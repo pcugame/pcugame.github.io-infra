@@ -1,0 +1,59 @@
+name: Build and Deploy API to NAS
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          file: apps/api/Dockerfile
+          push: true
+          platforms: ${{ vars.API_TARGET_PLATFORMS || 'linux/amd64' }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest
+            ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:sha-${{ github.sha }}
+
+  deploy-to-nas:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.NAS_HOST }}
+          username: ${{ secrets.NAS_USER }}
+          key: ${{ secrets.NAS_SSH_KEY }}
+          port: ${{ secrets.NAS_PORT || 22 }}
+          script_stop: true
+          script: |
+            IMAGE="ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest"
+            echo "Using image: $IMAGE"
+            docker login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_TOKEN}"
+            docker pull "$IMAGE"
+            cd "${NAS_COMPOSE_PATH:-/volume1/docker/pcu_graduationproject_v2}"
+            docker compose pull api || true
+            docker compose up -d
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          NAS_COMPOSE_PATH: ${{ secrets.NAS_COMPOSE_PATH }}
