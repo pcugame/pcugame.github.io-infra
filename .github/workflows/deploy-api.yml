@@ -46,6 +46,7 @@ jobs:
           port: ${{ secrets.NAS_PORT || 22 }}
           script_stop: true
           script: |
+            export PATH=$PATH:/usr/local/bin:/usr/bin
             IMAGE="ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest"
             echo "Using image: $IMAGE"
             docker login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_TOKEN}"
