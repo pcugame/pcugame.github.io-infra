@@ -44,5 +44,5 @@ jobs:
         with:
           personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
           external_repository: pcugame/pcugame.github.io
-          publish_branch: master
+          publish_branch: main
           publish_dir: apps/web/dist
