@@ -8,8 +8,11 @@ interface Props {
 
 export function ProjectCard({ project, year }: Props) {
   return (
-    <article className="project-card">
-      <div className="project-card__image">
+    <Link
+      to={`/years/${year}/${project.slug}`}
+      className="archive-card"
+    >
+      <div className="archive-card__image">
         {project.posterUrl ? (
           <img
             src={project.posterUrl}
@@ -17,29 +20,22 @@ export function ProjectCard({ project, year }: Props) {
             loading="lazy"
           />
         ) : (
-          <div className="project-card__placeholder">No Image</div>
+          <div className="archive-card__placeholder" aria-hidden="true">
+            <span>{project.title.charAt(0)}</span>
+          </div>
         )}
       </div>
-      <div className="project-card__body">
-        <h3 className="project-card__title">{project.title}</h3>
+      <div className="archive-card__body">
+        <h3 className="archive-card__title">{project.title}</h3>
         {project.summary && (
-          <p className="project-card__summary">{project.summary}</p>
+          <p className="archive-card__summary">{project.summary}</p>
         )}
-        <div className="project-card__members">
-          {project.members.map((m, i) => (
-            <span key={i} className="project-card__member">
-              {m.name}
-              <small>({m.studentId})</small>
-            </span>
-          ))}
+        <div className="archive-card__footer">
+          <p className="archive-card__members">
+            {project.members.map((m) => m.name).join(' · ')}
+          </p>
         </div>
-        <Link
-          to={`/years/${year}/${project.slug}`}
-          className="btn btn--primary btn--small"
-        >
-          자세히 보기
-        </Link>
       </div>
-    </article>
+    </Link>
   );
 }
