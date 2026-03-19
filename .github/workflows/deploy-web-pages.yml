@@ -46,3 +46,5 @@ jobs:
           external_repository: pcugame/pcugame.github.io
           publish_branch: main
           publish_dir: apps/web/dist
+          user_name: bipolarrr
+          user_email: challengedbipolar@gmail.com
