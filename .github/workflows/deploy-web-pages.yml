@@ -1,0 +1,48 @@
+name: Deploy Web to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'apps/web/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Build
+        working-directory: apps/web
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/' }}
+        run: npm run build
+
+      - name: Deploy to pcugame.github.io
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          external_repository: pcugame/pcugame.github.io
+          publish_branch: master
+          publish_dir: apps/web/dist

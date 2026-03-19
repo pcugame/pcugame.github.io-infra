@@ -1,0 +1,16 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Claude Code
+.claude/

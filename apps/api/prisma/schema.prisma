@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────
+
+enum UserRole {
+  USER
+  OPERATOR
+  ADMIN
+}
+
+enum ProjectStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AssetKind {
+  THUMBNAIL
+  IMAGE
+  POSTER
+  GAME
+}
+
+enum AssetStatus {
+  READY
+  DELETING
+  DELETED
+  FAILED
+}
+
+enum DownloadPolicy {
+  NONE
+  PUBLIC
+  SCHOOL_ONLY
+  ADMIN_ONLY
+}
+
+// ─── Models ───────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid())
+  googleSub String   @unique @map("google_sub")
+  email     String
+  name      String   @default("")
+  picture   String   @default("")
+  role      UserRole @default(USER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sessions AuthSession[] @relation("UserSessions")
+  projects Project[]     @relation("ProjectCreator")
+
+  @@map("users")
+}
+
+model Year {
+  id        String   @id @default(uuid())
+  year      Int      @unique
+  title     String   @default("")
+  isOpen    Boolean  @default(true) @map("is_open")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  projects Project[] @relation("YearProjects")
+
+  @@map("years")
+}
+
+model Project {
+  id             String         @id @default(uuid())
+  yearId         String         @map("year_id")
+  slug           String
+  title          String
+  summary        String         @default("")
+  description    String         @default("")
+  youtubeUrl     String         @default("") @map("youtube_url")
+  status         ProjectStatus  @default(DRAFT)
+  sortOrder      Int            @default(0) @map("sort_order")
+  downloadPolicy DownloadPolicy @default(PUBLIC) @map("download_policy")
+  posterAssetId  String?        @unique @map("poster_asset_id")
+  creatorId      String         @map("creator_id")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  year    Year  @relation("YearProjects", fields: [yearId], references: [id], onDelete: Cascade)
+  creator User  @relation("ProjectCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  poster  Asset? @relation("ProjectPoster", fields: [posterAssetId], references: [id], onDelete: SetNull)
+
+  members ProjectMember[] @relation("ProjectMembers")
+  assets  Asset[]         @relation("ProjectAssets")
+
+  @@unique([yearId, slug], name: "project_year_slug")
+  @@index([yearId, status, sortOrder])
+  @@index([status])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  name      String
+  studentId String   @default("") @map("student_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation("ProjectMembers", fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, sortOrder])
+  @@map("project_members")
+}
+
+model Asset {
+  id          String      @id @default(uuid())
+  projectId   String      @map("project_id")
+  kind        AssetKind
+  status      AssetStatus @default(READY)
+  storageKey  String      @unique @map("storage_key")
+  originalName String     @default("") @map("original_name")
+  mimeType    String      @default("") @map("mime_type")
+  sizeBytes   BigInt      @default(0) @map("size_bytes")
+  isPublic    Boolean     @default(false) @map("is_public")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  project      Project  @relation("ProjectAssets", fields: [projectId], references: [id], onDelete: Cascade)
+  posterOf     Project? @relation("ProjectPoster")
+
+  @@index([projectId, kind, status])
+  @@map("assets")
+}
+
+model AuthSession {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation("UserSessions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+model UploadJob {
+  id         String   @id @default(uuid())
+  storageKey String   @map("storage_key")
+  status     String   @default("pending")
+  error      String   @default("")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("upload_jobs")
+}
