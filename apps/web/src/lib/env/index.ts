@@ -3,7 +3,7 @@
 
 export const env = {
   /** 백엔드 API 기본 URL (예: https://api.gradshow.pcu.ac.kr) */
-  API_BASE_URL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000',
+  API_BASE_URL: import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000',
 
   /** Google OAuth Client ID */
   GOOGLE_CLIENT_ID: import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '',

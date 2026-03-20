@@ -5,7 +5,6 @@ import { env } from '../../config/env.js';
 import { sendOk } from '../../shared/http.js';
 import { badRequest, unauthorized } from '../../shared/errors.js';
 import { generateSessionId, sessionExpiresAt } from '../../shared/session.js';
-import { requireLogin } from '../../plugins/auth.js';
 import { logger } from '../../lib/logger.js';
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -73,12 +72,16 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // POST /api/auth/logout
-  app.post('/auth/logout', { preHandler: requireLogin }, async (request, reply) => {
+  app.post('/auth/logout', async (request, reply) => {
     const sid = request.cookies[cfg.SESSION_COOKIE_NAME];
     if (sid) {
       await prisma.authSession.deleteMany({ where: { id: sid } }).catch(() => {});
     }
-    reply.clearCookie(cfg.SESSION_COOKIE_NAME, { path: '/' });
+    reply.clearCookie(cfg.SESSION_COOKIE_NAME, {
+      path: '/',
+      secure: cfg.COOKIE_SECURE,
+      sameSite: cfg.COOKIE_SAME_SITE,
+    });
     sendOk(reply, { message: 'Logged out' });
   });
 

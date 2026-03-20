@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { promises as fsp, createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
+import { pipeline as streamPipeline } from 'node:stream/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
@@ -9,74 +9,16 @@ import { env } from '../../config/env.js';
 import { sendOk, sendCreated } from '../../shared/http.js';
 import { badRequest, notFound, conflict, forbidden, unauthorized } from '../../shared/errors.js';
 import { requireLogin, requireRole } from '../../plugins/auth.js';
-import { generateStorageKey, buildStoragePath } from '../../shared/storage-path.js';
-import {
-  detectFileType,
-  isAllowedImageType,
-  isAllowedGameType,
-  SIZE_LIMITS,
-} from '../../shared/file-signature.js';
+import { buildStoragePath } from '../../shared/storage-path.js';
 import { toSlug } from '../../shared/slug.js';
 import type { AssetKind } from '@prisma/client';
+import { UploadPipeline } from '../assets/upload/index.js';
+import type { SavedFile } from '../assets/upload/index.js';
 
 function assetUrl(storageKey: string, kind: AssetKind): string {
   const base = env().PUBLIC_BASE_URL;
   if (kind === 'GAME') return `${base}/api/assets/protected/${storageKey}`;
   return `${base}/api/assets/public/${storageKey}`;
-}
-
-interface SavedFile {
-  storageKey: string;
-  mimeType: string;
-  sizeBytes: number;
-  originalName: string;
-  kind: AssetKind;
-}
-
-async function saveFile(
-  tmpPath: string,
-  kind: AssetKind,
-  originalName: string,
-): Promise<SavedFile> {
-  const cfg = env();
-
-  const stat = await fsp.stat(tmpPath);
-  const sizeBytes = stat.size;
-
-  const limits: Record<string, number> = {
-    GAME: SIZE_LIMITS.game,
-    POSTER: SIZE_LIMITS.poster,
-    THUMBNAIL: SIZE_LIMITS.poster,
-    IMAGE: SIZE_LIMITS.image,
-  };
-  const limit = limits[kind] ?? SIZE_LIMITS.image;
-  if (sizeBytes > limit) {
-    throw badRequest(`File too large for kind ${kind}`);
-  }
-
-  // Read header for type detection
-  const fd = await fsp.open(tmpPath, 'r');
-  const headerBuf = Buffer.alloc(16);
-  await fd.read(headerBuf, 0, 16, 0);
-  await fd.close();
-
-  const fileType = detectFileType(headerBuf);
-  if (!fileType) throw badRequest('Unsupported file type');
-
-  if (kind === 'GAME') {
-    if (!isAllowedGameType(fileType)) throw badRequest('Game file must be a ZIP archive');
-  } else {
-    if (!isAllowedImageType(fileType)) throw badRequest('Images must be JPEG, PNG, or WebP');
-  }
-
-  const isPublic = kind !== 'GAME';
-  const root = isPublic ? cfg.UPLOAD_ROOT_PUBLIC : cfg.UPLOAD_ROOT_PROTECTED;
-  const storageKey = generateStorageKey(fileType.ext);
-  const filePath = buildStoragePath(root, storageKey);
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.rename(tmpPath, filePath);
-
-  return { storageKey, mimeType: fileType.mime, sizeBytes, originalName, kind };
 }
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
@@ -340,18 +282,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // POST /api/admin/projects/submit (multipart)
   app.post('/projects/submit', { preHandler: requireLogin }, async (request, reply) => {
     const cfg = env();
-    const tmpFiles: string[] = [];
+    const pipeline = new UploadPipeline();
 
     try {
+      // ── Collect multipart parts ───────────────────────────────
       const parts = request.parts();
-
       let payloadJson = '';
-      interface FilePart {
-        tmpPath: string;
-        fieldname: string;
-        filename: string;
-        mimetype: string;
-      }
+      interface FilePart { tmpPath: string; fieldname: string; filename: string; }
       const fileParts: FilePart[] = [];
 
       for await (const part of parts) {
@@ -359,19 +296,19 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           if (part.fieldname === 'payload') payloadJson = part.value as string;
         } else {
           const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
-          tmpFiles.push(tmpPath);
-          await pipeline(part.file, createWriteStream(tmpPath));
+          pipeline.trackTempFile(tmpPath);
+          await streamPipeline(part.file, createWriteStream(tmpPath));
           fileParts.push({
             tmpPath,
             fieldname: part.fieldname,
             filename: part.filename ?? '',
-            mimetype: part.mimetype,
           });
         }
       }
 
       if (!payloadJson) throw badRequest('Missing payload field');
 
+      // ── Parse payload ─────────────────────────────────────────
       interface SubmitPayload {
         year: number;
         title: string;
@@ -420,7 +357,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         slug = `${baseSlug}-${attempt}`;
       }
 
-      // Save files
+      // ── Validate, process, and move files via upload pipeline ─
       const savedFiles: SavedFile[] = [];
       for (const fp of fileParts) {
         let kind: AssetKind;
@@ -429,14 +366,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         else if (fp.fieldname === 'gameFile') kind = 'GAME';
         else continue;
 
-        const saved = await saveFile(fp.tmpPath, kind, fp.filename);
+        const saved = await pipeline.processFile(fp.tmpPath, kind, fp.filename);
         savedFiles.push(saved);
-        tmpFiles.splice(tmpFiles.indexOf(fp.tmpPath), 1);
       }
 
       const status = autoPublish ? 'PUBLISHED' : 'DRAFT';
 
-      // Create project + assets in transaction
+      // ── DB transaction — if this fails, committed files are rolled back ─
       const project = await prisma.$transaction(async (tx) => {
         const p = await tx.project.create({
           data: {
@@ -493,10 +429,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         adminEditUrl,
         publicUrl,
       });
+    } catch (err) {
+      await pipeline.rollbackCommitted();
+      throw err;
     } finally {
-      for (const t of tmpFiles) {
-        await fsp.unlink(t).catch(() => {});
-      }
+      await pipeline.cleanupTemp();
     }
   });
 
@@ -514,25 +451,30 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         if (project.status !== 'DRAFT') throw forbidden('Cannot edit non-draft project');
       }
 
-      const tmpFiles: string[] = [];
-      let kind: AssetKind = 'IMAGE';
-      let savedFile: SavedFile | null = null;
+      const pipeline = new UploadPipeline();
 
       try {
+        // Collect all parts first so 'kind' is set before processing
+        let kind: AssetKind = 'IMAGE';
+        let fileTmpPath: string | null = null;
+        let fileOriginalName = '';
+
         const parts = request.parts();
         for await (const part of parts) {
           if (part.type === 'field' && part.fieldname === 'kind') {
             kind = part.value as AssetKind;
           } else if (part.type === 'file' && part.fieldname === 'file') {
             const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
-            tmpFiles.push(tmpPath);
-            await pipeline(part.file, createWriteStream(tmpPath));
-            savedFile = await saveFile(tmpPath, kind, part.filename ?? '');
-            tmpFiles.splice(tmpFiles.indexOf(tmpPath), 1);
+            pipeline.trackTempFile(tmpPath);
+            await streamPipeline(part.file, createWriteStream(tmpPath));
+            fileTmpPath = tmpPath;
+            fileOriginalName = part.filename ?? '';
           }
         }
 
-        if (!savedFile) throw badRequest('No file provided');
+        if (!fileTmpPath) throw badRequest('No file provided');
+
+        const savedFile = await pipeline.processFile(fileTmpPath, kind, fileOriginalName);
 
         const asset = await prisma.asset.create({
           data: {
@@ -550,10 +492,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           assetId: asset.id,
           url: assetUrl(savedFile.storageKey, savedFile.kind),
         });
+      } catch (err) {
+        await pipeline.rollbackCommitted();
+        throw err;
       } finally {
-        for (const t of tmpFiles) {
-          await fsp.unlink(t).catch(() => {});
-        }
+        await pipeline.cleanupTemp();
       }
     },
   );
