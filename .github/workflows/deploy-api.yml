@@ -51,7 +51,7 @@ jobs:
             echo "Using image: $IMAGE"
             docker login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_TOKEN}"
             docker pull "$IMAGE"
-            cd "${COMPOSE_PATH:-/opt/pcu_graduationproject_v2}"
+            cd "${COMPOSE_PATH:-/srv/graduationproject_v2}"
             docker compose pull api || true
             docker compose up -d
         env:
