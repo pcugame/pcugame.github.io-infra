@@ -57,6 +57,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
+          envs: GHCR_USERNAME,GHCR_TOKEN,COMPOSE_PATH
           script_stop: true
           script: |
             export PATH=$PATH:/usr/local/bin:/usr/bin
