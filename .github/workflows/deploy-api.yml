@@ -6,6 +6,7 @@ on:
     paths:
       - 'apps/api/**'
       - 'docker-compose.yml'
+      - 'server/deploy.sh'
       - '.github/workflows/deploy-api.yml'
   workflow_dispatch:
 
@@ -40,15 +41,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Copy docker-compose.yml to server
+      - name: Copy deploy script to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: docker-compose.yml
+          source: server/deploy.sh
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          strip_components: 1
 
       - name: SSH deploy to server
         uses: appleboy/ssh-action@v1.0.3
@@ -57,18 +59,15 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          envs: GHCR_USERNAME,GHCR_TOKEN,COMPOSE_PATH
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR
           script_stop: true
           script: |
             export PATH=$PATH:/usr/local/bin:/usr/bin
-            IMAGE="ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest"
-            echo "Using image: $IMAGE"
             podman login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_TOKEN}"
-            podman pull "$IMAGE"
-            cd "${COMPOSE_PATH:-/srv/graduationproject_v2}"
-            podman compose pull api || true
-            podman compose up -d
+            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
+            chmod +x "${DEPLOY_DIR}/deploy.sh"
+            "${DEPLOY_DIR}/deploy.sh" up
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          COMPOSE_PATH: ${{ secrets.DEPLOY_COMPOSE_PATH }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
