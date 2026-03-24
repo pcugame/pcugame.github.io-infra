@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'apps/api/**'
+      - 'docker-compose.yml'
       - '.github/workflows/deploy-api.yml'
   workflow_dispatch:
 
@@ -37,6 +38,18 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy docker-compose.yml to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: docker-compose.yml
+          target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+
       - name: SSH deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -49,11 +62,11 @@ jobs:
             export PATH=$PATH:/usr/local/bin:/usr/bin
             IMAGE="ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest"
             echo "Using image: $IMAGE"
-            docker login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_TOKEN}"
-            docker pull "$IMAGE"
+            podman login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_TOKEN}"
+            podman pull "$IMAGE"
             cd "${COMPOSE_PATH:-/srv/graduationproject_v2}"
-            docker compose pull api || true
-            docker compose up -d
+            podman compose pull api || true
+            podman compose up -d
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
