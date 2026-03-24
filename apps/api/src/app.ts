@@ -44,6 +44,7 @@ export async function buildApp() {
         error: {
           code: error.code ?? 'ERROR',
           message: error.message,
+          ...(error.details !== undefined ? { details: error.details } : {}),
         },
       };
       reply.status(error.statusCode).send(body);

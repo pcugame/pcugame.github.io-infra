@@ -8,6 +8,17 @@ import { prisma } from '../../lib/prisma.js';
 import { env } from '../../config/env.js';
 import { sendOk, sendCreated } from '../../shared/http.js';
 import { badRequest, notFound, conflict, forbidden, unauthorized } from '../../shared/errors.js';
+import {
+  parseBody,
+  CreateYearBody,
+  UpdateYearBody,
+  UpdateProjectBody,
+  SubmitProjectPayload,
+  AddMemberBody,
+  UpdateMemberBody,
+  SetPosterBody,
+  AssetKindEnum,
+} from '../../shared/validation.js';
 import { requireLogin, requireRole } from '../../plugins/auth.js';
 import { buildStoragePath } from '../../shared/storage-path.js';
 import { toSlug } from '../../shared/slug.js';
@@ -16,7 +27,7 @@ import { UploadPipeline } from '../assets/upload/index.js';
 import type { SavedFile } from '../assets/upload/index.js';
 
 function assetUrl(storageKey: string, kind: AssetKind): string {
-  const base = env().PUBLIC_BASE_URL;
+  const base = env().API_PUBLIC_URL;
   if (kind === 'GAME') return `${base}/api/assets/protected/${storageKey}`;
   return `${base}/api/assets/public/${storageKey}`;
 }
@@ -27,7 +38,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // GET /api/admin/years
   app.get('/years', { preHandler: requireLogin }, async (_req, reply) => {
     const years = await prisma.year.findMany({
-      orderBy: { year: 'desc' },
+      orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
       include: { _count: { select: { projects: true } } },
     });
     const items = years.map((y) => ({
@@ -35,45 +46,44 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       year: y.year,
       title: y.title || undefined,
       isPublished: y.isOpen,
-      sortOrder: 0,
+      sortOrder: y.sortOrder,
       projectCount: y._count.projects,
     }));
     sendOk(reply, { items });
   });
 
   // POST /api/admin/years
-  app.post<{ Body: { year?: number; title?: string; isPublished?: boolean } }>(
+  app.post(
     '/years',
     { preHandler: requireRole('ADMIN', 'OPERATOR') },
     async (request, reply) => {
-      const { year, title = '', isPublished = true } = request.body;
-      if (!year || !Number.isInteger(year)) throw badRequest('year is required');
+      const { year, title, isPublished, sortOrder } = parseBody(CreateYearBody, request.body);
 
       const existing = await prisma.year.findUnique({ where: { year } });
       if (existing) throw conflict(`Year ${year} already exists`);
 
-      const created = await prisma.year.create({ data: { year, title, isOpen: isPublished } });
+      const created = await prisma.year.create({
+        data: { year, title, isOpen: isPublished, sortOrder },
+      });
       sendCreated(reply, { id: created.id, year: created.year });
     },
   );
 
   // PATCH /api/admin/years/:id
-  app.patch<{
-    Params: { id: string };
-    Body: { title?: string; isPublished?: boolean };
-  }>(
+  app.patch<{ Params: { id: string } }>(
     '/years/:id',
     { preHandler: requireRole('ADMIN', 'OPERATOR') },
     async (request, reply) => {
       const year = await prisma.year.findUnique({ where: { id: request.params.id } });
       if (!year) throw notFound('Year not found');
 
-      const { title, isPublished } = request.body;
+      const { title, isPublished, sortOrder } = parseBody(UpdateYearBody, request.body);
       const updated = await prisma.year.update({
         where: { id: year.id },
         data: {
           ...(title !== undefined ? { title } : {}),
           ...(isPublished !== undefined ? { isOpen: isPublished } : {}),
+          ...(sortOrder !== undefined ? { sortOrder } : {}),
         },
         include: { _count: { select: { projects: true } } },
       });
@@ -82,7 +92,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         year: updated.year,
         title: updated.title || undefined,
         isPublished: updated.isOpen,
-        sortOrder: 0,
+        sortOrder: updated.sortOrder,
         projectCount: updated._count.projects,
       });
     },
@@ -169,18 +179,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // PATCH /api/admin/projects/:id
-  app.patch<{
-    Params: { id: string };
-    Body: {
-      title?: string;
-      summary?: string;
-      description?: string;
-      youtubeUrl?: string | null;
-      status?: string;
-      sortOrder?: number;
-      downloadPolicy?: string;
-    };
-  }>(
+  app.patch<{ Params: { id: string } }>(
     '/projects/:id',
     { preHandler: requireLogin },
     async (request, reply) => {
@@ -196,7 +195,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const { title, summary, description, youtubeUrl, status, sortOrder, downloadPolicy } =
-        request.body;
+        parseBody(UpdateProjectBody, request.body);
 
       const updated = await prisma.project.update({
         where: { id: project.id },
@@ -205,9 +204,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
           ...(summary !== undefined ? { summary } : {}),
           ...(description !== undefined ? { description } : {}),
           ...(youtubeUrl !== undefined ? { youtubeUrl: youtubeUrl ?? '' } : {}),
-          ...(status !== undefined ? { status: status as never } : {}),
+          ...(status !== undefined ? { status } : {}),
           ...(sortOrder !== undefined ? { sortOrder } : {}),
-          ...(downloadPolicy !== undefined ? { downloadPolicy: downloadPolicy as never } : {}),
+          ...(downloadPolicy !== undefined ? { downloadPolicy } : {}),
         },
         include: {
           year: true,
@@ -308,19 +307,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
       if (!payloadJson) throw badRequest('Missing payload field');
 
-      // ── Parse payload ─────────────────────────────────────────
-      interface SubmitPayload {
-        year: number;
-        title: string;
-        summary?: string;
-        description?: string;
-        youtubeUrl?: string;
-        autoPublish?: boolean;
-        members: { name: string; studentId: string; sortOrder?: number }[];
-      }
-      let payload: SubmitPayload;
+      // ── Parse & validate payload ───────────────────────────────
+      let rawPayload: unknown;
       try {
-        payload = JSON.parse(payloadJson) as SubmitPayload;
+        rawPayload = JSON.parse(payloadJson);
       } catch {
         throw badRequest('Invalid payload JSON');
       }
@@ -328,15 +318,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       const {
         year: yearNum,
         title,
-        summary = '',
-        description = '',
-        youtubeUrl = '',
-        autoPublish = false,
+        summary,
+        description,
+        youtubeUrl,
+        autoPublish,
         members,
-      } = payload;
-
-      if (!yearNum || !title) throw badRequest('year and title are required');
-      if (!members || members.length === 0) throw badRequest('At least one member required');
+      } = parseBody(SubmitProjectPayload, rawPayload);
 
       // Find or create year
       let year = await prisma.year.findUnique({ where: { year: yearNum } });
@@ -417,9 +404,11 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         return p;
       });
 
-      const adminEditUrl = `${cfg.PUBLIC_BASE_URL}/admin/projects/${project.id}/edit`;
+      const adminEditUrl = `${cfg.WEB_PUBLIC_URL}/admin/projects/${project.id}/edit`;
       const publicUrl =
-        status === 'PUBLISHED' ? `${cfg.PUBLIC_BASE_URL}/${yearNum}/${slug}` : undefined;
+        status === 'PUBLISHED'
+          ? `${cfg.WEB_PUBLIC_URL}/years/${yearNum}/${slug}`
+          : undefined;
 
       sendCreated(reply, {
         id: project.id,
@@ -462,7 +451,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         const parts = request.parts();
         for await (const part of parts) {
           if (part.type === 'field' && part.fieldname === 'kind') {
-            kind = part.value as AssetKind;
+            const parsed = AssetKindEnum.safeParse(part.value);
+            if (!parsed.success) throw badRequest(`Invalid asset kind: ${part.value}`);
+            kind = parsed.data;
           } else if (part.type === 'file' && part.fieldname === 'file') {
             const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
             pipeline.trackTempFile(tmpPath);
@@ -502,7 +493,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // PATCH /api/admin/projects/:id/poster
-  app.patch<{ Params: { id: string }; Body: { assetId: string } }>(
+  app.patch<{ Params: { id: string } }>(
     '/projects/:id/poster',
     { preHandler: requireLogin },
     async (request, reply) => {
@@ -512,9 +503,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       const user = request.currentUser!;
       if (user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
         if (project.creatorId !== user.id) throw forbidden('Not project owner');
+        if (project.status !== 'DRAFT') throw forbidden('Cannot edit non-draft project');
       }
 
-      const { assetId } = request.body;
+      const { assetId } = parseBody(SetPosterBody, request.body);
       const asset = await prisma.asset.findFirst({
         where: { id: assetId, projectId: project.id },
       });
@@ -526,10 +518,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // POST /api/admin/projects/:id/members
-  app.post<{
-    Params: { id: string };
-    Body: { name: string; studentId: string; sortOrder?: number };
-  }>(
+  app.post<{ Params: { id: string } }>(
     '/projects/:id/members',
     { preHandler: requireLogin },
     async (request, reply) => {
@@ -542,8 +531,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         if (project.status !== 'DRAFT') throw forbidden('Cannot edit non-draft project');
       }
 
-      const { name, studentId, sortOrder = 0 } = request.body;
-      if (!name || !studentId) throw badRequest('name and studentId required');
+      const { name, studentId, sortOrder } = parseBody(AddMemberBody, request.body);
 
       const member = await prisma.projectMember.create({
         data: { projectId: project.id, name, studentId, sortOrder },
@@ -553,10 +541,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // PATCH /api/admin/projects/:id/members/:memberId
-  app.patch<{
-    Params: { id: string; memberId: string };
-    Body: { name?: string; studentId?: string; sortOrder?: number };
-  }>(
+  app.patch<{ Params: { id: string; memberId: string } }>(
     '/projects/:id/members/:memberId',
     { preHandler: requireLogin },
     async (request, reply) => {
@@ -574,7 +559,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!member) throw notFound('Member not found');
 
-      const { name, studentId, sortOrder } = request.body;
+      const { name, studentId, sortOrder } = parseBody(UpdateMemberBody, request.body);
       await prisma.projectMember.update({
         where: { id: member.id },
         data: {

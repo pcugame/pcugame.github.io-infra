@@ -9,7 +9,8 @@ import {
   AddMemberSchema,
   type AddMemberInput,
 } from '../../contracts/schemas';
-import type { ProjectStatus } from '../../contracts';
+import type { ProjectStatus, AdminProjectDetail } from '../../contracts';
+import type { UpdateMemberRequest } from '../../contracts/admin';
 import {
   adminProjectApi,
   adminMemberApi,
@@ -89,12 +90,31 @@ export default function AdminProjectEditPage() {
     },
   });
 
+  const updateMemberMutation = useMutation({
+    mutationFn: ({ memberId, body }: { memberId: string; body: UpdateMemberRequest }) =>
+      adminMemberApi.update(id!, memberId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+    },
+  });
+
   const removeMemberMutation = useMutation({
     mutationFn: (memberId: string) => adminMemberApi.remove(id!, memberId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
     },
   });
+
+  const swapMemberOrder = (index: number, direction: -1 | 1) => {
+    if (!project) return;
+    const members = project.members;
+    const other = index + direction;
+    if (other < 0 || other >= members.length) return;
+    const a = members[index];
+    const b = members[other];
+    updateMemberMutation.mutate({ memberId: a.id, body: { sortOrder: b.sortOrder } });
+    updateMemberMutation.mutate({ memberId: b.id, body: { sortOrder: a.sortOrder } });
+  };
 
   // ── 자산 추가/삭제 ────────────────────────────────────────
   const addAssetMutation = useMutation({
@@ -276,19 +296,21 @@ export default function AdminProjectEditPage() {
       <fieldset>
         <legend>참여 학생</legend>
         <ul className="member-list">
-          {project.members.map((m) => (
-            <li key={m.id} className="member-list__item">
-              <span>
-                {m.name} ({m.studentId})
-              </span>
-              <button
-                className="btn btn--danger btn--small"
-                onClick={() => removeMemberMutation.mutate(m.id)}
-                disabled={removeMemberMutation.isPending}
-              >
-                삭제
-              </button>
-            </li>
+          {project.members.map((m, idx) => (
+            <MemberRow
+              key={m.id}
+              member={m}
+              index={idx}
+              total={project.members.length}
+              onSwap={swapMemberOrder}
+              onUpdate={(body) =>
+                updateMemberMutation.mutate({ memberId: m.id, body })
+              }
+              onRemove={() => removeMemberMutation.mutate(m.id)}
+              isBusy={
+                updateMemberMutation.isPending || removeMemberMutation.isPending
+              }
+            />
           ))}
         </ul>
 
@@ -328,33 +350,65 @@ export default function AdminProjectEditPage() {
       <fieldset>
         <legend>등록된 자산</legend>
 
+        {project.posterAssetId && (
+          <p style={{ marginBottom: '0.5rem' }}>
+            현재 포스터:{' '}
+            <strong>
+              {project.assets.find((a) => a.id === project.posterAssetId)
+                ?.originalName ?? project.posterAssetId}
+            </strong>
+          </p>
+        )}
+
         {project.assets.length === 0 ? (
           <p>등록된 자산이 없습니다.</p>
         ) : (
           <ul className="asset-list">
-            {project.assets.map((asset) => (
-              <li key={asset.id} className="asset-list__item">
-                <span>
-                  [{asset.kind}] {asset.originalName} (
-                  {(asset.size / 1024).toFixed(0)}KB)
-                </span>
-                {asset.kind === 'IMAGE' || asset.kind === 'POSTER' ? (
-                  <img
-                    src={asset.url}
-                    alt={asset.originalName}
-                    className="asset-thumb"
-                    loading="lazy"
-                  />
-                ) : null}
-                <button
-                  className="btn btn--danger btn--small"
-                  onClick={() => removeAssetMutation.mutate(asset.id)}
-                  disabled={removeAssetMutation.isPending}
-                >
-                  삭제
-                </button>
-              </li>
-            ))}
+            {project.assets.map((asset) => {
+              const isCurrentPoster = asset.id === project.posterAssetId;
+              const canSetAsPoster =
+                (asset.kind === 'IMAGE' || asset.kind === 'POSTER') &&
+                !isCurrentPoster;
+              return (
+                <li key={asset.id} className="asset-list__item">
+                  <span>
+                    [{asset.kind}] {asset.originalName} (
+                    {(asset.size / 1024).toFixed(0)}KB)
+                    {isCurrentPoster && (
+                      <strong style={{ marginLeft: '0.5rem', color: 'var(--color-primary, #2563eb)' }}>
+                        [포스터]
+                      </strong>
+                    )}
+                  </span>
+                  {asset.kind === 'IMAGE' || asset.kind === 'POSTER' ? (
+                    <img
+                      src={asset.url}
+                      alt={asset.originalName}
+                      className="asset-thumb"
+                      loading="lazy"
+                    />
+                  ) : null}
+                  <div className="asset-actions">
+                    {canSetAsPoster && (
+                      <button
+                        className="btn btn--secondary btn--small"
+                        onClick={() => setPosterMutation.mutate(asset.id)}
+                        disabled={setPosterMutation.isPending}
+                      >
+                        포스터로 지정
+                      </button>
+                    )}
+                    <button
+                      className="btn btn--danger btn--small"
+                      onClick={() => removeAssetMutation.mutate(asset.id)}
+                      disabled={removeAssetMutation.isPending}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
 
@@ -402,5 +456,116 @@ export default function AdminProjectEditPage() {
         </div>
       </fieldset>
     </div>
+  );
+}
+
+// ── 멤버 행 컴포넌트 (인라인 수정 + 순서 변경) ──────────────
+
+type MemberData = AdminProjectDetail['members'][number];
+
+function MemberRow({
+  member,
+  index,
+  total,
+  onSwap,
+  onUpdate,
+  onRemove,
+  isBusy,
+}: {
+  member: MemberData;
+  index: number;
+  total: number;
+  onSwap: (index: number, direction: -1 | 1) => void;
+  onUpdate: (body: UpdateMemberRequest) => void;
+  onRemove: () => void;
+  isBusy: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(member.name);
+  const [studentId, setStudentId] = useState(member.studentId);
+
+  const handleSave = () => {
+    const body: UpdateMemberRequest = {};
+    if (name !== member.name) body.name = name;
+    if (studentId !== member.studentId) body.studentId = studentId;
+    if (Object.keys(body).length > 0) onUpdate(body);
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    setName(member.name);
+    setStudentId(member.studentId);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <li className="member-list__item">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={{ width: '100px' }}
+        />
+        <input
+          type="text"
+          value={studentId}
+          onChange={(e) => setStudentId(e.target.value)}
+          style={{ width: '100px' }}
+        />
+        <button
+          className="btn btn--primary btn--small"
+          onClick={handleSave}
+          disabled={isBusy || (!name || !studentId)}
+        >
+          저장
+        </button>
+        <button className="btn btn--secondary btn--small" onClick={handleCancel}>
+          취소
+        </button>
+      </li>
+    );
+  }
+
+  return (
+    <li className="member-list__item">
+      <span>
+        {member.name} ({member.studentId})
+        <span style={{ color: '#888', fontSize: '0.85em', marginLeft: '0.5rem' }}>
+          #{member.sortOrder}
+        </span>
+      </span>
+      <div className="member-actions">
+        <button
+          className="btn btn--secondary btn--small"
+          onClick={() => onSwap(index, -1)}
+          disabled={isBusy || index === 0}
+          title="위로"
+        >
+          ▲
+        </button>
+        <button
+          className="btn btn--secondary btn--small"
+          onClick={() => onSwap(index, 1)}
+          disabled={isBusy || index === total - 1}
+          title="아래로"
+        >
+          ▼
+        </button>
+        <button
+          className="btn btn--secondary btn--small"
+          onClick={() => setEditing(true)}
+        >
+          수정
+        </button>
+        <button
+          className="btn btn--danger btn--small"
+          onClick={onRemove}
+          disabled={isBusy}
+        >
+          삭제
+        </button>
+      </div>
+    </li>
   );
 }

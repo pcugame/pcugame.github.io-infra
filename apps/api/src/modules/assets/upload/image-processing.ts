@@ -1,10 +1,9 @@
 /**
- * Image processing pipeline — extension point for future transformations.
- *
- * Currently implements passthrough (returns the input unchanged).
- * Designed so that adding automatic .webp conversion requires changes
- * only within this file.
+ * Image processing pipeline — automatic WebP conversion for large uploads.
  */
+
+import { promises as fsp } from 'node:fs';
+import sharp from 'sharp';
 
 export interface ImageProcessingInput {
   /** Path to the temp file on disk */
@@ -35,57 +34,47 @@ export interface ImageProcessingResult {
   converted: boolean;
 }
 
-/*
- * TODO: Implement automatic WebP conversion for large image uploads.
- *
- * ── When to trigger ──────────────────────────────────────────────────
- *   - The uploaded file is JPEG or PNG (mimeType !== 'image/webp').
- *   - Its size exceeds a configurable threshold.
- *     Suggested defaults: 2 MB for IMAGE kind, 5 MB for POSTER kind.
- *     (Define the threshold constant in this file or in file-signature.ts.)
- *
- * ── Conversion flow ──────────────────────────────────────────────────
- *   1. npm install sharp            (add to apps/api)
- *   2. Import sharp in this file.
- *   3. In processImage():
- *        if (mimeType !== 'image/webp' && sizeBytes > threshold) {
- *          const outputPath = input.tmpPath + '.webp';
- *          await sharp(input.tmpPath).webp({ quality: 90 }).toFile(outputPath);
- *          const stat = await fsp.stat(outputPath);
- *          return {
- *            tmpPath: outputPath,
- *            mimeType: 'image/webp',
- *            ext: 'webp',
- *            sizeBytes: stat.size,
- *            converted: true,
- *          };
- *        }
- *   4. Return passthrough for files already WebP or below threshold.
- *
- * ── How the pipeline uses the result ─────────────────────────────────
- *   - upload.service.ts calls generateStorageKey(result.ext), so a
- *     converted file automatically gets a .webp storage key.
- *   - The Asset DB record stores the returned mimeType and sizeBytes,
- *     so metadata stays accurate after conversion.
- *   - When converted === true, the pipeline keeps the original tmpPath
- *     tracked for cleanup and tracks the new tmpPath as well. Both are
- *     cleaned up in the finally block.
- *
- * ── Files that should NOT need changes ───────────────────────────────
- *   - upload.service.ts  (already handles converted flag)
- *   - admin.routes.ts    (uses pipeline unchanged)
- *   - file-validator.ts  (validation happens before processing)
- *   - file-signature.ts  (WebP is already an allowed image type)
- */
+/** Files above this size (in bytes) are converted to WebP. */
+const WEBP_THRESHOLD_BYTES = 512 * 1024; // 512 KB
+
+/** WebP output quality (0–100). */
+const WEBP_QUALITY = 85;
+
+/** MIME types eligible for WebP conversion. */
+const CONVERTIBLE_MIMES = new Set(['image/jpeg', 'image/png']);
 
 /**
  * Process an uploaded image file.
  *
- * Currently a passthrough — returns the input unchanged.
- * See the TODO block above for the planned WebP conversion.
+ * Converts JPEG/PNG files above WEBP_THRESHOLD_BYTES to WebP.
+ * Files already in WebP format or below the threshold are returned unchanged.
  */
 export async function processImage(
   input: ImageProcessingInput,
 ): Promise<ImageProcessingResult> {
-  return { ...input, converted: false };
+  if (!CONVERTIBLE_MIMES.has(input.mimeType) || input.sizeBytes <= WEBP_THRESHOLD_BYTES) {
+    return { ...input, converted: false };
+  }
+
+  const outputPath = input.tmpPath + '.webp';
+
+  await sharp(input.tmpPath)
+    .webp({ quality: WEBP_QUALITY })
+    .toFile(outputPath);
+
+  const stat = await fsp.stat(outputPath);
+
+  // If WebP is somehow larger than the original, keep the original.
+  if (stat.size >= input.sizeBytes) {
+    await fsp.unlink(outputPath).catch(() => {});
+    return { ...input, converted: false };
+  }
+
+  return {
+    tmpPath: outputPath,
+    mimeType: 'image/webp',
+    ext: 'webp',
+    sizeBytes: stat.size,
+    converted: true,
+  };
 }

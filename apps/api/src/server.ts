@@ -5,7 +5,7 @@ const config = loadEnv();
 
 import { buildApp } from './app.js';
 import { logger } from './lib/logger.js';
-import { disconnectPrisma } from './lib/prisma.js';
+import { disconnectPrisma, prisma } from './lib/prisma.js';
 
 async function main(): Promise<void> {
   const app = await buildApp();
@@ -18,8 +18,22 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Purge expired sessions every hour
+  const SESSION_PURGE_INTERVAL = 60 * 60 * 1000;
+  const purgeTimer = setInterval(async () => {
+    try {
+      const { count } = await prisma.authSession.deleteMany({
+        where: { expiresAt: { lt: new Date() } },
+      });
+      if (count > 0) logger.info({ count }, 'Purged expired sessions');
+    } catch (err) {
+      logger.error(err, 'Failed to purge expired sessions');
+    }
+  }, SESSION_PURGE_INTERVAL);
+
   const shutdown = async (signal: string) => {
     logger.info(`Received ${signal}, shutting down…`);
+    clearInterval(purgeTimer);
     await app.close();
     await disconnectPrisma();
     process.exit(0);

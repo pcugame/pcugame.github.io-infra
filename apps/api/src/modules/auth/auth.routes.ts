@@ -3,7 +3,8 @@ import { OAuth2Client } from 'google-auth-library';
 import { prisma } from '../../lib/prisma.js';
 import { env } from '../../config/env.js';
 import { sendOk } from '../../shared/http.js';
-import { badRequest, unauthorized } from '../../shared/errors.js';
+import { unauthorized } from '../../shared/errors.js';
+import { parseBody, GoogleLoginBody } from '../../shared/validation.js';
 import { generateSessionId, sessionExpiresAt } from '../../shared/session.js';
 import { logger } from '../../lib/logger.js';
 
@@ -12,9 +13,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   const oauthClient = new OAuth2Client();
 
   // POST /api/auth/google
-  app.post<{ Body: { credential?: string } }>('/auth/google', async (request, reply) => {
-    const { credential } = request.body;
-    if (!credential) throw badRequest('Missing credential');
+  app.post('/auth/google', async (request, reply) => {
+    const { credential } = parseBody(GoogleLoginBody, request.body);
 
     let payload;
     try {
@@ -73,6 +73,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // POST /api/auth/logout
   app.post('/auth/logout', async (request, reply) => {
+    // Only process logout if the user has a valid (non-expired) session,
+    // which mitigates CSRF-triggered forced logout.
+    if (!request.currentUser) {
+      reply.clearCookie(cfg.SESSION_COOKIE_NAME, {
+        path: '/',
+        secure: cfg.COOKIE_SECURE,
+        sameSite: cfg.COOKIE_SAME_SITE,
+      });
+      sendOk(reply, { message: 'Logged out' });
+      return;
+    }
+
     const sid = request.cookies[cfg.SESSION_COOKIE_NAME];
     if (sid) {
       await prisma.authSession.deleteMany({ where: { id: sid } }).catch(() => {});

@@ -5,14 +5,15 @@ import { sendOk } from '../../shared/http.js';
 import { notFound } from '../../shared/errors.js';
 
 function publicAssetUrl(storageKey: string): string {
-  return `${env().PUBLIC_BASE_URL}/api/assets/public/${storageKey}`;
+  return `${env().API_PUBLIC_URL}/api/assets/public/${storageKey}`;
 }
 
 export async function publicRoutes(app: FastifyInstance): Promise<void> {
   // GET /api/public/years
   app.get('/years', async (_request, reply) => {
     const years = await prisma.year.findMany({
-      orderBy: { year: 'desc' },
+      where: { isOpen: true },
+      orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
       include: {
         _count: { select: { projects: { where: { status: 'PUBLISHED' } } } },
       },
@@ -126,7 +127,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       images,
       posterUrl: project.poster ? publicAssetUrl(project.poster.storageKey) : undefined,
       gameDownloadUrl: gameAsset
-        ? `${env().PUBLIC_BASE_URL}/api/assets/protected/${gameAsset.storageKey}`
+        ? `${env().API_PUBLIC_URL}/api/assets/protected/${gameAsset.storageKey}`
         : undefined,
       downloadPolicy: project.downloadPolicy,
       status: 'PUBLISHED' as const,

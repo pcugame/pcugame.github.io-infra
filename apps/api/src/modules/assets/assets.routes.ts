@@ -87,12 +87,9 @@ export async function assetsRoutes(app: FastifyInstance): Promise<void> {
       if (!asset) throw notFound('Asset not found');
 
       const user = request.currentUser!;
-      if (
-        user.role !== 'ADMIN' &&
-        user.role !== 'OPERATOR' &&
-        asset.project.creatorId !== user.id
-      ) {
-        throw forbidden('Not allowed');
+      if (user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
+        if (asset.project.creatorId !== user.id) throw forbidden('Not allowed');
+        if (asset.project.status !== 'DRAFT') throw forbidden('Cannot edit non-draft project');
       }
 
       await prisma.asset.update({ where: { id: asset.id }, data: { status: 'DELETING' } });
