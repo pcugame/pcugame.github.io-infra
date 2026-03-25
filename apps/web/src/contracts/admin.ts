@@ -7,13 +7,13 @@ import type { DownloadPolicy, ProjectStatus } from './enums';
 export type CreateYearRequest = {
   year: number;
   title?: string;
-  isPublished?: boolean;
+  isOpen?: boolean;
   sortOrder?: number;
 };
 
 export type UpdateYearRequest = {
   title?: string;
-  isPublished?: boolean;
+  isOpen?: boolean;
   sortOrder?: number;
 };
 
@@ -21,7 +21,7 @@ export type AdminYearItem = {
   id: string;
   year: number;
   title?: string;
-  isPublished: boolean;
+  isOpen: boolean;
   sortOrder: number;
   projectCount: number;
 };

@@ -23,9 +23,7 @@ export default function YearsPage() {
 
       {data && data.items.length > 0 && (
         <div className="year-list">
-          {data.items
-            .filter((y) => y.isPublished)
-            .map((y) => (
+          {data.items.map((y) => (
               <Link to={`/years/${y.year}`} key={y.id} className="year-list-item">
                 <h2>{y.year}년</h2>
                 {y.title && <p className="year-list-item__title">{y.title}</p>}

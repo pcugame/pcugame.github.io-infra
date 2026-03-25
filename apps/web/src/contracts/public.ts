@@ -8,7 +8,6 @@ export type PublicYearItem = {
   year: number;
   title?: string;
   projectCount: number;
-  isPublished: boolean;
 };
 
 export type PublicYearListResponse = {

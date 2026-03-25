@@ -15,7 +15,7 @@ export default function HomePage() {
     queryFn: publicApi.getYears,
   });
 
-  const publishedYears = yearsData?.items.filter((y) => y.isPublished) ?? [];
+  const publishedYears = yearsData?.items ?? [];
   const latestYear = publishedYears[0] ?? null;
   const totalProjects = publishedYears.reduce((sum, y) => sum + y.projectCount, 0);
 

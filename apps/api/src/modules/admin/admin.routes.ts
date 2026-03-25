@@ -45,7 +45,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       id: y.id,
       year: y.year,
       title: y.title || undefined,
-      isPublished: y.isOpen,
+      isOpen: y.isOpen,
       sortOrder: y.sortOrder,
       projectCount: y._count.projects,
     }));
@@ -57,13 +57,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     '/years',
     { preHandler: requireRole('ADMIN', 'OPERATOR') },
     async (request, reply) => {
-      const { year, title, isPublished, sortOrder } = parseBody(CreateYearBody, request.body);
+      const { year, title, isOpen, sortOrder } = parseBody(CreateYearBody, request.body);
 
       const existing = await prisma.year.findUnique({ where: { year } });
       if (existing) throw conflict(`Year ${year} already exists`);
 
       const created = await prisma.year.create({
-        data: { year, title, isOpen: isPublished, sortOrder },
+        data: { year, title, isOpen, sortOrder },
       });
       sendCreated(reply, { id: created.id, year: created.year });
     },
@@ -77,12 +77,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       const year = await prisma.year.findUnique({ where: { id: request.params.id } });
       if (!year) throw notFound('Year not found');
 
-      const { title, isPublished, sortOrder } = parseBody(UpdateYearBody, request.body);
+      const { title, isOpen: newIsOpen, sortOrder } = parseBody(UpdateYearBody, request.body);
       const updated = await prisma.year.update({
         where: { id: year.id },
         data: {
           ...(title !== undefined ? { title } : {}),
-          ...(isPublished !== undefined ? { isOpen: isPublished } : {}),
+          ...(newIsOpen !== undefined ? { isOpen: newIsOpen } : {}),
           ...(sortOrder !== undefined ? { sortOrder } : {}),
         },
         include: { _count: { select: { projects: true } } },
@@ -91,7 +91,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         id: updated.id,
         year: updated.year,
         title: updated.title || undefined,
-        isPublished: updated.isOpen,
+        isOpen: updated.isOpen,
         sortOrder: updated.sortOrder,
         projectCount: updated._count.projects,
       });

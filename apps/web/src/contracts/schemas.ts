@@ -55,7 +55,7 @@ export type UpdateProjectFormInput = z.infer<typeof UpdateProjectFormSchema>;
 export const CreateYearSchema = z.object({
   year: z.number().int().min(2021).max(2100),
   title: z.string().max(100).optional().or(z.literal('')),
-  isPublished: z.boolean().optional(),
+  isOpen: z.boolean().optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 });
 
@@ -63,7 +63,7 @@ export type CreateYearInput = z.infer<typeof CreateYearSchema>;
 
 export const UpdateYearSchema = z.object({
   title: z.string().max(100).optional().or(z.literal('')),
-  isPublished: z.boolean().optional(),
+  isOpen: z.boolean().optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 });
 

@@ -31,7 +31,7 @@ export default function AdminYearsPage() {
     defaultValues: {
       year: new Date().getFullYear(),
       title: '',
-      isPublished: true,
+      isOpen: true,
       sortOrder: 0,
     },
   });
@@ -41,7 +41,7 @@ export default function AdminYearsPage() {
       adminYearApi.create({
         year: data.year,
         title: data.title || undefined,
-        isPublished: data.isPublished,
+        isOpen: data.isOpen,
         sortOrder: data.sortOrder,
       }),
     onSuccess: () => {
@@ -87,8 +87,8 @@ export default function AdminYearsPage() {
           </div>
           <div className="form-field form-field--checkbox">
             <label>
-              <input type="checkbox" {...regCreate('isPublished')} />
-              공개
+              <input type="checkbox" {...regCreate('isOpen')} />
+              업로드 허용
             </label>
           </div>
           <div className="form-field">
@@ -122,7 +122,7 @@ export default function AdminYearsPage() {
             <tr>
               <th>연도</th>
               <th>제목</th>
-              <th>공개</th>
+              <th>업로드</th>
               <th>정렬</th>
               <th>작품 수</th>
               <th>관리</th>
@@ -172,7 +172,7 @@ function YearRow({
     resolver: zodResolver(UpdateYearSchema),
     defaultValues: {
       title: year.title ?? '',
-      isPublished: year.isPublished,
+      isOpen: year.isOpen,
       sortOrder: year.sortOrder,
     },
   });
@@ -181,7 +181,7 @@ function YearRow({
     mutationFn: (data: UpdateYearInput) =>
       adminYearApi.update(year.id, {
         title: data.title || undefined,
-        isPublished: data.isPublished,
+        isOpen: data.isOpen,
         sortOrder: data.sortOrder,
       }),
     onSuccess: () => onSaved(),
@@ -192,7 +192,7 @@ function YearRow({
       <tr>
         <td>{year.year}</td>
         <td>{year.title ?? '-'}</td>
-        <td>{year.isPublished ? '공개' : '비공개'}</td>
+        <td>{year.isOpen ? '허용' : '잠금'}</td>
         <td>{year.sortOrder}</td>
         <td>{year.projectCount}</td>
         <td>
@@ -212,7 +212,7 @@ function YearRow({
       </td>
       <td>
         <label>
-          <input type="checkbox" {...register('isPublished')} />
+          <input type="checkbox" {...register('isOpen')} />
         </label>
       </td>
       <td>

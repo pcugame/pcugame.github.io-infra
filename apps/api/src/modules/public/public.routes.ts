@@ -13,7 +13,6 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
   // GET /api/public/years
   app.get('/years', async (_request, reply) => {
     const years = await prisma.year.findMany({
-      where: { isOpen: true },
       orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
       include: {
         _count: { select: { projects: { where: { status: 'PUBLISHED' } } } },
@@ -24,7 +23,6 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       year: y.year,
       title: y.title || undefined,
       projectCount: y._count.projects,
-      isPublished: y.isOpen,
     }));
     sendOk(reply, { items });
   });
