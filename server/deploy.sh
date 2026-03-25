@@ -13,7 +13,7 @@ API_CONTAINER="gp-api"
 PG_IMAGE="docker.io/library/postgres:16-alpine"
 API_IMAGE="ghcr.io/pcugame/pcu-graduationproject-v2-api:latest"
 PG_VOLUME="gp_pg_data"
-HEALTHCHECK_TIMEOUT=60  # seconds
+HEALTHCHECK_TIMEOUT=90  # seconds
 
 # ── Load .env ──────────────────────────────────────────────────
 load_env() {
@@ -32,6 +32,14 @@ wait_for_pg() {
   echo "Waiting for PostgreSQL to be ready..."
   local elapsed=0
   while (( elapsed < HEALTHCHECK_TIMEOUT )); do
+    # First check the container is actually running
+    local state
+    state=$(podman inspect --format '{{.State.Status}}' "$PG_CONTAINER" 2>/dev/null || echo "missing")
+    if [[ "$state" == "exited" || "$state" == "dead" || "$state" == "missing" ]]; then
+      echo "ERROR: PostgreSQL container is not running (state: $state)"
+      podman logs "$PG_CONTAINER" --tail 30 2>/dev/null || true
+      return 1
+    fi
     if podman exec "$PG_CONTAINER" pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" &>/dev/null; then
       echo "PostgreSQL is ready! (${elapsed}s)"
       return 0
@@ -40,17 +48,57 @@ wait_for_pg() {
     elapsed=$((elapsed + 2))
   done
   echo "ERROR: PostgreSQL did not become ready within ${HEALTHCHECK_TIMEOUT}s"
-  podman logs "$PG_CONTAINER" --tail 30
+  podman logs "$PG_CONTAINER" --tail 30 2>/dev/null || true
   return 1
 }
 
 # ── Tear down ──────────────────────────────────────────────────
 do_down() {
   echo "Stopping and removing containers..."
-  podman rm -f "$API_CONTAINER" 2>/dev/null || true
-  podman rm -f "$PG_CONTAINER" 2>/dev/null || true
+
+  # 1) Stop containers gracefully first, then force-remove
+  for ctr in "$API_CONTAINER" "$PG_CONTAINER"; do
+    podman stop "$ctr" --time 10 2>/dev/null || true
+    podman rm -f "$ctr" 2>/dev/null || true
+  done
+
+  # 2) Stop and remove the pod (also removes its infra container)
+  podman pod stop "$POD_NAME" --time 10 2>/dev/null || true
   podman pod rm -f "$POD_NAME" 2>/dev/null || true
+
+  # 3) Verify nothing remains — if a container with our names still
+  #    exists in any state (created/exited/dead), remove it by ID
+  for ctr in "$API_CONTAINER" "$PG_CONTAINER"; do
+    local cid
+    cid=$(podman ps -a --filter "name=^${ctr}$" --format '{{.ID}}' 2>/dev/null || true)
+    if [[ -n "$cid" ]]; then
+      echo "WARNING: orphaned container $ctr ($cid) found, force-removing..."
+      podman rm -f -t 0 "$cid" 2>/dev/null || true
+    fi
+  done
+
+  # 4) Final pod cleanup
+  if podman pod exists "$POD_NAME" 2>/dev/null; then
+    echo "WARNING: orphaned pod '$POD_NAME' found, force-removing..."
+    podman pod rm -f "$POD_NAME" 2>/dev/null || true
+  fi
+
   echo "Down complete. (Volume '$PG_VOLUME' preserved)"
+}
+
+# ── Verify container is running ───────────────────────────────
+verify_running() {
+  local name="$1"
+  local label="$2"
+  sleep 1  # give podman a moment to update state
+  local state
+  state=$(podman inspect --format '{{.State.Status}}' "$name" 2>/dev/null || echo "missing")
+  if [[ "$state" != "running" ]]; then
+    echo "ERROR: $label failed to start (state: $state)"
+    podman logs "$name" --tail 30 2>/dev/null || true
+    return 1
+  fi
+  echo "$label is running."
 }
 
 # ── Bring up ───────────────────────────────────────────────────
@@ -68,18 +116,20 @@ do_up() {
   # Remove old containers/pod if they exist
   do_down
 
+  # Small pause to let podman fully release resources
+  sleep 2
+
   # Create pod with API port published
   echo "Creating pod '$POD_NAME'..."
   podman pod create \
     --name "$POD_NAME" \
     -p "${API_PORT:-4000}:4000"
 
-  # Start PostgreSQL
+  # Start PostgreSQL (no --replace: we just ensured a clean state)
   echo "Starting PostgreSQL..."
   podman run -d \
     --pod "$POD_NAME" \
     --name "$PG_CONTAINER" \
-    --replace \
     --restart unless-stopped \
     -e "POSTGRES_DB=${POSTGRES_DB}" \
     -e "POSTGRES_USER=${POSTGRES_USER}" \
@@ -87,19 +137,21 @@ do_up() {
     -v "${PG_VOLUME}:/var/lib/postgresql/data:Z" \
     "$PG_IMAGE"
 
-  # Wait for PostgreSQL to be healthy
+  # Verify PostgreSQL container is actually running
+  verify_running "$PG_CONTAINER" "PostgreSQL"
+
+  # Wait for PostgreSQL to accept connections
   wait_for_pg
 
   # Fix DATABASE_URL: in a pod, containers share localhost
   # Replace the hostname 'postgres' with '127.0.0.1' since they're in the same pod
   local db_url="${DATABASE_URL//\@postgres:/\@127.0.0.1:}"
 
-  # Start API
+  # Start API (no --replace: we just ensured a clean state)
   echo "Starting API..."
   podman run -d \
     --pod "$POD_NAME" \
     --name "$API_CONTAINER" \
-    --replace \
     --restart unless-stopped \
     -e "NODE_ENV=production" \
     -e "PORT=4000" \
@@ -121,6 +173,9 @@ do_up() {
     -v "${STORAGE_HOST_PATH}/protected:/app/storage/protected:Z" \
     -v "${STORAGE_HOST_PATH}/public:/app/storage/public:Z" \
     "$API_IMAGE"
+
+  # Verify API container is actually running
+  verify_running "$API_CONTAINER" "API"
 
   echo ""
   echo "=== Deploy complete ==="
