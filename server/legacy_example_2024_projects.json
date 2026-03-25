@@ -1,0 +1,182 @@
+[
+  {
+    "title": "MUSIC LIBRARY",
+    "studentIds": ["1988001"],
+    "names": ["강윤성"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "OVERCOME",
+    "studentIds": ["1988002", "1988042"],
+    "names": ["고정용", "하영민"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "포레스트릭서",
+    "studentIds": ["2088004"],
+    "names": ["권정임"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "GALLERY",
+    "studentIds": ["1988004", "1988043"],
+    "names": ["김기인", "황동석"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "TIME RUNN",
+    "studentIds": ["1988005"],
+    "names": ["김민준"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "Follow-up Trip",
+    "studentIds": ["1988007"],
+    "names": ["김선우"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "이파리의 기대컨",
+    "studentIds": ["1788010"],
+    "names": ["김재원"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "DIVER",
+    "studentIds": ["1988017", "1988022"],
+    "names": ["박기현", "서윤성"],
+    "originalPosterFormat": "png"
+  },
+  {
+    "title": "RPG 생존 일지",
+    "studentIds": ["1988018"],
+    "names": ["박시윤"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "Let's Challange",
+    "studentIds": ["1888011"],
+    "names": ["박진수"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "Dungeon Creatures",
+    "studentIds": ["1988020"],
+    "names": ["박찬"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "Neon Art",
+    "studentIds": ["1788014"],
+    "names": ["박현준"],
+    "originalPosterFormat": "png"
+  },
+  {
+    "title": "FINAL DESTINATION -Last one standing-",
+    "studentIds": ["1988024"],
+    "names": ["성규민"],
+    "originalPosterFormat": "png"
+  },
+  {
+    "title": "31GAME -31th national park-",
+    "studentIds": ["1888012"],
+    "names": ["송민재"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "놀러와요! 판타지 팜",
+    "studentIds": ["2088028"],
+    "names": ["엄지승"],
+    "originalPosterFormat": "png"
+  },
+  {
+    "title": "나와 호랑이님",
+    "studentIds": ["1988028"],
+    "names": ["염경진"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "Legend of Slasher",
+    "studentIds": ["1988029"],
+    "names": ["오단해"],
+    "originalPosterFormat": "jpg"
+  },
+  {
+    "title": "소악마키우기 -당신만의 작은 소악마-",
+    "studentIds": ["1988031"],
+    "names": ["유정준"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "던전라이크",
+    "studentIds": ["1888017"],
+    "names": ["윤정현"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "EVERY DAY",
+    "studentIds": ["2188901"],
+    "names": ["윤종수"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "SOAR",
+    "studentIds": ["2188043"],
+    "names": ["윤진호"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "강호협행",
+    "studentIds": ["1988032"],
+    "names": ["이민학"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "짐승의 격투",
+    "studentIds": ["2188801"],
+    "names": ["이예나"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "짭스스톤",
+    "studentIds": ["1988034"],
+    "names": ["이종헌"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "FOREST SURVIVAL",
+    "studentIds": ["1988035"],
+    "names": ["이지호"],
+    "originalPosterFormat": "png"
+  },
+  {
+    "title": "TURRET DEFENSE",
+    "studentIds": ["1888028"],
+    "names": ["이지훈"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "UNDOCKED",
+    "studentIds": ["1988037"],
+    "names": ["이휘재"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "ANCIENT RUINS",
+    "studentIds": ["1988038", "1888025"],
+    "names": ["임형균", "이승현"],
+    "originalPosterFormat": "pdf"
+  },
+  {
+    "title": "Temple",
+    "studentIds": ["1888034"],
+    "names": ["최원준"],
+    "originalPosterFormat": "png"
+  },
+  {
+    "title": "PROJECT: UNITE",
+    "studentIds": ["1988041"],
+    "names": ["최재영"],
+    "originalPosterFormat": "png"
+  }
+]

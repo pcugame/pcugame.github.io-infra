@@ -1,0 +1,2471 @@
+{
+  "years": [
+    {
+      "year": 2020,
+      "title": "2020 졸업작품전",
+      "isOpen": false
+    },
+    {
+      "year": 2021,
+      "title": "2021 졸업작품전",
+      "isOpen": false
+    },
+    {
+      "year": 2022,
+      "title": "2022 졸업작품전",
+      "isOpen": false
+    },
+    {
+      "year": 2023,
+      "title": "2023 졸업작품전",
+      "isOpen": false
+    },
+    {
+      "year": 2024,
+      "title": "2024 졸업작품전",
+      "isOpen": false
+    },
+    {
+      "year": 2025,
+      "title": "2025 졸업작품전",
+      "isOpen": false
+    }
+  ],
+  "projects": [
+    {
+      "year": 2020,
+      "title": "로스트아크 소개영상",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "강기주",
+          "studentId": "1588001",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "V_BUNNY",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "강동현",
+          "studentId": "1288001",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "DogCommanDo",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "강태우",
+          "studentId": "1390002",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "Father",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "구자혁",
+          "studentId": "1488003",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "Water Melon Jump",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김진영",
+          "studentId": "1588012",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "DON'T BRAKE",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김진한",
+          "studentId": "0000001",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "E.W.L",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "문승현",
+          "studentId": "1488010",
+          "sortOrder": 0
+        },
+        {
+          "name": "민경환",
+          "studentId": "1488012",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "TicToc",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "심진보",
+          "studentId": "0000002",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "Helios",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "윤대현",
+          "studentId": "1588027",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "NARUTO-FIGHT-",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "윤신영",
+          "studentId": "0000003",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "Rens Viewer",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이건후",
+          "studentId": "1588029",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "THE MANUAL",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "조민수",
+          "studentId": "1400000",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "니어 오토마타 모작",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "채희범",
+          "studentId": "1461067",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "AUDODESK 3D MAYA 모델링",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "최두혁",
+          "studentId": "0000004",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "MOST PUZZLE",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "최성원",
+          "studentId": "1788033",
+          "sortOrder": 0
+        },
+        {
+          "name": "정혜인",
+          "studentId": "1688033",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "던전",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "최준석",
+          "studentId": "1488036",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "드론 시뮬레이터",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "홍진기",
+          "studentId": "1488039",
+          "sortOrder": 0
+        },
+        {
+          "name": "이낙규",
+          "studentId": "0000005",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "리듬게임",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박단비",
+          "studentId": "0000006",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "행행 중앙도서관",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이윤행",
+          "studentId": "1542023",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2020,
+      "title": "Aircraft",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이주호",
+          "studentId": "1616021",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "RUNNING CAT",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "강예훈",
+          "studentId": "1488001",
+          "sortOrder": 0
+        },
+        {
+          "name": "이장훈",
+          "studentId": "1488025",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "FLATTOWER DEFENSE",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이종훈",
+          "studentId": "1688003",
+          "sortOrder": 0
+        },
+        {
+          "name": "권기석",
+          "studentId": "1488026",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "RANDOM TOWER DEFENSE",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김수곤",
+          "studentId": "1588009",
+          "sortOrder": 0
+        },
+        {
+          "name": "장재형",
+          "studentId": "1588033",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "Aisling's Mistake",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박예솔",
+          "studentId": "1888010",
+          "sortOrder": 0
+        },
+        {
+          "name": "이지수",
+          "studentId": "1888027",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "종말여행",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "유승효",
+          "studentId": "1588026",
+          "sortOrder": 0
+        },
+        {
+          "name": "정영준",
+          "studentId": "1588036",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "Regina -Princess Legendary-",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "조현영",
+          "studentId": "1888033",
+          "sortOrder": 0
+        },
+        {
+          "name": "한지아",
+          "studentId": "1888036",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "D's travel",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "장영재",
+          "studentId": "1588032",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "INFERNO",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김효원",
+          "studentId": "1688010",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "MOTEL ESCAPE",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "안성준",
+          "studentId": "1688017",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "윙윙 (Wing Wing)",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이지욱",
+          "studentId": "1688026",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "SPACE GUN",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "임광희",
+          "studentId": "1688029",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "Diplomacy",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "허재성",
+          "studentId": "1688038",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "대항해시대",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "백성현",
+          "studentId": "1788016",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "광대",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김민성",
+          "studentId": "1488005",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "Medieval Saga",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김진강",
+          "studentId": "1488007",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "Chase Rythm",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "문형찬",
+          "studentId": "1488011",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "NEON DASH",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김대경",
+          "studentId": "1588007",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "움직여라! 용사여!",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "노백승",
+          "studentId": "1588015",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "RUN",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "모영준",
+          "studentId": "1588016",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "뿜뿜 시티팝 리듬게임",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박진규",
+          "studentId": "1588020",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "CovertOperation",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "여권익",
+          "studentId": "1588024",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "MEMO",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "하승문",
+          "studentId": "1588043",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "우주방어",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이승원",
+          "studentId": "1688024",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "풍선 게임",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "임도희",
+          "studentId": "1688030",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2021,
+      "title": "동네 빵집",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "정기훈",
+          "studentId": "1888032",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Escape from ICE world",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "방인성",
+          "studentId": "1588022",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "엘마 풀레아",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김도겸",
+          "studentId": "1688004",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "I'm human",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김명준",
+          "studentId": "1688006",
+          "sortOrder": 0
+        },
+        {
+          "name": "나민승",
+          "studentId": "1688011",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "히어로 트레인",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김성현",
+          "studentId": "1688007",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "용순이의 모험",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "노승우",
+          "studentId": "1688012",
+          "sortOrder": 0
+        },
+        {
+          "name": "최재현",
+          "studentId": "1688036",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Mirra Survival",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박성훈",
+          "studentId": "1688015",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "사쿠야씨 대모험",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이강민",
+          "studentId": "1688021",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Dungeon Walker",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이동욱",
+          "studentId": "1688023",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Forest Quest",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "전태성",
+          "studentId": "1688031",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "타워",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "황어진",
+          "studentId": "1688039",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Passing Bot",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "고창건",
+          "studentId": "1788001",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Wanna Go Home",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김관호",
+          "studentId": "1788003",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Awake",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김명준",
+          "studentId": "1788004",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Mighter Fighters",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김민창",
+          "studentId": "1788005",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "META-BATTER",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "백두산",
+          "studentId": "1788015",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "SmallerWorld",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "성시엽",
+          "studentId": "1788017",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "카오스 헌터",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "오승묵",
+          "studentId": "1788019",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "EsC'afe",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "오태원",
+          "studentId": "1788020",
+          "sortOrder": 0
+        },
+        {
+          "name": "윤영태",
+          "studentId": "1688019",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "1년 -One Year-",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "원태준",
+          "studentId": "1788021",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "BrainAnger",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이동재",
+          "studentId": "1788023",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "랜덤탄막 프로젝트",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "임윤남",
+          "studentId": "1788025",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "패턴 미로",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "임창묵",
+          "studentId": "1788026",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "투자자로 성공하기",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "장대원",
+          "studentId": "1788027",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Scenario.",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "정정우",
+          "studentId": "1788029",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "악몽",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김단영",
+          "studentId": "1888002",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "God of Combo",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "한충헌",
+          "studentId": "1888037",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2022,
+      "title": "Virus Resistance",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이원호",
+          "studentId": "1988033",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "레스토랑",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이창준",
+          "studentId": "1688027",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Lost Bible",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김성륜",
+          "studentId": "1788007",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "what?!",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김정우",
+          "studentId": "1788012",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "SEVEN",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박주현",
+          "studentId": "1788013",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Path Patrol",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박수영",
+          "studentId": "1888009",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Rolling Rock",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "정영범",
+          "studentId": "1888013",
+          "sortOrder": 0
+        },
+        {
+          "name": "송하민",
+          "studentId": "1884039",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Ruins Hunter",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김대겸",
+          "studentId": "1888003",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Guilty",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김우중",
+          "studentId": "1888004",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Mirroring",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김태랑",
+          "studentId": "1888007",
+          "sortOrder": 0
+        },
+        {
+          "name": "윤홍인",
+          "studentId": "1888018",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "멍생라이프",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "신종호",
+          "studentId": "1888014",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Seven Sins",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "양승필",
+          "studentId": "1888015",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Door",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "육기정",
+          "studentId": "1888016",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Fantasy War",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이석천",
+          "studentId": "1888024",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Hunting Farmer",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이재형",
+          "studentId": "1888026",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Find a Member",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이현준",
+          "studentId": "1888029",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "Match Raid",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "MOBILE"
+      ],
+      "members": [
+        {
+          "name": "이상헌",
+          "studentId": "2084029",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "HospitalRunner",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "배용훈",
+          "studentId": "2088025",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "기사도에 대하여",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이창현",
+          "studentId": "2088033",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "BossRusher",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "장종익",
+          "studentId": "2088036",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "인마대전(PC)",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "최준영",
+          "studentId": "2088802",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2023,
+      "title": "인마대전(Android)",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "MOBILE"
+      ],
+      "members": [
+        {
+          "name": "최준영",
+          "studentId": "2088802",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "MUSIC LIBRARY",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "강윤성",
+          "studentId": "1988001",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "OVERCOME",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "고정용",
+          "studentId": "1988002",
+          "sortOrder": 0
+        },
+        {
+          "name": "하영민",
+          "studentId": "1988042",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "포레스트릭서",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "권정임",
+          "studentId": "2088004",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "GALLERY",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김기인",
+          "studentId": "1988004",
+          "sortOrder": 0
+        },
+        {
+          "name": "황동석",
+          "studentId": "1988043",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "TIME RUNN",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김민준",
+          "studentId": "1988005",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "Follow-up Trip",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김선우",
+          "studentId": "1988007",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "이파리의 기대컨",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김재원",
+          "studentId": "1788010",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "DIVER",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박기현",
+          "studentId": "1988017",
+          "sortOrder": 0
+        },
+        {
+          "name": "서윤성",
+          "studentId": "1988022",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "RPG 생존 일지",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박시윤",
+          "studentId": "1988018",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "Let's Challange",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박진수",
+          "studentId": "1888011",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "Dungeon Creatures",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박찬",
+          "studentId": "1988020",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "Neon Art",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박현준",
+          "studentId": "1788014",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "FINAL DESTINATION -Last one standing-",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "성규민",
+          "studentId": "1988024",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "31GAME -31th national park-",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "송민재",
+          "studentId": "1888012",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "놀러와요! 판타지 팜",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "엄지승",
+          "studentId": "2088028",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "나와 호랑이님",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "염경진",
+          "studentId": "1988028",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "Legend of Slasher",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "오단해",
+          "studentId": "1988029",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "소악마키우기 -당신만의 작은 소악마-",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "유정준",
+          "studentId": "1988031",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "던전라이크",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "윤정현",
+          "studentId": "1888017",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "EVERY DAY",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "윤종수",
+          "studentId": "2188901",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "SOAR",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "윤진호",
+          "studentId": "2188043",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "강호협행",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이민학",
+          "studentId": "1988032",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "짐승의 격투",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이예나",
+          "studentId": "2188801",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "짭스스톤",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이종헌",
+          "studentId": "1988034",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "FOREST SURVIVAL",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이지호",
+          "studentId": "1988035",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "TURRET DEFENSE",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이지훈",
+          "studentId": "1888028",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "UNDOCKED",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이휘재",
+          "studentId": "1988037",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "ANCIENT RUINS",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "임형균",
+          "studentId": "1988038",
+          "sortOrder": 0
+        },
+        {
+          "name": "이승현",
+          "studentId": "1888025",
+          "sortOrder": 1
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "Temple",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "최원준",
+          "studentId": "1888034",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2024,
+      "title": "PROJECT: UNITE",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "최재영",
+          "studentId": "1988041",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2025,
+      "title": "리듬파이터",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김현우",
+          "studentId": "1988014",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://kimhyunwoo1124.github.io/"
+    },
+    {
+      "year": 2025,
+      "title": "Twins",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박준학",
+          "studentId": "1988019",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2025,
+      "title": "IN THE DARK",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "황장민",
+          "studentId": "1988044",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2025,
+      "title": "고기산책로",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "이선귀",
+          "studentId": "2036043",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/sungwidard7/Project_MeatPath.git"
+    },
+    {
+      "year": 2025,
+      "title": "Dragon Slayer",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "경정찬",
+          "studentId": "2088002",
+          "sortOrder": 0
+        },
+        {
+          "name": "나정원",
+          "studentId": "2088018",
+          "sortOrder": 1
+        },
+        {
+          "name": "윤동욱",
+          "studentId": "2288020",
+          "sortOrder": 2
+        }
+      ],
+      "githubUrl": "https://github.com/dkfkaksk/DGS_GAME/blob/main/README.md"
+    },
+    {
+      "year": 2025,
+      "title": "AirStrike",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "권현민",
+          "studentId": "2088005",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/AliceInSakura/AirStrike/blob/main/README.md"
+    },
+    {
+      "year": 2025,
+      "title": "냥이의 식탁",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김지유",
+          "studentId": "2088011",
+          "sortOrder": 0
+        },
+        {
+          "name": "정완희",
+          "studentId": "2088041",
+          "sortOrder": 1
+        }
+      ],
+      "githubUrl": "https://dhksgml.github.io/NyangsTable/"
+    },
+    {
+      "year": 2025,
+      "title": "전탄발사",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김진욱",
+          "studentId": "2088013",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2025,
+      "title": "NIGHTFALL RUSH",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김찬영",
+          "studentId": "2088015",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/rlacksdud01/NightFall_Rush"
+    },
+    {
+      "year": 2025,
+      "title": "Farm Farm Island",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "남혁진",
+          "studentId": "2088019",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/HykJn/Project_FFI"
+    },
+    {
+      "year": 2025,
+      "title": "Dungeon Crawl",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박상범",
+          "studentId": "2088021",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/WeakSpoter/School-Project.git"
+    },
+    {
+      "year": 2025,
+      "title": "BPM: BEATS PER MINUTE",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "신중훈",
+          "studentId": "2088026",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/ShinJooongHooon/BPM"
+    },
+    {
+      "year": 2025,
+      "title": "BIG HEAD",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "윤준서",
+          "studentId": "2088030",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/cytingu/PCUGraduationwork"
+    },
+    {
+      "year": 2025,
+      "title": "UNDEAD RUSH",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "장윤호",
+          "studentId": "2088035",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/yunho703/Undead-Rush"
+    },
+    {
+      "year": 2025,
+      "title": "비연 (PC)",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "전민성",
+          "studentId": "2088037",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/JMS2001K/Flying-Swallow/tree/main"
+    },
+    {
+      "year": 2025,
+      "title": "A+",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "최문섭",
+          "studentId": "2088044",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2025,
+      "title": "Tele Connect",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "황인수",
+          "studentId": "2088046",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/psychicmage/Project-VA-.git"
+    },
+    {
+      "year": 2025,
+      "title": "PROJECT-T",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "노영준",
+          "studentId": "2188045",
+          "sortOrder": 0
+        }
+      ]
+    },
+    {
+      "year": 2025,
+      "title": "현대공군대결",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "최민섭",
+          "studentId": "2188802",
+          "sortOrder": 0
+        }
+      ],
+      "githubUrl": "https://github.com/f1709/-/blob/main/README.md"
+    },
+    {
+      "year": 2025,
+      "title": "Escape from Wizard: Sun & Moon",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "김다희",
+          "studentId": "2288014",
+          "sortOrder": 0
+        },
+        {
+          "name": "남경서",
+          "studentId": "2288014",
+          "sortOrder": 1
+        }
+      ],
+      "githubUrl": "https://project-jol.github.io/Project-Joljak.github.io/"
+    },
+    {
+      "year": 2025,
+      "title": "2Dragon -혈무-",
+      "status": "PUBLISHED",
+      "downloadPolicy": "PUBLIC",
+      "platforms": [
+        "PC"
+      ],
+      "members": [
+        {
+          "name": "박건우",
+          "studentId": "2288049",
+          "sortOrder": 0
+        },
+        {
+          "name": "김승석",
+          "studentId": "2288012",
+          "sortOrder": 1
+        }
+      ],
+      "githubUrl": "https://github.com/Nyam03/2Dragon_Capstone"
+    }
+  ]
+}

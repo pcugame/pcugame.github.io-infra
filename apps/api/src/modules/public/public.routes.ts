@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { env } from '../../config/env.js';
 import { sendOk } from '../../shared/http.js';
 import { notFound } from '../../shared/errors.js';
+import { sanitizeStudentId } from '../../shared/student-id.js';
 
 function publicAssetUrl(storageKey: string): string {
   return `${env().API_PUBLIC_URL}/api/assets/public/${storageKey}`;
@@ -51,7 +52,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       title: p.title,
       summary: p.summary || undefined,
       posterUrl: p.poster ? publicAssetUrl(p.poster.storageKey) : undefined,
-      members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
+      members: p.members.map((m) => ({ name: m.name, studentId: sanitizeStudentId(m.studentId) })),
     }));
 
     sendOk(reply, { year: yearNum, items, empty: items.length === 0 });
@@ -122,7 +123,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       members: project.members.map((m) => ({
         id: m.id,
         name: m.name,
-        studentId: m.studentId,
+        studentId: sanitizeStudentId(m.studentId),
       })),
       images,
       posterUrl: project.poster ? publicAssetUrl(project.poster.storageKey) : undefined,

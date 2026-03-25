@@ -42,6 +42,12 @@ enum DownloadPolicy {
   ADMIN_ONLY
 }
 
+enum Platform {
+  PC
+  MOBILE
+  WEB
+}
+
 // ─── Models ───────────────────────────────────────────
 
 model User {
@@ -86,6 +92,8 @@ model Project {
   status         ProjectStatus  @default(DRAFT)
   sortOrder      Int            @default(0) @map("sort_order")
   downloadPolicy DownloadPolicy @default(PUBLIC) @map("download_policy")
+  githubUrl      String         @default("") @map("github_url")
+  platforms      Platform[]     @default([])
   posterAssetId  String?        @unique @map("poster_asset_id")
   creatorId      String         @map("creator_id")
   createdAt      DateTime       @default(now()) @map("created_at")

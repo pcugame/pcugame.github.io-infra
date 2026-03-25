@@ -123,6 +123,8 @@ interface ImportProject {
   youtubeUrl?: string;
   status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   downloadPolicy?: 'NONE' | 'PUBLIC' | 'SCHOOL_ONLY' | 'ADMIN_ONLY';
+  githubUrl?: string;
+  platforms?: ('PC' | 'MOBILE' | 'WEB')[];
   members?: ImportMember[];
 }
 
@@ -204,6 +206,8 @@ async function importFromJson(filePath: string, creatorId: string) {
           youtubeUrl: p.youtubeUrl ?? '',
           status: p.status ?? 'PUBLISHED',
           downloadPolicy: p.downloadPolicy ?? 'PUBLIC',
+          githubUrl: p.githubUrl ?? '',
+          platforms: p.platforms ?? [],
           creatorId,
           members: {
             create: (p.members ?? []).map((m, i) => ({

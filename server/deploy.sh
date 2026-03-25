@@ -79,6 +79,7 @@ do_up() {
   podman run -d \
     --pod "$POD_NAME" \
     --name "$PG_CONTAINER" \
+    --replace \
     --restart unless-stopped \
     -e "POSTGRES_DB=${POSTGRES_DB}" \
     -e "POSTGRES_USER=${POSTGRES_USER}" \
@@ -98,6 +99,7 @@ do_up() {
   podman run -d \
     --pod "$POD_NAME" \
     --name "$API_CONTAINER" \
+    --replace \
     --restart unless-stopped \
     -e "NODE_ENV=production" \
     -e "PORT=4000" \

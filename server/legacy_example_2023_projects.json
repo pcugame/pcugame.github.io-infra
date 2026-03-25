@@ -1,0 +1,149 @@
+[
+  {
+    "title": "레스토랑",
+    "studentIds": ["1688027"],
+    "names": ["이창준"],
+    "originalPosterFormat": "jpg",
+    "isMobile": false
+  },
+  {
+    "title": "Lost Bible",
+    "studentIds": ["1788007"],
+    "names": ["김성륜"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "what?!",
+    "studentIds": ["1788012"],
+    "names": ["김정우"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "SEVEN",
+    "studentIds": ["1788013"],
+    "names": ["박주현"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "Path Patrol",
+    "studentIds": ["1888009"],
+    "names": ["박수영"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "Rolling Rock",
+    "studentIds": ["1888013","1884039"],
+    "names": ["정영범","송하민"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "Ruins Hunter",
+    "studentIds": ["1888003"],
+    "names": ["김대겸"],
+    "originalPosterFormat": "jpg",
+    "isMobile": false
+  },
+  {
+    "title": "Guilty",
+    "studentIds": ["1888004"],
+    "names": ["김우중"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "Mirroring",
+    "studentIds": ["1888007","1888018"],
+    "names": ["김태랑","윤홍인"],
+    "originalPosterFormat": "jpg",
+    "isMobile": false
+  },
+  {
+    "title": "멍생라이프",
+    "studentIds": ["1888014"],
+    "names": ["신종호"],
+    "originalPosterFormat": "jpg",
+    "isMobile": false
+  },
+  {
+    "title": "Seven Sins",
+    "studentIds": ["1888015"],
+    "names": ["양승필"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "Door",
+    "studentIds": ["1888016"],
+    "names": ["육기정"],
+    "originalPosterFormat": "jpg",
+    "isMobile": false
+  },
+  {
+    "title": "Fantasy War",
+    "studentIds": ["1888024"],
+    "names": ["이석천"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "Hunting Farmer",
+    "studentIds": ["1888026"],
+    "names": ["이재형"],
+    "originalPosterFormat": "jpg",
+    "isMobile": false
+  },
+  {
+    "title": "Find a Member",
+    "studentIds": ["1888029"],
+    "names": ["이현준"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "Match Raid",
+    "studentIds": ["2084029"],
+    "names": ["이상헌"],
+    "originalPosterFormat": "png",
+    "isMobile": true
+  },
+  {
+    "title": "HospitalRunner",
+    "studentIds": ["2088025"],
+    "names": ["배용훈"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "기사도에 대하여",
+    "studentIds": ["2088033"],
+    "names": ["이창현"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "BossRusher",
+    "studentIds": ["2088036"],
+    "names": ["장종익"],
+    "originalPosterFormat": "png",
+    "isMobile": false
+  },
+  {
+    "title": "인마대전(PC)",
+    "studentIds": ["2088802"],
+    "names": ["최준영"],
+    "originalPosterFormat": "jpg",
+    "isMobile": false
+  },
+  {
+    "title": "인마대전(Android)",
+    "studentIds": ["2088802"],
+    "names": ["최준영"],
+    "originalPosterFormat": "jpg",
+    "isMobile": true
+  }
+]

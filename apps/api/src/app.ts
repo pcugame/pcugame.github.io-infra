@@ -14,74 +14,74 @@ import { AppError } from './shared/errors.js';
 import type { ApiError } from './shared/http.js';
 
 export async function buildApp() {
-  const app = Fastify({
-    logger: false,
-    bodyLimit: 2 * 1024 * 1024, // 2 MB for JSON bodies
-  });
+	const app = Fastify({
+		logger: false,
+		bodyLimit: 2 * 1024 * 1024, // 2 MB for JSON bodies
+	});
 
-  // Plugins
-  await registerCors(app);
-  await registerCookie(app);
-  await registerMultipart(app);
-  await registerAuth(app);
+	// Plugins
+	await registerCors(app);
+	await registerCookie(app);
+	await registerMultipart(app);
+	await registerAuth(app);
 
-  // Health check
-  app.get('/api/health', async (_req, reply) => {
-    reply.send({ ok: true, timestamp: new Date().toISOString() });
-  });
+	// Health check
+	app.get('/api/health', async (_req, reply) => {
+		reply.send({ ok: true, timestamp: new Date().toISOString() });
+	});
 
-  // Routes
-  await app.register(authRoutes, { prefix: '/api' });
-  await app.register(publicRoutes, { prefix: '/api/public' });
-  await app.register(adminRoutes, { prefix: '/api/admin' });
-  await app.register(assetsRoutes, { prefix: '/api' });
+	// Routes
+	await app.register(authRoutes, { prefix: '/api' });
+	await app.register(publicRoutes, { prefix: '/api/public' });
+	await app.register(adminRoutes, { prefix: '/api/admin' });
+	await app.register(assetsRoutes, { prefix: '/api' });
 
-  // Global error handler
-  app.setErrorHandler((error: FastifyError, _request, reply) => {
-    if (error instanceof AppError) {
-      const body: ApiError = {
-        ok: false,
-        error: {
-          code: error.code ?? 'ERROR',
-          message: error.message,
-          ...(error.details !== undefined ? { details: error.details } : {}),
-        },
-      };
-      reply.status(error.statusCode).send(body);
-      return;
-    }
+	// Global error handler
+	app.setErrorHandler((error: FastifyError, _request, reply) => {
+		if (error instanceof AppError) {
+			const body: ApiError = {
+				ok: false,
+				error: {
+					code: error.code ?? 'ERROR',
+					message: error.message,
+					...(error.details !== undefined ? { details: error.details } : {}),
+				},
+			};
+			reply.status(error.statusCode).send(body);
+			return;
+		}
 
-    // Fastify validation errors
-    if (error.validation) {
-      const body: ApiError = {
-        ok: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Validation failed',
-          details: error.validation,
-        },
-      };
-      reply.status(400).send(body);
-      return;
-    }
+		// Fastify validation errors
+		if (error.validation) {
+			const body: ApiError = {
+				ok: false,
+				error: {
+					code: 'VALIDATION_ERROR',
+					message: 'Validation failed',
+					details: error.validation,
+				},
+			};
+			reply.status(400).send(body);
+			return;
+		}
 
-    // Multipart file size limit
-    if (error.statusCode === 413 || error.code === 'FST_REQ_FILE_TOO_LARGE') {
-      const body: ApiError = {
-        ok: false,
-        error: { code: 'PAYLOAD_TOO_LARGE', message: 'File too large' },
-      };
-      reply.status(413).send(body);
-      return;
-    }
+		// Multipart file size limit
+		if (error.statusCode === 413 || error.code === 'FST_REQ_FILE_TOO_LARGE') {
+			const body: ApiError = {
+				ok: false,
+				error: { code: 'PAYLOAD_TOO_LARGE', message: 'File too large' },
+			};
+			reply.status(413).send(body);
+			return;
+		}
 
-    logger.error(error, 'Unhandled error');
-    const body: ApiError = {
-      ok: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
-    };
-    reply.status(500).send(body);
-  });
+		logger.error(error, 'Unhandled error');
+		const body: ApiError = {
+			ok: false,
+			error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
+		};
+		reply.status(500).send(body);
+	});
 
   return app;
 }
