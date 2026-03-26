@@ -2602,6 +2602,8 @@ fieldset.status-section legend {
   display: flex;
   flex-direction: column;
   min-height: 44px;
+  max-width: 400px;
+  width: 100%;
 }
 
 .archive-card:hover {
@@ -2613,7 +2615,7 @@ fieldset.status-section legend {
 }
 
 .archive-card__image {
-  height: 175px;
+  aspect-ratio: 16 / 10;
   overflow: hidden;
   background: #e8eeff;
   flex-shrink: 0;
