@@ -4,7 +4,7 @@ import { Footer } from './Footer';
 
 export function Layout() {
   const { pathname } = useLocation();
-  const isFullWidth = pathname === '/' || pathname === '/years';
+  const isFullWidth = pathname === '/' || pathname.startsWith('/years');
 
   return (
     <div className="layout">

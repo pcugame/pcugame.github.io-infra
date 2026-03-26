@@ -196,11 +196,11 @@
 
 [data-theme='dark'] .archive-page__header {
   border-bottom-color: #1e3a6e;
-  background: linear-gradient(180deg, #111d42 0%, #0b1330 100%);
+  background: linear-gradient(180deg, #13204a 0%, #0b1330 100%);
 }
 
 [data-theme='dark'] .archive-back {
-  color: #7b8ab8;
+  color: #8b9fd0;
 }
 
 [data-theme='dark'] .archive-back:hover {
@@ -208,26 +208,26 @@
 }
 
 [data-theme='dark'] .archive-page__title {
-  color: #e0e7ff;
+  color: #e8eeff;
 }
 
 [data-theme='dark'] .archive-page__subtitle {
-  color: #7b8ab8;
+  color: #8b9fd0;
 }
 
 [data-theme='dark'] .archive-search__input {
-  border-color: #1e3a6e;
-  background: #0a0f25;
+  border-color: #243660;
+  background: #0e1838;
   color: #e0e7ff;
 }
 
 [data-theme='dark'] .archive-search__input:focus {
-  border-color: #2461d4;
-  box-shadow: 0 0 0 3px rgba(36, 97, 212, 0.2);
+  border-color: #3b7df0;
+  box-shadow: 0 0 0 3px rgba(59, 125, 240, 0.2);
 }
 
 [data-theme='dark'] .archive-count {
-  color: #7b8ab8;
+  color: #8b9fd0;
 }
 
 [data-theme='dark'] .archive-card {
@@ -237,9 +237,10 @@
 }
 
 [data-theme='dark'] .archive-card:hover {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  border-color: rgba(36, 97, 212, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(91, 156, 245, 0.2);
+  border-color: #3b7df0;
   color: #e0e7ff;
+  background: #162050;
 }
 
 [data-theme='dark'] .archive-card__image {
@@ -247,20 +248,24 @@
 }
 
 [data-theme='dark'] .archive-card__placeholder {
-  background: linear-gradient(135deg, #1e3a6e, #111d42);
-  color: rgba(91, 156, 245, 0.15);
+  background: linear-gradient(135deg, #1a3060, #0e1838);
+  color: rgba(91, 156, 245, 0.2);
 }
 
 [data-theme='dark'] .archive-card__title {
-  color: #e0e7ff;
+  color: #eef3ff;
+}
+
+[data-theme='dark'] .archive-card:hover .archive-card__title {
+  color: #5b9cf5;
 }
 
 [data-theme='dark'] .archive-card__summary {
-  color: #7b8ab8;
+  color: #8b9fd0;
 }
 
 [data-theme='dark'] .archive-card__members {
-  color: #5a6a94;
+  color: #6878a8;
 }
 
 /* ── Theme toggle button ─────────────────────────────────────── */
@@ -381,7 +386,7 @@ a:hover {
 }
 
 [data-theme='dark'] .header__logo-sig {
-  filter: brightness(0) invert(1) brightness(1.1);
+  filter: brightness(1.8) saturate(0.6);
 }
 
 .header__logo-divider {

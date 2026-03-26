@@ -38,50 +38,54 @@ export default function YearProjectsPage() {
   return (
     <div className="archive-page">
       <div className="archive-page__header">
-        <Link to="/years" className="archive-back">← 연도 목록</Link>
-        <h1 className="archive-page__title">{pageTitle}</h1>
-        <p className="archive-page__subtitle">{year}년 작품 목록을 확인하세요.</p>
+        <div className="container">
+          <Link to="/" className="archive-back">← 연도 목록</Link>
+          <h1 className="archive-page__title">{pageTitle}</h1>
+          <p className="archive-page__subtitle">{year}년 작품 목록을 확인하세요.</p>
+        </div>
       </div>
 
-      {isLoading && <LoadingSpinner />}
-      {error && <ErrorMessage error={error} onReset={() => refetch()} />}
+      <div className="container">
+        {isLoading && <LoadingSpinner />}
+        {error && <ErrorMessage error={error} onReset={() => refetch()} />}
 
-      {data && (
-        <>
-          <div className="archive-page__toolbar">
-            <div className="archive-search">
-              <span className="archive-search__icon" aria-hidden="true">🔍</span>
-              <input
-                className="archive-search__input"
-                type="search"
-                placeholder="작품명 또는 팀원 이름으로 검색"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                aria-label="작품 검색"
+        {data && (
+          <>
+            <div className="archive-page__toolbar">
+              <div className="archive-search">
+                <span className="archive-search__icon" aria-hidden="true">🔍</span>
+                <input
+                  className="archive-search__input"
+                  type="search"
+                  placeholder="작품명 또는 팀원 이름으로 검색"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  aria-label="작품 검색"
+                />
+              </div>
+              <span className="archive-count">
+                {filtered.length}개 작품
+              </span>
+            </div>
+
+            {data.empty || filtered.length === 0 ? (
+              <EmptyState
+                message={
+                  search
+                    ? `"${search}"에 해당하는 작품이 없습니다.`
+                    : '해당 연도 작품이 아직 등록되지 않았습니다.'
+                }
               />
-            </div>
-            <span className="archive-count">
-              {filtered.length}개 작품
-            </span>
-          </div>
-
-          {data.empty || filtered.length === 0 ? (
-            <EmptyState
-              message={
-                search
-                  ? `"${search}"에 해당하는 작품이 없습니다.`
-                  : '해당 연도 작품이 아직 등록되지 않았습니다.'
-              }
-            />
-          ) : (
-            <div className="archive-grid">
-              {filtered.map((project) => (
-                <ProjectCard key={project.id} project={project} year={year} />
-              ))}
-            </div>
-          )}
-        </>
-      )}
+            ) : (
+              <div className="archive-grid">
+                {filtered.map((project) => (
+                  <ProjectCard key={project.id} project={project} year={year} />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
