@@ -21,7 +21,7 @@
 
 ## Coding Style & Naming Conventions
 
-- TypeScript throughout; 2‑space indent; prefer explicit types at module boundaries.
+- TypeScript throughout; 1-tab indent; prefer explicit types at module boundaries.
 - Web: Components/pages PascalCase (e.g., `HomePage.tsx`), hooks `useX.ts`, re‑exports via `index.ts`.
 - API: Route files end with `.routes.ts`; plugins lowercase (`cookie.ts`); keep handlers small and typed.
 - Linting: Web uses ESLint (`apps/web/eslint.config.js`); API uses `tsc --noEmit` for type checks.

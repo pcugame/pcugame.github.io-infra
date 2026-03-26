@@ -3,32 +3,32 @@
     {
       "year": 2020,
       "title": "2020 졸업작품전",
-      "isOpen": false
+      "isUploadEnabled": false
     },
     {
       "year": 2021,
       "title": "2021 졸업작품전",
-      "isOpen": false
+      "isUploadEnabled": false
     },
     {
       "year": 2022,
       "title": "2022 졸업작품전",
-      "isOpen": false
+      "isUploadEnabled": false
     },
     {
       "year": 2023,
       "title": "2023 졸업작품전",
-      "isOpen": false
+      "isUploadEnabled": false
     },
     {
       "year": 2024,
       "title": "2024 졸업작품전",
-      "isOpen": false
+      "isUploadEnabled": false
     },
     {
       "year": 2025,
       "title": "2025 졸업작품전",
-      "isOpen": false
+      "isUploadEnabled": false
     }
   ],
   "projects": [

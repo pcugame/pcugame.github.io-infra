@@ -11,13 +11,13 @@ export const AssetKindEnum = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME']);
 export const CreateYearBody = z.object({
   year: z.number().int().min(2021).max(2100),
   title: z.string().max(100).optional().default(''),
-  isOpen: z.boolean().optional().default(true),
+  isUploadEnabled: z.boolean().optional().default(true),
   sortOrder: z.number().int().min(0).optional().default(0),
 });
 
 export const UpdateYearBody = z.object({
   title: z.string().max(100).optional(),
-  isOpen: z.boolean().optional(),
+  isUploadEnabled: z.boolean().optional(),
   sortOrder: z.number().int().min(0).optional(),
 });
 

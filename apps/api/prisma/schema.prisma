@@ -70,7 +70,7 @@ model Year {
   id        String   @id @default(uuid())
   year      Int      @unique
   title     String   @default("")
-  isOpen    Boolean  @default(true) @map("is_open")
+  isUploadEnabled Boolean  @default(true) @map("is_upload_enabled")
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

@@ -61,7 +61,7 @@ describe('CreateYearBody', () => {
     expect(result).toEqual({
       year: 2025,
       title: '',
-      isOpen: true,
+      isUploadEnabled: true,
       sortOrder: 0,
     });
   });
@@ -70,12 +70,12 @@ describe('CreateYearBody', () => {
     const result = CreateYearBody.parse({
       year: 2026,
       title: '졸업전시',
-      isOpen: false,
+      isUploadEnabled: false,
       sortOrder: 5,
     });
     expect(result.year).toBe(2026);
     expect(result.title).toBe('졸업전시');
-    expect(result.isOpen).toBe(false);
+    expect(result.isUploadEnabled).toBe(false);
     expect(result.sortOrder).toBe(5);
   });
 
@@ -116,7 +116,7 @@ describe('UpdateYearBody', () => {
     const result = UpdateYearBody.parse({ title: '수정', sortOrder: 3 });
     expect(result.title).toBe('수정');
     expect(result.sortOrder).toBe(3);
-    expect(result.isOpen).toBeUndefined();
+    expect(result.isUploadEnabled).toBeUndefined();
   });
 });
 

@@ -31,6 +31,12 @@
 
 import { PrismaClient } from '@prisma/client';
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+
+if (process.env.NODE_ENV === 'production') {
+  console.error('ERROR: seed must not run in production');
+  process.exit(1);
+}
 
 const prisma = new PrismaClient();
 
@@ -49,18 +55,19 @@ async function seedTestAdmin() {
   });
   console.log('User:', user.id, user.email, `(${user.role})`);
 
-  // 기존 테스트 세션 삭제 후 재생성
-  await prisma.authSession.deleteMany({ where: { id: 'test-session-token' } });
+  // 기존 세션 삭제 후 랜덤 토큰으로 재생성
+  await prisma.authSession.deleteMany({ where: { userId: user.id } });
+  const sessionId = randomUUID();
   const session = await prisma.authSession.create({
     data: {
-      id: 'test-session-token',
+      id: sessionId,
       userId: user.id,
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30일
     },
   });
   console.log('Session:', session.id, '(30일 유효)');
 
-  return user;
+  return { user, sessionId };
 }
 
 // ── 테스트 데이터 생성 ────────────────────────────────
@@ -69,7 +76,7 @@ async function seedTestData(creatorId: string) {
   const year = await prisma.year.upsert({
     where: { year: 2026 },
     update: {},
-    create: { year: 2026, title: '2026 졸업작품전', isOpen: true },
+    create: { year: 2026, title: '2026 졸업작품전', isUploadEnabled: true },
   });
 
   const existing = await prisma.project.findUnique({
@@ -105,7 +112,7 @@ async function seedTestData(creatorId: string) {
 interface ImportYear {
   year: number;
   title?: string;
-  isOpen?: boolean;
+  isUploadEnabled?: boolean;
 }
 
 interface ImportMember {
@@ -153,8 +160,8 @@ async function importFromJson(filePath: string, creatorId: string) {
     for (const y of data.years) {
       const created = await prisma.year.upsert({
         where: { year: y.year },
-        update: { title: y.title ?? '', isOpen: y.isOpen ?? true },
-        create: { year: y.year, title: y.title ?? '', isOpen: y.isOpen ?? true },
+        update: { title: y.title ?? '', isUploadEnabled: y.isUploadEnabled ?? true },
+        create: { year: y.year, title: y.title ?? '', isUploadEnabled: y.isUploadEnabled ?? true },
       });
       yearMap.set(y.year, created.id);
       console.log(`연도: ${y.year} (${created.id})`);
@@ -172,7 +179,7 @@ async function importFromJson(filePath: string, creatorId: string) {
         const y = await prisma.year.upsert({
           where: { year: p.year },
           update: {},
-          create: { year: p.year, isOpen: true },
+          create: { year: p.year, isUploadEnabled: true },
         });
         yearMap.set(p.year, y.id);
       }
@@ -235,13 +242,13 @@ async function main() {
   console.log('━━━ PCU Graduation DB Seed ━━━\n');
 
   // 항상 테스트 ADMIN 생성
-  const admin = await seedTestAdmin();
+  const { user: admin, sessionId } = await seedTestAdmin();
   console.log('');
 
   if (importIndex !== -1 && args[importIndex + 1]) {
     // JSON 파일에서 데이터 임포트
     const filePath = args[importIndex + 1];
-    console.log(`📂 "${filePath}"에서 데이터 임포트 중...\n`);
+    console.log(`"${filePath}"에서 데이터 임포트 중...\n`);
     await importFromJson(filePath, admin.id);
   } else {
     // 테스트 데이터 생성
@@ -250,9 +257,9 @@ async function main() {
   }
 
   console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('세션 쿠키 값: test-session-token');
+  console.log(`세션 쿠키 값: ${sessionId}`);
   console.log('브라우저 콘솔에서 로그인:');
-  console.log('document.cookie = "sid=test-session-token; path=/; secure; samesite=none"');
+  console.log(`document.cookie = "sid=${sessionId}; path=/; secure; samesite=none"`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 }
 

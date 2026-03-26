@@ -59,14 +59,3 @@ export function requireRole(...roles: UserRole[]) {
     }
   };
 }
-
-export function canEditProject(
-  request: FastifyRequest,
-  project: { creatorId: string; status: string },
-): void {
-  const user = request.currentUser;
-  if (!user) throw unauthorized();
-  if (user.role === 'ADMIN' || user.role === 'OPERATOR') return;
-  if (project.creatorId !== user.id) throw forbidden('Not project owner');
-  if (project.status !== 'DRAFT') throw forbidden('Cannot edit non-draft project');
-}

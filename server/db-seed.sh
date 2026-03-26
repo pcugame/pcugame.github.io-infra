@@ -226,7 +226,7 @@ do_add_project() {
     {
       "year": ${year},
       "title": "${year_title_escaped}",
-      "isOpen": ${is_open}
+      "isUploadEnabled": ${is_open}
     }
   ],
   "projects": [

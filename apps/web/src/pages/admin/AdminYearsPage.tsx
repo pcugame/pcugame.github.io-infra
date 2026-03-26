@@ -31,7 +31,7 @@ export default function AdminYearsPage() {
     defaultValues: {
       year: new Date().getFullYear(),
       title: '',
-      isOpen: true,
+      isUploadEnabled: true,
       sortOrder: 0,
     },
   });
@@ -41,7 +41,7 @@ export default function AdminYearsPage() {
       adminYearApi.create({
         year: data.year,
         title: data.title || undefined,
-        isOpen: data.isOpen,
+        isUploadEnabled: data.isUploadEnabled,
         sortOrder: data.sortOrder,
       }),
     onSuccess: () => {
@@ -87,7 +87,7 @@ export default function AdminYearsPage() {
           </div>
           <div className="form-field form-field--checkbox">
             <label>
-              <input type="checkbox" {...regCreate('isOpen')} />
+              <input type="checkbox" {...regCreate('isUploadEnabled')} />
               업로드 허용
             </label>
           </div>
@@ -172,7 +172,7 @@ function YearRow({
     resolver: zodResolver(UpdateYearSchema),
     defaultValues: {
       title: year.title ?? '',
-      isOpen: year.isOpen,
+      isUploadEnabled: year.isUploadEnabled,
       sortOrder: year.sortOrder,
     },
   });
@@ -181,7 +181,7 @@ function YearRow({
     mutationFn: (data: UpdateYearInput) =>
       adminYearApi.update(year.id, {
         title: data.title || undefined,
-        isOpen: data.isOpen,
+        isUploadEnabled: data.isUploadEnabled,
         sortOrder: data.sortOrder,
       }),
     onSuccess: () => onSaved(),
@@ -192,7 +192,7 @@ function YearRow({
       <tr>
         <td>{year.year}</td>
         <td>{year.title ?? '-'}</td>
-        <td>{year.isOpen ? '허용' : '잠금'}</td>
+        <td>{year.isUploadEnabled ? '허용' : '잠금'}</td>
         <td>{year.sortOrder}</td>
         <td>{year.projectCount}</td>
         <td>
@@ -212,7 +212,7 @@ function YearRow({
       </td>
       <td>
         <label>
-          <input type="checkbox" {...register('isOpen')} />
+          <input type="checkbox" {...register('isUploadEnabled')} />
         </label>
       </td>
       <td>

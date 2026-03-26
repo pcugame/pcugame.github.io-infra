@@ -12,6 +12,9 @@ import { adminRoutes } from './modules/admin/admin.routes.js';
 import { assetsRoutes } from './modules/assets/assets.routes.js';
 import { AppError } from './shared/errors.js';
 import type { ApiError } from './shared/http.js';
+import { prisma } from './lib/prisma.js';
+import { promises as fsp } from 'node:fs';
+import path from 'node:path';
 
 export async function buildApp() {
 	const app = Fastify({
@@ -25,9 +28,33 @@ export async function buildApp() {
 	await registerMultipart(app);
 	await registerAuth(app);
 
-	// Health check
+	// Health check — DB ping + storage write test
 	app.get('/api/health', async (_req, reply) => {
-		reply.send({ ok: true, timestamp: new Date().toISOString() });
+		const checks: Record<string, 'ok' | 'fail'> = {};
+
+		// DB connectivity
+		try {
+			await prisma.$queryRaw`SELECT 1`;
+			checks.db = 'ok';
+		} catch {
+			checks.db = 'fail';
+		}
+
+		// Storage directories writable
+		const cfg = env();
+		for (const dir of [cfg.UPLOAD_ROOT_PUBLIC, cfg.UPLOAD_ROOT_PROTECTED]) {
+			const probe = path.join(dir, `.healthcheck-${process.pid}`);
+			try {
+				await fsp.writeFile(probe, '');
+				await fsp.unlink(probe);
+				checks[`storage:${path.basename(dir)}`] = 'ok';
+			} catch {
+				checks[`storage:${path.basename(dir)}`] = 'fail';
+			}
+		}
+
+		const ok = Object.values(checks).every((v) => v === 'ok');
+		reply.status(ok ? 200 : 503).send({ ok, timestamp: new Date().toISOString(), checks });
 	});
 
 	// Routes

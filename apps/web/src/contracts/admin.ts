@@ -1,19 +1,19 @@
 // ── Admin API 타입 ───────────────────────────────────────────
 
-import type { DownloadPolicy, ProjectStatus } from './enums';
+import type { AssetKind, DownloadPolicy, ProjectStatus } from './enums';
 
 // ── Year ─────────────────────────────────────────────────────
 
 export type CreateYearRequest = {
   year: number;
   title?: string;
-  isOpen?: boolean;
+  isUploadEnabled?: boolean;
   sortOrder?: number;
 };
 
 export type UpdateYearRequest = {
   title?: string;
-  isOpen?: boolean;
+  isUploadEnabled?: boolean;
   sortOrder?: number;
 };
 
@@ -21,25 +21,12 @@ export type AdminYearItem = {
   id: string;
   year: number;
   title?: string;
-  isOpen: boolean;
+  isUploadEnabled: boolean;
   sortOrder: number;
   projectCount: number;
 };
 
 // ── Project ──────────────────────────────────────────────────
-
-export type CreateProjectRequest = {
-  year: number;
-  title: string;
-  summary?: string;
-  description?: string;
-  youtubeUrl?: string;
-  members: { name: string; studentId: string; sortOrder?: number }[];
-  status?: 'DRAFT' | 'PUBLISHED';
-  posterAssetId?: string;
-  imageAssetIds?: string[];
-  gameAssetId?: string;
-};
 
 export type UpdateProjectRequest = {
   title?: string;
@@ -77,7 +64,7 @@ export type AdminProjectDetail = {
   members: { id: string; name: string; studentId: string; sortOrder: number }[];
   assets: {
     id: string;
-    kind: string;
+    kind: AssetKind;
     url: string;
     originalName: string;
     size: number;

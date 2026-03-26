@@ -30,7 +30,7 @@ for (const file of YEAR_FILES) {
   years.push({
     year,
     title: `${year} 졸업작품전`,
-    isOpen: false,
+    isUploadEnabled: false,
   });
 
   const raw = JSON.parse(readFileSync(join(__dirname, file), 'utf-8'));

@@ -16,12 +16,14 @@ const envSchema = z
     GOOGLE_CLIENT_IDS: z
       .string()
       .min(1, 'GOOGLE_CLIENT_IDS must not be empty — OAuth login will not work without at least one client ID')
-      .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
+      .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean))
+      .refine((arr) => arr.length > 0, 'GOOGLE_CLIENT_IDS must contain at least one valid client ID'),
     ALLOWED_GOOGLE_HD: z.string().default(''),
     CORS_ALLOWED_ORIGINS: z
       .string()
       .min(1, 'CORS_ALLOWED_ORIGINS must not be empty — the server needs at least one allowed origin')
-      .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
+      .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean))
+      .refine((arr) => arr.length > 0, 'CORS_ALLOWED_ORIGINS must contain at least one valid origin'),
     API_PUBLIC_URL: z.string().url(),
     WEB_PUBLIC_URL: z.string().url(),
     UPLOAD_ROOT_PROTECTED: z.string().default('/app/storage/protected'),

@@ -2,9 +2,11 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import type { AssetKind } from '@prisma/client';
 import { env } from '../../../config/env.js';
+import { logger } from '../../../lib/logger.js';
 import { generateStorageKey, buildStoragePath } from '../../../shared/storage-path.js';
 import { validateFile } from './file-validator.js';
 import { processImage } from './image-processing.js';
+import { moveFile } from './move-file.js';
 import type { SavedFile } from './upload-types.js';
 
 interface CommittedFile {
@@ -94,7 +96,7 @@ export class UploadPipeline {
     const permanentPath = buildStoragePath(root, storageKey);
 
     await fsp.mkdir(path.dirname(permanentPath), { recursive: true });
-    await fsp.rename(finalTmpPath, permanentPath);
+    await moveFile(finalTmpPath, permanentPath);
 
     // Track the committed file for rollback, remove moved path from temp
     this.committedFiles.push({ permanentPath, storageKey });
@@ -125,7 +127,7 @@ export class UploadPipeline {
       try {
         await fsp.unlink(f.permanentPath);
       } catch (err) {
-        console.error(`[upload] rollback cleanup failed for ${f.permanentPath}:`, err);
+        logger.error({ err, path: f.permanentPath }, 'Upload rollback cleanup failed');
       }
     }
     this.committedFiles = [];

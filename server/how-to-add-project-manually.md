@@ -115,7 +115,7 @@ YouTube URL [선택]: https://www.youtube.com/watch?v=example123
     {
       "year": 2025,
       "title": "2025 게임학과 졸업작품전",
-      "isOpen": true
+      "isUploadEnabled": true
     }
   ],
   "projects": [
@@ -197,7 +197,7 @@ YouTube URL [선택]: https://www.youtube.com/watch?v=example123
     {
       "year": 2025,
       "title": "2025 게임학과 졸업작품전",
-      "isOpen": true
+      "isUploadEnabled": true
     }
   ],
   "projects": [

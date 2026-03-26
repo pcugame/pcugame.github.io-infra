@@ -177,6 +177,50 @@ do_up() {
   # Verify API container is actually running
   verify_running "$API_CONTAINER" "API"
 
+  # Wait for API health check (DB + storage)
+  echo "Waiting for API health check..."
+  local api_elapsed=0
+  while (( api_elapsed < HEALTHCHECK_TIMEOUT )); do
+    if podman exec "$API_CONTAINER" wget -qO- http://localhost:4000/api/health 2>/dev/null | grep -q '"ok":true'; then
+      echo "API health check passed! (${api_elapsed}s)"
+      break
+    fi
+    sleep 2
+    api_elapsed=$((api_elapsed + 2))
+  done
+  if (( api_elapsed >= HEALTHCHECK_TIMEOUT )); then
+    echo "WARNING: API health check did not pass within ${HEALTHCHECK_TIMEOUT}s"
+    podman logs "$API_CONTAINER" --tail 30 2>/dev/null || true
+  fi
+
+  # ── Generate systemd service with restart delay ──
+  echo "Generating systemd service for pod..."
+  local systemd_dir="$HOME/.config/systemd/user"
+  mkdir -p "$systemd_dir"
+  podman generate systemd --name "$POD_NAME" --files --new \
+    --restart-policy=on-failure \
+    -t 10 > /dev/null 2>&1 || true
+
+  # Move generated files into systemd user directory
+  for f in pod-${POD_NAME}.service container-*.service; do
+    [[ -f "$f" ]] && mv -f "$f" "$systemd_dir/"
+  done
+
+  # Patch pod service with restart delay and burst limits
+  local pod_service="$systemd_dir/pod-${POD_NAME}.service"
+  if [[ -f "$pod_service" ]]; then
+    sed -i '/^\[Service\]/a RestartSec=15' "$pod_service"
+    sed -i '/^\[Unit\]/a StartLimitBurst=10\nStartLimitIntervalSec=300' "$pod_service"
+    echo "Patched $pod_service with RestartSec=15, StartLimitBurst=10, StartLimitIntervalSec=300"
+  else
+    echo "WARNING: $pod_service not found, skipping restart-delay patch"
+  fi
+
+  # Reload and enable
+  systemctl --user daemon-reload
+  systemctl --user enable "pod-${POD_NAME}.service" 2>/dev/null || true
+  echo "Systemd service enabled for pod '$POD_NAME'."
+
   echo ""
   echo "=== Deploy complete ==="
   podman pod ps --filter "name=$POD_NAME"
