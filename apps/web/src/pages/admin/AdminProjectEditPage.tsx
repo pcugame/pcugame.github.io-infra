@@ -22,6 +22,12 @@ import { buildAssetFormData } from '../../lib/utils';
 import { LoadingSpinner, ErrorMessage } from '../../components/common';
 import { useMe } from '../../features/auth';
 
+const STATUS_LABELS: Record<string, string> = {
+  DRAFT: '초안',
+  PUBLISHED: '공개',
+  ARCHIVED: '보관',
+};
+
 export default function AdminProjectEditPage() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
@@ -252,13 +258,7 @@ export default function AdminProjectEditPage() {
           <legend>공개 상태</legend>
           <p>
             현재 상태:{' '}
-            <strong>
-              {project.status === 'DRAFT'
-                ? '초안'
-                : project.status === 'PUBLISHED'
-                  ? '공개'
-                  : '보관'}
-            </strong>
+            <strong>{STATUS_LABELS[project.status]}</strong>
           </p>
           <div className="form-actions">
             {project.status !== 'PUBLISHED' && (
@@ -414,42 +414,24 @@ export default function AdminProjectEditPage() {
 
         <div className="asset-upload-section">
           <h4>자산 추가</h4>
-          <div className="form-field">
-            <label>이미지 추가</label>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleAddAsset('IMAGE', f);
-                e.target.value = '';
-              }}
-            />
-          </div>
-          <div className="form-field">
-            <label>포스터 교체</label>
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleAddAsset('POSTER', f);
-                e.target.value = '';
-              }}
-            />
-          </div>
-          <div className="form-field">
-            <label>게임 파일 (ZIP)</label>
-            <input
-              type="file"
-              accept=".zip"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleAddAsset('GAME', f);
-                e.target.value = '';
-              }}
-            />
-          </div>
+          {([
+            { label: '이미지 추가', kind: 'IMAGE', accept: 'image/jpeg,image/png,image/webp' },
+            { label: '포스터 교체', kind: 'POSTER', accept: 'image/jpeg,image/png,image/webp' },
+            { label: '게임 파일 (ZIP)', kind: 'GAME', accept: '.zip' },
+          ] as const).map(({ label, kind, accept }) => (
+            <div key={kind} className="form-field">
+              <label>{label}</label>
+              <input
+                type="file"
+                accept={accept}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleAddAsset(kind, f);
+                  e.target.value = '';
+                }}
+              />
+            </div>
+          ))}
           {addAssetMutation.error && (
             <p className="field-error">{getApiErrorMessage(addAssetMutation.error)}</p>
           )}

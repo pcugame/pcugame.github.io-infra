@@ -1,18 +1,18 @@
 import { useMe, useLogout } from '../features/auth';
 import { LoadingSpinner } from '../components/common';
 
+const ROLE_LABELS: Record<string, string> = {
+  USER: '일반 사용자',
+  OPERATOR: '운영자',
+  ADMIN: '관리자',
+};
+
 export default function MePage() {
   const { user, isLoading } = useMe();
   const logout = useLogout();
 
   if (isLoading) return <LoadingSpinner />;
   if (!user) return null;
-
-  const roleLabels: Record<string, string> = {
-    USER: '일반 사용자',
-    OPERATOR: '운영자',
-    ADMIN: '관리자',
-  };
 
   return (
     <div className="me-page">
@@ -27,7 +27,7 @@ export default function MePage() {
           <dd>{user.email}</dd>
 
           <dt>권한</dt>
-          <dd>{roleLabels[user.role] ?? user.role}</dd>
+          <dd>{ROLE_LABELS[user.role] ?? user.role}</dd>
         </dl>
 
         <button
