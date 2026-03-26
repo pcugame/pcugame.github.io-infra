@@ -593,7 +593,7 @@ a:hover {
   color: var(--color-secondary);
 }
 
-/* ── Year List ────────────────────────────────────────────────── */
+/* ── Year List (legacy) ───────────────────────────────────────── */
 
 .year-list {
   display: flex;
@@ -630,6 +630,164 @@ a:hover {
   margin-left: auto;
   color: var(--color-secondary);
   font-size: 0.9rem;
+}
+
+/* ── Years Landing Page (unified with home) ──────────────────── */
+
+.years-landing {
+  background: var(--h-bg);
+}
+
+.years-hero {
+  position: relative;
+  padding: 6rem 0 3rem;
+  text-align: center;
+  overflow: hidden;
+}
+
+.years-hero__bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.years-hero__glow {
+  position: absolute;
+  top: -40%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 400px;
+  background: radial-gradient(ellipse, var(--h-primary-glow) 0%, transparent 70%);
+  border-radius: 50%;
+}
+
+.years-hero__title {
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: var(--h-text);
+  letter-spacing: -0.03em;
+  margin: 0.5rem 0;
+}
+
+.years-hero__desc {
+  font-size: 1.05rem;
+  color: var(--h-text-muted);
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+.years-body {
+  padding: 0 0 5rem;
+}
+
+.years-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--h-border);
+  border-radius: 12px;
+  overflow: hidden;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.years-card {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 1.5rem 2rem;
+  background: var(--h-surface);
+  text-decoration: none;
+  color: var(--h-text);
+  transition: background 0.15s;
+  border-bottom: 1px solid var(--h-border);
+}
+
+.years-card:last-child {
+  border-bottom: none;
+}
+
+.years-card:hover {
+  background: var(--h-surface-tint);
+  text-decoration: none;
+  color: var(--h-text);
+}
+
+.years-card__index {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--h-text-muted);
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+  min-width: 1.5rem;
+}
+
+.years-card__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.years-card__year {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: var(--h-primary);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.years-card__title {
+  font-size: 0.85rem;
+  color: var(--h-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.years-card__count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--h-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.years-card__arrow {
+  font-size: 1.1rem;
+  color: var(--h-text-muted);
+  transition: transform 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.years-card:hover .years-card__arrow {
+  transform: translateX(4px);
+  color: var(--h-primary);
+}
+
+[data-theme='dark'] .years-card:hover {
+  background: #162050;
+}
+
+@media (max-width: 640px) {
+  .years-hero {
+    padding: 4rem 0 2rem;
+  }
+
+  .years-hero__title {
+    font-size: 1.8rem;
+  }
+
+  .years-card {
+    padding: 1.25rem 1.25rem;
+    gap: 1rem;
+  }
+
+  .years-card__year {
+    font-size: 1.25rem;
+  }
 }
 
 /* ── Project Grid ─────────────────────────────────────────────── */
