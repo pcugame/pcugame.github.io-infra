@@ -11,6 +11,11 @@ export default function YearProjectsPage() {
   const year = Number(yearParam);
   const [search, setSearch] = useState('');
 
+  const { data: yearsData } = useQuery({
+    queryKey: queryKeys.publicYears,
+    queryFn: publicApi.getYears,
+  });
+
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: queryKeys.yearProjects(year),
     queryFn: () => publicApi.getYearProjects(year),
@@ -20,6 +25,9 @@ export default function YearProjectsPage() {
   if (isNaN(year)) {
     return <EmptyState message="잘못된 연도입니다." />;
   }
+
+  const yearInfo = yearsData?.items.find((y) => y.year === year);
+  const pageTitle = yearInfo?.title || `${year}년도 졸업전시회`;
 
   const filtered = data?.items.filter(
     (p) =>
@@ -31,8 +39,8 @@ export default function YearProjectsPage() {
     <div className="archive-page">
       <div className="archive-page__header">
         <Link to="/years" className="archive-back">← 연도 목록</Link>
-        <h1 className="archive-page__title">게임 아카이브</h1>
-        <p className="archive-page__subtitle">{year}년 졸업 작품 목록을 확인하세요.</p>
+        <h1 className="archive-page__title">{pageTitle}</h1>
+        <p className="archive-page__subtitle">{year}년 작품 목록을 확인하세요.</p>
       </div>
 
       {isLoading && <LoadingSpinner />}

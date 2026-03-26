@@ -10,7 +10,9 @@ export function Header() {
     <header className="header">
       <div className="header__inner container">
         <Link to="/" className="header__logo">
-          PCU 게임공학과 졸업작품 전시
+          <img src="/pcu_signature.svg" alt="배재대학교" className="header__logo-sig" draggable={false} />
+          <span className="header__logo-divider" aria-hidden="true" />
+          <span className="header__logo-dept">소프트웨어공학부<br />게임공학전공</span>
         </Link>
 
         <nav className="header__nav">

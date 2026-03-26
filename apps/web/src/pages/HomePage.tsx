@@ -30,8 +30,8 @@ export default function HomePage() {
   return (
     <div className="home-landing">
 
-      {/* ── Section 1: Hero ───────────────────────────────────── */}
-      <section className="home-hero">
+      {/* ── Section 1: Compact Hero + Year Archive ──────────── */}
+      <section className="home-hero home-hero--compact">
         <div className="home-hero__bg" aria-hidden="true">
           <div className="home-hero__grid" />
           <div className="home-hero__glow home-hero__glow--1" />
@@ -40,32 +40,41 @@ export default function HomePage() {
         <div className="home-hero__inner container">
           <div className="home-hero__text">
             <p className="home-hero__eyebrow">
-              Paichai University · Game Engineering
+              Paichai University · Video Game Engineering
             </p>
             <h1 className="home-hero__title">
-              우리들의<br />
-              게임 프로젝트<br />
-              <span className="home-hero__accent">아카이브</span>
+              배재대학교 게임공학과<br />
+              졸업작품 <span className="home-hero__accent">아카이브</span>
             </h1>
             <p className="home-hero__desc">
-              배재대학교 게임공학과 학생들의 아름다운 게임들을 만나보세요.
+              연도를 선택하여 게임공학과 졸업작품을 탐색하세요.
             </p>
-            <div className="home-hero__ctas">
-              <Link to="/years" className="home-btn home-btn--primary">
-                최신 졸업 작품 보러가기
-              </Link>
-              <a href="#home-about" className="home-btn home-btn--ghost">
-                전시 소개 ↓
-              </a>
-            </div>
           </div>
-          <div className="home-hero__characters" aria-hidden="true">
-            <div className="home-hero__char home-hero__char--male">
-              <img src="/pcu_game_character_male.png" alt="" draggable={false} />
-            </div>
-            <div className="home-hero__char home-hero__char--female">
-              <img src="/pcu_game_character_female.png" alt="" draggable={false} />
-            </div>
+
+          {/* Year cards — 히어로 내부에 바로 배치 */}
+          <div className="home-hero__years">
+            {yearsLoading && <LoadingSpinner />}
+            {yearsError && <ErrorMessage error={yearsError} onReset={yearsRefetch} />}
+
+            {yearsData && (
+              <div className="home-year-grid">
+                {publishedYears.map((y) => (
+                  <Link
+                    key={y.id}
+                    to={`/years/${y.year}`}
+                    className="home-year-card"
+                  >
+                    <span className="home-year-card__year">{y.year}</span>
+                    {y.title && (
+                      <span className="home-year-card__title">{y.title}</span>
+                    )}
+                    <span className="home-year-card__count">
+                      {y.projectCount}개 작품
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -168,52 +177,7 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* ── Section 4: Year Archive ───────────────────────────── */}
-      <section className="home-archive" aria-labelledby="home-archive-heading">
-        <div className="container">
-          <div className="home-section-header">
-            <div>
-              <p className="home-eyebrow">Archive</p>
-              <h2 id="home-archive-heading" className="home-section-title">
-                연도별 아카이브
-              </h2>
-            </div>
-            <Link to="/years" className="home-link-more">
-              전체 연도 →
-            </Link>
-          </div>
-
-          {yearsLoading && <LoadingSpinner />}
-          {yearsError && <ErrorMessage error={yearsError} onReset={yearsRefetch} />}
-
-          {yearsData && (
-            <div className="home-archive__grid">
-              {publishedYears.map((y, i) => (
-                <Link
-                  key={y.id}
-                  to={`/years/${y.year}`}
-                  className="home-archive-card"
-                >
-                  <span className="home-archive-card__index">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <div className="home-archive-card__main">
-                    <span className="home-archive-card__year">{y.year}</span>
-                    {y.title && (
-                      <span className="home-archive-card__title">{y.title}</span>
-                    )}
-                  </div>
-                  <span className="home-archive-card__count">
-                    {y.projectCount}개 작품
-                  </span>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ── Section 5: About ──────────────────────────────────── */}
+      {/* ── Section 4: About ──────────────────────────────────── */}
       <section
         className="home-about"
         id="home-about"
@@ -257,7 +221,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ── Section 6: Bottom CTA ─────────────────────────────── */}
+      {/* ── Section 5: Bottom CTA ─────────────────────────────── */}
       <section className="home-cta" aria-label="작품 탐색 유도">
         <div className="home-cta__bg-pattern" aria-hidden="true" />
         <div className="container">
