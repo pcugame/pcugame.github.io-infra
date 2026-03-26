@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # db-seed.sh — 서버에서 테스트 DB 적재 / 작품 수동 추가 / DB 점검
+# 위치: apps/db/db-seed.sh (프로덕션 서버에서 Podman 컨테이너 대상 실행)
 # Usage:
 #   ./db-seed.sh seed
 #   ./db-seed.sh import-json /path/to/data.json

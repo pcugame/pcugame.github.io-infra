@@ -11,6 +11,8 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
+    "db:seed": "tsx ../db/seed.ts",
+    "db:seed:import": "tsx ../db/seed.ts --import ../db/legacy-import.json",
     "lint": "tsc --noEmit",
     "test": "vitest run"
   },
