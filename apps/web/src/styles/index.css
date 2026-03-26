@@ -2585,7 +2585,7 @@ fieldset.status-section legend {
 
 .archive-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, min(1fr, 420px)));
   gap: 1.5rem;
 }
 
@@ -2614,6 +2614,7 @@ fieldset.status-section legend {
 
 .archive-card__image {
   aspect-ratio: 16 / 10;
+  max-height: 220px;
   overflow: hidden;
   background: #e8eeff;
   flex-shrink: 0;
@@ -2684,7 +2685,7 @@ fieldset.status-section legend {
 
 @media (max-width: 768px) {
   .archive-grid {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, min(1fr, 360px)));
     gap: 1rem;
   }
 }
