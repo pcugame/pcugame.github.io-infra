@@ -531,7 +531,7 @@ function MemberRow({
     <li className="member-list__item">
       <span>
         {member.name} ({member.studentId})
-        <span style={{ color: '#888', fontSize: '0.85em', marginLeft: '0.5rem' }}>
+        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85em', marginLeft: '0.5rem' }}>
           #{member.sortOrder}
         </span>
       </span>

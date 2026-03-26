@@ -12,17 +12,279 @@
   --color-danger: #dc2626;
   --color-danger-hover: #b91c1c;
   --color-secondary: #6b7280;
-  --color-bg: #f9fafb;
-  --color-surface: #ffffff;
-  --color-text: #111827;
-  --color-text-muted: #6b7280;
-  --color-border: #e5e7eb;
+  --color-bg: #f7f9fd;
+  --color-surface: #fdfdff;
+  --color-text: #0f1729;
+  --color-text-muted: #64709b;
+  --color-border: #e2e6f0;
   --color-success: #16a34a;
   --radius: 8px;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1);
   --max-width: 1200px;
   --header-height: 60px;
+}
+
+/* ── Dark Theme — 배재대 브랜드 컬러 기반 ────────────────────── */
+/* PCU Shield Blue: #1a51af  Gold: #d4a234  Navy: #0b1330      */
+
+[data-theme='dark'] {
+  --color-primary: #5b9cf5;           /* PCU blue — 밝은 톤 */
+  --color-primary-hover: #2461d4;     /* PCU button blue */
+  --color-danger: #f87171;
+  --color-danger-hover: #ef4444;
+  --color-secondary: #7b8ab8;         /* navy-tinted muted */
+  --color-bg: #0b1330;                /* PCU deep navy */
+  --color-surface: #111d42;           /* PCU dark surface */
+  --color-text: #e0e7ff;              /* blue-white */
+  --color-text-muted: #7b8ab8;        /* slate-blue */
+  --color-border: #1e3a6e;            /* navy border */
+  --color-success: #34d399;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+/* ── Dark — badges ───────────────────────────────────────────── */
+
+[data-theme='dark'] .badge--draft {
+  background: rgba(212, 162, 52, 0.15);  /* PCU gold tint */
+  color: #e8bc50;
+}
+
+[data-theme='dark'] .badge--published {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+[data-theme='dark'] .badge--archived {
+  background: rgba(123, 138, 184, 0.15);
+  color: #7b8ab8;
+}
+
+/* ── Dark — error box ────────────────────────────────────────── */
+
+[data-theme='dark'] .error-box {
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.25);
+}
+
+/* ── Dark — all form inputs ──────────────────────────────────── */
+
+[data-theme='dark'] input,
+[data-theme='dark'] textarea,
+[data-theme='dark'] select {
+  background: #0a0f25;
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+[data-theme='dark'] input:focus,
+[data-theme='dark'] textarea:focus,
+[data-theme='dark'] select:focus {
+  box-shadow: 0 0 0 3px rgba(36, 97, 212, 0.25);
+}
+
+[data-theme='dark'] input::placeholder,
+[data-theme='dark'] textarea::placeholder {
+  color: #5a6a94;
+}
+
+/* ── Dark — project card ─────────────────────────────────────── */
+
+[data-theme='dark'] .project-card__thumb--empty,
+[data-theme='dark'] .project-card__image {
+  background: #162044;
+}
+
+/* ── Dark — home landing variables ───────────────────────────── */
+
+[data-theme='dark'] .home-landing {
+  --h-bg: #0b1330;
+  --h-surface: #111d42;
+  --h-surface-tint: #142050;
+  --h-primary: #5b9cf5;
+  --h-primary-btn: #2461d4;
+  --h-primary-glow: rgba(36, 97, 212, 0.3);
+  --h-text: #e0e7ff;
+  --h-text-muted: #7b8ab8;
+  --h-border: #1e3a6e;
+  --h-border-light: #162044;
+  --h-dark-bg: #060a1e;
+  --h-dark-surface: #0b1330;
+  --h-cta-bg: #1a51af;
+  --h-shadow: 0 2px 16px rgba(0, 0, 0, 0.4);
+  --h-shadow-md: 0 4px 24px rgba(0, 0, 0, 0.45);
+  --h-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Dark — home hero (hardcoded gradients) ──────────────────── */
+
+[data-theme='dark'] .home-hero {
+  background: linear-gradient(135deg, #0b1330 0%, #111d42 50%, #0b1330 100%);
+}
+
+[data-theme='dark'] .home-hero__grid {
+  background-image: radial-gradient(circle, rgba(26, 81, 175, 0.15) 1px, transparent 1px);
+}
+
+[data-theme='dark'] .home-hero__glow--1 {
+  background: radial-gradient(circle, rgba(36, 97, 212, 0.12) 0%, transparent 70%);
+}
+
+[data-theme='dark'] .home-hero__glow--2 {
+  background: radial-gradient(circle, rgba(212, 162, 52, 0.06) 0%, transparent 70%);
+}
+
+[data-theme='dark'] .home-hero__char--male img {
+  filter: drop-shadow(4px 0 24px rgba(26, 81, 175, 0.2));
+}
+
+[data-theme='dark'] .home-hero__char--female img {
+  filter: drop-shadow(-4px 0 32px rgba(26, 81, 175, 0.25));
+}
+
+/* ── Dark — home buttons (hardcoded colors) ──────────────────── */
+
+[data-theme='dark'] .home-btn--primary:hover {
+  background: #1a51af;
+}
+
+[data-theme='dark'] .home-btn--gold {
+  color: #0b1330;
+}
+
+[data-theme='dark'] .home-btn--gold:hover {
+  color: #0b1330;
+}
+
+[data-theme='dark'] .home-btn--white {
+  background: #111d42;
+  color: #5b9cf5;
+}
+
+[data-theme='dark'] .home-btn--white:hover {
+  background: #1e3a6e;
+  color: #5b9cf5;
+}
+
+[data-theme='dark'] .home-btn--ghost {
+  color: #7b8ab8;
+}
+
+/* ── Dark — home highlight (dark section) ────────────────────── */
+
+[data-theme='dark'] .home-highlight-card__poster {
+  background: #0b1330;
+}
+
+[data-theme='dark'] .home-highlight-card__no-poster {
+  background: linear-gradient(135deg, #0b1330, #060a1e);
+}
+
+/* ── Dark — home archive cards ───────────────────────────────── */
+
+[data-theme='dark'] .home-archive-card:hover {
+  background: #162050;
+}
+
+/* ── Dark — archive page (all hardcoded colors) ──────────────── */
+
+[data-theme='dark'] .archive-page {
+  background: #0b1330;
+}
+
+[data-theme='dark'] .archive-page__header {
+  border-bottom-color: #1e3a6e;
+  background: linear-gradient(180deg, #111d42 0%, #0b1330 100%);
+}
+
+[data-theme='dark'] .archive-back {
+  color: #7b8ab8;
+}
+
+[data-theme='dark'] .archive-back:hover {
+  color: #5b9cf5;
+}
+
+[data-theme='dark'] .archive-page__title {
+  color: #e0e7ff;
+}
+
+[data-theme='dark'] .archive-page__subtitle {
+  color: #7b8ab8;
+}
+
+[data-theme='dark'] .archive-search__input {
+  border-color: #1e3a6e;
+  background: #0a0f25;
+  color: #e0e7ff;
+}
+
+[data-theme='dark'] .archive-search__input:focus {
+  border-color: #2461d4;
+  box-shadow: 0 0 0 3px rgba(36, 97, 212, 0.2);
+}
+
+[data-theme='dark'] .archive-count {
+  color: #7b8ab8;
+}
+
+[data-theme='dark'] .archive-card {
+  background: #111d42;
+  border-color: #1e3a6e;
+  color: #e0e7ff;
+}
+
+[data-theme='dark'] .archive-card:hover {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border-color: rgba(36, 97, 212, 0.4);
+  color: #e0e7ff;
+}
+
+[data-theme='dark'] .archive-card__image {
+  background: #162044;
+}
+
+[data-theme='dark'] .archive-card__placeholder {
+  background: linear-gradient(135deg, #1e3a6e, #111d42);
+  color: rgba(91, 156, 245, 0.15);
+}
+
+[data-theme='dark'] .archive-card__title {
+  color: #e0e7ff;
+}
+
+[data-theme='dark'] .archive-card__summary {
+  color: #7b8ab8;
+}
+
+[data-theme='dark'] .archive-card__members {
+  color: #5a6a94;
+}
+
+/* ── Theme toggle button ─────────────────────────────────────── */
+
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.theme-toggle:hover {
+  background: var(--color-bg);
+  border-color: var(--color-primary);
 }
 
 *,
