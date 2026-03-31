@@ -181,9 +181,14 @@ export default function AdminProjectEditPage() {
 
   return (
     <div className="admin-project-edit-page">
-      <h1>작품 수정: {project.title}</h1>
+      <div className="admin-page-header">
+        <div className="admin-page-header__text">
+          <span className="admin-page-header__eyebrow">Edit Project</span>
+          <h1>작품 수정: {project.title}</h1>
+        </div>
+      </div>
       <p className="edit-meta">
-        슬러그: <code>{project.slug}</code> | 연도: {project.year}
+        슬러그: <code>{project.slug}</code> | 연도: <span className="admin-year-badge">{project.year}</span>
       </p>
 
       {/* ── 기본 정보 폼 ────────────────────────────────────── */}

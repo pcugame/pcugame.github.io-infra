@@ -61,12 +61,17 @@ export default function AdminYearsPage() {
 
   return (
     <div className="admin-years-page">
-      <h1>연도 관리</h1>
+      <div className="admin-page-header">
+        <div className="admin-page-header__text">
+          <span className="admin-page-header__eyebrow">Year Management</span>
+          <h1>연도 관리</h1>
+        </div>
+      </div>
 
       {/* ── 새 연도 생성 ────────────────────────────────────── */}
       <form
         onSubmit={handleCreate((d) => createMutation.mutate(d))}
-        className="year-create-form"
+        className="year-create-form admin-card"
       >
         <h3>새 연도 추가</h3>
         <div className="form-row">
@@ -117,6 +122,7 @@ export default function AdminYearsPage() {
       {years.length === 0 ? (
         <EmptyState message="등록된 연도가 없습니다." />
       ) : (
+        <div className="admin-card">
         <table className="admin-table">
           <thead>
             <tr>
@@ -145,6 +151,7 @@ export default function AdminYearsPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

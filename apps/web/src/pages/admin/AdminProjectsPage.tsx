@@ -35,67 +35,82 @@ export default function AdminProjectsPage() {
       ? projects
       : projects.filter((p) => p.status === statusFilter);
 
+  const statusCounts = {
+    ALL: projects.length,
+    DRAFT: projects.filter((p) => p.status === 'DRAFT').length,
+    PUBLISHED: projects.filter((p) => p.status === 'PUBLISHED').length,
+    ARCHIVED: projects.filter((p) => p.status === 'ARCHIVED').length,
+  };
+
   return (
     <div className="admin-projects-page">
       <div className="admin-page-header">
-        <h1>작품 관리</h1>
+        <div className="admin-page-header__text">
+          <span className="admin-page-header__eyebrow">Project Management</span>
+          <h1>작품 관리</h1>
+        </div>
         <Link to="/admin/projects/new" className="btn btn--primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '0.4rem' }}>
+            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
           새 작품 등록
         </Link>
       </div>
 
-      {/* 상태 필터 */}
-      <div className="filter-bar">
-        <label>상태 필터:</label>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as ProjectStatus | 'ALL')}
-        >
-          <option value="ALL">전체</option>
-          <option value="DRAFT">초안</option>
-          <option value="PUBLISHED">공개</option>
-          <option value="ARCHIVED">보관</option>
-        </select>
+      {/* 상태 필터 탭 */}
+      <div className="admin-filter-tabs">
+        {(['ALL', 'DRAFT', 'PUBLISHED', 'ARCHIVED'] as const).map((s) => (
+          <button
+            key={s}
+            className={`admin-filter-tab ${statusFilter === s ? 'admin-filter-tab--active' : ''}`}
+            onClick={() => setStatusFilter(s)}
+          >
+            {s === 'ALL' ? '전체' : STATUS_LABELS[s]}
+            <span className="admin-filter-tab__count">{statusCounts[s]}</span>
+          </button>
+        ))}
       </div>
 
       {filtered.length === 0 ? (
         <EmptyState message="조건에 맞는 작품이 없습니다." />
       ) : (
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>제목</th>
-              <th>연도</th>
-              <th>상태</th>
-              <th>작성자</th>
-              <th>수정일</th>
-              <th>관리</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((p) => (
-              <tr key={p.id}>
-                <td>{p.title}</td>
-                <td>{p.year}</td>
-                <td>
-                  <span className={`badge ${STATUS_COLORS[p.status]}`}>
-                    {STATUS_LABELS[p.status]}
-                  </span>
-                </td>
-                <td>{p.createdByUserName ?? '-'}</td>
-                <td>{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
-                <td>
-                  <Link
-                    to={`/admin/projects/${p.id}/edit`}
-                    className="btn btn--small btn--secondary"
-                  >
-                    수정
-                  </Link>
-                </td>
+        <div className="admin-card">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>제목</th>
+                <th>연도</th>
+                <th>상태</th>
+                <th>작성자</th>
+                <th>수정일</th>
+                <th>관리</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filtered.map((p) => (
+                <tr key={p.id}>
+                  <td><strong>{p.title}</strong></td>
+                  <td><span className="admin-year-badge">{p.year}</span></td>
+                  <td>
+                    <span className={`badge ${STATUS_COLORS[p.status]}`}>
+                      {STATUS_LABELS[p.status]}
+                    </span>
+                  </td>
+                  <td>{p.createdByUserName ?? '-'}</td>
+                  <td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
+                  <td>
+                    <Link
+                      to={`/admin/projects/${p.id}/edit`}
+                      className="btn btn--small btn--secondary"
+                    >
+                      수정
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

@@ -86,7 +86,12 @@ export default function AdminProjectNewPage() {
 
   return (
     <div className="admin-project-new-page">
-      <h1>새 작품 등록</h1>
+      <div className="admin-page-header">
+        <div className="admin-page-header__text">
+          <span className="admin-page-header__eyebrow">New Project</span>
+          <h1>새 작품 등록</h1>
+        </div>
+      </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="project-form">
         {/* ── 기본 정보 ──────────────────────────────────────── */}

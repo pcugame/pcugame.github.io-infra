@@ -19,6 +19,7 @@ const AdminProjectNewPage = lazy(() => import('../pages/admin/AdminProjectNewPag
 const AdminProjectEditPage = lazy(() => import('../pages/admin/AdminProjectEditPage'));
 const AdminYearsPage = lazy(() => import('../pages/admin/AdminYearsPage'));
 
+
 function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<LoadingSpinner />}>{children}</Suspense>;
 }

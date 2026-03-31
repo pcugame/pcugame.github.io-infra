@@ -8,6 +8,14 @@ import { parseBody, GoogleLoginBody } from '../../shared/validation.js';
 import { generateSessionId, sessionExpiresAt } from '../../shared/session.js';
 import { logger } from '../../lib/logger.js';
 
+// UCM 정책으로 이름 뒤에 학과명이 붙어 오는 경우 제거
+// 예: "송지한소프트웨어공학부" → "송지한", "송지한게임공학과" → "송지한"
+const DEPT_SUFFIXES = /(?:소프트웨어공학부|게임공학전공|게임공학과|컴퓨터공학과|정보통신공학과|공학부|공학과|학부|학과|전공)$/;
+function stripDeptSuffix(name: string): string {
+  const stripped = name.replace(DEPT_SUFFIXES, '');
+  return stripped || name;
+}
+
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   const cfg = env();
   const oauthClient = new OAuth2Client();
@@ -37,17 +45,19 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       throw unauthorized('Email domain not allowed');
     }
 
+    const cleanName = stripDeptSuffix(payload.name ?? '');
+
     const user = await prisma.user.upsert({
       where: { googleSub: payload.sub },
       create: {
         googleSub: payload.sub,
         email: payload.email,
-        name: payload.name ?? '',
+        name: cleanName,
         picture: payload.picture ?? '',
       },
       update: {
         email: payload.email,
-        name: payload.name ?? '',
+        name: cleanName,
         picture: payload.picture ?? '',
       },
     });
