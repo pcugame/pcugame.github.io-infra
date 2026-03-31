@@ -47,12 +47,12 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
   });
 }
 
-export function requireLogin(request: FastifyRequest, _reply: FastifyReply): void {
+export async function requireLogin(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   if (!request.currentUser) throw unauthorized();
 }
 
 export function requireRole(...roles: UserRole[]) {
-  return (request: FastifyRequest, _reply: FastifyReply): void => {
+  return async (request: FastifyRequest, _reply: FastifyReply): Promise<void> => {
     if (!request.currentUser) throw unauthorized();
     if (!roles.includes(request.currentUser.role)) {
       throw forbidden('Insufficient permissions');
