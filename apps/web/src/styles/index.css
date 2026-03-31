@@ -1860,6 +1860,150 @@ fieldset.status-section legend {
   font-size: 0.95rem;
 }
 
+/* ── Hero full variant: 헤더 없이 전체 화면 ─────────────────── */
+
+.home-hero--full {
+  min-height: 100svh;
+  max-height: none;
+}
+
+.home-hero--full .home-hero__inner {
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+  padding-top: 7rem;
+  padding-bottom: 4rem;
+}
+
+.home-hero--full .home-hero__text {
+  align-self: center;
+  text-align: left;
+  max-width: 480px;
+}
+
+.home-hero--full .home-hero__eyebrow {
+  margin-bottom: 1rem;
+}
+
+.home-hero--full .home-hero__title {
+  font-size: clamp(2rem, 4.5vw, 3rem);
+  margin-bottom: 0.75rem;
+}
+
+.home-hero--full .home-hero__desc {
+  margin: 0;
+  max-width: 400px;
+  font-size: 0.95rem;
+}
+
+/* ── Home Top Nav (오버레이, 바 없음) ────────────────────────── */
+
+.home-topnav {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+}
+
+.home-topnav__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
+}
+
+.home-topnav__logo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--h-text);
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.home-topnav__logo:hover {
+  text-decoration: none;
+}
+
+.home-topnav__logo-sig {
+  height: 60px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+.home-topnav__logo-divider {
+  width: 1px;
+  height: 36px;
+  background: var(--h-border);
+  flex-shrink: 0;
+}
+
+.home-topnav__logo-dept {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--h-text);
+  white-space: nowrap;
+}
+
+.home-topnav__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.home-topnav__link {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--h-text-muted);
+  text-decoration: none;
+  padding: 0.4rem 0.6rem;
+  transition: color 0.15s;
+}
+
+.home-topnav__link:hover {
+  color: var(--h-primary);
+  text-decoration: none;
+}
+
+.home-topnav__btn {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--h-primary);
+  text-decoration: none;
+  padding: 0.45rem 1rem;
+  border: 1.5px solid var(--h-primary);
+  border-radius: 50px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.home-topnav__btn:hover {
+  background: var(--h-primary);
+  color: #ffffff;
+  text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  .home-topnav__logo-sig {
+    height: 40px;
+  }
+
+  .home-topnav__logo-divider {
+    height: 28px;
+  }
+
+  .home-topnav__logo-dept {
+    font-size: 0.85rem;
+  }
+
+  .home-hero--full .home-hero__inner {
+    grid-template-columns: 1fr;
+    padding-top: 6rem;
+    padding-bottom: 3rem;
+  }
+}
+
 .home-hero__years {
   width: 100%;
   align-self: end;

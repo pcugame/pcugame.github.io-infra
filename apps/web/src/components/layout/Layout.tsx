@@ -4,15 +4,16 @@ import { Footer } from './Footer';
 
 export function Layout() {
   const { pathname } = useLocation();
-  const isFullWidth = pathname === '/' || pathname.startsWith('/years');
+  const isHome = pathname === '/';
+  const isFullWidth = isHome || pathname.startsWith('/years');
 
   return (
     <div className="layout">
-      <Header />
+      {!isHome && <Header />}
       <main className={isFullWidth ? 'main main--home' : 'main container'}>
         <Outlet />
       </main>
-      <Footer />
+      {!isHome && <Footer />}
     </div>
   );
 }
