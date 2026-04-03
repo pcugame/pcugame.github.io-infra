@@ -21,6 +21,7 @@ import { queryKeys } from '../../lib/query';
 import { buildAssetFormData } from '../../lib/utils';
 import { LoadingSpinner, ErrorMessage } from '../../components/common';
 import { useMe } from '../../features/auth';
+import GameUploadWidget from '../../components/GameUploadWidget';
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: '초안',
@@ -441,6 +442,9 @@ export default function AdminProjectEditPage() {
             <p className="field-error">{getApiErrorMessage(addAssetMutation.error)}</p>
           )}
         </div>
+
+        {/* ── 대용량 게임 파일 (청크 업로드) ──────────────── */}
+        <GameUploadWidget projectId={id!} />
       </fieldset>
     </div>
   );

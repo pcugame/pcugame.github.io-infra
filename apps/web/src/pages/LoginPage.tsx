@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useMe, useLogin } from '../features/auth';
 import { initializeGoogleSignIn } from '../lib/auth';
@@ -11,6 +11,10 @@ export default function LoginPage() {
   const loginMutation = useLogin();
 
   const googleBtnRef = useRef<HTMLDivElement>(null);
+  // mutate 함수는 안정적인 참조이므로 ref에 저장하지 않아도 되지만,
+  // loginMutation 객체 자체는 매 렌더마다 바뀌므로 .mutate만 ref로 잡는다.
+  const mutateRef = useRef(loginMutation.mutate);
+  mutateRef.current = loginMutation.mutate;
 
   // 이미 로그인 상태이면 이전 페이지 또는 홈으로 이동
   useEffect(() => {
@@ -22,18 +26,14 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, navigate, location.state]);
 
-  const handleCredential = useCallback(
-    (credential: string) => {
-      loginMutation.mutate(credential);
-    },
-    [loginMutation],
-  );
-
+  // Google 버튼 초기화 — isAuthenticated가 바뀔 때만 실행
   useEffect(() => {
     if (googleBtnRef.current && !isAuthenticated) {
-      initializeGoogleSignIn(googleBtnRef.current, handleCredential);
+      initializeGoogleSignIn(googleBtnRef.current, (credential: string) => {
+        mutateRef.current(credential);
+      });
     }
-  }, [isAuthenticated, handleCredential]);
+  }, [isAuthenticated]);
 
   // 403 → 학교 도메인 안내
   const errorMessage = loginMutation.error

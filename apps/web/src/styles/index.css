@@ -1373,7 +1373,9 @@ button.archive-card {
 .google-btn-container {
   display: flex;
   justify-content: center;
+  align-items: center;
   margin-bottom: 1rem;
+  min-height: 44px; /* Google 버튼 높이 예약 — 비동기 로드 시 레이아웃 시프트 방지 */
 }
 
 .login-status {

@@ -23,6 +23,16 @@ export function initializeGoogleSignIn(
     return;
   }
 
+  // 이미 로드 중인 스크립트가 있으면 중복 추가하지 않음
+  const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+  if (existing) {
+    // 스크립트 로드 완료를 기다림
+    existing.addEventListener('load', () => {
+      renderButton(buttonElement, onCredential, clientId);
+    });
+    return;
+  }
+
   // 스크립트 동적 로드
   const script = document.createElement('script');
   script.src = 'https://accounts.google.com/gsi/client';

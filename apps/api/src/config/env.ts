@@ -49,6 +49,11 @@ const envSchema = z
     UPLOAD_PRIVILEGED_MAX_FILES: z.coerce.number().int().positive().default(20),
     // Global concurrent upload limit (all users combined)
     UPLOAD_MAX_CONCURRENT: z.coerce.number().int().positive().default(5),
+    // ── Chunked game upload ─────────────────────────────────
+    UPLOAD_CHUNKED_GAME_MAX_MB: z.coerce.number().positive().default(5120),   // 5 GB
+    UPLOAD_CHUNK_SIZE_MB: z.coerce.number().positive().default(10),           // 10 MB per chunk
+    UPLOAD_STAGING_ROOT: z.string().default('/app/storage/staging'),
+    UPLOAD_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(1440), // 24 hours
   })
 ;
 
