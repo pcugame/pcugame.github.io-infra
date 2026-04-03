@@ -4,6 +4,7 @@ import { adminProjectRoutes } from './admin-project.routes.js';
 import { adminMemberRoutes } from './admin-member.routes.js';
 import { adminGameUploadRoutes } from './admin-game-upload.routes.js';
 import { adminBannedIpRoutes } from './admin-banned-ip.routes.js';
+import { adminSettingsRoutes } from './admin-settings.routes.js';
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
 	await app.register(adminYearRoutes);
@@ -11,4 +12,5 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 	await app.register(adminMemberRoutes);
 	await app.register(adminGameUploadRoutes);
 	await app.register(adminBannedIpRoutes);
+	await app.register(adminSettingsRoutes);
 }

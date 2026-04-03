@@ -111,6 +111,25 @@ export interface BannedIpItem {
   createdAt: string;
 }
 
+// ── Site Settings ───────────────────────────────────────────
+
+export interface SiteSettingsData {
+  maxGameFileMb: number;
+  maxChunkSizeMb: number;
+}
+
+export const adminSettingsApi = {
+  get() {
+    return api.get<SiteSettingsData>('/api/admin/settings');
+  },
+
+  update(body: Partial<SiteSettingsData>) {
+    return api.patch<SiteSettingsData>('/api/admin/settings', body);
+  },
+};
+
+// ── Banned IPs ──────────────────────────────────────────────
+
 export const adminBannedIpApi = {
   list() {
     return api.get<{ items: BannedIpItem[] }>('/api/admin/banned-ips');

@@ -25,6 +25,7 @@ import { generateStorageKey, buildStoragePath } from '../../shared/storage-path.
 import { logger } from '../../lib/logger.js';
 import { getUploadLimits } from '../../shared/upload-limits.js';
 import { detectFileType, isAllowedGameType } from '../../shared/file-signature.js';
+import { getSiteSettings } from '../../shared/site-settings.js';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -68,8 +69,8 @@ async function loadSession(sessionId: string, userId: string, userRole: string) 
 
 export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void> {
 	const cfg = env();
-	const chunkSizeBytes = cfg.UPLOAD_CHUNK_SIZE_MB * 1024 * 1024;
-	const maxGameBytes = cfg.UPLOAD_CHUNKED_GAME_MAX_MB * 1024 * 1024;
+	// Env values are used as fallback / bodyLimit ceiling only.
+	// Actual limits are read from DB (SiteSetting) per-request.
 
 	// Register octet-stream parser for this plugin scope only
 	app.addContentTypeParser(
@@ -97,6 +98,11 @@ export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void>
 			}
 
 			const { originalName, totalBytes } = body;
+
+			// Read dynamic limit from DB (admin-configurable, no restart needed)
+			const settings = await getSiteSettings();
+			const maxGameBytes = settings.maxGameFileMb * 1024 * 1024;
+			const chunkSizeBytes = settings.maxChunkSizeMb * 1024 * 1024;
 
 			// Apply role-based game size limit (not just global max)
 			const roleLimits = getUploadLimits(request.currentUser!.role);
@@ -160,7 +166,8 @@ export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void>
 		'/game-upload-sessions/:sessionId/chunks/:index',
 		{
 			preHandler: requireLogin,
-			bodyLimit: chunkSizeBytes + 4096, // chunk + small overhead
+			// Fixed ceiling — actual per-chunk validation uses session.chunkSizeBytes
+			bodyLimit: 100 * 1024 * 1024, // 100 MB ceiling for any chunk size setting
 		},
 		async (request, reply) => {
 			const user = request.currentUser!;

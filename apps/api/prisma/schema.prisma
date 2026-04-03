@@ -216,3 +216,14 @@ model BannedIp {
 
   @@map("banned_ips")
 }
+
+/// Runtime-configurable site settings (single row, id = "default").
+/// Read from memory cache; updated via admin API without server restart.
+model SiteSetting {
+  id              String   @id @default("default")
+  maxGameFileMb   Int      @default(5120) @map("max_game_file_mb")
+  maxChunkSizeMb  Int      @default(10) @map("max_chunk_size_mb")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("site_settings")
+}
