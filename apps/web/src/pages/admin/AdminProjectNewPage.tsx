@@ -35,7 +35,7 @@ export default function AdminProjectNewPage() {
   } = useForm<SubmitProjectPayloadInput>({
     resolver: zodResolver(SubmitProjectPayloadSchema),
     defaultValues: {
-      year: new Date().getFullYear(),
+      yearId: '',
       title: '',
       summary: '',
       description: '',
@@ -51,8 +51,8 @@ export default function AdminProjectNewPage() {
     name: 'members',
   });
 
-  const selectedYear = watch('year');
-  const selectedYearItem = years.find((y) => y.year === selectedYear);
+  const selectedYearId = watch('yearId');
+  const selectedYearItem = years.find((y) => y.id === selectedYearId);
   const isUploadLocked = selectedYearItem != null && !selectedYearItem.isUploadEnabled && !isPrivileged;
 
   // ── 파일 상태 ──────────────────────────────────────────────
@@ -115,30 +115,24 @@ export default function AdminProjectNewPage() {
           <legend>기본 정보</legend>
 
           <div className="form-field">
-            <label htmlFor="year">연도 *</label>
+            <label htmlFor="yearId">전시회 *</label>
             {years.length > 0 ? (
-              <select
-                id="year"
-                {...register('year', { valueAsNumber: true })}
-              >
+              <select id="yearId" {...register('yearId')}>
+                <option value="">전시회를 선택하세요</option>
                 {years.map((y) => (
-                  <option key={y.id} value={y.year}>
+                  <option key={y.id} value={y.id}>
                     {y.year}{y.title ? ` — ${y.title}` : ''}
                     {!y.isUploadEnabled ? ' (업로드 잠김)' : ''}
                   </option>
                 ))}
               </select>
             ) : (
-              <input
-                id="year"
-                type="number"
-                {...register('year', { valueAsNumber: true })}
-              />
+              <p className="field-error">등록된 전시회가 없습니다. 관리자에게 문의하세요.</p>
             )}
-            {errors.year && <span className="field-error">{errors.year.message}</span>}
+            {errors.yearId && <span className="field-error">{errors.yearId.message}</span>}
             {isUploadLocked && (
               <span className="field-error">
-                이 연도는 업로드가 잠겨 있습니다. 운영자에게 문의하세요.
+                이 전시회는 업로드가 잠겨 있습니다. 운영자에게 문의하세요.
               </span>
             )}
           </div>

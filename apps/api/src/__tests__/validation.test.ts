@@ -181,14 +181,14 @@ describe('UpdateProjectBody', () => {
 
 describe('SubmitProjectPayload', () => {
   const validPayload = {
-    year: 2025,
+    yearId: '550e8400-e29b-41d4-a716-446655440000',
     title: 'My Game',
     members: [{ name: '홍길동', studentId: '2021001' }],
   };
 
   it('accepts valid minimal payload', () => {
     const result = SubmitProjectPayload.parse(validPayload);
-    expect(result.year).toBe(2025);
+    expect(result.yearId).toBe('550e8400-e29b-41d4-a716-446655440000');
     expect(result.title).toBe('My Game');
     expect(result.summary).toBe('');
     expect(result.autoPublish).toBe(false);

@@ -76,7 +76,7 @@ async function seedTestAdmin() {
 
 async function seedTestData(creatorId: string) {
   const year = await prisma.year.upsert({
-    where: { year: 2026 },
+    where: { year_title: { year: 2026, title: '2026 졸업작품전' } },
     update: {},
     create: { year: 2026, title: '2026 졸업작품전', isUploadEnabled: true },
   });
@@ -162,13 +162,14 @@ async function importFromJson(filePath: string, creatorId: string) {
   const yearMap = new Map<number, string>(); // year number -> year id
   if (data.years) {
     for (const y of data.years) {
+      const yearTitle = y.title ?? '';
       const created = await prisma.year.upsert({
-        where: { year: y.year },
-        update: { title: y.title ?? '', isUploadEnabled: y.isUploadEnabled ?? true },
-        create: { year: y.year, title: y.title ?? '', isUploadEnabled: y.isUploadEnabled ?? true },
+        where: { year_title: { year: y.year, title: yearTitle } },
+        update: { isUploadEnabled: y.isUploadEnabled ?? true },
+        create: { year: y.year, title: yearTitle, isUploadEnabled: y.isUploadEnabled ?? true },
       });
       yearMap.set(y.year, created.id);
-      console.log(`연도: ${y.year} (${created.id})`);
+      console.log(`연도: ${y.year} — ${yearTitle || '(제목 없음)'} (${created.id})`);
     }
   }
 
@@ -180,10 +181,11 @@ async function importFromJson(filePath: string, creatorId: string) {
     for (const p of data.projects) {
       // 연도가 없으면 자동 생성
       if (!yearMap.has(p.year)) {
+        const defaultTitle = `${p.year} 졸업작품전`;
         const y = await prisma.year.upsert({
-          where: { year: p.year },
+          where: { year_title: { year: p.year, title: defaultTitle } },
           update: {},
-          create: { year: p.year, isUploadEnabled: true },
+          create: { year: p.year, title: defaultTitle, isUploadEnabled: true },
         });
         yearMap.set(p.year, y.id);
       }

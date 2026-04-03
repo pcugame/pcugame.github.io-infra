@@ -3,6 +3,30 @@ import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
+import type { PublicYearItem } from '../contracts';
+
+interface GroupedYear {
+  year: number;
+  title?: string;
+  projectCount: number;
+}
+
+function groupYearsByNumber(items: PublicYearItem[]): GroupedYear[] {
+  const map = new Map<number, GroupedYear>();
+  for (const item of items) {
+    const existing = map.get(item.year);
+    if (existing) {
+      existing.projectCount += item.projectCount;
+    } else {
+      map.set(item.year, {
+        year: item.year,
+        title: item.title,
+        projectCount: item.projectCount,
+      });
+    }
+  }
+  return Array.from(map.values());
+}
 
 export default function YearsPage() {
   const { data, isLoading, error, refetch } = useQuery({
@@ -10,7 +34,7 @@ export default function YearsPage() {
     queryFn: publicApi.getYears,
   });
 
-  const items = data?.items ?? [];
+  const items = groupYearsByNumber(data?.items ?? []);
 
   return (
     <div className="years-landing">
@@ -35,7 +59,7 @@ export default function YearsPage() {
           {items.length > 0 && (
             <div className="years-grid">
               {items.map((y, i) => (
-                <Link to={`/years/${y.year}`} key={y.id} className="years-card">
+                <Link to={`/years/${y.year}`} key={y.year} className="years-card">
                   <span className="years-card__index">
                     {String(i + 1).padStart(2, '0')}
                   </span>
@@ -48,7 +72,7 @@ export default function YearsPage() {
                   <span className="years-card__count">
                     {y.projectCount}개 작품
                   </span>
-                  <span className="years-card__arrow" aria-hidden="true">→</span>
+                  <span className="years-card__arrow" aria-hidden="true">&rarr;</span>
                 </Link>
               ))}
             </div>

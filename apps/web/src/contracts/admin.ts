@@ -78,7 +78,7 @@ export type AdminProjectDetail = {
 // ── Submit (all-in-one) ──────────────────────────────────────
 
 export type SubmitProjectPayload = {
-  year: number;
+  yearId: string;
   title: string;
   summary?: string;
   description?: string;

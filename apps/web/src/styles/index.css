@@ -5113,3 +5113,63 @@ fieldset.status-section legend {
   color: var(--color-text-muted);
   background: var(--color-surface);
 }
+
+/* ── Exhibition Tabs ──────────────────────────────────────── */
+
+.exhibition-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  padding: 0.25rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.exhibition-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.exhibition-tab:hover {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+
+.exhibition-tab--active {
+  background: #fff;
+  color: var(--color-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.exhibition-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4em;
+  padding: 0 0.35em;
+  font-size: 0.78em;
+  font-weight: 600;
+  line-height: 1.5;
+  border-radius: 999px;
+  background: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.exhibition-tab--active .exhibition-tab__count {
+  background: var(--color-primary);
+  color: #fff;
+}

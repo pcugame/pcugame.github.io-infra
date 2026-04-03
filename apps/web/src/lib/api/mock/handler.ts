@@ -51,8 +51,15 @@ const routes: MockRoute[] = [
 		pattern: /^\/api\/public\/years\/(\d+)\/projects$/,
 		handler: (match) => {
 			const year = Number(match[1]);
-			const items = MOCK_YEAR_PROJECTS[year] ?? [];
-			return { year, items, empty: items.length === 0 };
+			const cards = MOCK_YEAR_PROJECTS[year] ?? [];
+			const yearItems = MOCK_YEARS.filter((y) => y.year === year);
+			const exhibitions = yearItems.map((y) => ({ id: y.id, title: y.title || `${year} 전시` }));
+			const items = cards.map((c) => ({
+				...c,
+				exhibitionId: yearItems[0]?.id ?? `mock-year-${year}`,
+				exhibitionTitle: yearItems[0]?.title ?? `${year} 전시`,
+			}));
+			return { year, exhibitions, items, empty: items.length === 0 };
 		},
 	},
 	{

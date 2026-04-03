@@ -11,6 +11,7 @@ export default function YearProjectsPage() {
   const year = Number(yearParam);
   const [search, setSearch] = useState('');
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string | null>(null); // null = 전체
   const closeModal = useCallback(() => setSelectedSlug(null), []);
 
   const { data: yearsData } = useQuery({
@@ -28,21 +29,31 @@ export default function YearProjectsPage() {
     return <EmptyState message="잘못된 연도입니다." />;
   }
 
-  const yearInfo = yearsData?.items.find((y) => y.year === year);
-  const pageTitle = yearInfo?.title || `${year}년도 졸업전시회`;
+  // 같은 연도의 전시회 이름들 중 첫 번째를 기본 타이틀로
+  const yearItems = yearsData?.items.filter((y) => y.year === year) ?? [];
+  const pageTitle = yearItems[0]?.title || `${year}년도 졸업전시회`;
 
-  const filtered = data?.items.filter(
+  const exhibitions = data?.exhibitions ?? [];
+  const hasMultipleExhibitions = exhibitions.length > 1;
+
+  // 탭 필터링
+  const tabFiltered = activeTab
+    ? data?.items.filter((p) => p.exhibitionId === activeTab) ?? []
+    : data?.items ?? [];
+
+  // 검색 필터링
+  const filtered = tabFiltered.filter(
     (p) =>
       p.title.toLowerCase().includes(search.toLowerCase()) ||
       p.members.some((m) => m.name.includes(search)),
-  ) ?? [];
+  );
 
   return (
     <div className="archive-page">
       <div className="archive-page__header">
         <div className="container">
-          <Link to="/" className="archive-back">← 연도 목록</Link>
-          <h1 className="archive-page__title">{pageTitle}</h1>
+          <Link to="/" className="archive-back">&larr; 연도 목록</Link>
+          <h1 className="archive-page__title">{year}년</h1>
           <p className="archive-page__subtitle">{year}년 작품 목록을 확인하세요.</p>
         </div>
       </div>
@@ -53,9 +64,35 @@ export default function YearProjectsPage() {
 
         {data && (
           <>
+            {/* 전시회 탭 (2개 이상일 때만 표시) */}
+            {hasMultipleExhibitions && (
+              <div className="exhibition-tabs">
+                <button
+                  className={`exhibition-tab ${activeTab === null ? 'exhibition-tab--active' : ''}`}
+                  onClick={() => setActiveTab(null)}
+                >
+                  전체
+                  <span className="exhibition-tab__count">{data.items.length}</span>
+                </button>
+                {exhibitions.map((ex) => {
+                  const count = data.items.filter((p) => p.exhibitionId === ex.id).length;
+                  return (
+                    <button
+                      key={ex.id}
+                      className={`exhibition-tab ${activeTab === ex.id ? 'exhibition-tab--active' : ''}`}
+                      onClick={() => setActiveTab(ex.id)}
+                    >
+                      {ex.title}
+                      <span className="exhibition-tab__count">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="archive-page__toolbar">
               <div className="archive-search">
-                <span className="archive-search__icon" aria-hidden="true">🔍</span>
+                <span className="archive-search__icon" aria-hidden="true">&#x1F50D;</span>
                 <input
                   className="archive-search__input"
                   type="search"

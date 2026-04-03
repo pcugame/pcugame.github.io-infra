@@ -20,7 +20,7 @@ export default function HomePage() {
 		queryFn: publicApi.getYears,
 	});
 
-	const publishedYears = yearsData?.items ?? [];
+	const publishedYears = groupYearsByNumber(yearsData?.items ?? []);
 
 	return (
 		<div className="home-landing">
@@ -89,9 +89,34 @@ export default function HomePage() {
 
 // ── 연도 목록 (6개 고정 높이, 초과 시 스크롤) ────────────────
 
+// ── 같은 연도의 전시회를 하나로 합침 ────────────────────────
+
+interface GroupedYear {
+	year: number;
+	title?: string;
+	projectCount: number;
+}
+
+function groupYearsByNumber(items: PublicYearItem[]): GroupedYear[] {
+	const map = new Map<number, GroupedYear>();
+	for (const item of items) {
+		const existing = map.get(item.year);
+		if (existing) {
+			existing.projectCount += item.projectCount;
+		} else {
+			map.set(item.year, {
+				year: item.year,
+				title: item.title,
+				projectCount: item.projectCount,
+			});
+		}
+	}
+	return Array.from(map.values());
+}
+
 const VISIBLE_YEARS = 6;
 
-function YearGrid({ years }: { years: PublicYearItem[] }) {
+function YearGrid({ years }: { years: GroupedYear[] }) {
 	const gridRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
@@ -116,7 +141,7 @@ function YearGrid({ years }: { years: PublicYearItem[] }) {
 			className={`home-year-grid ${needsScroll ? 'home-year-grid--scrollable' : ''}`}
 		>
 			{years.map((y) => (
-				<Link key={y.id} to={`/years/${y.year}`} className="home-year-card">
+				<Link key={y.year} to={`/years/${y.year}`} className="home-year-card">
 					<span className="home-year-card__year">{y.year}</span>
 					{y.title && (
 						<span className="home-year-card__title">{y.title}</span>

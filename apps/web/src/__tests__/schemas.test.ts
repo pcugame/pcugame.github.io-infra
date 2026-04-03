@@ -95,14 +95,14 @@ describe('UpdateProjectFormSchema', () => {
 
 describe('SubmitProjectPayloadSchema', () => {
   const valid = {
-    year: 2025,
+    yearId: 'test-exhibition-id',
     title: 'Game Title',
     members: [{ name: '홍길동', studentId: '2021001' }],
   };
 
   it('accepts minimal valid payload', () => {
     const result = SubmitProjectPayloadSchema.parse(valid);
-    expect(result.year).toBe(2025);
+    expect(result.yearId).toBe('test-exhibition-id');
     expect(result.members).toHaveLength(1);
   });
 
