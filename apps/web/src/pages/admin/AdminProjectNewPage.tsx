@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useForm, useFieldArray } from 'react-hook-form';
+import { useForm, useFieldArray, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -30,7 +30,6 @@ export default function AdminProjectNewPage() {
     register,
     control,
     handleSubmit,
-    watch,
     formState: { errors },
   } = useForm<SubmitProjectPayloadInput>({
     resolver: zodResolver(SubmitProjectPayloadSchema),
@@ -51,7 +50,7 @@ export default function AdminProjectNewPage() {
     name: 'members',
   });
 
-  const selectedYearId = watch('yearId');
+  const selectedYearId = useWatch({ control, name: 'yearId' });
   const selectedYearItem = years.find((y) => y.id === selectedYearId);
   const isUploadLocked = selectedYearItem != null && !selectedYearItem.isUploadEnabled && !isPrivileged;
 

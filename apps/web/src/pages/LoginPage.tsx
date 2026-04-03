@@ -11,10 +11,10 @@ export default function LoginPage() {
   const loginMutation = useLogin();
 
   const googleBtnRef = useRef<HTMLDivElement>(null);
-  // mutate 함수는 안정적인 참조이므로 ref에 저장하지 않아도 되지만,
-  // loginMutation 객체 자체는 매 렌더마다 바뀌므로 .mutate만 ref로 잡는다.
   const mutateRef = useRef(loginMutation.mutate);
-  mutateRef.current = loginMutation.mutate;
+  useEffect(() => {
+    mutateRef.current = loginMutation.mutate;
+  });
 
   // 이미 로그인 상태이면 이전 페이지 또는 홈으로 이동
   useEffect(() => {

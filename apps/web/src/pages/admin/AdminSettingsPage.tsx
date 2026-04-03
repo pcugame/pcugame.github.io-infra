@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminSettingsApi, getApiErrorMessage } from '../../lib/api';
 import type { SiteSettingsData } from '../../lib/api';
@@ -13,29 +13,33 @@ export default function AdminSettingsPage() {
     queryFn: adminSettingsApi.get,
   });
 
-  const [form, setForm] = useState<SiteSettingsData>({ maxGameFileMb: 5120, maxChunkSizeMb: 10 });
-  const [dirty, setDirty] = useState(false);
+  // data의 JSON을 키로 사용하여 서버 데이터가 바뀌면 edits를 자동 리셋
+  const dataKey = useMemo(() => (data ? JSON.stringify(data) : ''), [data]);
+  const [edits, setEdits] = useState<Partial<SiteSettingsData> | null>(null);
+  const [lastDataKey, setLastDataKey] = useState(dataKey);
 
-  useEffect(() => {
-    if (data) {
-      setForm(data);
-      setDirty(false);
-    }
-  }, [data]);
+  if (dataKey && dataKey !== lastDataKey) {
+    setLastDataKey(dataKey);
+    setEdits(null);
+  }
+
+  const dirty = edits !== null;
+  const form: SiteSettingsData = data
+    ? { ...data, ...edits }
+    : { maxGameFileMb: 5120, maxChunkSizeMb: 10, ...edits };
 
   const updateMutation = useMutation({
     mutationFn: (body: Partial<SiteSettingsData>) => adminSettingsApi.update(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.adminSettings });
-      setDirty(false);
+      setEdits(null);
     },
   });
 
   const handleChange = (field: keyof SiteSettingsData, value: string) => {
     const num = parseInt(value, 10);
     if (isNaN(num)) return;
-    setForm((prev) => ({ ...prev, [field]: num }));
-    setDirty(true);
+    setEdits((prev) => ({ ...prev, [field]: num }));
   };
 
   const handleSave = () => {
