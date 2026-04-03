@@ -23,6 +23,16 @@ import { UploadPipeline } from '../assets/upload/index.js';
 import type { SavedFile } from '../assets/upload/index.js';
 import { loadProjectWithAccess } from './project-access.js';
 import { assertUploadAllowed } from './upload-guard.js';
+import {
+	getUploadLimits,
+	kindLimit,
+	fieldnameToKind,
+	createByteLimiter,
+	acquireUploadSlot,
+	releaseUploadSlot,
+} from '../../shared/upload-limits.js';
+import { payloadTooLarge } from '../../shared/errors.js';
+import { assertValidPosterAsset, isPosterUrlSafe } from '../../shared/poster-validation.js';
 
 function assetUrl(storageKey: string, kind: AssetKind): string {
 	const base = env().API_PUBLIC_URL;
@@ -42,7 +52,7 @@ function serializeProjectDetail(project: {
 	sortOrder: number;
 	downloadPolicy: string;
 	posterAssetId: string | null;
-	poster: { storageKey: string } | null;
+	poster: { storageKey: string; kind: AssetKind; status: string } | null;
 	members: { id: string; name: string; studentId: string; sortOrder: number }[];
 	assets: { id: string; kind: AssetKind; storageKey: string; originalName: string; sizeBytes: bigint }[];
 }) {
@@ -58,8 +68,8 @@ function serializeProjectDetail(project: {
 		sortOrder: project.sortOrder,
 		downloadPolicy: project.downloadPolicy,
 		posterAssetId: project.posterAssetId ?? undefined,
-		posterUrl: project.poster
-			? assetUrl(project.poster.storageKey, 'POSTER')
+		posterUrl: isPosterUrlSafe(project.poster)
+			? assetUrl(project.poster!.storageKey, 'POSTER')
 			: undefined,
 		members: project.members.map((m) => ({
 			id: m.id,
@@ -182,22 +192,49 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 	// POST /projects/submit (multipart)
 	app.post('/projects/submit', { preHandler: requireLogin }, async (request, reply) => {
 		const cfg = env();
+		const role = request.currentUser!.role;
+		const limits = getUploadLimits(role);
 		const pipeline = new UploadPipeline();
 
+		acquireUploadSlot();
 		try {
 			// ── Collect multipart parts ───────────────────────────────
 			const parts = request.parts();
 			let payloadJson = '';
 			interface FilePart { tmpPath: string; fieldname: string; filename: string; }
 			const fileParts: FilePart[] = [];
+			let totalBytes = 0;
 
 			for await (const part of parts) {
 				if (part.type === 'field') {
 					if (part.fieldname === 'payload') payloadJson = part.value as string;
 				} else {
+					// Enforce file count limit
+					if (fileParts.length >= limits.maxFiles) {
+						throw payloadTooLarge(`Too many files (max ${limits.maxFiles})`);
+					}
+
+					// Determine per-file byte limit from fieldname
+					const fileKind = fieldnameToKind(part.fieldname);
+					const perFileMax = fileKind
+						? kindLimit(limits, fileKind)
+						: limits.imageMaxBytes; // unknown field → image limit
+
 					const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
 					pipeline.trackTempFile(tmpPath);
-					await streamPipeline(part.file, createWriteStream(tmpPath));
+
+					// Stream through byte limiter → abort early if over limit
+					const limiter = createByteLimiter(perFileMax, part.filename ?? part.fieldname);
+					await streamPipeline(part.file, limiter, createWriteStream(tmpPath));
+
+					// Track cumulative request size
+					const stat = await fsp.stat(tmpPath);
+					totalBytes += stat.size;
+					if (totalBytes > limits.requestMaxBytes) {
+						const limitMB = Math.round(limits.requestMaxBytes / 1024 / 1024);
+						throw payloadTooLarge(`Total upload size exceeds ${limitMB}MB limit`);
+					}
+
 					fileParts.push({
 						tmpPath,
 						fieldname: part.fieldname,
@@ -321,6 +358,7 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 			await pipeline.rollbackCommitted();
 			throw err;
 		} finally {
+			releaseUploadSlot();
 			await pipeline.cleanupTemp();
 		}
 	});
@@ -332,8 +370,11 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 		async (request, reply) => {
 			await loadProjectWithAccess(request, request.params.id, { requireDraft: true });
 
+			const role = request.currentUser!.role;
+			const limits = getUploadLimits(role);
 			const pipeline = new UploadPipeline();
 
+			acquireUploadSlot();
 			try {
 				// Collect all parts first so 'kind' is set before processing
 				let kind: AssetKind = 'IMAGE';
@@ -347,9 +388,19 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 						if (!parsed.success) throw badRequest(`Invalid asset kind: ${part.value}`);
 						kind = parsed.data;
 					} else if (part.type === 'file' && part.fieldname === 'file') {
+						// Kind may not be known yet (field order varies), so use
+						// the role's max possible per-file limit for streaming.
+						// The exact per-kind check runs in validateFile() after write.
+						const streamMax = Math.max(
+							limits.imageMaxBytes,
+							limits.gameMaxBytes,
+						);
+
 						const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
 						pipeline.trackTempFile(tmpPath);
-						await streamPipeline(part.file, createWriteStream(tmpPath));
+
+						const limiter = createByteLimiter(streamMax, part.filename ?? 'file');
+						await streamPipeline(part.file, limiter, createWriteStream(tmpPath));
 						fileTmpPath = tmpPath;
 						fileOriginalName = part.filename ?? '';
 					}
@@ -379,6 +430,7 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 				await pipeline.rollbackCommitted();
 				throw err;
 			} finally {
+				releaseUploadSlot();
 				await pipeline.cleanupTemp();
 			}
 		},
@@ -392,10 +444,10 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 			await loadProjectWithAccess(request, request.params.id, { requireDraft: true });
 
 			const { assetId } = parseBody(SetPosterBody, request.body);
-			const asset = await prisma.asset.findFirst({
-				where: { id: assetId, projectId: request.params.id },
+			const asset = await prisma.asset.findUnique({
+				where: { id: assetId },
 			});
-			if (!asset) throw notFound('Asset not found');
+			assertValidPosterAsset(asset, request.params.id);
 
 			await prisma.project.update({ where: { id: request.params.id }, data: { posterAssetId: assetId } });
 			sendOk(reply, { posterAssetId: assetId });

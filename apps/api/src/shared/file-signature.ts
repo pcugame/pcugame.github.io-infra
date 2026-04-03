@@ -51,10 +51,10 @@ export function isAllowedGameType(result: FileTypeResult): boolean {
   return ALLOWED_GAME_MIMES.has(result.mime);
 }
 
-// Size limits in bytes
+// Absolute per-kind size ceilings (applies to all roles).
+// Role-based tighter limits are enforced in upload-limits.ts.
 export const SIZE_LIMITS = {
   poster: 10 * 1024 * 1024,       // 10 MB
   image: 15 * 1024 * 1024,        // 15 MB
   game: 1024 * 1024 * 1024,       // 1024 MB
-  totalMultipart: 1200 * 1024 * 1024, // 1200 MB
 } as const;

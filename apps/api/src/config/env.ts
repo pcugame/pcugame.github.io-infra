@@ -35,6 +35,20 @@ const envSchema = z
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
       .default('info'),
+
+    // ── Upload limits (MB / count) ──────────────────────────
+    // USER limits (tighter — for regular students)
+    UPLOAD_USER_IMAGE_MAX_MB: z.coerce.number().positive().default(10),
+    UPLOAD_USER_GAME_MAX_MB: z.coerce.number().positive().default(200),
+    UPLOAD_USER_REQUEST_MAX_MB: z.coerce.number().positive().default(250),
+    UPLOAD_USER_MAX_FILES: z.coerce.number().int().positive().default(10),
+    // OPERATOR/ADMIN limits (relaxed — for staff reviewing or importing)
+    UPLOAD_PRIVILEGED_IMAGE_MAX_MB: z.coerce.number().positive().default(15),
+    UPLOAD_PRIVILEGED_GAME_MAX_MB: z.coerce.number().positive().default(1024),
+    UPLOAD_PRIVILEGED_REQUEST_MAX_MB: z.coerce.number().positive().default(1200),
+    UPLOAD_PRIVILEGED_MAX_FILES: z.coerce.number().int().positive().default(20),
+    // Global concurrent upload limit (all users combined)
+    UPLOAD_MAX_CONCURRENT: z.coerce.number().int().positive().default(5),
   })
 ;
 

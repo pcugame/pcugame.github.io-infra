@@ -4,6 +4,7 @@ import { env } from '../../config/env.js';
 import { sendOk } from '../../shared/http.js';
 import { notFound } from '../../shared/errors.js';
 import { sanitizeStudentId } from '../../shared/student-id.js';
+import { isPosterUrlSafe } from '../../shared/poster-validation.js';
 
 function publicAssetUrl(storageKey: string): string {
   return `${env().API_PUBLIC_URL}/api/assets/public/${storageKey}`;
@@ -49,7 +50,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       slug: p.slug,
       title: p.title,
       summary: p.summary || undefined,
-      posterUrl: p.poster ? publicAssetUrl(p.poster.storageKey) : undefined,
+      posterUrl: isPosterUrlSafe(p.poster) ? publicAssetUrl(p.poster!.storageKey) : undefined,
       members: p.members.map((m) => ({ name: m.name, studentId: sanitizeStudentId(m.studentId) })),
     }));
 
@@ -124,7 +125,7 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
         studentId: sanitizeStudentId(m.studentId),
       })),
       images,
-      posterUrl: project.poster ? publicAssetUrl(project.poster.storageKey) : undefined,
+      posterUrl: isPosterUrlSafe(project.poster) ? publicAssetUrl(project.poster!.storageKey) : undefined,
       gameDownloadUrl: gameAsset
         ? `${env().API_PUBLIC_URL}/api/assets/protected/${gameAsset.storageKey}`
         : undefined,
