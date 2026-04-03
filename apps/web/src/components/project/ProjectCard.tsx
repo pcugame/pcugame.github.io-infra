@@ -1,16 +1,17 @@
-import { Link } from 'react-router-dom';
 import type { PublicProjectCard } from '../../contracts';
 
 interface Props {
   project: PublicProjectCard;
   year: number;
+  onSelect?: (slug: string) => void;
 }
 
-export function ProjectCard({ project, year }: Props) {
+export function ProjectCard({ project, onSelect }: Props) {
   return (
-    <Link
-      to={`/years/${year}/${project.slug}`}
+    <button
+      type="button"
       className="archive-card"
+      onClick={() => onSelect?.(project.slug)}
     >
       <div className="archive-card__image">
         {project.posterUrl ? (
@@ -36,6 +37,6 @@ export function ProjectCard({ project, year }: Props) {
           </p>
         </div>
       </div>
-    </Link>
+    </button>
   );
 }

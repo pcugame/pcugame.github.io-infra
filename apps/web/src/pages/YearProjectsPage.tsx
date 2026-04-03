@@ -1,15 +1,17 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
-import { ProjectCard } from '../components/project';
+import { ProjectCard, ProjectModal } from '../components/project';
 
 export default function YearProjectsPage() {
   const { year: yearParam } = useParams<{ year: string }>();
   const year = Number(yearParam);
   const [search, setSearch] = useState('');
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const closeModal = useCallback(() => setSelectedSlug(null), []);
 
   const { data: yearsData } = useQuery({
     queryKey: queryKeys.publicYears,
@@ -79,13 +81,17 @@ export default function YearProjectsPage() {
             ) : (
               <div className="archive-grid">
                 {filtered.map((project) => (
-                  <ProjectCard key={project.id} project={project} year={year} />
+                  <ProjectCard key={project.id} project={project} year={year} onSelect={setSelectedSlug} />
                 ))}
               </div>
             )}
           </>
         )}
       </div>
+
+      {selectedSlug && (
+        <ProjectModal slug={selectedSlug} year={year} onClose={closeModal} />
+      )}
     </div>
   );
 }
