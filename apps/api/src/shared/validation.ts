@@ -3,7 +3,6 @@ import { z } from 'zod';
 // ── Enums (matching Prisma) ──────────────────────────────────
 
 export const ProjectStatusEnum = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
-export const DownloadPolicyEnum = z.enum(['NONE', 'PUBLIC', 'SCHOOL_ONLY', 'ADMIN_ONLY']);
 export const AssetKindEnum = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME']);
 
 // ── Year ─────────────────────────────────────────────────────
@@ -32,7 +31,6 @@ export const UpdateProjectBody = z.object({
   isLegacy: z.boolean().optional(),
   status: ProjectStatusEnum.optional(),
   sortOrder: z.number().int().min(0).optional(),
-  downloadPolicy: DownloadPolicyEnum.optional(),
 });
 
 // ── Project submit (all-in-one multipart payload) ────────────

@@ -59,25 +59,6 @@ describe('UpdateProjectFormSchema', () => {
     ).toThrow();
   });
 
-  it('accepts valid downloadPolicy values', () => {
-    for (const dp of ['NONE', 'PUBLIC', 'SCHOOL_ONLY', 'ADMIN_ONLY']) {
-      const result = UpdateProjectFormSchema.parse({
-        title: 'Test',
-        downloadPolicy: dp,
-      });
-      expect(result.downloadPolicy).toBe(dp);
-    }
-  });
-
-  it('rejects invalid downloadPolicy', () => {
-    expect(() =>
-      UpdateProjectFormSchema.parse({
-        title: 'Test',
-        downloadPolicy: 'EVERYONE',
-      }),
-    ).toThrow();
-  });
-
   it('rejects title over 120 chars', () => {
     expect(() =>
       UpdateProjectFormSchema.parse({ title: 'x'.repeat(121) }),

@@ -51,6 +51,24 @@ export default function AdminYearsPage() {
     },
   });
 
+  // ── 연도 삭제 ──────────────────────────────────────────────
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => adminYearApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.adminYears });
+      qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+    },
+  });
+
+  const handleDelete = (year: AdminYearItem) => {
+    const msg = year.projectCount > 0
+      ? `"${year.title || year.year}" 전시회를 삭제하시겠습니까?\n\n이 전시회에 등록된 ${year.projectCount}개의 작품도 함께 삭제됩니다. (파일은 유지됨)`
+      : `"${year.title || year.year}" 전시회를 삭제하시겠습니까?`;
+    if (window.confirm(msg)) {
+      deleteMutation.mutate(year.id);
+    }
+  };
+
   // ── 연도 수정 (인라인) ────────────────────────────────────
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -149,6 +167,8 @@ export default function AdminYearsPage() {
                       qc.invalidateQueries({ queryKey: queryKeys.adminYears });
                       qc.invalidateQueries({ queryKey: queryKeys.publicYears });
                     }}
+                    onDelete={() => handleDelete(y)}
+                    isDeleting={deleteMutation.isPending}
                   />
                 ))}
               </tbody>
@@ -169,6 +189,8 @@ export default function AdminYearsPage() {
                   qc.invalidateQueries({ queryKey: queryKeys.adminYears });
                   qc.invalidateQueries({ queryKey: queryKeys.publicYears });
                 }}
+                onDelete={() => handleDelete(y)}
+                isDeleting={deleteMutation.isPending}
               />
             ))}
           </div>
@@ -186,12 +208,16 @@ function YearMobileCard({
   onEdit,
   onCancel,
   onSaved,
+  onDelete,
+  isDeleting,
 }: {
   year: AdminYearItem;
   isEditing: boolean;
   onEdit: () => void;
   onCancel: () => void;
   onSaved: () => void;
+  onDelete: () => void;
+  isDeleting: boolean;
 }) {
   const {
     register,
@@ -276,9 +302,18 @@ function YearMobileCard({
     <div className="admin-ycard">
       <div className="admin-ycard__header">
         <span className="admin-ycard__year">{year.year}</span>
-        <button className="btn btn--secondary btn--small" onClick={onEdit}>
-          수정
-        </button>
+        <div style={{ display: 'flex', gap: '0.25rem' }}>
+          <button className="btn btn--secondary btn--small" onClick={onEdit}>
+            수정
+          </button>
+          <button
+            className="btn btn--danger btn--small"
+            onClick={onDelete}
+            disabled={isDeleting}
+          >
+            삭제
+          </button>
+        </div>
       </div>
       <div className="admin-ycard__details">
         {year.title && (
@@ -306,12 +341,16 @@ function YearRow({
   onEdit,
   onCancel,
   onSaved,
+  onDelete,
+  isDeleting,
 }: {
   year: AdminYearItem;
   isEditing: boolean;
   onEdit: () => void;
   onCancel: () => void;
   onSaved: () => void;
+  onDelete: () => void;
+  isDeleting: boolean;
 }) {
   const {
     register,
@@ -346,6 +385,14 @@ function YearRow({
         <td>
           <button className="btn btn--secondary btn--small" onClick={onEdit}>
             수정
+          </button>
+          <button
+            className="btn btn--danger btn--small"
+            onClick={onDelete}
+            disabled={isDeleting}
+            style={{ marginLeft: '0.25rem' }}
+          >
+            삭제
           </button>
         </td>
       </tr>

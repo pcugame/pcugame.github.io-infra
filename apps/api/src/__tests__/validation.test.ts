@@ -9,7 +9,6 @@ import {
   SetPosterBody,
   GoogleLoginBody,
   ProjectStatusEnum,
-  DownloadPolicyEnum,
   AssetKindEnum,
 } from '../shared/validation.js';
 
@@ -26,18 +25,6 @@ describe('ProjectStatusEnum', () => {
     expect(() => ProjectStatusEnum.parse('DELETED')).toThrow();
     expect(() => ProjectStatusEnum.parse('')).toThrow();
     expect(() => ProjectStatusEnum.parse(123)).toThrow();
-  });
-});
-
-describe('DownloadPolicyEnum', () => {
-  it('accepts valid policies', () => {
-    for (const v of ['NONE', 'PUBLIC', 'SCHOOL_ONLY', 'ADMIN_ONLY']) {
-      expect(DownloadPolicyEnum.parse(v)).toBe(v);
-    }
-  });
-
-  it('rejects invalid policy', () => {
-    expect(() => DownloadPolicyEnum.parse('PRIVATE')).toThrow();
   });
 });
 
@@ -134,17 +121,6 @@ describe('UpdateProjectBody', () => {
 
   it('rejects invalid status', () => {
     expect(() => UpdateProjectBody.parse({ status: 'INVALID' })).toThrow();
-  });
-
-  it('accepts valid downloadPolicy', () => {
-    const result = UpdateProjectBody.parse({ downloadPolicy: 'SCHOOL_ONLY' });
-    expect(result.downloadPolicy).toBe('SCHOOL_ONLY');
-  });
-
-  it('rejects invalid downloadPolicy', () => {
-    expect(() =>
-      UpdateProjectBody.parse({ downloadPolicy: 'EVERYONE' }),
-    ).toThrow();
   });
 
   it('rejects title over 120 chars', () => {

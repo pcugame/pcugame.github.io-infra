@@ -1,7 +1,5 @@
 // ── Public API 응답 타입 ─────────────────────────────────────
 
-import type { DownloadPolicy } from './enums';
-
 /** GET /api/public/years */
 export type PublicYearItem = {
   id: string;
@@ -71,6 +69,5 @@ export type PublicProjectDetailResponse = {
   images: PublicProjectImage[];
   posterUrl?: string;
   gameDownloadUrl?: string;
-  downloadPolicy: DownloadPolicy;
   status: 'PUBLISHED';
 };

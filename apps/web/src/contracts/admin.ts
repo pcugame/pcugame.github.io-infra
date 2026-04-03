@@ -1,6 +1,6 @@
 // ── Admin API 타입 ───────────────────────────────────────────
 
-import type { AssetKind, DownloadPolicy, ProjectStatus } from './enums';
+import type { AssetKind, ProjectStatus } from './enums';
 import type { ProjectVideo } from './public';
 
 // ── Year ─────────────────────────────────────────────────────
@@ -38,7 +38,6 @@ export type UpdateProjectRequest = {
   isLegacy?: boolean;
   status?: ProjectStatus;
   sortOrder?: number;
-  downloadPolicy?: DownloadPolicy;
 };
 
 export type AdminProjectItem = {
@@ -62,7 +61,6 @@ export type AdminProjectDetail = {
   video: ProjectVideo | null;
   status: ProjectStatus;
   sortOrder: number;
-  downloadPolicy: DownloadPolicy;
   posterAssetId?: string;
   posterUrl?: string;
   members: { id: string; name: string; studentId: string; sortOrder: number; userId: string | null }[];

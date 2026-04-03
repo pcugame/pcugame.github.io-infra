@@ -227,19 +227,29 @@ export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void>
 				throw badRequest(`Chunk ${index}: expected ${expectedSize} bytes, got ${bytesWritten}`);
 			}
 
-			// Update uploaded chunks set (idempotent)
-			const uploaded = new Set(session.uploadedChunks);
-			uploaded.add(index);
+			// Atomic append — avoids read-modify-write race when multiple
+			// chunks are uploaded concurrently.  PostgreSQL array ops are
+			// performed inside a single UPDATE so no concurrent write can
+			// cause a lost-update on the uploadedChunks column.
+			const updated = await prisma.$queryRaw<{ uploaded_chunks: number[] }[]>`
+				UPDATE game_upload_sessions
+				SET uploaded_chunks = (
+					SELECT ARRAY(
+						SELECT DISTINCT unnest(uploaded_chunks || ARRAY[${index}::int])
+						ORDER BY 1
+					)
+				),
+				updated_at = NOW()
+				WHERE id = ${session.id}
+				RETURNING uploaded_chunks
+			`;
 
-			await prisma.gameUploadSession.update({
-				where: { id: session.id },
-				data: { uploadedChunks: Array.from(uploaded).sort((a: number, b: number) => a - b) },
-			});
+			const newChunks = updated[0]?.uploaded_chunks ?? [];
 
 			sendOk(reply, {
 				index,
 				bytesWritten,
-				uploadedCount: uploaded.size,
+				uploadedCount: newChunks.length,
 				totalChunks: session.totalChunks,
 			});
 		},
@@ -292,11 +302,15 @@ export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void>
 				throw badRequest(`Missing ${missing.length} chunks: [${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '...' : ''}]`);
 			}
 
-			// Mark as COMPLETING to prevent concurrent complete calls
-			await prisma.gameUploadSession.update({
-				where: { id: session.id },
+			// Atomically transition PENDING → COMPLETING.
+			// If another request already flipped the status, count === 0 and we bail.
+			const transitioned = await prisma.gameUploadSession.updateMany({
+				where: { id: session.id, status: 'PENDING' },
 				data: { status: 'COMPLETING' },
 			});
+			if (transitioned.count === 0) {
+				throw badRequest('Session is already being completed by another request');
+			}
 
 			try {
 				// Concatenate chunks directly to permanent storage (no intermediate copy)
@@ -407,9 +421,9 @@ export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void>
 					sizeBytes: Number(session.totalBytes),
 				});
 			} catch (err) {
-				// Revert to PENDING so user can retry
-				await prisma.gameUploadSession.update({
-					where: { id: session.id },
+				// Revert to PENDING so user can retry (only if still COMPLETING)
+				await prisma.gameUploadSession.updateMany({
+					where: { id: session.id, status: 'COMPLETING' },
 					data: { status: 'PENDING' },
 				}).catch(() => {});
 				throw err;

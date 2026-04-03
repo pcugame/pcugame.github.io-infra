@@ -1,4 +1,4 @@
-// ── 공유 Enum 상수 ──────────────────────────────────────────
+// ── 공유 Enum 상수 ────────────────────────���─────────────────
 
 export const USER_ROLES = ['USER', 'OPERATOR', 'ADMIN'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
@@ -8,6 +8,3 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 export const ASSET_KINDS = ['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME'] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
-
-export const DOWNLOAD_POLICIES = ['NONE', 'PUBLIC', 'SCHOOL_ONLY', 'ADMIN_ONLY'] as const;
-export type DownloadPolicy = (typeof DOWNLOAD_POLICIES)[number];

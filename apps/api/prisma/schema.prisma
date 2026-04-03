@@ -35,13 +35,6 @@ enum AssetStatus {
   FAILED
 }
 
-enum DownloadPolicy {
-  NONE
-  PUBLIC
-  SCHOOL_ONLY
-  ADMIN_ONLY
-}
-
 enum Platform {
   PC
   MOBILE
@@ -96,7 +89,6 @@ model Project {
   videoMimeType  String         @default("") @map("video_mime_type")
   status         ProjectStatus  @default(DRAFT)
   sortOrder      Int            @default(0) @map("sort_order")
-  downloadPolicy DownloadPolicy @default(PUBLIC) @map("download_policy")
   githubUrl      String         @default("") @map("github_url")
   platforms      Platform[]     @default([])
   posterAssetId  String?        @unique @map("poster_asset_id")

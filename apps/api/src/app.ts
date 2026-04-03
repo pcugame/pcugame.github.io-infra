@@ -17,10 +17,20 @@ import { prisma } from './lib/prisma.js';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 
+function parseTrustProxy(val: string): boolean | number | string {
+	if (val === 'true') return true;
+	if (val === 'false' || val === '') return false;
+	const num = Number(val);
+	if (!isNaN(num) && Number.isInteger(num) && num > 0) return num;
+	return val; // comma-separated IPs or subnet
+}
+
 export async function buildApp() {
+	const cfg = env();
 	const app = Fastify({
 		logger: false,
 		bodyLimit: 2 * 1024 * 1024, // 2 MB for JSON bodies
+		trustProxy: parseTrustProxy(cfg.TRUST_PROXY),
 	});
 
 	// Plugins

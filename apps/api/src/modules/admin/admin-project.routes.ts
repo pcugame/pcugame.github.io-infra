@@ -52,7 +52,6 @@ function serializeProjectDetail(project: {
 	videoMimeType: string;
 	status: string;
 	sortOrder: number;
-	downloadPolicy: string;
 	posterAssetId: string | null;
 	poster: { storageKey: string; kind: AssetKind; status: string } | null;
 	members: { id: string; name: string; studentId: string; sortOrder: number; userId: string | null }[];
@@ -75,7 +74,6 @@ function serializeProjectDetail(project: {
 			: null,
 		status: project.status,
 		sortOrder: project.sortOrder,
-		downloadPolicy: project.downloadPolicy,
 		posterAssetId: project.posterAssetId ?? undefined,
 		posterUrl: isPosterUrlSafe(project.poster)
 			? assetUrl(project.poster!.storageKey, 'POSTER')
@@ -170,7 +168,7 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 		async (request, reply) => {
 			await loadProjectWithAccess(request, request.params.id, { requireDraft: true });
 
-			const { title, summary, description, videoUrl, videoMimeType, isLegacy, status, sortOrder, downloadPolicy } =
+			const { title, summary, description, videoUrl, videoMimeType, isLegacy, status, sortOrder } =
 				parseBody(UpdateProjectBody, request.body);
 
 			const updated = await prisma.project.update({
@@ -184,7 +182,6 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 					...(isLegacy !== undefined ? { isLegacy } : {}),
 					...(status !== undefined ? { status } : {}),
 					...(sortOrder !== undefined ? { sortOrder } : {}),
-					...(downloadPolicy !== undefined ? { downloadPolicy } : {}),
 				},
 				include: projectDetailInclude,
 			});
@@ -441,17 +438,44 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 
 				const savedFile = await pipeline.processFile(fileTmpPath, kind, fileOriginalName);
 
-				const asset = await prisma.asset.create({
-					data: {
-						projectId: request.params.id,
-						kind: savedFile.kind,
-						storageKey: savedFile.storageKey,
-						originalName: savedFile.originalName,
-						mimeType: savedFile.mimeType,
-						sizeBytes: BigInt(savedFile.sizeBytes),
-						isPublic: savedFile.kind !== 'GAME',
-					},
-				});
+				// If uploading a GAME asset, replace the existing one instead of creating a duplicate.
+				let existingGame: { id: string; storageKey: string } | null = null;
+				if (savedFile.kind === 'GAME') {
+					existingGame = await prisma.asset.findFirst({
+						where: { projectId: request.params.id, kind: 'GAME', status: 'READY' },
+						select: { id: true, storageKey: true },
+					});
+				}
+
+				let asset;
+				if (existingGame) {
+					// Replace existing GAME asset in-place
+					const cfg2 = env();
+					const oldFilePath = buildStoragePath(cfg2.UPLOAD_ROOT_PROTECTED, existingGame.storageKey);
+					await fsp.unlink(oldFilePath).catch(() => {});
+
+					asset = await prisma.asset.update({
+						where: { id: existingGame.id },
+						data: {
+							storageKey: savedFile.storageKey,
+							originalName: savedFile.originalName,
+							mimeType: savedFile.mimeType,
+							sizeBytes: BigInt(savedFile.sizeBytes),
+						},
+					});
+				} else {
+					asset = await prisma.asset.create({
+						data: {
+							projectId: request.params.id,
+							kind: savedFile.kind,
+							storageKey: savedFile.storageKey,
+							originalName: savedFile.originalName,
+							mimeType: savedFile.mimeType,
+							sizeBytes: BigInt(savedFile.sizeBytes),
+							isPublic: savedFile.kind !== 'GAME',
+						},
+					});
+				}
 
 				sendCreated(reply, {
 					assetId: asset.id,

@@ -112,23 +112,17 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* 게임 다운로드 */}
-      {project.gameDownloadUrl && project.downloadPolicy !== 'NONE' && (
+      {/* 게임 다운로드 — GAME files are always publicly downloadable */}
+      {project.gameDownloadUrl && (
         <section className="project-detail__download">
           <h3>게임 다운로드</h3>
-          {project.downloadPolicy === 'PUBLIC' ? (
-            <a
-              href={project.gameDownloadUrl}
-              className="btn btn--primary"
-              download
-            >
-              다운로드 (ZIP)
-            </a>
-          ) : project.downloadPolicy === 'SCHOOL_ONLY' ? (
-            <p>학교 계정으로 로그인한 사용자만 다운로드할 수 있습니다.</p>
-          ) : (
-            <p>관리자만 다운로드할 수 있습니다.</p>
-          )}
+          <a
+            href={project.gameDownloadUrl}
+            className="btn btn--primary"
+            download
+          >
+            다운로드 (ZIP)
+          </a>
         </section>
       )}
     </div>

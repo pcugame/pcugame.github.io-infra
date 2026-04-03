@@ -47,7 +47,6 @@ export const UpdateProjectFormSchema = z.object({
   videoMimeType: z.string().max(100).optional().or(z.literal('')),
   status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
   sortOrder: z.number().int().nonnegative().optional(),
-  downloadPolicy: z.enum(['NONE', 'PUBLIC', 'SCHOOL_ONLY', 'ADMIN_ONLY']).optional(),
 });
 
 export type UpdateProjectFormInput = z.infer<typeof UpdateProjectFormSchema>;

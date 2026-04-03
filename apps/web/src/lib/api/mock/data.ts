@@ -274,7 +274,6 @@ function buildDetail(card: MockProjectCard, year: number): any {
 		],
 		posterUrl: card.posterUrl,
 		gameDownloadUrl: year <= 2024 ? undefined : '#mock-download',
-		downloadPolicy: 'PUBLIC',
 		status: 'PUBLISHED',
 	};
 }
@@ -325,7 +324,7 @@ export function buildAdminProjectDetail(id: string): any | undefined {
 		id: detail.id, title: detail.title, slug: detail.slug, year: detail.year,
 		summary: detail.summary, description: detail.description,
 		isLegacy: detail.isLegacy, video: detail.video,
-		status: 'PUBLISHED', sortOrder: 0, downloadPolicy: detail.downloadPolicy,
+		status: 'PUBLISHED', sortOrder: 0,
 		posterAssetId: `img-${detail.id}-poster`, posterUrl: detail.posterUrl,
 		members: detail.members.map((m: { id: string; name: string; studentId: string }, i: number) => ({ ...m, sortOrder: i, userId: null })),
 		assets: detail.images.map((img: { id: string; kind: string; url: string }) => ({

@@ -122,23 +122,17 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								</div>
 							)}
 
-							{/* 다운로드 */}
-							{project.gameDownloadUrl && project.downloadPolicy !== 'NONE' && (
+							{/* 다운로드 — GAME files are always publicly downloadable */}
+							{project.gameDownloadUrl && (
 								<div className="modal-download">
-									{project.downloadPolicy === 'PUBLIC' ? (
-										<a href={project.gameDownloadUrl} className="btn btn--primary btn--large" download>
-											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-												<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-												<polyline points="7 10 12 15 17 10" />
-												<line x1="12" y1="15" x2="12" y2="3" />
-											</svg>
-											게임 다운로드
-										</a>
-									) : project.downloadPolicy === 'SCHOOL_ONLY' ? (
-										<p className="modal-download__note">학교 계정으로 로그인한 사용자만 다운로드할 수 있습니다.</p>
-									) : (
-										<p className="modal-download__note">관리자만 다운로드할 수 있습니다.</p>
-									)}
+									<a href={project.gameDownloadUrl} className="btn btn--primary btn--large" download>
+										<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" y1="15" x2="12" y2="3" />
+										</svg>
+										게임 다운로드
+									</a>
 								</div>
 							)}
 						</div>

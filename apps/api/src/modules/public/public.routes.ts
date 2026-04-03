@@ -122,7 +122,9 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
         kind: a.kind as 'IMAGE' | 'POSTER',
       }));
 
-    const gameAsset = project.assets.find((a) => a.kind === 'GAME');
+    // Pick the newest GAME asset (deterministic if duplicates exist)
+    const gameAssets = project.assets.filter((a) => a.kind === 'GAME');
+    const gameAsset = gameAssets.length > 0 ? gameAssets[gameAssets.length - 1] : undefined;
 
     sendOk(reply, {
       id: project.id,
@@ -149,7 +151,6 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       gameDownloadUrl: gameAsset
         ? `${env().API_PUBLIC_URL}/api/assets/protected/${gameAsset.storageKey}`
         : undefined,
-      downloadPolicy: project.downloadPolicy,
       status: 'PUBLISHED' as const,
     });
   });

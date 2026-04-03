@@ -81,8 +81,9 @@ const routes: MockRoute[] = [
 	},
 	{
 		pattern: /^\/api\/admin\/years\/([^/]+)$/,
-		handler: (match) => {
+		handler: (match, method) => {
 			requireAdmin();
+			if (method === 'DELETE') return undefined;
 			return MOCK_ADMIN_YEARS.find((y) => y.id === match[1]) ?? MOCK_ADMIN_YEARS[0];
 		},
 	},

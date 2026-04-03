@@ -60,11 +60,10 @@ export async function assetsRoutes(app: FastifyInstance): Promise<void> {
 
       const asset = await prisma.asset.findFirst({
         where: { storageKey, status: 'READY' },
-        include: { project: true },
       });
       if (!asset) throw notFound('Asset not found');
 
-      // Game files (ZIP) are publicly downloadable, but abusers get permanently banned.
+      // All downloads are public. GAME files get IP-based abuse prevention.
       if (asset.kind === 'GAME') {
         const result = gameDownloadLimiter.check(request.ip);
         if (result === 'ban') {
@@ -76,21 +75,6 @@ export async function assetsRoutes(app: FastifyInstance): Promise<void> {
           }).catch((err) => logger.error({ err }, 'Failed to persist IP ban'));
 
           throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
-        }
-      }
-
-      // Other protected assets still respect the project's downloadPolicy.
-      if (asset.kind !== 'GAME') {
-        const policy = asset.project.downloadPolicy;
-        if (policy === 'NONE') throw forbidden('Download not allowed');
-
-        if (policy === 'ADMIN_ONLY') {
-          const user = request.currentUser;
-          if (!user) throw forbidden('Login required');
-          if (user.role !== 'ADMIN' && user.role !== 'OPERATOR')
-            throw forbidden('Insufficient permissions');
-        } else if (policy === 'SCHOOL_ONLY') {
-          if (!request.currentUser) throw forbidden('Login required');
         }
       }
 

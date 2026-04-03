@@ -42,6 +42,22 @@ export async function adminYearRoutes(app: FastifyInstance): Promise<void> {
 		},
 	);
 
+	// DELETE /years/:id — cascade-deletes all projects, members, assets (DB records only)
+	app.delete<{ Params: { id: string } }>(
+		'/years/:id',
+		{ preHandler: requireRole('ADMIN', 'OPERATOR') },
+		async (request, reply) => {
+			const year = await prisma.year.findUnique({
+				where: { id: request.params.id },
+				include: { _count: { select: { projects: true } } },
+			});
+			if (!year) throw notFound('Year not found');
+
+			await prisma.year.delete({ where: { id: year.id } });
+			reply.status(204).send();
+		},
+	);
+
 	// PATCH /years/:id
 	app.patch<{ Params: { id: string } }>(
 		'/years/:id',

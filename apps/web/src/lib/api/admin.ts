@@ -27,6 +27,10 @@ export const adminYearApi = {
   update(id: string, body: UpdateYearRequest) {
     return api.patch<AdminYearItem>(`/api/admin/years/${id}`, body);
   },
+
+  delete(id: string) {
+    return api.delete<void>(`/api/admin/years/${id}`);
+  },
 };
 
 // ── Project ──────────────────────────────────────────────────

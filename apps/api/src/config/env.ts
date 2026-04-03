@@ -36,6 +36,11 @@ const envSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
       .default('info'),
 
+    // Reverse proxy trust — set to 'true' if behind a single proxy (nginx, etc.),
+    // or a number for the hop count, or a comma-separated list of trusted IPs.
+    // Leave empty or 'false' when the API is directly exposed (no proxy).
+    TRUST_PROXY: z.string().default('false'),
+
     // ── Upload limits (MB / count) ──────────────────────────
     // USER limits (tighter — for regular students)
     UPLOAD_USER_IMAGE_MAX_MB: z.coerce.number().positive().default(10),

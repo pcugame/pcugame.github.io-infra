@@ -62,7 +62,6 @@ export default function AdminProjectEditPage() {
           videoMimeType: project.video?.mimeType ?? '',
           status: project.status,
           sortOrder: project.sortOrder,
-          downloadPolicy: project.downloadPolicy,
         }
       : undefined,
   });
@@ -247,15 +246,6 @@ export default function AdminProjectEditPage() {
             />
           </div>
 
-          <div className="form-field">
-            <label htmlFor="downloadPolicy">다운로드 정책</label>
-            <select id="downloadPolicy" {...register('downloadPolicy')}>
-              <option value="PUBLIC">공개</option>
-              <option value="SCHOOL_ONLY">학교 계정만</option>
-              <option value="ADMIN_ONLY">관리자만</option>
-              <option value="NONE">비공개</option>
-            </select>
-          </div>
         </fieldset>
 
         {updateMutation.error && (
