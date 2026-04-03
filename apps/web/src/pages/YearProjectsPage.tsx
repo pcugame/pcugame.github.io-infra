@@ -53,7 +53,7 @@ export default function YearProjectsPage() {
       <div className="archive-page__header">
         <div className="container">
           <Link to="/" className="archive-back">&larr; 연도 목록</Link>
-          <h1 className="archive-page__title">{year}년</h1>
+          <h1 className="archive-page__title">{pageTitle}</h1>
           <p className="archive-page__subtitle">{year}년 작품 목록을 확인하세요.</p>
         </div>
       </div>
