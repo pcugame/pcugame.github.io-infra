@@ -215,7 +215,8 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 	);
 
 	// POST /projects/submit (multipart)
-	app.post('/projects/submit', { preHandler: requireLogin }, async (request, reply) => {
+	const uploadBodyLimit = env().UPLOAD_PRIVILEGED_REQUEST_MAX_MB * 1024 * 1024;
+	app.post('/projects/submit', { preHandler: requireLogin, bodyLimit: uploadBodyLimit }, async (request, reply) => {
 		const cfg = env();
 		const role = request.currentUser!.role;
 		const limits = getUploadLimits(role);
@@ -396,7 +397,7 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 	// POST /projects/:id/assets (multipart, add one asset)
 	app.post<{ Params: { id: string } }>(
 		'/projects/:id/assets',
-		{ preHandler: requireLogin },
+		{ preHandler: requireLogin, bodyLimit: uploadBodyLimit },
 		async (request, reply) => {
 			await loadProjectWithAccess(request, request.params.id, { requireDraft: true });
 
