@@ -118,7 +118,14 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       title: project.title,
       summary: project.summary || undefined,
       description: project.description || undefined,
-      youtubeUrl: project.youtubeUrl || undefined,
+      isLegacy: project.isLegacy,
+      video: project.videoUrl
+        ? {
+            provider: 'NAS' as const,
+            url: project.videoUrl,
+            mimeType: project.videoMimeType || 'video/mp4',
+          }
+        : null,
       members: project.members.map((m) => ({
         id: m.id,
         name: m.name,

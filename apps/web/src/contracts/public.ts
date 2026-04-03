@@ -30,6 +30,13 @@ export type PublicYearProjectsResponse = {
   empty: boolean;
 };
 
+/** 프로젝트 영상 정보 (NAS 자체 호스팅) */
+export type ProjectVideo = {
+  provider: 'NAS';
+  url: string;
+  mimeType: string;
+};
+
 /** GET /api/public/projects/:idOrSlug */
 export type PublicProjectImage = {
   id: string;
@@ -50,7 +57,8 @@ export type PublicProjectDetailResponse = {
   title: string;
   summary?: string;
   description?: string;
-  youtubeUrl?: string;
+  isLegacy: boolean;
+  video: ProjectVideo | null;
   members: PublicProjectMember[];
   images: PublicProjectImage[];
   posterUrl?: string;

@@ -58,7 +58,8 @@ export default function AdminProjectEditPage() {
           title: project.title,
           summary: project.summary ?? '',
           description: project.description ?? '',
-          youtubeUrl: project.youtubeUrl ?? '',
+          videoUrl: project.video?.url ?? '',
+          videoMimeType: project.video?.mimeType ?? '',
           status: project.status,
           sortOrder: project.sortOrder,
           downloadPolicy: project.downloadPolicy,
@@ -70,7 +71,7 @@ export default function AdminProjectEditPage() {
     mutationFn: (data: UpdateProjectFormInput) =>
       adminProjectApi.update(id!, {
         ...data,
-        youtubeUrl: data.youtubeUrl || null,
+        videoUrl: data.videoUrl || null,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
@@ -185,11 +186,15 @@ export default function AdminProjectEditPage() {
       <div className="admin-page-header">
         <div className="admin-page-header__text">
           <span className="admin-page-header__eyebrow">Edit Project</span>
-          <h1>작품 수정: {project.title}</h1>
+          <h1>
+            작품 수정: {project.title}
+            {project.isLegacy && <span className="legacy-badge">아카이브</span>}
+          </h1>
         </div>
       </div>
       <p className="edit-meta">
         슬러그: <code>{project.slug}</code> | 연도: <span className="admin-year-badge">{project.year}</span>
+        {project.isLegacy && ' | 아카이브 자료'}
       </p>
 
       {/* ── 기본 정보 폼 ────────────────────────────────────── */}
@@ -214,8 +219,23 @@ export default function AdminProjectEditPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="youtubeUrl">YouTube URL</label>
-            <input id="youtubeUrl" type="url" {...register('youtubeUrl')} />
+            <label htmlFor="videoUrl">영상 URL (NAS)</label>
+            <input
+              id="videoUrl"
+              type="url"
+              placeholder="https://nas.example.com/video/game-trailer.mp4"
+              {...register('videoUrl')}
+            />
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="videoMimeType">영상 MIME 타입</label>
+            <select id="videoMimeType" {...register('videoMimeType')}>
+              <option value="">선택 안 함</option>
+              <option value="video/mp4">video/mp4</option>
+              <option value="video/webm">video/webm</option>
+              <option value="video/ogg">video/ogg</option>
+            </select>
           </div>
 
           <div className="form-field">

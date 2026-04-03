@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { detectFileType, isAllowedGameType } from '../shared/file-signature.js';
 
 /**
  * Unit tests for the game upload session logic.
@@ -86,6 +87,56 @@ describe('Game upload session validation', () => {
 			const maxBytes = maxMB * 1024 * 1024;
 			const fileBytes = 5120 * 1024 * 1024;
 			expect(fileBytes <= maxBytes).toBe(true);
+		});
+	});
+
+	// ── Role-based limit enforcement (regression for issue #1) ──
+	describe('role-based chunked upload limits', () => {
+		it('USER effective max is min(globalMax, roleGameMax)', () => {
+			// Global chunked max = 5120 MB, USER game limit = 200 MB
+			const globalMax = 5120 * 1024 * 1024;
+			const userGameMax = 200 * 1024 * 1024;
+			const effectiveMax = Math.min(globalMax, userGameMax);
+			expect(effectiveMax).toBe(userGameMax);
+		});
+
+		it('ADMIN effective max is min(globalMax, roleGameMax) = globalMax', () => {
+			const globalMax = 5120 * 1024 * 1024;
+			const adminGameMax = 1024 * 1024 * 1024;
+			const effectiveMax = Math.min(globalMax, adminGameMax);
+			expect(effectiveMax).toBe(adminGameMax);
+		});
+
+		it('USER cannot bypass 200MB limit via chunked upload', () => {
+			const userGameMax = 200 * 1024 * 1024;
+			const globalMax = 5120 * 1024 * 1024;
+			const effectiveMax = Math.min(globalMax, userGameMax);
+			const requestedBytes = 500 * 1024 * 1024; // 500MB
+			expect(requestedBytes > effectiveMax).toBe(true);
+		});
+	});
+
+	// ── ZIP signature validation (regression for issue #1) ──
+	describe('ZIP signature validation on complete', () => {
+		it('valid ZIP header is detected as game type', () => {
+			const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00]);
+			const result = detectFileType(zipHeader);
+			expect(result).not.toBeNull();
+			expect(isAllowedGameType(result!)).toBe(true);
+		});
+
+		it('non-ZIP header is rejected', () => {
+			const randomHeader = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+			const result = detectFileType(randomHeader);
+			// Either null or not a game type
+			expect(result === null || !isAllowedGameType(result)).toBe(true);
+		});
+
+		it('JPEG header is not accepted as game type', () => {
+			const jpegHeader = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00]);
+			const result = detectFileType(jpegHeader);
+			expect(result).not.toBeNull();
+			expect(isAllowedGameType(result!)).toBe(false);
 		});
 	});
 

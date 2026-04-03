@@ -39,7 +39,8 @@ export default function AdminProjectNewPage() {
       title: '',
       summary: '',
       description: '',
-      youtubeUrl: '',
+      videoUrl: '',
+      videoMimeType: '',
       autoPublish: false,
       members: [{ name: '', studentId: '' }],
     },
@@ -163,16 +164,26 @@ export default function AdminProjectNewPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="youtubeUrl">YouTube URL</label>
+            <label htmlFor="videoUrl">영상 URL (NAS)</label>
             <input
-              id="youtubeUrl"
+              id="videoUrl"
               type="url"
-              placeholder="https://www.youtube.com/watch?v=..."
-              {...register('youtubeUrl')}
+              placeholder="https://nas.example.com/video/game-trailer.mp4"
+              {...register('videoUrl')}
             />
-            {errors.youtubeUrl && (
-              <span className="field-error">{errors.youtubeUrl.message}</span>
+            {errors.videoUrl && (
+              <span className="field-error">{errors.videoUrl.message}</span>
             )}
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="videoMimeType">영상 MIME 타입</label>
+            <select id="videoMimeType" {...register('videoMimeType')}>
+              <option value="">선택 안 함</option>
+              <option value="video/mp4">video/mp4</option>
+              <option value="video/webm">video/webm</option>
+              <option value="video/ogg">video/ogg</option>
+            </select>
           </div>
 
           <div className="form-field form-field--checkbox">

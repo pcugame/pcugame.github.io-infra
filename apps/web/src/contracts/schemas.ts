@@ -19,11 +19,12 @@ export const SubmitProjectPayloadSchema = z.object({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
-  youtubeUrl: z
+  videoUrl: z
     .string()
     .url('올바른 URL을 입력하세요')
     .optional()
     .or(z.literal('')),
+  videoMimeType: z.string().max(100).optional().or(z.literal('')),
   autoPublish: z.boolean().optional(),
   members: z
     .array(ProjectMemberInputSchema)
@@ -38,11 +39,12 @@ export const UpdateProjectFormSchema = z.object({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
-  youtubeUrl: z
+  videoUrl: z
     .string()
     .url('올바른 URL을 입력하세요')
     .optional()
     .or(z.literal('')),
+  videoMimeType: z.string().max(100).optional().or(z.literal('')),
   status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
   sortOrder: z.number().int().nonnegative().optional(),
   downloadPolicy: z.enum(['NONE', 'PUBLIC', 'SCHOOL_ONLY', 'ADMIN_ONLY']).optional(),

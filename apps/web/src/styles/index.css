@@ -1067,6 +1067,66 @@ a:hover {
   color: var(--color-secondary);
 }
 
+/* ── Mock Role Switcher (dev only) ───────────────────────────── */
+
+.mock-switcher {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  font-size: 0.72rem;
+}
+
+.mock-switcher__label {
+  font-weight: 700;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.mock-switcher__btns {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.mock-switcher__btn {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: all 0.15s;
+}
+
+.mock-switcher__btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.mock-switcher__btn--active {
+  border-color: transparent;
+}
+
+@media (max-width: 640px) {
+  .mock-switcher {
+    bottom: 68px;
+    right: 0.5rem;
+    padding: 0.3rem 0.5rem;
+  }
+}
+
 /* ── Project Modal (오버레이 팝업) ────────────────────────────── */
 
 .modal-overlay {
@@ -4990,4 +5050,66 @@ fieldset.status-section legend {
     border-radius: 10px;
     padding: 0.65rem 1rem;
   }
+}
+
+/* ── Legacy Badge & Notice ────────────────────────────────── */
+
+.legacy-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.15em 0.5em;
+  font-size: 0.7em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.legacy-notice {
+  margin: 0.5rem 0 1rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+}
+
+/* ── ProjectVideo Component ───────────────────────────────── */
+
+.project-video {
+  width: 100%;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+}
+
+.project-video video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.project-video--poster {
+  background: var(--color-surface);
+}
+
+.project-video--poster img {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.project-video__note {
+  margin: 0;
+  padding: 0.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
 }

@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
-import { toYouTubeEmbedUrl } from '../../lib/utils';
 import { LoadingSpinner } from '../common';
+import { ProjectVideo } from './ProjectVideo';
 
 interface Props {
 	slug: string;
@@ -38,7 +38,6 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 		if (e.target === overlayRef.current) onClose();
 	};
 
-	const embedUrl = project ? toYouTubeEmbedUrl(project.youtubeUrl) : null;
 	const galleryImages = project?.images.filter((img) => img.kind === 'IMAGE') ?? [];
 
 	return (
@@ -60,26 +59,37 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 				{project && (
 					<>
 						{/* 영상 or 포스터 (상단 비주얼) */}
-						{embedUrl ? (
+						{(project.video || project.posterUrl) ? (
 							<div className="modal-visual">
-								<div className="modal-video">
-									<iframe
-										src={embedUrl}
-										title={`${project.title} 영상`}
-										allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-										allowFullScreen
+								{project.video ? (
+									<ProjectVideo
+										video={project.video}
+										posterUrl={project.posterUrl}
+										title={project.title}
 									/>
-								</div>
-							</div>
-						) : project.posterUrl ? (
-							<div className="modal-visual">
-								<img src={project.posterUrl} alt={`${project.title} 포스터`} className="modal-poster" />
+								) : project.posterUrl ? (
+									<img src={project.posterUrl} alt={`${project.title} 포스터`} className="modal-poster" />
+								) : null}
 							</div>
 						) : null}
 
 						{/* 본문 */}
 						<div className="modal-body">
-							<h1 className="modal-title">{project.title}</h1>
+							<h1 className="modal-title">
+								{project.title}
+								{project.isLegacy && (
+									<span className="legacy-badge" title="아카이브 자료">
+										아카이브
+									</span>
+								)}
+							</h1>
+
+							{/* Legacy 안내 */}
+							{project.isLegacy && (
+								<p className="legacy-notice">
+									아카이브 자료입니다. 일부 자료가 누락되었을 수 있습니다.
+								</p>
+							)}
 
 							{/* 참여 학생 */}
 							<div className="modal-members">

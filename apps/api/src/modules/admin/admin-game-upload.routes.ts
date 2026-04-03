@@ -20,8 +20,11 @@ import { badRequest, notFound, forbidden } from '../../shared/errors.js';
 import { AppError } from '../../shared/errors.js';
 import { requireLogin } from '../../plugins/auth.js';
 import { loadProjectWithAccess } from './project-access.js';
+import { assertUploadAllowed } from './upload-guard.js';
 import { generateStorageKey, buildStoragePath } from '../../shared/storage-path.js';
 import { logger } from '../../lib/logger.js';
+import { getUploadLimits } from '../../shared/upload-limits.js';
+import { detectFileType, isAllowedGameType } from '../../shared/file-signature.js';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -82,7 +85,11 @@ export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void>
 		'/projects/:id/game-upload-sessions',
 		{ preHandler: requireLogin },
 		async (request, reply) => {
-			await loadProjectWithAccess(request, request.params.id, { requireDraft: true });
+			const project = await loadProjectWithAccess(request, request.params.id, { requireDraft: true });
+
+			// Enforce year upload lock (same policy as normal submit)
+			const year = await prisma.year.findUnique({ where: { id: project.yearId } });
+			assertUploadAllowed(year, year?.year ?? 0, request.currentUser!.role);
 
 			const body = request.body as { originalName?: string; totalBytes?: number };
 			if (!body?.originalName || !body?.totalBytes) {
@@ -91,9 +98,13 @@ export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void>
 
 			const { originalName, totalBytes } = body;
 
+			// Apply role-based game size limit (not just global max)
+			const roleLimits = getUploadLimits(request.currentUser!.role);
+			const effectiveMax = Math.min(maxGameBytes, roleLimits.gameMaxBytes);
+
 			if (totalBytes <= 0) throw badRequest('totalBytes must be positive');
-			if (totalBytes > maxGameBytes) {
-				const maxMB = Math.round(maxGameBytes / 1024 / 1024);
+			if (totalBytes > effectiveMax) {
+				const maxMB = Math.round(effectiveMax / 1024 / 1024);
 				throw badRequest(`File size ${Math.round(totalBytes / 1024 / 1024)}MB exceeds max ${maxMB}MB`);
 			}
 
@@ -304,37 +315,76 @@ export async function adminGameUploadRoutes(app: FastifyInstance): Promise<void>
 					throw new AppError(500, `Final file size mismatch: expected ${session.totalBytes}, got ${stat.size}`, 'SIZE_MISMATCH');
 				}
 
-				// Replace existing GAME asset if any, else create new one
+				// Verify ZIP signature (read first 8 bytes of concatenated file)
+				const fd = await fsp.open(permanentPath, 'r');
+				try {
+					const header = Buffer.alloc(8);
+					await fd.read(header, 0, 8, 0);
+					const detected = detectFileType(header);
+					if (!detected || !isAllowedGameType(detected)) {
+						await fd.close();
+						await fsp.unlink(permanentPath).catch(() => {});
+						throw badRequest('Uploaded file is not a valid ZIP archive');
+					}
+				} finally {
+					await fd.close().catch(() => {});
+				}
+
+				// Replace existing GAME asset if any, else create new one.
+				// Safe ordering: rename old file → update DB → delete old file.
 				const existingGame = await prisma.asset.findFirst({
 					where: { projectId: session.projectId, kind: 'GAME', status: 'READY' },
 				});
 
+				let oldBackupPath: string | null = null;
 				if (existingGame) {
-					// Delete old file
 					const oldPath = buildStoragePath(cfg.UPLOAD_ROOT_PROTECTED, existingGame.storageKey);
-					await fsp.unlink(oldPath).catch(() => {});
-					// Update existing record
-					await prisma.asset.update({
-						where: { id: existingGame.id },
-						data: {
-							storageKey,
-							originalName: session.originalName,
-							mimeType: 'application/zip',
-							sizeBytes: session.totalBytes,
-						},
+					oldBackupPath = oldPath + '.bak';
+					// Rename old file to backup (safe — can restore on failure)
+					await fsp.rename(oldPath, oldBackupPath).catch(() => {
+						oldBackupPath = null; // old file missing — nothing to back up
 					});
+
+					try {
+						await prisma.asset.update({
+							where: { id: existingGame.id },
+							data: {
+								storageKey,
+								originalName: session.originalName,
+								mimeType: 'application/zip',
+								sizeBytes: session.totalBytes,
+							},
+						});
+					} catch (dbErr) {
+						// DB update failed — restore old file from backup
+						if (oldBackupPath) {
+							const oldPath2 = buildStoragePath(cfg.UPLOAD_ROOT_PROTECTED, existingGame.storageKey);
+							await fsp.rename(oldBackupPath, oldPath2).catch(() => {});
+						}
+						await fsp.unlink(permanentPath).catch(() => {});
+						throw dbErr;
+					}
+
+					// DB succeeded — safe to remove backup of old file
+					if (oldBackupPath) await fsp.unlink(oldBackupPath).catch(() => {});
 				} else {
-					await prisma.asset.create({
-						data: {
-							projectId: session.projectId,
-							kind: 'GAME',
-							storageKey,
-							originalName: session.originalName,
-							mimeType: 'application/zip',
-							sizeBytes: session.totalBytes,
-							isPublic: false,
-						},
-					});
+					try {
+						await prisma.asset.create({
+							data: {
+								projectId: session.projectId,
+								kind: 'GAME',
+								storageKey,
+								originalName: session.originalName,
+								mimeType: 'application/zip',
+								sizeBytes: session.totalBytes,
+								isPublic: false,
+							},
+						});
+					} catch (dbErr) {
+						// DB create failed — remove orphan permanent file
+						await fsp.unlink(permanentPath).catch(() => {});
+						throw dbErr;
+					}
 				}
 
 				// Mark complete and cleanup staging

@@ -47,7 +47,9 @@ function serializeProjectDetail(project: {
 	year: { year: number };
 	summary: string;
 	description: string;
-	youtubeUrl: string;
+	isLegacy: boolean;
+	videoUrl: string;
+	videoMimeType: string;
 	status: string;
 	sortOrder: number;
 	downloadPolicy: string;
@@ -63,7 +65,14 @@ function serializeProjectDetail(project: {
 		year: project.year.year,
 		summary: project.summary || undefined,
 		description: project.description || undefined,
-		youtubeUrl: project.youtubeUrl || undefined,
+		isLegacy: project.isLegacy,
+		video: project.videoUrl
+			? {
+					provider: 'NAS' as const,
+					url: project.videoUrl,
+					mimeType: project.videoMimeType || 'video/mp4',
+				}
+			: null,
 		status: project.status,
 		sortOrder: project.sortOrder,
 		downloadPolicy: project.downloadPolicy,
@@ -141,7 +150,13 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 				user.role !== 'OPERATOR' &&
 				project.creatorId !== user.id
 			) {
-				throw forbidden('Not your project');
+				// Check if user is a linked member of this project
+				const isMember = !!(await prisma.projectMember.findFirst({
+					where: { projectId: project.id, userId: user.id },
+				}));
+				if (!isMember) {
+					throw forbidden('Not your project');
+				}
 			}
 
 			sendOk(reply, serializeProjectDetail(project));
@@ -155,7 +170,7 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 		async (request, reply) => {
 			await loadProjectWithAccess(request, request.params.id, { requireDraft: true });
 
-			const { title, summary, description, youtubeUrl, status, sortOrder, downloadPolicy } =
+			const { title, summary, description, videoUrl, videoMimeType, isLegacy, status, sortOrder, downloadPolicy } =
 				parseBody(UpdateProjectBody, request.body);
 
 			const updated = await prisma.project.update({
@@ -164,7 +179,9 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 					...(title !== undefined ? { title } : {}),
 					...(summary !== undefined ? { summary } : {}),
 					...(description !== undefined ? { description } : {}),
-					...(youtubeUrl !== undefined ? { youtubeUrl: youtubeUrl ?? '' } : {}),
+					...(videoUrl !== undefined ? { videoUrl: videoUrl ?? '' } : {}),
+					...(videoMimeType !== undefined ? { videoMimeType } : {}),
+					...(isLegacy !== undefined ? { isLegacy } : {}),
 					...(status !== undefined ? { status } : {}),
 					...(sortOrder !== undefined ? { sortOrder } : {}),
 					...(downloadPolicy !== undefined ? { downloadPolicy } : {}),
@@ -266,7 +283,8 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 				title,
 				summary,
 				description,
-				youtubeUrl,
+				videoUrl,
+				videoMimeType,
 				autoPublish,
 				members,
 			} = parseBody(SubmitProjectPayload, rawPayload);
@@ -313,7 +331,8 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 						title,
 						summary,
 						description,
-						youtubeUrl,
+						videoUrl,
+						videoMimeType,
 						status,
 						creatorId: creatorUser.id,
 						members: {

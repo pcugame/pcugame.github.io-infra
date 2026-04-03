@@ -55,7 +55,7 @@ export default function GameUploadWidget({ projectId }: Props) {
 		const f = e.target.files?.[0] ?? null;
 		setFile(f);
 		setError(null);
-		setResumeSession(null);
+		// Do NOT clear resumeSession here — user needs it to resume after re-selecting the file
 	}, []);
 
 	const doUpload = useCallback(async (

@@ -6,9 +6,26 @@ import { notFound, forbidden } from '../../shared/errors.js';
 import { buildStoragePath } from '../../shared/storage-path.js';
 import { requireLogin } from '../../plugins/auth.js';
 import { loadProjectWithAccess } from '../admin/project-access.js';
+import { DownloadRateLimiter } from '../../shared/download-rate-limit.js';
+import { logger } from '../../lib/logger.js';
+
+// 15분 안에 동일 IP에서 30회 초과 시 영구 차단
+export const gameDownloadLimiter = new DownloadRateLimiter({ windowMs: 15 * 60 * 1000, maxHits: 30 });
 
 export async function assetsRoutes(app: FastifyInstance): Promise<void> {
   const cfg = env();
+
+  // Load banned IPs from DB into memory on startup
+  try {
+    const banned = await prisma.bannedIp.findMany({ select: { ip: true } });
+    gameDownloadLimiter.loadBannedIps(banned.map((b) => b.ip));
+    if (banned.length > 0) {
+      logger.info(`Loaded ${banned.length} banned IPs`);
+    }
+  } catch {
+    // Table may not exist yet (migration pending) — proceed without cache
+    logger.warn('Could not load banned IPs (migration may be pending)');
+  }
 
   // GET /api/assets/public/:storageKey
   app.get<{ Params: { storageKey: string } }>(
@@ -47,16 +64,34 @@ export async function assetsRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!asset) throw notFound('Asset not found');
 
-      const policy = asset.project.downloadPolicy;
-      if (policy === 'NONE') throw forbidden('Download not allowed');
+      // Game files (ZIP) are publicly downloadable, but abusers get permanently banned.
+      if (asset.kind === 'GAME') {
+        const result = gameDownloadLimiter.check(request.ip);
+        if (result === 'ban') {
+          // Persist the ban to DB
+          await prisma.bannedIp.upsert({
+            where: { ip: request.ip },
+            create: { ip: request.ip, reason: `Rate limit exceeded (game download)` },
+            update: {},
+          }).catch((err) => logger.error({ err }, 'Failed to persist IP ban'));
 
-      if (policy === 'ADMIN_ONLY') {
-        const user = request.currentUser;
-        if (!user) throw forbidden('Login required');
-        if (user.role !== 'ADMIN' && user.role !== 'OPERATOR')
-          throw forbidden('Insufficient permissions');
-      } else if (policy === 'SCHOOL_ONLY') {
-        if (!request.currentUser) throw forbidden('Login required');
+          throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
+        }
+      }
+
+      // Other protected assets still respect the project's downloadPolicy.
+      if (asset.kind !== 'GAME') {
+        const policy = asset.project.downloadPolicy;
+        if (policy === 'NONE') throw forbidden('Download not allowed');
+
+        if (policy === 'ADMIN_ONLY') {
+          const user = request.currentUser;
+          if (!user) throw forbidden('Login required');
+          if (user.role !== 'ADMIN' && user.role !== 'OPERATOR')
+            throw forbidden('Insufficient permissions');
+        } else if (policy === 'SCHOOL_ONLY') {
+          if (!request.currentUser) throw forbidden('Login required');
+        }
       }
 
       const filePath = buildStoragePath(cfg.UPLOAD_ROOT_PROTECTED, storageKey);

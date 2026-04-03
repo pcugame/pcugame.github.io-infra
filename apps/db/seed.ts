@@ -19,7 +19,9 @@
  *       "title": "게임 제목",
  *       "summary": "한 줄 소개",
  *       "description": "상세 설명",
- *       "youtubeUrl": "https://youtube.com/...",
+ *       "isLegacy": true,
+ *       "videoUrl": "https://nas.example.com/video/trailer.mp4",
+ *       "videoMimeType": "video/mp4",
  *       "status": "PUBLISHED",
  *       "members": [
  *         { "name": "홍길동", "studentId": "20240001" }
@@ -127,7 +129,9 @@ interface ImportProject {
   slug?: string;
   summary?: string;
   description?: string;
-  youtubeUrl?: string;
+  isLegacy?: boolean;
+  videoUrl?: string;
+  videoMimeType?: string;
   status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   downloadPolicy?: 'NONE' | 'PUBLIC' | 'SCHOOL_ONLY' | 'ADMIN_ONLY';
   githubUrl?: string;
@@ -210,7 +214,9 @@ async function importFromJson(filePath: string, creatorId: string) {
           title: p.title,
           summary: p.summary ?? '',
           description: p.description ?? '',
-          youtubeUrl: p.youtubeUrl ?? '',
+          isLegacy: p.isLegacy ?? false,
+          videoUrl: p.videoUrl ?? '',
+          videoMimeType: p.videoMimeType ?? '',
           status: p.status ?? 'PUBLISHED',
           downloadPolicy: p.downloadPolicy ?? 'PUBLIC',
           githubUrl: p.githubUrl ?? '',

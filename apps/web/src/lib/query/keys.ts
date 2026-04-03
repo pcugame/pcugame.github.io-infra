@@ -16,4 +16,5 @@ export const queryKeys = {
   adminYears: ['adminYears'] as const,
   adminProjects: ['adminProjects'] as const,
   adminProject: (id: string) => ['adminProject', id] as const,
+  adminBannedIps: ['adminBannedIps'] as const,
 } as const;

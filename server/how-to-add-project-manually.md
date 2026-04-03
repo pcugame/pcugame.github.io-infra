@@ -73,7 +73,7 @@ cd /srv/graduationproject_v2/server
 - slug
 - 한 줄 소개
 - 상세 설명
-- YouTube URL
+- 영상 URL (NAS)
 - 상태
 - 다운로드 정책
 - 멤버 이름/학번
@@ -93,7 +93,7 @@ cd /srv/graduationproject_v2/server
 우주 정거장을 배경으로 한 협동 퍼즐 게임입니다.
 두 플레이어가 각자 다른 능력을 사용해 스테이지를 해결합니다.
 
-YouTube URL [선택]: https://www.youtube.com/watch?v=example123
+영상 URL (NAS) [선택]: https://www.youtube.com/watch?v=example123
 상태 (DRAFT/PUBLISHED/ARCHIVED) [PUBLISHED]: PUBLISHED
 다운로드 정책 (NONE/PUBLIC/SCHOOL_ONLY/ADMIN_ONLY) [PUBLIC]: PUBLIC
 
@@ -124,7 +124,7 @@ YouTube URL [선택]: https://www.youtube.com/watch?v=example123
       "title": "별빛 모험",
       "summary": "2인 협동 퍼즐 어드벤처 게임",
       "description": "우주 정거장을 배경으로 한 협동 퍼즐 게임입니다.\n두 플레이어가 각자 다른 능력을 사용해 스테이지를 해결합니다.",
-      "youtubeUrl": "https://www.youtube.com/watch?v=example123",
+      "videoUrl": "https://www.youtube.com/watch?v=example123",
       "status": "PUBLISHED",
       "downloadPolicy": "PUBLIC",
       "slug": "starlight-adventure",
@@ -161,7 +161,7 @@ YouTube URL [선택]: https://www.youtube.com/watch?v=example123
 - `상세 설명`
   - 여러 줄 입력 가능합니다.
   - 빈 줄을 입력하면 종료됩니다.
-- `YouTube URL`
+- `영상 URL (NAS)`
   - 없으면 비워도 됩니다.
 - `상태`
   - `DRAFT`, `PUBLISHED`, `ARCHIVED` 중 하나입니다.
@@ -207,7 +207,7 @@ YouTube URL [선택]: https://www.youtube.com/watch?v=example123
       "slug": "starlight-adventure",
       "summary": "2인 협동 퍼즐 어드벤처 게임",
       "description": "우주 정거장을 배경으로 한 협동 퍼즐 게임",
-      "youtubeUrl": "https://www.youtube.com/watch?v=example123",
+      "videoUrl": "https://www.youtube.com/watch?v=example123",
       "status": "PUBLISHED",
       "downloadPolicy": "PUBLIC",
       "members": [

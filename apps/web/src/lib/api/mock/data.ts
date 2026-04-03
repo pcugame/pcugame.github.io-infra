@@ -1,30 +1,67 @@
 // ── Mock 데이터 ─────────────────────────────────────────────
 // VITE_MOCK=true 일 때 실제 API 대신 사용되는 가짜 데이터.
-// legacy-import.json의 실제 구조를 참고하여 작성.
+// ⚠ 이 파일은 contracts 타입을 직접 import하지 않는다.
+//   contracts가 변경되어도 이 파일이 빌드를 깨뜨리지 않도록 의도적으로 분리.
+//   mock 데이터는 개발 편의 용도이므로, 실제 API 응답과 형태가 달라도 무방하다.
 
-import type {
-	PublicYearItem,
-	PublicProjectCard,
-	PublicProjectDetailResponse,
-	AuthUser,
-	AdminYearItem,
-	AdminProjectItem,
-	AdminProjectDetail,
-} from '../../../contracts';
+// ── 사용자 (역할 전환 가능) ──────────────────────────────────
+// localStorage의 'mock-role' 키로 전환: 'ADMIN' | 'OPERATOR' | 'USER'
+// 브라우저 콘솔에서: localStorage.setItem('mock-role', 'USER') 후 새로고침
 
-// ── 사용자 ──────────────────────────────────────────────────
+interface MockUser {
+	id: string;
+	email: string;
+	name: string;
+	role: string;
+}
 
-export const MOCK_USER: AuthUser = {
-	id: 'mock-user-1',
-	email: 'test-admin@test.pcu.ac.kr',
-	name: '테스트',
-	role: 'ADMIN',
+const MOCK_USERS: Record<string, MockUser> = {
+	ADMIN: {
+		id: 'mock-admin',
+		email: 'admin@test.pcu.ac.kr',
+		name: '관리자',
+		role: 'ADMIN',
+	},
+	OPERATOR: {
+		id: 'mock-operator',
+		email: 'operator@test.pcu.ac.kr',
+		name: '운영자',
+		role: 'OPERATOR',
+	},
+	USER: {
+		id: 'mock-user',
+		email: 'student@test.pcu.ac.kr',
+		name: '학생',
+		role: 'USER',
+	},
 };
+
+export function getMockRole(): string {
+	try {
+		const v = localStorage.getItem('mock-role');
+		if (v && v in MOCK_USERS) return v;
+	} catch { /* noop */ }
+	return 'ADMIN';
+}
+
+export function getMockUser(): MockUser {
+	return MOCK_USERS[getMockRole()];
+}
+
+// 하위 호환 (기존 handler.ts에서 MOCK_USER 참조)
+export const MOCK_USER = MOCK_USERS.ADMIN;
 
 // ── 연도 ────────────────────────────────────────────────────
 // 실제 데이터: "{year} 졸업작품전" 형식
 
-export const MOCK_YEARS: PublicYearItem[] = [
+interface MockYearItem {
+	id: string;
+	year: number;
+	title: string;
+	projectCount: number;
+}
+
+export const MOCK_YEARS: MockYearItem[] = [
 	{ id: 'y1', year: 2025, title: '2025 졸업작품전', projectCount: 6 },
 	{ id: 'y2', year: 2024, title: '2024 졸업작품전', projectCount: 5 },
 	{ id: 'y3', year: 2023, title: '2023 졸업작품전', projectCount: 4 },
@@ -34,7 +71,16 @@ export const MOCK_YEARS: PublicYearItem[] = [
 // ── 프로젝트 카드 ────────────────────────────────────────────
 // 실제 패턴: 영문 제목 다수, 한글 제목 일부, 1~3인 팀, 학번은 20XX0XX 형식
 
-const MOCK_PROJECTS_2025: PublicProjectCard[] = [
+interface MockProjectCard {
+	id: string;
+	slug: string;
+	title: string;
+	summary?: string;
+	posterUrl?: string;
+	members: { name: string; studentId: string }[];
+}
+
+const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
 		id: 'p1', slug: 'dragon-slayer', title: 'Dragon Slayer',
 		summary: '판타지 세계관 기반 3D 액션 RPG',
@@ -89,7 +135,7 @@ const MOCK_PROJECTS_2025: PublicProjectCard[] = [
 	},
 ];
 
-const MOCK_PROJECTS_2024: PublicProjectCard[] = [
+const MOCK_PROJECTS_2024: MockProjectCard[] = [
 	{
 		id: 'p7', slug: 'music-library', title: 'MUSIC LIBRARY',
 		summary: '음악 감상과 연동되는 비주얼 인터랙션 게임',
@@ -135,7 +181,7 @@ const MOCK_PROJECTS_2024: PublicProjectCard[] = [
 	},
 ];
 
-const MOCK_PROJECTS_2023: PublicProjectCard[] = [
+const MOCK_PROJECTS_2023: MockProjectCard[] = [
 	{
 		id: 'p12', slug: 'lost-bible', title: 'Lost Bible',
 		summary: '고대 유적을 탐험하는 퍼즐 어드벤처',
@@ -171,7 +217,7 @@ const MOCK_PROJECTS_2023: PublicProjectCard[] = [
 	},
 ];
 
-const MOCK_PROJECTS_2022: PublicProjectCard[] = [
+const MOCK_PROJECTS_2022: MockProjectCard[] = [
 	{
 		id: 'p16', slug: 'escapafe', title: "EsC'afe",
 		summary: '카페를 배경으로 한 탈출 퍼즐 게임',
@@ -200,7 +246,7 @@ const MOCK_PROJECTS_2022: PublicProjectCard[] = [
 	},
 ];
 
-export const MOCK_YEAR_PROJECTS: Record<number, PublicProjectCard[]> = {
+export const MOCK_YEAR_PROJECTS: Record<number, MockProjectCard[]> = {
 	2025: MOCK_PROJECTS_2025,
 	2024: MOCK_PROJECTS_2024,
 	2023: MOCK_PROJECTS_2023,
@@ -209,7 +255,8 @@ export const MOCK_YEAR_PROJECTS: Record<number, PublicProjectCard[]> = {
 
 // ── 프로젝트 상세 빌더 ──────────────────────────────────────
 
-function buildDetail(card: PublicProjectCard, year: number): PublicProjectDetailResponse {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildDetail(card: MockProjectCard, year: number): any {
 	return {
 		id: card.id,
 		year,
@@ -217,7 +264,8 @@ function buildDetail(card: PublicProjectCard, year: number): PublicProjectDetail
 		title: card.title,
 		summary: card.summary,
 		description: `${card.title}은(는) 배재대학교 게임공학과 ${year}년 졸업작품으로 제작된 프로젝트입니다.\n\n${card.summary ?? ''}\n\nPC 플랫폼 대상으로 개발되었습니다.`,
-		youtubeUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+		isLegacy: year <= 2024,
+		video: null,
 		members: card.members.map((m, i) => ({ id: `m-${card.id}-${i}`, name: m.name, studentId: m.studentId })),
 		images: [
 			{ id: `img-${card.id}-poster`, url: card.posterUrl ?? `https://placehold.co/800x1120/333/eee?text=${encodeURIComponent(card.title)}`, kind: 'POSTER' },
@@ -225,13 +273,14 @@ function buildDetail(card: PublicProjectCard, year: number): PublicProjectDetail
 			{ id: `img-${card.id}-2`, url: `https://placehold.co/1280x720/333/ccc?text=${encodeURIComponent(card.title)}+Screenshot+2`, kind: 'IMAGE' },
 		],
 		posterUrl: card.posterUrl,
-		gameDownloadUrl: '#mock-download',
+		gameDownloadUrl: year <= 2024 ? undefined : '#mock-download',
 		downloadPolicy: 'PUBLIC',
 		status: 'PUBLISHED',
 	};
 }
 
-export function findProjectDetail(idOrSlug: string, year?: number): PublicProjectDetailResponse | undefined {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function findProjectDetail(idOrSlug: string, year?: number): any | undefined {
 	const yearsToSearch = year ? [year] : [2025, 2024, 2023, 2022];
 	for (const y of yearsToSearch) {
 		const cards = MOCK_YEAR_PROJECTS[y];
@@ -244,15 +293,18 @@ export function findProjectDetail(idOrSlug: string, year?: number): PublicProjec
 
 // ── Admin 데이터 ─────────────────────────────────────────────
 
-export const MOCK_ADMIN_YEARS: AdminYearItem[] = MOCK_YEARS.map((y, i) => ({
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const MOCK_ADMIN_YEARS: any[] = MOCK_YEARS.map((y, i) => ({
 	...y,
 	isUploadEnabled: i === 0,
 	sortOrder: i,
 	projectCount: y.projectCount,
 }));
 
-export function buildAdminProjectItems(): AdminProjectItem[] {
-	const items: AdminProjectItem[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function buildAdminProjectItems(): any[] {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const items: any[] = [];
 	for (const [yearStr, cards] of Object.entries(MOCK_YEAR_PROJECTS)) {
 		for (const card of cards) {
 			items.push({
@@ -265,16 +317,18 @@ export function buildAdminProjectItems(): AdminProjectItem[] {
 	return items;
 }
 
-export function buildAdminProjectDetail(id: string): AdminProjectDetail | undefined {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function buildAdminProjectDetail(id: string): any | undefined {
 	const detail = findProjectDetail(id);
 	if (!detail) return undefined;
 	return {
 		id: detail.id, title: detail.title, slug: detail.slug, year: detail.year,
-		summary: detail.summary, description: detail.description, youtubeUrl: detail.youtubeUrl,
+		summary: detail.summary, description: detail.description,
+		isLegacy: detail.isLegacy, video: detail.video,
 		status: 'PUBLISHED', sortOrder: 0, downloadPolicy: detail.downloadPolicy,
 		posterAssetId: `img-${detail.id}-poster`, posterUrl: detail.posterUrl,
-		members: detail.members.map((m, i) => ({ ...m, sortOrder: i })),
-		assets: detail.images.map((img) => ({
+		members: detail.members.map((m: { id: string; name: string; studentId: string }, i: number) => ({ ...m, sortOrder: i, userId: null })),
+		assets: detail.images.map((img: { id: string; kind: string; url: string }) => ({
 			id: img.id, kind: img.kind, url: img.url, originalName: `${img.id}.webp`, size: 102400,
 		})),
 	};

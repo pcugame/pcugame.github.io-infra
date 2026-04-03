@@ -120,7 +120,7 @@ do_add_project() {
   local slug=""
   local summary=""
   local description=""
-  local youtube_url=""
+  local video_url=""
   local status=""
   local download_policy=""
   local members_json=""
@@ -162,7 +162,7 @@ do_add_project() {
     description+="$line"
   done
 
-  read -rp "YouTube URL [선택]: " youtube_url
+  read -rp "영상 URL (NAS) [선택]: " video_url
   read -rp "상태 (DRAFT/PUBLISHED/ARCHIVED) [PUBLISHED]: " status
   status="${status:-PUBLISHED}"
   case "$status" in
@@ -206,7 +206,7 @@ do_add_project() {
   append_json_field project_fields "title" "$title"
   append_json_field project_fields "summary" "$summary"
   append_json_field project_fields "description" "$description"
-  append_json_field project_fields "youtubeUrl" "$youtube_url"
+  append_json_field project_fields "videoUrl" "$video_url"
   append_json_field project_fields "status" "$status"
   append_json_field project_fields "downloadPolicy" "$download_policy"
 

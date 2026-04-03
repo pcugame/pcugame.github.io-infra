@@ -1,11 +1,19 @@
 import type { ReactElement } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
+import { useMe } from '../../features/auth';
 
-const NAV_ITEMS = [
+type NavItem = { to: string; label: string; icon: string; end: boolean };
+
+const ADMIN_NAV: NavItem[] = [
   { to: '/admin/projects', label: '작품 관리', icon: 'grid', end: true },
   { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
   { to: '/admin/years', label: '연도 관리', icon: 'calendar', end: false },
-] as const;
+  { to: '/admin/banned-ips', label: 'IP 차단 관리', icon: 'shield', end: false },
+];
+
+const USER_NAV: NavItem[] = [
+  { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
+];
 
 const ICONS: Record<string, ReactElement> = {
   grid: (
@@ -23,19 +31,28 @@ const ICONS: Record<string, ReactElement> = {
       <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
     </svg>
   ),
+  shield: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  ),
 };
 
 export function AdminLayout() {
+  const { user } = useMe();
+  const isAdmin = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
+  const navItems = isAdmin ? ADMIN_NAV : USER_NAV;
+  const title = isAdmin ? '관리자 패널' : '작품 등록';
+
   return (
     <div className="admin-layout">
-      {/* 데스크톱 사이드바 (모바일에서는 상단 수평 탭으로 전환) */}
       <nav className="admin-sidebar">
         <div className="admin-sidebar__header">
           <span className="admin-sidebar__eyebrow">게임공학과 작품전시</span>
-          <h3 className="admin-sidebar__title">관리자 패널</h3>
+          <h3 className="admin-sidebar__title">{title}</h3>
         </div>
         <ul className="admin-sidebar__nav">
-          {NAV_ITEMS.map(({ to, label, icon, end }) => (
+          {navItems.map(({ to, label, icon, end }) => (
             <li key={to}>
               <NavLink to={to} end={end}>
                 {ICONS[icon]}

@@ -157,14 +157,19 @@ describe('UpdateProjectBody', () => {
     expect(() => UpdateProjectBody.parse({ title: '' })).toThrow();
   });
 
-  it('accepts youtubeUrl as empty string', () => {
-    const result = UpdateProjectBody.parse({ youtubeUrl: '' });
-    expect(result.youtubeUrl).toBe('');
+  it('accepts videoUrl as empty string', () => {
+    const result = UpdateProjectBody.parse({ videoUrl: '' });
+    expect(result.videoUrl).toBe('');
   });
 
-  it('accepts youtubeUrl as null', () => {
-    const result = UpdateProjectBody.parse({ youtubeUrl: null });
-    expect(result.youtubeUrl).toBeNull();
+  it('accepts videoUrl as null', () => {
+    const result = UpdateProjectBody.parse({ videoUrl: null });
+    expect(result.videoUrl).toBeNull();
+  });
+
+  it('accepts isLegacy boolean', () => {
+    const result = UpdateProjectBody.parse({ isLegacy: true });
+    expect(result.isLegacy).toBe(true);
   });
 
   it('rejects negative sortOrder', () => {

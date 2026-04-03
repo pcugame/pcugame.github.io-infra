@@ -61,6 +61,7 @@ for (const file of YEAR_FILES) {
     const project = {
       year,
       title: entry.title,
+      isLegacy: true,
       status: 'PUBLISHED',
       downloadPolicy: 'PUBLIC',
       platforms,

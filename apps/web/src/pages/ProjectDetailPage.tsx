@@ -2,8 +2,8 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
-import { toYouTubeEmbedUrl } from '../lib/utils';
 import { LoadingSpinner, ErrorMessage } from '../components/common';
+import { ProjectVideo } from '../components/project';
 
 export default function ProjectDetailPage() {
   const { year: yearParam, slug, projectId } = useParams<{
@@ -27,8 +27,6 @@ export default function ProjectDetailPage() {
   if (error) return <ErrorMessage error={error} onReset={() => refetch()} />;
   if (!project) return null;
 
-  const embedUrl = toYouTubeEmbedUrl(project.youtubeUrl);
-  const posterImages = project.images.filter((img) => img.kind === 'POSTER');
   const galleryImages = project.images.filter((img) => img.kind === 'IMAGE');
 
   return (
@@ -40,7 +38,21 @@ export default function ProjectDetailPage() {
         </Link>
       )}
 
-      <h1>{project.title}</h1>
+      <h1>
+        {project.title}
+        {project.isLegacy && (
+          <span className="legacy-badge" title="아카이브 자료 — 일부 정보가 누락되었을 수 있습니다">
+            아카이브
+          </span>
+        )}
+      </h1>
+
+      {/* Legacy 안내 */}
+      {project.isLegacy && (
+        <p className="legacy-notice">
+          이 프로젝트는 아카이브 자료입니다. 일부 자료(실행 파일, 스크린샷 등)가 누락되었을 수 있습니다.
+        </p>
+      )}
 
       {/* 참여 학생 */}
       <section className="project-detail__members">
@@ -76,18 +88,15 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* YouTube */}
-      {embedUrl && (
+      {/* 영상 (NAS 자체 호스팅) */}
+      {(project.video || project.posterUrl) && (
         <section className="project-detail__video">
           <h3>영상</h3>
-          <div className="video-container">
-            <iframe
-              src={embedUrl}
-              title={`${project.title} 영상`}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
-          </div>
+          <ProjectVideo
+            video={project.video}
+            posterUrl={project.posterUrl}
+            title={project.title}
+          />
         </section>
       )}
 
@@ -100,9 +109,6 @@ export default function ProjectDetailPage() {
               <img key={img.id} src={img.url} alt="게임 스크린샷" loading="lazy" />
             ))}
           </div>
-          {posterImages.length > 0 && posterImages.map((img) => (
-            <img key={img.id} src={img.url} alt="포스터" loading="lazy" className="gallery-poster" />
-          ))}
         </section>
       )}
 

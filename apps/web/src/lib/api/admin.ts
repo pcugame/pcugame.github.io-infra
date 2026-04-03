@@ -101,3 +101,22 @@ export const adminAssetApi = {
     return api.delete<void>(`/api/admin/assets/${assetId}`);
   },
 };
+
+// ── Banned IPs ──────────────────────────────────────────────
+
+export interface BannedIpItem {
+  id: string;
+  ip: string;
+  reason: string;
+  createdAt: string;
+}
+
+export const adminBannedIpApi = {
+  list() {
+    return api.get<{ items: BannedIpItem[] }>('/api/admin/banned-ips');
+  },
+
+  unban(id: string) {
+    return api.delete<void>(`/api/admin/banned-ips/${id}`);
+  },
+};

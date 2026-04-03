@@ -90,7 +90,9 @@ model Project {
   title          String
   summary        String         @default("")
   description    String         @default("")
-  youtubeUrl     String         @default("") @map("youtube_url")
+  isLegacy       Boolean        @default(false) @map("is_legacy")
+  videoUrl       String         @default("") @map("video_url")
+  videoMimeType  String         @default("") @map("video_mime_type")
   status         ProjectStatus  @default(DRAFT)
   sortOrder      Int            @default(0) @map("sort_order")
   downloadPolicy DownloadPolicy @default(PUBLIC) @map("download_policy")
@@ -202,4 +204,15 @@ model GameUploadSession {
   @@index([userId])
   @@index([status, expiresAt])
   @@map("game_upload_sessions")
+}
+
+/// IP addresses permanently banned from downloading game files.
+/// Auto-banned when download rate limit is exceeded; admins can unban.
+model BannedIp {
+  id        String   @id @default(uuid())
+  ip        String   @unique
+  reason    String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("banned_ips")
 }
