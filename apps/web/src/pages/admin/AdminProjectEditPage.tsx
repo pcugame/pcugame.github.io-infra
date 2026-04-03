@@ -443,7 +443,6 @@ export default function AdminProjectEditPage() {
           {([
             { label: '이미지 추가', kind: 'IMAGE', accept: 'image/jpeg,image/png,image/webp' },
             { label: '포스터 교체', kind: 'POSTER', accept: 'image/jpeg,image/png,image/webp' },
-            { label: '게임 파일 (ZIP)', kind: 'GAME', accept: '.zip' },
           ] as const).map(({ label, kind, accept }) => (
             <div key={kind} className="form-field">
               <label>{label}</label>
