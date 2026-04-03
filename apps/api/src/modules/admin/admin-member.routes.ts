@@ -35,13 +35,14 @@ export async function adminMemberRoutes(app: FastifyInstance): Promise<void> {
 			});
 			if (!member) throw notFound('Member not found');
 
-			const { name, studentId, sortOrder } = parseBody(UpdateMemberBody, request.body);
+			const { name, studentId, sortOrder, userId } = parseBody(UpdateMemberBody, request.body);
 			await prisma.projectMember.update({
 				where: { id: member.id },
 				data: {
 					...(name !== undefined ? { name } : {}),
 					...(studentId !== undefined ? { studentId } : {}),
 					...(sortOrder !== undefined ? { sortOrder } : {}),
+					...(userId !== undefined ? { userId } : {}),
 				},
 			});
 			reply.status(204).send();

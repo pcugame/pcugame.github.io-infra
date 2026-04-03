@@ -2741,6 +2741,16 @@ fieldset.status-section legend {
   text-decoration: none;
 }
 
+.home-topnav__btn--upload {
+  background: var(--h-primary);
+  color: #ffffff;
+}
+
+.home-topnav__btn--upload:hover {
+  background: var(--h-primary-hover, #1a56db);
+  color: #ffffff;
+}
+
 @media (max-width: 640px) {
   .home-topnav__inner {
     padding-top: 0.75rem;

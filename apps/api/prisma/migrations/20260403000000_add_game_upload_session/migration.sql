@@ -32,3 +32,12 @@ ALTER TABLE "game_upload_sessions" ADD CONSTRAINT "game_upload_sessions_project_
 
 -- AddForeignKey
 ALTER TABLE "game_upload_sessions" ADD CONSTRAINT "game_upload_sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AlterTable: add userId to project_members for membership-based access
+ALTER TABLE "project_members" ADD COLUMN "user_id" TEXT;
+
+-- CreateIndex
+CREATE INDEX "project_members_user_id_idx" ON "project_members"("user_id");
+
+-- AddForeignKey
+ALTER TABLE "project_members" ADD CONSTRAINT "project_members_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;

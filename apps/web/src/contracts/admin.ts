@@ -61,7 +61,7 @@ export type AdminProjectDetail = {
   downloadPolicy: DownloadPolicy;
   posterAssetId?: string;
   posterUrl?: string;
-  members: { id: string; name: string; studentId: string; sortOrder: number }[];
+  members: { id: string; name: string; studentId: string; sortOrder: number; userId: string | null }[];
   assets: {
     id: string;
     kind: AssetKind;

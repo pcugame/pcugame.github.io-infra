@@ -9,8 +9,8 @@ import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
  *
  * Rules:
  * - ADMIN / OPERATOR: always allowed (any project, any status).
- * - USER: must be the project creator. If `requireDraft` is true, the
- *   project must be in DRAFT status.
+ * - USER: must be the project creator OR a linked project member.
+ *   If `requireDraft` is true, the project must be in DRAFT status.
  *
  * Throws `forbidden` on denial. Does NOT check authentication (caller
  * must ensure the user is logged in before calling this).
@@ -20,11 +20,13 @@ export function assertWriteAccess(
 	creatorId: string,
 	userId: string,
 	projectStatus: string,
-	opts: { requireDraft?: boolean } = {},
+	opts: { requireDraft?: boolean; isMember?: boolean } = {},
 ): void {
 	if (role === 'ADMIN' || role === 'OPERATOR') return;
 
-	if (creatorId !== userId) throw forbidden('Not project owner');
+	if (creatorId !== userId && !opts.isMember) {
+		throw forbidden('Not project owner or member');
+	}
 	if (opts.requireDraft && projectStatus !== 'DRAFT') {
 		throw forbidden('Cannot edit non-draft project');
 	}
@@ -34,7 +36,7 @@ export function assertWriteAccess(
  * Load a project by ID and verify the current user has write access.
  *
  * - ADMIN / OPERATOR: always allowed.
- * - Other roles: must be the project creator.
+ * - Other roles: must be the project creator or a linked member (ProjectMember.userId).
  * - If `requireDraft` is true, non-privileged users can only edit DRAFT projects.
  */
 export async function loadProjectWithAccess(
@@ -48,6 +50,13 @@ export async function loadProjectWithAccess(
 	const project = await prisma.project.findUnique({ where: { id: projectId } });
 	if (!project) throw notFound('Project not found');
 
-	assertWriteAccess(user.role, project.creatorId, user.id, project.status, opts);
+	// Check if user is a linked member of this project
+	const isMember = user.role !== 'ADMIN' && user.role !== 'OPERATOR'
+		? !!(await prisma.projectMember.findFirst({
+				where: { projectId, userId: user.id },
+			}))
+		: false;
+
+	assertWriteAccess(user.role, project.creatorId, user.id, project.status, { ...opts, isMember });
 	return project;
 }

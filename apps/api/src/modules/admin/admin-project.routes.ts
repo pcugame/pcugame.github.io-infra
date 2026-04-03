@@ -53,7 +53,7 @@ function serializeProjectDetail(project: {
 	downloadPolicy: string;
 	posterAssetId: string | null;
 	poster: { storageKey: string; kind: AssetKind; status: string } | null;
-	members: { id: string; name: string; studentId: string; sortOrder: number }[];
+	members: { id: string; name: string; studentId: string; sortOrder: number; userId: string | null }[];
 	assets: { id: string; kind: AssetKind; storageKey: string; originalName: string; sizeBytes: bigint }[];
 }) {
 	return {
@@ -76,6 +76,7 @@ function serializeProjectDetail(project: {
 			name: m.name,
 			studentId: m.studentId,
 			sortOrder: m.sortOrder,
+			userId: m.userId,
 		})),
 		assets: project.assets.map((a) => ({
 			id: a.id,
@@ -100,7 +101,14 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 		const user = request.currentUser!;
 		const isPrivileged = user.role === 'ADMIN' || user.role === 'OPERATOR';
 		const projects = await prisma.project.findMany({
-			where: isPrivileged ? {} : { creatorId: user.id },
+			where: isPrivileged
+				? {}
+				: {
+						OR: [
+							{ creatorId: user.id },
+							{ members: { some: { userId: user.id } } },
+						],
+					},
 			orderBy: { createdAt: 'desc' },
 			include: { year: true, creator: true },
 		});
@@ -297,6 +305,7 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 
 			// ── DB transaction — if this fails, committed files are rolled back ─
 			const project = await prisma.$transaction(async (tx) => {
+				const creatorUser = request.currentUser!;
 				const p = await tx.project.create({
 					data: {
 						yearId: year.id,
@@ -306,12 +315,14 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 						description,
 						youtubeUrl,
 						status,
-						creatorId: request.currentUser!.id,
+						creatorId: creatorUser.id,
 						members: {
 							create: members.map((m, i) => ({
 								name: m.name,
 								studentId: m.studentId,
 								sortOrder: m.sortOrder ?? i,
+								// Auto-link creator to their own member entry (name match)
+								...(m.name === creatorUser.name ? { userId: creatorUser.id } : {}),
 							})),
 						},
 					},

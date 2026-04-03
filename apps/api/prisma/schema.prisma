@@ -62,6 +62,7 @@ model User {
 
   sessions       AuthSession[]       @relation("UserSessions")
   projects       Project[]           @relation("ProjectCreator")
+  memberships    ProjectMember[]     @relation("UserMemberships")
   gameUploads    GameUploadSession[] @relation("UserGameUploads")
 
   @@map("users")
@@ -117,6 +118,7 @@ model Project {
 model ProjectMember {
   id        String   @id @default(uuid())
   projectId String   @map("project_id")
+  userId    String?  @map("user_id")
   name      String
   studentId String   @default("") @map("student_id")
   sortOrder Int      @default(0) @map("sort_order")
@@ -124,8 +126,10 @@ model ProjectMember {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   project Project @relation("ProjectMembers", fields: [projectId], references: [id], onDelete: Cascade)
+  user    User?   @relation("UserMemberships", fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([projectId, sortOrder])
+  @@index([userId])
   @@map("project_members")
 }
 

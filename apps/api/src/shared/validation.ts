@@ -65,6 +65,7 @@ export const UpdateMemberBody = z.object({
   name: z.string().min(1).max(50).optional(),
   studentId: z.string().min(1).max(20).optional(),
   sortOrder: z.number().int().min(0).optional(),
+  userId: z.string().uuid().nullable().optional(),
 });
 
 // ── Poster ───────────────────────────────────────────────────
