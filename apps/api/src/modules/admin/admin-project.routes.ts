@@ -280,7 +280,7 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 			}
 
 			const {
-				year: yearNum,
+				yearId,
 				title,
 				summary,
 				description,
@@ -290,9 +290,9 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 				members,
 			} = parseBody(SubmitProjectPayload, rawPayload);
 
-			// Require year to exist and uploads to be allowed
-			const year = await prisma.year.findUnique({ where: { year: yearNum } });
-			assertUploadAllowed(year, yearNum, request.currentUser!.role);
+			// Require exhibition to exist and uploads to be allowed
+			const year = await prisma.year.findUnique({ where: { id: yearId } });
+			assertUploadAllowed(year, yearId, request.currentUser!.role);
 
 			// Generate unique slug
 			const baseSlug = toSlug(title);
@@ -374,13 +374,13 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 			const adminEditUrl = `${cfg.WEB_PUBLIC_URL}/admin/projects/${project.id}/edit`;
 			const publicUrl =
 				status === 'PUBLISHED'
-					? `${cfg.WEB_PUBLIC_URL}/years/${yearNum}/${slug}`
+					? `${cfg.WEB_PUBLIC_URL}/years/${year.year}/${slug}`
 					: undefined;
 
 			sendCreated(reply, {
 				id: project.id,
 				slug: project.slug,
-				year: yearNum,
+				year: year.year,
 				status,
 				adminEditUrl,
 				publicUrl,

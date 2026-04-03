@@ -3,7 +3,8 @@
 // client.ts의 request()에서 VITE_MOCK=true일 때만 호출된다.
 
 import {
-	MOCK_USER,
+	getMockUser,
+	getMockRole,
 	MOCK_YEARS,
 	MOCK_YEAR_PROJECTS,
 	MOCK_ADMIN_YEARS,
@@ -11,6 +12,15 @@ import {
 	buildAdminProjectItems,
 	buildAdminProjectDetail,
 } from './data';
+
+function requireAdmin(): void {
+	const role = getMockRole();
+	if (role !== 'ADMIN' && role !== 'OPERATOR') {
+		const err = new Error('Mock: forbidden');
+		Object.assign(err, { status: 403 });
+		throw err;
+	}
+}
 
 type MockRoute = {
 	pattern: RegExp;
@@ -21,11 +31,11 @@ const routes: MockRoute[] = [
 	// ── Auth ──
 	{
 		pattern: /^\/api\/me$/,
-		handler: () => ({ authenticated: true, user: MOCK_USER }),
+		handler: () => ({ authenticated: true, user: getMockUser() }),
 	},
 	{
 		pattern: /^\/api\/auth\/google$/,
-		handler: () => ({ user: MOCK_USER }),
+		handler: () => ({ user: getMockUser() }),
 	},
 	{
 		pattern: /^\/api\/auth\/logout$/,
@@ -53,10 +63,11 @@ const routes: MockRoute[] = [
 		},
 	},
 
-	// ── Admin Years ──
+	// ── Admin Years (OPERATOR/ADMIN only) ──
 	{
 		pattern: /^\/api\/admin\/years$/,
 		handler: (_match, method) => {
+			requireAdmin();
 			if (method === 'POST') return { id: 'new-year', year: 2026 };
 			return { items: MOCK_ADMIN_YEARS };
 		},
@@ -64,6 +75,7 @@ const routes: MockRoute[] = [
 	{
 		pattern: /^\/api\/admin\/years\/([^/]+)$/,
 		handler: (match) => {
+			requireAdmin();
 			return MOCK_ADMIN_YEARS.find((y) => y.id === match[1]) ?? MOCK_ADMIN_YEARS[0];
 		},
 	},
@@ -101,7 +113,10 @@ const routes: MockRoute[] = [
 	},
 	{
 		pattern: /^\/api\/admin\/projects$/,
-		handler: () => ({ items: buildAdminProjectItems() }),
+		handler: () => {
+			requireAdmin();
+			return { items: buildAdminProjectItems() };
+		},
 	},
 
 	// ── Admin Assets ──

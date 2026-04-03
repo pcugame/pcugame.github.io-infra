@@ -25,7 +25,7 @@ export function MobileBottomNav() {
 				<span>전시</span>
 			</NavLink>
 
-			{isAuthenticated && (
+			{isAuthenticated && user?.role === 'USER' && (
 				<NavLink to="/admin/projects/new" className="mobile-bottom-nav__item">
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<line x1="12" y1="5" x2="12" y2="19" />

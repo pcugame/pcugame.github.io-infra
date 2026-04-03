@@ -44,7 +44,7 @@ const SubmitMember = z.object({
 });
 
 export const SubmitProjectPayload = z.object({
-  year: z.number().int().min(2021).max(2100),
+  yearId: z.string().uuid('Invalid exhibition ID'),
   title: z.string().min(1).max(120),
   summary: z.string().max(300).optional().default(''),
   description: z.string().max(5000).optional().default(''),

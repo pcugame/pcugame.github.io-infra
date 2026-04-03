@@ -30,8 +30,10 @@ export async function adminYearRoutes(app: FastifyInstance): Promise<void> {
 		async (request, reply) => {
 			const { year, title, isUploadEnabled, sortOrder } = parseBody(CreateYearBody, request.body);
 
-			const existing = await prisma.year.findUnique({ where: { year } });
-			if (existing) throw conflict(`Year ${year} already exists`);
+			const existing = await prisma.year.findUnique({
+				where: { year_title: { year, title: title || '' } },
+			});
+			if (existing) throw conflict(`"${title || year}" 전시회가 이미 존재합니다`);
 
 			const created = await prisma.year.create({
 				data: { year, title, isUploadEnabled, sortOrder },

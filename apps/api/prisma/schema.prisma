@@ -70,7 +70,7 @@ model User {
 
 model Year {
   id        String   @id @default(uuid())
-  year      Int      @unique
+  year      Int
   title     String   @default("")
   isUploadEnabled Boolean  @default(true) @map("is_upload_enabled")
   sortOrder Int      @default(0) @map("sort_order")
@@ -79,6 +79,7 @@ model Year {
 
   projects Project[] @relation("YearProjects")
 
+  @@unique([year, title], name: "year_title")
   @@index([sortOrder, year])
   @@map("years")
 }

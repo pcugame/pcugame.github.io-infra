@@ -22,10 +22,18 @@ export type PublicProjectCard = {
   summary?: string;
   posterUrl?: string;
   members: { name: string; studentId: string }[];
+  exhibitionId?: string;
+  exhibitionTitle?: string;
+};
+
+export type PublicExhibition = {
+  id: string;
+  title: string;
 };
 
 export type PublicYearProjectsResponse = {
   year: number;
+  exhibitions: PublicExhibition[];
   items: PublicProjectCard[];
   empty: boolean;
 };

@@ -12,17 +12,18 @@ import { notFound, forbidden } from '../../shared/errors.js';
  */
 export function assertUploadAllowed(
 	year: Year | null,
-	yearNum: number,
+	yearIdentifier: string | number,
 	role: UserRole,
 ): asserts year is Year {
 	if (!year) {
-		throw notFound(`Year ${yearNum} does not exist. An operator must create it first.`);
+		throw notFound(`Exhibition ${yearIdentifier} does not exist. An operator must create it first.`);
 	}
 
 	const isPrivileged = role === 'ADMIN' || role === 'OPERATOR';
 	if (!year.isUploadEnabled && !isPrivileged) {
+		const label = year.title ? `"${year.title}" (${year.year})` : String(year.year);
 		throw forbidden(
-			`Upload is disabled for year ${yearNum}. Contact an operator to enable it.`,
+			`Upload is disabled for ${label}. Contact an operator to enable it.`,
 		);
 	}
 }

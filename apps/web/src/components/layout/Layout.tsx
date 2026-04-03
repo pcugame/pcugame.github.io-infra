@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Header } from './Header';
 import { MobileBottomNav } from './MobileBottomNav';
 import { MobileTopBar } from './MobileTopBar';
+import { MockRoleSwitcher } from '../common/MockRoleSwitcher';
 
 export function Layout() {
   const { pathname } = useLocation();
@@ -15,6 +16,7 @@ export function Layout() {
         <Outlet />
       </main>
       <MobileBottomNav />
+      <MockRoleSwitcher />
     </div>
   );
 }

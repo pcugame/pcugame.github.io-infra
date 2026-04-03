@@ -33,11 +33,14 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
     const yearNum = parseInt(request.params.year, 10);
     if (isNaN(yearNum)) throw notFound('Year not found');
 
-    const year = await prisma.year.findUnique({ where: { year: yearNum } });
-    if (!year) throw notFound('Year not found');
+    const yearRecords = await prisma.year.findMany({ where: { year: yearNum } });
+    if (yearRecords.length === 0) throw notFound('Year not found');
+
+    const yearIds = yearRecords.map((y) => y.id);
+    const yearMap = new Map(yearRecords.map((y) => [y.id, y]));
 
     const projects = await prisma.project.findMany({
-      where: { yearId: year.id, status: 'PUBLISHED' },
+      where: { yearId: { in: yearIds }, status: 'PUBLISHED' },
       orderBy: { sortOrder: 'asc' },
       include: {
         members: { orderBy: { sortOrder: 'asc' } },
@@ -45,16 +48,26 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
       },
     });
 
-    const items = projects.map((p) => ({
-      id: p.id,
-      slug: p.slug,
-      title: p.title,
-      summary: p.summary || undefined,
-      posterUrl: isPosterUrlSafe(p.poster) ? publicAssetUrl(p.poster!.storageKey) : undefined,
-      members: p.members.map((m) => ({ name: m.name, studentId: sanitizeStudentId(m.studentId) })),
+    const exhibitions = yearRecords.map((y) => ({
+      id: y.id,
+      title: y.title || `${yearNum} 전시`,
     }));
 
-    sendOk(reply, { year: yearNum, items, empty: items.length === 0 });
+    const items = projects.map((p) => {
+      const yr = yearMap.get(p.yearId);
+      return {
+        id: p.id,
+        slug: p.slug,
+        title: p.title,
+        summary: p.summary || undefined,
+        posterUrl: isPosterUrlSafe(p.poster) ? publicAssetUrl(p.poster!.storageKey) : undefined,
+        members: p.members.map((m) => ({ name: m.name, studentId: sanitizeStudentId(m.studentId) })),
+        exhibitionId: p.yearId,
+        exhibitionTitle: yr?.title || `${yearNum} 전시`,
+      };
+    });
+
+    sendOk(reply, { year: yearNum, exhibitions, items, empty: items.length === 0 });
   });
 
   // GET /api/public/projects/:idOrSlug?year=...
@@ -84,16 +97,16 @@ export async function publicRoutes(app: FastifyInstance): Promise<void> {
     }
 
     if (!project) {
-      let yearId: string | undefined;
+      let yearIds: string[] | undefined;
       if (yearNum !== undefined && !isNaN(yearNum)) {
-        const y = await prisma.year.findUnique({ where: { year: yearNum } });
-        yearId = y?.id;
+        const ys = await prisma.year.findMany({ where: { year: yearNum } });
+        if (ys.length > 0) yearIds = ys.map((y) => y.id);
       }
       project = await prisma.project.findFirst({
         where: {
           slug: idOrSlug,
           status: 'PUBLISHED',
-          ...(yearId ? { yearId } : {}),
+          ...(yearIds ? { yearId: { in: yearIds } } : {}),
         },
         include: includeSpec,
       });
