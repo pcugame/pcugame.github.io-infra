@@ -122,21 +122,43 @@ export default function AdminYearsPage() {
       {years.length === 0 ? (
         <EmptyState message="등록된 연도가 없습니다." />
       ) : (
-        <div className="admin-card">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>연도</th>
-              <th>제목</th>
-              <th>업로드</th>
-              <th>정렬</th>
-              <th>작품 수</th>
-              <th>관리</th>
-            </tr>
-          </thead>
-          <tbody>
+        <>
+          {/* Desktop: table */}
+          <div className="admin-card admin-desktop-only">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>연도</th>
+                  <th>제목</th>
+                  <th>업로드</th>
+                  <th>정렬</th>
+                  <th>작품 수</th>
+                  <th>관리</th>
+                </tr>
+              </thead>
+              <tbody>
+                {years.map((y) => (
+                  <YearRow
+                    key={y.id}
+                    year={y}
+                    isEditing={editingId === y.id}
+                    onEdit={() => setEditingId(y.id)}
+                    onCancel={() => setEditingId(null)}
+                    onSaved={() => {
+                      setEditingId(null);
+                      qc.invalidateQueries({ queryKey: queryKeys.adminYears });
+                      qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+                    }}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile: card list */}
+          <div className="admin-mobile-cards">
             {years.map((y) => (
-              <YearRow
+              <YearMobileCard
                 key={y.id}
                 year={y}
                 isEditing={editingId === y.id}
@@ -149,10 +171,129 @@ export default function AdminYearsPage() {
                 }}
               />
             ))}
-          </tbody>
-        </table>
-        </div>
+          </div>
+        </>
       )}
+    </div>
+  );
+}
+
+// ── 연도 모바일 카드 (모바일 전용) ──────────────────────────
+
+function YearMobileCard({
+  year,
+  isEditing,
+  onEdit,
+  onCancel,
+  onSaved,
+}: {
+  year: AdminYearItem;
+  isEditing: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const {
+    register,
+    handleSubmit,
+  } = useForm<UpdateYearInput>({
+    resolver: zodResolver(UpdateYearSchema),
+    defaultValues: {
+      title: year.title ?? '',
+      isUploadEnabled: year.isUploadEnabled,
+      sortOrder: year.sortOrder,
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (data: UpdateYearInput) =>
+      adminYearApi.update(year.id, {
+        title: data.title || undefined,
+        isUploadEnabled: data.isUploadEnabled,
+        sortOrder: data.sortOrder,
+      }),
+    onSuccess: () => onSaved(),
+  });
+
+  if (isEditing) {
+    return (
+      <div className="admin-ycard admin-ycard--editing">
+        <div className="admin-ycard__header">
+          <span className="admin-ycard__year">{year.year}</span>
+        </div>
+        <form
+          className="admin-ycard__form"
+          onSubmit={handleSubmit((d) => updateMutation.mutate(d))}
+        >
+          <div className="form-field" style={{ marginBottom: 0 }}>
+            <label htmlFor={`m-title-${year.id}`}>제목</label>
+            <input id={`m-title-${year.id}`} type="text" {...register('title')} />
+          </div>
+          <div className="admin-ycard__row">
+            <div className="form-field form-field--checkbox" style={{ marginBottom: 0 }}>
+              <label>
+                <input type="checkbox" {...register('isUploadEnabled')} />
+                업로드 허용
+              </label>
+            </div>
+            <div className="form-field" style={{ marginBottom: 0, flex: '0 0 auto' }}>
+              <label htmlFor={`m-sort-${year.id}`}>정렬</label>
+              <input
+                id={`m-sort-${year.id}`}
+                type="number"
+                {...register('sortOrder', { valueAsNumber: true })}
+                style={{ width: '70px' }}
+              />
+            </div>
+          </div>
+          <div className="admin-ycard__actions">
+            <button
+              type="submit"
+              className="btn btn--primary btn--small"
+              disabled={updateMutation.isPending}
+            >
+              {updateMutation.isPending ? '저장 중…' : '저장'}
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary btn--small"
+              onClick={onCancel}
+            >
+              취소
+            </button>
+          </div>
+          {updateMutation.error && (
+            <span className="field-error">
+              {getApiErrorMessage(updateMutation.error)}
+            </span>
+          )}
+        </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="admin-ycard">
+      <div className="admin-ycard__header">
+        <span className="admin-ycard__year">{year.year}</span>
+        <button className="btn btn--secondary btn--small" onClick={onEdit}>
+          수정
+        </button>
+      </div>
+      <div className="admin-ycard__details">
+        {year.title && (
+          <span className="admin-ycard__detail">
+            <span className="admin-ycard__label">제목</span> {year.title}
+          </span>
+        )}
+        <span className="admin-ycard__detail">
+          <span className="admin-ycard__label">업로드</span>{' '}
+          {year.isUploadEnabled ? '허용' : '잠금'}
+        </span>
+        <span className="admin-ycard__detail">
+          <span className="admin-ycard__label">작품</span> {year.projectCount}개
+        </span>
+      </div>
     </div>
   );
 }

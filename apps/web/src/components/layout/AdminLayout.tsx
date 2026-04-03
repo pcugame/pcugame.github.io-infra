@@ -28,6 +28,7 @@ const ICONS: Record<string, ReactElement> = {
 export function AdminLayout() {
   return (
     <div className="admin-layout">
+      {/* 데스크톱 사이드바 (모바일에서는 상단 수평 탭으로 전환) */}
       <nav className="admin-sidebar">
         <div className="admin-sidebar__header">
           <span className="admin-sidebar__eyebrow">게임공학과 작품전시</span>

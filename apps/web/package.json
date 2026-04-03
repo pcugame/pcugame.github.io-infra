@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:mock": "vite --mode mock",
     "build": "tsc -b && vite build && node scripts/post-build.mjs",
     "lint": "eslint .",
     "preview": "vite preview",

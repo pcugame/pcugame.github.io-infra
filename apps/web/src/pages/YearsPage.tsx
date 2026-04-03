@@ -13,13 +13,9 @@ export default function YearsPage() {
   const items = data?.items ?? [];
 
   return (
-    <div className="home-landing years-landing">
+    <div className="years-landing">
       <section className="years-hero">
-        <div className="years-hero__bg" aria-hidden="true">
-          <div className="years-hero__glow" />
-        </div>
         <div className="container">
-          <p className="home-eyebrow">Archive</p>
           <h1 className="years-hero__title">연도별 전시</h1>
           <p className="years-hero__desc">
             배재대학교 게임공학과 졸업작품 아카이브를 연도별로 탐색해보세요.

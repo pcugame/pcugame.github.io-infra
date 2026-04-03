@@ -74,43 +74,71 @@ export default function AdminProjectsPage() {
       {filtered.length === 0 ? (
         <EmptyState message="조건에 맞는 작품이 없습니다." />
       ) : (
-        <div className="admin-card">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>제목</th>
-                <th>연도</th>
-                <th>상태</th>
-                <th>작성자</th>
-                <th>수정일</th>
-                <th>관리</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((p) => (
-                <tr key={p.id}>
-                  <td><strong>{p.title}</strong></td>
-                  <td><span className="admin-year-badge">{p.year}</span></td>
-                  <td>
-                    <span className={`badge ${STATUS_COLORS[p.status]}`}>
-                      {STATUS_LABELS[p.status]}
-                    </span>
-                  </td>
-                  <td>{p.createdByUserName ?? '-'}</td>
-                  <td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
-                  <td>
-                    <Link
-                      to={`/admin/projects/${p.id}/edit`}
-                      className="btn btn--small btn--secondary"
-                    >
-                      수정
-                    </Link>
-                  </td>
+        <>
+          {/* Desktop: table */}
+          <div className="admin-card admin-desktop-only">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>제목</th>
+                  <th>연도</th>
+                  <th>상태</th>
+                  <th>작성자</th>
+                  <th>수정일</th>
+                  <th>관리</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((p) => (
+                  <tr key={p.id}>
+                    <td><strong>{p.title}</strong></td>
+                    <td><span className="admin-year-badge">{p.year}</span></td>
+                    <td>
+                      <span className={`badge ${STATUS_COLORS[p.status]}`}>
+                        {STATUS_LABELS[p.status]}
+                      </span>
+                    </td>
+                    <td>{p.createdByUserName ?? '-'}</td>
+                    <td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
+                    <td>
+                      <Link
+                        to={`/admin/projects/${p.id}/edit`}
+                        className="btn btn--small btn--secondary"
+                      >
+                        수정
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile: card list */}
+          <div className="admin-mobile-cards">
+            {filtered.map((p) => (
+              <Link
+                to={`/admin/projects/${p.id}/edit`}
+                key={p.id}
+                className="admin-pcard"
+              >
+                <div className="admin-pcard__top">
+                  <h3 className="admin-pcard__title">{p.title}</h3>
+                  <span className={`badge ${STATUS_COLORS[p.status]}`}>
+                    {STATUS_LABELS[p.status]}
+                  </span>
+                </div>
+                <div className="admin-pcard__meta">
+                  <span className="admin-year-badge">{p.year}</span>
+                  <span className="admin-pcard__dot">&middot;</span>
+                  <span>{p.createdByUserName ?? '-'}</span>
+                  <span className="admin-pcard__dot">&middot;</span>
+                  <span>{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

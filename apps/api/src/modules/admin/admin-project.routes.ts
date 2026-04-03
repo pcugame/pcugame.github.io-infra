@@ -22,6 +22,7 @@ import type { AssetKind } from '@prisma/client';
 import { UploadPipeline } from '../assets/upload/index.js';
 import type { SavedFile } from '../assets/upload/index.js';
 import { loadProjectWithAccess } from './project-access.js';
+import { assertUploadAllowed } from './upload-guard.js';
 
 function assetUrl(storageKey: string, kind: AssetKind): string {
 	const base = env().API_PUBLIC_URL;
@@ -225,11 +226,9 @@ export async function adminProjectRoutes(app: FastifyInstance): Promise<void> {
 				members,
 			} = parseBody(SubmitProjectPayload, rawPayload);
 
-			// Find or create year
-			let year = await prisma.year.findUnique({ where: { year: yearNum } });
-			if (!year) {
-				year = await prisma.year.create({ data: { year: yearNum, isUploadEnabled: true } });
-			}
+			// Require year to exist and uploads to be allowed
+			const year = await prisma.year.findUnique({ where: { year: yearNum } });
+			assertUploadAllowed(year, yearNum, request.currentUser!.role);
 
 			// Generate unique slug
 			const baseSlug = toSlug(title);

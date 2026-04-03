@@ -1,10 +1,37 @@
 import type { FastifyRequest } from 'fastify';
 import type { Project } from '@prisma/client';
+import type { UserRole } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
 
 /**
- * Load a project by ID and verify the current user has access.
+ * Pure permission check — no DB access, fully testable.
+ *
+ * Rules:
+ * - ADMIN / OPERATOR: always allowed (any project, any status).
+ * - USER: must be the project creator. If `requireDraft` is true, the
+ *   project must be in DRAFT status.
+ *
+ * Throws `forbidden` on denial. Does NOT check authentication (caller
+ * must ensure the user is logged in before calling this).
+ */
+export function assertWriteAccess(
+	role: UserRole,
+	creatorId: string,
+	userId: string,
+	projectStatus: string,
+	opts: { requireDraft?: boolean } = {},
+): void {
+	if (role === 'ADMIN' || role === 'OPERATOR') return;
+
+	if (creatorId !== userId) throw forbidden('Not project owner');
+	if (opts.requireDraft && projectStatus !== 'DRAFT') {
+		throw forbidden('Cannot edit non-draft project');
+	}
+}
+
+/**
+ * Load a project by ID and verify the current user has write access.
  *
  * - ADMIN / OPERATOR: always allowed.
  * - Other roles: must be the project creator.
@@ -21,12 +48,6 @@ export async function loadProjectWithAccess(
 	const project = await prisma.project.findUnique({ where: { id: projectId } });
 	if (!project) throw notFound('Project not found');
 
-	if (user.role === 'ADMIN' || user.role === 'OPERATOR') return project;
-
-	if (project.creatorId !== user.id) throw forbidden('Not project owner');
-	if (opts.requireDraft && project.status !== 'DRAFT') {
-		throw forbidden('Cannot edit non-draft project');
-	}
-
+	assertWriteAccess(user.role, project.creatorId, user.id, project.status, opts);
 	return project;
 }

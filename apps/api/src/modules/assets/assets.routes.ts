@@ -5,6 +5,7 @@ import { env } from '../../config/env.js';
 import { notFound, forbidden } from '../../shared/errors.js';
 import { buildStoragePath } from '../../shared/storage-path.js';
 import { requireLogin } from '../../plugins/auth.js';
+import { loadProjectWithAccess } from '../admin/project-access.js';
 
 export async function assetsRoutes(app: FastifyInstance): Promise<void> {
   const cfg = env();
@@ -86,11 +87,8 @@ export async function assetsRoutes(app: FastifyInstance): Promise<void> {
       });
       if (!asset) throw notFound('Asset not found');
 
-      const user = request.currentUser!;
-      if (user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
-        if (asset.project.creatorId !== user.id) throw forbidden('Not allowed');
-        if (asset.project.status !== 'DRAFT') throw forbidden('Cannot edit non-draft project');
-      }
+      // Reuse centralized write-access check
+      await loadProjectWithAccess(request, asset.projectId, { requireDraft: true });
 
       await prisma.asset.update({ where: { id: asset.id }, data: { status: 'DELETING' } });
 

@@ -2,24 +2,35 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SubmitProjectPayloadSchema,
   type SubmitProjectPayloadInput,
 } from '../../contracts/schemas';
-import { adminProjectApi, getApiErrorMessage } from '../../lib/api';
+import { adminProjectApi, adminYearApi, getApiErrorMessage } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
+import { useMe } from '../../features/auth';
 
 export default function AdminProjectNewPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { user } = useMe();
+  const isPrivileged = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
+
+  // ── 연도 목록 (업로드 잠금 여부 표시) ──────────────────────
+  const { data: yearsData } = useQuery({
+    queryKey: queryKeys.adminYears,
+    queryFn: adminYearApi.list,
+  });
+  const years = yearsData?.items ?? [];
 
   // ── 폼 ──────────────────────────────────────────────────────
   const {
     register,
     control,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm<SubmitProjectPayloadInput>({
     resolver: zodResolver(SubmitProjectPayloadSchema),
@@ -38,6 +49,10 @@ export default function AdminProjectNewPage() {
     control,
     name: 'members',
   });
+
+  const selectedYear = watch('year');
+  const selectedYearItem = years.find((y) => y.year === selectedYear);
+  const isUploadLocked = selectedYearItem != null && !selectedYearItem.isUploadEnabled && !isPrivileged;
 
   // ── 파일 상태 ──────────────────────────────────────────────
   const [posterFile, setPosterFile] = useState<File | null>(null);
@@ -100,12 +115,31 @@ export default function AdminProjectNewPage() {
 
           <div className="form-field">
             <label htmlFor="year">연도 *</label>
-            <input
-              id="year"
-              type="number"
-              {...register('year', { valueAsNumber: true })}
-            />
+            {years.length > 0 ? (
+              <select
+                id="year"
+                {...register('year', { valueAsNumber: true })}
+              >
+                {years.map((y) => (
+                  <option key={y.id} value={y.year}>
+                    {y.year}{y.title ? ` — ${y.title}` : ''}
+                    {!y.isUploadEnabled ? ' (업로드 잠김)' : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="year"
+                type="number"
+                {...register('year', { valueAsNumber: true })}
+              />
+            )}
             {errors.year && <span className="field-error">{errors.year.message}</span>}
+            {isUploadLocked && (
+              <span className="field-error">
+                이 연도는 업로드가 잠겨 있습니다. 운영자에게 문의하세요.
+              </span>
+            )}
           </div>
 
           <div className="form-field">
@@ -270,7 +304,7 @@ export default function AdminProjectNewPage() {
           <button
             type="submit"
             className="btn btn--primary btn--large"
-            disabled={submitMutation.isPending}
+            disabled={submitMutation.isPending || isUploadLocked}
           >
             {submitMutation.isPending ? '등록 중…' : '작품 등록'}
           </button>

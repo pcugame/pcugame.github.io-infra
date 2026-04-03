@@ -6,6 +6,7 @@ import { registerCors } from './plugins/cors.js';
 import { registerCookie } from './plugins/cookie.js';
 import { registerMultipart } from './plugins/multipart.js';
 import { registerAuth } from './plugins/auth.js';
+import { registerCsrf } from './plugins/csrf.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { publicRoutes } from './modules/public/public.routes.js';
 import { adminRoutes } from './modules/admin/admin.routes.js';
@@ -27,6 +28,7 @@ export async function buildApp() {
 	await registerCookie(app);
 	await registerMultipart(app);
 	await registerAuth(app);
+	await registerCsrf(app);
 
 	// Health check — DB ping + storage write test
 	app.get('/api/health', async (_req, reply) => {
