@@ -63,7 +63,6 @@ for (const file of YEAR_FILES) {
       title: entry.title,
       isLegacy: true,
       status: 'PUBLISHED',
-      downloadPolicy: 'PUBLIC',
       platforms,
       members,
     };

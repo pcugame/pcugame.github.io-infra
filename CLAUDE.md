@@ -75,14 +75,15 @@ No shared package — types are duplicated in `apps/web/src/contracts/` (enums, 
 
 - **Entry**: `server.ts` → `buildApp()` in `app.ts`
 - **Route prefixes**: `/api/auth`, `/api/public`, `/api/admin`, `/api/assets`
-- **Admin routes** (`modules/admin/`): `admin.routes.ts` is an assembly-only entry point that registers sub-route modules:
-  - `admin-year.routes.ts` — Year CRUD (3 endpoints)
-  - `admin-project.routes.ts` — Project CRUD + submit + asset add + poster set (7 endpoints)
-  - `admin-member.routes.ts` — Member CRUD (3 endpoints)
+- **Admin routes** (`modules/admin/`): `admin.routes.ts` is an assembly-only entry point that registers sub-route modules. Each module follows a 3-layer pattern (`controller.ts` → `service.ts` → `repository.ts`):
+  - `year/` — Exhibition/Year CRUD (3 endpoints)
+  - `project/` — Project CRUD + submit + asset add + poster set (7 endpoints)
+  - `member/` — Member CRUD (3 endpoints)
+  - `game-upload/` — Resumable chunked game-file upload (6 endpoints)
+  - `banned-ip/` — Banned IP list + unban (2 endpoints, OPERATOR/ADMIN only)
+  - `settings/` — Site settings CRUD
   - `project-access.ts` — `assertWriteAccess()` (pure, testable permission check) + `loadProjectWithAccess()` (DB-backed wrapper)
-  - `upload-guard.ts` — `assertUploadAllowed()` enforces year existence + upload lock
-  - `admin-game-upload.routes.ts` — Resumable chunked game-file upload (6 endpoints)
-  - `admin-banned-ip.routes.ts` — Banned IP list + unban (2 endpoints, OPERATOR/ADMIN only)
+  - `upload-guard.ts` — `assertUploadAllowed()` enforces exhibition existence + upload lock
 - **Auth plugin** (`plugins/auth.ts`): cookie-based session via `AuthSession` table. Decorates request with `requireLogin()` and `requireRole()` helpers.
 - **Env config** (`config/env.ts`): Zod-validated singleton; access via `env()`.
 - **Shared utilities** (`shared/`): `errors.ts` (AppError), `http.ts` (sendOk/sendCreated), `validation.ts` (Zod schemas + `parseBody` helper), `session.ts`, `storage-path.ts`, `file-signature.ts`, `slug.ts`, `download-rate-limit.ts` (IP-based rate limiter with permanent ban)
@@ -90,7 +91,7 @@ No shared package — types are duplicated in `apps/web/src/contracts/` (enums, 
 - **Tests**: vitest unit tests in `src/__tests__/` — run with `npm run test`.
 
 #### Database schema (Prisma)
-Key models: `User` (roles: USER/OPERATOR/ADMIN), `Year`, `Project` (status: DRAFT/PUBLISHED/ARCHIVED, downloadPolicy: NONE/PUBLIC/SCHOOL_ONLY/ADMIN_ONLY), `ProjectMember`, `Asset` (kind: THUMBNAIL/IMAGE/POSTER/GAME), `AuthSession`, `GameUploadSession` (resumable chunked game uploads), `BannedIp` (auto-banned IPs from excessive game downloads).
+Key models: `User` (roles: USER/OPERATOR/ADMIN), `Exhibition` (year + title, isUploadEnabled), `Project` (status: DRAFT/PUBLISHED/ARCHIVED), `ProjectMember`, `Asset` (kind: THUMBNAIL/IMAGE/POSTER/GAME), `AuthSession`, `GameUploadSession` (resumable chunked game uploads), `BannedIp` (auto-banned IPs from excessive game downloads), `SiteSetting` (runtime-configurable limits).
 Note: `UploadJob` model exists in schema but is unused (dead code, pending removal).
 
 ### Web (`apps/web/src/`)
@@ -105,11 +106,11 @@ Note: `UploadJob` model exists in schema but is unused (dead code, pending remov
 
 ## Upload lock policy (`isUploadEnabled`)
 
-Each `Year` has an `isUploadEnabled` flag controlled by operators/admins.
+Each `Exhibition` has an `isUploadEnabled` flag controlled by operators/admins.
 
-- **Server enforcement** (`upload-guard.ts`): The submit route (`POST /projects/submit`) requires the target year to **already exist** (no auto-creation). If `isUploadEnabled` is `false`, only `ADMIN` and `OPERATOR` roles may submit; `USER` receives 403.
-- **Frontend hint**: The new-project form shows a year dropdown with lock status and disables the submit button for locked years (non-privileged users only). This is a UX convenience — the server is the source of truth.
-- Years must be created explicitly by operators via `POST /admin/years`.
+- **Server enforcement** (`upload-guard.ts`): The submit route (`POST /projects/submit`) requires the target exhibition to **already exist** (no auto-creation). If `isUploadEnabled` is `false`, only `ADMIN` and `OPERATOR` roles may submit; `USER` receives 403.
+- **Frontend hint**: The new-project form shows an exhibition dropdown with lock status and disables the submit button for locked exhibitions (non-privileged users only). This is a UX convenience — the server is the source of truth.
+- Exhibitions must be created explicitly by operators via `POST /admin/years`.
 
 ## Read vs write permissions
 
@@ -117,7 +118,7 @@ This is a **public showcase site** — read access is open, write access is rest
 
 ### Read (public, no login required)
 - `GET /api/assets/public/:storageKey` — images, posters, thumbnails. No auth.
-- `GET /api/assets/protected/:storageKey` — game files are **always publicly downloadable** (no login, no `downloadPolicy` check). An IP-based rate limiter permanently bans IPs that exceed 30 downloads/15min. Admins can unban via `GET/DELETE /api/admin/banned-ips`. Non-GAME protected assets still respect the project's `downloadPolicy`.
+- `GET /api/assets/protected/:storageKey` — game files are **always publicly downloadable** (no login required). An IP-based rate limiter permanently bans IPs that exceed 30 downloads/15min. Admins can unban via `GET/DELETE /api/admin/banned-ips`.
 - `GET /api/public/*` — project listings, year listings. No auth.
 
 ### Write (login required, role-enforced)
@@ -197,7 +198,7 @@ Large game ZIP files (up to 5GB) use a separate resumable chunked upload flow, i
 - Existing GAME asset is replaced on complete via safe rename-then-update (old file backed up, restored on DB failure)
 - ZIP magic-byte validation on finalize (rejects non-ZIP files)
 - Role-based size limit enforced on session creation (`min(globalMax, roleGameMax)`)
-- Year upload lock (`assertUploadAllowed`) checked on session creation
+- Exhibition upload lock (`assertUploadAllowed`) checked on session creation
 - Expired/cancelled sessions have their staging dirs cleaned up
 - Frontend widget supports pause, resume, retry, and new-tab recovery via session API
 

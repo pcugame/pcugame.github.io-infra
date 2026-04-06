@@ -26,7 +26,8 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY package.json ./
 
-RUN mkdir -p /app/storage/protected /app/storage/public && \
+RUN npm install -g tsx && \
+    mkdir -p /app/storage/protected /app/storage/public && \
     chown -R appuser:appgroup /app/storage
 
 USER appuser

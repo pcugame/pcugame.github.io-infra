@@ -86,7 +86,7 @@ copy_json_to_container_and_run() {
 
   echo "Importing JSON via Prisma seed: $json_file"
   podman cp "$json_file" "${API_CONTAINER}:${remote_path}"
-  podman exec "$API_CONTAINER" sh -lc \
+  podman exec -e NODE_ENV=development "$API_CONTAINER" sh -lc \
     "set -e; npx tsx prisma/seed.ts --import '$remote_path' && rm -f '$remote_path'"
 }
 
@@ -94,7 +94,7 @@ do_seed() {
   require_container_running "$API_CONTAINER"
   echo "=== Prisma seed 실행 ==="
   echo "테스트 ADMIN + 세션 + 테스트 프로젝트를 생성합니다."
-  exec_api npx tsx prisma/seed.ts
+  podman exec -e NODE_ENV=development "$API_CONTAINER" npx tsx prisma/seed.ts
 }
 
 do_import_json() {
@@ -122,7 +122,6 @@ do_add_project() {
   local description=""
   local video_url=""
   local status=""
-  local download_policy=""
   local members_json=""
   local members_block=""
   local project_fields=""
@@ -170,13 +169,6 @@ do_add_project() {
     *) echo "ERROR: 상태는 DRAFT, PUBLISHED, ARCHIVED 중 하나여야 합니다."; exit 1 ;;
   esac
 
-  read -rp "다운로드 정책 (NONE/PUBLIC/SCHOOL_ONLY/ADMIN_ONLY) [PUBLIC]: " download_policy
-  download_policy="${download_policy:-PUBLIC}"
-  case "$download_policy" in
-    NONE|PUBLIC|SCHOOL_ONLY|ADMIN_ONLY) ;;
-    *) echo "ERROR: 다운로드 정책이 올바르지 않습니다."; exit 1 ;;
-  esac
-
   echo ""
   echo "멤버 추가"
   local member_index=0
@@ -208,7 +200,6 @@ do_add_project() {
   append_json_field project_fields "description" "$description"
   append_json_field project_fields "videoUrl" "$video_url"
   append_json_field project_fields "status" "$status"
-  append_json_field project_fields "downloadPolicy" "$download_policy"
 
   if [[ -n "$slug" ]]; then
     append_json_field project_fields "slug" "$slug"
@@ -269,12 +260,13 @@ do_tables() {
   echo "=== Row counts ==="
   run_sql <<'SQL'
 SELECT 'users' AS "table", COUNT(*) FROM users
-UNION ALL SELECT 'years', COUNT(*) FROM years
+UNION ALL SELECT 'exhibitions', COUNT(*) FROM exhibitions
 UNION ALL SELECT 'projects', COUNT(*) FROM projects
 UNION ALL SELECT 'project_members', COUNT(*) FROM project_members
 UNION ALL SELECT 'assets', COUNT(*) FROM assets
 UNION ALL SELECT 'auth_sessions', COUNT(*) FROM auth_sessions
-UNION ALL SELECT 'upload_jobs', COUNT(*) FROM upload_jobs
+UNION ALL SELECT 'game_upload_sessions', COUNT(*) FROM game_upload_sessions
+UNION ALL SELECT 'banned_ips', COUNT(*) FROM banned_ips
 ORDER BY "table";
 SQL
 }
@@ -286,12 +278,15 @@ do_reset() {
 
   run_sql <<'SQL'
 TRUNCATE
+  game_upload_sessions,
+  banned_ips,
+  site_settings,
   upload_jobs,
   auth_sessions,
   assets,
   project_members,
   projects,
-  years,
+  exhibitions,
   users
 RESTART IDENTITY
 CASCADE;
