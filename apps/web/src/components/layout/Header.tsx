@@ -18,9 +18,7 @@ export function Header() {
 
           {isAuthenticated && user ? (
             <>
-              {user.role === 'USER' && (
-                <Link to="/admin/projects/new" className="home-topnav__btn home-topnav__btn--upload">작품 등록</Link>
-              )}
+              <Link to="/admin/projects/new" className="home-topnav__btn home-topnav__btn--upload">작품 등록</Link>
               {(user.role === 'OPERATOR' || user.role === 'ADMIN') && (
                 <Link to="/admin/projects" className="home-topnav__link">관리</Link>
               )}

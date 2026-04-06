@@ -143,3 +143,38 @@ export const adminBannedIpApi = {
     return api.delete<void>(`/api/admin/banned-ips/${id}`);
   },
 };
+
+// ── Import ─────────────────────────────────────────────────
+
+export interface ImportPreviewExhibition {
+  year: number;
+  title: string;
+  isNew: boolean;
+  existingProjectCount: number;
+}
+
+export interface ImportPreviewResult {
+  valid: boolean;
+  exhibitions: ImportPreviewExhibition[];
+  projectCount: number;
+  errors: string[];
+}
+
+export interface ImportExecuteResult {
+  exhibitions: { created: number; existing: number };
+  projects: { created: number };
+}
+
+export const adminImportApi = {
+  preview(file: File) {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post<ImportPreviewResult>('/api/admin/import/preview', fd);
+  },
+
+  execute(file: File) {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post<ImportExecuteResult>('/api/admin/import/execute', fd);
+  },
+};

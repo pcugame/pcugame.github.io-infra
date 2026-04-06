@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useMe } from '../../features/auth';
 
-type NavItem = { to: string; label: string; icon: string; end: boolean };
+type NavItem = { to: string; label: string; icon: string; end: boolean; adminOnly?: boolean };
 
 const ADMIN_NAV: NavItem[] = [
   { to: '/admin/projects', label: '작품 관리', icon: 'grid', end: true },
@@ -10,6 +10,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/years', label: '연도 관리', icon: 'calendar', end: false },
   { to: '/admin/settings', label: '사이트 설정', icon: 'settings', end: false },
   { to: '/admin/banned-ips', label: 'IP 차단 관리', icon: 'shield', end: false },
+  { to: '/admin/import', label: 'JSON 임포트', icon: 'upload', end: false, adminOnly: true },
 ];
 
 const USER_NAV: NavItem[] = [
@@ -42,12 +43,20 @@ const ICONS: Record<string, ReactElement> = {
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     </svg>
   ),
+  upload: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  ),
 };
 
 export function AdminLayout() {
   const { user } = useMe();
   const isAdmin = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
-  const navItems = isAdmin ? ADMIN_NAV : USER_NAV;
+  const isSuperAdmin = user?.role === 'ADMIN';
+  const navItems = isAdmin
+    ? (isSuperAdmin ? ADMIN_NAV : ADMIN_NAV.filter(n => !n.adminOnly))
+    : USER_NAV;
   const title = isAdmin ? '관리자 패널' : '작품 등록';
 
   return (

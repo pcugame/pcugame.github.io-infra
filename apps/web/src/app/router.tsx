@@ -20,6 +20,7 @@ const AdminProjectEditPage = lazy(() => import('../pages/admin/AdminProjectEditP
 const AdminYearsPage = lazy(() => import('../pages/admin/AdminYearsPage'));
 const AdminBannedIpsPage = lazy(() => import('../pages/admin/AdminBannedIpsPage'));
 const AdminSettingsPage = lazy(() => import('../pages/admin/AdminSettingsPage'));
+const AdminImportPage = lazy(() => import('../pages/admin/AdminImportPage'));
 
 
 function Lazy({ children }: { children: React.ReactNode }) {
@@ -158,6 +159,16 @@ export const router = createBrowserRouter(
                 <RequireRole allowed={['OPERATOR', 'ADMIN']}>
                   <Lazy>
                     <AdminBannedIpsPage />
+                  </Lazy>
+                </RequireRole>
+              ),
+            },
+            {
+              path: 'import',
+              element: (
+                <RequireRole allowed={['ADMIN']}>
+                  <Lazy>
+                    <AdminImportPage />
                   </Lazy>
                 </RequireRole>
               ),
