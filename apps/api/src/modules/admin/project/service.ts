@@ -6,7 +6,8 @@ import os from 'node:os';
 import type { AssetKind, ProjectStatus } from '@prisma/client';
 import { env } from '../../../config/env.js';
 import { badRequest, forbidden, notFound, payloadTooLarge } from '../../../shared/errors.js';
-import { buildStoragePath } from '../../../shared/storage-path.js';
+import { bucketForKind } from '../../../lib/s3.js';
+import { deleteObject } from '../../../lib/storage.js';
 import { toSlug } from '../../../shared/slug.js';
 import { isPosterUrlSafe, assertValidPosterAsset } from '../../../shared/poster-validation.js';
 import {
@@ -27,7 +28,7 @@ import * as repo from './repository.js';
 /** Build a full asset URL from storageKey and kind */
 export function assetUrl(storageKey: string, kind: AssetKind): string {
 	const base = env().API_PUBLIC_URL;
-	if (kind === 'GAME') return `${base}/api/assets/protected/${storageKey}`;
+	if (kind === 'GAME' || kind === 'VIDEO') return `${base}/api/assets/protected/${storageKey}`;
 	return `${base}/api/assets/public/${storageKey}`;
 }
 
@@ -49,6 +50,23 @@ export function serializeProjectDetail(project: {
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
 	assets: { id: number; kind: AssetKind; storageKey: string; originalName: string; sizeBytes: bigint }[];
 }) {
+	// VIDEO from Asset system (new), fallback to videoUrl for legacy projects
+	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
+	let video: { provider: string; url: string; mimeType: string } | null = null;
+	if (videoAsset) {
+		video = {
+			provider: 'LOCAL',
+			url: assetUrl(videoAsset.storageKey, 'VIDEO'),
+			mimeType: videoAsset.mimeType || 'video/mp4',
+		};
+	} else if (project.videoUrl) {
+		video = {
+			provider: 'NAS',
+			url: project.videoUrl,
+			mimeType: project.videoMimeType || 'video/mp4',
+		};
+	}
+
 	return {
 		id: project.id,
 		title: project.title,
@@ -57,13 +75,7 @@ export function serializeProjectDetail(project: {
 		summary: project.summary || undefined,
 		description: project.description || undefined,
 		isLegacy: project.isLegacy,
-		video: project.videoUrl
-			? {
-					provider: 'NAS' as const,
-					url: project.videoUrl,
-					mimeType: project.videoMimeType || 'video/mp4',
-				}
-			: null,
+		video,
 		status: project.status,
 		sortOrder: project.sortOrder,
 		posterAssetId: project.posterAssetId ?? undefined,
@@ -140,15 +152,12 @@ export async function updateProject(
 	return serializeProjectDetail(updated);
 }
 
-/** Delete a project and its associated asset files from disk */
+/** Delete a project and its associated asset files from S3 */
 export async function deleteProject(projectId: number) {
 	const assets = await repo.findAssetsByProjectId(projectId);
-	const cfg = env();
-	for (const asset of assets) {
-		const root = asset.kind === 'GAME' ? cfg.UPLOAD_ROOT_PROTECTED : cfg.UPLOAD_ROOT_PUBLIC;
-		const filePath = buildStoragePath(root, asset.storageKey);
-		await fsp.unlink(filePath).catch(() => {});
-	}
+	await Promise.allSettled(
+		assets.map((asset) => deleteObject(bucketForKind(asset.kind), asset.storageKey)),
+	);
 	await repo.deleteProject(projectId);
 }
 
@@ -226,6 +235,7 @@ export async function processFileParts(
 		if (fp.fieldname === 'poster') kind = 'POSTER';
 		else if (fp.fieldname === 'images[]') kind = 'IMAGE';
 		else if (fp.fieldname === 'gameFile') kind = 'GAME';
+		else if (fp.fieldname === 'videoFile') kind = 'VIDEO';
 		else continue;
 
 		savedFiles.push(await pipeline.processFile(fp.tmpPath, kind, fp.filename));
@@ -261,7 +271,7 @@ export async function submitProject(
 
 		// Lazy import to avoid circular — validation is shared
 		const { parseBody, SubmitProjectPayload } = await import('../../../shared/validation.js');
-		const { exhibitionId, title, summary, description, videoUrl, videoMimeType, autoPublish, members } =
+		const { exhibitionId, title, summary, description, autoPublish, members } =
 			parseBody(SubmitProjectPayload, rawPayload);
 
 		const exhibition = await repo.findExhibitionById(exhibitionId);
@@ -277,8 +287,6 @@ export async function submitProject(
 			title,
 			summary,
 			description,
-			videoUrl,
-			videoMimeType,
 			status,
 			creatorId: user.id,
 			creatorName: user.name,
@@ -351,19 +359,19 @@ export async function addAssetToProject(
 
 		const savedFile = await pipeline.processFile(fileTmpPath, kind, fileOriginalName);
 
-		// Replace existing GAME asset if uploading a new one
-		let existingGame: { id: number; storageKey: string } | null = null;
+		// Replace existing GAME or VIDEO asset if uploading a new one
+		let existingReplaceable: { id: number; storageKey: string } | null = null;
 		if (savedFile.kind === 'GAME') {
-			existingGame = await repo.findReadyGameAsset(projectId);
+			existingReplaceable = await repo.findReadyGameAsset(projectId);
+		} else if (savedFile.kind === 'VIDEO') {
+			existingReplaceable = await repo.findReadyVideoAsset(projectId);
 		}
 
 		let asset;
-		if (existingGame) {
-			const cfg = env();
-			const oldFilePath = buildStoragePath(cfg.UPLOAD_ROOT_PROTECTED, existingGame.storageKey);
-			await fsp.unlink(oldFilePath).catch(() => {});
+		if (existingReplaceable) {
+			await deleteObject(bucketForKind(savedFile.kind), existingReplaceable.storageKey).catch(() => {});
 
-			asset = await repo.updateAssetFile(existingGame.id, {
+			asset = await repo.updateAssetFile(existingReplaceable.id, {
 				storageKey: savedFile.storageKey,
 				originalName: savedFile.originalName,
 				mimeType: savedFile.mimeType,
@@ -377,7 +385,7 @@ export async function addAssetToProject(
 				originalName: savedFile.originalName,
 				mimeType: savedFile.mimeType,
 				sizeBytes: BigInt(savedFile.sizeBytes),
-				isPublic: savedFile.kind !== 'GAME',
+				isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO',
 			});
 		}
 

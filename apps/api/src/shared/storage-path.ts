@@ -7,6 +7,7 @@ export function generateStorageKey(ext: string): string {
   return `${uuid}.${safe}`;
 }
 
+/** @deprecated Used only by migration script. S3 uses storageKey directly as object key. */
 export function buildStoragePath(root: string, storageKey: string): string {
   // Use first 2 chars of key as subdirectory to avoid huge flat dirs
   const sub = storageKey.slice(0, 2);

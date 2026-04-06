@@ -84,6 +84,14 @@ export function findReadyGameAsset(projectId: number) {
 	});
 }
 
+/** Find the first VIDEO asset in READY status for a project */
+export function findReadyVideoAsset(projectId: number) {
+	return prisma.asset.findFirst({
+		where: { projectId, kind: 'VIDEO', status: 'READY' },
+		select: { id: true, storageKey: true },
+	});
+}
+
 /** Create a new asset */
 export function createAsset(data: {
 	projectId: number;
@@ -173,7 +181,7 @@ export function createProjectWithAssets(data: SubmitProjectData) {
 					originalName: sf.originalName,
 					mimeType: sf.mimeType,
 					sizeBytes: BigInt(sf.sizeBytes),
-					isPublic: sf.kind !== 'GAME',
+					isPublic: sf.kind !== 'GAME' && sf.kind !== 'VIDEO',
 				},
 			});
 			if (sf.kind === 'POSTER' && !posterAssetId) posterAssetId = asset.id;

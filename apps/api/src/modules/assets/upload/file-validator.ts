@@ -4,6 +4,7 @@ import {
   detectFileType,
   isAllowedImageType,
   isAllowedGameType,
+  isAllowedVideoType,
   SIZE_LIMITS,
 } from '../../../shared/file-signature.js';
 import { badRequest } from '../../../shared/errors.js';
@@ -14,6 +15,7 @@ const KIND_SIZE_LIMITS: Record<string, number> = {
   POSTER: SIZE_LIMITS.poster,
   THUMBNAIL: SIZE_LIMITS.poster,
   IMAGE: SIZE_LIMITS.image,
+  VIDEO: SIZE_LIMITS.video,
 };
 
 /**
@@ -44,6 +46,8 @@ export async function validateFile(
 
   if (kind === 'GAME') {
     if (!isAllowedGameType(fileType)) throw badRequest('Game file must be a ZIP archive');
+  } else if (kind === 'VIDEO') {
+    if (!isAllowedVideoType(fileType)) throw badRequest('Video must be MP4 or WebM');
   } else {
     if (!isAllowedImageType(fileType)) throw badRequest('Images must be JPEG, PNG, or WebP');
   }

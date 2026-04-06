@@ -26,6 +26,7 @@ enum AssetKind {
   IMAGE
   POSTER
   GAME
+  VIDEO
 }
 
 enum AssetStatus {
@@ -174,7 +175,7 @@ model UploadJob {
 }
 
 /// Tracks a resumable chunked game-file upload session.
-/// Chunks are stored in UPLOAD_STAGING_ROOT/<id>/ as chunk-NNNN files.
+/// Uses S3 multipart upload — chunks go directly to object storage.
 model GameUploadSession {
   id             String   @id @default(uuid())
   projectId      Int      @map("project_id")
@@ -185,8 +186,11 @@ model GameUploadSession {
   totalChunks    Int      @map("total_chunks")
   uploadedChunks Int[]    @default([]) @map("uploaded_chunks")
   status         String   @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED
-  stagingPath    String   @map("staging_path")
+  stagingPath    String   @default("") @map("staging_path") // legacy, no longer used
   storageKey     String?  @map("storage_key") // set on completion
+  s3UploadId     String?  @map("s3_upload_id")
+  s3Key          String?  @map("s3_key")
+  s3PartEtags    Json?    @map("s3_part_etags") // [{partNumber: Int, etag: String}]
   expiresAt      DateTime @map("expires_at")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")

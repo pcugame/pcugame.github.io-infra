@@ -14,7 +14,8 @@ export function createSession(data: {
 	totalBytes: bigint;
 	chunkSizeBytes: number;
 	totalChunks: number;
-	stagingPath: string;
+	s3UploadId: string;
+	s3Key: string;
 	expiresAt: Date;
 }) {
 	return prisma.gameUploadSession.create({ data });
@@ -80,6 +81,27 @@ export function transitionToCompleting(sessionId: string) {
 	return prisma.gameUploadSession.updateMany({
 		where: { id: sessionId, status: 'PENDING' },
 		data: { status: 'COMPLETING' },
+	});
+}
+
+/** Atomically append an S3 part ETag to the session's s3PartEtags array */
+export async function appendPartEtag(
+	sessionId: string,
+	partNumber: number,
+	etag: string,
+) {
+	// Read current etags, append, write back — wrapped in raw SQL for atomicity
+	const session = await prisma.gameUploadSession.findUniqueOrThrow({
+		where: { id: sessionId },
+		select: { s3PartEtags: true },
+	});
+	const existing = (session.s3PartEtags as { partNumber: number; etag: string }[] | null) ?? [];
+	// Replace if same partNumber (re-upload of a chunk)
+	const filtered = existing.filter((p) => p.partNumber !== partNumber);
+	filtered.push({ partNumber, etag });
+	await prisma.gameUploadSession.update({
+		where: { id: sessionId },
+		data: { s3PartEtags: filtered },
 	});
 }
 

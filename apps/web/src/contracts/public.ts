@@ -36,6 +36,13 @@ export type PublicYearProjectsResponse = {
   empty: boolean;
 };
 
+/** GET /api/public/exhibitions/:id/projects */
+export type PublicExhibitionProjectsResponse = {
+  exhibition: { id: number; year: number; title: string };
+  items: PublicProjectCard[];
+  empty: boolean;
+};
+
 /** 프로젝트 영상 정보 (NAS 자체 호스팅) */
 export type ProjectVideo = {
   provider: 'NAS';

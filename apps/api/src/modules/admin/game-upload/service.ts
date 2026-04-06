@@ -1,42 +1,34 @@
 /**
- * Resumable chunked game-file upload service.
+ * Resumable chunked game-file upload service (S3 multipart).
  *
  * Flow:
- *   1. createSession()   → create session + staging dir
- *   2. uploadChunk()     → stream one chunk to staging
+ *   1. createSession()   → create S3 multipart upload + DB session
+ *   2. uploadChunk()     → upload one S3 part
  *   3. getSessionStatus()→ query progress
- *   4. completeSession() → concatenate chunks → GAME asset
- *   5. cancelSession()   → cancel + cleanup staging
+ *   4. completeSession() → complete multipart upload → GAME asset
+ *   5. cancelSession()   → abort multipart upload + cleanup
  */
 
-import { promises as fsp, createWriteStream, createReadStream } from 'node:fs';
-import { pipeline as streamPipeline } from 'node:stream/promises';
-import path from 'node:path';
-import crypto from 'node:crypto';
 import { env } from '../../../config/env.js';
 import { badRequest, forbidden, notFound, AppError } from '../../../shared/errors.js';
-import { generateStorageKey, buildStoragePath } from '../../../shared/storage-path.js';
+import { generateStorageKey } from '../../../shared/storage-path.js';
 import { getUploadLimits } from '../../../shared/upload-limits.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
 import { getSiteSettings } from '../../../shared/site-settings.js';
 import { logger } from '../../../lib/logger.js';
+import {
+	createMultipartUpload,
+	uploadPart,
+	completeMultipartUpload,
+	abortMultipartUpload,
+	headObject,
+	readObjectRange,
+	deleteObject,
+} from '../../../lib/storage.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import * as repo from './repository.js';
 
 // ── Helpers ─────────────────────────────────────────────────
-
-function chunkFileName(index: number): string {
-	return `chunk-${String(index).padStart(6, '0')}`;
-}
-
-/** Remove a staging directory, logging errors */
-async function cleanupStagingDir(stagingPath: string): Promise<void> {
-	try {
-		await fsp.rm(stagingPath, { recursive: true, force: true });
-	} catch (err) {
-		logger.error({ err, path: stagingPath }, 'Failed to cleanup staging dir');
-	}
-}
 
 /** Load and validate a session (ownership, expiry) */
 async function loadSession(sessionId: string, userId: number, userRole: string) {
@@ -50,7 +42,9 @@ async function loadSession(sessionId: string, userId: number, userRole: string) 
 
 	if (session.expiresAt < new Date()) {
 		await repo.updateSessionStatus(session.id, 'CANCELLED');
-		await cleanupStagingDir(session.stagingPath);
+		if (session.s3UploadId && session.s3Key) {
+			await abortMultipartUpload(env().S3_BUCKET_PROTECTED, session.s3Key, session.s3UploadId).catch(() => {});
+		}
 		throw badRequest('Upload session has expired');
 	}
 
@@ -96,26 +90,29 @@ export async function createSession(
 	const existing = await repo.findActiveSessions(projectId);
 	for (const s of existing) {
 		await repo.updateSessionStatus(s.id, 'CANCELLED');
-		await cleanupStagingDir(s.stagingPath);
+		if (s.s3UploadId && s.s3Key) {
+			await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s.s3Key, s.s3UploadId).catch(() => {});
+		}
 	}
 
 	const totalChunks = Math.ceil(totalBytes / chunkSizeBytes);
-	const sessionId = crypto.randomUUID();
-	const stagingPath = path.join(cfg.UPLOAD_STAGING_ROOT, sessionId);
+	const s3Key = generateStorageKey('zip');
 
-	await fsp.mkdir(stagingPath, { recursive: true });
+	// Start S3 multipart upload
+	const s3UploadId = await createMultipartUpload(cfg.S3_BUCKET_PROTECTED, s3Key);
 
 	const expiresAt = new Date(Date.now() + cfg.UPLOAD_SESSION_TTL_MINUTES * 60 * 1000);
 
 	const session = await repo.createSession({
-		id: sessionId,
+		id: crypto.randomUUID(),
 		projectId,
 		userId: user.id,
 		originalName,
 		totalBytes: BigInt(totalBytes),
 		chunkSizeBytes,
 		totalChunks,
-		stagingPath,
+		s3UploadId,
+		s3Key,
 		expiresAt,
 	});
 
@@ -127,7 +124,7 @@ export async function createSession(
 	};
 }
 
-/** Stream and save one chunk to the staging directory */
+/** Upload one chunk as an S3 multipart part */
 export async function uploadChunk(
 	sessionId: string,
 	chunkIndex: number,
@@ -144,43 +141,45 @@ export async function uploadChunk(
 		throw badRequest(`Invalid chunk index: must be 0..${session.totalChunks - 1}`);
 	}
 
+	if (!session.s3UploadId || !session.s3Key) {
+		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
+	}
+
 	const isLastChunk = chunkIndex === session.totalChunks - 1;
 	const expectedSize = isLastChunk
 		? Number(session.totalBytes) - chunkIndex * session.chunkSizeBytes
 		: session.chunkSizeBytes;
 
-	const chunkPath = path.join(session.stagingPath, chunkFileName(chunkIndex));
+	// Collect the chunk into a buffer for S3 (S3 requires content-length)
+	const chunks: Buffer[] = [];
 	let bytesWritten = 0;
-	const ws = createWriteStream(chunkPath);
-
-	try {
-		await new Promise<void>((resolve, reject) => {
-			body.on('data', (chunk: Buffer) => {
-				bytesWritten += chunk.length;
-				if (bytesWritten > expectedSize + 4096) {
-					ws.destroy();
-					reject(new AppError(413, `Chunk ${chunkIndex} exceeds expected size`, 'PAYLOAD_TOO_LARGE'));
-					return;
-				}
-				if (!ws.write(chunk)) {
-					body.pause();
-					ws.once('drain', () => body.resume());
-				}
-			});
-			body.on('end', () => { ws.end(() => resolve()); });
-			body.on('error', reject);
-			ws.on('error', reject);
-		});
-	} catch (err) {
-		await fsp.unlink(chunkPath).catch(() => {});
-		throw err;
+	for await (const chunk of body as AsyncIterable<Buffer>) {
+		bytesWritten += chunk.length;
+		if (bytesWritten > expectedSize + 4096) {
+			throw new AppError(413, `Chunk ${chunkIndex} exceeds expected size`, 'PAYLOAD_TOO_LARGE');
+		}
+		chunks.push(chunk);
 	}
 
 	if (!isLastChunk && bytesWritten !== expectedSize) {
-		await fsp.unlink(chunkPath).catch(() => {});
 		throw badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${bytesWritten}`);
 	}
 
+	const buffer = Buffer.concat(chunks);
+	const cfg = env();
+	const partNumber = chunkIndex + 1; // S3 parts are 1-based
+
+	const etag = await uploadPart(
+		cfg.S3_BUCKET_PROTECTED,
+		session.s3Key,
+		session.s3UploadId,
+		partNumber,
+		buffer,
+		buffer.length,
+	);
+
+	// Store ETag and append chunk index
+	await repo.appendPartEtag(session.id, partNumber, etag);
 	const updated = await repo.appendChunkIndex(session.id, chunkIndex);
 	const newChunks = updated[0]?.uploaded_chunks ?? [];
 
@@ -212,7 +211,7 @@ export async function getSessionStatus(
 	};
 }
 
-/** Finalize a chunked upload: concatenate chunks, validate ZIP, create GAME asset */
+/** Finalize a chunked upload: complete S3 multipart, validate ZIP, create GAME asset */
 export async function completeSession(
 	sessionId: string,
 	user: { id: number; role: string },
@@ -222,6 +221,10 @@ export async function completeSession(
 
 	if (session.status !== 'PENDING') {
 		throw badRequest(`Cannot complete: session is ${session.status}`);
+	}
+
+	if (!session.s3UploadId || !session.s3Key) {
+		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
 	}
 
 	// Verify all chunks present
@@ -241,53 +244,42 @@ export async function completeSession(
 	}
 
 	try {
-		// Concatenate chunks directly to permanent storage
-		const storageKey = generateStorageKey('zip');
-		const permanentPath = buildStoragePath(cfg.UPLOAD_ROOT_PROTECTED, storageKey);
-		await fsp.mkdir(path.dirname(permanentPath), { recursive: true });
-
-		const ws = createWriteStream(permanentPath);
-		for (let i = 0; i < session.totalChunks; i++) {
-			const chunkPath = path.join(session.stagingPath, chunkFileName(i));
-			await streamPipeline(createReadStream(chunkPath), ws, { end: false });
-		}
-		ws.end();
-		await new Promise<void>((resolve, reject) => {
-			ws.on('finish', resolve);
-			ws.on('error', reject);
-		});
-
-		// Verify final size
-		const stat = await fsp.stat(permanentPath);
-		if (stat.size !== Number(session.totalBytes)) {
-			await fsp.unlink(permanentPath).catch(() => {});
-			throw new AppError(500, `Final file size mismatch: expected ${session.totalBytes}, got ${stat.size}`, 'SIZE_MISMATCH');
+		// Complete the S3 multipart upload
+		const parts = (session.s3PartEtags as { partNumber: number; etag: string }[] | null) ?? [];
+		if (parts.length !== session.totalChunks) {
+			throw new AppError(500, `Part ETag count mismatch: expected ${session.totalChunks}, got ${parts.length}`, 'INTERNAL_ERROR');
 		}
 
-		// Verify ZIP signature
-		const fd = await fsp.open(permanentPath, 'r');
-		try {
-			const header = Buffer.alloc(8);
-			await fd.read(header, 0, 8, 0);
-			const detected = detectFileType(header);
-			if (!detected || !isAllowedGameType(detected)) {
-				await fd.close();
-				await fsp.unlink(permanentPath).catch(() => {});
-				throw badRequest('Uploaded file is not a valid ZIP archive');
-			}
-		} finally {
-			await fd.close().catch(() => {});
+		await completeMultipartUpload(
+			cfg.S3_BUCKET_PROTECTED,
+			session.s3Key,
+			session.s3UploadId,
+			parts,
+		);
+
+		// Verify final size via HeadObject
+		const head = await headObject(cfg.S3_BUCKET_PROTECTED, session.s3Key);
+		if (!head) {
+			throw new AppError(500, 'Completed object not found in S3', 'INTERNAL_ERROR');
+		}
+		if (head.size !== Number(session.totalBytes)) {
+			await deleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key).catch(() => {});
+			throw new AppError(500, `Final file size mismatch: expected ${session.totalBytes}, got ${head.size}`, 'SIZE_MISMATCH');
+		}
+
+		// Verify ZIP signature via range read
+		const header = await readObjectRange(cfg.S3_BUCKET_PROTECTED, session.s3Key, 0, 7);
+		const detected = detectFileType(header);
+		if (!detected || !isAllowedGameType(detected)) {
+			await deleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key).catch(() => {});
+			throw badRequest('Uploaded file is not a valid ZIP archive');
 		}
 
 		// Replace existing GAME asset or create new one
+		const storageKey = session.s3Key;
 		const existingGame = await repo.findReadyGameAsset(session.projectId);
 
-		let oldBackupPath: string | null = null;
 		if (existingGame) {
-			const oldPath = buildStoragePath(cfg.UPLOAD_ROOT_PROTECTED, existingGame.storageKey);
-			oldBackupPath = oldPath + '.bak';
-			await fsp.rename(oldPath, oldBackupPath).catch(() => { oldBackupPath = null; });
-
 			try {
 				await repo.updateAssetFile(existingGame.id, {
 					storageKey,
@@ -296,14 +288,11 @@ export async function completeSession(
 					sizeBytes: session.totalBytes,
 				});
 			} catch (dbErr) {
-				if (oldBackupPath) {
-					const oldPath2 = buildStoragePath(cfg.UPLOAD_ROOT_PROTECTED, existingGame.storageKey);
-					await fsp.rename(oldBackupPath, oldPath2).catch(() => {});
-				}
-				await fsp.unlink(permanentPath).catch(() => {});
+				await deleteObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch(() => {});
 				throw dbErr;
 			}
-			if (oldBackupPath) await fsp.unlink(oldBackupPath).catch(() => {});
+			// Delete old S3 object after successful DB update
+			await deleteObject(cfg.S3_BUCKET_PROTECTED, existingGame.storageKey).catch(() => {});
 		} else {
 			try {
 				await repo.createGameAsset({
@@ -313,13 +302,12 @@ export async function completeSession(
 					sizeBytes: session.totalBytes,
 				});
 			} catch (dbErr) {
-				await fsp.unlink(permanentPath).catch(() => {});
+				await deleteObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch(() => {});
 				throw dbErr;
 			}
 		}
 
 		await repo.markCompleted(session.id, storageKey);
-		await cleanupStagingDir(session.stagingPath);
 
 		return {
 			status: 'COMPLETED' as const,
@@ -332,7 +320,7 @@ export async function completeSession(
 	}
 }
 
-/** Cancel an upload session and cleanup staging */
+/** Cancel an upload session and abort the S3 multipart upload */
 export async function cancelSession(
 	sessionId: string,
 	user: { id: number; role: string },
@@ -344,7 +332,9 @@ export async function cancelSession(
 	}
 
 	await repo.updateSessionStatus(session.id, 'CANCELLED');
-	await cleanupStagingDir(session.stagingPath);
+	if (session.s3UploadId && session.s3Key) {
+		await abortMultipartUpload(env().S3_BUCKET_PROTECTED, session.s3Key, session.s3UploadId).catch(() => {});
+	}
 }
 
 /** List active upload sessions for a project */

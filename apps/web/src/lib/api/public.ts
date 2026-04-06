@@ -3,12 +3,13 @@
 import type {
   PublicYearListResponse,
   PublicYearProjectsResponse,
+  PublicExhibitionProjectsResponse,
   PublicProjectDetailResponse,
 } from '../../contracts';
 import { api } from './client';
 
 export const publicApi = {
-  /** 공개 연도 목록 */
+  /** 공개 연도 목록 (전시 목록) */
   getYears() {
     return api.get<PublicYearListResponse>('/api/public/years');
   },
@@ -16,6 +17,11 @@ export const publicApi = {
   /** 특정 연도의 공개 프로젝트 목록 */
   getYearProjects(year: number) {
     return api.get<PublicYearProjectsResponse>(`/api/public/years/${year}/projects`);
+  },
+
+  /** 특정 전시의 공개 프로젝트 목록 */
+  getExhibitionProjects(id: number) {
+    return api.get<PublicExhibitionProjectsResponse>(`/api/public/exhibitions/${id}/projects`);
   },
 
   /** 프로젝트 상세 (id 또는 slug, slug일 경우 year query 포함 가능) */

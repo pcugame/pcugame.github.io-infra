@@ -20,6 +20,8 @@ export interface UploadLimits {
 	imageMaxBytes: number;
 	/** Max bytes per game (ZIP) file */
 	gameMaxBytes: number;
+	/** Max bytes per video file */
+	videoMaxBytes: number;
 	/** Max total bytes per request (all files combined) */
 	requestMaxBytes: number;
 	/** Max number of file parts per request */
@@ -35,6 +37,7 @@ export function getUploadLimits(role: UserRole): UploadLimits {
 			posterMaxBytes: cfg.UPLOAD_PRIVILEGED_IMAGE_MAX_MB * 1024 * 1024,
 			imageMaxBytes: cfg.UPLOAD_PRIVILEGED_IMAGE_MAX_MB * 1024 * 1024,
 			gameMaxBytes: cfg.UPLOAD_PRIVILEGED_GAME_MAX_MB * 1024 * 1024,
+			videoMaxBytes: 500 * 1024 * 1024,
 			requestMaxBytes: cfg.UPLOAD_PRIVILEGED_REQUEST_MAX_MB * 1024 * 1024,
 			maxFiles: cfg.UPLOAD_PRIVILEGED_MAX_FILES,
 		};
@@ -44,6 +47,7 @@ export function getUploadLimits(role: UserRole): UploadLimits {
 		posterMaxBytes: cfg.UPLOAD_USER_IMAGE_MAX_MB * 1024 * 1024,
 		imageMaxBytes: cfg.UPLOAD_USER_IMAGE_MAX_MB * 1024 * 1024,
 		gameMaxBytes: cfg.UPLOAD_USER_GAME_MAX_MB * 1024 * 1024,
+		videoMaxBytes: 200 * 1024 * 1024,
 		requestMaxBytes: cfg.UPLOAD_USER_REQUEST_MAX_MB * 1024 * 1024,
 		maxFiles: cfg.UPLOAD_USER_MAX_FILES,
 	};
@@ -53,6 +57,7 @@ export function getUploadLimits(role: UserRole): UploadLimits {
 export function kindLimit(limits: UploadLimits, kind: AssetKind): number {
 	switch (kind) {
 		case 'GAME': return limits.gameMaxBytes;
+		case 'VIDEO': return limits.videoMaxBytes;
 		case 'POSTER':
 		case 'THUMBNAIL': return limits.posterMaxBytes;
 		case 'IMAGE':
@@ -66,6 +71,7 @@ const FIELDNAME_MAP: Record<string, AssetKind> = {
 	poster: 'POSTER',
 	'images[]': 'IMAGE',
 	gameFile: 'GAME',
+	videoFile: 'VIDEO',
 };
 
 /**

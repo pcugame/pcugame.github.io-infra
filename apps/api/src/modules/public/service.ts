@@ -55,6 +55,38 @@ export async function listProjectsByYear(yearParam: string) {
 	return { year: yearNum, exhibitions, items, empty: items.length === 0 };
 }
 
+/** List published projects for a single exhibition by ID */
+export async function listProjectsByExhibition(idParam: string) {
+	const id = parseInt(idParam, 10);
+	if (isNaN(id)) throw notFound('Exhibition not found');
+
+	const exhibition = await repo.findExhibitionById(id);
+	if (!exhibition) throw notFound('Exhibition not found');
+
+	const projects = await repo.findPublishedProjectsInExhibitions([id]);
+
+	const items = projects.map((p) => ({
+		id: p.id,
+		slug: p.slug,
+		title: p.title,
+		summary: p.summary || undefined,
+		posterUrl: isPosterUrlSafe(p.poster) ? publicAssetUrl(p.poster!.storageKey) : undefined,
+		members: p.members.map((m) => ({ name: m.name, studentId: sanitizeStudentId(m.studentId) })),
+		exhibitionId: p.exhibitionId,
+		exhibitionTitle: exhibition.title || `${exhibition.year} 전시`,
+	}));
+
+	return {
+		exhibition: {
+			id: exhibition.id,
+			year: exhibition.year,
+			title: exhibition.title || `${exhibition.year} 전시`,
+		},
+		items,
+		empty: items.length === 0,
+	};
+}
+
 /** Get a single published project by ID or slug */
 export async function getProjectDetail(idOrSlug: string, yearParam?: string) {
 	const yearNum = yearParam ? parseInt(yearParam, 10) : undefined;

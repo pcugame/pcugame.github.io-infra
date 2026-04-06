@@ -3,7 +3,7 @@ import { z } from 'zod';
 // ── Enums (matching Prisma) ──────────────────────────────────
 
 export const ProjectStatusEnum = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
-export const AssetKindEnum = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME']);
+export const AssetKindEnum = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO']);
 
 // ── Exhibition ──────────────────────────────────────────────
 
@@ -46,8 +46,6 @@ export const SubmitProjectPayload = z.object({
 	title: z.string().min(1).max(120),
 	summary: z.string().max(300).optional().default(''),
 	description: z.string().max(5000).optional().default(''),
-	videoUrl: z.string().url().or(z.literal('')).optional().default(''),
-	videoMimeType: z.string().max(100).optional().default(''),
 	autoPublish: z.boolean().optional().default(false),
 	members: z.array(SubmitMember).min(1, 'At least one member required'),
 });

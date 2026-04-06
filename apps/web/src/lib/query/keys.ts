@@ -8,6 +8,7 @@ export const queryKeys = {
   // ── Public ─────────────────────────────────────────────────
   publicYears: ['publicYears'] as const,
   yearProjects: (year: number) => ['yearProjects', year] as const,
+  exhibitionProjects: (id: number) => ['exhibitionProjects', id] as const,
   projectDetail: (year: number, slug: string) =>
     ['projectDetail', year, slug] as const,
   projectDetailById: (id: number) => ['projectDetailById', id] as const,

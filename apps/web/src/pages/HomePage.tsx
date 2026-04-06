@@ -20,7 +20,7 @@ export default function HomePage() {
 		queryFn: publicApi.getYears,
 	});
 
-	const publishedYears = groupYearsByNumber(yearsData?.items ?? []);
+	const exhibitions = yearsData?.items ?? [];
 
 	return (
 		<div className="home-landing">
@@ -42,7 +42,7 @@ export default function HomePage() {
 							<span className="home-topnav__logo-dept">소프트웨어공학부<br />게임공학전공</span>
 						</Link>
 						<div className="home-topnav__actions">
-							<Link to="/years" className="home-topnav__link">연도별 전시</Link>
+							<Link to="/years" className="home-topnav__link">전시 목록</Link>
 							{isAuthenticated && user ? (
 								<>
 									{(user.role === 'OPERATOR' || user.role === 'ADMIN') && (
@@ -68,15 +68,15 @@ export default function HomePage() {
 							프로젝트 <span className="home-hero__accent">아카이브</span>
 						</h1>
 						<p className="home-hero__desc">
-							연도를 선택하여 게임공학과 졸업작품을 탐색하세요.
+							전시를 선택하여 게임공학과 졸업작품을 탐색하세요.
 						</p>
 					</div>
 
-					{/* Year cards */}
+					{/* Exhibition cards */}
 					<div className="home-hero__years">
 						{yearsLoading && <LoadingSpinner />}
 						{yearsError && <ErrorMessage error={yearsError} onReset={yearsRefetch} />}
-						{yearsData && <YearGrid years={publishedYears} />}
+						{yearsData && <ExhibitionGrid exhibitions={exhibitions} />}
 					</div>
 				</div>
 			</section>
@@ -85,67 +85,42 @@ export default function HomePage() {
 	);
 }
 
-// ── 연도 목록 (6개 고정 높이, 초과 시 스크롤) ────────────────
+// ── 전시 목록 (6개 고정 높이, 초과 시 스크롤) ────────────────
 
-// ── 같은 연도의 전시회를 하나로 합침 ────────────────────────
+const VISIBLE_CARDS = 7;
 
-interface GroupedYear {
-	year: number;
-	title?: string;
-	projectCount: number;
-}
-
-function groupYearsByNumber(items: PublicYearItem[]): GroupedYear[] {
-	const map = new Map<number, GroupedYear>();
-	for (const item of items) {
-		const existing = map.get(item.year);
-		if (existing) {
-			existing.projectCount += item.projectCount;
-		} else {
-			map.set(item.year, {
-				year: item.year,
-				title: item.title,
-				projectCount: item.projectCount,
-			});
-		}
-	}
-	return Array.from(map.values());
-}
-
-const VISIBLE_YEARS = 6;
-
-function YearGrid({ years }: { years: GroupedYear[] }) {
+function ExhibitionGrid({ exhibitions }: { exhibitions: PublicYearItem[] }) {
 	const gridRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		const el = gridRef.current;
-		if (!el || years.length <= VISIBLE_YEARS) return;
+		if (!el || exhibitions.length <= VISIBLE_CARDS) return;
 
 		const cards = el.children;
-		if (cards.length < VISIBLE_YEARS) return;
+		if (cards.length < VISIBLE_CARDS) return;
 
-		const sixth = cards[VISIBLE_YEARS - 1] as HTMLElement;
-		const height = sixth.offsetTop + sixth.offsetHeight;
+		const seventh = cards[VISIBLE_CARDS - 1] as HTMLElement;
+		const height = seventh.offsetTop + seventh.offsetHeight;
 		el.style.maxHeight = `${height}px`;
 
 		return () => { el.style.maxHeight = ''; };
-	}, [years.length]);
+	}, [exhibitions.length]);
 
-	const needsScroll = years.length > VISIBLE_YEARS;
+	const needsScroll = exhibitions.length > VISIBLE_CARDS;
 
 	return (
 		<div
 			ref={gridRef}
 			className={`home-year-grid ${needsScroll ? 'home-year-grid--scrollable' : ''}`}
 		>
-			{years.map((y) => (
-				<Link key={y.year} to={`/years/${y.year}`} className="home-year-card">
-					<span className="home-year-card__year">{y.year}</span>
-					{y.title && (
-						<span className="home-year-card__title">{y.title}</span>
+			{exhibitions.map((ex) => (
+				<Link key={ex.id} to={`/exhibitions/${ex.id}`} className="home-year-card">
+					<span className="home-year-card__year">{ex.year}</span>
+					{ex.title && (
+						<span className="home-year-card__title">{ex.title}</span>
 					)}
 					<span className="home-year-card__count">
-						{y.projectCount}개 작품
+						{ex.projectCount}개 작품
 					</span>
 				</Link>
 			))}

@@ -14,8 +14,7 @@ import { assetsController } from './modules/assets/index.js';
 import { AppError } from './shared/errors.js';
 import type { ApiError } from './shared/http.js';
 import { prisma } from './lib/prisma.js';
-import { promises as fsp } from 'node:fs';
-import path from 'node:path';
+import { headObject } from './lib/storage.js';
 
 function parseTrustProxy(val: string): boolean | number | string {
 	if (val === 'true') return true;
@@ -52,17 +51,13 @@ export async function buildApp() {
 			checks.db = 'fail';
 		}
 
-		// Storage directories writable
+		// S3 connectivity — probe a non-existent key (HeadObject returns null, not error)
 		const cfg = env();
-		for (const dir of [cfg.UPLOAD_ROOT_PUBLIC, cfg.UPLOAD_ROOT_PROTECTED]) {
-			const probe = path.join(dir, `.healthcheck-${process.pid}`);
-			try {
-				await fsp.writeFile(probe, '');
-				await fsp.unlink(probe);
-				checks[`storage:${path.basename(dir)}`] = 'ok';
-			} catch {
-				checks[`storage:${path.basename(dir)}`] = 'fail';
-			}
+		try {
+			await headObject(cfg.S3_BUCKET_PUBLIC, '.healthcheck');
+			checks.s3 = 'ok';
+		} catch {
+			checks.s3 = 'fail';
 		}
 
 		const ok = Object.values(checks).every((v) => v === 'ok');

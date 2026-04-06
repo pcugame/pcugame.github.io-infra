@@ -2861,6 +2861,10 @@ fieldset.status-section legend {
 
 .home-hero__years {
   width: 100%;
+  align-self: center;
+}
+
+.home-hero__years:has(.home-year-grid--scrollable) {
   align-self: end;
 }
 

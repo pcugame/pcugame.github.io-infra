@@ -11,6 +11,7 @@ import { LoadingSpinner } from '../components/common';
 const HomePage = lazy(() => import('../pages/HomePage'));
 const YearsPage = lazy(() => import('../pages/YearsPage'));
 const YearProjectsPage = lazy(() => import('../pages/YearProjectsPage'));
+const ExhibitionProjectsPage = lazy(() => import('../pages/ExhibitionProjectsPage'));
 const ProjectDetailPage = lazy(() => import('../pages/ProjectDetailPage'));
 const LoginPage = lazy(() => import('../pages/LoginPage'));
 const MePage = lazy(() => import('../pages/MePage'));
@@ -54,6 +55,14 @@ export const router = createBrowserRouter(
           element: (
             <Lazy>
               <YearProjectsPage />
+            </Lazy>
+          ),
+        },
+        {
+          path: '/exhibitions/:id',
+          element: (
+            <Lazy>
+              <ExhibitionProjectsPage />
             </Lazy>
           ),
         },

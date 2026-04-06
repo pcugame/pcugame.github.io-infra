@@ -1,16 +1,16 @@
 import { promises as fsp } from 'node:fs';
-import path from 'node:path';
+import { createReadStream } from 'node:fs';
 import type { AssetKind } from '@prisma/client';
-import { env } from '../../../config/env.js';
 import { logger } from '../../../lib/logger.js';
-import { generateStorageKey, buildStoragePath } from '../../../shared/storage-path.js';
+import { bucketForKind } from '../../../lib/s3.js';
+import { uploadFile, deleteObject } from '../../../lib/storage.js';
+import { generateStorageKey } from '../../../shared/storage-path.js';
 import { validateFile } from './file-validator.js';
 import { processImage } from './image-processing.js';
-import { moveFile } from './move-file.js';
 import type { SavedFile } from './upload-types.js';
 
 interface CommittedFile {
-  permanentPath: string;
+  bucket: string;
   storageKey: string;
 }
 
@@ -57,8 +57,6 @@ export class UploadPipeline {
     kind: AssetKind,
     originalName: string,
   ): Promise<SavedFile> {
-    const cfg = env();
-
     // ── Step 1: Validate type and size ──────────────────────────
     const validated = await validateFile(tmpPath, kind);
 
@@ -69,7 +67,7 @@ export class UploadPipeline {
     let finalExt = validated.ext;
     let finalSizeBytes = validated.sizeBytes;
 
-    if (kind !== 'GAME') {
+    if (kind !== 'GAME' && kind !== 'VIDEO') {
       const processed = await processImage({
         tmpPath,
         mimeType: validated.mimeType,
@@ -89,17 +87,16 @@ export class UploadPipeline {
       }
     }
 
-    // ── Step 3: Move to permanent storage ───────────────────────
-    const isPublic = kind !== 'GAME';
-    const root = isPublic ? cfg.UPLOAD_ROOT_PUBLIC : cfg.UPLOAD_ROOT_PROTECTED;
+    // ── Step 3: Upload to S3 ─────────────────────────────────────
+    const bucket = bucketForKind(kind);
     const storageKey = generateStorageKey(finalExt);
-    const permanentPath = buildStoragePath(root, storageKey);
+    const stat = await fsp.stat(finalTmpPath);
+    const body = createReadStream(finalTmpPath);
 
-    await fsp.mkdir(path.dirname(permanentPath), { recursive: true });
-    await moveFile(finalTmpPath, permanentPath);
+    await uploadFile(bucket, storageKey, body, finalMimeType, stat.size);
 
     // Track the committed file for rollback, remove moved path from temp
-    this.committedFiles.push({ permanentPath, storageKey });
+    this.committedFiles.push({ bucket, storageKey });
     this.removeTempEntry(finalTmpPath);
 
     // If no conversion happened, finalTmpPath === tmpPath, so the original
@@ -125,9 +122,9 @@ export class UploadPipeline {
   async rollbackCommitted(): Promise<void> {
     for (const f of this.committedFiles) {
       try {
-        await fsp.unlink(f.permanentPath);
+        await deleteObject(f.bucket, f.storageKey);
       } catch (err) {
-        logger.error({ err, path: f.permanentPath }, 'Upload rollback cleanup failed');
+        logger.error({ err, storageKey: f.storageKey }, 'Upload rollback cleanup failed');
       }
     }
     this.committedFiles = [];

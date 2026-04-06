@@ -26,8 +26,9 @@ const envSchema = z
       .refine((arr) => arr.length > 0, 'CORS_ALLOWED_ORIGINS must contain at least one valid origin'),
     API_PUBLIC_URL: z.string().url(),
     WEB_PUBLIC_URL: z.string().url(),
-    UPLOAD_ROOT_PROTECTED: z.string().default('/app/storage/protected'),
-    UPLOAD_ROOT_PUBLIC: z.string().default('/app/storage/public'),
+    // Legacy local storage paths — only used by migration script
+    UPLOAD_ROOT_PROTECTED: z.string().default('/app/storage/protected').optional(),
+    UPLOAD_ROOT_PUBLIC: z.string().default('/app/storage/public').optional(),
     AUTO_PUBLISH_DEFAULT: z
       .enum(['true', 'false'])
       .default('false')
@@ -57,8 +58,21 @@ const envSchema = z
     // ── Chunked game upload ─────────────────────────────────
     UPLOAD_CHUNKED_GAME_MAX_MB: z.coerce.number().positive().default(5120),   // 5 GB
     UPLOAD_CHUNK_SIZE_MB: z.coerce.number().positive().default(10),           // 10 MB per chunk
-    UPLOAD_STAGING_ROOT: z.string().default('/app/storage/staging'),
+    // UPLOAD_STAGING_ROOT removed — chunked uploads now use S3 multipart
     UPLOAD_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(1440), // 24 hours
+
+    // ── S3-compatible object storage (Garage) ─────────────
+    S3_ENDPOINT: z.string().url(),
+    S3_REGION: z.string().default('garage'),
+    S3_ACCESS_KEY_ID: z.string().min(1),
+    S3_SECRET_ACCESS_KEY: z.string().min(1),
+    S3_BUCKET_PUBLIC: z.string().default('pcu-public'),
+    S3_BUCKET_PROTECTED: z.string().default('pcu-protected'),
+    S3_FORCE_PATH_STYLE: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
+    S3_PRESIGN_TTL_SEC: z.coerce.number().int().positive().default(60),
   })
 ;
 

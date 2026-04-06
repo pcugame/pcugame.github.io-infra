@@ -1,8 +1,8 @@
-import { promises as fsp, createReadStream } from 'node:fs';
 import type { FastifyReply } from 'fastify';
 import { env } from '../../config/env.js';
 import { notFound, forbidden } from '../../shared/errors.js';
-import { buildStoragePath } from '../../shared/storage-path.js';
+import { bucketForKind } from '../../lib/s3.js';
+import { getPresignedUrl, deleteObject } from '../../lib/storage.js';
 import { gameDownloadLimiter } from '../../shared/game-download-limiter.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './repository.js';
@@ -20,22 +20,17 @@ export async function loadBannedIpCache(): Promise<void> {
 	}
 }
 
-/** Stream a public asset to the client with immutable caching */
+/** Redirect to a presigned S3 URL for a public asset */
 export async function streamPublicAsset(storageKey: string, reply: FastifyReply) {
 	const asset = await repo.findPublicAsset(storageKey);
 	if (!asset) throw notFound('Asset not found');
 
-	const filePath = buildStoragePath(env().UPLOAD_ROOT_PUBLIC, storageKey);
-	try { await fsp.access(filePath); }
-	catch { throw notFound('File not found'); }
-
-	reply.header('Content-Type', asset.mimeType);
-	reply.header('Content-Length', asset.sizeBytes.toString());
-	reply.header('Cache-Control', 'public, max-age=31536000, immutable');
-	return reply.send(createReadStream(filePath));
+	const url = await getPresignedUrl(env().S3_BUCKET_PUBLIC, storageKey);
+	reply.header('Referrer-Policy', 'no-referrer');
+	return reply.redirect(url, 302);
 }
 
-/** Stream a protected asset with IP-based rate limiting for game downloads */
+/** Redirect to a presigned S3 URL for a protected asset with IP-based rate limiting */
 export async function streamProtectedAsset(storageKey: string, clientIp: string, reply: FastifyReply) {
 	const asset = await repo.findAssetByStorageKey(storageKey);
 	if (!asset) throw notFound('Asset not found');
@@ -50,27 +45,20 @@ export async function streamProtectedAsset(storageKey: string, clientIp: string,
 		}
 	}
 
-	const filePath = buildStoragePath(env().UPLOAD_ROOT_PROTECTED, storageKey);
-	try { await fsp.access(filePath); }
-	catch { throw notFound('File not found'); }
-
-	reply.header('Content-Type', asset.mimeType);
-	reply.header('Content-Length', asset.sizeBytes.toString());
-	reply.header('Content-Disposition', `attachment; filename="${encodeURIComponent(asset.originalName)}"`);
-	return reply.send(createReadStream(filePath));
+	const url = await getPresignedUrl(env().S3_BUCKET_PROTECTED, storageKey);
+	reply.header('Referrer-Policy', 'no-referrer');
+	return reply.redirect(url, 302);
 }
 
-/** Delete an asset: mark status, remove file, clear poster ref, mark deleted */
+/** Delete an asset: mark status, remove from S3, clear poster ref, mark deleted */
 export async function deleteAsset(assetId: number) {
 	const asset = await repo.findAssetByIdWithProject(assetId);
 	if (!asset) throw notFound('Asset not found');
 
 	await repo.markAssetDeleting(asset.id);
 
-	const cfg = env();
-	const root = asset.kind === 'GAME' ? cfg.UPLOAD_ROOT_PROTECTED : cfg.UPLOAD_ROOT_PUBLIC;
-	const filePath = buildStoragePath(root, asset.storageKey);
-	await fsp.unlink(filePath).catch(() => {});
+	const bucket = bucketForKind(asset.kind);
+	await deleteObject(bucket, asset.storageKey).catch(() => {});
 
 	if (asset.project.posterAssetId === asset.id) {
 		await repo.clearPosterIfMatches(asset.projectId, asset.id);

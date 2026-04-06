@@ -33,7 +33,7 @@ export function ProjectCard({ project, onSelect }: Props) {
         )}
         <div className="archive-card__footer">
           <p className="archive-card__members">
-            {project.members.map((m) => m.name).join(' · ')}
+            {project.members.map((m) => m.studentId ? `${m.studentId} - ${m.name}` : m.name).join(' · ')}
           </p>
         </div>
       </div>

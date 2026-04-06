@@ -27,6 +27,11 @@ export function findPublishedProjectsInExhibitions(exhibitionIds: number[]) {
 	});
 }
 
+/** Find a single exhibition by ID */
+export function findExhibitionById(id: number) {
+	return prisma.exhibition.findUnique({ where: { id } });
+}
+
 const projectDetailInclude = {
 	exhibition: true,
 	members: { orderBy: { sortOrder: 'asc' as const } },

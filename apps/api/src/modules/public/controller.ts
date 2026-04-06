@@ -19,6 +19,15 @@ export async function publicController(app: FastifyInstance): Promise<void> {
 		},
 	);
 
+	/** GET /api/public/exhibitions/:id/projects — list projects in a single exhibition */
+	app.get<{ Params: { id: string } }>(
+		'/exhibitions/:id/projects',
+		async (request, reply) => {
+			const data = await publicService.listProjectsByExhibition(request.params.id);
+			sendOk(reply, data);
+		},
+	);
+
 	/** GET /api/public/projects/:idOrSlug — get project detail by ID or slug */
 	app.get<{
 		Params: { idOrSlug: string };
