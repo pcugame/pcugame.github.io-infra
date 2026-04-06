@@ -87,8 +87,6 @@ model Project {
   summary        String         @default("")
   description    String         @default("")
   isLegacy       Boolean        @default(false) @map("is_legacy")
-  videoUrl       String         @default("") @map("video_url")
-  videoMimeType  String         @default("") @map("video_mime_type")
   status         ProjectStatus  @default(DRAFT)
   sortOrder      Int            @default(0) @map("sort_order")
   githubUrl      String         @default("") @map("github_url")
