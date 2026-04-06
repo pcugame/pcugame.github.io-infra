@@ -45,10 +45,10 @@ export default function HomePage() {
 							<Link to="/years" className="home-topnav__link">연도별 전시</Link>
 							{isAuthenticated && user ? (
 								<>
-									<Link to="/admin/projects/new" className="home-topnav__btn home-topnav__btn--upload">작품 등록</Link>
 									{(user.role === 'OPERATOR' || user.role === 'ADMIN') && (
 										<Link to="/admin/projects" className="home-topnav__link">관리</Link>
 									)}
+									<Link to="/admin/projects/new" className="home-topnav__btn home-topnav__btn--upload">작품 등록</Link>
 									<Link to="/me" className="home-topnav__btn">{user.name}</Link>
 								</>
 							) : (

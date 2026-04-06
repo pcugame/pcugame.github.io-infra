@@ -25,16 +25,6 @@ export function MobileBottomNav() {
 				<span>전시</span>
 			</NavLink>
 
-			{isAuthenticated && (
-				<NavLink to="/admin/projects/new" className="mobile-bottom-nav__item">
-					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-						<line x1="12" y1="5" x2="12" y2="19" />
-						<line x1="5" y1="12" x2="19" y2="12" />
-					</svg>
-					<span>등록</span>
-				</NavLink>
-			)}
-
 			{isAdmin && (
 				<NavLink to="/admin/projects" className="mobile-bottom-nav__item">
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -42,6 +32,16 @@ export function MobileBottomNav() {
 						<rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
 					</svg>
 					<span>관리</span>
+				</NavLink>
+			)}
+
+			{isAuthenticated && (
+				<NavLink to="/admin/projects/new" className="mobile-bottom-nav__item">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<line x1="12" y1="5" x2="12" y2="19" />
+						<line x1="5" y1="12" x2="19" y2="12" />
+					</svg>
+					<span>등록</span>
 				</NavLink>
 			)}
 
