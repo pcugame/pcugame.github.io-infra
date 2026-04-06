@@ -9,7 +9,7 @@
 // 브라우저 콘솔에서: localStorage.setItem('mock-role', 'USER') 후 새로고침
 
 interface MockUser {
-	id: string;
+	id: number;
 	email: string;
 	name: string;
 	role: string;
@@ -17,19 +17,19 @@ interface MockUser {
 
 const MOCK_USERS: Record<string, MockUser> = {
 	ADMIN: {
-		id: 'mock-admin',
+		id: 1,
 		email: 'admin@test.pcu.ac.kr',
 		name: '관리자',
 		role: 'ADMIN',
 	},
 	OPERATOR: {
-		id: 'mock-operator',
+		id: 2,
 		email: 'operator@test.pcu.ac.kr',
 		name: '운영자',
 		role: 'OPERATOR',
 	},
 	USER: {
-		id: 'mock-user',
+		id: 3,
 		email: 'student@test.pcu.ac.kr',
 		name: '학생',
 		role: 'USER',
@@ -51,28 +51,28 @@ export function getMockUser(): MockUser {
 // 하위 호환 (기존 handler.ts에서 MOCK_USER 참조)
 export const MOCK_USER = MOCK_USERS.ADMIN;
 
-// ── 연도 ────────────────────────────────────────────────────
+// ── 전시회(연도) ────────────────────────────────────────────
 // 실제 데이터: "{year} 졸업작품전" 형식
 
 interface MockYearItem {
-	id: string;
+	id: number;
 	year: number;
 	title: string;
 	projectCount: number;
 }
 
 export const MOCK_YEARS: MockYearItem[] = [
-	{ id: 'y1', year: 2025, title: '2025 졸업작품전', projectCount: 6 },
-	{ id: 'y2', year: 2024, title: '2024 졸업작품전', projectCount: 5 },
-	{ id: 'y3', year: 2023, title: '2023 졸업작품전', projectCount: 4 },
-	{ id: 'y4', year: 2022, title: '2022 졸업작품전', projectCount: 3 },
+	{ id: 1, year: 2025, title: '2025 졸업작품전', projectCount: 6 },
+	{ id: 2, year: 2024, title: '2024 졸업작품전', projectCount: 5 },
+	{ id: 3, year: 2023, title: '2023 졸업작품전', projectCount: 4 },
+	{ id: 4, year: 2022, title: '2022 졸업작품전', projectCount: 3 },
 ];
 
 // ── 프로젝트 카드 ────────────────────────────────────────────
 // 실제 패턴: 영문 제목 다수, 한글 제목 일부, 1~3인 팀, 학번은 20XX0XX 형식
 
 interface MockProjectCard {
-	id: string;
+	id: number;
 	slug: string;
 	title: string;
 	summary?: string;
@@ -82,7 +82,7 @@ interface MockProjectCard {
 
 const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
-		id: 'p1', slug: 'dragon-slayer', title: 'Dragon Slayer',
+		id: 1, slug: 'dragon-slayer', title: 'Dragon Slayer',
 		summary: '판타지 세계관 기반 3D 액션 RPG',
 		posterUrl: 'https://placehold.co/400x560/1a1a2e/e0e0ff?text=Dragon+Slayer',
 		members: [
@@ -92,7 +92,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p2', slug: '냥이의-식탁', title: '냥이의 식탁',
+		id: 2, slug: '냥이의-식탁', title: '냥이의 식탁',
 		summary: '고양이 캐릭터 기반 요리 시뮬레이션 게임',
 		posterUrl: 'https://placehold.co/400x560/2e1a2e/ffe0ff?text=%EB%83%A5%EC%9D%B4%EC%9D%98+%EC%8B%9D%ED%83%81',
 		members: [
@@ -101,7 +101,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p3', slug: 'dungeon-crawl', title: 'Dungeon Crawl',
+		id: 3, slug: 'dungeon-crawl', title: 'Dungeon Crawl',
 		summary: '절차적 생성 던전 탐험 로그라이크',
 		posterUrl: 'https://placehold.co/400x560/1a2e2e/e0ffff?text=Dungeon+Crawl',
 		members: [
@@ -109,7 +109,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p4', slug: 'bpm-beats-per-minute', title: 'BPM: BEATS PER MINUTE',
+		id: 4, slug: 'bpm-beats-per-minute', title: 'BPM: BEATS PER MINUTE',
 		summary: '리듬에 맞춰 전투하는 FPS 리듬 게임',
 		posterUrl: 'https://placehold.co/400x560/2e1a1a/ffe0e0?text=BPM',
 		members: [
@@ -117,7 +117,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p5', slug: 'undead-rush', title: 'UNDEAD RUSH',
+		id: 5, slug: 'undead-rush', title: 'UNDEAD RUSH',
 		summary: '좀비 서바이벌 탑다운 슈터',
 		posterUrl: 'https://placehold.co/400x560/1a2e1a/e0ffe0?text=UNDEAD+RUSH',
 		members: [
@@ -125,7 +125,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p6', slug: 'airstrike', title: 'AirStrike',
+		id: 6, slug: 'airstrike', title: 'AirStrike',
 		summary: '비행 슈팅 아케이드 게임',
 		posterUrl: 'https://placehold.co/400x560/2e2e1a/ffffe0?text=AirStrike',
 		members: [
@@ -137,7 +137,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 
 const MOCK_PROJECTS_2024: MockProjectCard[] = [
 	{
-		id: 'p7', slug: 'music-library', title: 'MUSIC LIBRARY',
+		id: 7, slug: 'music-library', title: 'MUSIC LIBRARY',
 		summary: '음악 감상과 연동되는 비주얼 인터랙션 게임',
 		posterUrl: 'https://placehold.co/400x560/1a1a2e/c0c0ff?text=MUSIC+LIBRARY',
 		members: [
@@ -145,7 +145,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p8', slug: 'overcome', title: 'OVERCOME',
+		id: 8, slug: 'overcome', title: 'OVERCOME',
 		summary: '장애물을 극복하며 진행하는 플랫포머 게임',
 		posterUrl: 'https://placehold.co/400x560/2e1a2e/ffc0ff?text=OVERCOME',
 		members: [
@@ -154,7 +154,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p9', slug: 'gallery', title: 'GALLERY',
+		id: 9, slug: 'gallery', title: 'GALLERY',
 		summary: '미술관을 탐험하는 공포 어드벤처',
 		posterUrl: 'https://placehold.co/400x560/1a2e1a/c0ffc0?text=GALLERY',
 		members: [
@@ -163,7 +163,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p10', slug: 'diver', title: 'DIVER',
+		id: 10, slug: 'diver', title: 'DIVER',
 		summary: '심해 탐사 어드벤처 게임',
 		posterUrl: 'https://placehold.co/400x560/2e2e1a/ffffe0?text=DIVER',
 		members: [
@@ -172,7 +172,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p11', slug: 'hex-defense', title: 'HEX DEFENSE',
+		id: 11, slug: 'hex-defense', title: 'HEX DEFENSE',
 		summary: '헥스 기반 타워 디펜스 전략 게임',
 		posterUrl: 'https://placehold.co/400x560/1a2e2e/a0ffff?text=HEX+DEFENSE',
 		members: [
@@ -183,7 +183,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 
 const MOCK_PROJECTS_2023: MockProjectCard[] = [
 	{
-		id: 'p12', slug: 'lost-bible', title: 'Lost Bible',
+		id: 12, slug: 'lost-bible', title: 'Lost Bible',
 		summary: '고대 유적을 탐험하는 퍼즐 어드벤처',
 		posterUrl: 'https://placehold.co/400x560/1a1a2e/a0a0ff?text=Lost+Bible',
 		members: [
@@ -191,7 +191,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p13', slug: 'hospitalrunner', title: 'HospitalRunner',
+		id: 13, slug: 'hospitalrunner', title: 'HospitalRunner',
 		summary: '병원을 배경으로 한 러닝 액션 게임',
 		posterUrl: 'https://placehold.co/400x560/2e1a1a/ffa0a0?text=HospitalRunner',
 		members: [
@@ -199,7 +199,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p14', slug: 'what', title: 'what?!',
+		id: 14, slug: 'what', title: 'what?!',
 		summary: '비주얼 노벨 기반 추리 어드벤처',
 		posterUrl: 'https://placehold.co/400x560/2e1a2e/c0a0ff?text=what%3F!',
 		members: [
@@ -207,7 +207,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p15', slug: '인마대전', title: '인마대전',
+		id: 15, slug: '인마대전', title: '인마대전',
 		summary: '대전 격투 게임',
 		posterUrl: 'https://placehold.co/400x560/1a2e1a/a0ffa0?text=%EC%9D%B8%EB%A7%88%EB%8C%80%EC%A0%84',
 		members: [
@@ -219,7 +219,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 
 const MOCK_PROJECTS_2022: MockProjectCard[] = [
 	{
-		id: 'p16', slug: 'escapafe', title: "EsC'afe",
+		id: 16, slug: 'escapafe', title: "EsC'afe",
 		summary: '카페를 배경으로 한 탈출 퍼즐 게임',
 		posterUrl: 'https://placehold.co/400x560/2e2e1a/ffffa0?text=EsCafe',
 		members: [
@@ -228,7 +228,7 @@ const MOCK_PROJECTS_2022: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p17', slug: 'most-puzzle', title: 'MOST PUZZLE',
+		id: 17, slug: 'most-puzzle', title: 'MOST PUZZLE',
 		summary: '다양한 퍼즐을 조합하는 두뇌 퍼즐 게임',
 		posterUrl: 'https://placehold.co/400x560/1a1a2e/8080ff?text=MOST+PUZZLE',
 		members: [
@@ -237,7 +237,7 @@ const MOCK_PROJECTS_2022: MockProjectCard[] = [
 		],
 	},
 	{
-		id: 'p18', slug: 'v-bunny', title: 'V_BUNNY',
+		id: 18, slug: 'v-bunny', title: 'V_BUNNY',
 		summary: '토끼 캐릭터 기반 액션 플랫포머',
 		posterUrl: 'https://placehold.co/400x560/2e1a1a/ff8080?text=V_BUNNY',
 		members: [
@@ -266,11 +266,11 @@ function buildDetail(card: MockProjectCard, year: number): any {
 		description: `${card.title}은(는) 배재대학교 게임공학과 ${year}년 졸업작품으로 제작된 프로젝트입니다.\n\n${card.summary ?? ''}\n\nPC 플랫폼 대상으로 개발되었습니다.`,
 		isLegacy: year <= 2024,
 		video: null,
-		members: card.members.map((m, i) => ({ id: `m-${card.id}-${i}`, name: m.name, studentId: m.studentId })),
+		members: card.members.map((m, i) => ({ id: card.id * 100 + i, name: m.name, studentId: m.studentId })),
 		images: [
-			{ id: `img-${card.id}-poster`, url: card.posterUrl ?? `https://placehold.co/800x1120/333/eee?text=${encodeURIComponent(card.title)}`, kind: 'POSTER' },
-			{ id: `img-${card.id}-1`, url: `https://placehold.co/1280x720/222/ccc?text=${encodeURIComponent(card.title)}+Screenshot+1`, kind: 'IMAGE' },
-			{ id: `img-${card.id}-2`, url: `https://placehold.co/1280x720/333/ccc?text=${encodeURIComponent(card.title)}+Screenshot+2`, kind: 'IMAGE' },
+			{ id: card.id * 100 + 50, url: card.posterUrl ?? `https://placehold.co/800x1120/333/eee?text=${encodeURIComponent(card.title)}`, kind: 'POSTER' },
+			{ id: card.id * 100 + 51, url: `https://placehold.co/1280x720/222/ccc?text=${encodeURIComponent(card.title)}+Screenshot+1`, kind: 'IMAGE' },
+			{ id: card.id * 100 + 52, url: `https://placehold.co/1280x720/333/ccc?text=${encodeURIComponent(card.title)}+Screenshot+2`, kind: 'IMAGE' },
 		],
 		posterUrl: card.posterUrl,
 		gameDownloadUrl: year <= 2024 ? undefined : '#mock-download',
@@ -279,12 +279,12 @@ function buildDetail(card: MockProjectCard, year: number): any {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function findProjectDetail(idOrSlug: string, year?: number): any | undefined {
+export function findProjectDetail(idOrSlug: string | number, year?: number): any | undefined {
 	const yearsToSearch = year ? [year] : [2025, 2024, 2023, 2022];
 	for (const y of yearsToSearch) {
 		const cards = MOCK_YEAR_PROJECTS[y];
 		if (!cards) continue;
-		const card = cards.find((c) => c.slug === idOrSlug || c.id === idOrSlug);
+		const card = cards.find((c) => c.slug === String(idOrSlug) || c.id === Number(idOrSlug));
 		if (card) return buildDetail(card, y);
 	}
 	return undefined;
@@ -317,7 +317,7 @@ export function buildAdminProjectItems(): any[] {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildAdminProjectDetail(id: string): any | undefined {
+export function buildAdminProjectDetail(id: string | number): any | undefined {
 	const detail = findProjectDetail(id);
 	if (!detail) return undefined;
 	return {
@@ -325,10 +325,10 @@ export function buildAdminProjectDetail(id: string): any | undefined {
 		summary: detail.summary, description: detail.description,
 		isLegacy: detail.isLegacy, video: detail.video,
 		status: 'PUBLISHED', sortOrder: 0,
-		posterAssetId: `img-${detail.id}-poster`, posterUrl: detail.posterUrl,
-		members: detail.members.map((m: { id: string; name: string; studentId: string }, i: number) => ({ ...m, sortOrder: i, userId: null })),
-		assets: detail.images.map((img: { id: string; kind: string; url: string }) => ({
-			id: img.id, kind: img.kind, url: img.url, originalName: `${img.id}.webp`, size: 102400,
+		posterAssetId: detail.images[0]?.id, posterUrl: detail.posterUrl,
+		members: detail.members.map((m: { id: number; name: string; studentId: string }, i: number) => ({ ...m, sortOrder: i, userId: null })),
+		assets: detail.images.map((img: { id: number; kind: string; url: string }) => ({
+			id: img.id, kind: img.kind, url: img.url, originalName: `asset-${img.id}.webp`, size: 102400,
 		})),
 	};
 }

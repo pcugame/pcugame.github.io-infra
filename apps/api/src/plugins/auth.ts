@@ -7,7 +7,7 @@ import type { UserRole } from '@prisma/client';
 declare module 'fastify' {
   interface FastifyRequest {
     currentUser?: {
-      id: string;
+      id: number;
       googleSub: string;
       email: string;
       name: string;

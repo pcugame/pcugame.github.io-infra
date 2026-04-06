@@ -5,51 +5,51 @@ import { z } from 'zod';
 export const ProjectStatusEnum = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
 export const AssetKindEnum = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME']);
 
-// ── Year ─────────────────────────────────────────────────────
+// ── Exhibition ──────────────────────────────────────────────
 
-export const CreateYearBody = z.object({
-  year: z.number().int().min(2021).max(2100),
-  title: z.string().max(100).optional().default(''),
-  isUploadEnabled: z.boolean().optional().default(true),
-  sortOrder: z.number().int().min(0).optional().default(0),
+export const CreateExhibitionBody = z.object({
+	year: z.number().int().min(2021).max(2100),
+	title: z.string().max(100).optional().default(''),
+	isUploadEnabled: z.boolean().optional().default(true),
+	sortOrder: z.number().int().min(0).optional().default(0),
 });
 
-export const UpdateYearBody = z.object({
-  title: z.string().max(100).optional(),
-  isUploadEnabled: z.boolean().optional(),
-  sortOrder: z.number().int().min(0).optional(),
+export const UpdateExhibitionBody = z.object({
+	title: z.string().max(100).optional(),
+	isUploadEnabled: z.boolean().optional(),
+	sortOrder: z.number().int().min(0).optional(),
 });
 
 // ── Project update ───────────────────────────────────────────
 
 export const UpdateProjectBody = z.object({
-  title: z.string().min(1).max(120).optional(),
-  summary: z.string().max(300).optional(),
-  description: z.string().max(5000).optional(),
-  videoUrl: z.string().url().or(z.literal('')).nullable().optional(),
-  videoMimeType: z.string().max(100).optional(),
-  isLegacy: z.boolean().optional(),
-  status: ProjectStatusEnum.optional(),
-  sortOrder: z.number().int().min(0).optional(),
+	title: z.string().min(1).max(120).optional(),
+	summary: z.string().max(300).optional(),
+	description: z.string().max(5000).optional(),
+	videoUrl: z.string().url().or(z.literal('')).nullable().optional(),
+	videoMimeType: z.string().max(100).optional(),
+	isLegacy: z.boolean().optional(),
+	status: ProjectStatusEnum.optional(),
+	sortOrder: z.number().int().min(0).optional(),
 });
 
 // ── Project submit (all-in-one multipart payload) ────────────
 
 const SubmitMember = z.object({
-  name: z.string().min(1).max(50),
-  studentId: z.string().min(1).max(20),
-  sortOrder: z.number().int().min(0).optional(),
+	name: z.string().min(1).max(50),
+	studentId: z.string().min(1).max(20),
+	sortOrder: z.number().int().min(0).optional(),
 });
 
 export const SubmitProjectPayload = z.object({
-  yearId: z.string().uuid('Invalid exhibition ID'),
-  title: z.string().min(1).max(120),
-  summary: z.string().max(300).optional().default(''),
-  description: z.string().max(5000).optional().default(''),
-  videoUrl: z.string().url().or(z.literal('')).optional().default(''),
-  videoMimeType: z.string().max(100).optional().default(''),
-  autoPublish: z.boolean().optional().default(false),
-  members: z.array(SubmitMember).min(1, 'At least one member required'),
+	exhibitionId: z.coerce.number().int().positive('Invalid exhibition ID'),
+	title: z.string().min(1).max(120),
+	summary: z.string().max(300).optional().default(''),
+	description: z.string().max(5000).optional().default(''),
+	videoUrl: z.string().url().or(z.literal('')).optional().default(''),
+	videoMimeType: z.string().max(100).optional().default(''),
+	autoPublish: z.boolean().optional().default(false),
+	members: z.array(SubmitMember).min(1, 'At least one member required'),
 });
 
 export type SubmitProjectPayloadT = z.infer<typeof SubmitProjectPayload>;
@@ -57,28 +57,28 @@ export type SubmitProjectPayloadT = z.infer<typeof SubmitProjectPayload>;
 // ── Member ───────────────────────────────────────────────────
 
 export const AddMemberBody = z.object({
-  name: z.string().min(1).max(50),
-  studentId: z.string().min(1).max(20),
-  sortOrder: z.number().int().min(0).optional().default(0),
+	name: z.string().min(1).max(50),
+	studentId: z.string().min(1).max(20),
+	sortOrder: z.number().int().min(0).optional().default(0),
 });
 
 export const UpdateMemberBody = z.object({
-  name: z.string().min(1).max(50).optional(),
-  studentId: z.string().min(1).max(20).optional(),
-  sortOrder: z.number().int().min(0).optional(),
-  userId: z.string().uuid().nullable().optional(),
+	name: z.string().min(1).max(50).optional(),
+	studentId: z.string().min(1).max(20).optional(),
+	sortOrder: z.number().int().min(0).optional(),
+	userId: z.coerce.number().int().positive().nullable().optional(),
 });
 
 // ── Poster ───────────────────────────────────────────────────
 
 export const SetPosterBody = z.object({
-  assetId: z.string().uuid(),
+	assetId: z.coerce.number().int().positive(),
 });
 
 // ── Auth ─────────────────────────────────────────────────────
 
 export const GoogleLoginBody = z.object({
-  credential: z.string().min(1, 'Missing credential'),
+	credential: z.string().min(1, 'Missing credential'),
 });
 
 // ── Helper ───────────────────────────────────────────────────
@@ -86,10 +86,18 @@ export const GoogleLoginBody = z.object({
 import { AppError } from './errors.js';
 
 export function parseBody<T>(schema: z.ZodType<T>, data: unknown): T {
-  const result = schema.safeParse(data);
-  if (!result.success) {
-    const details = result.error.flatten().fieldErrors;
-    throw new AppError(400, 'Validation failed', 'VALIDATION_ERROR', details);
-  }
-  return result.data;
+	const result = schema.safeParse(data);
+	if (!result.success) {
+		const details = result.error.flatten().fieldErrors;
+		throw new AppError(400, 'Validation failed', 'VALIDATION_ERROR', details);
+	}
+	return result.data;
+}
+
+export function parseIntParam(value: string, name = 'ID'): number {
+	const n = Number(value);
+	if (!Number.isInteger(n) || n <= 0) {
+		throw new AppError(400, `Invalid ${name}`, 'VALIDATION_ERROR');
+	}
+	return n;
 }

@@ -7,7 +7,7 @@ import {
   SubmitProjectPayloadSchema,
   type SubmitProjectPayloadInput,
 } from '../../contracts/schemas';
-import { adminProjectApi, adminYearApi, getApiErrorMessage } from '../../lib/api';
+import { adminProjectApi, adminExhibitionApi, getApiErrorMessage } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
 import { useMe } from '../../features/auth';
@@ -18,10 +18,10 @@ export default function AdminProjectNewPage() {
   const { user } = useMe();
   const isPrivileged = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
 
-  // ── 연도 목록 (업로드 잠금 여부 표시) ──────────────────────
+  // ── 전시회 목록 (업로드 잠금 여부 표시) ──────────────────────
   const { data: yearsData } = useQuery({
-    queryKey: queryKeys.adminYears,
-    queryFn: adminYearApi.list,
+    queryKey: queryKeys.adminExhibitions,
+    queryFn: adminExhibitionApi.list,
   });
   const years = yearsData?.items ?? [];
 
@@ -34,7 +34,7 @@ export default function AdminProjectNewPage() {
   } = useForm<SubmitProjectPayloadInput>({
     resolver: zodResolver(SubmitProjectPayloadSchema),
     defaultValues: {
-      yearId: '',
+      exhibitionId: 0,
       title: '',
       summary: '',
       description: '',
@@ -50,8 +50,8 @@ export default function AdminProjectNewPage() {
     name: 'members',
   });
 
-  const selectedYearId = useWatch({ control, name: 'yearId' });
-  const selectedYearItem = years.find((y) => y.id === selectedYearId);
+  const selectedExhibitionId = useWatch({ control, name: 'exhibitionId' });
+  const selectedYearItem = years.find((y) => y.id === Number(selectedExhibitionId));
   const isUploadLocked = selectedYearItem != null && !selectedYearItem.isUploadEnabled && !isPrivileged;
 
   // ── 파일 상태 ──────────────────────────────────────────────
@@ -114,10 +114,10 @@ export default function AdminProjectNewPage() {
           <legend>기본 정보</legend>
 
           <div className="form-field">
-            <label htmlFor="yearId">전시회 *</label>
+            <label htmlFor="exhibitionId">전시회 *</label>
             {years.length > 0 ? (
-              <select id="yearId" {...register('yearId')}>
-                <option value="">전시회를 선택하세요</option>
+              <select id="exhibitionId" {...register('exhibitionId', { valueAsNumber: true })}>
+                <option value={0}>전시회를 선택하세요</option>
                 {years.map((y) => (
                   <option key={y.id} value={y.id}>
                     {y.year}{y.title ? ` — ${y.title}` : ''}
@@ -128,7 +128,7 @@ export default function AdminProjectNewPage() {
             ) : (
               <p className="field-error">등록된 전시회가 없습니다. 관리자에게 문의하세요.</p>
             )}
-            {errors.yearId && <span className="field-error">{errors.yearId.message}</span>}
+            {errors.exhibitionId && <span className="field-error">{errors.exhibitionId.message}</span>}
             {isUploadLocked && (
               <span className="field-error">
                 이 전시회는 업로드가 잠겨 있습니다. 운영자에게 문의하세요.

@@ -19,7 +19,7 @@ export interface GameUploadSession {
 
 export interface GameUploadStatus {
 	sessionId: string;
-	projectId: string;
+	projectId: number;
 	originalName: string;
 	totalBytes: number;
 	chunkSizeBytes: number;
@@ -68,7 +68,7 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** Create a new upload session for a game file. */
 export async function createGameUploadSession(
-	projectId: string,
+	projectId: number,
 	file: File,
 ): Promise<GameUploadSession> {
 	return apiRequest<GameUploadSession>(
@@ -95,7 +95,7 @@ export async function getGameUploadStatus(
 
 /** List active sessions for a project. */
 export async function listGameUploadSessions(
-	projectId: string,
+	projectId: number,
 ): Promise<{ items: GameUploadStatus[] }> {
 	return apiRequest<{ items: GameUploadStatus[] }>(
 		`/api/admin/projects/${projectId}/game-upload-sessions`,

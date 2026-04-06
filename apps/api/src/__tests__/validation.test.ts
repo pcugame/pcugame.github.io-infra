@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CreateYearBody,
-  UpdateYearBody,
+  CreateExhibitionBody,
+  UpdateExhibitionBody,
   UpdateProjectBody,
   SubmitProjectPayload,
   AddMemberBody,
@@ -10,6 +10,7 @@ import {
   GoogleLoginBody,
   ProjectStatusEnum,
   AssetKindEnum,
+  parseIntParam,
 } from '../shared/validation.js';
 
 // ── Enum schemas ─────────────────────────────────────────────
@@ -40,11 +41,11 @@ describe('AssetKindEnum', () => {
   });
 });
 
-// ── Year schemas ─────────────────────────────────────────────
+// ── Exhibition schemas ──────────────────────────────────────
 
-describe('CreateYearBody', () => {
+describe('CreateExhibitionBody', () => {
   it('accepts valid input with defaults', () => {
-    const result = CreateYearBody.parse({ year: 2025 });
+    const result = CreateExhibitionBody.parse({ year: 2025 });
     expect(result).toEqual({
       year: 2025,
       title: '',
@@ -54,7 +55,7 @@ describe('CreateYearBody', () => {
   });
 
   it('accepts full input', () => {
-    const result = CreateYearBody.parse({
+    const result = CreateExhibitionBody.parse({
       year: 2026,
       title: '졸업전시',
       isUploadEnabled: false,
@@ -67,40 +68,40 @@ describe('CreateYearBody', () => {
   });
 
   it('rejects year below 2021', () => {
-    expect(() => CreateYearBody.parse({ year: 2020 })).toThrow();
+    expect(() => CreateExhibitionBody.parse({ year: 2020 })).toThrow();
   });
 
   it('rejects year above 2100', () => {
-    expect(() => CreateYearBody.parse({ year: 2101 })).toThrow();
+    expect(() => CreateExhibitionBody.parse({ year: 2101 })).toThrow();
   });
 
   it('rejects non-integer year', () => {
-    expect(() => CreateYearBody.parse({ year: 2025.5 })).toThrow();
+    expect(() => CreateExhibitionBody.parse({ year: 2025.5 })).toThrow();
   });
 
   it('rejects missing year', () => {
-    expect(() => CreateYearBody.parse({})).toThrow();
+    expect(() => CreateExhibitionBody.parse({})).toThrow();
   });
 
   it('rejects negative sortOrder', () => {
-    expect(() => CreateYearBody.parse({ year: 2025, sortOrder: -1 })).toThrow();
+    expect(() => CreateExhibitionBody.parse({ year: 2025, sortOrder: -1 })).toThrow();
   });
 
   it('rejects title over 100 chars', () => {
     expect(() =>
-      CreateYearBody.parse({ year: 2025, title: 'a'.repeat(101) }),
+      CreateExhibitionBody.parse({ year: 2025, title: 'a'.repeat(101) }),
     ).toThrow();
   });
 });
 
-describe('UpdateYearBody', () => {
+describe('UpdateExhibitionBody', () => {
   it('accepts empty object (all optional)', () => {
-    const result = UpdateYearBody.parse({});
+    const result = UpdateExhibitionBody.parse({});
     expect(result).toEqual({});
   });
 
   it('accepts partial update', () => {
-    const result = UpdateYearBody.parse({ title: '수정', sortOrder: 3 });
+    const result = UpdateExhibitionBody.parse({ title: '수정', sortOrder: 3 });
     expect(result.title).toBe('수정');
     expect(result.sortOrder).toBe(3);
     expect(result.isUploadEnabled).toBeUndefined();
@@ -157,18 +158,23 @@ describe('UpdateProjectBody', () => {
 
 describe('SubmitProjectPayload', () => {
   const validPayload = {
-    yearId: '550e8400-e29b-41d4-a716-446655440000',
+    exhibitionId: 1,
     title: 'My Game',
     members: [{ name: '홍길동', studentId: '2021001' }],
   };
 
   it('accepts valid minimal payload', () => {
     const result = SubmitProjectPayload.parse(validPayload);
-    expect(result.yearId).toBe('550e8400-e29b-41d4-a716-446655440000');
+    expect(result.exhibitionId).toBe(1);
     expect(result.title).toBe('My Game');
     expect(result.summary).toBe('');
     expect(result.autoPublish).toBe(false);
     expect(result.members).toHaveLength(1);
+  });
+
+  it('coerces string exhibitionId to number', () => {
+    const result = SubmitProjectPayload.parse({ ...validPayload, exhibitionId: '42' });
+    expect(result.exhibitionId).toBe(42);
   });
 
   it('rejects missing title', () => {
@@ -234,13 +240,17 @@ describe('UpdateMemberBody', () => {
 // ── Poster / Auth schemas ────────────────────────────────────
 
 describe('SetPosterBody', () => {
-  it('accepts valid UUID', () => {
-    const uuid = '550e8400-e29b-41d4-a716-446655440000';
-    expect(SetPosterBody.parse({ assetId: uuid }).assetId).toBe(uuid);
+  it('accepts valid integer', () => {
+    expect(SetPosterBody.parse({ assetId: 42 }).assetId).toBe(42);
   });
 
-  it('rejects non-UUID', () => {
-    expect(() => SetPosterBody.parse({ assetId: 'not-a-uuid' })).toThrow();
+  it('coerces string to number', () => {
+    expect(SetPosterBody.parse({ assetId: '7' }).assetId).toBe(7);
+  });
+
+  it('rejects non-positive number', () => {
+    expect(() => SetPosterBody.parse({ assetId: 0 })).toThrow();
+    expect(() => SetPosterBody.parse({ assetId: -1 })).toThrow();
   });
 
   it('rejects missing assetId', () => {
@@ -261,5 +271,29 @@ describe('GoogleLoginBody', () => {
 
   it('rejects missing credential', () => {
     expect(() => GoogleLoginBody.parse({})).toThrow();
+  });
+});
+
+// ── parseIntParam ─────────────────────────────────────────────
+
+describe('parseIntParam', () => {
+  it('parses valid integer string', () => {
+    expect(parseIntParam('42')).toBe(42);
+  });
+
+  it('throws on non-numeric string', () => {
+    expect(() => parseIntParam('abc')).toThrow();
+  });
+
+  it('throws on zero', () => {
+    expect(() => parseIntParam('0')).toThrow();
+  });
+
+  it('throws on negative', () => {
+    expect(() => parseIntParam('-1')).toThrow();
+  });
+
+  it('throws on float', () => {
+    expect(() => parseIntParam('1.5')).toThrow();
   });
 });

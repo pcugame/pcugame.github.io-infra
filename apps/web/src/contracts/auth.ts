@@ -22,8 +22,9 @@ export type MeResponse =
 
 /** 인증된 사용자 정보 */
 export type AuthUser = {
-  id: string;
+  id: number;
   email: string;
   name: string;
   role: UserRole;
+  studentId?: string;
 };

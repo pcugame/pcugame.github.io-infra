@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { assertUploadAllowed } from '../modules/admin/upload-guard.js';
 import { AppError } from '../shared/errors.js';
-import type { Year } from '@prisma/client';
+import type { Exhibition } from '@prisma/client';
 
-function fakeYear(overrides: Partial<Year> = {}): Year {
+function fakeExhibition(overrides: Partial<Exhibition> = {}): Exhibition {
 	return {
-		id: 'year-1',
+		id: 1,
 		year: 2025,
 		title: '',
 		isUploadEnabled: true,
@@ -17,9 +17,7 @@ function fakeYear(overrides: Partial<Year> = {}): Year {
 }
 
 describe('assertUploadAllowed', () => {
-	// ── Year existence ──────────────────────────────────────────
-
-	it('throws 404 when year is null (any role)', () => {
+	it('throws 404 when exhibition is null (any role)', () => {
 		for (const role of ['USER', 'OPERATOR', 'ADMIN'] as const) {
 			try {
 				assertUploadAllowed(null, 2025, role);
@@ -32,29 +30,25 @@ describe('assertUploadAllowed', () => {
 		}
 	});
 
-	// ── Upload enabled ──────────────────────────────────────────
-
 	it('allows USER when uploads are enabled', () => {
-		const year = fakeYear({ isUploadEnabled: true });
-		expect(() => assertUploadAllowed(year, 2025, 'USER')).not.toThrow();
+		const ex = fakeExhibition({ isUploadEnabled: true });
+		expect(() => assertUploadAllowed(ex, 2025, 'USER')).not.toThrow();
 	});
 
 	it('allows OPERATOR when uploads are enabled', () => {
-		const year = fakeYear({ isUploadEnabled: true });
-		expect(() => assertUploadAllowed(year, 2025, 'OPERATOR')).not.toThrow();
+		const ex = fakeExhibition({ isUploadEnabled: true });
+		expect(() => assertUploadAllowed(ex, 2025, 'OPERATOR')).not.toThrow();
 	});
 
 	it('allows ADMIN when uploads are enabled', () => {
-		const year = fakeYear({ isUploadEnabled: true });
-		expect(() => assertUploadAllowed(year, 2025, 'ADMIN')).not.toThrow();
+		const ex = fakeExhibition({ isUploadEnabled: true });
+		expect(() => assertUploadAllowed(ex, 2025, 'ADMIN')).not.toThrow();
 	});
 
-	// ── Upload disabled ─────────────────────────────────────────
-
 	it('blocks USER when uploads are disabled', () => {
-		const year = fakeYear({ isUploadEnabled: false });
+		const ex = fakeExhibition({ isUploadEnabled: false });
 		try {
-			assertUploadAllowed(year, 2025, 'USER');
+			assertUploadAllowed(ex, 2025, 'USER');
 			expect.fail('should have thrown');
 		} catch (err) {
 			expect(err).toBeInstanceOf(AppError);
@@ -64,12 +58,12 @@ describe('assertUploadAllowed', () => {
 	});
 
 	it('allows OPERATOR when uploads are disabled', () => {
-		const year = fakeYear({ isUploadEnabled: false });
-		expect(() => assertUploadAllowed(year, 2025, 'OPERATOR')).not.toThrow();
+		const ex = fakeExhibition({ isUploadEnabled: false });
+		expect(() => assertUploadAllowed(ex, 2025, 'OPERATOR')).not.toThrow();
 	});
 
 	it('allows ADMIN when uploads are disabled', () => {
-		const year = fakeYear({ isUploadEnabled: false });
-		expect(() => assertUploadAllowed(year, 2025, 'ADMIN')).not.toThrow();
+		const ex = fakeExhibition({ isUploadEnabled: false });
+		expect(() => assertUploadAllowed(ex, 2025, 'ADMIN')).not.toThrow();
 	});
 });

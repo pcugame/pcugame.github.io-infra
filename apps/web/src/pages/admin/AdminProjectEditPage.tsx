@@ -30,7 +30,8 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default function AdminProjectEditPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id: idParam } = useParams<{ id: string }>();
+  const id = Number(idParam);
   const qc = useQueryClient();
   const { user } = useMe();
 
@@ -41,9 +42,9 @@ export default function AdminProjectEditPage() {
     error,
     refetch,
   } = useQuery({
-    queryKey: queryKeys.adminProject(id!),
-    queryFn: () => adminProjectApi.getDetail(id!),
-    enabled: !!id,
+    queryKey: queryKeys.adminProject(id),
+    queryFn: () => adminProjectApi.getDetail(id),
+    enabled: !isNaN(id),
   });
 
   // ── 기본 정보 수정 폼 ─────────────────────────────────────
@@ -68,12 +69,12 @@ export default function AdminProjectEditPage() {
 
   const updateMutation = useMutation({
     mutationFn: (data: UpdateProjectFormInput) =>
-      adminProjectApi.update(id!, {
+      adminProjectApi.update(id, {
         ...data,
         videoUrl: data.videoUrl || null,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
       qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
       qc.invalidateQueries({ queryKey: queryKeys.publicYears });
     },
@@ -90,25 +91,25 @@ export default function AdminProjectEditPage() {
   });
 
   const addMemberMutation = useMutation({
-    mutationFn: (body: AddMemberInput) => adminMemberApi.add(id!, body),
+    mutationFn: (body: AddMemberInput) => adminMemberApi.add(id, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
       setNewMember({ name: '', studentId: '' });
     },
   });
 
   const updateMemberMutation = useMutation({
-    mutationFn: ({ memberId, body }: { memberId: string; body: UpdateMemberRequest }) =>
-      adminMemberApi.update(id!, memberId, body),
+    mutationFn: ({ memberId, body }: { memberId: number; body: UpdateMemberRequest }) =>
+      adminMemberApi.update(id, memberId, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
     },
   });
 
   const removeMemberMutation = useMutation({
-    mutationFn: (memberId: string) => adminMemberApi.remove(id!, memberId),
+    mutationFn: (memberId: number) => adminMemberApi.remove(id, memberId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
     },
   });
 
@@ -125,22 +126,22 @@ export default function AdminProjectEditPage() {
 
   // ── 자산 추가/삭제 ────────────────────────────────────────
   const addAssetMutation = useMutation({
-    mutationFn: (fd: FormData) => adminProjectApi.addAsset(id!, fd),
+    mutationFn: (fd: FormData) => adminProjectApi.addAsset(id, fd),
   });
 
   const setPosterMutation = useMutation({
-    mutationFn: (assetId: string) =>
-      adminProjectApi.setPoster(id!, { assetId }),
+    mutationFn: (assetId: number) =>
+      adminProjectApi.setPoster(id, { assetId }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
       qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
     },
   });
 
   const removeAssetMutation = useMutation({
-    mutationFn: (assetId: string) => adminAssetApi.remove(assetId),
+    mutationFn: (assetId: number) => adminAssetApi.remove(assetId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
     },
   });
 
@@ -155,7 +156,7 @@ export default function AdminProjectEditPage() {
             // setPoster 실패는 기존 에러 표시 체계를 따름
           }
         } else {
-          qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+          qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
         }
       },
     });
@@ -167,9 +168,9 @@ export default function AdminProjectEditPage() {
 
   const toggleStatusMutation = useMutation({
     mutationFn: (status: ProjectStatus) =>
-      adminProjectApi.update(id!, { status }),
+      adminProjectApi.update(id, { status }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id!) });
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
       qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
       qc.invalidateQueries({ queryKey: queryKeys.publicYears });
     },
@@ -453,7 +454,7 @@ export default function AdminProjectEditPage() {
         </div>
 
         {/* ── 대용량 게임 파일 (청크 업로드) ──────────────── */}
-        <GameUploadWidget projectId={id!} />
+        <GameUploadWidget projectId={id} />
       </fieldset>
     </div>
   );

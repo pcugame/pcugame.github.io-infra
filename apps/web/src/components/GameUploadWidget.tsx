@@ -22,7 +22,7 @@ import {
 type UploadState = 'idle' | 'uploading' | 'completing' | 'completed' | 'error' | 'cancelled';
 
 interface Props {
-	projectId: string;
+	projectId: number;
 }
 
 export default function GameUploadWidget({ projectId }: Props) {

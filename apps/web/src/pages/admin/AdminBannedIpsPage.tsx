@@ -13,7 +13,7 @@ export default function AdminBannedIpsPage() {
   });
 
   const unbanMutation = useMutation({
-    mutationFn: (id: string) => adminBannedIpApi.unban(id),
+    mutationFn: (id: number) => adminBannedIpApi.unban(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.adminBannedIps });
     },

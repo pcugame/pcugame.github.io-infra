@@ -17,8 +17,8 @@ import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
  */
 export function assertWriteAccess(
 	role: UserRole,
-	creatorId: string,
-	userId: string,
+	creatorId: number,
+	userId: number,
 	projectStatus: string,
 	opts: { requireDraft?: boolean; isMember?: boolean } = {},
 ): void {
@@ -41,7 +41,7 @@ export function assertWriteAccess(
  */
 export async function loadProjectWithAccess(
 	request: FastifyRequest,
-	projectId: string,
+	projectId: number,
 	opts: { requireDraft?: boolean } = {},
 ): Promise<Project> {
 	const user = request.currentUser;

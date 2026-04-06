@@ -56,7 +56,7 @@ const routes: MockRoute[] = [
 			const exhibitions = yearItems.map((y) => ({ id: y.id, title: y.title || `${year} 전시` }));
 			const items = cards.map((c) => ({
 				...c,
-				exhibitionId: yearItems[0]?.id ?? `mock-year-${year}`,
+				exhibitionId: yearItems[0]?.id ?? 0,
 				exhibitionTitle: yearItems[0]?.title ?? `${year} 전시`,
 			}));
 			return { year, exhibitions, items, empty: items.length === 0 };
@@ -70,21 +70,22 @@ const routes: MockRoute[] = [
 		},
 	},
 
-	// ── Admin Years (OPERATOR/ADMIN only) ──
+	// ── Admin Exhibitions (OPERATOR/ADMIN only) ──
 	{
-		pattern: /^\/api\/admin\/years$/,
+		pattern: /^\/api\/admin\/exhibitions$/,
 		handler: (_match, method) => {
 			requireAdmin();
-			if (method === 'POST') return { id: 'new-year', year: 2026 };
+			if (method === 'POST') return { id: 100, year: 2026 };
 			return { items: MOCK_ADMIN_YEARS };
 		},
 	},
 	{
-		pattern: /^\/api\/admin\/years\/([^/]+)$/,
+		pattern: /^\/api\/admin\/exhibitions\/([^/]+)$/,
 		handler: (match, method) => {
 			requireAdmin();
 			if (method === 'DELETE') return undefined;
-			return MOCK_ADMIN_YEARS.find((y) => y.id === match[1]) ?? MOCK_ADMIN_YEARS[0];
+			const id = Number(match[1]);
+			return MOCK_ADMIN_YEARS.find((y) => y.id === id) ?? MOCK_ADMIN_YEARS[0];
 		},
 	},
 
@@ -92,17 +93,17 @@ const routes: MockRoute[] = [
 	{
 		pattern: /^\/api\/admin\/projects\/submit$/,
 		handler: () => ({
-			id: 'new-project', slug: 'new-project', year: 2025,
-			status: 'DRAFT', adminEditUrl: '/admin/projects/new-project/edit',
+			id: 999, slug: 'new-project', year: 2025,
+			status: 'DRAFT', adminEditUrl: '/admin/projects/999/edit',
 		}),
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)\/assets$/,
-		handler: () => ({ assetId: 'new-asset', url: 'https://placehold.co/400x300?text=New+Asset' }),
+		handler: () => ({ assetId: 900, url: 'https://placehold.co/400x300?text=New+Asset' }),
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)\/poster$/,
-		handler: () => ({ posterAssetId: 'poster-1' }),
+		handler: () => ({ posterAssetId: 901 }),
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)\/members\/([^/]+)$/,
@@ -110,7 +111,7 @@ const routes: MockRoute[] = [
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)\/members$/,
-		handler: () => ({ id: 'new-member' }),
+		handler: () => ({ id: 800 }),
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)$/,

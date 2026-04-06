@@ -2,7 +2,7 @@
 
 /** GET /api/public/years */
 export type PublicYearItem = {
-  id: string;
+  id: number;
   year: number;
   title?: string;
   projectCount: number;
@@ -14,18 +14,18 @@ export type PublicYearListResponse = {
 
 /** GET /api/public/years/:year/projects */
 export type PublicProjectCard = {
-  id: string;
+  id: number;
   slug: string;
   title: string;
   summary?: string;
   posterUrl?: string;
   members: { name: string; studentId: string }[];
-  exhibitionId?: string;
+  exhibitionId?: number;
   exhibitionTitle?: string;
 };
 
 export type PublicExhibition = {
-  id: string;
+  id: number;
   title: string;
 };
 
@@ -45,19 +45,19 @@ export type ProjectVideo = {
 
 /** GET /api/public/projects/:idOrSlug */
 export type PublicProjectImage = {
-  id: string;
+  id: number;
   url: string;
   kind: 'IMAGE' | 'POSTER';
 };
 
 export type PublicProjectMember = {
-  id: string;
+  id: number;
   name: string;
   studentId: string;
 };
 
 export type PublicProjectDetailResponse = {
-  id: string;
+  id: number;
   year: number;
   slug: string;
   title: string;

@@ -74,15 +74,15 @@ async function seedTestAdmin() {
 
 // ── 테스트 데이터 생성 ────────────────────────────────
 
-async function seedTestData(creatorId: string) {
-  const year = await prisma.year.upsert({
+async function seedTestData(creatorId: number) {
+  const exhibition = await prisma.exhibition.upsert({
     where: { year_title: { year: 2026, title: '2026 졸업작품전' } },
     update: {},
     create: { year: 2026, title: '2026 졸업작품전', isUploadEnabled: true },
   });
 
   const existing = await prisma.project.findUnique({
-    where: { project_year_slug: { yearId: year.id, slug: 'test-project' } },
+    where: { project_exhibition_slug: { exhibitionId: exhibition.id, slug: 'test-project' } },
   });
   if (existing) {
     console.log('테스트 프로젝트가 이미 존재합니다. 건너뜁니다.');
@@ -91,7 +91,7 @@ async function seedTestData(creatorId: string) {
 
   const project = await prisma.project.create({
     data: {
-      yearId: year.id,
+      exhibitionId: exhibition.id,
       slug: 'test-project',
       title: '테스트 졸업작품',
       summary: '배포 검증용 테스트 프로젝트입니다.',
@@ -133,7 +133,6 @@ interface ImportProject {
   videoUrl?: string;
   videoMimeType?: string;
   status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
-  downloadPolicy?: 'NONE' | 'PUBLIC' | 'SCHOOL_ONLY' | 'ADMIN_ONLY';
   githubUrl?: string;
   platforms?: ('PC' | 'MOBILE' | 'WEB')[];
   members?: ImportMember[];
@@ -154,22 +153,22 @@ function toSlugSimple(text: string): string {
     || 'project';
 }
 
-async function importFromJson(filePath: string, creatorId: string) {
+async function importFromJson(filePath: string, creatorId: number) {
   const raw = readFileSync(filePath, 'utf-8');
   const data: ImportData = JSON.parse(raw);
 
-  // 연도 생성
-  const yearMap = new Map<number, string>(); // year number -> year id
+  // 전시회 생성
+  const exhibitionMap = new Map<number, number>(); // year number -> exhibition id
   if (data.years) {
     for (const y of data.years) {
       const yearTitle = y.title ?? '';
-      const created = await prisma.year.upsert({
+      const created = await prisma.exhibition.upsert({
         where: { year_title: { year: y.year, title: yearTitle } },
         update: { isUploadEnabled: y.isUploadEnabled ?? true },
         create: { year: y.year, title: yearTitle, isUploadEnabled: y.isUploadEnabled ?? true },
       });
-      yearMap.set(y.year, created.id);
-      console.log(`연도: ${y.year} — ${yearTitle || '(제목 없음)'} (${created.id})`);
+      exhibitionMap.set(y.year, created.id);
+      console.log(`전시회: ${y.year} — ${yearTitle || '(제목 없음)'} (${created.id})`);
     }
   }
 
@@ -179,17 +178,17 @@ async function importFromJson(filePath: string, creatorId: string) {
     let skipped = 0;
 
     for (const p of data.projects) {
-      // 연도가 없으면 자동 생성
-      if (!yearMap.has(p.year)) {
+      // 전시회가 없으면 자동 생성
+      if (!exhibitionMap.has(p.year)) {
         const defaultTitle = `${p.year} 졸업작품전`;
-        const y = await prisma.year.upsert({
+        const ex = await prisma.exhibition.upsert({
           where: { year_title: { year: p.year, title: defaultTitle } },
           update: {},
           create: { year: p.year, title: defaultTitle, isUploadEnabled: true },
         });
-        yearMap.set(p.year, y.id);
+        exhibitionMap.set(p.year, ex.id);
       }
-      const yearId = yearMap.get(p.year)!;
+      const exhibitionId = exhibitionMap.get(p.year)!;
 
       // slug 생성 (중복 시 번호 추가)
       const baseSlug = p.slug || toSlugSimple(p.title);
@@ -197,7 +196,7 @@ async function importFromJson(filePath: string, creatorId: string) {
       let attempt = 0;
       while (
         await prisma.project.findUnique({
-          where: { project_year_slug: { yearId, slug } },
+          where: { project_exhibition_slug: { exhibitionId, slug } },
         })
       ) {
         attempt++;
@@ -205,13 +204,12 @@ async function importFromJson(filePath: string, creatorId: string) {
       }
 
       if (attempt > 0 && !p.slug) {
-        // 같은 제목이 이미 있다면 중복일 수 있음
         console.log(`  ⚠ "${p.title}" slug 충돌 → ${slug}`);
       }
 
       const project = await prisma.project.create({
         data: {
-          yearId,
+          exhibitionId,
           slug,
           title: p.title,
           summary: p.summary ?? '',
@@ -220,7 +218,6 @@ async function importFromJson(filePath: string, creatorId: string) {
           videoUrl: p.videoUrl ?? '',
           videoMimeType: p.videoMimeType ?? '',
           status: p.status ?? 'PUBLISHED',
-          downloadPolicy: p.downloadPolicy ?? 'PUBLIC',
           githubUrl: p.githubUrl ?? '',
           platforms: p.platforms ?? [],
           creatorId,

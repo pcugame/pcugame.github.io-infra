@@ -7,10 +7,10 @@ import { registerCookie } from './plugins/cookie.js';
 import { registerMultipart } from './plugins/multipart.js';
 import { registerAuth } from './plugins/auth.js';
 import { registerCsrf } from './plugins/csrf.js';
-import { authRoutes } from './modules/auth/auth.routes.js';
-import { publicRoutes } from './modules/public/public.routes.js';
+import { authController } from './modules/auth/index.js';
+import { publicController } from './modules/public/index.js';
 import { adminRoutes } from './modules/admin/admin.routes.js';
-import { assetsRoutes } from './modules/assets/assets.routes.js';
+import { assetsController } from './modules/assets/index.js';
 import { AppError } from './shared/errors.js';
 import type { ApiError } from './shared/http.js';
 import { prisma } from './lib/prisma.js';
@@ -70,10 +70,10 @@ export async function buildApp() {
 	});
 
 	// Routes
-	await app.register(authRoutes, { prefix: '/api' });
-	await app.register(publicRoutes, { prefix: '/api/public' });
+	await app.register(authController, { prefix: '/api' });
+	await app.register(publicController, { prefix: '/api/public' });
 	await app.register(adminRoutes, { prefix: '/api/admin' });
-	await app.register(assetsRoutes, { prefix: '/api' });
+	await app.register(assetsController, { prefix: '/api' });
 
 	// Global error handler
 	app.setErrorHandler((error: FastifyError, _request, reply) => {

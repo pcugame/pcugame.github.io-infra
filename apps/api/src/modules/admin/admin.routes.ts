@@ -1,16 +1,16 @@
 import type { FastifyInstance } from 'fastify';
-import { adminYearRoutes } from './admin-year.routes.js';
-import { adminProjectRoutes } from './admin-project.routes.js';
-import { adminMemberRoutes } from './admin-member.routes.js';
-import { adminGameUploadRoutes } from './admin-game-upload.routes.js';
-import { adminBannedIpRoutes } from './admin-banned-ip.routes.js';
-import { adminSettingsRoutes } from './admin-settings.routes.js';
+import { exhibitionController } from './year/index.js';
+import { projectController } from './project/index.js';
+import { memberController } from './member/index.js';
+import { gameUploadController } from './game-upload/index.js';
+import { bannedIpController } from './banned-ip/index.js';
+import { settingsController } from './settings/index.js';
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
-	await app.register(adminYearRoutes);
-	await app.register(adminProjectRoutes);
-	await app.register(adminMemberRoutes);
-	await app.register(adminGameUploadRoutes);
-	await app.register(adminBannedIpRoutes);
-	await app.register(adminSettingsRoutes);
+	await app.register(exhibitionController);
+	await app.register(projectController);
+	await app.register(memberController);
+	await app.register(gameUploadController);
+	await app.register(bannedIpController);
+	await app.register(settingsController);
 }

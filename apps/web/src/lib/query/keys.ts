@@ -10,12 +10,12 @@ export const queryKeys = {
   yearProjects: (year: number) => ['yearProjects', year] as const,
   projectDetail: (year: number, slug: string) =>
     ['projectDetail', year, slug] as const,
-  projectDetailById: (id: string) => ['projectDetailById', id] as const,
+  projectDetailById: (id: number) => ['projectDetailById', id] as const,
 
   // ── Admin ──────────────────────────────────────────────────
-  adminYears: ['adminYears'] as const,
+  adminExhibitions: ['adminExhibitions'] as const,
   adminProjects: ['adminProjects'] as const,
-  adminProject: (id: string) => ['adminProject', id] as const,
+  adminProject: (id: number) => ['adminProject', id] as const,
   adminBannedIps: ['adminBannedIps'] as const,
   adminSettings: ['adminSettings'] as const,
 } as const;

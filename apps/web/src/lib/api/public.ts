@@ -19,10 +19,10 @@ export const publicApi = {
   },
 
   /** 프로젝트 상세 (id 또는 slug, slug일 경우 year query 포함 가능) */
-  getProjectDetail(idOrSlug: string, year?: number) {
+  getProjectDetail(idOrSlug: string | number, year?: number) {
     const query = year ? `?year=${year}` : '';
     return api.get<PublicProjectDetailResponse>(
-      `/api/public/projects/${encodeURIComponent(idOrSlug)}${query}`,
+      `/api/public/projects/${encodeURIComponent(String(idOrSlug))}${query}`,
     );
   },
 };

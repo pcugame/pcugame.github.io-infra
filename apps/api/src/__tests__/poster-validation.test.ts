@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { assertValidPosterAsset, isPosterUrlSafe, type PosterCandidate } from '../shared/poster-validation.js';
 import { AppError } from '../shared/errors.js';
 
-const projectId = 'proj-1';
+const projectId = 1;
 
 function fakeAsset(overrides: Partial<PosterCandidate> = {}): PosterCandidate {
 	return {
-		id: 'asset-1',
+		id: 10,
 		projectId,
 		kind: 'POSTER',
 		status: 'READY',
@@ -14,10 +14,7 @@ function fakeAsset(overrides: Partial<PosterCandidate> = {}): PosterCandidate {
 	};
 }
 
-// ── assertValidPosterAsset ──────────────────────────────────
-
 describe('assertValidPosterAsset', () => {
-	// Valid cases
 	it('accepts POSTER kind in READY status', () => {
 		expect(() => assertValidPosterAsset(fakeAsset({ kind: 'POSTER' }), projectId)).not.toThrow();
 	});
@@ -30,7 +27,6 @@ describe('assertValidPosterAsset', () => {
 		expect(() => assertValidPosterAsset(fakeAsset({ kind: 'THUMBNAIL' }), projectId)).not.toThrow();
 	});
 
-	// Null asset
 	it('throws 404 when asset is null', () => {
 		try {
 			assertValidPosterAsset(null, projectId);
@@ -41,10 +37,9 @@ describe('assertValidPosterAsset', () => {
 		}
 	});
 
-	// Wrong project
 	it('throws 404 when asset belongs to a different project', () => {
 		try {
-			assertValidPosterAsset(fakeAsset({ projectId: 'other-proj' }), projectId);
+			assertValidPosterAsset(fakeAsset({ projectId: 999 }), projectId);
 			expect.fail('should have thrown');
 		} catch (err) {
 			expect(err).toBeInstanceOf(AppError);
@@ -53,7 +48,6 @@ describe('assertValidPosterAsset', () => {
 		}
 	});
 
-	// Invalid kind
 	it('throws 400 when asset kind is GAME', () => {
 		try {
 			assertValidPosterAsset(fakeAsset({ kind: 'GAME' }), projectId);
@@ -66,7 +60,6 @@ describe('assertValidPosterAsset', () => {
 		}
 	});
 
-	// Invalid status
 	it('throws 400 when asset status is DELETING', () => {
 		try {
 			assertValidPosterAsset(fakeAsset({ status: 'DELETING' }), projectId);
@@ -89,8 +82,6 @@ describe('assertValidPosterAsset', () => {
 		}
 	});
 });
-
-// ── isPosterUrlSafe ─────────────────────────────────────────
 
 describe('isPosterUrlSafe', () => {
 	it('returns true for POSTER kind in READY status', () => {

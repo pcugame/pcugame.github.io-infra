@@ -1,27 +1,27 @@
-import type { Year } from '@prisma/client';
+import type { Exhibition } from '@prisma/client';
 import type { UserRole } from '@prisma/client';
 import { notFound, forbidden } from '../../shared/errors.js';
 
 /**
- * Validate that a year exists and that the user is allowed to upload to it.
+ * Validate that an exhibition exists and that the user is allowed to upload to it.
  *
  * Policy:
- * - Year must exist (operators create years explicitly).
+ * - Exhibition must exist (operators create exhibitions explicitly).
  * - If `isUploadEnabled` is false, only ADMIN / OPERATOR may submit.
  * - USER role is blocked when uploads are disabled.
  */
 export function assertUploadAllowed(
-	year: Year | null,
-	yearIdentifier: string | number,
+	exhibition: Exhibition | null,
+	exhibitionIdentifier: string | number,
 	role: UserRole,
-): asserts year is Year {
-	if (!year) {
-		throw notFound(`Exhibition ${yearIdentifier} does not exist. An operator must create it first.`);
+): asserts exhibition is Exhibition {
+	if (!exhibition) {
+		throw notFound(`Exhibition ${exhibitionIdentifier} does not exist. An operator must create it first.`);
 	}
 
 	const isPrivileged = role === 'ADMIN' || role === 'OPERATOR';
-	if (!year.isUploadEnabled && !isPrivileged) {
-		const label = year.title ? `"${year.title}" (${year.year})` : String(year.year);
+	if (!exhibition.isUploadEnabled && !isPrivileged) {
+		const label = exhibition.title ? `"${exhibition.title}" (${exhibition.year})` : String(exhibition.year);
 		throw forbidden(
 			`Upload is disabled for ${label}. Contact an operator to enable it.`,
 		);

@@ -15,7 +15,7 @@ export type ProjectMemberInput = z.infer<typeof ProjectMemberInputSchema>;
 // ── 작품 등록 (submit all-in-one) ────────────────────────────
 
 export const SubmitProjectPayloadSchema = z.object({
-  yearId: z.string().min(1, '전시회를 선택하세요'),
+  exhibitionId: z.number().int().positive('전시회를 선택하세요'),
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
@@ -51,24 +51,24 @@ export const UpdateProjectFormSchema = z.object({
 
 export type UpdateProjectFormInput = z.infer<typeof UpdateProjectFormSchema>;
 
-// ── 연도 생성/수정 ──────────────────────────────────────────
+// ── 전시회 생성/수정 ────────────────────────────────────────
 
-export const CreateYearSchema = z.object({
+export const CreateExhibitionSchema = z.object({
   year: z.number().int().min(2021).max(2100),
   title: z.string().max(100).optional().or(z.literal('')),
   isUploadEnabled: z.boolean().optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 });
 
-export type CreateYearInput = z.infer<typeof CreateYearSchema>;
+export type CreateExhibitionInput = z.infer<typeof CreateExhibitionSchema>;
 
-export const UpdateYearSchema = z.object({
+export const UpdateExhibitionSchema = z.object({
   title: z.string().max(100).optional().or(z.literal('')),
   isUploadEnabled: z.boolean().optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 });
 
-export type UpdateYearInput = z.infer<typeof UpdateYearSchema>;
+export type UpdateExhibitionInput = z.infer<typeof UpdateExhibitionSchema>;
 
 // ── 멤버 추가/수정 (admin edit 화면용) ───────────────────────
 

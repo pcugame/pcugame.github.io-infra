@@ -14,12 +14,16 @@ export default function ProjectDetailPage() {
 
   const year = yearParam ? Number(yearParam) : undefined;
   const idOrSlug = slug ?? projectId ?? '';
+  const numericId = projectId ? Number(projectId) : NaN;
 
   const { data: project, isLoading, error, refetch } = useQuery({
     queryKey: slug && year
       ? queryKeys.projectDetail(year, slug)
-      : queryKeys.projectDetailById(idOrSlug),
-    queryFn: () => publicApi.getProjectDetail(idOrSlug, year),
+      : queryKeys.projectDetailById(numericId),
+    queryFn: () => publicApi.getProjectDetail(
+      !isNaN(numericId) ? numericId : idOrSlug,
+      year,
+    ),
     enabled: !!idOrSlug,
   });
 

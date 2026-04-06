@@ -13,8 +13,8 @@ import { badRequest, notFound } from './errors.js';
 const POSTER_ELIGIBLE_KINDS = new Set<AssetKind>(['POSTER', 'IMAGE', 'THUMBNAIL']);
 
 export interface PosterCandidate {
-	id: string;
-	projectId: string;
+	id: number;
+	projectId: number;
 	kind: AssetKind;
 	status: string;
 }
@@ -25,7 +25,7 @@ export interface PosterCandidate {
  */
 export function assertValidPosterAsset(
 	asset: PosterCandidate | null,
-	expectedProjectId: string,
+	expectedProjectId: number,
 ): void {
 	if (!asset) {
 		throw notFound('Asset not found');

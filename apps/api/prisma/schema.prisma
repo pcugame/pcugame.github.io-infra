@@ -44,9 +44,10 @@ enum Platform {
 // ─── Models ───────────────────────────────────────────
 
 model User {
-  id        String   @id @default(uuid())
+  id        Int      @id @default(autoincrement())
   googleSub String   @unique @map("google_sub")
-  email     String
+  email     String   @default("")
+  studentId String?  @unique @map("student_id")
   name      String   @default("")
   picture   String   @default("")
   role      UserRole @default(USER)
@@ -61,25 +62,25 @@ model User {
   @@map("users")
 }
 
-model Year {
-  id        String   @id @default(uuid())
-  year      Int
-  title     String   @default("")
+model Exhibition {
+  id              Int      @id @default(autoincrement())
+  year            Int
+  title           String   @default("")
   isUploadEnabled Boolean  @default(true) @map("is_upload_enabled")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  sortOrder       Int      @default(0) @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  projects Project[] @relation("YearProjects")
+  projects Project[] @relation("ExhibitionProjects")
 
   @@unique([year, title], name: "year_title")
   @@index([sortOrder, year])
-  @@map("years")
+  @@map("exhibitions")
 }
 
 model Project {
-  id             String         @id @default(uuid())
-  yearId         String         @map("year_id")
+  id             Int            @id @default(autoincrement())
+  exhibitionId   Int            @map("exhibition_id")
   slug           String
   title          String
   summary        String         @default("")
@@ -91,29 +92,29 @@ model Project {
   sortOrder      Int            @default(0) @map("sort_order")
   githubUrl      String         @default("") @map("github_url")
   platforms      Platform[]     @default([])
-  posterAssetId  String?        @unique @map("poster_asset_id")
-  creatorId      String         @map("creator_id")
+  posterAssetId  Int?           @unique @map("poster_asset_id")
+  creatorId      Int            @map("creator_id")
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
 
-  year    Year  @relation("YearProjects", fields: [yearId], references: [id], onDelete: Cascade)
-  creator User  @relation("ProjectCreator", fields: [creatorId], references: [id], onDelete: Cascade)
-  poster  Asset? @relation("ProjectPoster", fields: [posterAssetId], references: [id], onDelete: SetNull)
+  exhibition Exhibition @relation("ExhibitionProjects", fields: [exhibitionId], references: [id], onDelete: Cascade)
+  creator    User       @relation("ProjectCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  poster     Asset?     @relation("ProjectPoster", fields: [posterAssetId], references: [id], onDelete: SetNull)
 
   members     ProjectMember[]      @relation("ProjectMembers")
   assets      Asset[]              @relation("ProjectAssets")
   gameUploads GameUploadSession[]  @relation("ProjectGameUploads")
 
-  @@unique([yearId, slug], name: "project_year_slug")
-  @@index([yearId, status, sortOrder])
+  @@unique([exhibitionId, slug], name: "project_exhibition_slug")
+  @@index([exhibitionId, status, sortOrder])
   @@index([status])
   @@map("projects")
 }
 
 model ProjectMember {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  userId    String?  @map("user_id")
+  id        Int      @id @default(autoincrement())
+  projectId Int      @map("project_id")
+  userId    Int?     @map("user_id")
   name      String
   studentId String   @default("") @map("student_id")
   sortOrder Int      @default(0) @map("sort_order")
@@ -129,8 +130,8 @@ model ProjectMember {
 }
 
 model Asset {
-  id          String      @id @default(uuid())
-  projectId   String      @map("project_id")
+  id          Int         @id @default(autoincrement())
+  projectId   Int         @map("project_id")
   kind        AssetKind
   status      AssetStatus @default(READY)
   storageKey  String      @unique @map("storage_key")
@@ -150,7 +151,7 @@ model Asset {
 
 model AuthSession {
   id        String   @id @default(uuid())
-  userId    String   @map("user_id")
+  userId    Int      @map("user_id")
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -162,7 +163,7 @@ model AuthSession {
 }
 
 model UploadJob {
-  id         String   @id @default(uuid())
+  id         Int      @id @default(autoincrement())
   storageKey String   @map("storage_key")
   status     String   @default("pending")
   error      String   @default("")
@@ -176,8 +177,8 @@ model UploadJob {
 /// Chunks are stored in UPLOAD_STAGING_ROOT/<id>/ as chunk-NNNN files.
 model GameUploadSession {
   id             String   @id @default(uuid())
-  projectId      String   @map("project_id")
-  userId         String   @map("user_id")
+  projectId      Int      @map("project_id")
+  userId         Int      @map("user_id")
   originalName   String   @map("original_name")
   totalBytes     BigInt   @map("total_bytes")
   chunkSizeBytes Int      @map("chunk_size_bytes")
@@ -202,7 +203,7 @@ model GameUploadSession {
 /// IP addresses permanently banned from downloading game files.
 /// Auto-banned when download rate limit is exceeded; admins can unban.
 model BannedIp {
-  id        String   @id @default(uuid())
+  id        Int      @id @default(autoincrement())
   ip        String   @unique
   reason    String   @default("")
   createdAt DateTime @default(now()) @map("created_at")

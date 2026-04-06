@@ -3,23 +3,23 @@
 import type { AssetKind, ProjectStatus } from './enums';
 import type { ProjectVideo } from './public';
 
-// ── Year ─────────────────────────────────────────────────────
+// ── Exhibition ───────────────────────────────────────────────
 
-export type CreateYearRequest = {
+export type CreateExhibitionRequest = {
   year: number;
   title?: string;
   isUploadEnabled?: boolean;
   sortOrder?: number;
 };
 
-export type UpdateYearRequest = {
+export type UpdateExhibitionRequest = {
   title?: string;
   isUploadEnabled?: boolean;
   sortOrder?: number;
 };
 
-export type AdminYearItem = {
-  id: string;
+export type AdminExhibitionItem = {
+  id: number;
   year: number;
   title?: string;
   isUploadEnabled: boolean;
@@ -41,7 +41,7 @@ export type UpdateProjectRequest = {
 };
 
 export type AdminProjectItem = {
-  id: string;
+  id: number;
   title: string;
   slug: string;
   year: number;
@@ -51,7 +51,7 @@ export type AdminProjectItem = {
 };
 
 export type AdminProjectDetail = {
-  id: string;
+  id: number;
   title: string;
   slug: string;
   year: number;
@@ -61,11 +61,11 @@ export type AdminProjectDetail = {
   video: ProjectVideo | null;
   status: ProjectStatus;
   sortOrder: number;
-  posterAssetId?: string;
+  posterAssetId?: number;
   posterUrl?: string;
-  members: { id: string; name: string; studentId: string; sortOrder: number; userId: string | null }[];
+  members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
   assets: {
-    id: string;
+    id: number;
     kind: AssetKind;
     url: string;
     originalName: string;
@@ -76,7 +76,7 @@ export type AdminProjectDetail = {
 // ── Submit (all-in-one) ──────────────────────────────────────
 
 export type SubmitProjectPayload = {
-  yearId: string;
+  exhibitionId: number;
   title: string;
   summary?: string;
   description?: string;
@@ -87,7 +87,7 @@ export type SubmitProjectPayload = {
 };
 
 export type SubmitProjectResponse = {
-  id: string;
+  id: number;
   slug: string;
   year: number;
   status: 'DRAFT' | 'PUBLISHED';
@@ -108,3 +108,11 @@ export type UpdateMemberRequest = {
   studentId?: string;
   sortOrder?: number;
 };
+
+// ── Backward compat aliases ─────────────────────────────────
+/** @deprecated Use AdminExhibitionItem */
+export type AdminYearItem = AdminExhibitionItem;
+/** @deprecated Use CreateExhibitionRequest */
+export type CreateYearRequest = CreateExhibitionRequest;
+/** @deprecated Use UpdateExhibitionRequest */
+export type UpdateYearRequest = UpdateExhibitionRequest;

@@ -1,9 +1,9 @@
 // ── Admin API 호출 ───────────────────────────────────────────
 
 import type {
-  CreateYearRequest,
-  UpdateYearRequest,
-  AdminYearItem,
+  CreateExhibitionRequest,
+  UpdateExhibitionRequest,
+  AdminExhibitionItem,
   UpdateProjectRequest,
   AdminProjectItem,
   AdminProjectDetail,
@@ -13,23 +13,23 @@ import type {
 } from '../../contracts';
 import { api } from './client';
 
-// ── Year ─────────────────────────────────────────────────────
+// ── Exhibition ──────────────────────────────────────────────
 
-export const adminYearApi = {
+export const adminExhibitionApi = {
   list() {
-    return api.get<{ items: AdminYearItem[] }>('/api/admin/years');
+    return api.get<{ items: AdminExhibitionItem[] }>('/api/admin/exhibitions');
   },
 
-  create(body: CreateYearRequest) {
-    return api.post<{ id: string; year: number }>('/api/admin/years', body);
+  create(body: CreateExhibitionRequest) {
+    return api.post<{ id: number; year: number }>('/api/admin/exhibitions', body);
   },
 
-  update(id: string, body: UpdateYearRequest) {
-    return api.patch<AdminYearItem>(`/api/admin/years/${id}`, body);
+  update(id: number, body: UpdateExhibitionRequest) {
+    return api.patch<AdminExhibitionItem>(`/api/admin/exhibitions/${id}`, body);
   },
 
-  delete(id: string) {
-    return api.delete<void>(`/api/admin/years/${id}`);
+  delete(id: number) {
+    return api.delete<void>(`/api/admin/exhibitions/${id}`);
   },
 };
 
@@ -40,15 +40,15 @@ export const adminProjectApi = {
     return api.get<{ items: AdminProjectItem[] }>('/api/admin/projects');
   },
 
-  getDetail(id: string) {
+  getDetail(id: number) {
     return api.get<AdminProjectDetail>(`/api/admin/projects/${id}`);
   },
 
-  update(id: string, body: UpdateProjectRequest) {
+  update(id: number, body: UpdateProjectRequest) {
     return api.patch<AdminProjectDetail>(`/api/admin/projects/${id}`, body);
   },
 
-  delete(id: string) {
+  delete(id: number) {
     return api.delete<void>(`/api/admin/projects/${id}`);
   },
 
@@ -61,16 +61,16 @@ export const adminProjectApi = {
   },
 
   /** 기존 프로젝트에 자산 추가 */
-  addAsset(projectId: string, formData: FormData) {
-    return api.post<{ assetId: string; url: string }>(
+  addAsset(projectId: number, formData: FormData) {
+    return api.post<{ assetId: number; url: string }>(
       `/api/admin/projects/${projectId}/assets`,
       formData,
     );
   },
 
   /** 포스터 지정 */
-  setPoster(projectId: string, body: { assetId: string }) {
-    return api.patch<{ posterAssetId: string }>(
+  setPoster(projectId: number, body: { assetId: number }) {
+    return api.patch<{ posterAssetId: number }>(
       `/api/admin/projects/${projectId}/poster`,
       body,
     );
@@ -80,18 +80,18 @@ export const adminProjectApi = {
 // ── Member CRUD ──────────────────────────────────────────────
 
 export const adminMemberApi = {
-  add(projectId: string, body: AddMemberRequest) {
-    return api.post<{ id: string }>(`/api/admin/projects/${projectId}/members`, body);
+  add(projectId: number, body: AddMemberRequest) {
+    return api.post<{ id: number }>(`/api/admin/projects/${projectId}/members`, body);
   },
 
-  update(projectId: string, memberId: string, body: UpdateMemberRequest) {
+  update(projectId: number, memberId: number, body: UpdateMemberRequest) {
     return api.patch<void>(
       `/api/admin/projects/${projectId}/members/${memberId}`,
       body,
     );
   },
 
-  remove(projectId: string, memberId: string) {
+  remove(projectId: number, memberId: number) {
     return api.delete<void>(
       `/api/admin/projects/${projectId}/members/${memberId}`,
     );
@@ -101,7 +101,7 @@ export const adminMemberApi = {
 // ── Asset 삭제 ───────────────────────────────────────────────
 
 export const adminAssetApi = {
-  remove(assetId: string) {
+  remove(assetId: number) {
     return api.delete<void>(`/api/admin/assets/${assetId}`);
   },
 };
@@ -109,7 +109,7 @@ export const adminAssetApi = {
 // ── Banned IPs ──────────────────────────────────────────────
 
 export interface BannedIpItem {
-  id: string;
+  id: number;
   ip: string;
   reason: string;
   createdAt: string;
@@ -139,7 +139,7 @@ export const adminBannedIpApi = {
     return api.get<{ items: BannedIpItem[] }>('/api/admin/banned-ips');
   },
 
-  unban(id: string) {
+  unban(id: number) {
     return api.delete<void>(`/api/admin/banned-ips/${id}`);
   },
 };

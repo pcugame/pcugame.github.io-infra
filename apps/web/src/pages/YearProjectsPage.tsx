@@ -11,7 +11,7 @@ export default function YearProjectsPage() {
   const year = Number(yearParam);
   const [search, setSearch] = useState('');
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string | null>(null); // null = 전체
+  const [activeTab, setActiveTab] = useState<number | null>(null); // null = 전체
   const closeModal = useCallback(() => setSelectedSlug(null), []);
 
   const { data: yearsData } = useQuery({
