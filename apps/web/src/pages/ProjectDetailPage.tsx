@@ -92,7 +92,7 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* 영상 (NAS 자체 호스팅) */}
+      {/* 영상 */}
       {(project.video || project.posterUrl) && (
         <section className="project-detail__video">
           <h3>영상</h3>

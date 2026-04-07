@@ -44,8 +44,6 @@ export function createProjectWithMembers(
 		summary: string;
 		description: string;
 		isLegacy: boolean;
-		videoUrl: string;
-		videoMimeType: string;
 		status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 		githubUrl: string;
 		platforms: ('PC' | 'MOBILE' | 'WEB')[];

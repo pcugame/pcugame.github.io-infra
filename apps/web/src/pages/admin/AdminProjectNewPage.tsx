@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useFieldArray, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -11,12 +11,14 @@ import { adminProjectApi, adminExhibitionApi, getApiErrorMessage } from '../../l
 import { queryKeys } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
 import { useMe } from '../../features/auth';
+import { getClientUploadLimits } from '../../lib/upload-limits';
 
 export default function AdminProjectNewPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user } = useMe();
   const isPrivileged = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
+  const limits = getClientUploadLimits(user?.role ?? 'USER');
 
   // ── 전시회 목록 (업로드 잠금 여부 표시) ──────────────────────
   const { data: yearsData } = useQuery({
@@ -38,8 +40,6 @@ export default function AdminProjectNewPage() {
       title: '',
       summary: '',
       description: '',
-      videoUrl: '',
-      videoMimeType: '',
       autoPublish: false,
       members: [{ name: '', studentId: '' }],
     },
@@ -58,13 +58,45 @@ export default function AdminProjectNewPage() {
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [gameFile, setGameFile] = useState<File | null>(null);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
   const [posterPreview, setPosterPreview] = useState<string | null>(null);
+  const [fileSizeError, setFileSizeError] = useState<string | null>(null);
+  const posterPreviewRef = useRef<string | null>(null);
+
+  // Cleanup poster ObjectURL on unmount
+  useEffect(() => {
+    return () => {
+      if (posterPreviewRef.current) URL.revokeObjectURL(posterPreviewRef.current);
+    };
+  }, []);
+
+  /** Validate file size against the role-based limit for the given kind. */
+  const checkFileSize = (file: File, maxMb: number, label: string): boolean => {
+    if (file.size > maxMb * 1024 * 1024) {
+      setFileSizeError(`${label}: ${(file.size / 1024 / 1024).toFixed(1)}MB — 최대 ${maxMb}MB까지 허용됩니다.`);
+      return false;
+    }
+    setFileSizeError(null);
+    return true;
+  };
 
   const handlePosterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
+    // Revoke previous ObjectURL
+    if (posterPreviewRef.current) {
+      URL.revokeObjectURL(posterPreviewRef.current);
+      posterPreviewRef.current = null;
+    }
+    if (file && !checkFileSize(file, limits.posterMaxMb, '포스터')) {
+      setPosterFile(null);
+      setPosterPreview(null);
+      e.target.value = '';
+      return;
+    }
     setPosterFile(file);
     if (file) {
       const url = URL.createObjectURL(file);
+      posterPreviewRef.current = url;
       setPosterPreview(url);
     } else {
       setPosterPreview(null);
@@ -72,11 +104,36 @@ export default function AdminProjectNewPage() {
   };
 
   const handleImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setImageFiles(Array.from(e.target.files ?? []));
+    const files = Array.from(e.target.files ?? []);
+    const oversized = files.find((f) => f.size > limits.imageMaxMb * 1024 * 1024);
+    if (oversized) {
+      setFileSizeError(`이미지 "${oversized.name}": ${(oversized.size / 1024 / 1024).toFixed(1)}MB — 최대 ${limits.imageMaxMb}MB까지 허용됩니다.`);
+      setImageFiles([]);
+      e.target.value = '';
+      return;
+    }
+    setFileSizeError(null);
+    setImageFiles(files);
   };
 
   const handleGameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setGameFile(e.target.files?.[0] ?? null);
+    const file = e.target.files?.[0] ?? null;
+    if (file && !checkFileSize(file, limits.gameMaxMb, '게임 파일')) {
+      setGameFile(null);
+      e.target.value = '';
+      return;
+    }
+    setGameFile(file);
+  };
+
+  const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    if (file && !checkFileSize(file, limits.videoMaxMb, '동영상')) {
+      setVideoFile(null);
+      e.target.value = '';
+      return;
+    }
+    setVideoFile(file);
   };
 
   // ── 제출 ───────────────────────────────────────────────────
@@ -91,10 +148,16 @@ export default function AdminProjectNewPage() {
   });
 
   const onSubmit = (data: SubmitProjectPayloadInput) => {
+    // Auto-link the first member matching creator's name with their userId
+    if (user) {
+      const creatorMember = data.members.find((m) => m.name === user.name);
+      if (creatorMember) creatorMember.userId = user.id;
+    }
     const fd = buildSubmitFormData(data, {
       poster: posterFile ?? undefined,
       images: imageFiles.length > 0 ? imageFiles : undefined,
       gameFile: gameFile ?? undefined,
+      videoFile: videoFile ?? undefined,
     });
     submitMutation.mutate(fd);
   };
@@ -154,29 +217,6 @@ export default function AdminProjectNewPage() {
             {errors.description && (
               <span className="field-error">{errors.description.message}</span>
             )}
-          </div>
-
-          <div className="form-field">
-            <label htmlFor="videoUrl">영상 URL (NAS)</label>
-            <input
-              id="videoUrl"
-              type="url"
-              placeholder="https://nas.example.com/video/game-trailer.mp4"
-              {...register('videoUrl')}
-            />
-            {errors.videoUrl && (
-              <span className="field-error">{errors.videoUrl.message}</span>
-            )}
-          </div>
-
-          <div className="form-field">
-            <label htmlFor="videoMimeType">영상 MIME 타입</label>
-            <select id="videoMimeType" {...register('videoMimeType')}>
-              <option value="">선택 안 함</option>
-              <option value="video/mp4">video/mp4</option>
-              <option value="video/webm">video/webm</option>
-              <option value="video/ogg">video/ogg</option>
-            </select>
           </div>
 
           <div className="form-field form-field--checkbox">
@@ -252,8 +292,14 @@ export default function AdminProjectNewPage() {
         <fieldset>
           <legend>파일 업로드</legend>
 
+          {fileSizeError && (
+            <div className="error-box" role="alert">
+              <p>{fileSizeError}</p>
+            </div>
+          )}
+
           <div className="form-field">
-            <label htmlFor="poster">포스터 이미지</label>
+            <label htmlFor="poster">포스터 이미지 (최대 {limits.posterMaxMb}MB)</label>
             <input
               id="poster"
               type="file"
@@ -268,7 +314,7 @@ export default function AdminProjectNewPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="images">추가 이미지 (복수 선택 가능)</label>
+            <label htmlFor="images">추가 이미지 (복수 선택 가능, 각 최대 {limits.imageMaxMb}MB)</label>
             <input
               id="images"
               type="file"
@@ -282,7 +328,22 @@ export default function AdminProjectNewPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="gameFile">게임 파일 (ZIP)</label>
+            <label htmlFor="videoFile">동영상 (MP4, WebM, 최대 {limits.videoMaxMb}MB)</label>
+            <input
+              id="videoFile"
+              type="file"
+              accept="video/mp4,video/webm,.mp4,.webm"
+              onChange={handleVideoChange}
+            />
+            {videoFile && (
+              <p className="file-info">
+                {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)}MB)
+              </p>
+            )}
+          </div>
+
+          <div className="form-field">
+            <label htmlFor="gameFile">게임 파일 (ZIP, 최대 {limits.gameMaxMb}MB)</label>
             <input
               id="gameFile"
               type="file"
@@ -294,6 +355,9 @@ export default function AdminProjectNewPage() {
                 {gameFile.name} ({(gameFile.size / 1024 / 1024).toFixed(1)}MB)
               </p>
             )}
+            <p className="field-hint">
+              대용량 게임 파일은 작품 등록 후 편집 화면에서 청크 업로드를 이용하세요.
+            </p>
           </div>
         </fieldset>
 

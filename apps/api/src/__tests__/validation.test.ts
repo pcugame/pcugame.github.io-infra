@@ -31,13 +31,13 @@ describe('ProjectStatusEnum', () => {
 
 describe('AssetKindEnum', () => {
   it('accepts valid kinds', () => {
-    for (const v of ['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME']) {
+    for (const v of ['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO']) {
       expect(AssetKindEnum.parse(v)).toBe(v);
     }
   });
 
   it('rejects invalid kind', () => {
-    expect(() => AssetKindEnum.parse('VIDEO')).toThrow();
+    expect(() => AssetKindEnum.parse('AUDIO')).toThrow();
   });
 });
 
@@ -132,16 +132,6 @@ describe('UpdateProjectBody', () => {
 
   it('rejects empty title', () => {
     expect(() => UpdateProjectBody.parse({ title: '' })).toThrow();
-  });
-
-  it('accepts videoUrl as empty string', () => {
-    const result = UpdateProjectBody.parse({ videoUrl: '' });
-    expect(result.videoUrl).toBe('');
-  });
-
-  it('accepts videoUrl as null', () => {
-    const result = UpdateProjectBody.parse({ videoUrl: null });
-    expect(result.videoUrl).toBeNull();
   });
 
   it('accepts isLegacy boolean', () => {

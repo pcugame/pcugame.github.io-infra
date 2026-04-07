@@ -5,34 +5,32 @@ import * as repo from './repository.js';
 
 // ── JSON 스키마 정의 ─────────────────────────────────────────
 
-const ImportMember = z.object({
+export const ImportMember = z.object({
 	name: z.string().min(1).max(50),
 	studentId: z.string().max(20).optional().default(''),
 	sortOrder: z.number().int().min(0).optional(),
 });
 
-const ImportProject = z.object({
+export const ImportProject = z.object({
 	year: z.number().int().min(2000).max(2100),
 	title: z.string().min(1).max(120),
 	slug: z.string().max(80).optional(),
 	summary: z.string().max(300).optional().default(''),
 	description: z.string().max(5000).optional().default(''),
 	isLegacy: z.boolean().optional().default(false),
-	videoUrl: z.string().url().or(z.literal('')).optional().default(''),
-	videoMimeType: z.string().max(100).optional().default(''),
 	status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional().default('PUBLISHED'),
 	githubUrl: z.string().max(500).optional().default(''),
 	platforms: z.array(z.enum(['PC', 'MOBILE', 'WEB'])).optional().default([]),
 	members: z.array(ImportMember).optional().default([]),
 });
 
-const ImportYear = z.object({
+export const ImportYear = z.object({
 	year: z.number().int().min(2000).max(2100),
 	title: z.string().max(100).optional().default(''),
 	isUploadEnabled: z.boolean().optional().default(true),
 });
 
-const ImportDataSchema = z.object({
+export const ImportDataSchema = z.object({
 	years: z.array(ImportYear).optional().default([]),
 	projects: z.array(ImportProject).optional().default([]),
 });
@@ -198,8 +196,6 @@ export async function executeImport(raw: string, creatorId: number): Promise<Imp
 				summary: p.summary,
 				description: p.description,
 				isLegacy: p.isLegacy,
-				videoUrl: p.videoUrl,
-				videoMimeType: p.videoMimeType,
 				status: p.status,
 				githubUrl: p.githubUrl,
 				platforms: p.platforms,

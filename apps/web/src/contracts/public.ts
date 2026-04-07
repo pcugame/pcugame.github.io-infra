@@ -43,9 +43,8 @@ export type PublicExhibitionProjectsResponse = {
   empty: boolean;
 };
 
-/** 프로젝트 영상 정보 (NAS 자체 호스팅) */
+/** 프로젝트 영상 정보 (로컬 업로드) */
 export type ProjectVideo = {
-  provider: 'NAS';
   url: string;
   mimeType: string;
 };

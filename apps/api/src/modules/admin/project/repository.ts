@@ -134,12 +134,9 @@ export interface SubmitProjectData {
 	title: string;
 	summary?: string;
 	description?: string;
-	videoUrl?: string;
-	videoMimeType?: string;
 	status: ProjectStatus;
 	creatorId: number;
-	creatorName: string;
-	members: { name: string; studentId: string; sortOrder?: number }[];
+	members: { name: string; studentId: string; sortOrder?: number; userId?: number }[];
 	savedFiles: { kind: AssetKind; storageKey: string; originalName: string; mimeType: string; sizeBytes: number }[];
 }
 
@@ -156,8 +153,6 @@ export function createProjectWithAssets(data: SubmitProjectData) {
 				title: data.title,
 				summary: data.summary,
 				description: data.description,
-				videoUrl: data.videoUrl,
-				videoMimeType: data.videoMimeType,
 				status: data.status,
 				creatorId: data.creatorId,
 				members: {
@@ -165,7 +160,7 @@ export function createProjectWithAssets(data: SubmitProjectData) {
 						name: m.name,
 						studentId: m.studentId,
 						sortOrder: m.sortOrder ?? i,
-						...(m.name === data.creatorName ? { userId: data.creatorId } : {}),
+						...(m.userId ? { userId: m.userId } : {}),
 					})),
 				},
 			},

@@ -29,3 +29,15 @@ export function updateMember(
 export function deleteMember(id: number) {
 	return prisma.projectMember.delete({ where: { id } });
 }
+
+/** Swap sortOrder of two members atomically */
+export function swapMemberOrder(memberIdA: number, memberIdB: number, projectId: number) {
+	return prisma.$transaction(async (tx) => {
+		const a = await tx.projectMember.findFirst({ where: { id: memberIdA, projectId } });
+		const b = await tx.projectMember.findFirst({ where: { id: memberIdB, projectId } });
+		if (!a || !b) return null;
+		await tx.projectMember.update({ where: { id: memberIdA }, data: { sortOrder: b.sortOrder } });
+		await tx.projectMember.update({ where: { id: memberIdB }, data: { sortOrder: a.sortOrder } });
+		return { a: memberIdA, b: memberIdB };
+	});
+}

@@ -33,8 +33,6 @@ export type UpdateProjectRequest = {
   title?: string;
   summary?: string;
   description?: string;
-  videoUrl?: string | null;
-  videoMimeType?: string;
   isLegacy?: boolean;
   status?: ProjectStatus;
   sortOrder?: number;
@@ -80,8 +78,6 @@ export type SubmitProjectPayload = {
   title: string;
   summary?: string;
   description?: string;
-  videoUrl?: string;
-  videoMimeType?: string;
   members: { name: string; studentId: string; sortOrder?: number }[];
   autoPublish?: boolean;
 };

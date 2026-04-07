@@ -162,17 +162,17 @@ export default function GameUploadWidget({ projectId }: Props) {
 	const fileSizeMB = file ? (file.size / 1024 / 1024).toFixed(1) : '0';
 
 	return (
-		<div style={{ border: '1px solid #444', padding: '16px', borderRadius: '8px', marginTop: '16px' }}>
-			<h3 style={{ margin: '0 0 12px' }}>게임 파일 업로드 (대용량 ZIP)</h3>
+		<div className="game-upload">
+			<h3 className="game-upload__title">게임 파일 업로드 (대용량 ZIP)</h3>
 
 			{/* Resume banner */}
 			{resumeSession && state === 'idle' && (
-				<div style={{ background: '#2a2a3a', padding: '12px', borderRadius: '6px', marginBottom: '12px' }}>
-					<p style={{ margin: '0 0 8px' }}>
+				<div className="game-upload__resume-banner">
+					<p className="game-upload__resume-text">
 						미완료 업로드가 있습니다: <strong>{resumeSession.originalName}</strong>
 						{' '}({resumeSession.uploadedCount}/{resumeSession.totalChunks} 청크 완료)
 					</p>
-					<p style={{ margin: '0 0 8px', fontSize: '0.85em', opacity: 0.7 }}>
+					<p className="game-upload__resume-hint">
 						재개하려면 동일한 파일을 선택 후 "이어올리기" 버튼을 누르세요.
 					</p>
 				</div>
@@ -180,14 +180,14 @@ export default function GameUploadWidget({ projectId }: Props) {
 
 			{/* File input */}
 			{(state === 'idle' || state === 'error' || state === 'cancelled') && (
-				<div style={{ marginBottom: '12px' }}>
+				<div className="game-upload__file-input">
 					<input
 						type="file"
 						accept=".zip,application/zip,application/x-zip-compressed"
 						onChange={handleFileChange}
 					/>
 					{file && (
-						<p style={{ margin: '4px 0 0', fontSize: '0.9em' }}>
+						<p className="file-info">
 							{file.name} — {fileSizeMB}MB
 						</p>
 					)}
@@ -196,32 +196,17 @@ export default function GameUploadWidget({ projectId }: Props) {
 
 			{/* Progress bar */}
 			{progress && (state === 'uploading' || state === 'completing' || state === 'completed') && (
-				<div style={{ marginBottom: '12px' }}>
-					<div style={{
-						background: '#333',
-						borderRadius: '4px',
-						overflow: 'hidden',
-						height: '24px',
-						position: 'relative',
-					}}>
-						<div style={{
-							background: state === 'completed' ? '#4caf50' : '#2196f3',
-							height: '100%',
-							width: `${progress.percent}%`,
-							transition: 'width 0.3s',
-						}} />
-						<span style={{
-							position: 'absolute',
-							top: '50%',
-							left: '50%',
-							transform: 'translate(-50%, -50%)',
-							fontSize: '0.8em',
-							fontWeight: 'bold',
-						}}>
+				<div className="game-upload__progress-wrap">
+					<div className="game-upload__progress-track">
+						<div
+							className={`game-upload__progress-bar ${state === 'completed' ? 'game-upload__progress-bar--done' : ''}`}
+							style={{ width: `${progress.percent}%` }}
+						/>
+						<span className="game-upload__progress-label">
 							{progress.percent}% ({progress.uploadedChunks}/{progress.totalChunks})
 						</span>
 					</div>
-					<p style={{ margin: '4px 0 0', fontSize: '0.85em', opacity: 0.7 }}>
+					<p className="game-upload__progress-status">
 						{state === 'completing' && '파일 조립 중…'}
 						{state === 'completed' && '업로드 완료!'}
 						{state === 'uploading' && `${(progress.uploadedBytes / 1024 / 1024).toFixed(0)}MB / ${(progress.totalBytes / 1024 / 1024).toFixed(0)}MB`}
@@ -231,13 +216,13 @@ export default function GameUploadWidget({ projectId }: Props) {
 
 			{/* Error */}
 			{error && (
-				<div style={{ background: '#3a2020', padding: '8px 12px', borderRadius: '6px', marginBottom: '12px', color: '#f88' }}>
+				<div className="game-upload__error">
 					{error}
 				</div>
 			)}
 
 			{/* Action buttons */}
-			<div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+			<div className="game-upload__actions">
 				{state === 'idle' && file && !resumeSession && (
 					<button className="btn btn--primary" onClick={handleStart}>
 						업로드 시작
@@ -274,7 +259,7 @@ export default function GameUploadWidget({ projectId }: Props) {
 				)}
 
 				{state === 'completed' && (
-					<span style={{ color: '#4caf50', fontWeight: 'bold' }}>업로드 완료</span>
+					<span className="game-upload__complete-text">업로드 완료</span>
 				)}
 			</div>
 		</div>

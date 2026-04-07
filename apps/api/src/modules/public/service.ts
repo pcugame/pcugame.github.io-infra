@@ -121,6 +121,11 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string) {
 	const gameAssets = project.assets.filter((a) => a.kind === 'GAME');
 	const gameAsset = gameAssets.length > 0 ? gameAssets[gameAssets.length - 1] : undefined;
 
+	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
+	const video = videoAsset
+		? { url: `${env().API_PUBLIC_URL}/api/assets/protected/${videoAsset.storageKey}`, mimeType: videoAsset.mimeType || 'video/mp4' }
+		: null;
+
 	return {
 		id: project.id,
 		year: project.exhibition.year,
@@ -129,13 +134,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string) {
 		summary: project.summary || undefined,
 		description: project.description || undefined,
 		isLegacy: project.isLegacy,
-		video: project.videoUrl
-			? {
-					provider: 'NAS' as const,
-					url: project.videoUrl,
-					mimeType: project.videoMimeType || 'video/mp4',
-				}
-			: null,
+		video,
 		members: project.members.map((m) => ({
 			id: m.id,
 			name: m.name,

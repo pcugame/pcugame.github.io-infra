@@ -20,8 +20,6 @@
  *       "summary": "한 줄 소개",
  *       "description": "상세 설명",
  *       "isLegacy": true,
- *       "videoUrl": "https://nas.example.com/video/trailer.mp4",
- *       "videoMimeType": "video/mp4",
  *       "status": "PUBLISHED",
  *       "members": [
  *         { "name": "홍길동", "studentId": "20240001" }
@@ -130,8 +128,6 @@ interface ImportProject {
   summary?: string;
   description?: string;
   isLegacy?: boolean;
-  videoUrl?: string;
-  videoMimeType?: string;
   status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   githubUrl?: string;
   platforms?: ('PC' | 'MOBILE' | 'WEB')[];
@@ -215,8 +211,6 @@ async function importFromJson(filePath: string, creatorId: number) {
           summary: p.summary ?? '',
           description: p.description ?? '',
           isLegacy: p.isLegacy ?? false,
-          videoUrl: p.videoUrl ?? '',
-          videoMimeType: p.videoMimeType ?? '',
           status: p.status ?? 'PUBLISHED',
           githubUrl: p.githubUrl ?? '',
           platforms: p.platforms ?? [],

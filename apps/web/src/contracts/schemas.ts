@@ -8,6 +8,7 @@ export const ProjectMemberInputSchema = z.object({
   name: z.string().min(1, '이름을 입력하세요').max(50),
   studentId: z.string().min(1, '학번을 입력하세요').max(20),
   sortOrder: z.number().int().nonnegative().optional(),
+  userId: z.number().int().positive().optional(),
 });
 
 export type ProjectMemberInput = z.infer<typeof ProjectMemberInputSchema>;
@@ -19,12 +20,6 @@ export const SubmitProjectPayloadSchema = z.object({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
-  videoUrl: z
-    .string()
-    .url('올바른 URL을 입력하세요')
-    .optional()
-    .or(z.literal('')),
-  videoMimeType: z.string().max(100).optional().or(z.literal('')),
   autoPublish: z.boolean().optional(),
   members: z
     .array(ProjectMemberInputSchema)
@@ -39,12 +34,6 @@ export const UpdateProjectFormSchema = z.object({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
-  videoUrl: z
-    .string()
-    .url('올바른 URL을 입력하세요')
-    .optional()
-    .or(z.literal('')),
-  videoMimeType: z.string().max(100).optional().or(z.literal('')),
   status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 });

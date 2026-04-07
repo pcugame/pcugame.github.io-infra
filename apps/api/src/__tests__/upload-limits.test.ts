@@ -19,6 +19,7 @@ const fakeLimits: UploadLimits = {
 	posterMaxBytes: 5 * 1024 * 1024,
 	imageMaxBytes: 10 * 1024 * 1024,
 	gameMaxBytes: 200 * 1024 * 1024,
+	videoMaxBytes: 200 * 1024 * 1024,
 	requestMaxBytes: 250 * 1024 * 1024,
 	maxFiles: 10,
 };

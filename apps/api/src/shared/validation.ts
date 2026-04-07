@@ -26,8 +26,6 @@ export const UpdateProjectBody = z.object({
 	title: z.string().min(1).max(120).optional(),
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
-	videoUrl: z.string().url().or(z.literal('')).nullable().optional(),
-	videoMimeType: z.string().max(100).optional(),
 	isLegacy: z.boolean().optional(),
 	status: ProjectStatusEnum.optional(),
 	sortOrder: z.number().int().min(0).optional(),
@@ -39,6 +37,7 @@ const SubmitMember = z.object({
 	name: z.string().min(1).max(50),
 	studentId: z.string().min(1).max(20),
 	sortOrder: z.number().int().min(0).optional(),
+	userId: z.number().int().positive().optional(),
 });
 
 export const SubmitProjectPayload = z.object({
@@ -65,6 +64,11 @@ export const UpdateMemberBody = z.object({
 	studentId: z.string().min(1).max(20).optional(),
 	sortOrder: z.number().int().min(0).optional(),
 	userId: z.coerce.number().int().positive().nullable().optional(),
+});
+
+export const SwapMembersBody = z.object({
+	memberIdA: z.coerce.number().int().positive(),
+	memberIdB: z.coerce.number().int().positive(),
 });
 
 // ── Poster ───────────────────────────────────────────────────

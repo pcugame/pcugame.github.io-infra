@@ -287,8 +287,6 @@ export default function AdminImportPage() {
       "summary": "한 줄 소개",
       "description": "상세 설명",
       "isLegacy": true,
-      "videoUrl": "https://example.com/video.mp4",
-      "videoMimeType": "video/mp4",
       "status": "PUBLISHED",
       "githubUrl": "https://github.com/...",
       "platforms": ["PC", "WEB"],

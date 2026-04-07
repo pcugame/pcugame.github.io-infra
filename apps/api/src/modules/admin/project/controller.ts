@@ -4,7 +4,9 @@ import { sendOk, sendCreated } from '../../../shared/http.js';
 import { parseBody, parseIntParam, UpdateProjectBody, SetPosterBody } from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
 import { loadProjectWithAccess } from '../project-access.js';
+import { assertUploadAllowed } from '../upload-guard.js';
 import * as projectService from './service.js';
+import * as repo from './repository.js';
 
 /** Register admin project CRUD + upload routes */
 export async function projectController(app: FastifyInstance): Promise<void> {
@@ -27,14 +29,26 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		},
 	);
 
-	/** PATCH /projects/:id — partial-update project (draft only) */
+	/** PATCH /projects/:id — partial-update project */
 	app.patch<{ Params: { id: string } }>(
 		'/projects/:id',
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId, { requireDraft: true });
 			const patch = parseBody(UpdateProjectBody, request.body);
+			const user = request.currentUser!;
+
+			// Status changes need special handling: USER can toggle DRAFT ↔ PUBLISHED
+			// on their own projects even when the project is not in DRAFT.
+			const isStatusChange = patch.status !== undefined;
+			const project = await loadProjectWithAccess(request, projectId, {
+				requireDraft: !isStatusChange,
+			});
+
+			if (isStatusChange) {
+				projectService.assertStatusTransition(project.status, patch.status!, user.role);
+			}
+
 			const updated = await projectService.updateProject(projectId, patch);
 			sendOk(reply, updated);
 		},
@@ -69,7 +83,10 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireLogin, bodyLimit: uploadBodyLimit },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			const project = await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			const user = request.currentUser!;
+			const exhibition = await repo.findExhibitionById(project.exhibitionId);
+			assertUploadAllowed(exhibition, project.exhibitionId, user.role);
 			const result = await projectService.addAssetToProject(projectId, request as any);
 			sendCreated(reply, result);
 		},

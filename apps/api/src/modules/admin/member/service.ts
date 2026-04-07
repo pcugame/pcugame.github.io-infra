@@ -31,3 +31,9 @@ export async function deleteMember(projectId: number, memberId: number) {
 
 	await repo.deleteMember(member.id);
 }
+
+/** Swap sortOrder of two members. Throws 404 if either is not found. */
+export async function swapMemberOrder(projectId: number, memberIdA: number, memberIdB: number) {
+	const result = await repo.swapMemberOrder(memberIdA, memberIdB, projectId);
+	if (!result) throw notFound('One or both members not found in this project');
+}

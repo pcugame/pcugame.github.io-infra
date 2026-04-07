@@ -7,6 +7,7 @@ export interface SubmitProjectFiles {
   poster?: File;
   images?: File[];
   gameFile?: File;
+  videoFile?: File;
 }
 
 /**
@@ -41,6 +42,11 @@ export function buildSubmitFormData(
   // 게임 파일
   if (files.gameFile) {
     fd.append('gameFile', files.gameFile);
+  }
+
+  // 동영상 파일
+  if (files.videoFile) {
+    fd.append('videoFile', files.videoFile);
   }
 
   return fd;

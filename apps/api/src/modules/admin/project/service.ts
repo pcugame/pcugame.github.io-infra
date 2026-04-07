@@ -41,31 +41,17 @@ export function serializeProjectDetail(project: {
 	summary: string;
 	description: string;
 	isLegacy: boolean;
-	videoUrl: string;
-	videoMimeType: string;
 	status: string;
 	sortOrder: number;
 	posterAssetId: number | null;
 	poster: { storageKey: string; kind: AssetKind; status: string } | null;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
-	assets: { id: number; kind: AssetKind; storageKey: string; originalName: string; sizeBytes: bigint }[];
+	assets: { id: number; kind: AssetKind; storageKey: string; originalName: string; mimeType: string; sizeBytes: bigint }[];
 }) {
-	// VIDEO from Asset system (new), fallback to videoUrl for legacy projects
 	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
-	let video: { provider: string; url: string; mimeType: string } | null = null;
-	if (videoAsset) {
-		video = {
-			provider: 'LOCAL',
-			url: assetUrl(videoAsset.storageKey, 'VIDEO'),
-			mimeType: videoAsset.mimeType || 'video/mp4',
-		};
-	} else if (project.videoUrl) {
-		video = {
-			provider: 'NAS',
-			url: project.videoUrl,
-			mimeType: project.videoMimeType || 'video/mp4',
-		};
-	}
+	const video = videoAsset
+		? { url: assetUrl(videoAsset.storageKey, 'VIDEO'), mimeType: videoAsset.mimeType || 'video/mp4' }
+		: null;
 
 	return {
 		id: project.id,
@@ -129,12 +115,35 @@ export async function getProjectDetail(projectId: number, userId: number, userRo
 	return serializeProjectDetail(project);
 }
 
+/**
+ * Validate that a status transition is allowed for the given role.
+ *
+ * - ADMIN / OPERATOR: all transitions allowed.
+ * - USER: DRAFT ↔ PUBLISHED only. ARCHIVED transitions are blocked.
+ */
+export function assertStatusTransition(
+	currentStatus: string,
+	targetStatus: string,
+	role: string,
+): void {
+	if (role === 'ADMIN' || role === 'OPERATOR') return;
+
+	const allowed =
+		(currentStatus === 'DRAFT' && targetStatus === 'PUBLISHED') ||
+		(currentStatus === 'PUBLISHED' && targetStatus === 'DRAFT');
+
+	if (!allowed) {
+		throw forbidden(
+			`Users can only toggle between DRAFT and PUBLISHED. Cannot change ${currentStatus} → ${targetStatus}.`,
+		);
+	}
+}
+
 /** Partial-update a project */
 export async function updateProject(
 	projectId: number,
 	patch: {
 		title?: string; summary?: string; description?: string;
-		videoUrl?: string | null; videoMimeType?: string;
 		isLegacy?: boolean; status?: ProjectStatus; sortOrder?: number;
 	},
 ) {
@@ -142,8 +151,6 @@ export async function updateProject(
 		...(patch.title !== undefined ? { title: patch.title } : {}),
 		...(patch.summary !== undefined ? { summary: patch.summary } : {}),
 		...(patch.description !== undefined ? { description: patch.description } : {}),
-		...(patch.videoUrl !== undefined ? { videoUrl: patch.videoUrl ?? '' } : {}),
-		...(patch.videoMimeType !== undefined ? { videoMimeType: patch.videoMimeType } : {}),
 		...(patch.isLegacy !== undefined ? { isLegacy: patch.isLegacy } : {}),
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
@@ -289,8 +296,11 @@ export async function submitProject(
 			description,
 			status,
 			creatorId: user.id,
-			creatorName: user.name,
-			members,
+			members: members.map((m) => ({
+				...m,
+				// If no userId provided, auto-link creator by checking member name
+				userId: m.userId,
+			})),
 			savedFiles: savedFiles.map((sf) => ({
 				kind: sf.kind,
 				storageKey: sf.storageKey,
@@ -356,6 +366,14 @@ export async function addAssetToProject(
 		}
 
 		if (!fileTmpPath) throw badRequest('No file provided');
+
+		// Post-collection size check: now that kind is known, verify against the exact limit
+		const exactLimit = kindLimit(limits, kind);
+		const fileStat = await fsp.stat(fileTmpPath);
+		if (fileStat.size > exactLimit) {
+			const limitMB = Math.round(exactLimit / 1024 / 1024);
+			throw payloadTooLarge(`File exceeds ${kind} size limit of ${limitMB}MB`);
+		}
 
 		const savedFile = await pipeline.processFile(fileTmpPath, kind, fileOriginalName);
 
