@@ -96,6 +96,13 @@ export const adminMemberApi = {
       `/api/admin/projects/${projectId}/members/${memberId}`,
     );
   },
+
+  swap(projectId: number, memberIdA: number, memberIdB: number) {
+    return api.patch<void>(
+      `/api/admin/projects/${projectId}/members/swap`,
+      { memberIdA, memberIdB },
+    );
+  },
 };
 
 // ── Asset 삭제 ───────────────────────────────────────────────

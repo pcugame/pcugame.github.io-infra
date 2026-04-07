@@ -109,15 +109,20 @@ export default function AdminProjectEditPage() {
     },
   });
 
+  const swapMemberMutation = useMutation({
+    mutationFn: ({ memberIdA, memberIdB }: { memberIdA: number; memberIdB: number }) =>
+      adminMemberApi.swap(id, memberIdA, memberIdB),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
+    },
+  });
+
   const swapMemberOrder = (index: number, direction: -1 | 1) => {
     if (!project) return;
     const members = project.members;
     const other = index + direction;
     if (other < 0 || other >= members.length) return;
-    const a = members[index];
-    const b = members[other];
-    updateMemberMutation.mutate({ memberId: a.id, body: { sortOrder: b.sortOrder } });
-    updateMemberMutation.mutate({ memberId: b.id, body: { sortOrder: a.sortOrder } });
+    swapMemberMutation.mutate({ memberIdA: members[index].id, memberIdB: members[other].id });
   };
 
   // ── 자산 추가/삭제 ────────────────────────────────────────
@@ -310,7 +315,7 @@ export default function AdminProjectEditPage() {
               }
               onRemove={() => removeMemberMutation.mutate(m.id)}
               isBusy={
-                updateMemberMutation.isPending || removeMemberMutation.isPending
+                updateMemberMutation.isPending || removeMemberMutation.isPending || swapMemberMutation.isPending
               }
               disabled={!canEditContent}
             />

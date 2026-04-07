@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { sendCreated } from '../../../shared/http.js';
-import { parseBody, parseIntParam, AddMemberBody, UpdateMemberBody } from '../../../shared/validation.js';
+import { parseBody, parseIntParam, AddMemberBody, UpdateMemberBody, SwapMembersBody } from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
 import { loadProjectWithAccess } from '../project-access.js';
 import * as memberService from './service.js';
@@ -43,6 +43,19 @@ export async function memberController(app: FastifyInstance): Promise<void> {
 			const memberId = parseIntParam(request.params.memberId, 'Member ID');
 			await loadProjectWithAccess(request, projectId, { requireDraft: true });
 			await memberService.deleteMember(projectId, memberId);
+			reply.status(204).send();
+		},
+	);
+
+	/** PATCH /projects/:id/members/swap — atomically swap two members' sort order */
+	app.patch<{ Params: { id: string } }>(
+		'/projects/:id/members/swap',
+		{ preHandler: requireLogin },
+		async (request, reply) => {
+			const projectId = parseIntParam(request.params.id);
+			await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			const { memberIdA, memberIdB } = parseBody(SwapMembersBody, request.body);
+			await memberService.swapMemberOrder(projectId, memberIdA, memberIdB);
 			reply.status(204).send();
 		},
 	);

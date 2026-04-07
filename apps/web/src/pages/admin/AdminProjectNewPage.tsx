@@ -36,7 +36,7 @@ export default function AdminProjectNewPage() {
   } = useForm<SubmitProjectPayloadInput>({
     resolver: zodResolver(SubmitProjectPayloadSchema),
     defaultValues: {
-      exhibitionId: 0,
+      exhibitionId: 0, // sentinel: Zod .positive() rejects 0 → "전시회를 선택하세요"
       title: '',
       summary: '',
       description: '',
