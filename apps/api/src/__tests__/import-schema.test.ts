@@ -37,7 +37,7 @@ describe('ImportDataSchema', () => {
 		const result = ImportDataSchema.parse({
 			projects: [{ year: 2025, title: 'Test' }],
 		});
-		const p = result.projects[0];
+		const p = result.projects[0]!;
 		expect(p.isLegacy).toBe(false);
 		expect(p.status).toBe('PUBLISHED');
 		expect(p.summary).toBe('');

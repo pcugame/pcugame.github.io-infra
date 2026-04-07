@@ -137,8 +137,8 @@ describe('serializeProjectDetail', () => {
 				sizeBytes: 12345n,
 			}],
 		}));
-		expect(result.assets[0].size).toBe(12345);
-		expect(typeof result.assets[0].size).toBe('number');
+		expect(result.assets[0]!.size).toBe(12345);
+		expect(typeof result.assets[0]!.size).toBe('number');
 	});
 
 	it('returns video as null when no VIDEO asset exists', () => {
@@ -188,6 +188,6 @@ describe('serializeProjectDetail', () => {
 		expect(result.members[0]).toEqual({
 			id: 1, name: '홍길동', studentId: '20251234', sortOrder: 0, userId: null,
 		});
-		expect(result.members[1].userId).toBe(5);
+		expect(result.members[1]!.userId).toBe(5);
 	});
 });
