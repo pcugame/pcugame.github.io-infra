@@ -7,7 +7,7 @@ import { MockRoleSwitcher } from '../common/MockRoleSwitcher';
 export function Layout() {
   const { pathname } = useLocation();
   const isHome = pathname === '/';
-  const isFullWidth = isHome || pathname.startsWith('/years') || pathname.startsWith('/admin');
+  const isFullWidth = isHome || pathname.startsWith('/years') || pathname.startsWith('/exhibitions') || pathname.startsWith('/admin');
   return (
     <div className="layout home-landing">
       {!isHome && <Header />}
