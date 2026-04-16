@@ -941,7 +941,7 @@ a:hover {
 }
 
 .years-card__title {
-  font-size: 0.85rem;
+  font-size: 1.05rem;
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4733,7 +4733,7 @@ fieldset.status-section legend {
   }
 
   .years-card__title {
-    font-size: 0.78rem;
+    font-size: 0.95rem;
   }
 
   .years-card__count {
