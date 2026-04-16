@@ -1,0 +1,84 @@
+name: Bug Report
+description: Report a reproducible bug that is not already explained by the current repository status
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing a bug:
+
+        - This repository is public, but the database is still incomplete.
+        - The home page may fail because of the current DB state.
+        - UI-only review is often easier in `apps/web` mock mode.
+        - If you already have a fix, sending a PR is the fastest path.
+        - For faster confirmation, you can also contact Instagram `@gluemylifeplease`.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Acknowledgements
+      options:
+        - label: I checked the README and the current repository status note.
+          required: true
+        - label: I understand that the current incomplete DB state can cause home page errors.
+          required: true
+        - label: I am reporting a code or implementation problem, not only missing or unfinished data.
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Briefly describe the problem.
+      placeholder: What is broken?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps To Reproduce
+      description: Write clear steps so the issue can be reproduced.
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      placeholder: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      placeholder: What actually happened?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Web
+        - API
+        - Data / DB
+        - Deployment
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional Notes
+      description: Stack trace, screenshots, logs, or any extra context.
