@@ -170,6 +170,13 @@ do_up() {
     -e "UPLOAD_ROOT_PUBLIC=/app/storage/public" \
     -e "AUTO_PUBLISH_DEFAULT=${AUTO_PUBLISH_DEFAULT:-false}" \
     -e "LOG_LEVEL=${LOG_LEVEL:-info}" \
+    -e "S3_ENDPOINT=${S3_ENDPOINT}" \
+    -e "S3_REGION=${S3_REGION:-us-east-1}" \
+    -e "S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}" \
+    -e "S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}" \
+    -e "S3_BUCKET_PUBLIC=${S3_BUCKET_PUBLIC:-pcu-public}" \
+    -e "S3_BUCKET_PROTECTED=${S3_BUCKET_PROTECTED:-pcu-protected}" \
+    -e "S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}" \
     -v "${STORAGE_HOST_PATH}/protected:/app/storage/protected:Z" \
     -v "${STORAGE_HOST_PATH}/public:/app/storage/public:Z" \
     "$API_IMAGE"
