@@ -12,9 +12,9 @@ async function main(): Promise<void> {
 
 	try {
 		await app.listen({ port: config.PORT, host: '0.0.0.0' });
-		logger.info(`Server listening on http://0.0.0.0:${config.PORT}`);
+		logger().info(`Server listening on http://0.0.0.0:${config.PORT}`);
 	} catch (err) {
-		logger.fatal(err, 'Failed to start server');
+		logger().fatal(err, 'Failed to start server');
 		process.exit(1);
 	}
 
@@ -25,14 +25,14 @@ async function main(): Promise<void> {
 			const { count } = await prisma.authSession.deleteMany({
 				where: { expiresAt: { lt: new Date() } },
 			});
-			if (count > 0) logger.info({ count }, 'Purged expired sessions');
+			if (count > 0) logger().info({ count }, 'Purged expired sessions');
 		} catch (err) {
-			logger.error(err, 'Failed to purge expired sessions');
+			logger().error(err, 'Failed to purge expired sessions');
 		}
 	}, SESSION_PURGE_INTERVAL);
 
 	const shutdown = async (signal: string) => {
-		logger.info(`Received ${signal}, shutting down…`);
+		logger().info(`Received ${signal}, shutting down…`);
 		clearInterval(purgeTimer);
 		await app.close();
 		await disconnectPrisma();

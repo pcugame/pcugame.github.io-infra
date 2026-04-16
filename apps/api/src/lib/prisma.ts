@@ -20,6 +20,6 @@ if (process.env['NODE_ENV'] !== 'production') {
 }
 
 export async function disconnectPrisma(): Promise<void> {
-  logger.info('Disconnecting Prisma…');
+  logger().info('Disconnecting Prisma…');
   await prisma.$disconnect();
 }

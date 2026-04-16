@@ -109,7 +109,7 @@ export async function buildApp() {
 			return;
 		}
 
-		logger.error(error, 'Unhandled error');
+		logger().error(error, 'Unhandled error');
 		const body: ApiError = {
 			ok: false,
 			error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },

@@ -13,10 +13,10 @@ export async function loadBannedIpCache(): Promise<void> {
 		const banned = await repo.findAllBannedIps();
 		gameDownloadLimiter.loadBannedIps(banned.map((b) => b.ip));
 		if (banned.length > 0) {
-			logger.info(`Loaded ${banned.length} banned IPs`);
+			logger().info(`Loaded ${banned.length} banned IPs`);
 		}
 	} catch {
-		logger.warn('Could not load banned IPs (migration may be pending)');
+		logger().warn('Could not load banned IPs (migration may be pending)');
 	}
 }
 
@@ -40,7 +40,7 @@ export async function streamProtectedAsset(storageKey: string, clientIp: string,
 		const result = gameDownloadLimiter.check(clientIp);
 		if (result === 'ban') {
 			await repo.upsertBannedIp(clientIp, 'Rate limit exceeded (game download)')
-				.catch((err) => logger.error({ err }, 'Failed to persist IP ban'));
+				.catch((err) => logger().error({ err }, 'Failed to persist IP ban'));
 			throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
 		}
 	}

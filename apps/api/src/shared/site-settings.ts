@@ -41,7 +41,7 @@ export async function reloadSiteSettings(): Promise<SiteSettings> {
 		};
 	} catch {
 		// Table may not exist yet (migration pending)
-		logger.warn('Could not load site settings, using defaults');
+		logger().warn('Could not load site settings, using defaults');
 		_cache = { ...DEFAULTS };
 	}
 	return _cache;

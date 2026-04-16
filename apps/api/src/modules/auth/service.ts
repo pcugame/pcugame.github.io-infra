@@ -31,16 +31,16 @@ export async function loginWithGoogle(credential: string) {
 		});
 		payload = ticket.getPayload();
 	} catch (err) {
-		logger.error({ err, configuredAudience: cfg.GOOGLE_CLIENT_IDS }, 'Google token verification failed');
+		logger().error({ err, configuredAudience: cfg.GOOGLE_CLIENT_IDS }, 'Google token verification failed');
 		throw unauthorized('Invalid Google token');
 	}
 
 	if (!payload?.sub || !payload.email) throw unauthorized('Invalid token payload');
 
-	logger.info({ email: payload.email, hd: payload.hd, allowedHd: cfg.ALLOWED_GOOGLE_HD }, 'Google login attempt');
+	logger().info({ email: payload.email, hd: payload.hd, allowedHd: cfg.ALLOWED_GOOGLE_HD }, 'Google login attempt');
 
 	if (cfg.ALLOWED_GOOGLE_HD && payload.hd !== cfg.ALLOWED_GOOGLE_HD) {
-		logger.warn({ hd: payload.hd, allowedHd: cfg.ALLOWED_GOOGLE_HD }, 'Email domain rejected');
+		logger().warn({ hd: payload.hd, allowedHd: cfg.ALLOWED_GOOGLE_HD }, 'Email domain rejected');
 		throw unauthorized('Email domain not allowed');
 	}
 
