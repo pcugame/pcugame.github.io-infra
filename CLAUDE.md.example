@@ -1,0 +1,80 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+PCU Graduation Project Showcase — a monorepo for a university game engineering capstone showcase platform. Frontend is deployed to GitHub Pages; backend runs on a dedicated server via Podman. Object storage uses S3-compatible service (Garage for local dev).
+
+## Commands
+
+### API (`apps/api`)
+```bash
+npm run dev              # tsx watch (hot reload) on :4000
+npm run build            # tsc compile to dist/
+npm run lint             # tsc --noEmit (type-check only)
+npm run test             # vitest run (unit tests in src/__tests__/)
+npm run db:generate      # regenerate Prisma client after schema changes
+npm run db:migrate       # create + apply migration (development)
+npm run db:migrate:deploy # apply existing migrations (production)
+npm run db:studio        # Prisma Studio GUI
+npm run db:seed          # test admin + sample data (from apps/db/seed.ts)
+npm run db:seed:import   # import legacy data (from apps/db/legacy-import.json)
+```
+
+### Web (`apps/web`)
+```bash
+npm run dev              # Vite dev server on :5173
+npm run build            # tsc + vite build + post-build.mjs (for SPA routing on GitHub Pages)
+npm run lint             # ESLint 9
+npm run test             # vitest run (unit tests in src/__tests__/)
+npm run preview          # preview production build locally
+```
+
+### Local dev setup
+```bash
+# 1. DB + S3 (Docker)
+cd apps/db && docker compose up -d
+
+# 2. API (separate terminal)
+cd apps/api
+npm install && npx prisma generate && npx prisma migrate dev
+npm run db:seed              # test admin + sample data
+npm run dev
+
+# 3. Web (separate terminal)
+cd apps/web && npm install && npm run dev
+```
+
+### DB tools (`apps/db`)
+```bash
+docker compose up -d         # start local PostgreSQL + Garage on :5432/:3900
+docker compose down          # stop (data preserved)
+docker compose down -v       # stop + delete data
+```
+
+## Architecture
+
+### Monorepo structure
+```
+apps/api/   — Fastify 5 + TypeScript + Prisma + PostgreSQL
+apps/db/    — Local PostgreSQL + Garage (docker-compose) + seed/migration scripts
+apps/web/   — React 19 + Vite + TanStack Query + React Router v7
+```
+
+No shared package — types are duplicated in `apps/web/src/contracts/` (enums, Zod schemas, response types).
+
+**Note:** API uses Zod v3 (`zod@^3.24`), Web uses Zod v4 (`zod@^4.3`) — import paths and some APIs differ between the two.
+
+## Coding conventions
+
+- 1-tab indentation throughout.
+- API route files named `*.routes.ts`; Fastify plugins are lowercase.
+- Web components PascalCase (`HomePage.tsx`); hooks camelCase (`useMe.ts`).
+- Explicit TypeScript types at module boundaries; Zod for runtime validation on both sides.
+- Conventional Commits (`feat:`, `fix:`, `chore:`, etc.).
+
+## Known pitfalls
+
+### Fastify 5: route-level hooks must be async
+Fastify 5 hangs when a route-level `preHandler` is a sync function that returns `undefined` on success. Always declare `preHandler` / `onRequest` / `preSerialization` etc. as `async` functions returning `Promise<void>`.

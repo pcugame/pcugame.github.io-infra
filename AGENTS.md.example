@@ -1,0 +1,47 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+
+- Monorepo under `apps/`:
+  - `apps/api` — Fastify 5 + TypeScript API. Routes in `src/modules/<area>/*.routes.ts`, plugins in `src/plugins/*.ts`, shared utils in `src/shared/`. Prisma schema at `prisma/schema.prisma`.
+  - `apps/web` — React 19 + Vite + TypeScript. Pages in `src/pages/*Page.tsx`, components in `src/components/**`, features in `src/features/**`.
+  - `apps/db` — Local dev PostgreSQL + Garage (S3) via docker-compose, seed scripts.
+- Root: `assets/` (university branding), `.github/workflows/` (CI/CD).
+
+## Build, Test, and Development Commands
+
+- API (`cd apps/api`):
+  - `npm run dev` — Start Fastify with `tsx` on `:4000`.
+  - `npm run build` / `npm start` — Compile to `dist/` and run.
+  - `npm run test` — Vitest unit tests (`src/__tests__/`).
+  - DB: `npm run db:generate`, `npm run db:migrate`, `npm run db:studio`.
+- Web (`cd apps/web`):
+  - `npm run dev` — Vite dev server (`:5173`).
+  - `npm run dev:mock` — Mock mode (no backend needed).
+  - `npm run build` / `npm run preview`.
+  - `npm run test` — Vitest unit tests (`src/__tests__/`).
+  - `npm run lint` — ESLint 9.
+- Docker (DB + S3): `cd apps/db && docker compose up -d`.
+
+## Coding Style & Naming Conventions
+
+- TypeScript throughout; 1-tab indent; prefer explicit types at module boundaries.
+- Web: Components/pages PascalCase (e.g., `HomePage.tsx`), hooks `useX.ts`, re-exports via `index.ts`.
+- API: Route files end with `.routes.ts`; plugins lowercase (`cookie.ts`); keep handlers small and typed.
+- Linting: Web uses ESLint (`apps/web/eslint.config.js`); API uses `tsc --noEmit` for type checks.
+
+## Testing Guidelines
+
+- Both `apps/api` and `apps/web` have Vitest test suites under `src/__tests__/`.
+- Run with `npm run test` in each app directory.
+- Test files: `*.test.ts` / `*.test.tsx`.
+
+## Commit & Pull Request Guidelines
+
+- Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`) as used in history.
+- PRs: clear description, link issues, screenshots for UI changes, note DB migrations.
+
+## Security & Configuration
+
+- Do not commit secrets. Copy `.env.example` → `.env`.
+- Web env keys must start with `VITE_`.
