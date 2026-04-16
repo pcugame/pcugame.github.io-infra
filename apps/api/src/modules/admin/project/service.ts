@@ -424,3 +424,24 @@ export async function setPoster(projectId: number, assetId: number) {
 	await repo.setProjectPoster(projectId, assetId);
 	return { posterAssetId: assetId };
 }
+
+// ── Bulk operations ───────────────────────────────────────
+
+/** Bulk update project status */
+export async function bulkUpdateStatus(ids: number[], status: ProjectStatus) {
+	const result = await repo.bulkUpdateStatus(ids, status);
+	return { updated: result.count };
+}
+
+/** Bulk delete projects: remove S3 objects + DB records. NAS originals are untouched. */
+export async function bulkDeleteProjects(ids: number[]) {
+	const assets = await repo.findAssetsByProjectIds(ids);
+
+	// Delete from S3 (best-effort, don't block on failures)
+	await Promise.allSettled(
+		assets.map((a) => deleteObject(bucketForKind(a.kind), a.storageKey)),
+	);
+
+	const result = await repo.bulkDeleteProjects(ids);
+	return { deleted: result.count, assetsRemoved: assets.length };
+}

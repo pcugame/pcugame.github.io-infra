@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { env } from '../../../config/env.js';
 import { sendOk, sendCreated } from '../../../shared/http.js';
-import { parseBody, parseIntParam, UpdateProjectBody, SetPosterBody } from '../../../shared/validation.js';
-import { requireLogin } from '../../../plugins/auth.js';
+import { parseBody, parseIntParam, UpdateProjectBody, SetPosterBody, BulkStatusBody, BulkDeleteBody } from '../../../shared/validation.js';
+import { requireLogin, requireRole } from '../../../plugins/auth.js';
 import { loadProjectWithAccess } from '../project-access.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import * as projectService from './service.js';
@@ -63,6 +63,28 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 			await loadProjectWithAccess(request, projectId, { requireDraft: true });
 			await projectService.deleteProject(projectId);
 			reply.status(204).send();
+		},
+	);
+
+	/** PATCH /projects/bulk/status — bulk update project status (ADMIN/OPERATOR) */
+	app.patch(
+		'/projects/bulk/status',
+		{ preHandler: requireRole('OPERATOR') },
+		async (request, reply) => {
+			const { ids, status } = parseBody(BulkStatusBody, request.body);
+			const result = await projectService.bulkUpdateStatus(ids, status);
+			sendOk(reply, result);
+		},
+	);
+
+	/** DELETE /projects/bulk — bulk delete projects (ADMIN only) */
+	app.delete(
+		'/projects/bulk',
+		{ preHandler: requireRole('ADMIN') },
+		async (request, reply) => {
+			const { ids } = parseBody(BulkDeleteBody, request.body);
+			const result = await projectService.bulkDeleteProjects(ids);
+			sendOk(reply, result);
 		},
 	);
 

@@ -77,6 +77,17 @@ export const SetPosterBody = z.object({
 	assetId: z.coerce.number().int().positive(),
 });
 
+// ── Bulk operations ──────────────────────────────────────────
+
+export const BulkStatusBody = z.object({
+	ids: z.array(z.number().int().positive()).min(1).max(500),
+	status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']),
+});
+
+export const BulkDeleteBody = z.object({
+	ids: z.array(z.number().int().positive()).min(1).max(500),
+});
+
 // ── Auth ─────────────────────────────────────────────────────
 
 export const GoogleLoginBody = z.object({

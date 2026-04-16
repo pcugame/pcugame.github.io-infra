@@ -126,6 +126,34 @@ export function setProjectPoster(projectId: number, assetId: number) {
 	});
 }
 
+// ── Bulk operations ────────────────────────────────────────
+
+/** Update status on multiple projects */
+export function bulkUpdateStatus(ids: number[], status: ProjectStatus) {
+	return prisma.project.updateMany({
+		where: { id: { in: ids } },
+		data: { status },
+	});
+}
+
+/** Find all assets belonging to multiple projects */
+export function findAssetsByProjectIds(projectIds: number[]) {
+	return prisma.asset.findMany({
+		where: { projectId: { in: projectIds } },
+	});
+}
+
+/** Delete multiple projects (cascades members; assets must be deleted first) */
+export async function bulkDeleteProjects(ids: number[]) {
+	// Clear posterAssetId FK before deleting assets
+	await prisma.project.updateMany({
+		where: { id: { in: ids } },
+		data: { posterAssetId: null },
+	});
+	await prisma.asset.deleteMany({ where: { projectId: { in: ids } } });
+	return prisma.project.deleteMany({ where: { id: { in: ids } } });
+}
+
 // ── Transactional project creation (submit) ─────────────────
 
 export interface SubmitProjectData {
