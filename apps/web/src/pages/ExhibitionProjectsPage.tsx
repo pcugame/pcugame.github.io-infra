@@ -24,8 +24,10 @@ export default function ExhibitionProjectsPage() {
   }
 
   const exhibition = data?.exhibition;
-  const pageTitle = exhibition?.title || (exhibition ? `${exhibition.year} 전시` : '전시');
   const year = exhibition?.year ?? 0;
+  const pageTitle = exhibition
+    ? (exhibition.title ? `${year} ${exhibition.title}` : `${year} 전시`)
+    : '전시';
 
   // 검색 필터링
   const filtered = (data?.items ?? []).filter(
@@ -40,7 +42,6 @@ export default function ExhibitionProjectsPage() {
         <div className="container">
           <Link to="/years" className="archive-back">&larr; 전시 목록</Link>
           <h1 className="archive-page__title">{pageTitle}</h1>
-          <p className="archive-page__subtitle">{year}년 작품 목록을 확인하세요.</p>
         </div>
       </div>
 
