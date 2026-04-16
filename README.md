@@ -18,7 +18,7 @@
 
 - **Frontend**: React 19 · Vite · React Router 7 · TanStack Query
 - **Backend**: Fastify 5 · TypeScript · Prisma · PostgreSQL
-- **Storage**: S3 호환 오브젝트 스토리지
+- **Storage**: S3 호환 오브젝트 스토리지 (Garage)
 - **Auth**: Google OAuth 2.0
 - **CI/CD**: GitHub Actions (API → GHCR · Web → GitHub Pages)
 
@@ -29,25 +29,44 @@
 - Node.js 22+
 - Docker (또는 Docker Desktop)
 
-### 1. DB + 스토리지
+### 경로 A: UI만 수정 (DB/API 불필요)
+
+서버를 띄우지 않고 프론트엔드 UI만 확인할 수 있습니다.
+
+```bash
+cd apps/web
+npm install
+npm run dev:mock
+```
+
+mock 모드에서는 가짜 데이터로 대부분의 화면을 둘러볼 수 있습니다.
+다만 일부 관리자 API는 아직 mock이 없습니다 — [#8](../../issues/8) 참고.
+
+### 경로 B: 풀스택 개발
+
+#### 1. DB + 스토리지
 
 ```bash
 cd apps/db
 docker compose up -d
 ```
 
-### 2. API
+Garage(S3 호환 스토리지)가 함께 올라갑니다. 초기 버킷은 `garage-init.sh`가 자동 생성합니다.
+
+#### 2. API
 
 ```bash
 cd apps/api
 npm install
 npx prisma generate
 npx prisma migrate dev
-npm run db:seed
+npm run db:seed          # 테스트 관리자 + 샘플 프로젝트
 npm run dev
 ```
 
-### 3. Web
+> **참고**: API 실행에는 환경변수 설정이 필요합니다. 아직 `.env.example`이 없어서 `src/config/env.ts`를 보고 직접 작성해야 합니다 — [#6](../../issues/6)에서 개선 예정.
+
+#### 3. Web
 
 ```bash
 cd apps/web
@@ -55,12 +74,10 @@ npm install
 npm run dev
 ```
 
-### Mock 모드 (DB 없이 UI 확인)
+### 로그인
 
-```bash
-cd apps/web
-npm run dev:mock
-```
+현재 로그인은 Google OAuth를 거쳐야 합니다. 로컬 개발 시에는 seed가 출력하는 세션 쿠키를 브라우저에 수동 주입하는 방식을 씁니다.
+개발용 간편 로그인은 [#7](../../issues/7)에서 추가 예정입니다.
 
 ## Quality Checks
 
