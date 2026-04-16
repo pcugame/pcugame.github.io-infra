@@ -43,8 +43,10 @@ export type AdminProjectItem = {
   title: string;
   slug: string;
   year: number;
+  isIncomplete: boolean;
   status: ProjectStatus;
   createdByUserName?: string;
+  memberNames: string[];
   updatedAt: string;
 };
 

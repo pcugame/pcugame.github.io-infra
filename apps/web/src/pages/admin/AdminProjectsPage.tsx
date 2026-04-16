@@ -19,7 +19,7 @@ const STATUS_COLORS: Record<ProjectStatus, string> = {
 	ARCHIVED: 'badge--archived',
 };
 
-type SortKey = 'title' | 'year' | 'status' | 'updatedAt';
+type SortKey = 'title' | 'year' | 'status' | 'incomplete' | 'updatedAt';
 type SortDir = 'asc' | 'desc';
 
 export default function AdminProjectsPage() {
@@ -77,7 +77,8 @@ export default function AdminProjectsPage() {
 			list = list.filter((p) =>
 				p.title.toLowerCase().includes(q) ||
 				String(p.year).includes(q) ||
-				(p.createdByUserName ?? '').toLowerCase().includes(q),
+				(p.createdByUserName ?? '').toLowerCase().includes(q) ||
+				p.memberNames.some((name) => name.toLowerCase().includes(q)),
 			);
 		}
 
@@ -86,6 +87,7 @@ export default function AdminProjectsPage() {
 			if (sortKey === 'title') cmp = a.title.localeCompare(b.title, 'ko');
 			else if (sortKey === 'year') cmp = a.year - b.year;
 			else if (sortKey === 'status') cmp = a.status.localeCompare(b.status);
+			else if (sortKey === 'incomplete') cmp = Number(a.isIncomplete) - Number(b.isIncomplete);
 			else if (sortKey === 'updatedAt') cmp = a.updatedAt.localeCompare(b.updatedAt);
 			return sortDir === 'asc' ? cmp : -cmp;
 		});
@@ -265,6 +267,10 @@ export default function AdminProjectsPage() {
 									<th className="admin-table__sortable" onClick={() => handleSort('status')}>
 										상태{sortIndicator('status')}
 									</th>
+									<th className="admin-table__sortable" onClick={() => handleSort('incomplete')}>
+										누락{sortIndicator('incomplete')}
+									</th>
+									<th>제작자</th>
 									<th>작성자</th>
 									<th className="admin-table__sortable" onClick={() => handleSort('updatedAt')}>
 										수정일{sortIndicator('updatedAt')}
@@ -284,13 +290,19 @@ export default function AdminProjectsPage() {
 												/>
 											</td>
 										)}
-										<td><strong>{p.title}</strong></td>
+										<td className="admin-table__title-cell"><strong>{p.title}</strong></td>
 										<td><span className="admin-year-badge">{p.year}</span></td>
 										<td>
 											<span className={`badge ${STATUS_COLORS[p.status]}`}>
 												{STATUS_LABELS[p.status]}
 											</span>
 										</td>
+										<td>
+											{p.isIncomplete && (
+												<span className="incomplete-badge">불완전</span>
+											)}
+										</td>
+										<td>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
 										<td>{p.createdByUserName ?? '-'}</td>
 										<td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
 										<td>
@@ -325,6 +337,9 @@ export default function AdminProjectsPage() {
 								>
 									<div className="admin-pcard__top">
 										<h3 className="admin-pcard__title">{p.title}</h3>
+										{p.isIncomplete && (
+											<span className="incomplete-badge">불완전</span>
+										)}
 										<span className={`badge ${STATUS_COLORS[p.status]}`}>
 											{STATUS_LABELS[p.status]}
 										</span>
@@ -332,7 +347,7 @@ export default function AdminProjectsPage() {
 									<div className="admin-pcard__meta">
 										<span className="admin-year-badge">{p.year}</span>
 										<span className="admin-pcard__dot">&middot;</span>
-										<span>{p.createdByUserName ?? '-'}</span>
+										<span>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</span>
 										<span className="admin-pcard__dot">&middot;</span>
 										<span>{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</span>
 									</div>

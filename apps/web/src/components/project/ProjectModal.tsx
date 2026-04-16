@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
@@ -19,6 +19,7 @@ type MediaItem =
 export function ProjectModal({ slug, year, onClose }: Props) {
 	const overlayRef = useRef<HTMLDivElement>(null);
 	const [activeIndex, setActiveIndex] = useState(0);
+	const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
 	const { data: project, isLoading } = useQuery({
 		queryKey: queryKeys.projectDetail(year, slug),
@@ -28,8 +29,12 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 	// ESC 닫기
 	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') onClose();
+		const onKey = () => {
+			if (lightboxUrl) {
+				setLightboxUrl(null);
+			} else {
+				onClose();
+			}
 		};
 		document.addEventListener('keydown', onKey);
 		document.body.style.overflow = 'hidden';
@@ -37,29 +42,33 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 			document.removeEventListener('keydown', onKey);
 			document.body.style.overflow = '';
 		};
-	}, [onClose]);
+	}, [onClose, lightboxUrl]);
 
 	// 오버레이 클릭 닫기
 	const handleOverlayClick = (e: React.MouseEvent) => {
 		if (e.target === overlayRef.current) onClose();
 	};
 
-	// 미디어 목록 구성
+	const closeLightbox = useCallback((e: React.MouseEvent) => {
+		if (e.target === e.currentTarget) setLightboxUrl(null);
+	}, []);
+
+	// 미디어 목록 구성: 포스터 > 동영상 > 사진
 	const mediaItems: MediaItem[] = [];
 	if (project) {
+		if (project.posterUrl) {
+			mediaItems.push({
+				type: 'poster',
+				url: project.posterUrl,
+				label: '포스터',
+			});
+		}
 		if (project.video) {
 			mediaItems.push({
 				type: 'video',
 				url: project.video.url,
 				mimeType: project.video.mimeType,
 				label: '동영상',
-			});
-		}
-		if (project.posterUrl) {
-			mediaItems.push({
-				type: 'poster',
-				url: project.posterUrl,
-				label: '포스터',
 			});
 		}
 		const galleryImages = project.images.filter((img) => img.kind === 'IMAGE');
@@ -81,6 +90,8 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 		setActiveIndex(safeIndex);
 	}
 
+	const isImageType = current?.type === 'poster' || current?.type === 'image';
+
 	return (
 		<div className="modal-overlay" ref={overlayRef} onClick={handleOverlayClick}>
 			<div className="modal-panel" role="dialog" aria-modal="true">
@@ -99,22 +110,39 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 				{project && (
 					<>
-						{/* 메인 미디어 표시 */}
+						{/* 메인 미디어 표시 — 16:9 고정 비율 */}
 						{current && (
 							<div className="modal-visual">
-								{current.type === 'video' ? (
-									<ProjectVideo
-										video={{ url: current.url, mimeType: current.mimeType }}
-										posterUrl={project.posterUrl}
-										title={project.title}
-									/>
-								) : (
-									<img
-										src={current.url}
-										alt={current.label}
-										className="modal-poster"
-									/>
-								)}
+								<div className="modal-visual__frame">
+									{current.type === 'video' ? (
+										<ProjectVideo
+											video={{ url: current.url, mimeType: current.mimeType }}
+											posterUrl={project.posterUrl}
+											title={project.title}
+										/>
+									) : (
+										<img
+											src={current.url}
+											alt={current.label}
+											className="modal-visual__img"
+										/>
+									)}
+									{/* 사진/포스터일 때 확대 버튼 */}
+									{isImageType && (
+										<button
+											className="modal-visual__zoom"
+											onClick={() => setLightboxUrl(current.url)}
+											aria-label="확대해서 보기"
+										>
+											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+												<circle cx="11" cy="11" r="8" />
+												<line x1="21" y1="21" x2="16.65" y2="16.65" />
+												<line x1="11" y1="8" x2="11" y2="14" />
+												<line x1="8" y1="11" x2="14" y2="11" />
+											</svg>
+										</button>
+									)}
+								</div>
 							</div>
 						)}
 
@@ -194,7 +222,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								</div>
 							)}
 
-							{/* 다운로드 — GAME files are always publicly downloadable */}
+							{/* 다운로드 */}
 							{project.gameDownloadUrl && (
 								<div className="modal-download">
 									<a href={project.gameDownloadUrl} className="btn btn--primary btn--large" download>
@@ -211,6 +239,22 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 					</>
 				)}
 			</div>
+
+			{/* 라이트박스 (사진 확대) */}
+			{lightboxUrl && (
+				<div className="modal-lightbox" onClick={closeLightbox}>
+					<button
+						className="modal-lightbox__close"
+						onClick={() => setLightboxUrl(null)}
+						aria-label="닫기"
+					>
+						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+						</svg>
+					</button>
+					<img src={lightboxUrl} alt="확대 이미지" className="modal-lightbox__img" />
+				</div>
+			)}
 		</div>
 	);
 }

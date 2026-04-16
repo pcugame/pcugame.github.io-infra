@@ -68,7 +68,7 @@ export default function HomePage() {
 							프로젝트 <span className="home-hero__accent">아카이브</span>
 						</h1>
 						<p className="home-hero__desc">
-							전시를 선택하여 게임공학과 졸업작품을 탐색하세요.
+							전시를 선택하여 게임공학과 작품들을 탐색하세요.
 						</p>
 					</div>
 

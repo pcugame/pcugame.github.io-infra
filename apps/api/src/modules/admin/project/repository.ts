@@ -24,7 +24,11 @@ export function findProjectsForUser(userId: number, isPrivileged: boolean) {
 					],
 				},
 		orderBy: { createdAt: 'desc' },
-		include: { exhibition: true, creator: true },
+		include: {
+			exhibition: true,
+			creator: true,
+			members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true } },
+		},
 	});
 }
 

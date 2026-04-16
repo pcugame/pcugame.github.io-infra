@@ -96,8 +96,10 @@ export async function listProjects(userId: number, userRole: string) {
 		title: p.title,
 		slug: p.slug,
 		year: p.exhibition.year,
+		isIncomplete: p.isIncomplete,
 		status: p.status,
 		createdByUserName: p.creator.name || undefined,
+		memberNames: p.members.map((m) => m.name),
 		updatedAt: p.updatedAt.toISOString(),
 	}));
 }

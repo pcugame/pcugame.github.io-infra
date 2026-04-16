@@ -375,6 +375,18 @@ a:hover {
   text-decoration: underline;
 }
 
+/* ── Global Animations ────────────────────────────────────────── */
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* ── Container ────────────────────────────────────────────────── */
 
 .container {
@@ -644,6 +656,10 @@ a:hover {
   text-decoration: none;
 }
 
+.btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -863,6 +879,7 @@ a:hover {
 .years-hero {
   padding: 3rem 0 2rem;
   text-align: center;
+  animation: fade-in-up 0.4s ease;
 }
 
 .years-hero__title {
@@ -901,11 +918,19 @@ a:hover {
   gap: 1.25rem;
   padding: 1.5rem 2rem;
   background: var(--color-surface);
+  animation: fade-in-up 0.35s ease both;
   text-decoration: none;
   color: var(--color-text);
   transition: background 0.15s;
   border-bottom: 1px solid var(--color-border);
 }
+
+.years-card:nth-child(1) { animation-delay: 0s; }
+.years-card:nth-child(2) { animation-delay: 0.05s; }
+.years-card:nth-child(3) { animation-delay: 0.1s; }
+.years-card:nth-child(4) { animation-delay: 0.15s; }
+.years-card:nth-child(5) { animation-delay: 0.2s; }
+.years-card:nth-child(n+6) { animation-delay: 0.25s; }
 
 .years-card:last-child {
   border-bottom: none;
@@ -1006,11 +1031,13 @@ a:hover {
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
-  transition: box-shadow 0.15s;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  animation: fade-in-up 0.4s ease both;
 }
 
 .project-card:hover {
   box-shadow: var(--shadow-lg);
+  transform: translateY(-4px);
 }
 
 .project-card__image {
@@ -1023,6 +1050,11 @@ a:hover {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.project-card:hover .project-card__image img {
+  transform: scale(1.05);
 }
 
 .project-card__placeholder {
@@ -1201,33 +1233,116 @@ a:hover {
   min-height: 300px;
 }
 
-/* 상단 비주얼 (영상 or 포스터) */
+/* 상단 비주얼 — 고정 16:9 비율 */
 .modal-visual {
   border-radius: 16px 16px 0 0;
   overflow: hidden;
   background: #0f172a;
 }
 
-.modal-video {
+.modal-visual__frame {
   position: relative;
+  width: 100%;
   padding-bottom: 56.25%;
   height: 0;
 }
 
-.modal-video iframe {
+.modal-visual__img {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  border: 0;
+  object-fit: contain;
+  display: block;
 }
 
-.modal-poster {
+.modal-visual__zoom {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+.modal-visual__frame:hover .modal-visual__zoom {
+  opacity: 1;
+}
+
+.modal-visual__zoom:hover {
+  background: rgba(0, 0, 0, 0.8);
+}
+
+/* ProjectVideo가 modal-visual__frame 안에 들어갈 때 꽉 채움 */
+.modal-visual__frame .project-video {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
-  display: block;
-  max-height: 400px;
-  object-fit: cover;
+  height: 100%;
+  border-radius: 0;
+}
+
+.modal-visual__frame .project-video video,
+.modal-visual__frame .project-video img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+}
+
+/* 라이트박스 (사진 확대) */
+.modal-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  cursor: zoom-out;
+  animation: fade-in 0.2s ease;
+}
+
+.modal-lightbox__img {
+  max-width: 92vw;
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: 4px;
+  cursor: default;
+  animation: modal-slide-up 0.25s ease;
+}
+
+.modal-lightbox__close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.modal-lightbox__close:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* 미디어 탭 목록 */
@@ -1639,8 +1754,9 @@ button.archive-card {
   display: flex;
   flex-direction: column;
   position: sticky;
-  top: var(--header-height);
-  height: calc(100vh - var(--header-height));
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .admin-sidebar__header {
@@ -1746,6 +1862,7 @@ button.archive-card {
   justify-content: space-between;
   margin-bottom: 2rem;
   gap: 1rem;
+  animation: fade-in-up 0.3s ease;
 }
 
 .admin-page-header__text {
@@ -1861,6 +1978,14 @@ form.admin-card h3 {
   text-align: left;
   font-size: 0.88rem;
   border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+/* 제목 컬럼만 줄바꿈 허용 + 남은 공간 전부 사용 */
+.admin-table .admin-table__title-cell {
+  white-space: normal;
+  word-break: break-word;
+  width: 100%;
 }
 
 .admin-table th {
@@ -3871,6 +3996,7 @@ fieldset.status-section legend {
   padding: 2.5rem 0 2rem;
   border-bottom: 1px solid var(--color-border);
   margin-bottom: 2rem;
+  animation: fade-in-up 0.35s ease;
 }
 
 .archive-back {
