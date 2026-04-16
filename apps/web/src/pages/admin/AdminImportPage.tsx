@@ -107,7 +107,7 @@ export default function AdminImportPage() {
 				</div>
 			</div>
 
-			<p style={{ marginBottom: '1.5rem', opacity: 0.7, fontSize: '0.9em' }}>
+			<p className="admin-import-page__desc">
 				JSON 파일을 업로드하여 전시회와 프로젝트 데이터를 일괄 등록합니다.
 				모든 데이터는 하나의 트랜잭션으로 처리되어, 하나라도 실패하면 전체가 롤백됩니다.
 			</p>
@@ -115,19 +115,10 @@ export default function AdminImportPage() {
 			{/* 파일 선택 영역 */}
 			{step !== 'done' && (
 				<div
-					className="import-dropzone"
+					className={`admin-card admin-import-dropzone${previewMutation.isPending ? ' admin-import-dropzone--loading' : ''}`}
 					onDrop={handleDrop}
 					onDragOver={(e) => e.preventDefault()}
 					onClick={() => fileRef.current?.click()}
-					style={{
-						border: '2px dashed var(--color-border, #555)',
-						borderRadius: '8px',
-						padding: '2rem',
-						textAlign: 'center',
-						cursor: 'pointer',
-						marginBottom: '1.5rem',
-						opacity: previewMutation.isPending ? 0.5 : 1,
-					}}
 				>
 					<input
 						ref={fileRef}
@@ -142,10 +133,10 @@ export default function AdminImportPage() {
 						<p>{file.name} ({(file.size / 1024).toFixed(1)} KB)</p>
 					) : (
 						<>
-							<p style={{ marginBottom: '0.5rem', fontWeight: 600 }}>
+							<p className="admin-import-dropzone__title">
 								JSON 파일을 드래그하거나 클릭하여 선택
 							</p>
-							<p style={{ fontSize: '0.85em', opacity: 0.6 }}>최대 10MB, .json 파일만 지원</p>
+							<p className="admin-import-dropzone__hint">최대 10MB, .json 파일만 지원</p>
 						</>
 					)}
 				</div>
@@ -153,14 +144,14 @@ export default function AdminImportPage() {
 
 			{/* 검증 에러 */}
 			{previewMutation.error && (
-				<div className="error-box" role="alert" style={{ marginBottom: '1rem' }}>
-					<p>{getApiErrorMessage(previewMutation.error)}</p>
+				<div className="error-box" role="alert">
+					<p className="error-box__message">{getApiErrorMessage(previewMutation.error)}</p>
 				</div>
 			)}
 
 			{preview && !preview.valid && preview.errors.length > 0 && (
-				<div className="error-box" role="alert" style={{ marginBottom: '1rem' }}>
-					<p style={{ fontWeight: 600, marginBottom: '0.5rem' }}>JSON 검증 실패</p>
+				<div className="error-box" role="alert">
+					<p className="error-box__message" style={{ marginBottom: '0.5rem' }}>JSON 검증 실패</p>
 					<ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
 						{preview.errors.map((err, i) => (
 							<li key={i}>{err}</li>
@@ -172,51 +163,51 @@ export default function AdminImportPage() {
 			{/* 프리뷰 결과 */}
 			{step === 'preview' && preview && preview.valid && (
 				<>
-					<fieldset>
-						<legend>임포트 미리보기</legend>
+					<div className="admin-card" style={{ padding: '1.75rem', marginBottom: '1.5rem' }}>
+						<h3 className="admin-import-section-title">임포트 미리보기</h3>
 
-						<div style={{ marginBottom: '1rem' }}>
-							<strong>전시회 ({preview.exhibitions.length}개)</strong>
-							<table style={{ width: '100%', marginTop: '0.5rem', borderCollapse: 'collapse' }}>
-								<thead>
-									<tr style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border, #555)' }}>
-										<th style={{ padding: '0.4rem 0.5rem' }}>연도</th>
-										<th style={{ padding: '0.4rem 0.5rem' }}>제목</th>
-										<th style={{ padding: '0.4rem 0.5rem' }}>상태</th>
+						<p className="admin-import-section-subtitle">
+							전시회 ({preview.exhibitions.length}개)
+						</p>
+						<table className="admin-table">
+							<thead>
+								<tr>
+									<th>연도</th>
+									<th>제목</th>
+									<th>상태</th>
+								</tr>
+							</thead>
+							<tbody>
+								{preview.exhibitions.map((ex, i) => (
+									<tr key={i}>
+										<td>{ex.year}</td>
+										<td>{ex.title}</td>
+										<td>
+											{ex.isNew ? (
+												<span className="admin-import-badge admin-import-badge--new">새로 생성</span>
+											) : (
+												<span className="admin-import-badge admin-import-badge--existing">
+													기존 (프로젝트 {ex.existingProjectCount}개)
+												</span>
+											)}
+										</td>
 									</tr>
-								</thead>
-								<tbody>
-									{preview.exhibitions.map((ex, i) => (
-										<tr key={i} style={{ borderBottom: '1px solid var(--color-border, #333)' }}>
-											<td style={{ padding: '0.4rem 0.5rem' }}>{ex.year}</td>
-											<td style={{ padding: '0.4rem 0.5rem' }}>{ex.title}</td>
-											<td style={{ padding: '0.4rem 0.5rem' }}>
-												{ex.isNew ? (
-													<span style={{ color: 'var(--color-success, #4caf50)' }}>새로 생성</span>
-												) : (
-													<span style={{ color: 'var(--color-warning, #ff9800)' }}>
-														기존 전시회 (프로젝트 {ex.existingProjectCount}개 보유)
-													</span>
-												)}
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
+								))}
+							</tbody>
+						</table>
 
-						<div>
-							<strong>프로젝트: {preview.projectCount}개</strong> 추가 예정
-						</div>
-					</fieldset>
+						<p className="admin-import-section-subtitle" style={{ marginTop: '1.25rem' }}>
+							프로젝트: <strong>{preview.projectCount}개</strong> 추가 예정
+						</p>
+					</div>
 
 					{executeMutation.error && (
-						<div className="error-box" role="alert" style={{ marginTop: '1rem' }}>
-							<p>{getApiErrorMessage(executeMutation.error)}</p>
+						<div className="error-box" role="alert">
+							<p className="error-box__message">{getApiErrorMessage(executeMutation.error)}</p>
 						</div>
 					)}
 
-					<div className="form-actions" style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+					<div style={{ display: 'flex', gap: '0.5rem' }}>
 						<button
 							className="btn btn--primary"
 							onClick={handleConfirm}
@@ -225,7 +216,7 @@ export default function AdminImportPage() {
 							{executeMutation.isPending ? '임포트 중...' : '임포트 실행'}
 						</button>
 						<button
-							className="btn"
+							className="btn btn--secondary"
 							onClick={handleReset}
 							disabled={executeMutation.isPending}
 						>
@@ -238,16 +229,11 @@ export default function AdminImportPage() {
 			{/* 완료 결과 */}
 			{step === 'done' && result && (
 				<>
-					<div style={{
-						padding: '1.5rem',
-						borderRadius: '8px',
-						border: '1px solid var(--color-success, #4caf50)',
-						marginBottom: '1rem',
-					}}>
-						<p style={{ fontWeight: 600, marginBottom: '0.75rem', color: 'var(--color-success, #4caf50)' }}>
+					<div className="admin-card admin-import-result">
+						<p className="admin-import-result__title">
 							임포트가 완료되었습니다.
 						</p>
-						<ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
+						<ul className="admin-import-result__list">
 							<li>전시회: {result.exhibitions.created}개 생성, {result.exhibitions.existing}개 기존 재활용</li>
 							<li>프로젝트: {result.projects.created}개 생성</li>
 						</ul>
@@ -259,18 +245,9 @@ export default function AdminImportPage() {
 			)}
 
 			{/* JSON 형식 안내 */}
-			<details style={{ marginTop: '2rem' }}>
-				<summary style={{ cursor: 'pointer', fontWeight: 600, marginBottom: '0.5rem' }}>
-					JSON 파일 형식 안내
-				</summary>
-				<pre style={{
-					padding: '1rem',
-					borderRadius: '6px',
-					overflow: 'auto',
-					fontSize: '0.85em',
-					background: 'var(--color-surface, #1a1a1a)',
-					border: '1px solid var(--color-border, #333)',
-				}}>
+			<details className="admin-import-help">
+				<summary>JSON 파일 형식 안내</summary>
+				<pre className="admin-import-help__code">
 {`{
   "years": [
     {
