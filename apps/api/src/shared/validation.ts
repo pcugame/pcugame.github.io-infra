@@ -26,7 +26,7 @@ export const UpdateProjectBody = z.object({
 	title: z.string().min(1).max(120).optional(),
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
-	isLegacy: z.boolean().optional(),
+	isIncomplete: z.boolean().optional(),
 	status: ProjectStatusEnum.optional(),
 	sortOrder: z.number().int().min(0).optional(),
 });

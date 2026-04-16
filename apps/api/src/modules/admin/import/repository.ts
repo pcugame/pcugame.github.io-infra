@@ -43,7 +43,7 @@ export function createProjectWithMembers(
 		title: string;
 		summary: string;
 		description: string;
-		isLegacy: boolean;
+		isIncomplete: boolean;
 		status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 		githubUrl: string;
 		platforms: ('PC' | 'MOBILE' | 'WEB')[];

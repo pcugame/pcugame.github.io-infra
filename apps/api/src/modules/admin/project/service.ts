@@ -40,7 +40,7 @@ export function serializeProjectDetail(project: {
 	exhibition: { year: number };
 	summary: string;
 	description: string;
-	isLegacy: boolean;
+	isIncomplete: boolean;
 	status: string;
 	sortOrder: number;
 	posterAssetId: number | null;
@@ -60,7 +60,7 @@ export function serializeProjectDetail(project: {
 		year: project.exhibition.year,
 		summary: project.summary || undefined,
 		description: project.description || undefined,
-		isLegacy: project.isLegacy,
+		isIncomplete: project.isIncomplete,
 		video,
 		status: project.status,
 		sortOrder: project.sortOrder,
@@ -144,14 +144,14 @@ export async function updateProject(
 	projectId: number,
 	patch: {
 		title?: string; summary?: string; description?: string;
-		isLegacy?: boolean; status?: ProjectStatus; sortOrder?: number;
+		isIncomplete?: boolean; status?: ProjectStatus; sortOrder?: number;
 	},
 ) {
 	const updated = await repo.updateProject(projectId, {
 		...(patch.title !== undefined ? { title: patch.title } : {}),
 		...(patch.summary !== undefined ? { summary: patch.summary } : {}),
 		...(patch.description !== undefined ? { description: patch.description } : {}),
-		...(patch.isLegacy !== undefined ? { isLegacy: patch.isLegacy } : {}),
+		...(patch.isIncomplete !== undefined ? { isIncomplete: patch.isIncomplete } : {}),
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	});

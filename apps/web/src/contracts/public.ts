@@ -69,7 +69,7 @@ export type PublicProjectDetailResponse = {
   title: string;
   summary?: string;
   description?: string;
-  isLegacy: boolean;
+  isIncomplete: boolean;
   video: ProjectVideo | null;
   members: PublicProjectMember[];
   images: PublicProjectImage[];

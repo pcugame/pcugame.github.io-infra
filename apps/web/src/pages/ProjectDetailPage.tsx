@@ -44,17 +44,24 @@ export default function ProjectDetailPage() {
 
       <h1>
         {project.title}
-        {project.isLegacy && (
-          <span className="legacy-badge" title="아카이브 자료 — 일부 정보가 누락되었을 수 있습니다">
-            아카이브
+        {project.isIncomplete && (
+          <span className="incomplete-badge" title="일부 자료가 누락되었을 수 있습니다">
+            불완전
           </span>
         )}
       </h1>
 
-      {/* Legacy 안내 */}
-      {project.isLegacy && (
-        <p className="legacy-notice">
-          이 프로젝트는 아카이브 자료입니다. 일부 자료(실행 파일, 스크린샷 등)가 누락되었을 수 있습니다.
+      {/* 에셋 유실 안내 */}
+      {project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && !project.video && project.images.length === 0 && (
+        <p className="incomplete-notice incomplete-notice--missing">
+          이 프로젝트의 파일이 유실되었습니다. 포스터, 실행 파일, 스크린샷 등이 등록되지 않은 상태입니다.
+        </p>
+      )}
+
+      {/* 불완전 안내 (파일은 일부 있지만 불완전 플래그) */}
+      {project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || project.video || project.images.length > 0) && (
+        <p className="incomplete-notice">
+          이 프로젝트는 일부 자료가 누락되었을 수 있습니다.
         </p>
       )}
 

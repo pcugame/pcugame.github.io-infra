@@ -263,7 +263,7 @@ export default function AdminImportPage() {
       "slug": "game-title",
       "summary": "한 줄 소개",
       "description": "상세 설명",
-      "isLegacy": true,
+      "isIncomplete": true,
       "status": "PUBLISHED",
       "githubUrl": "https://github.com/...",
       "platforms": ["PC", "WEB"],

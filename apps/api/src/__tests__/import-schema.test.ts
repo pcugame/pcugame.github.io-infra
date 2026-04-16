@@ -18,7 +18,7 @@ describe('ImportDataSchema', () => {
 				slug: 'game',
 				summary: 'A game',
 				description: 'Details',
-				isLegacy: true,
+				isIncomplete: true,
 				status: 'DRAFT',
 				githubUrl: 'https://github.com/test',
 				platforms: ['PC', 'WEB'],
@@ -38,7 +38,7 @@ describe('ImportDataSchema', () => {
 			projects: [{ year: 2025, title: 'Test' }],
 		});
 		const p = result.projects[0]!;
-		expect(p.isLegacy).toBe(false);
+		expect(p.isIncomplete).toBe(false);
 		expect(p.status).toBe('PUBLISHED');
 		expect(p.summary).toBe('');
 		expect(p.description).toBe('');

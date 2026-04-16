@@ -193,13 +193,13 @@ export default function AdminProjectEditPage() {
           <span className="admin-page-header__eyebrow">Edit Project</span>
           <h1>
             작품 수정: {project.title}
-            {project.isLegacy && <span className="legacy-badge">아카이브</span>}
+            {project.isIncomplete && <span className="incomplete-badge">불완전</span>}
           </h1>
         </div>
       </div>
       <p className="edit-meta">
         슬러그: <code>{project.slug}</code> | 연도: <span className="admin-year-badge">{project.year}</span>
-        {project.isLegacy && ' | 아카이브 자료'}
+        {project.isIncomplete && ' | 불완전 자료'}
       </p>
 
       {/* ── 기본 정보 폼 ────────────────────────────────────── */}

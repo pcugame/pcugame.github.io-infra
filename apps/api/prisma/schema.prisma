@@ -86,7 +86,7 @@ model Project {
   title          String
   summary        String         @default("")
   description    String         @default("")
-  isLegacy       Boolean        @default(false) @map("is_legacy")
+  isIncomplete   Boolean        @default(false) @map("is_incomplete")
   status         ProjectStatus  @default(DRAFT)
   sortOrder      Int            @default(0) @map("sort_order")
   githubUrl      String         @default("") @map("github_url")

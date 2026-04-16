@@ -77,17 +77,24 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 						<div className="modal-body">
 							<h1 className="modal-title">
 								{project.title}
-								{project.isLegacy && (
-									<span className="legacy-badge" title="아카이브 자료">
-										아카이브
+								{project.isIncomplete && (
+									<span className="incomplete-badge" title="일부 자료가 누락되었을 수 있습니다">
+										불완전
 									</span>
 								)}
 							</h1>
 
-							{/* Legacy 안내 */}
-							{project.isLegacy && (
-								<p className="legacy-notice">
-									아카이브 자료입니다. 일부 자료가 누락되었을 수 있습니다.
+							{/* 에셋 유실 안내 */}
+							{project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && !project.video && project.images.length === 0 && (
+								<p className="incomplete-notice incomplete-notice--missing">
+									이 프로젝트의 파일이 유실되었습니다.
+								</p>
+							)}
+
+							{/* 불완전 안내 */}
+							{project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || project.video || project.images.length > 0) && (
+								<p className="incomplete-notice">
+									일부 자료가 누락되었을 수 있습니다.
 								</p>
 							)}
 

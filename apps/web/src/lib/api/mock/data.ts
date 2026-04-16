@@ -264,7 +264,7 @@ function buildDetail(card: MockProjectCard, year: number): any {
 		title: card.title,
 		summary: card.summary,
 		description: `${card.title}은(는) 배재대학교 게임공학과 ${year}년 졸업작품으로 제작된 프로젝트입니다.\n\n${card.summary ?? ''}\n\nPC 플랫폼 대상으로 개발되었습니다.`,
-		isLegacy: year <= 2024,
+		isIncomplete: year <= 2024,
 		video: null,
 		members: card.members.map((m, i) => ({ id: card.id * 100 + i, name: m.name, studentId: m.studentId })),
 		images: [
@@ -323,7 +323,7 @@ export function buildAdminProjectDetail(id: string | number): any | undefined {
 	return {
 		id: detail.id, title: detail.title, slug: detail.slug, year: detail.year,
 		summary: detail.summary, description: detail.description,
-		isLegacy: detail.isLegacy, video: detail.video,
+		isIncomplete: detail.isIncomplete, video: detail.video,
 		status: 'PUBLISHED', sortOrder: 0,
 		posterAssetId: detail.images[0]?.id, posterUrl: detail.posterUrl,
 		members: detail.members.map((m: { id: number; name: string; studentId: string }, i: number) => ({ ...m, sortOrder: i, userId: null })),

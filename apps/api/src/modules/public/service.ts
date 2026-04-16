@@ -132,7 +132,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string) {
 		title: project.title,
 		summary: project.summary || undefined,
 		description: project.description || undefined,
-		isLegacy: project.isLegacy,
+		isIncomplete: project.isIncomplete,
 		video,
 		members: project.members.map((m) => ({
 			id: m.id,

@@ -42,7 +42,7 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 		exhibition: { year: 2025 },
 		summary: 'A summary',
 		description: 'A description',
-		isLegacy: false,
+		isIncomplete: false,
 		status: 'DRAFT',
 		sortOrder: 0,
 		posterAssetId: null as number | null,
@@ -86,7 +86,7 @@ describe('serializeProjectDetail', () => {
 		expect(result.title).toBe('Test Project');
 		expect(result.slug).toBe('test-project');
 		expect(result.year).toBe(2025);
-		expect(result.isLegacy).toBe(false);
+		expect(result.isIncomplete).toBe(false);
 		expect(result.status).toBe('DRAFT');
 		expect(result.sortOrder).toBe(0);
 	});

@@ -134,9 +134,9 @@ describe('UpdateProjectBody', () => {
     expect(() => UpdateProjectBody.parse({ title: '' })).toThrow();
   });
 
-  it('accepts isLegacy boolean', () => {
-    const result = UpdateProjectBody.parse({ isLegacy: true });
-    expect(result.isLegacy).toBe(true);
+  it('accepts isIncomplete boolean', () => {
+    const result = UpdateProjectBody.parse({ isIncomplete: true });
+    expect(result.isIncomplete).toBe(true);
   });
 
   it('rejects negative sortOrder', () => {

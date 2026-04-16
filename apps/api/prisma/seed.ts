@@ -19,7 +19,7 @@
  *       "title": "게임 제목",
  *       "summary": "한 줄 소개",
  *       "description": "상세 설명",
- *       "isLegacy": true,
+ *       "isIncomplete": true,
  *       "status": "PUBLISHED",
  *       "members": [
  *         { "name": "홍길동", "studentId": "20240001" }
@@ -127,7 +127,7 @@ interface ImportProject {
   slug?: string;
   summary?: string;
   description?: string;
-  isLegacy?: boolean;
+  isIncomplete?: boolean;
   status?: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
   githubUrl?: string;
   platforms?: ('PC' | 'MOBILE' | 'WEB')[];
@@ -210,7 +210,7 @@ async function importFromJson(filePath: string, creatorId: number) {
           title: p.title,
           summary: p.summary ?? '',
           description: p.description ?? '',
-          isLegacy: p.isLegacy ?? false,
+          isIncomplete: p.isIncomplete ?? false,
           status: p.status ?? 'PUBLISHED',
           githubUrl: p.githubUrl ?? '',
           platforms: p.platforms ?? [],

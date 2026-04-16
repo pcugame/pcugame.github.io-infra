@@ -5340,9 +5340,9 @@ fieldset.status-section legend {
   }
 }
 
-/* ── Legacy Badge & Notice ────────────────────────────────── */
+/* ── Incomplete Badge & Notice ────────────────────────────── */
 
-.legacy-badge {
+.incomplete-badge {
   display: inline-block;
   margin-left: 0.5rem;
   padding: 0.15em 0.5em;
@@ -5356,7 +5356,7 @@ fieldset.status-section legend {
   vertical-align: middle;
 }
 
-.legacy-notice {
+.incomplete-notice {
   margin: 0.5rem 0 1rem;
   padding: 0.6rem 1rem;
   font-size: 0.9rem;
@@ -5364,6 +5364,12 @@ fieldset.status-section legend {
   background: #fffbeb;
   border: 1px solid #fde68a;
   border-radius: var(--radius);
+}
+
+.incomplete-notice--missing {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
 }
 
 /* ── ProjectVideo Component ───────────────────────────────── */

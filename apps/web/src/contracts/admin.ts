@@ -33,7 +33,7 @@ export type UpdateProjectRequest = {
   title?: string;
   summary?: string;
   description?: string;
-  isLegacy?: boolean;
+  isIncomplete?: boolean;
   status?: ProjectStatus;
   sortOrder?: number;
 };
@@ -55,7 +55,7 @@ export type AdminProjectDetail = {
   year: number;
   summary?: string;
   description?: string;
-  isLegacy: boolean;
+  isIncomplete: boolean;
   video: ProjectVideo | null;
   status: ProjectStatus;
   sortOrder: number;

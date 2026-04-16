@@ -62,7 +62,7 @@ for (const file of YEAR_FILES) {
     const project = {
       year,
       title: entry.title,
-      isLegacy: true,
+      isIncomplete: true,
       status: 'PUBLISHED',
       platforms,
       members,

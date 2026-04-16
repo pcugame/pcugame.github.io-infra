@@ -346,7 +346,7 @@ async function doImport(
 						exhibitionId: exhibition.id,
 						slug,
 						title: entry.title,
-						isLegacy: true,
+						isIncomplete: true,
 						status: 'PUBLISHED',
 						githubUrl: entry.githubLink ?? '',
 						platforms,
