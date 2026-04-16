@@ -14,6 +14,7 @@ body:
         - UI-only review is often easier in `apps/web` mock mode.
         - If you already have a fix, sending a PR is the fastest path.
         - For faster confirmation, you can also contact Instagram `@gluemylifeplease`.
+        - You can also come to `C302` and ask for `송지한`.
 
   - type: checkboxes
     id: acknowledgements

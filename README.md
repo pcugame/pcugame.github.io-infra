@@ -70,6 +70,7 @@ cd apps/web && npm test && npm run lint
 - 변경 사항이 있으면 브랜치를 pull 받은 뒤 수정해서 PR로 보내 주세요.
 - PR을 올리면 확인하겠습니다.
 - 더 빠른 확인이 필요하면 Instagram `@gluemylifeplease` 로 연락해 주세요.
+- 오프라인으로는 `C302호`에 와서 `송지한`을 찾아도 됩니다.
 
 ## Before Opening An Issue
 
