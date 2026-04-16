@@ -14,24 +14,34 @@ const SIGNATURES: { bytes: number[]; offset: number; mime: string; ext: string }
   { bytes: [0x50, 0x4b, 0x03, 0x04], offset: 0, mime: 'application/zip', ext: 'zip' },
   { bytes: [0x50, 0x4b, 0x05, 0x06], offset: 0, mime: 'application/zip', ext: 'zip' },
   { bytes: [0x50, 0x4b, 0x07, 0x08], offset: 0, mime: 'application/zip', ext: 'zip' },
-  // MP4 (ftyp box)
+  // MP4 / MOV (ftyp box — covers mp4, m4v, mov, 3gp)
   { bytes: [0x66, 0x74, 0x79, 0x70], offset: 4, mime: 'video/mp4', ext: 'mp4' },
-  // WebM / Matroska (EBML header)
-  { bytes: [0x1a, 0x45, 0xdf, 0xa3], offset: 0, mime: 'video/webm', ext: 'webm' },
+  // WebM / Matroska (EBML header — covers mkv and webm)
+  { bytes: [0x1a, 0x45, 0xdf, 0xa3], offset: 0, mime: 'video/x-matroska', ext: 'mkv' },
+  // AVI (RIFF....AVI)
+  { bytes: [0x52, 0x49, 0x46, 0x46], offset: 0, mime: 'video/x-msvideo', ext: 'avi' },
+  // WMV / ASF
+  { bytes: [0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11], offset: 0, mime: 'video/x-ms-wmv', ext: 'wmv' },
 ];
 
 const WEBP_MARKER = [0x57, 0x45, 0x42, 0x50]; // "WEBP" at offset 8
+const AVI_MARKER = [0x41, 0x56, 0x49, 0x20];  // "AVI " at offset 8
 
 export function detectFileType(buffer: Buffer): FileTypeResult | null {
   for (const sig of SIGNATURES) {
     if (buffer.length < sig.offset + sig.bytes.length) continue;
     const match = sig.bytes.every((b, i) => buffer[sig.offset + i] === b);
     if (match) {
-      // Extra check for WebP: verify "WEBP" at offset 8
+      // RIFF container: disambiguate WebP vs AVI by marker at offset 8
       if (sig.mime === 'image/webp') {
         if (buffer.length < 12) continue;
         const isWebp = WEBP_MARKER.every((b, i) => buffer[8 + i] === b);
         if (!isWebp) continue;
+      }
+      if (sig.mime === 'video/x-msvideo') {
+        if (buffer.length < 12) continue;
+        const isAvi = AVI_MARKER.every((b, i) => buffer[8 + i] === b);
+        if (!isAvi) continue;
       }
       return { mime: sig.mime, ext: sig.ext };
     }
@@ -47,7 +57,12 @@ const ALLOWED_IMAGE_MIMES = new Set([
 
 const ALLOWED_GAME_MIMES = new Set(['application/zip']);
 
-const ALLOWED_VIDEO_MIMES = new Set(['video/mp4', 'video/webm']);
+const ALLOWED_VIDEO_MIMES = new Set([
+  'video/mp4',
+  'video/x-matroska',   // mkv / webm
+  'video/x-msvideo',    // avi
+  'video/x-ms-wmv',     // wmv
+]);
 
 export function isAllowedImageType(result: FileTypeResult): boolean {
   return ALLOWED_IMAGE_MIMES.has(result.mime);

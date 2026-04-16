@@ -41,11 +41,21 @@ describe('detectFileType', () => {
     expect(detectFileType(buf)).toBeNull();
   });
 
-  it('rejects RIFF without WEBP marker', () => {
+  it('detects AVI from RIFF+AVI marker', () => {
     const buf = Buffer.from([
       0x52, 0x49, 0x46, 0x46,
       0x00, 0x00, 0x00, 0x00,
-      0x41, 0x56, 0x49, 0x20, // "AVI " not "WEBP"
+      0x41, 0x56, 0x49, 0x20, // "AVI "
+      0x00, 0x00, 0x00, 0x00,
+    ]);
+    expect(detectFileType(buf)).toEqual({ mime: 'video/x-msvideo', ext: 'avi' });
+  });
+
+  it('rejects RIFF without WEBP or AVI marker', () => {
+    const buf = Buffer.from([
+      0x52, 0x49, 0x46, 0x46,
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, // unknown RIFF subtype
       0x00, 0x00, 0x00, 0x00,
     ]);
     expect(detectFileType(buf)).toBeNull();

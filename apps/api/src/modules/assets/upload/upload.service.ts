@@ -7,6 +7,7 @@ import { uploadFile, deleteObject } from '../../../lib/storage.js';
 import { generateStorageKey } from '../../../shared/storage-path.js';
 import { validateFile } from './file-validator.js';
 import { processImage } from './image-processing.js';
+import { processVideo } from './video-processing.js';
 import type { SavedFile } from './upload-types.js';
 
 interface CommittedFile {
@@ -67,7 +68,23 @@ export class UploadPipeline {
     let finalExt = validated.ext;
     let finalSizeBytes = validated.sizeBytes;
 
-    if (kind !== 'GAME' && kind !== 'VIDEO') {
+    if (kind === 'VIDEO') {
+      const processed = await processVideo({
+        tmpPath,
+        mimeType: validated.mimeType,
+        ext: validated.ext,
+        sizeBytes: validated.sizeBytes,
+      });
+
+      finalTmpPath = processed.tmpPath;
+      finalMimeType = processed.mimeType;
+      finalExt = processed.ext;
+      finalSizeBytes = processed.sizeBytes;
+
+      if (processed.converted && processed.tmpPath !== tmpPath) {
+        this.trackTempFile(processed.tmpPath);
+      }
+    } else if (kind !== 'GAME') {
       const processed = await processImage({
         tmpPath,
         mimeType: validated.mimeType,
@@ -80,8 +97,6 @@ export class UploadPipeline {
       finalExt = processed.ext;
       finalSizeBytes = processed.sizeBytes;
 
-      // If conversion created a new file, track it for cleanup.
-      // The original tmpPath stays tracked — cleanupTemp handles it.
       if (processed.converted && processed.tmpPath !== tmpPath) {
         this.trackTempFile(processed.tmpPath);
       }
@@ -124,7 +139,7 @@ export class UploadPipeline {
       try {
         await deleteObject(f.bucket, f.storageKey);
       } catch (err) {
-        logger.error({ err, storageKey: f.storageKey }, 'Upload rollback cleanup failed');
+        logger().error({ err, storageKey: f.storageKey }, 'Upload rollback cleanup failed');
       }
     }
     this.committedFiles = [];

@@ -47,7 +47,7 @@ export async function validateFile(
   if (kind === 'GAME') {
     if (!isAllowedGameType(fileType)) throw badRequest('Game file must be a ZIP archive');
   } else if (kind === 'VIDEO') {
-    if (!isAllowedVideoType(fileType)) throw badRequest('Video must be MP4 or WebM');
+    if (!isAllowedVideoType(fileType)) throw badRequest('Unsupported video format');
   } else {
     if (!isAllowedImageType(fileType)) throw badRequest('Images must be JPEG, PNG, or WebP');
   }
