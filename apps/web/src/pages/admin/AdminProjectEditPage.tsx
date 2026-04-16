@@ -190,9 +190,8 @@ export default function AdminProjectEditPage() {
     <div className="admin-project-edit-page">
       <div className="admin-page-header">
         <div className="admin-page-header__text">
-          <span className="admin-page-header__eyebrow">Edit Project</span>
           <h1>
-            작품 수정: {project.title}
+            작품 수정
             {project.isIncomplete && <span className="incomplete-badge">불완전</span>}
           </h1>
         </div>

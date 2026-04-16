@@ -1969,6 +1969,10 @@ form.admin-card h3 {
 
 /* ── Forms ─────────────────────────────────────────────────────── */
 
+form.project-form {
+  margin-bottom: 2.5rem;
+}
+
 .project-form fieldset,
 .year-create-form fieldset,
 fieldset.status-section {
@@ -1984,9 +1988,26 @@ fieldset.status-section {
 .year-create-form h3,
 fieldset.status-section legend {
   font-weight: 800;
-  font-size: 1rem;
+  font-size: 1.25rem;
   padding: 0 0.6rem;
   letter-spacing: -0.01em;
+}
+
+.project-form .form-actions {
+  margin-bottom: 0;
+}
+
+.project-form fieldset + fieldset,
+.project-form .form-actions + fieldset,
+.project-form fieldset + .status-section {
+  margin-top: 2rem;
+}
+
+.field-hint {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-top: 0.35rem;
+  line-height: 1.5;
 }
 
 /* ── Admin Import Page ───────────────────────────────────────── */
@@ -5106,7 +5127,7 @@ fieldset.status-section legend {
   .project-form legend,
   .year-create-form h3,
   fieldset.status-section legend {
-    font-size: 0.9rem;
+    font-size: 1.1rem;
   }
 
   .form-field label {

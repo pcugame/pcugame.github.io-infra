@@ -1,6 +1,6 @@
 /**
  * Chunked game-file upload widget with progress, retry, and resume.
- * Functional, not pretty — designed for reliability.
+ * Used in both project creation and project edit pages.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -23,18 +23,27 @@ type UploadState = 'idle' | 'uploading' | 'completing' | 'completed' | 'error' |
 
 interface Props {
 	projectId: number;
+	/** Pre-selected file (e.g. from the creation form) */
+	initialFile?: File | null;
+	/** Auto-start upload on mount when initialFile is provided */
+	autoStart?: boolean;
+	/** Called when upload completes */
+	onComplete?: () => void;
+	/** Called when the user skips / aborts */
+	onSkip?: () => void;
 }
 
-export default function GameUploadWidget({ projectId }: Props) {
+export default function GameUploadWidget({ projectId, initialFile, autoStart, onComplete, onSkip }: Props) {
 	const qc = useQueryClient();
 
-	const [file, setFile] = useState<File | null>(null);
+	const [file, setFile] = useState<File | null>(initialFile ?? null);
 	const [state, setState] = useState<UploadState>('idle');
 	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [session, setSession] = useState<GameUploadSession | null>(null);
 	const [resumeSession, setResumeSession] = useState<GameUploadStatus | null>(null);
 	const controllerRef = useRef<GameUploadController | null>(null);
+	const autoStartedRef = useRef(false);
 
 	// Check for existing resumable session on mount
 	useEffect(() => {
@@ -55,7 +64,6 @@ export default function GameUploadWidget({ projectId }: Props) {
 		const f = e.target.files?.[0] ?? null;
 		setFile(f);
 		setError(null);
-		// Do NOT clear resumeSession here — user needs it to resume after re-selecting the file
 	}, []);
 
 	const doUpload = useCallback(async (
@@ -75,8 +83,8 @@ export default function GameUploadWidget({ projectId }: Props) {
 		try {
 			await ctrl.start();
 			setState('completed');
-			// Refresh project detail to show new GAME asset
 			qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
+			onComplete?.();
 		} catch (err) {
 			if ((err as Error).message === 'Upload aborted') {
 				setState('cancelled');
@@ -85,7 +93,7 @@ export default function GameUploadWidget({ projectId }: Props) {
 				setState('error');
 			}
 		}
-	}, [projectId, qc]);
+	}, [projectId, qc, onComplete]);
 
 	const handleStart = useCallback(async () => {
 		if (!file) return;
@@ -99,10 +107,19 @@ export default function GameUploadWidget({ projectId }: Props) {
 		}
 	}, [file, projectId, doUpload]);
 
+	// Auto-start on mount when initialFile + autoStart are provided
+	useEffect(() => {
+		if (autoStart && initialFile && !autoStartedRef.current) {
+			autoStartedRef.current = true;
+			// Defer to avoid synchronous setState within effect body
+			const id = setTimeout(() => handleStart(), 0);
+			return () => clearTimeout(id);
+		}
+	}, [autoStart, initialFile, handleStart]);
+
 	const handleResume = useCallback(async () => {
 		if (!resumeSession) return;
 
-		// Need the file to resume — user must re-select the same file
 		if (!file) {
 			setError('이전 업로드를 재개하려면 동일한 파일을 다시 선택하세요.');
 			return;
@@ -113,7 +130,6 @@ export default function GameUploadWidget({ projectId }: Props) {
 		}
 
 		try {
-			// Fetch latest status to get up-to-date uploaded chunks
 			const status = await getGameUploadStatus(resumeSession.sessionId);
 			const sess: GameUploadSession = {
 				sessionId: status.sessionId,
@@ -132,7 +148,6 @@ export default function GameUploadWidget({ projectId }: Props) {
 	const handleRetry = useCallback(async () => {
 		if (!file || !session) return;
 		try {
-			// Get current status to know which chunks are done
 			const status = await getGameUploadStatus(session.sessionId);
 			await doUpload(file, session, status.uploadedChunks);
 		} catch (err) {
@@ -163,7 +178,7 @@ export default function GameUploadWidget({ projectId }: Props) {
 
 	return (
 		<div className="game-upload">
-			<h3 className="game-upload__title">게임 파일 업로드 (대용량 ZIP)</h3>
+			<h3 className="game-upload__title">게임 파일 업로드 (ZIP 파일)</h3>
 
 			{/* Resume banner */}
 			{resumeSession && state === 'idle' && (
@@ -260,6 +275,12 @@ export default function GameUploadWidget({ projectId }: Props) {
 
 				{state === 'completed' && (
 					<span className="game-upload__complete-text">업로드 완료</span>
+				)}
+
+				{onSkip && state !== 'completed' && (
+					<button className="btn btn--secondary" onClick={onSkip}>
+						건너뛰기
+					</button>
 				)}
 			</div>
 		</div>
