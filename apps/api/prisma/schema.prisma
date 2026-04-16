@@ -161,17 +161,6 @@ model AuthSession {
   @@map("auth_sessions")
 }
 
-model UploadJob {
-  id         Int      @id @default(autoincrement())
-  storageKey String   @map("storage_key")
-  status     String   @default("pending")
-  error      String   @default("")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-
-  @@map("upload_jobs")
-}
-
 /// Tracks a resumable chunked game-file upload session.
 /// Uses S3 multipart upload — chunks go directly to object storage.
 model GameUploadSession {

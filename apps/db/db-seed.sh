@@ -281,7 +281,6 @@ TRUNCATE
   game_upload_sessions,
   banned_ips,
   site_settings,
-  upload_jobs,
   auth_sessions,
   assets,
   project_members,
