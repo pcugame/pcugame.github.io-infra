@@ -179,6 +179,7 @@ do_up() {
     -e "S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}" \
     -v "${STORAGE_HOST_PATH}/protected:/app/storage/protected:Z" \
     -v "${STORAGE_HOST_PATH}/public:/app/storage/public:Z" \
+    -v "/mnt/nas/pcu_storage/GraduationGame/Asset:/nas/Asset:ro" \
     "$API_IMAGE"
 
   # Verify API container is actually running
