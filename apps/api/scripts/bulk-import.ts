@@ -68,13 +68,20 @@ const MIME_MAP: Record<string, string> = {
 	'.jpeg': 'image/jpeg',
 	'.pdf': 'application/pdf',
 	'.zip': 'application/zip',
+	'.apk': 'application/vnd.android.package-archive',
+	'.7z': 'application/x-7z-compressed',
+	'.exe': 'application/x-msdownload',
 	'.mp4': 'video/mp4',
 	'.mov': 'video/quicktime',
+	'.mkv': 'video/x-matroska',
+	'.avi': 'video/x-msvideo',
+	'.wmv': 'video/x-ms-wmv',
 };
 
 // Poster preference: webp first, then original formats
-const POSTER_EXTS = ['.webp', '.png', '.jpg', '.jpeg'];
-const VIDEO_EXTS = ['.mp4', '.mov'];
+const POSTER_EXTS = ['.webp', '.png', '.jpg', '.jpeg', '.pdf'];
+const GAME_EXTS = ['.zip', '.apk', '.7z', '.exe'];
+const VIDEO_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.wmv'];
 
 // ── CLI ──────────────────────────────────────────────────
 
@@ -162,7 +169,7 @@ function discoverAssets(
 	}
 
 	// Game
-	const gamePath = findAssetFile(join(yearDir, 'game'), fileKey, 'game', ['.zip']);
+	const gamePath = findAssetFile(join(yearDir, 'game'), fileKey, 'game', GAME_EXTS);
 	if (gamePath) {
 		assets.push({
 			kind: 'GAME',
