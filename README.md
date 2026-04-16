@@ -2,6 +2,10 @@
 
 배재대학교 게임공학과 졸업작품 전시 플랫폼 모노레포입니다.
 
+> [!CAUTION]
+> **이 프로젝트는 현재 개발 중이며, 아직 완성된 상태가 아닙니다.**
+> 알려진 이슈는 [Issues](../../issues) 탭에서 확인할 수 있습니다.
+
 ## Repository Layout
 
 - `apps/api`: Fastify + TypeScript + Prisma API
