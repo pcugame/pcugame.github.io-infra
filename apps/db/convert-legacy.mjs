@@ -14,8 +14,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const SERVER_DIR = join(__dirname, '..', '..', 'server');
 
-const YEAR_FILES = readdirSync(__dirname)
+const YEAR_FILES = readdirSync(SERVER_DIR)
   .filter(f => /^legacy_example_(\d{4})_projects\.json$/.test(f))
   .sort();
 
@@ -33,7 +34,7 @@ for (const file of YEAR_FILES) {
     isUploadEnabled: false,
   });
 
-  const raw = JSON.parse(readFileSync(join(__dirname, file), 'utf-8'));
+  const raw = JSON.parse(readFileSync(join(SERVER_DIR, file), 'utf-8'));
 
   for (const entry of raw) {
     const members = [];

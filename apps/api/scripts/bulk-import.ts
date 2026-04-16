@@ -2,10 +2,13 @@
  * Bulk import legacy projects WITH assets from NAS.
  *
  * Usage (run from apps/api):
- *   npx tsx scripts/bulk-import.ts <nas-asset-root> [--year 2024] [--dry-run]
+ *   npx tsx scripts/bulk-import.ts <nas-asset-root> <legacy-json-dir> [--year 2024] [--dry-run]
  *
- * Example:
- *   npx tsx scripts/bulk-import.ts /mnt/nas/GraduationGame/Asset --year 2024
+ * Example (local):
+ *   npx tsx scripts/bulk-import.ts /mnt/nas/Asset ../../server --year 2024
+ *
+ * Example (container):
+ *   npx tsx scripts/bulk-import.ts /nas/Asset /nas/legacy --dry-run
  *
  * NAS asset directory structure expected:
  *   <root>/{year}/poster/{ids}_poster.{webp|png|jpg|pdf}
@@ -58,8 +61,6 @@ interface ImportStats {
 
 // ── Config ───────────────────────────────────────────────
 
-const LEGACY_DIR = join(import.meta.dirname!, '..', '..', '..', 'server');
-
 const MIME_MAP: Record<string, string> = {
 	'.webp': 'image/webp',
 	'.png': 'image/png',
@@ -79,7 +80,7 @@ const VIDEO_EXTS = ['.mp4', '.mov'];
 
 function parseArgs() {
 	const args = process.argv.slice(2);
-	let assetRoot = '';
+	const positional: string[] = [];
 	let yearFilter: number | undefined;
 	let dryRun = false;
 
@@ -91,18 +92,22 @@ function parseArgs() {
 		} else if (arg === '--dry-run') {
 			dryRun = true;
 		} else if (!arg.startsWith('--')) {
-			assetRoot = arg;
+			positional.push(arg);
 		}
 	}
 
-	if (!assetRoot) {
-		console.error('Usage: npx tsx scripts/bulk-import.ts <nas-asset-root> [--year 2024] [--dry-run]');
+	const assetRoot = positional[0] ?? '';
+	const legacyDir = positional[1] ?? '';
+
+	if (!assetRoot || !legacyDir) {
+		console.error('Usage: npx tsx scripts/bulk-import.ts <nas-asset-root> <legacy-json-dir> [--year 2024] [--dry-run]');
 		console.error('');
-		console.error('NAS asset root should contain: {year}/poster/, {year}/game/, {year}/video/');
+		console.error('  nas-asset-root:  directory containing {year}/poster/, {year}/game/, {year}/video/');
+		console.error('  legacy-json-dir: directory containing legacy_example_20XX_projects.json files');
 		process.exit(1);
 	}
 
-	return { assetRoot, yearFilter, dryRun };
+	return { assetRoot, legacyDir, yearFilter, dryRun };
 }
 
 // ── Asset discovery ──────────────────────────────────────
@@ -214,15 +219,15 @@ async function main() {
 
 async function doImport(
 	prisma: PrismaClient,
-	opts: { assetRoot: string; yearFilter?: number; dryRun: boolean },
+	opts: { assetRoot: string; legacyDir: string; yearFilter?: number; dryRun: boolean },
 ) {
 	// Find legacy JSON files
-	const legacyFiles = readdirSync(LEGACY_DIR)
+	const legacyFiles = readdirSync(opts.legacyDir)
 		.filter((f) => /^legacy_example_(\d{4})_projects\.json$/.test(f))
 		.sort();
 
 	if (legacyFiles.length === 0) {
-		console.error(`No legacy_example_*_projects.json files found in ${LEGACY_DIR}`);
+		console.error(`No legacy_example_*_projects.json files found in ${opts.legacyDir}`);
 		process.exit(1);
 	}
 
@@ -251,7 +256,7 @@ async function doImport(
 		console.log(`\n═══ ${year}년도 ═══`);
 
 		const entries: LegacyEntry[] = JSON.parse(
-			readFileSync(join(LEGACY_DIR, file), 'utf-8'),
+			readFileSync(join(opts.legacyDir, file), 'utf-8'),
 		);
 
 		// Upsert exhibition
