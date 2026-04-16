@@ -52,7 +52,7 @@ export function getMockUser(): MockUser {
 export const MOCK_USER = MOCK_USERS.ADMIN;
 
 // ── 전시회(연도) ────────────────────────────────────────────
-// 실제 데이터: "{year} 졸업작품전" 형식
+// 실제 데이터: "졸업작품 전시회" 형식
 
 interface MockYearItem {
 	id: number;
@@ -62,10 +62,10 @@ interface MockYearItem {
 }
 
 export const MOCK_YEARS: MockYearItem[] = [
-	{ id: 1, year: 2025, title: '2025 졸업작품전', projectCount: 6 },
-	{ id: 2, year: 2024, title: '2024 졸업작품전', projectCount: 5 },
-	{ id: 3, year: 2023, title: '2023 졸업작품전', projectCount: 4 },
-	{ id: 4, year: 2022, title: '2022 졸업작품전', projectCount: 3 },
+	{ id: 1, year: 2025, title: '졸업작품 전시회', projectCount: 6 },
+	{ id: 2, year: 2024, title: '졸업작품 전시회', projectCount: 5 },
+	{ id: 3, year: 2023, title: '졸업작품 전시회', projectCount: 4 },
+	{ id: 4, year: 2022, title: '졸업작품 전시회', projectCount: 3 },
 ];
 
 // ── 프로젝트 카드 ────────────────────────────────────────────

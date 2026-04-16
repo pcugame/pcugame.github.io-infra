@@ -74,9 +74,9 @@ async function seedTestAdmin() {
 
 async function seedTestData(creatorId: number) {
   const exhibition = await prisma.exhibition.upsert({
-    where: { year_title: { year: 2026, title: '2026 졸업작품전' } },
+    where: { year_title: { year: 2026, title: '졸업작품 전시회' } },
     update: {},
-    create: { year: 2026, title: '2026 졸업작품전', isUploadEnabled: true },
+    create: { year: 2026, title: '졸업작품 전시회', isUploadEnabled: true },
   });
 
   const existing = await prisma.project.findUnique({
@@ -176,7 +176,7 @@ async function importFromJson(filePath: string, creatorId: number) {
     for (const p of data.projects) {
       // 전시회가 없으면 자동 생성
       if (!exhibitionMap.has(p.year)) {
-        const defaultTitle = `${p.year} 졸업작품전`;
+        const defaultTitle = '졸업작품 전시회';
         const ex = await prisma.exhibition.upsert({
           where: { year_title: { year: p.year, title: defaultTitle } },
           update: {},
