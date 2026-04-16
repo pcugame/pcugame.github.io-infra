@@ -351,6 +351,7 @@ html {
   background: var(--color-bg);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  scrollbar-gutter: stable;
 }
 
 body {

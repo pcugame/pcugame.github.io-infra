@@ -14,7 +14,7 @@ export function Header() {
         </Link>
 
         <div className="home-topnav__actions">
-          <Link to="/years" className="home-topnav__link">연도별 전시</Link>
+          <Link to="/years" className="home-topnav__link">전시 목록</Link>
 
           {isAuthenticated && user ? (
             <>
