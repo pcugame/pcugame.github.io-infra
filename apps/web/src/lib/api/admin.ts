@@ -172,6 +172,26 @@ export interface ImportExecuteResult {
   projects: { created: number };
 }
 
+// ── Export ─────────────────────────────────────────────────
+
+export interface ExportResult {
+  projects: number;
+  totalFiles: number;
+  downloaded: number;
+  skipped: number;
+  failed: number;
+  aborted: boolean;
+  paths: string[];
+}
+
+export const adminExportApi = {
+  run(year?: number) {
+    return api.post<ExportResult>('/api/admin/export', { year });
+  },
+};
+
+// ── Import ─────────────────────────────────────────────────
+
 export const adminImportApi = {
   preview(file: File) {
     const fd = new FormData();

@@ -1,6 +1,5 @@
 import { env } from '../../config/env.js';
 import { notFound } from '../../shared/errors.js';
-import { sanitizeStudentId } from '../../shared/student-id.js';
 import { isPosterUrlSafe } from '../../shared/poster-validation.js';
 import * as repo from './repository.js';
 
@@ -46,7 +45,7 @@ export async function listProjectsByYear(yearParam: string) {
 			title: p.title,
 			summary: p.summary || undefined,
 			posterUrl: isPosterUrlSafe(p.poster) ? publicAssetUrl(p.poster!.storageKey) : undefined,
-			members: p.members.map((m) => ({ name: m.name, studentId: sanitizeStudentId(m.studentId) })),
+			members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
 			exhibitionId: p.exhibitionId,
 			exhibitionTitle: ex?.title || `${yearNum} 전시`,
 		};
@@ -71,7 +70,7 @@ export async function listProjectsByExhibition(idParam: string) {
 		title: p.title,
 		summary: p.summary || undefined,
 		posterUrl: isPosterUrlSafe(p.poster) ? publicAssetUrl(p.poster!.storageKey) : undefined,
-		members: p.members.map((m) => ({ name: m.name, studentId: sanitizeStudentId(m.studentId) })),
+		members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
 		exhibitionId: p.exhibitionId,
 		exhibitionTitle: exhibition.title || `${exhibition.year} 전시`,
 	}));
@@ -138,7 +137,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string) {
 		members: project.members.map((m) => ({
 			id: m.id,
 			name: m.name,
-			studentId: sanitizeStudentId(m.studentId),
+			studentId: m.studentId,
 		})),
 		images,
 		posterUrl: isPosterUrlSafe(project.poster) ? publicAssetUrl(project.poster!.storageKey) : undefined,

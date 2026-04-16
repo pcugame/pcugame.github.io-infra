@@ -26,5 +26,4 @@ export type AuthUser = {
   email: string;
   name: string;
   role: UserRole;
-  studentId?: string;
 };

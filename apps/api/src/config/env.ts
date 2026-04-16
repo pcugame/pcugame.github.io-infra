@@ -73,6 +73,10 @@ const envSchema = z
       .default('true')
       .transform((v) => v === 'true'),
     S3_PRESIGN_TTL_SEC: z.coerce.number().int().positive().default(60),
+
+    // ── NAS export ──────────────────────────────────────
+    // Mount path where exported asset files are written (e.g. /mnt/nas)
+    NAS_EXPORT_PATH: z.string().optional(),
   })
 ;
 

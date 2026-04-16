@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -9,12 +9,67 @@ import {
 	type UpdateExhibitionInput,
 } from '../../contracts/schemas';
 import type { AdminExhibitionItem } from '../../contracts';
-import { adminExhibitionApi, getApiErrorMessage } from '../../lib/api';
+import { adminExhibitionApi, adminExportApi, isApiError, getApiErrorMessage } from '../../lib/api';
+import type { ExportResult } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
+import { useMe } from '../../features/auth';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
 
 export default function AdminYearsPage() {
 	const qc = useQueryClient();
+	const { user } = useMe();
+	const isAdmin = user?.role === 'ADMIN';
+
+	// ── NAS 내보내기 ──────────────────────────────────────────
+	const [exportResult, setExportResult] = useState<{ year: number; result: ExportResult } | null>(null);
+	const [exportError, setExportError] = useState<{ year: number; message: string } | null>(null);
+
+	const exportMutation = useMutation({
+		mutationFn: (year: number) => adminExportApi.run(year),
+		onSuccess: (result, year) => {
+			if (result.aborted) {
+				setExportError({
+					year,
+					message: `내보내기가 중단되었습니다. (다운로드: ${result.downloaded}, 실패: ${result.failed})`,
+				});
+				setExportResult(null);
+			} else {
+				setExportResult({ year, result });
+				setExportError(null);
+			}
+		},
+		onError: (err, year) => {
+			if (isApiError(err) && err.status === 409) {
+				setExportError({
+					year,
+					message: '다른 관리자가 이미 내보내기를 실행 중입니다. 잠시 후 다시 시도해주세요.',
+				});
+			} else {
+				setExportError({ year, message: getApiErrorMessage(err) });
+			}
+			setExportResult(null);
+		},
+	});
+
+	const isAnyExporting = exportMutation.isPending;
+
+	const handleExport = (year: number) => {
+		if (!window.confirm(
+			`${year}년도 에셋을 NAS로 내보내시겠습니까?\n\n대용량 파일 다운로드가 포함되어 수 분이 소요될 수 있습니다.`
+		)) return;
+		setExportResult(null);
+		setExportError(null);
+		exportMutation.mutate(year);
+	};
+
+	// 내보내기 중 새로고침/탭 닫기 경고
+	useEffect(() => {
+		if (!isAnyExporting) return;
+		const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+		window.addEventListener('beforeunload', handler);
+		return () => window.removeEventListener('beforeunload', handler);
+	}, [isAnyExporting]);
+
 	const { data, isLoading, error, refetch } = useQuery({
 		queryKey: queryKeys.adminExhibitions,
 		queryFn: adminExhibitionApi.list,
@@ -136,6 +191,27 @@ export default function AdminYearsPage() {
 				)}
 			</form>
 
+			{/* ── 내보내기 결과/에러 ─────────────────────────────── */}
+			{exportResult && (
+				<div className="admin-card" style={{
+					background: exportResult.result.failed > 0
+						? 'var(--color-warning-bg, #fff3e0)'
+						: 'var(--color-success-bg, #e8f5e9)',
+					padding: '1rem',
+				}}>
+					<strong>{exportResult.year}년도 내보내기 완료:</strong>{' '}
+					{exportResult.result.downloaded}개 다운로드, {exportResult.result.skipped}개 스킵
+					{exportResult.result.failed > 0 && (
+						<>, <span style={{ color: 'var(--color-error, #c62828)' }}>{exportResult.result.failed}개 실패</span></>
+					)}
+				</div>
+			)}
+			{exportError && (
+				<div className="admin-card" style={{ background: 'var(--color-error-bg, #fce4ec)', padding: '1rem' }}>
+					<strong>{exportError.year}년도 내보내기 실패:</strong> {exportError.message}
+				</div>
+			)}
+
 			{/* ── 연도 목록 ───────────────────────────────────────── */}
 			{years.length === 0 ? (
 				<EmptyState message="등록된 연도가 없습니다." />
@@ -169,6 +245,10 @@ export default function AdminYearsPage() {
 										}}
 										onDelete={() => handleDelete(y)}
 										isDeleting={deleteMutation.isPending}
+										isAdmin={isAdmin}
+										onExport={() => handleExport(y.year)}
+										isExporting={exportMutation.isPending && exportMutation.variables === y.year}
+										isAnyExporting={isAnyExporting}
 									/>
 								))}
 							</tbody>
@@ -191,6 +271,10 @@ export default function AdminYearsPage() {
 								}}
 								onDelete={() => handleDelete(y)}
 								isDeleting={deleteMutation.isPending}
+								isAdmin={isAdmin}
+								onExport={() => handleExport(y.year)}
+								isExporting={exportMutation.isPending && exportMutation.variables === y.year}
+								isAnyExporting={isAnyExporting}
 							/>
 						))}
 					</div>
@@ -210,6 +294,10 @@ function YearMobileCard({
 	onSaved,
 	onDelete,
 	isDeleting,
+	isAdmin,
+	onExport,
+	isExporting,
+	isAnyExporting,
 }: {
 	year: AdminExhibitionItem;
 	isEditing: boolean;
@@ -218,6 +306,10 @@ function YearMobileCard({
 	onSaved: () => void;
 	onDelete: () => void;
 	isDeleting: boolean;
+	isAdmin: boolean;
+	onExport: () => void;
+	isExporting: boolean;
+	isAnyExporting: boolean;
 }) {
 	const {
 		register,
@@ -303,13 +395,22 @@ function YearMobileCard({
 			<div className="admin-ycard__header">
 				<span className="admin-ycard__year">{year.year}</span>
 				<div style={{ display: 'flex', gap: '0.25rem' }}>
+					{isAdmin && (
+						<button
+							className="btn btn--secondary btn--small"
+							onClick={onExport}
+							disabled={isAnyExporting}
+						>
+							{isExporting ? 'NAS 내보내는 중…' : 'NAS 내보내기'}
+						</button>
+					)}
 					<button className="btn btn--secondary btn--small" onClick={onEdit}>
 						수정
 					</button>
 					<button
 						className="btn btn--danger btn--small"
 						onClick={onDelete}
-						disabled={isDeleting}
+						disabled={isDeleting || isAnyExporting}
 					>
 						삭제
 					</button>
@@ -343,6 +444,10 @@ function YearRow({
 	onSaved,
 	onDelete,
 	isDeleting,
+	isAdmin,
+	onExport,
+	isExporting,
+	isAnyExporting,
 }: {
 	year: AdminExhibitionItem;
 	isEditing: boolean;
@@ -351,6 +456,10 @@ function YearRow({
 	onSaved: () => void;
 	onDelete: () => void;
 	isDeleting: boolean;
+	isAdmin: boolean;
+	onExport: () => void;
+	isExporting: boolean;
+	isAnyExporting: boolean;
 }) {
 	const {
 		register,
@@ -383,13 +492,23 @@ function YearRow({
 				<td>{year.sortOrder}</td>
 				<td>{year.projectCount}</td>
 				<td>
+					{isAdmin && (
+						<button
+							className="btn btn--secondary btn--small"
+							onClick={onExport}
+							disabled={isAnyExporting}
+							style={{ marginRight: '0.25rem' }}
+						>
+							{isExporting ? '내보내는 중…' : 'NAS 내보내기'}
+						</button>
+					)}
 					<button className="btn btn--secondary btn--small" onClick={onEdit}>
 						수정
 					</button>
 					<button
 						className="btn btn--danger btn--small"
 						onClick={onDelete}
-						disabled={isDeleting}
+						disabled={isDeleting || isAnyExporting}
 						style={{ marginLeft: '0.25rem' }}
 					>
 						삭제

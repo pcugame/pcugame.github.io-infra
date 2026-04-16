@@ -6,6 +6,7 @@ import { gameUploadController } from './game-upload/index.js';
 import { bannedIpController } from './banned-ip/index.js';
 import { settingsController } from './settings/index.js';
 import { importController } from './import/index.js';
+import { exportController } from './export/index.js';
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
 	await app.register(exhibitionController);
@@ -15,4 +16,5 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 	await app.register(bannedIpController);
 	await app.register(settingsController);
 	await app.register(importController);
+	await app.register(exportController);
 }
