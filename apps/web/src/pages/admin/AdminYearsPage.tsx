@@ -136,8 +136,7 @@ export default function AdminYearsPage() {
 		<div className="admin-years-page">
 			<div className="admin-page-header">
 				<div className="admin-page-header__text">
-					<span className="admin-page-header__eyebrow">Year Management</span>
-					<h1>연도 관리</h1>
+					<h1>전시회 추가</h1>
 				</div>
 			</div>
 

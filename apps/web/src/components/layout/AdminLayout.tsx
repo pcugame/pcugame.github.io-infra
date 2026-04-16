@@ -7,7 +7,7 @@ type NavItem = { to: string; label: string; icon: string; end: boolean; adminOnl
 const ADMIN_NAV: NavItem[] = [
   { to: '/admin/projects', label: '작품 관리', icon: 'grid', end: true },
   { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
-  { to: '/admin/years', label: '연도 관리', icon: 'calendar', end: false },
+  { to: '/admin/years', label: '전시회 추가', icon: 'calendar', end: false },
   { to: '/admin/settings', label: '사이트 설정', icon: 'settings', end: false },
   { to: '/admin/banned-ips', label: 'IP 차단 관리', icon: 'shield', end: false },
   { to: '/admin/import', label: 'JSON 임포트', icon: 'upload', end: false, adminOnly: true },

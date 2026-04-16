@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
@@ -11,8 +11,14 @@ interface Props {
 	onClose: () => void;
 }
 
+type MediaItem =
+	| { type: 'video'; url: string; mimeType: string; label: string }
+	| { type: 'poster'; url: string; label: string }
+	| { type: 'image'; id: number; url: string; label: string };
+
 export function ProjectModal({ slug, year, onClose }: Props) {
 	const overlayRef = useRef<HTMLDivElement>(null);
+	const [activeIndex, setActiveIndex] = useState(0);
 
 	const { data: project, isLoading } = useQuery({
 		queryKey: queryKeys.projectDetail(year, slug),
@@ -38,7 +44,42 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 		if (e.target === overlayRef.current) onClose();
 	};
 
-	const galleryImages = project?.images.filter((img) => img.kind === 'IMAGE') ?? [];
+	// 미디어 목록 구성
+	const mediaItems: MediaItem[] = [];
+	if (project) {
+		if (project.video) {
+			mediaItems.push({
+				type: 'video',
+				url: project.video.url,
+				mimeType: project.video.mimeType,
+				label: '동영상',
+			});
+		}
+		if (project.posterUrl) {
+			mediaItems.push({
+				type: 'poster',
+				url: project.posterUrl,
+				label: '포스터',
+			});
+		}
+		const galleryImages = project.images.filter((img) => img.kind === 'IMAGE');
+		galleryImages.forEach((img, i) => {
+			mediaItems.push({
+				type: 'image',
+				id: img.id,
+				url: img.url,
+				label: `사진 ${i + 1}`,
+			});
+		});
+	}
+
+	const current = mediaItems[activeIndex] ?? null;
+
+	// activeIndex가 범위를 벗어나지 않도록
+	const safeIndex = Math.min(activeIndex, Math.max(mediaItems.length - 1, 0));
+	if (safeIndex !== activeIndex && mediaItems.length > 0) {
+		setActiveIndex(safeIndex);
+	}
 
 	return (
 		<div className="modal-overlay" ref={overlayRef} onClick={handleOverlayClick}>
@@ -58,20 +99,53 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 				{project && (
 					<>
-						{/* 영상 or 포스터 (상단 비주얼) */}
-						{(project.video || project.posterUrl) ? (
+						{/* 메인 미디어 표시 */}
+						{current && (
 							<div className="modal-visual">
-								{project.video ? (
+								{current.type === 'video' ? (
 									<ProjectVideo
-										video={project.video}
+										video={{ url: current.url, mimeType: current.mimeType }}
 										posterUrl={project.posterUrl}
 										title={project.title}
 									/>
-								) : project.posterUrl ? (
-									<img src={project.posterUrl} alt={`${project.title} 포스터`} className="modal-poster" />
-								) : null}
+								) : (
+									<img
+										src={current.url}
+										alt={current.label}
+										className="modal-poster"
+									/>
+								)}
 							</div>
-						) : null}
+						)}
+
+						{/* 미디어 탭 목록 */}
+						{mediaItems.length > 1 && (
+							<div className="modal-media-tabs">
+								{mediaItems.map((item, i) => (
+									<button
+										key={item.type === 'image' ? `img-${item.id}` : item.type}
+										className={`modal-media-tab ${i === activeIndex ? 'modal-media-tab--active' : ''}`}
+										onClick={() => setActiveIndex(i)}
+									>
+										{item.type === 'video' ? (
+											<span className="modal-media-tab__icon">
+												<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+													<polygon points="5 3 19 12 5 21 5 3" />
+												</svg>
+											</span>
+										) : (
+											<img
+												src={item.url}
+												alt={item.label}
+												className="modal-media-tab__thumb"
+												loading="lazy"
+											/>
+										)}
+										<span className="modal-media-tab__label">{item.label}</span>
+									</button>
+								))}
+							</div>
+						)}
 
 						{/* 본문 */}
 						<div className="modal-body">
@@ -117,15 +191,6 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 							{project.description && (
 								<div className="modal-description">
 									<div className="prose">{project.description}</div>
-								</div>
-							)}
-
-							{/* 스크린샷 갤러리 */}
-							{galleryImages.length > 0 && (
-								<div className="modal-gallery">
-									{galleryImages.map((img) => (
-										<img key={img.id} src={img.url} alt="스크린샷" loading="lazy" />
-									))}
 								</div>
 							)}
 
