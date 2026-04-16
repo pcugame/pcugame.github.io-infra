@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useFieldArray, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -12,6 +12,14 @@ import { queryKeys } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
 import { useMe } from '../../features/auth';
 import { getClientUploadLimits } from '../../lib/upload-limits';
+import {
+	createGameUploadSession,
+	uploadGameFile,
+	type GameUploadProgress,
+	type GameUploadController,
+} from '../../lib/api/game-upload';
+
+type GameUploadState = 'idle' | 'uploading' | 'completing' | 'completed' | 'error';
 
 export default function AdminProjectNewPage() {
   const navigate = useNavigate();
@@ -62,6 +70,23 @@ export default function AdminProjectNewPage() {
   const [posterPreview, setPosterPreview] = useState<string | null>(null);
   const [fileSizeError, setFileSizeError] = useState<string | null>(null);
   const posterPreviewRef = useRef<string | null>(null);
+
+  // ── 게임 청크 업로드 상태 ──────────────────────────────────
+  const [gameUploadState, setGameUploadState] = useState<GameUploadState>('idle');
+  const [gameProgress, setGameProgress] = useState<GameUploadProgress | null>(null);
+  const [gameUploadError, setGameUploadError] = useState<string | null>(null);
+  const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
+  const gameControllerRef = useRef<GameUploadController | null>(null);
+
+  // ── beforeunload 경고 (업로드 진행 중 이탈 방지) ───────────
+  useEffect(() => {
+    if (gameUploadState !== 'uploading' && gameUploadState !== 'completing') return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [gameUploadState]);
 
   // Cleanup poster ObjectURL on unmount
   useEffect(() => {
@@ -118,11 +143,14 @@ export default function AdminProjectNewPage() {
 
   const handleGameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
-    if (file && !checkFileSize(file, limits.gameMaxMb, '게임 파일')) {
+    // 게임 파일은 청크 업로드이므로 서버 최대(5GB) 기준으로 느슨하게 체크
+    if (file && file.size > 5 * 1024 * 1024 * 1024) {
+      setFileSizeError(`게임 파일: ${(file.size / 1024 / 1024).toFixed(1)}MB — 최대 5120MB까지 허용됩니다.`);
       setGameFile(null);
       e.target.value = '';
       return;
     }
+    setFileSizeError(null);
     setGameFile(file);
   };
 
@@ -136,6 +164,29 @@ export default function AdminProjectNewPage() {
     setVideoFile(file);
   };
 
+  // ── 게임 청크 업로드 실행 ──────────────────────────────────
+  const startGameUpload = useCallback(async (projectId: number, file: File) => {
+    setGameUploadState('uploading');
+    setGameUploadError(null);
+
+    try {
+      const session = await createGameUploadSession(projectId, file);
+      const ctrl = uploadGameFile(file, session, (p) => {
+        setGameProgress(p);
+        if (p.percent >= 100) setGameUploadState('completing');
+      });
+      gameControllerRef.current = ctrl;
+
+      await ctrl.start();
+      setGameUploadState('completed');
+      // 캐시 무효화
+      qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
+    } catch (err) {
+      setGameUploadError(getApiErrorMessage(err));
+      setGameUploadState('error');
+    }
+  }, [qc]);
+
   // ── 제출 ───────────────────────────────────────────────────
   const submitMutation = useMutation({
     mutationFn: (formData: FormData) => adminProjectApi.submit(formData),
@@ -143,7 +194,14 @@ export default function AdminProjectNewPage() {
       qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
       qc.invalidateQueries({ queryKey: queryKeys.publicYears });
       qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
-      navigate(`/admin/projects/${res.id}/edit`);
+
+      if (gameFile) {
+        // 게임 파일이 있으면 같은 화면에서 청크 업로드 시작
+        setCreatedProjectId(res.id);
+        startGameUpload(res.id, gameFile);
+      } else {
+        navigate(`/admin/projects/${res.id}/edit`);
+      }
     },
   });
 
@@ -153,14 +211,41 @@ export default function AdminProjectNewPage() {
       const creatorMember = data.members.find((m) => m.name === user.name);
       if (creatorMember) creatorMember.userId = user.id;
     }
+    // 게임 파일은 청크 업로드로 별도 전송하므로 FormData에서 제외
     const fd = buildSubmitFormData(data, {
       poster: posterFile ?? undefined,
       images: imageFiles.length > 0 ? imageFiles : undefined,
-      gameFile: gameFile ?? undefined,
       videoFile: videoFile ?? undefined,
     });
     submitMutation.mutate(fd);
   };
+
+  // 게임 업로드 완료/건너뛰기 → 편집 페이지로
+  const goToEdit = () => {
+    if (!createdProjectId) return;
+    navigate(`/admin/projects/${createdProjectId}/edit`);
+  };
+
+  // 게임 업로드 중단 확인
+  const handleSkipGameUpload = () => {
+    if (gameUploadState === 'uploading' || gameUploadState === 'completing') {
+      if (!window.confirm('게임 파일 업로드를 중단하시겠습니까? 편집 화면에서 다시 업로드할 수 있습니다.')) {
+        return;
+      }
+      gameControllerRef.current?.abort();
+    }
+    goToEdit();
+  };
+
+  // 게임 업로드 재시도
+  const handleRetryGameUpload = () => {
+    if (!createdProjectId || !gameFile) return;
+    startGameUpload(createdProjectId, gameFile);
+  };
+
+  const isSubmitting = submitMutation.isPending;
+  const isGameUploading = gameUploadState === 'uploading' || gameUploadState === 'completing';
+  const showGameProgress = createdProjectId !== null;
 
   return (
     <div className="admin-project-new-page">
@@ -171,6 +256,67 @@ export default function AdminProjectNewPage() {
         </div>
       </div>
 
+      {/* ── 게임 업로드 진행 화면 (프로젝트 생성 완료 후) ──── */}
+      {showGameProgress && (
+        <div className="game-upload game-upload--inline">
+          <h3 className="game-upload__title">게임 파일 업로드 중</h3>
+          <p className="game-upload__file-name">{gameFile?.name}</p>
+
+          {/* 프로그레스바 */}
+          {gameProgress && (gameUploadState === 'uploading' || gameUploadState === 'completing' || gameUploadState === 'completed') && (
+            <div className="game-upload__progress-wrap">
+              <div className="game-upload__progress-track">
+                <div
+                  className={`game-upload__progress-bar ${gameUploadState === 'completed' ? 'game-upload__progress-bar--done' : ''}`}
+                  style={{ width: `${gameProgress.percent}%` }}
+                />
+                <span className="game-upload__progress-label">
+                  {gameProgress.percent}% ({gameProgress.uploadedChunks}/{gameProgress.totalChunks})
+                </span>
+              </div>
+              <p className="game-upload__progress-status">
+                {gameUploadState === 'uploading' && `${(gameProgress.uploadedBytes / 1024 / 1024).toFixed(0)}MB / ${(gameProgress.totalBytes / 1024 / 1024).toFixed(0)}MB`}
+                {gameUploadState === 'completing' && '파일 조립 중…'}
+                {gameUploadState === 'completed' && '업로드 완료!'}
+              </p>
+            </div>
+          )}
+
+          {/* 에러 */}
+          {gameUploadError && (
+            <div className="game-upload__error">{gameUploadError}</div>
+          )}
+
+          {/* 액션 버튼 */}
+          <div className="game-upload__actions">
+            {gameUploadState === 'completed' && (
+              <button className="btn btn--primary" onClick={goToEdit}>
+                편집 화면으로 이동
+              </button>
+            )}
+
+            {gameUploadState === 'error' && (
+              <>
+                <button className="btn btn--primary" onClick={handleRetryGameUpload}>
+                  재시도
+                </button>
+                <button className="btn btn--secondary" onClick={goToEdit}>
+                  건너뛰고 편집 화면으로
+                </button>
+              </>
+            )}
+
+            {isGameUploading && (
+              <button className="btn btn--danger" onClick={handleSkipGameUpload}>
+                업로드 중단
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── 등록 폼 (프로젝트 미생성 상태에서만 표시) ────────── */}
+      {!showGameProgress && (
       <form onSubmit={handleSubmit(onSubmit)} className="project-form">
         {/* ── 기본 정보 ──────────────────────────────────────── */}
         <fieldset>
@@ -343,7 +489,7 @@ export default function AdminProjectNewPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="gameFile">게임 파일 (ZIP, 최대 {limits.gameMaxMb}MB)</label>
+            <label htmlFor="gameFile">게임 파일 (ZIP, 최대 5GB)</label>
             <input
               id="gameFile"
               type="file"
@@ -356,7 +502,7 @@ export default function AdminProjectNewPage() {
               </p>
             )}
             <p className="field-hint">
-              대용량 게임 파일은 작품 등록 후 편집 화면에서 청크 업로드를 이용하세요.
+              작품 등록 후 자동으로 청크 업로드가 시작됩니다. 중간에 끊겨도 이어서 올릴 수 있습니다.
             </p>
           </div>
         </fieldset>
@@ -372,12 +518,13 @@ export default function AdminProjectNewPage() {
           <button
             type="submit"
             className="btn btn--primary btn--large"
-            disabled={submitMutation.isPending || isUploadLocked}
+            disabled={isSubmitting || isUploadLocked}
           >
-            {submitMutation.isPending ? '등록 중…' : '작품 등록'}
+            {isSubmitting ? '등록 중…' : '작품 등록'}
           </button>
         </div>
       </form>
+      )}
     </div>
   );
 }
