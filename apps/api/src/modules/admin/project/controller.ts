@@ -77,9 +77,9 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		},
 	);
 
-	/** DELETE /projects/bulk — bulk delete projects (ADMIN only) */
-	app.delete(
-		'/projects/bulk',
+	/** POST /projects/bulk/delete — bulk delete projects (ADMIN only) */
+	app.post(
+		'/projects/bulk/delete',
 		{ preHandler: requireRole('ADMIN') },
 		async (request, reply) => {
 			const { ids } = parseBody(BulkDeleteBody, request.body);

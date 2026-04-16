@@ -75,6 +75,16 @@ export const adminProjectApi = {
       body,
     );
   },
+
+  /** 일괄 상태 변경 */
+  bulkStatus(ids: number[], status: string) {
+    return api.patch<{ updated: number }>('/api/admin/projects/bulk/status', { ids, status });
+  },
+
+  /** 일괄 삭제 */
+  bulkDelete(ids: number[]) {
+    return api.post<{ deleted: number; assetsRemoved: number }>('/api/admin/projects/bulk/delete', { ids });
+  },
 };
 
 // ── Member CRUD ──────────────────────────────────────────────
