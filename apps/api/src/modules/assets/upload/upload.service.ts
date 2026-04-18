@@ -7,6 +7,7 @@ import { uploadFile, deleteObject } from '../../../lib/storage.js';
 import { generateStorageKey } from '../../../shared/storage-path.js';
 import { validateFile } from './file-validator.js';
 import { processImage } from './image-processing.js';
+import { processPdf } from './pdf-processing.js';
 import { processVideo } from './video-processing.js';
 import type { SavedFile } from './upload-types.js';
 
@@ -82,6 +83,17 @@ export class UploadPipeline {
       finalSizeBytes = processed.sizeBytes;
 
       if (processed.converted && processed.tmpPath !== tmpPath) {
+        this.trackTempFile(processed.tmpPath);
+      }
+    } else if (kind === 'POSTER' && validated.mimeType === 'application/pdf') {
+      const processed = await processPdf({ tmpPath });
+
+      finalTmpPath = processed.tmpPath;
+      finalMimeType = processed.mimeType;
+      finalExt = processed.ext;
+      finalSizeBytes = processed.sizeBytes;
+
+      if (processed.tmpPath !== tmpPath) {
         this.trackTempFile(processed.tmpPath);
       }
     } else if (kind !== 'GAME') {

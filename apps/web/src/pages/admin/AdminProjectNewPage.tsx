@@ -92,14 +92,16 @@ export default function AdminProjectNewPage() {
       URL.revokeObjectURL(posterPreviewRef.current);
       posterPreviewRef.current = null;
     }
-    if (file && !checkFileSize(file, limits.posterMaxMb, '포스터')) {
+    const isPdf = !!file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+    const limitMb = isPdf ? limits.posterPdfMaxMb : limits.posterMaxMb;
+    if (file && !checkFileSize(file, limitMb, '포스터')) {
       setPosterFile(null);
       setPosterPreview(null);
       e.target.value = '';
       return;
     }
     setPosterFile(file);
-    if (file) {
+    if (file && !isPdf) {
       const url = URL.createObjectURL(file);
       posterPreviewRef.current = url;
       setPosterPreview(url);
@@ -338,11 +340,11 @@ export default function AdminProjectNewPage() {
           )}
 
           <div className="form-field">
-            <label htmlFor="poster">포스터 이미지 (JPG · PNG · WebP, 최대 {limits.posterMaxMb}MB)</label>
+            <label htmlFor="poster">포스터 이미지 (JPG · PNG · WebP 최대 {limits.posterMaxMb}MB / PDF 최대 {limits.posterPdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환)</label>
             <input
               id="poster"
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
               onChange={handlePosterChange}
             />
             {posterPreview && (

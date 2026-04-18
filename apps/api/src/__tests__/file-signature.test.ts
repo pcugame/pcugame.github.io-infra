@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   detectFileType,
   isAllowedImageType,
+  isAllowedPosterType,
   isAllowedGameType,
+  SIZE_LIMITS,
 } from '../shared/file-signature.js';
 
 describe('detectFileType', () => {
@@ -34,6 +36,13 @@ describe('detectFileType', () => {
     const buf = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     const result = detectFileType(buf);
     expect(result).toEqual({ mime: 'application/zip', ext: 'zip' });
+  });
+
+  it('detects PDF', () => {
+    // "%PDF-1.4..."
+    const buf = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const result = detectFileType(buf);
+    expect(result).toEqual({ mime: 'application/pdf', ext: 'pdf' });
   });
 
   it('returns null for unknown', () => {
@@ -71,6 +80,30 @@ describe('isAllowedImageType', () => {
 
   it('rejects ZIP', () => {
     expect(isAllowedImageType({ mime: 'application/zip', ext: 'zip' })).toBe(false);
+  });
+
+  it('rejects PDF (PDF is poster-only)', () => {
+    expect(isAllowedImageType({ mime: 'application/pdf', ext: 'pdf' })).toBe(false);
+  });
+});
+
+describe('isAllowedPosterType', () => {
+  it('allows JPEG, PNG, WebP, PDF', () => {
+    expect(isAllowedPosterType({ mime: 'image/jpeg', ext: 'jpg' })).toBe(true);
+    expect(isAllowedPosterType({ mime: 'image/png', ext: 'png' })).toBe(true);
+    expect(isAllowedPosterType({ mime: 'image/webp', ext: 'webp' })).toBe(true);
+    expect(isAllowedPosterType({ mime: 'application/pdf', ext: 'pdf' })).toBe(true);
+  });
+
+  it('rejects ZIP and video types', () => {
+    expect(isAllowedPosterType({ mime: 'application/zip', ext: 'zip' })).toBe(false);
+    expect(isAllowedPosterType({ mime: 'video/mp4', ext: 'mp4' })).toBe(false);
+  });
+});
+
+describe('SIZE_LIMITS', () => {
+  it('exposes a larger ceiling for PDF posters than image posters', () => {
+    expect(SIZE_LIMITS.posterPdf).toBeGreaterThan(SIZE_LIMITS.poster);
   });
 });
 

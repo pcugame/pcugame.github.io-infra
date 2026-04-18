@@ -22,6 +22,8 @@ const SIGNATURES: { bytes: number[]; offset: number; mime: string; ext: string }
   { bytes: [0x52, 0x49, 0x46, 0x46], offset: 0, mime: 'video/x-msvideo', ext: 'avi' },
   // WMV / ASF
   { bytes: [0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11], offset: 0, mime: 'video/x-ms-wmv', ext: 'wmv' },
+  // PDF ("%PDF-")
+  { bytes: [0x25, 0x50, 0x44, 0x46, 0x2d], offset: 0, mime: 'application/pdf', ext: 'pdf' },
 ];
 
 const WEBP_MARKER = [0x57, 0x45, 0x42, 0x50]; // "WEBP" at offset 8
@@ -55,6 +57,11 @@ const ALLOWED_IMAGE_MIMES = new Set([
   'image/webp',
 ]);
 
+const ALLOWED_POSTER_MIMES = new Set([
+  ...ALLOWED_IMAGE_MIMES,
+  'application/pdf',
+]);
+
 const ALLOWED_GAME_MIMES = new Set(['application/zip']);
 
 const ALLOWED_VIDEO_MIMES = new Set([
@@ -66,6 +73,10 @@ const ALLOWED_VIDEO_MIMES = new Set([
 
 export function isAllowedImageType(result: FileTypeResult): boolean {
   return ALLOWED_IMAGE_MIMES.has(result.mime);
+}
+
+export function isAllowedPosterType(result: FileTypeResult): boolean {
+  return ALLOWED_POSTER_MIMES.has(result.mime);
 }
 
 export function isAllowedGameType(result: FileTypeResult): boolean {
@@ -80,6 +91,7 @@ export function isAllowedVideoType(result: FileTypeResult): boolean {
 // Role-based tighter limits are enforced in upload-limits.ts.
 export const SIZE_LIMITS = {
   poster: 15 * 1024 * 1024,       // 15 MB
+  posterPdf: 50 * 1024 * 1024,    // 50 MB (source PDF; rasterized output is much smaller)
   image: 15 * 1024 * 1024,        // 15 MB
   game: 5120 * 1024 * 1024,       // 5120 MB
   video: 1024 * 1024 * 1024,      // 1024 MB

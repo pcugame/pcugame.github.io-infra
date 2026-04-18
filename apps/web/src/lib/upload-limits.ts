@@ -9,6 +9,7 @@
 export interface ClientUploadLimits {
 	imageMaxMb: number;
 	posterMaxMb: number;
+	posterPdfMaxMb: number;
 	gameMaxMb: number;
 	videoMaxMb: number;
 	requestMaxMb: number;
@@ -18,6 +19,7 @@ export interface ClientUploadLimits {
 const USER_LIMITS: ClientUploadLimits = {
 	imageMaxMb: 10,
 	posterMaxMb: 10,
+	posterPdfMaxMb: 50,
 	gameMaxMb: 5120,
 	videoMaxMb: 200,
 	requestMaxMb: 250,
@@ -27,6 +29,7 @@ const USER_LIMITS: ClientUploadLimits = {
 const PRIVILEGED_LIMITS: ClientUploadLimits = {
 	imageMaxMb: 15,
 	posterMaxMb: 15,
+	posterPdfMaxMb: 50,
 	gameMaxMb: 5120,
 	videoMaxMb: 1024,
 	requestMaxMb: 1200,

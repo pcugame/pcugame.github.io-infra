@@ -433,7 +433,7 @@ export default function AdminProjectEditPage() {
               <h4>자산 추가</h4>
               {([
                 { label: `이미지 추가 (JPG · PNG · WebP, 최대 ${limits.imageMaxMb}MB)`, kind: 'IMAGE', accept: 'image/jpeg,image/png,image/webp' },
-                { label: `포스터 교체 (JPG · PNG · WebP, 최대 ${limits.posterMaxMb}MB)`, kind: 'POSTER', accept: 'image/jpeg,image/png,image/webp' },
+                { label: `포스터 교체 (JPG · PNG · WebP 최대 ${limits.posterMaxMb}MB / PDF 최대 ${limits.posterPdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환)`, kind: 'POSTER', accept: 'image/jpeg,image/png,image/webp,application/pdf,.pdf' },
                 { label: `동영상 업로드 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 최대 ${limits.videoMaxMb}MB)`, kind: 'VIDEO', accept: 'video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv' },
               ] as const).map(({ label, kind, accept }) => (
                 <div key={kind} className="form-field">

@@ -3,6 +3,7 @@ import type { AssetKind } from '@prisma/client';
 import {
   detectFileType,
   isAllowedImageType,
+  isAllowedPosterType,
   isAllowedGameType,
   isAllowedVideoType,
   SIZE_LIMITS,
@@ -31,11 +32,6 @@ export async function validateFile(
   const stat = await fsp.stat(tmpPath);
   const sizeBytes = stat.size;
 
-  const limit = KIND_SIZE_LIMITS[kind] ?? SIZE_LIMITS.image;
-  if (sizeBytes > limit) {
-    throw badRequest(`File too large for kind ${kind}`);
-  }
-
   const fd = await fsp.open(tmpPath, 'r');
   const headerBuf = Buffer.alloc(16);
   await fd.read(headerBuf, 0, 16, 0);
@@ -44,10 +40,22 @@ export async function validateFile(
   const fileType = detectFileType(headerBuf);
   if (!fileType) throw badRequest('Unsupported file type');
 
+  // PDF posters get a larger size ceiling because the rasterized output
+  // is much smaller than the source.
+  const isPosterPdf = kind === 'POSTER' && fileType.mime === 'application/pdf';
+  const limit = isPosterPdf
+    ? SIZE_LIMITS.posterPdf
+    : (KIND_SIZE_LIMITS[kind] ?? SIZE_LIMITS.image);
+  if (sizeBytes > limit) {
+    throw badRequest(`File too large for kind ${kind}`);
+  }
+
   if (kind === 'GAME') {
     if (!isAllowedGameType(fileType)) throw badRequest('Game file must be a ZIP archive');
   } else if (kind === 'VIDEO') {
     if (!isAllowedVideoType(fileType)) throw badRequest('Unsupported video format');
+  } else if (kind === 'POSTER') {
+    if (!isAllowedPosterType(fileType)) throw badRequest('Poster must be JPEG, PNG, WebP, or PDF');
   } else {
     if (!isAllowedImageType(fileType)) throw badRequest('Images must be JPEG, PNG, or WebP');
   }
