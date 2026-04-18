@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useForm, useFieldArray, useWatch } from 'react-hook-form';
+import { useForm, useFieldArray, useWatch, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -13,6 +13,7 @@ import { buildSubmitFormData } from '../../lib/utils';
 import { useMe } from '../../features/auth';
 import { getClientUploadLimits } from '../../lib/upload-limits';
 import GameUploadWidget from '../../components/GameUploadWidget';
+import ExhibitionSelect from '../../components/ExhibitionSelect';
 
 export default function AdminProjectNewPage() {
   const navigate = useNavigate();
@@ -213,15 +214,19 @@ export default function AdminProjectNewPage() {
           <div className="form-field">
             <label htmlFor="exhibitionId">전시회 *</label>
             {years.length > 0 ? (
-              <select id="exhibitionId" {...register('exhibitionId', { valueAsNumber: true })}>
-                <option value={0}>전시회를 선택하세요</option>
-                {years.map((y) => (
-                  <option key={y.id} value={y.id}>
-                    {y.year}{y.title ? ` — ${y.title}` : ''}
-                    {!y.isUploadEnabled ? ' (업로드 잠김)' : ''}
-                  </option>
-                ))}
-              </select>
+              <Controller
+                control={control}
+                name="exhibitionId"
+                render={({ field }) => (
+                  <ExhibitionSelect
+                    id="exhibitionId"
+                    value={field.value && field.value > 0 ? field.value : null}
+                    onChange={(id) => field.onChange(id)}
+                    items={years}
+                    aria-invalid={!!errors.exhibitionId}
+                  />
+                )}
+              />
             ) : (
               <p className="field-error">등록된 전시회가 없습니다. 관리자에게 문의하세요.</p>
             )}
