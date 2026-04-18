@@ -13,7 +13,7 @@
   --color-danger: #dc2626;
   --color-danger-hover: #b91c1c;
   --color-secondary: #64748b;
-  --color-bg: #e7ecff;
+  --color-bg: #eef1f8;
   --color-surface: #f5f5f9;
   --color-text: #0f172a;
   --color-text-muted: #64748b;
@@ -2962,7 +2962,7 @@ fieldset.status-section legend {
 
 .home-landing {
   /* Light theme — PCU 로고 블루 기반 */
-  --h-bg: #eef1f8;
+  --h-bg: #e7ecff;
   --h-surface: #f5f5f9;
   --h-surface-tint: #eef3ff;
   --h-primary: #1a51af;       /* PCU shield blue */
