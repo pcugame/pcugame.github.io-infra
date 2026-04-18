@@ -144,10 +144,14 @@ export default function ExhibitionSelect({
 	const renderLabel = (it: AdminYearItem) => (
 		<>
 			<span className="exhibition-select__year">{it.year}</span>
-			<span className="exhibition-select__sep" aria-hidden="true">
-				{it.title ? '—' : ''}
+			<span
+				className={
+					'exhibition-select__title' +
+					(it.isUploadEnabled ? ' exhibition-select__title--active' : '')
+				}
+			>
+				{it.title ?? ''}
 			</span>
-			<span className="exhibition-select__title">{it.title ?? ''}</span>
 			{!it.isUploadEnabled && (
 				<span className="exhibition-select__lock-pill">업로드 잠김</span>
 			)}

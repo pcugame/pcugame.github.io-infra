@@ -2410,9 +2410,9 @@ fieldset.status-section legend {
 
 .exhibition-select__trigger-label {
   display: inline-grid;
-  grid-template-columns: 4ch 1ch minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
   width: 100%;
   min-width: 0;
   font-variant-numeric: tabular-nums;
@@ -2468,9 +2468,9 @@ fieldset.status-section legend {
 
 .exhibition-select__option {
   display: grid;
-  grid-template-columns: 4ch 1ch minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
   padding: 0.55rem 0.7rem;
   border-radius: 7px;
   font-size: 0.9rem;
@@ -2496,13 +2496,15 @@ fieldset.status-section legend {
 }
 
 .exhibition-select__year {
-  text-align: right;
   font-weight: 600;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  letter-spacing: 0.01em;
 }
 
-.exhibition-select__sep {
-  color: var(--color-text-muted);
-  text-align: center;
+.exhibition-select__option[aria-selected='true'] .exhibition-select__year,
+.exhibition-select__trigger:not(.exhibition-select__trigger--placeholder) .exhibition-select__year {
+  color: inherit;
 }
 
 .exhibition-select__title {
@@ -2510,6 +2512,10 @@ fieldset.status-section legend {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.exhibition-select__title--active {
+  font-weight: 700;
 }
 
 .exhibition-select__lock-pill {
