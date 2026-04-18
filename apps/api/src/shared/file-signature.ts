@@ -82,5 +82,5 @@ export const SIZE_LIMITS = {
   poster: 10 * 1024 * 1024,       // 10 MB
   image: 15 * 1024 * 1024,        // 15 MB
   game: 1024 * 1024 * 1024,       // 1024 MB
-  video: 500 * 1024 * 1024,       // 500 MB
+  video: 1024 * 1024 * 1024,      // 1024 MB
 } as const;

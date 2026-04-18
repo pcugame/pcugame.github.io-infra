@@ -37,7 +37,7 @@ export function getUploadLimits(role: UserRole): UploadLimits {
 			posterMaxBytes: cfg.UPLOAD_PRIVILEGED_IMAGE_MAX_MB * 1024 * 1024,
 			imageMaxBytes: cfg.UPLOAD_PRIVILEGED_IMAGE_MAX_MB * 1024 * 1024,
 			gameMaxBytes: cfg.UPLOAD_PRIVILEGED_GAME_MAX_MB * 1024 * 1024,
-			videoMaxBytes: 500 * 1024 * 1024,
+			videoMaxBytes: 1024 * 1024 * 1024,
 			requestMaxBytes: cfg.UPLOAD_PRIVILEGED_REQUEST_MAX_MB * 1024 * 1024,
 			maxFiles: cfg.UPLOAD_PRIVILEGED_MAX_FILES,
 		};

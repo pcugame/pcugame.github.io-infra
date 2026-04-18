@@ -28,7 +28,7 @@ const PRIVILEGED_LIMITS: ClientUploadLimits = {
 	imageMaxMb: 15,
 	posterMaxMb: 15,
 	gameMaxMb: 1024,
-	videoMaxMb: 500,
+	videoMaxMb: 1024,
 	requestMaxMb: 1200,
 	maxFiles: 20,
 };
