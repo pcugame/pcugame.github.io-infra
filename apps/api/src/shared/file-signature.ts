@@ -81,6 +81,6 @@ export function isAllowedVideoType(result: FileTypeResult): boolean {
 export const SIZE_LIMITS = {
   poster: 10 * 1024 * 1024,       // 10 MB
   image: 15 * 1024 * 1024,        // 15 MB
-  game: 1024 * 1024 * 1024,       // 1024 MB
+  game: 5120 * 1024 * 1024,       // 5120 MB
   video: 1024 * 1024 * 1024,      // 1024 MB
 } as const;
