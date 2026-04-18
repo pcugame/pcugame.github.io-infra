@@ -338,7 +338,7 @@ export default function AdminProjectNewPage() {
           )}
 
           <div className="form-field">
-            <label htmlFor="poster">포스터 이미지 (최대 {limits.posterMaxMb}MB)</label>
+            <label htmlFor="poster">포스터 이미지 (JPG · PNG · WebP, 최대 {limits.posterMaxMb}MB)</label>
             <input
               id="poster"
               type="file"
@@ -353,7 +353,7 @@ export default function AdminProjectNewPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="images">추가 이미지 (복수 선택 가능, 각 최대 {limits.imageMaxMb}MB)</label>
+            <label htmlFor="images">추가 이미지 (JPG · PNG · WebP, 각 최대 {limits.imageMaxMb}MB, 복수 선택)</label>
             <input
               id="images"
               type="file"
@@ -367,11 +367,11 @@ export default function AdminProjectNewPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="videoFile">동영상 (MP4, WebM, 최대 {limits.videoMaxMb}MB)</label>
+            <label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 최대 {limits.videoMaxMb}MB)</label>
             <input
               id="videoFile"
               type="file"
-              accept="video/mp4,video/webm,.mp4,.webm"
+              accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
               onChange={handleVideoChange}
             />
             {videoFile && (

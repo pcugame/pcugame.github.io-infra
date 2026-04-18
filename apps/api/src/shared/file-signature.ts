@@ -79,7 +79,7 @@ export function isAllowedVideoType(result: FileTypeResult): boolean {
 // Absolute per-kind size ceilings (applies to all roles).
 // Role-based tighter limits are enforced in upload-limits.ts.
 export const SIZE_LIMITS = {
-  poster: 10 * 1024 * 1024,       // 10 MB
+  poster: 15 * 1024 * 1024,       // 15 MB
   image: 15 * 1024 * 1024,        // 15 MB
   game: 5120 * 1024 * 1024,       // 5120 MB
   video: 1024 * 1024 * 1024,      // 1024 MB
