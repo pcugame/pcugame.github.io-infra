@@ -11,14 +11,17 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends openssl && \
     rm -rf /var/lib/apt/lists/*
-# Workspace lockfile + manifests for the api workspace and its deps
+# Copy every workspace manifest so `npm ci` at the root installs all of
+# them in one shot. Using `--workspace=apps/api` is tempting for image
+# size, but npm (v10) silently skips platform-specific optional deps
+# (@img/sharp-linux-x64, @napi-rs/canvas-linux-x64-gnu, ...) when a
+# workspace filter is active — sharp then fails to load at runtime with
+# "Could not load the sharp module using the linux-x64 runtime".
 COPY package.json package-lock.json ./
 COPY packages/contracts/package.json ./packages/contracts/
 COPY apps/api/package.json ./apps/api/
-# Install workspace deps. Keep lifecycle scripts enabled so sharp's
-# platform-specific optional dep (@img/sharp-linux-x64) is selected by
-# npm for this Debian/glibc build host — same libc as the runner stage.
-RUN npm ci --workspace=apps/api --include-workspace-root
+COPY apps/web/package.json ./apps/web/
+RUN npm ci
 
 # ── Stage 2: Build TypeScript ──
 FROM node:22-bookworm-slim AS builder
