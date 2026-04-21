@@ -1974,7 +1974,7 @@ form.admin-card h3 {
 
 .admin-table th,
 .admin-table td {
-  padding: 0.75rem 1rem;
+  padding: 0.45rem 1rem;
   text-align: left;
   font-size: 0.88rem;
   border-bottom: 1px solid var(--color-border);
@@ -1986,6 +1986,11 @@ form.admin-card h3 {
   white-space: normal;
   word-break: break-word;
   width: 100%;
+}
+
+.admin-table .admin-table__title-cell strong {
+  display: block;
+  overflow: hidden;
 }
 
 .admin-table th {
@@ -2005,6 +2010,10 @@ form.admin-card h3 {
 
 .admin-table tbody tr:hover {
   background: var(--color-bg);
+}
+
+.admin-table tbody td {
+  height: 3.25rem;
 }
 
 .admin-table tbody tr:last-child td {

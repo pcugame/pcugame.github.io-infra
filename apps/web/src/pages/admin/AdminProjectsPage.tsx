@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import type React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ProjectStatus } from '../../contracts';
@@ -18,6 +19,14 @@ const STATUS_COLORS: Record<ProjectStatus, string> = {
 	PUBLISHED: 'badge--published',
 	ARCHIVED: 'badge--archived',
 };
+
+function titleStyle(title: string): React.CSSProperties {
+	const len = title.length;
+	if (len <= 16) return { fontSize: '0.9rem', lineHeight: '1.5' };
+	if (len <= 24) return { fontSize: '0.82rem', lineHeight: '1.4' };
+	if (len <= 36) return { fontSize: '0.74rem', lineHeight: '1.3' };
+	return { fontSize: '0.66rem', lineHeight: '1.2', letterSpacing: '-0.02em' };
+}
 
 type SortKey = 'title' | 'year' | 'status' | 'incomplete' | 'updatedAt';
 type SortDir = 'asc' | 'desc';
@@ -290,7 +299,7 @@ export default function AdminProjectsPage() {
 												/>
 											</td>
 										)}
-										<td className="admin-table__title-cell"><strong>{p.title}</strong></td>
+										<td className="admin-table__title-cell"><strong style={titleStyle(p.title)}>{p.title}</strong></td>
 										<td><span className="admin-year-badge">{p.year}</span></td>
 										<td>
 											<span className={`badge ${STATUS_COLORS[p.status]}`}>

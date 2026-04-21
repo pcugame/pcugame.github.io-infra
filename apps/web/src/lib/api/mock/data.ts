@@ -101,6 +101,14 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
+		id: 99, slug: 'escape-from-wizard-sun-moon', title: 'Escape from Wizard: Sun & Moon',
+		summary: '마법사의 탑을 탈출하는 퍼즐 어드벤처',
+		posterUrl: 'https://placehold.co/400x560/2e2e1a/ffffe0?text=Escape+from+Wizard',
+		members: [
+			{ name: '테스트X', studentId: '2088099' },
+		],
+	},
+	{
 		id: 3, slug: 'dungeon-crawl', title: 'Dungeon Crawl',
 		summary: '절차적 생성 던전 탐험 로그라이크',
 		posterUrl: 'https://placehold.co/400x560/1a2e2e/e0ffff?text=Dungeon+Crawl',
