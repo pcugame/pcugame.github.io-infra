@@ -37,6 +37,12 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest
             ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:sha-${{ github.sha }}
+          # GHA cache layers: unchanged stages (apt-get, npm ci, sharp workaround) are
+          # pulled from cache; only stages touched by the diff re-run. `mode=max` caches
+          # intermediate stages too so deps + builder both benefit, not just the final
+          # image. Branch-scoped per GHA cache rules; 10 GB soft limit is comfortable.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   deploy:
     needs: build-and-push
