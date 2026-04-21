@@ -19,6 +19,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
 COPY packages/contracts ./packages/contracts
 COPY apps/api ./apps/api
+# Workspace-scoped bins (prisma, tsc) live here, not hoisted to root node_modules
+COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 RUN npm run db:generate --workspace=apps/api && \
     npm run build --workspace=apps/api
 
@@ -32,6 +34,7 @@ RUN apk add --no-cache ffmpeg && \
     adduser --system --uid 1001 appuser
 
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/packages/contracts ./packages/contracts
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
