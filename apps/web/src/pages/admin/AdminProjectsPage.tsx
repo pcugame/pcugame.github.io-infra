@@ -304,7 +304,7 @@ export default function AdminProjectsPage() {
 										누락{sortIndicator('incomplete')}
 									</th>
 									<th>제작자</th>
-									<th>작성자</th>
+									<th className="admin-table__col--creator">작성자</th>
 									<th className="admin-table__sortable" onClick={() => handleSort('updatedAt')}>
 										수정일{sortIndicator('updatedAt')}
 									</th>
@@ -336,7 +336,7 @@ export default function AdminProjectsPage() {
 											)}
 										</td>
 										<td>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
-										<td>{p.createdByUserName ?? '-'}</td>
+										<td className="admin-table__col--creator">{p.createdByUserName ?? '-'}</td>
 										<td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
 										<td>
 											<Link

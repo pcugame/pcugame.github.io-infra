@@ -2834,6 +2834,16 @@ fieldset.status-section legend {
 
 /* ── Admin: Narrow (769px–960px) — 좌측 컴팩트 아이콘 사이드바 ── */
 
+/* Below a comfortable desktop width the 작성자 column is the first to go —
+   the row has to hold title (with member list that can be 3+ names), year,
+   two badges, 수정일 and the 관리 button before it, so creator is the
+   column that adds the least signal per horizontal pixel. */
+@media (max-width: 1100px) {
+  .admin-table .admin-table__col--creator {
+    display: none;
+  }
+}
+
 @media (max-width: 1100px) and (min-width: 769px) {
   .admin-layout {
     grid-template-columns: 80px 1fr;
