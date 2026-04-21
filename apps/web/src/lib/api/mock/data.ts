@@ -310,6 +310,8 @@ export function buildAdminProjectItems(): any[] {
 				id: card.id, title: card.title, slug: card.slug,
 				year: Number(yearStr), status: 'PUBLISHED',
 				createdByUserName: '테스트', updatedAt: new Date().toISOString(),
+				memberNames: ['팀원A', '팀원B'],
+				isIncomplete: false,
 			});
 		}
 	}
