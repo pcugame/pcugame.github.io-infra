@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import type React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -110,6 +110,30 @@ export default function AdminProjectsPage() {
 		PUBLISHED: projects.filter((p) => p.status === 'PUBLISHED').length,
 		ARCHIVED: projects.filter((p) => p.status === 'ARCHIVED').length,
 	};
+
+	// ── Mobile long-press selection ──────────────────────
+	const [mobileSelectMode, setMobileSelectMode] = useState(false);
+	const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	const handleCardTouchStart = useCallback((id: number) => {
+		longPressTimer.current = setTimeout(() => {
+			setMobileSelectMode(true);
+			setSelected(new Set([id]));
+			navigator.vibrate?.(40);
+		}, 500);
+	}, []);
+
+	const handleCardTouchEnd = useCallback(() => {
+		if (longPressTimer.current) {
+			clearTimeout(longPressTimer.current);
+			longPressTimer.current = null;
+		}
+	}, []);
+
+	function exitMobileSelectMode() {
+		setMobileSelectMode(false);
+		setSelected(new Set());
+	}
 
 	// ── Selection helpers ────────────────────────────────
 	const filteredIds = filtered.map((p) => p.id);
@@ -329,20 +353,41 @@ export default function AdminProjectsPage() {
 					</div>
 
 					{/* Mobile: card list */}
-					<div className="admin-mobile-cards">
+					<div className={`admin-mobile-cards ${mobileSelectMode ? 'admin-mobile-cards--selecting' : ''}`}>
+						{isPrivileged && mobileSelectMode && (
+							<div className="admin-mobile-select-bar">
+								<button className="admin-mobile-select-bar__all" onClick={toggleAll}>
+									{allSelected ? '전체 해제' : '전체 선택'}
+								</button>
+								<span className="admin-mobile-select-bar__count">{selected.size}개 선택됨</span>
+								<button className="admin-mobile-select-bar__cancel" onClick={exitMobileSelectMode}>
+									취소
+								</button>
+							</div>
+						)}
 						{filtered.map((p) => (
-							<div key={p.id} className={`admin-pcard ${selected.has(p.id) ? 'admin-pcard--selected' : ''}`}>
-								{isPrivileged && (
-									<input
-										type="checkbox"
-										className="admin-pcard__check"
-										checked={selected.has(p.id)}
-										onChange={() => toggleOne(p.id)}
-									/>
+							<div
+								key={p.id}
+								className={`admin-pcard ${selected.has(p.id) ? 'admin-pcard--selected' : ''}`}
+								onTouchStart={isPrivileged ? () => handleCardTouchStart(p.id) : undefined}
+								onTouchEnd={isPrivileged ? handleCardTouchEnd : undefined}
+								onTouchMove={isPrivileged ? handleCardTouchEnd : undefined}
+								onMouseDown={isPrivileged ? () => handleCardTouchStart(p.id) : undefined}
+								onMouseUp={isPrivileged ? handleCardTouchEnd : undefined}
+								onMouseLeave={isPrivileged ? handleCardTouchEnd : undefined}
+								onClick={isPrivileged && mobileSelectMode ? () => toggleOne(p.id) : undefined}
+							>
+								{isPrivileged && mobileSelectMode && selected.has(p.id) && (
+									<span className="admin-pcard__selected-mark">
+										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+											<polyline points="20 6 9 17 4 12" />
+										</svg>
+									</span>
 								)}
 								<Link
 									to={`/admin/projects/${p.id}/edit`}
 									className="admin-pcard__link"
+									onClick={mobileSelectMode ? (e) => e.preventDefault() : undefined}
 								>
 									<div className="admin-pcard__top">
 										<h3 className="admin-pcard__title">{p.title}</h3>

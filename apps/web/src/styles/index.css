@@ -2093,11 +2093,19 @@ form.admin-card h3 {
   position: relative;
 }
 
-.admin-pcard__check {
+.admin-pcard__selected-mark {
   position: absolute;
-  top: 0.85rem;
-  left: 0.75rem;
+  top: 0.6rem;
+  right: 0.6rem;
   z-index: 1;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .admin-pcard__link {
@@ -2109,8 +2117,47 @@ form.admin-card h3 {
 }
 
 .admin-pcard--selected {
-  border-color: var(--color-primary);
-  background: rgba(26, 81, 175, 0.04);
+  box-shadow: 0 0 0 2px var(--color-primary);
+  background: rgba(26, 81, 175, 0.07);
+}
+
+.admin-mobile-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+}
+
+.admin-mobile-select-bar__all,
+.admin-mobile-select-bar__cancel {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.3rem 0.65rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  background: var(--color-bg);
+  color: var(--color-text);
+  transition: background 0.15s;
+}
+
+.admin-mobile-select-bar__cancel {
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+
+.admin-mobile-select-bar__count {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.admin-mobile-cards--selecting .admin-pcard {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* ── Year Badge (inline in table) ────────────────────────────── */
