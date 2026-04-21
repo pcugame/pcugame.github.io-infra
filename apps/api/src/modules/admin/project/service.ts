@@ -12,6 +12,7 @@ import { safeDeleteObject } from '../../../lib/storage.js';
 import { logger } from '../../../lib/logger.js';
 import { toSlug } from '../../../shared/slug.js';
 import { isPosterUrlSafe, assertValidPosterAsset } from '../../../shared/poster-validation.js';
+import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
 import {
 	getUploadLimits,
 	kindLimit,
@@ -62,7 +63,7 @@ export function serializeProjectDetail(project: {
 		year: project.exhibition.year,
 		summary: project.summary || undefined,
 		description: project.description || undefined,
-		isIncomplete: project.isIncomplete,
+		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, project.poster),
 		video,
 		status: project.status,
 		sortOrder: project.sortOrder,
@@ -98,7 +99,7 @@ export async function listProjects(userId: number, userRole: string): Promise<Ad
 		title: p.title,
 		slug: p.slug,
 		year: p.exhibition.year,
-		isIncomplete: p.isIncomplete,
+		isIncomplete: effectiveIsIncomplete(p.isIncomplete, p.assets, p.poster),
 		status: p.status,
 		createdByUserName: p.creator.name || undefined,
 		memberNames: p.members.map((m) => m.name),

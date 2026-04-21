@@ -7,6 +7,7 @@ import type {
 import { env } from '../../config/env.js';
 import { notFound } from '../../shared/errors.js';
 import { isPosterUrlSafe } from '../../shared/poster-validation.js';
+import { effectiveIsIncomplete } from '../../shared/project-completeness.js';
 import * as repo from './repository.js';
 
 /** Build a public asset URL */
@@ -138,7 +139,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 		title: project.title,
 		summary: project.summary || undefined,
 		description: project.description || undefined,
-		isIncomplete: project.isIncomplete,
+		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, project.poster),
 		video,
 		members: project.members.map((m) => ({
 			id: m.id,

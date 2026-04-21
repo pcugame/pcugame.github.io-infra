@@ -177,6 +177,42 @@ describe('serializeProjectDetail', () => {
 		expect(result.video!.mimeType).toBe('video/mp4');
 	});
 
+	it('effectively clears isIncomplete when project has GAME + VIDEO + valid poster', () => {
+		const result = serializeProjectDetail(fakeProject({
+			isIncomplete: true,
+			poster: { storageKey: 'p.png', kind: 'POSTER', status: 'READY' },
+			assets: [
+				{ id: 1, kind: 'GAME', storageKey: 'g.zip', originalName: 'g.zip', mimeType: 'application/zip', sizeBytes: 1n },
+				{ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n },
+				{ id: 3, kind: 'POSTER', storageKey: 'p.png', originalName: 'p.png', mimeType: 'image/png', sizeBytes: 3n },
+			],
+		}));
+		expect(result.isIncomplete).toBe(false);
+	});
+
+	it('keeps isIncomplete=true when project is missing the game asset', () => {
+		const result = serializeProjectDetail(fakeProject({
+			isIncomplete: true,
+			poster: { storageKey: 'p.png', kind: 'POSTER', status: 'READY' },
+			assets: [
+				{ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n },
+			],
+		}));
+		expect(result.isIncomplete).toBe(true);
+	});
+
+	it('keeps isIncomplete=true when poster is not url-safe', () => {
+		const result = serializeProjectDetail(fakeProject({
+			isIncomplete: true,
+			poster: { storageKey: 'g.zip', kind: 'GAME', status: 'READY' },
+			assets: [
+				{ id: 1, kind: 'GAME', storageKey: 'g.zip', originalName: 'g.zip', mimeType: 'application/zip', sizeBytes: 1n },
+				{ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n },
+			],
+		}));
+		expect(result.isIncomplete).toBe(true);
+	});
+
 	it('maps members correctly', () => {
 		const result = serializeProjectDetail(fakeProject({
 			members: [

@@ -28,6 +28,12 @@ export function findProjectsForUser(userId: number, isPrivileged: boolean) {
 			exhibition: true,
 			creator: true,
 			members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true } },
+			// Just enough to decide whether `isIncomplete` should be suppressed in the response.
+			assets: {
+				where: { status: 'READY', kind: { in: ['GAME', 'VIDEO'] } },
+				select: { kind: true },
+			},
+			poster: { select: { kind: true, status: true, storageKey: true } },
 		},
 	});
 }
