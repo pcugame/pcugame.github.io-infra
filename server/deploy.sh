@@ -108,10 +108,12 @@ do_up() {
   # Ensure volume exists
   podman volume inspect "$PG_VOLUME" &>/dev/null || podman volume create "$PG_VOLUME"
 
-  # Pull latest images
+  # Pull latest images (-q: suppress per-layer progress — it lands on
+  # stderr and pollutes CI logs with noisy "err:" lines via ssh-action.
+  # Real pull errors still surface via exit code and set -e.)
   echo "Pulling images..."
-  podman pull "$PG_IMAGE"
-  podman pull "$API_IMAGE"
+  podman pull -q "$PG_IMAGE"
+  podman pull -q "$API_IMAGE"
 
   # Remove old containers/pod if they exist
   do_down
