@@ -3,6 +3,7 @@ import type { GoogleAuthResponse, LogoutResponse, MeResponse } from '@pcu/contra
 import { env } from '../../config/env.js';
 import { sendOk } from '../../shared/http.js';
 import { parseBody, GoogleLoginBody } from '../../shared/validation.js';
+import { cookieExpiresAt } from '../../shared/session.js';
 import * as authService from './service.js';
 
 /** Register authentication routes (Google OAuth, logout, /me) */
@@ -19,7 +20,7 @@ export async function authController(app: FastifyInstance): Promise<void> {
 			secure: cfg.COOKIE_SECURE,
 			sameSite: cfg.COOKIE_SAME_SITE,
 			path: '/',
-			expires: expiresAt,
+			expires: cookieExpiresAt({ expiresAt }),
 		});
 
 		sendOk<GoogleAuthResponse>(reply, {

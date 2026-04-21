@@ -121,39 +121,18 @@ export function revertToPending(sessionId: string) {
 	});
 }
 
+/**
+ * Find sessions stuck in COMPLETING past `cutoff` — these were interrupted by a crash
+ * or forced shutdown and would otherwise never progress. Called on boot so a restart
+ * gives users a chance to retry rather than waiting for TTL expiry.
+ */
+export function findStaleCompletingSessions(cutoff: Date) {
+	return prisma.gameUploadSession.findMany({
+		where: { status: 'COMPLETING', updatedAt: { lt: cutoff } },
+	});
+}
+
 /** Find an exhibition by ID */
 export function findExhibitionById(id: number) {
 	return prisma.exhibition.findUnique({ where: { id } });
-}
-
-/** Find the first READY GAME asset for a project */
-export function findReadyGameAsset(projectId: number) {
-	return prisma.asset.findFirst({
-		where: { projectId, kind: 'GAME', status: 'READY' },
-	});
-}
-
-/** Update an existing asset's file metadata */
-export function updateAssetFile(
-	id: number,
-	data: { storageKey: string; originalName: string; mimeType: string; sizeBytes: bigint },
-) {
-	return prisma.asset.update({ where: { id }, data });
-}
-
-/** Create a new GAME asset */
-export function createGameAsset(data: {
-	projectId: number;
-	storageKey: string;
-	originalName: string;
-	sizeBytes: bigint;
-}) {
-	return prisma.asset.create({
-		data: {
-			...data,
-			kind: 'GAME',
-			mimeType: 'application/zip',
-			isPublic: false,
-		},
-	});
 }

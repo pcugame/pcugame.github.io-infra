@@ -51,6 +51,32 @@ export async function deleteObject(
 	await s3().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
+/**
+ * Delete an S3 object with best-effort retry through the orphan reaper.
+ * On failure: logs the original error with caller-supplied context, queues the object
+ * for later retry via the OrphanObject table, and swallows the error. Never throws —
+ * callers use this when the delete is a best-effort cleanup and should not fail the
+ * surrounding operation (e.g. replacing an existing asset, aborting on validation error).
+ *
+ * Keep the `reason` string short and specific ("replace-game-asset", "completion-size-mismatch") —
+ * it ends up in both logs and the DB row so operators can trace where orphans came from.
+ */
+export async function safeDeleteObject(
+	bucket: string,
+	key: string,
+	reason: string,
+	logContext?: Record<string, unknown>,
+): Promise<void> {
+	try {
+		await deleteObject(bucket, key);
+	} catch (err) {
+		const { logger } = await import('./logger.js');
+		const { recordOrphan } = await import('../modules/orphan/service.js');
+		logger().error({ err, bucket, storageKey: key, reason, ...logContext }, 'S3 delete failed — queuing for orphan reaper');
+		await recordOrphan(bucket, key, reason);
+	}
+}
+
 export async function headObject(
 	bucket: string,
 	key: string,

@@ -8,7 +8,7 @@ import type { AdminProjectItem, AdminProjectDetail } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { badRequest, forbidden, notFound, payloadTooLarge } from '../../../shared/errors.js';
 import { bucketForKind } from '../../../lib/s3.js';
-import { deleteObject } from '../../../lib/storage.js';
+import { safeDeleteObject } from '../../../lib/storage.js';
 import { logger } from '../../../lib/logger.js';
 import { toSlug } from '../../../shared/slug.js';
 import { isPosterUrlSafe, assertValidPosterAsset } from '../../../shared/poster-validation.js';
@@ -166,8 +166,8 @@ export async function updateProject(
 /** Delete a project and its associated asset files from S3 */
 export async function deleteProject(projectId: number) {
 	const assets = await repo.findAssetsByProjectId(projectId);
-	await Promise.allSettled(
-		assets.map((asset) => deleteObject(bucketForKind(asset.kind), asset.storageKey)),
+	await Promise.all(
+		assets.map((asset) => safeDeleteObject(bucketForKind(asset.kind), asset.storageKey, 'project-delete', { assetId: asset.id, projectId })),
 	);
 	await repo.deleteProject(projectId);
 }
@@ -381,39 +381,41 @@ export async function addAssetToProject(
 
 		const savedFile = await pipeline.processFile(fileTmpPath, kind, fileOriginalName);
 
-		// Replace existing GAME or VIDEO asset if uploading a new one
-		let existingReplaceable: { id: number; storageKey: string } | null = null;
-		if (savedFile.kind === 'GAME') {
-			existingReplaceable = await repo.findReadyGameAsset(projectId);
-		} else if (savedFile.kind === 'VIDEO') {
-			existingReplaceable = await repo.findReadyVideoAsset(projectId);
-		}
+		// Replace existing GAME or VIDEO asset if uploading a new one. Other kinds always create.
+		// DB write goes first — deletes of the prior S3 object happen only after commit so a mid-
+		// flight failure can't leave the project pointing at a storageKey we already deleted.
+		const isReplaceable = savedFile.kind === 'GAME' || savedFile.kind === 'VIDEO';
+		let assetId: number;
+		let oldStorageKey: string | null = null;
 
-		let asset;
-		if (existingReplaceable) {
-			await deleteObject(bucketForKind(savedFile.kind), existingReplaceable.storageKey).catch((err) => {
-				logger().error({ err, assetId: existingReplaceable!.id, oldStorageKey: existingReplaceable!.storageKey, kind: savedFile.kind }, 'Failed to delete previous replaceable asset object — orphan likely');
-			});
-
-			asset = await repo.updateAssetFile(existingReplaceable.id, {
+		if (isReplaceable) {
+			const result = await repo.replaceOrCreateReplaceableAsset(projectId, savedFile.kind, {
 				storageKey: savedFile.storageKey,
 				originalName: savedFile.originalName,
 				mimeType: savedFile.mimeType,
 				sizeBytes: BigInt(savedFile.sizeBytes),
+				isPublic: false,
 			});
+			assetId = result.assetId;
+			oldStorageKey = result.oldStorageKey;
 		} else {
-			asset = await repo.createAsset({
+			const asset = await repo.createAsset({
 				projectId,
 				kind: savedFile.kind,
 				storageKey: savedFile.storageKey,
 				originalName: savedFile.originalName,
 				mimeType: savedFile.mimeType,
 				sizeBytes: BigInt(savedFile.sizeBytes),
-				isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO',
+				isPublic: true,
 			});
+			assetId = asset.id;
 		}
 
-		return { assetId: asset.id, url: assetUrl(savedFile.storageKey, savedFile.kind) };
+		if (oldStorageKey) {
+			await safeDeleteObject(bucketForKind(savedFile.kind), oldStorageKey, 'project-asset-replace-previous', { assetId, kind: savedFile.kind });
+		}
+
+		return { assetId, url: assetUrl(savedFile.storageKey, savedFile.kind) };
 	} catch (err) {
 		await pipeline.rollbackCommitted();
 		throw err;
@@ -443,9 +445,9 @@ export async function bulkUpdateStatus(ids: number[], status: ProjectStatus) {
 export async function bulkDeleteProjects(ids: number[]) {
 	const assets = await repo.findAssetsByProjectIds(ids);
 
-	// Delete from S3 (best-effort, don't block on failures)
-	await Promise.allSettled(
-		assets.map((a) => deleteObject(bucketForKind(a.kind), a.storageKey)),
+	// Failures go through safeDeleteObject — orphan reaper handles retry.
+	await Promise.all(
+		assets.map((a) => safeDeleteObject(bucketForKind(a.kind), a.storageKey, 'project-bulk-delete', { assetId: a.id, projectId: a.projectId })),
 	);
 
 	const result = await repo.bulkDeleteProjects(ids);

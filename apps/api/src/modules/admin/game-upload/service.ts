@@ -11,6 +11,7 @@
 
 import { env } from '../../../config/env.js';
 import { badRequest, forbidden, notFound, AppError } from '../../../shared/errors.js';
+import { isAcceptingNewWork } from '../../../lib/lifecycle.js';
 import { generateStorageKey } from '../../../shared/storage-path.js';
 import { getUploadLimits } from '../../../shared/upload-limits.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
@@ -23,9 +24,10 @@ import {
 	abortMultipartUpload,
 	headObject,
 	readObjectRange,
-	deleteObject,
+	safeDeleteObject,
 } from '../../../lib/storage.js';
 import { assertUploadAllowed } from '../upload-guard.js';
+import { replaceOrCreateReplaceableAsset } from '../project/repository.js';
 import * as repo from './repository.js';
 
 // ── Helpers ─────────────────────────────────────────────────
@@ -62,6 +64,12 @@ export async function createSession(
 	user: { id: number; role: string },
 	body: { originalName?: string; totalBytes?: number },
 ) {
+	// Refuse to start new multi-chunk sessions once shutdown has begun — in-flight
+	// `complete` calls are still allowed so existing uploads don't get truncated.
+	if (!isAcceptingNewWork()) {
+		throw new AppError(503, 'Server is restarting — please retry in a moment', 'DRAINING');
+	}
+
 	if (!body?.originalName || !body?.totalBytes) {
 		throw badRequest('Missing originalName or totalBytes');
 	}
@@ -267,9 +275,7 @@ export async function completeSession(
 			throw new AppError(500, 'Completed object not found in S3', 'INTERNAL_ERROR');
 		}
 		if (head.size !== Number(session.totalBytes)) {
-			await deleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key).catch((err) => {
-				logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to delete S3 object after size mismatch — orphan likely');
-			});
+			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, 'game-upload-size-mismatch', { sessionId: session.id });
 			throw new AppError(500, `Final file size mismatch: expected ${session.totalBytes}, got ${head.size}`, 'SIZE_MISMATCH');
 		}
 
@@ -277,48 +283,29 @@ export async function completeSession(
 		const header = await readObjectRange(cfg.S3_BUCKET_PROTECTED, session.s3Key, 0, 7);
 		const detected = detectFileType(header);
 		if (!detected || !isAllowedGameType(detected)) {
-			await deleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key).catch((err) => {
-				logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to delete S3 object after invalid ZIP — orphan likely');
-			});
+			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, 'game-upload-invalid-zip', { sessionId: session.id });
 			throw badRequest('Uploaded file is not a valid ZIP archive');
 		}
 
-		// Replace existing GAME asset or create new one
+		// Replace existing GAME asset or create new one — single transaction, serialized per project.
 		const storageKey = session.s3Key;
-		const existingGame = await repo.findReadyGameAsset(session.projectId);
-
-		if (existingGame) {
-			try {
-				await repo.updateAssetFile(existingGame.id, {
-					storageKey,
-					originalName: session.originalName,
-					mimeType: 'application/zip',
-					sizeBytes: session.totalBytes,
-				});
-			} catch (dbErr) {
-				await deleteObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch((err) => {
-					logger().error({ err, sessionId: session.id, storageKey }, 'Failed to delete new S3 object after updateAssetFile failed — orphan likely');
-				});
-				throw dbErr;
-			}
-			// Delete old S3 object after successful DB update
-			await deleteObject(cfg.S3_BUCKET_PROTECTED, existingGame.storageKey).catch((err) => {
-				logger().error({ err, assetId: existingGame.id, oldStorageKey: existingGame.storageKey }, 'Failed to delete previous GAME asset object — orphan likely');
+		let oldStorageKey: string | null = null;
+		try {
+			const result = await replaceOrCreateReplaceableAsset(session.projectId, 'GAME', {
+				storageKey,
+				originalName: session.originalName,
+				mimeType: 'application/zip',
+				sizeBytes: session.totalBytes,
+				isPublic: false,
 			});
-		} else {
-			try {
-				await repo.createGameAsset({
-					projectId: session.projectId,
-					storageKey,
-					originalName: session.originalName,
-					sizeBytes: session.totalBytes,
-				});
-			} catch (dbErr) {
-				await deleteObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch((err) => {
-					logger().error({ err, sessionId: session.id, storageKey }, 'Failed to delete new S3 object after createGameAsset failed — orphan likely');
-				});
-				throw dbErr;
-			}
+			oldStorageKey = result.oldStorageKey;
+		} catch (dbErr) {
+			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, storageKey, 'game-upload-asset-upsert-failed', { sessionId: session.id });
+			throw dbErr;
+		}
+
+		if (oldStorageKey) {
+			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, oldStorageKey, 'game-upload-replace-previous', { sessionId: session.id });
 		}
 
 		await repo.markCompleted(session.id, storageKey);
@@ -353,6 +340,33 @@ export async function cancelSession(
 			logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to abort multipart upload during cancelSession');
 		});
 	}
+}
+
+/**
+ * Boot-time sweep: revert any upload session stuck in COMPLETING for more than 5 minutes
+ * back to PENDING (the interrupted `completeSession` can't resume, but the user can retry)
+ * and abort the orphan S3 multipart upload so parts don't accumulate.
+ *
+ * Called from `server.ts` during startup, before the health endpoint starts accepting OK.
+ */
+export async function sweepStaleCompletingSessions(): Promise<{ swept: number }> {
+	const cutoff = new Date(Date.now() - 5 * 60 * 1000);
+	const stale = await repo.findStaleCompletingSessions(cutoff);
+	if (stale.length === 0) return { swept: 0 };
+
+	const cfg = env();
+	for (const s of stale) {
+		await repo.revertToPending(s.id).catch((err) => {
+			logger().error({ err, sessionId: s.id }, 'Boot sweep: failed to revert stale COMPLETING session');
+		});
+		if (s.s3UploadId && s.s3Key) {
+			await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s.s3Key, s.s3UploadId).catch((err) => {
+				logger().error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Boot sweep: failed to abort leftover multipart');
+			});
+		}
+	}
+	logger().warn({ count: stale.length }, 'Boot sweep: reverted stale COMPLETING sessions to PENDING');
+	return { swept: stale.length };
 }
 
 /** List active upload sessions for a project */

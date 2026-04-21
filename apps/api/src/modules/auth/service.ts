@@ -1,7 +1,7 @@
 import { OAuth2Client } from 'google-auth-library';
 import { env } from '../../config/env.js';
 import { unauthorized } from '../../shared/errors.js';
-import { generateSessionId, sessionExpiresAt } from '../../shared/session.js';
+import { absoluteSessionExpiresAt, generateSessionId } from '../../shared/session.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './repository.js';
 
@@ -54,7 +54,7 @@ export async function loginWithGoogle(credential: string) {
 	});
 
 	const sessionId = generateSessionId();
-	const expiresAt = sessionExpiresAt();
+	const expiresAt = absoluteSessionExpiresAt();
 	await repo.createSession({ id: sessionId, userId: user.id, expiresAt });
 
 	return { user, sessionId, expiresAt };

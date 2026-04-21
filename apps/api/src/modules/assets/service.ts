@@ -2,7 +2,7 @@ import type { FastifyReply } from 'fastify';
 import { env } from '../../config/env.js';
 import { notFound, forbidden } from '../../shared/errors.js';
 import { bucketForKind } from '../../lib/s3.js';
-import { getPresignedUrl, deleteObject } from '../../lib/storage.js';
+import { getPresignedUrl, safeDeleteObject } from '../../lib/storage.js';
 import { gameDownloadLimiter } from '../../shared/game-download-limiter.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './repository.js';
@@ -58,9 +58,7 @@ export async function deleteAsset(assetId: number) {
 	await repo.markAssetDeleting(asset.id);
 
 	const bucket = bucketForKind(asset.kind);
-	await deleteObject(bucket, asset.storageKey).catch((err) => {
-		logger().error({ err, assetId: asset.id, storageKey: asset.storageKey, bucket }, 'Failed to delete S3 object during deleteAsset — orphan likely');
-	});
+	await safeDeleteObject(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id });
 
 	if (asset.project.posterAssetId === asset.id) {
 		await repo.clearPosterIfMatches(asset.projectId, asset.id);

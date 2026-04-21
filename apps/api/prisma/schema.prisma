@@ -146,14 +146,19 @@ model Asset {
   posterOf     Project? @relation("ProjectPoster")
 
   @@index([projectId, kind, status])
+  // Partial unique index `asset_project_replaceable_ready_unique` on (project_id, kind)
+  // WHERE status = 'READY' AND kind IN ('GAME','VIDEO') is applied via raw SQL in
+  // `migrations/20260421_asset_ready_unique_per_kind/` — Prisma can't express partial-unique
+  // in the DSL. IMAGE etc. are intentionally excluded (gallery may hold many).
   @@map("assets")
 }
 
 model AuthSession {
-  id        String   @id @default(uuid())
-  userId    Int      @map("user_id")
-  expiresAt DateTime @map("expires_at")
-  createdAt DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  userId     Int      @map("user_id")
+  expiresAt  DateTime @map("expires_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   user User @relation("UserSessions", fields: [userId], references: [id], onDelete: Cascade)
 
@@ -201,6 +206,25 @@ model BannedIp {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("banned_ips")
+}
+
+/// S3 objects that outlived their DB record — queued by `safeDeleteObject`
+/// when a sync S3 delete fails, and periodically retried by the orphan reaper.
+/// A row is "pending" while resolvedAt is null; resolved rows are kept for audit.
+model OrphanObject {
+  id           Int       @id @default(autoincrement())
+  bucket       String
+  storageKey   String    @map("storage_key")
+  reason       String    @default("")
+  attemptCount Int       @default(0) @map("attempt_count")
+  lastTriedAt  DateTime? @map("last_tried_at")
+  lastError    String?   @map("last_error")
+  resolvedAt   DateTime? @map("resolved_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@unique([bucket, storageKey], name: "orphan_bucket_storage_key")
+  @@index([resolvedAt])
+  @@map("orphan_objects")
 }
 
 /// Runtime-configurable site settings (single row, id = "default").

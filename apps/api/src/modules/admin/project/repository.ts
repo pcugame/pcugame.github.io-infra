@@ -117,6 +117,63 @@ export function updateAssetFile(
 	return prisma.asset.update({ where: { id }, data });
 }
 
+/**
+ * Replace the single READY asset of a given kind for a project, or create one if none exists.
+ * Serialized per-project by taking SELECT ... FOR UPDATE on the parent project row — this
+ * closes the "two concurrent inserts see no existing asset and both create one" race that
+ * leaves a stray asset + orphaned S3 object.
+ *
+ * Returns `oldStorageKey` for callers that need to clean up the prior S3 object after commit.
+ */
+export function replaceOrCreateReplaceableAsset(
+	projectId: number,
+	kind: AssetKind,
+	data: {
+		storageKey: string;
+		originalName: string;
+		mimeType: string;
+		sizeBytes: bigint;
+		isPublic: boolean;
+	},
+): Promise<{ assetId: number; oldStorageKey: string | null }> {
+	return prisma.$transaction(async (tx) => {
+		await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`;
+
+		const existing = await tx.asset.findFirst({
+			where: { projectId, kind, status: 'READY' },
+			select: { id: true, storageKey: true },
+		});
+
+		if (existing) {
+			const updated = await tx.asset.update({
+				where: { id: existing.id },
+				data: {
+					storageKey: data.storageKey,
+					originalName: data.originalName,
+					mimeType: data.mimeType,
+					sizeBytes: data.sizeBytes,
+				},
+				select: { id: true },
+			});
+			return { assetId: updated.id, oldStorageKey: existing.storageKey };
+		}
+
+		const created = await tx.asset.create({
+			data: {
+				projectId,
+				kind,
+				storageKey: data.storageKey,
+				originalName: data.originalName,
+				mimeType: data.mimeType,
+				sizeBytes: data.sizeBytes,
+				isPublic: data.isPublic,
+			},
+			select: { id: true },
+		});
+		return { assetId: created.id, oldStorageKey: null };
+	});
+}
+
 /** Find a single asset by ID */
 export function findAssetById(id: number) {
 	return prisma.asset.findUnique({ where: { id } });

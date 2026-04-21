@@ -30,14 +30,27 @@ export function deleteMember(id: number) {
 	return prisma.projectMember.delete({ where: { id } });
 }
 
-/** Swap sortOrder of two members atomically */
+/**
+ * Swap sortOrder of two members atomically.
+ * Locks both rows with SELECT ... FOR UPDATE so a concurrent swap can't read stale sortOrder
+ * between our read and write. Rows are locked in ascending-id order to avoid deadlock when two
+ * swaps target the same pair from opposite directions.
+ */
 export function swapMemberOrder(memberIdA: number, memberIdB: number, projectId: number) {
 	return prisma.$transaction(async (tx) => {
-		const a = await tx.projectMember.findFirst({ where: { id: memberIdA, projectId } });
-		const b = await tx.projectMember.findFirst({ where: { id: memberIdB, projectId } });
+		const [loId, hiId] = memberIdA < memberIdB ? [memberIdA, memberIdB] : [memberIdB, memberIdA];
+		const locked = await tx.$queryRaw<{ id: number; sort_order: number }[]>`
+			SELECT id, sort_order FROM project_members
+			WHERE id IN (${loId}, ${hiId}) AND project_id = ${projectId}
+			ORDER BY id
+			FOR UPDATE
+		`;
+		if (locked.length !== 2) return null;
+		const a = locked.find((r) => r.id === memberIdA);
+		const b = locked.find((r) => r.id === memberIdB);
 		if (!a || !b) return null;
-		await tx.projectMember.update({ where: { id: memberIdA }, data: { sortOrder: b.sortOrder } });
-		await tx.projectMember.update({ where: { id: memberIdB }, data: { sortOrder: a.sortOrder } });
+		await tx.projectMember.update({ where: { id: memberIdA }, data: { sortOrder: b.sort_order } });
+		await tx.projectMember.update({ where: { id: memberIdB }, data: { sortOrder: a.sort_order } });
 		return { a: memberIdA, b: memberIdB };
 	});
 }

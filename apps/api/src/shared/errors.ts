@@ -37,3 +37,18 @@ export function payloadTooLarge(message = 'Payload too large'): AppError {
 export function unsupportedMediaType(message = 'Unsupported media type'): AppError {
   return new AppError(415, message, 'UNSUPPORTED_MEDIA_TYPE');
 }
+
+/**
+ * Detect a Prisma unique-constraint violation (P2002), optionally scoped to a specific target.
+ * `target` matches either the constraint name or any field name in err.meta.target.
+ */
+export function isUniqueConstraintError(err: unknown, target?: string): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: unknown; meta?: { target?: unknown } };
+  if (e.code !== 'P2002') return false;
+  if (!target) return true;
+  const t = e.meta?.target;
+  if (typeof t === 'string') return t === target || t.includes(target);
+  if (Array.isArray(t)) return t.includes(target);
+  return false;
+}

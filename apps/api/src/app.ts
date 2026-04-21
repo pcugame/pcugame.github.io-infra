@@ -15,6 +15,7 @@ import { AppError } from './shared/errors.js';
 import type { ApiError } from './shared/http.js';
 import { prisma } from './lib/prisma.js';
 import { headObject } from './lib/storage.js';
+import { decInFlight, getLifecycleState, incInFlight } from './lib/lifecycle.js';
 
 function parseTrustProxy(val: string): boolean | number | string {
 	if (val === 'true') return true;
@@ -32,6 +33,15 @@ export async function buildApp() {
 		trustProxy: parseTrustProxy(cfg.TRUST_PROXY),
 	});
 
+	// In-flight counter so shutdown can wait for active requests to finish.
+	// Runs before routing so counter stays accurate even if a plugin hook rejects.
+	app.addHook('onRequest', async () => {
+		incInFlight();
+	});
+	app.addHook('onResponse', async () => {
+		decInFlight();
+	});
+
 	// Plugins
 	await registerCors(app);
 	await registerCookie(app);
@@ -39,8 +49,15 @@ export async function buildApp() {
 	await registerAuth(app);
 	await registerCsrf(app);
 
-	// Health check — DB ping + storage write test
+	// Health check — DB ping + storage write test. Flips to 503 when the process is draining
+	// so the load balancer stops routing new traffic before we start closing connections.
 	app.get('/api/health', async (_req, reply) => {
+		const state = getLifecycleState();
+		if (state === 'draining' || state === 'shutting_down') {
+			reply.status(503).send({ ok: false, state, timestamp: new Date().toISOString() });
+			return;
+		}
+
 		const checks: Record<string, 'ok' | 'fail'> = {};
 
 		// DB connectivity
@@ -61,7 +78,7 @@ export async function buildApp() {
 		}
 
 		const ok = Object.values(checks).every((v) => v === 'ok');
-		reply.status(ok ? 200 : 503).send({ ok, timestamp: new Date().toISOString(), checks });
+		reply.status(ok ? 200 : 503).send({ ok, state, timestamp: new Date().toISOString(), checks });
 	});
 
 	// Routes
