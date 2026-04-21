@@ -2,18 +2,19 @@
 # Built via .github/workflows/deploy-api.yml with context=. file=apps/api/Dockerfile
 
 # ── Stage 1: Install dependencies ──
-FROM node:22-alpine AS deps
+FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 # Workspace lockfile + manifests for the api workspace and its deps
 COPY package.json package-lock.json ./
 COPY packages/contracts/package.json ./packages/contracts/
 COPY apps/api/package.json ./apps/api/
-# Drop --ignore-scripts so sharp downloads the correct alpine binary
-# and npm creates .bin symlinks for tsc/prisma (used by the builder stage).
+# Install workspace deps. Keep lifecycle scripts enabled so sharp's
+# platform-specific optional dep (@img/sharp-linux-x64) is selected by
+# npm for this Debian/glibc build host — same libc as the runner stage.
 RUN npm ci --workspace=apps/api --include-workspace-root
 
 # ── Stage 2: Build TypeScript ──
-FROM node:22-alpine AS builder
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
@@ -25,13 +26,15 @@ RUN npm run db:generate --workspace=apps/api && \
     npm run build --workspace=apps/api
 
 # ── Stage 3: Production image ──
-FROM node:22-alpine AS runner
+FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-RUN apk add --no-cache ffmpeg && \
-    addgroup --system --gid 1001 appgroup && \
-    adduser --system --uid 1001 appuser
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg wget && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --system --gid 1001 appgroup && \
+    useradd --system --uid 1001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
