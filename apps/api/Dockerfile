@@ -27,7 +27,7 @@ RUN npm ci
 # the lockfile, so `npm ci` on Linux doesn't install them. Force-install
 # the matching variant per sharp's documented workaround.
 # https://sharp.pixelplumbing.com/install#cross-platform
-RUN npm install --prefix apps/api --no-save --os=linux --libc=gnu --cpu=x64 sharp
+RUN npm install --workspace=apps/api --no-save --os=linux --libc=gnu --cpu=x64 sharp
 
 # ── Stage 2: Build TypeScript ──
 FROM node:22-bookworm-slim AS builder
