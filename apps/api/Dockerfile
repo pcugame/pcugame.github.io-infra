@@ -4,6 +4,13 @@
 # ── Stage 1: Install dependencies ──
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
+# openssl CLI is required at install time so @prisma/engines' postinstall
+# detects OpenSSL 3.0.x and downloads the matching engines. Without it,
+# detection silently falls back to debian-openssl-1.1.x and the runtime
+# fails on bookworm with "Can't write to @prisma/engines" at migrate time.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends openssl && \
+    rm -rf /var/lib/apt/lists/*
 # Workspace lockfile + manifests for the api workspace and its deps
 COPY package.json package-lock.json ./
 COPY packages/contracts/package.json ./packages/contracts/
@@ -31,7 +38,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg wget && \
+    apt-get install -y --no-install-recommends ffmpeg wget openssl && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --system --gid 1001 appgroup && \
     useradd --system --uid 1001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser
