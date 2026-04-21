@@ -1,0 +1,9 @@
+{
+  "name": "pcu-graduation-project",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/*"
+  ]
+}

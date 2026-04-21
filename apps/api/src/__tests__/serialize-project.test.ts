@@ -43,7 +43,7 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 		summary: 'A summary',
 		description: 'A description',
 		isIncomplete: false,
-		status: 'DRAFT',
+		status: 'DRAFT' as const,
 		sortOrder: 0,
 		posterAssetId: null as number | null,
 		poster: null as { storageKey: string; kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO'; status: string } | null,

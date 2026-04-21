@@ -1,8 +1,9 @@
+import type { AdminExhibitionItem, CreateExhibitionRequest, UpdateExhibitionRequest } from '@pcu/contracts';
 import { notFound, conflict } from '../../../shared/errors.js';
 import * as repo from './repository.js';
 
 /** List all exhibitions with project counts, mapped to API shape */
-export async function listExhibitions() {
+export async function listExhibitions(): Promise<AdminExhibitionItem[]> {
 	const exhibitions = await repo.findAllExhibitions();
 	return exhibitions.map((e) => ({
 		id: e.id,
@@ -15,7 +16,7 @@ export async function listExhibitions() {
 }
 
 /** Create an exhibition after checking for duplicates */
-export async function createExhibition(data: { year: number; title?: string; isUploadEnabled?: boolean; sortOrder?: number }) {
+export async function createExhibition(data: CreateExhibitionRequest) {
 	const existing = await repo.findExhibitionByComposite(data.year, data.title || '');
 	if (existing) throw conflict(`"${data.title || data.year}" 전시회가 이미 존재합니다`);
 
@@ -34,8 +35,8 @@ export async function deleteExhibition(id: number) {
 /** Partial-update an exhibition. Throws 404 if not found. Returns updated shape. */
 export async function updateExhibition(
 	id: number,
-	patch: { title?: string; isUploadEnabled?: boolean; sortOrder?: number },
-) {
+	patch: UpdateExhibitionRequest,
+): Promise<AdminExhibitionItem> {
 	const exhibition = await repo.findExhibitionById(id);
 	if (!exhibition) throw notFound('Exhibition not found');
 

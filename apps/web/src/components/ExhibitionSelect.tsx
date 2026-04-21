@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { AdminYearItem } from '../contracts';
+import type { AdminExhibitionItem } from '../contracts';
 
 interface Props {
 	id?: string;
 	value: number | null;
 	onChange: (id: number) => void;
-	items: AdminYearItem[];
+	items: AdminExhibitionItem[];
 	disabled?: boolean;
 	'aria-invalid'?: boolean;
 }
@@ -141,7 +141,7 @@ export default function ExhibitionSelect({
 		if (open) listRef.current?.focus();
 	}, [open]);
 
-	const renderLabel = (it: AdminYearItem) => (
+	const renderLabel = (it: AdminExhibitionItem) => (
 		<>
 			<span className="exhibition-select__year">{it.year}</span>
 			<span

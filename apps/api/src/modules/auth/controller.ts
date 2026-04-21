@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { GoogleAuthResponse, LogoutResponse, MeResponse } from '@pcu/contracts';
 import { env } from '../../config/env.js';
 import { sendOk } from '../../shared/http.js';
 import { parseBody, GoogleLoginBody } from '../../shared/validation.js';
@@ -21,7 +22,7 @@ export async function authController(app: FastifyInstance): Promise<void> {
 			expires: expiresAt,
 		});
 
-		sendOk(reply, {
+		sendOk<GoogleAuthResponse>(reply, {
 			user: { id: user.id, email: user.email, name: user.name, role: user.role },
 		});
 	});
@@ -38,16 +39,16 @@ export async function authController(app: FastifyInstance): Promise<void> {
 			secure: cfg.COOKIE_SECURE,
 			sameSite: cfg.COOKIE_SAME_SITE,
 		});
-		sendOk(reply, { message: 'Logged out' });
+		sendOk<LogoutResponse>(reply, { message: 'Logged out' });
 	});
 
 	/** GET /api/me — current user info (no auth required) */
 	app.get('/me', async (request, reply) => {
 		if (!request.currentUser) {
-			sendOk(reply, { authenticated: false });
+			sendOk<MeResponse>(reply, { authenticated: false });
 			return;
 		}
-		sendOk(reply, {
+		sendOk<MeResponse>(reply, {
 			authenticated: true,
 			user: {
 				id: request.currentUser.id,

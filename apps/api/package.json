@@ -22,6 +22,7 @@
     "@fastify/cookie": "^11.0.1",
     "@fastify/cors": "^10.0.1",
     "@fastify/multipart": "^9.0.1",
+    "@pcu/contracts": "*",
     "@prisma/client": "6.11.0",
     "fastify": "^5.1.0",
     "google-auth-library": "^9.14.2",

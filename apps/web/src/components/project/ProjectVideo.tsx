@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import type { ProjectVideo as VideoInfo } from '../../contracts/public';
+import type { ProjectVideo as VideoInfo } from '@pcu/contracts';
 
 interface Props {
 	video: VideoInfo | null;

@@ -9,8 +9,7 @@ import {
   AddMemberSchema,
   type AddMemberInput,
 } from '../../contracts/schemas';
-import type { ProjectStatus, AdminProjectDetail } from '../../contracts';
-import type { UpdateMemberRequest } from '../../contracts/admin';
+import type { ProjectStatus, AdminProjectDetail, UpdateMemberRequest } from '@pcu/contracts';
 import {
   adminProjectApi,
   adminMemberApi,

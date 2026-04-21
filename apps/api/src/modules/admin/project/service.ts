@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import type { AssetKind, ProjectStatus } from '@prisma/client';
+import type { AdminProjectItem, AdminProjectDetail } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { badRequest, forbidden, notFound, payloadTooLarge } from '../../../shared/errors.js';
 import { bucketForKind } from '../../../lib/s3.js';
@@ -41,13 +42,13 @@ export function serializeProjectDetail(project: {
 	summary: string;
 	description: string;
 	isIncomplete: boolean;
-	status: string;
+	status: ProjectStatus;
 	sortOrder: number;
 	posterAssetId: number | null;
 	poster: { storageKey: string; kind: AssetKind; status: string } | null;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
 	assets: { id: number; kind: AssetKind; storageKey: string; originalName: string; mimeType: string; sizeBytes: bigint }[];
-}) {
+}): AdminProjectDetail {
 	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
 	const video = videoAsset
 		? { url: assetUrl(videoAsset.storageKey, 'VIDEO'), mimeType: videoAsset.mimeType || 'video/mp4' }
@@ -88,7 +89,7 @@ export function serializeProjectDetail(project: {
 // ── Business logic ──────────────────────────────────────────
 
 /** List projects visible to the current user */
-export async function listProjects(userId: number, userRole: string) {
+export async function listProjects(userId: number, userRole: string): Promise<AdminProjectItem[]> {
 	const isPrivileged = userRole === 'ADMIN' || userRole === 'OPERATOR';
 	const projects = await repo.findProjectsForUser(userId, isPrivileged);
 	return projects.map((p) => ({

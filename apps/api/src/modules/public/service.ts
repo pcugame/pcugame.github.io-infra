@@ -1,3 +1,9 @@
+import type {
+	PublicYearItem,
+	PublicYearProjectsResponse,
+	PublicExhibitionProjectsResponse,
+	PublicProjectDetailResponse,
+} from '@pcu/contracts';
 import { env } from '../../config/env.js';
 import { notFound } from '../../shared/errors.js';
 import { isPosterUrlSafe } from '../../shared/poster-validation.js';
@@ -9,7 +15,7 @@ function publicAssetUrl(storageKey: string): string {
 }
 
 /** List all years with published project counts */
-export async function listYears() {
+export async function listYears(): Promise<PublicYearItem[]> {
 	const exhibitions = await repo.findExhibitionsWithPublishedCounts();
 	return exhibitions.map((e) => ({
 		id: e.id,
@@ -20,7 +26,7 @@ export async function listYears() {
 }
 
 /** List published projects for a given year number (supports multiple exhibitions) */
-export async function listProjectsByYear(yearParam: string) {
+export async function listProjectsByYear(yearParam: string): Promise<PublicYearProjectsResponse> {
 	const yearNum = parseInt(yearParam, 10);
 	if (isNaN(yearNum)) throw notFound('Year not found');
 
@@ -55,7 +61,7 @@ export async function listProjectsByYear(yearParam: string) {
 }
 
 /** List published projects for a single exhibition by ID */
-export async function listProjectsByExhibition(idParam: string) {
+export async function listProjectsByExhibition(idParam: string): Promise<PublicExhibitionProjectsResponse> {
 	const id = parseInt(idParam, 10);
 	if (isNaN(id)) throw notFound('Exhibition not found');
 
@@ -87,7 +93,7 @@ export async function listProjectsByExhibition(idParam: string) {
 }
 
 /** Get a single published project by ID or slug */
-export async function getProjectDetail(idOrSlug: string, yearParam?: string) {
+export async function getProjectDetail(idOrSlug: string, yearParam?: string): Promise<PublicProjectDetailResponse> {
 	const yearNum = yearParam ? parseInt(yearParam, 10) : undefined;
 
 	// Try numeric ID lookup first
