@@ -43,7 +43,9 @@ async function loadSession(sessionId: string, userId: number, userRole: string) 
 	if (session.expiresAt < new Date()) {
 		await repo.updateSessionStatus(session.id, 'CANCELLED');
 		if (session.s3UploadId && session.s3Key) {
-			await abortMultipartUpload(env().S3_BUCKET_PROTECTED, session.s3Key, session.s3UploadId).catch(() => {});
+			await abortMultipartUpload(env().S3_BUCKET_PROTECTED, session.s3Key, session.s3UploadId).catch((err) => {
+				logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to abort multipart upload for expired session');
+			});
 		}
 		throw badRequest('Upload session has expired');
 	}
@@ -91,7 +93,9 @@ export async function createSession(
 	for (const s of existing) {
 		await repo.updateSessionStatus(s.id, 'CANCELLED');
 		if (s.s3UploadId && s.s3Key) {
-			await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s.s3Key, s.s3UploadId).catch(() => {});
+			await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s.s3Key, s.s3UploadId).catch((err) => {
+				logger().error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Failed to abort multipart upload while replacing active session');
+			});
 		}
 	}
 
@@ -263,7 +267,9 @@ export async function completeSession(
 			throw new AppError(500, 'Completed object not found in S3', 'INTERNAL_ERROR');
 		}
 		if (head.size !== Number(session.totalBytes)) {
-			await deleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key).catch(() => {});
+			await deleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key).catch((err) => {
+				logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to delete S3 object after size mismatch — orphan likely');
+			});
 			throw new AppError(500, `Final file size mismatch: expected ${session.totalBytes}, got ${head.size}`, 'SIZE_MISMATCH');
 		}
 
@@ -271,7 +277,9 @@ export async function completeSession(
 		const header = await readObjectRange(cfg.S3_BUCKET_PROTECTED, session.s3Key, 0, 7);
 		const detected = detectFileType(header);
 		if (!detected || !isAllowedGameType(detected)) {
-			await deleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key).catch(() => {});
+			await deleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key).catch((err) => {
+				logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to delete S3 object after invalid ZIP — orphan likely');
+			});
 			throw badRequest('Uploaded file is not a valid ZIP archive');
 		}
 
@@ -288,11 +296,15 @@ export async function completeSession(
 					sizeBytes: session.totalBytes,
 				});
 			} catch (dbErr) {
-				await deleteObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch(() => {});
+				await deleteObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch((err) => {
+					logger().error({ err, sessionId: session.id, storageKey }, 'Failed to delete new S3 object after updateAssetFile failed — orphan likely');
+				});
 				throw dbErr;
 			}
 			// Delete old S3 object after successful DB update
-			await deleteObject(cfg.S3_BUCKET_PROTECTED, existingGame.storageKey).catch(() => {});
+			await deleteObject(cfg.S3_BUCKET_PROTECTED, existingGame.storageKey).catch((err) => {
+				logger().error({ err, assetId: existingGame.id, oldStorageKey: existingGame.storageKey }, 'Failed to delete previous GAME asset object — orphan likely');
+			});
 		} else {
 			try {
 				await repo.createGameAsset({
@@ -302,7 +314,9 @@ export async function completeSession(
 					sizeBytes: session.totalBytes,
 				});
 			} catch (dbErr) {
-				await deleteObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch(() => {});
+				await deleteObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch((err) => {
+					logger().error({ err, sessionId: session.id, storageKey }, 'Failed to delete new S3 object after createGameAsset failed — orphan likely');
+				});
 				throw dbErr;
 			}
 		}
@@ -315,7 +329,9 @@ export async function completeSession(
 			sizeBytes: Number(session.totalBytes),
 		};
 	} catch (err) {
-		await repo.revertToPending(session.id).catch(() => {});
+		await repo.revertToPending(session.id).catch((revertErr) => {
+			logger().error({ err: revertErr, sessionId: session.id }, 'Failed to revert session to PENDING after completion error — session may be stuck in COMPLETING');
+		});
 		throw err;
 	}
 }
@@ -333,7 +349,9 @@ export async function cancelSession(
 
 	await repo.updateSessionStatus(session.id, 'CANCELLED');
 	if (session.s3UploadId && session.s3Key) {
-		await abortMultipartUpload(env().S3_BUCKET_PROTECTED, session.s3Key, session.s3UploadId).catch(() => {});
+		await abortMultipartUpload(env().S3_BUCKET_PROTECTED, session.s3Key, session.s3UploadId).catch((err) => {
+			logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to abort multipart upload during cancelSession');
+		});
 	}
 }
 

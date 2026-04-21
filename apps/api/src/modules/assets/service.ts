@@ -58,7 +58,9 @@ export async function deleteAsset(assetId: number) {
 	await repo.markAssetDeleting(asset.id);
 
 	const bucket = bucketForKind(asset.kind);
-	await deleteObject(bucket, asset.storageKey).catch(() => {});
+	await deleteObject(bucket, asset.storageKey).catch((err) => {
+		logger().error({ err, assetId: asset.id, storageKey: asset.storageKey, bucket }, 'Failed to delete S3 object during deleteAsset — orphan likely');
+	});
 
 	if (asset.project.posterAssetId === asset.id) {
 		await repo.clearPosterIfMatches(asset.projectId, asset.id);

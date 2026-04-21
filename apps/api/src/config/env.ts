@@ -93,6 +93,11 @@ export function loadEnv(): Env {
     process.exit(1);
   }
   _env = result.data;
+  if (!_env.ALLOWED_GOOGLE_HD) {
+    console.warn(
+      '⚠  ALLOWED_GOOGLE_HD is empty — any Google account can sign up. Set it to your institution domain (e.g. "g.pcu.ac.kr") in production.',
+    );
+  }
   return _env;
 }
 

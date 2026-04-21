@@ -9,6 +9,7 @@ import { env } from '../../../config/env.js';
 import { badRequest, forbidden, notFound, payloadTooLarge } from '../../../shared/errors.js';
 import { bucketForKind } from '../../../lib/s3.js';
 import { deleteObject } from '../../../lib/storage.js';
+import { logger } from '../../../lib/logger.js';
 import { toSlug } from '../../../shared/slug.js';
 import { isPosterUrlSafe, assertValidPosterAsset } from '../../../shared/poster-validation.js';
 import {
@@ -390,7 +391,9 @@ export async function addAssetToProject(
 
 		let asset;
 		if (existingReplaceable) {
-			await deleteObject(bucketForKind(savedFile.kind), existingReplaceable.storageKey).catch(() => {});
+			await deleteObject(bucketForKind(savedFile.kind), existingReplaceable.storageKey).catch((err) => {
+				logger().error({ err, assetId: existingReplaceable!.id, oldStorageKey: existingReplaceable!.storageKey, kind: savedFile.kind }, 'Failed to delete previous replaceable asset object — orphan likely');
+			});
 
 			asset = await repo.updateAssetFile(existingReplaceable.id, {
 				storageKey: savedFile.storageKey,
