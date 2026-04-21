@@ -5,6 +5,9 @@ on:
     branches: [master]
     paths:
       - 'apps/api/**'
+      - 'packages/contracts/**'
+      - 'package.json'
+      - 'package-lock.json'
       - 'docker-compose.yml'
       - 'server/deploy.sh'
       - '.github/workflows/deploy-api.yml'
@@ -27,7 +30,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
-          context: apps/api
+          context: .
           file: apps/api/Dockerfile
           push: true
           platforms: ${{ vars.API_TARGET_PLATFORMS || 'linux/amd64' }}

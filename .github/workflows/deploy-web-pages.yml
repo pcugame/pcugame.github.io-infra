@@ -5,6 +5,10 @@ on:
     branches: [master]
     paths:
       - 'apps/web/**'
+      - 'packages/contracts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-web-pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -25,11 +29,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        working-directory: apps/web
-        run: npm ci
+        run: npm ci --workspace=apps/web --include-workspace-root
 
       - name: Build
         working-directory: apps/web
