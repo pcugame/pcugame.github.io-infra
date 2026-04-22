@@ -112,6 +112,14 @@ export function createByteLimiter(maxBytes: number, label = 'File'): Transform {
 
 let _activeUploads = 0;
 
+/**
+ * Conservative hint clients use to back off before the next attempt. A typical
+ * upload finishes in well under a minute; 10s keeps retries responsive while
+ * giving the queue room to drain. Emitted as `Retry-After` by the global error
+ * handler (see `app.ts`) when this throws 429.
+ */
+export const UPLOAD_RETRY_AFTER_SEC = 10;
+
 export function acquireUploadSlot(maxConcurrent?: number): void {
 	const max = maxConcurrent ?? env().UPLOAD_MAX_CONCURRENT;
 	if (_activeUploads >= max) {
@@ -119,6 +127,7 @@ export function acquireUploadSlot(maxConcurrent?: number): void {
 			429,
 			`Server is processing ${_activeUploads} uploads. Please try again shortly.`,
 			'TOO_MANY_UPLOADS',
+			{ retryAfterSec: UPLOAD_RETRY_AFTER_SEC },
 		);
 	}
 	_activeUploads++;

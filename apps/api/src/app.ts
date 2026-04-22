@@ -131,6 +131,20 @@ export async function buildApp() {
 	// Global error handler
 	app.setErrorHandler((error: FastifyError, _request, reply) => {
 		if (error instanceof AppError) {
+			// Some AppErrors carry a backoff hint in `details.retryAfterSec` (e.g. the
+			// upload-semaphore 429). Promote it to a real `Retry-After` header so clients
+			// and intermediaries don't have to parse the JSON body to know when to retry.
+			if (
+				error.statusCode === 429
+				&& error.details
+				&& typeof error.details === 'object'
+				&& 'retryAfterSec' in (error.details as Record<string, unknown>)
+			) {
+				const hint = (error.details as { retryAfterSec?: unknown }).retryAfterSec;
+				if (typeof hint === 'number' && hint > 0) {
+					reply.header('Retry-After', String(Math.ceil(hint)));
+				}
+			}
 			const body: ApiError = {
 				ok: false,
 				error: {

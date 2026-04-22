@@ -170,6 +170,7 @@ describe('upload concurrency', () => {
 			expect(err).toBeInstanceOf(AppError);
 			expect((err as AppError).statusCode).toBe(429);
 			expect((err as AppError).message).toContain('3');
+			expect((err as AppError).details).toMatchObject({ retryAfterSec: expect.any(Number) });
 		}
 	});
 
