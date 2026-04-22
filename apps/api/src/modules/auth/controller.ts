@@ -11,7 +11,13 @@ export async function authController(app: FastifyInstance): Promise<void> {
 	const cfg = env();
 
 	/** POST /api/auth/google — Google One-Tap / OAuth login */
-	app.post('/auth/google', async (request, reply) => {
+	const loginRouteConfig: Record<string, unknown> = {
+		rateLimit: {
+			max: cfg.RATE_LIMIT_LOGIN_MAX,
+			timeWindow: cfg.RATE_LIMIT_LOGIN_WINDOW_MS,
+		},
+	};
+	app.post('/auth/google', { config: loginRouteConfig }, async (request, reply) => {
 		const { credential } = parseBody(GoogleLoginBody, request.body);
 		const { user, sessionId, expiresAt } = await authService.loginWithGoogle(credential);
 

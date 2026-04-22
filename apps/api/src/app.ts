@@ -3,6 +3,7 @@ import type { FastifyError } from 'fastify';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { registerHelmet } from './plugins/helmet.js';
+import { registerRateLimit } from './plugins/rate-limit.js';
 import { registerCors } from './plugins/cors.js';
 import { registerCookie } from './plugins/cookie.js';
 import { registerMultipart } from './plugins/multipart.js';
@@ -45,6 +46,7 @@ export async function buildApp() {
 
 	// Plugins
 	await registerHelmet(app);
+	await registerRateLimit(app);
 	await registerCors(app);
 	await registerCookie(app);
 	await registerMultipart(app);
@@ -136,6 +138,22 @@ export async function buildApp() {
 				error: { code: 'PAYLOAD_TOO_LARGE', message: 'File too large' },
 			};
 			reply.status(413).send(body);
+			return;
+		}
+
+		// Rate-limit plugin throws an error with statusCode 429; its onExceeding/onExceeded
+		// hooks already set `x-ratelimit-*` + `retry-after` headers. The message carries the
+		// per-route retry window. Normalize to the project's ApiError envelope here so clients
+		// don't need to special-case the raw fastify error shape.
+		if (error.statusCode === 429) {
+			const body: ApiError = {
+				ok: false,
+				error: {
+					code: 'RATE_LIMITED',
+					message: error.message || 'Too many requests',
+				},
+			};
+			reply.status(429).send(body);
 			return;
 		}
 

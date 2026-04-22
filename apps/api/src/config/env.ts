@@ -50,6 +50,18 @@ const envSchema = z
     // Leave empty or 'false' when the API is directly exposed (no proxy).
     TRUST_PROXY: z.string().default('false'),
 
+    // ── Rate limits (req per window, per client IP) ──────────
+    // Global baseline for every route not explicitly allowlisted. Kept permissive
+    // so legitimate traffic (page-of-projects listing, thumbnails) never trips it.
+    RATE_LIMIT_GLOBAL_MAX: z.coerce.number().int().positive().default(300),
+    RATE_LIMIT_GLOBAL_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+    // Login endpoint — tight because credential stuffing is the common abuse.
+    RATE_LIMIT_LOGIN_MAX: z.coerce.number().int().positive().default(20),
+    RATE_LIMIT_LOGIN_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+    // Project submit — uploads are a rare, heavyweight action.
+    RATE_LIMIT_SUBMIT_MAX: z.coerce.number().int().positive().default(30),
+    RATE_LIMIT_SUBMIT_WINDOW_MS: z.coerce.number().int().positive().default(3_600_000),
+
     // ── Upload limits (MB / count) ──────────────────────────
     // USER limits (tighter — for regular students)
     UPLOAD_USER_IMAGE_MAX_MB: z.coerce.number().positive().default(10),

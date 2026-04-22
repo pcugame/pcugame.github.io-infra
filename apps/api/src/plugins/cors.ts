@@ -8,6 +8,13 @@ export async function registerCors(app: FastifyInstance): Promise<void> {
 		credentials: true,
 		methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
 		allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+		exposedHeaders: [
+			'X-Request-Id',
+			'X-RateLimit-Limit',
+			'X-RateLimit-Remaining',
+			'X-RateLimit-Reset',
+			'Retry-After',
+		],
 	});
 
 	// Chrome Private Network Access: 공개 사이트(GitHub Pages)에서

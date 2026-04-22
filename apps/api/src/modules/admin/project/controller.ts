@@ -90,9 +90,19 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 
 	/** POST /projects/submit — create project with multipart file upload */
 	const uploadBodyLimit = env().UPLOAD_PRIVILEGED_REQUEST_MAX_MB * 1024 * 1024;
+	const submitRouteConfig: Record<string, unknown> = {
+		rateLimit: {
+			max: env().RATE_LIMIT_SUBMIT_MAX,
+			timeWindow: env().RATE_LIMIT_SUBMIT_WINDOW_MS,
+		},
+	};
 	app.post(
 		'/projects/submit',
-		{ preHandler: requireLogin, bodyLimit: uploadBodyLimit },
+		{
+			preHandler: requireLogin,
+			bodyLimit: uploadBodyLimit,
+			config: submitRouteConfig,
+		},
 		async (request, reply) => {
 			const result = await projectService.submitProject(request as any);
 			sendCreated(reply, result);
