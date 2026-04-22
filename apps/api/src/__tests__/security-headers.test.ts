@@ -64,4 +64,17 @@ describe('security headers (helmet)', () => {
 		const res = await app.inject({ method: 'GET', url: '/api/health' });
 		expect(res.headers['cross-origin-resource-policy']).toBe('cross-origin');
 	});
+
+	it('emits x-request-id on every response', async () => {
+		const res = await app.inject({ method: 'GET', url: '/api/health' });
+		const reqId = res.headers['x-request-id'];
+		expect(reqId).toBeDefined();
+		expect(String(reqId)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+	});
+
+	it('generates a distinct x-request-id per request', async () => {
+		const a = await app.inject({ method: 'GET', url: '/api/health' });
+		const b = await app.inject({ method: 'GET', url: '/api/health' });
+		expect(a.headers['x-request-id']).not.toBe(b.headers['x-request-id']);
+	});
 });

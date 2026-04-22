@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import type { FastifyError } from 'fastify';
 import { env } from './config/env.js';
-import { logger } from './lib/logger.js';
+import { logger, rootLogger } from './lib/logger.js';
+import { requestContext } from './lib/request-context.js';
 import { registerHelmet } from './plugins/helmet.js';
 import { registerRateLimit } from './plugins/rate-limit.js';
 import { registerCors } from './plugins/cors.js';
@@ -33,6 +35,9 @@ export async function buildApp() {
 		logger: false,
 		bodyLimit: 2 * 1024 * 1024, // 2 MB for JSON bodies
 		trustProxy: parseTrustProxy(cfg.TRUST_PROXY),
+		// Fixed-width UUIDs beat the default monotonically-increasing string for
+		// log correlation across multiple instances behind a load balancer.
+		genReqId: () => randomUUID(),
 	});
 
 	// In-flight counter so shutdown can wait for active requests to finish.
@@ -42,6 +47,16 @@ export async function buildApp() {
 	});
 	app.addHook('onResponse', async () => {
 		decInFlight();
+	});
+
+	// Seed the AsyncLocalStorage request context. `enterWith` mutates the current
+	// async scope so every downstream `await` (plugins, handlers, services, repos)
+	// sees the same child logger. Also echo the request id on the response so
+	// clients/ops can cross-reference a failing request with server logs.
+	app.addHook('onRequest', async (request, reply) => {
+		const log = rootLogger().child({ reqId: request.id });
+		requestContext.enterWith({ reqId: request.id, log });
+		reply.header('x-request-id', request.id);
 	});
 
 	// Plugins
