@@ -98,17 +98,16 @@ describe('rate-limit plugin', () => {
 		expect(codes.slice(3).some((c) => c === 429)).toBe(true);
 	});
 
-	it('exempts /api/health from the rate limiter', async () => {
-		const healthIp = '203.0.113.9';
-		const codes: number[] = [];
-		for (let i = 0; i < 10; i++) {
-			const res = await app.inject({
-				method: 'GET',
-				url: '/api/health',
-				remoteAddress: healthIp,
-			});
-			codes.push(res.statusCode);
-		}
-		expect(codes.every((c) => c !== 429)).toBe(true);
-	});
+	it.each(['/api/health', '/api/health/deep'])(
+		'exempts %s from the rate limiter',
+		async (url) => {
+			const healthIp = '203.0.113.9';
+			const codes: number[] = [];
+			for (let i = 0; i < 10; i++) {
+				const res = await app.inject({ method: 'GET', url, remoteAddress: healthIp });
+				codes.push(res.statusCode);
+			}
+			expect(codes.every((c) => c !== 429)).toBe(true);
+		},
+	);
 });

@@ -4,9 +4,11 @@ import { env } from '../config/env.js';
 import type { ApiError } from '../shared/http.js';
 
 /**
- * IP-based request rate-limiter. Applied globally, but two paths are allowlisted:
+ * IP-based request rate-limiter. Applied globally, but two classes of paths are
+ * allowlisted:
  *
- * - `/api/health` — monitoring probes should never trip the limiter.
+ * - `/api/health` and `/api/health/deep` — monitoring probes should never trip
+ *   the limiter, and the LB polls the shallow one on a short interval.
  * - `/api/assets/protected/*` — already covered by the domain-specific download
  *   limiter in `shared/download-rate-limit.ts` (IP ban on 30 hits / 15min). Running
  *   both on the same path would double-count and confuse operators.
@@ -28,6 +30,7 @@ export async function registerRateLimit(app: FastifyInstance): Promise<void> {
 		keyGenerator: (req: FastifyRequest) => req.ip,
 		allowList: (req: FastifyRequest) =>
 			req.url === '/api/health'
+			|| req.url === '/api/health/deep'
 			|| req.url.startsWith('/api/assets/protected/'),
 		skipOnError: true,
 		// The plugin reads `statusCode` from our returned object to set the HTTP status,

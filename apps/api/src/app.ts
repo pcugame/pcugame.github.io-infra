@@ -68,8 +68,11 @@ export async function buildApp() {
 	await registerAuth(app);
 	await registerCsrf(app);
 
-	// Health check — DB ping + storage write test. Flips to 503 when the process is draining
-	// so the load balancer stops routing new traffic before we start closing connections.
+	// Shallow health — DB + lifecycle only. This is what the LB / Docker HEALTHCHECK
+	// consults, so an S3 (Garage) outage must NOT flip the container to unhealthy:
+	// most routes don't touch S3, and removing the API from rotation just because
+	// object storage blipped would be worse than serving those routes degraded.
+	// 503 when draining/shutting_down so the LB stops routing new traffic.
 	app.get('/api/health', async (_req, reply) => {
 		const state = getLifecycleState();
 		if (state === 'draining' || state === 'shutting_down') {
@@ -78,8 +81,6 @@ export async function buildApp() {
 		}
 
 		const checks: Record<string, 'ok' | 'fail'> = {};
-
-		// DB connectivity
 		try {
 			await prisma.$queryRaw`SELECT 1`;
 			checks.db = 'ok';
@@ -87,7 +88,28 @@ export async function buildApp() {
 			checks.db = 'fail';
 		}
 
-		// S3 connectivity — probe a non-existent key (HeadObject returns null, not error)
+		const ok = checks.db === 'ok';
+		reply.status(ok ? 200 : 503).send({ ok, state, timestamp: new Date().toISOString(), checks });
+	});
+
+	// Deep health — DB + S3 probe. For monitoring dashboards / ops that want the full
+	// picture. Not wired to the LB so S3 alone can't take the API out of rotation.
+	app.get('/api/health/deep', async (_req, reply) => {
+		const state = getLifecycleState();
+		if (state === 'draining' || state === 'shutting_down') {
+			reply.status(503).send({ ok: false, state, timestamp: new Date().toISOString() });
+			return;
+		}
+
+		const checks: Record<string, 'ok' | 'fail'> = {};
+
+		try {
+			await prisma.$queryRaw`SELECT 1`;
+			checks.db = 'ok';
+		} catch {
+			checks.db = 'fail';
+		}
+
 		const cfg = env();
 		try {
 			await headObject(cfg.S3_BUCKET_PUBLIC, '.healthcheck');
