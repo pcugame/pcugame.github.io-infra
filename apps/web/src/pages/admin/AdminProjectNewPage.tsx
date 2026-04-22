@@ -14,6 +14,7 @@ import { useMe } from '../../features/auth';
 import { getClientUploadLimits } from '../../lib/upload-limits';
 import GameUploadWidget from '../../components/GameUploadWidget';
 import ExhibitionSelect from '../../components/ExhibitionSelect';
+import { ProjectPreviewModal } from '../../components/project';
 
 export default function AdminProjectNewPage() {
   const navigate = useNavigate();
@@ -34,6 +35,7 @@ export default function AdminProjectNewPage() {
     register,
     control,
     handleSubmit,
+    getValues,
     formState: { errors },
   } = useForm<SubmitProjectPayloadInput>({
     resolver: zodResolver(SubmitProjectPayloadSchema),
@@ -102,6 +104,12 @@ export default function AdminProjectNewPage() {
 
   // ── 게임 청크 업로드 (프로젝트 생성 후) ────────────────────
   const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
+
+  // ── 미리보기 모달 ──────────────────────────────────────────
+  const [previewSnapshot, setPreviewSnapshot] = useState<SubmitProjectPayloadInput | null>(null);
+
+  const openPreview = () => setPreviewSnapshot(getValues());
+  const closePreview = () => setPreviewSnapshot(null);
 
   // Cleanup poster ObjectURL on unmount
   useEffect(() => {
@@ -497,8 +505,36 @@ export default function AdminProjectNewPage() {
           >
             {isSubmitting ? '등록 중…' : '작품 등록'}
           </button>
+          <button
+            type="button"
+            className="btn btn--secondary btn--large"
+            onClick={openPreview}
+            disabled={isSubmitting}
+          >
+            미리보기
+          </button>
         </div>
       </form>
+      )}
+
+      {previewSnapshot && (
+        <ProjectPreviewModal
+          values={{
+            title: previewSnapshot.title,
+            summary: previewSnapshot.summary || undefined,
+            description: previewSnapshot.description || undefined,
+            members: previewSnapshot.members.map((m) => ({
+              name: m.name,
+              studentId: m.studentId,
+            })),
+          }}
+          poster={posterFile}
+          images={imageFiles}
+          video={videoFile}
+          game={gameFile}
+          exhibitionLabel={selectedYearItem ? `${selectedYearItem.year}년 전시` : undefined}
+          onClose={closePreview}
+        />
       )}
     </div>
   );
