@@ -1,4 +1,5 @@
 import { S3Client } from '@aws-sdk/client-s3';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { env } from '../config/env.js';
 import type { AssetKind } from '@prisma/client';
 
@@ -15,6 +16,14 @@ export function s3(): S3Client {
 			secretAccessKey: e.S3_SECRET_ACCESS_KEY,
 		},
 		forcePathStyle: e.S3_FORCE_PATH_STYLE,
+		// Without these, a Garage hiccup can hang /api/health or a game download
+		// indefinitely (SDK v3 defaults to no timeout). 30s covers small ops; the
+		// chunked-upload multipart path sizes its own per-chunk timeouts.
+		requestHandler: new NodeHttpHandler({
+			connectionTimeout: 5_000,
+			requestTimeout: 30_000,
+		}),
+		maxAttempts: 3,
 	});
 	return _client;
 }

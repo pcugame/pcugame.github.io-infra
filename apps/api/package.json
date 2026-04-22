@@ -26,6 +26,7 @@
     "@fastify/rate-limit": "^10.3.0",
     "@pcu/contracts": "*",
     "@prisma/client": "6.11.0",
+    "@smithy/node-http-handler": "^4.6.0",
     "fastify": "^5.1.0",
     "google-auth-library": "^9.14.2",
     "pdf-to-img": "^6.0.0",
