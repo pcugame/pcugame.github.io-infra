@@ -261,6 +261,44 @@ export const MOCK_YEAR_PROJECTS: Record<number, MockProjectCard[]> = {
 	2022: MOCK_PROJECTS_2022,
 };
 
+// ── USER(id=3) 소유 mock 작품 ────────────────────────────────
+// MyProjectsPage가 비어있지 않도록 학생 본인 소유 드래프트/공개작을 시드한다.
+// 연도별 공개 목록(MOCK_YEAR_PROJECTS)에는 포함하지 않는다 — "내 작품" 전용 시드.
+
+interface MockMyProjectCard extends MockProjectCard {
+	year: number;
+	status: 'DRAFT' | 'PUBLISHED';
+	ownerId: number;
+	updatedAgoSec: number;
+}
+
+export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
+	{
+		id: 9001, slug: 'my-rhythm-proto', title: '리듬 게임 프로토타입',
+		summary: '비트 시각화를 실험 중인 초안입니다.',
+		posterUrl: 'https://placehold.co/400x560/0f172a/fbbf24?text=Rhythm+Proto',
+		members: [{ name: '학생', studentId: '2088099' }],
+		year: 2025, status: 'DRAFT', ownerId: 3, updatedAgoSec: 0,
+	},
+	{
+		id: 9002, slug: 'my-untitled-demo', title: 'Untitled Game Demo',
+		summary: '탑다운 슈터 데모 — 내부 테스트용 공개',
+		posterUrl: 'https://placehold.co/400x560/1e293b/38bdf8?text=Untitled+Demo',
+		members: [
+			{ name: '학생', studentId: '2088099' },
+			{ name: '테스트파트너', studentId: '2088100' },
+		],
+		year: 2025, status: 'PUBLISHED', ownerId: 3, updatedAgoSec: 86400,
+	},
+	{
+		id: 9003, slug: 'my-puzzle-wip', title: '퍼즐 게임 (작업 중)',
+		summary: '3-매치 기반 퍼즐 프로토타입',
+		posterUrl: 'https://placehold.co/400x560/1e1b4b/a78bfa?text=Puzzle+WIP',
+		members: [{ name: '학생', studentId: '2088099' }],
+		year: 2025, status: 'DRAFT', ownerId: 3, updatedAgoSec: 7 * 86400,
+	},
+];
+
 // ── 프로젝트 상세 빌더 ──────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -295,6 +333,10 @@ export function findProjectDetail(idOrSlug: string | number, year?: number): any
 		const card = cards.find((c) => c.slug === String(idOrSlug) || c.id === Number(idOrSlug));
 		if (card) return buildDetail(card, y);
 	}
+	const draft = MOCK_MY_PROJECTS.find(
+		(c) => c.slug === String(idOrSlug) || c.id === Number(idOrSlug),
+	);
+	if (draft) return buildDetail(draft, draft.year);
 	return undefined;
 }
 
@@ -309,7 +351,9 @@ export const MOCK_ADMIN_YEARS: any[] = MOCK_YEARS.map((y, i) => ({
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildAdminProjectItems(): any[] {
+export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: boolean }): any[] {
+	const isPrivileged = opts?.isPrivileged ?? true;
+	const userId = opts?.userId;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const items: any[] = [];
 	for (const [yearStr, cards] of Object.entries(MOCK_YEAR_PROJECTS)) {
@@ -317,11 +361,26 @@ export function buildAdminProjectItems(): any[] {
 			items.push({
 				id: card.id, title: card.title, slug: card.slug,
 				year: Number(yearStr), status: 'PUBLISHED',
-				createdByUserName: '테스트', updatedAt: new Date().toISOString(),
-				memberNames: ['팀원A', '팀원B'],
+				createdByUserName: '관리자', updatedAt: new Date().toISOString(),
+				memberNames: card.members.map((m) => m.name),
 				isIncomplete: false,
+				createdByUserId: 1,
 			});
 		}
+	}
+	for (const d of MOCK_MY_PROJECTS) {
+		items.push({
+			id: d.id, title: d.title, slug: d.slug,
+			year: d.year, status: d.status,
+			createdByUserName: '학생',
+			updatedAt: new Date(Date.now() - d.updatedAgoSec * 1000).toISOString(),
+			memberNames: d.members.map((m) => m.name),
+			isIncomplete: d.status === 'DRAFT',
+			createdByUserId: d.ownerId,
+		});
+	}
+	if (!isPrivileged && userId != null) {
+		return items.filter((it) => it.createdByUserId === userId);
 	}
 	return items;
 }

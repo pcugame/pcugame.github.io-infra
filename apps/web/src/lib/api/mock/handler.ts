@@ -123,8 +123,12 @@ const routes: MockRoute[] = [
 	{
 		pattern: /^\/api\/admin\/projects$/,
 		handler: () => {
-			requireAdmin();
-			return { items: buildAdminProjectItems() };
+			// 실제 API와 동일하게: ADMIN/OPERATOR는 전체, USER는 본인 소유만 반환.
+			// /me/projects 페이지가 USER 역할에서도 비어있지 않도록 한다.
+			const role = getMockRole();
+			const user = getMockUser();
+			const isPrivileged = role === 'ADMIN' || role === 'OPERATOR';
+			return { items: buildAdminProjectItems({ userId: user.id, isPrivileged }) };
 		},
 	},
 
