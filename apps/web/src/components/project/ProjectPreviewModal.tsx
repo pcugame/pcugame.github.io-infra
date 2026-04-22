@@ -102,7 +102,6 @@ export function ProjectPreviewModal({
 	const safeIndex =
 		mediaItems.length > 0 ? Math.min(activeIndex, mediaItems.length - 1) : 0;
 	const current = mediaItems[safeIndex] ?? null;
-	const isZoomable = current?.kind === 'poster-img' || current?.kind === 'image';
 
 	const visibleMembers = values.members.filter((m) => m.name || m.studentId);
 
