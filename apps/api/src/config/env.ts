@@ -104,12 +104,47 @@ export type Env = z.infer<typeof envSchema>;
 
 let _env: Env | undefined;
 
+/**
+ * Fixed-phrase hint per Zod issue code. Intentionally does NOT consult
+ * `issue.message` or any received value — some codes (e.g. `invalid_enum_value`)
+ * default to messages that include the offending value, and env values can be
+ * secrets. Keeping the hint constant guarantees nothing sensitive leaks to stderr.
+ */
+const ENV_ISSUE_HINT: Record<string, string> = {
+  invalid_type: 'is missing or has the wrong type',
+  invalid_string: 'is not a valid string (url / email / regex)',
+  too_small: 'is shorter or smaller than required',
+  too_big: 'is longer or larger than allowed',
+  invalid_enum_value: 'must be one of the allowed values',
+  invalid_union: 'does not match any accepted shape',
+  invalid_literal: 'does not match the required literal',
+  custom: 'failed a custom validation rule',
+};
+
+/**
+ * Format Zod env-validation issues into one line per field — `PATH: hint`.
+ *
+ * Deliberately ignores `issue.message` and any other value-derived text, so we
+ * can't accidentally print the contents of, e.g., `SESSION_SECRET` or a token
+ * that was supposed to be a URL. The hint column uses {@link ENV_ISSUE_HINT}
+ * by code alone.
+ */
+export function formatEnvIssues(issues: z.ZodIssue[]): string[] {
+  return issues.map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join('.') : '(root)';
+    const hint = ENV_ISSUE_HINT[issue.code] ?? `failed validation (${issue.code})`;
+    return `  - ${path}: ${hint}`;
+  });
+}
+
 export function loadEnv(): Env {
   if (_env) return _env;
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     console.error('❌ Invalid environment variables:');
-    console.error(result.error.flatten().fieldErrors);
+    for (const line of formatEnvIssues(result.error.issues)) {
+      console.error(line);
+    }
     process.exit(1);
   }
   _env = result.data;
