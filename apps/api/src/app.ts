@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import type { FastifyError } from 'fastify';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
+import { registerHelmet } from './plugins/helmet.js';
 import { registerCors } from './plugins/cors.js';
 import { registerCookie } from './plugins/cookie.js';
 import { registerMultipart } from './plugins/multipart.js';
@@ -43,6 +44,7 @@ export async function buildApp() {
 	});
 
 	// Plugins
+	await registerHelmet(app);
 	await registerCors(app);
 	await registerCookie(app);
 	await registerMultipart(app);
