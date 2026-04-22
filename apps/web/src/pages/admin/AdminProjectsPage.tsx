@@ -6,6 +6,7 @@ import type { ProjectStatus } from '../../contracts';
 import { adminProjectApi, getApiErrorMessage } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { useMe } from '../../features/auth';
+import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
@@ -45,6 +46,8 @@ export default function AdminProjectsPage() {
 	// ── Filters ──────────────────────────────────────────
 	const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'ALL'>('ALL');
 	const [search, setSearch] = useState('');
+	const [isComposing, setIsComposing] = useState(false);
+	const debouncedSearch = useDebouncedValue(search, 250, isComposing);
 	const [sortKey, setSortKey] = useState<SortKey>('year');
 	const [sortDir, setSortDir] = useState<SortDir>('desc');
 
@@ -81,8 +84,8 @@ export default function AdminProjectsPage() {
 			? projects
 			: projects.filter((p) => p.status === statusFilter);
 
-		if (search.trim()) {
-			const q = search.trim().toLowerCase();
+		if (debouncedSearch.trim()) {
+			const q = debouncedSearch.trim().toLowerCase();
 			list = list.filter((p) =>
 				p.title.toLowerCase().includes(q) ||
 				String(p.year).includes(q) ||
@@ -102,7 +105,7 @@ export default function AdminProjectsPage() {
 		});
 
 		return list;
-	}, [projects, statusFilter, search, sortKey, sortDir]);
+	}, [projects, statusFilter, debouncedSearch, sortKey, sortDir]);
 
 	const statusCounts = {
 		ALL: projects.length,
@@ -228,6 +231,11 @@ export default function AdminProjectsPage() {
 					placeholder="제목, 연도, 작성자 검색..."
 					value={search}
 					onChange={(e) => setSearch(e.target.value)}
+					onCompositionStart={() => setIsComposing(true)}
+					onCompositionEnd={(e) => {
+						setIsComposing(false);
+						setSearch((e.target as HTMLInputElement).value);
+					}}
 				/>
 				{isPrivileged && selected.size > 0 && (
 					<div className="admin-bulk-actions">
