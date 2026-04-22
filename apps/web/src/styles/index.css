@@ -2815,6 +2815,17 @@ fieldset.status-section legend {
   margin-top: 0.25rem;
 }
 
+.file-selected-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.file-selected-row .file-info {
+  margin-top: 0;
+}
+
 /* ── Edit Page ────────────────────────────────────────────────── */
 
 .edit-meta {

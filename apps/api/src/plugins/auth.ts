@@ -14,6 +14,7 @@ declare module 'fastify' {
       email: string;
       name: string;
       role: UserRole;
+      studentId?: string;
     };
   }
 }
@@ -62,6 +63,7 @@ async function resolveSession(request: FastifyRequest, reply: FastifyReply): Pro
     email: session.user.email,
     name: session.user.name,
     role: session.user.role,
+    studentId: session.user.studentId ?? undefined,
   };
 }
 

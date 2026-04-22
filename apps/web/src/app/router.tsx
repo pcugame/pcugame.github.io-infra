@@ -15,6 +15,7 @@ const ExhibitionProjectsPage = lazy(() => import('../pages/ExhibitionProjectsPag
 const ProjectDetailPage = lazy(() => import('../pages/ProjectDetailPage'));
 const LoginPage = lazy(() => import('../pages/LoginPage'));
 const MePage = lazy(() => import('../pages/MePage'));
+const MyProjectsPage = lazy(() => import('../pages/MyProjectsPage'));
 const AdminProjectsPage = lazy(() => import('../pages/admin/AdminProjectsPage'));
 const AdminProjectNewPage = lazy(() => import('../pages/admin/AdminProjectNewPage'));
 const AdminProjectEditPage = lazy(() => import('../pages/admin/AdminProjectEditPage'));
@@ -98,6 +99,16 @@ export const router = createBrowserRouter(
             <RequireAuth>
               <Lazy>
                 <MePage />
+              </Lazy>
+            </RequireAuth>
+          ),
+        },
+        {
+          path: '/me/projects',
+          element: (
+            <RequireAuth>
+              <Lazy>
+                <MyProjectsPage />
               </Lazy>
             </RequireAuth>
           ),

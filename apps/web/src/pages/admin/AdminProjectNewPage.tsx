@@ -43,7 +43,13 @@ export default function AdminProjectNewPage() {
       summary: '',
       description: '',
       autoPublish: false,
-      members: [{ name: '', studentId: '' }],
+      members: [
+        {
+          name: user?.name ?? '',
+          studentId: user?.studentId ?? '',
+          userId: user?.id,
+        },
+      ],
     },
   });
 
@@ -64,6 +70,35 @@ export default function AdminProjectNewPage() {
   const [posterPreview, setPosterPreview] = useState<string | null>(null);
   const [fileSizeError, setFileSizeError] = useState<string | null>(null);
   const posterPreviewRef = useRef<string | null>(null);
+  const posterInputRef = useRef<HTMLInputElement>(null);
+  const imagesInputRef = useRef<HTMLInputElement>(null);
+  const gameInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+
+  const clearPoster = () => {
+    if (posterPreviewRef.current) {
+      URL.revokeObjectURL(posterPreviewRef.current);
+      posterPreviewRef.current = null;
+    }
+    setPosterFile(null);
+    setPosterPreview(null);
+    if (posterInputRef.current) posterInputRef.current.value = '';
+  };
+
+  const clearImages = () => {
+    setImageFiles([]);
+    if (imagesInputRef.current) imagesInputRef.current.value = '';
+  };
+
+  const clearGameFile = () => {
+    setGameFile(null);
+    if (gameInputRef.current) gameInputRef.current.value = '';
+  };
+
+  const clearVideo = () => {
+    setVideoFile(null);
+    if (videoInputRef.current) videoInputRef.current.value = '';
+  };
 
   // ── 게임 청크 업로드 (프로젝트 생성 후) ────────────────────
   const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
@@ -345,8 +380,23 @@ export default function AdminProjectNewPage() {
               id="poster"
               type="file"
               accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
+              ref={posterInputRef}
               onChange={handlePosterChange}
             />
+            {posterFile && (
+              <div className="file-selected-row">
+                <p className="file-info">
+                  {posterFile.name} ({(posterFile.size / 1024 / 1024).toFixed(1)}MB)
+                </p>
+                <button
+                  type="button"
+                  className="btn btn--danger btn--small"
+                  onClick={clearPoster}
+                >
+                  제거
+                </button>
+              </div>
+            )}
             {posterPreview && (
               <div className="poster-preview">
                 <img src={posterPreview} alt="포스터 미리보기" />
@@ -361,10 +411,20 @@ export default function AdminProjectNewPage() {
               type="file"
               accept="image/jpeg,image/png,image/webp"
               multiple
+              ref={imagesInputRef}
               onChange={handleImagesChange}
             />
             {imageFiles.length > 0 && (
-              <p className="file-info">{imageFiles.length}개 파일 선택됨</p>
+              <div className="file-selected-row">
+                <p className="file-info">{imageFiles.length}개 파일 선택됨</p>
+                <button
+                  type="button"
+                  className="btn btn--danger btn--small"
+                  onClick={clearImages}
+                >
+                  제거
+                </button>
+              </div>
             )}
           </div>
 
@@ -374,12 +434,22 @@ export default function AdminProjectNewPage() {
               id="videoFile"
               type="file"
               accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
+              ref={videoInputRef}
               onChange={handleVideoChange}
             />
             {videoFile && (
-              <p className="file-info">
-                {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)}MB)
-              </p>
+              <div className="file-selected-row">
+                <p className="file-info">
+                  {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)}MB)
+                </p>
+                <button
+                  type="button"
+                  className="btn btn--danger btn--small"
+                  onClick={clearVideo}
+                >
+                  제거
+                </button>
+              </div>
             )}
           </div>
 
@@ -389,12 +459,22 @@ export default function AdminProjectNewPage() {
               id="gameFile"
               type="file"
               accept=".zip,application/zip,application/x-zip-compressed"
+              ref={gameInputRef}
               onChange={handleGameChange}
             />
             {gameFile && (
-              <p className="file-info">
-                {gameFile.name} ({(gameFile.size / 1024 / 1024).toFixed(1)}MB)
-              </p>
+              <div className="file-selected-row">
+                <p className="file-info">
+                  {gameFile.name} ({(gameFile.size / 1024 / 1024).toFixed(1)}MB)
+                </p>
+                <button
+                  type="button"
+                  className="btn btn--danger btn--small"
+                  onClick={clearGameFile}
+                >
+                  제거
+                </button>
+              </div>
             )}
             <p className="field-hint">
               작품 등록 후 자동으로 청크 업로드가 시작됩니다. 중간에 끊겨도 이어서 올릴 수 있습니다.

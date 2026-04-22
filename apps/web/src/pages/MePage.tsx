@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useMe, useLogout } from '../features/auth';
 import { LoadingSpinner } from '../components/common';
 
@@ -40,12 +41,22 @@ export default function MePage() {
             <span className="me-info-item__label">이메일</span>
             <span className="me-info-item__value">{user.email}</span>
           </li>
+          {user.studentId && (
+            <li className="me-info-item">
+              <span className="me-info-item__label">학번</span>
+              <span className="me-info-item__value">{user.studentId}</span>
+            </li>
+          )}
           <li className="me-info-item">
             <span className="me-info-item__label">권한</span>
             <span className="me-info-item__value">{ROLE_LABELS[user.role] ?? user.role}</span>
           </li>
         </ul>
       </div>
+
+      <Link to="/me/projects" className="btn btn--secondary" style={{ marginBottom: '0.75rem' }}>
+        내 작품 관리
+      </Link>
 
       {/* Logout */}
       <button

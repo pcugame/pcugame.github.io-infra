@@ -30,7 +30,13 @@ export async function authController(app: FastifyInstance): Promise<void> {
 		});
 
 		sendOk<GoogleAuthResponse>(reply, {
-			user: { id: user.id, email: user.email, name: user.name, role: user.role },
+			user: {
+				id: user.id,
+				email: user.email,
+				name: user.name,
+				role: user.role,
+				studentId: user.studentId ?? undefined,
+			},
 		});
 	});
 
@@ -62,6 +68,7 @@ export async function authController(app: FastifyInstance): Promise<void> {
 				email: request.currentUser.email,
 				name: request.currentUser.name,
 				role: request.currentUser.role,
+				studentId: request.currentUser.studentId,
 			},
 		});
 	});
