@@ -1,8 +1,11 @@
 import { notFound } from '../../../shared/errors.js';
+import * as projectRepo from '../project/repository.js';
 import * as repo from './repository.js';
 
 /** Add a member to a project */
 export async function addMember(projectId: number, data: { name: string; studentId: string; sortOrder?: number }) {
+	const project = await projectRepo.findProjectById(projectId);
+	if (!project) throw notFound('Project not found');
 	const member = await repo.createMember({ projectId, ...data });
 	return { id: member.id };
 }

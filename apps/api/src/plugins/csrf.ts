@@ -5,44 +5,28 @@ import { forbidden } from '../shared/errors.js';
 /**
  * Pure origin-validation logic — no Fastify dependency, fully testable.
  *
- * Returns `true` if the request should be allowed, throws on denial.
- *
  * Policy:
  * - GET / HEAD / OPTIONS are always allowed (read-only).
- * - For state-changing methods (POST, PATCH, DELETE, PUT):
- *   - If `Origin` header is present, it must match an allowed origin.
- *   - Otherwise fall back to `Referer` header's origin.
- *   - If neither is present, reject — legitimate browser cross-origin
- *     requests always include `Origin`.
+ * - For state-changing methods (POST, PATCH, DELETE, PUT) the `Origin` header
+ *   must be present and match an allowed origin. Browsers always send `Origin`
+ *   on credentialed cross-origin state-changing fetches, so a missing header
+ *   is treated as untrusted. `Referer` is intentionally not consulted — it can
+ *   be stripped by privacy tooling and is weaker evidence than `Origin`.
  */
 export function validateCsrfOrigin(
 	method: string,
 	originHeader: string | undefined,
-	refererHeader: string | undefined,
 	allowedOrigins: ReadonlySet<string>,
 ): void {
 	const upper = method.toUpperCase();
 	if (upper === 'GET' || upper === 'HEAD' || upper === 'OPTIONS') return;
 
-	// Primary: Origin header
-	if (originHeader) {
-		if (allowedOrigins.has(originHeader)) return;
+	if (!originHeader) {
+		throw forbidden('CSRF check failed: missing origin header');
+	}
+	if (!allowedOrigins.has(originHeader)) {
 		throw forbidden(`CSRF check failed: origin '${originHeader}' is not allowed`);
 	}
-
-	// Fallback: Referer header
-	if (refererHeader) {
-		try {
-			const refOrigin = new URL(refererHeader).origin;
-			if (allowedOrigins.has(refOrigin)) return;
-		} catch {
-			// malformed Referer — fall through to rejection
-		}
-		throw forbidden('CSRF check failed: referer origin is not allowed');
-	}
-
-	// No Origin, no Referer — reject
-	throw forbidden('CSRF check failed: missing origin header');
 }
 
 /**
@@ -53,11 +37,6 @@ export async function registerCsrf(app: FastifyInstance): Promise<void> {
 	const allowedOrigins = new Set(env().CORS_ALLOWED_ORIGINS);
 
 	app.addHook('onRequest', async (request) => {
-		validateCsrfOrigin(
-			request.method,
-			request.headers.origin,
-			request.headers.referer,
-			allowedOrigins,
-		);
+		validateCsrfOrigin(request.method, request.headers.origin, allowedOrigins);
 	});
 }

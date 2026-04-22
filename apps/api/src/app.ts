@@ -102,14 +102,25 @@ export async function buildApp() {
 			return;
 		}
 
-		// Fastify validation errors
+		// Fastify validation errors.
+		// Raw `error.validation` leaks schema paths and internal keywords; log it for ops
+		// and return a normalized `{ field, code }` shape that clients can still act on.
 		if (error.validation) {
+			logger().warn({ validation: error.validation }, 'Request validation failed');
+			const details = error.validation.map((v) => ({
+				field: typeof v.instancePath === 'string' && v.instancePath.length > 0
+					? v.instancePath.replace(/^\//, '').replace(/\//g, '.')
+					: (v.params && typeof (v.params as Record<string, unknown>).missingProperty === 'string'
+						? String((v.params as Record<string, unknown>).missingProperty)
+						: ''),
+				code: typeof v.keyword === 'string' ? v.keyword : 'invalid',
+			}));
 			const body: ApiError = {
 				ok: false,
 				error: {
 					code: 'VALIDATION_ERROR',
 					message: 'Validation failed',
-					details: error.validation,
+					details,
 				},
 			};
 			reply.status(400).send(body);

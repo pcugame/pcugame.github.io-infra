@@ -212,13 +212,17 @@ export function findAssetsByProjectIds(projectIds: number[]) {
 
 /** Delete multiple projects (cascades members; assets must be deleted first) */
 export async function bulkDeleteProjects(ids: number[]) {
-	// Clear posterAssetId FK before deleting assets
-	await prisma.project.updateMany({
-		where: { id: { in: ids } },
-		data: { posterAssetId: null },
+	// All three steps share a transaction so a partial failure can't leave the rows in the
+	// half-broken state where posterAssetId is nulled but the asset rows still point at a
+	// project that has been deleted (or worse, vice-versa).
+	return prisma.$transaction(async (tx) => {
+		await tx.project.updateMany({
+			where: { id: { in: ids } },
+			data: { posterAssetId: null },
+		});
+		await tx.asset.deleteMany({ where: { projectId: { in: ids } } });
+		return tx.project.deleteMany({ where: { id: { in: ids } } });
 	});
-	await prisma.asset.deleteMany({ where: { projectId: { in: ids } } });
-	return prisma.project.deleteMany({ where: { id: { in: ids } } });
 }
 
 // ── Transactional project creation (submit) ─────────────────

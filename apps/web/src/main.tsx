@@ -3,12 +3,15 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router-dom';
 import { Providers } from './app/providers';
 import { router } from './app/router';
+import { ErrorBoundary } from './components/common';
 import './styles/index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Providers>
-      <RouterProvider router={router} />
-    </Providers>
+    <ErrorBoundary>
+      <Providers>
+        <RouterProvider router={router} />
+      </Providers>
+    </ErrorBoundary>
   </StrictMode>,
 );

@@ -44,6 +44,7 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 	const [resumeSession, setResumeSession] = useState<GameUploadStatus | null>(null);
 	const controllerRef = useRef<GameUploadController | null>(null);
 	const autoStartedRef = useRef(false);
+	const submittingRef = useRef(false);
 
 	// Check for existing resumable session on mount
 	useEffect(() => {
@@ -97,6 +98,8 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 
 	const handleStart = useCallback(async () => {
 		if (!file) return;
+		if (submittingRef.current) return;
+		submittingRef.current = true;
 		try {
 			const sess = await createGameUploadSession(projectId, file);
 			setSession(sess);
@@ -104,6 +107,8 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 		} catch (err) {
 			setError(getApiErrorMessage(err));
 			setState('error');
+		} finally {
+			submittingRef.current = false;
 		}
 	}, [file, projectId, doUpload]);
 
@@ -128,6 +133,8 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 			setError(`파일 크기 불일치: 선택한 파일 ${file.size}B vs 세션 ${resumeSession.totalBytes}B. 동일한 파일을 선택하세요.`);
 			return;
 		}
+		if (submittingRef.current) return;
+		submittingRef.current = true;
 
 		try {
 			const status = await getGameUploadStatus(resumeSession.sessionId);
@@ -142,6 +149,8 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 		} catch (err) {
 			setError(getApiErrorMessage(err));
 			setState('error');
+		} finally {
+			submittingRef.current = false;
 		}
 	}, [file, resumeSession, doUpload]);
 
@@ -239,17 +248,17 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 			{/* Action buttons */}
 			<div className="game-upload__actions">
 				{state === 'idle' && file && !resumeSession && (
-					<button className="btn btn--primary" onClick={handleStart}>
+					<button className="btn btn--primary" onClick={handleStart} disabled={state !== 'idle'}>
 						업로드 시작
 					</button>
 				)}
 
 				{state === 'idle' && file && resumeSession && (
 					<>
-						<button className="btn btn--primary" onClick={handleResume}>
+						<button className="btn btn--primary" onClick={handleResume} disabled={state !== 'idle'}>
 							이어올리기
 						</button>
-						<button className="btn btn--secondary" onClick={handleStart}>
+						<button className="btn btn--secondary" onClick={handleStart} disabled={state !== 'idle'}>
 							새로 시작
 						</button>
 					</>

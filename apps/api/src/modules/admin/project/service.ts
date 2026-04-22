@@ -6,7 +6,7 @@ import os from 'node:os';
 import type { AssetKind, ProjectStatus } from '@prisma/client';
 import type { AdminProjectItem, AdminProjectDetail } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
-import { badRequest, forbidden, notFound, payloadTooLarge } from '../../../shared/errors.js';
+import { badRequest, conflict, forbidden, isUniqueConstraintError, notFound, payloadTooLarge } from '../../../shared/errors.js';
 import { bucketForKind } from '../../../lib/s3.js';
 import { safeDeleteObject } from '../../../lib/storage.js';
 import { logger } from '../../../lib/logger.js';
@@ -185,6 +185,11 @@ async function generateUniqueSlug(exhibitionId: number, title: string): Promise<
 	return slug;
 }
 
+/** Next candidate in the `-1`, `-2`, ... series used when we lose the slug race. */
+function nextSlugCandidate(baseSlug: string, attempt: number): string {
+	return attempt === 0 ? baseSlug : `${baseSlug}-${attempt}`;
+}
+
 /** Multipart file part collected during submit */
 export interface CollectedFilePart {
 	tmpPath: string;
@@ -289,38 +294,66 @@ export async function submitProject(
 		const exhibition = await repo.findExhibitionById(exhibitionId);
 		assertUploadAllowed(exhibition, exhibitionId, user.role as any);
 
-		const slug = await generateUniqueSlug(exhibition!.id, title);
+		const baseSlug = toSlug(title);
+		let slug = await generateUniqueSlug(exhibition!.id, title);
 		const savedFiles = await processFileParts(fileParts, pipeline);
 		const status: ProjectStatus = autoPublish ? 'PUBLISHED' : 'DRAFT';
 
-		const project = await repo.createProjectWithAssets({
-			exhibitionId: exhibition!.id,
-			slug,
-			title,
-			summary,
-			description,
-			status,
-			creatorId: user.id,
-			members: members.map((m) => ({
-				...m,
-				// If no userId provided, auto-link creator by checking member name
-				userId: m.userId,
-			})),
-			savedFiles: savedFiles.map((sf) => ({
-				kind: sf.kind,
-				storageKey: sf.storageKey,
-				originalName: sf.originalName,
-				mimeType: sf.mimeType,
-				sizeBytes: sf.sizeBytes,
-			})),
-		});
+		// Retry on slug TOCTOU: between generateUniqueSlug's SELECT and createProjectWithAssets'
+		// INSERT, a concurrent submit can claim the same slug. P2002 on `slug` → pick the next
+		// candidate and retry. Cap retries so a truly stuck state (e.g. DB error) surfaces.
+		let project: Awaited<ReturnType<typeof repo.createProjectWithAssets>> | undefined;
+		let retryAttempt = 0;
+		const maxRetries = 5;
+		while (true) {
+			try {
+				project = await repo.createProjectWithAssets({
+					exhibitionId: exhibition!.id,
+					slug,
+					title,
+					summary,
+					description,
+					status,
+					creatorId: user.id,
+					members: members.map((m) => ({
+						...m,
+						userId: m.userId,
+					})),
+					savedFiles: savedFiles.map((sf) => ({
+						kind: sf.kind,
+						storageKey: sf.storageKey,
+						originalName: sf.originalName,
+						mimeType: sf.mimeType,
+						sizeBytes: sf.sizeBytes,
+					})),
+				});
+				break;
+			} catch (err) {
+				if (isUniqueConstraintError(err, 'slug') && retryAttempt < maxRetries) {
+					retryAttempt++;
+					// Walk past any slugs that arrived while we were losing races.
+					let candidate = nextSlugCandidate(baseSlug, retryAttempt);
+					while (await repo.findProjectByExhibitionAndSlug(exhibition!.id, candidate)) {
+						retryAttempt++;
+						if (retryAttempt > maxRetries) break;
+						candidate = nextSlugCandidate(baseSlug, retryAttempt);
+					}
+					if (retryAttempt > maxRetries) {
+						throw conflict('Failed to allocate a unique slug after repeated contention');
+					}
+					slug = candidate;
+					continue;
+				}
+				throw err;
+			}
+		}
 
 		return {
-			id: project.id,
-			slug: project.slug,
+			id: project!.id,
+			slug: project!.slug,
 			year: exhibition!.year,
 			status,
-			adminEditUrl: `${cfg.WEB_PUBLIC_URL}/admin/projects/${project.id}/edit`,
+			adminEditUrl: `${cfg.WEB_PUBLIC_URL}/admin/projects/${project!.id}/edit`,
 			publicUrl: status === 'PUBLISHED'
 				? `${cfg.WEB_PUBLIC_URL}/years/${exhibition!.year}/${slug}`
 				: undefined,
