@@ -13,6 +13,7 @@ API_CONTAINER="gp-api"
 PG_IMAGE="docker.io/library/postgres:16-alpine"
 API_IMAGE="ghcr.io/pcugame/pcu-graduationproject-v2-api:latest"
 PG_VOLUME="gp_pg_data"
+API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"
 HEALTHCHECK_TIMEOUT=90  # seconds
 
 # ── Load .env ──────────────────────────────────────────────────
@@ -121,11 +122,12 @@ do_up() {
   # Small pause to let podman fully release resources
   sleep 2
 
-  # Create pod with API port published
+  # Create pod with API port published only on loopback by default.
+  # Public traffic should reach the API through the reverse proxy, not :4000.
   echo "Creating pod '$POD_NAME'..."
   podman pod create \
     --name "$POD_NAME" \
-    -p "${API_PORT:-4000}:4000"
+    -p "${API_BIND_HOST}:${API_PORT:-4000}:4000"
 
   # Start PostgreSQL (no --replace: we just ensured a clean state)
   echo "Starting PostgreSQL..."

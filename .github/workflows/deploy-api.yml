@@ -10,6 +10,8 @@ on:
       - 'package-lock.json'
       - 'docker-compose.yml'
       - 'server/deploy.sh'
+      - 'server/hardening/**'
+      - 'server/SECURITY-HARDENING.md'
       - '.github/workflows/deploy-api.yml'
   workflow_dispatch:
 
@@ -57,7 +59,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh
+          source: server/deploy.sh,server/hardening/*,server/SECURITY-HARDENING.md
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
 

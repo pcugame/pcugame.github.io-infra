@@ -14,6 +14,8 @@
 - `server`: 운영 보조 스크립트
 - `.github/workflows`: CI/CD 워크플로
 
+운영 서버 SSH/password 제한, fail2ban, nftables, API loopback 바인딩 적용 절차는 [`server/SECURITY-HARDENING.md`](server/SECURITY-HARDENING.md)를 참고하세요.
+
 ## Tech Stack
 
 - **Frontend**: React 19 · Vite · React Router 7 · TanStack Query
