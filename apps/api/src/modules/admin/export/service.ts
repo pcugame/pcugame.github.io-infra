@@ -48,19 +48,52 @@ function assetFileName(kind: string, ext: string, index: number): string {
 	return index > 0 ? `${base}_${index + 1}.${ext}` : `${base}.${ext}`;
 }
 
-// ── Server-side mutex ──────────────────────────────────
+// ── Server-side mutex + progress ────────────────────────
+
+export type ExportPhase = 'preparing' | 'downloading' | 'finishing';
+
+export interface ExportProgress {
+	year: number | null;
+	startedAt: number;
+	phase: ExportPhase;
+	totalProjects: number;
+	currentProjectIndex: number;
+	currentProjectTitle: string | null;
+	totalFiles: number;
+	downloaded: number;
+	skipped: number;
+	failed: number;
+}
 
 let exportRunning = false;
+let currentProgress: ExportProgress | null = null;
 
-function acquireExportLock(): void {
+function acquireExportLock(year: number | null): void {
 	if (exportRunning) {
 		throw conflict('Export is already in progress');
 	}
 	exportRunning = true;
+	currentProgress = {
+		year,
+		startedAt: Date.now(),
+		phase: 'preparing',
+		totalProjects: 0,
+		currentProjectIndex: 0,
+		currentProjectTitle: null,
+		totalFiles: 0,
+		downloaded: 0,
+		skipped: 0,
+		failed: 0,
+	};
 }
 
 function releaseExportLock(): void {
 	exportRunning = false;
+	currentProgress = null;
+}
+
+export function getExportProgress(): ExportProgress | null {
+	return currentProgress;
 }
 
 // ── S3 download (atomic + abortable) ──────────────────
@@ -112,7 +145,7 @@ export interface ExportResult {
 }
 
 export async function exportAssets(opts: ExportOptions): Promise<ExportResult> {
-	acquireExportLock();
+	acquireExportLock(opts.year ?? null);
 	try {
 		return await doExport(opts);
 	} finally {
@@ -133,16 +166,31 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 		paths: [],
 	};
 
-	if (projects.length === 0) return result;
+	if (currentProgress) {
+		currentProgress.totalProjects = projects.length;
+		currentProgress.phase = 'downloading';
+	}
+
+	if (projects.length === 0) {
+		if (currentProgress) currentProgress.phase = 'finishing';
+		return result;
+	}
 
 	const assetsDir = join(opts.outDir, 'ExportedAssets');
 
-	for (const project of projects) {
+	for (let pIdx = 0; pIdx < projects.length; pIdx++) {
+		const project = projects[pIdx];
+		if (!project) continue;
 		// Check abort before each project
 		if (opts.signal?.aborted) {
 			result.aborted = true;
 			logger().warn('Export aborted by client disconnect');
 			break;
+		}
+
+		if (currentProgress) {
+			currentProgress.currentProjectIndex = pIdx;
+			currentProgress.currentProjectTitle = project.title;
 		}
 
 		const exDir = exhibitionDirName(project.exhibition.year, project.exhibition.title);
@@ -166,6 +214,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 			const bucket = bucketForKind(asset.kind as AssetKind);
 
 			result.totalFiles++;
+			if (currentProgress) currentProgress.totalFiles = result.totalFiles;
 
 			if (opts.dryRun) {
 				result.paths.push(destPath);
@@ -176,6 +225,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 			try {
 				await fsp.access(destPath);
 				result.skipped++;
+				if (currentProgress) currentProgress.skipped = result.skipped;
 				continue;
 			} catch {
 				// doesn't exist — proceed
@@ -186,6 +236,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 			try {
 				await downloadObject(bucket, asset.storageKey, destPath, opts.signal);
 				result.downloaded++;
+				if (currentProgress) currentProgress.downloaded = result.downloaded;
 			} catch (err) {
 				if (opts.signal?.aborted) {
 					result.aborted = true;
@@ -193,10 +244,15 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 				}
 				logger().error({ err, storageKey: asset.storageKey }, 'Export download failed');
 				result.failed++;
+				if (currentProgress) currentProgress.failed = result.failed;
 			}
 		}
 
 		if (result.aborted) break;
+	}
+
+	if (currentProgress && !result.aborted) {
+		currentProgress.phase = 'finishing';
 	}
 
 	return result;

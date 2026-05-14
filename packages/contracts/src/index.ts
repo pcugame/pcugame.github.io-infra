@@ -220,3 +220,26 @@ export type UpdateMemberRequest = {
 	studentId?: string;
 	sortOrder?: number;
 };
+
+// ── Admin: Export progress ───────────────────────────────────
+
+export type ExportPhase = 'preparing' | 'downloading' | 'finishing';
+
+export type ExportProgress = {
+	year: number | null;
+	startedAt: number;
+	phase: ExportPhase;
+	totalProjects: number;
+	currentProjectIndex: number;
+	currentProjectTitle: string | null;
+	totalFiles: number;
+	downloaded: number;
+	skipped: number;
+	failed: number;
+};
+
+/** GET /api/admin/export/status */
+export type ExportStatusResponse = {
+	running: boolean;
+	progress: ExportProgress | null;
+};

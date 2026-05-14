@@ -14,6 +14,7 @@ import type { ExportResult } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { useMe } from '../../features/auth';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
+import { ExportProgressModal } from '../../components/admin/ExportProgressModal';
 
 export default function AdminYearsPage() {
 	const qc = useQueryClient();
@@ -21,31 +22,30 @@ export default function AdminYearsPage() {
 	const isAdmin = user?.role === 'ADMIN';
 
 	// ── NAS 내보내기 ──────────────────────────────────────────
-	const [exportResult, setExportResult] = useState<{ year: number; result: ExportResult } | null>(null);
-	const [exportError, setExportError] = useState<{ year: number; message: string } | null>(null);
+	const [exportResult, setExportResult] = useState<ExportResult | null>(null);
+	const [exportError, setExportError] = useState<string | null>(null);
+	const [modalYear, setModalYear] = useState<number | null>(null);
 
 	const exportMutation = useMutation({
 		mutationFn: (year: number) => adminExportApi.run(year),
-		onSuccess: (result, year) => {
+		onSuccess: (result) => {
 			if (result.aborted) {
-				setExportError({
-					year,
-					message: `내보내기가 중단되었습니다. (다운로드: ${result.downloaded}, 실패: ${result.failed})`,
-				});
+				setExportError(
+					`내보내기가 중단되었습니다. (다운로드: ${result.downloaded}, 실패: ${result.failed})`,
+				);
 				setExportResult(null);
 			} else {
-				setExportResult({ year, result });
+				setExportResult(result);
 				setExportError(null);
 			}
 		},
-		onError: (err, year) => {
+		onError: (err) => {
 			if (isApiError(err) && err.status === 409) {
-				setExportError({
-					year,
-					message: '다른 관리자가 이미 내보내기를 실행 중입니다. 잠시 후 다시 시도해주세요.',
-				});
+				setExportError(
+					'다른 관리자가 이미 내보내기를 실행 중입니다. 잠시 후 다시 시도해주세요.',
+				);
 			} else {
-				setExportError({ year, message: getApiErrorMessage(err) });
+				setExportError(getApiErrorMessage(err));
 			}
 			setExportResult(null);
 		},
@@ -59,7 +59,16 @@ export default function AdminYearsPage() {
 		)) return;
 		setExportResult(null);
 		setExportError(null);
+		setModalYear(year);
 		exportMutation.mutate(year);
+	};
+
+	const handleModalClose = () => {
+		// 진행 중 닫기는 모달 자체에서 막힘 — 여기서는 완료/실패 후만 호출됨
+		setModalYear(null);
+		setExportResult(null);
+		setExportError(null);
+		exportMutation.reset();
 	};
 
 	// 내보내기 중 새로고침/탭 닫기 경고
@@ -190,27 +199,6 @@ export default function AdminYearsPage() {
 				)}
 			</form>
 
-			{/* ── 내보내기 결과/에러 ─────────────────────────────── */}
-			{exportResult && (
-				<div className="admin-card" style={{
-					background: exportResult.result.failed > 0
-						? 'var(--color-warning-bg, #fff3e0)'
-						: 'var(--color-success-bg, #e8f5e9)',
-					padding: '1rem',
-				}}>
-					<strong>{exportResult.year}년도 내보내기 완료:</strong>{' '}
-					{exportResult.result.downloaded}개 다운로드, {exportResult.result.skipped}개 스킵
-					{exportResult.result.failed > 0 && (
-						<>, <span style={{ color: 'var(--color-error, #c62828)' }}>{exportResult.result.failed}개 실패</span></>
-					)}
-				</div>
-			)}
-			{exportError && (
-				<div className="admin-card" style={{ background: 'var(--color-error-bg, #fce4ec)', padding: '1rem' }}>
-					<strong>{exportError.year}년도 내보내기 실패:</strong> {exportError.message}
-				</div>
-			)}
-
 			{/* ── 연도 목록 ───────────────────────────────────────── */}
 			{years.length === 0 ? (
 				<EmptyState message="등록된 연도가 없습니다." />
@@ -279,6 +267,15 @@ export default function AdminYearsPage() {
 					</div>
 				</>
 			)}
+
+			<ExportProgressModal
+				open={modalYear !== null}
+				year={modalYear ?? 0}
+				isRunning={exportMutation.isPending}
+				result={exportResult}
+				error={exportError}
+				onClose={handleModalClose}
+			/>
 		</div>
 	);
 }

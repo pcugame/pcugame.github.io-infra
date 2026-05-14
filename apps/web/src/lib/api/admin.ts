@@ -10,6 +10,7 @@ import type {
   SubmitProjectResponse,
   AddMemberRequest,
   UpdateMemberRequest,
+  ExportStatusResponse,
 } from '../../contracts';
 import { api } from './client';
 
@@ -197,6 +198,10 @@ export interface ExportResult {
 export const adminExportApi = {
   run(year?: number) {
     return api.post<ExportResult>('/api/admin/export', { year });
+  },
+
+  status() {
+    return api.get<ExportStatusResponse>('/api/admin/export/status');
   },
 };
 

@@ -47,4 +47,19 @@ export async function exportController(app: FastifyInstance): Promise<void> {
 			sendOk(reply, result);
 		},
 	);
+
+	/**
+	 * GET /export/status — read live progress of an in-flight export.
+	 *
+	 * Returns `{ running: false, progress: null }` when idle.
+	 * The web admin polls this while the export modal is open.
+	 */
+	app.get(
+		'/export/status',
+		{ preHandler: requireRole('ADMIN') },
+		async (_request, reply) => {
+			const progress = exportService.getExportProgress();
+			sendOk(reply, { running: progress !== null, progress });
+		},
+	);
 }
