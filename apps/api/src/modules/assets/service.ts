@@ -59,6 +59,9 @@ export async function deleteAsset(assetId: number) {
 
 	const bucket = bucketForKind(asset.kind);
 	await safeDeleteObject(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id });
+	if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
+		await safeDeleteObject(bucket, asset.playbackStorageKey, 'asset-delete-playback', { assetId: asset.id });
+	}
 
 	if (asset.project.posterAssetId === asset.id) {
 		await repo.clearPosterIfMatches(asset.projectId, asset.id);

@@ -22,6 +22,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import type { AssetPlaybackStatus } from '@prisma/client';
 import { readdirSync, statSync, copyFileSync, createReadStream, mkdtempSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, extname, basename } from 'node:path';
@@ -47,9 +48,14 @@ interface MatchedAsset {
 interface AssetRecord {
 	kind: AssetKind;
 	storageKey: string;
+	playbackStorageKey?: string | null;
 	originalName: string;
 	mimeType: string;
+	playbackMimeType?: string;
 	sizeBytes: bigint;
+	playbackSizeBytes?: bigint;
+	playbackStatus?: AssetPlaybackStatus;
+	playbackError?: string;
 	isPublic: boolean;
 }
 
@@ -99,6 +105,10 @@ const VIDEO_PREF = ['.mp4', '.mov', '.mkv', '.avi', '.wmv'];
 
 /** Skip these entries (Synology metadata, etc.) */
 const SKIP_NAMES = new Set(['@eadir', '.ds_store', 'thumbs.db']);
+
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
 
 // ── CLI ──────────────────────────────────────────────────
 
@@ -259,7 +269,17 @@ function discoverAssets(
 async function uploadAsset(
 	asset: MatchedAsset,
 	tmpDir: string,
-): Promise<{ storageKey: string; mimeType: string; sizeBytes: number; converted: boolean }> {
+): Promise<{
+	storageKey: string;
+	playbackStorageKey?: string | null;
+	mimeType: string;
+	playbackMimeType?: string;
+	sizeBytes: number;
+	playbackSizeBytes?: number;
+	playbackStatus?: AssetPlaybackStatus;
+	playbackError?: string;
+	converted: boolean;
+}> {
 	let finalPath = asset.filePath;
 	let finalMime = asset.mimeType;
 	let finalExt = extname(asset.filePath).toLowerCase().replace('.', '');
@@ -304,25 +324,53 @@ async function uploadAsset(
 			copyFileSync(asset.filePath, tmpPath);
 			tempFiles.push(tmpPath);
 
-			try {
-				const result = await processVideo({
-					tmpPath,
-					mimeType: asset.mimeType,
-					ext: finalExt,
-					sizeBytes: asset.sizeBytes,
-				});
-				finalPath = result.tmpPath;
-				finalMime = result.mimeType;
-				finalExt = result.ext;
-				finalSize = result.sizeBytes;
-				converted = result.converted;
-				if (result.converted && result.tmpPath !== tmpPath) {
-					tempFiles.push(result.tmpPath);
+			const playback = await processVideo({
+				tmpPath,
+				mimeType: asset.mimeType,
+				ext: finalExt,
+				sizeBytes: asset.sizeBytes,
+			});
+			if (playback.playback) tempFiles.push(playback.playback.tmpPath);
+
+			const storageKey = generateStorageKey(finalExt);
+			const bucket = bucketForKind(asset.kind);
+			await uploadFile(bucket, storageKey, createReadStream(tmpPath), asset.mimeType, asset.sizeBytes);
+
+			let playbackStorageKey: string | null = null;
+			let playbackMimeType = '';
+			let playbackSizeBytes = 0;
+			let playbackStatus = playback.playbackStatus;
+			let playbackError = playback.playbackError;
+			if (playback.playback) {
+				const candidatePlaybackKey = generateStorageKey(playback.playback.ext);
+				try {
+					await uploadFile(
+						bucket,
+						candidatePlaybackKey,
+						createReadStream(playback.playback.tmpPath),
+						playback.playback.mimeType,
+						playback.playback.sizeBytes,
+					);
+					playbackStorageKey = candidatePlaybackKey;
+					playbackMimeType = playback.playback.mimeType;
+					playbackSizeBytes = playback.playback.sizeBytes;
+				} catch (err) {
+					playbackStatus = 'FAILED';
+					playbackError = errorMessage(err).slice(0, 2000);
 				}
-			} catch {
-				// Processing failed — use original copy
-				finalPath = tmpPath;
 			}
+
+			return {
+				storageKey,
+				playbackStorageKey,
+				mimeType: asset.mimeType,
+				playbackMimeType,
+				sizeBytes: asset.sizeBytes,
+				playbackSizeBytes,
+				playbackStatus,
+				playbackError,
+				converted: playback.converted,
+			};
 		}
 
 		// ── Upload to S3 ──────────────────────────────────────
@@ -443,9 +491,14 @@ async function doAttach(
 					records.push({
 						kind: asset.kind,
 						storageKey: result.storageKey,
+						playbackStorageKey: result.playbackStorageKey,
 						originalName: asset.originalName,
 						mimeType: result.mimeType,
+						playbackMimeType: result.playbackMimeType,
 						sizeBytes: BigInt(result.sizeBytes),
+						playbackSizeBytes: BigInt(result.playbackSizeBytes ?? 0),
+						playbackStatus: result.playbackStatus,
+						playbackError: result.playbackError,
 						isPublic: asset.kind !== 'GAME' && asset.kind !== 'VIDEO',
 					});
 
@@ -462,9 +515,14 @@ async function doAttach(
 								kind: rec.kind,
 								status: 'READY',
 								storageKey: rec.storageKey,
+								playbackStorageKey: rec.playbackStorageKey ?? null,
 								originalName: rec.originalName,
 								mimeType: rec.mimeType,
+								playbackMimeType: rec.playbackMimeType ?? '',
 								sizeBytes: rec.sizeBytes,
+								playbackSizeBytes: rec.playbackSizeBytes ?? BigInt(0),
+								playbackStatus: rec.playbackStatus ?? 'PENDING',
+								playbackError: rec.playbackError ?? '',
 								isPublic: rec.isPublic,
 							},
 						});

@@ -1,5 +1,5 @@
 import { prisma } from '../../../lib/prisma.js';
-import type { AssetKind, ProjectStatus, Prisma } from '@prisma/client';
+import type { AssetKind, AssetPlaybackStatus, ProjectStatus, Prisma } from '@prisma/client';
 
 // ── Shared include spec for project detail queries ──────────
 
@@ -107,9 +107,14 @@ export function createAsset(data: {
 	projectId: number;
 	kind: AssetKind;
 	storageKey: string;
+	playbackStorageKey?: string | null;
 	originalName: string;
 	mimeType: string;
+	playbackMimeType?: string;
 	sizeBytes: bigint;
+	playbackSizeBytes?: bigint;
+	playbackStatus?: AssetPlaybackStatus;
+	playbackError?: string;
 	isPublic: boolean;
 }) {
 	return prisma.asset.create({ data });
@@ -118,7 +123,17 @@ export function createAsset(data: {
 /** Replace an existing asset's file metadata */
 export function updateAssetFile(
 	id: number,
-	data: { storageKey: string; originalName: string; mimeType: string; sizeBytes: bigint },
+	data: {
+		storageKey: string;
+		playbackStorageKey?: string | null;
+		originalName: string;
+		mimeType: string;
+		playbackMimeType?: string;
+		sizeBytes: bigint;
+		playbackSizeBytes?: bigint;
+		playbackStatus?: AssetPlaybackStatus;
+		playbackError?: string;
+	},
 ) {
 	return prisma.asset.update({ where: { id }, data });
 }
@@ -136,18 +151,23 @@ export function replaceOrCreateReplaceableAsset(
 	kind: AssetKind,
 	data: {
 		storageKey: string;
+		playbackStorageKey?: string | null;
 		originalName: string;
 		mimeType: string;
+		playbackMimeType?: string;
 		sizeBytes: bigint;
+		playbackSizeBytes?: bigint;
+		playbackStatus?: AssetPlaybackStatus;
+		playbackError?: string;
 		isPublic: boolean;
 	},
-): Promise<{ assetId: number; oldStorageKey: string | null }> {
+): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
 	return prisma.$transaction(async (tx) => {
 		await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`;
 
 		const existing = await tx.asset.findFirst({
 			where: { projectId, kind, status: 'READY' },
-			select: { id: true, storageKey: true },
+			select: { id: true, storageKey: true, playbackStorageKey: true },
 		});
 
 		if (existing) {
@@ -155,13 +175,22 @@ export function replaceOrCreateReplaceableAsset(
 				where: { id: existing.id },
 				data: {
 					storageKey: data.storageKey,
+					playbackStorageKey: data.playbackStorageKey ?? null,
 					originalName: data.originalName,
 					mimeType: data.mimeType,
+					playbackMimeType: data.playbackMimeType ?? '',
 					sizeBytes: data.sizeBytes,
+					playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
+					playbackStatus: data.playbackStatus ?? 'PENDING',
+					playbackError: data.playbackError ?? '',
 				},
 				select: { id: true },
 			});
-			return { assetId: updated.id, oldStorageKey: existing.storageKey };
+			return {
+				assetId: updated.id,
+				oldStorageKey: existing.storageKey,
+				oldPlaybackStorageKey: existing.playbackStorageKey,
+			};
 		}
 
 		const created = await tx.asset.create({
@@ -169,14 +198,19 @@ export function replaceOrCreateReplaceableAsset(
 				projectId,
 				kind,
 				storageKey: data.storageKey,
+				playbackStorageKey: data.playbackStorageKey ?? null,
 				originalName: data.originalName,
 				mimeType: data.mimeType,
+				playbackMimeType: data.playbackMimeType ?? '',
 				sizeBytes: data.sizeBytes,
+				playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
+				playbackStatus: data.playbackStatus ?? 'PENDING',
+				playbackError: data.playbackError ?? '',
 				isPublic: data.isPublic,
 			},
 			select: { id: true },
 		});
-		return { assetId: created.id, oldStorageKey: null };
+		return { assetId: created.id, oldStorageKey: null, oldPlaybackStorageKey: null };
 	});
 }
 
@@ -236,7 +270,18 @@ export interface SubmitProjectData {
 	status: ProjectStatus;
 	creatorId: number;
 	members: { name: string; studentId: string; sortOrder?: number; userId?: number }[];
-	savedFiles: { kind: AssetKind; storageKey: string; originalName: string; mimeType: string; sizeBytes: number }[];
+	savedFiles: {
+		kind: AssetKind;
+		storageKey: string;
+		playbackStorageKey?: string | null;
+		originalName: string;
+		mimeType: string;
+		playbackMimeType?: string;
+		sizeBytes: number;
+		playbackSizeBytes?: number;
+		playbackStatus?: AssetPlaybackStatus;
+		playbackError?: string;
+	}[];
 }
 
 /**
@@ -272,9 +317,14 @@ export function createProjectWithAssets(data: SubmitProjectData) {
 					projectId: p.id,
 					kind: sf.kind,
 					storageKey: sf.storageKey,
+					playbackStorageKey: sf.playbackStorageKey ?? null,
 					originalName: sf.originalName,
 					mimeType: sf.mimeType,
+					playbackMimeType: sf.playbackMimeType ?? '',
 					sizeBytes: BigInt(sf.sizeBytes),
+					playbackSizeBytes: BigInt(sf.playbackSizeBytes ?? 0),
+					playbackStatus: sf.playbackStatus ?? 'PENDING',
+					playbackError: sf.playbackError ?? '',
 					isPublic: sf.kind !== 'GAME' && sf.kind !== 'VIDEO',
 				},
 			});

@@ -1,4 +1,5 @@
 import type { AssetKind } from '@prisma/client';
+import type { AssetPlaybackStatus } from '@prisma/client';
 
 /** Raw file part collected from multipart stream */
 export interface CollectedFile {
@@ -17,8 +18,13 @@ export interface ValidatedFile {
 /** A file that has been fully processed and moved to permanent storage */
 export interface SavedFile {
   storageKey: string;
+  playbackStorageKey?: string | null;
   mimeType: string;
+  playbackMimeType?: string;
   sizeBytes: number;
+  playbackSizeBytes?: number;
+  playbackStatus?: AssetPlaybackStatus;
+  playbackError?: string;
   originalName: string;
   kind: AssetKind;
 }

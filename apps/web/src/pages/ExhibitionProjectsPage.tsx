@@ -14,6 +14,7 @@ export default function ExhibitionProjectsPage() {
   const [isComposing, setIsComposing] = useState(false);
   const debouncedSearch = useDebouncedValue(search, 250, isComposing);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'poster'>('grid');
   const closeModal = useCallback(() => setSelectedSlug(null), []);
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -71,6 +72,33 @@ export default function ExhibitionProjectsPage() {
                   aria-label="작품 검색"
                 />
               </div>
+              <div className="archive-view-toggle" role="group" aria-label="보기 방식">
+                <button
+                  type="button"
+                  className={`archive-view-btn${viewMode === 'poster' ? ' archive-view-btn--active' : ''}`}
+                  onClick={() => setViewMode('poster')}
+                  aria-label="포스터 뷰"
+                  title="포스터 뷰"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <rect x="4.5" y="1" width="7" height="14" rx="1.5"/>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={`archive-view-btn${viewMode === 'grid' ? ' archive-view-btn--active' : ''}`}
+                  onClick={() => setViewMode('grid')}
+                  aria-label="그리드 뷰"
+                  title="그리드 뷰"
+                >
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <rect x="1" y="2" width="6" height="3.5" rx="0.75"/>
+                    <rect x="9" y="2" width="6" height="3.5" rx="0.75"/>
+                    <rect x="1" y="7.5" width="6" height="3.5" rx="0.75"/>
+                    <rect x="9" y="7.5" width="6" height="3.5" rx="0.75"/>
+                  </svg>
+                </button>
+              </div>
               <span className="archive-count">
                 {filtered.length}개 작품
               </span>
@@ -85,7 +113,7 @@ export default function ExhibitionProjectsPage() {
                 }
               />
             ) : (
-              <div className="archive-grid">
+              <div className={`archive-grid${viewMode === 'poster' ? ' archive-grid--poster' : ''}`}>
                 {filtered.map((project) => (
                   <ProjectCard key={project.id} project={project} year={year} onSelect={setSelectedSlug} />
                 ))}

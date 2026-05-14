@@ -10,6 +10,8 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Readable } from 'node:stream';
+import { createWriteStream } from 'node:fs';
+import { pipeline as streamPipeline } from 'node:stream/promises';
 import { s3 } from './s3.js';
 import { env } from '../config/env.js';
 
@@ -116,6 +118,15 @@ export async function readObjectRange(
 		chunks.push(Buffer.from(chunk));
 	}
 	return Buffer.concat(chunks);
+}
+
+export async function downloadObject(
+	bucket: string,
+	key: string,
+	destPath: string,
+): Promise<void> {
+	const res = await s3().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+	await streamPipeline(res.Body as Readable, createWriteStream(destPath));
 }
 
 /* ── Multipart upload operations ──────────────────────── */

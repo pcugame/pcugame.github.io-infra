@@ -37,6 +37,12 @@ enum AssetStatus {
   FAILED
 }
 
+enum AssetPlaybackStatus {
+  PENDING
+  READY
+  FAILED
+}
+
 enum Platform {
   PC
   MOBILE
@@ -130,17 +136,22 @@ model ProjectMember {
 }
 
 model Asset {
-  id          Int         @id @default(autoincrement())
-  projectId   Int         @map("project_id")
-  kind        AssetKind
-  status      AssetStatus @default(READY)
-  storageKey  String      @unique @map("storage_key")
-  originalName String     @default("") @map("original_name")
-  mimeType    String      @default("") @map("mime_type")
-  sizeBytes   BigInt      @default(0) @map("size_bytes")
-  isPublic    Boolean     @default(false) @map("is_public")
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
+  id                 Int                 @id @default(autoincrement())
+  projectId          Int                 @map("project_id")
+  kind               AssetKind
+  status             AssetStatus         @default(READY)
+  storageKey         String              @unique @map("storage_key")
+  playbackStorageKey String?             @unique @map("playback_storage_key")
+  originalName       String              @default("") @map("original_name")
+  mimeType           String              @default("") @map("mime_type")
+  playbackMimeType   String              @default("") @map("playback_mime_type")
+  sizeBytes          BigInt              @default(0) @map("size_bytes")
+  playbackSizeBytes  BigInt              @default(0) @map("playback_size_bytes")
+  playbackStatus     AssetPlaybackStatus @default(PENDING) @map("playback_status")
+  playbackError      String              @default("") @map("playback_error")
+  isPublic           Boolean             @default(false) @map("is_public")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
 
   project      Project  @relation("ProjectAssets", fields: [projectId], references: [id], onDelete: Cascade)
   posterOf     Project? @relation("ProjectPoster")

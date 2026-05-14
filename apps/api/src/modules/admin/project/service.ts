@@ -3,7 +3,7 @@ import { pipeline as streamPipeline } from 'node:stream/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
-import type { AssetKind, ProjectStatus } from '@prisma/client';
+import type { AssetKind, AssetPlaybackStatus, ProjectStatus } from '@prisma/client';
 import type { AdminProjectItem, AdminProjectDetail } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { badRequest, conflict, forbidden, isUniqueConstraintError, notFound, payloadTooLarge } from '../../../shared/errors.js';
@@ -35,6 +35,40 @@ export function assetUrl(storageKey: string, kind: AssetKind): string {
 	return `${base}/api/assets/public/${storageKey}`;
 }
 
+type SerializableAsset = {
+	id: number;
+	kind: AssetKind;
+	storageKey: string;
+	playbackStorageKey: string | null;
+	originalName: string;
+	mimeType: string;
+	playbackMimeType: string;
+	sizeBytes: bigint;
+	playbackSizeBytes: bigint;
+	playbackStatus: AssetPlaybackStatus;
+	playbackError: string;
+};
+
+function playbackKeyFor(asset: SerializableAsset): string {
+	return asset.kind === 'VIDEO' && asset.playbackStorageKey
+		? asset.playbackStorageKey
+		: asset.storageKey;
+}
+
+function playbackMimeFor(asset: SerializableAsset): string {
+	return asset.kind === 'VIDEO' && asset.playbackStorageKey
+		? asset.playbackMimeType || 'video/mp4'
+		: asset.mimeType || 'video/mp4';
+}
+
+async function deleteAssetObjects(asset: { id: number; projectId?: number; kind: AssetKind; storageKey: string; playbackStorageKey: string | null }, reason: string) {
+	const bucket = bucketForKind(asset.kind);
+	await safeDeleteObject(bucket, asset.storageKey, reason, { assetId: asset.id, projectId: asset.projectId });
+	if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
+		await safeDeleteObject(bucket, asset.playbackStorageKey, `${reason}-playback`, { assetId: asset.id, projectId: asset.projectId });
+	}
+}
+
 /** Serialize a project detail record to the API response shape */
 export function serializeProjectDetail(project: {
 	id: number;
@@ -49,11 +83,17 @@ export function serializeProjectDetail(project: {
 	posterAssetId: number | null;
 	poster: { storageKey: string; kind: AssetKind; status: string } | null;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
-	assets: { id: number; kind: AssetKind; storageKey: string; originalName: string; mimeType: string; sizeBytes: bigint }[];
+	assets: SerializableAsset[];
 }): AdminProjectDetail {
 	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
 	const video = videoAsset
-		? { url: assetUrl(videoAsset.storageKey, 'VIDEO'), mimeType: videoAsset.mimeType || 'video/mp4' }
+		? {
+			url: assetUrl(playbackKeyFor(videoAsset), 'VIDEO'),
+			mimeType: playbackMimeFor(videoAsset),
+			originalDownloadUrl: assetUrl(videoAsset.storageKey, 'VIDEO'),
+			playbackStatus: videoAsset.playbackStatus,
+			playbackError: videoAsset.playbackError || undefined,
+		}
 		: null;
 
 	return {
@@ -82,6 +122,10 @@ export function serializeProjectDetail(project: {
 			id: a.id,
 			kind: a.kind,
 			url: assetUrl(a.storageKey, a.kind),
+			originalDownloadUrl: a.kind === 'VIDEO' ? assetUrl(a.storageKey, a.kind) : undefined,
+			playbackUrl: a.kind === 'VIDEO' ? assetUrl(playbackKeyFor(a), a.kind) : undefined,
+			playbackStatus: a.kind === 'VIDEO' ? a.playbackStatus : undefined,
+			playbackError: a.kind === 'VIDEO' && a.playbackError ? a.playbackError : undefined,
 			originalName: a.originalName,
 			size: Number(a.sizeBytes),
 		})),
@@ -168,7 +212,7 @@ export async function updateProject(
 export async function deleteProject(projectId: number) {
 	const assets = await repo.findAssetsByProjectId(projectId);
 	await Promise.all(
-		assets.map((asset) => safeDeleteObject(bucketForKind(asset.kind), asset.storageKey, 'project-delete', { assetId: asset.id, projectId })),
+		assets.map((asset) => deleteAssetObjects({ ...asset, projectId }, 'project-delete')),
 	);
 	await repo.deleteProject(projectId);
 }
@@ -322,9 +366,14 @@ export async function submitProject(
 					savedFiles: savedFiles.map((sf) => ({
 						kind: sf.kind,
 						storageKey: sf.storageKey,
+						playbackStorageKey: sf.playbackStorageKey ?? null,
 						originalName: sf.originalName,
 						mimeType: sf.mimeType,
+						playbackMimeType: sf.playbackMimeType ?? '',
 						sizeBytes: sf.sizeBytes,
+						playbackSizeBytes: sf.playbackSizeBytes ?? 0,
+						playbackStatus: sf.playbackStatus,
+						playbackError: sf.playbackError,
 					})),
 				});
 				break;
@@ -421,25 +470,37 @@ export async function addAssetToProject(
 		const isReplaceable = savedFile.kind === 'GAME' || savedFile.kind === 'VIDEO';
 		let assetId: number;
 		let oldStorageKey: string | null = null;
+		let oldPlaybackStorageKey: string | null = null;
 
 		if (isReplaceable) {
 			const result = await repo.replaceOrCreateReplaceableAsset(projectId, savedFile.kind, {
 				storageKey: savedFile.storageKey,
+				playbackStorageKey: savedFile.playbackStorageKey ?? null,
 				originalName: savedFile.originalName,
 				mimeType: savedFile.mimeType,
+				playbackMimeType: savedFile.playbackMimeType ?? '',
 				sizeBytes: BigInt(savedFile.sizeBytes),
+				playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
+				playbackStatus: savedFile.playbackStatus,
+				playbackError: savedFile.playbackError,
 				isPublic: false,
 			});
 			assetId = result.assetId;
 			oldStorageKey = result.oldStorageKey;
+			oldPlaybackStorageKey = result.oldPlaybackStorageKey;
 		} else {
 			const asset = await repo.createAsset({
 				projectId,
 				kind: savedFile.kind,
 				storageKey: savedFile.storageKey,
+				playbackStorageKey: savedFile.playbackStorageKey ?? null,
 				originalName: savedFile.originalName,
 				mimeType: savedFile.mimeType,
+				playbackMimeType: savedFile.playbackMimeType ?? '',
 				sizeBytes: BigInt(savedFile.sizeBytes),
+				playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
+				playbackStatus: savedFile.playbackStatus,
+				playbackError: savedFile.playbackError,
 				isPublic: true,
 			});
 			assetId = asset.id;
@@ -447,6 +508,9 @@ export async function addAssetToProject(
 
 		if (oldStorageKey) {
 			await safeDeleteObject(bucketForKind(savedFile.kind), oldStorageKey, 'project-asset-replace-previous', { assetId, kind: savedFile.kind });
+		}
+		if (oldPlaybackStorageKey) {
+			await safeDeleteObject(bucketForKind(savedFile.kind), oldPlaybackStorageKey, 'project-asset-replace-previous-playback', { assetId, kind: savedFile.kind });
 		}
 
 		return { assetId, url: assetUrl(savedFile.storageKey, savedFile.kind) };
@@ -481,7 +545,7 @@ export async function bulkDeleteProjects(ids: number[]) {
 
 	// Failures go through safeDeleteObject — orphan reaper handles retry.
 	await Promise.all(
-		assets.map((a) => safeDeleteObject(bucketForKind(a.kind), a.storageKey, 'project-bulk-delete', { assetId: a.id, projectId: a.projectId })),
+		assets.map((a) => deleteAssetObjects(a, 'project-bulk-delete')),
 	);
 
 	const result = await repo.bulkDeleteProjects(ids);

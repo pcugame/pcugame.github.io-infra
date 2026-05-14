@@ -16,9 +16,13 @@ interface CommittedFile {
   storageKey: string;
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * Manages the lifecycle of uploaded files through the pipeline:
- *   validate → image-process → move to permanent storage
+ *   validate → image/video-process → upload to permanent storage
  *
  * Tracks both temp files and committed (permanently stored) files so that
  * failures at any stage can be cleaned up properly.
@@ -49,9 +53,9 @@ export class UploadPipeline {
    * Full pipeline for a single file:
    *   1. Validate file type (magic bytes) and size
    *   2. Image processing hook (passthrough now; webp conversion later)
-   *   3. Move to permanent storage
+   *   3. Upload to permanent storage
    *
-   * On success the file is moved to permanent storage and tracked for
+   * On success the file is uploaded to permanent storage and tracked for
    * potential rollback.  The temp entry is removed from tracking.
    */
   async processFile(
@@ -61,6 +65,62 @@ export class UploadPipeline {
   ): Promise<SavedFile> {
     // ── Step 1: Validate type and size ──────────────────────────
     const validated = await validateFile(tmpPath, kind);
+    const bucket = bucketForKind(kind);
+
+    if (kind === 'VIDEO') {
+      const playback = await processVideo({
+        tmpPath,
+        mimeType: validated.mimeType,
+        ext: validated.ext,
+        sizeBytes: validated.sizeBytes,
+      });
+
+      const storageKey = generateStorageKey(validated.ext);
+      const originalStat = await fsp.stat(tmpPath);
+      await uploadFile(bucket, storageKey, createReadStream(tmpPath), validated.mimeType, originalStat.size);
+      this.committedFiles.push({ bucket, storageKey });
+
+      let playbackStorageKey: string | null = null;
+      let playbackMimeType = '';
+      let playbackSizeBytes = 0;
+      let playbackStatus = playback.playbackStatus;
+      let playbackError = playback.playbackError;
+
+      if (playback.playback) {
+        this.trackTempFile(playback.playback.tmpPath);
+        const candidatePlaybackKey = generateStorageKey(playback.playback.ext);
+        try {
+          await uploadFile(
+            bucket,
+            candidatePlaybackKey,
+            createReadStream(playback.playback.tmpPath),
+            playback.playback.mimeType,
+            playback.playback.sizeBytes,
+          );
+          playbackStorageKey = candidatePlaybackKey;
+          this.committedFiles.push({ bucket, storageKey: playbackStorageKey });
+          playbackMimeType = playback.playback.mimeType;
+          playbackSizeBytes = playback.playback.sizeBytes;
+        } catch (err) {
+          playbackStatus = 'FAILED';
+          playbackError = errorMessage(err).slice(0, 2000);
+          logger().error({ err, storageKey, playbackStorageKey: candidatePlaybackKey }, 'Playback upload failed; keeping original video');
+        }
+      }
+
+      return {
+        storageKey,
+        playbackStorageKey,
+        mimeType: validated.mimeType,
+        playbackMimeType,
+        sizeBytes: validated.sizeBytes,
+        playbackSizeBytes,
+        playbackStatus,
+        playbackError,
+        originalName,
+        kind,
+      };
+    }
 
     // ── Step 2: Image processing hook ───────────────────────────
     // Game files (ZIP) skip image processing entirely.
@@ -69,23 +129,7 @@ export class UploadPipeline {
     let finalExt = validated.ext;
     let finalSizeBytes = validated.sizeBytes;
 
-    if (kind === 'VIDEO') {
-      const processed = await processVideo({
-        tmpPath,
-        mimeType: validated.mimeType,
-        ext: validated.ext,
-        sizeBytes: validated.sizeBytes,
-      });
-
-      finalTmpPath = processed.tmpPath;
-      finalMimeType = processed.mimeType;
-      finalExt = processed.ext;
-      finalSizeBytes = processed.sizeBytes;
-
-      if (processed.converted && processed.tmpPath !== tmpPath) {
-        this.trackTempFile(processed.tmpPath);
-      }
-    } else if (kind === 'POSTER' && validated.mimeType === 'application/pdf') {
+    if (kind === 'POSTER' && validated.mimeType === 'application/pdf') {
       const processed = await processPdf({ tmpPath });
 
       finalTmpPath = processed.tmpPath;
@@ -115,20 +159,15 @@ export class UploadPipeline {
     }
 
     // ── Step 3: Upload to S3 ─────────────────────────────────────
-    const bucket = bucketForKind(kind);
     const storageKey = generateStorageKey(finalExt);
     const stat = await fsp.stat(finalTmpPath);
     const body = createReadStream(finalTmpPath);
 
     await uploadFile(bucket, storageKey, body, finalMimeType, stat.size);
 
-    // Track the committed file for rollback, remove moved path from temp
+    // Track the committed file for rollback. Temp files remain tracked and
+    // are removed by cleanupTemp() after DB work succeeds or fails.
     this.committedFiles.push({ bucket, storageKey });
-    this.removeTempEntry(finalTmpPath);
-
-    // If no conversion happened, finalTmpPath === tmpPath, so the original
-    // is already removed above.  If conversion happened, the original is
-    // still tracked and will be cleaned up in cleanupTemp().
 
     return {
       storageKey,
@@ -165,10 +204,4 @@ export class UploadPipeline {
     this.tempFiles = [];
   }
 
-  // ── Internal ────────────────────────────────────────────────────
-
-  private removeTempEntry(filePath: string): void {
-    const idx = this.tempFiles.indexOf(filePath);
-    if (idx !== -1) this.tempFiles.splice(idx, 1);
-  }
 }

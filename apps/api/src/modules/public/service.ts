@@ -15,6 +15,10 @@ function publicAssetUrl(storageKey: string): string {
 	return `${env().API_PUBLIC_URL}/api/assets/public/${storageKey}`;
 }
 
+function protectedAssetUrl(storageKey: string): string {
+	return `${env().API_PUBLIC_URL}/api/assets/protected/${storageKey}`;
+}
+
 /** List all years with published project counts */
 export async function listYears(): Promise<PublicYearItem[]> {
 	const exhibitions = await repo.findExhibitionsWithPublishedCounts();
@@ -129,7 +133,12 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 
 	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
 	const video = videoAsset
-		? { url: `${env().API_PUBLIC_URL}/api/assets/protected/${videoAsset.storageKey}`, mimeType: videoAsset.mimeType || 'video/mp4' }
+		? {
+			url: protectedAssetUrl(videoAsset.playbackStorageKey ?? videoAsset.storageKey),
+			mimeType: videoAsset.playbackStorageKey
+				? videoAsset.playbackMimeType || 'video/mp4'
+				: videoAsset.mimeType || 'video/mp4',
+		}
 		: null;
 
 	return {
@@ -149,7 +158,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 		images,
 		posterUrl: isPosterUrlSafe(project.poster) ? publicAssetUrl(project.poster!.storageKey) : undefined,
 		gameDownloadUrl: gameAsset
-			? `${env().API_PUBLIC_URL}/api/assets/protected/${gameAsset.storageKey}`
+			? protectedAssetUrl(gameAsset.storageKey)
 			: undefined,
 		status: 'PUBLISHED' as const,
 	};

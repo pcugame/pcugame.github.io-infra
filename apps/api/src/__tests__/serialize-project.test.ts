@@ -48,7 +48,36 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 		posterAssetId: null as number | null,
 		poster: null as { storageKey: string; kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO'; status: string } | null,
 		members: [] as { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[],
-		assets: [] as { id: number; kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO'; storageKey: string; originalName: string; mimeType: string; sizeBytes: bigint }[],
+		assets: [] as {
+			id: number;
+			kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO';
+			storageKey: string;
+			playbackStorageKey: string | null;
+			originalName: string;
+			mimeType: string;
+			playbackMimeType: string;
+			sizeBytes: bigint;
+			playbackSizeBytes: bigint;
+			playbackStatus: 'PENDING' | 'READY' | 'FAILED';
+			playbackError: string;
+		}[],
+		...overrides,
+	};
+}
+
+function fakeAsset(overrides: Partial<ReturnType<typeof fakeProject>['assets'][number]> = {}) {
+	return {
+		id: 1,
+		kind: 'IMAGE' as const,
+		storageKey: 'img.png',
+		playbackStorageKey: null,
+		originalName: 'photo.png',
+		mimeType: 'image/png',
+		playbackMimeType: '',
+		sizeBytes: 12345n,
+		playbackSizeBytes: 0n,
+		playbackStatus: 'PENDING' as const,
+		playbackError: '',
 		...overrides,
 	};
 }
@@ -128,14 +157,7 @@ describe('serializeProjectDetail', () => {
 
 	it('converts sizeBytes bigint to number in assets', () => {
 		const result = serializeProjectDetail(fakeProject({
-			assets: [{
-				id: 1,
-				kind: 'IMAGE',
-				storageKey: 'img.png',
-				originalName: 'photo.png',
-				mimeType: 'image/png',
-				sizeBytes: 12345n,
-			}],
+			assets: [fakeAsset()],
 		}));
 		expect(result.assets[0]!.size).toBe(12345);
 		expect(typeof result.assets[0]!.size).toBe('number');
@@ -148,31 +170,64 @@ describe('serializeProjectDetail', () => {
 
 	it('returns video object when VIDEO asset exists', () => {
 		const result = serializeProjectDetail(fakeProject({
-			assets: [{
+			assets: [fakeAsset({
 				id: 2,
 				kind: 'VIDEO',
 				storageKey: 'vid.mp4',
 				originalName: 'demo.mp4',
 				mimeType: 'video/mp4',
 				sizeBytes: 99999n,
-			}],
+				playbackStatus: 'READY',
+			})],
 		}));
 		expect(result.video).toEqual({
 			url: 'https://api.example.com/api/assets/protected/vid.mp4',
 			mimeType: 'video/mp4',
+			originalDownloadUrl: 'https://api.example.com/api/assets/protected/vid.mp4',
+			playbackStatus: 'READY',
+			playbackError: undefined,
+		});
+	});
+
+	it('returns playback URL for admin video preview when playback file exists', () => {
+		const result = serializeProjectDetail(fakeProject({
+			assets: [fakeAsset({
+				id: 2,
+				kind: 'VIDEO',
+				storageKey: 'original.mov',
+				playbackStorageKey: 'playback.mp4',
+				originalName: 'demo.mov',
+				mimeType: 'video/quicktime',
+				playbackMimeType: 'video/mp4',
+				sizeBytes: 99999n,
+				playbackSizeBytes: 12345n,
+				playbackStatus: 'READY',
+			})],
+		}));
+
+		expect(result.video).toMatchObject({
+			url: 'https://api.example.com/api/assets/protected/playback.mp4',
+			mimeType: 'video/mp4',
+			originalDownloadUrl: 'https://api.example.com/api/assets/protected/original.mov',
+			playbackStatus: 'READY',
+		});
+		expect(result.assets[0]).toMatchObject({
+			url: 'https://api.example.com/api/assets/protected/original.mov',
+			playbackUrl: 'https://api.example.com/api/assets/protected/playback.mp4',
+			originalDownloadUrl: 'https://api.example.com/api/assets/protected/original.mov',
 		});
 	});
 
 	it('defaults video mimeType to video/mp4 when empty', () => {
 		const result = serializeProjectDetail(fakeProject({
-			assets: [{
+			assets: [fakeAsset({
 				id: 2,
 				kind: 'VIDEO',
 				storageKey: 'vid.webm',
 				originalName: 'demo.webm',
 				mimeType: '',
 				sizeBytes: 50000n,
-			}],
+			})],
 		}));
 		expect(result.video!.mimeType).toBe('video/mp4');
 	});
@@ -182,9 +237,9 @@ describe('serializeProjectDetail', () => {
 			isIncomplete: true,
 			poster: { storageKey: 'p.png', kind: 'POSTER', status: 'READY' },
 			assets: [
-				{ id: 1, kind: 'GAME', storageKey: 'g.zip', originalName: 'g.zip', mimeType: 'application/zip', sizeBytes: 1n },
-				{ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n },
-				{ id: 3, kind: 'POSTER', storageKey: 'p.png', originalName: 'p.png', mimeType: 'image/png', sizeBytes: 3n },
+				fakeAsset({ id: 1, kind: 'GAME', storageKey: 'g.zip', originalName: 'g.zip', mimeType: 'application/zip', sizeBytes: 1n }),
+				fakeAsset({ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n }),
+				fakeAsset({ id: 3, kind: 'POSTER', storageKey: 'p.png', originalName: 'p.png', mimeType: 'image/png', sizeBytes: 3n }),
 			],
 		}));
 		expect(result.isIncomplete).toBe(false);
@@ -195,7 +250,7 @@ describe('serializeProjectDetail', () => {
 			isIncomplete: true,
 			poster: { storageKey: 'p.png', kind: 'POSTER', status: 'READY' },
 			assets: [
-				{ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n },
+				fakeAsset({ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n }),
 			],
 		}));
 		expect(result.isIncomplete).toBe(true);
@@ -206,8 +261,8 @@ describe('serializeProjectDetail', () => {
 			isIncomplete: true,
 			poster: { storageKey: 'g.zip', kind: 'GAME', status: 'READY' },
 			assets: [
-				{ id: 1, kind: 'GAME', storageKey: 'g.zip', originalName: 'g.zip', mimeType: 'application/zip', sizeBytes: 1n },
-				{ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n },
+				fakeAsset({ id: 1, kind: 'GAME', storageKey: 'g.zip', originalName: 'g.zip', mimeType: 'application/zip', sizeBytes: 1n }),
+				fakeAsset({ id: 2, kind: 'VIDEO', storageKey: 'v.mp4', originalName: 'v.mp4', mimeType: 'video/mp4', sizeBytes: 2n }),
 			],
 		}));
 		expect(result.isIncomplete).toBe(true);

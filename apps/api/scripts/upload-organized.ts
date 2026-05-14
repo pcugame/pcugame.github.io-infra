@@ -15,6 +15,7 @@
  */
 
 import { PrismaClient } from '@prisma/client';
+import type { AssetPlaybackStatus } from '@prisma/client';
 import { readdirSync, statSync, createReadStream, readFileSync, mkdtempSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, extname, basename } from 'node:path';
@@ -49,6 +50,10 @@ const VIDEO_MIMES_FOR_PROCESSING = new Set([
 
 const SKIP_NAMES = new Set(['@eadir', '.ds_store', 'thumbs.db', 'desktop.ini']);
 
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
 // ── Types ────────────────────────────────────────────────
 
 interface ProjectFolder {
@@ -64,9 +69,14 @@ interface ProjectFolder {
 interface AssetRecord {
 	kind: AssetKind;
 	storageKey: string;
+	playbackStorageKey?: string | null;
 	originalName: string;
 	mimeType: string;
+	playbackMimeType?: string;
 	sizeBytes: bigint;
+	playbackSizeBytes?: bigint;
+	playbackStatus?: AssetPlaybackStatus;
+	playbackError?: string;
 	isPublic: boolean;
 }
 
@@ -172,7 +182,17 @@ async function uploadAsset(
 	filePath: string,
 	kind: AssetKind,
 	tmpDir: string,
-): Promise<{ storageKey: string; mimeType: string; sizeBytes: number; converted: boolean }> {
+): Promise<{
+	storageKey: string;
+	playbackStorageKey?: string | null;
+	mimeType: string;
+	playbackMimeType?: string;
+	sizeBytes: number;
+	playbackSizeBytes?: number;
+	playbackStatus?: AssetPlaybackStatus;
+	playbackError?: string;
+	converted: boolean;
+}> {
 	const ext = extname(filePath).toLowerCase();
 	const mime = MIME_MAP[ext] ?? 'application/octet-stream';
 	let finalPath = filePath;
@@ -208,19 +228,51 @@ async function uploadAsset(
 			const tmpPath = join(tmpDir, `${Date.now()}_${basename(filePath)}`);
 			copyFileSync(filePath, tmpPath);
 			tempFiles.push(tmpPath);
-			try {
-				const result = await processVideo({
-					tmpPath, mimeType: mime, ext: finalExt, sizeBytes: finalSize,
-				});
-				finalPath = result.tmpPath;
-				finalMime = result.mimeType;
-				finalExt = result.ext;
-				finalSize = result.sizeBytes;
-				converted = result.converted;
-				if (result.converted && result.tmpPath !== tmpPath) tempFiles.push(result.tmpPath);
-			} catch {
-				finalPath = tmpPath;
+
+			const playback = await processVideo({
+				tmpPath, mimeType: mime, ext: finalExt, sizeBytes: finalSize,
+			});
+			if (playback.playback) tempFiles.push(playback.playback.tmpPath);
+
+			const storageKey = generateStorageKey(finalExt);
+			const bucket = bucketForKind(kind);
+			await uploadFile(bucket, storageKey, createReadStream(tmpPath), mime, finalSize);
+
+			let playbackStorageKey: string | null = null;
+			let playbackMimeType = '';
+			let playbackSizeBytes = 0;
+			let playbackStatus = playback.playbackStatus;
+			let playbackError = playback.playbackError;
+			if (playback.playback) {
+				const candidatePlaybackKey = generateStorageKey(playback.playback.ext);
+				try {
+					await uploadFile(
+						bucket,
+						candidatePlaybackKey,
+						createReadStream(playback.playback.tmpPath),
+						playback.playback.mimeType,
+						playback.playback.sizeBytes,
+					);
+					playbackStorageKey = candidatePlaybackKey;
+					playbackMimeType = playback.playback.mimeType;
+					playbackSizeBytes = playback.playback.sizeBytes;
+				} catch (err) {
+					playbackStatus = 'FAILED';
+					playbackError = errorMessage(err).slice(0, 2000);
+				}
 			}
+
+			return {
+				storageKey,
+				playbackStorageKey,
+				mimeType: mime,
+				playbackMimeType,
+				sizeBytes: finalSize,
+				playbackSizeBytes,
+				playbackStatus,
+				playbackError,
+				converted: playback.converted,
+			};
 		}
 
 		// Upload to S3
@@ -349,9 +401,14 @@ async function doUpload(
 					records.push({
 						kind: 'POSTER',
 						storageKey: result.storageKey,
+						playbackStorageKey: result.playbackStorageKey,
 						originalName: basename(folder.poster),
 						mimeType: result.mimeType,
+						playbackMimeType: result.playbackMimeType,
 						sizeBytes: BigInt(result.sizeBytes),
+						playbackSizeBytes: BigInt(result.playbackSizeBytes ?? 0),
+						playbackStatus: result.playbackStatus,
+						playbackError: result.playbackError,
 						isPublic: true,
 					});
 					const flag = result.converted ? ' → converted' : '';
@@ -364,9 +421,14 @@ async function doUpload(
 					records.push({
 						kind: 'GAME',
 						storageKey: result.storageKey,
+						playbackStorageKey: result.playbackStorageKey,
 						originalName: basename(g),
 						mimeType: result.mimeType,
+						playbackMimeType: result.playbackMimeType,
 						sizeBytes: BigInt(result.sizeBytes),
+						playbackSizeBytes: BigInt(result.playbackSizeBytes ?? 0),
+						playbackStatus: result.playbackStatus,
+						playbackError: result.playbackError,
 						isPublic: false,
 					});
 					console.log(`        GAME    ${(result.sizeBytes / 1024 / 1024).toFixed(1)} MB  ${result.mimeType}`);
@@ -379,9 +441,14 @@ async function doUpload(
 					records.push({
 						kind: 'VIDEO',
 						storageKey: result.storageKey,
+						playbackStorageKey: result.playbackStorageKey,
 						originalName: basename(t),
 						mimeType: result.mimeType,
+						playbackMimeType: result.playbackMimeType,
 						sizeBytes: BigInt(result.sizeBytes),
+						playbackSizeBytes: BigInt(result.playbackSizeBytes ?? 0),
+						playbackStatus: result.playbackStatus,
+						playbackError: result.playbackError,
 						isPublic: false,
 					});
 					const flag = result.converted ? ' → converted' : '';
@@ -397,9 +464,14 @@ async function doUpload(
 								kind: rec.kind,
 								status: 'READY',
 								storageKey: rec.storageKey,
+								playbackStorageKey: rec.playbackStorageKey ?? null,
 								originalName: rec.originalName,
 								mimeType: rec.mimeType,
+								playbackMimeType: rec.playbackMimeType ?? '',
 								sizeBytes: rec.sizeBytes,
+								playbackSizeBytes: rec.playbackSizeBytes ?? BigInt(0),
+								playbackStatus: rec.playbackStatus ?? 'PENDING',
+								playbackError: rec.playbackError ?? '',
 								isPublic: rec.isPublic,
 							},
 						});

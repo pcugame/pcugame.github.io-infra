@@ -7,6 +7,7 @@
 export type UserRole = 'USER' | 'OPERATOR' | 'ADMIN';
 export type ProjectStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 export type AssetKind = 'THUMBNAIL' | 'IMAGE' | 'POSTER' | 'GAME' | 'VIDEO';
+export type AssetPlaybackStatus = 'PENDING' | 'READY' | 'FAILED';
 
 // ── Auth ─────────────────────────────────────────────────────
 
@@ -86,6 +87,9 @@ export type PublicExhibitionProjectsResponse = {
 export type ProjectVideo = {
 	url: string;
 	mimeType: string;
+	originalDownloadUrl?: string;
+	playbackStatus?: AssetPlaybackStatus;
+	playbackError?: string;
 };
 
 /** GET /api/public/projects/:idOrSlug */
@@ -182,6 +186,10 @@ export type AdminProjectDetail = {
 		id: number;
 		kind: AssetKind;
 		url: string;
+		originalDownloadUrl?: string;
+		playbackUrl?: string;
+		playbackStatus?: AssetPlaybackStatus;
+		playbackError?: string;
 		originalName: string;
 		size: number;
 	}[];
@@ -224,6 +232,15 @@ export type UpdateMemberRequest = {
 // ── Admin: Export progress ───────────────────────────────────
 
 export type ExportPhase = 'preparing' | 'downloading' | 'finishing';
+export type ExportFileStatus = 'pending' | 'saving' | 'saved' | 'skipped' | 'failed';
+
+export type ExportProgressFile = {
+	assetId: number;
+	kind: AssetKind;
+	originalName: string;
+	fileName: string;
+	status: ExportFileStatus;
+};
 
 export type ExportProgress = {
 	year: number | null;
@@ -232,6 +249,7 @@ export type ExportProgress = {
 	totalProjects: number;
 	currentProjectIndex: number;
 	currentProjectTitle: string | null;
+	currentProjectFiles: ExportProgressFile[];
 	totalFiles: number;
 	downloaded: number;
 	skipped: number;

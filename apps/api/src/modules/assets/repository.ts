@@ -10,7 +10,13 @@ export function findPublicAsset(storageKey: string) {
 /** Find any READY asset by storageKey (including protected) */
 export function findAssetByStorageKey(storageKey: string) {
 	return prisma.asset.findFirst({
-		where: { storageKey, status: 'READY' },
+		where: {
+			status: 'READY',
+			OR: [
+				{ storageKey },
+				{ playbackStorageKey: storageKey },
+			],
+		},
 	});
 }
 

@@ -392,6 +392,12 @@ export default function AdminProjectEditPage() {
                       </strong>
                     )}
                   </span>
+                  {asset.kind === 'VIDEO' && asset.playbackStatus && (
+                    <p className="field-hint">
+                      재생용: {asset.playbackStatus}
+                      {asset.playbackError ? ` (${asset.playbackError})` : ''}
+                    </p>
+                  )}
                   {asset.kind === 'IMAGE' || asset.kind === 'POSTER' ? (
                     <img
                       src={asset.url}
@@ -410,6 +416,15 @@ export default function AdminProjectEditPage() {
                         >
                           포스터로 지정
                         </button>
+                      )}
+                      {asset.kind === 'VIDEO' && asset.originalDownloadUrl && (
+                        <a
+                          className="btn btn--secondary btn--small"
+                          href={asset.originalDownloadUrl}
+                          download
+                        >
+                          원본 다운로드
+                        </a>
                       )}
                       <button
                         className="btn btn--danger btn--small"

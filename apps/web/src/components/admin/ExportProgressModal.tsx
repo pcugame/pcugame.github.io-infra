@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { adminExportApi } from '../../lib/api';
 import type { ExportResult } from '../../lib/api';
-import type { ExportPhase } from '../../contracts';
+import type { ExportFileStatus, ExportPhase } from '../../contracts';
 import { queryKeys } from '../../lib/query';
 
 interface Props {
@@ -18,6 +18,14 @@ const PHASE_LABEL: Record<ExportPhase, string> = {
 	preparing: '준비 중…',
 	downloading: '다운로드 중…',
 	finishing: '마무리 중…',
+};
+
+const FILE_STATUS_LABEL: Record<ExportFileStatus, string> = {
+	pending: '대기',
+	saving: '저장중',
+	saved: '완료',
+	skipped: '스킵',
+	failed: '실패',
 };
 
 export function ExportProgressModal({
@@ -71,15 +79,22 @@ export function ExportProgressModal({
 	const skipped = progress?.skipped ?? 0;
 	const failed = progress?.failed ?? 0;
 	const totalFiles = progress?.totalFiles ?? 0;
+	const processedFiles = downloaded + skipped + failed;
+	const progressPercent = totalFiles > 0
+		? Math.min(Math.round((processedFiles / totalFiles) * 100), 100)
+		: 0;
+	const currentProjectFiles = progress?.currentProjectFiles ?? [];
+	const title = isRunning
+		? `${year}년 작품 NAS에 저장중...`
+		: `${year}년도 NAS 내보내기`;
 
 	return (
 		<div className="modal-overlay" onClick={handleOverlayClick}>
 			<div
-				className="modal-panel"
+				className="modal-panel export-progress-modal"
 				role="dialog"
 				aria-modal="true"
 				aria-live="polite"
-				style={{ maxWidth: 520 }}
 			>
 				{!isRunning && (
 					<button className="modal-close" onClick={onClose} aria-label="닫기">
@@ -100,37 +115,42 @@ export function ExportProgressModal({
 				)}
 
 				<div className="modal-body">
-					<h2 className="modal-title">{year}년도 NAS 내보내기</h2>
+					<h2 className="modal-title">{title}</h2>
 
 					{isRunning && (
-						<div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-							<div
-								style={{
-									display: 'flex',
-									alignItems: 'center',
-									gap: '0.85rem',
-								}}
-							>
+						<div className="export-progress">
+							<div className="export-progress__phase">
 								<div
 									className="spinner"
 									aria-label="진행 중"
 									style={{ width: 28, height: 28, borderWidth: 3 }}
 								/>
-								<strong style={{ fontSize: '1rem' }}>{phaseLabel}</strong>
+								<strong>{phaseLabel}</strong>
 							</div>
 
-							<dl
-								style={{
-									margin: 0,
-									display: 'grid',
-									gridTemplateColumns: 'auto 1fr',
-									columnGap: '1rem',
-									rowGap: '0.5rem',
-									fontSize: '0.92rem',
-								}}
-							>
-								<dt style={{ color: 'var(--color-text-muted)' }}>프로젝트</dt>
-								<dd style={{ margin: 0 }}>
+							<div className="export-progress__bar-wrap">
+								<div className="export-progress__bar-meta">
+									<span>전체 진행률</span>
+									<strong>{progressPercent}%</strong>
+								</div>
+								<div
+									className="export-progress__bar-track"
+									role="progressbar"
+									aria-label="NAS 내보내기 진행률"
+									aria-valuemin={0}
+									aria-valuemax={100}
+									aria-valuenow={progressPercent}
+								>
+									<div
+										className="export-progress__bar-fill"
+										style={{ width: `${progressPercent}%` }}
+									/>
+								</div>
+							</div>
+
+							<dl className="export-progress__stats">
+								<dt>프로젝트</dt>
+								<dd>
 									{projectsTotal > 0
 										? `${projectsDone} / ${projectsTotal}`
 										: '집계 중…'}
@@ -138,53 +158,73 @@ export function ExportProgressModal({
 
 								{progress?.currentProjectTitle && (
 									<>
-										<dt style={{ color: 'var(--color-text-muted)' }}>현재 작품</dt>
-										<dd
-											style={{
-												margin: 0,
-												overflow: 'hidden',
-												textOverflow: 'ellipsis',
-												whiteSpace: 'nowrap',
-											}}
-										>
+										<dt>현재 작품</dt>
+										<dd className="export-progress__current-title">
 											{progress.currentProjectTitle}
 										</dd>
 									</>
 								)}
 
-								<dt style={{ color: 'var(--color-text-muted)' }}>파일</dt>
-								<dd style={{ margin: 0 }}>
+								<dt>파일</dt>
+								<dd>
 									<span>다운로드 <strong>{downloaded}</strong></span>
-									<span style={{ color: 'var(--color-text-muted)' }}> · </span>
+									<span className="export-progress__muted"> · </span>
 									<span>스킵 <strong>{skipped}</strong></span>
 									{failed > 0 && (
 										<>
-											<span style={{ color: 'var(--color-text-muted)' }}> · </span>
-											<span style={{ color: 'var(--color-danger, #dc2626)' }}>
+											<span className="export-progress__muted"> · </span>
+											<span className="export-progress__danger">
 												실패 <strong>{failed}</strong>
 											</span>
 										</>
 									)}
 									{totalFiles > 0 && (
-										<span style={{ color: 'var(--color-text-muted)' }}>
-											{' '}/ 총 {totalFiles}
+										<span className="export-progress__muted">
+											{' '}/ 총 {totalFiles}개
 										</span>
 									)}
 								</dd>
 							</dl>
 
-							<p
-								style={{
-									margin: 0,
-									padding: '0.75rem 1rem',
-									background: 'var(--color-bg)',
-									border: '1px solid var(--color-border)',
-									borderRadius: 10,
-									color: 'var(--color-text-muted)',
-									fontSize: '0.85rem',
-									lineHeight: 1.5,
-								}}
-							>
+							<div className="export-progress__file-panel">
+								<div className="export-progress__file-panel-head">
+									<strong>진행중 작품 파일</strong>
+									<span>
+										{currentProjectFiles.length > 0
+											? `${currentProjectFiles.length}개`
+											: '집계 중'}
+									</span>
+								</div>
+								{currentProjectFiles.length > 0 ? (
+									<ul className="export-progress__file-list">
+										{currentProjectFiles.map((file) => (
+											<li className="export-progress__file-item" key={file.assetId}>
+												<div className="export-progress__file-main">
+													<span className="export-progress__file-name">
+														{file.fileName}
+													</span>
+													{file.originalName && file.originalName !== file.fileName && (
+														<span className="export-progress__file-original">
+															원본: {file.originalName}
+														</span>
+													)}
+												</div>
+												<span
+													className={`export-progress__file-status export-progress__file-status--${file.status}`}
+												>
+													{FILE_STATUS_LABEL[file.status]}
+												</span>
+											</li>
+										))}
+									</ul>
+								) : (
+									<p className="export-progress__file-empty">
+										현재 작품의 파일 목록을 불러오는 중입니다.
+									</p>
+								)}
+							</div>
+
+							<p className="export-progress__notice">
 								내보내기 중에는 이 창을 닫을 수 없습니다. 작업이 끝날 때까지 잠시만
 								기다려주세요. (탭을 닫거나 새로고침하면 진행 중인 작업이 중단됩니다.)
 							</p>

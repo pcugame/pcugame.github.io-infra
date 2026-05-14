@@ -1,6 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import { createWriteStream } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
@@ -51,6 +51,15 @@ function assetFileName(kind: string, ext: string, index: number): string {
 // ── Server-side mutex + progress ────────────────────────
 
 export type ExportPhase = 'preparing' | 'downloading' | 'finishing';
+export type ExportFileStatus = 'pending' | 'saving' | 'saved' | 'skipped' | 'failed';
+
+export interface ExportProgressFile {
+	assetId: number;
+	kind: AssetKind;
+	originalName: string;
+	fileName: string;
+	status: ExportFileStatus;
+}
 
 export interface ExportProgress {
 	year: number | null;
@@ -59,6 +68,7 @@ export interface ExportProgress {
 	totalProjects: number;
 	currentProjectIndex: number;
 	currentProjectTitle: string | null;
+	currentProjectFiles: ExportProgressFile[];
 	totalFiles: number;
 	downloaded: number;
 	skipped: number;
@@ -80,6 +90,7 @@ function acquireExportLock(year: number | null): void {
 		totalProjects: 0,
 		currentProjectIndex: 0,
 		currentProjectTitle: null,
+		currentProjectFiles: [],
 		totalFiles: 0,
 		downloaded: 0,
 		skipped: 0,
@@ -94,6 +105,13 @@ function releaseExportLock(): void {
 
 export function getExportProgress(): ExportProgress | null {
 	return currentProgress;
+}
+
+function setCurrentFileStatus(assetId: number, status: ExportFileStatus): void {
+	if (!currentProgress) return;
+	currentProgress.currentProjectFiles = currentProgress.currentProjectFiles.map((file) =>
+		file.assetId === assetId ? { ...file, status } : file,
+	);
 }
 
 // ── S3 download (atomic + abortable) ──────────────────
@@ -155,10 +173,11 @@ export async function exportAssets(opts: ExportOptions): Promise<ExportResult> {
 
 async function doExport(opts: ExportOptions): Promise<ExportResult> {
 	const projects = await repo.findProjectsWithAssets(opts.year);
+	const totalFiles = projects.reduce((sum, project) => sum + project.assets.length, 0);
 
 	const result: ExportResult = {
 		projects: projects.length,
-		totalFiles: 0,
+		totalFiles,
 		downloaded: 0,
 		skipped: 0,
 		failed: 0,
@@ -168,6 +187,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 
 	if (currentProgress) {
 		currentProgress.totalProjects = projects.length;
+		currentProgress.totalFiles = totalFiles;
 		currentProgress.phase = 'downloading';
 	}
 
@@ -198,23 +218,37 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 		const fullDir = join(assetsDir, exDir, projDir);
 
 		const kindCount = new Map<string, number>();
-
-		for (const asset of project.assets) {
-			if (opts.signal?.aborted) {
-				result.aborted = true;
-				break;
-			}
-
+		const projectFiles = project.assets.map((asset) => {
 			const idx = kindCount.get(asset.kind) ?? 0;
 			kindCount.set(asset.kind, idx + 1);
 
 			const ext = extFromKey(asset.storageKey);
 			const fileName = assetFileName(asset.kind, ext, idx);
-			const destPath = join(fullDir, fileName);
-			const bucket = bucketForKind(asset.kind as AssetKind);
 
-			result.totalFiles++;
-			if (currentProgress) currentProgress.totalFiles = result.totalFiles;
+			return {
+				asset,
+				fileName,
+				destPath: join(fullDir, fileName),
+			};
+		});
+
+		if (currentProgress) {
+			currentProgress.currentProjectFiles = projectFiles.map(({ asset, fileName }) => ({
+				assetId: asset.id,
+				kind: asset.kind as AssetKind,
+				originalName: asset.originalName,
+				fileName,
+				status: 'pending',
+			}));
+		}
+
+		for (const { asset, destPath } of projectFiles) {
+			if (opts.signal?.aborted) {
+				result.aborted = true;
+				break;
+			}
+
+			const bucket = bucketForKind(asset.kind as AssetKind);
 
 			if (opts.dryRun) {
 				result.paths.push(destPath);
@@ -226,6 +260,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 				await fsp.access(destPath);
 				result.skipped++;
 				if (currentProgress) currentProgress.skipped = result.skipped;
+				setCurrentFileStatus(asset.id, 'skipped');
 				continue;
 			} catch {
 				// doesn't exist — proceed
@@ -234,9 +269,11 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 			await fsp.mkdir(fullDir, { recursive: true });
 
 			try {
+				setCurrentFileStatus(asset.id, 'saving');
 				await downloadObject(bucket, asset.storageKey, destPath, opts.signal);
 				result.downloaded++;
 				if (currentProgress) currentProgress.downloaded = result.downloaded;
+				setCurrentFileStatus(asset.id, 'saved');
 			} catch (err) {
 				if (opts.signal?.aborted) {
 					result.aborted = true;
@@ -245,6 +282,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 				logger().error({ err, storageKey: asset.storageKey }, 'Export download failed');
 				result.failed++;
 				if (currentProgress) currentProgress.failed = result.failed;
+				setCurrentFileStatus(asset.id, 'failed');
 			}
 		}
 
