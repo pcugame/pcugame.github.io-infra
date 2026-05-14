@@ -135,7 +135,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 
 	if (projects.length === 0) return result;
 
-	const assetsDir = join(opts.outDir, 'Assets');
+	const assetsDir = join(opts.outDir, 'ExportedAssets');
 
 	for (const project of projects) {
 		// Check abort before each project
