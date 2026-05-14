@@ -10,21 +10,32 @@ interface Props {
 export function ProjectCard({ project, onSelect }: Props) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [isMultiLine, setIsMultiLine] = useState(false);
+  // Prevents re-entering the measurement loop once we've decided to stay large
+  // after confirming the small font also fits in 1 line.
+  const decided = useRef(false);
 
-  // Reset to base (large) state whenever the title changes so measurement
-  // always happens at the large font-size, not the already-shrunk one.
   useLayoutEffect(() => {
     setIsMultiLine(false);
+    decided.current = false;
   }, [project.title]);
 
-  // After confirming base state, measure whether text wraps.
   useLayoutEffect(() => {
-    if (isMultiLine) return;
+    if (decided.current) return;
     const el = titleRef.current;
     if (!el) return;
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight);
-    if (el.scrollHeight > Math.ceil(lineHeight) + 2) {
-      setIsMultiLine(true);
+    const wraps = el.scrollHeight > Math.ceil(lineHeight) + 2;
+
+    if (!isMultiLine) {
+      // Phase 1: measuring at large font — does it wrap?
+      if (wraps) setIsMultiLine(true);
+    } else {
+      // Phase 2: measuring at small font — does it still need 2 lines?
+      // If not, go back to large (text will be clipped to 1 line by the wrapper).
+      if (!wraps) {
+        decided.current = true;
+        setIsMultiLine(false);
+      }
     }
   }, [isMultiLine, project.title]);
 
@@ -48,12 +59,14 @@ export function ProjectCard({ project, onSelect }: Props) {
         )}
       </div>
       <div className="archive-card__body">
-        <h3
-          ref={titleRef}
-          className={`archive-card__title${isMultiLine ? ' archive-card__title--multiline' : ''}`}
-        >
-          {project.title}
-        </h3>
+        <div className="archive-card__title-wrap">
+          <h3
+            ref={titleRef}
+            className={`archive-card__title${isMultiLine ? ' archive-card__title--multiline' : ''}`}
+          >
+            {project.title}
+          </h3>
+        </div>
         {project.summary && (
           <p className="archive-card__summary">{project.summary}</p>
         )}
