@@ -4774,8 +4774,7 @@ fieldset.status-section legend {
 }
 
 .archive-grid--poster .archive-card__image img {
-  object-fit: contain;
-  background: var(--color-border);
+  object-fit: cover;
 }
 
 /* ── Archive Card (image3 style) ─────────────────────────────── */
