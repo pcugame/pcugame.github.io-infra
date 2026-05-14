@@ -11,12 +11,22 @@ export function ProjectCard({ project, onSelect }: Props) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [isMultiLine, setIsMultiLine] = useState(false);
 
+  // Reset to base (large) state whenever the title changes so measurement
+  // always happens at the large font-size, not the already-shrunk one.
   useLayoutEffect(() => {
+    setIsMultiLine(false);
+  }, [project.title]);
+
+  // After confirming base state, measure whether text wraps.
+  useLayoutEffect(() => {
+    if (isMultiLine) return;
     const el = titleRef.current;
     if (!el) return;
     const lineHeight = parseFloat(getComputedStyle(el).lineHeight);
-    setIsMultiLine(el.scrollHeight > Math.ceil(lineHeight) + 2);
-  }, [project.title]);
+    if (el.scrollHeight > Math.ceil(lineHeight) + 2) {
+      setIsMultiLine(true);
+    }
+  }, [isMultiLine, project.title]);
 
   return (
     <button

@@ -4851,15 +4851,14 @@ fieldset.status-section legend {
   line-height: 1.3;
   height: 2.86rem;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
 }
 
 .archive-card__title--multiline {
   font-size: 1.1rem;
   height: 2.86rem;
+  display: -webkit-box;
   -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .archive-card__summary {
@@ -5634,16 +5633,15 @@ fieldset.status-section legend {
     font-size: 1.1rem;
     line-height: 1.25;
     height: 2.2rem;
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
   .archive-card__title--multiline {
     font-size: 0.88rem;
     height: 2.2rem;
+    display: -webkit-box;
     -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 
   .archive-card__summary {
