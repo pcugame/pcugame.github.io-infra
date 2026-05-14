@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { PublicProjectCard } from '../../contracts';
 
 interface Props {
@@ -7,6 +8,16 @@ interface Props {
 }
 
 export function ProjectCard({ project, onSelect }: Props) {
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [isMultiLine, setIsMultiLine] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight);
+    setIsMultiLine(el.scrollHeight > Math.ceil(lineHeight) + 2);
+  }, [project.title]);
+
   return (
     <button
       type="button"
@@ -27,14 +38,23 @@ export function ProjectCard({ project, onSelect }: Props) {
         )}
       </div>
       <div className="archive-card__body">
-        <h3 className="archive-card__title">{project.title}</h3>
+        <h3
+          ref={titleRef}
+          className={`archive-card__title${isMultiLine ? ' archive-card__title--multiline' : ''}`}
+        >
+          {project.title}
+        </h3>
         {project.summary && (
           <p className="archive-card__summary">{project.summary}</p>
         )}
         <div className="archive-card__footer">
-          <p className="archive-card__members">
-            {project.members.map((m) => m.studentId ? `${m.studentId} - ${m.name}` : m.name).join(' · ')}
-          </p>
+          <div className="archive-card__members">
+            {project.members.map((m) => (
+              <span key={m.studentId ?? m.name} className="archive-card__member-pill">
+                {m.studentId ? `${m.studentId} - ${m.name}` : m.name}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
     </button>

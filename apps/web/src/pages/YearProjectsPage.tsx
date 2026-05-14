@@ -18,7 +18,7 @@ export default function YearProjectsPage() {
   const debouncedSearch = useDebouncedValue(search, 250, isComposing);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<number | null>(null); // null = 전체
-  const [viewMode, setViewMode] = useState<'grid' | 'poster'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'poster'>('poster');
   const closeModal = useCallback(() => setSelectedSlug(null), []);
 
   const { data: yearsData } = useQuery({

@@ -14,7 +14,7 @@ export default function ExhibitionProjectsPage() {
   const [isComposing, setIsComposing] = useState(false);
   const debouncedSearch = useDebouncedValue(search, 250, isComposing);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'grid' | 'poster'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'poster'>('poster');
   const closeModal = useCallback(() => setSelectedSlug(null), []);
 
   const { data, isLoading, error, refetch } = useQuery({
