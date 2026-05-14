@@ -51,7 +51,7 @@ export function ProjectCard({ project, onSelect }: Props) {
           <div className="archive-card__members">
             {project.members.map((m) => (
               <span key={m.studentId ?? m.name} className="archive-card__member-pill">
-                {m.studentId ? `${m.studentId} - ${m.name}` : m.name}
+                {m.studentId ? `${m.studentId} ${m.name}` : m.name}
               </span>
             ))}
           </div>
