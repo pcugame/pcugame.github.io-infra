@@ -106,6 +106,9 @@ verify_running() {
 do_up() {
   load_env
 
+  local nas_export_host_path="${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
+  local nas_export_container_path="${NAS_EXPORT_PATH:-/nas}"
+
   # Ensure volume exists
   podman volume inspect "$PG_VOLUME" &>/dev/null || podman volume create "$PG_VOLUME"
 
@@ -184,9 +187,10 @@ do_up() {
     -e "S3_BUCKET_PUBLIC=${S3_BUCKET_PUBLIC:-pcu-public}" \
     -e "S3_BUCKET_PROTECTED=${S3_BUCKET_PROTECTED:-pcu-protected}" \
     -e "S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}" \
+    -e "NAS_EXPORT_PATH=${nas_export_container_path}" \
     -v "${STORAGE_HOST_PATH}/protected:/app/storage/protected:Z" \
     -v "${STORAGE_HOST_PATH}/public:/app/storage/public:Z" \
-    -v "/mnt/nas/pcu_storage/GraduationGame/Asset:/nas/Asset:ro" \
+    -v "${nas_export_host_path}:${nas_export_container_path}:rw" \
     "$API_IMAGE"
 
   # Verify API container is actually running
