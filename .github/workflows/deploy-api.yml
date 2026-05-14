@@ -62,6 +62,7 @@ jobs:
           source: server/deploy.sh,server/hardening/*,server/SECURITY-HARDENING.md
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
+          overwrite: true
 
       - name: SSH deploy to server
         uses: appleboy/ssh-action@v1.0.3
