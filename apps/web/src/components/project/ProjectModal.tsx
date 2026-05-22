@@ -97,6 +97,20 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 	const isImageType = current?.type === 'poster' || current?.type === 'image';
 
+	// 동영상 캐러셀 헬퍼
+	const videoStartIndex = mediaItems.findIndex((m) => m.type === 'video');
+	const videoCount = projectVideos.length;
+	const currentVideoOffset = current?.type === 'video' ? activeIndex - videoStartIndex : 0;
+
+	const prevVideo = () => {
+		if (videoCount < 2) return;
+		setActiveIndex(videoStartIndex + (currentVideoOffset - 1 + videoCount) % videoCount);
+	};
+	const nextVideo = () => {
+		if (videoCount < 2) return;
+		setActiveIndex(videoStartIndex + (currentVideoOffset + 1) % videoCount);
+	};
+
 	return (
 		<div className="modal-overlay" ref={overlayRef} onClick={handleOverlayClick}>
 			<div className="modal-panel" role="dialog" aria-modal="true">
@@ -148,35 +162,71 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 										</button>
 									)}
 								</div>
+								{/* 동영상 여러 개일 때 dot + 화살표 네비게이션 */}
+								{current.type === 'video' && videoCount > 1 && (
+									<div className="modal-video-nav">
+										<button className="modal-video-nav__arrow" onClick={prevVideo} aria-label="이전 동영상">
+											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+												<polyline points="15 18 9 12 15 6" />
+											</svg>
+										</button>
+										<div className="modal-video-dots">
+											{Array.from({ length: videoCount }, (_, i) => (
+												<button
+													key={i}
+													className={`modal-video-dot${i === currentVideoOffset ? ' modal-video-dot--active' : ''}`}
+													onClick={() => setActiveIndex(videoStartIndex + i)}
+													aria-label={`동영상 ${i + 1}`}
+												/>
+											))}
+										</div>
+										<button className="modal-video-nav__arrow" onClick={nextVideo} aria-label="다음 동영상">
+											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+												<polyline points="9 18 15 12 9 6" />
+											</svg>
+										</button>
+									</div>
+								)}
 							</div>
 						)}
 
 						{/* 미디어 탭 목록 */}
 						{mediaItems.length > 1 && (
 							<div className="modal-media-tabs">
-								{mediaItems.map((item, i) => (
-									<button
-										key={item.type === 'image' ? `img-${item.id}` : `${item.type}-${i}`}
-										className={`modal-media-tab ${i === activeIndex ? 'modal-media-tab--active' : ''}`}
-										onClick={() => setActiveIndex(i)}
-									>
-										{item.type === 'video' ? (
-											<span className="modal-media-tab__icon">
-												<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-													<polygon points="5 3 19 12 5 21 5 3" />
-												</svg>
+								{mediaItems.map((item, i) => {
+									// 동영상이 여러 개면 첫 번째 이후의 동영상 탭은 생략 (dot nav로 대체)
+									if (item.type === 'video' && i > videoStartIndex) return null;
+
+									const isActive = item.type === 'video'
+										? current?.type === 'video'
+										: i === activeIndex;
+
+									return (
+										<button
+											key={item.type === 'image' ? `img-${item.id}` : `${item.type}-${i}`}
+											className={`modal-media-tab ${isActive ? 'modal-media-tab--active' : ''}`}
+											onClick={() => setActiveIndex(i)}
+										>
+											{item.type === 'video' ? (
+												<span className="modal-media-tab__icon">
+													<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+														<polygon points="5 3 19 12 5 21 5 3" />
+													</svg>
+												</span>
+											) : (
+												<img
+													src={item.url}
+													alt={item.label}
+													className="modal-media-tab__thumb"
+													loading="lazy"
+												/>
+											)}
+											<span className="modal-media-tab__label">
+												{item.type === 'video' ? '동영상' : item.label}
 											</span>
-										) : (
-											<img
-												src={item.url}
-												alt={item.label}
-												className="modal-media-tab__thumb"
-												loading="lazy"
-											/>
-										)}
-										<span className="modal-media-tab__label">{item.label}</span>
-									</button>
-								))}
+										</button>
+									);
+								})}
 							</div>
 						)}
 

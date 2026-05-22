@@ -1505,6 +1505,66 @@ a:hover {
   white-space: nowrap;
 }
 
+/* 동영상 dot 네비게이션 */
+.modal-video-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.55rem 1rem;
+  background: #0f172a;
+}
+
+.modal-video-nav__arrow {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.modal-video-nav__arrow:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.modal-video-nav__arrow:active {
+  transform: scale(0.9);
+}
+
+.modal-video-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal-video-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.28);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.modal-video-dot--active {
+  background: #fff;
+  transform: scale(1.3);
+}
+
+.modal-video-dot:hover:not(.modal-video-dot--active) {
+  background: rgba(255, 255, 255, 0.55);
+}
+
 /* 본문 */
 .modal-body {
   padding: 1.75rem 2rem 2rem;
@@ -5104,6 +5164,11 @@ fieldset.status-section legend {
   color: var(--color-text-muted);
   white-space: nowrap;
   line-height: 1.5;
+}
+
+.archive-card__member-pill--more {
+  font-style: italic;
+  opacity: 0.7;
 }
 
 @media (max-width: 768px) {
