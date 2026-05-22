@@ -2107,6 +2107,34 @@ button.archive-card {
   min-height: 44px; /* Google 버튼 높이 예약 — 비동기 로드 시 레이아웃 시프트 방지 */
 }
 
+.login-ucm-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  margin-bottom: 1rem;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.login-ucm-link:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.login-ucm-link__icon {
+  width: 0.9em;
+  height: 0.9em;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.login-ucm-link:hover .login-ucm-link__icon {
+  opacity: 1;
+}
+
 .login-status {
   color: var(--color-text-muted);
   font-size: 0.9rem;

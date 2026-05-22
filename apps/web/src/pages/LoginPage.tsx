@@ -50,6 +50,19 @@ export default function LoginPage() {
 
         <div ref={googleBtnRef} className="google-btn-container" />
 
+        <a
+          href="https://www.pcu.ac.kr/kor/contents/130"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="login-ucm-link"
+        >
+          UCM 계정에 대해 모르겠어요
+          <svg className="login-ucm-link__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="6" y="1" width="9" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+            <rect x="1" y="6" width="9" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.5" fill="var(--color-surface)"/>
+          </svg>
+        </a>
+
         {loginMutation.isPending && <p className="login-status">로그인 처리 중…</p>}
 
         {errorMessage && (
