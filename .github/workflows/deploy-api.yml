@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --include-workspace-root
 
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=apps/api
+
       - name: Test API
         run: npm test --workspace=apps/api
 
