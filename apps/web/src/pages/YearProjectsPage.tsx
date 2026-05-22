@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { useDebouncedValue } from '../lib/useDebouncedValue';
+import { sortProjectsWithPosterFirst } from '../lib/utils';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
 import { ProjectCard, ProjectModal } from '../components/project';
 
@@ -49,11 +50,11 @@ export default function YearProjectsPage() {
     : data?.items ?? [];
 
   // 검색 필터링
-  const filtered = tabFiltered.filter(
+  const filtered = sortProjectsWithPosterFirst(tabFiltered.filter(
     (p) =>
       p.title.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
       p.members.some((m) => m.name.includes(debouncedSearch)),
-  );
+  ));
 
   return (
     <div className="archive-page">
