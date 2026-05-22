@@ -3517,6 +3517,16 @@ fieldset.status-section legend {
 .main--home {
   padding-top: 0;
   padding-bottom: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* inner .home-landing (from HomePage) fills main */
+.main--home > .home-landing {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Home Design Tokens ──────────────────────────────────────── */
@@ -3942,12 +3952,11 @@ fieldset.status-section legend {
 /* ── Home Top Nav (오버레이, 바 없음) ────────────────────────── */
 
 .home-topnav {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
   z-index: 10;
+  background: var(--h-bg);
   border-bottom: 3px solid var(--h-border);
+  flex-shrink: 0;
 }
 
 .home-topnav__inner {
@@ -4097,9 +4106,10 @@ fieldset.status-section legend {
 /* ── 홈 아카이브 레이아웃 ─────────────────────────────────── */
 
 .home-archive-header {
-  padding-top: 8.5rem; /* topnav(~6.5rem) + 상하 여백 균형(2rem) */
-  padding-bottom: 2rem;
+  padding-top: 2rem;
+  padding-bottom: 1.5rem;
   border-bottom: 3px solid var(--h-border);
+  flex-shrink: 0;
 }
 
 .home-archive-header .home-hero__eyebrow {
@@ -4117,8 +4127,11 @@ fieldset.status-section legend {
 }
 
 .home-archive-body {
-  padding-top: 2rem;
-  padding-bottom: 4rem;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-top: 1.5rem;
+  padding-bottom: 1.5rem;
 }
 
 /* ── Year Grid (4열, 카드 크기 ~80%) ─────────────────────── */
@@ -4152,9 +4165,9 @@ fieldset.status-section legend {
   color: var(--h-text);
 }
 
-/* 9:16 포스터 영역 — 하얀 배경 + 테두리 */
+/* A4 세로(210:297) 포스터 영역 — 하얀 배경 + 테두리 */
 .home-year-card__poster {
-  aspect-ratio: 9 / 16;
+  aspect-ratio: 210 / 297;
   margin: 0.5rem;
   border: 1.5px solid rgba(15, 23, 42, 0.14);
   border-radius: 3px;
@@ -4245,7 +4258,7 @@ fieldset.status-section legend {
 
 @media (max-width: 640px) {
   .home-archive-header {
-    padding-top: 4.5rem;
+    padding-top: 1.25rem;
   }
 
   .home-year-grid {
