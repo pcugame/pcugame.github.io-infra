@@ -55,6 +55,7 @@ const ALLOWED_IMAGE_MIMES = new Set([
   'image/jpeg',
   'image/png',
   'image/webp',
+  'application/pdf',
 ]);
 
 const ALLOWED_POSTER_MIMES = new Set([
@@ -93,6 +94,7 @@ export const SIZE_LIMITS = {
   poster: 15 * 1024 * 1024,       // 15 MB
   posterPdf: 50 * 1024 * 1024,    // 50 MB (source PDF; rasterized output is much smaller)
   image: 15 * 1024 * 1024,        // 15 MB
+  imagePdf: 100 * 1024 * 1024,    // 100 MB (source PDF; rasterized output is much smaller)
   game: 5120 * 1024 * 1024,       // 5120 MB
   video: 1024 * 1024 * 1024,      // 1024 MB
 } as const;

@@ -40,11 +40,14 @@ export async function validateFile(
   const fileType = detectFileType(headerBuf);
   if (!fileType) throw badRequest('Unsupported file type');
 
-  // PDF posters get a larger size ceiling because the rasterized output
+  // PDF posters/images get a larger size ceiling because the rasterized output
   // is much smaller than the source.
   const isPosterPdf = kind === 'POSTER' && fileType.mime === 'application/pdf';
+  const isImagePdf = kind === 'IMAGE' && fileType.mime === 'application/pdf';
   const limit = isPosterPdf
     ? SIZE_LIMITS.posterPdf
+    : isImagePdf
+    ? SIZE_LIMITS.imagePdf
     : (KIND_SIZE_LIMITS[kind] ?? SIZE_LIMITS.image);
   if (sizeBytes > limit) {
     throw badRequest(`File too large for kind ${kind}`);
@@ -57,7 +60,7 @@ export async function validateFile(
   } else if (kind === 'POSTER') {
     if (!isAllowedPosterType(fileType)) throw badRequest('Poster must be JPEG, PNG, WebP, or PDF');
   } else {
-    if (!isAllowedImageType(fileType)) throw badRequest('Images must be JPEG, PNG, or WebP');
+    if (!isAllowedImageType(fileType)) throw badRequest('Images must be JPEG, PNG, WebP, or PDF');
   }
 
   return { mimeType: fileType.mime, ext: fileType.ext, sizeBytes };

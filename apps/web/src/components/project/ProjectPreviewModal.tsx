@@ -26,7 +26,8 @@ type MediaItem =
 	| { kind: 'poster-img'; url: string; label: string }
 	| { kind: 'poster-pdf'; name: string; label: string }
 	| { kind: 'video-mock'; name: string; label: string }
-	| { kind: 'image'; url: string; label: string };
+	| { kind: 'image'; url: string; label: string }
+	| { kind: 'image-pdf'; name: string; label: string };
 
 const isPdfFile = (f: File): boolean =>
 	f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
@@ -62,7 +63,11 @@ export function ProjectPreviewModal({
 			items.push({ kind: 'video-mock', name: video.name, label: '동영상' });
 		}
 		images.forEach((f, i) => {
-			items.push({ kind: 'image', url: URL.createObjectURL(f), label: `사진 ${i + 1}` });
+			if (isPdfFile(f)) {
+				items.push({ kind: 'image-pdf', name: f.name, label: `사진 ${i + 1}(PDF)` });
+			} else {
+				items.push({ kind: 'image', url: URL.createObjectURL(f), label: `사진 ${i + 1}` });
+			}
 		});
 		return items;
 	});
@@ -137,7 +142,7 @@ export function ProjectPreviewModal({
 										</svg>
 									</button>
 								</>
-							) : current.kind === 'poster-pdf' ? (
+							) : current.kind === 'poster-pdf' || current.kind === 'image-pdf' ? (
 								<div className="preview-mock">
 									<div className="preview-mock__tag">PDF</div>
 									<div className="preview-mock__name">{current.name}</div>

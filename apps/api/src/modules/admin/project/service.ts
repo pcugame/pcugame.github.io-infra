@@ -20,6 +20,7 @@ import {
 	acquireUploadSlot,
 	releaseUploadSlot,
 } from '../../../shared/upload-limits.js';
+import { detectFileType, SIZE_LIMITS } from '../../../shared/file-signature.js';
 import { UploadPipeline } from '../../assets/upload/index.js';
 import type { SavedFile } from '../../assets/upload/index.js';
 import { assertUploadAllowed } from '../upload-guard.js';
@@ -144,7 +145,13 @@ export async function collectMultipartParts(
 			}
 
 			const fileKind = fieldnameToKind(part.fieldname);
-			const perFileMax = fileKind ? kindLimit(limits, fileKind) : limits.imageMaxBytes;
+			const basePerFileMax = fileKind ? kindLimit(limits, fileKind) : limits.imageMaxBytes;
+			const perFileMax =
+				fileKind === 'POSTER'
+					? Math.max(basePerFileMax, SIZE_LIMITS.posterPdf)
+					: fileKind === 'IMAGE'
+					? Math.max(basePerFileMax, SIZE_LIMITS.imagePdf)
+					: basePerFileMax;
 
 			const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
 			pipeline.trackTempFile(tmpPath);
@@ -335,8 +342,20 @@ export async function addAssetToProject(
 
 		if (!fileTmpPath) throw badRequest('No file provided');
 
-		// Post-collection size check: now that kind is known, verify against the exact limit
-		const exactLimit = kindLimit(limits, kind);
+		// Post-collection size check: now that kind and file type are known,
+		// verify against the exact role/type limit.
+		const headerBuf = Buffer.alloc(16);
+		const fd = await fsp.open(fileTmpPath, 'r');
+		await fd.read(headerBuf, 0, 16, 0);
+		await fd.close();
+		const fileType = detectFileType(headerBuf);
+		const isPdf = fileType?.mime === 'application/pdf';
+		const exactLimit =
+			kind === 'POSTER' && isPdf
+				? Math.max(kindLimit(limits, kind), SIZE_LIMITS.posterPdf)
+				: kind === 'IMAGE' && isPdf
+				? Math.max(kindLimit(limits, kind), SIZE_LIMITS.imagePdf)
+				: kindLimit(limits, kind);
 		const fileStat = await fsp.stat(fileTmpPath);
 		if (fileStat.size > exactLimit) {
 			const limitMB = Math.round(exactLimit / 1024 / 1024);

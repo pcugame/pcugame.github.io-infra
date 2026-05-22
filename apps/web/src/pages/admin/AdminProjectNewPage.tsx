@@ -155,9 +155,15 @@ export default function AdminProjectNewPage() {
 
   const handleImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
-    const oversized = files.find((f) => f.size > limits.imageMaxMb * 1024 * 1024);
+    const oversized = files.find((f) => {
+      const isPdf = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
+      const limitMb = isPdf ? limits.imagePdfMaxMb : limits.imageMaxMb;
+      return f.size > limitMb * 1024 * 1024;
+    });
     if (oversized) {
-      setFileSizeError(`이미지 "${oversized.name}": ${(oversized.size / 1024 / 1024).toFixed(1)}MB — 최대 ${limits.imageMaxMb}MB까지 허용됩니다.`);
+      const isPdf = oversized.type === 'application/pdf' || oversized.name.toLowerCase().endsWith('.pdf');
+      const limitMb = isPdf ? limits.imagePdfMaxMb : limits.imageMaxMb;
+      setFileSizeError(`이미지 "${oversized.name}": ${(oversized.size / 1024 / 1024).toFixed(1)}MB — 최대 ${limitMb}MB까지 허용됩니다.`);
       setImageFiles([]);
       e.target.value = '';
       return;
@@ -413,11 +419,11 @@ export default function AdminProjectNewPage() {
           </div>
 
           <div className="form-field">
-            <label htmlFor="images">추가 이미지 (JPG · PNG · WebP, 각 최대 {limits.imageMaxMb}MB, 복수 선택)</label>
+            <label htmlFor="images">추가 이미지 (JPG · PNG · WebP 각 최대 {limits.imageMaxMb}MB / PDF 최대 {limits.imagePdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환, 복수 선택)</label>
             <input
               id="images"
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
               multiple
               ref={imagesInputRef}
               onChange={handleImagesChange}

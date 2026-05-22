@@ -72,18 +72,15 @@ describe('detectFileType', () => {
 });
 
 describe('isAllowedImageType', () => {
-  it('allows JPEG, PNG, WebP', () => {
+  it('allows JPEG, PNG, WebP, PDF', () => {
     expect(isAllowedImageType({ mime: 'image/jpeg', ext: 'jpg' })).toBe(true);
     expect(isAllowedImageType({ mime: 'image/png', ext: 'png' })).toBe(true);
     expect(isAllowedImageType({ mime: 'image/webp', ext: 'webp' })).toBe(true);
+    expect(isAllowedImageType({ mime: 'application/pdf', ext: 'pdf' })).toBe(true);
   });
 
   it('rejects ZIP', () => {
     expect(isAllowedImageType({ mime: 'application/zip', ext: 'zip' })).toBe(false);
-  });
-
-  it('rejects PDF (PDF is poster-only)', () => {
-    expect(isAllowedImageType({ mime: 'application/pdf', ext: 'pdf' })).toBe(false);
   });
 });
 
@@ -104,6 +101,11 @@ describe('isAllowedPosterType', () => {
 describe('SIZE_LIMITS', () => {
   it('exposes a larger ceiling for PDF posters than image posters', () => {
     expect(SIZE_LIMITS.posterPdf).toBeGreaterThan(SIZE_LIMITS.poster);
+  });
+
+  it('exposes a 100MB ceiling for source IMAGE PDFs', () => {
+    expect(SIZE_LIMITS.imagePdf).toBe(100 * 1024 * 1024);
+    expect(SIZE_LIMITS.imagePdf).toBeGreaterThan(SIZE_LIMITS.image);
   });
 });
 

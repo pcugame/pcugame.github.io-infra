@@ -129,7 +129,7 @@ export class UploadPipeline {
     let finalExt = validated.ext;
     let finalSizeBytes = validated.sizeBytes;
 
-    if (kind === 'POSTER' && validated.mimeType === 'application/pdf') {
+    if ((kind === 'IMAGE' || kind === 'POSTER') && validated.mimeType === 'application/pdf') {
       const processed = await processPdf({ tmpPath });
 
       finalTmpPath = processed.tmpPath;

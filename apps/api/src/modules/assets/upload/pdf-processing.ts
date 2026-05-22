@@ -1,7 +1,7 @@
 /**
  * PDF processing pipeline — rasterize the first page of a PDF to WebP.
  *
- * Used only for POSTER uploads. Uses pdf-to-img (pdfjs-dist) to render the
+ * Used for POSTER and IMAGE uploads. Uses pdf-to-img (pdfjs-dist) to render the
  * first page to a PNG buffer, then pipes through sharp to resize and encode
  * as WebP. Pure JS — no system binaries required.
  */
@@ -74,7 +74,7 @@ function translatePdfError(err: unknown): Error {
 
   const lower = msg.toLowerCase();
   if (lower.includes('password') || lower.includes('encrypt')) {
-    return badRequest('암호화된 PDF는 포스터로 사용할 수 없습니다. 암호를 해제한 후 다시 업로드해주세요.');
+    return badRequest('암호화된 PDF는 업로드할 수 없습니다. 암호를 해제한 후 다시 업로드해주세요.');
   }
   if (
     lower.includes('invalid pdf') ||
