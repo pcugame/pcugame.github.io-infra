@@ -11,12 +11,20 @@ vi.mock('../config/env.js', () => ({
 
 const mocks = vi.hoisted(() => ({
 	findExhibitionsWithPublishedCounts: vi.fn(),
+	findExhibitionsByYear: vi.fn(),
+	findPublishedProjectsInExhibitions: vi.fn(),
+	findPublishedProjectById: vi.fn(),
+	findPublishedProjectBySlug: vi.fn(),
 	findExhibitionPosterByStorageKey: vi.fn(),
 	getPresignedUrl: vi.fn(),
 }));
 
 vi.mock('../modules/public/repository.js', () => ({
 	findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
+	findExhibitionsByYear: mocks.findExhibitionsByYear,
+	findPublishedProjectsInExhibitions: mocks.findPublishedProjectsInExhibitions,
+	findPublishedProjectById: mocks.findPublishedProjectById,
+	findPublishedProjectBySlug: mocks.findPublishedProjectBySlug,
 	findExhibitionPosterByStorageKey: mocks.findExhibitionPosterByStorageKey,
 }));
 
@@ -24,11 +32,15 @@ vi.mock('../lib/storage.js', () => ({
 	getPresignedUrl: mocks.getPresignedUrl,
 }));
 
-import { getExhibitionPosterRedirectUrl, listYears } from '../modules/public/service.js';
+import { getExhibitionPosterRedirectUrl, getProjectDetail, listProjectsByYear, listYears } from '../modules/public/service.js';
 
 describe('public exhibition years', () => {
 	beforeEach(() => {
 		mocks.findExhibitionsWithPublishedCounts.mockReset();
+		mocks.findExhibitionsByYear.mockReset();
+		mocks.findPublishedProjectsInExhibitions.mockReset();
+		mocks.findPublishedProjectById.mockReset();
+		mocks.findPublishedProjectBySlug.mockReset();
 		mocks.findExhibitionPosterByStorageKey.mockReset();
 		mocks.getPresignedUrl.mockReset();
 	});
@@ -75,5 +87,48 @@ describe('public exhibition years', () => {
 			statusCode: 404,
 		} satisfies Partial<AppError>);
 		expect(mocks.getPresignedUrl).not.toHaveBeenCalled();
+	});
+
+	it('returns archived projects in public year listings', async () => {
+		mocks.findExhibitionsByYear.mockResolvedValue([{ id: 1, year: 2026, title: 'Show' }]);
+		mocks.findPublishedProjectsInExhibitions.mockResolvedValue([
+			{
+				id: 10,
+				slug: 'archived-game',
+				title: 'Archived Game',
+				summary: '',
+				poster: null,
+				members: [],
+				exhibitionId: 1,
+				status: 'ARCHIVED',
+			},
+		]);
+
+		await expect(listProjectsByYear('2026')).resolves.toMatchObject({
+			year: 2026,
+			empty: false,
+			items: [{ id: 10, slug: 'archived-game', title: 'Archived Game' }],
+		});
+	});
+
+	it('preserves archived status on public project detail', async () => {
+		mocks.findPublishedProjectById.mockResolvedValue({
+			id: 10,
+			slug: 'archived-game',
+			title: 'Archived Game',
+			summary: '',
+			description: '',
+			isIncomplete: false,
+			status: 'ARCHIVED',
+			exhibition: { year: 2026 },
+			members: [],
+			assets: [],
+			poster: null,
+		});
+
+		await expect(getProjectDetail('10')).resolves.toMatchObject({
+			id: 10,
+			status: 'ARCHIVED',
+		});
 	});
 });

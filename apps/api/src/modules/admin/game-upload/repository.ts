@@ -2,7 +2,16 @@ import { prisma } from '../../../lib/prisma.js';
 
 /** Find a game upload session by ID */
 export function findSessionById(id: string) {
-	return prisma.gameUploadSession.findUnique({ where: { id } });
+	return prisma.gameUploadSession.findUnique({
+		where: { id },
+		include: {
+			project: {
+				select: {
+					status: true,
+				},
+			},
+		},
+	});
 }
 
 /** Create a new game upload session */

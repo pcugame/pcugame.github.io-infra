@@ -172,6 +172,6 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 		gameDownloadUrl: gameAsset
 			? protectedAssetUrl(gameAsset.storageKey)
 			: undefined,
-		status: 'PUBLISHED' as const,
+		status: project.status as 'PUBLISHED' | 'ARCHIVED',
 	};
 }

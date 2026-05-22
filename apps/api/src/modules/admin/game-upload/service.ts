@@ -55,6 +55,13 @@ async function loadSession(sessionId: string, userId: number, userRole: string) 
 	return session;
 }
 
+export function assertGameUploadSessionWritable(projectStatus: string, userRole: string): void {
+	if (userRole === 'ADMIN' || userRole === 'OPERATOR') return;
+	if (projectStatus !== 'DRAFT') {
+		throw forbidden('Cannot upload game files to non-draft project');
+	}
+}
+
 // ── Service methods ─────────────────────────────────────────
 
 /** Create a new chunked upload session for a project */
@@ -148,6 +155,7 @@ export async function uploadChunk(
 	if (session.status !== 'PENDING') {
 		throw badRequest(`Cannot upload chunks: session is ${session.status}`);
 	}
+	assertGameUploadSessionWritable(session.project.status, user.role);
 
 	if (isNaN(chunkIndex) || chunkIndex < 0 || chunkIndex >= session.totalChunks) {
 		throw badRequest(`Invalid chunk index: must be 0..${session.totalChunks - 1}`);
@@ -234,6 +242,7 @@ export async function completeSession(
 	if (session.status !== 'PENDING') {
 		throw badRequest(`Cannot complete: session is ${session.status}`);
 	}
+	assertGameUploadSessionWritable(session.project.status, user.role);
 
 	if (!session.s3UploadId || !session.s3Key) {
 		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');

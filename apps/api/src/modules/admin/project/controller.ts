@@ -41,8 +41,9 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 			// Status changes need special handling: USER can toggle DRAFT ↔ PUBLISHED
 			// on their own projects even when the project is not in DRAFT.
 			const isStatusChange = patch.status !== undefined;
+			const hasContentChange = Object.keys(patch).some((key) => key !== 'status');
 			const project = await loadProjectWithAccess(request, projectId, {
-				requireDraft: !isStatusChange,
+				requireDraft: hasContentChange || !isStatusChange,
 			});
 
 			if (isStatusChange) {
@@ -69,7 +70,7 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 	/** PATCH /projects/bulk/status — bulk update project status (ADMIN/OPERATOR) */
 	app.patch(
 		'/projects/bulk/status',
-		{ preHandler: requireRole('OPERATOR') },
+		{ preHandler: requireRole('ADMIN', 'OPERATOR') },
 		async (request, reply) => {
 			const { ids, status } = parseBody(BulkStatusBody, request.body);
 			const result = await projectService.bulkUpdateStatus(ids, status);

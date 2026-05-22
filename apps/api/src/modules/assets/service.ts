@@ -1,11 +1,41 @@
 import type { FastifyReply } from 'fastify';
+import type { UserRole } from '@prisma/client';
 import { env } from '../../config/env.js';
-import { notFound, forbidden } from '../../shared/errors.js';
+import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
 import { bucketForKind } from '../../lib/s3.js';
 import { getPresignedUrl, safeDeleteObject } from '../../lib/storage.js';
 import { gameDownloadLimiter } from '../../shared/game-download-limiter.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './repository.js';
+
+type ProtectedAssetAccessUser = {
+	id: number;
+	role: UserRole;
+};
+
+type ProtectedAssetAccessRecord = {
+	kind: string;
+	project: {
+		creatorId: number;
+		status: string;
+		members: { userId: number | null }[];
+	};
+};
+
+export function canStreamProtectedAsset(
+	asset: ProtectedAssetAccessRecord,
+	user?: ProtectedAssetAccessUser,
+): boolean {
+	const isPublicProject = asset.project.status === 'PUBLISHED' || asset.project.status === 'ARCHIVED';
+	if (isPublicProject && (asset.kind === 'GAME' || asset.kind === 'VIDEO')) {
+		return true;
+	}
+
+	if (!user) return false;
+	if (user.role === 'ADMIN' || user.role === 'OPERATOR') return true;
+	if (asset.project.creatorId === user.id) return true;
+	return asset.project.members.some((member) => member.userId === user.id);
+}
 
 /** Initialize in-memory ban cache from DB on startup */
 export async function loadBannedIpCache(): Promise<void> {
@@ -31,9 +61,18 @@ export async function streamPublicAsset(storageKey: string, reply: FastifyReply)
 }
 
 /** Redirect to a presigned S3 URL for a protected asset with IP-based rate limiting */
-export async function streamProtectedAsset(storageKey: string, clientIp: string, reply: FastifyReply) {
+export async function streamProtectedAsset(
+	storageKey: string,
+	clientIp: string,
+	user: ProtectedAssetAccessUser | undefined,
+	reply: FastifyReply,
+) {
 	const asset = await repo.findAssetByStorageKey(storageKey);
 	if (!asset) throw notFound('Asset not found');
+	if (!canStreamProtectedAsset(asset, user)) {
+		if (!user) throw unauthorized();
+		throw forbidden('Not allowed to access this asset');
+	}
 
 	// GAME downloads get IP-based abuse prevention
 	if (asset.kind === 'GAME') {

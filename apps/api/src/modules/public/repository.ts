@@ -1,11 +1,14 @@
 import { prisma } from '../../lib/prisma.js';
+import type { ProjectStatus } from '@prisma/client';
+
+const PUBLIC_PROJECT_STATUSES: ProjectStatus[] = ['PUBLISHED', 'ARCHIVED'];
 
 /** List all exhibitions with published project counts, ordered by sortOrder/year */
 export function findExhibitionsWithPublishedCounts() {
 	return prisma.exhibition.findMany({
 		orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
 		include: {
-			_count: { select: { projects: { where: { status: 'PUBLISHED' } } } },
+			_count: { select: { projects: { where: { status: { in: PUBLIC_PROJECT_STATUSES } } } } },
 		},
 	});
 }
@@ -18,7 +21,7 @@ export function findExhibitionsByYear(year: number) {
 /** Find published projects within given exhibitionIds, sorted by sortOrder */
 export function findPublishedProjectsInExhibitions(exhibitionIds: number[]) {
 	return prisma.project.findMany({
-		where: { exhibitionId: { in: exhibitionIds }, status: 'PUBLISHED' },
+		where: { exhibitionId: { in: exhibitionIds }, status: { in: PUBLIC_PROJECT_STATUSES } },
 		orderBy: { sortOrder: 'asc' },
 		include: {
 			members: { orderBy: { sortOrder: 'asc' } },
@@ -50,7 +53,7 @@ const projectDetailInclude = {
 /** Find a published project by numeric ID */
 export function findPublishedProjectById(id: number) {
 	return prisma.project.findFirst({
-		where: { id, status: 'PUBLISHED' },
+		where: { id, status: { in: PUBLIC_PROJECT_STATUSES } },
 		include: projectDetailInclude,
 	});
 }
@@ -60,7 +63,7 @@ export function findPublishedProjectBySlug(slug: string, exhibitionIds?: number[
 	return prisma.project.findFirst({
 		where: {
 			slug,
-			status: 'PUBLISHED',
+			status: { in: PUBLIC_PROJECT_STATUSES },
 			...(exhibitionIds ? { exhibitionId: { in: exhibitionIds } } : {}),
 		},
 		include: projectDetailInclude,

@@ -1,6 +1,11 @@
 {
   "name": "pcu-graduation-project",
   "private": true,
+  "scripts": {
+    "test": "npm test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present"
+  },
   "workspaces": [
     "apps/api",
     "apps/web",

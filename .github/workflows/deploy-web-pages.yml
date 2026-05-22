@@ -34,6 +34,14 @@ jobs:
       - name: Install dependencies
         run: npm ci --workspace=apps/web --include-workspace-root
 
+      - name: Test
+        working-directory: apps/web
+        run: npm test
+
+      - name: Lint
+        working-directory: apps/web
+        run: npm run lint
+
       - name: Build
         working-directory: apps/web
         env:

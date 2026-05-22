@@ -23,7 +23,12 @@ export async function assetsController(app: FastifyInstance): Promise<void> {
 	app.get<{ Params: { storageKey: string } }>(
 		'/assets/protected/:storageKey',
 		async (request, reply) => {
-			return assetsService.streamProtectedAsset(request.params.storageKey, request.ip, reply);
+			return assetsService.streamProtectedAsset(
+				request.params.storageKey,
+				request.ip,
+				request.currentUser,
+				reply,
+			);
 		},
 	);
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { detectFileType, isAllowedGameType } from '../shared/file-signature.js';
+import { assertGameUploadSessionWritable } from '../modules/admin/game-upload/service.js';
 
 /**
  * Unit tests for the game upload session logic.
@@ -9,6 +10,19 @@ import { detectFileType, isAllowedGameType } from '../shared/file-signature.js';
  */
 
 describe('Game upload session validation', () => {
+	describe('project status policy', () => {
+		it('allows USER writes only while the project is draft', () => {
+			expect(() => assertGameUploadSessionWritable('DRAFT', 'USER')).not.toThrow();
+			expect(() => assertGameUploadSessionWritable('PUBLISHED', 'USER')).toThrow();
+			expect(() => assertGameUploadSessionWritable('ARCHIVED', 'USER')).toThrow();
+		});
+
+		it('allows privileged roles to write regardless of project status', () => {
+			expect(() => assertGameUploadSessionWritable('ARCHIVED', 'OPERATOR')).not.toThrow();
+			expect(() => assertGameUploadSessionWritable('ARCHIVED', 'ADMIN')).not.toThrow();
+		});
+	});
+
 	// ── Chunk index math ────────────────────────────────────
 	describe('chunk calculation', () => {
 		it('calculates total chunks correctly for exact division', () => {

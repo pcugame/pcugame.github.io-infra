@@ -119,7 +119,7 @@ export type PublicProjectDetailResponse = {
 	images: PublicProjectImage[];
 	posterUrl?: string;
 	gameDownloadUrl?: string;
-	status: 'PUBLISHED';
+	status: 'PUBLISHED' | 'ARCHIVED';
 };
 
 // ── Admin: Exhibition ────────────────────────────────────────

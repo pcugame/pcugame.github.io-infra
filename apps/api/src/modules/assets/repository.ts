@@ -17,6 +17,15 @@ export function findAssetByStorageKey(storageKey: string) {
 				{ playbackStorageKey: storageKey },
 			],
 		},
+		include: {
+			project: {
+				select: {
+					creatorId: true,
+					status: true,
+					members: { select: { userId: true } },
+				},
+			},
+		},
 	});
 }
 

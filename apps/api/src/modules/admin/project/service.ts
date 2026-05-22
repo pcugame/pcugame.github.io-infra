@@ -3,15 +3,14 @@ import { pipeline as streamPipeline } from 'node:stream/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
-import type { AssetKind, AssetPlaybackStatus, ProjectStatus } from '@prisma/client';
-import type { AdminProjectItem, AdminProjectDetail } from '@pcu/contracts';
+import type { AssetKind, ProjectStatus } from '@prisma/client';
+import type { AdminProjectItem } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { badRequest, conflict, forbidden, isUniqueConstraintError, notFound, payloadTooLarge } from '../../../shared/errors.js';
 import { bucketForKind } from '../../../lib/s3.js';
 import { safeDeleteObject } from '../../../lib/storage.js';
-import { logger } from '../../../lib/logger.js';
 import { toSlug } from '../../../shared/slug.js';
-import { isPosterUrlSafe, assertValidPosterAsset } from '../../../shared/poster-validation.js';
+import { assertValidPosterAsset } from '../../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
 import {
 	getUploadLimits,
@@ -24,42 +23,11 @@ import {
 import { UploadPipeline } from '../../assets/upload/index.js';
 import type { SavedFile } from '../../assets/upload/index.js';
 import { assertUploadAllowed } from '../upload-guard.js';
+import { assetUrl, serializeProjectDetail } from './serializer.js';
 import * as repo from './repository.js';
 
-// ── Helpers ─────────────────────────────────────────────────
-
-/** Build a full asset URL from storageKey and kind */
-export function assetUrl(storageKey: string, kind: AssetKind): string {
-	const base = env().API_PUBLIC_URL;
-	if (kind === 'GAME' || kind === 'VIDEO') return `${base}/api/assets/protected/${storageKey}`;
-	return `${base}/api/assets/public/${storageKey}`;
-}
-
-type SerializableAsset = {
-	id: number;
-	kind: AssetKind;
-	storageKey: string;
-	playbackStorageKey: string | null;
-	originalName: string;
-	mimeType: string;
-	playbackMimeType: string;
-	sizeBytes: bigint;
-	playbackSizeBytes: bigint;
-	playbackStatus: AssetPlaybackStatus;
-	playbackError: string;
-};
-
-function playbackKeyFor(asset: SerializableAsset): string {
-	return asset.kind === 'VIDEO' && asset.playbackStorageKey
-		? asset.playbackStorageKey
-		: asset.storageKey;
-}
-
-function playbackMimeFor(asset: SerializableAsset): string {
-	return asset.kind === 'VIDEO' && asset.playbackStorageKey
-		? asset.playbackMimeType || 'video/mp4'
-		: asset.mimeType || 'video/mp4';
-}
+export { assetUrl, serializeProjectDetail } from './serializer.js';
+export { assertStatusTransition, bulkUpdateStatus } from './project-status.service.js';
 
 async function deleteAssetObjects(asset: { id: number; projectId?: number; kind: AssetKind; storageKey: string; playbackStorageKey: string | null }, reason: string) {
 	const bucket = bucketForKind(asset.kind);
@@ -67,69 +35,6 @@ async function deleteAssetObjects(asset: { id: number; projectId?: number; kind:
 	if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
 		await safeDeleteObject(bucket, asset.playbackStorageKey, `${reason}-playback`, { assetId: asset.id, projectId: asset.projectId });
 	}
-}
-
-/** Serialize a project detail record to the API response shape */
-export function serializeProjectDetail(project: {
-	id: number;
-	title: string;
-	slug: string;
-	exhibition: { year: number };
-	summary: string;
-	description: string;
-	isIncomplete: boolean;
-	status: ProjectStatus;
-	sortOrder: number;
-	posterAssetId: number | null;
-	poster: { storageKey: string; kind: AssetKind; status: string } | null;
-	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
-	assets: SerializableAsset[];
-}): AdminProjectDetail {
-	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
-	const video = videoAsset
-		? {
-			url: assetUrl(playbackKeyFor(videoAsset), 'VIDEO'),
-			mimeType: playbackMimeFor(videoAsset),
-			originalDownloadUrl: assetUrl(videoAsset.storageKey, 'VIDEO'),
-			playbackStatus: videoAsset.playbackStatus,
-			playbackError: videoAsset.playbackError || undefined,
-		}
-		: null;
-
-	return {
-		id: project.id,
-		title: project.title,
-		slug: project.slug,
-		year: project.exhibition.year,
-		summary: project.summary || undefined,
-		description: project.description || undefined,
-		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, project.poster),
-		video,
-		status: project.status,
-		sortOrder: project.sortOrder,
-		posterAssetId: project.posterAssetId ?? undefined,
-		posterUrl: isPosterUrlSafe(project.poster)
-			? assetUrl(project.poster!.storageKey, 'POSTER')
-			: undefined,
-		members: project.members.map((m) => ({
-			id: m.id,
-			name: m.name,
-			studentId: m.studentId,
-			sortOrder: m.sortOrder,
-			userId: m.userId,
-		})),
-		assets: project.assets.map((a) => ({
-			id: a.id,
-			kind: a.kind,
-			url: assetUrl(a.storageKey, a.kind),
-			originalDownloadUrl: a.kind === 'VIDEO' ? assetUrl(a.storageKey, a.kind) : undefined,
-			playbackUrl: a.kind === 'VIDEO' ? assetUrl(playbackKeyFor(a), a.kind) : undefined,
-			playbackStatus: a.kind === 'VIDEO' ? a.playbackStatus : undefined,
-			playbackError: a.kind === 'VIDEO' && a.playbackError ? a.playbackError : undefined,
-			originalName: a.originalName,
-			size: Number(a.sizeBytes),
-		})),
-	};
 }
 
 // ── Business logic ──────────────────────────────────────────
@@ -162,30 +67,6 @@ export async function getProjectDetail(projectId: number, userId: number, userRo
 	}
 
 	return serializeProjectDetail(project);
-}
-
-/**
- * Validate that a status transition is allowed for the given role.
- *
- * - ADMIN / OPERATOR: all transitions allowed.
- * - USER: DRAFT ↔ PUBLISHED only. ARCHIVED transitions are blocked.
- */
-export function assertStatusTransition(
-	currentStatus: string,
-	targetStatus: string,
-	role: string,
-): void {
-	if (role === 'ADMIN' || role === 'OPERATOR') return;
-
-	const allowed =
-		(currentStatus === 'DRAFT' && targetStatus === 'PUBLISHED') ||
-		(currentStatus === 'PUBLISHED' && targetStatus === 'DRAFT');
-
-	if (!allowed) {
-		throw forbidden(
-			`Users can only toggle between DRAFT and PUBLISHED. Cannot change ${currentStatus} → ${targetStatus}.`,
-		);
-	}
 }
 
 /** Partial-update a project */
@@ -532,12 +413,6 @@ export async function setPoster(projectId: number, assetId: number) {
 }
 
 // ── Bulk operations ───────────────────────────────────────
-
-/** Bulk update project status */
-export async function bulkUpdateStatus(ids: number[], status: ProjectStatus) {
-	const result = await repo.bulkUpdateStatus(ids, status);
-	return { updated: result.count };
-}
 
 /** Bulk delete projects: remove S3 objects + DB records. NAS originals are untouched. */
 export async function bulkDeleteProjects(ids: number[]) {
