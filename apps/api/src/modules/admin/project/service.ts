@@ -57,6 +57,7 @@ export async function listProjects(userId: number, userRole: string): Promise<Ad
 		status: p.status,
 		createdByUserName: p.creator.name || undefined,
 		memberNames: p.members.map((m) => m.name),
+		memberStudentIds: p.members.map((m) => m.studentId),
 		updatedAt: p.updatedAt.toISOString(),
 	}));
 }

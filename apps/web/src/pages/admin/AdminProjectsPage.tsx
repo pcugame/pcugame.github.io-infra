@@ -7,6 +7,7 @@ import { adminProjectApi, getApiErrorMessage } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { useMe } from '../../features/auth';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
+import { matchesSearch } from '../../lib/utils';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
@@ -83,12 +84,17 @@ export default function AdminProjectsPage() {
 			: projects.filter((p) => p.status === statusFilter);
 
 		if (debouncedSearch.trim()) {
-			const q = debouncedSearch.trim().toLowerCase();
 			list = list.filter((p) =>
-				p.title.toLowerCase().includes(q) ||
-				String(p.year).includes(q) ||
-				(p.createdByUserName ?? '').toLowerCase().includes(q) ||
-				p.memberNames.some((name) => name.toLowerCase().includes(q)),
+				matchesSearch(
+					[
+						p.title,
+						p.year,
+						p.createdByUserName,
+						...p.memberNames,
+						...p.memberStudentIds,
+					],
+					debouncedSearch,
+				),
 			);
 		}
 
@@ -225,7 +231,7 @@ export default function AdminProjectsPage() {
 				<input
 					type="text"
 					className="admin-search"
-					placeholder="제목, 연도, 작성자 검색..."
+					placeholder="제목, 연도, 작성자, 이름, 학번 검색..."
 					value={search}
 					onChange={(e) => setSearch(e.target.value)}
 					onCompositionStart={() => setIsComposing(true)}

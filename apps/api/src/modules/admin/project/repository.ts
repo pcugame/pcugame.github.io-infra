@@ -27,7 +27,7 @@ export function findProjectsForUser(userId: number, isPrivileged: boolean) {
 		include: {
 			exhibition: true,
 			creator: true,
-			members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true } },
+			members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true, studentId: true } },
 			// Just enough to decide whether `isIncomplete` should be suppressed in the response.
 			assets: {
 				where: { status: 'READY', kind: { in: ['GAME', 'VIDEO'] } },

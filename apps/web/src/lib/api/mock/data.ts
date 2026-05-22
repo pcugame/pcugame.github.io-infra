@@ -368,6 +368,7 @@ export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: 
 				year: Number(yearStr), status: 'PUBLISHED',
 				createdByUserName: '관리자', updatedAt: new Date().toISOString(),
 				memberNames: card.members.map((m) => m.name),
+				memberStudentIds: card.members.map((m) => m.studentId),
 				isIncomplete: false,
 				createdByUserId: 1,
 			});
@@ -380,6 +381,7 @@ export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: 
 			createdByUserName: '학생',
 			updatedAt: new Date(Date.now() - d.updatedAgoSec * 1000).toISOString(),
 			memberNames: d.members.map((m) => m.name),
+			memberStudentIds: d.members.map((m) => m.studentId),
 			isIncomplete: false,
 			createdByUserId: d.ownerId,
 		});

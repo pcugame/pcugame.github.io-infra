@@ -170,6 +170,7 @@ export type AdminProjectItem = {
 	status: ProjectStatus;
 	createdByUserName?: string;
 	memberNames: string[];
+	memberStudentIds: string[];
 	updatedAt: string;
 };
 
