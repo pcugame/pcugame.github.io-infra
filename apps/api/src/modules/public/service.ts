@@ -144,7 +144,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 	const gameAsset = gameAssets.length > 0 ? gameAssets[gameAssets.length - 1] : undefined;
 
 	const videos = project.assets
-		.filter((a) => a.kind === 'VIDEO')
+		.filter((a) => a.kind === 'VIDEO' && a.playbackStatus === 'READY')
 		.map((videoAsset) => ({
 			url: protectedAssetUrl(videoAsset.playbackStorageKey ?? videoAsset.storageKey),
 			mimeType: videoAsset.playbackStorageKey

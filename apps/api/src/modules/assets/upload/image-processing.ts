@@ -1,5 +1,5 @@
 /**
- * Image processing pipeline — automatic WebP conversion for large uploads.
+ * Image processing pipeline — decode and re-encode browser images to WebP.
  */
 
 import { promises as fsp } from 'node:fs';
@@ -34,25 +34,23 @@ export interface ImageProcessingResult {
   converted: boolean;
 }
 
-/** Files above this size (in bytes) are converted to WebP. */
-const WEBP_THRESHOLD_BYTES = 512 * 1024; // 512 KB
-
 /** WebP output quality (0–100). */
 const WEBP_QUALITY = 85;
 
 /** MIME types eligible for WebP conversion. */
-const CONVERTIBLE_MIMES = new Set(['image/jpeg', 'image/png']);
+const CONVERTIBLE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 /**
  * Process an uploaded image file.
  *
- * Converts JPEG/PNG files above WEBP_THRESHOLD_BYTES to WebP.
- * Files already in WebP format or below the threshold are returned unchanged.
+ * Converts JPEG/PNG/WebP files to a fresh WebP output. This forces a decode
+ * boundary, strips risky metadata, and avoids serving uploaded image bytes
+ * directly even when the source is already small.
  */
 export async function processImage(
   input: ImageProcessingInput,
 ): Promise<ImageProcessingResult> {
-  if (!CONVERTIBLE_MIMES.has(input.mimeType) || input.sizeBytes <= WEBP_THRESHOLD_BYTES) {
+  if (!CONVERTIBLE_MIMES.has(input.mimeType)) {
     return { ...input, converted: false };
   }
 
@@ -63,12 +61,6 @@ export async function processImage(
     .toFile(outputPath);
 
   const stat = await fsp.stat(outputPath);
-
-  // If WebP is somehow larger than the original, keep the original.
-  if (stat.size >= input.sizeBytes) {
-    await fsp.unlink(outputPath).catch(() => {});
-    return { ...input, converted: false };
-  }
 
   return {
     tmpPath: outputPath,

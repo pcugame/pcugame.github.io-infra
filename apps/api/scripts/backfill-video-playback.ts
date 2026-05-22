@@ -18,6 +18,7 @@ import { env } from '../src/config/env.js';
 import { downloadObject, uploadFile } from '../src/lib/storage.js';
 import { generateStorageKey } from '../src/shared/storage-path.js';
 import { processVideo } from '../src/modules/assets/upload/video-processing.js';
+import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
 
 function parseArgs() {
 	const args = process.argv.slice(2);
@@ -90,6 +91,7 @@ async function main() {
 						createReadStream(result.playback.tmpPath),
 						result.playback.mimeType,
 						result.playback.sizeBytes,
+						storageOptionsForAsset('VIDEO', 'playback'),
 					);
 					await prisma.asset.update({
 						where: { id: asset.id },

@@ -151,6 +151,7 @@ describe('public exhibition years', () => {
 					playbackStorageKey: 'first.mp4',
 					mimeType: 'video/quicktime',
 					playbackMimeType: 'video/mp4',
+					playbackStatus: 'READY',
 				},
 				{
 					id: 2,
@@ -159,6 +160,7 @@ describe('public exhibition years', () => {
 					playbackStorageKey: null,
 					mimeType: 'video/mp4',
 					playbackMimeType: '',
+					playbackStatus: 'READY',
 				},
 			],
 			poster: null,

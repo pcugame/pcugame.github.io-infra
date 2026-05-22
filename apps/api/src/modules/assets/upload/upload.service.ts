@@ -9,6 +9,8 @@ import { validateFile } from './file-validator.js';
 import { processImage } from './image-processing.js';
 import { processPdf } from './pdf-processing.js';
 import { processVideo } from './video-processing.js';
+import { badRequest } from '../../../shared/errors.js';
+import { storageOptionsForAsset } from './storage-policy.js';
 import type { SavedFile } from './upload-types.js';
 
 interface CommittedFile {
@@ -74,10 +76,20 @@ export class UploadPipeline {
         ext: validated.ext,
         sizeBytes: validated.sizeBytes,
       });
+      if (playback.playbackStatus === 'FAILED') {
+        throw badRequest(`Video validation failed: ${playback.playbackError || 'unsupported or corrupt video'}`);
+      }
 
       const storageKey = generateStorageKey(validated.ext);
       const originalStat = await fsp.stat(tmpPath);
-      await uploadFile(bucket, storageKey, createReadStream(tmpPath), validated.mimeType, originalStat.size);
+      await uploadFile(
+        bucket,
+        storageKey,
+        createReadStream(tmpPath),
+        validated.mimeType,
+        originalStat.size,
+        storageOptionsForAsset(kind, 'original'),
+      );
       this.committedFiles.push({ bucket, storageKey });
 
       let playbackStorageKey: string | null = null;
@@ -96,15 +108,20 @@ export class UploadPipeline {
             createReadStream(playback.playback.tmpPath),
             playback.playback.mimeType,
             playback.playback.sizeBytes,
+            storageOptionsForAsset(kind, 'playback'),
           );
           playbackStorageKey = candidatePlaybackKey;
           this.committedFiles.push({ bucket, storageKey: playbackStorageKey });
           playbackMimeType = playback.playback.mimeType;
           playbackSizeBytes = playback.playback.sizeBytes;
         } catch (err) {
-          playbackStatus = 'FAILED';
-          playbackError = errorMessage(err).slice(0, 2000);
-          logger().error({ err, storageKey, playbackStorageKey: candidatePlaybackKey }, 'Playback upload failed; keeping original video');
+          logger().error({
+            err,
+            storageKey,
+            playbackStorageKey: candidatePlaybackKey,
+            playbackError: errorMessage(err).slice(0, 2000),
+          }, 'Playback upload failed');
+          throw err;
         }
       }
 
@@ -163,7 +180,14 @@ export class UploadPipeline {
     const stat = await fsp.stat(finalTmpPath);
     const body = createReadStream(finalTmpPath);
 
-    await uploadFile(bucket, storageKey, body, finalMimeType, stat.size);
+    await uploadFile(
+      bucket,
+      storageKey,
+      body,
+      finalMimeType,
+      stat.size,
+      storageOptionsForAsset(kind, 'original'),
+    );
 
     // Track the committed file for rollback. Temp files remain tracked and
     // are removed by cleanupTemp() after DB work succeeds or fails.

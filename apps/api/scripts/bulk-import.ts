@@ -25,12 +25,16 @@ import { readFileSync, readdirSync, statSync, createReadStream, copyFileSync, mk
 import { promises as fsp } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
 import { loadEnv } from '../src/config/env.js';
 import { uploadFile } from '../src/lib/storage.js';
 import { bucketForKind } from '../src/lib/s3.js';
 import { toSlug } from '../src/shared/slug.js';
+import { generateStorageKey } from '../src/shared/storage-path.js';
+import { processImage } from '../src/modules/assets/upload/image-processing.js';
+import { processPdf } from '../src/modules/assets/upload/pdf-processing.js';
 import { processVideo } from '../src/modules/assets/upload/video-processing.js';
+import { validateFile } from '../src/modules/assets/upload/file-validator.js';
+import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
 import type { AssetKind } from '@prisma/client';
 import type { AssetPlaybackStatus } from '@prisma/client';
 
@@ -219,8 +223,8 @@ function discoverAssets(
 // ── S3 upload ────────────────────────────────────────────
 
 async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<UploadedAsset> {
-	const ext = extname(asset.filePath).toLowerCase();
 	const bucket = bucketForKind(asset.kind);
+	const validated = await validateFile(asset.filePath, asset.kind);
 
 	if (asset.kind === 'VIDEO') {
 		const tempFiles: string[] = [];
@@ -231,14 +235,24 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 
 			const playback = await processVideo({
 				tmpPath,
-				mimeType: asset.mimeType,
-				ext: ext.replace('.', ''),
-				sizeBytes: asset.sizeBytes,
+				mimeType: validated.mimeType,
+				ext: validated.ext,
+				sizeBytes: validated.sizeBytes,
 			});
+			if (playback.playbackStatus === 'FAILED') {
+				throw new Error(`Video validation failed: ${playback.playbackError || 'unsupported or corrupt video'}`);
+			}
 			if (playback.playback) tempFiles.push(playback.playback.tmpPath);
 
-			const storageKey = `${randomUUID()}${ext}`;
-			await uploadFile(bucket, storageKey, createReadStream(tmpPath), asset.mimeType, asset.sizeBytes);
+			const storageKey = generateStorageKey(validated.ext);
+			await uploadFile(
+				bucket,
+				storageKey,
+				createReadStream(tmpPath),
+				validated.mimeType,
+				validated.sizeBytes,
+				storageOptionsForAsset(asset.kind, 'original'),
+			);
 
 			let playbackStorageKey: string | null = null;
 			let playbackMimeType = '';
@@ -246,7 +260,7 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 			let playbackStatus = playback.playbackStatus;
 			let playbackError = playback.playbackError;
 			if (playback.playback) {
-				const candidatePlaybackKey = `${randomUUID()}.mp4`;
+				const candidatePlaybackKey = generateStorageKey(playback.playback.ext);
 				try {
 					await uploadFile(
 						bucket,
@@ -254,6 +268,7 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 						createReadStream(playback.playback.tmpPath),
 						playback.playback.mimeType,
 						playback.playback.sizeBytes,
+						storageOptionsForAsset(asset.kind, 'playback'),
 					);
 					playbackStorageKey = candidatePlaybackKey;
 					playbackMimeType = playback.playback.mimeType;
@@ -267,9 +282,9 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 			return {
 				storageKey,
 				playbackStorageKey,
-				mimeType: asset.mimeType,
+				mimeType: validated.mimeType,
 				playbackMimeType,
-				sizeBytes: asset.sizeBytes,
+				sizeBytes: validated.sizeBytes,
 				playbackSizeBytes,
 				playbackStatus,
 				playbackError,
@@ -280,16 +295,47 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 		}
 	}
 
-	const storageKey = `${randomUUID()}${ext}`;
-	const stream = createReadStream(asset.filePath);
-	await uploadFile(bucket, storageKey, stream, asset.mimeType, asset.sizeBytes);
+	let finalPath = asset.filePath;
+	let finalMime = validated.mimeType;
+	let finalExt = validated.ext;
+	let finalSize = validated.sizeBytes;
+	let converted = false;
+	const tempFiles: string[] = [];
+	try {
+		if (asset.kind !== 'GAME') {
+			const tmpPath = join(tmpDir, `${Date.now()}_${basename(asset.filePath)}`);
+			copyFileSync(asset.filePath, tmpPath);
+			tempFiles.push(tmpPath);
 
-	return {
-		storageKey,
-		mimeType: asset.mimeType,
-		sizeBytes: asset.sizeBytes,
-		converted: false,
-	};
+			const processed = validated.mimeType === 'application/pdf'
+				? await processPdf({ tmpPath })
+				: await processImage({
+					tmpPath,
+					mimeType: validated.mimeType,
+					ext: validated.ext,
+					sizeBytes: validated.sizeBytes,
+				});
+			finalPath = processed.tmpPath;
+			finalMime = processed.mimeType;
+			finalExt = processed.ext;
+			finalSize = processed.sizeBytes;
+			converted = processed.converted;
+			if (processed.converted && processed.tmpPath !== tmpPath) tempFiles.push(processed.tmpPath);
+		}
+
+		const storageKey = generateStorageKey(finalExt);
+		const stream = createReadStream(finalPath);
+		await uploadFile(bucket, storageKey, stream, finalMime, finalSize, storageOptionsForAsset(asset.kind, 'original'));
+
+		return {
+			storageKey,
+			mimeType: finalMime,
+			sizeBytes: finalSize,
+			converted,
+		};
+	} finally {
+		for (const t of tempFiles) await fsp.unlink(t).catch(() => {});
+	}
 }
 
 // ── Main import ──────────────────────────────────────────

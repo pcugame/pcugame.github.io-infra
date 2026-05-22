@@ -17,19 +17,28 @@ import { env } from '../config/env.js';
 
 /* ── Simple object operations ─────────────────────────── */
 
+export interface UploadObjectOptions {
+	contentDisposition?: string;
+	cacheControl?: string;
+	contentType?: string;
+}
+
 export async function uploadFile(
 	bucket: string,
 	key: string,
 	body: Buffer | Readable,
 	contentType: string,
 	contentLength?: number,
+	options: UploadObjectOptions = {},
 ): Promise<void> {
 	await s3().send(
 		new PutObjectCommand({
 			Bucket: bucket,
 			Key: key,
 			Body: body,
-			ContentType: contentType,
+			ContentType: options.contentType ?? contentType,
+			...(options.contentDisposition && { ContentDisposition: options.contentDisposition }),
+			...(options.cacheControl && { CacheControl: options.cacheControl }),
 			...(contentLength != null && { ContentLength: contentLength }),
 		}),
 	);
@@ -135,12 +144,15 @@ export async function createMultipartUpload(
 	bucket: string,
 	key: string,
 	contentType = 'application/zip',
+	options: UploadObjectOptions = {},
 ): Promise<string> {
 	const res = await s3().send(
 		new CreateMultipartUploadCommand({
 			Bucket: bucket,
 			Key: key,
-			ContentType: contentType,
+			ContentType: options.contentType ?? contentType,
+			...(options.contentDisposition && { ContentDisposition: options.contentDisposition }),
+			...(options.cacheControl && { CacheControl: options.cacheControl }),
 		}),
 	);
 	if (!res.UploadId) throw new Error('S3 CreateMultipartUpload returned no UploadId');

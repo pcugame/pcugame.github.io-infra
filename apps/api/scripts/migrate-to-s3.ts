@@ -19,6 +19,7 @@ import { loadEnv } from '../src/config/env.js';
 import { buildStoragePath } from '../src/shared/storage-path.js';
 import { uploadFile, headObject } from '../src/lib/storage.js';
 import { bucketForKind } from '../src/lib/s3.js';
+import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
 
 const prisma = new PrismaClient();
 
@@ -67,7 +68,14 @@ async function main() {
 		try {
 			const stat = await fsp.stat(localPath);
 			const stream = createReadStream(localPath);
-			await uploadFile(bucket, asset.storageKey, stream, asset.mimeType, stat.size);
+			await uploadFile(
+				bucket,
+				asset.storageKey,
+				stream,
+				asset.mimeType,
+				stat.size,
+				storageOptionsForAsset(asset.kind, 'original'),
+			);
 			uploaded++;
 
 			if ((uploaded + skipped) % 50 === 0) {

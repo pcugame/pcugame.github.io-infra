@@ -2,12 +2,13 @@
  * Attach NAS assets to existing legacy projects in the database.
  *
  * Discovers ALL files matching {studentIds}_{prefix}.* on the NAS, regardless
- * of extension. No magic-byte validation is performed — files are trusted.
+ * of extension. Files are validated by the same magic-byte pipeline used by
+ * normal web uploads before they are uploaded.
  *
  * Processing applied where possible:
- *   - Images (JPEG/PNG > 512 KB) → WebP conversion via sharp
- *   - Videos (non-MP4)           → MP4 normalisation via ffmpeg
- *   - Everything else            → uploaded as-is
+ *   - Images/PDF posters         → decoded and re-encoded to WebP
+ *   - Videos                     → ffprobe validation + MP4 playback preparation
+ *   - Game files                 → ZIP structure validation before upload
  *
  * Usage (run from apps/api):
  *   npx tsx scripts/attach-legacy-assets.ts <nas-asset-root> [--year 2024] [--dry-run]
@@ -29,7 +30,10 @@ import { join, extname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadEnv } from '../src/config/env.js';
 import { processImage } from '../src/modules/assets/upload/image-processing.js';
+import { processPdf } from '../src/modules/assets/upload/pdf-processing.js';
 import { processVideo } from '../src/modules/assets/upload/video-processing.js';
+import { validateFile } from '../src/modules/assets/upload/file-validator.js';
+import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
 import { uploadFile } from '../src/lib/storage.js';
 import { bucketForKind } from '../src/lib/s3.js';
 import { generateStorageKey } from '../src/shared/storage-path.js';
@@ -88,15 +92,6 @@ const MIME_MAP: Record<string, string> = {
 	'.avi': 'video/x-msvideo',
 	'.wmv': 'video/x-ms-wmv',
 };
-
-/** MIME types eligible for sharp WebP conversion. */
-const PROCESSABLE_IMAGE_MIMES = new Set(['image/jpeg', 'image/png']);
-
-/** MIME types eligible for ffmpeg MP4 normalisation. */
-const PROCESSABLE_VIDEO_MIMES = new Set([
-	'video/mp4', 'video/quicktime',
-	'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv',
-]);
 
 /** Preferred extension order for each prefix (best first). */
 const POSTER_PREF = ['.webp', '.png', '.jpg', '.jpeg', '.pdf'];
@@ -264,7 +259,7 @@ function discoverAssets(
 
 /**
  * Upload a single asset to S3, applying conversion where possible.
- * No magic-byte validation — files are trusted.
+ * Uses the normal upload validator; extension-derived MIME values are not trusted.
  */
 async function uploadAsset(
 	asset: MatchedAsset,
@@ -280,61 +275,66 @@ async function uploadAsset(
 	playbackError?: string;
 	converted: boolean;
 }> {
+	const validated = await validateFile(asset.filePath, asset.kind);
 	let finalPath = asset.filePath;
-	let finalMime = asset.mimeType;
-	let finalExt = extname(asset.filePath).toLowerCase().replace('.', '');
-	let finalSize = asset.sizeBytes;
+	let finalMime = validated.mimeType;
+	let finalExt = validated.ext;
+	let finalSize = validated.sizeBytes;
 	let converted = false;
 	const tempFiles: string[] = [];
 
 	try {
 		// ── Image processing (WebP conversion) ────────────────
-		if (
-			asset.kind !== 'GAME' && asset.kind !== 'VIDEO'
-			&& PROCESSABLE_IMAGE_MIMES.has(asset.mimeType)
-		) {
+		if (asset.kind !== 'GAME' && asset.kind !== 'VIDEO') {
 			const tmpPath = join(tmpDir, `${Date.now()}_${basename(asset.filePath)}`);
 			copyFileSync(asset.filePath, tmpPath);
 			tempFiles.push(tmpPath);
 
-			try {
-				const result = await processImage({
+			const result = validated.mimeType === 'application/pdf'
+				? await processPdf({ tmpPath })
+				: await processImage({
 					tmpPath,
-					mimeType: asset.mimeType,
-					ext: finalExt,
-					sizeBytes: asset.sizeBytes,
+					mimeType: validated.mimeType,
+					ext: validated.ext,
+					sizeBytes: validated.sizeBytes,
 				});
-				finalPath = result.tmpPath;
-				finalMime = result.mimeType;
-				finalExt = result.ext;
-				finalSize = result.sizeBytes;
-				converted = result.converted;
-				if (result.converted && result.tmpPath !== tmpPath) {
-					tempFiles.push(result.tmpPath);
-				}
-			} catch {
-				// Processing failed — use original copy
-				finalPath = tmpPath;
+			finalPath = result.tmpPath;
+			finalMime = result.mimeType;
+			finalExt = result.ext;
+			finalSize = result.sizeBytes;
+			converted = result.converted;
+			if (result.converted && result.tmpPath !== tmpPath) {
+				tempFiles.push(result.tmpPath);
 			}
 		}
 
 		// ── Video processing (MP4 normalisation) ──────────────
-		if (asset.kind === 'VIDEO' && PROCESSABLE_VIDEO_MIMES.has(asset.mimeType)) {
+		if (asset.kind === 'VIDEO') {
 			const tmpPath = join(tmpDir, `${Date.now()}_${basename(asset.filePath)}`);
 			copyFileSync(asset.filePath, tmpPath);
 			tempFiles.push(tmpPath);
 
 			const playback = await processVideo({
 				tmpPath,
-				mimeType: asset.mimeType,
-				ext: finalExt,
-				sizeBytes: asset.sizeBytes,
+				mimeType: validated.mimeType,
+				ext: validated.ext,
+				sizeBytes: validated.sizeBytes,
 			});
+			if (playback.playbackStatus === 'FAILED') {
+				throw new Error(`Video validation failed: ${playback.playbackError || 'unsupported or corrupt video'}`);
+			}
 			if (playback.playback) tempFiles.push(playback.playback.tmpPath);
 
-			const storageKey = generateStorageKey(finalExt);
+			const storageKey = generateStorageKey(validated.ext);
 			const bucket = bucketForKind(asset.kind);
-			await uploadFile(bucket, storageKey, createReadStream(tmpPath), asset.mimeType, asset.sizeBytes);
+			await uploadFile(
+				bucket,
+				storageKey,
+				createReadStream(tmpPath),
+				validated.mimeType,
+				validated.sizeBytes,
+				storageOptionsForAsset(asset.kind, 'original'),
+			);
 
 			let playbackStorageKey: string | null = null;
 			let playbackMimeType = '';
@@ -350,6 +350,7 @@ async function uploadAsset(
 						createReadStream(playback.playback.tmpPath),
 						playback.playback.mimeType,
 						playback.playback.sizeBytes,
+						storageOptionsForAsset(asset.kind, 'playback'),
 					);
 					playbackStorageKey = candidatePlaybackKey;
 					playbackMimeType = playback.playback.mimeType;
@@ -363,9 +364,9 @@ async function uploadAsset(
 			return {
 				storageKey,
 				playbackStorageKey,
-				mimeType: asset.mimeType,
+				mimeType: validated.mimeType,
 				playbackMimeType,
-				sizeBytes: asset.sizeBytes,
+				sizeBytes: validated.sizeBytes,
 				playbackSizeBytes,
 				playbackStatus,
 				playbackError,
@@ -378,7 +379,7 @@ async function uploadAsset(
 		const bucket = bucketForKind(asset.kind);
 		const stat = await fsp.stat(finalPath);
 		const stream = createReadStream(finalPath);
-		await uploadFile(bucket, storageKey, stream, finalMime, stat.size);
+		await uploadFile(bucket, storageKey, stream, finalMime, stat.size, storageOptionsForAsset(asset.kind, 'original'));
 
 		return { storageKey, mimeType: finalMime, sizeBytes: stat.size, converted };
 	} finally {

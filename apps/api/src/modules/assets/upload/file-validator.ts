@@ -10,6 +10,7 @@ import {
 } from '../../../shared/file-signature.js';
 import { badRequest } from '../../../shared/errors.js';
 import type { ValidatedFile } from './upload-types.js';
+import { validateZipArchiveFile } from './zip-validation.js';
 
 const KIND_SIZE_LIMITS: Record<string, number> = {
   GAME: SIZE_LIMITS.game,
@@ -55,6 +56,7 @@ export async function validateFile(
 
   if (kind === 'GAME') {
     if (!isAllowedGameType(fileType)) throw badRequest('Game file must be a ZIP archive');
+    await validateZipArchiveFile(tmpPath, sizeBytes);
   } else if (kind === 'VIDEO') {
     if (!isAllowedVideoType(fileType)) throw badRequest('Unsupported video format');
   } else if (kind === 'POSTER') {

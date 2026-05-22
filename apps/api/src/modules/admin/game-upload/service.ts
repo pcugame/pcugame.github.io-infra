@@ -17,6 +17,8 @@ import { getUploadLimits } from '../../../shared/upload-limits.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
 import { getSiteSettings } from '../../../shared/site-settings.js';
 import { logger } from '../../../lib/logger.js';
+import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
+import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
 import {
 	createMultipartUpload,
 	uploadPart,
@@ -116,7 +118,12 @@ export async function createSession(
 	const s3Key = generateStorageKey('zip');
 
 	// Start S3 multipart upload
-	const s3UploadId = await createMultipartUpload(cfg.S3_BUCKET_PROTECTED, s3Key);
+	const s3UploadId = await createMultipartUpload(
+		cfg.S3_BUCKET_PROTECTED,
+		s3Key,
+		'application/zip',
+		storageOptionsForAsset('GAME', 'original'),
+	);
 
 	const expiresAt = new Date(Date.now() + cfg.UPLOAD_SESSION_TTL_MINUTES * 60 * 1000);
 
@@ -292,6 +299,12 @@ export async function completeSession(
 		if (!detected || !isAllowedGameType(detected)) {
 			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, 'game-upload-invalid-zip', { sessionId: session.id });
 			throw badRequest('Uploaded file is not a valid ZIP archive');
+		}
+		try {
+			await validateZipArchiveObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, head.size);
+		} catch (err) {
+			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, 'game-upload-unsafe-zip', { sessionId: session.id });
+			throw err;
 		}
 
 		// Replace existing GAME asset or create new one — single transaction, serialized per project.
