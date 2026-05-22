@@ -70,3 +70,12 @@ export function buildPosterReplaceFormData(poster: File): FormData {
   fd.append('poster', poster);
   return fd;
 }
+
+/**
+ * 전시회 포스터 업로드용 FormData
+ */
+export function buildExhibitionPosterFormData(poster: File): FormData {
+  const fd = new FormData();
+  fd.append('poster', poster);
+  return fd;
+}

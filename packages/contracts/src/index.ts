@@ -46,6 +46,7 @@ export type PublicYearItem = {
 	year: number;
 	title?: string;
 	projectCount: number;
+	posterUrl?: string;
 };
 
 export type PublicYearListResponse = {
@@ -143,6 +144,9 @@ export type AdminExhibitionItem = {
 	isUploadEnabled: boolean;
 	sortOrder: number;
 	projectCount: number;
+	posterUrl?: string;
+	posterOriginalName?: string;
+	posterSize?: number;
 };
 
 // ── Admin: Project ───────────────────────────────────────────

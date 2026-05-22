@@ -59,10 +59,11 @@ interface MockYearItem {
 	year: number;
 	title: string;
 	projectCount: number;
+	posterUrl?: string;
 }
 
 export const MOCK_YEARS: MockYearItem[] = [
-	{ id: 1, year: 2025, title: '졸업작품 전시회', projectCount: 6 },
+	{ id: 1, year: 2025, title: '졸업작품 전시회', projectCount: 6, posterUrl: 'https://placehold.co/540x960/0f172a/f8fafc?text=2025' },
 	{ id: 2, year: 2024, title: '졸업작품 전시회', projectCount: 5 },
 	{ id: 3, year: 2023, title: '졸업작품 전시회', projectCount: 4 },
 	{ id: 4, year: 2022, title: '졸업작품 전시회', projectCount: 3 },

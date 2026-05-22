@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import type { ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -12,6 +13,7 @@ import type { AdminExhibitionItem } from '../../contracts';
 import { adminExhibitionApi, adminExportApi, isApiError, getApiErrorMessage } from '../../lib/api';
 import type { ExportResult } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
+import { buildExhibitionPosterFormData } from '../../lib/utils/formData';
 import { useMe } from '../../features/auth';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
 import { ExportProgressModal } from '../../components/admin/ExportProgressModal';
@@ -210,6 +212,7 @@ export default function AdminYearsPage() {
 							<thead>
 								<tr>
 									<th>연도</th>
+									<th>포스터</th>
 									<th>제목</th>
 									<th>업로드</th>
 									<th>정렬</th>
@@ -335,6 +338,7 @@ function YearMobileCard({
 				<div className="admin-ycard__header">
 					<span className="admin-ycard__year">{year.year}</span>
 				</div>
+				<YearPosterControls year={year} compact />
 				<form
 					className="admin-ycard__form"
 					onSubmit={handleSubmit((d) => updateMutation.mutate(d))}
@@ -412,6 +416,7 @@ function YearMobileCard({
 					</button>
 				</div>
 			</div>
+			<YearPosterControls year={year} compact />
 			<div className="admin-ycard__details">
 				{year.title && (
 					<span className="admin-ycard__detail">
@@ -483,6 +488,9 @@ function YearRow({
 		return (
 			<tr>
 				<td>{year.year}</td>
+				<td>
+					<YearPosterControls year={year} />
+				</td>
 				<td>{year.title ?? '-'}</td>
 				<td>{year.isUploadEnabled ? '허용' : '잠금'}</td>
 				<td>{year.sortOrder}</td>
@@ -518,6 +526,9 @@ function YearRow({
 		<tr>
 			<td>{year.year}</td>
 			<td>
+				<YearPosterControls year={year} />
+			</td>
+			<td>
 				<input type="text" {...register('title')} style={{ width: '120px' }} />
 			</td>
 			<td>
@@ -551,5 +562,114 @@ function YearRow({
 				)}
 			</td>
 		</tr>
+	);
+}
+
+function formatPosterSize(size?: number): string {
+	if (!size) return '';
+	if (size >= 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)}MB`;
+	return `${Math.max(1, Math.round(size / 1024))}KB`;
+}
+
+function YearPosterControls({
+	year,
+	compact = false,
+}: {
+	year: AdminExhibitionItem;
+	compact?: boolean;
+}) {
+	const qc = useQueryClient();
+	const inputRef = useRef<HTMLInputElement>(null);
+
+	const invalidate = () => {
+		qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
+		qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+	};
+
+	const uploadMutation = useMutation({
+		mutationFn: (file: File) =>
+			adminExhibitionApi.uploadPoster(
+				year.id,
+				buildExhibitionPosterFormData(file),
+			),
+		onSuccess: invalidate,
+		onSettled: () => {
+			if (inputRef.current) inputRef.current.value = '';
+		},
+	});
+
+	const deletePosterMutation = useMutation({
+		mutationFn: () => adminExhibitionApi.deletePoster(year.id),
+		onSuccess: invalidate,
+	});
+
+	const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+		const file = event.currentTarget.files?.[0];
+		if (!file) return;
+		uploadMutation.mutate(file);
+	};
+
+	const handleDelete = () => {
+		if (!year.posterUrl) return;
+		if (window.confirm(`${year.title || year.year} 전시회 포스터를 삭제하시겠습니까?`)) {
+			deletePosterMutation.mutate();
+		}
+	};
+
+	const isBusy = uploadMutation.isPending || deletePosterMutation.isPending;
+	const sizeLabel = formatPosterSize(year.posterSize);
+
+	return (
+		<div className={`admin-exhibition-poster${compact ? ' admin-exhibition-poster--compact' : ''}`}>
+			<div className="admin-exhibition-poster__preview">
+				{year.posterUrl ? (
+					<img src={year.posterUrl} alt={`${year.title || year.year} 전시회 포스터`} />
+				) : (
+					<span>{year.year}</span>
+				)}
+			</div>
+			<div className="admin-exhibition-poster__body">
+				{year.posterOriginalName && (
+					<span className="admin-exhibition-poster__name" title={year.posterOriginalName}>
+						{year.posterOriginalName}
+					</span>
+				)}
+				{sizeLabel && (
+					<span className="admin-exhibition-poster__size">{sizeLabel}</span>
+				)}
+				<div className="admin-exhibition-poster__actions">
+					<input
+						ref={inputRef}
+						type="file"
+						accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
+						className="sr-only"
+						onChange={handleFileChange}
+					/>
+					<button
+						type="button"
+						className="btn btn--secondary btn--small"
+						onClick={() => inputRef.current?.click()}
+						disabled={isBusy}
+					>
+						{uploadMutation.isPending ? '업로드 중…' : year.posterUrl ? '교체' : '업로드'}
+					</button>
+					{year.posterUrl && (
+						<button
+							type="button"
+							className="btn btn--danger btn--small"
+							onClick={handleDelete}
+							disabled={isBusy}
+						>
+							삭제
+						</button>
+					)}
+				</div>
+				{(uploadMutation.error || deletePosterMutation.error) && (
+					<span className="field-error">
+						{getApiErrorMessage(uploadMutation.error ?? deletePosterMutation.error)}
+					</span>
+				)}
+			</div>
+		</div>
 	);
 }

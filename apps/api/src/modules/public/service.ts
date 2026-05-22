@@ -5,6 +5,7 @@ import type {
 	PublicProjectDetailResponse,
 } from '@pcu/contracts';
 import { env } from '../../config/env.js';
+import { getPresignedUrl } from '../../lib/storage.js';
 import { notFound } from '../../shared/errors.js';
 import { isPosterUrlSafe } from '../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../shared/project-completeness.js';
@@ -13,6 +14,10 @@ import * as repo from './repository.js';
 /** Build a public asset URL */
 function publicAssetUrl(storageKey: string): string {
 	return `${env().API_PUBLIC_URL}/api/assets/public/${storageKey}`;
+}
+
+function exhibitionPosterUrl(storageKey: string): string {
+	return `${env().API_PUBLIC_URL}/api/public/exhibition-posters/${storageKey}`;
 }
 
 function protectedAssetUrl(storageKey: string): string {
@@ -27,7 +32,14 @@ export async function listYears(): Promise<PublicYearItem[]> {
 		year: e.year,
 		title: e.title || undefined,
 		projectCount: e._count.projects,
+		posterUrl: e.posterStorageKey ? exhibitionPosterUrl(e.posterStorageKey) : undefined,
 	}));
+}
+
+export async function getExhibitionPosterRedirectUrl(storageKey: string): Promise<string> {
+	const poster = await repo.findExhibitionPosterByStorageKey(storageKey);
+	if (!poster?.posterStorageKey) throw notFound('Poster not found');
+	return getPresignedUrl(env().S3_BUCKET_PUBLIC, poster.posterStorageKey);
 }
 
 /** List published projects for a given year number (supports multiple exhibitions) */

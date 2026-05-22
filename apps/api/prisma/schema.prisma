@@ -71,13 +71,17 @@ model User {
 }
 
 model Exhibition {
-  id              Int      @id @default(autoincrement())
-  year            Int
-  title           String   @default("")
-  isUploadEnabled Boolean  @default(true) @map("is_upload_enabled")
-  sortOrder       Int      @default(0) @map("sort_order")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                 Int      @id @default(autoincrement())
+  year               Int
+  title              String   @default("")
+  isUploadEnabled    Boolean  @default(true) @map("is_upload_enabled")
+  sortOrder          Int      @default(0) @map("sort_order")
+  posterStorageKey   String?  @unique @map("poster_storage_key")
+  posterOriginalName String   @default("") @map("poster_original_name")
+  posterMimeType     String   @default("") @map("poster_mime_type")
+  posterSizeBytes    BigInt   @default(0) @map("poster_size_bytes")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   projects Project[] @relation("ExhibitionProjects")
 

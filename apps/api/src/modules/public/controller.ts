@@ -10,6 +10,15 @@ export async function publicController(app: FastifyInstance): Promise<void> {
 		sendOk(reply, { items });
 	});
 
+	/** GET /api/public/exhibition-posters/:storageKey — redirect to registered exhibition poster */
+	app.get<{ Params: { storageKey: string } }>(
+		'/exhibition-posters/:storageKey',
+		async (request, reply) => {
+			const url = await publicService.getExhibitionPosterRedirectUrl(request.params.storageKey);
+			reply.redirect(url);
+		},
+	);
+
 	/** GET /api/public/years/:year/projects — list projects in a year */
 	app.get<{ Params: { year: string } }>(
 		'/years/:year/projects',

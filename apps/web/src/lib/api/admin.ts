@@ -32,6 +32,14 @@ export const adminExhibitionApi = {
   delete(id: number) {
     return api.delete<void>(`/api/admin/exhibitions/${id}`);
   },
+
+  uploadPoster(id: number, formData: FormData) {
+    return api.post<AdminExhibitionItem>(`/api/admin/exhibitions/${id}/poster`, formData);
+  },
+
+  deletePoster(id: number) {
+    return api.delete<void>(`/api/admin/exhibitions/${id}/poster`);
+  },
 };
 
 // ── Project ──────────────────────────────────────────────────

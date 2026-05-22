@@ -32,6 +32,14 @@ export function findExhibitionById(id: number) {
 	return prisma.exhibition.findUnique({ where: { id } });
 }
 
+/** Find an exhibition poster by storage key. */
+export function findExhibitionPosterByStorageKey(storageKey: string) {
+	return prisma.exhibition.findUnique({
+		where: { posterStorageKey: storageKey },
+		select: { id: true, posterStorageKey: true },
+	});
+}
+
 const projectDetailInclude = {
 	exhibition: true,
 	members: { orderBy: { sortOrder: 'asc' as const } },

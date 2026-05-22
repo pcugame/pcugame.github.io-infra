@@ -88,6 +88,21 @@ const routes: MockRoute[] = [
 			return MOCK_ADMIN_YEARS.find((y) => y.id === id) ?? MOCK_ADMIN_YEARS[0];
 		},
 	},
+	{
+		pattern: /^\/api\/admin\/exhibitions\/([^/]+)\/poster$/,
+		handler: (match, method) => {
+			requireAdmin();
+			if (method === 'DELETE') return undefined;
+			const id = Number(match[1]);
+			const item = MOCK_ADMIN_YEARS.find((y) => y.id === id) ?? MOCK_ADMIN_YEARS[0];
+			return {
+				...item,
+				posterUrl: item.posterUrl ?? 'https://placehold.co/540x960/0f172a/f8fafc?text=Poster',
+				posterOriginalName: 'poster.webp',
+				posterSize: 245760,
+			};
+		},
+	},
 
 	// ── Admin Projects ──
 	{

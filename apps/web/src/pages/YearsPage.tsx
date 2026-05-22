@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
+import type { PublicYearItem } from '../contracts';
 
 export default function YearsPage() {
   const { data, isLoading, error, refetch } = useQuery({
@@ -39,6 +41,7 @@ export default function YearsPage() {
                   <span className="years-card__index">
                     {String(i + 1).padStart(2, '0')}
                   </span>
+                  <YearsCardPoster ex={ex} />
                   <div className="years-card__main">
                     <span className="years-card__year">{ex.year}</span>
                     {ex.title && (
@@ -56,5 +59,24 @@ export default function YearsPage() {
         </div>
       </section>
     </div>
+  );
+}
+
+function YearsCardPoster({ ex }: { ex: PublicYearItem }) {
+  const [failed, setFailed] = useState(false);
+  const showImage = ex.posterUrl && !failed;
+
+  return (
+    <span className="years-card__poster" aria-hidden="true">
+      {showImage ? (
+        <img
+          src={ex.posterUrl}
+          alt=""
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <span>{ex.year}</span>
+      )}
+    </span>
   );
 }

@@ -49,3 +49,61 @@ export function updateExhibition(
 		include: { _count: { select: { projects: true } } },
 	});
 }
+
+/** Store processed poster metadata on an exhibition and return the previous key. */
+export async function replaceExhibitionPoster(
+	id: number,
+	data: {
+		storageKey: string;
+		originalName: string;
+		mimeType: string;
+		sizeBytes: bigint;
+	},
+) {
+	return prisma.$transaction(async (tx) => {
+		const existing = await tx.exhibition.findUnique({
+			where: { id },
+			select: { posterStorageKey: true },
+		});
+
+		if (!existing) return null;
+
+		const updated = await tx.exhibition.update({
+			where: { id },
+			data: {
+				posterStorageKey: data.storageKey,
+				posterOriginalName: data.originalName,
+				posterMimeType: data.mimeType,
+				posterSizeBytes: data.sizeBytes,
+			},
+			include: { _count: { select: { projects: true } } },
+		});
+
+		return { updated, oldStorageKey: existing.posterStorageKey };
+	});
+}
+
+/** Clear poster metadata from an exhibition and return the removed key. */
+export async function clearExhibitionPoster(id: number) {
+	return prisma.$transaction(async (tx) => {
+		const existing = await tx.exhibition.findUnique({
+			where: { id },
+			select: { posterStorageKey: true },
+		});
+
+		if (!existing) return null;
+
+		const updated = await tx.exhibition.update({
+			where: { id },
+			data: {
+				posterStorageKey: null,
+				posterOriginalName: '',
+				posterMimeType: '',
+				posterSizeBytes: 0,
+			},
+			include: { _count: { select: { projects: true } } },
+		});
+
+		return { updated, oldStorageKey: existing.posterStorageKey };
+	});
+}
