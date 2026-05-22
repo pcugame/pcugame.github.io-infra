@@ -32,7 +32,7 @@ export async function assetsController(app: FastifyInstance): Promise<void> {
 		},
 	);
 
-	/** DELETE /api/admin/assets/:assetId — delete an asset (draft project only) */
+	/** DELETE /api/admin/assets/:assetId — delete an asset */
 	app.delete<{ Params: { assetId: string } }>(
 		'/admin/assets/:assetId',
 		{ preHandler: requireLogin },
@@ -43,7 +43,7 @@ export async function assetsController(app: FastifyInstance): Promise<void> {
 			if (!asset) throw notFound('Asset not found');
 
 			// Centralized write-access check (must be done before deletion)
-			await loadProjectWithAccess(request, asset.projectId, { requireDraft: true });
+			await loadProjectWithAccess(request, asset.projectId);
 
 			await assetsService.deleteAsset(assetId);
 			reply.status(204).send();

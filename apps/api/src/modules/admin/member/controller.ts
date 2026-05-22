@@ -13,7 +13,7 @@ export async function memberController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			await loadProjectWithAccess(request, projectId);
 			const data = parseBody(AddMemberBody, request.body);
 			const result = await memberService.addMember(projectId, data);
 			sendCreated(reply, result);
@@ -27,7 +27,7 @@ export async function memberController(app: FastifyInstance): Promise<void> {
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
 			const memberId = parseIntParam(request.params.memberId, 'Member ID');
-			await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			await loadProjectWithAccess(request, projectId);
 			const patch = parseBody(UpdateMemberBody, request.body);
 			await memberService.updateMember(projectId, memberId, patch);
 			reply.status(204).send();
@@ -41,7 +41,7 @@ export async function memberController(app: FastifyInstance): Promise<void> {
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
 			const memberId = parseIntParam(request.params.memberId, 'Member ID');
-			await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			await loadProjectWithAccess(request, projectId);
 			await memberService.deleteMember(projectId, memberId);
 			reply.status(204).send();
 		},
@@ -53,7 +53,7 @@ export async function memberController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			await loadProjectWithAccess(request, projectId);
 			const { memberIdA, memberIdB } = parseBody(SwapMembersBody, request.body);
 			await memberService.swapMemberOrder(projectId, memberIdA, memberIdB);
 			reply.status(204).send();

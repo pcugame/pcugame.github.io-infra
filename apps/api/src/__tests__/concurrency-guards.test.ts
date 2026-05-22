@@ -87,37 +87,41 @@ describe('Concurrency guard patterns', () => {
 		});
 	});
 
-	// ── D: Atomic draft guard on write ──────────────────────
+	// ── D: Ownership guard on write ─────────────────────────
 
-	describe('draft guard on write queries', () => {
+	describe('ownership guard on write queries', () => {
 		/**
-		 * Simulates adding status condition to an update WHERE clause.
+		 * Simulates adding ownership conditions to a write query.
 		 */
 		function guardedUpdate(
-			project: { id: string; status: string },
-			requiredStatus: string | null,
+			project: { id: string; creatorId: number; memberIds: number[] },
+			userId: number,
+			isPrivileged: boolean,
 		): { count: number } {
-			if (requiredStatus && project.status !== requiredStatus) {
+			if (!isPrivileged && project.creatorId !== userId && !project.memberIds.includes(userId)) {
 				return { count: 0 };
 			}
 			return { count: 1 };
 		}
 
-		it('allows update when status matches', () => {
-			const project = { id: '1', status: 'DRAFT' };
-			expect(guardedUpdate(project, 'DRAFT').count).toBe(1);
+		it('allows creator update', () => {
+			const project = { id: '1', creatorId: 1, memberIds: [] };
+			expect(guardedUpdate(project, 1, false).count).toBe(1);
 		});
 
-		it('blocks update when status changed between check and write', () => {
-			// Simulates: loadProjectWithAccess saw DRAFT, but project was
-			// published before the actual update query ran
-			const project = { id: '1', status: 'PUBLISHED' };
-			expect(guardedUpdate(project, 'DRAFT').count).toBe(0);
+		it('allows linked member update', () => {
+			const project = { id: '1', creatorId: 1, memberIds: [2] };
+			expect(guardedUpdate(project, 2, false).count).toBe(1);
 		});
 
-		it('privileged users bypass draft guard (null condition)', () => {
-			const project = { id: '1', status: 'PUBLISHED' };
-			expect(guardedUpdate(project, null).count).toBe(1);
+		it('blocks unrelated user update', () => {
+			const project = { id: '1', creatorId: 1, memberIds: [2] };
+			expect(guardedUpdate(project, 3, false).count).toBe(0);
+		});
+
+		it('privileged users bypass ownership guard', () => {
+			const project = { id: '1', creatorId: 1, memberIds: [] };
+			expect(guardedUpdate(project, 99, true).count).toBe(1);
 		});
 	});
 

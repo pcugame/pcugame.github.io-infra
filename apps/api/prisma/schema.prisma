@@ -17,7 +17,6 @@ enum UserRole {
 }
 
 enum ProjectStatus {
-  DRAFT
   PUBLISHED
   ARCHIVED
 }
@@ -98,7 +97,7 @@ model Project {
   summary        String         @default("")
   description    String         @default("")
   isIncomplete   Boolean        @default(false) @map("is_incomplete")
-  status         ProjectStatus  @default(DRAFT)
+  status         ProjectStatus  @default(PUBLISHED)
   sortOrder      Int            @default(0) @map("sort_order")
   githubUrl      String         @default("") @map("github_url")
   platforms      Platform[]     @default([])

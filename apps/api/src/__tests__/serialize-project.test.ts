@@ -43,7 +43,7 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 		summary: 'A summary',
 		description: 'A description',
 		isIncomplete: false,
-		status: 'DRAFT' as const,
+		status: 'PUBLISHED' as const,
 		sortOrder: 0,
 		posterAssetId: null as number | null,
 		poster: null as { storageKey: string; kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO'; status: string } | null,
@@ -123,7 +123,7 @@ describe('serializeProjectDetail', () => {
 		expect(result.slug).toBe('test-project');
 		expect(result.year).toBe(2025);
 		expect(result.isIncomplete).toBe(false);
-		expect(result.status).toBe('DRAFT');
+		expect(result.status).toBe('PUBLISHED');
 		expect(result.sortOrder).toBe(0);
 	});
 

@@ -10,13 +10,11 @@ import { useDebouncedValue } from '../../lib/useDebouncedValue';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '초안',
 	PUBLISHED: '공개',
 	ARCHIVED: '보관',
 };
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
-	DRAFT: 'badge--draft',
 	PUBLISHED: 'badge--published',
 	ARCHIVED: 'badge--archived',
 };
@@ -109,7 +107,6 @@ export default function AdminProjectsPage() {
 
 	const statusCounts = {
 		ALL: projects.length,
-		DRAFT: projects.filter((p) => p.status === 'DRAFT').length,
 		PUBLISHED: projects.filter((p) => p.status === 'PUBLISHED').length,
 		ARCHIVED: projects.filter((p) => p.status === 'ARCHIVED').length,
 	};
@@ -211,7 +208,7 @@ export default function AdminProjectsPage() {
 
 			{/* 상태 필터 탭 */}
 			<div className="admin-filter-tabs">
-				{(['ALL', 'DRAFT', 'PUBLISHED', 'ARCHIVED'] as const).map((s) => (
+				{(['ALL', 'PUBLISHED', 'ARCHIVED'] as const).map((s) => (
 					<button
 						key={s}
 						className={`admin-filter-tab ${statusFilter === s ? 'admin-filter-tab--active' : ''}`}
@@ -246,13 +243,6 @@ export default function AdminProjectsPage() {
 							onClick={() => handleBulkStatus('PUBLISHED')}
 						>
 							공개
-						</button>
-						<button
-							className="btn btn--small btn--secondary"
-							disabled={isBusy}
-							onClick={() => handleBulkStatus('DRAFT')}
-						>
-							초안
 						</button>
 						<button
 							className="btn btn--small btn--secondary"

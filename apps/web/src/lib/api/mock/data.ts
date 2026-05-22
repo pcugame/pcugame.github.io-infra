@@ -13,6 +13,7 @@ interface MockUser {
 	email: string;
 	name: string;
 	role: string;
+	studentId?: string;
 }
 
 const MOCK_USERS: Record<string, MockUser> = {
@@ -30,9 +31,10 @@ const MOCK_USERS: Record<string, MockUser> = {
 	},
 	USER: {
 		id: 3,
-		email: 'student@test.pcu.ac.kr',
+		email: '2088099@test.pcu.ac.kr',
 		name: '학생',
 		role: 'USER',
+		studentId: '2088099',
 	},
 };
 
@@ -263,12 +265,12 @@ export const MOCK_YEAR_PROJECTS: Record<number, MockProjectCard[]> = {
 };
 
 // ── USER(id=3) 소유 mock 작품 ────────────────────────────────
-// MyProjectsPage가 비어있지 않도록 학생 본인 소유 드래프트/공개작을 시드한다.
+// MyProjectsPage가 비어있지 않도록 학생 본인 소유 작품을 시드한다.
 // 연도별 공개 목록(MOCK_YEAR_PROJECTS)에는 포함하지 않는다 — "내 작품" 전용 시드.
 
 interface MockMyProjectCard extends MockProjectCard {
 	year: number;
-	status: 'DRAFT' | 'PUBLISHED';
+	status: 'PUBLISHED' | 'ARCHIVED';
 	ownerId: number;
 	updatedAgoSec: number;
 }
@@ -276,10 +278,10 @@ interface MockMyProjectCard extends MockProjectCard {
 export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 	{
 		id: 9001, slug: 'my-rhythm-proto', title: '리듬 게임 프로토타입',
-		summary: '비트 시각화를 실험 중인 초안입니다.',
+		summary: '비트 시각화를 실험 중인 프로젝트입니다.',
 		posterUrl: 'https://placehold.co/400x560/0f172a/fbbf24?text=Rhythm+Proto',
 		members: [{ name: '학생', studentId: '2088099' }],
-		year: 2025, status: 'DRAFT', ownerId: 3, updatedAgoSec: 0,
+		year: 2025, status: 'PUBLISHED', ownerId: 3, updatedAgoSec: 0,
 	},
 	{
 		id: 9002, slug: 'my-untitled-demo', title: 'Untitled Game Demo',
@@ -296,7 +298,7 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 		summary: '3-매치 기반 퍼즐 프로토타입',
 		posterUrl: 'https://placehold.co/400x560/1e1b4b/a78bfa?text=Puzzle+WIP',
 		members: [{ name: '학생', studentId: '2088099' }],
-		year: 2025, status: 'DRAFT', ownerId: 3, updatedAgoSec: 7 * 86400,
+		year: 2025, status: 'ARCHIVED', ownerId: 3, updatedAgoSec: 7 * 86400,
 	},
 ];
 
@@ -304,6 +306,7 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildDetail(card: MockProjectCard, year: number): any {
+	const status = 'status' in card ? card.status : 'PUBLISHED';
 	return {
 		id: card.id,
 		year,
@@ -322,7 +325,7 @@ function buildDetail(card: MockProjectCard, year: number): any {
 		],
 		posterUrl: card.posterUrl,
 		gameDownloadUrl: year <= 2024 ? undefined : '#mock-download',
-		status: 'PUBLISHED',
+		status,
 	};
 }
 
@@ -335,10 +338,10 @@ export function findProjectDetail(idOrSlug: string | number, year?: number): any
 		const card = cards.find((c) => c.slug === String(idOrSlug) || c.id === Number(idOrSlug));
 		if (card) return buildDetail(card, y);
 	}
-	const draft = MOCK_MY_PROJECTS.find(
+	const ownProject = MOCK_MY_PROJECTS.find(
 		(c) => c.slug === String(idOrSlug) || c.id === Number(idOrSlug),
 	);
-	if (draft) return buildDetail(draft, draft.year);
+	if (ownProject) return buildDetail(ownProject, ownProject.year);
 	return undefined;
 }
 
@@ -377,7 +380,7 @@ export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: 
 			createdByUserName: '학생',
 			updatedAt: new Date(Date.now() - d.updatedAgoSec * 1000).toISOString(),
 			memberNames: d.members.map((m) => m.name),
-			isIncomplete: d.status === 'DRAFT',
+			isIncomplete: false,
 			createdByUserId: d.ownerId,
 		});
 	}
@@ -395,7 +398,7 @@ export function buildAdminProjectDetail(id: string | number): any | undefined {
 		id: detail.id, title: detail.title, slug: detail.slug, year: detail.year,
 		summary: detail.summary, description: detail.description,
 		isIncomplete: detail.isIncomplete, video: detail.video, videos: detail.videos,
-		status: 'PUBLISHED', sortOrder: 0,
+		status: detail.status, sortOrder: 0,
 		posterAssetId: detail.images[0]?.id, posterUrl: detail.posterUrl,
 		members: detail.members.map((m: { id: number; name: string; studentId: string }, i: number) => ({ ...m, sortOrder: i, userId: null })),
 		assets: detail.images.map((img: { id: number; kind: string; url: string }) => ({

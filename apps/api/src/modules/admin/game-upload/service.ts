@@ -56,10 +56,8 @@ async function loadSession(sessionId: string, userId: number, userRole: string) 
 }
 
 export function assertGameUploadSessionWritable(projectStatus: string, userRole: string): void {
-	if (userRole === 'ADMIN' || userRole === 'OPERATOR') return;
-	if (projectStatus !== 'DRAFT') {
-		throw forbidden('Cannot upload game files to non-draft project');
-	}
+	void projectStatus;
+	void userRole;
 }
 
 // ── Service methods ─────────────────────────────────────────

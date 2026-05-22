@@ -224,7 +224,7 @@ export async function submitProject(
 
 		// Lazy import to avoid circular — validation is shared
 		const { parseBody, SubmitProjectPayload } = await import('../../../shared/validation.js');
-		const { exhibitionId, title, summary, description, autoPublish, members } =
+		const { exhibitionId, title, summary, description, members } =
 			parseBody(SubmitProjectPayload, rawPayload);
 
 		const exhibition = await repo.findExhibitionById(exhibitionId);
@@ -233,7 +233,7 @@ export async function submitProject(
 		const baseSlug = toSlug(title);
 		let slug = await generateUniqueSlug(exhibition!.id, title);
 		const savedFiles = await processFileParts(fileParts, pipeline);
-		const status: ProjectStatus = autoPublish ? 'PUBLISHED' : 'DRAFT';
+		const status: ProjectStatus = 'PUBLISHED';
 
 		// Retry on slug TOCTOU: between generateUniqueSlug's SELECT and createProjectWithAssets'
 		// INSERT, a concurrent submit can claim the same slug. P2002 on `slug` → pick the next
@@ -295,9 +295,7 @@ export async function submitProject(
 			year: exhibition!.year,
 			status,
 			adminEditUrl: `${cfg.WEB_PUBLIC_URL}/admin/projects/${project!.id}/edit`,
-			publicUrl: status === 'PUBLISHED'
-				? `${cfg.WEB_PUBLIC_URL}/years/${exhibition!.year}/${slug}`
-				: undefined,
+			publicUrl: `${cfg.WEB_PUBLIC_URL}/years/${exhibition!.year}/${slug}`,
 		};
 	} catch (err) {
 		await pipeline.rollbackCommitted();

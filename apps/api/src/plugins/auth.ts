@@ -4,6 +4,7 @@ import { env } from '../config/env.js';
 import { unauthorized, forbidden } from '../shared/errors.js';
 import { cookieExpiresAt, isIdleExpired } from '../shared/session.js';
 import * as authRepo from '../modules/auth/repository.js';
+import { extractStudentIdFromEmail } from '../modules/auth/student-id.js';
 import type { UserRole } from '@prisma/client';
 
 declare module 'fastify' {
@@ -63,7 +64,7 @@ async function resolveSession(request: FastifyRequest, reply: FastifyReply): Pro
     email: session.user.email,
     name: session.user.name,
     role: session.user.role,
-    studentId: session.user.studentId ?? undefined,
+    studentId: session.user.studentId ?? extractStudentIdFromEmail(session.user.email),
   };
 }
 

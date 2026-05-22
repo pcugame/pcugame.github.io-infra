@@ -7,7 +7,6 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../lib/query';
 import { getApiErrorMessage } from '../lib/api';
-import { UploadProgressModal } from './common';
 import {
 	createGameUploadSession,
 	getGameUploadStatus,
@@ -76,10 +75,14 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 		setState('uploading');
 		setError(null);
 
-		const ctrl = uploadGameFile(uploadFile, sess, (p) => {
-			setProgress(p);
-			if (p.percent >= 100) setState('completing');
-		}, uploadedChunks);
+		const ctrl = uploadGameFile(uploadFile, sess, {
+			title: '게임 파일 업로드',
+			startFrom: uploadedChunks,
+			onProgress: (p) => {
+				setProgress(p);
+				if (p.percent >= 100) setState('completing');
+			},
+		});
 		controllerRef.current = ctrl;
 
 		try {
@@ -185,21 +188,9 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 	}, [session, resumeSession]);
 
 	const fileSizeMB = file ? (file.size / 1024 / 1024).toFixed(1) : '0';
-	const isUploading = state === 'uploading' || state === 'completing';
 
 	return (
 		<div className="game-upload">
-			<UploadProgressModal
-				open={isUploading}
-				title="게임 파일 업로드"
-				percent={progress?.percent}
-				loadedBytes={progress?.uploadedBytes}
-				totalBytes={progress?.totalBytes}
-				status={state === 'completing'
-					? '파일 조립 및 검증이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.'
-					: '청크 업로드가 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.'}
-			/>
-
 			<h3 className="game-upload__title">게임 파일 업로드 (ZIP 파일)</h3>
 
 			{/* Resume banner */}

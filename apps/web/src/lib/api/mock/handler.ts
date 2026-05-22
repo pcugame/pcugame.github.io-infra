@@ -109,7 +109,8 @@ const routes: MockRoute[] = [
 		pattern: /^\/api\/admin\/projects\/submit$/,
 		handler: () => ({
 			id: 999, slug: 'new-project', year: 2025,
-			status: 'DRAFT', adminEditUrl: '/admin/projects/999/edit',
+			status: 'PUBLISHED', adminEditUrl: '/admin/projects/999/edit',
+			publicUrl: '/years/2025/new-project',
 		}),
 	},
 	{

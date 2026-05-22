@@ -38,13 +38,8 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 			const patch = parseBody(UpdateProjectBody, request.body);
 			const user = request.currentUser!;
 
-			// Status changes need special handling: USER can toggle DRAFT ↔ PUBLISHED
-			// on their own projects even when the project is not in DRAFT.
 			const isStatusChange = patch.status !== undefined;
-			const hasContentChange = Object.keys(patch).some((key) => key !== 'status');
-			const project = await loadProjectWithAccess(request, projectId, {
-				requireDraft: hasContentChange || !isStatusChange,
-			});
+			const project = await loadProjectWithAccess(request, projectId);
 
 			if (isStatusChange) {
 				projectService.assertStatusTransition(project.status, patch.status!, user.role);
@@ -55,13 +50,13 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		},
 	);
 
-	/** DELETE /projects/:id — delete project and associated files (draft only) */
+	/** DELETE /projects/:id — delete project and associated files */
 	app.delete<{ Params: { id: string } }>(
 		'/projects/:id',
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			await loadProjectWithAccess(request, projectId);
 			await projectService.deleteProject(projectId);
 			reply.status(204).send();
 		},
@@ -110,13 +105,13 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		},
 	);
 
-	/** POST /projects/:id/assets — add single asset to project (draft only) */
+	/** POST /projects/:id/assets — add single asset to project */
 	app.post<{ Params: { id: string } }>(
 		'/projects/:id/assets',
 		{ preHandler: requireLogin, bodyLimit: uploadBodyLimit },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			const project = await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			const project = await loadProjectWithAccess(request, projectId);
 			const user = request.currentUser!;
 			const exhibition = await repo.findExhibitionById(project.exhibitionId);
 			assertUploadAllowed(exhibition, project.exhibitionId, user.role);
@@ -125,13 +120,13 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		},
 	);
 
-	/** PATCH /projects/:id/poster — set poster asset for project (draft only) */
+	/** PATCH /projects/:id/poster — set poster asset for project */
 	app.patch<{ Params: { id: string } }>(
 		'/projects/:id/poster',
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			await loadProjectWithAccess(request, projectId);
 			const { assetId } = parseBody(SetPosterBody, request.body);
 			const result = await projectService.setPoster(projectId, assetId);
 			sendOk(reply, result);

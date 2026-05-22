@@ -90,3 +90,42 @@ ss -tulpen | grep -E ':(5050|4000|111)\b'
 ```
 
 External direct access to `:4000` should fail after redeploy and firewall application; `https://203.250.133.230/api/health` should continue to work through nginx.
+
+## Nginx Security Upgrade Runbook
+
+Use this when an Nginx CVE affects the reverse proxy. For CVE-2026-42945, Debian 13
+backports the fix in `nginx` / `nginx-common` `1.26.3-3+deb13u5`; prefer that
+package over switching to the upstream nginx.org repository unless Debian has no
+patched candidate.
+
+```bash
+sudo tar -C / -czf "/root/nginx-pre-upgrade-$(date -u +%Y%m%dT%H%M%SZ).tgz" etc/nginx
+
+apt-cache policy nginx nginx-common
+apt changelog nginx | grep -Ei 'CVE-2026-42945|rewrite|security' | head -n 40
+
+sudo apt-get update
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade nginx nginx-common
+
+sudo nginx -t
+sudo systemctl reload nginx || sudo systemctl restart nginx
+```
+
+Verify after the upgrade:
+
+```bash
+dpkg -l nginx nginx-common
+sudo nginx -v
+systemctl is-active nginx
+curl -fsS http://127.0.0.1:4000/api/health
+curl -kfsS https://203.250.133.230/api/health
+sudo ss -tulpen | grep -E ':(443|80|4000|5050)\b'
+curl -fsS --connect-timeout 5 http://203.250.133.230:4000/api/health || echo "direct :4000 blocked"
+```
+
+Expected:
+
+- `nginx` and `nginx-common` are on the patched Debian security version.
+- `nginx -t` succeeds and `nginx` remains `active`.
+- API health passes through both loopback and the public HTTPS reverse proxy.
+- `:4000` listens only on `127.0.0.1` and public direct access to `:4000` fails.

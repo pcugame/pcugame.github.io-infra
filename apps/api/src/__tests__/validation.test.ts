@@ -17,12 +17,12 @@ import {
 
 describe('ProjectStatusEnum', () => {
   it('accepts valid statuses', () => {
-    expect(ProjectStatusEnum.parse('DRAFT')).toBe('DRAFT');
     expect(ProjectStatusEnum.parse('PUBLISHED')).toBe('PUBLISHED');
     expect(ProjectStatusEnum.parse('ARCHIVED')).toBe('ARCHIVED');
   });
 
   it('rejects invalid status', () => {
+    expect(() => ProjectStatusEnum.parse('DRAFT')).toThrow();
     expect(() => ProjectStatusEnum.parse('DELETED')).toThrow();
     expect(() => ProjectStatusEnum.parse('')).toThrow();
     expect(() => ProjectStatusEnum.parse(123)).toThrow();
@@ -158,7 +158,6 @@ describe('SubmitProjectPayload', () => {
     expect(result.exhibitionId).toBe(1);
     expect(result.title).toBe('My Game');
     expect(result.summary).toBe('');
-    expect(result.autoPublish).toBe(false);
     expect(result.members).toHaveLength(1);
   });
 

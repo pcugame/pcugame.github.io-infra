@@ -11,10 +11,9 @@ import { assertGameUploadSessionWritable } from '../modules/admin/game-upload/se
 
 describe('Game upload session validation', () => {
 	describe('project status policy', () => {
-		it('allows USER writes only while the project is draft', () => {
-			expect(() => assertGameUploadSessionWritable('DRAFT', 'USER')).not.toThrow();
-			expect(() => assertGameUploadSessionWritable('PUBLISHED', 'USER')).toThrow();
-			expect(() => assertGameUploadSessionWritable('ARCHIVED', 'USER')).toThrow();
+		it('allows USER writes to owned or linked projects regardless of project status', () => {
+			expect(() => assertGameUploadSessionWritable('PUBLISHED', 'USER')).not.toThrow();
+			expect(() => assertGameUploadSessionWritable('ARCHIVED', 'USER')).not.toThrow();
 		});
 
 		it('allows privileged roles to write regardless of project status', () => {

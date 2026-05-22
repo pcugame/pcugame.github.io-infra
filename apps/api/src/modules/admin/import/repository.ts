@@ -44,7 +44,7 @@ export function createProjectWithMembers(
 		summary: string;
 		description: string;
 		isIncomplete: boolean;
-		status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+		status: 'PUBLISHED' | 'ARCHIVED';
 		githubUrl: string;
 		platforms: ('PC' | 'MOBILE' | 'WEB')[];
 		creatorId: number;

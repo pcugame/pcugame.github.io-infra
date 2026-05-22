@@ -12,7 +12,7 @@ import type {
   UpdateMemberRequest,
   ExportStatusResponse,
 } from '../../contracts';
-import { api, uploadFormData, type UploadProgress } from './client';
+import { api, uploadFormData } from './client';
 
 // ── Exhibition ──────────────────────────────────────────────
 
@@ -33,9 +33,10 @@ export const adminExhibitionApi = {
     return api.delete<void>(`/api/admin/exhibitions/${id}`);
   },
 
-  uploadPoster(id: number, formData: FormData, onProgress?: (progress: UploadProgress) => void) {
+  uploadPoster(id: number, formData: FormData) {
     return uploadFormData<AdminExhibitionItem>(`/api/admin/exhibitions/${id}/poster`, formData, {
-      onProgress,
+      title: '전시회 포스터 업로드',
+      processingMessage: '포스터 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
     });
   },
 
@@ -64,20 +65,26 @@ export const adminProjectApi = {
   },
 
   /** 작품 + 파일 일괄 등록 (multipart/form-data) */
-  submit(formData: FormData, onProgress?: (progress: UploadProgress) => void) {
+  submit(formData: FormData) {
     return uploadFormData<SubmitProjectResponse>(
       '/api/admin/projects/submit',
       formData,
-      { onProgress },
+      {
+        title: '작품 파일 업로드',
+        processingMessage: '파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
+      },
     );
   },
 
   /** 기존 프로젝트에 자산 추가 */
-  addAsset(projectId: number, formData: FormData, onProgress?: (progress: UploadProgress) => void) {
+  addAsset(projectId: number, formData: FormData, title = '자산 업로드') {
     return uploadFormData<{ assetId: number; url: string }>(
       `/api/admin/projects/${projectId}/assets`,
       formData,
-      { onProgress },
+      {
+        title,
+        processingMessage: '파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
+      },
     );
   },
 
@@ -220,15 +227,21 @@ export const adminExportApi = {
 // ── Import ─────────────────────────────────────────────────
 
 export const adminImportApi = {
-  preview(file: File, onProgress?: (progress: UploadProgress) => void) {
+  preview(file: File) {
     const fd = new FormData();
     fd.append('file', file);
-    return uploadFormData<ImportPreviewResult>('/api/admin/import/preview', fd, { onProgress });
+    return uploadFormData<ImportPreviewResult>('/api/admin/import/preview', fd, {
+      title: 'JSON 파일 업로드',
+      processingMessage: '파일 처리 중에는 이 창을 닫거나 새로고침하지 마세요.',
+    });
   },
 
-  execute(file: File, onProgress?: (progress: UploadProgress) => void) {
+  execute(file: File) {
     const fd = new FormData();
     fd.append('file', file);
-    return uploadFormData<ImportExecuteResult>('/api/admin/import/execute', fd, { onProgress });
+    return uploadFormData<ImportExecuteResult>('/api/admin/import/execute', fd, {
+      title: 'JSON 임포트 실행',
+      processingMessage: '파일 처리 중에는 이 창을 닫거나 새로고침하지 마세요.',
+    });
   },
 };

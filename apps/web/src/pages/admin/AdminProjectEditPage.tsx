@@ -15,7 +15,6 @@ import {
   adminMemberApi,
   adminAssetApi,
   getApiErrorMessage,
-  type UploadProgress,
 } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { buildAssetFormData } from '../../lib/utils';
@@ -24,10 +23,8 @@ import { useMe } from '../../features/auth';
 import { MemberRow } from '../../features/admin/projects/MemberRow';
 import { getClientUploadLimits } from '../../lib/upload-limits';
 import GameUploadWidget from '../../components/GameUploadWidget';
-import { UploadProgressModal } from '../../components/common';
 
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: '초안',
+const STATUS_LABELS: Record<ProjectStatus, string> = {
   PUBLISHED: '공개',
   ARCHIVED: '보관',
 };
@@ -62,7 +59,6 @@ export default function AdminProjectEditPage() {
           title: project.title,
           summary: project.summary ?? '',
           description: project.description ?? '',
-          status: project.status,
           sortOrder: project.sortOrder,
         }
       : undefined,
@@ -79,7 +75,13 @@ export default function AdminProjectEditPage() {
   });
 
   const onSubmitUpdate = (data: UpdateProjectFormInput) => {
-    updateMutation.mutate(data);
+    const contentPatch = {
+      title: data.title,
+      summary: data.summary,
+      description: data.description,
+      sortOrder: data.sortOrder,
+    };
+    updateMutation.mutate(contentPatch);
   };
 
   // ── 멤버 추가 ─────────────────────────────────────────────
@@ -129,16 +131,12 @@ export default function AdminProjectEditPage() {
 
   // ── 자산 추가/삭제 ────────────────────────────────────────
   const limits = getClientUploadLimits(user?.role ?? 'USER');
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [assetFileError, setAssetFileError] = useState<string | null>(null);
   const addAssetMutation = useMutation({
-    mutationFn: (fd: FormData) => adminProjectApi.addAsset(id, fd, setUploadProgress),
+    mutationFn: ({ fd, title }: { fd: FormData; title: string }) =>
+      adminProjectApi.addAsset(id, fd, title),
     onSuccess: () => {
-      setUploadProgress((prev) => prev ? { ...prev, percent: 100, loaded: prev.total } : prev);
       qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
-    },
-    onSettled: () => {
-      setUploadProgress(null);
     },
   });
 
@@ -160,8 +158,12 @@ export default function AdminProjectEditPage() {
 
   const handleAddAsset = async (kind: string, file: File) => {
     const fd = buildAssetFormData(kind, file);
-    setUploadProgress({ loaded: 0, total: 0, percent: 0 });
-    const res = await addAssetMutation.mutateAsync(fd);
+    const uploadTitle = kind === 'POSTER'
+      ? '포스터 업로드'
+      : kind === 'VIDEO'
+        ? '동영상 업로드'
+        : '이미지 업로드';
+    const res = await addAssetMutation.mutateAsync({ fd, title: uploadTitle });
     if (kind === 'POSTER') {
       try {
         await setPosterMutation.mutateAsync(res.assetId);
@@ -215,20 +217,10 @@ export default function AdminProjectEditPage() {
   if (error) return <ErrorMessage error={error} onReset={() => refetch()} />;
   if (!project) return null;
 
-  // USER can only edit DRAFT projects; OPERATOR/ADMIN can edit any status
-  const canEditContent = isPrivileged || project.status === 'DRAFT';
+  const canEditContent = true;
 
   return (
     <div className="admin-project-edit-page">
-      <UploadProgressModal
-        open={addAssetMutation.isPending}
-        title="자산 업로드"
-        percent={uploadProgress?.percent}
-        loadedBytes={uploadProgress?.loaded}
-        totalBytes={uploadProgress?.total}
-        status="파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요."
-      />
-
       <div className="admin-page-header">
         <div className="admin-page-header__text">
           <h1>
@@ -303,22 +295,13 @@ export default function AdminProjectEditPage() {
           <strong>{STATUS_LABELS[project.status]}</strong>
         </p>
         <div className="form-actions">
-          {project.status !== 'PUBLISHED' && (
+          {isPrivileged && project.status !== 'PUBLISHED' && (
             <button
               className="btn btn--primary btn--small"
               onClick={() => toggleStatusMutation.mutate('PUBLISHED')}
               disabled={toggleStatusMutation.isPending}
             >
               공개로 전환
-            </button>
-          )}
-          {project.status !== 'DRAFT' && (
-            <button
-              className="btn btn--secondary btn--small"
-              onClick={() => toggleStatusMutation.mutate('DRAFT')}
-              disabled={toggleStatusMutation.isPending}
-            >
-              초안으로 전환
             </button>
           )}
           {project.status !== 'ARCHIVED' && isPrivileged && (
@@ -339,9 +322,6 @@ export default function AdminProjectEditPage() {
       {/* ── 참여 학생 ───────────────────────────────────────── */}
       <fieldset>
         <legend>참여 학생</legend>
-        {!canEditContent && (
-          <p className="field-hint">초안 상태에서만 멤버를 수정할 수 있습니다.</p>
-        )}
         <ul className="member-list">
           {project.members.map((m, idx) => (
             <MemberRow
@@ -399,9 +379,6 @@ export default function AdminProjectEditPage() {
       {/* ── 자산 관리 ───────────────────────────────────────── */}
       <fieldset>
         <legend>등록된 자산</legend>
-        {!canEditContent && (
-          <p className="field-hint">초안 상태에서만 자산을 수정할 수 있습니다.</p>
-        )}
 
         {project.posterAssetId && (
           <p className="asset-current-poster">

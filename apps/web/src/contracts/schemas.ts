@@ -20,7 +20,6 @@ export const SubmitProjectPayloadSchema = z.object({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
-  autoPublish: z.boolean().optional(),
   members: z
     .array(ProjectMemberInputSchema)
     .min(1, '최소 1명의 참여 학생을 추가하세요'),
@@ -34,7 +33,7 @@ export const UpdateProjectFormSchema = z.object({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
-  status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional(),
+  status: z.enum(['PUBLISHED', 'ARCHIVED']).optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 });
 

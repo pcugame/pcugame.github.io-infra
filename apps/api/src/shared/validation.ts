@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 // ── Enums (matching Prisma) ──────────────────────────────────
 
-export const ProjectStatusEnum = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
+export const ProjectStatusEnum = z.enum(['PUBLISHED', 'ARCHIVED']);
 export const AssetKindEnum = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO']);
 
 // ── Exhibition ──────────────────────────────────────────────
@@ -45,7 +45,6 @@ export const SubmitProjectPayload = z.object({
 	title: z.string().min(1).max(120),
 	summary: z.string().max(300).optional().default(''),
 	description: z.string().max(5000).optional().default(''),
-	autoPublish: z.boolean().optional().default(false),
 	members: z.array(SubmitMember).min(1, 'At least one member required'),
 });
 
@@ -81,7 +80,7 @@ export const SetPosterBody = z.object({
 
 export const BulkStatusBody = z.object({
 	ids: z.array(z.number().int().positive()).min(1).max(500),
-	status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']),
+	status: ProjectStatusEnum,
 });
 
 export const BulkDeleteBody = z.object({

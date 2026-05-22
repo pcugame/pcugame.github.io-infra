@@ -44,7 +44,7 @@ describe('UpdateExhibitionSchema', () => {
 
 describe('UpdateProjectFormSchema', () => {
 	it('accepts valid status values', () => {
-		for (const s of ['DRAFT', 'PUBLISHED', 'ARCHIVED']) {
+		for (const s of ['PUBLISHED', 'ARCHIVED']) {
 			const result = UpdateProjectFormSchema.parse({
 				title: 'Test',
 				status: s,
@@ -56,6 +56,12 @@ describe('UpdateProjectFormSchema', () => {
 	it('rejects invalid status', () => {
 		expect(() =>
 			UpdateProjectFormSchema.parse({ title: 'Test', status: 'DELETED' }),
+		).toThrow();
+	});
+
+	it('rejects draft status', () => {
+		expect(() =>
+			UpdateProjectFormSchema.parse({ title: 'Test', status: 'DRAFT' }),
 		).toThrow();
 	});
 

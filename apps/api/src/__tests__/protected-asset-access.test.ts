@@ -11,7 +11,7 @@ function asset(opts: {
 		kind: opts.kind ?? 'GAME',
 		project: {
 			creatorId: opts.creatorId ?? 1,
-			status: opts.status ?? 'DRAFT',
+			status: opts.status ?? 'PUBLISHED',
 			members: (opts.memberIds ?? []).map((userId) => ({ userId })),
 		},
 	};
@@ -23,18 +23,11 @@ describe('canStreamProtectedAsset', () => {
 		expect(canStreamProtectedAsset(asset({ kind: 'VIDEO', status: 'ARCHIVED' }))).toBe(true);
 	});
 
-	it('does not expose draft protected assets anonymously', () => {
-		expect(canStreamProtectedAsset(asset({ status: 'DRAFT' }))).toBe(false);
-	});
-
-	it('allows draft asset access to creator, linked member, and privileged roles', () => {
-		expect(canStreamProtectedAsset(asset({ creatorId: 1 }), { id: 1, role: 'USER' })).toBe(true);
-		expect(canStreamProtectedAsset(asset({ memberIds: [2] }), { id: 2, role: 'USER' })).toBe(true);
-		expect(canStreamProtectedAsset(asset({}), { id: 99, role: 'OPERATOR' })).toBe(true);
-		expect(canStreamProtectedAsset(asset({}), { id: 99, role: 'ADMIN' })).toBe(true);
-	});
-
-	it('blocks unrelated users from draft protected assets', () => {
-		expect(canStreamProtectedAsset(asset({ creatorId: 1, memberIds: [2] }), { id: 3, role: 'USER' })).toBe(false);
+	it('allows authenticated owners, linked members, and privileged roles for non-public legacy statuses', () => {
+		expect(canStreamProtectedAsset(asset({ status: 'LEGACY', creatorId: 1 }), { id: 1, role: 'USER' })).toBe(true);
+		expect(canStreamProtectedAsset(asset({ status: 'LEGACY', memberIds: [2] }), { id: 2, role: 'USER' })).toBe(true);
+		expect(canStreamProtectedAsset(asset({ status: 'LEGACY' }), { id: 99, role: 'OPERATOR' })).toBe(true);
+		expect(canStreamProtectedAsset(asset({ status: 'LEGACY' }), { id: 99, role: 'ADMIN' })).toBe(true);
+		expect(canStreamProtectedAsset(asset({ status: 'LEGACY', creatorId: 1, memberIds: [2] }), { id: 3, role: 'USER' })).toBe(false);
 	});
 });

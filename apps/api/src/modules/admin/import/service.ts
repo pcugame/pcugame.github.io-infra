@@ -18,7 +18,7 @@ export const ImportProject = z.object({
 	summary: z.string().max(300).optional().default(''),
 	description: z.string().max(5000).optional().default(''),
 	isIncomplete: z.boolean().optional().default(false),
-	status: z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']).optional().default('PUBLISHED'),
+	status: z.enum(['PUBLISHED', 'ARCHIVED']).optional().default('PUBLISHED'),
 	githubUrl: z.string().max(500).optional().default(''),
 	platforms: z.array(z.enum(['PC', 'MOBILE', 'WEB'])).optional().default([]),
 	members: z.array(ImportMember).optional().default([]),

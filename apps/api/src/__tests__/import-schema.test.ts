@@ -19,7 +19,7 @@ describe('ImportDataSchema', () => {
 				summary: 'A game',
 				description: 'Details',
 				isIncomplete: true,
-				status: 'DRAFT',
+				status: 'PUBLISHED',
 				githubUrl: 'https://github.com/test',
 				platforms: ['PC', 'WEB'],
 				members: [{ name: '홍길동', studentId: '20251234' }],
@@ -66,6 +66,11 @@ describe('ImportProject', () => {
 
 	it('rejects invalid status value', () => {
 		const result = ImportProject.safeParse({ year: 2025, title: 'Test', status: 'DELETED' });
+		expect(result.success).toBe(false);
+	});
+
+	it('rejects draft status value', () => {
+		const result = ImportProject.safeParse({ year: 2025, title: 'Test', status: 'DRAFT' });
 		expect(result.success).toBe(false);
 	});
 

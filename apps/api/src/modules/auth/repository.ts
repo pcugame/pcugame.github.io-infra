@@ -6,11 +6,17 @@ export function upsertUserByGoogleSub(data: {
 	email: string;
 	name: string;
 	picture: string;
+	studentId?: string;
 }) {
 	return prisma.user.upsert({
 		where: { googleSub: data.googleSub },
 		create: data,
-		update: { email: data.email, name: data.name, picture: data.picture },
+		update: {
+			email: data.email,
+			name: data.name,
+			picture: data.picture,
+			...(data.studentId ? { studentId: data.studentId } : {}),
+		},
 	});
 }
 

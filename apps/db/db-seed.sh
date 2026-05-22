@@ -162,11 +162,11 @@ do_add_project() {
   done
 
   read -rp "영상 URL (NAS) [선택]: " video_url
-  read -rp "상태 (DRAFT/PUBLISHED/ARCHIVED) [PUBLISHED]: " status
+  read -rp "상태 (PUBLISHED/ARCHIVED) [PUBLISHED]: " status
   status="${status:-PUBLISHED}"
   case "$status" in
-    DRAFT|PUBLISHED|ARCHIVED) ;;
-    *) echo "ERROR: 상태는 DRAFT, PUBLISHED, ARCHIVED 중 하나여야 합니다."; exit 1 ;;
+    PUBLISHED|ARCHIVED) ;;
+    *) echo "ERROR: 상태는 PUBLISHED, ARCHIVED 중 하나여야 합니다."; exit 1 ;;
   esac
 
   echo ""

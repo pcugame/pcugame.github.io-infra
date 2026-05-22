@@ -6,13 +6,11 @@ import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '초안',
 	PUBLISHED: '공개',
 	ARCHIVED: '보관',
 };
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
-	DRAFT: 'badge--draft',
 	PUBLISHED: 'badge--published',
 	ARCHIVED: 'badge--archived',
 };

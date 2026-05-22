@@ -7,6 +7,7 @@
 
 import { env } from '../env';
 import { ApiError } from './client';
+import { failUpload, finishUpload, startUpload, updateUpload } from '../upload';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -43,6 +44,12 @@ export interface GameUploadController {
 	start: () => Promise<{ status: string; storageKey: string; sizeBytes: number }>;
 	/** Abort the in-progress upload (can still be resumed later). */
 	abort: () => void;
+}
+
+export interface UploadGameFileOptions {
+	title: string;
+	onProgress?: (progress: GameUploadProgress) => void;
+	startFrom?: number[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -117,79 +124,116 @@ export async function cancelGameUploadSession(
  *
  * @param file        The game ZIP file
  * @param session     The session from createGameUploadSession
- * @param onProgress  Called after each chunk completes
- * @param startFrom   Array of already-uploaded chunk indices (for resume)
+ * @param options     Upload title, progress callback, and resume chunk indices
  * @returns controller with start() and abort()
  */
 export function uploadGameFile(
 	file: File,
 	session: GameUploadSession,
-	onProgress?: (progress: GameUploadProgress) => void,
-	startFrom: number[] = [],
+	options: UploadGameFileOptions,
 ): GameUploadController {
 	let aborted = false;
+	let taskId: string | null = null;
 
-	const uploadedSet = new Set(startFrom);
+	const uploadedSet = new Set(options.startFrom ?? []);
+
+	function ensureTask() {
+		if (taskId) return taskId;
+		taskId = startUpload({
+			title: options.title,
+			phase: 'uploading',
+			totalBytes: file.size,
+			loadedBytes: 0,
+			percent: 0,
+			processingMessage: '파일 조립 및 검증이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
+		});
+		return taskId;
+	}
 
 	function reportProgress() {
-		if (!onProgress) return;
+		const uploadTaskId = ensureTask();
 		const uploadedBytes = uploadedSet.size * session.chunkSizeBytes;
-		onProgress({
+		const progress = {
 			uploadedChunks: uploadedSet.size,
 			totalChunks: session.totalChunks,
 			uploadedBytes: Math.min(uploadedBytes, file.size),
 			totalBytes: file.size,
 			percent: Math.round((uploadedSet.size / session.totalChunks) * 100),
+		};
+		options.onProgress?.(progress);
+		updateUpload(uploadTaskId, {
+			phase: 'uploading',
+			loadedBytes: progress.uploadedBytes,
+			totalBytes: progress.totalBytes,
+			percent: Math.min(99, progress.percent),
 		});
 	}
 
 	async function start() {
-		reportProgress();
+		const uploadTaskId = ensureTask();
+		try {
+			reportProgress();
 
-		for (let i = 0; i < session.totalChunks; i++) {
-			if (aborted) throw new Error('Upload aborted');
-			if (uploadedSet.has(i)) continue; // already uploaded (resume)
-
-			const start = i * session.chunkSizeBytes;
-			const end = Math.min(start + session.chunkSizeBytes, file.size);
-			const chunk = file.slice(start, end);
-
-			// Retry up to 3 times per chunk
-			let lastErr: unknown;
-			for (let attempt = 0; attempt < 3; attempt++) {
+			for (let i = 0; i < session.totalChunks; i++) {
 				if (aborted) throw new Error('Upload aborted');
-				try {
-					await apiRequest(
-						`/api/admin/game-upload-sessions/${session.sessionId}/chunks/${i}`,
-						{
-							method: 'PUT',
-							headers: { 'Content-Type': 'application/octet-stream' },
-							body: chunk,
-						},
-					);
-					lastErr = null;
-					break;
-				} catch (err) {
-					lastErr = err;
-					// Wait before retry (exponential backoff)
-					if (attempt < 2) {
-						await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+				if (uploadedSet.has(i)) continue; // already uploaded (resume)
+
+				const start = i * session.chunkSizeBytes;
+				const end = Math.min(start + session.chunkSizeBytes, file.size);
+				const chunk = file.slice(start, end);
+
+				// Retry up to 3 times per chunk
+				let lastErr: unknown;
+				for (let attempt = 0; attempt < 3; attempt++) {
+					if (aborted) throw new Error('Upload aborted');
+					try {
+						await apiRequest(
+							`/api/admin/game-upload-sessions/${session.sessionId}/chunks/${i}`,
+							{
+								method: 'PUT',
+								headers: { 'Content-Type': 'application/octet-stream' },
+								body: chunk,
+							},
+						);
+						lastErr = null;
+						break;
+					} catch (err) {
+						lastErr = err;
+						// Wait before retry (exponential backoff)
+						if (attempt < 2) {
+							await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+						}
 					}
 				}
+				if (lastErr) throw lastErr;
+
+				uploadedSet.add(i);
+				reportProgress();
 			}
-			if (lastErr) throw lastErr;
 
-			uploadedSet.add(i);
-			reportProgress();
+			updateUpload(uploadTaskId, {
+				phase: 'processing',
+				loadedBytes: file.size,
+				totalBytes: file.size,
+				percent: 99,
+			});
+
+			// All chunks uploaded — finalize
+			const result = await apiRequest<{ status: string; storageKey: string; sizeBytes: number }>(
+				`/api/admin/game-upload-sessions/${session.sessionId}/complete`,
+				{ method: 'POST' },
+			);
+
+			finishUpload(uploadTaskId);
+			return result;
+		} catch (err) {
+			if ((err as Error).message === 'Upload aborted') {
+				failUpload(uploadTaskId, '업로드가 일시정지되었습니다.');
+			} else {
+				failUpload(uploadTaskId, err instanceof Error ? err.message : '업로드 중 오류가 발생했습니다.');
+			}
+			throw err;
 		}
-
-		// All chunks uploaded — finalize
-		const result = await apiRequest<{ status: string; storageKey: string; sizeBytes: number }>(
-			`/api/admin/game-upload-sessions/${session.sessionId}/complete`,
-			{ method: 'POST' },
-		);
-
-		return result;
 	}
 
 	return {

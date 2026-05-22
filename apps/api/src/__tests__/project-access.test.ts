@@ -7,24 +7,24 @@ describe('assertWriteAccess', () => {
 	const otherId = 2;
 
 	it('allows ADMIN regardless of ownership or status', () => {
-		expect(() => assertWriteAccess('ADMIN', creatorId, otherId, 'PUBLISHED', { requireDraft: true })).not.toThrow();
+		expect(() => assertWriteAccess('ADMIN', creatorId, otherId)).not.toThrow();
 	});
 
 	it('allows OPERATOR regardless of ownership or status', () => {
-		expect(() => assertWriteAccess('OPERATOR', creatorId, otherId, 'ARCHIVED', { requireDraft: true })).not.toThrow();
+		expect(() => assertWriteAccess('OPERATOR', creatorId, otherId)).not.toThrow();
 	});
 
-	it('allows USER who is the creator on DRAFT project', () => {
-		expect(() => assertWriteAccess('USER', creatorId, creatorId, 'DRAFT', { requireDraft: true })).not.toThrow();
+	it('allows USER who is the creator on a published project', () => {
+		expect(() => assertWriteAccess('USER', creatorId, creatorId)).not.toThrow();
 	});
 
-	it('allows USER who is the creator when requireDraft is false', () => {
-		expect(() => assertWriteAccess('USER', creatorId, creatorId, 'PUBLISHED')).not.toThrow();
+	it('allows USER who is the creator on an archived project', () => {
+		expect(() => assertWriteAccess('USER', creatorId, creatorId)).not.toThrow();
 	});
 
 	it('blocks USER who is not the creator and not a member', () => {
 		try {
-			assertWriteAccess('USER', creatorId, otherId, 'DRAFT', { requireDraft: true });
+			assertWriteAccess('USER', creatorId, otherId);
 			expect.fail('should have thrown');
 		} catch (err) {
 			expect(err).toBeInstanceOf(AppError);
@@ -33,47 +33,11 @@ describe('assertWriteAccess', () => {
 		}
 	});
 
-	it('allows USER who is a linked member on DRAFT project', () => {
-		expect(() => assertWriteAccess('USER', creatorId, otherId, 'DRAFT', { requireDraft: true, isMember: true })).not.toThrow();
+	it('allows USER who is a linked member on a published project', () => {
+		expect(() => assertWriteAccess('USER', creatorId, otherId, { isMember: true })).not.toThrow();
 	});
 
-	it('blocks member on PUBLISHED project when requireDraft is true', () => {
-		try {
-			assertWriteAccess('USER', creatorId, otherId, 'PUBLISHED', { requireDraft: true, isMember: true });
-			expect.fail('should have thrown');
-		} catch (err) {
-			expect(err).toBeInstanceOf(AppError);
-			expect((err as AppError).statusCode).toBe(403);
-			expect((err as AppError).message).toContain('non-draft');
-		}
-	});
-
-	it('allows member when requireDraft is false', () => {
-		expect(() => assertWriteAccess('USER', creatorId, otherId, 'PUBLISHED', { isMember: true })).not.toThrow();
-	});
-
-	it('blocks USER creator on PUBLISHED project when requireDraft is true', () => {
-		try {
-			assertWriteAccess('USER', creatorId, creatorId, 'PUBLISHED', { requireDraft: true });
-			expect.fail('should have thrown');
-		} catch (err) {
-			expect(err).toBeInstanceOf(AppError);
-			expect((err as AppError).statusCode).toBe(403);
-			expect((err as AppError).message).toContain('non-draft');
-		}
-	});
-
-	it('blocks USER creator on ARCHIVED project when requireDraft is true', () => {
-		try {
-			assertWriteAccess('USER', creatorId, creatorId, 'ARCHIVED', { requireDraft: true });
-			expect.fail('should have thrown');
-		} catch (err) {
-			expect(err).toBeInstanceOf(AppError);
-			expect((err as AppError).statusCode).toBe(403);
-		}
-	});
-
-	it('defaults requireDraft to false when opts omitted', () => {
-		expect(() => assertWriteAccess('USER', creatorId, creatorId, 'PUBLISHED')).not.toThrow();
+	it('allows USER who is a linked member on an archived project', () => {
+		expect(() => assertWriteAccess('USER', creatorId, otherId, { isMember: true })).not.toThrow();
 	});
 });

@@ -4,6 +4,7 @@ import { unauthorized } from '../../shared/errors.js';
 import { absoluteSessionExpiresAt, generateSessionId } from '../../shared/session.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './repository.js';
+import { extractStudentIdFromEmail } from './student-id.js';
 
 const oauthClient = new OAuth2Client();
 
@@ -45,12 +46,14 @@ export async function loginWithGoogle(credential: string) {
 	}
 
 	const cleanName = stripDeptSuffix(payload.name ?? '');
+	const studentId = extractStudentIdFromEmail(payload.email);
 
 	const user = await repo.upsertUserByGoogleSub({
 		googleSub: payload.sub,
 		email: payload.email,
 		name: cleanName,
 		picture: payload.picture ?? '',
+		studentId,
 	});
 
 	const sessionId = generateSessionId();

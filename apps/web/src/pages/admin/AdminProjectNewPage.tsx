@@ -7,7 +7,7 @@ import {
   SubmitProjectPayloadSchema,
   type SubmitProjectPayloadInput,
 } from '../../contracts/schemas';
-import { adminProjectApi, adminExhibitionApi, getApiErrorMessage, type UploadProgress } from '../../lib/api';
+import { adminProjectApi, adminExhibitionApi, getApiErrorMessage } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
 import { useMe } from '../../features/auth';
@@ -15,7 +15,6 @@ import { getClientUploadLimits } from '../../lib/upload-limits';
 import GameUploadWidget from '../../components/GameUploadWidget';
 import ExhibitionSelect from '../../components/ExhibitionSelect';
 import { ProjectPreviewModal } from '../../components/project';
-import { UploadProgressModal } from '../../components/common';
 
 export default function AdminProjectNewPage() {
   const navigate = useNavigate();
@@ -37,6 +36,7 @@ export default function AdminProjectNewPage() {
     control,
     handleSubmit,
     getValues,
+    setValue,
     formState: { errors },
   } = useForm<SubmitProjectPayloadInput>({
     resolver: zodResolver(SubmitProjectPayloadSchema),
@@ -45,7 +45,6 @@ export default function AdminProjectNewPage() {
       title: '',
       summary: '',
       description: '',
-      autoPublish: false,
       members: [
         {
           name: user?.name ?? '',
@@ -61,6 +60,21 @@ export default function AdminProjectNewPage() {
     name: 'members',
   });
 
+  useEffect(() => {
+    if (!user || fields.length === 0) return;
+
+    const firstMember = getValues('members.0');
+    if (!firstMember?.name) {
+      setValue('members.0.name', user.name, { shouldValidate: true });
+    }
+    if (!firstMember?.studentId && user.studentId) {
+      setValue('members.0.studentId', user.studentId, { shouldValidate: true });
+    }
+    if (!firstMember?.userId) {
+      setValue('members.0.userId', user.id);
+    }
+  }, [fields.length, getValues, setValue, user]);
+
   const selectedExhibitionId = useWatch({ control, name: 'exhibitionId' });
   const selectedYearItem = years.find((y) => y.id === Number(selectedExhibitionId));
   const isUploadLocked = selectedYearItem != null && !selectedYearItem.isUploadEnabled && !isPrivileged;
@@ -72,7 +86,6 @@ export default function AdminProjectNewPage() {
   const [videoFiles, setVideoFiles] = useState<File[]>([]);
   const [posterPreview, setPosterPreview] = useState<string | null>(null);
   const [fileSizeError, setFileSizeError] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const posterPreviewRef = useRef<string | null>(null);
   const posterInputRef = useRef<HTMLInputElement>(null);
   const imagesInputRef = useRef<HTMLInputElement>(null);
@@ -204,9 +217,8 @@ export default function AdminProjectNewPage() {
 
   // ── 제출 ───────────────────────────────────────────────────
   const submitMutation = useMutation({
-    mutationFn: (formData: FormData) => adminProjectApi.submit(formData, setUploadProgress),
+    mutationFn: (formData: FormData) => adminProjectApi.submit(formData),
     onSuccess: (res) => {
-      setUploadProgress((prev) => prev ? { ...prev, percent: 100, loaded: prev.total } : prev);
       qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
       qc.invalidateQueries({ queryKey: queryKeys.publicYears });
       qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
@@ -217,9 +229,6 @@ export default function AdminProjectNewPage() {
       } else {
         navigate(`/admin/projects/${res.id}/edit`);
       }
-    },
-    onSettled: () => {
-      setUploadProgress(null);
     },
   });
 
@@ -235,7 +244,6 @@ export default function AdminProjectNewPage() {
       images: imageFiles.length > 0 ? imageFiles : undefined,
       videoFiles: videoFiles.length > 0 ? videoFiles : undefined,
     });
-    setUploadProgress({ loaded: 0, total: 0, percent: 0 });
     submitMutation.mutate(fd);
   };
 
@@ -246,19 +254,9 @@ export default function AdminProjectNewPage() {
 
   const isSubmitting = submitMutation.isPending;
   const showGameProgress = createdProjectId !== null;
-  const hasSubmitUploadFiles = posterFile !== null || imageFiles.length > 0 || videoFiles.length > 0;
 
   return (
     <div className="admin-project-new-page">
-      <UploadProgressModal
-        open={submitMutation.isPending && hasSubmitUploadFiles}
-        title="작품 파일 업로드"
-        percent={uploadProgress?.percent}
-        loadedBytes={uploadProgress?.loaded}
-        totalBytes={uploadProgress?.total}
-        status="파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요."
-      />
-
       <div className="admin-page-header">
         <div className="admin-page-header__text">
           <span className="admin-page-header__eyebrow">New Project</span>
@@ -331,12 +329,6 @@ export default function AdminProjectNewPage() {
             )}
           </div>
 
-          <div className="form-field form-field--checkbox">
-            <label>
-              <input type="checkbox" {...register('autoPublish')} />
-              즉시 공개
-            </label>
-          </div>
         </fieldset>
 
         {/* ── 참여 학생 ──────────────────────────────────────── */}

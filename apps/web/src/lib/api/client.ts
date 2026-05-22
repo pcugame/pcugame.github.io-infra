@@ -2,6 +2,8 @@
 // 모든 API 호출은 이 계층을 통과한다.
 
 import { env } from '../env';
+import { failUpload, finishUpload, startUpload, updateUpload } from '../upload';
+import type { UploadFormDataOptions } from '../upload';
 
 // ── 에러 타입 ────────────────────────────────────────────────
 
@@ -17,12 +19,6 @@ export class ApiError extends Error {
     this.statusText = statusText;
     this.body = body;
   }
-}
-
-export interface UploadProgress {
-	loaded: number;
-	total: number;
-	percent: number;
 }
 
 // ── 기본 fetch 래퍼 ──────────────────────────────────────────
@@ -112,13 +108,27 @@ export const api = {
 export function uploadFormData<T>(
 	path: string,
 	formData: FormData,
-	options: {
-		method?: 'POST' | 'PATCH' | 'PUT';
-		onProgress?: (progress: UploadProgress) => void;
-	} = {},
+	options: UploadFormDataOptions,
 ): Promise<T> {
+	const hasFiles = hasBinaryFormData(formData);
+	const taskId = hasFiles
+		? startUpload({
+			title: options.title,
+			phase: 'preparing',
+			processingMessage: options.processingMessage,
+		})
+		: null;
+
 	if (import.meta.env.VITE_MOCK === 'true') {
-		return request<T>(path, { method: options.method ?? 'POST', body: formData });
+		return request<T>(path, { method: options.method ?? 'POST', body: formData })
+			.then((result) => {
+				if (taskId) finishUpload(taskId);
+				return result;
+			})
+			.catch((err) => {
+				if (taskId) failUpload(taskId, getApiErrorMessage(err));
+				throw err;
+			});
 	}
 
 	return new Promise<T>((resolve, reject) => {
@@ -126,12 +136,26 @@ export function uploadFormData<T>(
 		xhr.open(options.method ?? 'POST', `${env.API_BASE_URL}${path}`);
 		xhr.withCredentials = true;
 
+		if (taskId) {
+			updateUpload(taskId, { phase: 'uploading' });
+		}
+
 		xhr.upload.onprogress = (event) => {
-			if (!options.onProgress || !event.lengthComputable) return;
-			options.onProgress({
-				loaded: event.loaded,
-				total: event.total,
-				percent: Math.min(99, Math.round((event.loaded / event.total) * 100)),
+			if (!taskId || !event.lengthComputable) return;
+			const percent = Math.min(99, Math.round((event.loaded / event.total) * 100));
+			updateUpload(taskId, {
+				phase: 'uploading',
+				loadedBytes: event.loaded,
+				totalBytes: event.total,
+				percent,
+			});
+		};
+
+		xhr.upload.onload = () => {
+			if (!taskId) return;
+			updateUpload(taskId, {
+				phase: 'processing',
+				percent: 99,
 			});
 		};
 
@@ -139,11 +163,13 @@ export function uploadFormData<T>(
 			if (xhr.status < 200 || xhr.status >= 300) {
 				let errorBody: unknown = xhr.responseText;
 				try { errorBody = JSON.parse(xhr.responseText); } catch { /* keep text */ }
+				if (taskId) failUpload(taskId, getApiErrorMessage(new ApiError(xhr.status, xhr.statusText, errorBody)));
 				reject(new ApiError(xhr.status, xhr.statusText, errorBody));
 				return;
 			}
 
 			if (xhr.status === 204) {
+				if (taskId) finishUpload(taskId);
 				resolve(undefined as T);
 				return;
 			}
@@ -152,6 +178,7 @@ export function uploadFormData<T>(
 			try {
 				json = JSON.parse(xhr.responseText);
 			} catch {
+				if (taskId) finishUpload(taskId);
 				resolve(xhr.responseText as T);
 				return;
 			}
@@ -163,17 +190,35 @@ export function uploadFormData<T>(
 				'data' in json &&
 				(json as Record<string, unknown>).ok === true
 			) {
+				if (taskId) finishUpload(taskId);
 				resolve((json as { data: T }).data);
 				return;
 			}
 
+			if (taskId) finishUpload(taskId);
 			resolve(json as T);
 		};
 
-		xhr.onerror = () => reject(new ApiError(0, 'Network Error', null));
-		xhr.onabort = () => reject(new ApiError(0, 'Upload aborted', null));
+		xhr.onerror = () => {
+			const err = new ApiError(0, 'Network Error', null);
+			if (taskId) failUpload(taskId, getApiErrorMessage(err));
+			reject(err);
+		};
+		xhr.onabort = () => {
+			const err = new ApiError(0, 'Upload aborted', null);
+			if (taskId) failUpload(taskId, getApiErrorMessage(err));
+			reject(err);
+		};
 		xhr.send(formData);
 	});
+}
+
+function hasBinaryFormData(formData: FormData): boolean {
+	if (typeof Blob === 'undefined') return false;
+	for (const value of formData.values()) {
+		if (value instanceof Blob) return true;
+	}
+	return false;
 }
 
 // ── 에러 판정 유틸 ───────────────────────────────────────────

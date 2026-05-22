@@ -5,7 +5,7 @@
 // ── Enums ────────────────────────────────────────────────────
 
 export type UserRole = 'USER' | 'OPERATOR' | 'ADMIN';
-export type ProjectStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+export type ProjectStatus = 'PUBLISHED' | 'ARCHIVED';
 export type AssetKind = 'THUMBNAIL' | 'IMAGE' | 'POSTER' | 'GAME' | 'VIDEO';
 export type AssetPlaybackStatus = 'PENDING' | 'READY' | 'FAILED';
 
@@ -209,14 +209,13 @@ export type SubmitProjectPayload = {
 	summary?: string;
 	description?: string;
 	members: { name: string; studentId: string; sortOrder?: number }[];
-	autoPublish?: boolean;
 };
 
 export type SubmitProjectResponse = {
 	id: number;
 	slug: string;
 	year: number;
-	status: 'DRAFT' | 'PUBLISHED';
+	status: 'PUBLISHED';
 	adminEditUrl: string;
 	publicUrl?: string;
 };

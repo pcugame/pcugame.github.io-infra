@@ -21,7 +21,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			const project = await loadProjectWithAccess(request, projectId, { requireDraft: true });
+			const project = await loadProjectWithAccess(request, projectId);
 			const user = request.currentUser!;
 			const result = await gameUploadService.createSession(
 				projectId,
