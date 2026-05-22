@@ -12,7 +12,7 @@ import type {
   UpdateMemberRequest,
   ExportStatusResponse,
 } from '../../contracts';
-import { api } from './client';
+import { api, uploadFormData, type UploadProgress } from './client';
 
 // ── Exhibition ──────────────────────────────────────────────
 
@@ -33,8 +33,10 @@ export const adminExhibitionApi = {
     return api.delete<void>(`/api/admin/exhibitions/${id}`);
   },
 
-  uploadPoster(id: number, formData: FormData) {
-    return api.post<AdminExhibitionItem>(`/api/admin/exhibitions/${id}/poster`, formData);
+  uploadPoster(id: number, formData: FormData, onProgress?: (progress: UploadProgress) => void) {
+    return uploadFormData<AdminExhibitionItem>(`/api/admin/exhibitions/${id}/poster`, formData, {
+      onProgress,
+    });
   },
 
   deletePoster(id: number) {
@@ -62,18 +64,20 @@ export const adminProjectApi = {
   },
 
   /** 작품 + 파일 일괄 등록 (multipart/form-data) */
-  submit(formData: FormData) {
-    return api.post<SubmitProjectResponse>(
+  submit(formData: FormData, onProgress?: (progress: UploadProgress) => void) {
+    return uploadFormData<SubmitProjectResponse>(
       '/api/admin/projects/submit',
       formData,
+      { onProgress },
     );
   },
 
   /** 기존 프로젝트에 자산 추가 */
-  addAsset(projectId: number, formData: FormData) {
-    return api.post<{ assetId: number; url: string }>(
+  addAsset(projectId: number, formData: FormData, onProgress?: (progress: UploadProgress) => void) {
+    return uploadFormData<{ assetId: number; url: string }>(
       `/api/admin/projects/${projectId}/assets`,
       formData,
+      { onProgress },
     );
   },
 
@@ -216,15 +220,15 @@ export const adminExportApi = {
 // ── Import ─────────────────────────────────────────────────
 
 export const adminImportApi = {
-  preview(file: File) {
+  preview(file: File, onProgress?: (progress: UploadProgress) => void) {
     const fd = new FormData();
     fd.append('file', file);
-    return api.post<ImportPreviewResult>('/api/admin/import/preview', fd);
+    return uploadFormData<ImportPreviewResult>('/api/admin/import/preview', fd, { onProgress });
   },
 
-  execute(file: File) {
+  execute(file: File, onProgress?: (progress: UploadProgress) => void) {
     const fd = new FormData();
     fd.append('file', file);
-    return api.post<ImportExecuteResult>('/api/admin/import/execute', fd);
+    return uploadFormData<ImportExecuteResult>('/api/admin/import/execute', fd, { onProgress });
   },
 };

@@ -15,6 +15,7 @@ import {
   adminMemberApi,
   adminAssetApi,
   getApiErrorMessage,
+  type UploadProgress,
 } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { buildAssetFormData } from '../../lib/utils';
@@ -23,6 +24,7 @@ import { useMe } from '../../features/auth';
 import { MemberRow } from '../../features/admin/projects/MemberRow';
 import { getClientUploadLimits } from '../../lib/upload-limits';
 import GameUploadWidget from '../../components/GameUploadWidget';
+import { UploadProgressModal } from '../../components/common';
 
 const STATUS_LABELS: Record<string, string> = {
   DRAFT: '초안',
@@ -127,10 +129,15 @@ export default function AdminProjectEditPage() {
 
   // ── 자산 추가/삭제 ────────────────────────────────────────
   const limits = getClientUploadLimits(user?.role ?? 'USER');
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const addAssetMutation = useMutation({
-    mutationFn: (fd: FormData) => adminProjectApi.addAsset(id, fd),
+    mutationFn: (fd: FormData) => adminProjectApi.addAsset(id, fd, setUploadProgress),
     onSuccess: () => {
+      setUploadProgress((prev) => prev ? { ...prev, percent: 100, loaded: prev.total } : prev);
       qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
+    },
+    onSettled: () => {
+      setUploadProgress(null);
     },
   });
 
@@ -152,6 +159,7 @@ export default function AdminProjectEditPage() {
 
   const handleAddAsset = (kind: string, file: File) => {
     const fd = buildAssetFormData(kind, file);
+    setUploadProgress({ loaded: 0, total: 0, percent: 0 });
     addAssetMutation.mutate(fd, {
       onSuccess: async (res) => {
         if (kind === 'POSTER') {
@@ -188,6 +196,15 @@ export default function AdminProjectEditPage() {
 
   return (
     <div className="admin-project-edit-page">
+      <UploadProgressModal
+        open={addAssetMutation.isPending}
+        title="자산 업로드"
+        percent={uploadProgress?.percent}
+        loadedBytes={uploadProgress?.loaded}
+        totalBytes={uploadProgress?.total}
+        status="파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요."
+      />
+
       <div className="admin-page-header">
         <div className="admin-page-header__text">
           <h1>

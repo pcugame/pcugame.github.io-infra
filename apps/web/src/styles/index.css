@@ -1277,6 +1277,69 @@ a:hover {
   min-height: 300px;
 }
 
+.upload-progress-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(6px);
+}
+
+.upload-progress-modal__panel {
+  width: min(420px, 100%);
+  padding: 1.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.24);
+}
+
+.upload-progress-modal__head,
+.upload-progress-modal__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.upload-progress-modal__head strong {
+  color: var(--color-text);
+  font-size: 1rem;
+}
+
+.upload-progress-modal__head span,
+.upload-progress-modal__meta,
+.upload-progress-modal__status {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.upload-progress-modal__bar-track {
+  position: relative;
+  height: 0.75rem;
+  margin: 1rem 0 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border) 70%, var(--color-surface));
+}
+
+.upload-progress-modal__bar-fill {
+  height: 100%;
+  min-width: 0.75rem;
+  border-radius: inherit;
+  background: var(--color-primary-btn, var(--color-primary));
+  transition: width 0.2s ease;
+}
+
+.upload-progress-modal__status {
+  margin: 0.9rem 0 0;
+  line-height: 1.5;
+}
+
 /* 상단 비주얼 — 고정 16:9 비율 */
 .modal-visual {
   border-radius: 16px 16px 0 0;

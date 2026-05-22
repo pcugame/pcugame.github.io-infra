@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -9,8 +9,10 @@ import {
 } from '../../../contracts/schemas';
 import type { AdminExhibitionItem } from '../../../contracts';
 import { adminExhibitionApi, getApiErrorMessage } from '../../../lib/api';
+import type { UploadProgress } from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
 import { buildExhibitionPosterFormData } from '../../../lib/utils/formData';
+import { UploadProgressModal } from '../../../components/common';
 
 type ExhibitionRowProps = {
 	year: AdminExhibitionItem;
@@ -289,6 +291,7 @@ function YearPosterControls({
 }) {
 	const qc = useQueryClient();
 	const inputRef = useRef<HTMLInputElement>(null);
+	const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
 	const invalidate = () => {
 		qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
@@ -300,9 +303,14 @@ function YearPosterControls({
 			adminExhibitionApi.uploadPoster(
 				year.id,
 				buildExhibitionPosterFormData(file),
+				setUploadProgress,
 			),
-		onSuccess: invalidate,
+		onSuccess: () => {
+			setUploadProgress((prev) => prev ? { ...prev, percent: 100, loaded: prev.total } : prev);
+			invalidate();
+		},
 		onSettled: () => {
+			setUploadProgress(null);
 			if (inputRef.current) inputRef.current.value = '';
 		},
 	});
@@ -315,6 +323,7 @@ function YearPosterControls({
 	const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
 		const file = event.currentTarget.files?.[0];
 		if (!file) return;
+		setUploadProgress({ loaded: 0, total: 0, percent: 0 });
 		uploadMutation.mutate(file);
 	};
 
@@ -330,6 +339,15 @@ function YearPosterControls({
 
 	return (
 		<div className={`admin-exhibition-poster${compact ? ' admin-exhibition-poster--compact' : ''}`}>
+			<UploadProgressModal
+				open={uploadMutation.isPending}
+				title="전시회 포스터 업로드"
+				percent={uploadProgress?.percent}
+				loadedBytes={uploadProgress?.loaded}
+				totalBytes={uploadProgress?.total}
+				status="포스터 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요."
+			/>
+
 			<div className="admin-exhibition-poster__preview">
 				{year.posterUrl ? (
 					<img src={year.posterUrl} alt={`${year.title || year.year} 전시회 포스터`} />

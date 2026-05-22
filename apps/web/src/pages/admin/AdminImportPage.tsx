@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { adminImportApi, getApiErrorMessage } from '../../lib/api';
+import { adminImportApi, getApiErrorMessage, type UploadProgress } from '../../lib/api';
 import type { ImportPreviewResult, ImportExecuteResult } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
+import { UploadProgressModal } from '../../components/common';
 
 type Step = 'select' | 'preview' | 'confirm' | 'done';
 
@@ -13,23 +14,28 @@ export default function AdminImportPage() {
 	const [step, setStep] = useState<Step>('select');
 	const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
 	const [result, setResult] = useState<ImportExecuteResult | null>(null);
+	const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
 	const previewMutation = useMutation({
-		mutationFn: (f: File) => adminImportApi.preview(f),
+		mutationFn: (f: File) => adminImportApi.preview(f, setUploadProgress),
 		onSuccess: (data) => {
+			setUploadProgress((prev) => prev ? { ...prev, percent: 100, loaded: prev.total } : prev);
 			setPreview(data);
 			setStep(data.valid ? 'preview' : 'select');
 		},
+		onSettled: () => setUploadProgress(null),
 	});
 
 	const executeMutation = useMutation({
-		mutationFn: (f: File) => adminImportApi.execute(f),
+		mutationFn: (f: File) => adminImportApi.execute(f, setUploadProgress),
 		onSuccess: (data) => {
+			setUploadProgress((prev) => prev ? { ...prev, percent: 100, loaded: prev.total } : prev);
 			setResult(data);
 			setStep('done');
 			qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
 			qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 		},
+		onSettled: () => setUploadProgress(null),
 	});
 
 	const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,6 +55,7 @@ export default function AdminImportPage() {
 		setStep('select');
 		setPreview(null);
 		setResult(null);
+		setUploadProgress({ loaded: 0, total: 0, percent: 0 });
 		previewMutation.mutate(f);
 	}, [previewMutation]);
 
@@ -70,6 +77,7 @@ export default function AdminImportPage() {
 		setStep('select');
 		setPreview(null);
 		setResult(null);
+		setUploadProgress({ loaded: 0, total: 0, percent: 0 });
 		previewMutation.mutate(f);
 	}, [previewMutation]);
 
@@ -87,6 +95,7 @@ export default function AdminImportPage() {
 			if (!ok) return;
 		}
 
+		setUploadProgress({ loaded: 0, total: 0, percent: 0 });
 		executeMutation.mutate(file);
 	};
 
@@ -100,6 +109,15 @@ export default function AdminImportPage() {
 
 	return (
 		<div className="admin-import-page">
+			<UploadProgressModal
+				open={previewMutation.isPending || executeMutation.isPending}
+				title={executeMutation.isPending ? 'JSON 임포트 실행' : 'JSON 파일 업로드'}
+				percent={uploadProgress?.percent}
+				loadedBytes={uploadProgress?.loaded}
+				totalBytes={uploadProgress?.total}
+				status="파일 처리 중에는 이 창을 닫거나 새로고침하지 마세요."
+			/>
+
 			<div className="admin-page-header">
 				<div className="admin-page-header__text">
 					<span className="admin-page-header__eyebrow">Data Import</span>

@@ -19,6 +19,12 @@ export class ApiError extends Error {
   }
 }
 
+export interface UploadProgress {
+	loaded: number;
+	total: number;
+	percent: number;
+}
+
 // ── 기본 fetch 래퍼 ──────────────────────────────────────────
 
 type RequestOptions = Omit<RequestInit, 'body'> & {
@@ -102,6 +108,73 @@ export const api = {
     return request<T>(path, { ...opts, method: 'DELETE' });
   },
 };
+
+export function uploadFormData<T>(
+	path: string,
+	formData: FormData,
+	options: {
+		method?: 'POST' | 'PATCH' | 'PUT';
+		onProgress?: (progress: UploadProgress) => void;
+	} = {},
+): Promise<T> {
+	if (import.meta.env.VITE_MOCK === 'true') {
+		return request<T>(path, { method: options.method ?? 'POST', body: formData });
+	}
+
+	return new Promise<T>((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open(options.method ?? 'POST', `${env.API_BASE_URL}${path}`);
+		xhr.withCredentials = true;
+
+		xhr.upload.onprogress = (event) => {
+			if (!options.onProgress || !event.lengthComputable) return;
+			options.onProgress({
+				loaded: event.loaded,
+				total: event.total,
+				percent: Math.min(99, Math.round((event.loaded / event.total) * 100)),
+			});
+		};
+
+		xhr.onload = () => {
+			if (xhr.status < 200 || xhr.status >= 300) {
+				let errorBody: unknown = xhr.responseText;
+				try { errorBody = JSON.parse(xhr.responseText); } catch { /* keep text */ }
+				reject(new ApiError(xhr.status, xhr.statusText, errorBody));
+				return;
+			}
+
+			if (xhr.status === 204) {
+				resolve(undefined as T);
+				return;
+			}
+
+			let json: unknown;
+			try {
+				json = JSON.parse(xhr.responseText);
+			} catch {
+				resolve(xhr.responseText as T);
+				return;
+			}
+
+			if (
+				typeof json === 'object' &&
+				json !== null &&
+				'ok' in json &&
+				'data' in json &&
+				(json as Record<string, unknown>).ok === true
+			) {
+				resolve((json as { data: T }).data);
+				return;
+			}
+
+			resolve(json as T);
+		};
+
+		xhr.onerror = () => reject(new ApiError(0, 'Network Error', null));
+		xhr.onabort = () => reject(new ApiError(0, 'Upload aborted', null));
+		xhr.send(formData);
+	});
+}
 
 // ── 에러 판정 유틸 ───────────────────────────────────────────
 
