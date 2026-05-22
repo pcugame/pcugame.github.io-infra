@@ -69,7 +69,7 @@ export default function AdminProjectNewPage() {
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [gameFile, setGameFile] = useState<File | null>(null);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoFiles, setVideoFiles] = useState<File[]>([]);
   const [posterPreview, setPosterPreview] = useState<string | null>(null);
   const [fileSizeError, setFileSizeError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
@@ -100,7 +100,7 @@ export default function AdminProjectNewPage() {
   };
 
   const clearVideo = () => {
-    setVideoFile(null);
+    setVideoFiles([]);
     if (videoInputRef.current) videoInputRef.current.value = '';
   };
 
@@ -188,13 +188,18 @@ export default function AdminProjectNewPage() {
   };
 
   const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
-    if (file && !checkFileSize(file, limits.videoMaxMb, '동영상')) {
-      setVideoFile(null);
+    const files = Array.from(e.target.files ?? []);
+    const oversized = files.find((file) => file.size > limits.videoMaxMb * 1024 * 1024);
+    if (oversized) {
+      setFileSizeError(`동영상 "${oversized.name}": ${(oversized.size / 1024 / 1024).toFixed(1)}MB — 최대 ${limits.videoMaxMb}MB까지 허용됩니다.`);
       e.target.value = '';
       return;
     }
-    setVideoFile(file);
+    setFileSizeError(null);
+    if (files.length > 0) {
+      setVideoFiles((prev) => [...prev, ...files]);
+    }
+    e.target.value = '';
   };
 
   // ── 제출 ───────────────────────────────────────────────────
@@ -228,7 +233,7 @@ export default function AdminProjectNewPage() {
     const fd = buildSubmitFormData(data, {
       poster: posterFile ?? undefined,
       images: imageFiles.length > 0 ? imageFiles : undefined,
-      videoFile: videoFile ?? undefined,
+      videoFiles: videoFiles.length > 0 ? videoFiles : undefined,
     });
     setUploadProgress({ loaded: 0, total: 0, percent: 0 });
     submitMutation.mutate(fd);
@@ -241,7 +246,7 @@ export default function AdminProjectNewPage() {
 
   const isSubmitting = submitMutation.isPending;
   const showGameProgress = createdProjectId !== null;
-  const hasSubmitUploadFiles = posterFile !== null || imageFiles.length > 0 || videoFile !== null;
+  const hasSubmitUploadFiles = posterFile !== null || imageFiles.length > 0 || videoFiles.length > 0;
 
   return (
     <div className="admin-project-new-page">
@@ -436,6 +441,32 @@ export default function AdminProjectNewPage() {
           </div>
 
           <div className="form-field">
+            <label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 최대 {limits.videoMaxMb}MB)</label>
+            <input
+              id="videoFile"
+              type="file"
+              accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
+              multiple
+              ref={videoInputRef}
+              onChange={handleVideoChange}
+            />
+            {videoFiles.length > 0 && (
+              <div className="file-selected-row">
+                <p className="file-info">
+                  {videoFiles.length}개 파일 선택됨: {videoFiles.map((file) => file.name).join(', ')}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn--danger btn--small"
+                  onClick={clearVideo}
+                >
+                  제거
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="form-field">
             <label htmlFor="images">추가 이미지 (JPG · PNG · WebP 각 최대 {limits.imageMaxMb}MB / PDF 최대 {limits.imagePdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환, 복수 선택)</label>
             <input
               id="images"
@@ -452,31 +483,6 @@ export default function AdminProjectNewPage() {
                   type="button"
                   className="btn btn--danger btn--small"
                   onClick={clearImages}
-                >
-                  제거
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="form-field">
-            <label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 최대 {limits.videoMaxMb}MB)</label>
-            <input
-              id="videoFile"
-              type="file"
-              accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
-              ref={videoInputRef}
-              onChange={handleVideoChange}
-            />
-            {videoFile && (
-              <div className="file-selected-row">
-                <p className="file-info">
-                  {videoFile.name} ({(videoFile.size / 1024 / 1024).toFixed(1)}MB)
-                </p>
-                <button
-                  type="button"
-                  className="btn btn--danger btn--small"
-                  onClick={clearVideo}
                 >
                   제거
                 </button>
@@ -553,7 +559,7 @@ export default function AdminProjectNewPage() {
           }}
           poster={posterFile}
           images={imageFiles}
-          video={videoFile}
+          videos={videoFiles}
           game={gameFile}
           exhibitionLabel={selectedYearItem ? `${selectedYearItem.year}년 전시` : undefined}
           onClose={closePreview}

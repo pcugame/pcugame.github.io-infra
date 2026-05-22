@@ -53,16 +53,16 @@ export function serializeProjectDetail(project: {
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
 	assets: SerializableAsset[];
 }): AdminProjectDetail {
-	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
-	const video = videoAsset
-		? {
+	const videos = project.assets
+		.filter((a) => a.kind === 'VIDEO')
+		.map((videoAsset) => ({
 			url: assetUrl(playbackKeyFor(videoAsset), 'VIDEO'),
 			mimeType: playbackMimeFor(videoAsset),
 			originalDownloadUrl: assetUrl(videoAsset.storageKey, 'VIDEO'),
 			playbackStatus: videoAsset.playbackStatus,
 			playbackError: videoAsset.playbackError || undefined,
-		}
-		: null;
+		}));
+	const video = videos[0] ?? null;
 
 	return {
 		id: project.id,
@@ -73,6 +73,7 @@ export function serializeProjectDetail(project: {
 		description: project.description || undefined,
 		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, project.poster),
 		video,
+		videos,
 		status: project.status,
 		sortOrder: project.sortOrder,
 		posterAssetId: project.posterAssetId ?? undefined,

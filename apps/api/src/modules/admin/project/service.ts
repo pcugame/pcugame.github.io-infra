@@ -38,6 +38,10 @@ async function deleteAssetObjects(asset: { id: number; projectId?: number; kind:
 	}
 }
 
+export function isReplaceableAssetKind(kind: AssetKind): boolean {
+	return kind === 'GAME';
+}
+
 // ── Business logic ──────────────────────────────────────────
 
 /** List projects visible to the current user */
@@ -364,10 +368,10 @@ export async function addAssetToProject(
 
 		const savedFile = await pipeline.processFile(fileTmpPath, kind, fileOriginalName);
 
-		// Replace existing GAME or VIDEO asset if uploading a new one. Other kinds always create.
+		// Replace existing GAME asset if uploading a new one. Other kinds, including VIDEO, always create.
 		// DB write goes first — deletes of the prior S3 object happen only after commit so a mid-
 		// flight failure can't leave the project pointing at a storageKey we already deleted.
-		const isReplaceable = savedFile.kind === 'GAME' || savedFile.kind === 'VIDEO';
+		const isReplaceable = isReplaceableAssetKind(savedFile.kind);
 		let assetId: number;
 		let oldStorageKey: string | null = null;
 		let oldPlaybackStorageKey: string | null = null;
@@ -401,7 +405,7 @@ export async function addAssetToProject(
 				playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
 				playbackStatus: savedFile.playbackStatus,
 				playbackError: savedFile.playbackError,
-				isPublic: true,
+				isPublic: savedFile.kind !== 'VIDEO',
 			});
 			assetId = asset.id;
 		}

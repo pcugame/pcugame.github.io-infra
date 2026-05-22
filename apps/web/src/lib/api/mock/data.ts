@@ -313,6 +313,7 @@ function buildDetail(card: MockProjectCard, year: number): any {
 		description: `${card.title}은(는) 배재대학교 게임공학과 ${year}년 졸업작품으로 제작된 프로젝트입니다.\n\n${card.summary ?? ''}\n\nPC 플랫폼 대상으로 개발되었습니다.`,
 		isIncomplete: year <= 2024,
 		video: null,
+		videos: [],
 		members: card.members.map((m, i) => ({ id: card.id * 100 + i, name: m.name, studentId: m.studentId })),
 		images: [
 			{ id: card.id * 100 + 50, url: card.posterUrl ?? `https://placehold.co/800x1120/333/eee?text=${encodeURIComponent(card.title)}`, kind: 'POSTER' },
@@ -393,7 +394,7 @@ export function buildAdminProjectDetail(id: string | number): any | undefined {
 	return {
 		id: detail.id, title: detail.title, slug: detail.slug, year: detail.year,
 		summary: detail.summary, description: detail.description,
-		isIncomplete: detail.isIncomplete, video: detail.video,
+		isIncomplete: detail.isIncomplete, video: detail.video, videos: detail.videos,
 		status: 'PUBLISHED', sortOrder: 0,
 		posterAssetId: detail.images[0]?.id, posterUrl: detail.posterUrl,
 		members: detail.members.map((m: { id: number; name: string; studentId: string }, i: number) => ({ ...m, sortOrder: i, userId: null })),

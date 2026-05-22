@@ -143,15 +143,15 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 	const gameAssets = project.assets.filter((a) => a.kind === 'GAME');
 	const gameAsset = gameAssets.length > 0 ? gameAssets[gameAssets.length - 1] : undefined;
 
-	const videoAsset = project.assets.find((a) => a.kind === 'VIDEO');
-	const video = videoAsset
-		? {
+	const videos = project.assets
+		.filter((a) => a.kind === 'VIDEO')
+		.map((videoAsset) => ({
 			url: protectedAssetUrl(videoAsset.playbackStorageKey ?? videoAsset.storageKey),
 			mimeType: videoAsset.playbackStorageKey
 				? videoAsset.playbackMimeType || 'video/mp4'
 				: videoAsset.mimeType || 'video/mp4',
-		}
-		: null;
+		}));
+	const video = videos[0] ?? null;
 
 	return {
 		id: project.id,
@@ -162,6 +162,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 		description: project.description || undefined,
 		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, project.poster),
 		video,
+		videos,
 		members: project.members.map((m) => ({
 			id: m.id,
 			name: m.name,

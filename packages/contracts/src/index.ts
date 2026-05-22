@@ -115,6 +115,7 @@ export type PublicProjectDetailResponse = {
 	description?: string;
 	isIncomplete: boolean;
 	video: ProjectVideo | null;
+	videos: ProjectVideo[];
 	members: PublicProjectMember[];
 	images: PublicProjectImage[];
 	posterUrl?: string;
@@ -181,6 +182,7 @@ export type AdminProjectDetail = {
 	description?: string;
 	isIncomplete: boolean;
 	video: ProjectVideo | null;
+	videos: ProjectVideo[];
 	status: ProjectStatus;
 	sortOrder: number;
 	posterAssetId?: number;

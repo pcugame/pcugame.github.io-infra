@@ -131,4 +131,51 @@ describe('public exhibition years', () => {
 			status: 'ARCHIVED',
 		});
 	});
+
+	it('returns multiple public videos in asset order and keeps video as first item', async () => {
+		mocks.findPublishedProjectById.mockResolvedValue({
+			id: 10,
+			slug: 'multi-video-game',
+			title: 'Multi Video Game',
+			summary: '',
+			description: '',
+			isIncomplete: false,
+			status: 'PUBLISHED',
+			exhibition: { year: 2026 },
+			members: [],
+			assets: [
+				{
+					id: 1,
+					kind: 'VIDEO',
+					storageKey: 'first.mov',
+					playbackStorageKey: 'first.mp4',
+					mimeType: 'video/quicktime',
+					playbackMimeType: 'video/mp4',
+				},
+				{
+					id: 2,
+					kind: 'VIDEO',
+					storageKey: 'second.mp4',
+					playbackStorageKey: null,
+					mimeType: 'video/mp4',
+					playbackMimeType: '',
+				},
+			],
+			poster: null,
+		});
+
+		const result = await getProjectDetail('10');
+
+		expect(result.video).toBe(result.videos[0]);
+		expect(result.videos).toEqual([
+			{
+				url: 'https://api.example.com/api/assets/protected/first.mp4',
+				mimeType: 'video/mp4',
+			},
+			{
+				url: 'https://api.example.com/api/assets/protected/second.mp4',
+				mimeType: 'video/mp4',
+			},
+		]);
+	});
 });

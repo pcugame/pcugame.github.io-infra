@@ -161,10 +161,10 @@ model Asset {
   posterOf     Project? @relation("ProjectPoster")
 
   @@index([projectId, kind, status])
-  // Partial unique index `asset_project_replaceable_ready_unique` on (project_id, kind)
-  // WHERE status = 'READY' AND kind IN ('GAME','VIDEO') is applied via raw SQL in
-  // `migrations/20260421_asset_ready_unique_per_kind/` — Prisma can't express partial-unique
-  // in the DSL. IMAGE etc. are intentionally excluded (gallery may hold many).
+  // Partial unique index `asset_project_game_ready_unique` on (project_id, kind)
+  // WHERE status = 'READY' AND kind = 'GAME' is applied via raw SQL in
+  // `migrations/20260523_allow_multiple_videos/` — Prisma can't express partial-unique
+  // in the DSL. VIDEO/IMAGE etc. are intentionally excluded (projects may hold many).
   @@map("assets")
 }
 

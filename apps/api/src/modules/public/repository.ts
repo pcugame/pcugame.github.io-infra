@@ -46,7 +46,7 @@ export function findExhibitionPosterByStorageKey(storageKey: string) {
 const projectDetailInclude = {
 	exhibition: true,
 	members: { orderBy: { sortOrder: 'asc' as const } },
-	assets: { where: { status: 'READY' as const } },
+	assets: { where: { status: 'READY' as const }, orderBy: { createdAt: 'asc' as const } },
 	poster: true,
 } as const;
 

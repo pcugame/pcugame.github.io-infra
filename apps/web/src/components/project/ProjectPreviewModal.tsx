@@ -16,7 +16,7 @@ interface Props {
 	values: PreviewValues;
 	poster: File | null;
 	images: File[];
-	video: File | null;
+	videos: File[];
 	game: File | null;
 	exhibitionLabel?: string;
 	onClose: () => void;
@@ -40,7 +40,7 @@ export function ProjectPreviewModal({
 	values,
 	poster,
 	images,
-	video,
+	videos,
 	game,
 	exhibitionLabel,
 	onClose,
@@ -59,9 +59,9 @@ export function ProjectPreviewModal({
 				items.push({ kind: 'poster-img', url: URL.createObjectURL(poster), label: '포스터' });
 			}
 		}
-		if (video) {
-			items.push({ kind: 'video-mock', name: video.name, label: '동영상' });
-		}
+		videos.forEach((video, i) => {
+			items.push({ kind: 'video-mock', name: video.name, label: `동영상${i + 1}` });
+		});
 		images.forEach((f, i) => {
 			if (isPdfFile(f)) {
 				items.push({ kind: 'image-pdf', name: f.name, label: `사진 ${i + 1}(PDF)` });

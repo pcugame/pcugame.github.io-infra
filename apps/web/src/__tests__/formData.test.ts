@@ -50,9 +50,10 @@ describe('buildSubmitFormData', () => {
 		expect(fd.get('gameFile')).not.toBeNull();
 	});
 
-	it('appends videoFile when provided', () => {
-		const fd = buildSubmitFormData(fakePayload(), { videoFile: fakeFile('demo.mp4') });
-		expect(fd.get('videoFile')).not.toBeNull();
+	it('appends multiple videoFiles as repeated videoFile fields', () => {
+		const videos = [fakeFile('demo-1.mp4'), fakeFile('demo-2.mp4')];
+		const fd = buildSubmitFormData(fakePayload(), { videoFiles: videos });
+		expect(fd.getAll('videoFile')).toHaveLength(2);
 	});
 
 	it('contains only payload when no files provided', () => {

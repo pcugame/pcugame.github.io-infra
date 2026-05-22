@@ -130,6 +130,7 @@ export default function AdminProjectEditPage() {
   // ── 자산 추가/삭제 ────────────────────────────────────────
   const limits = getClientUploadLimits(user?.role ?? 'USER');
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [assetFileError, setAssetFileError] = useState<string | null>(null);
   const addAssetMutation = useMutation({
     mutationFn: (fd: FormData) => adminProjectApi.addAsset(id, fd, setUploadProgress),
     onSuccess: () => {
@@ -157,20 +158,43 @@ export default function AdminProjectEditPage() {
     },
   });
 
-  const handleAddAsset = (kind: string, file: File) => {
+  const handleAddAsset = async (kind: string, file: File) => {
     const fd = buildAssetFormData(kind, file);
     setUploadProgress({ loaded: 0, total: 0, percent: 0 });
-    addAssetMutation.mutate(fd, {
-      onSuccess: async (res) => {
-        if (kind === 'POSTER') {
-          try {
-            await setPosterMutation.mutateAsync(res.assetId);
-          } catch {
-            // setPoster 실패는 기존 에러 표시 체계를 따름
-          }
-        }
-      },
+    const res = await addAssetMutation.mutateAsync(fd);
+    if (kind === 'POSTER') {
+      try {
+        await setPosterMutation.mutateAsync(res.assetId);
+      } catch {
+        // setPoster 실패는 기존 에러 표시 체계를 따름
+      }
+    }
+  };
+
+  const handleAddAssetFiles = async (kind: string, files: File[]) => {
+    const oversized = files.find((file) => {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const maxMb = kind === 'VIDEO'
+        ? limits.videoMaxMb
+        : kind === 'POSTER'
+          ? (isPdf ? limits.posterPdfMaxMb : limits.posterMaxMb)
+          : (isPdf ? limits.imagePdfMaxMb : limits.imageMaxMb);
+      return file.size > maxMb * 1024 * 1024;
     });
+    if (oversized) {
+      const isPdf = oversized.type === 'application/pdf' || oversized.name.toLowerCase().endsWith('.pdf');
+      const maxMb = kind === 'VIDEO'
+        ? limits.videoMaxMb
+        : kind === 'POSTER'
+          ? (isPdf ? limits.posterPdfMaxMb : limits.posterMaxMb)
+          : (isPdf ? limits.imagePdfMaxMb : limits.imageMaxMb);
+      setAssetFileError(`${oversized.name}: ${(oversized.size / 1024 / 1024).toFixed(1)}MB — 최대 ${maxMb}MB까지 허용됩니다.`);
+      return;
+    }
+    setAssetFileError(null);
+    for (const file of files) {
+      await handleAddAsset(kind, file);
+    }
   };
 
   // ── 상태 토글 (publish/archive) ───────────────────────────
@@ -464,25 +488,31 @@ export default function AdminProjectEditPage() {
             <div className="asset-upload-section">
               <h4>자산 추가</h4>
               {([
-                { label: `이미지 추가 (JPG · PNG · WebP 최대 ${limits.imageMaxMb}MB / PDF 최대 ${limits.imagePdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환)`, kind: 'IMAGE', accept: 'image/jpeg,image/png,image/webp,application/pdf,.pdf' },
                 { label: `포스터 교체 (JPG · PNG · WebP 최대 ${limits.posterMaxMb}MB / PDF 최대 ${limits.posterPdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환)`, kind: 'POSTER', accept: 'image/jpeg,image/png,image/webp,application/pdf,.pdf' },
                 { label: `동영상 업로드 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 최대 ${limits.videoMaxMb}MB)`, kind: 'VIDEO', accept: 'video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv' },
+                { label: `이미지 추가 (JPG · PNG · WebP 최대 ${limits.imageMaxMb}MB / PDF 최대 ${limits.imagePdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환)`, kind: 'IMAGE', accept: 'image/jpeg,image/png,image/webp,application/pdf,.pdf' },
               ] as const).map(({ label, kind, accept }) => (
                 <div key={kind} className="form-field">
                   <label>{label}</label>
                   <input
                     type="file"
                     accept={accept}
+                    multiple={kind === 'VIDEO'}
                     onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleAddAsset(kind, f);
+                      const files = Array.from(e.target.files ?? []);
                       e.target.value = '';
+                      if (files.length > 0) {
+                        void handleAddAssetFiles(kind, kind === 'VIDEO' ? files : files.slice(0, 1)).catch(() => {});
+                      }
                     }}
                   />
                 </div>
               ))}
               {addAssetMutation.error && (
                 <p className="field-error">{getApiErrorMessage(addAssetMutation.error)}</p>
+              )}
+              {assetFileError && (
+                <p className="field-error">{assetFileError}</p>
               )}
             </div>
 

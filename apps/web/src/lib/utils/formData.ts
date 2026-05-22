@@ -7,7 +7,7 @@ export interface SubmitProjectFiles {
   poster?: File;
   images?: File[];
   gameFile?: File;
-  videoFile?: File;
+  videoFiles?: File[];
 }
 
 /**
@@ -17,6 +17,7 @@ export interface SubmitProjectFiles {
  * - `poster` 필드: 단일 파일
  * - `images[]` 필드: 복수 파일
  * - `gameFile` 필드: 단일 파일
+ * - `videoFile` 필드: 복수 파일 반복 append
  */
 export function buildSubmitFormData(
   payload: SubmitProjectPayloadInput,
@@ -45,8 +46,10 @@ export function buildSubmitFormData(
   }
 
   // 동영상 파일
-  if (files.videoFile) {
-    fd.append('videoFile', files.videoFile);
+  if (files.videoFiles) {
+    for (const video of files.videoFiles) {
+      fd.append('videoFile', video);
+    }
   }
 
   return fd;

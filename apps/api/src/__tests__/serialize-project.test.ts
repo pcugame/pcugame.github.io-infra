@@ -30,7 +30,7 @@ vi.mock('../../assets/upload/index.js', () => ({
 
 vi.mock('./repository.js', () => ({}));
 
-import { assetUrl, serializeProjectDetail } from '../modules/admin/project/service.js';
+import { assetUrl, isReplaceableAssetKind, serializeProjectDetail } from '../modules/admin/project/service.js';
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -106,6 +106,13 @@ describe('assetUrl', () => {
 	});
 });
 
+describe('asset replacement policy', () => {
+	it('keeps GAME replaceable and lets VIDEO create additional assets', () => {
+		expect(isReplaceableAssetKind('GAME')).toBe(true);
+		expect(isReplaceableAssetKind('VIDEO')).toBe(false);
+	});
+});
+
 // ── serializeProjectDetail ──────────────────────────────────
 
 describe('serializeProjectDetail', () => {
@@ -166,6 +173,7 @@ describe('serializeProjectDetail', () => {
 	it('returns video as null when no VIDEO asset exists', () => {
 		const result = serializeProjectDetail(fakeProject({ assets: [] }));
 		expect(result.video).toBeNull();
+		expect(result.videos).toEqual([]);
 	});
 
 	it('returns video object when VIDEO asset exists', () => {
@@ -187,6 +195,40 @@ describe('serializeProjectDetail', () => {
 			playbackStatus: 'READY',
 			playbackError: undefined,
 		});
+		expect(result.videos).toHaveLength(1);
+	});
+
+	it('returns videos in asset order and preserves video as the first item', () => {
+		const result = serializeProjectDetail(fakeProject({
+			assets: [
+				fakeAsset({
+					id: 2,
+					kind: 'VIDEO',
+					storageKey: 'first.mp4',
+					originalName: 'first.mp4',
+					mimeType: 'video/mp4',
+					sizeBytes: 2n,
+					playbackStatus: 'READY',
+				}),
+				fakeAsset({
+					id: 3,
+					kind: 'VIDEO',
+					storageKey: 'second.mov',
+					playbackStorageKey: 'second-playback.mp4',
+					originalName: 'second.mov',
+					mimeType: 'video/quicktime',
+					playbackMimeType: 'video/mp4',
+					sizeBytes: 3n,
+					playbackStatus: 'READY',
+				}),
+			],
+		}));
+
+		expect(result.video).toBe(result.videos[0]);
+		expect(result.videos.map((v) => v.url)).toEqual([
+			'https://api.example.com/api/assets/protected/first.mp4',
+			'https://api.example.com/api/assets/protected/second-playback.mp4',
+		]);
 	});
 
 	it('returns playback URL for admin video preview when playback file exists', () => {

@@ -55,6 +55,11 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 	// 미디어 목록 구성: 포스터 > 동영상 > 사진
 	const mediaItems: MediaItem[] = [];
+	const projectVideos = project?.videos?.length
+		? project.videos
+		: project?.video
+			? [project.video]
+			: [];
 	if (project) {
 		if (project.posterUrl) {
 			mediaItems.push({
@@ -63,14 +68,14 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 				label: '포스터',
 			});
 		}
-		if (project.video) {
+		projectVideos.forEach((video, i) => {
 			mediaItems.push({
 				type: 'video',
-				url: project.video.url,
-				mimeType: project.video.mimeType,
-				label: '동영상',
+				url: video.url,
+				mimeType: video.mimeType,
+				label: `동영상${i + 1}`,
 			});
-		}
+		});
 		const galleryImages = project.images.filter((img) => img.kind === 'IMAGE');
 		galleryImages.forEach((img, i) => {
 			mediaItems.push({
@@ -151,7 +156,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 							<div className="modal-media-tabs">
 								{mediaItems.map((item, i) => (
 									<button
-										key={item.type === 'image' ? `img-${item.id}` : item.type}
+										key={item.type === 'image' ? `img-${item.id}` : `${item.type}-${i}`}
 										className={`modal-media-tab ${i === activeIndex ? 'modal-media-tab--active' : ''}`}
 										onClick={() => setActiveIndex(i)}
 									>
@@ -187,14 +192,14 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 							</h1>
 
 							{/* 에셋 유실 안내 */}
-							{project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && !project.video && project.images.length === 0 && (
+							{project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && projectVideos.length === 0 && project.images.length === 0 && (
 								<p className="incomplete-notice incomplete-notice--missing">
 									이 프로젝트의 파일이 유실되었습니다.
 								</p>
 							)}
 
 							{/* 불완전 안내 */}
-							{project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || project.video || project.images.length > 0) && (
+							{project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || projectVideos.length > 0 || project.images.length > 0) && (
 								<p className="incomplete-notice">
 									일부 자료가 누락되었을 수 있습니다.
 								</p>
