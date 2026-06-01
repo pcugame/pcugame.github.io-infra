@@ -13,6 +13,271 @@
 
 문제가 생겼을 때는 먼저 API health를 확인합니다. `health`가 정상이면 웹 배포, 로그인, 권한, 파일 저장소 문제를 차례로 좁혀 봅니다. `health/deep`은 DB뿐 아니라 S3/NAS 계층까지 확인하므로 파일 업로드/이미지 문제를 볼 때 유용합니다.
 
+## 용어 먼저 이해하기
+
+이 프로젝트 문서에는 웹 개발, 서버 운영, 배포 자동화 용어가 섞여 있습니다. Unity로 게임을 만들어 본 경험만 있어도 이해할 수 있도록, 자주 나오는 단어를 “사전적 설명”과 “쉬운 설명”으로 나눠 적었습니다.
+
+### Web, Frontend
+
+- 사전적 설명: 사용자의 브라우저에서 실행되는 화면과 화면 동작을 말합니다. HTML, CSS, JavaScript/TypeScript, React 같은 기술로 구성됩니다.
+- 쉬운 설명: Unity 게임에서 플레이어가 직접 보는 UI, 버튼, 메뉴, 화면 전환에 해당합니다. 이 프로젝트에서는 학생과 방문자가 보는 작품 목록, 작품 상세, 로그인 화면, 관리자 화면이 모두 Web입니다.
+- 이 저장소에서는 `apps/web` 폴더가 Web입니다.
+
+### API, Backend
+
+- 사전적 설명: Web이 필요한 데이터를 요청하거나 작업을 실행할 수 있도록 서버가 제공하는 기능 입구입니다. Backend는 이런 API와 서버 내부 로직 전체를 뜻합니다.
+- 쉬운 설명: Unity 게임이 저장/불러오기, 랭킹 서버, 로그인 서버에 요청을 보내는 것과 비슷합니다. 화면은 Web이 보여주지만, “작품 목록 주세요”, “로그인 처리해 주세요”, “파일 업로드할게요” 같은 실제 처리는 API가 담당합니다.
+- 이 저장소에서는 `apps/api` 폴더가 API/Backend입니다.
+
+### Server
+
+- 사전적 설명: 네트워크를 통해 다른 컴퓨터나 브라우저에 서비스를 제공하는 컴퓨터 또는 프로그램입니다.
+- 쉬운 설명: 우리 웹사이트의 실제 일을 대신 해주는 상시 켜진 컴퓨터입니다. 방문자의 브라우저는 이 서버에 “작품 데이터 주세요”라고 요청하고, 서버는 DB와 파일 저장소를 확인해 답합니다.
+- 현재 운영 서버에는 API, PostgreSQL DB, nginx, Podman runtime이 있습니다.
+
+### URL, Route, Endpoint
+
+- 사전적 설명: URL은 웹 주소 전체이고, route는 앱 안에서 특정 화면이나 기능으로 가는 경로이며, endpoint는 API가 요청을 받는 구체적인 주소입니다.
+- 쉬운 설명: Unity 씬 이름이나 메뉴 버튼 목적지처럼 “어디로 갈지”를 나타냅니다. `https://pcugame.github.io`는 사이트 주소이고, `/admin/projects`는 관리자 작품 목록 화면이며, `/api/health`는 API 상태 확인 기능입니다.
+- 예: `https://203.250.133.230/api/health`는 API 서버의 health endpoint입니다.
+
+### HTTP, HTTPS
+
+- 사전적 설명: HTTP는 브라우저와 서버가 데이터를 주고받는 통신 규칙입니다. HTTPS는 HTTP에 암호화를 더한 안전한 통신 방식입니다.
+- 쉬운 설명: HTTP는 브라우저와 서버가 대화하는 언어이고, HTTPS는 그 대화를 남이 훔쳐보기 어렵게 봉투에 넣어 보내는 방식입니다.
+- 운영에서는 로그인과 파일 접근이 있으므로 HTTPS가 필요합니다.
+
+### IP 주소, Domain, DNS
+
+- 사전적 설명: IP 주소는 네트워크에서 컴퓨터를 찾는 숫자 주소입니다. domain은 사람이 읽기 쉬운 이름이고, DNS는 domain을 IP 주소로 바꿔 주는 시스템입니다.
+- 쉬운 설명: IP 주소는 `203.250.133.230` 같은 실제 위치 좌표이고, domain은 `pcugame.github.io` 같은 별명입니다. DNS는 별명을 실제 위치로 찾아 주는 전화번호부입니다.
+- 현재 공개 API는 domain이 아니라 IP 주소 `203.250.133.230`을 직접 사용합니다. 그래서 TLS 인증서 운영이 조금 더 까다롭습니다.
+
+### Port
+
+- 사전적 설명: 한 서버 안에서 어떤 프로그램과 통신할지 구분하는 번호입니다.
+- 쉬운 설명: 하나의 건물에 여러 사무실이 있을 때 사무실 번호 같은 것입니다. 서버라는 건물 안에서 API는 보통 `4000`번 사무실을 씁니다.
+- 운영에서는 외부 사용자가 `:4000`으로 직접 들어오지 못하게 하고, nginx가 HTTPS 요청을 받아 내부 `127.0.0.1:4000`으로 전달합니다.
+
+### `127.0.0.1`, localhost, loopback
+
+- 사전적 설명: 자기 자신을 가리키는 특수한 네트워크 주소입니다. 외부 컴퓨터가 아니라 현재 컴퓨터 내부에서만 접근합니다.
+- 쉬운 설명: 서버가 자기 자신에게 말할 때 쓰는 주소입니다. “밖에서 API에 직접 들어오지 말고, 서버 안에서만 API를 보게 하자”는 구조에 사용합니다.
+- `http://127.0.0.1:4000/api/health`는 운영 서버 내부에서만 직접 확인하는 health 주소입니다.
+
+### Health Check, Deep Health
+
+- 사전적 설명: health check는 서비스가 살아 있고 기본 의존성이 정상인지 확인하는 점검 endpoint입니다. deep health는 더 많은 내부 의존성까지 확인하는 확장 점검입니다.
+- 쉬운 설명: health check는 “서버 숨 쉬고 있나?”를 보는 것이고, deep health는 “서버뿐 아니라 DB, 파일 저장소까지 제대로 연결됐나?”를 보는 것입니다.
+- `/api/health`는 API와 DB 중심 확인입니다. `/api/health/deep`은 S3/NAS 쪽까지 확인하므로 이미지나 업로드 문제를 볼 때 더 중요합니다.
+
+### DB, Database
+
+- 사전적 설명: 구조화된 데이터를 저장하고 검색하는 시스템입니다.
+- 쉬운 설명: 엑셀 파일보다 훨씬 크고 안전한 저장 장부입니다. 사용자, 전시 연도, 작품 제목, 멤버, 업로드된 파일 정보가 DB에 들어갑니다.
+- 게임으로 비유하면 세이브 데이터, 유저 계정, 아이템 목록을 저장하는 서버 저장소에 가깝습니다.
+
+### PostgreSQL
+
+- 사전적 설명: 많이 쓰이는 오픈소스 관계형 데이터베이스입니다.
+- 쉬운 설명: 이 프로젝트가 사용하는 DB 프로그램 이름입니다. Unity 프로젝트에서 특정 플러그인이나 에셋을 고르듯, 서버 데이터 저장 프로그램으로 PostgreSQL을 고른 것입니다.
+
+### Prisma, Schema, Migration
+
+- 사전적 설명: Prisma는 TypeScript 코드에서 DB를 다루기 쉽게 해 주는 도구입니다. schema는 DB 구조 정의서이고, migration은 DB 구조 변경 기록과 적용 절차입니다.
+- 쉬운 설명: schema는 “DB에 어떤 표가 있고 각 칸이 어떤 의미인지 적은 설계도”입니다. migration은 “설계도가 바뀌었을 때 실제 DB도 똑같이 고치는 패치 파일”입니다.
+- Unity로 비유하면 저장 데이터 클래스 구조를 바꾼 뒤, 기존 세이브 파일도 새 구조에 맞게 변환하는 작업과 비슷합니다.
+- 운영 DB migration은 데이터가 바뀔 수 있으므로 백업 없이 실행하면 안 됩니다.
+
+### Seed
+
+- 사전적 설명: 개발이나 테스트를 위해 DB에 기본 데이터를 넣는 작업입니다.
+- 쉬운 설명: 빈 게임 월드에 테스트용 캐릭터, 아이템, 맵 데이터를 미리 깔아 두는 것과 같습니다.
+- 로컬 개발에서는 `npm run db:seed`로 테스트용 데이터를 넣을 수 있습니다.
+
+### File Storage, Object Storage
+
+- 사전적 설명: 이미지, 영상, 압축 파일 같은 바이너리 파일을 저장하는 공간입니다. object storage는 파일을 key-value 형태의 object로 저장하는 방식입니다.
+- 쉬운 설명: DB는 작품 제목과 설명 같은 “글자 데이터”를 저장하고, 파일 저장소는 포스터 이미지, 게임 빌드 파일, 영상 같은 “무거운 파일”을 저장합니다.
+- DB에 게임 파일 자체를 넣는 것이 아니라, 파일은 저장소에 두고 DB에는 파일 위치와 정보만 적습니다.
+
+### S3, Garage
+
+- 사전적 설명: S3는 AWS에서 시작된 object storage API 규격입니다. Garage는 S3와 비슷한 방식으로 동작하는 오픈소스 저장소입니다.
+- 쉬운 설명: S3는 “파일 보관 창고에 파일을 넣고 빼는 표준 방식”이라고 보면 됩니다. Garage는 그 방식을 우리 환경에서 쓸 수 있게 해 주는 프로그램입니다.
+- README에서 “S3/Garage”라고 쓰면, 실제 파일을 넣고 빼는 저장소 계층을 뜻합니다.
+
+### NAS
+
+- 사전적 설명: Network Attached Storage의 약자로, 네트워크로 연결해서 사용하는 저장장치입니다.
+- 쉬운 설명: 여러 컴퓨터가 같이 접근하는 큰 외장하드입니다. 운영 서버가 NAS를 연결해서 export 대상이나 일부 파일 경로로 사용합니다.
+- NAS가 꺼지거나 mount가 풀리면 API 자체는 살아 있어도 이미지, 업로드, export가 실패할 수 있습니다.
+
+### Mount
+
+- 사전적 설명: 외부 디스크나 네트워크 저장소를 특정 폴더 경로에 연결해 파일처럼 접근할 수 있게 만드는 작업입니다.
+- 쉬운 설명: NAS라는 외장하드를 서버의 `/mnt/nas/pcu_storage` 폴더에 꽂아 둔 상태라고 생각하면 됩니다.
+- `df -hT /mnt/nas/pcu_storage`는 그 외장하드가 제대로 꽂혀 있는지 보는 명령입니다.
+
+### Export
+
+- 사전적 설명: 시스템 안의 데이터를 외부에서 쓰기 쉬운 파일 구조로 내보내는 작업입니다.
+- 쉬운 설명: 관리자 화면에 있는 작품 파일들을 NAS 쪽 폴더로 복사해서, 웹 서비스 밖에서도 정리된 파일 묶음으로 볼 수 있게 만드는 작업입니다.
+- export는 파일을 많이 읽고 쓰므로 NAS 상태와 권한이 중요합니다.
+
+### nginx, Reverse Proxy
+
+- 사전적 설명: nginx는 웹 서버이자 reverse proxy로 자주 쓰이는 프로그램입니다. reverse proxy는 외부 요청을 받아 내부 서비스로 대신 전달하는 중간 서버입니다.
+- 쉬운 설명: nginx는 건물 1층 안내데스크입니다. 사용자는 안내데스크로만 들어오고, 안내데스크가 내부 사무실인 API로 연결해 줍니다.
+- 이 구조 덕분에 API의 `4000` 포트를 외부에 직접 열지 않고도 HTTPS로 API를 사용할 수 있습니다.
+
+### TLS, Certificate, 인증서
+
+- 사전적 설명: TLS는 HTTPS 암호화에 쓰이는 보안 프로토콜이고, certificate는 서버가 진짜 그 주소의 서버임을 증명하는 전자 문서입니다.
+- 쉬운 설명: TLS는 브라우저와 서버 사이의 대화를 암호화하는 자물쇠이고, 인증서는 “이 서버가 가짜가 아니다”라고 보여 주는 신분증입니다.
+- 인증서가 만료되면 브라우저에 보안 경고가 뜰 수 있습니다.
+
+### OAuth, Google Login
+
+- 사전적 설명: OAuth는 사용자가 비밀번호를 직접 서비스에 맡기지 않고, Google 같은 인증 제공자를 통해 로그인하게 하는 표준 방식입니다.
+- 쉬운 설명: 우리 사이트가 Google 비밀번호를 직접 받지 않고, Google에게 “이 사람이 맞나요?”라고 물어보는 방식입니다. Google이 확인해 주면 우리 사이트는 그 결과만 믿고 로그인 세션을 만듭니다.
+- 이 프로젝트는 Google OAuth를 사용하며, 학교 도메인 제한이 걸려 있습니다.
+
+### Session, Cookie, HttpOnly Cookie
+
+- 사전적 설명: session은 로그인 상태를 서버가 기억하는 정보입니다. cookie는 브라우저가 서버에 자동으로 함께 보내는 작은 데이터입니다. HttpOnly cookie는 JavaScript에서 읽지 못하게 막은 보안 cookie입니다.
+- 쉬운 설명: 로그인 후 받는 입장 팔찌라고 생각하면 됩니다. 브라우저는 요청할 때마다 이 팔찌를 보여 주고, 서버는 “아, 로그인한 사용자구나”라고 판단합니다.
+- HttpOnly는 웹 화면 코드가 팔찌 내용을 훔쳐보지 못하게 막는 설정입니다.
+
+### Role, 권한, `USER`/`OPERATOR`/`ADMIN`
+
+- 사전적 설명: role은 사용자가 시스템에서 수행할 수 있는 작업 범위를 나타내는 권한 등급입니다.
+- 쉬운 설명: 게임 길드 권한처럼 일반 멤버, 운영진, 최고관리자 역할이 다른 것과 같습니다.
+- `USER`는 일반 로그인 사용자, `OPERATOR`는 작품/전시 운영 담당자, `ADMIN`은 import 같은 더 위험한 작업까지 가능한 관리자입니다.
+
+### Environment Variable, `.env`
+
+- 사전적 설명: 프로그램 실행 시 외부에서 주입하는 설정값입니다. `.env` 파일은 이런 값을 저장하는 로컬 설정 파일입니다.
+- 쉬운 설명: Unity의 Project Settings나 빌드 설정처럼, 코드에 박아 넣지 않고 환경별로 바꿔 끼우는 설정입니다. 로컬, 테스트, 운영 서버는 DB 주소나 API 주소가 다르기 때문에 `.env`를 씁니다.
+- `.env`에는 비밀번호나 토큰이 들어갈 수 있으므로 절대 커밋하거나 채팅에 붙여 넣지 않습니다.
+
+### Secret, Token, Private Key
+
+- 사전적 설명: secret은 외부에 공개되면 안 되는 인증 정보이고, token은 접근 권한을 증명하는 문자열이며, private key는 암호화/접속 인증에 쓰는 개인키입니다.
+- 쉬운 설명: 계정 비밀번호, 사무실 마스터키, 자동 로그인 열쇠 같은 것입니다. 한 번 유출되면 다른 사람이 서버나 저장소에 접근할 수 있습니다.
+- README에는 값이 아니라 “이런 종류의 값은 쓰지 말라”는 원칙만 적습니다.
+
+### GitHub Actions, Workflow
+
+- 사전적 설명: GitHub Actions는 GitHub에서 제공하는 자동화 실행 환경입니다. workflow는 어떤 조건에서 어떤 명령을 실행할지 적은 자동화 파일입니다.
+- 쉬운 설명: GitHub에 코드를 올리면 자동으로 테스트하고, 빌드하고, 배포까지 해 주는 작업 로봇입니다.
+- `.github/workflows/deploy-api.yml`은 API 배포 로봇, `.github/workflows/deploy-web-pages.yml`은 Web 배포 로봇입니다.
+
+### Deploy, 배포
+
+- 사전적 설명: 개발한 코드를 실제 사용자가 접근할 수 있는 운영 환경에 올리는 작업입니다.
+- 쉬운 설명: Unity에서 에디터 안에서만 돌리던 게임을 빌드해서 실제 플레이어가 받을 수 있게 올리는 과정과 비슷합니다.
+- 이 프로젝트는 Web을 GitHub Pages에 배포하고, API를 운영 서버에 배포합니다.
+
+### Build, Lint, Test
+
+- 사전적 설명: build는 실행 가능한 결과물을 만드는 작업, lint는 코드 스타일/문법 위험을 검사하는 작업, test는 정해 둔 기능 검증 코드를 실행하는 작업입니다.
+- 쉬운 설명: build는 Unity 빌드, lint는 코드 맞춤법 검사, test는 자동 플레이 테스트에 가깝습니다.
+- 문서만 바꿀 때는 보통 전체 build/test가 필수는 아니지만, 코드 변경 때는 실행해야 합니다.
+
+### Node.js, npm
+
+- 사전적 설명: Node.js는 JavaScript/TypeScript를 브라우저 밖에서 실행하는 런타임입니다. npm은 패키지 설치와 명령 실행 도구입니다.
+- 쉬운 설명: Unity 프로젝트에 Unity Editor와 Package Manager가 필요하듯, 이 웹 프로젝트에는 Node.js와 npm이 필요합니다.
+- `npm install`은 필요한 패키지를 설치하고, `npm run build`는 `package.json`에 적힌 build 명령을 실행합니다.
+
+### Docker, Docker Compose
+
+- 사전적 설명: Docker는 프로그램과 실행 환경을 container로 묶어 실행하는 도구입니다. Docker Compose는 여러 container를 한 번에 띄우는 설정 도구입니다.
+- 쉬운 설명: “내 컴퓨터에는 되는데 다른 컴퓨터에는 안 돼요”를 줄이기 위해, 프로그램이 돌아갈 작은 가상 실행 박스를 만드는 도구입니다.
+- 로컬/통합 테스트에서는 Docker Compose로 PostgreSQL, Garage, API, Web을 함께 띄웁니다.
+
+### Container, Image
+
+- 사전적 설명: image는 실행 환경을 담은 템플릿이고, container는 그 image를 실제로 실행한 인스턴스입니다.
+- 쉬운 설명: image는 Unity 빌드 파일이고, container는 그 빌드를 실제로 실행한 게임 프로세스에 가깝습니다. 같은 image로 container를 다시 만들 수 있습니다.
+- API 운영 image는 GHCR에 올라가고, 서버는 그 image를 받아 container로 실행합니다.
+
+### Podman, Pod, Volume
+
+- 사전적 설명: Podman은 Docker와 비슷하게 container를 실행하는 도구입니다. pod는 여러 container를 묶은 실행 단위이고, volume은 container가 지워져도 유지되는 저장공간입니다.
+- 쉬운 설명: Podman은 운영 서버에서 container를 돌리는 프로그램입니다. pod는 API와 DB를 같은 작업 묶음으로 묶은 것이고, volume은 DB 데이터를 잃지 않게 따로 보관하는 세이브 폴더입니다.
+- 운영 서버에서는 Podman pod `graduationproject` 안에 `gp-api`, `gp-postgres`가 있습니다.
+
+### GHCR
+
+- 사전적 설명: GitHub Container Registry의 약자로, container image를 저장하는 GitHub의 registry 서비스입니다.
+- 쉬운 설명: API 서버 빌드 결과물을 보관하는 창고입니다. GitHub Actions가 API image를 GHCR에 올리고, 운영 서버가 그 image를 내려받아 실행합니다.
+
+### GitHub Pages
+
+- 사전적 설명: GitHub가 정적 웹사이트를 호스팅해 주는 서비스입니다.
+- 쉬운 설명: HTML/CSS/JS로 만들어진 Web 결과물을 무료 웹 호스팅 공간에 올려서 방문자가 볼 수 있게 하는 서비스입니다.
+- 이 프로젝트의 공개 Web은 `pcugame/pcugame.github.io` 저장소에 배포됩니다.
+
+### Mock
+
+- 사전적 설명: 실제 API나 DB 대신 가짜 데이터를 사용해 화면이나 기능을 테스트하는 방식입니다.
+- 쉬운 설명: Unity에서 실제 서버 연결 없이 임시 JSON 데이터나 더미 캐릭터 데이터로 UI를 확인하는 것과 같습니다.
+- `npm run dev:mock`은 API/DB/S3 없이 Web 화면만 빠르게 확인할 때 씁니다.
+
+### Integration Test, 통합 테스트 환경
+
+- 사전적 설명: 여러 구성요소를 실제와 비슷하게 함께 실행해 전체 흐름을 검증하는 테스트입니다.
+- 쉬운 설명: 캐릭터 컨트롤러만 따로 보는 것이 아니라, 실제 맵, UI, 저장, 네트워크까지 같이 켜고 플레이해 보는 테스트입니다.
+- `npm run testenv:up`은 Web, API, PostgreSQL, Garage를 함께 띄워 실제 경로에 가깝게 확인합니다.
+
+### Production, Local, Development
+
+- 사전적 설명: production은 실제 사용자가 쓰는 운영 환경입니다. local/development는 개발자 컴퓨터에서 작업하고 확인하는 환경입니다.
+- 쉬운 설명: production은 출시 서버, local은 내 PC 테스트 환경입니다. local에서 되는 설정을 production에 그대로 켜면 보안 문제가 생길 수 있습니다.
+- 특히 dev login, mock, local secret은 production에서 사용하면 안 됩니다.
+
+### CORS, CSRF
+
+- 사전적 설명: CORS는 브라우저가 다른 출처의 API를 호출할 수 있는지 정하는 보안 정책입니다. CSRF는 로그인된 사용자의 브라우저를 악용해 원치 않는 요청을 보내는 공격입니다.
+- 쉬운 설명: CORS는 “우리 웹사이트에서 우리 API로 요청해도 되나요?”를 브라우저가 확인하는 규칙입니다. CSRF는 사용자가 로그인한 상태를 나쁜 사이트가 몰래 이용하는 공격입니다.
+- 로그인과 관리자 기능이 있는 서비스에서는 둘 다 중요합니다.
+
+### Rate Limit
+
+- 사전적 설명: 일정 시간 동안 허용되는 요청 수를 제한하는 정책입니다.
+- 쉬운 설명: 로그인 시도나 파일 다운로드를 너무 많이 반복하는 사람을 자동으로 막는 장치입니다. 게임 서버에서 비정상적으로 빠른 요청을 보내는 클라이언트를 제한하는 것과 비슷합니다.
+
+### Presigned URL, Redirect
+
+- 사전적 설명: presigned URL은 제한된 시간 동안만 접근 가능한 임시 파일 주소입니다. redirect는 한 주소로 들어온 요청을 다른 주소로 보내는 응답입니다.
+- 쉬운 설명: 파일 창고에 바로 들어갈 수 있는 1회용 임시 입장권을 만들어 주는 방식입니다. 사용자는 API 주소를 눌렀지만, 실제 파일은 S3/Garage 임시 주소에서 내려받게 됩니다.
+
+### TypeScript, React, Vite, Fastify, Zod, TanStack Query
+
+- 사전적 설명: TypeScript는 타입이 있는 JavaScript입니다. React는 화면 UI를 만드는 라이브러리, Vite는 Web 개발/빌드 도구, Fastify는 API 서버 프레임워크, Zod는 데이터 검증 라이브러리, TanStack Query는 Web에서 API 데이터를 불러오고 캐시하는 라이브러리입니다.
+- 쉬운 설명: 전부 “웹 서비스를 만들기 위한 도구들”입니다. Unity로 치면 C# 언어, UI Toolkit, Addressables, 입력 시스템, 검증용 유틸리티처럼 각자 담당 영역이 있는 도구 묶음입니다.
+- 운영자가 매일 이 도구의 내부를 알 필요는 없지만, 오류 메시지나 package 이름에서 보이면 어느 영역 문제인지 감을 잡는 데 도움이 됩니다.
+
+### Contract
+
+- 사전적 설명: API 요청과 응답의 형태를 Web과 API가 함께 맞추기 위한 타입 정의입니다.
+- 쉬운 설명: Web과 API 사이의 약속 문서입니다. Web이 “작품 목록은 이런 모양으로 주세요”라고 기대하고, API가 같은 모양으로 답해야 화면이 깨지지 않습니다.
+- 이 저장소에서는 `packages/contracts`가 그 약속을 담습니다.
+
+### 로그, Smoke Check, Runbook
+
+- 사전적 설명: 로그는 프로그램이 남기는 실행 기록입니다. smoke check는 큰 문제 없이 켜졌는지 빠르게 보는 최소 점검입니다. runbook은 운영자가 따라 하는 절차서입니다.
+- 쉬운 설명: 로그는 게임 콘솔 출력, smoke check는 게임 실행 후 메인 화면/저장/로그인만 빠르게 눌러 보는 점검, runbook은 장애가 났을 때 따라 할 체크리스트입니다.
+- README의 “문제 발생 시 확인표”와 “배포 전후 smoke check”는 runbook 역할을 합니다.
+
+### CLI 명령어, `cd`, `curl`, `sudo`
+
+- 사전적 설명: CLI는 터미널에서 글자로 명령을 입력하는 방식입니다. `cd`는 폴더 이동, `curl`은 HTTP 요청 실행, `sudo`는 관리자 권한으로 명령을 실행하는 도구입니다.
+- 쉬운 설명: Unity Editor 버튼 대신 검은 창/PowerShell에서 직접 명령 버튼을 누르는 방식입니다. `cd apps/web`은 `apps/web` 폴더로 들어가라는 뜻이고, `curl .../api/health`는 브라우저 대신 API 주소를 한 번 호출해 보라는 뜻입니다.
+- `sudo`가 붙은 명령은 서버에 큰 영향을 줄 수 있으므로 승인 없이 실행하지 않습니다.
+
 ## 현재 운영 정보
 
 | 항목 | 현재 기준 |
@@ -191,6 +456,7 @@ curl -kfsS https://203.250.133.230/api/health
 ### 인증서 경고
 
 - 현재 공개 API는 IP 주소 `203.250.133.230` 기준입니다. IP 기반 TLS 운영은 일반 도메인보다 갱신/호환성 리스크가 큽니다.
+- 언젠가 학교의 도메인을 받을 수 있게 된다면, 교체가 시급하다고 생각합니다. (송지한 주)
 - 서버에서 인증서 만료일과 nginx 설정을 확인합니다.
 
 ```bash
@@ -198,7 +464,7 @@ openssl x509 -in /etc/ssl/acme/203.250.133.230/fullchain.pem -noout -subject -is
 sudo nginx -t
 ```
 
-- 임의로 인증서 파일을 교체하지 말고, `ops/server-audit/2026-06-01/`의 TLS 기록과 운영 담당자 확인 후 처리합니다.
+- 임의로 인증서 파일을 교체하지 말고, 운영 담당자 확인 후 처리합니다.
 
 ## 로컬/통합 확인법
 
@@ -342,8 +608,6 @@ Web 배포 변수는 GitHub Actions variables/secrets에서 관리합니다. REA
 - nginx가 `127.0.0.1:4000`으로 proxy하는지 확인합니다.
 - API 로그에 env validation 실패, migration 실패, 반복 재시작이 없는지 확인합니다.
 
-자세한 체크리스트는 `ops/server-audit/2026-06-01/05_smoke_checklist.md`를 봅니다.
-
 ## 기술 스택
 
 - Frontend: React 19, Vite 8, TypeScript, React Router 7, TanStack Query, Zod v4
@@ -375,20 +639,6 @@ Web 배포 변수는 GitHub Actions variables/secrets에서 관리합니다. REA
 - mock API에 `/api/public/exhibitions/:id/projects` route가 추가됐습니다.
 - `/admin` 직접 접근 시 `/admin/projects`로 이동하도록 index route가 추가됐습니다.
 - Google hosted domain mismatch는 403 `EMAIL_DOMAIN_NOT_ALLOWED`로 정리됐고, invalid token은 401 `UNAUTHORIZED`를 유지합니다.
-
-## 참고 문서
-
-- 현재 상태 요약: `docs/00_CURRENT_STATE.md`
-- API와 데이터 contract: `docs/02_API_AND_DATA_CONTRACT.md`
-- 검증 기록: `docs/05_VALIDATION_REPORT.md`
-- 서버 감사 기록: `ops/server-audit/2026-06-01/`
-- 서버 smoke checklist: `ops/server-audit/2026-06-01/05_smoke_checklist.md`
-- 서버 보안/프록시 문서: `server/SECURITY-HARDENING.md`
-- API deploy workflow: `.github/workflows/deploy-api.yml`
-- Web deploy workflow: `.github/workflows/deploy-web-pages.yml`
-- API Prisma schema: `apps/api/prisma/schema.prisma`
-- 공유 contract: `packages/contracts/src/index.ts`
-- LLM/신규 작업 기준: `docs/llm/`
 
 ## 안전수칙
 
