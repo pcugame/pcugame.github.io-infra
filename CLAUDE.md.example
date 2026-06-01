@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+This is a shared example for a personal local `CLAUDE.md`. You may customize
+your local copy, but shared project rules live in `README.md` and `docs/llm/*`;
+prefer those when local notes conflict.
+
 ## Project Overview
 
 PCU Graduation Project Showcase — a monorepo for a university game engineering capstone showcase platform. Frontend is deployed to GitHub Pages; backend runs on a dedicated server via Podman. Object storage uses S3-compatible service (Garage for local dev).
@@ -60,9 +64,12 @@ docker compose down -v       # stop + delete data
 apps/api/   — Fastify 5 + TypeScript + Prisma + PostgreSQL
 apps/db/    — Local PostgreSQL + Garage (docker-compose) + seed/migration scripts
 apps/web/   — React 19 + Vite + TanStack Query + React Router v7
+packages/contracts/ — type-only API/Web transport contracts
 ```
 
-No shared package — types are duplicated in `apps/web/src/contracts/` (enums, Zod schemas, response types).
+Shared API/Web transport types live in `packages/contracts` and are re-exported
+from `apps/web/src/contracts`. Web form schemas remain in
+`apps/web/src/contracts/schemas.ts`.
 
 **Note:** API uses Zod v3 (`zod@^3.24`), Web uses Zod v4 (`zod@^4.3`) — import paths and some APIs differ between the two.
 
@@ -73,6 +80,7 @@ No shared package — types are duplicated in `apps/web/src/contracts/` (enums, 
 - Web components PascalCase (`HomePage.tsx`); hooks camelCase (`useMe.ts`).
 - Explicit TypeScript types at module boundaries; Zod for runtime validation on both sides.
 - Conventional Commits (`feat:`, `fix:`, `chore:`, etc.).
+- Update `packages/contracts/src/index.ts` before changing API/Web request or response shapes.
 
 ## Known pitfalls
 
