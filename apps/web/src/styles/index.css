@@ -2140,6 +2140,32 @@ button.archive-card {
   font-size: 0.9rem;
 }
 
+.dev-auth-panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.dev-auth-panel__group,
+.dev-auth-panel__errors {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.dev-auth-panel__group {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dev-auth-panel__errors {
+  grid-template-columns: 1fr;
+}
+
+.dev-auth-panel .btn {
+  min-height: 2.5rem;
+  justify-content: center;
+  white-space: normal;
+}
+
 /* ── Me Page ──────────────────────────────────────────────────── */
 
 .me-page {
@@ -2656,6 +2682,21 @@ form.admin-card h3 {
   border-color: var(--color-primary);
 }
 
+.admin-filter-input {
+  width: 7.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.admin-filter-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
 .admin-bulk-actions {
   display: flex;
   align-items: center;
@@ -2668,6 +2709,33 @@ form.admin-card h3 {
   font-weight: 600;
   color: var(--color-primary);
   margin-right: 0.25rem;
+}
+
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin-pagination__summary,
+.admin-pagination__page {
+  font-size: 0.86rem;
+  color: var(--color-text-muted);
+}
+
+.admin-pagination__controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-pagination__page {
+  min-width: 4rem;
+  text-align: center;
+  font-weight: 600;
 }
 
 /* ── Mobile project card with checkbox ───────────────────────── */

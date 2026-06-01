@@ -5,11 +5,18 @@ import type {
   UpdateExhibitionRequest,
   AdminExhibitionItem,
   UpdateProjectRequest,
-  AdminProjectItem,
+  AdminProjectListQuery,
+  AdminProjectListResponse,
   AdminProjectDetail,
   SubmitProjectResponse,
   AddMemberRequest,
   UpdateMemberRequest,
+  BannedIpListResponse,
+  SiteSettingsData,
+  UpdateSiteSettingsRequest,
+  ImportPreviewResult,
+  ImportExecuteResult,
+  ExportResult,
   ExportStatusResponse,
 } from '../../contracts';
 import { api, uploadFormData } from './client';
@@ -47,10 +54,23 @@ export const adminExhibitionApi = {
 
 // ── Project ──────────────────────────────────────────────────
 
+function buildQuery(params: AdminProjectListQuery): string {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') query.set(key, String(value));
+  });
+  const text = query.toString();
+  return text ? `?${text}` : '';
+}
+
+function getProjects(params: AdminProjectListQuery = {}) {
+  return api.get<AdminProjectListResponse>(`/api/admin/projects${buildQuery(params)}`);
+}
+
 export const adminProjectApi = {
-  list() {
-    return api.get<{ items: AdminProjectItem[] }>('/api/admin/projects');
-  },
+  getProjects,
+
+  list: getProjects,
 
   getDetail(id: number) {
     return api.get<AdminProjectDetail>(`/api/admin/projects/${id}`);
@@ -143,28 +163,12 @@ export const adminAssetApi = {
   },
 };
 
-// ── Banned IPs ──────────────────────────────────────────────
-
-export interface BannedIpItem {
-  id: number;
-  ip: string;
-  reason: string;
-  createdAt: string;
-}
-
-// ── Site Settings ───────────────────────────────────────────
-
-export interface SiteSettingsData {
-  maxGameFileMb: number;
-  maxChunkSizeMb: number;
-}
-
 export const adminSettingsApi = {
   get() {
     return api.get<SiteSettingsData>('/api/admin/settings');
   },
 
-  update(body: Partial<SiteSettingsData>) {
+  update(body: UpdateSiteSettingsRequest) {
     return api.patch<SiteSettingsData>('/api/admin/settings', body);
   },
 };
@@ -173,46 +177,13 @@ export const adminSettingsApi = {
 
 export const adminBannedIpApi = {
   list() {
-    return api.get<{ items: BannedIpItem[] }>('/api/admin/banned-ips');
+    return api.get<BannedIpListResponse>('/api/admin/banned-ips');
   },
 
   unban(id: number) {
     return api.delete<void>(`/api/admin/banned-ips/${id}`);
   },
 };
-
-// ── Import ─────────────────────────────────────────────────
-
-export interface ImportPreviewExhibition {
-  year: number;
-  title: string;
-  isNew: boolean;
-  existingProjectCount: number;
-}
-
-export interface ImportPreviewResult {
-  valid: boolean;
-  exhibitions: ImportPreviewExhibition[];
-  projectCount: number;
-  errors: string[];
-}
-
-export interface ImportExecuteResult {
-  exhibitions: { created: number; existing: number };
-  projects: { created: number };
-}
-
-// ── Export ─────────────────────────────────────────────────
-
-export interface ExportResult {
-  projects: number;
-  totalFiles: number;
-  downloaded: number;
-  skipped: number;
-  failed: number;
-  aborted: boolean;
-  paths: string[];
-}
 
 export const adminExportApi = {
   run(year?: number) {

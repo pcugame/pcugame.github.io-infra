@@ -1,6 +1,8 @@
 // ── TanStack Query Key 상수 ──────────────────────────────────
 // 모든 query key를 여기서 관리하여 invalidate 시 일관성을 유지한다.
 
+import type { AdminProjectListQuery } from '../../contracts';
+
 export const queryKeys = {
   // ── Auth ────────────────────────────────────────────────────
   me: ['me'] as const,
@@ -16,6 +18,7 @@ export const queryKeys = {
   // ── Admin ──────────────────────────────────────────────────
   adminExhibitions: ['adminExhibitions'] as const,
   adminProjects: ['adminProjects'] as const,
+  adminProjectsList: (params: AdminProjectListQuery) => ['adminProjects', params] as const,
   adminProject: (id: number) => ['adminProject', id] as const,
   adminBannedIps: ['adminBannedIps'] as const,
   adminSettings: ['adminSettings'] as const,
