@@ -8,6 +8,7 @@ export type UserRole = 'USER' | 'OPERATOR' | 'ADMIN';
 export type ProjectStatus = 'PUBLISHED' | 'ARCHIVED';
 export type AssetKind = 'THUMBNAIL' | 'IMAGE' | 'POSTER' | 'GAME' | 'VIDEO';
 export type AssetPlaybackStatus = 'PENDING' | 'READY' | 'FAILED';
+export type Platform = 'PC' | 'MOBILE' | 'WEB';
 
 // ── Auth ─────────────────────────────────────────────────────
 
@@ -28,6 +29,21 @@ export type AuthUser = {
 /** POST /api/auth/google – response (data envelope stripped) */
 export type GoogleAuthResponse = {
 	user: AuthUser;
+};
+
+export type DevAuthLoginRequest = {
+	role: UserRole;
+};
+
+export type DevAuthErrorScenario =
+	| 'domain-not-allowed'
+	| 'google-api-unavailable'
+	| 'invalid-google-token'
+	| 'missing-google-payload'
+	| 'api-server-error';
+
+export type DevAuthLoginErrorRequest = {
+	scenario: DevAuthErrorScenario;
 };
 
 /** POST /api/auth/logout – response */
@@ -113,6 +129,8 @@ export type PublicProjectDetailResponse = {
 	title: string;
 	summary?: string;
 	description?: string;
+	githubUrl?: string;
+	platforms: Platform[];
 	isIncomplete: boolean;
 	video: ProjectVideo | null;
 	videos: ProjectVideo[];
@@ -174,6 +192,33 @@ export type AdminProjectItem = {
 	updatedAt: string;
 };
 
+export type AdminProjectListSort = 'createdAt' | 'title' | 'year' | 'status';
+export type SortOrder = 'asc' | 'desc';
+
+export type AdminProjectListQuery = {
+	page?: number;
+	limit?: number;
+	search?: string;
+	year?: number;
+	status?: ProjectStatus;
+	sort?: AdminProjectListSort;
+	order?: SortOrder;
+};
+
+export type PaginationInfo = {
+	page: number;
+	limit: number;
+	totalItems: number;
+	totalPages: number;
+	hasNextPage: boolean;
+	hasPreviousPage: boolean;
+};
+
+export type AdminProjectListResponse = {
+	items: AdminProjectItem[];
+	pagination: PaginationInfo;
+};
+
 export type AdminProjectDetail = {
 	id: number;
 	title: string;
@@ -181,6 +226,8 @@ export type AdminProjectDetail = {
 	year: number;
 	summary?: string;
 	description?: string;
+	githubUrl?: string;
+	platforms: Platform[];
 	isIncomplete: boolean;
 	video: ProjectVideo | null;
 	videos: ProjectVideo[];
@@ -235,6 +282,49 @@ export type UpdateMemberRequest = {
 	sortOrder?: number;
 };
 
+// ── Admin: Settings ─────────────────────────────────────────
+
+export type SiteSettingsData = {
+	maxGameFileMb: number;
+	maxChunkSizeMb: number;
+};
+
+export type UpdateSiteSettingsRequest = Partial<SiteSettingsData>;
+
+// ── Admin: Banned IPs ───────────────────────────────────────
+
+export type BannedIpItem = {
+	id: number;
+	ip: string;
+	reason: string;
+	createdAt: string;
+};
+
+export type BannedIpListResponse = {
+	items: BannedIpItem[];
+};
+
+// ── Admin: Import ───────────────────────────────────────────
+
+export type ImportPreviewExhibition = {
+	year: number;
+	title: string;
+	isNew: boolean;
+	existingProjectCount: number;
+};
+
+export type ImportPreviewResult = {
+	valid: boolean;
+	exhibitions: ImportPreviewExhibition[];
+	projectCount: number;
+	errors: string[];
+};
+
+export type ImportExecuteResult = {
+	exhibitions: { created: number; existing: number };
+	projects: { created: number };
+};
+
 // ── Admin: Export progress ───────────────────────────────────
 
 export type ExportPhase = 'preparing' | 'downloading' | 'finishing';
@@ -266,4 +356,53 @@ export type ExportProgress = {
 export type ExportStatusResponse = {
 	running: boolean;
 	progress: ExportProgress | null;
+};
+
+export type ExportResult = {
+	projects: number;
+	totalFiles: number;
+	downloaded: number;
+	skipped: number;
+	failed: number;
+	aborted: boolean;
+	paths: string[];
+};
+
+// ── Admin: Game upload ──────────────────────────────────────
+
+export type GameUploadSession = {
+	sessionId: string;
+	chunkSizeBytes: number;
+	totalChunks: number;
+	expiresAt: string;
+};
+
+export type GameUploadStatus = {
+	sessionId: string;
+	projectId: number;
+	originalName: string;
+	totalBytes: number;
+	chunkSizeBytes: number;
+	totalChunks: number;
+	uploadedChunks: number[];
+	uploadedCount: number;
+	status: string;
+	expiresAt: string;
+};
+
+export type GameUploadSessionListResponse = {
+	items: GameUploadStatus[];
+};
+
+export type GameUploadChunkResponse = {
+	index: number;
+	bytesWritten: number;
+	uploadedCount: number;
+	totalChunks: number;
+};
+
+export type GameUploadCompleteResponse = {
+	status: 'COMPLETED';
+	storageKey: string;
+	sizeBytes: number;
 };

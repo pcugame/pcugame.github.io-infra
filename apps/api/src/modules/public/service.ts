@@ -160,6 +160,8 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 		title: project.title,
 		summary: project.summary || undefined,
 		description: project.description || undefined,
+		githubUrl: project.githubUrl || undefined,
+		platforms: project.platforms,
 		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, project.poster),
 		video,
 		videos,

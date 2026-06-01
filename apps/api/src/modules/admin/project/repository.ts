@@ -12,30 +12,108 @@ export const projectDetailInclude = {
 
 // ── Project queries ─────────────────────────────────────────
 
+const projectListPlayableKinds: AssetKind[] = ['GAME', 'VIDEO'];
+
+const projectListInclude = {
+	exhibition: true,
+	creator: true,
+	members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true, studentId: true } },
+	// Just enough to decide whether `isIncomplete` should be suppressed in the response.
+	assets: {
+		where: { status: 'READY' as const, kind: { in: projectListPlayableKinds } },
+		select: { kind: true },
+	},
+	poster: { select: { kind: true, status: true, storageKey: true } },
+} as const satisfies Prisma.ProjectInclude;
+
+export type ProjectListSort = 'createdAt' | 'title' | 'year' | 'status';
+export type SortOrder = 'asc' | 'desc';
+
+export type FindProjectsForUserOptions = {
+	page: number;
+	limit: number;
+	search?: string;
+	year?: number;
+	status?: ProjectStatus;
+	sort: ProjectListSort;
+	order: SortOrder;
+};
+
+function containsText(search: string): Prisma.StringFilter {
+	return { contains: search, mode: 'insensitive' };
+}
+
+function buildProjectListWhere(
+	userId: number,
+	isPrivileged: boolean,
+	options: FindProjectsForUserOptions,
+): Prisma.ProjectWhereInput {
+	const and: Prisma.ProjectWhereInput[] = [];
+
+	if (!isPrivileged) {
+		and.push({
+			OR: [
+				{ creatorId: userId },
+				{ members: { some: { userId } } },
+			],
+		});
+	}
+
+	if (options.search) {
+		and.push({
+			OR: [
+				{ title: containsText(options.search) },
+				{ summary: containsText(options.search) },
+				{ members: { some: { name: containsText(options.search) } } },
+				{ members: { some: { studentId: containsText(options.search) } } },
+			],
+		});
+	}
+
+	if (options.year !== undefined) {
+		and.push({ exhibition: { year: options.year } });
+	}
+
+	if (options.status !== undefined) {
+		and.push({ status: options.status });
+	}
+
+	return and.length > 0 ? { AND: and } : {};
+}
+
+function buildProjectListOrderBy(
+	sort: ProjectListSort,
+	order: SortOrder,
+): Prisma.ProjectOrderByWithRelationInput[] {
+	const primary: Prisma.ProjectOrderByWithRelationInput =
+		sort === 'year'
+			? { exhibition: { year: order } }
+			: { [sort]: order };
+
+	return [primary, { id: order }];
+}
+
 /** List projects visible to the given user (privileged sees all) */
-export function findProjectsForUser(userId: number, isPrivileged: boolean) {
-	return prisma.project.findMany({
-		where: isPrivileged
-			? {}
-			: {
-					OR: [
-						{ creatorId: userId },
-						{ members: { some: { userId } } },
-					],
-				},
-		orderBy: { createdAt: 'desc' },
-		include: {
-			exhibition: true,
-			creator: true,
-			members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true, studentId: true } },
-			// Just enough to decide whether `isIncomplete` should be suppressed in the response.
-			assets: {
-				where: { status: 'READY', kind: { in: ['GAME', 'VIDEO'] } },
-				select: { kind: true },
-			},
-			poster: { select: { kind: true, status: true, storageKey: true } },
-		},
-	});
+export function findProjectsForUser(
+	userId: number,
+	isPrivileged: boolean,
+	options: FindProjectsForUserOptions,
+) {
+	const where = buildProjectListWhere(userId, isPrivileged, options);
+	const orderBy = buildProjectListOrderBy(options.sort, options.order);
+	const skip = (options.page - 1) * options.limit;
+	const take = options.limit;
+
+	return prisma.$transaction([
+		prisma.project.count({ where }),
+		prisma.project.findMany({
+			where,
+			orderBy,
+			skip,
+			take,
+			include: projectListInclude,
+		}),
+	]).then(([totalItems, items]) => ({ totalItems, items }));
 }
 
 /** Find a project by ID with full detail includes */

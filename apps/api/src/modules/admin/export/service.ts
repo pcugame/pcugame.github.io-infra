@@ -8,7 +8,13 @@ import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { s3, bucketForKind } from '../../../lib/s3.js';
 import { logger } from '../../../lib/logger.js';
 import { conflict } from '../../../shared/errors.js';
-import type { AssetKind } from '@prisma/client';
+import type { AssetKind as PrismaAssetKind } from '@prisma/client';
+import type {
+	AssetKind,
+	ExportFileStatus,
+	ExportProgress,
+	ExportResult,
+} from '@pcu/contracts';
 import * as repo from './repository.js';
 
 // ── Path helpers ────────────────────────────────────────
@@ -49,31 +55,6 @@ function assetFileName(kind: string, ext: string, index: number): string {
 }
 
 // ── Server-side mutex + progress ────────────────────────
-
-export type ExportPhase = 'preparing' | 'downloading' | 'finishing';
-export type ExportFileStatus = 'pending' | 'saving' | 'saved' | 'skipped' | 'failed';
-
-export interface ExportProgressFile {
-	assetId: number;
-	kind: AssetKind;
-	originalName: string;
-	fileName: string;
-	status: ExportFileStatus;
-}
-
-export interface ExportProgress {
-	year: number | null;
-	startedAt: number;
-	phase: ExportPhase;
-	totalProjects: number;
-	currentProjectIndex: number;
-	currentProjectTitle: string | null;
-	currentProjectFiles: ExportProgressFile[];
-	totalFiles: number;
-	downloaded: number;
-	skipped: number;
-	failed: number;
-}
 
 let exportRunning = false;
 let currentProgress: ExportProgress | null = null;
@@ -150,16 +131,6 @@ export interface ExportOptions {
 	year?: number;
 	dryRun?: boolean;
 	signal?: AbortSignal;
-}
-
-export interface ExportResult {
-	projects: number;
-	totalFiles: number;
-	downloaded: number;
-	skipped: number;
-	failed: number;
-	aborted: boolean;
-	paths: string[];
 }
 
 export async function exportAssets(opts: ExportOptions): Promise<ExportResult> {
@@ -248,7 +219,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 				break;
 			}
 
-			const bucket = bucketForKind(asset.kind as AssetKind);
+			const bucket = bucketForKind(asset.kind as PrismaAssetKind);
 
 			if (opts.dryRun) {
 				result.paths.push(destPath);

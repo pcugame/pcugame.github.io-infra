@@ -42,6 +42,8 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 		exhibition: { year: 2025 },
 		summary: 'A summary',
 		description: 'A description',
+		githubUrl: '',
+		platforms: [] as ('PC' | 'MOBILE' | 'WEB')[],
 		isIncomplete: false,
 		status: 'PUBLISHED' as const,
 		sortOrder: 0,

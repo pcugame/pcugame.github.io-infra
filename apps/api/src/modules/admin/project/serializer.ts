@@ -1,4 +1,4 @@
-import type { AssetKind, AssetPlaybackStatus, ProjectStatus } from '@prisma/client';
+import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from '@prisma/client';
 import type { AdminProjectDetail } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { isPosterUrlSafe } from '../../../shared/poster-validation.js';
@@ -45,6 +45,8 @@ export function serializeProjectDetail(project: {
 	exhibition: { year: number };
 	summary: string;
 	description: string;
+	githubUrl: string;
+	platforms: Platform[];
 	isIncomplete: boolean;
 	status: ProjectStatus;
 	sortOrder: number;
@@ -71,6 +73,8 @@ export function serializeProjectDetail(project: {
 		year: project.exhibition.year,
 		summary: project.summary || undefined,
 		description: project.description || undefined,
+		githubUrl: project.githubUrl || undefined,
+		platforms: project.platforms,
 		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, project.poster),
 		video,
 		videos,

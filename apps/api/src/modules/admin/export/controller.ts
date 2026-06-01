@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { ExportResult, ExportStatusResponse } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { requireRole } from '../../../plugins/auth.js';
 import { badRequest } from '../../../shared/errors.js';
@@ -44,7 +45,7 @@ export async function exportController(app: FastifyInstance): Promise<void> {
 				signal: ac.signal,
 			});
 
-			sendOk(reply, result);
+			sendOk<ExportResult>(reply, result);
 		},
 	);
 
@@ -59,7 +60,7 @@ export async function exportController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireRole('ADMIN') },
 		async (_request, reply) => {
 			const progress = exportService.getExportProgress();
-			sendOk(reply, { running: progress !== null, progress });
+			sendOk<ExportStatusResponse>(reply, { running: progress !== null, progress });
 		},
 	);
 }

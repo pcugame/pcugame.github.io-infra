@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { toSlug } from '../../../shared/slug.js';
 import { badRequest } from '../../../shared/errors.js';
+import type { ImportExecuteResult, ImportPreviewResult } from '@pcu/contracts';
 import * as repo from './repository.js';
 
 // ── JSON 스키마 정의 ─────────────────────────────────────────
@@ -39,12 +40,7 @@ export type ImportData = z.infer<typeof ImportDataSchema>;
 
 // ── 프리뷰 (트랜잭션 없이 검증만) ─────────────────────────────
 
-export interface PreviewResult {
-	valid: boolean;
-	exhibitions: { year: number; title: string; isNew: boolean; existingProjectCount: number }[];
-	projectCount: number;
-	errors: string[];
-}
+export type PreviewResult = ImportPreviewResult;
 
 export async function previewImport(raw: string): Promise<PreviewResult> {
 	let parsed: unknown;
@@ -106,10 +102,7 @@ export async function previewImport(raw: string): Promise<PreviewResult> {
 
 // ── 실제 임포트 (all-or-nothing 트랜잭션) ───────────────────
 
-export interface ImportResult {
-	exhibitions: { created: number; existing: number };
-	projects: { created: number };
-}
+export type ImportResult = ImportExecuteResult;
 
 export async function executeImport(raw: string, creatorId: number): Promise<ImportResult> {
 	let parsed: unknown;

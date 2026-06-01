@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { BannedIpListResponse } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { parseIntParam } from '../../../shared/validation.js';
 import { requireRole } from '../../../plugins/auth.js';
@@ -12,7 +13,7 @@ export async function bannedIpController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireRole('ADMIN', 'OPERATOR') },
 		async (_request, reply) => {
 			const items = await bannedIpService.listBannedIps();
-			sendOk(reply, { items });
+			sendOk<BannedIpListResponse>(reply, { items });
 		},
 	);
 

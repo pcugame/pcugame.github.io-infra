@@ -31,6 +31,18 @@ export const UpdateProjectBody = z.object({
 	sortOrder: z.number().int().min(0).optional(),
 });
 
+export const AdminProjectListQuery = z.object({
+	page: z.coerce.number().int().positive().default(1),
+	limit: z.coerce.number().int().positive().transform((n) => Math.min(n, 100)).default(20),
+	search: z.string().trim().max(100).optional().transform((value) => value || undefined),
+	year: z.coerce.number().int().optional(),
+	status: ProjectStatusEnum.optional(),
+	sort: z.enum(['createdAt', 'title', 'year', 'status']).default('createdAt'),
+	order: z.enum(['asc', 'desc']).default('desc'),
+});
+
+export type AdminProjectListQueryT = z.infer<typeof AdminProjectListQuery>;
+
 // ── Project submit (all-in-one multipart payload) ────────────
 
 const SubmitMember = z.object({

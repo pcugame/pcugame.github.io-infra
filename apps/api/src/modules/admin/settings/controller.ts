@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { SiteSettingsData } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { requireRole } from '../../../plugins/auth.js';
 import * as settingsService from './service.js';
@@ -11,7 +12,7 @@ export async function settingsController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireRole('ADMIN', 'OPERATOR') },
 		async (_request, reply) => {
 			const settings = await settingsService.getSettings();
-			sendOk(reply, settings);
+			sendOk<SiteSettingsData>(reply, settings);
 		},
 	);
 
@@ -23,7 +24,7 @@ export async function settingsController(app: FastifyInstance): Promise<void> {
 			const updated = await settingsService.updateSettings(
 				request.body as Record<string, unknown> | null,
 			);
-			sendOk(reply, updated);
+			sendOk<SiteSettingsData>(reply, updated);
 		},
 	);
 }

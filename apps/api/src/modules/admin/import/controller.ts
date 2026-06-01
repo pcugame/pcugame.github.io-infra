@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { ImportExecuteResult, ImportPreviewResult } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { badRequest, payloadTooLarge } from '../../../shared/errors.js';
 import { requireRole } from '../../../plugins/auth.js';
@@ -40,7 +41,7 @@ export async function importController(app: FastifyInstance): Promise<void> {
 		async (request, reply) => {
 			const raw = await extractJsonFromMultipart(request);
 			const preview = await importService.previewImport(raw);
-			sendOk(reply, preview);
+			sendOk<ImportPreviewResult>(reply, preview);
 		},
 	);
 
@@ -51,7 +52,7 @@ export async function importController(app: FastifyInstance): Promise<void> {
 		async (request, reply) => {
 			const raw = await extractJsonFromMultipart(request);
 			const result = await importService.executeImport(raw, request.currentUser!.id);
-			sendOk(reply, result);
+			sendOk<ImportExecuteResult>(reply, result);
 		},
 	);
 }
