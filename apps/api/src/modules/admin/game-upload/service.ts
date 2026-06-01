@@ -10,10 +10,11 @@
  */
 
 import { env } from '../../../config/env.js';
+import { Transform, type Readable } from 'node:stream';
 import { badRequest, forbidden, notFound, AppError } from '../../../shared/errors.js';
 import { isAcceptingNewWork } from '../../../lib/lifecycle.js';
 import { generateStorageKey } from '../../../shared/storage-path.js';
-import { getUploadLimits } from '../../../shared/upload-limits.js';
+import { acquireUploadSlot, getUploadLimits, releaseUploadSlot } from '../../../shared/upload-limits.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
 import { getSiteSettings } from '../../../shared/site-settings.js';
 import { logger } from '../../../lib/logger.js';
@@ -30,9 +31,82 @@ import {
 } from '../../../lib/storage.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import { replaceOrCreateReplaceableAsset } from '../project/repository.js';
+import type {
+	GameUploadChunkResponse,
+	GameUploadCompleteResponse,
+	GameUploadSession,
+	GameUploadStatus,
+} from '@pcu/contracts';
 import * as repo from './repository.js';
 
 // ── Helpers ─────────────────────────────────────────────────
+
+const MB = 1024 * 1024;
+
+function chunkByteLength(chunk: unknown, encoding: BufferEncoding): number {
+	if (Buffer.isBuffer(chunk)) return chunk.length;
+	if (chunk instanceof Uint8Array) return chunk.byteLength;
+	if (typeof chunk === 'string') return Buffer.byteLength(chunk, encoding);
+	return 0;
+}
+
+function toError(err: unknown): Error {
+	return err instanceof Error ? err : new Error(String(err));
+}
+
+function createCountedChunkStream(
+	body: NodeJS.ReadableStream,
+	chunkIndex: number,
+	expectedSize: number,
+): { stream: Readable; bytesWritten: () => number; destroy: (err?: unknown) => void } {
+	const source = body as Readable;
+	let written = 0;
+
+	const counter = new Transform({
+		transform(chunk, encoding, callback) {
+			written += chunkByteLength(chunk, encoding as BufferEncoding);
+			if (written > expectedSize) {
+				callback(new AppError(413, `Chunk ${chunkIndex} exceeds expected size`, 'PAYLOAD_TOO_LARGE'));
+				return;
+			}
+			callback(null, chunk);
+		},
+		flush(callback) {
+			if (written !== expectedSize) {
+				callback(badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${written}`));
+				return;
+			}
+			callback();
+		},
+	});
+
+	source.once('error', (err) => counter.destroy(err));
+	counter.once('error', () => {
+		if (!source.destroyed) source.destroy();
+	});
+	source.pipe(counter);
+
+	return {
+		stream: counter,
+		bytesWritten: () => written,
+		destroy: (err?: unknown) => {
+			const error = err == null ? undefined : toError(err);
+			if (!counter.destroyed) counter.destroy(error);
+			if (!source.destroyed) source.destroy(error);
+		},
+	};
+}
+
+export function resolveChunkSizeBytes(
+	settings: { maxChunkSizeMb: number },
+	cfg: { UPLOAD_CHUNK_SIZE_MB: number } = env(),
+): number {
+	return Math.max(1, Math.floor(Math.min(settings.maxChunkSizeMb, cfg.UPLOAD_CHUNK_SIZE_MB) * MB));
+}
+
+export function chunkUploadBodyLimitBytes(cfg: { UPLOAD_CHUNK_SIZE_MB: number } = env()): number {
+	return Math.max(1, Math.floor(cfg.UPLOAD_CHUNK_SIZE_MB * MB));
+}
 
 /** Load and validate a session (ownership, expiry) */
 async function loadSession(sessionId: string, userId: number, userRole: string) {
@@ -70,7 +144,7 @@ export async function createSession(
 	exhibitionId: number,
 	user: { id: number; role: string },
 	body: { originalName?: string; totalBytes?: number },
-) {
+): Promise<GameUploadSession> {
 	// Refuse to start new multi-chunk sessions once shutdown has begun — in-flight
 	// `complete` calls are still allowed so existing uploads don't get truncated.
 	if (!isAcceptingNewWork()) {
@@ -91,7 +165,7 @@ export async function createSession(
 	// Read dynamic limit from DB
 	const settings = await getSiteSettings();
 	const maxGameBytes = settings.maxGameFileMb * 1024 * 1024;
-	const chunkSizeBytes = settings.maxChunkSizeMb * 1024 * 1024;
+	const chunkSizeBytes = resolveChunkSizeBytes(settings, cfg);
 
 	// Apply role-based limit
 	const roleLimits = getUploadLimits(user.role as any);
@@ -154,73 +228,73 @@ export async function uploadChunk(
 	chunkIndex: number,
 	body: NodeJS.ReadableStream,
 	user: { id: number; role: string },
-) {
-	const session = await loadSession(sessionId, user.id, user.role);
+): Promise<GameUploadChunkResponse> {
+	acquireUploadSlot();
+	try {
+		const session = await loadSession(sessionId, user.id, user.role);
 
-	if (session.status !== 'PENDING') {
-		throw badRequest(`Cannot upload chunks: session is ${session.status}`);
-	}
-	assertGameUploadSessionWritable(session.project.status, user.role);
-
-	if (isNaN(chunkIndex) || chunkIndex < 0 || chunkIndex >= session.totalChunks) {
-		throw badRequest(`Invalid chunk index: must be 0..${session.totalChunks - 1}`);
-	}
-
-	if (!session.s3UploadId || !session.s3Key) {
-		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
-	}
-
-	const isLastChunk = chunkIndex === session.totalChunks - 1;
-	const expectedSize = isLastChunk
-		? Number(session.totalBytes) - chunkIndex * session.chunkSizeBytes
-		: session.chunkSizeBytes;
-
-	// Collect the chunk into a buffer for S3 (S3 requires content-length)
-	const chunks: Buffer[] = [];
-	let bytesWritten = 0;
-	for await (const chunk of body as AsyncIterable<Buffer>) {
-		bytesWritten += chunk.length;
-		if (bytesWritten > expectedSize + 4096) {
-			throw new AppError(413, `Chunk ${chunkIndex} exceeds expected size`, 'PAYLOAD_TOO_LARGE');
+		if (session.status !== 'PENDING') {
+			throw badRequest(`Cannot upload chunks: session is ${session.status}`);
 		}
-		chunks.push(chunk);
+		assertGameUploadSessionWritable(session.project.status, user.role);
+
+		if (isNaN(chunkIndex) || chunkIndex < 0 || chunkIndex >= session.totalChunks) {
+			throw badRequest(`Invalid chunk index: must be 0..${session.totalChunks - 1}`);
+		}
+
+		if (!session.s3UploadId || !session.s3Key) {
+			throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
+		}
+
+		const isLastChunk = chunkIndex === session.totalChunks - 1;
+		const expectedSize = isLastChunk
+			? Number(session.totalBytes) - chunkIndex * session.chunkSizeBytes
+			: session.chunkSizeBytes;
+
+		const cfg = env();
+		const partNumber = chunkIndex + 1; // S3 parts are 1-based
+		const countedBody = createCountedChunkStream(body, chunkIndex, expectedSize);
+
+		let etag: string;
+		try {
+			etag = await uploadPart(
+				cfg.S3_BUCKET_PROTECTED,
+				session.s3Key,
+				session.s3UploadId,
+				partNumber,
+				countedBody.stream,
+				expectedSize,
+			);
+		} catch (err) {
+			countedBody.destroy(err);
+			throw err;
+		}
+		const bytesWritten = countedBody.bytesWritten();
+		if (bytesWritten !== expectedSize) {
+			throw badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${bytesWritten}`);
+		}
+
+		// Store ETag and append chunk index
+		await repo.appendPartEtag(session.id, partNumber, etag);
+		const updated = await repo.appendChunkIndex(session.id, chunkIndex);
+		const newChunks = updated[0]?.uploaded_chunks ?? [];
+
+		return {
+			index: chunkIndex,
+			bytesWritten,
+			uploadedCount: newChunks.length,
+			totalChunks: session.totalChunks,
+		};
+	} finally {
+		releaseUploadSlot();
 	}
-
-	if (!isLastChunk && bytesWritten !== expectedSize) {
-		throw badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${bytesWritten}`);
-	}
-
-	const buffer = Buffer.concat(chunks);
-	const cfg = env();
-	const partNumber = chunkIndex + 1; // S3 parts are 1-based
-
-	const etag = await uploadPart(
-		cfg.S3_BUCKET_PROTECTED,
-		session.s3Key,
-		session.s3UploadId,
-		partNumber,
-		buffer,
-		buffer.length,
-	);
-
-	// Store ETag and append chunk index
-	await repo.appendPartEtag(session.id, partNumber, etag);
-	const updated = await repo.appendChunkIndex(session.id, chunkIndex);
-	const newChunks = updated[0]?.uploaded_chunks ?? [];
-
-	return {
-		index: chunkIndex,
-		bytesWritten,
-		uploadedCount: newChunks.length,
-		totalChunks: session.totalChunks,
-	};
 }
 
 /** Get current session status and progress */
 export async function getSessionStatus(
 	sessionId: string,
 	user: { id: number; role: string },
-) {
+): Promise<GameUploadStatus> {
 	const session = await loadSession(sessionId, user.id, user.role);
 	return {
 		sessionId: session.id,
@@ -240,7 +314,7 @@ export async function getSessionStatus(
 export async function completeSession(
 	sessionId: string,
 	user: { id: number; role: string },
-) {
+): Promise<GameUploadCompleteResponse> {
 	const cfg = env();
 	const session = await loadSession(sessionId, user.id, user.role);
 
@@ -393,7 +467,7 @@ export async function sweepStaleCompletingSessions(): Promise<{ swept: number }>
 export async function listSessions(
 	projectId: number,
 	user: { id: number; role: string },
-) {
+): Promise<GameUploadStatus[]> {
 	const isPrivileged = user.role === 'ADMIN' || user.role === 'OPERATOR';
 	const sessions = await repo.findActiveSessionsForListing(
 		projectId,
@@ -402,9 +476,12 @@ export async function listSessions(
 
 	return sessions.map((s) => ({
 		sessionId: s.id,
+		projectId: s.projectId,
 		originalName: s.originalName,
 		totalBytes: Number(s.totalBytes),
+		chunkSizeBytes: s.chunkSizeBytes,
 		totalChunks: s.totalChunks,
+		uploadedChunks: s.uploadedChunks,
 		uploadedCount: s.uploadedChunks.length,
 		status: s.status,
 		expiresAt: s.expiresAt.toISOString(),

@@ -10,6 +10,7 @@ import type { UserRole } from '@prisma/client';
 import type { AssetKind } from '@prisma/client';
 import { env } from '../config/env.js';
 import { AppError } from './errors.js';
+import { detectFileType, SIZE_LIMITS } from './file-signature.js';
 
 // ── Limit resolution ─────────────────────────────────────────
 
@@ -104,6 +105,72 @@ export function createByteLimiter(maxBytes: number, label = 'File'): Transform {
 				return;
 			}
 			callback(null, chunk);
+		},
+	});
+}
+
+export function kindLimitForMime(limits: UploadLimits, kind: AssetKind, mime?: string): number {
+	const baseLimit = kindLimit(limits, kind);
+	if (kind === 'POSTER' && mime === 'application/pdf') {
+		return Math.max(baseLimit, SIZE_LIMITS.posterPdf);
+	}
+	if (kind === 'IMAGE' && mime === 'application/pdf') {
+		return Math.max(baseLimit, SIZE_LIMITS.imagePdf);
+	}
+	return baseLimit;
+}
+
+/**
+ * Enforce the effective per-kind limit while streaming to temp storage.
+ * The first 16 bytes are enough for the local magic-byte detector; PDF image
+ * and poster uploads get their larger source-PDF ceiling as soon as detected.
+ */
+export function createKindAwareByteLimiter(
+	limits: UploadLimits,
+	kind: AssetKind,
+	label = 'File',
+): Transform {
+	const headerBytesNeeded = 16;
+	let header = Buffer.alloc(0);
+	let total = 0;
+	let effectiveLimit: number | undefined;
+
+	function resolveLimit(): number {
+		if (effectiveLimit !== undefined) return effectiveLimit;
+		if (header.length >= headerBytesNeeded) {
+			effectiveLimit = kindLimitForMime(limits, kind, detectFileType(header)?.mime);
+			return effectiveLimit;
+		}
+		return kindLimit(limits, kind);
+	}
+
+	function limitError(limit: number): AppError {
+		const limitMB = Math.round(limit / 1024 / 1024);
+		return new AppError(413, `${label} exceeds ${kind} size limit of ${limitMB}MB`, 'PAYLOAD_TOO_LARGE');
+	}
+
+	return new Transform({
+		transform(chunk: Buffer, _encoding, callback) {
+			total += chunk.length;
+			if (header.length < headerBytesNeeded) {
+				const remaining = headerBytesNeeded - header.length;
+				header = Buffer.concat([header, chunk.subarray(0, remaining)]);
+			}
+
+			const limit = resolveLimit();
+			if (total > limit) {
+				callback(limitError(limit));
+				return;
+			}
+			callback(null, chunk);
+		},
+		flush(callback) {
+			const limit = effectiveLimit ?? kindLimitForMime(limits, kind, detectFileType(header)?.mime);
+			if (total > limit) {
+				callback(limitError(limit));
+				return;
+			}
+			callback();
 		},
 	});
 }
