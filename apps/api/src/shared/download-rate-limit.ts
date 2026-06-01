@@ -1,5 +1,5 @@
 /**
- * In-memory IP-based rate limiter for game file downloads.
+ * In-memory IP-based rate limiter for protected asset downloads.
  *
  * When an IP exceeds the threshold, it is permanently banned via
  * a callback (which writes to the DB). Subsequent requests from

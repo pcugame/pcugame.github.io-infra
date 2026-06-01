@@ -14,7 +14,7 @@ export async function addMember(projectId: number, data: { name: string; student
 export async function updateMember(
 	projectId: number,
 	memberId: number,
-	patch: { name?: string; studentId?: string; sortOrder?: number; userId?: number | null },
+	patch: { name?: string; studentId?: string; sortOrder?: number },
 ) {
 	const member = await repo.findMemberInProject(memberId, projectId);
 	if (!member) throw notFound('Member not found');
@@ -23,7 +23,6 @@ export async function updateMember(
 		...(patch.name !== undefined ? { name: patch.name } : {}),
 		...(patch.studentId !== undefined ? { studentId: patch.studentId } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
-		...(patch.userId !== undefined ? { userId: patch.userId } : {}),
 	});
 }
 

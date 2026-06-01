@@ -4,7 +4,7 @@ import { env } from '../../config/env.js';
 import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
 import { bucketForKind } from '../../lib/s3.js';
 import { getPresignedUrl, safeDeleteObject } from '../../lib/storage.js';
-import { gameDownloadLimiter } from '../../shared/game-download-limiter.js';
+import { protectedDownloadLimiter } from '../../shared/protected-download-limiter.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './repository.js';
 
@@ -41,7 +41,7 @@ export function canStreamProtectedAsset(
 export async function loadBannedIpCache(): Promise<void> {
 	try {
 		const banned = await repo.findAllBannedIps();
-		gameDownloadLimiter.loadBannedIps(banned.map((b) => b.ip));
+		protectedDownloadLimiter.loadBannedIps(banned.map((b) => b.ip));
 		if (banned.length > 0) {
 			logger().info(`Loaded ${banned.length} banned IPs`);
 		}
@@ -74,14 +74,13 @@ export async function streamProtectedAsset(
 		throw forbidden('Not allowed to access this asset');
 	}
 
-	// GAME downloads get IP-based abuse prevention
-	if (asset.kind === 'GAME') {
-		const result = gameDownloadLimiter.check(clientIp);
-		if (result === 'ban') {
-			await repo.upsertBannedIp(clientIp, 'Rate limit exceeded (game download)')
-				.catch((err) => logger().error({ err }, 'Failed to persist IP ban'));
-			throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
-		}
+	// Count only authorized protected redirects so access checks cannot be bypassed
+	// or masked by rate-limit state.
+	const result = protectedDownloadLimiter.check(clientIp);
+	if (result === 'ban') {
+		await repo.upsertBannedIp(clientIp, 'Rate limit exceeded (protected asset download)')
+			.catch((err) => logger().error({ err }, 'Failed to persist IP ban'));
+		throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
 	}
 
 	const url = await getPresignedUrl(env().S3_BUCKET_PROTECTED, storageKey);

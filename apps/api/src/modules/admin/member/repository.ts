@@ -20,7 +20,7 @@ export function findMemberInProject(memberId: number, projectId: number) {
 /** Partial-update a member record */
 export function updateMember(
 	id: number,
-	data: { name?: string; studentId?: string; sortOrder?: number; userId?: number | null },
+	data: { name?: string; studentId?: string; sortOrder?: number },
 ) {
 	return prisma.projectMember.update({ where: { id }, data });
 }
