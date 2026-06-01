@@ -1,16 +1,18 @@
 import { badRequest } from '../../../shared/errors.js';
+import type { SiteSettingsData, UpdateSiteSettingsRequest } from '@pcu/contracts';
+import { env } from '../../../config/env.js';
 import * as repo from './repository.js';
 
 /** Get current site settings */
-export function getSettings() {
+export function getSettings(): Promise<SiteSettingsData> {
 	return repo.getSettings();
 }
 
 /** Validate and apply a settings patch */
-export async function updateSettings(body: Record<string, unknown> | null) {
+export async function updateSettings(body: Record<string, unknown> | null): Promise<SiteSettingsData> {
 	if (!body) throw badRequest('Missing body');
 
-	const patch: { maxGameFileMb?: number; maxChunkSizeMb?: number } = {};
+	const patch: UpdateSiteSettingsRequest = {};
 
 	if (body.maxGameFileMb !== undefined) {
 		const v = Number(body.maxGameFileMb);
@@ -20,7 +22,10 @@ export async function updateSettings(body: Record<string, unknown> | null) {
 
 	if (body.maxChunkSizeMb !== undefined) {
 		const v = Number(body.maxChunkSizeMb);
-		if (!Number.isInteger(v) || v < 1 || v > 100) throw badRequest('maxChunkSizeMb must be 1–100');
+		const maxChunkSizeMb = Math.floor(env().UPLOAD_CHUNK_SIZE_MB);
+		if (!Number.isInteger(v) || v < 1 || v > maxChunkSizeMb) {
+			throw badRequest(`maxChunkSizeMb must be 1-${maxChunkSizeMb}`);
+		}
 		patch.maxChunkSizeMb = v;
 	}
 

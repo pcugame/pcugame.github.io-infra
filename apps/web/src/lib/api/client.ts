@@ -227,19 +227,31 @@ export function isApiError(err: unknown): err is ApiError {
   return err instanceof ApiError;
 }
 
+function getApiErrorPayload(err: unknown): Record<string, unknown> | null {
+  if (!isApiError(err) || typeof err.body !== 'object' || err.body === null) {
+    return null;
+  }
+
+  const body = err.body as Record<string, unknown>;
+  if (typeof body.error === 'object' && body.error !== null) {
+    return body.error as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+export function getApiErrorCode(err: unknown): string | undefined {
+  const error = getApiErrorPayload(err);
+  return typeof error?.code === 'string' ? error.code : undefined;
+}
+
 export function getApiErrorMessage(err: unknown): string {
   if (isApiError(err)) {
+    const error = getApiErrorPayload(err);
+    if (typeof error?.message === 'string') return error.message;
+
     if (typeof err.body === 'object' && err.body !== null) {
       const body = err.body as Record<string, unknown>;
-      // 백엔드 에러 형식: { ok: false, error: { code, message } }
-      if (
-        typeof body.error === 'object' &&
-        body.error !== null &&
-        'message' in body.error &&
-        typeof (body.error as Record<string, unknown>).message === 'string'
-      ) {
-        return ((body.error as Record<string, unknown>).message as string);
-      }
       if (typeof body.message === 'string') return body.message;
     }
     return err.statusText;

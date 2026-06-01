@@ -17,8 +17,8 @@ const STATUS_COLORS: Record<ProjectStatus, string> = {
 
 export default function MyProjectsPage() {
 	const { data, isLoading, error, refetch } = useQuery({
-		queryKey: queryKeys.adminProjects,
-		queryFn: adminProjectApi.list,
+		queryKey: queryKeys.adminProjectsList({ page: 1, limit: 100 }),
+		queryFn: () => adminProjectApi.list({ page: 1, limit: 100 }),
 	});
 
 	if (isLoading) return <LoadingSpinner />;
@@ -33,11 +33,11 @@ export default function MyProjectsPage() {
 					<span className="admin-page-header__eyebrow">My Projects</span>
 					<h1>내 작품</h1>
 				</div>
-				<Link to="/admin/projects/new" className="btn btn--primary">
+				<Link to="/me/projects/new" className="btn btn--primary">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '0.4rem' }}>
 						<line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
 					</svg>
-					새 작품 등록
+					새 작품 제출
 				</Link>
 			</div>
 

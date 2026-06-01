@@ -92,7 +92,7 @@ jobs:
           script_stop: true
           script: |
             export PATH=$PATH:/usr/local/bin:/usr/bin
-            podman login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_TOKEN}"
+            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
             export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
             chmod +x "${DEPLOY_DIR}/deploy.sh"
             "${DEPLOY_DIR}/deploy.sh" up

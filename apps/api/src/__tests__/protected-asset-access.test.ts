@@ -23,6 +23,11 @@ describe('canStreamProtectedAsset', () => {
 		expect(canStreamProtectedAsset(asset({ kind: 'VIDEO', status: 'ARCHIVED' }))).toBe(true);
 	});
 
+	it('does not publicly expose image or poster assets through the protected route', () => {
+		expect(canStreamProtectedAsset(asset({ kind: 'IMAGE', status: 'PUBLISHED' }))).toBe(false);
+		expect(canStreamProtectedAsset(asset({ kind: 'POSTER', status: 'ARCHIVED' }))).toBe(false);
+	});
+
 	it('allows authenticated owners, linked members, and privileged roles for non-public legacy statuses', () => {
 		expect(canStreamProtectedAsset(asset({ status: 'LEGACY', creatorId: 1 }), { id: 1, role: 'USER' })).toBe(true);
 		expect(canStreamProtectedAsset(asset({ status: 'LEGACY', memberIds: [2] }), { id: 2, role: 'USER' })).toBe(true);

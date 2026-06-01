@@ -1,4 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type {
+	GameUploadChunkResponse,
+	GameUploadCompleteResponse,
+	GameUploadSession,
+	GameUploadSessionListResponse,
+	GameUploadStatus,
+} from '@pcu/contracts';
 import { sendOk, sendCreated } from '../../../shared/http.js';
 import { parseIntParam } from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
@@ -29,7 +36,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 				{ id: user.id, role: user.role },
 				request.body as { originalName?: string; totalBytes?: number },
 			);
-			sendCreated(reply, result);
+			sendCreated<GameUploadSession>(reply, result);
 		},
 	);
 
@@ -38,7 +45,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 		'/game-upload-sessions/:sessionId/chunks/:index',
 		{
 			preHandler: requireLogin,
-			bodyLimit: 100 * 1024 * 1024, // 100 MB ceiling
+			bodyLimit: gameUploadService.chunkUploadBodyLimitBytes(),
 		},
 		async (request, reply) => {
 			const user = request.currentUser!;
@@ -48,7 +55,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 				request.body as NodeJS.ReadableStream,
 				{ id: user.id, role: user.role },
 			);
-			sendOk(reply, result);
+			sendOk<GameUploadChunkResponse>(reply, result);
 		},
 	);
 
@@ -62,7 +69,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 				request.params.sessionId,
 				{ id: user.id, role: user.role },
 			);
-			sendOk(reply, result);
+			sendOk<GameUploadStatus>(reply, result);
 		},
 	);
 
@@ -76,7 +83,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 				request.params.sessionId,
 				{ id: user.id, role: user.role },
 			);
-			sendOk(reply, result);
+			sendOk<GameUploadCompleteResponse>(reply, result);
 		},
 	);
 
@@ -105,7 +112,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 				projectId,
 				{ id: user.id, role: user.role },
 			);
-			sendOk(reply, { items });
+			sendOk<GameUploadSessionListResponse>(reply, { items });
 		},
 	);
 }

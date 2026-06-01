@@ -4,7 +4,12 @@
   "scripts": {
     "test": "npm test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "build": "npm run build --workspaces --if-present",
+    "testenv:up": "docker compose -f docker-compose.integration.yml up --build -d && node scripts/smoke-integration.mjs",
+    "testenv:reset": "docker compose -f docker-compose.integration.yml down -v --remove-orphans && npm run testenv:up",
+    "testenv:down": "docker compose -f docker-compose.integration.yml down --remove-orphans",
+    "testenv:clean": "docker compose -f docker-compose.integration.yml down -v --remove-orphans",
+    "test:integration": "npm run testenv:up && docker compose -f docker-compose.integration.yml --profile e2e run --rm e2e"
   },
   "workspaces": [
     "apps/api",

@@ -14,7 +14,7 @@ const ADMIN_NAV: NavItem[] = [
 ];
 
 const USER_NAV: NavItem[] = [
-  { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
+  { to: '/me/projects/new', label: '작품 제출', icon: 'plus', end: false },
 ];
 
 const ICONS: Record<string, ReactElement> = {

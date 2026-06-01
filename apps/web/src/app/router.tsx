@@ -1,6 +1,6 @@
 // ── 라우트 정의 ──────────────────────────────────────────────
 
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
 import { Layout, AdminLayout } from '../components/layout';
 import { RequireAuth, RequireRole } from '../features/auth';
 
@@ -16,6 +16,7 @@ const ProjectDetailPage = lazy(() => import('../pages/ProjectDetailPage'));
 const LoginPage = lazy(() => import('../pages/LoginPage'));
 const MePage = lazy(() => import('../pages/MePage'));
 const MyProjectsPage = lazy(() => import('../pages/MyProjectsPage'));
+const UserProjectSubmitPage = lazy(() => import('../pages/UserProjectSubmitPage'));
 const AdminProjectsPage = lazy(() => import('../pages/admin/AdminProjectsPage'));
 const AdminProjectNewPage = lazy(() => import('../pages/admin/AdminProjectNewPage'));
 const AdminProjectEditPage = lazy(() => import('../pages/admin/AdminProjectEditPage'));
@@ -29,8 +30,7 @@ function Lazy({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<LoadingSpinner />}>{children}</Suspense>;
 }
 
-export const router = createBrowserRouter(
-  [
+export const routes: RouteObject[] = [
     {
       element: <Layout />,
       children: [
@@ -113,6 +113,16 @@ export const router = createBrowserRouter(
             </RequireAuth>
           ),
         },
+        {
+          path: '/me/projects/new',
+          element: (
+            <RequireAuth>
+              <Lazy>
+                <UserProjectSubmitPage />
+              </Lazy>
+            </RequireAuth>
+          ),
+        },
 
         // ── Admin ──────────────────────────────────────────
         {
@@ -123,6 +133,10 @@ export const router = createBrowserRouter(
             </RequireAuth>
           ),
           children: [
+            {
+              index: true,
+              element: <Navigate to="projects" replace />,
+            },
             {
               path: 'projects',
               element: (
@@ -136,7 +150,7 @@ export const router = createBrowserRouter(
             {
               path: 'projects/new',
               element: (
-                <RequireRole allowed={['USER', 'OPERATOR', 'ADMIN']}>
+                <RequireRole allowed={['OPERATOR', 'ADMIN']}>
                   <Lazy>
                     <AdminProjectNewPage />
                   </Lazy>
@@ -197,7 +211,10 @@ export const router = createBrowserRouter(
         },
       ],
     },
-  ],
+];
+
+export const router = createBrowserRouter(
+  routes,
   {
     basename: import.meta.env.BASE_URL,
   },

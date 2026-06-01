@@ -12,6 +12,16 @@ import {
   AssetKindEnum,
   parseIntParam,
 } from '../shared/validation.js';
+import type { UpdateMemberRequest } from '@pcu/contracts';
+
+type IsExact<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
+  ? ((<T>() => T extends B ? 1 : 2) extends (<T>() => T extends A ? 1 : 2) ? true : false)
+  : false;
+
+const updateMemberBodyMatchesContract: IsExact<
+  ReturnType<typeof UpdateMemberBody.parse>,
+  UpdateMemberRequest
+> = true;
 
 // ── Enum schemas ─────────────────────────────────────────────
 
@@ -217,12 +227,33 @@ describe('AddMemberBody', () => {
 });
 
 describe('UpdateMemberBody', () => {
+  it('matches the shared UpdateMemberRequest contract', () => {
+    expect(updateMemberBodyMatchesContract).toBe(true);
+  });
+
   it('accepts empty object', () => {
     expect(UpdateMemberBody.parse({})).toEqual({});
   });
 
   it('accepts partial name update', () => {
     expect(UpdateMemberBody.parse({ name: '새이름' }).name).toBe('새이름');
+  });
+
+  it('accepts profile fields only', () => {
+    expect(UpdateMemberBody.parse({
+      name: '새이름',
+      studentId: '20229999',
+      sortOrder: 2,
+    })).toEqual({
+      name: '새이름',
+      studentId: '20229999',
+      sortOrder: 2,
+    });
+  });
+
+  it('rejects userId linking fields', () => {
+    expect(() => UpdateMemberBody.parse({ userId: 123 })).toThrow();
+    expect(() => UpdateMemberBody.parse({ userId: null })).toThrow();
   });
 });
 

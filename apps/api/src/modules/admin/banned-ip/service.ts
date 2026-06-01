@@ -1,9 +1,10 @@
 import { notFound } from '../../../shared/errors.js';
-import { gameDownloadLimiter } from '../../../shared/game-download-limiter.js';
+import { protectedDownloadLimiter } from '../../../shared/protected-download-limiter.js';
+import type { BannedIpItem } from '@pcu/contracts';
 import * as repo from './repository.js';
 
 /** List all banned IPs mapped to API shape */
-export async function listBannedIps() {
+export async function listBannedIps(): Promise<BannedIpItem[]> {
 	const items = await repo.findAllBannedIps();
 	return items.map((b) => ({
 		id: b.id,
@@ -19,5 +20,5 @@ export async function unbanIp(id: number) {
 	if (!record) throw notFound('Banned IP record not found');
 
 	await repo.deleteBannedIp(record.id);
-	gameDownloadLimiter.removeBan(record.ip);
+	protectedDownloadLimiter.removeBan(record.ip);
 }

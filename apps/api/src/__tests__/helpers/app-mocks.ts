@@ -17,6 +17,7 @@ export const defaultTestEnv = {
 	COOKIE_SECURE: false,
 	COOKIE_SAME_SITE: 'lax',
 	GOOGLE_CLIENT_IDS: ['test-client-id'],
+	DEV_AUTH_ENABLED: false,
 	ALLOWED_GOOGLE_HD: '',
 	CORS_ALLOWED_ORIGINS: ['http://localhost:5173'],
 	API_PUBLIC_URL: 'http://localhost:4000',

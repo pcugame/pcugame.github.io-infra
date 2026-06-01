@@ -8,11 +8,9 @@
 
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
+import type { SiteSettingsData } from '@pcu/contracts';
 
-export interface SiteSettings {
-	maxGameFileMb: number;
-	maxChunkSizeMb: number;
-}
+export type SiteSettings = SiteSettingsData;
 
 const DEFAULTS: SiteSettings = {
 	maxGameFileMb: 5120,    // 5 GB

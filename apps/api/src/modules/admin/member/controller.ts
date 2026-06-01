@@ -29,6 +29,7 @@ export async function memberController(app: FastifyInstance): Promise<void> {
 			const memberId = parseIntParam(request.params.memberId, 'Member ID');
 			await loadProjectWithAccess(request, projectId);
 			const patch = parseBody(UpdateMemberBody, request.body);
+			// TODO: If account linking is needed, add a separate ADMIN/OPERATOR-only endpoint.
 			await memberService.updateMember(projectId, memberId, patch);
 			reply.status(204).send();
 		},

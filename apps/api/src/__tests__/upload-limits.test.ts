@@ -5,6 +5,7 @@ import {
 	kindLimit,
 	fieldnameToKind,
 	createByteLimiter,
+	createKindAwareByteLimiter,
 	acquireUploadSlot,
 	releaseUploadSlot,
 	activeUploadCount,
@@ -132,6 +133,46 @@ describe('createByteLimiter', () => {
 			expect((err as AppError).message).toContain('10MB');
 			expect((err as AppError).message).toContain('poster.jpg');
 		}
+	});
+});
+
+describe('createKindAwareByteLimiter', () => {
+	const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+	const mp4Header = Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]);
+	const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+
+	async function expectPayloadTooLarge(kind: 'IMAGE' | 'VIDEO' | 'GAME', firstChunk: Buffer, maxBytes: number) {
+		const limiter = createKindAwareByteLimiter(
+			{
+				...fakeLimits,
+				imageMaxBytes: kind === 'IMAGE' ? maxBytes : fakeLimits.imageMaxBytes,
+				videoMaxBytes: kind === 'VIDEO' ? maxBytes : fakeLimits.videoMaxBytes,
+				gameMaxBytes: kind === 'GAME' ? maxBytes : fakeLimits.gameMaxBytes,
+			},
+			kind,
+			`${kind.toLowerCase()}.bin`,
+		);
+		const source = Readable.from([firstChunk, Buffer.alloc(maxBytes)]);
+		const sink = new Writable({
+			write(_chunk, _enc, cb) { cb(); },
+		});
+
+		await expect(pipeline(source, limiter, sink)).rejects.toMatchObject({
+			statusCode: 413,
+			code: 'PAYLOAD_TOO_LARGE',
+		});
+	}
+
+	it('rejects oversized IMAGE at image limit instead of the GAME limit', async () => {
+		await expectPayloadTooLarge('IMAGE', pngHeader, 1024);
+	});
+
+	it('rejects oversized VIDEO at video limit', async () => {
+		await expectPayloadTooLarge('VIDEO', mp4Header, 1024);
+	});
+
+	it('rejects oversized GAME at game limit', async () => {
+		await expectPayloadTooLarge('GAME', zipHeader, 1024);
 	});
 });
 

@@ -26,6 +26,10 @@ const envSchema = z
       .min(1, 'GOOGLE_CLIENT_IDS must not be empty — OAuth login will not work without at least one client ID')
       .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean))
       .refine((arr) => arr.length > 0, 'GOOGLE_CLIENT_IDS must contain at least one valid client ID'),
+    DEV_AUTH_ENABLED: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
     ALLOWED_GOOGLE_HD: z.string().default(''),
     CORS_ALLOWED_ORIGINS: z
       .string()
@@ -77,7 +81,7 @@ const envSchema = z
     UPLOAD_MAX_CONCURRENT: z.coerce.number().int().positive().default(5),
     // ── Chunked game upload ─────────────────────────────────
     UPLOAD_CHUNKED_GAME_MAX_MB: z.coerce.number().positive().default(5120),   // 5 GB
-    UPLOAD_CHUNK_SIZE_MB: z.coerce.number().positive().default(10),           // 10 MB per chunk
+    UPLOAD_CHUNK_SIZE_MB: z.coerce.number().int().positive().default(10),     // 10 MB per chunk
     // UPLOAD_STAGING_ROOT removed — chunked uploads now use S3 multipart
     UPLOAD_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(1440), // 24 hours
 

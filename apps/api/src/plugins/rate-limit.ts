@@ -9,9 +9,9 @@ import type { ApiError } from '../shared/http.js';
  *
  * - `/api/health` and `/api/health/deep` — monitoring probes should never trip
  *   the limiter, and the LB polls the shallow one on a short interval.
- * - `/api/assets/protected/*` — already covered by the domain-specific download
- *   limiter in `shared/download-rate-limit.ts` (IP ban on 30 hits / 15min). Running
- *   both on the same path would double-count and confuse operators.
+ * - `/api/assets/protected/*` — covered by the domain-specific protected download
+ *   limiter after asset lookup/access checks. Running both on the same path would
+ *   double-count and confuse operators.
  *
  * Per-route buckets (login, submit) layer on top via `config.rateLimit` on the
  * route definition. Fastify merges those with the global bucket, so the stricter

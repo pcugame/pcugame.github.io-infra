@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { env } from '../../../config/env.js';
 import { sendOk, sendCreated } from '../../../shared/http.js';
-import { parseBody, parseIntParam, UpdateProjectBody, SetPosterBody, BulkStatusBody, BulkDeleteBody } from '../../../shared/validation.js';
+import { parseBody, parseIntParam, AdminProjectListQuery, UpdateProjectBody, SetPosterBody, BulkStatusBody, BulkDeleteBody } from '../../../shared/validation.js';
 import { requireLogin, requireRole } from '../../../plugins/auth.js';
 import { loadProjectWithAccess } from '../project-access.js';
 import { assertUploadAllowed } from '../upload-guard.js';
@@ -11,10 +11,11 @@ import * as repo from './repository.js';
 /** Register admin project CRUD + upload routes */
 export async function projectController(app: FastifyInstance): Promise<void> {
 	/** GET /projects — list user's projects */
-	app.get('/projects', { preHandler: requireLogin }, async (request, reply) => {
+	app.get<{ Querystring: Record<string, unknown> }>('/projects', { preHandler: requireLogin }, async (request, reply) => {
 		const user = request.currentUser!;
-		const items = await projectService.listProjects(user.id, user.role);
-		sendOk(reply, { items });
+		const query = parseBody(AdminProjectListQuery, request.query);
+		const data = await projectService.listProjects(user.id, user.role, query);
+		sendOk(reply, data);
 	});
 
 	/** GET /projects/:id — get project detail */
@@ -95,12 +96,12 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 	app.post(
 		'/projects/submit',
 		{
-			preHandler: requireLogin,
+			preHandler: requireRole('ADMIN', 'OPERATOR'),
 			bodyLimit: uploadBodyLimit,
 			config: submitRouteConfig,
 		},
 		async (request, reply) => {
-			const result = await projectService.submitProject(request as any);
+			const result = await projectService.submitProject(request as any, { audience: 'admin' });
 			sendCreated(reply, result);
 		},
 	);

@@ -3,8 +3,8 @@ import { pipeline as streamPipeline } from 'node:stream/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
-import type { AssetKind, ProjectStatus } from '@prisma/client';
-import type { AdminProjectItem } from '@pcu/contracts';
+import type { AssetKind, ProjectStatus, UserRole } from '@prisma/client';
+import type { AdminProjectItem, AdminProjectListQuery, AdminProjectListResponse } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { badRequest, conflict, forbidden, isUniqueConstraintError, notFound, payloadTooLarge } from '../../../shared/errors.js';
 import { bucketForKind } from '../../../lib/s3.js';
@@ -17,6 +17,8 @@ import {
 	kindLimit,
 	fieldnameToKind,
 	createByteLimiter,
+	createKindAwareByteLimiter,
+	kindLimitForMime,
 	acquireUploadSlot,
 	releaseUploadSlot,
 } from '../../../shared/upload-limits.js';
@@ -45,10 +47,24 @@ export function isReplaceableAssetKind(kind: AssetKind): boolean {
 // ── Business logic ──────────────────────────────────────────
 
 /** List projects visible to the current user */
-export async function listProjects(userId: number, userRole: string): Promise<AdminProjectItem[]> {
+export async function listProjects(
+	userId: number,
+	userRole: string,
+	options: AdminProjectListQuery = {},
+): Promise<AdminProjectListResponse> {
+	const listOptions: repo.FindProjectsForUserOptions = {
+		page: options.page ?? 1,
+		limit: options.limit ?? 20,
+		search: options.search,
+		year: options.year,
+		status: options.status,
+		sort: options.sort ?? 'createdAt',
+		order: options.order ?? 'desc',
+	};
 	const isPrivileged = userRole === 'ADMIN' || userRole === 'OPERATOR';
-	const projects = await repo.findProjectsForUser(userId, isPrivileged);
-	return projects.map((p) => ({
+	const { items: projects, totalItems } = await repo.findProjectsForUser(userId, isPrivileged, listOptions);
+	const totalPages = Math.ceil(totalItems / listOptions.limit);
+	const items: AdminProjectItem[] = projects.map((p) => ({
 		id: p.id,
 		title: p.title,
 		slug: p.slug,
@@ -60,6 +76,18 @@ export async function listProjects(userId: number, userRole: string): Promise<Ad
 		memberStudentIds: p.members.map((m) => m.studentId),
 		updatedAt: p.updatedAt.toISOString(),
 	}));
+
+	return {
+		items,
+		pagination: {
+			page: listOptions.page,
+			limit: listOptions.limit,
+			totalItems,
+			totalPages,
+			hasNextPage: listOptions.page < totalPages,
+			hasPreviousPage: listOptions.page > 1 && totalItems > 0,
+		},
+	};
 }
 
 /** Get a single project detail with access check for read */
@@ -197,16 +225,76 @@ export async function processFileParts(
 	return savedFiles;
 }
 
+export type SubmitProjectAudience = 'admin' | 'user';
+
+export interface SubmitProjectOptions {
+	audience: SubmitProjectAudience;
+}
+
+const USER_SUBMIT_FORBIDDEN_TOP_LEVEL_FIELDS = [
+	'status',
+	'sortOrder',
+	'isIncomplete',
+	'creator',
+	'creatorId',
+	'creatorUserId',
+	'createdBy',
+	'createdByUserId',
+	'createdByUserName',
+	'posterAssetId',
+	'assetIds',
+	'ids',
+	'bulkStatus',
+	'bulkDelete',
+] as const;
+
+const USER_SUBMIT_FORBIDDEN_MEMBER_FIELDS = ['userId', 'sortOrder'] as const;
+
+function hasOwn(obj: Record<string, unknown>, key: string): boolean {
+	return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function assertUserSubmitPayloadPolicy(rawPayload: unknown): void {
+	if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return;
+
+	const payload = rawPayload as Record<string, unknown>;
+	for (const field of USER_SUBMIT_FORBIDDEN_TOP_LEVEL_FIELDS) {
+		if (hasOwn(payload, field)) {
+			throw badRequest(`Field "${field}" is not allowed for user project submission`, 'USER_SUBMIT_FORBIDDEN_FIELD');
+		}
+	}
+
+	const members = payload.members;
+	if (!Array.isArray(members)) return;
+
+	members.forEach((member, index) => {
+		if (!member || typeof member !== 'object' || Array.isArray(member)) return;
+		const memberPayload = member as Record<string, unknown>;
+		for (const field of USER_SUBMIT_FORBIDDEN_MEMBER_FIELDS) {
+			if (hasOwn(memberPayload, field)) {
+				throw badRequest(`Field "members.${index}.${field}" is not allowed for user project submission`, 'USER_SUBMIT_FORBIDDEN_FIELD');
+			}
+		}
+	});
+}
+
 /**
  * Full submit flow: validate payload, generate slug, process files,
  * create project in DB. Handles upload slot and pipeline lifecycle.
  */
 export async function submitProject(
 	request: { parts(): AsyncIterable<any>; currentUser: { id: number; name: string; role: string } },
+	options: SubmitProjectOptions = { audience: 'admin' },
 ) {
 	const cfg = env();
 	const user = request.currentUser;
-	const limits = getUploadLimits(user.role as any);
+	const isAdminAudience = options.audience === 'admin';
+	if (isAdminAudience && user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
+		throw forbidden('Admin project submission requires operator or admin role');
+	}
+
+	const policyRole: UserRole = options.audience === 'user' ? 'USER' : user.role as UserRole;
+	const limits = getUploadLimits(policyRole);
 	const pipeline = new UploadPipeline();
 
 	acquireUploadSlot();
@@ -223,13 +311,17 @@ export async function submitProject(
 		try { rawPayload = JSON.parse(payloadJson); }
 		catch { throw badRequest('Invalid payload JSON'); }
 
+		if (options.audience === 'user') {
+			assertUserSubmitPayloadPolicy(rawPayload);
+		}
+
 		// Lazy import to avoid circular — validation is shared
 		const { parseBody, SubmitProjectPayload } = await import('../../../shared/validation.js');
 		const { exhibitionId, title, summary, description, members } =
 			parseBody(SubmitProjectPayload, rawPayload);
 
 		const exhibition = await repo.findExhibitionById(exhibitionId);
-		assertUploadAllowed(exhibition, exhibitionId, user.role as any);
+		assertUploadAllowed(exhibition, exhibitionId, policyRole);
 
 		const baseSlug = toSlug(title);
 		let slug = await generateUniqueSlug(exhibition!.id, title);
@@ -252,10 +344,15 @@ export async function submitProject(
 					description,
 					status,
 					creatorId: user.id,
-					members: members.map((m) => ({
-						...m,
-						userId: m.userId,
-					})),
+					members: options.audience === 'user'
+						? members.map((m) => ({
+								name: m.name,
+								studentId: m.studentId,
+							}))
+						: members.map((m) => ({
+								...m,
+								userId: m.userId,
+							})),
 					savedFiles: savedFiles.map((sf) => ({
 						kind: sf.kind,
 						storageKey: sf.storageKey,
@@ -320,7 +417,7 @@ export async function addAssetToProject(
 
 	acquireUploadSlot();
 	try {
-		let kind: AssetKind = 'IMAGE';
+		let kind: AssetKind | null = null;
 		let fileTmpPath: string | null = null;
 		let fileOriginalName = '';
 
@@ -332,17 +429,20 @@ export async function addAssetToProject(
 				if (!parsed.success) throw badRequest(`Invalid asset kind: ${part.value}`);
 				kind = parsed.data;
 			} else if (part.type === 'file' && part.fieldname === 'file') {
-				const streamMax = Math.max(limits.imageMaxBytes, limits.gameMaxBytes);
+				if (!kind) {
+					throw badRequest('Asset kind must be provided before file');
+				}
 				const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
 				pipeline.trackTempFile(tmpPath);
 
-				const limiter = createByteLimiter(streamMax, part.filename ?? 'file');
+				const limiter = createKindAwareByteLimiter(limits, kind, part.filename ?? 'file');
 				await streamPipeline(part.file, limiter, createWriteStream(tmpPath));
 				fileTmpPath = tmpPath;
 				fileOriginalName = part.filename ?? '';
 			}
 		}
 
+		if (!kind) throw badRequest('Missing asset kind');
 		if (!fileTmpPath) throw badRequest('No file provided');
 
 		// Post-collection size check: now that kind and file type are known,
@@ -352,13 +452,7 @@ export async function addAssetToProject(
 		await fd.read(headerBuf, 0, 16, 0);
 		await fd.close();
 		const fileType = detectFileType(headerBuf);
-		const isPdf = fileType?.mime === 'application/pdf';
-		const exactLimit =
-			kind === 'POSTER' && isPdf
-				? Math.max(kindLimit(limits, kind), SIZE_LIMITS.posterPdf)
-				: kind === 'IMAGE' && isPdf
-				? Math.max(kindLimit(limits, kind), SIZE_LIMITS.imagePdf)
-				: kindLimit(limits, kind);
+		const exactLimit = kindLimitForMime(limits, kind, fileType?.mime);
 		const fileStat = await fsp.stat(fileTmpPath);
 		if (fileStat.size > exactLimit) {
 			const limitMB = Math.round(exactLimit / 1024 / 1024);

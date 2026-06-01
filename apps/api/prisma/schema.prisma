@@ -211,7 +211,7 @@ model GameUploadSession {
   @@map("game_upload_sessions")
 }
 
-/// IP addresses permanently banned from downloading game files.
+/// IP addresses permanently banned from downloading protected assets.
 /// Auto-banned when download rate limit is exceeded; admins can unban.
 model BannedIp {
   id        Int      @id @default(autoincrement())

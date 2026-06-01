@@ -31,6 +31,18 @@ export const UpdateProjectBody = z.object({
 	sortOrder: z.number().int().min(0).optional(),
 });
 
+export const AdminProjectListQuery = z.object({
+	page: z.coerce.number().int().positive().default(1),
+	limit: z.coerce.number().int().positive().transform((n) => Math.min(n, 100)).default(20),
+	search: z.string().trim().max(100).optional().transform((value) => value || undefined),
+	year: z.coerce.number().int().optional(),
+	status: ProjectStatusEnum.optional(),
+	sort: z.enum(['createdAt', 'title', 'year', 'status']).default('createdAt'),
+	order: z.enum(['asc', 'desc']).default('desc'),
+});
+
+export type AdminProjectListQueryT = z.infer<typeof AdminProjectListQuery>;
+
 // ── Project submit (all-in-one multipart payload) ────────────
 
 const SubmitMember = z.object({
@@ -62,8 +74,12 @@ export const UpdateMemberBody = z.object({
 	name: z.string().min(1).max(50).optional(),
 	studentId: z.string().min(1).max(20).optional(),
 	sortOrder: z.number().int().min(0).optional(),
-	userId: z.coerce.number().int().positive().nullable().optional(),
-});
+	userId: z.never().optional(),
+}).transform((body) => ({
+	...(body.name !== undefined ? { name: body.name } : {}),
+	...(body.studentId !== undefined ? { studentId: body.studentId } : {}),
+	...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
+}));
 
 export const SwapMembersBody = z.object({
 	memberIdA: z.coerce.number().int().positive(),
@@ -91,6 +107,20 @@ export const BulkDeleteBody = z.object({
 
 export const GoogleLoginBody = z.object({
 	credential: z.string().min(1, 'Missing credential'),
+});
+
+export const DevAuthLoginBody = z.object({
+	role: z.enum(['USER', 'OPERATOR', 'ADMIN']),
+});
+
+export const DevAuthLoginErrorBody = z.object({
+	scenario: z.enum([
+		'domain-not-allowed',
+		'google-api-unavailable',
+		'invalid-google-token',
+		'missing-google-payload',
+		'api-server-error',
+	]),
 });
 
 // ── Helper ───────────────────────────────────────────────────

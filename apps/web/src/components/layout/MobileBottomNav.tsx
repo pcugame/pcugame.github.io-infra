@@ -4,6 +4,7 @@ import { useMe } from '../../features/auth';
 export function MobileBottomNav() {
 	const { isAuthenticated, user } = useMe();
 	const isAdmin = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
+	const submitRoute = isAdmin ? '/admin/projects/new' : '/me/projects/new';
 
 	return (
 		<nav className="mobile-bottom-nav" aria-label="모바일 탐색">
@@ -36,12 +37,12 @@ export function MobileBottomNav() {
 			)}
 
 			{isAuthenticated && (
-				<NavLink to="/admin/projects/new" className="mobile-bottom-nav__item">
+				<NavLink to={submitRoute} className="mobile-bottom-nav__item">
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<line x1="12" y1="5" x2="12" y2="19" />
 						<line x1="5" y1="12" x2="19" y2="12" />
 					</svg>
-					<span>등록</span>
+					<span>{isAdmin ? '등록' : '제출'}</span>
 				</NavLink>
 			)}
 

@@ -24,8 +24,8 @@ vi.mock('../lib/storage.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('../lib/storage.js')>();
 	return { ...actual, headObject: vi.fn().mockResolvedValue(null) };
 });
-vi.mock('../shared/game-download-limiter.js', () => ({
-	gameDownloadLimiter: {
+vi.mock('../shared/protected-download-limiter.js', () => ({
+	protectedDownloadLimiter: {
 		check: vi.fn().mockReturnValue('ok'),
 		isBanned: vi.fn().mockReturnValue(false),
 		addBan: vi.fn(),
@@ -33,7 +33,6 @@ vi.mock('../shared/game-download-limiter.js', () => ({
 		loadBannedIps: vi.fn(),
 		destroy: vi.fn(),
 	},
-	loadBannedIpCache: vi.fn().mockResolvedValue(undefined),
 }));
 // Block auth service from hitting Google — login requests only need to reach
 // the rate-limit stage, not succeed.

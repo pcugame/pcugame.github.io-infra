@@ -2,12 +2,11 @@ import { useState, useMemo, useRef, useCallback } from 'react';
 import type React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ProjectStatus } from '../../contracts';
+import type { AdminProjectListSort, ProjectStatus, SortOrder } from '../../contracts';
 import { adminProjectApi, getApiErrorMessage } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { useMe } from '../../features/auth';
 import { useDebouncedValue } from '../../lib/useDebouncedValue';
-import { matchesSearch } from '../../lib/utils';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
@@ -28,8 +27,10 @@ function titleStyle(title: string): React.CSSProperties {
 	return { fontSize: '0.66rem', lineHeight: '1.2', letterSpacing: '-0.02em' };
 }
 
-type SortKey = 'title' | 'year' | 'status' | 'incomplete' | 'updatedAt';
-type SortDir = 'asc' | 'desc';
+const DEFAULT_PAGE_LIMIT = 20;
+
+type SortKey = AdminProjectListSort;
+type SortDir = SortOrder;
 
 export default function AdminProjectsPage() {
 	const qc = useQueryClient();
@@ -37,18 +38,36 @@ export default function AdminProjectsPage() {
 	const isAdmin = user?.role === 'ADMIN';
 	const isPrivileged = user?.role === 'ADMIN' || user?.role === 'OPERATOR';
 
-	const { data, isLoading, error, refetch } = useQuery({
-		queryKey: queryKeys.adminProjects,
-		queryFn: adminProjectApi.list,
-	});
-
 	// ── Filters ──────────────────────────────────────────
 	const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'ALL'>('ALL');
 	const [search, setSearch] = useState('');
+	const [yearFilter, setYearFilter] = useState('');
 	const [isComposing, setIsComposing] = useState(false);
 	const debouncedSearch = useDebouncedValue(search, 250, isComposing);
-	const [sortKey, setSortKey] = useState<SortKey>('year');
+	const [page, setPage] = useState(1);
+	const [limit] = useState(DEFAULT_PAGE_LIMIT);
+	const [sortKey, setSortKey] = useState<SortKey>('createdAt');
 	const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+	const listQuery = useMemo(() => {
+		const term = debouncedSearch.trim();
+		const year = yearFilter.trim();
+		const parsedYear = Number(year);
+		return {
+			page,
+			limit,
+			...(term ? { search: term } : {}),
+			...(year && Number.isInteger(parsedYear) ? { year: parsedYear } : {}),
+			...(statusFilter === 'ALL' ? {} : { status: statusFilter }),
+			sort: sortKey,
+			order: sortDir,
+		};
+	}, [debouncedSearch, limit, page, sortDir, sortKey, statusFilter, yearFilter]);
+
+	const { data, isLoading, error, refetch } = useQuery({
+		queryKey: queryKeys.adminProjectsList(listQuery),
+		queryFn: () => adminProjectApi.getProjects(listQuery),
+	});
 
 	// ── Selection ────────────────────────────────────────
 	const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -76,46 +95,13 @@ export default function AdminProjectsPage() {
 	const isBusy = bulkStatusMutation.isPending || bulkDeleteMutation.isPending;
 
 	// ── Derived data ─────────────────────────────────────
-	const projects = useMemo(() => data?.items ?? [], [data]);
-
-	const filtered = useMemo(() => {
-		let list = statusFilter === 'ALL'
-			? projects
-			: projects.filter((p) => p.status === statusFilter);
-
-		if (debouncedSearch.trim()) {
-			list = list.filter((p) =>
-				matchesSearch(
-					[
-						p.title,
-						p.year,
-						p.createdByUserName,
-						...p.memberNames,
-						...p.memberStudentIds,
-					],
-					debouncedSearch,
-				),
-			);
-		}
-
-		list = [...list].sort((a, b) => {
-			let cmp = 0;
-			if (sortKey === 'title') cmp = a.title.localeCompare(b.title, 'ko');
-			else if (sortKey === 'year') cmp = a.year - b.year;
-			else if (sortKey === 'status') cmp = a.status.localeCompare(b.status);
-			else if (sortKey === 'incomplete') cmp = Number(a.isIncomplete) - Number(b.isIncomplete);
-			else if (sortKey === 'updatedAt') cmp = a.updatedAt.localeCompare(b.updatedAt);
-			return sortDir === 'asc' ? cmp : -cmp;
-		});
-
-		return list;
-	}, [projects, statusFilter, debouncedSearch, sortKey, sortDir]);
-
-	const statusCounts = {
-		ALL: projects.length,
-		PUBLISHED: projects.filter((p) => p.status === 'PUBLISHED').length,
-		ARCHIVED: projects.filter((p) => p.status === 'ARCHIVED').length,
-	};
+	const projects = useMemo(() => data?.items ?? [], [data?.items]);
+	const pagination = data?.pagination;
+	const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);
+	const selectedIds = useMemo(
+		() => projectIds.filter((id) => selected.has(id)),
+		[projectIds, selected],
+	);
 
 	// ── Mobile long-press selection ──────────────────────
 	const [mobileSelectMode, setMobileSelectMode] = useState(false);
@@ -142,15 +128,18 @@ export default function AdminProjectsPage() {
 	}
 
 	// ── Selection helpers ────────────────────────────────
-	const filteredIds = filtered.map((p) => p.id);
-	const allSelected = filteredIds.length > 0 && filteredIds.every((id) => selected.has(id));
+	const allSelected = projectIds.length > 0 && selectedIds.length === projectIds.length;
 
 	function toggleAll() {
-		if (allSelected) {
-			setSelected(new Set());
-		} else {
-			setSelected(new Set(filteredIds));
-		}
+		setSelected((prev) => {
+			const next = new Set(prev);
+			if (allSelected) {
+				projectIds.forEach((id) => next.delete(id));
+			} else {
+				projectIds.forEach((id) => next.add(id));
+			}
+			return next;
+		});
 	}
 
 	function toggleOne(id: number) {
@@ -164,6 +153,8 @@ export default function AdminProjectsPage() {
 
 	// ── Sort toggle ──────────────────────────────────────
 	function handleSort(key: SortKey) {
+		setPage(1);
+		setSelected(new Set());
 		if (sortKey === key) {
 			setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 		} else {
@@ -177,9 +168,32 @@ export default function AdminProjectsPage() {
 		return sortDir === 'asc' ? ' \u25B2' : ' \u25BC';
 	}
 
-	// ── Bulk actions ─────────────────────────────────────
-	const selectedIds = [...selected];
+	function goToPage(nextPage: number) {
+		if (!pagination) return;
+		if (nextPage < 1 || nextPage > pagination.totalPages) return;
+		setSelected(new Set());
+		setPage(nextPage);
+	}
 
+	function handleStatusFilter(nextStatus: ProjectStatus | 'ALL') {
+		setStatusFilter(nextStatus);
+		setPage(1);
+		setSelected(new Set());
+	}
+
+	function handleYearFilter(value: string) {
+		setYearFilter(value);
+		setPage(1);
+		setSelected(new Set());
+	}
+
+	function handleSearchChange(value: string) {
+		setSearch(value);
+		setPage(1);
+		setSelected(new Set());
+	}
+
+	// ── Bulk actions ─────────────────────────────────────
 	function handleBulkStatus(status: ProjectStatus) {
 		if (selectedIds.length === 0) return;
 		bulkStatusMutation.mutate({ ids: selectedIds, status });
@@ -218,10 +232,9 @@ export default function AdminProjectsPage() {
 					<button
 						key={s}
 						className={`admin-filter-tab ${statusFilter === s ? 'admin-filter-tab--active' : ''}`}
-						onClick={() => { setStatusFilter(s); setSelected(new Set()); }}
+						onClick={() => handleStatusFilter(s)}
 					>
 						{s === 'ALL' ? '전체' : STATUS_LABELS[s]}
-						<span className="admin-filter-tab__count">{statusCounts[s]}</span>
 					</button>
 				))}
 			</div>
@@ -231,18 +244,26 @@ export default function AdminProjectsPage() {
 				<input
 					type="text"
 					className="admin-search"
-					placeholder="제목, 연도, 작성자, 이름, 학번 검색..."
+					placeholder="제목, 요약, 이름, 학번 검색..."
 					value={search}
-					onChange={(e) => setSearch(e.target.value)}
+					onChange={(e) => handleSearchChange(e.target.value)}
 					onCompositionStart={() => setIsComposing(true)}
 					onCompositionEnd={(e) => {
 						setIsComposing(false);
-						setSearch((e.target as HTMLInputElement).value);
+						handleSearchChange((e.target as HTMLInputElement).value);
 					}}
 				/>
-				{isPrivileged && selected.size > 0 && (
+				<input
+					type="number"
+					className="admin-filter-input"
+					aria-label="연도 필터"
+					placeholder="연도"
+					value={yearFilter}
+					onChange={(e) => handleYearFilter(e.target.value)}
+				/>
+				{isPrivileged && selectedIds.length > 0 && (
 					<div className="admin-bulk-actions">
-						<span className="admin-bulk-actions__count">{selected.size}개 선택</span>
+						<span className="admin-bulk-actions__count">{selectedIds.length}개 선택</span>
 						<button
 							className="btn btn--small btn--secondary"
 							disabled={isBusy}
@@ -277,7 +298,7 @@ export default function AdminProjectsPage() {
 				</div>
 			)}
 
-			{filtered.length === 0 ? (
+			{projects.length === 0 ? (
 				<EmptyState message="조건에 맞는 작품이 없습니다." />
 			) : (
 				<>
@@ -304,19 +325,15 @@ export default function AdminProjectsPage() {
 									<th className="admin-table__sortable" onClick={() => handleSort('status')}>
 										상태{sortIndicator('status')}
 									</th>
-									<th className="admin-table__sortable" onClick={() => handleSort('incomplete')}>
-										누락{sortIndicator('incomplete')}
-									</th>
+									<th>누락</th>
 									<th>제작자</th>
 									<th className="admin-table__col--creator">작성자</th>
-									<th className="admin-table__sortable" onClick={() => handleSort('updatedAt')}>
-										수정일{sortIndicator('updatedAt')}
-									</th>
+									<th>수정일</th>
 									<th>관리</th>
 								</tr>
 							</thead>
 							<tbody>
-								{filtered.map((p) => (
+								{projects.map((p) => (
 									<tr key={p.id} className={selected.has(p.id) ? 'admin-table__row--selected' : ''}>
 										{isPrivileged && (
 											<td>
@@ -363,13 +380,13 @@ export default function AdminProjectsPage() {
 								<button className="admin-mobile-select-bar__all" onClick={toggleAll}>
 									{allSelected ? '전체 해제' : '전체 선택'}
 								</button>
-								<span className="admin-mobile-select-bar__count">{selected.size}개 선택됨</span>
+								<span className="admin-mobile-select-bar__count">{selectedIds.length}개 선택됨</span>
 								<button className="admin-mobile-select-bar__cancel" onClick={exitMobileSelectMode}>
 									취소
 								</button>
 							</div>
 						)}
-						{filtered.map((p) => (
+						{projects.map((p) => (
 							<div
 								key={p.id}
 								className={`admin-pcard ${selected.has(p.id) ? 'admin-pcard--selected' : ''}`}
@@ -414,6 +431,34 @@ export default function AdminProjectsPage() {
 						))}
 					</div>
 				</>
+			)}
+			{pagination && (
+				<div className="admin-pagination">
+					<span className="admin-pagination__summary">
+						총 {pagination.totalItems.toLocaleString('ko-KR')}개
+					</span>
+					<div className="admin-pagination__controls">
+						<button
+							type="button"
+							className="btn btn--small btn--secondary"
+							disabled={!pagination.hasPreviousPage}
+							onClick={() => goToPage(pagination.page - 1)}
+						>
+							이전
+						</button>
+						<span className="admin-pagination__page">
+							{pagination.totalPages === 0 ? '0 / 0' : `${pagination.page} / ${pagination.totalPages}`}
+						</span>
+						<button
+							type="button"
+							className="btn btn--small btn--secondary"
+							disabled={!pagination.hasNextPage}
+							onClick={() => goToPage(pagination.page + 1)}
+						>
+							다음
+						</button>
+					</div>
+				</div>
 			)}
 		</div>
 	);
