@@ -188,8 +188,9 @@ export async function buildApp() {
 		reply.status(ok ? 200 : 503).send({ ok, state, timestamp: new Date().toISOString(), checks });
 	});
 
-	// Deep health — DB + S3 probe. For monitoring dashboards / ops that want the full
-	// picture. Not wired to the LB so S3 alone can't take the API out of rotation.
+	// Deep health — DB + storage probe for upload/image/export diagnostics.
+	// It intentionally includes S3 and keeps the checks.s3 wire shape stable.
+	// Not wired to the LB so S3 alone can't take the API out of rotation.
 	app.get('/api/health/deep', async (_req, reply) => {
 		const state = getLifecycleState();
 		if (state === 'draining' || state === 'shutting_down') {

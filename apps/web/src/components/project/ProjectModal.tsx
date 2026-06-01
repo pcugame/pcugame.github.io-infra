@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { LoadingSpinner } from '../common';
+import { ProjectPublicMeta } from './ProjectPublicMeta';
 import { ProjectVideo } from './ProjectVideo';
 
 interface Props {
@@ -240,6 +241,8 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 									</span>
 								)}
 							</h1>
+
+							<ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
 							{/* 에셋 유실 안내 */}
 							{project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && projectVideos.length === 0 && project.images.length === 0 && (

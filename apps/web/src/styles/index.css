@@ -1579,6 +1579,59 @@ a:hover {
   margin-bottom: 1rem;
 }
 
+.project-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: -0.25rem 0 1.1rem;
+}
+
+.project-meta__platforms {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.project-meta__platform-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0.28rem 0.62rem;
+  border: 1px solid rgba(26, 81, 175, 0.22);
+  border-radius: 999px;
+  background: rgba(26, 81, 175, 0.07);
+  color: var(--color-primary);
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.project-github-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.project-github-link:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  transform: translateY(-1px);
+}
+
+.project-github-link__icon {
+  width: 1rem;
+  height: 1rem;
+}
+
 /* ── NAS Export Progress ────────────────────────────────────── */
 
 .export-progress-modal {
@@ -2010,6 +2063,11 @@ button.archive-card {
 .project-detail h1 {
   font-size: 1.8rem;
   margin-bottom: 1rem;
+}
+
+.project-detail > .project-meta {
+  margin-top: -0.4rem;
+  margin-bottom: 1.4rem;
 }
 
 .project-detail section {

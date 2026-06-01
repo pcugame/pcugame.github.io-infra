@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { GoogleAuthResponse } from '@pcu/contracts';
 import { env } from '../../config/env.js';
-import { AppError, forbidden, unauthorized } from '../../shared/errors.js';
+import { API_ERROR_CODES, AppError, forbidden, unauthorized } from '../../shared/errors.js';
 import { sendOk } from '../../shared/http.js';
 import { cookieExpiresAt } from '../../shared/session.js';
 import { parseBody, DevAuthLoginBody, DevAuthLoginErrorBody } from '../../shared/validation.js';
@@ -39,7 +39,7 @@ export async function devAuthController(app: FastifyInstance): Promise<void> {
 
 		switch (scenario) {
 			case 'domain-not-allowed':
-				throw forbidden('Email domain not allowed', 'EMAIL_DOMAIN_NOT_ALLOWED');
+				throw forbidden('Email domain not allowed', API_ERROR_CODES.EMAIL_DOMAIN_NOT_ALLOWED);
 			case 'google-api-unavailable':
 				throw new AppError(401, 'Google authentication service is unavailable', 'GOOGLE_API_UNAVAILABLE');
 			case 'invalid-google-token':

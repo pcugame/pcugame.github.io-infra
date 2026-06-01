@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage } from '../components/common';
-import { ProjectVideo } from '../components/project';
+import { ProjectPublicMeta, ProjectVideo } from '../components/project';
 
 export default function ProjectDetailPage() {
   const { year: yearParam, slug, projectId } = useParams<{
@@ -55,6 +55,8 @@ export default function ProjectDetailPage() {
           </span>
         )}
       </h1>
+
+      <ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
       {/* 에셋 유실 안내 */}
       {project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && projectVideos.length === 0 && project.images.length === 0 && (

@@ -178,7 +178,6 @@ do_up() {
     -e "WEB_PUBLIC_URL=${WEB_PUBLIC_URL}" \
     -e "UPLOAD_ROOT_PROTECTED=/app/storage/protected" \
     -e "UPLOAD_ROOT_PUBLIC=/app/storage/public" \
-    -e "AUTO_PUBLISH_DEFAULT=${AUTO_PUBLISH_DEFAULT:-false}" \
     -e "LOG_LEVEL=${LOG_LEVEL:-info}" \
     -e "S3_ENDPOINT=${S3_ENDPOINT}" \
     -e "S3_REGION=${S3_REGION:-us-east-1}" \

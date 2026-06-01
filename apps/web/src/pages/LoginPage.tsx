@@ -1,11 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useMe, useLogin } from '../features/auth';
-import type { DevAuthErrorScenario, UserRole } from '../contracts';
+import type { ApiErrorCode, DevAuthErrorScenario, UserRole } from '../contracts';
 import { initializeGoogleSignIn } from '../lib/auth';
 import { getApiErrorCode, getApiErrorMessage, isApiError } from '../lib/api';
 
-const SCHOOL_DOMAIN_ERROR_CODES = new Set(['EMAIL_DOMAIN_NOT_ALLOWED', 'DOMAIN_NOT_ALLOWED']);
+const API_ERROR_CODES = {
+  EMAIL_DOMAIN_NOT_ALLOWED: 'EMAIL_DOMAIN_NOT_ALLOWED',
+} as const satisfies Record<string, ApiErrorCode>;
+
+const SCHOOL_DOMAIN_ERROR_CODES = new Set<string>([
+  API_ERROR_CODES.EMAIL_DOMAIN_NOT_ALLOWED,
+  'DOMAIN_NOT_ALLOWED',
+]);
 
 const DEV_AUTH_ROLES: { role: UserRole; label: string }[] = [
   { role: 'USER', label: '학생' },

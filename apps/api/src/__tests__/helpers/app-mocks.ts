@@ -22,7 +22,6 @@ export const defaultTestEnv = {
 	CORS_ALLOWED_ORIGINS: ['http://localhost:5173'],
 	API_PUBLIC_URL: 'http://localhost:4000',
 	WEB_PUBLIC_URL: 'http://localhost:5173',
-	AUTO_PUBLISH_DEFAULT: false,
 	LOG_LEVEL: 'silent',
 	TRUST_PROXY: 'false',
 	RATE_LIMIT_GLOBAL_MAX: 300,

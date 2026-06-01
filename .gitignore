@@ -26,3 +26,14 @@ apps/web/src/pages/admin/AdminPreview.tsx
 
 # 개인 메모
 홍보.md
+
+# 로컬 Markdown 메모/프롬프트
+*.md
+!README.md
+!Readme.md
+!readme.md
+!**/README.md
+!**/Readme.md
+!**/readme.md
+!*.md.example
+!**/*.md.example

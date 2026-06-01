@@ -1,7 +1,7 @@
 import { OAuth2Client } from 'google-auth-library';
 import type { UserRole } from '@prisma/client';
 import { env } from '../../config/env.js';
-import { forbidden, unauthorized } from '../../shared/errors.js';
+import { API_ERROR_CODES, forbidden, unauthorized } from '../../shared/errors.js';
 import { absoluteSessionExpiresAt, generateSessionId } from '../../shared/session.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './repository.js';
@@ -74,7 +74,7 @@ export async function loginWithGoogle(credential: string) {
 
 	if (cfg.ALLOWED_GOOGLE_HD && payload.hd !== cfg.ALLOWED_GOOGLE_HD) {
 		logger().warn({ hd: payload.hd, allowedHd: cfg.ALLOWED_GOOGLE_HD }, 'Email domain rejected');
-		throw forbidden('Email domain not allowed', 'EMAIL_DOMAIN_NOT_ALLOWED');
+		throw forbidden('Email domain not allowed', API_ERROR_CODES.EMAIL_DOMAIN_NOT_ALLOWED);
 	}
 
 	const cleanName = stripDeptSuffix(payload.name ?? '');

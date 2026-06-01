@@ -1,3 +1,10 @@
+import type { ApiErrorCode } from '@pcu/contracts';
+
+export const API_ERROR_CODES = {
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  EMAIL_DOMAIN_NOT_ALLOWED: 'EMAIL_DOMAIN_NOT_ALLOWED',
+} as const satisfies Record<string, ApiErrorCode>;
+
 export class AppError extends Error {
   constructor(
     public readonly statusCode: number,
@@ -15,7 +22,7 @@ export function badRequest(message: string, code?: string): AppError {
 }
 
 export function unauthorized(message = 'Unauthorized'): AppError {
-  return new AppError(401, message, 'UNAUTHORIZED');
+  return new AppError(401, message, API_ERROR_CODES.UNAUTHORIZED);
 }
 
 export function forbidden(message = 'Forbidden', code = 'FORBIDDEN'): AppError {

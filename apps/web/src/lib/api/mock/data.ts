@@ -80,6 +80,8 @@ interface MockProjectCard {
 	title: string;
 	summary?: string;
 	posterUrl?: string;
+	githubUrl?: string;
+	platforms?: ('PC' | 'MOBILE' | 'WEB')[];
 	members: { name: string; studentId: string }[];
 }
 
@@ -88,6 +90,8 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		id: 1, slug: 'dragon-slayer', title: 'Dragon Slayer',
 		summary: '판타지 세계관 기반 3D 액션 RPG',
 		posterUrl: 'https://placehold.co/400x560/1a1a2e/e0e0ff?text=Dragon+Slayer',
+		githubUrl: 'https://github.com/pcugame/dragon-slayer',
+		platforms: ['PC', 'WEB'],
 		members: [
 			{ name: '테스트A', studentId: '2088001' },
 			{ name: '테스트B', studentId: '2088002' },
@@ -314,6 +318,8 @@ function buildDetail(card: MockProjectCard, year: number): any {
 		title: card.title,
 		summary: card.summary,
 		description: `${card.title}은(는) 배재대학교 게임공학과 ${year}년 졸업작품으로 제작된 프로젝트입니다.\n\n${card.summary ?? ''}\n\nPC 플랫폼 대상으로 개발되었습니다.`,
+		githubUrl: card.githubUrl,
+		platforms: card.platforms ?? ['PC'],
 		isIncomplete: year <= 2024,
 		video: null,
 		videos: [],
@@ -399,6 +405,7 @@ export function buildAdminProjectDetail(id: string | number): any | undefined {
 	return {
 		id: detail.id, title: detail.title, slug: detail.slug, year: detail.year,
 		summary: detail.summary, description: detail.description,
+		githubUrl: detail.githubUrl, platforms: detail.platforms,
 		isIncomplete: detail.isIncomplete, video: detail.video, videos: detail.videos,
 		status: detail.status, sortOrder: 0,
 		posterAssetId: detail.images[0]?.id, posterUrl: detail.posterUrl,

@@ -68,7 +68,7 @@ describe('health endpoints', () => {
 		expect(body.checks.db).toBe('fail');
 	});
 
-	it('/api/health/deep returns 503 when S3 fails (DB ok)', async () => {
+	it('/api/health/deep reports storage failure when the S3 probe fails', async () => {
 		headObjectMock.mockRejectedValue(new Error('S3 down'));
 		const res = await app.inject({ method: 'GET', url: '/api/health/deep' });
 		expect(res.statusCode).toBe(503);
@@ -78,7 +78,7 @@ describe('health endpoints', () => {
 		expect(body.checks.s3).toBe('fail');
 	});
 
-	it('/api/health/deep returns 200 when both checks succeed', async () => {
+	it('/api/health/deep returns 200 when DB and storage checks succeed', async () => {
 		const res = await app.inject({ method: 'GET', url: '/api/health/deep' });
 		expect(res.statusCode).toBe(200);
 		const body = JSON.parse(res.body);

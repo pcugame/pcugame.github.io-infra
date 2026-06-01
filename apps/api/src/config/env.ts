@@ -41,10 +41,6 @@ const envSchema = z
     // Legacy local storage paths — only used by migration script
     UPLOAD_ROOT_PROTECTED: z.string().default('/app/storage/protected').optional(),
     UPLOAD_ROOT_PUBLIC: z.string().default('/app/storage/public').optional(),
-    AUTO_PUBLISH_DEFAULT: z
-      .enum(['true', 'false'])
-      .default('false')
-      .transform((v) => v === 'true'),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
       .default('info'),
