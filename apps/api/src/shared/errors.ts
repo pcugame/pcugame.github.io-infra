@@ -18,8 +18,8 @@ export function unauthorized(message = 'Unauthorized'): AppError {
   return new AppError(401, message, 'UNAUTHORIZED');
 }
 
-export function forbidden(message = 'Forbidden'): AppError {
-  return new AppError(403, message, 'FORBIDDEN');
+export function forbidden(message = 'Forbidden', code = 'FORBIDDEN'): AppError {
+  return new AppError(403, message, code);
 }
 
 export function notFound(message = 'Not found'): AppError {

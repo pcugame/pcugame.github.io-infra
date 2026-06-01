@@ -26,6 +26,10 @@ const envSchema = z
       .min(1, 'GOOGLE_CLIENT_IDS must not be empty — OAuth login will not work without at least one client ID')
       .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean))
       .refine((arr) => arr.length > 0, 'GOOGLE_CLIENT_IDS must contain at least one valid client ID'),
+    DEV_AUTH_ENABLED: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
     ALLOWED_GOOGLE_HD: z.string().default(''),
     CORS_ALLOWED_ORIGINS: z
       .string()

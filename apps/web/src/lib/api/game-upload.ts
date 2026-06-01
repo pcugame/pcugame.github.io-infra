@@ -8,28 +8,17 @@
 import { env } from '../env';
 import { ApiError } from './client';
 import { failUpload, finishUpload, startUpload, updateUpload } from '../upload';
+import type {
+	GameUploadChunkResponse,
+	GameUploadCompleteResponse,
+	GameUploadSession,
+	GameUploadSessionListResponse,
+	GameUploadStatus,
+} from '../../contracts';
 
 // ── Types ────────────────────────────────────────────────────
 
-export interface GameUploadSession {
-	sessionId: string;
-	chunkSizeBytes: number;
-	totalChunks: number;
-	expiresAt: string;
-}
-
-export interface GameUploadStatus {
-	sessionId: string;
-	projectId: number;
-	originalName: string;
-	totalBytes: number;
-	chunkSizeBytes: number;
-	totalChunks: number;
-	uploadedChunks: number[];
-	uploadedCount: number;
-	status: string;
-	expiresAt: string;
-}
+export type { GameUploadSession, GameUploadStatus };
 
 export interface GameUploadProgress {
 	uploadedChunks: number;
@@ -41,7 +30,7 @@ export interface GameUploadProgress {
 
 export interface GameUploadController {
 	/** Start or resume the upload. Returns when fully complete. */
-	start: () => Promise<{ status: string; storageKey: string; sizeBytes: number }>;
+	start: () => Promise<GameUploadCompleteResponse>;
 	/** Abort the in-progress upload (can still be resumed later). */
 	abort: () => void;
 }
@@ -55,6 +44,14 @@ export interface UploadGameFileOptions {
 // ── Helpers ──────────────────────────────────────────────────
 
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+	if (import.meta.env.VITE_MOCK === 'true') {
+		const { handleMockRequest } = await import('./mock/handler');
+		return handleMockRequest<T>(path, {
+			method: init.method ?? 'GET',
+			body: init.body,
+		});
+	}
+
 	const url = `${env.API_BASE_URL}${path}`;
 	const res = await fetch(url, { ...init, credentials: 'include' });
 
@@ -103,8 +100,8 @@ export async function getGameUploadStatus(
 /** List active sessions for a project. */
 export async function listGameUploadSessions(
 	projectId: number,
-): Promise<{ items: GameUploadStatus[] }> {
-	return apiRequest<{ items: GameUploadStatus[] }>(
+): Promise<GameUploadSessionListResponse> {
+	return apiRequest<GameUploadSessionListResponse>(
 		`/api/admin/projects/${projectId}/game-upload-sessions`,
 	);
 }
@@ -187,7 +184,7 @@ export function uploadGameFile(
 				for (let attempt = 0; attempt < 3; attempt++) {
 					if (aborted) throw new Error('Upload aborted');
 					try {
-						await apiRequest(
+						await apiRequest<GameUploadChunkResponse>(
 							`/api/admin/game-upload-sessions/${session.sessionId}/chunks/${i}`,
 							{
 								method: 'PUT',
@@ -219,7 +216,7 @@ export function uploadGameFile(
 			});
 
 			// All chunks uploaded — finalize
-			const result = await apiRequest<{ status: string; storageKey: string; sizeBytes: number }>(
+			const result = await apiRequest<GameUploadCompleteResponse>(
 				`/api/admin/game-upload-sessions/${session.sessionId}/complete`,
 				{ method: 'POST' },
 			);

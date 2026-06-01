@@ -109,6 +109,20 @@ export const GoogleLoginBody = z.object({
 	credential: z.string().min(1, 'Missing credential'),
 });
 
+export const DevAuthLoginBody = z.object({
+	role: z.enum(['USER', 'OPERATOR', 'ADMIN']),
+});
+
+export const DevAuthLoginErrorBody = z.object({
+	scenario: z.enum([
+		'domain-not-allowed',
+		'google-api-unavailable',
+		'invalid-google-token',
+		'missing-google-payload',
+		'api-server-error',
+	]),
+});
+
 // ── Helper ───────────────────────────────────────────────────
 
 import { AppError } from './errors.js';

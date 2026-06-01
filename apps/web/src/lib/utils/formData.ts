@@ -1,5 +1,5 @@
 // ── FormData 직렬화 유틸 ─────────────────────────────────────
-// POST /api/admin/projects/submit 등 multipart 요청 조립용
+// Project submit multipart 요청 조립용
 
 import type { SubmitProjectPayloadInput } from '../../contracts/schemas';
 

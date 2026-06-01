@@ -1,12 +1,37 @@
 import { OAuth2Client } from 'google-auth-library';
+import type { UserRole } from '@prisma/client';
 import { env } from '../../config/env.js';
-import { unauthorized } from '../../shared/errors.js';
+import { forbidden, unauthorized } from '../../shared/errors.js';
 import { absoluteSessionExpiresAt, generateSessionId } from '../../shared/session.js';
 import { logger } from '../../lib/logger.js';
 import * as repo from './repository.js';
 import { extractStudentIdFromEmail } from './student-id.js';
 
 const oauthClient = new OAuth2Client();
+
+const DEV_AUTH_USERS: Record<UserRole, {
+	googleSub: string;
+	email: string;
+	name: string;
+	studentId?: string;
+}> = {
+	USER: {
+		googleSub: 'dev-auth-user',
+		email: 'student@test.pcu.ac.kr',
+		name: 'Integration Student',
+		studentId: '20260001',
+	},
+	OPERATOR: {
+		googleSub: 'dev-auth-operator',
+		email: 'operator@test.pcu.ac.kr',
+		name: 'Integration Operator',
+	},
+	ADMIN: {
+		googleSub: 'dev-auth-admin',
+		email: 'admin@test.pcu.ac.kr',
+		name: 'Integration Admin',
+	},
+};
 
 // UCM 정책으로 이름 뒤에 학과명이 붙어 오는 경우 제거
 const DEPT_SUFFIXES = /(?:소프트웨어공학부|게임공학전공|게임공학과|컴퓨터공학과|정보통신공학과|공학부|공학과|학부|학과|전공)$/;
@@ -15,6 +40,13 @@ const DEPT_SUFFIXES = /(?:소프트웨어공학부|게임공학전공|게임공�
 function stripDeptSuffix(name: string): string {
 	const stripped = name.replace(DEPT_SUFFIXES, '');
 	return stripped || name;
+}
+
+async function createSessionForUser(userId: number) {
+	const sessionId = generateSessionId();
+	const expiresAt = absoluteSessionExpiresAt();
+	await repo.createSession({ id: sessionId, userId, expiresAt });
+	return { sessionId, expiresAt };
 }
 
 /**
@@ -42,7 +74,7 @@ export async function loginWithGoogle(credential: string) {
 
 	if (cfg.ALLOWED_GOOGLE_HD && payload.hd !== cfg.ALLOWED_GOOGLE_HD) {
 		logger().warn({ hd: payload.hd, allowedHd: cfg.ALLOWED_GOOGLE_HD }, 'Email domain rejected');
-		throw unauthorized('Email domain not allowed');
+		throw forbidden('Email domain not allowed', 'EMAIL_DOMAIN_NOT_ALLOWED');
 	}
 
 	const cleanName = stripDeptSuffix(payload.name ?? '');
@@ -56,9 +88,16 @@ export async function loginWithGoogle(credential: string) {
 		studentId,
 	});
 
-	const sessionId = generateSessionId();
-	const expiresAt = absoluteSessionExpiresAt();
-	await repo.createSession({ id: sessionId, userId: user.id, expiresAt });
+	const { sessionId, expiresAt } = await createSessionForUser(user.id);
+
+	return { user, sessionId, expiresAt };
+}
+
+/** Create a real session for a fixed dev/test user role without Google. */
+export async function loginForDevRole(role: UserRole) {
+	const profile = DEV_AUTH_USERS[role];
+	const user = await repo.upsertDevUser({ ...profile, role });
+	const { sessionId, expiresAt } = await createSessionForUser(user.id);
 
 	return { user, sessionId, expiresAt };
 }

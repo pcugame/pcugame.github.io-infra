@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import type { UserRole } from '@prisma/client';
 
 /** Upsert a user by Google subject ID, updating profile on each login */
 export function upsertUserByGoogleSub(data: {
@@ -16,6 +17,34 @@ export function upsertUserByGoogleSub(data: {
 			name: data.name,
 			picture: data.picture,
 			...(data.studentId ? { studentId: data.studentId } : {}),
+		},
+	});
+}
+
+/** Upsert a fixed dev/test user with an explicit role. */
+export function upsertDevUser(data: {
+	googleSub: string;
+	email: string;
+	name: string;
+	role: UserRole;
+	studentId?: string | null;
+}) {
+	return prisma.user.upsert({
+		where: { googleSub: data.googleSub },
+		create: {
+			googleSub: data.googleSub,
+			email: data.email,
+			name: data.name,
+			picture: '',
+			role: data.role,
+			...(data.studentId ? { studentId: data.studentId } : {}),
+		},
+		update: {
+			email: data.email,
+			name: data.name,
+			picture: '',
+			role: data.role,
+			studentId: data.studentId ?? null,
 		},
 	});
 }
