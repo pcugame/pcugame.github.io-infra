@@ -1,0 +1,173 @@
+name: pcu-integration
+
+x-s3-env: &s3-env
+  S3_ENDPOINT: http://host.docker.internal:3900
+  S3_REGION: garage
+  S3_ACCESS_KEY_ID: PCUINTEGRATIONKEY01
+  S3_SECRET_ACCESS_KEY: pcu-integration-secret-key-change-me-000000
+  S3_BUCKET_PUBLIC: pcu-public
+  S3_BUCKET_PROTECTED: pcu-protected
+  S3_FORCE_PATH_STYLE: "true"
+  S3_PRESIGN_TTL_SEC: "60"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_DB: pcu_graduationproject_v2
+      POSTGRES_USER: pcu_admin
+      POSTGRES_PASSWORD: integration
+    volumes:
+      - integration_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pcu_admin -d pcu_graduationproject_v2"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  garage:
+    image: dxflrs/garage:v1.1.0
+    restart: unless-stopped
+    ports:
+      - "3900:3900"
+      - "3902:3902"
+      - "3903:3903"
+    volumes:
+      - ./apps/db/garage.toml:/etc/garage.toml:ro
+      - integration_garage_data:/var/lib/garage/data
+      - integration_garage_meta:/var/lib/garage/meta
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3903/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  garage-init:
+    image: dxflrs/garage:v1.1.0
+    restart: "no"
+    depends_on:
+      garage:
+        condition: service_healthy
+    environment:
+      <<: *s3-env
+      GARAGE_KEY_NAME: pcu-integration-key
+    volumes:
+      - ./apps/db/garage.toml:/etc/garage.toml:ro
+      - ./apps/db/garage-init-integration.sh:/garage-init-integration.sh:ro
+    entrypoint: ["/bin/sh", "/garage-init-integration.sh"]
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NODE_ENV: test
+      PORT: "4000"
+      LOG_LEVEL: info
+      TRUST_PROXY: "false"
+      SHUTDOWN_DRAIN_MS: "15000"
+      DATABASE_URL: postgresql://pcu_admin:integration@postgres:5432/pcu_graduationproject_v2?schema=public
+      SESSION_SECRET: integration-session-secret-change-me-32chars
+      SESSION_COOKIE_NAME: sid
+      SESSION_IDLE_MS: "7200000"
+      SESSION_ABSOLUTE_MS: "1209600000"
+      SESSION_TOUCH_MIN_INTERVAL_MS: "300000"
+      COOKIE_SECURE: "false"
+      COOKIE_SAME_SITE: lax
+      GOOGLE_CLIENT_IDS: integration-dev-auth-only.apps.googleusercontent.com
+      DEV_AUTH_ENABLED: "true"
+      ALLOWED_GOOGLE_HD: g.pcu.ac.kr
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      API_PUBLIC_URL: http://localhost:4000
+      WEB_PUBLIC_URL: http://localhost:5173
+      AUTO_PUBLISH_DEFAULT: "false"
+      RATE_LIMIT_GLOBAL_MAX: "1000"
+      RATE_LIMIT_GLOBAL_WINDOW_MS: "60000"
+      RATE_LIMIT_LOGIN_MAX: "100"
+      RATE_LIMIT_LOGIN_WINDOW_MS: "60000"
+      RATE_LIMIT_SUBMIT_MAX: "100"
+      RATE_LIMIT_SUBMIT_WINDOW_MS: "3600000"
+      UPLOAD_USER_IMAGE_MAX_MB: "10"
+      UPLOAD_USER_GAME_MAX_MB: "5120"
+      UPLOAD_USER_REQUEST_MAX_MB: "250"
+      UPLOAD_USER_MAX_FILES: "10"
+      UPLOAD_PRIVILEGED_IMAGE_MAX_MB: "15"
+      UPLOAD_PRIVILEGED_GAME_MAX_MB: "5120"
+      UPLOAD_PRIVILEGED_REQUEST_MAX_MB: "1200"
+      UPLOAD_PRIVILEGED_MAX_FILES: "20"
+      UPLOAD_MAX_CONCURRENT: "5"
+      UPLOAD_CHUNKED_GAME_MAX_MB: "5120"
+      UPLOAD_CHUNK_SIZE_MB: "10"
+      UPLOAD_SESSION_TTL_MINUTES: "1440"
+      <<: *s3-env
+    ports:
+      - "4000:4000"
+    command: >
+      sh -c "npx prisma migrate deploy &&
+             npx tsx prisma/seed.ts --integration &&
+             node dist/server.js"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  web:
+    image: node:22-bookworm-slim
+    restart: unless-stopped
+    working_dir: /app
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      VITE_API_BASE_URL: http://localhost:4000
+      VITE_GOOGLE_CLIENT_ID: integration-dev-auth-only.apps.googleusercontent.com
+      VITE_DEV_AUTH_ENABLED: "true"
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - integration_node_modules:/app/node_modules
+      - integration_api_node_modules:/app/apps/api/node_modules
+      - integration_web_node_modules:/app/apps/web/node_modules
+    command: >
+      sh -c "npm ci &&
+             npm run dev --workspace=apps/web -- --host 0.0.0.0"
+
+  e2e:
+    image: node:22-bookworm-slim
+    profiles: ["e2e"]
+    working_dir: /app
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+    environment:
+      INTEGRATION_API_BASE_URL: http://api:4000
+      INTEGRATION_WEB_BASE_URL: http://web:5173
+      INTEGRATION_ORIGIN: http://localhost:5173
+    volumes:
+      - .:/app:ro
+    command: ["node", "scripts/smoke-integration.mjs"]
+
+volumes:
+  integration_pg_data:
+  integration_garage_data:
+  integration_garage_meta:
+  integration_node_modules:
+  integration_api_node_modules:
+  integration_web_node_modules:

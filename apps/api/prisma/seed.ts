@@ -32,6 +32,7 @@
 import { PrismaClient } from '@prisma/client';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 if (process.env.NODE_ENV === 'production') {
   console.error('ERROR: seed must not run in production');
@@ -105,6 +106,321 @@ async function seedTestData(creatorId: number) {
     },
   });
   console.log('테스트 프로젝트:', project.id, project.title);
+}
+
+// ── 통합 테스트 데이터 + S3 fixture 업로드 ─────────────────
+
+const INTEGRATION_USERS = {
+  student: {
+    googleSub: 'dev-auth-user',
+    email: 'student@test.pcu.ac.kr',
+    name: 'Integration Student',
+    role: 'USER' as const,
+    studentId: '20260001',
+  },
+  operator: {
+    googleSub: 'dev-auth-operator',
+    email: 'operator@test.pcu.ac.kr',
+    name: 'Integration Operator',
+    role: 'OPERATOR' as const,
+    studentId: null,
+  },
+  admin: {
+    googleSub: 'dev-auth-admin',
+    email: 'admin@test.pcu.ac.kr',
+    name: 'Integration Admin',
+    role: 'ADMIN' as const,
+    studentId: null,
+  },
+  other: {
+    googleSub: 'dev-auth-other-user',
+    email: 'other@test.pcu.ac.kr',
+    name: 'Integration Other Student',
+    role: 'USER' as const,
+    studentId: '20260099',
+  },
+};
+
+const INTEGRATION_PROJECT_SLUGS = [
+  'integration-public-asset',
+  'integration-archived',
+  'integration-student-owned',
+  'integration-member-project',
+  'integration-other-owned',
+  'integration-incomplete',
+];
+
+const INTEGRATION_EXHIBITIONS = [
+  { year: 2026, title: 'Integration Upload Open' },
+  { year: 2027, title: 'Integration Upload Closed' },
+  { year: 2028, title: 'Integration Empty Exhibition' },
+];
+
+const ONE_BY_ONE_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+  'base64',
+);
+const TINY_MP4 = Buffer.from([
+  0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70,
+  0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
+  0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
+]);
+const EMPTY_ZIP = Buffer.from([
+  0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]);
+
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required env for integration seed: ${name}`);
+  return value;
+}
+
+function integrationS3Client(): S3Client {
+  return new S3Client({
+    endpoint: requiredEnv('S3_ENDPOINT'),
+    region: process.env.S3_REGION || 'garage',
+    credentials: {
+      accessKeyId: requiredEnv('S3_ACCESS_KEY_ID'),
+      secretAccessKey: requiredEnv('S3_SECRET_ACCESS_KEY'),
+    },
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
+  });
+}
+
+async function uploadIntegrationObject(
+  s3: S3Client,
+  bucket: string,
+  key: string,
+  body: Buffer,
+  contentType: string,
+) {
+  await s3.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+    ContentLength: body.length,
+  }));
+}
+
+async function upsertIntegrationUser(user: typeof INTEGRATION_USERS[keyof typeof INTEGRATION_USERS]) {
+  return prisma.user.upsert({
+    where: { googleSub: user.googleSub },
+    update: {
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      picture: '',
+      studentId: user.studentId,
+    },
+    create: {
+      googleSub: user.googleSub,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      picture: '',
+      ...(user.studentId ? { studentId: user.studentId } : {}),
+    },
+  });
+}
+
+async function seedIntegrationData() {
+  console.log('통합 테스트 데이터 초기화 중...\n');
+
+  const publicBucket = process.env.S3_BUCKET_PUBLIC || 'pcu-public';
+  const protectedBucket = process.env.S3_BUCKET_PROTECTED || 'pcu-protected';
+  const s3 = integrationS3Client();
+
+  await prisma.asset.deleteMany({
+    where: {
+      storageKey: {
+        in: [
+          'integration-poster.png',
+          'integration-image.png',
+          'integration-video.mp4',
+          'integration-game.zip',
+        ],
+      },
+    },
+  });
+  await prisma.project.deleteMany({ where: { slug: { in: INTEGRATION_PROJECT_SLUGS } } });
+  await prisma.exhibition.deleteMany({
+    where: {
+      OR: INTEGRATION_EXHIBITIONS.map((item) => ({ year: item.year, title: item.title })),
+    },
+  });
+
+  const [student, operator, admin, other] = await Promise.all([
+    upsertIntegrationUser(INTEGRATION_USERS.student),
+    upsertIntegrationUser(INTEGRATION_USERS.operator),
+    upsertIntegrationUser(INTEGRATION_USERS.admin),
+    upsertIntegrationUser(INTEGRATION_USERS.other),
+  ]);
+
+  await prisma.authSession.deleteMany({
+    where: { userId: { in: [student.id, operator.id, admin.id, other.id] } },
+  });
+
+  await uploadIntegrationObject(s3, publicBucket, '.healthcheck', Buffer.from('ok'), 'text/plain');
+  await uploadIntegrationObject(s3, publicBucket, 'integration-exhibition-poster.png', ONE_BY_ONE_PNG, 'image/png');
+  await uploadIntegrationObject(s3, publicBucket, 'integration-poster.png', ONE_BY_ONE_PNG, 'image/png');
+  await uploadIntegrationObject(s3, publicBucket, 'integration-image.png', ONE_BY_ONE_PNG, 'image/png');
+  await uploadIntegrationObject(s3, protectedBucket, 'integration-video.mp4', TINY_MP4, 'video/mp4');
+  await uploadIntegrationObject(s3, protectedBucket, 'integration-game.zip', EMPTY_ZIP, 'application/zip');
+
+  const uploadOpen = await prisma.exhibition.create({
+    data: {
+      year: 2026,
+      title: 'Integration Upload Open',
+      isUploadEnabled: true,
+      sortOrder: 0,
+      posterStorageKey: 'integration-exhibition-poster.png',
+      posterOriginalName: 'integration-exhibition-poster.png',
+      posterMimeType: 'image/png',
+      posterSizeBytes: BigInt(ONE_BY_ONE_PNG.length),
+    },
+  });
+  const uploadClosed = await prisma.exhibition.create({
+    data: {
+      year: 2027,
+      title: 'Integration Upload Closed',
+      isUploadEnabled: false,
+      sortOrder: 1,
+    },
+  });
+  const emptyExhibition = await prisma.exhibition.create({
+    data: {
+      year: 2028,
+      title: 'Integration Empty Exhibition',
+      isUploadEnabled: true,
+      sortOrder: 2,
+    },
+  });
+
+  const publicProject = await prisma.project.create({
+    data: {
+      exhibitionId: uploadOpen.id,
+      slug: 'integration-public-asset',
+      title: 'Integration Public Asset Project',
+      summary: 'Public project with poster, image, video, and game fixtures.',
+      description: 'Seeded for full-stack integration verification.',
+      status: 'PUBLISHED',
+      creatorId: student.id,
+      members: {
+        create: [{ name: student.name, studentId: student.studentId ?? '', userId: student.id, sortOrder: 0 }],
+      },
+    },
+  });
+
+  const poster = await prisma.asset.create({
+    data: {
+      projectId: publicProject.id,
+      kind: 'POSTER',
+      storageKey: 'integration-poster.png',
+      originalName: 'integration-poster.png',
+      mimeType: 'image/png',
+      sizeBytes: BigInt(ONE_BY_ONE_PNG.length),
+      isPublic: true,
+    },
+  });
+  await prisma.project.update({
+    where: { id: publicProject.id },
+    data: { posterAssetId: poster.id },
+  });
+  await prisma.asset.createMany({
+    data: [
+      {
+        projectId: publicProject.id,
+        kind: 'IMAGE',
+        storageKey: 'integration-image.png',
+        originalName: 'integration-image.png',
+        mimeType: 'image/png',
+        sizeBytes: BigInt(ONE_BY_ONE_PNG.length),
+        isPublic: true,
+      },
+      {
+        projectId: publicProject.id,
+        kind: 'VIDEO',
+        storageKey: 'integration-video.mp4',
+        originalName: 'integration-video.mp4',
+        mimeType: 'video/mp4',
+        sizeBytes: BigInt(TINY_MP4.length),
+        playbackStatus: 'READY',
+        isPublic: false,
+      },
+      {
+        projectId: publicProject.id,
+        kind: 'GAME',
+        storageKey: 'integration-game.zip',
+        originalName: 'integration-game.zip',
+        mimeType: 'application/zip',
+        sizeBytes: BigInt(EMPTY_ZIP.length),
+        playbackStatus: 'READY',
+        isPublic: false,
+      },
+    ],
+  });
+
+  await prisma.project.createMany({
+    data: [
+      {
+        exhibitionId: uploadOpen.id,
+        slug: 'integration-archived',
+        title: 'Integration Archived Project',
+        summary: 'Archived project visible in public archive flows.',
+        status: 'ARCHIVED',
+        creatorId: student.id,
+      },
+      {
+        exhibitionId: uploadOpen.id,
+        slug: 'integration-student-owned',
+        title: 'Integration Student Owned Project',
+        summary: 'Owned by the fixed USER account.',
+        status: 'PUBLISHED',
+        creatorId: student.id,
+      },
+      {
+        exhibitionId: uploadOpen.id,
+        slug: 'integration-other-owned',
+        title: 'Integration Other Owned Project',
+        summary: 'Owned by another student for permission checks.',
+        status: 'PUBLISHED',
+        creatorId: other.id,
+      },
+      {
+        exhibitionId: uploadClosed.id,
+        slug: 'integration-incomplete',
+        title: 'Integration Incomplete Project',
+        summary: 'Incomplete project in upload-disabled exhibition.',
+        isIncomplete: true,
+        status: 'PUBLISHED',
+        creatorId: student.id,
+      },
+    ],
+  });
+
+  await prisma.project.create({
+    data: {
+      exhibitionId: uploadOpen.id,
+      slug: 'integration-member-project',
+      title: 'Integration Member Project',
+      summary: 'Student is a member but not the creator.',
+      status: 'PUBLISHED',
+      creatorId: other.id,
+      members: {
+        create: [
+          { name: other.name, studentId: other.studentId ?? '', userId: other.id, sortOrder: 0 },
+          { name: student.name, studentId: student.studentId ?? '', userId: student.id, sortOrder: 1 },
+        ],
+      },
+    },
+  });
+
+  console.log('통합 테스트 사용자:', student.email, operator.email, admin.email);
+  console.log('통합 테스트 전시:', uploadOpen.id, uploadClosed.id, emptyExhibition.id);
+  console.log('통합 테스트 fixture asset: /api/assets/public/integration-poster.png');
 }
 
 // ── JSON 파일에서 실제 데이터 임포트 ──────────────────
@@ -237,8 +553,14 @@ async function importFromJson(filePath: string, creatorId: number) {
 async function main() {
   const args = process.argv.slice(2);
   const importIndex = args.indexOf('--import');
+  const integration = args.includes('--integration');
 
   console.log('━━━ PCU Graduation DB Seed ━━━\n');
+
+  if (integration) {
+    await seedIntegrationData();
+    return;
+  }
 
   // 항상 테스트 ADMIN 생성
   const { user: admin, sessionId } = await seedTestAdmin();
