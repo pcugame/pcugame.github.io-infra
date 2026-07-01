@@ -1,0 +1,116 @@
+/* ── Me Page ──────────────────────────────────────────────────── */
+
+.me-page {
+  max-width: 480px;
+}
+
+.me-profile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.me-profile__avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  font-weight: 800;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 4px 16px rgba(26, 81, 175, 0.2);
+}
+
+[data-theme='dark'] .me-profile__avatar {
+  box-shadow: 0 4px 16px rgba(124, 172, 248, 0.15);
+}
+
+.me-profile__name {
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.35rem;
+}
+
+.me-profile__role {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: rgba(26, 81, 175, 0.08);
+  color: var(--color-primary);
+}
+
+.me-role--operator {
+  background: rgba(234, 179, 8, 0.1);
+  color: #b45309;
+}
+
+.me-role--admin {
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--color-danger);
+}
+
+[data-theme='dark'] .me-role--operator {
+  background: rgba(234, 179, 8, 0.12);
+  color: #facc15;
+}
+
+[data-theme='dark'] .me-role--admin {
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+}
+
+.me-card {
+  background: var(--color-surface);
+  padding: 0;
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.me-info-list {
+  list-style: none;
+}
+
+.me-info-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.me-info-item:last-child {
+  border-bottom: none;
+}
+
+.me-info-item__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.me-info-item__value {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-text);
+  text-align: right;
+}
+
+.me-logout-btn {
+  width: 100%;
+  justify-content: center;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+}
+

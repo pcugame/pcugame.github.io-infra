@@ -1,0 +1,283 @@
+/* ── Reset & Variables ────────────────────────────────────────── */
+
+:root {
+  --color-primary: #1a51af;
+  --color-primary-hover: #143d8a;
+  --color-primary-btn: #2461d4;
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+  --color-secondary: #64748b;
+  --color-bg: #eef1f8;
+  --color-surface: #f5f5f9;
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-border: #dce6f5;
+  --color-success: #16a34a;
+  --radius: 10px;
+  --shadow: 0 2px 16px rgba(26, 81, 175, 0.08);
+  --shadow-lg: 0 4px 24px rgba(26, 81, 175, 0.12);
+  --max-width: 1200px;
+  --header-height: 80px;
+}
+
+/* ── Dark Theme — 회색조 기반 ────────────────────────────────── */
+
+[data-theme='dark'] {
+  --color-primary: #7cacf8;
+  --color-primary-hover: #5a94f0;
+  --color-primary-btn: #5a94f0;
+  --color-danger: #f87171;
+  --color-danger-hover: #ef4444;
+  --color-secondary: #9ca3af;
+  --color-bg: #161618;
+  --color-surface: #1e1e21;
+  --color-text: #e4e4e7;
+  --color-text-muted: #8b8b92;
+  --color-border: #2e2e33;
+  --color-success: #34d399;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+/* ── Dark — badges ───────────────────────────────────────────── */
+
+[data-theme='dark'] .badge--published {
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+}
+
+[data-theme='dark'] .badge--archived {
+  background: rgba(156, 163, 175, 0.12);
+  color: #9ca3af;
+}
+
+/* ── Dark — error box ────────────────────────────────────────── */
+
+[data-theme='dark'] .error-box {
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+/* ── Dark — all form inputs ──────────────────────────────────── */
+
+[data-theme='dark'] input,
+[data-theme='dark'] textarea,
+[data-theme='dark'] select {
+  background: #131315;
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+[data-theme='dark'] input:focus,
+[data-theme='dark'] textarea:focus,
+[data-theme='dark'] select:focus {
+  box-shadow: 0 0 0 3px rgba(124, 172, 248, 0.15);
+}
+
+[data-theme='dark'] input::placeholder,
+[data-theme='dark'] textarea::placeholder {
+  color: #606068;
+}
+
+/* ── Dark — project card ─────────────────────────────────────── */
+
+[data-theme='dark'] .project-card__thumb--empty,
+[data-theme='dark'] .project-card__image {
+  background: #232327;
+}
+
+/* ── Dark — home landing variables ───────────────────────────── */
+
+[data-theme='dark'] .home-landing {
+  --h-bg: #161618;
+  --h-surface: #1e1e21;
+  --h-surface-tint: #252528;
+  --h-primary: #7cacf8;
+  --h-primary-btn: #5a94f0;
+  --h-primary-glow: rgba(124, 172, 248, 0.2);
+  --h-text: #e4e4e7;
+  --h-text-muted: #8b8b92;
+  --h-border: #2e2e33;
+  --h-border-light: #232327;
+  --h-dark-bg: #101012;
+  --h-dark-surface: #161618;
+  --h-cta-bg: #5a94f0;
+  --h-shadow: 0 2px 16px rgba(0, 0, 0, 0.4);
+  --h-shadow-md: 0 4px 24px rgba(0, 0, 0, 0.45);
+  --h-shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Dark — home hero (hardcoded gradients) ──────────────────── */
+
+[data-theme='dark'] .home-hero {
+  background: linear-gradient(135deg, #161618 0%, #1e1e21 50%, #161618 100%);
+}
+
+[data-theme='dark'] .home-hero__grid {
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+}
+
+[data-theme='dark'] .home-hero__glow--1 {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.04) 0%, transparent 70%);
+}
+
+[data-theme='dark'] .home-hero__glow--2 {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.03) 0%, transparent 70%);
+}
+
+[data-theme='dark'] .home-hero__char--male img {
+  filter: drop-shadow(4px 0 24px rgba(0, 0, 0, 0.3));
+}
+
+[data-theme='dark'] .home-hero__char--female img {
+  filter: drop-shadow(-4px 0 32px rgba(0, 0, 0, 0.35));
+}
+
+/* ── Dark — home buttons (hardcoded colors) ──────────────────── */
+
+[data-theme='dark'] .home-btn--primary:hover {
+  background: #4a84e0;
+}
+
+[data-theme='dark'] .home-btn--gold {
+  color: #161618;
+}
+
+[data-theme='dark'] .home-btn--gold:hover {
+  color: #161618;
+}
+
+[data-theme='dark'] .home-btn--white {
+  background: #1e1e21;
+  color: #e4e4e7;
+}
+
+[data-theme='dark'] .home-btn--white:hover {
+  background: #2e2e33;
+  color: #e4e4e7;
+}
+
+[data-theme='dark'] .home-btn--ghost {
+  color: #8b8b92;
+}
+
+/* ── Dark — home highlight (dark section) ────────────────────── */
+
+[data-theme='dark'] .home-highlight-card__poster {
+  background: #131315;
+}
+
+[data-theme='dark'] .home-highlight-card__no-poster {
+  background: linear-gradient(135deg, #1a1a1d, #101012);
+}
+
+/* ── Dark — home archive cards ───────────────────────────────── */
+
+[data-theme='dark'] .home-archive-card:hover {
+  background: #252528;
+}
+
+/* ── Dark — archive page (all hardcoded colors) ──────────────── */
+
+[data-theme='dark'] .archive-page {
+  background: transparent;
+}
+
+[data-theme='dark'] .archive-page__header {
+  border-bottom-color: #2e2e33;
+}
+
+/* archive-back/title/subtitle now use CSS vars — dark overrides not needed */
+
+[data-theme='dark'] .archive-search__input {
+  border-color: #2e2e33;
+  background: #131315;
+  color: #e4e4e7;
+}
+
+[data-theme='dark'] .archive-search__input:focus {
+  border-color: #7cacf8;
+  box-shadow: 0 0 0 3px rgba(124, 172, 248, 0.15);
+}
+
+[data-theme='dark'] .archive-count {
+  color: #8b8b92;
+}
+
+[data-theme='dark'] .archive-card {
+  background: #1e1e21;
+  border-color: #2e2e33;
+  color: #e4e4e7;
+}
+
+[data-theme='dark'] .archive-card:hover {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  border-color: #3e3e44;
+  color: #e4e4e7;
+  background: #252528;
+}
+
+[data-theme='dark'] .archive-card__image {
+  background: #232327;
+}
+
+[data-theme='dark'] .archive-card__placeholder {
+  background: linear-gradient(135deg, #232327, #1a1a1d);
+  color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='dark'] .archive-card__title {
+  color: #e4e4e7;
+}
+
+[data-theme='dark'] .archive-card:hover .archive-card__title {
+  color: #7cacf8;
+}
+
+[data-theme='dark'] .archive-card__summary {
+  color: #8b8b92;
+}
+
+[data-theme='dark'] .archive-card__members {
+  color: #6e6e76;
+}
+
+[data-theme='dark'] .archive-card__member-pill {
+  background: rgba(255, 255, 255, 0.08);
+  color: #8b8b92;
+}
+
+/* ── Theme toggle (legacy — kept for mobile bottom nav compat) ── */
+
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.theme-toggle:hover {
+  background: var(--color-bg);
+  border-color: var(--color-primary);
+}
+
+[data-theme='dark'] .theme-toggle {
+  border-color: #3a3a40;
+  color: #9a9aa0;
+}
+
+[data-theme='dark'] .theme-toggle:hover {
+  background: #252528;
+  border-color: #7cacf8;
+}

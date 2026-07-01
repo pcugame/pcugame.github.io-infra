@@ -1,0 +1,229 @@
+.upload-progress-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(6px);
+}
+
+.upload-progress-modal__panel {
+  width: min(420px, 100%);
+  padding: 1.25rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.24);
+}
+
+.upload-progress-modal__head,
+.upload-progress-modal__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.upload-progress-modal__head strong {
+  color: var(--color-text);
+  font-size: 1rem;
+}
+
+.upload-progress-modal__head span,
+.upload-progress-modal__meta,
+.upload-progress-modal__status {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.upload-progress-modal__bar-track {
+  position: relative;
+  height: 0.75rem;
+  margin: 1rem 0 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border) 70%, var(--color-surface));
+}
+
+.upload-progress-modal__bar-fill {
+  height: 100%;
+  min-width: 0.75rem;
+  border-radius: inherit;
+  background: var(--color-primary-btn, var(--color-primary));
+  transition: width 0.2s ease;
+}
+
+.upload-progress-modal__status {
+  margin: 0.9rem 0 0;
+  line-height: 1.5;
+}
+
+/* ── Game Upload Widget ──────────────────────────────────── */
+
+.game-upload {
+  border: 1px solid var(--color-border);
+  padding: 1.25rem;
+  border-radius: 12px;
+  margin-top: 1.25rem;
+  background: var(--color-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.game-upload__title {
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.game-upload__resume-banner {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  margin-bottom: 0.85rem;
+}
+
+.game-upload__resume-text {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+}
+
+.game-upload__resume-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.game-upload__file-input {
+  margin-bottom: 0.85rem;
+}
+
+.game-upload__progress-wrap {
+  margin-bottom: 0.85rem;
+}
+
+.game-upload__progress-track {
+  background: var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+  height: 26px;
+  position: relative;
+}
+
+.game-upload__progress-bar {
+  background: var(--color-primary-btn);
+  height: 100%;
+  transition: width 0.3s ease;
+  border-radius: 6px;
+}
+
+.game-upload__progress-bar--done {
+  background: var(--color-success);
+}
+
+.game-upload__progress-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.game-upload__progress-status {
+  margin: 0.3rem 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.game-upload__error {
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  margin-bottom: 0.85rem;
+  color: var(--color-danger);
+  font-size: 0.85rem;
+}
+
+.game-upload__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.game-upload__complete-text {
+  color: var(--color-success);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+/* ── Edit Page helpers ───────────────────────────────────── */
+
+.asset-current-poster {
+  margin-bottom: 0.5rem;
+  font-size: 0.88rem;
+}
+
+.asset-poster-label {
+  margin-left: 0.5rem;
+  color: var(--color-primary);
+}
+
+.member-edit-input {
+  width: 100px;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  background: var(--color-surface);
+}
+
+.member-edit-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.member-sort-order {
+  color: var(--color-text-muted);
+  font-size: 0.85em;
+  margin-left: 0.5rem;
+}
+
+/* ── Dark — game upload overrides ────────────────────────── */
+
+[data-theme='dark'] .game-upload {
+  background: var(--color-surface);
+}
+
+[data-theme='dark'] .game-upload__resume-banner {
+  background: var(--color-bg);
+}
+
+[data-theme='dark'] .game-upload__error {
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+[data-theme='dark'] .game-upload__progress-track {
+  background: #2e2e33;
+}
+
+[data-theme='dark'] .member-edit-input {
+  background: #131315;
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+[data-theme='dark'] .member-edit-input:focus {
+  box-shadow: 0 0 0 3px rgba(124, 172, 248, 0.15);
+}

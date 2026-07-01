@@ -1,8 +1,16 @@
 // ── Mock 데이터 ─────────────────────────────────────────────
 // VITE_MOCK=true 일 때 실제 API 대신 사용되는 가짜 데이터.
-// ⚠ 이 파일은 contracts 타입을 직접 import하지 않는다.
-//   contracts가 변경되어도 이 파일이 빌드를 깨뜨리지 않도록 의도적으로 분리.
-//   mock 데이터는 개발 편의 용도이므로, 실제 API 응답과 형태가 달라도 무방하다.
+
+import type {
+	AdminExhibitionItem,
+	AdminProjectDetail,
+	AdminProjectItem,
+	Platform,
+	ProjectStatus,
+	PublicProjectCard,
+	PublicProjectDetailResponse,
+	PublicYearItem,
+} from '../../../contracts';
 
 // ── 사용자 (역할 전환 가능) ──────────────────────────────────
 // localStorage의 'mock-role' 키로 전환: 'ADMIN' | 'OPERATOR' | 'USER'
@@ -56,34 +64,20 @@ export const MOCK_USER = MOCK_USERS.ADMIN;
 // ── 전시회(연도) ────────────────────────────────────────────
 // 실제 데이터: "졸업작품 전시회" 형식
 
-interface MockYearItem {
-	id: number;
-	year: number;
-	title: string;
-	projectCount: number;
-	posterUrl?: string;
-}
-
-export const MOCK_YEARS: MockYearItem[] = [
+export const MOCK_YEARS = [
 	{ id: 1, year: 2025, title: '졸업작품 전시회', projectCount: 6, posterUrl: 'https://placehold.co/540x960/0f172a/f8fafc?text=2025' },
 	{ id: 2, year: 2024, title: '졸업작품 전시회', projectCount: 5 },
 	{ id: 3, year: 2023, title: '졸업작품 전시회', projectCount: 4 },
 	{ id: 4, year: 2022, title: '졸업작품 전시회', projectCount: 3 },
-];
+] satisfies PublicYearItem[];
 
 // ── 프로젝트 카드 ────────────────────────────────────────────
 // 실제 패턴: 영문 제목 다수, 한글 제목 일부, 1~3인 팀, 학번은 20XX0XX 형식
 
-interface MockProjectCard {
-	id: number;
-	slug: string;
-	title: string;
-	summary?: string;
-	posterUrl?: string;
+type MockProjectCard = PublicProjectCard & {
 	githubUrl?: string;
-	platforms?: ('PC' | 'MOBILE' | 'WEB')[];
-	members: { name: string; studentId: string }[];
-}
+	platforms?: Platform[];
+};
 
 const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
@@ -274,7 +268,7 @@ export const MOCK_YEAR_PROJECTS: Record<number, MockProjectCard[]> = {
 
 interface MockMyProjectCard extends MockProjectCard {
 	year: number;
-	status: 'PUBLISHED' | 'ARCHIVED';
+	status: ProjectStatus;
 	ownerId: number;
 	updatedAgoSec: number;
 }
@@ -308,8 +302,7 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 
 // ── 프로젝트 상세 빌더 ──────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildDetail(card: MockProjectCard, year: number): any {
+function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): PublicProjectDetailResponse {
 	const status = 'status' in card ? card.status : 'PUBLISHED';
 	return {
 		id: card.id,
@@ -335,8 +328,7 @@ function buildDetail(card: MockProjectCard, year: number): any {
 	};
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function findProjectDetail(idOrSlug: string | number, year?: number): any | undefined {
+export function findProjectDetail(idOrSlug: string | number, year?: number): PublicProjectDetailResponse | undefined {
 	const yearsToSearch = year ? [year] : [2025, 2024, 2023, 2022];
 	for (const y of yearsToSearch) {
 		const cards = MOCK_YEAR_PROJECTS[y];
@@ -353,20 +345,21 @@ export function findProjectDetail(idOrSlug: string | number, year?: number): any
 
 // ── Admin 데이터 ─────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const MOCK_ADMIN_YEARS: any[] = MOCK_YEARS.map((y, i) => ({
+export const MOCK_ADMIN_YEARS: AdminExhibitionItem[] = MOCK_YEARS.map((y, i) => ({
 	...y,
 	isUploadEnabled: i === 0,
 	sortOrder: i,
 	projectCount: y.projectCount,
 }));
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: boolean }): any[] {
+export type MockAdminProjectItem = AdminProjectItem & {
+	createdByUserId: number;
+};
+
+export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: boolean }): MockAdminProjectItem[] {
 	const isPrivileged = opts?.isPrivileged ?? true;
 	const userId = opts?.userId;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const items: any[] = [];
+	const items: MockAdminProjectItem[] = [];
 	for (const [yearStr, cards] of Object.entries(MOCK_YEAR_PROJECTS)) {
 		for (const card of cards) {
 			items.push({
@@ -398,8 +391,7 @@ export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: 
 	return items;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildAdminProjectDetail(id: string | number): any | undefined {
+export function buildAdminProjectDetail(id: string | number): AdminProjectDetail | undefined {
 	const detail = findProjectDetail(id);
 	if (!detail) return undefined;
 	return {
@@ -409,8 +401,8 @@ export function buildAdminProjectDetail(id: string | number): any | undefined {
 		isIncomplete: detail.isIncomplete, video: detail.video, videos: detail.videos,
 		status: detail.status, sortOrder: 0,
 		posterAssetId: detail.images[0]?.id, posterUrl: detail.posterUrl,
-		members: detail.members.map((m: { id: number; name: string; studentId: string }, i: number) => ({ ...m, sortOrder: i, userId: null })),
-		assets: detail.images.map((img: { id: number; kind: string; url: string }) => ({
+		members: detail.members.map((m, i) => ({ ...m, sortOrder: i, userId: null })),
+		assets: detail.images.map((img) => ({
 			id: img.id, kind: img.kind, url: img.url, originalName: `asset-${img.id}.webp`, size: 102400,
 		})),
 	};

@@ -6,6 +6,8 @@ import { requireLogin, requireRole } from '../../../plugins/auth.js';
 import { loadProjectWithAccess } from '../project-access.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import * as projectService from './service.js';
+import { addAssetToProject } from './project-asset.service.js';
+import { submitProject } from './project-submit.service.js';
 import * as repo from './repository.js';
 
 /** Register admin project CRUD + upload routes */
@@ -101,7 +103,7 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 			config: submitRouteConfig,
 		},
 		async (request, reply) => {
-			const result = await projectService.submitProject(request as any, { audience: 'admin' });
+			const result = await submitProject(request as any, { audience: 'admin' });
 			sendCreated(reply, result);
 		},
 	);
@@ -116,7 +118,7 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 			const user = request.currentUser!;
 			const exhibition = await repo.findExhibitionById(project.exhibitionId);
 			assertUploadAllowed(exhibition, project.exhibitionId, user.role);
-			const result = await projectService.addAssetToProject(projectId, request as any);
+			const result = await addAssetToProject(projectId, request as any);
 			sendCreated(reply, result);
 		},
 	);

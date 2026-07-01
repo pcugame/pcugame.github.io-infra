@@ -1,0 +1,95 @@
+/* ── Login ────────────────────────────────────────────────────── */
+
+.login-page {
+  display: flex;
+  justify-content: center;
+  padding-top: 4rem;
+}
+
+.login-card {
+  background: var(--color-surface);
+  padding: 2.5rem;
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--color-border);
+  text-align: center;
+  max-width: 400px;
+  width: 100%;
+}
+
+.login-card h1 {
+  margin-bottom: 0.5rem;
+}
+
+.login-card p {
+  color: var(--color-text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.google-btn-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 1rem;
+  min-height: 44px; /* Google 버튼 높이 예약 — 비동기 로드 시 레이아웃 시프트 방지 */
+}
+
+.login-ucm-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  margin-bottom: 1rem;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.login-ucm-link:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.login-ucm-link__icon {
+  width: 0.9em;
+  height: 0.9em;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.login-ucm-link:hover .login-ucm-link__icon {
+  opacity: 1;
+}
+
+.login-status {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.dev-auth-panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.dev-auth-panel__group,
+.dev-auth-panel__errors {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.dev-auth-panel__group {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dev-auth-panel__errors {
+  grid-template-columns: 1fr;
+}
+
+.dev-auth-panel .btn {
+  min-height: 2.5rem;
+  justify-content: center;
+  white-space: normal;
+}
+
