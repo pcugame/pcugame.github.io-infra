@@ -1,0 +1,145 @@
+/* ── Project Detail (legacy — 직접 접근 시 폴백) ─────────────── */
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.project-detail h1 {
+  font-size: 1.8rem;
+  margin-bottom: 1rem;
+}
+
+.project-detail > .project-meta {
+  margin-top: -0.4rem;
+  margin-bottom: 1.4rem;
+}
+
+.project-detail section {
+  margin-bottom: 2rem;
+}
+
+.project-detail__members ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.project-detail__members li {
+  background: var(--color-surface);
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  border: 1px solid var(--color-border);
+}
+
+.project-detail__poster img {
+  max-width: 500px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.prose {
+  white-space: pre-wrap;
+  line-height: 1.8;
+}
+
+.video-container {
+  position: relative;
+  padding-bottom: 56.25%;
+  height: 0;
+  overflow: hidden;
+  border-radius: var(--radius);
+}
+
+.video-container iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1rem;
+}
+
+.gallery-grid img {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  width: 100%;
+}
+
+
+.incomplete-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.15em 0.5em;
+  font-size: 0.7em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.incomplete-notice {
+  margin: 0.5rem 0 1rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+}
+
+.incomplete-notice--missing {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+/* ── ProjectVideo Component ───────────────────────────────── */
+
+.project-video {
+  width: 100%;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+}
+
+.project-video video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.project-video--poster {
+  background: var(--color-surface);
+}
+
+.project-video--poster img {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.project-video__note {
+  margin: 0;
+  padding: 0.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+/* ── Exhibition Tabs ──────────────────────────────────────── */

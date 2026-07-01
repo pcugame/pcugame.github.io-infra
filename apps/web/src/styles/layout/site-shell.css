@@ -1,0 +1,245 @@
+/* ── Container ────────────────────────────────────────────────── */
+
+.container {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+/* ── Layout ───────────────────────────────────────────────────── */
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.main {
+  flex: 1;
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+}
+
+/* ── Header ───────────────────────────────────────────────────── */
+
+.site-topnav {
+  position: relative;
+  z-index: 10;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.site-topnav > .home-topnav__inner {
+  width: 100%;
+}
+
+/* ── Site Theme Toggle ───────────────────────────────────────── */
+
+.site-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.site-theme-toggle:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+[data-theme='dark'] .site-theme-toggle {
+  border-color: #3a3a40;
+  color: #9a9aa0;
+}
+
+[data-theme='dark'] .site-theme-toggle:hover {
+  border-color: #7cacf8;
+  color: #7cacf8;
+  background: rgba(124, 172, 248, 0.08);
+}
+
+/* ── Mobile Top Bar (모바일 전용 로고 바) ────────────────────── */
+
+.mobile-topbar {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /* 모바일: 데스크톱 상단 바 제거 → 하단 바로 대체 */
+  .site-topnav {
+    display: none;
+  }
+
+  .footer {
+    display: none;
+  }
+
+  /* ── 모바일 로고 바 — 홈 topnav와 동일한 크기·위치 ────── */
+  .mobile-topbar {
+    display: block;
+    padding: 0.75rem 1rem;
+  }
+
+  .mobile-topbar__logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--color-text);
+    text-decoration: none;
+    line-height: 1.2;
+  }
+
+  .mobile-topbar__logo:hover {
+    text-decoration: none;
+  }
+
+  .mobile-topbar__sig {
+    height: 32px;
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  .mobile-topbar__divider {
+    width: 1px;
+    height: 22px;
+    background: var(--color-border);
+    flex-shrink: 0;
+  }
+
+  .mobile-topbar__dept {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--color-text);
+    white-space: nowrap;
+    line-height: 1.15;
+  }
+
+  /* ── 모바일 main 레이아웃 — 모든 페이지 동일 좌우 여백 ── */
+  .main {
+    padding: 0 1rem 1rem;
+  }
+
+  .main.container {
+    padding: 0 1rem 1rem;
+  }
+
+  .main--home {
+    padding: 0 1rem 1rem;
+  }
+
+  /* 모든 페이지 배경 통일 */
+  .archive-page,
+  .years-landing {
+    background: transparent;
+  }
+
+  /* 어드민: main 패딩 제거 → admin-content가 자체 패딩 사용 */
+  .main:has(.admin-layout) {
+    padding: 0;
+  }
+}
+
+/* (header__nav styles removed — now using home-topnav__* classes in Header) */
+
+/* ── Footer ───────────────────────────────────────────────────── */
+
+.footer {
+  padding: 1.5rem 0;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+/* ── Mobile Bottom Nav ────────────────────────────────────────── */
+
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: rgba(245, 245, 249, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--color-border);
+    padding: 0.35rem 0.25rem;
+    padding-bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
+    justify-content: space-around;
+    align-items: stretch;
+  }
+
+  .mobile-bottom-nav__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.3rem 0.35rem;
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-decoration: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    transition: color 0.15s;
+    min-width: 0;
+    flex: 1;
+    font-family: inherit;
+    line-height: 1.2;
+  }
+
+  .mobile-bottom-nav__item:hover {
+    text-decoration: none;
+  }
+
+  .mobile-bottom-nav__item svg {
+    flex-shrink: 0;
+  }
+
+  .mobile-bottom-nav__item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .mobile-bottom-nav__item.active {
+    color: var(--color-primary);
+  }
+
+  /* 하단 바 높이만큼 body에 패딩 추가 */
+  .layout {
+    padding-bottom: 60px;
+  }
+
+  /* 홈 히어로: 스크롤 없음, main 여백 없음 */
+  .layout:has(.home-hero--full) {
+    padding-bottom: 0;
+    overflow: hidden;
+    height: 100svh;
+  }
+
+  .layout:has(.home-hero--full) > .main {
+    padding: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+}
