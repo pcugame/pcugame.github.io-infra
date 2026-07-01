@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm --prefix ../.. run build -w @pcu/contracts",
     "dev": "tsx watch src/server.ts",
+    "prebuild": "npm --prefix ../.. run build -w @pcu/contracts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "db:generate": "prisma generate",
@@ -14,6 +16,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:import": "tsx prisma/seed.ts --import ../db/legacy-import.json",
     "lint": "tsc --noEmit",
+    "pretest": "npm --prefix ../.. run build -w @pcu/contracts",
     "test": "vitest run"
   },
   "dependencies": {

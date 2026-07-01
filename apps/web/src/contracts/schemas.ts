@@ -1,21 +1,28 @@
-// ── Zod 스키마 (프론트 폼 validation + 향후 contracts 공유용) ─
+// ── Web form Zod wrappers around shared transport schemas ─
 
 import { z } from 'zod';
+import {
+	AddMemberSchema as SharedAddMemberSchema,
+	CreateExhibitionBaseSchema,
+	ProjectMemberInputSchema as SharedProjectMemberInputSchema,
+	ProjectStatusSchema,
+	SubmitProjectPayloadBaseSchema,
+	UpdateExhibitionBaseSchema,
+	UpdateProjectBaseSchema,
+} from '@pcu/contracts';
 
 // ── 멤버 입력 ────────────────────────────────────────────────
 
-export const ProjectMemberInputSchema = z.object({
+export const ProjectMemberInputSchema = SharedProjectMemberInputSchema.extend({
   name: z.string().min(1, '이름을 입력하세요').max(50),
   studentId: z.string().min(1, '학번을 입력하세요').max(20),
-  sortOrder: z.number().int().nonnegative().optional(),
-  userId: z.number().int().positive().optional(),
 });
 
 export type ProjectMemberInput = z.infer<typeof ProjectMemberInputSchema>;
 
 // ── 작품 등록 (submit all-in-one) ────────────────────────────
 
-export const SubmitProjectPayloadSchema = z.object({
+export const SubmitProjectPayloadSchema = SubmitProjectPayloadBaseSchema.extend({
   exhibitionId: z.number().int().positive('전시회를 선택하세요'),
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
@@ -29,41 +36,41 @@ export type SubmitProjectPayloadInput = z.infer<typeof SubmitProjectPayloadSchem
 
 // ── 작품 수정 ────────────────────────────────────────────────
 
-export const UpdateProjectFormSchema = z.object({
+export const UpdateProjectFormSchema = UpdateProjectBaseSchema.pick({
+	title: true,
+	summary: true,
+	description: true,
+	status: true,
+	sortOrder: true,
+}).extend({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
-  status: z.enum(['PUBLISHED', 'ARCHIVED']).optional(),
-  sortOrder: z.number().int().nonnegative().optional(),
+  status: ProjectStatusSchema.optional(),
 });
 
 export type UpdateProjectFormInput = z.infer<typeof UpdateProjectFormSchema>;
 
 // ── 전시회 생성/수정 ────────────────────────────────────────
 
-export const CreateExhibitionSchema = z.object({
+export const CreateExhibitionSchema = CreateExhibitionBaseSchema.extend({
   year: z.number().int().min(2021).max(2100),
   title: z.string().max(100).optional().or(z.literal('')),
-  isUploadEnabled: z.boolean().optional(),
-  sortOrder: z.number().int().nonnegative().optional(),
 });
 
 export type CreateExhibitionInput = z.infer<typeof CreateExhibitionSchema>;
 
-export const UpdateExhibitionSchema = z.object({
+export const UpdateExhibitionSchema = UpdateExhibitionBaseSchema.extend({
   title: z.string().max(100).optional().or(z.literal('')),
-  isUploadEnabled: z.boolean().optional(),
-  sortOrder: z.number().int().nonnegative().optional(),
 });
 
 export type UpdateExhibitionInput = z.infer<typeof UpdateExhibitionSchema>;
 
 // ── 멤버 추가/수정 (admin edit 화면용) ───────────────────────
 
-export const AddMemberSchema = z.object({
+export const AddMemberSchema = SharedAddMemberSchema.extend({
   name: z.string().min(1, '이름을 입력하세요').max(50),
   studentId: z.string().min(1, '학번을 입력하세요').max(20),
-  sortOrder: z.number().int().nonnegative().optional(),
 });
 
 export type AddMemberInput = z.infer<typeof AddMemberSchema>;

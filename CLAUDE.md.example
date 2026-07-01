@@ -72,6 +72,12 @@ from `apps/web/src/contracts`. Web form schemas remain in
 `apps/web/src/contracts/schemas.ts`.
 
 **Note:** API and Web both use Zod v4 (`zod@^4.4`) with the standard `zod` import path.
+Shared transport schemas live in `packages/contracts`; app-specific adapters
+should only add coercion, defaults, or UI-facing validation messages.
+Future schema-sharing work should continue moving API/Web transport boundary
+schemas into `packages/contracts`, while keeping API env validation,
+DB/legacy import validation, Prisma persistence validation, and Web-only form UX
+wrappers local to their apps.
 
 ## Coding conventions
 

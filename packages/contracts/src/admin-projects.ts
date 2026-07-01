@@ -85,7 +85,7 @@ export type SubmitProjectPayload = {
 	title: string;
 	summary?: string;
 	description?: string;
-	members: { name: string; studentId: string; sortOrder?: number }[];
+	members: { name: string; studentId: string; sortOrder?: number; userId?: number }[];
 };
 
 export type SubmitProjectResponse = {
