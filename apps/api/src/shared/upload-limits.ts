@@ -6,8 +6,8 @@
  */
 
 import { Transform } from 'node:stream';
-import type { UserRole } from '@prisma/client';
-import type { AssetKind } from '@prisma/client';
+import type { UserRole } from '../generated/prisma/client.js';
+import type { AssetKind } from '../generated/prisma/client.js';
 import { env } from '../config/env.js';
 import { AppError } from './errors.js';
 import { detectFileType, SIZE_LIMITS } from './file-signature.js';

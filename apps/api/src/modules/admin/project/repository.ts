@@ -1,5 +1,5 @@
 import { prisma } from '../../../lib/prisma.js';
-import type { AssetKind, AssetPlaybackStatus, ProjectStatus, Prisma } from '@prisma/client';
+import type { AssetKind, AssetPlaybackStatus, ProjectStatus, Prisma } from '../../../generated/prisma/client.js';
 
 // ── Shared include spec for project detail queries ──────────
 

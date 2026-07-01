@@ -1,5 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
-import type { UserRole } from '@prisma/client';
+import type { UserRole } from '../../generated/prisma/client.js';
 
 /** Upsert a user by Google subject ID, updating profile on each login */
 export function upsertUserByGoogleSub(data: {

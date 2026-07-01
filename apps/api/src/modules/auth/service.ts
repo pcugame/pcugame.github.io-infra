@@ -1,5 +1,5 @@
 import { OAuth2Client } from 'google-auth-library';
-import type { UserRole } from '@prisma/client';
+import type { UserRole } from '../../generated/prisma/client.js';
 import { env } from '../../config/env.js';
 import { API_ERROR_CODES, forbidden, unauthorized } from '../../shared/errors.js';
 import { absoluteSessionExpiresAt, generateSessionId } from '../../shared/session.js';

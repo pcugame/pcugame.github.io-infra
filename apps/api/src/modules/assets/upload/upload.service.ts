@@ -1,6 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import { createReadStream } from 'node:fs';
-import type { AssetKind } from '@prisma/client';
+import type { AssetKind } from '../../../generated/prisma/client.js';
 import { logger } from '../../../lib/logger.js';
 import { bucketForKind } from '../../../lib/s3.js';
 import { uploadFile, deleteObject } from '../../../lib/storage.js';

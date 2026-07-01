@@ -1,5 +1,5 @@
-import type { AssetKind } from '@prisma/client';
-import type { AssetPlaybackStatus } from '@prisma/client';
+import type { AssetKind } from '../../../generated/prisma/client.js';
+import type { AssetPlaybackStatus } from '../../../generated/prisma/client.js';
 
 /** Raw file part collected from multipart stream */
 export interface CollectedFile {

@@ -20,7 +20,7 @@
  * Requires: DATABASE_URL, S3_* env vars (via .env or environment)
  */
 
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../src/lib/prisma-client.js';
 import { readFileSync, readdirSync, statSync, createReadStream, copyFileSync, mkdtempSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, extname, basename } from 'node:path';
@@ -35,8 +35,9 @@ import { processPdf } from '../src/modules/assets/upload/pdf-processing.js';
 import { processVideo } from '../src/modules/assets/upload/video-processing.js';
 import { validateFile } from '../src/modules/assets/upload/file-validator.js';
 import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
-import type { AssetKind } from '@prisma/client';
-import type { AssetPlaybackStatus } from '@prisma/client';
+import type { AssetKind } from '../src/generated/prisma/client.js';
+import type { AssetPlaybackStatus } from '../src/generated/prisma/client.js';
+import type { PrismaClient } from '../src/generated/prisma/client.js';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -344,7 +345,7 @@ async function main() {
 	const opts = parseArgs();
 	loadEnv();
 
-	const prisma = new PrismaClient();
+	const prisma = createPrismaClient();
 
 	try {
 		await doImport(prisma, opts);

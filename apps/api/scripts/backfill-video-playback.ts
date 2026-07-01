@@ -8,13 +8,13 @@
  * only playback_* fields on the Asset row are updated.
  */
 
-import { PrismaClient } from '@prisma/client';
 import { createReadStream, mkdtempSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, extname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadEnv } from '../src/config/env.js';
 import { env } from '../src/config/env.js';
+import { createPrismaClient } from '../src/lib/prisma-client.js';
 import { downloadObject, uploadFile } from '../src/lib/storage.js';
 import { generateStorageKey } from '../src/shared/storage-path.js';
 import { processVideo } from '../src/modules/assets/upload/video-processing.js';
@@ -44,7 +44,7 @@ function errorMessage(err: unknown): string {
 async function main() {
 	const opts = parseArgs();
 	loadEnv();
-	const prisma = new PrismaClient();
+	const prisma = createPrismaClient();
 	const tmpDir = mkdtempSync(join(tmpdir(), 'video-playback-backfill-'));
 
 	try {

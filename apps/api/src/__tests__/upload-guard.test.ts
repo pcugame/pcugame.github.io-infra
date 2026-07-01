@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { assertUploadAllowed } from '../modules/admin/upload-guard.js';
 import { AppError } from '../shared/errors.js';
-import type { Exhibition } from '@prisma/client';
+import type { Exhibition } from '../generated/prisma/client.js';
 
 function fakeExhibition(overrides: Partial<Exhibition> = {}): Exhibition {
 	return {

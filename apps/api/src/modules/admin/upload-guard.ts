@@ -1,5 +1,5 @@
-import type { Exhibition } from '@prisma/client';
-import type { UserRole } from '@prisma/client';
+import type { Exhibition } from '../../generated/prisma/client.js';
+import type { UserRole } from '../../generated/prisma/client.js';
 import { notFound, forbidden } from '../../shared/errors.js';
 
 /**

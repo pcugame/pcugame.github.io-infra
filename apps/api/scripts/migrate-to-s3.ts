@@ -14,17 +14,18 @@
  */
 
 import { createReadStream, promises as fsp } from 'node:fs';
-import { PrismaClient } from '@prisma/client';
 import { loadEnv } from '../src/config/env.js';
+import { createPrismaClient } from '../src/lib/prisma-client.js';
 import { buildStoragePath } from '../src/shared/storage-path.js';
 import { uploadFile, headObject } from '../src/lib/storage.js';
 import { bucketForKind } from '../src/lib/s3.js';
 import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
 
-const prisma = new PrismaClient();
+let prisma: ReturnType<typeof createPrismaClient> | undefined;
 
 async function main() {
 	const cfg = loadEnv();
+	prisma = createPrismaClient();
 
 	if (!cfg.UPLOAD_ROOT_PUBLIC || !cfg.UPLOAD_ROOT_PROTECTED) {
 		console.error('ERROR: UPLOAD_ROOT_PUBLIC and UPLOAD_ROOT_PROTECTED must be set for migration.');
@@ -108,4 +109,4 @@ main()
 		console.error('Migration script failed:', err);
 		process.exit(1);
 	})
-	.finally(() => prisma.$disconnect());
+	.finally(() => prisma?.$disconnect());

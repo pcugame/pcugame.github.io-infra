@@ -5,7 +5,7 @@ import { unauthorized, forbidden } from '../shared/errors.js';
 import { cookieExpiresAt, isIdleExpired } from '../shared/session.js';
 import * as authRepo from '../modules/auth/repository.js';
 import { extractStudentIdFromEmail } from '../modules/auth/student-id.js';
-import type { UserRole } from '@prisma/client';
+import type { UserRole } from '../generated/prisma/client.js';
 
 declare module 'fastify' {
   interface FastifyRequest {

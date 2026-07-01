@@ -15,7 +15,7 @@
  * already false, this is always false.
  */
 
-import type { AssetKind } from '@prisma/client';
+import type { AssetKind } from '../generated/prisma/client.js';
 import { isPosterUrlSafe } from './poster-validation.js';
 
 export function effectiveIsIncomplete(
