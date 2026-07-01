@@ -5189,6 +5189,7 @@ fieldset.status-section legend {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 1.5rem;
+  align-items: start;
 }
 
 .archive-grid--poster {
@@ -5217,6 +5218,7 @@ fieldset.status-section legend {
   flex-direction: column;
   min-height: 44px;
   width: 100%;
+  container-type: inline-size;
 }
 
 .archive-card:hover {
@@ -5266,23 +5268,20 @@ fieldset.status-section legend {
 }
 
 .archive-card__title-wrap {
-  height: 2.86rem;
   overflow: hidden;
 }
 
 .archive-card__title {
-  font-size: 1.4rem;
+  font-size: clamp(0.95rem, 7.5cqi, 1.4rem);
   font-weight: 700;
   color: var(--color-text);
   line-height: 1.3;
-}
-
-.archive-card__title--multiline {
-  font-size: 1.1rem;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .archive-card__summary {
@@ -5304,8 +5303,9 @@ fieldset.status-section legend {
 
 .archive-card__members {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.3rem;
+  overflow: hidden;
 }
 
 .archive-card__member-pill {
@@ -6058,17 +6058,8 @@ fieldset.status-section legend {
     gap: 0.15rem;
   }
 
-  .archive-card__title-wrap {
-    height: 2.2rem;
-  }
-
   .archive-card__title {
-    font-size: 1.1rem;
     line-height: 1.25;
-  }
-
-  .archive-card__title--multiline {
-    font-size: 0.88rem;
   }
 
   .archive-card__summary {

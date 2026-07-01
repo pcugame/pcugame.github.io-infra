@@ -7,8 +7,6 @@ interface Props {
 }
 
 export function ProjectCard({ project, onSelect }: Props) {
-  const isLongTitle = project.title.length > 22;
-
   return (
     <button
       type="button"
@@ -30,11 +28,7 @@ export function ProjectCard({ project, onSelect }: Props) {
       </div>
       <div className="archive-card__body">
         <div className="archive-card__title-wrap">
-          <h3
-            className={`archive-card__title${isLongTitle ? ' archive-card__title--multiline' : ''}`}
-          >
-            {project.title}
-          </h3>
+          <h3 className="archive-card__title">{project.title}</h3>
         </div>
         {project.summary && (
           <p className="archive-card__summary">{project.summary}</p>
