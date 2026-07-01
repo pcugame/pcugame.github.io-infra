@@ -42,7 +42,8 @@ COPY packages/contracts ./packages/contracts
 COPY apps/api ./apps/api
 # Workspace-scoped bins (prisma, tsc) live here, not hoisted to root node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
-RUN npm run db:generate --workspace=apps/api && \
+RUN npm run build --workspace=@pcu/contracts && \
+    npm run db:generate --workspace=apps/api && \
     npm run build --workspace=apps/api
 
 # ── Stage 3: Production image ──

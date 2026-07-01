@@ -4,11 +4,15 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "npm --prefix ../.. run build -w @pcu/contracts",
     "dev": "vite",
+    "predev:mock": "npm --prefix ../.. run build -w @pcu/contracts",
     "dev:mock": "vite --mode mock",
+    "prebuild": "npm --prefix ../.. run build -w @pcu/contracts",
     "build": "tsc -b && vite build && node scripts/post-build.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
+    "pretest": "npm --prefix ../.. run build -w @pcu/contracts",
     "test": "vitest run"
   },
   "dependencies": {

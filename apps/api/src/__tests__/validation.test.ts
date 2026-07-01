@@ -12,7 +12,20 @@ import {
   AssetKindEnum,
   parseIntParam,
 } from '../shared/validation.js';
-import type { UpdateMemberRequest } from '@pcu/contracts';
+import type {
+  AddMemberRequest,
+  AddMemberSchemaInput,
+  CreateExhibitionBaseSchemaInput,
+  CreateExhibitionRequest,
+  SubmitProjectPayload as SubmitProjectPayloadContract,
+  SubmitProjectPayloadBaseSchemaInput,
+  UpdateExhibitionBaseSchemaInput,
+  UpdateExhibitionRequest,
+  UpdateMemberBaseSchemaInput,
+  UpdateMemberRequest,
+  UpdateProjectBaseSchemaInput,
+  UpdateProjectRequest,
+} from '@pcu/contracts';
 
 type IsExact<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2)
   ? ((<T>() => T extends B ? 1 : 2) extends (<T>() => T extends A ? 1 : 2) ? true : false)
@@ -22,10 +35,43 @@ const updateMemberBodyMatchesContract: IsExact<
   ReturnType<typeof UpdateMemberBody.parse>,
   UpdateMemberRequest
 > = true;
+const createExhibitionSchemaMatchesContract: IsExact<
+  CreateExhibitionBaseSchemaInput,
+  CreateExhibitionRequest
+> = true;
+const updateExhibitionSchemaMatchesContract: IsExact<
+  UpdateExhibitionBaseSchemaInput,
+  UpdateExhibitionRequest
+> = true;
+const updateProjectSchemaMatchesContract: IsExact<
+  UpdateProjectBaseSchemaInput,
+  UpdateProjectRequest
+> = true;
+const submitProjectSchemaMatchesContract: IsExact<
+  SubmitProjectPayloadBaseSchemaInput,
+  SubmitProjectPayloadContract
+> = true;
+const addMemberSchemaMatchesContract: IsExact<
+  AddMemberSchemaInput,
+  AddMemberRequest
+> = true;
+const updateMemberSchemaMatchesContract: IsExact<
+  UpdateMemberBaseSchemaInput,
+  UpdateMemberRequest
+> = true;
 
 // ── Enum schemas ─────────────────────────────────────────────
 
 describe('ProjectStatusEnum', () => {
+  it('keeps shared schema inferred types aligned with transport contracts', () => {
+    expect(createExhibitionSchemaMatchesContract).toBe(true);
+    expect(updateExhibitionSchemaMatchesContract).toBe(true);
+    expect(updateProjectSchemaMatchesContract).toBe(true);
+    expect(submitProjectSchemaMatchesContract).toBe(true);
+    expect(addMemberSchemaMatchesContract).toBe(true);
+    expect(updateMemberSchemaMatchesContract).toBe(true);
+  });
+
   it('accepts valid statuses', () => {
     expect(ProjectStatusEnum.parse('PUBLISHED')).toBe('PUBLISHED');
     expect(ProjectStatusEnum.parse('ARCHIVED')).toBe('ARCHIVED');

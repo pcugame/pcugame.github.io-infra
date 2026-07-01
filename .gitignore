@@ -1,6 +1,7 @@
 # Dependencies
 node_modules
 apps/api/src/generated/prisma/
+packages/contracts/dist/
 
 # Environment
 .env

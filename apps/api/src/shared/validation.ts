@@ -1,35 +1,33 @@
 import { z } from 'zod';
+import {
+	AddMemberSchema,
+	AssetKindSchema,
+	CreateExhibitionBaseSchema,
+	ProjectStatusSchema,
+	SubmitProjectPayloadBaseSchema,
+	UpdateExhibitionBaseSchema,
+	UpdateMemberBaseSchema,
+	UpdateProjectBaseSchema,
+} from '@pcu/contracts';
 
 // ── Enums (matching Prisma) ──────────────────────────────────
 
-export const ProjectStatusEnum = z.enum(['PUBLISHED', 'ARCHIVED']);
-export const AssetKindEnum = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO']);
+export const ProjectStatusEnum = ProjectStatusSchema;
+export const AssetKindEnum = AssetKindSchema;
 
 // ── Exhibition ──────────────────────────────────────────────
 
-export const CreateExhibitionBody = z.object({
-	year: z.number().int().min(2021).max(2100),
-	title: z.string().max(100).optional().default(''),
-	isUploadEnabled: z.boolean().optional().default(true),
-	sortOrder: z.number().int().min(0).optional().default(0),
+export const CreateExhibitionBody = CreateExhibitionBaseSchema.extend({
+	title: CreateExhibitionBaseSchema.shape.title.default(''),
+	isUploadEnabled: CreateExhibitionBaseSchema.shape.isUploadEnabled.default(true),
+	sortOrder: CreateExhibitionBaseSchema.shape.sortOrder.default(0),
 });
 
-export const UpdateExhibitionBody = z.object({
-	title: z.string().max(100).optional(),
-	isUploadEnabled: z.boolean().optional(),
-	sortOrder: z.number().int().min(0).optional(),
-});
+export const UpdateExhibitionBody = UpdateExhibitionBaseSchema;
 
 // ── Project update ───────────────────────────────────────────
 
-export const UpdateProjectBody = z.object({
-	title: z.string().min(1).max(120).optional(),
-	summary: z.string().max(300).optional(),
-	description: z.string().max(5000).optional(),
-	isIncomplete: z.boolean().optional(),
-	status: ProjectStatusEnum.optional(),
-	sortOrder: z.number().int().min(0).optional(),
-});
+export const UpdateProjectBody = UpdateProjectBaseSchema;
 
 export const AdminProjectListQuery = z.object({
 	page: z.coerce.number().int().positive().default(1),
@@ -45,35 +43,21 @@ export type AdminProjectListQueryT = z.infer<typeof AdminProjectListQuery>;
 
 // ── Project submit (all-in-one multipart payload) ────────────
 
-const SubmitMember = z.object({
-	name: z.string().min(1).max(50),
-	studentId: z.string().min(1).max(20),
-	sortOrder: z.number().int().min(0).optional(),
-	userId: z.number().int().positive().optional(),
-});
-
-export const SubmitProjectPayload = z.object({
+export const SubmitProjectPayload = SubmitProjectPayloadBaseSchema.extend({
 	exhibitionId: z.coerce.number().int().positive('Invalid exhibition ID'),
-	title: z.string().min(1).max(120),
-	summary: z.string().max(300).optional().default(''),
-	description: z.string().max(5000).optional().default(''),
-	members: z.array(SubmitMember).min(1, 'At least one member required'),
+	summary: SubmitProjectPayloadBaseSchema.shape.summary.default(''),
+	description: SubmitProjectPayloadBaseSchema.shape.description.default(''),
 });
 
 export type SubmitProjectPayloadT = z.infer<typeof SubmitProjectPayload>;
 
 // ── Member ───────────────────────────────────────────────────
 
-export const AddMemberBody = z.object({
-	name: z.string().min(1).max(50),
-	studentId: z.string().min(1).max(20),
-	sortOrder: z.number().int().min(0).optional().default(0),
+export const AddMemberBody = AddMemberSchema.extend({
+	sortOrder: AddMemberSchema.shape.sortOrder.default(0),
 });
 
-export const UpdateMemberBody = z.object({
-	name: z.string().min(1).max(50).optional(),
-	studentId: z.string().min(1).max(20).optional(),
-	sortOrder: z.number().int().min(0).optional(),
+export const UpdateMemberBody = UpdateMemberBaseSchema.extend({
 	userId: z.never().optional(),
 }).transform((body) => ({
 	...(body.name !== undefined ? { name: body.name } : {}),

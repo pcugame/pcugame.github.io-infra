@@ -1,6 +1,4 @@
-// Shared API contract types between apps/api and apps/web.
-// Type-only — no runtime values. Each consumer declares its own runtime
-// constants (e.g. enum value arrays for form options) where needed.
+// Shared API contract types and runtime transport schemas between apps/api and apps/web.
 
 export type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus, UserRole } from './enums.js';
 
@@ -76,3 +74,5 @@ export type {
 	GameUploadSessionListResponse,
 	GameUploadStatus,
 } from './game-upload.js';
+
+export * from './schemas.js';
