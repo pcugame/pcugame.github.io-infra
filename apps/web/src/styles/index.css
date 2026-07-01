@@ -5276,12 +5276,9 @@ fieldset.status-section legend {
   font-weight: 700;
   color: var(--color-text);
   line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
-  word-break: keep-all;
-  overflow-wrap: break-word;
+  text-overflow: ellipsis;
 }
 
 .archive-card__summary {
