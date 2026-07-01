@@ -1,4 +1,4 @@
-import type { AssetKind } from '@prisma/client';
+import type { AssetKind } from '../../../generated/prisma/client.js';
 import type { UploadObjectOptions } from '../../../lib/storage.js';
 
 const DOWNLOAD_ONLY_OPTIONS: UploadObjectOptions = {

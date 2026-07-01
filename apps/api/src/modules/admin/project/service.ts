@@ -3,7 +3,7 @@ import { pipeline as streamPipeline } from 'node:stream/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
-import type { AssetKind, ProjectStatus, UserRole } from '@prisma/client';
+import type { AssetKind, ProjectStatus, UserRole } from '../../../generated/prisma/client.js';
 import type { AdminProjectItem, AdminProjectListQuery, AdminProjectListResponse } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { badRequest, conflict, forbidden, isUniqueConstraintError, notFound, payloadTooLarge } from '../../../shared/errors.js';

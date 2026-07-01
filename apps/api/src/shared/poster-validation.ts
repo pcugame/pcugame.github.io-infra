@@ -7,7 +7,7 @@
  * - Be in READY status
  */
 
-import type { AssetKind } from '@prisma/client';
+import type { AssetKind } from '../generated/prisma/client.js';
 import { badRequest, notFound } from './errors.js';
 
 const POSTER_ELIGIBLE_KINDS = new Set<AssetKind>(['POSTER', 'IMAGE', 'THUMBNAIL']);

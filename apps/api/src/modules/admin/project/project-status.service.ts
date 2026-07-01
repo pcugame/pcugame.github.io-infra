@@ -1,4 +1,4 @@
-import type { ProjectStatus } from '@prisma/client';
+import type { ProjectStatus } from '../../../generated/prisma/client.js';
 import { forbidden } from '../../../shared/errors.js';
 import * as repo from './repository.js';
 

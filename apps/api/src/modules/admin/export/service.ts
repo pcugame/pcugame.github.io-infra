@@ -8,7 +8,7 @@ import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { s3, bucketForKind } from '../../../lib/s3.js';
 import { logger } from '../../../lib/logger.js';
 import { conflict } from '../../../shared/errors.js';
-import type { AssetKind as PrismaAssetKind } from '@prisma/client';
+import type { AssetKind as PrismaAssetKind } from '../../../generated/prisma/client.js';
 import type {
 	AssetKind,
 	ExportFileStatus,

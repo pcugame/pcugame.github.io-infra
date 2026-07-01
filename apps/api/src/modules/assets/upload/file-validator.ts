@@ -1,5 +1,5 @@
 import { promises as fsp } from 'node:fs';
-import type { AssetKind } from '@prisma/client';
+import type { AssetKind } from '../../../generated/prisma/client.js';
 import {
   detectFileType,
   isAllowedImageType,

@@ -29,7 +29,7 @@
  * }
  */
 
-import { PrismaClient } from '@prisma/client';
+import { createPrismaClient } from '../src/lib/prisma-client.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -39,7 +39,7 @@ if (process.env.NODE_ENV === 'production') {
   process.exit(1);
 }
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 // ── 테스트 ADMIN 유저 + 세션 생성 ─────────────────────
 

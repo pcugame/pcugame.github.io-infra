@@ -1,7 +1,7 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { env } from '../config/env.js';
-import type { AssetKind } from '@prisma/client';
+import type { AssetKind } from '../generated/prisma/client.js';
 
 let _client: S3Client | undefined;
 

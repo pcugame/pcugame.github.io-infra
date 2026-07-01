@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import type { Project, UserRole } from '@prisma/client';
+import type { Project, UserRole } from '../../generated/prisma/client.js';
 import { prisma } from '../../lib/prisma.js';
 import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
 

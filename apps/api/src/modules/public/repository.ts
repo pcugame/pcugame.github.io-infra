@@ -1,5 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
-import type { ProjectStatus } from '@prisma/client';
+import type { ProjectStatus } from '../../generated/prisma/client.js';
 
 const PUBLIC_PROJECT_STATUSES: ProjectStatus[] = ['PUBLISHED', 'ARCHIVED'];
 

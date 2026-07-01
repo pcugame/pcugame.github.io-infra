@@ -22,8 +22,7 @@
  * Requires: DATABASE_URL, S3_* env vars
  */
 
-import { PrismaClient } from '@prisma/client';
-import type { AssetPlaybackStatus } from '@prisma/client';
+import type { AssetPlaybackStatus } from '../src/generated/prisma/client.js';
 import { readdirSync, statSync, copyFileSync, createReadStream, mkdtempSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, extname, basename } from 'node:path';
@@ -35,9 +34,11 @@ import { processVideo } from '../src/modules/assets/upload/video-processing.js';
 import { validateFile } from '../src/modules/assets/upload/file-validator.js';
 import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
 import { uploadFile } from '../src/lib/storage.js';
+import { createPrismaClient } from '../src/lib/prisma-client.js';
 import { bucketForKind } from '../src/lib/s3.js';
 import { generateStorageKey } from '../src/shared/storage-path.js';
-import type { AssetKind } from '@prisma/client';
+import type { AssetKind } from '../src/generated/prisma/client.js';
+import type { PrismaClient } from '../src/generated/prisma/client.js';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -396,7 +397,7 @@ async function main() {
 	const opts = parseArgs();
 	loadEnv();
 
-	const prisma = new PrismaClient();
+	const prisma = createPrismaClient();
 	try {
 		await doAttach(prisma, opts);
 	} finally {

@@ -1,4 +1,4 @@
-import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from '@prisma/client';
+import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from '../../../generated/prisma/client.js';
 import type { AdminProjectDetail } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { isPosterUrlSafe } from '../../../shared/poster-validation.js';
