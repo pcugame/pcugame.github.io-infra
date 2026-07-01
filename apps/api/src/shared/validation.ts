@@ -127,7 +127,10 @@ export const DevAuthLoginErrorBody = z.object({
 
 import { AppError } from './errors.js';
 
-export function parseBody<T>(schema: z.ZodType<T>, data: unknown): T {
+export function parseBody<TSchema extends z.ZodType>(
+	schema: TSchema,
+	data: unknown,
+): z.output<TSchema> {
 	const result = schema.safeParse(data);
 	if (!result.success) {
 		const details = result.error.flatten().fieldErrors;
