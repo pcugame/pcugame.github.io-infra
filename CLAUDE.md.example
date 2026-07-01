@@ -71,7 +71,7 @@ Shared API/Web transport types live in `packages/contracts` and are re-exported
 from `apps/web/src/contracts`. Web form schemas remain in
 `apps/web/src/contracts/schemas.ts`.
 
-**Note:** API uses Zod v3 (`zod@^3.24`), Web uses Zod v4 (`zod@^4.3`) — import paths and some APIs differ between the two.
+**Note:** API and Web both use Zod v4 (`zod@^4.4`) with the standard `zod` import path.
 
 ## Coding conventions
 
