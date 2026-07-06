@@ -646,12 +646,17 @@
   padding-bottom: 1.5rem;
 }
 
+.home-archive-body > .container {
+  width: 100%;
+}
+
 /* ── Year Grid (4열, 카드 크기 ~80%) ─────────────────────── */
 
 .home-year-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
+  width: 100%;
   max-width: calc(var(--max-width) * 0.8); /* 960px */
 }
 
@@ -660,6 +665,8 @@
 .home-year-card {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
   background: var(--h-surface);
   border: 1px solid var(--h-border);
   border-radius: var(--h-radius);
@@ -679,6 +686,8 @@
 
 /* A4 세로(210:297) 포스터 영역 — 하얀 배경 + 테두리 */
 .home-year-card__poster {
+  flex: 0 0 auto;
+  width: calc(100% - 1rem);
   aspect-ratio: 210 / 297;
   margin: 0.5rem;
   border: 1.5px solid rgba(15, 23, 42, 0.14);
@@ -763,7 +772,7 @@
 
 @media (max-width: 900px) {
   .home-year-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     max-width: 100%;
   }
 }
@@ -774,7 +783,7 @@
   }
 
   .home-year-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.75rem;
     max-width: 100%;
   }
