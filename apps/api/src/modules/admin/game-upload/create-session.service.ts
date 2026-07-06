@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { GameUploadCreateSessionRequest, GameUploadSession } from '@pcu/contracts';
+import type { GameUploadSession } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { logger } from '../../../lib/logger.js';
 import { isAcceptingNewWork } from '../../../lib/lifecycle.js';
@@ -18,7 +18,7 @@ export async function createSession(
 	projectId: number,
 	exhibitionId: number,
 	user: { id: number; role: string },
-	body: GameUploadCreateSessionRequest,
+	body: { originalName?: string; totalBytes?: number },
 ): Promise<GameUploadSession> {
 	// Refuse to start new multi-chunk sessions once shutdown has begun; in-flight
 	// completion calls are still allowed so existing uploads do not get truncated.
