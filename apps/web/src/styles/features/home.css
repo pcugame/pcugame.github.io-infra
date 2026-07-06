@@ -657,8 +657,8 @@
   --home-year-card-max: 13.5rem;
   --home-year-grid-gap: 1rem;
 
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--home-year-card-min), var(--home-year-card-max)));
   justify-content: center;
   align-items: start;
   gap: var(--home-year-grid-gap);
@@ -672,11 +672,6 @@
 .home-year-card {
   display: flex;
   flex-direction: column;
-  flex: 0 1 clamp(
-    var(--home-year-card-min),
-    calc((100% - (3 * var(--home-year-grid-gap))) / 4),
-    var(--home-year-card-max)
-  );
   min-width: 0;
   background: var(--h-surface);
   border: 1px solid var(--h-border);
