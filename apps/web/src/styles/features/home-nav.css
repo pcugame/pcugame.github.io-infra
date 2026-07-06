@@ -1,0 +1,135 @@
+/* ── Home Top Nav (오버레이, 바 없음) ────────────────────────── */
+
+.home-topnav {
+  position: relative;
+  z-index: 10;
+  background: var(--h-bg);
+  border-bottom: 3px solid var(--h-border);
+  flex-shrink: 0;
+}
+
+.home-topnav__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 1.25rem;
+  padding-bottom: 1.25rem;
+}
+
+.home-topnav__logo {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--h-text);
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.home-topnav__logo:hover {
+  text-decoration: none;
+}
+
+.home-topnav__logo-sig {
+  height: 60px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+.home-topnav__logo-divider {
+  width: 1px;
+  height: 36px;
+  background: var(--h-border);
+  flex-shrink: 0;
+}
+
+.home-topnav__logo-dept {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--h-text);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-topnav__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.home-topnav__link {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--h-text-muted);
+  text-decoration: none;
+  padding: 0.45rem 0.75rem;
+  border: 1.5px solid transparent;
+  border-radius: 50px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.home-topnav__link:hover {
+  color: var(--h-primary);
+  border-color: var(--h-border);
+  text-decoration: none;
+}
+
+.home-topnav__btn {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--h-primary);
+  text-decoration: none;
+  padding: 0.45rem 1rem;
+  border: 1.5px solid var(--h-primary);
+  border-radius: 50px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.home-topnav__btn:hover {
+  background: var(--h-primary);
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.home-topnav__btn--upload {
+  background: var(--h-primary);
+  color: #ffffff;
+}
+
+.home-topnav__btn--upload:hover {
+  background: var(--h-primary-hover, #1a56db);
+  color: #ffffff;
+}
+
+@media (max-width: 640px) {
+  .home-topnav__inner {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .home-topnav__logo-sig {
+    height: 32px;
+  }
+
+  .home-topnav__logo-divider {
+    height: 22px;
+  }
+
+  .home-topnav__logo-dept {
+    font-size: 0.75rem;
+  }
+
+  /* 모바일: 홈 topnav 전체 숨김 → Layout의 MobileTopBar로 통일 */
+  .home-topnav {
+    display: none;
+  }
+
+  /* 모바일: eyebrow 영문 + 왼쪽 막대 숨김 */
+  .home-hero__eyebrow {
+    display: none;
+  }
+
+}

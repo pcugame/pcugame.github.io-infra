@@ -1,0 +1,235 @@
+/* ── Hero (Home) ──────────────────────────────────────────────── */
+
+.hero {
+  text-align: center;
+  padding: 4rem 1rem;
+}
+
+.hero h1 {
+  font-size: 2.2rem;
+  font-weight: 800;
+  margin-bottom: 0.25rem;
+}
+
+.hero h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: 1rem;
+}
+
+.hero p {
+  color: var(--color-text-muted);
+  margin-bottom: 2rem;
+}
+
+
+/* ── main override: 홈에서 padding 제거 ─────────────────────── */
+
+.main--home {
+  padding-top: 0;
+  padding-bottom: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* inner .home-landing (from HomePage) fills main */
+.main--home > .home-landing {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Home Design Tokens ──────────────────────────────────────── */
+
+.home-landing {
+  /* Light theme — PCU 로고 블루 기반 */
+  --h-bg: #e7ecff;
+  --h-surface: #f5f5f9;
+  --h-surface-tint: #eef3ff;
+  --h-primary: #1a51af;       /* PCU shield blue */
+  --h-primary-btn: #2461d4;
+  --h-primary-glow: rgba(36, 97, 212, 0.18);
+  --h-text: #0f172a;
+  --h-text-muted: #64748b;
+  --h-border: #dce6f5;
+  --h-border-light: #eef3ff;
+
+  /* Dark section (하이라이트/어워즈) */
+  --h-dark-bg: #161618;
+  --h-dark-surface: #1e1e21;
+  --h-gold: #d4a234;
+  --h-gold-light: #e8bc50;
+  --h-gold-dim: rgba(212, 162, 52, 0.12);
+  --h-gold-border: rgba(212, 162, 52, 0.3);
+  --h-dark-text: #eef3ff;
+  --h-dark-text-muted: #7b8ab8;
+
+  /* CTA 섹션 */
+  --h-cta-bg: #1a51af;
+
+  --h-radius: 12px;
+  --h-shadow: 0 2px 16px rgba(26, 81, 175, 0.08);
+  --h-shadow-md: 0 4px 24px rgba(26, 81, 175, 0.12);
+  --h-shadow-lg: 0 12px 40px rgba(26, 81, 175, 0.18);
+
+  background: var(--h-bg);
+  color: var(--h-text);
+}
+
+/* ── Home Buttons ────────────────────────────────────────────── */
+
+.home-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 50px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  min-height: 44px;
+  letter-spacing: 0.01em;
+  border: 2px solid transparent;
+}
+
+.home-btn:hover {
+  text-decoration: none;
+}
+
+.home-btn--primary {
+  background: var(--h-primary-btn);
+  color: #ffffff;
+  box-shadow: 0 4px 16px var(--h-primary-glow);
+}
+
+.home-btn--primary:hover {
+  background: #1a51af;
+  box-shadow: 0 6px 24px var(--h-primary-glow);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.home-btn--ghost {
+  background: transparent;
+  color: var(--h-text-muted);
+  border-color: var(--h-border);
+}
+
+.home-btn--ghost:hover {
+  border-color: var(--h-primary);
+  color: var(--h-primary);
+}
+
+.home-btn--gold {
+  background: var(--h-gold);
+  color: #1a1a1d;
+}
+
+.home-btn--gold:hover {
+  background: var(--h-gold-light);
+  box-shadow: 0 0 28px rgba(212, 162, 52, 0.4);
+  color: #1a1a1d;
+  transform: translateY(-1px);
+}
+
+.home-btn--white {
+  background: #ffffff;
+  color: var(--h-primary);
+}
+
+.home-btn--white:hover {
+  background: #f0f5ff;
+  color: var(--h-primary);
+  transform: translateY(-1px);
+}
+
+.home-btn--large {
+  padding: 1rem 2.5rem;
+  font-size: 1rem;
+}
+
+/* ── Shared Section Typography ───────────────────────────────── */
+
+.home-eyebrow {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--h-primary);
+  margin-bottom: 0.75rem;
+}
+
+.home-eyebrow--gold {
+  color: var(--h-gold);
+}
+
+.home-eyebrow--dim {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.home-section-title {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--h-text);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.home-section-title--dark {
+  color: var(--h-dark-text);
+}
+
+.home-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 2.5rem;
+  gap: 1rem;
+}
+
+.home-section-header--dark {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 2.5rem;
+  gap: 1rem;
+}
+
+.home-link-more {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--h-primary);
+  text-decoration: none;
+  white-space: nowrap;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--h-border);
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.home-link-more:hover {
+  color: var(--h-primary-btn);
+  border-color: var(--h-primary);
+  text-decoration: none;
+}
+
+.home-link-more--gold {
+  color: var(--h-gold);
+  border-bottom-color: var(--h-gold-border);
+}
+
+.home-link-more--gold:hover {
+  color: var(--h-gold-light);
+  border-color: var(--h-gold);
+}
+
+/* ── Focus ───────────────────────────────────────────────────── */
+
+.home-landing :focus-visible {
+  outline: 2px solid var(--h-primary);
+  outline-offset: 3px;
+  border-radius: 3px;
+}

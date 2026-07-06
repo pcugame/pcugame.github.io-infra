@@ -1342,16 +1342,12 @@ form.admin-card h3 {
 
   /* ── 스크롤바 숨김 (모바일 네이티브 느낌) ─────────────── */
   .admin-filter-tabs::-webkit-scrollbar,
-  .admin-sidebar__nav::-webkit-scrollbar,
-  .home-year-grid::-webkit-scrollbar,
-  .home-showcase__tabs::-webkit-scrollbar {
+  .admin-sidebar__nav::-webkit-scrollbar {
     display: none;
   }
 
   .admin-filter-tabs,
-  .admin-sidebar__nav,
-  .home-year-grid,
-  .home-showcase__tabs {
+  .admin-sidebar__nav {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }

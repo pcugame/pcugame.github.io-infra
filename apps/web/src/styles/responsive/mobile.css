@@ -376,55 +376,6 @@
     font-size: 0.9rem;
   }
 
-  /* ── 홈 히어로: 모바일 — 풀스크린, 스크롤 없음 ────────── */
-  .home-hero--full {
-    min-height: 0;
-    max-height: none;
-    overflow: hidden;
-    flex: 1;
-    background: transparent;
-  }
-
-  .home-hero--full .home-hero__bg {
-    display: none;
-  }
-
-  .home-hero--full .home-hero__title {
-    font-size: clamp(1.5rem, 6.5vw, 2.2rem);
-    line-height: 1.2;
-  }
-
-  .home-hero--full .home-hero__desc {
-    font-size: 0.88rem;
-    line-height: 1.65;
-  }
-
-  .home-year-grid {
-    border-radius: 10px;
-  }
-
-  .home-year-card {
-    padding: 0;
-    gap: 0;
-  }
-
-  .home-year-card__year {
-    font-size: 1.1rem;
-    min-width: 3rem;
-  }
-
-  .home-year-card__meta-year {
-    font-size: 1.25rem;
-  }
-
-  .home-year-card__title {
-    font-size: 0.9rem;
-  }
-
-  .home-year-card__count {
-    font-size: 0.72rem;
-  }
-
   /* ══════════════════════════════════════════════════════════
      관리자 모바일 — 네이티브 앱 스타일
      ══════════════════════════════════════════════════════════ */

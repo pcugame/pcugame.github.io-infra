@@ -1,0 +1,343 @@
+/* ── Section 1: Hero ─────────────────────────────────────────── */
+
+.home-hero {
+  position: relative;
+  min-height: calc(100svh - var(--header-height));
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  background: linear-gradient(135deg, #f0f1f5 0%, #e8ecf6 50%, #e1e6f2 100%);
+}
+
+.home-hero__bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Subtle dot grid */
+.home-hero__grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(26, 81, 175, 0.12) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.6;
+}
+
+.home-hero__glow--1 {
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(36, 97, 212, 0.08) 0%, transparent 70%);
+  top: -100px;
+  right: -100px;
+  border-radius: 50%;
+  filter: blur(60px);
+}
+
+.home-hero__glow--2 {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(26, 81, 175, 0.06) 0%, transparent 70%);
+  bottom: 0;
+  left: -80px;
+  border-radius: 50%;
+  filter: blur(60px);
+}
+
+.home-hero__inner {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: center;
+  padding-top: 3rem;
+  padding-bottom: 2rem;
+  width: 100%;
+}
+
+.home-hero__text {
+  max-width: 540px;
+}
+
+.home-hero__eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--h-text-muted);
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.home-hero__eyebrow::before {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 2px;
+  background: var(--h-primary);
+  flex-shrink: 0;
+}
+
+.home-hero__title {
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--h-text);
+  margin-bottom: 1.25rem;
+}
+
+.home-hero__accent {
+  color: var(--h-primary-btn);
+}
+
+.home-hero__desc {
+  font-size: 1rem;
+  color: var(--h-text-muted);
+  line-height: 1.75;
+  margin-bottom: 2rem;
+  max-width: 420px;
+}
+
+.home-hero__ctas {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Characters area — hero 행 전체 높이를 채움 */
+.home-hero__characters {
+  position: relative;
+  align-self: stretch;
+  min-height: 400px;
+}
+
+.home-hero__char {
+  position: absolute;
+}
+
+.home-hero__char img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: bottom center;
+  display: block;
+}
+
+/* Male: 왼쪽 절반 */
+.home-hero__char--male {
+  left: -100px;
+  width: 70%;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  -webkit-mask-image: linear-gradient(to top, transparent 0%, black 12%);
+  mask-image: linear-gradient(to top, transparent 0%, black 12%);
+}
+
+.home-hero__char--male img {
+  transform: scaleX(-1);
+  filter: drop-shadow(4px 0 24px rgba(26, 81, 175, 0.12));
+}
+
+/* Female: 오른쪽 절반 */
+.home-hero__char--female {
+  right: -100px;
+  width: 85%;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  -webkit-mask-image: linear-gradient(to top, transparent 0%, black 10%);
+  mask-image: linear-gradient(to top, transparent 0%, black 10%);
+}
+
+.home-hero__char--female img {
+  filter: drop-shadow(-4px 0 32px rgba(26, 81, 175, 0.15));
+}
+
+/* ── Hero compact variant: 연도 카드를 히어로 안에 배치 ─────── */
+
+.home-hero--compact {
+  min-height: auto;
+  max-height: none;
+}
+
+.home-hero--compact .home-hero__inner {
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: end;
+  padding-top: 4rem;
+  padding-bottom: 4rem;
+}
+
+.home-hero--compact .home-hero__text {
+  align-self: center;
+  text-align: left;
+  max-width: 480px;
+}
+
+.home-hero--compact .home-hero__eyebrow {
+  margin-bottom: 1rem;
+}
+
+.home-hero--compact .home-hero__title {
+  font-size: clamp(2rem, 4.5vw, 3rem);
+  margin-bottom: 0.75rem;
+}
+
+.home-hero--compact .home-hero__desc {
+  margin: 0;
+  max-width: 400px;
+  font-size: 0.95rem;
+}
+
+/* ── Hero full variant: 헤더 없이 전체 화면 ─────────────────── */
+
+.home-hero--full {
+  min-height: 100svh;
+  max-height: none;
+}
+
+.home-hero--full .home-hero__inner {
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+  padding-top: 7rem;
+  padding-bottom: 4rem;
+}
+
+.home-hero--full .home-hero__text {
+  align-self: center;
+  text-align: left;
+  max-width: 480px;
+}
+
+.home-hero--full .home-hero__eyebrow {
+  margin-bottom: 1rem;
+}
+
+.home-hero--full .home-hero__title {
+  font-size: clamp(2rem, 4.5vw, 3rem);
+  margin-bottom: 0.75rem;
+}
+
+.home-hero--full .home-hero__desc {
+  margin: 0;
+  max-width: 400px;
+  font-size: 0.95rem;
+}
+
+/* ── Entry Animations ────────────────────────────────────────── */
+
+@keyframes home-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .home-hero__eyebrow {
+    animation: home-fade-up 0.55s ease both;
+    animation-delay: 0.05s;
+  }
+
+  .home-hero__title {
+    animation: home-fade-up 0.55s ease both;
+    animation-delay: 0.15s;
+  }
+
+  .home-hero__desc {
+    animation: home-fade-up 0.55s ease both;
+    animation-delay: 0.25s;
+  }
+
+  .home-hero__ctas {
+    animation: home-fade-up 0.55s ease both;
+    animation-delay: 0.35s;
+  }
+
+  .home-hero__character {
+    animation: home-fade-up 0.7s ease both;
+    animation-delay: 0.4s;
+  }
+}
+
+@media (max-width: 1024px) {
+  .home-hero__inner {
+    gap: 2rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .home-hero__inner {
+    grid-template-columns: 1fr;
+    padding-top: 2.5rem;
+    padding-bottom: 1rem;
+  }
+
+  .home-hero__characters {
+    display: none;
+  }
+
+  .home-hero__title {
+    font-size: clamp(2rem, 9vw, 2.8rem);
+  }
+
+  .home-hero__desc {
+    font-size: 0.92rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .home-hero--full .home-hero__inner {
+    grid-template-columns: 1fr;
+    padding-top: 4rem;
+    padding-bottom: 2rem;
+  }
+
+  .home-hero--full .home-hero__text {
+    text-align: center;
+    max-width: 100%;
+  }
+
+  .home-hero--full .home-hero__desc {
+    margin: 0 auto;
+  }
+
+  .home-hero--full .home-hero__title {
+    font-size: clamp(1.6rem, 7vw, 2.4rem);
+  }
+
+  .home-hero--full {
+    min-height: 0;
+    max-height: none;
+    overflow: hidden;
+    flex: 1;
+    background: transparent;
+  }
+
+  .home-hero--full .home-hero__bg {
+    display: none;
+  }
+
+  .home-hero--full .home-hero__title {
+    font-size: clamp(1.5rem, 6.5vw, 2.2rem);
+    line-height: 1.2;
+  }
+
+  .home-hero--full .home-hero__desc {
+    font-size: 0.88rem;
+    line-height: 1.65;
+  }
+}
