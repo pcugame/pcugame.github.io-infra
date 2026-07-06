@@ -10,7 +10,6 @@ import {
 import { AppError, badRequest } from '../../../shared/errors.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
 import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
-import { replaceOrCreateReplaceableAsset } from '../project/repository.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
 import * as repo from './repository.js';
@@ -32,7 +31,10 @@ export async function completeSession(
 		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
 	}
 
-	const uploaded = new Set(session.uploadedChunks);
+	const uploadedChunks = session.parts.length > 0
+		? session.parts.map((part: { partNumber: number }) => part.partNumber - 1)
+		: session.uploadedChunks;
+	const uploaded = new Set(uploadedChunks);
 	const missing: number[] = [];
 	for (let i = 0; i < session.totalChunks; i++) {
 		if (!uploaded.has(i)) missing.push(i);
@@ -46,8 +48,11 @@ export async function completeSession(
 		throw badRequest('Session is already being completed by another request');
 	}
 
+	let s3Completed = false;
+	const storageKey = session.s3Key;
 	try {
-		const parts = (session.s3PartEtags as { partNumber: number; etag: string }[] | null) ?? [];
+		const dbParts = await repo.findPartsBySessionId(session.id);
+		const parts = dbParts.map((part) => ({ partNumber: part.partNumber, etag: part.etag }));
 		if (parts.length !== session.totalChunks) {
 			throw new AppError(500, `Part ETag count mismatch: expected ${session.totalChunks}, got ${parts.length}`, 'INTERNAL_ERROR');
 		}
@@ -58,50 +63,37 @@ export async function completeSession(
 			session.s3UploadId,
 			parts,
 		);
+		s3Completed = true;
 
-		const head = await headObject(cfg.S3_BUCKET_PROTECTED, session.s3Key);
+		const head = await headObject(cfg.S3_BUCKET_PROTECTED, storageKey);
 		if (!head) {
 			throw new AppError(500, 'Completed object not found in S3', 'INTERNAL_ERROR');
 		}
 		if (head.size !== Number(session.totalBytes)) {
-			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, 'game-upload-size-mismatch', { sessionId: session.id });
 			throw new AppError(500, `Final file size mismatch: expected ${session.totalBytes}, got ${head.size}`, 'SIZE_MISMATCH');
 		}
 
-		const header = await readObjectRange(cfg.S3_BUCKET_PROTECTED, session.s3Key, 0, 7);
+		const header = await readObjectRange(cfg.S3_BUCKET_PROTECTED, storageKey, 0, 7);
 		const detected = detectFileType(header);
 		if (!detected || !isAllowedGameType(detected)) {
-			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, 'game-upload-invalid-zip', { sessionId: session.id });
 			throw badRequest('Uploaded file is not a valid ZIP archive');
 		}
-		try {
-			await validateZipArchiveObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, head.size);
-		} catch (err) {
-			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, session.s3Key, 'game-upload-unsafe-zip', { sessionId: session.id });
-			throw err;
-		}
+		await validateZipArchiveObject(cfg.S3_BUCKET_PROTECTED, storageKey, head.size);
 
-		const storageKey = session.s3Key;
-		let oldStorageKey: string | null = null;
-		try {
-			const result = await replaceOrCreateReplaceableAsset(session.projectId, 'GAME', {
-				storageKey,
-				originalName: session.originalName,
-				mimeType: 'application/zip',
-				sizeBytes: session.totalBytes,
-				isPublic: false,
-			});
-			oldStorageKey = result.oldStorageKey;
-		} catch (dbErr) {
-			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, storageKey, 'game-upload-asset-upsert-failed', { sessionId: session.id });
-			throw dbErr;
-		}
+		const result = await repo.finalizeCompletedSession(session.id, session.projectId, 'GAME', {
+			storageKey,
+			originalName: session.originalName,
+			mimeType: 'application/zip',
+			sizeBytes: session.totalBytes,
+			isPublic: false,
+		});
 
-		if (oldStorageKey) {
-			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, oldStorageKey, 'game-upload-replace-previous', { sessionId: session.id });
+		if (result.oldStorageKey) {
+			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, result.oldStorageKey, 'game-upload-replace-previous', { sessionId: session.id });
 		}
-
-		await repo.markCompleted(session.id, storageKey);
+		if (result.oldPlaybackStorageKey) {
+			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, result.oldPlaybackStorageKey, 'game-upload-replace-previous-playback', { sessionId: session.id });
+		}
 
 		return {
 			status: 'COMPLETED' as const,
@@ -109,9 +101,21 @@ export async function completeSession(
 			sizeBytes: Number(session.totalBytes),
 		};
 	} catch (err) {
-		await repo.revertToPending(session.id).catch((revertErr) => {
-			logger().error({ err: revertErr, sessionId: session.id }, 'Failed to revert session to PENDING after completion error; session may be stuck in COMPLETING');
-		});
+		if (!s3Completed) {
+			const head = await headObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch(() => null);
+			s3Completed = !!head;
+		}
+
+		if (s3Completed) {
+			await repo.markFailed(session.id, storageKey).catch((markErr) => {
+				logger().error({ err: markErr, sessionId: session.id }, 'Failed to mark session FAILED after completed-object error');
+			});
+			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, storageKey, 'game-upload-completion-failed', { sessionId: session.id });
+		} else {
+			await repo.revertToPending(session.id).catch((revertErr) => {
+				logger().error({ err: revertErr, sessionId: session.id }, 'Failed to revert session to PENDING after pre-S3-complete error');
+			});
+		}
 		throw err;
 	}
 }

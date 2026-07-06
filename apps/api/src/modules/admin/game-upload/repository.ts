@@ -1,7 +1,36 @@
 import { prisma } from '../../../lib/prisma.js';
+import { Prisma, type AssetKind, type AssetPlaybackStatus } from '../../../generated/prisma/client.js';
+
+type TxClient = Prisma.TransactionClient;
+
+const serializableOptions = {
+	isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+} as const;
+
+function isRetryableTransactionError(err: unknown): boolean {
+	return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034';
+}
+
+export async function withSerializableRetry<T>(
+	fn: (tx: TxClient) => Promise<T>,
+	maxAttempts = 3,
+): Promise<T> {
+	let lastErr: unknown;
+	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+		try {
+			return await prisma.$transaction(fn, serializableOptions);
+		} catch (err) {
+			lastErr = err;
+			if (!isRetryableTransactionError(err) || attempt === maxAttempts) {
+				throw err;
+			}
+		}
+	}
+	throw lastErr;
+}
 
 /** Find a game upload session by ID */
-export function findSessionById(id: string) {
+export function findSessionById(id: string): Promise<any> {
 	return prisma.gameUploadSession.findUnique({
 		where: { id },
 		include: {
@@ -10,12 +39,14 @@ export function findSessionById(id: string) {
 					status: true,
 				},
 			},
+			parts: {
+				orderBy: { partNumber: 'asc' },
+			},
 		},
-	});
+	} as any) as Promise<any>;
 }
 
-/** Create a new game upload session */
-export function createSession(data: {
+type CreateSessionData = {
 	id: string;
 	projectId: number;
 	userId: number;
@@ -26,8 +57,36 @@ export function createSession(data: {
 	s3UploadId: string;
 	s3Key: string;
 	expiresAt: Date;
-}) {
-	return prisma.gameUploadSession.create({ data });
+};
+
+/** Create a new session and replace the project's active slot atomically. */
+export function createSessionReplacingActive(data: CreateSessionData) {
+	return withSerializableRetry(async (tx) => {
+		const active = await (tx as any).gameUploadActiveSession.findUnique({
+			where: { projectId: data.projectId },
+			include: { session: true },
+		});
+		const replacedSessions = active?.session ? [active.session] : [];
+
+		if (active) {
+			await tx.gameUploadSession.updateMany({
+				where: {
+					id: active.sessionId,
+					status: { in: ['PENDING', 'COMPLETING'] },
+				},
+				data: { status: 'CANCELLED' },
+			});
+		}
+
+		const session = await tx.gameUploadSession.create({ data });
+		await (tx as any).gameUploadActiveSession.upsert({
+			where: { projectId: data.projectId },
+			update: { sessionId: session.id },
+			create: { projectId: data.projectId, sessionId: session.id },
+		});
+
+		return { session, replacedSessions };
+	});
 }
 
 /** Update session status (e.g. cancel, expire) */
@@ -35,6 +94,19 @@ export function updateSessionStatus(id: string, status: string) {
 	return prisma.gameUploadSession.update({
 		where: { id },
 		data: { status },
+	});
+}
+
+export function cancelSessionAndClearActive(id: string) {
+	return withSerializableRetry(async (tx) => {
+		const session = await tx.gameUploadSession.update({
+			where: { id },
+			data: { status: 'CANCELLED' },
+		});
+		await (tx as any).gameUploadActiveSession.deleteMany({
+			where: { sessionId: id },
+		});
+		return session;
 	});
 }
 
@@ -59,27 +131,13 @@ export function findActiveSessionsForListing(
 			status: { in: ['PENDING', 'COMPLETING'] },
 			...(opts.userId ? { userId: opts.userId } : {}),
 		},
+		include: {
+			parts: {
+				orderBy: { partNumber: 'asc' },
+			},
+		},
 		orderBy: { createdAt: 'desc' },
-	});
-}
-
-/**
- * Atomically append a chunk index to the session's uploadedChunks array.
- * Uses raw SQL to avoid lost-update races on concurrent chunk uploads.
- */
-export function appendChunkIndex(sessionId: string, index: number) {
-	return prisma.$queryRaw<{ uploaded_chunks: number[] }[]>`
-		UPDATE game_upload_sessions
-		SET uploaded_chunks = (
-			SELECT ARRAY(
-				SELECT DISTINCT unnest(uploaded_chunks || ARRAY[${index}::int])
-				ORDER BY 1
-			)
-		),
-		updated_at = NOW()
-		WHERE id = ${sessionId}
-		RETURNING uploaded_chunks
-	`;
+	} as any) as Promise<any[]>;
 }
 
 /**
@@ -93,33 +151,33 @@ export function transitionToCompleting(sessionId: string) {
 	});
 }
 
-/** Atomically append an S3 part ETag to the session's s3PartEtags array */
-export async function appendPartEtag(
+/** Store or replace an S3 multipart ETag for a part. */
+export async function upsertPartEtag(
 	sessionId: string,
 	partNumber: number,
 	etag: string,
 ) {
-	// Read current etags, append, write back — wrapped in raw SQL for atomicity
-	const session = await prisma.gameUploadSession.findUniqueOrThrow({
-		where: { id: sessionId },
-		select: { s3PartEtags: true },
+	await (prisma as any).gameUploadPart.upsert({
+		where: {
+			game_upload_part_session_part: {
+				sessionId,
+				partNumber,
+			},
+		},
+		update: { etag },
+		create: { sessionId, partNumber, etag },
 	});
-	const existing = (session.s3PartEtags as { partNumber: number; etag: string }[] | null) ?? [];
-	// Replace if same partNumber (re-upload of a chunk)
-	const filtered = existing.filter((p) => p.partNumber !== partNumber);
-	filtered.push({ partNumber, etag });
-	await prisma.gameUploadSession.update({
-		where: { id: sessionId },
-		data: { s3PartEtags: filtered },
-	});
+	return (prisma as any).gameUploadPart.findMany({
+		where: { sessionId },
+		orderBy: { partNumber: 'asc' },
+	}) as Promise<Array<{ partNumber: number; etag: string }>>;
 }
 
-/** Mark session as COMPLETED and store the final storage key */
-export function markCompleted(sessionId: string, storageKey: string) {
-	return prisma.gameUploadSession.update({
-		where: { id: sessionId },
-		data: { status: 'COMPLETED', storageKey },
-	});
+export function findPartsBySessionId(sessionId: string) {
+	return (prisma as any).gameUploadPart.findMany({
+		where: { sessionId },
+		orderBy: { partNumber: 'asc' },
+	}) as Promise<Array<{ partNumber: number; etag: string }>>;
 }
 
 /** Revert a COMPLETING session back to PENDING (for retry on error) */
@@ -127,6 +185,101 @@ export function revertToPending(sessionId: string) {
 	return prisma.gameUploadSession.updateMany({
 		where: { id: sessionId, status: 'COMPLETING' },
 		data: { status: 'PENDING' },
+	});
+}
+
+export function markFailed(sessionId: string, storageKey?: string | null) {
+	return withSerializableRetry(async (tx) => {
+		const result = await tx.gameUploadSession.updateMany({
+			where: { id: sessionId },
+			data: {
+				status: 'FAILED',
+				...(storageKey ? { storageKey } : {}),
+			},
+		});
+		await (tx as any).gameUploadActiveSession.deleteMany({
+			where: { sessionId },
+		});
+		return result;
+	});
+}
+
+export function finalizeCompletedSession(
+	sessionId: string,
+	projectId: number,
+	kind: AssetKind,
+	data: {
+		storageKey: string;
+		playbackStorageKey?: string | null;
+		originalName: string;
+		mimeType: string;
+		playbackMimeType?: string;
+		sizeBytes: bigint;
+		playbackSizeBytes?: bigint;
+		playbackStatus?: AssetPlaybackStatus;
+		playbackError?: string;
+		isPublic: boolean;
+	},
+): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
+	return withSerializableRetry(async (tx) => {
+		const existing = await tx.asset.findFirst({
+			where: { projectId, kind, status: 'READY' },
+			select: { id: true, storageKey: true, playbackStorageKey: true },
+		});
+
+		let result: { assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null };
+		if (existing) {
+			const updated = await tx.asset.update({
+				where: { id: existing.id },
+				data: {
+					storageKey: data.storageKey,
+					playbackStorageKey: data.playbackStorageKey ?? null,
+					originalName: data.originalName,
+					mimeType: data.mimeType,
+					playbackMimeType: data.playbackMimeType ?? '',
+					sizeBytes: data.sizeBytes,
+					playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
+					playbackStatus: data.playbackStatus ?? 'PENDING',
+					playbackError: data.playbackError ?? '',
+					isPublic: data.isPublic,
+				},
+				select: { id: true },
+			});
+			result = {
+				assetId: updated.id,
+				oldStorageKey: existing.storageKey,
+				oldPlaybackStorageKey: existing.playbackStorageKey,
+			};
+		} else {
+			const created = await tx.asset.create({
+				data: {
+					projectId,
+					kind,
+					storageKey: data.storageKey,
+					playbackStorageKey: data.playbackStorageKey ?? null,
+					originalName: data.originalName,
+					mimeType: data.mimeType,
+					playbackMimeType: data.playbackMimeType ?? '',
+					sizeBytes: data.sizeBytes,
+					playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
+					playbackStatus: data.playbackStatus ?? 'PENDING',
+					playbackError: data.playbackError ?? '',
+					isPublic: data.isPublic,
+				},
+				select: { id: true },
+			});
+			result = { assetId: created.id, oldStorageKey: null, oldPlaybackStorageKey: null };
+		}
+
+		await tx.gameUploadSession.update({
+			where: { id: sessionId },
+			data: { status: 'COMPLETED', storageKey: data.storageKey },
+		});
+		await (tx as any).gameUploadActiveSession.deleteMany({
+			where: { sessionId },
+		});
+
+		return result;
 	});
 }
 

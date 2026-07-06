@@ -49,16 +49,6 @@ export async function createSession(
 		throw badRequest(`File size ${Math.round(totalBytes / 1024 / 1024)}MB exceeds max ${maxMB}MB`);
 	}
 
-	const existing = await repo.findActiveSessions(projectId);
-	for (const s of existing) {
-		await repo.updateSessionStatus(s.id, 'CANCELLED');
-		if (s.s3UploadId && s.s3Key) {
-			await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s.s3Key, s.s3UploadId).catch((err) => {
-				logger().error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Failed to abort multipart upload while replacing active session');
-			});
-		}
-	}
-
 	const totalChunks = Math.ceil(totalBytes / chunkSizeBytes);
 	const s3Key = generateStorageKey('zip');
 	const s3UploadId = await createMultipartUpload(
@@ -69,21 +59,37 @@ export async function createSession(
 	);
 	const expiresAt = new Date(Date.now() + cfg.UPLOAD_SESSION_TTL_MINUTES * 60 * 1000);
 
-	const session = await repo.createSession({
-		id: randomUUID(),
-		projectId,
-		userId: user.id,
-		originalName,
-		totalBytes: BigInt(totalBytes),
-		chunkSizeBytes,
-		totalChunks,
-		s3UploadId,
-		s3Key,
-		expiresAt,
-	});
+	let created: Awaited<ReturnType<typeof repo.createSessionReplacingActive>>;
+	try {
+		created = await repo.createSessionReplacingActive({
+			id: randomUUID(),
+			projectId,
+			userId: user.id,
+			originalName,
+			totalBytes: BigInt(totalBytes),
+			chunkSizeBytes,
+			totalChunks,
+			s3UploadId,
+			s3Key,
+			expiresAt,
+		});
+	} catch (err) {
+		await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s3Key, s3UploadId).catch((abortErr) => {
+			logger().error({ err: abortErr, s3Key }, 'Failed to abort new multipart upload after session create failure');
+		});
+		throw err;
+	}
+
+	for (const s of created.replacedSessions) {
+		if (s.s3UploadId && s.s3Key) {
+			await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s.s3Key, s.s3UploadId).catch((err) => {
+				logger().error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Failed to abort multipart upload while replacing active session');
+			});
+		}
+	}
 
 	return {
-		sessionId: session.id,
+		sessionId: created.session.id,
 		chunkSizeBytes,
 		totalChunks,
 		expiresAt: expiresAt.toISOString(),
