@@ -27,6 +27,39 @@ describe('site settings upload limits', () => {
 		}));
 	});
 
+	it('rejects missing bodies and patches without supported fields', async () => {
+		await expect(updateSettings(null)).rejects.toMatchObject({
+			statusCode: 400,
+		});
+		await expect(updateSettings({ unknown: true })).rejects.toMatchObject({
+			statusCode: 400,
+		});
+		expect(mocks.patchSettings).not.toHaveBeenCalled();
+	});
+
+	it('coerces numeric setting values and persists a valid patch', async () => {
+		await expect(updateSettings({ maxGameFileMb: '4096', maxChunkSizeMb: '8' })).resolves.toEqual({
+			maxGameFileMb: 5120,
+			maxChunkSizeMb: 8,
+		});
+
+		expect(mocks.patchSettings).toHaveBeenCalledWith({
+			maxGameFileMb: 4096,
+			maxChunkSizeMb: 8,
+		});
+	});
+
+	it.each([
+		{ maxGameFileMb: 0 },
+		{ maxGameFileMb: '1.5' },
+		{ maxChunkSizeMb: 0 },
+		{ maxChunkSizeMb: 'bad' },
+	])('rejects invalid numeric setting patch %o', async (body) => {
+		await expect(updateSettings(body)).rejects.toMatchObject({
+			statusCode: 400,
+		});
+	});
+
 	it('keeps maxChunkSizeMb aligned with the chunk upload route body limit', async () => {
 		await expect(updateSettings({ maxChunkSizeMb: 11 })).rejects.toMatchObject({
 			statusCode: 400,
