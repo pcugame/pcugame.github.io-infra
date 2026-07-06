@@ -650,14 +650,23 @@
   width: 100%;
 }
 
-/* ── Year Grid (4열, 카드 크기 ~80%) ─────────────────────── */
+/* ── Year Grid ─────────────────────────────────────────────── */
 
 .home-year-grid {
+  --home-year-card-min: 11rem;
+  --home-year-card-max: 13.5rem;
+
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, var(--home-year-card-min)), var(--home-year-card-max))
+  );
+  justify-content: center;
+  align-items: start;
   gap: 1rem;
   width: 100%;
   max-width: calc(var(--max-width) * 0.8); /* 960px */
+  margin: 0 auto;
 }
 
 /* ── Year Card ─────────────────────────────────────────────── */
@@ -772,7 +781,6 @@
 
 @media (max-width: 900px) {
   .home-year-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     max-width: 100%;
   }
 }
@@ -783,7 +791,9 @@
   }
 
   .home-year-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    --home-year-card-min: 9.5rem;
+    --home-year-card-max: 1fr;
+
     gap: 0.75rem;
     max-width: 100%;
   }
