@@ -112,6 +112,7 @@ model Project {
   members     ProjectMember[]      @relation("ProjectMembers")
   assets      Asset[]              @relation("ProjectAssets")
   gameUploads GameUploadSession[]  @relation("ProjectGameUploads")
+  activeGameUpload GameUploadActiveSession? @relation("ProjectActiveGameUpload")
 
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
   @@index([exhibitionId, status, sortOrder])
@@ -191,7 +192,7 @@ model GameUploadSession {
   chunkSizeBytes Int      @map("chunk_size_bytes")
   totalChunks    Int      @map("total_chunks")
   uploadedChunks Int[]    @default([]) @map("uploaded_chunks")
-  status         String   @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED
+  status         String   @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED | FAILED
   stagingPath    String   @default("") @map("staging_path") // legacy, no longer used
   storageKey     String?  @map("storage_key") // set on completion
   s3UploadId     String?  @map("s3_upload_id")
@@ -203,11 +204,40 @@ model GameUploadSession {
 
   project Project @relation("ProjectGameUploads", fields: [projectId], references: [id], onDelete: Cascade)
   user    User    @relation("UserGameUploads", fields: [userId], references: [id], onDelete: Cascade)
+  parts   GameUploadPart[] @relation("GameUploadSessionParts")
+  activeSlot GameUploadActiveSession? @relation("GameUploadSessionActiveSlot")
 
   @@index([projectId])
   @@index([userId])
   @@index([status, expiresAt])
   @@map("game_upload_sessions")
+}
+
+model GameUploadPart {
+  id         Int      @id @default(autoincrement())
+  sessionId  String   @map("session_id")
+  partNumber Int      @map("part_number")
+  etag       String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  session GameUploadSession @relation("GameUploadSessionParts", fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, partNumber], name: "game_upload_part_session_part", map: "game_upload_parts_session_id_part_number_key")
+  @@index([sessionId])
+  @@map("game_upload_parts")
+}
+
+model GameUploadActiveSession {
+  projectId Int      @id @map("project_id")
+  sessionId String   @unique @map("session_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation("ProjectActiveGameUpload", fields: [projectId], references: [id], onDelete: Cascade)
+  session GameUploadSession @relation("GameUploadSessionActiveSlot", fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("game_upload_active_sessions")
 }
 
 /// IP addresses permanently banned from downloading protected assets.

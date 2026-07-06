@@ -1,5 +1,35 @@
 import { prisma } from '../../../lib/prisma.js';
 import type { AssetKind, AssetPlaybackStatus, ProjectStatus, Prisma } from '../../../generated/prisma/client.js';
+import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
+
+type TxClient = Prisma.TransactionClient;
+
+const serializableOptions = {
+	isolationLevel: PrismaRuntime.TransactionIsolationLevel.Serializable,
+} as const;
+
+function isRetryableTransactionError(err: unknown): boolean {
+	return err instanceof PrismaRuntime.PrismaClientKnownRequestError
+		&& (err.code === 'P2034' || err.code === 'P2002');
+}
+
+async function withSerializableRetry<T>(
+	fn: (tx: TxClient) => Promise<T>,
+	maxAttempts = 3,
+): Promise<T> {
+	let lastErr: unknown;
+	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+		try {
+			return await prisma.$transaction(fn, serializableOptions);
+		} catch (err) {
+			lastErr = err;
+			if (!isRetryableTransactionError(err) || attempt === maxAttempts) {
+				throw err;
+			}
+		}
+	}
+	throw lastErr;
+}
 
 // ── Shared include spec for project detail queries ──────────
 
@@ -141,8 +171,18 @@ export function updateProject(id: number, data: Prisma.ProjectUpdateInput) {
 }
 
 /** Delete a project by ID */
-export function deleteProject(id: number) {
-	return prisma.project.delete({ where: { id } });
+export function deleteProjectReturningAssets(id: number) {
+	return prisma.$transaction(async (tx) => {
+		const assets = await tx.asset.findMany({ where: { projectId: id } });
+		await tx.project.update({
+			where: { id },
+			data: { posterAssetId: null },
+			select: { id: true },
+		});
+		await tx.asset.deleteMany({ where: { projectId: id } });
+		await tx.project.delete({ where: { id } });
+		return assets;
+	});
 }
 
 /** Find all assets for a project */
@@ -218,9 +258,8 @@ export function updateAssetFile(
 
 /**
  * Replace the single READY asset of a given kind for a project, or create one if none exists.
- * Serialized per-project by taking SELECT ... FOR UPDATE on the parent project row — this
- * closes the "two concurrent inserts see no existing asset and both create one" race that
- * leaves a stray asset + orphaned S3 object.
+ * Serialized with a Serializable Prisma transaction. The partial unique index for READY
+ * GAME assets closes concurrent create races; serialization retries handle write conflicts.
  *
  * Returns `oldStorageKey` for callers that need to clean up the prior S3 object after commit.
  */
@@ -240,9 +279,7 @@ export function replaceOrCreateReplaceableAsset(
 		isPublic: boolean;
 	},
 ): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
-	return prisma.$transaction(async (tx) => {
-		await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`;
-
+	return withSerializableRetry(async (tx) => {
 		const existing = await tx.asset.findFirst({
 			where: { projectId, kind, status: 'READY' },
 			select: { id: true, storageKey: true, playbackStorageKey: true },
@@ -323,17 +360,19 @@ export function findAssetsByProjectIds(projectIds: number[]) {
 }
 
 /** Delete multiple projects (cascades members; assets must be deleted first) */
-export async function bulkDeleteProjects(ids: number[]) {
+export async function bulkDeleteProjectsReturningAssets(ids: number[]) {
 	// All three steps share a transaction so a partial failure can't leave the rows in the
 	// half-broken state where posterAssetId is nulled but the asset rows still point at a
 	// project that has been deleted (or worse, vice-versa).
 	return prisma.$transaction(async (tx) => {
+		const assets = await tx.asset.findMany({ where: { projectId: { in: ids } } });
 		await tx.project.updateMany({
 			where: { id: { in: ids } },
 			data: { posterAssetId: null },
 		});
 		await tx.asset.deleteMany({ where: { projectId: { in: ids } } });
-		return tx.project.deleteMany({ where: { id: { in: ids } } });
+		const result = await tx.project.deleteMany({ where: { id: { in: ids } } });
+		return { result, assets };
 	});
 }
 

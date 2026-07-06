@@ -4,8 +4,7 @@ import { defaultTestEnv } from './helpers/app-mocks.js';
 
 const mocks = vi.hoisted(() => ({
 	findSessionById: vi.fn(),
-	appendPartEtag: vi.fn(),
-	appendChunkIndex: vi.fn(),
+	upsertPartEtag: vi.fn(),
 	updateSessionStatus: vi.fn(),
 	findExhibitionById: vi.fn(),
 	getSiteSettings: vi.fn(),
@@ -26,17 +25,19 @@ vi.mock('../config/env.js', () => ({
 
 vi.mock('../modules/admin/game-upload/repository.js', () => ({
 	findSessionById: mocks.findSessionById,
-	appendPartEtag: mocks.appendPartEtag,
-	appendChunkIndex: mocks.appendChunkIndex,
+	upsertPartEtag: mocks.upsertPartEtag,
 	updateSessionStatus: mocks.updateSessionStatus,
+	cancelSessionAndClearActive: vi.fn(),
 	findExhibitionById: mocks.findExhibitionById,
 	findActiveSessions: vi.fn().mockResolvedValue([]),
-	createSession: vi.fn(),
+	createSessionReplacingActive: vi.fn(),
 	findActiveSessionsForListing: vi.fn().mockResolvedValue([]),
 	findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
+	findPartsBySessionId: vi.fn().mockResolvedValue([]),
 	revertToPending: vi.fn(),
 	transitionToCompleting: vi.fn(),
-	markCompleted: vi.fn(),
+	markFailed: vi.fn(),
+	finalizeCompletedSession: vi.fn(),
 }));
 
 vi.mock('../lib/storage.js', () => ({
@@ -83,6 +84,7 @@ function pendingSession() {
 		s3UploadId: 'multipart-1',
 		s3Key: 'protected/game.zip',
 		s3PartEtags: [],
+		parts: [],
 		project: { status: 'PUBLISHED' },
 	};
 }
@@ -110,10 +112,7 @@ describe('game upload resource guards', () => {
 		vi.clearAllMocks();
 		_resetActiveUploads();
 		mocks.findSessionById.mockImplementation(async () => pendingSession());
-		mocks.appendPartEtag.mockResolvedValue(undefined);
-		mocks.appendChunkIndex.mockImplementation(async (_sessionId, index: number) => [
-			{ uploaded_chunks: [index] },
-		]);
+		mocks.upsertPartEtag.mockResolvedValue([{ partNumber: 1 }]);
 	});
 
 	afterEach(() => {
@@ -187,8 +186,7 @@ describe('game upload resource guards', () => {
 
 		expect(result.bytesWritten).toBe(1024);
 		expect(mocks.uploadPart).toHaveBeenCalledTimes(1);
-		expect(mocks.appendPartEtag).toHaveBeenCalledWith('session-1', 1, 'etag-1024');
-		expect(mocks.appendChunkIndex).toHaveBeenCalledWith('session-1', 0);
+		expect(mocks.upsertPartEtag).toHaveBeenCalledWith('session-1', 1, 'etag-1024');
 	});
 
 	it('does not record chunk state when the request stream aborts and allows retry', async () => {
@@ -220,8 +218,7 @@ describe('game upload resource guards', () => {
 		await expect(
 			uploadChunk('session-1', 0, aborted, { id: 11, role: 'USER' }),
 		).rejects.toThrow('client aborted');
-		expect(mocks.appendPartEtag).not.toHaveBeenCalled();
-		expect(mocks.appendChunkIndex).not.toHaveBeenCalled();
+		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
 		expect(activeUploadCount()).toBe(0);
 
 		const retried = await uploadChunk(
@@ -232,8 +229,7 @@ describe('game upload resource guards', () => {
 		);
 
 		expect(retried.bytesWritten).toBe(2);
-		expect(mocks.appendPartEtag).toHaveBeenCalledWith('session-1', 1, 'etag-2');
-		expect(mocks.appendChunkIndex).toHaveBeenCalledWith('session-1', 0);
+		expect(mocks.upsertPartEtag).toHaveBeenCalledWith('session-1', 1, 'etag-2');
 		expect(activeUploadCount()).toBe(0);
 	});
 
@@ -250,8 +246,7 @@ describe('game upload resource guards', () => {
 		).rejects.toThrow('s3 upload failed');
 
 		expect(source.destroyed).toBe(true);
-		expect(mocks.appendPartEtag).not.toHaveBeenCalled();
-		expect(mocks.appendChunkIndex).not.toHaveBeenCalled();
+		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
 		expect(activeUploadCount()).toBe(0);
 	});
 });

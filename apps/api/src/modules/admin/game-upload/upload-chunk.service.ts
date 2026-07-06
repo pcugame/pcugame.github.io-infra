@@ -60,14 +60,12 @@ export async function uploadChunk(
 			throw badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${bytesWritten}`);
 		}
 
-		await repo.appendPartEtag(session.id, partNumber, etag);
-		const updated = await repo.appendChunkIndex(session.id, chunkIndex);
-		const newChunks = updated[0]?.uploaded_chunks ?? [];
+		const parts = await repo.upsertPartEtag(session.id, partNumber, etag);
 
 		return {
 			index: chunkIndex,
 			bytesWritten,
-			uploadedCount: newChunks.length,
+			uploadedCount: parts.length,
 			totalChunks: session.totalChunks,
 		};
 	} finally {

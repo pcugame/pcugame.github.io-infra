@@ -96,11 +96,10 @@ export async function updateProject(
 
 /** Delete a project and its associated asset files from S3 */
 export async function deleteProject(projectId: number) {
-	const assets = await repo.findAssetsByProjectId(projectId);
+	const assets = await repo.deleteProjectReturningAssets(projectId);
 	await Promise.all(
 		assets.map((asset) => deleteAssetObjects({ ...asset, projectId }, 'project-delete')),
 	);
-	await repo.deleteProject(projectId);
 }
 
 /** Set a project's poster to the given asset (with validation) */
@@ -115,13 +114,12 @@ export async function setPoster(projectId: number, assetId: number) {
 
 /** Bulk delete projects: remove S3 objects + DB records. NAS originals are untouched. */
 export async function bulkDeleteProjects(ids: number[]) {
-	const assets = await repo.findAssetsByProjectIds(ids);
+	const { result, assets } = await repo.bulkDeleteProjectsReturningAssets(ids);
 
 	// Failures go through safeDeleteObject — orphan reaper handles retry.
 	await Promise.all(
 		assets.map((a) => deleteAssetObjects(a, 'project-bulk-delete')),
 	);
 
-	const result = await repo.bulkDeleteProjects(ids);
 	return { deleted: result.count, assetsRemoved: assets.length };
 }

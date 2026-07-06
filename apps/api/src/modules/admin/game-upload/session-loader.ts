@@ -15,7 +15,7 @@ export async function loadSession(sessionId: string, userId: number, userRole: s
 	}
 
 	if (session.expiresAt < new Date()) {
-		await repo.updateSessionStatus(session.id, 'CANCELLED');
+		await repo.cancelSessionAndClearActive(session.id);
 		if (session.s3UploadId && session.s3Key) {
 			await abortMultipartUpload(env().S3_BUCKET_PROTECTED, session.s3Key, session.s3UploadId).catch((err) => {
 				logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to abort multipart upload for expired session');
