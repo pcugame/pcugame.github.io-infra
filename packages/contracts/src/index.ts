@@ -40,10 +40,14 @@ export type {
 	AdminProjectListQuery,
 	AdminProjectListResponse,
 	AdminProjectListSort,
+	BulkDeleteProjectsRequest,
+	BulkUpdateProjectStatusRequest,
 	PaginationInfo,
+	SetProjectPosterRequest,
 	SortOrder,
 	SubmitProjectPayload,
 	SubmitProjectResponse,
+	SwapProjectMembersRequest,
 	UpdateMemberRequest,
 	UpdateProjectRequest,
 } from './admin-projects.js';
@@ -68,6 +72,7 @@ export type {
 } from './admin-import-export.js';
 
 export type {
+	GameUploadCreateSessionRequest,
 	GameUploadChunkResponse,
 	GameUploadCompleteResponse,
 	GameUploadSession,

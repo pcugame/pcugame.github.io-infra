@@ -1,10 +1,19 @@
 import { z } from 'zod';
 import {
 	AddMemberSchema,
+	AdminProjectListQueryBaseSchema,
 	AssetKindSchema,
+	BulkDeleteProjectsSchema,
+	BulkUpdateProjectStatusSchema,
 	CreateExhibitionBaseSchema,
+	DevAuthLoginErrorRequestSchema,
+	DevAuthLoginRequestSchema,
+	GameUploadCreateSessionSchema,
+	GoogleAuthRequestSchema,
 	ProjectStatusSchema,
+	SetProjectPosterSchema,
 	SubmitProjectPayloadBaseSchema,
+	SwapProjectMembersSchema,
 	UpdateExhibitionBaseSchema,
 	UpdateMemberBaseSchema,
 	UpdateProjectBaseSchema,
@@ -32,11 +41,15 @@ export const UpdateProjectBody = UpdateProjectBaseSchema;
 export const AdminProjectListQuery = z.object({
 	page: z.coerce.number().int().positive().default(1),
 	limit: z.coerce.number().int().positive().transform((n) => Math.min(n, 100)).default(20),
-	search: z.string().trim().max(100).optional().transform((value) => value || undefined),
+	search: AdminProjectListQueryBaseSchema.shape.search
+		.unwrap()
+		.trim()
+		.optional()
+		.transform((value) => value || undefined),
 	year: z.coerce.number().int().optional(),
-	status: ProjectStatusEnum.optional(),
-	sort: z.enum(['createdAt', 'title', 'year', 'status']).default('createdAt'),
-	order: z.enum(['asc', 'desc']).default('desc'),
+	status: AdminProjectListQueryBaseSchema.shape.status,
+	sort: AdminProjectListQueryBaseSchema.shape.sort.default('createdAt'),
+	order: AdminProjectListQueryBaseSchema.shape.order.default('desc'),
 });
 
 export type AdminProjectListQueryT = z.infer<typeof AdminProjectListQuery>;
@@ -65,46 +78,37 @@ export const UpdateMemberBody = UpdateMemberBaseSchema.extend({
 	...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
 }));
 
-export const SwapMembersBody = z.object({
+export const SwapMembersBody = SwapProjectMembersSchema.extend({
 	memberIdA: z.coerce.number().int().positive(),
 	memberIdB: z.coerce.number().int().positive(),
 });
 
 // ── Poster ───────────────────────────────────────────────────
 
-export const SetPosterBody = z.object({
+export const SetPosterBody = SetProjectPosterSchema.extend({
 	assetId: z.coerce.number().int().positive(),
 });
 
 // ── Bulk operations ──────────────────────────────────────────
 
-export const BulkStatusBody = z.object({
-	ids: z.array(z.number().int().positive()).min(1).max(500),
-	status: ProjectStatusEnum,
-});
+export const BulkStatusBody = BulkUpdateProjectStatusSchema;
 
-export const BulkDeleteBody = z.object({
-	ids: z.array(z.number().int().positive()).min(1).max(500),
-});
+export const BulkDeleteBody = BulkDeleteProjectsSchema;
 
 // ── Auth ─────────────────────────────────────────────────────
 
-export const GoogleLoginBody = z.object({
+export const GoogleLoginBody = GoogleAuthRequestSchema.extend({
 	credential: z.string().min(1, 'Missing credential'),
 });
 
-export const DevAuthLoginBody = z.object({
-	role: z.enum(['USER', 'OPERATOR', 'ADMIN']),
-});
+export const DevAuthLoginBody = DevAuthLoginRequestSchema;
 
-export const DevAuthLoginErrorBody = z.object({
-	scenario: z.enum([
-		'domain-not-allowed',
-		'google-api-unavailable',
-		'invalid-google-token',
-		'missing-google-payload',
-		'api-server-error',
-	]),
+export const DevAuthLoginErrorBody = DevAuthLoginErrorRequestSchema;
+
+// ── Game upload session ──────────────────────────────────────
+
+export const GameUploadCreateSessionBody = GameUploadCreateSessionSchema.extend({
+	totalBytes: z.coerce.number().positive(),
 });
 
 // ── Helper ───────────────────────────────────────────────────

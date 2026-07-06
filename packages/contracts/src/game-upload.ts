@@ -1,3 +1,8 @@
+export type GameUploadCreateSessionRequest = {
+	originalName: string;
+	totalBytes: number;
+};
+
 export type GameUploadSession = {
 	sessionId: string;
 	chunkSizeBytes: number;

@@ -11,6 +11,7 @@ import { failUpload, finishUpload, startUpload, updateUpload } from '../upload';
 import type {
 	GameUploadChunkResponse,
 	GameUploadCompleteResponse,
+	GameUploadCreateSessionRequest,
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
@@ -83,7 +84,7 @@ export async function createGameUploadSession(
 			body: JSON.stringify({
 				originalName: file.name,
 				totalBytes: file.size,
-			}),
+			} satisfies GameUploadCreateSessionRequest),
 		},
 	);
 }

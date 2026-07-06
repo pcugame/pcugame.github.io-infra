@@ -64,20 +64,21 @@ docker compose down -v       # stop + delete data
 apps/api/   — Fastify 5 + TypeScript + Prisma + PostgreSQL
 apps/db/    — Local PostgreSQL + Garage (docker-compose) + seed/migration scripts
 apps/web/   — React 19 + Vite + TanStack Query + React Router v7
-packages/contracts/ — type-only API/Web transport contracts
+packages/contracts/ — API/Web transport contracts and shared runtime schemas
 ```
 
-Shared API/Web transport types live in `packages/contracts` and are re-exported
-from `apps/web/src/contracts`. Web form schemas remain in
+Shared API/Web transport types and request schemas live in `packages/contracts`
+and are re-exported from `apps/web/src/contracts`. Web form schemas remain in
 `apps/web/src/contracts/schemas.ts`.
 
 **Note:** API and Web both use Zod v4 (`zod@^4.4`) with the standard `zod` import path.
 Shared transport schemas live in `packages/contracts`; app-specific adapters
-should only add coercion, defaults, or UI-facing validation messages.
-Future schema-sharing work should continue moving API/Web transport boundary
-schemas into `packages/contracts`, while keeping API env validation,
-DB/legacy import validation, Prisma persistence validation, and Web-only form UX
-wrappers local to their apps.
+should only add coercion, defaults, transforms, or UI-facing validation messages.
+Project/exhibition/member, auth, admin project bulk/poster/swap/list, and game
+upload session request schemas are shared there. Future schema-sharing work
+should focus on high-value response schemas only when runtime validation is
+needed, while keeping API env validation, DB/legacy import validation, Prisma
+persistence validation, and Web-only form UX wrappers local to their apps.
 
 ## Coding conventions
 

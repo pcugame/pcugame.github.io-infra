@@ -7,7 +7,7 @@ import type {
 	GameUploadStatus,
 } from '@pcu/contracts';
 import { sendOk, sendCreated } from '../../../shared/http.js';
-import { parseIntParam } from '../../../shared/validation.js';
+import { GameUploadCreateSessionBody, parseBody, parseIntParam } from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
 import { loadProjectWithAccess } from '../project-access.js';
 import * as gameUploadService from './service.js';
@@ -30,11 +30,12 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 			const projectId = parseIntParam(request.params.id);
 			const project = await loadProjectWithAccess(request, projectId);
 			const user = request.currentUser!;
+			const body = parseBody(GameUploadCreateSessionBody, request.body);
 			const result = await gameUploadService.createSession(
 				projectId,
 				project.exhibitionId,
 				{ id: user.id, role: user.role },
-				request.body as { originalName?: string; totalBytes?: number },
+				body,
 			);
 			sendCreated<GameUploadSession>(reply, result);
 		},

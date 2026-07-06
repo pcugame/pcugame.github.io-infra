@@ -9,8 +9,12 @@ import type {
   AdminProjectListResponse,
   AdminProjectDetail,
   SubmitProjectResponse,
+  BulkUpdateProjectStatusRequest,
+  BulkDeleteProjectsRequest,
+  SetProjectPosterRequest,
   AddMemberRequest,
   UpdateMemberRequest,
+  SwapProjectMembersRequest,
   BannedIpListResponse,
   SiteSettingsData,
   UpdateSiteSettingsRequest,
@@ -109,7 +113,7 @@ export const adminProjectApi = {
   },
 
   /** 포스터 지정 */
-  setPoster(projectId: number, body: { assetId: number }) {
+  setPoster(projectId: number, body: SetProjectPosterRequest) {
     return api.patch<{ posterAssetId: number }>(
       `/api/admin/projects/${projectId}/poster`,
       body,
@@ -117,13 +121,19 @@ export const adminProjectApi = {
   },
 
   /** 일괄 상태 변경 */
-  bulkStatus(ids: number[], status: string) {
-    return api.patch<{ updated: number }>('/api/admin/projects/bulk/status', { ids, status });
+  bulkStatus(ids: number[], status: BulkUpdateProjectStatusRequest['status']) {
+    return api.patch<{ updated: number }>(
+      '/api/admin/projects/bulk/status',
+      { ids, status } satisfies BulkUpdateProjectStatusRequest,
+    );
   },
 
   /** 일괄 삭제 */
   bulkDelete(ids: number[]) {
-    return api.post<{ deleted: number; assetsRemoved: number }>('/api/admin/projects/bulk/delete', { ids });
+    return api.post<{ deleted: number; assetsRemoved: number }>(
+      '/api/admin/projects/bulk/delete',
+      { ids } satisfies BulkDeleteProjectsRequest,
+    );
   },
 };
 
@@ -150,7 +160,7 @@ export const adminMemberApi = {
   swap(projectId: number, memberIdA: number, memberIdB: number) {
     return api.patch<void>(
       `/api/admin/projects/${projectId}/members/swap`,
-      { memberIdA, memberIdB },
+      { memberIdA, memberIdB } satisfies SwapProjectMembersRequest,
     );
   },
 };

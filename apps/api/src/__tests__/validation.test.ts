@@ -5,7 +5,14 @@ import {
   UpdateProjectBody,
   SubmitProjectPayload,
   AddMemberBody,
+  AdminProjectListQuery,
+  BulkDeleteBody,
+  BulkStatusBody,
+  DevAuthLoginBody,
+  DevAuthLoginErrorBody,
+  GameUploadCreateSessionBody,
   UpdateMemberBody,
+  SwapMembersBody,
   SetPosterBody,
   GoogleLoginBody,
   ProjectStatusEnum,
@@ -15,10 +22,28 @@ import {
 import type {
   AddMemberRequest,
   AddMemberSchemaInput,
+  AdminProjectListQuery as AdminProjectListQueryContract,
+  AdminProjectListQueryBaseSchemaInput,
+  BulkDeleteProjectsRequest,
+  BulkDeleteProjectsSchemaInput,
+  BulkUpdateProjectStatusRequest,
+  BulkUpdateProjectStatusSchemaInput,
   CreateExhibitionBaseSchemaInput,
   CreateExhibitionRequest,
+  DevAuthLoginErrorRequest,
+  DevAuthLoginErrorRequestSchemaInput,
+  DevAuthLoginRequest,
+  DevAuthLoginRequestSchemaInput,
+  GameUploadCreateSessionRequest,
+  GameUploadCreateSessionSchemaInput,
+  GoogleAuthRequest,
+  GoogleAuthRequestSchemaInput,
+  SetProjectPosterRequest,
+  SetProjectPosterSchemaInput,
   SubmitProjectPayload as SubmitProjectPayloadContract,
   SubmitProjectPayloadBaseSchemaInput,
+  SwapProjectMembersRequest,
+  SwapProjectMembersSchemaInput,
   UpdateExhibitionBaseSchemaInput,
   UpdateExhibitionRequest,
   UpdateMemberBaseSchemaInput,
@@ -47,6 +72,22 @@ const updateProjectSchemaMatchesContract: IsExact<
   UpdateProjectBaseSchemaInput,
   UpdateProjectRequest
 > = true;
+const adminProjectListQuerySchemaMatchesContract: IsExact<
+  AdminProjectListQueryBaseSchemaInput,
+  AdminProjectListQueryContract
+> = true;
+const bulkStatusSchemaMatchesContract: IsExact<
+  BulkUpdateProjectStatusSchemaInput,
+  BulkUpdateProjectStatusRequest
+> = true;
+const bulkDeleteSchemaMatchesContract: IsExact<
+  BulkDeleteProjectsSchemaInput,
+  BulkDeleteProjectsRequest
+> = true;
+const setProjectPosterSchemaMatchesContract: IsExact<
+  SetProjectPosterSchemaInput,
+  SetProjectPosterRequest
+> = true;
 const submitProjectSchemaMatchesContract: IsExact<
   SubmitProjectPayloadBaseSchemaInput,
   SubmitProjectPayloadContract
@@ -59,6 +100,26 @@ const updateMemberSchemaMatchesContract: IsExact<
   UpdateMemberBaseSchemaInput,
   UpdateMemberRequest
 > = true;
+const swapProjectMembersSchemaMatchesContract: IsExact<
+  SwapProjectMembersSchemaInput,
+  SwapProjectMembersRequest
+> = true;
+const googleAuthSchemaMatchesContract: IsExact<
+  GoogleAuthRequestSchemaInput,
+  GoogleAuthRequest
+> = true;
+const devAuthLoginSchemaMatchesContract: IsExact<
+  DevAuthLoginRequestSchemaInput,
+  DevAuthLoginRequest
+> = true;
+const devAuthLoginErrorSchemaMatchesContract: IsExact<
+  DevAuthLoginErrorRequestSchemaInput,
+  DevAuthLoginErrorRequest
+> = true;
+const gameUploadCreateSessionSchemaMatchesContract: IsExact<
+  GameUploadCreateSessionSchemaInput,
+  GameUploadCreateSessionRequest
+> = true;
 
 // ── Enum schemas ─────────────────────────────────────────────
 
@@ -67,9 +128,18 @@ describe('ProjectStatusEnum', () => {
     expect(createExhibitionSchemaMatchesContract).toBe(true);
     expect(updateExhibitionSchemaMatchesContract).toBe(true);
     expect(updateProjectSchemaMatchesContract).toBe(true);
+    expect(adminProjectListQuerySchemaMatchesContract).toBe(true);
+    expect(bulkStatusSchemaMatchesContract).toBe(true);
+    expect(bulkDeleteSchemaMatchesContract).toBe(true);
+    expect(setProjectPosterSchemaMatchesContract).toBe(true);
     expect(submitProjectSchemaMatchesContract).toBe(true);
     expect(addMemberSchemaMatchesContract).toBe(true);
     expect(updateMemberSchemaMatchesContract).toBe(true);
+    expect(swapProjectMembersSchemaMatchesContract).toBe(true);
+    expect(googleAuthSchemaMatchesContract).toBe(true);
+    expect(devAuthLoginSchemaMatchesContract).toBe(true);
+    expect(devAuthLoginErrorSchemaMatchesContract).toBe(true);
+    expect(gameUploadCreateSessionSchemaMatchesContract).toBe(true);
   });
 
   it('accepts valid statuses', () => {
@@ -200,6 +270,27 @@ describe('UpdateProjectBody', () => {
   });
 });
 
+describe('AdminProjectListQuery', () => {
+  it('applies API defaults and coercion', () => {
+    expect(AdminProjectListQuery.parse({})).toEqual({
+      page: 1,
+      limit: 20,
+      sort: 'createdAt',
+      order: 'desc',
+    });
+    expect(AdminProjectListQuery.parse({ page: '2', limit: '150', year: '2025' })).toMatchObject({
+      page: 2,
+      limit: 100,
+      year: 2025,
+    });
+  });
+
+  it('trims empty search to undefined', () => {
+    const result = AdminProjectListQuery.parse({ search: '   ' });
+    expect(result.search).toBeUndefined();
+  });
+});
+
 // ── Submit project payload ───────────────────────────────────
 
 describe('SubmitProjectPayload', () => {
@@ -303,7 +394,16 @@ describe('UpdateMemberBody', () => {
   });
 });
 
-// ── Poster / Auth schemas ────────────────────────────────────
+describe('SwapMembersBody', () => {
+  it('coerces member ids', () => {
+    expect(SwapMembersBody.parse({ memberIdA: '1', memberIdB: '2' })).toEqual({
+      memberIdA: 1,
+      memberIdB: 2,
+    });
+  });
+});
+
+// ── Poster / Bulk / Auth / Upload schemas ────────────────────
 
 describe('SetPosterBody', () => {
   it('accepts valid integer', () => {
@@ -324,6 +424,25 @@ describe('SetPosterBody', () => {
   });
 });
 
+describe('BulkStatusBody', () => {
+  it('accepts valid ids and status', () => {
+    expect(BulkStatusBody.parse({ ids: [1, 2], status: 'ARCHIVED' })).toEqual({
+      ids: [1, 2],
+      status: 'ARCHIVED',
+    });
+  });
+
+  it('rejects empty ids', () => {
+    expect(() => BulkStatusBody.parse({ ids: [], status: 'PUBLISHED' })).toThrow();
+  });
+});
+
+describe('BulkDeleteBody', () => {
+  it('accepts ids', () => {
+    expect(BulkDeleteBody.parse({ ids: [1] })).toEqual({ ids: [1] });
+  });
+});
+
 describe('GoogleLoginBody', () => {
   it('accepts valid credential', () => {
     expect(GoogleLoginBody.parse({ credential: 'token123' }).credential).toBe(
@@ -337,6 +456,32 @@ describe('GoogleLoginBody', () => {
 
   it('rejects missing credential', () => {
     expect(() => GoogleLoginBody.parse({})).toThrow();
+  });
+});
+
+describe('DevAuthLoginBody', () => {
+  it('accepts supported roles', () => {
+    expect(DevAuthLoginBody.parse({ role: 'ADMIN' })).toEqual({ role: 'ADMIN' });
+  });
+});
+
+describe('DevAuthLoginErrorBody', () => {
+  it('accepts supported scenarios', () => {
+    expect(DevAuthLoginErrorBody.parse({ scenario: 'invalid-google-token' })).toEqual({
+      scenario: 'invalid-google-token',
+    });
+  });
+});
+
+describe('GameUploadCreateSessionBody', () => {
+  it('coerces totalBytes for API input', () => {
+    expect(GameUploadCreateSessionBody.parse({
+      originalName: 'game.zip',
+      totalBytes: '1024',
+    })).toEqual({
+      originalName: 'game.zip',
+      totalBytes: 1024,
+    });
   });
 });
 

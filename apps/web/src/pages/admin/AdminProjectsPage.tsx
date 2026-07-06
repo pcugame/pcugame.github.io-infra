@@ -42,7 +42,7 @@ export default function AdminProjectsPage() {
 	}, [selection.resetSelection]);
 
 	const bulkStatusMutation = useMutation({
-		mutationFn: ({ ids, status }: { ids: number[]; status: string }) =>
+		mutationFn: ({ ids, status }: { ids: number[]; status: ProjectStatus }) =>
 			adminProjectApi.bulkStatus(ids, status),
 		onSuccess: () => {
 			selection.resetSelection();

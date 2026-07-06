@@ -36,6 +36,19 @@ export type AdminProjectListQuery = {
 	order?: SortOrder;
 };
 
+export type BulkUpdateProjectStatusRequest = {
+	ids: number[];
+	status: ProjectStatus;
+};
+
+export type BulkDeleteProjectsRequest = {
+	ids: number[];
+};
+
+export type SetProjectPosterRequest = {
+	assetId: number;
+};
+
 export type PaginationInfo = {
 	page: number;
 	limit: number;
@@ -107,4 +120,9 @@ export type UpdateMemberRequest = {
 	name?: string;
 	studentId?: string;
 	sortOrder?: number;
+};
+
+export type SwapProjectMembersRequest = {
+	memberIdA: number;
+	memberIdB: number;
 };
