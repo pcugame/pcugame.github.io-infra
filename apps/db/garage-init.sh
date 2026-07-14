@@ -6,7 +6,11 @@ set -e
 GARAGE="garage -c /etc/garage.toml"
 
 echo "=== Garage init: configuring layout ==="
-NODE_ID=$($GARAGE node id 2>/dev/null | head -1 | cut -d@ -f1)
+NODE_ID=$($GARAGE status 2>/dev/null | awk '/^[0-9a-f]/ { print $1; exit }')
+if [ -z "$NODE_ID" ]; then
+  echo "Could not discover the Garage node ID" >&2
+  exit 1
+fi
 $GARAGE layout assign "$NODE_ID" -z dc1 -c 1G 2>/dev/null || true
 $GARAGE layout apply --version 1 2>/dev/null || echo "Layout already applied"
 

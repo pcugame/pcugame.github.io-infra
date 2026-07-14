@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ImportExecuteResult, ImportPreviewResult } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { badRequest, payloadTooLarge } from '../../../shared/errors.js';
+import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import { requireRole } from '../../../plugins/auth.js';
 import * as importService from './service.js';
 
@@ -14,6 +15,7 @@ async function extractJsonFromMultipart(request: { file: () => Promise<unknown> 
 
 	const mimeType: string = file.mimetype ?? '';
 	const fileName: string = file.filename ?? '';
+	assertValidUploadFilename(fileName);
 	if (!fileName.endsWith('.json') && !mimeType.includes('json')) {
 		throw badRequest('JSON 파일만 업로드할 수 있습니다.');
 	}

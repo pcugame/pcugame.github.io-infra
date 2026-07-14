@@ -12,6 +12,7 @@ import {
 import { SIZE_LIMITS } from '../../../shared/file-signature.js';
 import type { UploadPipeline } from './upload.service.js';
 import { payloadTooLarge } from '../../../shared/errors.js';
+import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 
 /** Multipart file part collected during submit */
 export interface CollectedFilePart {
@@ -37,6 +38,9 @@ export async function collectMultipartParts(
 		if (part.type === 'field') {
 			if (part.fieldname === 'payload') payloadJson = part.value as string;
 		} else {
+			const filename = part.filename ?? '';
+			assertValidUploadFilename(filename);
+
 			if (fileParts.length >= limits.maxFiles) {
 				throw payloadTooLarge(`Too many files (max ${limits.maxFiles})`);
 			}
@@ -53,7 +57,7 @@ export async function collectMultipartParts(
 			const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
 			pipeline.trackTempFile(tmpPath);
 
-			const limiter = createByteLimiter(perFileMax, part.filename ?? part.fieldname);
+			const limiter = createByteLimiter(perFileMax, filename);
 			await streamPipeline(part.file, limiter, createWriteStream(tmpPath));
 
 			const stat = await fsp.stat(tmpPath);
@@ -63,7 +67,7 @@ export async function collectMultipartParts(
 				throw payloadTooLarge(`Total upload size exceeds ${limitMB}MB limit`);
 			}
 
-			fileParts.push({ tmpPath, fieldname: part.fieldname, filename: part.filename ?? '' });
+			fileParts.push({ tmpPath, fieldname: part.fieldname, filename });
 		}
 	}
 

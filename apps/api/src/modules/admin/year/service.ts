@@ -9,6 +9,7 @@ import { bucketForKind } from '../../../lib/s3.js';
 import { safeDeleteObject } from '../../../lib/storage.js';
 import { notFound, conflict, badRequest, payloadTooLarge } from '../../../shared/errors.js';
 import { SIZE_LIMITS } from '../../../shared/file-signature.js';
+import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import {
 	acquireUploadSlot,
 	createByteLimiter,
@@ -111,15 +112,17 @@ export async function replacePoster(
 			}
 			fileCount++;
 			if (fileCount > 1) throw badRequest('Only one poster file is allowed');
+			const filename = part.filename ?? '';
+			assertValidUploadFilename(filename);
 
 			const nextTmpPath = path.join(os.tmpdir(), crypto.randomUUID());
 			pipeline.trackTempFile(nextTmpPath);
 
 			const posterStreamMax = Math.max(kindLimit(limits, 'POSTER'), SIZE_LIMITS.posterPdf);
-			const limiter = createByteLimiter(posterStreamMax, part.filename ?? 'poster');
+			const limiter = createByteLimiter(posterStreamMax, filename);
 			await streamPipeline(part.file, limiter, createWriteStream(nextTmpPath));
 			tmpPath = nextTmpPath;
-			originalName = part.filename ?? '';
+			originalName = filename;
 		}
 
 		if (!tmpPath) throw badRequest('No poster file provided');

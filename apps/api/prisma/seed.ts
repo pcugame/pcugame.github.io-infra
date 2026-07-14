@@ -29,10 +29,13 @@
  * }
  */
 
-import { createPrismaClient } from '../src/lib/prisma-client.js';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+
+const { createPrismaClient } = process.env.SEED_USE_DIST === 'true'
+  ? await import('../dist/lib/prisma-client.js')
+  : await import('../src/lib/prisma-client.js');
 
 if (process.env.NODE_ENV === 'production') {
   console.error('ERROR: seed must not run in production');

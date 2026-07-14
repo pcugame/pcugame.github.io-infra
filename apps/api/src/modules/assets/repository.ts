@@ -21,8 +21,12 @@ export function findAssetByStorageKey(storageKey: string) {
 			project: {
 				select: {
 					creatorId: true,
+					title: true,
 					status: true,
-					members: { select: { userId: true } },
+					members: {
+						select: { id: true, userId: true, name: true, studentId: true, sortOrder: true },
+						orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+					},
 				},
 			},
 		},

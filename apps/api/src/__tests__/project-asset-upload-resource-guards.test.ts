@@ -138,6 +138,21 @@ describe('project asset upload resource guards', () => {
 		expect(processSpy).not.toHaveBeenCalled();
 	});
 
+	it('rejects an unsafe filename before creating a temp file', async () => {
+		await expect(
+			addAssetToProject(
+				7,
+				assetRequest('IMAGE', chunksWithHeader(pngHeader, 128, 128), '../image.png'),
+			),
+		).rejects.toMatchObject({
+			statusCode: 400,
+			code: 'INVALID_FILENAME',
+		});
+
+		expect(trackedTempFiles).toEqual([]);
+		expect(processSpy).not.toHaveBeenCalled();
+	});
+
 	it('rejects oversized IMAGE before temp storage grows toward the GAME limit', async () => {
 		await expect(
 			addAssetToProject(

@@ -56,6 +56,29 @@ describe('project payload schemas', () => {
 		});
 	});
 
+	it('limits new project titles to 125 UTF-8 bytes', () => {
+		expect(SubmitProjectPayloadBaseSchema.safeParse({
+			exhibitionId: 1,
+			title: 'a'.repeat(125),
+			members: [member],
+		}).success).toBe(true);
+		expect(SubmitProjectPayloadBaseSchema.safeParse({
+			exhibitionId: 1,
+			title: 'a'.repeat(126),
+			members: [member],
+		}).success).toBe(false);
+		expect(SubmitProjectPayloadBaseSchema.safeParse({
+			exhibitionId: 1,
+			title: '가'.repeat(41),
+			members: [member],
+		}).success).toBe(true);
+		expect(SubmitProjectPayloadBaseSchema.safeParse({
+			exhibitionId: 1,
+			title: '가'.repeat(42),
+			members: [member],
+		}).success).toBe(false);
+	});
+
 	it('rejects missing members and invalid member linking', () => {
 		expect(SubmitProjectPayloadBaseSchema.safeParse({
 			exhibitionId: 1,

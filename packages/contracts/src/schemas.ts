@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_NEW_PROJECT_TITLE_BYTES, utf8ByteLength } from './filename-policy.js';
 
 export const ProjectStatusSchema = z.enum(['PUBLISHED', 'ARCHIVED']);
 export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO']);
@@ -20,9 +21,15 @@ export const ProjectMemberInputSchema = z.object({
 	userId: z.number().int().positive().optional(),
 });
 
+export const ProjectSubmissionTitleSchema = z.string()
+	.min(1, '제목을 입력하세요.')
+	.refine((title) => utf8ByteLength(title) <= MAX_NEW_PROJECT_TITLE_BYTES, {
+		message: `작품 제목은 UTF-8 기준 ${MAX_NEW_PROJECT_TITLE_BYTES}바이트 이하여야 합니다.`,
+	});
+
 export const SubmitProjectPayloadBaseSchema = z.object({
 	exhibitionId: z.number().int().positive(),
-	title: z.string().min(1).max(120),
+	title: ProjectSubmissionTitleSchema,
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
 	members: z.array(ProjectMemberInputSchema).min(1),

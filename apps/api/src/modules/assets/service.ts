@@ -1,5 +1,6 @@
 import type { FastifyReply } from 'fastify';
 import type { UserRole } from '../../generated/prisma/client.js';
+import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/contracts';
 import { env } from '../../config/env.js';
 import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
 import { bucketForKind } from '../../lib/s3.js';
@@ -83,7 +84,16 @@ export async function streamProtectedAsset(
 		throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
 	}
 
-	const url = await getPresignedUrl(env().S3_BUCKET_PROTECTED, storageKey);
+	const downloadOptions = asset.kind === 'GAME'
+		? {
+			responseContentDisposition: attachmentContentDisposition(
+				buildGameDownloadFilename(asset.project.title, asset.project.members).filename,
+			),
+		}
+		: undefined;
+	const url = downloadOptions
+		? await getPresignedUrl(env().S3_BUCKET_PROTECTED, storageKey, downloadOptions)
+		: await getPresignedUrl(env().S3_BUCKET_PROTECTED, storageKey);
 	reply.header('Referrer-Policy', 'no-referrer');
 	return reply.redirect(url, 302);
 }

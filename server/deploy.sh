@@ -11,7 +11,8 @@ POD_NAME="graduationproject"
 PG_CONTAINER="gp-postgres"
 API_CONTAINER="gp-api"
 PG_IMAGE="docker.io/library/postgres:16-alpine"
-API_IMAGE="ghcr.io/pcugame/pcu-graduationproject-v2-api:latest"
+API_IMAGE="${API_IMAGE:-ghcr.io/pcugame/pcu-graduationproject-v2-api:latest}"
+PULL_API_IMAGE="${PULL_API_IMAGE:-true}"
 PG_VOLUME="gp_pg_data"
 API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"
 HEALTHCHECK_TIMEOUT=90  # seconds
@@ -117,7 +118,12 @@ do_up() {
   # Real pull errors still surface via exit code and set -e.)
   echo "Pulling images..."
   podman pull -q "$PG_IMAGE"
-  podman pull -q "$API_IMAGE"
+  if [[ "$PULL_API_IMAGE" == "true" ]]; then
+    podman pull -q "$API_IMAGE"
+  else
+    podman image inspect "$API_IMAGE" >/dev/null
+    echo "Using existing local API image: $API_IMAGE"
+  fi
 
   # Remove old containers/pod if they exist
   do_down
@@ -198,17 +204,20 @@ do_up() {
   # Wait for API health check (DB + storage)
   echo "Waiting for API health check..."
   local api_elapsed=0
+  local api_healthy=0
   while (( api_elapsed < HEALTHCHECK_TIMEOUT )); do
     if podman exec "$API_CONTAINER" wget -qO- http://localhost:4000/api/health 2>/dev/null | grep -q '"ok":true'; then
       echo "API health check passed! (${api_elapsed}s)"
+      api_healthy=1
       break
     fi
     sleep 2
     api_elapsed=$((api_elapsed + 2))
   done
-  if (( api_elapsed >= HEALTHCHECK_TIMEOUT )); then
-    echo "WARNING: API health check did not pass within ${HEALTHCHECK_TIMEOUT}s"
+  if (( api_healthy == 0 )); then
+    echo "ERROR: API health check did not pass within ${HEALTHCHECK_TIMEOUT}s"
     podman logs "$API_CONTAINER" --tail 30 2>/dev/null || true
+    return 1
   fi
 
   # ── Generate systemd service with restart delay ──
