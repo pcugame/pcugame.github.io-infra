@@ -43,6 +43,21 @@ async function fetchJson(url, options) {
   return { res, body };
 }
 
+async function fetchIntegrationS3Headers(url) {
+  const target = new URL(url);
+  const signedHost = target.host;
+  if (target.hostname === 'garage') target.hostname = '127.0.0.1';
+
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(target, { headers: { Host: signedHost } }, (response) => {
+      resolve({ status: response.statusCode ?? 0, headers: response.headers });
+      response.destroy();
+    });
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 await waitFor('API health', async () => {
   const { body } = await fetchJson(`${apiBase}/api/health`);
   if (!body?.ok) throw new Error('health returned ok=false');
@@ -100,4 +115,32 @@ if (!location || !location.includes('integration-poster.png')) {
 }
 console.log('ok: public asset redirect');
 
+const { body: publicProject } = await fetchJson(
+  `${apiBase}/api/public/projects/integration-public-asset`,
+);
+const gameDownloadUrl = publicProject?.data?.gameDownloadUrl;
+if (typeof gameDownloadUrl !== 'string') {
+  throw new Error('integration public project did not expose a game download URL');
+}
+
+const gameRedirect = await fetch(gameDownloadUrl, { redirect: 'manual' });
+if (gameRedirect.status !== 302) {
+  throw new Error(`game download redirect returned ${gameRedirect.status}`);
+}
+const gameLocation = gameRedirect.headers.get('location');
+if (!gameLocation) throw new Error('game download redirect did not include a presigned URL');
+
+const gameObject = await fetchIntegrationS3Headers(gameLocation);
+if (gameObject.status < 200 || gameObject.status >= 300) {
+  throw new Error(`presigned game download returned ${gameObject.status}`);
+}
+const disposition = gameObject.headers['content-disposition'] || '';
+const expectedFilename =
+  "filename*=UTF-8''Integration%20Public%20Asset%20Project_Integration%20Student_20260001.zip";
+if (!disposition.includes('filename="game.zip"') || !disposition.includes(expectedFilename)) {
+  throw new Error(`game download returned unexpected Content-Disposition: ${disposition}`);
+}
+console.log('ok: game download uses the friendly Content-Disposition filename');
+
 console.log('integration smoke passed');
+import { request as httpRequest } from 'node:http';

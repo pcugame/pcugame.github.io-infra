@@ -5,6 +5,10 @@ db_engine = "sqlite"
 
 replication_factor = 1
 
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "garage:3901"
+rpc_secret = "0000000000000000000000000000000000000000000000000000000000000000"
+
 [s3_api]
 s3_region = "garage"
 api_bind_addr = "[::]:3900"
@@ -17,7 +21,3 @@ root_domain = ".web.garage.localhost"
 [admin]
 api_bind_addr = "[::]:3903"
 admin_token = "local-dev-admin-token"
-
-[rpc]
-bind_addr = "[::]:3901"
-secret = "0000000000000000000000000000000000000000000000000000000000000000"

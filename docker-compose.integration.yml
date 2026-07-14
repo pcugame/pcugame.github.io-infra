@@ -1,10 +1,10 @@
 name: pcu-integration
 
 x-s3-env: &s3-env
-  S3_ENDPOINT: http://host.docker.internal:3900
+  S3_ENDPOINT: http://garage:3900
   S3_REGION: garage
-  S3_ACCESS_KEY_ID: PCUINTEGRATIONKEY01
-  S3_SECRET_ACCESS_KEY: pcu-integration-secret-key-change-me-000000
+  S3_ACCESS_KEY_ID: GK000000000000000000000001
+  S3_SECRET_ACCESS_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
   S3_BUCKET_PUBLIC: pcu-public
   S3_BUCKET_PROTECTED: pcu-protected
   S3_FORCE_PATH_STYLE: "true"
@@ -40,14 +40,16 @@ services:
       - integration_garage_data:/var/lib/garage/data
       - integration_garage_meta:/var/lib/garage/meta
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:3903/health"]
+      test: ["CMD", "/garage", "-c", "/etc/garage.toml", "status"]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 10s
 
   garage-init:
-    image: dxflrs/garage:v1.1.0
+    build:
+      context: ./apps/db
+      dockerfile: Dockerfile.garage-init
     restart: "no"
     depends_on:
       garage:
@@ -58,6 +60,7 @@ services:
     volumes:
       - ./apps/db/garage.toml:/etc/garage.toml:ro
       - ./apps/db/garage-init-integration.sh:/garage-init-integration.sh:ro
+      - integration_garage_meta:/var/lib/garage/meta:ro
     entrypoint: ["/bin/sh", "/garage-init-integration.sh"]
 
   api:
@@ -115,7 +118,7 @@ services:
       - "4000:4000"
     command: >
       sh -c "npx prisma migrate deploy &&
-             npx tsx prisma/seed.ts --integration &&
+             SEED_USE_DIST=true npx tsx prisma/seed.ts --integration &&
              node dist/server.js"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/health"]

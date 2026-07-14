@@ -5,6 +5,7 @@ import {
 	AddMemberSchema as SharedAddMemberSchema,
 	CreateExhibitionBaseSchema,
 	ProjectMemberInputSchema as SharedProjectMemberInputSchema,
+	ProjectSubmissionTitleSchema,
 	ProjectStatusSchema,
 	SubmitProjectPayloadBaseSchema,
 	UpdateExhibitionBaseSchema,
@@ -24,7 +25,7 @@ export type ProjectMemberInput = z.infer<typeof ProjectMemberInputSchema>;
 
 export const SubmitProjectPayloadSchema = SubmitProjectPayloadBaseSchema.extend({
   exhibitionId: z.number().int().positive('전시회를 선택하세요'),
-  title: z.string().min(1, '제목을 입력하세요').max(120),
+  title: ProjectSubmissionTitleSchema,
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
   members: z

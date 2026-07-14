@@ -104,6 +104,13 @@ describe('SubmitProjectPayloadSchema', () => {
 			SubmitProjectPayloadSchema.parse({ ...valid, title: undefined }),
 		).toThrow();
 	});
+
+	it('validates the new-project title by UTF-8 byte length', () => {
+		expect(() => SubmitProjectPayloadSchema.parse({ ...valid, title: 'a'.repeat(125) })).not.toThrow();
+		expect(() => SubmitProjectPayloadSchema.parse({ ...valid, title: 'a'.repeat(126) })).toThrow();
+		expect(() => SubmitProjectPayloadSchema.parse({ ...valid, title: '가'.repeat(41) })).not.toThrow();
+		expect(() => SubmitProjectPayloadSchema.parse({ ...valid, title: '가'.repeat(42) })).toThrow();
+	});
 });
 
 // ── Member schemas ───────────────────────────────────────────

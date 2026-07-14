@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 	readObjectRange: vi.fn(),
 	safeDeleteObject: vi.fn(),
 	replaceOrCreateReplaceableAsset: vi.fn(),
+	createSessionReplacingActive: vi.fn(),
 }));
 
 vi.mock('../config/env.js', () => ({
@@ -30,7 +31,7 @@ vi.mock('../modules/admin/game-upload/repository.js', () => ({
 	cancelSessionAndClearActive: vi.fn(),
 	findExhibitionById: mocks.findExhibitionById,
 	findActiveSessions: vi.fn().mockResolvedValue([]),
-	createSessionReplacingActive: vi.fn(),
+	createSessionReplacingActive: mocks.createSessionReplacingActive,
 	findActiveSessionsForListing: vi.fn().mockResolvedValue([]),
 	findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
 	findPartsBySessionId: vi.fn().mockResolvedValue([]),
@@ -64,6 +65,7 @@ vi.mock('../lib/lifecycle.js', () => ({
 
 import {
 	chunkUploadBodyLimitBytes,
+	createSession,
 	resolveChunkSizeBytes,
 	uploadChunk,
 } from '../modules/admin/game-upload/service.js';
@@ -125,6 +127,22 @@ describe('game upload resource guards', () => {
 		expect(chunkUploadBodyLimitBytes(cfg)).toBe(10 * 1024 * 1024);
 		expect(resolveChunkSizeBytes({ maxChunkSizeMb: 100 }, cfg)).toBe(10 * 1024 * 1024);
 		expect(resolveChunkSizeBytes({ maxChunkSizeMb: 4 }, cfg)).toBe(4 * 1024 * 1024);
+	});
+
+	it('rejects an unsafe original filename before creating S3 upload state', async () => {
+		await expect(createSession(
+			7,
+			1,
+			{ id: 11, role: 'USER' },
+			{ originalName: '../game?.zip', totalBytes: 1024 },
+		)).rejects.toMatchObject({
+			statusCode: 400,
+			code: 'INVALID_FILENAME',
+		});
+
+		expect(mocks.findExhibitionById).not.toHaveBeenCalled();
+		expect(mocks.createMultipartUpload).not.toHaveBeenCalled();
+		expect(mocks.createSessionReplacingActive).not.toHaveBeenCalled();
 	});
 
 	it('rejects chunk uploads above configured concurrency', async () => {

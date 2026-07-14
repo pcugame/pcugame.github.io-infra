@@ -15,6 +15,7 @@ import {
 	releaseUploadSlot,
 } from '../../../shared/upload-limits.js';
 import { detectFileType } from '../../../shared/file-signature.js';
+import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import { UploadPipeline } from '../../assets/upload/index.js';
 import { assetUrl } from './serializer.js';
 import * as repo from './repository.js';
@@ -51,13 +52,15 @@ export async function addAssetToProject(
 				if (!kind) {
 					throw badRequest('Asset kind must be provided before file');
 				}
+				const filename = part.filename ?? '';
+				assertValidUploadFilename(filename);
 				const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
 				pipeline.trackTempFile(tmpPath);
 
-				const limiter = createKindAwareByteLimiter(limits, kind, part.filename ?? 'file');
+				const limiter = createKindAwareByteLimiter(limits, kind, filename);
 				await streamPipeline(part.file, limiter, createWriteStream(tmpPath));
 				fileTmpPath = tmpPath;
-				fileOriginalName = part.filename ?? '';
+				fileOriginalName = filename;
 			}
 		}
 

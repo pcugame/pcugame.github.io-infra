@@ -47,11 +47,20 @@ export async function uploadFile(
 export async function getPresignedUrl(
 	bucket: string,
 	key: string,
-	ttlSec?: number,
+	options: {
+		ttlSec?: number;
+		responseContentDisposition?: string;
+	} = {},
 ): Promise<string> {
-	const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+	const command = new GetObjectCommand({
+		Bucket: bucket,
+		Key: key,
+		...(options.responseContentDisposition && {
+			ResponseContentDisposition: options.responseContentDisposition,
+		}),
+	});
 	return getSignedUrl(s3(), command, {
-		expiresIn: ttlSec ?? env().S3_PRESIGN_TTL_SEC,
+		expiresIn: options.ttlSec ?? env().S3_PRESIGN_TTL_SEC,
 	});
 }
 

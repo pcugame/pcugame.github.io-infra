@@ -10,7 +10,11 @@ PUBLIC_BUCKET="${S3_BUCKET_PUBLIC:-pcu-public}"
 PROTECTED_BUCKET="${S3_BUCKET_PROTECTED:-pcu-protected}"
 
 echo "=== Garage integration init: configuring layout ==="
-NODE_ID=$($GARAGE node id 2>/dev/null | head -1 | cut -d@ -f1)
+NODE_ID=$($GARAGE status 2>/dev/null | awk '/^[0-9a-f]/ { print $1; exit }')
+if [ -z "$NODE_ID" ]; then
+  echo "Could not discover the Garage node ID" >&2
+  exit 1
+fi
 $GARAGE layout assign "$NODE_ID" -z dc1 -c 1G 2>/dev/null || true
 $GARAGE layout apply --version 1 2>/dev/null || echo "Layout already applied"
 
@@ -21,11 +25,7 @@ $GARAGE bucket create "$PROTECTED_BUCKET" 2>/dev/null || echo "Bucket $PROTECTED
 echo "=== Garage integration init: creating deterministic access key ==="
 if $GARAGE key info "$KEY_NAME" >/dev/null 2>&1; then
   echo "Key $KEY_NAME already exists"
-elif $GARAGE key import --yes "$ACCESS_KEY_ID" "$SECRET_ACCESS_KEY" "$KEY_NAME" >/dev/null 2>&1; then
-  echo "Imported key $KEY_NAME"
-elif $GARAGE key import "$ACCESS_KEY_ID" "$SECRET_ACCESS_KEY" "$KEY_NAME" >/dev/null 2>&1; then
-  echo "Imported key $KEY_NAME"
-elif $GARAGE key import "$KEY_NAME" "$ACCESS_KEY_ID" "$SECRET_ACCESS_KEY" >/dev/null 2>&1; then
+elif $GARAGE key import --yes -n "$KEY_NAME" "$ACCESS_KEY_ID" "$SECRET_ACCESS_KEY" >/dev/null 2>&1; then
   echo "Imported key $KEY_NAME"
 else
   echo "Could not import deterministic Garage key" >&2

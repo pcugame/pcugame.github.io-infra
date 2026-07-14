@@ -2,6 +2,22 @@
 
 export type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus, UserRole } from './enums.js';
 
+export {
+	attachmentContentDisposition,
+	buildGameDownloadFilename,
+	GAME_DOWNLOAD_FALLBACK_FILENAME,
+	MAX_NEW_PROJECT_TITLE_BYTES,
+	MAX_PORTABLE_FILENAME_BYTES,
+	sanitizeFilenameComponent,
+	utf8ByteLength,
+	validateUploadFilename,
+} from './filename-policy.js';
+export type {
+	FilenameValidationReason,
+	FilenameValidationReasonCode,
+	GameDownloadMember,
+} from './filename-policy.js';
+
 export type {
 	ApiErrorCode,
 	AuthUser,

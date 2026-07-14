@@ -87,15 +87,33 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,API_IMAGE
           script_stop: true
           script: |
             export PATH=$PATH:/usr/local/bin:/usr/bin
             printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
             export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
             chmod +x "${DEPLOY_DIR}/deploy.sh"
-            "${DEPLOY_DIR}/deploy.sh" up
+
+            rollback_tag="localhost/pcu-graduationproject-v2-api:rollback"
+            previous_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null || true)"
+            if [ -n "${previous_image_id}" ]; then
+              podman untag "${rollback_tag}" 2>/dev/null || true
+              podman tag "${previous_image_id}" "${rollback_tag}"
+            fi
+
+            if ! API_IMAGE="${API_IMAGE}" PULL_API_IMAGE=true "${DEPLOY_DIR}/deploy.sh" up; then
+              echo "Candidate deployment failed. Restoring the previous API image."
+              if [ -z "${previous_image_id}" ]; then
+                echo "No previous API image was available for rollback."
+                exit 1
+              fi
+              API_IMAGE="${rollback_tag}" PULL_API_IMAGE=false "${DEPLOY_DIR}/deploy.sh" up
+              echo "Rollback completed; failing the workflow to surface the rejected deployment."
+              exit 1
+            fi
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
+          API_IMAGE: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:sha-${{ github.sha }}

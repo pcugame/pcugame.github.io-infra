@@ -8,6 +8,7 @@ import { AppError, badRequest } from '../../../shared/errors.js';
 import { getSiteSettings } from '../../../shared/site-settings.js';
 import { generateStorageKey } from '../../../shared/storage-path.js';
 import { getUploadLimits } from '../../../shared/upload-limits.js';
+import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import { resolveChunkSizeBytes } from './session-sizing.js';
@@ -32,6 +33,7 @@ export async function createSession(
 
 	const cfg = env();
 	const { originalName, totalBytes } = body;
+	assertValidUploadFilename(originalName);
 
 	const exhibition = await repo.findExhibitionById(exhibitionId);
 	assertUploadAllowed(exhibition, exhibition?.year ?? 0, user.role as any);
