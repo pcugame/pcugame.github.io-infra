@@ -9,16 +9,42 @@
  *   5. cancelSession()    -> abort multipart upload + cleanup
  */
 
-export { chunkUploadBodyLimitBytes, resolveChunkSizeBytes } from './session-sizing.js';
 export { createCountedChunkStream, chunkByteLength, toError } from './chunk-stream.js';
-export { loadSession } from './session-loader.js';
 export { assertGameUploadSessionWritable } from './session-policy.js';
-export { createSession } from './create-session.service.js';
-export { uploadChunk } from './upload-chunk.service.js';
-export { completeSession } from './complete-session.service.js';
-export {
+export { chunkUploadBodyLimitBytes, resolveChunkSizeBytes } from './session-sizing.js';
+
+import { createSession } from './create-session.service.js';
+import { uploadChunk } from './upload-chunk.service.js';
+import { completeSession } from './complete-session.service.js';
+import {
 	cancelSession,
 	getSessionStatus,
 	listSessions,
 	sweepStaleCompletingSessions,
 } from './session-maintenance.service.js';
+import type { GameUploadServiceDependencies } from './ports.js';
+
+/** Build the application use-cases from explicit ports. */
+export function createGameUploadService(deps: GameUploadServiceDependencies) {
+	return {
+		createSession: (...args: Parameters<typeof createSession> extends [unknown, ...infer Rest] ? Rest : never) => (
+			createSession(deps, ...args)
+		),
+		uploadChunk: (...args: Parameters<typeof uploadChunk> extends [unknown, ...infer Rest] ? Rest : never) => (
+			uploadChunk(deps, ...args)
+		),
+		completeSession: (...args: Parameters<typeof completeSession> extends [unknown, ...infer Rest] ? Rest : never) => (
+			completeSession(deps, ...args)
+		),
+		cancelSession: (...args: Parameters<typeof cancelSession> extends [unknown, ...infer Rest] ? Rest : never) => (
+			cancelSession(deps, ...args)
+		),
+		getSessionStatus: (...args: Parameters<typeof getSessionStatus> extends [unknown, ...infer Rest] ? Rest : never) => (
+			getSessionStatus(deps, ...args)
+		),
+		listSessions: (...args: Parameters<typeof listSessions> extends [unknown, ...infer Rest] ? Rest : never) => (
+			listSessions(deps, ...args)
+		),
+		sweepStaleCompletingSessions: () => sweepStaleCompletingSessions(deps),
+	};
+}

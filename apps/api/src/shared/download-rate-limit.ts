@@ -15,6 +15,21 @@ interface BucketEntry {
 	timestamps: number[];
 }
 
+interface RateLimitClock {
+	now(): Date;
+}
+
+interface RateLimitScheduler {
+	every(intervalMs: number, task: () => void): { cancel(): void };
+}
+
+interface DownloadRateLimiterOptions {
+	windowMs?: number;
+	maxHits?: number;
+	clock?: RateLimitClock;
+	scheduler?: RateLimitScheduler;
+}
+
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;  // 15 minutes
 const DEFAULT_MAX_HITS = 30;                // max downloads per window
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000;   // cleanup every 5 minutes
@@ -24,14 +39,22 @@ export class DownloadRateLimiter {
 	private bannedIps = new Set<string>();
 	private readonly windowMs: number;
 	private readonly maxHits: number;
-	private sweepTimer: ReturnType<typeof setInterval> | null = null;
+	private readonly clock: RateLimitClock;
+	private sweepTask: { cancel(): void } | null;
 
-	constructor(opts: { windowMs?: number; maxHits?: number } = {}) {
+	constructor(opts: DownloadRateLimiterOptions = {}) {
 		this.windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;
 		this.maxHits = opts.maxHits ?? DEFAULT_MAX_HITS;
+		this.clock = opts.clock ?? { now: () => new Date() };
+		const scheduler = opts.scheduler ?? {
+			every(intervalMs: number, task: () => void) {
+				const timer = setInterval(task, intervalMs);
+				timer.unref();
+				return { cancel: () => clearInterval(timer) };
+			},
+		};
 
-		this.sweepTimer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
-		if (this.sweepTimer.unref) this.sweepTimer.unref();
+		this.sweepTask = scheduler.every(SWEEP_INTERVAL_MS, () => this.sweep());
 	}
 
 	/** Load banned IPs from DB on startup. */
@@ -71,7 +94,7 @@ export class DownloadRateLimiter {
 			);
 		}
 
-		const now = Date.now();
+		const now = this.clock.now().getTime();
 		const cutoff = now - this.windowMs;
 
 		let entry = this.buckets.get(ip);
@@ -95,7 +118,7 @@ export class DownloadRateLimiter {
 	}
 
 	private sweep(): void {
-		const cutoff = Date.now() - this.windowMs;
+		const cutoff = this.clock.now().getTime() - this.windowMs;
 		for (const [ip, entry] of this.buckets) {
 			entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
 			if (entry.timestamps.length === 0) {
@@ -105,9 +128,9 @@ export class DownloadRateLimiter {
 	}
 
 	destroy(): void {
-		if (this.sweepTimer) {
-			clearInterval(this.sweepTimer);
-			this.sweepTimer = null;
+		if (this.sweepTask) {
+			this.sweepTask.cancel();
+			this.sweepTask = null;
 		}
 		this.buckets.clear();
 		this.bannedIps.clear();

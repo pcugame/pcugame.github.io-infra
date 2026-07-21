@@ -1,27 +1,29 @@
-import { promises as fsp } from 'node:fs';
-import { createWriteStream } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
-import { randomUUID } from 'node:crypto';
-import type { Readable } from 'node:stream';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { env } from '../../../config/env.js';
-import { s3, bucketForKind } from '../../../lib/s3.js';
-import { logger } from '../../../lib/logger.js';
-import { conflict } from '../../../shared/errors.js';
-import type { AssetKind as PrismaAssetKind } from '../../../generated/prisma/client.js';
 import type {
 	AssetKind,
 	ExportFileStatus,
 	ExportProgress,
 	ExportResult,
 } from '@pcu/contracts';
-import * as repo from './repository.js';
+import { conflict } from '../../../shared/errors.js';
 import { parseWebglEntryKey } from '../../webgl/paths.js';
 
-// ── Path helpers ────────────────────────────────────────
+export interface ExportProject {
+	id: number;
+	title: string;
+	webglEntryKey: string;
+	exhibition: { year: number; title: string };
+	members: { name: string; studentId: string; sortOrder: number }[];
+	assets: {
+		id: number;
+		kind: AssetKind;
+		storageKey: string;
+		originalName: string;
+		mimeType: string;
+		sizeBytes: bigint;
+	}[];
+}
 
-/** Remove characters forbidden in directory names on Windows/POSIX */
 function safeDirName(name: string): string {
 	return name
 		.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
@@ -30,18 +32,16 @@ function safeDirName(name: string): string {
 		|| 'unnamed';
 }
 
-/** `{year}_{title}` */
 function exhibitionDirName(year: number, title: string): string {
 	return safeDirName(title ? `${year}_${title}` : `${year}`);
 }
 
-/** `{title}_{studentId1}{name1}_{studentId2}{name2}_...` */
 function projectDirName(
 	title: string,
 	members: { studentId: string; name: string; sortOrder: number }[],
 ): string {
 	const sorted = [...members].sort((a, b) => a.sortOrder - b.sortOrder);
-	const memberPart = sorted.map((m) => `${m.studentId}${m.name}`).join('_');
+	const memberPart = sorted.map((member) => `${member.studentId}${member.name}`).join('_');
 	return safeDirName(memberPart ? `${title}_${memberPart}` : title);
 }
 
@@ -50,83 +50,44 @@ function extFromKey(storageKey: string): string {
 	return dot >= 0 ? storageKey.slice(dot + 1) : 'bin';
 }
 
-/** `poster.webp`, `image.png`, `image_2.webp`, ... */
 function assetFileName(kind: string, ext: string, index: number): string {
 	const base = kind.toLowerCase();
 	return index > 0 ? `${base}_${index + 1}.${ext}` : `${base}.${ext}`;
 }
 
-// ── Server-side mutex + progress ────────────────────────
+/** Process-local lock/progress implementation. Replace this port for multi-replica operation. */
+export class InMemoryExportProgressStore {
+	private progress: ExportProgress | null = null;
 
-let exportRunning = false;
-let currentProgress: ExportProgress | null = null;
-
-function acquireExportLock(year: number | null): void {
-	if (exportRunning) {
-		throw conflict('Export is already in progress');
+	start(year: number | null, startedAt: number): void {
+		if (this.progress) throw conflict('Export is already in progress');
+		this.progress = {
+			year,
+			startedAt,
+			phase: 'preparing',
+			totalProjects: 0,
+			currentProjectIndex: 0,
+			currentProjectTitle: null,
+			currentProjectFiles: [],
+			totalFiles: 0,
+			downloaded: 0,
+			skipped: 0,
+			failed: 0,
+		};
 	}
-	exportRunning = true;
-	currentProgress = {
-		year,
-		startedAt: Date.now(),
-		phase: 'preparing',
-		totalProjects: 0,
-		currentProjectIndex: 0,
-		currentProjectTitle: null,
-		currentProjectFiles: [],
-		totalFiles: 0,
-		downloaded: 0,
-		skipped: 0,
-		failed: 0,
-	};
-}
 
-function releaseExportLock(): void {
-	exportRunning = false;
-	currentProgress = null;
-}
+	get(): ExportProgress | null {
+		return this.progress;
+	}
 
-export function getExportProgress(): ExportProgress | null {
-	return currentProgress;
-}
+	update(update: (progress: ExportProgress) => void): void {
+		if (this.progress) update(this.progress);
+	}
 
-function setCurrentFileStatus(assetId: number, status: ExportFileStatus): void {
-	if (!currentProgress) return;
-	currentProgress.currentProjectFiles = currentProgress.currentProjectFiles.map((file) =>
-		file.assetId === assetId ? { ...file, status } : file,
-	);
-}
-
-// ── S3 download (atomic + abortable) ──────────────────
-
-/** Generate a temp path next to the final destination */
-function tmpPath(destPath: string): string {
-	return `${destPath}.${randomUUID()}.tmp`;
-}
-
-async function downloadObject(
-	bucket: string,
-	key: string,
-	destPath: string,
-	signal?: AbortSignal,
-): Promise<void> {
-	const tmp = tmpPath(destPath);
-	try {
-		const res = await s3().send(
-			new GetObjectCommand({ Bucket: bucket, Key: key }),
-			{ abortSignal: signal },
-		);
-		const ws = createWriteStream(tmp);
-		await pipeline(res.Body as Readable, ws, { signal });
-		await fsp.rename(tmp, destPath);
-	} catch (err) {
-		// Clean up temp file on any failure (abort, network, disk, etc.)
-		await fsp.unlink(tmp).catch(() => {});
-		throw err;
+	finish(): void {
+		this.progress = null;
 	}
 }
-
-// ── Public API ──────────────────────────────────────────
 
 export interface ExportOptions {
 	outDir: string;
@@ -135,163 +96,164 @@ export interface ExportOptions {
 	signal?: AbortSignal;
 }
 
-export async function exportAssets(opts: ExportOptions): Promise<ExportResult> {
-	acquireExportLock(opts.year ?? null);
-	try {
-		return await doExport(opts);
-	} finally {
-		releaseExportLock();
-	}
+export interface ExportServiceDependencies {
+	findProjects(year?: number): Promise<ExportProject[]>;
+	pathExists(path: string): Promise<boolean>;
+	ensureDirectory(path: string): Promise<void>;
+	saveObject(bucket: string, key: string, destination: string, signal?: AbortSignal): Promise<void>;
+	bucketForKind(kind: AssetKind): string;
+	protectedBucket: string;
+	now(): number;
+	logWarn(message: string): void;
+	logError(context: Record<string, unknown>, message: string): void;
 }
 
-async function doExport(opts: ExportOptions): Promise<ExportResult> {
-	const projects = await repo.findProjectsWithAssets(opts.year);
-	const totalFiles = projects.reduce(
-		(sum, project) => sum + project.assets.length + (parseWebglEntryKey(project.id, project.webglEntryKey) ? 1 : 0),
-		0,
-	);
-
-	const result: ExportResult = {
-		projects: projects.length,
-		totalFiles,
-		downloaded: 0,
-		skipped: 0,
-		failed: 0,
-		aborted: false,
-		paths: [],
-	};
-
-	if (currentProgress) {
-		currentProgress.totalProjects = projects.length;
-		currentProgress.totalFiles = totalFiles;
-		currentProgress.phase = 'downloading';
-	}
-
-	if (projects.length === 0) {
-		if (currentProgress) currentProgress.phase = 'finishing';
-		return result;
-	}
-
-	const assetsDir = join(opts.outDir, 'ExportedAssets');
-
-	for (let pIdx = 0; pIdx < projects.length; pIdx++) {
-		const project = projects[pIdx];
-		if (!project) continue;
-		// Check abort before each project
-		if (opts.signal?.aborted) {
-			result.aborted = true;
-			logger().warn('Export aborted by client disconnect');
-			break;
-		}
-
-		if (currentProgress) {
-			currentProgress.currentProjectIndex = pIdx;
-			currentProgress.currentProjectTitle = project.title;
-		}
-
-		const exDir = exhibitionDirName(project.exhibition.year, project.exhibition.title);
-		const projDir = projectDirName(project.title, project.members);
-		const fullDir = join(assetsDir, exDir, projDir);
-
-		const kindCount = new Map<string, number>();
-		const projectFiles: Array<{
-			asset: {
-				id: number;
-				kind: PrismaAssetKind | 'WEBGL';
-				storageKey: string;
-				originalName: string;
-			};
-			fileName: string;
-			destPath: string;
-		}> = project.assets.map((asset) => {
-			const idx = kindCount.get(asset.kind) ?? 0;
-			kindCount.set(asset.kind, idx + 1);
-
-			const ext = extFromKey(asset.storageKey);
-			const fileName = assetFileName(asset.kind, ext, idx);
-
-			return {
-				asset,
-				fileName,
-				destPath: join(fullDir, fileName),
-			};
+export function createExportService(
+	deps: ExportServiceDependencies,
+	progressStore = new InMemoryExportProgressStore(),
+) {
+	function setCurrentFileStatus(assetId: number, status: ExportFileStatus): void {
+		progressStore.update((progress) => {
+			progress.currentProjectFiles = progress.currentProjectFiles.map((file) =>
+				file.assetId === assetId ? { ...file, status } : file,
+			);
 		});
-		const webglDeployment = parseWebglEntryKey(project.id, project.webglEntryKey);
-		if (webglDeployment) {
-			projectFiles.push({
-				asset: {
-					id: -project.id,
-					kind: 'WEBGL',
-					storageKey: webglDeployment.sourceKey,
-					originalName: 'webgl.zip',
-				},
-				fileName: 'webgl/webgl.zip',
-				destPath: join(fullDir, 'webgl', 'webgl.zip'),
-			});
-		}
+	}
 
-		if (currentProgress) {
-			currentProgress.currentProjectFiles = projectFiles.map(({ asset, fileName }) => ({
-				assetId: asset.id,
-				kind: asset.kind as AssetKind | 'WEBGL',
-				originalName: asset.originalName,
-				fileName,
-				status: 'pending',
-			}));
-		}
+	async function doExport(options: ExportOptions): Promise<ExportResult> {
+		const projects = await deps.findProjects(options.year);
+		const totalFiles = projects.reduce(
+			(sum, project) => sum + project.assets.length
+				+ (parseWebglEntryKey(project.id, project.webglEntryKey) ? 1 : 0),
+			0,
+		);
+		const result: ExportResult = {
+			projects: projects.length,
+			totalFiles,
+			downloaded: 0,
+			skipped: 0,
+			failed: 0,
+			aborted: false,
+			paths: [],
+		};
 
-		for (const { asset, destPath } of projectFiles) {
-			if (opts.signal?.aborted) {
+		progressStore.update((progress) => {
+			progress.totalProjects = projects.length;
+			progress.totalFiles = totalFiles;
+			progress.phase = projects.length === 0 ? 'finishing' : 'downloading';
+		});
+		if (projects.length === 0) return result;
+
+		const assetsDir = join(options.outDir, 'ExportedAssets');
+		for (let projectIndex = 0; projectIndex < projects.length; projectIndex++) {
+			const project = projects[projectIndex];
+			if (!project) continue;
+			if (options.signal?.aborted) {
 				result.aborted = true;
+				deps.logWarn('Export aborted by client disconnect');
 				break;
 			}
 
-			const bucket = asset.kind === 'WEBGL'
-				? env().S3_BUCKET_PROTECTED
-				: bucketForKind(asset.kind);
+			progressStore.update((progress) => {
+				progress.currentProjectIndex = projectIndex;
+				progress.currentProjectTitle = project.title;
+			});
 
-			if (opts.dryRun) {
-				result.paths.push(destPath);
-				continue;
+			const fullDir = join(
+				assetsDir,
+				exhibitionDirName(project.exhibition.year, project.exhibition.title),
+				projectDirName(project.title, project.members),
+			);
+			const kindCount = new Map<string, number>();
+			const projectFiles: Array<{
+				asset: { id: number; kind: AssetKind | 'WEBGL'; storageKey: string; originalName: string };
+				fileName: string;
+				destination: string;
+			}> = project.assets.map((asset) => {
+				const index = kindCount.get(asset.kind) ?? 0;
+				kindCount.set(asset.kind, index + 1);
+				const fileName = assetFileName(asset.kind, extFromKey(asset.storageKey), index);
+				return { asset, fileName, destination: join(fullDir, fileName) };
+			});
+			const webgl = parseWebglEntryKey(project.id, project.webglEntryKey);
+			if (webgl) {
+				projectFiles.push({
+					asset: {
+						id: -project.id,
+						kind: 'WEBGL',
+						storageKey: webgl.sourceKey,
+						originalName: 'webgl.zip',
+					},
+					fileName: 'webgl/webgl.zip',
+					destination: join(fullDir, 'webgl', 'webgl.zip'),
+				});
 			}
 
-			// Idempotent: skip if file already exists
-			try {
-				await fsp.access(destPath);
-				result.skipped++;
-				if (currentProgress) currentProgress.skipped = result.skipped;
-				setCurrentFileStatus(asset.id, 'skipped');
-				continue;
-			} catch {
-				// doesn't exist — proceed
-			}
+			progressStore.update((progress) => {
+				progress.currentProjectFiles = projectFiles.map(({ asset, fileName }) => ({
+					assetId: asset.id,
+					kind: asset.kind,
+					originalName: asset.originalName,
+					fileName,
+					status: 'pending',
+				}));
+			});
 
-			await fsp.mkdir(dirname(destPath), { recursive: true });
-
-			try {
-				setCurrentFileStatus(asset.id, 'saving');
-				await downloadObject(bucket, asset.storageKey, destPath, opts.signal);
-				result.downloaded++;
-				if (currentProgress) currentProgress.downloaded = result.downloaded;
-				setCurrentFileStatus(asset.id, 'saved');
-			} catch (err) {
-				if (opts.signal?.aborted) {
+			for (const { asset, destination } of projectFiles) {
+				if (options.signal?.aborted) {
 					result.aborted = true;
 					break;
 				}
-				logger().error({ err, storageKey: asset.storageKey }, 'Export download failed');
-				result.failed++;
-				if (currentProgress) currentProgress.failed = result.failed;
-				setCurrentFileStatus(asset.id, 'failed');
+				const bucket = asset.kind === 'WEBGL'
+					? deps.protectedBucket
+					: deps.bucketForKind(asset.kind);
+				if (options.dryRun) {
+					result.paths.push(destination);
+					continue;
+				}
+				if (await deps.pathExists(destination)) {
+					result.skipped++;
+					progressStore.update((progress) => { progress.skipped = result.skipped; });
+					setCurrentFileStatus(asset.id, 'skipped');
+					continue;
+				}
+
+				await deps.ensureDirectory(dirname(destination));
+				try {
+					setCurrentFileStatus(asset.id, 'saving');
+					await deps.saveObject(bucket, asset.storageKey, destination, options.signal);
+					result.downloaded++;
+					progressStore.update((progress) => { progress.downloaded = result.downloaded; });
+					setCurrentFileStatus(asset.id, 'saved');
+				} catch (err) {
+					if (options.signal?.aborted) {
+						result.aborted = true;
+						break;
+					}
+					deps.logError({ err, storageKey: asset.storageKey }, 'Export download failed');
+					result.failed++;
+					progressStore.update((progress) => { progress.failed = result.failed; });
+					setCurrentFileStatus(asset.id, 'failed');
+				}
 			}
+			if (result.aborted) break;
 		}
 
-		if (result.aborted) break;
+		if (!result.aborted) {
+			progressStore.update((progress) => { progress.phase = 'finishing'; });
+		}
+		return result;
 	}
 
-	if (currentProgress && !result.aborted) {
-		currentProgress.phase = 'finishing';
-	}
-
-	return result;
+	return {
+		getExportProgress: () => progressStore.get(),
+		async exportAssets(options: ExportOptions): Promise<ExportResult> {
+			progressStore.start(options.year ?? null, deps.now());
+			try {
+				return await doExport(options);
+			} finally {
+				progressStore.finish();
+			}
+		},
+	};
 }

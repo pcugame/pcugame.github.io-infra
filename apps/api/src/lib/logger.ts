@@ -1,6 +1,7 @@
 import pino from 'pino';
 import { env } from '../config/env.js';
 import { currentContext } from './request-context.js';
+import type { AppLogger } from '../application/ports.js';
 
 let _root: pino.Logger | undefined;
 
@@ -10,7 +11,7 @@ let _root: pino.Logger | undefined;
  * background jobs that run outside any request context. Everywhere else, use
  * {@link logger} and let the request context attach its reqId automatically.
  */
-export function rootLogger(): pino.Logger {
+export function rootLogger(): AppLogger {
 	if (!_root) {
 		const e = env();
 		_root = pino({
@@ -34,6 +35,6 @@ export function rootLogger(): pino.Logger {
  *
  * Callers never need to care which mode is active; the shape is identical.
  */
-export function logger(): pino.Logger {
+export function logger(): AppLogger {
 	return currentContext()?.log ?? rootLogger();
 }

@@ -1,13 +1,8 @@
-import type { FastifyReply } from 'fastify';
-import type { UserRole } from '../../generated/prisma/client.js';
 import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/contracts';
-import { env } from '../../config/env.js';
+import type { AssetKind, UserRole } from '@pcu/contracts';
+import type { Actor } from '../../application/http-input.js';
+import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
 import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
-import { bucketForKind } from '../../lib/s3.js';
-import { getPresignedUrl, safeDeleteObject } from '../../lib/storage.js';
-import { protectedDownloadLimiter } from '../../shared/protected-download-limiter.js';
-import { logger } from '../../lib/logger.js';
-import * as repo from './repository.js';
 
 type ProtectedAssetAccessUser = {
 	id: number;
@@ -22,6 +17,65 @@ type ProtectedAssetAccessRecord = {
 		members: { userId: number | null }[];
 	};
 };
+
+interface ProtectedAssetStreamRecord extends ProtectedAssetAccessRecord {
+	project: ProtectedAssetAccessRecord['project'] & {
+		title: string;
+		members: {
+			id: number;
+			userId: number | null;
+			name: string;
+			studentId: string;
+			sortOrder: number;
+		}[];
+	};
+}
+
+interface AssetDeletionRecord {
+	id: number;
+	projectId: number;
+	kind: AssetKind;
+	storageKey: string;
+	playbackStorageKey: string | null;
+	project: { posterAssetId: number | null };
+}
+
+export interface AssetsServiceDependencies {
+	publicBucket: string;
+	protectedBucket: string;
+	presign(
+		bucket: string,
+		key: string,
+		options?: { responseContentDisposition: string },
+	): Promise<string>;
+	bucketForKind(kind: AssetKind): string;
+	deleteOrQueue(
+		bucket: string,
+		key: string,
+		reason: string,
+		context: Record<string, unknown>,
+	): Promise<void>;
+	loadProjectWithAccess(actor: Actor, projectId: number): Promise<unknown>;
+	downloadLimiter: {
+		loadBannedIps(ips: string[]): void;
+		check(ip: string): 'ok' | 'ban' | 'banned';
+	};
+	logger: {
+		info(message: string): void;
+		warn(message: string): void;
+		error(context: Record<string, unknown>, message: string): void;
+	};
+	repository: {
+		findAllBannedIps(): Promise<{ ip: string }[]>;
+		findPublicAsset(key: string): Promise<unknown | null>;
+		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
+		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
+		findAssetByIdWithProject(id: number): Promise<AssetDeletionRecord | null>;
+		markAssetDeleting(id: number): Promise<unknown>;
+		clearPosterIfMatches(projectId: number, assetId: number): Promise<unknown>;
+		markAssetDeleted(id: number): Promise<unknown>;
+	};
+}
 
 export function canStreamProtectedAsset(
 	asset: ProtectedAssetAccessRecord,
@@ -39,36 +93,38 @@ export function canStreamProtectedAsset(
 }
 
 /** Initialize in-memory ban cache from DB on startup */
-export async function loadBannedIpCache(): Promise<void> {
+export async function loadBannedIpCache(deps: AssetsServiceDependencies): Promise<void> {
 	try {
-		const banned = await repo.findAllBannedIps();
-		protectedDownloadLimiter.loadBannedIps(banned.map((b) => b.ip));
+		const banned = await deps.repository.findAllBannedIps();
+		deps.downloadLimiter.loadBannedIps(banned.map((b) => b.ip));
 		if (banned.length > 0) {
-			logger().info(`Loaded ${banned.length} banned IPs`);
+			deps.logger.info(`Loaded ${banned.length} banned IPs`);
 		}
 	} catch {
-		logger().warn('Could not load banned IPs (migration may be pending)');
+		deps.logger.warn('Could not load banned IPs (migration may be pending)');
 	}
 }
 
 /** Redirect to a presigned S3 URL for a public asset */
-export async function streamPublicAsset(storageKey: string, reply: FastifyReply) {
-	const asset = await repo.findPublicAsset(storageKey);
+export async function streamPublicAsset(
+	deps: AssetsServiceDependencies,
+	storageKey: string,
+): Promise<HttpResponseDescriptor> {
+	const asset = await deps.repository.findPublicAsset(storageKey);
 	if (!asset) throw notFound('Asset not found');
 
-	const url = await getPresignedUrl(env().S3_BUCKET_PUBLIC, storageKey);
-	reply.header('Referrer-Policy', 'no-referrer');
-	return reply.redirect(url, 302);
+	const url = await deps.presign(deps.publicBucket, storageKey);
+	return { status: 302, headers: { 'Referrer-Policy': 'no-referrer' }, location: url };
 }
 
 /** Redirect to a presigned S3 URL for a protected asset with IP-based rate limiting */
 export async function streamProtectedAsset(
+	deps: AssetsServiceDependencies,
 	storageKey: string,
 	clientIp: string,
 	user: ProtectedAssetAccessUser | undefined,
-	reply: FastifyReply,
-) {
-	const asset = await repo.findAssetByStorageKey(storageKey);
+): Promise<HttpResponseDescriptor> {
+	const asset = await deps.repository.findAssetByStorageKey(storageKey);
 	if (!asset) throw notFound('Asset not found');
 	if (!canStreamProtectedAsset(asset, user)) {
 		if (!user) throw unauthorized();
@@ -77,10 +133,10 @@ export async function streamProtectedAsset(
 
 	// Count only authorized protected redirects so access checks cannot be bypassed
 	// or masked by rate-limit state.
-	const result = protectedDownloadLimiter.check(clientIp);
+	const result = deps.downloadLimiter.check(clientIp);
 	if (result === 'ban') {
-		await repo.upsertBannedIp(clientIp, 'Rate limit exceeded (protected asset download)')
-			.catch((err) => logger().error({ err }, 'Failed to persist IP ban'));
+		await deps.repository.upsertBannedIp(clientIp, 'Rate limit exceeded (protected asset download)')
+			.catch((err) => deps.logger.error({ err }, 'Failed to persist IP ban'));
 		throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
 	}
 
@@ -92,30 +148,47 @@ export async function streamProtectedAsset(
 		}
 		: undefined;
 	const url = downloadOptions
-		? await getPresignedUrl(env().S3_BUCKET_PROTECTED, storageKey, downloadOptions)
-		: await getPresignedUrl(env().S3_BUCKET_PROTECTED, storageKey);
-	reply.header('Referrer-Policy', 'no-referrer');
-	return reply.redirect(url, 302);
+		? await deps.presign(deps.protectedBucket, storageKey, downloadOptions)
+		: await deps.presign(deps.protectedBucket, storageKey);
+	return { status: 302, headers: { 'Referrer-Policy': 'no-referrer' }, location: url };
 }
 
 /** Delete an asset: mark status, remove from S3, clear poster ref, mark deleted */
-export async function deleteAsset(assetId: number) {
-	const asset = await repo.findAssetByIdWithProject(assetId);
+export async function deleteAsset(
+	deps: AssetsServiceDependencies,
+	assetId: number,
+	actor: Actor,
+) {
+	const asset = await deps.repository.findAssetByIdWithProject(assetId);
 	if (!asset) throw notFound('Asset not found');
+	await deps.loadProjectWithAccess(actor, asset.projectId);
 
-	await repo.markAssetDeleting(asset.id);
+	await deps.repository.markAssetDeleting(asset.id);
 
-	const bucket = bucketForKind(asset.kind);
-	await safeDeleteObject(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id });
+	const bucket = deps.bucketForKind(asset.kind);
+	await deps.deleteOrQueue(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id });
 	if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
-		await safeDeleteObject(bucket, asset.playbackStorageKey, 'asset-delete-playback', { assetId: asset.id });
+		await deps.deleteOrQueue(bucket, asset.playbackStorageKey, 'asset-delete-playback', { assetId: asset.id });
 	}
 
 	if (asset.project.posterAssetId === asset.id) {
-		await repo.clearPosterIfMatches(asset.projectId, asset.id);
+		await deps.repository.clearPosterIfMatches(asset.projectId, asset.id);
 	}
 
-	await repo.markAssetDeleted(asset.id);
+	await deps.repository.markAssetDeleted(asset.id);
 
 	return { projectId: asset.projectId };
+}
+
+export function createAssetsService(deps: AssetsServiceDependencies) {
+	return {
+		loadBannedIpCache: () => loadBannedIpCache(deps),
+		streamPublicAsset: (storageKey: string) => streamPublicAsset(deps, storageKey),
+		streamProtectedAsset: (
+			storageKey: string,
+			clientIp: string,
+			user: ProtectedAssetAccessUser | undefined,
+		) => streamProtectedAsset(deps, storageKey, clientIp, user),
+		deleteAsset: (assetId: number, actor: Actor) => deleteAsset(deps, assetId, actor),
+	};
 }

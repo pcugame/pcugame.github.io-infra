@@ -258,10 +258,12 @@ export async function processVideo(
 		if (strategy === 'remux') {
 			try {
 				await remux(input.tmpPath, outputPath);
-			} catch (err) {
-				logger().warn({ err }, 'Playback remux failed, falling back to re-encode');
-				await fsp.unlink(outputPath).catch(() => {});
-				await reencode(input.tmpPath, outputPath);
+				} catch (err) {
+					logger().warn({ err }, 'Playback remux failed, falling back to re-encode');
+					await fsp.unlink(outputPath).catch((cleanupError) => {
+						logger().warn({ err: cleanupError, outputPath }, 'Failed to remove partial remux output');
+					});
+					await reencode(input.tmpPath, outputPath);
 			}
 		} else {
 			await reencode(input.tmpPath, outputPath);

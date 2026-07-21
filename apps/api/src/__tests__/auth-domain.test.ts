@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createAuthService } from '../modules/auth/service.js';
 
 const mocks = vi.hoisted(() => ({
 	verifyIdToken: vi.fn(),
@@ -12,34 +13,30 @@ const mocks = vi.hoisted(() => ({
 	},
 }));
 
-vi.mock('google-auth-library', () => ({
-	OAuth2Client: vi.fn(function OAuth2Client() {
-		return {
-			verifyIdToken: mocks.verifyIdToken,
-		};
-	}),
-}));
-
-vi.mock('../config/env.js', () => ({
-	env: () => mocks.testEnv,
-	loadEnv: () => mocks.testEnv,
-}));
-
-vi.mock('../lib/logger.js', () => ({
-	logger: () => ({
-		error: vi.fn(),
-		info: vi.fn(),
-		warn: vi.fn(),
-	}),
-}));
-
-vi.mock('../modules/auth/repository.js', () => ({
-	upsertUserByGoogleSub: mocks.upsertUserByGoogleSub,
-	createSession: mocks.createSession,
-	deleteSession: mocks.deleteSession,
-}));
-
 describe('auth Google hosted domain handling', () => {
+	function service(logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }) {
+		return createAuthService({
+			repository: {
+				upsertUserByGoogleSub: mocks.upsertUserByGoogleSub,
+				upsertDevUser: vi.fn(),
+				createSession: mocks.createSession,
+				deleteSession: mocks.deleteSession,
+			},
+			googleTokens: {
+				verify: async (credential, audiences) => {
+					const ticket = await mocks.verifyIdToken({ idToken: credential, audience: audiences });
+					return ticket?.getPayload();
+				},
+			},
+			clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
+			generateSessionId: () => 'session-id',
+			sessionAbsoluteMs: mocks.testEnv.SESSION_ABSOLUTE_MS,
+			googleClientIds: mocks.testEnv.GOOGLE_CLIENT_IDS,
+			allowedGoogleHostedDomain: mocks.testEnv.ALLOWED_GOOGLE_HD,
+			logger,
+		});
+	}
+
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.testEnv.ALLOWED_GOOGLE_HD = 'g.pcu.ac.kr';
@@ -55,16 +52,17 @@ describe('auth Google hosted domain handling', () => {
 	});
 
 	it('keeps invalid Google ID tokens as 401 UNAUTHORIZED', async () => {
+		const authLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 		mocks.verifyIdToken.mockRejectedValue(new Error('bad token'));
-		const { loginWithGoogle } = await import('../modules/auth/service.js');
-
-		await expect(loginWithGoogle('bad-token')).rejects.toMatchObject({
+		await expect(service(authLogger).loginWithGoogle('bad-token')).rejects.toMatchObject({
 			statusCode: 401,
 			code: 'UNAUTHORIZED',
 			message: 'Invalid Google token',
 		});
 		expect(mocks.upsertUserByGoogleSub).not.toHaveBeenCalled();
 		expect(mocks.createSession).not.toHaveBeenCalled();
+		expect(JSON.stringify(authLogger.error.mock.calls)).not.toContain('bad-token');
+		expect(JSON.stringify(authLogger.error.mock.calls)).not.toContain('test-client-id');
 	});
 
 	it('returns 403 EMAIL_DOMAIN_NOT_ALLOWED for hosted domain mismatch', async () => {
@@ -77,14 +75,36 @@ describe('auth Google hosted domain handling', () => {
 				picture: '',
 			}),
 		});
-		const { loginWithGoogle } = await import('../modules/auth/service.js');
-
-		await expect(loginWithGoogle('valid-token-wrong-domain')).rejects.toMatchObject({
+		await expect(service().loginWithGoogle('valid-token-wrong-domain')).rejects.toMatchObject({
 			statusCode: 403,
 			code: 'EMAIL_DOMAIN_NOT_ALLOWED',
 			message: 'Email domain not allowed',
 		});
 		expect(mocks.upsertUserByGoogleSub).not.toHaveBeenCalled();
 		expect(mocks.createSession).not.toHaveBeenCalled();
+	});
+
+	it('does not write Google account identifiers to authentication logs', async () => {
+		const authLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		mocks.verifyIdToken.mockResolvedValue({
+			getPayload: () => ({
+				sub: 'private-google-subject',
+				email: 'student@g.pcu.ac.kr',
+				hd: 'g.pcu.ac.kr',
+				name: 'Student',
+				picture: '',
+			}),
+		});
+
+		await service(authLogger).loginWithGoogle('private-credential');
+
+		const logs = JSON.stringify([
+			...authLogger.info.mock.calls,
+			...authLogger.warn.mock.calls,
+			...authLogger.error.mock.calls,
+		]);
+		expect(logs).not.toContain('student@g.pcu.ac.kr');
+		expect(logs).not.toContain('private-google-subject');
+		expect(logs).not.toContain('private-credential');
 	});
 });

@@ -22,7 +22,7 @@ export function createCountedChunkStream(
 
 	const counter = new Transform({
 		transform(chunk, encoding, callback) {
-			written += chunkByteLength(chunk, encoding as BufferEncoding);
+			written += chunkByteLength(chunk, encoding);
 			if (written > expectedSize) {
 				callback(new AppError(413, `Chunk ${chunkIndex} exceeds expected size`, 'PAYLOAD_TOO_LARGE'));
 				return;

@@ -4,11 +4,9 @@ import { sendOk, sendCreated } from '../../../shared/http.js';
 import { parseBody, parseIntParam, AdminProjectListQuery, UpdateProjectBody, SetPosterBody, BulkStatusBody, BulkDeleteBody } from '../../../shared/validation.js';
 import { requireLogin, requireRole } from '../../../plugins/auth.js';
 import { loadProjectWithAccess } from '../project-access.js';
-import { assertUploadAllowed } from '../upload-guard.js';
-import * as projectService from './service.js';
-import { addAssetToProject } from './project-asset.service.js';
-import { submitProject } from './project-submit.service.js';
-import * as repo from './repository.js';
+import { projectService } from './runtime.js';
+import { addAssetToProject } from './project-asset.runtime.js';
+import { submitProject } from './project-submit.runtime.js';
 
 /** Register admin project CRUD + upload routes */
 export async function projectController(app: FastifyInstance): Promise<void> {
@@ -42,7 +40,7 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 			const user = request.currentUser!;
 
 			const isStatusChange = patch.status !== undefined;
-			const project = await loadProjectWithAccess(request, projectId);
+			const project = await loadProjectWithAccess(user, projectId);
 
 			if (isStatusChange) {
 				projectService.assertStatusTransition(project.status, patch.status!, user.role);
@@ -59,7 +57,7 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId);
+			await loadProjectWithAccess(request.currentUser!, projectId);
 			await projectService.deleteProject(projectId);
 			reply.status(204).send();
 		},
@@ -103,7 +101,7 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 			config: submitRouteConfig,
 		},
 		async (request, reply) => {
-			const result = await submitProject(request as any, { audience: 'admin' });
+			const result = await submitProject({ actor: request.currentUser!, parts: request.parts() }, { audience: 'admin' });
 			sendCreated(reply, result);
 		},
 	);
@@ -114,11 +112,13 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireLogin, bodyLimit: uploadBodyLimit },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			const project = await loadProjectWithAccess(request, projectId);
 			const user = request.currentUser!;
-			const exhibition = await repo.findExhibitionById(project.exhibitionId);
-			assertUploadAllowed(exhibition, project.exhibitionId, user.role);
-			const result = await addAssetToProject(projectId, request as any);
+			const project = await loadProjectWithAccess(user, projectId);
+			const result = await addAssetToProject(
+				projectId,
+				project.exhibitionId,
+				{ actor: user, parts: request.parts() },
+			);
 			sendCreated(reply, result);
 		},
 	);
@@ -129,7 +129,7 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId);
+			await loadProjectWithAccess(request.currentUser!, projectId);
 			const { assetId } = parseBody(SetPosterBody, request.body);
 			const result = await projectService.setPoster(projectId, assetId);
 			sendOk(reply, result);
@@ -142,7 +142,7 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			await loadProjectWithAccess(request, projectId);
+			await loadProjectWithAccess(request.currentUser!, projectId);
 			await projectService.deleteWebgl(projectId);
 			reply.status(204).send();
 		},

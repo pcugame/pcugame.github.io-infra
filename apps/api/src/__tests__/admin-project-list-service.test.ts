@@ -1,32 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createProjectService } from '../modules/admin/project/service.js';
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	findProjectsForUser: vi.fn(),
-}));
+};
 
-vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
-	loadEnv: () => ({ ...defaultTestEnv }),
-}));
-
-vi.mock('../lib/s3.js', () => ({
-	bucketForKind: () => 'test-bucket',
-}));
-
-vi.mock('../lib/storage.js', () => ({
-	safeDeleteObject: vi.fn(),
-}));
-
-vi.mock('../modules/assets/upload/index.js', () => ({
-	UploadPipeline: vi.fn(),
-}));
-
-vi.mock('../modules/admin/project/repository.js', () => ({
-	findProjectsForUser: mocks.findProjectsForUser,
-}));
-
-import { listProjects } from '../modules/admin/project/service.js';
+const projectService = createProjectService({
+	repository: {
+		findProjectsForUser: mocks.findProjectsForUser,
+		findProjectById: vi.fn(),
+		isMemberOfProject: vi.fn(),
+		updateProject: vi.fn(),
+		deleteProjectReturningAssets: vi.fn(),
+		clearWebglDeployment: vi.fn(),
+		findAssetById: vi.fn(),
+		setProjectPoster: vi.fn(),
+		bulkDeleteProjectsReturningAssets: vi.fn(),
+	},
+	serializeProjectDetail: vi.fn(),
+	deleteAssetObjects: vi.fn(),
+	abortMultipart: vi.fn(),
+	cleanupWebglEntry: vi.fn(),
+	cleanupWebglDeployment: vi.fn(),
+	logger: { error: vi.fn() },
+});
 
 function fakeProject(overrides: Record<string, unknown> = {}) {
 	return {
@@ -61,7 +58,7 @@ describe('admin project list service', () => {
 		['OPERATOR', true],
 		['USER', false],
 	] as const)('passes privileged=%s scope to repository', async (role, isPrivileged) => {
-		await listProjects(7, role, {
+		await projectService.listProjects(7, role, {
 			page: 1,
 			limit: 20,
 			sort: 'createdAt',
@@ -75,7 +72,7 @@ describe('admin project list service', () => {
 	});
 
 	it('serializes items and returns accurate pagination metadata', async () => {
-		const result = await listProjects(7, 'ADMIN', {
+		const result = await projectService.listProjects(7, 'ADMIN', {
 			page: 2,
 			limit: 20,
 			sort: 'createdAt',
@@ -107,7 +104,7 @@ describe('admin project list service', () => {
 	});
 
 	it('marks the last page correctly', async () => {
-		const result = await listProjects(7, 'ADMIN', {
+		const result = await projectService.listProjects(7, 'ADMIN', {
 			page: 3,
 			limit: 20,
 			sort: 'createdAt',

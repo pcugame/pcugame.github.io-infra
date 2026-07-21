@@ -1,16 +1,16 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ImportExecuteResult, ImportPreviewResult } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { badRequest, payloadTooLarge } from '../../../shared/errors.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import { requireRole } from '../../../plugins/auth.js';
-import * as importService from './service.js';
+import { importService } from './runtime.js';
 
 const MAX_JSON_SIZE = 10 * 1024 * 1024; // 10 MB
 
 /** Extract JSON string from multipart file upload */
-async function extractJsonFromMultipart(request: { file: () => Promise<unknown> }): Promise<string> {
-	const file = await (request as any).file();
+async function extractJsonFromMultipart(request: FastifyRequest): Promise<string> {
+	const file = await request.file();
 	if (!file) throw badRequest('JSON 파일이 필요합니다.');
 
 	const mimeType: string = file.mimetype ?? '';

@@ -3,7 +3,7 @@ import { env } from '../../../config/env.js';
 import { sendOk, sendCreated } from '../../../shared/http.js';
 import { parseBody, parseIntParam, CreateExhibitionBody, UpdateExhibitionBody } from '../../../shared/validation.js';
 import { requireLogin, requireRole } from '../../../plugins/auth.js';
-import * as exhibitionService from './service.js';
+import { exhibitionService } from './runtime.js';
 
 /** Register admin exhibition CRUD routes */
 export async function exhibitionController(app: FastifyInstance): Promise<void> {
@@ -54,7 +54,10 @@ export async function exhibitionController(app: FastifyInstance): Promise<void> 
 		{ preHandler: requireRole('ADMIN', 'OPERATOR'), bodyLimit: uploadBodyLimit },
 		async (request, reply) => {
 			const id = parseIntParam(request.params.id);
-			const updated = await exhibitionService.replacePoster(id, request as any);
+			const updated = await exhibitionService.replacePoster(id, {
+				actor: request.currentUser!,
+				parts: request.parts(),
+			});
 			sendOk(reply, updated);
 		},
 	);

@@ -1,11 +1,9 @@
 import { posix as pathPosix } from 'node:path';
-import type { FastifyReply } from 'fastify';
-import { env } from '../../config/env.js';
-import { getObjectStream, headObject } from '../../lib/storage.js';
 import { badRequest, notFound } from '../../shared/errors.js';
+import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
+import type { ObjectStreamResult } from '../../application/ports.js';
 import { webglContentMetadata, webglContentSecurityPolicy } from '../webgl/content.js';
 import { parseWebglEntryKey } from '../webgl/paths.js';
-import * as repo from './repository.js';
 
 export type ParsedByteRange = { start: number; end: number } | null | 'invalid';
 
@@ -50,76 +48,128 @@ export function normalizeWebglRequestPath(requestedPath: string): string {
 	return normalized;
 }
 
-export function setWebglSecurityHeaders(reply: FastifyReply): void {
-	const cfg = env();
-	reply.removeHeader('access-control-allow-credentials');
-	reply.removeHeader('x-frame-options');
-	reply.removeHeader('cross-origin-opener-policy');
-	reply.header('Access-Control-Allow-Origin', '*');
-	reply.header('Access-Control-Expose-Headers', 'Accept-Ranges, Content-Length, Content-Range, ETag, Last-Modified');
-	reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
-	reply.header('Content-Security-Policy', webglContentSecurityPolicy(cfg.WEB_PUBLIC_URL, cfg.API_PUBLIC_URL));
+export interface PublicWebglConfig {
+	apiPublicUrl: string;
+	webPublicUrl: string;
+	publicBucket: string;
 }
 
-export function setWebglResponseHeaders(reply: FastifyReply, pathname: string): void {
-	setWebglSecurityHeaders(reply);
+export interface PublicWebglRepository {
+	findPublicWebglProject(id: number): Promise<{ id: number; webglEntryKey: string } | null>;
+}
+
+export interface PublicWebglStorage {
+	head(bucket: string, key: string): Promise<{ size: number; contentType: string } | null>;
+	stream(
+		bucket: string,
+		key: string,
+		range?: { start: number; end: number },
+	): Promise<ObjectStreamResult | null>;
+}
+
+export function webglSecurityHeaders(config: PublicWebglConfig): Pick<HttpResponseDescriptor, 'headers' | 'removeHeaders'> {
+	return {
+		removeHeaders: [
+			'access-control-allow-credentials',
+			'x-frame-options',
+			'cross-origin-opener-policy',
+		],
+		headers: {
+			'Access-Control-Allow-Origin': '*',
+			'Access-Control-Expose-Headers': 'Accept-Ranges, Content-Length, Content-Range, ETag, Last-Modified',
+			'Cross-Origin-Resource-Policy': 'cross-origin',
+			'Content-Security-Policy': webglContentSecurityPolicy(config.webPublicUrl, config.apiPublicUrl),
+		},
+	};
+}
+
+export function webglResponseHeaders(config: PublicWebglConfig, pathname: string): Pick<HttpResponseDescriptor, 'headers' | 'removeHeaders'> {
+	const security = webglSecurityHeaders(config);
 	const metadata = webglContentMetadata(pathname);
-	reply.header('Content-Type', metadata.contentType);
-	reply.header('Cache-Control', metadata.cacheControl);
-	if (metadata.contentEncoding) reply.header('Content-Encoding', metadata.contentEncoding);
+	return {
+		...security,
+		headers: {
+			...security.headers,
+			'Content-Type': metadata.contentType,
+			'Cache-Control': metadata.cacheControl,
+			...(metadata.contentEncoding ? { 'Content-Encoding': metadata.contentEncoding } : {}),
+		},
+	};
 }
 
-export function sendWebglPreflight(reply: FastifyReply): void {
-	reply.removeHeader('access-control-allow-credentials');
-	reply.header('Access-Control-Allow-Origin', '*');
-	reply.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-	reply.header('Access-Control-Allow-Headers', 'Range, Content-Type');
-	reply.header('Access-Control-Max-Age', '86400');
-	reply.status(204).send();
+export function webglPreflightResponse(): HttpResponseDescriptor {
+	return {
+		status: 204,
+		removeHeaders: ['access-control-allow-credentials'],
+		headers: {
+			'Access-Control-Allow-Origin': '*',
+			'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+			'Access-Control-Allow-Headers': 'Range, Content-Type',
+			'Access-Control-Max-Age': '86400',
+		},
+	};
 }
 
-export async function streamPublicWebgl(
-	projectId: number,
-	requestedPath: string,
-	rangeHeader: string | undefined,
-	reply: FastifyReply,
-) {
-	setWebglSecurityHeaders(reply);
-	const project = await repo.findPublicWebglProject(projectId);
-	if (!project) throw notFound('WebGL build not found');
-	const deployment = parseWebglEntryKey(projectId, project.webglEntryKey);
-	if (!deployment) throw notFound('WebGL build not found');
+export function createPublicWebglService(deps: {
+	config: PublicWebglConfig;
+	repository: PublicWebglRepository;
+	storage: PublicWebglStorage;
+}) {
+	return {
+		securityHeaders: () => webglSecurityHeaders(deps.config),
+		preflight: webglPreflightResponse,
+		async stream(
+			projectId: number,
+			requestedPath: string,
+			rangeHeader: string | undefined,
+		): Promise<HttpResponseDescriptor> {
+			const project = await deps.repository.findPublicWebglProject(projectId);
+			if (!project) throw notFound('WebGL build not found');
+			const deployment = parseWebglEntryKey(projectId, project.webglEntryKey);
+			if (!deployment) throw notFound('WebGL build not found');
 
-	const relativePath = normalizeWebglRequestPath(requestedPath || 'index.html');
-	const storageKey = `${deployment.sitePrefix}${relativePath}`;
-	if (!storageKey.startsWith(deployment.sitePrefix)) throw badRequest('Invalid WebGL asset path');
+			const relativePath = normalizeWebglRequestPath(requestedPath || 'index.html');
+			const storageKey = `${deployment.sitePrefix}${relativePath}`;
+			if (!storageKey.startsWith(deployment.sitePrefix)) throw badRequest('Invalid WebGL asset path');
 
-	const cfg = env();
-	const head = await headObject(cfg.S3_BUCKET_PUBLIC, storageKey);
-	if (!head) throw notFound('WebGL asset not found');
-	const range = parseSingleByteRange(rangeHeader, head.size);
-	if (range === 'invalid') {
-		setWebglResponseHeaders(reply, relativePath);
-		reply.header('Accept-Ranges', 'bytes');
-		reply.header('Content-Range', `bytes */${head.size}`);
-		return reply.status(416).send();
-	}
+			const head = await deps.storage.head(deps.config.publicBucket, storageKey);
+			if (!head) throw notFound('WebGL asset not found');
+			const range = parseSingleByteRange(rangeHeader, head.size);
+			const responseHeaders = webglResponseHeaders(deps.config, relativePath);
+			if (range === 'invalid') {
+				return {
+					status: 416,
+					...responseHeaders,
+					headers: {
+						...responseHeaders.headers,
+						'Accept-Ranges': 'bytes',
+						'Content-Range': `bytes */${head.size}`,
+					},
+				};
+			}
 
-	const object = await getObjectStream(
-		cfg.S3_BUCKET_PUBLIC,
-		storageKey,
-		range ?? undefined,
-	);
-	if (!object) throw notFound('WebGL asset not found');
+			const object = await deps.storage.stream(
+				deps.config.publicBucket,
+				storageKey,
+				range ?? undefined,
+			);
+			if (!object) throw notFound('WebGL asset not found');
 
-	setWebglResponseHeaders(reply, relativePath);
-	reply.header('Accept-Ranges', 'bytes');
-	reply.header('Content-Length', String(object.size));
-	if (object.etag) reply.header('ETag', object.etag);
-	if (object.lastModified) reply.header('Last-Modified', object.lastModified.toUTCString());
-	if (range) {
-		reply.header('Content-Range', object.contentRange ?? `bytes ${range.start}-${range.end}/${head.size}`);
-		reply.status(206);
-	}
-	return reply.send(object.body);
+			return {
+				status: range ? 206 : 200,
+				...responseHeaders,
+				headers: {
+					...responseHeaders.headers,
+					'Accept-Ranges': 'bytes',
+					'Content-Length': String(object.size),
+					...(object.etag ? { ETag: object.etag } : {}),
+					...(object.lastModified ? { 'Last-Modified': object.lastModified.toUTCString() } : {}),
+					...(range ? {
+						'Content-Range': object.contentRange ?? `bytes ${range.start}-${range.end}/${head.size}`,
+					} : {}),
+				},
+				body: object.body,
+			};
+		},
+	};
 }

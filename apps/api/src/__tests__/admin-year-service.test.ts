@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createExhibitionService } from '../modules/admin/year/service.js';
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	findAllExhibitions: vi.fn(),
 	findExhibitionByComposite: vi.fn(),
 	createExhibition: vi.fn(),
@@ -9,41 +9,39 @@ const mocks = vi.hoisted(() => ({
 	findExhibitionByIdWithCount: vi.fn(),
 	updateExhibition: vi.fn(),
 	deleteExhibition: vi.fn(),
+	replaceExhibitionPoster: vi.fn(),
 	clearExhibitionPoster: vi.fn(),
 	safeDeleteObject: vi.fn(),
-}));
+};
 
-vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv, API_PUBLIC_URL: 'https://api.example.test' }),
-	loadEnv: () => ({ ...defaultTestEnv, API_PUBLIC_URL: 'https://api.example.test' }),
-}));
+const exhibitionService = createExhibitionService({
+	apiPublicUrl: 'https://api.example.test',
+	posterBucket: 'public-bucket',
+	repository: {
+		findAllExhibitions: mocks.findAllExhibitions,
+		findExhibitionByComposite: mocks.findExhibitionByComposite,
+		createExhibition: mocks.createExhibition,
+		findExhibitionById: mocks.findExhibitionById,
+		findExhibitionByIdWithCount: mocks.findExhibitionByIdWithCount,
+		updateExhibition: mocks.updateExhibition,
+		deleteExhibition: mocks.deleteExhibition,
+		replaceExhibitionPoster: mocks.replaceExhibitionPoster,
+		clearExhibitionPoster: mocks.clearExhibitionPoster,
+	},
+	uploadLimits: () => ({
+		posterMaxBytes: 1,
+		imageMaxBytes: 1,
+		gameMaxBytes: 1,
+		videoMaxBytes: 1,
+		requestMaxBytes: 1,
+		maxFiles: 1,
+	}),
+	uploadSlots: { acquire: vi.fn(), release: vi.fn() },
+	posterUpload: { start: vi.fn() },
+	deleteOrQueue: mocks.safeDeleteObject,
+});
 
-vi.mock('../lib/s3.js', () => ({
-	bucketForKind: vi.fn(() => 'public-bucket'),
-}));
-
-vi.mock('../lib/storage.js', () => ({
-	safeDeleteObject: mocks.safeDeleteObject,
-}));
-
-vi.mock('../modules/admin/year/repository.js', () => ({
-	findAllExhibitions: mocks.findAllExhibitions,
-	findExhibitionByComposite: mocks.findExhibitionByComposite,
-	createExhibition: mocks.createExhibition,
-	findExhibitionById: mocks.findExhibitionById,
-	findExhibitionByIdWithCount: mocks.findExhibitionByIdWithCount,
-	updateExhibition: mocks.updateExhibition,
-	deleteExhibition: mocks.deleteExhibition,
-	clearExhibitionPoster: mocks.clearExhibitionPoster,
-}));
-
-import {
-	createExhibition,
-	deleteExhibition,
-	deletePoster,
-	listExhibitions,
-	updateExhibition,
-} from '../modules/admin/year/service.js';
+const { createExhibition, deleteExhibition, deletePoster, listExhibitions, updateExhibition } = exhibitionService;
 
 function exhibition(overrides: Record<string, unknown> = {}) {
 	return {

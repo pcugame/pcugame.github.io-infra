@@ -1,21 +1,34 @@
-import type { AssetKind, ProjectStatus, UserRole } from '../../../generated/prisma/client.js';
-import { env } from '../../../config/env.js';
+import type { AssetKind, ProjectStatus, UserRole } from '@pcu/contracts';
 import { badRequest, conflict, forbidden, isUniqueConstraintError } from '../../../shared/errors.js';
-import { getUploadLimits, acquireUploadSlot, releaseUploadSlot } from '../../../shared/upload-limits.js';
+import type { UploadLimits } from '../../../shared/upload-limits.js';
 import { toSlug } from '../../../shared/slug.js';
-import { UploadPipeline } from '../../assets/upload/index.js';
-import type { SavedFile } from '../../assets/upload/index.js';
-import { collectMultipartParts, type CollectedFilePart } from '../../assets/upload/multipart-collector.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import { generateUniqueSlug, nextSlugCandidate } from './slug.service.js';
-import * as repo from './repository.js';
+import type { MultipartCommandInput } from '../../../application/http-input.js';
+import { parseBody, SubmitProjectPayload } from '../../../shared/validation.js';
+import type {
+	CollectedUploadFile,
+	MultipartCollectorPort,
+	SavedUpload,
+	UploadPipelinePort,
+} from '../../../application/upload-ports.js';
+import type { SubmitProjectRepository } from './ports.js';
+
+export interface SubmitProjectDependencies {
+	webPublicUrl: string;
+	repository: SubmitProjectRepository;
+	uploadLimits(role: UserRole): UploadLimits;
+	uploadSlots: { acquire(): void; release(): void };
+	createPipeline(): UploadPipelinePort;
+	multipartCollector: MultipartCollectorPort;
+}
 
 /** Process collected file parts through the upload pipeline */
 export async function processFileParts(
-	fileParts: CollectedFilePart[],
-	pipeline: UploadPipeline,
-): Promise<SavedFile[]> {
-	const savedFiles: SavedFile[] = [];
+	fileParts: CollectedUploadFile[],
+	pipeline: UploadPipelinePort,
+): Promise<SavedUpload[]> {
+	const savedFiles: SavedUpload[] = [];
 	for (const fp of fileParts) {
 		let kind: AssetKind;
 		if (fp.fieldname === 'poster') kind = 'POSTER';
@@ -87,24 +100,24 @@ function assertUserSubmitPayloadPolicy(rawPayload: unknown): void {
  * create project in DB. Handles upload slot and pipeline lifecycle.
  */
 export async function submitProject(
-	request: { parts(): AsyncIterable<any>; currentUser: { id: number; name: string; role: string } },
+	deps: SubmitProjectDependencies,
+	input: MultipartCommandInput,
 	options: SubmitProjectOptions = { audience: 'admin' },
 ) {
-	const cfg = env();
-	const user = request.currentUser;
+	const user = input.actor;
 	const isAdminAudience = options.audience === 'admin';
 	if (isAdminAudience && user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
 		throw forbidden('Admin project submission requires operator or admin role');
 	}
 
-	const policyRole: UserRole = options.audience === 'user' ? 'USER' : user.role as UserRole;
-	const limits = getUploadLimits(policyRole);
-	const pipeline = new UploadPipeline();
+	const policyRole: UserRole = options.audience === 'user' ? 'USER' : user.role;
+	const limits = deps.uploadLimits(policyRole);
+	const pipeline = deps.createPipeline();
 
-	acquireUploadSlot();
+	deps.uploadSlots.acquire();
 	try {
-		const { payloadJson, fileParts } = await collectMultipartParts(
-			request.parts(),
+		const { payloadJson, fileParts } = await deps.multipartCollector.collect(
+			input.parts,
 			pipeline,
 			limits,
 		);
@@ -119,29 +132,27 @@ export async function submitProject(
 			assertUserSubmitPayloadPolicy(rawPayload);
 		}
 
-		// Lazy import to avoid circular — validation is shared
-		const { parseBody, SubmitProjectPayload } = await import('../../../shared/validation.js');
 		const { exhibitionId, title, summary, description, members } =
 			parseBody(SubmitProjectPayload, rawPayload);
 
-		const exhibition = await repo.findExhibitionById(exhibitionId);
+		const exhibition = await deps.repository.findExhibitionById(exhibitionId);
 		assertUploadAllowed(exhibition, exhibitionId, policyRole);
 
 		const baseSlug = toSlug(title);
-		let slug = await generateUniqueSlug(exhibition!.id, title);
+		let slug = await generateUniqueSlug(deps.repository, exhibition.id, title);
 		const savedFiles = await processFileParts(fileParts, pipeline);
 		const status: ProjectStatus = 'PUBLISHED';
 
 		// Retry on slug TOCTOU: between generateUniqueSlug's SELECT and createProjectWithAssets'
 		// INSERT, a concurrent submit can claim the same slug. P2002 on `slug` → pick the next
 		// candidate and retry. Cap retries so a truly stuck state (e.g. DB error) surfaces.
-		let project: Awaited<ReturnType<typeof repo.createProjectWithAssets>> | undefined;
+		let project: Awaited<ReturnType<typeof deps.repository.createProjectWithAssets>> | undefined;
 		let retryAttempt = 0;
 		const maxRetries = 5;
 		while (true) {
 			try {
-				project = await repo.createProjectWithAssets({
-					exhibitionId: exhibition!.id,
+				project = await deps.repository.createProjectWithAssets({
+					exhibitionId: exhibition.id,
 					slug,
 					title,
 					summary,
@@ -176,7 +187,7 @@ export async function submitProject(
 					retryAttempt++;
 					// Walk past any slugs that arrived while we were losing races.
 					let candidate = nextSlugCandidate(baseSlug, retryAttempt);
-					while (await repo.findProjectByExhibitionAndSlug(exhibition!.id, candidate)) {
+					while (await deps.repository.findProjectByExhibitionAndSlug(exhibition.id, candidate)) {
 						retryAttempt++;
 						if (retryAttempt > maxRetries) break;
 						candidate = nextSlugCandidate(baseSlug, retryAttempt);
@@ -192,18 +203,27 @@ export async function submitProject(
 		}
 
 		return {
-			id: project!.id,
-			slug: project!.slug,
-			year: exhibition!.year,
+			id: project.id,
+			slug: project.slug,
+			year: exhibition.year,
 			status,
-			adminEditUrl: `${cfg.WEB_PUBLIC_URL}/admin/projects/${project!.id}/edit`,
-			publicUrl: `${cfg.WEB_PUBLIC_URL}/years/${exhibition!.year}/${slug}`,
+			adminEditUrl: `${deps.webPublicUrl}/admin/projects/${project.id}/edit`,
+			publicUrl: `${deps.webPublicUrl}/years/${exhibition.year}/${slug}`,
 		};
 	} catch (err) {
 		await pipeline.rollbackCommitted();
 		throw err;
 	} finally {
-		releaseUploadSlot();
+		deps.uploadSlots.release();
 		await pipeline.cleanupTemp();
 	}
+}
+
+export function createSubmitProjectService(deps: SubmitProjectDependencies) {
+	return {
+		submitProject: (
+			input: MultipartCommandInput,
+			options: SubmitProjectOptions = { audience: 'admin' },
+		) => submitProject(deps, input, options),
+	};
 }

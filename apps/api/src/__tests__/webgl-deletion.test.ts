@@ -1,39 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createProjectService } from '../modules/admin/project/service.js';
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	clearWebglDeployment: vi.fn(),
 	deleteProjectReturningAssets: vi.fn(),
 	bulkDeleteProjectsReturningAssets: vi.fn(),
 	deleteAssetObjects: vi.fn(),
-	abortMultipartUpload: vi.fn(),
+	abortMultipart: vi.fn(),
 	cleanupWebglEntry: vi.fn(),
 	cleanupWebglDeployment: vi.fn(),
-}));
+};
 
-vi.mock('../config/env.js', () => ({
-	env: () => ({ S3_BUCKET_PROTECTED: 'pcu-protected', API_PUBLIC_URL: 'https://api.example.com' }),
-	loadEnv: () => ({ S3_BUCKET_PROTECTED: 'pcu-protected', API_PUBLIC_URL: 'https://api.example.com' }),
-}));
-vi.mock('../lib/logger.js', () => ({ logger: () => ({ error: vi.fn() }) }));
-vi.mock('../lib/storage.js', () => ({ abortMultipartUpload: mocks.abortMultipartUpload }));
-vi.mock('../modules/admin/project/asset-cleanup.js', () => ({
+const projectService = createProjectService({
+	repository: {
+		clearWebglDeployment: mocks.clearWebglDeployment,
+		deleteProjectReturningAssets: mocks.deleteProjectReturningAssets,
+		bulkDeleteProjectsReturningAssets: mocks.bulkDeleteProjectsReturningAssets,
+		findProjectsForUser: vi.fn(),
+		findProjectById: vi.fn(),
+		isMemberOfProject: vi.fn(),
+		updateProject: vi.fn(),
+		findAssetById: vi.fn(),
+		setProjectPoster: vi.fn(),
+	},
+	serializeProjectDetail: vi.fn(),
 	deleteAssetObjects: mocks.deleteAssetObjects,
-}));
-vi.mock('../modules/admin/project/repository.js', () => ({
-	clearWebglDeployment: mocks.clearWebglDeployment,
-	deleteProjectReturningAssets: mocks.deleteProjectReturningAssets,
-	bulkDeleteProjectsReturningAssets: mocks.bulkDeleteProjectsReturningAssets,
-}));
-vi.mock('../modules/webgl/deployment.js', () => ({
+	abortMultipart: mocks.abortMultipart,
 	cleanupWebglEntry: mocks.cleanupWebglEntry,
 	cleanupWebglDeployment: mocks.cleanupWebglDeployment,
-}));
-
-import {
-	bulkDeleteProjects,
-	deleteProject,
-	deleteWebgl,
-} from '../modules/admin/project/service.js';
+	logger: { error: vi.fn() },
+});
 
 const oldEntry = 'webgl/7/123e4567-e89b-42d3-a456-426614174000/site/index.html';
 const activeSource = 'webgl/7/123e4567-e89b-42d3-b456-426614174111/source.zip';
@@ -49,7 +45,7 @@ const activeWebgl = {
 describe('WebGL deletion cleanup', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.abortMultipartUpload.mockResolvedValue(undefined);
+		mocks.abortMultipart.mockResolvedValue(undefined);
 		mocks.cleanupWebglEntry.mockResolvedValue(undefined);
 		mocks.cleanupWebglDeployment.mockResolvedValue(undefined);
 		mocks.deleteAssetObjects.mockResolvedValue(undefined);
@@ -61,14 +57,10 @@ describe('WebGL deletion cleanup', () => {
 			cancelledSession: activeWebgl,
 		});
 
-		await deleteWebgl(7);
+		await projectService.deleteWebgl(7);
 
 		expect(mocks.cleanupWebglEntry).toHaveBeenCalledWith(7, oldEntry, 'webgl-delete');
-		expect(mocks.abortMultipartUpload).toHaveBeenCalledWith(
-			'pcu-protected',
-			activeSource,
-			'webgl-multipart',
-		);
+		expect(mocks.abortMultipart).toHaveBeenCalledWith(activeSource, 'webgl-multipart');
 		expect(mocks.cleanupWebglDeployment).toHaveBeenCalledWith(
 			expect.objectContaining({
 				projectId: 7,
@@ -93,13 +85,13 @@ describe('WebGL deletion cleanup', () => {
 			activeUploads: [gameUpload, activeWebgl],
 		});
 
-		await deleteProject(7);
+		await projectService.deleteProject(7);
 
 		expect(mocks.deleteAssetObjects).toHaveBeenCalledWith(
 			expect.objectContaining({ id: 5, projectId: 7 }),
 			'project-delete',
 		);
-		expect(mocks.abortMultipartUpload).toHaveBeenCalledTimes(2);
+		expect(mocks.abortMultipart).toHaveBeenCalledTimes(2);
 		expect(mocks.cleanupWebglDeployment).toHaveBeenCalledTimes(1);
 		expect(mocks.cleanupWebglEntry).toHaveBeenCalledWith(7, oldEntry, 'project-delete');
 	});
@@ -115,7 +107,7 @@ describe('WebGL deletion cleanup', () => {
 			activeUploads: [activeWebgl],
 		});
 
-		await expect(bulkDeleteProjects([7, 8])).resolves.toEqual({
+		await expect(projectService.bulkDeleteProjects([7, 8])).resolves.toEqual({
 			deleted: 2,
 			assetsRemoved: 0,
 			webglBuildsRemoved: 1,

@@ -6,8 +6,7 @@
  */
 
 import { Transform } from 'node:stream';
-import type { UserRole } from '../generated/prisma/client.js';
-import type { AssetKind } from '../generated/prisma/client.js';
+import type { AssetKind, UserRole } from '@pcu/contracts';
 import { env } from '../config/env.js';
 import { AppError } from './errors.js';
 import { detectFileType, SIZE_LIMITS } from './file-signature.js';
@@ -177,8 +176,6 @@ export function createKindAwareByteLimiter(
 
 // ── Concurrent upload semaphore ──────────────────────────────
 
-let _activeUploads = 0;
-
 /**
  * Conservative hint clients use to back off before the next attempt. A typical
  * upload finishes in well under a minute; 10s keeps retries responsive while
@@ -187,29 +184,32 @@ let _activeUploads = 0;
  */
 export const UPLOAD_RETRY_AFTER_SEC = 10;
 
-export function acquireUploadSlot(maxConcurrent?: number): void {
-	const max = maxConcurrent ?? env().UPLOAD_MAX_CONCURRENT;
-	if (_activeUploads >= max) {
-		throw new AppError(
-			429,
-			`Server is processing ${_activeUploads} uploads. Please try again shortly.`,
-			'TOO_MANY_UPLOADS',
-			{ retryAfterSec: UPLOAD_RETRY_AFTER_SEC },
-		);
-	}
-	_activeUploads++;
+export function createUploadLimiter(maxConcurrent: () => number) {
+	let activeUploads = 0;
+	return {
+		acquire(override?: number): void {
+			const max = override ?? maxConcurrent();
+			if (activeUploads >= max) {
+				throw new AppError(
+					429,
+					`Server is processing ${activeUploads} uploads. Please try again shortly.`,
+					'TOO_MANY_UPLOADS',
+					{ retryAfterSec: UPLOAD_RETRY_AFTER_SEC },
+				);
+			}
+			activeUploads++;
+		},
+		release(): void {
+			if (activeUploads > 0) activeUploads--;
+		},
+		activeCount: () => activeUploads,
+		reset: () => { activeUploads = 0; },
+	};
 }
 
-export function releaseUploadSlot(): void {
-	if (_activeUploads > 0) _activeUploads--;
-}
+const processUploadLimiter = createUploadLimiter(() => env().UPLOAD_MAX_CONCURRENT);
 
-/** Current count — exposed for testing. */
-export function activeUploadCount(): number {
-	return _activeUploads;
-}
-
-/** Reset — for testing only. */
-export function _resetActiveUploads(): void {
-	_activeUploads = 0;
-}
+export const acquireUploadSlot = processUploadLimiter.acquire;
+export const releaseUploadSlot = processUploadLimiter.release;
+export const activeUploadCount = processUploadLimiter.activeCount;
+export const _resetActiveUploads = processUploadLimiter.reset;

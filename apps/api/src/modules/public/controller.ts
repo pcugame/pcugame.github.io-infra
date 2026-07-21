@@ -1,56 +1,59 @@
 import type { FastifyInstance } from 'fastify';
 import { sendOk } from '../../shared/http.js';
-import * as publicService from './service.js';
-import * as webglService from './webgl.service.js';
+import { publicService } from './runtime.js';
+import { publicWebglService } from './webgl.runtime.js';
 import { parseIntParam } from '../../shared/validation.js';
+import { applyDescriptorHeaders, applyResponseDescriptor } from '../../shared/response-descriptor.js';
 
 /** Register public read-only routes (no auth required) */
 export async function publicController(app: FastifyInstance): Promise<void> {
-	const noGlobalCors = { cors: false } as any;
+	const noGlobalCors = { cors: false };
 	const webglRouteOptions = { config: noGlobalCors, helmet: false } as const;
-	const streamWebgl = async (
-		request: { params: { projectId: string; '*': string }; headers: { range?: string } },
-		reply: Parameters<typeof webglService.streamPublicWebgl>[3],
-	) => webglService.streamPublicWebgl(
-		parseIntParam(request.params.projectId, 'Project ID'),
-		request.params['*'] || 'index.html',
-		request.headers.range,
-		reply,
-	);
 
 	app.options('/webgl/:projectId', webglRouteOptions, async (_request, reply) => {
-		webglService.sendWebglPreflight(reply);
+		return applyResponseDescriptor(reply, publicWebglService.preflight());
 	});
 	app.options('/webgl/:projectId/', webglRouteOptions, async (_request, reply) => {
-		webglService.sendWebglPreflight(reply);
+		return applyResponseDescriptor(reply, publicWebglService.preflight());
 	});
 	app.options('/webgl/:projectId/*', webglRouteOptions, async (_request, reply) => {
-		webglService.sendWebglPreflight(reply);
+		return applyResponseDescriptor(reply, publicWebglService.preflight());
 	});
 	app.get<{ Params: { projectId: string } }>(
 		'/webgl/:projectId',
 		webglRouteOptions,
-		async (request, reply) => webglService.streamPublicWebgl(
-			parseIntParam(request.params.projectId, 'Project ID'),
-			'index.html',
-			request.headers.range,
-			reply,
-		),
+		async (request, reply) => {
+			applyDescriptorHeaders(reply, publicWebglService.securityHeaders());
+			return applyResponseDescriptor(reply, await publicWebglService.stream(
+				parseIntParam(request.params.projectId, 'Project ID'),
+				'index.html',
+				request.headers.range,
+			));
+		},
 	);
 	app.get<{ Params: { projectId: string } }>(
 		'/webgl/:projectId/',
 		webglRouteOptions,
-		async (request, reply) => webglService.streamPublicWebgl(
-			parseIntParam(request.params.projectId, 'Project ID'),
-			'index.html',
-			request.headers.range,
-			reply,
-		),
+		async (request, reply) => {
+			applyDescriptorHeaders(reply, publicWebglService.securityHeaders());
+			return applyResponseDescriptor(reply, await publicWebglService.stream(
+				parseIntParam(request.params.projectId, 'Project ID'),
+				'index.html',
+				request.headers.range,
+			));
+		},
 	);
 	app.get<{ Params: { projectId: string; '*': string } }>(
 		'/webgl/:projectId/*',
 		webglRouteOptions,
-		streamWebgl as any,
+		async (request, reply) => {
+			applyDescriptorHeaders(reply, publicWebglService.securityHeaders());
+			return applyResponseDescriptor(reply, await publicWebglService.stream(
+				parseIntParam(request.params.projectId, 'Project ID'),
+				request.params['*'] || 'index.html',
+				request.headers.range,
+			));
+		},
 	);
 
 	/** GET /api/public/years — list years with published project counts */

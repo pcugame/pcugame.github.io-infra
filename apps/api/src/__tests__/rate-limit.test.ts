@@ -36,10 +36,12 @@ vi.mock('../shared/protected-download-limiter.js', () => ({
 }));
 // Block auth service from hitting Google — login requests only need to reach
 // the rate-limit stage, not succeed.
-vi.mock('../modules/auth/service.js', () => ({
-	loginWithGoogle: vi.fn().mockRejectedValue(new Error('auth disabled in test')),
-	logout: vi.fn().mockResolvedValue(undefined),
-	resolveSession: vi.fn().mockResolvedValue(null),
+vi.mock('../modules/auth/runtime.js', () => ({
+	authService: {
+		loginWithGoogle: vi.fn().mockRejectedValue(new Error('auth disabled in test')),
+		logout: vi.fn().mockResolvedValue(undefined),
+		loginForDevRole: vi.fn(),
+	},
 }));
 
 describe('rate-limit plugin', () => {

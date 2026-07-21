@@ -1,7 +1,19 @@
-import type { FastifyRequest } from 'fastify';
-import type { Project, UserRole } from '../../generated/prisma/client.js';
-import { prisma } from '../../lib/prisma.js';
-import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
+import type { UserRole } from '@pcu/contracts';
+import { notFound, forbidden } from '../../shared/errors.js';
+import type { Actor } from '../../application/http-input.js';
+import { projectAccessRepository } from './project-access.repository.js';
+
+export interface ProjectAccessRecord {
+	id: number;
+	exhibitionId: number;
+	creatorId: number;
+	status: string;
+}
+
+export interface ProjectAccessRepository {
+	findProject(projectId: number): Promise<ProjectAccessRecord | null>;
+	isLinkedMember(projectId: number, userId: number): Promise<boolean>;
+}
 
 /**
  * Pure permission check — no DB access, fully testable.
@@ -32,23 +44,20 @@ export function assertWriteAccess(
  * - ADMIN / OPERATOR: always allowed.
  * - Other roles: must be the project creator or a linked member (ProjectMember.userId).
  */
-export async function loadProjectWithAccess(
-	request: FastifyRequest,
-	projectId: number,
-): Promise<Project> {
-	const user = request.currentUser;
-	if (!user) throw unauthorized();
+export function createProjectAccessService(repository: ProjectAccessRepository) {
+	return {
+		async loadProjectWithAccess(actor: Actor, projectId: number): Promise<ProjectAccessRecord> {
+			const project = await repository.findProject(projectId);
+			if (!project) throw notFound('Project not found');
 
-	const project = await prisma.project.findUnique({ where: { id: projectId } });
-	if (!project) throw notFound('Project not found');
+			const isMember = actor.role !== 'ADMIN' && actor.role !== 'OPERATOR'
+				? await repository.isLinkedMember(projectId, actor.id)
+				: false;
 
-	// Check if user is a linked member of this project
-	const isMember = user.role !== 'ADMIN' && user.role !== 'OPERATOR'
-		? !!(await prisma.projectMember.findFirst({
-				where: { projectId, userId: user.id },
-			}))
-		: false;
-
-	assertWriteAccess(user.role, project.creatorId, user.id, { isMember });
-	return project;
+			assertWriteAccess(actor.role, project.creatorId, actor.id, { isMember });
+			return project;
+		},
+	};
 }
+
+export const { loadProjectWithAccess } = createProjectAccessService(projectAccessRepository);

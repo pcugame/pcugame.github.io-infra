@@ -1,24 +1,24 @@
-import { createWriteStream, promises as fsp } from 'node:fs';
-import { pipeline as streamPipeline } from 'node:stream/promises';
-import path from 'node:path';
-import crypto from 'node:crypto';
-import os from 'node:os';
-import type { AssetKind } from '../../../generated/prisma/client.js';
-import { bucketForKind } from '../../../lib/s3.js';
-import { safeDeleteObject } from '../../../lib/storage.js';
-import { badRequest, payloadTooLarge } from '../../../shared/errors.js';
-import {
-	acquireUploadSlot,
-	createKindAwareByteLimiter,
-	getUploadLimits,
-	kindLimitForMime,
-	releaseUploadSlot,
-} from '../../../shared/upload-limits.js';
-import { detectFileType } from '../../../shared/file-signature.js';
-import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
-import { UploadPipeline } from '../../assets/upload/index.js';
-import { assetUrl } from './serializer.js';
-import * as repo from './repository.js';
+import type { AssetKind } from '@pcu/contracts';
+import type { MultipartCommandInput } from '../../../application/http-input.js';
+import type { ProcessedUpload, SingleAssetUploadCoordinator } from '../../../application/upload-ports.js';
+import type { UploadLimits } from '../../../shared/upload-limits.js';
+import { assertUploadAllowed } from '../upload-guard.js';
+import type { ProjectAssetRepository } from './ports.js';
+
+export interface ProjectAssetServiceDependencies {
+	repository: ProjectAssetRepository;
+	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits;
+	uploadSlots: { acquire(): void; release(): void };
+	uploadCoordinator: SingleAssetUploadCoordinator;
+	assetUrl(storageKey: string, kind: AssetKind): string;
+	bucketForKind(kind: AssetKind): string;
+	deleteOrQueue(
+		bucket: string,
+		key: string,
+		reason: string,
+		context: Record<string, unknown>,
+	): Promise<void>;
+}
 
 export function isReplaceableAssetKind(kind: AssetKind): boolean {
 	return kind === 'GAME';
@@ -29,59 +29,20 @@ export function isReplaceableAssetKind(kind: AssetKind): boolean {
  * Handles GAME asset replacement logic.
  */
 export async function addAssetToProject(
+	deps: ProjectAssetServiceDependencies,
 	projectId: number,
-	request: { parts(): AsyncIterable<any>; currentUser: { role: string } },
+	exhibitionId: number,
+	input: MultipartCommandInput,
 ) {
-	const limits = getUploadLimits(request.currentUser.role as any);
-	const pipeline = new UploadPipeline();
+	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
+	assertUploadAllowed(exhibition, exhibitionId, input.actor.role);
+	const limits = deps.uploadLimits(input.actor.role);
+	let upload: ProcessedUpload | null = null;
 
-	acquireUploadSlot();
+	deps.uploadSlots.acquire();
 	try {
-		let kind: AssetKind | null = null;
-		let fileTmpPath: string | null = null;
-		let fileOriginalName = '';
-
-		const { AssetKindEnum } = await import('../../../shared/validation.js');
-		const parts = request.parts();
-		for await (const part of parts as AsyncIterable<any>) {
-			if (part.type === 'field' && part.fieldname === 'kind') {
-				const parsed = AssetKindEnum.safeParse(part.value);
-				if (!parsed.success) throw badRequest(`Invalid asset kind: ${part.value}`);
-				kind = parsed.data;
-			} else if (part.type === 'file' && part.fieldname === 'file') {
-				if (!kind) {
-					throw badRequest('Asset kind must be provided before file');
-				}
-				const filename = part.filename ?? '';
-				assertValidUploadFilename(filename);
-				const tmpPath = path.join(os.tmpdir(), crypto.randomUUID());
-				pipeline.trackTempFile(tmpPath);
-
-				const limiter = createKindAwareByteLimiter(limits, kind, filename);
-				await streamPipeline(part.file, limiter, createWriteStream(tmpPath));
-				fileTmpPath = tmpPath;
-				fileOriginalName = filename;
-			}
-		}
-
-		if (!kind) throw badRequest('Missing asset kind');
-		if (!fileTmpPath) throw badRequest('No file provided');
-
-		// Post-collection size check: now that kind and file type are known,
-		// verify against the exact role/type limit.
-		const headerBuf = Buffer.alloc(16);
-		const fd = await fsp.open(fileTmpPath, 'r');
-		await fd.read(headerBuf, 0, 16, 0);
-		await fd.close();
-		const fileType = detectFileType(headerBuf);
-		const exactLimit = kindLimitForMime(limits, kind, fileType?.mime);
-		const fileStat = await fsp.stat(fileTmpPath);
-		if (fileStat.size > exactLimit) {
-			const limitMB = Math.round(exactLimit / 1024 / 1024);
-			throw payloadTooLarge(`File exceeds ${kind} size limit of ${limitMB}MB`);
-		}
-
-		const savedFile = await pipeline.processFile(fileTmpPath, kind, fileOriginalName);
+		upload = await deps.uploadCoordinator.start(input.parts, limits);
+		const savedFile = upload.savedFile;
 
 		// Replace existing GAME asset if uploading a new one. Other kinds, including VIDEO, always create.
 		// DB write goes first — deletes of the prior S3 object happen only after commit so a mid-
@@ -92,7 +53,7 @@ export async function addAssetToProject(
 		let oldPlaybackStorageKey: string | null = null;
 
 		if (isReplaceable) {
-			const result = await repo.replaceOrCreateReplaceableAsset(projectId, savedFile.kind, {
+			const result = await deps.repository.replaceOrCreateReplaceableAsset(projectId, savedFile.kind, {
 				storageKey: savedFile.storageKey,
 				playbackStorageKey: savedFile.playbackStorageKey ?? null,
 				originalName: savedFile.originalName,
@@ -108,7 +69,7 @@ export async function addAssetToProject(
 			oldStorageKey = result.oldStorageKey;
 			oldPlaybackStorageKey = result.oldPlaybackStorageKey;
 		} else {
-			const asset = await repo.createAsset({
+			const asset = await deps.repository.createAsset({
 				projectId,
 				kind: savedFile.kind,
 				storageKey: savedFile.storageKey,
@@ -126,18 +87,28 @@ export async function addAssetToProject(
 		}
 
 		if (oldStorageKey) {
-			await safeDeleteObject(bucketForKind(savedFile.kind), oldStorageKey, 'project-asset-replace-previous', { assetId, kind: savedFile.kind });
+			await deps.deleteOrQueue(deps.bucketForKind(savedFile.kind), oldStorageKey, 'project-asset-replace-previous', { assetId, kind: savedFile.kind });
 		}
 		if (oldPlaybackStorageKey) {
-			await safeDeleteObject(bucketForKind(savedFile.kind), oldPlaybackStorageKey, 'project-asset-replace-previous-playback', { assetId, kind: savedFile.kind });
+			await deps.deleteOrQueue(deps.bucketForKind(savedFile.kind), oldPlaybackStorageKey, 'project-asset-replace-previous-playback', { assetId, kind: savedFile.kind });
 		}
 
-		return { assetId, url: assetUrl(savedFile.storageKey, savedFile.kind) };
+		return { assetId, url: deps.assetUrl(savedFile.storageKey, savedFile.kind) };
 	} catch (err) {
-		await pipeline.rollbackCommitted();
+		if (upload) await upload.rollback();
 		throw err;
 	} finally {
-		releaseUploadSlot();
-		await pipeline.cleanupTemp();
+		deps.uploadSlots.release();
+		if (upload) await upload.cleanup();
 	}
+}
+
+export function createProjectAssetService(deps: ProjectAssetServiceDependencies) {
+	return {
+		addAssetToProject: (
+			projectId: number,
+			exhibitionId: number,
+			input: MultipartCommandInput,
+		) => addAssetToProject(deps, projectId, exhibitionId, input),
+	};
 }

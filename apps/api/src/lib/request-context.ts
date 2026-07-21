@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type pino from 'pino';
+import type { AppLogger } from '../application/ports.js';
 
 /**
  * Per-request state propagated through the async call chain. Fastify creates a fresh
@@ -12,7 +12,7 @@ import type pino from 'pino';
  */
 export interface RequestContext {
 	reqId: string;
-	log: pino.Logger;
+	log: AppLogger;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();

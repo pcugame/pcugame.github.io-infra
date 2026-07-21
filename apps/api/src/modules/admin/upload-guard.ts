@@ -1,6 +1,12 @@
-import type { Exhibition } from '../../generated/prisma/client.js';
-import type { UserRole } from '../../generated/prisma/client.js';
+import type { UserRole } from '@pcu/contracts';
 import { notFound, forbidden } from '../../shared/errors.js';
+
+export interface UploadableExhibition {
+	id: number;
+	year: number;
+	title: string;
+	isUploadEnabled: boolean;
+}
 
 /**
  * Validate that an exhibition exists and that the user is allowed to upload to it.
@@ -11,10 +17,10 @@ import { notFound, forbidden } from '../../shared/errors.js';
  * - USER role is blocked when uploads are disabled.
  */
 export function assertUploadAllowed(
-	exhibition: Exhibition | null,
+	exhibition: UploadableExhibition | null,
 	exhibitionIdentifier: string | number,
 	role: UserRole,
-): asserts exhibition is Exhibition {
+): asserts exhibition is UploadableExhibition {
 	if (!exhibition) {
 		throw notFound(`Exhibition ${exhibitionIdentifier} does not exist. An operator must create it first.`);
 	}

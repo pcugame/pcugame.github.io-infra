@@ -1,51 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { defaultTestEnv } from './helpers/app-mocks.js';
-
-const mocks = vi.hoisted(() => ({
-	findSessionById: vi.fn(),
-	transitionToCompleting: vi.fn(),
-	findPartsBySessionId: vi.fn(),
-	finalizeCompletedWebglSession: vi.fn(),
-	markFailed: vi.fn(),
-	revertToPending: vi.fn(),
-	completeMultipartUpload: vi.fn(),
-	headObject: vi.fn(),
-	readObjectRange: vi.fn(),
-	safeDeleteObject: vi.fn(),
-	deployWebglSource: vi.fn(),
-	cleanupWebglDeployment: vi.fn(),
-	cleanupWebglEntry: vi.fn(),
-}));
-
-vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
-	loadEnv: () => ({ ...defaultTestEnv }),
-}));
-vi.mock('../modules/admin/game-upload/repository.js', () => ({
-	findSessionById: mocks.findSessionById,
-	transitionToCompleting: mocks.transitionToCompleting,
-	findPartsBySessionId: mocks.findPartsBySessionId,
-	finalizeCompletedWebglSession: mocks.finalizeCompletedWebglSession,
-	finalizeCompletedSession: vi.fn(),
-	markFailed: mocks.markFailed,
-	revertToPending: mocks.revertToPending,
-}));
-vi.mock('../lib/storage.js', () => ({
-	completeMultipartUpload: mocks.completeMultipartUpload,
-	headObject: mocks.headObject,
-	readObjectRange: mocks.readObjectRange,
-	safeDeleteObject: mocks.safeDeleteObject,
-}));
-vi.mock('../modules/webgl/deployment.js', () => ({
-	deployWebglSource: mocks.deployWebglSource,
-	cleanupWebglDeployment: mocks.cleanupWebglDeployment,
-	cleanupWebglEntry: mocks.cleanupWebglEntry,
-}));
-
 import { completeSession } from '../modules/admin/game-upload/complete-session.service.js';
+import { cancelSession } from '../modules/admin/game-upload/session-maintenance.service.js';
+import { createCompletedUploadFinalizer } from '../modules/admin/game-upload/finalize-completed-upload.service.js';
+import type { GameUploadServiceDependencies } from '../modules/admin/game-upload/ports.js';
+import type { WebglDeploymentKeys } from '../modules/webgl/paths.js';
 
 const sourceKey = 'webgl/7/123e4567-e89b-42d3-a456-426614174000/source.zip';
-const deployed = {
+const deployed: WebglDeploymentKeys = {
 	projectId: 7,
 	deploymentId: '123e4567-e89b-42d3-a456-426614174000',
 	deploymentPrefix: 'webgl/7/123e4567-e89b-42d3-a456-426614174000/',
@@ -59,14 +20,14 @@ function session() {
 		id: 'session-webgl',
 		projectId: 7,
 		userId: 11,
-		uploadKind: 'WEBGL',
+		uploadKind: 'WEBGL' as const,
 		originalName: 'webgl.zip',
 		totalBytes: 8n,
 		chunkSizeBytes: 8,
 		totalChunks: 1,
 		uploadedChunks: [],
 		status: 'PENDING',
-		expiresAt: new Date(Date.now() + 60_000),
+		expiresAt: new Date('2026-07-22T00:00:00.000Z'),
 		s3UploadId: 'multipart',
 		s3Key: sourceKey,
 		parts: [{ partNumber: 1, etag: 'etag' }],
@@ -80,27 +41,85 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 
-describe('WebGL completion atomicity', () => {
-	beforeEach(() => {
-		vi.clearAllMocks();
-		mocks.findSessionById.mockResolvedValue(session());
-		mocks.transitionToCompleting.mockResolvedValue({ count: 1 });
-		mocks.findPartsBySessionId.mockResolvedValue([{ partNumber: 1, etag: 'etag' }]);
-		mocks.headObject.mockResolvedValue({ size: 8, contentType: 'application/zip' });
-		mocks.readObjectRange.mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]));
-		mocks.completeMultipartUpload.mockResolvedValue(undefined);
-		mocks.markFailed.mockResolvedValue({ count: 1 });
-		mocks.cleanupWebglEntry.mockResolvedValue(undefined);
-		mocks.cleanupWebglDeployment.mockResolvedValue(undefined);
+function createHarness() {
+	const mocks = {
+		findSessionById: vi.fn().mockResolvedValue(session()),
+		transitionToCompleting: vi.fn().mockResolvedValue({ count: 1 }),
+		findPartsBySessionId: vi.fn().mockResolvedValue([{ partNumber: 1, etag: 'etag' }]),
+		finalizeCompletedWebglSession: vi.fn().mockResolvedValue({ oldEntryKey: '' }),
+		markFailed: vi.fn().mockResolvedValue({ count: 1 }),
+		revertToPending: vi.fn().mockResolvedValue({ count: 1 }),
+		completeMultipart: vi.fn().mockResolvedValue(undefined),
+		head: vi.fn().mockResolvedValue({ size: 8, contentType: 'application/zip' }),
+		readHeader: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])),
+		deleteOrQueue: vi.fn().mockResolvedValue(undefined),
+		deployWebgl: vi.fn().mockResolvedValue(deployed),
+		cleanupWebglDeployment: vi.fn().mockResolvedValue(undefined),
+		cleanupWebglEntry: vi.fn().mockResolvedValue(undefined),
+		logError: vi.fn(),
+	};
+	const finalizer = createCompletedUploadFinalizer({
+		readHeader: mocks.readHeader,
+		validateGameArchive: vi.fn(),
+		deployWebgl: mocks.deployWebgl,
+		cleanupWebglDeployment: mocks.cleanupWebglDeployment,
+		cleanupWebglEntry: mocks.cleanupWebglEntry,
+		finalizeGame: vi.fn().mockResolvedValue({ oldStorageKey: null, oldPlaybackStorageKey: null }),
+		finalizeWebgl: mocks.finalizeCompletedWebglSession,
+		deleteOrQueue: mocks.deleteOrQueue,
+		webglUrl: () => 'http://localhost:4000/api/public/webgl/7/',
+		logError: mocks.logError,
 	});
+	const deps: GameUploadServiceDependencies = {
+		repository: {
+			findSessionById: mocks.findSessionById,
+			createSessionReplacingActive: vi.fn(),
+			cancelSessionAndClearActive: vi.fn(),
+			upsertPartEtag: vi.fn(),
+			transitionToCompleting: mocks.transitionToCompleting,
+			findPartsBySessionId: mocks.findPartsBySessionId,
+			revertToPending: mocks.revertToPending,
+			markFailed: mocks.markFailed,
+			findStaleCompletingSessions: vi.fn(),
+			findActiveSessionsForListing: vi.fn(),
+			findExhibitionById: vi.fn(),
+		},
+		storage: {
+			createMultipart: vi.fn(),
+			abortMultipart: vi.fn(),
+			uploadPart: vi.fn(),
+			completeMultipart: mocks.completeMultipart,
+			head: mocks.head,
+		},
+		finalizer,
+		settings: { get: vi.fn() },
+		uploadSlots: { acquire: vi.fn(), release: vi.fn() },
+		clock: { now: () => new Date('2026-07-21T00:00:00.000Z') },
+		ids: { next: () => 'id' },
+		lifecycle: { isAcceptingNewWork: () => true },
+		config: { uploadChunkSizeMb: 10, uploadSessionTtlMinutes: 60 },
+		roleGameMaxBytes: () => 1024,
+		storageKey: () => sourceKey,
+		deleteOrQueue: mocks.deleteOrQueue,
+		logger: { error: mocks.logError, warn: vi.fn() },
+	};
+	return {
+		mocks,
+		deps,
+		complete: () => completeSession(deps, 'session-webgl', { id: 11, role: 'USER' }),
+	};
+}
+
+describe('WebGL completion atomicity', () => {
+	beforeEach(() => vi.clearAllMocks());
 
 	it('does not swap the DB pointer before every hosted file is deployed', async () => {
-		const gate = deferred<typeof deployed>();
-		mocks.deployWebglSource.mockReturnValue(gate.promise);
-		mocks.finalizeCompletedWebglSession.mockResolvedValue({ oldEntryKey: '' });
+		const { mocks, complete } = createHarness();
+		const gate = deferred<WebglDeploymentKeys>();
+		mocks.deployWebgl.mockReturnValue(gate.promise);
 
-		const completion = completeSession('session-webgl', { id: 11, role: 'USER' });
-		await vi.waitFor(() => expect(mocks.deployWebglSource).toHaveBeenCalled());
+		const completion = complete();
+		await vi.waitFor(() => expect(mocks.deployWebgl).toHaveBeenCalled());
 		expect(mocks.finalizeCompletedWebglSession).not.toHaveBeenCalled();
 
 		gate.resolve(deployed);
@@ -110,34 +129,77 @@ describe('WebGL completion atomicity', () => {
 			webglUrl: 'http://localhost:4000/api/public/webgl/7/',
 		});
 		expect(mocks.finalizeCompletedWebglSession).toHaveBeenCalledWith(
-			'session-webgl',
-			7,
-			deployed.entryKey,
-			sourceKey,
+			expect.objectContaining({ id: 'session-webgl', projectId: 7 }),
+			deployed,
 		);
 	});
 
-	it('keeps the previous pointer and cleans the new source when deployment fails', async () => {
-		mocks.deployWebglSource.mockRejectedValue(new Error('public upload failed'));
+	it('rejects a duplicate completion before calling multipart completion', async () => {
+		const { mocks, complete } = createHarness();
+		mocks.transitionToCompleting.mockResolvedValue({ count: 0 });
 
-		await expect(completeSession('session-webgl', { id: 11, role: 'USER' }))
-			.rejects.toThrow('public upload failed');
+		await expect(complete()).rejects.toMatchObject({
+			statusCode: 400,
+			message: 'Session is already being completed by another request',
+		});
+		expect(mocks.completeMultipart).not.toHaveBeenCalled();
+	});
+
+	it('preserves COMPLETING when multipart outcome cannot be inspected', async () => {
+		const { mocks, complete } = createHarness();
+		mocks.completeMultipart.mockRejectedValueOnce(new Error('completion response lost'));
+		mocks.head.mockRejectedValueOnce(new Error('storage unavailable'));
+
+		await expect(complete()).rejects.toThrow('completion response lost');
+		expect(mocks.revertToPending).not.toHaveBeenCalled();
+		expect(mocks.markFailed).not.toHaveBeenCalled();
+		expect(mocks.deleteOrQueue).not.toHaveBeenCalled();
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'session-webgl', storageKey: sourceKey }),
+			'Could not determine whether multipart completion created the final object; preserving COMPLETING state',
+		);
+	});
+
+	it('does not abort storage when cancellation loses the state compare-and-set', async () => {
+		const { mocks, deps } = createHarness();
+		deps.repository.cancelSessionAndClearActive = vi.fn().mockResolvedValue({ count: 0 });
+
+		await expect(cancelSession(deps, 'session-webgl', { id: 11, role: 'USER' }))
+			.rejects.toThrow('Session state changed');
+		expect(deps.storage.abortMultipart).not.toHaveBeenCalled();
+		expect(mocks.completeMultipart).not.toHaveBeenCalled();
+	});
+
+	it('preserves a completed source for restart recovery when deployment fails transiently', async () => {
+		const { mocks, complete } = createHarness();
+		mocks.deployWebgl.mockRejectedValue(new Error('public upload failed'));
+
+		await expect(complete()).rejects.toThrow('public upload failed');
 		expect(mocks.finalizeCompletedWebglSession).not.toHaveBeenCalled();
+		expect(mocks.markFailed).not.toHaveBeenCalled();
+		expect(mocks.deleteOrQueue).not.toHaveBeenCalled();
+		expect(mocks.logError).not.toHaveBeenCalled();
+	});
+
+	it('marks a deterministically invalid completed source failed and queues deletion', async () => {
+		const { mocks, complete } = createHarness();
+		mocks.readHeader.mockResolvedValue(Buffer.from('not-a-zip'));
+
+		await expect(complete()).rejects.toMatchObject({ statusCode: 400 });
 		expect(mocks.markFailed).toHaveBeenCalledWith('session-webgl', sourceKey);
-		expect(mocks.safeDeleteObject).toHaveBeenCalledWith(
-			'pcu-protected',
+		expect(mocks.deleteOrQueue).toHaveBeenCalledWith(
 			sourceKey,
-			'webgl-upload-completion-failed',
+			'webgl-upload-completion-invalid',
 			{ sessionId: 'session-webgl' },
 		);
 	});
 
-	it('cleans both old source and hosted prefix after the pointer swap', async () => {
-		mocks.deployWebglSource.mockResolvedValue(deployed);
+	it('cleans the previous deployment after the pointer swap', async () => {
+		const { mocks, complete } = createHarness();
 		const oldEntry = 'webgl/7/123e4567-e89b-42d3-b456-426614174111/site/index.html';
 		mocks.finalizeCompletedWebglSession.mockResolvedValue({ oldEntryKey: oldEntry });
 
-		await completeSession('session-webgl', { id: 11, role: 'USER' });
+		await complete();
 		expect(mocks.cleanupWebglEntry).toHaveBeenCalledWith(
 			7,
 			oldEntry,
@@ -145,16 +207,16 @@ describe('WebGL completion atomicity', () => {
 		);
 	});
 
-	it('keeps the new deployment completed when cleanup of the previous deployment fails', async () => {
-		mocks.deployWebglSource.mockResolvedValue(deployed);
+	it('keeps the new deployment completed when old-deployment cleanup fails', async () => {
+		const { mocks, complete } = createHarness();
 		mocks.finalizeCompletedWebglSession.mockResolvedValue({
 			oldEntryKey: 'webgl/7/123e4567-e89b-42d3-b456-426614174111/site/index.html',
 		});
 		mocks.cleanupWebglEntry.mockRejectedValue(new Error('orphan queue unavailable'));
 
-		await expect(completeSession('session-webgl', { id: 11, role: 'USER' }))
-			.resolves.toMatchObject({ status: 'COMPLETED', webglUrl: expect.any(String) });
+		await expect(complete()).resolves.toMatchObject({ status: 'COMPLETED' });
 		expect(mocks.markFailed).not.toHaveBeenCalled();
 		expect(mocks.cleanupWebglDeployment).not.toHaveBeenCalled();
+		expect(mocks.logError).toHaveBeenCalledOnce();
 	});
 });

@@ -1,11 +1,25 @@
 import { notFound } from '../../../shared/errors.js';
-import { protectedDownloadLimiter } from '../../../shared/protected-download-limiter.js';
 import type { BannedIpItem } from '@pcu/contracts';
-import * as repo from './repository.js';
+
+export interface BannedIpServiceDependencies {
+	repository: {
+		findAllBannedIps(): Promise<Array<{
+			id: number;
+			ip: string;
+			reason: string;
+			createdAt: Date;
+		}>>;
+		findBannedIpById(id: number): Promise<{ id: number; ip: string } | null>;
+		deleteBannedIp(id: number): Promise<unknown>;
+	};
+	banCache: {
+		remove(ip: string): void;
+	};
+}
 
 /** List all banned IPs mapped to API shape */
-export async function listBannedIps(): Promise<BannedIpItem[]> {
-	const items = await repo.findAllBannedIps();
+export async function listBannedIps(deps: BannedIpServiceDependencies): Promise<BannedIpItem[]> {
+	const items = await deps.repository.findAllBannedIps();
 	return items.map((b) => ({
 		id: b.id,
 		ip: b.ip,
@@ -15,10 +29,17 @@ export async function listBannedIps(): Promise<BannedIpItem[]> {
 }
 
 /** Unban an IP by record ID. Removes from DB and in-memory cache. */
-export async function unbanIp(id: number) {
-	const record = await repo.findBannedIpById(id);
+export async function unbanIp(deps: BannedIpServiceDependencies, id: number): Promise<void> {
+	const record = await deps.repository.findBannedIpById(id);
 	if (!record) throw notFound('Banned IP record not found');
 
-	await repo.deleteBannedIp(record.id);
-	protectedDownloadLimiter.removeBan(record.ip);
+	await deps.repository.deleteBannedIp(record.id);
+	deps.banCache.remove(record.ip);
+}
+
+export function createBannedIpService(deps: BannedIpServiceDependencies) {
+	return {
+		listBannedIps: () => listBannedIps(deps),
+		unbanIp: (id: number) => unbanIp(deps, id),
+	};
 }

@@ -1,17 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { AppError } from '../shared/errors.js';
 
-vi.mock('../config/env.js', () => ({
-	env: () => ({
-		API_PUBLIC_URL: 'https://api.example.com',
-		S3_BUCKET_PUBLIC: 'pcu-public',
-		S3_PRESIGN_TTL_SEC: 60,
-	}),
-}));
-
 const mocks = vi.hoisted(() => ({
 	findExhibitionsWithPublishedCounts: vi.fn(),
 	findExhibitionsByYear: vi.fn(),
+	findExhibitionById: vi.fn(),
 	findPublishedProjectsInExhibitions: vi.fn(),
 	findPublishedProjectById: vi.fn(),
 	findPublishedProjectBySlug: vi.fn(),
@@ -19,25 +12,28 @@ const mocks = vi.hoisted(() => ({
 	getPresignedUrl: vi.fn(),
 }));
 
-vi.mock('../modules/public/repository.js', () => ({
-	findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
-	findExhibitionsByYear: mocks.findExhibitionsByYear,
-	findPublishedProjectsInExhibitions: mocks.findPublishedProjectsInExhibitions,
-	findPublishedProjectById: mocks.findPublishedProjectById,
-	findPublishedProjectBySlug: mocks.findPublishedProjectBySlug,
-	findExhibitionPosterByStorageKey: mocks.findExhibitionPosterByStorageKey,
-}));
-
-vi.mock('../lib/storage.js', () => ({
-	getPresignedUrl: mocks.getPresignedUrl,
-}));
-
 import { getExhibitionPosterRedirectUrl, getProjectDetail, listProjectsByYear, listYears } from '../modules/public/service.js';
+
+const dependencies = {
+	apiPublicUrl: 'https://api.example.com',
+	publicBucket: 'pcu-public',
+	presign: mocks.getPresignedUrl,
+	repository: {
+		findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
+		findExhibitionsByYear: mocks.findExhibitionsByYear,
+		findExhibitionById: mocks.findExhibitionById,
+		findPublishedProjectsInExhibitions: mocks.findPublishedProjectsInExhibitions,
+		findPublishedProjectById: mocks.findPublishedProjectById,
+		findPublishedProjectBySlug: mocks.findPublishedProjectBySlug,
+		findExhibitionPosterByStorageKey: mocks.findExhibitionPosterByStorageKey,
+	},
+};
 
 describe('public exhibition years', () => {
 	beforeEach(() => {
 		mocks.findExhibitionsWithPublishedCounts.mockReset();
 		mocks.findExhibitionsByYear.mockReset();
+		mocks.findExhibitionById.mockReset();
 		mocks.findPublishedProjectsInExhibitions.mockReset();
 		mocks.findPublishedProjectById.mockReset();
 		mocks.findPublishedProjectBySlug.mockReset();
@@ -56,7 +52,7 @@ describe('public exhibition years', () => {
 			},
 		]);
 
-		await expect(listYears()).resolves.toEqual([
+		await expect(listYears(dependencies)).resolves.toEqual([
 			{
 				id: 1,
 				year: 2026,
@@ -74,7 +70,7 @@ describe('public exhibition years', () => {
 		});
 		mocks.getPresignedUrl.mockResolvedValue('https://s3.example.com/poster.webp?sig=1');
 
-		await expect(getExhibitionPosterRedirectUrl('poster.webp')).resolves.toBe(
+		await expect(getExhibitionPosterRedirectUrl(dependencies, 'poster.webp')).resolves.toBe(
 			'https://s3.example.com/poster.webp?sig=1',
 		);
 		expect(mocks.getPresignedUrl).toHaveBeenCalledWith('pcu-public', 'poster.webp');
@@ -83,7 +79,7 @@ describe('public exhibition years', () => {
 	it('rejects unregistered exhibition poster keys', async () => {
 		mocks.findExhibitionPosterByStorageKey.mockResolvedValue(null);
 
-		await expect(getExhibitionPosterRedirectUrl('missing.webp')).rejects.toMatchObject({
+		await expect(getExhibitionPosterRedirectUrl(dependencies, 'missing.webp')).rejects.toMatchObject({
 			statusCode: 404,
 		} satisfies Partial<AppError>);
 		expect(mocks.getPresignedUrl).not.toHaveBeenCalled();
@@ -104,7 +100,7 @@ describe('public exhibition years', () => {
 			},
 		]);
 
-		await expect(listProjectsByYear('2026')).resolves.toMatchObject({
+		await expect(listProjectsByYear(dependencies, '2026')).resolves.toMatchObject({
 			year: 2026,
 			empty: false,
 			items: [{ id: 10, slug: 'archived-game', title: 'Archived Game' }],
@@ -126,7 +122,7 @@ describe('public exhibition years', () => {
 			poster: null,
 		});
 
-		await expect(getProjectDetail('10')).resolves.toMatchObject({
+		await expect(getProjectDetail(dependencies, '10')).resolves.toMatchObject({
 			id: 10,
 			status: 'ARCHIVED',
 		});
@@ -166,7 +162,7 @@ describe('public exhibition years', () => {
 			poster: null,
 		});
 
-		const result = await getProjectDetail('10');
+		const result = await getProjectDetail(dependencies, '10');
 
 		expect(result.video).toBe(result.videos[0]);
 		expect(result.videos).toEqual([

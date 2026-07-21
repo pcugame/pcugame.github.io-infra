@@ -4,6 +4,7 @@
   "scripts": {
     "test": "npm test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
+    "architecture": "npm run architecture -w apps/api",
     "build": "npm run build -w @pcu/contracts && npm run build -w apps/api && npm run build -w apps/web",
     "testenv:up": "docker compose -f docker-compose.integration.yml up --build -d && node scripts/smoke-integration.mjs",
     "testenv:reset": "docker compose -f docker-compose.integration.yml down -v --remove-orphans && npm run testenv:up",

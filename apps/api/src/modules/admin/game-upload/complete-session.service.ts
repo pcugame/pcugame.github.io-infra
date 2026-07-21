@@ -1,32 +1,23 @@
 import type { GameUploadCompleteResponse } from '@pcu/contracts';
-import { env } from '../../../config/env.js';
-import { logger } from '../../../lib/logger.js';
-import {
-	completeMultipartUpload,
-	headObject,
-	readObjectRange,
-	safeDeleteObject,
-} from '../../../lib/storage.js';
 import { AppError, badRequest } from '../../../shared/errors.js';
-import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
-import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
-import { cleanupWebglDeployment, cleanupWebglEntry, deployWebglSource } from '../../webgl/deployment.js';
-import { webglUrl } from '../../webgl/paths.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
-import * as repo from './repository.js';
+import { assertUploadStateTransition } from './state-machine.js';
+import { isTerminalUploadFinalizationError } from './finalize-completed-upload.service.js';
+import type { GameUploadServiceDependencies } from './ports.js';
 
 /** Finalize a chunked upload: complete S3 multipart, validate ZIP, create GAME asset */
 export async function completeSession(
+	deps: GameUploadServiceDependencies,
 	sessionId: string,
 	user: { id: number; role: string },
 ): Promise<GameUploadCompleteResponse> {
-	const cfg = env();
-	const session = await loadSession(sessionId, user.id, user.role);
+	const session = await loadSession(deps, sessionId, user.id, user.role);
 
 	if (session.status !== 'PENDING') {
 		throw badRequest(`Cannot complete: session is ${session.status}`);
 	}
+	assertUploadStateTransition(session.status, 'COMPLETING');
 	assertGameUploadSessionWritable(session.project.status, user.role);
 
 	if (!session.s3UploadId || !session.s3Key) {
@@ -45,117 +36,74 @@ export async function completeSession(
 		throw badRequest(`Missing ${missing.length} chunks: [${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '...' : ''}]`);
 	}
 
-	const transitioned = await repo.transitionToCompleting(session.id);
+	const transitioned = await deps.repository.transitionToCompleting(session.id);
 	if (transitioned.count === 0) {
 		throw badRequest('Session is already being completed by another request');
 	}
 
 	let s3Completed = false;
 	const storageKey = session.s3Key;
-	let deployedWebgl: Awaited<ReturnType<typeof deployWebglSource>> | null = null;
 	try {
-		const dbParts = await repo.findPartsBySessionId(session.id);
+		const dbParts = await deps.repository.findPartsBySessionId(session.id);
 		const parts = dbParts.map((part) => ({ partNumber: part.partNumber, etag: part.etag }));
 		if (parts.length !== session.totalChunks) {
 			throw new AppError(500, `Part ETag count mismatch: expected ${session.totalChunks}, got ${parts.length}`, 'INTERNAL_ERROR');
 		}
 
-		await completeMultipartUpload(
-			cfg.S3_BUCKET_PROTECTED,
+		await deps.storage.completeMultipart(
 			session.s3Key,
 			session.s3UploadId,
 			parts,
 		);
 		s3Completed = true;
 
-		const head = await headObject(cfg.S3_BUCKET_PROTECTED, storageKey);
+		const head = await deps.storage.head(storageKey);
 		if (!head) {
 			throw new AppError(500, 'Completed object not found in S3', 'INTERNAL_ERROR');
 		}
-		if (head.size !== Number(session.totalBytes)) {
-			throw new AppError(500, `Final file size mismatch: expected ${session.totalBytes}, got ${head.size}`, 'SIZE_MISMATCH');
-		}
-
-		const header = await readObjectRange(cfg.S3_BUCKET_PROTECTED, storageKey, 0, 7);
-		const detected = detectFileType(header);
-		if (!detected || !isAllowedGameType(detected)) {
-			throw badRequest('Uploaded file is not a valid ZIP archive');
-		}
-		if (session.uploadKind === 'WEBGL') {
-			deployedWebgl = await deployWebglSource(session.projectId, storageKey, head.size);
-			const result = await repo.finalizeCompletedWebglSession(
-				session.id,
-				session.projectId,
-				deployedWebgl.entryKey,
-				storageKey,
-			);
-			if (result.oldEntryKey && result.oldEntryKey !== deployedWebgl.entryKey) {
-				await cleanupWebglEntry(
-					session.projectId,
-					result.oldEntryKey,
-					'webgl-upload-replace-previous',
-				).catch((cleanupErr) => {
-					logger().error(
-						{ err: cleanupErr, projectId: session.projectId, oldEntryKey: result.oldEntryKey },
-						'Failed to clean previous WebGL deployment after pointer swap',
-					);
-				});
-			}
-			return {
-				status: 'COMPLETED' as const,
-				storageKey,
-				sizeBytes: Number(session.totalBytes),
-				webglUrl: webglUrl(cfg.API_PUBLIC_URL, session.projectId),
-			};
-		}
-
-		await validateZipArchiveObject(cfg.S3_BUCKET_PROTECTED, storageKey, head.size);
-
-		const result = await repo.finalizeCompletedSession(session.id, session.projectId, 'GAME', {
-			storageKey,
+		return await deps.finalizer.finalize({
+			id: session.id,
+			projectId: session.projectId,
+			uploadKind: session.uploadKind,
 			originalName: session.originalName,
-			mimeType: 'application/zip',
-			sizeBytes: session.totalBytes,
-			isPublic: false,
-		});
-
-		if (result.oldStorageKey) {
-			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, result.oldStorageKey, 'game-upload-replace-previous', { sessionId: session.id });
-		}
-		if (result.oldPlaybackStorageKey) {
-			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, result.oldPlaybackStorageKey, 'game-upload-replace-previous-playback', { sessionId: session.id });
-		}
-
-		return {
-			status: 'COMPLETED' as const,
-			storageKey,
-			sizeBytes: Number(session.totalBytes),
-		};
+			totalBytes: session.totalBytes,
+			s3Key: storageKey,
+		}, head);
 	} catch (err) {
 		if (!s3Completed) {
-			const head = await headObject(cfg.S3_BUCKET_PROTECTED, storageKey).catch(() => null);
-			s3Completed = !!head;
+			try {
+				s3Completed = await deps.storage.head(storageKey) !== null;
+			} catch (inspectionError) {
+				deps.logger.error(
+					{ err: inspectionError, sessionId: session.id, storageKey },
+					'Could not determine whether multipart completion created the final object; preserving COMPLETING state',
+				);
+				throw err;
+			}
 		}
 
 		if (s3Completed) {
-			await repo.markFailed(session.id, storageKey).catch((markErr) => {
-				logger().error({ err: markErr, sessionId: session.id }, 'Failed to mark session FAILED after completed-object error');
-			});
-			if (deployedWebgl) {
-				await cleanupWebglDeployment(deployedWebgl, 'webgl-upload-completion-failed');
-			} else {
-				await safeDeleteObject(
-					cfg.S3_BUCKET_PROTECTED,
+			if (isTerminalUploadFinalizationError(err)) {
+				await deps.repository.markFailed(session.id, storageKey).catch((markErr) => {
+					deps.logger.error({ err: markErr, sessionId: session.id }, 'Failed to mark invalid completed upload FAILED');
+				});
+				await deps.deleteOrQueue(
 					storageKey,
 					session.uploadKind === 'WEBGL'
-						? 'webgl-upload-completion-failed'
-						: 'game-upload-completion-failed',
+						? 'webgl-upload-completion-invalid'
+						: 'game-upload-completion-invalid',
 					{ sessionId: session.id },
+				);
+			} else {
+				deps.logger.warn(
+					{ err, sessionId: session.id, storageKey },
+					'Upload finalization failed after storage completion; preserving for restart recovery',
 				);
 			}
 		} else {
-			await repo.revertToPending(session.id).catch((revertErr) => {
-				logger().error({ err: revertErr, sessionId: session.id }, 'Failed to revert session to PENDING after pre-S3-complete error');
+			assertUploadStateTransition('COMPLETING', 'PENDING');
+			await deps.repository.revertToPending(session.id).catch((revertErr) => {
+				deps.logger.error({ err: revertErr, sessionId: session.id }, 'Failed to revert session to PENDING after pre-S3-complete error');
 			});
 		}
 		throw err;

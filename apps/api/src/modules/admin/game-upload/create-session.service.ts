@@ -1,31 +1,25 @@
-import { randomUUID } from 'node:crypto';
-import type { GameUploadSession } from '@pcu/contracts';
-import type { UploadKind } from '../../../generated/prisma/client.js';
-import { env } from '../../../config/env.js';
-import { logger } from '../../../lib/logger.js';
-import { isAcceptingNewWork } from '../../../lib/lifecycle.js';
-import { abortMultipartUpload, createMultipartUpload } from '../../../lib/storage.js';
-import { AppError, badRequest } from '../../../shared/errors.js';
-import { getSiteSettings } from '../../../shared/site-settings.js';
-import { generateStorageKey } from '../../../shared/storage-path.js';
-import { getUploadLimits } from '../../../shared/upload-limits.js';
+import type { GameUploadSession, UserRole } from '@pcu/contracts';
+import type { UploadKind } from '@pcu/contracts';
+import { AppError, badRequest, conflict } from '../../../shared/errors.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
-import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
-import { createWebglDeploymentKeys } from '../../webgl/paths.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import { resolveChunkSizeBytes } from './session-sizing.js';
-import * as repo from './repository.js';
+import {
+	ActiveUploadCompletionInProgressError,
+	type GameUploadServiceDependencies,
+} from './ports.js';
 
 /** Create a new chunked upload session for a project */
 export async function createSession(
+	deps: GameUploadServiceDependencies,
 	projectId: number,
 	exhibitionId: number,
-	user: { id: number; role: string },
+	user: { id: number; role: UserRole },
 	body: { originalName?: string; totalBytes?: number; uploadKind?: UploadKind },
 ): Promise<GameUploadSession> {
 	// Refuse to start new multi-chunk sessions once shutdown has begun; in-flight
 	// completion calls are still allowed so existing uploads do not get truncated.
-	if (!isAcceptingNewWork()) {
+	if (!deps.lifecycle.isAcceptingNewWork()) {
 		throw new AppError(503, 'Server is restarting; please retry in a moment', 'DRAINING');
 	}
 
@@ -33,20 +27,20 @@ export async function createSession(
 		throw badRequest('Missing originalName or totalBytes');
 	}
 
-	const cfg = env();
 	const { originalName, totalBytes } = body;
 	const uploadKind = body.uploadKind ?? 'GAME';
 	assertValidUploadFilename(originalName);
 
-	const exhibition = await repo.findExhibitionById(exhibitionId);
-	assertUploadAllowed(exhibition, exhibition?.year ?? 0, user.role as any);
+	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
+	assertUploadAllowed(exhibition, exhibition?.year ?? 0, user.role);
 
-	const settings = await getSiteSettings();
+	const settings = await deps.settings.get();
 	const maxGameBytes = settings.maxGameFileMb * 1024 * 1024;
-	const chunkSizeBytes = resolveChunkSizeBytes(settings, cfg);
+	const chunkSizeBytes = resolveChunkSizeBytes(settings, {
+		UPLOAD_CHUNK_SIZE_MB: deps.config.uploadChunkSizeMb,
+	});
 
-	const roleLimits = getUploadLimits(user.role as any);
-	const effectiveMax = Math.min(maxGameBytes, roleLimits.gameMaxBytes);
+	const effectiveMax = Math.min(maxGameBytes, deps.roleGameMaxBytes(user.role));
 
 	if (totalBytes <= 0) throw badRequest('totalBytes must be positive');
 	if (totalBytes > effectiveMax) {
@@ -55,21 +49,16 @@ export async function createSession(
 	}
 
 	const totalChunks = Math.ceil(totalBytes / chunkSizeBytes);
-	const s3Key = uploadKind === 'WEBGL'
-		? createWebglDeploymentKeys(projectId).sourceKey
-		: generateStorageKey('zip');
-	const s3UploadId = await createMultipartUpload(
-		cfg.S3_BUCKET_PROTECTED,
-		s3Key,
-		'application/zip',
-		storageOptionsForAsset('GAME', 'original'),
+	const s3Key = deps.storageKey(uploadKind, projectId);
+	const s3UploadId = await deps.storage.createMultipart(s3Key);
+	const expiresAt = new Date(
+		deps.clock.now().getTime() + deps.config.uploadSessionTtlMinutes * 60 * 1000,
 	);
-	const expiresAt = new Date(Date.now() + cfg.UPLOAD_SESSION_TTL_MINUTES * 60 * 1000);
 
-	let created: Awaited<ReturnType<typeof repo.createSessionReplacingActive>>;
+	let created: Awaited<ReturnType<typeof deps.repository.createSessionReplacingActive>>;
 	try {
-		created = await repo.createSessionReplacingActive({
-			id: randomUUID(),
+		created = await deps.repository.createSessionReplacingActive({
+			id: deps.ids.next(),
 			projectId,
 			userId: user.id,
 			uploadKind,
@@ -82,16 +71,19 @@ export async function createSession(
 			expiresAt,
 		});
 	} catch (err) {
-		await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s3Key, s3UploadId).catch((abortErr) => {
-			logger().error({ err: abortErr, s3Key }, 'Failed to abort new multipart upload after session create failure');
+		await deps.storage.abortMultipart(s3Key, s3UploadId).catch((abortErr) => {
+			deps.logger.error({ err: abortErr, s3Key }, 'Failed to abort new multipart upload after session create failure');
 		});
+		if (err instanceof ActiveUploadCompletionInProgressError) {
+			throw conflict(err.message);
+		}
 		throw err;
 	}
 
 	for (const s of created.replacedSessions) {
 		if (s.s3UploadId && s.s3Key) {
-			await abortMultipartUpload(cfg.S3_BUCKET_PROTECTED, s.s3Key, s.s3UploadId).catch((err) => {
-				logger().error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Failed to abort multipart upload while replacing active session');
+			await deps.storage.abortMultipart(s.s3Key, s.s3UploadId).catch((err) => {
+				deps.logger.error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Failed to abort multipart upload while replacing active session');
 			});
 		}
 	}

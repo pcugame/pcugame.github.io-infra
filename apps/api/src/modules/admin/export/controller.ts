@@ -4,7 +4,7 @@ import { sendOk } from '../../../shared/http.js';
 import { requireRole } from '../../../plugins/auth.js';
 import { badRequest } from '../../../shared/errors.js';
 import { env } from '../../../config/env.js';
-import * as exportService from './service.js';
+import { exportService } from './runtime.js';
 
 export async function exportController(app: FastifyInstance): Promise<void> {
 	/**
@@ -26,7 +26,7 @@ export async function exportController(app: FastifyInstance): Promise<void> {
 			const nasPath = env().NAS_EXPORT_PATH;
 			if (!nasPath) throw badRequest('NAS_EXPORT_PATH is not configured');
 
-			const body = (request.body ?? {}) as { year?: number; dryRun?: boolean };
+			const body = (request.body ?? {});
 			const year = body.year ? Number(body.year) : undefined;
 			if (year != null && (!Number.isInteger(year) || year < 2000)) {
 				throw badRequest('Invalid year');

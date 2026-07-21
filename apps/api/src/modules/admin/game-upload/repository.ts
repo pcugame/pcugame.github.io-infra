@@ -1,7 +1,27 @@
 import { prisma } from '../../../lib/prisma.js';
 import { Prisma, type AssetKind, type AssetPlaybackStatus, type UploadKind } from '../../../generated/prisma/client.js';
+import { ActiveUploadCompletionInProgressError } from './ports.js';
 
 type TxClient = Prisma.TransactionClient;
+
+const sessionWithProjectAndParts = {
+	include: {
+		project: { select: { status: true } },
+		parts: { orderBy: { partNumber: 'asc' as const } },
+	},
+} satisfies Prisma.GameUploadSessionDefaultArgs;
+
+export type UploadSessionRecord = Prisma.GameUploadSessionGetPayload<
+	typeof sessionWithProjectAndParts
+>;
+
+const sessionWithParts = {
+	include: { parts: { orderBy: { partNumber: 'asc' as const } } },
+} satisfies Prisma.GameUploadSessionDefaultArgs;
+
+export type UploadSessionWithParts = Prisma.GameUploadSessionGetPayload<
+	typeof sessionWithParts
+>;
 
 const serializableOptions = {
 	isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -30,20 +50,11 @@ export async function withSerializableRetry<T>(
 }
 
 /** Find a game upload session by ID */
-export function findSessionById(id: string): Promise<any> {
+export function findSessionById(id: string): Promise<UploadSessionRecord | null> {
 	return prisma.gameUploadSession.findUnique({
 		where: { id },
-		include: {
-			project: {
-				select: {
-					status: true,
-				},
-			},
-			parts: {
-				orderBy: { partNumber: 'asc' },
-			},
-		},
-	} as any) as Promise<any>;
+		...sessionWithProjectAndParts,
+	});
 }
 
 type CreateSessionData = {
@@ -63,7 +74,7 @@ type CreateSessionData = {
 /** Create a new session and replace the project's active slot atomically. */
 export function createSessionReplacingActive(data: CreateSessionData) {
 	return withSerializableRetry(async (tx) => {
-		const active = await (tx as any).gameUploadActiveSession.findUnique({
+		const active = await tx.gameUploadActiveSession.findUnique({
 			where: {
 				projectId_uploadKind: {
 					projectId: data.projectId,
@@ -74,18 +85,25 @@ export function createSessionReplacingActive(data: CreateSessionData) {
 		});
 		const replacedSessions = active?.session ? [active.session] : [];
 
+		// A completing upload may already have committed its multipart object. It
+		// must retain the active slot until finalization/recovery reaches a terminal
+		// state; cancelling it here would strand that object outside recovery.
+		if (active?.session.status === 'COMPLETING') {
+			throw new ActiveUploadCompletionInProgressError();
+		}
+
 		if (active) {
 			await tx.gameUploadSession.updateMany({
 				where: {
 					id: active.sessionId,
-					status: { in: ['PENDING', 'COMPLETING'] },
+					status: 'PENDING',
 				},
 				data: { status: 'CANCELLED' },
 			});
 		}
 
 		const session = await tx.gameUploadSession.create({ data });
-		await (tx as any).gameUploadActiveSession.upsert({
+		await tx.gameUploadActiveSession.upsert({
 			where: {
 				projectId_uploadKind: {
 					projectId: data.projectId,
@@ -114,14 +132,16 @@ export function updateSessionStatus(id: string, status: string) {
 
 export function cancelSessionAndClearActive(id: string) {
 	return withSerializableRetry(async (tx) => {
-		const session = await tx.gameUploadSession.update({
-			where: { id },
+		const result = await tx.gameUploadSession.updateMany({
+			where: { id, status: 'PENDING' },
 			data: { status: 'CANCELLED' },
 		});
-		await (tx as any).gameUploadActiveSession.deleteMany({
-			where: { sessionId: id },
-		});
-		return session;
+		if (result.count === 1) {
+			await tx.gameUploadActiveSession.deleteMany({
+				where: { sessionId: id },
+			});
+		}
+		return result;
 	});
 }
 
@@ -139,20 +159,16 @@ export function findActiveSessions(projectId: number) {
 export function findActiveSessionsForListing(
 	projectId: number,
 	opts: { userId?: number },
-) {
+): Promise<UploadSessionWithParts[]> {
 	return prisma.gameUploadSession.findMany({
 		where: {
 			projectId,
 			status: { in: ['PENDING', 'COMPLETING'] },
 			...(opts.userId ? { userId: opts.userId } : {}),
 		},
-		include: {
-			parts: {
-				orderBy: { partNumber: 'asc' },
-			},
-		},
+		...sessionWithParts,
 		orderBy: { createdAt: 'desc' },
-	} as any) as Promise<any[]>;
+	});
 }
 
 /**
@@ -172,7 +188,7 @@ export async function upsertPartEtag(
 	partNumber: number,
 	etag: string,
 ) {
-	await (prisma as any).gameUploadPart.upsert({
+	await prisma.gameUploadPart.upsert({
 		where: {
 			game_upload_part_session_part: {
 				sessionId,
@@ -182,17 +198,17 @@ export async function upsertPartEtag(
 		update: { etag },
 		create: { sessionId, partNumber, etag },
 	});
-	return (prisma as any).gameUploadPart.findMany({
+	return prisma.gameUploadPart.findMany({
 		where: { sessionId },
 		orderBy: { partNumber: 'asc' },
-	}) as Promise<Array<{ partNumber: number; etag: string }>>;
+	});
 }
 
 export function findPartsBySessionId(sessionId: string) {
-	return (prisma as any).gameUploadPart.findMany({
+	return prisma.gameUploadPart.findMany({
 		where: { sessionId },
 		orderBy: { partNumber: 'asc' },
-	}) as Promise<Array<{ partNumber: number; etag: string }>>;
+	});
 }
 
 /** Revert a COMPLETING session back to PENDING (for retry on error) */
@@ -206,13 +222,13 @@ export function revertToPending(sessionId: string) {
 export function markFailed(sessionId: string, storageKey?: string | null) {
 	return withSerializableRetry(async (tx) => {
 		const result = await tx.gameUploadSession.updateMany({
-			where: { id: sessionId },
+			where: { id: sessionId, status: { in: ['PENDING', 'COMPLETING'] } },
 			data: {
 				status: 'FAILED',
 				...(storageKey ? { storageKey } : {}),
 			},
 		});
-		await (tx as any).gameUploadActiveSession.deleteMany({
+		await tx.gameUploadActiveSession.deleteMany({
 			where: { sessionId },
 		});
 		return result;
@@ -286,11 +302,14 @@ export function finalizeCompletedSession(
 			result = { assetId: created.id, oldStorageKey: null, oldPlaybackStorageKey: null };
 		}
 
-		await tx.gameUploadSession.update({
-			where: { id: sessionId },
+		const completed = await tx.gameUploadSession.updateMany({
+			where: { id: sessionId, status: 'COMPLETING', uploadKind: 'GAME' },
 			data: { status: 'COMPLETED', storageKey: data.storageKey },
 		});
-		await (tx as any).gameUploadActiveSession.deleteMany({
+		if (completed.count !== 1) {
+			throw new Error('Game upload session is no longer completing');
+		}
+		await tx.gameUploadActiveSession.deleteMany({
 			where: { sessionId },
 		});
 
@@ -320,7 +339,7 @@ export function finalizeCompletedWebglSession(
 		if (completed.count !== 1) {
 			throw new Error('WebGL upload session is no longer completing');
 		}
-		await (tx as any).gameUploadActiveSession.deleteMany({
+		await tx.gameUploadActiveSession.deleteMany({
 			where: { sessionId },
 		});
 		return { oldEntryKey: project.webglEntryKey };

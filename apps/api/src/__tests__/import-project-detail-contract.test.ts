@@ -3,6 +3,7 @@ import type { AdminProjectDetail, PublicProjectDetailResponse } from '@pcu/contr
 
 const mocks = vi.hoisted(() => ({
 	runTransaction: vi.fn(),
+	findExhibitionForPreview: vi.fn(),
 	findExhibitionByComposite: vi.fn(),
 	upsertExhibition: vi.fn(),
 	findProjectBySlug: vi.fn(),
@@ -13,55 +14,43 @@ const mocks = vi.hoisted(() => ({
 	findPublishedProjectById: vi.fn(),
 	findPublishedProjectBySlug: vi.fn(),
 	findExhibitionPosterByStorageKey: vi.fn(),
-	getPresignedUrl: vi.fn(),
 }));
 
-vi.mock('../config/env.js', () => ({
-	env: () => ({
-		API_PUBLIC_URL: 'https://api.example.com',
-		S3_BUCKET_PUBLIC: 'pcu-public',
-		S3_PRESIGN_TTL_SEC: 60,
-		LOG_LEVEL: 'silent',
-		NODE_ENV: 'test',
-	}),
-	loadEnv: () => ({
-		API_PUBLIC_URL: 'https://api.example.com',
-		S3_BUCKET_PUBLIC: 'pcu-public',
-		S3_PRESIGN_TTL_SEC: 60,
-		LOG_LEVEL: 'silent',
-		NODE_ENV: 'test',
-	}),
-}));
+import { createImportService } from '../modules/admin/import/service.js';
+import { createProjectSerializer } from '../modules/admin/project/serializer.js';
+import { createPublicService } from '../modules/public/service.js';
 
-vi.mock('../modules/admin/import/repository.js', () => ({
-	runTransaction: mocks.runTransaction,
-	findExhibitionByComposite: mocks.findExhibitionByComposite,
-	upsertExhibition: mocks.upsertExhibition,
-	findProjectBySlug: mocks.findProjectBySlug,
-	createProjectWithMembers: mocks.createProjectWithMembers,
-}));
-
-vi.mock('../modules/public/repository.js', () => ({
-	findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
-	findExhibitionsByYear: mocks.findExhibitionsByYear,
-	findPublishedProjectsInExhibitions: mocks.findPublishedProjectsInExhibitions,
-	findPublishedProjectById: mocks.findPublishedProjectById,
-	findPublishedProjectBySlug: mocks.findPublishedProjectBySlug,
-	findExhibitionPosterByStorageKey: mocks.findExhibitionPosterByStorageKey,
-}));
-
-vi.mock('../lib/storage.js', () => ({
-	getPresignedUrl: mocks.getPresignedUrl,
-}));
-
-import { executeImport } from '../modules/admin/import/service.js';
-import { serializeProjectDetail } from '../modules/admin/project/serializer.js';
-import { getProjectDetail } from '../modules/public/service.js';
+const importService = createImportService({
+	repository: {
+		findExhibitionForPreview: mocks.findExhibitionForPreview,
+		runTransaction: mocks.runTransaction,
+	},
+});
+const { serializeProjectDetail } = createProjectSerializer('https://api.example.com');
+const publicService = createPublicService({
+	apiPublicUrl: 'https://api.example.com',
+	publicBucket: 'pcu-public',
+	presign: async (_bucket, key) => `https://storage.example.com/${key}`,
+	repository: {
+		findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
+		findExhibitionsByYear: mocks.findExhibitionsByYear,
+		findPublishedProjectsInExhibitions: mocks.findPublishedProjectsInExhibitions,
+		findExhibitionById: vi.fn(),
+		findPublishedProjectById: mocks.findPublishedProjectById,
+		findPublishedProjectBySlug: mocks.findPublishedProjectBySlug,
+		findExhibitionPosterByStorageKey: mocks.findExhibitionPosterByStorageKey,
+	},
+});
 
 describe('imported project detail contract fields', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.runTransaction.mockImplementation(async (fn) => fn({}));
+		mocks.runTransaction.mockImplementation(async (fn) => fn({
+			findExhibitionByComposite: mocks.findExhibitionByComposite,
+			upsertExhibition: mocks.upsertExhibition,
+			findProjectBySlug: mocks.findProjectBySlug,
+			createProjectWithMembers: mocks.createProjectWithMembers,
+		}));
 		mocks.findExhibitionByComposite.mockResolvedValue(null);
 		mocks.upsertExhibition.mockResolvedValue({ id: 77, year: 2026, title: '2026 Show' });
 		mocks.findProjectBySlug.mockResolvedValue(null);
@@ -84,12 +73,12 @@ describe('imported project detail contract fields', () => {
 			members: { name: string; studentId: string; sortOrder: number }[];
 		} | undefined;
 
-		mocks.createProjectWithMembers.mockImplementation(async (_tx, data) => {
+		mocks.createProjectWithMembers.mockImplementation(async (data) => {
 			createdProject = data;
 			return { id: 101, ...data };
 		});
 
-		await expect(executeImport(JSON.stringify({
+		await expect(importService.executeImport(JSON.stringify({
 			years: [{ year: 2026, title: '2026 Show' }],
 			projects: [{
 				year: 2026,
@@ -142,7 +131,7 @@ describe('imported project detail contract fields', () => {
 		});
 
 		mocks.findPublishedProjectById.mockResolvedValue(detailRecord);
-		const publicDetail: PublicProjectDetailResponse = await getProjectDetail('101');
+		const publicDetail: PublicProjectDetailResponse = await publicService.getProjectDetail('101');
 		expect(publicDetail).toMatchObject({
 			githubUrl,
 			platforms: [...platforms],

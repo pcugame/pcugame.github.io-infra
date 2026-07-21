@@ -1,6 +1,6 @@
-import type { AssetKind } from '../../../generated/prisma/client.js';
+import type { AssetKind } from '@pcu/contracts';
 import { bucketForKind } from '../../../lib/s3.js';
-import { safeDeleteObject } from '../../../lib/storage.js';
+import { safeDeleteObject } from '../../../object-deletion.js';
 
 export async function deleteAssetObjects(
 	asset: { id: number; projectId?: number; kind: AssetKind; storageKey: string; playbackStorageKey: string | null },

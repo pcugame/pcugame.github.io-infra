@@ -50,6 +50,7 @@ vi.mock('../lib/prisma.js', () => ({
 }));
 
 vi.mock('../modules/auth/repository.js', () => ({
+	findSessionWithUser: mocks.authSessionFindUnique,
 	upsertUserByGoogleSub: vi.fn(),
 	upsertDevUser: mocks.upsertDevUser,
 	createSession: mocks.createSession,

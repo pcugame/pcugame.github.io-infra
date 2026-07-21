@@ -1,6 +1,6 @@
 import { promises as fsp } from 'node:fs';
 import { createReadStream } from 'node:fs';
-import type { AssetKind } from '../../../generated/prisma/client.js';
+import type { AssetKind } from '@pcu/contracts';
 import { logger } from '../../../lib/logger.js';
 import { bucketForKind } from '../../../lib/s3.js';
 import { uploadFile, deleteObject } from '../../../lib/storage.js';
@@ -223,7 +223,9 @@ export class UploadPipeline {
   /** Clean up any remaining temp files.  Always call in a finally block. */
   async cleanupTemp(): Promise<void> {
     for (const t of this.tempFiles) {
-      await fsp.unlink(t).catch(() => {});
+			await fsp.unlink(t).catch((err) => {
+				logger().warn({ err, tempPath: t }, 'Upload temp-file cleanup failed');
+			});
     }
     this.tempFiles = [];
   }

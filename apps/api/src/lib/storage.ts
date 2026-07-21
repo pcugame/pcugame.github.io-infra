@@ -16,6 +16,13 @@ import { pipeline as streamPipeline } from 'node:stream/promises';
 import { s3 } from './s3.js';
 import { env } from '../config/env.js';
 
+function storageErrorMatches(err: unknown, names: readonly string[], statusCode?: number): boolean {
+	if (!err || typeof err !== 'object') return false;
+	const candidate = err as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+	return (typeof candidate.name === 'string' && names.includes(candidate.name))
+		|| (statusCode !== undefined && candidate.$metadata?.httpStatusCode === statusCode);
+}
+
 /* ── Simple object operations ─────────────────────────── */
 
 export interface UploadObjectOptions {
@@ -74,32 +81,6 @@ export async function deleteObject(
 	await s3().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
-/**
- * Delete an S3 object with best-effort retry through the orphan reaper.
- * On failure: logs the original error with caller-supplied context, queues the object
- * for later retry via the OrphanObject table, and swallows the error. Never throws —
- * callers use this when the delete is a best-effort cleanup and should not fail the
- * surrounding operation (e.g. replacing an existing asset, aborting on validation error).
- *
- * Keep the `reason` string short and specific ("replace-game-asset", "completion-size-mismatch") —
- * it ends up in both logs and the DB row so operators can trace where orphans came from.
- */
-export async function safeDeleteObject(
-	bucket: string,
-	key: string,
-	reason: string,
-	logContext?: Record<string, unknown>,
-): Promise<void> {
-	try {
-		await deleteObject(bucket, key);
-	} catch (err) {
-		const { logger } = await import('./logger.js');
-		const { recordOrphan } = await import('../modules/orphan/service.js');
-		logger().error({ err, bucket, storageKey: key, reason, ...logContext }, 'S3 delete failed — queuing for orphan reaper');
-		await recordOrphan(bucket, key, reason);
-	}
-}
-
 export async function headObject(
 	bucket: string,
 	key: string,
@@ -112,8 +93,8 @@ export async function headObject(
 			size: res.ContentLength ?? 0,
 			contentType: res.ContentType ?? 'application/octet-stream',
 		};
-	} catch (err: any) {
-		if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+	} catch (err: unknown) {
+		if (storageErrorMatches(err, ['NotFound'], 404)) {
 			return null;
 		}
 		throw err;
@@ -183,8 +164,8 @@ export async function getObjectStream(
 			lastModified: res.LastModified,
 			contentRange: res.ContentRange,
 		};
-	} catch (err: any) {
-		if (err.name === 'NoSuchKey' || err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+	} catch (err: unknown) {
+		if (storageErrorMatches(err, ['NoSuchKey', 'NotFound'], 404)) {
 			return null;
 		}
 		throw err;
@@ -207,26 +188,6 @@ export async function listObjectKeys(bucket: string, prefix: string): Promise<st
 		continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
 	} while (continuationToken);
 	return keys;
-}
-
-/** Best-effort prefix cleanup; individual failures enter the orphan retry queue. */
-export async function safeDeletePrefix(
-	bucket: string,
-	prefix: string,
-	reason: string,
-	logContext?: Record<string, unknown>,
-): Promise<number> {
-	const keys = await listObjectKeys(bucket, prefix);
-	const deleteConcurrency = 25;
-	for (let offset = 0; offset < keys.length; offset += deleteConcurrency) {
-		await Promise.all(keys.slice(offset, offset + deleteConcurrency).map((key) =>
-			safeDeleteObject(bucket, key, reason, {
-				...logContext,
-				prefix,
-			}),
-		));
-	}
-	return keys.length;
 }
 
 /* ── Multipart upload operations ──────────────────────── */
@@ -310,8 +271,8 @@ export async function abortMultipartUpload(
 				UploadId: uploadId,
 			}),
 		);
-	} catch (err: any) {
+	} catch (err: unknown) {
 		// Ignore if upload doesn't exist (already completed or aborted)
-		if (err.name !== 'NoSuchUpload') throw err;
+		if (!storageErrorMatches(err, ['NoSuchUpload'])) throw err;
 	}
 }

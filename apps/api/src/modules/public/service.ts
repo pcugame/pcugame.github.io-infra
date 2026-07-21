@@ -1,60 +1,123 @@
 import type {
+	AssetKind,
+	Platform,
+	ProjectStatus,
 	PublicYearItem,
 	PublicYearProjectsResponse,
 	PublicExhibitionProjectsResponse,
 	PublicProjectDetailResponse,
 } from '@pcu/contracts';
-import { env } from '../../config/env.js';
-import { getPresignedUrl } from '../../lib/storage.js';
 import { notFound } from '../../shared/errors.js';
 import { isPosterUrlSafe } from '../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../shared/project-completeness.js';
-import * as repo from './repository.js';
 import { parseWebglEntryKey, webglUrl } from '../webgl/paths.js';
 
+interface PublicPosterRecord {
+	kind: AssetKind;
+	status: string;
+	storageKey: string;
+}
+
+interface PublicProjectListRecord {
+	id: number;
+	slug: string;
+	title: string;
+	summary: string;
+	exhibitionId: number;
+	poster: PublicPosterRecord | null;
+	members: { name: string; studentId: string }[];
+}
+
+interface PublicProjectDetailRecord extends PublicProjectListRecord {
+	description: string;
+	githubUrl?: string;
+	platforms?: Platform[];
+	isIncomplete: boolean;
+	status: ProjectStatus;
+	webglEntryKey?: string;
+	exhibition: { year: number };
+	members: { id: number; name: string; studentId: string }[];
+	assets: {
+		id: number;
+		kind: AssetKind;
+		storageKey: string;
+		playbackStorageKey?: string | null;
+		mimeType: string;
+		playbackMimeType?: string;
+		playbackStatus?: string;
+	}[];
+}
+
+export interface PublicServiceDependencies {
+	apiPublicUrl: string;
+	publicBucket: string;
+	presign(bucket: string, key: string): Promise<string>;
+	repository: {
+		findExhibitionsWithPublishedCounts(): Promise<{
+			id: number;
+			year: number;
+			title: string;
+			posterStorageKey: string | null;
+			_count: { projects: number };
+		}[]>;
+		findExhibitionsByYear(year: number): Promise<{ id: number; year: number; title: string }[]>;
+		findPublishedProjectsInExhibitions(ids: number[]): Promise<PublicProjectListRecord[]>;
+		findExhibitionById(id: number): Promise<{ id: number; year: number; title: string } | null>;
+		findExhibitionPosterByStorageKey(key: string): Promise<{ posterStorageKey: string | null } | null>;
+		findPublishedProjectById(id: number): Promise<PublicProjectDetailRecord | null>;
+		findPublishedProjectBySlug(slug: string, exhibitionIds?: number[]): Promise<PublicProjectDetailRecord | null>;
+	};
+}
+
 /** Build a public asset URL */
-function publicAssetUrl(storageKey: string): string {
-	return `${env().API_PUBLIC_URL}/api/assets/public/${storageKey}`;
+function publicAssetUrl(deps: PublicServiceDependencies, storageKey: string): string {
+	return `${deps.apiPublicUrl}/api/assets/public/${storageKey}`;
 }
 
-function exhibitionPosterUrl(storageKey: string): string {
-	return `${env().API_PUBLIC_URL}/api/public/exhibition-posters/${storageKey}`;
+function exhibitionPosterUrl(deps: PublicServiceDependencies, storageKey: string): string {
+	return `${deps.apiPublicUrl}/api/public/exhibition-posters/${storageKey}`;
 }
 
-function protectedAssetUrl(storageKey: string): string {
-	return `${env().API_PUBLIC_URL}/api/assets/protected/${storageKey}`;
+function protectedAssetUrl(deps: PublicServiceDependencies, storageKey: string): string {
+	return `${deps.apiPublicUrl}/api/assets/protected/${storageKey}`;
 }
 
 /** List all years with published project counts */
-export async function listYears(): Promise<PublicYearItem[]> {
-	const exhibitions = await repo.findExhibitionsWithPublishedCounts();
+export async function listYears(deps: PublicServiceDependencies): Promise<PublicYearItem[]> {
+	const exhibitions = await deps.repository.findExhibitionsWithPublishedCounts();
 	return exhibitions.map((e) => ({
 		id: e.id,
 		year: e.year,
 		title: e.title || undefined,
 		projectCount: e._count.projects,
-		posterUrl: e.posterStorageKey ? exhibitionPosterUrl(e.posterStorageKey) : undefined,
+		posterUrl: e.posterStorageKey ? exhibitionPosterUrl(deps, e.posterStorageKey) : undefined,
 	}));
 }
 
-export async function getExhibitionPosterRedirectUrl(storageKey: string): Promise<string> {
-	const poster = await repo.findExhibitionPosterByStorageKey(storageKey);
+export async function getExhibitionPosterRedirectUrl(
+	deps: PublicServiceDependencies,
+	storageKey: string,
+): Promise<string> {
+	const poster = await deps.repository.findExhibitionPosterByStorageKey(storageKey);
 	if (!poster?.posterStorageKey) throw notFound('Poster not found');
-	return getPresignedUrl(env().S3_BUCKET_PUBLIC, poster.posterStorageKey);
+	return deps.presign(deps.publicBucket, poster.posterStorageKey);
 }
 
 /** List published projects for a given year number (supports multiple exhibitions) */
-export async function listProjectsByYear(yearParam: string): Promise<PublicYearProjectsResponse> {
+export async function listProjectsByYear(
+	deps: PublicServiceDependencies,
+	yearParam: string,
+): Promise<PublicYearProjectsResponse> {
 	const yearNum = parseInt(yearParam, 10);
 	if (isNaN(yearNum)) throw notFound('Year not found');
 
-	const exhibitionRecords = await repo.findExhibitionsByYear(yearNum);
+	const exhibitionRecords = await deps.repository.findExhibitionsByYear(yearNum);
 	if (exhibitionRecords.length === 0) throw notFound('Year not found');
 
 	const exhibitionIds = exhibitionRecords.map((e) => e.id);
 	const exhibitionMap = new Map(exhibitionRecords.map((e) => [e.id, e]));
 
-	const projects = await repo.findPublishedProjectsInExhibitions(exhibitionIds);
+	const projects = await deps.repository.findPublishedProjectsInExhibitions(exhibitionIds);
 
 	const exhibitions = exhibitionRecords.map((e) => ({
 		id: e.id,
@@ -63,12 +126,13 @@ export async function listProjectsByYear(yearParam: string): Promise<PublicYearP
 
 	const items = projects.map((p) => {
 		const ex = exhibitionMap.get(p.exhibitionId);
+		const poster = p.poster;
 		return {
 			id: p.id,
 			slug: p.slug,
 			title: p.title,
 			summary: p.summary || undefined,
-			posterUrl: isPosterUrlSafe(p.poster) ? publicAssetUrl(p.poster!.storageKey) : undefined,
+			posterUrl: poster && isPosterUrlSafe(poster) ? publicAssetUrl(deps, poster.storageKey) : undefined,
 			members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
 			exhibitionId: p.exhibitionId,
 			exhibitionTitle: ex?.title || `${yearNum} 전시`,
@@ -79,25 +143,31 @@ export async function listProjectsByYear(yearParam: string): Promise<PublicYearP
 }
 
 /** List published projects for a single exhibition by ID */
-export async function listProjectsByExhibition(idParam: string): Promise<PublicExhibitionProjectsResponse> {
+export async function listProjectsByExhibition(
+	deps: PublicServiceDependencies,
+	idParam: string,
+): Promise<PublicExhibitionProjectsResponse> {
 	const id = parseInt(idParam, 10);
 	if (isNaN(id)) throw notFound('Exhibition not found');
 
-	const exhibition = await repo.findExhibitionById(id);
+	const exhibition = await deps.repository.findExhibitionById(id);
 	if (!exhibition) throw notFound('Exhibition not found');
 
-	const projects = await repo.findPublishedProjectsInExhibitions([id]);
+	const projects = await deps.repository.findPublishedProjectsInExhibitions([id]);
 
-	const items = projects.map((p) => ({
-		id: p.id,
-		slug: p.slug,
-		title: p.title,
-		summary: p.summary || undefined,
-		posterUrl: isPosterUrlSafe(p.poster) ? publicAssetUrl(p.poster!.storageKey) : undefined,
-		members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
-		exhibitionId: p.exhibitionId,
-		exhibitionTitle: exhibition.title || `${exhibition.year} 전시`,
-	}));
+	const items = projects.map((p) => {
+		const poster = p.poster;
+		return {
+			id: p.id,
+			slug: p.slug,
+			title: p.title,
+			summary: p.summary || undefined,
+			posterUrl: poster && isPosterUrlSafe(poster) ? publicAssetUrl(deps, poster.storageKey) : undefined,
+			members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
+			exhibitionId: p.exhibitionId,
+			exhibitionTitle: exhibition.title || `${exhibition.year} 전시`,
+		};
+	});
 
 	return {
 		exhibition: {
@@ -111,7 +181,11 @@ export async function listProjectsByExhibition(idParam: string): Promise<PublicE
 }
 
 /** Get a single published project by ID or slug */
-export async function getProjectDetail(idOrSlug: string, yearParam?: string): Promise<PublicProjectDetailResponse> {
+export async function getProjectDetail(
+	deps: PublicServiceDependencies,
+	idOrSlug: string,
+	yearParam?: string,
+): Promise<PublicProjectDetailResponse> {
 	const yearNum = yearParam ? parseInt(yearParam, 10) : undefined;
 
 	// Try numeric ID lookup first
@@ -119,16 +193,16 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 	let project = null;
 
 	if (Number.isInteger(numericId) && numericId > 0) {
-		project = await repo.findPublishedProjectById(numericId);
+		project = await deps.repository.findPublishedProjectById(numericId);
 	}
 
 	if (!project) {
 		let exhibitionIds: number[] | undefined;
 		if (yearNum !== undefined && !isNaN(yearNum)) {
-			const exs = await repo.findExhibitionsByYear(yearNum);
+			const exs = await deps.repository.findExhibitionsByYear(yearNum);
 			if (exs.length > 0) exhibitionIds = exs.map((e) => e.id);
 		}
-		project = await repo.findPublishedProjectBySlug(idOrSlug, exhibitionIds);
+		project = await deps.repository.findPublishedProjectBySlug(idOrSlug, exhibitionIds);
 	}
 
 	if (!project) throw notFound('Project not found');
@@ -137,7 +211,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 		.filter((a) => a.kind === 'IMAGE' || a.kind === 'POSTER')
 		.map((a) => ({
 			id: a.id,
-			url: publicAssetUrl(a.storageKey),
+			url: publicAssetUrl(deps, a.storageKey),
 			kind: a.kind as 'IMAGE' | 'POSTER',
 		}));
 
@@ -147,12 +221,13 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 	const videos = project.assets
 		.filter((a) => a.kind === 'VIDEO' && a.playbackStatus === 'READY')
 		.map((videoAsset) => ({
-			url: protectedAssetUrl(videoAsset.playbackStorageKey ?? videoAsset.storageKey),
+			url: protectedAssetUrl(deps, videoAsset.playbackStorageKey ?? videoAsset.storageKey),
 			mimeType: videoAsset.playbackStorageKey
 				? videoAsset.playbackMimeType || 'video/mp4'
 				: videoAsset.mimeType || 'video/mp4',
 		}));
 	const video = videos[0] ?? null;
+	const poster = project.poster;
 
 	return {
 		id: project.id,
@@ -162,7 +237,7 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 		summary: project.summary || undefined,
 		description: project.description || undefined,
 		githubUrl: project.githubUrl || undefined,
-		platforms: project.platforms,
+		platforms: project.platforms ?? [],
 		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, project.poster),
 		video,
 		videos,
@@ -172,13 +247,25 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 			studentId: m.studentId,
 		})),
 		images,
-		posterUrl: isPosterUrlSafe(project.poster) ? publicAssetUrl(project.poster!.storageKey) : undefined,
+		posterUrl: poster && isPosterUrlSafe(poster) ? publicAssetUrl(deps, poster.storageKey) : undefined,
 		gameDownloadUrl: gameAsset
-			? protectedAssetUrl(gameAsset.storageKey)
+			? protectedAssetUrl(deps, gameAsset.storageKey)
 			: undefined,
-		webglUrl: parseWebglEntryKey(project.id, project.webglEntryKey)
-			? webglUrl(env().API_PUBLIC_URL, project.id)
+		webglUrl: project.webglEntryKey && parseWebglEntryKey(project.id, project.webglEntryKey)
+			? webglUrl(deps.apiPublicUrl, project.id)
 			: undefined,
-		status: project.status as 'PUBLISHED' | 'ARCHIVED',
+		status: project.status,
+	};
+}
+
+export function createPublicService(deps: PublicServiceDependencies) {
+	return {
+		listYears: () => listYears(deps),
+		getExhibitionPosterRedirectUrl: (storageKey: string) => (
+			getExhibitionPosterRedirectUrl(deps, storageKey)
+		),
+		listProjectsByYear: (year: string) => listProjectsByYear(deps, year),
+		listProjectsByExhibition: (id: string) => listProjectsByExhibition(deps, id),
+		getProjectDetail: (idOrSlug: string, year?: string) => getProjectDetail(deps, idOrSlug, year),
 	};
 }

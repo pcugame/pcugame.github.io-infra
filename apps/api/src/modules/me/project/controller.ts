@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { env } from '../../../config/env.js';
 import { requireLogin } from '../../../plugins/auth.js';
 import { sendCreated } from '../../../shared/http.js';
-import * as projectService from '../../admin/project/service.js';
+import { submitProject } from '../../admin/project/project-submit.runtime.js';
 
 /** Register current-user project submission routes. */
 export async function meProjectController(app: FastifyInstance): Promise<void> {
@@ -23,7 +23,10 @@ export async function meProjectController(app: FastifyInstance): Promise<void> {
 			config: submitRouteConfig,
 		},
 		async (request, reply) => {
-			const result = await projectService.submitProject(request as any, { audience: 'user' });
+			const result = await submitProject(
+				{ actor: request.currentUser!, parts: request.parts() },
+				{ audience: 'user' },
+			);
 			sendCreated(reply, result);
 		},
 	);

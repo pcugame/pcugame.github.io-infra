@@ -36,7 +36,12 @@ describe('public WebGL hosting route', () => {
 	beforeAll(async () => {
 		app = Fastify();
 		await registerHelmet(app);
-		await registerCors(app);
+		await registerCors(app, {
+			...defaultTestEnv,
+			LOG_LEVEL: 'info',
+			GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS],
+			CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS],
+		});
 		await app.register(publicController, { prefix: '/api/public' });
 		await app.ready();
 	});

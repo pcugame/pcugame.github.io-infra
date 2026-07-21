@@ -2,7 +2,45 @@ import { z } from 'zod';
 import { toSlug } from '../../../shared/slug.js';
 import { badRequest } from '../../../shared/errors.js';
 import type { ImportExecuteResult, ImportPreviewResult } from '@pcu/contracts';
-import * as repo from './repository.js';
+
+export interface ImportExhibitionRecord {
+	id: number;
+	_count?: { projects: number };
+}
+
+export interface ImportProjectCreate {
+	exhibitionId: number;
+	slug: string;
+	title: string;
+	summary: string;
+	description: string;
+	isIncomplete: boolean;
+	status: 'PUBLISHED' | 'ARCHIVED';
+	githubUrl: string;
+	platforms: ('PC' | 'MOBILE' | 'WEB')[];
+	creatorId: number;
+	members: Array<{ name: string; studentId: string; sortOrder: number }>;
+}
+
+export interface ImportTransactionRepository {
+	findExhibitionByComposite(year: number, title: string): Promise<ImportExhibitionRecord | null>;
+	upsertExhibition(data: {
+		year: number;
+		title: string;
+		isUploadEnabled?: boolean;
+	}): Promise<{ id: number }>;
+	findProjectBySlug(exhibitionId: number, slug: string): Promise<{ id: number } | null>;
+	createProjectWithMembers(data: ImportProjectCreate): Promise<unknown>;
+}
+
+export interface ImportRepository {
+	findExhibitionForPreview(year: number, title: string): Promise<ImportExhibitionRecord | null>;
+	runTransaction<T>(work: (repository: ImportTransactionRepository) => Promise<T>): Promise<T>;
+}
+
+export interface ImportServiceDependencies {
+	repository: ImportRepository;
+}
 
 // ── JSON 스키마 정의 ─────────────────────────────────────────
 
@@ -42,7 +80,10 @@ export type ImportData = z.infer<typeof ImportDataSchema>;
 
 export type PreviewResult = ImportPreviewResult;
 
-export async function previewImport(raw: string): Promise<PreviewResult> {
+export async function previewImport(
+	deps: ImportServiceDependencies,
+	raw: string,
+): Promise<PreviewResult> {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw);
@@ -78,17 +119,12 @@ export async function previewImport(raw: string): Promise<PreviewResult> {
 	const exhibitions: PreviewResult['exhibitions'] = [];
 	for (const { year, title } of yearSet.values()) {
 		const resolvedTitle = title || `${year} 졸업작품전`;
-		const existing = await repo.findExhibitionByComposite(
-			// preview는 트랜잭션 밖에서 실행 — prisma 직접 사용
-			(await import('../../../lib/prisma.js')).prisma,
-			year,
-			resolvedTitle,
-		);
+		const existing = await deps.repository.findExhibitionForPreview(year, resolvedTitle);
 		exhibitions.push({
 			year,
 			title: resolvedTitle,
 			isNew: !existing,
-			existingProjectCount: existing?._count.projects ?? 0,
+			existingProjectCount: existing?._count?.projects ?? 0,
 		});
 	}
 
@@ -104,7 +140,11 @@ export async function previewImport(raw: string): Promise<PreviewResult> {
 
 export type ImportResult = ImportExecuteResult;
 
-export async function executeImport(raw: string, creatorId: number): Promise<ImportResult> {
+export async function executeImport(
+	deps: ImportServiceDependencies,
+	raw: string,
+	creatorId: number,
+): Promise<ImportResult> {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw);
@@ -122,7 +162,7 @@ export async function executeImport(raw: string, creatorId: number): Promise<Imp
 
 	const data = result.data;
 
-	return repo.runTransaction(async (tx) => {
+	return deps.repository.runTransaction(async (repository) => {
 		const exhibitionMap = new Map<string, number>(); // "year::title" -> id
 		let exhibitionsCreated = 0;
 		let exhibitionsExisting = 0;
@@ -130,12 +170,12 @@ export async function executeImport(raw: string, creatorId: number): Promise<Imp
 		// 1. 전시회 생성/재활용
 		for (const y of data.years) {
 			const title = y.title || `${y.year} 졸업작품전`;
-			const existing = await repo.findExhibitionByComposite(tx, y.year, title);
+			const existing = await repository.findExhibitionByComposite(y.year, title);
 			if (existing) {
 				exhibitionMap.set(`${y.year}::${title}`, existing.id);
 				exhibitionsExisting++;
 			} else {
-				const created = await repo.upsertExhibition(tx, {
+				const created = await repository.upsertExhibition({
 					year: y.year,
 					title,
 					isUploadEnabled: y.isUploadEnabled,
@@ -150,12 +190,12 @@ export async function executeImport(raw: string, creatorId: number): Promise<Imp
 			const matchingKey = [...exhibitionMap.keys()].find(k => k.startsWith(`${p.year}::`));
 			if (!matchingKey) {
 				const defaultTitle = `${p.year} 졸업작품전`;
-				const existing = await repo.findExhibitionByComposite(tx, p.year, defaultTitle);
+				const existing = await repository.findExhibitionByComposite(p.year, defaultTitle);
 				if (existing) {
 					exhibitionMap.set(`${p.year}::${defaultTitle}`, existing.id);
 					exhibitionsExisting++;
 				} else {
-					const created = await repo.upsertExhibition(tx, {
+					const created = await repository.upsertExhibition({
 						year: p.year,
 						title: defaultTitle,
 					});
@@ -177,12 +217,12 @@ export async function executeImport(raw: string, creatorId: number): Promise<Imp
 			const baseSlug = p.slug || toSlug(p.title);
 			let slug = baseSlug;
 			let attempt = 0;
-			while (await repo.findProjectBySlug(tx, exhibitionId, slug)) {
+			while (await repository.findProjectBySlug(exhibitionId, slug)) {
 				attempt++;
 				slug = `${baseSlug}-${attempt}`;
 			}
 
-			await repo.createProjectWithMembers(tx, {
+			await repository.createProjectWithMembers({
 				exhibitionId,
 				slug,
 				title: p.title,
@@ -207,4 +247,11 @@ export async function executeImport(raw: string, creatorId: number): Promise<Imp
 			projects: { created: projectsCreated },
 		};
 	});
+}
+
+export function createImportService(deps: ImportServiceDependencies) {
+	return {
+		previewImport: (raw: string) => previewImport(deps, raw),
+		executeImport: (raw: string, creatorId: number) => executeImport(deps, raw, creatorId),
+	};
 }

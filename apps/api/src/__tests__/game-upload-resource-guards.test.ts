@@ -49,8 +49,8 @@ vi.mock('../lib/storage.js', () => ({
 	abortMultipartUpload: mocks.abortMultipartUpload,
 	headObject: mocks.headObject,
 	readObjectRange: mocks.readObjectRange,
-	safeDeleteObject: mocks.safeDeleteObject,
 }));
+vi.mock('../object-deletion.js', () => ({ safeDeleteObject: mocks.safeDeleteObject }));
 
 vi.mock('../shared/site-settings.js', () => ({
 	getSiteSettings: mocks.getSiteSettings,
@@ -66,11 +66,13 @@ vi.mock('../lib/lifecycle.js', () => ({
 
 import {
 	chunkUploadBodyLimitBytes,
-	createSession,
 	resolveChunkSizeBytes,
-	uploadChunk,
 } from '../modules/admin/game-upload/service.js';
+import { ActiveUploadCompletionInProgressError } from '../modules/admin/game-upload/ports.js';
+import { gameUploadService } from '../modules/admin/game-upload/runtime.js';
 import { _resetActiveUploads, activeUploadCount } from '../shared/upload-limits.js';
+
+const { createSession, uploadChunk } = gameUploadService;
 
 function pendingSession() {
 	return {
@@ -179,6 +181,33 @@ describe('game upload resource guards', () => {
 		expect(webglData.uploadKind).toBe('WEBGL');
 		expect(webglData.s3Key).toMatch(/^webgl\/7\/[0-9a-f-]+\/source\.zip$/);
 		expect(gameData.s3Key).not.toBe(webglData.s3Key);
+	});
+
+	it('aborts a new multipart upload instead of replacing a completing session', async () => {
+		mocks.findExhibitionById.mockResolvedValue({
+			id: 1,
+			year: 2026,
+			title: '',
+			isUploadEnabled: true,
+		});
+		mocks.getSiteSettings.mockResolvedValue({ maxGameFileMb: 5120, maxChunkSizeMb: 10 });
+		mocks.createMultipartUpload.mockResolvedValue('new-multipart');
+		mocks.abortMultipartUpload.mockResolvedValue(undefined);
+		mocks.createSessionReplacingActive.mockRejectedValue(
+			new ActiveUploadCompletionInProgressError(),
+		);
+
+		await expect(createSession(7, 1, { id: 11, role: 'USER' }, {
+			originalName: 'replacement.zip',
+			totalBytes: 1024,
+		})).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
+
+		expect(mocks.abortMultipartUpload).toHaveBeenCalledOnce();
+		expect(mocks.abortMultipartUpload).toHaveBeenCalledWith(
+			'pcu-protected',
+			expect.any(String),
+			'new-multipart',
+		);
 	});
 
 	it('rejects chunk uploads above configured concurrency', async () => {

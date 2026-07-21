@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import fastifyRateLimit, { type RateLimitPluginOptions } from '@fastify/rate-limit';
-import { env } from '../config/env.js';
+import type { Env } from '../config/env.js';
 import type { ApiError } from '../shared/http.js';
 
 /**
@@ -20,8 +20,7 @@ import type { ApiError } from '../shared/http.js';
  * `keyGenerator` uses `request.ip`, which respects the app's `trustProxy` setting,
  * so X-Forwarded-For behaves correctly in reverse-proxied production deployments.
  */
-export async function registerRateLimit(app: FastifyInstance): Promise<void> {
-	const cfg = env();
+export async function registerRateLimit(app: FastifyInstance, cfg: Env): Promise<void> {
 
 	await app.register(fastifyRateLimit, {
 		global: true,
@@ -47,6 +46,6 @@ export async function registerRateLimit(app: FastifyInstance): Promise<void> {
 				},
 			};
 			return body;
-		}) as NonNullable<RateLimitPluginOptions['errorResponseBuilder']>,
+		}),
 	});
 }

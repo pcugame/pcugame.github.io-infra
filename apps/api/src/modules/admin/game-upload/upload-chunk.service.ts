@@ -1,23 +1,21 @@
 import type { GameUploadChunkResponse } from '@pcu/contracts';
-import { env } from '../../../config/env.js';
-import { uploadPart } from '../../../lib/storage.js';
 import { AppError, badRequest } from '../../../shared/errors.js';
-import { acquireUploadSlot, releaseUploadSlot } from '../../../shared/upload-limits.js';
 import { createCountedChunkStream } from './chunk-stream.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
-import * as repo from './repository.js';
+import type { GameUploadServiceDependencies } from './ports.js';
 
 /** Upload one chunk as an S3 multipart part */
 export async function uploadChunk(
+	deps: GameUploadServiceDependencies,
 	sessionId: string,
 	chunkIndex: number,
 	body: NodeJS.ReadableStream,
 	user: { id: number; role: string },
 ): Promise<GameUploadChunkResponse> {
-	acquireUploadSlot();
+	deps.uploadSlots.acquire();
 	try {
-		const session = await loadSession(sessionId, user.id, user.role);
+		const session = await loadSession(deps, sessionId, user.id, user.role);
 
 		if (session.status !== 'PENDING') {
 			throw badRequest(`Cannot upload chunks: session is ${session.status}`);
@@ -37,14 +35,12 @@ export async function uploadChunk(
 			? Number(session.totalBytes) - chunkIndex * session.chunkSizeBytes
 			: session.chunkSizeBytes;
 
-		const cfg = env();
 		const partNumber = chunkIndex + 1;
 		const countedBody = createCountedChunkStream(body, chunkIndex, expectedSize);
 
 		let etag: string;
 		try {
-			etag = await uploadPart(
-				cfg.S3_BUCKET_PROTECTED,
+			etag = await deps.storage.uploadPart(
 				session.s3Key,
 				session.s3UploadId,
 				partNumber,
@@ -60,7 +56,7 @@ export async function uploadChunk(
 			throw badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${bytesWritten}`);
 		}
 
-		const parts = await repo.upsertPartEtag(session.id, partNumber, etag);
+		const parts = await deps.repository.upsertPartEtag(session.id, partNumber, etag);
 
 		return {
 			index: chunkIndex,
@@ -69,6 +65,6 @@ export async function uploadChunk(
 			totalChunks: session.totalChunks,
 		};
 	} finally {
-		releaseUploadSlot();
+		deps.uploadSlots.release();
 	}
 }
