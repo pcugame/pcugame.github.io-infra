@@ -5,6 +5,21 @@ import type { AppLogger } from '../application/ports.js';
 
 let _root: pino.Logger | undefined;
 
+export interface LoggerConfig {
+	LOG_LEVEL: string;
+	NODE_ENV: string;
+}
+
+/** Create an isolated root logger for a BackendContext from explicit config. */
+export function createRootLogger(config: LoggerConfig): AppLogger {
+	return pino({
+		level: config.LOG_LEVEL,
+		...(config.NODE_ENV === 'development'
+			? { transport: { target: 'pino-pretty', options: { colorize: true } } }
+			: {}),
+	});
+}
+
 /**
  * The process-wide root logger. Call this only when you specifically need to bypass
  * the per-request child logger — typically at boot/shutdown (`server.ts`) or from
@@ -13,13 +28,7 @@ let _root: pino.Logger | undefined;
  */
 export function rootLogger(): AppLogger {
 	if (!_root) {
-		const e = env();
-		_root = pino({
-			level: e.LOG_LEVEL,
-			...(e.NODE_ENV === 'development'
-				? { transport: { target: 'pino-pretty', options: { colorize: true } } }
-				: {}),
-		});
+		_root = createRootLogger(env()) as pino.Logger;
 	}
 	return _root;
 }

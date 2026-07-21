@@ -123,8 +123,27 @@ export async function buildApp(options: BuildAppOptions = {}) {
 	// Keep production wiring out of tests that supply a fake context. Besides
 	// reducing import-time side effects, this makes the composition seam real:
 	// no Prisma/S3/OAuth adapter is loaded unless the production default is used.
-	const context = options.context ?? (await import('./backend-context.js'))
-		.createProductionBackendContext();
+	const context = options.context ?? await (async () => {
+		const [{ env }, { createProductionBackendContext }] = await Promise.all([
+			import('./config/env.js'),
+			import('./backend-context.js'),
+		]);
+		return createProductionBackendContext(env());
+	})();
+	let partialApp: FastifyInstance | undefined;
+	try {
+		return await buildAppWithContext(context, (app) => { partialApp = app; });
+	} catch (error) {
+		await partialApp?.close().catch(() => undefined);
+		await context.close().catch(() => undefined);
+		throw error;
+	}
+}
+
+async function buildAppWithContext(
+	context: BackendContext,
+	onCreated: (app: FastifyInstance) => void,
+) {
 	const cfg = context.config;
 	const app = Fastify({
 		logger: false,
@@ -134,6 +153,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
 		// log correlation across multiple instances behind a load balancer.
 		genReqId: () => context.ids.next(),
 	});
+	onCreated(app);
 
 	// Route schemas use the shared Zod contracts. Compilers are installed once at
 	// the HTTP composition boundary instead of being hidden in feature modules.
@@ -150,15 +170,7 @@ export async function buildApp(options: BuildAppOptions = {}) {
 		context.lifecycle.requestFinished();
 	});
 	app.addHook('onClose', async () => {
-		let firstError: unknown;
-		for (const resource of [...context.shutdownResources].reverse()) {
-			try {
-				await resource.close();
-			} catch (error) {
-				firstError ??= error;
-			}
-		}
-		if (firstError !== undefined) throw firstError;
+		await context.close();
 	});
 
 	// Seed the AsyncLocalStorage request context. `enterWith` mutates the current

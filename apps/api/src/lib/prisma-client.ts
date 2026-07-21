@@ -14,9 +14,7 @@ function schemaFromDatabaseUrl(url: string): string | undefined {
   }
 }
 
-function createPrismaAdapter(): PrismaPg {
-  const databaseUrl = process.env['DATABASE_URL'] ?? '';
-
+function createPrismaAdapter(databaseUrl: string): PrismaPg {
   return new PrismaPg(
     {
       connectionString: databaseUrl,
@@ -30,8 +28,20 @@ function createPrismaAdapter(): PrismaPg {
 export function createPrismaClient(
   options?: PrismaClientOptions,
 ): PrismaClient {
+  return createPrismaClientForDatabase(process.env['DATABASE_URL'] ?? '', options);
+}
+
+/**
+ * Production composition entry point. Unlike the compatibility helper above,
+ * this never consults process.env and therefore cannot silently connect a
+ * context to a different database than the config it was built with.
+ */
+export function createPrismaClientForDatabase(
+  databaseUrl: string,
+  options?: PrismaClientOptions,
+): PrismaClient {
   return new PrismaClient({
     ...options,
-    adapter: createPrismaAdapter(),
+    adapter: createPrismaAdapter(databaseUrl),
   });
 }

@@ -5,6 +5,8 @@ import type { BackendContext } from '../backend-context.js';
 import type { Env } from '../config/env.js';
 import { buildApp } from '../app.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
+import { createExportProgressStore } from '../modules/admin/export/service.js';
 
 function testConfig(): Env {
 	return {
@@ -44,6 +46,8 @@ function createTestContext(): {
 		app.post('/auth/google', async () => ({ ok: true }));
 		app.get('/session-user', async (request) => ({ user: request.currentUser ?? null }));
 	};
+	let closePromise: Promise<void> | undefined;
+	let startPromise: Promise<void> | undefined;
 
 	return {
 		context: {
@@ -75,8 +79,12 @@ function createTestContext(): {
 				createWriteStream: () => new Writable({ write(_chunk, _encoding, done) { done(); } }),
 			},
 			googleTokens: { verify: async () => undefined },
-			scheduler: { every: () => ({ cancel: () => {} }) },
+			scheduler: {
+				every: () => ({ cancel: () => {} }),
+				delay: async () => {},
+			},
 			uploadLimiter: { acquire: () => {}, release: () => {} },
+			protectedDownloads: createProtectedDownloadLimiter(),
 			settings: {
 				get: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
 				update: async (value) => ({
@@ -94,7 +102,8 @@ function createTestContext(): {
 				inFlight: () => inFlight,
 				waitForDrain: async () => 'drained',
 			},
-			databaseHealth: { check: async () => true, close: async () => {} },
+			exportProgress: createExportProgressStore(),
+			databaseHealth: { check: async () => true },
 			authSessions: {
 				find: authSessionFind,
 				touch: authSessionTouch,
@@ -105,7 +114,6 @@ function createTestContext(): {
 				purgeExpiredSessions: async () => 0,
 				reapOrphans: async () => {},
 			},
-			shutdownResources: [{ start: resourceStart, close: resourceClose }],
 			routes: {
 				auth: authRoutes,
 				devAuth: emptyRoutes,
@@ -113,6 +121,15 @@ function createTestContext(): {
 				admin: emptyRoutes,
 				me: emptyRoutes,
 				assets: emptyRoutes,
+			},
+			resourceOwnership: [{ name: 'test-resource', ownership: 'owned' }],
+			start: () => {
+				startPromise ??= Promise.resolve().then(() => resourceStart());
+				return startPromise;
+			},
+			close: () => {
+				closePromise ??= Promise.resolve().then(() => resourceClose());
+				return closePromise;
 			},
 		},
 		storageHead,
@@ -207,5 +224,16 @@ describe('BackendContext composition', () => {
 		} finally {
 			await app.close();
 		}
+	});
+
+	it('closes the partial Fastify app and context once when route registration fails', async () => {
+		const { context, resourceClose } = createTestContext();
+		const original = new Error('route registration failed');
+		context.routes.assets = async () => { throw original; };
+
+		await expect(buildApp({ context })).rejects.toBe(original);
+		expect(resourceClose).toHaveBeenCalledOnce();
+		await context.close();
+		expect(resourceClose).toHaveBeenCalledOnce();
 	});
 });

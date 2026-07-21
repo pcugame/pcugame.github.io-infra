@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
+import type { S3Client } from '@aws-sdk/client-s3';
+import type { PrismaClient } from './generated/prisma/client.js';
 import type { Env } from './config/env.js';
-import { env } from './config/env.js';
-import { rootLogger } from './lib/logger.js';
 import type {
 	Clock,
 	AuthSessionStore,
@@ -15,32 +15,35 @@ import type {
 	ObjectStorage,
 	Scheduler,
 	SettingsStore,
-	ShutdownResource,
 	UploadLimiter,
 } from './application/ports.js';
 import {
-	cachedSettingsStore,
+	createCryptoIdGenerator,
 	createGoogleTokenVerifier,
-	cryptoIdGenerator,
-	nodeFileSystem,
-	nodeScheduler,
-	objectStorage,
-	prismaHealth,
-	processLifecycle,
-	processUploadLimiter,
-	prismaAuthSessions,
-	systemClock,
+	createLifecyclePort,
+	createNodeFileSystem,
+	createNodeScheduler,
+	createPrismaAuthSessions,
+	createPrismaHealth,
+	createPrismaSettingsStore,
+	createProcessUploadLimiter,
+	createSystemClock,
 } from './infrastructure/production-ports.js';
-import { prisma } from './lib/prisma.js';
-import { authController } from './modules/auth/index.js';
-import { devAuthController } from './modules/dev-auth/controller.js';
-import { publicController } from './modules/public/index.js';
-import { adminRoutes } from './modules/admin/admin.routes.js';
-import { meRoutes } from './modules/me/me.routes.js';
-import { assetsController } from './modules/assets/index.js';
-import { protectedDownloadLimiter } from './shared/protected-download-limiter.js';
-import { orphanService } from './modules/orphan/runtime.js';
-import { gameUploadService } from './modules/admin/game-upload/runtime.js';
+import { createPrismaClientForDatabase } from './lib/prisma-client.js';
+import { createS3Client } from './lib/s3.js';
+import { createObjectStorage } from './lib/storage.js';
+import { createRootLogger } from './lib/logger.js';
+import {
+	createProtectedDownloadLimiter,
+	protectedDownloadLimiter,
+} from './shared/protected-download-limiter.js';
+import type { DownloadRateLimiter } from './shared/download-rate-limit.js';
+import {
+	createExportProgressStore,
+	type ExportProgressStore,
+} from './modules/admin/export/service.js';
+import { createOrphanRepository } from './modules/orphan/repository.js';
+import { createOrphanService } from './modules/orphan/service.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -51,10 +54,95 @@ export interface BackendRoutes {
 	assets: FastifyPluginAsync;
 }
 
+export type ResourceOwnership = 'owned' | 'borrowed';
+
 /**
- * Explicit application composition boundary. Tests can replace any external
- * system without module mocking; production construction lives in one place.
+ * An externally supplied resource must declare who owns its lifetime. Borrowed
+ * resources are observable through the context but are never started or closed
+ * by it; owned resources join the same reverse-order lifecycle as factory output.
  */
+export type ResourceLease<T> =
+	| {
+		value: T;
+		ownership: 'borrowed';
+	}
+	| {
+		value: T;
+		ownership: 'owned';
+		start?: () => void | Promise<void>;
+		close: () => void | Promise<void>;
+	};
+
+export interface BackendResourceOwnership {
+	name: string;
+	ownership: ResourceOwnership;
+}
+
+interface RegisteredResource extends BackendResourceOwnership {
+	start?: () => void | Promise<void>;
+	close?: () => void | Promise<void>;
+}
+
+class BackendResourceOwner {
+	private readonly registered: RegisteredResource[] = [];
+	private closingRequested = false;
+	private startWork: Promise<void> | undefined;
+	private startPromise: Promise<void> | undefined;
+	private closePromise: Promise<void> | undefined;
+
+	register<T>(name: string, lease: ResourceLease<T>): T {
+		if (this.startPromise || this.closePromise) {
+			throw new Error(`Cannot register ${name} after the BackendContext lifecycle began`);
+		}
+		this.registered.push({
+			name,
+			ownership: lease.ownership,
+			start: lease.ownership === 'owned' ? lease.start : undefined,
+			close: lease.ownership === 'owned' ? lease.close : undefined,
+		});
+		return lease.value;
+	}
+
+	ownership(): readonly BackendResourceOwnership[] {
+		return this.registered.map(({ name, ownership }) => ({ name, ownership }));
+	}
+
+	start(): Promise<void> {
+		if (this.closePromise) return Promise.reject(new Error('BackendContext is closed'));
+		this.startWork ??= (async () => {
+			for (const resource of this.registered) {
+				if (this.closingRequested) throw new Error('BackendContext start aborted by close');
+				if (resource.ownership === 'owned') await resource.start?.();
+				if (this.closingRequested) throw new Error('BackendContext start aborted by close');
+			}
+		})();
+		this.startPromise ??= this.startWork.catch(async (error) => {
+			await this.close().catch(() => undefined);
+			throw error;
+		});
+		return this.startPromise;
+	}
+
+	close(): Promise<void> {
+		this.closingRequested = true;
+		this.closePromise ??= (async () => {
+			await this.startWork?.catch(() => undefined);
+			let firstError: unknown;
+			for (const resource of [...this.registered].reverse()) {
+				if (resource.ownership !== 'owned') continue;
+				try {
+					await resource.close?.();
+				} catch (error) {
+					firstError ??= error;
+				}
+			}
+			if (firstError !== undefined) throw firstError;
+		})();
+		return this.closePromise;
+	}
+}
+
+/** Explicit application composition and resource lifetime boundary. */
 export interface BackendContext {
 	config: Env;
 	clock: Clock;
@@ -65,32 +153,237 @@ export interface BackendContext {
 	googleTokens: GoogleTokenVerifier;
 	scheduler: Scheduler;
 	uploadLimiter: UploadLimiter;
+	protectedDownloads: DownloadRateLimiter;
 	settings: SettingsStore;
+	exportProgress: ExportProgressStore;
 	lifecycle: Lifecycle;
 	databaseHealth: DatabaseHealth;
 	authSessions: AuthSessionStore;
 	maintenance: BackgroundMaintenance;
-	shutdownResources: readonly ShutdownResource[];
 	routes: BackendRoutes;
+	resourceOwnership: readonly BackendResourceOwnership[];
+	start(): Promise<void>;
+	close(): Promise<void>;
 }
 
-export function createProductionBackendContext(config: Env = env()): BackendContext {
+type MaybePromise<T> = T | Promise<T>;
+
+export interface ProductionResourceFactories {
+	logger(config: Env): MaybePromise<AppLogger>;
+	clock(config: Env): MaybePromise<Clock>;
+	ids(config: Env): MaybePromise<IdGenerator>;
+	scheduler(config: Env): MaybePromise<Scheduler>;
+	fileSystem(config: Env): MaybePromise<FileSystem>;
+	googleTokens(config: Env): MaybePromise<GoogleTokenVerifier>;
+	prisma(config: Env): MaybePromise<PrismaClient>;
+	s3(config: Env): MaybePromise<S3Client>;
+	storage(client: S3Client, config: Env): MaybePromise<ObjectStorage>;
+	settings(client: PrismaClient, logger: AppLogger, config: Env): MaybePromise<SettingsStore & { close(): void }>;
+	uploadLimiter(config: Env): MaybePromise<UploadLimiter & { close(): void }>;
+	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
+	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
+	exportProgress(config: Env): MaybePromise<ExportProgressStore>;
+	routes(config: Env): MaybePromise<BackendRoutes>;
+}
+
+export interface ProductionResourceOverrides {
+	logger: ResourceLease<AppLogger>;
+	clock: ResourceLease<Clock>;
+	ids: ResourceLease<IdGenerator>;
+	scheduler: ResourceLease<Scheduler>;
+	fileSystem: ResourceLease<FileSystem>;
+	googleTokens: ResourceLease<GoogleTokenVerifier>;
+	prisma: ResourceLease<PrismaClient>;
+	s3: ResourceLease<S3Client>;
+	storage: ResourceLease<ObjectStorage>;
+	settings: ResourceLease<SettingsStore>;
+	uploadLimiter: ResourceLease<UploadLimiter>;
+	lifecycle: ResourceLease<Lifecycle>;
+	protectedDownloads: ResourceLease<DownloadRateLimiter>;
+	exportProgress: ResourceLease<ExportProgressStore>;
+}
+
+export interface CreateProductionBackendContextOptions {
+	/** Construction hooks are test seams; their output is owned by the context. */
+	factories?: Partial<ProductionResourceFactories>;
+	/** Supplied live resources must state whether the context owns them. */
+	resources?: Partial<ProductionResourceOverrides>;
+	routes?: BackendRoutes;
+}
+
+const defaultFactories: ProductionResourceFactories = {
+	logger: (config) => createRootLogger(config),
+	clock: () => createSystemClock(),
+	ids: () => createCryptoIdGenerator(),
+	scheduler: () => createNodeScheduler(),
+	fileSystem: () => createNodeFileSystem(),
+	googleTokens: () => createGoogleTokenVerifier(),
+	prisma: (config) => createPrismaClientForDatabase(config.DATABASE_URL, {
+		log: config.NODE_ENV === 'development'
+			? [
+				{ emit: 'event', level: 'query' },
+				{ emit: 'stdout', level: 'error' },
+			]
+			: [{ emit: 'stdout', level: 'error' }],
+	}),
+	s3: (config) => createS3Client(config),
+	storage: (client, config) => createObjectStorage(client, {
+		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
+	}),
+	settings: (client, logger) => createPrismaSettingsStore(client, logger),
+	uploadLimiter: (config) => createProcessUploadLimiter(config.UPLOAD_MAX_CONCURRENT),
+	lifecycle: (clock, scheduler) => createLifecyclePort(clock, scheduler),
+	protectedDownloads: (clock, scheduler) => createProtectedDownloadLimiter({ clock, scheduler }),
+	exportProgress: () => createExportProgressStore(),
+	routes: loadProductionRoutes,
+};
+
+async function loadProductionRoutes(): Promise<BackendRoutes> {
+	const [auth, devAuth, publicRoutes, admin, me, assets] = await Promise.all([
+		import('./modules/auth/index.js'),
+		import('./modules/dev-auth/controller.js'),
+		import('./modules/public/index.js'),
+		import('./modules/admin/admin.routes.js'),
+		import('./modules/me/me.routes.js'),
+		import('./modules/assets/index.js'),
+	]);
 	return {
-		config,
-		clock: systemClock,
-		logger: rootLogger(),
-		ids: cryptoIdGenerator,
-		storage: objectStorage,
-		fileSystem: nodeFileSystem,
-		googleTokens: createGoogleTokenVerifier(),
-		scheduler: nodeScheduler,
-		uploadLimiter: processUploadLimiter,
-		settings: cachedSettingsStore,
-		lifecycle: processLifecycle,
-		databaseHealth: prismaHealth,
-		authSessions: prismaAuthSessions,
-		maintenance: {
+		auth: auth.authController,
+		devAuth: devAuth.devAuthController,
+		public: publicRoutes.publicController,
+		admin: admin.adminRoutes,
+		me: me.meRoutes,
+		assets: assets.assetsController,
+	};
+}
+
+function owned<T>(value: T, close?: () => void | Promise<void>, start?: () => void | Promise<void>): ResourceLease<T> {
+	return { value, ownership: 'owned', close: close ?? (() => {}), start };
+}
+
+function createMaintenanceSchedule(
+	scheduler: Scheduler,
+	clock: Clock,
+	maintenance: BackgroundMaintenance,
+	logger: AppLogger,
+): { start(): void; close(): void } {
+	const tasks: Array<{ cancel(): void }> = [];
+	let started = false;
+	let closed = false;
+	return {
+		start() {
+			if (started) return;
+			if (closed) throw new Error('Maintenance schedule is closed');
+			started = true;
+			tasks.push(scheduler.every(60 * 60 * 1000, async () => {
+				try {
+					const count = await maintenance.purgeExpiredSessions(clock.now());
+					if (count > 0) logger.info({ count }, 'Purged expired sessions');
+				} catch (error) {
+					logger.error(error, 'Failed to purge expired sessions');
+				}
+			}));
+			tasks.push(scheduler.every(10 * 60 * 1000, async () => {
+				try {
+					await maintenance.reapOrphans();
+				} catch (error) {
+					logger.error(error, 'Orphan reaper iteration crashed');
+				}
+			}));
+		},
+		close() {
+			if (closed) return;
+			closed = true;
+			for (const task of [...tasks].reverse()) task.cancel();
+			tasks.length = 0;
+		},
+	};
+}
+
+/**
+ * Build one production resource graph from explicit config. No DB/S3 operation,
+ * timer, maintenance task, or signal listener starts until context.start().
+ */
+export async function createProductionBackendContext(
+	config: Env,
+	options: CreateProductionBackendContextOptions = {},
+): Promise<BackendContext> {
+	const owner = new BackendResourceOwner();
+	const factories = { ...defaultFactories, ...options.factories };
+	const supplied = options.resources ?? {};
+
+	async function resource<T>(
+		name: keyof ProductionResourceOverrides,
+		create: () => MaybePromise<T>,
+		close?: (value: T) => void | Promise<void>,
+		start?: (value: T) => void | Promise<void>,
+	): Promise<T> {
+		const external = supplied[name] as ResourceLease<T> | undefined;
+		if (external) return owner.register(name, external);
+		const value = await create();
+		return owner.register(name, owned(
+			value,
+			close ? () => close(value) : undefined,
+			start ? () => start(value) : undefined,
+		));
+	}
+
+	try {
+		const logger = await resource('logger', () => factories.logger(config));
+		const clock = await resource('clock', () => factories.clock(config));
+		const ids = await resource('ids', () => factories.ids(config));
+		const scheduler = await resource('scheduler', () => factories.scheduler(config));
+		const fileSystem = await resource('fileSystem', () => factories.fileSystem(config));
+		const googleTokens = await resource('googleTokens', () => factories.googleTokens(config));
+		const prisma = await resource(
+			'prisma',
+			() => factories.prisma(config),
+			(client) => client.$disconnect(),
+		);
+		const s3 = await resource('s3', () => factories.s3(config), (client) => client.destroy());
+		const storage = await resource('storage', () => factories.storage(s3, config));
+		const settings = await resource(
+			'settings',
+			() => factories.settings(prisma, logger, config),
+			(store) => 'close' in store && typeof store.close === 'function' ? store.close() : undefined,
+		);
+		const uploadLimiter = await resource(
+			'uploadLimiter',
+			() => factories.uploadLimiter(config),
+			(limiter) => 'close' in limiter && typeof limiter.close === 'function' ? limiter.close() : undefined,
+		);
+		const lifecycle = await resource(
+			'lifecycle',
+			() => factories.lifecycle(clock, scheduler, config),
+			(value) => 'close' in value && typeof value.close === 'function' ? value.close() : undefined,
+		);
+		const protectedDownloads = await resource(
+			'protectedDownloads',
+			() => factories.protectedDownloads(clock, scheduler, config),
+			(limiter) => limiter.close(),
+			(limiter) => limiter.start(),
+		);
+		const exportProgress = await resource(
+			'exportProgress',
+			() => factories.exportProgress(config),
+			(progress) => progress.close(),
+		);
+
+		const databaseHealth = createPrismaHealth(prisma);
+		const authSessions = createPrismaAuthSessions(prisma);
+		const orphanService = createOrphanService({
+			clock,
+			storage,
+			repository: createOrphanRepository(prisma),
+			logger: {
+				info: (context, message) => logger.info(context, message),
+				error: (context, message) => logger.error(context, message),
+			},
+		});
+		const maintenance: BackgroundMaintenance = {
 			async recoverStaleUploads() {
+				// Ticket 012 moves this remaining feature runtime into this graph.
+				const { gameUploadService } = await import('./modules/admin/game-upload/runtime.js');
 				await gameUploadService.sweepStaleCompletingSessions();
 			},
 			async purgeExpiredSessions(before) {
@@ -102,20 +395,50 @@ export function createProductionBackendContext(config: Env = env()): BackendCont
 			async reapOrphans() {
 				await orphanService.runOrphanReaper();
 			},
-		},
-		shutdownResources: [
-			{
-				start: () => protectedDownloadLimiter.start(),
-				close: () => protectedDownloadLimiter.close(),
-			},
-		],
-		routes: {
-			auth: authController,
-			devAuth: devAuthController,
-			public: publicController,
-			admin: adminRoutes,
-			me: meRoutes,
-			assets: assetsController,
-		},
-	};
+		};
+		const maintenanceSchedule = createMaintenanceSchedule(scheduler, clock, maintenance, logger);
+		owner.register('maintenanceSchedule', owned(
+			maintenanceSchedule,
+			() => maintenanceSchedule.close(),
+			() => maintenanceSchedule.start(),
+		));
+		if (!options.routes) {
+			// Compatibility lifetime only: production assets/banned routes still
+			// reference this pre-existing singleton until ticket 004 replaces their
+			// runtime graph with context.protectedDownloads. Do not copy this adapter
+			// to other feature resources; ticket 004 removes this registration.
+			owner.register('legacyProtectedDownloadLimiterUntilTicket004', owned(
+				protectedDownloadLimiter,
+				() => protectedDownloadLimiter.close(),
+				() => protectedDownloadLimiter.start(),
+			));
+		}
+		const routes = options.routes ?? await factories.routes(config);
+
+		return {
+			config,
+			clock,
+			logger,
+			ids,
+			storage,
+			fileSystem,
+			googleTokens,
+			scheduler,
+			uploadLimiter,
+			protectedDownloads,
+			settings,
+			exportProgress,
+			lifecycle,
+			databaseHealth,
+			authSessions,
+			maintenance,
+			routes,
+			resourceOwnership: owner.ownership(),
+			start: () => owner.start(),
+			close: () => owner.close(),
+		};
+	} catch (error) {
+		await owner.close().catch(() => undefined);
+		throw error;
+	}
 }

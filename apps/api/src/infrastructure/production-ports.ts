@@ -15,6 +15,7 @@ import type {
 	SettingsStore,
 	UploadLimiter,
 } from '../application/ports.js';
+import type { PrismaClient } from '../generated/prisma/client.js';
 import { prisma } from '../lib/prisma.js';
 import {
 	abortMultipartUpload,
@@ -46,16 +47,33 @@ import {
 } from '../shared/site-settings.js';
 import { acquireUploadSlot, releaseUploadSlot } from '../shared/upload-limits.js';
 import * as authRepository from '../modules/auth/repository.js';
+import { createLifecycle } from '../lib/lifecycle.js';
+import { createCachedSettingsStore } from '../shared/site-settings.js';
+import { createUploadLimiter } from '../shared/upload-limits.js';
 
-export const systemClock: Clock = { now: () => new Date() };
-export const cryptoIdGenerator: IdGenerator = { next: () => randomUUID() };
+export function createSystemClock(): Clock {
+	return { now: () => new Date() };
+}
 
-export const nodeScheduler: Scheduler = {
-	every(intervalMs, task) {
-		const timer = setInterval(() => void task(), intervalMs);
-		return { cancel: () => clearInterval(timer) };
-	},
-};
+export function createCryptoIdGenerator(): IdGenerator {
+	return { next: () => randomUUID() };
+}
+
+export const systemClock: Clock = createSystemClock();
+export const cryptoIdGenerator: IdGenerator = createCryptoIdGenerator();
+
+export function createNodeScheduler(): Scheduler {
+	return {
+		every(intervalMs, task) {
+			const timer = setInterval(() => void task(), intervalMs);
+			timer.unref();
+			return { cancel: () => clearInterval(timer) };
+		},
+		delay: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+	};
+}
+
+export const nodeScheduler: Scheduler = createNodeScheduler();
 
 export const objectStorage: ObjectStorage = {
 	upload: uploadFile,
@@ -71,7 +89,8 @@ export const objectStorage: ObjectStorage = {
 	abortMultipart: abortMultipartUpload,
 };
 
-export const nodeFileSystem: FileSystem = {
+export function createNodeFileSystem(): FileSystem {
+	return {
 	temporaryDirectory: () => os.tmpdir(),
 	stat: async (path) => fs.stat(path),
 	access: async (path) => fs.access(path),
@@ -82,7 +101,10 @@ export const nodeFileSystem: FileSystem = {
 	remove: async (path) => fs.unlink(path),
 	createReadStream,
 	createWriteStream,
-};
+	};
+}
+
+export const nodeFileSystem: FileSystem = createNodeFileSystem();
 
 export function createGoogleTokenVerifier(client = new OAuth2Client()): GoogleTokenVerifier {
 	return {
@@ -114,6 +136,76 @@ export const processLifecycle: Lifecycle = {
 	waitForDrain,
 };
 
+export function createLifecyclePort(clock: Clock, scheduler: Scheduler): Lifecycle & { close(): void } {
+	const lifecycle = createLifecycle({ clock, scheduler });
+	return {
+		state: lifecycle.getState,
+		setState: lifecycle.setState,
+		isAcceptingNewWork: lifecycle.isAcceptingNewWork,
+		requestStarted: lifecycle.requestStarted,
+		requestFinished: lifecycle.requestFinished,
+		inFlight: lifecycle.getInFlight,
+		waitForDrain: lifecycle.waitForDrain,
+		close: lifecycle.close,
+	};
+}
+
+export function createPrismaHealth(client: PrismaClient): DatabaseHealth {
+	return {
+		async check() {
+			try {
+				await client.$queryRaw`SELECT 1`;
+				return true;
+			} catch {
+				return false;
+			}
+		},
+	};
+}
+
+export function createPrismaAuthSessions(client: PrismaClient): AuthSessionStore {
+	return {
+		find: (id) => client.authSession.findUnique({
+			where: { id },
+			include: { user: true },
+		}),
+		touch: (id, lastSeenAt) => client.authSession.update({
+			where: { id },
+			data: { lastSeenAt },
+		}),
+		delete: (id) => client.authSession.deleteMany({ where: { id } }),
+	};
+}
+
+export function createPrismaSettingsStore(
+	client: PrismaClient,
+	logger: { warn(value: unknown, message?: string): void },
+) {
+	return createCachedSettingsStore({
+		loadOrCreate: () => client.siteSetting.upsert({
+			where: { id: 'default' },
+			update: {},
+			create: { id: 'default' },
+		}),
+		update: (patch) => client.siteSetting.upsert({
+			where: { id: 'default' },
+			create: {
+				id: 'default',
+				...(patch.maxGameFileMb !== undefined ? { maxGameFileMb: patch.maxGameFileMb } : {}),
+				...(patch.maxChunkSizeMb !== undefined ? { maxChunkSizeMb: patch.maxChunkSizeMb } : {}),
+			},
+			update: {
+				...(patch.maxGameFileMb !== undefined ? { maxGameFileMb: patch.maxGameFileMb } : {}),
+				...(patch.maxChunkSizeMb !== undefined ? { maxChunkSizeMb: patch.maxChunkSizeMb } : {}),
+			},
+		}),
+	}, { logger: { warn: (message) => logger.warn(message) } });
+}
+
+export function createProcessUploadLimiter(maxConcurrent: number) {
+	return createUploadLimiter(() => maxConcurrent);
+}
+
 export const prismaHealth: DatabaseHealth = {
 	async check() {
 		try {
@@ -123,7 +215,6 @@ export const prismaHealth: DatabaseHealth = {
 			return false;
 		}
 	},
-	close: () => prisma.$disconnect(),
 };
 
 export const prismaAuthSessions: AuthSessionStore = {
