@@ -19,17 +19,32 @@ export interface SiteSettingsRepository {
 	update(patch: Partial<SiteSettings>): Promise<SiteSettingsRow>;
 }
 
+export interface CachedSettingsStore {
+	get(): Promise<SiteSettings>;
+	reload(): Promise<SiteSettings>;
+	warmup(): Promise<SiteSettings>;
+	update(patch: Partial<SiteSettings>): Promise<SiteSettings>;
+	invalidate(): void;
+	close(): void;
+}
+
 export function createCachedSettingsStore(
 	repository: SiteSettingsRepository,
 	options: {
 		defaults?: SiteSettings;
-		warn?: (message: string) => void;
+		logger?: { warn(message: string): void };
 	} = {},
-) {
-	const defaults = options.defaults ?? DEFAULTS;
+): CachedSettingsStore {
+	const defaults = { ...(options.defaults ?? DEFAULTS) };
 	let cache: SiteSettings | null = null;
+	let closed = false;
+
+	function assertOpen(): void {
+		if (closed) throw new Error('Settings store is closed');
+	}
 
 	async function reload(): Promise<SiteSettings> {
+		assertOpen();
 		try {
 			const row = await repository.loadOrCreate();
 			cache = {
@@ -37,26 +52,35 @@ export function createCachedSettingsStore(
 				maxChunkSizeMb: row.maxChunkSizeMb,
 			};
 		} catch {
-			options.warn?.('Could not load site settings, using defaults');
+			options.logger?.warn('Could not load site settings, using defaults');
 			cache = { ...defaults };
 		}
-		return cache;
+		return { ...cache };
 	}
 
 	return {
 		async get(): Promise<SiteSettings> {
-			return cache ?? reload();
+			assertOpen();
+			return cache ? { ...cache } : reload();
 		},
 		reload,
+		warmup: reload,
 		async update(patch: Partial<SiteSettings>): Promise<SiteSettings> {
+			assertOpen();
 			const row = await repository.update(patch);
 			cache = {
 				maxGameFileMb: row.maxGameFileMb,
 				maxChunkSizeMb: row.maxChunkSizeMb,
 			};
-			return cache;
+			return { ...cache };
 		},
 		invalidate(): void {
+			if (closed) return;
+			cache = null;
+		},
+		close(): void {
+			if (closed) return;
+			closed = true;
 			cache = null;
 		},
 	};
@@ -80,7 +104,7 @@ const productionStore = createCachedSettingsStore({
 			...(patch.maxChunkSizeMb !== undefined ? { maxChunkSizeMb: patch.maxChunkSizeMb } : {}),
 		},
 	}),
-}, { warn: (message) => logger().warn(message) });
+}, { logger: { warn: (message) => logger().warn(message) } });
 
 export const getSiteSettings = productionStore.get;
 export const reloadSiteSettings = productionStore.reload;

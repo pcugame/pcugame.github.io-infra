@@ -5,6 +5,7 @@ const config = loadEnv();
 
 import { buildApp } from './app.js';
 import { createProductionBackendContext } from './backend-context.js';
+import { startOwnedResources } from './lib/lifecycle.js';
 
 async function main(): Promise<void> {
 	const context = createProductionBackendContext(config);
@@ -20,6 +21,9 @@ async function main(): Promise<void> {
 	}
 
 	try {
+		// Stateful resources are constructed without background work. Start owned
+		// timers only at this explicit process startup boundary.
+		await startOwnedResources(context.shutdownResources);
 		await app.listen({ port: config.PORT, host: '0.0.0.0' });
 		context.logger.info(`Server listening on http://0.0.0.0:${config.PORT}`);
 	} catch (err) {

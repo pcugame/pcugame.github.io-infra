@@ -15,17 +15,18 @@ interface BucketEntry {
 	timestamps: number[];
 }
 
-interface RateLimitClock {
+export interface RateLimitClock {
 	now(): Date;
 }
 
-interface RateLimitScheduler {
+export interface RateLimitScheduler {
 	every(intervalMs: number, task: () => void): { cancel(): void };
 }
 
-interface DownloadRateLimiterOptions {
+export interface DownloadRateLimiterOptions {
 	windowMs?: number;
 	maxHits?: number;
+	sweepIntervalMs?: number;
 	clock?: RateLimitClock;
 	scheduler?: RateLimitScheduler;
 }
@@ -40,41 +41,54 @@ export class DownloadRateLimiter {
 	private readonly windowMs: number;
 	private readonly maxHits: number;
 	private readonly clock: RateLimitClock;
-	private sweepTask: { cancel(): void } | null;
+	private readonly scheduler: RateLimitScheduler;
+	private readonly sweepIntervalMs: number;
+	private sweepTask: { cancel(): void } | null = null;
+	private closed = false;
 
 	constructor(opts: DownloadRateLimiterOptions = {}) {
 		this.windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;
 		this.maxHits = opts.maxHits ?? DEFAULT_MAX_HITS;
+		this.sweepIntervalMs = opts.sweepIntervalMs ?? SWEEP_INTERVAL_MS;
 		this.clock = opts.clock ?? { now: () => new Date() };
-		const scheduler = opts.scheduler ?? {
+		this.scheduler = opts.scheduler ?? {
 			every(intervalMs: number, task: () => void) {
 				const timer = setInterval(task, intervalMs);
 				timer.unref();
 				return { cancel: () => clearInterval(timer) };
 			},
 		};
+	}
 
-		this.sweepTask = scheduler.every(SWEEP_INTERVAL_MS, () => this.sweep());
+	/** Start periodic stale-bucket cleanup. Construction itself is side-effect free. */
+	start(): void {
+		this.assertOpen();
+		if (this.sweepTask) return;
+		this.sweepTask = this.scheduler.every(this.sweepIntervalMs, () => this.sweep());
 	}
 
 	/** Load banned IPs from DB on startup. */
 	loadBannedIps(ips: string[]): void {
+		this.assertOpen();
 		this.bannedIps = new Set(ips);
 	}
 
 	/** Add an IP to the in-memory ban cache (called after DB write). */
 	addBan(ip: string): void {
+		this.assertOpen();
 		this.bannedIps.add(ip);
 		this.buckets.delete(ip);
 	}
 
 	/** Remove an IP from the in-memory ban cache (called after DB delete). */
 	removeBan(ip: string): void {
+		this.assertOpen();
 		this.bannedIps.delete(ip);
 	}
 
 	/** Check if IP is banned. */
 	isBanned(ip: string): boolean {
+		this.assertOpen();
 		return this.bannedIps.has(ip);
 	}
 
@@ -86,6 +100,7 @@ export class DownloadRateLimiter {
 	 * - Otherwise records the hit and returns 'ok'.
 	 */
 	check(ip: string): 'ok' | 'ban' {
+		this.assertOpen();
 		if (this.bannedIps.has(ip)) {
 			throw new AppError(
 				403,
@@ -118,6 +133,7 @@ export class DownloadRateLimiter {
 	}
 
 	private sweep(): void {
+		if (this.closed) return;
 		const cutoff = this.clock.now().getTime() - this.windowMs;
 		for (const [ip, entry] of this.buckets) {
 			entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
@@ -127,13 +143,20 @@ export class DownloadRateLimiter {
 		}
 	}
 
-	destroy(): void {
+	close(): void {
+		if (this.closed) return;
+		this.closed = true;
 		if (this.sweepTask) {
 			this.sweepTask.cancel();
 			this.sweepTask = null;
 		}
 		this.buckets.clear();
 		this.bannedIps.clear();
+	}
+
+	/** Backward-compatible lifecycle name for existing production callers. */
+	destroy(): void {
+		this.close();
 	}
 
 	/** Exposed for testing. */
@@ -144,4 +167,14 @@ export class DownloadRateLimiter {
 	_bannedSize(): number {
 		return this.bannedIps.size;
 	}
+
+	private assertOpen(): void {
+		if (this.closed) throw new Error('Download rate limiter is closed');
+	}
+}
+
+export function createDownloadRateLimiter(
+	opts: DownloadRateLimiterOptions = {},
+): DownloadRateLimiter {
+	return new DownloadRateLimiter(opts);
 }

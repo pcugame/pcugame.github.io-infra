@@ -104,7 +104,10 @@ export function createProductionBackendContext(config: Env = env()): BackendCont
 			},
 		},
 		shutdownResources: [
-			{ close: () => protectedDownloadLimiter.destroy() },
+			{
+				start: () => protectedDownloadLimiter.start(),
+				close: () => protectedDownloadLimiter.close(),
+			},
 		],
 		routes: {
 			auth: authController,
