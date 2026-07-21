@@ -20,8 +20,8 @@ const projectService = createProjectService({
 	serializeProjectDetail: vi.fn(),
 	deleteAssetObjects: vi.fn(),
 	abortMultipart: vi.fn(),
-	cleanupWebglEntry: vi.fn(),
-	cleanupWebglDeployment: vi.fn(),
+	deleteWebglDeploymentByEntry: vi.fn(),
+	deleteWebglDeployment: vi.fn(),
 	logger: { error: vi.fn() },
 });
 

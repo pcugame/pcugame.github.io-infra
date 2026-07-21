@@ -14,6 +14,8 @@ import {
 	parseWebglEntryKey,
 	parseWebglSourceKey,
 	type WebglDeploymentKeys,
+	type WebglProtectedSourceKeys,
+	type WebglPublicDeploymentKeys,
 } from './paths.js';
 
 export async function deployWebglSource(
@@ -51,17 +53,7 @@ export async function deployWebglSource(
 	} catch (err) {
 		// Enumerate the whole prefix so an upload that reached object storage but whose
 		// client response was interrupted cannot escape the rollback callback tracking.
-		await safeDeletePrefix(
-			cfg.S3_BUCKET_PUBLIC,
-			keys.sitePrefix,
-			'webgl-deploy-rollback',
-			{ projectId, deploymentId: keys.deploymentId },
-		).catch((cleanupErr) => {
-			logger().error(
-				{ err: cleanupErr, projectId, sitePrefix: keys.sitePrefix },
-				'Failed to enumerate failed WebGL deployment for rollback',
-			);
-		});
+		await rollbackWebglPublicDeployment(keys, 'webgl-deploy-rollback');
 		throw err;
 	} finally {
 		await fsp.rm(tempDir, { recursive: true, force: true }).catch((err) => {
@@ -70,37 +62,60 @@ export async function deployWebglSource(
 	}
 }
 
-/** Remove both the protected source ZIP and every hosted object for a deployment. */
-export async function cleanupWebglDeployment(
-	keys: WebglDeploymentKeys,
+/**
+ * Roll back only the replaceable public output. The protected source is deliberately
+ * absent from this port so a transient pointer failure cannot destroy recovery input.
+ */
+export async function rollbackWebglPublicDeployment(
+	keys: WebglPublicDeploymentKeys,
 	reason: string,
 ): Promise<void> {
 	const cfg = env();
+	await safeDeletePrefix(cfg.S3_BUCKET_PUBLIC, keys.sitePrefix, reason, {
+		projectId: keys.projectId,
+		deploymentId: keys.deploymentId,
+	}).catch((err) => {
+		logger().error(
+			{ err, ...keys, reason },
+			'Failed to enumerate WebGL public deployment prefix for rollback',
+		);
+	});
+}
+
+/** Delete the protected source only after the upload is intentionally terminal. */
+export async function deleteWebglProtectedSource(
+	keys: WebglProtectedSourceKeys,
+	reason: string,
+): Promise<void> {
+	const cfg = env();
+	await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, keys.sourceKey, reason, {
+		projectId: keys.projectId,
+		deploymentId: keys.deploymentId,
+	}).catch((err) => {
+		logger().error({ err, ...keys, reason }, 'Failed to queue WebGL protected source deletion');
+	});
+}
+
+/** Explicit terminal deletion: remove both recovery input and hosted output. */
+export async function deleteWebglDeployment(
+	keys: WebglDeploymentKeys,
+	reason: string,
+): Promise<void> {
 	await Promise.all([
-		safeDeleteObject(cfg.S3_BUCKET_PROTECTED, keys.sourceKey, `${reason}-source`, {
-			projectId: keys.projectId,
-			deploymentId: keys.deploymentId,
-		}).catch((err) => {
-			logger().error({ err, ...keys, reason }, 'Failed to queue WebGL source cleanup');
-		}),
-		safeDeletePrefix(cfg.S3_BUCKET_PUBLIC, keys.sitePrefix, `${reason}-site`, {
-			projectId: keys.projectId,
-			deploymentId: keys.deploymentId,
-		}).catch((err) => {
-			logger().error({ err, ...keys, reason }, 'Failed to enumerate WebGL deployment prefix for cleanup');
-		}),
+		deleteWebglProtectedSource(keys, `${reason}-source`),
+		rollbackWebglPublicDeployment(keys, `${reason}-site`),
 	]);
 }
 
-export async function cleanupWebglEntry(
+export async function deleteWebglDeploymentByEntry(
 	projectId: number,
 	entryKey: string,
 	reason: string,
 ): Promise<void> {
 	const keys = parseWebglEntryKey(projectId, entryKey);
 	if (!keys) {
-		logger().error({ projectId, entryKey, reason }, 'Refusing to clean malformed WebGL entry key');
+		logger().error({ projectId, entryKey, reason }, 'Refusing to delete malformed WebGL entry key');
 		return;
 	}
-	await cleanupWebglDeployment(keys, reason);
+	await deleteWebglDeployment(keys, reason);
 }

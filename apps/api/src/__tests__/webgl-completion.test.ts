@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { completeSession } from '../modules/admin/game-upload/complete-session.service.js';
 import { cancelSession } from '../modules/admin/game-upload/session-maintenance.service.js';
 import { createCompletedUploadFinalizer } from '../modules/admin/game-upload/finalize-completed-upload.service.js';
+import { createGameUploadService } from '../modules/admin/game-upload/service.js';
 import type { GameUploadServiceDependencies } from '../modules/admin/game-upload/ports.js';
 import type { WebglDeploymentKeys } from '../modules/webgl/paths.js';
 
@@ -54,16 +55,16 @@ function createHarness() {
 		readHeader: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])),
 		deleteOrQueue: vi.fn().mockResolvedValue(undefined),
 		deployWebgl: vi.fn().mockResolvedValue(deployed),
-		cleanupWebglDeployment: vi.fn().mockResolvedValue(undefined),
-		cleanupWebglEntry: vi.fn().mockResolvedValue(undefined),
+		rollbackWebglPublicDeployment: vi.fn().mockResolvedValue(undefined),
+		deleteWebglDeploymentByEntry: vi.fn().mockResolvedValue(undefined),
 		logError: vi.fn(),
 	};
 	const finalizer = createCompletedUploadFinalizer({
 		readHeader: mocks.readHeader,
 		validateGameArchive: vi.fn(),
 		deployWebgl: mocks.deployWebgl,
-		cleanupWebglDeployment: mocks.cleanupWebglDeployment,
-		cleanupWebglEntry: mocks.cleanupWebglEntry,
+		rollbackWebglPublicDeployment: mocks.rollbackWebglPublicDeployment,
+		deleteWebglDeploymentByEntry: mocks.deleteWebglDeploymentByEntry,
 		finalizeGame: vi.fn().mockResolvedValue({ oldStorageKey: null, oldPlaybackStorageKey: null }),
 		finalizeWebgl: mocks.finalizeCompletedWebglSession,
 		deleteOrQueue: mocks.deleteOrQueue,
@@ -107,6 +108,117 @@ function createHarness() {
 		mocks,
 		deps,
 		complete: () => completeSession(deps, 'session-webgl', { id: 11, role: 'USER' }),
+	};
+}
+
+function createRestartRecoveryHarness() {
+	const durable = {
+		session: session(),
+		sourceExists: false,
+		publicObjects: new Set<string>(),
+		webglEntryKey: '',
+		failNextPointerFinalization: true,
+		events: [] as string[],
+	};
+	const processes: ReturnType<typeof createProcess>[] = [];
+
+	function createProcess() {
+		const rollbackWebglPublicDeployment = vi.fn(async (keys: { sitePrefix: string }) => {
+			durable.events.push('public-rollback');
+			for (const key of durable.publicObjects) {
+				if (key.startsWith(keys.sitePrefix)) durable.publicObjects.delete(key);
+			}
+		});
+		const deleteOrQueue = vi.fn(async (key: string) => {
+			if (key === sourceKey) durable.sourceExists = false;
+		});
+		const finalizer = createCompletedUploadFinalizer({
+			readHeader: async () => Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]),
+			validateGameArchive: vi.fn(),
+			deployWebgl: async () => {
+				if (!durable.sourceExists) throw new Error('protected source missing');
+				durable.events.push('public-deploy');
+				durable.publicObjects.add(deployed.entryKey);
+				durable.publicObjects.add(`${deployed.sitePrefix}Build/game.wasm`);
+				return deployed;
+			},
+			rollbackWebglPublicDeployment,
+			deleteWebglDeploymentByEntry: vi.fn(),
+			finalizeGame: vi.fn().mockResolvedValue({ oldStorageKey: null, oldPlaybackStorageKey: null }),
+			finalizeWebgl: async () => {
+				durable.events.push('db-pointer-finalize');
+				if (durable.failNextPointerFinalization) {
+					durable.failNextPointerFinalization = false;
+					throw new Error('database pointer unavailable');
+				}
+				const oldEntryKey = durable.webglEntryKey;
+				durable.webglEntryKey = deployed.entryKey;
+				durable.session.status = 'COMPLETED';
+				return { oldEntryKey };
+			},
+			deleteOrQueue,
+			webglUrl: () => 'http://localhost:4000/api/public/webgl/7/',
+			logError: vi.fn(),
+		});
+		const deps: GameUploadServiceDependencies = {
+			repository: {
+				findSessionById: async () => ({ ...durable.session }),
+				createSessionReplacingActive: vi.fn(),
+				cancelSessionAndClearActive: vi.fn(),
+				upsertPartEtag: vi.fn(),
+				transitionToCompleting: async () => {
+					if (durable.session.status !== 'PENDING') return { count: 0 };
+					durable.session.status = 'COMPLETING';
+					return { count: 1 };
+				},
+				findPartsBySessionId: async () => durable.session.parts,
+				revertToPending: vi.fn(),
+				markFailed: vi.fn(),
+				findStaleCompletingSessions: async () => (
+					durable.session.status === 'COMPLETING' ? [{ ...durable.session }] : []
+				),
+				findActiveSessionsForListing: vi.fn(),
+				findExhibitionById: vi.fn(),
+			},
+			storage: {
+				createMultipart: vi.fn(),
+				abortMultipart: vi.fn(),
+				uploadPart: vi.fn(),
+				completeMultipart: async () => {
+					durable.events.push('source-complete');
+					durable.sourceExists = true;
+				},
+				head: async () => durable.sourceExists
+					? { size: 8, contentType: 'application/zip' }
+					: null,
+			},
+			finalizer,
+			settings: { get: vi.fn() },
+			uploadSlots: { acquire: vi.fn(), release: vi.fn() },
+			clock: { now: () => new Date('2026-07-21T00:10:00.000Z') },
+			ids: { next: () => 'id' },
+			lifecycle: { isAcceptingNewWork: () => true },
+			config: { uploadChunkSizeMb: 10, uploadSessionTtlMinutes: 60 },
+			roleGameMaxBytes: () => 1024,
+			storageKey: () => sourceKey,
+			deleteOrQueue,
+			logger: { error: vi.fn(), warn: vi.fn() },
+		};
+		return {
+			service: createGameUploadService(deps),
+			rollbackWebglPublicDeployment,
+			deleteOrQueue,
+		};
+	}
+
+	return {
+		durable,
+		newProcess() {
+			const process = createProcess();
+			processes.push(process);
+			return process;
+		},
+		processes,
 	};
 }
 
@@ -181,6 +293,47 @@ describe('WebGL completion atomicity', () => {
 		expect(mocks.logError).not.toHaveBeenCalled();
 	});
 
+	it('preserves the source after a DB pointer fault and completes from a new recovery service', async () => {
+		const harness = createRestartRecoveryHarness();
+		const initialProcess = harness.newProcess();
+
+		await expect(initialProcess.service.completeSession(
+			'session-webgl',
+			{ id: 11, role: 'USER' },
+		)).rejects.toThrow('database pointer unavailable');
+
+		expect(harness.durable.events).toEqual([
+			'source-complete',
+			'public-deploy',
+			'db-pointer-finalize',
+			'public-rollback',
+		]);
+		expect(harness.durable.session.status).toBe('COMPLETING');
+		expect(harness.durable.sourceExists).toBe(true);
+		expect(harness.durable.publicObjects).toEqual(new Set());
+		expect(harness.durable.webglEntryKey).toBe('');
+		expect(initialProcess.deleteOrQueue).not.toHaveBeenCalled();
+
+		const recoveryProcess = harness.newProcess();
+		expect(recoveryProcess.service).not.toBe(initialProcess.service);
+		await expect(recoveryProcess.service.sweepStaleCompletingSessions())
+			.resolves.toEqual({ swept: 1 });
+
+		expect(harness.durable.session.status).toBe('COMPLETED');
+		expect(harness.durable.webglEntryKey).toBe(deployed.entryKey);
+		expect(harness.durable.sourceExists).toBe(true);
+		expect(recoveryProcess.deleteOrQueue).not.toHaveBeenCalled();
+		expect(harness.durable.publicObjects).toEqual(new Set([
+			deployed.entryKey,
+			`${deployed.sitePrefix}Build/game.wasm`,
+		]));
+		const deploymentPrefixes = new Set(
+			[...harness.durable.publicObjects].map((key) => key.split('site/')[0]),
+		);
+		expect(deploymentPrefixes).toEqual(new Set([deployed.deploymentPrefix]));
+		expect(harness.processes).toHaveLength(2);
+	});
+
 	it('marks a deterministically invalid completed source failed and queues deletion', async () => {
 		const { mocks, complete } = createHarness();
 		mocks.readHeader.mockResolvedValue(Buffer.from('not-a-zip'));
@@ -200,7 +353,7 @@ describe('WebGL completion atomicity', () => {
 		mocks.finalizeCompletedWebglSession.mockResolvedValue({ oldEntryKey: oldEntry });
 
 		await complete();
-		expect(mocks.cleanupWebglEntry).toHaveBeenCalledWith(
+		expect(mocks.deleteWebglDeploymentByEntry).toHaveBeenCalledWith(
 			7,
 			oldEntry,
 			'webgl-upload-replace-previous',
@@ -212,11 +365,11 @@ describe('WebGL completion atomicity', () => {
 		mocks.finalizeCompletedWebglSession.mockResolvedValue({
 			oldEntryKey: 'webgl/7/123e4567-e89b-42d3-b456-426614174111/site/index.html',
 		});
-		mocks.cleanupWebglEntry.mockRejectedValue(new Error('orphan queue unavailable'));
+		mocks.deleteWebglDeploymentByEntry.mockRejectedValue(new Error('orphan queue unavailable'));
 
 		await expect(complete()).resolves.toMatchObject({ status: 'COMPLETED' });
 		expect(mocks.markFailed).not.toHaveBeenCalled();
-		expect(mocks.cleanupWebglDeployment).not.toHaveBeenCalled();
+		expect(mocks.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
 		expect(mocks.logError).toHaveBeenCalledOnce();
 	});
 });

@@ -3,7 +3,11 @@ import { logger } from '../../../lib/logger.js';
 import { readObjectRange } from '../../../lib/storage.js';
 import { safeDeleteObject } from '../../../object-deletion.js';
 import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
-import { cleanupWebglDeployment, cleanupWebglEntry, deployWebglSource } from '../../webgl/deployment.js';
+import {
+	deleteWebglDeploymentByEntry,
+	deployWebglSource,
+	rollbackWebglPublicDeployment,
+} from '../../webgl/deployment.js';
 import { webglUrl } from '../../webgl/paths.js';
 import * as repository from './repository.js';
 import { createCompletedUploadFinalizer } from './finalize-completed-upload.service.js';
@@ -21,8 +25,8 @@ function getProductionFinalizer(): Finalizer {
 			await validateZipArchiveObject(config.S3_BUCKET_PROTECTED, key, size);
 		},
 		deployWebgl: deployWebglSource,
-		cleanupWebglDeployment,
-		cleanupWebglEntry,
+		rollbackWebglPublicDeployment,
+		deleteWebglDeploymentByEntry,
 		finalizeGame: (session) => repository.finalizeCompletedSession(session.id, session.projectId, 'GAME', {
 			storageKey: session.s3Key,
 			originalName: session.originalName,
