@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { env } from '../config/env.js';
+import type { Env } from '../config/env.js';
 import { forbidden } from '../shared/errors.js';
 
 /**
@@ -33,8 +33,8 @@ export function validateCsrfOrigin(
  * Fastify plugin that enforces CSRF origin validation on all
  * state-changing requests (POST, PATCH, DELETE, PUT).
  */
-export async function registerCsrf(app: FastifyInstance): Promise<void> {
-	const allowedOrigins = new Set(env().CORS_ALLOWED_ORIGINS);
+export async function registerCsrf(app: FastifyInstance, config: Env): Promise<void> {
+	const allowedOrigins = new Set(config.CORS_ALLOWED_ORIGINS);
 
 	app.addHook('onRequest', async (request) => {
 		validateCsrfOrigin(request.method, request.headers.origin, allowedOrigins);

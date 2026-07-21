@@ -5,7 +5,7 @@ import { API_ERROR_CODES, AppError, forbidden, unauthorized } from '../../shared
 import { sendOk } from '../../shared/http.js';
 import { cookieExpiresAt } from '../../shared/session.js';
 import { parseBody, DevAuthLoginBody, DevAuthLoginErrorBody } from '../../shared/validation.js';
-import * as authService from '../auth/service.js';
+import { authService } from '../auth/runtime.js';
 
 /** Register dev/test-only login routes. Never register this in production. */
 export async function devAuthController(app: FastifyInstance): Promise<void> {
@@ -20,7 +20,7 @@ export async function devAuthController(app: FastifyInstance): Promise<void> {
 			secure: cfg.COOKIE_SECURE,
 			sameSite: cfg.COOKIE_SAME_SITE,
 			path: '/',
-			expires: cookieExpiresAt({ expiresAt }),
+			expires: cookieExpiresAt({ expiresAt }, new Date(), cfg.SESSION_IDLE_MS),
 		});
 
 		sendOk<GoogleAuthResponse>(reply, {

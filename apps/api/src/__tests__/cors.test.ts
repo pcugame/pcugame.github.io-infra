@@ -1,20 +1,20 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 import { registerCors } from '../plugins/cors.js';
-
-vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
-	loadEnv: () => ({ ...defaultTestEnv }),
-}));
 
 describe('cors', () => {
 	let app: FastifyInstance;
 
 	beforeAll(async () => {
 		app = Fastify({ logger: false });
-		await registerCors(app);
+		await registerCors(app, {
+			...defaultTestEnv,
+			LOG_LEVEL: 'info',
+			GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS],
+			CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS],
+		});
 		app.put('/api/admin/game-upload-sessions/:sessionId/chunks/:index', async () => ({ ok: true }));
 		await app.ready();
 	});

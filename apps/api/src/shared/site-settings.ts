@@ -1,11 +1,3 @@
-/**
- * Runtime-configurable site settings with in-memory cache.
- *
- * Settings are stored in the `site_settings` table (single row).
- * On first access, the row is auto-created with defaults if missing.
- * Cache is invalidated on update via the admin API.
- */
-
 import { prisma } from '../lib/prisma.js';
 import { logger } from '../lib/logger.js';
 import type { SiteSettingsData } from '@pcu/contracts';
@@ -13,43 +5,70 @@ import type { SiteSettingsData } from '@pcu/contracts';
 export type SiteSettings = SiteSettingsData;
 
 const DEFAULTS: SiteSettings = {
-	maxGameFileMb: 5120,    // 5 GB
-	maxChunkSizeMb: 10,     // 10 MB per chunk
+	maxGameFileMb: 5120,
+	maxChunkSizeMb: 10,
 };
 
-let _cache: SiteSettings | null = null;
-
-/** Get current settings (cached, fast). */
-export async function getSiteSettings(): Promise<SiteSettings> {
-	if (_cache) return _cache;
-	return reloadSiteSettings();
+interface SiteSettingsRow {
+	maxGameFileMb: number;
+	maxChunkSizeMb: number;
 }
 
-/** Reload settings from DB into cache. Call after admin update. */
-export async function reloadSiteSettings(): Promise<SiteSettings> {
-	try {
-		const row = await prisma.siteSetting.upsert({
-			where: { id: 'default' },
-			create: { id: 'default' },
-			update: {},
-		});
-		_cache = {
-			maxGameFileMb: row.maxGameFileMb,
-			maxChunkSizeMb: row.maxChunkSizeMb,
-		};
-	} catch {
-		// Table may not exist yet (migration pending)
-		logger().warn('Could not load site settings, using defaults');
-		_cache = { ...DEFAULTS };
+export interface SiteSettingsRepository {
+	loadOrCreate(): Promise<SiteSettingsRow>;
+	update(patch: Partial<SiteSettings>): Promise<SiteSettingsRow>;
+}
+
+export function createCachedSettingsStore(
+	repository: SiteSettingsRepository,
+	options: {
+		defaults?: SiteSettings;
+		warn?: (message: string) => void;
+	} = {},
+) {
+	const defaults = options.defaults ?? DEFAULTS;
+	let cache: SiteSettings | null = null;
+
+	async function reload(): Promise<SiteSettings> {
+		try {
+			const row = await repository.loadOrCreate();
+			cache = {
+				maxGameFileMb: row.maxGameFileMb,
+				maxChunkSizeMb: row.maxChunkSizeMb,
+			};
+		} catch {
+			options.warn?.('Could not load site settings, using defaults');
+			cache = { ...defaults };
+		}
+		return cache;
 	}
-	return _cache;
+
+	return {
+		async get(): Promise<SiteSettings> {
+			return cache ?? reload();
+		},
+		reload,
+		async update(patch: Partial<SiteSettings>): Promise<SiteSettings> {
+			const row = await repository.update(patch);
+			cache = {
+				maxGameFileMb: row.maxGameFileMb,
+				maxChunkSizeMb: row.maxChunkSizeMb,
+			};
+			return cache;
+		},
+		invalidate(): void {
+			cache = null;
+		},
+	};
 }
 
-/** Update settings in DB and refresh cache. Returns new values. */
-export async function updateSiteSettings(
-	patch: Partial<SiteSettings>,
-): Promise<SiteSettings> {
-	const row = await prisma.siteSetting.upsert({
+const productionStore = createCachedSettingsStore({
+	loadOrCreate: () => prisma.siteSetting.upsert({
+		where: { id: 'default' },
+		create: { id: 'default' },
+		update: {},
+	}),
+	update: (patch) => prisma.siteSetting.upsert({
 		where: { id: 'default' },
 		create: {
 			id: 'default',
@@ -60,15 +79,10 @@ export async function updateSiteSettings(
 			...(patch.maxGameFileMb !== undefined ? { maxGameFileMb: patch.maxGameFileMb } : {}),
 			...(patch.maxChunkSizeMb !== undefined ? { maxChunkSizeMb: patch.maxChunkSizeMb } : {}),
 		},
-	});
-	_cache = {
-		maxGameFileMb: row.maxGameFileMb,
-		maxChunkSizeMb: row.maxChunkSizeMb,
-	};
-	return _cache;
-}
+	}),
+}, { warn: (message) => logger().warn(message) });
 
-/** Invalidate cache (for testing). */
-export function _invalidateCache(): void {
-	_cache = null;
-}
+export const getSiteSettings = productionStore.get;
+export const reloadSiteSettings = productionStore.reload;
+export const updateSiteSettings = productionStore.update;
+export const _invalidateCache = productionStore.invalidate;

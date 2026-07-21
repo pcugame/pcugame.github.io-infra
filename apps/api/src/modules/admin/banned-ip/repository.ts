@@ -1,16 +1,14 @@
-import { prisma } from '../../../lib/prisma.js';
+import type { PrismaClient } from '../../../generated/prisma/client.js';
 
-/** List all banned IPs, newest first */
-export function findAllBannedIps() {
-	return prisma.bannedIp.findMany({ orderBy: { createdAt: 'desc' } });
-}
+export function createBannedIpRepository(client: PrismaClient) {
+	return {
+		/** List all banned IPs, newest first. */
+		findAllBannedIps: () => client.bannedIp.findMany({ orderBy: { createdAt: 'desc' } }),
 
-/** Find a banned IP record by primary key */
-export function findBannedIpById(id: number) {
-	return prisma.bannedIp.findUnique({ where: { id } });
-}
+		/** Find a banned IP record by primary key. */
+		findBannedIpById: (id: number) => client.bannedIp.findUnique({ where: { id } }),
 
-/** Delete a banned IP record by primary key */
-export function deleteBannedIp(id: number) {
-	return prisma.bannedIp.delete({ where: { id } });
+		/** Delete a banned IP record by primary key. */
+		deleteBannedIp: (id: number) => client.bannedIp.delete({ where: { id } }),
+	};
 }

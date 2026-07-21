@@ -1,70 +1,40 @@
-import type { FastifyReply } from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../shared/errors.js';
+import { createAssetsService } from '../modules/assets/service.js';
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	findAssetByStorageKey: vi.fn(),
 	findPublicAsset: vi.fn(),
 	upsertBannedIp: vi.fn(),
 	getPresignedUrl: vi.fn(),
 	limiterCheck: vi.fn(),
 	loggerError: vi.fn(),
-}));
-
-vi.mock('../config/env.js', () => ({
-	env: () => ({
-		S3_BUCKET_PUBLIC: 'public-bucket',
-		S3_BUCKET_PROTECTED: 'protected-bucket',
-	}),
-}));
-
-vi.mock('../lib/logger.js', () => ({
-	logger: () => ({
-		error: mocks.loggerError,
-		info: vi.fn(),
-		warn: vi.fn(),
-	}),
-}));
-
-vi.mock('../lib/storage.js', () => ({
-	getPresignedUrl: mocks.getPresignedUrl,
-	safeDeleteObject: vi.fn(),
-}));
-
-vi.mock('../shared/protected-download-limiter.js', () => ({
-	protectedDownloadLimiter: {
-		check: mocks.limiterCheck,
-		loadBannedIps: vi.fn(),
-		removeBan: vi.fn(),
-	},
-}));
-
-vi.mock('../modules/assets/repository.js', () => ({
-	findPublicAsset: mocks.findPublicAsset,
-	findAssetByStorageKey: mocks.findAssetByStorageKey,
-	upsertBannedIp: mocks.upsertBannedIp,
-	findAllBannedIps: vi.fn().mockResolvedValue([]),
-	findAssetByIdWithProject: vi.fn(),
-	markAssetDeleting: vi.fn(),
-	markAssetDeleted: vi.fn(),
-	clearPosterIfMatches: vi.fn(),
-}));
-
-const { streamProtectedAsset, streamPublicAsset } = await import('../modules/assets/service.js');
-
-type ReplyStub = FastifyReply & {
-	header: ReturnType<typeof vi.fn>;
-	redirect: ReturnType<typeof vi.fn>;
 };
 
-function createReply(): ReplyStub {
-	const reply = {
-		header: vi.fn(),
-		redirect: vi.fn(),
-	};
-	reply.header.mockReturnValue(reply);
-	return reply as unknown as ReplyStub;
-}
+const assetsService = createAssetsService({
+	publicBucket: 'public-bucket',
+	protectedBucket: 'protected-bucket',
+	presign: mocks.getPresignedUrl,
+	bucketForKind: () => 'bucket',
+	deleteOrQueue: vi.fn(),
+	loadProjectWithAccess: vi.fn(),
+	downloadLimiter: {
+		loadBannedIps: vi.fn(),
+		check: mocks.limiterCheck,
+	},
+	logger: { info: vi.fn(), warn: vi.fn(), error: mocks.loggerError },
+	repository: {
+		findPublicAsset: mocks.findPublicAsset,
+		findAssetByStorageKey: mocks.findAssetByStorageKey,
+		upsertBannedIp: mocks.upsertBannedIp,
+		findAllBannedIps: vi.fn(),
+		findAssetByIdWithProject: vi.fn(),
+		markAssetDeleting: vi.fn(),
+		markAssetDeleted: vi.fn(),
+		clearPosterIfMatches: vi.fn(),
+	},
+});
+const { streamProtectedAsset, streamPublicAsset } = assetsService;
 
 function asset(opts: {
 	kind: string;
@@ -106,8 +76,7 @@ describe('protected asset redirects', () => {
 		mocks.findAssetByStorageKey.mockResolvedValue(asset({ kind }));
 		mocks.limiterCheck.mockReturnValueOnce('ok').mockReturnValueOnce('ban');
 
-		const firstReply = createReply();
-		await streamProtectedAsset(key, ip, undefined, firstReply);
+		const firstResponse = await streamProtectedAsset(key, ip, undefined);
 
 		expect(mocks.limiterCheck).toHaveBeenNthCalledWith(1, ip);
 		if (kind === 'GAME') {
@@ -119,18 +88,19 @@ describe('protected asset redirects', () => {
 		} else {
 			expect(mocks.getPresignedUrl).toHaveBeenCalledWith('protected-bucket', key);
 		}
-		expect(firstReply.header).toHaveBeenCalledWith('Referrer-Policy', 'no-referrer');
-		expect(firstReply.redirect).toHaveBeenCalledWith(`https://signed.example/protected-bucket/${key}`, 302);
+		expect(firstResponse).toEqual({
+			status: 302,
+			headers: { 'Referrer-Policy': 'no-referrer' },
+			location: `https://signed.example/protected-bucket/${key}`,
+		});
 
-		const bannedReply = createReply();
-		await expect(streamProtectedAsset(key, ip, undefined, bannedReply)).rejects.toMatchObject({
+		await expect(streamProtectedAsset(key, ip, undefined)).rejects.toMatchObject({
 			statusCode: 403,
 			code: 'FORBIDDEN',
 		});
 
 		expect(mocks.limiterCheck).toHaveBeenNthCalledWith(2, ip);
 		expect(mocks.upsertBannedIp).toHaveBeenCalledWith(ip, 'Rate limit exceeded (protected asset download)');
-		expect(bannedReply.redirect).not.toHaveBeenCalled();
 	});
 
 	it('uses project and ordered member data for the GAME download filename', async () => {
@@ -147,7 +117,7 @@ describe('protected asset redirects', () => {
 			},
 		});
 
-		await streamProtectedAsset('game.zip', '203.0.113.20', undefined, createReply());
+		await streamProtectedAsset('game.zip', '203.0.113.20', undefined);
 
 		expect(mocks.getPresignedUrl).toHaveBeenCalledWith(
 			'protected-bucket',
@@ -162,7 +132,7 @@ describe('protected asset redirects', () => {
 	it('falls back to game.zip when the friendly GAME filename exceeds 255 bytes', async () => {
 		mocks.findAssetByStorageKey.mockResolvedValue(asset({ kind: 'GAME', title: '가'.repeat(84), memberIds: [1] }));
 
-		await streamProtectedAsset('game.zip', '203.0.113.21', undefined, createReply());
+		await streamProtectedAsset('game.zip', '203.0.113.21', undefined);
 
 		expect(mocks.getPresignedUrl).toHaveBeenCalledWith(
 			'protected-bucket',
@@ -179,18 +149,17 @@ describe('protected asset redirects', () => {
 		const ip = `203.0.113.${kind === 'IMAGE' ? '12' : '13'}`;
 		mocks.findAssetByStorageKey.mockResolvedValue(asset({ kind, creatorId: 7 }));
 
-		await expect(streamProtectedAsset(key, ip, undefined, createReply())).rejects.toMatchObject({
+		await expect(streamProtectedAsset(key, ip, undefined)).rejects.toMatchObject({
 			statusCode: 401,
 			code: 'UNAUTHORIZED',
 		});
 		expect(mocks.limiterCheck).not.toHaveBeenCalled();
 		expect(mocks.getPresignedUrl).not.toHaveBeenCalled();
 
-		const reply = createReply();
-		await streamProtectedAsset(key, ip, { id: 7, role: 'USER' }, reply);
+		const response = await streamProtectedAsset(key, ip, { id: 7, role: 'USER' });
 
 		expect(mocks.limiterCheck).toHaveBeenCalledWith(ip);
-		expect(reply.redirect).toHaveBeenCalledWith(`https://signed.example/protected-bucket/${key}`, 302);
+		expect(response.location).toBe(`https://signed.example/protected-bucket/${key}`);
 	});
 
 	it('does not run the limiter before access checks for unauthorized protected assets', async () => {
@@ -199,7 +168,7 @@ describe('protected asset redirects', () => {
 			throw new AppError(403, 'banned', 'IP_BANNED');
 		});
 
-		await expect(streamProtectedAsset('video.mp4', '203.0.113.14', { id: 9, role: 'USER' }, createReply()))
+		await expect(streamProtectedAsset('video.mp4', '203.0.113.14', { id: 9, role: 'USER' }))
 			.rejects.toMatchObject({
 				statusCode: 403,
 				code: 'FORBIDDEN',
@@ -211,11 +180,10 @@ describe('protected asset redirects', () => {
 	it('does not apply the protected download limiter to public asset redirects', async () => {
 		mocks.findPublicAsset.mockResolvedValue({ storageKey: 'poster.jpg' });
 
-		const reply = createReply();
-		await streamPublicAsset('poster.jpg', reply);
+		const response = await streamPublicAsset('poster.jpg');
 
 		expect(mocks.limiterCheck).not.toHaveBeenCalled();
 		expect(mocks.getPresignedUrl).toHaveBeenCalledWith('public-bucket', 'poster.jpg');
-		expect(reply.redirect).toHaveBeenCalledWith('https://signed.example/public-bucket/poster.jpg', 302);
+		expect(response.location).toBe('https://signed.example/public-bucket/poster.jpg');
 	});
 });

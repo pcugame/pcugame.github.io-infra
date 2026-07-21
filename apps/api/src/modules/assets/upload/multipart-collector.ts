@@ -3,42 +3,40 @@ import { pipeline as streamPipeline } from 'node:stream/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import os from 'node:os';
+import type {
+	getUploadLimits} from '../../../shared/upload-limits.js';
 import {
 	createByteLimiter,
 	fieldnameToKind,
-	getUploadLimits,
 	kindLimit,
 } from '../../../shared/upload-limits.js';
 import { SIZE_LIMITS } from '../../../shared/file-signature.js';
-import type { UploadPipeline } from './upload.service.js';
 import { payloadTooLarge } from '../../../shared/errors.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
+import type { MultipartPart } from '../../../application/http-input.js';
+import type { CollectedUploadFile, UploadPipelinePort } from '../../../application/upload-ports.js';
 
 /** Multipart file part collected during submit */
-export interface CollectedFilePart {
-	tmpPath: string;
-	fieldname: string;
-	filename: string;
-}
+export type CollectedFilePart = CollectedUploadFile;
 
 /**
  * Collect multipart parts from a request stream.
  * Enforces per-file size limits, file count, and total request size.
  */
 export async function collectMultipartParts(
-	parts: AsyncIterable<{ type: string; fieldname: string; value?: unknown; file?: NodeJS.ReadableStream; filename?: string }>,
-	pipeline: UploadPipeline,
+	parts: AsyncIterable<MultipartPart>,
+	pipeline: UploadPipelinePort,
 	limits: ReturnType<typeof getUploadLimits>,
 ): Promise<{ payloadJson: string; fileParts: CollectedFilePart[] }> {
 	let payloadJson = '';
 	const fileParts: CollectedFilePart[] = [];
 	let totalBytes = 0;
 
-	for await (const part of parts as AsyncIterable<any>) {
+	for await (const part of parts) {
 		if (part.type === 'field') {
-			if (part.fieldname === 'payload') payloadJson = part.value as string;
+			if (part.fieldname === 'payload' && typeof part.value === 'string') payloadJson = part.value;
 		} else {
-			const filename = part.filename ?? '';
+			const filename = part.filename;
 			assertValidUploadFilename(filename);
 
 			if (fileParts.length >= limits.maxFiles) {

@@ -1,36 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { createProjectSerializer } from '../modules/admin/project/serializer.js';
+import { isReplaceableAssetKind } from '../modules/admin/project/project-asset.service.js';
 
-// Mock all transitive dependencies that call env() at module load time
-vi.mock('../config/env.js', () => ({
-	env: () => ({
-		API_PUBLIC_URL: 'https://api.example.com',
-		LOG_LEVEL: 'silent',
-		NODE_ENV: 'test',
-	}),
-	loadEnv: () => ({
-		API_PUBLIC_URL: 'https://api.example.com',
-		LOG_LEVEL: 'silent',
-		NODE_ENV: 'test',
-	}),
-}));
-
-vi.mock('../lib/s3.js', () => ({
-	s3: () => ({}),
-	bucketForKind: () => 'test-bucket',
-}));
-
-vi.mock('../lib/storage.js', () => ({
-	deleteObject: vi.fn(),
-	uploadObject: vi.fn(),
-}));
-
-vi.mock('../../assets/upload/index.js', () => ({
-	UploadPipeline: vi.fn(),
-}));
-
-vi.mock('./repository.js', () => ({}));
-
-import { assetUrl, isReplaceableAssetKind, serializeProjectDetail } from '../modules/admin/project/service.js';
+const { assetUrl, serializeProjectDetail } = createProjectSerializer('https://api.example.com');
 
 // ── Helpers ─────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@ import { sendOk, sendCreated } from '../../../shared/http.js';
 import { GameUploadCreateSessionBody, parseBody, parseIntParam } from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
 import { loadProjectWithAccess } from '../project-access.js';
-import * as gameUploadService from './service.js';
+import { gameUploadService } from './runtime.js';
 
 /** Register chunked game-upload routes */
 export async function gameUploadController(app: FastifyInstance): Promise<void> {
@@ -28,7 +28,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			const project = await loadProjectWithAccess(request, projectId);
+			const project = await loadProjectWithAccess(request.currentUser!, projectId);
 			const user = request.currentUser!;
 			const body = parseBody(GameUploadCreateSessionBody, request.body);
 			const result = await gameUploadService.createSession(

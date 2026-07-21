@@ -1,12 +1,15 @@
 import { toSlug } from '../../../shared/slug.js';
-import * as repo from './repository.js';
 
 /** Generate a unique slug for a project within an exhibition */
-export async function generateUniqueSlug(exhibitionId: number, title: string): Promise<string> {
+export async function generateUniqueSlug(
+	repository: { findProjectByExhibitionAndSlug(exhibitionId: number, slug: string): Promise<unknown | null> },
+	exhibitionId: number,
+	title: string,
+): Promise<string> {
 	const baseSlug = toSlug(title);
 	let slug = baseSlug;
 	let attempt = 0;
-	while (await repo.findProjectByExhibitionAndSlug(exhibitionId, slug)) {
+	while (await repository.findProjectByExhibitionAndSlug(exhibitionId, slug)) {
 		attempt++;
 		slug = `${baseSlug}-${attempt}`;
 	}

@@ -1,4 +1,4 @@
-import { PrismaClient } from '../generated/prisma/client.js';
+import type { PrismaClient } from '../generated/prisma/client.js';
 import { logger } from './logger.js';
 import { createPrismaClient } from './prisma-client.js';
 

@@ -1,6 +1,14 @@
 import { prisma } from '../../lib/prisma.js';
 import type { UserRole } from '../../generated/prisma/client.js';
 
+/** Resolve a cookie session and its actor in one query. */
+export function findSessionWithUser(id: string) {
+	return prisma.authSession.findUnique({
+		where: { id },
+		include: { user: true },
+	});
+}
+
 /** Upsert a user by Google subject ID, updating profile on each login */
 export function upsertUserByGoogleSub(data: {
 	googleSub: string;

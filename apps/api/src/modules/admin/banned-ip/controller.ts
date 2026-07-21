@@ -3,7 +3,7 @@ import type { BannedIpListResponse } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { parseIntParam } from '../../../shared/validation.js';
 import { requireRole } from '../../../plugins/auth.js';
-import * as bannedIpService from './service.js';
+import { bannedIpService } from './runtime.js';
 
 /** Register banned-IP management routes (OPERATOR/ADMIN only) */
 export async function bannedIpController(app: FastifyInstance): Promise<void> {

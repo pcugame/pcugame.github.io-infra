@@ -11,15 +11,16 @@ vi.mock('../config/env.js', () => ({
 	loadEnv: () => ({ ...defaultTestEnv }),
 }));
 
-vi.mock('../modules/admin/project/service.js', () => ({
-	listProjects: mocks.listProjects,
-	assertStatusTransition: vi.fn(),
-	bulkUpdateStatus: vi.fn(),
-	submitProject: vi.fn(),
-	addAssetToProject: vi.fn(),
-	setPoster: vi.fn(),
-	deleteProject: vi.fn(),
-	bulkDeleteProjects: vi.fn(),
+vi.mock('../modules/admin/project/runtime.js', () => ({
+	projectService: {
+		listProjects: mocks.listProjects,
+		assertStatusTransition: vi.fn(),
+		bulkUpdateStatus: vi.fn(),
+		setPoster: vi.fn(),
+		deleteProject: vi.fn(),
+		deleteWebgl: vi.fn(),
+		bulkDeleteProjects: vi.fn(),
+	},
 }));
 
 vi.mock('../modules/admin/project/repository.js', () => ({

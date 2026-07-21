@@ -5,9 +5,8 @@ import { env } from '../../config/env.js';
 import { logger } from '../../lib/logger.js';
 import {
 	downloadObject,
-	safeDeleteObject,
-	safeDeletePrefix,
 } from '../../lib/storage.js';
+import { safeDeleteObject, safeDeletePrefix } from '../../object-deletion.js';
 import { badRequest } from '../../shared/errors.js';
 import { validateWebglZipArchiveObject } from '../assets/upload/zip-validation.js';
 import { analyzeWebglArchive, uploadWebglArchive } from './archive.js';

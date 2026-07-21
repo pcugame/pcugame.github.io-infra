@@ -1,9 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import fastifyMultipart from '@fastify/multipart';
-import { env } from '../config/env.js';
+import type { Env } from '../config/env.js';
 
-export async function registerMultipart(app: FastifyInstance): Promise<void> {
-  const cfg = env();
+export async function registerMultipart(app: FastifyInstance, cfg: Env): Promise<void> {
   // Global ceiling = privileged game max (the absolute largest single file
   // any user can upload).  Per-file and per-request role-based limits are
   // enforced in the route handlers via streaming byte limiters.

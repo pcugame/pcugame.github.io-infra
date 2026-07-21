@@ -1,10 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import fastifyCors from '@fastify/cors';
-import { env } from '../config/env.js';
+import type { Env } from '../config/env.js';
 
-export async function registerCors(app: FastifyInstance): Promise<void> {
+declare module 'fastify' {
+	interface FastifyContextConfig {
+		cors?: boolean;
+	}
+}
+
+export async function registerCors(app: FastifyInstance, config: Env): Promise<void> {
 	await app.register(fastifyCors, {
-		origin: env().CORS_ALLOWED_ORIGINS,
+		origin: config.CORS_ALLOWED_ORIGINS,
 		credentials: true,
 		methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
 		allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],

@@ -37,5 +37,6 @@ apps/web/src/pages/admin/AdminPreview.tsx
 !**/README.md
 !**/Readme.md
 !**/readme.md
+!docs/backend-audit.md
 !*.md.example
 !**/*.md.example

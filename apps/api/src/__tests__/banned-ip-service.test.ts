@@ -1,25 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createBannedIpService } from '../modules/admin/banned-ip/service.js';
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	findAllBannedIps: vi.fn(),
 	findBannedIpById: vi.fn(),
 	deleteBannedIp: vi.fn(),
 	removeBan: vi.fn(),
-}));
+};
 
-vi.mock('../shared/protected-download-limiter.js', () => ({
-	protectedDownloadLimiter: {
-		removeBan: mocks.removeBan,
+const service = createBannedIpService({
+	repository: {
+		findAllBannedIps: mocks.findAllBannedIps,
+		findBannedIpById: mocks.findBannedIpById,
+		deleteBannedIp: mocks.deleteBannedIp,
 	},
-}));
-
-vi.mock('../modules/admin/banned-ip/repository.js', () => ({
-	findAllBannedIps: mocks.findAllBannedIps,
-	findBannedIpById: mocks.findBannedIpById,
-	deleteBannedIp: mocks.deleteBannedIp,
-}));
-
-import { listBannedIps, unbanIp } from '../modules/admin/banned-ip/service.js';
+	banCache: { remove: mocks.removeBan },
+});
 
 describe('banned IP service', () => {
 	beforeEach(() => {
@@ -36,7 +32,7 @@ describe('banned IP service', () => {
 			},
 		]);
 
-		await expect(listBannedIps()).resolves.toEqual([
+		await expect(service.listBannedIps()).resolves.toEqual([
 			{
 				id: 1,
 				ip: '203.0.113.10',
@@ -52,7 +48,7 @@ describe('banned IP service', () => {
 			ip: '203.0.113.20',
 		});
 
-		await unbanIp(7);
+		await service.unbanIp(7);
 
 		expect(mocks.deleteBannedIp).toHaveBeenCalledWith(7);
 		expect(mocks.removeBan).toHaveBeenCalledWith('203.0.113.20');
@@ -61,7 +57,7 @@ describe('banned IP service', () => {
 	it('throws 404 when the banned IP record does not exist', async () => {
 		mocks.findBannedIpById.mockResolvedValue(null);
 
-		await expect(unbanIp(404)).rejects.toMatchObject({
+		await expect(service.unbanIp(404)).rejects.toMatchObject({
 			statusCode: 404,
 			code: 'NOT_FOUND',
 		});

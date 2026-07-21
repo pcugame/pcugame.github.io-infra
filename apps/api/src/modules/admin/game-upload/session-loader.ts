@@ -1,12 +1,14 @@
-import { env } from '../../../config/env.js';
-import { logger } from '../../../lib/logger.js';
-import { abortMultipartUpload } from '../../../lib/storage.js';
 import { badRequest, forbidden, notFound } from '../../../shared/errors.js';
-import * as repo from './repository.js';
+import type { GameUploadServiceDependencies } from './ports.js';
 
 /** Load and validate a session (ownership, expiry) */
-export async function loadSession(sessionId: string, userId: number, userRole: string) {
-	const session = await repo.findSessionById(sessionId);
+export async function loadSession(
+	deps: Pick<GameUploadServiceDependencies, 'clock' | 'logger' | 'repository' | 'storage'>,
+	sessionId: string,
+	userId: number,
+	userRole: string,
+) {
+	const session = await deps.repository.findSessionById(sessionId);
 	if (!session) throw notFound('Upload session not found');
 
 	const isPrivileged = userRole === 'ADMIN' || userRole === 'OPERATOR';
@@ -14,11 +16,13 @@ export async function loadSession(sessionId: string, userId: number, userRole: s
 		throw forbidden('Not your upload session');
 	}
 
-	if (session.expiresAt < new Date()) {
-		await repo.cancelSessionAndClearActive(session.id);
-		if (session.s3UploadId && session.s3Key) {
-			await abortMultipartUpload(env().S3_BUCKET_PROTECTED, session.s3Key, session.s3UploadId).catch((err) => {
-				logger().error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to abort multipart upload for expired session');
+	if (session.expiresAt < deps.clock.now()) {
+		const cancelled = await deps.repository.cancelSessionAndClearActive(session.id);
+		// A completion may win after the read above. Only abort the multipart upload
+		// when our PENDING -> CANCELLED compare-and-set actually succeeded.
+		if (cancelled.count === 1 && session.s3UploadId && session.s3Key) {
+			await deps.storage.abortMultipart(session.s3Key, session.s3UploadId).catch((err) => {
+				deps.logger.error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to abort multipart upload for expired session');
 			});
 		}
 		throw badRequest('Upload session has expired');

@@ -33,5 +33,30 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Architecture boundaries
+        run: npm run architecture
+
+      - name: Workspace dependency audit
+        run: npm audit --audit-level=high
+
       - name: Build
         run: npm run build
+
+  integration:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: PostgreSQL + Garage integration smoke
+        run: npm run test:integration
+
+      - name: Tear down integration services
+        if: always()
+        run: docker compose -f docker-compose.integration.yml down -v --remove-orphans

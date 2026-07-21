@@ -1,13 +1,40 @@
-import { OAuth2Client } from 'google-auth-library';
-import type { UserRole } from '../../generated/prisma/client.js';
-import { env } from '../../config/env.js';
+import type { UserRole } from '@pcu/contracts';
+import type { Clock, GoogleTokenVerifier } from '../../application/ports.js';
 import { API_ERROR_CODES, forbidden, unauthorized } from '../../shared/errors.js';
-import { absoluteSessionExpiresAt, generateSessionId } from '../../shared/session.js';
-import { logger } from '../../lib/logger.js';
-import * as repo from './repository.js';
 import { extractStudentIdFromEmail } from './student-id.js';
 
-const oauthClient = new OAuth2Client();
+export interface AuthUserRecord {
+	id: number;
+	email: string;
+	name: string;
+	role: UserRole;
+	studentId: string | null;
+}
+
+export interface AuthRepository {
+	upsertUserByGoogleSub(data: {
+		googleSub: string;
+		email: string;
+		name: string;
+		picture: string;
+		studentId?: string;
+	}): Promise<AuthUserRecord>;
+	upsertDevUser(data: {
+		googleSub: string;
+		email: string;
+		name: string;
+		role: UserRole;
+		studentId?: string | null;
+	}): Promise<AuthUserRecord>;
+	createSession(data: { id: string; userId: number; expiresAt: Date }): Promise<unknown>;
+	deleteSession(id: string): Promise<unknown>;
+}
+
+export interface AuthServiceLogger {
+	info(context: Record<string, unknown>, message: string): void;
+	warn(context: Record<string, unknown>, message: string): void;
+	error(context: Record<string, unknown>, message: string): void;
+}
 
 const DEV_AUTH_USERS: Record<UserRole, {
 	googleSub: string;
@@ -33,78 +60,89 @@ const DEV_AUTH_USERS: Record<UserRole, {
 	},
 };
 
-// UCM 정책으로 이름 뒤에 학과명이 붙어 오는 경우 제거
 const DEPT_SUFFIXES = /(?:소프트웨어공학부|게임공학전공|게임공학과|컴퓨터공학과|정보통신공학과|공학부|공학과|학부|학과|전공)$/;
 
-/** Strip university department suffix from Google profile name */
-function stripDeptSuffix(name: string): string {
+export function stripDeptSuffix(name: string): string {
 	const stripped = name.replace(DEPT_SUFFIXES, '');
 	return stripped || name;
 }
 
-async function createSessionForUser(userId: number) {
-	const sessionId = generateSessionId();
-	const expiresAt = absoluteSessionExpiresAt();
-	await repo.createSession({ id: sessionId, userId, expiresAt });
-	return { sessionId, expiresAt };
-}
-
-/**
- * Verify a Google ID token, upsert the user, and create a session.
- * Returns the user data and session cookie info.
- */
-export async function loginWithGoogle(credential: string) {
-	const cfg = env();
-
-	let payload;
-	try {
-		const ticket = await oauthClient.verifyIdToken({
-			idToken: credential,
-			audience: cfg.GOOGLE_CLIENT_IDS,
-		});
-		payload = ticket.getPayload();
-	} catch (err) {
-		logger().error({ err, configuredAudience: cfg.GOOGLE_CLIENT_IDS }, 'Google token verification failed');
-		throw unauthorized('Invalid Google token');
+export function createAuthService(deps: {
+	repository: AuthRepository;
+	googleTokens: GoogleTokenVerifier;
+	clock: Clock;
+	generateSessionId: () => string;
+	sessionAbsoluteMs: number;
+	googleClientIds: string[];
+	allowedGoogleHostedDomain: string;
+	logger: AuthServiceLogger;
+}) {
+	async function createSessionForUser(userId: number) {
+		const sessionId = deps.generateSessionId();
+		const expiresAt = new Date(deps.clock.now().getTime() + deps.sessionAbsoluteMs);
+		await deps.repository.createSession({ id: sessionId, userId, expiresAt });
+		return { sessionId, expiresAt };
 	}
 
-	if (!payload?.sub || !payload.email) throw unauthorized('Invalid token payload');
+	return {
+		async loginWithGoogle(credential: string) {
+			let payload;
+			try {
+				payload = await deps.googleTokens.verify(credential, deps.googleClientIds);
+			} catch (err) {
+				// OAuth library errors can embed request metadata. Keep credentials and
+				// configured client identifiers out of logs while retaining diagnostics.
+				deps.logger.error(
+					{ errorType: err instanceof Error ? err.name : 'unknown', audienceCount: deps.googleClientIds.length },
+					'Google token verification failed',
+				);
+				throw unauthorized('Invalid Google token');
+			}
 
-	logger().info({ email: payload.email, hd: payload.hd, allowedHd: cfg.ALLOWED_GOOGLE_HD }, 'Google login attempt');
+			if (!payload?.sub || !payload.email) throw unauthorized('Invalid token payload');
 
-	if (cfg.ALLOWED_GOOGLE_HD && payload.hd !== cfg.ALLOWED_GOOGLE_HD) {
-		logger().warn({ hd: payload.hd, allowedHd: cfg.ALLOWED_GOOGLE_HD }, 'Email domain rejected');
-		throw forbidden('Email domain not allowed', API_ERROR_CODES.EMAIL_DOMAIN_NOT_ALLOWED);
-	}
+			deps.logger.info(
+				{
+					hasHostedDomain: Boolean(payload.hd),
+					hostedDomainAccepted: !deps.allowedGoogleHostedDomain
+						|| payload.hd === deps.allowedGoogleHostedDomain,
+				},
+				'Google login attempt',
+			);
 
-	const cleanName = stripDeptSuffix(payload.name ?? '');
-	const studentId = extractStudentIdFromEmail(payload.email);
+			if (deps.allowedGoogleHostedDomain && payload.hd !== deps.allowedGoogleHostedDomain) {
+				deps.logger.warn(
+					{ hasHostedDomain: Boolean(payload.hd) },
+					'Email domain rejected',
+				);
+				throw forbidden('Email domain not allowed', API_ERROR_CODES.EMAIL_DOMAIN_NOT_ALLOWED);
+			}
 
-	const user = await repo.upsertUserByGoogleSub({
-		googleSub: payload.sub,
-		email: payload.email,
-		name: cleanName,
-		picture: payload.picture ?? '',
-		studentId,
-	});
+			const user = await deps.repository.upsertUserByGoogleSub({
+				googleSub: payload.sub,
+				email: payload.email,
+				name: stripDeptSuffix(payload.name ?? ''),
+				picture: payload.picture ?? '',
+				studentId: extractStudentIdFromEmail(payload.email),
+			});
+			return { user, ...(await createSessionForUser(user.id)) };
+		},
 
-	const { sessionId, expiresAt } = await createSessionForUser(user.id);
+		async loginForDevRole(role: UserRole) {
+			const profile = DEV_AUTH_USERS[role];
+			const user = await deps.repository.upsertDevUser({ ...profile, role });
+			return { user, ...(await createSessionForUser(user.id)) };
+		},
 
-	return { user, sessionId, expiresAt };
-}
-
-/** Create a real session for a fixed dev/test user role without Google. */
-export async function loginForDevRole(role: UserRole) {
-	const profile = DEV_AUTH_USERS[role];
-	const user = await repo.upsertDevUser({ ...profile, role });
-	const { sessionId, expiresAt } = await createSessionForUser(user.id);
-
-	return { user, sessionId, expiresAt };
-}
-
-/** Delete a session by cookie ID (logout) */
-export async function logout(sessionId: string | undefined) {
-	if (sessionId) {
-		await repo.deleteSession(sessionId).catch(() => {});
-	}
+		async logout(sessionId: string | undefined): Promise<void> {
+			if (sessionId) {
+				await deps.repository.deleteSession(sessionId).catch((err) => {
+					deps.logger.warn(
+						{ errorType: err instanceof Error ? err.name : 'unknown' },
+						'Failed to delete logout session',
+					);
+				});
+			}
+		},
+	};
 }

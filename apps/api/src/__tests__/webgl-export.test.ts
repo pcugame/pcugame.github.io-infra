@@ -15,14 +15,14 @@ vi.mock('../config/env.js', () => ({
 	loadEnv: () => ({ ...defaultTestEnv }),
 }));
 vi.mock('../modules/admin/export/repository.js', () => ({
-	findProjectsWithAssets: mocks.findProjectsWithAssets,
+	createExportRepository: () => ({ findProjectsWithAssets: mocks.findProjectsWithAssets }),
 }));
 vi.mock('../lib/s3.js', () => ({
 	s3: () => ({ send: mocks.s3Send }),
 	bucketForKind: vi.fn(() => 'bucket'),
 }));
 
-import { exportAssets, getExportProgress } from '../modules/admin/export/service.js';
+import { exportAssets, getExportProgress } from '../modules/admin/export/runtime.js';
 
 const tempDirs: string[] = [];
 

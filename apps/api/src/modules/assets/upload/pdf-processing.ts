@@ -53,7 +53,9 @@ export async function processPdf(
       .webp({ quality: WEBP_QUALITY })
       .toFile(outputPath);
   } catch (err) {
-    await fsp.unlink(outputPath).catch(() => {});
+		await fsp.unlink(outputPath).catch((cleanupError) => {
+			logger().warn({ err: cleanupError, outputPath }, 'Failed to remove partial PDF raster');
+		});
     throw translatePdfError(err);
   }
 

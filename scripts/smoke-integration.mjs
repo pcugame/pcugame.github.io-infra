@@ -288,6 +288,19 @@ if (!activeKinds.has('GAME') || !activeKinds.has('WEBGL')) {
 }
 console.log('ok: GAME and WEBGL upload sessions coexist independently');
 
+const missingChunkComplete = await fetch(
+  `${apiBase}/api/admin/game-upload-sessions/${gameSession.sessionId}/complete`,
+  { method: 'POST', headers: { Cookie: cookie, Origin: origin } },
+);
+if (missingChunkComplete.status !== 400) {
+  throw new Error(`missing-chunk completion returned ${missingChunkComplete.status}`);
+}
+const missingChunkBody = await missingChunkComplete.json();
+if (missingChunkBody?.error?.code !== 'ERROR') {
+  throw new Error('missing-chunk completion did not preserve the existing ERROR envelope');
+}
+console.log('ok: completion rejects sessions with missing chunks');
+
 await fetchJson(`${apiBase}/api/admin/game-upload-sessions/${gameSession.sessionId}`, {
   method: 'DELETE',
   headers: { Cookie: cookie, Origin: origin },
@@ -305,10 +318,24 @@ await fetchJson(
     body: webglZip,
   },
 );
-const { body: webglComplete } = await fetchJson(
-  `${apiBase}/api/admin/game-upload-sessions/${webglSession.sessionId}/complete`,
-  { method: 'POST', headers: { Cookie: cookie, Origin: origin } },
-);
+const completionUrl = `${apiBase}/api/admin/game-upload-sessions/${webglSession.sessionId}/complete`;
+const completionOptions = { method: 'POST', headers: { Cookie: cookie, Origin: origin } };
+const completionResponses = await Promise.all([
+  fetch(completionUrl, completionOptions),
+  fetch(completionUrl, completionOptions),
+]);
+const completionStatuses = completionResponses.map((response) => response.status).sort((a, b) => a - b);
+if (completionStatuses[0] !== 200 || completionStatuses[1] !== 400) {
+  throw new Error(`concurrent completion returned ${completionStatuses.join(', ')}`);
+}
+const successfulCompletion = completionResponses.find((response) => response.status === 200);
+const rejectedCompletion = completionResponses.find((response) => response.status === 400);
+const webglComplete = await successfulCompletion.json();
+const duplicateComplete = await rejectedCompletion.json();
+if (duplicateComplete?.error?.code !== 'ERROR') {
+  throw new Error('duplicate completion did not preserve the existing ERROR envelope');
+}
+console.log('ok: concurrent completion has exactly one winner');
 const webglUrl = webglComplete?.data?.webglUrl;
 if (typeof webglUrl !== 'string') throw new Error('WebGL completion did not return webglUrl');
 const hostedWebglUrl = integrationApiUrl(webglUrl);
@@ -330,7 +357,10 @@ const webglCsp = hostedIndex.headers.get('content-security-policy') || '';
 if (!webglCsp.includes(`frame-ancestors ${new URL(origin).origin}`)) {
   throw new Error(`WebGL index returned an unexpected CSP: ${webglCsp}`);
 }
-const webglAssetSource = `${new URL(apiBase).origin}/api/public/webgl/`;
+// The container reaches the API as `http://api:4000`, while generated public
+// URLs intentionally use the browser-facing API_PUBLIC_URL (`localhost`). CSP
+// must be asserted against the wire contract, not the test runner's route.
+const webglAssetSource = `${new URL(webglUrl).origin}/api/public/webgl/`;
 if (!webglCsp.includes(`connect-src ${webglAssetSource}`) || webglCsp.includes("connect-src 'self'")) {
   throw new Error(`WebGL index did not isolate asset connections: ${webglCsp}`);
 }

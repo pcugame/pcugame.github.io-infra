@@ -1,68 +1,57 @@
-import { prisma } from '../../../lib/prisma.js';
-import type { Prisma, PrismaClient } from '../../../generated/prisma/client.js';
+import type { PrismaClient } from '../../../generated/prisma/client.js';
+import type {
+	ImportProjectCreate,
+	ImportRepository,
+	ImportTransactionRepository,
+} from './service.js';
 
-type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+type TransactionClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
-/** Find exhibition by unique (year, title) pair within a transaction */
-export function findExhibitionByComposite(tx: Tx, year: number, title: string) {
-	return tx.exhibition.findUnique({
-		where: { year_title: { year, title } },
-		include: { _count: { select: { projects: true } } },
-	});
-}
+function createTransactionRepository(tx: TransactionClient): ImportTransactionRepository {
+	return {
+		findExhibitionByComposite: (year, title) => tx.exhibition.findUnique({
+			where: { year_title: { year, title } },
+			include: { _count: { select: { projects: true } } },
+		}),
 
-/** Upsert exhibition — create if not exists, leave existing untouched */
-export function upsertExhibition(
-	tx: Tx,
-	data: { year: number; title: string; isUploadEnabled?: boolean },
-) {
-	return tx.exhibition.upsert({
-		where: { year_title: { year: data.year, title: data.title } },
-		update: {},
-		create: {
-			year: data.year,
-			title: data.title,
-			isUploadEnabled: data.isUploadEnabled ?? true,
-		},
-	});
-}
-
-/** Check if a project with given exhibition+slug already exists */
-export function findProjectBySlug(tx: Tx, exhibitionId: number, slug: string) {
-	return tx.project.findUnique({
-		where: { project_exhibition_slug: { exhibitionId, slug } },
-	});
-}
-
-/** Create a project with members in one call */
-export function createProjectWithMembers(
-	tx: Tx,
-	data: {
-		exhibitionId: number;
-		slug: string;
-		title: string;
-		summary: string;
-		description: string;
-		isIncomplete: boolean;
-		status: 'PUBLISHED' | 'ARCHIVED';
-		githubUrl: string;
-		platforms: ('PC' | 'MOBILE' | 'WEB')[];
-		creatorId: number;
-		members: { name: string; studentId: string; sortOrder: number }[];
-	},
-) {
-	const { members, ...projectData } = data;
-	return tx.project.create({
-		data: {
-			...projectData,
-			members: {
-				create: members,
+		upsertExhibition: (data) => tx.exhibition.upsert({
+			where: { year_title: { year: data.year, title: data.title } },
+			update: {},
+			create: {
+				year: data.year,
+				title: data.title,
+				isUploadEnabled: data.isUploadEnabled ?? true,
 			},
+		}),
+
+		findProjectBySlug: (exhibitionId, slug) => tx.project.findUnique({
+			where: { project_exhibition_slug: { exhibitionId, slug } },
+			select: { id: true },
+		}),
+
+		createProjectWithMembers: (data: ImportProjectCreate) => {
+			const { members, ...projectData } = data;
+			return tx.project.create({
+				data: {
+					...projectData,
+					members: { create: members },
+				},
+			});
 		},
-	});
+	};
 }
 
-/** Run a callback inside a Prisma interactive transaction */
-export function runTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-	return prisma.$transaction(fn, { timeout: 30_000 });
+/** Prisma adapter. Interactive transaction details stay behind this port. */
+export function createImportRepository(client: PrismaClient): ImportRepository {
+	return {
+		findExhibitionForPreview: (year, title) => client.exhibition.findUnique({
+			where: { year_title: { year, title } },
+			include: { _count: { select: { projects: true } } },
+		}),
+
+		runTransaction: (work) => client.$transaction(
+			(tx) => work(createTransactionRepository(tx)),
+			{ timeout: 30_000 },
+		),
+	};
 }

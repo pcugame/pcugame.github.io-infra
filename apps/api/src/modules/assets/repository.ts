@@ -1,73 +1,90 @@
+import type { PrismaClient } from '../../generated/prisma/client.js';
 import { prisma } from '../../lib/prisma.js';
 
-/** Find a public, READY asset by storageKey */
-export function findPublicAsset(storageKey: string) {
-	return prisma.asset.findFirst({
-		where: { storageKey, isPublic: true, status: 'READY' },
-	});
-}
-
-/** Find any READY asset by storageKey (including protected) */
-export function findAssetByStorageKey(storageKey: string) {
-	return prisma.asset.findFirst({
-		where: {
-			status: 'READY',
-			OR: [
-				{ storageKey },
-				{ playbackStorageKey: storageKey },
-			],
+export function createAssetsRepository(client: PrismaClient) {
+	return {
+		/** Find a public, READY asset by storageKey */
+		findPublicAsset(storageKey: string) {
+			return client.asset.findFirst({
+				where: { storageKey, isPublic: true, status: 'READY' },
+			});
 		},
-		include: {
-			project: {
-				select: {
-					creatorId: true,
-					title: true,
-					status: true,
-					members: {
-						select: { id: true, userId: true, name: true, studentId: true, sortOrder: true },
-						orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+
+		/** Find any READY asset by storageKey (including protected) */
+		findAssetByStorageKey(storageKey: string) {
+			return client.asset.findFirst({
+				where: {
+					status: 'READY',
+					OR: [
+						{ storageKey },
+						{ playbackStorageKey: storageKey },
+					],
+				},
+				include: {
+					project: {
+						select: {
+							creatorId: true,
+							title: true,
+							status: true,
+							members: {
+								select: { id: true, userId: true, name: true, studentId: true, sortOrder: true },
+								orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+							},
+						},
 					},
 				},
-			},
+			});
 		},
-	});
+
+		/** Find an asset by ID with its project relation */
+		findAssetByIdWithProject(id: number) {
+			return client.asset.findUnique({
+				where: { id },
+				include: { project: true },
+			});
+		},
+
+		/** Mark an asset as DELETING */
+		markAssetDeleting(id: number) {
+			return client.asset.update({ where: { id }, data: { status: 'DELETING' } });
+		},
+
+		/** Mark an asset as DELETED */
+		markAssetDeleted(id: number) {
+			return client.asset.update({ where: { id }, data: { status: 'DELETED' } });
+		},
+
+		/** Clear poster reference only if it still matches the deleted asset. */
+		clearPosterIfMatches(projectId: number, assetId: number) {
+			return client.project.updateMany({
+				where: { id: projectId, posterAssetId: assetId },
+				data: { posterAssetId: null },
+			});
+		},
+
+		/** Upsert a banned IP record */
+		upsertBannedIp(ip: string, reason: string) {
+			return client.bannedIp.upsert({
+				where: { ip },
+				create: { ip, reason },
+				update: {},
+			});
+		},
+
+		/** Load all banned IPs (for in-memory cache init) */
+		findAllBannedIps() {
+			return client.bannedIp.findMany({ select: { ip: true } });
+		},
+	};
 }
 
-/** Find an asset by ID with its project relation */
-export function findAssetByIdWithProject(id: number) {
-	return prisma.asset.findUnique({
-		where: { id },
-		include: { project: true },
-	});
-}
-
-/** Mark an asset as DELETING */
-export function markAssetDeleting(id: number) {
-	return prisma.asset.update({ where: { id }, data: { status: 'DELETING' } });
-}
-
-/** Mark an asset as DELETED */
-export function markAssetDeleted(id: number) {
-	return prisma.asset.update({ where: { id }, data: { status: 'DELETED' } });
-}
-
-/** Clear poster reference if it matches the given asset */
-export function clearPosterIfMatches(projectId: number, assetId: number) {
-	return prisma.project
-		.update({ where: { id: projectId }, data: { posterAssetId: null } })
-		.catch(() => {});
-}
-
-/** Upsert a banned IP record */
-export function upsertBannedIp(ip: string, reason: string) {
-	return prisma.bannedIp.upsert({
-		where: { ip },
-		create: { ip, reason },
-		update: {},
-	});
-}
-
-/** Load all banned IPs (for in-memory cache init) */
-export function findAllBannedIps() {
-	return prisma.bannedIp.findMany({ select: { ip: true } });
-}
+export const {
+	findPublicAsset,
+	findAssetByStorageKey,
+	findAssetByIdWithProject,
+	markAssetDeleting,
+	markAssetDeleted,
+	clearPosterIfMatches,
+	upsertBannedIp,
+	findAllBannedIps,
+} = createAssetsRepository(prisma);

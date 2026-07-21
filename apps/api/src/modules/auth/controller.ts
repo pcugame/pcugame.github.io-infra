@@ -4,7 +4,7 @@ import { env } from '../../config/env.js';
 import { sendOk } from '../../shared/http.js';
 import { parseBody, GoogleLoginBody } from '../../shared/validation.js';
 import { cookieExpiresAt } from '../../shared/session.js';
-import * as authService from './service.js';
+import { authService } from './runtime.js';
 
 /** Register authentication routes (Google OAuth, logout, /me) */
 export async function authController(app: FastifyInstance): Promise<void> {
@@ -26,7 +26,7 @@ export async function authController(app: FastifyInstance): Promise<void> {
 			secure: cfg.COOKIE_SECURE,
 			sameSite: cfg.COOKIE_SAME_SITE,
 			path: '/',
-			expires: cookieExpiresAt({ expiresAt }),
+			expires: cookieExpiresAt({ expiresAt }, new Date(), cfg.SESSION_IDLE_MS),
 		});
 
 		sendOk<GoogleAuthResponse>(reply, {

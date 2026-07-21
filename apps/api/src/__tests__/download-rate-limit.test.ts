@@ -5,7 +5,7 @@ import { AppError } from '../shared/errors.js';
 describe('DownloadRateLimiter', () => {
 	const limiters: DownloadRateLimiter[] = [];
 
-	function create(opts?: { windowMs?: number; maxHits?: number }) {
+	function create(opts?: ConstructorParameters<typeof DownloadRateLimiter>[0]) {
 		const l = new DownloadRateLimiter(opts);
 		limiters.push(l);
 		return l;
@@ -93,11 +93,15 @@ describe('DownloadRateLimiter', () => {
 	});
 
 	it('resets after window expires', () => {
-		const limiter = create({ maxHits: 1, windowMs: 1 });
+		let now = new Date('2026-07-21T00:00:00.000Z');
+		const limiter = create({
+			maxHits: 1,
+			windowMs: 1_000,
+			clock: { now: () => now },
+		});
 		limiter.check('1.2.3.4');
 
-		const start = Date.now();
-		while (Date.now() - start < 5) { /* busy wait 5ms */ }
+		now = new Date('2026-07-21T00:00:01.001Z');
 
 		expect(limiter.check('1.2.3.4')).toBe('ok');
 	});

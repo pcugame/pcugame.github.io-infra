@@ -199,6 +199,8 @@ model GameUploadSession {
   chunkSizeBytes Int        @map("chunk_size_bytes")
   totalChunks    Int        @map("total_chunks")
   uploadedChunks Int[]      @default([]) @map("uploaded_chunks")
+  // DB CHECK constraint `game_upload_sessions_status_check` limits this to the
+  // states in state-machine.ts. Prisma cannot model this check in the DSL.
   status         String     @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED | FAILED
   stagingPath    String     @default("") @map("staging_path") // legacy, no longer used
   storageKey     String?    @map("storage_key") // set on completion

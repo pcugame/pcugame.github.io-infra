@@ -1,6 +1,5 @@
-import type { ProjectStatus } from '../../../generated/prisma/client.js';
+import type { ProjectStatus } from '@pcu/contracts';
 import { forbidden } from '../../../shared/errors.js';
-import * as repo from './repository.js';
 
 /**
  * Validate that a status transition is allowed for the given role.
@@ -19,7 +18,11 @@ export function assertStatusTransition(
 }
 
 /** Bulk update project status */
-export async function bulkUpdateStatus(ids: number[], status: ProjectStatus) {
-	const result = await repo.bulkUpdateStatus(ids, status);
+export async function bulkUpdateStatus(
+	repository: { bulkUpdateStatus(ids: number[], status: ProjectStatus): Promise<{ count: number }> },
+	ids: number[],
+	status: ProjectStatus,
+) {
+	const result = await repository.bulkUpdateStatus(ids, status);
 	return { updated: result.count };
 }

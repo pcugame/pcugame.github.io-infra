@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { SiteSettingsData } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { requireRole } from '../../../plugins/auth.js';
-import * as settingsService from './service.js';
+import { settingsService } from './runtime.js';
 
 /** Register site-settings management routes (OPERATOR/ADMIN only) */
 export async function settingsController(app: FastifyInstance): Promise<void> {
