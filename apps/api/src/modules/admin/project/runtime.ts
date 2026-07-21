@@ -1,7 +1,7 @@
 import { env } from '../../../config/env.js';
 import { logger } from '../../../lib/logger.js';
 import { abortMultipartUpload } from '../../../lib/storage.js';
-import { cleanupWebglDeployment, cleanupWebglEntry } from '../../webgl/deployment.js';
+import { deleteWebglDeployment, deleteWebglDeploymentByEntry } from '../../webgl/deployment.js';
 import { deleteAssetObjects } from './asset-cleanup.js';
 import * as repository from './repository.js';
 import { serializeProjectDetail } from './serializer.runtime.js';
@@ -20,8 +20,8 @@ function service() {
 			key,
 			uploadId,
 		),
-		cleanupWebglEntry,
-		cleanupWebglDeployment,
+		deleteWebglDeploymentByEntry,
+		deleteWebglDeployment,
 		logger: { error: (context, message) => logger().error(context, message) },
 	});
 	return projectCrudService;

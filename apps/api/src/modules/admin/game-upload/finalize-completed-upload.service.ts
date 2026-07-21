@@ -1,7 +1,7 @@
 import type { GameUploadCompleteResponse, UploadKind } from '@pcu/contracts';
 import { AppError, badRequest } from '../../../shared/errors.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
-import type { WebglDeploymentKeys } from '../../webgl/paths.js';
+import type { WebglDeploymentKeys, WebglPublicDeploymentKeys } from '../../webgl/paths.js';
 
 export interface CompletedUploadSession {
 	id: string;
@@ -25,8 +25,8 @@ export function createCompletedUploadFinalizer(deps: {
 	readHeader(key: string): Promise<Buffer>;
 	validateGameArchive(key: string, size: number): Promise<void>;
 	deployWebgl(projectId: number, key: string, size: number): Promise<WebglDeploymentKeys>;
-	cleanupWebglDeployment(keys: WebglDeploymentKeys, reason: string): Promise<void>;
-	cleanupWebglEntry(projectId: number, entryKey: string, reason: string): Promise<void>;
+	rollbackWebglPublicDeployment(keys: WebglPublicDeploymentKeys, reason: string): Promise<void>;
+	deleteWebglDeploymentByEntry(projectId: number, entryKey: string, reason: string): Promise<void>;
 	finalizeGame(
 		session: CompletedUploadSession,
 	): Promise<{ oldStorageKey: string | null; oldPlaybackStorageKey: string | null }>;
@@ -61,7 +61,7 @@ export function createCompletedUploadFinalizer(deps: {
 					deployment = await deps.deployWebgl(session.projectId, session.s3Key, object.size);
 					const result = await deps.finalizeWebgl(session, deployment);
 					if (result.oldEntryKey && result.oldEntryKey !== deployment.entryKey) {
-						await deps.cleanupWebglEntry(
+						await deps.deleteWebglDeploymentByEntry(
 							session.projectId,
 							result.oldEntryKey,
 							'webgl-upload-replace-previous',
@@ -78,7 +78,10 @@ export function createCompletedUploadFinalizer(deps: {
 					};
 				} catch (err) {
 					if (deployment) {
-						await deps.cleanupWebglDeployment(deployment, 'webgl-upload-finalization-failed');
+						await deps.rollbackWebglPublicDeployment(
+							deployment,
+							'webgl-upload-finalization-failed-site',
+						);
 					}
 					throw err;
 				}

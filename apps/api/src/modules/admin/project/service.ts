@@ -17,8 +17,8 @@ export interface ProjectServiceDependencies {
 		reason: string,
 	): Promise<void>;
 	abortMultipart(key: string, uploadId: string): Promise<void>;
-	cleanupWebglEntry(projectId: number, entryKey: string, reason: string): Promise<void>;
-	cleanupWebglDeployment(
+	deleteWebglDeploymentByEntry(projectId: number, entryKey: string, reason: string): Promise<void>;
+	deleteWebglDeployment(
 		keys: NonNullable<ReturnType<typeof parseWebglSourceKey>>,
 		reason: string,
 	): Promise<void>;
@@ -127,7 +127,7 @@ async function cleanupDeletedProjectWebgl(
 	activeUploads: ActiveUploadCleanup[],
 	reason: string,
 ): Promise<void> {
-	if (entryKey) await deps.cleanupWebglEntry(projectId, entryKey, reason);
+	if (entryKey) await deps.deleteWebglDeploymentByEntry(projectId, entryKey, reason);
 	await Promise.all(activeUploads.map(async (session) => {
 		if (session.s3UploadId && session.s3Key) {
 			await deps.abortMultipart(session.s3Key, session.s3UploadId).catch((err) => {
@@ -136,7 +136,7 @@ async function cleanupDeletedProjectWebgl(
 		}
 		if (session.uploadKind === 'WEBGL' && session.s3Key) {
 			const keys = parseWebglSourceKey(projectId, session.s3Key);
-			if (keys) await deps.cleanupWebglDeployment(keys, `${reason}-active-upload`);
+			if (keys) await deps.deleteWebglDeployment(keys, `${reason}-active-upload`);
 		}
 	}));
 }

@@ -2,12 +2,23 @@ import { randomUUID } from 'node:crypto';
 
 const UUID_RE = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 
-export interface WebglDeploymentKeys {
+interface WebglDeploymentIdentity {
 	projectId: number;
 	deploymentId: string;
-	deploymentPrefix: string;
+}
+
+/** The protected recovery input. Deleting it makes restart recovery impossible. */
+export interface WebglProtectedSourceKeys extends WebglDeploymentIdentity {
 	sourceKey: string;
+}
+
+/** The replaceable public output. It is safe to roll this back before pointer commit. */
+export interface WebglPublicDeploymentKeys extends WebglDeploymentIdentity {
 	sitePrefix: string;
+}
+
+export interface WebglDeploymentKeys extends WebglProtectedSourceKeys, WebglPublicDeploymentKeys {
+	deploymentPrefix: string;
 	entryKey: string;
 }
 
