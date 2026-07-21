@@ -184,10 +184,20 @@ export function createKindAwareByteLimiter(
  */
 export const UPLOAD_RETRY_AFTER_SEC = 10;
 
-export function createUploadLimiter(maxConcurrent: () => number) {
+export interface UploadConcurrencyLimiter {
+	acquire(override?: number): void;
+	release(): void;
+	activeCount(): number;
+	reset(): void;
+	close(): void;
+}
+
+export function createUploadLimiter(maxConcurrent: () => number): UploadConcurrencyLimiter {
 	let activeUploads = 0;
+	let closed = false;
 	return {
 		acquire(override?: number): void {
+			if (closed) throw new Error('Upload limiter is closed');
 			const max = override ?? maxConcurrent();
 			if (activeUploads >= max) {
 				throw new AppError(
@@ -204,6 +214,11 @@ export function createUploadLimiter(maxConcurrent: () => number) {
 		},
 		activeCount: () => activeUploads,
 		reset: () => { activeUploads = 0; },
+		close(): void {
+			if (closed) return;
+			closed = true;
+			activeUploads = 0;
+		},
 	};
 }
 

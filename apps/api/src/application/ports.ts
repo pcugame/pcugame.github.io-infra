@@ -178,6 +178,7 @@ export interface AuthSessionStore {
 
 /** Process-scoped resources with explicit shutdown semantics (timers/caches). */
 export interface ShutdownResource {
+	start?(): void | Promise<void>;
 	close(): void | Promise<void>;
 }
 

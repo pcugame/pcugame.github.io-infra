@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createExportService, type ExportProject } from '../modules/admin/export/service.js';
+import {
+	createExportProgressStore,
+	createExportService,
+	type ExportProject,
+} from '../modules/admin/export/service.js';
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -49,13 +53,17 @@ function createDependencies(findProjects = vi.fn().mockResolvedValue([])) {
 	};
 }
 
+function createService(deps = createDependencies()) {
+	return createExportService(deps, createExportProgressStore());
+}
+
 describe('export service execution and process-local lock', () => {
 	it('rejects concurrent execution and releases the lock for a later retry', async () => {
 		const gate = deferred<ExportProject[]>();
 		const findProjects = vi.fn()
 			.mockReturnValueOnce(gate.promise)
 			.mockResolvedValue([]);
-		const service = createExportService(createDependencies(findProjects));
+		const service = createService(createDependencies(findProjects));
 
 		const first = service.exportAssets({ outDir: '/exports' });
 		expect(service.getExportProgress()).toMatchObject({ phase: 'preparing' });
@@ -74,7 +82,7 @@ describe('export service execution and process-local lock', () => {
 
 	it('honors an abort signal before writing the first project', async () => {
 		const deps = createDependencies(vi.fn().mockResolvedValue([project()]));
-		const service = createExportService(deps);
+		const service = createService(deps);
 		const abort = new AbortController();
 		abort.abort();
 
@@ -89,7 +97,7 @@ describe('export service execution and process-local lock', () => {
 		deps.saveObject.mockImplementation(async (_bucket, key) => {
 			if (key === 'one.png') throw new Error('storage unavailable');
 		});
-		const service = createExportService(deps);
+		const service = createService(deps);
 
 		await expect(service.exportAssets({ outDir: '/exports' })).resolves.toMatchObject({
 			totalFiles: 2,
@@ -103,7 +111,7 @@ describe('export service execution and process-local lock', () => {
 
 	it('releases progress state when project loading throws', async () => {
 		const deps = createDependencies(vi.fn().mockRejectedValue(new Error('database unavailable')));
-		const service = createExportService(deps);
+		const service = createService(deps);
 
 		await expect(service.exportAssets({ outDir: '/exports' }))
 			.rejects.toThrow('database unavailable');

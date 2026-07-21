@@ -7,7 +7,7 @@ import { logger } from '../../../lib/logger.js';
 import { prisma } from '../../../lib/prisma.js';
 import { bucketForKind, s3 } from '../../../lib/s3.js';
 import { createExportRepository } from './repository.js';
-import { createExportService } from './service.js';
+import { createExportProgressStore, createExportService } from './service.js';
 import { createExportFileWriter } from './file.adapter.js';
 
 let productionService: ReturnType<typeof createExportService> | undefined;
@@ -49,7 +49,7 @@ function service() {
 		now: Date.now,
 		logWarn: (message) => logger().warn(message),
 		logError: (context, message) => logger().error(context, message),
-	});
+	}, createExportProgressStore());
 	return productionService;
 }
 

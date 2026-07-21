@@ -56,10 +56,20 @@ function assetFileName(kind: string, ext: string, index: number): string {
 }
 
 /** Process-local lock/progress implementation. Replace this port for multi-replica operation. */
-export class InMemoryExportProgressStore {
+export interface ExportProgressStore {
+	start(year: number | null, startedAt: number): void;
+	get(): ExportProgress | null;
+	update(update: (progress: ExportProgress) => void): void;
+	finish(): void;
+	close(): void;
+}
+
+class InMemoryExportProgressStore implements ExportProgressStore {
 	private progress: ExportProgress | null = null;
+	private closed = false;
 
 	start(year: number | null, startedAt: number): void {
+		if (this.closed) throw new Error('Export progress store is closed');
 		if (this.progress) throw conflict('Export is already in progress');
 		this.progress = {
 			year,
@@ -77,16 +87,29 @@ export class InMemoryExportProgressStore {
 	}
 
 	get(): ExportProgress | null {
-		return this.progress;
+		return this.progress
+			? { ...this.progress, currentProjectFiles: [...this.progress.currentProjectFiles] }
+			: null;
 	}
 
 	update(update: (progress: ExportProgress) => void): void {
+		if (this.closed) return;
 		if (this.progress) update(this.progress);
 	}
 
 	finish(): void {
 		this.progress = null;
 	}
+
+	close(): void {
+		if (this.closed) return;
+		this.closed = true;
+		this.progress = null;
+	}
+}
+
+export function createExportProgressStore(): ExportProgressStore {
+	return new InMemoryExportProgressStore();
 }
 
 export interface ExportOptions {
@@ -110,7 +133,7 @@ export interface ExportServiceDependencies {
 
 export function createExportService(
 	deps: ExportServiceDependencies,
-	progressStore = new InMemoryExportProgressStore(),
+	progressStore: ExportProgressStore,
 ) {
 	function setCurrentFileStatus(assetId: number, status: ExportFileStatus): void {
 		progressStore.update((progress) => {

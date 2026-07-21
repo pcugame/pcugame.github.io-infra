@@ -18,11 +18,13 @@ function testConfig(): Env {
 function createTestContext(): {
 	context: BackendContext;
 	storageHead: ReturnType<typeof vi.fn>;
+	resourceStart: ReturnType<typeof vi.fn>;
 	resourceClose: ReturnType<typeof vi.fn>;
 	authSessionFind: ReturnType<typeof vi.fn>;
 	authSessionTouch: ReturnType<typeof vi.fn>;
 } {
 	const storageHead = vi.fn().mockResolvedValue({ size: 0, contentType: 'text/plain' });
+	const resourceStart = vi.fn();
 	const resourceClose = vi.fn();
 	const authSessionFind = vi.fn().mockResolvedValue(null);
 	const authSessionTouch = vi.fn().mockResolvedValue(undefined);
@@ -103,7 +105,7 @@ function createTestContext(): {
 				purgeExpiredSessions: async () => 0,
 				reapOrphans: async () => {},
 			},
-			shutdownResources: [{ close: resourceClose }],
+			shutdownResources: [{ start: resourceStart, close: resourceClose }],
 			routes: {
 				auth: authRoutes,
 				devAuth: emptyRoutes,
@@ -114,6 +116,7 @@ function createTestContext(): {
 			},
 		},
 		storageHead,
+		resourceStart,
 		resourceClose,
 		authSessionFind,
 		authSessionTouch,
@@ -122,8 +125,9 @@ function createTestContext(): {
 
 describe('BackendContext composition', () => {
 	it('runs health checks with injected clock, request IDs, DB, and storage ports', async () => {
-		const { context, storageHead, resourceClose } = createTestContext();
+		const { context, storageHead, resourceStart, resourceClose } = createTestContext();
 		const app = await buildApp({ context });
+		expect(resourceStart).not.toHaveBeenCalled();
 		try {
 			const shallow = await app.inject({ method: 'GET', url: '/api/health' });
 			expect(shallow.statusCode).toBe(200);

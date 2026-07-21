@@ -17,11 +17,13 @@ vi.mock('../lib/storage.js', async (importOriginal) => {
 });
 vi.mock('../shared/protected-download-limiter.js', () => ({
 	protectedDownloadLimiter: {
+		start: vi.fn(),
 		check: vi.fn().mockReturnValue('ok'),
 		isBanned: vi.fn().mockReturnValue(false),
 		addBan: vi.fn(),
 		removeBan: vi.fn(),
 		loadBannedIps: vi.fn(),
+		close: vi.fn(),
 		destroy: vi.fn(),
 	},
 }));

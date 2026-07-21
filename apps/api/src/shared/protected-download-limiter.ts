@@ -5,30 +5,45 @@
  * the same in-memory ban cache.
  */
 
-import { DownloadRateLimiter } from './download-rate-limit.js';
+import {
+	createDownloadRateLimiter,
+	type DownloadRateLimiter,
+	type DownloadRateLimiterOptions,
+} from './download-rate-limit.js';
+
+export function createProtectedDownloadLimiter(
+	options: DownloadRateLimiterOptions = {},
+): DownloadRateLimiter {
+	return createDownloadRateLimiter({
+		windowMs: 15 * 60 * 1000,
+		maxHits: 30,
+		...options,
+	});
+}
 
 let processLimiter: DownloadRateLimiter | undefined;
 
 function limiter(): DownloadRateLimiter {
-	processLimiter ??= new DownloadRateLimiter({
-		windowMs: 15 * 60 * 1000,
-		maxHits: 30,
-	});
+	processLimiter ??= createProtectedDownloadLimiter();
 	return processLimiter;
 }
 
+function closeProcessLimiter(): void {
+	processLimiter?.close();
+	processLimiter = undefined;
+}
+
 /**
- * Lazy process adapter. Importing application modules no longer starts a timer;
- * the timer starts on first production use and is released by BackendContext.
+ * Lazy compatibility adapter. Importing or first use does not start a timer;
+ * startup code must call `start()`, and BackendContext releases the instance.
  */
 export const protectedDownloadLimiter = {
+	start: () => limiter().start(),
 	loadBannedIps: (ips: string[]) => limiter().loadBannedIps(ips),
 	addBan: (ip: string) => limiter().addBan(ip),
 	removeBan: (ip: string) => limiter().removeBan(ip),
 	isBanned: (ip: string) => limiter().isBanned(ip),
 	check: (ip: string) => limiter().check(ip),
-	destroy(): void {
-		processLimiter?.destroy();
-		processLimiter = undefined;
-	},
+	close: closeProcessLimiter,
+	destroy: closeProcessLimiter,
 };
