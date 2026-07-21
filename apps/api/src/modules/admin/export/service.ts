@@ -1,10 +1,11 @@
 import { promises as fsp } from 'node:fs';
 import { createWriteStream } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { env } from '../../../config/env.js';
 import { s3, bucketForKind } from '../../../lib/s3.js';
 import { logger } from '../../../lib/logger.js';
 import { conflict } from '../../../shared/errors.js';
@@ -16,6 +17,7 @@ import type {
 	ExportResult,
 } from '@pcu/contracts';
 import * as repo from './repository.js';
+import { parseWebglEntryKey } from '../../webgl/paths.js';
 
 // ── Path helpers ────────────────────────────────────────
 
@@ -144,7 +146,10 @@ export async function exportAssets(opts: ExportOptions): Promise<ExportResult> {
 
 async function doExport(opts: ExportOptions): Promise<ExportResult> {
 	const projects = await repo.findProjectsWithAssets(opts.year);
-	const totalFiles = projects.reduce((sum, project) => sum + project.assets.length, 0);
+	const totalFiles = projects.reduce(
+		(sum, project) => sum + project.assets.length + (parseWebglEntryKey(project.id, project.webglEntryKey) ? 1 : 0),
+		0,
+	);
 
 	const result: ExportResult = {
 		projects: projects.length,
@@ -189,7 +194,16 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 		const fullDir = join(assetsDir, exDir, projDir);
 
 		const kindCount = new Map<string, number>();
-		const projectFiles = project.assets.map((asset) => {
+		const projectFiles: Array<{
+			asset: {
+				id: number;
+				kind: PrismaAssetKind | 'WEBGL';
+				storageKey: string;
+				originalName: string;
+			};
+			fileName: string;
+			destPath: string;
+		}> = project.assets.map((asset) => {
 			const idx = kindCount.get(asset.kind) ?? 0;
 			kindCount.set(asset.kind, idx + 1);
 
@@ -202,11 +216,24 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 				destPath: join(fullDir, fileName),
 			};
 		});
+		const webglDeployment = parseWebglEntryKey(project.id, project.webglEntryKey);
+		if (webglDeployment) {
+			projectFiles.push({
+				asset: {
+					id: -project.id,
+					kind: 'WEBGL',
+					storageKey: webglDeployment.sourceKey,
+					originalName: 'webgl.zip',
+				},
+				fileName: 'webgl/webgl.zip',
+				destPath: join(fullDir, 'webgl', 'webgl.zip'),
+			});
+		}
 
 		if (currentProgress) {
 			currentProgress.currentProjectFiles = projectFiles.map(({ asset, fileName }) => ({
 				assetId: asset.id,
-				kind: asset.kind as AssetKind,
+				kind: asset.kind as AssetKind | 'WEBGL',
 				originalName: asset.originalName,
 				fileName,
 				status: 'pending',
@@ -219,7 +246,9 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 				break;
 			}
 
-			const bucket = bucketForKind(asset.kind as PrismaAssetKind);
+			const bucket = asset.kind === 'WEBGL'
+				? env().S3_BUCKET_PROTECTED
+				: bucketForKind(asset.kind);
 
 			if (opts.dryRun) {
 				result.paths.push(destPath);
@@ -237,7 +266,7 @@ async function doExport(opts: ExportOptions): Promise<ExportResult> {
 				// doesn't exist — proceed
 			}
 
-			await fsp.mkdir(fullDir, { recursive: true });
+			await fsp.mkdir(dirname(destPath), { recursive: true });
 
 			try {
 				setCurrentFileStatus(asset.id, 'saving');

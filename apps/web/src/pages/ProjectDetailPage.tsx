@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage } from '../components/common';
-import { ProjectPublicMeta, ProjectVideo } from '../components/project';
+import { ProjectActions, ProjectPublicMeta, ProjectVideo } from '../components/project';
 
 export default function ProjectDetailPage() {
   const { year: yearParam, slug, projectId } = useParams<{
@@ -59,14 +59,14 @@ export default function ProjectDetailPage() {
       <ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
       {/* 에셋 유실 안내 */}
-      {project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && projectVideos.length === 0 && project.images.length === 0 && (
+      {project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
         <p className="incomplete-notice incomplete-notice--missing">
           이 프로젝트의 파일이 유실되었습니다. 포스터, 실행 파일, 스크린샷 등이 등록되지 않은 상태입니다.
         </p>
       )}
 
       {/* 불완전 안내 (파일은 일부 있지만 불완전 플래그) */}
-      {project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || projectVideos.length > 0 || project.images.length > 0) && (
+      {project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
         <p className="incomplete-notice">
           이 프로젝트는 일부 자료가 누락되었을 수 있습니다.
         </p>
@@ -135,17 +135,14 @@ export default function ProjectDetailPage() {
         </section>
       )}
 
-      {/* 게임 다운로드 — GAME files are always publicly downloadable */}
-      {project.gameDownloadUrl && (
+      {(project.gameDownloadUrl || project.webglUrl) && (
         <section className="project-detail__download">
-          <h3>게임 다운로드</h3>
-          <a
-            href={project.gameDownloadUrl}
-            className="btn btn--primary"
-            download
-          >
-            다운로드 (ZIP)
-          </a>
+          <h3>게임 실행</h3>
+          <ProjectActions
+            projectId={project.id}
+            gameDownloadUrl={project.gameDownloadUrl}
+            webglUrl={project.webglUrl}
+          />
         </section>
       )}
     </div>

@@ -48,6 +48,7 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 		status: 'PUBLISHED' as const,
 		sortOrder: 0,
 		posterAssetId: null as number | null,
+		webglEntryKey: '',
 		poster: null as { storageKey: string; kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO'; status: string } | null,
 		members: [] as { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[],
 		assets: [] as {
@@ -157,6 +158,16 @@ describe('serializeProjectDetail', () => {
 	it('converts posterAssetId null to undefined', () => {
 		const result = serializeProjectDetail(fakeProject({ posterAssetId: null }));
 		expect(result.posterAssetId).toBeUndefined();
+	});
+
+	it('exposes WebGL URL only when an active entry key exists', () => {
+		expect(serializeProjectDetail(fakeProject()).webglUrl).toBeUndefined();
+		expect(serializeProjectDetail(fakeProject({ webglEntryKey: 'webgl/1/not-a-deployment/site/index.html' })).webglUrl)
+			.toBeUndefined();
+		const result = serializeProjectDetail(fakeProject({
+			webglEntryKey: 'webgl/1/123e4567-e89b-42d3-a456-426614174000/site/index.html',
+		}));
+		expect(result.webglUrl).toBe('https://api.example.com/api/public/webgl/1/');
 	});
 
 	it('preserves posterAssetId when set', () => {

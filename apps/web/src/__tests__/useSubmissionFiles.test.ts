@@ -86,7 +86,7 @@ describe('useSubmissionFiles', () => {
 		expect((secondEvent.target as HTMLInputElement).value).toBe('');
 	});
 
-	it('rejects game files larger than the hard 5GB browser limit', () => {
+	it('rejects game files larger than the configured game upload limit', () => {
 		const { result } = renderHook(() => useSubmissionFiles({ limits }));
 		const game = file('game.zip', 'application/zip', 5 * 1024 * 1024 * 1024 + 1);
 		const event = eventWithFiles([game]);
@@ -96,5 +96,20 @@ describe('useSubmissionFiles', () => {
 		expect(result.current.gameFile).toBeNull();
 		expect(result.current.fileSizeError).toContain('게임 파일');
 		expect((event.target as HTMLInputElement).value).toBe('');
+	});
+
+	it('keeps GAME and WEBGL ZIP selections independently', () => {
+		const { result } = renderHook(() => useSubmissionFiles({ limits }));
+		const game = file('game.zip', 'application/zip', 1024);
+		const webgl = file('webgl.zip', 'application/zip', 2048);
+
+		act(() => result.current.handleGameChange(eventWithFiles([game])));
+		act(() => result.current.handleWebglChange(eventWithFiles([webgl])));
+		expect(result.current.gameFile).toBe(game);
+		expect(result.current.webglFile).toBe(webgl);
+
+		act(() => result.current.clearWebglFile());
+		expect(result.current.webglFile).toBeNull();
+		expect(result.current.gameFile).toBe(game);
 	});
 });

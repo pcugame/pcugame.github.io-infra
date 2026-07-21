@@ -84,6 +84,11 @@ export function useAdminProjectMutations({
 		onSuccess: invalidateProject,
 	});
 
+	const removeWebglMutation = useMutation({
+		mutationFn: () => adminProjectApi.deleteWebgl(projectId),
+		onSuccess: invalidateProject,
+	});
+
 	const toggleStatusMutation = useMutation({
 		mutationFn: (status: ProjectStatus) => adminProjectApi.update(projectId, { status }),
 		onSuccess: () => {
@@ -130,6 +135,7 @@ export function useAdminProjectMutations({
 		addAssetMutation,
 		setPosterMutation,
 		removeAssetMutation,
+		removeWebglMutation,
 		toggleStatusMutation,
 		swapMemberOrder,
 		addAsset,

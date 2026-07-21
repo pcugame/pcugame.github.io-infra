@@ -82,5 +82,6 @@ export type PublicProjectDetailResponse = {
 	images: PublicProjectImage[];
 	posterUrl?: string;
 	gameDownloadUrl?: string;
+	webglUrl?: string;
 	status: 'PUBLISHED' | 'ARCHIVED';
 };

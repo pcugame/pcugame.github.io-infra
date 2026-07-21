@@ -5,6 +5,7 @@ import { queryKeys } from '../../lib/query';
 import { LoadingSpinner } from '../common';
 import { ProjectPublicMeta } from './ProjectPublicMeta';
 import { ProjectVideo } from './ProjectVideo';
+import { ProjectActions } from './ProjectActions';
 
 interface Props {
 	slug: string;
@@ -245,14 +246,14 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 							<ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
 							{/* 에셋 유실 안내 */}
-							{project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && projectVideos.length === 0 && project.images.length === 0 && (
+							{project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
 								<p className="incomplete-notice incomplete-notice--missing">
 									이 프로젝트의 파일이 유실되었습니다.
 								</p>
 							)}
 
 							{/* 불완전 안내 */}
-							{project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || projectVideos.length > 0 || project.images.length > 0) && (
+							{project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
 								<p className="incomplete-notice">
 									일부 자료가 누락되었을 수 있습니다.
 								</p>
@@ -280,19 +281,12 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								</div>
 							)}
 
-							{/* 다운로드 */}
-							{project.gameDownloadUrl && (
-								<div className="modal-download">
-									<a href={project.gameDownloadUrl} className="btn btn--primary btn--large" download>
-										<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-											<polyline points="7 10 12 15 17 10" />
-											<line x1="12" y1="15" x2="12" y2="3" />
-										</svg>
-										게임 다운로드
-									</a>
-								</div>
-							)}
+							<ProjectActions
+								projectId={project.id}
+								gameDownloadUrl={project.gameDownloadUrl}
+								webglUrl={project.webglUrl}
+								className="modal-download"
+							/>
 						</div>
 					</>
 				)}

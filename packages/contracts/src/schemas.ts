@@ -4,6 +4,7 @@ import { MAX_NEW_PROJECT_TITLE_BYTES, utf8ByteLength } from './filename-policy.j
 export const ProjectStatusSchema = z.enum(['PUBLISHED', 'ARCHIVED']);
 export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO']);
 export const UserRoleSchema = z.enum(['USER', 'OPERATOR', 'ADMIN']);
+export const UploadKindSchema = z.enum(['GAME', 'WEBGL']);
 export const AdminProjectListSortSchema = z.enum(['createdAt', 'title', 'year', 'status']);
 export const SortOrderSchema = z.enum(['asc', 'desc']);
 export const DevAuthErrorScenarioSchema = z.enum([
@@ -112,6 +113,7 @@ export const DevAuthLoginErrorRequestSchema = z.object({
 export const GameUploadCreateSessionSchema = z.object({
 	originalName: z.string().min(1),
 	totalBytes: z.number().positive(),
+	uploadKind: UploadKindSchema.optional(),
 });
 
 export type ProjectMemberInputSchemaInput = z.infer<typeof ProjectMemberInputSchema>;

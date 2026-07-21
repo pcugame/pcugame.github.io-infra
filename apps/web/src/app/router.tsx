@@ -13,6 +13,7 @@ const YearsPage = lazy(() => import('../pages/YearsPage'));
 const YearProjectsPage = lazy(() => import('../pages/YearProjectsPage'));
 const ExhibitionProjectsPage = lazy(() => import('../pages/ExhibitionProjectsPage'));
 const ProjectDetailPage = lazy(() => import('../pages/ProjectDetailPage'));
+const ProjectPlayPage = lazy(() => import('../pages/ProjectPlayPage'));
 const LoginPage = lazy(() => import('../pages/LoginPage'));
 const MePage = lazy(() => import('../pages/MePage'));
 const MyProjectsPage = lazy(() => import('../pages/MyProjectsPage'));
@@ -210,6 +211,14 @@ export const routes: RouteObject[] = [
           ],
         },
       ],
+    },
+    {
+      path: '/projects/:projectId/play',
+      element: (
+        <Lazy>
+          <ProjectPlayPage />
+        </Lazy>
+      ),
     },
 ];
 

@@ -6,6 +6,7 @@ import { cookieExpiresAt, isIdleExpired } from '../shared/session.js';
 import * as authRepo from '../modules/auth/repository.js';
 import { extractStudentIdFromEmail } from '../modules/auth/student-id.js';
 import type { UserRole } from '../generated/prisma/client.js';
+import { isAllowedSessionSource } from '../shared/session-origin.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -24,6 +25,11 @@ async function resolveSession(request: FastifyRequest, reply: FastifyReply): Pro
   const cfg = env();
   const sid = request.cookies[cfg.SESSION_COOKIE_NAME];
   if (!sid) return;
+
+  // WebGL files are intentionally executable but untrusted. They are hosted on
+  // the API origin for Unity storage compatibility, so never honor an API
+  // session cookie unless the browser request came from the configured web UI.
+  if (!isAllowedSessionSource(request.headers, new Set(cfg.CORS_ALLOWED_ORIGINS))) return;
 
   const session = await prisma.authSession.findUnique({
     where: { id: sid },

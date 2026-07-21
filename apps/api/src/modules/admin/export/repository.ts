@@ -1,13 +1,15 @@
 import { prisma } from '../../../lib/prisma.js';
+import type { AssetKind } from '../../../generated/prisma/client.js';
 
 export interface ExportProject {
 	id: number;
 	title: string;
+	webglEntryKey: string;
 	exhibition: { year: number; title: string };
 	members: { name: string; studentId: string; sortOrder: number }[];
 	assets: {
 		id: number;
-		kind: string;
+		kind: AssetKind;
 		storageKey: string;
 		originalName: string;
 		mimeType: string;
@@ -21,7 +23,10 @@ export async function findProjectsWithAssets(
 ): Promise<ExportProject[]> {
 	return prisma.project.findMany({
 		where: {
-			assets: { some: { status: 'READY' } },
+			OR: [
+				{ assets: { some: { status: 'READY' } } },
+				{ webglEntryKey: { not: '' } },
+			],
 			...(yearFilter ? { exhibition: { year: yearFilter } } : {}),
 		},
 		include: {

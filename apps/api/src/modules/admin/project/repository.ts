@@ -173,6 +173,14 @@ export function updateProject(id: number, data: Prisma.ProjectUpdateInput) {
 /** Delete a project by ID */
 export function deleteProjectReturningAssets(id: number) {
 	return prisma.$transaction(async (tx) => {
+		const project = await tx.project.findUniqueOrThrow({
+			where: { id },
+			select: { webglEntryKey: true },
+		});
+		const activeUploads = await tx.gameUploadSession.findMany({
+			where: { projectId: id, status: { in: ['PENDING', 'COMPLETING'] } },
+			select: { id: true, uploadKind: true, s3Key: true, s3UploadId: true },
+		});
 		const assets = await tx.asset.findMany({ where: { projectId: id } });
 		await tx.project.update({
 			where: { id },
@@ -181,7 +189,33 @@ export function deleteProjectReturningAssets(id: number) {
 		});
 		await tx.asset.deleteMany({ where: { projectId: id } });
 		await tx.project.delete({ where: { id } });
-		return assets;
+		return { assets, webglEntryKey: project.webglEntryKey, activeUploads };
+	});
+}
+
+/** Clear the active WebGL pointer and cancel only the WEBGL upload slot. */
+export function clearWebglDeployment(projectId: number) {
+	return withSerializableRetry(async (tx) => {
+		const project = await tx.project.findUniqueOrThrow({
+			where: { id: projectId },
+			select: { webglEntryKey: true },
+		});
+		const active = await tx.gameUploadActiveSession.findUnique({
+			where: { projectId_uploadKind: { projectId, uploadKind: 'WEBGL' } },
+			include: { session: true },
+		});
+		if (active) {
+			await tx.gameUploadSession.updateMany({
+				where: { id: active.sessionId, status: { in: ['PENDING', 'COMPLETING'] } },
+				data: { status: 'CANCELLED' },
+			});
+			await tx.gameUploadActiveSession.deleteMany({ where: { sessionId: active.sessionId } });
+		}
+		await tx.project.update({
+			where: { id: projectId },
+			data: { webglEntryKey: '' },
+		});
+		return { oldEntryKey: project.webglEntryKey, cancelledSession: active?.session ?? null };
 	});
 }
 
@@ -365,6 +399,14 @@ export async function bulkDeleteProjectsReturningAssets(ids: number[]) {
 	// half-broken state where posterAssetId is nulled but the asset rows still point at a
 	// project that has been deleted (or worse, vice-versa).
 	return prisma.$transaction(async (tx) => {
+		const projects = await tx.project.findMany({
+			where: { id: { in: ids } },
+			select: { id: true, webglEntryKey: true },
+		});
+		const activeUploads = await tx.gameUploadSession.findMany({
+			where: { projectId: { in: ids }, status: { in: ['PENDING', 'COMPLETING'] } },
+			select: { id: true, projectId: true, uploadKind: true, s3Key: true, s3UploadId: true },
+		});
 		const assets = await tx.asset.findMany({ where: { projectId: { in: ids } } });
 		await tx.project.updateMany({
 			where: { id: { in: ids } },
@@ -372,7 +414,7 @@ export async function bulkDeleteProjectsReturningAssets(ids: number[]) {
 		});
 		await tx.asset.deleteMany({ where: { projectId: { in: ids } } });
 		const result = await tx.project.deleteMany({ where: { id: { in: ids } } });
-		return { result, assets };
+		return { result, assets, projects, activeUploads };
 	});
 }
 

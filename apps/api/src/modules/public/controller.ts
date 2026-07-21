@@ -1,9 +1,58 @@
 import type { FastifyInstance } from 'fastify';
 import { sendOk } from '../../shared/http.js';
 import * as publicService from './service.js';
+import * as webglService from './webgl.service.js';
+import { parseIntParam } from '../../shared/validation.js';
 
 /** Register public read-only routes (no auth required) */
 export async function publicController(app: FastifyInstance): Promise<void> {
+	const noGlobalCors = { cors: false } as any;
+	const webglRouteOptions = { config: noGlobalCors, helmet: false } as const;
+	const streamWebgl = async (
+		request: { params: { projectId: string; '*': string }; headers: { range?: string } },
+		reply: Parameters<typeof webglService.streamPublicWebgl>[3],
+	) => webglService.streamPublicWebgl(
+		parseIntParam(request.params.projectId, 'Project ID'),
+		request.params['*'] || 'index.html',
+		request.headers.range,
+		reply,
+	);
+
+	app.options('/webgl/:projectId', webglRouteOptions, async (_request, reply) => {
+		webglService.sendWebglPreflight(reply);
+	});
+	app.options('/webgl/:projectId/', webglRouteOptions, async (_request, reply) => {
+		webglService.sendWebglPreflight(reply);
+	});
+	app.options('/webgl/:projectId/*', webglRouteOptions, async (_request, reply) => {
+		webglService.sendWebglPreflight(reply);
+	});
+	app.get<{ Params: { projectId: string } }>(
+		'/webgl/:projectId',
+		webglRouteOptions,
+		async (request, reply) => webglService.streamPublicWebgl(
+			parseIntParam(request.params.projectId, 'Project ID'),
+			'index.html',
+			request.headers.range,
+			reply,
+		),
+	);
+	app.get<{ Params: { projectId: string } }>(
+		'/webgl/:projectId/',
+		webglRouteOptions,
+		async (request, reply) => webglService.streamPublicWebgl(
+			parseIntParam(request.params.projectId, 'Project ID'),
+			'index.html',
+			request.headers.range,
+			reply,
+		),
+	);
+	app.get<{ Params: { projectId: string; '*': string } }>(
+		'/webgl/:projectId/*',
+		webglRouteOptions,
+		streamWebgl as any,
+	);
+
 	/** GET /api/public/years — list years with published project counts */
 	app.get('/years', async (_request, reply) => {
 		const items = await publicService.listYears();

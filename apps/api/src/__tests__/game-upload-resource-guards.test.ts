@@ -39,6 +39,7 @@ vi.mock('../modules/admin/game-upload/repository.js', () => ({
 	transitionToCompleting: vi.fn(),
 	markFailed: vi.fn(),
 	finalizeCompletedSession: vi.fn(),
+	finalizeCompletedWebglSession: vi.fn(),
 }));
 
 vi.mock('../lib/storage.js', () => ({
@@ -143,6 +144,41 @@ describe('game upload resource guards', () => {
 		expect(mocks.findExhibitionById).not.toHaveBeenCalled();
 		expect(mocks.createMultipartUpload).not.toHaveBeenCalled();
 		expect(mocks.createSessionReplacingActive).not.toHaveBeenCalled();
+	});
+
+	it('creates independent GAME and WEBGL sessions with different storage layouts', async () => {
+		mocks.findExhibitionById.mockResolvedValue({
+			id: 1,
+			year: 2026,
+			title: '',
+			isUploadEnabled: true,
+		});
+		mocks.getSiteSettings.mockResolvedValue({ maxGameFileMb: 5120, maxChunkSizeMb: 10 });
+		mocks.createMultipartUpload.mockResolvedValue('multipart-id');
+		mocks.createSessionReplacingActive.mockImplementation(async (data) => ({
+			session: data,
+			replacedSessions: [],
+		}));
+
+		const game = await createSession(7, 1, { id: 11, role: 'USER' }, {
+			originalName: 'game.zip',
+			totalBytes: 1024,
+		});
+		const webgl = await createSession(7, 1, { id: 11, role: 'USER' }, {
+			originalName: 'webgl.zip',
+			totalBytes: 2048,
+			uploadKind: 'WEBGL',
+		});
+
+		expect(game.uploadKind).toBe('GAME');
+		expect(webgl.uploadKind).toBe('WEBGL');
+		const gameData = mocks.createSessionReplacingActive.mock.calls[0]![0];
+		const webglData = mocks.createSessionReplacingActive.mock.calls[1]![0];
+		expect(gameData.uploadKind).toBe('GAME');
+		expect(gameData.s3Key).toMatch(/^[0-9a-f-]+\.zip$/);
+		expect(webglData.uploadKind).toBe('WEBGL');
+		expect(webglData.s3Key).toMatch(/^webgl\/7\/[0-9a-f-]+\/source\.zip$/);
+		expect(gameData.s3Key).not.toBe(webglData.s3Key);
 	});
 
 	it('rejects chunk uploads above configured concurrency', async () => {
