@@ -244,7 +244,7 @@ describe('stateful resource factories', () => {
 		expect(secondStart).toHaveBeenCalledOnce();
 	});
 
-	it('wires the production compatibility sweeper to explicit start and idempotent close', async () => {
+	it('keeps the legacy route limiter alive until ticket 004 at the explicit owner boundary', async () => {
 		const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
 		const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 		const config: Env = {
@@ -260,17 +260,17 @@ describe('stateful resource factories', () => {
 				loadEnv: () => config,
 			}));
 			const { createProductionBackendContext } = await import('../backend-context.js');
-			const context = createProductionBackendContext(config);
+			const context = await createProductionBackendContext(config);
 
 			expect(setIntervalSpy).not.toHaveBeenCalled();
-			await startOwnedResources(context.shutdownResources);
-			await startOwnedResources(context.shutdownResources);
-			expect(setIntervalSpy).toHaveBeenCalledOnce();
+			await context.start();
+			await context.start();
+			// context limiter + two maintenance tasks + the existing route singleton.
+			expect(setIntervalSpy).toHaveBeenCalledTimes(4);
 
-			const protectedLimiterResource = context.shutdownResources[0]!;
-			await protectedLimiterResource.close();
-			await protectedLimiterResource.close();
-			expect(clearIntervalSpy).toHaveBeenCalledOnce();
+			await context.close();
+			await context.close();
+			expect(clearIntervalSpy).toHaveBeenCalledTimes(4);
 		} finally {
 			vi.doUnmock('../config/env.js');
 			setIntervalSpy.mockRestore();

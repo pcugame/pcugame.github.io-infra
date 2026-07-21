@@ -51,6 +51,7 @@ export interface ScheduledTask {
 
 export interface Scheduler {
 	every(intervalMs: number, task: () => void | Promise<void>): ScheduledTask;
+	delay(ms: number): Promise<void>;
 }
 
 /** Framework-neutral subset of object storage used by application services. */
@@ -153,7 +154,6 @@ export interface Lifecycle {
 
 export interface DatabaseHealth {
 	check(): Promise<boolean>;
-	close(): Promise<void>;
 }
 
 export interface AuthSessionRecord {

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import type { BackendContext } from '../backend-context.js';
+import type { Env } from '../config/env.js';
+import { defaultTestEnv } from './helpers/app-mocks.js';
 
 const mocks = vi.hoisted(() => ({
 	envOverrides: {
@@ -34,6 +37,7 @@ vi.mock('../config/env.js', async () => {
 vi.mock('../lib/logger.js', () => ({
 	logger: () => mocks.log,
 	rootLogger: () => mocks.log,
+	createRootLogger: () => mocks.log,
 }));
 
 vi.mock('../lib/prisma.js', () => ({
@@ -57,6 +61,113 @@ vi.mock('../modules/auth/repository.js', () => ({
 	deleteSession: mocks.deleteSession,
 	touchSession: mocks.touchSession,
 }));
+
+const emptyRoute = async () => {};
+
+function currentConfig(): Env {
+	return {
+		...defaultTestEnv,
+		...mocks.envOverrides,
+		NODE_ENV: mocks.envOverrides.NODE_ENV as Env['NODE_ENV'],
+		LOG_LEVEL: 'info',
+		GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS],
+		CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS],
+	};
+}
+
+async function createDevAuthTestContext(): Promise<BackendContext> {
+	const { devAuthController } = await import('../modules/dev-auth/controller.js');
+	const config = currentConfig();
+	let state: ReturnType<BackendContext['lifecycle']['state']> = 'ready';
+	let inFlight = 0;
+	let requestId = 0;
+	let closePromise: Promise<void> | undefined;
+	const logger = {
+		...mocks.log,
+		trace: vi.fn(),
+		fatal: vi.fn(),
+	};
+	mocks.log.child.mockReturnValue(logger);
+
+	return {
+		config,
+		clock: { now: () => new Date('2026-07-21T00:00:00.000Z') },
+		logger,
+		ids: { next: () => `dev-auth-request-${++requestId}` },
+		storage: {
+			upload: async () => {},
+			presign: async () => 'https://storage.test/object',
+			delete: async () => {},
+			head: async () => null,
+			readRange: async () => Buffer.alloc(0),
+			stream: async () => null,
+			listKeys: async () => [],
+			createMultipart: async () => 'upload-id',
+			uploadPart: async () => 'etag',
+			completeMultipart: async () => {},
+			abortMultipart: async () => {},
+		},
+		fileSystem: {} as BackendContext['fileSystem'],
+		googleTokens: { verify: async () => undefined },
+		scheduler: {
+			every: () => ({ cancel: () => {} }),
+			delay: async () => {},
+		},
+		uploadLimiter: { acquire: () => {}, release: () => {} },
+		protectedDownloads: {} as BackendContext['protectedDownloads'],
+		settings: {
+			get: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+			update: async (patch) => ({
+				maxGameFileMb: patch.maxGameFileMb ?? 5120,
+				maxChunkSizeMb: patch.maxChunkSizeMb ?? 10,
+			}),
+			invalidate: () => {},
+		},
+		exportProgress: {} as BackendContext['exportProgress'],
+		lifecycle: {
+			state: () => state,
+			setState: (next) => { state = next; },
+			isAcceptingNewWork: () => true,
+			requestStarted: () => { inFlight++; },
+			requestFinished: () => { inFlight--; },
+			inFlight: () => inFlight,
+			waitForDrain: async () => 'drained',
+		},
+		databaseHealth: { check: async () => true },
+		authSessions: {
+			find: mocks.authSessionFindUnique,
+			touch: mocks.touchSession,
+			delete: mocks.authSessionDelete,
+		},
+		maintenance: {
+			recoverStaleUploads: async () => {},
+			purgeExpiredSessions: async () => 0,
+			reapOrphans: async () => {},
+		},
+		routes: {
+			auth: emptyRoute,
+			devAuth: devAuthController,
+			public: emptyRoute,
+			admin: emptyRoute,
+			me: emptyRoute,
+			assets: emptyRoute,
+		},
+		resourceOwnership: [],
+		start: async () => {},
+		close: () => {
+			closePromise ??= Promise.resolve();
+			return closePromise;
+		},
+	};
+}
+
+async function buildDevAuthTestApp(): Promise<FastifyInstance> {
+	const [{ buildApp }, context] = await Promise.all([
+		import('../app.js'),
+		createDevAuthTestContext(),
+	]);
+	return buildApp({ context });
+}
 
 describe('dev auth routes', () => {
 	let app: FastifyInstance | undefined;
@@ -88,8 +199,7 @@ describe('dev auth routes', () => {
 	});
 
 	it('creates a real session cookie for a fixed dev role', async () => {
-		const { buildApp } = await import('../app.js');
-		app = await buildApp();
+		app = await buildDevAuthTestApp();
 		await app.ready();
 
 		const res = await app.inject({
@@ -127,8 +237,7 @@ describe('dev auth routes', () => {
 		['missing-google-payload', 401, 'UNAUTHORIZED'],
 		['api-server-error', 500, 'INTERNAL_ERROR'],
 	])('returns the simulated %s login failure through the API error envelope', async (scenario, status, code) => {
-		const { buildApp } = await import('../app.js');
-		app = await buildApp();
+		app = await buildDevAuthTestApp();
 		await app.ready();
 
 		const res = await app.inject({
@@ -148,8 +257,7 @@ describe('dev auth routes', () => {
 	it('does not register dev auth routes in production even when enabled', async () => {
 		mocks.envOverrides.NODE_ENV = 'production';
 		mocks.envOverrides.DEV_AUTH_ENABLED = true;
-		const { buildApp } = await import('../app.js');
-		app = await buildApp();
+		app = await buildDevAuthTestApp();
 		await app.ready();
 
 		const res = await app.inject({

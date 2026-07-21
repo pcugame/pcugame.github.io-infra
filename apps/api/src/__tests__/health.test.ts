@@ -14,12 +14,29 @@ vi.mock('../lib/prisma.js', () => ({
 		get $queryRaw() { return queryRawMock; },
 	},
 }));
+vi.mock('../lib/prisma-client.js', () => ({
+	createPrismaClientForDatabase: () => ({
+		$queryRaw: queryRawMock,
+		$disconnect: vi.fn(),
+		authSession: {
+			findUnique: vi.fn().mockResolvedValue(null),
+			update: vi.fn(),
+			deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+		},
+		siteSetting: { upsert: vi.fn() },
+		orphanObject: { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+	}),
+}));
 vi.mock('../lib/storage.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('../lib/storage.js')>();
-	return { ...actual, headObject: headObjectMock };
+	return {
+		...actual,
+		headObject: headObjectMock,
+		createObjectStorage: () => ({ head: headObjectMock }),
+	};
 });
-vi.mock('../shared/protected-download-limiter.js', () => ({
-	protectedDownloadLimiter: {
+vi.mock('../shared/protected-download-limiter.js', () => {
+	const protectedDownloadLimiter = {
 		start: vi.fn(),
 		check: vi.fn().mockReturnValue('ok'),
 		isBanned: vi.fn().mockReturnValue(false),
@@ -28,8 +45,12 @@ vi.mock('../shared/protected-download-limiter.js', () => ({
 		loadBannedIps: vi.fn(),
 		close: vi.fn(),
 		destroy: vi.fn(),
-	},
-}));
+	};
+	return {
+		protectedDownloadLimiter,
+		createProtectedDownloadLimiter: () => protectedDownloadLimiter,
+	};
+});
 
 describe('health endpoints', () => {
 	let app: FastifyInstance;
