@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { AdminProjectDetail } from '@pcu/contracts';
+import { Link } from 'react-router-dom';
 
 import GameUploadWidget from '../../../components/GameUploadWidget';
 import { getApiErrorMessage } from '../../../lib/api';
@@ -20,9 +21,11 @@ interface AdminProjectAssetManagerProps {
 	isAddingAsset: boolean;
 	isSettingPoster: boolean;
 	isRemovingAsset: boolean;
+	isRemovingWebgl: boolean;
 	onAddAsset: (kind: UploadAssetKind, file: File) => Promise<void>;
 	onSetPoster: (assetId: number) => void;
 	onRemoveAsset: (assetId: number) => void;
+	onRemoveWebgl: () => void;
 }
 
 const assetUploadFields = [
@@ -63,9 +66,11 @@ export function AdminProjectAssetManager({
 	isAddingAsset,
 	isSettingPoster,
 	isRemovingAsset,
+	isRemovingWebgl,
 	onAddAsset,
 	onSetPoster,
 	onRemoveAsset,
+	onRemoveWebgl,
 }: AdminProjectAssetManagerProps) {
 	const [assetFileError, setAssetFileError] = useState<string | null>(null);
 
@@ -201,7 +206,31 @@ export function AdminProjectAssetManager({
 						)}
 					</div>
 
-					<GameUploadWidget projectId={projectId} />
+					<GameUploadWidget projectId={projectId} uploadKind="GAME" />
+					<div className="webgl-asset-manager">
+						{project.webglUrl && (
+							<div className="webgl-asset-manager__current">
+								<p>현재 공개 WebGL 빌드가 배포되어 있습니다.</p>
+								<Link
+									className="btn btn--secondary btn--small"
+									to={`/projects/${projectId}/play`}
+									target="_blank"
+									rel="noopener noreferrer"
+								>
+									플레이 페이지 열기
+								</Link>
+								<button
+									type="button"
+									className="btn btn--danger btn--small"
+									disabled={isRemovingWebgl}
+									onClick={onRemoveWebgl}
+								>
+									{isRemovingWebgl ? '삭제 중…' : 'WebGL 빌드 삭제'}
+								</button>
+							</div>
+						)}
+						<GameUploadWidget projectId={projectId} uploadKind="WEBGL" />
+					</div>
 				</>
 			)}
 		</fieldset>

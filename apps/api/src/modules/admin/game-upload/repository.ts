@@ -1,5 +1,5 @@
 import { prisma } from '../../../lib/prisma.js';
-import { Prisma, type AssetKind, type AssetPlaybackStatus } from '../../../generated/prisma/client.js';
+import { Prisma, type AssetKind, type AssetPlaybackStatus, type UploadKind } from '../../../generated/prisma/client.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -50,6 +50,7 @@ type CreateSessionData = {
 	id: string;
 	projectId: number;
 	userId: number;
+	uploadKind: UploadKind;
 	originalName: string;
 	totalBytes: bigint;
 	chunkSizeBytes: number;
@@ -63,7 +64,12 @@ type CreateSessionData = {
 export function createSessionReplacingActive(data: CreateSessionData) {
 	return withSerializableRetry(async (tx) => {
 		const active = await (tx as any).gameUploadActiveSession.findUnique({
-			where: { projectId: data.projectId },
+			where: {
+				projectId_uploadKind: {
+					projectId: data.projectId,
+					uploadKind: data.uploadKind,
+				},
+			},
 			include: { session: true },
 		});
 		const replacedSessions = active?.session ? [active.session] : [];
@@ -80,9 +86,18 @@ export function createSessionReplacingActive(data: CreateSessionData) {
 
 		const session = await tx.gameUploadSession.create({ data });
 		await (tx as any).gameUploadActiveSession.upsert({
-			where: { projectId: data.projectId },
+			where: {
+				projectId_uploadKind: {
+					projectId: data.projectId,
+					uploadKind: data.uploadKind,
+				},
+			},
 			update: { sessionId: session.id },
-			create: { projectId: data.projectId, sessionId: session.id },
+			create: {
+				projectId: data.projectId,
+				uploadKind: data.uploadKind,
+				sessionId: session.id,
+			},
 		});
 
 		return { session, replacedSessions };
@@ -280,6 +295,35 @@ export function finalizeCompletedSession(
 		});
 
 		return result;
+	});
+}
+
+export function finalizeCompletedWebglSession(
+	sessionId: string,
+	projectId: number,
+	entryKey: string,
+	sourceKey: string,
+): Promise<{ oldEntryKey: string }> {
+	return withSerializableRetry(async (tx) => {
+		const project = await tx.project.findUniqueOrThrow({
+			where: { id: projectId },
+			select: { webglEntryKey: true },
+		});
+		await tx.project.update({
+			where: { id: projectId },
+			data: { webglEntryKey: entryKey },
+		});
+		const completed = await tx.gameUploadSession.updateMany({
+			where: { id: sessionId, status: 'COMPLETING', uploadKind: 'WEBGL' },
+			data: { status: 'COMPLETED', storageKey: sourceKey },
+		});
+		if (completed.count !== 1) {
+			throw new Error('WebGL upload session is no longer completing');
+		}
+		await (tx as any).gameUploadActiveSession.deleteMany({
+			where: { sessionId },
+		});
+		return { oldEntryKey: project.webglEntryKey };
 	});
 }
 

@@ -1,5 +1,7 @@
 import type { AssetKind } from './enums.js';
 
+export type ExportAssetKind = AssetKind | 'WEBGL';
+
 export type ImportPreviewExhibition = {
 	year: number;
 	title: string;
@@ -24,7 +26,7 @@ export type ExportFileStatus = 'pending' | 'saving' | 'saved' | 'skipped' | 'fai
 
 export type ExportProgressFile = {
 	assetId: number;
-	kind: AssetKind;
+	kind: ExportAssetKind;
 	originalName: string;
 	fileName: string;
 	status: ExportFileStatus;

@@ -7,4 +7,10 @@ export default defineConfig({
   // GitHub Pages: 커스텀 도메인이면 '/', 리포지토리 서브패스이면 '/repo-name/'
   // VITE_BASE_PATH 환경변수로 오버라이드 가능
   base: process.env.VITE_BASE_PATH ?? '/',
+  server: {
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS
+      ?.split(',')
+      .map((host) => host.trim())
+      .filter(Boolean),
+  },
 });

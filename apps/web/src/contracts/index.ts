@@ -50,6 +50,7 @@ export type {
 	SiteSettingsData,
 	UpdateSiteSettingsRequest,
 	ExportFileStatus,
+	ExportAssetKind,
 	ExportPhase,
 	ExportProgress,
 	ExportProgressFile,
@@ -64,6 +65,7 @@ export type {
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
+	UploadKind,
 } from '@pcu/contracts';
 export * from './schemas';
 

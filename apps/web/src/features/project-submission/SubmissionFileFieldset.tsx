@@ -4,23 +4,28 @@ import type { SubmissionFilesState } from './useSubmissionFiles';
 interface SubmissionFileFieldsetProps {
 	files: SubmissionFilesState;
 	gameUploadHint: string;
+	webglUploadHint: string;
 	limits: ClientUploadLimits;
 }
 
 export function SubmissionFileFieldset({
 	files,
 	gameUploadHint,
+	webglUploadHint,
 	limits,
 }: SubmissionFileFieldsetProps) {
 	const {
 		clearGameFile,
+		clearWebglFile,
 		clearImages,
 		clearPoster,
 		clearVideo,
 		fileSizeError,
 		gameFile,
 		gameInputRef,
+		webglInputRef,
 		handleGameChange,
+		handleWebglChange,
 		handleImagesChange,
 		handlePosterChange,
 		handleVideoChange,
@@ -31,6 +36,7 @@ export function SubmissionFileFieldset({
 		posterPreview,
 		videoFiles,
 		videoInputRef,
+		webglFile,
 	} = files;
 
 	return (
@@ -124,7 +130,7 @@ export function SubmissionFileFieldset({
 			</div>
 
 			<div className="form-field">
-				<label htmlFor="gameFile">게임 파일 (ZIP, 최대 5GB)</label>
+				<label htmlFor="gameFile">게임 파일 (ZIP, 최대 {limits.gameMaxMb}MB)</label>
 				<input
 					id="gameFile"
 					type="file"
@@ -149,6 +155,32 @@ export function SubmissionFileFieldset({
 				<p className="field-hint">
 					{gameUploadHint}
 				</p>
+			</div>
+
+			<div className="form-field">
+				<label htmlFor="webglFile">WebGL 빌드 파일 (ZIP, 최대 {limits.gameMaxMb}MB)</label>
+				<input
+					id="webglFile"
+					type="file"
+					accept=".zip,application/zip,application/x-zip-compressed"
+					ref={webglInputRef}
+					onChange={handleWebglChange}
+				/>
+				{webglFile && (
+					<div className="file-selected-row">
+						<p className="file-info">
+							{webglFile.name} ({(webglFile.size / 1024 / 1024).toFixed(1)}MB)
+						</p>
+						<button
+							type="button"
+							className="btn btn--danger btn--small"
+							onClick={clearWebglFile}
+						>
+							제거
+						</button>
+					</div>
+				)}
+				<p className="field-hint">{webglUploadHint}</p>
 			</div>
 		</fieldset>
 	);

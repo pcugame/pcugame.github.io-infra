@@ -3,6 +3,7 @@ import type { AdminProjectDetail } from '@pcu/contracts';
 import { env } from '../../../config/env.js';
 import { isPosterUrlSafe } from '../../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
+import { parseWebglEntryKey, webglUrl } from '../../webgl/paths.js';
 
 /** Build a full asset URL from storageKey and kind */
 export function assetUrl(storageKey: string, kind: AssetKind): string {
@@ -51,6 +52,7 @@ export function serializeProjectDetail(project: {
 	status: ProjectStatus;
 	sortOrder: number;
 	posterAssetId: number | null;
+	webglEntryKey?: string;
 	poster: { storageKey: string; kind: AssetKind; status: string } | null;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
 	assets: SerializableAsset[];
@@ -83,6 +85,9 @@ export function serializeProjectDetail(project: {
 		posterAssetId: project.posterAssetId ?? undefined,
 		posterUrl: isPosterUrlSafe(project.poster)
 			? assetUrl(project.poster!.storageKey, 'POSTER')
+			: undefined,
+		webglUrl: parseWebglEntryKey(project.id, project.webglEntryKey ?? '')
+			? webglUrl(env().API_PUBLIC_URL, project.id)
 			: undefined,
 		members: project.members.map((m) => ({
 			id: m.id,

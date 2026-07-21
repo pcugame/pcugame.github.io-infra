@@ -79,6 +79,7 @@ export type AdminProjectDetail = {
 	sortOrder: number;
 	posterAssetId?: number;
 	posterUrl?: string;
+	webglUrl?: string;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
 	assets: {
 		id: number;

@@ -10,6 +10,8 @@ import {
 import { AppError, badRequest } from '../../../shared/errors.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
 import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
+import { cleanupWebglDeployment, cleanupWebglEntry, deployWebglSource } from '../../webgl/deployment.js';
+import { webglUrl } from '../../webgl/paths.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
 import * as repo from './repository.js';
@@ -50,6 +52,7 @@ export async function completeSession(
 
 	let s3Completed = false;
 	const storageKey = session.s3Key;
+	let deployedWebgl: Awaited<ReturnType<typeof deployWebglSource>> | null = null;
 	try {
 		const dbParts = await repo.findPartsBySessionId(session.id);
 		const parts = dbParts.map((part) => ({ partNumber: part.partNumber, etag: part.etag }));
@@ -78,6 +81,34 @@ export async function completeSession(
 		if (!detected || !isAllowedGameType(detected)) {
 			throw badRequest('Uploaded file is not a valid ZIP archive');
 		}
+		if (session.uploadKind === 'WEBGL') {
+			deployedWebgl = await deployWebglSource(session.projectId, storageKey, head.size);
+			const result = await repo.finalizeCompletedWebglSession(
+				session.id,
+				session.projectId,
+				deployedWebgl.entryKey,
+				storageKey,
+			);
+			if (result.oldEntryKey && result.oldEntryKey !== deployedWebgl.entryKey) {
+				await cleanupWebglEntry(
+					session.projectId,
+					result.oldEntryKey,
+					'webgl-upload-replace-previous',
+				).catch((cleanupErr) => {
+					logger().error(
+						{ err: cleanupErr, projectId: session.projectId, oldEntryKey: result.oldEntryKey },
+						'Failed to clean previous WebGL deployment after pointer swap',
+					);
+				});
+			}
+			return {
+				status: 'COMPLETED' as const,
+				storageKey,
+				sizeBytes: Number(session.totalBytes),
+				webglUrl: webglUrl(cfg.API_PUBLIC_URL, session.projectId),
+			};
+		}
+
 		await validateZipArchiveObject(cfg.S3_BUCKET_PROTECTED, storageKey, head.size);
 
 		const result = await repo.finalizeCompletedSession(session.id, session.projectId, 'GAME', {
@@ -110,7 +141,18 @@ export async function completeSession(
 			await repo.markFailed(session.id, storageKey).catch((markErr) => {
 				logger().error({ err: markErr, sessionId: session.id }, 'Failed to mark session FAILED after completed-object error');
 			});
-			await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, storageKey, 'game-upload-completion-failed', { sessionId: session.id });
+			if (deployedWebgl) {
+				await cleanupWebglDeployment(deployedWebgl, 'webgl-upload-completion-failed');
+			} else {
+				await safeDeleteObject(
+					cfg.S3_BUCKET_PROTECTED,
+					storageKey,
+					session.uploadKind === 'WEBGL'
+						? 'webgl-upload-completion-failed'
+						: 'game-upload-completion-failed',
+					{ sessionId: session.id },
+				);
+			}
 		} else {
 			await repo.revertToPending(session.id).catch((revertErr) => {
 				logger().error({ err: revertErr, sessionId: session.id }, 'Failed to revert session to PENDING after pre-S3-complete error');

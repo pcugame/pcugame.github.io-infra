@@ -17,20 +17,24 @@ export interface SubmissionFilesState {
 	posterFile: File | null;
 	imageFiles: File[];
 	gameFile: File | null;
+	webglFile: File | null;
 	videoFiles: File[];
 	posterPreview: string | null;
 	fileSizeError: string | null;
 	posterInputRef: RefObject<HTMLInputElement | null>;
 	imagesInputRef: RefObject<HTMLInputElement | null>;
 	gameInputRef: RefObject<HTMLInputElement | null>;
+	webglInputRef: RefObject<HTMLInputElement | null>;
 	videoInputRef: RefObject<HTMLInputElement | null>;
 	clearPoster: () => void;
 	clearImages: () => void;
 	clearGameFile: () => void;
+	clearWebglFile: () => void;
 	clearVideo: () => void;
 	handlePosterChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleImagesChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleGameChange: (e: ChangeEvent<HTMLInputElement>) => void;
+	handleWebglChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleVideoChange: (e: ChangeEvent<HTMLInputElement>) => void;
 }
 
@@ -40,6 +44,7 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 	const [posterFile, setPosterFile] = useState<File | null>(null);
 	const [imageFiles, setImageFiles] = useState<File[]>([]);
 	const [gameFile, setGameFile] = useState<File | null>(null);
+	const [webglFile, setWebglFile] = useState<File | null>(null);
 	const [videoFiles, setVideoFiles] = useState<File[]>([]);
 	const [posterPreview, setPosterPreview] = useState<string | null>(null);
 	const [fileSizeError, setFileSizeError] = useState<string | null>(null);
@@ -47,6 +52,7 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 	const posterInputRef = useRef<HTMLInputElement>(null);
 	const imagesInputRef = useRef<HTMLInputElement>(null);
 	const gameInputRef = useRef<HTMLInputElement>(null);
+	const webglInputRef = useRef<HTMLInputElement>(null);
 	const videoInputRef = useRef<HTMLInputElement>(null);
 
 	const revokePosterPreview = () => {
@@ -71,6 +77,11 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 	const clearGameFile = () => {
 		setGameFile(null);
 		if (gameInputRef.current) gameInputRef.current.value = '';
+	};
+
+	const clearWebglFile = () => {
+		setWebglFile(null);
+		if (webglInputRef.current) webglInputRef.current.value = '';
 	};
 
 	const clearVideo = () => {
@@ -130,14 +141,30 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 
 	const handleGameChange = (e: ChangeEvent<HTMLInputElement>) => {
 		const file = e.target.files?.[0] ?? null;
-		if (file && file.size > 5 * 1024 * mb) {
-			setFileSizeError(`게임 파일: ${formatFileSizeMb(file.size)}MB — 최대 5120MB까지 허용됩니다.`);
+		if (file && file.size > limits.gameMaxMb * mb) {
+			setFileSizeError(
+				`게임 파일: ${formatFileSizeMb(file.size)}MB — 최대 ${limits.gameMaxMb}MB까지 허용됩니다.`,
+			);
 			setGameFile(null);
 			e.target.value = '';
 			return;
 		}
 		setFileSizeError(null);
 		setGameFile(file);
+	};
+
+	const handleWebglChange = (e: ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0] ?? null;
+		if (file && file.size > limits.gameMaxMb * mb) {
+			setFileSizeError(
+				`WebGL 빌드: ${formatFileSizeMb(file.size)}MB — 최대 ${limits.gameMaxMb}MB까지 허용됩니다.`,
+			);
+			setWebglFile(null);
+			e.target.value = '';
+			return;
+		}
+		setFileSizeError(null);
+		setWebglFile(file);
 	};
 
 	const handleVideoChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -161,20 +188,24 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 		posterFile,
 		imageFiles,
 		gameFile,
+		webglFile,
 		videoFiles,
 		posterPreview,
 		fileSizeError,
 		posterInputRef,
 		imagesInputRef,
 		gameInputRef,
+		webglInputRef,
 		videoInputRef,
 		clearPoster,
 		clearImages,
 		clearGameFile,
+		clearWebglFile,
 		clearVideo,
 		handlePosterChange,
 		handleImagesChange,
 		handleGameChange,
+		handleWebglChange,
 		handleVideoChange,
 	};
 }

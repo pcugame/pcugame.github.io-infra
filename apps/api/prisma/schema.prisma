@@ -47,6 +47,11 @@ enum Platform {
   WEB
 }
 
+enum UploadKind {
+  GAME
+  WEBGL
+}
+
 // ─── Models ───────────────────────────────────────────
 
 model User {
@@ -60,10 +65,10 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  sessions       AuthSession[]       @relation("UserSessions")
-  projects       Project[]           @relation("ProjectCreator")
-  memberships    ProjectMember[]     @relation("UserMemberships")
-  gameUploads    GameUploadSession[] @relation("UserGameUploads")
+  sessions    AuthSession[]       @relation("UserSessions")
+  projects    Project[]           @relation("ProjectCreator")
+  memberships ProjectMember[]     @relation("UserMemberships")
+  gameUploads GameUploadSession[] @relation("UserGameUploads")
 
   @@map("users")
 }
@@ -89,30 +94,31 @@ model Exhibition {
 }
 
 model Project {
-  id             Int            @id @default(autoincrement())
-  exhibitionId   Int            @map("exhibition_id")
-  slug           String
-  title          String
-  summary        String         @default("")
-  description    String         @default("")
-  isIncomplete   Boolean        @default(false) @map("is_incomplete")
-  status         ProjectStatus  @default(PUBLISHED)
-  sortOrder      Int            @default(0) @map("sort_order")
-  githubUrl      String         @default("") @map("github_url")
-  platforms      Platform[]     @default([])
-  posterAssetId  Int?           @unique @map("poster_asset_id")
-  creatorId      Int            @map("creator_id")
-  createdAt      DateTime       @default(now()) @map("created_at")
-  updatedAt      DateTime       @updatedAt @map("updated_at")
+  id            Int           @id @default(autoincrement())
+  exhibitionId  Int           @map("exhibition_id")
+  slug          String
+  title         String
+  summary       String        @default("")
+  description   String        @default("")
+  isIncomplete  Boolean       @default(false) @map("is_incomplete")
+  status        ProjectStatus @default(PUBLISHED)
+  sortOrder     Int           @default(0) @map("sort_order")
+  githubUrl     String        @default("") @map("github_url")
+  platforms     Platform[]    @default([])
+  posterAssetId Int?          @unique @map("poster_asset_id")
+  webglEntryKey String        @default("") @map("webgl_entry_key")
+  creatorId     Int           @map("creator_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
 
   exhibition Exhibition @relation("ExhibitionProjects", fields: [exhibitionId], references: [id], onDelete: Cascade)
   creator    User       @relation("ProjectCreator", fields: [creatorId], references: [id], onDelete: Cascade)
   poster     Asset?     @relation("ProjectPoster", fields: [posterAssetId], references: [id], onDelete: SetNull)
 
-  members     ProjectMember[]      @relation("ProjectMembers")
-  assets      Asset[]              @relation("ProjectAssets")
-  gameUploads GameUploadSession[]  @relation("ProjectGameUploads")
-  activeGameUpload GameUploadActiveSession? @relation("ProjectActiveGameUpload")
+  members           ProjectMember[]           @relation("ProjectMembers")
+  assets            Asset[]                   @relation("ProjectAssets")
+  gameUploads       GameUploadSession[]       @relation("ProjectGameUploads")
+  activeGameUploads GameUploadActiveSession[] @relation("ProjectActiveGameUploads")
 
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
   @@index([exhibitionId, status, sortOrder])
@@ -156,8 +162,8 @@ model Asset {
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
 
-  project      Project  @relation("ProjectAssets", fields: [projectId], references: [id], onDelete: Cascade)
-  posterOf     Project? @relation("ProjectPoster")
+  project  Project  @relation("ProjectAssets", fields: [projectId], references: [id], onDelete: Cascade)
+  posterOf Project? @relation("ProjectPoster")
 
   @@index([projectId, kind, status])
   // Partial unique index `asset_project_game_ready_unique` on (project_id, kind)
@@ -184,30 +190,32 @@ model AuthSession {
 /// Tracks a resumable chunked game-file upload session.
 /// Uses S3 multipart upload — chunks go directly to object storage.
 model GameUploadSession {
-  id             String   @id @default(uuid())
-  projectId      Int      @map("project_id")
-  userId         Int      @map("user_id")
-  originalName   String   @map("original_name")
-  totalBytes     BigInt   @map("total_bytes")
-  chunkSizeBytes Int      @map("chunk_size_bytes")
-  totalChunks    Int      @map("total_chunks")
-  uploadedChunks Int[]    @default([]) @map("uploaded_chunks")
-  status         String   @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED | FAILED
-  stagingPath    String   @default("") @map("staging_path") // legacy, no longer used
-  storageKey     String?  @map("storage_key") // set on completion
-  s3UploadId     String?  @map("s3_upload_id")
-  s3Key          String?  @map("s3_key")
-  s3PartEtags    Json?    @map("s3_part_etags") // [{partNumber: Int, etag: String}]
-  expiresAt      DateTime @map("expires_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id             String     @id @default(uuid())
+  projectId      Int        @map("project_id")
+  userId         Int        @map("user_id")
+  uploadKind     UploadKind @default(GAME) @map("upload_kind")
+  originalName   String     @map("original_name")
+  totalBytes     BigInt     @map("total_bytes")
+  chunkSizeBytes Int        @map("chunk_size_bytes")
+  totalChunks    Int        @map("total_chunks")
+  uploadedChunks Int[]      @default([]) @map("uploaded_chunks")
+  status         String     @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED | FAILED
+  stagingPath    String     @default("") @map("staging_path") // legacy, no longer used
+  storageKey     String?    @map("storage_key") // set on completion
+  s3UploadId     String?    @map("s3_upload_id")
+  s3Key          String?    @map("s3_key")
+  s3PartEtags    Json?      @map("s3_part_etags") // [{partNumber: Int, etag: String}]
+  expiresAt      DateTime   @map("expires_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
 
-  project Project @relation("ProjectGameUploads", fields: [projectId], references: [id], onDelete: Cascade)
-  user    User    @relation("UserGameUploads", fields: [userId], references: [id], onDelete: Cascade)
-  parts   GameUploadPart[] @relation("GameUploadSessionParts")
+  project    Project                  @relation("ProjectGameUploads", fields: [projectId], references: [id], onDelete: Cascade)
+  user       User                     @relation("UserGameUploads", fields: [userId], references: [id], onDelete: Cascade)
+  parts      GameUploadPart[]         @relation("GameUploadSessionParts")
   activeSlot GameUploadActiveSession? @relation("GameUploadSessionActiveSlot")
 
   @@index([projectId])
+  @@index([projectId, uploadKind])
   @@index([userId])
   @@index([status, expiresAt])
   @@map("game_upload_sessions")
@@ -229,14 +237,16 @@ model GameUploadPart {
 }
 
 model GameUploadActiveSession {
-  projectId Int      @id @map("project_id")
-  sessionId String   @unique @map("session_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  projectId  Int        @map("project_id")
+  uploadKind UploadKind @default(GAME) @map("upload_kind")
+  sessionId  String     @unique @map("session_id")
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
 
-  project Project @relation("ProjectActiveGameUpload", fields: [projectId], references: [id], onDelete: Cascade)
+  project Project           @relation("ProjectActiveGameUploads", fields: [projectId], references: [id], onDelete: Cascade)
   session GameUploadSession @relation("GameUploadSessionActiveSlot", fields: [sessionId], references: [id], onDelete: Cascade)
 
+  @@id([projectId, uploadKind], name: "projectId_uploadKind")
   @@map("game_upload_active_sessions")
 }
 
@@ -273,10 +283,10 @@ model OrphanObject {
 /// Runtime-configurable site settings (single row, id = "default").
 /// Read from memory cache; updated via admin API without server restart.
 model SiteSetting {
-  id              String   @id @default("default")
-  maxGameFileMb   Int      @default(5120) @map("max_game_file_mb")
-  maxChunkSizeMb  Int      @default(10) @map("max_chunk_size_mb")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id             String   @id @default("default")
+  maxGameFileMb  Int      @default(5120) @map("max_game_file_mb")
+  maxChunkSizeMb Int      @default(10) @map("max_chunk_size_mb")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@map("site_settings")
 }

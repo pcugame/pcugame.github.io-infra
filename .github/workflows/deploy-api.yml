@@ -95,6 +95,24 @@ jobs:
             export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
             chmod +x "${DEPLOY_DIR}/deploy.sh"
 
+            if podman container exists gp-postgres; then
+              umask 077
+              backup_dir="${DEPLOY_DIR}/backups"
+              backup_file="${backup_dir}/pre-webgl-${{ github.sha }}-$(date -u +%Y%m%dT%H%M%SZ).dump"
+              mkdir -p "${backup_dir}"
+              echo "Creating pre-deploy PostgreSQL backup at ${backup_file}"
+              if ! podman exec gp-postgres sh -c 'exec pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > "${backup_file}"; then
+                rm -f "${backup_file}"
+                echo "Database backup failed; refusing to deploy."
+                exit 1
+              fi
+              if [ ! -s "${backup_file}" ]; then
+                rm -f "${backup_file}"
+                echo "Database backup was empty; refusing to deploy."
+                exit 1
+              fi
+            fi
+
             rollback_tag="localhost/pcu-graduationproject-v2-api:rollback"
             previous_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null || true)"
             if [ -n "${previous_image_id}" ]; then

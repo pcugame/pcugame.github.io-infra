@@ -7,6 +7,7 @@ import {
 	UploadPartCommand,
 	CompleteMultipartUploadCommand,
 	AbortMultipartUploadCommand,
+	ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Readable } from 'node:stream';
@@ -19,6 +20,7 @@ import { env } from '../config/env.js';
 
 export interface UploadObjectOptions {
 	contentDisposition?: string;
+	contentEncoding?: string;
 	cacheControl?: string;
 	contentType?: string;
 }
@@ -38,6 +40,7 @@ export async function uploadFile(
 			Body: body,
 			ContentType: options.contentType ?? contentType,
 			...(options.contentDisposition && { ContentDisposition: options.contentDisposition }),
+			...(options.contentEncoding && { ContentEncoding: options.contentEncoding }),
 			...(options.cacheControl && { CacheControl: options.cacheControl }),
 			...(contentLength != null && { ContentLength: contentLength }),
 		}),
@@ -145,6 +148,85 @@ export async function downloadObject(
 ): Promise<void> {
 	const res = await s3().send(new GetObjectCommand({ Bucket: bucket, Key: key }));
 	await streamPipeline(res.Body as Readable, createWriteStream(destPath));
+}
+
+export interface ObjectStreamResult {
+	body: Readable;
+	size: number;
+	contentType: string;
+	contentEncoding?: string;
+	cacheControl?: string;
+	etag?: string;
+	lastModified?: Date;
+	contentRange?: string;
+}
+
+/** Read an object as a stream, optionally with a single byte range. */
+export async function getObjectStream(
+	bucket: string,
+	key: string,
+	range?: { start: number; end: number },
+): Promise<ObjectStreamResult | null> {
+	try {
+		const res = await s3().send(new GetObjectCommand({
+			Bucket: bucket,
+			Key: key,
+			...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
+		}));
+		return {
+			body: res.Body as Readable,
+			size: res.ContentLength ?? 0,
+			contentType: res.ContentType ?? 'application/octet-stream',
+			contentEncoding: res.ContentEncoding,
+			cacheControl: res.CacheControl,
+			etag: res.ETag,
+			lastModified: res.LastModified,
+			contentRange: res.ContentRange,
+		};
+	} catch (err: any) {
+		if (err.name === 'NoSuchKey' || err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+			return null;
+		}
+		throw err;
+	}
+}
+
+/** List every key below a prefix. Pagination is handled internally. */
+export async function listObjectKeys(bucket: string, prefix: string): Promise<string[]> {
+	const keys: string[] = [];
+	let continuationToken: string | undefined;
+	do {
+		const page = await s3().send(new ListObjectsV2Command({
+			Bucket: bucket,
+			Prefix: prefix,
+			ContinuationToken: continuationToken,
+		}));
+		for (const object of page.Contents ?? []) {
+			if (object.Key) keys.push(object.Key);
+		}
+		continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+	} while (continuationToken);
+	return keys;
+}
+
+/** Best-effort prefix cleanup; individual failures enter the orphan retry queue. */
+export async function safeDeletePrefix(
+	bucket: string,
+	prefix: string,
+	reason: string,
+	logContext?: Record<string, unknown>,
+): Promise<number> {
+	const keys = await listObjectKeys(bucket, prefix);
+	const deleteConcurrency = 25;
+	for (let offset = 0; offset < keys.length; offset += deleteConcurrency) {
+		await Promise.all(keys.slice(offset, offset + deleteConcurrency).map((key) =>
+			safeDeleteObject(bucket, key, reason, {
+				...logContext,
+				prefix,
+			}),
+		));
+	}
+	return keys.length;
 }
 
 /* ── Multipart upload operations ──────────────────────── */

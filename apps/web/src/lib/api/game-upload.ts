@@ -15,6 +15,7 @@ import type {
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
+	UploadKind,
 } from '../../contracts';
 
 // ── Types ────────────────────────────────────────────────────
@@ -75,6 +76,7 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
 export async function createGameUploadSession(
 	projectId: number,
 	file: File,
+	uploadKind: UploadKind = 'GAME',
 ): Promise<GameUploadSession> {
 	return apiRequest<GameUploadSession>(
 		`/api/admin/projects/${projectId}/game-upload-sessions`,
@@ -84,6 +86,7 @@ export async function createGameUploadSession(
 			body: JSON.stringify({
 				originalName: file.name,
 				totalBytes: file.size,
+				uploadKind,
 			} satisfies GameUploadCreateSessionRequest),
 		},
 	);
@@ -101,10 +104,14 @@ export async function getGameUploadStatus(
 /** List active sessions for a project. */
 export async function listGameUploadSessions(
 	projectId: number,
+	uploadKind?: UploadKind,
 ): Promise<GameUploadSessionListResponse> {
-	return apiRequest<GameUploadSessionListResponse>(
+	const response = await apiRequest<GameUploadSessionListResponse>(
 		`/api/admin/projects/${projectId}/game-upload-sessions`,
 	);
+	return uploadKind
+		? { items: response.items.filter((item) => (item.uploadKind ?? 'GAME') === uploadKind) }
+		: response;
 }
 
 /** Cancel an upload session. */

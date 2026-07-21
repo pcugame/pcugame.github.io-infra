@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { SubmitProjectPayloadInput } from '../../contracts/schemas';
 import { getApiErrorMessage } from '../../lib/api';
@@ -41,6 +41,15 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	} = submission;
 	const { control, getValues, handleSubmit, register } = form;
 	const [previewSnapshot, setPreviewSnapshot] = useState<SubmitProjectPayloadInput | null>(null);
+	const [gameUploadFinished, setGameUploadFinished] = useState(false);
+	const [webglUploadFinished, setWebglUploadFinished] = useState(false);
+
+	useEffect(() => {
+		if (!createdProjectId) return;
+		const gameReady = !files.gameFile || gameUploadFinished;
+		const webglReady = !files.webglFile || webglUploadFinished;
+		if (gameReady && webglReady) goToEdit();
+	}, [createdProjectId, files.gameFile, files.webglFile, gameUploadFinished, goToEdit, webglUploadFinished]);
 
 	const openPreview = () => setPreviewSnapshot(getValues());
 	const closePreview = () => setPreviewSnapshot(null);
@@ -55,13 +64,28 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 			</div>
 
 			{showGameProgress && (
-				<GameUploadWidget
-					projectId={createdProjectId!}
-					initialFile={files.gameFile}
-					autoStart
-					onComplete={goToEdit}
-					onSkip={goToEdit}
-				/>
+				<div className="submission-chunked-uploads">
+					{files.gameFile && (
+						<GameUploadWidget
+							projectId={createdProjectId!}
+							initialFile={files.gameFile}
+							autoStart
+							uploadKind="GAME"
+							onComplete={() => setGameUploadFinished(true)}
+							onSkip={() => setGameUploadFinished(true)}
+						/>
+					)}
+					{files.webglFile && (
+						<GameUploadWidget
+							projectId={createdProjectId!}
+							initialFile={files.webglFile}
+							autoStart
+							uploadKind="WEBGL"
+							onComplete={() => setWebglUploadFinished(true)}
+							onSkip={() => setWebglUploadFinished(true)}
+						/>
+					)}
+				</div>
 			)}
 
 			{!showGameProgress && (
@@ -85,6 +109,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 					<SubmissionFileFieldset
 						files={files}
 						gameUploadHint={copy.gameUploadHint}
+						webglUploadHint={copy.webglUploadHint}
 						limits={limits}
 					/>
 

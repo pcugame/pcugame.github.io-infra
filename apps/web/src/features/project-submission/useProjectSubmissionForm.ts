@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -17,7 +17,7 @@ import type { SubmissionFilesState } from './useSubmissionFiles';
 
 interface UseProjectSubmissionFormParams {
 	mode: ProjectSubmissionMode;
-	files: Pick<SubmissionFilesState, 'posterFile' | 'imageFiles' | 'videoFiles' | 'gameFile'>;
+	files: Pick<SubmissionFilesState, 'posterFile' | 'imageFiles' | 'videoFiles' | 'gameFile' | 'webglFile'>;
 }
 
 export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFormParams) {
@@ -33,6 +33,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				submitLabel: '작품 등록',
 				submittingLabel: '등록 중…',
 				gameUploadHint: '작품 등록 후 자동으로 청크 업로드가 시작됩니다. 중간에 끊겨도 이어서 올릴 수 있습니다.',
+				webglUploadHint: '게임 ZIP과 별도로 업로드됩니다. ZIP 루트 또는 단일 폴더 아래에 index.html이 있어야 합니다.',
 			}
 		: {
 				eyebrow: 'My Project',
@@ -40,6 +41,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				submitLabel: '작품 제출',
 				submittingLabel: '제출 중…',
 				gameUploadHint: '작품 제출 후 자동으로 청크 업로드가 시작됩니다. 중간에 끊겨도 이어서 올릴 수 있습니다.',
+				webglUploadHint: '게임 ZIP과 별도로 업로드됩니다. ZIP 루트 또는 단일 폴더 아래에 index.html이 있어야 합니다.',
 			};
 
 	const { data: yearsData } = useQuery({
@@ -103,7 +105,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			qc.invalidateQueries({ queryKey: queryKeys.publicYears });
 			qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
 
-			if (files.gameFile) {
+			if (files.gameFile || files.webglFile) {
 				setCreatedProjectId(res.id);
 			} else {
 				navigate(isAdminMode ? `/admin/projects/${res.id}/edit` : '/me/projects');
@@ -124,10 +126,10 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		submitMutation.mutate(fd);
 	};
 
-	const goToEdit = () => {
+	const goToEdit = useCallback(() => {
 		if (!createdProjectId) return;
 		navigate(isAdminMode ? `/admin/projects/${createdProjectId}/edit` : '/me/projects');
-	};
+	}, [createdProjectId, isAdminMode, navigate]);
 
 	return {
 		copy,

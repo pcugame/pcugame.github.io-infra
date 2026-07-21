@@ -1,6 +1,9 @@
+export type UploadKind = 'GAME' | 'WEBGL';
+
 export type GameUploadCreateSessionRequest = {
 	originalName: string;
 	totalBytes: number;
+	uploadKind?: UploadKind;
 };
 
 export type GameUploadSession = {
@@ -8,11 +11,13 @@ export type GameUploadSession = {
 	chunkSizeBytes: number;
 	totalChunks: number;
 	expiresAt: string;
+	uploadKind: UploadKind;
 };
 
 export type GameUploadStatus = {
 	sessionId: string;
 	projectId: number;
+	uploadKind: UploadKind;
 	originalName: string;
 	totalBytes: number;
 	chunkSizeBytes: number;
@@ -38,4 +43,5 @@ export type GameUploadCompleteResponse = {
 	status: 'COMPLETED';
 	storageKey: string;
 	sizeBytes: number;
+	webglUrl?: string;
 };

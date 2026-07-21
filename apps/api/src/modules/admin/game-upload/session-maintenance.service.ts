@@ -5,6 +5,7 @@ import { abortMultipartUpload, headObject, readObjectRange, safeDeleteObject } f
 import { badRequest } from '../../../shared/errors.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
 import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
+import { cleanupWebglDeployment, cleanupWebglEntry, deployWebglSource } from '../../webgl/deployment.js';
 import { loadSession } from './session-loader.js';
 import * as repo from './repository.js';
 
@@ -18,6 +19,7 @@ export async function getSessionStatus(
 	return {
 		sessionId: session.id,
 		projectId: session.projectId,
+		uploadKind: session.uploadKind,
 		originalName: session.originalName,
 		totalBytes: Number(session.totalBytes),
 		chunkSizeBytes: session.chunkSizeBytes,
@@ -77,6 +79,7 @@ export async function sweepStaleCompletingSessions(): Promise<{ swept: number }>
 			return null;
 		});
 		if (finalObject) {
+			let deployedWebgl: Awaited<ReturnType<typeof deployWebglSource>> | null = null;
 			try {
 				if (finalObject.size !== Number(s.totalBytes)) {
 					throw new Error(`Final file size mismatch: expected ${s.totalBytes}, got ${finalObject.size}`);
@@ -85,6 +88,28 @@ export async function sweepStaleCompletingSessions(): Promise<{ swept: number }>
 				const detected = detectFileType(header);
 				if (!detected || !isAllowedGameType(detected)) {
 					throw new Error('Completed object is not a valid ZIP archive');
+				}
+				if (s.uploadKind === 'WEBGL') {
+					deployedWebgl = await deployWebglSource(s.projectId, s.s3Key, finalObject.size);
+					const result = await repo.finalizeCompletedWebglSession(
+						s.id,
+						s.projectId,
+						deployedWebgl.entryKey,
+						s.s3Key,
+					);
+					if (result.oldEntryKey && result.oldEntryKey !== deployedWebgl.entryKey) {
+						await cleanupWebglEntry(
+							s.projectId,
+							result.oldEntryKey,
+							'webgl-upload-sweep-replace-previous',
+						).catch((cleanupErr) => {
+							logger().error(
+								{ err: cleanupErr, projectId: s.projectId, oldEntryKey: result.oldEntryKey },
+								'Boot sweep: failed to clean previous WebGL deployment after pointer swap',
+							);
+						});
+					}
+					continue;
 				}
 				await validateZipArchiveObject(cfg.S3_BUCKET_PROTECTED, s.s3Key, finalObject.size);
 				const result = await repo.finalizeCompletedSession(s.id, s.projectId, 'GAME', {
@@ -105,7 +130,18 @@ export async function sweepStaleCompletingSessions(): Promise<{ swept: number }>
 				await repo.markFailed(s.id, s.s3Key).catch((markErr) => {
 					logger().error({ err: markErr, sessionId: s.id }, 'Boot sweep: failed to mark unrepaired COMPLETING session failed');
 				});
-				await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, s.s3Key, 'game-upload-sweep-repair-failed', { sessionId: s.id });
+				if (deployedWebgl) {
+					await cleanupWebglDeployment(deployedWebgl, 'webgl-upload-sweep-repair-failed');
+				} else {
+					await safeDeleteObject(
+						cfg.S3_BUCKET_PROTECTED,
+						s.s3Key,
+						s.uploadKind === 'WEBGL'
+							? 'webgl-upload-sweep-repair-failed'
+							: 'game-upload-sweep-repair-failed',
+						{ sessionId: s.id },
+					);
+				}
 			}
 			continue;
 		}
@@ -139,6 +175,7 @@ export async function listSessions(
 		return {
 			sessionId: s.id,
 			projectId: s.projectId,
+			uploadKind: s.uploadKind,
 			originalName: s.originalName,
 			totalBytes: Number(s.totalBytes),
 			chunkSizeBytes: s.chunkSizeBytes,

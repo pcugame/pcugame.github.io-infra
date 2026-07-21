@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { GameUploadSession } from '@pcu/contracts';
+import type { UploadKind } from '../../../generated/prisma/client.js';
 import { env } from '../../../config/env.js';
 import { logger } from '../../../lib/logger.js';
 import { isAcceptingNewWork } from '../../../lib/lifecycle.js';
@@ -10,6 +11,7 @@ import { generateStorageKey } from '../../../shared/storage-path.js';
 import { getUploadLimits } from '../../../shared/upload-limits.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
+import { createWebglDeploymentKeys } from '../../webgl/paths.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import { resolveChunkSizeBytes } from './session-sizing.js';
 import * as repo from './repository.js';
@@ -19,7 +21,7 @@ export async function createSession(
 	projectId: number,
 	exhibitionId: number,
 	user: { id: number; role: string },
-	body: { originalName?: string; totalBytes?: number },
+	body: { originalName?: string; totalBytes?: number; uploadKind?: UploadKind },
 ): Promise<GameUploadSession> {
 	// Refuse to start new multi-chunk sessions once shutdown has begun; in-flight
 	// completion calls are still allowed so existing uploads do not get truncated.
@@ -33,6 +35,7 @@ export async function createSession(
 
 	const cfg = env();
 	const { originalName, totalBytes } = body;
+	const uploadKind = body.uploadKind ?? 'GAME';
 	assertValidUploadFilename(originalName);
 
 	const exhibition = await repo.findExhibitionById(exhibitionId);
@@ -52,7 +55,9 @@ export async function createSession(
 	}
 
 	const totalChunks = Math.ceil(totalBytes / chunkSizeBytes);
-	const s3Key = generateStorageKey('zip');
+	const s3Key = uploadKind === 'WEBGL'
+		? createWebglDeploymentKeys(projectId).sourceKey
+		: generateStorageKey('zip');
 	const s3UploadId = await createMultipartUpload(
 		cfg.S3_BUCKET_PROTECTED,
 		s3Key,
@@ -67,6 +72,7 @@ export async function createSession(
 			id: randomUUID(),
 			projectId,
 			userId: user.id,
+			uploadKind,
 			originalName,
 			totalBytes: BigInt(totalBytes),
 			chunkSizeBytes,
@@ -95,5 +101,6 @@ export async function createSession(
 		chunkSizeBytes,
 		totalChunks,
 		expiresAt: expiresAt.toISOString(),
+		uploadKind,
 	};
 }

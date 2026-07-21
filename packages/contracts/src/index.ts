@@ -77,6 +77,7 @@ export type {
 
 export type {
 	ExportFileStatus,
+	ExportAssetKind,
 	ExportPhase,
 	ExportProgress,
 	ExportProgressFile,
@@ -94,6 +95,7 @@ export type {
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
+	UploadKind,
 } from './game-upload.js';
 
 export * from './schemas.js';

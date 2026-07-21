@@ -88,6 +88,10 @@ export const adminProjectApi = {
     return api.delete<void>(`/api/admin/projects/${id}`);
   },
 
+  deleteWebgl(id: number) {
+    return api.delete<void>(`/api/admin/projects/${id}/webgl`);
+  },
+
   /** 작품 + 파일 일괄 등록 (multipart/form-data) */
   submit(formData: FormData) {
     return uploadFormData<SubmitProjectResponse>(

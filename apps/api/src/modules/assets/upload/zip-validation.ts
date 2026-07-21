@@ -24,12 +24,25 @@ interface ZipValidationInput {
 	sizeBytes: number;
 	eocdTail: Buffer;
 	tailStartOffset: number;
+	allowGzipEntries?: boolean;
 	readRange(start: number, end: number): Promise<Buffer>;
+}
+
+export interface ZipEntryMetadata {
+	fileName: string;
+	compressedSize: number;
+	uncompressedSize: number;
+	compressionMethod: number;
+	flags: number;
+	versionMadeBy: number;
+	externalFileAttributes: number;
+	isDirectory: boolean;
 }
 
 export interface ZipValidationSummary {
 	entryCount: number;
 	totalUncompressedBytes: number;
+	entries: ZipEntryMetadata[];
 }
 
 function findEocd(input: Buffer, tailStartOffset: number, sizeBytes: number): Eocd {
@@ -92,16 +105,22 @@ function isUnsafeZipPath(name: string): boolean {
 	return normalized === '..' || normalized.startsWith('../');
 }
 
-function parseCentralDirectory(buffer: Buffer, expectedEntries: number): ZipValidationSummary {
+function parseCentralDirectory(
+	buffer: Buffer,
+	expectedEntries: number,
+	options: { allowGzipEntries?: boolean } = {},
+): ZipValidationSummary {
 	let offset = 0;
 	let entryCount = 0;
 	let totalUncompressedBytes = 0;
+	const entries: ZipEntryMetadata[] = [];
 
 	while (offset < buffer.length) {
 		if (offset + 46 > buffer.length || buffer.readUInt32LE(offset) !== CENTRAL_DIRECTORY_SIGNATURE) {
 			throw badRequest('ZIP archive central directory is invalid');
 		}
 
+		const versionMadeBy = buffer.readUInt16LE(offset + 4);
 		const flags = buffer.readUInt16LE(offset + 8);
 		const compressionMethod = buffer.readUInt16LE(offset + 10);
 		const compressedSize = buffer.readUInt32LE(offset + 20);
@@ -109,6 +128,7 @@ function parseCentralDirectory(buffer: Buffer, expectedEntries: number): ZipVali
 		const fileNameLength = buffer.readUInt16LE(offset + 28);
 		const extraLength = buffer.readUInt16LE(offset + 30);
 		const commentLength = buffer.readUInt16LE(offset + 32);
+		const externalFileAttributes = buffer.readUInt32LE(offset + 38);
 		const localHeaderOffset = buffer.readUInt32LE(offset + 42);
 		const nameStart = offset + 46;
 		const nameEnd = nameStart + fileNameLength;
@@ -128,7 +148,11 @@ function parseCentralDirectory(buffer: Buffer, expectedEntries: number): ZipVali
 
 		const name = buffer.subarray(nameStart, nameEnd).toString('utf8');
 		if (isUnsafeZipPath(name)) throw badRequest('ZIP archive contains an unsafe file path');
-		if (ARCHIVE_EXT_RE.test(name)) throw badRequest('Nested archives are not allowed in game ZIP files');
+		if (ARCHIVE_EXT_RE.test(name) && !(options.allowGzipEntries && /\.gz$/i.test(name))) {
+			throw badRequest(options.allowGzipEntries
+				? 'Nested archives are not allowed in WebGL ZIP files'
+				: 'Nested archives are not allowed in game ZIP files');
+		}
 
 		totalUncompressedBytes += uncompressedSize;
 		if (totalUncompressedBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
@@ -143,12 +167,22 @@ function parseCentralDirectory(buffer: Buffer, expectedEntries: number): ZipVali
 		}
 
 		entryCount++;
+		entries.push({
+			fileName: name,
+			compressedSize,
+			uncompressedSize,
+			compressionMethod,
+			flags,
+			versionMadeBy,
+			externalFileAttributes,
+			isDirectory: name.endsWith('/') || (externalFileAttributes & 0x10) !== 0,
+		});
 		if (entryCount > MAX_ZIP_ENTRIES) throw badRequest('ZIP archive has too many files');
 		offset = nextOffset;
 	}
 
 	if (entryCount !== expectedEntries) throw badRequest('ZIP archive entry count is invalid');
-	return { entryCount, totalUncompressedBytes };
+	return { entryCount, totalUncompressedBytes, entries };
 }
 
 async function validateZipArchive(input: ZipValidationInput): Promise<ZipValidationSummary> {
@@ -164,10 +198,16 @@ async function validateZipArchive(input: ZipValidationInput): Promise<ZipValidat
 		throw badRequest('ZIP archive central directory could not be read');
 	}
 
-	return parseCentralDirectory(centralDirectory, eocd.entryCount);
+	return parseCentralDirectory(centralDirectory, eocd.entryCount, {
+		allowGzipEntries: input.allowGzipEntries,
+	});
 }
 
-export async function validateZipArchiveFile(filePath: string, sizeBytes?: number): Promise<ZipValidationSummary> {
+async function validateZipArchiveFileWithOptions(
+	filePath: string,
+	sizeBytes: number | undefined,
+	options: { allowGzipEntries?: boolean },
+): Promise<ZipValidationSummary> {
 	const stat = sizeBytes == null ? await fsp.stat(filePath) : { size: sizeBytes };
 	const tailLength = Math.min(stat.size, MAX_EOCD_SEARCH_BYTES);
 	const tailStart = stat.size - tailLength;
@@ -180,6 +220,7 @@ export async function validateZipArchiveFile(filePath: string, sizeBytes?: numbe
 			sizeBytes: stat.size,
 			eocdTail: tail,
 			tailStartOffset: tailStart,
+			allowGzipEntries: options.allowGzipEntries,
 			readRange: async (start, end) => {
 				const length = end - start + 1;
 				const buffer = Buffer.alloc(length);
@@ -190,6 +231,14 @@ export async function validateZipArchiveFile(filePath: string, sizeBytes?: numbe
 	} finally {
 		await handle.close();
 	}
+}
+
+export function validateZipArchiveFile(filePath: string, sizeBytes?: number): Promise<ZipValidationSummary> {
+	return validateZipArchiveFileWithOptions(filePath, sizeBytes, {});
+}
+
+export function validateWebglZipArchiveFile(filePath: string, sizeBytes?: number): Promise<ZipValidationSummary> {
+	return validateZipArchiveFileWithOptions(filePath, sizeBytes, { allowGzipEntries: true });
 }
 
 export async function validateZipArchiveObject(
@@ -205,6 +254,25 @@ export async function validateZipArchiveObject(
 		sizeBytes,
 		eocdTail: tail,
 		tailStartOffset: tailStart,
+		readRange: (start, end) => readObjectRange(bucket, key, start, end),
+	});
+}
+
+/** WebGL builds may legitimately contain pre-compressed `.gz` resources. */
+export async function validateWebglZipArchiveObject(
+	bucket: string,
+	key: string,
+	sizeBytes: number,
+): Promise<ZipValidationSummary> {
+	const tailLength = Math.min(sizeBytes, MAX_EOCD_SEARCH_BYTES);
+	const tailStart = sizeBytes - tailLength;
+	const tail = await readObjectRange(bucket, key, tailStart, sizeBytes - 1);
+
+	return validateZipArchive({
+		sizeBytes,
+		eocdTail: tail,
+		tailStartOffset: tailStart,
+		allowGzipEntries: true,
 		readRange: (start, end) => readObjectRange(bucket, key, start, end),
 	});
 }

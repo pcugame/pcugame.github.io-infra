@@ -18,6 +18,7 @@ import {
 	type GameUploadController,
 	type GameUploadStatus,
 } from '../lib/api/game-upload';
+import type { UploadKind } from '../contracts';
 
 type UploadState = 'idle' | 'uploading' | 'completing' | 'completed' | 'error' | 'cancelled';
 
@@ -31,10 +32,23 @@ interface Props {
 	onComplete?: () => void;
 	/** Called when the user skips / aborts */
 	onSkip?: () => void;
+	/** GAME and WEBGL use fully independent server-side sessions. */
+	uploadKind?: UploadKind;
 }
 
-export default function GameUploadWidget({ projectId, initialFile, autoStart, onComplete, onSkip }: Props) {
+export default function GameUploadWidget({
+	projectId,
+	initialFile,
+	autoStart,
+	onComplete,
+	onSkip,
+	uploadKind = 'GAME',
+}: Props) {
 	const qc = useQueryClient();
+	const isWebgl = uploadKind === 'WEBGL';
+	const labels = isWebgl
+		? { title: 'WebGL 빌드 업로드 (ZIP 파일)', uploadTitle: 'WebGL 빌드 업로드', noun: 'WebGL 빌드' }
+		: { title: '게임 파일 업로드 (ZIP 파일)', uploadTitle: '게임 파일 업로드', noun: '게임 파일' };
 
 	const [file, setFile] = useState<File | null>(initialFile ?? null);
 	const [state, setState] = useState<UploadState>('idle');
@@ -51,7 +65,7 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 		let cancelled = false;
 		async function check() {
 			try {
-				const res = await listGameUploadSessions(projectId);
+				const res = await listGameUploadSessions(projectId, uploadKind);
 				if (!cancelled && res.items.length > 0) {
 					setResumeSession(res.items[0]);
 				}
@@ -59,7 +73,7 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 		}
 		check();
 		return () => { cancelled = true; };
-	}, [projectId]);
+	}, [projectId, uploadKind]);
 
 	const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
 		const f = e.target.files?.[0] ?? null;
@@ -76,7 +90,7 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 		setError(null);
 
 		const ctrl = uploadGameFile(uploadFile, sess, {
-			title: '게임 파일 업로드',
+			title: labels.uploadTitle,
 			startFrom: uploadedChunks,
 			onProgress: (p) => {
 				setProgress(p);
@@ -98,14 +112,14 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 				setState('error');
 			}
 		}
-	}, [projectId, qc, onComplete]);
+	}, [labels.uploadTitle, projectId, qc, onComplete]);
 
 	const handleStart = useCallback(async () => {
 		if (!file) return;
 		if (submittingRef.current) return;
 		submittingRef.current = true;
 		try {
-			const sess = await createGameUploadSession(projectId, file);
+			const sess = await createGameUploadSession(projectId, file, uploadKind);
 			setSession(sess);
 			await doUpload(file, sess);
 		} catch (err) {
@@ -114,7 +128,7 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 		} finally {
 			submittingRef.current = false;
 		}
-	}, [file, projectId, doUpload]);
+	}, [file, projectId, doUpload, uploadKind]);
 
 	// Auto-start on mount when initialFile + autoStart are provided
 	useEffect(() => {
@@ -147,6 +161,7 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 				chunkSizeBytes: status.chunkSizeBytes,
 				totalChunks: status.totalChunks,
 				expiresAt: status.expiresAt,
+				uploadKind: status.uploadKind,
 			};
 			setSession(sess);
 			await doUpload(file, sess, status.uploadedChunks);
@@ -162,12 +177,18 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 		if (!file || !session) return;
 		try {
 			const status = await getGameUploadStatus(session.sessionId);
-			await doUpload(file, session, status.uploadedChunks);
+			if (status.status === 'PENDING') {
+				await doUpload(file, session, status.uploadedChunks);
+			} else {
+				const replacement = await createGameUploadSession(projectId, file, uploadKind);
+				setSession(replacement);
+				await doUpload(file, replacement);
+			}
 		} catch (err) {
 			setError(getApiErrorMessage(err));
 			setState('error');
 		}
-	}, [file, session, doUpload]);
+	}, [file, session, doUpload, projectId, uploadKind]);
 
 	const handleAbort = useCallback(() => {
 		controllerRef.current?.abort();
@@ -191,7 +212,7 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 
 	return (
 		<div className="game-upload">
-			<h3 className="game-upload__title">게임 파일 업로드 (ZIP 파일)</h3>
+			<h3 className="game-upload__title">{labels.title}</h3>
 
 			{/* Resume banner */}
 			{resumeSession && state === 'idle' && (
@@ -201,7 +222,7 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 						{' '}({resumeSession.uploadedCount}/{resumeSession.totalChunks} 청크 완료)
 					</p>
 					<p className="game-upload__resume-hint">
-						재개하려면 동일한 파일을 선택 후 "이어올리기" 버튼을 누르세요.
+						재개하려면 동일한 {labels.noun}을 선택 후 "이어올리기" 버튼을 누르세요.
 					</p>
 				</div>
 			)}
@@ -251,8 +272,8 @@ export default function GameUploadWidget({ projectId, initialFile, autoStart, on
 
 			{/* Action buttons */}
 			<div className="game-upload__actions">
-				{state === 'idle' && file && !resumeSession && (
-					<button className="btn btn--primary" onClick={handleStart} disabled={state !== 'idle'}>
+				{(state === 'idle' || state === 'error' || state === 'cancelled') && file && !resumeSession && !session && (
+					<button className="btn btn--primary" onClick={handleStart}>
 						업로드 시작
 					</button>
 				)}

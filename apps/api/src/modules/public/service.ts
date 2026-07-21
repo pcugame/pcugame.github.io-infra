@@ -10,6 +10,7 @@ import { notFound } from '../../shared/errors.js';
 import { isPosterUrlSafe } from '../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../shared/project-completeness.js';
 import * as repo from './repository.js';
+import { parseWebglEntryKey, webglUrl } from '../webgl/paths.js';
 
 /** Build a public asset URL */
 function publicAssetUrl(storageKey: string): string {
@@ -174,6 +175,9 @@ export async function getProjectDetail(idOrSlug: string, yearParam?: string): Pr
 		posterUrl: isPosterUrlSafe(project.poster) ? publicAssetUrl(project.poster!.storageKey) : undefined,
 		gameDownloadUrl: gameAsset
 			? protectedAssetUrl(gameAsset.storageKey)
+			: undefined,
+		webglUrl: parseWebglEntryKey(project.id, project.webglEntryKey)
+			? webglUrl(env().API_PUBLIC_URL, project.id)
 			: undefined,
 		status: project.status as 'PUBLISHED' | 'ARCHIVED',
 	};

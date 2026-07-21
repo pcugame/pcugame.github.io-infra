@@ -135,4 +135,16 @@ export async function projectController(app: FastifyInstance): Promise<void> {
 			sendOk(reply, result);
 		},
 	);
+
+	/** DELETE /projects/:id/webgl — remove only the hosted WebGL build */
+	app.delete<{ Params: { id: string } }>(
+		'/projects/:id/webgl',
+		{ preHandler: requireLogin },
+		async (request, reply) => {
+			const projectId = parseIntParam(request.params.id);
+			await loadProjectWithAccess(request, projectId);
+			await projectService.deleteWebgl(projectId);
+			reply.status(204).send();
+		},
+	);
 }

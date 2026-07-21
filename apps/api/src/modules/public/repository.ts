@@ -69,3 +69,11 @@ export function findPublishedProjectBySlug(slug: string, exhibitionIds?: number[
 		include: projectDetailInclude,
 	});
 }
+
+/** Resolve the currently active WebGL pointer for a publicly visible project. */
+export function findPublicWebglProject(id: number) {
+	return prisma.project.findFirst({
+		where: { id, status: { in: PUBLIC_PROJECT_STATUSES }, webglEntryKey: { not: '' } },
+		select: { id: true, webglEntryKey: true },
+	});
+}
