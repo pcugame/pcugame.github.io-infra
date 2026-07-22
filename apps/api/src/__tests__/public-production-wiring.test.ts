@@ -1,0 +1,432 @@
+import { readFile } from 'node:fs/promises';
+import { Readable } from 'node:stream';
+import type { S3Client } from '@aws-sdk/client-s3';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AppLogger, ObjectStorage, Scheduler, SettingsStore } from '../application/ports.js';
+import { buildApp } from '../app.js';
+import { createProductionBackendContext, type BackendRoutes } from '../backend-context.js';
+import type { Env } from '../config/env.js';
+import type { PrismaClient } from '../generated/prisma/client.js';
+import { defaultTestEnv } from './helpers/app-mocks.js';
+
+const emptyRoute: FastifyPluginAsync = async () => {};
+const deployment = '123e4567-e89b-42d3-a456-426614174000';
+const origin = 'http://localhost:5173';
+
+const logger: AppLogger = {
+	child: () => logger,
+	trace: vi.fn(),
+	debug: vi.fn(),
+	info: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
+	fatal: vi.fn(),
+};
+const settings: SettingsStore = {
+	get: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+	update: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+	invalidate: () => {},
+};
+
+function config(label: string): Env {
+	return {
+		...defaultTestEnv,
+		LOG_LEVEL: 'info',
+		API_PUBLIC_URL: `https://api-${label}.test`,
+		WEB_PUBLIC_URL: `https://web-${label}.test`,
+		S3_BUCKET_PUBLIC: `${label}-public`,
+		GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS],
+		CORS_ALLOWED_ORIGINS: [origin],
+	};
+}
+
+function prismaHarness(label: string) {
+	const calls = {
+		exhibitionFindMany: vi.fn(async (args: { where?: { year?: number } }) => (
+			args.where?.year
+				? [{ id: 1, year: args.where.year, title: `${label} Show` }]
+				: [{
+					id: 1,
+					year: 2026,
+					title: `${label} Show`,
+					posterStorageKey: `${label}-poster.webp`,
+					_count: { projects: 1 },
+				}]
+		)),
+		exhibitionFindUnique: vi.fn(async (args: { where: { id?: number; posterStorageKey?: string } }) => (
+			args.where.posterStorageKey
+				? { id: 1, posterStorageKey: args.where.posterStorageKey }
+				: { id: args.where.id ?? 1, year: 2026, title: `${label} Show` }
+		)),
+		projectFindMany: vi.fn(async () => [{
+			id: 7,
+			slug: `${label}-game`,
+			title: `${label} Game`,
+			summary: `${label} Summary`,
+			exhibitionId: 1,
+			poster: null,
+			members: [{ name: `${label} Member`, studentId: '20260001' }],
+		}]),
+		projectFindFirst: vi.fn(async (args: {
+			where: { id?: number; slug?: string; webglEntryKey?: { not: string } };
+		}) => {
+			if (args.where.webglEntryKey) {
+				return {
+					id: 7,
+					webglEntryKey: `webgl/7/${deployment}/site/index.html`,
+				};
+			}
+			return {
+				id: 7,
+				slug: `${label}-game`,
+				title: `${label} Game`,
+				summary: `${label} Summary`,
+				description: `${label} Description`,
+				isIncomplete: false,
+				status: 'PUBLISHED',
+				webglEntryKey: `webgl/7/${deployment}/site/index.html`,
+				exhibition: { year: 2026 },
+				members: [{ id: 1, name: `${label} Member`, studentId: '20260001' }],
+				assets: [],
+				poster: null,
+			};
+		}),
+		bannedFindMany: vi.fn(async () => []),
+	};
+	const prisma = {
+		exhibition: {
+			findMany: calls.exhibitionFindMany,
+			findUnique: calls.exhibitionFindUnique,
+		},
+		project: {
+			findMany: calls.projectFindMany,
+			findFirst: calls.projectFindFirst,
+		},
+		bannedIp: { findMany: calls.bannedFindMany },
+		authSession: {
+			findUnique: vi.fn(),
+			update: vi.fn(),
+			deleteMany: vi.fn(async () => ({ count: 0 })),
+		},
+		$queryRaw: vi.fn(async () => [{ ok: 1 }]),
+		$disconnect: vi.fn(),
+	} as unknown as PrismaClient;
+	return { prisma, calls };
+}
+
+function storageHarness(label: string) {
+	const calls = {
+		presign: vi.fn(async (bucket: string, key: string) => `https://storage.test/${bucket}/${key}`),
+		head: vi.fn(async () => ({ size: 10, contentType: 'application/octet-stream' })),
+		stream: vi.fn(async (
+			_bucket: string,
+			_key: string,
+			range?: { start: number; end: number },
+		) => {
+			const size = range ? range.end - range.start + 1 : 10;
+			return {
+				body: Readable.from([Buffer.alloc(size, label)]),
+				size,
+				contentType: 'application/octet-stream',
+				contentRange: range ? `bytes ${range.start}-${range.end}/10` : undefined,
+				etag: `"${label}-etag"`,
+			};
+		}),
+	};
+	const storage: ObjectStorage = {
+		upload: vi.fn(),
+		presign: calls.presign,
+		delete: vi.fn(),
+		head: calls.head,
+		readRange: vi.fn(async () => Buffer.alloc(0)),
+		stream: calls.stream,
+		listKeys: vi.fn(async () => []),
+		createMultipart: vi.fn(async () => 'upload-id'),
+		uploadPart: vi.fn(async () => 'etag'),
+		completeMultipart: vi.fn(),
+		abortMultipart: vi.fn(),
+	};
+	return { storage, calls };
+}
+
+async function harness(label: string) {
+	const prisma = prismaHarness(label);
+	const storage = storageHarness(label);
+	const scheduler: Scheduler = {
+		every: vi.fn(() => ({ cancel: vi.fn() })),
+		delay: vi.fn(async () => {}),
+	};
+	const s3 = { send: vi.fn(), destroy: vi.fn() } as unknown as S3Client;
+	const context = await createProductionBackendContext(config(label), {
+		factories: {
+			routes: (_config, _assets, _auth, publicGraph): BackendRoutes => ({
+				auth: emptyRoute,
+				devAuth: emptyRoute,
+				public: publicGraph.controller,
+				admin: emptyRoute,
+				me: emptyRoute,
+				assets: emptyRoute,
+			}),
+		},
+		resources: {
+			logger: { value: logger, ownership: 'borrowed' },
+			clock: {
+				value: { now: () => new Date('2026-07-22T00:00:00.000Z') },
+				ownership: 'borrowed',
+			},
+			scheduler: { value: scheduler, ownership: 'borrowed' },
+			prisma: { value: prisma.prisma, ownership: 'borrowed' },
+			s3: {
+				value: s3,
+				ownership: 'borrowed',
+			},
+			storage: { value: storage.storage, ownership: 'borrowed' },
+			settings: { value: settings, ownership: 'borrowed' },
+		},
+	});
+	return { context, prisma, storage, scheduler, s3 };
+}
+
+const apps: FastifyInstance[] = [];
+afterEach(async () => {
+	await Promise.allSettled(apps.splice(0).map((app) => app.close()));
+});
+
+describe('public/WebGL production wiring', () => {
+	it('imports, creates the context graph, and registers the production prefix without I/O or timers', async () => {
+		const sources = await Promise.all([
+			'controller.ts',
+			'index.ts',
+			'repository.ts',
+			'composition.ts',
+		].map((file) => readFile(new URL(`../modules/public/${file}`, import.meta.url), 'utf8')));
+		for (const source of sources) {
+			expect(source).not.toMatch(/config\/env|lib\/prisma|lib\/s3|lib\/storage|\.runtime/);
+		}
+		await Promise.all([
+			import('../modules/public/index.js'),
+			import('../modules/public/composition.js'),
+		]);
+
+		const a = await harness('a');
+		const app = await buildApp({ context: a.context });
+		apps.push(app);
+
+		expect(a.prisma.calls.exhibitionFindMany).not.toHaveBeenCalled();
+		expect(a.prisma.calls.projectFindMany).not.toHaveBeenCalled();
+		expect(a.prisma.calls.projectFindFirst).not.toHaveBeenCalled();
+		expect(a.prisma.calls.bannedFindMany).not.toHaveBeenCalled();
+		expect(a.storage.calls.presign).not.toHaveBeenCalled();
+		expect(a.storage.calls.head).not.toHaveBeenCalled();
+		expect(a.storage.calls.stream).not.toHaveBeenCalled();
+		expect(a.s3.send).not.toHaveBeenCalled();
+		expect(a.scheduler.every).not.toHaveBeenCalled();
+	});
+
+	it('preserves project and object not-found behavior before streaming', async () => {
+		const a = await harness('a');
+		const app = await buildApp({ context: a.context });
+		apps.push(app);
+
+		a.prisma.calls.projectFindFirst.mockResolvedValueOnce(null as never);
+		const missingProject = await app.inject({ method: 'GET', url: '/api/public/webgl/7/' });
+		expect(missingProject.statusCode).toBe(404);
+		expect(missingProject.json()).toMatchObject({
+			ok: false,
+			error: { code: 'NOT_FOUND', message: 'WebGL build not found' },
+		});
+		expect(a.storage.calls.head).not.toHaveBeenCalled();
+
+		a.storage.calls.head.mockResolvedValueOnce(null as never);
+		const missingObject = await app.inject({ method: 'GET', url: '/api/public/webgl/7/' });
+		expect(missingObject.statusCode).toBe(404);
+		expect(missingObject.json()).toMatchObject({
+			ok: false,
+			error: { code: 'NOT_FOUND', message: 'WebGL asset not found' },
+		});
+		expect(a.storage.calls.stream).not.toHaveBeenCalled();
+	});
+
+	it('serves years, year/exhibition projects, detail, and poster through the context repository', async () => {
+		const a = await harness('a');
+		const app = await buildApp({ context: a.context });
+		apps.push(app);
+
+		const years = await app.inject({ method: 'GET', url: '/api/public/years' });
+		expect(years.statusCode).toBe(200);
+		expect(years.json()).toMatchObject({
+			ok: true,
+			data: { items: [{ title: 'a Show', posterUrl: 'https://api-a.test/api/public/exhibition-posters/a-poster.webp' }] },
+		});
+
+		const byYear = await app.inject({ method: 'GET', url: '/api/public/years/2026/projects' });
+		expect(byYear.statusCode).toBe(200);
+		expect(byYear.json()).toMatchObject({
+			ok: true,
+			data: { year: 2026, items: [{ slug: 'a-game', title: 'a Game' }] },
+		});
+
+		const byExhibition = await app.inject({
+			method: 'GET',
+			url: '/api/public/exhibitions/1/projects',
+		});
+		expect(byExhibition.statusCode).toBe(200);
+		expect(byExhibition.json()).toMatchObject({
+			ok: true,
+			data: { exhibition: { title: 'a Show' }, items: [{ slug: 'a-game' }] },
+		});
+
+		const detail = await app.inject({ method: 'GET', url: '/api/public/projects/7' });
+		expect(detail.statusCode).toBe(200);
+		expect(detail.json()).toMatchObject({
+			ok: true,
+			data: {
+				slug: 'a-game',
+				webglUrl: 'https://api-a.test/api/public/webgl/7/',
+			},
+		});
+
+		const poster = await app.inject({
+			method: 'GET',
+			url: '/api/public/exhibition-posters/a-poster.webp',
+		});
+		expect(poster.statusCode).toBe(302);
+		expect(poster.headers.location).toBe('https://storage.test/a-public/a-poster.webp');
+		expect(a.storage.calls.presign).toHaveBeenCalledWith('a-public', 'a-poster.webp');
+	});
+
+	it('keeps A/B storage, bucket, and public URL/CSP config isolated', async () => {
+		const [a, b] = await Promise.all([harness('a'), harness('b')]);
+		const [appA, appB] = await Promise.all([
+			buildApp({ context: a.context }),
+			buildApp({ context: b.context }),
+		]);
+		apps.push(appA, appB);
+
+		const [rootA, rootB] = await Promise.all([
+			appA.inject({ method: 'GET', url: '/api/public/webgl/7' }),
+			appB.inject({ method: 'GET', url: '/api/public/webgl/7/' }),
+		]);
+		expect(rootA.statusCode).toBe(200);
+		expect(rootB.statusCode).toBe(200);
+		expect(rootA.headers['content-security-policy']).toContain('https://web-a.test');
+		expect(rootB.headers['content-security-policy']).toContain('https://web-b.test');
+		expect(a.storage.calls.stream).toHaveBeenCalledWith(
+			'a-public',
+			`webgl/7/${deployment}/site/index.html`,
+			undefined,
+		);
+		expect(b.storage.calls.stream).toHaveBeenCalledWith(
+			'b-public',
+			`webgl/7/${deployment}/site/index.html`,
+			undefined,
+		);
+		expect(a.storage.calls.stream).not.toHaveBeenCalledWith(
+			'b-public',
+			expect.any(String),
+			undefined,
+		);
+	});
+
+	it('preserves OPTIONS, wildcard metadata, ranges, CORS, CSP, and traversal rejection', async () => {
+		const a = await harness('a');
+		const app = await buildApp({ context: a.context });
+		apps.push(app);
+
+		for (const url of [
+			'/api/public/webgl/7',
+			'/api/public/webgl/7/',
+			'/api/public/webgl/7/Build/game.data',
+		]) {
+			const response = await app.inject({
+				method: 'OPTIONS',
+				url,
+				headers: {
+					origin: 'null',
+					'access-control-request-method': 'GET',
+					'access-control-request-headers': 'range',
+				},
+			});
+			expect(response.statusCode).toBe(204);
+			expect(response.headers['access-control-allow-origin']).toBe('*');
+			expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+			expect(response.headers['access-control-allow-headers']).toContain('Range');
+		}
+
+		const range = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/Build/game.wasm.br',
+			headers: { range: 'bytes=2-5', origin: 'null' },
+		});
+		expect(range.statusCode).toBe(206);
+		expect(range.headers['content-type']).toContain('application/wasm');
+		expect(range.headers['content-encoding']).toBe('br');
+		expect(range.headers['content-range']).toBe('bytes 2-5/10');
+		expect(range.headers['content-length']).toBe('4');
+		expect(range.headers['access-control-allow-origin']).toBe('*');
+		expect(range.headers['x-frame-options']).toBeUndefined();
+
+		const invalidRange = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/Build/game.data',
+			headers: { range: 'bytes=1-2,4-5' },
+		});
+		expect(invalidRange.statusCode).toBe(416);
+		expect(invalidRange.headers['content-range']).toBe('bytes */10');
+
+		const callsBeforeTraversal = a.storage.calls.head.mock.calls.length;
+		const traversal = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/Build%2F%2e%2e%2Fsource.zip',
+		});
+		expect([400, 404]).toContain(traversal.statusCode);
+		expect(a.storage.calls.head).toHaveBeenCalledTimes(callsBeforeTraversal);
+	});
+
+	it('keeps DB/storage failures in the production error envelope with WebGL security headers', async () => {
+		const a = await harness('a');
+		const app = await buildApp({ context: a.context });
+		apps.push(app);
+
+		a.prisma.calls.exhibitionFindMany.mockRejectedValueOnce(new Error('database unavailable'));
+		const dbFailure = await app.inject({ method: 'GET', url: '/api/public/years' });
+		expect(dbFailure.statusCode).toBe(500);
+		expect(dbFailure.json()).toEqual({
+			ok: false,
+			error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
+		});
+		expect(dbFailure.headers['x-content-type-options']).toBe('nosniff');
+
+		a.prisma.calls.projectFindFirst.mockRejectedValueOnce(new Error('database unavailable'));
+		const webglDbFailure = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/',
+			headers: { origin: 'null' },
+		});
+		expect(webglDbFailure.statusCode).toBe(500);
+		expect(webglDbFailure.json()).toEqual({
+			ok: false,
+			error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
+		});
+		expect(webglDbFailure.headers['access-control-allow-origin']).toBe('*');
+		expect(webglDbFailure.headers['x-frame-options']).toBeUndefined();
+		expect(webglDbFailure.headers['content-security-policy']).toContain('https://web-a.test');
+
+		a.storage.calls.head.mockRejectedValueOnce(new Error('storage unavailable'));
+		const storageFailure = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/',
+			headers: { origin: 'null' },
+		});
+		expect(storageFailure.statusCode).toBe(500);
+		expect(storageFailure.json()).toEqual({
+			ok: false,
+			error: { code: 'INTERNAL_ERROR', message: 'Internal server error' },
+		});
+		expect(storageFailure.headers['access-control-allow-origin']).toBe('*');
+		expect(storageFailure.headers['access-control-allow-credentials']).toBeUndefined();
+		expect(storageFailure.headers['x-frame-options']).toBeUndefined();
+		expect(storageFailure.headers['content-security-policy']).toContain('https://web-a.test');
+	});
+});
