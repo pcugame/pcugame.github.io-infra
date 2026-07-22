@@ -46,6 +46,10 @@ import {
 	createAuthProductionGraph,
 	type AuthProductionGraph,
 } from './modules/auth/composition.js';
+import {
+	createPublicProductionGraph,
+	type PublicProductionGraph,
+} from './modules/public/composition.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -189,6 +193,7 @@ export interface ProductionResourceFactories {
 		config: Env,
 		assetsBanned: AssetsBannedProductionGraph,
 		auth: AuthProductionGraph,
+		publicGraph: PublicProductionGraph,
 	): MaybePromise<BackendRoutes>;
 }
 
@@ -248,16 +253,16 @@ async function loadProductionRoutes(
 	_config: Env,
 	assetsBanned: AssetsBannedProductionGraph,
 	auth: AuthProductionGraph,
+	publicGraph: PublicProductionGraph,
 ): Promise<BackendRoutes> {
-	const [publicRoutes, admin, me] = await Promise.all([
-		import('./modules/public/index.js'),
+	const [admin, me] = await Promise.all([
 		import('./modules/admin/admin.routes.js'),
 		import('./modules/me/me.routes.js'),
 	]);
 	return {
 		auth: auth.authController,
 		devAuth: auth.devAuthController,
-		public: publicRoutes.publicController,
+		public: publicGraph.controller,
 		admin: admin.createAdminRoutes({ bannedIpController: assetsBanned.bannedIpController }),
 		me: me.meRoutes,
 		assets: assetsBanned.assetsController,
@@ -419,6 +424,13 @@ export async function createProductionBackendContext(
 			ids,
 			logger,
 		});
+		const publicGraph = createPublicProductionGraph({
+			config,
+			prisma,
+			storage,
+			logger,
+			clock,
+		});
 		const authSessions = auth.repository;
 		const maintenance: BackgroundMaintenance = {
 			async recoverStaleUploads() {
@@ -446,7 +458,7 @@ export async function createProductionBackendContext(
 			() => maintenanceSchedule.close(),
 			() => maintenanceSchedule.start(),
 		));
-		const routes = options.routes ?? await factories.routes(config, assetsBanned!, auth);
+		const routes = options.routes ?? await factories.routes(config, assetsBanned!, auth, publicGraph);
 
 		return {
 			config,

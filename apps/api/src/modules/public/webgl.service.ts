@@ -1,7 +1,7 @@
 import { posix as pathPosix } from 'node:path';
 import { badRequest, notFound } from '../../shared/errors.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
-import type { ObjectStreamResult } from '../../application/ports.js';
+import type { AppLogger, Clock, ObjectStreamResult } from '../../application/ports.js';
 import { webglContentMetadata, webglContentSecurityPolicy } from '../webgl/content.js';
 import { parseWebglEntryKey } from '../webgl/paths.js';
 
@@ -46,6 +46,31 @@ export function normalizeWebglRequestPath(requestedPath: string): string {
 		throw badRequest('Invalid WebGL asset path');
 	}
 	return normalized;
+}
+
+/**
+ * Fastify's router may normalize encoded dot segments before wildcard params
+ * are exposed. Inspect the original URL as well so traversal cannot turn into
+ * an apparently harmless path inside the public deployment.
+ */
+export function assertSafeWebglRawUrl(rawUrl: string): void {
+	let decodedPath = rawUrl.split('?', 1)[0] ?? '';
+	try {
+		for (let pass = 0; pass < 3; pass++) {
+			const next = decodeURIComponent(decodedPath);
+			if (next === decodedPath) break;
+			decodedPath = next;
+		}
+	} catch {
+		throw badRequest('Invalid WebGL asset path');
+	}
+	const slashPath = decodedPath.replace(/\\/g, '/');
+	if (
+		slashPath.includes('\0')
+		|| slashPath.split('/').some((segment) => segment === '..' || segment === '.')
+	) {
+		throw badRequest('Invalid WebGL asset path');
+	}
 }
 
 export interface PublicWebglConfig {
@@ -114,7 +139,13 @@ export function createPublicWebglService(deps: {
 	config: PublicWebglConfig;
 	repository: PublicWebglRepository;
 	storage: PublicWebglStorage;
+	logger: AppLogger;
+	clock: Clock;
 }) {
+	// Logger and clock belong to the context graph. They are intentionally not
+	// used to alter the established public response or logging contract here.
+	void deps.logger;
+	void deps.clock;
 	return {
 		securityHeaders: () => webglSecurityHeaders(deps.config),
 		preflight: webglPreflightResponse,
@@ -122,7 +153,9 @@ export function createPublicWebglService(deps: {
 			projectId: number,
 			requestedPath: string,
 			rangeHeader: string | undefined,
+			rawUrl?: string,
 		): Promise<HttpResponseDescriptor> {
+			if (rawUrl) assertSafeWebglRawUrl(rawUrl);
 			const project = await deps.repository.findPublicWebglProject(projectId);
 			if (!project) throw notFound('WebGL build not found');
 			const deployment = parseWebglEntryKey(projectId, project.webglEntryKey);
