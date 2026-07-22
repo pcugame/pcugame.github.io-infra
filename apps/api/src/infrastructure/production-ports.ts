@@ -4,7 +4,6 @@ import os from 'node:os';
 import { OAuth2Client } from 'google-auth-library';
 import type {
 	Clock,
-	AuthSessionStore,
 	DatabaseHealth,
 	FileSystem,
 	GoogleTokenVerifier,
@@ -46,7 +45,6 @@ import {
 	_invalidateCache,
 } from '../shared/site-settings.js';
 import { acquireUploadSlot, releaseUploadSlot } from '../shared/upload-limits.js';
-import * as authRepository from '../modules/auth/repository.js';
 import { createLifecycle } from '../lib/lifecycle.js';
 import { createCachedSettingsStore } from '../shared/site-settings.js';
 import { createUploadLimiter } from '../shared/upload-limits.js';
@@ -163,20 +161,6 @@ export function createPrismaHealth(client: PrismaClient): DatabaseHealth {
 	};
 }
 
-export function createPrismaAuthSessions(client: PrismaClient): AuthSessionStore {
-	return {
-		find: (id) => client.authSession.findUnique({
-			where: { id },
-			include: { user: true },
-		}),
-		touch: (id, lastSeenAt) => client.authSession.update({
-			where: { id },
-			data: { lastSeenAt },
-		}),
-		delete: (id) => client.authSession.deleteMany({ where: { id } }),
-	};
-}
-
 export function createPrismaSettingsStore(
 	client: PrismaClient,
 	logger: { warn(value: unknown, message?: string): void },
@@ -215,12 +199,6 @@ export const prismaHealth: DatabaseHealth = {
 			return false;
 		}
 	},
-};
-
-export const prismaAuthSessions: AuthSessionStore = {
-	find: authRepository.findSessionWithUser,
-	touch: authRepository.touchSession,
-	delete: authRepository.deleteSession,
 };
 
 // Keep the refresh operation reachable from the composition root without

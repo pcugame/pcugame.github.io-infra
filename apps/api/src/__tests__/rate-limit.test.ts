@@ -39,16 +39,6 @@ vi.mock('../shared/protected-download-limiter.js', () => {
 		createProtectedDownloadLimiter: () => limiter,
 	};
 });
-// Block auth service from hitting Google — login requests only need to reach
-// the rate-limit stage, not succeed.
-vi.mock('../modules/auth/runtime.js', () => ({
-	authService: {
-		loginWithGoogle: vi.fn().mockRejectedValue(new Error('auth disabled in test')),
-		logout: vi.fn().mockResolvedValue(undefined),
-		loginForDevRole: vi.fn(),
-	},
-}));
-
 describe('rate-limit plugin', () => {
 	let app: FastifyInstance;
 
@@ -98,8 +88,8 @@ describe('rate-limit plugin', () => {
 			});
 			codes.push(res.statusCode);
 		}
-		// The first three requests reach the handler (which throws "auth disabled" → 500),
-		// the fourth is short-circuited by the rate limiter.
+		// The first three requests reach the handler (the fake token is rejected),
+		// then the tighter route bucket short-circuits a later request.
 		expect(codes.slice(0, 3).every((c) => c !== 429)).toBe(true);
 		expect(codes.slice(3).some((c) => c === 429)).toBe(true);
 	});
