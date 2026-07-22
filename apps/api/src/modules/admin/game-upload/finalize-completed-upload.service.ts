@@ -57,18 +57,17 @@ export function createCompletedUploadFinalizer(deps: {
 
 			if (session.uploadKind === 'WEBGL') {
 				let deployment: WebglDeploymentKeys | null = null;
+				let pointerFinalized = false;
 				try {
 					deployment = await deps.deployWebgl(session.projectId, session.s3Key, object.size);
 					const result = await deps.finalizeWebgl(session, deployment);
+					pointerFinalized = true;
 					if (result.oldEntryKey && result.oldEntryKey !== deployment.entryKey) {
 						await deps.deleteWebglDeploymentByEntry(
 							session.projectId,
 							result.oldEntryKey,
 							'webgl-upload-replace-previous',
-						).catch((err) => deps.logError(
-							{ err, projectId: session.projectId, oldEntryKey: result.oldEntryKey },
-							'Failed to clean previous WebGL deployment after pointer swap',
-						));
+						);
 					}
 					return {
 						status: 'COMPLETED',
@@ -77,7 +76,7 @@ export function createCompletedUploadFinalizer(deps: {
 						webglUrl: deps.webglUrl(session.projectId),
 					};
 				} catch (err) {
-					if (deployment) {
+					if (deployment && !pointerFinalized) {
 						await deps.rollbackWebglPublicDeployment(
 							deployment,
 							'webgl-upload-finalization-failed-site',

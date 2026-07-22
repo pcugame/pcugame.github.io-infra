@@ -9,6 +9,7 @@ const mocks = {
 	createAsset: vi.fn(),
 	replaceOrCreateReplaceableAsset: vi.fn(),
 	findExhibitionById: vi.fn(),
+	deleteOrQueue: vi.fn(),
 };
 
 const MB = 1024 * 1024;
@@ -32,7 +33,7 @@ const projectAssetService = createProjectAssetService({
 	uploadCoordinator: singleAssetUploadCoordinator,
 	assetUrl: (key, kind) => `http://localhost:4000/api/assets/${kind === 'GAME' || kind === 'VIDEO' ? 'protected' : 'public'}/${key}`,
 	bucketForKind: () => 'test-bucket',
-	deleteOrQueue: vi.fn(),
+	deleteOrQueue: mocks.deleteOrQueue,
 });
 
 function chunksWithHeader(header: Buffer, totalBytes: number, chunkBytes: number): Buffer[] {
@@ -212,5 +213,47 @@ describe('project asset upload resource guards', () => {
 			url: 'http://localhost:4000/api/assets/public/asset/image.png',
 		});
 		await expect(fsp.access(tempFile)).rejects.toThrow();
+	});
+
+	it('does not roll back a committed GAME replacement when old-object queueing fails', async () => {
+		const rollback = vi.fn();
+		const cleanup = vi.fn();
+		const startSpy = vi.spyOn(singleAssetUploadCoordinator, 'start').mockResolvedValue({
+			savedFile: {
+				storageKey: 'asset/new-game.zip',
+				mimeType: 'application/zip',
+				sizeBytes: 128,
+				originalName: 'game.zip',
+				kind: 'GAME',
+			},
+			rollback,
+			cleanup,
+		});
+		mocks.replaceOrCreateReplaceableAsset.mockResolvedValue({
+			assetId: 321,
+			oldStorageKey: 'asset/old-game.zip',
+			oldPlaybackStorageKey: null,
+		});
+		mocks.deleteOrQueue.mockRejectedValue(new Error('durable deletion unavailable'));
+
+		await expect(projectAssetService.addAssetToProject(
+			7,
+			1,
+			assetRequest('GAME', [zipHeader], 'game.zip'),
+		)).rejects.toThrow('durable deletion unavailable');
+
+		expect(mocks.replaceOrCreateReplaceableAsset).toHaveBeenCalledWith(
+			7,
+			'GAME',
+			expect.objectContaining({ storageKey: 'asset/new-game.zip' }),
+			{
+				bucket: 'test-bucket',
+				reason: 'project-asset-replace-previous',
+				playbackReason: 'project-asset-replace-previous-playback',
+			},
+		);
+		expect(rollback).not.toHaveBeenCalled();
+		expect(cleanup).toHaveBeenCalledOnce();
+		startSpy.mockRestore();
 	});
 });

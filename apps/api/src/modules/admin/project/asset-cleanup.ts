@@ -1,6 +1,6 @@
 import type { AssetKind } from '@pcu/contracts';
 import { bucketForKind } from '../../../lib/s3.js';
-import { safeDeleteObject } from '../../../object-deletion.js';
+import { deleteDurablyQueuedObject, safeDeleteObject } from '../../../object-deletion.js';
 
 export async function deleteAssetObjects(
 	asset: { id: number; projectId?: number; kind: AssetKind; storageKey: string; playbackStorageKey: string | null },
@@ -10,5 +10,20 @@ export async function deleteAssetObjects(
 	await safeDeleteObject(bucket, asset.storageKey, reason, { assetId: asset.id, projectId: asset.projectId });
 	if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
 		await safeDeleteObject(bucket, asset.playbackStorageKey, `${reason}-playback`, { assetId: asset.id, projectId: asset.projectId });
+	}
+}
+
+/** Best-effort cleanup for objects already protected by a transactional orphan outbox row. */
+export async function deleteDurablyQueuedAssetObjects(
+	asset: { id: number; projectId?: number; kind: AssetKind; storageKey: string; playbackStorageKey: string | null },
+	reason: string,
+) {
+	const bucket = bucketForKind(asset.kind);
+	await deleteDurablyQueuedObject(bucket, asset.storageKey, reason, { assetId: asset.id, projectId: asset.projectId });
+	if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
+		await deleteDurablyQueuedObject(bucket, asset.playbackStorageKey, `${reason}-playback`, {
+			assetId: asset.id,
+			projectId: asset.projectId,
+		});
 	}
 }

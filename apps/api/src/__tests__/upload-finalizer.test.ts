@@ -64,20 +64,16 @@ describe('completed upload finalizer', () => {
 		expect(deps.deleteWebglDeploymentByEntry).not.toHaveBeenCalled();
 	});
 
-	it('keeps completion successful when cleanup of the previous deployment is queued', async () => {
+	it('propagates failed cleanup after pointer finalization without rolling back the new tree', async () => {
 		const deps = createDependencies();
 		const oldEntryKey = 'webgl/7/old/site/index.html';
 		deps.finalizeWebgl.mockResolvedValueOnce({ oldEntryKey });
 		deps.deleteWebglDeploymentByEntry.mockRejectedValueOnce(new Error('queue unavailable'));
 		const finalizer = createCompletedUploadFinalizer(deps);
 
-		await expect(finalizer.finalize(webglSession, { size: 8 })).resolves.toEqual({
-			status: 'COMPLETED',
-			storageKey: deployment.sourceKey,
-			sizeBytes: 8,
-			webglUrl: 'https://api.example.com/api/public/webgl/7/',
-		});
-		expect(deps.logError).toHaveBeenCalledOnce();
+		await expect(finalizer.finalize(webglSession, { size: 8 }))
+			.rejects.toThrow('queue unavailable');
+		expect(deps.logError).not.toHaveBeenCalled();
 		expect(deps.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
 	});
 });

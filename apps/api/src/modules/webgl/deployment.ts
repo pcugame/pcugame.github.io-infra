@@ -6,7 +6,12 @@ import { logger } from '../../lib/logger.js';
 import {
 	downloadObject,
 } from '../../lib/storage.js';
-import { safeDeleteObject, safeDeletePrefix } from '../../object-deletion.js';
+import {
+	deleteDurablyQueuedObject,
+	deleteDurablyQueuedPrefix,
+	safeDeleteObject,
+	safeDeletePrefix,
+} from '../../object-deletion.js';
 import { badRequest } from '../../shared/errors.js';
 import { validateWebglZipArchiveObject } from '../assets/upload/zip-validation.js';
 import { analyzeWebglArchive, uploadWebglArchive } from './archive.js';
@@ -74,11 +79,6 @@ export async function rollbackWebglPublicDeployment(
 	await safeDeletePrefix(cfg.S3_BUCKET_PUBLIC, keys.sitePrefix, reason, {
 		projectId: keys.projectId,
 		deploymentId: keys.deploymentId,
-	}).catch((err) => {
-		logger().error(
-			{ err, ...keys, reason },
-			'Failed to enumerate WebGL public deployment prefix for rollback',
-		);
 	});
 }
 
@@ -91,8 +91,6 @@ export async function deleteWebglProtectedSource(
 	await safeDeleteObject(cfg.S3_BUCKET_PROTECTED, keys.sourceKey, reason, {
 		projectId: keys.projectId,
 		deploymentId: keys.deploymentId,
-	}).catch((err) => {
-		logger().error({ err, ...keys, reason }, 'Failed to queue WebGL protected source deletion');
 	});
 }
 
@@ -115,7 +113,38 @@ export async function deleteWebglDeploymentByEntry(
 	const keys = parseWebglEntryKey(projectId, entryKey);
 	if (!keys) {
 		logger().error({ projectId, entryKey, reason }, 'Refusing to delete malformed WebGL entry key');
-		return;
+		throw new Error(`Malformed WebGL entry key for project ${projectId}`);
 	}
 	await deleteWebglDeployment(keys, reason);
+}
+
+/** Cleanup after the same DB transaction already persisted source+prefix outbox rows. */
+export async function deleteDurablyQueuedWebglDeployment(
+	keys: WebglDeploymentKeys,
+	reason: string,
+): Promise<void> {
+	const cfg = env();
+	await Promise.all([
+		deleteDurablyQueuedObject(cfg.S3_BUCKET_PROTECTED, keys.sourceKey, `${reason}-source`, {
+			projectId: keys.projectId,
+			deploymentId: keys.deploymentId,
+		}),
+		deleteDurablyQueuedPrefix(cfg.S3_BUCKET_PUBLIC, keys.sitePrefix, `${reason}-site`, {
+			projectId: keys.projectId,
+			deploymentId: keys.deploymentId,
+		}),
+	]);
+}
+
+export async function deleteDurablyQueuedWebglDeploymentByEntry(
+	projectId: number,
+	entryKey: string,
+	reason: string,
+): Promise<void> {
+	const keys = parseWebglEntryKey(projectId, entryKey);
+	if (!keys) {
+		logger().error({ projectId, entryKey, reason }, 'Refusing to delete malformed WebGL entry key');
+		throw new Error(`Malformed WebGL entry key for project ${projectId}`);
+	}
+	await deleteDurablyQueuedWebglDeployment(keys, reason);
 }

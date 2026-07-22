@@ -9,9 +9,11 @@ const mocks = {
 	abortMultipart: vi.fn(),
 	deleteWebglDeploymentByEntry: vi.fn(),
 	deleteWebglDeployment: vi.fn(),
+	deleteQueuedProtectedObject: vi.fn(),
 };
 
 const projectService = createProjectService({
+	deletionBuckets: { publicBucket: 'public', protectedBucket: 'protected' },
 	repository: {
 		clearWebglDeployment: mocks.clearWebglDeployment,
 		deleteProjectReturningAssets: mocks.deleteProjectReturningAssets,
@@ -28,6 +30,7 @@ const projectService = createProjectService({
 	abortMultipart: mocks.abortMultipart,
 	deleteWebglDeploymentByEntry: mocks.deleteWebglDeploymentByEntry,
 	deleteWebglDeployment: mocks.deleteWebglDeployment,
+	deleteQueuedProtectedObject: mocks.deleteQueuedProtectedObject,
 	logger: { error: vi.fn() },
 });
 
@@ -49,6 +52,7 @@ describe('WebGL deletion cleanup', () => {
 		mocks.deleteWebglDeploymentByEntry.mockResolvedValue(undefined);
 		mocks.deleteWebglDeployment.mockResolvedValue(undefined);
 		mocks.deleteAssetObjects.mockResolvedValue(undefined);
+		mocks.deleteQueuedProtectedObject.mockResolvedValue(undefined);
 	});
 
 	it('deletes only the WebGL pointer, source upload, and hosted deployment', async () => {
@@ -59,6 +63,11 @@ describe('WebGL deletion cleanup', () => {
 
 		await projectService.deleteWebgl(7);
 
+		expect(mocks.clearWebglDeployment).toHaveBeenCalledWith(7, {
+			publicBucket: 'public',
+			protectedBucket: 'protected',
+			reason: 'webgl-delete',
+		});
 		expect(mocks.deleteWebglDeploymentByEntry).toHaveBeenCalledWith(7, oldEntry, 'webgl-delete');
 		expect(mocks.abortMultipart).toHaveBeenCalledWith(activeSource, 'webgl-multipart');
 		expect(mocks.deleteWebglDeployment).toHaveBeenCalledWith(
@@ -87,6 +96,11 @@ describe('WebGL deletion cleanup', () => {
 
 		await projectService.deleteProject(7);
 
+		expect(mocks.deleteProjectReturningAssets).toHaveBeenCalledWith(7, {
+			publicBucket: 'public',
+			protectedBucket: 'protected',
+			reason: 'project-delete',
+		});
 		expect(mocks.deleteAssetObjects).toHaveBeenCalledWith(
 			expect.objectContaining({ id: 5, projectId: 7 }),
 			'project-delete',
@@ -94,6 +108,11 @@ describe('WebGL deletion cleanup', () => {
 		expect(mocks.abortMultipart).toHaveBeenCalledTimes(2);
 		expect(mocks.deleteWebglDeployment).toHaveBeenCalledTimes(1);
 		expect(mocks.deleteWebglDeploymentByEntry).toHaveBeenCalledWith(7, oldEntry, 'project-delete');
+		expect(mocks.deleteQueuedProtectedObject).toHaveBeenCalledWith(
+			'uploads/game.zip',
+			'project-delete-active-upload',
+			{ projectId: 7, uploadKind: 'GAME' },
+		);
 	});
 
 	it('includes WebGL builds in bulk deletion cleanup and result counts', async () => {
@@ -111,6 +130,11 @@ describe('WebGL deletion cleanup', () => {
 			deleted: 2,
 			assetsRemoved: 0,
 			webglBuildsRemoved: 1,
+		});
+		expect(mocks.bulkDeleteProjectsReturningAssets).toHaveBeenCalledWith([7, 8], {
+			publicBucket: 'public',
+			protectedBucket: 'protected',
+			reason: 'project-bulk-delete',
 		});
 		expect(mocks.deleteWebglDeploymentByEntry).toHaveBeenCalledWith(7, oldEntry, 'project-bulk-delete');
 		expect(mocks.deleteWebglDeployment).toHaveBeenCalledTimes(1);

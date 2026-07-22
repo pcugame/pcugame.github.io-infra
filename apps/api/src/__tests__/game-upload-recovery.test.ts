@@ -138,6 +138,18 @@ describe('stale upload recovery', () => {
 			'webgl-upload-sweep-invalid',
 			{ sessionId: 'stale-upload' },
 		);
+		expect(mocks.deleteOrQueue.mock.invocationCallOrder[0])
+			.toBeLessThan(mocks.markFailed.mock.invocationCallOrder[0]!);
+	});
+
+	it('does not mark an invalid completed object failed when durable deletion cannot be guaranteed', async () => {
+		const { deps, mocks } = createHarness();
+		mocks.finalize.mockRejectedValueOnce(badRequest('Unsafe ZIP path'));
+		mocks.deleteOrQueue.mockRejectedValueOnce(new Error('storage and orphan queue unavailable'));
+
+		await expect(sweepStaleCompletingSessions(deps))
+			.rejects.toThrow('storage and orphan queue unavailable');
+		expect(mocks.markFailed).not.toHaveBeenCalled();
 	});
 
 	it('aborts an unfinished multipart upload only after a successful not-found check', async () => {

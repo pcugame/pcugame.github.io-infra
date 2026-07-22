@@ -1,8 +1,62 @@
 import { prisma } from '../../../lib/prisma.js';
 import type { AssetKind, AssetPlaybackStatus, ProjectStatus, Prisma } from '../../../generated/prisma/client.js';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
+import { queueDurableDeletions, type DurableDeletionTarget } from '../../orphan/outbox.js';
+import {
+	webglDeletionTargetsByEntry,
+	webglDeletionTargetsBySource,
+} from '../../webgl/deletion-targets.js';
 
 type TxClient = Prisma.TransactionClient;
+
+interface DeletionOutboxConfig {
+	publicBucket: string;
+	protectedBucket: string;
+	reason: string;
+}
+
+interface AssetReplacementOutboxConfig {
+	bucket: string;
+	reason: string;
+	playbackReason: string;
+}
+
+function assetBucket(kind: AssetKind, config: DeletionOutboxConfig): string {
+	return kind === 'GAME' || kind === 'VIDEO' ? config.protectedBucket : config.publicBucket;
+}
+
+function assetDeletionTargets(
+	assets: Array<{ kind: AssetKind; storageKey: string; playbackStorageKey: string | null }>,
+	config: DeletionOutboxConfig,
+): DurableDeletionTarget[] {
+	return assets.flatMap((asset) => {
+		const bucket = assetBucket(asset.kind, config);
+		return [
+			{ bucket, storageKey: asset.storageKey, reason: config.reason },
+			...(asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey
+				? [{ bucket, storageKey: asset.playbackStorageKey, reason: `${config.reason}-playback` }]
+				: []),
+		];
+	});
+}
+
+function activeUploadDeletionTargets(
+	projectId: number,
+	uploads: Array<{ uploadKind: string; s3Key: string | null }>,
+	config: DeletionOutboxConfig,
+): DurableDeletionTarget[] {
+	return uploads.flatMap((upload) => {
+		if (!upload.s3Key) return [];
+		if (upload.uploadKind === 'WEBGL') {
+			return webglDeletionTargetsBySource(projectId, upload.s3Key, config, `${config.reason}-active-upload`);
+		}
+		return [{
+			bucket: config.protectedBucket,
+			storageKey: upload.s3Key,
+			reason: `${config.reason}-active-upload`,
+		}];
+	});
+}
 
 const serializableOptions = {
 	isolationLevel: PrismaRuntime.TransactionIsolationLevel.Serializable,
@@ -171,7 +225,7 @@ export function updateProject(id: number, data: Prisma.ProjectUpdateInput) {
 }
 
 /** Delete a project by ID */
-export function deleteProjectReturningAssets(id: number) {
+export function deleteProjectReturningAssets(id: number, outbox: DeletionOutboxConfig) {
 	return prisma.$transaction(async (tx) => {
 		const project = await tx.project.findUniqueOrThrow({
 			where: { id },
@@ -182,6 +236,11 @@ export function deleteProjectReturningAssets(id: number) {
 			select: { id: true, uploadKind: true, s3Key: true, s3UploadId: true },
 		});
 		const assets = await tx.asset.findMany({ where: { projectId: id } });
+		await queueDurableDeletions(tx, [
+			...assetDeletionTargets(assets, outbox),
+			...webglDeletionTargetsByEntry(id, project.webglEntryKey, outbox, outbox.reason),
+			...activeUploadDeletionTargets(id, activeUploads, outbox),
+		]);
 		await tx.project.update({
 			where: { id },
 			data: { posterAssetId: null },
@@ -194,7 +253,7 @@ export function deleteProjectReturningAssets(id: number) {
 }
 
 /** Clear the active WebGL pointer and cancel only the WEBGL upload slot. */
-export function clearWebglDeployment(projectId: number) {
+export function clearWebglDeployment(projectId: number, outbox: DeletionOutboxConfig) {
 	return withSerializableRetry(async (tx) => {
 		const project = await tx.project.findUniqueOrThrow({
 			where: { id: projectId },
@@ -204,6 +263,10 @@ export function clearWebglDeployment(projectId: number) {
 			where: { projectId_uploadKind: { projectId, uploadKind: 'WEBGL' } },
 			include: { session: true },
 		});
+		await queueDurableDeletions(tx, [
+			...webglDeletionTargetsByEntry(projectId, project.webglEntryKey, outbox, outbox.reason),
+			...activeUploadDeletionTargets(projectId, active?.session ? [active.session] : [], outbox),
+		]);
 		if (active) {
 			await tx.gameUploadSession.updateMany({
 				where: { id: active.sessionId, status: { in: ['PENDING', 'COMPLETING'] } },
@@ -312,6 +375,7 @@ export function replaceOrCreateReplaceableAsset(
 		playbackError?: string;
 		isPublic: boolean;
 	},
+	outbox: AssetReplacementOutboxConfig,
 ): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
 	return withSerializableRetry(async (tx) => {
 		const existing = await tx.asset.findFirst({
@@ -320,6 +384,20 @@ export function replaceOrCreateReplaceableAsset(
 		});
 
 		if (existing) {
+			await queueDurableDeletions(tx, [
+				...(existing.storageKey !== data.storageKey
+					? [{ bucket: outbox.bucket, storageKey: existing.storageKey, reason: outbox.reason }]
+					: []),
+				...(existing.playbackStorageKey
+					&& existing.playbackStorageKey !== data.playbackStorageKey
+					&& existing.playbackStorageKey !== data.storageKey
+					? [{
+						bucket: outbox.bucket,
+						storageKey: existing.playbackStorageKey,
+						reason: outbox.playbackReason,
+					}]
+					: []),
+			]);
 			const updated = await tx.asset.update({
 				where: { id: existing.id },
 				data: {
@@ -394,7 +472,7 @@ export function findAssetsByProjectIds(projectIds: number[]) {
 }
 
 /** Delete multiple projects (cascades members; assets must be deleted first) */
-export async function bulkDeleteProjectsReturningAssets(ids: number[]) {
+export async function bulkDeleteProjectsReturningAssets(ids: number[], outbox: DeletionOutboxConfig) {
 	// All three steps share a transaction so a partial failure can't leave the rows in the
 	// half-broken state where posterAssetId is nulled but the asset rows still point at a
 	// project that has been deleted (or worse, vice-versa).
@@ -408,6 +486,20 @@ export async function bulkDeleteProjectsReturningAssets(ids: number[]) {
 			select: { id: true, projectId: true, uploadKind: true, s3Key: true, s3UploadId: true },
 		});
 		const assets = await tx.asset.findMany({ where: { projectId: { in: ids } } });
+		await queueDurableDeletions(tx, [
+			...assetDeletionTargets(assets, outbox),
+			...projects.flatMap((project) => webglDeletionTargetsByEntry(
+				project.id,
+				project.webglEntryKey,
+				outbox,
+				outbox.reason,
+			)),
+			...projects.flatMap((project) => activeUploadDeletionTargets(
+				project.id,
+				activeUploads.filter((upload) => upload.projectId === project.id),
+				outbox,
+			)),
+		]);
 		await tx.project.updateMany({
 			where: { id: { in: ids } },
 			data: { posterAssetId: null },

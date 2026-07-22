@@ -1,6 +1,6 @@
 import { env } from '../../../config/env.js';
 import { bucketForKind } from '../../../lib/s3.js';
-import { safeDeleteObject } from '../../../object-deletion.js';
+import { deleteDurablyQueuedObject } from '../../../object-deletion.js';
 import {
 	acquireUploadSlot,
 	getUploadLimits,
@@ -20,7 +20,7 @@ function service() {
 		uploadLimits: getUploadLimits,
 		uploadSlots: { acquire: acquireUploadSlot, release: releaseUploadSlot },
 		posterUpload: exhibitionPosterUploadCoordinator,
-		deleteOrQueue: safeDeleteObject,
+		deleteOrQueue: deleteDurablyQueuedObject,
 	});
 	return productionService;
 }

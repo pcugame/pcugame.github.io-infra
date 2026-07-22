@@ -92,6 +92,18 @@ export interface DeletedAssetRecord {
 	playbackStorageKey: string | null;
 }
 
+export interface DeletionOutboxConfig {
+	publicBucket: string;
+	protectedBucket: string;
+	reason: string;
+}
+
+export interface AssetReplacementOutboxConfig {
+	bucket: string;
+	reason: string;
+	playbackReason: string;
+}
+
 export interface ProjectRepository {
 	findProjectsForUser(
 		userId: number,
@@ -116,18 +128,18 @@ export interface ProjectRepository {
 		status?: ProjectStatus;
 		sortOrder?: number;
 	}): Promise<ProjectDetailRecord>;
-	deleteProjectReturningAssets(id: number): Promise<{
+	deleteProjectReturningAssets(id: number, outbox: DeletionOutboxConfig): Promise<{
 		assets: DeletedAssetRecord[];
 		webglEntryKey: string;
 		activeUploads: ActiveUploadCleanup[];
 	}>;
-	clearWebglDeployment(projectId: number): Promise<{
+	clearWebglDeployment(projectId: number, outbox: DeletionOutboxConfig): Promise<{
 		oldEntryKey: string;
 		cancelledSession: ActiveUploadCleanup | null;
 	}>;
 	findAssetById(id: number): Promise<PosterCandidate | null>;
 	setProjectPoster(projectId: number, assetId: number): Promise<unknown>;
-	bulkDeleteProjectsReturningAssets(ids: number[]): Promise<{
+	bulkDeleteProjectsReturningAssets(ids: number[], outbox: DeletionOutboxConfig): Promise<{
 		result: { count: number };
 		assets: DeletedAssetRecord[];
 		projects: Array<{ id: number; webglEntryKey: string }>;
@@ -142,6 +154,7 @@ export interface ProjectRepository {
 		projectId: number,
 		kind: AssetKind,
 		data: AssetWriteData,
+		outbox: AssetReplacementOutboxConfig,
 	): Promise<{
 		assetId: number;
 		oldStorageKey: string | null;

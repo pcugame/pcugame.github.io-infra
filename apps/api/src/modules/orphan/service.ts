@@ -1,6 +1,9 @@
 export interface OrphanServiceDependencies {
 	clock: { now(): Date };
-	storage: { delete(bucket: string, key: string): Promise<void> };
+	storage: {
+		delete(bucket: string, key: string): Promise<void>;
+		listKeys?(bucket: string, prefix: string): Promise<string[]>;
+	};
 	repository: {
 		upsertOrphan(bucket: string, key: string, reason: string): Promise<unknown>;
 		findPendingOrphans(limit: number, cutoff: Date): Promise<{
@@ -18,10 +21,7 @@ export interface OrphanServiceDependencies {
 	};
 }
 
-/**
- * Persist an S3 object that needs deleting. Never throws — if the DB write itself fails,
- * we log prominently so operators know the object is leaked until the next reconcile pass.
- */
+/** Persist an S3 object that needs deleting before a caller records completion. */
 export async function recordOrphan(
 	deps: OrphanServiceDependencies,
 	bucket: string,
@@ -33,8 +33,9 @@ export async function recordOrphan(
 	} catch (err) {
 		deps.logger.error(
 			{ err, bucket, storageKey, reason },
-			'Failed to record orphan — S3 object will be leaked until reconcile-orphans runs',
+			'Failed to durably record orphan',
 		);
+		throw err;
 	}
 }
 
@@ -62,7 +63,15 @@ export async function runOrphanReaper(
 
 	for (const orphan of pending) {
 		try {
-			await deps.storage.delete(orphan.bucket, orphan.storageKey);
+			if (orphan.storageKey.endsWith('/')) {
+				if (!deps.storage.listKeys) {
+					throw new Error('Object storage does not support durable prefix reconciliation');
+				}
+				const keys = await deps.storage.listKeys(orphan.bucket, orphan.storageKey);
+				for (const key of keys) await deps.storage.delete(orphan.bucket, key);
+			} else {
+				await deps.storage.delete(orphan.bucket, orphan.storageKey);
+			}
 			await deps.repository.markResolved(orphan.id, now);
 			resolved++;
 		} catch (err) {

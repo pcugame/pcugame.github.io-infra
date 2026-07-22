@@ -12,6 +12,11 @@ export interface ExhibitionRecord {
 	_count: { projects: number };
 }
 
+export interface PosterDeletionOutboxConfig {
+	bucket: string;
+	reason: string;
+}
+
 export interface ExhibitionRepository {
 	findAllExhibitions(): Promise<ExhibitionRecord[]>;
 	findExhibitionByComposite(year: number, title: string): Promise<{ id: number } | null>;
@@ -22,7 +27,7 @@ export interface ExhibitionRepository {
 		_count: { projects: number };
 	} | null>;
 	createExhibition(data: CreateExhibitionRequest): Promise<{ id: number; year: number }>;
-	deleteExhibition(id: number): Promise<unknown>;
+	deleteExhibition(id: number, outbox: PosterDeletionOutboxConfig): Promise<{ posterStorageKey: string | null }>;
 	updateExhibition(id: number, patch: {
 		title?: string;
 		isUploadEnabled?: boolean;
@@ -33,8 +38,8 @@ export interface ExhibitionRepository {
 		originalName: string;
 		mimeType: string;
 		sizeBytes: bigint;
-	}): Promise<{ updated: ExhibitionRecord; oldStorageKey: string | null } | null>;
-	clearExhibitionPoster(id: number): Promise<{
+	}, outbox: PosterDeletionOutboxConfig): Promise<{ updated: ExhibitionRecord; oldStorageKey: string | null } | null>;
+	clearExhibitionPoster(id: number, outbox: PosterDeletionOutboxConfig): Promise<{
 		updated: ExhibitionRecord;
 		oldStorageKey: string | null;
 	} | null>;

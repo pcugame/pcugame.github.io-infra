@@ -12,6 +12,7 @@ const mocks = {
 	replaceExhibitionPoster: vi.fn(),
 	clearExhibitionPoster: vi.fn(),
 	safeDeleteObject: vi.fn(),
+	posterUploadStart: vi.fn(),
 };
 
 const exhibitionService = createExhibitionService({
@@ -37,11 +38,18 @@ const exhibitionService = createExhibitionService({
 		maxFiles: 1,
 	}),
 	uploadSlots: { acquire: vi.fn(), release: vi.fn() },
-	posterUpload: { start: vi.fn() },
+	posterUpload: { start: mocks.posterUploadStart },
 	deleteOrQueue: mocks.safeDeleteObject,
 });
 
-const { createExhibition, deleteExhibition, deletePoster, listExhibitions, updateExhibition } = exhibitionService;
+const {
+	createExhibition,
+	deleteExhibition,
+	deletePoster,
+	listExhibitions,
+	replacePoster,
+	updateExhibition,
+} = exhibitionService;
 
 function exhibition(overrides: Record<string, unknown> = {}) {
 	return {
@@ -61,6 +69,7 @@ function exhibition(overrides: Record<string, unknown> = {}) {
 describe('admin exhibition service', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mocks.safeDeleteObject.mockResolvedValue(undefined);
 	});
 
 	it('serializes exhibition list items with optional poster metadata', async () => {
@@ -156,7 +165,7 @@ describe('admin exhibition service', () => {
 		});
 	});
 
-	it('deletes the DB row and best-effort deletes an existing poster object', async () => {
+	it('deletes the DB row and durably deletes an existing poster object', async () => {
 		mocks.findExhibitionByIdWithCount.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
 		}));
@@ -164,13 +173,54 @@ describe('admin exhibition service', () => {
 
 		await deleteExhibition(1);
 
-		expect(mocks.deleteExhibition).toHaveBeenCalledWith(1);
+		expect(mocks.deleteExhibition).toHaveBeenCalledWith(1, {
+			bucket: 'public-bucket',
+			reason: 'exhibition-delete-poster',
+		});
 		expect(mocks.safeDeleteObject).toHaveBeenCalledWith(
 			'public-bucket',
 			'old-poster.webp',
 			'exhibition-delete-poster',
 			{ exhibitionId: 1 },
 		);
+	});
+
+	it('propagates poster deletion when neither storage nor the orphan queue is available', async () => {
+		mocks.findExhibitionByIdWithCount.mockResolvedValue(exhibition({
+			posterStorageKey: 'old-poster.webp',
+		}));
+		mocks.deleteExhibition.mockResolvedValue({});
+		mocks.safeDeleteObject.mockRejectedValue(new Error('durable deletion unavailable'));
+
+		await expect(deleteExhibition(1)).rejects.toThrow('durable deletion unavailable');
+	});
+
+	it('does not roll back a new poster after its DB pointer commits and old cleanup fails', async () => {
+		const rollback = vi.fn();
+		const cleanup = vi.fn();
+		mocks.findExhibitionById.mockResolvedValue(exhibition());
+		mocks.posterUploadStart.mockResolvedValue({
+			savedFile: {
+				storageKey: 'new-poster.webp',
+				mimeType: 'image/webp',
+				sizeBytes: 123,
+				originalName: 'poster.webp',
+				kind: 'POSTER',
+			},
+			rollback,
+			cleanup,
+		});
+		mocks.replaceExhibitionPoster.mockResolvedValue({
+			updated: exhibition({ posterStorageKey: 'new-poster.webp' }),
+			oldStorageKey: 'old-poster.webp',
+		});
+		mocks.safeDeleteObject.mockRejectedValue(new Error('durable deletion unavailable'));
+		const parts = (async function* () {})();
+
+		await expect(replacePoster(1, { actor: { id: 1, role: 'ADMIN' }, parts }))
+			.rejects.toThrow('durable deletion unavailable');
+		expect(rollback).not.toHaveBeenCalled();
+		expect(cleanup).toHaveBeenCalledOnce();
 	});
 
 	it('clears poster metadata and deletes the old poster object', async () => {

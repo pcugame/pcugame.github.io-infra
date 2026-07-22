@@ -1,8 +1,12 @@
 import { env } from '../../../config/env.js';
 import { logger } from '../../../lib/logger.js';
 import { abortMultipartUpload } from '../../../lib/storage.js';
-import { deleteWebglDeployment, deleteWebglDeploymentByEntry } from '../../webgl/deployment.js';
-import { deleteAssetObjects } from './asset-cleanup.js';
+import {
+	deleteDurablyQueuedWebglDeployment,
+	deleteDurablyQueuedWebglDeploymentByEntry,
+} from '../../webgl/deployment.js';
+import { deleteDurablyQueuedObject } from '../../../object-deletion.js';
+import { deleteDurablyQueuedAssetObjects } from './asset-cleanup.js';
 import * as repository from './repository.js';
 import { serializeProjectDetail } from './serializer.runtime.js';
 import { createProjectService } from './service.js';
@@ -11,17 +15,28 @@ import { assertStatusTransition, bulkUpdateStatus } from './project-status.servi
 let projectCrudService: ReturnType<typeof createProjectService> | undefined;
 
 function service() {
+	const config = env();
 	projectCrudService ??= createProjectService({
 		repository,
 		serializeProjectDetail,
-		deleteAssetObjects,
+		deletionBuckets: {
+			publicBucket: config.S3_BUCKET_PUBLIC,
+			protectedBucket: config.S3_BUCKET_PROTECTED,
+		},
+		deleteAssetObjects: deleteDurablyQueuedAssetObjects,
 		abortMultipart: (key, uploadId) => abortMultipartUpload(
 			env().S3_BUCKET_PROTECTED,
 			key,
 			uploadId,
 		),
-		deleteWebglDeploymentByEntry,
-		deleteWebglDeployment,
+		deleteWebglDeploymentByEntry: deleteDurablyQueuedWebglDeploymentByEntry,
+		deleteWebglDeployment: deleteDurablyQueuedWebglDeployment,
+		deleteQueuedProtectedObject: (key, reason, context) => deleteDurablyQueuedObject(
+			config.S3_BUCKET_PROTECTED,
+			key,
+			reason,
+			context,
+		),
 		logger: { error: (context, message) => logger().error(context, message) },
 	});
 	return projectCrudService;

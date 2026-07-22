@@ -345,6 +345,18 @@ describe('WebGL completion atomicity', () => {
 			'webgl-upload-completion-invalid',
 			{ sessionId: 'session-webgl' },
 		);
+		expect(mocks.deleteOrQueue.mock.invocationCallOrder[0])
+			.toBeLessThan(mocks.markFailed.mock.invocationCallOrder[0]!);
+	});
+
+	it('keeps an invalid completed source recoverable when deletion and queueing both fail', async () => {
+		const { mocks, complete } = createHarness();
+		mocks.readHeader.mockResolvedValue(Buffer.from('not-a-zip'));
+		mocks.deleteOrQueue.mockRejectedValue(new Error('storage and orphan queue unavailable'));
+
+		await expect(complete()).rejects.toThrow('storage and orphan queue unavailable');
+		expect(mocks.markFailed).not.toHaveBeenCalled();
+		expect(mocks.revertToPending).not.toHaveBeenCalled();
 	});
 
 	it('cleans the previous deployment after the pointer swap', async () => {
@@ -360,16 +372,16 @@ describe('WebGL completion atomicity', () => {
 		);
 	});
 
-	it('keeps the new deployment completed when old-deployment cleanup fails', async () => {
+	it('surfaces old-deployment cleanup failure without rolling back the finalized new tree', async () => {
 		const { mocks, complete } = createHarness();
 		mocks.finalizeCompletedWebglSession.mockResolvedValue({
 			oldEntryKey: 'webgl/7/123e4567-e89b-42d3-b456-426614174111/site/index.html',
 		});
 		mocks.deleteWebglDeploymentByEntry.mockRejectedValue(new Error('orphan queue unavailable'));
 
-		await expect(complete()).resolves.toMatchObject({ status: 'COMPLETED' });
+		await expect(complete()).rejects.toThrow('orphan queue unavailable');
 		expect(mocks.markFailed).not.toHaveBeenCalled();
 		expect(mocks.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
-		expect(mocks.logError).toHaveBeenCalledOnce();
+		expect(mocks.logError).not.toHaveBeenCalled();
 	});
 });
