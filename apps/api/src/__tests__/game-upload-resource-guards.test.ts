@@ -52,7 +52,7 @@ vi.mock('../lib/storage.js', () => ({
 }));
 vi.mock('../object-deletion.js', () => ({ safeDeleteObject: mocks.safeDeleteObject }));
 
-vi.mock('../shared/site-settings.js', () => ({
+vi.mock('../shared/site-settings.runtime.js', () => ({
 	getSiteSettings: mocks.getSiteSettings,
 }));
 

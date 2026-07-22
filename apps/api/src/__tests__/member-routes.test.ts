@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { memberController } from '../modules/admin/member/index.js';
+import type { PrismaClient } from '../generated/prisma/client.js';
+import { createMemberController } from '../modules/admin/member/index.js';
+import { createMemberRepository } from '../modules/admin/member/repository.js';
+import { createMemberService } from '../modules/admin/member/service.js';
+import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
+import { createProjectAccessService } from '../modules/admin/project-access.service.js';
 
 const mocks = vi.hoisted(() => ({
 	projectFindUnique: vi.fn(),
@@ -9,21 +14,6 @@ const mocks = vi.hoisted(() => ({
 	projectMemberCreate: vi.fn(),
 	projectMemberDelete: vi.fn(),
 	transaction: vi.fn(),
-}));
-
-vi.mock('../lib/prisma.js', () => ({
-	prisma: {
-		project: {
-			findUnique: mocks.projectFindUnique,
-		},
-		projectMember: {
-			findFirst: mocks.projectMemberFindFirst,
-			update: mocks.projectMemberUpdate,
-			create: mocks.projectMemberCreate,
-			delete: mocks.projectMemberDelete,
-		},
-		$transaction: mocks.transaction,
-	},
 }));
 
 vi.mock('../plugins/auth.js', () => {
@@ -107,6 +97,21 @@ function installPrismaMocks() {
 
 async function buildTestApp() {
 	const testApp = Fastify({ logger: false });
+	const prisma = {
+		project: { findUnique: mocks.projectFindUnique },
+		projectMember: {
+			findFirst: mocks.projectMemberFindFirst,
+			update: mocks.projectMemberUpdate,
+			create: mocks.projectMemberCreate,
+			delete: mocks.projectMemberDelete,
+		},
+		$transaction: mocks.transaction,
+	} as unknown as PrismaClient;
+	const access = createProjectAccessService(createProjectAccessRepository(prisma));
+	const service = createMemberService({
+		projectExists: async (projectId) => await createProjectAccessRepository(prisma).findProject(projectId) !== null,
+		repository: createMemberRepository(prisma),
+	});
 	testApp.setErrorHandler((error: any, _request, reply) => {
 		reply.status(error.statusCode ?? 500).send({
 			ok: false,
@@ -117,7 +122,7 @@ async function buildTestApp() {
 			},
 		});
 	});
-	await testApp.register(memberController, { prefix: '/api/admin' });
+	await testApp.register(createMemberController({ service, access }), { prefix: '/api/admin' });
 	return testApp;
 }
 

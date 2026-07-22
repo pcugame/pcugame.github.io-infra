@@ -10,7 +10,7 @@ import {
 	uploadPart,
 } from '../../../lib/storage.js';
 import { safeDeleteObject } from '../../../object-deletion.js';
-import { getSiteSettings } from '../../../shared/site-settings.js';
+import { getSiteSettings } from '../../../shared/site-settings.runtime.js';
 import { generateStorageKey } from '../../../shared/storage-path.js';
 import {
 	acquireUploadSlot,

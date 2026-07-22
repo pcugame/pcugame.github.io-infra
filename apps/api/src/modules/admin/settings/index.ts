@@ -1,1 +1,1 @@
-export { settingsController } from './controller.js';
+export { createSettingsController } from './controller.js';

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PrismaClient } from '../generated/prisma/client.js';
 
 const mocks = vi.hoisted(() => ({
 	projectCount: vi.fn(),
@@ -6,17 +7,18 @@ const mocks = vi.hoisted(() => ({
 	transaction: vi.fn(),
 }));
 
-vi.mock('../lib/prisma.js', () => ({
-	prisma: {
-		project: {
-			count: mocks.projectCount,
-			findMany: mocks.projectFindMany,
-		},
-		$transaction: mocks.transaction,
-	},
-}));
+import {
+	createProjectCrudRepository,
+	type FindProjectsForUserOptions,
+} from '../modules/admin/project/crud.repository.js';
 
-import { findProjectsForUser, type FindProjectsForUserOptions } from '../modules/admin/project/repository.js';
+const repository = createProjectCrudRepository({
+	project: {
+		count: mocks.projectCount,
+		findMany: mocks.projectFindMany,
+	},
+	$transaction: mocks.transaction,
+} as unknown as PrismaClient);
 
 const defaultOptions: FindProjectsForUserOptions = {
 	page: 1,
@@ -34,7 +36,7 @@ describe('admin project list repository', () => {
 	});
 
 	it('builds explicit pagination queries for privileged users', async () => {
-		await findProjectsForUser(303, true, {
+		await repository.findProjectsForUser(303, true, {
 			...defaultOptions,
 			page: 2,
 			limit: 10,
@@ -55,7 +57,7 @@ describe('admin project list repository', () => {
 	});
 
 	it('scopes USER queries to creator or linked member projects', async () => {
-		await findProjectsForUser(101, false, defaultOptions);
+		await repository.findProjectsForUser(101, false, defaultOptions);
 
 		expect(mocks.projectCount).toHaveBeenCalledWith({
 			where: {
@@ -72,7 +74,7 @@ describe('admin project list repository', () => {
 	});
 
 	it('adds title, summary, member name, and student id search filters', async () => {
-		await findProjectsForUser(303, true, {
+		await repository.findProjectsForUser(303, true, {
 			...defaultOptions,
 			search: 'alpha',
 		});
@@ -94,7 +96,7 @@ describe('admin project list repository', () => {
 	});
 
 	it('adds status and year filters', async () => {
-		await findProjectsForUser(303, true, {
+		await repository.findProjectsForUser(303, true, {
 			...defaultOptions,
 			status: 'ARCHIVED',
 			year: 2026,
@@ -115,7 +117,7 @@ describe('admin project list repository', () => {
 		['year', 'desc', [{ exhibition: { year: 'desc' } }, { id: 'desc' }]],
 		['status', 'asc', [{ status: 'asc' }, { id: 'asc' }]],
 	] as const)('builds whitelisted %s sort order', async (sort, order, orderBy) => {
-		await findProjectsForUser(303, true, {
+		await repository.findProjectsForUser(303, true, {
 			...defaultOptions,
 			sort,
 			order,
@@ -130,7 +132,7 @@ describe('admin project list repository', () => {
 		const items = [{ id: 1 }, { id: 2 }];
 		mocks.transaction.mockResolvedValue([2, items]);
 
-		const result = await findProjectsForUser(303, true, defaultOptions);
+		const result = await repository.findProjectsForUser(303, true, defaultOptions);
 
 		expect(result).toEqual({ totalItems: 2, items });
 	});

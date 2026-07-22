@@ -9,7 +9,7 @@ import type {
 import { sendOk, sendCreated } from '../../../shared/http.js';
 import { GameUploadCreateSessionBody, parseBody, parseIntParam } from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
-import { loadProjectWithAccess } from '../project-access.js';
+import { loadProjectWithAccess } from '../project-access.runtime.js';
 import { gameUploadService } from './runtime.js';
 
 /** Register chunked game-upload routes */
