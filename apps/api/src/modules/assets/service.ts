@@ -2,7 +2,7 @@ import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/co
 import type { AssetKind, UserRole } from '@pcu/contracts';
 import type { Actor } from '../../application/http-input.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
-import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
+import { AppError, notFound, forbidden, unauthorized } from '../../shared/errors.js';
 
 type ProtectedAssetAccessUser = {
 	id: number;
@@ -57,16 +57,13 @@ export interface AssetsServiceDependencies {
 	): Promise<void>;
 	loadProjectWithAccess(actor: Actor, projectId: number): Promise<unknown>;
 	downloadLimiter: {
-		loadBannedIps(ips: string[]): void;
-		check(ip: string): 'ok' | 'ban' | 'banned';
+		check(ip: string): 'ok' | 'ban';
 	};
 	logger: {
 		info(message: string): void;
-		warn(message: string): void;
 		error(context: Record<string, unknown>, message: string): void;
 	};
 	repository: {
-		findAllBannedIps(): Promise<{ ip: string }[]>;
 		findPublicAsset(key: string): Promise<unknown | null>;
 		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
 		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
@@ -74,6 +71,68 @@ export interface AssetsServiceDependencies {
 		markAssetDeleting(id: number): Promise<unknown>;
 		clearPosterIfMatches(projectId: number, assetId: number): Promise<unknown>;
 		markAssetDeleted(id: number): Promise<unknown>;
+	};
+}
+
+export interface BannedIpStartupGate {
+	warm(ips: string[]): void;
+	remove(ip: string): void;
+	check(ip: string): 'ok' | 'ban';
+	isReady(): boolean;
+}
+
+/**
+ * Protected downloads fail closed until the context-owned startup warmup has
+ * atomically installed the DB snapshot. A constructed/registered app can never
+ * interpret an uninitialized empty set as "no banned IPs".
+ */
+export function createBannedIpStartupGate(limiter: {
+	loadBannedIps(ips: string[]): void;
+	removeBan(ip: string): void;
+	check(ip: string): 'ok' | 'ban';
+}): BannedIpStartupGate {
+	let ready = false;
+	return {
+		warm(ips) {
+			limiter.loadBannedIps(ips);
+			ready = true;
+		},
+		remove: (ip) => limiter.removeBan(ip),
+		check(ip) {
+			if (!ready) {
+				throw new AppError(
+					503,
+					'Protected downloads are unavailable until the banned-IP cache is ready.',
+					'BANNED_IP_CACHE_UNAVAILABLE',
+				);
+			}
+			return limiter.check(ip);
+		},
+		isReady: () => ready,
+	};
+}
+
+/** Explicit startup owner. A DB failure is fatal and remains rejected. */
+export function createBannedIpWarmup(deps: {
+	repository: { findAllBannedIps(): Promise<{ ip: string }[]> };
+	gate: Pick<BannedIpStartupGate, 'warm'>;
+	logger: { info(value: unknown, message?: string): void; error(value: unknown, message?: string): void };
+}): { start(): Promise<void> } {
+	let startPromise: Promise<void> | undefined;
+	return {
+		start() {
+			startPromise ??= (async () => {
+				try {
+					const banned = await deps.repository.findAllBannedIps();
+					deps.gate.warm(banned.map(({ ip }) => ip));
+					deps.logger.info({ count: banned.length }, 'Loaded banned IP cache');
+				} catch (error) {
+					deps.logger.error(error, 'Banned IP cache warmup failed; aborting startup');
+					throw error;
+				}
+			})();
+			return startPromise;
+		},
 	};
 }
 
@@ -90,19 +149,6 @@ export function canStreamProtectedAsset(
 	if (user.role === 'ADMIN' || user.role === 'OPERATOR') return true;
 	if (asset.project.creatorId === user.id) return true;
 	return asset.project.members.some((member) => member.userId === user.id);
-}
-
-/** Initialize in-memory ban cache from DB on startup */
-export async function loadBannedIpCache(deps: AssetsServiceDependencies): Promise<void> {
-	try {
-		const banned = await deps.repository.findAllBannedIps();
-		deps.downloadLimiter.loadBannedIps(banned.map((b) => b.ip));
-		if (banned.length > 0) {
-			deps.logger.info(`Loaded ${banned.length} banned IPs`);
-		}
-	} catch {
-		deps.logger.warn('Could not load banned IPs (migration may be pending)');
-	}
 }
 
 /** Redirect to a presigned S3 URL for a public asset */
@@ -182,7 +228,6 @@ export async function deleteAsset(
 
 export function createAssetsService(deps: AssetsServiceDependencies) {
 	return {
-		loadBannedIpCache: () => loadBannedIpCache(deps),
 		streamPublicAsset: (storageKey: string) => streamPublicAsset(deps, storageKey),
 		streamProtectedAsset: (
 			storageKey: string,

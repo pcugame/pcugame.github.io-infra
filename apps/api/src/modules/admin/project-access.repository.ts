@@ -1,5 +1,4 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
-import { prisma } from '../../lib/prisma.js';
 
 export function createProjectAccessRepository(client: PrismaClient) {
 	return {
@@ -23,5 +22,3 @@ export function createProjectAccessRepository(client: PrismaClient) {
 		},
 	};
 }
-
-export const projectAccessRepository = createProjectAccessRepository(prisma);

@@ -33,15 +33,16 @@ import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
 import { createObjectStorage } from './lib/storage.js';
 import { createRootLogger } from './lib/logger.js';
-import {
-	createProtectedDownloadLimiter,
-	protectedDownloadLimiter,
-} from './shared/protected-download-limiter.js';
+import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
 import type { DownloadRateLimiter } from './shared/download-rate-limit.js';
 import {
 	createExportProgressStore,
 	type ExportProgressStore,
 } from './modules/admin/export/service.js';
+import {
+	createAssetsBannedProductionGraph,
+	type AssetsBannedProductionGraph,
+} from './modules/assets/composition.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -181,7 +182,7 @@ export interface ProductionResourceFactories {
 	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
 	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
 	exportProgress(config: Env): MaybePromise<ExportProgressStore>;
-	routes(config: Env): MaybePromise<BackendRoutes>;
+	routes(config: Env, assetsBanned: AssetsBannedProductionGraph): MaybePromise<BackendRoutes>;
 }
 
 export interface ProductionResourceOverrides {
@@ -236,22 +237,24 @@ const defaultFactories: ProductionResourceFactories = {
 	routes: loadProductionRoutes,
 };
 
-async function loadProductionRoutes(): Promise<BackendRoutes> {
-	const [auth, devAuth, publicRoutes, admin, me, assets] = await Promise.all([
+async function loadProductionRoutes(
+	_config: Env,
+	assetsBanned: AssetsBannedProductionGraph,
+): Promise<BackendRoutes> {
+	const [auth, devAuth, publicRoutes, admin, me] = await Promise.all([
 		import('./modules/auth/index.js'),
 		import('./modules/dev-auth/controller.js'),
 		import('./modules/public/index.js'),
 		import('./modules/admin/admin.routes.js'),
 		import('./modules/me/me.routes.js'),
-		import('./modules/assets/index.js'),
 	]);
 	return {
 		auth: auth.authController,
 		devAuth: devAuth.devAuthController,
 		public: publicRoutes.publicController,
-		admin: admin.adminRoutes,
+		admin: admin.createAdminRoutes({ bannedIpController: assetsBanned.bannedIpController }),
 		me: me.meRoutes,
-		assets: assets.assetsController,
+		assets: assetsBanned.assetsController,
 	};
 }
 
@@ -382,6 +385,24 @@ export async function createProductionBackendContext(
 			() => factories.exportProgress(config),
 			(progress) => progress.close(),
 		);
+		let assetsBanned: AssetsBannedProductionGraph | undefined;
+		if (!options.routes) {
+			const graph = createAssetsBannedProductionGraph({
+				config,
+				prisma,
+				storage,
+				downloadLimiter: protectedDownloads,
+				settings,
+				logger,
+				clock,
+			});
+			assetsBanned = graph;
+			owner.register('assetsBannedWarmup', owned(
+				graph.warmup,
+				undefined,
+				() => graph.warmup.start(),
+			));
+		}
 
 		const databaseHealth = createPrismaHealth(prisma);
 		const authSessions = createPrismaAuthSessions(prisma);
@@ -411,18 +432,7 @@ export async function createProductionBackendContext(
 			() => maintenanceSchedule.close(),
 			() => maintenanceSchedule.start(),
 		));
-		if (!options.routes) {
-			// Compatibility lifetime only: production assets/banned routes still
-			// reference this pre-existing singleton until ticket 004 replaces their
-			// runtime graph with context.protectedDownloads. Do not copy this adapter
-			// to other feature resources; ticket 004 removes this registration.
-			owner.register('legacyProtectedDownloadLimiterUntilTicket004', owned(
-				protectedDownloadLimiter,
-				() => protectedDownloadLimiter.close(),
-				() => protectedDownloadLimiter.start(),
-			));
-		}
-		const routes = options.routes ?? await factories.routes(config);
+		const routes = options.routes ?? await factories.routes(config, assetsBanned!);
 
 		return {
 			config,

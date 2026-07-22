@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { FastifyPluginAsync } from 'fastify';
 import type { Env } from '../config/env.js';
+import type { PrismaClient } from '../generated/prisma/client.js';
 import { createLifecycle, startOwnedResources } from '../lib/lifecycle.js';
 import {
 	createCachedSettingsStore,
@@ -244,7 +246,7 @@ describe('stateful resource factories', () => {
 		expect(secondStart).toHaveBeenCalledOnce();
 	});
 
-	it('keeps the legacy route limiter alive until ticket 004 at the explicit owner boundary', async () => {
+	it('starts only the context limiter after ticket 004 removes the legacy route limiter', async () => {
 		const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
 		const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 		const config: Env = {
@@ -255,24 +257,38 @@ describe('stateful resource factories', () => {
 		};
 		try {
 			vi.resetModules();
-			vi.doMock('../config/env.js', () => ({
-				env: () => config,
-				loadEnv: () => config,
-			}));
 			const { createProductionBackendContext } = await import('../backend-context.js');
-			const context = await createProductionBackendContext(config);
+			const emptyRoute: FastifyPluginAsync = async () => {};
+			const findBannedIps = vi.fn().mockResolvedValue([]);
+			const context = await createProductionBackendContext(config, {
+				factories: {
+					prisma: () => ({
+						$disconnect: vi.fn(),
+						bannedIp: { findMany: findBannedIps },
+						authSession: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+					} as unknown as PrismaClient),
+					routes: () => ({
+						auth: emptyRoute,
+						devAuth: emptyRoute,
+						public: emptyRoute,
+						admin: emptyRoute,
+						me: emptyRoute,
+						assets: emptyRoute,
+					}),
+				},
+			});
 
 			expect(setIntervalSpy).not.toHaveBeenCalled();
 			await context.start();
 			await context.start();
-			// context limiter + two maintenance tasks + the existing route singleton.
-			expect(setIntervalSpy).toHaveBeenCalledTimes(4);
+			expect(findBannedIps).toHaveBeenCalledOnce();
+			// One context limiter plus two context maintenance tasks; no route singleton.
+			expect(setIntervalSpy).toHaveBeenCalledTimes(3);
 
 			await context.close();
 			await context.close();
-			expect(clearIntervalSpy).toHaveBeenCalledTimes(4);
+			expect(clearIntervalSpy).toHaveBeenCalledTimes(3);
 		} finally {
-			vi.doUnmock('../config/env.js');
 			setIntervalSpy.mockRestore();
 			clearIntervalSpy.mockRestore();
 		}
