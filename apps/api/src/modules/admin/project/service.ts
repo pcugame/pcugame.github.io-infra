@@ -1,7 +1,6 @@
 import type { AssetKind, ProjectStatus } from '@pcu/contracts';
 import type { AdminProjectItem, AdminProjectListQuery, AdminProjectListResponse } from '@pcu/contracts';
 import { forbidden, notFound } from '../../../shared/errors.js';
-import { assertValidPosterAsset } from '../../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
 import { parseWebglSourceKey } from '../../webgl/paths.js';
 import type { createProjectSerializer } from './serializer.js';
@@ -167,10 +166,8 @@ export async function deleteWebgl(deps: ProjectServiceDependencies, projectId: n
 	);
 }
 
-/** Set a project's poster to the given asset (with validation) */
+/** Set a project's poster; repository validation and pointer update share one transaction. */
 export async function setPoster(deps: ProjectServiceDependencies, projectId: number, assetId: number) {
-	const asset = await deps.repository.findAssetById(assetId);
-	assertValidPosterAsset(asset, projectId);
 	await deps.repository.setProjectPoster(projectId, assetId);
 	return { posterAssetId: assetId };
 }

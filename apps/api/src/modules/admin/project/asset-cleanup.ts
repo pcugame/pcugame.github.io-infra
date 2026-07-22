@@ -1,4 +1,5 @@
 import type { AssetKind } from '@pcu/contracts';
+import type { SavedUpload } from '../../../application/upload-ports.js';
 import { bucketForKind } from '../../../lib/s3.js';
 import { deleteDurablyQueuedObject, safeDeleteObject } from '../../../object-deletion.js';
 
@@ -25,5 +26,21 @@ export async function deleteDurablyQueuedAssetObjects(
 			assetId: asset.id,
 			projectId: asset.projectId,
 		});
+	}
+}
+
+/** Cleanup for an upload whose DB write never committed; no outbox exists yet. */
+export async function deleteUnpersistedAssetUpload(upload: SavedUpload) {
+	const bucket = bucketForKind(upload.kind);
+	await safeDeleteObject(bucket, upload.storageKey, 'project-asset-upload-loser', {
+		kind: upload.kind,
+	});
+	if (upload.playbackStorageKey && upload.playbackStorageKey !== upload.storageKey) {
+		await safeDeleteObject(
+			bucket,
+			upload.playbackStorageKey,
+			'project-asset-upload-loser-playback',
+			{ kind: upload.kind },
+		);
 	}
 }

@@ -10,6 +10,7 @@ const mocks = {
 	replaceOrCreateReplaceableAsset: vi.fn(),
 	findExhibitionById: vi.fn(),
 	deleteOrQueue: vi.fn(),
+	deleteUnpersistedUpload: vi.fn(),
 };
 
 const MB = 1024 * 1024;
@@ -34,6 +35,7 @@ const projectAssetService = createProjectAssetService({
 	assetUrl: (key, kind) => `http://localhost:4000/api/assets/${kind === 'GAME' || kind === 'VIDEO' ? 'protected' : 'public'}/${key}`,
 	bucketForKind: () => 'test-bucket',
 	deleteOrQueue: mocks.deleteOrQueue,
+	deleteUnpersistedUpload: mocks.deleteUnpersistedUpload,
 });
 
 function chunksWithHeader(header: Buffer, totalBytes: number, chunkBytes: number): Buffer[] {

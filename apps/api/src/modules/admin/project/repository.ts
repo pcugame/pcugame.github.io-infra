@@ -1,6 +1,19 @@
 import { prisma } from '../../../lib/prisma.js';
-import type { AssetKind, AssetPlaybackStatus, ProjectStatus, Prisma } from '../../../generated/prisma/client.js';
+import type {
+	AssetKind,
+	AssetPlaybackStatus,
+	Prisma,
+	PrismaClient,
+	ProjectStatus,
+} from '../../../generated/prisma/client.js';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
+import { notFound } from '../../../shared/errors.js';
+import { assertValidPosterAsset } from '../../../shared/poster-validation.js';
+import {
+	ASSET_MUTATION_TRANSACTION_POLICY,
+	type AssetMutationTransactionPolicy,
+	withAssetMutationTransaction,
+} from '../../assets/mutation-transaction.js';
 import { queueDurableDeletions, type DurableDeletionTarget } from '../../orphan/outbox.js';
 import {
 	webglDeletionTargetsByEntry,
@@ -20,6 +33,15 @@ interface AssetReplacementOutboxConfig {
 	reason: string;
 	playbackReason: string;
 }
+
+type LockedReplaceableAsset = {
+	id: number;
+	projectId: number;
+	kind: AssetKind;
+	status: string;
+	storageKey: string;
+	playbackStorageKey: string | null;
+};
 
 function assetBucket(kind: AssetKind, config: DeletionOutboxConfig): string {
 	return kind === 'GAME' || kind === 'VIDEO' ? config.protectedBucket : config.publicBucket;
@@ -353,106 +375,164 @@ export function updateAssetFile(
 	return prisma.asset.update({ where: { id }, data });
 }
 
-/**
- * Replace the single READY asset of a given kind for a project, or create one if none exists.
- * Serialized with a Serializable Prisma transaction. The partial unique index for READY
- * GAME assets closes concurrent create races; serialization retries handle write conflicts.
- *
- * Returns `oldStorageKey` for callers that need to clean up the prior S3 object after commit.
- */
-export function replaceOrCreateReplaceableAsset(
-	projectId: number,
-	kind: AssetKind,
-	data: {
-		storageKey: string;
-		playbackStorageKey?: string | null;
-		originalName: string;
-		mimeType: string;
-		playbackMimeType?: string;
-		sizeBytes: bigint;
-		playbackSizeBytes?: bigint;
-		playbackStatus?: AssetPlaybackStatus;
-		playbackError?: string;
-		isPublic: boolean;
-	},
-	outbox: AssetReplacementOutboxConfig,
-): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
-	return withSerializableRetry(async (tx) => {
-		const existing = await tx.asset.findFirst({
-			where: { projectId, kind, status: 'READY' },
-			select: { id: true, storageKey: true, playbackStorageKey: true },
-		});
+export function createProjectAssetMutationRepository(
+	client: PrismaClient,
+	transactionPolicy: AssetMutationTransactionPolicy = ASSET_MUTATION_TRANSACTION_POLICY,
+) {
+	async function lockProject(tx: TxClient, projectId: number): Promise<void> {
+		const rows = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
+			SELECT "id"
+			FROM "projects"
+			WHERE "id" = ${projectId}
+			FOR UPDATE
+		`);
+		if (rows.length === 0) throw notFound('Project not found');
+	}
 
-		if (existing) {
-			await queueDurableDeletions(tx, [
-				...(existing.storageKey !== data.storageKey
-					? [{ bucket: outbox.bucket, storageKey: existing.storageKey, reason: outbox.reason }]
-					: []),
-				...(existing.playbackStorageKey
-					&& existing.playbackStorageKey !== data.playbackStorageKey
-					&& existing.playbackStorageKey !== data.storageKey
-					? [{
-						bucket: outbox.bucket,
-						storageKey: existing.playbackStorageKey,
-						reason: outbox.playbackReason,
-					}]
-					: []),
-			]);
-			const updated = await tx.asset.update({
-				where: { id: existing.id },
-				data: {
-					storageKey: data.storageKey,
-					playbackStorageKey: data.playbackStorageKey ?? null,
-					originalName: data.originalName,
-					mimeType: data.mimeType,
-					playbackMimeType: data.playbackMimeType ?? '',
-					sizeBytes: data.sizeBytes,
-					playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
-					playbackStatus: data.playbackStatus ?? 'PENDING',
-					playbackError: data.playbackError ?? '',
-				},
-				select: { id: true },
-			});
-			return {
-				assetId: updated.id,
-				oldStorageKey: existing.storageKey,
-				oldPlaybackStorageKey: existing.playbackStorageKey,
-			};
-		}
+	async function lockReadyAsset(
+		tx: TxClient,
+		projectId: number,
+		kind: AssetKind,
+	): Promise<LockedReplaceableAsset | null> {
+		const rows = await tx.$queryRaw<LockedReplaceableAsset[]>(PrismaRuntime.sql`
+			SELECT
+				"id",
+				"project_id" AS "projectId",
+				"kind"::text AS "kind",
+				"status"::text AS "status",
+				"storage_key" AS "storageKey",
+				"playback_storage_key" AS "playbackStorageKey"
+			FROM "assets"
+			WHERE "project_id" = ${projectId}
+				AND "kind" = CAST(${kind} AS "AssetKind")
+				AND "status" = 'READY'
+			ORDER BY "id"
+			LIMIT 1
+			FOR UPDATE
+		`);
+		return rows[0] ?? null;
+	}
 
-		const created = await tx.asset.create({
+	return {
+		/**
+		 * Replace the READY GAME identity with a new row. The old row is never
+		 * reused, so a delete request that already targets its ID cannot delete
+		 * the replacement object. Its cleanup outbox is committed in this tx.
+		 */
+		replaceOrCreateReplaceableAsset(
+			projectId: number,
+			kind: AssetKind,
 			data: {
-				projectId,
-				kind,
-				storageKey: data.storageKey,
-				playbackStorageKey: data.playbackStorageKey ?? null,
-				originalName: data.originalName,
-				mimeType: data.mimeType,
-				playbackMimeType: data.playbackMimeType ?? '',
-				sizeBytes: data.sizeBytes,
-				playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
-				playbackStatus: data.playbackStatus ?? 'PENDING',
-				playbackError: data.playbackError ?? '',
-				isPublic: data.isPublic,
+				storageKey: string;
+				playbackStorageKey?: string | null;
+				originalName: string;
+				mimeType: string;
+				playbackMimeType?: string;
+				sizeBytes: bigint;
+				playbackSizeBytes?: bigint;
+				playbackStatus?: AssetPlaybackStatus;
+				playbackError?: string;
+				isPublic: boolean;
 			},
-			select: { id: true },
-		});
-		return { assetId: created.id, oldStorageKey: null, oldPlaybackStorageKey: null };
-	});
+			outbox: AssetReplacementOutboxConfig,
+		): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
+			return withAssetMutationTransaction(client, async (tx) => {
+				await lockProject(tx, projectId);
+				const existing = await lockReadyAsset(tx, projectId, kind);
+
+				if (existing) {
+					await queueDurableDeletions(tx, [
+						...(existing.storageKey !== data.storageKey
+							? [{ bucket: outbox.bucket, storageKey: existing.storageKey, reason: outbox.reason }]
+							: []),
+						...(existing.playbackStorageKey
+							&& existing.playbackStorageKey !== data.playbackStorageKey
+							&& existing.playbackStorageKey !== data.storageKey
+							? [{
+								bucket: outbox.bucket,
+								storageKey: existing.playbackStorageKey,
+								reason: outbox.playbackReason,
+							}]
+							: []),
+					]);
+					await tx.project.updateMany({
+						where: { id: projectId, posterAssetId: existing.id },
+						data: { posterAssetId: null },
+					});
+					await tx.asset.update({
+						where: { id: existing.id },
+						data: { status: 'DELETED' },
+						select: { id: true },
+					});
+				}
+
+				const created = await tx.asset.create({
+					data: {
+						projectId,
+						kind,
+						storageKey: data.storageKey,
+						playbackStorageKey: data.playbackStorageKey ?? null,
+						originalName: data.originalName,
+						mimeType: data.mimeType,
+						playbackMimeType: data.playbackMimeType ?? '',
+						sizeBytes: data.sizeBytes,
+						playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
+						playbackStatus: data.playbackStatus ?? 'PENDING',
+						playbackError: data.playbackError ?? '',
+						isPublic: data.isPublic,
+					},
+					select: { id: true },
+				});
+				return {
+					assetId: created.id,
+					oldStorageKey: existing?.storageKey ?? null,
+					oldPlaybackStorageKey: existing?.playbackStorageKey ?? null,
+				};
+			}, transactionPolicy);
+		},
+
+		/** Validate project ownership, eligible kind and READY while both rows are locked. */
+		setProjectPoster(projectId: number, assetId: number): Promise<unknown> {
+			return withAssetMutationTransaction(client, async (tx) => {
+				await lockProject(tx, projectId);
+				const rows = await tx.$queryRaw<Array<{
+					id: number;
+					projectId: number;
+					kind: AssetKind;
+					status: string;
+				}>>(PrismaRuntime.sql`
+					SELECT
+						"id",
+						"project_id" AS "projectId",
+						"kind"::text AS "kind",
+						"status"::text AS "status"
+					FROM "assets"
+					WHERE "id" = ${assetId}
+					FOR UPDATE
+				`);
+				assertValidPosterAsset(rows[0] ?? null, projectId);
+				return tx.project.update({
+					where: { id: projectId },
+					data: { posterAssetId: assetId },
+				});
+			}, transactionPolicy);
+		},
+	};
 }
+
+const projectAssetMutationRepository = createProjectAssetMutationRepository(prisma);
+
+/** Bounded Serializable GAME identity swap used by the production runtime. */
+export const replaceOrCreateReplaceableAsset =
+	projectAssetMutationRepository.replaceOrCreateReplaceableAsset;
 
 /** Find a single asset by ID */
 export function findAssetById(id: number) {
 	return prisma.asset.findUnique({ where: { id } });
 }
 
-/** Set a project's poster asset ID */
-export function setProjectPoster(projectId: number, assetId: number) {
-	return prisma.project.update({
-		where: { id: projectId },
-		data: { posterAssetId: assetId },
-	});
-}
+/** Transactionally validate and set a project's poster asset ID. */
+export const setProjectPoster = projectAssetMutationRepository.setProjectPoster;
 
 // ── Bulk operations ────────────────────────────────────────
 

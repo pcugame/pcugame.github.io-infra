@@ -1,6 +1,10 @@
 import type { AssetKind } from '@pcu/contracts';
 import type { MultipartCommandInput } from '../../../application/http-input.js';
-import type { ProcessedUpload, SingleAssetUploadCoordinator } from '../../../application/upload-ports.js';
+import type {
+	ProcessedUpload,
+	SavedUpload,
+	SingleAssetUploadCoordinator,
+} from '../../../application/upload-ports.js';
 import type { UploadLimits } from '../../../shared/upload-limits.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import type { ProjectAssetRepository } from './ports.js';
@@ -19,6 +23,8 @@ export interface ProjectAssetServiceDependencies {
 		reason: string,
 		context: Record<string, unknown>,
 	): Promise<void>;
+	/** Durable fallback for a newly uploaded object when the DB mutation loses. */
+	deleteUnpersistedUpload(upload: SavedUpload): Promise<void>;
 }
 
 export function isReplaceableAssetKind(kind: AssetKind): boolean {
@@ -104,7 +110,12 @@ export async function addAssetToProject(
 
 		return { assetId, url: deps.assetUrl(savedFile.storageKey, savedFile.kind) };
 	} catch (err) {
-		if (upload && !uploadPersisted) await upload.rollback();
+		if (upload && !uploadPersisted) {
+			// UploadPipeline rollback is an immediate best effort. Follow it with the
+			// durable deletion contract so a losing upload is deleted or queued.
+			await upload.rollback();
+			await deps.deleteUnpersistedUpload(upload.savedFile);
+		}
 		throw err;
 	} finally {
 		deps.uploadSlots.release();
