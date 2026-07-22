@@ -161,8 +161,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			bucketForKind: () => 'protected',
 			deleteOrQueue,
 			loadProjectWithAccess: vi.fn().mockResolvedValue(undefined),
-			downloadLimiter: { loadBannedIps: vi.fn(), check: vi.fn().mockReturnValue('ok') },
-			logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+			downloadLimiter: { check: vi.fn().mockReturnValue('ok') },
+			logger: { info: vi.fn(), error: vi.fn() },
 			repository: assetsRepository,
 		});
 

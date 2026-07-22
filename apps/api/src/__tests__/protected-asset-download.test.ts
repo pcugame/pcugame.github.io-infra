@@ -19,15 +19,13 @@ const assetsService = createAssetsService({
 	deleteOrQueue: vi.fn(),
 	loadProjectWithAccess: vi.fn(),
 	downloadLimiter: {
-		loadBannedIps: vi.fn(),
 		check: mocks.limiterCheck,
 	},
-	logger: { info: vi.fn(), warn: vi.fn(), error: mocks.loggerError },
+	logger: { info: vi.fn(), error: mocks.loggerError },
 	repository: {
 		findPublicAsset: mocks.findPublicAsset,
 		findAssetByStorageKey: mocks.findAssetByStorageKey,
 		upsertBannedIp: mocks.upsertBannedIp,
-		findAllBannedIps: vi.fn(),
 		findAssetByIdWithProject: vi.fn(),
 		markAssetDeleting: vi.fn(),
 		markAssetDeleted: vi.fn(),

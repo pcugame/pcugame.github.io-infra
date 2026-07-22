@@ -36,7 +36,7 @@ vi.mock('../lib/storage.js', async (importOriginal) => {
 	};
 });
 vi.mock('../shared/protected-download-limiter.js', () => {
-	const protectedDownloadLimiter = {
+	const limiter = {
 		start: vi.fn(),
 		check: vi.fn().mockReturnValue('ok'),
 		isBanned: vi.fn().mockReturnValue(false),
@@ -47,8 +47,7 @@ vi.mock('../shared/protected-download-limiter.js', () => {
 		destroy: vi.fn(),
 	};
 	return {
-		protectedDownloadLimiter,
-		createProtectedDownloadLimiter: () => protectedDownloadLimiter,
+		createProtectedDownloadLimiter: () => limiter,
 	};
 });
 

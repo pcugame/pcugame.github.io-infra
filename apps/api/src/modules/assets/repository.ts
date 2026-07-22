@@ -1,5 +1,4 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
-import { prisma } from '../../lib/prisma.js';
 
 export function createAssetsRepository(client: PrismaClient) {
 	return {
@@ -77,14 +76,3 @@ export function createAssetsRepository(client: PrismaClient) {
 		},
 	};
 }
-
-export const {
-	findPublicAsset,
-	findAssetByStorageKey,
-	findAssetByIdWithProject,
-	markAssetDeleting,
-	markAssetDeleted,
-	clearPosterIfMatches,
-	upsertBannedIp,
-	findAllBannedIps,
-} = createAssetsRepository(prisma);
