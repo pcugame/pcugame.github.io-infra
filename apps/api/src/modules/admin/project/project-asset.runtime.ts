@@ -1,5 +1,5 @@
 import { bucketForKind } from '../../../lib/s3.js';
-import { safeDeleteObject } from '../../../object-deletion.js';
+import { deleteDurablyQueuedObject } from '../../../object-deletion.js';
 import {
 	acquireUploadSlot,
 	getUploadLimits,
@@ -17,7 +17,7 @@ export const projectAssetService = createProjectAssetService({
 	uploadCoordinator: singleAssetUploadCoordinator,
 	assetUrl,
 	bucketForKind,
-	deleteOrQueue: safeDeleteObject,
+	deleteOrQueue: deleteDurablyQueuedObject,
 });
 
 export const { addAssetToProject } = projectAssetService;

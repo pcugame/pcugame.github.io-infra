@@ -42,12 +42,56 @@ describe('orphan object service', () => {
 		expect(deps.repository.markFailed).toHaveBeenCalledWith(2, expect.any(Error), now);
 	});
 
-	it('logs but does not fail the caller when persistence of a retry record fails', async () => {
+	it('logs and propagates persistence failure to the deletion caller', async () => {
 		const { deps } = createDependencies();
-		deps.repository.upsertOrphan.mockRejectedValue(new Error('database unavailable'));
+		const databaseError = new Error('database unavailable');
+		deps.repository.upsertOrphan.mockRejectedValue(databaseError);
 		const service = createOrphanService(deps);
 
-		await expect(service.recordOrphan('public', 'lost.png', 'rollback')).resolves.toBeUndefined();
-		expect(deps.logger.error).toHaveBeenCalledOnce();
+		await expect(service.recordOrphan('public', 'lost.png', 'rollback'))
+			.rejects.toBe(databaseError);
+		expect(deps.logger.error).toHaveBeenCalledWith(
+			{ err: databaseError, bucket: 'public', storageKey: 'lost.png', reason: 'rollback' },
+			'Failed to durably record orphan',
+		);
+	});
+
+	it('treats deletion of an already missing object as a resolved retry', async () => {
+		const { deps, now } = createDependencies();
+		deps.repository.findPendingOrphans.mockResolvedValue([
+			{ id: 9, bucket: 'public', storageKey: 'already-gone.png', attemptCount: 2 },
+		]);
+		deps.storage.delete.mockResolvedValue(undefined);
+		deps.repository.markResolved.mockResolvedValue(undefined);
+		const service = createOrphanService(deps);
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
+		expect(deps.repository.markResolved).toHaveBeenCalledWith(9, now);
+		expect(deps.repository.markFailed).not.toHaveBeenCalled();
+	});
+
+	it('re-enumerates a durable prefix row on every retry before resolving it', async () => {
+		const { deps, now } = createDependencies();
+		const listKeys = vi.fn().mockResolvedValue([
+			'webgl/7/build/site/index.html',
+			'webgl/7/build/site/main.js',
+		]);
+		deps.storage.delete.mockResolvedValue(undefined);
+		deps.repository.findPendingOrphans.mockResolvedValue([{
+			id: 12,
+			bucket: 'public',
+			storageKey: 'webgl/7/build/site/',
+			attemptCount: 1,
+		}]);
+		deps.repository.markResolved.mockResolvedValue(undefined);
+		const service = createOrphanService({
+			...deps,
+			storage: { ...deps.storage, listKeys },
+		});
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
+		expect(listKeys).toHaveBeenCalledWith('public', 'webgl/7/build/site/');
+		expect(deps.storage.delete).toHaveBeenCalledTimes(2);
+		expect(deps.repository.markResolved).toHaveBeenCalledWith(12, now);
 	});
 });

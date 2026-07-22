@@ -84,9 +84,9 @@ export async function completeSession(
 
 		if (s3Completed) {
 			if (isTerminalUploadFinalizationError(err)) {
-				await deps.repository.markFailed(session.id, storageKey).catch((markErr) => {
-					deps.logger.error({ err: markErr, sessionId: session.id }, 'Failed to mark invalid completed upload FAILED');
-				});
+				// Keep the session recoverable until deletion is either complete or
+				// durably queued. A queue outage must not strand a terminal row whose
+				// source object is absent from the orphan reaper.
 				await deps.deleteOrQueue(
 					storageKey,
 					session.uploadKind === 'WEBGL'
@@ -94,6 +94,9 @@ export async function completeSession(
 						: 'game-upload-completion-invalid',
 					{ sessionId: session.id },
 				);
+				await deps.repository.markFailed(session.id, storageKey).catch((markErr) => {
+					deps.logger.error({ err: markErr, sessionId: session.id }, 'Failed to mark invalid completed upload FAILED');
+				});
 			} else {
 				deps.logger.warn(
 					{ err, sessionId: session.id, storageKey },

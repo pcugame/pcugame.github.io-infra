@@ -1,8 +1,22 @@
 import { prisma } from '../../../lib/prisma.js';
 import { Prisma, type AssetKind, type AssetPlaybackStatus, type UploadKind } from '../../../generated/prisma/client.js';
 import { ActiveUploadCompletionInProgressError } from './ports.js';
+import { queueDurableDeletions } from '../../orphan/outbox.js';
+import { webglDeletionTargetsByEntry } from '../../webgl/deletion-targets.js';
 
 type TxClient = Prisma.TransactionClient;
+
+interface GameReplacementOutboxConfig {
+	bucket: string;
+	reason: string;
+	playbackReason: string;
+}
+
+interface WebglReplacementOutboxConfig {
+	publicBucket: string;
+	protectedBucket: string;
+	reason: string;
+}
 
 const sessionWithProjectAndParts = {
 	include: {
@@ -251,6 +265,7 @@ export function finalizeCompletedSession(
 		playbackError?: string;
 		isPublic: boolean;
 	},
+	outbox: GameReplacementOutboxConfig,
 ): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
 	return withSerializableRetry(async (tx) => {
 		const existing = await tx.asset.findFirst({
@@ -260,6 +275,20 @@ export function finalizeCompletedSession(
 
 		let result: { assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null };
 		if (existing) {
+			await queueDurableDeletions(tx, [
+				...(existing.storageKey !== data.storageKey
+					? [{ bucket: outbox.bucket, storageKey: existing.storageKey, reason: outbox.reason }]
+					: []),
+				...(existing.playbackStorageKey
+					&& existing.playbackStorageKey !== data.playbackStorageKey
+					&& existing.playbackStorageKey !== data.storageKey
+					? [{
+						bucket: outbox.bucket,
+						storageKey: existing.playbackStorageKey,
+						reason: outbox.playbackReason,
+					}]
+					: []),
+			]);
 			const updated = await tx.asset.update({
 				where: { id: existing.id },
 				data: {
@@ -322,12 +351,19 @@ export function finalizeCompletedWebglSession(
 	projectId: number,
 	entryKey: string,
 	sourceKey: string,
+	outbox: WebglReplacementOutboxConfig,
 ): Promise<{ oldEntryKey: string }> {
 	return withSerializableRetry(async (tx) => {
 		const project = await tx.project.findUniqueOrThrow({
 			where: { id: projectId },
 			select: { webglEntryKey: true },
 		});
+		await queueDurableDeletions(tx, webglDeletionTargetsByEntry(
+			projectId,
+			project.webglEntryKey === entryKey ? '' : project.webglEntryKey,
+			outbox,
+			outbox.reason,
+		));
 		await tx.project.update({
 			where: { id: projectId },
 			data: { webglEntryKey: entryKey },

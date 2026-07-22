@@ -100,9 +100,6 @@ export async function sweepStaleCompletingSessions(
 			} catch (err) {
 				if (isTerminalUploadFinalizationError(err)) {
 					deps.logger.error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Boot sweep: completed upload is invalid');
-					await deps.repository.markFailed(s.id, s.s3Key).catch((markErr) => {
-						deps.logger.error({ err: markErr, sessionId: s.id }, 'Boot sweep: failed to mark invalid COMPLETING session failed');
-					});
 					await deps.deleteOrQueue(
 						s.s3Key,
 						s.uploadKind === 'WEBGL'
@@ -110,6 +107,9 @@ export async function sweepStaleCompletingSessions(
 							: 'game-upload-sweep-invalid',
 						{ sessionId: s.id },
 					);
+					await deps.repository.markFailed(s.id, s.s3Key).catch((markErr) => {
+						deps.logger.error({ err: markErr, sessionId: s.id }, 'Boot sweep: failed to mark invalid COMPLETING session failed');
+					});
 				} else {
 					deps.logger.error(
 						{ err, sessionId: s.id, s3Key: s.s3Key },

@@ -12,6 +12,7 @@ export interface ProjectAssetServiceDependencies {
 	uploadCoordinator: SingleAssetUploadCoordinator;
 	assetUrl(storageKey: string, kind: AssetKind): string;
 	bucketForKind(kind: AssetKind): string;
+	/** Best-effort delete of an object already protected by the repository transaction's outbox. */
 	deleteOrQueue(
 		bucket: string,
 		key: string,
@@ -38,6 +39,7 @@ export async function addAssetToProject(
 	assertUploadAllowed(exhibition, exhibitionId, input.actor.role);
 	const limits = deps.uploadLimits(input.actor.role);
 	let upload: ProcessedUpload | null = null;
+	let uploadPersisted = false;
 
 	deps.uploadSlots.acquire();
 	try {
@@ -53,6 +55,7 @@ export async function addAssetToProject(
 		let oldPlaybackStorageKey: string | null = null;
 
 		if (isReplaceable) {
+			const bucket = deps.bucketForKind(savedFile.kind);
 			const result = await deps.repository.replaceOrCreateReplaceableAsset(projectId, savedFile.kind, {
 				storageKey: savedFile.storageKey,
 				playbackStorageKey: savedFile.playbackStorageKey ?? null,
@@ -64,10 +67,15 @@ export async function addAssetToProject(
 				playbackStatus: savedFile.playbackStatus,
 				playbackError: savedFile.playbackError,
 				isPublic: false,
+			}, {
+				bucket,
+				reason: 'project-asset-replace-previous',
+				playbackReason: 'project-asset-replace-previous-playback',
 			});
 			assetId = result.assetId;
 			oldStorageKey = result.oldStorageKey;
 			oldPlaybackStorageKey = result.oldPlaybackStorageKey;
+			uploadPersisted = true;
 		} else {
 			const asset = await deps.repository.createAsset({
 				projectId,
@@ -84,6 +92,7 @@ export async function addAssetToProject(
 				isPublic: savedFile.kind !== 'VIDEO',
 			});
 			assetId = asset.id;
+			uploadPersisted = true;
 		}
 
 		if (oldStorageKey) {
@@ -95,7 +104,7 @@ export async function addAssetToProject(
 
 		return { assetId, url: deps.assetUrl(savedFile.storageKey, savedFile.kind) };
 	} catch (err) {
-		if (upload) await upload.rollback();
+		if (upload && !uploadPersisted) await upload.rollback();
 		throw err;
 	} finally {
 		deps.uploadSlots.release();

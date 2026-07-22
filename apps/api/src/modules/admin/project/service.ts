@@ -12,6 +12,7 @@ type ProjectSerializer = ReturnType<typeof createProjectSerializer>['serializePr
 export interface ProjectServiceDependencies {
 	repository: ProjectCrudRepository;
 	serializeProjectDetail: ProjectSerializer;
+	deletionBuckets: { publicBucket: string; protectedBucket: string };
 	deleteAssetObjects(
 		asset: { id: number; projectId?: number; kind: AssetKind; storageKey: string; playbackStorageKey: string | null },
 		reason: string,
@@ -22,6 +23,7 @@ export interface ProjectServiceDependencies {
 		keys: NonNullable<ReturnType<typeof parseWebglSourceKey>>,
 		reason: string,
 	): Promise<void>;
+	deleteQueuedProtectedObject(key: string, reason: string, context: Record<string, unknown>): Promise<void>;
 	logger: { error(context: Record<string, unknown>, message: string): void };
 }
 
@@ -113,11 +115,15 @@ export async function updateProject(
 
 /** Delete a project and its associated asset files from S3 */
 export async function deleteProject(deps: ProjectServiceDependencies, projectId: number) {
-	const { assets, webglEntryKey, activeUploads } = await deps.repository.deleteProjectReturningAssets(projectId);
+	const reason = 'project-delete';
+	const { assets, webglEntryKey, activeUploads } = await deps.repository.deleteProjectReturningAssets(projectId, {
+		...deps.deletionBuckets,
+		reason,
+	});
 	await Promise.all(
-		assets.map((asset) => deps.deleteAssetObjects({ ...asset, projectId }, 'project-delete')),
+		assets.map((asset) => deps.deleteAssetObjects({ ...asset, projectId }, reason)),
 	);
-	await cleanupDeletedProjectWebgl(deps, projectId, webglEntryKey, activeUploads, 'project-delete');
+	await cleanupDeletedProjectWebgl(deps, projectId, webglEntryKey, activeUploads, reason);
 }
 
 async function cleanupDeletedProjectWebgl(
@@ -137,18 +143,27 @@ async function cleanupDeletedProjectWebgl(
 		if (session.uploadKind === 'WEBGL' && session.s3Key) {
 			const keys = parseWebglSourceKey(projectId, session.s3Key);
 			if (keys) await deps.deleteWebglDeployment(keys, `${reason}-active-upload`);
+		} else if (session.s3Key) {
+			await deps.deleteQueuedProtectedObject(session.s3Key, `${reason}-active-upload`, {
+				projectId,
+				uploadKind: session.uploadKind,
+			});
 		}
 	}));
 }
 
 export async function deleteWebgl(deps: ProjectServiceDependencies, projectId: number): Promise<void> {
-	const { oldEntryKey, cancelledSession } = await deps.repository.clearWebglDeployment(projectId);
+	const reason = 'webgl-delete';
+	const { oldEntryKey, cancelledSession } = await deps.repository.clearWebglDeployment(projectId, {
+		...deps.deletionBuckets,
+		reason,
+	});
 	await cleanupDeletedProjectWebgl(
 		deps,
 		projectId,
 		oldEntryKey,
 		cancelledSession ? [cancelledSession] : [],
-		'webgl-delete',
+		reason,
 	);
 }
 
@@ -164,18 +179,22 @@ export async function setPoster(deps: ProjectServiceDependencies, projectId: num
 
 /** Bulk delete projects: remove S3 objects + DB records. NAS originals are untouched. */
 export async function bulkDeleteProjects(deps: ProjectServiceDependencies, ids: number[]) {
-	const { result, assets, projects, activeUploads } = await deps.repository.bulkDeleteProjectsReturningAssets(ids);
+	const reason = 'project-bulk-delete';
+	const { result, assets, projects, activeUploads } = await deps.repository.bulkDeleteProjectsReturningAssets(ids, {
+		...deps.deletionBuckets,
+		reason,
+	});
 
-	// Failures go through safeDeleteObject — orphan reaper handles retry.
+	// The repository transaction already queued every target; these calls are best effort.
 	await Promise.all(
-		assets.map((a) => deps.deleteAssetObjects(a, 'project-bulk-delete')),
+		assets.map((a) => deps.deleteAssetObjects(a, reason)),
 	);
 	await Promise.all(projects.map((project) => cleanupDeletedProjectWebgl(
 		deps,
 		project.id,
 		project.webglEntryKey,
 		activeUploads.filter((session) => session.projectId === project.id),
-		'project-bulk-delete',
+		reason,
 	)));
 
 	return {

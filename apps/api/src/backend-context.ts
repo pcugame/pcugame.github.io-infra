@@ -42,8 +42,6 @@ import {
 	createExportProgressStore,
 	type ExportProgressStore,
 } from './modules/admin/export/service.js';
-import { createOrphanRepository } from './modules/orphan/repository.js';
-import { createOrphanService } from './modules/orphan/service.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -261,41 +259,57 @@ function owned<T>(value: T, close?: () => void | Promise<void>, start?: () => vo
 	return { value, ownership: 'owned', close: close ?? (() => {}), start };
 }
 
-function createMaintenanceSchedule(
+export function createMaintenanceSchedule(
 	scheduler: Scheduler,
 	clock: Clock,
 	maintenance: BackgroundMaintenance,
 	logger: AppLogger,
-): { start(): void; close(): void } {
+): { start(): void; close(): Promise<void> } {
 	const tasks: Array<{ cancel(): void }> = [];
+	const inFlight = new Set<Promise<void>>();
 	let started = false;
 	let closed = false;
+	let closePromise: Promise<void> | undefined;
+
+	async function runTracked(work: () => Promise<void>): Promise<void> {
+		const operation = work();
+		inFlight.add(operation);
+		try {
+			await operation;
+		} finally {
+			inFlight.delete(operation);
+		}
+	}
+
 	return {
 		start() {
 			if (started) return;
 			if (closed) throw new Error('Maintenance schedule is closed');
 			started = true;
-			tasks.push(scheduler.every(60 * 60 * 1000, async () => {
+			tasks.push(scheduler.every(60 * 60 * 1000, () => runTracked(async () => {
 				try {
 					const count = await maintenance.purgeExpiredSessions(clock.now());
 					if (count > 0) logger.info({ count }, 'Purged expired sessions');
 				} catch (error) {
 					logger.error(error, 'Failed to purge expired sessions');
 				}
-			}));
-			tasks.push(scheduler.every(10 * 60 * 1000, async () => {
+			})));
+			tasks.push(scheduler.every(10 * 60 * 1000, () => runTracked(async () => {
 				try {
 					await maintenance.reapOrphans();
 				} catch (error) {
 					logger.error(error, 'Orphan reaper iteration crashed');
 				}
-			}));
+			})));
 		},
 		close() {
-			if (closed) return;
-			closed = true;
-			for (const task of [...tasks].reverse()) task.cancel();
-			tasks.length = 0;
+			closePromise ??= (async () => {
+				closed = true;
+				for (const task of [...tasks].reverse()) task.cancel();
+				tasks.length = 0;
+				await Promise.allSettled([...inFlight]);
+			})();
+			return closePromise;
 		},
 	};
 }
@@ -371,15 +385,6 @@ export async function createProductionBackendContext(
 
 		const databaseHealth = createPrismaHealth(prisma);
 		const authSessions = createPrismaAuthSessions(prisma);
-		const orphanService = createOrphanService({
-			clock,
-			storage,
-			repository: createOrphanRepository(prisma),
-			logger: {
-				info: (context, message) => logger.info(context, message),
-				error: (context, message) => logger.error(context, message),
-			},
-		});
 		const maintenance: BackgroundMaintenance = {
 			async recoverStaleUploads() {
 				// Ticket 012 moves this remaining feature runtime into this graph.
@@ -393,6 +398,10 @@ export async function createProductionBackendContext(
 				return count;
 			},
 			async reapOrphans() {
+				// Routes still use the legacy singleton object-deletion coordinator. Until
+				// those route graphs migrate, the scheduled reaper must consume that exact
+				// coordinator's orphan repository rather than a context-local queue.
+				const { orphanService } = await import('./modules/orphan/runtime.js');
 				await orphanService.runOrphanReaper();
 			},
 		};

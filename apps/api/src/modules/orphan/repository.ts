@@ -1,6 +1,8 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
 
-export function createOrphanRepository(client: PrismaClient) {
+type OrphanRepositoryClient = Pick<PrismaClient, 'orphanObject'>;
+
+export function createOrphanRepository(client: OrphanRepositoryClient) {
 	return {
 		upsertOrphan(bucket: string, storageKey: string, reason: string) {
 			return client.orphanObject.upsert({

@@ -1,10 +1,10 @@
 import { env } from '../../../config/env.js';
 import { logger } from '../../../lib/logger.js';
 import { readObjectRange } from '../../../lib/storage.js';
-import { safeDeleteObject } from '../../../object-deletion.js';
+import { deleteDurablyQueuedObject } from '../../../object-deletion.js';
 import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
 import {
-	deleteWebglDeploymentByEntry,
+	deleteDurablyQueuedWebglDeploymentByEntry,
 	deployWebglSource,
 	rollbackWebglPublicDeployment,
 } from '../../webgl/deployment.js';
@@ -26,21 +26,30 @@ function getProductionFinalizer(): Finalizer {
 		},
 		deployWebgl: deployWebglSource,
 		rollbackWebglPublicDeployment,
-		deleteWebglDeploymentByEntry,
 		finalizeGame: (session) => repository.finalizeCompletedSession(session.id, session.projectId, 'GAME', {
 			storageKey: session.s3Key,
 			originalName: session.originalName,
 			mimeType: 'application/zip',
 			sizeBytes: session.totalBytes,
 			isPublic: false,
+		}, {
+			bucket: config.S3_BUCKET_PROTECTED,
+			reason: 'game-upload-replace-previous',
+			playbackReason: 'game-upload-replace-previous-playback',
 		}),
 		finalizeWebgl: (session, deployment) => repository.finalizeCompletedWebglSession(
 			session.id,
 			session.projectId,
 			deployment.entryKey,
 			session.s3Key,
+			{
+				publicBucket: config.S3_BUCKET_PUBLIC,
+				protectedBucket: config.S3_BUCKET_PROTECTED,
+				reason: 'webgl-upload-replace-previous',
+			},
 		),
-		deleteOrQueue: (key, reason, context) => safeDeleteObject(
+		deleteWebglDeploymentByEntry: deleteDurablyQueuedWebglDeploymentByEntry,
+		deleteOrQueue: (key, reason, context) => deleteDurablyQueuedObject(
 			config.S3_BUCKET_PROTECTED,
 			key,
 			reason,

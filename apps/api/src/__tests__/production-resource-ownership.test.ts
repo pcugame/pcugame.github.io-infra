@@ -6,6 +6,7 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import type { Env } from '../config/env.js';
 import type { AppLogger, FileSystem, ObjectStorage, Scheduler } from '../application/ports.js';
 import {
+	createMaintenanceSchedule,
 	createProductionBackendContext,
 	type BackendRoutes,
 	type ProductionResourceFactories,
@@ -110,6 +111,39 @@ function schedulerHarness() {
 }
 
 describe('production BackendContext resource ownership', () => {
+	it('waits for an in-flight orphan reaper before closing its maintenance schedule', async () => {
+		const harness = schedulerHarness();
+		let release!: () => void;
+		const barrier = new Promise<void>((resolve) => { release = resolve; });
+		let entered!: () => void;
+		const started = new Promise<void>((resolve) => { entered = resolve; });
+		const schedule = createMaintenanceSchedule(
+			harness.scheduler,
+			{ now: () => new Date(0) },
+			{
+				recoverStaleUploads: vi.fn(),
+				purgeExpiredSessions: vi.fn().mockResolvedValue(0),
+				reapOrphans: vi.fn(async () => {
+					entered();
+					await barrier;
+				}),
+			},
+			testLogger,
+		);
+
+		schedule.start();
+		const running = Promise.resolve(harness.tasks[1]!.task());
+		await started;
+		let closed = false;
+		const closing = schedule.close().then(() => { closed = true; });
+		await Promise.resolve();
+		expect(closed).toBe(false);
+		expect(harness.tasks.every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
+		release();
+		await Promise.all([running, closing]);
+		expect(closed).toBe(true);
+	});
+
 	it('creates isolated stateful resources and closes only A-owned resources once', async () => {
 		const events: string[] = [];
 		const aScheduler = schedulerHarness();

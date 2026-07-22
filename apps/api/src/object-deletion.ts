@@ -16,3 +16,5 @@ const coordinator = createObjectDeletionCoordinator({
 
 export const safeDeleteObject = coordinator.deleteOrQueue;
 export const safeDeletePrefix = coordinator.deletePrefixOrQueue;
+export const deleteDurablyQueuedObject = coordinator.deleteDurablyQueued;
+export const deleteDurablyQueuedPrefix = coordinator.deleteDurablyQueuedPrefix;

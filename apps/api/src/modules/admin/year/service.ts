@@ -12,6 +12,7 @@ export interface ExhibitionServiceDependencies {
 	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits;
 	uploadSlots: { acquire(): void; release(): void };
 	posterUpload: PosterUploadCoordinator;
+	/** Best-effort delete of an object already protected by the repository transaction's outbox. */
 	deleteOrQueue(
 		bucket: string,
 		key: string,
@@ -61,7 +62,10 @@ export async function deleteExhibition(deps: ExhibitionServiceDependencies, id: 
 	const exhibition = await deps.repository.findExhibitionByIdWithCount(id);
 	if (!exhibition) throw notFound('Exhibition not found');
 
-	await deps.repository.deleteExhibition(id);
+	await deps.repository.deleteExhibition(id, {
+		bucket: deps.posterBucket,
+		reason: 'exhibition-delete-poster',
+	});
 
 	if (exhibition.posterStorageKey) {
 		await deps.deleteOrQueue(
@@ -103,6 +107,7 @@ export async function replacePoster(
 
 	const limits = deps.uploadLimits(input.actor.role);
 	let upload: ProcessedUpload | null = null;
+	let uploadPersisted = false;
 
 	deps.uploadSlots.acquire();
 	try {
@@ -113,8 +118,12 @@ export async function replacePoster(
 			originalName: savedFile.originalName,
 			mimeType: savedFile.mimeType,
 			sizeBytes: BigInt(savedFile.sizeBytes),
+		}, {
+			bucket: deps.posterBucket,
+			reason: 'exhibition-poster-replace-previous',
 		});
 		if (!result) throw notFound('Exhibition not found');
+		uploadPersisted = true;
 
 		if (result.oldStorageKey && result.oldStorageKey !== savedFile.storageKey) {
 			await deps.deleteOrQueue(
@@ -127,7 +136,7 @@ export async function replacePoster(
 
 		return serializeExhibition(deps, result.updated);
 	} catch (err) {
-		if (upload) await upload.rollback();
+		if (upload && !uploadPersisted) await upload.rollback();
 		throw err;
 	} finally {
 		deps.uploadSlots.release();
@@ -136,7 +145,10 @@ export async function replacePoster(
 }
 
 export async function deletePoster(deps: ExhibitionServiceDependencies, id: number): Promise<void> {
-	const result = await deps.repository.clearExhibitionPoster(id);
+	const result = await deps.repository.clearExhibitionPoster(id, {
+		bucket: deps.posterBucket,
+		reason: 'exhibition-poster-delete',
+	});
 	if (!result) throw notFound('Exhibition not found');
 
 	if (result.oldStorageKey) {

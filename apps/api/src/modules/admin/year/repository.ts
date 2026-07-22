@@ -1,4 +1,10 @@
 import { prisma } from '../../../lib/prisma.js';
+import { queueDurableDeletions } from '../../orphan/outbox.js';
+
+interface PosterDeletionOutboxConfig {
+	bucket: string;
+	reason: string;
+}
 
 /** @returns All exhibitions ordered by sortOrder asc, year desc, with project counts */
 export function findAllExhibitions() {
@@ -34,8 +40,22 @@ export function createExhibition(data: { year: number; title?: string; isUploadE
 }
 
 /** Delete an Exhibition by primary key (cascades via DB FK) */
-export function deleteExhibition(id: number) {
-	return prisma.exhibition.delete({ where: { id } });
+export function deleteExhibition(id: number, outbox: PosterDeletionOutboxConfig) {
+	return prisma.$transaction(async (tx) => {
+		const existing = await tx.exhibition.findUniqueOrThrow({
+			where: { id },
+			select: { posterStorageKey: true },
+		});
+		if (existing.posterStorageKey) {
+			await queueDurableDeletions(tx, [{
+				bucket: outbox.bucket,
+				storageKey: existing.posterStorageKey,
+				reason: outbox.reason,
+			}]);
+		}
+		await tx.exhibition.delete({ where: { id } });
+		return existing;
+	});
 }
 
 /** Partial-update an Exhibition and return the updated record with project count */
@@ -59,6 +79,7 @@ export async function replaceExhibitionPoster(
 		mimeType: string;
 		sizeBytes: bigint;
 	},
+	outbox: PosterDeletionOutboxConfig,
 ) {
 	return prisma.$transaction(async (tx) => {
 		const existing = await tx.exhibition.findUnique({
@@ -67,6 +88,13 @@ export async function replaceExhibitionPoster(
 		});
 
 		if (!existing) return null;
+		if (existing.posterStorageKey && existing.posterStorageKey !== data.storageKey) {
+			await queueDurableDeletions(tx, [{
+				bucket: outbox.bucket,
+				storageKey: existing.posterStorageKey,
+				reason: outbox.reason,
+			}]);
+		}
 
 		const updated = await tx.exhibition.update({
 			where: { id },
@@ -84,7 +112,7 @@ export async function replaceExhibitionPoster(
 }
 
 /** Clear poster metadata from an exhibition and return the removed key. */
-export async function clearExhibitionPoster(id: number) {
+export async function clearExhibitionPoster(id: number, outbox: PosterDeletionOutboxConfig) {
 	return prisma.$transaction(async (tx) => {
 		const existing = await tx.exhibition.findUnique({
 			where: { id },
@@ -92,6 +120,13 @@ export async function clearExhibitionPoster(id: number) {
 		});
 
 		if (!existing) return null;
+		if (existing.posterStorageKey) {
+			await queueDurableDeletions(tx, [{
+				bucket: outbox.bucket,
+				storageKey: existing.posterStorageKey,
+				reason: outbox.reason,
+			}]);
+		}
 
 		const updated = await tx.exhibition.update({
 			where: { id },
