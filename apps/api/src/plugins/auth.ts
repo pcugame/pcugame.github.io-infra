@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import type { Env } from '../config/env.js';
-import { unauthorized, forbidden } from '../shared/errors.js';
+import { AppError, unauthorized, forbidden } from '../shared/errors.js';
 import { cookieExpiresAt, isIdleExpired } from '../shared/session.js';
 import { extractStudentIdFromEmail } from '../modules/auth/student-id.js';
 import type { UserRole } from '@pcu/contracts';
@@ -21,16 +20,25 @@ declare module 'fastify' {
 }
 
 export interface AuthPluginOptions {
-	config: Env;
+	config: AuthPluginConfig;
 	clock: Clock;
 	sessions: AuthSessionStore;
 	logger: AppLogger;
 }
 
+export interface AuthPluginConfig {
+	SESSION_COOKIE_NAME: string;
+	SESSION_IDLE_MS: number;
+	SESSION_TOUCH_MIN_INTERVAL_MS: number;
+	COOKIE_SECURE: boolean;
+	COOKIE_SAME_SITE: 'strict' | 'lax' | 'none';
+	CORS_ALLOWED_ORIGINS: readonly string[];
+}
+
 async function resolveSession(
 	request: FastifyRequest,
 	reply: FastifyReply,
-	cfg: Env,
+	cfg: AuthPluginConfig,
 	clock: Clock,
 	sessions: AuthSessionStore,
 	appLogger: AppLogger,
@@ -44,7 +52,18 @@ async function resolveSession(
   // session cookie unless the browser request came from the configured web UI.
   if (!isAllowedSessionSource(request.headers, allowedOrigins)) return;
 
-	const session = await sessions.find(sid);
+	let session;
+	try {
+		session = await sessions.find(sid);
+	} catch (error) {
+		// Adapter errors can carry query parameters, including the opaque session
+		// credential. Never pass the raw error into request/global logging.
+		appLogger.error(
+			{ errorType: error instanceof Error ? error.name : 'unknown' },
+			'Failed to resolve authentication session',
+		);
+		throw new AppError(500, 'Internal server error', 'INTERNAL_ERROR');
+	}
 
   if (!session) return;
 

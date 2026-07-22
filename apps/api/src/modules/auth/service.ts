@@ -1,6 +1,6 @@
 import type { UserRole } from '@pcu/contracts';
-import type { Clock, GoogleTokenVerifier } from '../../application/ports.js';
-import { API_ERROR_CODES, forbidden, unauthorized } from '../../shared/errors.js';
+import type { Clock, GoogleTokenVerifier, IdGenerator } from '../../application/ports.js';
+import { API_ERROR_CODES, AppError, forbidden, unauthorized } from '../../shared/errors.js';
 import { extractStudentIdFromEmail } from './student-id.js';
 
 export interface AuthUserRecord {
@@ -27,7 +27,7 @@ export interface AuthRepository {
 		studentId?: string | null;
 	}): Promise<AuthUserRecord>;
 	createSession(data: { id: string; userId: number; expiresAt: Date }): Promise<unknown>;
-	deleteSession(id: string): Promise<unknown>;
+	delete(id: string): Promise<unknown>;
 }
 
 export interface AuthServiceLogger {
@@ -71,17 +71,27 @@ export function createAuthService(deps: {
 	repository: AuthRepository;
 	googleTokens: GoogleTokenVerifier;
 	clock: Clock;
-	generateSessionId: () => string;
+	ids: IdGenerator;
 	sessionAbsoluteMs: number;
 	googleClientIds: string[];
 	allowedGoogleHostedDomain: string;
 	logger: AuthServiceLogger;
 }) {
 	async function createSessionForUser(userId: number) {
-		const sessionId = deps.generateSessionId();
+		const sessionId = deps.ids.next();
 		const expiresAt = new Date(deps.clock.now().getTime() + deps.sessionAbsoluteMs);
 		await deps.repository.createSession({ id: sessionId, userId, expiresAt });
 		return { sessionId, expiresAt };
+	}
+
+	function persistenceFailure(error: unknown): AppError {
+		// Repository errors can include bound values. Log only a coarse error type;
+		// the HTTP error deliberately retains the existing generic 500 envelope.
+		deps.logger.error(
+			{ errorType: error instanceof Error ? error.name : 'unknown' },
+			'Authentication persistence failed',
+		);
+		return new AppError(500, 'Internal server error', 'INTERNAL_ERROR');
 	}
 
 	return {
@@ -118,25 +128,33 @@ export function createAuthService(deps: {
 				throw forbidden('Email domain not allowed', API_ERROR_CODES.EMAIL_DOMAIN_NOT_ALLOWED);
 			}
 
-			const user = await deps.repository.upsertUserByGoogleSub({
-				googleSub: payload.sub,
-				email: payload.email,
-				name: stripDeptSuffix(payload.name ?? ''),
-				picture: payload.picture ?? '',
-				studentId: extractStudentIdFromEmail(payload.email),
-			});
-			return { user, ...(await createSessionForUser(user.id)) };
+			try {
+				const user = await deps.repository.upsertUserByGoogleSub({
+					googleSub: payload.sub,
+					email: payload.email,
+					name: stripDeptSuffix(payload.name ?? ''),
+					picture: payload.picture ?? '',
+					studentId: extractStudentIdFromEmail(payload.email),
+				});
+				return { user, ...(await createSessionForUser(user.id)) };
+			} catch (error) {
+				throw persistenceFailure(error);
+			}
 		},
 
 		async loginForDevRole(role: UserRole) {
-			const profile = DEV_AUTH_USERS[role];
-			const user = await deps.repository.upsertDevUser({ ...profile, role });
-			return { user, ...(await createSessionForUser(user.id)) };
+			try {
+				const profile = DEV_AUTH_USERS[role];
+				const user = await deps.repository.upsertDevUser({ ...profile, role });
+				return { user, ...(await createSessionForUser(user.id)) };
+			} catch (error) {
+				throw persistenceFailure(error);
+			}
 		},
 
 		async logout(sessionId: string | undefined): Promise<void> {
 			if (sessionId) {
-				await deps.repository.deleteSession(sessionId).catch((err) => {
+				await deps.repository.delete(sessionId).catch((err) => {
 					deps.logger.warn(
 						{ errorType: err instanceof Error ? err.name : 'unknown' },
 						'Failed to delete logout session',
@@ -146,3 +164,5 @@ export function createAuthService(deps: {
 		},
 	};
 }
+
+export type AuthService = ReturnType<typeof createAuthService>;

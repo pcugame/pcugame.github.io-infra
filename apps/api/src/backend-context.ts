@@ -23,7 +23,6 @@ import {
 	createLifecyclePort,
 	createNodeFileSystem,
 	createNodeScheduler,
-	createPrismaAuthSessions,
 	createPrismaHealth,
 	createPrismaSettingsStore,
 	createProcessUploadLimiter,
@@ -43,6 +42,10 @@ import {
 	createAssetsBannedProductionGraph,
 	type AssetsBannedProductionGraph,
 } from './modules/assets/composition.js';
+import {
+	createAuthProductionGraph,
+	type AuthProductionGraph,
+} from './modules/auth/composition.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -182,7 +185,11 @@ export interface ProductionResourceFactories {
 	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
 	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
 	exportProgress(config: Env): MaybePromise<ExportProgressStore>;
-	routes(config: Env, assetsBanned: AssetsBannedProductionGraph): MaybePromise<BackendRoutes>;
+	routes(
+		config: Env,
+		assetsBanned: AssetsBannedProductionGraph,
+		auth: AuthProductionGraph,
+	): MaybePromise<BackendRoutes>;
 }
 
 export interface ProductionResourceOverrides {
@@ -240,17 +247,16 @@ const defaultFactories: ProductionResourceFactories = {
 async function loadProductionRoutes(
 	_config: Env,
 	assetsBanned: AssetsBannedProductionGraph,
+	auth: AuthProductionGraph,
 ): Promise<BackendRoutes> {
-	const [auth, devAuth, publicRoutes, admin, me] = await Promise.all([
-		import('./modules/auth/index.js'),
-		import('./modules/dev-auth/controller.js'),
+	const [publicRoutes, admin, me] = await Promise.all([
 		import('./modules/public/index.js'),
 		import('./modules/admin/admin.routes.js'),
 		import('./modules/me/me.routes.js'),
 	]);
 	return {
 		auth: auth.authController,
-		devAuth: devAuth.devAuthController,
+		devAuth: auth.devAuthController,
 		public: publicRoutes.publicController,
 		admin: admin.createAdminRoutes({ bannedIpController: assetsBanned.bannedIpController }),
 		me: me.meRoutes,
@@ -405,7 +411,15 @@ export async function createProductionBackendContext(
 		}
 
 		const databaseHealth = createPrismaHealth(prisma);
-		const authSessions = createPrismaAuthSessions(prisma);
+		const auth = createAuthProductionGraph({
+			config,
+			prisma,
+			googleTokens,
+			clock,
+			ids,
+			logger,
+		});
+		const authSessions = auth.repository;
 		const maintenance: BackgroundMaintenance = {
 			async recoverStaleUploads() {
 				// Ticket 012 moves this remaining feature runtime into this graph.
@@ -432,7 +446,7 @@ export async function createProductionBackendContext(
 			() => maintenanceSchedule.close(),
 			() => maintenanceSchedule.start(),
 		));
-		const routes = options.routes ?? await factories.routes(config, assetsBanned!);
+		const routes = options.routes ?? await factories.routes(config, assetsBanned!, auth);
 
 		return {
 			config,
