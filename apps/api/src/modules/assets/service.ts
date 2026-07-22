@@ -31,13 +31,20 @@ interface ProtectedAssetStreamRecord extends ProtectedAssetAccessRecord {
 	};
 }
 
-interface AssetDeletionRecord {
+interface AssetDeletionLookup {
+	id: number;
+	projectId: number;
+	project: { posterAssetId: number | null };
+}
+
+interface AssetDeletionClaim {
 	id: number;
 	projectId: number;
 	kind: AssetKind;
+	previousStatus: 'READY' | 'DELETING' | 'DELETED' | 'FAILED';
 	storageKey: string;
 	playbackStorageKey: string | null;
-	project: { posterAssetId: number | null };
+	alreadyDeleted: boolean;
 }
 
 export interface AssetsServiceDependencies {
@@ -67,10 +74,9 @@ export interface AssetsServiceDependencies {
 		findPublicAsset(key: string): Promise<unknown | null>;
 		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
 		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
-		findAssetByIdWithProject(id: number): Promise<AssetDeletionRecord | null>;
-		markAssetDeleting(id: number): Promise<unknown>;
-		clearPosterIfMatches(projectId: number, assetId: number): Promise<unknown>;
-		markAssetDeleted(id: number): Promise<unknown>;
+		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
+		claimAssetForDeletion(id: number): Promise<AssetDeletionClaim | null>;
+		completeAssetDeletion(claim: AssetDeletionClaim): Promise<void>;
 	};
 }
 
@@ -199,17 +205,19 @@ export async function streamProtectedAsset(
 	return { status: 302, headers: { 'Referrer-Policy': 'no-referrer' }, location: url };
 }
 
-/** Delete an asset: mark status, remove from S3, clear poster ref, mark deleted */
+/** Delete an asset using a locked DB identity claim around storage I/O. */
 export async function deleteAsset(
 	deps: AssetsServiceDependencies,
 	assetId: number,
 	actor: Actor,
 ) {
-	const asset = await deps.repository.findAssetByIdWithProject(assetId);
-	if (!asset) throw notFound('Asset not found');
-	await deps.loadProjectWithAccess(actor, asset.projectId);
+	const lookup = await deps.repository.findAssetByIdWithProject(assetId);
+	if (!lookup) throw notFound('Asset not found');
+	await deps.loadProjectWithAccess(actor, lookup.projectId);
 
-	await deps.repository.markAssetDeleting(asset.id);
+	const asset = await deps.repository.claimAssetForDeletion(assetId);
+	if (!asset) throw notFound('Asset not found');
+	if (asset.alreadyDeleted) return { projectId: asset.projectId };
 
 	const bucket = deps.bucketForKind(asset.kind);
 	await deps.deleteOrQueue(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id });
@@ -217,11 +225,7 @@ export async function deleteAsset(
 		await deps.deleteOrQueue(bucket, asset.playbackStorageKey, 'asset-delete-playback', { assetId: asset.id });
 	}
 
-	if (asset.project.posterAssetId === asset.id) {
-		await deps.repository.clearPosterIfMatches(asset.projectId, asset.id);
-	}
-
-	await deps.repository.markAssetDeleted(asset.id);
+	await deps.repository.completeAssetDeletion(asset);
 
 	return { projectId: asset.projectId };
 }

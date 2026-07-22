@@ -27,9 +27,8 @@ const assetsService = createAssetsService({
 		findAssetByStorageKey: mocks.findAssetByStorageKey,
 		upsertBannedIp: mocks.upsertBannedIp,
 		findAssetByIdWithProject: vi.fn(),
-		markAssetDeleting: vi.fn(),
-		markAssetDeleted: vi.fn(),
-		clearPosterIfMatches: vi.fn(),
+		claimAssetForDeletion: vi.fn(),
+		completeAssetDeletion: vi.fn(),
 	},
 });
 const { streamProtectedAsset, streamPublicAsset } = assetsService;

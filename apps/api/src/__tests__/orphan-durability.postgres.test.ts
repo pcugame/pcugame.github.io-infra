@@ -293,7 +293,9 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		}, { size: 4 })).resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
 		await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))
 			.resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
-		await expect(client.asset.findFirstOrThrow({ where: { projectId: project.id, kind: 'GAME' } }))
+		await expect(client.asset.findFirstOrThrow({
+			where: { projectId: project.id, kind: 'GAME', status: 'READY' },
+		}))
 			.resolves.toMatchObject({ storageKey: newKey });
 		await expect(client.orphanObject.count({ where: { bucket: protectedBucket, storageKey: oldKey } }))
 			.resolves.toBe(1);

@@ -11,14 +11,18 @@ function assetDeletionHarness() {
 		findAssetByIdWithProject: vi.fn().mockResolvedValue({
 			id: 41,
 			projectId: 7,
-			kind: 'GAME' as const,
-			storageKey: 'games/current.zip',
-			playbackStorageKey: 'games/current-playback.mp4',
 			project: { posterAssetId: 41 },
 		}),
-		markAssetDeleting: vi.fn().mockResolvedValue(undefined),
-		clearPosterIfMatches: vi.fn().mockResolvedValue(undefined),
-		markAssetDeleted: vi.fn().mockResolvedValue(undefined),
+		claimAssetForDeletion: vi.fn().mockResolvedValue({
+			id: 41,
+			projectId: 7,
+			kind: 'GAME' as const,
+			previousStatus: 'READY' as const,
+			storageKey: 'games/current.zip',
+			playbackStorageKey: 'games/current-playback.mp4',
+			alreadyDeleted: false,
+		}),
+		completeAssetDeletion: vi.fn().mockResolvedValue(undefined),
 	};
 	const deleteOrQueue = vi.fn().mockResolvedValue(undefined);
 	const deps = {
@@ -41,13 +45,9 @@ function assetDeletionHarness() {
 describe('durable object deletion callers', () => {
 	it('lets the caller finish after storage deletion without touching the queue', async () => {
 		const { deps, repository } = assetDeletionHarness();
-		repository.findAssetByIdWithProject.mockResolvedValueOnce({
-			id: 41,
-			projectId: 7,
-			kind: 'GAME',
-			storageKey: 'games/current.zip',
-			playbackStorageKey: null,
-			project: { posterAssetId: null },
+		repository.claimAssetForDeletion.mockResolvedValueOnce({
+			id: 41, projectId: 7, kind: 'GAME', previousStatus: 'READY',
+			storageKey: 'games/current.zip', playbackStorageKey: null, alreadyDeleted: false,
 		});
 		const record = vi.fn().mockRejectedValue(new Error('queue must not be used'));
 		const coordinator = createObjectDeletionCoordinator({
@@ -62,18 +62,14 @@ describe('durable object deletion callers', () => {
 			{ id: 1, role: 'ADMIN' },
 		)).resolves.toEqual({ projectId: 7 });
 		expect(record).not.toHaveBeenCalled();
-		expect(repository.markAssetDeleted).toHaveBeenCalledWith(41);
+		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
 	});
 
 	it('lets the caller finish with a durable orphan after storage deletion fails', async () => {
 		const { deps, repository } = assetDeletionHarness();
-		repository.findAssetByIdWithProject.mockResolvedValueOnce({
-			id: 41,
-			projectId: 7,
-			kind: 'GAME',
-			storageKey: 'games/current.zip',
-			playbackStorageKey: null,
-			project: { posterAssetId: null },
+		repository.claimAssetForDeletion.mockResolvedValueOnce({
+			id: 41, projectId: 7, kind: 'GAME', previousStatus: 'READY',
+			storageKey: 'games/current.zip', playbackStorageKey: null, alreadyDeleted: false,
 		});
 		const record = vi.fn().mockResolvedValue(undefined);
 		const coordinator = createObjectDeletionCoordinator({
@@ -91,7 +87,7 @@ describe('durable object deletion callers', () => {
 			{ id: 1, role: 'ADMIN' },
 		)).resolves.toEqual({ projectId: 7 });
 		expect(record).toHaveBeenCalledWith('protected', 'games/current.zip', 'asset-delete');
-		expect(repository.markAssetDeleted).toHaveBeenCalledWith(41);
+		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
 	});
 
 	it('marks an asset deleted only after every object is deleted or durably queued', async () => {
@@ -100,10 +96,10 @@ describe('durable object deletion callers', () => {
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
 			.resolves.toEqual({ projectId: 7 });
 		expect(deleteOrQueue).toHaveBeenCalledTimes(2);
-		expect(repository.markAssetDeleting.mock.invocationCallOrder[0])
+		expect(repository.claimAssetForDeletion.mock.invocationCallOrder[0])
 			.toBeLessThan(deleteOrQueue.mock.invocationCallOrder[0]!);
 		expect(deleteOrQueue.mock.invocationCallOrder[1])
-			.toBeLessThan(repository.markAssetDeleted.mock.invocationCallOrder[0]!);
+			.toBeLessThan(repository.completeAssetDeletion.mock.invocationCallOrder[0]!);
 	});
 
 	it('leaves an asset non-terminal when storage deletion and orphan queueing both fail', async () => {
@@ -112,8 +108,7 @@ describe('durable object deletion callers', () => {
 
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
 			.rejects.toThrow('storage and orphan queue unavailable');
-		expect(repository.markAssetDeleting).toHaveBeenCalledWith(41);
-		expect(repository.clearPosterIfMatches).not.toHaveBeenCalled();
-		expect(repository.markAssetDeleted).not.toHaveBeenCalled();
+		expect(repository.claimAssetForDeletion).toHaveBeenCalledWith(41);
+		expect(repository.completeAssetDeletion).not.toHaveBeenCalled();
 	});
 });

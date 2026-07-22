@@ -3,6 +3,10 @@ import { Prisma, type AssetKind, type AssetPlaybackStatus, type UploadKind } fro
 import { ActiveUploadCompletionInProgressError } from './ports.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
 import { webglDeletionTargetsByEntry } from '../../webgl/deletion-targets.js';
+import {
+	ASSET_MUTATION_TRANSACTION_POLICY,
+	withAssetMutationTransaction,
+} from '../../assets/mutation-transaction.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -267,11 +271,32 @@ export function finalizeCompletedSession(
 	},
 	outbox: GameReplacementOutboxConfig,
 ): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
-	return withSerializableRetry(async (tx) => {
-		const existing = await tx.asset.findFirst({
-			where: { projectId, kind, status: 'READY' },
-			select: { id: true, storageKey: true, playbackStorageKey: true },
-		});
+	return withAssetMutationTransaction(prisma, async (tx) => {
+		const projects = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+			SELECT "id"
+			FROM "projects"
+			WHERE "id" = ${projectId}
+			FOR UPDATE
+		`);
+		if (projects.length === 0) throw new Error('Project no longer exists');
+		const existingRows = await tx.$queryRaw<Array<{
+			id: number;
+			storageKey: string;
+			playbackStorageKey: string | null;
+		}>>(Prisma.sql`
+			SELECT
+				"id",
+				"storage_key" AS "storageKey",
+				"playback_storage_key" AS "playbackStorageKey"
+			FROM "assets"
+			WHERE "project_id" = ${projectId}
+				AND "kind" = CAST(${kind} AS "AssetKind")
+				AND "status" = 'READY'
+			ORDER BY "id"
+			LIMIT 1
+			FOR UPDATE
+		`);
+		const existing = existingRows[0] ?? null;
 
 		let result: { assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null };
 		if (existing) {
@@ -289,9 +314,19 @@ export function finalizeCompletedSession(
 					}]
 					: []),
 			]);
-			const updated = await tx.asset.update({
+			await tx.project.updateMany({
+				where: { id: projectId, posterAssetId: existing.id },
+				data: { posterAssetId: null },
+			});
+			await tx.asset.update({
 				where: { id: existing.id },
+				data: { status: 'DELETED' },
+				select: { id: true },
+			});
+			const created = await tx.asset.create({
 				data: {
+					projectId,
+					kind,
 					storageKey: data.storageKey,
 					playbackStorageKey: data.playbackStorageKey ?? null,
 					originalName: data.originalName,
@@ -306,7 +341,7 @@ export function finalizeCompletedSession(
 				select: { id: true },
 			});
 			result = {
-				assetId: updated.id,
+				assetId: created.id,
 				oldStorageKey: existing.storageKey,
 				oldPlaybackStorageKey: existing.playbackStorageKey,
 			};
@@ -343,7 +378,7 @@ export function finalizeCompletedSession(
 		});
 
 		return result;
-	});
+	}, ASSET_MUTATION_TRANSACTION_POLICY);
 }
 
 export function finalizeCompletedWebglSession(
