@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '../generated/prisma/client.js';
+import {
+	EXHIBITION_MUTATION_TRANSACTION_POLICY,
+	withExhibitionMutationTransaction,
+} from '../modules/admin/year/repository.js';
 import { createExhibitionService } from '../modules/admin/year/service.js';
 
 const mocks = {
@@ -155,7 +160,7 @@ describe('admin exhibition service', () => {
 
 	it('throws 404 when updating or deleting a missing exhibition', async () => {
 		mocks.findExhibitionById.mockResolvedValue(null);
-		mocks.findExhibitionByIdWithCount.mockResolvedValue(null);
+		mocks.deleteExhibition.mockResolvedValue(null);
 
 		await expect(updateExhibition(404, { title: 'Missing' })).rejects.toMatchObject({
 			statusCode: 404,
@@ -166,10 +171,9 @@ describe('admin exhibition service', () => {
 	});
 
 	it('deletes the DB row and durably deletes an existing poster object', async () => {
-		mocks.findExhibitionByIdWithCount.mockResolvedValue(exhibition({
+		mocks.deleteExhibition.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
 		}));
-		mocks.deleteExhibition.mockResolvedValue({});
 
 		await deleteExhibition(1);
 
@@ -186,10 +190,9 @@ describe('admin exhibition service', () => {
 	});
 
 	it('propagates poster deletion when neither storage nor the orphan queue is available', async () => {
-		mocks.findExhibitionByIdWithCount.mockResolvedValue(exhibition({
+		mocks.deleteExhibition.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
 		}));
-		mocks.deleteExhibition.mockResolvedValue({});
 		mocks.safeDeleteObject.mockRejectedValue(new Error('durable deletion unavailable'));
 
 		await expect(deleteExhibition(1)).rejects.toThrow('durable deletion unavailable');
@@ -223,6 +226,32 @@ describe('admin exhibition service', () => {
 		expect(cleanup).toHaveBeenCalledOnce();
 	});
 
+	it('rolls back exactly one uploaded object when the pointer transaction fails', async () => {
+		const rollback = vi.fn();
+		const cleanup = vi.fn();
+		mocks.findExhibitionById.mockResolvedValue(exhibition());
+		mocks.posterUploadStart.mockResolvedValue({
+			savedFile: {
+				storageKey: 'unpersisted.webp',
+				mimeType: 'image/webp',
+				sizeBytes: 123,
+				originalName: 'poster.webp',
+				kind: 'POSTER',
+			},
+			rollback,
+			cleanup,
+		});
+		mocks.replaceExhibitionPoster.mockRejectedValue(new Error('serialization exhausted'));
+
+		await expect(replacePoster(1, {
+			actor: { id: 1, role: 'ADMIN' },
+			parts: (async function* () {})(),
+		})).rejects.toThrow('serialization exhausted');
+		expect(mocks.posterUploadStart).toHaveBeenCalledOnce();
+		expect(rollback).toHaveBeenCalledOnce();
+		expect(cleanup).toHaveBeenCalledOnce();
+	});
+
 	it('clears poster metadata and deletes the old poster object', async () => {
 		mocks.clearExhibitionPoster.mockResolvedValue({
 			updated: exhibition(),
@@ -244,6 +273,29 @@ describe('admin exhibition service', () => {
 
 		await expect(deletePoster(404)).rejects.toMatchObject({
 			statusCode: 404,
+		});
+	});
+
+	it('retries only a bounded Serializable write conflict', async () => {
+		const transaction = vi.fn()
+			.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('write conflict', {
+				code: 'P2034',
+				clientVersion: 'test',
+			}))
+			.mockImplementationOnce(async (operation: (tx: object) => Promise<string>) => operation({}));
+		const operation = vi.fn(async () => 'committed');
+		const retries = vi.fn();
+
+		await expect(withExhibitionMutationTransaction(
+			{ $transaction: transaction } as never,
+			operation as never,
+			{ ...EXHIBITION_MUTATION_TRANSACTION_POLICY, onRetry: retries },
+		)).resolves.toBe('committed');
+		expect(transaction).toHaveBeenCalledTimes(2);
+		expect(operation).toHaveBeenCalledOnce();
+		expect(retries).toHaveBeenCalledOnce();
+		expect(transaction.mock.calls[0]?.[1]).toEqual({
+			isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
 		});
 	});
 });

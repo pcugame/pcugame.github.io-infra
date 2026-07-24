@@ -10,7 +10,7 @@ import { createCompletedUploadFinalizer } from '../modules/admin/game-upload/fin
 import * as gameUploadRepository from '../modules/admin/game-upload/repository.js';
 import * as projectRepository from '../modules/admin/project/repository.js';
 import { createProjectService } from '../modules/admin/project/service.js';
-import * as exhibitionRepository from '../modules/admin/year/repository.js';
+import { createExhibitionRepository } from '../modules/admin/year/repository.js';
 import { createExhibitionService } from '../modules/admin/year/service.js';
 import { createOrphanRepository } from '../modules/orphan/repository.js';
 import { createOrphanService } from '../modules/orphan/service.js';
@@ -449,7 +449,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		const service = createExhibitionService({
 			apiPublicUrl: 'https://api.example.test',
 			posterBucket: publicBucket,
-			repository: exhibitionRepository,
+			repository: createExhibitionRepository(client),
 			uploadLimits: () => ({
 				posterMaxBytes: 1024,
 				imageMaxBytes: 1024,

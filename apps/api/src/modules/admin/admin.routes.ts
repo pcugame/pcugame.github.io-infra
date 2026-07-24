@@ -5,9 +5,9 @@ export interface AdminRouteDependencies {
 	memberController: FastifyPluginAsync;
 	settingsController: FastifyPluginAsync;
 	bannedIpController: FastifyPluginAsync;
+	exhibitionController: FastifyPluginAsync;
 	/** Legacy route families expire in their numbered wiring tickets. */
 	legacy: {
-		exhibitionController: FastifyPluginAsync;
 		projectMultipartController: FastifyPluginAsync;
 		gameUploadController: FastifyPluginAsync;
 		importController: FastifyPluginAsync;
@@ -15,10 +15,10 @@ export interface AdminRouteDependencies {
 	};
 }
 
-/** Registration itself is pure; all ticket-008 controllers are explicit ports. */
+/** Registration itself is pure; migrated ticket-008/009 controllers are explicit ports. */
 export function createAdminRoutes(deps: AdminRouteDependencies): FastifyPluginAsync {
 	return async function adminRoutes(app): Promise<void> {
-		await app.register(deps.legacy.exhibitionController);
+		await app.register(deps.exhibitionController);
 		await app.register(deps.projectController);
 		await app.register(deps.legacy.projectMultipartController);
 		await app.register(deps.memberController);

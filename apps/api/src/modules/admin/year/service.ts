@@ -59,18 +59,16 @@ export async function createExhibition(deps: ExhibitionServiceDependencies, data
 
 /** Delete an exhibition by ID. Throws 404 if not found. */
 export async function deleteExhibition(deps: ExhibitionServiceDependencies, id: number) {
-	const exhibition = await deps.repository.findExhibitionByIdWithCount(id);
-	if (!exhibition) throw notFound('Exhibition not found');
-
-	await deps.repository.deleteExhibition(id, {
+	const deleted = await deps.repository.deleteExhibition(id, {
 		bucket: deps.posterBucket,
 		reason: 'exhibition-delete-poster',
 	});
+	if (!deleted) throw notFound('Exhibition not found');
 
-	if (exhibition.posterStorageKey) {
+	if (deleted.posterStorageKey) {
 		await deps.deleteOrQueue(
 			deps.posterBucket,
-			exhibition.posterStorageKey,
+			deleted.posterStorageKey,
 			'exhibition-delete-poster',
 			{ exhibitionId: id },
 		);

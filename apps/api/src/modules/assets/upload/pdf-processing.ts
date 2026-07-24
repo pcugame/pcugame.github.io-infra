@@ -9,12 +9,16 @@
 import { promises as fsp } from 'node:fs';
 import { pdf } from 'pdf-to-img';
 import sharp from 'sharp';
-import { logger } from '../../../lib/logger.js';
 import { badRequest } from '../../../shared/errors.js';
 import type { ImageProcessingResult } from './image-processing.js';
 
 export interface PdfProcessingInput {
   tmpPath: string;
+}
+
+export interface PdfProcessingLogger {
+  warn(value: unknown, message?: string): void;
+  error(value: unknown, message?: string): void;
 }
 
 /** Scale factor passed to pdfjs (roughly doubles resolution). */
@@ -28,6 +32,7 @@ const WEBP_QUALITY = 85;
 
 export async function processPdf(
   input: PdfProcessingInput,
+  logger: PdfProcessingLogger,
 ): Promise<ImageProcessingResult> {
   const outputPath = input.tmpPath + '.webp';
 
@@ -39,7 +44,7 @@ export async function processPdf(
     }
     pngBuf = await doc.getPage(1);
   } catch (err) {
-    throw translatePdfError(err);
+    throw translatePdfError(err, logger);
   }
 
   try {
@@ -53,10 +58,10 @@ export async function processPdf(
       .webp({ quality: WEBP_QUALITY })
       .toFile(outputPath);
   } catch (err) {
-		await fsp.unlink(outputPath).catch((cleanupError) => {
-			logger().warn({ err: cleanupError, outputPath }, 'Failed to remove partial PDF raster');
-		});
-    throw translatePdfError(err);
+    await fsp.unlink(outputPath).catch((cleanupError) => {
+      logger.warn({ err: cleanupError, outputPath }, 'Failed to remove partial PDF raster');
+    });
+    throw translatePdfError(err, logger);
   }
 
   const stat = await fsp.stat(outputPath);
@@ -70,9 +75,9 @@ export async function processPdf(
   };
 }
 
-function translatePdfError(err: unknown): Error {
+function translatePdfError(err: unknown, logger?: PdfProcessingLogger): Error {
   const msg = err instanceof Error ? err.message : String(err);
-  logger().error({ err }, 'PDF rasterization failed');
+  logger?.error({ err }, 'PDF rasterization failed');
 
   const lower = msg.toLowerCase();
   if (lower.includes('password') || lower.includes('encrypt')) {
