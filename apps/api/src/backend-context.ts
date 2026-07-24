@@ -54,6 +54,10 @@ import {
 	createProjectMemberSettingsProductionGraph,
 	type ProjectMemberSettingsProductionGraph,
 } from './modules/admin/project-member-settings.composition.js';
+import {
+	createYearProductionGraph,
+	type YearProductionGraph,
+} from './modules/admin/year/composition.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -203,6 +207,7 @@ export interface ProductionResourceFactories {
 		auth: AuthProductionGraph,
 		publicGraph: PublicProductionGraph,
 		projectMemberSettings: ProjectMemberSettingsProductionGraph,
+		year: YearProductionGraph,
 	): MaybePromise<BackendRoutes>;
 }
 
@@ -264,11 +269,11 @@ async function loadProductionRoutes(
 	auth: AuthProductionGraph,
 	publicGraph: PublicProductionGraph,
 	projectMemberSettings: ProjectMemberSettingsProductionGraph,
+	year: YearProductionGraph,
 ): Promise<BackendRoutes> {
-	const [admin, me, year, projectMultipart, gameUpload, importModule, exportModule] = await Promise.all([
+	const [admin, me, projectMultipart, gameUpload, importModule, exportModule] = await Promise.all([
 		import('./modules/admin/admin.routes.js'),
 		import('./modules/me/me.routes.js'),
-		import('./modules/admin/year/index.js'),
 		import('./modules/admin/project/multipart.compatibility.js'),
 		import('./modules/admin/game-upload/index.js'),
 		import('./modules/admin/import/index.js'),
@@ -280,9 +285,9 @@ async function loadProductionRoutes(
 		public: publicGraph.controller,
 		admin: admin.createAdminRoutes({
 			...projectMemberSettings,
+			...year,
 			bannedIpController: assetsBanned.bannedIpController,
 			legacy: {
-				exhibitionController: year.exhibitionController,
 				projectMultipartController: projectMultipart.projectMultipartCompatibilityController,
 				gameUploadController: gameUpload.gameUploadController,
 				importController: importModule.importController,
@@ -467,6 +472,17 @@ export async function createProductionBackendContext(
 			logger,
 			clock,
 		});
+		const year = createYearProductionGraph({
+			config,
+			prisma,
+			storage,
+			fileSystem,
+			settings,
+			uploadLimiter,
+			logger,
+			clock,
+			ids,
+		});
 		const authSessions = auth.repository;
 		const maintenance: BackgroundMaintenance = {
 			async recoverStaleUploads() {
@@ -500,6 +516,7 @@ export async function createProductionBackendContext(
 			auth,
 			publicGraph,
 			projectMemberSettings,
+			year,
 		);
 
 		return {

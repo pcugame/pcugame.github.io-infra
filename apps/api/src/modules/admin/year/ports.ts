@@ -27,7 +27,10 @@ export interface ExhibitionRepository {
 		_count: { projects: number };
 	} | null>;
 	createExhibition(data: CreateExhibitionRequest): Promise<{ id: number; year: number }>;
-	deleteExhibition(id: number, outbox: PosterDeletionOutboxConfig): Promise<{ posterStorageKey: string | null }>;
+	deleteExhibition(
+		id: number,
+		outbox: PosterDeletionOutboxConfig,
+	): Promise<{ posterStorageKey: string | null } | null>;
 	updateExhibition(id: number, patch: {
 		title?: string;
 		isUploadEnabled?: boolean;

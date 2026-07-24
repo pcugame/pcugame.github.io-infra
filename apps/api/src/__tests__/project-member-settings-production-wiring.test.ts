@@ -294,8 +294,8 @@ async function routeApp(
 	await app.register(createAdminRoutes({
 		...harness.graph,
 		bannedIpController: emptyRoute,
+		exhibitionController: emptyRoute,
 		legacy: {
-			exhibitionController: emptyRoute,
 			projectMultipartController: emptyRoute,
 			gameUploadController: emptyRoute,
 			importController: emptyRoute,
