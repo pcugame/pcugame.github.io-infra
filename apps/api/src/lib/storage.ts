@@ -92,13 +92,13 @@ export function createObjectStorage(
 			for await (const chunk of response.Body as Readable) chunks.push(Buffer.from(chunk));
 			return Buffer.concat(chunks);
 		},
-		async stream(bucket, key, range) {
+		async stream(bucket, key, range, signal) {
 			try {
 				const response = await client.send(new GetObjectCommand({
 					Bucket: bucket,
 					Key: key,
 					...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
-				}));
+				}), { abortSignal: signal });
 				return {
 					body: response.Body as Readable,
 					size: response.ContentLength ?? 0,

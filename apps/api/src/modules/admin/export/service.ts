@@ -135,6 +135,15 @@ export function createExportService(
 	deps: ExportServiceDependencies,
 	progressStore: ExportProgressStore,
 ) {
+	let closed = false;
+	let active:
+		| {
+			controller: AbortController;
+			settled: Promise<void>;
+		}
+		| undefined;
+	let closePromise: Promise<void> | undefined;
+
 	function setCurrentFileStatus(assetId: number, status: ExportFileStatus): void {
 		progressStore.update((progress) => {
 			progress.currentProjectFiles = progress.currentProjectFiles.map((file) =>
@@ -271,12 +280,38 @@ export function createExportService(
 	return {
 		getExportProgress: () => progressStore.get(),
 		async exportAssets(options: ExportOptions): Promise<ExportResult> {
+			if (closed) throw new Error('Export service is closed');
 			progressStore.start(options.year ?? null, deps.now());
+			const controller = new AbortController();
+			const abort = () => controller.abort();
+			if (options.signal?.aborted) abort();
+			else options.signal?.addEventListener('abort', abort, { once: true });
+			const operation = doExport({ ...options, signal: controller.signal });
+			let resolveSettled!: () => void;
+			const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
+			active = { controller, settled };
 			try {
-				return await doExport(options);
+				return await operation;
 			} finally {
+				options.signal?.removeEventListener('abort', abort);
 				progressStore.finish();
+				if (active?.controller === controller) active = undefined;
+				resolveSettled();
 			}
+		},
+		/**
+		 * Context shutdown first aborts storage/stream/filesystem work, then waits
+		 * for sibling-temp cleanup and the service finally block to release the
+		 * active lock. The context closes the progress store only after this ends.
+		 */
+		close(): Promise<void> {
+			closePromise ??= (async () => {
+				closed = true;
+				const running = active;
+				running?.controller.abort();
+				await running?.settled;
+			})();
+			return closePromise;
 		},
 	};
 }

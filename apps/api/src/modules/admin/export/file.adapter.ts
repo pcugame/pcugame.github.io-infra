@@ -1,10 +1,10 @@
-import type { Readable, Writable } from 'node:stream';
+import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 export interface ExportFileWriterDependencies {
 	ids: { next(): string };
 	getObject(bucket: string, key: string, signal?: AbortSignal): Promise<Readable>;
-	createWriteStream(path: string): Writable;
+	createWriteStream(path: string): NodeJS.WritableStream;
 	rename(from: string, to: string): Promise<void>;
 	remove(path: string): Promise<void>;
 	logCleanupError(error: unknown, path: string): void;
