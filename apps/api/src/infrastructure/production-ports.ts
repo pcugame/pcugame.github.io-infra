@@ -38,15 +38,13 @@ import {
 	setLifecycleState,
 	waitForDrain,
 } from '../lib/lifecycle.js';
-import {
-	getSiteSettings,
-	reloadSiteSettings,
-	updateSiteSettings,
-	_invalidateCache,
-} from '../shared/site-settings.js';
 import { acquireUploadSlot, releaseUploadSlot } from '../shared/upload-limits.js';
 import { createLifecycle } from '../lib/lifecycle.js';
-import { createCachedSettingsStore } from '../shared/site-settings.js';
+import {
+	createCachedSettingsStore,
+	createSiteSettingsRepository,
+	type CachedSettingsStoreOptions,
+} from '../shared/site-settings.js';
 import { createUploadLimiter } from '../shared/upload-limits.js';
 
 export function createSystemClock(): Clock {
@@ -118,12 +116,6 @@ export const processUploadLimiter: UploadLimiter = {
 	release: releaseUploadSlot,
 };
 
-export const cachedSettingsStore: SettingsStore = {
-	get: getSiteSettings,
-	update: updateSiteSettings,
-	invalidate: _invalidateCache,
-};
-
 export const processLifecycle: Lifecycle = {
 	state: getLifecycleState,
 	setState: setLifecycleState,
@@ -164,26 +156,12 @@ export function createPrismaHealth(client: PrismaClient): DatabaseHealth {
 export function createPrismaSettingsStore(
 	client: PrismaClient,
 	logger: { warn(value: unknown, message?: string): void },
+	options: Omit<CachedSettingsStoreOptions, 'logger'> = {},
 ) {
-	return createCachedSettingsStore({
-		loadOrCreate: () => client.siteSetting.upsert({
-			where: { id: 'default' },
-			update: {},
-			create: { id: 'default' },
-		}),
-		update: (patch) => client.siteSetting.upsert({
-			where: { id: 'default' },
-			create: {
-				id: 'default',
-				...(patch.maxGameFileMb !== undefined ? { maxGameFileMb: patch.maxGameFileMb } : {}),
-				...(patch.maxChunkSizeMb !== undefined ? { maxChunkSizeMb: patch.maxChunkSizeMb } : {}),
-			},
-			update: {
-				...(patch.maxGameFileMb !== undefined ? { maxGameFileMb: patch.maxGameFileMb } : {}),
-				...(patch.maxChunkSizeMb !== undefined ? { maxChunkSizeMb: patch.maxChunkSizeMb } : {}),
-			},
-		}),
-	}, { logger: { warn: (message) => logger.warn(message) } });
+	return createCachedSettingsStore(createSiteSettingsRepository(client), {
+		...options,
+		logger: { warn: (value, message) => logger.warn(value, message) },
+	});
 }
 
 export function createProcessUploadLimiter(maxConcurrent: number) {
@@ -200,9 +178,3 @@ export const prismaHealth: DatabaseHealth = {
 		}
 	},
 };
-
-// Keep the refresh operation reachable from the composition root without
-// exposing the cache implementation to application services.
-export async function warmSettingsStore(): Promise<void> {
-	await reloadSiteSettings();
-}

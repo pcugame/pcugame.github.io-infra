@@ -50,6 +50,10 @@ import {
 	createPublicProductionGraph,
 	type PublicProductionGraph,
 } from './modules/public/composition.js';
+import {
+	createProjectMemberSettingsProductionGraph,
+	type ProjectMemberSettingsProductionGraph,
+} from './modules/admin/project-member-settings.composition.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -184,7 +188,11 @@ export interface ProductionResourceFactories {
 	prisma(config: Env): MaybePromise<PrismaClient>;
 	s3(config: Env): MaybePromise<S3Client>;
 	storage(client: S3Client, config: Env): MaybePromise<ObjectStorage>;
-	settings(client: PrismaClient, logger: AppLogger, config: Env): MaybePromise<SettingsStore & { close(): void }>;
+	settings(
+		client: PrismaClient,
+		logger: AppLogger,
+		config: Env,
+	): MaybePromise<SettingsStore & { warmup?(): Promise<unknown>; close(): void }>;
 	uploadLimiter(config: Env): MaybePromise<UploadLimiter & { close(): void }>;
 	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
 	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
@@ -194,6 +202,7 @@ export interface ProductionResourceFactories {
 		assetsBanned: AssetsBannedProductionGraph,
 		auth: AuthProductionGraph,
 		publicGraph: PublicProductionGraph,
+		projectMemberSettings: ProjectMemberSettingsProductionGraph,
 	): MaybePromise<BackendRoutes>;
 }
 
@@ -254,16 +263,32 @@ async function loadProductionRoutes(
 	assetsBanned: AssetsBannedProductionGraph,
 	auth: AuthProductionGraph,
 	publicGraph: PublicProductionGraph,
+	projectMemberSettings: ProjectMemberSettingsProductionGraph,
 ): Promise<BackendRoutes> {
-	const [admin, me] = await Promise.all([
+	const [admin, me, year, projectMultipart, gameUpload, importModule, exportModule] = await Promise.all([
 		import('./modules/admin/admin.routes.js'),
 		import('./modules/me/me.routes.js'),
+		import('./modules/admin/year/index.js'),
+		import('./modules/admin/project/multipart.compatibility.js'),
+		import('./modules/admin/game-upload/index.js'),
+		import('./modules/admin/import/index.js'),
+		import('./modules/admin/export/index.js'),
 	]);
 	return {
 		auth: auth.authController,
 		devAuth: auth.devAuthController,
 		public: publicGraph.controller,
-		admin: admin.createAdminRoutes({ bannedIpController: assetsBanned.bannedIpController }),
+		admin: admin.createAdminRoutes({
+			...projectMemberSettings,
+			bannedIpController: assetsBanned.bannedIpController,
+			legacy: {
+				exhibitionController: year.exhibitionController,
+				projectMultipartController: projectMultipart.projectMultipartCompatibilityController,
+				gameUploadController: gameUpload.gameUploadController,
+				importController: importModule.importController,
+				exportController: exportModule.exportController,
+			},
+		}),
 		me: me.meRoutes,
 		assets: assetsBanned.assetsController,
 	};
@@ -374,6 +399,9 @@ export async function createProductionBackendContext(
 			'settings',
 			() => factories.settings(prisma, logger, config),
 			(store) => 'close' in store && typeof store.close === 'function' ? store.close() : undefined,
+			async (store) => {
+				if ('warmup' in store && typeof store.warmup === 'function') await store.warmup();
+			},
 		);
 		const uploadLimiter = await resource(
 			'uploadLimiter',
@@ -431,6 +459,14 @@ export async function createProductionBackendContext(
 			logger,
 			clock,
 		});
+		const projectMemberSettings = createProjectMemberSettingsProductionGraph({
+			config,
+			prisma,
+			storage,
+			settings,
+			logger,
+			clock,
+		});
 		const authSessions = auth.repository;
 		const maintenance: BackgroundMaintenance = {
 			async recoverStaleUploads() {
@@ -458,7 +494,13 @@ export async function createProductionBackendContext(
 			() => maintenanceSchedule.close(),
 			() => maintenanceSchedule.start(),
 		));
-		const routes = options.routes ?? await factories.routes(config, assetsBanned!, auth, publicGraph);
+		const routes = options.routes ?? await factories.routes(
+			config,
+			assetsBanned!,
+			auth,
+			publicGraph,
+			projectMemberSettings,
+		);
 
 		return {
 			config,

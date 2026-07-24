@@ -265,6 +265,12 @@ describe('stateful resource factories', () => {
 					prisma: () => ({
 						$disconnect: vi.fn(),
 						bannedIp: { findMany: findBannedIps },
+						siteSetting: {
+							upsert: vi.fn().mockResolvedValue({
+								maxGameFileMb: 5120,
+								maxChunkSizeMb: 10,
+							}),
+						},
 						authSession: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
 					} as unknown as PrismaClient),
 					routes: () => ({

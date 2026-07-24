@@ -1,30 +1,29 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import type { SiteSettingsData } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { requireRole } from '../../../plugins/auth.js';
-import { settingsService } from './runtime.js';
+import type { createSettingsService } from './service.js';
 
-/** Register site-settings management routes (OPERATOR/ADMIN only) */
-export async function settingsController(app: FastifyInstance): Promise<void> {
-	/** GET /settings — current site settings */
-	app.get(
-		'/settings',
-		{ preHandler: requireRole('ADMIN', 'OPERATOR') },
-		async (_request, reply) => {
-			const settings = await settingsService.getSettings();
-			sendOk<SiteSettingsData>(reply, settings);
-		},
-	);
-
-	/** PATCH /settings — update site settings */
-	app.patch(
-		'/settings',
-		{ preHandler: requireRole('ADMIN', 'OPERATOR') },
-		async (request, reply) => {
-			const updated = await settingsService.updateSettings(
-				request.body as Record<string, unknown> | null,
-			);
-			sendOk<SiteSettingsData>(reply, updated);
-		},
-	);
+export function createSettingsController(deps: {
+	service: ReturnType<typeof createSettingsService>;
+}): FastifyPluginAsync {
+	return async function settingsController(app): Promise<void> {
+		app.get(
+			'/settings',
+			{ preHandler: requireRole('ADMIN', 'OPERATOR') },
+			async (_request, reply) => {
+				sendOk<SiteSettingsData>(reply, await deps.service.getSettings());
+			},
+		);
+		app.patch(
+			'/settings',
+			{ preHandler: requireRole('ADMIN', 'OPERATOR') },
+			async (request, reply) => {
+				const updated = await deps.service.updateSettings(
+					request.body as Record<string, unknown> | null,
+				);
+				sendOk<SiteSettingsData>(reply, updated);
+			},
+		);
+	};
 }

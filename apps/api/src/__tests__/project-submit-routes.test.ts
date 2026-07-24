@@ -63,7 +63,7 @@ vi.mock('../plugins/auth.js', () => {
 	};
 });
 
-import { projectController } from '../modules/admin/project/index.js';
+import { projectMultipartCompatibilityController } from '../modules/admin/project/multipart.compatibility.js';
 import { meRoutes } from '../modules/me/me.routes.js';
 
 function validPayload(overrides: Record<string, unknown> = {}) {
@@ -102,7 +102,7 @@ async function buildTestApp() {
 	});
 
 	await app.register(meRoutes, { prefix: '/api/me' });
-	await app.register(projectController, { prefix: '/api/admin' });
+	await app.register(projectMultipartCompatibilityController, { prefix: '/api/admin' });
 	await app.ready();
 	return app;
 }
