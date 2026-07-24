@@ -149,6 +149,9 @@ function memoryFileSystem(): MemoryFileSystem {
 			files.delete(path);
 			temporary.delete(path);
 		}),
+		readRange: async (path, start, end) => (
+			(files.get(path) ?? Buffer.alloc(0)).subarray(start, end + 1)
+		),
 		createReadStream: (path) => Readable.from([files.get(path) ?? Buffer.alloc(0)]),
 		createWriteStream: calls.createWriteStream.mockImplementation((path: string) => {
 			temporary.add(path);
@@ -229,8 +232,8 @@ async function routeApp(
 		exhibitionController: emptyRoute,
 		importController: graph.importController,
 		exportController: graph.exportController,
+		projectMultipartController: emptyRoute,
 		legacy: {
-			projectMultipartController: emptyRoute,
 			gameUploadController: emptyRoute,
 		},
 	}));
@@ -298,8 +301,8 @@ async function contextHarness() {
 			exhibitionController: emptyRoute,
 			importController: importExport.importController,
 			exportController: importExport.exportController,
+			projectMultipartController: emptyRoute,
 			legacy: {
-				projectMultipartController: emptyRoute,
 				gameUploadController: emptyRoute,
 			},
 		}),

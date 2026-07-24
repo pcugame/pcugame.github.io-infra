@@ -62,6 +62,12 @@ import {
 	createImportExportProductionGraph,
 	type ImportExportProductionGraph,
 } from './modules/admin/import-export.composition.js';
+import {
+	createProjectMultipartProductionGraph,
+	type ProjectMultipartProductionGraph,
+} from './modules/admin/project-multipart.composition.js';
+import type { ProjectUploadProcessing } from './modules/admin/project/project-upload.adapter.js';
+import { createNodeProjectUploadProcessing } from './infrastructure/project-upload-processing.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -192,6 +198,11 @@ export interface ProductionResourceFactories {
 	ids(config: Env): MaybePromise<IdGenerator>;
 	scheduler(config: Env): MaybePromise<Scheduler>;
 	fileSystem(config: Env): MaybePromise<FileSystem>;
+	projectUploadProcessing(
+		fileSystem: FileSystem,
+		logger: AppLogger,
+		config: Env,
+	): MaybePromise<ProjectUploadProcessing>;
 	googleTokens(config: Env): MaybePromise<GoogleTokenVerifier>;
 	prisma(config: Env): MaybePromise<PrismaClient>;
 	s3(config: Env): MaybePromise<S3Client>;
@@ -213,6 +224,7 @@ export interface ProductionResourceFactories {
 		projectMemberSettings: ProjectMemberSettingsProductionGraph,
 		year: YearProductionGraph,
 		importExport: ImportExportProductionGraph,
+		projectMultipart: ProjectMultipartProductionGraph,
 	): MaybePromise<BackendRoutes>;
 }
 
@@ -247,6 +259,9 @@ const defaultFactories: ProductionResourceFactories = {
 	ids: () => createCryptoIdGenerator(),
 	scheduler: () => createNodeScheduler(),
 	fileSystem: () => createNodeFileSystem(),
+	projectUploadProcessing: (fileSystem, logger) => (
+		createNodeProjectUploadProcessing(fileSystem, logger)
+	),
 	googleTokens: () => createGoogleTokenVerifier(),
 	prisma: (config) => createPrismaClientForDatabase(config.DATABASE_URL, {
 		log: config.NODE_ENV === 'development'
@@ -276,11 +291,10 @@ async function loadProductionRoutes(
 	projectMemberSettings: ProjectMemberSettingsProductionGraph,
 	year: YearProductionGraph,
 	importExport: ImportExportProductionGraph,
+	projectMultipart: ProjectMultipartProductionGraph,
 ): Promise<BackendRoutes> {
-	const [admin, me, projectMultipart, gameUpload] = await Promise.all([
+	const [admin, gameUpload] = await Promise.all([
 		import('./modules/admin/admin.routes.js'),
-		import('./modules/me/me.routes.js'),
-		import('./modules/admin/project/multipart.compatibility.js'),
 		import('./modules/admin/game-upload/index.js'),
 	]);
 	return {
@@ -292,12 +306,12 @@ async function loadProductionRoutes(
 			...year,
 			...importExport,
 			bannedIpController: assetsBanned.bannedIpController,
+			projectMultipartController: projectMultipart.projectMultipartController,
 			legacy: {
-				projectMultipartController: projectMultipart.projectMultipartCompatibilityController,
 				gameUploadController: gameUpload.gameUploadController,
 			},
 		}),
-		me: me.meRoutes,
+		me: projectMultipart.meController,
 		assets: assetsBanned.assetsController,
 	};
 }
@@ -395,6 +409,11 @@ export async function createProductionBackendContext(
 		const ids = await resource('ids', () => factories.ids(config));
 		const scheduler = await resource('scheduler', () => factories.scheduler(config));
 		const fileSystem = await resource('fileSystem', () => factories.fileSystem(config));
+		const projectUploads = await factories.projectUploadProcessing(
+			fileSystem,
+			logger,
+			config,
+		);
 		const googleTokens = await resource('googleTokens', () => factories.googleTokens(config));
 		const prisma = await resource(
 			'prisma',
@@ -500,6 +519,20 @@ export async function createProductionBackendContext(
 			importExport,
 			() => importExport.close(),
 		));
+		const projectMultipart = createProjectMultipartProductionGraph({
+			config,
+			prisma,
+			storage,
+			fileSystem,
+			settings,
+			uploadLimiter,
+			logger,
+			clock,
+			ids,
+			processing: projectUploads,
+			access: projectMemberSettings.projectAccess,
+			repository: projectMemberSettings.projectRepository,
+		});
 		const authSessions = auth.repository;
 		const maintenance: BackgroundMaintenance = {
 			async recoverStaleUploads() {
@@ -535,6 +568,7 @@ export async function createProductionBackendContext(
 			projectMemberSettings,
 			year,
 			importExport,
+			projectMultipart,
 		);
 
 		return {

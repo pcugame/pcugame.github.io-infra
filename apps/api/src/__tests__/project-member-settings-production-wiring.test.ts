@@ -297,8 +297,8 @@ async function routeApp(
 		exhibitionController: emptyRoute,
 		importController: emptyRoute,
 		exportController: emptyRoute,
+		projectMultipartController: emptyRoute,
 		legacy: {
-			projectMultipartController: emptyRoute,
 			gameUploadController: emptyRoute,
 		},
 	}), { prefix: '/api/admin' });

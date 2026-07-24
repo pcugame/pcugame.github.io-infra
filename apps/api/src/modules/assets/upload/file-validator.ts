@@ -10,7 +10,7 @@ import {
 } from '../../../shared/file-signature.js';
 import { badRequest } from '../../../shared/errors.js';
 import type { ValidatedFile } from './upload-types.js';
-import { validateZipArchiveFile } from './zip-validation.js';
+import { validateZipArchiveFile } from './zip-file-validation.compatibility.js';
 
 const KIND_SIZE_LIMITS: Record<string, number> = {
   GAME: SIZE_LIMITS.game,

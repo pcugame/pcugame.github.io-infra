@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { analyzeWebglArchive } from '../modules/webgl/archive.js';
 import { webglContentMetadata, webglContentSecurityPolicy } from '../modules/webgl/content.js';
 import { createWebglDeploymentKeys, parseWebglEntryKey, parseWebglSourceKey } from '../modules/webgl/paths.js';
-import { validateWebglZipArchiveFile } from '../modules/assets/upload/zip-validation.js';
+import { validateWebglZipArchiveFile } from '../modules/assets/upload/zip-file-validation.compatibility.js';
 
 type ZipEntrySpec = {
 	name: string;

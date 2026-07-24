@@ -6,9 +6,9 @@
  * as WebP. Pure JS — no system binaries required.
  */
 
-import { promises as fsp } from 'node:fs';
 import { pdf } from 'pdf-to-img';
 import sharp from 'sharp';
+import type { FileSystem } from '../../../application/ports.js';
 import { badRequest } from '../../../shared/errors.js';
 import type { ImageProcessingResult } from './image-processing.js';
 
@@ -33,6 +33,7 @@ const WEBP_QUALITY = 85;
 export async function processPdf(
   input: PdfProcessingInput,
   logger: PdfProcessingLogger,
+  fileSystem: Pick<FileSystem, 'remove' | 'stat'>,
 ): Promise<ImageProcessingResult> {
   const outputPath = input.tmpPath + '.webp';
 
@@ -58,13 +59,13 @@ export async function processPdf(
       .webp({ quality: WEBP_QUALITY })
       .toFile(outputPath);
   } catch (err) {
-    await fsp.unlink(outputPath).catch((cleanupError) => {
+    await fileSystem.remove(outputPath).catch((cleanupError) => {
       logger.warn({ err: cleanupError, outputPath }, 'Failed to remove partial PDF raster');
     });
     throw translatePdfError(err, logger);
   }
 
-  const stat = await fsp.stat(outputPath);
+  const stat = await fileSystem.stat(outputPath);
 
   return {
     tmpPath: outputPath,
