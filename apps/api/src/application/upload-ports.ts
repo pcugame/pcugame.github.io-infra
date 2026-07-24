@@ -1,6 +1,6 @@
 import type { AssetKind, AssetPlaybackStatus } from '@pcu/contracts';
 import type { MultipartPart } from './http-input.js';
-import type { UploadLimits } from '../shared/upload-limits.js';
+import type { UploadLimits } from '../shared/upload-policy.js';
 
 export interface SavedUpload {
 	storageKey: string;

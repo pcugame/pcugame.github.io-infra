@@ -387,8 +387,8 @@ async function routeApp(
 		exhibitionController: harness.graph.exhibitionController,
 		importController: emptyRoute,
 		exportController: emptyRoute,
+		projectMultipartController: emptyRoute,
 		legacy: {
-			projectMultipartController: emptyRoute,
 			gameUploadController: emptyRoute,
 		},
 	}), { prefix: '/api/admin' });

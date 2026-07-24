@@ -1,12 +1,10 @@
-import { promises as fsp } from 'node:fs';
 import { posix as pathPosix, win32 as pathWin32 } from 'node:path';
 import { badRequest } from '../../../shared/errors.js';
-import { readObjectRange } from '../../../lib/storage.js';
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
 
-const MAX_EOCD_SEARCH_BYTES = 65_557;
+export const MAX_EOCD_SEARCH_BYTES = 65_557;
 const MAX_CENTRAL_DIRECTORY_BYTES = 64 * 1024 * 1024;
 const MAX_ZIP_ENTRIES = 10_000;
 const MAX_TOTAL_UNCOMPRESSED_BYTES = 10 * 1024 * 1024 * 1024;
@@ -185,7 +183,7 @@ function parseCentralDirectory(
 	return { entryCount, totalUncompressedBytes, entries };
 }
 
-async function validateZipArchive(input: ZipValidationInput): Promise<ZipValidationSummary> {
+export async function validateZipArchive(input: ZipValidationInput): Promise<ZipValidationSummary> {
 	if (input.sizeBytes < 22) throw badRequest('ZIP archive is too small');
 
 	const eocd = findEocd(input.eocdTail, input.tailStartOffset, input.sizeBytes);
@@ -203,76 +201,36 @@ async function validateZipArchive(input: ZipValidationInput): Promise<ZipValidat
 	});
 }
 
-async function validateZipArchiveFileWithOptions(
-	filePath: string,
-	sizeBytes: number | undefined,
-	options: { allowGzipEntries?: boolean },
-): Promise<ZipValidationSummary> {
-	const stat = sizeBytes == null ? await fsp.stat(filePath) : { size: sizeBytes };
-	const tailLength = Math.min(stat.size, MAX_EOCD_SEARCH_BYTES);
-	const tailStart = stat.size - tailLength;
-	const handle = await fsp.open(filePath, 'r');
-
-	try {
-		const tail = Buffer.alloc(tailLength);
-		await handle.read(tail, 0, tailLength, tailStart);
-		return await validateZipArchive({
-			sizeBytes: stat.size,
-			eocdTail: tail,
-			tailStartOffset: tailStart,
-			allowGzipEntries: options.allowGzipEntries,
-			readRange: async (start, end) => {
-				const length = end - start + 1;
-				const buffer = Buffer.alloc(length);
-				await handle.read(buffer, 0, length, start);
-				return buffer;
-			},
-		});
-	} finally {
-		await handle.close();
-	}
-}
-
-export function validateZipArchiveFile(filePath: string, sizeBytes?: number): Promise<ZipValidationSummary> {
-	return validateZipArchiveFileWithOptions(filePath, sizeBytes, {});
-}
-
-export function validateWebglZipArchiveFile(filePath: string, sizeBytes?: number): Promise<ZipValidationSummary> {
-	return validateZipArchiveFileWithOptions(filePath, sizeBytes, { allowGzipEntries: true });
-}
-
 export async function validateZipArchiveObject(
-	bucket: string,
-	key: string,
 	sizeBytes: number,
+	readRange: (start: number, end: number) => Promise<Buffer>,
 ): Promise<ZipValidationSummary> {
 	const tailLength = Math.min(sizeBytes, MAX_EOCD_SEARCH_BYTES);
 	const tailStart = sizeBytes - tailLength;
-	const tail = await readObjectRange(bucket, key, tailStart, sizeBytes - 1);
+	const tail = await readRange(tailStart, sizeBytes - 1);
 
 	return validateZipArchive({
 		sizeBytes,
 		eocdTail: tail,
 		tailStartOffset: tailStart,
-		readRange: (start, end) => readObjectRange(bucket, key, start, end),
+		readRange,
 	});
 }
 
 /** WebGL builds may legitimately contain pre-compressed `.gz` resources. */
 export async function validateWebglZipArchiveObject(
-	bucket: string,
-	key: string,
 	sizeBytes: number,
+	readRange: (start: number, end: number) => Promise<Buffer>,
 ): Promise<ZipValidationSummary> {
 	const tailLength = Math.min(sizeBytes, MAX_EOCD_SEARCH_BYTES);
 	const tailStart = sizeBytes - tailLength;
-	const tail = await readObjectRange(bucket, key, tailStart, sizeBytes - 1);
+	const tail = await readRange(tailStart, sizeBytes - 1);
 
 	return validateZipArchive({
 		sizeBytes,
 		eocdTail: tail,
 		tailStartOffset: tailStart,
 		allowGzipEntries: true,
-		readRange: (start, end) => readObjectRange(bucket, key, start, end),
+		readRange,
 	});
 }

@@ -9,6 +9,7 @@ import { validateFile } from './file-validator.js';
 import { processImage } from './image-processing.js';
 import { processPdf } from './pdf-processing.js';
 import { processVideo } from './video-processing.js';
+import { nodeVideoProcessingOperations } from './video-processing.compatibility.js';
 import { badRequest } from '../../../shared/errors.js';
 import { storageOptionsForAsset } from './storage-policy.js';
 import type { SavedFile } from './upload-types.js';
@@ -17,6 +18,11 @@ interface CommittedFile {
   bucket: string;
   storageKey: string;
 }
+
+const compatibilityFileSystem = {
+	stat: async (filePath: string) => fsp.stat(filePath),
+	remove: async (filePath: string) => fsp.unlink(filePath),
+};
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -75,7 +81,7 @@ export class UploadPipeline {
         mimeType: validated.mimeType,
         ext: validated.ext,
         sizeBytes: validated.sizeBytes,
-      });
+      }, logger(), nodeVideoProcessingOperations);
       if (playback.playbackStatus === 'FAILED') {
         throw badRequest(`Video validation failed: ${playback.playbackError || 'unsupported or corrupt video'}`);
       }
@@ -147,7 +153,11 @@ export class UploadPipeline {
     let finalSizeBytes = validated.sizeBytes;
 
     if ((kind === 'IMAGE' || kind === 'POSTER') && validated.mimeType === 'application/pdf') {
-      const processed = await processPdf({ tmpPath }, logger());
+      const processed = await processPdf(
+        { tmpPath },
+        logger(),
+        compatibilityFileSystem,
+      );
 
       finalTmpPath = processed.tmpPath;
       finalMimeType = processed.mimeType;
@@ -163,7 +173,7 @@ export class UploadPipeline {
         mimeType: validated.mimeType,
         ext: validated.ext,
         sizeBytes: validated.sizeBytes,
-      });
+      }, compatibilityFileSystem);
 
       finalTmpPath = processed.tmpPath;
       finalMimeType = processed.mimeType;

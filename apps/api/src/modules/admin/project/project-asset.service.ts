@@ -2,16 +2,15 @@ import type { AssetKind } from '@pcu/contracts';
 import type { MultipartCommandInput } from '../../../application/http-input.js';
 import type {
 	ProcessedUpload,
-	SavedUpload,
 	SingleAssetUploadCoordinator,
 } from '../../../application/upload-ports.js';
-import type { UploadLimits } from '../../../shared/upload-limits.js';
+import type { UploadLimits } from '../../../shared/upload-policy.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import type { ProjectAssetRepository } from './ports.js';
 
 export interface ProjectAssetServiceDependencies {
 	repository: ProjectAssetRepository;
-	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits;
+	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits | Promise<UploadLimits>;
 	uploadSlots: { acquire(): void; release(): void };
 	uploadCoordinator: SingleAssetUploadCoordinator;
 	assetUrl(storageKey: string, kind: AssetKind): string;
@@ -23,8 +22,6 @@ export interface ProjectAssetServiceDependencies {
 		reason: string,
 		context: Record<string, unknown>,
 	): Promise<void>;
-	/** Durable fallback for a newly uploaded object when the DB mutation loses. */
-	deleteUnpersistedUpload(upload: SavedUpload): Promise<void>;
 }
 
 export function isReplaceableAssetKind(kind: AssetKind): boolean {
@@ -43,9 +40,11 @@ export async function addAssetToProject(
 ) {
 	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
 	assertUploadAllowed(exhibition, exhibitionId, input.actor.role);
-	const limits = deps.uploadLimits(input.actor.role);
+	const limits = await deps.uploadLimits(input.actor.role);
 	let upload: ProcessedUpload | null = null;
 	let uploadPersisted = false;
+	let response: { assetId: number; url: string } | undefined;
+	let failure: unknown;
 
 	deps.uploadSlots.acquire();
 	try {
@@ -108,19 +107,38 @@ export async function addAssetToProject(
 			await deps.deleteOrQueue(deps.bucketForKind(savedFile.kind), oldPlaybackStorageKey, 'project-asset-replace-previous-playback', { assetId, kind: savedFile.kind });
 		}
 
-		return { assetId, url: deps.assetUrl(savedFile.storageKey, savedFile.kind) };
+		response = { assetId, url: deps.assetUrl(savedFile.storageKey, savedFile.kind) };
 	} catch (err) {
+		failure = err;
 		if (upload && !uploadPersisted) {
-			// UploadPipeline rollback is an immediate best effort. Follow it with the
-			// durable deletion contract so a losing upload is deleted or queued.
-			await upload.rollback();
-			await deps.deleteUnpersistedUpload(upload.savedFile);
+			try {
+				// The request pipeline is the sole owner of every unpersisted key
+				// and its rollback is ticket-003 delete-or-durable-queue.
+				await upload.rollback();
+			} catch (rollbackError) {
+				failure = new AggregateError(
+					[err, rollbackError],
+					'Project asset mutation and durable upload rollback failed',
+				);
+			}
 		}
-		throw err;
 	} finally {
 		deps.uploadSlots.release();
-		if (upload) await upload.cleanup();
+		if (upload) {
+			try {
+				await upload.cleanup();
+			} catch (cleanupError) {
+				failure = failure === undefined
+					? cleanupError
+					: new AggregateError(
+							[failure, cleanupError],
+							'Project asset request and temp cleanup failed',
+						);
+			}
+		}
 	}
+	if (failure !== undefined) throw failure;
+	return response!;
 }
 
 export function createProjectAssetService(deps: ProjectAssetServiceDependencies) {

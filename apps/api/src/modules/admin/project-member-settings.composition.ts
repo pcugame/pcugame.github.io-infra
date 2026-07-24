@@ -29,6 +29,9 @@ export interface ProjectMemberSettingsProductionGraph {
 	projectController: FastifyPluginAsync;
 	memberController: FastifyPluginAsync;
 	settingsController: FastifyPluginAsync;
+	/** Shared context-owned ports consumed by ticket-011 multipart controllers. */
+	projectAccess: ReturnType<typeof createProjectAccessService>;
+	projectRepository: ReturnType<typeof createProjectCrudRepository>;
 }
 
 export interface ProjectMemberSettingsProductionDependencies {
@@ -157,6 +160,8 @@ export function createProjectMemberSettingsProductionGraph(
 	});
 
 	return {
+		projectAccess: access,
+		projectRepository: repository,
 		projectController: createProjectController({
 			service: projectService,
 			access,

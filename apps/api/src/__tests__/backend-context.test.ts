@@ -75,6 +75,7 @@ function createTestContext(): {
 				mkdir: async () => {},
 				rename: async () => {},
 				remove: async () => {},
+				readRange: async () => Buffer.alloc(0),
 				createReadStream: () => Readable.from([]),
 				createWriteStream: () => new Writable({ write(_chunk, _encoding, done) { done(); } }),
 			},

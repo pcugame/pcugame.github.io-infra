@@ -8,9 +8,9 @@ export interface AdminRouteDependencies {
 	exhibitionController: FastifyPluginAsync;
 	importController: FastifyPluginAsync;
 	exportController: FastifyPluginAsync;
+	projectMultipartController: FastifyPluginAsync;
 	/** Legacy route families expire in their numbered wiring tickets. */
 	legacy: {
-		projectMultipartController: FastifyPluginAsync;
 		gameUploadController: FastifyPluginAsync;
 	};
 }
@@ -20,7 +20,7 @@ export function createAdminRoutes(deps: AdminRouteDependencies): FastifyPluginAs
 	return async function adminRoutes(app): Promise<void> {
 		await app.register(deps.exhibitionController);
 		await app.register(deps.projectController);
-		await app.register(deps.legacy.projectMultipartController);
+		await app.register(deps.projectMultipartController);
 		await app.register(deps.memberController);
 		await app.register(deps.legacy.gameUploadController);
 		await app.register(deps.bannedIpController);

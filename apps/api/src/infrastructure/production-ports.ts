@@ -95,6 +95,16 @@ export function createNodeFileSystem(): FileSystem {
 	},
 	rename: async (from, to) => fs.rename(from, to),
 	remove: async (path) => fs.unlink(path),
+	readRange: async (path, start, end) => {
+		const handle = await fs.open(path, 'r');
+		try {
+			const buffer = Buffer.alloc(Math.max(0, end - start + 1));
+			const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+			return buffer.subarray(0, bytesRead);
+		} finally {
+			await handle.close();
+		}
+	},
 	createReadStream,
 	createWriteStream,
 	};

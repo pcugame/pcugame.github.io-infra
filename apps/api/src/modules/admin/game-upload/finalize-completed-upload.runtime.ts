@@ -22,7 +22,10 @@ function getProductionFinalizer(): Finalizer {
 	productionFinalizer = createCompletedUploadFinalizer({
 		readHeader: (key) => readObjectRange(config.S3_BUCKET_PROTECTED, key, 0, 7),
 		validateGameArchive: async (key, size) => {
-			await validateZipArchiveObject(config.S3_BUCKET_PROTECTED, key, size);
+			await validateZipArchiveObject(
+				size,
+				(start, end) => readObjectRange(config.S3_BUCKET_PROTECTED, key, start, end),
+			);
 		},
 		deployWebgl: deployWebglSource,
 		rollbackWebglPublicDeployment,

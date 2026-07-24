@@ -124,13 +124,17 @@ export function createExhibitionPosterUploadCoordinator(
 					header: await readHeader(deps.fileSystem, temporaryPath),
 				});
 				const processed = validated.mimeType === 'application/pdf'
-					? await processPdf({ tmpPath: temporaryPath }, deps.logger)
+					? await processPdf(
+						{ tmpPath: temporaryPath },
+						deps.logger,
+						deps.fileSystem,
+					)
 					: await processImage({
 						tmpPath: temporaryPath,
 						mimeType: validated.mimeType,
 						ext: validated.ext,
 						sizeBytes: validated.sizeBytes,
-					});
+					}, deps.fileSystem);
 				if (processed.tmpPath !== temporaryPath) temporaryPaths.add(processed.tmpPath);
 
 				const finalStat = await deps.fileSystem.stat(processed.tmpPath);

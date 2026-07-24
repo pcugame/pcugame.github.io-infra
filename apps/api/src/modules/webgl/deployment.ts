@@ -5,6 +5,7 @@ import { env } from '../../config/env.js';
 import { logger } from '../../lib/logger.js';
 import {
 	downloadObject,
+	readObjectRange,
 } from '../../lib/storage.js';
 import {
 	deleteDurablyQueuedObject,
@@ -33,9 +34,8 @@ export async function deployWebglSource(
 
 	const cfg = env();
 	const summary = await validateWebglZipArchiveObject(
-		cfg.S3_BUCKET_PROTECTED,
-		sourceKey,
 		sizeBytes,
+		(start, end) => readObjectRange(cfg.S3_BUCKET_PROTECTED, sourceKey, start, end),
 	);
 	const layout = analyzeWebglArchive(summary);
 	const tempDir = await fsp.mkdtemp(join(tmpdir(), 'pcu-webgl-'));

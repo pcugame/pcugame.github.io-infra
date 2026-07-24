@@ -5,12 +5,6 @@ import type {
 	ProjectStatus,
 } from '../../../generated/prisma/client.js';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
-import { notFound } from '../../../shared/errors.js';
-import { assertValidPosterAsset } from '../../../shared/poster-validation.js';
-import {
-	ASSET_MUTATION_TRANSACTION_POLICY,
-	withAssetMutationTransaction,
-} from '../../assets/mutation-transaction.js';
 import { queueDurableDeletions, type DurableDeletionTarget } from '../../orphan/outbox.js';
 import {
 	webglDeletionTargetsByEntry,
@@ -18,8 +12,11 @@ import {
 } from '../../webgl/deletion-targets.js';
 import type {
 	DeletionOutboxConfig,
+	ProjectAssetRepository,
 	ProjectCrudRepository,
+	SubmitProjectRepository,
 } from './ports.js';
+import { createProjectAssetMutationRepository } from './asset-mutation.repository.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -161,7 +158,9 @@ async function withSerializableRetry<T>(
  */
 export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRepository & {
 	bulkUpdateStatus(ids: number[], status: ProjectStatus): Promise<{ count: number }>;
-} {
+} & SubmitProjectRepository & ProjectAssetRepository {
+	const assetMutation = createProjectAssetMutationRepository(client);
+
 	return {
 		async findProjectsForUser(userId, isPrivileged, options) {
 			const where = buildProjectListWhere(userId, isPrivileged, options);
@@ -242,32 +241,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 			return client.asset.findUnique({ where: { id } });
 		},
 		setProjectPoster(projectId, assetId) {
-			return withAssetMutationTransaction(client, async (tx) => {
-				const projects = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
-					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
-				`);
-				if (projects.length === 0) throw notFound('Project not found');
-				const assets = await tx.$queryRaw<Array<{
-					id: number;
-					projectId: number;
-					kind: AssetKind;
-					status: string;
-				}>>(PrismaRuntime.sql`
-					SELECT
-						"id",
-						"project_id" AS "projectId",
-						"kind"::text AS "kind",
-						"status"::text AS "status"
-					FROM "assets"
-					WHERE "id" = ${assetId}
-					FOR UPDATE
-				`);
-				assertValidPosterAsset(assets[0] ?? null, projectId);
-				return tx.project.update({
-					where: { id: projectId },
-					data: { posterAssetId: assetId },
-				});
-			}, ASSET_MUTATION_TRANSACTION_POLICY);
+			return assetMutation.setProjectPoster(projectId, assetId);
 		},
 		bulkDeleteProjectsReturningAssets(ids, outbox) {
 			return client.$transaction(async (tx) => {
@@ -305,6 +279,78 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 		},
 		bulkUpdateStatus(ids, status) {
 			return client.project.updateMany({ where: { id: { in: ids } }, data: { status } });
+		},
+		findExhibitionById(id) {
+			return client.exhibition.findUnique({ where: { id } });
+		},
+		findProjectByExhibitionAndSlug(exhibitionId, slug) {
+			return client.project.findUnique({
+				where: { project_exhibition_slug: { exhibitionId, slug } },
+			});
+		},
+		createProjectWithAssets(data) {
+			return client.$transaction(async (tx) => {
+				const project = await tx.project.create({
+					data: {
+						exhibitionId: data.exhibitionId,
+						slug: data.slug,
+						title: data.title,
+						summary: data.summary,
+						description: data.description,
+						status: data.status,
+						creatorId: data.creatorId,
+						members: {
+							create: data.members.map((member, index) => ({
+								name: member.name,
+								studentId: member.studentId,
+								sortOrder: member.sortOrder ?? index,
+								...(member.userId ? { userId: member.userId } : {}),
+							})),
+						},
+					},
+				});
+
+				let posterAssetId: number | null = null;
+				for (const savedFile of data.savedFiles) {
+					const asset = await tx.asset.create({
+						data: {
+							projectId: project.id,
+							kind: savedFile.kind,
+							storageKey: savedFile.storageKey,
+							playbackStorageKey: savedFile.playbackStorageKey ?? null,
+							originalName: savedFile.originalName,
+							mimeType: savedFile.mimeType,
+							playbackMimeType: savedFile.playbackMimeType ?? '',
+							sizeBytes: BigInt(savedFile.sizeBytes),
+							playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
+							playbackStatus: savedFile.playbackStatus ?? 'PENDING',
+							playbackError: savedFile.playbackError ?? '',
+							isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO',
+						},
+					});
+					if (savedFile.kind === 'POSTER' && posterAssetId === null) {
+						posterAssetId = asset.id;
+					}
+				}
+				if (posterAssetId !== null) {
+					await tx.project.update({
+						where: { id: project.id },
+						data: { posterAssetId },
+					});
+				}
+				return project;
+			});
+		},
+		createAsset(data) {
+			return client.asset.create({ data });
+		},
+		replaceOrCreateReplaceableAsset(projectId, kind, data, outbox) {
+			return assetMutation.replaceOrCreateReplaceableAsset(
+				projectId,
+				kind,
+				data,
+				outbox,
+			);
 		},
 	};
 }

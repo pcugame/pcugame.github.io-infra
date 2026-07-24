@@ -1,6 +1,6 @@
 import type { AssetKind, ProjectStatus, UserRole } from '@pcu/contracts';
 import { badRequest, conflict, forbidden, isUniqueConstraintError } from '../../../shared/errors.js';
-import type { UploadLimits } from '../../../shared/upload-limits.js';
+import type { UploadLimits } from '../../../shared/upload-policy.js';
 import { toSlug } from '../../../shared/slug.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import { generateUniqueSlug, nextSlugCandidate } from './slug.service.js';
@@ -17,7 +17,7 @@ import type { SubmitProjectRepository } from './ports.js';
 export interface SubmitProjectDependencies {
 	webPublicUrl: string;
 	repository: SubmitProjectRepository;
-	uploadLimits(role: UserRole): UploadLimits;
+	uploadLimits(role: UserRole): UploadLimits | Promise<UploadLimits>;
 	uploadSlots: { acquire(): void; release(): void };
 	createPipeline(): UploadPipelinePort;
 	multipartCollector: MultipartCollectorPort;
@@ -46,6 +46,15 @@ export type SubmitProjectAudience = 'admin' | 'user';
 
 export interface SubmitProjectOptions {
 	audience: SubmitProjectAudience;
+}
+
+export interface SubmitProjectResult {
+	id: number;
+	slug: string;
+	year: number;
+	status: ProjectStatus;
+	adminEditUrl: string;
+	publicUrl: string;
 }
 
 const USER_SUBMIT_FORBIDDEN_TOP_LEVEL_FIELDS = [
@@ -103,7 +112,7 @@ export async function submitProject(
 	deps: SubmitProjectDependencies,
 	input: MultipartCommandInput,
 	options: SubmitProjectOptions = { audience: 'admin' },
-) {
+): Promise<SubmitProjectResult> {
 	const user = input.actor;
 	const isAdminAudience = options.audience === 'admin';
 	if (isAdminAudience && user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
@@ -111,8 +120,10 @@ export async function submitProject(
 	}
 
 	const policyRole: UserRole = options.audience === 'user' ? 'USER' : user.role;
-	const limits = deps.uploadLimits(policyRole);
+	const limits = await deps.uploadLimits(policyRole);
 	const pipeline = deps.createPipeline();
+	let result: SubmitProjectResult | undefined;
+	let failure: unknown;
 
 	deps.uploadSlots.acquire();
 	try {
@@ -202,7 +213,7 @@ export async function submitProject(
 			}
 		}
 
-		return {
+		result = {
 			id: project.id,
 			slug: project.slug,
 			year: exhibition.year,
@@ -211,12 +222,30 @@ export async function submitProject(
 			publicUrl: `${deps.webPublicUrl}/years/${exhibition.year}/${slug}`,
 		};
 	} catch (err) {
-		await pipeline.rollbackCommitted();
-		throw err;
+		failure = err;
+		try {
+			await pipeline.rollbackCommitted();
+		} catch (rollbackError) {
+			failure = new AggregateError(
+				[err, rollbackError],
+				'Project submission and durable upload rollback failed',
+			);
+		}
 	} finally {
 		deps.uploadSlots.release();
-		await pipeline.cleanupTemp();
+		try {
+			await pipeline.cleanupTemp();
+		} catch (cleanupError) {
+			failure = failure === undefined
+				? cleanupError
+				: new AggregateError(
+						[failure, cleanupError],
+						'Project submission and temp cleanup failed',
+					);
+		}
 	}
+	if (failure !== undefined) throw failure;
+	return result!;
 }
 
 export function createSubmitProjectService(deps: SubmitProjectDependencies) {

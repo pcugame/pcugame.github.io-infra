@@ -169,9 +169,6 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 	}) {
 		const rollback = vi.fn(async () => { input.objects.delete(input.storageKey); });
 		const cleanup = vi.fn(async () => {});
-		const durableLoserCleanup = vi.fn(async (upload: { storageKey: string }) => {
-			input.objects.delete(upload.storageKey);
-		});
 		const mutationRepository = createProjectAssetMutationRepository(input.client, {
 			...ASSET_MUTATION_TRANSACTION_POLICY,
 			maxAttempts: input.maxAttempts ?? ASSET_MUTATION_TRANSACTION_POLICY.maxAttempts,
@@ -210,9 +207,8 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			assetUrl: (key) => `/assets/protected/${key}`,
 			bucketForKind: () => bucket,
 			deleteOrQueue: async (_bucket, key) => { input.objects.delete(key); },
-			deleteUnpersistedUpload: durableLoserCleanup,
 		});
-		return { service, rollback, cleanup, durableLoserCleanup };
+		return { service, rollback, cleanup };
 	}
 
 	async function expectProjectInvariants(projectId: number, objects: Set<string>) {
@@ -550,9 +546,6 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			}
 			await expect(loserResult).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
 			expect(loser.rollback).toHaveBeenCalledOnce();
-			expect(loser.durableLoserCleanup).toHaveBeenCalledWith(expect.objectContaining({
-				storageKey: loserKey,
-			}));
 			expect(objects).toEqual(new Set([winnerKey]));
 			await expect(control.asset.findUniqueOrThrow({ where: { id: oldAsset.id } }))
 				.resolves.toMatchObject({ status: 'DELETED', storageKey: oldKey });

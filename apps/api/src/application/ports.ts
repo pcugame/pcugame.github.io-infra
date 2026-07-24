@@ -114,6 +114,7 @@ export interface FileSystem {
 	mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
 	rename(from: string, to: string): Promise<void>;
 	remove(path: string): Promise<void>;
+	readRange(path: string, start: number, end: number): Promise<Buffer>;
 	createReadStream(path: string): Readable;
 	createWriteStream(path: string): NodeJS.WritableStream;
 }
