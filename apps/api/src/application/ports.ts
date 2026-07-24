@@ -76,6 +76,7 @@ export interface ObjectStorage {
 		bucket: string,
 		key: string,
 		range?: { start: number; end: number },
+		signal?: AbortSignal,
 	): Promise<ObjectStreamResult | null>;
 	listKeys(bucket: string, prefix: string): Promise<string[]>;
 	createMultipart(

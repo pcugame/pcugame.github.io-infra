@@ -295,11 +295,11 @@ async function routeApp(
 		...harness.graph,
 		bannedIpController: emptyRoute,
 		exhibitionController: emptyRoute,
+		importController: emptyRoute,
+		exportController: emptyRoute,
 		legacy: {
 			projectMultipartController: emptyRoute,
 			gameUploadController: emptyRoute,
-			importController: emptyRoute,
-			exportController: emptyRoute,
 		},
 	}), { prefix: '/api/admin' });
 	await app.ready();

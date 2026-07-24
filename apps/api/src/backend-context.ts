@@ -58,6 +58,10 @@ import {
 	createYearProductionGraph,
 	type YearProductionGraph,
 } from './modules/admin/year/composition.js';
+import {
+	createImportExportProductionGraph,
+	type ImportExportProductionGraph,
+} from './modules/admin/import-export.composition.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -208,6 +212,7 @@ export interface ProductionResourceFactories {
 		publicGraph: PublicProductionGraph,
 		projectMemberSettings: ProjectMemberSettingsProductionGraph,
 		year: YearProductionGraph,
+		importExport: ImportExportProductionGraph,
 	): MaybePromise<BackendRoutes>;
 }
 
@@ -270,14 +275,13 @@ async function loadProductionRoutes(
 	publicGraph: PublicProductionGraph,
 	projectMemberSettings: ProjectMemberSettingsProductionGraph,
 	year: YearProductionGraph,
+	importExport: ImportExportProductionGraph,
 ): Promise<BackendRoutes> {
-	const [admin, me, projectMultipart, gameUpload, importModule, exportModule] = await Promise.all([
+	const [admin, me, projectMultipart, gameUpload] = await Promise.all([
 		import('./modules/admin/admin.routes.js'),
 		import('./modules/me/me.routes.js'),
 		import('./modules/admin/project/multipart.compatibility.js'),
 		import('./modules/admin/game-upload/index.js'),
-		import('./modules/admin/import/index.js'),
-		import('./modules/admin/export/index.js'),
 	]);
 	return {
 		auth: auth.authController,
@@ -286,12 +290,11 @@ async function loadProductionRoutes(
 		admin: admin.createAdminRoutes({
 			...projectMemberSettings,
 			...year,
+			...importExport,
 			bannedIpController: assetsBanned.bannedIpController,
 			legacy: {
 				projectMultipartController: projectMultipart.projectMultipartCompatibilityController,
 				gameUploadController: gameUpload.gameUploadController,
-				importController: importModule.importController,
-				exportController: exportModule.exportController,
 			},
 		}),
 		me: me.meRoutes,
@@ -483,6 +486,20 @@ export async function createProductionBackendContext(
 			clock,
 			ids,
 		});
+		const importExport = createImportExportProductionGraph({
+			config,
+			prisma,
+			storage,
+			fileSystem,
+			exportProgress,
+			clock,
+			ids,
+			logger,
+		});
+		owner.register('importExport', owned(
+			importExport,
+			() => importExport.close(),
+		));
 		const authSessions = auth.repository;
 		const maintenance: BackgroundMaintenance = {
 			async recoverStaleUploads() {
@@ -517,6 +534,7 @@ export async function createProductionBackendContext(
 			publicGraph,
 			projectMemberSettings,
 			year,
+			importExport,
 		);
 
 		return {

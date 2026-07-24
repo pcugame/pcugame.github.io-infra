@@ -1,12 +1,19 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyPluginAsync } from 'fastify';
 import type { ExportResult, ExportStatusResponse } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { requireRole } from '../../../plugins/auth.js';
 import { badRequest } from '../../../shared/errors.js';
-import { env } from '../../../config/env.js';
-import { exportService } from './runtime.js';
+import type { createExportService } from './service.js';
 
-export async function exportController(app: FastifyInstance): Promise<void> {
+export interface ExportControllerDependencies {
+	service: ReturnType<typeof createExportService>;
+	outDir?: string;
+}
+
+export function createExportController(
+	deps: ExportControllerDependencies,
+): FastifyPluginAsync {
+	return async function exportController(app): Promise<void> {
 	/**
 	 * POST /export — export assets from S3 to NAS filesystem.
 	 *
@@ -23,7 +30,7 @@ export async function exportController(app: FastifyInstance): Promise<void> {
 		'/export',
 		{ preHandler: requireRole('ADMIN') },
 		async (request, reply) => {
-			const nasPath = env().NAS_EXPORT_PATH;
+			const nasPath = deps.outDir;
 			if (!nasPath) throw badRequest('NAS_EXPORT_PATH is not configured');
 
 			const body = (request.body ?? {});
@@ -34,18 +41,23 @@ export async function exportController(app: FastifyInstance): Promise<void> {
 
 			// Build an AbortController tied to the client connection
 			const ac = new AbortController();
-			request.raw.once('close', () => {
+			const onClose = () => {
 				if (!reply.sent) ac.abort();
-			});
-
-			const result = await exportService.exportAssets({
-				outDir: nasPath,
-				year,
-				dryRun: body.dryRun ?? false,
-				signal: ac.signal,
-			});
-
-			sendOk<ExportResult>(reply, result);
+			};
+			request.raw.once('aborted', onClose);
+			reply.raw.once('close', onClose);
+			try {
+				const result = await deps.service.exportAssets({
+					outDir: nasPath,
+					year,
+					dryRun: body.dryRun ?? false,
+					signal: ac.signal,
+				});
+				sendOk<ExportResult>(reply, result);
+			} finally {
+				request.raw.off('aborted', onClose);
+				reply.raw.off('close', onClose);
+			}
 		},
 	);
 
@@ -59,8 +71,9 @@ export async function exportController(app: FastifyInstance): Promise<void> {
 		'/export/status',
 		{ preHandler: requireRole('ADMIN') },
 		async (_request, reply) => {
-			const progress = exportService.getExportProgress();
+			const progress = deps.service.getExportProgress();
 			sendOk<ExportStatusResponse>(reply, { running: progress !== null, progress });
 		},
 	);
+	};
 }
