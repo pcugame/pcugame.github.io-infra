@@ -181,7 +181,6 @@ describe('server startup and shutdown ownership boundary', () => {
 	});
 
 	it.each([
-		['recovery', 0, 0],
 		['context start', 1, 0],
 		['listen', 1, 1],
 	] as const)(
@@ -191,18 +190,12 @@ describe('server startup and shutdown ownership boundary', () => {
 			const events: string[] = [];
 			const gate = deferred();
 			const entered = deferred();
-			const recovery = async () => {
-				if (stage !== 'recovery') return;
-				entered.resolve();
-				await gate.promise;
-			};
 			const startContext = async () => {
 				if (stage !== 'context start') return;
 				entered.resolve();
 				await gate.promise;
 			};
 			const { context, start, closeS3, closePrisma } = contextHarness(events, {
-				recover: recovery,
 				start: startContext,
 			});
 			const listen = vi.fn(async () => {

@@ -114,6 +114,7 @@ function prismaHarness(initialBans: string[] = []) {
 			delete: calls.bannedDelete,
 			upsert: calls.bannedUpsert,
 		},
+		gameUploadSession: { findMany: vi.fn(async () => []) },
 		orphanObject: { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn() },
 		$queryRaw: vi.fn(),
 		authSession: { findUnique: vi.fn(), update: vi.fn(), deleteMany: vi.fn(async () => ({ count: 0 })) },

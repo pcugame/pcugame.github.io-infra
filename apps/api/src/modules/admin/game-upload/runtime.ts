@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { env } from '../../../config/env.js';
 import { logger } from '../../../lib/logger.js';
+import { prisma } from '../../../lib/prisma.js';
 import { isAcceptingNewWork } from '../../../lib/lifecycle.js';
 import {
 	abortMultipartUpload,
@@ -20,13 +21,14 @@ import {
 import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
 import { createWebglDeploymentKeys } from '../../webgl/paths.js';
 import { completedUploadFinalizer } from './finalize-completed-upload.runtime.js';
-import * as repository from './repository.js';
+import { createGameUploadRepository } from './repository.js';
 import { createGameUploadService } from './service.js';
 import type { GameUploadServiceDependencies } from './ports.js';
 
 function dependencies(): GameUploadServiceDependencies {
 	const config = env();
 	const protectedBucket = config.S3_BUCKET_PROTECTED;
+	const repository = createGameUploadRepository(prisma);
 	return {
 		repository,
 		storage: {
@@ -65,7 +67,7 @@ function dependencies(): GameUploadServiceDependencies {
 		},
 		roleGameMaxBytes: (role) => getUploadLimits(role).gameMaxBytes,
 		storageKey: (uploadKind, projectId) => uploadKind === 'WEBGL'
-			? createWebglDeploymentKeys(projectId).sourceKey
+			? createWebglDeploymentKeys(projectId, randomUUID()).sourceKey
 			: generateStorageKey('zip'),
 		deleteOrQueue: (key, reason, context) => safeDeleteObject(
 			protectedBucket,

@@ -25,6 +25,21 @@ vi.mock('../config/env.js', () => ({
 }));
 
 vi.mock('../modules/admin/game-upload/repository.js', () => ({
+	createGameUploadRepository: () => ({
+		findSessionById: mocks.findSessionById,
+		upsertPartEtag: mocks.upsertPartEtag,
+		cancelSessionAndClearActive: vi.fn(),
+		findExhibitionById: mocks.findExhibitionById,
+		createSessionReplacingActive: mocks.createSessionReplacingActive,
+		findActiveSessionsForListing: vi.fn().mockResolvedValue([]),
+		findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
+		findPartsBySessionId: vi.fn().mockResolvedValue([]),
+		revertToPending: vi.fn(),
+		transitionToCompleting: vi.fn(),
+		markFailed: vi.fn(),
+		finalizeCompletedSession: vi.fn(),
+		finalizeCompletedWebglSession: vi.fn(),
+	}),
 	findSessionById: mocks.findSessionById,
 	upsertPartEtag: mocks.upsertPartEtag,
 	updateSessionStatus: mocks.updateSessionStatus,
@@ -41,6 +56,8 @@ vi.mock('../modules/admin/game-upload/repository.js', () => ({
 	finalizeCompletedSession: vi.fn(),
 	finalizeCompletedWebglSession: vi.fn(),
 }));
+
+vi.mock('../lib/prisma.js', () => ({ prisma: {} }));
 
 vi.mock('../lib/storage.js', () => ({
 	createMultipartUpload: mocks.createMultipartUpload,

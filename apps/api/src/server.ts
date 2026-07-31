@@ -75,18 +75,8 @@ export function createServerRuntime(deps: {
 		startPromise = (async () => {
 			if (await finishShutdownIfRequested()) return;
 			try {
-				// Recovery is explicit startup I/O. Context construction itself only
-				// allocates clients/state; feature warmups move here in later tickets.
-				try {
-					await context.maintenance.recoverStaleUploads();
-				} catch (error) {
-					context.logger.error(
-						error,
-						'Boot sweep for stale COMPLETING sessions failed — continuing',
-					);
-				}
-				if (await finishShutdownIfRequested()) return;
-
+				// Context start owns warmup, stale-upload recovery, and scheduler start
+				// in dependency order. Construction and route registration stay I/O-free.
 				await context.start();
 				if (await finishShutdownIfRequested()) return;
 				await app.listen({ port: config.PORT, host: '0.0.0.0' });

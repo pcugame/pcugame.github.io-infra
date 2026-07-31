@@ -233,9 +233,7 @@ async function routeApp(
 		importController: graph.importController,
 		exportController: graph.exportController,
 		projectMultipartController: emptyRoute,
-		legacy: {
-			gameUploadController: emptyRoute,
-		},
+		gameUploadController: emptyRoute,
 	}));
 }
 
@@ -302,9 +300,7 @@ async function contextHarness() {
 			importController: importExport.importController,
 			exportController: importExport.exportController,
 			projectMultipartController: emptyRoute,
-			legacy: {
-				gameUploadController: emptyRoute,
-			},
+			gameUploadController: emptyRoute,
 		}),
 	});
 	const context = await createProductionBackendContext(config, {

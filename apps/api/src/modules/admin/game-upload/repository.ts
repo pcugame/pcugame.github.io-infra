@@ -1,5 +1,10 @@
-import { prisma } from '../../../lib/prisma.js';
-import { Prisma, type AssetKind, type AssetPlaybackStatus, type UploadKind } from '../../../generated/prisma/client.js';
+import {
+	Prisma,
+	type AssetKind,
+	type AssetPlaybackStatus,
+	type PrismaClient,
+	type UploadKind,
+} from '../../../generated/prisma/client.js';
 import { ActiveUploadCompletionInProgressError } from './ports.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
 import { webglDeletionTargetsByEntry } from '../../webgl/deletion-targets.js';
@@ -10,13 +15,13 @@ import {
 
 type TxClient = Prisma.TransactionClient;
 
-interface GameReplacementOutboxConfig {
+export interface GameReplacementOutboxConfig {
 	bucket: string;
 	reason: string;
 	playbackReason: string;
 }
 
-interface WebglReplacementOutboxConfig {
+export interface WebglReplacementOutboxConfig {
 	publicBucket: string;
 	protectedBucket: string;
 	reason: string;
@@ -51,12 +56,13 @@ function isRetryableTransactionError(err: unknown): boolean {
 
 export async function withSerializableRetry<T>(
 	fn: (tx: TxClient) => Promise<T>,
+	client: PrismaClient,
 	maxAttempts = 3,
 ): Promise<T> {
 	let lastErr: unknown;
 	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
 		try {
-			return await prisma.$transaction(fn, serializableOptions);
+			return await client.$transaction(fn, serializableOptions);
 		} catch (err) {
 			lastErr = err;
 			if (!isRetryableTransactionError(err) || attempt === maxAttempts) {
@@ -68,8 +74,11 @@ export async function withSerializableRetry<T>(
 }
 
 /** Find a game upload session by ID */
-export function findSessionById(id: string): Promise<UploadSessionRecord | null> {
-	return prisma.gameUploadSession.findUnique({
+export function findSessionById(
+	id: string,
+	client: PrismaClient,
+): Promise<UploadSessionRecord | null> {
+	return client.gameUploadSession.findUnique({
 		where: { id },
 		...sessionWithProjectAndParts,
 	});
@@ -90,7 +99,10 @@ type CreateSessionData = {
 };
 
 /** Create a new session and replace the project's active slot atomically. */
-export function createSessionReplacingActive(data: CreateSessionData) {
+export function createSessionReplacingActive(
+	data: CreateSessionData,
+	client: PrismaClient,
+) {
 	return withSerializableRetry(async (tx) => {
 		const active = await tx.gameUploadActiveSession.findUnique({
 			where: {
@@ -137,18 +149,18 @@ export function createSessionReplacingActive(data: CreateSessionData) {
 		});
 
 		return { session, replacedSessions };
-	});
+	}, client);
 }
 
 /** Update session status (e.g. cancel, expire) */
-export function updateSessionStatus(id: string, status: string) {
-	return prisma.gameUploadSession.update({
+export function updateSessionStatus(id: string, status: string, client: PrismaClient) {
+	return client.gameUploadSession.update({
 		where: { id },
 		data: { status },
 	});
 }
 
-export function cancelSessionAndClearActive(id: string) {
+export function cancelSessionAndClearActive(id: string, client: PrismaClient) {
 	return withSerializableRetry(async (tx) => {
 		const result = await tx.gameUploadSession.updateMany({
 			where: { id, status: 'PENDING' },
@@ -160,12 +172,12 @@ export function cancelSessionAndClearActive(id: string) {
 			});
 		}
 		return result;
-	});
+	}, client);
 }
 
 /** Find all active (PENDING/COMPLETING) sessions for a project */
-export function findActiveSessions(projectId: number) {
-	return prisma.gameUploadSession.findMany({
+export function findActiveSessions(projectId: number, client: PrismaClient) {
+	return client.gameUploadSession.findMany({
 		where: {
 			projectId,
 			status: { in: ['PENDING', 'COMPLETING'] },
@@ -177,8 +189,9 @@ export function findActiveSessions(projectId: number) {
 export function findActiveSessionsForListing(
 	projectId: number,
 	opts: { userId?: number },
+	client: PrismaClient,
 ): Promise<UploadSessionWithParts[]> {
-	return prisma.gameUploadSession.findMany({
+	return client.gameUploadSession.findMany({
 		where: {
 			projectId,
 			status: { in: ['PENDING', 'COMPLETING'] },
@@ -193,8 +206,8 @@ export function findActiveSessionsForListing(
  * Atomically transition session from PENDING to COMPLETING.
  * Returns count=0 if another request already transitioned it.
  */
-export function transitionToCompleting(sessionId: string) {
-	return prisma.gameUploadSession.updateMany({
+export function transitionToCompleting(sessionId: string, client: PrismaClient) {
+	return client.gameUploadSession.updateMany({
 		where: { id: sessionId, status: 'PENDING' },
 		data: { status: 'COMPLETING' },
 	});
@@ -205,8 +218,9 @@ export async function upsertPartEtag(
 	sessionId: string,
 	partNumber: number,
 	etag: string,
+	client: PrismaClient,
 ) {
-	await prisma.gameUploadPart.upsert({
+	await client.gameUploadPart.upsert({
 		where: {
 			game_upload_part_session_part: {
 				sessionId,
@@ -216,28 +230,32 @@ export async function upsertPartEtag(
 		update: { etag },
 		create: { sessionId, partNumber, etag },
 	});
-	return prisma.gameUploadPart.findMany({
+	return client.gameUploadPart.findMany({
 		where: { sessionId },
 		orderBy: { partNumber: 'asc' },
 	});
 }
 
-export function findPartsBySessionId(sessionId: string) {
-	return prisma.gameUploadPart.findMany({
+export function findPartsBySessionId(sessionId: string, client: PrismaClient) {
+	return client.gameUploadPart.findMany({
 		where: { sessionId },
 		orderBy: { partNumber: 'asc' },
 	});
 }
 
 /** Revert a COMPLETING session back to PENDING (for retry on error) */
-export function revertToPending(sessionId: string) {
-	return prisma.gameUploadSession.updateMany({
+export function revertToPending(sessionId: string, client: PrismaClient) {
+	return client.gameUploadSession.updateMany({
 		where: { id: sessionId, status: 'COMPLETING' },
 		data: { status: 'PENDING' },
 	});
 }
 
-export function markFailed(sessionId: string, storageKey?: string | null) {
+export function markFailed(
+	sessionId: string,
+	storageKey: string | null | undefined,
+	client: PrismaClient,
+) {
 	return withSerializableRetry(async (tx) => {
 		const result = await tx.gameUploadSession.updateMany({
 			where: { id: sessionId, status: { in: ['PENDING', 'COMPLETING'] } },
@@ -250,7 +268,7 @@ export function markFailed(sessionId: string, storageKey?: string | null) {
 			where: { sessionId },
 		});
 		return result;
-	});
+	}, client);
 }
 
 export function finalizeCompletedSession(
@@ -270,8 +288,9 @@ export function finalizeCompletedSession(
 		isPublic: boolean;
 	},
 	outbox: GameReplacementOutboxConfig,
+	client: PrismaClient,
 ): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
-	return withAssetMutationTransaction(prisma, async (tx) => {
+	return withAssetMutationTransaction(client, async (tx) => {
 		const projects = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
 			SELECT "id"
 			FROM "projects"
@@ -387,6 +406,7 @@ export function finalizeCompletedWebglSession(
 	entryKey: string,
 	sourceKey: string,
 	outbox: WebglReplacementOutboxConfig,
+	client: PrismaClient,
 ): Promise<{ oldEntryKey: string }> {
 	return withSerializableRetry(async (tx) => {
 		const project = await tx.project.findUniqueOrThrow({
@@ -414,7 +434,7 @@ export function finalizeCompletedWebglSession(
 			where: { sessionId },
 		});
 		return { oldEntryKey: project.webglEntryKey };
-	});
+	}, client);
 }
 
 /**
@@ -422,13 +442,83 @@ export function finalizeCompletedWebglSession(
  * or forced shutdown and would otherwise never progress. Called on boot so a restart
  * gives users a chance to retry rather than waiting for TTL expiry.
  */
-export function findStaleCompletingSessions(cutoff: Date) {
-	return prisma.gameUploadSession.findMany({
+export function findStaleCompletingSessions(cutoff: Date, client: PrismaClient) {
+	return client.gameUploadSession.findMany({
 		where: { status: 'COMPLETING', updatedAt: { lt: cutoff } },
 	});
 }
 
 /** Find an exhibition by ID */
-export function findExhibitionById(id: number) {
-	return prisma.exhibition.findUnique({ where: { id } });
+export function findExhibitionById(id: number, client: PrismaClient) {
+	return client.exhibition.findUnique({ where: { id } });
+}
+
+/**
+ * Bind every game-upload query and transaction to one context-owned Prisma
+ * client. No query helper reaches a process-global client.
+ */
+export function createGameUploadRepository(client: PrismaClient) {
+	return {
+		findSessionById: (id: string) => findSessionById(id, client),
+		createSessionReplacingActive: (data: CreateSessionData) => (
+			createSessionReplacingActive(data, client)
+		),
+		cancelSessionAndClearActive: (id: string) => cancelSessionAndClearActive(id, client),
+		upsertPartEtag: (
+			sessionId: string,
+			partNumber: number,
+			etag: string,
+		) => upsertPartEtag(sessionId, partNumber, etag, client),
+		transitionToCompleting: (sessionId: string) => transitionToCompleting(sessionId, client),
+		findPartsBySessionId: (sessionId: string) => findPartsBySessionId(sessionId, client),
+		revertToPending: (sessionId: string) => revertToPending(sessionId, client),
+		markFailed: (sessionId: string, storageKey?: string | null) => (
+			markFailed(sessionId, storageKey, client)
+		),
+		findStaleCompletingSessions: (cutoff: Date) => findStaleCompletingSessions(cutoff, client),
+		findActiveSessionsForListing: (
+			projectId: number,
+			options: { userId?: number },
+		) => findActiveSessionsForListing(projectId, options, client),
+		findExhibitionById: (id: number) => findExhibitionById(id, client),
+		finalizeCompletedSession: (
+			sessionId: string,
+			projectId: number,
+			kind: AssetKind,
+			data: {
+				storageKey: string;
+				playbackStorageKey?: string | null;
+				originalName: string;
+				mimeType: string;
+				playbackMimeType?: string;
+				sizeBytes: bigint;
+				playbackSizeBytes?: bigint;
+				playbackStatus?: AssetPlaybackStatus;
+				playbackError?: string;
+				isPublic: boolean;
+			},
+			outbox: GameReplacementOutboxConfig,
+		) => finalizeCompletedSession(
+			sessionId,
+			projectId,
+			kind,
+			data,
+			outbox,
+			client,
+		),
+		finalizeCompletedWebglSession: (
+			sessionId: string,
+			projectId: number,
+			entryKey: string,
+			sourceKey: string,
+			outbox: WebglReplacementOutboxConfig,
+		) => finalizeCompletedWebglSession(
+			sessionId,
+			projectId,
+			entryKey,
+			sourceKey,
+			outbox,
+			client,
+		),
+	};
 }

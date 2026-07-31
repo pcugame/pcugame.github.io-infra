@@ -524,7 +524,7 @@ async function routeApp(
 		importController: emptyRoute,
 		exportController: emptyRoute,
 		projectMultipartController: harness.graph.projectMultipartController,
-		legacy: { gameUploadController: emptyRoute },
+		gameUploadController: emptyRoute,
 	}), { prefix: '/api/admin' });
 	await app.register(harness.graph.meController, { prefix: '/api/me' });
 	await app.ready();
@@ -624,7 +624,7 @@ async function contextAppHarness(
 							exportController: emptyRoute,
 							projectMultipartController:
 								projectMultipart.projectMultipartController,
-							legacy: { gameUploadController: emptyRoute },
+							gameUploadController: emptyRoute,
 						})),
 						me: actorPlugin(projectMultipart.meController),
 					};

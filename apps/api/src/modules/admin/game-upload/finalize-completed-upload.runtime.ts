@@ -1,5 +1,6 @@
 import { env } from '../../../config/env.js';
 import { logger } from '../../../lib/logger.js';
+import { prisma } from '../../../lib/prisma.js';
 import { readObjectRange } from '../../../lib/storage.js';
 import { deleteDurablyQueuedObject } from '../../../object-deletion.js';
 import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
@@ -7,9 +8,9 @@ import {
 	deleteDurablyQueuedWebglDeploymentByEntry,
 	deployWebglSource,
 	rollbackWebglPublicDeployment,
-} from '../../webgl/deployment.js';
+} from '../../webgl/deployment.runtime.js';
 import { webglUrl } from '../../webgl/paths.js';
-import * as repository from './repository.js';
+import { createGameUploadRepository } from './repository.js';
 import { createCompletedUploadFinalizer } from './finalize-completed-upload.service.js';
 
 type Finalizer = ReturnType<typeof createCompletedUploadFinalizer>;
@@ -19,6 +20,7 @@ let productionFinalizer: Finalizer | undefined;
 function getProductionFinalizer(): Finalizer {
 	if (productionFinalizer) return productionFinalizer;
 	const config = env();
+	const repository = createGameUploadRepository(prisma);
 	productionFinalizer = createCompletedUploadFinalizer({
 		readHeader: (key) => readObjectRange(config.S3_BUCKET_PROTECTED, key, 0, 7),
 		validateGameArchive: async (key, size) => {
