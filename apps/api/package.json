@@ -16,7 +16,9 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:import": "tsx prisma/seed.ts --import ../db/legacy-import.json",
     "lint": "eslint src prisma --max-warnings=0 && tsc --noEmit",
-    "architecture": "depcruise --config .dependency-cruiser.cjs src",
+    "architecture:guard": "node scripts/architecture-guard.mjs src",
+    "architecture:self-test": "node scripts/architecture-self-test.mjs",
+    "architecture": "npm run architecture:guard && npm run architecture:self-test && depcruise --config .dependency-cruiser.cjs src",
     "pretest": "npm --prefix ../.. run build -w @pcu/contracts",
     "test": "vitest run"
   },

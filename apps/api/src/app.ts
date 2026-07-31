@@ -124,11 +124,11 @@ export async function buildApp(options: BuildAppOptions = {}) {
 	// reducing import-time side effects, this makes the composition seam real:
 	// no Prisma/S3/OAuth adapter is loaded unless the production default is used.
 	const context = options.context ?? await (async () => {
-		const [{ env }, { createProductionBackendContext }] = await Promise.all([
+		const [{ loadEnv }, { createProductionBackendContext }] = await Promise.all([
 			import('./config/env.js'),
 			import('./backend-context.js'),
 		]);
-		return createProductionBackendContext(env());
+		return createProductionBackendContext(loadEnv());
 	})();
 	let partialApp: FastifyInstance | undefined;
 	try {

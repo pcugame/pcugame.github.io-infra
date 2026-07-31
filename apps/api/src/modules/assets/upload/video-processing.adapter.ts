@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import { promises as nodeFileSystem } from 'node:fs';
 import { promisify } from 'node:util';
 import type { FileSystem } from '../../../application/ports.js';
 import type {
@@ -140,25 +139,3 @@ export function createNodeVideoProcessingOperations(
 		stat: (filePath) => fileSystem.stat(filePath),
 	};
 }
-
-const compatibilityFileSystem: VideoFileSystem = {
-	async stat(path) {
-		return nodeFileSystem.stat(path);
-	},
-	async remove(path) {
-		await nodeFileSystem.unlink(path);
-	},
-	async readRange(path, start, end) {
-		const handle = await nodeFileSystem.open(path, 'r');
-		try {
-			const buffer = Buffer.alloc(end - start + 1);
-			const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
-			return buffer.subarray(0, bytesRead);
-		} finally {
-			await handle.close();
-		}
-	},
-};
-
-export const nodeVideoProcessingOperations =
-	createNodeVideoProcessingOperations(compatibilityFileSystem);

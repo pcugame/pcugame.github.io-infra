@@ -21,14 +21,6 @@ export interface LifecycleResource {
 	close(): void;
 }
 
-export async function startOwnedResources(
-	resources: readonly { start?(): void | Promise<void> }[],
-): Promise<void> {
-	for (const resource of resources) {
-		await resource.start?.();
-	}
-}
-
 export function createLifecycle(deps: {
 	clock?: LifecycleClock;
 	scheduler?: LifecycleScheduler;
@@ -71,13 +63,3 @@ export function createLifecycle(deps: {
 		},
 	};
 }
-
-const processLifecycle = createLifecycle();
-
-export const getLifecycleState = processLifecycle.getState;
-export const setLifecycleState = processLifecycle.setState;
-export const isAcceptingNewWork = processLifecycle.isAcceptingNewWork;
-export const getInFlight = processLifecycle.getInFlight;
-export const incInFlight = processLifecycle.requestStarted;
-export const decInFlight = processLifecycle.requestFinished;
-export const waitForDrain = processLifecycle.waitForDrain;

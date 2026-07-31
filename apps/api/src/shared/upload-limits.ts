@@ -2,11 +2,9 @@
  * Role-based upload limits and streaming enforcement utilities.
  *
  * USER gets tighter limits. OPERATOR/ADMIN get higher limits.
- * All values are configurable via env() — see config/env.ts.
+ * Stateful concurrency is created explicitly by the composition root.
  */
 
-import type { UserRole } from '@pcu/contracts';
-import { env } from '../config/env.js';
 import { AppError } from './errors.js';
 import type { UploadLimits } from './upload-policy.js';
 
@@ -18,33 +16,6 @@ export {
 	kindLimitForMime,
 	type UploadLimits,
 } from './upload-policy.js';
-
-// ── Limit resolution ─────────────────────────────────────────
-
-export function getUploadLimits(role: UserRole): UploadLimits {
-	const cfg = env();
-	const isPrivileged = role === 'ADMIN' || role === 'OPERATOR';
-
-	if (isPrivileged) {
-		return {
-			posterMaxBytes: cfg.UPLOAD_PRIVILEGED_IMAGE_MAX_MB * 1024 * 1024,
-			imageMaxBytes: cfg.UPLOAD_PRIVILEGED_IMAGE_MAX_MB * 1024 * 1024,
-			gameMaxBytes: cfg.UPLOAD_PRIVILEGED_GAME_MAX_MB * 1024 * 1024,
-			videoMaxBytes: 1024 * 1024 * 1024,
-			requestMaxBytes: cfg.UPLOAD_PRIVILEGED_REQUEST_MAX_MB * 1024 * 1024,
-			maxFiles: cfg.UPLOAD_PRIVILEGED_MAX_FILES,
-		};
-	}
-
-	return {
-		posterMaxBytes: cfg.UPLOAD_USER_IMAGE_MAX_MB * 1024 * 1024,
-		imageMaxBytes: cfg.UPLOAD_USER_IMAGE_MAX_MB * 1024 * 1024,
-		gameMaxBytes: cfg.UPLOAD_USER_GAME_MAX_MB * 1024 * 1024,
-		videoMaxBytes: 200 * 1024 * 1024,
-		requestMaxBytes: cfg.UPLOAD_USER_REQUEST_MAX_MB * 1024 * 1024,
-		maxFiles: cfg.UPLOAD_USER_MAX_FILES,
-	};
-}
 
 // ── Concurrent upload semaphore ──────────────────────────────
 
@@ -60,7 +31,6 @@ export interface UploadConcurrencyLimiter {
 	acquire(override?: number): void;
 	release(): void;
 	activeCount(): number;
-	reset(): void;
 	close(): void;
 }
 
@@ -85,7 +55,6 @@ export function createUploadLimiter(maxConcurrent: () => number): UploadConcurre
 			if (activeUploads > 0) activeUploads--;
 		},
 		activeCount: () => activeUploads,
-		reset: () => { activeUploads = 0; },
 		close(): void {
 			if (closed) return;
 			closed = true;
@@ -93,10 +62,3 @@ export function createUploadLimiter(maxConcurrent: () => number): UploadConcurre
 		},
 	};
 }
-
-const processUploadLimiter = createUploadLimiter(() => env().UPLOAD_MAX_CONCURRENT);
-
-export const acquireUploadSlot = processUploadLimiter.acquire;
-export const releaseUploadSlot = processUploadLimiter.release;
-export const activeUploadCount = processUploadLimiter.activeCount;
-export const _resetActiveUploads = processUploadLimiter.reset;

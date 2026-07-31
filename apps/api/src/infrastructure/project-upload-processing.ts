@@ -7,7 +7,7 @@ import { validateProjectUploadFile } from '../modules/admin/project/project-file
 import { processImage } from '../modules/assets/upload/image-processing.js';
 import { processPdf } from '../modules/assets/upload/pdf-processing.js';
 import { processVideo } from '../modules/assets/upload/video-processing.js';
-import { createNodeVideoProcessingOperations } from '../modules/assets/upload/video-processing.compatibility.js';
+import { createNodeVideoProcessingOperations } from '../modules/assets/upload/video-processing.adapter.js';
 
 /**
  * Node/sharp/ffmpeg adapter. The project application graph sees only

@@ -25,16 +25,8 @@ function createPrismaAdapter(databaseUrl: string): PrismaPg {
   );
 }
 
-export function createPrismaClient(
-  options?: PrismaClientOptions,
-): PrismaClient {
-  return createPrismaClientForDatabase(process.env['DATABASE_URL'] ?? '', options);
-}
-
 /**
- * Production composition entry point. Unlike the compatibility helper above,
- * this never consults process.env and therefore cannot silently connect a
- * context to a different database than the config it was built with.
+ * Construct a Prisma client for an explicit database URL.
  */
 export function createPrismaClientForDatabase(
   databaseUrl: string,

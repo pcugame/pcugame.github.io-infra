@@ -1,34 +1,59 @@
 import { Readable } from 'node:stream';
-import { promises as fsp } from 'node:fs';
+import { createWriteStream, promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createExportFileWriter } from '../modules/admin/export/file.adapter.js';
+import {
+	createExportProgressStore,
+	createExportService,
+} from '../modules/admin/export/service.js';
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	findProjectsWithAssets: vi.fn(),
-	s3Send: vi.fn(),
-}));
-
-vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
-	loadEnv: () => ({ ...defaultTestEnv }),
-}));
-vi.mock('../modules/admin/export/repository.js', () => ({
-	createExportRepository: () => ({ findProjectsWithAssets: mocks.findProjectsWithAssets }),
-}));
-vi.mock('../lib/s3.js', () => ({
-	s3: () => ({ send: mocks.s3Send }),
-	bucketForKind: vi.fn(() => 'bucket'),
-}));
-
-import { exportAssets, getExportProgress } from '../modules/admin/export/runtime.js';
+	getObject: vi.fn(),
+};
 
 const tempDirs: string[] = [];
+let exportService: ReturnType<typeof createExportService>;
+let exportProgress: ReturnType<typeof createExportProgressStore>;
+let fileSequence = 0;
 
 describe('NAS WebGL export', () => {
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => {
+		vi.clearAllMocks();
+		fileSequence = 0;
+		exportProgress = createExportProgressStore();
+		const fileWriter = createExportFileWriter({
+			ids: { next: () => `test-${++fileSequence}` },
+			getObject: mocks.getObject,
+			createWriteStream,
+			rename: fsp.rename,
+			remove: fsp.unlink,
+			logCleanupError: vi.fn(),
+		});
+		exportService = createExportService({
+			findProjects: mocks.findProjectsWithAssets,
+			async pathExists(path) {
+				try {
+					await fsp.access(path);
+					return true;
+				} catch {
+					return false;
+				}
+			},
+			ensureDirectory: (path) => fsp.mkdir(path, { recursive: true }).then(() => undefined),
+			saveObject: fileWriter.saveObject,
+			bucketForKind: () => 'bucket',
+			protectedBucket: 'pcu-protected',
+			now: () => 0,
+			logWarn: vi.fn(),
+			logError: vi.fn(),
+		}, exportProgress);
+	});
 	afterEach(async () => {
+		await exportService.close();
+		exportProgress.close();
 		await Promise.all(tempDirs.splice(0).map((dir) => fsp.rm(dir, { recursive: true, force: true })));
 	});
 
@@ -49,7 +74,7 @@ describe('NAS WebGL export', () => {
 			}],
 		}]);
 
-		const result = await exportAssets({ outDir: '/mnt/nas', dryRun: true });
+		const result = await exportService.exportAssets({ outDir: '/mnt/nas', dryRun: true });
 		expect(result.totalFiles).toBe(2);
 		expect(result.paths).toEqual([
 			'/mnt/nas/ExportedAssets/2026_졸업전시/작품_20260001학생/game.zip',
@@ -67,7 +92,7 @@ describe('NAS WebGL export', () => {
 			members: [],
 			assets: [],
 		}]);
-		const result = await exportAssets({ outDir: '/mnt/nas', dryRun: true });
+		const result = await exportService.exportAssets({ outDir: '/mnt/nas', dryRun: true });
 		expect(result).toMatchObject({ projects: 1, totalFiles: 1, failed: 0 });
 		expect(result.paths[0]).toBe('/mnt/nas/ExportedAssets/2026/웹게임/webgl/webgl.zip');
 	});
@@ -83,14 +108,14 @@ describe('NAS WebGL export', () => {
 			assets: [],
 		}]);
 		let progressKind: string | undefined;
-		mocks.s3Send.mockImplementation(async () => {
-			progressKind = getExportProgress()?.currentProjectFiles[0]?.kind;
-			return { Body: Readable.from([Buffer.from('original-webgl-zip')]) };
+		mocks.getObject.mockImplementation(async () => {
+			progressKind = exportService.getExportProgress()?.currentProjectFiles[0]?.kind;
+			return Readable.from([Buffer.from('original-webgl-zip')]);
 		});
 		const outDir = await fsp.mkdtemp(join(tmpdir(), 'pcu-webgl-export-'));
 		tempDirs.push(outDir);
 
-		const first = await exportAssets({ outDir });
+		const first = await exportService.exportAssets({ outDir });
 		const exportedPath = join(
 			outDir,
 			'ExportedAssets',
@@ -102,13 +127,10 @@ describe('NAS WebGL export', () => {
 		expect(first).toMatchObject({ downloaded: 1, skipped: 0, failed: 0 });
 		expect(await fsp.readFile(exportedPath, 'utf8')).toBe('original-webgl-zip');
 		expect(progressKind).toBe('WEBGL');
-		expect(mocks.s3Send.mock.calls[0]?.[0]?.input).toEqual({
-			Bucket: 'pcu-protected',
-			Key: sourceKey,
-		});
+		expect(mocks.getObject).toHaveBeenCalledWith('pcu-protected', sourceKey, expect.any(AbortSignal));
 
-		const second = await exportAssets({ outDir });
+		const second = await exportService.exportAssets({ outDir });
 		expect(second).toMatchObject({ downloaded: 0, skipped: 1, failed: 0 });
-		expect(mocks.s3Send).toHaveBeenCalledTimes(1);
+		expect(mocks.getObject).toHaveBeenCalledTimes(1);
 	});
 });

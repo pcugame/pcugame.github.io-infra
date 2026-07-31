@@ -3,12 +3,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createObjectDeletionCoordinator } from '../application/object-deletion.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
-import { prisma as productionPrisma } from '../lib/prisma.js';
 import { createAssetsRepository } from '../modules/assets/repository.js';
 import { createAssetsService } from '../modules/assets/service.js';
 import { createCompletedUploadFinalizer } from '../modules/admin/game-upload/finalize-completed-upload.service.js';
 import * as gameUploadRepository from '../modules/admin/game-upload/repository.js';
-import * as projectRepository from '../modules/admin/project/repository.js';
+import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { createProjectService } from '../modules/admin/project/service.js';
 import { createExhibitionRepository } from '../modules/admin/year/repository.js';
 import { createExhibitionService } from '../modules/admin/year/service.js';
@@ -20,6 +19,7 @@ const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true
 
 describe.runIf(runPostgresIntegration)('orphan durability with production PostgreSQL repositories', () => {
 	let client: PrismaClient;
+	let projectRepository: ReturnType<typeof createProjectCrudRepository>;
 	const testId = randomUUID();
 	let userId: number;
 	let exhibitionId: number;
@@ -76,6 +76,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		if (!databaseUrl) throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
 		client = createPrismaClientForDatabase(databaseUrl);
 		await client.$connect();
+		projectRepository = createProjectCrudRepository(client);
 
 		const user = await client.user.create({
 			data: {
@@ -128,7 +129,6 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		await client.exhibition.deleteMany({ where: { id: exhibitionId } });
 		await client.user.deleteMany({ where: { id: userId } });
 		await client.$disconnect();
-		await productionPrisma.$disconnect();
 	});
 
 	it('keeps the caller non-terminal on S3+queue failure and converges idempotently on retry', async () => {

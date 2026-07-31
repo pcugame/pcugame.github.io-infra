@@ -9,36 +9,9 @@ import type {
 	GoogleTokenVerifier,
 	IdGenerator,
 	Lifecycle,
-	ObjectStorage,
 	Scheduler,
-	SettingsStore,
-	UploadLimiter,
 } from '../application/ports.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { prisma } from '../lib/prisma.js';
-import {
-	abortMultipartUpload,
-	completeMultipartUpload,
-	createMultipartUpload,
-	deleteObject,
-	getObjectStream,
-	getPresignedUrl,
-	headObject,
-	listObjectKeys,
-	readObjectRange,
-	uploadFile,
-	uploadPart,
-} from '../lib/storage.js';
-import {
-	getInFlight,
-	getLifecycleState,
-	incInFlight,
-	decInFlight,
-	isAcceptingNewWork,
-	setLifecycleState,
-	waitForDrain,
-} from '../lib/lifecycle.js';
-import { acquireUploadSlot, releaseUploadSlot } from '../shared/upload-limits.js';
 import { createLifecycle } from '../lib/lifecycle.js';
 import {
 	createCachedSettingsStore,
@@ -55,9 +28,6 @@ export function createCryptoIdGenerator(): IdGenerator {
 	return { next: () => randomUUID() };
 }
 
-export const systemClock: Clock = createSystemClock();
-export const cryptoIdGenerator: IdGenerator = createCryptoIdGenerator();
-
 export function createNodeScheduler(): Scheduler {
 	return {
 		every(intervalMs, task) {
@@ -68,22 +38,6 @@ export function createNodeScheduler(): Scheduler {
 		delay: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
 	};
 }
-
-export const nodeScheduler: Scheduler = createNodeScheduler();
-
-export const objectStorage: ObjectStorage = {
-	upload: uploadFile,
-	presign: getPresignedUrl,
-	delete: deleteObject,
-	head: headObject,
-	readRange: readObjectRange,
-	stream: getObjectStream,
-	listKeys: listObjectKeys,
-	createMultipart: createMultipartUpload,
-	uploadPart,
-	completeMultipart: completeMultipartUpload,
-	abortMultipart: abortMultipartUpload,
-};
 
 export function createNodeFileSystem(): FileSystem {
 	return {
@@ -110,8 +64,6 @@ export function createNodeFileSystem(): FileSystem {
 	};
 }
 
-export const nodeFileSystem: FileSystem = createNodeFileSystem();
-
 export function createGoogleTokenVerifier(client = new OAuth2Client()): GoogleTokenVerifier {
 	return {
 		async verify(credential, audiences) {
@@ -120,21 +72,6 @@ export function createGoogleTokenVerifier(client = new OAuth2Client()): GoogleTo
 		},
 	};
 }
-
-export const processUploadLimiter: UploadLimiter = {
-	acquire: acquireUploadSlot,
-	release: releaseUploadSlot,
-};
-
-export const processLifecycle: Lifecycle = {
-	state: getLifecycleState,
-	setState: setLifecycleState,
-	isAcceptingNewWork,
-	requestStarted: incInFlight,
-	requestFinished: decInFlight,
-	inFlight: getInFlight,
-	waitForDrain,
-};
 
 export function createLifecyclePort(clock: Clock, scheduler: Scheduler): Lifecycle & { close(): void } {
 	const lifecycle = createLifecycle({ clock, scheduler });
@@ -174,17 +111,6 @@ export function createPrismaSettingsStore(
 	});
 }
 
-export function createProcessUploadLimiter(maxConcurrent: number) {
+export function createUploadLimiterPort(maxConcurrent: number) {
 	return createUploadLimiter(() => maxConcurrent);
 }
-
-export const prismaHealth: DatabaseHealth = {
-	async check() {
-		try {
-			await prisma.$queryRaw`SELECT 1`;
-			return true;
-		} catch {
-			return false;
-		}
-	},
-};

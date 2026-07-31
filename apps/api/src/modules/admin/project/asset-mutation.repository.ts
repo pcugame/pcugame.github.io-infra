@@ -24,8 +24,8 @@ type LockedReplaceableAsset = {
 };
 
 /**
- * Ticket-005 project asset mutation contract. Legacy compatibility and the
- * context-owned ticket-011 graph both call this single implementation.
+ * Ticket-005 project asset mutation contract used by the context-owned project
+ * graph. The caller supplies the client; this module never captures a default.
  */
 export function createProjectAssetMutationRepository(
 	client: PrismaClient,

@@ -1,11 +1,23 @@
+import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createGameUploadService } from '../modules/admin/game-upload/service.js';
+import type { GameUploadServiceDependencies } from '../modules/admin/game-upload/ports.js';
+import { ActiveUploadCompletionInProgressError } from '../modules/admin/game-upload/ports.js';
+import { createWebglDeploymentKeys } from '../modules/webgl/paths.js';
+import {
+	chunkUploadBodyLimitBytes,
+	resolveChunkSizeBytes,
+} from '../modules/admin/game-upload/service.js';
+import {
+	createUploadLimiter,
+	type UploadConcurrencyLimiter,
+} from '../shared/upload-limits.js';
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
 	findSessionById: vi.fn(),
 	upsertPartEtag: vi.fn(),
-	updateSessionStatus: vi.fn(),
 	findExhibitionById: vi.fn(),
 	getSiteSettings: vi.fn(),
 	uploadPart: vi.fn(),
@@ -13,83 +25,56 @@ const mocks = vi.hoisted(() => ({
 	completeMultipartUpload: vi.fn(),
 	abortMultipartUpload: vi.fn(),
 	headObject: vi.fn(),
-	readObjectRange: vi.fn(),
 	safeDeleteObject: vi.fn(),
-	replaceOrCreateReplaceableAsset: vi.fn(),
 	createSessionReplacingActive: vi.fn(),
-}));
+};
 
-vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv, UPLOAD_MAX_CONCURRENT: 2, UPLOAD_CHUNK_SIZE_MB: 10 }),
-	loadEnv: () => ({ ...defaultTestEnv, UPLOAD_MAX_CONCURRENT: 2, UPLOAD_CHUNK_SIZE_MB: 10 }),
-}));
+let uploadLimiter: UploadConcurrencyLimiter;
+let service: ReturnType<typeof createGameUploadService>;
 
-vi.mock('../modules/admin/game-upload/repository.js', () => ({
-	createGameUploadRepository: () => ({
-		findSessionById: mocks.findSessionById,
-		upsertPartEtag: mocks.upsertPartEtag,
-		cancelSessionAndClearActive: vi.fn(),
-		findExhibitionById: mocks.findExhibitionById,
-		createSessionReplacingActive: mocks.createSessionReplacingActive,
-		findActiveSessionsForListing: vi.fn().mockResolvedValue([]),
-		findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
-		findPartsBySessionId: vi.fn().mockResolvedValue([]),
-		revertToPending: vi.fn(),
-		transitionToCompleting: vi.fn(),
-		markFailed: vi.fn(),
-		finalizeCompletedSession: vi.fn(),
-		finalizeCompletedWebglSession: vi.fn(),
-	}),
-	findSessionById: mocks.findSessionById,
-	upsertPartEtag: mocks.upsertPartEtag,
-	updateSessionStatus: mocks.updateSessionStatus,
-	cancelSessionAndClearActive: vi.fn(),
-	findExhibitionById: mocks.findExhibitionById,
-	findActiveSessions: vi.fn().mockResolvedValue([]),
-	createSessionReplacingActive: mocks.createSessionReplacingActive,
-	findActiveSessionsForListing: vi.fn().mockResolvedValue([]),
-	findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
-	findPartsBySessionId: vi.fn().mockResolvedValue([]),
-	revertToPending: vi.fn(),
-	transitionToCompleting: vi.fn(),
-	markFailed: vi.fn(),
-	finalizeCompletedSession: vi.fn(),
-	finalizeCompletedWebglSession: vi.fn(),
-}));
-
-vi.mock('../lib/prisma.js', () => ({ prisma: {} }));
-
-vi.mock('../lib/storage.js', () => ({
-	createMultipartUpload: mocks.createMultipartUpload,
-	uploadPart: mocks.uploadPart,
-	completeMultipartUpload: mocks.completeMultipartUpload,
-	abortMultipartUpload: mocks.abortMultipartUpload,
-	headObject: mocks.headObject,
-	readObjectRange: mocks.readObjectRange,
-}));
-vi.mock('../object-deletion.js', () => ({ safeDeleteObject: mocks.safeDeleteObject }));
-
-vi.mock('../shared/site-settings.runtime.js', () => ({
-	getSiteSettings: mocks.getSiteSettings,
-}));
-
-vi.mock('../modules/admin/project/repository.js', () => ({
-	replaceOrCreateReplaceableAsset: mocks.replaceOrCreateReplaceableAsset,
-}));
-
-vi.mock('../lib/lifecycle.js', () => ({
-	isAcceptingNewWork: () => true,
-}));
-
-import {
-	chunkUploadBodyLimitBytes,
-	resolveChunkSizeBytes,
-} from '../modules/admin/game-upload/service.js';
-import { ActiveUploadCompletionInProgressError } from '../modules/admin/game-upload/ports.js';
-import { gameUploadService } from '../modules/admin/game-upload/runtime.js';
-import { _resetActiveUploads, activeUploadCount } from '../shared/upload-limits.js';
-
-const { createSession, uploadChunk } = gameUploadService;
+function createDependencies(): GameUploadServiceDependencies {
+	return {
+		repository: {
+			findSessionById: mocks.findSessionById,
+			upsertPartEtag: mocks.upsertPartEtag,
+			cancelSessionAndClearActive: vi.fn(),
+			findExhibitionById: mocks.findExhibitionById,
+			createSessionReplacingActive: mocks.createSessionReplacingActive,
+			findActiveSessionsForListing: vi.fn().mockResolvedValue([]),
+			findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
+			findPartsBySessionId: vi.fn().mockResolvedValue([]),
+			revertToPending: vi.fn(),
+			transitionToCompleting: vi.fn(),
+			markFailed: vi.fn(),
+		},
+		storage: {
+			createMultipart: mocks.createMultipartUpload,
+			uploadPart: mocks.uploadPart,
+			completeMultipart: mocks.completeMultipartUpload,
+			abortMultipart: mocks.abortMultipartUpload,
+			head: mocks.headObject,
+		},
+		finalizer: { finalize: vi.fn() },
+		settings: { get: mocks.getSiteSettings },
+		uploadSlots: uploadLimiter,
+		clock: { now: () => new Date('2026-07-31T00:00:00.000Z') },
+		ids: { next: randomUUID },
+		lifecycle: { isAcceptingNewWork: () => true },
+		config: {
+			uploadChunkSizeMb: 10,
+			uploadSessionTtlMinutes: defaultTestEnv.UPLOAD_SESSION_TTL_MINUTES,
+		},
+		roleGameMaxBytes: () => defaultTestEnv.UPLOAD_USER_GAME_MAX_MB * 1024 * 1024,
+		storageKey: (uploadKind, projectId) => {
+			const id = randomUUID();
+			return uploadKind === 'WEBGL'
+				? createWebglDeploymentKeys(projectId, id).sourceKey
+				: `${id}.zip`;
+		},
+		deleteOrQueue: mocks.safeDeleteObject,
+		logger: { error: vi.fn(), warn: vi.fn() },
+	};
+}
 
 function pendingSession() {
 	return {
@@ -132,13 +117,14 @@ function deferred<T>() {
 describe('game upload resource guards', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		_resetActiveUploads();
+		uploadLimiter = createUploadLimiter(() => 2);
+		service = createGameUploadService(createDependencies());
 		mocks.findSessionById.mockImplementation(async () => pendingSession());
 		mocks.upsertPartEtag.mockResolvedValue([{ partNumber: 1 }]);
 	});
 
 	afterEach(() => {
-		_resetActiveUploads();
+		uploadLimiter.close();
 	});
 
 	it('caps route body limit and session chunk size to UPLOAD_CHUNK_SIZE_MB', () => {
@@ -150,7 +136,7 @@ describe('game upload resource guards', () => {
 	});
 
 	it('rejects an unsafe original filename before creating S3 upload state', async () => {
-		await expect(createSession(
+		await expect(service.createSession(
 			7,
 			1,
 			{ id: 11, role: 'USER' },
@@ -179,11 +165,11 @@ describe('game upload resource guards', () => {
 			replacedSessions: [],
 		}));
 
-		const game = await createSession(7, 1, { id: 11, role: 'USER' }, {
+		const game = await service.createSession(7, 1, { id: 11, role: 'USER' }, {
 			originalName: 'game.zip',
 			totalBytes: 1024,
 		});
-		const webgl = await createSession(7, 1, { id: 11, role: 'USER' }, {
+		const webgl = await service.createSession(7, 1, { id: 11, role: 'USER' }, {
 			originalName: 'webgl.zip',
 			totalBytes: 2048,
 			uploadKind: 'WEBGL',
@@ -214,14 +200,13 @@ describe('game upload resource guards', () => {
 			new ActiveUploadCompletionInProgressError(),
 		);
 
-		await expect(createSession(7, 1, { id: 11, role: 'USER' }, {
+		await expect(service.createSession(7, 1, { id: 11, role: 'USER' }, {
 			originalName: 'replacement.zip',
 			totalBytes: 1024,
 		})).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
 
 		expect(mocks.abortMultipartUpload).toHaveBeenCalledOnce();
 		expect(mocks.abortMultipartUpload).toHaveBeenCalledWith(
-			'pcu-protected',
 			expect.any(String),
 			'new-multipart',
 		);
@@ -231,7 +216,7 @@ describe('game upload resource guards', () => {
 		const gates: Array<ReturnType<typeof deferred<string>>> = [];
 		let inFlight = 0;
 		let maxInFlight = 0;
-		mocks.uploadPart.mockImplementation(async (_bucket, _key, _uploadId, _partNumber, body: NodeJS.ReadableStream) => {
+		mocks.uploadPart.mockImplementation(async (_key, _uploadId, _partNumber, body: NodeJS.ReadableStream) => {
 			inFlight++;
 			maxInFlight = Math.max(maxInFlight, inFlight);
 			const gate = deferred<string>();
@@ -242,25 +227,25 @@ describe('game upload resource guards', () => {
 			return etag;
 		});
 
-		const first = uploadChunk('session-1', 0, oneByteStream(0), { id: 11, role: 'USER' });
-		const second = uploadChunk('session-1', 1, oneByteStream(1), { id: 11, role: 'USER' });
+		const first = service.uploadChunk('session-1', 0, oneByteStream(0), { id: 11, role: 'USER' });
+		const second = service.uploadChunk('session-1', 1, oneByteStream(1), { id: 11, role: 'USER' });
 		await vi.waitFor(() => expect(gates).toHaveLength(2));
 
 		await expect(
-			uploadChunk('session-1', 2, oneByteStream(2), { id: 11, role: 'USER' }),
+			service.uploadChunk('session-1', 2, oneByteStream(2), { id: 11, role: 'USER' }),
 		).rejects.toMatchObject({
 			statusCode: 429,
 			code: 'TOO_MANY_UPLOADS',
 		});
 
 		expect(mocks.uploadPart).toHaveBeenCalledTimes(2);
-		expect(activeUploadCount()).toBe(2);
+		expect(uploadLimiter.activeCount()).toBe(2);
 		expect(maxInFlight).toBe(2);
 
 		gates[0]!.resolve('etag-1');
 		gates[1]!.resolve('etag-2');
 		await expect(Promise.all([first, second])).resolves.toHaveLength(2);
-		expect(activeUploadCount()).toBe(0);
+		expect(uploadLimiter.activeCount()).toBe(0);
 	});
 
 	it('streams chunk bodies to S3 without buffering the full part', async () => {
@@ -270,14 +255,14 @@ describe('game upload resource guards', () => {
 			chunkSizeBytes: 1024,
 			totalChunks: 1,
 		});
-		mocks.uploadPart.mockImplementation(async (_bucket, _key, _uploadId, _partNumber, body: NodeJS.ReadableStream, contentLength: number) => {
+		mocks.uploadPart.mockImplementation(async (_key, _uploadId, _partNumber, body: NodeJS.ReadableStream, contentLength: number) => {
 			expect(Buffer.isBuffer(body)).toBe(false);
 			expect(contentLength).toBe(1024);
 			const bytes = await consumeStream(body);
 			return `etag-${bytes}`;
 		});
 
-		const result = await uploadChunk(
+		const result = await service.uploadChunk(
 			'session-1',
 			0,
 			Readable.from(Array.from({ length: 16 }, () => Buffer.alloc(64))),
@@ -303,7 +288,7 @@ describe('game upload resource guards', () => {
 				chunkSizeBytes: 2,
 				totalChunks: 1,
 			});
-		mocks.uploadPart.mockImplementation(async (_bucket, _key, _uploadId, _partNumber, body: NodeJS.ReadableStream) => {
+		mocks.uploadPart.mockImplementation(async (_key, _uploadId, _partNumber, body: NodeJS.ReadableStream) => {
 			const bytes = await consumeStream(body);
 			return `etag-${bytes}`;
 		});
@@ -316,12 +301,12 @@ describe('game upload resource guards', () => {
 		});
 
 		await expect(
-			uploadChunk('session-1', 0, aborted, { id: 11, role: 'USER' }),
+			service.uploadChunk('session-1', 0, aborted, { id: 11, role: 'USER' }),
 		).rejects.toThrow('client aborted');
 		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
-		expect(activeUploadCount()).toBe(0);
+		expect(uploadLimiter.activeCount()).toBe(0);
 
-		const retried = await uploadChunk(
+		const retried = await service.uploadChunk(
 			'session-1',
 			0,
 			Readable.from([Buffer.from([1, 2])]),
@@ -330,7 +315,7 @@ describe('game upload resource guards', () => {
 
 		expect(retried.bytesWritten).toBe(2);
 		expect(mocks.upsertPartEtag).toHaveBeenCalledWith('session-1', 1, 'etag-2');
-		expect(activeUploadCount()).toBe(0);
+		expect(uploadLimiter.activeCount()).toBe(0);
 	});
 
 	it('destroys the inbound stream and releases the upload slot when S3 upload fails', async () => {
@@ -342,11 +327,11 @@ describe('game upload resource guards', () => {
 		});
 
 		await expect(
-			uploadChunk('session-1', 0, source, { id: 11, role: 'USER' }),
+			service.uploadChunk('session-1', 0, source, { id: 11, role: 'USER' }),
 		).rejects.toThrow('s3 upload failed');
 
 		expect(source.destroyed).toBe(true);
 		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
-		expect(activeUploadCount()).toBe(0);
+		expect(uploadLimiter.activeCount()).toBe(0);
 	});
 });

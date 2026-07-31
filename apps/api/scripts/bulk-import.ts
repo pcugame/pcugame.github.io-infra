@@ -20,24 +20,26 @@
  * Requires: DATABASE_URL, S3_* env vars (via .env or environment)
  */
 
-import { createPrismaClient } from '../src/lib/prisma-client.js';
+import type { ObjectStorage } from '../src/application/ports.js';
+import type { Env } from '../src/config/env.js';
 import { readFileSync, readdirSync, statSync, createReadStream, copyFileSync, mkdtempSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadEnv } from '../src/config/env.js';
-import { uploadFile } from '../src/lib/storage.js';
-import { bucketForKind } from '../src/lib/s3.js';
 import { toSlug } from '../src/shared/slug.js';
 import { generateStorageKey } from '../src/shared/storage-path.js';
-import { processImage } from '../src/modules/assets/upload/image-processing.js';
-import { processPdf } from '../src/modules/assets/upload/pdf-processing.js';
-import { processVideo } from '../src/modules/assets/upload/video-processing.js';
 import { validateFile } from '../src/modules/assets/upload/file-validator.js';
 import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
 import type { AssetKind } from '../src/generated/prisma/client.js';
 import type { AssetPlaybackStatus } from '../src/generated/prisma/client.js';
 import type { PrismaClient } from '../src/generated/prisma/client.js';
+import {
+	bucketForKind,
+	createScriptResources,
+	createScriptUploadProcessing,
+	type ScriptUploadProcessing,
+} from './resources.js';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -223,8 +225,14 @@ function discoverAssets(
 
 // ── S3 upload ────────────────────────────────────────────
 
-async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<UploadedAsset> {
-	const bucket = bucketForKind(asset.kind);
+async function uploadAssetToS3(
+	asset: MatchedAsset,
+	tmpDir: string,
+	storage: ObjectStorage,
+	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
+	processing: ScriptUploadProcessing,
+): Promise<UploadedAsset> {
+	const bucket = bucketForKind(config, asset.kind);
 	const validated = await validateFile(asset.filePath, asset.kind);
 
 	if (asset.kind === 'VIDEO') {
@@ -234,7 +242,7 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 			copyFileSync(asset.filePath, tmpPath);
 			tempFiles.push(tmpPath);
 
-			const playback = await processVideo({
+			const playback = await processing.video({
 				tmpPath,
 				mimeType: validated.mimeType,
 				ext: validated.ext,
@@ -246,7 +254,7 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 			if (playback.playback) tempFiles.push(playback.playback.tmpPath);
 
 			const storageKey = generateStorageKey(validated.ext);
-			await uploadFile(
+			await storage.upload(
 				bucket,
 				storageKey,
 				createReadStream(tmpPath),
@@ -258,12 +266,12 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 			let playbackStorageKey: string | null = null;
 			let playbackMimeType = '';
 			let playbackSizeBytes = 0;
-			let playbackStatus = playback.playbackStatus;
+			let playbackStatus: AssetPlaybackStatus = playback.playbackStatus;
 			let playbackError = playback.playbackError;
 			if (playback.playback) {
 				const candidatePlaybackKey = generateStorageKey(playback.playback.ext);
 				try {
-					await uploadFile(
+					await storage.upload(
 						bucket,
 						candidatePlaybackKey,
 						createReadStream(playback.playback.tmpPath),
@@ -309,8 +317,8 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 			tempFiles.push(tmpPath);
 
 			const processed = validated.mimeType === 'application/pdf'
-				? await processPdf({ tmpPath })
-				: await processImage({
+				? await processing.pdf({ tmpPath })
+				: await processing.image({
 					tmpPath,
 					mimeType: validated.mimeType,
 					ext: validated.ext,
@@ -326,7 +334,7 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 
 		const storageKey = generateStorageKey(finalExt);
 		const stream = createReadStream(finalPath);
-		await uploadFile(bucket, storageKey, stream, finalMime, finalSize, storageOptionsForAsset(asset.kind, 'original'));
+		await storage.upload(bucket, storageKey, stream, finalMime, finalSize, storageOptionsForAsset(asset.kind, 'original'));
 
 		return {
 			storageKey,
@@ -343,20 +351,30 @@ async function uploadAssetToS3(asset: MatchedAsset, tmpDir: string): Promise<Upl
 
 async function main() {
 	const opts = parseArgs();
-	loadEnv();
+	const config = loadEnv();
 
-	const prisma = createPrismaClient();
+	const resources = createScriptResources(config);
+	const processing = createScriptUploadProcessing(config);
 
 	try {
-		await doImport(prisma, opts);
+		await doImport(
+			resources.prisma,
+			opts,
+			resources.storage,
+			config,
+			processing,
+		);
 	} finally {
-		await prisma.$disconnect();
+		await resources.close();
 	}
 }
 
 async function doImport(
 	prisma: PrismaClient,
 	opts: { assetRoot: string; legacyDir: string; yearFilter?: number; dryRun: boolean },
+	storage: ObjectStorage,
+	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
+	processing: ScriptUploadProcessing,
 ) {
 	// Find legacy JSON files
 	const legacyFiles = readdirSync(opts.legacyDir)
@@ -473,7 +491,13 @@ async function doImport(
 				}[] = [];
 
 				for (const asset of assets) {
-					const uploaded = await uploadAssetToS3(asset, tmpDir);
+					const uploaded = await uploadAssetToS3(
+						asset,
+						tmpDir,
+						storage,
+						config,
+						processing,
+					);
 					assetRecords.push({
 						kind: asset.kind,
 						storageKey: uploaded.storageKey,

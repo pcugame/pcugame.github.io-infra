@@ -25,8 +25,8 @@ import {
 	createNodeScheduler,
 	createPrismaHealth,
 	createPrismaSettingsStore,
-	createProcessUploadLimiter,
 	createSystemClock,
+	createUploadLimiterPort,
 } from './infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
@@ -281,7 +281,7 @@ const defaultFactories: ProductionResourceFactories = {
 		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
 	}),
 	settings: (client, logger) => createPrismaSettingsStore(client, logger),
-	uploadLimiter: (config) => createProcessUploadLimiter(config.UPLOAD_MAX_CONCURRENT),
+	uploadLimiter: (config) => createUploadLimiterPort(config.UPLOAD_MAX_CONCURRENT),
 	lifecycle: (clock, scheduler) => createLifecyclePort(clock, scheduler),
 	protectedDownloads: (clock, scheduler) => createProtectedDownloadLimiter({ clock, scheduler }),
 	exportProgress: () => createExportProgressStore(),

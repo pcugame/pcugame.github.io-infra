@@ -154,11 +154,6 @@ export class DownloadRateLimiter {
 		this.bannedIps.clear();
 	}
 
-	/** Backward-compatible lifecycle name for existing production callers. */
-	destroy(): void {
-		this.close();
-	}
-
 	/** Exposed for testing. */
 	_bucketSize(): number {
 		return this.buckets.size;

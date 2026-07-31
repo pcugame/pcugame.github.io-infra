@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AssetKind, PrismaClient } from '../generated/prisma/client.js';
 import { createObjectDeletionCoordinator } from '../application/object-deletion.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
-import { createProjectAssetMutationRepository } from '../modules/admin/project/repository.js';
+import { createProjectAssetMutationRepository } from '../modules/admin/project/asset-mutation.repository.js';
 import { createProjectAssetService } from '../modules/admin/project/project-asset.service.js';
 import { createAssetsRepository } from '../modules/assets/repository.js';
 import { createAssetsService } from '../modules/assets/service.js';

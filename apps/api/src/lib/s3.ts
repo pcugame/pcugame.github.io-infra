@@ -1,9 +1,5 @@
 import { S3Client } from '@aws-sdk/client-s3';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
-import { env } from '../config/env.js';
-import type { AssetKind } from '../generated/prisma/client.js';
-
-let _client: S3Client | undefined;
 
 export interface S3ClientConfig {
 	S3_ENDPOINT: string;
@@ -38,15 +34,4 @@ export function createS3Client(config: S3ClientConfig): S3Client {
 		}),
 		maxAttempts: 3,
 	});
-}
-
-export function s3(): S3Client {
-	if (_client) return _client;
-	_client = createS3Client(env());
-	return _client;
-}
-
-export function bucketForKind(kind: AssetKind): string {
-	const e = env();
-	return (kind === 'GAME' || kind === 'VIDEO') ? e.S3_BUCKET_PROTECTED : e.S3_BUCKET_PUBLIC;
 }

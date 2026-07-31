@@ -32,17 +32,20 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import type { PrismaClient } from '../src/generated/prisma/client.js';
 
-const { createPrismaClient } = process.env.SEED_USE_DIST === 'true'
+const prismaClientModule = (process.env.SEED_USE_DIST === 'true'
   ? await import('../dist/lib/prisma-client.js')
-  : await import('../src/lib/prisma-client.js');
+  : await import('../src/lib/prisma-client.js')) as unknown as {
+    createPrismaClientForDatabase(databaseUrl: string): PrismaClient;
+  };
 
 if (process.env.NODE_ENV === 'production') {
   console.error('ERROR: seed must not run in production');
   process.exit(1);
 }
 
-const prisma = createPrismaClient();
+const prisma = prismaClientModule.createPrismaClientForDatabase(requiredEnv('DATABASE_URL'));
 
 // ── 테스트 ADMIN 유저 + 세션 생성 ─────────────────────
 
@@ -571,7 +574,7 @@ async function main() {
 
   if (importIndex !== -1 && args[importIndex + 1]) {
     // JSON 파일에서 데이터 임포트
-    const filePath = args[importIndex + 1];
+    const filePath = args[importIndex + 1]!;
     console.log(`"${filePath}"에서 데이터 임포트 중...\n`);
     await importFromJson(filePath, admin.id);
   } else {

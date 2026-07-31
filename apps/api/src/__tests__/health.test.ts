@@ -6,13 +6,7 @@ const headObjectMock = vi.fn().mockResolvedValue(null);
 const queryRawMock = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
 
 vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
 	loadEnv: () => ({ ...defaultTestEnv }),
-}));
-vi.mock('../lib/prisma.js', () => ({
-	prisma: {
-		get $queryRaw() { return queryRawMock; },
-	},
 }));
 vi.mock('../lib/prisma-client.js', () => ({
 	createPrismaClientForDatabase: () => ({

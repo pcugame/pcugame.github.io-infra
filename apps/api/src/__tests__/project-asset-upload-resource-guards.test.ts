@@ -1,9 +1,9 @@
 import { promises as fsp } from 'node:fs';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { UploadPipelinePort } from '../application/upload-ports.js';
 import { createProjectAssetService } from '../modules/admin/project/project-asset.service.js';
 import { createProjectAssetUploadCoordinator } from '../modules/admin/project/project-asset-upload.adapter.js';
-import { UploadPipeline } from '../modules/assets/upload/index.js';
 import { createNodeFileSystem } from '../infrastructure/production-ports.js';
 
 const mocks = {
@@ -11,16 +11,38 @@ const mocks = {
 	replaceOrCreateReplaceableAsset: vi.fn(),
 	findExhibitionById: vi.fn(),
 	deleteOrQueue: vi.fn(),
+	processFile: vi.fn(),
+	rollbackCommitted: vi.fn(),
 };
 
 const MB = 1024 * 1024;
 const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 let id = 0;
+let trackedTempFiles: string[] = [];
+let cleanupSizes: number[] = [];
+
+function createFakePipeline(): UploadPipelinePort {
+	return {
+		trackTempFile(tmpPath) {
+			trackedTempFiles.push(tmpPath);
+		},
+		processFile: mocks.processFile,
+		rollbackCommitted: mocks.rollbackCommitted,
+		async cleanupTemp() {
+			for (const tmpPath of trackedTempFiles) {
+				const stat = await fsp.stat(tmpPath).catch(() => null);
+				if (stat) cleanupSizes.push(stat.size);
+				await fsp.unlink(tmpPath).catch(() => undefined);
+			}
+		},
+	};
+}
+
 const singleAssetUploadCoordinator = createProjectAssetUploadCoordinator({
 	fileSystem: createNodeFileSystem(),
 	ids: { next: () => `resource-guard-${++id}` },
-	createPipeline: () => new UploadPipeline(),
+	createPipeline: createFakePipeline,
 });
 const projectAssetService = createProjectAssetService({
 	repository: {
@@ -90,31 +112,11 @@ function firstTrackedTempFile(paths: string[]): string {
 }
 
 describe('project asset upload resource guards', () => {
-	let trackedTempFiles: string[];
-	let cleanupSizes: number[];
-	let trackSpy: ReturnType<typeof vi.spyOn>;
-	let cleanupSpy: ReturnType<typeof vi.spyOn>;
-	let processSpy: ReturnType<typeof vi.spyOn>;
-
 	beforeEach(() => {
 		vi.clearAllMocks();
 		trackedTempFiles = [];
 		cleanupSizes = [];
-
-		const originalTrack = UploadPipeline.prototype.trackTempFile;
-		const originalCleanup = UploadPipeline.prototype.cleanupTemp;
-		trackSpy = vi.spyOn(UploadPipeline.prototype, 'trackTempFile').mockImplementation(function (this: UploadPipeline, tmpPath: string) {
-			trackedTempFiles.push(tmpPath);
-			return originalTrack.call(this, tmpPath);
-		});
-		cleanupSpy = vi.spyOn(UploadPipeline.prototype, 'cleanupTemp').mockImplementation(async function (this: UploadPipeline) {
-			for (const tmpPath of trackedTempFiles) {
-				const stat = await fsp.stat(tmpPath).catch(() => null);
-				if (stat) cleanupSizes.push(stat.size);
-			}
-			return originalCleanup.call(this);
-		});
-		processSpy = vi.spyOn(UploadPipeline.prototype, 'processFile').mockResolvedValue({
+		mocks.processFile.mockResolvedValue({
 			storageKey: 'asset/image.png',
 			mimeType: 'image/png',
 			sizeBytes: 128,
@@ -130,10 +132,10 @@ describe('project asset upload resource guards', () => {
 		});
 	});
 
-	afterEach(() => {
-		trackSpy.mockRestore();
-		cleanupSpy.mockRestore();
-		processSpy.mockRestore();
+	afterEach(async () => {
+		await Promise.all(trackedTempFiles.map((tmpPath) => (
+			fsp.unlink(tmpPath).catch(() => undefined)
+		)));
 	});
 
 	it('requires the kind field before writing the single-asset file', async () => {
@@ -148,7 +150,7 @@ describe('project asset upload resource guards', () => {
 		});
 
 		expect(trackedTempFiles).toEqual([]);
-		expect(processSpy).not.toHaveBeenCalled();
+		expect(mocks.processFile).not.toHaveBeenCalled();
 	});
 
 	it('rejects an unsafe filename before creating a temp file', async () => {
@@ -164,7 +166,7 @@ describe('project asset upload resource guards', () => {
 		});
 
 		expect(trackedTempFiles).toEqual([]);
-		expect(processSpy).not.toHaveBeenCalled();
+		expect(mocks.processFile).not.toHaveBeenCalled();
 	});
 
 	it('rejects oversized IMAGE before temp storage grows toward the GAME limit', async () => {
@@ -179,7 +181,7 @@ describe('project asset upload resource guards', () => {
 			code: 'PAYLOAD_TOO_LARGE',
 		});
 
-		expect(processSpy).not.toHaveBeenCalled();
+		expect(mocks.processFile).not.toHaveBeenCalled();
 		expect(cleanupSizes[0]).toBeLessThanOrEqual(1 * MB);
 		await expect(fsp.access(firstTrackedTempFile(trackedTempFiles))).rejects.toThrow();
 	});
@@ -196,7 +198,7 @@ describe('project asset upload resource guards', () => {
 			code: 'PAYLOAD_TOO_LARGE',
 		});
 
-		expect(processSpy).not.toHaveBeenCalled();
+		expect(mocks.processFile).not.toHaveBeenCalled();
 		expect(cleanupSizes[0]).toBeLessThanOrEqual(2 * MB);
 		await expect(fsp.access(firstTrackedTempFile(trackedTempFiles))).rejects.toThrow();
 	});
@@ -209,7 +211,7 @@ describe('project asset upload resource guards', () => {
 		);
 
 		const tempFile = firstTrackedTempFile(trackedTempFiles);
-		expect(processSpy).toHaveBeenCalledWith(tempFile, 'IMAGE', 'image.png');
+		expect(mocks.processFile).toHaveBeenCalledWith(tempFile, 'IMAGE', 'image.png');
 		expect(mocks.createAsset).toHaveBeenCalledWith(expect.objectContaining({
 			projectId: 7,
 			kind: 'IMAGE',

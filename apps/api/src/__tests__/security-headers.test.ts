@@ -3,13 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 
 vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
 	loadEnv: () => ({ ...defaultTestEnv }),
-}));
-vi.mock('../lib/prisma.js', () => ({
-	prisma: {
-		$queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]),
-	},
 }));
 vi.mock('../lib/prisma-client.js', () => ({
 	createPrismaClientForDatabase: () => ({
@@ -24,10 +18,6 @@ vi.mock('../lib/prisma-client.js', () => ({
 		orphanObject: { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn() },
 	}),
 }));
-vi.mock('../lib/storage.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('../lib/storage.js')>();
-	return { ...actual, headObject: vi.fn().mockResolvedValue(null) };
-});
 vi.mock('../shared/protected-download-limiter.js', () => {
 	const limiter = {
 		start: vi.fn(),

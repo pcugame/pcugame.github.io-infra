@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
 	loadEnv: () => ({ ...defaultTestEnv }),
 }));
 

@@ -10,26 +10,17 @@
  * Safe to re-run — upsertOrphan is idempotent per (bucket, storage_key).
  */
 
-import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { loadEnv } from '../src/config/env.js';
-import { prisma, disconnectPrisma } from '../src/lib/prisma.js';
-import { s3 } from '../src/lib/s3.js';
-import { upsertOrphan } from '../src/modules/orphan/repository.js';
+import type { ObjectStorage } from '../src/application/ports.js';
+import type { PrismaClient } from '../src/generated/prisma/client.js';
+import { createOrphanRepository } from '../src/modules/orphan/repository.js';
+import { createScriptResources } from './resources.js';
 
-async function listAllKeys(bucket: string): Promise<string[]> {
-	const keys: string[] = [];
-	let continuationToken: string | undefined;
-	do {
-		const res = await s3().send(new ListObjectsV2Command({ Bucket: bucket, ContinuationToken: continuationToken }));
-		for (const obj of res.Contents ?? []) {
-			if (obj.Key) keys.push(obj.Key);
-		}
-		continuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
-	} while (continuationToken);
-	return keys;
+async function listAllKeys(storage: ObjectStorage, bucket: string): Promise<string[]> {
+	return storage.listKeys(bucket, '');
 }
 
-async function collectReferencedKeys(): Promise<Set<string>> {
+async function collectReferencedKeys(prisma: PrismaClient): Promise<Set<string>> {
 	const referenced = new Set<string>();
 
 	const assetRows = await prisma.asset.findMany({ select: { storageKey: true } });
@@ -49,25 +40,31 @@ async function collectReferencedKeys(): Promise<Set<string>> {
 async function main() {
 	const cfg = loadEnv();
 	const dryRun = process.argv.includes('--dry-run');
+	const resources = createScriptResources(cfg);
+	const orphanRepository = createOrphanRepository(resources.prisma);
 
-	const referenced = await collectReferencedKeys();
-	console.log(`DB references ${referenced.size} distinct storage keys`);
+	try {
+		const referenced = await collectReferencedKeys(resources.prisma);
+		console.log(`DB references ${referenced.size} distinct storage keys`);
 
-	for (const bucket of [cfg.S3_BUCKET_PUBLIC, cfg.S3_BUCKET_PROTECTED]) {
-		const allKeys = await listAllKeys(bucket);
-		const orphans = allKeys.filter((k) => !referenced.has(k));
-		console.log(`[${bucket}] total=${allKeys.length} orphan=${orphans.length}`);
+		for (const bucket of [cfg.S3_BUCKET_PUBLIC, cfg.S3_BUCKET_PROTECTED]) {
+			const allKeys = await listAllKeys(resources.storage, bucket);
+			const orphans = allKeys.filter((key) => !referenced.has(key));
+			console.log(`[${bucket}] total=${allKeys.length} orphan=${orphans.length}`);
 
-		if (dryRun) {
-			for (const key of orphans.slice(0, 20)) console.log(`  would enqueue: ${key}`);
-			if (orphans.length > 20) console.log(`  …and ${orphans.length - 20} more`);
-			continue;
+			if (dryRun) {
+				for (const key of orphans.slice(0, 20)) console.log(`  would enqueue: ${key}`);
+				if (orphans.length > 20) console.log(`  …and ${orphans.length - 20} more`);
+				continue;
+			}
+
+			for (const key of orphans) {
+				await orphanRepository.upsertOrphan(bucket, key, 'reconcile');
+			}
+			console.log(`[${bucket}] enqueued ${orphans.length} orphans`);
 		}
-
-		for (const key of orphans) {
-			await upsertOrphan(bucket, key, 'reconcile');
-		}
-		console.log(`[${bucket}] enqueued ${orphans.length} orphans`);
+	} finally {
+		await resources.close();
 	}
 }
 
@@ -75,5 +72,4 @@ main()
 	.catch((err) => {
 		console.error('reconcile-orphans failed:', err);
 		process.exitCode = 1;
-	})
-	.finally(() => disconnectPrisma());
+	});

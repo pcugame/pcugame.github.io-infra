@@ -102,8 +102,6 @@ const envSchema = z
 
 export type Env = z.infer<typeof envSchema>;
 
-let _env: Env | undefined;
-
 /**
  * Fixed-phrase hint per Zod issue code. Intentionally does NOT consult
  * `issue.message` or any received value. Env values can be secrets, so keeping
@@ -139,7 +137,6 @@ export function formatEnvIssues(issues: z.core.$ZodIssue[]): string[] {
 }
 
 export function loadEnv(): Env {
-  if (_env) return _env;
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     console.error('❌ Invalid environment variables:');
@@ -148,16 +145,11 @@ export function loadEnv(): Env {
     }
     process.exit(1);
   }
-  _env = result.data;
-  if (!_env.ALLOWED_GOOGLE_HD) {
+  const parsed = result.data;
+  if (!parsed.ALLOWED_GOOGLE_HD) {
     console.warn(
       '⚠  ALLOWED_GOOGLE_HD is empty — any Google account can sign up. Set it to your institution domain (e.g. "g.pcu.ac.kr") in production.',
     );
   }
-  return _env;
-}
-
-export function env(): Env {
-  if (!_env) return loadEnv();
-  return _env;
+  return parsed;
 }

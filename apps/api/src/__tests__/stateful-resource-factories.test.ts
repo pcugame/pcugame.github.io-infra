@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FastifyPluginAsync } from 'fastify';
 import type { Env } from '../config/env.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createLifecycle, startOwnedResources } from '../lib/lifecycle.js';
+import { createLifecycle } from '../lib/lifecycle.js';
 import {
 	createCachedSettingsStore,
 	type SiteSettingsRepository,
@@ -170,7 +170,7 @@ describe('stateful resource factories', () => {
 		expect(schedulerB.cancel).not.toHaveBeenCalled();
 		expect(() => b.check('10.0.0.4')).not.toThrow();
 		b.close();
-		b.destroy();
+		b.close();
 		expect(schedulerB.cancel).toHaveBeenCalledOnce();
 	});
 
@@ -228,22 +228,6 @@ describe('stateful resource factories', () => {
 		expect(ensureDirectory).not.toHaveBeenCalled();
 		expect(saveObject).not.toHaveBeenCalled();
 		expect(rateScheduler.scheduler.every).not.toHaveBeenCalled();
-	});
-
-	it('starts compatibility resources only at the explicit owner startup boundary', async () => {
-		const firstStart = vi.fn();
-		const secondStart = vi.fn().mockResolvedValue(undefined);
-		const resources = [
-			{ start: firstStart },
-			{ start: secondStart },
-			{ close: vi.fn() },
-		];
-
-		expect(firstStart).not.toHaveBeenCalled();
-		expect(secondStart).not.toHaveBeenCalled();
-		await startOwnedResources(resources);
-		expect(firstStart).toHaveBeenCalledOnce();
-		expect(secondStart).toHaveBeenCalledOnce();
 	});
 
 	it('starts only the context limiter after ticket 004 removes the legacy route limiter', async () => {
