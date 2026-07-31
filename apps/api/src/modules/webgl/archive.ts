@@ -1,7 +1,7 @@
 import { posix as pathPosix } from 'node:path';
 import yauzl, { type Entry } from 'yauzl';
+import type { ObjectStorage } from '../../application/ports.js';
 import { badRequest } from '../../shared/errors.js';
-import { uploadFile } from '../../lib/storage.js';
 import type { ZipEntryMetadata, ZipValidationSummary } from '../assets/upload/zip-validation.js';
 import { webglContentMetadata } from './content.js';
 
@@ -103,6 +103,7 @@ export async function uploadWebglArchive(
 	publicBucket: string,
 	sitePrefix: string,
 	layout: WebglArchiveLayout,
+	upload: ObjectStorage['upload'],
 	onUploaded?: (key: string) => void,
 ): Promise<string[]> {
 	const zip = await yauzl.openPromise(archivePath, {
@@ -130,7 +131,7 @@ export async function uploadWebglArchive(
 			const stream = await zip.openReadStreamPromise(entry);
 			const key = `${sitePrefix}${hostedPath}`;
 			const metadata = webglContentMetadata(hostedPath);
-			await uploadFile(
+			await upload(
 				publicBucket,
 				key,
 				stream,

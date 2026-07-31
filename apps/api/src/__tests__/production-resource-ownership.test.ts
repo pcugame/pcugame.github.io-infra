@@ -77,6 +77,9 @@ function fakePrisma(label: string, events: string[], maxGameFileMb = 5120): Pris
 			update: vi.fn(async () => ({})),
 			deleteMany: vi.fn(async () => ({ count: 0 })),
 		},
+		gameUploadSession: {
+			findMany: vi.fn(async () => []),
+		},
 		siteSetting: {
 			upsert: vi.fn(async (args: { create?: { maxGameFileMb?: number }; update?: { maxGameFileMb?: number } }) => ({
 				maxGameFileMb: args.update?.maxGameFileMb ?? args.create?.maxGameFileMb ?? maxGameFileMb,

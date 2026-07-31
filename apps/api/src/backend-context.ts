@@ -66,6 +66,10 @@ import {
 	createProjectMultipartProductionGraph,
 	type ProjectMultipartProductionGraph,
 } from './modules/admin/project-multipart.composition.js';
+import {
+	createGameUploadProductionGraph,
+	type GameUploadProductionGraph,
+} from './modules/admin/game-upload/composition.js';
 import type { ProjectUploadProcessing } from './modules/admin/project/project-upload.adapter.js';
 import { createNodeProjectUploadProcessing } from './infrastructure/project-upload-processing.js';
 
@@ -225,6 +229,7 @@ export interface ProductionResourceFactories {
 		year: YearProductionGraph,
 		importExport: ImportExportProductionGraph,
 		projectMultipart: ProjectMultipartProductionGraph,
+		gameUpload: GameUploadProductionGraph,
 	): MaybePromise<BackendRoutes>;
 }
 
@@ -292,11 +297,9 @@ async function loadProductionRoutes(
 	year: YearProductionGraph,
 	importExport: ImportExportProductionGraph,
 	projectMultipart: ProjectMultipartProductionGraph,
+	gameUpload: GameUploadProductionGraph,
 ): Promise<BackendRoutes> {
-	const [admin, gameUpload] = await Promise.all([
-		import('./modules/admin/admin.routes.js'),
-		import('./modules/admin/game-upload/index.js'),
-	]);
+	const admin = await import('./modules/admin/admin.routes.js');
 	return {
 		auth: auth.authController,
 		devAuth: auth.devAuthController,
@@ -307,9 +310,7 @@ async function loadProductionRoutes(
 			...importExport,
 			bannedIpController: assetsBanned.bannedIpController,
 			projectMultipartController: projectMultipart.projectMultipartController,
-			legacy: {
-				gameUploadController: gameUpload.gameUploadController,
-			},
+			gameUploadController: gameUpload.controller,
 		}),
 		me: projectMultipart.meController,
 		assets: assetsBanned.assetsController,
@@ -533,26 +534,34 @@ export async function createProductionBackendContext(
 			access: projectMemberSettings.projectAccess,
 			repository: projectMemberSettings.projectRepository,
 		});
+		const gameUpload = createGameUploadProductionGraph({
+			config,
+			prisma,
+			storage,
+			fileSystem,
+			settings,
+			uploadLimiter,
+			lifecycle,
+			clock,
+			ids,
+			logger,
+			access: projectMemberSettings.projectAccess,
+		});
+		owner.register('gameUploadWorkflow', owned(
+			gameUpload,
+			() => gameUpload.close(),
+			() => gameUpload.recoverStaleUploads(),
+		));
 		const authSessions = auth.repository;
 		const maintenance: BackgroundMaintenance = {
-			async recoverStaleUploads() {
-				// Ticket 012 moves this remaining feature runtime into this graph.
-				const { gameUploadService } = await import('./modules/admin/game-upload/runtime.js');
-				await gameUploadService.sweepStaleCompletingSessions();
-			},
+			recoverStaleUploads: () => gameUpload.recoverStaleUploads(),
 			async purgeExpiredSessions(before) {
 				const { count } = await prisma.authSession.deleteMany({
 					where: { expiresAt: { lt: before } },
 				});
 				return count;
 			},
-			async reapOrphans() {
-				// Routes still use the legacy singleton object-deletion coordinator. Until
-				// those route graphs migrate, the scheduled reaper must consume that exact
-				// coordinator's orphan repository rather than a context-local queue.
-				const { orphanService } = await import('./modules/orphan/runtime.js');
-				await orphanService.runOrphanReaper();
-			},
+			reapOrphans: () => gameUpload.reapOrphans(),
 		};
 		const maintenanceSchedule = createMaintenanceSchedule(scheduler, clock, maintenance, logger);
 		owner.register('maintenanceSchedule', owned(
@@ -569,6 +578,7 @@ export async function createProductionBackendContext(
 			year,
 			importExport,
 			projectMultipart,
+			gameUpload,
 		);
 
 		return {

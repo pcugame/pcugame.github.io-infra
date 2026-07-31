@@ -4,7 +4,7 @@ import { abortMultipartUpload } from '../../../lib/storage.js';
 import {
 	deleteDurablyQueuedWebglDeployment,
 	deleteDurablyQueuedWebglDeploymentByEntry,
-} from '../../webgl/deployment.js';
+} from '../../webgl/deployment.runtime.js';
 import { deleteDurablyQueuedObject } from '../../../object-deletion.js';
 import { deleteDurablyQueuedAssetObjects } from './asset-cleanup.js';
 import * as repository from './repository.js';

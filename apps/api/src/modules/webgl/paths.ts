@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 const UUID_RE = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 
 interface WebglDeploymentIdentity {
@@ -24,7 +22,7 @@ export interface WebglDeploymentKeys extends WebglProtectedSourceKeys, WebglPubl
 
 export function createWebglDeploymentKeys(
 	projectId: number,
-	deploymentId: string = randomUUID(),
+	deploymentId: string,
 ): WebglDeploymentKeys {
 	const deploymentPrefix = `webgl/${projectId}/${deploymentId}/`;
 	const sitePrefix = `${deploymentPrefix}site/`;

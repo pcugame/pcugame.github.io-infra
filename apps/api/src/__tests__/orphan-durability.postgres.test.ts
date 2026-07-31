@@ -271,6 +271,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 					reason: 'game-upload-replace-previous',
 					playbackReason: 'game-upload-replace-previous-playback',
 				},
+				client,
 			),
 			finalizeWebgl: async () => ({ oldEntryKey: '' }),
 			deleteOrQueue: (key, reason, context) => coordinator.deleteDurablyQueued(
@@ -401,6 +402,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				deployed.entryKey,
 				completed.s3Key,
 				{ publicBucket, protectedBucket, reason: 'webgl-upload-replace-previous' },
+				client,
 			),
 			deleteOrQueue: async () => {},
 			webglUrl: () => '/webgl',
