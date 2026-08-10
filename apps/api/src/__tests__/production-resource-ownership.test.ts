@@ -4,7 +4,13 @@ import type { S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import type { Env } from '../config/env.js';
-import type { AppLogger, FileSystem, ObjectStorage, Scheduler } from '../application/ports.js';
+import type {
+	AppLogger,
+	FileSystem,
+	GoogleTokenVerifier,
+	ObjectStorage,
+	Scheduler,
+} from '../application/ports.js';
 import {
 	createMaintenanceSchedule,
 	createProductionBackendContext,
@@ -13,6 +19,7 @@ import {
 } from '../backend-context.js';
 import { buildApp } from '../app.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
+import { routeRuntimeContractsFor } from '../shared/http-route-schemas.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
@@ -78,6 +85,9 @@ function fakePrisma(label: string, events: string[], maxGameFileMb = 5120): Pris
 			deleteMany: vi.fn(async () => ({ count: 0 })),
 		},
 		gameUploadSession: {
+			findMany: vi.fn(async () => []),
+		},
+		bannedIp: {
 			findMany: vi.fn(async () => []),
 		},
 		siteSetting: {
@@ -313,6 +323,152 @@ describe('production BackendContext resource ownership', () => {
 		expect(scheduler.scheduler.every).toHaveBeenCalledTimes(3);
 		await app.close();
 		expect(events).toEqual([]);
+	});
+
+	it('composes, starts, isolates, and closes two complete production route graphs', async () => {
+		const events: string[] = [];
+		const aScheduler = schedulerHarness();
+		const bScheduler = schedulerHarness();
+		const aPrisma = fakePrisma('a-full', events, 1000);
+		const bPrisma = fakePrisma('b-full', events, 2000);
+		const aS3 = fakeS3('a-full', events);
+		const bS3 = fakeS3('b-full', events);
+		const aStorage = { ...storage, head: vi.fn(async () => null) };
+		const bStorage = { ...storage, head: vi.fn(async () => null) };
+		const aVerify: GoogleTokenVerifier['verify'] = vi.fn(async () => undefined);
+		const bVerify: GoogleTokenVerifier['verify'] = vi.fn(async () => undefined);
+		let aId = 0;
+		let bId = 0;
+		const create = (
+			label: 'a' | 'b',
+			prisma: PrismaClient,
+			s3: S3Client,
+			objectStorage: ObjectStorage,
+			scheduler: Scheduler,
+			verify: GoogleTokenVerifier['verify'],
+			nextId: () => string,
+		) => createProductionBackendContext({
+			...testConfig,
+			NODE_ENV: 'production',
+			DEV_AUTH_ENABLED: true,
+			UPLOAD_MAX_CONCURRENT: 1,
+			API_PUBLIC_URL: `https://${label}.api.test`,
+			WEB_PUBLIC_URL: `https://${label}.web.test`,
+			S3_BUCKET_PUBLIC: `${label}-public`,
+			S3_BUCKET_PROTECTED: `${label}-protected`,
+		}, {
+			resources: {
+				logger: { value: testLogger, ownership: 'borrowed' },
+				clock: {
+					value: { now: () => new Date('2026-08-10T00:00:00.000Z') },
+					ownership: 'borrowed',
+				},
+				ids: { value: { next: nextId }, ownership: 'borrowed' },
+				scheduler: { value: scheduler, ownership: 'borrowed' },
+				fileSystem: { value: fileSystem, ownership: 'borrowed' },
+				googleTokens: { value: { verify }, ownership: 'borrowed' },
+				prisma: {
+					value: prisma,
+					ownership: 'owned',
+					close: () => prisma.$disconnect(),
+				},
+				s3: {
+					value: s3,
+					ownership: 'owned',
+					close: () => s3.destroy(),
+				},
+				storage: {
+					value: objectStorage,
+					ownership: 'owned',
+					close: () => {},
+				},
+			},
+		});
+
+		const interval = vi.spyOn(globalThis, 'setInterval');
+		const [a, b] = await Promise.all([
+			create(
+				'a',
+				aPrisma,
+				aS3,
+				aStorage,
+				aScheduler.scheduler,
+				aVerify,
+				() => `a-request-${++aId}`,
+			),
+			create(
+				'b',
+				bPrisma,
+				bS3,
+				bStorage,
+				bScheduler.scheduler,
+				bVerify,
+				() => `b-request-${++bId}`,
+			),
+		]);
+		const [appA, appB] = await Promise.all([
+			buildApp({ context: a }),
+			buildApp({ context: b }),
+		]);
+
+		for (const route of routeRuntimeContractsFor({ includeDevAuth: false })) {
+			const url = route.url === '*' ? '/*' : route.url;
+			expect(appA.hasRoute({ method: route.method, url }), `${route.method} ${route.url}`).toBe(true);
+			expect(appB.hasRoute({ method: route.method, url }), `${route.method} ${route.url}`).toBe(true);
+		}
+		expect(routeRuntimeContractsFor({ includeDevAuth: false })).toHaveLength(55);
+		expect(aPrisma.siteSetting.upsert).not.toHaveBeenCalled();
+		expect(aPrisma.bannedIp.findMany).not.toHaveBeenCalled();
+		expect(aPrisma.gameUploadSession.findMany).not.toHaveBeenCalled();
+		expect(aS3.send).not.toHaveBeenCalled();
+		expect(aStorage.head).not.toHaveBeenCalled();
+		expect(aScheduler.scheduler.every).not.toHaveBeenCalled();
+		expect(interval).not.toHaveBeenCalled();
+
+		a.lifecycle.requestStarted();
+		expect(a.lifecycle.inFlight()).toBe(1);
+		expect(b.lifecycle.inFlight()).toBe(0);
+		a.lifecycle.requestFinished();
+		a.uploadLimiter.acquire();
+		expect(() => a.uploadLimiter.acquire()).toThrow();
+		expect(() => b.uploadLimiter.acquire()).not.toThrow();
+		a.protectedDownloads.addBan('10.0.0.15');
+		expect(a.protectedDownloads.isBanned('10.0.0.15')).toBe(true);
+		expect(b.protectedDownloads.isBanned('10.0.0.15')).toBe(false);
+		a.exportProgress.start(2026, 1);
+		expect(a.exportProgress.get()).toMatchObject({ year: 2026 });
+		expect(b.exportProgress.get()).toBeNull();
+
+		await Promise.all([a.start(), b.start()]);
+		expect(aPrisma.siteSetting.upsert).toHaveBeenCalledOnce();
+		expect(bPrisma.siteSetting.upsert).toHaveBeenCalledOnce();
+		await expect(a.settings.get()).resolves.toMatchObject({ maxGameFileMb: 1000 });
+		await expect(b.settings.get()).resolves.toMatchObject({ maxGameFileMb: 2000 });
+		expect(aPrisma.bannedIp.findMany).toHaveBeenCalledOnce();
+		expect(bPrisma.bannedIp.findMany).toHaveBeenCalledOnce();
+		expect(aPrisma.gameUploadSession.findMany).toHaveBeenCalledOnce();
+		expect(bPrisma.gameUploadSession.findMany).toHaveBeenCalledOnce();
+		expect(aScheduler.tasks).toHaveLength(3);
+		expect(bScheduler.tasks).toHaveLength(3);
+
+		await appA.close();
+		await a.close();
+		expect(aScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
+		expect(bScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 0)).toBe(true);
+		expect(aS3.destroy).toHaveBeenCalledOnce();
+		expect(aPrisma.$disconnect).toHaveBeenCalledOnce();
+		expect(bS3.destroy).not.toHaveBeenCalled();
+		expect(bPrisma.$disconnect).not.toHaveBeenCalled();
+		const healthB = await appB.inject({ method: 'GET', url: '/api/health' });
+		expect(healthB.statusCode, healthB.body).toBe(200);
+		expect(healthB.headers['x-request-id']).toBe('b-request-1');
+		expect(bVerify).not.toHaveBeenCalled();
+		expect(aVerify).not.toHaveBeenCalled();
+
+		await appB.close();
+		expect(bS3.destroy).toHaveBeenCalledOnce();
+		expect(bPrisma.$disconnect).toHaveBeenCalledOnce();
+		interval.mockRestore();
 	});
 
 	it('closes S3 and Prisma once when explicit startup fails after timers begin', async () => {
