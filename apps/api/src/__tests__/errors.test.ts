@@ -5,10 +5,10 @@ import { parseBody } from '../shared/validation.js';
 
 describe('AppError', () => {
   it('has correct properties', () => {
-    const err = new AppError(400, 'Bad input', 'BAD_INPUT', { field: 'x' });
+    const err = new AppError(400, 'Bad input', 'VALIDATION_ERROR', { field: 'x' });
     expect(err.statusCode).toBe(400);
     expect(err.message).toBe('Bad input');
-    expect(err.code).toBe('BAD_INPUT');
+    expect(err.code).toBe('VALIDATION_ERROR');
     expect(err.details).toEqual({ field: 'x' });
     expect(err).toBeInstanceOf(Error);
   });

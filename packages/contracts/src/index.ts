@@ -99,3 +99,4 @@ export type {
 } from './game-upload.js';
 
 export * from './schemas.js';
+export * from './response-schemas.js';

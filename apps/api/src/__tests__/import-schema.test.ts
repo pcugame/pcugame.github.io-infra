@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { ImportDataSchema, ImportMember, ImportProject, ImportYear } from '../modules/admin/import/service.js';
+import { describe, it, expect, vi } from 'vitest';
+import {
+	createImportService,
+	ImportDataSchema,
+	ImportMember,
+	ImportProject,
+	ImportYear,
+} from '../modules/admin/import/service.js';
 
 describe('ImportDataSchema', () => {
 	it('parses minimal valid input', () => {
@@ -45,6 +51,24 @@ describe('ImportDataSchema', () => {
 		expect(p.githubUrl).toBe('');
 		expect(p.platforms).toEqual([]);
 		expect(p.members).toEqual([]);
+	});
+
+	it('returns a documented validation error code and JSON details for invalid execution data', async () => {
+		const runTransaction = vi.fn();
+		const service = createImportService({
+			repository: { runTransaction } as never,
+		});
+
+		await expect(service.executeImport(JSON.stringify({
+			projects: [{ year: 1999, title: 'Too old' }],
+		}), 1)).rejects.toMatchObject({
+			statusCode: 400,
+			code: 'VALIDATION_ERROR',
+			details: {
+				issues: [expect.stringContaining('projects.0.year')],
+			},
+		});
+		expect(runTransaction).not.toHaveBeenCalled();
 	});
 });
 

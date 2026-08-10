@@ -80,6 +80,24 @@ function registerGlobalErrorHandler(app: FastifyInstance, appLogger: BackendCont
 			return;
 		}
 
+		// Content parsers report invalid/empty JSON without populating
+		// `error.validation`; multipart labels an invalid JSON field as 406.
+		// Normalize both to the public validation envelope instead of a 500.
+		if (
+			error.statusCode === 400
+			|| error.code === 'FST_INVALID_JSON_FIELD_ERROR'
+		) {
+			const body: ApiError = {
+				ok: false,
+				error: {
+					code: 'VALIDATION_ERROR',
+					message: 'Malformed request',
+				},
+			};
+			reply.status(400).send(body);
+			return;
+		}
+
 		// Multipart file size limit
 		if (error.statusCode === 413 || error.code === 'FST_REQ_FILE_TOO_LARGE') {
 			const body: ApiError = {
@@ -87,6 +105,26 @@ function registerGlobalErrorHandler(app: FastifyInstance, appLogger: BackendCont
 				error: { code: 'PAYLOAD_TOO_LARGE', message: 'File too large' },
 			};
 			reply.status(413).send(body);
+			return;
+		}
+
+		// Normalize Fastify's generic parser error and @fastify/multipart's
+		// "request is not multipart" error to the API's documented 415 envelope.
+		// The multipart plugin reports the latter as 406 even though the problem
+		// is the request Content-Type, not response content negotiation.
+		if (
+			error.statusCode === 415
+			|| error.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE'
+			|| error.code === 'FST_INVALID_MULTIPART_CONTENT_TYPE'
+		) {
+			const body: ApiError = {
+				ok: false,
+				error: {
+					code: 'UNSUPPORTED_MEDIA_TYPE',
+					message: 'Unsupported media type',
+				},
+			};
+			reply.status(415).send(body);
 			return;
 		}
 

@@ -151,6 +151,22 @@ describe('game upload resource guards', () => {
 		expect(mocks.createSessionReplacingActive).not.toHaveBeenCalled();
 	});
 
+	it.each([1.5, Number.MAX_SAFE_INTEGER + 1])(
+		'rejects invalid totalBytes %s before any repository or storage work',
+		async (totalBytes) => {
+			await expect(service.createSession(
+				7,
+				1,
+				{ id: 11, role: 'USER' },
+				{ originalName: 'game.zip', totalBytes },
+			)).rejects.toMatchObject({ statusCode: 400 });
+
+			expect(mocks.findExhibitionById).not.toHaveBeenCalled();
+			expect(mocks.createMultipartUpload).not.toHaveBeenCalled();
+			expect(mocks.createSessionReplacingActive).not.toHaveBeenCalled();
+		},
+	);
+
 	it('creates independent GAME and WEBGL sessions with different storage layouts', async () => {
 		mocks.findExhibitionById.mockResolvedValue({
 			id: 1,

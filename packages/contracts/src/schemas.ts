@@ -15,11 +15,14 @@ export const DevAuthErrorScenarioSchema = z.enum([
 	'api-server-error',
 ]);
 
+const SafePositiveIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const SafeNonNegativeIntegerSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+
 export const ProjectMemberInputSchema = z.object({
 	name: z.string().min(1).max(50),
 	studentId: z.string().min(1).max(20),
-	sortOrder: z.number().int().min(0).optional(),
-	userId: z.number().int().positive().optional(),
+	sortOrder: SafeNonNegativeIntegerSchema.optional(),
+	userId: SafePositiveIntegerSchema.optional(),
 });
 
 export const ProjectSubmissionTitleSchema = z.string()
@@ -29,7 +32,7 @@ export const ProjectSubmissionTitleSchema = z.string()
 	});
 
 export const SubmitProjectPayloadBaseSchema = z.object({
-	exhibitionId: z.number().int().positive(),
+	exhibitionId: SafePositiveIntegerSchema,
 	title: ProjectSubmissionTitleSchema,
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
@@ -42,60 +45,60 @@ export const UpdateProjectBaseSchema = z.object({
 	description: z.string().max(5000).optional(),
 	isIncomplete: z.boolean().optional(),
 	status: ProjectStatusSchema.optional(),
-	sortOrder: z.number().int().min(0).optional(),
+	sortOrder: SafeNonNegativeIntegerSchema.optional(),
 });
 
 export const AdminProjectListQueryBaseSchema = z.object({
-	page: z.number().int().positive().optional(),
-	limit: z.number().int().positive().optional(),
+	page: SafePositiveIntegerSchema.optional(),
+	limit: SafePositiveIntegerSchema.optional(),
 	search: z.string().max(100).optional(),
-	year: z.number().int().optional(),
+	year: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER).optional(),
 	status: ProjectStatusSchema.optional(),
 	sort: AdminProjectListSortSchema.optional(),
 	order: SortOrderSchema.optional(),
 });
 
 export const BulkUpdateProjectStatusSchema = z.object({
-	ids: z.array(z.number().int().positive()).min(1).max(500),
+	ids: z.array(SafePositiveIntegerSchema).min(1).max(500),
 	status: ProjectStatusSchema,
 });
 
 export const BulkDeleteProjectsSchema = z.object({
-	ids: z.array(z.number().int().positive()).min(1).max(500),
+	ids: z.array(SafePositiveIntegerSchema).min(1).max(500),
 });
 
 export const SetProjectPosterSchema = z.object({
-	assetId: z.number().int().positive(),
+	assetId: SafePositiveIntegerSchema,
 });
 
 export const CreateExhibitionBaseSchema = z.object({
 	year: z.number().int().min(2021).max(2100),
 	title: z.string().max(100).optional(),
 	isUploadEnabled: z.boolean().optional(),
-	sortOrder: z.number().int().min(0).optional(),
+	sortOrder: SafeNonNegativeIntegerSchema.optional(),
 });
 
 export const UpdateExhibitionBaseSchema = z.object({
 	title: z.string().max(100).optional(),
 	isUploadEnabled: z.boolean().optional(),
-	sortOrder: z.number().int().min(0).optional(),
+	sortOrder: SafeNonNegativeIntegerSchema.optional(),
 });
 
 export const AddMemberSchema = z.object({
 	name: z.string().min(1).max(50),
 	studentId: z.string().min(1).max(20),
-	sortOrder: z.number().int().min(0).optional(),
+	sortOrder: SafeNonNegativeIntegerSchema.optional(),
 });
 
 export const UpdateMemberBaseSchema = z.object({
 	name: z.string().min(1).max(50).optional(),
 	studentId: z.string().min(1).max(20).optional(),
-	sortOrder: z.number().int().min(0).optional(),
+	sortOrder: SafeNonNegativeIntegerSchema.optional(),
 });
 
 export const SwapProjectMembersSchema = z.object({
-	memberIdA: z.number().int().positive(),
-	memberIdB: z.number().int().positive(),
+	memberIdA: SafePositiveIntegerSchema,
+	memberIdB: SafePositiveIntegerSchema,
 });
 
 export const GoogleAuthRequestSchema = z.object({
@@ -112,7 +115,7 @@ export const DevAuthLoginErrorRequestSchema = z.object({
 
 export const GameUploadCreateSessionSchema = z.object({
 	originalName: z.string().min(1),
-	totalBytes: z.number().positive(),
+	totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 	uploadKind: UploadKindSchema.optional(),
 });
 

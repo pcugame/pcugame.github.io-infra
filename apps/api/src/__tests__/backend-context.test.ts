@@ -44,7 +44,21 @@ function createTestContext(): {
 	};
 	const authRoutes: FastifyPluginAsync = async (app) => {
 		app.post('/auth/google', async () => ({ ok: true }));
-		app.get('/session-user', async (request) => ({ user: request.currentUser ?? null }));
+		app.get('/me', async (request) => ({
+			ok: true,
+			data: request.currentUser
+				? {
+					authenticated: true,
+					user: {
+						id: request.currentUser.id,
+						email: request.currentUser.email,
+						name: request.currentUser.name,
+						role: request.currentUser.role,
+						studentId: request.currentUser.studentId,
+					},
+				}
+				: { authenticated: false },
+		}));
 	};
 	let closePromise: Promise<void> | undefined;
 	let startPromise: Promise<void> | undefined;
@@ -208,14 +222,16 @@ describe('BackendContext composition', () => {
 		try {
 			const response = await app.inject({
 				method: 'GET',
-				url: '/api/session-user',
+				url: '/api/me',
 				headers: {
 					origin: 'http://localhost:5173',
 					cookie: 'sid=session-1',
 				},
 			});
 			expect(response.statusCode).toBe(200);
-			expect(response.json()).toMatchObject({ user: { id: 9, role: 'USER' } });
+			expect(response.json()).toMatchObject({
+				data: { user: { id: 9, role: 'USER' } },
+			});
 			expect(authSessionFind).toHaveBeenCalledWith('session-1');
 			expect(authSessionTouch).toHaveBeenCalledWith(
 				'session-1',

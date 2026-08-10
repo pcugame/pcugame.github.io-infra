@@ -107,9 +107,15 @@ describe('project payload schemas', () => {
 		expect(AdminProjectListQueryBaseSchema.safeParse({ sort: 'updatedAt' }).success).toBe(false);
 		expect(BulkUpdateProjectStatusSchema.safeParse({ ids: [1, 2], status: 'PUBLISHED' }).success).toBe(true);
 		expect(BulkDeleteProjectsSchema.safeParse({ ids: [] }).success).toBe(false);
+		expect(BulkDeleteProjectsSchema.safeParse({
+			ids: [Number.MAX_SAFE_INTEGER + 1],
+		}).success).toBe(false);
 		expect(SetProjectPosterSchema.safeParse({ assetId: 1 }).success).toBe(true);
 		expect(AddMemberSchema.safeParse(member).success).toBe(true);
 		expect(UpdateMemberBaseSchema.safeParse({ name: 'Updated' }).success).toBe(true);
+		expect(UpdateMemberBaseSchema.safeParse({
+			sortOrder: Number.MAX_SAFE_INTEGER + 1,
+		}).success).toBe(false);
 	});
 });
 
@@ -128,5 +134,13 @@ describe('exhibition and auth schemas', () => {
 		expect(DevAuthLoginErrorRequestSchema.safeParse({ scenario: 'domain-not-allowed' }).success).toBe(true);
 		expect(GameUploadCreateSessionSchema.safeParse({ originalName: 'game.zip', totalBytes: 1 }).success).toBe(true);
 		expect(GameUploadCreateSessionSchema.safeParse({ originalName: '', totalBytes: 0 }).success).toBe(false);
+		expect(GameUploadCreateSessionSchema.safeParse({
+			originalName: 'game.zip',
+			totalBytes: 1.5,
+		}).success).toBe(false);
+		expect(GameUploadCreateSessionSchema.safeParse({
+			originalName: 'game.zip',
+			totalBytes: Number.MAX_SAFE_INTEGER + 1,
+		}).success).toBe(false);
 	});
 });

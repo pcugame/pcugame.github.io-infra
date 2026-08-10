@@ -7,7 +7,12 @@ import type {
 	GameUploadStatus,
 } from '@pcu/contracts';
 import { sendOk, sendCreated } from '../../../shared/http.js';
-import { GameUploadCreateSessionBody, parseBody, parseIntParam } from '../../../shared/validation.js';
+import {
+	GameUploadCreateSessionBody,
+	parseBody,
+	parseIntParam,
+	parseNonNegativeIntParam,
+} from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
 import type { createGameUploadService } from './service.js';
 
@@ -70,7 +75,7 @@ export function createGameUploadController(
 			const user = request.currentUser!;
 			const result = await deps.service.uploadChunk(
 				request.params.sessionId,
-				parseInt(request.params.index, 10),
+				parseNonNegativeIntParam(request.params.index, 'Chunk index'),
 				request.body as NodeJS.ReadableStream,
 				{ id: user.id, role: user.role },
 			);

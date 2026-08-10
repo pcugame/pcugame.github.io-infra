@@ -29,6 +29,9 @@ export async function createSession(
 
 	const { originalName, totalBytes } = body;
 	const uploadKind = body.uploadKind ?? 'GAME';
+	if (!Number.isSafeInteger(totalBytes) || totalBytes <= 0) {
+		throw badRequest('totalBytes must be a positive safe integer');
+	}
 	assertValidUploadFilename(originalName);
 
 	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
@@ -42,7 +45,6 @@ export async function createSession(
 
 	const effectiveMax = Math.min(maxGameBytes, deps.roleGameMaxBytes(user.role));
 
-	if (totalBytes <= 0) throw badRequest('totalBytes must be positive');
 	if (totalBytes > effectiveMax) {
 		const maxMB = Math.round(effectiveMax / 1024 / 1024);
 		throw badRequest(`File size ${Math.round(totalBytes / 1024 / 1024)}MB exceeds max ${maxMB}MB`);

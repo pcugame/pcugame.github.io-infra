@@ -2,6 +2,7 @@ import { Readable } from 'node:stream';
 import { createWriteStream, promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { ExportStatusResponseSchema } from '@pcu/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createExportFileWriter } from '../modules/admin/export/file.adapter.js';
 import {
@@ -107,9 +108,11 @@ describe('NAS WebGL export', () => {
 			members: [],
 			assets: [],
 		}]);
-		let progressKind: string | undefined;
+		const captured = {
+			progress: null as ReturnType<typeof exportService.getExportProgress>,
+		};
 		mocks.getObject.mockImplementation(async () => {
-			progressKind = exportService.getExportProgress()?.currentProjectFiles[0]?.kind;
+			captured.progress = exportService.getExportProgress();
 			return Readable.from([Buffer.from('original-webgl-zip')]);
 		});
 		const outDir = await fsp.mkdtemp(join(tmpdir(), 'pcu-webgl-export-'));
@@ -126,7 +129,14 @@ describe('NAS WebGL export', () => {
 		);
 		expect(first).toMatchObject({ downloaded: 1, skipped: 0, failed: 0 });
 		expect(await fsp.readFile(exportedPath, 'utf8')).toBe('original-webgl-zip');
-		expect(progressKind).toBe('WEBGL');
+		expect(captured.progress?.currentProjectFiles[0]).toMatchObject({
+			assetId: -19,
+			kind: 'WEBGL',
+		});
+		expect(ExportStatusResponseSchema.safeParse({
+			running: true,
+			progress: captured.progress,
+		}).success).toBe(true);
 		expect(mocks.getObject).toHaveBeenCalledWith('pcu-protected', sourceKey, expect.any(AbortSignal));
 
 		const second = await exportService.exportAssets({ outDir });
