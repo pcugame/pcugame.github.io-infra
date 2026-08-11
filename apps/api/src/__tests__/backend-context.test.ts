@@ -7,6 +7,7 @@ import { buildApp } from '../app.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
 import { createExportProgressStore } from '../modules/admin/export/service.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 
 function testConfig(): Env {
 	return {
@@ -60,6 +61,7 @@ function createTestContext(): {
 				: { authenticated: false },
 		}));
 	};
+	const uploadLifecycle = createTestUploadLifecycleRuntime();
 	let closePromise: Promise<void> | undefined;
 	let startPromise: Promise<void> | undefined;
 
@@ -81,6 +83,8 @@ function createTestContext(): {
 				uploadPart: async () => 'etag',
 				completeMultipart: async () => {},
 				abortMultipart: async () => {},
+				listParts: async () => [],
+				listMultipartUploads: async () => [],
 			},
 			fileSystem: {
 				temporaryDirectory: () => '/tmp',
@@ -111,7 +115,10 @@ function createTestContext(): {
 			uploadLifecycleMetrics: {
 				recordPostCommitCleanupFailure: () => {},
 				postCommitCleanupFailureCount: () => 0,
+				recordUntrackedMultipartCleanupFailure: () => {},
+				untrackedMultipartCleanupFailureCount: () => 0,
 			},
+			uploadLifecycle,
 			lifecycle: {
 				state: () => 'ready',
 				setState: () => {},

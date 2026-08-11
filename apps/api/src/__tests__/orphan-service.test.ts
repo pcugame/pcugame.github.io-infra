@@ -1,45 +1,100 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import { createOrphanService } from '../modules/orphan/service.js';
+import type { ObjectReferenceInventory } from '../modules/orphan/reference-resolver.js';
+
+interface ClaimedOrphan {
+	id: number;
+	bucket: string;
+	storageKey: string;
+	targetKind: 'EXACT' | 'PREFIX';
+	attemptCount: number;
+}
 
 function createDependencies() {
 	const now = new Date('2026-07-21T05:00:00.000Z');
+	const repository = {
+		upsertOrphan: vi.fn(async () => undefined),
+		claimPendingOrphans: vi.fn(async (): Promise<ClaimedOrphan[]> => []),
+		markClaimResolved: vi.fn(async () => ({ count: 1 })),
+		renewClaim: vi.fn(async () => ({ count: 1 })),
+		markClaimCancelled: vi.fn(async () => ({ count: 1 })),
+		markClaimFailed: vi.fn(async () => ({ count: 1 })),
+	};
 	return {
 		now,
 		deps: {
 			clock: { now: () => now },
-			storage: { delete: vi.fn() },
-			repository: {
-				upsertOrphan: vi.fn(),
-				findPendingOrphans: vi.fn(),
-				markResolved: vi.fn(),
-				markFailed: vi.fn(),
+			storage: {
+				delete: vi.fn(async (
+					_bucket: string,
+					_key: string,
+					_request?: { signal?: AbortSignal; requestTimeoutMs?: number },
+				): Promise<void> => undefined),
+				listKeys: vi.fn(async (
+					_bucket: string,
+					_prefix: string,
+					_request?: { signal?: AbortSignal; requestTimeoutMs?: number },
+				): Promise<string[]> => []),
 			},
+			repository,
+			references: {
+				collect: vi.fn(async (): Promise<ObjectReferenceInventory> => ({
+					references: [],
+					unsafeBuckets: new Set<string>(),
+				})),
+			},
+			ids: { next: () => 'claim-token' },
 			logger: { info: vi.fn(), error: vi.fn() },
 		},
 	};
 }
 
+function orphan(
+	id: number,
+	storageKey: string,
+	overrides: Partial<{
+		bucket: string;
+		targetKind: 'EXACT' | 'PREFIX';
+		attemptCount: number;
+	}> = {},
+) {
+	return {
+		id,
+		bucket: overrides.bucket ?? 'public',
+		storageKey,
+		targetKind: overrides.targetKind ?? 'EXACT',
+		attemptCount: overrides.attemptCount ?? 0,
+	};
+}
+
 describe('orphan object service', () => {
-	it('uses one injected timestamp for cutoff, success, and failure updates', async () => {
+	it('uses one injected timestamp for claim, success, and failure updates', async () => {
 		const { deps, now } = createDependencies();
-		deps.repository.findPendingOrphans.mockResolvedValue([
-			{ id: 1, bucket: 'public', storageKey: 'ok.png', attemptCount: 0 },
-			{ id: 2, bucket: 'protected', storageKey: 'retry.zip', attemptCount: 3 },
+		deps.repository.claimPendingOrphans.mockResolvedValue([
+			orphan(1, 'ok.png'),
+			orphan(2, 'retry.zip', { bucket: 'protected', attemptCount: 3 }),
 		]);
 		deps.storage.delete
 			.mockResolvedValueOnce(undefined)
 			.mockRejectedValueOnce(new Error('storage unavailable'));
-		deps.repository.markResolved.mockResolvedValue(undefined);
-		deps.repository.markFailed.mockResolvedValue(undefined);
 		const service = createOrphanService(deps);
 
 		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 2, resolved: 1, failed: 1 });
-		expect(deps.repository.findPendingOrphans).toHaveBeenCalledWith(
+		expect(deps.repository.claimPendingOrphans).toHaveBeenCalledWith(
 			50,
-			new Date('2026-07-21T04:55:00.000Z'),
+			now,
+			new Date('2026-07-21T05:02:00.000Z'),
+			'claim-token',
 		);
-		expect(deps.repository.markResolved).toHaveBeenCalledWith(1, now);
-		expect(deps.repository.markFailed).toHaveBeenCalledWith(2, expect.any(Error), now);
+		expect(deps.repository.markClaimResolved).toHaveBeenCalledWith(1, 'claim-token', now);
+		expect(deps.repository.markClaimFailed).toHaveBeenCalledWith(
+			2,
+			'claim-token',
+			expect.any(Error),
+			now,
+			expect.any(Date),
+		);
 	});
 
 	it('logs and propagates persistence failure to the deletion caller', async () => {
@@ -56,80 +111,81 @@ describe('orphan object service', () => {
 		);
 	});
 
-	it('treats deletion of an already missing object as a resolved retry', async () => {
-		const { deps, now } = createDependencies();
-		deps.repository.findPendingOrphans.mockResolvedValue([
-			{ id: 9, bucket: 'public', storageKey: 'already-gone.png', attemptCount: 2 },
-		]);
-		deps.storage.delete.mockResolvedValue(undefined);
-		deps.repository.markResolved.mockResolvedValue(undefined);
+	it('collects one full reference inventory for a 50-row batch', async () => {
+		const { deps } = createDependencies();
+		deps.repository.claimPendingOrphans.mockResolvedValue(
+			Array.from({ length: 50 }, (_, index) => orphan(index + 1, `objects/${index}.bin`)),
+		);
 		const service = createOrphanService(deps);
 
-		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
-		expect(deps.repository.markResolved).toHaveBeenCalledWith(9, now);
-		expect(deps.repository.markFailed).not.toHaveBeenCalled();
+		await expect(service.runOrphanReaper()).resolves.toEqual({
+			tried: 50,
+			resolved: 50,
+			failed: 0,
+		});
+		expect(deps.references.collect).toHaveBeenCalledOnce();
+		expect(deps.storage.delete).toHaveBeenCalledTimes(50);
 	});
 
-	it('re-enumerates a durable prefix row on every retry before resolving it', async () => {
+	it('re-enumerates a durable prefix target before resolving it', async () => {
 		const { deps, now } = createDependencies();
-		const listKeys = vi.fn().mockResolvedValue([
+		deps.storage.listKeys.mockResolvedValue([
 			'webgl/7/build/site/index.html',
 			'webgl/7/build/site/main.js',
 		]);
-		deps.storage.delete.mockResolvedValue(undefined);
-		deps.repository.findPendingOrphans.mockResolvedValue([{
-			id: 12,
-			bucket: 'public',
-			storageKey: 'webgl/7/build/site/',
-			attemptCount: 1,
-		}]);
-		deps.repository.markResolved.mockResolvedValue(undefined);
-		const service = createOrphanService({
-			...deps,
-			storage: { ...deps.storage, listKeys },
-		});
+		deps.repository.claimPendingOrphans.mockResolvedValue([
+			orphan(12, 'webgl/7/build/site/', { targetKind: 'PREFIX', attemptCount: 1 }),
+		]);
+		const service = createOrphanService(deps);
 
 		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
-		expect(listKeys).toHaveBeenCalledWith(
+		expect(deps.storage.listKeys).toHaveBeenCalledWith(
 			'public',
 			'webgl/7/build/site/',
 			expect.objectContaining({ requestTimeoutMs: 60_000 }),
 		);
 		expect(deps.storage.delete).toHaveBeenCalledTimes(2);
-		expect(deps.repository.markResolved).toHaveBeenCalledWith(12, now);
+		expect(deps.repository.markClaimResolved).toHaveBeenCalledWith(12, 'claim-token', now);
 	});
 
-	it('cancels a claimed prefix deletion when any overlapping live reference exists', async () => {
+	it('cancels a claimed prefix deletion when an EXACT live reference overlaps it', async () => {
 		const { deps, now } = createDependencies();
-		const claimPendingOrphans = vi.fn().mockResolvedValue([{
-			id: 13,
-			bucket: 'public',
-			storageKey: 'webgl/7/build/site/',
-			targetKind: 'PREFIX' as const,
-			attemptCount: 0,
-		}]);
-		const markClaimCancelled = vi.fn().mockResolvedValue({ count: 1 });
-		const listKeys = vi.fn();
-		const service = createOrphanService({
-			...deps,
-			storage: { ...deps.storage, listKeys },
-			repository: {
-				...deps.repository,
-				claimPendingOrphans,
-				markClaimCancelled,
-			},
-			references: { isReferenced: vi.fn().mockResolvedValue(true) },
-			ids: { next: () => 'claim-token' },
+		deps.repository.claimPendingOrphans.mockResolvedValue([
+			orphan(13, 'webgl/7/build/site/', { targetKind: 'PREFIX' }),
+		]);
+		deps.references.collect.mockResolvedValue({
+			references: [{
+				bucket: 'public',
+				targetKind: 'EXACT',
+				key: 'webgl/7/build/site/index.html',
+				source: 'project:7:webgl-site',
+			}],
+			unsafeBuckets: new Set<string>(),
 		});
+		const service = createOrphanService(deps);
 
 		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
-		expect(markClaimCancelled).toHaveBeenCalledWith(
+		expect(deps.repository.markClaimCancelled).toHaveBeenCalledWith(
 			13,
 			'claim-token',
 			'live-reference-detected',
 			now,
 		);
-		expect(listKeys).not.toHaveBeenCalled();
+		expect(deps.storage.listKeys).not.toHaveBeenCalled();
+		expect(deps.storage.delete).not.toHaveBeenCalled();
+	});
+
+	it('fails closed for every deletion in a bucket with a malformed WebGL pointer', async () => {
+		const { deps } = createDependencies();
+		deps.repository.claimPendingOrphans.mockResolvedValue([orphan(14, 'unrelated.png')]);
+		deps.references.collect.mockResolvedValue({
+			references: [],
+			unsafeBuckets: new Set(['public']),
+		});
+		const service = createOrphanService(deps);
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
+		expect(deps.repository.markClaimCancelled).toHaveBeenCalledOnce();
 		expect(deps.storage.delete).not.toHaveBeenCalled();
 	});
 
@@ -139,7 +195,7 @@ describe('orphan object service', () => {
 			const { deps } = createDependencies();
 			let enteredDelete!: () => void;
 			const deleteEntered = new Promise<void>((resolve) => { enteredDelete = resolve; });
-			const deleteObject = vi.fn((
+			deps.storage.delete.mockImplementation((
 				_bucket: string,
 				_key: string,
 				request?: { signal?: AbortSignal },
@@ -151,32 +207,19 @@ describe('orphan object service', () => {
 					}, { once: true });
 				});
 			});
-			const markClaimFailed = vi.fn().mockResolvedValue({ count: 1 });
-			const service = createOrphanService({
-				...deps,
-				storage: { ...deps.storage, delete: deleteObject },
-				repository: {
-					...deps.repository,
-					claimPendingOrphans: vi.fn().mockResolvedValue([{
-						id: 14,
-						bucket: 'protected',
-						storageKey: 'game/lease-lost.zip',
-						targetKind: 'EXACT' as const,
-						attemptCount: 0,
-					}]),
-					renewClaim: vi.fn().mockResolvedValue({ count: 0 }),
-					markClaimFailed,
-				},
-				ids: { next: () => 'lease-token' },
-			});
+			deps.repository.claimPendingOrphans.mockResolvedValue([
+				orphan(15, 'game/lease-lost.zip', { bucket: 'protected' }),
+			]);
+			deps.repository.renewClaim.mockResolvedValue({ count: 0 });
+			const service = createOrphanService(deps);
 
 			const running = service.runOrphanReaper();
 			await deleteEntered;
 			await vi.advanceTimersByTimeAsync(30_000);
 			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
-			expect(markClaimFailed).toHaveBeenCalledWith(
-				14,
-				'lease-token',
+			expect(deps.repository.markClaimFailed).toHaveBeenCalledWith(
+				15,
+				'claim-token',
 				expect.any(Error),
 				new Date('2026-07-21T05:00:00.000Z'),
 				expect.any(Date),

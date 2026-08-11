@@ -4,7 +4,6 @@ import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify'
 import fastifyMultipart from '@fastify/multipart';
 import { cruise, type ICruiseResult } from 'dependency-cruiser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PrismaClient } from '../generated/prisma/client.js';
 import type {
 	AppLogger,
 	FileSystem,
@@ -19,6 +18,9 @@ import {
 	type YearProductionDependencies,
 } from '../modules/admin/year/composition.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
+import { createObjectDeletionCoordinator } from '../application/object-deletion.js';
+import type { ExhibitionRepository } from '../modules/admin/year/ports.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const tinyPng = Buffer.from(
@@ -49,8 +51,11 @@ interface ExhibitionRow {
 	_count: { projects: number };
 }
 
-function prismaHarness() {
+function repositoryHarness() {
 	let nextId = 2;
+	let nextIntentId = 0;
+	let commitFailure: Error | undefined;
+	let outboxFailure: Error | undefined;
 	const rows = new Map<number, ExhibitionRow>([[
 		1,
 		{
@@ -67,22 +72,26 @@ function prismaHarness() {
 		},
 	]]);
 	const orphans = new Map<string, { bucket: string; storageKey: string; reason: string }>();
-	let transactionFailure: Error | undefined;
-	let outboxFailure: Error | undefined;
 
-	function findUnique(where: Record<string, unknown>) {
-		if ('id' in where) return rows.get(where.id as number) ?? null;
-		const composite = where['year_title'] as { year: number; title: string } | undefined;
-		if (!composite) return null;
-		return [...rows.values()].find((row) => (
-			row.year === composite.year && row.title === composite.title
-		)) ?? null;
+	function failCommitIfScripted(): void {
+		if (!commitFailure) return;
+		const error = commitFailure;
+		commitFailure = undefined;
+		throw error;
+	}
+
+	function recordOutbox(bucket: string, storageKey: string, reason: string): void {
+		if (outboxFailure) throw outboxFailure;
+		orphans.set(`${bucket}\0${storageKey}`, { bucket, storageKey, reason });
 	}
 
 	const calls = {
 		findMany: vi.fn(async () => [...rows.values()]),
-		findUnique: vi.fn(async ({ where }: { where: Record<string, unknown> }) => findUnique(where)),
-		create: vi.fn(async ({ data }: { data: Partial<ExhibitionRow> & { year: number } }) => {
+		findByComposite: vi.fn(async (year: number, title: string) => (
+			[...rows.values()].find((row) => row.year === year && row.title === title) ?? null
+		)),
+		findById: vi.fn(async (id: number) => rows.get(id) ?? null),
+		create: vi.fn(async (data: { year: number; title?: string; isUploadEnabled?: boolean; sortOrder?: number }) => {
 			const row: ExhibitionRow = {
 				id: nextId++,
 				year: data.year,
@@ -98,70 +107,80 @@ function prismaHarness() {
 			rows.set(row.id, row);
 			return row;
 		}),
-		update: vi.fn(async ({ where, data }: {
-			where: { id: number };
-			data: Partial<ExhibitionRow>;
-		}) => {
-			const row = rows.get(where.id);
+		update: vi.fn(async (id: number, data: Partial<ExhibitionRow>) => {
+			const row = rows.get(id);
 			if (!row) throw new Error('missing exhibition');
 			Object.assign(row, data);
 			return row;
 		}),
-		delete: vi.fn(async ({ where }: { where: { id: number } }) => {
-			const row = rows.get(where.id);
-			if (!row) throw new Error('missing exhibition');
-			rows.delete(where.id);
+		delete: vi.fn(async (id: number, outbox: { bucket: string; reason: string }) => {
+			failCommitIfScripted();
+			const row = rows.get(id);
+			if (!row) return null;
+			if (row.posterStorageKey) recordOutbox(outbox.bucket, row.posterStorageKey, outbox.reason);
+			rows.delete(id);
 			return row;
 		}),
-		queryRaw: vi.fn(async (...query: unknown[]) => {
-			const id = query.slice(1).find((value): value is number => typeof value === 'number');
-			const row = id === undefined ? undefined : rows.get(id);
-			return row ? [{ id: row.id, posterStorageKey: row.posterStorageKey }] : [];
-		}),
-		orphanUpsert: vi.fn(async ({ create }: {
-			create: { bucket: string; storageKey: string; reason: string };
-		}) => {
+		replacePoster: vi.fn(async (
+			id: number,
+			data: { storageKey: string; originalName: string; mimeType: string; sizeBytes: bigint },
+			outbox: { bucket: string; reason: string },
+		) => {
+			failCommitIfScripted();
+			const row = rows.get(id);
+			if (!row) return null;
 			if (outboxFailure) throw outboxFailure;
-			orphans.set(`${create.bucket}\0${create.storageKey}`, create);
-			return create;
-		}),
-		transaction: vi.fn(),
-	};
-	const client = {
-		exhibition: {
-			findMany: calls.findMany,
-			findUnique: calls.findUnique,
-			create: calls.create,
-			update: calls.update,
-			delete: calls.delete,
-		},
-		orphanObject: {
-			upsert: calls.orphanUpsert,
-			findMany: vi.fn(async () => []),
-			update: vi.fn(async () => ({})),
-		},
-		$queryRaw: calls.queryRaw,
-		$transaction: calls.transaction.mockImplementation(async (work: unknown) => {
-			if (transactionFailure) {
-				const error = transactionFailure;
-				transactionFailure = undefined;
-				throw error;
+			const oldStorageKey = row.posterStorageKey;
+			if (oldStorageKey && oldStorageKey !== data.storageKey) {
+				recordOutbox(outbox.bucket, oldStorageKey, outbox.reason);
 			}
-			if (Array.isArray(work)) return Promise.all(work);
-			return (work as (tx: unknown) => Promise<unknown>)(client);
+			Object.assign(row, {
+				posterStorageKey: data.storageKey,
+				posterOriginalName: data.originalName,
+				posterMimeType: data.mimeType,
+				posterSizeBytes: data.sizeBytes,
+			});
+			return { updated: row, oldStorageKey };
 		}),
-	} as unknown as PrismaClient;
+		clearPoster: vi.fn(async (id: number, outbox: { bucket: string; reason: string }) => {
+			const row = rows.get(id);
+			if (!row) return null;
+			if (outboxFailure) throw outboxFailure;
+			const oldStorageKey = row.posterStorageKey;
+			if (oldStorageKey) recordOutbox(outbox.bucket, oldStorageKey, outbox.reason);
+			Object.assign(row, {
+				posterStorageKey: null,
+				posterOriginalName: '',
+				posterMimeType: '',
+				posterSizeBytes: 0n,
+			});
+			return { updated: row, oldStorageKey };
+		}),
+		recordOrphan: vi.fn(async (bucket: string, storageKey: string, reason: string) => {
+			recordOutbox(bucket, storageKey, reason);
+		}),
+	};
+	const repository: ExhibitionRepository = {
+		findAllExhibitions: calls.findMany,
+		findExhibitionByComposite: calls.findByComposite,
+		findExhibitionById: calls.findById,
+		findExhibitionByIdWithCount: calls.findById,
+		createExhibition: calls.create,
+		deleteExhibition: calls.delete,
+		updateExhibition: calls.update,
+		replaceExhibitionPoster: calls.replacePoster,
+		clearExhibitionPoster: calls.clearPoster,
+	};
 
 	return {
-		client,
+		repository,
 		calls,
 		rows,
 		orphans,
-		failNextTransaction(error: Error) {
-			transactionFailure = error;
-		},
-		failOutbox(error?: Error) {
-			outboxFailure = error;
+		failNextTransaction(error: Error) { commitFailure = error; },
+		failOutbox(error?: Error) { outboxFailure = error; },
+		prepareIntent(input: { bucket: string; storageKey: string }) {
+			return `year-intent-${++nextIntentId}-${input.bucket}-${input.storageKey}`;
 		},
 	};
 }
@@ -198,6 +217,8 @@ function storageHarness() {
 		uploadPart: vi.fn(async () => 'etag'),
 		completeMultipart: vi.fn(async () => {}),
 		abortMultipart: vi.fn(async () => {}),
+		listParts: vi.fn(async () => []),
+		listMultipartUploads: vi.fn(async () => []),
 	};
 	return {
 		storage,
@@ -275,7 +296,7 @@ function graphHarness(options: {
 	privilegedImageMaxMb?: number;
 	privilegedRequestMaxMb?: number;
 } = {}) {
-	const prisma = prismaHarness();
+	const repository = repositoryHarness();
 	const storage = storageHarness();
 	const fileSystem = fileSystemHarness();
 	const limiter = limiterHarness();
@@ -293,9 +314,25 @@ function graphHarness(options: {
 		UPLOAD_PRIVILEGED_REQUEST_MAX_MB: options.privilegedRequestMaxMb ?? 2,
 		UPLOAD_PRIVILEGED_MAX_FILES: 1,
 	};
+	const baseUploadLifecycle = createTestUploadLifecycleRuntime();
+	const uploadLifecycle = createTestUploadLifecycleRuntime({
+		uploadIntents: {
+			...baseUploadLifecycle.uploadIntents,
+			prepare: vi.fn(async (input) => repository.prepareIntent(input)),
+		},
+		orphanDeletions: createObjectDeletionCoordinator({
+			storage: storage.storage,
+			orphans: {
+				async record(bucket, storageKey, reason) {
+					await repository.calls.recordOrphan(bucket, storageKey, reason);
+				},
+			},
+			logger,
+		}),
+	});
 	const deps: YearProductionDependencies = {
 		config,
-		prisma: prisma.client,
+		repository: repository.repository,
 		storage: storage.storage,
 		fileSystem: fileSystem.fileSystem,
 		settings: settingsHarness(),
@@ -303,13 +340,15 @@ function graphHarness(options: {
 		logger,
 		clock: { now: () => new Date('2026-07-24T00:00:00.000Z') },
 		ids: { next: () => `00000000-0000-4000-8000-${String(++idSequence).padStart(12, '0')}` },
+		uploadLifecycle,
 	};
 	return {
 		graph: createYearProductionGraph(deps),
-		prisma,
+		repository,
 		storage,
 		fileSystem,
 		limiter,
+		uploadLifecycle,
 		activeUploads: limiter.active,
 	};
 }
@@ -416,9 +455,8 @@ describe('year production wiring', () => {
 		const harness = graphHarness();
 		const app = await routeApp(harness);
 		apps.push(app);
-		expect(harness.prisma.calls.findMany).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.findUnique).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.transaction).not.toHaveBeenCalled();
+		expect(harness.repository.calls.findMany).not.toHaveBeenCalled();
+		expect(harness.repository.calls.findById).not.toHaveBeenCalled();
 		expect(harness.storage.calls.upload).not.toHaveBeenCalled();
 		expect(harness.storage.calls.delete).not.toHaveBeenCalled();
 		expect(setIntervalSpy).not.toHaveBeenCalled();
@@ -459,7 +497,7 @@ describe('year production wiring', () => {
 			payload: { year: 'invalid' },
 		});
 		expect(invalid.statusCode).toBe(400);
-		expect(harness.prisma.calls.create).not.toHaveBeenCalled();
+		expect(harness.repository.calls.create).not.toHaveBeenCalled();
 
 		const created = await app.inject({
 			method: 'POST',
@@ -486,7 +524,7 @@ describe('year production wiring', () => {
 			url: '/api/admin/exhibitions',
 			payload: { year: 2028 },
 		})).statusCode).toBe(403);
-		expect(deniedHarness.prisma.calls.create).not.toHaveBeenCalled();
+		expect(deniedHarness.repository.calls.create).not.toHaveBeenCalled();
 	});
 
 	it('runs poster replace and clear through injected filesystem, storage, limiter, and repository', async () => {
@@ -500,11 +538,12 @@ describe('year production wiring', () => {
 			...multipartPoster(),
 		});
 		expect(replaced.statusCode, replaced.body).toBe(200);
-		const key = harness.prisma.rows.get(1)?.posterStorageKey;
+		const key = harness.repository.rows.get(1)?.posterStorageKey;
 		expect(key).toMatch(/^[0-9a-f-]+\.webp$/);
 		expect(harness.storage.objects.has(key!)).toBe(true);
-		expect(harness.storage.objects.has('old.webp')).toBe(false);
-		expect(harness.prisma.orphans.has('public\0old.webp')).toBe(true);
+		expect(harness.storage.objects.has('old.webp')).toBe(true);
+		expect(harness.repository.orphans.has('public\0old.webp')).toBe(true);
+		expect(harness.uploadLifecycle.wakeDeletionWorker).toHaveBeenCalledOnce();
 		expect(harness.activeUploads()).toBe(0);
 
 		const cleared = await app.inject({
@@ -512,9 +551,10 @@ describe('year production wiring', () => {
 			url: '/api/admin/exhibitions/1/poster',
 		});
 		expect(cleared.statusCode).toBe(204);
-		expect(harness.prisma.rows.get(1)?.posterStorageKey).toBeNull();
-		expect(harness.storage.objects.has(key!)).toBe(false);
-		expect(harness.prisma.orphans.has(`public\0${key}`)).toBe(true);
+		expect(harness.repository.rows.get(1)?.posterStorageKey).toBeNull();
+		expect(harness.storage.objects.has(key!)).toBe(true);
+		expect(harness.repository.orphans.has(`public\0${key}`)).toBe(true);
+		expect(harness.uploadLifecycle.wakeDeletionWorker).toHaveBeenCalledTimes(2);
 	});
 
 	it('routes PDF processing failure through the context logger without storage or pointer mutation', async () => {
@@ -533,7 +573,7 @@ describe('year production wiring', () => {
 		});
 		expect(invalidPdf.statusCode).toBe(400);
 		expect(harness.storage.calls.upload).not.toHaveBeenCalled();
-		expect(harness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(harness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect(harness.activeUploads()).toBe(0);
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({ err: expect.anything() }),
@@ -553,7 +593,7 @@ describe('year production wiring', () => {
 		});
 		expect(invalid.statusCode).toBe(400);
 		expect(invalidHarness.storage.calls.upload).not.toHaveBeenCalled();
-		expect(invalidHarness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(invalidHarness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect(invalidHarness.fileSystem.created.size).toBeGreaterThan(0);
 		expect(invalidHarness.fileSystem.outstanding()).toEqual([]);
 
@@ -567,7 +607,7 @@ describe('year production wiring', () => {
 		});
 		expect(oversize.statusCode).toBe(413);
 		expect(oversizeHarness.storage.calls.upload).not.toHaveBeenCalled();
-		expect(oversizeHarness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(oversizeHarness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect(oversizeHarness.fileSystem.created.size).toBeGreaterThan(0);
 		expect(oversizeHarness.fileSystem.outstanding()).toEqual([]);
 		expect(oversizeHarness.activeUploads()).toBe(0);
@@ -591,7 +631,7 @@ describe('year production wiring', () => {
 		expect(responseStatus === undefined || responseStatus >= 400).toBe(true);
 		if (responseStatus === undefined) expect(rejected).toBeInstanceOf(Error);
 		expect(harness.storage.calls.upload).not.toHaveBeenCalled();
-		expect(harness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(harness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect(harness.fileSystem.created.size).toBeGreaterThan(0);
 		await vi.waitFor(() => {
 			expect(harness.fileSystem.outstanding()).toEqual([]);
@@ -618,7 +658,7 @@ describe('year production wiring', () => {
 		expect(harness.limiter.calls.release).not.toHaveBeenCalled();
 		expect(harness.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
 		expect(harness.storage.calls.upload).not.toHaveBeenCalled();
-		expect(harness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(harness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect(harness.activeUploads()).toBe(0);
 	});
 
@@ -637,7 +677,7 @@ describe('year production wiring', () => {
 		expect(attemptedKey).toEqual(expect.any(String));
 		expect(beforeHarness.storage.calls.delete).toHaveBeenCalledWith('public', attemptedKey);
 		expect(beforeHarness.storage.objects.has(attemptedKey!)).toBe(false);
-		expect(beforeHarness.prisma.orphans.has(`public\0${attemptedKey}`)).toBe(false);
+		expect(beforeHarness.repository.orphans.has(`public\0${attemptedKey}`)).toBe(false);
 		expect(beforeHarness.fileSystem.outstanding()).toEqual([]);
 
 		const afterHarness = graphHarness();
@@ -653,7 +693,7 @@ describe('year production wiring', () => {
 		const storedThenFailedKey = afterHarness.storage.calls.upload.mock.calls[0]?.[1];
 		expect(afterHarness.storage.calls.delete).toHaveBeenCalledWith('public', storedThenFailedKey);
 		expect(afterHarness.storage.objects.has(storedThenFailedKey!)).toBe(false);
-		expect(afterHarness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(afterHarness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect(afterHarness.fileSystem.outstanding()).toEqual([]);
 	});
 
@@ -671,18 +711,18 @@ describe('year production wiring', () => {
 		expect(failed.statusCode).toBe(500);
 		const key = harness.storage.calls.upload.mock.calls[0]?.[1];
 		expect(harness.storage.objects.has(key!)).toBe(true);
-		expect(harness.prisma.orphans.get(`public\0${key}`)).toMatchObject({
+		expect(harness.repository.orphans.get(`public\0${key}`)).toMatchObject({
 			bucket: 'public',
 			storageKey: key,
 			reason: 'exhibition-poster-unpersisted',
 		});
-		expect(harness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(harness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect(harness.fileSystem.outstanding()).toEqual([]);
 	});
 
 	it('durably rolls back an uploaded object after DB failure and retains old cleanup intent on storage failure', async () => {
 		const rollbackHarness = graphHarness();
-		rollbackHarness.prisma.failNextTransaction(new Error('database unavailable'));
+		rollbackHarness.repository.failNextTransaction(new Error('database unavailable'));
 		const rollbackApp = await routeApp(rollbackHarness);
 		apps.push(rollbackApp);
 		const failed = await rollbackApp.inject({
@@ -691,7 +731,7 @@ describe('year production wiring', () => {
 			...multipartPoster(),
 		});
 		expect(failed.statusCode).toBe(500);
-		expect(rollbackHarness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(rollbackHarness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect([...rollbackHarness.storage.objects.keys()]).toEqual(['old.webp']);
 		expect(rollbackHarness.activeUploads()).toBe(0);
 
@@ -705,9 +745,9 @@ describe('year production wiring', () => {
 			...multipartPoster(),
 		});
 		expect(replaced.statusCode, replaced.body).toBe(200);
-		expect(cleanupHarness.prisma.rows.get(1)?.posterStorageKey).not.toBe('old.webp');
+		expect(cleanupHarness.repository.rows.get(1)?.posterStorageKey).not.toBe('old.webp');
 		expect(cleanupHarness.storage.objects.has('old.webp')).toBe(true);
-		expect(cleanupHarness.prisma.orphans.has('public\0old.webp')).toBe(true);
+		expect(cleanupHarness.repository.orphans.has('public\0old.webp')).toBe(true);
 	});
 
 	it('keeps clear and exhibition-delete responses committed with durable old-object cleanup', async () => {
@@ -720,9 +760,9 @@ describe('year production wiring', () => {
 			url: '/api/admin/exhibitions/1/poster',
 		});
 		expect(cleared.statusCode).toBe(204);
-		expect(clearHarness.prisma.rows.get(1)?.posterStorageKey).toBeNull();
+		expect(clearHarness.repository.rows.get(1)?.posterStorageKey).toBeNull();
 		expect(clearHarness.storage.objects.has('old.webp')).toBe(true);
-		expect(clearHarness.prisma.orphans.get('public\0old.webp')).toMatchObject({
+		expect(clearHarness.repository.orphans.get('public\0old.webp')).toMatchObject({
 			bucket: 'public',
 			storageKey: 'old.webp',
 			reason: 'exhibition-poster-delete',
@@ -737,9 +777,9 @@ describe('year production wiring', () => {
 			url: '/api/admin/exhibitions/1',
 		});
 		expect(deleted.statusCode).toBe(204);
-		expect(deleteHarness.prisma.rows.has(1)).toBe(false);
+		expect(deleteHarness.repository.rows.has(1)).toBe(false);
 		expect(deleteHarness.storage.objects.has('old.webp')).toBe(true);
-		expect(deleteHarness.prisma.orphans.get('public\0old.webp')).toMatchObject({
+		expect(deleteHarness.repository.orphans.get('public\0old.webp')).toMatchObject({
 			bucket: 'public',
 			storageKey: 'old.webp',
 			reason: 'exhibition-delete-poster',
@@ -748,7 +788,7 @@ describe('year production wiring', () => {
 
 	it('surfaces DB/outbox plus rollback cleanup failure without committing the pointer', async () => {
 		const harness = graphHarness();
-		harness.prisma.failOutbox(new Error('outbox unavailable'));
+		harness.repository.failOutbox(new Error('outbox unavailable'));
 		harness.storage.calls.delete.mockImplementation(async (_bucket: string, key: string) => {
 			if (key !== 'old.webp') throw new Error('storage unavailable');
 			harness.storage.objects.delete(key);
@@ -765,7 +805,7 @@ describe('year production wiring', () => {
 		expect(failed.json()).toMatchObject({
 			error: { message: expect.stringMatching(/deletion and durable orphan recording both failed/i) },
 		});
-		expect(harness.prisma.rows.get(1)?.posterStorageKey).toBe('old.webp');
+		expect(harness.repository.rows.get(1)?.posterStorageKey).toBe('old.webp');
 		expect(harness.activeUploads()).toBe(0);
 	});
 });

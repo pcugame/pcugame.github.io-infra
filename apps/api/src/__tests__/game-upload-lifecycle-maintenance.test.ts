@@ -4,10 +4,15 @@ import {
 	sweepExpiredPartClaims,
 	sweepUntrackedMultipartUploads,
 } from '../modules/admin/game-upload/session-maintenance.service.js';
+import {
+	MultipartBusinessCleanupError,
+	UntrackedMultipartCleanupError,
+} from '../modules/admin/game-upload/multipart-cleanup.js';
+import { createDurableGameUploadRepository } from './helpers/upload-lifecycle.js';
 
 function maintenanceDeps(): GameUploadServiceDependencies {
 	return {
-		repository: {
+		repository: createDurableGameUploadRepository({
 			findSessionById: vi.fn(),
 			createSessionReplacingActive: vi.fn(),
 			cancelSessionAndClearActive: vi.fn(),
@@ -19,12 +24,14 @@ function maintenanceDeps(): GameUploadServiceDependencies {
 			findStaleCompletingSessions: vi.fn(),
 			findActiveSessionsForListing: vi.fn(),
 			findExhibitionById: vi.fn(),
-		},
+		}),
 		storage: {
 			createMultipart: vi.fn(),
 			abortMultipart: vi.fn(),
 			uploadPart: vi.fn(),
 			completeMultipart: vi.fn(),
+			listParts: vi.fn(async () => []),
+			listMultipartUploads: vi.fn(async () => []),
 			head: vi.fn(),
 		},
 		finalizer: { finalize: vi.fn() },
@@ -37,7 +44,10 @@ function maintenanceDeps(): GameUploadServiceDependencies {
 		roleGameMaxBytes: () => 1024,
 		storageKey: () => 'key',
 		deleteOrQueue: vi.fn(),
-		logger: { error: vi.fn(), warn: vi.fn() },
+		wakeDeletionWorker: vi.fn(),
+		wakeMaintenance: vi.fn(),
+		recordUntrackedMultipartCleanupFailure: vi.fn(),
+		logger: { error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 	};
 }
 
@@ -60,7 +70,16 @@ describe('multipart lifecycle maintenance', () => {
 			s3Key: 'game.zip',
 			multipartGeneration: 3,
 		}]);
-		deps.repository.replaceMultipartGeneration = vi.fn().mockResolvedValue({ replaced: true });
+		deps.repository.replaceMultipartGeneration = vi.fn().mockResolvedValue({
+			replaced: true,
+			durableAbort: {
+				tracking: 'durable-abort-task-committed',
+				sessionId: 'session',
+				key: 'game.zip',
+				uploadId: 'old-upload',
+				reason: 'expired-part-claim-maintenance-reset',
+			},
+		});
 		vi.mocked(deps.storage.createMultipart).mockResolvedValue('new-upload');
 		vi.mocked(deps.storage.abortMultipart).mockResolvedValue(undefined);
 
@@ -72,6 +91,53 @@ describe('multipart lifecycle maintenance', () => {
 			reason: 'expired-part-claim-maintenance-reset',
 		});
 		expect(deps.storage.abortMultipart).toHaveBeenCalledWith('game.zip', 'old-upload');
+		expect(deps.wakeMaintenance).toHaveBeenCalledOnce();
+	});
+
+	it('surfaces an unused replacement when persistence, abort, and durable queue all fail', async () => {
+		const deps = maintenanceDeps();
+		deps.repository.findSessionsWithExpiredPartClaims = vi.fn().mockResolvedValue([{
+			id: 'session',
+			projectId: 1,
+			userId: 1,
+			uploadKind: 'GAME',
+			originalName: 'game.zip',
+			totalBytes: 1n,
+			chunkSizeBytes: 1,
+			totalChunks: 1,
+			uploadedChunks: [],
+			status: 'PENDING',
+			expiresAt: new Date('2026-08-12T00:00:00.000Z'),
+			s3UploadId: 'old-upload',
+			s3Key: 'game.zip',
+			multipartGeneration: 1,
+		}]);
+		const replacementError = new Error('generation transaction failed');
+		const abortError = new Error('replacement abort failed');
+		const queueError = new Error('replacement queue failed');
+		deps.repository.replaceMultipartGeneration = vi.fn().mockRejectedValue(replacementError);
+		vi.mocked(deps.storage.createMultipart).mockResolvedValue('new-upload');
+		vi.mocked(deps.storage.abortMultipart).mockRejectedValue(abortError);
+		deps.repository.queueAbortTask = vi.fn().mockRejectedValue(queueError);
+
+		let thrown: unknown;
+		try {
+			await sweepExpiredPartClaims(deps);
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect(thrown).toBeInstanceOf(MultipartBusinessCleanupError);
+		expect((thrown as AggregateError).errors[0]).toBe(replacementError);
+		const cleanup = (thrown as AggregateError).errors[1];
+		expect(cleanup).toBeInstanceOf(UntrackedMultipartCleanupError);
+		expect((cleanup as AggregateError).errors).toEqual([abortError, queueError]);
+		expect(deps.repository.queueAbortTask).toHaveBeenCalledWith({
+			key: 'game.zip',
+			uploadId: 'new-upload',
+			reason: 'expired-part-claim-reset-persistence-failed',
+		});
+		expect(deps.recordUntrackedMultipartCleanupFailure).toHaveBeenCalledOnce();
 	});
 
 	it('queues only aged, app-owned, untracked multipart uploads', async () => {

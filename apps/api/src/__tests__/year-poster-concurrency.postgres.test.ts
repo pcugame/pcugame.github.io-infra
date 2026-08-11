@@ -5,6 +5,7 @@ import { createObjectDeletionCoordinator } from '../application/object-deletion.
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createOrphanRepository } from '../modules/orphan/repository.js';
 import { createOrphanService } from '../modules/orphan/service.js';
+import { createObjectReferenceResolver } from '../modules/orphan/reference-resolver.js';
 import {
 	EXHIBITION_MUTATION_TRANSACTION_POLICY,
 	createExhibitionRepository,
@@ -128,6 +129,11 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 				listKeys: vi.fn(async () => []),
 			},
 			repository: createOrphanRepository(input.client),
+			references: createObjectReferenceResolver(
+				input.client,
+				{ publicBucket: bucket, protectedBucket: bucket },
+				{ error: vi.fn() },
+			),
 			logger: {
 				info: vi.fn(),
 				error: vi.fn(),
@@ -184,7 +190,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 					};
 				},
 			},
-			deleteOrQueue: deletion.deleteDurablyQueued,
+			wakeDeletionWorker: vi.fn(),
 		});
 		return { service, rollback, cleanup };
 	}

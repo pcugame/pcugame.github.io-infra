@@ -10,7 +10,7 @@ const mocks = {
 	createAsset: vi.fn(),
 	replaceOrCreateReplaceableAsset: vi.fn(),
 	findExhibitionById: vi.fn(),
-	deleteOrQueue: vi.fn(),
+	wakeDeletionWorker: vi.fn(),
 	processFile: vi.fn(),
 	rollbackCommitted: vi.fn(),
 	logError: vi.fn(),
@@ -63,7 +63,7 @@ const projectAssetService = createProjectAssetService({
 	uploadCoordinator: singleAssetUploadCoordinator,
 	assetUrl: (key, kind) => `http://localhost:4000/api/assets/${kind === 'GAME' || kind === 'VIDEO' ? 'protected' : 'public'}/${key}`,
 	bucketForKind: () => 'test-bucket',
-	deleteOrQueue: mocks.deleteOrQueue,
+	wakeDeletionWorker: mocks.wakeDeletionWorker,
 	logger: { error: mocks.logError },
 });
 
@@ -226,7 +226,7 @@ describe('project asset upload resource guards', () => {
 		await expect(fsp.access(tempFile)).rejects.toThrow();
 	});
 
-	it('does not roll back a committed GAME replacement when old-object queueing fails', async () => {
+	it('wakes durable deletion after a committed GAME replacement without rolling it back', async () => {
 		const rollback = vi.fn();
 		const cleanup = vi.fn();
 		const startSpy = vi.spyOn(singleAssetUploadCoordinator, 'start').mockResolvedValue({
@@ -245,7 +245,6 @@ describe('project asset upload resource guards', () => {
 			oldStorageKey: 'asset/old-game.zip',
 			oldPlaybackStorageKey: null,
 		});
-		mocks.deleteOrQueue.mockRejectedValue(new Error('durable deletion unavailable'));
 
 		await expect(projectAssetService.addAssetToProject(
 			7,
@@ -268,10 +267,8 @@ describe('project asset upload resource guards', () => {
 		);
 		expect(rollback).not.toHaveBeenCalled();
 		expect(cleanup).toHaveBeenCalledOnce();
-		expect(mocks.logError).toHaveBeenCalledWith(
-			expect.objectContaining({ assetId: 321, storageKey: 'asset/old-game.zip' }),
-			'Post-commit asset cleanup failed; durable outbox retained',
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.logError).not.toHaveBeenCalled();
 		startSpy.mockRestore();
 	});
 });

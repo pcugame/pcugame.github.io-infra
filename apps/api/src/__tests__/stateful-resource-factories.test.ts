@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FastifyPluginAsync } from 'fastify';
 import type { Env } from '../config/env.js';
-import type { PrismaClient } from '../generated/prisma/client.js';
+import type { ObjectStorage } from '../application/ports.js';
 import { createLifecycle } from '../lib/lifecycle.js';
 import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
 import {
@@ -15,6 +15,8 @@ import {
 	createExportService,
 } from '../modules/admin/export/service.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
+import { ownedTestUploadLifecycleResource } from './helpers/upload-lifecycle.js';
 
 function createRateLimitScheduler() {
 	let task: (() => void) | undefined;
@@ -255,20 +257,22 @@ describe('stateful resource factories', () => {
 			const { createProductionBackendContext } = await import('../backend-context.js');
 			const emptyRoute: FastifyPluginAsync = async () => {};
 			const findBannedIps = vi.fn().mockResolvedValue([]);
+			const objectStorage: ObjectStorage = {
+				upload: async () => {}, presign: async () => '', delete: async () => {},
+				head: async () => null, readRange: async () => Buffer.alloc(0), stream: async () => null,
+				listKeys: async () => [], createMultipart: async () => '', uploadPart: async () => '',
+				completeMultipart: async () => {}, abortMultipart: async () => {}, listParts: async () => [],
+				listMultipartUploads: async () => [],
+			};
+			const basePersistence = createScriptedBackendPersistence();
 			const context = await createProductionBackendContext(config, {
+				persistence: createScriptedBackendPersistence({
+					assetsRepository: {
+						...basePersistence.assetsRepository,
+						findAllBannedIps: findBannedIps,
+					},
+				}),
 				factories: {
-					prisma: () => ({
-						$disconnect: vi.fn(),
-						bannedIp: { findMany: findBannedIps },
-						gameUploadSession: { findMany: vi.fn().mockResolvedValue([]) },
-						siteSetting: {
-							upsert: vi.fn().mockResolvedValue({
-								maxGameFileMb: 5120,
-								maxChunkSizeMb: 10,
-							}),
-						},
-						authSession: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-					} as unknown as PrismaClient),
 					routes: () => ({
 						auth: emptyRoute,
 						devAuth: emptyRoute,
@@ -277,6 +281,18 @@ describe('stateful resource factories', () => {
 						me: emptyRoute,
 						assets: emptyRoute,
 					}),
+				},
+				resources: {
+					uploadLifecycle: ownedTestUploadLifecycleResource(),
+					storage: { value: objectStorage, ownership: 'borrowed' },
+					settings: {
+						value: {
+							get: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+							update: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+							invalidate: () => {},
+						},
+						ownership: 'borrowed',
+					},
 				},
 			});
 

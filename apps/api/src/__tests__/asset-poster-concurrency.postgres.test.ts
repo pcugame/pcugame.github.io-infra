@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AssetKind, PrismaClient } from '../generated/prisma/client.js';
-import { createObjectDeletionCoordinator } from '../application/object-deletion.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createProjectAssetMutationRepository } from '../modules/admin/project/asset-mutation.repository.js';
 import { createProjectAssetService } from '../modules/admin/project/project-asset.service.js';
@@ -10,6 +9,7 @@ import { createAssetsService } from '../modules/assets/service.js';
 import { ASSET_MUTATION_TRANSACTION_POLICY } from '../modules/assets/mutation-transaction.js';
 import { createOrphanRepository } from '../modules/orphan/repository.js';
 import { createOrphanService } from '../modules/orphan/service.js';
+import { createObjectReferenceResolver } from '../modules/orphan/reference-resolver.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 const BARRIER_NAMESPACE = 50_050;
@@ -134,31 +134,46 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 	function createDeletionService(
 		client: PrismaClient,
 		objects: Set<string>,
-		deleteOrQueue?: ReturnType<typeof createObjectDeletionCoordinator>['deleteOrQueue'],
+		failStorage = false,
 	) {
-		const coordinator = createObjectDeletionCoordinator({
+		const orphanService = createOrphanService({
+			clock: { now: () => new Date() },
 			storage: {
-				delete: async (_bucket, key) => { objects.delete(key); },
+				delete: async (_bucket, key) => {
+					if (failStorage) throw new Error('forced storage failure');
+					objects.delete(key);
+				},
 				listKeys: async () => [],
 			},
-			orphans: {
-				record: (targetBucket, key, reason) => createOrphanRepository(client)
-					.upsertOrphan(targetBucket, key, reason)
-					.then(() => undefined),
-			},
-			logger: { error: vi.fn() },
+			repository: createOrphanRepository(client),
+			references: createObjectReferenceResolver(
+				client,
+				{ publicBucket: bucket, protectedBucket: bucket },
+				{ error: vi.fn() },
+			),
+			logger: { info: vi.fn(), error: vi.fn() },
 		});
-		return createAssetsService({
+		let deletionWork = Promise.resolve();
+		const wakeDeletionWorker = () => {
+			deletionWork = deletionWork.then(async () => {
+				let result;
+				do {
+					result = await orphanService.runOrphanReaper();
+				} while (result.tried === 50);
+			});
+		};
+		const service = createAssetsService({
 			publicBucket: bucket,
 			protectedBucket: bucket,
 			presign: vi.fn(),
 			bucketForKind: () => bucket,
-			deleteOrQueue: deleteOrQueue ?? coordinator.deleteOrQueue,
+			wakeDeletionWorker,
 			loadProjectWithAccess: async () => ({}),
 			downloadLimiter: { check: () => 'ok' },
 			logger: { info: vi.fn(), error: vi.fn() },
 			repository: createAssetsRepository(client),
 		});
+		return Object.assign(service, { drainDeletion: () => deletionWork });
 	}
 
 	function createGameUploadService(input: {
@@ -173,6 +188,29 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			...ASSET_MUTATION_TRANSACTION_POLICY,
 			maxAttempts: input.maxAttempts ?? ASSET_MUTATION_TRANSACTION_POLICY.maxAttempts,
 		});
+		const orphanService = createOrphanService({
+			clock: { now: () => new Date() },
+			storage: {
+				delete: async (_bucket, key) => { input.objects.delete(key); },
+				listKeys: async () => [],
+			},
+			repository: createOrphanRepository(input.client),
+			references: createObjectReferenceResolver(
+				input.client,
+				{ publicBucket: bucket, protectedBucket: bucket },
+				{ error: vi.fn() },
+			),
+			logger: { info: vi.fn(), error: vi.fn() },
+		});
+		let deletionWork = Promise.resolve();
+		const wakeDeletionWorker = () => {
+			deletionWork = deletionWork.then(async () => {
+				let result;
+				do {
+					result = await orphanService.runOrphanReaper();
+				} while (result.tried === 50);
+			});
+		};
 		const service = createProjectAssetService({
 			repository: {
 				...mutationRepository,
@@ -206,9 +244,9 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			},
 			assetUrl: (key) => `/assets/protected/${key}`,
 			bucketForKind: () => bucket,
-			deleteOrQueue: async (_bucket, key) => { input.objects.delete(key); },
+			wakeDeletionWorker,
 		});
-		return { service, rollback, cleanup };
+		return { service, rollback, cleanup, drainDeletion: () => deletionWork };
 	}
 
 	async function expectProjectInvariants(projectId: number, objects: Set<string>) {
@@ -351,6 +389,7 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			} finally {
 				if (!released) await barrier.release();
 			}
+			await Promise.all([deletion.drainDeletion(), upload.drainDeletion()]);
 
 			await expect(control.asset.findUniqueOrThrow({ where: { id: oldAsset.id } }))
 				.resolves.toMatchObject({ status: 'DELETED', storageKey: oldKey });
@@ -387,6 +426,7 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 				if (!released) await barrier.release();
 			}
 			await expect(setPoster).rejects.toMatchObject({ statusCode: 400 });
+			await deletion.drainDeletion();
 			await expect(control.project.findUniqueOrThrow({ where: { id: project.id } }))
 				.resolves.toMatchObject({ posterAssetId: null });
 			await expect(control.asset.findUniqueOrThrow({ where: { id: asset.id } }))
@@ -417,6 +457,7 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			} finally {
 				if (!released) await barrier.release();
 			}
+			await deletion.drainDeletion();
 			await expect(control.project.findUniqueOrThrow({ where: { id: project.id } }))
 				.resolves.toMatchObject({ posterAssetId: null });
 			await expect(control.asset.findUniqueOrThrow({ where: { id: asset.id } }))
@@ -436,36 +477,11 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 				data: { posterAssetId: asset.id },
 			});
 			const objects = new Set([key]);
-			const queueFailure = new Error(`forced queue rollback ${iteration}`);
-			const productionOrphans = createOrphanRepository(operationA);
-			const failingOrphans = createOrphanService({
-				clock: { now: () => new Date() },
-				storage: { delete: vi.fn(), listKeys: vi.fn() },
-				repository: {
-					...productionOrphans,
-					upsertOrphan: (targetBucket, storageKey, reason) => operationA.$transaction(async (tx) => {
-						await createOrphanRepository(tx).upsertOrphan(targetBucket, storageKey, reason);
-						throw queueFailure;
-					}),
-				},
-				logger: { info: vi.fn(), error: vi.fn() },
-			});
-			const failingCoordinator = createObjectDeletionCoordinator({
-				storage: {
-					delete: vi.fn().mockRejectedValue(new Error('forced storage failure')),
-					listKeys: vi.fn(),
-				},
-				orphans: { record: failingOrphans.recordOrphan },
-				logger: { error: vi.fn() },
-			});
-			const failingDeletion = createDeletionService(
-				operationA,
-				objects,
-				failingCoordinator.deleteOrQueue,
-			);
+			const failingDeletion = createDeletionService(operationA, objects, true);
 
 			await expect(failingDeletion.deleteAsset(asset.id, { id: userId, role: 'ADMIN' }))
 				.resolves.toEqual({ projectId: project.id });
+			await failingDeletion.drainDeletion();
 			await expect(control.asset.findUniqueOrThrow({ where: { id: asset.id } }))
 				.resolves.toMatchObject({ status: 'DELETED', storageKey: key });
 			await expect(control.project.findUniqueOrThrow({ where: { id: project.id } }))
@@ -474,30 +490,19 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 				.resolves.toBe(1);
 			expect(objects.has(key)).toBe(true);
 
-			const durableCoordinator = createObjectDeletionCoordinator({
-				storage: {
-					delete: vi.fn().mockRejectedValue(new Error('storage still unavailable')),
-					listKeys: vi.fn(),
-				},
-				orphans: {
-					record: (targetBucket, storageKey, reason) => productionOrphans
-						.upsertOrphan(targetBucket, storageKey, reason)
-						.then(() => undefined),
-				},
-				logger: { error: vi.fn() },
+			await operationA.orphanObject.updateMany({
+				where: { bucket, storageKey: key, resolvedAt: null },
+				data: { nextAttemptAt: new Date(0), claimToken: null, claimUntil: null },
 			});
-			const retryDeletion = createDeletionService(
-				operationA,
-				objects,
-				durableCoordinator.deleteOrQueue,
-			);
+			const retryDeletion = createDeletionService(operationA, objects);
 			await expect(retryDeletion.deleteAsset(asset.id, { id: userId, role: 'ADMIN' }))
 				.resolves.toEqual({ projectId: project.id });
+			await retryDeletion.drainDeletion();
 			await expect(control.asset.findUniqueOrThrow({ where: { id: asset.id } }))
 				.resolves.toMatchObject({ status: 'DELETED' });
 			await expect(control.orphanObject.count({ where: { bucket, storageKey: key, resolvedAt: null } }))
-				.resolves.toBe(1);
-			expect(objects.has(key)).toBe(true);
+				.resolves.toBe(0);
+			expect(objects.has(key)).toBe(false);
 			await expectProjectInvariants(project.id, objects);
 		}
 	});
@@ -545,6 +550,7 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 				if (!released) await barrier.release();
 			}
 			await expect(loserResult).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
+			await Promise.all([winner.drainDeletion(), loser.drainDeletion()]);
 			expect(loser.rollback).toHaveBeenCalledOnce();
 			expect(objects).toEqual(new Set([winnerKey]));
 			await expect(control.asset.findUniqueOrThrow({ where: { id: oldAsset.id } }))

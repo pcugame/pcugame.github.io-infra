@@ -15,14 +15,20 @@ import {
 	type BackendRoutes,
 } from '../backend-context.js';
 import type { Env } from '../config/env.js';
-import type { PrismaClient } from '../generated/prisma/client.js';
 import { createAdminRoutes } from '../modules/admin/admin.routes.js';
 import {
 	createImportExportProductionGraph,
+	type ExportRepository,
 } from '../modules/admin/import-export.composition.js';
 import { createExportProgressStore } from '../modules/admin/export/service.js';
+import type {
+	ImportRepository,
+	ImportTransactionRepository,
+} from '../modules/admin/import/service.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
+import { ownedTestUploadLifecycleResource } from './helpers/upload-lifecycle.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const imageDestination = '/nas/ExportedAssets/2026_Show/Ticket 010/image.png';
@@ -64,37 +70,32 @@ function exportProject() {
 	};
 }
 
-function fakePrisma(projects = [exportProject()]) {
+function repositoryHarness(projects = [exportProject()]) {
 	const calls = {
-		projectFindMany: vi.fn().mockResolvedValue(projects),
-		projectFindUnique: vi.fn().mockResolvedValue(null),
-		projectCreate: vi.fn().mockResolvedValue({ id: 1 }),
-		exhibitionFindUnique: vi.fn().mockResolvedValue(null),
-		exhibitionUpsert: vi.fn().mockResolvedValue({ id: 11 }),
-		transaction: vi.fn(),
+		findProjectsWithAssets: vi.fn().mockResolvedValue(projects),
+		findProjectBySlug: vi.fn().mockResolvedValue(null),
+		createProjectWithMembers: vi.fn().mockResolvedValue({ id: 1 }),
+		findExhibitionByComposite: vi.fn().mockResolvedValue(null),
+		upsertExhibition: vi.fn().mockResolvedValue({ id: 11 }),
+		findExhibitionForPreview: vi.fn().mockResolvedValue(null),
+		runTransaction: vi.fn(),
 	};
-	const transactionClient = {
-		exhibition: {
-			findUnique: calls.exhibitionFindUnique,
-			upsert: calls.exhibitionUpsert,
-		},
-		project: {
-			findUnique: calls.projectFindUnique,
-			create: calls.projectCreate,
-		},
+	const transactionRepository: ImportTransactionRepository = {
+		findExhibitionByComposite: calls.findExhibitionByComposite,
+		upsertExhibition: calls.upsertExhibition,
+		findProjectBySlug: calls.findProjectBySlug,
+		createProjectWithMembers: calls.createProjectWithMembers,
 	};
-	const prisma = {
-		exhibition: { findUnique: calls.exhibitionFindUnique },
-		project: {
-			findMany: calls.projectFindMany,
-			findUnique: calls.projectFindUnique,
-			create: calls.projectCreate,
-		},
-		$transaction: calls.transaction.mockImplementation(async (
-			work: (tx: typeof transactionClient) => Promise<unknown>,
-		) => work(transactionClient)),
-	} as unknown as PrismaClient;
-	return { prisma, calls };
+	const importRepository: ImportRepository = {
+		findExhibitionForPreview: calls.findExhibitionForPreview,
+		runTransaction: calls.runTransaction.mockImplementation(async (
+			work: (repository: ImportTransactionRepository) => Promise<unknown>,
+		) => work(transactionRepository)),
+	};
+	const exportRepository: ExportRepository = {
+		findProjectsWithAssets: calls.findProjectsWithAssets,
+	};
+	return { importRepository, exportRepository, calls };
 }
 
 interface MemoryFileSystem extends FileSystem {
@@ -193,6 +194,8 @@ function fakeStorage() {
 		uploadPart: vi.fn(),
 		completeMultipart: vi.fn(),
 		abortMultipart: vi.fn(),
+		listParts: vi.fn(async () => []),
+		listMultipartUploads: vi.fn(async () => []),
 	};
 	return { storage, calls };
 }
@@ -202,7 +205,7 @@ function harness(options: {
 	fileSystem?: MemoryFileSystem;
 	storage?: ReturnType<typeof fakeStorage>;
 } = {}) {
-	const prisma = fakePrisma(options.projects);
+	const repositories = repositoryHarness(options.projects);
 	const storage = options.storage ?? fakeStorage();
 	const fileSystem = options.fileSystem ?? memoryFileSystem();
 	const logger = fakeLogger();
@@ -210,7 +213,8 @@ function harness(options: {
 	let id = 0;
 	const graph = createImportExportProductionGraph({
 		config: { ...defaultTestEnv, NAS_EXPORT_PATH: '/nas' },
-		prisma: prisma.prisma,
+		importRepository: repositories.importRepository,
+		exportRepository: repositories.exportRepository,
 		storage: storage.storage,
 		fileSystem,
 		exportProgress: progress,
@@ -218,7 +222,7 @@ function harness(options: {
 		ids: { next: () => `id-${++id}` },
 		logger,
 	});
-	return { graph, prisma, storage, fileSystem, logger, progress };
+	return { graph, repositories, storage, fileSystem, logger, progress };
 }
 
 async function routeApp(
@@ -304,8 +308,13 @@ async function contextHarness() {
 		}),
 	});
 	const context = await createProductionBackendContext(config, {
+		persistence: createScriptedBackendPersistence({
+			importRepository: state.repositories.importRepository,
+			exportRepository: state.repositories.exportRepository,
+		}),
 		factories: { routes },
 		resources: {
+			uploadLifecycle: ownedTestUploadLifecycleResource(),
 			logger: { value: state.logger, ownership: 'borrowed' },
 			clock: {
 				value: { now: () => new Date('2026-07-24T00:00:00.000Z') },
@@ -324,7 +333,6 @@ async function contextHarness() {
 				value: { verify: vi.fn(async () => undefined) },
 				ownership: 'borrowed',
 			},
-			prisma: { value: state.prisma.prisma, ownership: 'borrowed' },
 			s3: { value: { destroy: vi.fn() } as unknown as S3Client, ownership: 'borrowed' },
 			storage: { value: state.storage.storage, ownership: 'borrowed' },
 			settings: {
@@ -408,8 +416,8 @@ describe('import/export production wiring', () => {
 		const state = harness();
 		const app = await routeApp(state.graph);
 		apps.push(app);
-		expect(state.prisma.calls.projectFindMany).not.toHaveBeenCalled();
-		expect(state.prisma.calls.transaction).not.toHaveBeenCalled();
+		expect(state.repositories.calls.findProjectsWithAssets).not.toHaveBeenCalled();
+		expect(state.repositories.calls.runTransaction).not.toHaveBeenCalled();
 		expect(state.storage.calls.stream).not.toHaveBeenCalled();
 		expect(state.fileSystem.calls.access).not.toHaveBeenCalled();
 		expect(state.fileSystem.calls.mkdir).not.toHaveBeenCalled();
@@ -461,7 +469,7 @@ describe('import/export production wiring', () => {
 			...multipartJson(JSON.stringify({ projects: [{ year: 1900, title: 'bad' }] })),
 		});
 		expect(invalidSchema.statusCode).toBe(400);
-		expect(state.prisma.calls.transaction).not.toHaveBeenCalled();
+		expect(state.repositories.calls.runTransaction).not.toHaveBeenCalled();
 
 		const wrongType = multipartJson('{}', 'text/plain');
 		wrongType.payload = Buffer.from(wrongType.payload.toString().replace('import.json', 'import.txt'));
@@ -484,7 +492,7 @@ describe('import/export production wiring', () => {
 	it('isolates A/B progress and lets B continue after closing and aborting A', async () => {
 		const a = await contextHarness();
 		const b = await contextHarness();
-		b.prisma.calls.projectFindMany.mockResolvedValue([]);
+		b.repositories.calls.findProjectsWithAssets.mockResolvedValue([]);
 		const pending = new PassThrough();
 		a.storage.calls.stream.mockResolvedValue({
 			body: pending,

@@ -16,7 +16,7 @@ const mocks = {
 	deleteExhibition: vi.fn(),
 	replaceExhibitionPoster: vi.fn(),
 	clearExhibitionPoster: vi.fn(),
-	safeDeleteObject: vi.fn(),
+	wakeDeletionWorker: vi.fn(),
 	logError: vi.fn(),
 	posterUploadStart: vi.fn(),
 };
@@ -45,7 +45,7 @@ const exhibitionService = createExhibitionService({
 	}),
 	uploadSlots: { acquire: vi.fn(), release: vi.fn() },
 	posterUpload: { start: mocks.posterUploadStart },
-	deleteOrQueue: mocks.safeDeleteObject,
+	wakeDeletionWorker: mocks.wakeDeletionWorker,
 	logger: { error: mocks.logError },
 });
 
@@ -76,7 +76,6 @@ function exhibition(overrides: Record<string, unknown> = {}) {
 describe('admin exhibition service', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.safeDeleteObject.mockResolvedValue(undefined);
 	});
 
 	it('serializes exhibition list items with optional poster metadata', async () => {
@@ -172,7 +171,7 @@ describe('admin exhibition service', () => {
 		});
 	});
 
-	it('deletes the DB row and durably deletes an existing poster object', async () => {
+	it('deletes the DB row with an outbox entry and wakes the deletion worker', async () => {
 		mocks.deleteExhibition.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
 		}));
@@ -183,28 +182,20 @@ describe('admin exhibition service', () => {
 			bucket: 'public-bucket',
 			reason: 'exhibition-delete-poster',
 		});
-		expect(mocks.safeDeleteObject).toHaveBeenCalledWith(
-			'public-bucket',
-			'old-poster.webp',
-			'exhibition-delete-poster',
-			{ exhibitionId: 1 },
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
 	});
 
-	it('keeps the committed deletion successful when post-commit cleanup fails', async () => {
+	it('does not wait for an unrelated deletion backlog after the poster outbox commits', async () => {
 		mocks.deleteExhibition.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
 		}));
-		mocks.safeDeleteObject.mockRejectedValue(new Error('durable deletion unavailable'));
 
 		await expect(deleteExhibition(1)).resolves.toBeUndefined();
-		expect(mocks.logError).toHaveBeenCalledWith(
-			expect.objectContaining({ exhibitionId: 1, storageKey: 'old-poster.webp' }),
-			'Post-commit exhibition poster cleanup failed; durable outbox retained',
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.logError).not.toHaveBeenCalled();
 	});
 
-	it('does not roll back a new poster after its DB pointer commits and old cleanup fails', async () => {
+	it('does not roll back a new poster after its DB pointer and old-object outbox commit', async () => {
 		const rollback = vi.fn();
 		const cleanup = vi.fn();
 		mocks.findExhibitionById.mockResolvedValue(exhibition());
@@ -223,17 +214,14 @@ describe('admin exhibition service', () => {
 			updated: exhibition({ posterStorageKey: 'new-poster.webp' }),
 			oldStorageKey: 'old-poster.webp',
 		});
-		mocks.safeDeleteObject.mockRejectedValue(new Error('durable deletion unavailable'));
 		const parts = (async function* () {})();
 
 		await expect(replacePoster(1, { actor: { id: 1, role: 'ADMIN' }, parts }))
 			.resolves.toMatchObject({ id: 1, posterUrl: expect.stringContaining('new-poster.webp') });
 		expect(rollback).not.toHaveBeenCalled();
 		expect(cleanup).toHaveBeenCalledOnce();
-		expect(mocks.logError).toHaveBeenCalledWith(
-			expect.objectContaining({ exhibitionId: 1, storageKey: 'old-poster.webp' }),
-			'Post-commit exhibition poster cleanup failed; durable outbox retained',
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.logError).not.toHaveBeenCalled();
 	});
 
 	it('rolls back exactly one uploaded object when the pointer transaction fails', async () => {
@@ -262,7 +250,7 @@ describe('admin exhibition service', () => {
 		expect(cleanup).toHaveBeenCalledOnce();
 	});
 
-	it('clears poster metadata and deletes the old poster object', async () => {
+	it('clears poster metadata and wakes the queued old-poster deletion', async () => {
 		mocks.clearExhibitionPoster.mockResolvedValue({
 			updated: exhibition(),
 			oldStorageKey: 'old-poster.webp',
@@ -270,12 +258,7 @@ describe('admin exhibition service', () => {
 
 		await deletePoster(1);
 
-		expect(mocks.safeDeleteObject).toHaveBeenCalledWith(
-			'public-bucket',
-			'old-poster.webp',
-			'exhibition-poster-delete',
-			{ exhibitionId: 1 },
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
 	});
 
 	it('throws 404 when deleting a poster for a missing exhibition', async () => {

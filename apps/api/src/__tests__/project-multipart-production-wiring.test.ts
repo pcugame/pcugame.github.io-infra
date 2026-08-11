@@ -11,7 +11,6 @@ import {
 	type BackendRoutes,
 } from '../backend-context.js';
 import type { Env } from '../config/env.js';
-import type { PrismaClient } from '../generated/prisma/client.js';
 import type {
 	AppLogger,
 	FileSystem,
@@ -19,13 +18,19 @@ import type {
 	Scheduler,
 	SettingsStore,
 } from '../application/ports.js';
-import { DurableObjectDeletionError } from '../application/object-deletion.js';
+import {
+	createObjectDeletionCoordinator,
+	DurableObjectDeletionError,
+} from '../application/object-deletion.js';
 import { createNodeFileSystem } from '../infrastructure/production-ports.js';
 import { createNodeProjectUploadProcessing } from '../infrastructure/project-upload-processing.js';
 import { AppError } from '../shared/errors.js';
-import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
 import { createProjectAccessService } from '../modules/admin/project-access.service.js';
-import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
+import type {
+	ProjectApplicationRepository,
+	ProjectAssetWriteData,
+	SubmitProjectWriteData,
+} from '../modules/admin/project/ports.js';
 import { createProjectMultipartProductionGraph } from '../modules/admin/project-multipart.composition.js';
 import {
 	ProjectTempCleanupError,
@@ -33,6 +38,9 @@ import {
 } from '../modules/admin/project/project-upload.adapter.js';
 import { createAdminRoutes } from '../modules/admin/admin.routes.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createMultipartRequestHasher } from '../infrastructure/multipart-request-hasher.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const tinyPng = Buffer.from(
@@ -51,7 +59,16 @@ const logger: AppLogger = {
 };
 const fileSystemTeardowns: Array<() => Promise<void>> = [];
 
-function projectRow() {
+interface ProjectPortRow {
+	id: number;
+	exhibitionId: number;
+	creatorId: number;
+	status: SubmitProjectWriteData['status'];
+	slug: string;
+	title: string;
+}
+
+function projectRow(): ProjectPortRow {
 	return {
 		id: 7,
 		exhibitionId: 1,
@@ -62,13 +79,14 @@ function projectRow() {
 	};
 }
 
-function prismaHarness(label: string) {
+function portHarness(label: string) {
 	const project = projectRow();
-	const projects = new Map<number, ReturnType<typeof projectRow>>([[project.id, project]]);
-	const slugs = new Map<string, ReturnType<typeof projectRow>>([
+	const projects = new Map<number, ProjectPortRow>([[project.id, project]]);
+	const slugs = new Map<string, ProjectPortRow>([
 		[`${project.exhibitionId}\0${project.slug}`, project],
 	]);
 	const orphans = new Map<string, { bucket: string; storageKey: string; reason: string }>();
+	let nextIntentId = 0;
 	let nextProjectId = 20;
 	let nextAssetId = 100;
 	let failProjectCreate: Error | undefined;
@@ -78,27 +96,11 @@ function prismaHarness(label: string) {
 	let successfulProjectCreates = 0;
 
 	const calls = {
-		projectFindUnique: vi.fn(async ({ where }: {
-			where: {
-				id?: number;
-				project_exhibition_slug?: { exhibitionId: number; slug: string };
-			};
-		}) => {
-			if (where.id !== undefined) return projects.get(where.id) ?? null;
-			const composite = where.project_exhibition_slug;
-			return composite
-				? slugs.get(`${composite.exhibitionId}\0${composite.slug}`) ?? null
-				: null;
-		}),
-		projectCreate: vi.fn(async ({ data }: {
-			data: {
-				exhibitionId: number;
-				slug: string;
-				title: string;
-				creatorId: number;
-				status: string;
-			};
-		}) => {
+		projectFindUnique: vi.fn(async (id: number) => projects.get(id) ?? null),
+		projectFindBySlug: vi.fn(async (exhibitionId: number, slug: string) => (
+			slugs.get(`${exhibitionId}\0${slug}`) ?? null
+		)),
+		projectCreate: vi.fn(async (data: SubmitProjectWriteData) => {
 			if (failProjectCreate) throw failProjectCreate;
 			successfulProjectCreates += 1;
 			const row = {
@@ -113,67 +115,69 @@ function prismaHarness(label: string) {
 			slugs.set(`${row.exhibitionId}\0${row.slug}`, row);
 			return row;
 		}),
-		assetCreate: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+		assetCreate: vi.fn(async (data: ProjectAssetWriteData) => {
 			if (failAssetCreate) throw failAssetCreate;
 			return { id: nextAssetId++, ...data };
 		}),
-		orphanUpsert: vi.fn(async ({ create }: {
-			create: { bucket: string; storageKey: string; reason: string };
+		orphanUpsert: vi.fn(async (create: {
+			bucket: string;
+			storageKey: string;
+			reason: string;
 		}) => {
 			if (failOrphanWrite) throw failOrphanWrite;
 			orphans.set(`${create.bucket}\0${create.storageKey}`, create);
 			return create;
 		}),
-		transaction: vi.fn(),
 	};
-	const client = {
-		exhibition: {
-			findUnique: vi.fn(async ({ where }: { where: { id: number } }) => (
-				where.id === 1
-					? {
-							id: 1,
-							year: 2026,
-							title: `${label} Exhibition`,
-							isUploadEnabled: true,
-						}
-					: null
-			)),
+	const repository: ProjectApplicationRepository = {
+		findProjectsForUser: vi.fn(async () => ({ items: [], totalItems: 0 })),
+		findProjectById: vi.fn(async () => null),
+		isMemberOfProject: vi.fn(async () => null),
+		updateProject: vi.fn(async () => { throw new Error('not scripted'); }),
+		deleteProjectReturningAssets: vi.fn(async () => { throw new Error('not scripted'); }),
+		clearWebglDeployment: vi.fn(async () => { throw new Error('not scripted'); }),
+		findAssetById: vi.fn(async () => null),
+		setProjectPoster: vi.fn(async () => undefined),
+		bulkDeleteProjectsReturningAssets: vi.fn(async () => { throw new Error('not scripted'); }),
+		bulkUpdateStatus: vi.fn(async () => ({ count: 0 })),
+		findExhibitionById: vi.fn(async (id: number) => id === 1
+			? {
+					id: 1,
+					year: 2026,
+					title: `${label} Exhibition`,
+					isUploadEnabled: true,
+				}
+			: null),
+		findProjectByExhibitionAndSlug: calls.projectFindBySlug,
+		async createProjectWithAssets(data) {
+			const created = await calls.projectCreate(data);
+			for (const file of data.savedFiles) {
+				await calls.assetCreate({
+					...file,
+					projectId: created.id,
+					isPublic: file.kind !== 'GAME' && file.kind !== 'VIDEO',
+					sizeBytes: BigInt(file.sizeBytes),
+					playbackSizeBytes: BigInt(file.playbackSizeBytes ?? 0),
+				});
+			}
+			return created;
 		},
-		project: {
-			findUnique: calls.projectFindUnique,
-			create: calls.projectCreate,
-			update: vi.fn(async ({ where, data }: {
-				where: { id: number };
-				data: Record<string, unknown>;
-			}) => ({ ...projects.get(where.id), ...data })),
-			updateMany: vi.fn(async () => ({ count: 0 })),
+		createAsset: calls.assetCreate,
+		async replaceOrCreateReplaceableAsset(projectId, kind, data) {
+			const asset = await calls.assetCreate({ projectId, kind, ...data });
+			return { assetId: asset.id, oldStorageKey: null, oldPlaybackStorageKey: null };
 		},
-		projectMember: {
-			findFirst: vi.fn(async ({ where }: {
-				where: { userId?: number };
-			}) => (
-				memberUserId !== undefined && where.userId === memberUserId
-					? { projectId: project.id, userId: memberUserId }
-					: null
-			)),
-		},
-		asset: {
-			create: calls.assetCreate,
-			update: vi.fn(async () => ({})),
-		},
-		orphanObject: {
-			upsert: calls.orphanUpsert,
-			findMany: vi.fn(async () => []),
-			update: vi.fn(async () => ({})),
-		},
-		$queryRaw: vi.fn(async () => [{ id: project.id }]),
-		$transaction: calls.transaction.mockImplementation(async (work: unknown) => {
-			if (Array.isArray(work)) return Promise.all(work);
-			return (work as (tx: unknown) => Promise<unknown>)(client);
-		}),
-	} as unknown as PrismaClient;
+	};
+	const accessRepository = {
+		findProject: calls.projectFindUnique,
+		isLinkedMember: async (_projectId: number, userId: number) => (
+			memberUserId !== undefined && memberUserId === userId
+		),
+	};
 	return {
-		client,
+		repository,
+		access: createProjectAccessService(accessRepository),
+		accessRepository,
 		calls,
 		orphans,
 		failProject(error = new Error('project DB write failed')) {
@@ -190,6 +194,9 @@ function prismaHarness(label: string) {
 		},
 		projectCreateSuccesses() {
 			return successfulProjectCreates;
+		},
+		prepareIntent(input: { bucket: string; storageKey: string }) {
+			return `${label}-intent-${++nextIntentId}-${input.bucket}-${input.storageKey}`;
 		},
 	};
 }
@@ -223,6 +230,8 @@ function storageHarness(label: string) {
 		uploadPart: vi.fn(async () => 'etag'),
 		completeMultipart: vi.fn(async () => {}),
 		abortMultipart: vi.fn(async () => {}),
+		listParts: vi.fn(async () => []),
+		listMultipartUploads: vi.fn(async () => []),
 	};
 	return {
 		storage,
@@ -339,7 +348,7 @@ function limiterHarness() {
 }
 
 function graphHarness(label: string, options: { imageMaxMb?: number } = {}) {
-	const prisma = prismaHarness(label);
+	const ports = portHarness(label);
 	const storage = storageHarness(label);
 	const fileSystem = fileSystemHarness(label);
 	const limiter = limiterHarness();
@@ -366,11 +375,26 @@ function graphHarness(label: string, options: { imageMaxMb?: number } = {}) {
 		RATE_LIMIT_SUBMIT_MAX: 20,
 		RATE_LIMIT_SUBMIT_WINDOW_MS: 60_000,
 	};
-	const access = createProjectAccessService(createProjectAccessRepository(prisma.client));
-	const repository = createProjectCrudRepository(prisma.client);
+	const access = ports.access;
+	const repository = ports.repository;
+	const baseUploadLifecycle = createTestUploadLifecycleRuntime();
+	const uploadLifecycle = createTestUploadLifecycleRuntime({
+		uploadIntents: {
+			...baseUploadLifecycle.uploadIntents,
+			prepare: vi.fn(async (input) => ports.prepareIntent(input)),
+		},
+		orphanDeletions: createObjectDeletionCoordinator({
+			storage: storage.storage,
+			orphans: {
+				async record(bucket, storageKey, reason) {
+					await ports.calls.orphanUpsert({ bucket, storageKey, reason });
+				},
+			},
+			logger,
+		}),
+	});
 	const graph = createProjectMultipartProductionGraph({
 		config,
-		prisma: prisma.client,
 		storage: storage.storage,
 		fileSystem: fileSystem.fileSystem,
 		settings,
@@ -379,6 +403,8 @@ function graphHarness(label: string, options: { imageMaxMb?: number } = {}) {
 		clock: { now: () => new Date('2026-07-24T00:00:00.000Z') },
 		ids: { next: () => `${label}-${String(++id).padStart(4, '0')}` },
 		processing: createNodeProjectUploadProcessing(fileSystem.fileSystem, logger),
+		requestHasher: createMultipartRequestHasher(fileSystem.fileSystem),
+		uploadLifecycle,
 		access,
 		repository,
 	});
@@ -387,10 +413,11 @@ function graphHarness(label: string, options: { imageMaxMb?: number } = {}) {
 		config,
 		access,
 		repository,
-		prisma,
+		ports,
 		storage,
 		fileSystem,
 		limiter,
+		uploadLifecycle,
 		settings,
 	};
 }
@@ -591,6 +618,10 @@ async function contextAppHarness(
 	const context = await createProductionBackendContext(
 		harness.config as unknown as Env,
 		{
+			persistence: createScriptedBackendPersistence({
+				projectAccessRepository: harness.ports.accessRepository,
+				projectRepository: harness.ports.repository,
+			}),
 			factories: {
 				projectUploadProcessing: (fileSystem, appLogger) => {
 					const processing = createNodeProjectUploadProcessing(
@@ -637,6 +668,10 @@ async function contextAppHarness(
 				},
 			},
 			resources: {
+				uploadLifecycle: {
+					value: harness.uploadLifecycle,
+					ownership: 'borrowed',
+				},
 				logger: { value: contextLogger, ownership: 'borrowed' },
 				clock: {
 					value: { now: () => new Date('2026-07-24T00:00:00.000Z') },
@@ -656,7 +691,6 @@ async function contextAppHarness(
 					value: { verify: vi.fn(async () => undefined) },
 					ownership: 'borrowed',
 				},
-				prisma: { value: harness.prisma.client, ownership: 'borrowed' },
 				s3: {
 					value: { destroy: vi.fn() } as unknown as S3Client,
 					ownership: 'borrowed',
@@ -753,7 +787,7 @@ describe('project multipart production wiring', () => {
 		const interval = vi.spyOn(globalThis, 'setInterval');
 		const app = await routeApp(harness);
 		apps.push(app);
-		expect(harness.prisma.calls.projectFindUnique).not.toHaveBeenCalled();
+		expect(harness.ports.calls.projectFindUnique).not.toHaveBeenCalled();
 		expect(harness.storage.calls.upload).not.toHaveBeenCalled();
 		expect(harness.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
 		expect(interval).not.toHaveBeenCalled();
@@ -846,7 +880,7 @@ describe('project multipart production wiring', () => {
 			},
 		});
 		expect(asset.statusCode, asset.body).toBe(201);
-		expect(harness.prisma.calls.assetCreate).toHaveBeenCalledOnce();
+		expect(harness.ports.calls.assetCreate).toHaveBeenCalledOnce();
 		expect(harness.storage.calls.upload).toHaveBeenCalledOnce();
 		expect(harness.fileSystem.outstanding()).toEqual([]);
 
@@ -908,10 +942,8 @@ describe('project multipart production wiring', () => {
 			headers: { ...meRequest.headers, 'x-test-role': 'USER' },
 		});
 		expect(me.statusCode, me.body).toBe(201);
-		expect(harness.prisma.calls.projectCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				data: expect.objectContaining({ creatorId: 1 }),
-			}),
+		expect(harness.ports.calls.projectCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ creatorId: 1 }),
 		);
 
 		const deniedRequest = submitMultipart();
@@ -931,10 +963,8 @@ describe('project multipart production wiring', () => {
 			headers: { ...assetRequest.headers, 'x-test-role': 'ADMIN' },
 		});
 		expect(asset.statusCode, asset.body).toBe(201);
-		expect(harness.prisma.calls.projectFindUnique).toHaveBeenCalledWith(
-			expect.objectContaining({ where: { id: 7 } }),
-		);
-		expect(harness.prisma.calls.assetCreate).toHaveBeenCalled();
+		expect(harness.ports.calls.projectFindUnique).toHaveBeenCalledWith(7);
+		expect(harness.ports.calls.assetCreate).toHaveBeenCalled();
 		expect(harness.limiter.active()).toBe(0);
 		expect(harness.limiter.calls.acquire).toHaveBeenCalledTimes(2);
 		expect(harness.limiter.calls.release).toHaveBeenCalledTimes(2);
@@ -960,7 +990,7 @@ describe('project multipart production wiring', () => {
 		expect(harness.limiter.calls.acquire).not.toHaveBeenCalled();
 		expect(harness.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
 		expect(harness.storage.calls.upload).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.assetCreate).not.toHaveBeenCalled();
+		expect(harness.ports.calls.assetCreate).not.toHaveBeenCalled();
 	});
 
 	it('rejects malformed JSON and unsupported signatures without object or temp leaks', async () => {
@@ -1098,7 +1128,7 @@ describe('project multipart production wiring', () => {
 			...submitMultipart('{invalid-json', tinyPng),
 		});
 		expect(failed.statusCode).toBe(500);
-		expect(permanent.prisma.calls.projectCreate).not.toHaveBeenCalled();
+		expect(permanent.ports.calls.projectCreate).not.toHaveBeenCalled();
 		expect(permanent.storage.calls.upload).not.toHaveBeenCalled();
 		expect(permanent.fileSystem.calls.remove).toHaveBeenCalledTimes(3);
 		expect(permanent.fileSystem.outstanding()).toHaveLength(1);
@@ -1123,7 +1153,7 @@ describe('project multipart production wiring', () => {
 	it('deletes an unreferenced object after DB failure or records a durable orphan', async () => {
 		const deletedHarness = graphHarness('db-delete');
 		const assetDbError = new Error('asset DB original');
-		deletedHarness.prisma.failAsset(assetDbError);
+		deletedHarness.ports.failAsset(assetDbError);
 		const observedErrors: unknown[] = [];
 		const deletedApp = await routeApp(deletedHarness, observedErrors);
 		apps.push(deletedApp);
@@ -1139,7 +1169,7 @@ describe('project multipart production wiring', () => {
 		expectReleased(deletedHarness);
 
 		const queuedHarness = graphHarness('db-queue');
-		queuedHarness.prisma.failProject();
+		queuedHarness.ports.failProject();
 		queuedHarness.storage.failDelete();
 		const queuedApp = await routeApp(queuedHarness);
 		apps.push(queuedApp);
@@ -1151,7 +1181,7 @@ describe('project multipart production wiring', () => {
 		expect(queued.statusCode).toBe(500);
 		const key = queuedHarness.storage.calls.upload.mock.calls[0]?.[1];
 		expect(queuedHarness.storage.objects.has(key!)).toBe(true);
-		expect(queuedHarness.prisma.orphans.get(`db-queue-public\0${key}`)).toMatchObject({
+		expect(queuedHarness.ports.orphans.get(`db-queue-public\0${key}`)).toMatchObject({
 			bucket: 'db-queue-public',
 			storageKey: key,
 			reason: 'project-upload-unpersisted-original',
@@ -1162,9 +1192,9 @@ describe('project multipart production wiring', () => {
 	it('surfaces cleanup plus durable queue double failure without DB success', async () => {
 		const harness = graphHarness('double-failure');
 		const projectDbError = new Error('project DB original');
-		harness.prisma.failProject(projectDbError);
+		harness.ports.failProject(projectDbError);
 		harness.storage.failDelete();
-		harness.prisma.failOrphan();
+		harness.ports.failOrphan();
 		const observedErrors: unknown[] = [];
 		const app = await routeApp(harness, observedErrors);
 		apps.push(app);
@@ -1176,17 +1206,17 @@ describe('project multipart production wiring', () => {
 		expect(failed.statusCode).toBe(500);
 		expect(failed.json().error.message).toMatch(/durable .*rollback failed/i);
 		expect(errorLeaves(observedErrors[0])).toContain(projectDbError);
-		expect(harness.prisma.calls.projectCreate).toHaveBeenCalledOnce();
-		expect(harness.prisma.orphans.size).toBe(0);
+		expect(harness.ports.calls.projectCreate).toHaveBeenCalledOnce();
+		expect(harness.ports.orphans.size).toBe(0);
 		expectReleased(harness);
 	});
 
 	it('preserves DB, durable rollback, and permanent temp failures in one actual route error tree', async () => {
 		const harness = await contextAppHarness('context-all-failures');
 		const projectDbError = new Error('context project DB original');
-		harness.prisma.failProject(projectDbError);
+		harness.ports.failProject(projectDbError);
 		harness.storage.failDelete(new Error('context storage delete failed'));
-		harness.prisma.failOrphan(new Error('context durable queue failed'));
+		harness.ports.failOrphan(new Error('context durable queue failed'));
 		harness.fileSystem.failRemovePermanently();
 
 		const request = submitMultipart(submitPayload(), tinyPng);
@@ -1219,9 +1249,9 @@ describe('project multipart production wiring', () => {
 		expect(tempCleanup?.residuePaths.length).toBeGreaterThanOrEqual(
 			harness.fileSystem.outstanding().length,
 		);
-		expect(harness.prisma.calls.projectCreate).toHaveBeenCalledOnce();
-		expect(harness.prisma.projectCreateSuccesses()).toBe(0);
-		expect(harness.prisma.orphans.size).toBe(0);
+		expect(harness.ports.calls.projectCreate).toHaveBeenCalledOnce();
+		expect(harness.ports.projectCreateSuccesses()).toBe(0);
+		expect(harness.ports.orphans.size).toBe(0);
 		expect(harness.limiter.calls.acquire).toHaveBeenCalledOnce();
 		expect(harness.limiter.calls.release).toHaveBeenCalledOnce();
 		expect(harness.limiter.active()).toBe(0);

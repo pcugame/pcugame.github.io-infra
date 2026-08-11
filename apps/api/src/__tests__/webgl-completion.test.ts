@@ -5,6 +5,7 @@ import { createCompletedUploadFinalizer } from '../modules/admin/game-upload/fin
 import { createGameUploadService } from '../modules/admin/game-upload/service.js';
 import type { GameUploadServiceDependencies } from '../modules/admin/game-upload/ports.js';
 import type { WebglDeploymentKeys } from '../modules/webgl/paths.js';
+import { createDurableGameUploadRepository } from './helpers/upload-lifecycle.js';
 
 const sourceKey = 'webgl/7/123e4567-e89b-42d3-a456-426614174000/source.zip';
 const deployed: WebglDeploymentKeys = {
@@ -61,6 +62,8 @@ function createHarness() {
 		deployWebgl: vi.fn().mockResolvedValue(deployed),
 		rollbackWebglPublicDeployment: vi.fn().mockResolvedValue(undefined),
 		deleteWebglDeploymentByEntry: vi.fn().mockResolvedValue(undefined),
+		markCompletedObjectFailed: vi.fn().mockResolvedValue({ count: 1 }),
+		wakeDeletionWorker: vi.fn(),
 		logError: vi.fn(),
 	};
 	const finalizer = createCompletedUploadFinalizer({
@@ -68,15 +71,14 @@ function createHarness() {
 		validateGameArchive: vi.fn(),
 		deployWebgl: mocks.deployWebgl,
 		rollbackWebglPublicDeployment: mocks.rollbackWebglPublicDeployment,
-		deleteWebglDeploymentByEntry: mocks.deleteWebglDeploymentByEntry,
 		finalizeGame: mocks.finalizeGame,
 		finalizeWebgl: mocks.finalizeCompletedWebglSession,
-		deleteOrQueue: mocks.deleteOrQueue,
+		wakeDeletionWorker: mocks.wakeDeletionWorker,
 		webglUrl: () => 'http://localhost:4000/api/public/webgl/7/',
 		logError: mocks.logError,
 	});
 	const deps: GameUploadServiceDependencies = {
-		repository: {
+		repository: createDurableGameUploadRepository({
 			findSessionById: mocks.findSessionById,
 			createSessionReplacingActive: vi.fn(),
 			cancelSessionAndClearActive: vi.fn(),
@@ -85,15 +87,18 @@ function createHarness() {
 			findPartsBySessionId: mocks.findPartsBySessionId,
 			revertToPending: mocks.revertToPending,
 			markFailed: mocks.markFailed,
+			markCompletedObjectFailed: mocks.markCompletedObjectFailed,
 			findStaleCompletingSessions: vi.fn(),
 			findActiveSessionsForListing: vi.fn(),
 			findExhibitionById: vi.fn(),
-		},
+		}),
 		storage: {
 			createMultipart: vi.fn(),
 			abortMultipart: vi.fn(),
 			uploadPart: vi.fn(),
 			completeMultipart: mocks.completeMultipart,
+			listParts: vi.fn(async () => [{ partNumber: 1, etag: 'etag' }]),
+			listMultipartUploads: vi.fn(async () => []),
 			head: mocks.head,
 		},
 		finalizer,
@@ -106,7 +111,10 @@ function createHarness() {
 		roleGameMaxBytes: () => 1024,
 		storageKey: () => sourceKey,
 		deleteOrQueue: mocks.deleteOrQueue,
-		logger: { error: mocks.logError, warn: vi.fn() },
+		wakeDeletionWorker: mocks.wakeDeletionWorker,
+		wakeMaintenance: vi.fn(),
+		recordUntrackedMultipartCleanupFailure: vi.fn(),
+		logger: { error: mocks.logError, warn: vi.fn(), fatal: vi.fn() },
 	};
 	return {
 		mocks,
@@ -136,6 +144,7 @@ function createRestartRecoveryHarness() {
 		const deleteOrQueue = vi.fn(async (key: string) => {
 			if (key === sourceKey) durable.sourceExists = false;
 		});
+		const wakeDeletionWorker = vi.fn();
 		const finalizer = createCompletedUploadFinalizer({
 			readHeader: async () => Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]),
 			validateGameArchive: vi.fn(),
@@ -147,7 +156,6 @@ function createRestartRecoveryHarness() {
 				return deployed;
 			},
 			rollbackWebglPublicDeployment,
-			deleteWebglDeploymentByEntry: vi.fn(),
 			finalizeGame: vi.fn().mockResolvedValue({ oldStorageKey: null, oldPlaybackStorageKey: null }),
 			finalizeWebgl: async () => {
 				durable.events.push('db-pointer-finalize');
@@ -160,30 +168,34 @@ function createRestartRecoveryHarness() {
 				durable.session.status = 'COMPLETED';
 				return { oldEntryKey };
 			},
-			deleteOrQueue,
+			wakeDeletionWorker,
 			webglUrl: () => 'http://localhost:4000/api/public/webgl/7/',
 			logError: vi.fn(),
 		});
 		const deps: GameUploadServiceDependencies = {
-			repository: {
+			repository: createDurableGameUploadRepository({
 				findSessionById: async () => ({ ...durable.session }),
 				createSessionReplacingActive: vi.fn(),
 				cancelSessionAndClearActive: vi.fn(),
 				upsertPartEtag: vi.fn(),
-				transitionToCompleting: async () => {
-					if (durable.session.status !== 'PENDING') return { count: 0 };
+				claimCompletion: async () => {
+					if (durable.session.status !== 'PENDING') {
+						return { count: 0, reason: 'state' as const };
+					}
 					durable.session.status = 'COMPLETING';
-					return { count: 1 };
+					return { count: 1, reason: null };
 				},
+				transitionToCompleting: vi.fn().mockResolvedValue({ count: 0 }),
 				findPartsBySessionId: async () => durable.session.parts,
 				revertToPending: vi.fn(),
 				markFailed: vi.fn(),
-				findStaleCompletingSessions: async () => (
+				findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
+				claimStaleCompletingSessions: async () => (
 					durable.session.status === 'COMPLETING' ? [{ ...durable.session }] : []
 				),
 				findActiveSessionsForListing: vi.fn(),
 				findExhibitionById: vi.fn(),
-			},
+			}),
 			storage: {
 				createMultipart: vi.fn(),
 				abortMultipart: vi.fn(),
@@ -192,6 +204,8 @@ function createRestartRecoveryHarness() {
 					durable.events.push('source-complete');
 					durable.sourceExists = true;
 				},
+				listParts: async () => [{ partNumber: 1, etag: 'etag' }],
+				listMultipartUploads: async () => [],
 				head: async () => durable.sourceExists
 					? { size: 8, contentType: 'application/zip' }
 					: null,
@@ -206,12 +220,16 @@ function createRestartRecoveryHarness() {
 			roleGameMaxBytes: () => 1024,
 			storageKey: () => sourceKey,
 			deleteOrQueue,
-			logger: { error: vi.fn(), warn: vi.fn() },
+			wakeDeletionWorker,
+			wakeMaintenance: vi.fn(),
+			recordUntrackedMultipartCleanupFailure: vi.fn(),
+			logger: { error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 		};
 		return {
 			service: createGameUploadService(deps),
 			rollbackWebglPublicDeployment,
 			deleteOrQueue,
+			wakeDeletionWorker,
 		};
 	}
 
@@ -251,8 +269,8 @@ describe('WebGL completion atomicity', () => {
 	});
 
 	it('rejects a duplicate completion before calling multipart completion', async () => {
-		const { mocks, complete } = createHarness();
-		mocks.transitionToCompleting.mockResolvedValue({ count: 0 });
+		const { mocks, deps, complete } = createHarness();
+		deps.repository.claimCompletion = vi.fn().mockResolvedValue({ count: 0, reason: 'state' });
 
 		await expect(complete()).rejects.toMatchObject({
 			statusCode: 400,
@@ -313,12 +331,15 @@ describe('WebGL completion atomicity', () => {
 		deps.storage.listParts = vi.fn().mockResolvedValue([{ partNumber: 1, etag: 'etag' }]);
 
 		await expect(complete()).rejects.toThrow('completion response lost');
-		expect(mocks.revertToPending).toHaveBeenCalledWith('session-webgl', undefined);
+		expect(mocks.revertToPending).toHaveBeenCalledWith('session-webgl', 'id');
 	});
 
 	it('does not abort storage when cancellation loses the state compare-and-set', async () => {
 		const { mocks, deps } = createHarness();
-		deps.repository.cancelSessionAndClearActive = vi.fn().mockResolvedValue({ count: 0 });
+		deps.repository.cancelSessionAndClearActive = vi.fn().mockResolvedValue({
+			count: 0,
+			durableAbort: null,
+		});
 
 		await expect(cancelSession(deps, 'session-webgl', { id: 11, role: 'USER' }))
 			.rejects.toThrow('Session state changed');
@@ -378,73 +399,65 @@ describe('WebGL completion atomicity', () => {
 		expect(harness.processes).toHaveLength(2);
 	});
 
-	it('marks a deterministically invalid completed source failed and queues deletion', async () => {
+	it('atomically marks a deterministically invalid completed source failed, then wakes deletion', async () => {
 		const { mocks, complete } = createHarness();
 		mocks.readHeader.mockResolvedValue(Buffer.from('not-a-zip'));
 
 		await expect(complete()).rejects.toMatchObject({ statusCode: 400 });
-		expect(mocks.markFailed).toHaveBeenCalledWith('session-webgl', sourceKey);
-		expect(mocks.deleteOrQueue).toHaveBeenCalledWith(
-			sourceKey,
-			'webgl-upload-completion-invalid',
-			{ sessionId: 'session-webgl' },
-		);
-		expect(mocks.deleteOrQueue.mock.invocationCallOrder[0])
-			.toBeLessThan(mocks.markFailed.mock.invocationCallOrder[0]!);
+		expect(mocks.markCompletedObjectFailed).toHaveBeenCalledWith({
+			sessionId: 'session-webgl',
+			storageKey: sourceKey,
+			reason: 'webgl-upload-completion-invalid',
+			completionClaimToken: 'id',
+		});
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.deleteOrQueue).not.toHaveBeenCalled();
 	});
 
-	it('keeps an invalid completed source recoverable when deletion and queueing both fail', async () => {
+	it('keeps an invalid completed source recoverable when the atomic failure outbox commit fails', async () => {
 		const { mocks, complete } = createHarness();
 		mocks.readHeader.mockResolvedValue(Buffer.from('not-a-zip'));
-		mocks.deleteOrQueue.mockRejectedValue(new Error('storage and orphan queue unavailable'));
+		mocks.markCompletedObjectFailed.mockRejectedValue(new Error('database unavailable'));
 
-		await expect(complete()).rejects.toThrow('storage and orphan queue unavailable');
+		await expect(complete()).rejects.toThrow('database unavailable');
 		expect(mocks.markFailed).not.toHaveBeenCalled();
 		expect(mocks.revertToPending).not.toHaveBeenCalled();
+		expect(mocks.wakeDeletionWorker).not.toHaveBeenCalled();
 	});
 
-	it('cleans the previous deployment after the pointer swap', async () => {
+	it('wakes the reference-aware deletion worker after the pointer swap', async () => {
 		const { mocks, complete } = createHarness();
 		const oldEntry = 'webgl/7/123e4567-e89b-42d3-b456-426614174111/site/index.html';
 		mocks.finalizeCompletedWebglSession.mockResolvedValue({ oldEntryKey: oldEntry });
 
 		await complete();
-		expect(mocks.deleteWebglDeploymentByEntry).toHaveBeenCalledWith(
-			7,
-			oldEntry,
-			'webgl-upload-replace-previous',
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.deleteOrQueue).not.toHaveBeenCalled();
 	});
 
-	it('logs old-deployment cleanup failure without changing the completed response', async () => {
+	it('does not await global deletion work after a WebGL outbox commit', async () => {
 		const { mocks, complete } = createHarness();
 		mocks.finalizeCompletedWebglSession.mockResolvedValue({
 			oldEntryKey: 'webgl/7/123e4567-e89b-42d3-b456-426614174111/site/index.html',
 		});
-		mocks.deleteWebglDeploymentByEntry.mockRejectedValue(new Error('orphan queue unavailable'));
 
 		await expect(complete()).resolves.toMatchObject({ status: 'COMPLETED' });
 		expect(mocks.markFailed).not.toHaveBeenCalled();
 		expect(mocks.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
-		expect(mocks.logError).toHaveBeenCalledWith(
-			expect.objectContaining({ sessionId: 'session-webgl' }),
-			'Post-commit WebGL deployment cleanup failed; durable outbox retained',
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.logError).not.toHaveBeenCalled();
 	});
 
-	it('logs old GAME cleanup failure without changing the completed response', async () => {
+	it('wakes deletion after a GAME replacement without synchronously deleting the old object', async () => {
 		const { mocks, complete } = createHarness();
 		mocks.findSessionById.mockResolvedValueOnce({ ...session(), uploadKind: 'GAME' });
 		mocks.finalizeGame.mockResolvedValueOnce({
 			oldStorageKey: 'old-game.zip',
 			oldPlaybackStorageKey: null,
 		});
-		mocks.deleteOrQueue.mockRejectedValueOnce(new Error('storage unavailable'));
 
 		await expect(complete()).resolves.toMatchObject({ status: 'COMPLETED' });
-		expect(mocks.logError).toHaveBeenCalledWith(
-			expect.objectContaining({ sessionId: 'session-webgl', storageKey: 'old-game.zip' }),
-			'Post-commit GAME object cleanup failed; durable outbox retained',
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.deleteOrQueue).not.toHaveBeenCalled();
 	});
 });

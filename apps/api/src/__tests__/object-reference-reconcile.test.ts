@@ -155,7 +155,15 @@ describe('conservative orphan reconciliation', () => {
 		});
 		const models = emptyReferenceModels();
 		const orphanUpsert = vi.fn();
-		const prisma = { ...models, orphanObject: { upsert: orphanUpsert }, $queryRaw: vi.fn() };
+		const prisma = {
+			...models,
+			orphanObject: {
+				upsert: orphanUpsert,
+				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
+			},
+			$queryRaw: vi.fn(),
+		};
 		const storage = {
 			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
 				{ key: 'old.bin', lastModified: new Date('2026-08-11T10:00:00.000Z') },
@@ -183,7 +191,15 @@ describe('conservative orphan reconciliation', () => {
 			webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
 		}]);
 		const orphanUpsert = vi.fn().mockResolvedValue({});
-		const prisma = { ...models, orphanObject: { upsert: orphanUpsert }, $queryRaw: vi.fn() };
+		const prisma = {
+			...models,
+			orphanObject: {
+				upsert: orphanUpsert,
+				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
+			},
+			$queryRaw: vi.fn(),
+		};
 		const storage = {
 			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
 				{

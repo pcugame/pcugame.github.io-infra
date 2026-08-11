@@ -15,7 +15,9 @@ vi.mock('../lib/prisma-client.js', () => ({
 			deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
 		},
 		siteSetting: { upsert: vi.fn() },
-		orphanObject: { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+		orphanObject: {
+			upsert: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), update: vi.fn(),
+		},
 	}),
 }));
 vi.mock('../shared/protected-download-limiter.js', () => {

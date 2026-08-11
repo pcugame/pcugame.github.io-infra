@@ -7,8 +7,10 @@ import type { AppLogger, ObjectStorage, Scheduler, SettingsStore } from '../appl
 import { buildApp } from '../app.js';
 import { createProductionBackendContext, type BackendRoutes } from '../backend-context.js';
 import type { Env } from '../config/env.js';
-import type { PrismaClient } from '../generated/prisma/client.js';
+import type { PublicProductionRepository } from '../modules/public/composition.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
+import { ownedTestUploadLifecycleResource } from './helpers/upload-lifecycle.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const deployment = '123e4567-e89b-42d3-a456-426614174000';
@@ -41,25 +43,21 @@ function config(label: string): Env {
 	};
 }
 
-function prismaHarness(label: string) {
+function repositoryHarness(label: string) {
 	const calls = {
-		exhibitionFindMany: vi.fn(async (args: { where?: { year?: number } }) => (
-			args.where?.year
-				? [{ id: 1, year: args.where.year, title: `${label} Show` }]
-				: [{
-					id: 1,
-					year: 2026,
-					title: `${label} Show`,
-					posterStorageKey: `${label}-poster.webp`,
-					_count: { projects: 1 },
-				}]
-		)),
-		exhibitionFindUnique: vi.fn(async (args: { where: { id?: number; posterStorageKey?: string } }) => (
-			args.where.posterStorageKey
-				? { id: 1, posterStorageKey: args.where.posterStorageKey }
-				: { id: args.where.id ?? 1, year: 2026, title: `${label} Show` }
-		)),
-		projectFindMany: vi.fn(async () => [{
+		findExhibitionsWithPublishedCounts: vi.fn(async () => [{
+			id: 1,
+			year: 2026,
+			title: `${label} Show`,
+			posterStorageKey: `${label}-poster.webp`,
+			_count: { projects: 1 },
+		}]),
+		findExhibitionsByYear: vi.fn(async (year: number) => [
+			{ id: 1, year, title: `${label} Show` },
+		]),
+		findExhibitionById: vi.fn(async (id: number) => ({ id, year: 2026, title: `${label} Show` })),
+		findExhibitionPosterByStorageKey: vi.fn(async (storageKey: string) => ({ posterStorageKey: storageKey })),
+		findPublishedProjectsInExhibitions: vi.fn(async () => [{
 			id: 7,
 			slug: `${label}-game`,
 			title: `${label} Game`,
@@ -68,51 +66,40 @@ function prismaHarness(label: string) {
 			poster: null,
 			members: [{ name: `${label} Member`, studentId: '20260001' }],
 		}]),
-		projectFindFirst: vi.fn(async (args: {
-			where: { id?: number; slug?: string; webglEntryKey?: { not: string } };
-		}) => {
-			if (args.where.webglEntryKey) {
-				return {
-					id: 7,
-					webglEntryKey: `webgl/7/${deployment}/site/index.html`,
-				};
-			}
-			return {
+		findPublishedProject: vi.fn(async () => ({
 				id: 7,
+				exhibitionId: 1,
 				slug: `${label}-game`,
 				title: `${label} Game`,
 				summary: `${label} Summary`,
 				description: `${label} Description`,
 				isIncomplete: false,
-				status: 'PUBLISHED',
+				status: 'PUBLISHED' as const,
 				webglEntryKey: `webgl/7/${deployment}/site/index.html`,
 				exhibition: { year: 2026 },
 				members: [{ id: 1, name: `${label} Member`, studentId: '20260001' }],
 				assets: [],
 				poster: null,
-			};
-		}),
-		bannedFindMany: vi.fn(async () => []),
+			})),
+		findPublicWebglProject: vi.fn(async (): Promise<{
+			id: number;
+			webglEntryKey: string;
+		} | null> => ({
+			id: 7,
+			webglEntryKey: `webgl/7/${deployment}/site/index.html`,
+		})),
 	};
-	const prisma = {
-		exhibition: {
-			findMany: calls.exhibitionFindMany,
-			findUnique: calls.exhibitionFindUnique,
-		},
-		project: {
-			findMany: calls.projectFindMany,
-			findFirst: calls.projectFindFirst,
-		},
-		bannedIp: { findMany: calls.bannedFindMany },
-		authSession: {
-			findUnique: vi.fn(),
-			update: vi.fn(),
-			deleteMany: vi.fn(async () => ({ count: 0 })),
-		},
-		$queryRaw: vi.fn(async () => [{ ok: 1 }]),
-		$disconnect: vi.fn(),
-	} as unknown as PrismaClient;
-	return { prisma, calls };
+	const repository: PublicProductionRepository = {
+		findExhibitionsWithPublishedCounts: calls.findExhibitionsWithPublishedCounts,
+		findExhibitionsByYear: calls.findExhibitionsByYear,
+		findPublishedProjectsInExhibitions: calls.findPublishedProjectsInExhibitions,
+		findExhibitionById: calls.findExhibitionById,
+		findExhibitionPosterByStorageKey: calls.findExhibitionPosterByStorageKey,
+		findPublishedProjectById: calls.findPublishedProject,
+		findPublishedProjectBySlug: calls.findPublishedProject,
+		findPublicWebglProject: calls.findPublicWebglProject,
+	};
+	return { repository, calls };
 }
 
 function storageHarness(label: string) {
@@ -146,12 +133,14 @@ function storageHarness(label: string) {
 		uploadPart: vi.fn(async () => 'etag'),
 		completeMultipart: vi.fn(),
 		abortMultipart: vi.fn(),
+		listParts: vi.fn(async () => []),
+		listMultipartUploads: vi.fn(async () => []),
 	};
 	return { storage, calls };
 }
 
 async function harness(label: string) {
-	const prisma = prismaHarness(label);
+	const repository = repositoryHarness(label);
 	const storage = storageHarness(label);
 	const scheduler: Scheduler = {
 		every: vi.fn(() => ({ cancel: vi.fn() })),
@@ -159,6 +148,9 @@ async function harness(label: string) {
 	};
 	const s3 = { send: vi.fn(), destroy: vi.fn() } as unknown as S3Client;
 	const context = await createProductionBackendContext(config(label), {
+		persistence: createScriptedBackendPersistence({
+			publicRepository: repository.repository,
+		}),
 		factories: {
 			routes: (_config, _assets, _auth, publicGraph): BackendRoutes => ({
 				auth: emptyRoute,
@@ -170,13 +162,13 @@ async function harness(label: string) {
 			}),
 		},
 		resources: {
+			uploadLifecycle: ownedTestUploadLifecycleResource(),
 			logger: { value: logger, ownership: 'borrowed' },
 			clock: {
 				value: { now: () => new Date('2026-07-22T00:00:00.000Z') },
 				ownership: 'borrowed',
 			},
 			scheduler: { value: scheduler, ownership: 'borrowed' },
-			prisma: { value: prisma.prisma, ownership: 'borrowed' },
 			s3: {
 				value: s3,
 				ownership: 'borrowed',
@@ -185,7 +177,7 @@ async function harness(label: string) {
 			settings: { value: settings, ownership: 'borrowed' },
 		},
 	});
-	return { context, prisma, storage, scheduler, s3 };
+	return { context, repository, storage, scheduler, s3 };
 }
 
 const apps: FastifyInstance[] = [];
@@ -213,10 +205,9 @@ describe('public/WebGL production wiring', () => {
 		const app = await buildApp({ context: a.context });
 		apps.push(app);
 
-		expect(a.prisma.calls.exhibitionFindMany).not.toHaveBeenCalled();
-		expect(a.prisma.calls.projectFindMany).not.toHaveBeenCalled();
-		expect(a.prisma.calls.projectFindFirst).not.toHaveBeenCalled();
-		expect(a.prisma.calls.bannedFindMany).not.toHaveBeenCalled();
+		expect(a.repository.calls.findExhibitionsWithPublishedCounts).not.toHaveBeenCalled();
+		expect(a.repository.calls.findPublishedProjectsInExhibitions).not.toHaveBeenCalled();
+		expect(a.repository.calls.findPublicWebglProject).not.toHaveBeenCalled();
 		expect(a.storage.calls.presign).not.toHaveBeenCalled();
 		expect(a.storage.calls.head).not.toHaveBeenCalled();
 		expect(a.storage.calls.stream).not.toHaveBeenCalled();
@@ -229,7 +220,7 @@ describe('public/WebGL production wiring', () => {
 		const app = await buildApp({ context: a.context });
 		apps.push(app);
 
-		a.prisma.calls.projectFindFirst.mockResolvedValueOnce(null as never);
+		a.repository.calls.findPublicWebglProject.mockResolvedValueOnce(null);
 		const missingProject = await app.inject({ method: 'GET', url: '/api/public/webgl/7/' });
 		expect(missingProject.statusCode).toBe(404);
 		expect(missingProject.json()).toMatchObject({
@@ -389,7 +380,7 @@ describe('public/WebGL production wiring', () => {
 		const app = await buildApp({ context: a.context });
 		apps.push(app);
 
-		a.prisma.calls.exhibitionFindMany.mockRejectedValueOnce(new Error('database unavailable'));
+		a.repository.calls.findExhibitionsWithPublishedCounts.mockRejectedValueOnce(new Error('database unavailable'));
 		const dbFailure = await app.inject({ method: 'GET', url: '/api/public/years' });
 		expect(dbFailure.statusCode).toBe(500);
 		expect(dbFailure.json()).toEqual({
@@ -398,7 +389,7 @@ describe('public/WebGL production wiring', () => {
 		});
 		expect(dbFailure.headers['x-content-type-options']).toBe('nosniff');
 
-		a.prisma.calls.projectFindFirst.mockRejectedValueOnce(new Error('database unavailable'));
+		a.repository.calls.findPublicWebglProject.mockRejectedValueOnce(new Error('database unavailable'));
 		const webglDbFailure = await app.inject({
 			method: 'GET',
 			url: '/api/public/webgl/7/',

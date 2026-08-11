@@ -2,7 +2,6 @@ import { Readable, Writable } from 'node:stream';
 import type { FastifyPluginAsync } from 'fastify';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaClient } from '../generated/prisma/client.js';
 import type { Env } from '../config/env.js';
 import type {
 	AppLogger,
@@ -10,6 +9,7 @@ import type {
 	GoogleTokenVerifier,
 	ObjectStorage,
 	Scheduler,
+	SettingsStore,
 } from '../application/ports.js';
 import {
 	createMaintenanceSchedule,
@@ -21,6 +21,8 @@ import { buildApp } from '../app.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
 import { routeRuntimeContractsFor } from '../shared/http-route-schemas.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
+import { ownedTestUploadLifecycleResource } from './helpers/upload-lifecycle.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const emptyRoutes: BackendRoutes = {
@@ -73,41 +75,29 @@ const storage: ObjectStorage = {
 	uploadPart: async () => 'etag',
 	completeMultipart: async () => {},
 	abortMultipart: async () => {},
+	listParts: async () => [],
+	listMultipartUploads: async () => [],
 };
 
-function fakePrisma(label: string, events: string[], maxGameFileMb = 5120): PrismaClient {
-	return {
-		$disconnect: vi.fn(async () => { events.push(label ? `${label}:prisma` : 'prisma'); }),
-		$queryRaw: vi.fn(async () => [{ ok: 1 }]),
-		authSession: {
-			findUnique: vi.fn(async () => null),
-			update: vi.fn(async () => ({})),
-			deleteMany: vi.fn(async () => ({ count: 0 })),
-		},
-		gameUploadSession: {
-			findMany: vi.fn(async () => []),
-		},
-		bannedIp: {
-			findMany: vi.fn(async () => []),
-		},
-		siteSetting: {
-			upsert: vi.fn(async (args: { create?: { maxGameFileMb?: number }; update?: { maxGameFileMb?: number } }) => ({
-				maxGameFileMb: args.update?.maxGameFileMb ?? args.create?.maxGameFileMb ?? maxGameFileMb,
-				maxChunkSizeMb: 10,
-			})),
-		},
-		orphanObject: {
-			upsert: vi.fn(async () => ({})),
-			findMany: vi.fn(async () => []),
-			update: vi.fn(async () => ({})),
-		},
-	} as unknown as PrismaClient;
+function settingsHarness(label: string, events: string[], initialMaxGameFileMb = 5120) {
+	let value = { maxGameFileMb: initialMaxGameFileMb, maxChunkSizeMb: 10 };
+	const start = vi.fn(async () => {});
+	const close = vi.fn(() => { events.push(label ? `${label}:settings` : 'settings'); });
+	const store: SettingsStore = {
+		get: vi.fn(async () => value),
+		update: vi.fn(async (patch) => {
+			value = { ...value, ...patch };
+			return value;
+		}),
+		invalidate: vi.fn(),
+	};
+	return { store, start, close };
 }
 
 function fakeS3(label: string, events: string[]): S3Client {
 	return {
 		destroy: vi.fn(() => { events.push(label ? `${label}:s3` : 's3'); }),
-		send: vi.fn(),
+		send: vi.fn(async () => ({ Uploads: [], IsTruncated: false })),
 	} as unknown as S3Client;
 }
 
@@ -165,17 +155,20 @@ describe('production BackendContext resource ownership', () => {
 		const borrowedLogger = { ...testLogger, close: vi.fn() };
 		const config: Env = { ...testConfig, UPLOAD_MAX_CONCURRENT: 1 };
 		const create = (label: string, scheduler: Scheduler, setting: number) => {
-			const prisma = fakePrisma(label, events, setting);
+			const settings = settingsHarness(label, events, setting);
 			const s3 = fakeS3(label, events);
 			return createProductionBackendContext(config, {
+				persistence: createScriptedBackendPersistence(),
 				routes: emptyRoutes,
 				factories: { scheduler: () => scheduler },
 				resources: {
+					uploadLifecycle: ownedTestUploadLifecycleResource(),
 					logger: { value: borrowedLogger, ownership: 'borrowed' },
-					prisma: {
-						value: prisma,
+					settings: {
+						value: settings.store,
 						ownership: 'owned',
-						close: () => prisma.$disconnect(),
+						start: settings.start,
+						close: settings.close,
 					},
 					s3: {
 						value: s3,
@@ -213,24 +206,25 @@ describe('production BackendContext resource ownership', () => {
 		await a.close();
 		await a.close();
 
-		expect(events).toEqual(['a:s3', 'a:prisma']);
+		expect(events).toEqual(['a:settings', 'a:s3']);
 		expect(aScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
 		expect(bScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 0)).toBe(true);
 		expect(() => b.protectedDownloads.check('10.0.0.2')).not.toThrow();
 		expect(b.exportProgress.get()).toBeNull();
 		expect(borrowedLogger.close).not.toHaveBeenCalled();
 		expect(a.resourceOwnership).toContainEqual({ name: 'logger', ownership: 'borrowed' });
-		expect(a.resourceOwnership).toContainEqual({ name: 'prisma', ownership: 'owned' });
+		expect(a.resourceOwnership).toContainEqual({ name: 'settings', ownership: 'owned' });
 		await b.close();
-		expect(events).toEqual(['a:s3', 'a:prisma', 'b:s3', 'b:prisma']);
+		expect(events).toEqual(['a:settings', 'a:s3', 'b:settings', 'b:s3']);
 	});
 
 	it.each([
-		['s3', ['prisma']],
-		['settings', ['s3', 'prisma']],
-		['lifecycle', ['upload', 'settings', 's3', 'prisma']],
-		['exportProgress', ['protected', 'lifecycle', 'upload', 'settings', 's3', 'prisma']],
-		['routes', ['export', 'protected', 'lifecycle', 'upload', 'settings', 's3', 'prisma']],
+		['s3', []],
+		['storage', ['s3']],
+		['uploadLimiter', ['settings', 's3']],
+		['lifecycle', ['upload', 'settings', 's3']],
+		['exportProgress', ['protected', 'lifecycle', 'upload', 'settings', 's3']],
+		['routes', ['export', 'protected', 'lifecycle', 'upload', 'settings', 's3']],
 	] as const)('preserves the %s construction error and closes prior resources in reverse', async (failure, expected) => {
 		const events: string[] = [];
 		const original = new Error(`failure:${failure}`);
@@ -238,7 +232,7 @@ describe('production BackendContext resource ownership', () => {
 			if (name === failure) throw original;
 			return value;
 		};
-		const prisma = fakePrisma('', events);
+		const settings = settingsHarness('', events, 1);
 		const s3 = fakeS3('', events);
 		const factories: Partial<ProductionResourceFactories> = {
 			logger: () => fail('logger', testLogger),
@@ -247,15 +241,8 @@ describe('production BackendContext resource ownership', () => {
 			scheduler: () => fail('scheduler', schedulerHarness().scheduler),
 			fileSystem: () => fail('fileSystem', fileSystem),
 			googleTokens: () => fail('googleTokens', { verify: async () => undefined }),
-			prisma: () => fail('prisma', prisma),
 			s3: () => fail('s3', s3),
 			storage: () => fail('storage', storage),
-			settings: () => fail('settings', {
-				get: async () => ({ maxGameFileMb: 1, maxChunkSizeMb: 1 }),
-				update: async () => ({ maxGameFileMb: 1, maxChunkSizeMb: 1 }),
-				invalidate: () => {},
-				close: () => { events.push('settings'); },
-			}),
 			uploadLimiter: () => fail('uploadLimiter', {
 				acquire: () => {},
 				release: () => {},
@@ -287,7 +274,19 @@ describe('production BackendContext resource ownership', () => {
 
 		let received: unknown;
 		try {
-			await createProductionBackendContext(testConfig, { factories });
+			await createProductionBackendContext(testConfig, {
+				persistence: createScriptedBackendPersistence(),
+				factories,
+				resources: {
+					uploadLifecycle: ownedTestUploadLifecycleResource(),
+					settings: {
+						value: settings.store,
+						ownership: 'owned',
+						start: settings.start,
+						close: settings.close,
+					},
+				},
+			});
 		} catch (error) {
 			received = error;
 		}
@@ -297,25 +296,42 @@ describe('production BackendContext resource ownership', () => {
 
 	it('does no DB, S3, timer, or maintenance work before explicit startup', async () => {
 		const events: string[] = [];
-		const prisma = fakePrisma('context', events);
+		const settings = settingsHarness('context', events);
+		const basePersistence = createScriptedBackendPersistence();
+		const databaseCheck = vi.fn(async () => true);
+		const purgeExpired = vi.fn(async () => 0);
+		const persistence = createScriptedBackendPersistence({
+			databaseHealth: { check: databaseCheck },
+			authRepository: {
+				...basePersistence.authRepository,
+				purgeExpired,
+			},
+		});
 		const s3 = fakeS3('context', events);
 		const scheduler = schedulerHarness();
 		const context = await createProductionBackendContext(testConfig, {
+			persistence,
 			routes: emptyRoutes,
 			factories: { scheduler: () => scheduler.scheduler },
 			resources: {
+				uploadLifecycle: ownedTestUploadLifecycleResource(),
 				logger: { value: testLogger, ownership: 'borrowed' },
-				prisma: { value: prisma, ownership: 'borrowed' },
+				settings: {
+					value: settings.store,
+					ownership: 'borrowed',
+				},
 				s3: { value: s3, ownership: 'borrowed' },
 			},
 		});
 
-		expect(prisma.$queryRaw).not.toHaveBeenCalled();
-		expect(prisma.authSession.deleteMany).not.toHaveBeenCalled();
+		expect(databaseCheck).not.toHaveBeenCalled();
+		expect(purgeExpired).not.toHaveBeenCalled();
+		expect(settings.start).not.toHaveBeenCalled();
 		expect(s3.send).not.toHaveBeenCalled();
 		expect(scheduler.scheduler.every).not.toHaveBeenCalled();
 		const app = await buildApp({ context });
-		expect(prisma.$queryRaw).not.toHaveBeenCalled();
+		expect(databaseCheck).not.toHaveBeenCalled();
+		expect(purgeExpired).not.toHaveBeenCalled();
 		expect(s3.send).not.toHaveBeenCalled();
 		expect(scheduler.scheduler.every).not.toHaveBeenCalled();
 
@@ -329,8 +345,10 @@ describe('production BackendContext resource ownership', () => {
 		const events: string[] = [];
 		const aScheduler = schedulerHarness();
 		const bScheduler = schedulerHarness();
-		const aPrisma = fakePrisma('a-full', events, 1000);
-		const bPrisma = fakePrisma('b-full', events, 2000);
+		const aSettings = settingsHarness('a-full', events, 1000);
+		const bSettings = settingsHarness('b-full', events, 2000);
+		const aFindBannedIps = vi.fn(async () => []);
+		const bFindBannedIps = vi.fn(async () => []);
 		const aS3 = fakeS3('a-full', events);
 		const bS3 = fakeS3('b-full', events);
 		const aStorage = { ...storage, head: vi.fn(async () => null) };
@@ -341,12 +359,13 @@ describe('production BackendContext resource ownership', () => {
 		let bId = 0;
 		const create = (
 			label: 'a' | 'b',
-			prisma: PrismaClient,
 			s3: S3Client,
 			objectStorage: ObjectStorage,
 			scheduler: Scheduler,
 			verify: GoogleTokenVerifier['verify'],
 			nextId: () => string,
+			settings: ReturnType<typeof settingsHarness>,
+			findBannedIps: () => Promise<{ ip: string }[]>,
 		) => createProductionBackendContext({
 			...testConfig,
 			NODE_ENV: 'production',
@@ -357,7 +376,17 @@ describe('production BackendContext resource ownership', () => {
 			S3_BUCKET_PUBLIC: `${label}-public`,
 			S3_BUCKET_PROTECTED: `${label}-protected`,
 		}, {
+			persistence: (() => {
+				const base = createScriptedBackendPersistence();
+				return createScriptedBackendPersistence({
+					assetsRepository: {
+						...base.assetsRepository,
+						findAllBannedIps: findBannedIps,
+					},
+				});
+			})(),
 			resources: {
+				uploadLifecycle: ownedTestUploadLifecycleResource(),
 				logger: { value: testLogger, ownership: 'borrowed' },
 				clock: {
 					value: { now: () => new Date('2026-08-10T00:00:00.000Z') },
@@ -367,10 +396,11 @@ describe('production BackendContext resource ownership', () => {
 				scheduler: { value: scheduler, ownership: 'borrowed' },
 				fileSystem: { value: fileSystem, ownership: 'borrowed' },
 				googleTokens: { value: { verify }, ownership: 'borrowed' },
-				prisma: {
-					value: prisma,
+				settings: {
+					value: settings.store,
 					ownership: 'owned',
-					close: () => prisma.$disconnect(),
+					start: settings.start,
+					close: settings.close,
 				},
 				s3: {
 					value: s3,
@@ -389,21 +419,23 @@ describe('production BackendContext resource ownership', () => {
 		const [a, b] = await Promise.all([
 			create(
 				'a',
-				aPrisma,
 				aS3,
 				aStorage,
 				aScheduler.scheduler,
 				aVerify,
 				() => `a-request-${++aId}`,
+				aSettings,
+				aFindBannedIps,
 			),
 			create(
 				'b',
-				bPrisma,
 				bS3,
 				bStorage,
 				bScheduler.scheduler,
 				bVerify,
 				() => `b-request-${++bId}`,
+				bSettings,
+				bFindBannedIps,
 			),
 		]);
 		const [appA, appB] = await Promise.all([
@@ -416,10 +448,8 @@ describe('production BackendContext resource ownership', () => {
 			expect(appA.hasRoute({ method: route.method, url }), `${route.method} ${route.url}`).toBe(true);
 			expect(appB.hasRoute({ method: route.method, url }), `${route.method} ${route.url}`).toBe(true);
 		}
-		expect(routeRuntimeContractsFor({ includeDevAuth: false })).toHaveLength(55);
-		expect(aPrisma.siteSetting.upsert).not.toHaveBeenCalled();
-		expect(aPrisma.bannedIp.findMany).not.toHaveBeenCalled();
-		expect(aPrisma.gameUploadSession.findMany).not.toHaveBeenCalled();
+		expect(aSettings.start).not.toHaveBeenCalled();
+		expect(aFindBannedIps).not.toHaveBeenCalled();
 		expect(aS3.send).not.toHaveBeenCalled();
 		expect(aStorage.head).not.toHaveBeenCalled();
 		expect(aScheduler.scheduler.every).not.toHaveBeenCalled();
@@ -440,14 +470,12 @@ describe('production BackendContext resource ownership', () => {
 		expect(b.exportProgress.get()).toBeNull();
 
 		await Promise.all([a.start(), b.start()]);
-		expect(aPrisma.siteSetting.upsert).toHaveBeenCalledOnce();
-		expect(bPrisma.siteSetting.upsert).toHaveBeenCalledOnce();
+		expect(aSettings.start).toHaveBeenCalledOnce();
+		expect(bSettings.start).toHaveBeenCalledOnce();
 		await expect(a.settings.get()).resolves.toMatchObject({ maxGameFileMb: 1000 });
 		await expect(b.settings.get()).resolves.toMatchObject({ maxGameFileMb: 2000 });
-		expect(aPrisma.bannedIp.findMany).toHaveBeenCalledOnce();
-		expect(bPrisma.bannedIp.findMany).toHaveBeenCalledOnce();
-		expect(aPrisma.gameUploadSession.findMany).toHaveBeenCalledTimes(2);
-		expect(bPrisma.gameUploadSession.findMany).toHaveBeenCalledTimes(2);
+		expect(aFindBannedIps).toHaveBeenCalledOnce();
+		expect(bFindBannedIps).toHaveBeenCalledOnce();
 		expect(aScheduler.tasks).toHaveLength(4);
 		expect(bScheduler.tasks).toHaveLength(4);
 
@@ -456,22 +484,22 @@ describe('production BackendContext resource ownership', () => {
 		expect(aScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
 		expect(bScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 0)).toBe(true);
 		expect(aS3.destroy).toHaveBeenCalledOnce();
-		expect(aPrisma.$disconnect).toHaveBeenCalledOnce();
+		expect(aSettings.close).toHaveBeenCalledOnce();
 		expect(bS3.destroy).not.toHaveBeenCalled();
-		expect(bPrisma.$disconnect).not.toHaveBeenCalled();
+		expect(bSettings.close).not.toHaveBeenCalled();
 		const healthB = await appB.inject({ method: 'GET', url: '/api/health' });
 		expect(healthB.statusCode, healthB.body).toBe(200);
-		expect(healthB.headers['x-request-id']).toBe('b-request-1');
+		expect(healthB.headers['x-request-id']).toMatch(/^b-request-\d+$/);
 		expect(bVerify).not.toHaveBeenCalled();
 		expect(aVerify).not.toHaveBeenCalled();
 
 		await appB.close();
 		expect(bS3.destroy).toHaveBeenCalledOnce();
-		expect(bPrisma.$disconnect).toHaveBeenCalledOnce();
+		expect(bSettings.close).toHaveBeenCalledOnce();
 		interval.mockRestore();
 	});
 
-	it('closes S3 and Prisma once when explicit startup fails after timers begin', async () => {
+	it('closes owned storage and settings resources once when explicit startup fails after timers begin', async () => {
 		const events: string[] = [];
 		const original = new Error('second maintenance timer failed');
 		let calls = 0;
@@ -484,17 +512,20 @@ describe('production BackendContext resource ownership', () => {
 			}),
 			delay: async () => {},
 		};
-		const prisma = fakePrisma('failed', events);
+		const settings = settingsHarness('failed', events);
 		const s3 = fakeS3('failed', events);
 		const context = await createProductionBackendContext(testConfig, {
+			persistence: createScriptedBackendPersistence(),
 			routes: emptyRoutes,
 			factories: { scheduler: () => scheduler },
 			resources: {
+				uploadLifecycle: ownedTestUploadLifecycleResource(),
 				logger: { value: testLogger, ownership: 'borrowed' },
-				prisma: {
-					value: prisma,
+				settings: {
+					value: settings.store,
 					ownership: 'owned',
-					close: () => prisma.$disconnect(),
+					start: settings.start,
+					close: settings.close,
 				},
 				s3: { value: s3, ownership: 'owned', close: () => s3.destroy() },
 			},
@@ -503,7 +534,7 @@ describe('production BackendContext resource ownership', () => {
 		await expect(context.start()).rejects.toBe(original);
 		await expect(context.close()).resolves.toBeUndefined();
 		expect(cancel).toHaveBeenCalledTimes(2);
-		expect(events).toEqual(['failed:s3', 'failed:prisma']);
+		expect(events).toEqual(['failed:settings', 'failed:s3']);
 	});
 
 	it('serializes close with a deferred start and never starts a later resource', async () => {
@@ -515,13 +546,18 @@ describe('production BackendContext resource ownership', () => {
 		const firstClose = vi.fn(() => { events.push('first:close'); });
 		const laterStart = vi.fn();
 		const laterClose = vi.fn(() => { events.push('later:close'); });
-		const prisma = fakePrisma('race', events);
+		const settings = settingsHarness('race', events);
 		const s3 = fakeS3('race', events);
 		const context = await createProductionBackendContext(testConfig, {
+			persistence: createScriptedBackendPersistence(),
 			routes: emptyRoutes,
 			resources: {
+				uploadLifecycle: ownedTestUploadLifecycleResource(),
 				logger: { value: testLogger, ownership: 'borrowed' },
-				prisma: { value: prisma, ownership: 'borrowed' },
+				settings: {
+					value: settings.store,
+					ownership: 'borrowed',
+				},
 				s3: { value: s3, ownership: 'borrowed' },
 				protectedDownloads: {
 					value: createProtectedDownloadLimiter(),

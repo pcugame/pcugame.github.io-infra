@@ -2,14 +2,22 @@ import { readFile } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PrismaClient } from '../generated/prisma/client.js';
 import type { AppLogger, ObjectStorage, Scheduler } from '../application/ports.js';
 import type { Env } from '../config/env.js';
 import { createProductionBackendContext } from '../backend-context.js';
 import { createCachedSettingsStore } from '../shared/site-settings.js';
 import { createAdminRoutes } from '../modules/admin/admin.routes.js';
 import { createProjectMemberSettingsProductionGraph } from '../modules/admin/project-member-settings.composition.js';
+import { createProjectAccessService } from '../modules/admin/project-access.service.js';
+import type { ProjectApplicationRepository } from '../modules/admin/project/ports.js';
+import type { MemberServiceDependencies } from '../modules/admin/member/service.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import {
+	createTestUploadLifecycleRuntime,
+	ownedTestUploadLifecycleResource,
+} from './helpers/upload-lifecycle.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
+import { notFound } from '../shared/errors.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const deployment = '123e4567-e89b-42d3-a456-426614174000';
@@ -37,7 +45,7 @@ function projectRecord() {
 		githubUrl: '',
 		platforms: [],
 		isIncomplete: false,
-		status: 'PUBLISHED',
+		status: 'PUBLISHED' as const,
 		sortOrder: 0,
 		posterAssetId: null as number | null,
 		webglEntryKey: `webgl/7/${deployment}/site/index.html`,
@@ -87,23 +95,28 @@ function storageHarness() {
 		uploadPart: vi.fn(async () => 'etag'),
 		completeMultipart: vi.fn(),
 		abortMultipart: calls.abortMultipart,
+		listParts: vi.fn(async () => []),
+		listMultipartUploads: vi.fn(async () => []),
 	};
 	return { storage, calls };
 }
 
-function prismaHarness() {
+function portHarness() {
 	let project = projectRecord();
 	let exists = true;
 	let nextMemberId = 30;
 	const calls = {
-		projectCount: vi.fn(() => Promise.resolve(exists ? 1 : 0)),
 		projectFindMany: vi.fn(() => Promise.resolve(exists ? [project] : [])),
-		projectFindUnique: vi.fn(() => Promise.resolve(exists ? project : null)),
-		projectUpdate: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+		projectFindUnique: vi.fn((_id?: number) => Promise.resolve(exists ? project : null)),
+		projectList: vi.fn(async () => ({
+			items: exists ? [project] : [],
+			totalItems: exists ? 1 : 0,
+		})),
+		projectUpdate: vi.fn(async (data: Record<string, unknown>) => {
 			Object.assign(project, data);
 			return project;
 		}),
-		projectUpdateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+		projectUpdateMany: vi.fn(async (data: Record<string, unknown>) => {
 			Object.assign(project, data);
 			return { count: exists ? 1 : 0 };
 		}),
@@ -116,102 +129,124 @@ function prismaHarness() {
 			exists = false;
 			return { count };
 		}),
-		projectMemberFindFirst: vi.fn(async ({ where }: {
-			where: { id?: number; projectId?: number; userId?: number };
+		projectMemberFindFirst: vi.fn(async (where: {
+			id?: number;
+			projectId?: number;
+			userId?: number;
 		}) => project.members.find((member) => (
 			(where.id === undefined || member.id === where.id)
 				&& (where.projectId === undefined || member.projectId === where.projectId)
 				&& (where.userId === undefined || member.userId === where.userId)
 		)) ?? null),
-		memberCreate: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+		memberCreate: vi.fn(async (data: {
+			projectId: number;
+			name: string;
+			studentId: string;
+			sortOrder?: number;
+		}) => {
 			const member = { id: nextMemberId++, userId: null, ...data };
 			project.members.push(member as typeof project.members[number]);
 			return member;
 		}),
-		memberUpdate: vi.fn(async ({ where, data }: {
-			where: { id: number };
-			data: Record<string, unknown>;
-		}) => {
-			const member = project.members.find((value) => value.id === where.id)!;
+		memberUpdate: vi.fn(async (id: number, data: Record<string, unknown>) => {
+			const member = project.members.find((value) => value.id === id)!;
 			Object.assign(member, data);
 			return member;
 		}),
-		memberDelete: vi.fn(async ({ where }: { where: { id: number } }) => {
-			const member = project.members.find((value) => value.id === where.id)!;
-			project.members = project.members.filter((value) => value.id !== where.id);
+		memberDelete: vi.fn(async (id: number) => {
+			const member = project.members.find((value) => value.id === id)!;
+			project.members = project.members.filter((value) => value.id !== id);
 			return member;
 		}),
-		orphanUpsert: vi.fn(async () => ({})),
+		memberSwap: vi.fn(async (
+			memberIdA: number,
+			memberIdB: number,
+			_projectId?: number,
+		) => {
+			const a = project.members.find((member) => member.id === memberIdA);
+			const b = project.members.find((member) => member.id === memberIdB);
+			if (!a || !b) return null;
+			[a.sortOrder, b.sortOrder] = [b.sortOrder, a.sortOrder];
+			return { a: memberIdA, b: memberIdB };
+		}),
+		orphanUpsert: vi.fn(async (_outbox?: unknown) => ({})),
+		findAssetById: vi.fn(async (id: number) => (
+			project.assets.find((asset) => asset.id === id) ?? null
+		)),
+		setProjectPoster: vi.fn(async (projectId: number, assetId: number) => {
+			const asset = await calls.findAssetById(assetId);
+			if (!asset) throw notFound('Asset not found');
+			project.posterAssetId = assetId;
+			return { projectId, assetId };
+		}),
 		assetDeleteMany: vi.fn(async () => {
 			const count = project.assets.length;
 			project.assets = [];
 			return { count };
 		}),
-		queryRaw: vi.fn(async (query: unknown) => {
-			if (Array.isArray(query)) {
-				return project.members.slice(0, 2).map((member) => ({
-					id: member.id,
-					sort_order: member.sortOrder,
-				}));
-			}
-			const sql = (query as { sql?: string }).sql ?? '';
-			if (sql.includes('FROM "projects"')) return exists ? [{ id: project.id }] : [];
-			return [{
-				id: project.assets[0]!.id,
-				projectId: project.id,
-				kind: project.assets[0]!.kind,
-				status: project.assets[0]!.status,
-			}];
-		}),
-		transaction: vi.fn(),
 	};
-	const client = {
-		project: {
-			count: calls.projectCount,
-			findMany: calls.projectFindMany,
-			findUnique: calls.projectFindUnique,
-			findUniqueOrThrow: vi.fn(async () => {
-				if (!exists) throw new Error('missing project');
-				return { ...project };
-			}),
-			update: calls.projectUpdate,
-			updateMany: calls.projectUpdateMany,
-			delete: calls.projectDelete,
-			deleteMany: calls.projectDeleteMany,
+	const repository: ProjectApplicationRepository = {
+		findProjectsForUser: calls.projectList,
+		findProjectById: calls.projectFindUnique,
+		isMemberOfProject: async (projectId, userId) => calls.projectMemberFindFirst({ projectId, userId }),
+		updateProject: async (_id, data) => calls.projectUpdate(data),
+		async deleteProjectReturningAssets(_id, outbox) {
+			await calls.orphanUpsert(outbox);
+			const assets = [...project.assets];
+			await calls.assetDeleteMany();
+			await calls.projectDelete();
+			return { assets, webglEntryKey: project.webglEntryKey, activeUploads: [] };
 		},
-		projectMember: {
-			findFirst: calls.projectMemberFindFirst,
-			create: calls.memberCreate,
-			update: calls.memberUpdate,
-			delete: calls.memberDelete,
+		async clearWebglDeployment(_id, outbox) {
+			await calls.orphanUpsert(outbox);
+			const oldEntryKey = project.webglEntryKey;
+			project.webglEntryKey = '';
+			return { oldEntryKey, cancelledSession: null };
 		},
-		asset: {
-			findUnique: vi.fn(async ({ where }: { where: { id: number } }) => (
-				project.assets.find((asset) => asset.id === where.id) ?? null
-			)),
-			findMany: vi.fn(async () => [...project.assets]),
-			deleteMany: calls.assetDeleteMany,
+		findAssetById: calls.findAssetById,
+		setProjectPoster: calls.setProjectPoster,
+		async bulkDeleteProjectsReturningAssets(_ids, outbox) {
+			await calls.orphanUpsert(outbox);
+			const assets = [...project.assets];
+			await calls.assetDeleteMany();
+			const result = await calls.projectDeleteMany();
+			return {
+				result,
+				assets,
+				projects: [{ id: project.id, webglEntryKey: project.webglEntryKey }],
+				activeUploads: [],
+			};
 		},
-		gameUploadSession: {
-			findMany: vi.fn(async () => []),
-			updateMany: vi.fn(async () => ({ count: 0 })),
-		},
-		gameUploadActiveSession: {
-			findUnique: vi.fn(async () => null),
-			deleteMany: vi.fn(async () => ({ count: 0 })),
-		},
-		orphanObject: {
-			upsert: calls.orphanUpsert,
-			findMany: vi.fn(async () => []),
-			update: vi.fn(async () => ({})),
-		},
-		$queryRaw: calls.queryRaw,
-		$transaction: calls.transaction.mockImplementation(async (work: unknown) => {
-			if (Array.isArray(work)) return Promise.all(work);
-			return (work as (tx: unknown) => Promise<unknown>)(client);
-		}),
-	} as unknown as PrismaClient;
-	return { client, calls, getProject: () => project };
+		bulkUpdateStatus: async (_ids, status) => calls.projectUpdateMany({ status }),
+		findExhibitionById: vi.fn(async () => null),
+		findProjectByExhibitionAndSlug: vi.fn(async () => null),
+		createProjectWithAssets: vi.fn(async () => { throw new Error('not scripted'); }),
+		createAsset: vi.fn(async () => { throw new Error('not scripted'); }),
+		replaceOrCreateReplaceableAsset: vi.fn(async () => { throw new Error('not scripted'); }),
+	};
+	const accessRepository = {
+		findProject: calls.projectFindUnique,
+		isLinkedMember: async (projectId: number, userId: number) => (
+			await calls.projectMemberFindFirst({ projectId, userId }) !== null
+		),
+	};
+	const memberRepository: MemberServiceDependencies['repository'] = {
+		createMember: calls.memberCreate,
+		findMemberInProject: async (memberId, projectId) => (
+			calls.projectMemberFindFirst({ id: memberId, projectId })
+		),
+		updateMember: calls.memberUpdate,
+		deleteMember: calls.memberDelete,
+		swapMemberOrder: (a, b, projectId) => calls.memberSwap(a, b, projectId),
+	};
+	return {
+		calls,
+		repository,
+		projectAccess: createProjectAccessService(accessRepository),
+		projectExists: async (projectId: number) => await calls.projectFindUnique(projectId) !== null,
+		memberRepository,
+		getProject: () => project,
+	};
 }
 
 function settingsHarness(
@@ -247,11 +282,12 @@ function graphHarness(
 	label = 'a',
 	settingsOptions: Parameters<typeof settingsHarness>[1] = {},
 ) {
-	const prisma = prismaHarness();
+	const ports = portHarness();
 	const storage = storageHarness();
 	const settings = settingsHarness(label === 'a'
 		? { maxGameFileMb: 64, maxChunkSizeMb: 6 }
 		: { maxGameFileMb: 32, maxChunkSizeMb: 5 }, settingsOptions);
+	const uploadLifecycle = createTestUploadLifecycleRuntime();
 	const graph = createProjectMemberSettingsProductionGraph({
 		config: {
 			API_PUBLIC_URL: `https://api-${label}.test`,
@@ -259,13 +295,17 @@ function graphHarness(
 			S3_BUCKET_PROTECTED: `${label}-protected`,
 			UPLOAD_CHUNK_SIZE_MB: 10,
 		},
-		prisma: prisma.client,
+		projectAccess: ports.projectAccess,
+		projectExists: ports.projectExists,
+		projectRepository: ports.repository,
+		memberRepository: ports.memberRepository,
 		storage: storage.storage,
 		settings: settings.store,
 		logger,
 		clock: { now: () => new Date('2026-07-24T00:00:00.000Z') },
+		uploadLifecycle,
 	});
-	return { graph, prisma, storage, settings };
+	return { graph, ports, storage, settings, uploadLifecycle };
 }
 
 async function routeApp(
@@ -327,8 +367,8 @@ describe('project/member/settings production wiring', () => {
 			const harness = graphHarness();
 			const app = await routeApp(harness);
 			apps.push(app);
-			expect(harness.prisma.calls.projectFindUnique).not.toHaveBeenCalled();
-			expect(harness.prisma.calls.projectFindMany).not.toHaveBeenCalled();
+			expect(harness.ports.calls.projectFindUnique).not.toHaveBeenCalled();
+			expect(harness.ports.calls.projectFindMany).not.toHaveBeenCalled();
 			expect(harness.settings.repository.loadOrCreate).not.toHaveBeenCalled();
 			expect(harness.storage.calls.delete).not.toHaveBeenCalled();
 			expect(setIntervalSpy).not.toHaveBeenCalled();
@@ -367,8 +407,10 @@ describe('project/member/settings production wiring', () => {
 			method: 'DELETE',
 			url: '/api/admin/projects/7',
 		})).statusCode).toBe(204);
-		expect(harness.prisma.calls.projectDelete).toHaveBeenCalledOnce();
-		expect(harness.storage.calls.delete).toHaveBeenCalled();
+		expect(harness.ports.calls.projectDelete).toHaveBeenCalledOnce();
+		expect(harness.storage.calls.delete).not.toHaveBeenCalled();
+		expect(harness.ports.calls.orphanUpsert).toHaveBeenCalled();
+		expect(harness.uploadLifecycle.wakeDeletionWorker).toHaveBeenCalledTimes(2);
 
 		const deniedHarness = graphHarness();
 		const deniedApp = await routeApp(deniedHarness, { id: 99, role: 'USER' });
@@ -379,22 +421,22 @@ describe('project/member/settings production wiring', () => {
 			payload: { title: 'Intrusion' },
 		});
 		expect(denied.statusCode).toBe(403);
-		expect(deniedHarness.prisma.calls.projectUpdate).not.toHaveBeenCalled();
+		expect(deniedHarness.ports.calls.projectUpdate).not.toHaveBeenCalled();
 	});
 
 	it('preserves project list/detail/update/poster failures without forbidden mutations', async () => {
 		const listHarness = graphHarness();
-		listHarness.prisma.calls.transaction.mockRejectedValueOnce(new Error('list database failure'));
+		listHarness.ports.calls.projectList.mockRejectedValueOnce(new Error('list repository failure'));
 		const listApp = await routeApp(listHarness);
 		apps.push(listApp);
 		const listFailure = await listApp.inject({ method: 'GET', url: '/api/admin/projects' });
 		expect(listFailure.statusCode).toBe(500);
-		expect(listHarness.prisma.calls.projectUpdate).not.toHaveBeenCalled();
-		expect(listHarness.prisma.calls.projectDelete).not.toHaveBeenCalled();
+		expect(listHarness.ports.calls.projectUpdate).not.toHaveBeenCalled();
+		expect(listHarness.ports.calls.projectDelete).not.toHaveBeenCalled();
 		expect(listHarness.storage.calls.delete).not.toHaveBeenCalled();
 
 		const detailHarness = graphHarness();
-		detailHarness.prisma.calls.projectFindUnique.mockResolvedValueOnce(null);
+		detailHarness.ports.calls.projectFindUnique.mockResolvedValueOnce(null);
 		const detailApp = await routeApp(detailHarness);
 		apps.push(detailApp);
 		const missingDetail = await detailApp.inject({
@@ -403,7 +445,7 @@ describe('project/member/settings production wiring', () => {
 		});
 		expect(missingDetail.statusCode).toBe(404);
 		expect(missingDetail.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
-		expect(detailHarness.prisma.calls.projectUpdate).not.toHaveBeenCalled();
+		expect(detailHarness.ports.calls.projectUpdate).not.toHaveBeenCalled();
 
 		const updateHarness = graphHarness();
 		const updateApp = await routeApp(updateHarness, { id: 1, role: 'USER' });
@@ -415,12 +457,10 @@ describe('project/member/settings production wiring', () => {
 		});
 		expect(forbiddenStatus.statusCode).toBe(403);
 		expect(forbiddenStatus.json()).toMatchObject({ error: { code: 'FORBIDDEN' } });
-		expect(updateHarness.prisma.calls.projectUpdate).not.toHaveBeenCalled();
+		expect(updateHarness.ports.calls.projectUpdate).not.toHaveBeenCalled();
 
 		const posterHarness = graphHarness();
-		posterHarness.prisma.calls.queryRaw
-			.mockResolvedValueOnce([{ id: 7 }])
-			.mockResolvedValueOnce([]);
+		posterHarness.ports.calls.findAssetById.mockResolvedValueOnce(null);
 		const posterApp = await routeApp(posterHarness);
 		apps.push(posterApp);
 		const missingPoster = await posterApp.inject({
@@ -430,13 +470,13 @@ describe('project/member/settings production wiring', () => {
 		});
 		expect(missingPoster.statusCode).toBe(404);
 		expect(missingPoster.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
-		expect(posterHarness.prisma.calls.projectUpdate).not.toHaveBeenCalled();
+		expect(posterHarness.ports.calls.projectUpdate).not.toHaveBeenCalled();
 		expect(posterHarness.storage.calls.delete).not.toHaveBeenCalled();
 	});
 
 	it('retains outbox/storage guarantees across delete, WebGL and bulk failures', async () => {
 		const deleteHarness = graphHarness();
-		deleteHarness.prisma.calls.orphanUpsert.mockRejectedValueOnce(new Error('outbox unavailable'));
+		deleteHarness.ports.calls.orphanUpsert.mockRejectedValueOnce(new Error('outbox unavailable'));
 		const deleteApp = await routeApp(deleteHarness);
 		apps.push(deleteApp);
 		const failedDelete = await deleteApp.inject({
@@ -444,13 +484,12 @@ describe('project/member/settings production wiring', () => {
 			url: '/api/admin/projects/7',
 		});
 		expect(failedDelete.statusCode).toBe(500);
-		expect(deleteHarness.prisma.calls.projectUpdate).not.toHaveBeenCalled();
-		expect(deleteHarness.prisma.calls.assetDeleteMany).not.toHaveBeenCalled();
-		expect(deleteHarness.prisma.calls.projectDelete).not.toHaveBeenCalled();
+		expect(deleteHarness.ports.calls.projectUpdate).not.toHaveBeenCalled();
+		expect(deleteHarness.ports.calls.assetDeleteMany).not.toHaveBeenCalled();
+		expect(deleteHarness.ports.calls.projectDelete).not.toHaveBeenCalled();
 		expect(deleteHarness.storage.calls.delete).not.toHaveBeenCalled();
 
 		const webglHarness = graphHarness();
-		webglHarness.storage.calls.delete.mockRejectedValueOnce(new Error('object storage unavailable'));
 		const webglApp = await routeApp(webglHarness);
 		apps.push(webglApp);
 		const durableWebglDelete = await webglApp.inject({
@@ -458,12 +497,13 @@ describe('project/member/settings production wiring', () => {
 			url: '/api/admin/projects/7/webgl',
 		});
 		expect(durableWebglDelete.statusCode).toBe(204);
-		expect(webglHarness.prisma.calls.orphanUpsert).toHaveBeenCalled();
-		expect(webglHarness.prisma.getProject().webglEntryKey).toBe('');
-		expect(webglHarness.storage.calls.delete).toHaveBeenCalled();
+		expect(webglHarness.ports.calls.orphanUpsert).toHaveBeenCalled();
+		expect(webglHarness.ports.getProject().webglEntryKey).toBe('');
+		expect(webglHarness.storage.calls.delete).not.toHaveBeenCalled();
+		expect(webglHarness.uploadLifecycle.wakeDeletionWorker).toHaveBeenCalledOnce();
 
 		const bulkHarness = graphHarness();
-		bulkHarness.prisma.calls.orphanUpsert.mockRejectedValueOnce(new Error('bulk outbox unavailable'));
+		bulkHarness.ports.calls.orphanUpsert.mockRejectedValueOnce(new Error('bulk outbox unavailable'));
 		const bulkApp = await routeApp(bulkHarness);
 		apps.push(bulkApp);
 		const failedBulk = await bulkApp.inject({
@@ -472,9 +512,9 @@ describe('project/member/settings production wiring', () => {
 			payload: { ids: [7] },
 		});
 		expect(failedBulk.statusCode).toBe(500);
-		expect(bulkHarness.prisma.calls.projectUpdateMany).not.toHaveBeenCalled();
-		expect(bulkHarness.prisma.calls.assetDeleteMany).not.toHaveBeenCalled();
-		expect(bulkHarness.prisma.calls.projectDeleteMany).not.toHaveBeenCalled();
+		expect(bulkHarness.ports.calls.projectUpdateMany).not.toHaveBeenCalled();
+		expect(bulkHarness.ports.calls.assetDeleteMany).not.toHaveBeenCalled();
+		expect(bulkHarness.ports.calls.projectDeleteMany).not.toHaveBeenCalled();
 		expect(bulkHarness.storage.calls.delete).not.toHaveBeenCalled();
 	});
 
@@ -488,7 +528,9 @@ describe('project/member/settings production wiring', () => {
 			payload: { ids: [7] },
 		});
 		expect(bulk.statusCode).toBe(200);
-		expect(bulkHarness.prisma.calls.projectDeleteMany).toHaveBeenCalledOnce();
+		expect(bulkHarness.ports.calls.projectDeleteMany).toHaveBeenCalledOnce();
+		expect(bulkHarness.storage.calls.delete).not.toHaveBeenCalled();
+		expect(bulkHarness.uploadLifecycle.wakeDeletionWorker).toHaveBeenCalledOnce();
 
 		const memberHarness = graphHarness();
 		const memberApp = await routeApp(memberHarness);
@@ -514,14 +556,14 @@ describe('project/member/settings production wiring', () => {
 			method: 'DELETE',
 			url: `/api/admin/projects/7/members/${addedId}`,
 		})).statusCode).toBe(204);
-		expect(memberHarness.prisma.calls.memberCreate).toHaveBeenCalledOnce();
-		expect(memberHarness.prisma.calls.memberUpdate).toHaveBeenCalled();
-		expect(memberHarness.prisma.calls.memberDelete).toHaveBeenCalledOnce();
+		expect(memberHarness.ports.calls.memberCreate).toHaveBeenCalledOnce();
+		expect(memberHarness.ports.calls.memberUpdate).toHaveBeenCalled();
+		expect(memberHarness.ports.calls.memberDelete).toHaveBeenCalledOnce();
 	});
 
 	it('preserves member project/member/swap/access/validation failures without mutation', async () => {
 		const projectHarness = graphHarness();
-		projectHarness.prisma.calls.projectFindUnique.mockResolvedValueOnce(null);
+		projectHarness.ports.calls.projectFindUnique.mockResolvedValueOnce(null);
 		const projectApp = await routeApp(projectHarness);
 		apps.push(projectApp);
 		const missingProject = await projectApp.inject({
@@ -530,10 +572,10 @@ describe('project/member/settings production wiring', () => {
 			payload: { name: 'Member', studentId: '20260002' },
 		});
 		expect(missingProject.statusCode).toBe(404);
-		expect(projectHarness.prisma.calls.memberCreate).not.toHaveBeenCalled();
+		expect(projectHarness.ports.calls.memberCreate).not.toHaveBeenCalled();
 
 		const memberHarness = graphHarness();
-		memberHarness.prisma.calls.projectMemberFindFirst.mockResolvedValueOnce(null);
+		memberHarness.ports.calls.projectMemberFindFirst.mockResolvedValueOnce(null);
 		const memberApp = await routeApp(memberHarness);
 		apps.push(memberApp);
 		const missingMember = await memberApp.inject({
@@ -542,10 +584,10 @@ describe('project/member/settings production wiring', () => {
 			payload: { name: 'Missing' },
 		});
 		expect(missingMember.statusCode).toBe(404);
-		expect(memberHarness.prisma.calls.memberUpdate).not.toHaveBeenCalled();
+		expect(memberHarness.ports.calls.memberUpdate).not.toHaveBeenCalled();
 
 		const swapHarness = graphHarness();
-		swapHarness.prisma.calls.queryRaw.mockResolvedValueOnce([{ id: 11, sort_order: 0 }]);
+		swapHarness.ports.calls.memberSwap.mockResolvedValueOnce(null);
 		const swapApp = await routeApp(swapHarness);
 		apps.push(swapApp);
 		const missingSwapMember = await swapApp.inject({
@@ -554,7 +596,7 @@ describe('project/member/settings production wiring', () => {
 			payload: { memberIdA: 11, memberIdB: 999 },
 		});
 		expect(missingSwapMember.statusCode).toBe(404);
-		expect(swapHarness.prisma.calls.memberUpdate).not.toHaveBeenCalled();
+		expect(swapHarness.ports.calls.memberUpdate).not.toHaveBeenCalled();
 
 		const deniedHarness = graphHarness();
 		const deniedApp = await routeApp(deniedHarness, { id: 99, role: 'USER' });
@@ -564,7 +606,7 @@ describe('project/member/settings production wiring', () => {
 			url: '/api/admin/projects/7/members/11',
 		});
 		expect(denied.statusCode).toBe(403);
-		expect(deniedHarness.prisma.calls.memberDelete).not.toHaveBeenCalled();
+		expect(deniedHarness.ports.calls.memberDelete).not.toHaveBeenCalled();
 
 		const invalidHarness = graphHarness();
 		const invalidApp = await routeApp(invalidHarness);
@@ -575,7 +617,7 @@ describe('project/member/settings production wiring', () => {
 			payload: { name: '', studentId: '' },
 		});
 		expect(invalid.statusCode).toBe(400);
-		expect(invalidHarness.prisma.calls.memberCreate).not.toHaveBeenCalled();
+		expect(invalidHarness.ports.calls.memberCreate).not.toHaveBeenCalled();
 	});
 
 	it('keeps settings get/update/cache/invalidation independent across A/B graphs', async () => {
@@ -700,7 +742,6 @@ describe('project/member/settings production wiring', () => {
 			warmupRetryDelayMs: 1,
 		});
 		const closeSpy = vi.spyOn(store, 'close');
-		const prisma = prismaHarness();
 		const storage = storageHarness();
 		const scheduler: Scheduler = {
 			every: vi.fn(() => ({ cancel: vi.fn() })),
@@ -713,6 +754,7 @@ describe('project/member/settings production wiring', () => {
 			CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS],
 		};
 		const context = await createProductionBackendContext(config, {
+			persistence: createScriptedBackendPersistence(),
 			routes: {
 				auth: emptyRoute,
 				devAuth: emptyRoute,
@@ -721,10 +763,15 @@ describe('project/member/settings production wiring', () => {
 				me: emptyRoute,
 				assets: emptyRoute,
 			},
-			factories: { settings: () => store },
 			resources: {
+				uploadLifecycle: ownedTestUploadLifecycleResource(),
 				logger: { value: logger, ownership: 'borrowed' },
-				prisma: { value: prisma.client, ownership: 'borrowed' },
+				settings: {
+					value: store,
+					ownership: 'owned',
+					start: async () => { await store.warmup(); },
+					close: () => store.close(),
+				},
 				s3: {
 					value: { destroy: vi.fn() } as unknown as S3Client,
 					ownership: 'borrowed',

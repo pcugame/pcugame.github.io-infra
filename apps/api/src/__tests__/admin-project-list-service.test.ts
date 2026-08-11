@@ -19,11 +19,9 @@ const projectService = createProjectService({
 		bulkDeleteProjectsReturningAssets: vi.fn(),
 	},
 	serializeProjectDetail: vi.fn(),
-	deleteAssetObjects: vi.fn(),
 	abortMultipart: vi.fn(),
-	deleteWebglDeploymentByEntry: vi.fn(),
-	deleteWebglDeployment: vi.fn(),
-	deleteQueuedProtectedObject: vi.fn(),
+	wakeDeletionWorker: vi.fn(),
+	wakeMaintenance: vi.fn(),
 	logger: { error: vi.fn() },
 });
 

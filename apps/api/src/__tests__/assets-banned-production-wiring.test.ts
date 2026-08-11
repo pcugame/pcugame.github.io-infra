@@ -1,14 +1,19 @@
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PrismaClient } from '../generated/prisma/client.js';
 import type { AppLogger, ObjectStorage, Scheduler, SettingsStore } from '../application/ports.js';
 import type { BackendRoutes } from '../backend-context.js';
 import type { Env } from '../config/env.js';
 import { createProductionBackendContext } from '../backend-context.js';
 import { createAssetsBannedProductionGraph } from '../modules/assets/composition.js';
+import { createProjectAccessService } from '../modules/admin/project-access.service.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import {
+	createTestUploadLifecycleRuntime,
+	ownedTestUploadLifecycleResource,
+} from './helpers/upload-lifecycle.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const testConfig: Env = {
@@ -63,11 +68,13 @@ function storageHarness() {
 		uploadPart: vi.fn(async () => 'etag'),
 		completeMultipart: vi.fn(),
 		abortMultipart: vi.fn(),
+		listParts: vi.fn(async () => []),
+		listMultipartUploads: vi.fn(async () => []),
 	};
 	return { storage, calls };
 }
 
-function prismaHarness(initialBans: string[] = []) {
+function portHarness(initialBans: string[] = []) {
 	let bans = initialBans.map((ip, index) => ({
 		id: index + 1,
 		ip,
@@ -76,51 +83,55 @@ function prismaHarness(initialBans: string[] = []) {
 	}));
 	const calls = {
 		assetFindFirst: vi.fn(),
-		bannedFindMany: vi.fn(async (args?: { select?: { ip?: boolean } }) => (
-			args?.select ? bans.map(({ ip }) => ({ ip })) : [...bans]
-		)),
-		bannedFindUnique: vi.fn(async ({ where }: { where: { id: number } }) => (
-			bans.find(({ id }) => id === where.id) ?? null
-		)),
-		bannedDelete: vi.fn(async ({ where }: { where: { id: number } }) => {
-			const record = bans.find(({ id }) => id === where.id);
-			bans = bans.filter(({ id }) => id !== where.id);
+		bannedFindMany: vi.fn(async () => bans.map(({ ip }) => ({ ip }))),
+		bannedList: vi.fn(async () => [...bans]),
+		bannedFindById: vi.fn(async (id: number) => bans.find((row) => row.id === id) ?? null),
+		bannedDelete: vi.fn(async (id: number) => {
+			const record = bans.find((row) => row.id === id);
+			bans = bans.filter((row) => row.id !== id);
 			return record;
 		}),
-		bannedUpsert: vi.fn(async ({ where, create }: { where: { ip: string }; create: { ip: string; reason: string } }) => {
-			const existing = bans.find(({ ip }) => ip === where.ip);
+		bannedUpsert: vi.fn(async (ip: string, reason: string) => {
+			const existing = bans.find((row) => row.ip === ip);
 			if (existing) return existing;
 			const record = {
 				id: bans.length + 1,
-				ip: create.ip,
-				reason: create.reason,
+				ip,
+				reason,
 				createdAt: new Date('2026-07-22T00:00:00.000Z'),
 			};
 			bans.push(record);
 			return record;
 		}),
 	};
-	const prisma = {
-		asset: {
-			findFirst: calls.assetFindFirst,
-			findUnique: vi.fn(),
-			update: vi.fn(),
+	const projectAccessRepository = {
+		findProject: vi.fn(async () => ({
+			id: 7,
+			exhibitionId: 1,
+			creatorId: 1,
+			status: 'PUBLISHED',
+		})),
+		isLinkedMember: vi.fn(async () => false),
+	};
+	return {
+		calls,
+		assetsRepository: {
+			findPublicAsset: calls.assetFindFirst,
+			findAssetByStorageKey: calls.assetFindFirst,
+			upsertBannedIp: calls.bannedUpsert,
+			findAssetByIdWithProject: vi.fn(async () => null),
+			claimAssetForDeletion: vi.fn(async () => null),
+			completeAssetDeletion: vi.fn(async () => undefined),
+			findAllBannedIps: calls.bannedFindMany,
 		},
-		project: { findUnique: vi.fn(), updateMany: vi.fn() },
-		projectMember: { findFirst: vi.fn() },
-		bannedIp: {
-			findMany: calls.bannedFindMany,
-			findUnique: calls.bannedFindUnique,
-			delete: calls.bannedDelete,
-			upsert: calls.bannedUpsert,
+		bannedIpRepository: {
+			findAllBannedIps: calls.bannedList,
+			findBannedIpById: calls.bannedFindById,
+			deleteBannedIp: calls.bannedDelete,
 		},
-		gameUploadSession: { findMany: vi.fn(async () => []) },
-		orphanObject: { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn() },
-		$queryRaw: vi.fn(),
-		authSession: { findUnique: vi.fn(), update: vi.fn(), deleteMany: vi.fn(async () => ({ count: 0 })) },
-		$disconnect: vi.fn(),
-	} as unknown as PrismaClient;
-	return { prisma, calls };
+		projectAccessRepository,
+		projectAccess: createProjectAccessService(projectAccessRepository),
+	};
 }
 
 function protectedAsset() {
@@ -158,7 +169,7 @@ async function routeApp(plugin: FastifyPluginAsync, prefix: string, asAdmin = fa
 }
 
 function graphHarness(initialBans: string[] = [], maxHits = 30) {
-	const prisma = prismaHarness(initialBans);
+	const ports = portHarness(initialBans);
 	const storage = storageHarness();
 	const scheduler = schedulerHarness();
 	const limiter = createProtectedDownloadLimiter({
@@ -166,21 +177,25 @@ function graphHarness(initialBans: string[] = [], maxHits = 30) {
 		clock: { now: () => new Date('2026-07-22T00:00:00.000Z') },
 		scheduler: scheduler.scheduler,
 	});
+	const uploadLifecycle = createTestUploadLifecycleRuntime();
 	const graph = createAssetsBannedProductionGraph({
 		config: testConfig,
-		prisma: prisma.prisma,
+		assetsRepository: ports.assetsRepository,
+		bannedIpRepository: ports.bannedIpRepository,
+		projectAccess: ports.projectAccess,
 		storage: storage.storage,
 		downloadLimiter: limiter,
 		logger: testLogger,
 		clock: { now: () => new Date('2026-07-22T00:00:00.000Z') },
+		uploadLifecycle,
 	});
 	return {
-		prisma: prisma.prisma,
 		storage: storage.storage,
-		calls: { ...prisma.calls, ...storage.calls },
+		calls: { ...ports.calls, ...storage.calls },
 		scheduler,
 		limiter,
 		graph,
+		uploadLifecycle,
 	};
 }
 
@@ -272,19 +287,24 @@ describe('assets/banned-IP production vertical slice', () => {
 			remoteAddress: '203.0.113.20',
 		});
 		expect(exceeded.statusCode).toBe(403);
-		expect(recovered.calls.bannedUpsert).toHaveBeenCalledWith(expect.objectContaining({
-			where: { ip: '203.0.113.20' },
-			create: expect.objectContaining({ ip: '203.0.113.20' }),
-		}));
+		expect(recovered.calls.bannedUpsert).toHaveBeenCalledWith(
+			'203.0.113.20',
+			expect.any(String),
+		);
 	});
 
 	it('keeps context A/B cache and buckets independent, scopes admin mutation, and closes only A', async () => {
 		async function createContext(label: string) {
-			const prisma = prismaHarness(['203.0.113.30']);
+			const ports = portHarness(['203.0.113.30']);
 			const storage = storageHarness();
 			const scheduler = schedulerHarness();
 			const s3 = { destroy: vi.fn(), send: vi.fn() } as unknown as S3Client;
 			const context = await createProductionBackendContext(testConfig, {
+				persistence: createScriptedBackendPersistence({
+					assetsRepository: ports.assetsRepository,
+					bannedIpRepository: ports.bannedIpRepository,
+					projectAccessRepository: ports.projectAccessRepository,
+				}),
 				factories: {
 					scheduler: () => scheduler.scheduler,
 					routes: (_config, graph): BackendRoutes => ({
@@ -297,14 +317,14 @@ describe('assets/banned-IP production vertical slice', () => {
 					}),
 				},
 				resources: {
+					uploadLifecycle: ownedTestUploadLifecycleResource(),
 					logger: { value: testLogger, ownership: 'borrowed' },
-					prisma: { value: prisma.prisma, ownership: 'borrowed' },
 					s3: { value: s3, ownership: 'borrowed' },
 					storage: { value: storage.storage, ownership: 'borrowed' },
 					settings: { value: settings, ownership: 'borrowed' },
 				},
 			});
-			return { label, context, prisma, scheduler };
+			return { label, context, ports, scheduler };
 		}
 
 		const a = await createContext('a');
@@ -321,8 +341,8 @@ describe('assets/banned-IP production vertical slice', () => {
 		apps.push(adminA);
 		const unban = await adminA.inject({ method: 'DELETE', url: '/api/admin/banned-ips/1' });
 		expect(unban.statusCode).toBe(204);
-		expect(a.prisma.calls.bannedDelete).toHaveBeenCalledOnce();
-		expect(b.prisma.calls.bannedDelete).not.toHaveBeenCalled();
+		expect(a.ports.calls.bannedDelete).toHaveBeenCalledOnce();
+		expect(b.ports.calls.bannedDelete).not.toHaveBeenCalled();
 		expect(a.context.protectedDownloads.isBanned('203.0.113.30')).toBe(false);
 		expect(b.context.protectedDownloads.isBanned('203.0.113.30')).toBe(true);
 
@@ -334,9 +354,14 @@ describe('assets/banned-IP production vertical slice', () => {
 	});
 
 	it('aborts context startup on warmup failure and accepts recovered bans only in a fresh context', async () => {
-		async function createWith(prisma: ReturnType<typeof prismaHarness>, scheduler: ReturnType<typeof schedulerHarness>) {
+		async function createWith(ports: ReturnType<typeof portHarness>, scheduler: ReturnType<typeof schedulerHarness>) {
 			const storage = storageHarness();
 			return createProductionBackendContext(testConfig, {
+				persistence: createScriptedBackendPersistence({
+					assetsRepository: ports.assetsRepository,
+					bannedIpRepository: ports.bannedIpRepository,
+					projectAccessRepository: ports.projectAccessRepository,
+				}),
 				factories: {
 					scheduler: () => scheduler.scheduler,
 					routes: (_config, graph): BackendRoutes => ({
@@ -349,8 +374,8 @@ describe('assets/banned-IP production vertical slice', () => {
 					}),
 				},
 				resources: {
+					uploadLifecycle: ownedTestUploadLifecycleResource(),
 					logger: { value: testLogger, ownership: 'borrowed' },
-					prisma: { value: prisma.prisma, ownership: 'borrowed' },
 					s3: {
 						value: { destroy: vi.fn(), send: vi.fn() } as unknown as S3Client,
 						ownership: 'borrowed',
@@ -361,19 +386,19 @@ describe('assets/banned-IP production vertical slice', () => {
 			});
 		}
 
-		const failedPrisma = prismaHarness();
+		const failedPorts = portHarness();
 		const failure = new Error('banned IP query failed');
-		failedPrisma.calls.bannedFindMany.mockRejectedValue(failure);
+		failedPorts.calls.bannedFindMany.mockRejectedValue(failure);
 		const failedScheduler = schedulerHarness();
-		const failed = await createWith(failedPrisma, failedScheduler);
+		const failed = await createWith(failedPorts, failedScheduler);
 		await expect(failed.start()).rejects.toBe(failure);
 		await expect(failed.start()).rejects.toThrow('BackendContext is closed');
-		expect(failedPrisma.calls.bannedFindMany).toHaveBeenCalledOnce();
+		expect(failedPorts.calls.bannedFindMany).toHaveBeenCalledOnce();
 		expect(failedScheduler.tasks).toHaveLength(1);
 		expect(failedScheduler.tasks[0]!.cancel).toHaveBeenCalledOnce();
 
-		const recoveredPrisma = prismaHarness(['203.0.113.60']);
-		const recovered = await createWith(recoveredPrisma, schedulerHarness());
+		const recoveredPorts = portHarness(['203.0.113.60']);
+		const recovered = await createWith(recoveredPorts, schedulerHarness());
 		await recovered.start();
 		expect(recovered.protectedDownloads.isBanned('203.0.113.60')).toBe(true);
 		await recovered.close();

@@ -60,7 +60,10 @@ describe('assets repository', () => {
 				}]),
 			asset: { updateMany },
 			gameUploadSession: { updateMany: sessionUpdateMany },
-			orphanObject: { upsert: orphanUpsert },
+			orphanObject: {
+				upsert: orphanUpsert,
+				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+			},
 		};
 		const repository = createAssetsRepository({
 			$transaction: vi.fn(async (operation) => operation(tx)),

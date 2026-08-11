@@ -16,8 +16,6 @@ function harness() {
 	const deletion = {
 		deleteOrQueue: vi.fn().mockResolvedValue(undefined),
 		deletePrefixOrQueue: vi.fn().mockResolvedValue(0),
-		deleteDurablyQueued: vi.fn().mockResolvedValue(undefined),
-		deleteDurablyQueuedPrefix: vi.fn().mockResolvedValue(0),
 	};
 	const logError = vi.fn();
 	const adapter = createWebglDeployment({

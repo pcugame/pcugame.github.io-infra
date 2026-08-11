@@ -209,7 +209,10 @@ describe.runIf(runStorageIntegration)(
 				roleGameMaxBytes: () => 20 * MIB,
 				storageKey: () => key(`game-${randomUUID()}.zip`),
 				deleteOrQueue: async () => {},
-				logger: { error: vi.fn(), warn: vi.fn() },
+				wakeDeletionWorker: vi.fn(),
+				wakeMaintenance: vi.fn(),
+				recordUntrackedMultipartCleanupFailure: vi.fn(),
+				logger: { error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 			});
 		}
 
@@ -248,7 +251,6 @@ describe.runIf(runStorageIntegration)(
 			projectId = project.id;
 			gameRepository = createGameUploadRepository(prisma, {
 				abortBucket: protectedBucket,
-				durabilityEnabled: true,
 			});
 			const projectDeployment = createWebglDeploymentKeys(projectId, deployment.deploymentId);
 			await prisma.project.update({
@@ -423,11 +425,15 @@ describe.runIf(runStorageIntegration)(
 			})).resolves.toBe(1);
 
 			const logger = { info: vi.fn(), error: vi.fn() };
-			const intentWorker = createUploadIntentService({
+			const references = createObjectReferenceResolver(
 				prisma,
+				{ publicBucket, protectedBucket },
+				logger,
+			);
+			const intentWorker = createUploadIntentService({
 				repository: createUploadIntentRepository(prisma),
+				references,
 				storage,
-				buckets: { publicBucket, protectedBucket },
 				clock: { now: () => new Date(Date.now() + 1_000) },
 				ids: { next: () => randomUUID() },
 				logger,
@@ -443,11 +449,7 @@ describe.runIf(runStorageIntegration)(
 				clock: { now: () => new Date(Date.now() + 2_000) },
 				storage,
 				repository: createOrphanRepository(prisma),
-				references: createObjectReferenceResolver(
-					prisma,
-					{ publicBucket, protectedBucket },
-					logger,
-				),
+				references,
 				ids: { next: () => randomUUID() },
 				logger,
 			});

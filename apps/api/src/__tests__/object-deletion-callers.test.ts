@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createObjectDeletionCoordinator } from '../application/object-deletion.js';
 import { deleteAsset } from '../modules/assets/service.js';
 
 function assetDeletionHarness() {
@@ -24,13 +23,13 @@ function assetDeletionHarness() {
 		}),
 		completeAssetDeletion: vi.fn().mockResolvedValue(undefined),
 	};
-	const deleteOrQueue = vi.fn().mockResolvedValue(undefined);
+	const wakeDeletionWorker = vi.fn();
 	const deps = {
 		publicBucket: 'public',
 		protectedBucket: 'protected',
 		presign: vi.fn(),
 		bucketForKind: () => 'protected',
-		deleteOrQueue,
+		wakeDeletionWorker,
 		loadProjectWithAccess: vi.fn().mockResolvedValue(undefined),
 		downloadLimiter: {
 			loadBannedIps: vi.fn(),
@@ -39,80 +38,60 @@ function assetDeletionHarness() {
 		logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 		repository,
 	};
-	return { deps, repository, deleteOrQueue };
+	return { deps, repository, wakeDeletionWorker };
 }
 
 describe('durable object deletion callers', () => {
-	it('lets the caller finish after storage deletion without touching the queue', async () => {
-		const { deps, repository } = assetDeletionHarness();
+	it('returns after the durable asset outbox commit and wakes one worker', async () => {
+		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
 		repository.claimAssetForDeletion.mockResolvedValueOnce({
 			id: 41, projectId: 7, kind: 'GAME', previousStatus: 'READY',
 			storageKey: 'games/current.zip', playbackStorageKey: null, alreadyDeleted: false,
 		});
-		const record = vi.fn().mockRejectedValue(new Error('queue must not be used'));
-		const coordinator = createObjectDeletionCoordinator({
-			storage: { delete: vi.fn().mockResolvedValue(undefined), listKeys: vi.fn() },
-			orphans: { record },
-			logger: { error: vi.fn() },
-		});
-
-		await expect(deleteAsset(
-			{ ...deps, deleteOrQueue: coordinator.deleteOrQueue },
-			41,
-			{ id: 1, role: 'ADMIN' },
-		)).resolves.toEqual({ projectId: 7 });
-		expect(record).not.toHaveBeenCalled();
-		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
-	});
-
-	it('lets the caller finish with a durable orphan after storage deletion fails', async () => {
-		const { deps, repository } = assetDeletionHarness();
-		repository.claimAssetForDeletion.mockResolvedValueOnce({
-			id: 41, projectId: 7, kind: 'GAME', previousStatus: 'READY',
-			storageKey: 'games/current.zip', playbackStorageKey: null, alreadyDeleted: false,
-		});
-		const record = vi.fn().mockResolvedValue(undefined);
-		const coordinator = createObjectDeletionCoordinator({
-			storage: {
-				delete: vi.fn().mockRejectedValue(new Error('storage unavailable')),
-				listKeys: vi.fn(),
-			},
-			orphans: { record },
-			logger: { error: vi.fn() },
-		});
-
-		await expect(deleteAsset(
-			{ ...deps, deleteOrQueue: coordinator.deleteOrQueue },
-			41,
-			{ id: 1, role: 'ADMIN' },
-		)).resolves.toEqual({ projectId: 7 });
-		expect(record).toHaveBeenCalledWith('protected', 'games/current.zip', 'asset-delete');
-		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
-	});
-
-	it('commits the asset delete outbox before attempting post-commit object cleanup', async () => {
-		const { deps, repository, deleteOrQueue } = assetDeletionHarness();
 
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
 			.resolves.toEqual({ projectId: 7 });
-		expect(deleteOrQueue).toHaveBeenCalledTimes(2);
+		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
+		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
+	});
+
+	it('coalesces original and playback deletion targets into one request-path wake', async () => {
+		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
+
+		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
+			.resolves.toEqual({ projectId: 7 });
+		expect(repository.completeAssetDeletion).toHaveBeenCalledWith(
+			expect.objectContaining({
+				storageKey: 'games/current.zip',
+				playbackStorageKey: 'games/current-playback.mp4',
+			}),
+			expect.objectContaining({
+				reason: 'asset-delete',
+				playbackReason: 'asset-delete-playback',
+			}),
+		);
+		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
+	});
+
+	it('commits the asset delete outbox before waking background deletion', async () => {
+		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
+
+		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
+			.resolves.toEqual({ projectId: 7 });
 		expect(repository.claimAssetForDeletion.mock.invocationCallOrder[0])
 			.toBeLessThan(repository.completeAssetDeletion.mock.invocationCallOrder[0]!);
 		expect(repository.completeAssetDeletion.mock.invocationCallOrder[0])
-			.toBeLessThan(deleteOrQueue.mock.invocationCallOrder[0]!);
+			.toBeLessThan(wakeDeletionWorker.mock.invocationCallOrder[0]!);
 	});
 
-	it('keeps a committed asset deletion successful when immediate cleanup fails', async () => {
-		const { deps, repository, deleteOrQueue } = assetDeletionHarness();
-		deleteOrQueue.mockRejectedValueOnce(new Error('storage and orphan queue unavailable'));
+	it('does not report success when the transaction cannot commit its deletion outbox', async () => {
+		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
+		repository.completeAssetDeletion.mockRejectedValueOnce(new Error('database unavailable'));
 
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
-			.resolves.toEqual({ projectId: 7 });
+			.rejects.toThrow('database unavailable');
 		expect(repository.claimAssetForDeletion).toHaveBeenCalledWith(41);
 		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
-		expect(deps.logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ assetId: 41, projectId: 7 }),
-			'Post-commit asset cleanup failed; durable outbox retained',
-		);
+		expect(wakeDeletionWorker).not.toHaveBeenCalled();
 	});
 });

@@ -119,46 +119,43 @@ describe('object deletion coordinator', () => {
 
 		await expect(coordinator.deletePrefixOrQueue('public', 'webgl/7/build/site/', 'rollback'))
 			.resolves.toBe(0);
-		expect(record).toHaveBeenCalledWith('public', 'webgl/7/build/site/', 'rollback');
+		expect(record).toHaveBeenCalledWith(
+			'public',
+			'webgl/7/build/site/',
+			'rollback',
+			'PREFIX',
+		);
 	});
 
-	it('retains the existing transactional outbox instead of attempting a second queue write', async () => {
-		const record = vi.fn().mockRejectedValue(new Error('database unavailable'));
+	it('does not expose a transactional-outbox shortcut that can run a global reaper', () => {
 		const coordinator = createObjectDeletionCoordinator({
 			storage: {
-				delete: vi.fn().mockRejectedValue(new Error('storage unavailable')),
-				listKeys: vi.fn().mockRejectedValue(new Error('storage unavailable')),
+				delete: vi.fn(),
+				listKeys: vi.fn(),
 			},
-			orphans: { record },
-			logger: { error: vi.fn() },
-		});
-
-		await expect(coordinator.deleteDurablyQueued('protected', 'games/old.zip', 'replace'))
-			.resolves.toBeUndefined();
-		await expect(coordinator.deleteDurablyQueuedPrefix('public', 'webgl/7/build/site/', 'replace'))
-			.resolves.toBe(0);
-		expect(record).not.toHaveBeenCalled();
-	});
-
-	it('routes production outbox cleanup through the claimed fresh-reference reaper', async () => {
-		const deleteObject = vi.fn();
-		const listKeys = vi.fn();
-		const reapDurablyQueued = vi.fn()
-			.mockResolvedValueOnce({ failed: 0 })
-			.mockResolvedValueOnce({ failed: 0 });
-		const coordinator = createObjectDeletionCoordinator({
-			storage: { delete: deleteObject, listKeys },
 			orphans: { record: vi.fn() },
 			logger: { error: vi.fn() },
-			reapDurablyQueued,
 		});
 
-		await expect(coordinator.deleteDurablyQueued('protected', 'games/old.zip', 'replace'))
-			.resolves.toBeUndefined();
-		await expect(coordinator.deleteDurablyQueuedPrefix('public', 'webgl/7/site/', 'replace'))
-			.resolves.toBe(0);
-		expect(reapDurablyQueued).toHaveBeenCalledTimes(2);
-		expect(deleteObject).not.toHaveBeenCalled();
-		expect(listKeys).not.toHaveBeenCalled();
+		expect(Object.keys(coordinator).sort()).toEqual([
+			'deleteOrQueue',
+			'deletePrefixOrQueue',
+		]);
+	});
+
+	it('rejects prefix compensation when neither enumeration nor durable prefix recording works', async () => {
+		const listError = new Error('storage unavailable');
+		const queueError = new Error('database unavailable');
+		const coordinator = createObjectDeletionCoordinator({
+			storage: {
+				delete: vi.fn(),
+				listKeys: vi.fn().mockRejectedValue(listError),
+			},
+			orphans: { record: vi.fn().mockRejectedValue(queueError) },
+			logger: { error: vi.fn() },
+		});
+
+		await expect(coordinator.deletePrefixOrQueue('public', 'webgl/7/site/', 'replace'))
+			.rejects.toBe(queueError);
 	});
 });

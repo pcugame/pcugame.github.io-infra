@@ -16,7 +16,7 @@ const assetsService = createAssetsService({
 	protectedBucket: 'protected-bucket',
 	presign: mocks.getPresignedUrl,
 	bucketForKind: () => 'bucket',
-	deleteOrQueue: vi.fn(),
+	wakeDeletionWorker: vi.fn(),
 	loadProjectWithAccess: vi.fn(),
 	downloadLimiter: {
 		check: mocks.limiterCheck,

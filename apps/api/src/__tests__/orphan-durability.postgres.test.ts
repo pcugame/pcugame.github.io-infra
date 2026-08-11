@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Prisma, type PrismaClient } from '../generated/prisma/client.js';
-import { createObjectDeletionCoordinator } from '../application/object-deletion.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createAssetsRepository } from '../modules/assets/repository.js';
 import { createAssetsService } from '../modules/assets/service.js';
@@ -36,19 +35,6 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 	const protectedBucket = `integration-protected-${testId}`;
 	let fixtureSequence = 0;
 
-	function postCommitFailureCoordinator() {
-		const record = vi.fn().mockRejectedValue(new Error('forced post-commit queue failure'));
-		const coordinator = createObjectDeletionCoordinator({
-			storage: {
-				delete: vi.fn().mockRejectedValue(new Error('forced post-commit S3 failure')),
-				listKeys: vi.fn().mockRejectedValue(new Error('forced post-commit S3 list failure')),
-			},
-			orphans: { record },
-			logger: { error: vi.fn() },
-		});
-		return { coordinator, record };
-	}
-
 	async function createProjectFixture(data: { webglEntryKey?: string } = {}) {
 		fixtureSequence += 1;
 		return client.project.create({
@@ -61,20 +47,6 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				webglEntryKey: data.webglEntryKey ?? '',
 			},
 		});
-	}
-
-	function queuedWebglDelete(
-		coordinator: ReturnType<typeof createObjectDeletionCoordinator>,
-		project: number,
-		entryKey: string,
-		reason: string,
-	) {
-		const keys = parseWebglEntryKey(project, entryKey);
-		if (!keys) throw new Error(`Malformed test WebGL entry key for project ${project}`);
-		return Promise.all([
-			coordinator.deleteDurablyQueued(protectedBucket, keys.sourceKey, `${reason}-source`),
-			coordinator.deleteDurablyQueuedPrefix(publicBucket, keys.sitePrefix, `${reason}-site`),
-		]).then(() => undefined);
 	}
 
 	beforeAll(async () => {
@@ -298,10 +270,9 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		);
 	});
 
-	it('atomically commits asset deletion, clears completed-session pointers, and converges after cleanup failure', async () => {
+	it('atomically commits asset deletion, clears completed-session pointers, and converges after a worker wake', async () => {
 		const assetsRepository = createAssetsRepository(client);
 		const productionOrphanRepository = createOrphanRepository(client);
-		const queueFailure = new Error('forced orphan transaction rollback');
 		const completed = await client.gameUploadSession.create({
 			data: {
 				projectId,
@@ -316,26 +287,20 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 			},
 		});
-		const storageDelete = vi.fn().mockRejectedValue(new Error('forced S3 delete failure'));
-		const fallbackRecord = vi.fn().mockRejectedValue(queueFailure);
-		const failingCoordinator = createObjectDeletionCoordinator({
-			storage: { delete: storageDelete, listKeys: vi.fn() },
-			orphans: { record: fallbackRecord },
-			logger: { error: vi.fn() },
-		});
-		const createCaller = (deleteOrQueue: typeof failingCoordinator.deleteOrQueue) => createAssetsService({
+		const wakeDeletionWorker = vi.fn();
+		const createCaller = () => createAssetsService({
 			publicBucket: 'public',
 			protectedBucket: 'protected',
 			presign: vi.fn(),
 			bucketForKind: () => 'protected',
-			deleteOrQueue,
+			wakeDeletionWorker,
 			loadProjectWithAccess: vi.fn().mockResolvedValue(undefined),
 			downloadLimiter: { check: vi.fn().mockReturnValue('ok') },
 			logger: { info: vi.fn(), error: vi.fn() },
 			repository: assetsRepository,
 		});
 
-		await expect(createCaller(failingCoordinator.deleteOrQueue).deleteAsset(
+		await expect(createCaller().deleteAsset(
 			assetId,
 			{ id: userId, role: 'ADMIN' },
 		)).resolves.toEqual({ projectId });
@@ -346,8 +311,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			.resolves.toBe(1);
 		await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: completed.id } }))
 			.resolves.toMatchObject({ status: 'COMPLETED', storageKey: null });
-		expect(storageDelete).toHaveBeenCalledWith('protected', storageKey);
-		expect(fallbackRecord).toHaveBeenCalledWith('protected', storageKey, 'asset-delete');
+		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
 
 		const reapNow = new Date(Date.now() + 1_000);
 		const recoveredDelete = vi.fn().mockResolvedValue(undefined);
@@ -366,12 +330,13 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			logger: { info: vi.fn(), error: vi.fn() },
 		});
 
-		await expect(createCaller(failingCoordinator.deleteOrQueue).deleteAsset(
+		await expect(createCaller().deleteAsset(
 			assetId,
 			{ id: userId, role: 'ADMIN' },
 		)).resolves.toEqual({ projectId });
 		await expect(client.orphanObject.count({ where: { bucket: 'protected', storageKey } }))
 			.resolves.toBe(1);
+		expect(wakeDeletionWorker).toHaveBeenCalledTimes(2);
 
 		await expect(durableOrphanService.runOrphanReaper())
 			.resolves.toMatchObject({ failed: 0 });
@@ -387,7 +352,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			.resolves.toEqual({ tried: 0, resolved: 0, failed: 0 });
 	});
 
-	it('commits GAME replacement and its old-object outbox before post-commit S3+queue failure', async () => {
+	it('commits GAME replacement and its old-object outbox before waking deletion', async () => {
 		const project = await createProjectFixture();
 		const oldKey = `integration/orphan-durability/${testId}/game-old-${project.id}.zip`;
 		const newKey = `integration/orphan-durability/${testId}/game-new-${project.id}.zip`;
@@ -416,13 +381,12 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 			},
 		});
-		const { coordinator, record } = postCommitFailureCoordinator();
+		const wakeDeletionWorker = vi.fn();
 		const finalizer = createCompletedUploadFinalizer({
 			readHeader: async () => Buffer.from([0x50, 0x4b, 0x03, 0x04]),
 			validateGameArchive: async () => {},
 			deployWebgl: async () => { throw new Error('not used'); },
 			rollbackWebglPublicDeployment: async () => {},
-			deleteWebglDeploymentByEntry: async () => {},
 			finalizeGame: (completed) => gameUploadRepository.finalizeCompletedSession(
 				completed.id,
 				completed.projectId,
@@ -442,12 +406,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				client,
 			),
 			finalizeWebgl: async () => ({ oldEntryKey: '' }),
-			deleteOrQueue: (key, reason, context) => coordinator.deleteDurablyQueued(
-				protectedBucket,
-				key,
-				reason,
-				context,
-			),
+			wakeDeletionWorker,
 			webglUrl: () => '',
 			logError: vi.fn(),
 		});
@@ -468,7 +427,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			.resolves.toMatchObject({ storageKey: newKey });
 		await expect(client.orphanObject.count({ where: { bucket: protectedBucket, storageKey: oldKey } }))
 			.resolves.toBe(1);
-		expect(record).not.toHaveBeenCalled();
+		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
 	});
 
 	it('clears a superseded completed-session pointer in the generic GAME replacement transaction', async () => {
@@ -530,7 +489,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		})).resolves.toMatchObject({ storageKey: newKey });
 	});
 
-	it('commits project deletion with exact and WebGL-prefix outbox rows before cleanup failure', async () => {
+	it('commits project deletion with exact and WebGL-prefix outbox rows before one coalesced wake', async () => {
 		const deploymentId = randomUUID();
 		const provisional = await createProjectFixture();
 		const oldEntry = `webgl/${provisional.id}/${deploymentId}/site/index.html`;
@@ -546,30 +505,15 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				sizeBytes: 8n,
 			},
 		});
-		const { coordinator, record } = postCommitFailureCoordinator();
+		const wakeDeletionWorker = vi.fn();
+		const wakeMaintenance = vi.fn();
 		const service = createProjectService({
 			repository: projectRepository,
 			serializeProjectDetail: vi.fn(),
 			deletionBuckets: { publicBucket, protectedBucket },
-			deleteAssetObjects: async (asset, reason) => {
-				await coordinator.deleteDurablyQueued(publicBucket, asset.storageKey, reason);
-			},
 			abortMultipart: async () => {},
-			deleteWebglDeploymentByEntry: (project, entry, reason) => queuedWebglDelete(
-				coordinator,
-				project,
-				entry,
-				reason,
-			),
-			deleteWebglDeployment: async (keys, reason) => {
-				await queuedWebglDelete(coordinator, keys.projectId, keys.entryKey, reason);
-			},
-			deleteQueuedProtectedObject: (key, reason, context) => coordinator.deleteDurablyQueued(
-				protectedBucket,
-				key,
-				reason,
-				context,
-			),
+			wakeDeletionWorker,
+			wakeMaintenance,
 			logger: { error: vi.fn() },
 		});
 
@@ -585,10 +529,11 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				],
 			},
 		})).resolves.toBe(3);
-		expect(record).not.toHaveBeenCalled();
+		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(wakeMaintenance).toHaveBeenCalledOnce();
 	});
 
-	it('commits WebGL pointer/session terminal state with source+prefix outbox before cleanup failure', async () => {
+	it('commits WebGL pointer/session state with source+prefix outbox before waking deletion', async () => {
 		const project = await createProjectFixture();
 		const oldDeployment = randomUUID();
 		const newDeployment = randomUUID();
@@ -610,18 +555,12 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 			},
 		});
-		const { coordinator, record } = postCommitFailureCoordinator();
+		const wakeDeletionWorker = vi.fn();
 		const finalizer = createCompletedUploadFinalizer({
 			readHeader: async () => Buffer.from([0x50, 0x4b, 0x03, 0x04]),
 			validateGameArchive: async () => {},
 			deployWebgl: async () => deployment,
 			rollbackWebglPublicDeployment: async () => {},
-			deleteWebglDeploymentByEntry: (projectId, entry, reason) => queuedWebglDelete(
-				coordinator,
-				projectId,
-				entry,
-				reason,
-			),
 			finalizeGame: async () => ({ oldStorageKey: null, oldPlaybackStorageKey: null }),
 			finalizeWebgl: (completed, deployed) => gameUploadRepository.finalizeCompletedWebglSession(
 				completed.id,
@@ -631,7 +570,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				{ publicBucket, protectedBucket, reason: 'webgl-upload-replace-previous' },
 				client,
 			),
-			deleteOrQueue: async () => {},
+			wakeDeletionWorker,
 			webglUrl: () => '/webgl',
 			logError: vi.fn(),
 		});
@@ -657,10 +596,10 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				],
 			},
 		})).resolves.toBe(2);
-		expect(record).not.toHaveBeenCalled();
+		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
 	});
 
-	it('commits exhibition poster replacement and deletion outboxes before cleanup failure', async () => {
+	it('commits exhibition poster replacement and deletion outboxes before worker wakes', async () => {
 		fixtureSequence += 1;
 		const oldKey = `integration/orphan-durability/${testId}/poster-old-${fixtureSequence}.png`;
 		const newKey = `integration/orphan-durability/${testId}/poster-new-${fixtureSequence}.png`;
@@ -674,7 +613,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				posterSizeBytes: 8n,
 			},
 		});
-		const { coordinator, record } = postCommitFailureCoordinator();
+		const wakeDeletionWorker = vi.fn();
 		const service = createExhibitionService({
 			apiPublicUrl: 'https://api.example.test',
 			posterBucket: publicBucket,
@@ -701,12 +640,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 					cleanup: vi.fn(),
 				}),
 			},
-			deleteOrQueue: (bucket, key, reason, context) => coordinator.deleteDurablyQueued(
-				bucket,
-				key,
-				reason,
-				context,
-			),
+			wakeDeletionWorker,
 		});
 		const parts = (async function* () {})();
 
@@ -723,6 +657,6 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		await expect(client.exhibition.findUnique({ where: { id: exhibition.id } })).resolves.toBeNull();
 		await expect(client.orphanObject.count({ where: { bucket: publicBucket, storageKey: newKey } }))
 			.resolves.toBe(1);
-		expect(record).not.toHaveBeenCalled();
+		expect(wakeDeletionWorker).toHaveBeenCalledTimes(2);
 	});
 });

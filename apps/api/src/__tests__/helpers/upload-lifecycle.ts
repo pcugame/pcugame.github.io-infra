@@ -1,0 +1,101 @@
+import { vi } from 'vitest';
+
+import { createUploadLifecycleMetrics } from '../../lib/upload-lifecycle-metrics.js';
+import type { ResourceLease } from '../../backend-context.js';
+import type { DurableGameUploadRepository } from '../../modules/admin/game-upload/repository.js';
+import type { UploadLifecycleRuntime } from '../../modules/upload-lifecycle/ports.js';
+
+export function createTestUploadLifecycleRuntime(
+	overrides: Partial<UploadLifecycleRuntime> = {},
+): UploadLifecycleRuntime {
+	const runtime: UploadLifecycleRuntime = {
+		idempotency: {
+			claim: vi.fn(async () => ({
+				kind: 'acquired' as const,
+				operationId: 'test-operation',
+				ownerToken: 'test-owner',
+			})),
+			renew: vi.fn(async () => undefined),
+			markFailed: vi.fn(async () => undefined),
+			purgeExpired: vi.fn(async () => ({ count: 0 })),
+		},
+		uploadIntents: {
+			prepare: vi.fn(async () => 'test-intent'),
+			markUploaded: vi.fn(async () => undefined),
+			isUncommitted: vi.fn(async () => true),
+			recordAmbiguousError: vi.fn(async () => undefined),
+			sweep: vi.fn(async () => ({ tried: 0, referenced: 0, queued: 0, missing: 0 })),
+		},
+		orphanDeletions: {
+			deleteOrQueue: vi.fn(async () => undefined),
+			deletePrefixOrQueue: vi.fn(async () => 0),
+		},
+		multipartAborts: {
+			queue: vi.fn(async () => undefined),
+			run: vi.fn(async () => ({ tried: 0, resolved: 0, failed: 0 })),
+		},
+		gameUploads: createDurableGameUploadRepository(),
+		metrics: createUploadLifecycleMetrics(),
+		wakeDeletionWorker: vi.fn(),
+		wakeMaintenance: vi.fn(),
+		recover: vi.fn(async () => undefined),
+		start: vi.fn(async () => undefined),
+		close: vi.fn(async () => undefined),
+	};
+	return { ...runtime, ...overrides };
+}
+
+export function ownedTestUploadLifecycleResource(
+	runtime = createTestUploadLifecycleRuntime(),
+): ResourceLease<UploadLifecycleRuntime> {
+	return {
+		value: runtime,
+		ownership: 'owned',
+		start: runtime.start,
+		close: runtime.close,
+	};
+}
+
+export function createDurableGameUploadRepository(
+	overrides: Partial<DurableGameUploadRepository> = {},
+): DurableGameUploadRepository {
+	const repository: DurableGameUploadRepository = {
+		findSessionById: vi.fn(async () => null),
+		createSessionReplacingActive: vi.fn(async (data) => ({
+			session: { id: data.id },
+			durableAborts: [],
+		})),
+		cancelSessionAndClearActive: vi.fn(async () => ({ count: 1 as const, durableAbort: null })),
+		queueAbortTask: vi.fn(async () => undefined),
+		acquirePartClaim: vi.fn(async (input) => ({
+			kind: 'acquired' as const,
+			token: input.token,
+		})),
+		completePartClaim: vi.fn(async () => ({ accepted: true as const, parts: [] })),
+		renewPartClaim: vi.fn(async () => ({ count: 1 })),
+		claimCompletion: vi.fn(async () => ({ count: 1, reason: null })),
+		renewCompletionClaim: vi.fn(async () => ({ count: 1 })),
+		releaseCompletionClaim: vi.fn(async () => ({ count: 1 })),
+		replaceMultipartGeneration: vi.fn(async () => ({ replaced: true, durableAbort: null })),
+		upsertPartEtag: vi.fn(async () => []),
+		transitionToCompleting: vi.fn(async () => ({ count: 1 })),
+		findPartsBySessionId: vi.fn(async () => []),
+		revertToPending: vi.fn(async () => ({ count: 1 })),
+		markFailed: vi.fn(async () => ({ count: 1 })),
+		markCompletedObjectFailed: vi.fn(async () => ({ count: 1 })),
+		findStaleCompletingSessions: vi.fn(async () => []),
+		claimStaleCompletingSessions: vi.fn(async () => []),
+		findExpiredPendingSessions: vi.fn(async () => []),
+		findSessionsWithExpiredPartClaims: vi.fn(async () => []),
+		findKnownMultipartUploads: vi.fn(async () => []),
+		findActiveSessionsForListing: vi.fn(async () => []),
+		findExhibitionById: vi.fn(async () => null),
+		finalizeCompletedSession: vi.fn(async () => ({
+			assetId: 1,
+			oldStorageKey: null,
+			oldPlaybackStorageKey: null,
+		})),
+		finalizeCompletedWebglSession: vi.fn(async () => ({ oldEntryKey: '' })),
+	};
+	return { ...repository, ...overrides };
+}

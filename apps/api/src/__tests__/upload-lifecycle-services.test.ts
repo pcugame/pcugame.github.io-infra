@@ -100,35 +100,24 @@ function intentRepository(
 	} satisfies UploadIntentRepository;
 }
 
-function emptyReferencePrisma() {
-	return {
-		asset: { findMany: vi.fn().mockResolvedValue([]) },
-		exhibition: { findMany: vi.fn().mockResolvedValue([]) },
-		project: { findMany: vi.fn().mockResolvedValue([]) },
-		gameUploadSession: {
-			findMany: vi.fn().mockResolvedValue([]),
-		},
-		uploadIntent: {
-			findMany: vi.fn().mockResolvedValue([]),
-		},
-	};
-}
-
 describe('upload-intent convergence', () => {
 	it('queues an unreferenced object and resolves a missing object', async () => {
 		const repository = intentRepository([
 			{ id: 'present', bucket: 'public', storageKey: 'present.png', state: 'UPLOADED', attemptCount: 0 },
 			{ id: 'missing', bucket: 'public', storageKey: 'missing.png', state: 'PREPARED', attemptCount: 0 },
 		]);
+		const collect = vi.fn(async () => ({
+			references: [],
+			unsafeBuckets: new Set<string>(),
+		}));
 		const service = createUploadIntentService({
-			prisma: emptyReferencePrisma() as never,
 			repository,
+			references: { collect },
 			storage: {
 				head: vi.fn(async (_bucket, key) => key === 'present.png'
 					? { size: 1, contentType: 'image/png' }
 					: null),
 			},
-			buckets: { publicBucket: 'public', protectedBucket: 'protected' },
 			clock: { now: () => new Date('2026-08-11T00:00:00.000Z') },
 			ids: { next: () => 'claim' },
 			logger: { info: vi.fn(), error: vi.fn() },
@@ -144,6 +133,41 @@ describe('upload-intent convergence', () => {
 			'present', 'claim', 'public', 'present.png',
 		);
 		expect(repository.markMissing).toHaveBeenCalledWith('missing', 'claim');
+		expect(collect).toHaveBeenCalledOnce();
+	});
+
+	it('collects one full reference inventory for a 50-intent batch', async () => {
+		const intents = Array.from({ length: 50 }, (_, index) => ({
+			id: `intent-${index}`,
+			bucket: 'public',
+			storageKey: `objects/${index}.png`,
+			state: 'UPLOADED' as const,
+			attemptCount: 0,
+		}));
+		const repository = intentRepository(intents);
+		const collect = vi.fn(async () => ({
+			references: [],
+			unsafeBuckets: new Set<string>(),
+		}));
+		const service = createUploadIntentService({
+			repository,
+			references: { collect },
+			storage: {
+				head: vi.fn(async () => ({ size: 1, contentType: 'image/png' })),
+			},
+			clock: { now: () => new Date('2026-08-11T00:00:00.000Z') },
+			ids: { next: () => 'claim' },
+			logger: { info: vi.fn(), error: vi.fn() },
+		});
+
+		await expect(service.sweep()).resolves.toEqual({
+			tried: 50,
+			referenced: 0,
+			queued: 50,
+			missing: 0,
+		});
+		expect(collect).toHaveBeenCalledOnce();
+		expect(repository.queueCleanup).toHaveBeenCalledTimes(50);
 	});
 });
 

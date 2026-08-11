@@ -7,6 +7,7 @@ import { buildApp } from '../app.js';
 import { createAuthService } from '../modules/auth/service.js';
 import { createDevAuthController } from '../modules/dev-auth/controller.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 
 const mocks = {
 	upsertDevUser: vi.fn(),
@@ -40,6 +41,7 @@ function createDevAuthTestContext(cfg = config()): BackendContext {
 		error: vi.fn(),
 		fatal: vi.fn(),
 	};
+	const uploadLifecycle = createTestUploadLifecycleRuntime();
 	const service = createAuthService({
 		repository: {
 			upsertUserByGoogleSub: vi.fn(),
@@ -77,6 +79,8 @@ function createDevAuthTestContext(cfg = config()): BackendContext {
 			uploadPart: async () => 'etag',
 			completeMultipart: async () => {},
 			abortMultipart: async () => {},
+			listParts: async () => [],
+			listMultipartUploads: async () => [],
 		},
 		fileSystem: {} as BackendContext['fileSystem'],
 		googleTokens: { verify: async () => undefined },
@@ -97,7 +101,10 @@ function createDevAuthTestContext(cfg = config()): BackendContext {
 		uploadLifecycleMetrics: {
 			recordPostCommitCleanupFailure: () => {},
 			postCommitCleanupFailureCount: () => 0,
+			recordUntrackedMultipartCleanupFailure: () => {},
+			untrackedMultipartCleanupFailureCount: () => 0,
 		},
+		uploadLifecycle,
 		exportProgress: {} as BackendContext['exportProgress'],
 		lifecycle: {
 			state: () => state,

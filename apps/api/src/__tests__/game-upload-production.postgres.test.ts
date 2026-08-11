@@ -9,10 +9,16 @@ import type {
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createNodeFileSystem } from '../infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
 import {
 	createGameUploadProductionGraph,
 	type GameUploadProductionGraph,
 } from '../modules/admin/game-upload/composition.js';
+import { createGameUploadRepository } from '../modules/admin/game-upload/repository.js';
+import {
+	createProductionUploadLifecycleRuntime,
+	type UploadLifecycleRuntime,
+} from '../modules/upload-lifecycle/runtime.js';
 import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
 import { createProjectAccessService } from '../modules/admin/project-access.service.js';
 import { createWebglDeploymentKeys } from '../modules/webgl/paths.js';
@@ -189,6 +195,20 @@ function memoryStorage() {
 		) => {
 			multiparts.delete(uploadId);
 		}),
+		listParts: vi.fn(async (_bucket, _key, uploadId) => {
+			const upload = multiparts.get(uploadId);
+			if (!upload) throw new Error('multipart not found');
+			return [...upload.parts.keys()]
+				.sort((left, right) => left - right)
+				.map((partNumber) => ({ partNumber, etag: `etag-${partNumber}` }));
+		}),
+		listMultipartUploads: vi.fn(async (bucket, prefix) => [...multiparts.entries()]
+			.filter(([, upload]) => upload.bucket === bucket && upload.key.startsWith(prefix))
+			.map(([uploadId, upload]) => ({
+				key: upload.key,
+				uploadId,
+				initiated: new Date(),
+			}))),
 	};
 	return {
 		storage,
@@ -294,6 +314,7 @@ describe.runIf(runPostgresIntegration)(
 		const protectedBucket = `ticket-012-protected-${testId}`;
 		const storage = memoryStorage();
 		const graphs: GameUploadProductionGraph[] = [];
+		const runtimes: UploadLifecycleRuntime[] = [];
 		let idSequence = 0;
 
 		const settings: SettingsStore = {
@@ -309,6 +330,7 @@ describe.runIf(runPostgresIntegration)(
 			const access = createProjectAccessService(
 				createProjectAccessRepository(client),
 			);
+			const uploadLifecycle = productionRuntime(client);
 			const value = createGameUploadProductionGraph({
 				config: {
 					...defaultTestEnv,
@@ -320,7 +342,6 @@ describe.runIf(runPostgresIntegration)(
 					UPLOAD_USER_GAME_MAX_MB: 8,
 					UPLOAD_PRIVILEGED_GAME_MAX_MB: 8,
 				},
-				prisma: client,
 				storage: storage.storage,
 				fileSystem: createNodeFileSystem(),
 				settings,
@@ -343,9 +364,27 @@ describe.runIf(runPostgresIntegration)(
 				},
 				logger,
 				access,
+				uploadLifecycle,
 			});
 			graphs.push(value);
 			return value;
+		}
+
+		function productionRuntime(client: PrismaClient): UploadLifecycleRuntime {
+			const runtime = createProductionUploadLifecycleRuntime({
+				config: {
+					S3_BUCKET_PUBLIC: publicBucket,
+					S3_BUCKET_PROTECTED: protectedBucket,
+				},
+				prisma: client,
+				storage: storage.storage,
+				clock: { now: () => new Date('2098-07-31T00:10:00.000Z') },
+				ids: { next: () => randomUUID() },
+				logger,
+				metrics: createUploadLifecycleMetrics(),
+			});
+			runtimes.push(runtime);
+			return runtime;
 		}
 
 		async function createSessionFixture(input: {
@@ -427,7 +466,11 @@ describe.runIf(runPostgresIntegration)(
 
 		afterAll(async () => {
 			await Promise.allSettled(graphs.map((value) => value.close()));
+			await Promise.allSettled(runtimes.map((value) => value.close()));
 			if (!control) return;
+			await control.multipartAbortTask.deleteMany({
+				where: { bucket: protectedBucket },
+			});
 			await control.orphanObject.deleteMany({
 				where: { bucket: { in: [publicBucket, protectedBucket] } },
 			});
@@ -465,6 +508,351 @@ describe.runIf(runPostgresIntegration)(
 				where: { sessionId: completing.id },
 			});
 			await control.gameUploadSession.delete({ where: { id: completing.id } });
+		});
+
+		it('uses the production lifecycle repository to atomically replace an active upload and queue its abort', async () => {
+			const oldKey = `${testId}-replace-old.zip`;
+			const oldUploadId = randomUUID();
+			const oldSession = await createSessionFixture({
+				s3Key: oldKey,
+				s3UploadId: oldUploadId,
+			});
+			const newSessionId = randomUUID();
+			const newKey = `${testId}-replace-new.zip`;
+			const runtime = productionRuntime(control);
+
+			try {
+				const result = await runtime.gameUploads.createSessionReplacingActive({
+					id: newSessionId,
+					projectId,
+					userId,
+					uploadKind: 'GAME',
+					originalName: 'replacement.zip',
+					totalBytes: 1n,
+					chunkSizeBytes: 1,
+					totalChunks: 1,
+					s3UploadId: randomUUID(),
+					s3Key: newKey,
+					expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+				});
+
+				expect(result.session.id).toBe(newSessionId);
+				expect(result.durableAborts).toEqual([{
+					tracking: 'durable-abort-task-committed',
+					sessionId: oldSession.id,
+					key: oldKey,
+					uploadId: oldUploadId,
+					reason: 'active-upload-replaced',
+				}]);
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: oldSession.id },
+				})).resolves.toMatchObject({
+					status: 'CANCELLED',
+					s3Key: null,
+					s3UploadId: null,
+				});
+				await expect(control.gameUploadActiveSession.findUniqueOrThrow({
+					where: {
+						projectId_uploadKind: { projectId, uploadKind: 'GAME' },
+					},
+				})).resolves.toMatchObject({ sessionId: newSessionId });
+				await expect(control.multipartAbortTask.findUnique({
+					where: {
+						multipart_abort_bucket_key_upload: {
+							bucket: protectedBucket,
+							storageKey: oldKey,
+							uploadId: oldUploadId,
+						},
+					},
+				})).resolves.toMatchObject({
+					state: 'PENDING',
+					reason: 'active-upload-replaced',
+				});
+			} finally {
+				await runCleanupSteps([
+					() => control.gameUploadActiveSession.deleteMany({
+						where: { sessionId: { in: [oldSession.id, newSessionId] } },
+					}),
+					() => control.gameUploadSession.deleteMany({
+						where: { id: { in: [oldSession.id, newSessionId] } },
+					}),
+					() => control.multipartAbortTask.deleteMany({
+						where: { bucket: protectedBucket, storageKey: oldKey, uploadId: oldUploadId },
+					}),
+				]);
+			}
+		});
+
+		it('rolls back active replacement when the multipart-abort outbox cannot be committed', async () => {
+			const oldKey = `${testId}-replace-rollback-old.zip`;
+			const oldUploadId = randomUUID();
+			const oldSession = await createSessionFixture({
+				s3Key: oldKey,
+				s3UploadId: oldUploadId,
+			});
+			const newSessionId = randomUUID();
+			const suffix = oldSession.id.replaceAll('-', '_');
+			const functionName = `ticket_012_abort_${suffix}`;
+			const triggerName = `${functionName}_trigger`;
+			const quotedFunction = sqlIdentifier(functionName);
+			const quotedTrigger = sqlIdentifier(triggerName);
+			let functionCreated = false;
+			let triggerCreated = false;
+
+			try {
+				await control.$executeRawUnsafe(`
+					CREATE FUNCTION ${quotedFunction}() RETURNS trigger
+					LANGUAGE plpgsql AS $ticket_012$
+					BEGIN
+						IF NEW.bucket = ${sqlLiteral(protectedBucket)}
+							AND NEW.storage_key = ${sqlLiteral(oldKey)}
+							AND NEW.upload_id = ${sqlLiteral(oldUploadId)}
+						THEN
+							RAISE EXCEPTION 'ticket-012 forced multipart abort outbox failure';
+						END IF;
+						RETURN NEW;
+					END
+					$ticket_012$
+				`);
+				functionCreated = true;
+				await control.$executeRawUnsafe(`
+					CREATE TRIGGER ${quotedTrigger}
+					BEFORE INSERT OR UPDATE ON "multipart_abort_tasks"
+					FOR EACH ROW EXECUTE FUNCTION ${quotedFunction}()
+				`);
+				triggerCreated = true;
+
+				const runtime = productionRuntime(control);
+				await expect(runtime.gameUploads.createSessionReplacingActive({
+					id: newSessionId,
+					projectId,
+					userId,
+					uploadKind: 'GAME',
+					originalName: 'must-rollback.zip',
+					totalBytes: 1n,
+					chunkSizeBytes: 1,
+					totalChunks: 1,
+					s3UploadId: randomUUID(),
+					s3Key: `${testId}-replace-rollback-new.zip`,
+					expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+				})).rejects.toThrow('ticket-012 forced multipart abort outbox failure');
+
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: oldSession.id },
+				})).resolves.toMatchObject({
+					status: 'PENDING',
+					s3Key: oldKey,
+					s3UploadId: oldUploadId,
+				});
+				await expect(control.gameUploadSession.findUnique({
+					where: { id: newSessionId },
+				})).resolves.toBeNull();
+				await expect(control.gameUploadActiveSession.findUniqueOrThrow({
+					where: {
+						projectId_uploadKind: { projectId, uploadKind: 'GAME' },
+					},
+				})).resolves.toMatchObject({ sessionId: oldSession.id });
+				await expect(control.multipartAbortTask.count({
+					where: { bucket: protectedBucket, storageKey: oldKey, uploadId: oldUploadId },
+				})).resolves.toBe(0);
+			} finally {
+				await runCleanupSteps([
+					...triggerCreated
+						? [() => control.$executeRawUnsafe(
+								`DROP TRIGGER IF EXISTS ${quotedTrigger} ON "multipart_abort_tasks"`,
+							)]
+						: [],
+					...functionCreated
+						? [() => control.$executeRawUnsafe(
+								`DROP FUNCTION IF EXISTS ${quotedFunction}()`,
+							)]
+						: [],
+					() => control.gameUploadActiveSession.deleteMany({
+						where: { sessionId: { in: [oldSession.id, newSessionId] } },
+					}),
+					() => control.gameUploadSession.deleteMany({
+						where: { id: { in: [oldSession.id, newSessionId] } },
+					}),
+					() => control.multipartAbortTask.deleteMany({
+						where: { bucket: protectedBucket, storageKey: oldKey, uploadId: oldUploadId },
+					}),
+				]);
+			}
+		});
+
+		it('fences stale part claims when replacing a multipart generation', async () => {
+			const key = `${testId}-generation.zip`;
+			const oldUploadId = randomUUID();
+			const newUploadId = randomUUID();
+			const session = await createSessionFixture({
+				s3Key: key,
+				s3UploadId: oldUploadId,
+			});
+			const repository = createGameUploadRepository(control, {
+				abortBucket: protectedBucket,
+			});
+			const now = new Date('2098-07-31T00:10:00.000Z');
+			const leaseUntil = new Date('2098-07-31T00:11:00.000Z');
+			const staleToken = randomUUID();
+
+			try {
+				await expect(repository.acquirePartClaim({
+					sessionId: session.id,
+					partNumber: 1,
+					generation: 1,
+					token: staleToken,
+					owner: 'first-request',
+					now,
+					leaseUntil,
+				})).resolves.toEqual({ kind: 'acquired', token: staleToken });
+				await expect(repository.acquirePartClaim({
+					sessionId: session.id,
+					partNumber: 1,
+					generation: 1,
+					token: randomUUID(),
+					owner: 'second-request',
+					now,
+					leaseUntil,
+				})).resolves.toEqual({ kind: 'busy' });
+				await control.gameUploadPart.create({
+					data: {
+						sessionId: session.id,
+						partNumber: 1,
+						etag: 'old-etag',
+						generation: 1,
+					},
+				});
+
+				await expect(repository.replaceMultipartGeneration({
+					sessionId: session.id,
+					expectedGeneration: 1,
+					newUploadId,
+					reason: 'expired-part-claim-reset',
+				})).resolves.toEqual({
+					replaced: true,
+					durableAbort: {
+						tracking: 'durable-abort-task-committed',
+						sessionId: session.id,
+						key,
+						uploadId: oldUploadId,
+						reason: 'expired-part-claim-reset',
+					},
+				});
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				})).resolves.toMatchObject({
+					multipartGeneration: 2,
+					s3UploadId: newUploadId,
+					uploadedChunks: [],
+				});
+				await expect(control.gameUploadPartClaim.count({
+					where: { sessionId: session.id },
+				})).resolves.toBe(0);
+				await expect(control.gameUploadPart.count({
+					where: { sessionId: session.id },
+				})).resolves.toBe(0);
+				await expect(repository.completePartClaim({
+					token: staleToken,
+					etag: 'stale-etag',
+					now,
+				})).resolves.toEqual({ accepted: false, parts: [] });
+				await expect(repository.acquirePartClaim({
+					sessionId: session.id,
+					partNumber: 1,
+					generation: 1,
+					token: randomUUID(),
+					owner: 'stale-generation',
+					now,
+					leaseUntil,
+				})).resolves.toEqual({ kind: 'unavailable' });
+				await expect(control.multipartAbortTask.findUnique({
+					where: {
+						multipart_abort_bucket_key_upload: {
+							bucket: protectedBucket,
+							storageKey: key,
+							uploadId: oldUploadId,
+						},
+					},
+				})).resolves.toMatchObject({ reason: 'expired-part-claim-reset' });
+			} finally {
+				await runCleanupSteps([
+					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
+					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
+					() => control.multipartAbortTask.deleteMany({
+						where: { bucket: protectedBucket, storageKey: key, uploadId: oldUploadId },
+					}),
+				]);
+			}
+		});
+
+		it('blocks completion while a part claim is active and fences later part work after completion claim', async () => {
+			const session = await createSessionFixture({
+				s3Key: `${testId}-completion-claim.zip`,
+			});
+			const repository = createGameUploadRepository(control, {
+				abortBucket: protectedBucket,
+			});
+			const now = new Date('2098-07-31T00:10:00.000Z');
+			const leaseUntil = new Date('2098-07-31T00:11:00.000Z');
+			const partToken = randomUUID();
+			const completionToken = randomUUID();
+
+			try {
+				await repository.acquirePartClaim({
+					sessionId: session.id,
+					partNumber: 1,
+					generation: 1,
+					token: partToken,
+					owner: 'part-request',
+					now,
+					leaseUntil,
+				});
+				await expect(repository.claimCompletion({
+					sessionId: session.id,
+					generation: 1,
+					token: completionToken,
+					now,
+					leaseUntil,
+				})).resolves.toEqual({ count: 0, reason: 'parts-active' });
+				await expect(repository.completePartClaim({
+					token: partToken,
+					etag: 'etag-1',
+					now,
+				})).resolves.toMatchObject({ accepted: true });
+				await expect(repository.claimCompletion({
+					sessionId: session.id,
+					generation: 1,
+					token: completionToken,
+					now,
+					leaseUntil,
+				})).resolves.toEqual({ count: 1, reason: null });
+				await expect(repository.renewCompletionClaim(
+					session.id,
+					'wrong-token',
+					now,
+					new Date('2098-07-31T00:12:00.000Z'),
+				)).resolves.toEqual({ count: 0 });
+				await expect(repository.renewCompletionClaim(
+					session.id,
+					completionToken,
+					now,
+					new Date('2098-07-31T00:12:00.000Z'),
+				)).resolves.toEqual({ count: 1 });
+				await expect(repository.acquirePartClaim({
+					sessionId: session.id,
+					partNumber: 1,
+					generation: 1,
+					token: randomUUID(),
+					owner: 'late-part-request',
+					now,
+					leaseUntil,
+				})).resolves.toEqual({ kind: 'unavailable' });
+			} finally {
+				await runCleanupSteps([
+					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
+					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
+				]);
+			}
 		});
 
 		it('allows one actual concurrent complete winner through the CAS', async () => {

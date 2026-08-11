@@ -14,10 +14,12 @@ import {
 	createUploadLimiter,
 	type UploadConcurrencyLimiter,
 } from '../shared/upload-limits.js';
+import { createDurableGameUploadRepository } from './helpers/upload-lifecycle.js';
 
 const mocks = {
 	findSessionById: vi.fn(),
 	upsertPartEtag: vi.fn(),
+	completePartClaim: vi.fn(),
 	findExhibitionById: vi.fn(),
 	getSiteSettings: vi.fn(),
 	uploadPart: vi.fn(),
@@ -34,9 +36,10 @@ let service: ReturnType<typeof createGameUploadService>;
 
 function createDependencies(): GameUploadServiceDependencies {
 	return {
-		repository: {
+		repository: createDurableGameUploadRepository({
 			findSessionById: mocks.findSessionById,
 			upsertPartEtag: mocks.upsertPartEtag,
+			completePartClaim: mocks.completePartClaim,
 			cancelSessionAndClearActive: vi.fn(),
 			findExhibitionById: mocks.findExhibitionById,
 			createSessionReplacingActive: mocks.createSessionReplacingActive,
@@ -46,12 +49,14 @@ function createDependencies(): GameUploadServiceDependencies {
 			revertToPending: vi.fn(),
 			transitionToCompleting: vi.fn(),
 			markFailed: vi.fn(),
-		},
+		}),
 		storage: {
 			createMultipart: mocks.createMultipartUpload,
 			uploadPart: mocks.uploadPart,
 			completeMultipart: mocks.completeMultipartUpload,
 			abortMultipart: mocks.abortMultipartUpload,
+			listParts: vi.fn(async () => []),
+			listMultipartUploads: vi.fn(async () => []),
 			head: mocks.headObject,
 		},
 		finalizer: { finalize: vi.fn() },
@@ -72,7 +77,10 @@ function createDependencies(): GameUploadServiceDependencies {
 				: `${id}.zip`;
 		},
 		deleteOrQueue: mocks.safeDeleteObject,
-		logger: { error: vi.fn(), warn: vi.fn() },
+		wakeDeletionWorker: vi.fn(),
+		wakeMaintenance: vi.fn(),
+		recordUntrackedMultipartCleanupFailure: vi.fn(),
+		logger: { error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 	};
 }
 
@@ -121,6 +129,10 @@ describe('game upload resource guards', () => {
 		service = createGameUploadService(createDependencies());
 		mocks.findSessionById.mockImplementation(async () => pendingSession());
 		mocks.upsertPartEtag.mockResolvedValue([{ partNumber: 1 }]);
+		mocks.completePartClaim.mockImplementation(async ({ etag }) => ({
+			accepted: true,
+			parts: [{ partNumber: 1, etag, generation: 1 }],
+		}));
 	});
 
 	afterEach(() => {
@@ -178,7 +190,7 @@ describe('game upload resource guards', () => {
 		mocks.createMultipartUpload.mockResolvedValue('multipart-id');
 		mocks.createSessionReplacingActive.mockImplementation(async (data) => ({
 			session: data,
-			replacedSessions: [],
+			durableAborts: [],
 		}));
 
 		const game = await service.createSession(7, 1, { id: 11, role: 'USER' }, {
@@ -225,6 +237,7 @@ describe('game upload resource guards', () => {
 		expect(mocks.abortMultipartUpload).toHaveBeenCalledWith(
 			expect.any(String),
 			'new-multipart',
+			undefined,
 		);
 	});
 
@@ -287,7 +300,12 @@ describe('game upload resource guards', () => {
 
 		expect(result.bytesWritten).toBe(1024);
 		expect(mocks.uploadPart).toHaveBeenCalledTimes(1);
-		expect(mocks.upsertPartEtag).toHaveBeenCalledWith('session-1', 1, 'etag-1024');
+		expect(mocks.completePartClaim).toHaveBeenCalledWith({
+			token: expect.any(String),
+			etag: 'etag-1024',
+			now: new Date('2026-07-31T00:00:00.000Z'),
+		});
+		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
 	});
 
 	it('does not record chunk state when the request stream aborts and allows retry', async () => {
@@ -319,7 +337,7 @@ describe('game upload resource guards', () => {
 		await expect(
 			service.uploadChunk('session-1', 0, aborted, { id: 11, role: 'USER' }),
 		).rejects.toThrow('client aborted');
-		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
+		expect(mocks.completePartClaim).not.toHaveBeenCalled();
 		expect(uploadLimiter.activeCount()).toBe(0);
 
 		const retried = await service.uploadChunk(
@@ -330,7 +348,12 @@ describe('game upload resource guards', () => {
 		);
 
 		expect(retried.bytesWritten).toBe(2);
-		expect(mocks.upsertPartEtag).toHaveBeenCalledWith('session-1', 1, 'etag-2');
+		expect(mocks.completePartClaim).toHaveBeenCalledWith({
+			token: expect.any(String),
+			etag: 'etag-2',
+			now: new Date('2026-07-31T00:00:00.000Z'),
+		});
+		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
 		expect(uploadLimiter.activeCount()).toBe(0);
 	});
 
@@ -347,7 +370,7 @@ describe('game upload resource guards', () => {
 		).rejects.toThrow('s3 upload failed');
 
 		expect(source.destroyed).toBe(true);
-		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
+		expect(mocks.completePartClaim).not.toHaveBeenCalled();
 		expect(uploadLimiter.activeCount()).toBe(0);
 	});
 });

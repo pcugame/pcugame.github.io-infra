@@ -6,12 +6,13 @@ import type { AppLogger, ObjectStorage, Scheduler } from '../application/ports.j
 import { buildApp } from '../app.js';
 import {
 	createProductionBackendContext,
-	type BackendContext,
 	type BackendRoutes,
 } from '../backend-context.js';
 import type { Env } from '../config/env.js';
-import type { PrismaClient } from '../generated/prisma/client.js';
+import type { AuthProductionRepository } from '../modules/auth/composition.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
+import { ownedTestUploadLifecycleResource } from './helpers/upload-lifecycle.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const origin = 'http://localhost:5173';
@@ -41,6 +42,8 @@ function storage(): ObjectStorage {
 		uploadPart: async () => 'etag',
 		completeMultipart: async () => {},
 		abortMultipart: async () => {},
+		listParts: async () => [],
+		listMultipartUploads: async () => [],
 	};
 }
 
@@ -74,63 +77,60 @@ type Session = {
 	};
 };
 
-function prismaHarness(label: string, now: Date) {
+function repositoryHarness(label: string, now: Date) {
 	const sessions = new Map<string, Session>();
 	let lastUser: Session['user'] | undefined;
 	const calls = {
-		userUpsert: vi.fn(async (args: {
-			create: { googleSub: string; email: string; name: string; role?: Session['user']['role']; studentId?: string };
+		userUpsert: vi.fn(async (data: {
+			googleSub: string;
+			email: string;
+			name: string;
+			picture?: string;
+			role?: Session['user']['role'];
+			studentId?: string | null;
 		}) => {
 			lastUser = {
 				id: label.charCodeAt(0),
-				googleSub: args.create.googleSub,
-				email: args.create.email,
-				name: args.create.name,
-				role: args.create.role ?? 'USER',
-				studentId: args.create.studentId ?? null,
+				googleSub: data.googleSub,
+				email: data.email,
+				name: data.name,
+				role: data.role ?? 'USER',
+				studentId: data.studentId ?? null,
 			};
 			return lastUser;
 		}),
-		sessionCreate: vi.fn(async (args: { data: { id: string; userId: number; expiresAt: Date } }) => {
+		sessionCreate: vi.fn(async (data: { id: string; userId: number; expiresAt: Date }) => {
 			if (!lastUser) throw new Error('user must be created first');
 			const record: Session = {
-				id: args.data.id,
-				expiresAt: args.data.expiresAt,
+				id: data.id,
+				expiresAt: data.expiresAt,
 				lastSeenAt: now,
 				user: lastUser,
 			};
 			sessions.set(record.id, record);
 			return record;
 		}),
-		sessionFind: vi.fn(async (args: { where: { id: string } }) => sessions.get(args.where.id) ?? null),
-		sessionTouch: vi.fn(async (args: { where: { id: string }; data: { lastSeenAt: Date } }) => {
-			const record = sessions.get(args.where.id);
+		sessionFind: vi.fn(async (id: string) => sessions.get(id) ?? null),
+		sessionTouch: vi.fn(async (id: string, lastSeenAt: Date) => {
+			const record = sessions.get(id);
 			if (!record) throw new Error('missing session');
-			record.lastSeenAt = args.data.lastSeenAt;
+			record.lastSeenAt = lastSeenAt;
 			return record;
 		}),
-		sessionDelete: vi.fn(async (args: { where: { id: string } }) => ({
-			count: sessions.delete(args.where.id) ? 1 : 0,
+		sessionDelete: vi.fn(async (id: string) => ({
+			count: sessions.delete(id) ? 1 : 0,
 		})),
-		bannedFindMany: vi.fn(async () => []),
-		queryRaw: vi.fn(async () => [{ ok: 1 }]),
 	};
-	const prisma = {
-		user: { upsert: calls.userUpsert },
-		authSession: {
-			create: calls.sessionCreate,
-			findUnique: calls.sessionFind,
-			update: calls.sessionTouch,
-			deleteMany: calls.sessionDelete,
-		},
-		bannedIp: { findMany: calls.bannedFindMany },
-		siteSetting: {
-			upsert: vi.fn(async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 })),
-		},
-		$queryRaw: calls.queryRaw,
-		$disconnect: vi.fn(),
-	} as unknown as PrismaClient;
-	return { prisma, sessions, calls };
+	const repository: AuthProductionRepository = {
+		find: calls.sessionFind,
+		touch: calls.sessionTouch,
+		delete: calls.sessionDelete,
+		purgeExpired: vi.fn(async () => 0),
+		upsertUserByGoogleSub: calls.userUpsert,
+		upsertDevUser: calls.userUpsert,
+		createSession: calls.sessionCreate,
+	};
+	return { repository, sessions, calls };
 }
 
 async function authHarness(
@@ -152,13 +152,16 @@ async function authHarness(
 			hd: `${label}.example.edu`,
 		})),
 	};
-	const prisma = prismaHarness(label, clockValue);
+	const repository = repositoryHarness(label, clockValue);
 	const logs = loggerHarness();
 	const scheduler: Scheduler = {
 		every: vi.fn(() => ({ cancel: vi.fn() })),
 		delay: vi.fn(async () => {}),
 	};
 	const context = await createProductionBackendContext(cfg, {
+		persistence: createScriptedBackendPersistence({
+			authRepository: repository.repository,
+		}),
 		factories: {
 			routes: (_config, _assets, auth): BackendRoutes => ({
 				auth: auth.authController,
@@ -170,12 +173,12 @@ async function authHarness(
 			}),
 		},
 		resources: {
+			uploadLifecycle: ownedTestUploadLifecycleResource(),
 			logger: { value: logs.logger, ownership: 'borrowed' },
 			clock: { value: clock, ownership: 'borrowed' },
 			ids: { value: ids, ownership: 'borrowed' },
 			scheduler: { value: scheduler, ownership: 'borrowed' },
 			googleTokens: { value: googleTokens, ownership: 'borrowed' },
-			prisma: { value: prisma.prisma, ownership: 'borrowed' },
 			s3: {
 				value: { send: vi.fn(), destroy: vi.fn() } as unknown as S3Client,
 				ownership: 'borrowed',
@@ -191,7 +194,7 @@ async function authHarness(
 			},
 		},
 	});
-	return { cfg, context, clock, clockValue, ids, googleTokens, prisma, logs, scheduler };
+	return { cfg, context, clock, clockValue, ids, googleTokens, repository, logs, scheduler };
 }
 
 function session(label: string, overrides: Partial<Session> = {}): Session {
@@ -234,13 +237,11 @@ describe('auth production wiring', () => {
 			'a-private-credential',
 			['a-client-id'],
 		);
-		expect(harness.prisma.calls.userUpsert).toHaveBeenCalledOnce();
-		expect(harness.prisma.calls.sessionCreate).toHaveBeenCalledWith({
-			data: {
-				id: 'a-id-2',
-				userId: 'a'.charCodeAt(0),
-				expiresAt: new Date('2026-08-04T00:00:00.000Z'),
-			},
+		expect(harness.repository.calls.userUpsert).toHaveBeenCalledOnce();
+		expect(harness.repository.calls.sessionCreate).toHaveBeenCalledWith({
+			id: 'a-id-2',
+			userId: 'a'.charCodeAt(0),
+			expiresAt: new Date('2026-08-04T00:00:00.000Z'),
 		});
 		expect(login.headers['set-cookie']).toContain('a-sid=a-id-2');
 		expect(login.headers['set-cookie']).toContain('Expires=Tue, 21 Jul 2026 02:00:00 GMT');
@@ -251,15 +252,12 @@ describe('auth production wiring', () => {
 			headers: { origin, cookie: 'a-sid=a-id-2' },
 		});
 		expect(logout.statusCode).toBe(200);
-		expect(harness.prisma.calls.sessionFind).toHaveBeenCalledWith({
-			where: { id: 'a-id-2' },
-			include: { user: true },
-		});
-		expect(harness.prisma.calls.sessionDelete).toHaveBeenCalledWith({ where: { id: 'a-id-2' } });
+		expect(harness.repository.calls.sessionFind).toHaveBeenCalledWith('a-id-2');
+		expect(harness.repository.calls.sessionDelete).toHaveBeenCalledWith('a-id-2');
 		expect(logout.headers['set-cookie']).toContain('a-sid=;');
 	});
 
-	it('keeps A/B verifier, config, clock, ID, and Prisma graphs isolated', async () => {
+	it('keeps A/B verifier, config, clock, ID, and repository graphs isolated', async () => {
 		const a = await authHarness('a');
 		const b = await authHarness('b', { SESSION_IDLE_MS: 60 * 60 * 1000 }, new Date('2026-07-22T00:00:00.000Z'));
 		const [appA, appB] = await Promise.all([
@@ -277,9 +275,9 @@ describe('auth production wiring', () => {
 		expect(a.googleTokens.verify).toHaveBeenCalledWith('token-a', ['a-client-id']);
 		expect(a.googleTokens.verify).not.toHaveBeenCalledWith('token-b', expect.anything());
 		expect(b.googleTokens.verify).toHaveBeenCalledWith('token-b', ['b-client-id']);
-		expect(a.prisma.sessions.has('a-id-2')).toBe(true);
-		expect(a.prisma.sessions.has('b-id-2')).toBe(false);
-		expect(b.prisma.sessions.has('b-id-2')).toBe(true);
+		expect(a.repository.sessions.has('a-id-2')).toBe(true);
+		expect(a.repository.sessions.has('b-id-2')).toBe(false);
+		expect(b.repository.sessions.has('b-id-2')).toBe(true);
 		expect(loginA.headers['set-cookie']).toContain('a-sid=a-id-2');
 		expect(loginA.headers['set-cookie']).toContain('Expires=Tue, 21 Jul 2026 02:00:00 GMT');
 		expect(loginB.headers['set-cookie']).toContain('b-sid=b-id-2');
@@ -307,14 +305,14 @@ describe('auth production wiring', () => {
 		expect(wrongDomain.statusCode).toBe(403);
 		expect(wrongDomain.json()).toMatchObject({ error: { code: 'EMAIL_DOMAIN_NOT_ALLOWED' } });
 
-		harness.prisma.calls.userUpsert.mockRejectedValueOnce(new Error('repo leaked private-email@p.example.edu'));
+		harness.repository.calls.userUpsert.mockRejectedValueOnce(new Error('repo leaked private-email@p.example.edu'));
 		const repositoryFailure = await app.inject({
 			method: 'POST', url: '/api/auth/google', headers: { origin }, payload: { credential: 'p-repo-token' },
 		});
 		expect(repositoryFailure.statusCode).toBe(500);
 		expect(repositoryFailure.json()).toMatchObject({ error: { code: 'INTERNAL_ERROR' } });
 
-		harness.prisma.calls.sessionFind.mockRejectedValueOnce(new Error('find leaked p-find-session'));
+		harness.repository.calls.sessionFind.mockRejectedValueOnce(new Error('find leaked p-find-session'));
 		const sessionRepositoryFailure = await app.inject({
 			method: 'GET', url: '/api/me', headers: { origin, cookie: 'p-sid=p-find-session' },
 		});
@@ -325,8 +323,8 @@ describe('auth production wiring', () => {
 			id: 'p-secret-session',
 			lastSeenAt: new Date('2026-07-20T23:00:00.000Z'),
 		});
-		harness.prisma.calls.sessionFind.mockResolvedValueOnce(sensitiveSession);
-		harness.prisma.calls.sessionTouch.mockRejectedValueOnce(new Error('touch leaked p-secret-session'));
+		harness.repository.calls.sessionFind.mockResolvedValueOnce(sensitiveSession);
+		harness.repository.calls.sessionTouch.mockRejectedValueOnce(new Error('touch leaked p-secret-session'));
 		const touchFailure = await app.inject({
 			method: 'GET', url: '/api/me', headers: { origin, cookie: 'p-sid=p-secret-session' },
 		});
@@ -334,8 +332,8 @@ describe('auth production wiring', () => {
 		expect(touchFailure.json()).toMatchObject({ data: { authenticated: true } });
 		expect(touchFailure.headers['set-cookie']).toBeUndefined();
 
-		harness.prisma.calls.sessionFind.mockResolvedValueOnce(sensitiveSession);
-		harness.prisma.calls.sessionDelete.mockRejectedValueOnce(new Error('logout leaked p-secret-session'));
+		harness.repository.calls.sessionFind.mockResolvedValueOnce(sensitiveSession);
+		harness.repository.calls.sessionDelete.mockRejectedValueOnce(new Error('logout leaked p-secret-session'));
 		const logoutFailure = await app.inject({
 			method: 'POST', url: '/api/auth/logout', headers: { origin, cookie: 'p-sid=p-secret-session' },
 		});
@@ -362,7 +360,7 @@ describe('auth production wiring', () => {
 		['absolute', session('absolute', { expiresAt: new Date('2026-07-20T23:59:59.999Z') })],
 	])('expires a session at the %s policy boundary through the route plugin', async (_kind, record) => {
 		const harness = await authHarness('e');
-		harness.prisma.calls.sessionFind.mockResolvedValueOnce(record);
+		harness.repository.calls.sessionFind.mockResolvedValueOnce(record);
 		const app = await buildApp({ context: harness.context });
 		apps.push(app);
 		const response = await app.inject({
@@ -370,7 +368,7 @@ describe('auth production wiring', () => {
 		});
 		expect(response.statusCode).toBe(200);
 		expect(response.json()).toMatchObject({ data: { authenticated: false } });
-		expect(harness.prisma.calls.sessionDelete).toHaveBeenCalledWith({ where: { id: record.id } });
+		expect(harness.repository.calls.sessionDelete).toHaveBeenCalledWith(record.id);
 		expect(response.headers['set-cookie']).toContain('e-sid=;');
 	});
 
@@ -392,9 +390,8 @@ describe('auth production wiring', () => {
 
 		const harness = await authHarness('z', { DEV_AUTH_ENABLED: true });
 		expect(harness.googleTokens.verify).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.userUpsert).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.sessionFind).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.bannedFindMany).not.toHaveBeenCalled();
+		expect(harness.repository.calls.userUpsert).not.toHaveBeenCalled();
+		expect(harness.repository.calls.sessionFind).not.toHaveBeenCalled();
 		expect(harness.ids.next).not.toHaveBeenCalled();
 		expect(harness.clock.now).not.toHaveBeenCalled();
 		expect(harness.scheduler.every).not.toHaveBeenCalled();
@@ -402,9 +399,8 @@ describe('auth production wiring', () => {
 		const app = await buildApp({ context: harness.context });
 		apps.push(app);
 		expect(harness.googleTokens.verify).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.userUpsert).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.sessionFind).not.toHaveBeenCalled();
-		expect(harness.prisma.calls.bannedFindMany).not.toHaveBeenCalled();
+		expect(harness.repository.calls.userUpsert).not.toHaveBeenCalled();
+		expect(harness.repository.calls.sessionFind).not.toHaveBeenCalled();
 		expect(harness.ids.next).not.toHaveBeenCalled();
 		expect(harness.clock.now).not.toHaveBeenCalled();
 		expect(harness.scheduler.every).not.toHaveBeenCalled();
