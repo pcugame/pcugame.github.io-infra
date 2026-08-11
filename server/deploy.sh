@@ -168,6 +168,7 @@ do_up() {
     --restart unless-stopped \
     -e "NODE_ENV=production" \
     -e "PORT=4000" \
+    -e "TRUST_PROXY=${TRUST_PROXY:-1}" \
     -e "DATABASE_URL=${db_url}" \
     -e "SESSION_SECRET=${SESSION_SECRET}" \
     -e "SESSION_COOKIE_NAME=${SESSION_COOKIE_NAME:-sid}" \

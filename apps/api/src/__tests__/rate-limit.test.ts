@@ -11,6 +11,7 @@ import { createProtectedDownloadLimiter } from '../shared/protected-download-lim
 // Use very tight limits so the test doesn't need to send 300+ requests.
 const testEnv = {
 	...defaultTestEnv,
+	TRUST_PROXY: '1',
 	RATE_LIMIT_GLOBAL_MAX: 5,
 	RATE_LIMIT_GLOBAL_WINDOW_MS: 60_000,
 	RATE_LIMIT_LOGIN_MAX: 3,
@@ -157,6 +158,29 @@ describe('rate-limit plugin', () => {
 		// then the tighter route bucket short-circuits a later request.
 		expect(codes.slice(0, 3).every((c) => c !== 429)).toBe(true);
 		expect(codes.slice(3).some((c) => c === 429)).toBe(true);
+	});
+
+	it('uses the forwarded client IP behind the single trusted nginx hop', async () => {
+		const proxyAddress = '127.0.0.1';
+		const firstClientCodes: number[] = [];
+		for (let i = 0; i < 7; i++) {
+			const response = await app.inject({
+				method: 'GET',
+				url: '/api/me',
+				remoteAddress: proxyAddress,
+				headers: { 'x-forwarded-for': '198.51.100.10' },
+			});
+			firstClientCodes.push(response.statusCode);
+		}
+
+		expect(firstClientCodes).toContain(429);
+		const independentClient = await app.inject({
+			method: 'GET',
+			url: '/api/me',
+			remoteAddress: proxyAddress,
+			headers: { 'x-forwarded-for': '198.51.100.11' },
+		});
+		expect(independentClient.statusCode).toBe(200);
 	});
 
 	it.each(['/api/health', '/api/health/deep'])(

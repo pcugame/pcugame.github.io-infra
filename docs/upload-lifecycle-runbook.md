@@ -15,6 +15,19 @@ not understand. Use this order for production deployment:
    `reconcile-orphans.ts --apply`. Reconcile is dry-run by default; review a dry-run
    before every apply run.
 
+GitHub Actions expresses this ordering only for releases that need it. Add an
+immutable declaration under `.github/release-gates/web-before-api/` in the same
+compatibility-breaking change. That declaration triggers both component workflows,
+and the API deploy job waits for a successful Web deployment of the exact push SHA
+and for the production Pages endpoint to serve that SHA from `release-sha.txt`
+before opening the SSH deployment channel. The declaration affects only the push
+that adds or changes it; later independent API or Web changes remain independent.
+
+For a manually staged compatibility release, dispatch the Web workflow for the
+target ref first, then dispatch the API workflow for the same ref with
+`require_web_first=true`. The default `false` preserves independent manual API
+hotfixes. Do not select the independent path for a contract-breaking API release.
+
 Configure the S3-compatible bucket lifecycle to expire incomplete multipart uploads
 after an operator-approved retention period. This is defense in depth for uploads
 that die before an `uploadId` reaches PostgreSQL; it does not replace the application
