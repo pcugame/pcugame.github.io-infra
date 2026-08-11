@@ -28,9 +28,9 @@ export interface OrphanServiceDependencies {
 		): Promise<unknown>;
 		claimPendingOrphans(
 			limit: number,
-			now: Date,
-			claimUntil: Date,
+			eligibleAt: Date,
 			claimToken: string,
+			claimLeaseMs: number,
 		): Promise<{
 			id: number;
 			bucket: string;
@@ -39,12 +39,11 @@ export interface OrphanServiceDependencies {
 			attemptCount: number;
 		}[]>;
 		markClaimResolved(id: number, claimToken: string, now: Date): Promise<unknown>;
-		renewClaim(
+		renewActiveClaim(
 			id: number,
 			claimToken: string,
-			now: Date,
-			claimUntil: Date,
-		): Promise<unknown>;
+			claimLeaseMs: number,
+		): Promise<{ count: number }>;
 		markClaimCancelled(
 			id: number,
 			claimToken: string,
@@ -101,6 +100,16 @@ const STORAGE_REQUEST_TIMEOUT_MS = 60 * 1000;
 const MAX_BACKOFF_MS = 60 * 60 * 1000;
 const NOISY_ATTEMPT_THRESHOLD = 10;
 
+function boundedStorageRequest(signal: AbortSignal) {
+	return {
+		signal: AbortSignal.any([
+			signal,
+			AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS),
+		]),
+		requestTimeoutMs: STORAGE_REQUEST_TIMEOUT_MS,
+	};
+}
+
 /**
  * Claim one durable batch, collect one immutable reference snapshot, and retry
  * storage deletion without holding the database advisory lock during I/O.
@@ -115,8 +124,8 @@ export async function runOrphanReaper(
 	const pending = await deps.repository.claimPendingOrphans(
 		REAP_BATCH_SIZE,
 		now,
-		new Date(now.getTime() + CLAIM_LEASE_MS),
 		claimToken,
+		CLAIM_LEASE_MS,
 	);
 	if (pending.length === 0) return { tried: 0, resolved: 0, failed: 0 };
 
@@ -152,6 +161,7 @@ export async function runOrphanReaper(
 		if (signal?.aborted) break;
 		let heartbeat: NodeJS.Timeout | undefined;
 		let claimLost: Error | undefined;
+		let renewalFlight: Promise<void> | undefined;
 		let heartbeatActive = true;
 		const claimAbort = new AbortController();
 		const operationSignal = signal
@@ -167,28 +177,36 @@ export async function runOrphanReaper(
 		const assertClaimOwned = () => {
 			if (claimLost) throw claimLost;
 		};
-		heartbeat = setInterval(() => {
-				const heartbeatNow = deps.clock.now();
-				void deps.repository.renewClaim(
-					orphan.id,
-					claimToken,
-					heartbeatNow,
-					new Date(heartbeatNow.getTime() + CLAIM_LEASE_MS),
-				).then((result) => {
-					if (typeof result === 'object'
-						&& result !== null
-						&& 'count' in result
-						&& result.count !== 1) {
-						loseClaim(new Error('Orphan deletion claim was lost'));
-					}
-				}).catch((error) => {
-					deps.logger.error(
-						{ error, orphanId: orphan.id },
-						'Orphan deletion claim heartbeat failed',
+		const renewOwnedClaim = (): Promise<void> => {
+			assertClaimOwned();
+			renewalFlight ??= (async () => {
+				try {
+					const result = await deps.repository.renewActiveClaim(
+						orphan.id,
+						claimToken,
+						CLAIM_LEASE_MS,
 					);
+					if (result.count !== 1) {
+						throw new Error('Orphan deletion claim was lost');
+					}
+				} catch (error) {
 					loseClaim(error);
-				});
-			}, 30 * 1000);
+					throw claimLost ?? error;
+				}
+			})().finally(() => {
+				renewalFlight = undefined;
+			});
+			return renewalFlight;
+		};
+		heartbeat = setInterval(() => {
+			void renewOwnedClaim().catch((error) => {
+				deps.logger.error(
+					{ error, orphanId: orphan.id },
+					'Orphan deletion claim heartbeat failed',
+				);
+				loseClaim(error);
+			});
+		}, 30 * 1000);
 		heartbeat.unref();
 		try {
 			const referenced = referenceIndex.referencesTarget({
@@ -215,26 +233,35 @@ export async function runOrphanReaper(
 			}
 
 			if (orphan.targetKind === 'PREFIX') {
+				// A successful database-time renewal proves this claim has stayed
+				// continuously live since the batch snapshot. An expired claim can
+				// never be revived, so a stale snapshot fails closed here.
+				await renewOwnedClaim();
 				const keys = await deps.storage.listKeys(
 					orphan.bucket,
 					orphan.storageKey,
-					{ signal: operationSignal, requestTimeoutMs: STORAGE_REQUEST_TIMEOUT_MS },
+					boundedStorageRequest(operationSignal),
 				);
 				for (const key of keys) {
-					assertClaimOwned();
+					// Prefix batches may outlive one lease. Re-prove continuity before
+					// every destructive request without holding a DB lock during I/O.
+					await renewOwnedClaim();
 					if (operationSignal.aborted) {
 						throw operationSignal.reason ?? new Error('Orphan reaper aborted');
 					}
-					await deps.storage.delete(orphan.bucket, key, {
-						signal: operationSignal,
-						requestTimeoutMs: STORAGE_REQUEST_TIMEOUT_MS,
-					});
+					await deps.storage.delete(
+						orphan.bucket,
+						key,
+						boundedStorageRequest(operationSignal),
+					);
 				}
 			} else {
-				await deps.storage.delete(orphan.bucket, orphan.storageKey, {
-					signal: operationSignal,
-					requestTimeoutMs: STORAGE_REQUEST_TIMEOUT_MS,
-				});
+				await renewOwnedClaim();
+				await deps.storage.delete(
+					orphan.bucket,
+					orphan.storageKey,
+					boundedStorageRequest(operationSignal),
+				);
 			}
 			assertClaimOwned();
 			await deps.repository.markClaimResolved(orphan.id, claimToken, now);

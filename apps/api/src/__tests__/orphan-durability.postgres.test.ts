@@ -18,12 +18,14 @@ import {
 	createObjectReferenceResolver,
 } from '../modules/orphan/reference-resolver.js';
 import { createOrphanService } from '../modules/orphan/service.js';
+import { createUploadIntentRepository } from '../modules/upload-intent/repository.js';
 import { parseWebglEntryKey, parseWebglSourceKey } from '../modules/webgl/paths.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 
 describe.runIf(runPostgresIntegration)('orphan durability with production PostgreSQL repositories', () => {
 	let client: PrismaClient;
+	let referenceWriterClient: PrismaClient;
 	let projectRepository: ReturnType<typeof createProjectCrudRepository>;
 	const testId = randomUUID();
 	let userId: number;
@@ -53,7 +55,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		const databaseUrl = process.env['DATABASE_URL'];
 		if (!databaseUrl) throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
 		client = createPrismaClientForDatabase(databaseUrl);
-		await client.$connect();
+		referenceWriterClient = createPrismaClientForDatabase(databaseUrl);
+		await Promise.all([client.$connect(), referenceWriterClient.$connect()]);
 		projectRepository = createProjectCrudRepository(client);
 
 		const user = await client.user.create({
@@ -95,6 +98,9 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 
 	afterAll(async () => {
 		if (!client) return;
+		await client.uploadIntent.deleteMany({
+			where: { bucket: { in: [publicBucket, protectedBucket] } },
+		});
 		await client.orphanObject.deleteMany({
 			where: {
 				OR: [
@@ -106,19 +112,19 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		await client.project.deleteMany({ where: { id: projectId } });
 		await client.exhibition.deleteMany({ where: { id: exhibitionId } });
 		await client.user.deleteMany({ where: { id: userId } });
-		await client.$disconnect();
+		await Promise.all([client.$disconnect(), referenceWriterClient.$disconnect()]);
 	});
 
 	it('does not let reconciliation clear a live deletion claim', async () => {
 		const repository = createOrphanRepository(client);
 		const claimKey = `integration/orphan-durability/${testId}/claim-preserved.bin`;
-		const now = new Date('2026-08-11T00:00:00.000Z');
+		const now = new Date();
 		await repository.upsertOrphan(protectedBucket, claimKey, 'initial', 'EXACT', now);
 		await expect(repository.claimPendingOrphans!(
 			1,
 			now,
-			new Date(now.getTime() + 2 * 60 * 1000),
 			'claim-owner',
+			2 * 60 * 1000,
 		)).resolves.toHaveLength(1);
 
 		await repository.upsertOrphan(
@@ -126,7 +132,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			claimKey,
 			'reconcile-while-claimed',
 			'EXACT',
-			new Date(now.getTime() + 1_000),
+			new Date(),
 		);
 		await expect(client.orphanObject.findUniqueOrThrow({
 			where: {
@@ -137,12 +143,18 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			claimToken: 'claim-owner',
 		});
 
+		await client.orphanObject.update({
+			where: {
+				orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: claimKey },
+			},
+			data: { claimUntil: new Date(0) },
+		});
 		await repository.upsertOrphan(
 			protectedBucket,
 			claimKey,
 			'reconcile-after-expiry',
 			'EXACT',
-			new Date(now.getTime() + 2 * 60 * 1000 + 1),
+			new Date(),
 		);
 		await expect(client.orphanObject.findUniqueOrThrow({
 			where: {
@@ -167,8 +179,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		await expect(repository.claimPendingOrphans!(
 			50,
 			now,
-			new Date(now.getTime() + 2 * 60 * 1000),
 			'old-reaper-token',
+			2 * 60 * 1000,
 		)).resolves.toEqual(expect.arrayContaining([
 			expect.objectContaining({ storageKey: key }),
 		]));
@@ -207,6 +219,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				cancelReason: null,
 				resolvedAt: null,
 			});
+		await client.orphanObject.delete({ where: { id: claimed.id } });
 	});
 
 	it('orders a new reference before a competing deletion claim', async () => {
@@ -241,8 +254,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		const claim = repository.claimPendingOrphans!(
 			50,
 			now,
-			new Date(now.getTime() + 2 * 60 * 1000),
 			'reference-race-claim',
+			2 * 60 * 1000,
 		).finally(() => { claimSettled = true; });
 		await new Promise((resolve) => setTimeout(resolve, 100));
 		expect(claimSettled).toBe(false);
@@ -268,6 +281,102 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			'live-reference-detected',
 			new Date(),
 		);
+	});
+
+	it.each([
+		{ targetKind: 'EXACT' as const, suffix: 'exact' },
+		{ targetKind: 'PREFIX' as const, suffix: 'prefix' },
+	])('does not let a stale $targetKind worker delete after its DB lease expired and a reference committed', async ({ targetKind, suffix }) => {
+		const repository = createOrphanRepository(client);
+		const baseKey = `integration/orphan-durability/${testId}/lease-continuity-${suffix}`;
+		const orphanKey = targetKind === 'PREFIX' ? `${baseKey}/` : `${baseKey}.bin`;
+		const referenceKey = targetKind === 'PREFIX' ? `${baseKey}/live.bin` : orphanKey;
+		const intentId = randomUUID();
+		const realReferences = createObjectReferenceResolver(
+			client,
+			{ publicBucket, protectedBucket },
+			{ error: vi.fn() },
+		);
+		let snapshotCaptured!: () => void;
+		let releaseSnapshot!: () => void;
+		const snapshotReady = new Promise<void>((resolve) => { snapshotCaptured = resolve; });
+		const snapshotGate = new Promise<void>((resolve) => { releaseSnapshot = resolve; });
+		const collect = vi.fn(async () => {
+			const snapshot = await realReferences.collect();
+			snapshotCaptured();
+			await snapshotGate;
+			return snapshot;
+		});
+		const deleteObject = vi.fn(async () => undefined);
+		const listKeys = vi.fn(async () => [referenceKey]);
+		let running: ReturnType<ReturnType<typeof createOrphanService>['runOrphanReaper']> | undefined;
+
+		await repository.upsertOrphan(
+			protectedBucket,
+			orphanKey,
+			'lease-continuity-regression',
+			targetKind,
+			new Date(),
+		);
+		try {
+			const service = createOrphanService({
+				clock: { now: () => new Date() },
+				storage: { delete: deleteObject, listKeys },
+				repository,
+				references: { collect },
+				ids: { next: () => `lease-continuity-worker-${suffix}` },
+				logger: { info: vi.fn(), error: vi.fn() },
+			});
+			running = service.runOrphanReaper();
+			await snapshotReady;
+
+			const claimed = await client.orphanObject.findUniqueOrThrow({
+				where: {
+					orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: orphanKey },
+				},
+			});
+			expect(claimed).toMatchObject({
+				state: 'DELETE_CLAIMED',
+				claimToken: `lease-continuity-worker-${suffix}`,
+			});
+			await client.orphanObject.update({
+				where: { id: claimed.id },
+				data: { claimUntil: new Date(0) },
+			});
+
+			await createUploadIntentRepository(referenceWriterClient).prepare({
+				id: intentId,
+				bucket: protectedBucket,
+				storageKey: referenceKey,
+				purpose: 'lease-continuity-regression',
+				notBefore: new Date(Date.now() + 60 * 60 * 1000),
+			});
+			await expect(referenceWriterClient.uploadIntent.findUniqueOrThrow({
+				where: { id: intentId },
+			})).resolves.toMatchObject({
+				state: 'PREPARED',
+				bucket: protectedBucket,
+				storageKey: referenceKey,
+			});
+
+			releaseSnapshot();
+			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			expect(collect).toHaveBeenCalledOnce();
+			expect(listKeys).not.toHaveBeenCalled();
+			expect(deleteObject).not.toHaveBeenCalled();
+			await expect(realReferences.isReferenced({
+				bucket: protectedBucket,
+				targetKind: 'EXACT',
+				key: referenceKey,
+			})).resolves.toBe(true);
+		} finally {
+			releaseSnapshot();
+			if (running) await Promise.allSettled([running]);
+			await referenceWriterClient.uploadIntent.deleteMany({ where: { id: intentId } });
+			await client.orphanObject.deleteMany({
+				where: { bucket: protectedBucket, storageKey: orphanKey },
+			});
+		}
 	});
 
 	it('atomically commits asset deletion, clears completed-session pointers, and converges after a worker wake', async () => {

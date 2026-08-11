@@ -17,7 +17,7 @@ function createDependencies() {
 		upsertOrphan: vi.fn(async () => undefined),
 		claimPendingOrphans: vi.fn(async (): Promise<ClaimedOrphan[]> => []),
 		markClaimResolved: vi.fn(async () => ({ count: 1 })),
-		renewClaim: vi.fn(async () => ({ count: 1 })),
+		renewActiveClaim: vi.fn(async () => ({ count: 1 })),
 		markClaimCancelled: vi.fn(async () => ({ count: 1 })),
 		markClaimFailed: vi.fn(async () => ({ count: 1 })),
 	};
@@ -69,7 +69,7 @@ function orphan(
 }
 
 describe('orphan object service', () => {
-	it('uses one injected timestamp for claim, success, and failure updates', async () => {
+	it('uses a DB lease duration while keeping one timestamp for status updates', async () => {
 		const { deps, now } = createDependencies();
 		deps.repository.claimPendingOrphans.mockResolvedValue([
 			orphan(1, 'ok.png'),
@@ -84,8 +84,8 @@ describe('orphan object service', () => {
 		expect(deps.repository.claimPendingOrphans).toHaveBeenCalledWith(
 			50,
 			now,
-			new Date('2026-07-21T05:02:00.000Z'),
 			'claim-token',
+			120_000,
 		);
 		expect(deps.repository.markClaimResolved).toHaveBeenCalledWith(1, 'claim-token', now);
 		expect(deps.repository.markClaimFailed).toHaveBeenCalledWith(
@@ -145,6 +145,24 @@ describe('orphan object service', () => {
 			expect.objectContaining({ requestTimeoutMs: 60_000 }),
 		);
 		expect(deps.storage.delete).toHaveBeenCalledTimes(2);
+		expect(deps.repository.renewActiveClaim).toHaveBeenNthCalledWith(
+			1,
+			12,
+			'claim-token',
+			120_000,
+		);
+		expect(deps.repository.renewActiveClaim).toHaveBeenNthCalledWith(
+			2,
+			12,
+			'claim-token',
+			120_000,
+		);
+		expect(deps.repository.renewActiveClaim).toHaveBeenNthCalledWith(
+			3,
+			12,
+			'claim-token',
+			120_000,
+		);
 		expect(deps.repository.markClaimResolved).toHaveBeenCalledWith(12, 'claim-token', now);
 	});
 
@@ -189,7 +207,55 @@ describe('orphan object service', () => {
 		expect(deps.storage.delete).not.toHaveBeenCalled();
 	});
 
-	it('aborts storage work and leaves the row retryable when its deletion lease is lost', async () => {
+	it('fails closed before storage when an expired claim cannot prove continuity', async () => {
+		const { deps } = createDependencies();
+		deps.repository.claimPendingOrphans.mockResolvedValue([
+			orphan(15, 'game/already-expired.zip', { bucket: 'protected' }),
+		]);
+		deps.repository.renewActiveClaim.mockResolvedValue({ count: 0 });
+		const service = createOrphanService(deps);
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({
+			tried: 1,
+			resolved: 0,
+			failed: 1,
+		});
+		expect(deps.storage.delete).not.toHaveBeenCalled();
+		expect(deps.repository.markClaimFailed).toHaveBeenCalledWith(
+			15,
+			'claim-token',
+			expect.objectContaining({ message: 'Orphan deletion claim was lost' }),
+			new Date('2026-07-21T05:00:00.000Z'),
+			expect.any(Date),
+		);
+	});
+
+	it('abandons a later batch row instead of using the stale batch snapshot', async () => {
+		const { deps } = createDependencies();
+		deps.repository.claimPendingOrphans.mockResolvedValue([
+			orphan(16, 'batch/front.bin'),
+			orphan(17, 'batch/back.bin'),
+		]);
+		deps.repository.renewActiveClaim
+			.mockResolvedValueOnce({ count: 1 })
+			.mockResolvedValueOnce({ count: 0 });
+		const service = createOrphanService(deps);
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({
+			tried: 2,
+			resolved: 1,
+			failed: 1,
+		});
+		expect(deps.references.collect).toHaveBeenCalledOnce();
+		expect(deps.storage.delete).toHaveBeenCalledOnce();
+		expect(deps.storage.delete).toHaveBeenCalledWith(
+			'public',
+			'batch/front.bin',
+			expect.objectContaining({ requestTimeoutMs: 60_000 }),
+		);
+	});
+
+	it('aborts in-flight storage work and requeues when heartbeat ownership is lost', async () => {
 		vi.useFakeTimers();
 		try {
 			const { deps } = createDependencies();
@@ -210,7 +276,9 @@ describe('orphan object service', () => {
 			deps.repository.claimPendingOrphans.mockResolvedValue([
 				orphan(15, 'game/lease-lost.zip', { bucket: 'protected' }),
 			]);
-			deps.repository.renewClaim.mockResolvedValue({ count: 0 });
+			deps.repository.renewActiveClaim
+				.mockResolvedValueOnce({ count: 1 })
+				.mockResolvedValueOnce({ count: 0 });
 			const service = createOrphanService(deps);
 
 			const running = service.runOrphanReaper();

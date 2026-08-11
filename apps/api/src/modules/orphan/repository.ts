@@ -49,7 +49,12 @@ export function createOrphanRepository(client: OrphanRepositoryClient) {
 			})();
 		},
 
-		claimPendingOrphans: (limit: number, now: Date, claimUntil: Date, claimToken: string) => {
+		claimPendingOrphans: (
+			limit: number,
+			eligibleAt: Date,
+			claimToken: string,
+			claimLeaseMs: number,
+		) => {
 			return client.$queryRaw<Array<{
 				id: number;
 				bucket: string;
@@ -63,12 +68,15 @@ export function createOrphanRepository(client: OrphanRepositoryClient) {
 					SELECT orphan."id"
 					FROM "orphan_objects" AS orphan
 					CROSS JOIN object_reference_lock
-					WHERE orphan."next_attempt_at" <= ${now}
+					WHERE orphan."next_attempt_at" <= ${eligibleAt}
 						AND (
 							orphan."state" = 'PENDING'::"OrphanState"
 							OR (
 								orphan."state" = 'DELETE_CLAIMED'::"OrphanState"
-								AND (orphan."claim_until" IS NULL OR orphan."claim_until" <= ${now})
+								AND (
+									orphan."claim_until" IS NULL
+									OR orphan."claim_until" <= clock_timestamp()
+								)
 							)
 						)
 					ORDER BY orphan."id"
@@ -78,9 +86,10 @@ export function createOrphanRepository(client: OrphanRepositoryClient) {
 				UPDATE "orphan_objects" AS orphan
 				SET "state" = 'DELETE_CLAIMED'::"OrphanState",
 					"claim_token" = ${claimToken},
-					"claim_until" = ${claimUntil},
+					"claim_until" = clock_timestamp()
+						+ (${claimLeaseMs} * INTERVAL '1 millisecond'),
 					"cancel_reason" = NULL,
-					"last_tried_at" = ${now}
+					"last_tried_at" = ${eligibleAt}
 				FROM candidates
 				WHERE orphan."id" = candidates."id"
 				RETURNING orphan."id",
@@ -128,16 +137,24 @@ export function createOrphanRepository(client: OrphanRepositoryClient) {
 			});
 		},
 
-		renewClaim(id: number, claimToken: string, now: Date, claimUntil: Date) {
-			return client.orphanObject.updateMany({
-				where: {
-					id,
-					state: 'DELETE_CLAIMED',
-					claimToken,
-					claimUntil: { gt: now },
-				},
-				data: { claimUntil },
-			});
+		async renewActiveClaim(id: number, claimToken: string, claimLeaseMs: number) {
+			const renewed = await client.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+				WITH object_reference_lock AS MATERIALIZED (
+					SELECT pg_advisory_xact_lock(${OBJECT_REFERENCE_CLAIM_LOCK_ID})
+				), renewed AS (
+					UPDATE "orphan_objects" AS orphan
+					SET "claim_until" = clock_timestamp()
+						+ (${claimLeaseMs} * INTERVAL '1 millisecond')
+					FROM object_reference_lock
+					WHERE orphan."id" = ${id}
+						AND orphan."state" = 'DELETE_CLAIMED'::"OrphanState"
+						AND orphan."claim_token" = ${claimToken}
+						AND orphan."claim_until" > clock_timestamp()
+					RETURNING orphan."id"
+				)
+				SELECT "id" FROM renewed
+			`);
+			return { count: renewed.length };
 		},
 
 		async markClaimCancelled(id: number, claimToken: string, reason: string, now: Date) {
