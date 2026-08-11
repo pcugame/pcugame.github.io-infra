@@ -34,8 +34,6 @@ export interface WebglDeploymentDependencies {
 		ObjectDeletionCoordinator,
 		| 'deleteOrQueue'
 		| 'deletePrefixOrQueue'
-		| 'deleteDurablyQueued'
-		| 'deleteDurablyQueuedPrefix'
 	>;
 	logger: Pick<AppLogger, 'warn' | 'error'>;
 	storageRequest?: StorageRequestOptions;
@@ -228,56 +226,11 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 		await deleteDeployment(keys, reason);
 	}
 
-	/** Cleanup after the same transaction persisted source+prefix outbox rows. */
-	async function deleteDurablyQueuedDeployment(
-		keys: WebglDeploymentKeys,
-		reason: string,
-	): Promise<void> {
-		await Promise.all([
-			deps.deletion.deleteDurablyQueued(
-				deps.config.protectedBucket,
-				keys.sourceKey,
-				`${reason}-source`,
-				{
-					projectId: keys.projectId,
-					deploymentId: keys.deploymentId,
-				},
-			),
-			deps.deletion.deleteDurablyQueuedPrefix(
-				deps.config.publicBucket,
-				keys.sitePrefix,
-				`${reason}-site`,
-				{
-					projectId: keys.projectId,
-					deploymentId: keys.deploymentId,
-				},
-			),
-		]);
-	}
-
-	async function deleteDurablyQueuedDeploymentByEntry(
-		projectId: number,
-		entryKey: string,
-		reason: string,
-	): Promise<void> {
-		const keys = parseWebglEntryKey(projectId, entryKey);
-		if (!keys) {
-			deps.logger.error(
-				{ projectId, entryKey, reason },
-				'Refusing to delete malformed WebGL entry key',
-			);
-			throw new Error(`Malformed WebGL entry key for project ${projectId}`);
-		}
-		await deleteDurablyQueuedDeployment(keys, reason);
-	}
-
 	return {
 		deploySource,
 		rollbackPublicDeployment,
 		deleteProtectedSource,
 		deleteDeployment,
 		deleteDeploymentByEntry,
-		deleteDurablyQueuedDeployment,
-		deleteDurablyQueuedDeploymentByEntry,
 	};
 }

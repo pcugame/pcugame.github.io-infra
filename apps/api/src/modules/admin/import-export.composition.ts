@@ -8,17 +8,19 @@ import type {
 	ObjectStorage,
 } from '../../application/ports.js';
 import type { Env } from '../../config/env.js';
-import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createExportController } from './export/controller.js';
 import { createExportFileWriter } from './export/file.adapter.js';
-import { createExportRepository } from './export/repository.js';
 import {
 	createExportService,
+	type ExportProject,
 	type ExportProgressStore,
 } from './export/service.js';
 import { createImportController } from './import/controller.js';
-import { createImportRepository } from './import/repository.js';
-import { createImportService } from './import/service.js';
+import { createImportService, type ImportRepository } from './import/service.js';
+
+export interface ExportRepository {
+	findProjectsWithAssets(year?: number): Promise<ExportProject[]>;
+}
 
 type ImportExportConfig = Pick<
 	Env,
@@ -27,7 +29,8 @@ type ImportExportConfig = Pick<
 
 export interface ImportExportProductionDependencies {
 	config: ImportExportConfig;
-	prisma: PrismaClient;
+	importRepository: ImportRepository;
+	exportRepository: ExportRepository;
 	storage: ObjectStorage;
 	fileSystem: FileSystem;
 	exportProgress: ExportProgressStore;
@@ -55,9 +58,7 @@ function bucketForKind(kind: AssetKind, config: ImportExportConfig): string {
 export function createImportExportProductionGraph(
 	deps: ImportExportProductionDependencies,
 ): ImportExportProductionGraph {
-	const importRepository = createImportRepository(deps.prisma);
-	const importService = createImportService({ repository: importRepository });
-	const exportRepository = createExportRepository(deps.prisma);
+	const importService = createImportService({ repository: deps.importRepository });
 	const fileWriter = createExportFileWriter({
 		ids: deps.ids,
 		async getObject(bucket, key, signal) {
@@ -74,7 +75,7 @@ export function createImportExportProductionGraph(
 		),
 	});
 	const exportService = createExportService({
-		findProjects: exportRepository.findProjectsWithAssets,
+		findProjects: deps.exportRepository.findProjectsWithAssets,
 		async pathExists(path) {
 			try {
 				await deps.fileSystem.access(path);

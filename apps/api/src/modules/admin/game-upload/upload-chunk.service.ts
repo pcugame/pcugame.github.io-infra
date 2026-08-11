@@ -4,6 +4,12 @@ import { createCountedChunkStream } from './chunk-stream.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
 import type { GameUploadServiceDependencies } from './ports.js';
+import {
+	aggregateBusinessAndCleanupError,
+	cleanupUntrackedMultipart,
+	MultipartBusinessCleanupError,
+	UntrackedMultipartCleanupError,
+} from './multipart-cleanup.js';
 
 async function abortUnusedReplacement(
 	deps: GameUploadServiceDependencies,
@@ -11,19 +17,7 @@ async function abortUnusedReplacement(
 	uploadId: string,
 	reason: string,
 ): Promise<void> {
-	try {
-		await deps.storage.abortMultipart(key, uploadId);
-	} catch (error) {
-		try {
-			if (!deps.repository.queueAbortTask) throw new Error('Multipart abort queue is unavailable');
-			await deps.repository.queueAbortTask({ key, uploadId, reason });
-		} catch (queueError) {
-			deps.logger.error(
-				{ error, queueError, key, uploadId },
-				'Failed to abort or durably queue unused replacement multipart upload',
-			);
-		}
-	}
+	await cleanupUntrackedMultipart(deps, { key, uploadId, reason });
 }
 
 async function resetGeneration(
@@ -31,15 +25,35 @@ async function resetGeneration(
 	session: { id: string; s3Key: string; s3UploadId: string; multipartGeneration?: number },
 	reason: string,
 ): Promise<boolean> {
-	if (!deps.repository.replaceMultipartGeneration) return false;
 	const generation = session.multipartGeneration ?? 1;
 	const nextUploadId = await deps.storage.createMultipart(session.s3Key);
-	const reset = await deps.repository.replaceMultipartGeneration({
-		sessionId: session.id,
-		expectedGeneration: generation,
-		newUploadId: nextUploadId,
-		reason,
-	});
+	let reset: Awaited<ReturnType<typeof deps.repository.replaceMultipartGeneration>>;
+	try {
+		reset = await deps.repository.replaceMultipartGeneration({
+			sessionId: session.id,
+			expectedGeneration: generation,
+			newUploadId: nextUploadId,
+			reason,
+		});
+	} catch (businessError) {
+		try {
+			await cleanupUntrackedMultipart(deps, {
+				key: session.s3Key,
+				uploadId: nextUploadId,
+				reason: 'generation-reset-persistence-failed',
+			});
+		} catch (cleanupError) {
+			if (cleanupError instanceof UntrackedMultipartCleanupError) {
+				throw aggregateBusinessAndCleanupError(
+					businessError,
+					cleanupError,
+					'Multipart generation replacement and cleanup both failed',
+				);
+			}
+			throw cleanupError;
+		}
+		throw businessError;
+	}
 	if (!reset.replaced) {
 		await abortUnusedReplacement(
 			deps,
@@ -49,14 +63,26 @@ async function resetGeneration(
 		);
 		return false;
 	}
-	// The transaction already queued the old upload durably. This only reduces
-	// storage residue promptly.
-	await deps.storage.abortMultipart(session.s3Key, session.s3UploadId).catch((error) => {
-		deps.logger.error(
-			{ error, sessionId: session.id, s3Key: session.s3Key },
-			'Best-effort abort failed after multipart generation reset; durable task retained',
-		);
-	});
+	const durableAbort = reset.durableAbort;
+	if (durableAbort) {
+		// The discriminated result proves the transaction committed the exact old
+		// upload to the abort outbox before this prompt, best-effort abort.
+		deps.wakeMaintenance();
+		await deps.storage.abortMultipart(
+			durableAbort.key,
+			durableAbort.uploadId,
+		).catch((error) => {
+			deps.logger.error(
+				{
+					error,
+					sessionId: durableAbort.sessionId,
+					s3Key: durableAbort.key,
+					tracking: durableAbort.tracking,
+				},
+				'Best-effort abort failed after multipart generation reset; durable task retained',
+			);
+		});
+	}
 	return true;
 }
 
@@ -93,52 +119,56 @@ export async function uploadChunk(
 
 		const partNumber = chunkIndex + 1;
 		const generation = session.multipartGeneration ?? 1;
-		let claimToken: string | undefined;
-		if (deps.repository.acquirePartClaim) {
-			claimToken = deps.ids.next();
-			const now = deps.clock.now();
-			const claim = await deps.repository.acquirePartClaim({
-				sessionId: session.id,
-				partNumber,
-				generation,
-				token: claimToken,
-				owner: `user:${user.id}`,
-				now,
-				leaseUntil: new Date(now.getTime() + 2 * 60 * 1000),
-			});
-			if (claim.kind === 'busy') {
-				throw operationInProgress(`Chunk ${chunkIndex} is already being uploaded`);
-			}
-			if (claim.kind === 'expired') {
-				if (!deps.repository.replaceMultipartGeneration) {
-					throw conflict('An earlier chunk upload expired; create a new upload session');
-				}
+		const claimToken = deps.ids.next();
+		const now = deps.clock.now();
+		const claim = await deps.repository.acquirePartClaim({
+			sessionId: session.id,
+			partNumber,
+			generation,
+			token: claimToken,
+			owner: `user:${user.id}`,
+			now,
+			leaseUntil: new Date(now.getTime() + 2 * 60 * 1000),
+		});
+		if (claim.kind === 'busy') {
+			throw operationInProgress(`Chunk ${chunkIndex} is already being uploaded`);
+		}
+		if (claim.kind === 'expired') {
+			const businessError = conflict('A stale chunk upload was isolated; all chunks must be uploaded again');
+			try {
 				await resetGeneration(deps, {
 					id: session.id,
 					s3Key: session.s3Key,
 					s3UploadId: session.s3UploadId,
 					multipartGeneration: generation,
 				}, 'expired-part-claim-generation-reset');
-				throw conflict('A stale chunk upload was isolated; all chunks must be uploaded again');
+			} catch (cleanupError) {
+				if (cleanupError instanceof UntrackedMultipartCleanupError) {
+					throw aggregateBusinessAndCleanupError(
+						businessError,
+						cleanupError,
+						'Expired chunk claim and replacement cleanup both failed',
+					);
+				}
+				throw cleanupError;
 			}
-			if (claim.kind === 'unavailable') {
-				throw badRequest('Upload session changed before the chunk claim was acquired');
-			}
-			if (deps.repository.renewPartClaim) {
-				claimHeartbeat = setInterval(() => {
-					const heartbeatNow = deps.clock.now();
-					void deps.repository.renewPartClaim!(
-						claimToken!,
-						heartbeatNow,
-						new Date(heartbeatNow.getTime() + 2 * 60 * 1000),
-					).catch((error) => deps.logger.error(
-						{ error, sessionId: session.id, partNumber },
-						'Part-upload claim heartbeat failed',
-					));
-				}, 30 * 1000);
-				claimHeartbeat.unref();
-			}
+			throw businessError;
 		}
+		if (claim.kind === 'unavailable') {
+			throw badRequest('Upload session changed before the chunk claim was acquired');
+		}
+		claimHeartbeat = setInterval(() => {
+			const heartbeatNow = deps.clock.now();
+			void deps.repository.renewPartClaim(
+				claimToken,
+				heartbeatNow,
+				new Date(heartbeatNow.getTime() + 2 * 60 * 1000),
+			).catch((error) => deps.logger.error(
+				{ error, sessionId: session.id, partNumber },
+				'Part-upload claim heartbeat failed',
+			));
+		}, 30 * 1000);
+		claimHeartbeat.unref();
 		const countedBody = createCountedChunkStream(body, chunkIndex, expectedSize);
 
 		let etag: string;
@@ -160,30 +190,37 @@ export async function uploadChunk(
 		}
 
 		let parts;
-		if (claimToken && deps.repository.completePartClaim) {
-			const completed = await deps.repository.completePartClaim({
-				token: claimToken,
-				etag,
-				now: deps.clock.now(),
-			});
-			if (!completed.accepted) {
+		const completed = await deps.repository.completePartClaim({
+			token: claimToken,
+			etag,
+			now: deps.clock.now(),
+		});
+		if (!completed.accepted) {
+			const businessError = conflict('Chunk claim expired; the multipart generation must be restarted');
+			try {
 				await resetGeneration(deps, {
 					id: session.id,
 					s3Key: session.s3Key,
 					s3UploadId: session.s3UploadId,
 					multipartGeneration: generation,
-				}, 'part-claim-expired-before-etag-commit').catch((error) => {
-					deps.logger.error(
-						{ error, sessionId: session.id, partNumber },
-						'Immediate multipart generation reset failed; maintenance will retry',
+				}, 'part-claim-expired-before-etag-commit');
+			} catch (error) {
+				if (error instanceof UntrackedMultipartCleanupError) {
+					throw aggregateBusinessAndCleanupError(
+						businessError,
+						error,
+						'Chunk claim expiration and replacement cleanup both failed',
 					);
-				});
-				throw conflict('Chunk claim expired; the multipart generation must be restarted');
+				}
+				if (error instanceof MultipartBusinessCleanupError) throw error;
+				deps.logger.error(
+					{ error, sessionId: session.id, partNumber },
+					'Immediate multipart generation reset failed; maintenance will retry',
+				);
 			}
-			parts = completed.parts;
-		} else {
-			parts = await deps.repository.upsertPartEtag(session.id, partNumber, etag);
+			throw businessError;
 		}
+		parts = completed.parts;
 
 		return {
 			index: chunkIndex,

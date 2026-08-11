@@ -28,37 +28,7 @@ export async function queueDurableDeletions(
 	for (const target of unique.values()) {
 		const targetKind = target.targetKind
 			?? (target.storageKey.endsWith('/') ? 'PREFIX' : 'EXACT');
-		const delegate = client.orphanObject;
-		const supportsConditionalRequeue =
-			typeof delegate.updateMany === 'function'
-			&& typeof delegate.findUniqueOrThrow === 'function';
-		if (!supportsConditionalRequeue) {
-			await delegate.upsert({
-				where: {
-					orphan_bucket_storage_key: {
-						bucket: target.bucket,
-						storageKey: target.storageKey,
-					},
-				},
-				create: { ...target, targetKind, nextAttemptAt: now },
-				update: {
-					reason: target.reason,
-					targetKind,
-					state: 'PENDING',
-					claimToken: null,
-					claimUntil: null,
-					cancelReason: null,
-					resolvedAt: null,
-					attemptCount: 0,
-					lastTriedAt: null,
-					lastError: null,
-					nextAttemptAt: now,
-				},
-			});
-			continue;
-		}
-
-		await delegate.upsert({
+		await client.orphanObject.upsert({
 			where: {
 				orphan_bucket_storage_key: {
 					bucket: target.bucket,
@@ -77,7 +47,7 @@ export async function queueDurableDeletions(
 		// reference writer must remain blocked while that worker may delete), but
 		// leave a durable signal so a stale "live reference" observation requeues
 		// instead of cancelling this newer business outbox.
-		await delegate.updateMany({
+		await client.orphanObject.updateMany({
 			where: {
 				bucket: target.bucket,
 				storageKey: target.storageKey,
@@ -91,7 +61,7 @@ export async function queueDurableDeletions(
 		});
 		// Reconciliation uses createOrphanRepository.upsertOrphan instead and keeps
 		// active claims entirely unchanged.
-		await delegate.updateMany({
+		await client.orphanObject.updateMany({
 			where: {
 				bucket: target.bucket,
 				storageKey: target.storageKey,

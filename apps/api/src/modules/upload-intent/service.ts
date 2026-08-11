@@ -1,7 +1,9 @@
 import type { ObjectStorage } from '../../application/ports.js';
-import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createClaimToken } from '../../shared/claim-token.js';
-import { collectObjectReferences, inventoryReferencesTarget } from '../orphan/reference-resolver.js';
+import {
+	createObjectReferenceIndex,
+	type ObjectReferenceInventory,
+} from '../orphan/reference-resolver.js';
 import type { NewUploadIntent, UploadIntentRepository } from './ports.js';
 
 const CLAIM_LEASE_MS = 2 * 60 * 1000;
@@ -10,10 +12,9 @@ const DEFAULT_GRACE_MS = 60 * 60 * 1000;
 const BATCH_SIZE = 50;
 
 export function createUploadIntentService(deps: {
-	prisma: PrismaClient;
 	repository: UploadIntentRepository;
+	references: { collect(): Promise<ObjectReferenceInventory> };
 	storage: Pick<ObjectStorage, 'head'>;
-	buckets: { publicBucket: string; protectedBucket: string };
 	clock: { now(): Date };
 	ids?: { next(): string };
 	logger: {
@@ -50,6 +51,31 @@ export function createUploadIntentService(deps: {
 				claimToken,
 				new Date(now.getTime() + CLAIM_LEASE_MS),
 			);
+			if (intents.length === 0) {
+				return { tried: 0, referenced: 0, queued: 0, missing: 0 };
+			}
+			let referenceIndex: ReturnType<typeof createObjectReferenceIndex>;
+			try {
+				referenceIndex = createObjectReferenceIndex(await deps.references.collect());
+			} catch (error) {
+				await Promise.allSettled(intents.map((intent) => {
+					const backoff = Math.min(
+						60 * 60 * 1000,
+						30_000 * (2 ** Math.min(intent.attemptCount, 8)),
+					);
+					return repository.markSweepFailed(
+						intent.id,
+						claimToken,
+						error,
+						new Date(now.getTime() + backoff),
+					);
+				}));
+				deps.logger.error(
+					{ error, claimed: intents.length },
+					'Upload-intent reference snapshot failed; claimed intents were requeued',
+				);
+				return { tried: intents.length, referenced: 0, queued: 0, missing: 0 };
+			}
 			let referenced = 0;
 			let queued = 0;
 			let missing = 0;
@@ -69,19 +95,11 @@ export function createUploadIntentService(deps: {
 				}, CLAIM_HEARTBEAT_MS);
 				heartbeat.unref();
 				try {
-					const inventory = await collectObjectReferences(
-						deps.prisma,
-						deps.buckets,
-						deps.logger,
-					);
-					inventory.references = inventory.references.filter(
-						(reference) => reference.source !== `upload-intent:${intent.id}`,
-					);
-					if (inventoryReferencesTarget(inventory, {
+					if (referenceIndex.referencesTarget({
 						bucket: intent.bucket,
 						targetKind: 'EXACT',
 						key: intent.storageKey,
-					})) {
+					}, { ignoreSource: `upload-intent:${intent.id}` })) {
 						await repository.markReferenced(intent.id, claimToken);
 						referenced++;
 						continue;

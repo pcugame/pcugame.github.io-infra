@@ -193,3 +193,11 @@ export type SubmitProjectRepository = Pick<ProjectRepository,
 export type ProjectAssetRepository = Pick<ProjectRepository,
 	'createAsset' | 'findExhibitionById' | 'replaceOrCreateReplaceableAsset'
 >;
+
+/** Complete application-facing project port assembled once by BackendContext. */
+export type ProjectApplicationRepository = ProjectCrudRepository
+	& SubmitProjectRepository
+	& ProjectAssetRepository
+	& {
+		bulkUpdateStatus(ids: number[], status: ProjectStatus): Promise<{ count: number }>;
+	};

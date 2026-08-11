@@ -12,13 +12,7 @@ export interface ExhibitionServiceDependencies {
 	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits;
 	uploadSlots: { acquire(): void; release(): void };
 	posterUpload: PosterUploadCoordinator;
-	/** Best-effort delete of an object already protected by the repository transaction's outbox. */
-	deleteOrQueue(
-		bucket: string,
-		key: string,
-		reason: string,
-		context: Record<string, unknown>,
-	): Promise<void>;
+	wakeDeletionWorker(): void;
 	logger?: {
 		error(context: Record<string, unknown>, message: string): void;
 	};
@@ -29,24 +23,8 @@ function exhibitionPosterUrl(deps: ExhibitionServiceDependencies, storageKey: st
 	return `${deps.apiPublicUrl}/api/public/exhibition-posters/${storageKey}`;
 }
 
-async function cleanupCommittedPoster(
-	deps: ExhibitionServiceDependencies,
-	id: number,
-	storageKey: string,
-	reason: string,
-): Promise<void> {
-	await deps.deleteOrQueue(
-		deps.posterBucket,
-		storageKey,
-		reason,
-		{ exhibitionId: id },
-	).catch((error) => {
-		deps.recordPostCommitCleanupFailure?.();
-		deps.logger?.error(
-			{ error, exhibitionId: id, storageKey, reason },
-			'Post-commit exhibition poster cleanup failed; durable outbox retained',
-		);
-	});
+function cleanupCommittedPoster(deps: ExhibitionServiceDependencies): void {
+	deps.wakeDeletionWorker();
 }
 
 function serializeExhibition(
@@ -90,12 +68,7 @@ export async function deleteExhibition(deps: ExhibitionServiceDependencies, id: 
 	if (!deleted) throw notFound('Exhibition not found');
 
 	if (deleted.posterStorageKey) {
-		await cleanupCommittedPoster(
-			deps,
-			id,
-			deleted.posterStorageKey,
-			'exhibition-delete-poster',
-		);
+		cleanupCommittedPoster(deps);
 	}
 }
 
@@ -152,12 +125,7 @@ export async function replacePoster(
 		uploadPersisted = true;
 
 		if (result.oldStorageKey && result.oldStorageKey !== savedFile.storageKey) {
-			await cleanupCommittedPoster(
-				deps,
-				id,
-				result.oldStorageKey,
-				'exhibition-poster-replace-previous',
-			);
+			cleanupCommittedPoster(deps);
 		}
 
 		return serializeExhibition(deps, result.updated);
@@ -189,12 +157,7 @@ export async function deletePoster(deps: ExhibitionServiceDependencies, id: numb
 	if (!result) throw notFound('Exhibition not found');
 
 	if (result.oldStorageKey) {
-		await cleanupCommittedPoster(
-			deps,
-			id,
-			result.oldStorageKey,
-			'exhibition-poster-delete',
-		);
+		cleanupCommittedPoster(deps);
 	}
 }
 

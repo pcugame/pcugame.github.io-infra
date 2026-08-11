@@ -4,7 +4,7 @@ import { OUTBOX_REQUEUE_CANCEL_REASON } from './outbox.js';
 
 type OrphanRepositoryClient = Pick<PrismaClient, 'orphanObject' | '$queryRaw'>;
 
-export function createOrphanRepository(client: OrphanRepositoryClient, claimsEnabled = true) {
+export function createOrphanRepository(client: OrphanRepositoryClient) {
 	return {
 		upsertOrphan(
 			bucket: string,
@@ -13,38 +13,13 @@ export function createOrphanRepository(client: OrphanRepositoryClient, claimsEna
 			targetKind: 'EXACT' | 'PREFIX' = storageKey.endsWith('/') ? 'PREFIX' : 'EXACT',
 			now = new Date(),
 		) {
-			const delegate = client.orphanObject;
-			const supportsConditionalRequeue =
-				typeof delegate.updateMany === 'function'
-				&& typeof delegate.findUniqueOrThrow === 'function';
-
-			if (!supportsConditionalRequeue) {
-				return delegate.upsert({
-					where: { orphan_bucket_storage_key: { bucket, storageKey } },
-					create: { bucket, storageKey, reason, targetKind, nextAttemptAt: now },
-					update: {
-						reason,
-						targetKind,
-						state: 'PENDING',
-						claimToken: null,
-						claimUntil: null,
-						cancelReason: null,
-						resolvedAt: null,
-						attemptCount: 0,
-						lastError: null,
-						lastTriedAt: null,
-						nextAttemptAt: now,
-					},
-				});
-			}
-
 			return (async () => {
-				await delegate.upsert({
+				await client.orphanObject.upsert({
 					where: { orphan_bucket_storage_key: { bucket, storageKey } },
 					create: { bucket, storageKey, reason, targetKind, nextAttemptAt: now },
 					update: { reason },
 				});
-				await delegate.updateMany({
+				await client.orphanObject.updateMany({
 					where: {
 						bucket,
 						storageKey,
@@ -68,13 +43,13 @@ export function createOrphanRepository(client: OrphanRepositoryClient, claimsEna
 						nextAttemptAt: now,
 					},
 				});
-				return delegate.findUniqueOrThrow({
+				return client.orphanObject.findUniqueOrThrow({
 					where: { orphan_bucket_storage_key: { bucket, storageKey } },
 				});
 			})();
 		},
 
-		claimPendingOrphans: claimsEnabled ? (limit: number, now: Date, claimUntil: Date, claimToken: string) => {
+		claimPendingOrphans: (limit: number, now: Date, claimUntil: Date, claimToken: string) => {
 			return client.$queryRaw<Array<{
 				id: number;
 				bucket: string;
@@ -114,7 +89,7 @@ export function createOrphanRepository(client: OrphanRepositoryClient, claimsEna
 					orphan."target_kind"::text AS "targetKind",
 					orphan."attempt_count" AS "attemptCount"
 			`);
-		} : undefined,
+			},
 
 		findPendingOrphans(limit: number, cutoff: Date) {
 			return client.orphanObject.findMany({

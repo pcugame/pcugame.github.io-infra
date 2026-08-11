@@ -10,30 +10,18 @@ import type {
 	SettingsStore,
 	UploadLimiter,
 } from '../../../application/ports.js';
-import { createObjectDeletionCoordinator } from '../../../application/object-deletion.js';
 import type { Env } from '../../../config/env.js';
-import type { PrismaClient } from '../../../generated/prisma/client.js';
 import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
 import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
-import { createOrphanRepository } from '../../orphan/repository.js';
-import { createOrphanService } from '../../orphan/service.js';
-import { createObjectReferenceResolver } from '../../orphan/reference-resolver.js';
 import { createWebglDeployment } from '../../webgl/deployment.js';
 import { createWebglDeploymentKeys, webglUrl } from '../../webgl/paths.js';
 import type { createProjectAccessService } from '../project-access.service.js';
 import { createCompletedUploadFinalizer } from './finalize-completed-upload.service.js';
 import { createGameUploadController } from './controller.js';
-import { createGameUploadRepository } from './repository.js';
 import { createGameUploadService } from './service.js';
 import { chunkUploadBodyLimitBytes } from './session-sizing.js';
-import { createMultipartAbortService } from '../../multipart-abort/service.js';
-import { createMultipartAbortRepository } from '../../multipart-abort/repository.js';
-import { createUploadIntentService } from '../../upload-intent/service.js';
-import { createUploadIntentRepository } from '../../upload-intent/repository.js';
-import { createIdempotencyService } from '../../idempotency/service.js';
-import { createIdempotencyRepository } from '../../idempotency/repository.js';
-import type { UploadLifecycleMetrics } from '../../../lib/upload-lifecycle-metrics.js';
 import { resolveRoleGameMaxBytes } from '../../../shared/upload-policy.js';
+import type { UploadLifecycleRuntime } from '../../upload-lifecycle/ports.js';
 
 type GameUploadConfig = Pick<
 	Env,
@@ -50,7 +38,6 @@ type GameUploadService = ReturnType<typeof createGameUploadService>;
 
 export interface GameUploadProductionDependencies {
 	config: GameUploadConfig;
-	prisma: PrismaClient;
 	storage: ObjectStorage;
 	fileSystem: FileSystem;
 	settings: SettingsStore;
@@ -60,14 +47,13 @@ export interface GameUploadProductionDependencies {
 	ids: IdGenerator;
 	logger: AppLogger;
 	access: ReturnType<typeof createProjectAccessService>;
-	uploadLifecycleMetrics?: UploadLifecycleMetrics;
+	uploadLifecycle: UploadLifecycleRuntime;
 }
 
 export interface GameUploadProductionGraph {
 	controller: FastifyPluginAsync;
 	service: GameUploadService;
 	recoverStaleUploads(signal?: AbortSignal): Promise<void>;
-	reapOrphans(signal?: AbortSignal): Promise<void>;
 	close(): Promise<void>;
 }
 
@@ -125,65 +111,8 @@ function createWorkflowActivity() {
 export function createGameUploadProductionGraph(
 	deps: GameUploadProductionDependencies,
 ): GameUploadProductionGraph {
-	const prismaCapabilities = deps.prisma as unknown as Record<string, unknown>;
-	const durableLifecycleEnabled = Boolean(
-		prismaCapabilities['uploadIntent']
-		&& prismaCapabilities['idempotencyOperation']
-		&& prismaCapabilities['multipartAbortTask']
-		&& prismaCapabilities['gameUploadPartClaim']
-		&& typeof prismaCapabilities['$queryRaw'] === 'function',
-	);
-	const repository = createGameUploadRepository(deps.prisma, {
-		abortBucket: deps.config.S3_BUCKET_PROTECTED,
-		durabilityEnabled: durableLifecycleEnabled,
-	});
-	const multipartAborts = createMultipartAbortService({
-		repository: createMultipartAbortRepository(deps.prisma),
-		storage: deps.storage,
-		clock: deps.clock,
-		ids: deps.ids,
-		logger: deps.logger,
-	});
-	const uploadIntents = createUploadIntentService({
-		prisma: deps.prisma,
-		repository: createUploadIntentRepository(deps.prisma),
-		storage: deps.storage,
-		buckets: {
-			publicBucket: deps.config.S3_BUCKET_PUBLIC,
-			protectedBucket: deps.config.S3_BUCKET_PROTECTED,
-		},
-		clock: deps.clock,
-		ids: deps.ids,
-		logger: deps.logger,
-	});
-	const idempotency = createIdempotencyService({
-		repository: createIdempotencyRepository(deps.prisma),
-		clock: deps.clock,
-		ids: deps.ids,
-	});
-	const orphanService = createOrphanService({
-		clock: deps.clock,
-		storage: deps.storage,
-		repository: createOrphanRepository(deps.prisma, durableLifecycleEnabled),
-		...(durableLifecycleEnabled ? { references: createObjectReferenceResolver(
-			deps.prisma,
-			{
-				publicBucket: deps.config.S3_BUCKET_PUBLIC,
-				protectedBucket: deps.config.S3_BUCKET_PROTECTED,
-			},
-			deps.logger,
-		) } : {}),
-		ids: deps.ids,
-		logger: deps.logger,
-	});
-	const deletion = createObjectDeletionCoordinator({
-		storage: deps.storage,
-		orphans: { record: orphanService.recordOrphan },
-		logger: deps.logger,
-		...(durableLifecycleEnabled ? {
-			reapDurablyQueued: () => orphanService.runOrphanReaper(),
-		} : {}),
-	});
+	const repository = deps.uploadLifecycle.gameUploads;
+	const deletion = deps.uploadLifecycle.orphanDeletions;
 	const activity = createWorkflowActivity();
 	const webgl = createWebglDeployment({
 		config: {
@@ -263,19 +192,9 @@ export function createGameUploadProductionGraph(
 				},
 			)
 		),
-		deleteWebglDeploymentByEntry: webgl.deleteDurablyQueuedDeploymentByEntry,
-		deleteOrQueue: (key, reason, context) => deletion.deleteDurablyQueued(
-			deps.config.S3_BUCKET_PROTECTED,
-			key,
-			reason,
-			context,
-		),
+		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
 		webglUrl: (projectId) => webglUrl(deps.config.API_PUBLIC_URL, projectId),
 		logError: (context, message) => deps.logger.error(context, message),
-		...(deps.uploadLifecycleMetrics ? {
-			recordPostCommitCleanupFailure:
-				deps.uploadLifecycleMetrics.recordPostCommitCleanupFailure,
-		} : {}),
 	});
 	const rawService = createGameUploadService({
 		repository,
@@ -311,21 +230,17 @@ export function createGameUploadProductionGraph(
 				parts,
 				multipartStorageRequest(request, activity.signal),
 			),
-			...(deps.storage.listParts ? {
-				listParts: (key: string, uploadId: string, request?: { signal?: AbortSignal }) => deps.storage.listParts!(
-					deps.config.S3_BUCKET_PROTECTED,
-					key,
-					uploadId,
-					multipartStorageRequest(request, activity.signal),
-				),
-			} : {}),
-			...(deps.storage.listMultipartUploads ? {
-				listMultipartUploads: (prefix: string, request?: { signal?: AbortSignal }) => deps.storage.listMultipartUploads!(
-					deps.config.S3_BUCKET_PROTECTED,
-					prefix,
-					multipartStorageRequest(request, activity.signal),
-				),
-			} : {}),
+			listParts: (key: string, uploadId: string, request?: { signal?: AbortSignal }) => deps.storage.listParts(
+				deps.config.S3_BUCKET_PROTECTED,
+				key,
+				uploadId,
+				multipartStorageRequest(request, activity.signal),
+			),
+			listMultipartUploads: (prefix: string, request?: { signal?: AbortSignal }) => deps.storage.listMultipartUploads(
+				deps.config.S3_BUCKET_PROTECTED,
+				prefix,
+				multipartStorageRequest(request, activity.signal),
+			),
 			head: (key, request) => deps.storage.head(
 				deps.config.S3_BUCKET_PROTECTED,
 				key,
@@ -355,16 +270,12 @@ export function createGameUploadProductionGraph(
 			reason,
 			context,
 		),
-		deleteDurablyQueued: (key, reason, context) => deletion.deleteDurablyQueued(
-			deps.config.S3_BUCKET_PROTECTED,
-			key,
-			reason,
-			context,
-		),
-		...(deps.uploadLifecycleMetrics ? {
-			recordPostCommitCleanupFailure:
-				deps.uploadLifecycleMetrics.recordPostCommitCleanupFailure,
-		} : {}),
+		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
+		wakeMaintenance: deps.uploadLifecycle.wakeMaintenance,
+		recordUntrackedMultipartCleanupFailure:
+			deps.uploadLifecycle.metrics.recordUntrackedMultipartCleanupFailure,
+		recordPostCommitCleanupFailure:
+			deps.uploadLifecycle.metrics.recordPostCommitCleanupFailure,
 		logger: deps.logger,
 	});
 	const service: GameUploadService = {
@@ -407,23 +318,13 @@ export function createGameUploadProductionGraph(
 					service.sweepExpiredPartClaims(signal),
 					service.sweepUntrackedMultipartUploads(signal),
 				];
-				if (durableLifecycleEnabled) {
-					maintenanceWork.push(
-						multipartAborts.run(signal),
-						uploadIntents.sweep(signal),
-						idempotency.purgeExpired(deps.clock.now()),
-					);
-				}
 				recoveryPromise = Promise.allSettled(maintenanceWork).then((results) => {
-					for (const result of results) {
-						if (result.status === 'rejected') throw result.reason;
+					const failures = results.flatMap((result) => (
+						result.status === 'rejected' ? [result.reason] : []
+					));
+					if (failures.length > 0) {
+						throw new AggregateError(failures, 'Game upload maintenance iteration failed');
 					}
-				})
-				.catch((error) => {
-					deps.logger.error(
-						error,
-						'Upload lifecycle maintenance iteration failed — continuing',
-					);
 				})
 				.finally(() => {
 					recoveryPromise = undefined;
@@ -431,9 +332,6 @@ export function createGameUploadProductionGraph(
 			}
 			return recoveryPromise;
 		},
-		reapOrphans: (signal?: AbortSignal) => activity.run(async () => {
-			await orphanService.runOrphanReaper(signal);
-		}),
 		close: () => activity.close(),
 	};
 }

@@ -6,6 +6,12 @@ import { isTerminalUploadFinalizationError } from './finalize-completed-upload.s
 import { commitTerminalCompletedObjectFailure } from './terminal-object-failure.js';
 import type { GameUploadServiceDependencies } from './ports.js';
 import { createCompletionClaimGuard } from './completion-claim.js';
+import {
+	aggregateBusinessAndCleanupError,
+	cleanupUntrackedMultipart,
+	MultipartBusinessCleanupError,
+	UntrackedMultipartCleanupError,
+} from './multipart-cleanup.js';
 
 function signalRequest(signal?: AbortSignal): [] | [{ signal: AbortSignal }] {
 	return signal ? [{ signal }] : [];
@@ -65,9 +71,18 @@ export async function cancelSession(
 	if (cancelled.count === 0) {
 		throw badRequest('Session state changed before it could be cancelled');
 	}
-	if (session.s3UploadId && session.s3Key) {
-		await deps.storage.abortMultipart(session.s3Key, session.s3UploadId).catch((err) => {
-			deps.logger.error({ err, sessionId: session.id, s3Key: session.s3Key }, 'Failed to abort multipart upload during cancelSession');
+	if (cancelled.count === 1 && cancelled.durableAbort) {
+		deps.wakeMaintenance();
+		await deps.storage.abortMultipart(
+			cancelled.durableAbort.key,
+			cancelled.durableAbort.uploadId,
+		).catch((err) => {
+			deps.logger.error({
+				err,
+				sessionId: cancelled.durableAbort?.sessionId,
+				s3Key: cancelled.durableAbort?.key,
+				tracking: cancelled.durableAbort?.tracking,
+			}, 'Failed to abort multipart upload during cancelSession');
 		});
 	}
 }
@@ -84,17 +99,14 @@ export async function sweepStaleCompletingSessions(
 	if (signal?.aborted) return { swept: 0 };
 	const now = deps.clock.now();
 	const cutoff = new Date(now.getTime() - 5 * 60 * 1000);
-	const usesCompletionClaims = Boolean(deps.repository.claimStaleCompletingSessions);
-	const completionClaimToken = usesCompletionClaims ? deps.ids.next() : '';
-	const stale = deps.repository.claimStaleCompletingSessions
-		? await deps.repository.claimStaleCompletingSessions(
+	const completionClaimToken = deps.ids.next();
+	const stale = await deps.repository.claimStaleCompletingSessions(
 			cutoff,
 			now,
 			completionClaimToken,
 			new Date(now.getTime() + 2 * 60 * 1000),
 			50,
-		)
-		: await deps.repository.findStaleCompletingSessions(cutoff);
+		);
 	if (stale.length === 0) return { swept: 0 };
 
 	for (const s of stale) {
@@ -104,23 +116,19 @@ export async function sweepStaleCompletingSessions(
 			sessionId: s.id,
 			token: completionClaimToken,
 			clock: deps.clock,
-			...(usesCompletionClaims && deps.repository.renewCompletionClaim
-				? { renew: deps.repository.renewCompletionClaim }
-				: {}),
+			renew: deps.repository.renewCompletionClaim,
 			...(signal ? { outerSignal: signal } : {}),
 			logHeartbeatFailure: (error) => deps.logger.error(
 				{ error, sessionId: s.id },
 				'Completing-session recovery claim heartbeat failed',
 			),
 		});
-		const operationSignal = usesCompletionClaims ? completionClaim.signal : signal;
+		const operationSignal = completionClaim.signal;
 		try {
-		if (usesCompletionClaims) await completionClaim.assertOwned();
+		await completionClaim.assertOwned();
 		if (!s.s3Key) {
-			const failed = usesCompletionClaims
-				? await deps.repository.markFailed(s.id, undefined, completionClaimToken)
-				: await deps.repository.markFailed(s.id);
-			if (usesCompletionClaims && resultCount(failed) !== 1) {
+			const failed = await deps.repository.markFailed(s.id, undefined, completionClaimToken);
+			if (resultCount(failed) !== 1) {
 				throw completionClaim.loseClaim();
 			}
 			completionStateResolved = true;
@@ -130,7 +138,7 @@ export async function sweepStaleCompletingSessions(
 		let finalObject: Awaited<ReturnType<GameUploadServiceDependencies['storage']['head']>>;
 		try {
 			finalObject = await deps.storage.head(s.s3Key, ...signalRequest(operationSignal));
-			if (usesCompletionClaims) await completionClaim.assertOwned();
+			await completionClaim.assertOwned();
 		} catch (err) {
 			deps.logger.error(
 				{ err, sessionId: s.id, s3Key: s.s3Key },
@@ -140,7 +148,7 @@ export async function sweepStaleCompletingSessions(
 		}
 		if (finalObject) {
 			try {
-				if (usesCompletionClaims) await completionClaim.assertOwned();
+				await completionClaim.assertOwned();
 				const finalizationSession = {
 					id: s.id,
 					projectId: s.projectId,
@@ -148,22 +156,16 @@ export async function sweepStaleCompletingSessions(
 					originalName: s.originalName,
 					totalBytes: s.totalBytes,
 					s3Key: s.s3Key,
-					...(usesCompletionClaims
-						? { completionClaimToken }
-						: {}),
+					completionClaimToken,
 				};
-				if (usesCompletionClaims) {
-					await deps.finalizer.finalize(finalizationSession, finalObject, {
-						storageRequest: { signal: completionClaim.signal },
-						assertClaimOwned: completionClaim.assertOwned,
-					});
-				} else {
-					await deps.finalizer.finalize(finalizationSession, finalObject);
-				}
+				await deps.finalizer.finalize(finalizationSession, finalObject, {
+					storageRequest: { signal: completionClaim.signal },
+					assertClaimOwned: completionClaim.assertOwned,
+				});
 				completionStateResolved = true;
 			} catch (err) {
 				if (isTerminalUploadFinalizationError(err)) {
-					if (usesCompletionClaims) await completionClaim.assertOwned();
+					await completionClaim.assertOwned();
 					deps.logger.error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Boot sweep: completed upload is invalid');
 					await commitTerminalCompletedObjectFailure(deps, {
 						sessionId: s.id,
@@ -171,7 +173,7 @@ export async function sweepStaleCompletingSessions(
 						reason: s.uploadKind === 'WEBGL'
 							? 'webgl-upload-sweep-invalid'
 							: 'game-upload-sweep-invalid',
-						...(usesCompletionClaims ? { completionClaimToken } : {}),
+						completionClaimToken,
 					});
 					completionStateResolved = true;
 				} else {
@@ -184,15 +186,15 @@ export async function sweepStaleCompletingSessions(
 			continue;
 		}
 
-		if (s.s3UploadId && deps.storage.listParts) {
+		if (s.s3UploadId) {
 			try {
 				await deps.storage.listParts(s.s3Key, s.s3UploadId, ...signalRequest(operationSignal));
-				if (usesCompletionClaims) await completionClaim.assertOwned();
+				await completionClaim.assertOwned();
 				const reverted = await deps.repository.revertToPending(
 					s.id,
-					usesCompletionClaims ? completionClaimToken : undefined,
+					completionClaimToken,
 				);
-				if (usesCompletionClaims && resultCount(reverted) !== 1) {
+				if (resultCount(reverted) !== 1) {
 					throw completionClaim.loseClaim();
 				}
 				completionStateResolved = true;
@@ -205,26 +207,9 @@ export async function sweepStaleCompletingSessions(
 				continue;
 			}
 		}
-		if (s.s3UploadId) {
-			if (usesCompletionClaims) await completionClaim.assertOwned();
-			await deps.repository.queueAbortTask?.({
-				key: s.s3Key,
-				uploadId: s.s3UploadId,
-				reason: 'stale-completing-without-object',
-			});
-			await deps.storage.abortMultipart(
-				s.s3Key,
-				s.s3UploadId,
-				...signalRequest(operationSignal),
-			).catch((err) => {
-				deps.logger.error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Boot sweep: failed to abort leftover multipart');
-			});
-		}
-		if (usesCompletionClaims) await completionClaim.assertOwned();
-		const failed = usesCompletionClaims
-			? await deps.repository.markFailed(s.id, undefined, completionClaimToken)
-			: await deps.repository.markFailed(s.id);
-		if (usesCompletionClaims && resultCount(failed) !== 1) {
+		await completionClaim.assertOwned();
+		const failed = await deps.repository.markFailed(s.id, undefined, completionClaimToken);
+		if (resultCount(failed) !== 1) {
 			throw completionClaim.loseClaim();
 		}
 		completionStateResolved = true;
@@ -235,9 +220,7 @@ export async function sweepStaleCompletingSessions(
 			);
 		} finally {
 			completionClaim.stop();
-			if (!completionStateResolved
-				&& usesCompletionClaims
-				&& deps.repository.releaseCompletionClaim) {
+			if (!completionStateResolved) {
 				await deps.repository.releaseCompletionClaim(
 					s.id,
 					completionClaimToken,
@@ -261,16 +244,11 @@ async function abortUnusedMultipart(
 	reason: string,
 	signal?: AbortSignal,
 ): Promise<void> {
-	try {
-		await deps.storage.abortMultipart(key, uploadId, ...signalRequest(signal));
-	} catch (error) {
-		await deps.repository.queueAbortTask?.({ key, uploadId, reason }).catch((queueError) => {
-			deps.logger.error(
-				{ error: queueError, abortError: error, key, uploadId },
-				'Failed to durably queue an unused multipart upload',
-			);
-		});
-	}
+	await cleanupUntrackedMultipart(
+		deps,
+		{ key, uploadId, reason },
+		signal ? { signal } : undefined,
+	);
 }
 
 /** Reset an entire multipart generation after any part lease expires. */
@@ -279,8 +257,6 @@ export async function sweepExpiredPartClaims(
 	signal?: AbortSignal,
 ): Promise<{ swept: number }> {
 	if (signal?.aborted) return { swept: 0 };
-	if (!deps.repository.findSessionsWithExpiredPartClaims
-		|| !deps.repository.replaceMultipartGeneration) return { swept: 0 };
 	const sessions = await deps.repository.findSessionsWithExpiredPartClaims(
 		deps.clock.now(),
 		50,
@@ -290,17 +266,39 @@ export async function sweepExpiredPartClaims(
 		if (signal?.aborted) break;
 		if (!session.s3Key) continue;
 		try {
-			const oldUploadId = session.s3UploadId;
 			const nextUploadId = await deps.storage.createMultipart(
 				session.s3Key,
 				...signalRequest(signal),
 			);
-			const reset = await deps.repository.replaceMultipartGeneration({
-				sessionId: session.id,
-				expectedGeneration: session.multipartGeneration ?? 1,
-				newUploadId: nextUploadId,
-				reason: 'expired-part-claim-maintenance-reset',
-			});
+			let reset: Awaited<ReturnType<typeof deps.repository.replaceMultipartGeneration>>;
+			try {
+				reset = await deps.repository.replaceMultipartGeneration({
+					sessionId: session.id,
+					expectedGeneration: session.multipartGeneration ?? 1,
+					newUploadId: nextUploadId,
+					reason: 'expired-part-claim-maintenance-reset',
+				});
+			} catch (businessError) {
+				try {
+					await abortUnusedMultipart(
+						deps,
+						session.s3Key,
+						nextUploadId,
+						'expired-part-claim-reset-persistence-failed',
+						signal,
+					);
+				} catch (cleanupError) {
+					if (cleanupError instanceof UntrackedMultipartCleanupError) {
+						throw aggregateBusinessAndCleanupError(
+							businessError,
+							cleanupError,
+							'Expired part-claim generation replacement and cleanup both failed',
+						);
+					}
+					throw cleanupError;
+				}
+				throw businessError;
+			}
 			if (!reset.replaced) {
 				await abortUnusedMultipart(
 					deps,
@@ -312,19 +310,30 @@ export async function sweepExpiredPartClaims(
 				continue;
 			}
 			swept++;
-			if (oldUploadId) {
+			const durableAbort = reset.durableAbort;
+			if (durableAbort) {
+				deps.wakeMaintenance();
 				await deps.storage.abortMultipart(
-					session.s3Key,
-					oldUploadId,
+					durableAbort.key,
+					durableAbort.uploadId,
 					...signalRequest(signal),
 				).catch((error) => {
 					deps.logger.error(
-						{ error, sessionId: session.id, s3Key: session.s3Key },
+						{
+							error,
+							sessionId: durableAbort.sessionId,
+							s3Key: durableAbort.key,
+							tracking: durableAbort.tracking,
+						},
 						'Best-effort abort failed after expired part generation reset; durable task retained',
 					);
 				});
 			}
 		} catch (error) {
+			if (
+				error instanceof UntrackedMultipartCleanupError
+				|| error instanceof MultipartBusinessCleanupError
+			) throw error;
 			deps.logger.error(
 				{ error, sessionId: session.id, s3Key: session.s3Key },
 				'Expired part-claim reset failed; leaving it for retry',
@@ -340,7 +349,6 @@ export async function sweepExpiredPendingSessions(
 	signal?: AbortSignal,
 ): Promise<{ swept: number }> {
 	if (signal?.aborted) return { swept: 0 };
-	if (!deps.repository.findExpiredPendingSessions) return { swept: 0 };
 	const expired = await deps.repository.findExpiredPendingSessions(deps.clock.now(), 50);
 	let swept = 0;
 	for (const session of expired) {
@@ -349,14 +357,20 @@ export async function sweepExpiredPendingSessions(
 			const cancelled = await deps.repository.cancelSessionAndClearActive(session.id);
 			if (cancelled.count !== 1) continue;
 			swept++;
-			if (session.s3Key && session.s3UploadId) {
+			if (cancelled.durableAbort) {
+				deps.wakeMaintenance();
 				await deps.storage.abortMultipart(
-					session.s3Key,
-					session.s3UploadId,
+					cancelled.durableAbort.key,
+					cancelled.durableAbort.uploadId,
 					...signalRequest(signal),
 				).catch((error) => {
 					deps.logger.error(
-						{ error, sessionId: session.id, s3Key: session.s3Key },
+						{
+							error,
+							sessionId: cancelled.durableAbort?.sessionId,
+							s3Key: cancelled.durableAbort?.key,
+							tracking: cancelled.durableAbort?.tracking,
+						},
 						'Failed best-effort abort for expired upload; durable task retained',
 					);
 				});
@@ -374,8 +388,6 @@ export async function sweepUntrackedMultipartUploads(
 	signal?: AbortSignal,
 ): Promise<{ queued: number }> {
 	if (signal?.aborted) return { queued: 0 };
-	if (!deps.storage.listMultipartUploads || !deps.repository.findKnownMultipartUploads
-		|| !deps.repository.queueAbortTask) return { queued: 0 };
 	const [uploads, knownRows] = await Promise.all([
 		deps.storage.listMultipartUploads('', ...signalRequest(signal)),
 		deps.repository.findKnownMultipartUploads(),
@@ -397,6 +409,7 @@ export async function sweepUntrackedMultipartUploads(
 		});
 		queued++;
 	}
+	if (queued > 0) deps.wakeMaintenance();
 	return { queued };
 }
 

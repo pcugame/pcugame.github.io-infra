@@ -25,6 +25,104 @@ export interface ObjectReferenceLogger {
 	error(context: Record<string, unknown>, message: string): void;
 }
 
+interface ReferenceTrieNode {
+	children: Map<string, ReferenceTrieNode>;
+	exactCount: number;
+	prefixCount: number;
+	subtreeCount: number;
+}
+
+function createTrieNode(): ReferenceTrieNode {
+	return {
+		children: new Map(),
+		exactCount: 0,
+		prefixCount: 0,
+		subtreeCount: 0,
+	};
+}
+
+/**
+ * Immutable, per-snapshot EXACT/PREFIX overlap index. Trie subtree counts make
+ * prefix lookups independent of the total number of live references.
+ */
+export interface ObjectReferenceIndex {
+	referencesTarget(
+		target: Pick<ObjectReference, 'bucket' | 'targetKind' | 'key'>,
+		options?: { ignoreSource?: string },
+	): boolean;
+}
+
+export function createObjectReferenceIndex(
+	inventory: ObjectReferenceInventory,
+): ObjectReferenceIndex {
+	const roots = new Map<string, ReferenceTrieNode>();
+	const referencesBySource = new Map<string, ObjectReference[]>();
+
+	for (const reference of inventory.references) {
+		let root = roots.get(reference.bucket);
+		if (!root) {
+			root = createTrieNode();
+			roots.set(reference.bucket, root);
+		}
+		let node = root;
+		node.subtreeCount++;
+		for (const character of reference.key) {
+			let child = node.children.get(character);
+			if (!child) {
+				child = createTrieNode();
+				node.children.set(character, child);
+			}
+			node = child;
+			node.subtreeCount++;
+		}
+		if (reference.targetKind === 'EXACT') node.exactCount++;
+		else node.prefixCount++;
+
+		const sourceReferences = referencesBySource.get(reference.source) ?? [];
+		sourceReferences.push(reference);
+		referencesBySource.set(reference.source, sourceReferences);
+	}
+
+	function overlapCount(
+		target: Pick<ObjectReference, 'bucket' | 'targetKind' | 'key'>,
+	): number {
+		const root = roots.get(target.bucket);
+		if (!root) return 0;
+		if (target.targetKind === 'PREFIX' && target.key.length === 0) {
+			return root.subtreeCount;
+		}
+
+		let node = root;
+		let ancestorPrefixCount = root.prefixCount;
+		for (let index = 0; index < target.key.length; index++) {
+			const child = node.children.get(target.key[index]!);
+			if (!child) return ancestorPrefixCount;
+			node = child;
+			if (target.targetKind === 'EXACT') {
+				ancestorPrefixCount += node.prefixCount;
+			} else if (index < target.key.length - 1) {
+				ancestorPrefixCount += node.prefixCount;
+			}
+		}
+
+		return target.targetKind === 'EXACT'
+			? ancestorPrefixCount + node.exactCount
+			: ancestorPrefixCount + node.subtreeCount;
+	}
+
+	return {
+		referencesTarget(target, options = {}) {
+			if (inventory.unsafeBuckets.has(target.bucket)) return true;
+			const total = overlapCount(target);
+			if (total === 0) return false;
+			if (!options.ignoreSource) return true;
+			const ignored = referencesBySource.get(options.ignoreSource)
+				?.filter((reference) => targetsOverlap(reference, target)).length ?? 0;
+			return total > ignored;
+		},
+	};
+}
+
 /**
  * Reference writers and deletion claimers take the same transaction-scoped
  * PostgreSQL advisory lock. Keeping one global lock makes EXACT/PREFIX overlap
@@ -53,8 +151,7 @@ export function inventoryReferencesTarget(
 	inventory: ObjectReferenceInventory,
 	target: Pick<ObjectReference, 'bucket' | 'targetKind' | 'key'>,
 ): boolean {
-	if (inventory.unsafeBuckets.has(target.bucket)) return true;
-	return inventory.references.some((reference) => targetsOverlap(reference, target));
+	return createObjectReferenceIndex(inventory).referencesTarget(target);
 }
 
 /**
@@ -192,10 +289,9 @@ export function createObjectReferenceResolver(
 	return {
 		collect: () => collectObjectReferences(client, buckets, logger),
 		async isReferenced(target: { bucket: string; targetKind: ObjectTargetKind; key: string }) {
-			return inventoryReferencesTarget(
+			return createObjectReferenceIndex(
 				await collectObjectReferences(client, buckets, logger),
-				target,
-			);
+			).referencesTarget(target);
 		},
 	};
 }

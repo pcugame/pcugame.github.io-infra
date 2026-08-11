@@ -56,12 +56,7 @@ export interface AssetsServiceDependencies {
 		options?: { responseContentDisposition: string },
 	): Promise<string>;
 	bucketForKind(kind: AssetKind): string;
-	deleteOrQueue(
-		bucket: string,
-		key: string,
-		reason: string,
-		context: Record<string, unknown>,
-	): Promise<void>;
+	wakeDeletionWorker(): void;
 	loadProjectWithAccess(actor: Actor, projectId: number): Promise<unknown>;
 	downloadLimiter: {
 		check(ip: string): 'ok' | 'ban';
@@ -70,7 +65,6 @@ export interface AssetsServiceDependencies {
 		info(message: string): void;
 		error(context: Record<string, unknown>, message: string): void;
 	};
-	recordPostCommitCleanupFailure?: () => void;
 	repository: {
 		findPublicAsset(key: string): Promise<unknown | null>;
 		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
@@ -228,25 +222,9 @@ export async function deleteAsset(
 		playbackReason: 'asset-delete-playback',
 	});
 
-	// The transaction above owns durability. A failed immediate reap is logged
-	// and retried by maintenance; it must not turn a committed delete into 500.
-	await Promise.all([
-		deps.deleteOrQueue(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id }),
-		...(asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey
-			? [deps.deleteOrQueue(
-				bucket,
-				asset.playbackStorageKey,
-				'asset-delete-playback',
-				{ assetId: asset.id },
-			)]
-			: []),
-	]).catch((err) => {
-		deps.recordPostCommitCleanupFailure?.();
-		deps.logger.error(
-			{ err, assetId: asset.id, projectId: asset.projectId },
-			'Post-commit asset cleanup failed; durable outbox retained',
-		);
-	});
+	// The transaction above owns durability. The request only coalesces a worker
+	// wake and never waits for the global orphan backlog.
+	deps.wakeDeletionWorker();
 
 	return { projectId: asset.projectId };
 }

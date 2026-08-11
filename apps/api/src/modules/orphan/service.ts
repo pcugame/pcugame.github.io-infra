@@ -1,4 +1,8 @@
 import { createClaimToken } from '../../shared/claim-token.js';
+import {
+	createObjectReferenceIndex,
+	type ObjectReferenceInventory,
+} from './reference-resolver.js';
 
 export interface OrphanServiceDependencies {
 	clock: { now(): Date };
@@ -8,7 +12,7 @@ export interface OrphanServiceDependencies {
 			key: string,
 			request?: { signal?: AbortSignal; requestTimeoutMs?: number },
 		): Promise<void>;
-		listKeys?(
+		listKeys(
 			bucket: string,
 			prefix: string,
 			request?: { signal?: AbortSignal; requestTimeoutMs?: number },
@@ -22,7 +26,7 @@ export interface OrphanServiceDependencies {
 			targetKind?: 'EXACT' | 'PREFIX',
 			now?: Date,
 		): Promise<unknown>;
-		claimPendingOrphans?(
+		claimPendingOrphans(
 			limit: number,
 			now: Date,
 			claimUntil: Date,
@@ -34,28 +38,20 @@ export interface OrphanServiceDependencies {
 			targetKind: 'EXACT' | 'PREFIX';
 			attemptCount: number;
 		}[]>;
-		findPendingOrphans(limit: number, cutoff: Date): Promise<{
-			id: number;
-			bucket: string;
-			storageKey: string;
-			attemptCount: number;
-		}[]>;
-		markResolved(id: number, now: Date): Promise<unknown>;
-		markFailed(id: number, error: unknown, now: Date): Promise<unknown>;
-		markClaimResolved?(id: number, claimToken: string, now: Date): Promise<unknown>;
-		renewClaim?(
+		markClaimResolved(id: number, claimToken: string, now: Date): Promise<unknown>;
+		renewClaim(
 			id: number,
 			claimToken: string,
 			now: Date,
 			claimUntil: Date,
 		): Promise<unknown>;
-		markClaimCancelled?(
+		markClaimCancelled(
 			id: number,
 			claimToken: string,
 			reason: string,
 			now: Date,
 		): Promise<unknown>;
-		markClaimFailed?(
+		markClaimFailed(
 			id: number,
 			claimToken: string,
 			error: unknown,
@@ -63,12 +59,8 @@ export interface OrphanServiceDependencies {
 			nextAttemptAt: Date,
 		): Promise<unknown>;
 	};
-	references?: {
-		isReferenced(target: {
-			bucket: string;
-			targetKind: 'EXACT' | 'PREFIX';
-			key: string;
-		}): Promise<boolean>;
+	references: {
+		collect(): Promise<ObjectReferenceInventory>;
 	};
 	ids?: { next(): string };
 	logger: {
@@ -83,13 +75,14 @@ export async function recordOrphan(
 	bucket: string,
 	storageKey: string,
 	reason: string,
+	targetKind: 'EXACT' | 'PREFIX' = 'EXACT',
 ): Promise<void> {
 	try {
 		await deps.repository.upsertOrphan(
 			bucket,
 			storageKey,
 			reason,
-			undefined,
+			targetKind,
 			deps.clock.now(),
 		);
 	} catch (err) {
@@ -109,9 +102,8 @@ const MAX_BACKOFF_MS = 60 * 60 * 1000;
 const NOISY_ATTEMPT_THRESHOLD = 10;
 
 /**
- * Pull a batch of pending orphans and retry their S3 delete. Intended to be called
- * by a periodic interval in server.ts. Safe to call concurrently — each row is updated
- * independently and upsert keeps the set idempotent.
+ * Claim one durable batch, collect one immutable reference snapshot, and retry
+ * storage deletion without holding the database advisory lock during I/O.
  */
 export async function runOrphanReaper(
 	deps: OrphanServiceDependencies,
@@ -120,21 +112,38 @@ export async function runOrphanReaper(
 	if (signal?.aborted) return { tried: 0, resolved: 0, failed: 0 };
 	const now = deps.clock.now();
 	const claimToken = deps.ids?.next() ?? createClaimToken();
-	const pending = deps.repository.claimPendingOrphans
-		? await deps.repository.claimPendingOrphans(
-			REAP_BATCH_SIZE,
-			now,
-			new Date(now.getTime() + CLAIM_LEASE_MS),
-			claimToken,
-		)
-		: (await deps.repository.findPendingOrphans(
-			REAP_BATCH_SIZE,
-			new Date(now.getTime() - REAP_COOLDOWN_MS),
-		)).map((orphan) => ({
-			...orphan,
-			targetKind: orphan.storageKey.endsWith('/') ? 'PREFIX' as const : 'EXACT' as const,
-		}));
+	const pending = await deps.repository.claimPendingOrphans(
+		REAP_BATCH_SIZE,
+		now,
+		new Date(now.getTime() + CLAIM_LEASE_MS),
+		claimToken,
+	);
 	if (pending.length === 0) return { tried: 0, resolved: 0, failed: 0 };
+
+	let inventory: ObjectReferenceInventory;
+	try {
+		inventory = await deps.references.collect();
+	} catch (error) {
+		await Promise.allSettled(pending.map((orphan) => {
+			const backoffMs = Math.min(
+				REAP_COOLDOWN_MS * (2 ** Math.min(orphan.attemptCount, 8)),
+				MAX_BACKOFF_MS,
+			);
+			return deps.repository.markClaimFailed(
+				orphan.id,
+				claimToken,
+				error,
+				now,
+				new Date(now.getTime() + backoffMs),
+			);
+		}));
+		deps.logger.error(
+			{ error, claimed: pending.length },
+			'Orphan reference snapshot failed; claimed deletions were requeued',
+		);
+		return { tried: pending.length, resolved: 0, failed: pending.length };
+	}
+	const referenceIndex = createObjectReferenceIndex(inventory);
 
 	let resolved = 0;
 	let failed = 0;
@@ -158,10 +167,9 @@ export async function runOrphanReaper(
 		const assertClaimOwned = () => {
 			if (claimLost) throw claimLost;
 		};
-		if (deps.repository.renewClaim) {
-			heartbeat = setInterval(() => {
+		heartbeat = setInterval(() => {
 				const heartbeatNow = deps.clock.now();
-				void deps.repository.renewClaim!(
+				void deps.repository.renewClaim(
 					orphan.id,
 					claimToken,
 					heartbeatNow,
@@ -181,40 +189,32 @@ export async function runOrphanReaper(
 					loseClaim(error);
 				});
 			}, 30 * 1000);
-			heartbeat.unref();
-		}
+		heartbeat.unref();
 		try {
-			const referenced = await deps.references?.isReferenced({
+			const referenced = referenceIndex.referencesTarget({
 				bucket: orphan.bucket,
 				targetKind: orphan.targetKind,
 				key: orphan.storageKey,
-			}) ?? false;
+			});
 			assertClaimOwned();
 			if (referenced) {
-				if (deps.repository.markClaimCancelled) {
-					const cancellation = await deps.repository.markClaimCancelled(
-						orphan.id,
-						claimToken,
-						'live-reference-detected',
-						now,
-					);
-					if (typeof cancellation === 'object'
-						&& cancellation !== null
-						&& 'requeued' in cancellation
-						&& cancellation.requeued === true) {
-						continue;
-					}
-				} else {
-					await deps.repository.markResolved(orphan.id, now);
+				const cancellation = await deps.repository.markClaimCancelled(
+					orphan.id,
+					claimToken,
+					'live-reference-detected',
+					now,
+				);
+				if (typeof cancellation === 'object'
+					&& cancellation !== null
+					&& 'requeued' in cancellation
+					&& cancellation.requeued === true) {
+					continue;
 				}
 				resolved++;
 				continue;
 			}
 
 			if (orphan.targetKind === 'PREFIX') {
-				if (!deps.storage.listKeys) {
-					throw new Error('Object storage does not support durable prefix reconciliation');
-				}
 				const keys = await deps.storage.listKeys(
 					orphan.bucket,
 					orphan.storageKey,
@@ -237,26 +237,20 @@ export async function runOrphanReaper(
 				});
 			}
 			assertClaimOwned();
-			if (deps.repository.markClaimResolved) {
-				await deps.repository.markClaimResolved(orphan.id, claimToken, now);
-			} else {
-				await deps.repository.markResolved(orphan.id, now);
-			}
+			await deps.repository.markClaimResolved(orphan.id, claimToken, now);
 			resolved++;
 		} catch (err) {
 			const backoffMs = Math.min(
 				REAP_COOLDOWN_MS * (2 ** Math.min(orphan.attemptCount, 8)),
 				MAX_BACKOFF_MS,
 			);
-			const failureWrite = deps.repository.markClaimFailed
-				? deps.repository.markClaimFailed(
-					orphan.id,
-					claimToken,
-					err,
-					now,
-					new Date(now.getTime() + backoffMs),
-				)
-				: deps.repository.markFailed(orphan.id, err, now);
+			const failureWrite = deps.repository.markClaimFailed(
+				orphan.id,
+				claimToken,
+				err,
+				now,
+				new Date(now.getTime() + backoffMs),
+			);
 			await failureWrite.catch((dbErr) => {
 				deps.logger.error({ err: dbErr, orphanId: orphan.id }, 'Failed to record orphan reap attempt');
 			});
@@ -279,8 +273,13 @@ export async function runOrphanReaper(
 
 export function createOrphanService(deps: OrphanServiceDependencies) {
 	return {
-		recordOrphan: (bucket: string, key: string, reason: string) => (
-			recordOrphan(deps, bucket, key, reason)
+		recordOrphan: (
+			bucket: string,
+			key: string,
+			reason: string,
+			targetKind?: 'EXACT' | 'PREFIX',
+		) => (
+			recordOrphan(deps, bucket, key, reason, targetKind)
 		),
 		runOrphanReaper: (signal?: AbortSignal) => runOrphanReaper(deps, signal),
 	};

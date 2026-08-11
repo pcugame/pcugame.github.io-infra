@@ -137,13 +137,13 @@ export interface ObjectStorage {
 		uploadId: string,
 		request?: StorageRequestOptions,
 	): Promise<void>;
-	listParts?(
+	listParts(
 		bucket: string,
 		key: string,
 		uploadId: string,
 		request?: StorageRequestOptions,
 	): Promise<CompletedPart[]>;
-	listMultipartUploads?(
+	listMultipartUploads(
 		bucket: string,
 		prefix: string,
 		request?: StorageRequestOptions,

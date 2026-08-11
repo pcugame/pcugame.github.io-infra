@@ -8,6 +8,11 @@ import {
 	ActiveUploadCompletionInProgressError,
 	type GameUploadServiceDependencies,
 } from './ports.js';
+import {
+	aggregateBusinessAndCleanupError,
+	cleanupUntrackedMultipart,
+	UntrackedMultipartCleanupError,
+} from './multipart-cleanup.js';
 
 /** Create a new chunked upload session for a project */
 export async function createSession(
@@ -73,38 +78,40 @@ export async function createSession(
 			expiresAt,
 		});
 	} catch (err) {
-		let abortError: unknown;
+		const businessError = err instanceof ActiveUploadCompletionInProgressError
+			? conflict(err.message)
+			: err;
 		try {
-			await deps.storage.abortMultipart(s3Key, s3UploadId);
-		} catch (error) {
-			abortError = error;
-			deps.logger.error({ err: error, s3Key }, 'Failed to abort new multipart upload after session create failure');
-			try {
-				if (!deps.repository.queueAbortTask) throw new Error('Multipart abort queue is unavailable');
-				await deps.repository.queueAbortTask({
-					key: s3Key,
-					uploadId: s3UploadId,
-					reason: 'session-create-failed',
-				});
-			} catch (queueError) {
-				throw new AggregateError(
-					[err, abortError, queueError],
-					'Multipart creation failed and neither abort nor durable abort recording succeeded',
+			await cleanupUntrackedMultipart(deps, {
+				key: s3Key,
+				uploadId: s3UploadId,
+				reason: 'session-create-failed',
+			});
+		} catch (cleanupError) {
+			if (cleanupError instanceof UntrackedMultipartCleanupError) {
+				throw aggregateBusinessAndCleanupError(
+					businessError,
+					cleanupError,
+					'Session creation and untracked multipart cleanup both failed',
 				);
 			}
+			throw cleanupError;
 		}
-		if (err instanceof ActiveUploadCompletionInProgressError) {
-			throw conflict(err.message);
-		}
-		throw err;
+		throw businessError;
 	}
 
-	for (const s of created.replacedSessions) {
-		if (s.s3UploadId && s.s3Key) {
-			await deps.storage.abortMultipart(s.s3Key, s.s3UploadId).catch((err) => {
-				deps.logger.error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Failed to abort multipart upload while replacing active session');
-			});
-		}
+	if (created.durableAborts.length > 0) {
+		deps.wakeMaintenance();
+	}
+	for (const abort of created.durableAborts) {
+		// `tracking` is repository evidence that the replacement transaction
+		// committed the durable task before this prompt, best-effort abort.
+		await deps.storage.abortMultipart(abort.key, abort.uploadId).catch((err) => {
+			deps.logger.error(
+				{ err, sessionId: abort.sessionId, s3Key: abort.key, tracking: abort.tracking },
+				'Failed to abort multipart upload while replacing active session',
+			);
+		});
 	}
 
 	return {

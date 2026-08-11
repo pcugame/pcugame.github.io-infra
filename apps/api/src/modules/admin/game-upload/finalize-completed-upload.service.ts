@@ -38,7 +38,6 @@ export function createCompletedUploadFinalizer(deps: {
 		options?: CompletedUploadFinalizationOptions,
 	): Promise<WebglDeploymentKeys>;
 	rollbackWebglPublicDeployment(keys: WebglPublicDeploymentKeys, reason: string): Promise<void>;
-	deleteWebglDeploymentByEntry(projectId: number, entryKey: string, reason: string): Promise<void>;
 	finalizeGame(
 		session: CompletedUploadSession,
 	): Promise<{ oldStorageKey: string | null; oldPlaybackStorageKey: string | null }>;
@@ -46,24 +45,10 @@ export function createCompletedUploadFinalizer(deps: {
 		session: CompletedUploadSession,
 		deployment: WebglDeploymentKeys,
 	): Promise<{ oldEntryKey: string }>;
-	deleteOrQueue(key: string, reason: string, context: Record<string, unknown>): Promise<void>;
+	wakeDeletionWorker(): void;
 	webglUrl(projectId: number): string;
 	logError(context: Record<string, unknown>, message: string): void;
-	recordPostCommitCleanupFailure?: () => void;
 }) {
-	async function runPostCommitCleanup(
-		work: () => Promise<void>,
-		context: Record<string, unknown>,
-		message: string,
-	): Promise<void> {
-		try {
-			await work();
-		} catch (error) {
-			deps.recordPostCommitCleanupFailure?.();
-			deps.logError({ error, ...context }, message);
-		}
-	}
-
 	return {
 		async finalize(
 			session: CompletedUploadSession,
@@ -102,19 +87,7 @@ export function createCompletedUploadFinalizer(deps: {
 					const result = await deps.finalizeWebgl(session, deployment);
 					pointerFinalized = true;
 					if (result.oldEntryKey && result.oldEntryKey !== deployment.entryKey) {
-						await runPostCommitCleanup(
-							() => deps.deleteWebglDeploymentByEntry(
-								session.projectId,
-								result.oldEntryKey,
-								'webgl-upload-replace-previous',
-							),
-							{
-								sessionId: session.id,
-								projectId: session.projectId,
-								oldEntryKey: result.oldEntryKey,
-							},
-							'Post-commit WebGL deployment cleanup failed; durable outbox retained',
-						);
+						deps.wakeDeletionWorker();
 					}
 					return {
 						status: 'COMPLETED',
@@ -155,28 +128,7 @@ export function createCompletedUploadFinalizer(deps: {
 			);
 			await options.assertClaimOwned?.();
 			const result = await deps.finalizeGame(session);
-			if (result.oldStorageKey) {
-				await runPostCommitCleanup(
-					() => deps.deleteOrQueue(
-						result.oldStorageKey!,
-						'game-upload-replace-previous',
-						{ sessionId: session.id },
-					),
-					{ sessionId: session.id, storageKey: result.oldStorageKey },
-					'Post-commit GAME object cleanup failed; durable outbox retained',
-				);
-			}
-			if (result.oldPlaybackStorageKey) {
-				await runPostCommitCleanup(
-					() => deps.deleteOrQueue(
-						result.oldPlaybackStorageKey!,
-						'game-upload-replace-previous-playback',
-						{ sessionId: session.id },
-					),
-					{ sessionId: session.id, storageKey: result.oldPlaybackStorageKey },
-					'Post-commit GAME playback cleanup failed; durable outbox retained',
-				);
-			}
+			if (result.oldStorageKey || result.oldPlaybackStorageKey) deps.wakeDeletionWorker();
 			return {
 				status: 'COMPLETED',
 				storageKey: session.s3Key,

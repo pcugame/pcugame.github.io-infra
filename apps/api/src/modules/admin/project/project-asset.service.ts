@@ -16,13 +16,7 @@ export interface ProjectAssetServiceDependencies {
 	uploadCoordinator: SingleAssetUploadCoordinator;
 	assetUrl(storageKey: string, kind: AssetKind): string;
 	bucketForKind(kind: AssetKind): string;
-	/** Best-effort delete of an object already protected by the repository transaction's outbox. */
-	deleteOrQueue(
-		bucket: string,
-		key: string,
-		reason: string,
-		context: Record<string, unknown>,
-	): Promise<void>;
+	wakeDeletionWorker(): void;
 	logger?: {
 		error(context: Record<string, unknown>, message: string): void;
 	};
@@ -207,34 +201,7 @@ export async function addAssetToProject(
 		response = { assetId, url: deps.assetUrl(savedFile.storageKey, savedFile.kind) };
 		stopOperationHeartbeat();
 
-		if (oldStorageKey) {
-			await deps.deleteOrQueue(
-				deps.bucketForKind(savedFile.kind),
-				oldStorageKey,
-				'project-asset-replace-previous',
-				{ assetId, kind: savedFile.kind },
-			).catch((error) => {
-				deps.recordPostCommitCleanupFailure?.();
-				deps.logger?.error(
-					{ error, assetId, kind: savedFile.kind, storageKey: oldStorageKey },
-					'Post-commit asset cleanup failed; durable outbox retained',
-				);
-			});
-		}
-		if (oldPlaybackStorageKey) {
-			await deps.deleteOrQueue(
-				deps.bucketForKind(savedFile.kind),
-				oldPlaybackStorageKey,
-				'project-asset-replace-previous-playback',
-				{ assetId, kind: savedFile.kind },
-			).catch((error) => {
-				deps.recordPostCommitCleanupFailure?.();
-				deps.logger?.error(
-					{ error, assetId, kind: savedFile.kind, storageKey: oldPlaybackStorageKey },
-					'Post-commit asset playback cleanup failed; durable outbox retained',
-				);
-			});
-		}
+		if (oldStorageKey || oldPlaybackStorageKey) deps.wakeDeletionWorker();
 	} catch (err) {
 		stopOperationHeartbeat();
 		if (err instanceof AssetIdempotencyReplay) {

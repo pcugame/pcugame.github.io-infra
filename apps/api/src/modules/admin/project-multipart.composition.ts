@@ -9,18 +9,13 @@ import type {
 	SettingsStore,
 	UploadLimiter,
 } from '../../application/ports.js';
-import { createObjectDeletionCoordinator } from '../../application/object-deletion.js';
 import type { Env } from '../../config/env.js';
-import type { PrismaClient } from '../../generated/prisma/client.js';
 import {
 	bucketForAssetKind,
 	megabytes,
 	resolveRoleUploadLimits,
 	type UploadLimits,
 } from '../../shared/upload-policy.js';
-import { createOrphanRepository } from '../orphan/repository.js';
-import { createOrphanService } from '../orphan/service.js';
-import { createObjectReferenceResolver } from '../orphan/reference-resolver.js';
 import type { createProjectAccessService } from './project-access.service.js';
 import {
 	createAdminProjectMultipartController,
@@ -32,16 +27,12 @@ import { createProjectAssetService } from './project/project-asset.service.js';
 import { createSubmitProjectService } from './project/project-submit.service.js';
 import { createProjectUploadPipeline } from './project/project-upload.adapter.js';
 import type { ProjectUploadProcessing } from './project/project-upload.adapter.js';
-import type { createProjectCrudRepository } from './project/crud.repository.js';
+import type { ProjectApplicationRepository } from './project/ports.js';
 import type { MultipartRequestHasher } from '../../application/upload-ports.js';
 import { createMultipartCollector } from '../assets/upload/multipart-collector.js';
 import { createMeProjectController } from '../me/project/controller.js';
 import { createMeRoutes } from '../me/me.routes.js';
-import { createUploadIntentService } from '../upload-intent/service.js';
-import { createUploadIntentRepository } from '../upload-intent/repository.js';
-import { createIdempotencyService } from '../idempotency/service.js';
-import { createIdempotencyRepository } from '../idempotency/repository.js';
-import type { UploadLifecycleMetrics } from '../../lib/upload-lifecycle-metrics.js';
+import type { UploadLifecycleRuntime } from '../upload-lifecycle/ports.js';
 
 type ProjectMultipartConfig = Pick<
 	Env,
@@ -66,12 +57,11 @@ export interface ProjectMultipartProductionGraph {
 	meController: FastifyPluginAsync;
 	/** Identity seams proving ticket-008 access/repository reuse. */
 	projectAccess: ReturnType<typeof createProjectAccessService>;
-	projectRepository: ReturnType<typeof createProjectCrudRepository>;
+	projectRepository: ProjectApplicationRepository;
 }
 
 export interface ProjectMultipartProductionDependencies {
 	config: ProjectMultipartConfig;
-	prisma: PrismaClient;
 	storage: ObjectStorage;
 	fileSystem: FileSystem;
 	settings: SettingsStore;
@@ -80,10 +70,10 @@ export interface ProjectMultipartProductionDependencies {
 	clock: Clock;
 	ids: IdGenerator;
 	processing: ProjectUploadProcessing;
-	requestHasher?: MultipartRequestHasher;
+	requestHasher: MultipartRequestHasher;
 	access: ReturnType<typeof createProjectAccessService>;
-	repository: ReturnType<typeof createProjectCrudRepository>;
-	uploadLifecycleMetrics?: UploadLifecycleMetrics;
+	repository: ProjectApplicationRepository;
+	uploadLifecycle: UploadLifecycleRuntime;
 }
 
 async function uploadLimits(
@@ -117,55 +107,6 @@ function assetUrl(
 export function createProjectMultipartProductionGraph(
 	deps: ProjectMultipartProductionDependencies,
 ): ProjectMultipartProductionGraph {
-	const prismaCapabilities = deps.prisma as unknown as Record<string, unknown>;
-	const durableUploadsEnabled = Boolean(
-		prismaCapabilities['uploadIntent']
-		&& prismaCapabilities['idempotencyOperation']
-		&& prismaCapabilities['orphanObject']
-		&& typeof prismaCapabilities['$queryRaw'] === 'function',
-	);
-	const orphanService = createOrphanService({
-		clock: deps.clock,
-		storage: deps.storage,
-		repository: createOrphanRepository(deps.prisma),
-		...(durableUploadsEnabled ? {
-			references: createObjectReferenceResolver(
-				deps.prisma,
-				{
-					publicBucket: deps.config.S3_BUCKET_PUBLIC,
-					protectedBucket: deps.config.S3_BUCKET_PROTECTED,
-				},
-				deps.logger,
-			),
-		} : {}),
-		logger: deps.logger,
-	});
-	const deletion = createObjectDeletionCoordinator({
-		storage: deps.storage,
-		orphans: { record: orphanService.recordOrphan },
-		logger: deps.logger,
-		...(durableUploadsEnabled ? {
-			reapDurablyQueued: () => orphanService.runOrphanReaper(),
-		} : {}),
-	});
-	const uploadIntents = createUploadIntentService({
-		prisma: deps.prisma,
-		repository: createUploadIntentRepository(deps.prisma),
-		storage: deps.storage,
-		buckets: {
-			publicBucket: deps.config.S3_BUCKET_PUBLIC,
-			protectedBucket: deps.config.S3_BUCKET_PROTECTED,
-		},
-		clock: deps.clock,
-		ids: deps.ids,
-		logger: deps.logger,
-	});
-	const idempotency = createIdempotencyService({
-		repository: createIdempotencyRepository(deps.prisma),
-		clock: deps.clock,
-		ids: deps.ids,
-	});
-	const requestHasher = deps.requestHasher;
 	const createPipeline = () => createProjectUploadPipeline({
 		storage: deps.storage,
 		fileSystem: deps.fileSystem,
@@ -173,8 +114,8 @@ export function createProjectMultipartProductionGraph(
 		logger: deps.logger,
 		processing: deps.processing,
 		bucketForKind: (kind) => bucketForKind(kind, deps.config),
-		deleteUnpersistedObject: deletion.deleteOrQueue,
-		...(durableUploadsEnabled ? { uploadIntents } : {}),
+		deleteUnpersistedObject: deps.uploadLifecycle.orphanDeletions.deleteOrQueue,
+		uploadIntents: deps.uploadLifecycle.uploadIntents,
 	});
 	const limits = (role: UserRole) => uploadLimits(deps.config, deps.settings, role);
 	const submitService = createSubmitProjectService({
@@ -188,12 +129,10 @@ export function createProjectMultipartProductionGraph(
 			ids: deps.ids,
 		}),
 		logger: deps.logger,
-		...(deps.uploadLifecycleMetrics ? {
-			recordPostCommitCleanupFailure:
-				deps.uploadLifecycleMetrics.recordPostCommitCleanupFailure,
-		} : {}),
-		...(requestHasher ? { requestHasher } : {}),
-		...(durableUploadsEnabled ? { idempotency } : {}),
+		recordPostCommitCleanupFailure:
+			deps.uploadLifecycle.metrics.recordPostCommitCleanupFailure,
+		requestHasher: deps.requestHasher,
+		idempotency: deps.uploadLifecycle.idempotency,
 	});
 	const assetService = createProjectAssetService({
 		repository: deps.repository,
@@ -203,7 +142,7 @@ export function createProjectMultipartProductionGraph(
 			fileSystem: deps.fileSystem,
 			ids: deps.ids,
 			createPipeline,
-			...(requestHasher ? { requestHasher } : {}),
+			requestHasher: deps.requestHasher,
 		}),
 		assetUrl: (storageKey, kind) => assetUrl(
 			deps.config.API_PUBLIC_URL,
@@ -211,13 +150,11 @@ export function createProjectMultipartProductionGraph(
 			kind,
 		),
 		bucketForKind: (kind) => bucketForKind(kind, deps.config),
-		deleteOrQueue: deletion.deleteDurablyQueued,
+		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
 		logger: deps.logger,
-		...(deps.uploadLifecycleMetrics ? {
-			recordPostCommitCleanupFailure:
-				deps.uploadLifecycleMetrics.recordPostCommitCleanupFailure,
-		} : {}),
-		...(durableUploadsEnabled ? { idempotency } : {}),
+		recordPostCommitCleanupFailure:
+			deps.uploadLifecycle.metrics.recordPostCommitCleanupFailure,
+		idempotency: deps.uploadLifecycle.idempotency,
 	});
 	const route = {
 		rateLimit: {

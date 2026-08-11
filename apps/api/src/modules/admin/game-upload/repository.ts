@@ -5,7 +5,11 @@ import {
 	type PrismaClient,
 	type UploadKind,
 } from '../../../generated/prisma/client.js';
-import { ActiveUploadCompletionInProgressError } from './ports.js';
+import {
+	ActiveUploadCompletionInProgressError,
+	type DurablyTrackedMultipartAbort,
+	type GameUploadRepository,
+} from './ports.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
 import { webglDeletionTargetsByEntry } from '../../webgl/deletion-targets.js';
 import { parseWebglEntryKey } from '../../webgl/paths.js';
@@ -102,20 +106,17 @@ type CreateSessionData = {
 };
 
 interface GameUploadRepositoryOptions {
-	abortBucket?: string;
-	durabilityEnabled?: boolean;
+	abortBucket: string;
 }
 
 /** Create a new session and replace the project's active slot atomically. */
 export function createSessionReplacingActive(
 	data: CreateSessionData,
 	client: PrismaClient,
-	abortBucket?: string,
+	abortBucket: string,
 ) {
 	return withSerializableRetry(async (tx) => {
-		if (abortBucket) {
-			await assertNoDeletionClaim(tx, { bucket: abortBucket, key: data.s3Key });
-		}
+		await assertNoDeletionClaim(tx, { bucket: abortBucket, key: data.s3Key });
 		const active = await tx.gameUploadActiveSession.findUnique({
 			where: {
 				projectId_uploadKind: {
@@ -125,7 +126,7 @@ export function createSessionReplacingActive(
 			},
 			include: { session: true },
 		});
-		const replacedSessions = active?.session ? [active.session] : [];
+		const durableAborts: DurablyTrackedMultipartAbort[] = [];
 
 		// A completing upload may already have committed its multipart object. It
 		// must retain the active slot until finalization/recovery reaches a terminal
@@ -135,13 +136,21 @@ export function createSessionReplacingActive(
 		}
 
 		if (active) {
-			if (abortBucket && active.session.s3Key && active.session.s3UploadId) {
-				await queueMultipartAbortTask(tx, {
-					bucket: abortBucket,
-					storageKey: active.session.s3Key,
+			if (active.session.s3Key && active.session.s3UploadId) {
+				const abort = {
+					tracking: 'durable-abort-task-committed' as const,
+					sessionId: active.session.id,
+					key: active.session.s3Key,
 					uploadId: active.session.s3UploadId,
 					reason: 'active-upload-replaced',
+				};
+				await queueMultipartAbortTask(tx, {
+					bucket: abortBucket,
+					storageKey: abort.key,
+					uploadId: abort.uploadId,
+					reason: abort.reason,
 				});
+				durableAborts.push(abort);
 			}
 			await tx.gameUploadSession.updateMany({
 				where: {
@@ -168,7 +177,7 @@ export function createSessionReplacingActive(
 			},
 		});
 
-		return { session, replacedSessions };
+		return { session, durableAborts };
 	}, client);
 }
 
@@ -183,7 +192,7 @@ export function updateSessionStatus(id: string, status: string, client: PrismaCl
 export function cancelSessionAndClearActive(
 	id: string,
 	client: PrismaClient,
-	abortBucket?: string,
+	abortBucket: string,
 	reason = 'upload-session-cancelled',
 ) {
 	return withSerializableRetry(async (tx) => {
@@ -195,20 +204,30 @@ export function cancelSessionAndClearActive(
 			where: { id, status: 'PENDING' },
 			data: { status: 'CANCELLED', s3UploadId: null, s3Key: null },
 		});
+		let durableAbort: DurablyTrackedMultipartAbort | null = null;
 		if (result.count === 1) {
-			if (abortBucket && session?.s3Key && session.s3UploadId) {
-				await queueMultipartAbortTask(tx, {
-					bucket: abortBucket,
-					storageKey: session.s3Key,
+			if (session?.s3Key && session.s3UploadId) {
+				durableAbort = {
+					tracking: 'durable-abort-task-committed' as const,
+					sessionId: id,
+					key: session.s3Key,
 					uploadId: session.s3UploadId,
 					reason,
+				};
+				await queueMultipartAbortTask(tx, {
+					bucket: abortBucket,
+					storageKey: durableAbort.key,
+					uploadId: durableAbort.uploadId,
+					reason: durableAbort.reason,
 				});
 			}
 			await tx.gameUploadActiveSession.deleteMany({
 				where: { sessionId: id },
 			});
 		}
-		return result;
+		return result.count === 1
+			? { count: 1 as const, durableAbort }
+			: { count: 0 as const, durableAbort: null };
 	}, client);
 }
 
@@ -383,13 +402,21 @@ export function replaceMultipartGeneration(
 		if (!session
 			|| session.status !== 'PENDING'
 			|| session.multipartGeneration !== input.expectedGeneration
-			|| !session.s3Key) return { replaced: false as const };
+			|| !session.s3Key) return { replaced: false as const, durableAbort: null };
+		let durableAbort: DurablyTrackedMultipartAbort | null = null;
 		if (session.s3UploadId) {
-			await queueMultipartAbortTask(tx, {
-				bucket: input.abortBucket,
-				storageKey: session.s3Key,
+			durableAbort = {
+				tracking: 'durable-abort-task-committed',
+				sessionId: session.id,
+				key: session.s3Key,
 				uploadId: session.s3UploadId,
 				reason: input.reason,
+			};
+			await queueMultipartAbortTask(tx, {
+				bucket: input.abortBucket,
+				storageKey: durableAbort.key,
+				uploadId: durableAbort.uploadId,
+				reason: durableAbort.reason,
 			});
 		}
 		await tx.gameUploadPart.deleteMany({ where: { sessionId: input.sessionId } });
@@ -402,7 +429,7 @@ export function replaceMultipartGeneration(
 				uploadedChunks: [],
 			},
 		});
-		return { replaced: true as const };
+		return { replaced: true as const, durableAbort };
 	}, client);
 }
 
@@ -841,46 +868,40 @@ export function findExhibitionById(id: number, client: PrismaClient) {
  */
 export function createGameUploadRepository(
 	client: PrismaClient,
-	options: GameUploadRepositoryOptions = {},
-) {
+	options: GameUploadRepositoryOptions,
+): DurableGameUploadRepository {
 	return {
 		findSessionById: (id: string) => findSessionById(id, client),
 		createSessionReplacingActive: (data: CreateSessionData) => (
 			createSessionReplacingActive(
 				data,
 				client,
-				options.durabilityEnabled ? options.abortBucket : undefined,
+				options.abortBucket,
 			)
 		),
 		cancelSessionAndClearActive: (id: string) => cancelSessionAndClearActive(
 			id,
 			client,
-			options.durabilityEnabled ? options.abortBucket : undefined,
+			options.abortBucket,
 		),
-		queueAbortTask: options.durabilityEnabled ? (target: { key: string; uploadId: string; reason: string }) => (
+		queueAbortTask: (target: { key: string; uploadId: string; reason: string }) => (
 			client.$transaction((tx) => queueMultipartAbortTask(tx, {
-				bucket: options.abortBucket ?? '',
+				bucket: options.abortBucket,
 				storageKey: target.key,
 				uploadId: target.uploadId,
 				reason: target.reason,
 			}))
-		) : undefined,
-		acquirePartClaim: options.durabilityEnabled
-			? (input: Parameters<typeof acquirePartClaim>[0]) => acquirePartClaim(input, client)
-			: undefined,
-		completePartClaim: options.durabilityEnabled
-			? (input: Parameters<typeof completePartClaim>[0]) => completePartClaim(input, client)
-			: undefined,
-		renewPartClaim: options.durabilityEnabled ? (token: string, now: Date, leaseUntil: Date) => (
+		),
+		acquirePartClaim: (input: Parameters<typeof acquirePartClaim>[0]) => acquirePartClaim(input, client),
+		completePartClaim: (input: Parameters<typeof completePartClaim>[0]) => completePartClaim(input, client),
+		renewPartClaim: (token: string, now: Date, leaseUntil: Date) => (
 			client.gameUploadPartClaim.updateMany({
 				where: { token, leaseUntil: { gt: now } },
 				data: { leaseUntil },
 			})
-		) : undefined,
-		claimCompletion: options.durabilityEnabled
-			? (input: Parameters<typeof claimCompletion>[0]) => claimCompletion(input, client)
-			: undefined,
-		renewCompletionClaim: options.durabilityEnabled ? (sessionId: string, token: string, now: Date, leaseUntil: Date) => (
+		),
+		claimCompletion: (input: Parameters<typeof claimCompletion>[0]) => claimCompletion(input, client),
+		renewCompletionClaim: (sessionId: string, token: string, now: Date, leaseUntil: Date) => (
 			client.gameUploadSession.updateMany({
 				where: {
 					id: sessionId,
@@ -890,9 +911,8 @@ export function createGameUploadRepository(
 				},
 				data: { completionClaimUntil: leaseUntil },
 			})
-		) : undefined,
-		releaseCompletionClaim: options.durabilityEnabled
-			? (sessionId: string, token: string, now: Date, reason: string) => (
+		),
+		releaseCompletionClaim: (sessionId: string, token: string, now: Date, reason: string) => (
 				client.gameUploadSession.updateMany({
 					where: {
 						id: sessionId,
@@ -905,14 +925,13 @@ export function createGameUploadRepository(
 						completionLastError: reason.slice(0, 500),
 					},
 				})
-			)
-			: undefined,
-		replaceMultipartGeneration: options.durabilityEnabled ? (input: Omit<Parameters<typeof replaceMultipartGeneration>[0], 'abortBucket'>) => (
+			),
+		replaceMultipartGeneration: (input: Omit<Parameters<typeof replaceMultipartGeneration>[0], 'abortBucket'>) => (
 			replaceMultipartGeneration({
 				...input,
-				abortBucket: options.abortBucket ?? '',
+				abortBucket: options.abortBucket,
 			}, client)
-		) : undefined,
+		),
 		upsertPartEtag: (
 			sessionId: string,
 			partNumber: number,
@@ -930,30 +949,29 @@ export function createGameUploadRepository(
 		) => (
 			markFailed(sessionId, storageKey, client, completionClaimToken)
 		),
-		markCompletedObjectFailed: options.durabilityEnabled ? (input: {
+		markCompletedObjectFailed: (input: {
 			sessionId: string;
 			storageKey: string;
 			reason: string;
 			completionClaimToken?: string;
 		}) => markCompletedObjectFailed({
 			...input,
-			bucket: options.abortBucket ?? '',
-		}, client) : undefined,
+			bucket: options.abortBucket,
+		}, client),
 		findStaleCompletingSessions: (cutoff: Date) => findStaleCompletingSessions(cutoff, client),
-		claimStaleCompletingSessions: options.durabilityEnabled ? (
+		claimStaleCompletingSessions: (
 			cutoff: Date,
 			now: Date,
 			token: string,
 			leaseUntil: Date,
 			limit: number,
-		) => claimStaleCompletingSessions(cutoff, now, token, leaseUntil, limit, client) : undefined,
+		) => claimStaleCompletingSessions(cutoff, now, token, leaseUntil, limit, client),
 		findExpiredPendingSessions: (now: Date, limit: number) => client.gameUploadSession.findMany({
 			where: { status: 'PENDING', expiresAt: { lte: now } },
 			orderBy: { expiresAt: 'asc' },
 			take: limit,
 		}),
-		findSessionsWithExpiredPartClaims: options.durabilityEnabled
-			? (now: Date, limit: number) => client.gameUploadSession.findMany({
+		findSessionsWithExpiredPartClaims: (now: Date, limit: number) => client.gameUploadSession.findMany({
 				where: {
 					status: 'PENDING',
 					partClaims: { some: { leaseUntil: { lte: now } } },
@@ -961,8 +979,7 @@ export function createGameUploadRepository(
 				include: { parts: { orderBy: { partNumber: 'asc' } } },
 				orderBy: { updatedAt: 'asc' },
 				take: limit,
-			})
-			: undefined,
+			}),
 		findKnownMultipartUploads: () => client.gameUploadSession.findMany({
 			where: { s3UploadId: { not: null }, s3Key: { not: null } },
 			select: { s3Key: true, s3UploadId: true },
@@ -1017,4 +1034,45 @@ export function createGameUploadRepository(
 			completionResult,
 		),
 	};
+}
+
+/** The complete production persistence contract, including durability/fencing methods. */
+export interface DurableGameUploadRepository extends GameUploadRepository {
+	finalizeCompletedSession(
+		sessionId: string,
+		projectId: number,
+		kind: AssetKind,
+		data: {
+			storageKey: string;
+			playbackStorageKey?: string | null;
+			originalName: string;
+			mimeType: string;
+			playbackMimeType?: string;
+			sizeBytes: bigint;
+			playbackSizeBytes?: bigint;
+			playbackStatus?: AssetPlaybackStatus;
+			playbackError?: string;
+			isPublic: boolean;
+			completionClaimToken?: string;
+		},
+		outbox: GameReplacementOutboxConfig,
+	): Promise<{
+		assetId: number;
+		oldStorageKey: string | null;
+		oldPlaybackStorageKey: string | null;
+	}>;
+	finalizeCompletedWebglSession(
+		sessionId: string,
+		projectId: number,
+		entryKey: string,
+		sourceKey: string,
+		outbox: WebglReplacementOutboxConfig,
+		completionClaimToken?: string,
+		completionResult?: {
+			status: 'COMPLETED';
+			storageKey: string;
+			sizeBytes: number;
+			webglUrl: string;
+		},
+	): Promise<{ oldEntryKey: string }>;
 }

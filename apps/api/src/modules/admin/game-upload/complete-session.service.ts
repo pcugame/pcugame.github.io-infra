@@ -7,6 +7,11 @@ import { isTerminalUploadFinalizationError } from './finalize-completed-upload.s
 import { commitTerminalCompletedObjectFailure } from './terminal-object-failure.js';
 import type { GameUploadServiceDependencies } from './ports.js';
 import { createCompletionClaimGuard } from './completion-claim.js';
+import {
+	aggregateBusinessAndCleanupError,
+	cleanupUntrackedMultipart,
+	UntrackedMultipartCleanupError,
+} from './multipart-cleanup.js';
 
 function resultCount(result: unknown): number | undefined {
 	return typeof result === 'object'
@@ -71,17 +76,14 @@ export async function completeSession(
 	}
 
 	const completionToken = deps.ids.next();
-	const usesCompletionClaim = Boolean(deps.repository.claimCompletion);
 	const now = deps.clock.now();
-	const transitioned = deps.repository.claimCompletion
-		? await deps.repository.claimCompletion({
+	const transitioned = await deps.repository.claimCompletion({
 			sessionId: session.id,
 			generation,
 			token: completionToken,
 			now,
 			leaseUntil: new Date(now.getTime() + 2 * 60 * 1000),
-		})
-		: { ...(await deps.repository.transitionToCompleting(session.id)), reason: null };
+		});
 	if (transitioned.count === 0) {
 		if (transitioned.reason === 'parts-active') {
 			throw operationInProgress('A chunk upload is still active');
@@ -95,34 +97,30 @@ export async function completeSession(
 		sessionId: session.id,
 		token: completionToken,
 		clock: deps.clock,
-		...(usesCompletionClaim && deps.repository.renewCompletionClaim
-			? { renew: deps.repository.renewCompletionClaim }
-			: {}),
+		renew: deps.repository.renewCompletionClaim,
 		logHeartbeatFailure: (error) => deps.logger.error(
 			{ error, sessionId: session.id },
 			'Completion claim heartbeat failed',
 		),
 	});
-	const storageRequest = usesCompletionClaim
-		? { signal: completionClaim.signal }
-		: undefined;
+	const storageRequest = { signal: completionClaim.signal };
 	try {
-		if (usesCompletionClaim) await completionClaim.assertOwned();
+		await completionClaim.assertOwned();
 		const dbParts = await deps.repository.findPartsBySessionId(session.id);
-		if (usesCompletionClaim) await completionClaim.assertOwned();
+		await completionClaim.assertOwned();
 		const parts = dbParts
 			.filter((part) => (part.generation ?? generation) === generation)
 			.map((part) => ({ partNumber: part.partNumber, etag: part.etag }));
 		if (parts.length !== session.totalChunks) {
 			throw new AppError(500, `Part ETag count mismatch: expected ${session.totalChunks}, got ${parts.length}`, 'INTERNAL_ERROR');
 		}
-		if (deps.storage.listParts) {
+		{
 			const actualParts = await deps.storage.listParts(
 				session.s3Key,
 				session.s3UploadId,
 				...signalRequest(storageRequest?.signal),
 			);
-			if (usesCompletionClaim) await completionClaim.assertOwned();
+			await completionClaim.assertOwned();
 			const normalize = (etag: string) => etag.trim().replace(/^"|"$/g, '');
 			const matches = actualParts.length === parts.length && parts.every((part, index) => {
 				const actual = actualParts[index];
@@ -130,51 +128,71 @@ export async function completeSession(
 					&& normalize(actual.etag) === normalize(part.etag);
 			});
 			if (!matches) {
+				const businessError = conflict('Stored multipart parts did not match claimed ETags; re-upload all chunks');
 				const reverted = await deps.repository.revertToPending(
 					session.id,
-					usesCompletionClaim ? completionToken : undefined,
+					completionToken,
 				);
-				if (usesCompletionClaim && resultCount(reverted) !== 1) {
+				if (resultCount(reverted) !== 1) {
 					throw completionClaim.loseClaim();
 				}
 				completionStateResolved = true;
 				completionClaim.stop();
-				if (deps.repository.replaceMultipartGeneration) {
-					const nextUploadId = await deps.storage.createMultipart(
-						session.s3Key,
-						...signalRequest(storageRequest?.signal),
-					);
-					const reset = await deps.repository.replaceMultipartGeneration({
+				const nextUploadId = await deps.storage.createMultipart(
+					session.s3Key,
+					...signalRequest(storageRequest.signal),
+				);
+				let reset: Awaited<ReturnType<typeof deps.repository.replaceMultipartGeneration>>;
+				try {
+					reset = await deps.repository.replaceMultipartGeneration({
 						sessionId: session.id,
 						expectedGeneration: generation,
 						newUploadId: nextUploadId,
 						reason: 'list-parts-mismatch-generation-reset',
 					});
-					if (!reset.replaced) {
-						await deps.storage.abortMultipart(
-							session.s3Key,
-							nextUploadId,
-							...signalRequest(storageRequest?.signal),
-						).catch(async (error) => {
-							try {
-								if (!deps.repository.queueAbortTask) {
-									throw new Error('Multipart abort queue is unavailable');
-								}
-								await deps.repository.queueAbortTask({
-									key: session.s3Key!,
-									uploadId: nextUploadId,
-									reason: 'unused-list-parts-mismatch-reset',
-								});
-							} catch (queueError) {
-								deps.logger.error(
-									{ error, queueError, sessionId: session.id, uploadId: nextUploadId },
-									'Failed to abort or queue unused mismatch replacement upload',
-								);
-							}
-						});
+				} catch (replacementError) {
+					try {
+						await cleanupUntrackedMultipart(deps, {
+							key: session.s3Key,
+							uploadId: nextUploadId,
+							reason: 'list-parts-mismatch-reset-persistence-failed',
+						}, storageRequest);
+					} catch (cleanupError) {
+						if (cleanupError instanceof UntrackedMultipartCleanupError) {
+							throw aggregateBusinessAndCleanupError(
+								[businessError, replacementError],
+								cleanupError,
+								'Multipart mismatch, generation replacement, and cleanup all failed',
+							);
+						}
+						throw cleanupError;
 					}
+					throw new AggregateError(
+						[businessError, replacementError],
+						'Multipart mismatch and generation replacement both failed',
+					);
 				}
-				throw conflict('Stored multipart parts did not match claimed ETags; re-upload all chunks');
+				if (!reset.replaced) {
+					try {
+						await cleanupUntrackedMultipart(deps, {
+							key: session.s3Key,
+							uploadId: nextUploadId,
+							reason: 'unused-list-parts-mismatch-reset',
+						}, storageRequest);
+					} catch (cleanupError) {
+						if (cleanupError instanceof UntrackedMultipartCleanupError) {
+							throw aggregateBusinessAndCleanupError(
+								businessError,
+								cleanupError,
+								'Multipart mismatch and replacement cleanup both failed',
+							);
+						}
+						throw cleanupError;
+					}
+				} else if (reset.durableAbort) {
+					deps.wakeMaintenance();
+				}
+				throw businessError;
 			}
 		}
 
@@ -185,13 +203,13 @@ export async function completeSession(
 			...signalRequest(storageRequest?.signal),
 		);
 		s3Completed = true;
-		if (usesCompletionClaim) await completionClaim.assertOwned();
+		await completionClaim.assertOwned();
 
 		const head = await deps.storage.head(storageKey, ...signalRequest(storageRequest?.signal));
 		if (!head) {
 			throw new AppError(500, 'Completed object not found in S3', 'INTERNAL_ERROR');
 		}
-		if (usesCompletionClaim) await completionClaim.assertOwned();
+		await completionClaim.assertOwned();
 		const finalizationSession = {
 			id: session.id,
 			projectId: session.projectId,
@@ -199,14 +217,12 @@ export async function completeSession(
 			originalName: session.originalName,
 			totalBytes: session.totalBytes,
 			s3Key: storageKey,
-			...(usesCompletionClaim ? { completionClaimToken: completionToken } : {}),
+			completionClaimToken: completionToken,
 		};
-		const result = usesCompletionClaim
-			? await deps.finalizer.finalize(finalizationSession, head, {
+		const result = await deps.finalizer.finalize(finalizationSession, head, {
 				storageRequest,
 				assertClaimOwned: completionClaim.assertOwned,
-			})
-			: await deps.finalizer.finalize(finalizationSession, head);
+			});
 		completionStateResolved = true;
 		return result;
 	} catch (err) {
@@ -231,7 +247,7 @@ export async function completeSession(
 				);
 				throw err;
 			}
-			if (!s3Completed && deps.storage.listParts) {
+			if (!s3Completed) {
 				try {
 					await deps.storage.listParts(
 						session.s3Key,
@@ -250,14 +266,14 @@ export async function completeSession(
 
 		if (s3Completed) {
 			if (isTerminalUploadFinalizationError(err)) {
-				if (usesCompletionClaim) await completionClaim.assertOwned();
+				await completionClaim.assertOwned();
 				await commitTerminalCompletedObjectFailure(deps, {
 					sessionId: session.id,
 					storageKey,
 					reason: session.uploadKind === 'WEBGL'
 						? 'webgl-upload-completion-invalid'
 						: 'game-upload-completion-invalid',
-					...(usesCompletionClaim ? { completionClaimToken: completionToken } : {}),
+					completionClaimToken: completionToken,
 				});
 				completionStateResolved = true;
 			} else {
@@ -268,13 +284,13 @@ export async function completeSession(
 			}
 		} else {
 			assertUploadStateTransition('COMPLETING', 'PENDING');
-			if (usesCompletionClaim) await completionClaim.assertOwned();
+			await completionClaim.assertOwned();
 			try {
 				const reverted = await deps.repository.revertToPending(
 					session.id,
-					usesCompletionClaim ? completionToken : undefined,
+					completionToken,
 				);
-				if (usesCompletionClaim && resultCount(reverted) !== 1) {
+				if (resultCount(reverted) !== 1) {
 					throw completionClaim.loseClaim();
 				}
 				completionStateResolved = true;
@@ -285,7 +301,7 @@ export async function completeSession(
 		throw err;
 	} finally {
 		completionClaim.stop();
-		if (!completionStateResolved && usesCompletionClaim && deps.repository.releaseCompletionClaim) {
+		if (!completionStateResolved) {
 			await deps.repository.releaseCompletionClaim(
 				session.id,
 				completionToken,

@@ -1,13 +1,17 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { ObjectStorage } from '../../application/ports.js';
-import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createPublicController } from './controller.js';
-import { createPublicRepository } from './repository.js';
-import { createPublicService } from './service.js';
-import { createPublicWebglService } from './webgl.service.js';
+import { createPublicService, type PublicServiceDependencies } from './service.js';
+import {
+	createPublicWebglService,
+	type PublicWebglRepository,
+} from './webgl.service.js';
+
+export type PublicProductionRepository = PublicServiceDependencies['repository']
+	& PublicWebglRepository;
 
 export interface PublicProductionGraph {
-	repository: ReturnType<typeof createPublicRepository>;
+	repository: PublicProductionRepository;
 	service: ReturnType<typeof createPublicService>;
 	webglService: ReturnType<typeof createPublicWebglService>;
 	controller: FastifyPluginAsync;
@@ -19,7 +23,7 @@ export interface PublicProductionDependencies {
 		WEB_PUBLIC_URL: string;
 		S3_BUCKET_PUBLIC: string;
 	};
-	prisma: PrismaClient;
+	repository: PublicProductionRepository;
 	storage: ObjectStorage;
 }
 
@@ -27,7 +31,7 @@ export interface PublicProductionDependencies {
 export function createPublicProductionGraph(
 	deps: PublicProductionDependencies,
 ): PublicProductionGraph {
-	const repository = createPublicRepository(deps.prisma);
+	const repository = deps.repository;
 	const service = createPublicService({
 		apiPublicUrl: deps.config.API_PUBLIC_URL,
 		publicBucket: deps.config.S3_BUCKET_PUBLIC,

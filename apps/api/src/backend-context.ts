@@ -44,12 +44,16 @@ import {
 } from './modules/assets/composition.js';
 import {
 	createAuthProductionGraph,
+	type AuthProductionRepository,
 	type AuthProductionGraph,
 } from './modules/auth/composition.js';
+import { createAuthRepository } from './modules/auth/repository.js';
 import {
 	createPublicProductionGraph,
+	type PublicProductionRepository,
 	type PublicProductionGraph,
 } from './modules/public/composition.js';
+import { createPublicRepository } from './modules/public/repository.js';
 import {
 	createProjectMemberSettingsProductionGraph,
 	type ProjectMemberSettingsProductionGraph,
@@ -60,8 +64,12 @@ import {
 } from './modules/admin/year/composition.js';
 import {
 	createImportExportProductionGraph,
+	type ExportRepository,
 	type ImportExportProductionGraph,
 } from './modules/admin/import-export.composition.js';
+import { createImportRepository } from './modules/admin/import/repository.js';
+import type { ImportRepository } from './modules/admin/import/service.js';
+import { createExportRepository } from './modules/admin/export/repository.js';
 import {
 	createProjectMultipartProductionGraph,
 	type ProjectMultipartProductionGraph,
@@ -78,6 +86,44 @@ import {
 	createUploadLifecycleMetrics,
 	type UploadLifecycleMetrics,
 } from './lib/upload-lifecycle-metrics.js';
+import {
+	createProductionUploadLifecycleRuntime,
+	type UploadLifecycleRuntime,
+} from './modules/upload-lifecycle/runtime.js';
+import { createAssetsRepository } from './modules/assets/repository.js';
+import { createBannedIpRepository } from './modules/admin/banned-ip/repository.js';
+import { createProjectAccessRepository } from './modules/admin/project-access.repository.js';
+import { createProjectAccessService } from './modules/admin/project-access.service.js';
+import { createProjectCrudRepository } from './modules/admin/project/crud.repository.js';
+import { createMemberRepository } from './modules/admin/member/repository.js';
+import { createExhibitionRepository } from './modules/admin/year/repository.js';
+import type { AssetsServiceDependencies } from './modules/assets/service.js';
+import type { BannedIpServiceDependencies } from './modules/admin/banned-ip/service.js';
+import type { ProjectAccessRepository } from './modules/admin/project-access.service.js';
+import type { ProjectApplicationRepository } from './modules/admin/project/ports.js';
+import type { MemberServiceDependencies } from './modules/admin/member/service.js';
+import type { ExhibitionRepository } from './modules/admin/year/ports.js';
+
+/**
+ * Complete persistence boundary consumed by the production composition graph.
+ * Production builds it from one Prisma client; composition/lifecycle tests inject
+ * scripted domain ports and never need to construct or emulate Prisma delegates.
+ */
+export interface BackendPersistencePorts {
+	databaseHealth: DatabaseHealth;
+	authRepository: AuthProductionRepository;
+	publicRepository: PublicProductionRepository;
+	projectAccessRepository: ProjectAccessRepository;
+	projectRepository: ProjectApplicationRepository;
+	memberRepository: MemberServiceDependencies['repository'];
+	exhibitionRepository: ExhibitionRepository;
+	assetsRepository: AssetsServiceDependencies['repository'] & {
+		findAllBannedIps(): Promise<{ ip: string }[]>;
+	};
+	bannedIpRepository: BannedIpServiceDependencies['repository'];
+	importRepository: ImportRepository;
+	exportRepository: ExportRepository;
+}
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -216,6 +262,7 @@ export interface BackendContext {
 	settings: SettingsStore;
 	exportProgress: ExportProgressStore;
 	uploadLifecycleMetrics: UploadLifecycleMetrics;
+	uploadLifecycle: UploadLifecycleRuntime;
 	lifecycle: Lifecycle;
 	databaseHealth: DatabaseHealth;
 	authSessions: AuthSessionStore;
@@ -280,6 +327,7 @@ export interface ProductionResourceOverrides {
 	lifecycle: ResourceLease<Lifecycle>;
 	protectedDownloads: ResourceLease<DownloadRateLimiter>;
 	exportProgress: ResourceLease<ExportProgressStore>;
+	uploadLifecycle: ResourceLease<UploadLifecycleRuntime>;
 }
 
 export interface CreateProductionBackendContextOptions {
@@ -287,6 +335,8 @@ export interface CreateProductionBackendContextOptions {
 	factories?: Partial<ProductionResourceFactories>;
 	/** Supplied live resources must state whether the context owns them. */
 	resources?: Partial<ProductionResourceOverrides>;
+	/** Complete non-Prisma persistence seam for composition and lifecycle tests. */
+	persistence?: BackendPersistencePorts;
 	routes?: BackendRoutes;
 }
 
@@ -461,16 +511,46 @@ export async function createProductionBackendContext(
 			config,
 		);
 		const googleTokens = await resource('googleTokens', () => factories.googleTokens(config));
-		const prisma = await resource(
-			'prisma',
-			() => factories.prisma(config),
-			(client) => client.$disconnect(),
-		);
+		const prisma = options.persistence
+			? undefined
+			: await resource(
+				'prisma',
+				() => factories.prisma(config),
+				(client) => client.$disconnect(),
+			);
 		const s3 = await resource('s3', () => factories.s3(config), (client) => client.destroy());
 		const storage = await resource('storage', () => factories.storage(s3, config));
+		const uploadLifecycle = await resource(
+			'uploadLifecycle',
+			() => {
+				if (!prisma) {
+					throw new Error(
+						'An explicit uploadLifecycle resource is required with injected persistence ports',
+					);
+				}
+				return createProductionUploadLifecycleRuntime({
+					config,
+					prisma,
+					storage,
+					clock,
+					ids,
+					logger,
+					metrics: uploadLifecycleMetrics,
+				});
+			},
+			(runtime) => runtime.close(),
+			(runtime) => runtime.start(),
+		);
 		const settings = await resource(
 			'settings',
-			() => factories.settings(prisma, logger, config),
+			() => {
+				if (!prisma) {
+					throw new Error(
+						'An explicit settings resource is required with injected persistence ports',
+					);
+				}
+				return factories.settings(prisma, logger, config);
+			},
 			(store) => 'close' in store && typeof store.close === 'function' ? store.close() : undefined,
 			async (store) => {
 				if ('warmup' in store && typeof store.warmup === 'function') await store.warmup();
@@ -497,16 +577,77 @@ export async function createProductionBackendContext(
 			() => factories.exportProgress(config),
 			(progress) => progress.close(),
 		);
+		const persistence: BackendPersistencePorts = options.persistence ?? (() => {
+			if (!prisma) throw new Error('Prisma persistence was not initialized');
+			return {
+				databaseHealth: createPrismaHealth(prisma),
+				authRepository: createAuthRepository(prisma),
+				publicRepository: createPublicRepository(prisma),
+				projectAccessRepository: createProjectAccessRepository(prisma),
+				projectRepository: createProjectCrudRepository(prisma),
+				memberRepository: createMemberRepository(prisma),
+				exhibitionRepository: createExhibitionRepository(prisma),
+				assetsRepository: createAssetsRepository(prisma),
+				bannedIpRepository: createBannedIpRepository(prisma),
+				importRepository: createImportRepository(prisma),
+				exportRepository: createExportRepository(prisma),
+			};
+		})();
+		const databaseHealth = persistence.databaseHealth;
+		const auth = createAuthProductionGraph({
+			config,
+			repository: persistence.authRepository,
+			googleTokens,
+			clock,
+			ids,
+			logger,
+		});
+		const publicGraph = createPublicProductionGraph({
+			config,
+			repository: persistence.publicRepository,
+			storage,
+		});
+		const projectAccessRepository = persistence.projectAccessRepository;
+		const projectAccess = createProjectAccessService(projectAccessRepository);
+		const projectRepository = persistence.projectRepository;
+		const projectMemberSettings = createProjectMemberSettingsProductionGraph({
+			config,
+			projectAccess,
+			projectExists: async (projectId) => (
+				await projectAccessRepository.findProject(projectId) !== null
+			),
+			projectRepository,
+			memberRepository: persistence.memberRepository,
+			storage,
+			settings,
+			logger,
+			clock,
+			uploadLifecycle,
+		});
+		const year = createYearProductionGraph({
+			config,
+			repository: persistence.exhibitionRepository,
+			storage,
+			fileSystem,
+			settings,
+			uploadLimiter,
+			logger,
+			clock,
+			ids,
+			uploadLifecycle,
+		});
 		let assetsBanned: AssetsBannedProductionGraph | undefined;
 		if (!options.routes) {
 			const graph = createAssetsBannedProductionGraph({
 				config,
-				prisma,
+				assetsRepository: persistence.assetsRepository,
+				bannedIpRepository: persistence.bannedIpRepository,
+				projectAccess,
 				storage,
 				downloadLimiter: protectedDownloads,
 				logger,
 				clock,
-				uploadLifecycleMetrics,
+				uploadLifecycle,
 			});
 			assetsBanned = graph;
 			owner.register('assetsBannedWarmup', owned(
@@ -515,45 +656,10 @@ export async function createProductionBackendContext(
 				() => graph.warmup.start(),
 			));
 		}
-
-		const databaseHealth = createPrismaHealth(prisma);
-		const auth = createAuthProductionGraph({
-			config,
-			prisma,
-			googleTokens,
-			clock,
-			ids,
-			logger,
-		});
-		const publicGraph = createPublicProductionGraph({
-			config,
-			prisma,
-			storage,
-		});
-		const projectMemberSettings = createProjectMemberSettingsProductionGraph({
-			config,
-			prisma,
-			storage,
-			settings,
-			logger,
-			clock,
-			uploadLifecycleMetrics,
-		});
-		const year = createYearProductionGraph({
-			config,
-			prisma,
-			storage,
-			fileSystem,
-			settings,
-			uploadLimiter,
-			logger,
-			clock,
-			ids,
-			uploadLifecycleMetrics,
-		});
 		const importExport = createImportExportProductionGraph({
 			config,
-			prisma,
+			importRepository: persistence.importRepository,
+			exportRepository: persistence.exportRepository,
 			storage,
 			fileSystem,
 			exportProgress,
@@ -567,7 +673,6 @@ export async function createProductionBackendContext(
 		));
 		const projectMultipart = createProjectMultipartProductionGraph({
 			config,
-			prisma,
 			storage,
 			fileSystem,
 			settings,
@@ -577,13 +682,12 @@ export async function createProductionBackendContext(
 			ids,
 			processing: projectUploads,
 			requestHasher: createMultipartRequestHasher(fileSystem),
-			uploadLifecycleMetrics,
+			uploadLifecycle,
 			access: projectMemberSettings.projectAccess,
 			repository: projectMemberSettings.projectRepository,
 		});
 		const gameUpload = createGameUploadProductionGraph({
 			config,
-			prisma,
 			storage,
 			fileSystem,
 			settings,
@@ -593,7 +697,7 @@ export async function createProductionBackendContext(
 			ids,
 			logger,
 			access: projectMemberSettings.projectAccess,
-			uploadLifecycleMetrics,
+			uploadLifecycle,
 		});
 		const uploadTempScavenger = createUploadTempScavenger({
 			fileSystem,
@@ -613,12 +717,9 @@ export async function createProductionBackendContext(
 			},
 			async purgeExpiredSessions(before, signal) {
 				if (signal?.aborted) return 0;
-				const { count } = await prisma.authSession.deleteMany({
-					where: { expiresAt: { lt: before } },
-				});
-				return count;
+				return persistence.authRepository.purgeExpired(before);
 			},
-			reapOrphans: (signal) => gameUpload.reapOrphans(signal),
+			reapOrphans: (signal) => uploadLifecycle.recover(signal),
 		};
 		const maintenanceSchedule = createMaintenanceSchedule(scheduler, clock, maintenance, logger);
 		owner.register('maintenanceSchedule', owned(
@@ -652,6 +753,7 @@ export async function createProductionBackendContext(
 			settings,
 			exportProgress,
 			uploadLifecycleMetrics,
+			uploadLifecycle,
 			lifecycle,
 			databaseHealth,
 			authSessions,

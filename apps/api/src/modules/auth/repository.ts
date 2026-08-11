@@ -80,6 +80,14 @@ export function createAuthRepository(client: PrismaClient) {
 		delete(id: string) {
 			return client.authSession.deleteMany({ where: { id } });
 		},
+
+		/** Remove sessions that passed their absolute expiry. */
+		async purgeExpired(before: Date) {
+			const { count } = await client.authSession.deleteMany({
+				where: { expiresAt: { lt: before } },
+			});
+			return count;
+		},
 	};
 }
 

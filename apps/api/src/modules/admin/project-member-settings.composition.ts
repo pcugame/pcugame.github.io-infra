@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { AssetKind } from '@pcu/contracts';
 import type {
 	AppLogger,
 	Clock,
@@ -7,26 +6,18 @@ import type {
 	SettingsStore,
 } from '../../application/ports.js';
 import type { Env } from '../../config/env.js';
-import type { PrismaClient } from '../../generated/prisma/client.js';
-import { createObjectDeletionCoordinator } from '../../application/object-deletion.js';
-import { createOrphanRepository } from '../orphan/repository.js';
-import { createOrphanService } from '../orphan/service.js';
-import { createObjectReferenceResolver } from '../orphan/reference-resolver.js';
-import { parseWebglEntryKey } from '../webgl/paths.js';
-import { createProjectAccessRepository } from './project-access.repository.js';
-import { createProjectAccessService } from './project-access.service.js';
+import type { createProjectAccessService } from './project-access.service.js';
 import { createMemberController } from './member/controller.js';
-import { createMemberRepository } from './member/repository.js';
+import type { MemberServiceDependencies } from './member/service.js';
 import { createMemberService } from './member/service.js';
 import { createProjectController } from './project/controller.js';
-import { createProjectCrudRepository } from './project/crud.repository.js';
+import type { ProjectApplicationRepository } from './project/ports.js';
 import { createProjectSerializer } from './project/serializer.js';
 import { createProjectService } from './project/service.js';
 import { assertStatusTransition, bulkUpdateStatus } from './project/project-status.service.js';
 import { createSettingsController } from './settings/controller.js';
 import { createSettingsService } from './settings/service.js';
-import type { UploadLifecycleMetrics } from '../../lib/upload-lifecycle-metrics.js';
-import { bucketForAssetKind } from '../../shared/upload-policy.js';
+import type { UploadLifecycleRuntime } from '../upload-lifecycle/ports.js';
 
 export interface ProjectMemberSettingsProductionGraph {
 	projectController: FastifyPluginAsync;
@@ -34,7 +25,7 @@ export interface ProjectMemberSettingsProductionGraph {
 	settingsController: FastifyPluginAsync;
 	/** Shared context-owned ports consumed by ticket-011 multipart controllers. */
 	projectAccess: ReturnType<typeof createProjectAccessService>;
-	projectRepository: ReturnType<typeof createProjectCrudRepository>;
+	projectRepository: ProjectApplicationRepository;
 }
 
 export interface ProjectMemberSettingsProductionDependencies {
@@ -45,139 +36,41 @@ export interface ProjectMemberSettingsProductionDependencies {
 		| 'S3_BUCKET_PROTECTED'
 		| 'UPLOAD_CHUNK_SIZE_MB'
 	>;
-	prisma: PrismaClient;
+	projectAccess: ReturnType<typeof createProjectAccessService>;
+	projectExists(projectId: number): Promise<boolean>;
+	projectRepository: ProjectApplicationRepository;
+	memberRepository: MemberServiceDependencies['repository'];
 	storage: ObjectStorage;
 	settings: SettingsStore;
 	logger: AppLogger;
 	clock: Clock;
-	uploadLifecycleMetrics?: UploadLifecycleMetrics;
-}
-
-function bucketForKind(
-	kind: AssetKind,
-	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
-): string {
-	return bucketForAssetKind(kind, {
-		publicBucket: config.S3_BUCKET_PUBLIC,
-		protectedBucket: config.S3_BUCKET_PROTECTED,
-	});
+	uploadLifecycle: UploadLifecycleRuntime;
 }
 
 /** Compose the ticket-008 slice exclusively from one BackendContext's ports. */
 export function createProjectMemberSettingsProductionGraph(
 	deps: ProjectMemberSettingsProductionDependencies,
 ): ProjectMemberSettingsProductionGraph {
-	const prismaCapabilities = deps.prisma as unknown as Record<string, unknown>;
-	const durableLifecycleEnabled = Boolean(
-		prismaCapabilities['uploadIntent']
-		&& prismaCapabilities['orphanObject']
-		&& typeof prismaCapabilities['$queryRaw'] === 'function',
-	);
-	const accessRepository = createProjectAccessRepository(deps.prisma);
-	const access = createProjectAccessService(accessRepository);
-	const repository = createProjectCrudRepository(deps.prisma);
-	const orphanService = createOrphanService({
-		clock: deps.clock,
-		storage: deps.storage,
-		repository: createOrphanRepository(deps.prisma),
-		...(durableLifecycleEnabled ? {
-			references: createObjectReferenceResolver(
-				deps.prisma,
-				{
-					publicBucket: deps.config.S3_BUCKET_PUBLIC,
-					protectedBucket: deps.config.S3_BUCKET_PROTECTED,
-				},
-				deps.logger,
-			),
-		} : {}),
-		logger: deps.logger,
-	});
-	const deletion = createObjectDeletionCoordinator({
-		storage: deps.storage,
-		orphans: { record: orphanService.recordOrphan },
-		logger: deps.logger,
-		...(durableLifecycleEnabled ? {
-			reapDurablyQueued: () => orphanService.runOrphanReaper(),
-		} : {}),
-	});
 	const serializer = createProjectSerializer(deps.config.API_PUBLIC_URL);
 	const projectService = createProjectService({
-		repository,
+		repository: deps.projectRepository,
 		serializeProjectDetail: serializer.serializeProjectDetail,
 		deletionBuckets: {
 			publicBucket: deps.config.S3_BUCKET_PUBLIC,
 			protectedBucket: deps.config.S3_BUCKET_PROTECTED,
 		},
-		async deleteAssetObjects(asset, reason) {
-			const bucket = bucketForKind(asset.kind, deps.config);
-			await deletion.deleteDurablyQueued(bucket, asset.storageKey, reason, {
-				assetId: asset.id,
-				projectId: asset.projectId,
-			});
-			if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
-				await deletion.deleteDurablyQueued(
-					bucket,
-					asset.playbackStorageKey,
-					`${reason}-playback`,
-					{ assetId: asset.id, projectId: asset.projectId },
-				);
-			}
-		},
 		abortMultipart: (key, uploadId) => (
 			deps.storage.abortMultipart(deps.config.S3_BUCKET_PROTECTED, key, uploadId)
 		),
-		async deleteWebglDeploymentByEntry(projectId, entryKey, reason) {
-			const keys = parseWebglEntryKey(projectId, entryKey);
-			if (!keys) {
-				deps.logger.error(
-					{ projectId, entryKey, reason },
-					'Refusing to delete malformed WebGL entry key',
-				);
-				throw new Error(`Malformed WebGL entry key for project ${projectId}`);
-			}
-			await Promise.all([
-				deletion.deleteDurablyQueued(
-					deps.config.S3_BUCKET_PROTECTED,
-					keys.sourceKey,
-					`${reason}-source`,
-					{ projectId, deploymentId: keys.deploymentId },
-				),
-				deletion.deleteDurablyQueuedPrefix(
-					deps.config.S3_BUCKET_PUBLIC,
-					keys.sitePrefix,
-					`${reason}-site`,
-					{ projectId, deploymentId: keys.deploymentId },
-				),
-			]);
-		},
-		async deleteWebglDeployment(keys, reason) {
-			await Promise.all([
-				deletion.deleteDurablyQueued(
-					deps.config.S3_BUCKET_PROTECTED,
-					keys.sourceKey,
-					`${reason}-source`,
-					{ projectId: keys.projectId, deploymentId: keys.deploymentId },
-				),
-				deletion.deleteDurablyQueuedPrefix(
-					deps.config.S3_BUCKET_PUBLIC,
-					keys.sitePrefix,
-					`${reason}-site`,
-					{ projectId: keys.projectId, deploymentId: keys.deploymentId },
-				),
-			]);
-		},
-		deleteQueuedProtectedObject: (key, reason, context) => (
-			deletion.deleteDurablyQueued(deps.config.S3_BUCKET_PROTECTED, key, reason, context)
-		),
+		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
+		wakeMaintenance: deps.uploadLifecycle.wakeMaintenance,
 		logger: deps.logger,
-		...(deps.uploadLifecycleMetrics ? {
-			recordPostCommitCleanupFailure:
-				deps.uploadLifecycleMetrics.recordPostCommitCleanupFailure,
-		} : {}),
+		recordPostCommitCleanupFailure:
+			deps.uploadLifecycle.metrics.recordPostCommitCleanupFailure,
 	});
 	const memberService = createMemberService({
-		projectExists: async (projectId) => await accessRepository.findProject(projectId) !== null,
-		repository: createMemberRepository(deps.prisma),
+		projectExists: deps.projectExists,
+		repository: deps.memberRepository,
 	});
 	const settingsService = createSettingsService({
 		maxChunkSizeMb: Math.floor(deps.config.UPLOAD_CHUNK_SIZE_MB),
@@ -188,17 +81,17 @@ export function createProjectMemberSettingsProductionGraph(
 	});
 
 	return {
-		projectAccess: access,
-		projectRepository: repository,
+		projectAccess: deps.projectAccess,
+		projectRepository: deps.projectRepository,
 		projectController: createProjectController({
 			service: projectService,
-			access,
+			access: deps.projectAccess,
 			status: {
 				assertTransition: assertStatusTransition,
-				bulkUpdate: (ids, status) => bulkUpdateStatus(repository, ids, status),
+				bulkUpdate: (ids, status) => bulkUpdateStatus(deps.projectRepository, ids, status),
 			},
 		}),
-		memberController: createMemberController({ service: memberService, access }),
+		memberController: createMemberController({ service: memberService, access: deps.projectAccess }),
 		settingsController: createSettingsController({ service: settingsService }),
 	};
 }

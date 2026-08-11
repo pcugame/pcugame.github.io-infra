@@ -1,7 +1,12 @@
 import type { ObjectStorage } from './ports.js';
 
 export interface OrphanQueue {
-	record(bucket: string, storageKey: string, reason: string): Promise<void>;
+	record(
+		bucket: string,
+		storageKey: string,
+		reason: string,
+		targetKind?: 'EXACT' | 'PREFIX',
+	): Promise<void>;
 }
 
 export interface DeletionLogger {
@@ -16,18 +21,6 @@ export interface ObjectDeletionCoordinator {
 		logContext?: Record<string, unknown>,
 	): Promise<void>;
 	deletePrefixOrQueue(
-		bucket: string,
-		prefix: string,
-		reason: string,
-		logContext?: Record<string, unknown>,
-	): Promise<number>;
-	deleteDurablyQueued(
-		bucket: string,
-		key: string,
-		reason: string,
-		logContext?: Record<string, unknown>,
-	): Promise<void>;
-	deleteDurablyQueuedPrefix(
 		bucket: string,
 		prefix: string,
 		reason: string,
@@ -74,12 +67,6 @@ export function createObjectDeletionCoordinator(deps: {
 	orphans: OrphanQueue;
 	logger: DeletionLogger;
 	deleteConcurrency?: number;
-	/**
-	 * Runs the claimed, fresh-reference-checking reaper after an outbox row has
-	 * already committed. Production graphs provide this hook; direct deletion is
-	 * retained only for legacy/fake graphs that do not expose the claim schema.
-	 */
-	reapDurablyQueued?: () => Promise<{ failed: number }>;
 }): ObjectDeletionCoordinator {
 	const deleteConcurrency = deps.deleteConcurrency ?? 25;
 
@@ -125,7 +112,7 @@ export function createObjectDeletionCoordinator(deps: {
 					{ err, bucket, prefix, reason, ...logContext },
 					'Object prefix enumeration failed — queuing durable prefix retry',
 				);
-				await deps.orphans.record(bucket, prefix, reason);
+				await deps.orphans.record(bucket, prefix, reason, 'PREFIX');
 				return 0;
 			}
 			for (let offset = 0; offset < keys.length; offset += deleteConcurrency) {
@@ -134,54 +121,6 @@ export function createObjectDeletionCoordinator(deps: {
 				));
 			}
 			return keys.length;
-		},
-		async deleteDurablyQueued(bucket, key, reason, logContext = {}) {
-			if (deps.reapDurablyQueued) {
-				const result = await deps.reapDurablyQueued();
-				if (result.failed > 0) {
-					throw new Error(`Claimed orphan reaper reported ${result.failed} failed deletion(s)`);
-				}
-				return;
-			}
-			try {
-				await deps.storage.delete(bucket, key);
-			} catch (err) {
-				deps.logger.error(
-					{ err, bucket, storageKey: key, reason, ...logContext },
-					'Object delete failed — durable orphan outbox retained',
-				);
-			}
-		},
-		async deleteDurablyQueuedPrefix(bucket, prefix, reason, logContext = {}) {
-			if (deps.reapDurablyQueued) {
-				const result = await deps.reapDurablyQueued();
-				if (result.failed > 0) {
-					throw new Error(`Claimed orphan reaper reported ${result.failed} failed deletion(s)`);
-				}
-				return 0;
-			}
-			try {
-				const keys = await deps.storage.listKeys(bucket, prefix);
-				for (let offset = 0; offset < keys.length; offset += deleteConcurrency) {
-					await Promise.all(keys.slice(offset, offset + deleteConcurrency).map(async (key) => {
-						try {
-							await deps.storage.delete(bucket, key);
-						} catch (err) {
-							deps.logger.error(
-								{ err, bucket, storageKey: key, prefix, reason, ...logContext },
-								'Queued prefix object delete failed — durable prefix outbox retained',
-							);
-						}
-					}));
-				}
-				return keys.length;
-			} catch (err) {
-				deps.logger.error(
-					{ err, bucket, prefix, reason, ...logContext },
-					'Queued prefix enumeration failed — durable prefix outbox retained',
-				);
-				return 0;
-			}
 		},
 	};
 }
