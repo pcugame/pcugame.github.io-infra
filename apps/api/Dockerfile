@@ -22,20 +22,20 @@ COPY packages/contracts/package.json ./packages/contracts/
 COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 RUN npm ci
-# The committed lockfile was generated on Windows, which never resolves
-# sharp's @img/sharp-linux-* optional variants — they simply aren't in
-# the lockfile, so `npm ci` on Linux doesn't install them. The
-# `--os/--libc/--cpu` workaround from sharp's docs is silently ignored
-# when sharp is already "satisfied" (hoisted at root). Install the two
-# platform packages directly so they land in /app/node_modules/@img/
-# where the hoisted sharp module will find them at runtime.
+# npm workspace installs can place sharp and its platform-specific optional
+# packages at different node_modules levels. Install the Linux runtime pair
+# directly so they land in /app/node_modules/@img/, where the hoisted sharp
+# module will find the matching binary and libvips at runtime.
 RUN npm install --no-save \
-      @img/sharp-linux-x64@0.34.5 \
-      @img/sharp-libvips-linux-x64@1.2.4
+      @img/sharp-linux-x64@0.35.3 \
+      @img/sharp-libvips-linux-x64@1.3.2
 
 # ── Stage 2: Build TypeScript ──
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends openssl && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json ./
 COPY packages/contracts ./packages/contracts

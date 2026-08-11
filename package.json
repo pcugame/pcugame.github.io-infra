@@ -21,5 +21,9 @@
     "apps/api",
     "apps/web",
     "packages/*"
-  ]
+  ],
+  "overrides": {
+    "js-yaml": "4.3.1",
+    "pdfjs-dist": "6.2.108"
+  }
 }

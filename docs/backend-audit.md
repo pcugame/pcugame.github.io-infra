@@ -1,11 +1,11 @@
 # 백엔드 전수 감사 최종 검증 보고서
 
-> 이전 판본의 최초 종결 선언은 production composition 증거가 부족해 무효 처리됐다. 이 판본은 티켓 000~014의 현재 코드와 티켓 015의 전체 production graph 재검증 결과만을 근거로 다시 판정한다.
+> 이전 판본의 최초 종결 선언은 production composition 증거가 부족해 무효 처리됐다. 이 판본은 티켓 000~014의 현재 코드, 티켓 015의 전체 production graph 재검증과 티켓 016의 dependency advisory 해소 결과만을 근거로 다시 판정한다.
 
 ## 1. 기준과 판정 규칙
 
-- 최종 검증일: 2026-08-10
-- 코드 기준: ticket 014 커밋 014403b 및 ticket 015의 검증 테스트
+- 최종 검증일: 2026-08-11
+- 코드 기준: ticket 014 커밋 014403b, ticket 015 검증과 ticket 016 dependency remediation
 - 범위: apps/api, packages/contracts, Prisma migration, PostgreSQL/Garage integration, 관련 Web build와 dependency graph
 - 외부 HTTP payload, Prisma wire 의미와 S3 key 형식은 변경하지 않았다.
 - 티켓 015는 production behavior를 새로 설계하지 않고 기존 구현 주장을 반증하는 검증 gate로만 사용했다.
@@ -23,14 +23,14 @@ service fake, 빈 route plugin 또는 전체 테스트 통과만으로 productio
 
 기존 재감사의 H-01~H-04, M-01~M-08, L-01은 모두 현재 production 코드와 실패 테스트로 verified-fixed다. 특히 한 BackendContext가 config에서 시작해 실제 55개 production route, controller, service, repository와 external adapter를 조립하며, 두 context의 limiter, settings, lifecycle, export progress, ban cache, scheduler와 close 경계가 분리됨을 다시 검증했다.
 
-그러나 감사 전체는 아직 종결하지 않는다. clean npm ci에서 새로 보고된 dependency advisory D-01이 open이다.
+ticket 016은 clean install에서 발견한 dependency advisory D-01도 실제 사용 경로의 호환성 검증과 함께 해소했다.
 
-- 전체 dependency graph: High 13, Moderate 1
-- npm audit --omit=dev: High 9, Moderate 1
-- 실제 PDF/image upload, API router/URL parser, Web router 경로가 포함된다.
-- 강제 major downgrade/upgrade로 수치만 숨기지 않고 후속 티켓 016에서 호환성 검증과 함께 처리한다.
+- 전체 dependency graph와 production-only graph 모두 audit 0이다.
+- Prisma, Fastify/URL parser, Web router와 image processor를 안전 버전으로 올렸다.
+- 최신 `pdf-to-img`가 취약 PDF.js를 고정하는 경로는 patched PDF.js override와 정상/embedded-JavaScript/손상 PDF 실제 raster test로 검증했다.
+- API Docker image의 Linux Sharp/libvips binary pin도 같은 안전 버전으로 맞췄다.
 
-따라서 구조 감사 항목은 모두 닫혔지만 저장소 전체 감사의 최종 상태는 미종결이다. accepted/backlog로 낮춘 항목은 없다.
+따라서 H-01~H-04, M-01~M-08, L-01, D-01은 모두 verified-fixed이며 저장소 전체 감사를 종결한다. accepted/backlog로 낮춘 항목은 없다.
 
 ## 3. Finding 최종 판정
 
@@ -49,7 +49,7 @@ service fake, 빈 route plugin 또는 전체 테스트 통과만으로 productio
 | M-07 | architecture guard와 dependency-cruiser가 controller→runtime/env/global resource, repository→global Prisma, feature runtime과 stateful singleton을 금지한다. | 금지 fixture 16개가 실제 exit 1, 허용 factory/port runner 2개가 exit 0이며 production graph violation은 0이다. | verified-fixed |
 | M-08 | 일반 delete+queue 이중 실패는 전파되고 commit 후 cleanup 경로는 exact/prefix outbox를 transaction 안에 기록한다. | orphan unit/reaper tests와 실제 PostgreSQL fault 5개가 nonterminal/committed state 및 재시도 가능성을 검증한다. | verified-fixed |
 | L-01 | year, ID, chunk, byte count는 canonical safe integer만 받고 numeric-looking slug는 명시적으로 분리된다. | validation, public-years, game upload와 route runtime contract test가 suffix/sign/decimal/exponent/overflow를 거부한다. | verified-fixed |
-| D-01 | 현재 lockfile에 high dependency advisory가 남아 있다. 실제 PDF/image/API/Web 경로가 포함된다. | npm audit가 non-zero이며 omit-dev에서도 High 9가 재현된다. | open |
+| D-01 | Prisma/Fastify/Web router/Sharp와 lockfile 전이 의존성을 안전 버전으로 갱신하고, `pdf-to-img@6.2.0`에는 `pdfjs-dist@6.2.108`을 강제한다. Docker Linux Sharp/libvips pin도 함께 정렬했다. | clean install의 전체/production audit 0, media processor 4 tests, Docker Prisma generate/validate/build와 전체 unit/integration이 통과한다. | verified-fixed |
 
 ## 4. Production object graph와 resource 수명
 
@@ -188,33 +188,33 @@ production은 dev-auth 2개를 제외한 55개다. GET 21개에서 synthetic HEA
 | process-local lock/cache accepted 필요 | production feature lock/cache가 context별로 격리돼 예외 승인이 필요 없다. | verified-fixed |
 | DB/S3 fault matrix가 backlog | 실제 PostgreSQL fault/concurrency와 Garage protocol smoke로 분리 검증한다. | verified-fixed |
 
-## 8. 신규 D-01 dependency advisory
+## 8. D-01 dependency advisory 해소
 
-clean install에서 다음 경로가 high advisory에 해당한다.
+ticket 016에서 다음 경로를 안전 버전으로 갱신했다.
 
-- API route/schema graph: fast-uri 3.1.2
-- API/Prisma graph: find-my-way 9.6.0, Prisma 7.9.0 / @prisma/dev 0.24.14
-- 실제 PDF upload processing: pdf-to-img 6.0.0 → pdfjs-dist 5.6.205
-- 실제 image processing: sharp 0.34.5
-- Web router: react-router-dom/react-router 7.18.1
-- 전체 build graph 추가: brace-expansion, js-yaml, nanoid, postcss
+- API/Prisma graph: Prisma CLI/client/adapter 7.9.1, @prisma/dev 0.24.17, find-my-way 9.7.0, valibot 1.4.2
+- API route/schema graph: Fastify 5.11.3, fast-uri 3.1.5/4.1.2
+- 실제 PDF upload processing: pdf-to-img 6.2.0 + pdfjs-dist 6.2.108 override
+- 실제 image processing: sharp 0.35.3, Docker Linux sharp 0.35.3/libvips 1.3.2
+- Web router: react-router-dom/react-router 7.18.2
+- 전체 build graph: brace-expansion 1.1.18/5.0.9, js-yaml 4.3.1, nanoid 3.3.18, postcss 8.5.26
 
-registry 확인상 Prisma 7.9.1, React Router 7.18.2, sharp 0.35.3, find-my-way 9.7.0 등의 후보가 있지만 sharp와 PDF converter는 호환성/major 또는 downgrade 판단이 필요하다. 특히 최신 pdf-to-img 6.2.0도 취약 범위의 pdfjs-dist 5.6.205를 사용한다.
+`npm audit fix --force`의 PDF converter downgrade나 검증 없는 major 변경은 사용하지 않았다. PDF.js override는 정상 PDF, embedded JavaScript action 비실행, 손상 PDF 거부를 실제 raster processor에서 검증했고 Sharp는 정상/손상 image decode 경계와 Debian image에서 함께 검증했다.
 
-재현과 완료 조건은 backend-audit-tickets/016-current-dependency-advisories.md에 고정했다.
+재현, 버전 선택과 완료 증거는 backend-audit-tickets/016-current-dependency-advisories.md에 고정했다.
 
 ## 9. 최종 검증 기준선
 
 | 명령/질의 | 결과 |
 |---|---|
 | production graph 집중 suite | 12 files / 110 tests 통과 |
-| npm test | API 667, Web 86, contracts 26 통과; PostgreSQL 조건부 23개 skip |
+| npm test | API 671, Web 86, contracts 26 통과; PostgreSQL 조건부 23개 skip |
 | npm run lint | API type-aware ESLint/tsc와 Web ESLint 통과 |
 | npm run architecture | runtime/import inventory 0, self-test 18 runners 통과, 176 modules/354 dependencies violation 0 |
 | npm run build | contracts, API, Web production build 통과 |
-| Prisma validate | host NixOS는 존재하지 않는 linux-nixos engine checksum URL 때문에 실패; 동일 schema를 Docker Debian API 컨테이너에서 validate해 통과 |
-| npm audit --audit-level=high | 실패: High 13, Moderate 1 |
-| npm audit --omit=dev --audit-level=high | 실패: High 9, Moderate 1 |
+| Prisma generate/validate | host NixOS는 존재하지 않는 linux-nixos engine URL 때문에 실행 불가; Debian API builder의 clean install에서 Prisma 7.9.1 generate/build/schema validate 통과 |
+| npm audit --audit-level=high | 0 vulnerabilities |
+| npm audit --omit=dev --audit-level=high | 0 vulnerabilities |
 | npm run test:integration | Garage smoke/E2E 통과; PostgreSQL orphan 5, asset 5, year 7, import 2, game/recovery 4 통과 |
 | npm run testenv:clean | 이번 실행의 container, network와 volume 제거 완료; compose ps 0 확인 |
 
@@ -230,4 +230,4 @@ registry 확인상 Prisma 7.9.1, React Router 7.18.2, sharp 0.35.3, find-my-way 
 - WebGL recovery, asset/year 경쟁, orphan durability, import transaction과 game upload CAS가 실제 PostgreSQL 또는 명시적 storage fault harness로 검증된다.
 - 가능한 route 57개와 production route 55개의 input/response runtime contract가 고정된다.
 
-하지만 D-01이 open이므로 저장소 전체 감사는 미종결이다. dependency high advisory가 해소되고 동일 검증 기준선이 다시 통과해야 최종 종결할 수 있다.
+D-01을 포함한 모든 finding이 verified-fixed이고 전체 검증 기준선이 다시 통과했다. accepted 또는 backlog 예외 없이 저장소 전체 감사를 종결한다.

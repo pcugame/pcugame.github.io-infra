@@ -38,14 +38,19 @@ export async function processPdf(
   const outputPath = input.tmpPath + '.webp';
 
   let pngBuf: Buffer;
+  let document: Awaited<ReturnType<typeof pdf>> | undefined;
   try {
-    const doc = await pdf(input.tmpPath, { scale: PDF_SCALE });
-    if (doc.length < 1) {
+    document = await pdf(input.tmpPath, { scale: PDF_SCALE });
+    if (document.length < 1) {
       throw new Error('PDF has no pages');
     }
-    pngBuf = await doc.getPage(1);
+    pngBuf = await document.getPage(1);
   } catch (err) {
     throw translatePdfError(err, logger);
+  } finally {
+    await document?.destroy().catch((cleanupError) => {
+      logger.warn({ err: cleanupError, tmpPath: input.tmpPath }, 'Failed to destroy PDF document');
+    });
   }
 
   try {
