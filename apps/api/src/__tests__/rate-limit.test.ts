@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import { Readable, Writable } from 'node:stream';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import type { BackendContext } from '../backend-context.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
+import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
+import { createExportProgressStore } from '../modules/admin/export/service.js';
+import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
 
 // Use very tight limits so the test doesn't need to send 300+ requests.
 const testEnv = {
@@ -31,10 +37,79 @@ vi.mock('../shared/protected-download-limiter.js', () => {
 });
 describe('rate-limit plugin', () => {
 	let app: FastifyInstance;
+	let requestSequence = 0;
+	const emptyRoute: FastifyPluginAsync = async () => {};
+	const authRoute: FastifyPluginAsync = async (instance) => {
+		instance.post('/auth/google', {
+			config: {
+				rateLimit: {
+					max: testEnv.RATE_LIMIT_LOGIN_MAX,
+					timeWindow: testEnv.RATE_LIMIT_LOGIN_WINDOW_MS,
+				},
+			},
+		}, async () => ({ ok: false }));
+		instance.get('/me', async () => ({ ok: true, data: { authenticated: false } }));
+	};
+	const logger: BackendContext['logger'] = {
+		child: () => logger,
+		trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(),
+	};
+	const context: BackendContext = {
+		config: {
+			...testEnv,
+			LOG_LEVEL: 'info',
+			GOOGLE_CLIENT_IDS: [...testEnv.GOOGLE_CLIENT_IDS],
+			CORS_ALLOWED_ORIGINS: [...testEnv.CORS_ALLOWED_ORIGINS],
+		},
+		clock: { now: () => new Date('2026-08-11T00:00:00.000Z') },
+		logger,
+		ids: { next: () => `rate-limit-${++requestSequence}` },
+		storage: {
+			upload: async () => {}, presign: async () => '', delete: async () => {},
+			head: async () => null, readRange: async () => Buffer.alloc(0), stream: async () => null,
+			listKeys: async () => [], createMultipart: async () => '', uploadPart: async () => '',
+			completeMultipart: async () => {}, abortMultipart: async () => {}, listParts: async () => [],
+			listMultipartUploads: async () => [],
+		},
+		fileSystem: {
+			temporaryDirectory: () => '/tmp', stat: async () => ({ size: 0 }), access: async () => {},
+			mkdir: async () => {}, rename: async () => {}, remove: async () => {},
+			readRange: async () => Buffer.alloc(0), createReadStream: () => Readable.from([]),
+			createWriteStream: () => new Writable({ write(_chunk, _encoding, done) { done(); } }),
+		},
+		googleTokens: { verify: async () => undefined },
+		scheduler: { every: () => ({ cancel: () => {} }), delay: async () => {} },
+		uploadLimiter: { acquire: () => {}, release: () => {} },
+		protectedDownloads: createProtectedDownloadLimiter(),
+		settings: {
+			get: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+			update: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+			invalidate: () => {},
+		},
+		exportProgress: createExportProgressStore(),
+		uploadLifecycleMetrics: createUploadLifecycleMetrics(),
+		uploadLifecycle: createTestUploadLifecycleRuntime(),
+		lifecycle: {
+			state: () => 'ready', setState: () => {}, isAcceptingNewWork: () => true,
+			requestStarted: () => {}, requestFinished: () => {}, inFlight: () => 0,
+			waitForDrain: async () => 'drained',
+		},
+		databaseHealth: { check: async () => true },
+		authSessions: { find: async () => null, touch: async () => {}, delete: async () => {} },
+		maintenance: {
+			recoverStaleUploads: async () => {}, purgeExpiredSessions: async () => 0,
+			reapOrphans: async () => {},
+		},
+		routes: {
+			auth: authRoute, devAuth: emptyRoute, public: emptyRoute, admin: emptyRoute,
+			me: emptyRoute, assets: emptyRoute,
+		},
+		resourceOwnership: [], start: async () => {}, close: async () => {},
+	};
 
 	beforeAll(async () => {
 		const { buildApp } = await import('../app.js');
-		app = await buildApp();
+		app = await buildApp({ context });
 		await app.ready();
 	});
 
@@ -85,15 +160,19 @@ describe('rate-limit plugin', () => {
 	});
 
 	it.each(['/api/health', '/api/health/deep'])(
-		'exempts %s from the rate limiter',
+		'exempts %s from the rate limiter while preserving the healthy response contract',
 		async (url) => {
 			const healthIp = '203.0.113.9';
-			const codes: number[] = [];
 			for (let i = 0; i < 10; i++) {
 				const res = await app.inject({ method: 'GET', url, remoteAddress: healthIp });
-				codes.push(res.statusCode);
+				expect(res.statusCode).toBe(200);
+				expect(res.json()).toEqual({
+					ok: true,
+					state: 'ready',
+					timestamp: '2026-08-11T00:00:00.000Z',
+					checks: url.endsWith('/deep') ? { db: 'ok', s3: 'ok' } : { db: 'ok' },
+				});
 			}
-			expect(codes.every((c) => c !== 429)).toBe(true);
 		},
 	);
 });

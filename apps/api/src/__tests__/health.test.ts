@@ -1,56 +1,87 @@
+import type { S3Client } from '@aws-sdk/client-s3';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { AppLogger, ObjectStorage, SettingsStore } from '../application/ports.js';
+import { buildApp } from '../app.js';
+import { createProductionBackendContext } from '../backend-context.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 
-const headObjectMock = vi.fn().mockResolvedValue(null);
-const queryRawMock = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
+const emptyRoute: FastifyPluginAsync = async () => {};
+const headObject = vi.fn(async () => null as { size: number; contentType: string } | null);
+const databaseCheck = vi.fn(async () => true);
 
-vi.mock('../config/env.js', () => ({
-	loadEnv: () => ({ ...defaultTestEnv }),
-}));
-vi.mock('../lib/prisma-client.js', () => ({
-	createPrismaClientForDatabase: () => ({
-		$queryRaw: queryRawMock,
-		$disconnect: vi.fn(),
-		authSession: {
-			findUnique: vi.fn().mockResolvedValue(null),
-			update: vi.fn(),
-			deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-		},
-		siteSetting: { upsert: vi.fn() },
-		orphanObject: { upsert: vi.fn(), findMany: vi.fn(), update: vi.fn() },
-	}),
-}));
-vi.mock('../lib/storage.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('../lib/storage.js')>();
+const logger: AppLogger = {
+	child: () => logger,
+	trace: vi.fn(),
+	debug: vi.fn(),
+	info: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
+	fatal: vi.fn(),
+};
+
+const settings: SettingsStore = {
+	get: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+	update: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+	invalidate: () => {},
+};
+
+function storage(): ObjectStorage {
 	return {
-		...actual,
-		headObject: headObjectMock,
-		createObjectStorage: () => ({ head: headObjectMock }),
+		upload: async () => {},
+		presign: async () => 'https://storage.test/object',
+		delete: async () => {},
+		head: headObject,
+		readRange: async () => Buffer.alloc(0),
+		stream: async () => null,
+		listKeys: async () => [],
+		createMultipart: async () => 'upload-id',
+		uploadPart: async () => 'etag',
+		completeMultipart: async () => {},
+		abortMultipart: async () => {},
+		listParts: async () => [],
+		listMultipartUploads: async () => [],
 	};
-});
-vi.mock('../shared/protected-download-limiter.js', () => {
-	const limiter = {
-		start: vi.fn(),
-		check: vi.fn().mockReturnValue('ok'),
-		isBanned: vi.fn().mockReturnValue(false),
-		addBan: vi.fn(),
-		removeBan: vi.fn(),
-		loadBannedIps: vi.fn(),
-		close: vi.fn(),
-		destroy: vi.fn(),
-	};
-	return {
-		createProtectedDownloadLimiter: () => limiter,
-	};
-});
+}
 
 describe('health endpoints', () => {
 	let app: FastifyInstance;
 
 	beforeAll(async () => {
-		const { buildApp } = await import('../app.js');
-		app = await buildApp();
+		const context = await createProductionBackendContext({
+			...defaultTestEnv,
+			LOG_LEVEL: 'info',
+			GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS],
+			CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS],
+		}, {
+			persistence: createScriptedBackendPersistence({
+				databaseHealth: { check: databaseCheck },
+			}),
+			routes: {
+				auth: emptyRoute,
+				devAuth: emptyRoute,
+				public: emptyRoute,
+				admin: emptyRoute,
+				me: emptyRoute,
+				assets: emptyRoute,
+			},
+			resources: {
+				uploadLifecycle: {
+					value: createTestUploadLifecycleRuntime(),
+					ownership: 'borrowed',
+				},
+				logger: { value: logger, ownership: 'borrowed' },
+				s3: {
+					value: { destroy: vi.fn() } as unknown as S3Client,
+					ownership: 'borrowed',
+				},
+				storage: { value: storage(), ownership: 'borrowed' },
+				settings: { value: settings, ownership: 'borrowed' },
+			},
+		});
+		app = await buildApp({ context });
 		await app.ready();
 	});
 
@@ -59,46 +90,44 @@ describe('health endpoints', () => {
 	});
 
 	beforeEach(() => {
-		// Reset to default implementations so one test's mockRejectedValueOnce doesn't
-		// leak into the next (tests inject a fresh failure as needed).
-		headObjectMock.mockReset().mockResolvedValue(null);
-		queryRawMock.mockReset().mockResolvedValue([{ '?column?': 1 }]);
+		headObject.mockReset().mockResolvedValue(null);
+		databaseCheck.mockReset().mockResolvedValue(true);
 	});
 
 	it('/api/health does not probe S3 even when S3 is down', async () => {
-		headObjectMock.mockRejectedValue(new Error('S3 down'));
+		headObject.mockRejectedValue(new Error('S3 down'));
 		const res = await app.inject({ method: 'GET', url: '/api/health' });
 		expect(res.statusCode).toBe(200);
-		const body = JSON.parse(res.body);
-		expect(body.ok).toBe(true);
-		expect(body.checks).toEqual({ db: 'ok' });
-		expect(body.checks.s3).toBeUndefined();
+		expect(res.json()).toMatchObject({ ok: true, checks: { db: 'ok' } });
+		expect(res.json().checks.s3).toBeUndefined();
+		expect(headObject).not.toHaveBeenCalled();
 	});
 
 	it('/api/health returns 503 when DB fails', async () => {
-		queryRawMock.mockRejectedValue(new Error('pg down'));
+		databaseCheck.mockResolvedValue(false);
 		const res = await app.inject({ method: 'GET', url: '/api/health' });
 		expect(res.statusCode).toBe(503);
-		const body = JSON.parse(res.body);
-		expect(body.ok).toBe(false);
-		expect(body.checks.db).toBe('fail');
+		expect(res.json()).toMatchObject({ ok: false, checks: { db: 'fail' } });
 	});
 
 	it('/api/health/deep reports storage failure when the S3 probe fails', async () => {
-		headObjectMock.mockRejectedValue(new Error('S3 down'));
+		headObject.mockRejectedValue(new Error('S3 down'));
 		const res = await app.inject({ method: 'GET', url: '/api/health/deep' });
 		expect(res.statusCode).toBe(503);
-		const body = JSON.parse(res.body);
-		expect(body.ok).toBe(false);
-		expect(body.checks.db).toBe('ok');
-		expect(body.checks.s3).toBe('fail');
+		expect(res.json()).toMatchObject({
+			ok: false,
+			checks: { db: 'ok', s3: 'fail' },
+		});
 	});
 
-	it('/api/health/deep returns 200 when DB and storage checks succeed', async () => {
+	it('/api/health/deep returns 200 with the complete healthy envelope', async () => {
 		const res = await app.inject({ method: 'GET', url: '/api/health/deep' });
 		expect(res.statusCode).toBe(200);
-		const body = JSON.parse(res.body);
-		expect(body.ok).toBe(true);
-		expect(body.checks).toEqual({ db: 'ok', s3: 'ok' });
+		expect(res.json()).toMatchObject({
+			ok: true,
+			state: 'starting',
+			checks: { db: 'ok', s3: 'ok' },
+		});
+		expect(res.json().timestamp).toEqual(expect.any(String));
 	});
 });

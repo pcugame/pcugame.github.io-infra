@@ -8,7 +8,6 @@ import {
 import type { S3Client } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import type { PrismaClient } from '../generated/prisma/client.js';
 import type { AppLogger, ObjectStorage, SettingsStore } from '../application/ports.js';
 import { buildApp } from '../app.js';
 import { createProductionBackendContext, type ResourceLease } from '../backend-context.js';
@@ -18,6 +17,8 @@ import {
 	routeRuntimeContractsFor,
 } from '../shared/http-route-schemas.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 
 function borrowed<T>(value: T): ResourceLease<T> {
 	return { value, ownership: 'borrowed' };
@@ -36,56 +37,6 @@ function createLogger(): AppLogger {
 	return logger;
 }
 
-function createPrismaStub(): PrismaClient {
-	const model = new Proxy<Record<string, unknown>>({}, {
-		get: (_target, property) => {
-			if (property === 'then') return undefined;
-			return vi.fn(async () => undefined);
-		},
-	});
-	let client: PrismaClient;
-	client = new Proxy<Record<string, unknown>>({}, {
-		get: (_target, property) => {
-			if (property === 'then') return undefined;
-			if (property === '$disconnect') return vi.fn(async () => {});
-			if (property === '$queryRaw') return vi.fn(async () => [{ ok: 1 }]);
-			if (property === '$executeRaw') return vi.fn(async () => 0);
-			if (property === 'authSession') {
-				return {
-					findUnique: vi.fn(async ({ where }: { where: { id: string } }) => (
-						where.id === 'route-contract-session'
-							? {
-								id: where.id,
-								expiresAt: new Date('2100-01-01T00:00:00.000Z'),
-								lastSeenAt: new Date(),
-								user: {
-									id: 1,
-									googleSub: 'route-contract-admin',
-									email: 'admin@example.test',
-									name: 'Admin',
-									role: 'ADMIN',
-									studentId: null,
-								},
-							}
-							: null
-					)),
-					update: vi.fn(async () => undefined),
-					deleteMany: vi.fn(async () => ({ count: 0 })),
-				};
-			}
-			if (property === '$transaction') {
-				return vi.fn(async (work: unknown) => (
-					typeof work === 'function'
-						? work(client)
-						: Promise.all(work as Promise<unknown>[])
-				));
-			}
-			return model;
-		},
-	}) as unknown as PrismaClient;
-	return client;
-}
-
 function createStorageStub(): ObjectStorage {
 	return {
 		upload: async () => {},
@@ -99,6 +50,8 @@ function createStorageStub(): ObjectStorage {
 		uploadPart: async () => 'etag',
 		completeMultipart: async () => {},
 		abortMultipart: async () => {},
+		listParts: async () => [],
+		listMultipartUploads: async () => [],
 	};
 }
 
@@ -115,6 +68,27 @@ async function createContractApp(
 		}),
 		invalidate: () => {},
 	};
+	const basePersistence = createScriptedBackendPersistence();
+	const persistence = createScriptedBackendPersistence({
+		authRepository: {
+			...basePersistence.authRepository,
+			find: async (id) => id === 'route-contract-session'
+				? {
+					id,
+					expiresAt: new Date('2100-01-01T00:00:00.000Z'),
+					lastSeenAt: new Date(),
+					user: {
+						id: 1,
+						googleSub: 'route-contract-admin',
+						email: 'admin@example.test',
+						name: 'Admin',
+						role: 'ADMIN',
+						studentId: null,
+					},
+				}
+				: null,
+		},
+	});
 	const context = await createProductionBackendContext({
 		...defaultTestEnv,
 		NODE_ENV: nodeEnv,
@@ -124,9 +98,10 @@ async function createContractApp(
 		GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS],
 		CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS],
 	}, {
+		persistence,
 		resources: {
+			uploadLifecycle: borrowed(createTestUploadLifecycleRuntime()),
 			logger: borrowed(logger),
-			prisma: borrowed(createPrismaStub()),
 			s3: borrowed({} as S3Client),
 			storage: borrowed(createStorageStub()),
 			settings: borrowed(settings),
@@ -150,15 +125,16 @@ describe('production HTTP runtime contracts', () => {
 		await Promise.all([app.close(), productionApp.close()]);
 	});
 
-	it('matches the 57-route possible inventory and exact 55-route production inventory', () => {
-		expect(ROUTE_RUNTIME_CONTRACTS).toHaveLength(57);
+	it('maps the complete registry into development and production without duplicate route keys', () => {
 		const keys = ROUTE_RUNTIME_CONTRACTS.map(({ method, url }) => `${method} ${url}`);
 		expect(new Set(keys).size).toBe(keys.length);
 
 		const developmentRoutes = routeRuntimeContractsFor({ includeDevAuth: true });
 		const productionRoutes = routeRuntimeContractsFor({ includeDevAuth: false });
-		expect(developmentRoutes).toHaveLength(57);
-		expect(productionRoutes).toHaveLength(55);
+		expect(developmentRoutes).toEqual(ROUTE_RUNTIME_CONTRACTS);
+		expect(productionRoutes).toEqual(
+			ROUTE_RUNTIME_CONTRACTS.filter(({ family }) => family !== 'dev-auth'),
+		);
 
 		for (const route of developmentRoutes) {
 			const routerUrl = route.url === '*' ? '/*' : route.url;
@@ -178,7 +154,6 @@ describe('production HTTP runtime contracts', () => {
 			expect(productionApp.hasRoute({ method: route.method, url: route.url })).toBe(false);
 		}
 		const productionGets = productionRoutes.filter(({ method }) => method === 'GET');
-		expect(productionGets).toHaveLength(21);
 		for (const route of productionGets) {
 			expect(productionApp.hasRoute({ method: 'HEAD', url: route.url })).toBe(true);
 		}
