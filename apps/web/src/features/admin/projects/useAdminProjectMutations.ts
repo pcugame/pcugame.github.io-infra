@@ -10,6 +10,11 @@ import {
 } from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
 import { buildAssetFormData } from '../../../lib/utils';
+import {
+	createIdempotencyFingerprint,
+	fingerprintFile,
+	useStableIdempotencyOperation,
+} from '../../../lib/idempotency-operation';
 
 interface UseAdminProjectMutationsParams {
 	projectId: number;
@@ -23,6 +28,7 @@ export function useAdminProjectMutations({
 	onMemberAdded,
 }: UseAdminProjectMutationsParams) {
 	const qc = useQueryClient();
+	const assetIdempotencyOperation = useStableIdempotencyOperation();
 
 	const invalidateProject = () => {
 		qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
@@ -75,13 +81,22 @@ export function useAdminProjectMutations({
 			fd: FormData;
 			title: string;
 			idempotencyKey: string;
-		}) => adminProjectApi.addAsset(projectId, fd, title, idempotencyKey),
+			fingerprint: string;
+		}) => adminProjectApi.addAsset({
+			projectId,
+			formData: fd,
+			idempotencyKey,
+			title,
+		}),
 		retry: (failureCount, error) => failureCount < 1
 			&& isApiError(error)
 			&& error.status === 0
 			&& error.statusText === 'Network Error',
 		retryDelay: 0,
-		onSuccess: invalidateProject,
+		onSuccess: (_response, operation) => {
+			assetIdempotencyOperation.complete(operation.fingerprint);
+			invalidateProject();
+		},
 	});
 
 	const setPosterMutation = useMutation({
@@ -124,6 +139,11 @@ export function useAdminProjectMutations({
 
 	const addAsset = async (kind: 'POSTER' | 'VIDEO' | 'IMAGE', file: File) => {
 		const fd = buildAssetFormData(kind, file);
+		const fingerprint = createIdempotencyFingerprint({
+			projectId,
+			kind,
+			file: fingerprintFile(file),
+		});
 		const uploadTitle = kind === 'POSTER'
 			? '포스터 업로드'
 			: kind === 'VIDEO'
@@ -132,7 +152,8 @@ export function useAdminProjectMutations({
 		const res = await addAssetMutation.mutateAsync({
 			fd,
 			title: uploadTitle,
-			idempotencyKey: crypto.randomUUID(),
+			fingerprint,
+			idempotencyKey: assetIdempotencyOperation.keyFor(fingerprint),
 		});
 		if (kind === 'POSTER') {
 			try {
