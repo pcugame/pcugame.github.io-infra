@@ -45,8 +45,25 @@ describe('assets repository', () => {
 
 	it('terminalizes only the exact claimed storage identity', async () => {
 		const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-		const repository = createAssetsRepository({
+		const sessionUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+		const orphanUpsert = vi.fn().mockResolvedValue({});
+		const tx = {
+			$queryRaw: vi.fn()
+				.mockResolvedValueOnce([{ id: 7 }])
+				.mockResolvedValueOnce([{
+					id: 42,
+					projectId: 7,
+					kind: 'POSTER',
+					status: 'DELETING',
+					storageKey: 'poster/current.png',
+					playbackStorageKey: null,
+				}]),
 			asset: { updateMany },
+			gameUploadSession: { updateMany: sessionUpdateMany },
+			orphanObject: { upsert: orphanUpsert },
+		};
+		const repository = createAssetsRepository({
+			$transaction: vi.fn(async (operation) => operation(tx)),
 		} as unknown as PrismaClient);
 		const claim = {
 			id: 42,
@@ -58,7 +75,11 @@ describe('assets repository', () => {
 			alreadyDeleted: false,
 		};
 
-		await repository.completeAssetDeletion(claim);
+		await repository.completeAssetDeletion(claim, {
+			bucket: 'public',
+			reason: 'asset-delete',
+			playbackReason: 'asset-delete-playback',
+		});
 
 		expect(updateMany).toHaveBeenCalledWith({
 			where: {
@@ -71,5 +92,26 @@ describe('assets repository', () => {
 			},
 			data: { status: 'DELETED' },
 		});
+		expect(sessionUpdateMany).toHaveBeenCalledWith({
+			where: {
+				projectId: 7,
+				status: 'COMPLETED',
+				storageKey: 'poster/current.png',
+			},
+			data: { storageKey: null },
+		});
+		expect(orphanUpsert).toHaveBeenCalledWith(expect.objectContaining({
+			where: {
+				orphan_bucket_storage_key: {
+					bucket: 'public',
+					storageKey: 'poster/current.png',
+				},
+			},
+			create: expect.objectContaining({
+				bucket: 'public',
+				storageKey: 'poster/current.png',
+				reason: 'asset-delete',
+			}),
+		}));
 	});
 });

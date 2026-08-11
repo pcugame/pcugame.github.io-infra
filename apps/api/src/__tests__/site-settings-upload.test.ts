@@ -47,6 +47,7 @@ describe('site settings upload limits', () => {
 		{ maxGameFileMb: 0 },
 		{ maxGameFileMb: '1.5' },
 		{ maxChunkSizeMb: 0 },
+		{ maxChunkSizeMb: 4 },
 		{ maxChunkSizeMb: 'bad' },
 	])('rejects invalid numeric setting patch %o', async (body) => {
 		await expect(settingsService.updateSettings(body)).rejects.toMatchObject({

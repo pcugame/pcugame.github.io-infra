@@ -70,13 +70,17 @@ export interface AssetsServiceDependencies {
 		info(message: string): void;
 		error(context: Record<string, unknown>, message: string): void;
 	};
+	recordPostCommitCleanupFailure?: () => void;
 	repository: {
 		findPublicAsset(key: string): Promise<unknown | null>;
 		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
 		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
 		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
 		claimAssetForDeletion(id: number): Promise<AssetDeletionClaim | null>;
-		completeAssetDeletion(claim: AssetDeletionClaim): Promise<void>;
+		completeAssetDeletion(
+			claim: AssetDeletionClaim,
+			outbox: { bucket: string; reason: string; playbackReason: string },
+		): Promise<void>;
 	};
 }
 
@@ -217,15 +221,32 @@ export async function deleteAsset(
 
 	const asset = await deps.repository.claimAssetForDeletion(assetId);
 	if (!asset) throw notFound('Asset not found');
-	if (asset.alreadyDeleted) return { projectId: asset.projectId };
-
 	const bucket = deps.bucketForKind(asset.kind);
-	await deps.deleteOrQueue(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id });
-	if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
-		await deps.deleteOrQueue(bucket, asset.playbackStorageKey, 'asset-delete-playback', { assetId: asset.id });
-	}
+	await deps.repository.completeAssetDeletion(asset, {
+		bucket,
+		reason: 'asset-delete',
+		playbackReason: 'asset-delete-playback',
+	});
 
-	await deps.repository.completeAssetDeletion(asset);
+	// The transaction above owns durability. A failed immediate reap is logged
+	// and retried by maintenance; it must not turn a committed delete into 500.
+	await Promise.all([
+		deps.deleteOrQueue(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id }),
+		...(asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey
+			? [deps.deleteOrQueue(
+				bucket,
+				asset.playbackStorageKey,
+				'asset-delete-playback',
+				{ assetId: asset.id },
+			)]
+			: []),
+	]).catch((err) => {
+		deps.recordPostCommitCleanupFailure?.();
+		deps.logger.error(
+			{ err, assetId: asset.id, projectId: asset.projectId },
+			'Post-commit asset cleanup failed; durable outbox retained',
+		);
+	});
 
 	return { projectId: asset.projectId };
 }

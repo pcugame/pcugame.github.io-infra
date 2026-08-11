@@ -13,6 +13,8 @@ import {
 	withAssetMutationTransaction,
 } from '../../assets/mutation-transaction.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
+import { commitUploadIntents } from '../../upload-intent/repository.js';
+import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
 import type { AssetReplacementOutboxConfig } from './ports.js';
 
 type TxClient = Prisma.TransactionClient;
@@ -77,6 +79,12 @@ export function createProjectAssetMutationRepository(
 				playbackStatus?: AssetPlaybackStatus;
 				playbackError?: string;
 				isPublic: boolean;
+				uploadIntentIds?: string[];
+				idempotency?: {
+					operationId: string;
+					ownerToken: string;
+					resultForAsset(assetId: number): Record<string, unknown>;
+				};
 			},
 			outbox: AssetReplacementOutboxConfig,
 		): Promise<{
@@ -111,6 +119,16 @@ export function createProjectAssetMutationRepository(
 						where: { id: projectId, posterAssetId: existing.id },
 						data: { posterAssetId: null },
 					});
+					if (existing.storageKey !== data.storageKey) {
+						await tx.gameUploadSession.updateMany({
+							where: {
+								projectId,
+								status: 'COMPLETED',
+								storageKey: existing.storageKey,
+							},
+							data: { storageKey: null },
+						});
+					}
 					await tx.asset.update({
 						where: { id: existing.id },
 						data: { status: 'DELETED' },
@@ -135,6 +153,14 @@ export function createProjectAssetMutationRepository(
 					},
 					select: { id: true },
 				});
+				await commitUploadIntents(tx, data.uploadIntentIds ?? []);
+				if (data.idempotency) {
+					await succeedIdempotencyOperation(tx, {
+						operationId: data.idempotency.operationId,
+						ownerToken: data.idempotency.ownerToken,
+						result: data.idempotency.resultForAsset(created.id),
+					});
+				}
 				return {
 					assetId: created.id,
 					oldStorageKey: existing?.storageKey ?? null,

@@ -186,6 +186,11 @@ async function buildAppWithContext(
 	const app = Fastify({
 		logger: false,
 		bodyLimit: 2 * 1024 * 1024, // 2 MB for JSON bodies
+		requestTimeout: 45 * 60 * 1000,
+		handlerTimeout: 30 * 1000,
+		connectionTimeout: 5 * 60 * 1000,
+		keepAliveTimeout: 5 * 1000,
+		forceCloseConnections: 'idle',
 		trustProxy: parseTrustProxy(cfg.TRUST_PROXY),
 		// Fixed-width UUIDs beat the default monotonically-increasing string for
 		// log correlation across multiple instances behind a load balancer.
@@ -201,11 +206,29 @@ async function buildAppWithContext(
 
 	// In-flight counter so shutdown can wait for active requests to finish.
 	// Runs before routing so counter stays accurate even if a plugin hook rejects.
-	app.addHook('onRequest', async () => {
-		context.lifecycle.requestStarted();
-	});
-	app.addHook('onResponse', async () => {
+	const activeRequests = new WeakSet<object>();
+	const finishRequest = (request: object) => {
+		if (!activeRequests.delete(request)) return;
 		context.lifecycle.requestFinished();
+	};
+	app.addHook('onRequest', async (request, reply) => {
+		activeRequests.add(request);
+		context.lifecycle.requestStarted();
+		const finish = () => finishRequest(request);
+		reply.raw.once('finish', finish);
+		reply.raw.once('close', finish);
+	});
+	app.addHook('onResponse', async (request) => {
+		finishRequest(request);
+	});
+	app.addHook('onRequestAbort', async (request) => {
+		finishRequest(request);
+	});
+	app.addHook('onTimeout', async (request) => {
+		finishRequest(request);
+	});
+	app.addHook('onError', async (request) => {
+		finishRequest(request);
 	});
 	app.addHook('onClose', async () => {
 		await context.close();

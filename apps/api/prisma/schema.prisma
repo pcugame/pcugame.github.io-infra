@@ -52,6 +52,39 @@ enum UploadKind {
   WEBGL
 }
 
+enum OrphanTargetKind {
+  EXACT
+  PREFIX
+}
+
+enum OrphanState {
+  PENDING
+  DELETE_CLAIMED
+  CANCELLED
+  RESOLVED
+}
+
+enum UploadIntentState {
+  PREPARED
+  UPLOADED
+  COMMITTED
+  CLEANUP_QUEUED
+  RESOLVED
+}
+
+enum IdempotencyOperationState {
+  IN_PROGRESS
+  SUCCEEDED
+  RETRYABLE_FAILED
+  TERMINAL_FAILED
+}
+
+enum MultipartAbortTaskState {
+  PENDING
+  CLAIMED
+  RESOLVED
+}
+
 // ─── Models ───────────────────────────────────────────
 
 model User {
@@ -207,6 +240,11 @@ model GameUploadSession {
   s3UploadId     String?    @map("s3_upload_id")
   s3Key          String?    @map("s3_key")
   s3PartEtags    Json?      @map("s3_part_etags") // [{partNumber: Int, etag: String}]
+  multipartGeneration Int   @default(1) @map("multipart_generation")
+  completionClaimToken String? @map("completion_claim_token")
+  completionClaimUntil DateTime? @map("completion_claim_until")
+  completionLastError String? @map("completion_last_error")
+  completionResult Json? @map("completion_result")
   expiresAt      DateTime   @map("expires_at")
   createdAt      DateTime   @default(now()) @map("created_at")
   updatedAt      DateTime   @updatedAt @map("updated_at")
@@ -214,6 +252,7 @@ model GameUploadSession {
   project    Project                  @relation("ProjectGameUploads", fields: [projectId], references: [id], onDelete: Cascade)
   user       User                     @relation("UserGameUploads", fields: [userId], references: [id], onDelete: Cascade)
   parts      GameUploadPart[]         @relation("GameUploadSessionParts")
+  partClaims GameUploadPartClaim[]    @relation("GameUploadSessionPartClaims")
   activeSlot GameUploadActiveSession? @relation("GameUploadSessionActiveSlot")
 
   @@index([projectId])
@@ -228,6 +267,7 @@ model GameUploadPart {
   sessionId  String   @map("session_id")
   partNumber Int      @map("part_number")
   etag       String
+  generation Int      @default(1)
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
@@ -236,6 +276,24 @@ model GameUploadPart {
   @@unique([sessionId, partNumber], name: "game_upload_part_session_part", map: "game_upload_parts_session_id_part_number_key")
   @@index([sessionId])
   @@map("game_upload_parts")
+}
+
+model GameUploadPartClaim {
+  id         String   @id @default(uuid())
+  sessionId  String   @map("session_id")
+  partNumber Int      @map("part_number")
+  token      String   @unique
+  generation Int
+  owner      String   @default("")
+  leaseUntil DateTime @map("lease_until")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  session GameUploadSession @relation("GameUploadSessionPartClaims", fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, partNumber], name: "game_upload_part_claim_session_part", map: "game_upload_part_claim_session_part")
+  @@index([leaseUntil])
+  @@map("game_upload_part_claims")
 }
 
 model GameUploadActiveSession {
@@ -271,15 +329,90 @@ model OrphanObject {
   bucket       String
   storageKey   String    @map("storage_key")
   reason       String    @default("")
+  targetKind   OrphanTargetKind @default(EXACT) @map("target_kind")
+  state        OrphanState @default(PENDING)
+  claimToken   String?   @map("claim_token")
+  claimUntil   DateTime? @map("claim_until")
+  cancelReason String?   @map("cancel_reason")
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
   attemptCount Int       @default(0) @map("attempt_count")
   lastTriedAt  DateTime? @map("last_tried_at")
   lastError    String?   @map("last_error")
   resolvedAt   DateTime? @map("resolved_at")
   createdAt    DateTime  @default(now()) @map("created_at")
 
-  @@unique([bucket, storageKey], name: "orphan_bucket_storage_key")
-  @@index([resolvedAt])
+  @@unique([bucket, storageKey], name: "orphan_bucket_storage_key", map: "orphan_bucket_storage_key")
+  @@index([state, nextAttemptAt])
+  @@index([claimUntil])
   @@map("orphan_objects")
+}
+
+model UploadIntent {
+  id                String            @id @default(uuid())
+  bucket            String
+  storageKey        String            @map("storage_key")
+  purpose           String
+  ownerOperationId  String?           @map("owner_operation_id")
+  ownerActorId      Int?              @map("owner_actor_id")
+  ownerProjectId    Int?              @map("owner_project_id")
+  ownerExhibitionId Int?              @map("owner_exhibition_id")
+  state             UploadIntentState @default(PREPARED)
+  notBefore         DateTime          @map("not_before")
+  attemptCount      Int               @default(0) @map("attempt_count")
+  nextAttemptAt     DateTime          @default(now()) @map("next_attempt_at")
+  lastError         String?           @map("last_error")
+  claimToken        String?           @map("claim_token")
+  claimUntil        DateTime?         @map("claim_until")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  @@unique([bucket, storageKey], name: "upload_intent_bucket_storage_key", map: "upload_intent_bucket_storage_key")
+  @@index([state, nextAttemptAt, notBefore])
+  @@index([ownerOperationId])
+  @@map("upload_intents")
+}
+
+model IdempotencyOperation {
+  id            String                    @id @default(uuid())
+  actorId       Int                       @map("actor_id")
+  scope         String
+  key           String
+  requestHash   String                    @map("request_hash")
+  state         IdempotencyOperationState @default(IN_PROGRESS)
+  ownerToken    String?                   @map("owner_token")
+  ownerUntil    DateTime?                 @map("owner_until")
+  result        Json?
+  lastError     String?                   @map("last_error")
+  expiresAt     DateTime                  @map("expires_at")
+  createdAt     DateTime                  @default(now()) @map("created_at")
+  updatedAt     DateTime                  @updatedAt @map("updated_at")
+
+  @@unique([actorId, scope, key], name: "idempotency_actor_scope_key", map: "idempotency_actor_scope_key")
+  @@index([state, ownerUntil])
+  @@index([expiresAt])
+  @@map("idempotency_operations")
+}
+
+model MultipartAbortTask {
+  id            String                  @id @default(uuid())
+  bucket        String
+  storageKey    String                  @map("storage_key")
+  uploadId      String                  @map("upload_id")
+  reason        String                  @default("")
+  state         MultipartAbortTaskState @default(PENDING)
+  attemptCount  Int                     @default(0) @map("attempt_count")
+  nextAttemptAt DateTime                @default(now()) @map("next_attempt_at")
+  lastError     String?                 @map("last_error")
+  claimToken    String?                 @map("claim_token")
+  claimUntil    DateTime?               @map("claim_until")
+  resolvedAt    DateTime?               @map("resolved_at")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+
+  @@unique([bucket, storageKey, uploadId], name: "multipart_abort_bucket_key_upload", map: "multipart_abort_bucket_key_upload")
+  @@index([state, nextAttemptAt])
+  @@index([claimUntil])
+  @@map("multipart_abort_tasks")
 }
 
 /// Runtime-configurable site settings (single row, id = "default").

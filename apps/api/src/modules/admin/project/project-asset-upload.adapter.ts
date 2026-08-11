@@ -7,6 +7,7 @@ import type {
 } from '../../../application/ports.js';
 import type {
 	SingleAssetUploadCoordinator,
+	MultipartRequestHasher,
 	UploadPipelinePort,
 } from '../../../application/upload-ports.js';
 import { badRequest, payloadTooLarge } from '../../../shared/errors.js';
@@ -22,6 +23,7 @@ export interface ProjectAssetUploadDependencies {
 	fileSystem: FileSystem;
 	ids: IdGenerator;
 	createPipeline(): UploadPipelinePort;
+	requestHasher?: MultipartRequestHasher;
 }
 
 /**
@@ -32,8 +34,9 @@ export function createProjectAssetUploadCoordinator(
 	deps: ProjectAssetUploadDependencies,
 ): SingleAssetUploadCoordinator {
 	return {
-		async start(parts, limits) {
+		async start(parts, limits, owner, beforeUpload) {
 			const pipeline = deps.createPipeline();
+			if (owner) pipeline.setOwner?.(owner);
 			try {
 				let kind: AssetKind | null = null;
 				let fileTmpPath: string | null = null;
@@ -85,6 +88,17 @@ export function createProjectAssetUploadCoordinator(
 					);
 				}
 
+				const hashFiles = [{
+						tmpPath: fileTmpPath,
+						fieldname: 'file',
+						filename: fileOriginalName,
+					}];
+				const requestHash = deps.requestHasher
+					? await deps.requestHasher.hash({ kind }, hashFiles)
+					: '';
+				if (beforeUpload) {
+					pipeline.setOwner?.(await beforeUpload(requestHash));
+				}
 				const savedFile = await pipeline.processFile(
 					fileTmpPath,
 					kind,
@@ -92,6 +106,7 @@ export function createProjectAssetUploadCoordinator(
 				);
 				return {
 					savedFile,
+					requestHash,
 					rollback: () => pipeline.rollbackCommitted(),
 					cleanup: () => pipeline.cleanupTemp(),
 				};

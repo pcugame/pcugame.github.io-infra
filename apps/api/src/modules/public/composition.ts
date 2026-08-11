@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { AppLogger, Clock, ObjectStorage } from '../../application/ports.js';
+import type { ObjectStorage } from '../../application/ports.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createPublicController } from './controller.js';
 import { createPublicRepository } from './repository.js';
@@ -21,8 +21,6 @@ export interface PublicProductionDependencies {
 	};
 	prisma: PrismaClient;
 	storage: ObjectStorage;
-	logger: AppLogger;
-	clock: Clock;
 }
 
 /** Compose public reads exclusively from resources owned by one BackendContext. */
@@ -44,8 +42,6 @@ export function createPublicProductionGraph(
 		},
 		repository,
 		storage: deps.storage,
-		logger: deps.logger,
-		clock: deps.clock,
 	});
 	return {
 		repository,

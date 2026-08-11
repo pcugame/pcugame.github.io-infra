@@ -24,6 +24,21 @@ export interface ProjectServiceDependencies {
 	): Promise<void>;
 	deleteQueuedProtectedObject(key: string, reason: string, context: Record<string, unknown>): Promise<void>;
 	logger: { error(context: Record<string, unknown>, message: string): void };
+	recordPostCommitCleanupFailure?: () => void;
+}
+
+async function runPostCommitCleanup(
+	deps: ProjectServiceDependencies,
+	work: () => Promise<void>,
+	context: Record<string, unknown>,
+	message: string,
+): Promise<void> {
+	try {
+		await work();
+	} catch (error) {
+		deps.recordPostCommitCleanupFailure?.();
+		deps.logger.error({ error, ...context }, message);
+	}
 }
 
 // ── Business logic ──────────────────────────────────────────
@@ -120,7 +135,12 @@ export async function deleteProject(deps: ProjectServiceDependencies, projectId:
 		reason,
 	});
 	await Promise.all(
-		assets.map((asset) => deps.deleteAssetObjects({ ...asset, projectId }, reason)),
+		assets.map((asset) => runPostCommitCleanup(
+			deps,
+			() => deps.deleteAssetObjects({ ...asset, projectId }, reason),
+			{ projectId, assetId: asset.id, storageKey: asset.storageKey },
+			'Post-commit project asset cleanup failed; durable outbox retained',
+		)),
 	);
 	await cleanupDeletedProjectWebgl(deps, projectId, webglEntryKey, activeUploads, reason);
 }
@@ -132,21 +152,42 @@ async function cleanupDeletedProjectWebgl(
 	activeUploads: ActiveUploadCleanup[],
 	reason: string,
 ): Promise<void> {
-	if (entryKey) await deps.deleteWebglDeploymentByEntry(projectId, entryKey, reason);
+	if (entryKey) {
+		await runPostCommitCleanup(
+			deps,
+			() => deps.deleteWebglDeploymentByEntry(projectId, entryKey, reason),
+			{ projectId, entryKey },
+			'Post-commit WebGL cleanup failed; durable outbox retained',
+		);
+	}
 	await Promise.all(activeUploads.map(async (session) => {
 		if (session.s3UploadId && session.s3Key) {
 			await deps.abortMultipart(session.s3Key, session.s3UploadId).catch((err) => {
+				deps.recordPostCommitCleanupFailure?.();
 				deps.logger.error({ err, projectId, s3Key: session.s3Key }, 'Failed to abort project upload during deletion');
 			});
 		}
 		if (session.uploadKind === 'WEBGL' && session.s3Key) {
 			const keys = parseWebglSourceKey(projectId, session.s3Key);
-			if (keys) await deps.deleteWebglDeployment(keys, `${reason}-active-upload`);
+			if (keys) {
+				await runPostCommitCleanup(
+					deps,
+					() => deps.deleteWebglDeployment(keys, `${reason}-active-upload`),
+					{ projectId, storageKey: session.s3Key },
+					'Post-commit active WebGL cleanup failed; durable outbox retained',
+				);
+			}
 		} else if (session.s3Key) {
-			await deps.deleteQueuedProtectedObject(session.s3Key, `${reason}-active-upload`, {
-				projectId,
-				uploadKind: session.uploadKind,
-			});
+			await runPostCommitCleanup(
+				deps,
+				() => deps.deleteQueuedProtectedObject(
+					session.s3Key!,
+					`${reason}-active-upload`,
+					{ projectId, uploadKind: session.uploadKind },
+				),
+				{ projectId, storageKey: session.s3Key, uploadKind: session.uploadKind },
+				'Post-commit active upload cleanup failed; durable outbox retained',
+			);
 		}
 	}));
 }
@@ -184,7 +225,12 @@ export async function bulkDeleteProjects(deps: ProjectServiceDependencies, ids: 
 
 	// The repository transaction already queued every target; these calls are best effort.
 	await Promise.all(
-		assets.map((a) => deps.deleteAssetObjects(a, reason)),
+		assets.map((asset) => runPostCommitCleanup(
+			deps,
+			() => deps.deleteAssetObjects(asset, reason),
+			{ projectId: asset.projectId, assetId: asset.id, storageKey: asset.storageKey },
+			'Post-commit bulk asset cleanup failed; durable outbox retained',
+		)),
 	);
 	await Promise.all(projects.map((project) => cleanupDeletedProjectWebgl(
 		deps,

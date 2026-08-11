@@ -26,4 +26,5 @@ export type MultipartPart = MultipartFieldPart | MultipartFilePart;
 export interface MultipartCommandInput {
 	actor: Actor;
 	parts: AsyncIterable<MultipartPart>;
+	idempotencyKey?: string;
 }

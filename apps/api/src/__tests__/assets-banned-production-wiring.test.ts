@@ -171,7 +171,6 @@ function graphHarness(initialBans: string[] = [], maxHits = 30) {
 		prisma: prisma.prisma,
 		storage: storage.storage,
 		downloadLimiter: limiter,
-		settings,
 		logger: testLogger,
 		clock: { now: () => new Date('2026-07-22T00:00:00.000Z') },
 	});

@@ -15,7 +15,10 @@
     "test:integration:year-concurrency": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/year-poster-concurrency.postgres.test.ts",
     "test:integration:import-transaction": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/import-transaction.postgres.test.ts",
     "test:integration:game-upload": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/game-upload-production.postgres.test.ts",
-    "test:integration": "npm run testenv:up && npm run test:integration:orphan-durability && npm run test:integration:asset-concurrency && npm run test:integration:year-concurrency && npm run test:integration:import-transaction && npm run test:integration:game-upload && docker compose -f docker-compose.integration.yml --profile e2e run --rm e2e"
+    "test:integration:idempotency": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/idempotency.postgres.test.ts",
+    "test:integration:lifecycle-schema": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/upload-lifecycle-schema.postgres.test.ts",
+    "test:integration:storage-recovery": "RUN_STORAGE_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' S3_ENDPOINT='http://127.0.0.1:3900' S3_REGION='garage' S3_ACCESS_KEY_ID='GK000000000000000000000001' S3_SECRET_ACCESS_KEY='0000000000000000000000000000000000000000000000000000000000000001' npm exec -w apps/api -- vitest run src/__tests__/storage-recovery.garage.postgres.test.ts",
+    "test:integration": "node scripts/run-integration.mjs"
   },
   "workspaces": [
     "apps/api",

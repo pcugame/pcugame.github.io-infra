@@ -74,6 +74,12 @@ export function createObjectDeletionCoordinator(deps: {
 	orphans: OrphanQueue;
 	logger: DeletionLogger;
 	deleteConcurrency?: number;
+	/**
+	 * Runs the claimed, fresh-reference-checking reaper after an outbox row has
+	 * already committed. Production graphs provide this hook; direct deletion is
+	 * retained only for legacy/fake graphs that do not expose the claim schema.
+	 */
+	reapDurablyQueued?: () => Promise<{ failed: number }>;
 }): ObjectDeletionCoordinator {
 	const deleteConcurrency = deps.deleteConcurrency ?? 25;
 
@@ -130,6 +136,13 @@ export function createObjectDeletionCoordinator(deps: {
 			return keys.length;
 		},
 		async deleteDurablyQueued(bucket, key, reason, logContext = {}) {
+			if (deps.reapDurablyQueued) {
+				const result = await deps.reapDurablyQueued();
+				if (result.failed > 0) {
+					throw new Error(`Claimed orphan reaper reported ${result.failed} failed deletion(s)`);
+				}
+				return;
+			}
 			try {
 				await deps.storage.delete(bucket, key);
 			} catch (err) {
@@ -140,6 +153,13 @@ export function createObjectDeletionCoordinator(deps: {
 			}
 		},
 		async deleteDurablyQueuedPrefix(bucket, prefix, reason, logContext = {}) {
+			if (deps.reapDurablyQueued) {
+				const result = await deps.reapDurablyQueued();
+				if (result.failed > 0) {
+					throw new Error(`Claimed orphan reaper reported ${result.failed} failed deletion(s)`);
+				}
+				return 0;
+			}
 			try {
 				const keys = await deps.storage.listKeys(bucket, prefix);
 				for (let offset = 0; offset < keys.length; offset += deleteConcurrency) {

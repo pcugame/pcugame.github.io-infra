@@ -5,6 +5,7 @@ import { parseIntParam } from '../../../shared/validation.js';
 import type { createProjectAccessService } from '../project-access.service.js';
 import type { createProjectAssetService } from './project-asset.service.js';
 import type { createSubmitProjectService } from './project-submit.service.js';
+import { assertIdempotencyKey } from '../../idempotency/service.js';
 
 type SubmitService = ReturnType<typeof createSubmitProjectService>;
 type AssetService = ReturnType<typeof createProjectAssetService>;
@@ -28,11 +29,15 @@ export function createAdminProjectSubmitController(deps: {
 			{
 				preHandler: requireRole('ADMIN', 'OPERATOR'),
 				bodyLimit: deps.route.bodyLimit,
+				handlerTimeout: 45 * 60 * 1000,
 				config: { rateLimit: deps.route.rateLimit },
 			},
 			async (request, reply) => {
+				const idempotencyKey = assertIdempotencyKey(
+					request.headers['idempotency-key'],
+				);
 				const result = await deps.service.submitProject(
-					{ actor: request.currentUser!, parts: request.parts() },
+					{ actor: request.currentUser!, parts: request.parts(), idempotencyKey },
 					{ audience: 'admin' },
 				);
 				sendCreated(reply, result);
@@ -49,15 +54,22 @@ export function createProjectAssetUploadController(deps: {
 	return async function projectAssetUploadController(app): Promise<void> {
 		app.post<{ Params: { id: string } }>(
 			'/projects/:id/assets',
-			{ preHandler: requireLogin, bodyLimit: deps.bodyLimit },
+			{
+				preHandler: requireLogin,
+				bodyLimit: deps.bodyLimit,
+				handlerTimeout: 45 * 60 * 1000,
+			},
 			async (request, reply) => {
+				const idempotencyKey = assertIdempotencyKey(
+					request.headers['idempotency-key'],
+				);
 				const projectId = parseIntParam(request.params.id);
 				const actor = request.currentUser!;
 				const project = await deps.access.loadProjectWithAccess(actor, projectId);
 				const result = await deps.service.addAssetToProject(
 					projectId,
 					project.exhibitionId,
-					{ actor, parts: request.parts() },
+					{ actor, parts: request.parts(), idempotencyKey },
 				);
 				sendCreated(reply, result);
 			},

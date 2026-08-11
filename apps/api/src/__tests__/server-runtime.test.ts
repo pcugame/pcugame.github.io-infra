@@ -180,6 +180,60 @@ describe('server startup and shutdown ownership boundary', () => {
 		expect(events).toEqual(['s3', 'prisma']);
 	});
 
+	it('force-closes connections and invokes the injected exit boundary at the absolute deadline', async () => {
+		const { createServerRuntime } = await import('../server.js');
+		const events: string[] = [];
+		const { context } = contextHarness(events);
+		const closeIdleConnections = vi.fn();
+		const closeAllConnections = vi.fn();
+		const app = {
+			listen: vi.fn(async () => 'http://127.0.0.1'),
+			close: vi.fn(() => new Promise<void>(() => {})),
+			closeIdleConnections,
+			closeAllConnections,
+		} as unknown as FastifyInstance;
+		const forceExit = vi.fn();
+		const runtime = createServerRuntime({
+			config: { ...config, SHUTDOWN_DRAIN_MS: 25 },
+			context,
+			app,
+			signals: signalHarness().boundary,
+			forceExit,
+		});
+		await runtime.start();
+
+		await expect(runtime.shutdown('deadline-test')).resolves.toBe(1);
+		expect(closeIdleConnections).toHaveBeenCalledOnce();
+		expect(closeAllConnections).toHaveBeenCalledOnce();
+		expect(forceExit).toHaveBeenCalledWith(1);
+	});
+
+	it('applies the same absolute deadline when backend resource close hangs', async () => {
+		const { createServerRuntime } = await import('../server.js');
+		const events: string[] = [];
+		const { context } = contextHarness(events);
+		context.close = vi.fn(() => new Promise<void>(() => {}));
+		const closeAllConnections = vi.fn();
+		const app = {
+			listen: vi.fn(async () => 'http://127.0.0.1'),
+			close: vi.fn(async () => {}),
+			closeAllConnections,
+		} as unknown as FastifyInstance;
+		const forceExit = vi.fn();
+		const runtime = createServerRuntime({
+			config: { ...config, SHUTDOWN_DRAIN_MS: 25 },
+			context,
+			app,
+			signals: signalHarness().boundary,
+			forceExit,
+		});
+		await runtime.start();
+
+		await expect(runtime.shutdown('resource-hang-test')).resolves.toBe(1);
+		expect(closeAllConnections).toHaveBeenCalledOnce();
+		expect(forceExit).toHaveBeenCalledWith(1);
+	});
+
 	it.each([
 		['context start', 1, 0],
 		['listen', 1, 1],

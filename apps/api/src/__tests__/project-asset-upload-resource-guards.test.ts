@@ -13,6 +13,7 @@ const mocks = {
 	deleteOrQueue: vi.fn(),
 	processFile: vi.fn(),
 	rollbackCommitted: vi.fn(),
+	logError: vi.fn(),
 };
 
 const MB = 1024 * 1024;
@@ -63,6 +64,7 @@ const projectAssetService = createProjectAssetService({
 	assetUrl: (key, kind) => `http://localhost:4000/api/assets/${kind === 'GAME' || kind === 'VIDEO' ? 'protected' : 'public'}/${key}`,
 	bucketForKind: () => 'test-bucket',
 	deleteOrQueue: mocks.deleteOrQueue,
+	logger: { error: mocks.logError },
 });
 
 function chunksWithHeader(header: Buffer, totalBytes: number, chunkBytes: number): Buffer[] {
@@ -249,7 +251,10 @@ describe('project asset upload resource guards', () => {
 			7,
 			1,
 			assetRequest('GAME', [zipHeader], 'game.zip'),
-		)).rejects.toThrow('durable deletion unavailable');
+		)).resolves.toEqual({
+			assetId: 321,
+			url: 'http://localhost:4000/api/assets/protected/asset/new-game.zip',
+		});
 
 		expect(mocks.replaceOrCreateReplaceableAsset).toHaveBeenCalledWith(
 			7,
@@ -263,6 +268,10 @@ describe('project asset upload resource guards', () => {
 		);
 		expect(rollback).not.toHaveBeenCalled();
 		expect(cleanup).toHaveBeenCalledOnce();
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ assetId: 321, storageKey: 'asset/old-game.zip' }),
+			'Post-commit asset cleanup failed; durable outbox retained',
+		);
 		startSpy.mockRestore();
 	});
 });

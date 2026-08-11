@@ -24,6 +24,12 @@ export interface AssetWriteData {
 	playbackStatus?: AssetPlaybackStatus;
 	playbackError?: string;
 	isPublic: boolean;
+	uploadIntentIds?: string[];
+	idempotency?: {
+		operationId: string;
+		ownerToken: string;
+		resultForAsset(assetId: number): Record<string, unknown>;
+	};
 }
 
 export interface ProjectAssetWriteData extends AssetWriteData {
@@ -56,7 +62,13 @@ export interface SubmitProjectWriteData {
 		playbackSizeBytes?: number;
 		playbackStatus?: AssetPlaybackStatus;
 		playbackError?: string;
+		uploadIntentIds?: string[];
 	}>;
+	idempotency?: {
+		operationId: string;
+		ownerToken: string;
+		resultForProject(project: { id: number; slug: string }): Record<string, unknown>;
+	};
 }
 
 export interface ProjectListRecord {

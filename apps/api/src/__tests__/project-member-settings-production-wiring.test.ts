@@ -215,7 +215,7 @@ function prismaHarness() {
 }
 
 function settingsHarness(
-	initial = { maxGameFileMb: 64, maxChunkSizeMb: 4 },
+	initial = { maxGameFileMb: 64, maxChunkSizeMb: 6 },
 	options: {
 		now?: () => number;
 		ttlMs?: number;
@@ -250,8 +250,8 @@ function graphHarness(
 	const prisma = prismaHarness();
 	const storage = storageHarness();
 	const settings = settingsHarness(label === 'a'
-		? { maxGameFileMb: 64, maxChunkSizeMb: 4 }
-		: { maxGameFileMb: 32, maxChunkSizeMb: 2 }, settingsOptions);
+		? { maxGameFileMb: 64, maxChunkSizeMb: 6 }
+		: { maxGameFileMb: 32, maxChunkSizeMb: 5 }, settingsOptions);
 	const graph = createProjectMemberSettingsProductionGraph({
 		config: {
 			API_PUBLIC_URL: `https://api-${label}.test`,
@@ -587,21 +587,21 @@ describe('project/member/settings production wiring', () => {
 
 		expect((await appA.inject({ method: 'GET', url: '/api/admin/settings' })).json().data).toEqual({
 			maxGameFileMb: 64,
-			maxChunkSizeMb: 4,
+			maxChunkSizeMb: 6,
 		});
 		expect((await appB.inject({ method: 'GET', url: '/api/admin/settings' })).json().data).toEqual({
 			maxGameFileMb: 32,
-			maxChunkSizeMb: 2,
+			maxChunkSizeMb: 5,
 		});
 		const updated = await appA.inject({
 			method: 'PATCH',
 			url: '/api/admin/settings',
-			payload: { maxGameFileMb: 16, maxChunkSizeMb: 1 },
+			payload: { maxGameFileMb: 16, maxChunkSizeMb: 5 },
 		});
 		expect(updated.statusCode).toBe(200);
 		a.settings.store.invalidate();
-		expect(await a.settings.store.get()).toEqual({ maxGameFileMb: 16, maxChunkSizeMb: 1 });
-		expect(await b.settings.store.get()).toEqual({ maxGameFileMb: 32, maxChunkSizeMb: 2 });
+		expect(await a.settings.store.get()).toEqual({ maxGameFileMb: 16, maxChunkSizeMb: 5 });
+		expect(await b.settings.store.get()).toEqual({ maxGameFileMb: 32, maxChunkSizeMb: 5 });
 	});
 
 	it('preserves settings update validation failures without repository writes', async () => {
@@ -630,17 +630,17 @@ describe('project/member/settings production wiring', () => {
 		apps.push(app);
 
 		const initial = await app.inject({ method: 'GET', url: '/api/admin/settings' });
-		expect(initial.json().data).toEqual({ maxGameFileMb: 64, maxChunkSizeMb: 4 });
-		harness.settings.setValue({ maxGameFileMb: 8, maxChunkSizeMb: 2 });
+		expect(initial.json().data).toEqual({ maxGameFileMb: 64, maxChunkSizeMb: 6 });
+		harness.settings.setValue({ maxGameFileMb: 8, maxChunkSizeMb: 5 });
 
 		nowMs = 99;
 		const cached = await app.inject({ method: 'GET', url: '/api/admin/settings' });
-		expect(cached.json().data).toEqual({ maxGameFileMb: 64, maxChunkSizeMb: 4 });
+		expect(cached.json().data).toEqual({ maxGameFileMb: 64, maxChunkSizeMb: 6 });
 		expect(harness.settings.repository.loadOrCreate).toHaveBeenCalledOnce();
 
 		nowMs = 100;
 		const reloaded = await app.inject({ method: 'GET', url: '/api/admin/settings' });
-		expect(reloaded.json().data).toEqual({ maxGameFileMb: 8, maxChunkSizeMb: 2 });
+		expect(reloaded.json().data).toEqual({ maxGameFileMb: 8, maxChunkSizeMb: 5 });
 		expect(harness.settings.repository.loadOrCreate).toHaveBeenCalledTimes(2);
 	});
 
@@ -660,11 +660,11 @@ describe('project/member/settings production wiring', () => {
 		const updatedB = await appB.inject({
 			method: 'PATCH',
 			url: '/api/admin/settings',
-			payload: { maxGameFileMb: 12, maxChunkSizeMb: 1 },
+			payload: { maxGameFileMb: 12, maxChunkSizeMb: 5 },
 		});
 		expect(updatedB.statusCode).toBe(200);
-		expect(updatedB.json().data).toEqual({ maxGameFileMb: 12, maxChunkSizeMb: 1 });
-		expect(await b.settings.store.get()).toEqual({ maxGameFileMb: 12, maxChunkSizeMb: 1 });
+		expect(updatedB.json().data).toEqual({ maxGameFileMb: 12, maxChunkSizeMb: 5 });
+		expect(await b.settings.store.get()).toEqual({ maxGameFileMb: 12, maxChunkSizeMb: 5 });
 	});
 
 	it('retries an initial settings failure and exposes recovered lower DB limits without reset', async () => {

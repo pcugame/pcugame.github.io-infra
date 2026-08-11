@@ -138,7 +138,7 @@ describe('project submit route factories', () => {
 		const response = await app.inject({
 			method: 'POST',
 			url: '/api/me/projects/submit',
-			headers: { 'x-test-role': 'USER' },
+			headers: { 'x-test-role': 'USER', 'idempotency-key': 'me-submit' },
 		});
 		expect(response.statusCode).toBe(201);
 		expect(repository.createProjectWithAssets).toHaveBeenCalledWith(
@@ -146,11 +146,29 @@ describe('project submit route factories', () => {
 		);
 	});
 
+	it('requires a bounded Idempotency-Key on submit routes', async () => {
+		const missing = await app.inject({
+			method: 'POST',
+			url: '/api/me/projects/submit',
+			headers: { 'x-test-role': 'USER' },
+		});
+		expect(missing.statusCode).toBe(400);
+		const tooLong = await app.inject({
+			method: 'POST',
+			url: '/api/admin/projects/submit',
+			headers: {
+				'x-test-role': 'ADMIN',
+				'idempotency-key': 'x'.repeat(201),
+			},
+		});
+		expect(tooLong.statusCode).toBe(400);
+	});
+
 	it('blocks USER on the admin submit factory', async () => {
 		const response = await app.inject({
 			method: 'POST',
 			url: '/api/admin/projects/submit',
-			headers: { 'x-test-role': 'USER' },
+			headers: { 'x-test-role': 'USER', 'idempotency-key': 'denied-submit' },
 		});
 		expect(response.statusCode).toBe(403);
 		expect(repository.createProjectWithAssets).not.toHaveBeenCalled();
@@ -160,7 +178,7 @@ describe('project submit route factories', () => {
 		const response = await app.inject({
 			method: 'POST',
 			url: '/api/admin/projects/submit',
-			headers: { 'x-test-role': role },
+			headers: { 'x-test-role': role, 'idempotency-key': `${role}-submit` },
 		});
 		expect(response.statusCode).toBe(201);
 	});
@@ -183,6 +201,7 @@ describe('project submit route factories', () => {
 			headers: {
 				'x-test-role': 'USER',
 				'x-test-payload': payload,
+				'idempotency-key': 'forbidden-fields',
 			},
 		});
 		expect(response.statusCode).toBe(400);

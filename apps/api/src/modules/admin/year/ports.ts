@@ -41,6 +41,7 @@ export interface ExhibitionRepository {
 		originalName: string;
 		mimeType: string;
 		sizeBytes: bigint;
+		uploadIntentIds?: string[];
 	}, outbox: PosterDeletionOutboxConfig): Promise<{ updated: ExhibitionRecord; oldStorageKey: string | null } | null>;
 	clearExhibitionPoster(id: number, outbox: PosterDeletionOutboxConfig): Promise<{
 		updated: ExhibitionRecord;

@@ -7,6 +7,7 @@ import type {
 } from '../../../application/ports.js';
 import type {
 	SavedUpload,
+	UploadIntentOwner,
 	UploadPipelinePort,
 } from '../../../application/upload-ports.js';
 import { badRequest } from '../../../shared/errors.js';
@@ -53,6 +54,20 @@ export interface ProjectUploadPipelineDependencies {
 		reason: string,
 		context?: Record<string, unknown>,
 	): Promise<void>;
+	uploadIntents?: {
+		prepare(input: {
+			bucket: string;
+			storageKey: string;
+			purpose: string;
+			ownerOperationId?: string;
+			ownerActorId?: number;
+			ownerProjectId?: number;
+			ownerExhibitionId?: number;
+		}): Promise<string>;
+		markUploaded(id: string): Promise<void>;
+		isUncommitted(id: string): Promise<boolean>;
+		recordAmbiguousError(id: string, error: unknown): Promise<void>;
+	};
 }
 
 interface PendingObject {
@@ -60,6 +75,7 @@ interface PendingObject {
 	key: string;
 	kind: AssetKind;
 	purpose: 'original' | 'playback';
+	intentId?: string;
 }
 
 const TEMP_CLEANUP_MAX_ATTEMPTS = 3;
@@ -98,6 +114,7 @@ export function createProjectUploadPipeline(
 ): UploadPipelinePort {
 	const temporaryPaths = new Set<string>();
 	const pendingObjects: PendingObject[] = [];
+	let owner: UploadIntentOwner = {};
 
 	async function upload(
 		filePath: string,
@@ -105,23 +122,48 @@ export function createProjectUploadPipeline(
 		extension: string,
 		contentType: string,
 		purpose: PendingObject['purpose'],
-	): Promise<string> {
+	): Promise<{ key: string; intentId?: string }> {
 		const bucket = deps.bucketForKind(kind);
 		const key = storageKey(deps.ids.next(), extension);
 		const stat = await deps.fileSystem.stat(filePath);
-		pendingObjects.push({ bucket, key, kind, purpose });
-		await deps.storage.upload(
+		const intentId = await deps.uploadIntents?.prepare({
 			bucket,
-			key,
-			deps.fileSystem.createReadStream(filePath),
-			contentType,
-			stat.size,
-			storageOptionsForAsset(kind, purpose),
-		);
-		return key;
+			storageKey: key,
+			purpose: `project-${kind.toLowerCase()}-${purpose}`,
+			...(owner.operationId ? { ownerOperationId: owner.operationId } : {}),
+			...(owner.actorId !== undefined ? { ownerActorId: owner.actorId } : {}),
+			...(owner.projectId !== undefined ? { ownerProjectId: owner.projectId } : {}),
+			...(owner.exhibitionId !== undefined
+				? { ownerExhibitionId: owner.exhibitionId }
+				: {}),
+		});
+		pendingObjects.push({ bucket, key, kind, purpose, ...(intentId ? { intentId } : {}) });
+		try {
+			await deps.storage.upload(
+				bucket,
+				key,
+				deps.fileSystem.createReadStream(filePath),
+				contentType,
+				stat.size,
+				storageOptionsForAsset(kind, purpose),
+			);
+		} catch (error) {
+			if (intentId) await deps.uploadIntents?.recordAmbiguousError(intentId, error).catch(
+				(intentError) => deps.logger.error(
+					{ error: intentError, intentId, bucket, storageKey: key },
+					'Failed to annotate ambiguous upload intent',
+				),
+			);
+			throw error;
+		}
+		if (intentId) await deps.uploadIntents?.markUploaded(intentId);
+		return { key, ...(intentId ? { intentId } : {}) };
 	}
 
 	return {
+		setOwner(nextOwner) {
+			owner = { ...nextOwner };
+		},
 		trackTempFile(filePath) {
 			temporaryPaths.add(filePath);
 		},
@@ -142,7 +184,7 @@ export function createProjectUploadPipeline(
 					);
 				}
 
-				const originalKey = await upload(
+				const original = await upload(
 					filePath,
 					kind,
 					validated.ext,
@@ -154,18 +196,19 @@ export function createProjectUploadPipeline(
 				let playbackSizeBytes = 0;
 				if (playback.playback) {
 					temporaryPaths.add(playback.playback.tmpPath);
-					playbackStorageKey = await upload(
+					const playbackUpload = await upload(
 						playback.playback.tmpPath,
 						kind,
 						playback.playback.ext,
 						playback.playback.mimeType,
 						'playback',
 					);
+					playbackStorageKey = playbackUpload.key;
 					playbackMimeType = playback.playback.mimeType;
 					playbackSizeBytes = playback.playback.sizeBytes;
 				}
 				return {
-					storageKey: originalKey,
+					storageKey: original.key,
 					playbackStorageKey,
 					mimeType: validated.mimeType,
 					playbackMimeType,
@@ -175,6 +218,10 @@ export function createProjectUploadPipeline(
 					playbackError: playback.playbackError,
 					originalName,
 					kind,
+					uploadIntentIds: [original.intentId, ...pendingObjects
+						.filter((item) => item.key === playbackStorageKey)
+						.map((item) => item.intentId)]
+						.filter((id): id is string => typeof id === 'string'),
 				};
 			}
 
@@ -197,7 +244,7 @@ export function createProjectUploadPipeline(
 			}
 			if (processed.tmpPath !== filePath) temporaryPaths.add(processed.tmpPath);
 
-			const key = await upload(
+			const uploaded = await upload(
 				processed.tmpPath,
 				kind,
 				processed.ext,
@@ -205,11 +252,12 @@ export function createProjectUploadPipeline(
 				'original',
 			);
 			return {
-				storageKey: key,
+				storageKey: uploaded.key,
 				mimeType: processed.mimeType,
 				sizeBytes: processed.sizeBytes,
 				originalName,
 				kind,
+				uploadIntentIds: uploaded.intentId ? [uploaded.intentId] : [],
 			};
 		},
 
@@ -217,6 +265,12 @@ export function createProjectUploadPipeline(
 			const failures: unknown[] = [];
 			for (const object of [...pendingObjects].reverse()) {
 				try {
+					if (object.intentId
+						&& deps.uploadIntents
+						&& !(await deps.uploadIntents.isUncommitted(object.intentId))) {
+						pendingObjects.splice(pendingObjects.indexOf(object), 1);
+						continue;
+					}
 					await deps.deleteUnpersistedObject(
 						object.bucket,
 						object.key,

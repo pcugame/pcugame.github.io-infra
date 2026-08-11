@@ -889,8 +889,8 @@ describe('game-upload/WebGL production wiring', () => {
 		await Promise.all([a.context.start(), b.context.start()]);
 		expect(a.prisma.sessions.get('a-recovery')?.status).toBe('FAILED');
 		expect(a.prisma.calls.sessionFind).not.toHaveBeenCalled();
-		expect(a.scheduler.tasks).toHaveLength(3);
-		expect(b.scheduler.tasks).toHaveLength(3);
+		expect(a.scheduler.tasks).toHaveLength(4);
+		expect(b.scheduler.tasks).toHaveLength(4);
 
 		const aKey = 'a-stream.zip';
 		const bKey = 'b-stream.zip';

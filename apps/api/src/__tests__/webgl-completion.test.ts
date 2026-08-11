@@ -48,6 +48,10 @@ function createHarness() {
 		transitionToCompleting: vi.fn().mockResolvedValue({ count: 1 }),
 		findPartsBySessionId: vi.fn().mockResolvedValue([{ partNumber: 1, etag: 'etag' }]),
 		finalizeCompletedWebglSession: vi.fn().mockResolvedValue({ oldEntryKey: '' }),
+		finalizeGame: vi.fn().mockResolvedValue({
+			oldStorageKey: null,
+			oldPlaybackStorageKey: null,
+		}),
 		markFailed: vi.fn().mockResolvedValue({ count: 1 }),
 		revertToPending: vi.fn().mockResolvedValue({ count: 1 }),
 		completeMultipart: vi.fn().mockResolvedValue(undefined),
@@ -65,7 +69,7 @@ function createHarness() {
 		deployWebgl: mocks.deployWebgl,
 		rollbackWebglPublicDeployment: mocks.rollbackWebglPublicDeployment,
 		deleteWebglDeploymentByEntry: mocks.deleteWebglDeploymentByEntry,
-		finalizeGame: vi.fn().mockResolvedValue({ oldStorageKey: null, oldPlaybackStorageKey: null }),
+		finalizeGame: mocks.finalizeGame,
 		finalizeWebgl: mocks.finalizeCompletedWebglSession,
 		deleteOrQueue: mocks.deleteOrQueue,
 		webglUrl: () => 'http://localhost:4000/api/public/webgl/7/',
@@ -257,6 +261,20 @@ describe('WebGL completion atomicity', () => {
 		expect(mocks.completeMultipart).not.toHaveBeenCalled();
 	});
 
+	it('aborts completion before storage mutation when its DB lease is no longer owned', async () => {
+		const { mocks, deps, complete } = createHarness();
+		deps.repository.claimCompletion = vi.fn().mockResolvedValue({ count: 1, reason: null });
+		deps.repository.renewCompletionClaim = vi.fn().mockResolvedValue({ count: 0 });
+		deps.repository.releaseCompletionClaim = vi.fn().mockResolvedValue({ count: 0 });
+
+		await expect(complete()).rejects.toMatchObject({
+			name: 'CompletionClaimLostError',
+		});
+		expect(mocks.findPartsBySessionId).not.toHaveBeenCalled();
+		expect(mocks.completeMultipart).not.toHaveBeenCalled();
+		expect(deps.repository.releaseCompletionClaim).toHaveBeenCalledOnce();
+	});
+
 	it('preserves COMPLETING when multipart outcome cannot be inspected', async () => {
 		const { mocks, complete } = createHarness();
 		mocks.completeMultipart.mockRejectedValueOnce(new Error('completion response lost'));
@@ -270,6 +288,32 @@ describe('WebGL completion atomicity', () => {
 			expect.objectContaining({ sessionId: 'session-webgl', storageKey: sourceKey }),
 			'Could not determine whether multipart completion created the final object; preserving COMPLETING state',
 		);
+	});
+
+	it('preserves COMPLETING when HEAD is absent but ListParts is ambiguous', async () => {
+		const { mocks, deps, complete } = createHarness();
+		mocks.completeMultipart.mockRejectedValueOnce(new Error('completion response lost'));
+		mocks.head.mockResolvedValueOnce(null);
+		deps.storage.listParts = vi.fn()
+			.mockResolvedValueOnce([{ partNumber: 1, etag: 'etag' }])
+			.mockRejectedValueOnce(new Error('multipart unavailable'));
+
+		await expect(complete()).rejects.toThrow('completion response lost');
+		expect(mocks.revertToPending).not.toHaveBeenCalled();
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'session-webgl', storageKey: sourceKey }),
+			'Multipart completion and upload state are both ambiguous; preserving COMPLETING state',
+		);
+	});
+
+	it('returns to PENDING when HEAD is absent and ListParts confirms the upload remains', async () => {
+		const { mocks, deps, complete } = createHarness();
+		mocks.completeMultipart.mockRejectedValueOnce(new Error('completion response lost'));
+		mocks.head.mockResolvedValueOnce(null);
+		deps.storage.listParts = vi.fn().mockResolvedValue([{ partNumber: 1, etag: 'etag' }]);
+
+		await expect(complete()).rejects.toThrow('completion response lost');
+		expect(mocks.revertToPending).toHaveBeenCalledWith('session-webgl', undefined);
 	});
 
 	it('does not abort storage when cancellation loses the state compare-and-set', async () => {
@@ -372,16 +416,35 @@ describe('WebGL completion atomicity', () => {
 		);
 	});
 
-	it('surfaces old-deployment cleanup failure without rolling back the finalized new tree', async () => {
+	it('logs old-deployment cleanup failure without changing the completed response', async () => {
 		const { mocks, complete } = createHarness();
 		mocks.finalizeCompletedWebglSession.mockResolvedValue({
 			oldEntryKey: 'webgl/7/123e4567-e89b-42d3-b456-426614174111/site/index.html',
 		});
 		mocks.deleteWebglDeploymentByEntry.mockRejectedValue(new Error('orphan queue unavailable'));
 
-		await expect(complete()).rejects.toThrow('orphan queue unavailable');
+		await expect(complete()).resolves.toMatchObject({ status: 'COMPLETED' });
 		expect(mocks.markFailed).not.toHaveBeenCalled();
 		expect(mocks.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
-		expect(mocks.logError).not.toHaveBeenCalled();
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'session-webgl' }),
+			'Post-commit WebGL deployment cleanup failed; durable outbox retained',
+		);
+	});
+
+	it('logs old GAME cleanup failure without changing the completed response', async () => {
+		const { mocks, complete } = createHarness();
+		mocks.findSessionById.mockResolvedValueOnce({ ...session(), uploadKind: 'GAME' });
+		mocks.finalizeGame.mockResolvedValueOnce({
+			oldStorageKey: 'old-game.zip',
+			oldPlaybackStorageKey: null,
+		});
+		mocks.deleteOrQueue.mockRejectedValueOnce(new Error('storage unavailable'));
+
+		await expect(complete()).resolves.toMatchObject({ status: 'COMPLETED' });
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'session-webgl', storageKey: 'old-game.zip' }),
+			'Post-commit GAME object cleanup failed; durable outbox retained',
+		);
 	});
 });

@@ -11,6 +11,7 @@ import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createObjectDeletionCoordinator } from '../../application/object-deletion.js';
 import { createOrphanRepository } from '../orphan/repository.js';
 import { createOrphanService } from '../orphan/service.js';
+import { createObjectReferenceResolver } from '../orphan/reference-resolver.js';
 import { parseWebglEntryKey } from '../webgl/paths.js';
 import { createProjectAccessRepository } from './project-access.repository.js';
 import { createProjectAccessService } from './project-access.service.js';
@@ -24,6 +25,8 @@ import { createProjectService } from './project/service.js';
 import { assertStatusTransition, bulkUpdateStatus } from './project/project-status.service.js';
 import { createSettingsController } from './settings/controller.js';
 import { createSettingsService } from './settings/service.js';
+import type { UploadLifecycleMetrics } from '../../lib/upload-lifecycle-metrics.js';
+import { bucketForAssetKind } from '../../shared/upload-policy.js';
 
 export interface ProjectMemberSettingsProductionGraph {
 	projectController: FastifyPluginAsync;
@@ -47,21 +50,29 @@ export interface ProjectMemberSettingsProductionDependencies {
 	settings: SettingsStore;
 	logger: AppLogger;
 	clock: Clock;
+	uploadLifecycleMetrics?: UploadLifecycleMetrics;
 }
 
 function bucketForKind(
 	kind: AssetKind,
 	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
 ): string {
-	return kind === 'GAME' || kind === 'VIDEO'
-		? config.S3_BUCKET_PROTECTED
-		: config.S3_BUCKET_PUBLIC;
+	return bucketForAssetKind(kind, {
+		publicBucket: config.S3_BUCKET_PUBLIC,
+		protectedBucket: config.S3_BUCKET_PROTECTED,
+	});
 }
 
 /** Compose the ticket-008 slice exclusively from one BackendContext's ports. */
 export function createProjectMemberSettingsProductionGraph(
 	deps: ProjectMemberSettingsProductionDependencies,
 ): ProjectMemberSettingsProductionGraph {
+	const prismaCapabilities = deps.prisma as unknown as Record<string, unknown>;
+	const durableLifecycleEnabled = Boolean(
+		prismaCapabilities['uploadIntent']
+		&& prismaCapabilities['orphanObject']
+		&& typeof prismaCapabilities['$queryRaw'] === 'function',
+	);
 	const accessRepository = createProjectAccessRepository(deps.prisma);
 	const access = createProjectAccessService(accessRepository);
 	const repository = createProjectCrudRepository(deps.prisma);
@@ -69,12 +80,25 @@ export function createProjectMemberSettingsProductionGraph(
 		clock: deps.clock,
 		storage: deps.storage,
 		repository: createOrphanRepository(deps.prisma),
+		...(durableLifecycleEnabled ? {
+			references: createObjectReferenceResolver(
+				deps.prisma,
+				{
+					publicBucket: deps.config.S3_BUCKET_PUBLIC,
+					protectedBucket: deps.config.S3_BUCKET_PROTECTED,
+				},
+				deps.logger,
+			),
+		} : {}),
 		logger: deps.logger,
 	});
 	const deletion = createObjectDeletionCoordinator({
 		storage: deps.storage,
 		orphans: { record: orphanService.recordOrphan },
 		logger: deps.logger,
+		...(durableLifecycleEnabled ? {
+			reapDurablyQueued: () => orphanService.runOrphanReaper(),
+		} : {}),
 	});
 	const serializer = createProjectSerializer(deps.config.API_PUBLIC_URL);
 	const projectService = createProjectService({
@@ -146,6 +170,10 @@ export function createProjectMemberSettingsProductionGraph(
 			deletion.deleteDurablyQueued(deps.config.S3_BUCKET_PROTECTED, key, reason, context)
 		),
 		logger: deps.logger,
+		...(deps.uploadLifecycleMetrics ? {
+			recordPostCommitCleanupFailure:
+				deps.uploadLifecycleMetrics.recordPostCommitCleanupFailure,
+		} : {}),
 	});
 	const memberService = createMemberService({
 		projectExists: async (projectId) => await accessRepository.findProject(projectId) !== null,

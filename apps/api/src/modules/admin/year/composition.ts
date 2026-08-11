@@ -13,17 +13,23 @@ import { createObjectDeletionCoordinator } from '../../../application/object-del
 import type { Env } from '../../../config/env.js';
 import type { PrismaClient } from '../../../generated/prisma/client.js';
 import type { UploadLimits } from '../../../shared/upload-limits.js';
+import { megabytes, resolveRoleUploadLimits } from '../../../shared/upload-policy.js';
 import { createOrphanRepository } from '../../orphan/repository.js';
 import { createOrphanService } from '../../orphan/service.js';
+import { createObjectReferenceResolver } from '../../orphan/reference-resolver.js';
 import { createYearController } from './controller.js';
 import { createExhibitionPosterUploadCoordinator } from './poster-upload.adapter.js';
 import { createExhibitionRepository } from './repository.js';
 import { createExhibitionService } from './service.js';
+import { createUploadIntentService } from '../../upload-intent/service.js';
+import { createUploadIntentRepository } from '../../upload-intent/repository.js';
+import type { UploadLifecycleMetrics } from '../../../lib/upload-lifecycle-metrics.js';
 
 type YearConfig = Pick<
 	Env,
 	| 'API_PUBLIC_URL'
 	| 'S3_BUCKET_PUBLIC'
+	| 'S3_BUCKET_PROTECTED'
 	| 'UPLOAD_USER_IMAGE_MAX_MB'
 	| 'UPLOAD_USER_GAME_MAX_MB'
 	| 'UPLOAD_USER_REQUEST_MAX_MB'
@@ -48,47 +54,58 @@ export interface YearProductionDependencies {
 	logger: AppLogger;
 	clock: Clock;
 	ids: IdGenerator;
-}
-
-function megabytes(value: number): number {
-	return value * 1024 * 1024;
+	uploadLifecycleMetrics?: UploadLifecycleMetrics;
 }
 
 function uploadLimits(config: YearConfig, role: UserRole): UploadLimits {
-	const privileged = role === 'ADMIN' || role === 'OPERATOR';
-	return privileged
-		? {
-			posterMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_IMAGE_MAX_MB),
-			imageMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_IMAGE_MAX_MB),
-			gameMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_GAME_MAX_MB),
-			videoMaxBytes: 1024 * 1024 * 1024,
-			requestMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_REQUEST_MAX_MB),
-			maxFiles: config.UPLOAD_PRIVILEGED_MAX_FILES,
-		}
-		: {
-			posterMaxBytes: megabytes(config.UPLOAD_USER_IMAGE_MAX_MB),
-			imageMaxBytes: megabytes(config.UPLOAD_USER_IMAGE_MAX_MB),
-			gameMaxBytes: megabytes(config.UPLOAD_USER_GAME_MAX_MB),
-			videoMaxBytes: 200 * 1024 * 1024,
-			requestMaxBytes: megabytes(config.UPLOAD_USER_REQUEST_MAX_MB),
-			maxFiles: config.UPLOAD_USER_MAX_FILES,
-		};
+	return resolveRoleUploadLimits(config, role);
 }
 
 /** Compose ticket-009 solely from resources owned by one BackendContext. */
 export function createYearProductionGraph(
 	deps: YearProductionDependencies,
 ): YearProductionGraph {
+	const prismaCapabilities = deps.prisma as unknown as Record<string, unknown>;
+	const durableUploadsEnabled = Boolean(
+		prismaCapabilities['uploadIntent']
+		&& prismaCapabilities['orphanObject']
+		&& typeof prismaCapabilities['$queryRaw'] === 'function',
+	);
 	const repository = createExhibitionRepository(deps.prisma);
 	const orphanService = createOrphanService({
 		clock: deps.clock,
 		storage: deps.storage,
 		repository: createOrphanRepository(deps.prisma),
+		...(durableUploadsEnabled ? {
+			references: createObjectReferenceResolver(
+				deps.prisma,
+				{
+					publicBucket: deps.config.S3_BUCKET_PUBLIC,
+					protectedBucket: deps.config.S3_BUCKET_PROTECTED,
+				},
+				deps.logger,
+			),
+		} : {}),
 		logger: deps.logger,
 	});
 	const deletion = createObjectDeletionCoordinator({
 		storage: deps.storage,
 		orphans: { record: orphanService.recordOrphan },
+		logger: deps.logger,
+		...(durableUploadsEnabled ? {
+			reapDurablyQueued: () => orphanService.runOrphanReaper(),
+		} : {}),
+	});
+	const uploadIntents = createUploadIntentService({
+		prisma: deps.prisma,
+		repository: createUploadIntentRepository(deps.prisma),
+		storage: deps.storage,
+		buckets: {
+			publicBucket: deps.config.S3_BUCKET_PUBLIC,
+			protectedBucket: deps.config.S3_BUCKET_PROTECTED,
+		},
+		clock: deps.clock,
+		ids: deps.ids,
 		logger: deps.logger,
 	});
 	const posterUpload = createExhibitionPosterUploadCoordinator({
@@ -102,6 +119,7 @@ export function createYearProductionGraph(
 			key,
 			'exhibition-poster-unpersisted',
 		),
+		...(durableUploadsEnabled ? { uploadIntents } : {}),
 	});
 	const service = createExhibitionService({
 		apiPublicUrl: deps.config.API_PUBLIC_URL,
@@ -111,12 +129,12 @@ export function createYearProductionGraph(
 		uploadSlots: deps.uploadLimiter,
 		posterUpload,
 		deleteOrQueue: deletion.deleteDurablyQueued,
+		logger: deps.logger,
+		...(deps.uploadLifecycleMetrics ? {
+			recordPostCommitCleanupFailure:
+				deps.uploadLifecycleMetrics.recordPostCommitCleanupFailure,
+		} : {}),
 	});
-
-	// Site settings is part of the same context-owned slice. It currently has no
-	// exhibition-specific field; retaining it here prevents a future runtime
-	// singleton reach-back when the upload policy grows.
-	void deps.settings;
 
 	return {
 		exhibitionController: createYearController({

@@ -17,6 +17,71 @@ export interface UploadLimits {
 	maxFiles: number;
 }
 
+export interface RoleUploadPolicyConfig {
+	UPLOAD_USER_IMAGE_MAX_MB: number;
+	UPLOAD_USER_GAME_MAX_MB: number;
+	UPLOAD_USER_REQUEST_MAX_MB: number;
+	UPLOAD_USER_MAX_FILES: number;
+	UPLOAD_PRIVILEGED_IMAGE_MAX_MB: number;
+	UPLOAD_PRIVILEGED_GAME_MAX_MB: number;
+	UPLOAD_PRIVILEGED_REQUEST_MAX_MB: number;
+	UPLOAD_PRIVILEGED_MAX_FILES: number;
+}
+
+export function megabytes(value: number): number {
+	return value * 1024 * 1024;
+}
+
+export function resolveRoleGameMaxBytes(
+	config: Pick<RoleUploadPolicyConfig, 'UPLOAD_USER_GAME_MAX_MB' | 'UPLOAD_PRIVILEGED_GAME_MAX_MB'>,
+	role: string,
+): number {
+	return megabytes(
+		role === 'ADMIN' || role === 'OPERATOR'
+			? config.UPLOAD_PRIVILEGED_GAME_MAX_MB
+			: config.UPLOAD_USER_GAME_MAX_MB,
+	);
+}
+
+export function resolveRoleUploadLimits(
+	config: RoleUploadPolicyConfig,
+	role: string,
+	options: { maxGameFileMb?: number } = {},
+): UploadLimits {
+	const privileged = role === 'ADMIN' || role === 'OPERATOR';
+	const gameMaxBytes = resolveRoleGameMaxBytes(config, role);
+	const configured: UploadLimits = privileged
+		? {
+			posterMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_IMAGE_MAX_MB),
+			imageMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_IMAGE_MAX_MB),
+			gameMaxBytes,
+			videoMaxBytes: megabytes(1024),
+			requestMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_REQUEST_MAX_MB),
+			maxFiles: config.UPLOAD_PRIVILEGED_MAX_FILES,
+		}
+		: {
+			posterMaxBytes: megabytes(config.UPLOAD_USER_IMAGE_MAX_MB),
+			imageMaxBytes: megabytes(config.UPLOAD_USER_IMAGE_MAX_MB),
+			gameMaxBytes,
+			videoMaxBytes: megabytes(200),
+			requestMaxBytes: megabytes(config.UPLOAD_USER_REQUEST_MAX_MB),
+			maxFiles: config.UPLOAD_USER_MAX_FILES,
+		};
+	return options.maxGameFileMb === undefined
+		? configured
+		: {
+			...configured,
+			gameMaxBytes: Math.min(configured.gameMaxBytes, megabytes(options.maxGameFileMb)),
+		};
+}
+
+export function bucketForAssetKind(
+	kind: AssetKind,
+	buckets: { publicBucket: string; protectedBucket: string },
+): string {
+	return kind === 'GAME' || kind === 'VIDEO' ? buckets.protectedBucket : buckets.publicBucket;
+}
+
 export function kindLimit(limits: UploadLimits, kind: AssetKind): number {
 	switch (kind) {
 		case 'GAME': return limits.gameMaxBytes;

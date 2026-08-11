@@ -24,4 +24,5 @@ export interface UploadFormDataOptions {
 	title: string;
 	method?: 'POST' | 'PATCH' | 'PUT';
 	processingMessage?: string;
+	headers?: Record<string, string>;
 }

@@ -139,6 +139,9 @@ const PublicProjectQuerySchema = z.object({
 const WebglHeadersSchema = z.object({
 	range: z.string().optional(),
 });
+const IdempotencyHeadersSchema = z.object({
+	'idempotency-key': z.string().min(1).max(200),
+}).passthrough();
 const OctetStreamSchema = z.custom<NodeJS.ReadableStream>((value) => (
 	typeof value === 'object'
 	&& value !== null
@@ -164,9 +167,9 @@ const SettingsBodySchema = z.object({
 		PositiveIntegerParamSchema.transform(Number),
 	]).optional(),
 	maxChunkSizeMb: z.union([
-		z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+		z.number().int().min(5).max(Number.MAX_SAFE_INTEGER),
 		PositiveIntegerParamSchema.transform(Number),
-	]).optional(),
+	]).refine((value) => value >= 5, 'Chunk size must be at least 5 MiB').optional(),
 }).strict().refine(
 	(value) => value.maxGameFileMb !== undefined || value.maxChunkSizeMb !== undefined,
 	'At least one setting is required',
@@ -465,6 +468,7 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		responseBoundary: 'json',
 		params: EmptyObjectSchema,
 		querystring: EmptyObjectSchema,
+		headers: IdempotencyHeadersSchema,
 		response: jsonResponse(SubmitProjectResponseSchema, 201),
 	}),
 	contract({
@@ -606,6 +610,7 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		responseBoundary: 'json',
 		params: EmptyObjectSchema,
 		querystring: EmptyObjectSchema,
+		headers: IdempotencyHeadersSchema,
 		response: jsonResponse(SubmitProjectResponseSchema, 201),
 	}),
 	contract({
@@ -616,6 +621,7 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		responseBoundary: 'json',
 		params: IdParamsSchema,
 		querystring: EmptyObjectSchema,
+		headers: IdempotencyHeadersSchema,
 		response: jsonResponse(ProjectAssetUploadResponseSchema, 201),
 	}),
 	contract({

@@ -108,6 +108,10 @@ function createTestContext(): {
 				}),
 				invalidate: () => {},
 			},
+			uploadLifecycleMetrics: {
+				recordPostCommitCleanupFailure: () => {},
+				postCommitCleanupFailureCount: () => 0,
+			},
 			lifecycle: {
 				state: () => 'ready',
 				setState: () => {},

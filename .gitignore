@@ -38,5 +38,7 @@ apps/web/src/pages/admin/AdminPreview.tsx
 !**/Readme.md
 !**/readme.md
 !docs/backend-audit.md
+!docs/upload-lifecycle-runbook.md
+!docs/backend-audit-tickets/route-contract-ownership-follow-up.md
 !*.md.example
 !**/*.md.example

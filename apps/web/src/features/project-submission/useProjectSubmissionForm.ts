@@ -8,7 +8,7 @@ import {
 	SubmitProjectPayloadSchema,
 	type SubmitProjectPayloadInput,
 } from '../../contracts/schemas';
-import { adminExhibitionApi } from '../../lib/api';
+import { adminExhibitionApi, isApiError } from '../../lib/api';
 import { getProjectSubmitApi, type ProjectSubmissionMode } from '../../lib/api/project-submit';
 import { queryKeys } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
@@ -99,7 +99,15 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 	const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
 
 	const submitMutation = useMutation({
-		mutationFn: (formData: FormData) => getProjectSubmitApi(mode).submit(formData),
+		mutationFn: ({ formData, idempotencyKey }: {
+			formData: FormData;
+			idempotencyKey: string;
+		}) => getProjectSubmitApi(mode).submit(formData, idempotencyKey),
+		retry: (failureCount, error) => failureCount < 1
+			&& isApiError(error)
+			&& error.status === 0
+			&& error.statusText === 'Network Error',
+		retryDelay: 0,
 		onSuccess: (res) => {
 			qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 			qc.invalidateQueries({ queryKey: queryKeys.publicYears });
@@ -123,7 +131,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			images: files.imageFiles.length > 0 ? files.imageFiles : undefined,
 			videoFiles: files.videoFiles.length > 0 ? files.videoFiles : undefined,
 		});
-		submitMutation.mutate(fd);
+		submitMutation.mutate({ formData: fd, idempotencyKey: crypto.randomUUID() });
 	};
 
 	const goToEdit = useCallback(() => {

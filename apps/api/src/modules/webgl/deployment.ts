@@ -5,6 +5,7 @@ import type {
 	FileSystem,
 	IdGenerator,
 	ObjectStorage,
+	StorageRequestOptions,
 } from '../../application/ports.js';
 import type { ObjectDeletionCoordinator } from '../../application/object-deletion.js';
 import { badRequest } from '../../shared/errors.js';
@@ -37,6 +38,32 @@ export interface WebglDeploymentDependencies {
 		| 'deleteDurablyQueuedPrefix'
 	>;
 	logger: Pick<AppLogger, 'warn' | 'error'>;
+	storageRequest?: StorageRequestOptions;
+}
+
+function combineStorageRequests(
+	base?: StorageRequestOptions,
+	request?: StorageRequestOptions,
+): StorageRequestOptions | undefined {
+	if (!base && !request) return undefined;
+	const signals = [base?.signal, request?.signal].filter(
+		(signal): signal is AbortSignal => signal !== undefined,
+	);
+	return {
+		...(request?.requestTimeoutMs !== undefined
+			? { requestTimeoutMs: request.requestTimeoutMs }
+			: base?.requestTimeoutMs !== undefined
+				? { requestTimeoutMs: base.requestTimeoutMs }
+				: {}),
+		...(signals.length === 1 ? { signal: signals[0] } : {}),
+		...(signals.length > 1 ? { signal: AbortSignal.any(signals) } : {}),
+	};
+}
+
+function assertRequestActive(request?: StorageRequestOptions): void {
+	if (request?.signal?.aborted) {
+		throw request.signal.reason ?? new Error('WebGL deployment was aborted');
+	}
 }
 
 /**
@@ -63,9 +90,14 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 		projectId: number,
 		sourceKey: string,
 		sizeBytes: number,
+		request?: StorageRequestOptions,
+		assertClaimOwned?: () => Promise<void>,
 	): Promise<WebglDeploymentKeys> {
 		const keys = parseWebglSourceKey(projectId, sourceKey);
 		if (!keys) throw badRequest('WebGL upload has an invalid deployment key');
+		const storageRequest = combineStorageRequests(deps.storageRequest, request);
+		assertRequestActive(storageRequest);
+		await assertClaimOwned?.();
 
 		const summary = await validateWebglZipArchiveObject(
 			sizeBytes,
@@ -74,8 +106,11 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 				sourceKey,
 				start,
 				end,
+				storageRequest,
 			),
 		);
+		assertRequestActive(storageRequest);
+		await assertClaimOwned?.();
 		const layout = analyzeWebglArchive(summary);
 		const tempId = deps.ids.next().replace(/[^a-zA-Z0-9-]/g, '');
 		if (!tempId) throw new Error('WebGL deployment ID generator returned an unsafe value');
@@ -86,29 +121,38 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 		const uploadedKeys: string[] = [];
 
 		try {
+			assertRequestActive(storageRequest);
 			const source = await deps.storage.stream(
 				deps.config.protectedBucket,
 				sourceKey,
+				undefined,
+				storageRequest,
 			);
 			if (!source) throw badRequest('WebGL source object was not found');
 			await pipeline(source.body, deps.fileSystem.createWriteStream(archivePath));
+			assertRequestActive(storageRequest);
+			await assertClaimOwned?.();
 			await uploadWebglArchive(
 				archivePath,
 				deps.config.publicBucket,
 				keys.sitePrefix,
 				layout,
-				(bucket, key, body, contentType, contentLength, options) => (
-					deps.storage.upload(
+				async (bucket, key, body, contentType, contentLength, options) => {
+					assertRequestActive(storageRequest);
+					return deps.storage.upload(
 						bucket,
 						key,
 						body,
 						contentType,
 						contentLength,
 						options,
-					)
-				),
+						storageRequest,
+					);
+				},
 				(key) => uploadedKeys.push(key),
 			);
+			assertRequestActive(storageRequest);
+			await assertClaimOwned?.();
 			if (!uploadedKeys.includes(keys.entryKey)) {
 				throw badRequest('WebGL ZIP did not deploy index.html');
 			}
@@ -116,7 +160,22 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 		} catch (error) {
 			// Enumerate the whole prefix so an upload that reached object storage
 			// but whose response was interrupted cannot escape compensation.
-			await rollbackPublicDeployment(keys, 'webgl-deploy-rollback');
+			let stillOwnsClaim = !storageRequest?.signal?.aborted;
+			if (stillOwnsClaim && assertClaimOwned) {
+				try {
+					await assertClaimOwned();
+				} catch {
+					stillOwnsClaim = false;
+				}
+			}
+			if (stillOwnsClaim) {
+				await rollbackPublicDeployment(keys, 'webgl-deploy-rollback');
+			} else {
+				deps.logger.warn(
+					{ err: error, projectId, sourceKey, sitePrefix: keys.sitePrefix },
+					'WebGL deployment was interrupted without its completion claim; retaining partial output for reconciliation',
+				);
+			}
 			throw error;
 		} finally {
 			await deps.fileSystem.remove(archivePath).catch((error) => {

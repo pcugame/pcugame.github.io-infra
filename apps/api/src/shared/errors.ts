@@ -44,6 +44,14 @@ export function conflict(message: string): AppError {
   return new AppError(409, message, 'CONFLICT');
 }
 
+export function idempotencyConflict(message = 'Idempotency key was already used for another request'): AppError {
+  return new AppError(409, message, 'IDEMPOTENCY_CONFLICT');
+}
+
+export function operationInProgress(message = 'An operation with this idempotency key is still in progress'): AppError {
+  return new AppError(409, message, 'OPERATION_IN_PROGRESS');
+}
+
 export function payloadTooLarge(message = 'Payload too large'): AppError {
   return new AppError(413, message, 'PAYLOAD_TOO_LARGE');
 }

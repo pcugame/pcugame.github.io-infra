@@ -48,9 +48,12 @@ export async function processPdf(
   } catch (err) {
     throw translatePdfError(err, logger);
   } finally {
-    await document?.destroy().catch((cleanupError) => {
-      logger.warn({ err: cleanupError, tmpPath: input.tmpPath }, 'Failed to destroy PDF document');
-    });
+	const destroy = (document as { destroy?: () => Promise<void> } | undefined)?.destroy;
+	if (destroy) {
+	  await destroy.call(document).catch((cleanupError: unknown) => {
+		logger.warn({ err: cleanupError, tmpPath: input.tmpPath }, 'Failed to destroy PDF document');
+	  });
+	}
   }
 
   try {

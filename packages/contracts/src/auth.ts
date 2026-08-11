@@ -53,7 +53,9 @@ export type ApiErrorCode =
 	| 'INVALID_FILENAME'
 	| 'DRAINING'
 	| 'INTERNAL_ERROR'
-	| 'SIZE_MISMATCH';
+	| 'SIZE_MISMATCH'
+	| 'IDEMPOTENCY_CONFLICT'
+	| 'OPERATION_IN_PROGRESS';
 
 /** POST /api/auth/logout - response */
 export type LogoutResponse = { message: string };

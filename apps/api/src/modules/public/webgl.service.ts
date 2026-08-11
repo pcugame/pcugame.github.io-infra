@@ -1,7 +1,7 @@
 import { posix as pathPosix } from 'node:path';
 import { badRequest, notFound } from '../../shared/errors.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
-import type { AppLogger, Clock, ObjectStreamResult } from '../../application/ports.js';
+import type { ObjectStreamResult } from '../../application/ports.js';
 import { webglContentMetadata, webglContentSecurityPolicy } from '../webgl/content.js';
 import { parseWebglEntryKey } from '../webgl/paths.js';
 
@@ -139,13 +139,7 @@ export function createPublicWebglService(deps: {
 	config: PublicWebglConfig;
 	repository: PublicWebglRepository;
 	storage: PublicWebglStorage;
-	logger: AppLogger;
-	clock: Clock;
 }) {
-	// Logger and clock belong to the context graph. They are intentionally not
-	// used to alter the established public response or logging contract here.
-	void deps.logger;
-	void deps.clock;
 	return {
 		securityHeaders: () => webglSecurityHeaders(deps.config),
 		preflight: webglPreflightResponse,

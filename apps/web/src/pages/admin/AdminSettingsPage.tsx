@@ -91,7 +91,7 @@ export default function AdminSettingsPage() {
             <input
               id="maxChunkSizeMb"
               type="number"
-              min={1}
+              min={5}
               max={100}
               value={form.maxChunkSizeMb}
               onChange={(e) => handleChange('maxChunkSizeMb', e.target.value)}

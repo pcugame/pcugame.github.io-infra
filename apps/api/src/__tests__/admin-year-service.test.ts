@@ -17,6 +17,7 @@ const mocks = {
 	replaceExhibitionPoster: vi.fn(),
 	clearExhibitionPoster: vi.fn(),
 	safeDeleteObject: vi.fn(),
+	logError: vi.fn(),
 	posterUploadStart: vi.fn(),
 };
 
@@ -45,6 +46,7 @@ const exhibitionService = createExhibitionService({
 	uploadSlots: { acquire: vi.fn(), release: vi.fn() },
 	posterUpload: { start: mocks.posterUploadStart },
 	deleteOrQueue: mocks.safeDeleteObject,
+	logger: { error: mocks.logError },
 });
 
 const {
@@ -189,13 +191,17 @@ describe('admin exhibition service', () => {
 		);
 	});
 
-	it('propagates poster deletion when neither storage nor the orphan queue is available', async () => {
+	it('keeps the committed deletion successful when post-commit cleanup fails', async () => {
 		mocks.deleteExhibition.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
 		}));
 		mocks.safeDeleteObject.mockRejectedValue(new Error('durable deletion unavailable'));
 
-		await expect(deleteExhibition(1)).rejects.toThrow('durable deletion unavailable');
+		await expect(deleteExhibition(1)).resolves.toBeUndefined();
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ exhibitionId: 1, storageKey: 'old-poster.webp' }),
+			'Post-commit exhibition poster cleanup failed; durable outbox retained',
+		);
 	});
 
 	it('does not roll back a new poster after its DB pointer commits and old cleanup fails', async () => {
@@ -221,9 +227,13 @@ describe('admin exhibition service', () => {
 		const parts = (async function* () {})();
 
 		await expect(replacePoster(1, { actor: { id: 1, role: 'ADMIN' }, parts }))
-			.rejects.toThrow('durable deletion unavailable');
+			.resolves.toMatchObject({ id: 1, posterUrl: expect.stringContaining('new-poster.webp') });
 		expect(rollback).not.toHaveBeenCalled();
 		expect(cleanup).toHaveBeenCalledOnce();
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ exhibitionId: 1, storageKey: 'old-poster.webp' }),
+			'Post-commit exhibition poster cleanup failed; durable outbox retained',
+		);
 	});
 
 	it('rolls back exactly one uploaded object when the pointer transaction fails', async () => {

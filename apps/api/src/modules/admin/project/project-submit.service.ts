@@ -1,5 +1,5 @@
 import type { AssetKind, ProjectStatus, UserRole } from '@pcu/contracts';
-import { badRequest, conflict, forbidden, isUniqueConstraintError } from '../../../shared/errors.js';
+import { AppError, badRequest, conflict, forbidden, isUniqueConstraintError } from '../../../shared/errors.js';
 import type { UploadLimits } from '../../../shared/upload-policy.js';
 import { toSlug } from '../../../shared/slug.js';
 import { assertUploadAllowed } from '../upload-guard.js';
@@ -9,6 +9,7 @@ import { parseBody, SubmitProjectPayload } from '../../../shared/validation.js';
 import type {
 	CollectedUploadFile,
 	MultipartCollectorPort,
+	MultipartRequestHasher,
 	SavedUpload,
 	UploadPipelinePort,
 } from '../../../application/upload-ports.js';
@@ -21,6 +22,29 @@ export interface SubmitProjectDependencies {
 	uploadSlots: { acquire(): void; release(): void };
 	createPipeline(): UploadPipelinePort;
 	multipartCollector: MultipartCollectorPort;
+	logger?: {
+		error(context: Record<string, unknown>, message: string): void;
+	};
+	recordPostCommitCleanupFailure?: () => void;
+	requestHasher?: MultipartRequestHasher;
+	idempotency?: {
+		claim(input: {
+			actorId: number;
+			scope: string;
+			key: string;
+			requestHash: string;
+		}): Promise<
+			| { kind: 'acquired'; operationId: string; ownerToken: string }
+			| { kind: 'succeeded'; result: unknown }
+		>;
+		markFailed(input: {
+			operationId: string;
+			ownerToken: string;
+			terminal: boolean;
+			error: unknown;
+		}): Promise<void>;
+		renew?(input: { operationId: string; ownerToken: string }): Promise<void>;
+	};
 }
 
 /** Process collected file parts through the upload pipeline */
@@ -55,6 +79,17 @@ export interface SubmitProjectResult {
 	status: ProjectStatus;
 	adminEditUrl: string;
 	publicUrl: string;
+}
+
+function isSubmitProjectResult(value: unknown): value is SubmitProjectResult {
+	if (!value || typeof value !== 'object') return false;
+	const result = value as Record<string, unknown>;
+	return typeof result.id === 'number'
+		&& typeof result.slug === 'string'
+		&& typeof result.year === 'number'
+		&& (result.status === 'PUBLISHED' || result.status === 'ARCHIVED')
+		&& typeof result.adminEditUrl === 'string'
+		&& typeof result.publicUrl === 'string';
 }
 
 const USER_SUBMIT_FORBIDDEN_TOP_LEVEL_FIELDS = [
@@ -124,6 +159,12 @@ export async function submitProject(
 	const pipeline = deps.createPipeline();
 	let result: SubmitProjectResult | undefined;
 	let failure: unknown;
+	let operation: { operationId: string; ownerToken: string } | undefined;
+	let operationHeartbeat: NodeJS.Timeout | undefined;
+	const stopOperationHeartbeat = () => {
+		if (operationHeartbeat) clearInterval(operationHeartbeat);
+		operationHeartbeat = undefined;
+	};
 
 	deps.uploadSlots.acquire();
 	try {
@@ -145,9 +186,45 @@ export async function submitProject(
 
 		const { exhibitionId, title, summary, description, members } =
 			parseBody(SubmitProjectPayload, rawPayload);
+		pipeline.setOwner?.({ actorId: user.id, exhibitionId });
 
 		const exhibition = await deps.repository.findExhibitionById(exhibitionId);
 		assertUploadAllowed(exhibition, exhibitionId, policyRole);
+
+		if (input.idempotencyKey && deps.idempotency) {
+			if (!deps.requestHasher) throw new Error('Idempotency hashing is unavailable');
+			const requestHash = await deps.requestHasher.hash(rawPayload, fileParts);
+			const claimed = await deps.idempotency.claim({
+				actorId: user.id,
+				scope: `project-submit:${options.audience}`,
+				key: input.idempotencyKey,
+				requestHash,
+			});
+			if (claimed.kind === 'succeeded') {
+				if (!isSubmitProjectResult(claimed.result)) {
+					throw new Error('Stored idempotency result is malformed');
+				}
+				result = claimed.result;
+				return result;
+			}
+			operation = claimed;
+			if (deps.idempotency.renew) {
+				operationHeartbeat = setInterval(() => {
+					void deps.idempotency!.renew!(operation!).catch((error) => {
+						deps.logger?.error(
+							{ error, operationId: operation?.operationId },
+							'Idempotency operation heartbeat failed',
+						);
+					});
+				}, 30 * 1000);
+				operationHeartbeat.unref();
+			}
+			pipeline.setOwner?.({
+				operationId: operation.operationId,
+				actorId: user.id,
+				exhibitionId,
+			});
+		}
 
 		const baseSlug = toSlug(title);
 		let slug = await generateUniqueSlug(deps.repository, exhibition.id, title);
@@ -190,7 +267,21 @@ export async function submitProject(
 						playbackSizeBytes: sf.playbackSizeBytes ?? 0,
 						playbackStatus: sf.playbackStatus,
 						playbackError: sf.playbackError,
+						uploadIntentIds: sf.uploadIntentIds,
 					})),
+					...(operation ? {
+						idempotency: {
+							...operation,
+							resultForProject: (created: { id: number; slug: string }) => ({
+								id: created.id,
+								slug: created.slug,
+								year: exhibition.year,
+								status,
+								adminEditUrl: `${deps.webPublicUrl}/admin/projects/${created.id}/edit`,
+								publicUrl: `${deps.webPublicUrl}/years/${exhibition.year}/${created.slug}`,
+							}),
+						},
+					} : {}),
 				});
 				break;
 			} catch (err) {
@@ -221,8 +312,25 @@ export async function submitProject(
 			adminEditUrl: `${deps.webPublicUrl}/admin/projects/${project.id}/edit`,
 			publicUrl: `${deps.webPublicUrl}/years/${exhibition.year}/${slug}`,
 		};
+		stopOperationHeartbeat();
 	} catch (err) {
+		stopOperationHeartbeat();
 		failure = err;
+		if (operation && deps.idempotency) {
+			await deps.idempotency.markFailed({
+				...operation,
+				terminal: err instanceof AppError
+					&& err.statusCode >= 400
+					&& err.statusCode < 500
+					&& err.statusCode !== 409,
+				error: err,
+			}).catch((markError) => {
+				deps.logger?.error(
+					{ error: markError, operationId: operation?.operationId },
+					'Failed to persist idempotency operation failure',
+				);
+			});
+		}
 		try {
 			await pipeline.rollbackCommitted();
 		} catch (rollbackError) {
@@ -232,16 +340,23 @@ export async function submitProject(
 			);
 		}
 	} finally {
+		stopOperationHeartbeat();
 		deps.uploadSlots.release();
 		try {
 			await pipeline.cleanupTemp();
 		} catch (cleanupError) {
-			failure = failure === undefined
-				? cleanupError
-				: new AggregateError(
+			if (result !== undefined && failure === undefined) {
+				deps.recordPostCommitCleanupFailure?.();
+				deps.logger?.error(
+					{ error: cleanupError, projectId: result.id },
+					'Post-commit project temp cleanup failed',
+				);
+			} else {
+				failure = failure === undefined ? cleanupError : new AggregateError(
 						[failure, cleanupError],
 						'Project submission and temp cleanup failed',
 					);
+			}
 		}
 	}
 	if (failure !== undefined) throw failure;

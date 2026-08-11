@@ -90,25 +90,29 @@ describe('durable object deletion callers', () => {
 		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
 	});
 
-	it('marks an asset deleted only after every object is deleted or durably queued', async () => {
+	it('commits the asset delete outbox before attempting post-commit object cleanup', async () => {
 		const { deps, repository, deleteOrQueue } = assetDeletionHarness();
 
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
 			.resolves.toEqual({ projectId: 7 });
 		expect(deleteOrQueue).toHaveBeenCalledTimes(2);
 		expect(repository.claimAssetForDeletion.mock.invocationCallOrder[0])
-			.toBeLessThan(deleteOrQueue.mock.invocationCallOrder[0]!);
-		expect(deleteOrQueue.mock.invocationCallOrder[1])
 			.toBeLessThan(repository.completeAssetDeletion.mock.invocationCallOrder[0]!);
+		expect(repository.completeAssetDeletion.mock.invocationCallOrder[0])
+			.toBeLessThan(deleteOrQueue.mock.invocationCallOrder[0]!);
 	});
 
-	it('leaves an asset non-terminal when storage deletion and orphan queueing both fail', async () => {
+	it('keeps a committed asset deletion successful when immediate cleanup fails', async () => {
 		const { deps, repository, deleteOrQueue } = assetDeletionHarness();
 		deleteOrQueue.mockRejectedValueOnce(new Error('storage and orphan queue unavailable'));
 
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
-			.rejects.toThrow('storage and orphan queue unavailable');
+			.resolves.toEqual({ projectId: 7 });
 		expect(repository.claimAssetForDeletion).toHaveBeenCalledWith(41);
-		expect(repository.completeAssetDeletion).not.toHaveBeenCalled();
+		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
+		expect(deps.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ assetId: 41, projectId: 7 }),
+			'Post-commit asset cleanup failed; durable outbox retained',
+		);
 	});
 });

@@ -4,6 +4,7 @@ import {
 } from '../../../generated/prisma/client.js';
 import { conflict } from '../../../shared/errors.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
+import { commitUploadIntents } from '../../upload-intent/repository.js';
 
 interface PosterDeletionOutboxConfig {
 	bucket: string;
@@ -162,6 +163,7 @@ export function createExhibitionRepository(
 			originalName: string;
 			mimeType: string;
 			sizeBytes: bigint;
+			uploadIntentIds?: string[];
 		},
 		outbox: PosterDeletionOutboxConfig,
 	) {
@@ -186,6 +188,7 @@ export function createExhibitionRepository(
 				},
 				include: { _count: { select: { projects: true } } },
 			});
+			await commitUploadIntents(tx, data.uploadIntentIds ?? []);
 
 			return { updated, oldStorageKey: existing.posterStorageKey };
 		}, policy);

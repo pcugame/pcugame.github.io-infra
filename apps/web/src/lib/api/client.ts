@@ -120,7 +120,11 @@ export function uploadFormData<T>(
 		: null;
 
 	if (import.meta.env.VITE_MOCK === 'true') {
-		return request<T>(path, { method: options.method ?? 'POST', body: formData })
+		return request<T>(path, {
+			method: options.method ?? 'POST',
+			body: formData,
+			headers: options.headers,
+		})
 			.then((result) => {
 				if (taskId) finishUpload(taskId);
 				return result;
@@ -135,6 +139,9 @@ export function uploadFormData<T>(
 		const xhr = new XMLHttpRequest();
 		xhr.open(options.method ?? 'POST', `${env.API_BASE_URL}${path}`);
 		xhr.withCredentials = true;
+		for (const [name, value] of Object.entries(options.headers ?? {})) {
+			xhr.setRequestHeader(name, value);
+		}
 
 		if (taskId) {
 			updateUpload(taskId, { phase: 'uploading' });

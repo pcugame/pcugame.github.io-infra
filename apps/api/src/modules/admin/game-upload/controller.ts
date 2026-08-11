@@ -70,6 +70,7 @@ export function createGameUploadController(
 		{
 			preHandler: requireLogin,
 			bodyLimit: deps.chunkUploadBodyLimitBytes,
+			handlerTimeout: 45 * 60 * 1000,
 		},
 		async (request, reply) => {
 			const user = request.currentUser!;
@@ -100,7 +101,7 @@ export function createGameUploadController(
 	/** POST /game-upload-sessions/:sessionId/complete — finalize chunked upload */
 	app.post<{ Params: { sessionId: string } }>(
 		'/game-upload-sessions/:sessionId/complete',
-		{ preHandler: requireLogin },
+		{ preHandler: requireLogin, handlerTimeout: 45 * 60 * 1000 },
 		async (request, reply) => {
 			const user = request.currentUser!;
 			const result = await deps.service.completeSession(

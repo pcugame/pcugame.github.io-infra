@@ -55,7 +55,11 @@ export function createYearController(deps: YearControllerDependencies): FastifyP
 		/** POST /exhibitions/:id/poster — upload or replace exhibition poster */
 		app.post<{ Params: { id: string } }>(
 			'/exhibitions/:id/poster',
-			{ preHandler: requireRole('ADMIN', 'OPERATOR'), bodyLimit: deps.uploadBodyLimit },
+			{
+				preHandler: requireRole('ADMIN', 'OPERATOR'),
+				bodyLimit: deps.uploadBodyLimit,
+				handlerTimeout: 45 * 60 * 1000,
+			},
 			async (request, reply) => {
 				const id = parseIntParam(request.params.id);
 				const updated = await deps.service.replacePoster(id, {

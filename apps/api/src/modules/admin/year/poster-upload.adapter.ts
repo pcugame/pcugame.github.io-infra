@@ -22,6 +22,20 @@ export interface ExhibitionPosterUploadDependencies {
 	ids: IdGenerator;
 	logger: AppLogger;
 	deleteUnpersistedObject(storageKey: string): Promise<void>;
+	uploadIntents?: {
+		prepare(input: {
+			bucket: string;
+			storageKey: string;
+			purpose: string;
+			ownerOperationId?: string;
+			ownerActorId?: number;
+			ownerProjectId?: number;
+			ownerExhibitionId?: number;
+		}): Promise<string>;
+		markUploaded(id: string): Promise<void>;
+		isUncommitted(id: string): Promise<boolean>;
+		recordAmbiguousError(id: string, error: unknown): Promise<void>;
+	};
 }
 
 function storageKey(id: string, extension: string): string {
@@ -63,24 +77,40 @@ export function createExhibitionPosterUploadCoordinator(
 	deps: ExhibitionPosterUploadDependencies,
 ): PosterUploadCoordinator {
 	return {
-		async start(parts, limits) {
+		async start(parts, limits, owner = {}) {
 			const temporaryPaths = new Set<string>();
 			let committedKey: string | null = null;
+			let intentId: string | undefined;
 
 			async function cleanupTemporaryFiles(): Promise<void> {
-				for (const temporaryPath of temporaryPaths) {
-					await deps.fileSystem.remove(temporaryPath).catch((error) => {
+				const failures: unknown[] = [];
+				for (const temporaryPath of [...temporaryPaths]) {
+					try {
+						await deps.fileSystem.remove(temporaryPath);
+						temporaryPaths.delete(temporaryPath);
+					} catch (error) {
+						failures.push(error);
 						deps.logger.warn(
 							{ error, temporaryPath },
 							'Exhibition poster temp-file cleanup failed',
 						);
-					});
+					}
 				}
-				temporaryPaths.clear();
+				if (failures.length > 0) {
+					throw new AggregateError(
+						failures,
+						'Exhibition poster temp-file cleanup failed',
+					);
+				}
 			}
 
 			async function rollbackCommitted(): Promise<void> {
 				if (!committedKey) return;
+				if (intentId && deps.uploadIntents
+					&& !(await deps.uploadIntents.isUncommitted(intentId))) {
+					committedKey = null;
+					return;
+				}
 				const key = committedKey;
 				await deps.deleteUnpersistedObject(key);
 				committedKey = null;
@@ -140,14 +170,36 @@ export function createExhibitionPosterUploadCoordinator(
 				const finalStat = await deps.fileSystem.stat(processed.tmpPath);
 				const key = storageKey(deps.ids.next(), processed.ext);
 				committedKey = key;
-				await deps.storage.upload(
-					deps.bucket,
-					key,
-					deps.fileSystem.createReadStream(processed.tmpPath),
-					processed.mimeType,
-					finalStat.size,
-					storageOptionsForAsset('POSTER'),
-				);
+				intentId = await deps.uploadIntents?.prepare({
+					bucket: deps.bucket,
+					storageKey: key,
+					purpose: 'exhibition-poster',
+					...(owner.operationId ? { ownerOperationId: owner.operationId } : {}),
+					...(owner.actorId !== undefined ? { ownerActorId: owner.actorId } : {}),
+					...(owner.projectId !== undefined ? { ownerProjectId: owner.projectId } : {}),
+					...(owner.exhibitionId !== undefined
+						? { ownerExhibitionId: owner.exhibitionId }
+						: {}),
+				});
+				try {
+					await deps.storage.upload(
+						deps.bucket,
+						key,
+						deps.fileSystem.createReadStream(processed.tmpPath),
+						processed.mimeType,
+						finalStat.size,
+						storageOptionsForAsset('POSTER'),
+					);
+				} catch (error) {
+					if (intentId) await deps.uploadIntents?.recordAmbiguousError(intentId, error).catch(
+						(intentError) => deps.logger.error(
+							{ error: intentError, intentId, storageKey: key },
+							'Failed to annotate ambiguous poster upload intent',
+						),
+					);
+					throw error;
+				}
+				if (intentId) await deps.uploadIntents?.markUploaded(intentId);
 
 				return {
 					savedFile: {
@@ -156,6 +208,7 @@ export function createExhibitionPosterUploadCoordinator(
 						sizeBytes: processed.sizeBytes,
 						originalName,
 						kind: 'POSTER',
+						uploadIntentIds: intentId ? [intentId] : [],
 					},
 					rollback: rollbackCommitted,
 					cleanup: cleanupTemporaryFiles,
@@ -167,11 +220,18 @@ export function createExhibitionPosterUploadCoordinator(
 				} catch (cleanupError) {
 					rollbackError = cleanupError;
 				}
-				await cleanupTemporaryFiles();
-				if (rollbackError !== undefined) {
+				let tempError: unknown;
+				try {
+					await cleanupTemporaryFiles();
+				} catch (cleanupError) {
+					tempError = cleanupError;
+				}
+				if (rollbackError !== undefined || tempError !== undefined) {
 					throw new AggregateError(
-						[error, rollbackError],
-						'Exhibition poster upload and durable rollback both failed',
+						[error, rollbackError, tempError].filter(
+							(value) => value !== undefined,
+						),
+						'Exhibition poster upload or cleanup failed',
 					);
 				}
 				throw error;

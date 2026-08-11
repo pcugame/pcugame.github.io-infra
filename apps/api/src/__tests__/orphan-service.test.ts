@@ -90,8 +90,99 @@ describe('orphan object service', () => {
 		});
 
 		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
-		expect(listKeys).toHaveBeenCalledWith('public', 'webgl/7/build/site/');
+		expect(listKeys).toHaveBeenCalledWith(
+			'public',
+			'webgl/7/build/site/',
+			expect.objectContaining({ requestTimeoutMs: 60_000 }),
+		);
 		expect(deps.storage.delete).toHaveBeenCalledTimes(2);
 		expect(deps.repository.markResolved).toHaveBeenCalledWith(12, now);
+	});
+
+	it('cancels a claimed prefix deletion when any overlapping live reference exists', async () => {
+		const { deps, now } = createDependencies();
+		const claimPendingOrphans = vi.fn().mockResolvedValue([{
+			id: 13,
+			bucket: 'public',
+			storageKey: 'webgl/7/build/site/',
+			targetKind: 'PREFIX' as const,
+			attemptCount: 0,
+		}]);
+		const markClaimCancelled = vi.fn().mockResolvedValue({ count: 1 });
+		const listKeys = vi.fn();
+		const service = createOrphanService({
+			...deps,
+			storage: { ...deps.storage, listKeys },
+			repository: {
+				...deps.repository,
+				claimPendingOrphans,
+				markClaimCancelled,
+			},
+			references: { isReferenced: vi.fn().mockResolvedValue(true) },
+			ids: { next: () => 'claim-token' },
+		});
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
+		expect(markClaimCancelled).toHaveBeenCalledWith(
+			13,
+			'claim-token',
+			'live-reference-detected',
+			now,
+		);
+		expect(listKeys).not.toHaveBeenCalled();
+		expect(deps.storage.delete).not.toHaveBeenCalled();
+	});
+
+	it('aborts storage work and leaves the row retryable when its deletion lease is lost', async () => {
+		vi.useFakeTimers();
+		try {
+			const { deps } = createDependencies();
+			let enteredDelete!: () => void;
+			const deleteEntered = new Promise<void>((resolve) => { enteredDelete = resolve; });
+			const deleteObject = vi.fn((
+				_bucket: string,
+				_key: string,
+				request?: { signal?: AbortSignal },
+			) => {
+				enteredDelete();
+				return new Promise<void>((_resolve, reject) => {
+					request?.signal?.addEventListener('abort', () => {
+						reject(request.signal?.reason ?? new Error('aborted'));
+					}, { once: true });
+				});
+			});
+			const markClaimFailed = vi.fn().mockResolvedValue({ count: 1 });
+			const service = createOrphanService({
+				...deps,
+				storage: { ...deps.storage, delete: deleteObject },
+				repository: {
+					...deps.repository,
+					claimPendingOrphans: vi.fn().mockResolvedValue([{
+						id: 14,
+						bucket: 'protected',
+						storageKey: 'game/lease-lost.zip',
+						targetKind: 'EXACT' as const,
+						attemptCount: 0,
+					}]),
+					renewClaim: vi.fn().mockResolvedValue({ count: 0 }),
+					markClaimFailed,
+				},
+				ids: { next: () => 'lease-token' },
+			});
+
+			const running = service.runOrphanReaper();
+			await deleteEntered;
+			await vi.advanceTimersByTimeAsync(30_000);
+			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			expect(markClaimFailed).toHaveBeenCalledWith(
+				14,
+				'lease-token',
+				expect.any(Error),
+				new Date('2026-07-21T05:00:00.000Z'),
+				expect.any(Date),
+			);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

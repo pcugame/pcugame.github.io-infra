@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, promises as fs } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { OAuth2Client } from 'google-auth-library';
 import type {
 	Clock,
@@ -61,6 +62,17 @@ export function createNodeFileSystem(): FileSystem {
 	},
 	createReadStream,
 	createWriteStream,
+	listFiles: async (directory) => {
+		const entries = await fs.readdir(directory, { withFileTypes: true });
+		const files = await Promise.all(entries
+			.filter((entry) => entry.isFile())
+			.map(async (entry) => {
+				const filePath = path.join(directory, entry.name);
+				const stat = await fs.stat(filePath);
+				return { name: entry.name, path: filePath, lastModified: stat.mtime };
+			}));
+		return files;
+	},
 	};
 }
 

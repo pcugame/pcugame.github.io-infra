@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { requireLogin } from '../../../shared/auth-guards.js';
 import { sendCreated } from '../../../shared/http.js';
 import type { createSubmitProjectService } from '../../admin/project/project-submit.service.js';
+import { assertIdempotencyKey } from '../../idempotency/service.js';
 
 export function createMeProjectController(deps: {
 	service: ReturnType<typeof createSubmitProjectService>;
@@ -19,11 +20,15 @@ export function createMeProjectController(deps: {
 			{
 				preHandler: requireLogin,
 				bodyLimit: deps.route.bodyLimit,
+				handlerTimeout: 45 * 60 * 1000,
 				config: { rateLimit: deps.route.rateLimit },
 			},
 			async (request, reply) => {
+				const idempotencyKey = assertIdempotencyKey(
+					request.headers['idempotency-key'],
+				);
 				const result = await deps.service.submitProject(
-					{ actor: request.currentUser!, parts: request.parts() },
+					{ actor: request.currentUser!, parts: request.parts(), idempotencyKey },
 					{ audience: 'user' },
 				);
 				sendCreated(reply, result);

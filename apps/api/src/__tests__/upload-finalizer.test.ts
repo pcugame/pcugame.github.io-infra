@@ -64,16 +64,60 @@ describe('completed upload finalizer', () => {
 		expect(deps.deleteWebglDeploymentByEntry).not.toHaveBeenCalled();
 	});
 
-	it('propagates failed cleanup after pointer finalization without rolling back the new tree', async () => {
+	it('does not roll back a deployment after losing its completion claim', async () => {
 		const deps = createDependencies();
+		const controller = new AbortController();
+		const claimLost = new Error('completion claim lost');
+		let assertions = 0;
+		const assertClaimOwned = vi.fn(async () => {
+			assertions++;
+			if (assertions === 4) {
+				controller.abort(claimLost);
+				throw claimLost;
+			}
+		});
+		const finalizer = createCompletedUploadFinalizer(deps);
+
+		await expect(finalizer.finalize(webglSession, { size: 8 }, {
+			storageRequest: { signal: controller.signal },
+			assertClaimOwned,
+		})).rejects.toThrow('completion claim lost');
+
+		expect(deps.deployWebgl).toHaveBeenCalledOnce();
+		expect(deps.finalizeWebgl).not.toHaveBeenCalled();
+		expect(deps.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
+		expect(deps.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'upload-1', projectId: 7 }),
+			'WebGL completion claim was lost; retaining deployment for reference-aware reconciliation',
+		);
+	});
+
+	it('keeps success after pointer finalization when durable old-tree cleanup reports failure', async () => {
+		const deps = createDependencies();
+		const recordPostCommitCleanupFailure = vi.fn();
 		const oldEntryKey = 'webgl/7/old/site/index.html';
 		deps.finalizeWebgl.mockResolvedValueOnce({ oldEntryKey });
 		deps.deleteWebglDeploymentByEntry.mockRejectedValueOnce(new Error('queue unavailable'));
-		const finalizer = createCompletedUploadFinalizer(deps);
+		const finalizer = createCompletedUploadFinalizer({
+			...deps,
+			recordPostCommitCleanupFailure,
+		});
 
-		await expect(finalizer.finalize(webglSession, { size: 8 }))
-			.rejects.toThrow('queue unavailable');
-		expect(deps.logError).not.toHaveBeenCalled();
+		await expect(finalizer.finalize(webglSession, { size: 8 })).resolves.toEqual({
+			status: 'COMPLETED',
+			storageKey: deployment.sourceKey,
+			sizeBytes: 8,
+			webglUrl: 'https://api.example.com/api/public/webgl/7/',
+		});
+		expect(deps.logError).toHaveBeenCalledWith(
+			expect.objectContaining({
+				error: expect.objectContaining({ message: 'queue unavailable' }),
+				projectId: 7,
+				oldEntryKey,
+			}),
+			'Post-commit WebGL deployment cleanup failed; durable outbox retained',
+		);
+		expect(recordPostCommitCleanupFailure).toHaveBeenCalledOnce();
 		expect(deps.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
 	});
 });

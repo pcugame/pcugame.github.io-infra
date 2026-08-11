@@ -10,6 +10,7 @@ import {
 	type AssetMutationTransactionPolicy,
 	withAssetMutationTransaction,
 } from './mutation-transaction.js';
+import { queueDurableDeletions } from '../orphan/outbox.js';
 
 export interface AssetDeletionClaim {
 	id: number;
@@ -137,40 +138,84 @@ export function createAssetsRepository(
 			}, transactionPolicy);
 		},
 
-		/** Finish only the exact identity claimed above; never terminalize a reused row. */
-		async completeAssetDeletion(claim: AssetDeletionClaim): Promise<void> {
-			const result = await client.asset.updateMany({
-				where: {
-					id: claim.id,
-					projectId: claim.projectId,
-					kind: claim.kind,
-					status: 'DELETING',
-					storageKey: claim.storageKey,
-					playbackStorageKey: claim.playbackStorageKey,
-				},
-				data: { status: 'DELETED' },
-			});
-			if (result.count === 1) return;
+		/**
+		 * Terminalize the exact claimed identity and create its deletion outbox in
+		 * one transaction. Object-storage I/O is only a post-commit optimization.
+		 */
+		async completeAssetDeletion(
+			claim: AssetDeletionClaim,
+			outbox: { bucket: string; reason: string; playbackReason: string },
+		): Promise<void> {
+			await withAssetMutationTransaction(client, async (tx) => {
+				const projects = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+					SELECT "id"
+					FROM "projects"
+					WHERE "id" = ${claim.projectId}
+					FOR UPDATE
+				`);
+				if (projects.length === 0) return;
 
-			const current = await client.asset.findUnique({
-				where: { id: claim.id },
-				select: {
-					projectId: true,
-					kind: true,
-					status: true,
-					storageKey: true,
-					playbackStorageKey: true,
-				},
-			});
-			if (current
-				&& current.projectId === claim.projectId
-				&& current.kind === claim.kind
-				&& current.status === 'DELETED'
-				&& current.storageKey === claim.storageKey
-				&& current.playbackStorageKey === claim.playbackStorageKey) {
-				return;
-			}
-			throw conflict('Asset identity changed before deletion completed');
+				const rows = await tx.$queryRaw<LockedAssetDeletionRow[]>(Prisma.sql`
+					SELECT
+						"id",
+						"project_id" AS "projectId",
+						"kind"::text AS "kind",
+						"status"::text AS "status",
+						"storage_key" AS "storageKey",
+						"playback_storage_key" AS "playbackStorageKey"
+					FROM "assets"
+					WHERE "id" = ${claim.id}
+					FOR UPDATE
+				`);
+				const current = rows[0];
+				if (!current) return;
+				const sameIdentity = current.projectId === claim.projectId
+					&& current.kind === claim.kind
+					&& current.storageKey === claim.storageKey
+					&& current.playbackStorageKey === claim.playbackStorageKey;
+				if (!sameIdentity || (current.status !== 'DELETING' && current.status !== 'DELETED')) {
+					throw conflict('Asset identity changed before deletion completed');
+				}
+
+				await queueDurableDeletions(tx, [
+					{
+						bucket: outbox.bucket,
+						storageKey: claim.storageKey,
+						reason: outbox.reason,
+					},
+					...(claim.playbackStorageKey && claim.playbackStorageKey !== claim.storageKey
+						? [{
+							bucket: outbox.bucket,
+							storageKey: claim.playbackStorageKey,
+							reason: outbox.playbackReason,
+						}]
+						: []),
+				]);
+				await tx.gameUploadSession.updateMany({
+					where: {
+						projectId: claim.projectId,
+						status: 'COMPLETED',
+						storageKey: claim.storageKey,
+					},
+					data: { storageKey: null },
+				});
+				if (current.status === 'DELETING') {
+					const result = await tx.asset.updateMany({
+						where: {
+							id: claim.id,
+							projectId: claim.projectId,
+							kind: claim.kind,
+							status: 'DELETING',
+							storageKey: claim.storageKey,
+							playbackStorageKey: claim.playbackStorageKey,
+						},
+						data: { status: 'DELETED' },
+					});
+					if (result.count !== 1) {
+						throw conflict('Asset identity changed before deletion completed');
+					}
+				}
+			}, transactionPolicy);
 		},
 
 		/** Upsert a banned IP record */

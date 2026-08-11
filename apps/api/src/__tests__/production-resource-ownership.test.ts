@@ -208,8 +208,8 @@ describe('production BackendContext resource ownership', () => {
 
 		await a.start();
 		await b.start();
-		expect(aScheduler.tasks).toHaveLength(3);
-		expect(bScheduler.tasks).toHaveLength(3);
+		expect(aScheduler.tasks).toHaveLength(4);
+		expect(bScheduler.tasks).toHaveLength(4);
 		await a.close();
 		await a.close();
 
@@ -320,7 +320,7 @@ describe('production BackendContext resource ownership', () => {
 		expect(scheduler.scheduler.every).not.toHaveBeenCalled();
 
 		await context.start();
-		expect(scheduler.scheduler.every).toHaveBeenCalledTimes(3);
+		expect(scheduler.scheduler.every).toHaveBeenCalledTimes(4);
 		await app.close();
 		expect(events).toEqual([]);
 	});
@@ -446,10 +446,10 @@ describe('production BackendContext resource ownership', () => {
 		await expect(b.settings.get()).resolves.toMatchObject({ maxGameFileMb: 2000 });
 		expect(aPrisma.bannedIp.findMany).toHaveBeenCalledOnce();
 		expect(bPrisma.bannedIp.findMany).toHaveBeenCalledOnce();
-		expect(aPrisma.gameUploadSession.findMany).toHaveBeenCalledOnce();
-		expect(bPrisma.gameUploadSession.findMany).toHaveBeenCalledOnce();
-		expect(aScheduler.tasks).toHaveLength(3);
-		expect(bScheduler.tasks).toHaveLength(3);
+		expect(aPrisma.gameUploadSession.findMany).toHaveBeenCalledTimes(2);
+		expect(bPrisma.gameUploadSession.findMany).toHaveBeenCalledTimes(2);
+		expect(aScheduler.tasks).toHaveLength(4);
+		expect(bScheduler.tasks).toHaveLength(4);
 
 		await appA.close();
 		await a.close();

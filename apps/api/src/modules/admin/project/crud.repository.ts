@@ -17,6 +17,9 @@ import type {
 	SubmitProjectRepository,
 } from './ports.js';
 import { createProjectAssetMutationRepository } from './asset-mutation.repository.js';
+import { commitUploadIntents } from '../../upload-intent/repository.js';
+import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
+import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -202,6 +205,15 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					...webglDeletionTargetsByEntry(id, project.webglEntryKey, outbox, outbox.reason),
 					...activeUploadDeletionTargets(id, activeUploads, outbox),
 				]);
+				for (const upload of activeUploads) {
+					if (!upload.s3Key || !upload.s3UploadId) continue;
+					await queueMultipartAbortTask(tx, {
+						bucket: outbox.protectedBucket,
+						storageKey: upload.s3Key,
+						uploadId: upload.s3UploadId,
+						reason: `${outbox.reason}-active-multipart`,
+					});
+				}
 				await tx.project.update({
 					where: { id },
 					data: { posterAssetId: null },
@@ -226,6 +238,14 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					...webglDeletionTargetsByEntry(projectId, project.webglEntryKey, outbox, outbox.reason),
 					...activeUploadDeletionTargets(projectId, active?.session ? [active.session] : [], outbox),
 				]);
+				if (active?.session.s3Key && active.session.s3UploadId) {
+					await queueMultipartAbortTask(tx, {
+						bucket: outbox.protectedBucket,
+						storageKey: active.session.s3Key,
+						uploadId: active.session.s3UploadId,
+						reason: `${outbox.reason}-active-multipart`,
+					});
+				}
 				if (active) {
 					await tx.gameUploadSession.updateMany({
 						where: { id: active.sessionId, status: { in: ['PENDING', 'COMPLETING'] } },
@@ -268,6 +288,15 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						outbox,
 					)),
 				]);
+				for (const upload of activeUploads) {
+					if (!upload.s3Key || !upload.s3UploadId) continue;
+					await queueMultipartAbortTask(tx, {
+						bucket: outbox.protectedBucket,
+						storageKey: upload.s3Key,
+						uploadId: upload.s3UploadId,
+						reason: `${outbox.reason}-active-multipart`,
+					});
+				}
 				await tx.project.updateMany({
 					where: { id: { in: ids } },
 					data: { posterAssetId: null },
@@ -338,11 +367,34 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						data: { posterAssetId },
 					});
 				}
+				await commitUploadIntents(
+					tx,
+					data.savedFiles.flatMap((savedFile) => savedFile.uploadIntentIds ?? []),
+				);
+				if (data.idempotency) {
+					await succeedIdempotencyOperation(tx, {
+						operationId: data.idempotency.operationId,
+						ownerToken: data.idempotency.ownerToken,
+						result: data.idempotency.resultForProject(project),
+					});
+				}
 				return project;
 			});
 		},
 		createAsset(data) {
-			return client.asset.create({ data });
+			return client.$transaction(async (tx) => {
+				const { uploadIntentIds = [], idempotency, ...assetData } = data;
+				const asset = await tx.asset.create({ data: assetData });
+				await commitUploadIntents(tx, uploadIntentIds);
+				if (idempotency) {
+					await succeedIdempotencyOperation(tx, {
+						operationId: idempotency.operationId,
+						ownerToken: idempotency.ownerToken,
+						result: idempotency.resultForAsset(asset.id),
+					});
+				}
+				return asset;
+			});
 		},
 		replaceOrCreateReplaceableAsset(projectId, kind, data, outbox) {
 			return assetMutation.replaceOrCreateReplaceableAsset(

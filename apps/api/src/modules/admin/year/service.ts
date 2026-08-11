@@ -19,10 +19,34 @@ export interface ExhibitionServiceDependencies {
 		reason: string,
 		context: Record<string, unknown>,
 	): Promise<void>;
+	logger?: {
+		error(context: Record<string, unknown>, message: string): void;
+	};
+	recordPostCommitCleanupFailure?: () => void;
 }
 
 function exhibitionPosterUrl(deps: ExhibitionServiceDependencies, storageKey: string): string {
 	return `${deps.apiPublicUrl}/api/public/exhibition-posters/${storageKey}`;
+}
+
+async function cleanupCommittedPoster(
+	deps: ExhibitionServiceDependencies,
+	id: number,
+	storageKey: string,
+	reason: string,
+): Promise<void> {
+	await deps.deleteOrQueue(
+		deps.posterBucket,
+		storageKey,
+		reason,
+		{ exhibitionId: id },
+	).catch((error) => {
+		deps.recordPostCommitCleanupFailure?.();
+		deps.logger?.error(
+			{ error, exhibitionId: id, storageKey, reason },
+			'Post-commit exhibition poster cleanup failed; durable outbox retained',
+		);
+	});
 }
 
 function serializeExhibition(
@@ -66,11 +90,11 @@ export async function deleteExhibition(deps: ExhibitionServiceDependencies, id: 
 	if (!deleted) throw notFound('Exhibition not found');
 
 	if (deleted.posterStorageKey) {
-		await deps.deleteOrQueue(
-			deps.posterBucket,
+		await cleanupCommittedPoster(
+			deps,
+			id,
 			deleted.posterStorageKey,
 			'exhibition-delete-poster',
-			{ exhibitionId: id },
 		);
 	}
 }
@@ -109,13 +133,17 @@ export async function replacePoster(
 
 	deps.uploadSlots.acquire();
 	try {
-		upload = await deps.posterUpload.start(input.parts, limits);
+		upload = await deps.posterUpload.start(input.parts, limits, {
+			actorId: input.actor.id,
+			exhibitionId: id,
+		});
 		const savedFile = upload.savedFile;
 		const result = await deps.repository.replaceExhibitionPoster(id, {
 			storageKey: savedFile.storageKey,
 			originalName: savedFile.originalName,
 			mimeType: savedFile.mimeType,
 			sizeBytes: BigInt(savedFile.sizeBytes),
+			uploadIntentIds: savedFile.uploadIntentIds,
 		}, {
 			bucket: deps.posterBucket,
 			reason: 'exhibition-poster-replace-previous',
@@ -124,11 +152,11 @@ export async function replacePoster(
 		uploadPersisted = true;
 
 		if (result.oldStorageKey && result.oldStorageKey !== savedFile.storageKey) {
-			await deps.deleteOrQueue(
-				deps.posterBucket,
+			await cleanupCommittedPoster(
+				deps,
+				id,
 				result.oldStorageKey,
 				'exhibition-poster-replace-previous',
-				{ exhibitionId: id },
 			);
 		}
 
@@ -138,7 +166,18 @@ export async function replacePoster(
 		throw err;
 	} finally {
 		deps.uploadSlots.release();
-		if (upload) await upload.cleanup();
+		if (upload) {
+			try {
+				await upload.cleanup();
+			} catch (cleanupError) {
+				if (!uploadPersisted) throw cleanupError;
+				deps.recordPostCommitCleanupFailure?.();
+				deps.logger?.error(
+					{ error: cleanupError, exhibitionId: id },
+					'Post-commit exhibition poster temp cleanup failed',
+				);
+			}
+		}
 	}
 }
 
@@ -150,11 +189,11 @@ export async function deletePoster(deps: ExhibitionServiceDependencies, id: numb
 	if (!result) throw notFound('Exhibition not found');
 
 	if (result.oldStorageKey) {
-		await deps.deleteOrQueue(
-			deps.posterBucket,
+		await cleanupCommittedPoster(
+			deps,
+			id,
 			result.oldStorageKey,
 			'exhibition-poster-delete',
-			{ exhibitionId: id },
 		);
 	}
 }

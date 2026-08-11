@@ -419,7 +419,10 @@ function multipart(parts: Array<
 	}
 	buffers.push(Buffer.from(`--${boundary}--\r\n`));
 	return {
-		headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+		headers: {
+			'content-type': `multipart/form-data; boundary=${boundary}`,
+			'idempotency-key': `test-${Math.random().toString(16).slice(2)}`,
+		},
 		payload: Buffer.concat(buffers),
 	};
 }
@@ -477,7 +480,10 @@ function abortedAssetMultipart() {
 		throw new Error('ticket 011 client aborted');
 	})());
 	return {
-		headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+		headers: {
+			'content-type': `multipart/form-data; boundary=${boundary}`,
+			'idempotency-key': 'test-aborted-asset',
+		},
 		payload,
 	};
 }

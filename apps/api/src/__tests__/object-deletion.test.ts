@@ -139,4 +139,26 @@ describe('object deletion coordinator', () => {
 			.resolves.toBe(0);
 		expect(record).not.toHaveBeenCalled();
 	});
+
+	it('routes production outbox cleanup through the claimed fresh-reference reaper', async () => {
+		const deleteObject = vi.fn();
+		const listKeys = vi.fn();
+		const reapDurablyQueued = vi.fn()
+			.mockResolvedValueOnce({ failed: 0 })
+			.mockResolvedValueOnce({ failed: 0 });
+		const coordinator = createObjectDeletionCoordinator({
+			storage: { delete: deleteObject, listKeys },
+			orphans: { record: vi.fn() },
+			logger: { error: vi.fn() },
+			reapDurablyQueued,
+		});
+
+		await expect(coordinator.deleteDurablyQueued('protected', 'games/old.zip', 'replace'))
+			.resolves.toBeUndefined();
+		await expect(coordinator.deleteDurablyQueuedPrefix('public', 'webgl/7/site/', 'replace'))
+			.resolves.toBe(0);
+		expect(reapDurablyQueued).toHaveBeenCalledTimes(2);
+		expect(deleteObject).not.toHaveBeenCalled();
+		expect(listKeys).not.toHaveBeenCalled();
+	});
 });

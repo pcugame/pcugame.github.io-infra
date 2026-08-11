@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { Env } from '../config/env.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createLifecycle } from '../lib/lifecycle.js';
+import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
 import {
 	createCachedSettingsStore,
 	type SiteSettingsRepository,
@@ -30,6 +31,16 @@ function createRateLimitScheduler() {
 }
 
 describe('stateful resource factories', () => {
+	it('keeps upload lifecycle counters local to their owning backend context', () => {
+		const a = createUploadLifecycleMetrics();
+		const b = createUploadLifecycleMetrics();
+
+		a.recordPostCommitCleanupFailure();
+		a.recordPostCommitCleanupFailure();
+		expect(a.postCommitCleanupFailureCount()).toBe(2);
+		expect(b.postCommitCleanupFailureCount()).toBe(0);
+	});
+
 	it('does not schedule a timer while stateful modules are imported', async () => {
 		const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
 		try {
@@ -273,12 +284,12 @@ describe('stateful resource factories', () => {
 			await context.start();
 			await context.start();
 			expect(findBannedIps).toHaveBeenCalledOnce();
-			// One context limiter plus two context maintenance tasks; no route singleton.
-			expect(setIntervalSpy).toHaveBeenCalledTimes(3);
+			// One context limiter plus three context maintenance tasks; no route singleton.
+			expect(setIntervalSpy).toHaveBeenCalledTimes(4);
 
 			await context.close();
 			await context.close();
-			expect(clearIntervalSpy).toHaveBeenCalledTimes(3);
+			expect(clearIntervalSpy).toHaveBeenCalledTimes(4);
 		} finally {
 			setIntervalSpy.mockRestore();
 			clearIntervalSpy.mockRestore();

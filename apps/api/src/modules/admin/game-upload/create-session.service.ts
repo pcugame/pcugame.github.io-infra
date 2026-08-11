@@ -73,9 +73,26 @@ export async function createSession(
 			expiresAt,
 		});
 	} catch (err) {
-		await deps.storage.abortMultipart(s3Key, s3UploadId).catch((abortErr) => {
-			deps.logger.error({ err: abortErr, s3Key }, 'Failed to abort new multipart upload after session create failure');
-		});
+		let abortError: unknown;
+		try {
+			await deps.storage.abortMultipart(s3Key, s3UploadId);
+		} catch (error) {
+			abortError = error;
+			deps.logger.error({ err: error, s3Key }, 'Failed to abort new multipart upload after session create failure');
+			try {
+				if (!deps.repository.queueAbortTask) throw new Error('Multipart abort queue is unavailable');
+				await deps.repository.queueAbortTask({
+					key: s3Key,
+					uploadId: s3UploadId,
+					reason: 'session-create-failed',
+				});
+			} catch (queueError) {
+				throw new AggregateError(
+					[err, abortError, queueError],
+					'Multipart creation failed and neither abort nor durable abort recording succeeded',
+				);
+			}
+		}
 		if (err instanceof ActiveUploadCompletionInProgressError) {
 			throw conflict(err.message);
 		}

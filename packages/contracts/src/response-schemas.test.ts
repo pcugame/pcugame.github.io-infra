@@ -183,6 +183,10 @@ describe('response runtime schemas', () => {
 			ok: true,
 			data: { maxGameFileMb: 5120, maxChunkSizeMb: 10 },
 		});
+		expect(success.safeParse({
+			ok: true,
+			data: { maxGameFileMb: 5120, maxChunkSizeMb: 4 },
+		}).success).toBe(false);
 
 		expect(ApiErrorResponseSchema.parse({
 			ok: false,

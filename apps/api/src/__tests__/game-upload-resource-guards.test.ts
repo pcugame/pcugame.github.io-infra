@@ -132,7 +132,7 @@ describe('game upload resource guards', () => {
 
 		expect(chunkUploadBodyLimitBytes(cfg)).toBe(10 * 1024 * 1024);
 		expect(resolveChunkSizeBytes({ maxChunkSizeMb: 100 }, cfg)).toBe(10 * 1024 * 1024);
-		expect(resolveChunkSizeBytes({ maxChunkSizeMb: 4 }, cfg)).toBe(4 * 1024 * 1024);
+		expect(resolveChunkSizeBytes({ maxChunkSizeMb: 4 }, cfg)).toBe(5 * 1024 * 1024);
 	});
 
 	it('rejects an unsafe original filename before creating S3 upload state', async () => {

@@ -426,7 +426,7 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 		}
 	});
 
-	it('repeats storage+queue double failure without recording a terminal status', async () => {
+	it('commits deletion and its outbox before repeatable post-commit cleanup failures', async () => {
 		for (let iteration = 0; iteration < REPETITIONS; iteration += 1) {
 			const project = await createProjectFixture();
 			const key = `integration/ticket-005/${testId}/double-failure-${iteration}.png`;
@@ -465,13 +465,13 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			);
 
 			await expect(failingDeletion.deleteAsset(asset.id, { id: userId, role: 'ADMIN' }))
-				.rejects.toMatchObject({ name: 'DurableObjectDeletionError', queueError: queueFailure });
+				.resolves.toEqual({ projectId: project.id });
 			await expect(control.asset.findUniqueOrThrow({ where: { id: asset.id } }))
-				.resolves.toMatchObject({ status: 'DELETING', storageKey: key });
+				.resolves.toMatchObject({ status: 'DELETED', storageKey: key });
 			await expect(control.project.findUniqueOrThrow({ where: { id: project.id } }))
 				.resolves.toMatchObject({ posterAssetId: null });
 			await expect(control.orphanObject.count({ where: { bucket, storageKey: key } }))
-				.resolves.toBe(0);
+				.resolves.toBe(1);
 			expect(objects.has(key)).toBe(true);
 
 			const durableCoordinator = createObjectDeletionCoordinator({

@@ -335,6 +335,7 @@ describe('production HTTP runtime contracts', () => {
 				origin: 'http://localhost:5173',
 				cookie: 'sid=route-contract-session',
 				'content-type': `multipart/form-data; boundary=${boundary}`,
+				'idempotency-key': 'invalid-multipart-json',
 			},
 			payload: Buffer.from(
 				`--${boundary}\r\n`
@@ -861,6 +862,9 @@ describe('production HTTP runtime contracts', () => {
 				const request = {
 					method: testCase.method,
 					url: testCase.requestUrl,
+					...(testCase.family === 'me-project'
+						? { headers: { 'idempotency-key': 'response-contract' } }
+						: {}),
 					...('payload' in testCase ? { payload: testCase.payload } : {}),
 				};
 				const happy = await familyApp.inject(request);

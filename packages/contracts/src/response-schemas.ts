@@ -45,6 +45,8 @@ export const ApiErrorCodeSchema = z.enum([
 	'DRAINING',
 	'INTERNAL_ERROR',
 	'SIZE_MISMATCH',
+	'IDEMPOTENCY_CONFLICT',
+	'OPERATION_IN_PROGRESS',
 ]);
 
 /**
@@ -327,7 +329,7 @@ export const CreatedMemberResponseSchema = z.object({
 
 export const SiteSettingsDataSchema = z.object({
 	maxGameFileMb: PositiveIntegerSchema,
-	maxChunkSizeMb: PositiveIntegerSchema,
+	maxChunkSizeMb: z.number().int().min(5),
 }).strict();
 
 export const BannedIpItemSchema = z.object({

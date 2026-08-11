@@ -79,6 +79,26 @@ function createHarness(session = staleSession()) {
 }
 
 describe('stale upload recovery', () => {
+	it('stops before storage or state mutation when the DB completion claim is lost', async () => {
+		const session = staleSession();
+		const { deps, mocks } = createHarness(session);
+		deps.repository.claimStaleCompletingSessions = vi.fn().mockResolvedValue([session]);
+		deps.repository.renewCompletionClaim = vi.fn().mockResolvedValue({ count: 0 });
+		deps.repository.releaseCompletionClaim = vi.fn().mockResolvedValue({ count: 0 });
+
+		await expect(sweepStaleCompletingSessions(deps)).resolves.toEqual({ swept: 1 });
+
+		expect(mocks.head).not.toHaveBeenCalled();
+		expect(mocks.finalize).not.toHaveBeenCalled();
+		expect(mocks.markFailed).not.toHaveBeenCalled();
+		expect(deps.repository.releaseCompletionClaim).toHaveBeenCalledWith(
+			'stale-upload',
+			'id',
+			new Date('2026-07-21T00:10:00.000Z'),
+			'recovery-deferred',
+		);
+	});
+
 	it('uses the normal finalizer when the completed source object exists', async () => {
 		const session = staleSession();
 		const { deps, mocks } = createHarness(session);
@@ -148,8 +168,12 @@ describe('stale upload recovery', () => {
 		mocks.deleteOrQueue.mockRejectedValueOnce(new Error('storage and orphan queue unavailable'));
 
 		await expect(sweepStaleCompletingSessions(deps))
-			.rejects.toThrow('storage and orphan queue unavailable');
+			.resolves.toEqual({ swept: 1 });
 		expect(mocks.markFailed).not.toHaveBeenCalled();
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'stale-upload' }),
+			'Completing-session recovery failed; continuing with the batch',
+		);
 	});
 
 	it('aborts an unfinished multipart upload only after a successful not-found check', async () => {

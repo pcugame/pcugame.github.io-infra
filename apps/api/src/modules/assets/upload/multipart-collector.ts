@@ -61,7 +61,10 @@ async function collectWithDependencies(
 					? Math.max(basePerFileMax, SIZE_LIMITS.imagePdf)
 					: basePerFileMax;
 
-			const tmpPath = path.join(deps.fileSystem.temporaryDirectory(), deps.ids.next());
+			const tmpPath = path.join(
+				deps.fileSystem.temporaryDirectory(),
+				`pcu-project-upload-${deps.ids.next()}`,
+			);
 			pipeline.trackTempFile(tmpPath);
 
 			const limiter = createByteLimiter(perFileMax, filename);

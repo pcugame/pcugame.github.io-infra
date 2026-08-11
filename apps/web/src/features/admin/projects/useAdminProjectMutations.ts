@@ -2,7 +2,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AdminProjectDetail, ProjectStatus, UpdateMemberRequest } from '@pcu/contracts';
 
 import type { AddMemberInput, UpdateProjectFormInput } from '../../../contracts/schemas';
-import { adminAssetApi, adminMemberApi, adminProjectApi } from '../../../lib/api';
+import {
+	adminAssetApi,
+	adminMemberApi,
+	adminProjectApi,
+	isApiError,
+} from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
 import { buildAssetFormData } from '../../../lib/utils';
 
@@ -66,8 +71,16 @@ export function useAdminProjectMutations({
 	});
 
 	const addAssetMutation = useMutation({
-		mutationFn: ({ fd, title }: { fd: FormData; title: string }) =>
-			adminProjectApi.addAsset(projectId, fd, title),
+		mutationFn: ({ fd, title, idempotencyKey }: {
+			fd: FormData;
+			title: string;
+			idempotencyKey: string;
+		}) => adminProjectApi.addAsset(projectId, fd, title, idempotencyKey),
+		retry: (failureCount, error) => failureCount < 1
+			&& isApiError(error)
+			&& error.status === 0
+			&& error.statusText === 'Network Error',
+		retryDelay: 0,
 		onSuccess: invalidateProject,
 	});
 
@@ -116,7 +129,11 @@ export function useAdminProjectMutations({
 			: kind === 'VIDEO'
 				? '동영상 업로드'
 				: '이미지 업로드';
-		const res = await addAssetMutation.mutateAsync({ fd, title: uploadTitle });
+		const res = await addAssetMutation.mutateAsync({
+			fd,
+			title: uploadTitle,
+			idempotencyKey: crypto.randomUUID(),
+		});
 		if (kind === 'POSTER') {
 			try {
 				await setPosterMutation.mutateAsync(res.assetId);

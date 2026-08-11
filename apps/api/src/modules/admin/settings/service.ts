@@ -29,8 +29,8 @@ export function createSettingsService(deps: SettingsServiceDependencies) {
 
 			if (body.maxChunkSizeMb !== undefined) {
 				const v = Number(body.maxChunkSizeMb);
-				if (!Number.isInteger(v) || v < 1 || v > deps.maxChunkSizeMb) {
-					throw badRequest(`maxChunkSizeMb must be 1-${deps.maxChunkSizeMb}`);
+				if (!Number.isInteger(v) || v < 5 || v > deps.maxChunkSizeMb) {
+					throw badRequest(`maxChunkSizeMb must be 5-${deps.maxChunkSizeMb}`);
 				}
 				patch.maxChunkSizeMb = v;
 			}

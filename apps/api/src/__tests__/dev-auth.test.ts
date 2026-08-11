@@ -1,3 +1,4 @@
+import { createConnection } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import type { BackendContext } from '../backend-context.js';
@@ -93,6 +94,10 @@ function createDevAuthTestContext(cfg = config()): BackendContext {
 			}),
 			invalidate: () => {},
 		},
+		uploadLifecycleMetrics: {
+			recordPostCommitCleanupFailure: () => {},
+			postCommitCleanupFailureCount: () => 0,
+		},
 		exportProgress: {} as BackendContext['exportProgress'],
 		lifecycle: {
 			state: () => state,
@@ -180,6 +185,68 @@ describe('dev auth routes', () => {
 			ok: true,
 			data: { user: { email: 'admin@test.pcu.ac.kr', role: 'ADMIN' } },
 		});
+	});
+
+	it('accounts for an aborted request body exactly once over a real TCP socket', async () => {
+		const context = createDevAuthTestContext();
+		app = await buildApp({ context });
+		await app.listen({ host: '127.0.0.1', port: 0 });
+		const address = app.server.address();
+		if (!address || typeof address === 'string') throw new Error('Expected a TCP address');
+		const socket = createConnection({ host: '127.0.0.1', port: address.port });
+		socket.on('error', () => {});
+		let received = '';
+		socket.on('data', (chunk) => { received += chunk.toString(); });
+		await new Promise<void>((resolve) => socket.once('connect', resolve));
+		await new Promise<void>((resolve, reject) => socket.write([
+			'POST /api/dev/auth/login HTTP/1.1',
+			'Host: 127.0.0.1',
+			'Origin: http://localhost:5173',
+			'Content-Type: application/json',
+			'Content-Length: 100',
+			'Connection: close',
+			'',
+			'{',
+		].join('\r\n'), (error) => error ? reject(error) : resolve()));
+		await vi.waitFor(() => expect({
+			inFlight: context.lifecycle.inFlight(),
+			received,
+		}).toEqual({ inFlight: 1, received: '' }));
+		socket.destroy();
+		await vi.waitFor(() => expect(context.lifecycle.inFlight()).toBe(0));
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(context.lifecycle.inFlight()).toBe(0);
+	});
+
+	it('closes an idle keep-alive connection when Fastify closes', async () => {
+		const context = createDevAuthTestContext();
+		app = await buildApp({ context });
+		await app.listen({ host: '127.0.0.1', port: 0 });
+		const address = app.server.address();
+		if (!address || typeof address === 'string') throw new Error('Expected a TCP address');
+		const socket = createConnection({ host: '127.0.0.1', port: address.port });
+		socket.on('error', () => {});
+		await new Promise<void>((resolve) => socket.once('connect', resolve));
+		const response = new Promise<string>((resolve) => {
+			let received = '';
+			socket.on('data', (chunk) => {
+				received += chunk.toString();
+				if (received.includes('"ok":true')) resolve(received);
+			});
+		});
+		socket.write([
+			'GET /api/health HTTP/1.1',
+			'Host: 127.0.0.1',
+			'Connection: keep-alive',
+			'',
+			'',
+		].join('\r\n'));
+		await expect(response).resolves.toContain('200 OK');
+		const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+		await app.close();
+		await closed;
+		expect(context.lifecycle.inFlight()).toBe(0);
+		app = undefined;
 	});
 
 	it.each([

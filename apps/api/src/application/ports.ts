@@ -25,6 +25,23 @@ export interface CompletedPart {
 	etag: string;
 }
 
+export interface StoredObject {
+	key: string;
+	lastModified?: Date;
+	size?: number;
+}
+
+export interface MultipartUpload {
+	key: string;
+	uploadId: string;
+	initiated?: Date;
+}
+
+export interface StorageRequestOptions {
+	signal?: AbortSignal;
+	requestTimeoutMs?: number;
+}
+
 /** Time is an input to application code, not hidden process state. */
 export interface Clock {
 	now(): Date;
@@ -63,27 +80,40 @@ export interface ObjectStorage {
 		contentType: string,
 		contentLength?: number,
 		options?: UploadObjectOptions,
+		request?: StorageRequestOptions,
 	): Promise<void>;
 	presign(
 		bucket: string,
 		key: string,
 		options?: { ttlSec?: number; responseContentDisposition?: string },
 	): Promise<string>;
-	delete(bucket: string, key: string): Promise<void>;
-	head(bucket: string, key: string): Promise<{ size: number; contentType: string } | null>;
-	readRange(bucket: string, key: string, start: number, end: number): Promise<Buffer>;
+	delete(bucket: string, key: string, request?: StorageRequestOptions): Promise<void>;
+	head(bucket: string, key: string, request?: StorageRequestOptions): Promise<{
+		size: number;
+		contentType: string;
+		lastModified?: Date;
+	} | null>;
+	readRange(
+		bucket: string,
+		key: string,
+		start: number,
+		end: number,
+		request?: StorageRequestOptions,
+	): Promise<Buffer>;
 	stream(
 		bucket: string,
 		key: string,
 		range?: { start: number; end: number },
-		signal?: AbortSignal,
+		request?: StorageRequestOptions,
 	): Promise<ObjectStreamResult | null>;
-	listKeys(bucket: string, prefix: string): Promise<string[]>;
+	listKeys(bucket: string, prefix: string, request?: StorageRequestOptions): Promise<string[]>;
+	listObjects?(bucket: string, prefix: string, request?: StorageRequestOptions): Promise<StoredObject[]>;
 	createMultipart(
 		bucket: string,
 		key: string,
 		contentType?: string,
 		options?: UploadObjectOptions,
+		request?: StorageRequestOptions,
 	): Promise<string>;
 	uploadPart(
 		bucket: string,
@@ -92,18 +122,42 @@ export interface ObjectStorage {
 		partNumber: number,
 		body: Readable | Buffer,
 		contentLength: number,
+		request?: StorageRequestOptions,
 	): Promise<string>;
 	completeMultipart(
 		bucket: string,
 		key: string,
 		uploadId: string,
 		parts: CompletedPart[],
+		request?: StorageRequestOptions,
 	): Promise<void>;
-	abortMultipart(bucket: string, key: string, uploadId: string): Promise<void>;
+	abortMultipart(
+		bucket: string,
+		key: string,
+		uploadId: string,
+		request?: StorageRequestOptions,
+	): Promise<void>;
+	listParts?(
+		bucket: string,
+		key: string,
+		uploadId: string,
+		request?: StorageRequestOptions,
+	): Promise<CompletedPart[]>;
+	listMultipartUploads?(
+		bucket: string,
+		prefix: string,
+		request?: StorageRequestOptions,
+	): Promise<MultipartUpload[]>;
 }
 
 export interface FileStat {
 	size: number;
+}
+
+export interface DirectoryFile {
+	name: string;
+	path: string;
+	lastModified?: Date;
 }
 
 /** Small filesystem port used by upload/export coordinators. */
@@ -117,6 +171,7 @@ export interface FileSystem {
 	readRange(path: string, start: number, end: number): Promise<Buffer>;
 	createReadStream(path: string): Readable;
 	createWriteStream(path: string): NodeJS.WritableStream;
+	listFiles?(path: string): Promise<DirectoryFile[]>;
 }
 
 export interface GoogleIdentity {
@@ -186,7 +241,7 @@ export interface ShutdownResource {
 
 /** Long-running process jobs exposed to the server through the composition root. */
 export interface BackgroundMaintenance {
-	recoverStaleUploads(): Promise<void>;
-	purgeExpiredSessions(before: Date): Promise<number>;
-	reapOrphans(): Promise<void>;
+	recoverStaleUploads(signal?: AbortSignal): Promise<void>;
+	purgeExpiredSessions(before: Date, signal?: AbortSignal): Promise<number>;
+	reapOrphans(signal?: AbortSignal): Promise<void>;
 }

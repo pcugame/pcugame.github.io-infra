@@ -13,6 +13,13 @@ export interface ServerRuntime {
 	shutdown(reason: string): Promise<0 | 1>;
 }
 
+class ShutdownDeadlineError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'ShutdownDeadlineError';
+	}
+}
+
 /**
  * Own signal registration and startup/shutdown overlap without owning resources
  * itself. Fastify's onClose hook and every failure path converge on the same
@@ -24,10 +31,12 @@ export function createServerRuntime(deps: {
 	app: FastifyInstance;
 	signals?: SignalBoundary;
 	setExitCode?: (code: number) => void;
+	forceExit?: (code: number) => void;
 }): ServerRuntime {
 	const { config, context, app } = deps;
 	const signals = deps.signals ?? process;
 	const setExitCode = deps.setExitCode ?? ((code: number) => { process.exitCode = code; });
+	const forceExit = deps.forceExit ?? ((code: number) => process.exit(code));
 	let signalHandlersRegistered = false;
 	let startPromise: Promise<void> | undefined;
 	let shutdownPromise: Promise<0 | 1> | undefined;
@@ -95,28 +104,70 @@ export function createServerRuntime(deps: {
 	function shutdown(reason: string): Promise<0 | 1> {
 		shutdownPromise ??= (async () => {
 			removeSignalHandlers();
+			const deadline = Date.now() + config.SHUTDOWN_DRAIN_MS;
+			const remainingMs = () => Math.max(0, deadline - Date.now());
+			const waitWithinDeadline = async <T>(label: string, work: Promise<T>): Promise<T> => {
+				const remaining = remainingMs();
+				if (remaining <= 0) {
+					throw new ShutdownDeadlineError(`Shutdown deadline exceeded before ${label}`);
+				}
+				let timer: NodeJS.Timeout | undefined;
+				try {
+					return await Promise.race([
+						work,
+						new Promise<T>((_resolve, reject) => {
+							timer = setTimeout(
+								() => reject(new ShutdownDeadlineError(`Shutdown deadline exceeded during ${label}`)),
+								remaining,
+							);
+							timer.unref();
+						}),
+					]);
+				} finally {
+					if (timer) clearTimeout(timer);
+				}
+			};
 			context.logger.info(`Received ${reason}, entering drain phase`);
 			context.lifecycle.setState('draining');
-			const drainResult = await context.lifecycle.waitForDrain(config.SHUTDOWN_DRAIN_MS);
+			const closeReserveMs = Math.min(5_000, Math.max(1_000, Math.floor(config.SHUTDOWN_DRAIN_MS / 3)));
+			const drainBudgetMs = Math.max(0, remainingMs() - closeReserveMs);
+			const drainResult = await context.lifecycle.waitForDrain(drainBudgetMs);
 			context.logger.info(
 				{ drainResult, inFlight: context.lifecycle.inFlight() },
 				'Drain phase complete',
 			);
 			context.lifecycle.setState('shutting_down');
 
-			let closeFailed = false;
+			let closeFailed = drainResult !== 'drained';
+			let deadlineExceeded = false;
 			try {
-				await app.close();
+				await waitWithinDeadline('Fastify close', app.close());
 			} catch (error) {
 				closeFailed = true;
+				deadlineExceeded ||= error instanceof ShutdownDeadlineError || remainingMs() <= 0;
 				context.logger.fatal(error, 'Error during shutdown close');
 			} finally {
 				try {
-					await context.close();
+					await waitWithinDeadline('backend resource close', context.close());
 				} catch (error) {
 					closeFailed = true;
+					deadlineExceeded ||= error instanceof ShutdownDeadlineError || remainingMs() <= 0;
 					context.logger.fatal(error, 'Error closing backend resources');
 				}
+			}
+			if (deadlineExceeded || remainingMs() <= 0) {
+				const closable = app as FastifyInstance & {
+					closeIdleConnections?(): void;
+					closeAllConnections?(): void;
+				};
+				closable.closeIdleConnections?.();
+				closable.closeAllConnections?.();
+				context.logger.fatal(
+					{ inFlight: context.lifecycle.inFlight(), reason },
+					'Shutdown deadline exceeded; forcing process exit',
+				);
+				forceExit(1);
+				return 1;
 			}
 			return drainResult === 'drained' && !closeFailed ? 0 : 1;
 		})();

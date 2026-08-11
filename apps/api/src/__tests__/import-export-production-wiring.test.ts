@@ -533,9 +533,9 @@ describe('import/export production wiring', () => {
 			_bucket: string,
 			_key: string,
 			_range: unknown,
-			signal?: AbortSignal,
+			request?: { signal?: AbortSignal },
 		) => {
-			signal?.addEventListener('abort', () => { abortCount += 1; }, { once: true });
+			request?.signal?.addEventListener('abort', () => { abortCount += 1; }, { once: true });
 			return { body: pending, size: 4, contentType: 'image/png' };
 		});
 		const deferredRemove = vi.fn(async (path: string) => {
@@ -593,9 +593,9 @@ describe('import/export production wiring', () => {
 			_bucket: string,
 			_key: string,
 			_range: unknown,
-			signal?: AbortSignal,
+			request?: { signal?: AbortSignal },
 		) => {
-			receivedSignal = signal;
+			receivedSignal = request?.signal;
 			return { body: pending, size: 4, contentType: 'image/png' };
 		});
 		const app = await routeApp(state.graph);
@@ -712,7 +712,7 @@ describe('import/export production wiring', () => {
 			'pcu-protected',
 			`webgl/71/${deploymentId}/source.zip`,
 			undefined,
-			expect.any(AbortSignal),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 		expect(state.storage.calls.stream.mock.calls.some(([bucket]) => bucket === 'pcu-public')).toBe(false);
 		expect(state.fileSystem.calls.rename).toHaveBeenCalledWith(temporaryPath, finalPath);

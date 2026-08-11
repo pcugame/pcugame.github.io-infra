@@ -6,7 +6,6 @@ import type {
 	ObjectStorage,
 	SettingsStore,
 } from '../application/ports.js';
-import { DurableObjectDeletionError } from '../application/object-deletion.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createNodeFileSystem } from '../infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
@@ -651,7 +650,7 @@ describe.runIf(runPostgresIntegration)(
 			}
 		});
 
-		it('keeps COMPLETING when actual orphan persistence and storage deletion both fail', async () => {
+		it('rolls back terminal state and preserves the object when atomic outbox persistence fails', async () => {
 			const key = `${testId}-double-failure.zip`;
 			const uploadId = randomUUID();
 			const session = await createSessionFixture({
@@ -702,6 +701,7 @@ describe.runIf(runPostgresIntegration)(
 					FOR EACH ROW EXECUTE FUNCTION ${quotedFunction}()
 				`);
 				triggerCreated = true;
+				storage.calls.delete.mockClear();
 				storage.failDelete();
 				try {
 					await graph(control).service.completeSession(
@@ -712,9 +712,7 @@ describe.runIf(runPostgresIntegration)(
 					failure = error;
 				}
 
-				expect(failure).toBeInstanceOf(DurableObjectDeletionError);
-				expect(String((failure as DurableObjectDeletionError).queueError))
-					.toContain('ticket-012 forced orphan write failure');
+				expect(String(failure)).toContain('ticket-012 forced orphan write failure');
 				await expect(control.gameUploadSession.findUniqueOrThrow({
 					where: { id: session.id },
 				})).resolves.toMatchObject({
@@ -729,7 +727,7 @@ describe.runIf(runPostgresIntegration)(
 				await expect(control.orphanObject.count({
 					where: { bucket: protectedBucket, storageKey: key },
 				})).resolves.toBe(0);
-				expect(storage.calls.delete).toHaveBeenCalledWith(protectedBucket, key);
+				expect(storage.calls.delete).not.toHaveBeenCalled();
 				expect(storage.objects.has(`${protectedBucket}/${key}`)).toBe(true);
 			} finally {
 				storage.restoreDelete();

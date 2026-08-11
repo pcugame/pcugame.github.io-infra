@@ -72,6 +72,12 @@ import {
 } from './modules/admin/game-upload/composition.js';
 import type { ProjectUploadProcessing } from './modules/admin/project/project-upload.adapter.js';
 import { createNodeProjectUploadProcessing } from './infrastructure/project-upload-processing.js';
+import { createMultipartRequestHasher } from './infrastructure/multipart-request-hasher.js';
+import { createUploadTempScavenger } from './modules/upload-intent/temp-scavenger.js';
+import {
+	createUploadLifecycleMetrics,
+	type UploadLifecycleMetrics,
+} from './lib/upload-lifecycle-metrics.js';
 
 export interface BackendRoutes {
 	auth: FastifyPluginAsync;
@@ -154,12 +160,37 @@ class BackendResourceOwner {
 	close(): Promise<void> {
 		this.closingRequested = true;
 		this.closePromise ??= (async () => {
-			await this.startWork?.catch(() => undefined);
+			const closeTimeoutMs = 5_000;
+			async function settleWithin(work: Promise<unknown>, label: string): Promise<void> {
+				let timer: NodeJS.Timeout | undefined;
+				try {
+					await Promise.race([
+						work,
+						new Promise<never>((_resolve, reject) => {
+							timer = setTimeout(
+								() => reject(new Error(`Timed out closing ${label}`)),
+								closeTimeoutMs,
+							);
+							timer.unref();
+						}),
+					]);
+				} finally {
+					if (timer) clearTimeout(timer);
+				}
+			}
+
 			let firstError: unknown;
+			if (this.startWork) {
+				try {
+					await settleWithin(this.startWork.catch(() => undefined), 'context startup');
+				} catch (error) {
+					firstError ??= error;
+				}
+			}
 			for (const resource of [...this.registered].reverse()) {
 				if (resource.ownership !== 'owned') continue;
 				try {
-					await resource.close?.();
+					await settleWithin(Promise.resolve().then(() => resource.close?.()), resource.name);
 				} catch (error) {
 					firstError ??= error;
 				}
@@ -184,6 +215,7 @@ export interface BackendContext {
 	protectedDownloads: DownloadRateLimiter;
 	settings: SettingsStore;
 	exportProgress: ExportProgressStore;
+	uploadLifecycleMetrics: UploadLifecycleMetrics;
 	lifecycle: Lifecycle;
 	databaseHealth: DatabaseHealth;
 	authSessions: AuthSessionStore;
@@ -332,6 +364,7 @@ export function createMaintenanceSchedule(
 	let started = false;
 	let closed = false;
 	let closePromise: Promise<void> | undefined;
+	const abortController = new AbortController();
 
 	async function runTracked(work: () => Promise<void>): Promise<void> {
 		const operation = work();
@@ -350,23 +383,34 @@ export function createMaintenanceSchedule(
 			started = true;
 			tasks.push(scheduler.every(60 * 60 * 1000, () => runTracked(async () => {
 				try {
-					const count = await maintenance.purgeExpiredSessions(clock.now());
+					const count = await maintenance.purgeExpiredSessions(
+						clock.now(),
+						abortController.signal,
+					);
 					if (count > 0) logger.info({ count }, 'Purged expired sessions');
 				} catch (error) {
 					logger.error(error, 'Failed to purge expired sessions');
 				}
 			})));
-			tasks.push(scheduler.every(10 * 60 * 1000, () => runTracked(async () => {
+			tasks.push(scheduler.every(60 * 1000, () => runTracked(async () => {
 				try {
-					await maintenance.reapOrphans();
+					await maintenance.reapOrphans(abortController.signal);
 				} catch (error) {
 					logger.error(error, 'Orphan reaper iteration crashed');
+				}
+			})));
+			tasks.push(scheduler.every(60 * 1000, () => runTracked(async () => {
+				try {
+					await maintenance.recoverStaleUploads(abortController.signal);
+				} catch (error) {
+					logger.error(error, 'Upload lifecycle maintenance iteration crashed');
 				}
 			})));
 		},
 		close() {
 			closePromise ??= (async () => {
 				closed = true;
+				abortController.abort(new Error('Maintenance schedule is closing'));
 				for (const task of [...tasks].reverse()) task.cancel();
 				tasks.length = 0;
 				await Promise.allSettled([...inFlight]);
@@ -406,6 +450,7 @@ export async function createProductionBackendContext(
 
 	try {
 		const logger = await resource('logger', () => factories.logger(config));
+		const uploadLifecycleMetrics = createUploadLifecycleMetrics();
 		const clock = await resource('clock', () => factories.clock(config));
 		const ids = await resource('ids', () => factories.ids(config));
 		const scheduler = await resource('scheduler', () => factories.scheduler(config));
@@ -459,9 +504,9 @@ export async function createProductionBackendContext(
 				prisma,
 				storage,
 				downloadLimiter: protectedDownloads,
-				settings,
 				logger,
 				clock,
+				uploadLifecycleMetrics,
 			});
 			assetsBanned = graph;
 			owner.register('assetsBannedWarmup', owned(
@@ -484,8 +529,6 @@ export async function createProductionBackendContext(
 			config,
 			prisma,
 			storage,
-			logger,
-			clock,
 		});
 		const projectMemberSettings = createProjectMemberSettingsProductionGraph({
 			config,
@@ -494,6 +537,7 @@ export async function createProductionBackendContext(
 			settings,
 			logger,
 			clock,
+			uploadLifecycleMetrics,
 		});
 		const year = createYearProductionGraph({
 			config,
@@ -505,6 +549,7 @@ export async function createProductionBackendContext(
 			logger,
 			clock,
 			ids,
+			uploadLifecycleMetrics,
 		});
 		const importExport = createImportExportProductionGraph({
 			config,
@@ -531,6 +576,8 @@ export async function createProductionBackendContext(
 			clock,
 			ids,
 			processing: projectUploads,
+			requestHasher: createMultipartRequestHasher(fileSystem),
+			uploadLifecycleMetrics,
 			access: projectMemberSettings.projectAccess,
 			repository: projectMemberSettings.projectRepository,
 		});
@@ -546,6 +593,12 @@ export async function createProductionBackendContext(
 			ids,
 			logger,
 			access: projectMemberSettings.projectAccess,
+			uploadLifecycleMetrics,
+		});
+		const uploadTempScavenger = createUploadTempScavenger({
+			fileSystem,
+			clock,
+			logger,
 		});
 		owner.register('gameUploadWorkflow', owned(
 			gameUpload,
@@ -554,14 +607,18 @@ export async function createProductionBackendContext(
 		));
 		const authSessions = auth.repository;
 		const maintenance: BackgroundMaintenance = {
-			recoverStaleUploads: () => gameUpload.recoverStaleUploads(),
-			async purgeExpiredSessions(before) {
+			async recoverStaleUploads(signal) {
+				await gameUpload.recoverStaleUploads(signal);
+				if (!signal?.aborted) await uploadTempScavenger.sweep(signal);
+			},
+			async purgeExpiredSessions(before, signal) {
+				if (signal?.aborted) return 0;
 				const { count } = await prisma.authSession.deleteMany({
 					where: { expiresAt: { lt: before } },
 				});
 				return count;
 			},
-			reapOrphans: () => gameUpload.reapOrphans(),
+			reapOrphans: (signal) => gameUpload.reapOrphans(signal),
 		};
 		const maintenanceSchedule = createMaintenanceSchedule(scheduler, clock, maintenance, logger);
 		owner.register('maintenanceSchedule', owned(
@@ -594,6 +651,7 @@ export async function createProductionBackendContext(
 			protectedDownloads,
 			settings,
 			exportProgress,
+			uploadLifecycleMetrics,
 			lifecycle,
 			databaseHealth,
 			authSessions,
