@@ -128,6 +128,29 @@ describe('public exhibition years', () => {
 		});
 	});
 
+	it.each(['1e3', '+1', '1.0', '0x10', '0001', '9007199254740992'])(
+		'treats non-canonical numeric notation %s as a slug, never as an ID',
+		async (slug) => {
+			mocks.findPublishedProjectBySlug.mockResolvedValue({
+				id: 10,
+				slug,
+				title: 'Numeric-looking slug',
+				summary: '',
+				description: '',
+				isIncomplete: false,
+				status: 'PUBLISHED',
+				exhibition: { year: 2026 },
+				members: [],
+				assets: [],
+				poster: null,
+			});
+
+			await expect(getProjectDetail(dependencies, slug)).resolves.toMatchObject({ slug });
+			expect(mocks.findPublishedProjectById).not.toHaveBeenCalled();
+			expect(mocks.findPublishedProjectBySlug).toHaveBeenCalledWith(slug, undefined);
+		},
+	);
+
 	it('returns multiple public videos in asset order and keeps video as first item', async () => {
 		mocks.findPublishedProjectById.mockResolvedValue({
 			id: 10,

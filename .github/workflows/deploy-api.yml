@@ -10,9 +10,17 @@ on:
       - 'package-lock.json'
       - 'server/deploy.sh'
       - '.github/workflows/deploy-api.yml'
+      - '.github/release-gates/web-before-api/**'
   workflow_dispatch:
+    inputs:
+      require_web_first:
+        description: 'Wait for a successful Web deployment of this exact ref before deploying the API'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
+  actions: read
   contents: read
   packages: write
 
@@ -67,6 +75,107 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine release ordering
+        id: release-order
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          MANUAL_REQUIRE_WEB_FIRST: ${{ inputs.require_web_first }}
+        run: |
+          set -euo pipefail
+
+          require_web_first=false
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            require_web_first="${MANUAL_REQUIRE_WEB_FIRST:-false}"
+          else
+            if git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+              changed_paths="$(git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}")"
+            else
+              changed_paths="$(git show --pretty='' --name-only "${GITHUB_SHA}")"
+            fi
+            if grep -q '^\.github/release-gates/web-before-api/' <<< "${changed_paths}"; then
+              require_web_first=true
+            fi
+          fi
+
+          echo "require_web_first=${require_web_first}" >> "${GITHUB_OUTPUT}"
+
+      - name: Wait for matching Web deployment
+        if: steps.release-order.outputs.require_web_first == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          web_run_id=""
+          web_workflow_succeeded=false
+          for attempt in $(seq 1 240); do
+            if [ -z "${web_run_id}" ]; then
+              web_run_id="$(
+                gh api --method GET \
+                  "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-web-pages.yml/runs" \
+                  -f head_sha="${GITHUB_SHA}" \
+                  -f per_page=10 \
+                  --jq '.workflow_runs[0].id // empty'
+              )"
+            fi
+
+            if [ -z "${web_run_id}" ]; then
+              if (( attempt % 6 == 1 )); then
+                echo "Waiting for the matching Web workflow run to appear..."
+              fi
+              sleep 10
+              continue
+            fi
+
+            web_state="$(
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${web_run_id}" \
+                --jq '[.status, (.conclusion // ""), .html_url] | @tsv'
+            )"
+            IFS=$'\t' read -r status conclusion run_url <<< "${web_state}"
+
+            if [ "${status}" = "completed" ]; then
+              if [ "${conclusion}" = "success" ]; then
+                echo "Web deployment succeeded: ${run_url}"
+                web_workflow_succeeded=true
+                break
+              fi
+
+              echo "Web deployment ended with ${conclusion}: ${run_url}"
+              exit 1
+            fi
+
+            if (( attempt % 6 == 1 )); then
+              echo "Web deployment is ${status}: ${run_url}"
+            fi
+            sleep 10
+          done
+
+          if [ "${web_workflow_succeeded}" != "true" ]; then
+            echo "Timed out waiting for Web deployment run ${web_run_id:-unknown}."
+            exit 1
+          fi
+
+          for attempt in $(seq 1 120); do
+            deployed_sha="$(
+              curl --fail --silent --show-error --location --max-time 10 \
+                "https://pcugame.github.io/release-sha.txt?expected=${GITHUB_SHA}" \
+                2>/dev/null || true
+            )"
+            if [ "${deployed_sha}" = "${GITHUB_SHA}" ]; then
+              echo "Production Web serves the compatible release ${GITHUB_SHA}."
+              exit 0
+            fi
+            if (( attempt % 6 == 1 )); then
+              echo "Waiting for GitHub Pages to serve Web release ${GITHUB_SHA}..."
+            fi
+            sleep 10
+          done
+
+          echo "GitHub Pages did not serve Web release ${GITHUB_SHA} before timeout."
+          exit 1
 
       - name: Copy deploy script to server
         uses: appleboy/scp-action@v0.1.7

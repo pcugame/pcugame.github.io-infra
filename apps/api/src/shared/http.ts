@@ -1,4 +1,5 @@
 import type { FastifyReply } from 'fastify';
+import type { ApiErrorCode } from '@pcu/contracts';
 
 export interface ApiSuccess<T = unknown> {
   ok: true;
@@ -8,7 +9,7 @@ export interface ApiSuccess<T = unknown> {
 export interface ApiError {
   ok: false;
   error: {
-    code: string;
+    code: ApiErrorCode;
     message: string;
     details?: unknown;
   };
@@ -27,7 +28,7 @@ export function sendError(
   reply: FastifyReply,
   status: number,
   message: string,
-  code = 'ERROR',
+  code: ApiErrorCode = 'ERROR',
   details?: unknown,
 ): void {
   const body: ApiError = { ok: false, error: { code, message, details } };

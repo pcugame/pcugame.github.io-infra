@@ -1,20 +1,28 @@
-import type { FastifyInstance } from 'fastify';
-import { exhibitionController } from './year/index.js';
-import { projectController } from './project/index.js';
-import { memberController } from './member/index.js';
-import { gameUploadController } from './game-upload/index.js';
-import { bannedIpController } from './banned-ip/index.js';
-import { settingsController } from './settings/index.js';
-import { importController } from './import/index.js';
-import { exportController } from './export/index.js';
+import type { FastifyPluginAsync } from 'fastify';
 
-export async function adminRoutes(app: FastifyInstance): Promise<void> {
-	await app.register(exhibitionController);
-	await app.register(projectController);
-	await app.register(memberController);
-	await app.register(gameUploadController);
-	await app.register(bannedIpController);
-	await app.register(settingsController);
-	await app.register(importController);
-	await app.register(exportController);
+export interface AdminRouteDependencies {
+	projectController: FastifyPluginAsync;
+	memberController: FastifyPluginAsync;
+	settingsController: FastifyPluginAsync;
+	bannedIpController: FastifyPluginAsync;
+	exhibitionController: FastifyPluginAsync;
+	importController: FastifyPluginAsync;
+	exportController: FastifyPluginAsync;
+	projectMultipartController: FastifyPluginAsync;
+	gameUploadController: FastifyPluginAsync;
+}
+
+/** Registration itself is pure; migrated ticket-008/009/010 controllers are explicit ports. */
+export function createAdminRoutes(deps: AdminRouteDependencies): FastifyPluginAsync {
+	return async function adminRoutes(app): Promise<void> {
+		await app.register(deps.exhibitionController);
+		await app.register(deps.projectController);
+		await app.register(deps.projectMultipartController);
+		await app.register(deps.memberController);
+		await app.register(deps.gameUploadController);
+		await app.register(deps.bannedIpController);
+		await app.register(deps.settingsController);
+		await app.register(deps.importController);
+		await app.register(deps.exportController);
+	};
 }

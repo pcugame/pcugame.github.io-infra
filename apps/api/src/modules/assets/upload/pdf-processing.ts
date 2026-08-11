@@ -6,15 +6,19 @@
  * as WebP. Pure JS — no system binaries required.
  */
 
-import { promises as fsp } from 'node:fs';
 import { pdf } from 'pdf-to-img';
 import sharp from 'sharp';
-import { logger } from '../../../lib/logger.js';
+import type { FileSystem } from '../../../application/ports.js';
 import { badRequest } from '../../../shared/errors.js';
 import type { ImageProcessingResult } from './image-processing.js';
 
 export interface PdfProcessingInput {
   tmpPath: string;
+}
+
+export interface PdfProcessingLogger {
+  warn(value: unknown, message?: string): void;
+  error(value: unknown, message?: string): void;
 }
 
 /** Scale factor passed to pdfjs (roughly doubles resolution). */
@@ -28,18 +32,28 @@ const WEBP_QUALITY = 85;
 
 export async function processPdf(
   input: PdfProcessingInput,
+  logger: PdfProcessingLogger,
+  fileSystem: Pick<FileSystem, 'remove' | 'stat'>,
 ): Promise<ImageProcessingResult> {
   const outputPath = input.tmpPath + '.webp';
 
   let pngBuf: Buffer;
+  let document: Awaited<ReturnType<typeof pdf>> | undefined;
   try {
-    const doc = await pdf(input.tmpPath, { scale: PDF_SCALE });
-    if (doc.length < 1) {
+    document = await pdf(input.tmpPath, { scale: PDF_SCALE });
+    if (document.length < 1) {
       throw new Error('PDF has no pages');
     }
-    pngBuf = await doc.getPage(1);
+    pngBuf = await document.getPage(1);
   } catch (err) {
-    throw translatePdfError(err);
+    throw translatePdfError(err, logger);
+  } finally {
+	const destroy = (document as { destroy?: () => Promise<void> } | undefined)?.destroy;
+	if (destroy) {
+	  await destroy.call(document).catch((cleanupError: unknown) => {
+		logger.warn({ err: cleanupError, tmpPath: input.tmpPath }, 'Failed to destroy PDF document');
+	  });
+	}
   }
 
   try {
@@ -53,13 +67,13 @@ export async function processPdf(
       .webp({ quality: WEBP_QUALITY })
       .toFile(outputPath);
   } catch (err) {
-		await fsp.unlink(outputPath).catch((cleanupError) => {
-			logger().warn({ err: cleanupError, outputPath }, 'Failed to remove partial PDF raster');
-		});
-    throw translatePdfError(err);
+    await fileSystem.remove(outputPath).catch((cleanupError) => {
+      logger.warn({ err: cleanupError, outputPath }, 'Failed to remove partial PDF raster');
+    });
+    throw translatePdfError(err, logger);
   }
 
-  const stat = await fsp.stat(outputPath);
+  const stat = await fileSystem.stat(outputPath);
 
   return {
     tmpPath: outputPath,
@@ -70,9 +84,9 @@ export async function processPdf(
   };
 }
 
-function translatePdfError(err: unknown): Error {
+function translatePdfError(err: unknown, logger?: PdfProcessingLogger): Error {
   const msg = err instanceof Error ? err.message : String(err);
-  logger().error({ err }, 'PDF rasterization failed');
+  logger?.error({ err }, 'PDF rasterization failed');
 
   const lower = msg.toLowerCase();
   if (lower.includes('password') || lower.includes('encrypt')) {

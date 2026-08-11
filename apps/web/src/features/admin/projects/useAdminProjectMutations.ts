@@ -2,9 +2,19 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AdminProjectDetail, ProjectStatus, UpdateMemberRequest } from '@pcu/contracts';
 
 import type { AddMemberInput, UpdateProjectFormInput } from '../../../contracts/schemas';
-import { adminAssetApi, adminMemberApi, adminProjectApi } from '../../../lib/api';
+import {
+	adminAssetApi,
+	adminMemberApi,
+	adminProjectApi,
+	isApiError,
+} from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
 import { buildAssetFormData } from '../../../lib/utils';
+import {
+	createIdempotencyFingerprint,
+	fingerprintFile,
+	useStableIdempotencyOperation,
+} from '../../../lib/idempotency-operation';
 
 interface UseAdminProjectMutationsParams {
 	projectId: number;
@@ -18,6 +28,7 @@ export function useAdminProjectMutations({
 	onMemberAdded,
 }: UseAdminProjectMutationsParams) {
 	const qc = useQueryClient();
+	const assetIdempotencyOperation = useStableIdempotencyOperation();
 
 	const invalidateProject = () => {
 		qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
@@ -66,9 +77,26 @@ export function useAdminProjectMutations({
 	});
 
 	const addAssetMutation = useMutation({
-		mutationFn: ({ fd, title }: { fd: FormData; title: string }) =>
-			adminProjectApi.addAsset(projectId, fd, title),
-		onSuccess: invalidateProject,
+		mutationFn: ({ fd, title, idempotencyKey }: {
+			fd: FormData;
+			title: string;
+			idempotencyKey: string;
+			fingerprint: string;
+		}) => adminProjectApi.addAsset({
+			projectId,
+			formData: fd,
+			idempotencyKey,
+			title,
+		}),
+		retry: (failureCount, error) => failureCount < 1
+			&& isApiError(error)
+			&& error.status === 0
+			&& error.statusText === 'Network Error',
+		retryDelay: 0,
+		onSuccess: (_response, operation) => {
+			assetIdempotencyOperation.complete(operation.fingerprint);
+			invalidateProject();
+		},
 	});
 
 	const setPosterMutation = useMutation({
@@ -111,12 +139,22 @@ export function useAdminProjectMutations({
 
 	const addAsset = async (kind: 'POSTER' | 'VIDEO' | 'IMAGE', file: File) => {
 		const fd = buildAssetFormData(kind, file);
+		const fingerprint = createIdempotencyFingerprint({
+			projectId,
+			kind,
+			file: fingerprintFile(file),
+		});
 		const uploadTitle = kind === 'POSTER'
 			? '포스터 업로드'
 			: kind === 'VIDEO'
 				? '동영상 업로드'
 				: '이미지 업로드';
-		const res = await addAssetMutation.mutateAsync({ fd, title: uploadTitle });
+		const res = await addAssetMutation.mutateAsync({
+			fd,
+			title: uploadTitle,
+			fingerprint,
+			idempotencyKey: assetIdempotencyOperation.keyFor(fingerprint),
+		});
 		if (kind === 'POSTER') {
 			try {
 				await setPosterMutation.mutateAsync(res.assetId);

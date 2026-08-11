@@ -1,5 +1,5 @@
 import type { AssetKind } from '../../../generated/prisma/client.js';
-import type { UploadObjectOptions } from '../../../lib/storage.js';
+import type { UploadObjectOptions } from '../../../application/ports.js';
 
 const DOWNLOAD_ONLY_OPTIONS: UploadObjectOptions = {
 	contentType: 'application/octet-stream',
@@ -21,4 +21,3 @@ export function storageOptionsForAsset(
 	}
 	return {};
 }
-

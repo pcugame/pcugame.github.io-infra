@@ -12,7 +12,7 @@ describe('DownloadRateLimiter', () => {
 	}
 
 	afterEach(() => {
-		for (const l of limiters) l.destroy();
+		for (const l of limiters) l.close();
 		limiters.length = 0;
 	});
 
@@ -106,14 +106,14 @@ describe('DownloadRateLimiter', () => {
 		expect(limiter.check('1.2.3.4')).toBe('ok');
 	});
 
-	it('cleans up on destroy', () => {
+	it('cleans up on close', () => {
 		const limiter = create({ maxHits: 10, windowMs: 60_000 });
 		limiter.check('1.2.3.4');
 		limiter.addBan('5.6.7.8');
 		expect(limiter._bucketSize()).toBe(1);
 		expect(limiter._bannedSize()).toBe(1);
 
-		limiter.destroy();
+		limiter.close();
 		expect(limiter._bucketSize()).toBe(0);
 		expect(limiter._bannedSize()).toBe(0);
 	});

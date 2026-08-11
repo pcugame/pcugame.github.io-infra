@@ -16,22 +16,19 @@ const assetsService = createAssetsService({
 	protectedBucket: 'protected-bucket',
 	presign: mocks.getPresignedUrl,
 	bucketForKind: () => 'bucket',
-	deleteOrQueue: vi.fn(),
+	wakeDeletionWorker: vi.fn(),
 	loadProjectWithAccess: vi.fn(),
 	downloadLimiter: {
-		loadBannedIps: vi.fn(),
 		check: mocks.limiterCheck,
 	},
-	logger: { info: vi.fn(), warn: vi.fn(), error: mocks.loggerError },
+	logger: { info: vi.fn(), error: mocks.loggerError },
 	repository: {
 		findPublicAsset: mocks.findPublicAsset,
 		findAssetByStorageKey: mocks.findAssetByStorageKey,
 		upsertBannedIp: mocks.upsertBannedIp,
-		findAllBannedIps: vi.fn(),
 		findAssetByIdWithProject: vi.fn(),
-		markAssetDeleting: vi.fn(),
-		markAssetDeleted: vi.fn(),
-		clearPosterIfMatches: vi.fn(),
+		claimAssetForDeletion: vi.fn(),
+		completeAssetDeletion: vi.fn(),
 	},
 });
 const { streamProtectedAsset, streamPublicAsset } = assetsService;

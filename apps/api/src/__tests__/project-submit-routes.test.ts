@@ -1,70 +1,21 @@
-import Fastify from 'fastify';
-import type { FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createSubmitProjectService } from '../modules/admin/project/project-submit.service.js';
+import { createAdminProjectSubmitController } from '../modules/admin/project/multipart.controller.js';
+import { createMeProjectController } from '../modules/me/project/controller.js';
+import { createMeRoutes } from '../modules/me/me.routes.js';
 
-const mocks = vi.hoisted(() => ({
+const repository = {
 	findExhibitionById: vi.fn(),
 	findProjectByExhibitionAndSlug: vi.fn(),
 	createProjectWithAssets: vi.fn(),
-}));
-
-vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
-	loadEnv: () => ({ ...defaultTestEnv }),
-}));
-
-vi.mock('../modules/admin/project/repository.js', () => ({
-	findExhibitionById: mocks.findExhibitionById,
-	findProjectByExhibitionAndSlug: mocks.findProjectByExhibitionAndSlug,
-	createProjectWithAssets: mocks.createProjectWithAssets,
-}));
-
-vi.mock('../modules/assets/upload/index.js', () => ({
-	UploadPipeline: vi.fn(function UploadPipeline() {
-		return {
-			trackTempFile: vi.fn(),
-			processFile: vi.fn(),
-			rollbackCommitted: vi.fn().mockResolvedValue(undefined),
-			cleanupTemp: vi.fn().mockResolvedValue(undefined),
-		};
-	}),
-}));
-
-vi.mock('../plugins/auth.js', () => {
-	const users = {
-		USER: { id: 101, email: 'student@g.pcu.ac.kr', name: 'Student', role: 'USER', studentId: '20240001' },
-		OPERATOR: { id: 202, email: 'operator@g.pcu.ac.kr', name: 'Operator', role: 'OPERATOR', studentId: null },
-		ADMIN: { id: 303, email: 'admin@g.pcu.ac.kr', name: 'Admin', role: 'ADMIN', studentId: null },
-	} as const;
-
-	function httpError(statusCode: number, message: string, code: string) {
-		const err = new Error(message) as Error & { statusCode: number; code: string };
-		err.statusCode = statusCode;
-		err.code = code;
-		return err;
-	}
-
-	function attachUser(request: any) {
-		const role = request.headers['x-test-role'] as keyof typeof users | undefined;
-		if (!role || !users[role]) throw httpError(401, 'Unauthorized', 'UNAUTHORIZED');
-		request.currentUser = users[role];
-		return users[role];
-	}
-
-	return {
-		requireLogin: async (request: any) => {
-			attachUser(request);
-		},
-		requireRole: (...roles: string[]) => async (request: any) => {
-			const user = attachUser(request);
-			if (!roles.includes(user.role)) throw httpError(403, 'Forbidden', 'FORBIDDEN');
-		},
-	};
-});
-
-import { projectController } from '../modules/admin/project/index.js';
-import { meRoutes } from '../modules/me/me.routes.js';
+};
+const pipeline = {
+	trackTempFile: vi.fn(),
+	processFile: vi.fn(),
+	rollbackCommitted: vi.fn(async () => {}),
+	cleanupTemp: vi.fn(async () => {}),
+};
 
 function validPayload(overrides: Record<string, unknown> = {}) {
 	return JSON.stringify({
@@ -77,130 +28,184 @@ function validPayload(overrides: Record<string, unknown> = {}) {
 	});
 }
 
-async function buildTestApp() {
-	const app = Fastify({ logger: false });
+function service() {
+	return createSubmitProjectService({
+		webPublicUrl: 'https://web.example.test',
+		repository,
+		uploadLimits: () => ({
+			posterMaxBytes: 1024,
+			imageMaxBytes: 1024,
+			gameMaxBytes: 1024,
+			videoMaxBytes: 1024,
+			requestMaxBytes: 2048,
+			maxFiles: 4,
+		}),
+		uploadSlots: { acquire: vi.fn(), release: vi.fn() },
+		createPipeline: () => pipeline,
+		multipartCollector: {
+			collect: async (parts) => {
+				let payloadJson = '';
+				for await (const part of parts) {
+					if (part.type === 'field' && part.fieldname === 'payload') {
+						payloadJson = String(part.value);
+					}
+				}
+				return { payloadJson, fileParts: [] };
+			},
+		},
+	});
+}
 
-	app.decorateRequest('parts', (function parts(this: any) {
-		const payload = this.headers['x-test-payload'] as string | undefined;
+async function buildTestApp(): Promise<FastifyInstance> {
+	const app = Fastify({ logger: false });
+	app.decorateRequest('parts', (function parts(this: {
+		headers: Record<string, string | undefined>;
+	}) {
+		const payload = this.headers['x-test-payload'];
 		return (async function* multipartParts() {
 			yield {
-				type: 'field',
+				type: 'field' as const,
 				fieldname: 'payload',
 				value: payload ?? validPayload(),
 			};
 		})();
-	}) as any);
-
-	app.setErrorHandler((error: any, _request, reply) => {
-		reply.status(error.statusCode ?? 500).send({
+	}) as never);
+	app.addHook('preHandler', async (request) => {
+		const role = request.headers['x-test-role'] as 'USER' | 'OPERATOR' | 'ADMIN' | undefined;
+		if (!role) return;
+		const ids = { USER: 101, OPERATOR: 202, ADMIN: 303 };
+		request.currentUser = {
+			id: ids[role],
+			googleSub: role,
+			email: `${role.toLowerCase()}@g.pcu.ac.kr`,
+			name: role,
+			role,
+		};
+	});
+	app.setErrorHandler((error, _request, reply) => {
+		const failure = error as { statusCode?: number; code?: string };
+		reply.status(failure.statusCode ?? 500).send({
 			ok: false,
 			error: {
-				code: error.code ?? 'ERROR',
-				message: error.message,
+				code: failure.code ?? 'ERROR',
+				message: error instanceof Error ? error.message : String(error),
 			},
 		});
 	});
-
-	await app.register(meRoutes, { prefix: '/api/me' });
-	await app.register(projectController, { prefix: '/api/admin' });
+	const submit = service();
+	await app.register(createMeRoutes({
+		projectController: createMeProjectController({
+			service: submit,
+			route: {
+				bodyLimit: 2048,
+				rateLimit: { max: 10, timeWindow: 1000 },
+			},
+		}),
+	}), { prefix: '/api/me' });
+	await app.register(createAdminProjectSubmitController({
+		service: submit,
+		route: {
+			bodyLimit: 2048,
+			rateLimit: { max: 10, timeWindow: 1000 },
+		},
+	}), { prefix: '/api/admin' });
 	await app.ready();
 	return app;
 }
 
-describe('project submit routes', () => {
+describe('project submit route factories', () => {
 	let app: FastifyInstance;
 
 	beforeEach(async () => {
 		vi.clearAllMocks();
-		mocks.findExhibitionById.mockResolvedValue({
+		repository.findExhibitionById.mockResolvedValue({
 			id: 7,
 			year: 2026,
 			title: '2026 Exhibition',
 			isUploadEnabled: true,
 		});
-		mocks.findProjectByExhibitionAndSlug.mockResolvedValue(null);
-		mocks.createProjectWithAssets.mockImplementation(async (data) => ({
+		repository.findProjectByExhibitionAndSlug.mockResolvedValue(null);
+		repository.createProjectWithAssets.mockImplementation(async (data) => ({
 			id: 900,
 			slug: data.slug,
 		}));
 		app = await buildTestApp();
 	});
 
-	afterEach(async () => {
-		await app.close();
-	});
+	afterEach(async () => app.close());
 
-	it('allows USER submit via /api/me/projects/submit', async () => {
-		const res = await app.inject({
+	it('allows USER submit via the me prefix and fixes the actor', async () => {
+		const response = await app.inject({
 			method: 'POST',
 			url: '/api/me/projects/submit',
-			headers: { 'x-test-role': 'USER' },
+			headers: { 'x-test-role': 'USER', 'idempotency-key': 'me-submit' },
 		});
-
-		expect(res.statusCode).toBe(201);
-		expect(mocks.createProjectWithAssets).toHaveBeenCalledWith(
+		expect(response.statusCode).toBe(201);
+		expect(repository.createProjectWithAssets).toHaveBeenCalledWith(
 			expect.objectContaining({ creatorId: 101 }),
 		);
 	});
 
-	it('blocks USER submit via /api/admin/projects/submit', async () => {
-		const res = await app.inject({
+	it('requires a bounded Idempotency-Key on submit routes', async () => {
+		const missing = await app.inject({
 			method: 'POST',
-			url: '/api/admin/projects/submit',
+			url: '/api/me/projects/submit',
 			headers: { 'x-test-role': 'USER' },
 		});
-
-		expect(res.statusCode).toBe(403);
-		expect(mocks.createProjectWithAssets).not.toHaveBeenCalled();
+		expect(missing.statusCode).toBe(400);
+		const tooLong = await app.inject({
+			method: 'POST',
+			url: '/api/admin/projects/submit',
+			headers: {
+				'x-test-role': 'ADMIN',
+				'idempotency-key': 'x'.repeat(201),
+			},
+		});
+		expect(tooLong.statusCode).toBe(400);
 	});
 
-	it.each(['OPERATOR', 'ADMIN'] as const)(
-		'allows %s submit via /api/admin/projects/submit',
-		async (role) => {
-			const res = await app.inject({
-				method: 'POST',
-				url: '/api/admin/projects/submit',
-				headers: { 'x-test-role': role },
-			});
+	it('blocks USER on the admin submit factory', async () => {
+		const response = await app.inject({
+			method: 'POST',
+			url: '/api/admin/projects/submit',
+			headers: { 'x-test-role': 'USER', 'idempotency-key': 'denied-submit' },
+		});
+		expect(response.statusCode).toBe(403);
+		expect(repository.createProjectWithAssets).not.toHaveBeenCalled();
+	});
 
-			expect(res.statusCode).toBe(201);
-		},
-	);
+	it.each(['OPERATOR', 'ADMIN'] as const)('allows %s on admin submit', async (role) => {
+		const response = await app.inject({
+			method: 'POST',
+			url: '/api/admin/projects/submit',
+			headers: { 'x-test-role': role, 'idempotency-key': `${role}-submit` },
+		});
+		expect(response.statusCode).toBe(201);
+	});
 
 	it.each([
-		['status', validPayload({ status: 'ARCHIVED' })],
-		['sortOrder', validPayload({ sortOrder: 99 })],
-		['creatorId', validPayload({ creatorId: 999 })],
-		['members.0.userId', validPayload({ members: [{ name: 'Student', studentId: '20240001', userId: 999 }] })],
-	] as const)('rejects USER endpoint admin-only payload field %s', async (_field, payload) => {
-		const res = await app.inject({
+		validPayload({ status: 'ARCHIVED' }),
+		validPayload({ sortOrder: 99 }),
+		validPayload({ creatorId: 999 }),
+		validPayload({
+			members: [{
+				name: 'Student',
+				studentId: '20240001',
+				userId: 999,
+			}],
+		}),
+	])('rejects admin-only payload fields on the me route', async (payload) => {
+		const response = await app.inject({
 			method: 'POST',
 			url: '/api/me/projects/submit',
 			headers: {
 				'x-test-role': 'USER',
 				'x-test-payload': payload,
+				'idempotency-key': 'forbidden-fields',
 			},
 		});
-
-		const body = JSON.parse(res.body);
-		expect(res.statusCode).toBe(400);
-		expect(body.error.code).toBe('USER_SUBMIT_FORBIDDEN_FIELD');
-		expect(mocks.createProjectWithAssets).not.toHaveBeenCalled();
-	});
-
-	it('forces USER endpoint creator and does not accept member userId binding from payload', async () => {
-		const res = await app.inject({
-			method: 'POST',
-			url: '/api/me/projects/submit',
-			headers: { 'x-test-role': 'USER' },
-		});
-
-		expect(res.statusCode).toBe(201);
-		expect(mocks.createProjectWithAssets).toHaveBeenCalledWith(
-			expect.objectContaining({
-				creatorId: 101,
-				members: [{ name: 'Student', studentId: '20240001' }],
-			}),
-		);
+		expect(response.statusCode).toBe(400);
+		expect(response.json().error.code).toBe('USER_SUBMIT_FORBIDDEN_FIELD');
+		expect(repository.createProjectWithAssets).not.toHaveBeenCalled();
 	});
 });

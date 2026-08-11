@@ -24,25 +24,31 @@ import { getProjectSubmitApi } from '../lib/api/project-submit';
 describe('project submit API selection', () => {
 	it('/me/projects/new user mode submits to the me endpoint', async () => {
 		const fd = new FormData();
+		const idempotencyKey = 'user-operation-key';
 
-		await getProjectSubmitApi('user').submit(fd);
+		await getProjectSubmitApi('user').submit({ formData: fd, idempotencyKey });
 
 		expect(mocks.uploadFormData).toHaveBeenCalledWith(
 			'/api/me/projects/submit',
 			fd,
-			expect.any(Object),
+			expect.objectContaining({
+				headers: { 'Idempotency-Key': idempotencyKey },
+			}),
 		);
 	});
 
 	it('/admin/projects/new admin mode submits to the admin endpoint', async () => {
 		const fd = new FormData();
+		const idempotencyKey = 'admin-operation-key';
 
-		await getProjectSubmitApi('admin').submit(fd);
+		await getProjectSubmitApi('admin').submit({ formData: fd, idempotencyKey });
 
 		expect(mocks.uploadFormData).toHaveBeenCalledWith(
 			'/api/admin/projects/submit',
 			fd,
-			expect.any(Object),
+			expect.objectContaining({
+				headers: { 'Idempotency-Key': idempotencyKey },
+			}),
 		);
 	});
 });

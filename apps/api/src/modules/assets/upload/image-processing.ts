@@ -2,8 +2,8 @@
  * Image processing pipeline — decode and re-encode browser images to WebP.
  */
 
-import { promises as fsp } from 'node:fs';
 import sharp from 'sharp';
+import type { FileSystem } from '../../../application/ports.js';
 
 export interface ImageProcessingInput {
   /** Path to the temp file on disk */
@@ -49,6 +49,7 @@ const CONVERTIBLE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp']);
  */
 export async function processImage(
   input: ImageProcessingInput,
+  fileSystem: Pick<FileSystem, 'stat'>,
 ): Promise<ImageProcessingResult> {
   if (!CONVERTIBLE_MIMES.has(input.mimeType)) {
     return { ...input, converted: false };
@@ -60,7 +61,7 @@ export async function processImage(
     .webp({ quality: WEBP_QUALITY })
     .toFile(outputPath);
 
-  const stat = await fsp.stat(outputPath);
+  const stat = await fileSystem.stat(outputPath);
 
   return {
     tmpPath: outputPath,

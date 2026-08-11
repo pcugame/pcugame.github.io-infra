@@ -93,25 +93,32 @@ export const adminProjectApi = {
   },
 
   /** 작품 + 파일 일괄 등록 (multipart/form-data) */
-  submit(formData: FormData) {
+  submit(input: { formData: FormData; idempotencyKey: string }) {
     return uploadFormData<SubmitProjectResponse>(
       '/api/admin/projects/submit',
-      formData,
+      input.formData,
       {
         title: '작품 파일 업로드',
         processingMessage: '파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
+        headers: { 'Idempotency-Key': input.idempotencyKey },
       },
     );
   },
 
   /** 기존 프로젝트에 자산 추가 */
-  addAsset(projectId: number, formData: FormData, title = '자산 업로드') {
+  addAsset(input: {
+    projectId: number;
+    formData: FormData;
+    idempotencyKey: string;
+    title?: string;
+  }) {
     return uploadFormData<{ assetId: number; url: string }>(
-      `/api/admin/projects/${projectId}/assets`,
-      formData,
+      `/api/admin/projects/${input.projectId}/assets`,
+      input.formData,
       {
-        title,
+        title: input.title ?? '자산 업로드',
         processingMessage: '파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
+        headers: { 'Idempotency-Key': input.idempotencyKey },
       },
     );
   },

@@ -1,19 +1,50 @@
 import { promises as fsp } from 'node:fs';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { UploadPipelinePort } from '../application/upload-ports.js';
 import { createProjectAssetService } from '../modules/admin/project/project-asset.service.js';
-import { singleAssetUploadCoordinator } from '../modules/admin/project/project-asset-upload.adapter.js';
-import { UploadPipeline } from '../modules/assets/upload/index.js';
+import { createProjectAssetUploadCoordinator } from '../modules/admin/project/project-asset-upload.adapter.js';
+import { createNodeFileSystem } from '../infrastructure/production-ports.js';
 
 const mocks = {
 	createAsset: vi.fn(),
 	replaceOrCreateReplaceableAsset: vi.fn(),
 	findExhibitionById: vi.fn(),
+	wakeDeletionWorker: vi.fn(),
+	processFile: vi.fn(),
+	rollbackCommitted: vi.fn(),
+	logError: vi.fn(),
 };
 
 const MB = 1024 * 1024;
 const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+let id = 0;
+let trackedTempFiles: string[] = [];
+let cleanupSizes: number[] = [];
+
+function createFakePipeline(): UploadPipelinePort {
+	return {
+		trackTempFile(tmpPath) {
+			trackedTempFiles.push(tmpPath);
+		},
+		processFile: mocks.processFile,
+		rollbackCommitted: mocks.rollbackCommitted,
+		async cleanupTemp() {
+			for (const tmpPath of trackedTempFiles) {
+				const stat = await fsp.stat(tmpPath).catch(() => null);
+				if (stat) cleanupSizes.push(stat.size);
+				await fsp.unlink(tmpPath).catch(() => undefined);
+			}
+		},
+	};
+}
+
+const singleAssetUploadCoordinator = createProjectAssetUploadCoordinator({
+	fileSystem: createNodeFileSystem(),
+	ids: { next: () => `resource-guard-${++id}` },
+	createPipeline: createFakePipeline,
+});
 const projectAssetService = createProjectAssetService({
 	repository: {
 		createAsset: mocks.createAsset,
@@ -32,7 +63,8 @@ const projectAssetService = createProjectAssetService({
 	uploadCoordinator: singleAssetUploadCoordinator,
 	assetUrl: (key, kind) => `http://localhost:4000/api/assets/${kind === 'GAME' || kind === 'VIDEO' ? 'protected' : 'public'}/${key}`,
 	bucketForKind: () => 'test-bucket',
-	deleteOrQueue: vi.fn(),
+	wakeDeletionWorker: mocks.wakeDeletionWorker,
+	logger: { error: mocks.logError },
 });
 
 function chunksWithHeader(header: Buffer, totalBytes: number, chunkBytes: number): Buffer[] {
@@ -82,31 +114,11 @@ function firstTrackedTempFile(paths: string[]): string {
 }
 
 describe('project asset upload resource guards', () => {
-	let trackedTempFiles: string[];
-	let cleanupSizes: number[];
-	let trackSpy: ReturnType<typeof vi.spyOn>;
-	let cleanupSpy: ReturnType<typeof vi.spyOn>;
-	let processSpy: ReturnType<typeof vi.spyOn>;
-
 	beforeEach(() => {
 		vi.clearAllMocks();
 		trackedTempFiles = [];
 		cleanupSizes = [];
-
-		const originalTrack = UploadPipeline.prototype.trackTempFile;
-		const originalCleanup = UploadPipeline.prototype.cleanupTemp;
-		trackSpy = vi.spyOn(UploadPipeline.prototype, 'trackTempFile').mockImplementation(function (this: UploadPipeline, tmpPath: string) {
-			trackedTempFiles.push(tmpPath);
-			return originalTrack.call(this, tmpPath);
-		});
-		cleanupSpy = vi.spyOn(UploadPipeline.prototype, 'cleanupTemp').mockImplementation(async function (this: UploadPipeline) {
-			for (const tmpPath of trackedTempFiles) {
-				const stat = await fsp.stat(tmpPath).catch(() => null);
-				if (stat) cleanupSizes.push(stat.size);
-			}
-			return originalCleanup.call(this);
-		});
-		processSpy = vi.spyOn(UploadPipeline.prototype, 'processFile').mockResolvedValue({
+		mocks.processFile.mockResolvedValue({
 			storageKey: 'asset/image.png',
 			mimeType: 'image/png',
 			sizeBytes: 128,
@@ -122,10 +134,10 @@ describe('project asset upload resource guards', () => {
 		});
 	});
 
-	afterEach(() => {
-		trackSpy.mockRestore();
-		cleanupSpy.mockRestore();
-		processSpy.mockRestore();
+	afterEach(async () => {
+		await Promise.all(trackedTempFiles.map((tmpPath) => (
+			fsp.unlink(tmpPath).catch(() => undefined)
+		)));
 	});
 
 	it('requires the kind field before writing the single-asset file', async () => {
@@ -140,7 +152,7 @@ describe('project asset upload resource guards', () => {
 		});
 
 		expect(trackedTempFiles).toEqual([]);
-		expect(processSpy).not.toHaveBeenCalled();
+		expect(mocks.processFile).not.toHaveBeenCalled();
 	});
 
 	it('rejects an unsafe filename before creating a temp file', async () => {
@@ -156,7 +168,7 @@ describe('project asset upload resource guards', () => {
 		});
 
 		expect(trackedTempFiles).toEqual([]);
-		expect(processSpy).not.toHaveBeenCalled();
+		expect(mocks.processFile).not.toHaveBeenCalled();
 	});
 
 	it('rejects oversized IMAGE before temp storage grows toward the GAME limit', async () => {
@@ -171,7 +183,7 @@ describe('project asset upload resource guards', () => {
 			code: 'PAYLOAD_TOO_LARGE',
 		});
 
-		expect(processSpy).not.toHaveBeenCalled();
+		expect(mocks.processFile).not.toHaveBeenCalled();
 		expect(cleanupSizes[0]).toBeLessThanOrEqual(1 * MB);
 		await expect(fsp.access(firstTrackedTempFile(trackedTempFiles))).rejects.toThrow();
 	});
@@ -188,7 +200,7 @@ describe('project asset upload resource guards', () => {
 			code: 'PAYLOAD_TOO_LARGE',
 		});
 
-		expect(processSpy).not.toHaveBeenCalled();
+		expect(mocks.processFile).not.toHaveBeenCalled();
 		expect(cleanupSizes[0]).toBeLessThanOrEqual(2 * MB);
 		await expect(fsp.access(firstTrackedTempFile(trackedTempFiles))).rejects.toThrow();
 	});
@@ -201,7 +213,7 @@ describe('project asset upload resource guards', () => {
 		);
 
 		const tempFile = firstTrackedTempFile(trackedTempFiles);
-		expect(processSpy).toHaveBeenCalledWith(tempFile, 'IMAGE', 'image.png');
+		expect(mocks.processFile).toHaveBeenCalledWith(tempFile, 'IMAGE', 'image.png');
 		expect(mocks.createAsset).toHaveBeenCalledWith(expect.objectContaining({
 			projectId: 7,
 			kind: 'IMAGE',
@@ -212,5 +224,51 @@ describe('project asset upload resource guards', () => {
 			url: 'http://localhost:4000/api/assets/public/asset/image.png',
 		});
 		await expect(fsp.access(tempFile)).rejects.toThrow();
+	});
+
+	it('wakes durable deletion after a committed GAME replacement without rolling it back', async () => {
+		const rollback = vi.fn();
+		const cleanup = vi.fn();
+		const startSpy = vi.spyOn(singleAssetUploadCoordinator, 'start').mockResolvedValue({
+			savedFile: {
+				storageKey: 'asset/new-game.zip',
+				mimeType: 'application/zip',
+				sizeBytes: 128,
+				originalName: 'game.zip',
+				kind: 'GAME',
+			},
+			rollback,
+			cleanup,
+		});
+		mocks.replaceOrCreateReplaceableAsset.mockResolvedValue({
+			assetId: 321,
+			oldStorageKey: 'asset/old-game.zip',
+			oldPlaybackStorageKey: null,
+		});
+
+		await expect(projectAssetService.addAssetToProject(
+			7,
+			1,
+			assetRequest('GAME', [zipHeader], 'game.zip'),
+		)).resolves.toEqual({
+			assetId: 321,
+			url: 'http://localhost:4000/api/assets/protected/asset/new-game.zip',
+		});
+
+		expect(mocks.replaceOrCreateReplaceableAsset).toHaveBeenCalledWith(
+			7,
+			'GAME',
+			expect.objectContaining({ storageKey: 'asset/new-game.zip' }),
+			{
+				bucket: 'test-bucket',
+				reason: 'project-asset-replace-previous',
+				playbackReason: 'project-asset-replace-previous-playback',
+			},
+		);
+		expect(rollback).not.toHaveBeenCalled();
+		expect(cleanup).toHaveBeenCalledOnce();
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.logError).not.toHaveBeenCalled();
+		startSpy.mockRestore();
 	});
 });

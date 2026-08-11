@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createObjectDeletionCoordinator } from '../application/object-deletion.js';
+import {
+	createObjectDeletionCoordinator,
+	DurableObjectDeletionError,
+} from '../application/object-deletion.js';
 
 describe('object deletion coordinator', () => {
+	it('does not write an orphan row when object storage deletion succeeds', async () => {
+		const record = vi.fn().mockRejectedValue(new Error('queue must not be used'));
+		const coordinator = createObjectDeletionCoordinator({
+			storage: { delete: vi.fn().mockResolvedValue(undefined), listKeys: vi.fn() },
+			orphans: { record },
+			logger: { error: vi.fn() },
+		});
+
+		await expect(coordinator.deleteOrQueue('public', 'already-gone.png', 'cleanup'))
+			.resolves.toBeUndefined();
+		expect(record).not.toHaveBeenCalled();
+	});
+
 	it('persists a retryable orphan when object storage deletion fails', async () => {
 		const deleteObject = vi.fn().mockRejectedValue(new Error('storage unavailable'));
 		const record = vi.fn().mockResolvedValue(undefined);
@@ -29,6 +45,45 @@ describe('object deletion coordinator', () => {
 		);
 	});
 
+	it('rejects when neither storage deletion nor durable orphan recording succeeds', async () => {
+		const deleteError = new Error('storage unavailable');
+		const queueError = new Error('database unavailable');
+		const logError = vi.fn();
+		const coordinator = createObjectDeletionCoordinator({
+			storage: {
+				delete: vi.fn().mockRejectedValue(deleteError),
+				listKeys: vi.fn(),
+			},
+			orphans: { record: vi.fn().mockRejectedValue(queueError) },
+			logger: { error: logError },
+		});
+
+		const failure = await coordinator.deleteOrQueue(
+			'protected',
+			'games/untracked.zip',
+			'game-replaced',
+			{ projectId: 7 },
+		).catch((error: unknown) => error);
+
+		expect(failure).toBeInstanceOf(DurableObjectDeletionError);
+		expect(failure).toMatchObject({
+			bucket: 'protected',
+			storageKey: 'games/untracked.zip',
+			reason: 'game-replaced',
+			deleteError,
+			queueError,
+			cause: queueError,
+		});
+		expect(logError).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				err: queueError,
+				deleteError,
+				projectId: 7,
+			}),
+			'Object delete and durable orphan recording both failed',
+		);
+	});
+
 	it('deletes every key in a prefix and queues only failed keys', async () => {
 		const deleteObject = vi.fn(async (_bucket: string, key: string) => {
 			if (key.endsWith('2.js')) throw new Error('transient');
@@ -49,5 +104,58 @@ describe('object deletion coordinator', () => {
 		expect(deleteObject).toHaveBeenCalledTimes(3);
 		expect(record).toHaveBeenCalledOnce();
 		expect(record).toHaveBeenCalledWith('public', 'site/2.js', 'deployment-delete');
+	});
+
+	it('queues the prefix itself when enumeration fails', async () => {
+		const record = vi.fn().mockResolvedValue(undefined);
+		const coordinator = createObjectDeletionCoordinator({
+			storage: {
+				delete: vi.fn(),
+				listKeys: vi.fn().mockRejectedValue(new Error('list unavailable')),
+			},
+			orphans: { record },
+			logger: { error: vi.fn() },
+		});
+
+		await expect(coordinator.deletePrefixOrQueue('public', 'webgl/7/build/site/', 'rollback'))
+			.resolves.toBe(0);
+		expect(record).toHaveBeenCalledWith(
+			'public',
+			'webgl/7/build/site/',
+			'rollback',
+			'PREFIX',
+		);
+	});
+
+	it('does not expose a transactional-outbox shortcut that can run a global reaper', () => {
+		const coordinator = createObjectDeletionCoordinator({
+			storage: {
+				delete: vi.fn(),
+				listKeys: vi.fn(),
+			},
+			orphans: { record: vi.fn() },
+			logger: { error: vi.fn() },
+		});
+
+		expect(Object.keys(coordinator).sort()).toEqual([
+			'deleteOrQueue',
+			'deletePrefixOrQueue',
+		]);
+	});
+
+	it('rejects prefix compensation when neither enumeration nor durable prefix recording works', async () => {
+		const listError = new Error('storage unavailable');
+		const queueError = new Error('database unavailable');
+		const coordinator = createObjectDeletionCoordinator({
+			storage: {
+				delete: vi.fn(),
+				listKeys: vi.fn().mockRejectedValue(listError),
+			},
+			orphans: { record: vi.fn().mockRejectedValue(queueError) },
+			logger: { error: vi.fn() },
+		});
+
+		await expect(coordinator.deletePrefixOrQueue('public', 'webgl/7/site/', 'replace'))
+			.rejects.toBe(queueError);
 	});
 });

@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '../generated/prisma/client.js';
+import {
+	EXHIBITION_MUTATION_TRANSACTION_POLICY,
+	withExhibitionMutationTransaction,
+} from '../modules/admin/year/repository.js';
 import { createExhibitionService } from '../modules/admin/year/service.js';
 
 const mocks = {
@@ -11,7 +16,9 @@ const mocks = {
 	deleteExhibition: vi.fn(),
 	replaceExhibitionPoster: vi.fn(),
 	clearExhibitionPoster: vi.fn(),
-	safeDeleteObject: vi.fn(),
+	wakeDeletionWorker: vi.fn(),
+	logError: vi.fn(),
+	posterUploadStart: vi.fn(),
 };
 
 const exhibitionService = createExhibitionService({
@@ -37,11 +44,19 @@ const exhibitionService = createExhibitionService({
 		maxFiles: 1,
 	}),
 	uploadSlots: { acquire: vi.fn(), release: vi.fn() },
-	posterUpload: { start: vi.fn() },
-	deleteOrQueue: mocks.safeDeleteObject,
+	posterUpload: { start: mocks.posterUploadStart },
+	wakeDeletionWorker: mocks.wakeDeletionWorker,
+	logger: { error: mocks.logError },
 });
 
-const { createExhibition, deleteExhibition, deletePoster, listExhibitions, updateExhibition } = exhibitionService;
+const {
+	createExhibition,
+	deleteExhibition,
+	deletePoster,
+	listExhibitions,
+	replacePoster,
+	updateExhibition,
+} = exhibitionService;
 
 function exhibition(overrides: Record<string, unknown> = {}) {
 	return {
@@ -146,7 +161,7 @@ describe('admin exhibition service', () => {
 
 	it('throws 404 when updating or deleting a missing exhibition', async () => {
 		mocks.findExhibitionById.mockResolvedValue(null);
-		mocks.findExhibitionByIdWithCount.mockResolvedValue(null);
+		mocks.deleteExhibition.mockResolvedValue(null);
 
 		await expect(updateExhibition(404, { title: 'Missing' })).rejects.toMatchObject({
 			statusCode: 404,
@@ -156,24 +171,86 @@ describe('admin exhibition service', () => {
 		});
 	});
 
-	it('deletes the DB row and best-effort deletes an existing poster object', async () => {
-		mocks.findExhibitionByIdWithCount.mockResolvedValue(exhibition({
+	it('deletes the DB row with an outbox entry and wakes the deletion worker', async () => {
+		mocks.deleteExhibition.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
 		}));
-		mocks.deleteExhibition.mockResolvedValue({});
 
 		await deleteExhibition(1);
 
-		expect(mocks.deleteExhibition).toHaveBeenCalledWith(1);
-		expect(mocks.safeDeleteObject).toHaveBeenCalledWith(
-			'public-bucket',
-			'old-poster.webp',
-			'exhibition-delete-poster',
-			{ exhibitionId: 1 },
-		);
+		expect(mocks.deleteExhibition).toHaveBeenCalledWith(1, {
+			bucket: 'public-bucket',
+			reason: 'exhibition-delete-poster',
+		});
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
 	});
 
-	it('clears poster metadata and deletes the old poster object', async () => {
+	it('does not wait for an unrelated deletion backlog after the poster outbox commits', async () => {
+		mocks.deleteExhibition.mockResolvedValue(exhibition({
+			posterStorageKey: 'old-poster.webp',
+		}));
+
+		await expect(deleteExhibition(1)).resolves.toBeUndefined();
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.logError).not.toHaveBeenCalled();
+	});
+
+	it('does not roll back a new poster after its DB pointer and old-object outbox commit', async () => {
+		const rollback = vi.fn();
+		const cleanup = vi.fn();
+		mocks.findExhibitionById.mockResolvedValue(exhibition());
+		mocks.posterUploadStart.mockResolvedValue({
+			savedFile: {
+				storageKey: 'new-poster.webp',
+				mimeType: 'image/webp',
+				sizeBytes: 123,
+				originalName: 'poster.webp',
+				kind: 'POSTER',
+			},
+			rollback,
+			cleanup,
+		});
+		mocks.replaceExhibitionPoster.mockResolvedValue({
+			updated: exhibition({ posterStorageKey: 'new-poster.webp' }),
+			oldStorageKey: 'old-poster.webp',
+		});
+		const parts = (async function* () {})();
+
+		await expect(replacePoster(1, { actor: { id: 1, role: 'ADMIN' }, parts }))
+			.resolves.toMatchObject({ id: 1, posterUrl: expect.stringContaining('new-poster.webp') });
+		expect(rollback).not.toHaveBeenCalled();
+		expect(cleanup).toHaveBeenCalledOnce();
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.logError).not.toHaveBeenCalled();
+	});
+
+	it('rolls back exactly one uploaded object when the pointer transaction fails', async () => {
+		const rollback = vi.fn();
+		const cleanup = vi.fn();
+		mocks.findExhibitionById.mockResolvedValue(exhibition());
+		mocks.posterUploadStart.mockResolvedValue({
+			savedFile: {
+				storageKey: 'unpersisted.webp',
+				mimeType: 'image/webp',
+				sizeBytes: 123,
+				originalName: 'poster.webp',
+				kind: 'POSTER',
+			},
+			rollback,
+			cleanup,
+		});
+		mocks.replaceExhibitionPoster.mockRejectedValue(new Error('serialization exhausted'));
+
+		await expect(replacePoster(1, {
+			actor: { id: 1, role: 'ADMIN' },
+			parts: (async function* () {})(),
+		})).rejects.toThrow('serialization exhausted');
+		expect(mocks.posterUploadStart).toHaveBeenCalledOnce();
+		expect(rollback).toHaveBeenCalledOnce();
+		expect(cleanup).toHaveBeenCalledOnce();
+	});
+
+	it('clears poster metadata and wakes the queued old-poster deletion', async () => {
 		mocks.clearExhibitionPoster.mockResolvedValue({
 			updated: exhibition(),
 			oldStorageKey: 'old-poster.webp',
@@ -181,12 +258,7 @@ describe('admin exhibition service', () => {
 
 		await deletePoster(1);
 
-		expect(mocks.safeDeleteObject).toHaveBeenCalledWith(
-			'public-bucket',
-			'old-poster.webp',
-			'exhibition-poster-delete',
-			{ exhibitionId: 1 },
-		);
+		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
 	});
 
 	it('throws 404 when deleting a poster for a missing exhibition', async () => {
@@ -194,6 +266,29 @@ describe('admin exhibition service', () => {
 
 		await expect(deletePoster(404)).rejects.toMatchObject({
 			statusCode: 404,
+		});
+	});
+
+	it('retries only a bounded Serializable write conflict', async () => {
+		const transaction = vi.fn()
+			.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError('write conflict', {
+				code: 'P2034',
+				clientVersion: 'test',
+			}))
+			.mockImplementationOnce(async (operation: (tx: object) => Promise<string>) => operation({}));
+		const operation = vi.fn(async () => 'committed');
+		const retries = vi.fn();
+
+		await expect(withExhibitionMutationTransaction(
+			{ $transaction: transaction } as never,
+			operation as never,
+			{ ...EXHIBITION_MUTATION_TRANSACTION_POLICY, onRetry: retries },
+		)).resolves.toBe('committed');
+		expect(transaction).toHaveBeenCalledTimes(2);
+		expect(operation).toHaveBeenCalledOnce();
+		expect(retries).toHaveBeenCalledOnce();
+		expect(transaction.mock.calls[0]?.[1]).toEqual({
+			isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
 		});
 	});
 });

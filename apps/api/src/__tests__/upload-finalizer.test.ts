@@ -25,11 +25,10 @@ function createDependencies() {
 		readHeader: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])),
 		validateGameArchive: vi.fn().mockResolvedValue(undefined),
 		deployWebgl: vi.fn().mockResolvedValue(deployment),
-		cleanupWebglDeployment: vi.fn().mockResolvedValue(undefined),
-		cleanupWebglEntry: vi.fn().mockResolvedValue(undefined),
+		rollbackWebglPublicDeployment: vi.fn().mockResolvedValue(undefined),
 		finalizeGame: vi.fn().mockResolvedValue({ oldStorageKey: null, oldPlaybackStorageKey: null }),
 		finalizeWebgl: vi.fn().mockResolvedValue({ oldEntryKey: '' }),
-		deleteOrQueue: vi.fn().mockResolvedValue(undefined),
+		wakeDeletionWorker: vi.fn(),
 		webglUrl: vi.fn().mockReturnValue('https://api.example.com/api/public/webgl/7/'),
 		logError: vi.fn(),
 	};
@@ -50,24 +49,52 @@ describe('completed upload finalizer', () => {
 		expect(deps.deployWebgl).not.toHaveBeenCalled();
 	});
 
-	it('removes a newly deployed WebGL tree when the DB pointer swap fails', async () => {
+	it('rolls back only the new public tree when the DB pointer swap fails', async () => {
 		const deps = createDependencies();
 		deps.finalizeWebgl.mockRejectedValueOnce(new Error('database unavailable'));
 		const finalizer = createCompletedUploadFinalizer(deps);
 
 		await expect(finalizer.finalize(webglSession, { size: 8 }))
 			.rejects.toThrow('database unavailable');
-		expect(deps.cleanupWebglDeployment).toHaveBeenCalledWith(
+		expect(deps.rollbackWebglPublicDeployment).toHaveBeenCalledWith(
 			deployment,
-			'webgl-upload-finalization-failed',
+			'webgl-upload-finalization-failed-site',
+		);
+		expect(deps.wakeDeletionWorker).not.toHaveBeenCalled();
+	});
+
+	it('does not roll back a deployment after losing its completion claim', async () => {
+		const deps = createDependencies();
+		const controller = new AbortController();
+		const claimLost = new Error('completion claim lost');
+		let assertions = 0;
+		const assertClaimOwned = vi.fn(async () => {
+			assertions++;
+			if (assertions === 4) {
+				controller.abort(claimLost);
+				throw claimLost;
+			}
+		});
+		const finalizer = createCompletedUploadFinalizer(deps);
+
+		await expect(finalizer.finalize(webglSession, { size: 8 }, {
+			storageRequest: { signal: controller.signal },
+			assertClaimOwned,
+		})).rejects.toThrow('completion claim lost');
+
+		expect(deps.deployWebgl).toHaveBeenCalledOnce();
+		expect(deps.finalizeWebgl).not.toHaveBeenCalled();
+		expect(deps.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
+		expect(deps.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'upload-1', projectId: 7 }),
+			'WebGL completion claim was lost; retaining deployment for reference-aware reconciliation',
 		);
 	});
 
-	it('keeps completion successful when cleanup of the previous deployment is queued', async () => {
+	it('returns success immediately after pointer and deletion outbox commit, then wakes the worker', async () => {
 		const deps = createDependencies();
 		const oldEntryKey = 'webgl/7/old/site/index.html';
 		deps.finalizeWebgl.mockResolvedValueOnce({ oldEntryKey });
-		deps.cleanupWebglEntry.mockRejectedValueOnce(new Error('queue unavailable'));
 		const finalizer = createCompletedUploadFinalizer(deps);
 
 		await expect(finalizer.finalize(webglSession, { size: 8 })).resolves.toEqual({
@@ -76,7 +103,8 @@ describe('completed upload finalizer', () => {
 			sizeBytes: 8,
 			webglUrl: 'https://api.example.com/api/public/webgl/7/',
 		});
-		expect(deps.logError).toHaveBeenCalledOnce();
-		expect(deps.cleanupWebglDeployment).not.toHaveBeenCalled();
+		expect(deps.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(deps.logError).not.toHaveBeenCalled();
+		expect(deps.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
 	});
 });

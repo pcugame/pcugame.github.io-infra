@@ -1,43 +1,39 @@
 import { describe, expect, it, vi } from 'vitest';
-import { defaultTestEnv } from './helpers/app-mocks.js';
+import type { AppLogger } from '../application/ports.js';
+import { currentContext, requestContext } from '../lib/request-context.js';
 
-// Stub env so the logger module can boot its pino singleton.
-vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
-	loadEnv: () => ({ ...defaultTestEnv }),
-}));
+function fakeLogger(): AppLogger {
+	return {
+		child: vi.fn(),
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+	};
+}
 
 describe('request context logger', () => {
 	it('returns a child logger bound to reqId when inside a context', async () => {
-		const { requestContext } = await import('../lib/request-context.js');
-		const { logger, rootLogger } = await import('../lib/logger.js');
-
-		const root = rootLogger();
-		const child = root.child({ reqId: 'fixed-id' });
+		const child = fakeLogger();
 
 		requestContext.run({ reqId: 'fixed-id', log: child }, () => {
-			const inside = logger();
-			expect(inside).toBe(child);
-			expect(inside).not.toBe(root);
+			expect(currentContext()?.log).toBe(child);
+			expect(currentContext()?.reqId).toBe('fixed-id');
 		});
 	});
 
-	it('falls back to root logger outside a request context', async () => {
-		const { logger, rootLogger } = await import('../lib/logger.js');
-
-		// Called synchronously outside any `requestContext.run` — must be root.
-		expect(logger()).toBe(rootLogger());
+	it('has no ambient logger outside a request context', () => {
+		expect(currentContext()).toBeUndefined();
 	});
 
 	it('propagates the context across awaited calls', async () => {
-		const { requestContext } = await import('../lib/request-context.js');
-		const { logger, rootLogger } = await import('../lib/logger.js');
-
-		const child = rootLogger().child({ reqId: 'async-id' });
+		const child = fakeLogger();
 
 		const innerLogger = await requestContext.run({ reqId: 'async-id', log: child }, async () => {
 			await new Promise((r) => setTimeout(r, 1));
-			return logger();
+			return currentContext()?.log;
 		});
 
 		expect(innerLogger).toBe(child);

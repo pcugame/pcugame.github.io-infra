@@ -38,15 +38,29 @@ export const UpdateExhibitionBody = UpdateExhibitionBaseSchema;
 
 export const UpdateProjectBody = UpdateProjectBaseSchema;
 
+const CanonicalIntegerInput = z.union([
+	z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+	z.string().regex(/^-?(0|[1-9]\d*)$/),
+]).transform(Number).pipe(
+	z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+);
+
+const CanonicalPositiveIntegerInput = CanonicalIntegerInput.pipe(
+	z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+);
+
 export const AdminProjectListQuery = z.object({
-	page: z.coerce.number().int().positive().default(1),
-	limit: z.coerce.number().int().positive().transform((n) => Math.min(n, 100)).default(20),
+	page: CanonicalPositiveIntegerInput.default(1),
+	limit: CanonicalIntegerInput
+		.pipe(z.number().int().positive())
+		.transform((n) => Math.min(n, 100))
+		.default(20),
 	search: AdminProjectListQueryBaseSchema.shape.search
 		.unwrap()
 		.trim()
 		.optional()
 		.transform((value) => value || undefined),
-	year: z.coerce.number().int().optional(),
+	year: CanonicalIntegerInput.pipe(z.number().int().min(1000).max(9999)).optional(),
 	status: AdminProjectListQueryBaseSchema.shape.status,
 	sort: AdminProjectListQueryBaseSchema.shape.sort.default('createdAt'),
 	order: AdminProjectListQueryBaseSchema.shape.order.default('desc'),
@@ -57,7 +71,7 @@ export type AdminProjectListQueryT = z.infer<typeof AdminProjectListQuery>;
 // ── Project submit (all-in-one multipart payload) ────────────
 
 export const SubmitProjectPayload = SubmitProjectPayloadBaseSchema.extend({
-	exhibitionId: z.coerce.number().int().positive('Invalid exhibition ID'),
+	exhibitionId: CanonicalPositiveIntegerInput,
 	summary: SubmitProjectPayloadBaseSchema.shape.summary.default(''),
 	description: SubmitProjectPayloadBaseSchema.shape.description.default(''),
 });
@@ -79,14 +93,14 @@ export const UpdateMemberBody = UpdateMemberBaseSchema.extend({
 }));
 
 export const SwapMembersBody = SwapProjectMembersSchema.extend({
-	memberIdA: z.coerce.number().int().positive(),
-	memberIdB: z.coerce.number().int().positive(),
+	memberIdA: CanonicalPositiveIntegerInput,
+	memberIdB: CanonicalPositiveIntegerInput,
 });
 
 // ── Poster ───────────────────────────────────────────────────
 
 export const SetPosterBody = SetProjectPosterSchema.extend({
-	assetId: z.coerce.number().int().positive(),
+	assetId: CanonicalPositiveIntegerInput,
 });
 
 // ── Bulk operations ──────────────────────────────────────────
@@ -108,7 +122,7 @@ export const DevAuthLoginErrorBody = DevAuthLoginErrorRequestSchema;
 // ── Game upload session ──────────────────────────────────────
 
 export const GameUploadCreateSessionBody = GameUploadCreateSessionSchema.extend({
-	totalBytes: z.coerce.number().positive(),
+	totalBytes: CanonicalPositiveIntegerInput,
 });
 
 // ── Helper ───────────────────────────────────────────────────
@@ -129,7 +143,15 @@ export function parseBody<TSchema extends z.ZodType>(
 
 export function parseIntParam(value: string, name = 'ID'): number {
 	const n = Number(value);
-	if (!Number.isInteger(n) || n <= 0) {
+	if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(n) || n <= 0) {
+		throw new AppError(400, `Invalid ${name}`, 'VALIDATION_ERROR');
+	}
+	return n;
+}
+
+export function parseNonNegativeIntParam(value: string, name: string): number {
+	const n = Number(value);
+	if (!/^(0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(n)) {
 		throw new AppError(400, `Invalid ${name}`, 'VALIDATION_ERROR');
 	}
 	return n;

@@ -14,9 +14,7 @@ function schemaFromDatabaseUrl(url: string): string | undefined {
   }
 }
 
-function createPrismaAdapter(): PrismaPg {
-  const databaseUrl = process.env['DATABASE_URL'] ?? '';
-
+function createPrismaAdapter(databaseUrl: string): PrismaPg {
   return new PrismaPg(
     {
       connectionString: databaseUrl,
@@ -27,11 +25,15 @@ function createPrismaAdapter(): PrismaPg {
   );
 }
 
-export function createPrismaClient(
+/**
+ * Construct a Prisma client for an explicit database URL.
+ */
+export function createPrismaClientForDatabase(
+  databaseUrl: string,
   options?: PrismaClientOptions,
 ): PrismaClient {
   return new PrismaClient({
     ...options,
-    adapter: createPrismaAdapter(),
+    adapter: createPrismaAdapter(databaseUrl),
   });
 }

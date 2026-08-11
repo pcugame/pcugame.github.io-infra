@@ -20,7 +20,10 @@ import {
 	cancelSession,
 	getSessionStatus,
 	listSessions,
+	sweepExpiredPendingSessions,
+	sweepExpiredPartClaims,
 	sweepStaleCompletingSessions,
+	sweepUntrackedMultipartUploads,
 } from './session-maintenance.service.js';
 import type { GameUploadServiceDependencies } from './ports.js';
 
@@ -45,6 +48,15 @@ export function createGameUploadService(deps: GameUploadServiceDependencies) {
 		listSessions: (...args: Parameters<typeof listSessions> extends [unknown, ...infer Rest] ? Rest : never) => (
 			listSessions(deps, ...args)
 		),
-		sweepStaleCompletingSessions: () => sweepStaleCompletingSessions(deps),
+		sweepStaleCompletingSessions: (signal?: AbortSignal) => (
+			sweepStaleCompletingSessions(deps, signal)
+		),
+		sweepExpiredPendingSessions: (signal?: AbortSignal) => (
+			sweepExpiredPendingSessions(deps, signal)
+		),
+		sweepExpiredPartClaims: (signal?: AbortSignal) => sweepExpiredPartClaims(deps, signal),
+		sweepUntrackedMultipartUploads: (signal?: AbortSignal) => (
+			sweepUntrackedMultipartUploads(deps, signal)
+		),
 	};
 }

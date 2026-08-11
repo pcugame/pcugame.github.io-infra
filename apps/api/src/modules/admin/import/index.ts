@@ -1,1 +1,1 @@
-export { importController } from './controller.js';
+export { createImportController } from './controller.js';

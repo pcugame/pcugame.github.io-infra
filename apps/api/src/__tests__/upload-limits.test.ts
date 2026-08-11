@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
@@ -6,10 +6,8 @@ import {
 	fieldnameToKind,
 	createByteLimiter,
 	createKindAwareByteLimiter,
-	acquireUploadSlot,
-	releaseUploadSlot,
-	activeUploadCount,
-	_resetActiveUploads,
+	createUploadLimiter,
+	type UploadConcurrencyLimiter,
 	type UploadLimits,
 } from '../shared/upload-limits.js';
 import { AppError } from '../shared/errors.js';
@@ -179,33 +177,39 @@ describe('createKindAwareByteLimiter', () => {
 // ── Concurrent upload semaphore (using explicit max) ────────
 
 describe('upload concurrency', () => {
+	let limiter: UploadConcurrencyLimiter;
+
 	beforeEach(() => {
-		_resetActiveUploads();
+		limiter = createUploadLimiter(() => 3);
+	});
+
+	afterEach(() => {
+		limiter.close();
 	});
 
 	it('tracks active upload count', () => {
-		expect(activeUploadCount()).toBe(0);
-		acquireUploadSlot(5);
-		expect(activeUploadCount()).toBe(1);
-		acquireUploadSlot(5);
-		expect(activeUploadCount()).toBe(2);
-		releaseUploadSlot();
-		expect(activeUploadCount()).toBe(1);
-		releaseUploadSlot();
-		expect(activeUploadCount()).toBe(0);
+		expect(limiter.activeCount()).toBe(0);
+		limiter.acquire(5);
+		expect(limiter.activeCount()).toBe(1);
+		limiter.acquire(5);
+		expect(limiter.activeCount()).toBe(2);
+		limiter.release();
+		expect(limiter.activeCount()).toBe(1);
+		limiter.release();
+		expect(limiter.activeCount()).toBe(0);
 	});
 
 	it('does not go below zero on extra release', () => {
-		releaseUploadSlot();
-		expect(activeUploadCount()).toBe(0);
+		limiter.release();
+		expect(limiter.activeCount()).toBe(0);
 	});
 
 	it('throws 429 when max concurrent uploads reached', () => {
-		for (let i = 0; i < 3; i++) acquireUploadSlot(3);
-		expect(activeUploadCount()).toBe(3);
+		for (let i = 0; i < 3; i++) limiter.acquire();
+		expect(limiter.activeCount()).toBe(3);
 
 		try {
-			acquireUploadSlot(3);
+			limiter.acquire();
 			expect.fail('should have thrown');
 		} catch (err) {
 			expect(err).toBeInstanceOf(AppError);
@@ -216,8 +220,8 @@ describe('upload concurrency', () => {
 	});
 
 	it('allows new slot after release', () => {
-		for (let i = 0; i < 3; i++) acquireUploadSlot(3);
-		releaseUploadSlot();
-		expect(() => acquireUploadSlot(3)).not.toThrow();
+		for (let i = 0; i < 3; i++) limiter.acquire();
+		limiter.release();
+		expect(() => limiter.acquire()).not.toThrow();
 	});
 });

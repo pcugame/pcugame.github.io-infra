@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type {
 	GameUploadChunkResponse,
 	GameUploadCompleteResponse,
@@ -7,13 +7,33 @@ import type {
 	GameUploadStatus,
 } from '@pcu/contracts';
 import { sendOk, sendCreated } from '../../../shared/http.js';
-import { GameUploadCreateSessionBody, parseBody, parseIntParam } from '../../../shared/validation.js';
+import {
+	GameUploadCreateSessionBody,
+	parseBody,
+	parseIntParam,
+	parseNonNegativeIntParam,
+} from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
-import { loadProjectWithAccess } from '../project-access.js';
-import { gameUploadService } from './runtime.js';
+import type { createGameUploadService } from './service.js';
+
+type GameUploadService = ReturnType<typeof createGameUploadService>;
+
+export interface GameUploadControllerDependencies {
+	service: GameUploadService;
+	access: {
+		loadProjectWithAccess(
+			actor: NonNullable<FastifyRequest['currentUser']>,
+			projectId: number,
+		): Promise<{ exhibitionId: number }>;
+	};
+	chunkUploadBodyLimitBytes: number;
+}
 
 /** Register chunked game-upload routes */
-export async function gameUploadController(app: FastifyInstance): Promise<void> {
+export function createGameUploadController(
+	deps: GameUploadControllerDependencies,
+): FastifyPluginAsync {
+	return async function gameUploadController(app): Promise<void> {
 	// Register octet-stream parser for this plugin scope only
 	app.addContentTypeParser(
 		'application/octet-stream',
@@ -28,10 +48,13 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
-			const project = await loadProjectWithAccess(request.currentUser!, projectId);
+			const project = await deps.access.loadProjectWithAccess(
+				request.currentUser!,
+				projectId,
+			);
 			const user = request.currentUser!;
 			const body = parseBody(GameUploadCreateSessionBody, request.body);
-			const result = await gameUploadService.createSession(
+			const result = await deps.service.createSession(
 				projectId,
 				project.exhibitionId,
 				{ id: user.id, role: user.role },
@@ -46,13 +69,14 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 		'/game-upload-sessions/:sessionId/chunks/:index',
 		{
 			preHandler: requireLogin,
-			bodyLimit: gameUploadService.chunkUploadBodyLimitBytes(),
+			bodyLimit: deps.chunkUploadBodyLimitBytes,
+			handlerTimeout: 45 * 60 * 1000,
 		},
 		async (request, reply) => {
 			const user = request.currentUser!;
-			const result = await gameUploadService.uploadChunk(
+			const result = await deps.service.uploadChunk(
 				request.params.sessionId,
-				parseInt(request.params.index, 10),
+				parseNonNegativeIntParam(request.params.index, 'Chunk index'),
 				request.body as NodeJS.ReadableStream,
 				{ id: user.id, role: user.role },
 			);
@@ -66,7 +90,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const user = request.currentUser!;
-			const result = await gameUploadService.getSessionStatus(
+			const result = await deps.service.getSessionStatus(
 				request.params.sessionId,
 				{ id: user.id, role: user.role },
 			);
@@ -77,10 +101,10 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 	/** POST /game-upload-sessions/:sessionId/complete — finalize chunked upload */
 	app.post<{ Params: { sessionId: string } }>(
 		'/game-upload-sessions/:sessionId/complete',
-		{ preHandler: requireLogin },
+		{ preHandler: requireLogin, handlerTimeout: 45 * 60 * 1000 },
 		async (request, reply) => {
 			const user = request.currentUser!;
-			const result = await gameUploadService.completeSession(
+			const result = await deps.service.completeSession(
 				request.params.sessionId,
 				{ id: user.id, role: user.role },
 			);
@@ -94,7 +118,7 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 		{ preHandler: requireLogin },
 		async (request, reply) => {
 			const user = request.currentUser!;
-			await gameUploadService.cancelSession(
+			await deps.service.cancelSession(
 				request.params.sessionId,
 				{ id: user.id, role: user.role },
 			);
@@ -109,11 +133,12 @@ export async function gameUploadController(app: FastifyInstance): Promise<void> 
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
 			const user = request.currentUser!;
-			const items = await gameUploadService.listSessions(
+			const items = await deps.service.listSessions(
 				projectId,
 				{ id: user.id, role: user.role },
 			);
 			sendOk<GameUploadSessionListResponse>(reply, { items });
 		},
 	);
+	};
 }

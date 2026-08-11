@@ -9,7 +9,7 @@ export class AppError extends Error {
   constructor(
     public readonly statusCode: number,
     message: string,
-    public readonly code?: string,
+    public readonly code?: ApiErrorCode,
     public readonly details?: unknown,
   ) {
     super(message);
@@ -17,15 +17,22 @@ export class AppError extends Error {
   }
 }
 
-export function badRequest(message: string, code?: string): AppError {
-  return new AppError(400, message, code);
+export function badRequest(
+  message: string,
+  code?: ApiErrorCode,
+  details?: unknown,
+): AppError {
+  return new AppError(400, message, code, details);
 }
 
 export function unauthorized(message = 'Unauthorized'): AppError {
   return new AppError(401, message, API_ERROR_CODES.UNAUTHORIZED);
 }
 
-export function forbidden(message = 'Forbidden', code = 'FORBIDDEN'): AppError {
+export function forbidden(
+  message = 'Forbidden',
+  code: ApiErrorCode = 'FORBIDDEN',
+): AppError {
   return new AppError(403, message, code);
 }
 
@@ -35,6 +42,14 @@ export function notFound(message = 'Not found'): AppError {
 
 export function conflict(message: string): AppError {
   return new AppError(409, message, 'CONFLICT');
+}
+
+export function idempotencyConflict(message = 'Idempotency key was already used for another request'): AppError {
+  return new AppError(409, message, 'IDEMPOTENCY_CONFLICT');
+}
+
+export function operationInProgress(message = 'An operation with this idempotency key is still in progress'): AppError {
+  return new AppError(409, message, 'OPERATION_IN_PROGRESS');
 }
 
 export function payloadTooLarge(message = 'Payload too large'): AppError {

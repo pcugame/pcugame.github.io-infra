@@ -18,6 +18,7 @@ import {
   ProjectStatusEnum,
   AssetKindEnum,
   parseIntParam,
+  parseNonNegativeIntParam,
 } from '../shared/validation.js';
 import type {
   AddMemberRequest,
@@ -289,6 +290,13 @@ describe('AdminProjectListQuery', () => {
     const result = AdminProjectListQuery.parse({ search: '   ' });
     expect(result.search).toBeUndefined();
   });
+
+  it.each(['2026x', '+2026', '2026.0', '2e3', '999999999999999999999'])(
+    'rejects non-canonical or unsafe year %s',
+    (year) => {
+      expect(AdminProjectListQuery.safeParse({ year }).success).toBe(false);
+    },
+  );
 });
 
 // ── Submit project payload ───────────────────────────────────
@@ -308,10 +316,17 @@ describe('SubmitProjectPayload', () => {
     expect(result.members).toHaveLength(1);
   });
 
-  it('coerces string exhibitionId to number', () => {
+  it('coerces a canonical string exhibitionId to number', () => {
     const result = SubmitProjectPayload.parse({ ...validPayload, exhibitionId: '42' });
     expect(result.exhibitionId).toBe(42);
   });
+
+  it.each(['+1', '1.0', '1e2', ' 1 ', '0x10', '999999999999999999999'])(
+    'rejects non-canonical or unsafe exhibitionId %s',
+    (exhibitionId) => {
+      expect(SubmitProjectPayload.safeParse({ ...validPayload, exhibitionId }).success).toBe(false);
+    },
+  );
 
   it('rejects missing title', () => {
     expect(() =>
@@ -395,12 +410,19 @@ describe('UpdateMemberBody', () => {
 });
 
 describe('SwapMembersBody', () => {
-  it('coerces member ids', () => {
+  it('coerces canonical member ids', () => {
     expect(SwapMembersBody.parse({ memberIdA: '1', memberIdB: '2' })).toEqual({
       memberIdA: 1,
       memberIdB: 2,
     });
   });
+
+  it.each(['+1', '1.0', '1e2', ' 1 ', '0x10', '999999999999999999999'])(
+    'rejects non-canonical or unsafe member id %s',
+    (memberIdA) => {
+      expect(SwapMembersBody.safeParse({ memberIdA, memberIdB: '2' }).success).toBe(false);
+    },
+  );
 });
 
 // ── Poster / Bulk / Auth / Upload schemas ────────────────────
@@ -410,9 +432,16 @@ describe('SetPosterBody', () => {
     expect(SetPosterBody.parse({ assetId: 42 }).assetId).toBe(42);
   });
 
-  it('coerces string to number', () => {
+  it('coerces a canonical string to number', () => {
     expect(SetPosterBody.parse({ assetId: '7' }).assetId).toBe(7);
   });
+
+  it.each(['+1', '1.0', '1e2', ' 1 ', '0x10', '999999999999999999999'])(
+    'rejects non-canonical or unsafe assetId %s',
+    (assetId) => {
+      expect(SetPosterBody.safeParse({ assetId }).success).toBe(false);
+    },
+  );
 
   it('rejects non-positive number', () => {
     expect(() => SetPosterBody.parse({ assetId: 0 })).toThrow();
@@ -474,7 +503,7 @@ describe('DevAuthLoginErrorBody', () => {
 });
 
 describe('GameUploadCreateSessionBody', () => {
-  it('coerces totalBytes for API input', () => {
+  it('coerces canonical totalBytes for API input', () => {
     expect(GameUploadCreateSessionBody.parse({
       originalName: 'game.zip',
       totalBytes: '1024',
@@ -483,6 +512,16 @@ describe('GameUploadCreateSessionBody', () => {
       totalBytes: 1024,
     });
   });
+
+  it.each([1.5, '+1', '1.0', '1e2', ' 1 ', '0x10', '999999999999999999999'])(
+    'rejects non-canonical, fractional, or unsafe totalBytes %s',
+    (totalBytes) => {
+      expect(GameUploadCreateSessionBody.safeParse({
+        originalName: 'game.zip',
+        totalBytes,
+      }).success).toBe(false);
+    },
+  );
 });
 
 // ── parseIntParam ─────────────────────────────────────────────
@@ -507,4 +546,25 @@ describe('parseIntParam', () => {
   it('throws on float', () => {
     expect(() => parseIntParam('1.5')).toThrow();
   });
+
+  it.each(['1x', '+1', '1e2', '999999999999999999999'])(
+    'throws on non-canonical or unsafe integer %s',
+    (value) => {
+      expect(() => parseIntParam(value)).toThrow();
+    },
+  );
+});
+
+describe('parseNonNegativeIntParam', () => {
+  it('accepts canonical zero-based chunk indexes', () => {
+    expect(parseNonNegativeIntParam('0', 'Chunk index')).toBe(0);
+    expect(parseNonNegativeIntParam('42', 'Chunk index')).toBe(42);
+  });
+
+  it.each(['', '-1', '+1', '1x', '1.5', '1e2', '999999999999999999999'])(
+    'rejects malformed chunk index %s',
+    (value) => {
+      expect(() => parseNonNegativeIntParam(value, 'Chunk index')).toThrow();
+    },
+  );
 });

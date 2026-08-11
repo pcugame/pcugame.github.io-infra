@@ -80,6 +80,24 @@ function registerGlobalErrorHandler(app: FastifyInstance, appLogger: BackendCont
 			return;
 		}
 
+		// Content parsers report invalid/empty JSON without populating
+		// `error.validation`; multipart labels an invalid JSON field as 406.
+		// Normalize both to the public validation envelope instead of a 500.
+		if (
+			error.statusCode === 400
+			|| error.code === 'FST_INVALID_JSON_FIELD_ERROR'
+		) {
+			const body: ApiError = {
+				ok: false,
+				error: {
+					code: 'VALIDATION_ERROR',
+					message: 'Malformed request',
+				},
+			};
+			reply.status(400).send(body);
+			return;
+		}
+
 		// Multipart file size limit
 		if (error.statusCode === 413 || error.code === 'FST_REQ_FILE_TOO_LARGE') {
 			const body: ApiError = {
@@ -87,6 +105,26 @@ function registerGlobalErrorHandler(app: FastifyInstance, appLogger: BackendCont
 				error: { code: 'PAYLOAD_TOO_LARGE', message: 'File too large' },
 			};
 			reply.status(413).send(body);
+			return;
+		}
+
+		// Normalize Fastify's generic parser error and @fastify/multipart's
+		// "request is not multipart" error to the API's documented 415 envelope.
+		// The multipart plugin reports the latter as 406 even though the problem
+		// is the request Content-Type, not response content negotiation.
+		if (
+			error.statusCode === 415
+			|| error.code === 'FST_ERR_CTP_INVALID_MEDIA_TYPE'
+			|| error.code === 'FST_INVALID_MULTIPART_CONTENT_TYPE'
+		) {
+			const body: ApiError = {
+				ok: false,
+				error: {
+					code: 'UNSUPPORTED_MEDIA_TYPE',
+					message: 'Unsupported media type',
+				},
+			};
+			reply.status(415).send(body);
 			return;
 		}
 
@@ -123,17 +161,42 @@ export async function buildApp(options: BuildAppOptions = {}) {
 	// Keep production wiring out of tests that supply a fake context. Besides
 	// reducing import-time side effects, this makes the composition seam real:
 	// no Prisma/S3/OAuth adapter is loaded unless the production default is used.
-	const context = options.context ?? (await import('./backend-context.js'))
-		.createProductionBackendContext();
+	const context = options.context ?? await (async () => {
+		const [{ loadEnv }, { createProductionBackendContext }] = await Promise.all([
+			import('./config/env.js'),
+			import('./backend-context.js'),
+		]);
+		return createProductionBackendContext(loadEnv());
+	})();
+	let partialApp: FastifyInstance | undefined;
+	try {
+		return await buildAppWithContext(context, (app) => { partialApp = app; });
+	} catch (error) {
+		await partialApp?.close().catch(() => undefined);
+		await context.close().catch(() => undefined);
+		throw error;
+	}
+}
+
+async function buildAppWithContext(
+	context: BackendContext,
+	onCreated: (app: FastifyInstance) => void,
+) {
 	const cfg = context.config;
 	const app = Fastify({
 		logger: false,
 		bodyLimit: 2 * 1024 * 1024, // 2 MB for JSON bodies
+		requestTimeout: 45 * 60 * 1000,
+		handlerTimeout: 30 * 1000,
+		connectionTimeout: 5 * 60 * 1000,
+		keepAliveTimeout: 5 * 1000,
+		forceCloseConnections: 'idle',
 		trustProxy: parseTrustProxy(cfg.TRUST_PROXY),
 		// Fixed-width UUIDs beat the default monotonically-increasing string for
 		// log correlation across multiple instances behind a load balancer.
 		genReqId: () => context.ids.next(),
 	});
+	onCreated(app);
 
 	// Route schemas use the shared Zod contracts. Compilers are installed once at
 	// the HTTP composition boundary instead of being hidden in feature modules.
@@ -143,22 +206,32 @@ export async function buildApp(options: BuildAppOptions = {}) {
 
 	// In-flight counter so shutdown can wait for active requests to finish.
 	// Runs before routing so counter stays accurate even if a plugin hook rejects.
-	app.addHook('onRequest', async () => {
-		context.lifecycle.requestStarted();
-	});
-	app.addHook('onResponse', async () => {
+	const activeRequests = new WeakSet<object>();
+	const finishRequest = (request: object) => {
+		if (!activeRequests.delete(request)) return;
 		context.lifecycle.requestFinished();
+	};
+	app.addHook('onRequest', async (request, reply) => {
+		activeRequests.add(request);
+		context.lifecycle.requestStarted();
+		const finish = () => finishRequest(request);
+		reply.raw.once('finish', finish);
+		reply.raw.once('close', finish);
+	});
+	app.addHook('onResponse', async (request) => {
+		finishRequest(request);
+	});
+	app.addHook('onRequestAbort', async (request) => {
+		finishRequest(request);
+	});
+	app.addHook('onTimeout', async (request) => {
+		finishRequest(request);
+	});
+	app.addHook('onError', async (request) => {
+		finishRequest(request);
 	});
 	app.addHook('onClose', async () => {
-		let firstError: unknown;
-		for (const resource of [...context.shutdownResources].reverse()) {
-			try {
-				await resource.close();
-			} catch (error) {
-				firstError ??= error;
-			}
-		}
-		if (firstError !== undefined) throw firstError;
+		await context.close();
 	});
 
 	// Seed the AsyncLocalStorage request context. `enterWith` mutates the current

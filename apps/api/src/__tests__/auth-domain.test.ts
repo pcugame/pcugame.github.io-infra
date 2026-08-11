@@ -20,7 +20,7 @@ describe('auth Google hosted domain handling', () => {
 				upsertUserByGoogleSub: mocks.upsertUserByGoogleSub,
 				upsertDevUser: vi.fn(),
 				createSession: mocks.createSession,
-				deleteSession: mocks.deleteSession,
+				delete: mocks.deleteSession,
 			},
 			googleTokens: {
 				verify: async (credential, audiences) => {
@@ -29,7 +29,7 @@ describe('auth Google hosted domain handling', () => {
 				},
 			},
 			clock: { now: () => new Date('2026-01-01T00:00:00.000Z') },
-			generateSessionId: () => 'session-id',
+			ids: { next: () => 'session-id' },
 			sessionAbsoluteMs: mocks.testEnv.SESSION_ABSOLUTE_MS,
 			googleClientIds: mocks.testEnv.GOOGLE_CLIENT_IDS,
 			allowedGoogleHostedDomain: mocks.testEnv.ALLOWED_GOOGLE_HD,

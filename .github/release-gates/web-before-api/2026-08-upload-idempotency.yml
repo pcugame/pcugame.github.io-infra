@@ -1,0 +1,15 @@
+release: upload-idempotency
+policy: web-before-api
+immutable: true
+reason: >-
+  The new API requires Idempotency-Key for project submission and asset upload
+  mutations. The old Web client does not send that header, while the new Web
+  client is backward-compatible with the old API because unknown request headers
+  are ignored.
+rollout:
+  - Deploy and verify the Web build for this release commit.
+  - Apply the API migration and deploy the API build for the same commit.
+notes: >-
+  The deployment workflow gates only the push that adds or changes this declaration.
+  Future component-only changes remain independent. Add a new immutable declaration
+  for a future compatibility-breaking release instead of editing this one.

@@ -1,6 +1,6 @@
 import type { AssetKind, AssetPlaybackStatus } from '@pcu/contracts';
 import type { MultipartPart } from './http-input.js';
-import type { UploadLimits } from '../shared/upload-limits.js';
+import type { UploadLimits } from '../shared/upload-policy.js';
 
 export interface SavedUpload {
 	storageKey: string;
@@ -13,6 +13,14 @@ export interface SavedUpload {
 	playbackError?: string;
 	originalName: string;
 	kind: AssetKind;
+	uploadIntentIds?: string[];
+}
+
+export interface UploadIntentOwner {
+	operationId?: string;
+	actorId?: number;
+	projectId?: number;
+	exhibitionId?: number;
 }
 
 export interface CollectedUploadFile {
@@ -21,7 +29,12 @@ export interface CollectedUploadFile {
 	filename: string;
 }
 
+export interface MultipartRequestHasher {
+	hash(payload: unknown, files: readonly CollectedUploadFile[]): Promise<string>;
+}
+
 export interface UploadPipelinePort {
+	setOwner?(owner: UploadIntentOwner): void;
 	trackTempFile(path: string): void;
 	processFile(path: string, kind: AssetKind, originalName: string): Promise<SavedUpload>;
 	rollbackCommitted(): Promise<void>;
@@ -38,6 +51,7 @@ export interface MultipartCollectorPort {
 
 export interface ProcessedUpload {
 	savedFile: SavedUpload;
+	requestHash?: string;
 	rollback(): Promise<void>;
 	cleanup(): Promise<void>;
 }
@@ -46,6 +60,8 @@ export interface SingleAssetUploadCoordinator {
 	start(
 		parts: AsyncIterable<MultipartPart>,
 		limits: UploadLimits,
+		owner?: UploadIntentOwner,
+		beforeUpload?: (requestHash: string) => Promise<UploadIntentOwner>,
 	): Promise<ProcessedUpload>;
 }
 
@@ -53,5 +69,6 @@ export interface PosterUploadCoordinator {
 	start(
 		parts: AsyncIterable<MultipartPart>,
 		limits: UploadLimits,
+		owner?: UploadIntentOwner,
 	): Promise<ProcessedUpload>;
 }

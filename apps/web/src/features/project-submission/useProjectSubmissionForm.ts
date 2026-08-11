@@ -8,10 +8,15 @@ import {
 	SubmitProjectPayloadSchema,
 	type SubmitProjectPayloadInput,
 } from '../../contracts/schemas';
-import { adminExhibitionApi } from '../../lib/api';
+import { adminExhibitionApi, isApiError } from '../../lib/api';
 import { getProjectSubmitApi, type ProjectSubmissionMode } from '../../lib/api/project-submit';
 import { queryKeys } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
+import {
+	createIdempotencyFingerprint,
+	fingerprintFile,
+	useStableIdempotencyOperation,
+} from '../../lib/idempotency-operation';
 import { useMe } from '../auth';
 import type { SubmissionFilesState } from './useSubmissionFiles';
 
@@ -97,10 +102,21 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 	const selectedYearItem = years.find((year) => year.id === Number(selectedExhibitionId));
 	const isUploadLocked = selectedYearItem != null && !selectedYearItem.isUploadEnabled && !isPrivileged;
 	const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
+	const idempotencyOperation = useStableIdempotencyOperation();
 
 	const submitMutation = useMutation({
-		mutationFn: (formData: FormData) => getProjectSubmitApi(mode).submit(formData),
-		onSuccess: (res) => {
+		mutationFn: ({ formData, idempotencyKey }: {
+			formData: FormData;
+			idempotencyKey: string;
+			fingerprint: string;
+		}) => getProjectSubmitApi(mode).submit({ formData, idempotencyKey }),
+		retry: (failureCount, error) => failureCount < 1
+			&& isApiError(error)
+			&& error.status === 0
+			&& error.statusText === 'Network Error',
+		retryDelay: 0,
+		onSuccess: (res, operation) => {
+			idempotencyOperation.complete(operation.fingerprint);
 			qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 			qc.invalidateQueries({ queryKey: queryKeys.publicYears });
 			qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
@@ -123,7 +139,22 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			images: files.imageFiles.length > 0 ? files.imageFiles : undefined,
 			videoFiles: files.videoFiles.length > 0 ? files.videoFiles : undefined,
 		});
-		submitMutation.mutate(fd);
+		const fingerprint = createIdempotencyFingerprint({
+			mode,
+			payload: data,
+			files: {
+				poster: files.posterFile ? fingerprintFile(files.posterFile) : null,
+				images: files.imageFiles.map(fingerprintFile),
+				videos: files.videoFiles.map(fingerprintFile),
+				game: files.gameFile ? fingerprintFile(files.gameFile) : null,
+				webgl: files.webglFile ? fingerprintFile(files.webglFile) : null,
+			},
+		});
+		submitMutation.mutate({
+			formData: fd,
+			fingerprint,
+			idempotencyKey: idempotencyOperation.keyFor(fingerprint),
+		});
 	};
 
 	const goToEdit = useCallback(() => {

@@ -1,1 +1,1 @@
-export { authController } from './controller.js';
+export { createAuthController, type AuthControllerDeps } from './controller.js';

@@ -12,16 +12,19 @@ export interface ExhibitionServiceDependencies {
 	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits;
 	uploadSlots: { acquire(): void; release(): void };
 	posterUpload: PosterUploadCoordinator;
-	deleteOrQueue(
-		bucket: string,
-		key: string,
-		reason: string,
-		context: Record<string, unknown>,
-	): Promise<void>;
+	wakeDeletionWorker(): void;
+	logger?: {
+		error(context: Record<string, unknown>, message: string): void;
+	};
+	recordPostCommitCleanupFailure?: () => void;
 }
 
 function exhibitionPosterUrl(deps: ExhibitionServiceDependencies, storageKey: string): string {
 	return `${deps.apiPublicUrl}/api/public/exhibition-posters/${storageKey}`;
+}
+
+function cleanupCommittedPoster(deps: ExhibitionServiceDependencies): void {
+	deps.wakeDeletionWorker();
 }
 
 function serializeExhibition(
@@ -58,18 +61,14 @@ export async function createExhibition(deps: ExhibitionServiceDependencies, data
 
 /** Delete an exhibition by ID. Throws 404 if not found. */
 export async function deleteExhibition(deps: ExhibitionServiceDependencies, id: number) {
-	const exhibition = await deps.repository.findExhibitionByIdWithCount(id);
-	if (!exhibition) throw notFound('Exhibition not found');
+	const deleted = await deps.repository.deleteExhibition(id, {
+		bucket: deps.posterBucket,
+		reason: 'exhibition-delete-poster',
+	});
+	if (!deleted) throw notFound('Exhibition not found');
 
-	await deps.repository.deleteExhibition(id);
-
-	if (exhibition.posterStorageKey) {
-		await deps.deleteOrQueue(
-			deps.posterBucket,
-			exhibition.posterStorageKey,
-			'exhibition-delete-poster',
-			{ exhibitionId: id },
-		);
+	if (deleted.posterStorageKey) {
+		cleanupCommittedPoster(deps);
 	}
 }
 
@@ -103,49 +102,62 @@ export async function replacePoster(
 
 	const limits = deps.uploadLimits(input.actor.role);
 	let upload: ProcessedUpload | null = null;
+	let uploadPersisted = false;
 
 	deps.uploadSlots.acquire();
 	try {
-		upload = await deps.posterUpload.start(input.parts, limits);
+		upload = await deps.posterUpload.start(input.parts, limits, {
+			actorId: input.actor.id,
+			exhibitionId: id,
+		});
 		const savedFile = upload.savedFile;
 		const result = await deps.repository.replaceExhibitionPoster(id, {
 			storageKey: savedFile.storageKey,
 			originalName: savedFile.originalName,
 			mimeType: savedFile.mimeType,
 			sizeBytes: BigInt(savedFile.sizeBytes),
+			uploadIntentIds: savedFile.uploadIntentIds,
+		}, {
+			bucket: deps.posterBucket,
+			reason: 'exhibition-poster-replace-previous',
 		});
 		if (!result) throw notFound('Exhibition not found');
+		uploadPersisted = true;
 
 		if (result.oldStorageKey && result.oldStorageKey !== savedFile.storageKey) {
-			await deps.deleteOrQueue(
-				deps.posterBucket,
-				result.oldStorageKey,
-				'exhibition-poster-replace-previous',
-				{ exhibitionId: id },
-			);
+			cleanupCommittedPoster(deps);
 		}
 
 		return serializeExhibition(deps, result.updated);
 	} catch (err) {
-		if (upload) await upload.rollback();
+		if (upload && !uploadPersisted) await upload.rollback();
 		throw err;
 	} finally {
 		deps.uploadSlots.release();
-		if (upload) await upload.cleanup();
+		if (upload) {
+			try {
+				await upload.cleanup();
+			} catch (cleanupError) {
+				if (!uploadPersisted) throw cleanupError;
+				deps.recordPostCommitCleanupFailure?.();
+				deps.logger?.error(
+					{ error: cleanupError, exhibitionId: id },
+					'Post-commit exhibition poster temp cleanup failed',
+				);
+			}
+		}
 	}
 }
 
 export async function deletePoster(deps: ExhibitionServiceDependencies, id: number): Promise<void> {
-	const result = await deps.repository.clearExhibitionPoster(id);
+	const result = await deps.repository.clearExhibitionPoster(id, {
+		bucket: deps.posterBucket,
+		reason: 'exhibition-poster-delete',
+	});
 	if (!result) throw notFound('Exhibition not found');
 
 	if (result.oldStorageKey) {
-		await deps.deleteOrQueue(
-			deps.posterBucket,
-			result.oldStorageKey,
-			'exhibition-poster-delete',
-			{ exhibitionId: id },
-		);
+		cleanupCommittedPoster(deps);
 	}
 }
 

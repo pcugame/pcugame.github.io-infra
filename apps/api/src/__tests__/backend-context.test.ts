@@ -5,6 +5,9 @@ import type { BackendContext } from '../backend-context.js';
 import type { Env } from '../config/env.js';
 import { buildApp } from '../app.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
+import { createExportProgressStore } from '../modules/admin/export/service.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 
 function testConfig(): Env {
 	return {
@@ -18,11 +21,13 @@ function testConfig(): Env {
 function createTestContext(): {
 	context: BackendContext;
 	storageHead: ReturnType<typeof vi.fn>;
+	resourceStart: ReturnType<typeof vi.fn>;
 	resourceClose: ReturnType<typeof vi.fn>;
 	authSessionFind: ReturnType<typeof vi.fn>;
 	authSessionTouch: ReturnType<typeof vi.fn>;
 } {
 	const storageHead = vi.fn().mockResolvedValue({ size: 0, contentType: 'text/plain' });
+	const resourceStart = vi.fn();
 	const resourceClose = vi.fn();
 	const authSessionFind = vi.fn().mockResolvedValue(null);
 	const authSessionTouch = vi.fn().mockResolvedValue(undefined);
@@ -40,8 +45,25 @@ function createTestContext(): {
 	};
 	const authRoutes: FastifyPluginAsync = async (app) => {
 		app.post('/auth/google', async () => ({ ok: true }));
-		app.get('/session-user', async (request) => ({ user: request.currentUser ?? null }));
+		app.get('/me', async (request) => ({
+			ok: true,
+			data: request.currentUser
+				? {
+					authenticated: true,
+					user: {
+						id: request.currentUser.id,
+						email: request.currentUser.email,
+						name: request.currentUser.name,
+						role: request.currentUser.role,
+						studentId: request.currentUser.studentId,
+					},
+				}
+				: { authenticated: false },
+		}));
 	};
+	const uploadLifecycle = createTestUploadLifecycleRuntime();
+	let closePromise: Promise<void> | undefined;
+	let startPromise: Promise<void> | undefined;
 
 	return {
 		context: {
@@ -61,6 +83,8 @@ function createTestContext(): {
 				uploadPart: async () => 'etag',
 				completeMultipart: async () => {},
 				abortMultipart: async () => {},
+				listParts: async () => [],
+				listMultipartUploads: async () => [],
 			},
 			fileSystem: {
 				temporaryDirectory: () => '/tmp',
@@ -69,12 +93,17 @@ function createTestContext(): {
 				mkdir: async () => {},
 				rename: async () => {},
 				remove: async () => {},
+				readRange: async () => Buffer.alloc(0),
 				createReadStream: () => Readable.from([]),
 				createWriteStream: () => new Writable({ write(_chunk, _encoding, done) { done(); } }),
 			},
 			googleTokens: { verify: async () => undefined },
-			scheduler: { every: () => ({ cancel: () => {} }) },
+			scheduler: {
+				every: () => ({ cancel: () => {} }),
+				delay: async () => {},
+			},
 			uploadLimiter: { acquire: () => {}, release: () => {} },
+			protectedDownloads: createProtectedDownloadLimiter(),
 			settings: {
 				get: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
 				update: async (value) => ({
@@ -83,6 +112,13 @@ function createTestContext(): {
 				}),
 				invalidate: () => {},
 			},
+			uploadLifecycleMetrics: {
+				recordPostCommitCleanupFailure: () => {},
+				postCommitCleanupFailureCount: () => 0,
+				recordUntrackedMultipartCleanupFailure: () => {},
+				untrackedMultipartCleanupFailureCount: () => 0,
+			},
+			uploadLifecycle,
 			lifecycle: {
 				state: () => 'ready',
 				setState: () => {},
@@ -92,7 +128,8 @@ function createTestContext(): {
 				inFlight: () => inFlight,
 				waitForDrain: async () => 'drained',
 			},
-			databaseHealth: { check: async () => true, close: async () => {} },
+			exportProgress: createExportProgressStore(),
+			databaseHealth: { check: async () => true },
 			authSessions: {
 				find: authSessionFind,
 				touch: authSessionTouch,
@@ -103,7 +140,6 @@ function createTestContext(): {
 				purgeExpiredSessions: async () => 0,
 				reapOrphans: async () => {},
 			},
-			shutdownResources: [{ close: resourceClose }],
 			routes: {
 				auth: authRoutes,
 				devAuth: emptyRoutes,
@@ -112,8 +148,18 @@ function createTestContext(): {
 				me: emptyRoutes,
 				assets: emptyRoutes,
 			},
+			resourceOwnership: [{ name: 'test-resource', ownership: 'owned' }],
+			start: () => {
+				startPromise ??= Promise.resolve().then(() => resourceStart());
+				return startPromise;
+			},
+			close: () => {
+				closePromise ??= Promise.resolve().then(() => resourceClose());
+				return closePromise;
+			},
 		},
 		storageHead,
+		resourceStart,
 		resourceClose,
 		authSessionFind,
 		authSessionTouch,
@@ -122,8 +168,9 @@ function createTestContext(): {
 
 describe('BackendContext composition', () => {
 	it('runs health checks with injected clock, request IDs, DB, and storage ports', async () => {
-		const { context, storageHead, resourceClose } = createTestContext();
+		const { context, storageHead, resourceStart, resourceClose } = createTestContext();
 		const app = await buildApp({ context });
+		expect(resourceStart).not.toHaveBeenCalled();
 		try {
 			const shallow = await app.inject({ method: 'GET', url: '/api/health' });
 			expect(shallow.statusCode).toBe(200);
@@ -186,14 +233,16 @@ describe('BackendContext composition', () => {
 		try {
 			const response = await app.inject({
 				method: 'GET',
-				url: '/api/session-user',
+				url: '/api/me',
 				headers: {
 					origin: 'http://localhost:5173',
 					cookie: 'sid=session-1',
 				},
 			});
 			expect(response.statusCode).toBe(200);
-			expect(response.json()).toMatchObject({ user: { id: 9, role: 'USER' } });
+			expect(response.json()).toMatchObject({
+				data: { user: { id: 9, role: 'USER' } },
+			});
 			expect(authSessionFind).toHaveBeenCalledWith('session-1');
 			expect(authSessionTouch).toHaveBeenCalledWith(
 				'session-1',
@@ -203,5 +252,16 @@ describe('BackendContext composition', () => {
 		} finally {
 			await app.close();
 		}
+	});
+
+	it('closes the partial Fastify app and context once when route registration fails', async () => {
+		const { context, resourceClose } = createTestContext();
+		const original = new Error('route registration failed');
+		context.routes.assets = async () => { throw original; };
+
+		await expect(buildApp({ context })).rejects.toBe(original);
+		expect(resourceClose).toHaveBeenCalledOnce();
+		await context.close();
+		expect(resourceClose).toHaveBeenCalledOnce();
 	});
 });

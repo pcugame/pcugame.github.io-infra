@@ -77,7 +77,7 @@ const envSchema = z
     UPLOAD_MAX_CONCURRENT: z.coerce.number().int().positive().default(5),
     // ── Chunked game upload ─────────────────────────────────
     UPLOAD_CHUNKED_GAME_MAX_MB: z.coerce.number().positive().default(5120),   // 5 GB
-    UPLOAD_CHUNK_SIZE_MB: z.coerce.number().int().positive().default(10),     // 10 MB per chunk
+    UPLOAD_CHUNK_SIZE_MB: z.coerce.number().int().min(5).default(10),        // S3 multipart minimum
     // UPLOAD_STAGING_ROOT removed — chunked uploads now use S3 multipart
     UPLOAD_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(1440), // 24 hours
 
@@ -101,8 +101,6 @@ const envSchema = z
 ;
 
 export type Env = z.infer<typeof envSchema>;
-
-let _env: Env | undefined;
 
 /**
  * Fixed-phrase hint per Zod issue code. Intentionally does NOT consult
@@ -139,7 +137,6 @@ export function formatEnvIssues(issues: z.core.$ZodIssue[]): string[] {
 }
 
 export function loadEnv(): Env {
-  if (_env) return _env;
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     console.error('❌ Invalid environment variables:');
@@ -148,16 +145,11 @@ export function loadEnv(): Env {
     }
     process.exit(1);
   }
-  _env = result.data;
-  if (!_env.ALLOWED_GOOGLE_HD) {
+  const parsed = result.data;
+  if (!parsed.ALLOWED_GOOGLE_HD) {
     console.warn(
       '⚠  ALLOWED_GOOGLE_HD is empty — any Google account can sign up. Set it to your institution domain (e.g. "g.pcu.ac.kr") in production.',
     );
   }
-  return _env;
-}
-
-export function env(): Env {
-  if (!_env) return loadEnv();
-  return _env;
+  return parsed;
 }

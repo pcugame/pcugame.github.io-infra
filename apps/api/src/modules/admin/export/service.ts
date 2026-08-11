@@ -56,10 +56,20 @@ function assetFileName(kind: string, ext: string, index: number): string {
 }
 
 /** Process-local lock/progress implementation. Replace this port for multi-replica operation. */
-export class InMemoryExportProgressStore {
+export interface ExportProgressStore {
+	start(year: number | null, startedAt: number): void;
+	get(): ExportProgress | null;
+	update(update: (progress: ExportProgress) => void): void;
+	finish(): void;
+	close(): void;
+}
+
+class InMemoryExportProgressStore implements ExportProgressStore {
 	private progress: ExportProgress | null = null;
+	private closed = false;
 
 	start(year: number | null, startedAt: number): void {
+		if (this.closed) throw new Error('Export progress store is closed');
 		if (this.progress) throw conflict('Export is already in progress');
 		this.progress = {
 			year,
@@ -77,16 +87,29 @@ export class InMemoryExportProgressStore {
 	}
 
 	get(): ExportProgress | null {
-		return this.progress;
+		return this.progress
+			? { ...this.progress, currentProjectFiles: [...this.progress.currentProjectFiles] }
+			: null;
 	}
 
 	update(update: (progress: ExportProgress) => void): void {
+		if (this.closed) return;
 		if (this.progress) update(this.progress);
 	}
 
 	finish(): void {
 		this.progress = null;
 	}
+
+	close(): void {
+		if (this.closed) return;
+		this.closed = true;
+		this.progress = null;
+	}
+}
+
+export function createExportProgressStore(): ExportProgressStore {
+	return new InMemoryExportProgressStore();
 }
 
 export interface ExportOptions {
@@ -110,8 +133,17 @@ export interface ExportServiceDependencies {
 
 export function createExportService(
 	deps: ExportServiceDependencies,
-	progressStore = new InMemoryExportProgressStore(),
+	progressStore: ExportProgressStore,
 ) {
+	let closed = false;
+	let active:
+		| {
+			controller: AbortController;
+			settled: Promise<void>;
+		}
+		| undefined;
+	let closePromise: Promise<void> | undefined;
+
 	function setCurrentFileStatus(assetId: number, status: ExportFileStatus): void {
 		progressStore.update((progress) => {
 			progress.currentProjectFiles = progress.currentProjectFiles.map((file) =>
@@ -248,12 +280,38 @@ export function createExportService(
 	return {
 		getExportProgress: () => progressStore.get(),
 		async exportAssets(options: ExportOptions): Promise<ExportResult> {
+			if (closed) throw new Error('Export service is closed');
 			progressStore.start(options.year ?? null, deps.now());
+			const controller = new AbortController();
+			const abort = () => controller.abort();
+			if (options.signal?.aborted) abort();
+			else options.signal?.addEventListener('abort', abort, { once: true });
+			const operation = doExport({ ...options, signal: controller.signal });
+			let resolveSettled!: () => void;
+			const settled = new Promise<void>((resolve) => { resolveSettled = resolve; });
+			active = { controller, settled };
 			try {
-				return await doExport(options);
+				return await operation;
 			} finally {
+				options.signal?.removeEventListener('abort', abort);
 				progressStore.finish();
+				if (active?.controller === controller) active = undefined;
+				resolveSettled();
 			}
+		},
+		/**
+		 * Context shutdown first aborts storage/stream/filesystem work, then waits
+		 * for sibling-temp cleanup and the service finally block to release the
+		 * active lock. The context closes the progress store only after this ends.
+		 */
+		close(): Promise<void> {
+			closePromise ??= (async () => {
+				closed = true;
+				const running = active;
+				running?.controller.abort();
+				await running?.settled;
+			})();
+			return closePromise;
 		},
 	};
 }

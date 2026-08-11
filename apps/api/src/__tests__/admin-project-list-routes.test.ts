@@ -4,27 +4,18 @@ import { defaultTestEnv } from './helpers/app-mocks.js';
 
 const mocks = vi.hoisted(() => ({
 	listProjects: vi.fn(),
+	getProjectDetail: vi.fn(),
+	updateProject: vi.fn(),
+	deleteProject: vi.fn(),
+	deleteWebgl: vi.fn(),
+	setPoster: vi.fn(),
+	bulkDeleteProjects: vi.fn(),
+	loadProjectWithAccess: vi.fn(),
+	bulkUpdate: vi.fn(),
 }));
 
 vi.mock('../config/env.js', () => ({
-	env: () => ({ ...defaultTestEnv }),
 	loadEnv: () => ({ ...defaultTestEnv }),
-}));
-
-vi.mock('../modules/admin/project/runtime.js', () => ({
-	projectService: {
-		listProjects: mocks.listProjects,
-		assertStatusTransition: vi.fn(),
-		bulkUpdateStatus: vi.fn(),
-		setPoster: vi.fn(),
-		deleteProject: vi.fn(),
-		deleteWebgl: vi.fn(),
-		bulkDeleteProjects: vi.fn(),
-	},
-}));
-
-vi.mock('../modules/admin/project/repository.js', () => ({
-	findExhibitionById: vi.fn(),
 }));
 
 vi.mock('../plugins/auth.js', () => {
@@ -59,7 +50,25 @@ vi.mock('../plugins/auth.js', () => {
 	};
 });
 
-import { projectController } from '../modules/admin/project/index.js';
+import { createProjectController } from '../modules/admin/project/index.js';
+import type { createProjectService } from '../modules/admin/project/service.js';
+
+const projectController = createProjectController({
+	service: {
+		listProjects: mocks.listProjects,
+		getProjectDetail: mocks.getProjectDetail,
+		updateProject: mocks.updateProject,
+		deleteProject: mocks.deleteProject,
+		deleteWebgl: mocks.deleteWebgl,
+		setPoster: mocks.setPoster,
+		bulkDeleteProjects: mocks.bulkDeleteProjects,
+	} as ReturnType<typeof createProjectService>,
+	access: { loadProjectWithAccess: mocks.loadProjectWithAccess },
+	status: {
+		assertTransition: vi.fn(),
+		bulkUpdate: mocks.bulkUpdate,
+	},
+});
 
 async function buildTestApp() {
 	const app = Fastify({ logger: false });

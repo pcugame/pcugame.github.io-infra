@@ -5,6 +5,7 @@ import type {
 } from '../modules/admin/game-upload/ports.js';
 import { sweepStaleCompletingSessions } from '../modules/admin/game-upload/session-maintenance.service.js';
 import { badRequest } from '../shared/errors.js';
+import { createDurableGameUploadRepository } from './helpers/upload-lifecycle.js';
 
 function staleSession(
 	overrides: Partial<GameUploadSessionSummary> = {},
@@ -29,7 +30,7 @@ function staleSession(
 
 function createHarness(session = staleSession()) {
 	const mocks = {
-		findStale: vi.fn().mockResolvedValue([session]),
+		claimStale: vi.fn().mockResolvedValue([session]),
 		head: vi.fn().mockResolvedValue({ size: 8, contentType: 'application/zip' }),
 		finalize: vi.fn().mockResolvedValue({
 			status: 'COMPLETED' as const,
@@ -37,30 +38,36 @@ function createHarness(session = staleSession()) {
 			sizeBytes: 8,
 		}),
 		markFailed: vi.fn().mockResolvedValue({ count: 1 }),
+		markCompletedObjectFailed: vi.fn().mockResolvedValue({ count: 1 }),
+		revertToPending: vi.fn().mockResolvedValue({ count: 1 }),
 		abortMultipart: vi.fn().mockResolvedValue(undefined),
 		deleteOrQueue: vi.fn().mockResolvedValue(undefined),
 		logError: vi.fn(),
 		logWarn: vi.fn(),
 	};
 	const deps: GameUploadServiceDependencies = {
-		repository: {
+		repository: createDurableGameUploadRepository({
 			findSessionById: vi.fn(),
 			createSessionReplacingActive: vi.fn(),
 			cancelSessionAndClearActive: vi.fn(),
 			upsertPartEtag: vi.fn(),
 			transitionToCompleting: vi.fn(),
 			findPartsBySessionId: vi.fn(),
-			revertToPending: vi.fn(),
+			revertToPending: mocks.revertToPending,
 			markFailed: mocks.markFailed,
-			findStaleCompletingSessions: mocks.findStale,
+			markCompletedObjectFailed: mocks.markCompletedObjectFailed,
+			findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
+			claimStaleCompletingSessions: mocks.claimStale,
 			findActiveSessionsForListing: vi.fn(),
 			findExhibitionById: vi.fn(),
-		},
+		}),
 		storage: {
 			createMultipart: vi.fn(),
 			abortMultipart: mocks.abortMultipart,
 			uploadPart: vi.fn(),
 			completeMultipart: vi.fn(),
+			listParts: vi.fn(async () => []),
+			listMultipartUploads: vi.fn(async () => []),
 			head: mocks.head,
 		},
 		finalizer: { finalize: mocks.finalize },
@@ -73,19 +80,48 @@ function createHarness(session = staleSession()) {
 		roleGameMaxBytes: () => 1024,
 		storageKey: () => 'key',
 		deleteOrQueue: mocks.deleteOrQueue,
-		logger: { error: mocks.logError, warn: mocks.logWarn },
+		wakeDeletionWorker: vi.fn(),
+		wakeMaintenance: vi.fn(),
+		recordUntrackedMultipartCleanupFailure: vi.fn(),
+		logger: { error: mocks.logError, warn: mocks.logWarn, fatal: vi.fn() },
 	};
 	return { deps, mocks };
 }
 
 describe('stale upload recovery', () => {
+	it('stops before storage or state mutation when the DB completion claim is lost', async () => {
+		const session = staleSession();
+		const { deps, mocks } = createHarness(session);
+		deps.repository.claimStaleCompletingSessions = vi.fn().mockResolvedValue([session]);
+		deps.repository.renewCompletionClaim = vi.fn().mockResolvedValue({ count: 0 });
+		deps.repository.releaseCompletionClaim = vi.fn().mockResolvedValue({ count: 0 });
+
+		await expect(sweepStaleCompletingSessions(deps)).resolves.toEqual({ swept: 1 });
+
+		expect(mocks.head).not.toHaveBeenCalled();
+		expect(mocks.finalize).not.toHaveBeenCalled();
+		expect(mocks.markFailed).not.toHaveBeenCalled();
+		expect(deps.repository.releaseCompletionClaim).toHaveBeenCalledWith(
+			'stale-upload',
+			'id',
+			new Date('2026-07-21T00:10:00.000Z'),
+			'recovery-deferred',
+		);
+	});
+
 	it('uses the normal finalizer when the completed source object exists', async () => {
 		const session = staleSession();
 		const { deps, mocks } = createHarness(session);
 
 		await expect(sweepStaleCompletingSessions(deps)).resolves.toEqual({ swept: 1 });
 
-		expect(mocks.findStale).toHaveBeenCalledWith(new Date('2026-07-21T00:05:00.000Z'));
+		expect(mocks.claimStale).toHaveBeenCalledWith(
+			new Date('2026-07-21T00:05:00.000Z'),
+			new Date('2026-07-21T00:10:00.000Z'),
+			'id',
+			new Date('2026-07-21T00:12:00.000Z'),
+			50,
+		);
 		expect(mocks.finalize).toHaveBeenCalledWith({
 			id: session.id,
 			projectId: session.projectId,
@@ -93,7 +129,11 @@ describe('stale upload recovery', () => {
 			originalName: session.originalName,
 			totalBytes: session.totalBytes,
 			s3Key: session.s3Key,
-		}, { size: 8, contentType: 'application/zip' });
+			completionClaimToken: 'id',
+		}, { size: 8, contentType: 'application/zip' }, {
+			storageRequest: { signal: expect.any(AbortSignal) },
+			assertClaimOwned: expect.any(Function),
+		});
 		expect(mocks.markFailed).not.toHaveBeenCalled();
 		expect(mocks.deleteOrQueue).not.toHaveBeenCalled();
 	});
@@ -123,33 +163,45 @@ describe('stale upload recovery', () => {
 		expect(mocks.markFailed).not.toHaveBeenCalled();
 	});
 
-	it('fails and deletes only a deterministically invalid completed object', async () => {
+	it('atomically records terminal failure and deletion outbox for an invalid completed object', async () => {
 		const { deps, mocks } = createHarness();
 		mocks.finalize.mockRejectedValueOnce(badRequest('Unsafe ZIP path'));
 
 		await expect(sweepStaleCompletingSessions(deps)).resolves.toEqual({ swept: 1 });
 
-		expect(mocks.markFailed).toHaveBeenCalledWith(
-			'stale-upload',
-			'webgl/7/deployment/source.zip',
-		);
-		expect(mocks.deleteOrQueue).toHaveBeenCalledWith(
-			'webgl/7/deployment/source.zip',
-			'webgl-upload-sweep-invalid',
-			{ sessionId: 'stale-upload' },
+		expect(mocks.markCompletedObjectFailed).toHaveBeenCalledWith({
+			sessionId: 'stale-upload',
+			storageKey: 'webgl/7/deployment/source.zip',
+			reason: 'webgl-upload-sweep-invalid',
+			completionClaimToken: 'id',
+		});
+		expect(deps.wakeDeletionWorker).toHaveBeenCalledOnce();
+		expect(mocks.markFailed).not.toHaveBeenCalled();
+		expect(mocks.deleteOrQueue).not.toHaveBeenCalled();
+	});
+
+	it('does not terminalize when the atomic failure/outbox transaction fails', async () => {
+		const { deps, mocks } = createHarness();
+		mocks.finalize.mockRejectedValueOnce(badRequest('Unsafe ZIP path'));
+		mocks.markCompletedObjectFailed.mockRejectedValueOnce(new Error('outbox unavailable'));
+
+		await expect(sweepStaleCompletingSessions(deps))
+			.resolves.toEqual({ swept: 1 });
+		expect(mocks.markFailed).not.toHaveBeenCalled();
+		expect(mocks.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'stale-upload' }),
+			'Completing-session recovery failed; continuing with the batch',
 		);
 	});
 
-	it('aborts an unfinished multipart upload only after a successful not-found check', async () => {
+	it('returns an existing multipart to PENDING only after a successful not-found and ListParts check', async () => {
 		const { deps, mocks } = createHarness();
 		mocks.head.mockResolvedValueOnce(null);
 
 		await expect(sweepStaleCompletingSessions(deps)).resolves.toEqual({ swept: 1 });
 
-		expect(mocks.abortMultipart).toHaveBeenCalledWith(
-			'webgl/7/deployment/source.zip',
-			'multipart-1',
-		);
-		expect(mocks.markFailed).toHaveBeenCalledWith('stale-upload');
+		expect(mocks.revertToPending).toHaveBeenCalledWith('stale-upload', 'id');
+		expect(mocks.abortMultipart).not.toHaveBeenCalled();
+		expect(mocks.markFailed).not.toHaveBeenCalled();
 	});
 });

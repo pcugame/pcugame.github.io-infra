@@ -8,17 +8,18 @@
  * only playback_* fields on the Asset row are updated.
  */
 
-import { createReadStream, mkdtempSync } from 'node:fs';
+import { createReadStream, createWriteStream, mkdtempSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, extname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { pipeline } from 'node:stream/promises';
 import { loadEnv } from '../src/config/env.js';
-import { env } from '../src/config/env.js';
-import { createPrismaClient } from '../src/lib/prisma-client.js';
-import { downloadObject, uploadFile } from '../src/lib/storage.js';
 import { generateStorageKey } from '../src/shared/storage-path.js';
-import { processVideo } from '../src/modules/assets/upload/video-processing.js';
 import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
+import {
+	createScriptResources,
+	createScriptUploadProcessing,
+} from './resources.js';
 
 function parseArgs() {
 	const args = process.argv.slice(2);
@@ -43,8 +44,10 @@ function errorMessage(err: unknown): string {
 
 async function main() {
 	const opts = parseArgs();
-	loadEnv();
-	const prisma = createPrismaClient();
+	const config = loadEnv();
+	const resources = createScriptResources(config);
+	const processing = createScriptUploadProcessing(config);
+	const prisma = resources.prisma;
 	const tmpDir = mkdtempSync(join(tmpdir(), 'video-playback-backfill-'));
 
 	try {
@@ -66,8 +69,13 @@ async function main() {
 			const localPath = join(tmpDir, `${asset.id}.${ext}`);
 
 			try {
-				await downloadObject(env().S3_BUCKET_PROTECTED, asset.storageKey, localPath);
-				const result = await processVideo({
+				const object = await resources.storage.stream(
+					config.S3_BUCKET_PROTECTED,
+					asset.storageKey,
+				);
+				if (!object) throw new Error(`Object not found: ${asset.storageKey}`);
+				await pipeline(object.body, createWriteStream(localPath));
+				const result = await processing.video({
 					tmpPath: localPath,
 					mimeType: asset.mimeType || 'video/mp4',
 					ext,
@@ -85,8 +93,8 @@ async function main() {
 
 				if (result.playback) {
 					const playbackStorageKey = generateStorageKey('mp4');
-					await uploadFile(
-						env().S3_BUCKET_PROTECTED,
+					await resources.storage.upload(
+						config.S3_BUCKET_PROTECTED,
 						playbackStorageKey,
 						createReadStream(result.playback.tmpPath),
 						result.playback.mimeType,
@@ -133,7 +141,7 @@ async function main() {
 		}
 	} finally {
 		await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-		await prisma.$disconnect();
+		await resources.close();
 	}
 }
 

@@ -1,1 +1,1 @@
-export { projectController } from './controller.js';
+export { createProjectController } from './controller.js';

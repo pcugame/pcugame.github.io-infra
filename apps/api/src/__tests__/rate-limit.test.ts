@@ -1,10 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
+import { Readable, Writable } from 'node:stream';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import type { BackendContext } from '../backend-context.js';
+import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
+import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
+import { createExportProgressStore } from '../modules/admin/export/service.js';
+import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
 
 // Use very tight limits so the test doesn't need to send 300+ requests.
 const testEnv = {
 	...defaultTestEnv,
+	TRUST_PROXY: '1',
 	RATE_LIMIT_GLOBAL_MAX: 5,
 	RATE_LIMIT_GLOBAL_WINDOW_MS: 60_000,
 	RATE_LIMIT_LOGIN_MAX: 3,
@@ -12,44 +19,98 @@ const testEnv = {
 };
 
 vi.mock('../config/env.js', () => ({
-	env: () => ({ ...testEnv }),
 	loadEnv: () => ({ ...testEnv }),
 }));
-vi.mock('../lib/prisma.js', () => ({
-	prisma: {
-		$queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]),
-	},
-}));
-vi.mock('../lib/storage.js', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('../lib/storage.js')>();
-	return { ...actual, headObject: vi.fn().mockResolvedValue(null) };
-});
-vi.mock('../shared/protected-download-limiter.js', () => ({
-	protectedDownloadLimiter: {
+vi.mock('../shared/protected-download-limiter.js', () => {
+	const limiter = {
+		start: vi.fn(),
 		check: vi.fn().mockReturnValue('ok'),
 		isBanned: vi.fn().mockReturnValue(false),
 		addBan: vi.fn(),
 		removeBan: vi.fn(),
 		loadBannedIps: vi.fn(),
+		close: vi.fn(),
 		destroy: vi.fn(),
-	},
-}));
-// Block auth service from hitting Google — login requests only need to reach
-// the rate-limit stage, not succeed.
-vi.mock('../modules/auth/runtime.js', () => ({
-	authService: {
-		loginWithGoogle: vi.fn().mockRejectedValue(new Error('auth disabled in test')),
-		logout: vi.fn().mockResolvedValue(undefined),
-		loginForDevRole: vi.fn(),
-	},
-}));
-
+	};
+	return {
+		createProtectedDownloadLimiter: () => limiter,
+	};
+});
 describe('rate-limit plugin', () => {
 	let app: FastifyInstance;
+	let requestSequence = 0;
+	const emptyRoute: FastifyPluginAsync = async () => {};
+	const authRoute: FastifyPluginAsync = async (instance) => {
+		instance.post('/auth/google', {
+			config: {
+				rateLimit: {
+					max: testEnv.RATE_LIMIT_LOGIN_MAX,
+					timeWindow: testEnv.RATE_LIMIT_LOGIN_WINDOW_MS,
+				},
+			},
+		}, async () => ({ ok: false }));
+		instance.get('/me', async () => ({ ok: true, data: { authenticated: false } }));
+	};
+	const logger: BackendContext['logger'] = {
+		child: () => logger,
+		trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), fatal: vi.fn(),
+	};
+	const context: BackendContext = {
+		config: {
+			...testEnv,
+			LOG_LEVEL: 'info',
+			GOOGLE_CLIENT_IDS: [...testEnv.GOOGLE_CLIENT_IDS],
+			CORS_ALLOWED_ORIGINS: [...testEnv.CORS_ALLOWED_ORIGINS],
+		},
+		clock: { now: () => new Date('2026-08-11T00:00:00.000Z') },
+		logger,
+		ids: { next: () => `rate-limit-${++requestSequence}` },
+		storage: {
+			upload: async () => {}, presign: async () => '', delete: async () => {},
+			head: async () => null, readRange: async () => Buffer.alloc(0), stream: async () => null,
+			listKeys: async () => [], createMultipart: async () => '', uploadPart: async () => '',
+			completeMultipart: async () => {}, abortMultipart: async () => {}, listParts: async () => [],
+			listMultipartUploads: async () => [],
+		},
+		fileSystem: {
+			temporaryDirectory: () => '/tmp', stat: async () => ({ size: 0 }), access: async () => {},
+			mkdir: async () => {}, rename: async () => {}, remove: async () => {},
+			readRange: async () => Buffer.alloc(0), createReadStream: () => Readable.from([]),
+			createWriteStream: () => new Writable({ write(_chunk, _encoding, done) { done(); } }),
+		},
+		googleTokens: { verify: async () => undefined },
+		scheduler: { every: () => ({ cancel: () => {} }), delay: async () => {} },
+		uploadLimiter: { acquire: () => {}, release: () => {} },
+		protectedDownloads: createProtectedDownloadLimiter(),
+		settings: {
+			get: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+			update: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
+			invalidate: () => {},
+		},
+		exportProgress: createExportProgressStore(),
+		uploadLifecycleMetrics: createUploadLifecycleMetrics(),
+		uploadLifecycle: createTestUploadLifecycleRuntime(),
+		lifecycle: {
+			state: () => 'ready', setState: () => {}, isAcceptingNewWork: () => true,
+			requestStarted: () => {}, requestFinished: () => {}, inFlight: () => 0,
+			waitForDrain: async () => 'drained',
+		},
+		databaseHealth: { check: async () => true },
+		authSessions: { find: async () => null, touch: async () => {}, delete: async () => {} },
+		maintenance: {
+			recoverStaleUploads: async () => {}, purgeExpiredSessions: async () => 0,
+			reapOrphans: async () => {},
+		},
+		routes: {
+			auth: authRoute, devAuth: emptyRoute, public: emptyRoute, admin: emptyRoute,
+			me: emptyRoute, assets: emptyRoute,
+		},
+		resourceOwnership: [], start: async () => {}, close: async () => {},
+	};
 
 	beforeAll(async () => {
 		const { buildApp } = await import('../app.js');
-		app = await buildApp();
+		app = await buildApp({ context });
 		await app.ready();
 	});
 
@@ -93,22 +154,49 @@ describe('rate-limit plugin', () => {
 			});
 			codes.push(res.statusCode);
 		}
-		// The first three requests reach the handler (which throws "auth disabled" → 500),
-		// the fourth is short-circuited by the rate limiter.
+		// The first three requests reach the handler (the fake token is rejected),
+		// then the tighter route bucket short-circuits a later request.
 		expect(codes.slice(0, 3).every((c) => c !== 429)).toBe(true);
 		expect(codes.slice(3).some((c) => c === 429)).toBe(true);
 	});
 
+	it('uses the forwarded client IP behind the single trusted nginx hop', async () => {
+		const proxyAddress = '127.0.0.1';
+		const firstClientCodes: number[] = [];
+		for (let i = 0; i < 7; i++) {
+			const response = await app.inject({
+				method: 'GET',
+				url: '/api/me',
+				remoteAddress: proxyAddress,
+				headers: { 'x-forwarded-for': '198.51.100.10' },
+			});
+			firstClientCodes.push(response.statusCode);
+		}
+
+		expect(firstClientCodes).toContain(429);
+		const independentClient = await app.inject({
+			method: 'GET',
+			url: '/api/me',
+			remoteAddress: proxyAddress,
+			headers: { 'x-forwarded-for': '198.51.100.11' },
+		});
+		expect(independentClient.statusCode).toBe(200);
+	});
+
 	it.each(['/api/health', '/api/health/deep'])(
-		'exempts %s from the rate limiter',
+		'exempts %s from the rate limiter while preserving the healthy response contract',
 		async (url) => {
 			const healthIp = '203.0.113.9';
-			const codes: number[] = [];
 			for (let i = 0; i < 10; i++) {
 				const res = await app.inject({ method: 'GET', url, remoteAddress: healthIp });
-				codes.push(res.statusCode);
+				expect(res.statusCode).toBe(200);
+				expect(res.json()).toEqual({
+					ok: true,
+					state: 'ready',
+					timestamp: '2026-08-11T00:00:00.000Z',
+					checks: url.endsWith('/deep') ? { db: 'ok', s3: 'ok' } : { db: 'ok' },
+				});
 			}
-			expect(codes.every((c) => c !== 429)).toBe(true);
 		},
 	);
 });

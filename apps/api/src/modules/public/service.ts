@@ -108,8 +108,10 @@ export async function listProjectsByYear(
 	deps: PublicServiceDependencies,
 	yearParam: string,
 ): Promise<PublicYearProjectsResponse> {
-	const yearNum = parseInt(yearParam, 10);
-	if (isNaN(yearNum)) throw notFound('Year not found');
+	const yearNum = Number(yearParam);
+	if (!/^\d{4}$/.test(yearParam) || !Number.isSafeInteger(yearNum)) {
+		throw notFound('Year not found');
+	}
 
 	const exhibitionRecords = await deps.repository.findExhibitionsByYear(yearNum);
 	if (exhibitionRecords.length === 0) throw notFound('Year not found');
@@ -147,8 +149,10 @@ export async function listProjectsByExhibition(
 	deps: PublicServiceDependencies,
 	idParam: string,
 ): Promise<PublicExhibitionProjectsResponse> {
-	const id = parseInt(idParam, 10);
-	if (isNaN(id)) throw notFound('Exhibition not found');
+	const id = Number(idParam);
+	if (!/^[1-9]\d*$/.test(idParam) || !Number.isSafeInteger(id)) {
+		throw notFound('Exhibition not found');
+	}
 
 	const exhibition = await deps.repository.findExhibitionById(id);
 	if (!exhibition) throw notFound('Exhibition not found');
@@ -186,19 +190,28 @@ export async function getProjectDetail(
 	idOrSlug: string,
 	yearParam?: string,
 ): Promise<PublicProjectDetailResponse> {
-	const yearNum = yearParam ? parseInt(yearParam, 10) : undefined;
+	const yearNum = yearParam === undefined ? undefined : Number(yearParam);
+	if (
+		yearParam !== undefined
+		&& (!/^\d{4}$/.test(yearParam) || !Number.isSafeInteger(yearNum))
+	) {
+		throw notFound('Year not found');
+	}
 
 	// Try numeric ID lookup first
 	const numericId = Number(idOrSlug);
 	let project = null;
 
-	if (Number.isInteger(numericId) && numericId > 0) {
+	if (
+		/^[1-9]\d*$/.test(idOrSlug)
+		&& Number.isSafeInteger(numericId)
+	) {
 		project = await deps.repository.findPublishedProjectById(numericId);
 	}
 
 	if (!project) {
 		let exhibitionIds: number[] | undefined;
-		if (yearNum !== undefined && !isNaN(yearNum)) {
+		if (yearNum !== undefined) {
 			const exs = await deps.repository.findExhibitionsByYear(yearNum);
 			if (exs.length > 0) exhibitionIds = exs.map((e) => e.id);
 		}

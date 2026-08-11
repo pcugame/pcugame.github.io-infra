@@ -47,7 +47,7 @@ export interface ImportServiceDependencies {
 export const ImportMember = z.object({
 	name: z.string().min(1).max(50),
 	studentId: z.string().max(20).optional().default(''),
-	sortOrder: z.number().int().min(0).optional(),
+	sortOrder: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
 });
 
 export const ImportProject = z.object({
@@ -157,7 +157,11 @@ export async function executeImport(
 		const errors = result.error.issues.map(
 			(i) => `${i.path.join('.')}: ${i.message}`,
 		);
-		throw badRequest('JSON 검증 실패', errors.join('; '));
+		throw badRequest(
+			'JSON 검증 실패',
+			'VALIDATION_ERROR',
+			{ issues: errors },
+		);
 	}
 
 	const data = result.data;

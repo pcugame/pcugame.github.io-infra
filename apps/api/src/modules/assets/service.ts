@@ -2,7 +2,7 @@ import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/co
 import type { AssetKind, UserRole } from '@pcu/contracts';
 import type { Actor } from '../../application/http-input.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
-import { notFound, forbidden, unauthorized } from '../../shared/errors.js';
+import { AppError, notFound, forbidden, unauthorized } from '../../shared/errors.js';
 
 type ProtectedAssetAccessUser = {
 	id: number;
@@ -31,13 +31,20 @@ interface ProtectedAssetStreamRecord extends ProtectedAssetAccessRecord {
 	};
 }
 
-interface AssetDeletionRecord {
+interface AssetDeletionLookup {
+	id: number;
+	projectId: number;
+	project: { posterAssetId: number | null };
+}
+
+interface AssetDeletionClaim {
 	id: number;
 	projectId: number;
 	kind: AssetKind;
+	previousStatus: 'READY' | 'DELETING' | 'DELETED' | 'FAILED';
 	storageKey: string;
 	playbackStorageKey: string | null;
-	project: { posterAssetId: number | null };
+	alreadyDeleted: boolean;
 }
 
 export interface AssetsServiceDependencies {
@@ -49,31 +56,87 @@ export interface AssetsServiceDependencies {
 		options?: { responseContentDisposition: string },
 	): Promise<string>;
 	bucketForKind(kind: AssetKind): string;
-	deleteOrQueue(
-		bucket: string,
-		key: string,
-		reason: string,
-		context: Record<string, unknown>,
-	): Promise<void>;
+	wakeDeletionWorker(): void;
 	loadProjectWithAccess(actor: Actor, projectId: number): Promise<unknown>;
 	downloadLimiter: {
-		loadBannedIps(ips: string[]): void;
-		check(ip: string): 'ok' | 'ban' | 'banned';
+		check(ip: string): 'ok' | 'ban';
 	};
 	logger: {
 		info(message: string): void;
-		warn(message: string): void;
 		error(context: Record<string, unknown>, message: string): void;
 	};
 	repository: {
-		findAllBannedIps(): Promise<{ ip: string }[]>;
 		findPublicAsset(key: string): Promise<unknown | null>;
 		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
 		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
-		findAssetByIdWithProject(id: number): Promise<AssetDeletionRecord | null>;
-		markAssetDeleting(id: number): Promise<unknown>;
-		clearPosterIfMatches(projectId: number, assetId: number): Promise<unknown>;
-		markAssetDeleted(id: number): Promise<unknown>;
+		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
+		claimAssetForDeletion(id: number): Promise<AssetDeletionClaim | null>;
+		completeAssetDeletion(
+			claim: AssetDeletionClaim,
+			outbox: { bucket: string; reason: string; playbackReason: string },
+		): Promise<void>;
+	};
+}
+
+export interface BannedIpStartupGate {
+	warm(ips: string[]): void;
+	remove(ip: string): void;
+	check(ip: string): 'ok' | 'ban';
+	isReady(): boolean;
+}
+
+/**
+ * Protected downloads fail closed until the context-owned startup warmup has
+ * atomically installed the DB snapshot. A constructed/registered app can never
+ * interpret an uninitialized empty set as "no banned IPs".
+ */
+export function createBannedIpStartupGate(limiter: {
+	loadBannedIps(ips: string[]): void;
+	removeBan(ip: string): void;
+	check(ip: string): 'ok' | 'ban';
+}): BannedIpStartupGate {
+	let ready = false;
+	return {
+		warm(ips) {
+			limiter.loadBannedIps(ips);
+			ready = true;
+		},
+		remove: (ip) => limiter.removeBan(ip),
+		check(ip) {
+			if (!ready) {
+				throw new AppError(
+					503,
+					'Protected downloads are unavailable until the banned-IP cache is ready.',
+					'BANNED_IP_CACHE_UNAVAILABLE',
+				);
+			}
+			return limiter.check(ip);
+		},
+		isReady: () => ready,
+	};
+}
+
+/** Explicit startup owner. A DB failure is fatal and remains rejected. */
+export function createBannedIpWarmup(deps: {
+	repository: { findAllBannedIps(): Promise<{ ip: string }[]> };
+	gate: Pick<BannedIpStartupGate, 'warm'>;
+	logger: { info(value: unknown, message?: string): void; error(value: unknown, message?: string): void };
+}): { start(): Promise<void> } {
+	let startPromise: Promise<void> | undefined;
+	return {
+		start() {
+			startPromise ??= (async () => {
+				try {
+					const banned = await deps.repository.findAllBannedIps();
+					deps.gate.warm(banned.map(({ ip }) => ip));
+					deps.logger.info({ count: banned.length }, 'Loaded banned IP cache');
+				} catch (error) {
+					deps.logger.error(error, 'Banned IP cache warmup failed; aborting startup');
+					throw error;
+				}
+			})();
+			return startPromise;
+		},
 	};
 }
 
@@ -90,19 +153,6 @@ export function canStreamProtectedAsset(
 	if (user.role === 'ADMIN' || user.role === 'OPERATOR') return true;
 	if (asset.project.creatorId === user.id) return true;
 	return asset.project.members.some((member) => member.userId === user.id);
-}
-
-/** Initialize in-memory ban cache from DB on startup */
-export async function loadBannedIpCache(deps: AssetsServiceDependencies): Promise<void> {
-	try {
-		const banned = await deps.repository.findAllBannedIps();
-		deps.downloadLimiter.loadBannedIps(banned.map((b) => b.ip));
-		if (banned.length > 0) {
-			deps.logger.info(`Loaded ${banned.length} banned IPs`);
-		}
-	} catch {
-		deps.logger.warn('Could not load banned IPs (migration may be pending)');
-	}
 }
 
 /** Redirect to a presigned S3 URL for a public asset */
@@ -153,36 +203,34 @@ export async function streamProtectedAsset(
 	return { status: 302, headers: { 'Referrer-Policy': 'no-referrer' }, location: url };
 }
 
-/** Delete an asset: mark status, remove from S3, clear poster ref, mark deleted */
+/** Delete an asset using a locked DB identity claim around storage I/O. */
 export async function deleteAsset(
 	deps: AssetsServiceDependencies,
 	assetId: number,
 	actor: Actor,
 ) {
-	const asset = await deps.repository.findAssetByIdWithProject(assetId);
+	const lookup = await deps.repository.findAssetByIdWithProject(assetId);
+	if (!lookup) throw notFound('Asset not found');
+	await deps.loadProjectWithAccess(actor, lookup.projectId);
+
+	const asset = await deps.repository.claimAssetForDeletion(assetId);
 	if (!asset) throw notFound('Asset not found');
-	await deps.loadProjectWithAccess(actor, asset.projectId);
-
-	await deps.repository.markAssetDeleting(asset.id);
-
 	const bucket = deps.bucketForKind(asset.kind);
-	await deps.deleteOrQueue(bucket, asset.storageKey, 'asset-delete', { assetId: asset.id });
-	if (asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey) {
-		await deps.deleteOrQueue(bucket, asset.playbackStorageKey, 'asset-delete-playback', { assetId: asset.id });
-	}
+	await deps.repository.completeAssetDeletion(asset, {
+		bucket,
+		reason: 'asset-delete',
+		playbackReason: 'asset-delete-playback',
+	});
 
-	if (asset.project.posterAssetId === asset.id) {
-		await deps.repository.clearPosterIfMatches(asset.projectId, asset.id);
-	}
-
-	await deps.repository.markAssetDeleted(asset.id);
+	// The transaction above owns durability. The request only coalesces a worker
+	// wake and never waits for the global orphan backlog.
+	deps.wakeDeletionWorker();
 
 	return { projectId: asset.projectId };
 }
 
 export function createAssetsService(deps: AssetsServiceDependencies) {
 	return {
-		loadBannedIpCache: () => loadBannedIpCache(deps),
 		streamPublicAsset: (storageKey: string) => streamPublicAsset(deps, storageKey),
 		streamProtectedAsset: (
 			storageKey: string,

@@ -46,11 +46,16 @@ export type ApiErrorCode =
 	| 'PAYLOAD_TOO_LARGE'
 	| 'UNSUPPORTED_MEDIA_TYPE'
 	| 'RATE_LIMITED'
+	| 'IP_BANNED'
+	| 'BANNED_IP_CACHE_UNAVAILABLE'
 	| 'TOO_MANY_UPLOADS'
 	| 'USER_SUBMIT_FORBIDDEN_FIELD'
+	| 'INVALID_FILENAME'
 	| 'DRAINING'
 	| 'INTERNAL_ERROR'
-	| 'SIZE_MISMATCH';
+	| 'SIZE_MISMATCH'
+	| 'IDEMPOTENCY_CONFLICT'
+	| 'OPERATION_IN_PROGRESS';
 
 /** POST /api/auth/logout - response */
 export type LogoutResponse = { message: string };

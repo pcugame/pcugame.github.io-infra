@@ -1,6 +1,9 @@
-import type { FastifyInstance } from 'fastify';
-import { meProjectController } from './project/index.js';
+import type { FastifyPluginAsync } from 'fastify';
 
-export async function meRoutes(app: FastifyInstance): Promise<void> {
-	await app.register(meProjectController);
+export function createMeRoutes(deps: {
+	projectController: FastifyPluginAsync;
+}): FastifyPluginAsync {
+	return async function meRoutes(app): Promise<void> {
+		await app.register(deps.projectController);
+	};
 }

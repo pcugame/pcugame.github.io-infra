@@ -6,6 +6,7 @@ const mocks = {
 };
 
 const projectService = createProjectService({
+	deletionBuckets: { publicBucket: 'public', protectedBucket: 'protected' },
 	repository: {
 		findProjectsForUser: mocks.findProjectsForUser,
 		findProjectById: vi.fn(),
@@ -18,10 +19,9 @@ const projectService = createProjectService({
 		bulkDeleteProjectsReturningAssets: vi.fn(),
 	},
 	serializeProjectDetail: vi.fn(),
-	deleteAssetObjects: vi.fn(),
 	abortMultipart: vi.fn(),
-	cleanupWebglEntry: vi.fn(),
-	cleanupWebglDeployment: vi.fn(),
+	wakeDeletionWorker: vi.fn(),
+	wakeMaintenance: vi.fn(),
 	logger: { error: vi.fn() },
 });
 

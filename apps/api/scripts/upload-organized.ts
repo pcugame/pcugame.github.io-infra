@@ -15,23 +15,25 @@
  */
 
 import type { AssetPlaybackStatus } from '../src/generated/prisma/client.js';
+import type { ObjectStorage } from '../src/application/ports.js';
+import type { Env } from '../src/config/env.js';
 import { readdirSync, statSync, createReadStream, readFileSync, mkdtempSync } from 'node:fs';
 import { promises as fsp } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadEnv } from '../src/config/env.js';
-import { processImage } from '../src/modules/assets/upload/image-processing.js';
-import { processPdf } from '../src/modules/assets/upload/pdf-processing.js';
-import { processVideo } from '../src/modules/assets/upload/video-processing.js';
 import { validateFile } from '../src/modules/assets/upload/file-validator.js';
 import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
-import { uploadFile } from '../src/lib/storage.js';
-import { createPrismaClient } from '../src/lib/prisma-client.js';
-import { bucketForKind } from '../src/lib/s3.js';
 import { generateStorageKey } from '../src/shared/storage-path.js';
 import { copyFileSync } from 'node:fs';
 import type { AssetKind } from '../src/generated/prisma/client.js';
 import type { PrismaClient } from '../src/generated/prisma/client.js';
+import {
+	bucketForKind,
+	createScriptResources,
+	createScriptUploadProcessing,
+	type ScriptUploadProcessing,
+} from './resources.js';
 
 const SKIP_NAMES = new Set(['@eadir', '.ds_store', 'thumbs.db', 'desktop.ini']);
 
@@ -167,6 +169,9 @@ async function uploadAsset(
 	filePath: string,
 	kind: AssetKind,
 	tmpDir: string,
+	storage: ObjectStorage,
+	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
+	processing: ScriptUploadProcessing,
 ): Promise<{
 	storageKey: string;
 	playbackStorageKey?: string | null;
@@ -193,8 +198,8 @@ async function uploadAsset(
 			copyFileSync(filePath, tmpPath);
 			tempFiles.push(tmpPath);
 			const result = validated.mimeType === 'application/pdf'
-				? await processPdf({ tmpPath })
-				: await processImage({
+				? await processing.pdf({ tmpPath })
+				: await processing.image({
 					tmpPath, mimeType: validated.mimeType, ext: validated.ext, sizeBytes: validated.sizeBytes,
 				});
 			finalPath = result.tmpPath;
@@ -211,7 +216,7 @@ async function uploadAsset(
 			copyFileSync(filePath, tmpPath);
 			tempFiles.push(tmpPath);
 
-			const playback = await processVideo({
+			const playback = await processing.video({
 				tmpPath, mimeType: validated.mimeType, ext: validated.ext, sizeBytes: validated.sizeBytes,
 			});
 			if (playback.playbackStatus === 'FAILED') {
@@ -220,8 +225,8 @@ async function uploadAsset(
 			if (playback.playback) tempFiles.push(playback.playback.tmpPath);
 
 			const storageKey = generateStorageKey(validated.ext);
-			const bucket = bucketForKind(kind);
-			await uploadFile(
+			const bucket = bucketForKind(config, kind);
+			await storage.upload(
 				bucket,
 				storageKey,
 				createReadStream(tmpPath),
@@ -233,12 +238,12 @@ async function uploadAsset(
 			let playbackStorageKey: string | null = null;
 			let playbackMimeType = '';
 			let playbackSizeBytes = 0;
-			let playbackStatus = playback.playbackStatus;
+			let playbackStatus: AssetPlaybackStatus = playback.playbackStatus;
 			let playbackError = playback.playbackError;
 			if (playback.playback) {
 				const candidatePlaybackKey = generateStorageKey(playback.playback.ext);
 				try {
-					await uploadFile(
+					await storage.upload(
 						bucket,
 						candidatePlaybackKey,
 						createReadStream(playback.playback.tmpPath),
@@ -270,10 +275,10 @@ async function uploadAsset(
 
 		// Upload to S3
 		const storageKey = generateStorageKey(finalExt);
-		const bucket = bucketForKind(kind);
+		const bucket = bucketForKind(config, kind);
 		const stat = await fsp.stat(finalPath);
 		const stream = createReadStream(finalPath);
-		await uploadFile(bucket, storageKey, stream, finalMime, stat.size, storageOptionsForAsset(kind, 'original'));
+		await storage.upload(bucket, storageKey, stream, finalMime, stat.size, storageOptionsForAsset(kind, 'original'));
 
 		return { storageKey, mimeType: finalMime, sizeBytes: stat.size, converted };
 	} finally {
@@ -285,19 +290,29 @@ async function uploadAsset(
 
 async function main() {
 	const opts = parseArgs();
-	loadEnv();
-	const prisma = createPrismaClient();
+	const config = loadEnv();
+	const resources = createScriptResources(config);
+	const processing = createScriptUploadProcessing(config);
 
 	try {
-		await doUpload(prisma, opts);
+		await doUpload(
+			resources.prisma,
+			opts,
+			resources.storage,
+			config,
+			processing,
+		);
 	} finally {
-		await prisma.$disconnect();
+		await resources.close();
 	}
 }
 
 async function doUpload(
 	prisma: PrismaClient,
 	opts: { root: string; dryRun: boolean },
+	storage: ObjectStorage,
+	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
+	processing: ScriptUploadProcessing,
 ) {
 	// Read project folders
 	const folders = readdirSync(opts.root)
@@ -389,7 +404,14 @@ async function doUpload(
 
 				// Upload poster
 				if (folder.poster) {
-					const result = await uploadAsset(folder.poster, 'POSTER', tmpDir);
+					const result = await uploadAsset(
+						folder.poster,
+						'POSTER',
+						tmpDir,
+						storage,
+						config,
+						processing,
+					);
 					if (result.converted) totalConverted++;
 					records.push({
 						kind: 'POSTER',
@@ -410,7 +432,14 @@ async function doUpload(
 
 				// Upload games
 				for (const g of folder.games) {
-					const result = await uploadAsset(g, 'GAME', tmpDir);
+					const result = await uploadAsset(
+						g,
+						'GAME',
+						tmpDir,
+						storage,
+						config,
+						processing,
+					);
 					records.push({
 						kind: 'GAME',
 						storageKey: result.storageKey,
@@ -429,7 +458,14 @@ async function doUpload(
 
 				// Upload trailers
 				for (const t of folder.trailers) {
-					const result = await uploadAsset(t, 'VIDEO', tmpDir);
+					const result = await uploadAsset(
+						t,
+						'VIDEO',
+						tmpDir,
+						storage,
+						config,
+						processing,
+					);
 					if (result.converted) totalConverted++;
 					records.push({
 						kind: 'VIDEO',

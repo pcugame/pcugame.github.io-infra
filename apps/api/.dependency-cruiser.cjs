@@ -14,6 +14,32 @@ module.exports = {
 			to: { path: '(repository|lib/prisma)\\.ts$' },
 		},
 		{
+			name: 'controllers-and-indexes-do-not-use-runtime-or-env',
+			severity: 'error',
+			from: { path: '(controller|index)\\.ts$' },
+			to: { path: '(?:\\.runtime|/runtime|config/env)\\.ts$' },
+		},
+		{
+			name: 'controllers-and-indexes-do-not-use-global-resources',
+			severity: 'error',
+			from: { path: '(controller|index)\\.ts$' },
+			to: {
+				path: '(?:^|/)src/(?:infrastructure/production-ports|lib/(?:lifecycle|logger|prisma|s3|storage)|object-deletion|shared/(?:download-rate-limit|protected-download-limiter|site-settings|upload-limits))\\.ts$',
+			},
+		},
+		{
+			name: 'repositories-do-not-use-global-prisma',
+			severity: 'error',
+			from: { path: '(?:repository|\\.repository)\\.ts$' },
+			to: { path: '(?:^|/)src/lib/prisma\\.ts$' },
+		},
+		{
+			name: 'features-do-not-use-runtime',
+			severity: 'error',
+			from: { path: '(?:^|/)src/modules/' },
+			to: { path: '(?:\\.runtime|/runtime)\\.ts$' },
+		},
+		{
 			name: 'application-services-do-not-use-fastify',
 			severity: 'error',
 			from: { path: '(service|serializer|state-machine)\\.ts$' },

@@ -1,192 +1,233 @@
-# 백엔드 전수 감사 결과
+# 백엔드 전수 감사 최종 검증 보고서
 
-감사 기준일은 2026-07-21이며, 기준선은 `a6275f1` (`Add secure Unity WebGL hosting`)을 포함한 당시 워킹트리다. 외부 URL, 정상 요청·응답 envelope, DB 모델의 의미, 기존 migration, S3 key 형식은 유지했다. 다만 완료 중인 업로드를 새 세션으로 교체하는 경쟁 요청은 데이터 유실 방지를 위해 이제 `409 CONFLICT`로 거절한다.
+> 이전 판본의 최초 종결 선언은 production composition 증거가 부족해 무효 처리됐다. 이 판본은 티켓 000~014의 현재 코드, 티켓 015의 전체 production graph 재검증과 티켓 016의 dependency advisory 해소 결과만을 근거로 다시 판정한다.
 
-목표 구조는 다음과 같은 실용적 3계층과 작은 port다.
+## 1. 기준과 판정 규칙
 
-`Fastify controller → application service/use-case → repository / external-system port`
+- 최종 검증일: 2026-08-11
+- 코드 기준: ticket 014 커밋 014403b, ticket 015 검증과 ticket 016 dependency remediation
+- 범위: apps/api, packages/contracts, Prisma migration, PostgreSQL/Garage integration, 관련 Web build와 dependency graph
+- 외부 HTTP payload, Prisma wire 의미와 S3 key 형식은 변경하지 않았다.
+- 티켓 015는 production behavior를 새로 설계하지 않고 기존 구현 주장을 반증하는 검증 gate로만 사용했다.
 
-Fastify의 plugin 캡슐화와 schema 경계, Prisma의 의존성 주입 단위 테스트와 실제 DB 통합 테스트를 기준으로 삼았다. 범용 DI container, generic repository, Spring식 계층 복제는 도입하지 않았다.
-
-## 결론
-
-- 발견한 High 8건과 Medium 14건은 모두 `fixed`다.
-- Low 4건은 현재 단일 API replica라는 운영 가정과 외부 계약 호환성을 근거로 `accepted` 또는 `backlog`로 남겼다.
-- API 테스트는 49파일/445개에서 58파일/484개로 늘었다. 숫자보다 중요한 변화는 production module mock이 90회/27파일에서 42회/12파일로 감소한 것이다.
-- `npm test`는 API 484개, Web 86개, contracts 22개를 통과한다.
-- Docker 통합 환경에서 13개 migration, PostgreSQL, Garage multipart, 누락 chunk, 동시 complete, WebGL 배포·range·삭제를 검증했다.
-- 전체 workspace dependency audit 결과는 취약점 0건이다. Prisma CLI/client/adapter는 동일한 7.9.0으로 맞췄고, lockfile의 React Router와 transitive build/test 의존성도 advisory가 해소된 호환 버전으로 갱신했다.
-
-## 기준선과 최종 수치
-
-| 지표 | 기준선 | 최종 |
-|---|---:|---:|
-| API test files | 49 | 58 |
-| API tests | 445 | 484 |
-| `vi.mock` 호출 | 90 | 42 |
-| `vi.mock` 사용 파일 | 27 | 12 |
-| application service의 Fastify/Prisma/env/S3 직접 import | 다수 | 0, architecture rule로 차단 |
-| controller의 repository/Prisma 직접 import | 존재 | 0, architecture rule로 차단 |
-| 순환 의존성 | `storage → orphan → storage` | 0, dependency-cruiser로 차단 |
-| workspace dependency advisory | Prisma CLI 및 Web/transitive 계열 포함 | 0 |
-| JSON/params/query/response schema slot | 대부분 없음 | 모든 route에 존재; 좁은 response runtime schema는 Low backlog |
-
-테스트 수는 Vitest 실행 결과를, mock 수는 `^\s*vi\.mock\(` 정규식의 실제 호출만 집계했다.
-
-## 감사 항목
-
-| 심각도 | 파일·심볼 | 증거 | 위반된 경계 | 테스트하기 어려웠던 기능 | 수정 방식 | 추가 테스트 | 상태 |
-|---|---|---|---|---|---|---|---|
-| High | `src/app.ts#buildApp`, `src/server.ts#main` | production singleton과 background repository가 조립 코드 밖에서 생성되고 server가 Prisma/use-case를 직접 호출 | composition/application 경계 우회 | DB/S3/clock/request-id/shutdown 실패를 격리하기 어려움 | `BackendContext`, production port, `BackgroundMaintenance`, 지연 production import 도입 | `backend-context.test.ts`, Docker health/migration smoke | fixed |
-| High | `modules/admin/project/controller.ts`, `modules/me/project/controller.ts`, 기존 `project-access.ts` | controller가 repository 흐름을 직접 조립하고 접근 제어가 Fastify user와 Prisma를 동시에 앎 | controller → repository, framework → ORM 누출 | owner/member/operator/admin 분기와 거부 분기 | framework-neutral `Actor`, `createProjectAccessService`, `createProjectAccessRepository`로 분리 | `project-access.test.ts`, `admin-project-list-*.test.ts`, integration auth/session | fixed |
-| High | 기존 project submit/asset, year poster, asset upload 흐름 | raw `request.parts()`, temp FS, 변환, S3, DB rollback이 한 함수에 혼재 | HTTP adapter와 application workflow 혼합 | limit 초과, 중단 stream, S3 성공 뒤 DB 실패, temp cleanup | `MultipartCommandInput`, collector/pipeline/coordinator port, `*.adapter.ts`, service factory로 분리 | `project-submit-routes.test.ts`, `project-asset-upload-resource-guards.test.ts`, `upload-finalizer.test.ts`, `file-validator.test.ts` | fixed |
-| High | `lib/storage.ts`, 기존 orphan service | storage가 orphan service를 역참조하고 orphan이 다시 storage를 참조 | infrastructure 순환, 보상 정책이 storage에 침투 | 삭제 실패 queue와 reaper 실패·재시도 | `application/object-deletion.ts` coordinator와 `object-deletion.ts` production adapter 도입 | `object-deletion.test.ts`, `orphan-service.test.ts` | fixed |
-| High | `game-upload/complete-session.service.ts`, `session-maintenance.service.ts`, `repository.ts` | complete/recovery 중복, 상태 문자열 임의 갱신, S3 결과 불명 시 PENDING 복귀, transient DB 오류에도 원본 삭제 | workflow/state/transaction 경계 불명확 | missing/duplicate/concurrent complete, S3 complete 뒤 DB 실패, restart repair | 명시적 state machine, CAS, 공통 finalizer, terminal validation 오류와 recoverable infra 오류 분리, boot repair 재사용 | `game-upload-state-machine.test.ts`, `webgl-completion.test.ts`, `game-upload-recovery.test.ts`, integration concurrent complete | fixed |
-| High | `game-upload/repository.ts#createSessionReplacingActive` | 새 session이 `COMPLETING` session을 `CANCELLED`로 바꿀 수 있어 완료 객체가 복구 대상에서 이탈 | state machine과 repository transaction 불일치 | create/complete 경쟁과 orphan source | serializable transaction에서 COMPLETING active slot 교체 거부, 새 multipart 보상 abort, 409 반환 | `game-upload-resource-guards.test.ts` | fixed |
-| High | `webgl/deployment.ts`, public WebGL service, game finalizer | 배포 파일 쓰기, project pointer swap, 이전 tree 삭제의 원자성·보상 순서가 흩어짐 | S3/DB orchestration 누출 | 부분 배포, pointer DB 실패, 이전 배포 cleanup 실패 | deployment descriptor, 공통 completed-upload finalizer, pointer CAS transaction, 새 tree rollback과 이전 tree orphan queue | `upload-finalizer.test.ts`, `webgl-completion.test.ts`, `webgl-deletion.test.ts`, Docker WebGL smoke | fixed |
-| High | `assets/repository.ts#clearPosterIfMatches` | 함수명과 달리 poster 조건 없이 update했고 DB 오류를 삼킴; 동시 poster 교체를 지울 수 있음 | repository 원자성 위반 | asset 삭제와 poster 교체 경쟁 | `updateMany({ id, posterAssetId })` compare-and-set으로 변경하고 오류 전파 | `assets-repository.test.ts` | fixed |
-| Medium | `assets/service.ts`, `public/webgl.service.ts` | application service가 `FastifyReply`로 header/status/stream을 직접 기록 | HTTP framework 누출 | range/redirect/CSP/404를 service 단위로 검증하기 어려움 | `{ status, headers, body, location }` response descriptor 반환, controller adapter만 reply 처리 | `protected-asset-download.test.ts`, `public-webgl.test.ts` | fixed |
-| Medium | `project/serializer.ts` 및 기존 serializer | URL mapper가 `env()`를 직접 읽고 repository payload에 결합 | configuration/ORM 누출 | URL/base 변경, WebGL key 유효성 | `createProjectSerializer(baseUrl)`와 명시적 serializable DTO | `serialize-project.test.ts` (module mock 5개 제거) | fixed |
-| Medium | `admin/import/service.ts`, `repository.ts` | service 안의 dynamic Prisma import와 transaction 세부 구현 | application → ORM 누출 | 전체 rollback, slug 충돌, preview/execute 분리 | `ImportRepository`, transaction-scoped adapter factory와 runtime 조립 | `import-schema.test.ts`, `import-project-detail-contract.test.ts` | fixed |
-| Medium | `admin/export/service.ts`, 기존 export 전역 변수 | module-global lock/progress, 직접 FS/S3/time/UUID, destination 직접 쓰기 | application과 process/FS 인프라 혼합 | abort, 재실행, partial file, lock 해제 | `InMemoryExportProgressStore`, pure service, sibling temp + atomic rename file adapter | `export-service.test.ts`, `export-file-adapter.test.ts`, `webgl-export.test.ts` | fixed |
-| Medium | `auth/service.ts`, `plugins/auth.ts`, `shared/session.ts` | OAuth/env/time/repository singleton, touch 실패 후 cookie 연장, credential·email 가능 로그 | application → env/OAuth/DB 및 PII 운영 경계 | hosted-domain, token 오류, idle/absolute expiry, touch 실패 | verifier/clock/repository/session store 주입, cookie는 touch 성공 때만 갱신, 고정 진단 필드만 로그 | `auth-domain.test.ts`, `backend-context.test.ts`, `session*.test.ts`, `dev-auth.test.ts` | fixed |
-| Medium | `shared/site-settings.ts`, settings service/runtime | cache와 Prisma가 service 경계에 숨고 테스트가 module mock에 의존 | application → global cache/ORM | cache invalidate/update, 설정 기반 upload limit | `SettingsStore` port와 injected settings service/runtime | `site-settings-upload.test.ts`, `backend-context.test.ts` | fixed |
-| Medium | `shared/upload-limits.ts`, `download-rate-limit.ts`, `protected-download-limiter.ts` | process-global counters/cache/timer와 `Date.now` 고정 | lifecycle/time 경계 누출 | concurrency release, window expiry, shutdown timer cleanup | limiter port, injected clock/scheduler, lazy process adapter, BackendContext shutdown resource | `upload-limits.test.ts`, `download-rate-limit.test.ts`, `backend-context.test.ts` | fixed |
-| Medium | `lib/lifecycle.ts`, `server.ts` | hidden process lifecycle/timers와 direct background calls | server/application 경계 혼합 | drain timeout, scheduler cancel, startup recovery | injectable lifecycle delay/time, scheduler tasks, maintenance port, close resource 역순 정리 | `concurrency-guards.test.ts`, `backend-context.test.ts`, Docker restart/startup path | fixed |
-| Medium | `shared/http-route-schemas.ts`, 모든 controller | JSON route 56개에 Fastify schema가 사실상 없고 controller parser에만 의존 | HTTP validation/serialization 경계 누락 | handler 전 validation과 일관된 400 envelope | Zod compiler와 global `onRoute` schema hook, contracts 기반 body/query, params/header slot, normalized error mapper | `backend-context.test.ts`, `validation.test.ts`, route characterization tests | fixed |
-| Medium | logger/request context/auth logs/cleanup catch | request-id 전파가 약하고 일부 오류·PII 또는 cleanup 오류가 삼켜짐 | 운영 진단 경계 | OAuth 실패, session touch, rollback/temp cleanup 추적 | `AppLogger`, AsyncLocalStorage child logger, `x-request-id`, safe error type logging, cleanup warn/error | `request-context.test.ts`, `auth-domain.test.ts`, `export-file-adapter.test.ts` | fixed |
-| Medium | project/year/member/banned-ip/public service와 repository | service가 repository module type/Prisma payload를 알고 production module mock이 필요 | application → adapter/ORM 타입 누출 | CRUD 실패·권한 분기를 fake로 구성하기 어려움 | 기능별 port DTO, `createXService(deps)`, repository factory, 얇은 runtime adapter | `admin-year-service.test.ts`, `admin-project-list-service.test.ts`, `banned-ip-service.test.ts`, `public-years.test.ts` | fixed |
-| Medium | `prisma/schema.prisma`, game upload migration | status가 임의 문자열이고 양수 size/part 제약이 DB에 없음 | DB가 domain invariant를 보장하지 않음 | out-of-band writer, concurrent invalid state | status/sizes/part number CHECK migration 추가, application state machine과 일치 | Prisma validate/generate, fresh PostgreSQL migration, state-machine tests | fixed |
-| Medium | API lint/architecture/CI | API ESLint와 cycle/layer guard, migration/S3 integration job이 없음 | 회귀 방지 경계 누락 | `any`, floating promise, 새 cycle/direct import를 review에 의존 | type-aware ESLint, dependency-cruiser forbidden rules, CI verify + PostgreSQL/Garage integration | 로컬 lint/architecture/build/audit/integration 전체 통과 | fixed |
-| Medium | API test suite 전반 | 90개 module mock이 import graph와 전역 singleton을 복제 | 테스트가 production wiring에 결합 | 실제 실패 분기보다 mock shape 유지에 비용 발생 | fake port/service 주입으로 42개까지 축소; 남은 것은 HTTP wiring/legacy characterization 위주 | 신규 service/adapter/context 테스트 9파일 | fixed |
-| Low | `shared/http-route-schemas.ts#schema.response` | response slot은 전 route에 있으나 호환성 때문에 `z.unknown()` | runtime response narrowing 미완료 | 잘못된 response field를 runtime에서 차단하지 못함 | TS `@pcu/contracts` 응답 타입은 유지; endpoint별 response Zod는 점진 도입 | 현재 build/route characterization | backlog |
-| Low | `InMemoryExportProgressStore`, upload/download cache/lock | lock/cache가 process-local | 다중 replica 조정 부재 | replica 간 중복 export/limit 불일치 | 현재 단일 API container 가정으로 명시; Redis/DB lease port로 대체 가능 | process-local 동작 단위 테스트 | accepted |
-| Low | 일부 production repository/runtime adapter | application은 port를 받지만 몇 adapter export는 module-level Prisma singleton을 보존 | adapter 조립이 완전히 BackendContext 한곳에 모이지 않음 | adapter 자체 교체에는 factory/runtime 변경 필요 | service 경계는 차단했고 신규/high-risk repository는 factory 사용; 외부 import 호환 때문에 wrapper 유지 | architecture guard + fake-port service tests | accepted |
-| Low | fault-injected Docker matrix | 실제 PostgreSQL/Garage smoke는 핵심 transport와 concurrency를 검증하지만 DB/S3 강제 장애의 모든 조합은 fake-port 테스트 | 실제 장애 주입 harness 부재 | S3 성공 뒤 DB 실패 등 transport별 재현 | 결정 분기는 unit fake port, 실제 protocol은 Docker smoke로 분리 | recovery/finalizer/object-deletion unit + Docker smoke | backlog |
-
-## 1. 표준적이거나 합리적이지 않았던 파일 전체 목록과 근거
-
-아래 목록은 단순히 변경된 파일 전체가 아니라, 기준선에서 책임 혼합·역방향 의존·전역 수명·무결성 위험을 실제로 가진 파일 전체다.
-
-| 파일 | 기준선 문제 |
+| 상태 | 의미 |
 |---|---|
-| `apps/api/src/app.ts` | production singleton 생성, request-id/error/schema/shutdown 조립 지점 부재 |
-| `apps/api/src/server.ts` | Prisma, orphan, upload recovery와 timer를 직접 호출 |
-| `apps/api/src/lib/storage.ts` | 삭제 실패 때 orphan application service를 역참조해 cycle 생성 |
-| `apps/api/src/lib/lifecycle.ts` | process-global state와 실제 time/delay 고정 |
-| `apps/api/src/lib/logger.ts`, `lib/request-context.ts` | request logger와 root logger 경계가 불명확 |
-| `apps/api/src/modules/admin/project-access.ts` | 접근 정책, Fastify user, Prisma 조회가 한 모듈에 혼재 |
-| `apps/api/src/modules/admin/project/controller.ts`, `modules/me/project/controller.ts` | 접근 조회와 upload orchestration을 controller가 직접 수행 |
-| `apps/api/src/modules/admin/project/service.ts`, `project-submit.service.ts`, `project-asset.service.ts`, `serializer.ts`, `slug.service.ts`, `asset-cleanup.ts` | repository/config/upload/storage 책임과 ORM payload가 application에 누출 |
-| `apps/api/src/modules/admin/project/repository.ts` | 다수 query/transaction의 전역 Prisma 결합과 암시적 반환 타입 |
-| `apps/api/src/modules/admin/year/controller.ts`, `year/service.ts`, `year/repository.ts` | poster multipart, FS/S3, DB 보상과 HTTP가 혼재 |
-| `apps/api/src/modules/assets/controller.ts`, `assets/service.ts`, `assets/repository.ts` | reply 직접 조작, 접근/ban/storage/delete 흐름 혼재, poster clear 경쟁 조건 |
-| `apps/api/src/modules/assets/upload/upload.service.ts` | temp FS, validation, 변환, S3 commit/rollback을 하나의 service가 직접 수행; adapter임에도 service 이름 사용 |
-| `apps/api/src/modules/assets/upload/multipart-collector.ts`, `pdf-processing.ts`, `video-processing.ts` | raw multipart/FS 작업 및 cleanup 오류 진단 부족 |
-| `apps/api/src/modules/public/controller.ts`, `public/service.ts`, `public/webgl.service.ts` | Fastify reply/stream, env, storage query가 application 흐름에 결합 |
-| `apps/api/src/modules/webgl/deployment.ts` | protected source, public tree, DB pointer 보상이 completion과 분리 |
-| `apps/api/src/modules/admin/game-upload/controller.ts` | raw stream parser와 workflow 설정 혼재 |
-| `apps/api/src/modules/admin/game-upload/service.ts`, `create-session.service.ts`, `upload-chunk.service.ts`, `complete-session.service.ts`, `session-maintenance.service.ts`, `session-loader.ts`, `session-sizing.ts` | 상태 전이·시간·UUID·S3·DB가 암시적으로 결합되고 normal/recovery orchestration 중복 |
-| `apps/api/src/modules/admin/game-upload/repository.ts` | string state, broad update, active-slot 경쟁, transaction 경계가 외부에 노출 |
-| `apps/api/src/modules/admin/import/service.ts`, `import/repository.ts` | service의 dynamic Prisma import와 transaction 세부 누출 |
-| `apps/api/src/modules/admin/export/controller.ts`, `export/service.ts`, `export/repository.ts` | env path, module-global lock/progress, S3/FS/time/UUID 직접 접근 |
-| `apps/api/src/modules/admin/member/controller.ts`, `member/service.ts`, `member/repository.ts` | controller/repository 결합과 Prisma payload 중심 service |
-| `apps/api/src/modules/admin/banned-ip/controller.ts`, `banned-ip/service.ts`, `banned-ip/repository.ts` | DB와 process cache 동기화를 module singleton이 조립 |
-| `apps/api/src/modules/admin/settings/controller.ts`, `settings/service.ts`, 기존 `settings/repository.ts` | settings cache/DB/env가 중복 계층에 분산 |
-| `apps/api/src/modules/auth/controller.ts`, `auth/service.ts`, `auth/repository.ts`, `plugins/auth.ts` | OAuth/env/time/session DB/cookie와 PII 로그가 결합 |
-| `apps/api/src/modules/dev-auth/controller.ts` | production auth runtime/config에 직접 결합 |
-| `apps/api/src/modules/orphan/service.ts`, `orphan/repository.ts` | storage cycle, clock와 Prisma singleton 결합 |
-| `apps/api/src/shared/site-settings.ts`, `upload-limits.ts`, `protected-download-limiter.ts`, `download-rate-limit.ts`, `session.ts` | 숨은 DB/cache/counter/timer/env/time process state |
-| `apps/api/src/plugins/cookie.ts`, `cors.ts`, `csrf.ts`, `multipart.ts`, `rate-limit.ts` | 설정을 기본 `env()`로 숨겨 조립 경계 밖에서도 production config 생성 |
+| verified-fixed | production 코드 경로와 실패 분기 테스트 또는 강제 guard가 함께 존재한다. |
+| open | 실제 위반, 검증 공백 또는 현재 dependency advisory가 남아 있다. |
+| accepted | 사용자가 명시적으로 승인한 운영 제약이다. 이번 판정에는 0건이다. |
+| backlog | 요구사항을 위반하지 않는 Low 개선이다. 이번 판정에는 0건이다. |
 
-## 2. 구조 때문에 테스트하기 어려웠던 기능과 누락됐던 실패 시나리오
+service fake, 빈 route plugin 또는 전체 테스트 통과만으로 production composition을 인정하지 않았다.
 
-| 기능 | 기준선에서 어려웠던 이유 | 누락·취약했던 실패 시나리오 | 현재 증명 |
+## 2. 결론
+
+기존 재감사의 H-01~H-04, M-01~M-08, L-01은 모두 현재 production 코드와 실패 테스트로 verified-fixed다. 특히 한 BackendContext가 config에서 시작해 실제 55개 production route, controller, service, repository와 external adapter를 조립하며, 두 context의 limiter, settings, lifecycle, export progress, ban cache, scheduler와 close 경계가 분리됨을 다시 검증했다.
+
+ticket 016은 clean install에서 발견한 dependency advisory D-01도 실제 사용 경로의 호환성 검증과 함께 해소했다.
+
+- 전체 dependency graph와 production-only graph 모두 audit 0이다.
+- Prisma, Fastify/URL parser, Web router와 image processor를 안전 버전으로 올렸다.
+- 최신 `pdf-to-img`가 취약 PDF.js를 고정하는 경로는 patched PDF.js override와 정상/embedded-JavaScript/손상 PDF 실제 raster test로 검증했다.
+- API Docker image의 Linux Sharp/libvips binary pin도 같은 안전 버전으로 맞췄다.
+
+따라서 H-01~H-04, M-01~M-08, L-01, D-01은 모두 verified-fixed이며 저장소 전체 감사를 종결한다. accepted/backlog로 낮춘 항목은 없다.
+
+## 3. Finding 최종 판정
+
+| ID | 최종 production 증거 | 실패·회귀 증거 | 상태 |
 |---|---|---|---|
-| project 접근/CRUD | Fastify user와 Prisma 조회가 결합 | linked member 허용, unrelated user 거부, status update 권한 | pure policy/service + route tests |
-| project/year multipart | request stream, temp FS, 변환, S3, DB가 한 객체 | stream abort, slot release, temp cleanup, S3 commit 뒤 DB rollback | fake upload coordinator와 resource-guard tests |
-| asset 삭제 | S3 삭제와 DB poster/status 순서가 암시적 | poster 동시 교체 CAS, playback object cleanup 실패 | repository CAS test + deletion service tests |
-| game chunk upload | global limiter와 repository module mock 필요 | 중단 body, short chunk, S3 실패 뒤 slot release, retry | `game-upload-resource-guards.test.ts` |
-| game complete | 상태 전이와 S3 완료 결과가 분리되지 않음 | missing chunk, duplicate/concurrent complete, outcome unknown | unit tests + actual Docker concurrent complete |
-| restart recovery | normal complete와 별도 코드, storage error를 not-found로 취급 | S3 complete 뒤 DB failure, head outage, invalid archive cleanup | `game-upload-recovery.test.ts`와 공통 finalizer |
-| WebGL deploy | public upload와 pointer swap/cleanup 결합 | partial deploy, DB swap failure, old tree cleanup failure | finalizer/completion/deletion tests + Docker smoke |
-| storage delete compensation | storage와 orphan이 순환 | queue write 실패, reaper retry/backoff | object-deletion/orphan tests |
-| export | module-global lock와 직접 destination write | concurrent start, abort, partial file 노출, retry/cleanup | export service/file adapter tests |
-| import | dynamic Prisma import | transaction 전체 rollback, slug collision | import schema/contract tests와 transaction adapter |
-| OAuth/session | OAuth client, time, DB, cookie가 고정 | bad token, hosted-domain 거부, idle/absolute expiry, touch DB failure | auth/session/context/dev-auth tests |
-| settings/limiter | process cache/timer를 import할 때 생성 | cache update, timer shutdown, deterministic window expiry | settings/upload/download/context tests |
-| HTTP boundary | handler 내부 parse만 존재 | handler 진입 전 schema 거부, 일관된 error envelope | injected BackendContext route test |
-| observability | logger singleton과 PII-rich 오류 | request-id 누락, cleanup/session 오류 무진단 | request-context/auth/export tests |
+| H-01 | backend-context.ts#createProductionBackendContext가 context별 Prisma, S3, storage, settings, limiter, lifecycle, feature graph와 실제 route tree를 조립한다. | production-resource-ownership.test.ts의 full graph A/B test가 등록 I/O 0, 55 route, warmup, 격리와 owner-only close를 한 harness에서 검증한다. | verified-fixed |
+| H-02 | WebGL public rollback과 protected recovery source terminal deletion이 별도 operation이다. | webgl-completion.test.ts, webgl-deployment-compensation.test.ts와 game-upload-production.postgres.test.ts가 DB pointer 실패 뒤 source 보존과 새 graph recovery를 검증한다. | verified-fixed |
+| H-03 | asset delete/GAME replace/setPoster는 bounded Serializable transaction, row lock, CAS와 durable outbox를 사용한다. | asset-poster-concurrency.postgres.test.ts 5개와 orphan-durability.postgres.test.ts가 실제 PostgreSQL 경쟁 및 이중 실패를 검증한다. | verified-fixed |
+| H-04 | assets/banned-IP controller는 context graph와 명시적 startup warmup을 사용한다. | assets-banned-production-wiring.test.ts가 등록 I/O 0, fail-closed, warmup 실패, A/B cache와 close를 검증한다. | verified-fixed |
+| M-01 | project multipart, game upload를 포함한 모든 feature가 composition factory를 통해 context resource를 받는다. runtime compatibility consumer는 0이다. | full graph test, project-multipart-production-wiring.test.ts, game-upload-production-wiring.test.ts와 architecture inventory가 실제 controller route를 검증한다. | verified-fixed |
+| M-02 | BackendResourceOwner가 owned/borrowed lease, start, reverse close와 exactly-once promise를 소유하고 server runtime은 signal만 소유한다. | production-resource-ownership.test.ts와 server-runtime.test.ts가 partial construction/start, 동시 close, signal/listen 실패와 S3/Prisma exactly-once close를 검증한다. | verified-fixed |
+| M-03 | context-owned cached settings store가 bounded warmup/TTL/retry/close를 제공하고 같은 instance가 project/year/game upload에 주입된다. | project-member-settings-production-wiring.test.ts와 실제 game route의 낮은 maxGameFileMb 회귀가 실패 후 회복과 A/B 격리를 검증한다. | verified-fixed |
+| M-04 | exhibition poster mutation은 locked Serializable transaction과 durable cleanup intent를 사용한다. | year-poster-concurrency.postgres.test.ts 7개와 year-production-wiring.test.ts가 경쟁, abort, limiter, storage/DB/outbox/temp 실패를 검증한다. | verified-fixed |
+| M-05 | ROUTE_RUNTIME_CONTRACTS가 가능한 명시 route 57개와 production route 55개의 input/response schema를 소유한다. | http-route-runtime-contracts.test.ts가 57/55/21 inventory, family별 negative input, response drift와 parser 400/415를 실제 Fastify injection으로 검증한다. | verified-fixed |
+| M-06 | fake external adapter를 넣되 실제 createProductionBackendContext, default route loader와 controller factory를 조립하는 full graph harness가 존재한다. | production slice 12파일/110 tests와 새 full graph lifecycle test가 empty route 없이 production graph를 실행한다. vi.mock은 legacy characterization 12회/5파일로 제한된다. | verified-fixed |
+| M-07 | architecture guard와 dependency-cruiser가 controller→runtime/env/global resource, repository→global Prisma, feature runtime과 stateful singleton을 금지한다. | 금지 fixture 16개가 실제 exit 1, 허용 factory/port runner 2개가 exit 0이며 production graph violation은 0이다. | verified-fixed |
+| M-08 | 일반 delete+queue 이중 실패는 전파되고 commit 후 cleanup 경로는 exact/prefix outbox를 transaction 안에 기록한다. | orphan unit/reaper tests와 실제 PostgreSQL fault 5개가 nonterminal/committed state 및 재시도 가능성을 검증한다. | verified-fixed |
+| L-01 | year, ID, chunk, byte count는 canonical safe integer만 받고 numeric-looking slug는 명시적으로 분리된다. | validation, public-years, game upload와 route runtime contract test가 suffix/sign/decimal/exponent/overflow를 거부한다. | verified-fixed |
+| D-01 | Prisma/Fastify/Web router/Sharp와 lockfile 전이 의존성을 안전 버전으로 갱신하고, `pdf-to-img@6.2.0`에는 `pdfjs-dist@6.2.108`을 강제한다. Docker Linux Sharp/libvips pin도 함께 정렬했다. | clean install의 전체/production audit 0, media processor 4 tests, Docker Prisma generate/validate/build와 전체 unit/integration이 통과한다. | verified-fixed |
 
-## 3. Before/after 파일·테스트 대응표
+## 4. Production object graph와 resource 수명
 
-| Before | After | 책임 이동 | 증명 테스트 |
-|---|---|---|---|
-| `app.ts`, `server.ts`의 singleton 조립 | `backend-context.ts`, `application/ports.ts`, `infrastructure/production-ports.ts` | production 생성과 background maintenance를 composition root로 | `backend-context.test.ts`, health smoke |
-| `storage.ts ↔ orphan/service.ts` | `application/object-deletion.ts`, `object-deletion.ts`, `orphan/runtime.ts` | storage는 object operation만, coordinator가 queue 보상 | `object-deletion.test.ts`, `orphan-service.test.ts` |
-| Fastify/Prisma 결합 `project-access.ts` | `project-access.ts` pure policy/service + `project-access.repository.ts` | 접근 정책과 DB adapter 분리 | `project-access.test.ts` |
-| project service의 repository/env payload | `project/ports.ts`, `runtime.ts`, `serializer.runtime.ts` | application DTO와 production adapter 분리 | admin project service/route/serializer tests |
-| raw multipart project submit | `application/http-input.ts`, `upload-ports.ts`, `project-submit.service.ts`, `project-submit.runtime.ts` | HTTP parts adapter와 upload use-case 분리 | project submit/resource guard tests |
-| 단일 asset upload의 FS/S3/DB 혼합 | `project-asset-upload.adapter.ts`, `project-asset.service.ts`, `project-asset.runtime.ts` | temp 수집은 adapter, 보상은 coordinator/service | project asset resource guard tests |
-| exhibition poster service의 raw request/FS | `year/poster-upload.adapter.ts`, `year/ports.ts`, `year/runtime.ts` | poster lifecycle port 주입 | `admin-year-service.test.ts` |
-| `assets/upload/upload.service.ts` | `assets/upload/upload.adapter.ts` | 인프라 작업을 정확히 adapter로 명명·격리 | file validator/video/resource tests |
-| asset/public service의 `FastifyReply` | `shared/response-descriptor.ts`, controller reply adapter | service는 framework-neutral descriptor 반환 | protected asset/public WebGL tests |
-| game completion/recovery 중복 | `state-machine.ts`, `finalize-completed-upload.service.ts`, `complete-session.service.ts`, `session-maintenance.service.ts` | 정상/재시작이 같은 finalizer와 상태 규칙 사용 | state-machine/finalizer/recovery/completion tests |
-| active upload broad status update | repository serializable CAS + `ActiveUploadCompletionInProgressError` | COMPLETING 보존, 새 multipart abort | game upload resource guard test |
-| 문자열 상태만 있는 DB | `20260721010000_game_upload_state_constraints/migration.sql` | DB CHECK로 상태/양수 invariant 보장 | Prisma validate + fresh Docker migration |
-| import service의 dynamic Prisma | `import/repository.ts#createImportRepository`, `import/runtime.ts` | transaction adapter 주입 | import contract/schema tests |
-| export global lock/직접 file write | `export/service.ts`, `export/file.adapter.ts`, `export/runtime.ts` | progress store와 atomic file adapter 분리 | export service/file tests |
-| auth service/plugin singleton | `auth/service.ts#createAuthService`, `auth/runtime.ts`, injected auth plugin | verifier/clock/session store/config 주입 | auth-domain/context/session tests |
-| settings repository/cache 중복 | `settings/service.ts`, `settings/runtime.ts`, `SettingsStore` | cache는 production adapter, service는 port만 | site settings tests |
-| eager protected limiter | lazy `protected-download-limiter.ts`, injected-clock `download-rate-limit.ts` | import side effect 제거, shutdown 명시 | download limiter/context tests |
-| route별 schema 부재 | `shared/http-route-schemas.ts` + Zod compiler | HTTP 조립 경계에서 schema 일괄 부착 | backend context/validation/route tests |
-| 수동 review에 의존한 경계 | `eslint.config.js`, `.dependency-cruiser.cjs`, CI workflow | lint/cycle/layer/audit/integration 자동 차단 | lint/architecture/CI 명령 |
+~~~
+runProductionServer(config)
+  → createProductionBackendContext(config)
+      → context-owned external resources
+      → feature composition factories
+      → actual BackendRoutes
+  → buildApp({ context })
+      → plugins + schemas + actual route tree
+  → context.start()
+      → settings warmup
+      → banned-IP warmup
+      → stale upload recovery
+      → protected-download and maintenance schedules
+  → app/server close
+      → BackendResourceOwner reverse close, exactly once
+~~~
 
-## 외부 계약과 무결성 변경
+### 4.1 Resource ownership matrix
 
-- URL, 정상 응답 envelope, S3 bucket/key layout, public WebGL URL, 기존 migration은 변경하지 않았다.
-- Fastify error mapper는 기존 `{ ok: false, error: { code, message, details? } }` envelope를 유지한다.
-- multipart와 stream route는 body를 JSON schema로 잘못 해석하지 않고 params/query/header/response slot만 적용한다.
-- 완료 중인 동일 종류 upload를 교체하려는 요청만 새로 `409 CONFLICT`가 된다. 이전 동작은 완료 객체를 orphan으로 만들 수 있어 호환성보다 무결성을 우선했다.
-- 새 migration은 기존 string column을 enum으로 바꾸지 않고 CHECK만 추가하므로 Prisma payload와 wire contract는 그대로다.
+| Resource | 생성/조립 위치 | 상태와 start | close owner | 최종 판정 |
+|---|---|---|---|---|
+| Env | server/app가 loadEnv 결과를 context에 전달 | immutable context config | 해당 없음 | context input |
+| Logger | createRootLogger(config) | context별 logger/child logger | close 불필요 | isolated |
+| Prisma client/pool | createPrismaClientForDatabase | context별 DB adapter | BackendResourceOwner → $disconnect | owned |
+| S3 client/socket | createS3Client(config) | context별 client, construction socket I/O 0 | BackendResourceOwner → destroy | owned |
+| ObjectStorage | createObjectStorage(context S3) | context bucket/config adapter | S3 owner가 transport 종료 | owned adapter |
+| FileSystem/processing | createNodeFileSystem, createNodeProjectUploadProcessing | stateless adapter; request workflow가 temp cleanup | workflow/context close 대기 | context port |
+| Google verifier | createGoogleTokenVerifier | context별 OAuth client | close 불필요 | isolated |
+| Clock/ID | production-ports factories | context별 deterministic seam | close 불필요 | isolated |
+| Scheduler | createNodeScheduler | task handle은 각 owning resource가 start에서 생성 | dependent resource close가 cancel | isolated |
+| Settings cache | createPrismaSettingsStore | explicit warmup, TTL/retry/invalidate | store close | owned |
+| Upload limiter | createUploadLimiterPort | context-local semaphore | limiter close | owned |
+| Lifecycle | createLifecyclePort | context-local state/in-flight | lifecycle close | owned |
+| Protected limiter/ban cache | createProtectedDownloadLimiter | explicit timer start, DB ban warmup | close/cancel | owned |
+| Export progress/lock | createExportProgressStore | context-local active export | importExport settle 후 store close | owned |
+| Import/export workflow | createImportExportProductionGraph | active export/abort tracking | graph close | owned |
+| Game/WebGL/orphan workflow | createGameUploadProductionGraph | explicit stale recovery, active work tracking | graph close | owned |
+| Maintenance schedule | createMaintenanceSchedule | explicit purge/reaper timers | cancel 후 in-flight settle | owned |
+| Fastify app | buildApp(context) | request lifecycle, route/plugins | onClose → context.close | owner bridge |
+| Signal runner | createServerRuntime | SIGTERM/SIGINT와 drain sequence | handler removal, app/context close | runner-owned |
 
-## 검증 결과
+등록 순서는 logger, clock, IDs, scheduler, filesystem, verifier, Prisma, S3, storage, settings, upload limiter, lifecycle, protected limiter, export progress, assets warmup, import/export, game workflow, maintenance schedule다. close는 이 순서의 역순이며 borrowed lease는 시작하거나 닫지 않는다.
 
-| 명령 | 결과 |
+### 4.2 Runtime/compatibility inventory
+
+| Inventory | 최종 값 |
+|---|---:|
+| feature runtime files | 0 |
+| controller runtime imports | 0 |
+| controller env imports | 0 |
+| repository global Prisma imports | 0 |
+| non-composition stateful imports | 0 |
+| feature runtime imports | 0 |
+| production architecture violations | 0 |
+| stateful allowlist | request-scoped AsyncLocalStorage 1개 |
+
+## 5. Production graph와 실패 matrix 증거
+
+| 영역 | 실제 production graph 증거 |
 |---|---|
-| `npm run lint -w apps/api` | ESLint type-aware 규칙 + `tsc --noEmit` 통과 |
-| `npm run architecture -w apps/api` | cycle/layer 위반 0 |
-| `npm test -w apps/api` | 58 files, 484 tests 통과 |
-| `npm test` | API 484 + Web 86 + contracts 22 통과 |
-| `npm run build` | contracts/API/Web production build 통과 |
-| `prisma generate` / `prisma validate` | Prisma Client 7.9.0 생성, schema valid |
-| `npm audit --audit-level=high` | 전체 workspace 0 vulnerabilities |
-| `npm run test:integration` | PostgreSQL + Garage host/e2e smoke 모두 통과 |
+| 전체 graph | production-resource-ownership.test.ts가 fake Prisma/S3/storage/filesystem/OAuth/clock/ID/scheduler로 두 개의 default production context와 app을 조립한다. |
+| registration | context construction와 buildApp 등록 전후 DB/S3/storage/timer call 0, production route 55개 존재를 확인한다. |
+| startup | settings warmup, banned DB load, stale COMPLETING sweep와 context별 scheduler 3개가 explicit start에서만 실행된다. |
+| isolation/close | limiter, lifecycle, ban cache, export progress, settings가 A/B에서 분리되고 A close가 A timer/S3/Prisma만 한 번 닫는다. B health route는 계속 동작한다. |
+| feature wiring | assets, auth, public, project/member/settings, year, import/export, multipart, game/WebGL의 각 production-wiring test가 실제 controller factory와 prefix를 사용한다. |
+| server | import side-effect 0, startup/listen/signal race, drain과 close 오류가 server-runtime.test.ts에 고정됐다. |
+| DB 경쟁/fault | asset 5, year 7, orphan durability 5, import transaction 2, game upload/recovery 4개가 실제 PostgreSQL transaction을 사용한다. |
+| Garage protocol | integration smoke/E2E가 multipart, missing chunk, concurrent complete, WebGL deploy/CSP/CORS/Range/encoding/delete를 실제 Garage에서 검증한다. |
+| HTTP contract | health/auth/public/assets/admin/me/game/import/export 전체 family를 actual Fastify injection으로 검증한다. |
 
-로컬 NixOS에서는 Prisma가 존재하지 않는 `linux-nixos` precompiled schema-engine URL을 요청했다. 동일 7.9.0 commit의 설치된 `schema-engine-debian-openssl-3.0.x`를 `PRISMA_SCHEMA_ENGINE_BINARY`로 지정해 generate/validate했고, Debian 기반 Docker/CI에서는 기본 generate가 통과했다.
+## 6. HTTP runtime contract matrix
 
-## CI와 rollback
+### 6.1 Route family
 
-CI `verify`는 install → Prisma generate → 전체 test → lint → architecture → workspace audit → build 순서다. 이후 별도 `integration` job이 PostgreSQL과 Garage를 띄우고 항상 volume까지 정리한다.
+| Family | 가능한 명시 route |
+|---|---:|
+| CORS | 1 |
+| Health | 2 |
+| Auth | 3 |
+| Dev auth | 2 |
+| Public WebGL | 6 |
+| Public data | 5 |
+| Assets | 3 |
+| Me project | 1 |
+| Admin exhibitions | 6 |
+| Admin projects | 10 |
+| Admin members | 4 |
+| Game upload | 6 |
+| Admin banned IP | 2 |
+| Admin settings | 2 |
+| Admin import | 2 |
+| Admin export | 2 |
+| 합계 | 57 |
 
-코드 rollback은 논리 단계별로 context/ports, feature runtime, upload state machine 순서의 revert가 가능하다. 새 DB 제약만 되돌릴 때는 다음 SQL이면 충분하다.
+production은 dev-auth 2개를 제외한 55개다. GET 21개에서 synthetic HEAD 21개가 파생된다.
 
-```sql
-ALTER TABLE "game_upload_parts"
-DROP CONSTRAINT IF EXISTS "game_upload_parts_part_number_check";
+### 6.2 Boundary classification
 
-ALTER TABLE "game_upload_sessions"
-DROP CONSTRAINT IF EXISTS "game_upload_sessions_sizes_check";
+| Body boundary | 수 |
+|---|---:|
+| none | 34 |
+| JSON | 15 |
+| multipart | 6 |
+| octet-stream | 1 |
+| CORS plugin | 1 |
 
-ALTER TABLE "game_upload_sessions"
-DROP CONSTRAINT IF EXISTS "game_upload_sessions_status_check";
-```
+| Response boundary | 수 |
+|---|---:|
+| JSON | 36 |
+| no-content | 13 |
+| stream | 3 |
+| redirect | 3 |
+| errors-only | 1 |
+| CORS plugin | 1 |
 
-이 rollback은 데이터나 S3 object를 변환하지 않는다. 외부 key migration도 없으므로 별도 object rollback은 필요하지 않다.
+모든 route에 params/query/response 분류가 있고 JSON/octet route에는 body schema가 있다. multipart와 raw stream은 handler parser 책임을 명시하며 z.unknown fallback은 없다.
 
-## 남은 Low 작업
+## 7. 이전 open 항목의 해소
 
-1. endpoint별 Zod response schema를 추가해 현재 `z.unknown()` runtime response slot을 좁힌다.
-2. API를 다중 replica로 확장할 때 export lock, download ban cache, upload limiter, scheduler leader를 Redis/DB lease 구현으로 교체한다.
-3. legacy production repository wrapper를 기능별 factory만 export하도록 점진 정리한다.
-4. Docker fault proxy 또는 test-only failure port를 추가해 DB/S3 오류 조합도 실제 transport 환경에서 반복한다.
+| 이전 open 주장 | 현재 증거 | 판정 |
+|---|---|---|
+| BackendContext가 singleton alias만 반환 | context별 resource와 모든 feature graph를 직접 생성한다. | verified-fixed |
+| project access/controller가 global repository 사용 | project access/repository factory identity가 multipart/game consumer까지 공유된다. | verified-fixed |
+| multipart가 global limiter/FS/runtime 사용 | context port와 실제 admin/me route resource-guard tests가 존재한다. | verified-fixed |
+| game active slot은 fake 예외만 검증 | 실제 PostgreSQL COMPLETING replacement와 concurrent CAS를 검증한다. | verified-fixed |
+| serializer가 env runtime 캡처 | createProjectSerializer(baseUrl)만 사용하고 runtime 파일은 없다. | verified-fixed |
+| export progress/FS/S3가 module singleton | context-owned import/export graph와 A/B close/abort/atomic rename tests가 있다. | verified-fixed |
+| settings first-failure sticky default | bounded retry/TTL/reload와 actual upload consumer가 같은 store를 사용한다. | verified-fixed |
+| limiter/lifecycle/scheduler가 process-global | factory가 context별 instance를 만들고 full graph A/B test가 분리를 검증한다. | verified-fixed |
+| feature runtime/repository compatibility export | architecture inventory 0, 금지 fixture가 회귀를 차단한다. | verified-fixed |
+| architecture rule 공백 | guard 10개, dependency-cruiser 6개 금지 fixture와 허용 fixture가 실행된다. | verified-fixed |
+| module mock 중심 | module mock 12회/5파일, production wiring과 full graph test가 별도 증거를 제공한다. | verified-fixed |
+| process-local lock/cache accepted 필요 | production feature lock/cache가 context별로 격리돼 예외 승인이 필요 없다. | verified-fixed |
+| DB/S3 fault matrix가 backlog | 실제 PostgreSQL fault/concurrency와 Garage protocol smoke로 분리 검증한다. | verified-fixed |
+
+## 8. D-01 dependency advisory 해소
+
+ticket 016에서 다음 경로를 안전 버전으로 갱신했다.
+
+- API/Prisma graph: Prisma CLI/client/adapter 7.9.1, @prisma/dev 0.24.17, find-my-way 9.7.0, valibot 1.4.2
+- API route/schema graph: Fastify 5.11.3, fast-uri 3.1.5/4.1.2
+- 실제 PDF upload processing: pdf-to-img 6.2.0 + pdfjs-dist 6.2.108 override
+- 실제 image processing: sharp 0.35.3, Docker Linux sharp 0.35.3/libvips 1.3.2
+- Web router: react-router-dom/react-router 7.18.2
+- 전체 build graph: brace-expansion 1.1.18/5.0.9, js-yaml 4.3.1, nanoid 3.3.18, postcss 8.5.26
+
+`npm audit fix --force`의 PDF converter downgrade나 검증 없는 major 변경은 사용하지 않았다. PDF.js override는 정상 PDF, embedded JavaScript action 비실행, 손상 PDF 거부를 실제 raster processor에서 검증했고 Sharp는 정상/손상 image decode 경계와 Debian image에서 함께 검증했다.
+
+재현, 버전 선택과 완료 증거는 backend-audit-tickets/016-current-dependency-advisories.md에 고정했다.
+
+## 9. 최종 검증 기준선
+
+| 명령/질의 | 결과 |
+|---|---|
+| production graph 집중 suite | 12 files / 110 tests 통과 |
+| npm test | API 671, Web 86, contracts 26 통과; PostgreSQL 조건부 23개 skip |
+| npm run lint | API type-aware ESLint/tsc와 Web ESLint 통과 |
+| npm run architecture | runtime/import inventory 0, self-test 18 runners 통과, 176 modules/354 dependencies violation 0 |
+| npm run build | contracts, API, Web production build 통과 |
+| Prisma generate/validate | host NixOS는 존재하지 않는 linux-nixos engine URL 때문에 실행 불가; Debian API builder의 clean install에서 Prisma 7.9.1 generate/build/schema validate 통과 |
+| npm audit --audit-level=high | 0 vulnerabilities |
+| npm audit --omit=dev --audit-level=high | 0 vulnerabilities |
+| npm run test:integration | Garage smoke/E2E 통과; PostgreSQL orphan 5, asset 5, year 7, import 2, game/recovery 4 통과 |
+| npm run testenv:clean | 이번 실행의 container, network와 volume 제거 완료; compose ps 0 확인 |
+
+## 10. 감사 종료 판정
+
+다음 구조 조건은 모두 충족됐다.
+
+- 모든 stateful resource의 생성자, 사용자, start와 close owner가 production composition root에 명시된다.
+- actual controller factory와 55-route production tree가 fake external adapter로 조립된다.
+- registration은 DB/S3/timer I/O가 없고 explicit startup만 warmup/recovery/schedule을 수행한다.
+- 두 context의 state와 owned close가 격리된다.
+- runtime/env/global Prisma/singleton 회귀가 정적 guard로 차단된다.
+- WebGL recovery, asset/year 경쟁, orphan durability, import transaction과 game upload CAS가 실제 PostgreSQL 또는 명시적 storage fault harness로 검증된다.
+- 가능한 route 57개와 production route 55개의 input/response runtime contract가 고정된다.
+
+D-01을 포함한 모든 finding이 verified-fixed이고 전체 검증 기준선이 다시 통과했다. accepted 또는 backlog 예외 없이 저장소 전체 감사를 종결한다.
