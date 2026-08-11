@@ -1,4 +1,5 @@
 import type { AssetKind } from '@pcu/contracts';
+import type { Readable } from 'node:stream';
 import type {
 	AppLogger,
 	FileSystem,
@@ -87,6 +88,37 @@ function isMissingFile(error: unknown): boolean {
 		&& error.code === 'ENOENT';
 }
 
+async function destroyAndWaitForClose(body: Readable): Promise<void> {
+	if (body.closed) return;
+
+	await new Promise<void>((resolve, reject) => {
+		let cleanupError: unknown;
+		const observeCleanupError = (error: unknown) => {
+			cleanupError ??= error;
+		};
+		const finishCleanup = () => {
+			body.off('error', observeCleanupError);
+			body.off('close', finishCleanup);
+			if (cleanupError === undefined) resolve();
+			else reject(cleanupError);
+		};
+
+		// The listener does not suppress stream failures: it holds the first one
+		// until the close event proves that the backing file is no longer in use,
+		// then rejects with that same error.
+		body.on('error', observeCleanupError);
+		body.once('close', finishCleanup);
+		try {
+			body.destroy();
+		} catch (error) {
+			cleanupError ??= error;
+			// A conforming Readable emits close after destroy. If a broken adapter
+			// does not, remain fail-closed instead of deleting the backing temp file.
+			if (body.closed) finishCleanup();
+		}
+	});
+}
+
 export class ProjectTempCleanupError extends AggregateError {
 	readonly residuePaths: readonly string[];
 	readonly maxAttempts: number;
@@ -138,22 +170,39 @@ export function createProjectUploadPipeline(
 				: {}),
 		});
 		pendingObjects.push({ bucket, key, kind, purpose, ...(intentId ? { intentId } : {}) });
+		const body = deps.fileSystem.createReadStream(filePath);
 		try {
 			await deps.storage.upload(
 				bucket,
 				key,
-				deps.fileSystem.createReadStream(filePath),
+				body,
 				contentType,
 				stat.size,
 				storageOptionsForAsset(kind, purpose),
 			);
 		} catch (error) {
+			// A storage adapter may reject before it starts consuming the body. Stop
+			// and settle the request-owned stream before temp cleanup removes its
+			// backing file, otherwise fs.ReadStream can open later and emit an
+			// unhandled ENOENT.
+			let streamCleanupError: unknown;
+			try {
+				await destroyAndWaitForClose(body);
+			} catch (cleanupError) {
+				streamCleanupError = cleanupError;
+			}
 			if (intentId) await deps.uploadIntents?.recordAmbiguousError(intentId, error).catch(
 				(intentError) => deps.logger.error(
 					{ error: intentError, intentId, bucket, storageKey: key },
 					'Failed to annotate ambiguous upload intent',
 				),
 			);
+			if (streamCleanupError !== undefined) {
+				throw new AggregateError(
+					[error, streamCleanupError],
+					'Project object upload and request-stream cleanup failed',
+				);
+			}
 			throw error;
 		}
 		if (intentId) await deps.uploadIntents?.markUploaded(intentId);

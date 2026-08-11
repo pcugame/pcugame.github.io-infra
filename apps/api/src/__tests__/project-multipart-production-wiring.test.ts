@@ -203,11 +203,30 @@ function portHarness(label: string) {
 
 function storageHarness(label: string) {
 	const objects = new Map<string, Buffer>();
-	let uploadFailure: { timing: 'before' | 'after'; error: Error } | undefined;
+	let uploadFailure: {
+		timing: 'before' | 'after';
+		error: Error;
+		streamCleanupError?: Error;
+	} | undefined;
 	let deleteFailure: Error | undefined;
 	const calls = {
-		upload: vi.fn(async (_bucket: string, key: string, body: AsyncIterable<Buffer>) => {
-			if (uploadFailure?.timing === 'before') throw uploadFailure.error;
+		upload: vi.fn(async (_bucket: string, key: string, body: Readable) => {
+			if (uploadFailure?.timing === 'before') {
+				if (uploadFailure.streamCleanupError) {
+					const cleanupError = uploadFailure.streamCleanupError;
+					const streamWithDestroy = body as Readable & {
+						_destroy(
+							error: Error | null,
+							callback: (error?: Error | null) => void,
+						): void;
+					};
+					const originalDestroy = streamWithDestroy._destroy.bind(streamWithDestroy);
+					streamWithDestroy._destroy = (error, callback) => {
+						originalDestroy(error, () => callback(cleanupError));
+					};
+				}
+				throw uploadFailure.error;
+			}
 			const chunks: Buffer[] = [];
 			for await (const chunk of body) chunks.push(Buffer.from(chunk));
 			objects.set(key, Buffer.concat(chunks));
@@ -237,8 +256,16 @@ function storageHarness(label: string) {
 		storage,
 		calls,
 		objects,
-		failUpload(timing: 'before' | 'after') {
-			uploadFailure = { timing, error: new Error(`${label} upload failed ${timing}`) };
+		failUpload(
+			timing: 'before' | 'after',
+			error = new Error(`${label} upload failed ${timing}`),
+			streamCleanupError?: Error,
+		) {
+			uploadFailure = {
+				timing,
+				error,
+				...(streamCleanupError ? { streamCleanupError } : {}),
+			};
 		},
 		failDelete(error = new Error(`${label} delete failed`)) {
 			deleteFailure = error;
@@ -250,6 +277,12 @@ function fileSystemHarness(label: string) {
 	const base = createNodeFileSystem();
 	const created = new Set<string>();
 	const removed = new Set<string>();
+	const streamPaths = new WeakMap<Readable, string>();
+	const lifecycle: Array<{
+		type: 'stream-close' | 'remove';
+		path: string;
+		stream?: Readable;
+	}> = [];
 	let removeFailuresRemaining = 0;
 	let permanentRemoveFailure = false;
 	let missingRemovalsRemaining = 0;
@@ -259,8 +292,14 @@ function fileSystemHarness(label: string) {
 			created.add(filePath);
 			return base.createWriteStream(filePath);
 		}),
-		createReadStream: vi.fn((filePath: string) => base.createReadStream(filePath)),
+		createReadStream: vi.fn((filePath: string) => {
+			const stream = base.createReadStream(filePath);
+			streamPaths.set(stream, filePath);
+			stream.once('close', () => lifecycle.push({ type: 'stream-close', path: filePath, stream }));
+			return stream;
+		}),
 		remove: vi.fn(async (filePath: string) => {
+			lifecycle.push({ type: 'remove', path: filePath });
 			// Processors such as sharp create derived temp paths without going
 			// through createWriteStream; observing remove makes those residues
 			// visible to assertions and teardown as well.
@@ -311,6 +350,8 @@ function fileSystemHarness(label: string) {
 		fileSystem,
 		calls,
 		created,
+		lifecycle: () => [...lifecycle],
+		streamPath: (stream: Readable) => streamPaths.get(stream),
 		outstanding: () => [...created].filter((filePath) => !removed.has(filePath)),
 		failRemoveTimes(count: number) {
 			removeFailuresRemaining = count;
@@ -753,6 +794,23 @@ function expectReleased(harness: ReturnType<typeof graphHarness>): void {
 	expect(harness.fileSystem.outstanding()).toEqual([]);
 }
 
+function expectUploadStreamClosedBeforeTempRemoval(
+	harness: ReturnType<typeof graphHarness>,
+	body: Readable,
+): void {
+	const filePath = harness.fileSystem.streamPath(body);
+	expect(filePath).toEqual(expect.any(String));
+	const lifecycle = harness.fileSystem.lifecycle();
+	const closeIndex = lifecycle.findIndex((event) => (
+		event.type === 'stream-close' && event.stream === body
+	));
+	const removeIndex = lifecycle.findIndex((event) => (
+		event.type === 'remove' && event.path === filePath
+	));
+	expect(closeIndex).toBeGreaterThanOrEqual(0);
+	expect(removeIndex).toBeGreaterThan(closeIndex);
+}
+
 function errorLeaves(error: unknown): unknown[] {
 	if (error instanceof AggregateError) {
 		return [
@@ -1093,6 +1151,10 @@ describe('project multipart production wiring', () => {
 				'storage-' + timing + '-public',
 				key,
 			);
+			const uploadBody = harness.storage.calls.upload.mock.calls[0]?.[2];
+			expect(uploadBody).toBeInstanceOf(Readable);
+			expect((uploadBody as Readable).destroyed).toBe(true);
+			expectUploadStreamClosedBeforeTempRemoval(harness, uploadBody as Readable);
 			expect(harness.storage.objects.has(key!)).toBe(false);
 			if (timing === 'before') {
 				// S3 DELETE is intentionally idempotent: rollback succeeds although
@@ -1102,6 +1164,32 @@ describe('project multipart production wiring', () => {
 			expectReleased(harness);
 		},
 	);
+
+	it('preserves immediate upload rejection and stream cleanup failure after close', async () => {
+		const harness = graphHarness('storage-stream-cleanup');
+		const uploadError = new Error('storage rejected without consuming body');
+		const streamCleanupError = new Error('request stream close failed');
+		harness.storage.failUpload('before', uploadError, streamCleanupError);
+		const observedErrors: unknown[] = [];
+		const app = await routeApp(harness, observedErrors);
+		apps.push(app);
+
+		const failed = await app.inject({
+			method: 'POST',
+			url: '/api/admin/projects/7/assets',
+			...assetMultipart(),
+		});
+
+		expect(failed.statusCode).toBe(500);
+		const uploadBody = harness.storage.calls.upload.mock.calls[0]?.[2];
+		expect(uploadBody).toBeInstanceOf(Readable);
+		expect((uploadBody as Readable).closed).toBe(true);
+		expectUploadStreamClosedBeforeTempRemoval(harness, uploadBody as Readable);
+		const leaves = errorLeaves(observedErrors[0]);
+		expect(leaves).toContain(uploadError);
+		expect(leaves).toContain(streamCleanupError);
+		expectReleased(harness);
+	});
 
 	it('retries transient temp removal and reports permanent residue without false success', async () => {
 		const transient = graphHarness('temp-transient');
