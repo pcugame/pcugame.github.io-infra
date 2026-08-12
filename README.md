@@ -224,13 +224,14 @@ Web과 API가 같은 commit에서 변경되면 API workflow는 같은 SHA의 Web
 ## 변경 기준
 
 - API 요청·응답을 변경할 때 `packages/contracts`의 schema와 관련 계약 test를 함께 개정한다.
-- database 구조를 변경할 때 `apps/api/prisma/schema.prisma`와 migration을 함께 commit한다.
+- database 구조를 변경할 때 `apps/api/prisma/schema.prisma`와 migration을 함께 commit하고 [database migration policy](docs/database-migration-policy.md)를 따른다.
 - 새 API module은 application·infrastructure 경계를 유지하고 `npm run architecture`를 통과해야 한다.
 - 업로드 변경은 파일 signature, 권한, 용량 제한, idempotency, orphan 정리와 동시성 test를 함께 검토한다.
 - 배포 관련 변경은 Web과 API의 독립 배포 순서 및 rollback 가능성을 유지한다.
 
 ## 관련 문서
 
+- [database migration policy](docs/database-migration-policy.md)
 - [업로드 lifecycle 배포 runbook](docs/upload-lifecycle-runbook.md)
 - [backend 검토 기록](docs/backend-audit.md)
 - [route 계약 소유권 후속 기록](docs/backend-audit-tickets/route-contract-ownership-follow-up.md)
