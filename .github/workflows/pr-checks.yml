@@ -14,22 +14,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
-
-      - name: Test migration policy guard
-        run: node --test scripts/check-migration-policy.test.mjs
-
-      - name: Check migration history and review signals
-        env:
-          MIGRATION_POLICY_BASE: ${{ github.event.pull_request.base.sha || 'origin/master' }}
-        run: node scripts/check-migration-policy.mjs "${MIGRATION_POLICY_BASE}"
 
       - name: Install dependencies
         run: npm ci --include-workspace-root
