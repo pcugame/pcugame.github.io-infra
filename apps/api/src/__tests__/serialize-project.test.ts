@@ -34,13 +34,8 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 			sizeBytes: bigint;
 			width?: number | null;
 			height?: number | null;
-			imageRenditions?: Array<{
-				profile: 'CARD_480' | 'DISPLAY_960';
-				storageKey: string;
-				sourceStorageKey: string;
-				width: number;
-				height: number;
-			}>;
+			card480Height?: number | null;
+			display960Height?: number | null;
 			playbackSizeBytes: bigint;
 			playbackStatus: 'PENDING' | 'READY' | 'FAILED';
 			playbackError: string;
@@ -155,21 +150,13 @@ describe('serializeProjectDetail', () => {
 		expect(typeof result.assets[0]!.size).toBe('number');
 	});
 
-	it('serializes admin image assets with current renditions and nullable legacy metadata', () => {
+	it('serializes admin image assets from deterministic rendition readiness', () => {
 		const result = serializeProjectDetail(fakeProject({
 			assets: [fakeAsset({
 				width: 1200,
 				height: 800,
-				imageRenditions: [
-					{
-						profile: 'DISPLAY_960', storageKey: 'display.webp',
-						sourceStorageKey: 'img.png', width: 960, height: 640,
-					},
-					{
-						profile: 'CARD_480', storageKey: 'stale.webp',
-						sourceStorageKey: 'old.png', width: 480, height: 320,
-					},
-				],
+				card480Height: null,
+				display960Height: 640,
 			})],
 		}));
 		expect(result.assets[0]).toEqual({
@@ -183,7 +170,7 @@ describe('serializeProjectDetail', () => {
 				},
 				renditions: [{
 					profile: 'DISPLAY_960',
-					url: 'https://api.example.com/api/public/images/display.webp',
+					url: 'https://api.example.com/api/public/images/img.png%2F__pcu_image_rendition__%2Fv1%2Fdisplay-960.webp',
 					width: 960,
 					height: 640,
 				}],

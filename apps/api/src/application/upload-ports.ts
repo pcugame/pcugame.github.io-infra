@@ -1,21 +1,17 @@
 import type {
 	AssetKind,
 	AssetPlaybackStatus,
-	ResponsiveImage,
 } from '@pcu/contracts';
 import type { MultipartPart } from './http-input.js';
 import type { UploadLimits } from '../shared/upload-policy.js';
+import type { ImageRenditionProfile } from '../shared/responsive-image.js';
 
-export type ImageRenditionProfile = ResponsiveImage['renditions'][number]['profile'];
+export type { ImageRenditionProfile } from '../shared/responsive-image.js';
 
 export interface SavedImageRendition {
 	profile: ImageRenditionProfile;
-	storageKey: string;
-	sourceStorageKey: string;
 	width: number;
 	height: number;
-	mimeType: string;
-	sizeBytes: number;
 }
 
 export interface SavedUpload {

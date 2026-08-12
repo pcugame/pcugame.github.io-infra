@@ -1,11 +1,10 @@
-import type { ResponsiveImage } from '@pcu/contracts';
+import { RESPONSIVE_IMAGE_PROFILES, type ResponsiveImage } from '@pcu/contracts';
 
 type ResponsiveImageRendition = ResponsiveImage['renditions'][number];
 
-const PROFILE_WIDTH: Record<ResponsiveImageRendition['profile'], number> = {
-	CARD_480: 480,
-	DISPLAY_960: 960,
-};
+const PROFILE_WIDTH = Object.fromEntries(
+	RESPONSIVE_IMAGE_PROFILES.map(({ profile, width }) => [profile, width]),
+) as Record<ResponsiveImageRendition['profile'], number>;
 
 export type ResponsiveImageCandidate = {
 	kind: 'original' | 'rendition';

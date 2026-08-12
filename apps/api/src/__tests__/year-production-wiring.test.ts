@@ -50,7 +50,8 @@ interface ExhibitionRow {
 	posterSizeBytes: bigint;
 	posterWidth: number | null;
 	posterHeight: number | null;
-	imageRenditions: [];
+	posterCard480Height: number | null;
+	posterDisplay960Height: number | null;
 	_count: { projects: number };
 }
 
@@ -73,7 +74,8 @@ function repositoryHarness() {
 			posterSizeBytes: 10n,
 			posterWidth: null,
 			posterHeight: null,
-			imageRenditions: [],
+			posterCard480Height: null,
+			posterDisplay960Height: null,
 			_count: { projects: 0 },
 		},
 	]]);
@@ -110,7 +112,8 @@ function repositoryHarness() {
 				posterSizeBytes: 0n,
 				posterWidth: null,
 				posterHeight: null,
-				imageRenditions: [],
+				posterCard480Height: null,
+				posterDisplay960Height: null,
 				_count: { projects: 0 },
 			};
 			rows.set(row.id, row);

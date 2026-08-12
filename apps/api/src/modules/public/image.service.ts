@@ -1,4 +1,4 @@
-import type { AppLogger, ObjectStorage } from '../../application/ports.js';
+import type { AppLogger, ObjectStorage, ObjectStreamResult } from '../../application/ports.js';
 import { notFound } from '../../shared/errors.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
 import { PUBLIC_IMAGE_CACHE_CONTROL } from '../../shared/responsive-image.js';
@@ -45,7 +45,9 @@ export function matchesIfModifiedSince(
 	return Math.floor(lastModified.getTime() / 1_000) <= Math.floor(since / 1_000);
 }
 
-function representationHeaders(metadata: PublicImageMetadata): Record<string, string> {
+function representationHeaders(
+	metadata: PublicImageMetadata | ObjectStreamResult,
+): Record<string, string> {
 	return {
 		'Cache-Control': PUBLIC_IMAGE_CACHE_CONTROL,
 		'Content-Type': metadata.contentType,
@@ -70,22 +72,34 @@ function isNotModified(
 }
 
 export function createPublicImageService(deps: PublicImageServiceDependencies) {
-	async function loadMetadata(storageKey: string): Promise<{
-		metadata: PublicImageMetadata;
-		resolvedStorageKey: string;
-	}> {
+	async function resolveStorageKey(storageKey: string): Promise<string> {
 		const reference = await deps.repository.resolvePublicImage(storageKey);
 		if (!reference) throw notFound('Image not found');
+		return reference.storageKey;
+	}
 
-		const metadata = await deps.storage.head(deps.publicBucket, reference.storageKey);
+	async function loadMetadata(resolvedStorageKey: string): Promise<PublicImageMetadata> {
+		const metadata = await deps.storage.head(deps.publicBucket, resolvedStorageKey);
 		if (!metadata) {
 			deps.logger.error(
-				{ storageKey: reference.storageKey, bucket: deps.publicBucket },
+				{ storageKey: resolvedStorageKey, bucket: deps.publicBucket },
 				'Public image has a current database reference but no storage object',
 			);
 			throw notFound('Image not found');
 		}
-		return { metadata, resolvedStorageKey: reference.storageKey };
+		return metadata;
+	}
+
+	async function streamObject(resolvedStorageKey: string): Promise<ObjectStreamResult> {
+		const object = await deps.storage.stream(deps.publicBucket, resolvedStorageKey);
+		if (!object) {
+			deps.logger.error(
+				{ storageKey: resolvedStorageKey, bucket: deps.publicBucket },
+				'Public image has a current database reference but no storage object',
+			);
+			throw notFound('Image not found');
+		}
+		return object;
 	}
 
 	async function respond(
@@ -93,7 +107,19 @@ export function createPublicImageService(deps: PublicImageServiceDependencies) {
 		storageKey: string,
 		headers: PublicImageRequestHeaders,
 	): Promise<HttpResponseDescriptor> {
-		const { metadata, resolvedStorageKey } = await loadMetadata(storageKey);
+		const resolvedStorageKey = await resolveStorageKey(storageKey);
+		const hasValidator = headers.ifNoneMatch !== undefined
+			|| headers.ifModifiedSince !== undefined;
+		if (method === 'GET' && !hasValidator) {
+			const object = await streamObject(resolvedStorageKey);
+			return {
+				status: 200,
+				headers: representationHeaders(object),
+				body: object.body,
+			};
+		}
+
+		const metadata = await loadMetadata(resolvedStorageKey);
 		const responseHeaders = representationHeaders(metadata);
 		if (isNotModified(headers, metadata)) {
 			return {
@@ -108,14 +134,7 @@ export function createPublicImageService(deps: PublicImageServiceDependencies) {
 			};
 		}
 
-		const object = await deps.storage.stream(deps.publicBucket, resolvedStorageKey);
-		if (!object) {
-			deps.logger.error(
-				{ storageKey: resolvedStorageKey, bucket: deps.publicBucket },
-				'Public image disappeared after metadata resolution',
-			);
-			throw notFound('Image not found');
-		}
+		const object = await streamObject(resolvedStorageKey);
 		if (object.size !== metadata.size || object.contentType !== metadata.contentType) {
 			deps.logger.error(
 				{
@@ -133,7 +152,7 @@ export function createPublicImageService(deps: PublicImageServiceDependencies) {
 		}
 		return {
 			status: 200,
-			headers: responseHeaders,
+			headers: representationHeaders(object),
 			body: object.body,
 		};
 	}

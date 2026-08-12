@@ -11,7 +11,7 @@ export interface NewUploadIntent {
 }
 
 export interface UploadIntentRepository {
-	prepare(data: NewUploadIntent): Promise<unknown>;
+	prepare(data: NewUploadIntent): Promise<{ id: string }>;
 	markUploaded(id: string): Promise<unknown>;
 	isUncommitted(id: string): Promise<boolean>;
 	recordAmbiguousError(id: string, error: unknown): Promise<unknown>;

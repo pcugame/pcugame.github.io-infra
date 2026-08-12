@@ -10,6 +10,7 @@ import {
 	backfillImageRenditions,
 	parseImageRenditionBackfillOptions,
 } from '../modules/assets/image-rendition-backfill.js';
+import { deriveImageRenditionStorageKey } from '../shared/responsive-image.js';
 
 describe('image rendition backfill options', () => {
 	it('defaults to dry-run and one worker', () => {
@@ -52,6 +53,7 @@ function dryRunDependencies(input: {
 	stream?: () => Promise<{ body: Readable } | null>;
 }) {
 	const upload = vi.fn();
+	const stream = vi.fn(input.stream ?? (async () => null));
 	const transaction = vi.fn();
 	const remove = vi.fn(async () => {});
 	const fileSystem = {
@@ -81,7 +83,7 @@ function dryRunDependencies(input: {
 				$transaction: transaction,
 			},
 			storage: {
-				stream: vi.fn(input.stream ?? (async () => null)),
+				stream,
 				upload,
 			},
 			fileSystem,
@@ -97,6 +99,7 @@ function dryRunDependencies(input: {
 			orphanDeletions: { deleteOrQueue: vi.fn() },
 		} as never,
 		upload,
+		stream,
 		transaction,
 	};
 }
@@ -108,11 +111,8 @@ type DryRunAsset = {
 	storageKey: string;
 	width: number | null;
 	height: number | null;
-	imageRenditions: Array<{
-		profile: 'CARD_480' | 'DISPLAY_960';
-		storageKey: string;
-		sourceStorageKey: string;
-	}>;
+	card480Height: number | null;
+	display960Height: number | null;
 };
 
 async function realDryRunHarness(input: {
@@ -174,10 +174,8 @@ describe('image rendition backfill dry-run', () => {
 				storageKey: 'original.webp',
 				width: 1200,
 				height: 800,
-				imageRenditions: [
-					{ profile: 'CARD_480', storageKey: 'card.webp', sourceStorageKey: 'original.webp' },
-					{ profile: 'DISPLAY_960', storageKey: 'display.webp', sourceStorageKey: 'original.webp' },
-				],
+				card480Height: 320,
+				display960Height: 640,
 			}],
 		});
 
@@ -205,7 +203,8 @@ describe('image rendition backfill dry-run', () => {
 				storageKey: 'missing.webp',
 				width: null,
 				height: null,
-				imageRenditions: [],
+				card480Height: null,
+				display960Height: null,
 			}],
 		});
 
@@ -236,7 +235,8 @@ describe('image rendition backfill dry-run', () => {
 				storageKey: 'missing.webp',
 				width: null,
 				height: null,
-				imageRenditions: [],
+				card480Height: null,
+				display960Height: null,
 			}, {
 				id: 7,
 				projectId: 7,
@@ -244,7 +244,8 @@ describe('image rendition backfill dry-run', () => {
 				storageKey: 'valid.webp',
 				width: null,
 				height: null,
-				imageRenditions: [],
+				card480Height: null,
+				display960Height: null,
 			}],
 			sources: new Map([
 				['missing.webp', null],
@@ -291,7 +292,8 @@ describe('image rendition backfill dry-run', () => {
 				storageKey,
 				width: null,
 				height: null,
-				imageRenditions: [],
+				card480Height: null,
+				display960Height: null,
 			})),
 			sources,
 			beforeStream: async () => {
@@ -331,7 +333,8 @@ describe('image rendition backfill dry-run', () => {
 				storageKey: 'missing.webp',
 				width: null,
 				height: null,
-				imageRenditions: [],
+				card480Height: null,
+				display960Height: null,
 			}, {
 				id: 7,
 				projectId: 7,
@@ -339,14 +342,16 @@ describe('image rendition backfill dry-run', () => {
 				storageKey: 'complete-asset.webp',
 				width: 400,
 				height: 200,
-				imageRenditions: [],
+				card480Height: null,
+				display960Height: null,
 			}],
 			exhibitions: [{
 				id: 3,
 				posterStorageKey: 'complete-exhibition.webp',
 				posterWidth: 400,
 				posterHeight: 200,
-				imageRenditions: [],
+				posterCard480Height: null,
+				posterDisplay960Height: null,
 			}],
 		});
 
@@ -373,11 +378,8 @@ async function applyHarness(options: {
 	sourceHeight?: number;
 	assetWidth?: number | null;
 	assetHeight?: number | null;
-	imageRenditions?: Array<{
-		profile: 'CARD_480' | 'DISPLAY_960';
-		storageKey: string;
-		sourceStorageKey: string;
-	}>;
+	card480Height?: number | null;
+	display960Height?: number | null;
 } = {}) {
 	const temporaryDirectory = await nodeFileSystem.mkdtemp(path.join(os.tmpdir(), 'image-backfill-test-'));
 	const nodeFiles = createNodeFileSystem();
@@ -416,34 +418,27 @@ async function applyHarness(options: {
 		storageKey: 'source.webp',
 		width: options.assetWidth ?? null,
 		height: options.assetHeight ?? null,
-		imageRenditions: [...(options.imageRenditions ?? [])],
+		card480Height: options.card480Height ?? null,
+		display960Height: options.display960Height ?? null,
 	};
 	let sequence = 0;
 	const uploadedObjects = new Map<string, Buffer>();
 	const uploadBodies: Readable[] = [];
 	const intentById = new Map<string, { bucket: string; storageKey: string }>();
-	const createdRenditions = vi.fn(async ({ data }: {
-		data: Array<{
-			profile: 'CARD_480' | 'DISPLAY_960';
-			storageKey: string;
-			sourceStorageKey: string;
-		}>;
-	}) => {
-		assetRecord.imageRenditions.push(...data.map((rendition) => ({
-			profile: rendition.profile,
-			storageKey: rendition.storageKey,
-			sourceStorageKey: rendition.sourceStorageKey,
-		})));
-		return { count: data.length };
-	});
 	const markUploaded = vi.fn(async () => {});
 	const recordAmbiguousError = vi.fn(async () => {});
 	const isUncommitted = vi.fn(async () => true);
 	let rawCall = 0;
-	const deleteRenditions = vi.fn(async () => ({ count: 0 }));
-	const assetUpdate = vi.fn(async ({ data }: { data: { width: number; height: number } }) => {
+	const assetUpdate = vi.fn(async ({ data }: { data: {
+		width: number;
+		height: number;
+		card480Height?: number;
+		display960Height?: number;
+	} }) => {
 		assetRecord.width = data.width;
 		assetRecord.height = data.height;
+		if (data.card480Height !== undefined) assetRecord.card480Height = data.card480Height;
+		if (data.display960Height !== undefined) assetRecord.display960Height = data.display960Height;
 		return { id: 5 };
 	});
 	const outboxUpsert = vi.fn();
@@ -454,18 +449,11 @@ async function applyHarness(options: {
 			if (rawCall === 2) return [{
 				storageKey: options.sourceChanged ? 'replacement.webp' : 'source.webp',
 				status: 'READY',
+				card480Height: assetRecord.card480Height,
+				display960Height: assetRecord.display960Height,
 			}];
 			return [];
 		}),
-		imageRendition: {
-			findMany: vi.fn(async ({ where }: {
-				where: { profile?: { in?: Array<'CARD_480' | 'DISPLAY_960'> } };
-			}) => assetRecord.imageRenditions
-				.filter((rendition) => where.profile?.in?.includes(rendition.profile) ?? true)
-				.map((rendition, index) => ({ id: index + 1, ...rendition }))),
-			deleteMany: deleteRenditions,
-			createMany: createdRenditions,
-		},
 		asset: { update: assetUpdate },
 		orphanObject: {
 			upsert: outboxUpsert,
@@ -509,7 +497,6 @@ async function applyHarness(options: {
 	return {
 		temporaryDirectory,
 		assetRecord,
-		createdRenditions,
 		rollback,
 		uploadedObjects,
 		uploadBodies,
@@ -517,7 +504,6 @@ async function applyHarness(options: {
 		stream,
 		prepare,
 		transaction,
-		deleteRenditions,
 		assetUpdate,
 		outboxUpsert,
 		loggerError,
@@ -552,6 +538,35 @@ async function applyHarness(options: {
 }
 
 describe('image rendition backfill apply', () => {
+	it('rejects an underivable canonical key before opening source or rendition storage I/O', async () => {
+		const sourceStorageKey = 'x'.repeat(1_020);
+		const harness = dryRunDependencies({
+			assets: [{
+				id: 5,
+				projectId: 7,
+				kind: 'IMAGE',
+				storageKey: sourceStorageKey,
+				width: 1_200,
+				height: 600,
+				card480Height: null,
+				display960Height: null,
+			}],
+		});
+
+		await expect(backfillImageRenditions(harness.deps, {
+			apply: true,
+			owner: 'asset',
+			concurrency: 1,
+		})).resolves.toMatchObject({
+			succeeded: 0,
+			failed: 1,
+			failures: [{ owner: 'asset', id: 5 }],
+		});
+		expect(harness.stream).not.toHaveBeenCalled();
+		expect(harness.upload).not.toHaveBeenCalled();
+		expect(harness.transaction).not.toHaveBeenCalled();
+	});
+
 	it('updates metadata only when the source is no wider than CARD_480', async () => {
 		const harness = await applyHarness({ sourceWidth: 400, sourceHeight: 200 });
 		try {
@@ -567,7 +582,10 @@ describe('image rendition backfill apply', () => {
 				failed: 0,
 			});
 			expect(harness.assetRecord).toMatchObject({ width: 400, height: 200 });
-			expect(harness.assetRecord.imageRenditions).toEqual([]);
+			expect(harness.assetRecord).toMatchObject({
+				card480Height: null,
+				display960Height: null,
+			});
 			expect(harness.prepare).not.toHaveBeenCalled();
 			expect(harness.upload).not.toHaveBeenCalled();
 			expect(harness.transaction).toHaveBeenCalledOnce();
@@ -591,14 +609,14 @@ describe('image rendition backfill apply', () => {
 				failed: 0,
 			});
 			expect(harness.uploadedObjects.size).toBe(1);
-			expect(harness.createdRenditions).toHaveBeenCalledWith({
-				data: [expect.objectContaining({
-					profile: 'CARD_480',
-					width: 480,
-					height: 240,
-					sourceStorageKey: 'source.webp',
-				})],
+			expect(harness.assetUpdate).toHaveBeenCalledWith({
+				where: { id: 5 },
+				data: expect.objectContaining({ card480Height: 240 }),
+				select: { id: true },
 			});
+			expect([...harness.uploadedObjects.keys()]).toEqual([
+				deriveImageRenditionStorageKey('source.webp', 'CARD_480'),
+			]);
 			const uploaded = [...harness.uploadedObjects.values()][0]!;
 			await expect(sharp(uploaded).metadata()).resolves.toMatchObject({ width: 480, height: 240 });
 			for (const call of harness.upload.mock.calls) expect(call[1]).not.toBe('source.webp');
@@ -614,11 +632,7 @@ describe('image rendition backfill apply', () => {
 			sourceHeight: 600,
 			assetWidth: 1_200,
 			assetHeight: 600,
-			imageRenditions: [{
-				profile: 'CARD_480',
-				storageKey: 'existing-card.webp',
-				sourceStorageKey: 'source.webp',
-			}],
+			card480Height: 240,
 		});
 		try {
 			await expect(backfillImageRenditions(harness.deps, {
@@ -632,16 +646,10 @@ describe('image rendition backfill apply', () => {
 				failed: 0,
 			});
 			expect(harness.uploadedObjects.size).toBe(1);
-			expect(harness.createdRenditions).toHaveBeenCalledWith({
-				data: [expect.objectContaining({
-					profile: 'DISPLAY_960',
-					width: 960,
-					height: 480,
-					sourceStorageKey: 'source.webp',
-				})],
+			expect(harness.assetRecord).toMatchObject({
+				card480Height: 240,
+				display960Height: 480,
 			});
-			expect(harness.assetRecord.imageRenditions.map(({ profile }) => profile).sort())
-				.toEqual(['CARD_480', 'DISPLAY_960']);
 		} finally {
 			await nodeFileSystem.rm(harness.temporaryDirectory, { recursive: true, force: true });
 		}
@@ -651,15 +659,8 @@ describe('image rendition backfill apply', () => {
 		const harness = await applyHarness({
 			assetWidth: 1_200,
 			assetHeight: 600,
-			imageRenditions: [{
-				profile: 'CARD_480',
-				storageKey: 'card.webp',
-				sourceStorageKey: 'source.webp',
-			}, {
-				profile: 'DISPLAY_960',
-				storageKey: 'display.webp',
-				sourceStorageKey: 'source.webp',
-			}],
+			card480Height: 240,
+			display960Height: 480,
 		});
 		try {
 			await expect(backfillImageRenditions(harness.deps, {
@@ -702,12 +703,14 @@ describe('image rendition backfill apply', () => {
 				expect(harness.upload.mock.invocationCallOrder[index])
 					.toBeLessThan(harness.markUploaded.mock.invocationCallOrder[index]!);
 			}
-			expect(harness.createdRenditions).toHaveBeenCalledWith({
-				data: expect.arrayContaining([
-					expect.objectContaining({ profile: 'CARD_480', width: 480, sourceStorageKey: 'source.webp' }),
-					expect.objectContaining({ profile: 'DISPLAY_960', width: 960, sourceStorageKey: 'source.webp' }),
-				]),
+			expect(harness.assetRecord).toMatchObject({
+				card480Height: 240,
+				display960Height: 480,
 			});
+			expect([...harness.uploadedObjects.keys()].sort()).toEqual([
+				deriveImageRenditionStorageKey('source.webp', 'CARD_480'),
+				deriveImageRenditionStorageKey('source.webp', 'DISPLAY_960'),
+			].sort());
 			expect(harness.rollback).not.toHaveBeenCalled();
 			expect(await nodeFileSystem.readdir(harness.temporaryDirectory)).toEqual([]);
 		} finally {
@@ -742,71 +745,13 @@ describe('image rendition backfill apply', () => {
 		}
 	});
 
-	it('preserves a mismatched rendition and fails after rolling back only new uploads', async () => {
-		const mismatchedRendition = {
-			profile: 'CARD_480' as const,
-			storageKey: 'mismatched-card.webp',
-			sourceStorageKey: 'previous-source.webp',
-		};
-		const harness = await applyHarness({
-			sourceWidth: 1_200,
-			sourceHeight: 600,
-			assetWidth: null,
-			assetHeight: null,
-			imageRenditions: [mismatchedRendition],
-		});
-		try {
-			await expect(backfillImageRenditions(harness.deps, {
-				apply: true,
-				owner: 'asset',
-				concurrency: 1,
-			})).resolves.toMatchObject({
-				succeeded: 0,
-				failed: 1,
-				sourceChanged: 0,
-				failures: [{
-					owner: 'asset',
-					id: 5,
-					error: 'asset 5 has a rendition from a mismatched source generation',
-				}],
-			});
-
-			expect(harness.outboxUpsert).not.toHaveBeenCalled();
-			expect(harness.deleteRenditions).not.toHaveBeenCalled();
-			expect(harness.createdRenditions).not.toHaveBeenCalled();
-			expect(harness.assetUpdate).not.toHaveBeenCalled();
-			expect(harness.assetRecord.imageRenditions).toEqual([mismatchedRendition]);
-
-			expect(harness.uploadedObjects.size).toBe(2);
-			expect(harness.rollback).toHaveBeenCalledTimes(2);
-		const rollbackKeys = harness.rollback.mock.calls.map((call) => call[1]);
-			expect(rollbackKeys).toEqual(expect.arrayContaining([...harness.uploadedObjects.keys()]));
-			expect(rollbackKeys).not.toContain(mismatchedRendition.storageKey);
-			expect(harness.loggerError).toHaveBeenCalledWith({
-				owner: 'asset',
-				id: 5,
-				profile: 'CARD_480',
-				storageKey: 'mismatched-card.webp',
-				sourceStorageKey: 'previous-source.webp',
-				currentSource: 'source.webp',
-			}, 'Backfill found a rendition from a mismatched source generation');
-			expect(await nodeFileSystem.readdir(harness.temporaryDirectory)).toEqual([]);
-		} finally {
-			await nodeFileSystem.rm(harness.temporaryDirectory, { recursive: true, force: true });
-		}
-	});
-
 	it('treats a successful partial run as complete when rerun', async () => {
 		const harness = await applyHarness({
 			sourceWidth: 1_200,
 			sourceHeight: 600,
 			assetWidth: 1_200,
 			assetHeight: 600,
-			imageRenditions: [{
-				profile: 'CARD_480',
-				storageKey: 'existing-card.webp',
-				sourceStorageKey: 'source.webp',
-			}],
+			card480Height: 240,
 		});
 		try {
 			await expect(backfillImageRenditions(harness.deps, {
@@ -896,7 +841,7 @@ describe('image rendition backfill apply', () => {
 				succeeded: 0,
 				failed: 0,
 			});
-			expect(harness.createdRenditions).not.toHaveBeenCalled();
+			expect(harness.assetUpdate).not.toHaveBeenCalled();
 			expect(harness.rollback).toHaveBeenCalledTimes(2);
 		} finally {
 			await nodeFileSystem.rm(harness.temporaryDirectory, { recursive: true, force: true });

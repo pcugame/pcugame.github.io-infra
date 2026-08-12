@@ -7,6 +7,7 @@ import type {
 } from '../application/ports.js';
 import { createProjectUploadPipeline } from '../modules/admin/project/project-upload.adapter.js';
 import { ImageOutputCleanupError } from '../modules/assets/upload/image-processing.js';
+import { deriveImageRenditionStorageKey } from '../shared/responsive-image.js';
 
 const logger: AppLogger = {
 	child: () => logger,
@@ -161,25 +162,24 @@ describe('responsive image upload bundle lifecycle', () => {
 			uploadIntentIds: ['intent-1', 'intent-2', 'intent-3'],
 		});
 		expect(saved.renditions).toEqual([
-			expect.objectContaining({
+			{
 				profile: 'CARD_480',
-				sourceStorageKey: saved.storageKey,
 				width: 480,
 				height: 240,
-			}),
-			expect.objectContaining({
+			},
+			{
 				profile: 'DISPLAY_960',
-				sourceStorageKey: saved.storageKey,
 				width: 960,
 				height: 480,
-			}),
+			},
 		]);
 		expect(test.uploadIntents.prepare).toHaveBeenCalledTimes(3);
 		expect(test.uploadIntents.markUploaded).toHaveBeenCalledTimes(3);
 		expect(test.storage.upload).toHaveBeenCalledTimes(3);
 		for (const key of [
 			saved.storageKey,
-			...(saved.renditions ?? []).map(({ storageKey }) => storageKey),
+			deriveImageRenditionStorageKey(saved.storageKey, 'CARD_480'),
+			deriveImageRenditionStorageKey(saved.storageKey, 'DISPLAY_960'),
 		]) {
 			const prepareIndex = test.events.findIndex((event) => event.startsWith(`prepare:${key}:`));
 			const putIndex = test.events.findIndex((event) => event.startsWith(`put:${key}:`));

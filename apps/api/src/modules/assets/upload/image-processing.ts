@@ -8,7 +8,10 @@
 
 import sharp, { type Sharp } from 'sharp';
 import type { FileSystem } from '../../../application/ports.js';
-import type { ImageRenditionProfile } from '../../../application/upload-ports.js';
+import {
+	IMAGE_RENDITION_PROFILES,
+	type ImageRenditionProfile,
+} from '../../../shared/responsive-image.js';
 
 export interface ImageProcessingInput {
 	/** Path to the source temp file on disk. */
@@ -53,14 +56,6 @@ export interface ImageRenditionProcessingResult {
 	height: number;
 	renditions: ProcessedImageRendition[];
 }
-
-export const IMAGE_RENDITION_TARGETS = [
-	{ profile: 'CARD_480', width: 480 },
-	{ profile: 'DISPLAY_960', width: 960 },
-] as const satisfies ReadonlyArray<{
-	profile: ImageRenditionProfile;
-	width: number;
-}>;
 
 /** Shared encode policy for production uploads and legacy backfill. */
 export const IMAGE_WEBP_QUALITY = {
@@ -149,7 +144,7 @@ async function encodeSelectedOutputs(
 	}
 
 	const selectedProfiles = new Set(input.profiles);
-	for (const target of IMAGE_RENDITION_TARGETS) {
+	for (const target of IMAGE_RENDITION_PROFILES) {
 		if (!selectedProfiles.has(target.profile) || input.sourceWidth <= target.width) continue;
 		outputs.push({
 			kind: 'rendition',
@@ -228,7 +223,7 @@ export async function encodeImageBundle(
 		outputBasePath: input.outputBasePath,
 		sourceWidth: input.sourceWidth,
 		profiles: input.createRenditions
-			? IMAGE_RENDITION_TARGETS.map(({ profile }) => profile)
+			? IMAGE_RENDITION_PROFILES.map(({ profile }) => profile)
 			: [],
 		includeOriginal: true,
 	}, fileSystem);

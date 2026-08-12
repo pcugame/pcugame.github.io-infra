@@ -1,4 +1,8 @@
 import type { PrismaClient, ProjectStatus } from '../../generated/prisma/client.js';
+import {
+	IMAGE_RENDITION_PROFILES,
+	parseImageRenditionStorageKey,
+} from '../../shared/responsive-image.js';
 
 const PUBLIC_PROJECT_STATUSES: ProjectStatus[] = ['PUBLISHED', 'ARCHIVED'];
 
@@ -8,13 +12,43 @@ const projectDetailInclude = {
 	assets: {
 		where: { status: 'READY' as const },
 		orderBy: { createdAt: 'asc' as const },
-		include: { imageRenditions: true },
 	},
-	poster: { include: { imageRenditions: true } },
+	poster: true,
 } as const;
 
 /** Bind every public read query to the Prisma client owned by one BackendContext. */
 export function createPublicRepository(prisma: PrismaClient) {
+	async function findExactPublicImageOwner(storageKey: string) {
+		const asset = await prisma.asset.findFirst({
+			where: {
+				storageKey,
+				status: 'READY',
+				isPublic: true,
+				kind: { in: ['IMAGE', 'POSTER', 'THUMBNAIL'] },
+				project: { status: { in: PUBLIC_PROJECT_STATUSES } },
+			},
+			select: {
+				storageKey: true,
+				width: true,
+				card480Height: true,
+				display960Height: true,
+			},
+		});
+		if (asset) return { owner: 'asset' as const, image: asset };
+
+		const exhibition = await prisma.exhibition.findUnique({
+			where: { posterStorageKey: storageKey },
+			select: {
+				posterStorageKey: true,
+				posterWidth: true,
+				posterCard480Height: true,
+				posterDisplay960Height: true,
+			},
+		});
+		if (exhibition?.posterStorageKey !== storageKey) return null;
+		return { owner: 'exhibition' as const, image: exhibition };
+	}
+
 	return {
 		/** List all exhibitions with published project counts, ordered by sortOrder/year */
 		findExhibitionsWithPublishedCounts() {
@@ -22,7 +56,6 @@ export function createPublicRepository(prisma: PrismaClient) {
 				orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
 				include: {
 					_count: { select: { projects: { where: { status: { in: PUBLIC_PROJECT_STATUSES } } } } },
-					imageRenditions: true,
 				},
 			});
 		},
@@ -39,7 +72,7 @@ export function createPublicRepository(prisma: PrismaClient) {
 				orderBy: { sortOrder: 'asc' },
 				include: {
 					members: { orderBy: { sortOrder: 'asc' } },
-					poster: { include: { imageRenditions: true } },
+					poster: true,
 				},
 			});
 		},
@@ -51,60 +84,31 @@ export function createPublicRepository(prisma: PrismaClient) {
 
 		/** Resolve one current, publicly visible canonical image or rendition. */
 		async resolvePublicImage(storageKey: string) {
-			const asset = await prisma.asset.findFirst({
-				where: {
-					storageKey,
-					status: 'READY',
-					isPublic: true,
-					kind: { in: ['IMAGE', 'POSTER', 'THUMBNAIL'] },
-					project: { status: { in: PUBLIC_PROJECT_STATUSES } },
-				},
-				select: { storageKey: true },
-			});
-			if (asset) return asset;
-
-			const exhibition = await prisma.exhibition.findUnique({
-				where: { posterStorageKey: storageKey },
-				select: { posterStorageKey: true },
-			});
-			if (exhibition?.posterStorageKey === storageKey) return { storageKey };
-
-			const rendition = await prisma.imageRendition.findUnique({
-				where: { storageKey },
-				select: {
-					storageKey: true,
-					sourceStorageKey: true,
-					asset: {
-						select: {
-							storageKey: true,
-							status: true,
-							isPublic: true,
-							kind: true,
-							project: { select: { status: true } },
-						},
-					},
-					exhibition: { select: { posterStorageKey: true } },
-				},
-			});
-			if (!rendition) return null;
-
-			const ownerAsset = rendition.asset;
-			if (
-				ownerAsset
-				&& ownerAsset.storageKey === rendition.sourceStorageKey
-				&& ownerAsset.status === 'READY'
-				&& ownerAsset.isPublic
-				&& (ownerAsset.kind === 'IMAGE'
-					|| ownerAsset.kind === 'POSTER'
-					|| ownerAsset.kind === 'THUMBNAIL')
-				&& PUBLIC_PROJECT_STATUSES.includes(ownerAsset.project.status)
-			) {
-				return { storageKey: rendition.storageKey };
+			const parsed = parseImageRenditionStorageKey(storageKey);
+			if (parsed) {
+				const sourceOwner = await findExactPublicImageOwner(parsed.sourceStorageKey);
+				const definition = IMAGE_RENDITION_PROFILES.find(
+					(candidate) => candidate.profile === parsed.profile,
+				);
+				if (sourceOwner && definition) {
+					const sourceWidth = sourceOwner.owner === 'asset'
+						? sourceOwner.image.width
+						: sourceOwner.image.posterWidth;
+					const renditionHeight = sourceOwner.owner === 'asset'
+						? sourceOwner.image[definition.heightField]
+						: sourceOwner.image[definition.posterHeightField];
+					if (sourceWidth != null && sourceWidth > definition.width && renditionHeight != null) {
+						return { storageKey };
+					}
+				}
+				// The suffix is reserved only for newly generated keys. Preserve an
+				// exact legacy original that happened to use the same shape.
+				const legacyOriginal = await findExactPublicImageOwner(storageKey);
+				return legacyOriginal ? { storageKey } : null;
 			}
-			if (rendition.exhibition?.posterStorageKey === rendition.sourceStorageKey) {
-				return { storageKey: rendition.storageKey };
-			}
-			return null;
+
+			const original = await findExactPublicImageOwner(storageKey);
+			return original ? { storageKey } : null;
 		},
 
 		/** Find a published project by numeric ID */

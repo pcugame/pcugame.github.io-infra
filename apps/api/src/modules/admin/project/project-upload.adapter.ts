@@ -12,6 +12,7 @@ import type {
 	UploadPipelinePort,
 } from '../../../application/upload-ports.js';
 import { badRequest } from '../../../shared/errors.js';
+import { deriveImageRenditionStorageKey } from '../../../shared/responsive-image.js';
 import { generateStorageKey } from '../../../shared/storage-path.js';
 import type {
 	ImageProcessingInput,
@@ -139,9 +140,10 @@ export function createProjectUploadPipeline(
 		contentType: string,
 		purpose: UploadPurpose,
 		storageRole?: 'original' | 'playback' | 'rendition',
+		storageKey?: string,
 	): Promise<{ key: string; intentId?: string }> {
 		const bucket = deps.bucketForKind(kind);
-		const key = generateStorageKey(extension, deps.ids.next());
+		const key = storageKey ?? generateStorageKey(extension, deps.ids.next());
 		const objectRole: 'original' | 'playback' | 'rendition' = storageRole ?? (
 			purpose === 'original' || purpose === 'playback' ? purpose : 'rendition'
 		);
@@ -286,6 +288,10 @@ export function createProjectUploadPipeline(
 				processed: ImageProcessingResult['renditions'][number];
 			}>;
 			for (const rendition of processed.renditions) {
+				const renditionStorageKey = deriveImageRenditionStorageKey(
+					originalUpload.key,
+					rendition.profile,
+				);
 				const renditionUpload = await upload(
 					rendition.tmpPath,
 					kind,
@@ -293,6 +299,7 @@ export function createProjectUploadPipeline(
 					rendition.mimeType,
 					renditionPurpose(rendition.profile),
 					'rendition',
+					renditionStorageKey,
 				);
 				uploadedRenditions.push({
 					profile: rendition.profile,
@@ -314,12 +321,8 @@ export function createProjectUploadPipeline(
 				height: processed.original.height,
 				renditions: uploadedRenditions.map((rendition) => ({
 					profile: rendition.profile,
-					storageKey: rendition.key,
-					sourceStorageKey: originalUpload.key,
 					width: rendition.processed.width,
 					height: rendition.processed.height,
-					mimeType: rendition.processed.mimeType,
-					sizeBytes: rendition.processed.sizeBytes,
 				})),
 				uploadIntentIds: [
 					originalUpload.intentId,

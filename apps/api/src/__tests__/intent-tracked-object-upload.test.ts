@@ -66,6 +66,24 @@ function createUploader(input: {
 }
 
 describe('intent-tracked object upload lifecycle', () => {
+	it('does not open a body or issue PUT when a deterministic key already has an intent', async () => {
+		const duplicateError = new Error('Upload intent already owns object key in state COMMITTED');
+		const body = Readable.from(['immutable']);
+		const createBody = vi.fn(() => body);
+		const uploadIntents = intentPort();
+		uploadIntents.prepare.mockRejectedValueOnce(duplicateError);
+		const storage: Pick<ObjectStorage, 'upload'> = { upload: vi.fn() };
+		const uploader = createUploader({ storage, uploadIntents });
+
+		await expect(uploader.upload({
+			...input('source.webp/__pcu_image_rendition__/v1/card-480.webp', body),
+			createBody,
+		})).rejects.toBe(duplicateError);
+		expect(createBody).not.toHaveBeenCalled();
+		expect(storage.upload).not.toHaveBeenCalled();
+		await expect(uploader.rollback()).resolves.toBeUndefined();
+	});
+
 	it('prepares before PUT, marks afterward, and skips committed objects during rollback', async () => {
 		const events: string[] = [];
 		const uploadIntents = intentPort({ events, isUncommitted: false });

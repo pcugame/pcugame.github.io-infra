@@ -81,21 +81,13 @@ function uploadFor(kind: 'POSTER' | 'VIDEO'): SavedUpload {
 		renditions: [
 			{
 				profile: 'CARD_480',
-				storageKey: 'poster-card.webp',
-				sourceStorageKey: 'poster-original.webp',
 				width: 480,
 				height: 320,
-				mimeType: 'image/webp',
-				sizeBytes: 300,
 			},
 			{
 				profile: 'DISPLAY_960',
-				storageKey: 'poster-display.webp',
-				sourceStorageKey: 'poster-original.webp',
 				width: 960,
 				height: 640,
-				mimeType: 'image/webp',
-				sizeBytes: 600,
 			},
 		],
 		uploadIntentIds: ['poster-original-intent', 'poster-card-intent', 'poster-display-intent'],
@@ -136,10 +128,6 @@ function transactionHarness() {
 		expect(insideTransaction).toBe(true);
 		return { id: nextAssetId++, input };
 	});
-	const renditionCreateMany = vi.fn(async (input: unknown) => {
-		expect(insideTransaction).toBe(true);
-		return { count: 2, input };
-	});
 	const intentFindMany = vi.fn(async (input: {
 		where: { id: { in: string[] } };
 	}) => {
@@ -158,7 +146,6 @@ function transactionHarness() {
 	});
 	const tx = {
 		asset: { create: assetCreate },
-		imageRendition: { createMany: renditionCreateMany },
 		uploadIntent: { findMany: intentFindMany, updateMany: intentUpdateMany },
 		$queryRaw: vi.fn(async () => {
 			expect(insideTransaction).toBe(true);
@@ -179,7 +166,6 @@ function transactionHarness() {
 	return {
 		prisma,
 		assetCreate,
-		renditionCreateMany,
 		intentFindMany,
 		intentUpdateMany,
 		transaction,
@@ -232,6 +218,8 @@ describe('administrative script upload lifecycle', () => {
 				kind: 'POSTER',
 				width: 1200,
 				height: 800,
+				card480Height: 320,
+				display960Height: 640,
 				isPublic: true,
 			},
 		});
@@ -243,19 +231,6 @@ describe('administrative script upload lifecycle', () => {
 				playbackStatus: 'READY',
 				isPublic: false,
 			},
-		});
-		expect(database.renditionCreateMany).toHaveBeenCalledWith({
-			data: expect.arrayContaining([
-				expect.objectContaining({
-					profile: 'CARD_480',
-					sourceStorageKey: 'poster-original.webp',
-					width: 480,
-				}),
-				expect.objectContaining({
-					profile: 'DISPLAY_960',
-					width: 960,
-				}),
-			]),
 		});
 		const allIntentIds = [
 			'poster-original-intent',

@@ -41,13 +41,8 @@ describe('public exhibition years', () => {
 				posterStorageKey: 'poster.webp',
 				posterWidth: 1200,
 				posterHeight: 800,
-				imageRenditions: [{
-					profile: 'CARD_480',
-					storageKey: 'poster-480.webp',
-					sourceStorageKey: 'poster.webp',
-					width: 480,
-					height: 320,
-				}],
+				posterCard480Height: 320,
+				posterDisplay960Height: null,
 				_count: { projects: 7 },
 			},
 		]);
@@ -66,7 +61,7 @@ describe('public exhibition years', () => {
 					},
 					renditions: [{
 						profile: 'CARD_480',
-						url: 'https://api.example.com/api/public/images/poster-480.webp',
+						url: 'https://api.example.com/api/public/images/poster.webp%2F__pcu_image_rendition__%2Fv1%2Fcard-480.webp',
 						width: 480,
 						height: 320,
 					}],

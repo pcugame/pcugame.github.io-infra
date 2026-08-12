@@ -16,7 +16,7 @@ import { createProjectAssetMutationRepository } from './asset-mutation.repositor
 import { commitUploadIntents } from '../../upload-intent/repository.js';
 import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
-import { imageRenditionCreateManyData } from '../../assets/image-rendition-lifecycle.js';
+import { assetImageRenditionReadiness } from '../../assets/image-rendition-lifecycle.js';
 import {
 	projectActiveUploadDeletionTargets,
 	projectAssetDeletionTargets,
@@ -41,7 +41,8 @@ const projectListInclude = {
 			storageKey: true,
 			width: true,
 			height: true,
-			imageRenditions: true,
+			card480Height: true,
+			display960Height: true,
 		},
 	},
 } as const satisfies Prisma.ProjectInclude;
@@ -52,9 +53,8 @@ export const projectDetailInclude = {
 	assets: {
 		where: { status: 'READY' as const },
 		orderBy: { createdAt: 'asc' as const },
-		include: { imageRenditions: true },
 	},
-	poster: { include: { imageRenditions: true } },
+	poster: true,
 } as const;
 
 export type FindProjectsForUserOptions = {
@@ -179,7 +179,6 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 				});
 				const assets = await tx.asset.findMany({
 					where: { projectId: id },
-					include: { imageRenditions: true },
 				});
 				await queueDurableDeletions(tx, [
 					...projectAssetDeletionTargets(assets, outbox),
@@ -256,7 +255,6 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 				});
 				const assets = await tx.asset.findMany({
 					where: { projectId: { in: ids } },
-					include: { imageRenditions: true },
 				});
 				await queueDurableDeletions(tx, [
 					...projectAssetDeletionTargets(assets, outbox),
@@ -340,16 +338,9 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 							isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO',
 							width: savedFile.width,
 							height: savedFile.height,
+							...assetImageRenditionReadiness(savedFile.renditions ?? []),
 						},
 					});
-					const renditionData = imageRenditionCreateManyData(
-						{ assetId: asset.id },
-						savedFile.storageKey,
-						savedFile.renditions ?? [],
-					);
-					if (renditionData.length > 0) {
-						await tx.imageRendition.createMany({ data: renditionData });
-					}
 					if (savedFile.kind === 'POSTER' && posterAssetId === null) {
 						posterAssetId = asset.id;
 					}
@@ -382,15 +373,12 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					renditions = [],
 					...assetData
 				} = data;
-				const asset = await tx.asset.create({ data: assetData });
-				const renditionData = imageRenditionCreateManyData(
-					{ assetId: asset.id },
-					data.storageKey,
-					renditions,
-				);
-				if (renditionData.length > 0) {
-					await tx.imageRendition.createMany({ data: renditionData });
-				}
+				const asset = await tx.asset.create({
+					data: {
+						...assetData,
+						...assetImageRenditionReadiness(renditions),
+					},
+				});
 				await commitUploadIntents(tx, uploadIntentIds);
 				if (idempotency) {
 					await succeedIdempotencyOperation(tx, {

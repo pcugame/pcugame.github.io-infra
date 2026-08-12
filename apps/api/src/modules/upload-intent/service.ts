@@ -29,12 +29,12 @@ export function createUploadIntentService(deps: {
 		async prepare(input: Omit<NewUploadIntent, 'id' | 'notBefore'>): Promise<string> {
 			const now = deps.clock.now();
 			const id = deps.ids?.next() ?? createClaimToken();
-			await repository.prepare({
+			const prepared = await repository.prepare({
 				...input,
 				id,
 				notBefore: new Date(now.getTime() + graceMs),
 			});
-			return id;
+			return prepared.id;
 		},
 		markUploaded: (id: string) => repository.markUploaded(id).then(() => undefined),
 		isUncommitted: (id: string) => repository.isUncommitted(id),

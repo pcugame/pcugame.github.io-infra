@@ -52,7 +52,8 @@ function repositoryHarness(label: string) {
 			posterStorageKey: `${label}-poster.webp`,
 			posterWidth: 1200,
 			posterHeight: 800,
-			imageRenditions: [],
+			posterCard480Height: null,
+			posterDisplay960Height: null,
 			_count: { projects: 1 },
 		}]),
 		findExhibitionsByYear: vi.fn(async (year: number) => [
@@ -309,6 +310,8 @@ describe('public/WebGL production wiring', () => {
 		expect(poster.headers['cache-control']).toBe('public, max-age=31536000, immutable');
 		expect(a.repository.calls.resolvePublicImage).toHaveBeenCalledWith('a-poster.webp');
 		expect(a.storage.calls.presign).not.toHaveBeenCalled();
+		expect(a.storage.calls.head).not.toHaveBeenCalled();
+		expect(a.storage.calls.stream).toHaveBeenCalledOnce();
 
 		a.storage.calls.stream.mockClear();
 		const posterHead = await app.inject({
@@ -366,7 +369,7 @@ describe('public/WebGL production wiring', () => {
 		expect(stale.statusCode).toBe(404);
 		expect(a.storage.calls.head).not.toHaveBeenCalled();
 
-		a.storage.calls.head.mockResolvedValueOnce(null as never);
+		a.storage.calls.stream.mockResolvedValueOnce(null as never);
 		const missing = await app.inject({ method: 'GET', url: '/api/public/images/missing.webp' });
 		expect(missing.statusCode).toBe(404);
 		expect(logger.error).toHaveBeenCalledWith(
@@ -374,7 +377,7 @@ describe('public/WebGL production wiring', () => {
 			expect.stringContaining('database reference'),
 		);
 
-		a.storage.calls.head.mockRejectedValueOnce(new Error('storage unavailable'));
+		a.storage.calls.stream.mockRejectedValueOnce(new Error('storage unavailable'));
 		const failed = await app.inject({ method: 'GET', url: '/api/public/images/failed.webp' });
 		expect(failed.statusCode).toBe(500);
 		expect(failed.json()).toMatchObject({

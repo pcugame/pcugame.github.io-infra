@@ -109,10 +109,6 @@ export interface DeletedAssetRecord {
 	kind: AssetKind;
 	storageKey: string;
 	playbackStorageKey: string | null;
-	imageRenditions?: Array<{
-		storageKey: string;
-		sourceStorageKey: string;
-	}>;
 }
 
 export interface DeletionOutboxConfig {

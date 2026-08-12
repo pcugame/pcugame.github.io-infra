@@ -6,14 +6,14 @@ import type {
 	IdGenerator,
 	ObjectStorage,
 } from '../../application/ports.js';
-import type {
-	ImageRenditionProfile,
-	PrismaClient,
-} from '../../generated/prisma/client.js';
+import type { PrismaClient } from '../../generated/prisma/client.js';
 import { Prisma } from '../../generated/prisma/client.js';
-import { generateStorageKey } from '../../shared/storage-path.js';
 import {
-	IMAGE_RENDITION_TARGETS,
+	deriveImageRenditionStorageKey,
+	IMAGE_RENDITION_PROFILES,
+	type ImageRenditionProfile,
+} from '../../shared/responsive-image.js';
+import {
 	ImageOutputCleanupError,
 	processImageRenditions,
 	type ProcessedImageRendition,
@@ -26,7 +26,6 @@ import { storageOptionsForAsset } from './upload/storage-policy.js';
 import { commitUploadIntents } from '../upload-intent/repository.js';
 import type { UploadIntentService } from '../upload-lifecycle/ports.js';
 import type { ObjectDeletionCoordinator } from '../../application/object-deletion.js';
-import { imageRenditionCreateManyData } from './image-rendition-lifecycle.js';
 import {
 	ASSET_MUTATION_TRANSACTION_POLICY,
 	withAssetMutationTransaction,
@@ -62,12 +61,6 @@ export interface ImageRenditionBackfillSummary {
 	failures: Array<{ owner: 'asset' | 'exhibition'; id: number; error: string }>;
 }
 
-interface RenditionRow {
-	profile: ImageRenditionProfile;
-	storageKey: string;
-	sourceStorageKey: string;
-}
-
 interface AssetBackfillItem {
 	owner: 'asset';
 	id: number;
@@ -76,7 +69,8 @@ interface AssetBackfillItem {
 	storageKey: string;
 	width: number | null;
 	height: number | null;
-	imageRenditions: RenditionRow[];
+	card480Height: number | null;
+	display960Height: number | null;
 }
 
 interface ExhibitionBackfillItem {
@@ -85,7 +79,8 @@ interface ExhibitionBackfillItem {
 	storageKey: string;
 	width: number | null;
 	height: number | null;
-	imageRenditions: RenditionRow[];
+	posterCard480Height: number | null;
+	posterDisplay960Height: number | null;
 }
 
 type BackfillItem = AssetBackfillItem | ExhibitionBackfillItem;
@@ -93,11 +88,8 @@ type BackfillItem = AssetBackfillItem | ExhibitionBackfillItem;
 interface UploadedRendition {
 	profile: ImageRenditionProfile;
 	storageKey: string;
-	sourceStorageKey: string;
 	width: number;
 	height: number;
-	mimeType: string;
-	sizeBytes: number;
 	intentId: string;
 }
 
@@ -126,13 +118,6 @@ class SourceChangedError extends Error {
 	constructor(owner: BackfillItem['owner'], id: number) {
 		super(`${owner} ${id} canonical source changed during rendition backfill`);
 		this.name = 'SourceChangedError';
-	}
-}
-
-class RenditionSourceMismatchError extends Error {
-	constructor(owner: BackfillItem['owner'], id: number) {
-		super(`${owner} ${id} has a rendition from a mismatched source generation`);
-		this.name = 'RenditionSourceMismatchError';
 	}
 }
 
@@ -208,11 +193,11 @@ export function parseImageRenditionBackfillOptions(
 
 function requestedProfiles(item: BackfillItem): ImageRenditionProfile[] {
 	if (item.owner === 'asset' && item.kind === 'THUMBNAIL') return [];
-	const currentProfiles = new Set(item.imageRenditions
-		.filter((rendition) => rendition.sourceStorageKey === item.storageKey)
-		.map((rendition) => rendition.profile));
-	return IMAGE_RENDITION_TARGETS.flatMap((target) => {
-		if (currentProfiles.has(target.profile)) return [];
+	return IMAGE_RENDITION_PROFILES.flatMap((target) => {
+		const readyHeight = item.owner === 'asset'
+			? item[target.heightField]
+			: item[target.posterHeightField];
+		if (readyHeight != null) return [];
 		if (item.width !== null && item.width <= target.width) return [];
 		return [target.profile];
 	});
@@ -246,9 +231,8 @@ async function loadItems(
 					storageKey: true,
 					width: true,
 					height: true,
-					imageRenditions: {
-						select: { profile: true, storageKey: true, sourceStorageKey: true },
-					},
+					card480Height: true,
+					display960Height: true,
 				},
 			}),
 		options.owner === 'asset'
@@ -265,9 +249,8 @@ async function loadItems(
 					posterStorageKey: true,
 					posterWidth: true,
 					posterHeight: true,
-					imageRenditions: {
-						select: { profile: true, storageKey: true, sourceStorageKey: true },
-					},
+					posterCard480Height: true,
+					posterDisplay960Height: true,
 				},
 			}),
 	]);
@@ -279,7 +262,8 @@ async function loadItems(
 		storageKey: asset.storageKey,
 		width: asset.width,
 		height: asset.height,
-		imageRenditions: asset.imageRenditions,
+		card480Height: asset.card480Height,
+		display960Height: asset.display960Height,
 	}));
 	const exhibitionItems: ExhibitionBackfillItem[] = exhibitions.map((exhibition) => ({
 		owner: 'exhibition',
@@ -287,7 +271,8 @@ async function loadItems(
 		storageKey: exhibition.posterStorageKey!,
 		width: exhibition.posterWidth,
 		height: exhibition.posterHeight,
-		imageRenditions: exhibition.imageRenditions,
+		posterCard480Height: exhibition.posterCard480Height,
+		posterDisplay960Height: exhibition.posterDisplay960Height,
 	}));
 	if (options.owner === 'asset') return assetItems;
 	if (options.owner === 'exhibition') return exhibitionItems;
@@ -311,7 +296,7 @@ async function uploadRenditions(
 	objectUploads: IntentTrackedObjectUploader,
 ): Promise<void> {
 	for (const rendition of renditions) {
-		const storageKey = generateStorageKey(rendition.ext, deps.ids.next());
+		const storageKey = deriveImageRenditionStorageKey(item.storageKey, rendition.profile);
 		const { intentId } = await objectUploads.upload({
 			bucket: deps.publicBucket,
 			storageKey,
@@ -337,59 +322,37 @@ async function uploadRenditions(
 		const record: UploadedRendition = {
 			profile: rendition.profile,
 			storageKey,
-			sourceStorageKey: item.storageKey,
 			width: rendition.width,
 			height: rendition.height,
-			mimeType: rendition.mimeType,
-			sizeBytes: rendition.sizeBytes,
 			intentId,
 		};
 		uploaded.push(record);
 	}
 }
 
-async function replaceStaleProfileRows(
-	tx: Prisma.TransactionClient,
-	deps: ImageRenditionBackfillDependencies,
-	item: BackfillItem,
+function assetReadinessPatch(
 	uploaded: readonly UploadedRendition[],
-): Promise<void> {
-	if (uploaded.length === 0) return;
-	const ownerWhere = item.owner === 'asset'
-		? { assetId: item.id }
-		: { exhibitionId: item.id };
-	const existing = await tx.imageRendition.findMany({
-		where: {
-			...ownerWhere,
-			profile: { in: uploaded.map(({ profile }) => profile) },
-		},
-		select: { storageKey: true, sourceStorageKey: true, profile: true },
-	});
-	const mismatched = existing.filter((row) => row.sourceStorageKey !== item.storageKey);
-	if (mismatched.length > 0) {
-		for (const row of mismatched) {
-			deps.logger.error(
-				{
-					owner: item.owner,
-					id: item.id,
-					profile: row.profile,
-					storageKey: row.storageKey,
-					sourceStorageKey: row.sourceStorageKey,
-					currentSource: item.storageKey,
-				},
-				'Backfill found a rendition from a mismatched source generation',
-			);
-		}
-		throw new RenditionSourceMismatchError(item.owner, item.id);
+): { card480Height?: number; display960Height?: number } {
+	const patch: { card480Height?: number; display960Height?: number } = {};
+	for (const rendition of uploaded) {
+		if (rendition.profile === 'CARD_480') patch.card480Height = rendition.height;
+		else patch.display960Height = rendition.height;
 	}
-	if (existing.length > 0) throw new SourceChangedError(item.owner, item.id);
-	await tx.imageRendition.createMany({
-		data: imageRenditionCreateManyData(
-			item.owner === 'asset' ? { assetId: item.id } : { exhibitionId: item.id },
-			item.storageKey,
-			uploaded,
-		),
-	});
+	return patch;
+}
+
+function exhibitionReadinessPatch(
+	uploaded: readonly UploadedRendition[],
+): { posterCard480Height?: number; posterDisplay960Height?: number } {
+	const patch: {
+		posterCard480Height?: number;
+		posterDisplay960Height?: number;
+	} = {};
+	for (const rendition of uploaded) {
+		if (rendition.profile === 'CARD_480') patch.posterCard480Height = rendition.height;
+		else patch.posterDisplay960Height = rendition.height;
+	}
+	return patch;
 }
 
 async function commitAssetItem(
@@ -403,17 +366,23 @@ async function commitAssetItem(
 			SELECT "id" FROM "projects" WHERE "id" = ${item.projectId} FOR UPDATE
 		`);
 		if (projects.length === 0) throw new SourceChangedError(item.owner, item.id);
-		const assets = await tx.$queryRaw<Array<{ storageKey: string; status: string }>>(Prisma.sql`
+		const assets = await tx.$queryRaw<Array<{
+			storageKey: string;
+			status: string;
+		}>>(Prisma.sql`
 			SELECT "storage_key" AS "storageKey", "status"::text AS "status"
 			FROM "assets" WHERE "id" = ${item.id} FOR UPDATE
 		`);
-		if (assets[0]?.storageKey !== item.storageKey || assets[0]?.status !== 'READY') {
+		const current = assets[0];
+		if (current?.storageKey !== item.storageKey || current.status !== 'READY') {
 			throw new SourceChangedError(item.owner, item.id);
 		}
-		await replaceStaleProfileRows(tx, deps, item, uploaded);
 		await tx.asset.update({
 			where: { id: item.id },
-			data: dimensions,
+			data: {
+				...dimensions,
+				...assetReadinessPatch(uploaded),
+			},
 			select: { id: true },
 		});
 		await commitUploadIntents(tx, uploaded.map(({ intentId }) => intentId));
@@ -427,17 +396,23 @@ async function commitExhibitionItem(
 	uploaded: readonly UploadedRendition[],
 ): Promise<void> {
 	await withExhibitionMutationTransaction(deps.prisma, async (tx) => {
-		const exhibitions = await tx.$queryRaw<Array<{ posterStorageKey: string | null }>>(Prisma.sql`
+		const exhibitions = await tx.$queryRaw<Array<{
+			posterStorageKey: string | null;
+		}>>(Prisma.sql`
 			SELECT "poster_storage_key" AS "posterStorageKey"
 			FROM "exhibitions" WHERE "id" = ${item.id} FOR UPDATE
 		`);
-		if (exhibitions[0]?.posterStorageKey !== item.storageKey) {
+		const current = exhibitions[0];
+		if (current?.posterStorageKey !== item.storageKey) {
 			throw new SourceChangedError(item.owner, item.id);
 		}
-		await replaceStaleProfileRows(tx, deps, item, uploaded);
 		await tx.exhibition.update({
 			where: { id: item.id },
-			data: { posterWidth: dimensions.width, posterHeight: dimensions.height },
+			data: {
+				posterWidth: dimensions.width,
+				posterHeight: dimensions.height,
+				...exhibitionReadinessPatch(uploaded),
+			},
 			select: { id: true },
 		});
 		await commitUploadIntents(tx, uploaded.map(({ intentId }) => intentId));
@@ -505,6 +480,13 @@ async function processItem(
 	let planned: ImageRenditionProfile[] = [];
 	let outcome: ItemOutcome;
 	try {
+		// Reject legacy/reserved/overlong sources before opening either storage
+		// direction. The deterministic key helper is the single key-policy gate.
+		if (options.apply) {
+			for (const profile of profiles) {
+				deriveImageRenditionStorageKey(item.storageKey, profile);
+			}
+		}
 		const object = await deps.storage.stream(deps.publicBucket, item.storageKey);
 		if (!object) throw new SourceObjectMissingError(item.storageKey);
 		await streamPipeline(object.body, deps.fileSystem.createWriteStream(sourcePath));

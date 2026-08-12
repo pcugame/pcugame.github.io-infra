@@ -12,7 +12,6 @@ import { isPosterUrlSafe } from '../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../shared/project-completeness.js';
 import {
 	createResponsiveImageSerializer,
-	type ResponsiveImageRenditionRecord,
 } from '../../shared/responsive-image.js';
 import { parseWebglEntryKey, webglUrl } from '../webgl/paths.js';
 
@@ -23,7 +22,8 @@ interface PublicPosterRecord {
 	storageKey: string;
 	width?: number | null;
 	height?: number | null;
-	imageRenditions?: ResponsiveImageRenditionRecord[];
+	card480Height?: number | null;
+	display960Height?: number | null;
 }
 
 interface PublicProjectListRecord {
@@ -52,7 +52,8 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 		storageKey: string;
 		width?: number | null;
 		height?: number | null;
-		imageRenditions?: ResponsiveImageRenditionRecord[];
+		card480Height?: number | null;
+		display960Height?: number | null;
 		playbackStorageKey?: string | null;
 		mimeType: string;
 		playbackMimeType?: string;
@@ -70,7 +71,8 @@ export interface PublicServiceDependencies {
 			posterStorageKey: string | null;
 			posterWidth?: number | null;
 			posterHeight?: number | null;
-			imageRenditions?: ResponsiveImageRenditionRecord[];
+			posterCard480Height?: number | null;
+			posterDisplay960Height?: number | null;
 			_count: { projects: number };
 		}[]>;
 		findExhibitionsByYear(year: number): Promise<{ id: number; year: number; title: string }[]>;
@@ -102,7 +104,8 @@ export async function listYears(deps: PublicServiceDependencies): Promise<Public
 			storageKey: e.posterStorageKey,
 			width: e.posterWidth,
 			height: e.posterHeight,
-			imageRenditions: e.imageRenditions,
+			card480Height: e.posterCard480Height,
+			display960Height: e.posterDisplay960Height,
 		}) : undefined,
 	}));
 }

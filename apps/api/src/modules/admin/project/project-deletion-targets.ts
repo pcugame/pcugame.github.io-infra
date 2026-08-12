@@ -11,10 +11,6 @@ export interface ProjectDeletionAsset {
 	kind: AssetKind;
 	storageKey: string;
 	playbackStorageKey: string | null;
-	imageRenditions?: Array<{
-		storageKey: string;
-		sourceStorageKey: string;
-	}>;
 }
 
 export interface ProjectDeletionUpload {
@@ -43,12 +39,13 @@ export function projectAssetDeletionTargets(
 					reason: `${config.reason}-playback`,
 				}]
 				: []),
-			...imageRenditionDeletionTargets(
-				config.publicBucket,
-				asset.storageKey,
-				asset.imageRenditions ?? [],
-				`${config.reason}-rendition`,
-			),
+			...(asset.kind === 'IMAGE' || asset.kind === 'POSTER'
+				? imageRenditionDeletionTargets(
+					config.publicBucket,
+					asset.storageKey,
+					`${config.reason}-rendition`,
+				)
+				: []),
 		];
 	});
 }

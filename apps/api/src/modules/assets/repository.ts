@@ -170,14 +170,6 @@ export function createAssetsRepository(
 				if (!sameIdentity || (current.status !== 'DELETING' && current.status !== 'DELETED')) {
 					throw conflict('Asset identity changed before deletion completed');
 				}
-				const currentRenditions = await tx.imageRendition.findMany({
-					where: {
-						assetId: claim.id,
-						sourceStorageKey: claim.storageKey,
-					},
-					select: { storageKey: true, sourceStorageKey: true },
-				});
-
 				await queueDurableDeletions(tx, [
 					{
 						bucket: outbox.bucket,
@@ -191,19 +183,14 @@ export function createAssetsRepository(
 							reason: outbox.playbackReason,
 						}]
 						: []),
-					...imageRenditionDeletionTargets(
-						outbox.bucket,
-						claim.storageKey,
-						currentRenditions,
-						`${outbox.reason}-rendition`,
-					),
+					...(claim.kind === 'IMAGE' || claim.kind === 'POSTER'
+						? imageRenditionDeletionTargets(
+							outbox.bucket,
+							claim.storageKey,
+							`${outbox.reason}-rendition`,
+						)
+						: []),
 				]);
-				await tx.imageRendition.deleteMany({
-					where: {
-						assetId: claim.id,
-						sourceStorageKey: claim.storageKey,
-					},
-				});
 				await tx.gameUploadSession.updateMany({
 					where: {
 						projectId: claim.projectId,

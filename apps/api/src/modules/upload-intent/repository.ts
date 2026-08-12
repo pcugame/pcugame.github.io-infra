@@ -54,7 +54,59 @@ export function createUploadIntentRepository(client: PrismaClient) {
 		prepare(data: NewUploadIntent) {
 			return client.$transaction(async (tx) => {
 				await assertNoDeletionClaim(tx, { bucket: data.bucket, key: data.storageKey });
-				return tx.uploadIntent.create({ data });
+				const existing = await tx.uploadIntent.findUnique({
+					where: {
+						upload_intent_bucket_storage_key: {
+							bucket: data.bucket,
+							storageKey: data.storageKey,
+						},
+					},
+					select: {
+						id: true,
+						state: true,
+						purpose: true,
+						ownerOperationId: true,
+						ownerActorId: true,
+						ownerProjectId: true,
+						ownerExhibitionId: true,
+					},
+				});
+				if (!existing) return tx.uploadIntent.create({ data });
+				const sameOwner = existing.purpose === data.purpose
+					&& existing.ownerOperationId === (data.ownerOperationId ?? null)
+					&& existing.ownerActorId === (data.ownerActorId ?? null)
+					&& existing.ownerProjectId === (data.ownerProjectId ?? null)
+					&& existing.ownerExhibitionId === (data.ownerExhibitionId ?? null);
+				if (!sameOwner) {
+					throw new Error('Upload intent object key is owned by another operation');
+				}
+				if (existing.state !== 'RESOLVED') {
+					// A deterministic rendition key belongs to immutable bytes. Sharing an
+					// active/committed intent would let a loser issue a second PUT, while a
+					// cleanup-queued intent may already have an outbox claim in flight.
+					throw new Error(
+						`Upload intent already owns object key in state ${existing.state}`,
+					);
+				}
+				// Deterministic rendition retries reuse an exact object key. A terminal
+				// attempt may be rearmed only after proving no deletion claim is active.
+				return tx.uploadIntent.update({
+					where: { id: existing.id },
+					data: {
+						purpose: data.purpose,
+						ownerOperationId: data.ownerOperationId,
+						ownerActorId: data.ownerActorId,
+						ownerProjectId: data.ownerProjectId,
+						ownerExhibitionId: data.ownerExhibitionId,
+						notBefore: data.notBefore,
+						state: 'PREPARED',
+						attemptCount: 0,
+						nextAttemptAt: new Date(),
+						lastError: null,
+						claimToken: null,
+						claimUntil: null,
+					},
+				});
 			}, SERIALIZABLE);
 		},
 

@@ -43,7 +43,8 @@ function serializeExhibition(
 				storageKey: e.posterStorageKey,
 				width: e.posterWidth,
 				height: e.posterHeight,
-				imageRenditions: e.imageRenditions,
+				card480Height: e.posterCard480Height,
+				display960Height: e.posterDisplay960Height,
 			})
 			: undefined,
 		posterOriginalName: e.posterOriginalName || undefined,

@@ -1,14 +1,6 @@
 import type { CreateExhibitionRequest } from '@pcu/contracts';
 import type { SavedImageRendition } from '../../../application/upload-ports.js';
 
-export interface ExhibitionImageRenditionRecord {
-	profile: 'CARD_480' | 'DISPLAY_960';
-	storageKey: string;
-	sourceStorageKey: string;
-	width: number;
-	height: number;
-}
-
 export interface ExhibitionRecord {
 	id: number;
 	year: number;
@@ -20,7 +12,8 @@ export interface ExhibitionRecord {
 	posterSizeBytes: bigint;
 	posterWidth?: number | null;
 	posterHeight?: number | null;
-	imageRenditions?: ExhibitionImageRenditionRecord[];
+	posterCard480Height?: number | null;
+	posterDisplay960Height?: number | null;
 	_count: { projects: number };
 }
 

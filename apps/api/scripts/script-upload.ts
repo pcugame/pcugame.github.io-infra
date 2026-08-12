@@ -15,7 +15,7 @@ import type {
 	UploadIntentOwner,
 	UploadPipelinePort,
 } from '../src/application/upload-ports.js';
-import { imageRenditionCreateManyData } from '../src/modules/assets/image-rendition-lifecycle.js';
+import { assetImageRenditionReadiness } from '../src/modules/assets/image-rendition-lifecycle.js';
 import { commitUploadIntents } from '../src/modules/upload-intent/repository.js';
 
 export interface ScriptUploadSource {
@@ -159,8 +159,9 @@ export async function createScriptAsset(
 			mimeType: saved.mimeType,
 			playbackMimeType: saved.playbackMimeType ?? '',
 			sizeBytes: BigInt(saved.sizeBytes),
-			width: saved.width,
-			height: saved.height,
+		width: saved.width,
+		height: saved.height,
+		...assetImageRenditionReadiness(saved.renditions ?? []),
 			playbackSizeBytes: BigInt(saved.playbackSizeBytes ?? 0),
 			playbackStatus: saved.playbackStatus ?? 'PENDING',
 			playbackError: saved.playbackError ?? '',
@@ -168,13 +169,5 @@ export async function createScriptAsset(
 		},
 		select: { id: true },
 	});
-	const renditions = imageRenditionCreateManyData(
-		{ assetId: created.id },
-		saved.storageKey,
-		saved.renditions ?? [],
-	);
-	if (renditions.length > 0) {
-		await tx.imageRendition.createMany({ data: renditions });
-	}
 	return created;
 }

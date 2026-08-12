@@ -3,7 +3,6 @@ import { isPosterUrlSafe } from '../../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
 import {
 	createResponsiveImageSerializer,
-	type ResponsiveImageRenditionRecord,
 } from '../../../shared/responsive-image.js';
 import { parseWebglEntryKey, webglUrl } from '../../webgl/paths.js';
 
@@ -22,7 +21,8 @@ export type SerializableAsset = {
 	sizeBytes: bigint;
 	width?: number | null;
 	height?: number | null;
-	imageRenditions?: ResponsiveImageRenditionRecord[];
+	card480Height?: number | null;
+	display960Height?: number | null;
 	playbackSizeBytes: bigint;
 	playbackStatus: AssetPlaybackStatus;
 	playbackError: string;
@@ -61,7 +61,8 @@ export type SerializableProject = {
 		status: string;
 		width?: number | null;
 		height?: number | null;
-		imageRenditions?: ResponsiveImageRenditionRecord[];
+		card480Height?: number | null;
+		display960Height?: number | null;
 	} | null;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
 	assets: SerializableAsset[];

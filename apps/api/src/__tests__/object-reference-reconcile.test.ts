@@ -29,21 +29,29 @@ function referenceClient(input: { malformedWebgl?: boolean } = {}) {
 					storageKey: 'images/original.png',
 					playbackStorageKey: 'images/playback.webp',
 					isPublic: true,
+					card480Height: null,
+					display960Height: null,
 				},
 				{
 					id: 2,
 					storageKey: 'videos/original.mp4',
 					playbackStorageKey: null,
 					isPublic: false,
+					card480Height: null,
+					display960Height: null,
 				},
 			]),
 		},
 		exhibition: {
 			findMany: vi.fn().mockResolvedValue([
-				{ id: 3, posterStorageKey: 'posters/exhibition.png' },
+				{
+					id: 3,
+					posterStorageKey: 'posters/exhibition.png',
+					posterCard480Height: null,
+					posterDisplay960Height: null,
+				},
 			]),
 		},
-		imageRendition: { findMany: vi.fn().mockResolvedValue([]) },
 		project: {
 			findMany: vi.fn().mockResolvedValue([{
 				id: 7,
@@ -138,7 +146,6 @@ function emptyReferenceModels() {
 	return {
 		asset: { findMany: vi.fn().mockResolvedValue([]) },
 		exhibition: { findMany: vi.fn().mockResolvedValue([]) },
-		imageRendition: { findMany: vi.fn().mockResolvedValue([]) },
 		project: { findMany: vi.fn().mockResolvedValue([]) },
 		gameUploadSession: {
 			findMany: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]),
