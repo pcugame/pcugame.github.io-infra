@@ -5,11 +5,7 @@ import type {
 	ProjectStatus,
 } from '../../../generated/prisma/client.js';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
-import { queueDurableDeletions, type DurableDeletionTarget } from '../../orphan/outbox.js';
-import {
-	webglDeletionTargetsByEntry,
-	webglDeletionTargetsBySource,
-} from '../../webgl/deletion-targets.js';
+import { queueDurableDeletions } from '../../orphan/outbox.js';
 import type {
 	DeletionOutboxConfig,
 	ProjectAssetRepository,
@@ -20,6 +16,12 @@ import { createProjectAssetMutationRepository } from './asset-mutation.repositor
 import { commitUploadIntents } from '../../upload-intent/repository.js';
 import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
+import { assetImageRenditionReadiness } from '../../assets/image-rendition-lifecycle.js';
+import {
+	projectActiveUploadDeletionTargets,
+	projectAssetDeletionTargets,
+	projectWebglDeletionTargets,
+} from './project-deletion-targets.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -32,13 +34,26 @@ const projectListInclude = {
 		where: { status: 'READY' as const, kind: { in: projectListPlayableKinds } },
 		select: { kind: true },
 	},
-	poster: { select: { kind: true, status: true, storageKey: true } },
+	poster: {
+		select: {
+			kind: true,
+			status: true,
+			storageKey: true,
+			width: true,
+			height: true,
+			card480Height: true,
+			display960Height: true,
+		},
+	},
 } as const satisfies Prisma.ProjectInclude;
 
 export const projectDetailInclude = {
 	exhibition: true,
 	members: { orderBy: { sortOrder: 'asc' as const } },
-	assets: { where: { status: 'READY' as const }, orderBy: { createdAt: 'asc' as const } },
+	assets: {
+		where: { status: 'READY' as const },
+		orderBy: { createdAt: 'asc' as const },
+	},
 	poster: true,
 } as const;
 
@@ -92,43 +107,6 @@ function buildProjectListOrderBy(
 	const primary: Prisma.ProjectOrderByWithRelationInput =
 		sort === 'year' ? { exhibition: { year: order } } : { [sort]: order };
 	return [primary, { id: order }];
-}
-
-function assetBucket(kind: AssetKind, config: DeletionOutboxConfig): string {
-	return kind === 'GAME' || kind === 'VIDEO' ? config.protectedBucket : config.publicBucket;
-}
-
-function assetDeletionTargets(
-	assets: Array<{ kind: AssetKind; storageKey: string; playbackStorageKey: string | null }>,
-	config: DeletionOutboxConfig,
-): DurableDeletionTarget[] {
-	return assets.flatMap((asset) => {
-		const bucket = assetBucket(asset.kind, config);
-		return [
-			{ bucket, storageKey: asset.storageKey, reason: config.reason },
-			...(asset.playbackStorageKey && asset.playbackStorageKey !== asset.storageKey
-				? [{ bucket, storageKey: asset.playbackStorageKey, reason: `${config.reason}-playback` }]
-				: []),
-		];
-	});
-}
-
-function activeUploadDeletionTargets(
-	projectId: number,
-	uploads: Array<{ uploadKind: string; s3Key: string | null }>,
-	config: DeletionOutboxConfig,
-): DurableDeletionTarget[] {
-	return uploads.flatMap((upload) => {
-		if (!upload.s3Key) return [];
-		if (upload.uploadKind === 'WEBGL') {
-			return webglDeletionTargetsBySource(projectId, upload.s3Key, config, `${config.reason}-active-upload`);
-		}
-		return [{
-			bucket: config.protectedBucket,
-			storageKey: upload.s3Key,
-			reason: `${config.reason}-active-upload`,
-		}];
-	});
 }
 
 function retryableTransactionError(error: unknown): boolean {
@@ -199,11 +177,13 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					where: { projectId: id, status: { in: ['PENDING', 'COMPLETING'] } },
 					select: { id: true, uploadKind: true, s3Key: true, s3UploadId: true },
 				});
-				const assets = await tx.asset.findMany({ where: { projectId: id } });
+				const assets = await tx.asset.findMany({
+					where: { projectId: id },
+				});
 				await queueDurableDeletions(tx, [
-					...assetDeletionTargets(assets, outbox),
-					...webglDeletionTargetsByEntry(id, project.webglEntryKey, outbox, outbox.reason),
-					...activeUploadDeletionTargets(id, activeUploads, outbox),
+					...projectAssetDeletionTargets(assets, outbox),
+					...projectWebglDeletionTargets(id, project.webglEntryKey, outbox),
+					...projectActiveUploadDeletionTargets(id, activeUploads, outbox),
 				]);
 				for (const upload of activeUploads) {
 					if (!upload.s3Key || !upload.s3UploadId) continue;
@@ -235,8 +215,8 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					include: { session: true },
 				});
 				await queueDurableDeletions(tx, [
-					...webglDeletionTargetsByEntry(projectId, project.webglEntryKey, outbox, outbox.reason),
-					...activeUploadDeletionTargets(projectId, active?.session ? [active.session] : [], outbox),
+					...projectWebglDeletionTargets(projectId, project.webglEntryKey, outbox),
+					...projectActiveUploadDeletionTargets(projectId, active?.session ? [active.session] : [], outbox),
 				]);
 				if (active?.session.s3Key && active.session.s3UploadId) {
 					await queueMultipartAbortTask(tx, {
@@ -273,16 +253,17 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					where: { projectId: { in: ids }, status: { in: ['PENDING', 'COMPLETING'] } },
 					select: { id: true, projectId: true, uploadKind: true, s3Key: true, s3UploadId: true },
 				});
-				const assets = await tx.asset.findMany({ where: { projectId: { in: ids } } });
+				const assets = await tx.asset.findMany({
+					where: { projectId: { in: ids } },
+				});
 				await queueDurableDeletions(tx, [
-					...assetDeletionTargets(assets, outbox),
-					...projects.flatMap((project) => webglDeletionTargetsByEntry(
+					...projectAssetDeletionTargets(assets, outbox),
+					...projects.flatMap((project) => projectWebglDeletionTargets(
 						project.id,
 						project.webglEntryKey,
 						outbox,
-						outbox.reason,
 					)),
-					...projects.flatMap((project) => activeUploadDeletionTargets(
+					...projects.flatMap((project) => projectActiveUploadDeletionTargets(
 						project.id,
 						activeUploads.filter((upload) => upload.projectId === project.id),
 						outbox,
@@ -355,6 +336,9 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 							playbackStatus: savedFile.playbackStatus ?? 'PENDING',
 							playbackError: savedFile.playbackError ?? '',
 							isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO',
+							width: savedFile.width,
+							height: savedFile.height,
+							...assetImageRenditionReadiness(savedFile.renditions ?? []),
 						},
 					});
 					if (savedFile.kind === 'POSTER' && posterAssetId === null) {
@@ -383,8 +367,18 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 		},
 		createAsset(data) {
 			return client.$transaction(async (tx) => {
-				const { uploadIntentIds = [], idempotency, ...assetData } = data;
-				const asset = await tx.asset.create({ data: assetData });
+				const {
+					uploadIntentIds = [],
+					idempotency,
+					renditions = [],
+					...assetData
+				} = data;
+				const asset = await tx.asset.create({
+					data: {
+						...assetData,
+						...assetImageRenditionReadiness(renditions),
+					},
+				});
 				await commitUploadIntents(tx, uploadIntentIds);
 				if (idempotency) {
 					await succeedIdempotencyOperation(tx, {

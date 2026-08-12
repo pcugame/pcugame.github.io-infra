@@ -1,11 +1,13 @@
 import type { AdminProjectDetail, AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from '@pcu/contracts';
 import { isPosterUrlSafe } from '../../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
+import {
+	createResponsiveImageSerializer,
+} from '../../../shared/responsive-image.js';
 import { parseWebglEntryKey, webglUrl } from '../../webgl/paths.js';
 
-function assetUrlFor(base: string, storageKey: string, kind: AssetKind): string {
-	if (kind === 'GAME' || kind === 'VIDEO') return `${base}/api/assets/protected/${storageKey}`;
-	return `${base}/api/assets/public/${storageKey}`;
+function protectedAssetUrlFor(base: string, storageKey: string): string {
+	return `${base}/api/assets/protected/${storageKey}`;
 }
 
 export type SerializableAsset = {
@@ -17,6 +19,10 @@ export type SerializableAsset = {
 	mimeType: string;
 	playbackMimeType: string;
 	sizeBytes: bigint;
+	width?: number | null;
+	height?: number | null;
+	card480Height?: number | null;
+	display960Height?: number | null;
 	playbackSizeBytes: bigint;
 	playbackStatus: AssetPlaybackStatus;
 	playbackError: string;
@@ -49,22 +55,31 @@ export type SerializableProject = {
 	sortOrder: number;
 	posterAssetId: number | null;
 	webglEntryKey?: string;
-	poster: { storageKey: string; kind: AssetKind; status: string } | null;
+	poster: {
+		storageKey: string;
+		kind: AssetKind;
+		status: string;
+		width?: number | null;
+		height?: number | null;
+		card480Height?: number | null;
+		display960Height?: number | null;
+	} | null;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
 	assets: SerializableAsset[];
 };
 
 export function createProjectSerializer(baseUrl: string) {
 	const base = baseUrl.replace(/\/$/, '');
-	const assetUrl = (storageKey: string, kind: AssetKind) => assetUrlFor(base, storageKey, kind);
+	const protectedAssetUrl = (storageKey: string) => protectedAssetUrlFor(base, storageKey);
+	const responsiveImages = createResponsiveImageSerializer(base);
 
 	function serializeProjectDetail(project: SerializableProject): AdminProjectDetail {
 		const videos = project.assets
 			.filter((a) => a.kind === 'VIDEO')
 			.map((videoAsset) => ({
-				url: assetUrl(playbackKeyFor(videoAsset), 'VIDEO'),
+				url: protectedAssetUrl(playbackKeyFor(videoAsset)),
 				mimeType: playbackMimeFor(videoAsset),
-				originalDownloadUrl: assetUrl(videoAsset.storageKey, 'VIDEO'),
+				originalDownloadUrl: protectedAssetUrl(videoAsset.storageKey),
 				playbackStatus: videoAsset.playbackStatus,
 				playbackError: videoAsset.playbackError || undefined,
 			}));
@@ -85,8 +100,8 @@ export function createProjectSerializer(baseUrl: string) {
 			status: project.status,
 			sortOrder: project.sortOrder,
 			posterAssetId: project.posterAssetId ?? undefined,
-			posterUrl: isPosterUrlSafe(project.poster)
-				? assetUrl(project.poster!.storageKey, 'POSTER')
+			poster: isPosterUrlSafe(project.poster)
+				? responsiveImages.serializeResponsiveImage(project.poster!)
 				: undefined,
 			webglUrl: parseWebglEntryKey(project.id, project.webglEntryKey ?? '')
 				? webglUrl(base, project.id)
@@ -98,19 +113,30 @@ export function createProjectSerializer(baseUrl: string) {
 				sortOrder: m.sortOrder,
 				userId: m.userId,
 			})),
-			assets: project.assets.map((a) => ({
-				id: a.id,
-				kind: a.kind,
-				url: assetUrl(a.storageKey, a.kind),
-				originalDownloadUrl: a.kind === 'VIDEO' ? assetUrl(a.storageKey, a.kind) : undefined,
-				playbackUrl: a.kind === 'VIDEO' ? assetUrl(playbackKeyFor(a), a.kind) : undefined,
-				playbackStatus: a.kind === 'VIDEO' ? a.playbackStatus : undefined,
-				playbackError: a.kind === 'VIDEO' && a.playbackError ? a.playbackError : undefined,
-				originalName: a.originalName,
-				size: Number(a.sizeBytes),
-			})),
+			assets: project.assets.map((a) => {
+				if (a.kind === 'IMAGE' || a.kind === 'POSTER' || a.kind === 'THUMBNAIL') {
+					return {
+						id: a.id,
+						kind: a.kind,
+						image: responsiveImages.serializeResponsiveImage(a),
+						originalName: a.originalName,
+						size: Number(a.sizeBytes),
+					};
+				}
+				return {
+					id: a.id,
+					kind: a.kind,
+					url: protectedAssetUrl(a.storageKey),
+					originalDownloadUrl: a.kind === 'VIDEO' ? protectedAssetUrl(a.storageKey) : undefined,
+					playbackUrl: a.kind === 'VIDEO' ? protectedAssetUrl(playbackKeyFor(a)) : undefined,
+					playbackStatus: a.kind === 'VIDEO' ? a.playbackStatus : undefined,
+					playbackError: a.kind === 'VIDEO' && a.playbackError ? a.playbackError : undefined,
+					originalName: a.originalName,
+					size: Number(a.sizeBytes),
+				};
+			}),
 		};
 	}
 
-	return { assetUrl, serializeProjectDetail };
+	return { protectedAssetUrl, serializeProjectDetail };
 }

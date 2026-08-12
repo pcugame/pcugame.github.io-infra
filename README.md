@@ -195,7 +195,7 @@ npm run build
 
 - PostgreSQL은 자산의 `storageKey`, 공개 여부, 크기, MIME type, 처리 상태를 저장한다.
 - Garage의 `pcu-public` bucket은 공개 자산, `pcu-protected` bucket은 보호 자산을 저장한다.
-- API는 자산 요청을 검사한 뒤 짧은 유효 기간의 presigned URL로 redirect한다.
+- API는 현재 공개 참조로 확인된 이미지를 불변 cache header와 함께 직접 stream한다. GAME·VIDEO 등 보호 자산은 권한을 검사한 뒤 기존처럼 짧은 유효 기간의 presigned URL로 redirect한다.
 - 영상 업로드는 재생용 자산 처리 상태를 별도로 기록한다.
 - Unity WebGL ZIP은 archive 경로와 content encoding을 검증한 뒤 공개 실행 경로로 제공한다.
 - multipart 업로드의 중단·만료·완료 실패는 background maintenance와 durable task table로 복구한다.
@@ -208,7 +208,7 @@ npm run build
 
 `master` branch의 `apps/web`, 공용 계약 또는 workspace 설정 변경은 `deploy-web-pages.yml`을 실행한다. test·lint·build를 통과한 `apps/web/dist`를 `pcugame/pcugame.github.io` 저장소의 `master` branch에 게시한다. build 후 생성되는 `404.html`은 GitHub Pages에서 SPA deep link를 처리한다.
 
-Web과 API가 같은 commit에서 변경되면 Web workflow는 같은 SHA의 API 배포 성공을 확인한 뒤 게시한다.
+Web과 API가 같은 commit에서 변경되면 API workflow는 같은 SHA의 Web 배포 성공을 확인한 뒤 배포한다. breaking 계약 배포 중에는 새 Web과 기존 API가 잠시 불일치할 수 있으며, 최종적으로 같은 SHA pair가 배포되어야 한다.
 
 ### API
 

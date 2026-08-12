@@ -4,6 +4,7 @@
 export type {
 	AssetKind,
 	AssetPlaybackStatus,
+	ResponsiveImage,
 	Platform,
 	ProjectStatus,
 	UserRole,

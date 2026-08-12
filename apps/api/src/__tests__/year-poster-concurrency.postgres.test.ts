@@ -13,8 +13,13 @@ import {
 import { createExhibitionService } from '../modules/admin/year/service.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
+const API_PUBLIC_URL = 'https://api.example.test';
 const BARRIER_NAMESPACE = 50_090;
 const REPETITIONS = 3;
+
+function publicImageUrl(storageKey: string): string {
+	return `${API_PUBLIC_URL}/api/public/images/${encodeURIComponent(storageKey)}`;
+}
 
 function deferred() {
 	let resolve!: () => void;
@@ -162,7 +167,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			onRetry: input.onRetry ? () => input.onRetry?.() : undefined,
 		});
 		const service = createExhibitionService({
-			apiPublicUrl: 'https://api.example.test',
+			apiPublicUrl: API_PUBLIC_URL,
 			posterBucket: bucket,
 			repository,
 			uploadLimits: () => ({
@@ -461,7 +466,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 		await expect(service.service.replacePoster(exhibition.id, {
 			actor: { id: 1, role: 'ADMIN' },
 			parts: emptyParts(),
-		})).resolves.toMatchObject({ posterUrl: expect.stringContaining(newKey) });
+		})).resolves.toMatchObject({ poster: { original: { url: publicImageUrl(newKey) } } });
 		await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
 			.resolves.toMatchObject({ posterStorageKey: newKey });
 		const sequence = await control.$queryRaw<Array<{ lastValue: bigint }>>`
@@ -496,23 +501,26 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 		});
 		const barrier = await armBarrier(exhibition.id);
 		let released = false;
+		let losing: Promise<unknown> | undefined;
 		try {
 			const winning = winner.service.replacePoster(exhibition.id, {
 				actor: { id: 1, role: 'ADMIN' },
 				parts: emptyParts(),
 			});
 			await waitForDatabaseLock('ticket009-operation-a');
-			const losing = loser.service.replacePoster(exhibition.id, {
+			losing = loser.service.replacePoster(exhibition.id, {
 				actor: { id: 1, role: 'ADMIN' },
 				parts: emptyParts(),
 			});
 			await waitForDatabaseLock('ticket009-operation-b');
 			await barrier.release();
 			released = true;
-			await expect(winning).resolves.toMatchObject({ posterUrl: expect.stringContaining(winnerKey) });
-			await expect(losing).rejects.toMatchObject({ statusCode: 409 });
+			await expect(winning).resolves.toMatchObject({
+				poster: { original: { url: publicImageUrl(winnerKey) } },
+			});
 		} finally {
 			if (!released) await barrier.release();
+			if (losing) await expect(losing).rejects.toMatchObject({ statusCode: 409 });
 		}
 
 		await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
@@ -537,7 +545,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 		await expect(service.service.replacePoster(exhibition.id, {
 			actor: { id: 1, role: 'ADMIN' },
 			parts: emptyParts(),
-		})).resolves.toMatchObject({ posterUrl: expect.stringContaining(newKey) });
+		})).resolves.toMatchObject({ poster: { original: { url: publicImageUrl(newKey) } } });
 		await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
 			.resolves.toMatchObject({ posterStorageKey: newKey });
 		expect(objects.has(newKey)).toBe(true);

@@ -1,6 +1,5 @@
 import type {
 	AssetKind,
-	AssetPlaybackStatus,
 	Prisma,
 	PrismaClient,
 } from '../../../generated/prisma/client.js';
@@ -15,7 +14,11 @@ import {
 import { queueDurableDeletions } from '../../orphan/outbox.js';
 import { commitUploadIntents } from '../../upload-intent/repository.js';
 import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
-import type { AssetReplacementOutboxConfig } from './ports.js';
+import {
+	assetImageRenditionReadiness,
+	imageRenditionDeletionTargets,
+} from '../../assets/image-rendition-lifecycle.js';
+import type { AssetReplacementOutboxConfig, AssetWriteData } from './ports.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -68,24 +71,7 @@ export function createProjectAssetMutationRepository(
 		replaceOrCreateReplaceableAsset(
 			projectId: number,
 			kind: AssetKind,
-			data: {
-				storageKey: string;
-				playbackStorageKey?: string | null;
-				originalName: string;
-				mimeType: string;
-				playbackMimeType?: string;
-				sizeBytes: bigint;
-				playbackSizeBytes?: bigint;
-				playbackStatus?: AssetPlaybackStatus;
-				playbackError?: string;
-				isPublic: boolean;
-				uploadIntentIds?: string[];
-				idempotency?: {
-					operationId: string;
-					ownerToken: string;
-					resultForAsset(assetId: number): Record<string, unknown>;
-				};
-			},
+			data: AssetWriteData,
 			outbox: AssetReplacementOutboxConfig,
 		): Promise<{
 			assetId: number;
@@ -113,6 +99,13 @@ export function createProjectAssetMutationRepository(
 									storageKey: existing.playbackStorageKey,
 									reason: outbox.playbackReason,
 								}]
+							: []),
+						...(kind === 'IMAGE' || kind === 'POSTER'
+							? imageRenditionDeletionTargets(
+								outbox.bucket,
+								existing.storageKey,
+								`${outbox.reason}-rendition`,
+							)
 							: []),
 					]);
 					await tx.project.updateMany({
@@ -150,6 +143,9 @@ export function createProjectAssetMutationRepository(
 						playbackStatus: data.playbackStatus ?? 'PENDING',
 						playbackError: data.playbackError ?? '',
 						isPublic: data.isPublic,
+						width: data.width,
+						height: data.height,
+						...assetImageRenditionReadiness(data.renditions ?? []),
 					},
 					select: { id: true },
 				});

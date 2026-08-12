@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createProjectSerializer } from '../modules/admin/project/serializer.js';
 import { isReplaceableAssetKind } from '../modules/admin/project/project-asset.service.js';
 
-const { assetUrl, serializeProjectDetail } = createProjectSerializer('https://api.example.com');
+const { protectedAssetUrl, serializeProjectDetail } = createProjectSerializer('https://api.example.com');
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -32,6 +32,10 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 			mimeType: string;
 			playbackMimeType: string;
 			sizeBytes: bigint;
+			width?: number | null;
+			height?: number | null;
+			card480Height?: number | null;
+			display960Height?: number | null;
 			playbackSizeBytes: bigint;
 			playbackStatus: 'PENDING' | 'READY' | 'FAILED';
 			playbackError: string;
@@ -57,27 +61,15 @@ function fakeAsset(overrides: Partial<ReturnType<typeof fakeProject>['assets'][n
 	};
 }
 
-// ── assetUrl ────────────────────────────────────────────────
+// ── protectedAssetUrl ───────────────────────────────────────
 
-describe('assetUrl', () => {
-	it('returns protected URL for GAME kind', () => {
-		expect(assetUrl('abc.zip', 'GAME')).toBe('https://api.example.com/api/assets/protected/abc.zip');
+describe('protectedAssetUrl', () => {
+	it('returns a protected asset URL', () => {
+		expect(protectedAssetUrl('abc.zip')).toBe('https://api.example.com/api/assets/protected/abc.zip');
 	});
 
-	it('returns protected URL for VIDEO kind', () => {
-		expect(assetUrl('vid.mp4', 'VIDEO')).toBe('https://api.example.com/api/assets/protected/vid.mp4');
-	});
-
-	it('returns public URL for IMAGE kind', () => {
-		expect(assetUrl('img.png', 'IMAGE')).toBe('https://api.example.com/api/assets/public/img.png');
-	});
-
-	it('returns public URL for POSTER kind', () => {
-		expect(assetUrl('poster.jpg', 'POSTER')).toBe('https://api.example.com/api/assets/public/poster.jpg');
-	});
-
-	it('returns public URL for THUMBNAIL kind', () => {
-		expect(assetUrl('thumb.webp', 'THUMBNAIL')).toBe('https://api.example.com/api/assets/public/thumb.webp');
+	it('keeps VIDEO downloads on the protected route', () => {
+		expect(protectedAssetUrl('vid.mp4')).toBe('https://api.example.com/api/assets/protected/vid.mp4');
 	});
 });
 
@@ -102,23 +94,26 @@ describe('serializeProjectDetail', () => {
 		expect(result.sortOrder).toBe(0);
 	});
 
-	it('returns posterUrl as undefined when poster is null', () => {
+	it('returns poster as undefined when poster is null', () => {
 		const result = serializeProjectDetail(fakeProject({ poster: null }));
-		expect(result.posterUrl).toBeUndefined();
+		expect(result.poster).toBeUndefined();
 	});
 
-	it('returns posterUrl as undefined when poster kind is GAME', () => {
+	it('returns poster as undefined when poster kind is GAME', () => {
 		const result = serializeProjectDetail(fakeProject({
 			poster: { storageKey: 'g.zip', kind: 'GAME', status: 'READY' },
 		}));
-		expect(result.posterUrl).toBeUndefined();
+		expect(result.poster).toBeUndefined();
 	});
 
-	it('returns posterUrl when poster is READY IMAGE', () => {
+	it('returns a responsive image when poster is READY IMAGE', () => {
 		const result = serializeProjectDetail(fakeProject({
 			poster: { storageKey: 'img.png', kind: 'IMAGE', status: 'READY' },
 		}));
-		expect(result.posterUrl).toBe('https://api.example.com/api/assets/public/img.png');
+		expect(result.poster).toEqual({
+			original: { url: 'https://api.example.com/api/public/images/img.png' },
+			renditions: [],
+		});
 	});
 
 	it('converts empty summary and description to undefined', () => {
@@ -153,6 +148,36 @@ describe('serializeProjectDetail', () => {
 		}));
 		expect(result.assets[0]!.size).toBe(12345);
 		expect(typeof result.assets[0]!.size).toBe('number');
+	});
+
+	it('serializes admin image assets from deterministic rendition readiness', () => {
+		const result = serializeProjectDetail(fakeProject({
+			assets: [fakeAsset({
+				width: 1200,
+				height: 800,
+				card480Height: null,
+				display960Height: 640,
+			})],
+		}));
+		expect(result.assets[0]).toEqual({
+			id: 1,
+			kind: 'IMAGE',
+			image: {
+				original: {
+					url: 'https://api.example.com/api/public/images/img.png',
+					width: 1200,
+					height: 800,
+				},
+				renditions: [{
+					profile: 'DISPLAY_960',
+					url: 'https://api.example.com/api/public/images/img.png%2F__pcu_image_rendition__%2Fv1%2Fdisplay-960.webp',
+					width: 960,
+					height: 640,
+				}],
+			},
+			originalName: 'photo.png',
+			size: 12345,
+		});
 	});
 
 	it('returns video as null when no VIDEO asset exists', () => {

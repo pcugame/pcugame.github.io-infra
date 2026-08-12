@@ -74,11 +74,13 @@ export function createYearProductionGraph(
 	const service = createExhibitionService({
 		apiPublicUrl: deps.config.API_PUBLIC_URL,
 		posterBucket: deps.config.S3_BUCKET_PUBLIC,
+		protectedBucket: deps.config.S3_BUCKET_PROTECTED,
 		repository: deps.repository,
 		uploadLimits: (role) => uploadLimits(deps.config, role),
 		uploadSlots: deps.uploadLimiter,
 		posterUpload,
 		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
+		wakeMaintenance: deps.uploadLifecycle.wakeMaintenance,
 		logger: deps.logger,
 		recordPostCommitCleanupFailure:
 			deps.uploadLifecycle.metrics.recordPostCommitCleanupFailure,

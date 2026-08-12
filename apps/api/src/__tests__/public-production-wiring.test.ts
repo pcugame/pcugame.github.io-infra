@@ -50,13 +50,19 @@ function repositoryHarness(label: string) {
 			year: 2026,
 			title: `${label} Show`,
 			posterStorageKey: `${label}-poster.webp`,
+			posterWidth: 1200,
+			posterHeight: 800,
+			posterCard480Height: null,
+			posterDisplay960Height: null,
 			_count: { projects: 1 },
 		}]),
 		findExhibitionsByYear: vi.fn(async (year: number) => [
 			{ id: 1, year, title: `${label} Show` },
 		]),
 		findExhibitionById: vi.fn(async (id: number) => ({ id, year: 2026, title: `${label} Show` })),
-		findExhibitionPosterByStorageKey: vi.fn(async (storageKey: string) => ({ posterStorageKey: storageKey })),
+		resolvePublicImage: vi.fn(async (
+			storageKey: string,
+		): Promise<{ storageKey: string } | null> => ({ storageKey })),
 		findPublishedProjectsInExhibitions: vi.fn(async () => [{
 			id: 7,
 			slug: `${label}-game`,
@@ -94,7 +100,7 @@ function repositoryHarness(label: string) {
 		findExhibitionsByYear: calls.findExhibitionsByYear,
 		findPublishedProjectsInExhibitions: calls.findPublishedProjectsInExhibitions,
 		findExhibitionById: calls.findExhibitionById,
-		findExhibitionPosterByStorageKey: calls.findExhibitionPosterByStorageKey,
+		resolvePublicImage: calls.resolvePublicImage,
 		findPublishedProjectById: calls.findPublishedProject,
 		findPublishedProjectBySlug: calls.findPublishedProject,
 		findPublicWebglProject: calls.findPublicWebglProject,
@@ -105,7 +111,12 @@ function repositoryHarness(label: string) {
 function storageHarness(label: string) {
 	const calls = {
 		presign: vi.fn(async (bucket: string, key: string) => `https://storage.test/${bucket}/${key}`),
-		head: vi.fn(async () => ({ size: 10, contentType: 'application/octet-stream' })),
+		head: vi.fn(async () => ({
+			size: 10,
+			contentType: 'image/webp',
+			etag: `"${label}-etag"`,
+			lastModified: new Date('2026-07-22T00:00:00.000Z'),
+		})),
 		stream: vi.fn(async (
 			_bucket: string,
 			_key: string,
@@ -115,7 +126,7 @@ function storageHarness(label: string) {
 			return {
 				body: Readable.from([Buffer.alloc(size, label)]),
 				size,
-				contentType: 'application/octet-stream',
+				contentType: 'image/webp',
 				contentRange: range ? `bytes ${range.start}-${range.end}/10` : undefined,
 				etag: `"${label}-etag"`,
 			};
@@ -239,7 +250,7 @@ describe('public/WebGL production wiring', () => {
 		expect(a.storage.calls.stream).not.toHaveBeenCalled();
 	});
 
-	it('serves years, year/exhibition projects, detail, and poster through the context repository', async () => {
+	it('serves years, year/exhibition projects, detail, and images through the context repository', async () => {
 		const a = await harness('a');
 		const app = await buildApp({ context: a.context });
 		apps.push(app);
@@ -248,7 +259,19 @@ describe('public/WebGL production wiring', () => {
 		expect(years.statusCode).toBe(200);
 		expect(years.json()).toMatchObject({
 			ok: true,
-			data: { items: [{ title: 'a Show', posterUrl: 'https://api-a.test/api/public/exhibition-posters/a-poster.webp' }] },
+			data: {
+				items: [{
+					title: 'a Show',
+					poster: {
+						original: {
+							url: 'https://api-a.test/api/public/images/a-poster.webp',
+							width: 1200,
+							height: 800,
+						},
+						renditions: [],
+					},
+				}],
+			},
 		});
 
 		const byYear = await app.inject({ method: 'GET', url: '/api/public/years/2026/projects' });
@@ -280,11 +303,87 @@ describe('public/WebGL production wiring', () => {
 
 		const poster = await app.inject({
 			method: 'GET',
+			url: '/api/public/images/a-poster.webp',
+		});
+		expect(poster.statusCode).toBe(200);
+		expect(poster.headers['content-type']).toContain('image/webp');
+		expect(poster.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+		expect(a.repository.calls.resolvePublicImage).toHaveBeenCalledWith('a-poster.webp');
+		expect(a.storage.calls.presign).not.toHaveBeenCalled();
+		expect(a.storage.calls.head).not.toHaveBeenCalled();
+		expect(a.storage.calls.stream).toHaveBeenCalledOnce();
+
+		a.storage.calls.stream.mockClear();
+		const posterHead = await app.inject({
+			method: 'HEAD',
+			url: '/api/public/images/a-poster.webp',
+		});
+		expect(posterHead.statusCode).toBe(200);
+		expect(posterHead.body).toBe('');
+		expect(posterHead.headers).toMatchObject({
+			'content-type': 'image/webp',
+			'content-length': '10',
+			'cache-control': 'public, max-age=31536000, immutable',
+			etag: '"a-etag"',
+			'last-modified': 'Wed, 22 Jul 2026 00:00:00 GMT',
+		});
+		expect(a.storage.calls.stream).not.toHaveBeenCalled();
+
+		for (const headers of [
+			{ 'if-none-match': '"a-etag"' },
+			{ 'if-modified-since': 'Wed, 22 Jul 2026 00:00:00 GMT' },
+		]) {
+			for (const method of ['GET', 'HEAD'] as const) {
+				const notModified = await app.inject({
+					method,
+					url: '/api/public/images/a-poster.webp',
+					headers,
+				});
+				expect(notModified.statusCode).toBe(304);
+				expect(notModified.body).toBe('');
+			}
+		}
+		expect(a.storage.calls.stream).not.toHaveBeenCalled();
+
+		const legacyNestedKey = await app.inject({
+			method: 'HEAD',
+			url: '/api/public/images/legacy%2Fnested.webp',
+		});
+		expect(legacyNestedKey.statusCode).toBe(200);
+		expect(a.repository.calls.resolvePublicImage).toHaveBeenCalledWith('legacy/nested.webp');
+
+		const oldPoster = await app.inject({
+			method: 'GET',
 			url: '/api/public/exhibition-posters/a-poster.webp',
 		});
-		expect(poster.statusCode).toBe(302);
-		expect(poster.headers.location).toBe('https://storage.test/a-public/a-poster.webp');
-		expect(a.storage.calls.presign).toHaveBeenCalledWith('a-public', 'a-poster.webp');
+		expect(oldPoster.statusCode).toBe(404);
+	});
+
+	it('distinguishes unauthorized, missing, and failed public image resolution', async () => {
+		const a = await harness('a');
+		const app = await buildApp({ context: a.context });
+		apps.push(app);
+
+		a.repository.calls.resolvePublicImage.mockResolvedValueOnce(null);
+		const stale = await app.inject({ method: 'GET', url: '/api/public/images/stale.webp' });
+		expect(stale.statusCode).toBe(404);
+		expect(a.storage.calls.head).not.toHaveBeenCalled();
+
+		a.storage.calls.stream.mockResolvedValueOnce(null as never);
+		const missing = await app.inject({ method: 'GET', url: '/api/public/images/missing.webp' });
+		expect(missing.statusCode).toBe(404);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ storageKey: 'missing.webp', bucket: 'a-public' }),
+			expect.stringContaining('database reference'),
+		);
+
+		a.storage.calls.stream.mockRejectedValueOnce(new Error('storage unavailable'));
+		const failed = await app.inject({ method: 'GET', url: '/api/public/images/failed.webp' });
+		expect(failed.statusCode).toBe(500);
+		expect(failed.json()).toMatchObject({
+			ok: false,
+			error: { code: 'INTERNAL_ERROR' },
+		});
 	});
 
 	it('keeps A/B storage, bucket, and public URL/CSP config isolated', async () => {

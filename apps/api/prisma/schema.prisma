@@ -107,17 +107,21 @@ model User {
 }
 
 model Exhibition {
-  id                 Int      @id @default(autoincrement())
-  year               Int
-  title              String   @default("")
-  isUploadEnabled    Boolean  @default(true) @map("is_upload_enabled")
-  sortOrder          Int      @default(0) @map("sort_order")
-  posterStorageKey   String?  @unique @map("poster_storage_key")
-  posterOriginalName String   @default("") @map("poster_original_name")
-  posterMimeType     String   @default("") @map("poster_mime_type")
-  posterSizeBytes    BigInt   @default(0) @map("poster_size_bytes")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  id                     Int      @id @default(autoincrement())
+  year                   Int
+  title                  String   @default("")
+  isUploadEnabled        Boolean  @default(true) @map("is_upload_enabled")
+  sortOrder              Int      @default(0) @map("sort_order")
+  posterStorageKey       String?  @unique @map("poster_storage_key")
+  posterOriginalName     String   @default("") @map("poster_original_name")
+  posterMimeType         String   @default("") @map("poster_mime_type")
+  posterSizeBytes        BigInt   @default(0) @map("poster_size_bytes")
+  posterWidth            Int?     @map("poster_width")
+  posterHeight           Int?     @map("poster_height")
+  posterCard480Height    Int?     @map("poster_card_480_height")
+  posterDisplay960Height Int?     @map("poster_display_960_height")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
 
   projects Project[] @relation("ExhibitionProjects")
 
@@ -188,6 +192,10 @@ model Asset {
   mimeType           String              @default("") @map("mime_type")
   playbackMimeType   String              @default("") @map("playback_mime_type")
   sizeBytes          BigInt              @default(0) @map("size_bytes")
+  width              Int?
+  height             Int?
+  card480Height      Int?                @map("card_480_height")
+  display960Height   Int?                @map("display_960_height")
   playbackSizeBytes  BigInt              @default(0) @map("playback_size_bytes")
   playbackStatus     AssetPlaybackStatus @default(PENDING) @map("playback_status")
   playbackError      String              @default("") @map("playback_error")
@@ -223,31 +231,31 @@ model AuthSession {
 /// Tracks a resumable chunked game-file upload session.
 /// Uses S3 multipart upload — chunks go directly to object storage.
 model GameUploadSession {
-  id             String     @id @default(uuid())
-  projectId      Int        @map("project_id")
-  userId         Int        @map("user_id")
-  uploadKind     UploadKind @default(GAME) @map("upload_kind")
-  originalName   String     @map("original_name")
-  totalBytes     BigInt     @map("total_bytes")
-  chunkSizeBytes Int        @map("chunk_size_bytes")
-  totalChunks    Int        @map("total_chunks")
-  uploadedChunks Int[]      @default([]) @map("uploaded_chunks")
+  id                   String     @id @default(uuid())
+  projectId            Int        @map("project_id")
+  userId               Int        @map("user_id")
+  uploadKind           UploadKind @default(GAME) @map("upload_kind")
+  originalName         String     @map("original_name")
+  totalBytes           BigInt     @map("total_bytes")
+  chunkSizeBytes       Int        @map("chunk_size_bytes")
+  totalChunks          Int        @map("total_chunks")
+  uploadedChunks       Int[]      @default([]) @map("uploaded_chunks")
   // DB CHECK constraint `game_upload_sessions_status_check` limits this to the
   // states in state-machine.ts. Prisma cannot model this check in the DSL.
-  status         String     @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED | FAILED
-  stagingPath    String     @default("") @map("staging_path") // legacy, no longer used
-  storageKey     String?    @map("storage_key") // set on completion
-  s3UploadId     String?    @map("s3_upload_id")
-  s3Key          String?    @map("s3_key")
-  s3PartEtags    Json?      @map("s3_part_etags") // [{partNumber: Int, etag: String}]
-  multipartGeneration Int   @default(1) @map("multipart_generation")
-  completionClaimToken String? @map("completion_claim_token")
-  completionClaimUntil DateTime? @map("completion_claim_until")
-  completionLastError String? @map("completion_last_error")
-  completionResult Json? @map("completion_result")
-  expiresAt      DateTime   @map("expires_at")
-  createdAt      DateTime   @default(now()) @map("created_at")
-  updatedAt      DateTime   @updatedAt @map("updated_at")
+  status               String     @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED | FAILED
+  stagingPath          String     @default("") @map("staging_path") // legacy, no longer used
+  storageKey           String?    @map("storage_key") // set on completion
+  s3UploadId           String?    @map("s3_upload_id")
+  s3Key                String?    @map("s3_key")
+  s3PartEtags          Json?      @map("s3_part_etags") // [{partNumber: Int, etag: String}]
+  multipartGeneration  Int        @default(1) @map("multipart_generation")
+  completionClaimToken String?    @map("completion_claim_token")
+  completionClaimUntil DateTime?  @map("completion_claim_until")
+  completionLastError  String?    @map("completion_last_error")
+  completionResult     Json?      @map("completion_result")
+  expiresAt            DateTime   @map("expires_at")
+  createdAt            DateTime   @default(now()) @map("created_at")
+  updatedAt            DateTime   @updatedAt @map("updated_at")
 
   project    Project                  @relation("ProjectGameUploads", fields: [projectId], references: [id], onDelete: Cascade)
   user       User                     @relation("UserGameUploads", fields: [userId], references: [id], onDelete: Cascade)
@@ -325,21 +333,21 @@ model BannedIp {
 /// when a sync S3 delete fails, and periodically retried by the orphan reaper.
 /// A row is "pending" while resolvedAt is null; resolved rows are kept for audit.
 model OrphanObject {
-  id           Int       @id @default(autoincrement())
-  bucket       String
-  storageKey   String    @map("storage_key")
-  reason       String    @default("")
-  targetKind   OrphanTargetKind @default(EXACT) @map("target_kind")
-  state        OrphanState @default(PENDING)
-  claimToken   String?   @map("claim_token")
-  claimUntil   DateTime? @map("claim_until")
-  cancelReason String?   @map("cancel_reason")
-  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
-  attemptCount Int       @default(0) @map("attempt_count")
-  lastTriedAt  DateTime? @map("last_tried_at")
-  lastError    String?   @map("last_error")
-  resolvedAt   DateTime? @map("resolved_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id            Int              @id @default(autoincrement())
+  bucket        String
+  storageKey    String           @map("storage_key")
+  reason        String           @default("")
+  targetKind    OrphanTargetKind @default(EXACT) @map("target_kind")
+  state         OrphanState      @default(PENDING)
+  claimToken    String?          @map("claim_token")
+  claimUntil    DateTime?        @map("claim_until")
+  cancelReason  String?          @map("cancel_reason")
+  nextAttemptAt DateTime         @default(now()) @map("next_attempt_at")
+  attemptCount  Int              @default(0) @map("attempt_count")
+  lastTriedAt   DateTime?        @map("last_tried_at")
+  lastError     String?          @map("last_error")
+  resolvedAt    DateTime?        @map("resolved_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
 
   @@unique([bucket, storageKey], name: "orphan_bucket_storage_key", map: "orphan_bucket_storage_key")
   @@index([state, nextAttemptAt])
@@ -373,19 +381,19 @@ model UploadIntent {
 }
 
 model IdempotencyOperation {
-  id            String                    @id @default(uuid())
-  actorId       Int                       @map("actor_id")
-  scope         String
-  key           String
-  requestHash   String                    @map("request_hash")
-  state         IdempotencyOperationState @default(IN_PROGRESS)
-  ownerToken    String?                   @map("owner_token")
-  ownerUntil    DateTime?                 @map("owner_until")
-  result        Json?
-  lastError     String?                   @map("last_error")
-  expiresAt     DateTime                  @map("expires_at")
-  createdAt     DateTime                  @default(now()) @map("created_at")
-  updatedAt     DateTime                  @updatedAt @map("updated_at")
+  id          String                    @id @default(uuid())
+  actorId     Int                       @map("actor_id")
+  scope       String
+  key         String
+  requestHash String                    @map("request_hash")
+  state       IdempotencyOperationState @default(IN_PROGRESS)
+  ownerToken  String?                   @map("owner_token")
+  ownerUntil  DateTime?                 @map("owner_until")
+  result      Json?
+  lastError   String?                   @map("last_error")
+  expiresAt   DateTime                  @map("expires_at")
+  createdAt   DateTime                  @default(now()) @map("created_at")
+  updatedAt   DateTime                  @updatedAt @map("updated_at")
 
   @@unique([actorId, scope, key], name: "idempotency_actor_scope_key", map: "idempotency_actor_scope_key")
   @@index([state, ownerUntil])

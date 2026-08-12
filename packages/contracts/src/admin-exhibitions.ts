@@ -1,3 +1,5 @@
+import type { ResponsiveImage } from './responsive-image.js';
+
 export type CreateExhibitionRequest = {
 	year: number;
 	title?: string;
@@ -18,7 +20,7 @@ export type AdminExhibitionItem = {
 	isUploadEnabled: boolean;
 	sortOrder: number;
 	projectCount: number;
-	posterUrl?: string;
+	poster?: ResponsiveImage;
 	posterOriginalName?: string;
 	posterSize?: number;
 };

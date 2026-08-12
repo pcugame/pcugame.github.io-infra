@@ -68,6 +68,10 @@ function exhibition(overrides: Record<string, unknown> = {}) {
 		posterStorageKey: null,
 		posterOriginalName: '',
 		posterSizeBytes: 0n,
+		posterWidth: null,
+		posterHeight: null,
+		posterCard480Height: null,
+		posterDisplay960Height: null,
 		_count: { projects: 0 },
 		...overrides,
 	};
@@ -85,6 +89,10 @@ describe('admin exhibition service', () => {
 				posterStorageKey: 'poster.webp',
 				posterOriginalName: 'poster.pdf',
 				posterSizeBytes: 1234n,
+				posterWidth: 1200,
+				posterHeight: 800,
+				posterCard480Height: 320,
+				posterDisplay960Height: null,
 				_count: { projects: 3 },
 			}),
 			exhibition({ id: 2, year: 2025 }),
@@ -98,7 +106,19 @@ describe('admin exhibition service', () => {
 				isUploadEnabled: true,
 				sortOrder: 0,
 				projectCount: 3,
-				posterUrl: 'https://api.example.test/api/public/exhibition-posters/poster.webp',
+				poster: {
+					original: {
+						url: 'https://api.example.test/api/public/images/poster.webp',
+						width: 1200,
+						height: 800,
+					},
+					renditions: [{
+						profile: 'CARD_480',
+						url: 'https://api.example.test/api/public/images/poster.webp%2F__pcu_image_rendition__%2Fv1%2Fcard-480.webp',
+						width: 480,
+						height: 320,
+					}],
+				},
 				posterOriginalName: 'poster.pdf',
 				posterSize: 1234,
 			},
@@ -109,10 +129,27 @@ describe('admin exhibition service', () => {
 				isUploadEnabled: true,
 				sortOrder: 0,
 				projectCount: 0,
-				posterUrl: undefined,
+				poster: undefined,
 				posterOriginalName: undefined,
 				posterSize: undefined,
 			},
+		]);
+	});
+
+	it('keeps a legacy poster usable without dimensions or renditions', async () => {
+		mocks.findAllExhibitions.mockResolvedValue([
+			exhibition({ posterStorageKey: 'legacy poster.webp' }),
+		]);
+
+		await expect(listExhibitions()).resolves.toEqual([
+			expect.objectContaining({
+				poster: {
+					original: {
+						url: 'https://api.example.test/api/public/images/legacy%20poster.webp',
+					},
+					renditions: [],
+				},
+			}),
 		]);
 	});
 
@@ -174,13 +211,15 @@ describe('admin exhibition service', () => {
 	it('deletes the DB row with an outbox entry and wakes the deletion worker', async () => {
 		mocks.deleteExhibition.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
+			cleanupQueued: true,
 		}));
 
 		await deleteExhibition(1);
 
 		expect(mocks.deleteExhibition).toHaveBeenCalledWith(1, {
-			bucket: 'public-bucket',
-			reason: 'exhibition-delete-poster',
+			publicBucket: 'public-bucket',
+			protectedBucket: 'public-bucket',
+			reason: 'exhibition-delete',
 		});
 		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
 	});
@@ -188,6 +227,7 @@ describe('admin exhibition service', () => {
 	it('does not wait for an unrelated deletion backlog after the poster outbox commits', async () => {
 		mocks.deleteExhibition.mockResolvedValue(exhibition({
 			posterStorageKey: 'old-poster.webp',
+			cleanupQueued: true,
 		}));
 
 		await expect(deleteExhibition(1)).resolves.toBeUndefined();
@@ -206,18 +246,37 @@ describe('admin exhibition service', () => {
 				sizeBytes: 123,
 				originalName: 'poster.webp',
 				kind: 'POSTER',
+				width: 1200,
+				height: 800,
+				renditions: [{
+					profile: 'CARD_480',
+					width: 480,
+					height: 320,
+				}],
+				uploadIntentIds: ['intent-original', 'intent-480'],
 			},
 			rollback,
 			cleanup,
 		});
 		mocks.replaceExhibitionPoster.mockResolvedValue({
-			updated: exhibition({ posterStorageKey: 'new-poster.webp' }),
+			updated: exhibition({
+				posterStorageKey: 'new-poster.webp',
+				posterWidth: 1200,
+				posterHeight: 800,
+				posterCard480Height: 320,
+				posterDisplay960Height: null,
+			}),
 			oldStorageKey: 'old-poster.webp',
 		});
 		const parts = (async function* () {})();
 
 		await expect(replacePoster(1, { actor: { id: 1, role: 'ADMIN' }, parts }))
-			.resolves.toMatchObject({ id: 1, posterUrl: expect.stringContaining('new-poster.webp') });
+			.resolves.toMatchObject({
+				id: 1,
+				poster: {
+					original: { url: expect.stringContaining('new-poster.webp') },
+				},
+			});
 		expect(rollback).not.toHaveBeenCalled();
 		expect(cleanup).toHaveBeenCalledOnce();
 		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();

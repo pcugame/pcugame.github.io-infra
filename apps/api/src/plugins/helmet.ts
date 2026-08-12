@@ -2,10 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import fastifyHelmet from '@fastify/helmet';
 
 /**
- * Security-header defaults for a JSON-only API.
+ * Security-header defaults for an API that serves JSON, redirects, and bytes.
  *
  * Scope constraints that shape these directives:
- * - The API never serves HTML or scripts — responses are JSON or 302 redirects to S3.
+ * - Public images and WebGL assets may be streamed, but the API never renders
+ *   executable application HTML of its own.
  * - The web frontend is hosted on a different origin (GitHub Pages), so CORP must allow
  *   cross-origin responses.
  * - `Referrer-Policy: no-referrer` matches what `assets/service.ts` already sets per

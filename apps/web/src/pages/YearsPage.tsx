@@ -1,9 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
-import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
+import { LoadingSpinner, ErrorMessage, EmptyState, ResponsiveImage } from '../components/common';
 import type { PublicYearItem } from '../contracts';
 
 export default function YearsPage() {
@@ -63,16 +62,15 @@ export default function YearsPage() {
 }
 
 function YearsCardPoster({ ex }: { ex: PublicYearItem }) {
-  const [failed, setFailed] = useState(false);
-  const showImage = ex.posterUrl && !failed;
-
   return (
     <span className="years-card__poster" aria-hidden="true">
-      {showImage ? (
-        <img
-          src={ex.posterUrl}
+      {ex.poster ? (
+        <ResponsiveImage
+          image={ex.poster}
           alt=""
-          onError={() => setFailed(true)}
+          sizes="(max-width: 640px) 38vw, (max-width: 1100px) 24vw, 240px"
+          loading="lazy"
+          decoding="async"
         />
       ) : (
         <span>{ex.year}</span>

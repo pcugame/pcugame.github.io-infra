@@ -2,7 +2,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
-import { LoadingSpinner, ErrorMessage } from '../components/common';
+import { LoadingSpinner, ErrorMessage, ResponsiveImage } from '../components/common';
 import { ProjectActions, ProjectPublicMeta, ProjectVideo } from '../components/project';
 
 export default function ProjectDetailPage() {
@@ -59,14 +59,14 @@ export default function ProjectDetailPage() {
       <ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
       {/* 에셋 유실 안내 */}
-      {project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
+      {project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
         <p className="incomplete-notice incomplete-notice--missing">
           이 프로젝트의 파일이 유실되었습니다. 포스터, 실행 파일, 스크린샷 등이 등록되지 않은 상태입니다.
         </p>
       )}
 
       {/* 불완전 안내 (파일은 일부 있지만 불완전 플래그) */}
-      {project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
+      {project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
         <p className="incomplete-notice">
           이 프로젝트는 일부 자료가 누락되었을 수 있습니다.
         </p>
@@ -92,9 +92,14 @@ export default function ProjectDetailPage() {
       )}
 
       {/* 포스터 */}
-      {project.posterUrl && (
+      {project.poster && (
         <section className="project-detail__poster">
-          <img src={project.posterUrl} alt={`${project.title} 포스터`} />
+          <ResponsiveImage
+            image={project.poster}
+            alt={`${project.title} 포스터`}
+            sizes="(max-width: 768px) 100vw, 960px"
+            decoding="async"
+          />
         </section>
       )}
 
@@ -115,7 +120,7 @@ export default function ProjectDetailPage() {
               <h4>동영상{i + 1}</h4>
               <ProjectVideo
                 video={video}
-                posterUrl={project.posterUrl}
+                poster={project.poster}
                 title={project.title}
               />
             </div>
@@ -129,7 +134,14 @@ export default function ProjectDetailPage() {
           <h3>스크린샷</h3>
           <div className="gallery-grid">
             {galleryImages.map((img) => (
-              <img key={img.id} src={img.url} alt="게임 스크린샷" loading="lazy" />
+              <ResponsiveImage
+                key={img.id}
+                image={img.image}
+                alt="게임 스크린샷"
+                sizes="(max-width: 768px) 100vw, 50vw"
+                loading="lazy"
+                decoding="async"
+              />
             ))}
           </div>
         </section>

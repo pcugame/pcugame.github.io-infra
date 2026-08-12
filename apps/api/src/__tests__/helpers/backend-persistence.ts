@@ -27,7 +27,7 @@ export function createScriptedBackendPersistence(
 			findExhibitionsByYear: async () => [],
 			findPublishedProjectsInExhibitions: async () => [],
 			findExhibitionById: async () => null,
-			findExhibitionPosterByStorageKey: async () => null,
+			resolvePublicImage: async () => null,
 			findPublishedProjectById: async () => null,
 			findPublishedProjectBySlug: async () => null,
 			findPublicWebglProject: async () => null,
@@ -72,7 +72,6 @@ export function createScriptedBackendPersistence(
 			clearExhibitionPoster: async () => null,
 		},
 		assetsRepository: {
-			findPublicAsset: async () => null,
 			findAssetByStorageKey: async () => null,
 			upsertBannedIp: async () => undefined,
 			findAssetByIdWithProject: async () => null,

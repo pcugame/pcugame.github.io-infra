@@ -112,7 +112,7 @@ export const adminProjectApi = {
     idempotencyKey: string;
     title?: string;
   }) {
-    return uploadFormData<{ assetId: number; url: string }>(
+    return uploadFormData<{ assetId: number }>(
       `/api/admin/projects/${input.projectId}/assets`,
       input.formData,
       {

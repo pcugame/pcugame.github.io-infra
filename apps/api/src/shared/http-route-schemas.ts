@@ -50,7 +50,7 @@ import {
 	UpdateProjectBody,
 } from './validation.js';
 
-type RouteMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
+type RouteMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
 export type RouteBodyBoundary = 'none' | 'json' | 'multipart' | 'octet-stream' | 'cors-plugin';
 export type RouteResponseBoundary =
 	| 'json'
@@ -196,6 +196,11 @@ const WebglStreamResponse = {
 	416: NoContentSchema,
 	default: ApiErrorResponseSchema,
 };
+const PublicImageResponse = {
+	200: StreamBodySchema,
+	304: NoContentSchema,
+	default: ApiErrorResponseSchema,
+};
 const WebglPreflightResponse = {
 	204: NoContentSchema,
 	default: ApiErrorResponseSchema,
@@ -232,8 +237,9 @@ function contract(input: RouteRuntimeContract): RouteRuntimeContract {
 
 /**
  * Machine-readable union of every explicit route buildApp can register: 55
- * always-active routes plus two non-production dev-auth routes. Fastify's 21
- * synthetic HEAD routes reuse their GET contract and are not counted.
+ * always-active routes plus two non-production dev-auth routes. Fastify's 19
+ * synthetic HEAD routes reuse their GET contract and are not counted; public
+ * images declare an additional explicit HEAD contract.
  */
 export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 	contract({
@@ -393,14 +399,33 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 	}),
 	contract({
 		method: 'GET',
-		url: '/api/public/exhibition-posters/:storageKey',
+		url: '/api/public/images/:storageKey',
 		family: 'public',
 		bodyBoundary: 'none',
-		responseBoundary: 'redirect',
+		responseBoundary: 'stream',
 		params: z.object({ storageKey: StorageKeyParamSchema }).strict(),
 		querystring: EmptyObjectSchema,
 		body: NoBodySchema,
-		response: RedirectResponse,
+		headers: z.object({
+			'if-none-match': z.string().optional(),
+			'if-modified-since': z.string().optional(),
+		}).passthrough(),
+		response: PublicImageResponse,
+	}),
+	contract({
+		method: 'HEAD',
+		url: '/api/public/images/:storageKey',
+		family: 'public',
+		bodyBoundary: 'none',
+		responseBoundary: 'stream',
+		params: z.object({ storageKey: StorageKeyParamSchema }).strict(),
+		querystring: EmptyObjectSchema,
+		body: NoBodySchema,
+		headers: z.object({
+			'if-none-match': z.string().optional(),
+			'if-modified-since': z.string().optional(),
+		}).passthrough(),
+		response: PublicImageResponse,
 	}),
 	contract({
 		method: 'GET',
@@ -435,20 +460,17 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		body: NoBodySchema,
 		response: jsonResponse(PublicProjectDetailResponseSchema),
 	}),
-	...[
-		'/api/assets/public/:storageKey',
-		'/api/assets/protected/:storageKey',
-	].map((url) => contract({
-		method: 'GET' as const,
-		url,
+	contract({
+		method: 'GET',
+		url: '/api/assets/protected/:storageKey',
 		family: 'assets',
-		bodyBoundary: 'none' as const,
-		responseBoundary: 'redirect' as const,
+		bodyBoundary: 'none',
+		responseBoundary: 'redirect',
 		params: z.object({ storageKey: StorageKeyParamSchema }).strict(),
 		querystring: EmptyObjectSchema,
 		body: NoBodySchema,
 		response: RedirectResponse,
-	})),
+	}),
 	contract({
 		method: 'DELETE',
 		url: '/api/admin/assets/:assetId',
@@ -857,10 +879,11 @@ export function findRouteRuntimeContract(
 	method: string,
 	url: string,
 ): RouteRuntimeContract | undefined {
-	const normalizedMethod = method === 'HEAD' ? 'GET' : method;
 	return ROUTE_RUNTIME_CONTRACTS.find(
-		(item) => item.method === normalizedMethod && item.url === url,
-	);
+		(item) => item.method === method && item.url === url,
+	) ?? (method === 'HEAD' ? ROUTE_RUNTIME_CONTRACTS.find(
+		(item) => item.method === 'GET' && item.url === url,
+	) : undefined);
 }
 
 /**

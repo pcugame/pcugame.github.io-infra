@@ -47,7 +47,6 @@ export function createAssetsBannedProductionGraph(
 	const gate = createBannedIpStartupGate(deps.downloadLimiter);
 
 	const assetsService = createAssetsService({
-		publicBucket: deps.config.S3_BUCKET_PUBLIC,
 		protectedBucket: deps.config.S3_BUCKET_PROTECTED,
 		presign: (bucket, key, options) => deps.storage.presign(bucket, key, options),
 		bucketForKind: (kind: AssetKind) => (

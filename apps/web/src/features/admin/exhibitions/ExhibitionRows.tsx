@@ -8,6 +8,7 @@ import {
 	type UpdateExhibitionInput,
 } from '../../../contracts/schemas';
 import type { AdminExhibitionItem } from '../../../contracts';
+import { ResponsiveImage } from '../../../components/common';
 import { adminExhibitionApi, getApiErrorMessage } from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
 import { buildExhibitionPosterFormData } from '../../../lib/utils/formData';
@@ -321,7 +322,7 @@ function YearPosterControls({
 	};
 
 	const handleDelete = () => {
-		if (!year.posterUrl) return;
+		if (!year.poster) return;
 		if (window.confirm(`${year.title || year.year} 전시회 포스터를 삭제하시겠습니까?`)) {
 			deletePosterMutation.mutate();
 		}
@@ -333,8 +334,14 @@ function YearPosterControls({
 	return (
 		<div className={`admin-exhibition-poster${compact ? ' admin-exhibition-poster--compact' : ''}`}>
 			<div className="admin-exhibition-poster__preview">
-				{year.posterUrl ? (
-					<img src={year.posterUrl} alt={`${year.title || year.year} 전시회 포스터`} />
+				{year.poster ? (
+					<ResponsiveImage
+						image={year.poster}
+						alt={`${year.title || year.year} 전시회 포스터`}
+						sizes={compact ? '72px' : '120px'}
+						loading="lazy"
+						decoding="async"
+					/>
 				) : (
 					<span>{year.year}</span>
 				)}
@@ -362,9 +369,9 @@ function YearPosterControls({
 						onClick={() => inputRef.current?.click()}
 						disabled={isBusy}
 					>
-						{uploadMutation.isPending ? '업로드 중…' : year.posterUrl ? '교체' : '업로드'}
+						{uploadMutation.isPending ? '업로드 중…' : year.poster ? '교체' : '업로드'}
 					</button>
-					{year.posterUrl && (
+					{year.poster && (
 						<button
 							type="button"
 							className="btn btn--danger btn--small"

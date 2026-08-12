@@ -116,7 +116,6 @@ function portHarness(initialBans: string[] = []) {
 	return {
 		calls,
 		assetsRepository: {
-			findPublicAsset: calls.assetFindFirst,
 			findAssetByStorageKey: calls.assetFindFirst,
 			upsertBannedIp: calls.bannedUpsert,
 			findAssetByIdWithProject: vi.fn(async () => null),

@@ -1,6 +1,18 @@
-import type { AssetKind, AssetPlaybackStatus } from '@pcu/contracts';
+import type {
+	AssetKind,
+	AssetPlaybackStatus,
+} from '@pcu/contracts';
 import type { MultipartPart } from './http-input.js';
 import type { UploadLimits } from '../shared/upload-policy.js';
+import type { ImageRenditionProfile } from '../shared/responsive-image.js';
+
+export type { ImageRenditionProfile } from '../shared/responsive-image.js';
+
+export interface SavedImageRendition {
+	profile: ImageRenditionProfile;
+	width: number;
+	height: number;
+}
 
 export interface SavedUpload {
 	storageKey: string;
@@ -13,6 +25,11 @@ export interface SavedUpload {
 	playbackError?: string;
 	originalName: string;
 	kind: AssetKind;
+	/** Canonical raster dimensions. Absent for non-image objects and legacy data. */
+	width?: number;
+	height?: number;
+	/** Physically uploaded derivatives generated from this canonical source. */
+	renditions?: SavedImageRendition[];
 	uploadIntentIds?: string[];
 }
 

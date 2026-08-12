@@ -1,4 +1,8 @@
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
+import {
+	deriveImageRenditionStorageKey,
+	IMAGE_RENDITION_PROFILES,
+} from '../../shared/responsive-image.js';
 import { parseWebglEntryKey } from '../webgl/paths.js';
 
 export type ObjectTargetKind = 'EXACT' | 'PREFIX';
@@ -174,11 +178,18 @@ export async function collectObjectReferences(
 				storageKey: true,
 				playbackStorageKey: true,
 				isPublic: true,
+				card480Height: true,
+				display960Height: true,
 			},
 		}),
 		client.exhibition.findMany({
 			where: { posterStorageKey: { not: null } },
-			select: { id: true, posterStorageKey: true },
+			select: {
+				id: true,
+				posterStorageKey: true,
+				posterCard480Height: true,
+				posterDisplay960Height: true,
+			},
 		}),
 		client.project.findMany({
 			where: { webglEntryKey: { not: '' } },
@@ -199,6 +210,7 @@ export async function collectObjectReferences(
 	]);
 
 	const references: ObjectReference[] = [];
+	const unsafeBuckets = new Set<string>();
 	for (const asset of assets) {
 		const bucket = asset.isPublic ? buckets.publicBucket : buckets.protectedBucket;
 		references.push({
@@ -215,6 +227,34 @@ export async function collectObjectReferences(
 				source: `asset:${asset.id}:playback`,
 			});
 		}
+		for (const definition of IMAGE_RENDITION_PROFILES) {
+			if (asset[definition.heightField] == null) continue;
+			let renditionStorageKey: string;
+			try {
+				renditionStorageKey = deriveImageRenditionStorageKey(
+					asset.storageKey,
+					definition.profile,
+				);
+			} catch (error) {
+				unsafeBuckets.add(buckets.publicBucket);
+				logger.error(
+					{
+						error,
+						assetId: asset.id,
+						storageKey: asset.storageKey,
+						profile: definition.profile,
+					},
+					'Malformed asset rendition readiness encountered; public bucket deletion is disabled',
+				);
+				continue;
+			}
+			references.push({
+				bucket: buckets.publicBucket,
+				targetKind: 'EXACT',
+				key: renditionStorageKey,
+				source: `asset:${asset.id}:rendition:${definition.profile}`,
+			});
+		}
 	}
 	for (const exhibition of exhibitions) {
 		if (!exhibition.posterStorageKey) continue;
@@ -224,9 +264,36 @@ export async function collectObjectReferences(
 			key: exhibition.posterStorageKey,
 			source: `exhibition:${exhibition.id}:poster`,
 		});
+		for (const definition of IMAGE_RENDITION_PROFILES) {
+			if (exhibition[definition.posterHeightField] == null) continue;
+			let renditionStorageKey: string;
+			try {
+				renditionStorageKey = deriveImageRenditionStorageKey(
+					exhibition.posterStorageKey,
+					definition.profile,
+				);
+			} catch (error) {
+				unsafeBuckets.add(buckets.publicBucket);
+				logger.error(
+					{
+						error,
+						exhibitionId: exhibition.id,
+						storageKey: exhibition.posterStorageKey,
+						profile: definition.profile,
+					},
+					'Malformed exhibition rendition readiness encountered; public bucket deletion is disabled',
+				);
+				continue;
+			}
+			references.push({
+				bucket: buckets.publicBucket,
+				targetKind: 'EXACT',
+				key: renditionStorageKey,
+				source: `exhibition:${exhibition.id}:rendition:${definition.profile}`,
+			});
+		}
 	}
 
-	const unsafeBuckets = new Set<string>();
 	for (const project of projects) {
 		const parsed = parseWebglEntryKey(project.id, project.webglEntryKey);
 		if (!parsed) {

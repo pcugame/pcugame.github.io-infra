@@ -48,7 +48,6 @@ interface AssetDeletionClaim {
 }
 
 export interface AssetsServiceDependencies {
-	publicBucket: string;
 	protectedBucket: string;
 	presign(
 		bucket: string,
@@ -66,7 +65,6 @@ export interface AssetsServiceDependencies {
 		error(context: Record<string, unknown>, message: string): void;
 	};
 	repository: {
-		findPublicAsset(key: string): Promise<unknown | null>;
 		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
 		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
 		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
@@ -155,18 +153,6 @@ export function canStreamProtectedAsset(
 	return asset.project.members.some((member) => member.userId === user.id);
 }
 
-/** Redirect to a presigned S3 URL for a public asset */
-export async function streamPublicAsset(
-	deps: AssetsServiceDependencies,
-	storageKey: string,
-): Promise<HttpResponseDescriptor> {
-	const asset = await deps.repository.findPublicAsset(storageKey);
-	if (!asset) throw notFound('Asset not found');
-
-	const url = await deps.presign(deps.publicBucket, storageKey);
-	return { status: 302, headers: { 'Referrer-Policy': 'no-referrer' }, location: url };
-}
-
 /** Redirect to a presigned S3 URL for a protected asset with IP-based rate limiting */
 export async function streamProtectedAsset(
 	deps: AssetsServiceDependencies,
@@ -231,7 +217,6 @@ export async function deleteAsset(
 
 export function createAssetsService(deps: AssetsServiceDependencies) {
 	return {
-		streamPublicAsset: (storageKey: string) => streamPublicAsset(deps, storageKey),
 		streamProtectedAsset: (
 			storageKey: string,
 			clientIp: string,

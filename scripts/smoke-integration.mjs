@@ -194,17 +194,35 @@ if (untrustedMe?.data?.authenticated) {
 }
 console.log('ok: API/WebGL-origin requests cannot reuse frontend sessions');
 
-const assetRes = await fetch(`${apiBase}/api/assets/public/integration-poster.png`, {
-  redirect: 'manual',
-});
-if (assetRes.status !== 302) {
-  throw new Error(`asset redirect returned ${assetRes.status}`);
+const publicImageUrl = `${apiBase}/api/public/images/integration-poster.png`;
+const assetRes = await fetch(publicImageUrl, { redirect: 'manual' });
+if (assetRes.status !== 200) {
+  throw new Error(`public image stream returned ${assetRes.status}`);
 }
-const location = assetRes.headers.get('location');
-if (!location || !location.includes('integration-poster.png')) {
-  throw new Error('asset redirect did not include the expected presigned URL');
+if (!assetRes.headers.get('content-type')?.includes('image/png')) {
+  throw new Error('public image stream returned an unexpected Content-Type');
 }
-console.log('ok: public asset redirect');
+if (assetRes.headers.get('cache-control') !== 'public, max-age=31536000, immutable') {
+  throw new Error('public image stream did not return the immutable cache policy');
+}
+if ((await assetRes.arrayBuffer()).byteLength === 0) {
+  throw new Error('public image stream returned an empty body');
+}
+
+const assetHead = await fetch(publicImageUrl, { method: 'HEAD' });
+if (assetHead.status !== 200 || !assetHead.headers.get('content-length')) {
+  throw new Error(`public image HEAD returned invalid metadata (${assetHead.status})`);
+}
+const imageEtag = assetHead.headers.get('etag');
+if (imageEtag) {
+  const conditional = await fetch(publicImageUrl, {
+    headers: { 'If-None-Match': imageEtag },
+  });
+  if (conditional.status !== 304 || (await conditional.arrayBuffer()).byteLength !== 0) {
+    throw new Error('public image conditional request did not return a bodyless 304');
+  }
+}
+console.log('ok: public image direct stream, HEAD, and immutable cache');
 
 const { body: publicProject } = await fetchJson(
   `${apiBase}/api/public/projects/integration-public-asset`,

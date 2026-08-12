@@ -1,5 +1,6 @@
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
 import type { ProjectVideo } from './public.js';
+import type { ResponsiveImage } from './responsive-image.js';
 
 export type UpdateProjectRequest = {
 	title?: string;
@@ -78,12 +79,18 @@ export type AdminProjectDetail = {
 	status: ProjectStatus;
 	sortOrder: number;
 	posterAssetId?: number;
-	posterUrl?: string;
+	poster?: ResponsiveImage;
 	webglUrl?: string;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
-	assets: {
+	assets: Array<({
 		id: number;
-		kind: AssetKind;
+		kind: Extract<AssetKind, 'THUMBNAIL' | 'IMAGE' | 'POSTER'>;
+		image: ResponsiveImage;
+		originalName: string;
+		size: number;
+	} | {
+		id: number;
+		kind: Exclude<AssetKind, 'THUMBNAIL' | 'IMAGE' | 'POSTER'>;
 		url: string;
 		originalDownloadUrl?: string;
 		playbackUrl?: string;
@@ -91,7 +98,7 @@ export type AdminProjectDetail = {
 		playbackError?: string;
 		originalName: string;
 		size: number;
-	}[];
+	})>;
 };
 
 export type SubmitProjectPayload = {

@@ -104,6 +104,8 @@ export function createObjectStorage(
 				return {
 					size: response.ContentLength ?? 0,
 					contentType: response.ContentType ?? 'application/octet-stream',
+					...(response.CacheControl ? { cacheControl: response.CacheControl } : {}),
+					...(response.ETag ? { etag: response.ETag } : {}),
 					...(response.LastModified ? { lastModified: response.LastModified } : {}),
 				};
 			} catch (error) {

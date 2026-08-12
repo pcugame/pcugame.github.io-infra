@@ -4,8 +4,8 @@ export function sortProjectsWithPosterFirst(projects: PublicProjectCard[]): Publ
 	return projects
 		.map((project, index) => ({ project, index }))
 		.sort((a, b) => {
-			const posterRankA = a.project.posterUrl ? 0 : 1;
-			const posterRankB = b.project.posterUrl ? 0 : 1;
+			const posterRankA = a.project.poster ? 0 : 1;
+			const posterRankB = b.project.poster ? 0 : 1;
 
 			if (posterRankA !== posterRankB) return posterRankA - posterRankB;
 			return a.index - b.index;

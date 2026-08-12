@@ -58,6 +58,9 @@ describe('production deployment safety', () => {
 		const releaseDeclaration = repositoryFile(
 			'.github/release-gates/web-before-api/2026-08-upload-idempotency.yml',
 		);
+		const responsiveImageDeclaration = repositoryFile(
+			'.github/release-gates/web-before-api/2026-08-responsive-images.yml',
+		);
 		const apiPaths = pushPaths(repositoryFile('.github/workflows/deploy-api.yml'));
 		const webPaths = pushPaths(repositoryFile('.github/workflows/deploy-web-pages.yml'));
 		const releaseGatePath = '.github/release-gates/web-before-api/**';
@@ -69,6 +72,9 @@ describe('production deployment safety', () => {
 		expect(webPaths).not.toContain('apps/api/**');
 		expect(apiPaths).not.toContain('apps/web/**');
 		expect(releaseDeclaration).toContain('Idempotency-Key');
+		expect(responsiveImageDeclaration).toContain('policy: web-before-api');
+		expect(responsiveImageDeclaration).toContain('same commit');
+		expect(responsiveImageDeclaration).not.toContain('policy: api-before-web');
 	});
 
 	it('keeps manual API hotfixes independent unless Web-first is requested', () => {

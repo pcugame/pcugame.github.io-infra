@@ -1,5 +1,4 @@
 import type { AssetKind } from '@pcu/contracts';
-import type { Readable } from 'node:stream';
 import type {
 	AppLogger,
 	FileSystem,
@@ -7,14 +6,24 @@ import type {
 	ObjectStorage,
 } from '../../../application/ports.js';
 import type {
+	ImageRenditionProfile,
 	SavedUpload,
 	UploadIntentOwner,
 	UploadPipelinePort,
 } from '../../../application/upload-ports.js';
 import { badRequest } from '../../../shared/errors.js';
+import { deriveImageRenditionStorageKey } from '../../../shared/responsive-image.js';
+import { generateStorageKey } from '../../../shared/storage-path.js';
+import type {
+	ImageProcessingInput,
+	ImageProcessingResult,
+} from '../../assets/upload/image-processing.js';
+import { ImageOutputCleanupError } from '../../assets/upload/image-processing.js';
+import type { PdfProcessingInput } from '../../assets/upload/pdf-processing.js';
+import { createIntentTrackedObjectUploader } from '../../assets/upload/intent-tracked-object-upload.js';
 import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
 
-interface ProcessedImage {
+interface ProcessedFile {
 	tmpPath: string;
 	mimeType: string;
 	ext: string;
@@ -37,9 +46,9 @@ export interface ProjectUploadProcessing {
 		filePath: string,
 		kind: AssetKind,
 	): Promise<{ mimeType: string; ext: string; sizeBytes: number }>;
-	processImage(input: ProcessedImage): Promise<ProcessedImage>;
-	processPdf(input: { tmpPath: string }): Promise<ProcessedImage>;
-	processVideo(input: ProcessedImage): Promise<ProcessedVideo>;
+	processImage(input: ImageProcessingInput): Promise<ImageProcessingResult>;
+	processPdf(input: PdfProcessingInput): Promise<ImageProcessingResult>;
+	processVideo(input: ProcessedFile): Promise<ProcessedVideo>;
 }
 
 export interface ProjectUploadPipelineDependencies {
@@ -48,6 +57,7 @@ export interface ProjectUploadPipelineDependencies {
 	ids: IdGenerator;
 	logger: AppLogger;
 	processing: ProjectUploadProcessing;
+	purposePrefix?: 'project' | 'exhibition';
 	bucketForKind(kind: AssetKind): string;
 	deleteUnpersistedObject(
 		bucket: string,
@@ -71,12 +81,12 @@ export interface ProjectUploadPipelineDependencies {
 	};
 }
 
-interface PendingObject {
-	bucket: string;
-	key: string;
-	kind: AssetKind;
-	purpose: 'original' | 'playback';
-	intentId?: string;
+type UploadPurpose = 'original' | 'playback' | 'rendition-card-480' | 'rendition-display-960';
+
+function renditionPurpose(
+	profile: ImageRenditionProfile,
+): 'rendition-card-480' | 'rendition-display-960' {
+	return profile === 'CARD_480' ? 'rendition-card-480' : 'rendition-display-960';
 }
 
 const TEMP_CLEANUP_MAX_ATTEMPTS = 3;
@@ -86,37 +96,6 @@ function isMissingFile(error: unknown): boolean {
 		&& error !== null
 		&& 'code' in error
 		&& error.code === 'ENOENT';
-}
-
-async function destroyAndWaitForClose(body: Readable): Promise<void> {
-	if (body.closed) return;
-
-	await new Promise<void>((resolve, reject) => {
-		let cleanupError: unknown;
-		const observeCleanupError = (error: unknown) => {
-			cleanupError ??= error;
-		};
-		const finishCleanup = () => {
-			body.off('error', observeCleanupError);
-			body.off('close', finishCleanup);
-			if (cleanupError === undefined) resolve();
-			else reject(cleanupError);
-		};
-
-		// The listener does not suppress stream failures: it holds the first one
-		// until the close event proves that the backing file is no longer in use,
-		// then rejects with that same error.
-		body.on('error', observeCleanupError);
-		body.once('close', finishCleanup);
-		try {
-			body.destroy();
-		} catch (error) {
-			cleanupError ??= error;
-			// A conforming Readable emits close after destroy. If a broken adapter
-			// does not, remain fail-closed instead of deleting the backing temp file.
-			if (body.closed) finishCleanup();
-		}
-	});
 }
 
 export class ProjectTempCleanupError extends AggregateError {
@@ -131,10 +110,6 @@ export class ProjectTempCleanupError extends AggregateError {
 	}
 }
 
-function storageKey(id: string, extension: string): string {
-	return `${id}.${extension.replace(/[^a-zA-Z0-9]/g, '')}`;
-}
-
 /**
  * A request-owned pipeline whose external resources all come from one
  * BackendContext. Object cleanup intent is recorded before each PUT so an
@@ -145,68 +120,48 @@ export function createProjectUploadPipeline(
 	deps: ProjectUploadPipelineDependencies,
 ): UploadPipelinePort {
 	const temporaryPaths = new Set<string>();
-	const pendingObjects: PendingObject[] = [];
 	let owner: UploadIntentOwner = {};
+	const objectUploads = createIntentTrackedObjectUploader({
+		storage: deps.storage,
+		uploadIntents: deps.uploadIntents,
+		deleteUnpersistedObject: ({ bucket, storageKey, reason, context }) => (
+			deps.deleteUnpersistedObject(bucket, storageKey, reason, context)
+		),
+		logger: deps.logger,
+		uploadStreamFailureMessage: 'Project object upload and request-stream cleanup failed',
+		rollbackFailureMessage: 'Project upload durable rollback failed',
+		ambiguousErrorLogMessage: 'Failed to annotate ambiguous upload intent',
+	});
 
 	async function upload(
 		filePath: string,
 		kind: AssetKind,
 		extension: string,
 		contentType: string,
-		purpose: PendingObject['purpose'],
+		purpose: UploadPurpose,
+		storageRole?: 'original' | 'playback' | 'rendition',
+		storageKey?: string,
 	): Promise<{ key: string; intentId?: string }> {
 		const bucket = deps.bucketForKind(kind);
-		const key = storageKey(deps.ids.next(), extension);
+		const key = storageKey ?? generateStorageKey(extension, deps.ids.next());
+		const objectRole: 'original' | 'playback' | 'rendition' = storageRole ?? (
+			purpose === 'original' || purpose === 'playback' ? purpose : 'rendition'
+		);
 		const stat = await deps.fileSystem.stat(filePath);
-		const intentId = await deps.uploadIntents?.prepare({
+		const uploaded = await objectUploads.upload({
 			bucket,
 			storageKey: key,
-			purpose: `project-${kind.toLowerCase()}-${purpose}`,
-			...(owner.operationId ? { ownerOperationId: owner.operationId } : {}),
-			...(owner.actorId !== undefined ? { ownerActorId: owner.actorId } : {}),
-			...(owner.projectId !== undefined ? { ownerProjectId: owner.projectId } : {}),
-			...(owner.exhibitionId !== undefined
-				? { ownerExhibitionId: owner.exhibitionId }
-				: {}),
+			purpose: `${deps.purposePrefix ?? 'project'}-${kind.toLowerCase()}-${purpose}`,
+			owner,
+			createBody: () => deps.fileSystem.createReadStream(filePath),
+			contentType,
+			contentLength: stat.size,
+			storageOptions: storageOptionsForAsset(kind, objectRole),
+			rollbackReason: `project-upload-unpersisted-${purpose}`,
+			rollbackContext: { kind },
+			logContext: { kind, purpose },
 		});
-		pendingObjects.push({ bucket, key, kind, purpose, ...(intentId ? { intentId } : {}) });
-		const body = deps.fileSystem.createReadStream(filePath);
-		try {
-			await deps.storage.upload(
-				bucket,
-				key,
-				body,
-				contentType,
-				stat.size,
-				storageOptionsForAsset(kind, purpose),
-			);
-		} catch (error) {
-			// A storage adapter may reject before it starts consuming the body. Stop
-			// and settle the request-owned stream before temp cleanup removes its
-			// backing file, otherwise fs.ReadStream can open later and emit an
-			// unhandled ENOENT.
-			let streamCleanupError: unknown;
-			try {
-				await destroyAndWaitForClose(body);
-			} catch (cleanupError) {
-				streamCleanupError = cleanupError;
-			}
-			if (intentId) await deps.uploadIntents?.recordAmbiguousError(intentId, error).catch(
-				(intentError) => deps.logger.error(
-					{ error: intentError, intentId, bucket, storageKey: key },
-					'Failed to annotate ambiguous upload intent',
-				),
-			);
-			if (streamCleanupError !== undefined) {
-				throw new AggregateError(
-					[error, streamCleanupError],
-					'Project object upload and request-stream cleanup failed',
-				);
-			}
-			throw error;
-		}
-		if (intentId) await deps.uploadIntents?.markUploaded(intentId);
-		return { key, ...(intentId ? { intentId } : {}) };
+		return { key, ...uploaded };
 	}
 
 	return {
@@ -241,6 +196,7 @@ export function createProjectUploadPipeline(
 					'original',
 				);
 				let playbackStorageKey: string | null = null;
+				let playbackIntentId: string | undefined;
 				let playbackMimeType = '';
 				let playbackSizeBytes = 0;
 				if (playback.playback) {
@@ -253,6 +209,7 @@ export function createProjectUploadPipeline(
 						'playback',
 					);
 					playbackStorageKey = playbackUpload.key;
+					playbackIntentId = playbackUpload.intentId;
 					playbackMimeType = playback.playback.mimeType;
 					playbackSizeBytes = playback.playback.sizeBytes;
 				}
@@ -267,76 +224,115 @@ export function createProjectUploadPipeline(
 					playbackError: playback.playbackError,
 					originalName,
 					kind,
-					uploadIntentIds: [original.intentId, ...pendingObjects
-						.filter((item) => item.key === playbackStorageKey)
-						.map((item) => item.intentId)]
+					uploadIntentIds: [original.intentId, playbackIntentId]
 						.filter((id): id is string => typeof id === 'string'),
 				};
 			}
 
-			let processed = {
-				tmpPath: filePath,
-				mimeType: validated.mimeType,
-				ext: validated.ext,
-				sizeBytes: validated.sizeBytes,
-			};
-			if ((kind === 'IMAGE' || kind === 'POSTER')
-				&& validated.mimeType === 'application/pdf') {
-				processed = await deps.processing.processPdf({ tmpPath: filePath });
-			} else if (kind !== 'GAME') {
-				processed = await deps.processing.processImage({
-					tmpPath: filePath,
+			if (kind === 'GAME') {
+				const uploaded = await upload(
+					filePath,
+					kind,
+					validated.ext,
+					validated.mimeType,
+					'original',
+				);
+				return {
+					storageKey: uploaded.key,
 					mimeType: validated.mimeType,
-					ext: validated.ext,
 					sizeBytes: validated.sizeBytes,
-				});
+					originalName,
+					kind,
+					uploadIntentIds: uploaded.intentId ? [uploaded.intentId] : [],
+				};
 			}
-			if (processed.tmpPath !== filePath) temporaryPaths.add(processed.tmpPath);
 
-			const uploaded = await upload(
-				processed.tmpPath,
+			const createRenditions = kind === 'IMAGE' || kind === 'POSTER';
+			let processed: ImageProcessingResult;
+			try {
+				processed = validated.mimeType === 'application/pdf'
+					? await deps.processing.processPdf({
+						tmpPath: filePath,
+						createRenditions,
+					})
+					: await deps.processing.processImage({
+						tmpPath: filePath,
+						mimeType: validated.mimeType,
+						ext: validated.ext,
+						sizeBytes: validated.sizeBytes,
+						createRenditions,
+					});
+			} catch (error) {
+				if (error instanceof ImageOutputCleanupError) {
+					for (const residuePath of error.residuePaths) {
+						temporaryPaths.add(residuePath);
+					}
+				}
+				throw error;
+			}
+			for (const output of [processed.original, ...processed.renditions]) {
+				if (output.tmpPath !== filePath) temporaryPaths.add(output.tmpPath);
+			}
+
+			const originalUpload = await upload(
+				processed.original.tmpPath,
 				kind,
-				processed.ext,
-				processed.mimeType,
+				processed.original.ext,
+				processed.original.mimeType,
 				'original',
 			);
+			const uploadedRenditions = [] as Array<{
+				profile: ImageRenditionProfile;
+				key: string;
+				intentId?: string;
+				processed: ImageProcessingResult['renditions'][number];
+			}>;
+			for (const rendition of processed.renditions) {
+				const renditionStorageKey = deriveImageRenditionStorageKey(
+					originalUpload.key,
+					rendition.profile,
+				);
+				const renditionUpload = await upload(
+					rendition.tmpPath,
+					kind,
+					rendition.ext,
+					rendition.mimeType,
+					renditionPurpose(rendition.profile),
+					'rendition',
+					renditionStorageKey,
+				);
+				uploadedRenditions.push({
+					profile: rendition.profile,
+					key: renditionUpload.key,
+					...(renditionUpload.intentId
+						? { intentId: renditionUpload.intentId }
+						: {}),
+					processed: rendition,
+				});
+			}
+
 			return {
-				storageKey: uploaded.key,
-				mimeType: processed.mimeType,
-				sizeBytes: processed.sizeBytes,
+				storageKey: originalUpload.key,
+				mimeType: processed.original.mimeType,
+				sizeBytes: processed.original.sizeBytes,
 				originalName,
 				kind,
-				uploadIntentIds: uploaded.intentId ? [uploaded.intentId] : [],
+				width: processed.original.width,
+				height: processed.original.height,
+				renditions: uploadedRenditions.map((rendition) => ({
+					profile: rendition.profile,
+					width: rendition.processed.width,
+					height: rendition.processed.height,
+				})),
+				uploadIntentIds: [
+					originalUpload.intentId,
+					...uploadedRenditions.map((rendition) => rendition.intentId),
+				].filter((id): id is string => typeof id === 'string'),
 			};
 		},
 
 		async rollbackCommitted() {
-			const failures: unknown[] = [];
-			for (const object of [...pendingObjects].reverse()) {
-				try {
-					if (object.intentId
-						&& deps.uploadIntents
-						&& !(await deps.uploadIntents.isUncommitted(object.intentId))) {
-						pendingObjects.splice(pendingObjects.indexOf(object), 1);
-						continue;
-					}
-					await deps.deleteUnpersistedObject(
-						object.bucket,
-						object.key,
-						`project-upload-unpersisted-${object.purpose}`,
-						{ kind: object.kind },
-					);
-					pendingObjects.splice(pendingObjects.indexOf(object), 1);
-				} catch (error) {
-					failures.push(error);
-				}
-			}
-			if (failures.length > 0) {
-				throw new AggregateError(
-					failures,
-					'Project upload durable rollback failed',
-				);
-			}
+			await objectUploads.rollback();
 		},
 
 		async cleanupTemp() {

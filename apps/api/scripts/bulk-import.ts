@@ -20,26 +20,18 @@
  * Requires: DATABASE_URL, S3_* env vars (via .env or environment)
  */
 
-import type { ObjectStorage } from '../src/application/ports.js';
-import type { Env } from '../src/config/env.js';
-import { readFileSync, readdirSync, statSync, createReadStream, copyFileSync, mkdtempSync } from 'node:fs';
-import { promises as fsp } from 'node:fs';
-import { join, extname, basename } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, extname } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { loadEnv } from '../src/config/env.js';
 import { toSlug } from '../src/shared/slug.js';
-import { generateStorageKey } from '../src/shared/storage-path.js';
-import { validateFile } from '../src/modules/assets/upload/file-validator.js';
-import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
 import type { AssetKind } from '../src/generated/prisma/client.js';
-import type { AssetPlaybackStatus } from '../src/generated/prisma/client.js';
-import type { PrismaClient } from '../src/generated/prisma/client.js';
+import { createScriptResources } from './resources.js';
 import {
-	bucketForKind,
-	createScriptResources,
-	createScriptUploadProcessing,
-	type ScriptUploadProcessing,
-} from './resources.js';
+	createScriptAsset,
+	runScriptUploadItem,
+	type ScriptUploadItemResources,
+} from './script-upload.js';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -59,7 +51,6 @@ interface MatchedAsset {
 	kind: AssetKind;
 	filePath: string;
 	originalName: string;
-	mimeType: string;
 	sizeBytes: number;
 }
 
@@ -70,45 +61,12 @@ interface ImportStats {
 	failed: { project: string; reason: string }[];
 }
 
-interface UploadedAsset {
-	storageKey: string;
-	playbackStorageKey?: string | null;
-	mimeType: string;
-	playbackMimeType?: string;
-	sizeBytes: number;
-	playbackSizeBytes?: number;
-	playbackStatus?: AssetPlaybackStatus;
-	playbackError?: string;
-	converted: boolean;
-}
-
 // ── Config ───────────────────────────────────────────────
-
-const MIME_MAP: Record<string, string> = {
-	'.webp': 'image/webp',
-	'.png': 'image/png',
-	'.jpg': 'image/jpeg',
-	'.jpeg': 'image/jpeg',
-	'.pdf': 'application/pdf',
-	'.zip': 'application/zip',
-	'.apk': 'application/vnd.android.package-archive',
-	'.7z': 'application/x-7z-compressed',
-	'.exe': 'application/x-msdownload',
-	'.mp4': 'video/mp4',
-	'.mov': 'video/quicktime',
-	'.mkv': 'video/x-matroska',
-	'.avi': 'video/x-msvideo',
-	'.wmv': 'video/x-ms-wmv',
-};
 
 // Poster preference: webp first, then original formats
 const POSTER_EXTS = ['.webp', '.png', '.jpg', '.jpeg', '.pdf'];
 const GAME_EXTS = ['.zip', '.apk', '.7z', '.exe'];
 const VIDEO_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.wmv'];
-
-function errorMessage(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
 
 // ── CLI ──────────────────────────────────────────────────
 
@@ -190,7 +148,6 @@ function discoverAssets(
 			kind: 'POSTER',
 			filePath: posterPath,
 			originalName: `${fileKey}_poster${ext}`,
-			mimeType: MIME_MAP[ext] ?? 'application/octet-stream',
 			sizeBytes: statSync(posterPath).size,
 		});
 	}
@@ -202,7 +159,6 @@ function discoverAssets(
 			kind: 'GAME',
 			filePath: gamePath,
 			originalName: `${fileKey}_game.zip`,
-			mimeType: 'application/zip',
 			sizeBytes: statSync(gamePath).size,
 		});
 	}
@@ -215,136 +171,11 @@ function discoverAssets(
 			kind: 'VIDEO',
 			filePath: videoPath,
 			originalName: `${fileKey}_video${ext}`,
-			mimeType: MIME_MAP[ext] ?? 'video/mp4',
 			sizeBytes: statSync(videoPath).size,
 		});
 	}
 
 	return assets;
-}
-
-// ── S3 upload ────────────────────────────────────────────
-
-async function uploadAssetToS3(
-	asset: MatchedAsset,
-	tmpDir: string,
-	storage: ObjectStorage,
-	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
-	processing: ScriptUploadProcessing,
-): Promise<UploadedAsset> {
-	const bucket = bucketForKind(config, asset.kind);
-	const validated = await validateFile(asset.filePath, asset.kind);
-
-	if (asset.kind === 'VIDEO') {
-		const tempFiles: string[] = [];
-		try {
-			const tmpPath = join(tmpDir, `${Date.now()}_${basename(asset.filePath)}`);
-			copyFileSync(asset.filePath, tmpPath);
-			tempFiles.push(tmpPath);
-
-			const playback = await processing.video({
-				tmpPath,
-				mimeType: validated.mimeType,
-				ext: validated.ext,
-				sizeBytes: validated.sizeBytes,
-			});
-			if (playback.playbackStatus === 'FAILED') {
-				throw new Error(`Video validation failed: ${playback.playbackError || 'unsupported or corrupt video'}`);
-			}
-			if (playback.playback) tempFiles.push(playback.playback.tmpPath);
-
-			const storageKey = generateStorageKey(validated.ext);
-			await storage.upload(
-				bucket,
-				storageKey,
-				createReadStream(tmpPath),
-				validated.mimeType,
-				validated.sizeBytes,
-				storageOptionsForAsset(asset.kind, 'original'),
-			);
-
-			let playbackStorageKey: string | null = null;
-			let playbackMimeType = '';
-			let playbackSizeBytes = 0;
-			let playbackStatus: AssetPlaybackStatus = playback.playbackStatus;
-			let playbackError = playback.playbackError;
-			if (playback.playback) {
-				const candidatePlaybackKey = generateStorageKey(playback.playback.ext);
-				try {
-					await storage.upload(
-						bucket,
-						candidatePlaybackKey,
-						createReadStream(playback.playback.tmpPath),
-						playback.playback.mimeType,
-						playback.playback.sizeBytes,
-						storageOptionsForAsset(asset.kind, 'playback'),
-					);
-					playbackStorageKey = candidatePlaybackKey;
-					playbackMimeType = playback.playback.mimeType;
-					playbackSizeBytes = playback.playback.sizeBytes;
-				} catch (err) {
-					playbackStatus = 'FAILED';
-					playbackError = errorMessage(err).slice(0, 2000);
-				}
-			}
-
-			return {
-				storageKey,
-				playbackStorageKey,
-				mimeType: validated.mimeType,
-				playbackMimeType,
-				sizeBytes: validated.sizeBytes,
-				playbackSizeBytes,
-				playbackStatus,
-				playbackError,
-				converted: playback.converted,
-			};
-		} finally {
-			for (const t of tempFiles) await fsp.unlink(t).catch(() => {});
-		}
-	}
-
-	let finalPath = asset.filePath;
-	let finalMime = validated.mimeType;
-	let finalExt = validated.ext;
-	let finalSize = validated.sizeBytes;
-	let converted = false;
-	const tempFiles: string[] = [];
-	try {
-		if (asset.kind !== 'GAME') {
-			const tmpPath = join(tmpDir, `${Date.now()}_${basename(asset.filePath)}`);
-			copyFileSync(asset.filePath, tmpPath);
-			tempFiles.push(tmpPath);
-
-			const processed = validated.mimeType === 'application/pdf'
-				? await processing.pdf({ tmpPath })
-				: await processing.image({
-					tmpPath,
-					mimeType: validated.mimeType,
-					ext: validated.ext,
-					sizeBytes: validated.sizeBytes,
-				});
-			finalPath = processed.tmpPath;
-			finalMime = processed.mimeType;
-			finalExt = processed.ext;
-			finalSize = processed.sizeBytes;
-			converted = processed.converted;
-			if (processed.converted && processed.tmpPath !== tmpPath) tempFiles.push(processed.tmpPath);
-		}
-
-		const storageKey = generateStorageKey(finalExt);
-		const stream = createReadStream(finalPath);
-		await storage.upload(bucket, storageKey, stream, finalMime, finalSize, storageOptionsForAsset(asset.kind, 'original'));
-
-		return {
-			storageKey,
-			mimeType: finalMime,
-			sizeBytes: finalSize,
-			converted,
-		};
-	} finally {
-		for (const t of tempFiles) await fsp.unlink(t).catch(() => {});
-	}
 }
 
 // ── Main import ──────────────────────────────────────────
@@ -354,28 +185,19 @@ async function main() {
 	const config = loadEnv();
 
 	const resources = createScriptResources(config);
-	const processing = createScriptUploadProcessing(config);
 
 	try {
-		await doImport(
-			resources.prisma,
-			opts,
-			resources.storage,
-			config,
-			processing,
-		);
+		await doImport(resources, opts);
 	} finally {
 		await resources.close();
 	}
 }
 
-async function doImport(
-	prisma: PrismaClient,
+export async function doImport(
+	resources: ScriptUploadItemResources,
 	opts: { assetRoot: string; legacyDir: string; yearFilter?: number; dryRun: boolean },
-	storage: ObjectStorage,
-	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
-	processing: ScriptUploadProcessing,
 ) {
+	const prisma = resources.prisma;
 	// Find legacy JSON files
 	const legacyFiles = readdirSync(opts.legacyDir)
 		.filter((f) => /^legacy_example_(\d{4})_projects\.json$/.test(f))
@@ -386,8 +208,8 @@ async function doImport(
 		process.exit(1);
 	}
 
-	// Ensure a system user exists for creatorId
-	const systemUser = await prisma.user.upsert({
+	// Dry-run must remain read-only. The creator is materialized only on apply.
+	const systemUser = opts.dryRun ? null : await prisma.user.upsert({
 		where: { googleSub: 'system-import' },
 		update: {},
 		create: {
@@ -399,9 +221,7 @@ async function doImport(
 	});
 
 	const stats: ImportStats = { projects: 0, assets: 0, skipped: 0, failed: [] };
-	const tmpDir = mkdtempSync(join(tmpdir(), 'bulk-import-'));
 
-	try {
 	for (const file of legacyFiles) {
 		const yearMatch = file.match(/(\d{4})/);
 		if (!yearMatch) continue;
@@ -416,26 +236,36 @@ async function doImport(
 			readFileSync(join(opts.legacyDir, file), 'utf-8'),
 		);
 
-		// Upsert exhibition
+		// Dry-run resolves existing state without creating the exhibition.
 		const exhibitionTitle = `${year} 졸업작품전`;
-		const exhibition = await prisma.exhibition.upsert({
-			where: { year_title: { year, title: exhibitionTitle } },
-			update: {},
-			create: { year, title: exhibitionTitle, isUploadEnabled: false },
-		});
-		console.log(`전시회: ${exhibitionTitle} (id=${exhibition.id})`);
+		const exhibition = opts.dryRun
+			? await prisma.exhibition.findUnique({
+				where: { year_title: { year, title: exhibitionTitle } },
+			})
+			: await prisma.exhibition.upsert({
+				where: { year_title: { year, title: exhibitionTitle } },
+				update: {},
+				create: { year, title: exhibitionTitle, isUploadEnabled: false },
+			});
+		console.log(
+			exhibition
+				? `전시회: ${exhibitionTitle} (id=${exhibition.id})`
+				: `전시회: ${exhibitionTitle} (would create)`,
+		);
 
 		for (const entry of entries) {
 			const label = `${entry.title} (${entry.studentIds.join(', ')})`;
 
 			// Skip if project already exists
 			const baseSlug = toSlug(entry.title);
-			const existing = await prisma.project.findFirst({
-				where: {
-					exhibitionId: exhibition.id,
-					title: entry.title,
-				},
-			});
+			const existing = exhibition
+				? await prisma.project.findFirst({
+					where: {
+						exhibitionId: exhibition.id,
+						title: entry.title,
+					},
+				})
+				: null;
 			if (existing) {
 				console.log(`  SKIP: ${label} — already exists`);
 				stats.skipped++;
@@ -456,6 +286,9 @@ async function doImport(
 				stats.assets += assets.length;
 				continue;
 			}
+			if (!exhibition || !systemUser) {
+				throw new Error('Apply resources were not initialized');
+			}
 
 			// Generate unique slug
 			let slug = baseSlug;
@@ -475,104 +308,64 @@ async function doImport(
 			else platforms.push('PC');
 
 			try {
-				// Upload assets to S3
-				const assetRecords: {
-					kind: AssetKind;
-					storageKey: string;
-					playbackStorageKey?: string | null;
-					originalName: string;
-					mimeType: string;
-					playbackMimeType?: string;
-					sizeBytes: bigint;
-					playbackSizeBytes?: bigint;
-					playbackStatus?: AssetPlaybackStatus;
-					playbackError?: string;
-					isPublic: boolean;
-				}[] = [];
-
-				for (const asset of assets) {
-					const uploaded = await uploadAssetToS3(
-						asset,
-						tmpDir,
-						storage,
-						config,
-						processing,
-					);
-					assetRecords.push({
-						kind: asset.kind,
-						storageKey: uploaded.storageKey,
-						playbackStorageKey: uploaded.playbackStorageKey,
-						originalName: asset.originalName,
-						mimeType: uploaded.mimeType,
-						playbackMimeType: uploaded.playbackMimeType,
-						sizeBytes: BigInt(uploaded.sizeBytes),
-						playbackSizeBytes: BigInt(uploaded.playbackSizeBytes ?? 0),
-						playbackStatus: uploaded.playbackStatus,
-						playbackError: uploaded.playbackError,
-						isPublic: asset.kind !== 'GAME' && asset.kind !== 'VIDEO',
-					});
-				}
-
-				// Create project + members + assets in single transaction
-				const project = await prisma.project.create({
-					data: {
+				const { uploads } = await runScriptUploadItem(
+					resources,
+					{
+						operationId: resources.ids.next(),
+						actorId: systemUser.id,
 						exhibitionId: exhibition.id,
-						slug,
-						title: entry.title,
-						isIncomplete: true,
-						status: 'PUBLISHED',
-						githubUrl: entry.githubLink ?? '',
-						platforms,
-						creatorId: systemUser.id,
-						members: {
-							create: entry.names.map((name, i) => ({
-								name,
-								studentId: entry.studentIds[i] ?? '',
-								sortOrder: i,
-							})),
-						},
-						assets: {
-							create: assetRecords.map((a) => ({
-								kind: a.kind,
-								status: 'READY',
-								storageKey: a.storageKey,
-								playbackStorageKey: a.playbackStorageKey ?? null,
-								originalName: a.originalName,
-								mimeType: a.mimeType,
-								playbackMimeType: a.playbackMimeType ?? '',
-								sizeBytes: a.sizeBytes,
-								playbackSizeBytes: a.playbackSizeBytes ?? BigInt(0),
-								playbackStatus: a.playbackStatus ?? 'PENDING',
-								playbackError: a.playbackError ?? '',
-								isPublic: a.isPublic,
-							})),
-						},
 					},
-					include: { assets: true },
-				});
+					assets.map((asset) => ({
+						kind: asset.kind,
+						filePath: asset.filePath,
+						originalName: asset.originalName,
+					})),
+					async (tx, uploadedAssets) => {
+						const project = await tx.project.create({
+							data: {
+								exhibitionId: exhibition.id,
+								slug,
+								title: entry.title,
+								isIncomplete: true,
+								status: 'PUBLISHED',
+								githubUrl: entry.githubLink ?? '',
+								platforms,
+								creatorId: systemUser.id,
+								members: {
+									create: entry.names.map((name, i) => ({
+										name,
+										studentId: entry.studentIds[i] ?? '',
+										sortOrder: i,
+									})),
+								},
+							},
+							select: { id: true },
+						});
+						let posterAssetId: number | undefined;
+						for (const uploaded of uploadedAssets) {
+							const created = await createScriptAsset(tx, project.id, uploaded);
+							if (uploaded.saved.kind === 'POSTER') posterAssetId = created.id;
+						}
+						if (posterAssetId !== undefined) {
+							await tx.project.update({
+								where: { id: project.id },
+								data: { posterAssetId },
+							});
+						}
+						return project;
+					},
+				);
 
-				// Set poster
-				const posterAsset = project.assets.find((a) => a.kind === 'POSTER');
-				if (posterAsset) {
-					await prisma.project.update({
-						where: { id: project.id },
-						data: { posterAssetId: posterAsset.id },
-					});
-				}
-
-				const assetSummary = assetRecords.map((a) => a.kind[0]).join('') || '-';
+				const assetSummary = uploads.map(({ saved }) => saved.kind[0]).join('') || '-';
 				console.log(`  OK: ${label} [${assetSummary}]`);
 				stats.projects++;
-				stats.assets += assetRecords.length;
+				stats.assets += uploads.length;
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				console.error(`  FAIL: ${label} — ${msg}`);
 				stats.failed.push({ project: label, reason: msg });
 			}
 		}
-	}
-	} finally {
-		await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 	}
 
 	// Summary
@@ -589,7 +382,10 @@ async function doImport(
 	}
 }
 
-main().catch((err) => {
-	console.error('Import failed:', err);
-	process.exit(1);
-});
+const executedPath = process.argv[1];
+if (executedPath && import.meta.url === pathToFileURL(executedPath).href) {
+	void main().catch((err) => {
+		console.error('Import failed:', err);
+		process.exitCode = 1;
+	});
+}

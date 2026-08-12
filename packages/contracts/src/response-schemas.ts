@@ -5,6 +5,7 @@ import {
 	UserRoleSchema,
 	UploadKindSchema,
 } from './schemas.js';
+import type { ResponsiveImage } from './responsive-image.js';
 
 export type JsonValue =
 	| string
@@ -98,6 +99,20 @@ const OpaqueSessionIdSchema = z.string().min(1).max(200).refine(
 	'Session ID contains a NUL byte',
 );
 
+export const ResponsiveImageSchema: z.ZodType<ResponsiveImage> = z.object({
+	original: z.object({
+		url: UrlSchema,
+		width: PositiveIntegerSchema.optional(),
+		height: PositiveIntegerSchema.optional(),
+	}).strict(),
+	renditions: z.array(z.object({
+		profile: z.enum(['CARD_480', 'DISPLAY_960']),
+		url: UrlSchema,
+		width: PositiveIntegerSchema,
+		height: PositiveIntegerSchema,
+	}).strict()),
+}).strict();
+
 export const AuthUserSchema = z.object({
 	id: PositiveIntegerSchema,
 	email: z.string().min(1),
@@ -127,7 +142,7 @@ export const PublicYearItemSchema = z.object({
 	year: YearSchema,
 	title: z.string().optional(),
 	projectCount: NonNegativeIntegerSchema,
-	posterUrl: UrlSchema.optional(),
+	poster: ResponsiveImageSchema.optional(),
 }).strict();
 
 export const PublicYearListResponseSchema = z.object({
@@ -139,7 +154,7 @@ export const PublicProjectCardSchema = z.object({
 	slug: z.string().min(1),
 	title: z.string(),
 	summary: z.string().optional(),
-	posterUrl: UrlSchema.optional(),
+	poster: ResponsiveImageSchema.optional(),
 	members: z.array(z.object({
 		name: z.string(),
 		studentId: z.string(),
@@ -180,8 +195,8 @@ export const ProjectVideoSchema = z.object({
 
 export const PublicProjectImageSchema = z.object({
 	id: PositiveIntegerSchema,
-	url: UrlSchema,
 	kind: z.enum(['IMAGE', 'POSTER']),
+	image: ResponsiveImageSchema,
 }).strict();
 
 export const PublicProjectMemberSchema = z.object({
@@ -204,7 +219,7 @@ export const PublicProjectDetailResponseSchema = z.object({
 	videos: z.array(ProjectVideoSchema),
 	members: z.array(PublicProjectMemberSchema),
 	images: z.array(PublicProjectImageSchema),
-	posterUrl: UrlSchema.optional(),
+	poster: ResponsiveImageSchema.optional(),
 	gameDownloadUrl: UrlSchema.optional(),
 	webglUrl: UrlSchema.optional(),
 	status: ProjectStatusSchema,
@@ -217,7 +232,7 @@ export const AdminExhibitionItemSchema = z.object({
 	isUploadEnabled: z.boolean(),
 	sortOrder: NonNegativeIntegerSchema,
 	projectCount: NonNegativeIntegerSchema,
-	posterUrl: UrlSchema.optional(),
+	poster: ResponsiveImageSchema.optional(),
 	posterOriginalName: z.string().optional(),
 	posterSize: NonNegativeIntegerSchema.optional(),
 }).strict();
@@ -273,7 +288,7 @@ export const AdminProjectDetailSchema = z.object({
 	status: ProjectStatusSchema,
 	sortOrder: NonNegativeIntegerSchema,
 	posterAssetId: PositiveIntegerSchema.optional(),
-	posterUrl: UrlSchema.optional(),
+	poster: ResponsiveImageSchema.optional(),
 	webglUrl: UrlSchema.optional(),
 	members: z.array(z.object({
 		id: PositiveIntegerSchema,
@@ -282,17 +297,26 @@ export const AdminProjectDetailSchema = z.object({
 		sortOrder: NonNegativeIntegerSchema,
 		userId: PositiveIntegerSchema.nullable(),
 	}).strict()),
-	assets: z.array(z.object({
-		id: PositiveIntegerSchema,
-		kind: AssetKindSchema,
-		url: UrlSchema,
-		originalDownloadUrl: UrlSchema.optional(),
-		playbackUrl: UrlSchema.optional(),
-		playbackStatus: AssetPlaybackStatusSchema.optional(),
-		playbackError: z.string().optional(),
-		originalName: z.string(),
-		size: NonNegativeIntegerSchema,
-	}).strict()),
+	assets: z.array(z.discriminatedUnion('kind', [
+		z.object({
+			id: PositiveIntegerSchema,
+			kind: z.enum(['THUMBNAIL', 'IMAGE', 'POSTER']),
+			image: ResponsiveImageSchema,
+			originalName: z.string(),
+			size: NonNegativeIntegerSchema,
+		}).strict(),
+		z.object({
+			id: PositiveIntegerSchema,
+			kind: z.enum(['GAME', 'VIDEO']),
+			url: UrlSchema,
+			originalDownloadUrl: UrlSchema.optional(),
+			playbackUrl: UrlSchema.optional(),
+			playbackStatus: AssetPlaybackStatusSchema.optional(),
+			playbackError: z.string().optional(),
+			originalName: z.string(),
+			size: NonNegativeIntegerSchema,
+		}).strict(),
+	])),
 }).strict();
 
 export const SubmitProjectResponseSchema = z.object({
@@ -306,7 +330,6 @@ export const SubmitProjectResponseSchema = z.object({
 
 export const ProjectAssetUploadResponseSchema = z.object({
 	assetId: PositiveIntegerSchema,
-	url: UrlSchema,
 }).strict();
 
 export const BulkStatusResponseSchema = z.object({

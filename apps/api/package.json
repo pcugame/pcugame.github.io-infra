@@ -15,12 +15,14 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:import": "tsx prisma/seed.ts --import ../db/legacy-import.json",
-    "lint": "eslint src prisma --max-warnings=0 && tsc --noEmit",
+    "backfill:image-renditions": "tsx scripts/backfill-image-renditions.ts",
+    "lint": "eslint src prisma scripts --max-warnings=0 && tsc --noEmit",
     "architecture:guard": "node scripts/architecture-guard.mjs src scripts",
     "architecture:self-test": "node scripts/architecture-self-test.mjs",
     "architecture": "npm run architecture:guard && npm run architecture:self-test && depcruise --config .dependency-cruiser.cjs src scripts",
     "pretest": "npm --prefix ../.. run build -w @pcu/contracts",
-    "test": "vitest run"
+    "test": "vitest run && npm run test:scripts",
+    "test:scripts": "vitest run --config scripts/vitest.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1024.0",
@@ -47,11 +49,13 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@types/http-cache-semantics": "^4.2.0",
     "@types/node": "^22.10.2",
     "@types/sharp": "^0.31.1",
     "@types/yauzl": "^3.4.0",
     "dependency-cruiser": "18.1.0",
     "eslint": "10.7.0",
+    "http-cache-semantics": "^4.2.0",
     "prisma": "7.9.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
