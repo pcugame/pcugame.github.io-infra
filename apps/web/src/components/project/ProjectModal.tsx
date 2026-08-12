@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import type { ResponsiveImage as ResponsiveImageData } from '@pcu/contracts';
 import { publicApi } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
-import { LoadingSpinner } from '../common';
+import { LoadingSpinner, ResponsiveImage } from '../common';
 import { ProjectPublicMeta } from './ProjectPublicMeta';
 import { ProjectVideo } from './ProjectVideo';
 import { ProjectActions } from './ProjectActions';
@@ -15,13 +16,13 @@ interface Props {
 
 type MediaItem =
 	| { type: 'video'; url: string; mimeType: string; label: string }
-	| { type: 'poster'; url: string; label: string }
-	| { type: 'image'; id: number; url: string; label: string };
+	| { type: 'poster'; image: ResponsiveImageData; label: string }
+	| { type: 'image'; id: number; image: ResponsiveImageData; label: string };
 
 export function ProjectModal({ slug, year, onClose }: Props) {
 	const overlayRef = useRef<HTMLDivElement>(null);
 	const [activeIndex, setActiveIndex] = useState(0);
-	const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+	const [lightboxImage, setLightboxImage] = useState<ResponsiveImageData | null>(null);
 
 	const { data: project, isLoading } = useQuery({
 		queryKey: queryKeys.projectDetail(year, slug),
@@ -32,8 +33,8 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 	// ESC 닫기
 	useEffect(() => {
 		const onKey = () => {
-			if (lightboxUrl) {
-				setLightboxUrl(null);
+			if (lightboxImage) {
+				setLightboxImage(null);
 			} else {
 				onClose();
 			}
@@ -44,7 +45,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 			document.removeEventListener('keydown', onKey);
 			document.body.style.overflow = '';
 		};
-	}, [onClose, lightboxUrl]);
+	}, [onClose, lightboxImage]);
 
 	// 오버레이 클릭 닫기
 	const handleOverlayClick = (e: React.MouseEvent) => {
@@ -52,7 +53,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 	};
 
 	const closeLightbox = useCallback((e: React.MouseEvent) => {
-		if (e.target === e.currentTarget) setLightboxUrl(null);
+		if (e.target === e.currentTarget) setLightboxImage(null);
 	}, []);
 
 	// 미디어 목록 구성: 포스터 > 동영상 > 사진
@@ -63,10 +64,10 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 			? [project.video]
 			: [];
 	if (project) {
-		if (project.posterUrl) {
+		if (project.poster) {
 			mediaItems.push({
 				type: 'poster',
-				url: project.posterUrl,
+				image: project.poster,
 				label: '포스터',
 			});
 		}
@@ -83,7 +84,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 			mediaItems.push({
 				type: 'image',
 				id: img.id,
-				url: img.url,
+				image: img.image,
 				label: `사진 ${i + 1}`,
 			});
 		});
@@ -138,21 +139,23 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 									{current.type === 'video' ? (
 										<ProjectVideo
 											video={{ url: current.url, mimeType: current.mimeType }}
-											posterUrl={project.posterUrl}
+											poster={project.poster}
 											title={project.title}
 										/>
 									) : (
-										<img
-											src={current.url}
+										<ResponsiveImage
+											image={current.image}
 											alt={current.label}
 											className="modal-visual__img"
+											sizes="(max-width: 768px) 100vw, 960px"
+											decoding="async"
 										/>
 									)}
 									{/* 사진/포스터일 때 확대 버튼 */}
 									{isImageType && (
 										<button
 											className="modal-visual__zoom"
-											onClick={() => setLightboxUrl(current.url)}
+											onClick={() => setLightboxImage(current.image)}
 											aria-label="확대해서 보기"
 										>
 											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -216,11 +219,13 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 													</svg>
 												</span>
 											) : (
-												<img
-													src={item.url}
+												<ResponsiveImage
+													image={item.image}
 													alt={item.label}
 													className="modal-media-tab__thumb"
+													sizes="96px"
 													loading="lazy"
+													decoding="async"
 												/>
 											)}
 											<span className="modal-media-tab__label">
@@ -246,14 +251,14 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 							<ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
 							{/* 에셋 유실 안내 */}
-							{project.isIncomplete && !project.posterUrl && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
+							{project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
 								<p className="incomplete-notice incomplete-notice--missing">
 									이 프로젝트의 파일이 유실되었습니다.
 								</p>
 							)}
 
 							{/* 불완전 안내 */}
-							{project.isIncomplete && (project.posterUrl || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
+							{project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
 								<p className="incomplete-notice">
 									일부 자료가 누락되었을 수 있습니다.
 								</p>
@@ -293,18 +298,22 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 			</div>
 
 			{/* 라이트박스 (사진 확대) */}
-			{lightboxUrl && (
+			{lightboxImage && (
 				<div className="modal-lightbox" onClick={closeLightbox}>
 					<button
 						className="modal-lightbox__close"
-						onClick={() => setLightboxUrl(null)}
+						onClick={() => setLightboxImage(null)}
 						aria-label="닫기"
 					>
 						<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 							<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
 						</svg>
 					</button>
-					<img src={lightboxUrl} alt="확대 이미지" className="modal-lightbox__img" />
+					<img
+						src={lightboxImage.original.url}
+						alt="확대 이미지"
+						className="modal-lightbox__img"
+					/>
 				</div>
 			)}
 		</div>

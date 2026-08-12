@@ -3,6 +3,7 @@ import type { AdminProjectDetail } from '@pcu/contracts';
 import { Link } from 'react-router-dom';
 
 import GameUploadWidget from '../../../components/GameUploadWidget';
+import { ResponsiveImage } from '../../../components/common';
 import { getApiErrorMessage } from '../../../lib/api';
 import type { ClientUploadLimits } from '../../../lib/upload-limits';
 import {
@@ -130,12 +131,14 @@ export function AdminProjectAssetManager({
 										{asset.playbackError ? ` (${asset.playbackError})` : ''}
 									</p>
 								)}
-								{asset.kind === 'IMAGE' || asset.kind === 'POSTER' ? (
-									<img
-										src={asset.url}
+								{asset.kind === 'THUMBNAIL' || asset.kind === 'IMAGE' || asset.kind === 'POSTER' ? (
+									<ResponsiveImage
+										image={asset.image}
 										alt={asset.originalName}
 										className="asset-thumb"
+										sizes="160px"
 										loading="lazy"
+										decoding="async"
 									/>
 								) : null}
 								{canEditContent && (

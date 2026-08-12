@@ -1,6 +1,4 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { AppError } from '../shared/errors.js';
-
 const mocks = vi.hoisted(() => ({
 	findExhibitionsWithPublishedCounts: vi.fn(),
 	findExhibitionsByYear: vi.fn(),
@@ -8,16 +6,12 @@ const mocks = vi.hoisted(() => ({
 	findPublishedProjectsInExhibitions: vi.fn(),
 	findPublishedProjectById: vi.fn(),
 	findPublishedProjectBySlug: vi.fn(),
-	findExhibitionPosterByStorageKey: vi.fn(),
-	getPresignedUrl: vi.fn(),
 }));
 
-import { getExhibitionPosterRedirectUrl, getProjectDetail, listProjectsByYear, listYears } from '../modules/public/service.js';
+import { getProjectDetail, listProjectsByYear, listYears } from '../modules/public/service.js';
 
 const dependencies = {
 	apiPublicUrl: 'https://api.example.com',
-	publicBucket: 'pcu-public',
-	presign: mocks.getPresignedUrl,
 	repository: {
 		findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
 		findExhibitionsByYear: mocks.findExhibitionsByYear,
@@ -25,7 +19,6 @@ const dependencies = {
 		findPublishedProjectsInExhibitions: mocks.findPublishedProjectsInExhibitions,
 		findPublishedProjectById: mocks.findPublishedProjectById,
 		findPublishedProjectBySlug: mocks.findPublishedProjectBySlug,
-		findExhibitionPosterByStorageKey: mocks.findExhibitionPosterByStorageKey,
 	},
 };
 
@@ -37,17 +30,24 @@ describe('public exhibition years', () => {
 		mocks.findPublishedProjectsInExhibitions.mockReset();
 		mocks.findPublishedProjectById.mockReset();
 		mocks.findPublishedProjectBySlug.mockReset();
-		mocks.findExhibitionPosterByStorageKey.mockReset();
-		mocks.getPresignedUrl.mockReset();
 	});
 
-	it('includes an exhibition poster URL when a poster key is present', async () => {
+	it('includes an exhibition responsive image when a poster key is present', async () => {
 		mocks.findExhibitionsWithPublishedCounts.mockResolvedValue([
 			{
 				id: 1,
 				year: 2026,
 				title: '졸업작품 전시회',
 				posterStorageKey: 'poster.webp',
+				posterWidth: 1200,
+				posterHeight: 800,
+				imageRenditions: [{
+					profile: 'CARD_480',
+					storageKey: 'poster-480.webp',
+					sourceStorageKey: 'poster.webp',
+					width: 480,
+					height: 320,
+				}],
 				_count: { projects: 7 },
 			},
 		]);
@@ -58,31 +58,38 @@ describe('public exhibition years', () => {
 				year: 2026,
 				title: '졸업작품 전시회',
 				projectCount: 7,
-				posterUrl: 'https://api.example.com/api/public/exhibition-posters/poster.webp',
+				poster: {
+					original: {
+						url: 'https://api.example.com/api/public/images/poster.webp',
+						width: 1200,
+						height: 800,
+					},
+					renditions: [{
+						profile: 'CARD_480',
+						url: 'https://api.example.com/api/public/images/poster-480.webp',
+						width: 480,
+						height: 320,
+					}],
+				},
 			},
 		]);
 	});
 
-	it('only presigns registered exhibition poster keys', async () => {
-		mocks.findExhibitionPosterByStorageKey.mockResolvedValue({
+	it('keeps legacy exhibition posters usable without metadata or renditions', async () => {
+		mocks.findExhibitionsWithPublishedCounts.mockResolvedValue([{
 			id: 1,
-			posterStorageKey: 'poster.webp',
-		});
-		mocks.getPresignedUrl.mockResolvedValue('https://s3.example.com/poster.webp?sig=1');
+			year: 2025,
+			title: '',
+			posterStorageKey: 'legacy.webp',
+			_count: { projects: 0 },
+		}]);
 
-		await expect(getExhibitionPosterRedirectUrl(dependencies, 'poster.webp')).resolves.toBe(
-			'https://s3.example.com/poster.webp?sig=1',
-		);
-		expect(mocks.getPresignedUrl).toHaveBeenCalledWith('pcu-public', 'poster.webp');
-	});
-
-	it('rejects unregistered exhibition poster keys', async () => {
-		mocks.findExhibitionPosterByStorageKey.mockResolvedValue(null);
-
-		await expect(getExhibitionPosterRedirectUrl(dependencies, 'missing.webp')).rejects.toMatchObject({
-			statusCode: 404,
-		} satisfies Partial<AppError>);
-		expect(mocks.getPresignedUrl).not.toHaveBeenCalled();
+		await expect(listYears(dependencies)).resolves.toMatchObject([{
+			poster: {
+				original: { url: 'https://api.example.com/api/public/images/legacy.webp' },
+				renditions: [],
+			},
+		}]);
 	});
 
 	it('returns archived projects in public year listings', async () => {
@@ -105,6 +112,28 @@ describe('public exhibition years', () => {
 			empty: false,
 			items: [{ id: 10, slug: 'archived-game', title: 'Archived Game' }],
 		});
+	});
+
+	it('omits a private project poster from public year listings', async () => {
+		mocks.findExhibitionsByYear.mockResolvedValue([{ id: 1, year: 2026, title: 'Show' }]);
+		mocks.findPublishedProjectsInExhibitions.mockResolvedValue([{
+			id: 10,
+			slug: 'private-poster',
+			title: 'Private Poster',
+			summary: '',
+			poster: {
+				kind: 'IMAGE',
+				status: 'READY',
+				isPublic: false,
+				storageKey: 'private.webp',
+			},
+			members: [],
+			exhibitionId: 1,
+		}]);
+
+		const result = await listProjectsByYear(dependencies, '2026');
+
+		expect(result.items[0]?.poster).toBeUndefined();
 	});
 
 	it('preserves archived status on public project detail', async () => {
@@ -166,6 +195,7 @@ describe('public exhibition years', () => {
 				{
 					id: 1,
 					kind: 'VIDEO',
+					isPublic: false,
 					storageKey: 'first.mov',
 					playbackStorageKey: 'first.mp4',
 					mimeType: 'video/quicktime',
@@ -175,6 +205,7 @@ describe('public exhibition years', () => {
 				{
 					id: 2,
 					kind: 'VIDEO',
+					isPublic: false,
 					storageKey: 'second.mp4',
 					playbackStorageKey: null,
 					mimeType: 'video/mp4',
@@ -198,5 +229,53 @@ describe('public exhibition years', () => {
 				mimeType: 'video/mp4',
 			},
 		]);
+	});
+
+	it('only serializes explicitly public project images and posters', async () => {
+		mocks.findPublishedProjectById.mockResolvedValue({
+			id: 10,
+			slug: 'mixed-visibility-images',
+			title: 'Mixed Visibility Images',
+			summary: '',
+			description: '',
+			isIncomplete: false,
+			status: 'PUBLISHED',
+			exhibition: { year: 2026 },
+			members: [],
+			assets: [
+				{
+					id: 1,
+					kind: 'IMAGE',
+					isPublic: false,
+					storageKey: 'private-image.webp',
+					mimeType: 'image/webp',
+				},
+				{
+					id: 2,
+					kind: 'POSTER',
+					isPublic: true,
+					storageKey: 'public-image.webp',
+					mimeType: 'image/webp',
+				},
+			],
+			poster: {
+				kind: 'IMAGE',
+				status: 'READY',
+				isPublic: false,
+				storageKey: 'private-poster.webp',
+			},
+		});
+
+		const result = await getProjectDetail(dependencies, '10');
+
+		expect(result.poster).toBeUndefined();
+		expect(result.images).toEqual([{
+			id: 2,
+			kind: 'POSTER',
+			image: {
+				original: { url: 'https://api.example.com/api/public/images/public-image.webp' },
+				renditions: [],
+			},
+		}]);
 	});
 });

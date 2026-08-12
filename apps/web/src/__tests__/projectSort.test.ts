@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { PublicProjectCard } from '../contracts';
 import { sortProjectsWithPosterFirst } from '../lib/utils';
 
-function project(id: number, posterUrl?: string): PublicProjectCard {
+function project(id: number, poster?: PublicProjectCard['poster']): PublicProjectCard {
 	return {
 		id,
 		slug: `project-${id}`,
 		title: `Project ${id}`,
-		posterUrl,
+		poster,
 		members: [],
 	};
 }
@@ -16,9 +16,9 @@ describe('sortProjectsWithPosterFirst', () => {
 	it('moves projects without posters behind projects with posters', () => {
 		const sorted = sortProjectsWithPosterFirst([
 			project(1),
-			project(2, '/poster-2.webp'),
+			project(2, { original: { url: 'https://example.test/poster-2.webp' }, renditions: [] }),
 			project(3),
-			project(4, '/poster-4.webp'),
+			project(4, { original: { url: 'https://example.test/poster-4.webp' }, renditions: [] }),
 		]);
 
 		expect(sorted.map((p) => p.id)).toEqual([2, 4, 1, 3]);
@@ -26,8 +26,8 @@ describe('sortProjectsWithPosterFirst', () => {
 
 	it('keeps the original order within the same poster group', () => {
 		const sorted = sortProjectsWithPosterFirst([
-			project(1, '/poster-1.webp'),
-			project(2, '/poster-2.webp'),
+			project(1, { original: { url: 'https://example.test/poster-1.webp' }, renditions: [] }),
+			project(2, { original: { url: 'https://example.test/poster-2.webp' }, renditions: [] }),
 			project(3),
 			project(4),
 		]);

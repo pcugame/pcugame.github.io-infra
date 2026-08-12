@@ -91,6 +91,8 @@ export interface ObjectStorage {
 	head(bucket: string, key: string, request?: StorageRequestOptions): Promise<{
 		size: number;
 		contentType: string;
+		cacheControl?: string;
+		etag?: string;
 		lastModified?: Date;
 	} | null>;
 	readRange(

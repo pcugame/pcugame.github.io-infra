@@ -44,10 +44,34 @@ import {
 	PublicProjectDetailResponseSchema,
 	PublicYearListResponseSchema,
 	PublicYearProjectsResponseSchema,
+	ProjectAssetUploadResponseSchema,
+	ResponsiveImageSchema,
 	SiteSettingsDataSchema,
 	SubmitProjectResponseSchema,
 	apiSuccessSchema,
 } from './response-schemas.js';
+
+const responsiveImage = {
+	original: {
+		url: 'https://api.example.test/api/public/images/original.webp',
+		width: 1200,
+		height: 1680,
+	},
+	renditions: [
+		{
+			profile: 'CARD_480' as const,
+			url: 'https://api.example.test/api/public/images/card.webp',
+			width: 480,
+			height: 672,
+		},
+		{
+			profile: 'DISPLAY_960' as const,
+			url: 'https://api.example.test/api/public/images/display.webp',
+			width: 960,
+			height: 1344,
+		},
+	],
+};
 
 type IsAssignable<A, B> = A extends B ? true : false;
 
@@ -103,7 +127,7 @@ describe('response runtime schemas', () => {
 				year: 2026,
 				title: '2026 전시',
 				projectCount: 0,
-				posterUrl: 'https://api.example.test/poster',
+				poster: responsiveImage,
 			}],
 		}).items).toHaveLength(1);
 
@@ -149,6 +173,20 @@ describe('response runtime schemas', () => {
 			images: [],
 			status: 'PUBLISHED',
 		}).githubUrl).toBe('github.com/legacy/project');
+
+		expect(ResponsiveImageSchema.parse({
+			original: { url: 'https://api.example.test/api/public/images/legacy.webp' },
+			renditions: [],
+		})).toEqual({
+			original: { url: 'https://api.example.test/api/public/images/legacy.webp' },
+			renditions: [],
+		});
+
+		expect(ProjectAssetUploadResponseSchema.parse({ assetId: 7 })).toEqual({ assetId: 7 });
+		expect(ProjectAssetUploadResponseSchema.safeParse({
+			assetId: 7,
+			url: 'https://api.example.test/api/public/images/uploaded.webp',
+		}).success).toBe(false);
 
 		expect(ExportStatusResponseSchema.parse({
 			running: true,
@@ -211,6 +249,61 @@ describe('response runtime schemas', () => {
 				code: 'projects.0.year: invalid',
 				message: 'Validation failed',
 			},
+		}).success).toBe(false);
+	});
+
+	it('uses one responsive image schema across public and admin image responses', () => {
+		const adminDetail = AdminProjectDetailSchema.parse({
+			id: 1,
+			title: 'Responsive project',
+			slug: 'responsive-project',
+			year: 2026,
+			platforms: ['WEB'],
+			isIncomplete: false,
+			video: null,
+			videos: [],
+			status: 'PUBLISHED',
+			sortOrder: 0,
+			poster: responsiveImage,
+			members: [],
+			assets: [
+				{
+					id: 10,
+					kind: 'IMAGE',
+					image: responsiveImage,
+					originalName: 'image.webp',
+					size: 123,
+				},
+				{
+					id: 11,
+					kind: 'VIDEO',
+					url: 'https://api.example.test/api/assets/protected/video.mp4',
+					originalName: 'video.mp4',
+					size: 456,
+				},
+			],
+		});
+
+		expect(adminDetail.assets[0]).toMatchObject({ kind: 'IMAGE', image: responsiveImage });
+		expect(adminDetail.assets[1]).toMatchObject({ kind: 'VIDEO' });
+		expect(AdminProjectDetailSchema.safeParse({
+			...adminDetail,
+			assets: [{
+				id: 10,
+				kind: 'IMAGE',
+				url: responsiveImage.original.url,
+				originalName: 'legacy.webp',
+				size: 1,
+			}],
+		}).success).toBe(false);
+		expect(ResponsiveImageSchema.safeParse({
+			original: { url: responsiveImage.original.url },
+			renditions: [{
+				profile: 'UNKNOWN',
+				url: responsiveImage.renditions[0]?.url,
+				width: 480,
+				height: 672,
+			}],
 		}).success).toBe(false);
 	});
 

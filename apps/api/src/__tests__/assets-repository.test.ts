@@ -59,6 +59,10 @@ describe('assets repository', () => {
 					playbackStorageKey: null,
 				}]),
 			asset: { updateMany },
+			imageRendition: {
+				findMany: vi.fn().mockResolvedValue([]),
+				deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+			},
 			gameUploadSession: { updateMany: sessionUpdateMany },
 			orphanObject: {
 				upsert: orphanUpsert,

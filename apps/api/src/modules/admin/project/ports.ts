@@ -4,6 +4,7 @@ import type {
 	ProjectStatus,
 } from '@pcu/contracts';
 import type { PosterCandidate } from '../../../shared/poster-validation.js';
+import type { SavedImageRendition } from '../../../application/upload-ports.js';
 import type { SerializableProject } from './serializer.js';
 
 export interface ExhibitionUploadRecord {
@@ -20,6 +21,9 @@ export interface AssetWriteData {
 	mimeType: string;
 	playbackMimeType?: string;
 	sizeBytes: bigint;
+	width?: number;
+	height?: number;
+	renditions?: SavedImageRendition[];
 	playbackSizeBytes?: bigint;
 	playbackStatus?: AssetPlaybackStatus;
 	playbackError?: string;
@@ -59,6 +63,9 @@ export interface SubmitProjectWriteData {
 		mimeType: string;
 		playbackMimeType?: string;
 		sizeBytes: number;
+		width?: number;
+		height?: number;
+		renditions?: SavedImageRendition[];
 		playbackSizeBytes?: number;
 		playbackStatus?: AssetPlaybackStatus;
 		playbackError?: string;
@@ -102,6 +109,10 @@ export interface DeletedAssetRecord {
 	kind: AssetKind;
 	storageKey: string;
 	playbackStorageKey: string | null;
+	imageRenditions?: Array<{
+		storageKey: string;
+		sourceStorageKey: string;
+	}>;
 }
 
 export interface DeletionOutboxConfig {

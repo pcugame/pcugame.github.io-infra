@@ -14,7 +14,6 @@ export interface ProjectAssetServiceDependencies {
 	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits | Promise<UploadLimits>;
 	uploadSlots: { acquire(): void; release(): void };
 	uploadCoordinator: SingleAssetUploadCoordinator;
-	assetUrl(storageKey: string, kind: AssetKind): string;
 	bucketForKind(kind: AssetKind): string;
 	wakeDeletionWorker(): void;
 	logger?: {
@@ -41,16 +40,16 @@ export interface ProjectAssetServiceDependencies {
 	};
 }
 
-function storedAssetResult(value: unknown): { assetId: number; url: string } | null {
+function storedAssetResult(value: unknown): { assetId: number } | null {
 	if (!value || typeof value !== 'object') return null;
 	const result = value as Record<string, unknown>;
-	return typeof result.assetId === 'number' && typeof result.url === 'string'
-		? { assetId: result.assetId, url: result.url }
+	return typeof result.assetId === 'number'
+		? { assetId: result.assetId }
 		: null;
 }
 
 class AssetIdempotencyReplay extends Error {
-	constructor(readonly result: { assetId: number; url: string }) {
+	constructor(readonly result: { assetId: number }) {
 		super('Asset idempotency replay');
 		this.name = 'AssetIdempotencyReplay';
 	}
@@ -75,7 +74,7 @@ export async function addAssetToProject(
 	const limits = await deps.uploadLimits(input.actor.role);
 	let upload: ProcessedUpload | null = null;
 	let uploadPersisted = false;
-	let response: { assetId: number; url: string } | undefined;
+	let response: { assetId: number } | undefined;
 	let failure: unknown;
 	let operation: { operationId: string; ownerToken: string } | undefined;
 	let operationHeartbeat: NodeJS.Timeout | undefined;
@@ -147,6 +146,9 @@ export async function addAssetToProject(
 				mimeType: savedFile.mimeType,
 				playbackMimeType: savedFile.playbackMimeType ?? '',
 				sizeBytes: BigInt(savedFile.sizeBytes),
+				width: savedFile.width,
+				height: savedFile.height,
+				renditions: savedFile.renditions,
 				playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
 				playbackStatus: savedFile.playbackStatus,
 				playbackError: savedFile.playbackError,
@@ -155,10 +157,7 @@ export async function addAssetToProject(
 				...(operation ? {
 					idempotency: {
 						...operation,
-						resultForAsset: (createdAssetId: number) => ({
-							assetId: createdAssetId,
-							url: deps.assetUrl(savedFile.storageKey, savedFile.kind),
-						}),
+						resultForAsset: (createdAssetId: number) => ({ assetId: createdAssetId }),
 					},
 				} : {}),
 			}, {
@@ -180,6 +179,9 @@ export async function addAssetToProject(
 				mimeType: savedFile.mimeType,
 				playbackMimeType: savedFile.playbackMimeType ?? '',
 				sizeBytes: BigInt(savedFile.sizeBytes),
+				width: savedFile.width,
+				height: savedFile.height,
+				renditions: savedFile.renditions,
 				playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
 				playbackStatus: savedFile.playbackStatus,
 				playbackError: savedFile.playbackError,
@@ -188,17 +190,14 @@ export async function addAssetToProject(
 				...(operation ? {
 					idempotency: {
 						...operation,
-						resultForAsset: (createdAssetId: number) => ({
-							assetId: createdAssetId,
-							url: deps.assetUrl(savedFile.storageKey, savedFile.kind),
-						}),
+						resultForAsset: (createdAssetId: number) => ({ assetId: createdAssetId }),
 					},
 				} : {}),
 			});
 			assetId = asset.id;
 			uploadPersisted = true;
 		}
-		response = { assetId, url: deps.assetUrl(savedFile.storageKey, savedFile.kind) };
+		response = { assetId };
 		stopOperationHeartbeat();
 
 		if (oldStorageKey || oldPlaybackStorageKey) deps.wakeDeletionWorker();

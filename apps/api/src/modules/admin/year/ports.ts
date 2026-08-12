@@ -1,4 +1,13 @@
 import type { CreateExhibitionRequest } from '@pcu/contracts';
+import type { SavedImageRendition } from '../../../application/upload-ports.js';
+
+export interface ExhibitionImageRenditionRecord {
+	profile: 'CARD_480' | 'DISPLAY_960';
+	storageKey: string;
+	sourceStorageKey: string;
+	width: number;
+	height: number;
+}
 
 export interface ExhibitionRecord {
 	id: number;
@@ -9,11 +18,20 @@ export interface ExhibitionRecord {
 	posterStorageKey: string | null;
 	posterOriginalName: string;
 	posterSizeBytes: bigint;
+	posterWidth?: number | null;
+	posterHeight?: number | null;
+	imageRenditions?: ExhibitionImageRenditionRecord[];
 	_count: { projects: number };
 }
 
 export interface PosterDeletionOutboxConfig {
 	bucket: string;
+	reason: string;
+}
+
+export interface ExhibitionDeletionOutboxConfig {
+	publicBucket: string;
+	protectedBucket: string;
 	reason: string;
 }
 
@@ -29,8 +47,8 @@ export interface ExhibitionRepository {
 	createExhibition(data: CreateExhibitionRequest): Promise<{ id: number; year: number }>;
 	deleteExhibition(
 		id: number,
-		outbox: PosterDeletionOutboxConfig,
-	): Promise<{ posterStorageKey: string | null } | null>;
+		outbox: ExhibitionDeletionOutboxConfig,
+	): Promise<{ posterStorageKey: string | null; cleanupQueued?: boolean } | null>;
 	updateExhibition(id: number, patch: {
 		title?: string;
 		isUploadEnabled?: boolean;
@@ -41,6 +59,9 @@ export interface ExhibitionRepository {
 		originalName: string;
 		mimeType: string;
 		sizeBytes: bigint;
+		width?: number;
+		height?: number;
+		renditions?: SavedImageRendition[];
 		uploadIntentIds?: string[];
 	}, outbox: PosterDeletionOutboxConfig): Promise<{ updated: ExhibitionRecord; oldStorageKey: string | null } | null>;
 	clearExhibitionPoster(id: number, outbox: PosterDeletionOutboxConfig): Promise<{

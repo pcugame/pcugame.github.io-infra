@@ -48,6 +48,9 @@ interface ExhibitionRow {
 	posterOriginalName: string;
 	posterMimeType: string;
 	posterSizeBytes: bigint;
+	posterWidth: number | null;
+	posterHeight: number | null;
+	imageRenditions: [];
 	_count: { projects: number };
 }
 
@@ -68,6 +71,9 @@ function repositoryHarness() {
 			posterOriginalName: 'old.webp',
 			posterMimeType: 'image/webp',
 			posterSizeBytes: 10n,
+			posterWidth: null,
+			posterHeight: null,
+			imageRenditions: [],
 			_count: { projects: 0 },
 		},
 	]]);
@@ -102,6 +108,9 @@ function repositoryHarness() {
 				posterOriginalName: '',
 				posterMimeType: '',
 				posterSizeBytes: 0n,
+				posterWidth: null,
+				posterHeight: null,
+				imageRenditions: [],
 				_count: { projects: 0 },
 			};
 			rows.set(row.id, row);
@@ -113,13 +122,23 @@ function repositoryHarness() {
 			Object.assign(row, data);
 			return row;
 		}),
-		delete: vi.fn(async (id: number, outbox: { bucket: string; reason: string }) => {
+		delete: vi.fn(async (id: number, outbox: {
+			publicBucket: string;
+			protectedBucket: string;
+			reason: string;
+		}) => {
 			failCommitIfScripted();
 			const row = rows.get(id);
 			if (!row) return null;
-			if (row.posterStorageKey) recordOutbox(outbox.bucket, row.posterStorageKey, outbox.reason);
+			if (row.posterStorageKey) {
+				recordOutbox(
+					outbox.publicBucket,
+					row.posterStorageKey,
+					`${outbox.reason}-poster`,
+				);
+			}
 			rows.delete(id);
-			return row;
+			return { ...row, cleanupQueued: !!row.posterStorageKey };
 		}),
 		replacePoster: vi.fn(async (
 			id: number,

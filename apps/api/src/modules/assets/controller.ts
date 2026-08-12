@@ -11,17 +11,6 @@ export interface AssetsControllerDependencies {
 /** Create a pure asset route plugin. Registration performs no warmup or I/O. */
 export function createAssetsController(deps: AssetsControllerDependencies): FastifyPluginAsync {
 	return async function assetsController(app): Promise<void> {
-		/** GET /api/assets/public/:storageKey — stream public asset (no auth) */
-		app.get<{ Params: { storageKey: string } }>(
-			'/assets/public/:storageKey',
-			async (request, reply) => {
-				return applyResponseDescriptor(
-					reply,
-					await deps.service.streamPublicAsset(request.params.storageKey),
-				);
-			},
-		);
-
 		/** GET /api/assets/protected/:storageKey — stream protected asset (rate-limited) */
 		app.get<{ Params: { storageKey: string } }>(
 			'/assets/protected/:storageKey',

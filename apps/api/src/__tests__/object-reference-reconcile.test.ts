@@ -43,6 +43,7 @@ function referenceClient(input: { malformedWebgl?: boolean } = {}) {
 				{ id: 3, posterStorageKey: 'posters/exhibition.png' },
 			]),
 		},
+		imageRendition: { findMany: vi.fn().mockResolvedValue([]) },
 		project: {
 			findMany: vi.fn().mockResolvedValue([{
 				id: 7,
@@ -137,6 +138,7 @@ function emptyReferenceModels() {
 	return {
 		asset: { findMany: vi.fn().mockResolvedValue([]) },
 		exhibition: { findMany: vi.fn().mockResolvedValue([]) },
+		imageRendition: { findMany: vi.fn().mockResolvedValue([]) },
 		project: { findMany: vi.fn().mockResolvedValue([]) },
 		gameUploadSession: {
 			findMany: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]),

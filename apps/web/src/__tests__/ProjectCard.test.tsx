@@ -28,9 +28,34 @@ describe('ProjectCard', () => {
 		expect(onSelect).toHaveBeenCalledWith('test-game');
 	});
 
-	it('renders a placeholder when posterUrl is missing', () => {
+	it('renders a placeholder when the poster is missing', () => {
 		render(<ProjectCard project={project({ title: 'No Poster' })} year={2026} />);
 
 		expect(screen.getByText('N')).toBeTruthy();
+	});
+
+	it('renders responsive poster candidates with card loading semantics', () => {
+		render(<ProjectCard project={project({
+			poster: {
+				original: {
+					url: 'https://images.test/original.webp',
+					width: 1200,
+					height: 1680,
+				},
+				renditions: [{
+					profile: 'CARD_480',
+					url: 'https://images.test/card.webp',
+					width: 480,
+					height: 672,
+				}],
+			},
+		})} year={2026} />);
+
+		const poster = screen.getByRole('img', { name: 'Test Game 포스터' });
+		expect(poster.getAttribute('src')).toBe('https://images.test/original.webp');
+		expect(poster.getAttribute('srcset')).toContain('https://images.test/card.webp 480w');
+		expect(poster.getAttribute('sizes')).toContain('280px');
+		expect(poster.getAttribute('loading')).toBe('lazy');
+		expect(poster.getAttribute('decoding')).toBe('async');
 	});
 });

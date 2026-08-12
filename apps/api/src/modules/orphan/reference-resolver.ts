@@ -161,12 +161,12 @@ export function inventoryReferencesTarget(
 export async function collectObjectReferences(
 	client: Pick<
 		PrismaClient,
-		'asset' | 'exhibition' | 'project' | 'gameUploadSession' | 'uploadIntent'
+		'asset' | 'exhibition' | 'imageRendition' | 'project' | 'gameUploadSession' | 'uploadIntent'
 	>,
 	buckets: ObjectReferenceBuckets,
 	logger: ObjectReferenceLogger,
 ): Promise<ObjectReferenceInventory> {
-	const [assets, exhibitions, projects, completedSessions, activeSessions, intents] = await Promise.all([
+	const [assets, exhibitions, renditions, projects, completedSessions, activeSessions, intents] = await Promise.all([
 		client.asset.findMany({
 			where: { status: { not: 'DELETED' } },
 			select: {
@@ -179,6 +179,17 @@ export async function collectObjectReferences(
 		client.exhibition.findMany({
 			where: { posterStorageKey: { not: null } },
 			select: { id: true, posterStorageKey: true },
+		}),
+		client.imageRendition.findMany({
+			select: {
+				id: true,
+				storageKey: true,
+				sourceStorageKey: true,
+				assetId: true,
+				exhibitionId: true,
+				asset: { select: { storageKey: true, status: true } },
+				exhibition: { select: { posterStorageKey: true } },
+			},
 		}),
 		client.project.findMany({
 			where: { webglEntryKey: { not: '' } },
@@ -223,6 +234,39 @@ export async function collectObjectReferences(
 			targetKind: 'EXACT',
 			key: exhibition.posterStorageKey,
 			source: `exhibition:${exhibition.id}:poster`,
+		});
+	}
+	for (const rendition of renditions) {
+		const ownerSource = rendition.assetId !== null
+			? rendition.asset?.storageKey ?? null
+			: rendition.exhibition?.posterStorageKey ?? null;
+		const ownerIsCurrent = rendition.assetId !== null
+			? rendition.asset?.status !== 'DELETED'
+			: rendition.exhibitionId !== null && rendition.exhibition !== null;
+		const sourceMatches = ownerSource === rendition.sourceStorageKey;
+		const malformed = !ownerIsCurrent || !sourceMatches;
+		if (malformed) {
+			// A bad derivative pointer can protect only its own exact object. It must
+			// never disable cleanup for the rest of the public bucket.
+			logger.error(
+				{
+					renditionId: rendition.id,
+					storageKey: rendition.storageKey,
+					sourceStorageKey: rendition.sourceStorageKey,
+					ownerSourceStorageKey: ownerSource,
+					assetId: rendition.assetId,
+					exhibitionId: rendition.exhibitionId,
+				},
+				'Mismatched image rendition pointer encountered; exact object deletion is disabled',
+			);
+		}
+		references.push({
+			bucket: buckets.publicBucket,
+			targetKind: 'EXACT',
+			key: rendition.storageKey,
+			source: malformed
+				? `image-rendition:${rendition.id}:mismatched`
+				: `image-rendition:${rendition.id}:current`,
 		});
 	}
 

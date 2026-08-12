@@ -426,7 +426,7 @@ async function seedIntegrationData() {
 
   console.log('통합 테스트 사용자:', student.email, operator.email, admin.email);
   console.log('통합 테스트 전시:', uploadOpen.id, uploadClosed.id, emptyExhibition.id);
-  console.log('통합 테스트 fixture asset: /api/assets/public/integration-poster.png');
+  console.log('통합 테스트 fixture asset storage key: integration-poster.png');
 }
 
 // ── JSON 파일에서 실제 데이터 임포트 ──────────────────

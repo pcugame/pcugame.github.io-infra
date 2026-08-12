@@ -1,9 +1,14 @@
 import { useState, useRef } from 'react';
-import type { ProjectVideo as VideoInfo } from '@pcu/contracts';
+import type {
+	ProjectVideo as VideoInfo,
+	ResponsiveImage as ResponsiveImageData,
+} from '@pcu/contracts';
+import { pickRendition } from '../../lib/responsive-image';
+import { ResponsiveImage } from '../common';
 
 interface Props {
 	video: VideoInfo | null;
-	posterUrl?: string;
+	poster?: ResponsiveImageData;
 	title: string;
 }
 
@@ -12,19 +17,25 @@ interface Props {
  * 영상이 없으면 포스터를 표시하고, 포스터도 없으면 null 반환.
  * 재생 오류 시 자연스러운 fallback UI를 보여준다.
  */
-export function ProjectVideo({ video, posterUrl, title }: Props) {
+export function ProjectVideo({ video, poster, title }: Props) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const [hasError, setHasError] = useState(false);
+	const videoPosterSrc = poster ? pickRendition(poster, 960).url : undefined;
 
 	// 영상도 포스터도 없으면 렌더링하지 않음
-	if (!video && !posterUrl) return null;
+	if (!video && !videoPosterSrc) return null;
 
 	// 영상 로드 실패 또는 영상 없음 → 포스터 fallback
 	if (!video || hasError) {
-		if (!posterUrl) return null;
+		if (!poster) return null;
 		return (
 			<div className="project-video project-video--poster">
-				<img src={posterUrl} alt={`${title} 포스터`} />
+				<ResponsiveImage
+					image={poster}
+					alt={`${title} 포스터`}
+					sizes="(max-width: 768px) 100vw, 960px"
+					decoding="async"
+				/>
 				{hasError && (
 					<p className="project-video__note">영상을 불러올 수 없습니다.</p>
 				)}
@@ -38,7 +49,7 @@ export function ProjectVideo({ video, posterUrl, title }: Props) {
 				ref={videoRef}
 				controls
 				preload="metadata"
-				poster={posterUrl}
+				poster={videoPosterSrc}
 				onError={() => setHasError(true)}
 			>
 				<source src={video.url} type={video.mimeType} />

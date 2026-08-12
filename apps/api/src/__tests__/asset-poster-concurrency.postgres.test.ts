@@ -163,7 +163,6 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			});
 		};
 		const service = createAssetsService({
-			publicBucket: bucket,
 			protectedBucket: bucket,
 			presign: vi.fn(),
 			bucketForKind: () => bucket,
@@ -242,7 +241,6 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 					};
 				},
 			},
-			assetUrl: (key) => `/assets/protected/${key}`,
 			bucketForKind: () => bucket,
 			wakeDeletionWorker,
 		});
@@ -545,11 +543,19 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 				await waitForDatabaseLock('ticket005-operation-b');
 				await barrier.release();
 				released = true;
-				await expect(winnerResult).resolves.toMatchObject({ url: `/assets/protected/${winnerKey}` });
+				const [winnerOutcome, loserOutcome] = await Promise.allSettled([
+					winnerResult,
+					loserResult,
+				]);
+				if (winnerOutcome.status !== 'fulfilled') throw winnerOutcome.reason;
+				expect(winnerOutcome.value.assetId).toBeGreaterThan(0);
+				expect(loserOutcome).toMatchObject({
+					status: 'rejected',
+					reason: { statusCode: 409, code: 'CONFLICT' },
+				});
 			} finally {
 				if (!released) await barrier.release();
 			}
-			await expect(loserResult).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
 			await Promise.all([winner.drainDeletion(), loser.drainDeletion()]);
 			expect(loser.rollback).toHaveBeenCalledOnce();
 			expect(objects).toEqual(new Set([winnerKey]));

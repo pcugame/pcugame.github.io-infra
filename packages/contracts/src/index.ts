@@ -1,6 +1,7 @@
 // Shared API contract types and runtime transport schemas between apps/api and apps/web.
 
 export type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus, UserRole } from './enums.js';
+export type { ResponsiveImage } from './responsive-image.js';
 
 export {
 	attachmentContentDisposition,

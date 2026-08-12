@@ -11,6 +11,7 @@ import {
 	findProjectDetail,
 	buildAdminProjectItems,
 	buildAdminProjectDetail,
+	mockResponsiveImage,
 } from './data';
 
 type MockRequestOptions = {
@@ -167,7 +168,9 @@ const routes: MockRoute[] = [
 			const item = MOCK_ADMIN_YEARS.find((y) => y.id === id) ?? MOCK_ADMIN_YEARS[0];
 			return {
 				...item,
-				posterUrl: item.posterUrl ?? 'https://placehold.co/540x960/0f172a/f8fafc?text=Poster',
+				poster: item.poster ?? mockResponsiveImage(
+					'https://placehold.co/540x960/0f172a/f8fafc?text=Poster',
+				),
 				posterOriginalName: 'poster.webp',
 				posterSize: 245760,
 			};
@@ -347,7 +350,7 @@ const routes: MockRoute[] = [
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)\/assets$/,
-		handler: () => ({ assetId: 900, url: 'https://placehold.co/400x300?text=New+Asset' }),
+		handler: () => ({ assetId: 900 }),
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)\/poster$/,

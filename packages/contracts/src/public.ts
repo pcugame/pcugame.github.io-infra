@@ -1,4 +1,5 @@
 import type { AssetPlaybackStatus, Platform } from './enums.js';
+import type { ResponsiveImage } from './responsive-image.js';
 
 /** GET /api/public/years */
 export type PublicYearItem = {
@@ -6,7 +7,7 @@ export type PublicYearItem = {
 	year: number;
 	title?: string;
 	projectCount: number;
-	posterUrl?: string;
+	poster?: ResponsiveImage;
 };
 
 export type PublicYearListResponse = {
@@ -19,7 +20,7 @@ export type PublicProjectCard = {
 	slug: string;
 	title: string;
 	summary?: string;
-	posterUrl?: string;
+	poster?: ResponsiveImage;
 	members: { name: string; studentId: string }[];
 	exhibitionId?: number;
 	exhibitionTitle?: string;
@@ -56,8 +57,8 @@ export type ProjectVideo = {
 /** GET /api/public/projects/:idOrSlug */
 export type PublicProjectImage = {
 	id: number;
-	url: string;
 	kind: 'IMAGE' | 'POSTER';
+	image: ResponsiveImage;
 };
 
 export type PublicProjectMember = {
@@ -80,7 +81,7 @@ export type PublicProjectDetailResponse = {
 	videos: ProjectVideo[];
 	members: PublicProjectMember[];
 	images: PublicProjectImage[];
-	posterUrl?: string;
+	poster?: ResponsiveImage;
 	gameDownloadUrl?: string;
 	webglUrl?: string;
 	status: 'PUBLISHED' | 'ARCHIVED';

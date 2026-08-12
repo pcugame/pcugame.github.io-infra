@@ -398,7 +398,6 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		});
 		const wakeDeletionWorker = vi.fn();
 		const createCaller = () => createAssetsService({
-			publicBucket: 'public',
 			protectedBucket: 'protected',
 			presign: vi.fn(),
 			bucketForKind: () => 'protected',

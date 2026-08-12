@@ -1,9 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
-import { LoadingSpinner, ErrorMessage } from '../components/common';
+import { LoadingSpinner, ErrorMessage, ResponsiveImage } from '../components/common';
 import { useMe } from '../features/auth';
 import type { PublicYearItem } from '../contracts';
 
@@ -104,16 +103,15 @@ function ExhibitionGrid({ exhibitions }: { exhibitions: PublicYearItem[] }) {
 }
 
 function ExhibitionPoster({ ex }: { ex: PublicYearItem }) {
-	const [failed, setFailed] = useState(false);
-	const showImage = ex.posterUrl && !failed;
-
 	return (
 		<div className="home-year-card__poster">
-			{showImage ? (
-				<img
-					src={ex.posterUrl}
+			{ex.poster ? (
+				<ResponsiveImage
+					image={ex.poster}
 					alt={`${ex.title ?? ex.year} 전시회 포스터`}
-					onError={() => setFailed(true)}
+					sizes="(max-width: 640px) 88vw, (max-width: 1100px) 44vw, 420px"
+					loading="lazy"
+					decoding="async"
 				/>
 			) : (
 				<>

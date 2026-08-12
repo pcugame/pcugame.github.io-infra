@@ -1,5 +1,6 @@
 import type { AssetKind } from '../../../generated/prisma/client.js';
 import type { UploadObjectOptions } from '../../../application/ports.js';
+import { PUBLIC_IMAGE_CACHE_CONTROL } from '../../../shared/responsive-image.js';
 
 const DOWNLOAD_ONLY_OPTIONS: UploadObjectOptions = {
 	contentType: 'application/octet-stream',
@@ -7,16 +8,17 @@ const DOWNLOAD_ONLY_OPTIONS: UploadObjectOptions = {
 };
 
 const PUBLIC_IMAGE_OPTIONS: UploadObjectOptions = {
-	cacheControl: 'public, max-age=31536000, immutable',
+	cacheControl: PUBLIC_IMAGE_CACHE_CONTROL,
 };
 
 export function storageOptionsForAsset(
 	kind: AssetKind,
-	role: 'original' | 'playback' = 'original',
+	role: 'original' | 'playback' | 'rendition' = 'original',
 ): UploadObjectOptions {
 	if (kind === 'GAME') return DOWNLOAD_ONLY_OPTIONS;
 	if (kind === 'VIDEO' && role === 'original') return DOWNLOAD_ONLY_OPTIONS;
-	if ((kind === 'IMAGE' || kind === 'POSTER' || kind === 'THUMBNAIL') && role === 'original') {
+	if ((kind === 'IMAGE' || kind === 'POSTER' || kind === 'THUMBNAIL')
+		&& role !== 'playback') {
 		return PUBLIC_IMAGE_OPTIONS;
 	}
 	return {};

@@ -11,7 +11,10 @@ import { badRequest, payloadTooLarge } from '../../../shared/errors.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import { processImage } from '../../assets/upload/image-processing.js';
 import { processPdf } from '../../assets/upload/pdf-processing.js';
-import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
+import {
+	createProjectUploadPipeline,
+	type ProjectUploadProcessing,
+} from '../project/project-upload.adapter.js';
 import { validatePosterFile } from './poster-file-validation.js';
 import { createPosterByteLimiter } from './poster-upload.policy.js';
 
@@ -38,11 +41,6 @@ export interface ExhibitionPosterUploadDependencies {
 	};
 }
 
-function storageKey(id: string, extension: string): string {
-	const safeExtension = extension.replace(/[^a-zA-Z0-9]/g, '');
-	return `${id}.${safeExtension}`;
-}
-
 async function readHeader(
 	fileSystem: FileSystem,
 	filePath: string,
@@ -65,56 +63,57 @@ async function readHeader(
 	return Buffer.concat(chunks, collected);
 }
 
+function createPosterProcessing(
+	deps: Pick<ExhibitionPosterUploadDependencies, 'fileSystem' | 'logger'>,
+): ProjectUploadProcessing {
+	return {
+		async validate(filePath, kind) {
+			if (kind !== 'POSTER') throw new Error('Exhibition upload only accepts POSTER');
+			const stat = await deps.fileSystem.stat(filePath);
+			return validatePosterFile({
+				sizeBytes: stat.size,
+				header: await readHeader(deps.fileSystem, filePath),
+			});
+		},
+		processImage: (input) => processImage(input, deps.fileSystem),
+		processPdf: (input) => processPdf(input, deps.logger, deps.fileSystem),
+		processVideo: async () => {
+			throw new Error('Exhibition upload does not process video');
+		},
+	};
+}
+
 /**
- * Context-owned poster upload adapter. Temp-file and object upload work happens
- * before the repository transaction. `rollback` guarantees that an unpersisted
- * object is either deleted or represented by ticket-003's durable orphan row.
- * Cleanup intent is registered before upload because an object store can persist
- * a PUT and still report an ambiguous transport failure. ObjectStorage.delete
- * is therefore required to treat a missing key as an idempotent success.
+ * Collect the exhibition-specific multipart shape, then delegate processing,
+ * immutable key creation, intent tracking, PUTs, rollback, and temp ownership
+ * to the same upload pipeline used by project images.
  */
 export function createExhibitionPosterUploadCoordinator(
 	deps: ExhibitionPosterUploadDependencies,
 ): PosterUploadCoordinator {
 	return {
 		async start(parts, limits, owner = {}) {
-			const temporaryPaths = new Set<string>();
-			let committedKey: string | null = null;
-			let intentId: string | undefined;
-
-			async function cleanupTemporaryFiles(): Promise<void> {
-				const failures: unknown[] = [];
-				for (const temporaryPath of [...temporaryPaths]) {
+			const uploadPipeline = createProjectUploadPipeline({
+				storage: deps.storage,
+				fileSystem: deps.fileSystem,
+				ids: deps.ids,
+				logger: deps.logger,
+				processing: createPosterProcessing(deps),
+				purposePrefix: 'exhibition',
+				bucketForKind: () => deps.bucket,
+				deleteUnpersistedObject: async (_bucket, key) => {
 					try {
-						await deps.fileSystem.remove(temporaryPath);
-						temporaryPaths.delete(temporaryPath);
+						await deps.deleteUnpersistedObject(key);
 					} catch (error) {
-						failures.push(error);
-						deps.logger.warn(
-							{ error, temporaryPath },
-							'Exhibition poster temp-file cleanup failed',
+						throw new AggregateError(
+							[error],
+							'Object deletion and durable orphan recording both failed',
 						);
 					}
-				}
-				if (failures.length > 0) {
-					throw new AggregateError(
-						failures,
-						'Exhibition poster temp-file cleanup failed',
-					);
-				}
-			}
-
-			async function rollbackCommitted(): Promise<void> {
-				if (!committedKey) return;
-				if (intentId && deps.uploadIntents
-					&& !(await deps.uploadIntents.isUncommitted(intentId))) {
-					committedKey = null;
-					return;
-				}
-				const key = committedKey;
-				await deps.deleteUnpersistedObject(key);
-				committedKey = null;
-			}
+				},
+				...(deps.uploadIntents ? { uploadIntents: deps.uploadIntents } : {}),
+			});
+			uploadPipeline.setOwner?.(owner);
 
 			try {
 				let temporaryPath: string | null = null;
@@ -123,7 +122,9 @@ export function createExhibitionPosterUploadCoordinator(
 
 				for await (const part of parts) {
 					if (part.type !== 'file') continue;
-					if (part.fieldname !== 'poster') throw badRequest('Multipart field must be poster');
+					if (part.fieldname !== 'poster') {
+						throw badRequest('Multipart field must be poster');
+					}
 					fileCount += 1;
 					if (fileCount > 1) throw badRequest('Only one poster file is allowed');
 					assertValidUploadFilename(part.filename);
@@ -132,7 +133,7 @@ export function createExhibitionPosterUploadCoordinator(
 						deps.fileSystem.temporaryDirectory(),
 						`exhibition-poster-${deps.ids.next()}`,
 					);
-					temporaryPaths.add(nextPath);
+					uploadPipeline.trackTempFile(nextPath);
 					await streamPipeline(
 						part.file,
 						createPosterByteLimiter(limits, part.filename),
@@ -149,80 +150,26 @@ export function createExhibitionPosterUploadCoordinator(
 					throw payloadTooLarge(`Total upload size exceeds ${limitMB}MB limit`);
 				}
 
-				const validated = validatePosterFile({
-					sizeBytes: sourceStat.size,
-					header: await readHeader(deps.fileSystem, temporaryPath),
-				});
-				const processed = validated.mimeType === 'application/pdf'
-					? await processPdf(
-						{ tmpPath: temporaryPath },
-						deps.logger,
-						deps.fileSystem,
-					)
-					: await processImage({
-						tmpPath: temporaryPath,
-						mimeType: validated.mimeType,
-						ext: validated.ext,
-						sizeBytes: validated.sizeBytes,
-					}, deps.fileSystem);
-				if (processed.tmpPath !== temporaryPath) temporaryPaths.add(processed.tmpPath);
-
-				const finalStat = await deps.fileSystem.stat(processed.tmpPath);
-				const key = storageKey(deps.ids.next(), processed.ext);
-				committedKey = key;
-				intentId = await deps.uploadIntents?.prepare({
-					bucket: deps.bucket,
-					storageKey: key,
-					purpose: 'exhibition-poster',
-					...(owner.operationId ? { ownerOperationId: owner.operationId } : {}),
-					...(owner.actorId !== undefined ? { ownerActorId: owner.actorId } : {}),
-					...(owner.projectId !== undefined ? { ownerProjectId: owner.projectId } : {}),
-					...(owner.exhibitionId !== undefined
-						? { ownerExhibitionId: owner.exhibitionId }
-						: {}),
-				});
-				try {
-					await deps.storage.upload(
-						deps.bucket,
-						key,
-						deps.fileSystem.createReadStream(processed.tmpPath),
-						processed.mimeType,
-						finalStat.size,
-						storageOptionsForAsset('POSTER'),
-					);
-				} catch (error) {
-					if (intentId) await deps.uploadIntents?.recordAmbiguousError(intentId, error).catch(
-						(intentError) => deps.logger.error(
-							{ error: intentError, intentId, storageKey: key },
-							'Failed to annotate ambiguous poster upload intent',
-						),
-					);
-					throw error;
-				}
-				if (intentId) await deps.uploadIntents?.markUploaded(intentId);
-
+				const savedFile = await uploadPipeline.processFile(
+					temporaryPath,
+					'POSTER',
+					originalName,
+				);
 				return {
-					savedFile: {
-						storageKey: key,
-						mimeType: processed.mimeType,
-						sizeBytes: processed.sizeBytes,
-						originalName,
-						kind: 'POSTER',
-						uploadIntentIds: intentId ? [intentId] : [],
-					},
-					rollback: rollbackCommitted,
-					cleanup: cleanupTemporaryFiles,
+					savedFile,
+					rollback: () => uploadPipeline.rollbackCommitted(),
+					cleanup: () => uploadPipeline.cleanupTemp(),
 				};
 			} catch (error) {
 				let rollbackError: unknown;
 				try {
-					await rollbackCommitted();
+					await uploadPipeline.rollbackCommitted();
 				} catch (cleanupError) {
 					rollbackError = cleanupError;
 				}
 				let tempError: unknown;
 				try {
-					await cleanupTemporaryFiles();
+					await uploadPipeline.cleanupTemp();
 				} catch (cleanupError) {
 					tempError = cleanupError;
 				}

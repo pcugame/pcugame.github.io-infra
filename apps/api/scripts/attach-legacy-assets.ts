@@ -22,25 +22,16 @@
  * Requires: DATABASE_URL, S3_* env vars
  */
 
-import type { AssetPlaybackStatus } from '../src/generated/prisma/client.js';
-import type { ObjectStorage } from '../src/application/ports.js';
-import type { Env } from '../src/config/env.js';
-import { readdirSync, statSync, copyFileSync, createReadStream, mkdtempSync } from 'node:fs';
-import { promises as fsp } from 'node:fs';
-import { join, extname, basename } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readdirSync, statSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import { loadEnv } from '../src/config/env.js';
-import { validateFile } from '../src/modules/assets/upload/file-validator.js';
-import { storageOptionsForAsset } from '../src/modules/assets/upload/storage-policy.js';
-import { generateStorageKey } from '../src/shared/storage-path.js';
 import type { AssetKind } from '../src/generated/prisma/client.js';
-import type { PrismaClient } from '../src/generated/prisma/client.js';
+import { createScriptResources } from './resources.js';
 import {
-	bucketForKind,
-	createScriptResources,
-	createScriptUploadProcessing,
-	type ScriptUploadProcessing,
-} from './resources.js';
+	createScriptAsset,
+	runScriptUploadItem,
+	type ScriptUploadItemResources,
+} from './script-upload.js';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -48,22 +39,7 @@ interface MatchedAsset {
 	kind: AssetKind;
 	filePath: string;
 	originalName: string;
-	mimeType: string;
 	sizeBytes: number;
-}
-
-interface AssetRecord {
-	kind: AssetKind;
-	storageKey: string;
-	playbackStorageKey?: string | null;
-	originalName: string;
-	mimeType: string;
-	playbackMimeType?: string;
-	sizeBytes: bigint;
-	playbackSizeBytes?: bigint;
-	playbackStatus?: AssetPlaybackStatus;
-	playbackError?: string;
-	isPublic: boolean;
 }
 
 interface AttachStats {
@@ -76,26 +52,6 @@ interface AttachStats {
 
 // ── Config ───────────────────────────────────────────────
 
-const MIME_MAP: Record<string, string> = {
-	'.webp': 'image/webp',
-	'.png': 'image/png',
-	'.jpg': 'image/jpeg',
-	'.jpeg': 'image/jpeg',
-	'.pdf': 'application/pdf',
-	'.txt': 'text/plain',
-	'.zip': 'application/zip',
-	'.apk': 'application/vnd.android.package-archive',
-	'.7z': 'application/x-7z-compressed',
-	'.exe': 'application/x-msdownload',
-	'.egg': 'application/octet-stream',
-	'.rbxl': 'application/octet-stream',
-	'.mp4': 'video/mp4',
-	'.mov': 'video/quicktime',
-	'.mkv': 'video/x-matroska',
-	'.avi': 'video/x-msvideo',
-	'.wmv': 'video/x-ms-wmv',
-};
-
 /** Preferred extension order for each prefix (best first). */
 const POSTER_PREF = ['.webp', '.png', '.jpg', '.jpeg', '.pdf'];
 const GAME_PREF = ['.zip', '.apk', '.7z', '.exe'];
@@ -103,10 +59,6 @@ const VIDEO_PREF = ['.mp4', '.mov', '.mkv', '.avi', '.wmv'];
 
 /** Skip these entries (Synology metadata, etc.) */
 const SKIP_NAMES = new Set(['@eadir', '.ds_store', 'thumbs.db']);
-
-function errorMessage(err: unknown): string {
-	return err instanceof Error ? err.message : String(err);
-}
 
 // ── CLI ──────────────────────────────────────────────────
 
@@ -220,12 +172,10 @@ function discoverAssets(
 	const assets: MatchedAsset[] = [];
 
 	const addAsset = (kind: AssetKind, filePath: string) => {
-		const ext = extname(filePath).toLowerCase();
 		assets.push({
 			kind,
 			filePath,
 			originalName: basename(filePath),
-			mimeType: MIME_MAP[ext] ?? 'application/octet-stream',
 			sizeBytes: statSync(filePath).size,
 		});
 	};
@@ -258,144 +208,6 @@ function discoverAssets(
 	return assets;
 }
 
-// ── Upload & processing ──────────────────────────────────
-
-/**
- * Upload a single asset to S3, applying conversion where possible.
- * Uses the normal upload validator; extension-derived MIME values are not trusted.
- */
-async function uploadAsset(
-	asset: MatchedAsset,
-	tmpDir: string,
-	storage: ObjectStorage,
-	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
-	processing: ScriptUploadProcessing,
-): Promise<{
-	storageKey: string;
-	playbackStorageKey?: string | null;
-	mimeType: string;
-	playbackMimeType?: string;
-	sizeBytes: number;
-	playbackSizeBytes?: number;
-	playbackStatus?: AssetPlaybackStatus;
-	playbackError?: string;
-	converted: boolean;
-}> {
-	const validated = await validateFile(asset.filePath, asset.kind);
-	let finalPath = asset.filePath;
-	let finalMime = validated.mimeType;
-	let finalExt = validated.ext;
-	let finalSize = validated.sizeBytes;
-	let converted = false;
-	const tempFiles: string[] = [];
-
-	try {
-		// ── Image processing (WebP conversion) ────────────────
-		if (asset.kind !== 'GAME' && asset.kind !== 'VIDEO') {
-			const tmpPath = join(tmpDir, `${Date.now()}_${basename(asset.filePath)}`);
-			copyFileSync(asset.filePath, tmpPath);
-			tempFiles.push(tmpPath);
-
-			const result = validated.mimeType === 'application/pdf'
-				? await processing.pdf({ tmpPath })
-				: await processing.image({
-					tmpPath,
-					mimeType: validated.mimeType,
-					ext: validated.ext,
-					sizeBytes: validated.sizeBytes,
-				});
-			finalPath = result.tmpPath;
-			finalMime = result.mimeType;
-			finalExt = result.ext;
-			finalSize = result.sizeBytes;
-			converted = result.converted;
-			if (result.converted && result.tmpPath !== tmpPath) {
-				tempFiles.push(result.tmpPath);
-			}
-		}
-
-		// ── Video processing (MP4 normalisation) ──────────────
-		if (asset.kind === 'VIDEO') {
-			const tmpPath = join(tmpDir, `${Date.now()}_${basename(asset.filePath)}`);
-			copyFileSync(asset.filePath, tmpPath);
-			tempFiles.push(tmpPath);
-
-			const playback = await processing.video({
-				tmpPath,
-				mimeType: validated.mimeType,
-				ext: validated.ext,
-				sizeBytes: validated.sizeBytes,
-			});
-			if (playback.playbackStatus === 'FAILED') {
-				throw new Error(`Video validation failed: ${playback.playbackError || 'unsupported or corrupt video'}`);
-			}
-			if (playback.playback) tempFiles.push(playback.playback.tmpPath);
-
-			const storageKey = generateStorageKey(validated.ext);
-			const bucket = bucketForKind(config, asset.kind);
-			await storage.upload(
-				bucket,
-				storageKey,
-				createReadStream(tmpPath),
-				validated.mimeType,
-				validated.sizeBytes,
-				storageOptionsForAsset(asset.kind, 'original'),
-			);
-
-			let playbackStorageKey: string | null = null;
-			let playbackMimeType = '';
-			let playbackSizeBytes = 0;
-			let playbackStatus: AssetPlaybackStatus = playback.playbackStatus;
-			let playbackError = playback.playbackError;
-			if (playback.playback) {
-				const candidatePlaybackKey = generateStorageKey(playback.playback.ext);
-				try {
-					await storage.upload(
-						bucket,
-						candidatePlaybackKey,
-						createReadStream(playback.playback.tmpPath),
-						playback.playback.mimeType,
-						playback.playback.sizeBytes,
-						storageOptionsForAsset(asset.kind, 'playback'),
-					);
-					playbackStorageKey = candidatePlaybackKey;
-					playbackMimeType = playback.playback.mimeType;
-					playbackSizeBytes = playback.playback.sizeBytes;
-				} catch (err) {
-					playbackStatus = 'FAILED';
-					playbackError = errorMessage(err).slice(0, 2000);
-				}
-			}
-
-			return {
-				storageKey,
-				playbackStorageKey,
-				mimeType: validated.mimeType,
-				playbackMimeType,
-				sizeBytes: validated.sizeBytes,
-				playbackSizeBytes,
-				playbackStatus,
-				playbackError,
-				converted: playback.converted,
-			};
-		}
-
-		// ── Upload to S3 ──────────────────────────────────────
-		const storageKey = generateStorageKey(finalExt);
-		const bucket = bucketForKind(config, asset.kind);
-		const stat = await fsp.stat(finalPath);
-		const stream = createReadStream(finalPath);
-		await storage.upload(bucket, storageKey, stream, finalMime, stat.size, storageOptionsForAsset(asset.kind, 'original'));
-
-		return { storageKey, mimeType: finalMime, sizeBytes: stat.size, converted };
-	} finally {
-		// Clean up temp files
-		for (const t of tempFiles) {
-			await fsp.unlink(t).catch(() => {});
-		}
-	}
-}
-
 // ── Main ─────────────────────────────────────────────────
 
 async function main() {
@@ -403,27 +215,18 @@ async function main() {
 	const config = loadEnv();
 
 	const resources = createScriptResources(config);
-	const processing = createScriptUploadProcessing(config);
 	try {
-		await doAttach(
-			resources.prisma,
-			opts,
-			resources.storage,
-			config,
-			processing,
-		);
+		await doAttach(resources, opts);
 	} finally {
 		await resources.close();
 	}
 }
 
 async function doAttach(
-	prisma: PrismaClient,
+	resources: ScriptUploadItemResources,
 	opts: { assetRoot: string; yearFilter?: number; dryRun: boolean },
-	storage: ObjectStorage,
-	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
-	processing: ScriptUploadProcessing,
 ) {
+	const prisma = resources.prisma;
 	const projects = await prisma.project.findMany({
 		where: {
 			isIncomplete: true,
@@ -453,11 +256,7 @@ async function doAttach(
 	};
 	let currentYear = 0;
 
-	const tmpDir = mkdtempSync(join(tmpdir(), 'legacy-import-'));
-	console.log(`Temp directory: ${tmpDir}\n`);
-
-	try {
-		for (const project of projects) {
+	for (const project of projects) {
 			const year = project.exhibition.year;
 
 			if (year !== currentYear) {
@@ -499,78 +298,45 @@ async function doAttach(
 			}
 
 			try {
-				const records: AssetRecord[] = [];
-
-				for (const asset of assets) {
-					const result = await uploadAsset(
-						asset,
-						tmpDir,
-						storage,
-						config,
-						processing,
-					);
-					if (result.converted) stats.converted++;
-
-					records.push({
+				const { uploads } = await runScriptUploadItem(
+					resources,
+					{ projectId: project.id, exhibitionId: project.exhibitionId },
+					assets.map((asset) => ({
 						kind: asset.kind,
-						storageKey: result.storageKey,
-						playbackStorageKey: result.playbackStorageKey,
+						filePath: asset.filePath,
 						originalName: asset.originalName,
-						mimeType: result.mimeType,
-						playbackMimeType: result.playbackMimeType,
-						sizeBytes: BigInt(result.sizeBytes),
-						playbackSizeBytes: BigInt(result.playbackSizeBytes ?? 0),
-						playbackStatus: result.playbackStatus,
-						playbackError: result.playbackError,
-						isPublic: asset.kind !== 'GAME' && asset.kind !== 'VIDEO',
-					});
+					})),
+					async (tx, uploadedAssets) => {
+						for (const uploaded of uploadedAssets) {
+							const created = await createScriptAsset(tx, project.id, uploaded);
+							if (uploaded.saved.kind === 'POSTER') {
+								await tx.project.update({
+									where: { id: project.id },
+									data: { posterAssetId: created.id },
+								});
+							}
+						}
+					},
+				);
 
-					const sizeMB = (result.sizeBytes / 1024 / 1024).toFixed(1);
-					const flag = result.converted ? '→ converted' : '';
-					console.log(`        ${asset.kind.padEnd(7)} ${sizeMB} MB  ${result.mimeType} ${flag}`);
+				for (const uploaded of uploads) {
+					if (uploaded.converted) stats.converted++;
+					const sizeMB = (uploaded.saved.sizeBytes / 1024 / 1024).toFixed(1);
+					const flag = uploaded.converted ? '→ converted' : '';
+					console.log(
+						`        ${uploaded.saved.kind.padEnd(7)} ${sizeMB} MB  ${uploaded.saved.mimeType} ${flag}`,
+					);
 				}
 
-				await prisma.$transaction(async (tx) => {
-					for (const rec of records) {
-						const created = await tx.asset.create({
-							data: {
-								projectId: project.id,
-								kind: rec.kind,
-								status: 'READY',
-								storageKey: rec.storageKey,
-								playbackStorageKey: rec.playbackStorageKey ?? null,
-								originalName: rec.originalName,
-								mimeType: rec.mimeType,
-								playbackMimeType: rec.playbackMimeType ?? '',
-								sizeBytes: rec.sizeBytes,
-								playbackSizeBytes: rec.playbackSizeBytes ?? BigInt(0),
-								playbackStatus: rec.playbackStatus ?? 'PENDING',
-								playbackError: rec.playbackError ?? '',
-								isPublic: rec.isPublic,
-							},
-						});
-
-						if (rec.kind === 'POSTER') {
-							await tx.project.update({
-								where: { id: project.id },
-								data: { posterAssetId: created.id },
-							});
-						}
-					}
-				});
-
-				const summary = records.map((a) => a.kind[0]).join('');
+				const summary = uploads.map(({ saved }) => saved.kind[0]).join('');
 				console.log(`  OK: ${label} [${summary}]`);
 				stats.projects++;
-				stats.assets += records.length;
+				stats.assets += uploads.length;
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				console.error(`  FAIL: ${label} — ${msg}`);
 				stats.failed.push({ project: label, reason: msg });
 			}
-		}
-	} finally {
-		await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
 	}
 
 	console.log('\n═══ Summary ═══');

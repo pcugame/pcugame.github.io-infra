@@ -4,7 +4,6 @@ import { createAssetsService } from '../modules/assets/service.js';
 
 const mocks = {
 	findAssetByStorageKey: vi.fn(),
-	findPublicAsset: vi.fn(),
 	upsertBannedIp: vi.fn(),
 	getPresignedUrl: vi.fn(),
 	limiterCheck: vi.fn(),
@@ -12,7 +11,6 @@ const mocks = {
 };
 
 const assetsService = createAssetsService({
-	publicBucket: 'public-bucket',
 	protectedBucket: 'protected-bucket',
 	presign: mocks.getPresignedUrl,
 	bucketForKind: () => 'bucket',
@@ -23,7 +21,6 @@ const assetsService = createAssetsService({
 	},
 	logger: { info: vi.fn(), error: mocks.loggerError },
 	repository: {
-		findPublicAsset: mocks.findPublicAsset,
 		findAssetByStorageKey: mocks.findAssetByStorageKey,
 		upsertBannedIp: mocks.upsertBannedIp,
 		findAssetByIdWithProject: vi.fn(),
@@ -31,7 +28,7 @@ const assetsService = createAssetsService({
 		completeAssetDeletion: vi.fn(),
 	},
 });
-const { streamProtectedAsset, streamPublicAsset } = assetsService;
+const { streamProtectedAsset } = assetsService;
 
 function asset(opts: {
 	kind: string;
@@ -174,13 +171,4 @@ describe('protected asset redirects', () => {
 		expect(mocks.getPresignedUrl).not.toHaveBeenCalled();
 	});
 
-	it('does not apply the protected download limiter to public asset redirects', async () => {
-		mocks.findPublicAsset.mockResolvedValue({ storageKey: 'poster.jpg' });
-
-		const response = await streamPublicAsset('poster.jpg');
-
-		expect(mocks.limiterCheck).not.toHaveBeenCalled();
-		expect(mocks.getPresignedUrl).toHaveBeenCalledWith('public-bucket', 'poster.jpg');
-		expect(response.location).toBe('https://signed.example/public-bucket/poster.jpg');
-	});
 });

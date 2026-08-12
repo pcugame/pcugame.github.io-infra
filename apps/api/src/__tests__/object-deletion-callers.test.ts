@@ -4,7 +4,6 @@ import { deleteAsset } from '../modules/assets/service.js';
 function assetDeletionHarness() {
 	const repository = {
 		findAllBannedIps: vi.fn(),
-		findPublicAsset: vi.fn(),
 		findAssetByStorageKey: vi.fn(),
 		upsertBannedIp: vi.fn(),
 		findAssetByIdWithProject: vi.fn().mockResolvedValue({
@@ -25,7 +24,6 @@ function assetDeletionHarness() {
 	};
 	const wakeDeletionWorker = vi.fn();
 	const deps = {
-		publicBucket: 'public',
 		protectedBucket: 'protected',
 		presign: vi.fn(),
 		bucketForKind: () => 'protected',

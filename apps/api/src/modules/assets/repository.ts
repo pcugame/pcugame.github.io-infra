@@ -11,6 +11,7 @@ import {
 	withAssetMutationTransaction,
 } from './mutation-transaction.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
+import { imageRenditionDeletionTargets } from './image-rendition-lifecycle.js';
 
 export interface AssetDeletionClaim {
 	id: number;
@@ -36,13 +37,6 @@ export function createAssetsRepository(
 	transactionPolicy: AssetMutationTransactionPolicy = ASSET_MUTATION_TRANSACTION_POLICY,
 ) {
 	return {
-		/** Find a public, READY asset by storageKey */
-		findPublicAsset(storageKey: string) {
-			return client.asset.findFirst({
-				where: { storageKey, isPublic: true, status: 'READY' },
-			});
-		},
-
 		/** Find any READY asset by storageKey (including protected) */
 		findAssetByStorageKey(storageKey: string) {
 			return client.asset.findFirst({
@@ -176,6 +170,13 @@ export function createAssetsRepository(
 				if (!sameIdentity || (current.status !== 'DELETING' && current.status !== 'DELETED')) {
 					throw conflict('Asset identity changed before deletion completed');
 				}
+				const currentRenditions = await tx.imageRendition.findMany({
+					where: {
+						assetId: claim.id,
+						sourceStorageKey: claim.storageKey,
+					},
+					select: { storageKey: true, sourceStorageKey: true },
+				});
 
 				await queueDurableDeletions(tx, [
 					{
@@ -190,7 +191,19 @@ export function createAssetsRepository(
 							reason: outbox.playbackReason,
 						}]
 						: []),
+					...imageRenditionDeletionTargets(
+						outbox.bucket,
+						claim.storageKey,
+						currentRenditions,
+						`${outbox.reason}-rendition`,
+					),
 				]);
+				await tx.imageRendition.deleteMany({
+					where: {
+						assetId: claim.id,
+						sourceStorageKey: claim.storageKey,
+					},
+				});
 				await tx.gameUploadSession.updateMany({
 					where: {
 						projectId: claim.projectId,

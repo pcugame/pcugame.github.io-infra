@@ -15,12 +15,14 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:import": "tsx prisma/seed.ts --import ../db/legacy-import.json",
-    "lint": "eslint src prisma --max-warnings=0 && tsc --noEmit",
+    "backfill:image-renditions": "tsx scripts/backfill-image-renditions.ts",
+    "lint": "eslint src prisma scripts --max-warnings=0 && tsc --noEmit",
     "architecture:guard": "node scripts/architecture-guard.mjs src scripts",
     "architecture:self-test": "node scripts/architecture-self-test.mjs",
     "architecture": "npm run architecture:guard && npm run architecture:self-test && depcruise --config .dependency-cruiser.cjs src scripts",
     "pretest": "npm --prefix ../.. run build -w @pcu/contracts",
-    "test": "vitest run"
+    "test": "vitest run && npm run test:scripts",
+    "test:scripts": "vitest run --config scripts/vitest.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1024.0",

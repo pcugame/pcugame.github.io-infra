@@ -4,3 +4,5 @@ export { EmptyState } from './EmptyState';
 export { ErrorBoundary } from './ErrorBoundary';
 export { UploadProgressModal } from './UploadProgressModal';
 export { usePreventWindowClose } from './usePreventWindowClose';
+export { ResponsiveImage } from './ResponsiveImage';
+export type { ResponsiveImageProps } from './ResponsiveImage';

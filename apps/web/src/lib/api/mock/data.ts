@@ -10,7 +10,56 @@ import type {
 	PublicProjectCard,
 	PublicProjectDetailResponse,
 	PublicYearItem,
+	ResponsiveImage,
 } from '../../../contracts';
+
+const PLACEHOLDER_SIZE_PATTERN = /^(https:\/\/placehold\.co\/)(\d+)x(\d+)(?=\/|\?|$)/;
+
+function placeholderSize(url: string): { width: number; height: number } {
+	const match = PLACEHOLDER_SIZE_PATTERN.exec(url);
+	if (!match) throw new Error(`Mock responsive image must use a sized placehold.co URL: ${url}`);
+	return { width: Number(match[2]), height: Number(match[3]) };
+}
+
+function placeholderUrlAtSize(url: string, width: number, height: number): string {
+	return url.replace(PLACEHOLDER_SIZE_PATTERN, `$1${width}x${height}`);
+}
+
+export function mockResponsiveImage(url: string): ResponsiveImage {
+	const { width, height } = placeholderSize(url);
+	const renditions: ResponsiveImage['renditions'] = [];
+
+	if (width > 480) {
+		const renditionHeight = Math.round(height * 480 / width);
+		renditions.push({
+			profile: 'CARD_480',
+			url: placeholderUrlAtSize(url, 480, renditionHeight),
+			width: 480,
+			height: renditionHeight,
+		});
+	}
+	if (width > 960) {
+		const renditionHeight = Math.round(height * 960 / width);
+		renditions.push({
+			profile: 'DISPLAY_960',
+			url: placeholderUrlAtSize(url, 960, renditionHeight),
+			width: 960,
+			height: renditionHeight,
+		});
+	}
+
+	return {
+		original: { url, width, height },
+		renditions,
+	};
+}
+
+function mockLegacyResponsiveImage(url: string): ResponsiveImage {
+	return {
+		original: { url, ...placeholderSize(url) },
+		renditions: [],
+	};
+}
 
 // ── 사용자 (역할 전환 가능) ──────────────────────────────────
 // localStorage의 'mock-role' 키로 전환: 'ADMIN' | 'OPERATOR' | 'USER'
@@ -65,7 +114,7 @@ export const MOCK_USER = MOCK_USERS.ADMIN;
 // 실제 데이터: "졸업작품 전시회" 형식
 
 export const MOCK_YEARS = [
-	{ id: 1, year: 2025, title: '졸업작품 전시회', projectCount: 6, posterUrl: 'https://placehold.co/540x960/0f172a/f8fafc?text=2025' },
+	{ id: 1, year: 2025, title: '졸업작품 전시회', projectCount: 6, poster: mockLegacyResponsiveImage('https://placehold.co/540x960/0f172a/f8fafc?text=2025') },
 	{ id: 2, year: 2024, title: '졸업작품 전시회', projectCount: 5 },
 	{ id: 3, year: 2023, title: '졸업작품 전시회', projectCount: 4 },
 	{ id: 4, year: 2022, title: '졸업작품 전시회', projectCount: 3 },
@@ -83,7 +132,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
 		id: 1, slug: 'dragon-slayer', title: 'Dragon Slayer',
 		summary: '판타지 세계관 기반 3D 액션 RPG',
-		posterUrl: 'https://placehold.co/400x560/1a1a2e/e0e0ff?text=Dragon+Slayer',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a1a2e/e0e0ff?text=Dragon+Slayer'),
 		githubUrl: 'https://github.com/pcugame/dragon-slayer',
 		platforms: ['PC', 'WEB'],
 		members: [
@@ -95,7 +144,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
 		id: 2, slug: '냥이의-식탁', title: '냥이의 식탁',
 		summary: '고양이 캐릭터 기반 요리 시뮬레이션 게임',
-		posterUrl: 'https://placehold.co/400x560/2e1a2e/ffe0ff?text=%EB%83%A5%EC%9D%B4%EC%9D%98+%EC%8B%9D%ED%83%81',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a2e/ffe0ff?text=%EB%83%A5%EC%9D%B4%EC%9D%98+%EC%8B%9D%ED%83%81'),
 		members: [
 			{ name: '테스트D', studentId: '2088004' },
 			{ name: '테스트E', studentId: '2088005' },
@@ -104,7 +153,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
 		id: 99, slug: 'escape-from-wizard-sun-moon', title: 'Escape from Wizard: Sun & Moon',
 		summary: '마법사의 탑을 탈출하는 퍼즐 어드벤처',
-		posterUrl: 'https://placehold.co/400x560/2e2e1a/ffffe0?text=Escape+from+Wizard',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e2e1a/ffffe0?text=Escape+from+Wizard'),
 		members: [
 			{ name: '테스트X', studentId: '2088099' },
 		],
@@ -112,7 +161,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
 		id: 3, slug: 'dungeon-crawl', title: 'Dungeon Crawl',
 		summary: '절차적 생성 던전 탐험 로그라이크',
-		posterUrl: 'https://placehold.co/400x560/1a2e2e/e0ffff?text=Dungeon+Crawl',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e2e/e0ffff?text=Dungeon+Crawl'),
 		members: [
 			{ name: '테스트F', studentId: '2088006' },
 		],
@@ -120,7 +169,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
 		id: 4, slug: 'bpm-beats-per-minute', title: 'BPM: BEATS PER MINUTE',
 		summary: '리듬에 맞춰 전투하는 FPS 리듬 게임',
-		posterUrl: 'https://placehold.co/400x560/2e1a1a/ffe0e0?text=BPM',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a1a/ffe0e0?text=BPM'),
 		members: [
 			{ name: '테스트G', studentId: '2088007' },
 		],
@@ -128,7 +177,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
 		id: 5, slug: 'undead-rush', title: 'UNDEAD RUSH',
 		summary: '좀비 서바이벌 탑다운 슈터',
-		posterUrl: 'https://placehold.co/400x560/1a2e1a/e0ffe0?text=UNDEAD+RUSH',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e1a/e0ffe0?text=UNDEAD+RUSH'),
 		members: [
 			{ name: '테스트H', studentId: '2088008' },
 		],
@@ -136,7 +185,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
 		id: 6, slug: 'airstrike', title: 'AirStrike',
 		summary: '비행 슈팅 아케이드 게임',
-		posterUrl: 'https://placehold.co/400x560/2e2e1a/ffffe0?text=AirStrike',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e2e1a/ffffe0?text=AirStrike'),
 		members: [
 			{ name: '테스트I', studentId: '2088009' },
 			{ name: '테스트J', studentId: '2088010' },
@@ -148,7 +197,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 	{
 		id: 7, slug: 'music-library', title: 'MUSIC LIBRARY',
 		summary: '음악 감상과 연동되는 비주얼 인터랙션 게임',
-		posterUrl: 'https://placehold.co/400x560/1a1a2e/c0c0ff?text=MUSIC+LIBRARY',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a1a2e/c0c0ff?text=MUSIC+LIBRARY'),
 		members: [
 			{ name: '테스트K', studentId: '2036001' },
 		],
@@ -156,7 +205,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 	{
 		id: 8, slug: 'overcome', title: 'OVERCOME',
 		summary: '장애물을 극복하며 진행하는 플랫포머 게임',
-		posterUrl: 'https://placehold.co/400x560/2e1a2e/ffc0ff?text=OVERCOME',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a2e/ffc0ff?text=OVERCOME'),
 		members: [
 			{ name: '테스트L', studentId: '2036002' },
 			{ name: '테스트M', studentId: '2036003' },
@@ -165,7 +214,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 	{
 		id: 9, slug: 'gallery', title: 'GALLERY',
 		summary: '미술관을 탐험하는 공포 어드벤처',
-		posterUrl: 'https://placehold.co/400x560/1a2e1a/c0ffc0?text=GALLERY',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e1a/c0ffc0?text=GALLERY'),
 		members: [
 			{ name: '테스트N', studentId: '2036004' },
 			{ name: '테스트O', studentId: '2036005' },
@@ -174,7 +223,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 	{
 		id: 10, slug: 'diver', title: 'DIVER',
 		summary: '심해 탐사 어드벤처 게임',
-		posterUrl: 'https://placehold.co/400x560/2e2e1a/ffffe0?text=DIVER',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e2e1a/ffffe0?text=DIVER'),
 		members: [
 			{ name: '테스트P', studentId: '2036006' },
 			{ name: '테스트Q', studentId: '2036007' },
@@ -183,7 +232,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 	{
 		id: 11, slug: 'hex-defense', title: 'HEX DEFENSE',
 		summary: '헥스 기반 타워 디펜스 전략 게임',
-		posterUrl: 'https://placehold.co/400x560/1a2e2e/a0ffff?text=HEX+DEFENSE',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e2e/a0ffff?text=HEX+DEFENSE'),
 		members: [
 			{ name: '테스트R', studentId: '2036008' },
 		],
@@ -194,7 +243,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 	{
 		id: 12, slug: 'lost-bible', title: 'Lost Bible',
 		summary: '고대 유적을 탐험하는 퍼즐 어드벤처',
-		posterUrl: 'https://placehold.co/400x560/1a1a2e/a0a0ff?text=Lost+Bible',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a1a2e/a0a0ff?text=Lost+Bible'),
 		members: [
 			{ name: '테스트S', studentId: '1988001' },
 		],
@@ -202,7 +251,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 	{
 		id: 13, slug: 'hospitalrunner', title: 'HospitalRunner',
 		summary: '병원을 배경으로 한 러닝 액션 게임',
-		posterUrl: 'https://placehold.co/400x560/2e1a1a/ffa0a0?text=HospitalRunner',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a1a/ffa0a0?text=HospitalRunner'),
 		members: [
 			{ name: '테스트T', studentId: '1988002' },
 		],
@@ -210,7 +259,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 	{
 		id: 14, slug: 'what', title: 'what?!',
 		summary: '비주얼 노벨 기반 추리 어드벤처',
-		posterUrl: 'https://placehold.co/400x560/2e1a2e/c0a0ff?text=what%3F!',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a2e/c0a0ff?text=what%3F!'),
 		members: [
 			{ name: '테스트U', studentId: '1988003' },
 		],
@@ -218,7 +267,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 	{
 		id: 15, slug: '인마대전', title: '인마대전',
 		summary: '대전 격투 게임',
-		posterUrl: 'https://placehold.co/400x560/1a2e1a/a0ffa0?text=%EC%9D%B8%EB%A7%88%EB%8C%80%EC%A0%84',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e1a/a0ffa0?text=%EC%9D%B8%EB%A7%88%EB%8C%80%EC%A0%84'),
 		members: [
 			{ name: '테스트V', studentId: '1988004' },
 			{ name: '테스트W', studentId: '1988005' },
@@ -230,7 +279,7 @@ const MOCK_PROJECTS_2022: MockProjectCard[] = [
 	{
 		id: 16, slug: 'escapafe', title: "EsC'afe",
 		summary: '카페를 배경으로 한 탈출 퍼즐 게임',
-		posterUrl: 'https://placehold.co/400x560/2e2e1a/ffffa0?text=EsCafe',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e2e1a/ffffa0?text=EsCafe'),
 		members: [
 			{ name: '테스트X', studentId: '1888001' },
 			{ name: '테스트Y', studentId: '1888002' },
@@ -239,7 +288,7 @@ const MOCK_PROJECTS_2022: MockProjectCard[] = [
 	{
 		id: 17, slug: 'most-puzzle', title: 'MOST PUZZLE',
 		summary: '다양한 퍼즐을 조합하는 두뇌 퍼즐 게임',
-		posterUrl: 'https://placehold.co/400x560/1a1a2e/8080ff?text=MOST+PUZZLE',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1a1a2e/8080ff?text=MOST+PUZZLE'),
 		members: [
 			{ name: '테스트Z', studentId: '1888003' },
 			{ name: '테스트AA', studentId: '1888004' },
@@ -248,7 +297,7 @@ const MOCK_PROJECTS_2022: MockProjectCard[] = [
 	{
 		id: 18, slug: 'v-bunny', title: 'V_BUNNY',
 		summary: '토끼 캐릭터 기반 액션 플랫포머',
-		posterUrl: 'https://placehold.co/400x560/2e1a1a/ff8080?text=V_BUNNY',
+		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a1a/ff8080?text=V_BUNNY'),
 		members: [
 			{ name: '테스트AB', studentId: '1888005' },
 		],
@@ -277,14 +326,14 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 	{
 		id: 9001, slug: 'my-rhythm-proto', title: '리듬 게임 프로토타입',
 		summary: '비트 시각화를 실험 중인 프로젝트입니다.',
-		posterUrl: 'https://placehold.co/400x560/0f172a/fbbf24?text=Rhythm+Proto',
+		poster: mockResponsiveImage('https://placehold.co/400x560/0f172a/fbbf24?text=Rhythm+Proto'),
 		members: [{ name: '학생', studentId: '2088099' }],
 		year: 2025, status: 'PUBLISHED', ownerId: 3, updatedAgoSec: 0,
 	},
 	{
 		id: 9002, slug: 'my-untitled-demo', title: 'Untitled Game Demo',
 		summary: '탑다운 슈터 데모 — 내부 테스트용 공개',
-		posterUrl: 'https://placehold.co/400x560/1e293b/38bdf8?text=Untitled+Demo',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1e293b/38bdf8?text=Untitled+Demo'),
 		members: [
 			{ name: '학생', studentId: '2088099' },
 			{ name: '테스트파트너', studentId: '2088100' },
@@ -294,7 +343,7 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 	{
 		id: 9003, slug: 'my-puzzle-wip', title: '퍼즐 게임 (작업 중)',
 		summary: '3-매치 기반 퍼즐 프로토타입',
-		posterUrl: 'https://placehold.co/400x560/1e1b4b/a78bfa?text=Puzzle+WIP',
+		poster: mockResponsiveImage('https://placehold.co/400x560/1e1b4b/a78bfa?text=Puzzle+WIP'),
 		members: [{ name: '학생', studentId: '2088099' }],
 		year: 2025, status: 'ARCHIVED', ownerId: 3, updatedAgoSec: 7 * 86400,
 	},
@@ -318,11 +367,23 @@ function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): P
 		videos: [],
 		members: card.members.map((m, i) => ({ id: card.id * 100 + i, name: m.name, studentId: m.studentId })),
 		images: [
-			{ id: card.id * 100 + 50, url: card.posterUrl ?? `https://placehold.co/800x1120/333/eee?text=${encodeURIComponent(card.title)}`, kind: 'POSTER' },
-			{ id: card.id * 100 + 51, url: `https://placehold.co/1280x720/222/ccc?text=${encodeURIComponent(card.title)}+Screenshot+1`, kind: 'IMAGE' },
-			{ id: card.id * 100 + 52, url: `https://placehold.co/1280x720/333/ccc?text=${encodeURIComponent(card.title)}+Screenshot+2`, kind: 'IMAGE' },
+			{
+				id: card.id * 100 + 50,
+				image: card.poster ?? mockResponsiveImage(`https://placehold.co/800x1120/333/eee?text=${encodeURIComponent(card.title)}`),
+				kind: 'POSTER',
+			},
+			{
+				id: card.id * 100 + 51,
+				image: mockResponsiveImage(`https://placehold.co/1280x720/222/ccc?text=${encodeURIComponent(card.title)}+Screenshot+1`),
+				kind: 'IMAGE',
+			},
+			{
+				id: card.id * 100 + 52,
+				image: mockResponsiveImage(`https://placehold.co/1280x720/333/ccc?text=${encodeURIComponent(card.title)}+Screenshot+2`),
+				kind: 'IMAGE',
+			},
 		],
-		posterUrl: card.posterUrl,
+		poster: card.poster,
 		gameDownloadUrl: year <= 2024 ? undefined : '#mock-download',
 		status,
 	};
@@ -400,10 +461,10 @@ export function buildAdminProjectDetail(id: string | number): AdminProjectDetail
 		githubUrl: detail.githubUrl, platforms: detail.platforms,
 		isIncomplete: detail.isIncomplete, video: detail.video, videos: detail.videos,
 		status: detail.status, sortOrder: 0,
-		posterAssetId: detail.images[0]?.id, posterUrl: detail.posterUrl,
+		posterAssetId: detail.images[0]?.id, poster: detail.poster,
 		members: detail.members.map((m, i) => ({ ...m, sortOrder: i, userId: null })),
 		assets: detail.images.map((img) => ({
-			id: img.id, kind: img.kind, url: img.url, originalName: `asset-${img.id}.webp`, size: 102400,
+			id: img.id, kind: img.kind, image: img.image, originalName: `asset-${img.id}.webp`, size: 102400,
 		})),
 	};
 }

@@ -36,7 +36,6 @@ import type { UploadLifecycleRuntime } from '../upload-lifecycle/ports.js';
 
 type ProjectMultipartConfig = Pick<
 	Env,
-	| 'API_PUBLIC_URL'
 	| 'WEB_PUBLIC_URL'
 	| 'S3_BUCKET_PUBLIC'
 	| 'S3_BUCKET_PROTECTED'
@@ -92,17 +91,6 @@ function bucketForKind(kind: AssetKind, config: ProjectMultipartConfig): string 
 	});
 }
 
-function assetUrl(
-	baseUrl: string,
-	storageKey: string,
-	kind: AssetKind,
-): string {
-	const base = baseUrl.replace(/\/$/, '');
-	return kind === 'GAME' || kind === 'VIDEO'
-		? `${base}/api/assets/protected/${storageKey}`
-		: `${base}/api/assets/public/${storageKey}`;
-}
-
 /** Compose ticket-011 exclusively from resources and ports owned by one context. */
 export function createProjectMultipartProductionGraph(
 	deps: ProjectMultipartProductionDependencies,
@@ -144,11 +132,6 @@ export function createProjectMultipartProductionGraph(
 			createPipeline,
 			requestHasher: deps.requestHasher,
 		}),
-		assetUrl: (storageKey, kind) => assetUrl(
-			deps.config.API_PUBLIC_URL,
-			storageKey,
-			kind,
-		),
 		bucketForKind: (kind) => bucketForKind(kind, deps.config),
 		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
 		logger: deps.logger,

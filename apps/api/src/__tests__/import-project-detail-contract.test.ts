@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
 	findPublishedProjectsInExhibitions: vi.fn(),
 	findPublishedProjectById: vi.fn(),
 	findPublishedProjectBySlug: vi.fn(),
-	findExhibitionPosterByStorageKey: vi.fn(),
 }));
 
 import { createImportService } from '../modules/admin/import/service.js';
@@ -29,8 +28,6 @@ const importService = createImportService({
 const { serializeProjectDetail } = createProjectSerializer('https://api.example.com');
 const publicService = createPublicService({
 	apiPublicUrl: 'https://api.example.com',
-	publicBucket: 'pcu-public',
-	presign: async (_bucket, key) => `https://storage.example.com/${key}`,
 	repository: {
 		findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
 		findExhibitionsByYear: mocks.findExhibitionsByYear,
@@ -38,7 +35,6 @@ const publicService = createPublicService({
 		findExhibitionById: vi.fn(),
 		findPublishedProjectById: mocks.findPublishedProjectById,
 		findPublishedProjectBySlug: mocks.findPublishedProjectBySlug,
-		findExhibitionPosterByStorageKey: mocks.findExhibitionPosterByStorageKey,
 	},
 });
 

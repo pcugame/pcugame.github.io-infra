@@ -1,7 +1,10 @@
 import { promises as fsp } from 'node:fs';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UploadPipelinePort } from '../application/upload-ports.js';
+import type {
+	SingleAssetUploadCoordinator,
+	UploadPipelinePort,
+} from '../application/upload-ports.js';
 import { createProjectAssetService } from '../modules/admin/project/project-asset.service.js';
 import { createProjectAssetUploadCoordinator } from '../modules/admin/project/project-asset-upload.adapter.js';
 import { createNodeFileSystem } from '../infrastructure/production-ports.js';
@@ -61,7 +64,6 @@ const projectAssetService = createProjectAssetService({
 	}),
 	uploadSlots: { acquire: vi.fn(), release: vi.fn() },
 	uploadCoordinator: singleAssetUploadCoordinator,
-	assetUrl: (key, kind) => `http://localhost:4000/api/assets/${kind === 'GAME' || kind === 'VIDEO' ? 'protected' : 'public'}/${key}`,
 	bucketForKind: () => 'test-bucket',
 	wakeDeletionWorker: mocks.wakeDeletionWorker,
 	logger: { error: mocks.logError },
@@ -221,7 +223,6 @@ describe('project asset upload resource guards', () => {
 		}));
 		expect(result).toEqual({
 			assetId: 321,
-			url: 'http://localhost:4000/api/assets/public/asset/image.png',
 		});
 		await expect(fsp.access(tempFile)).rejects.toThrow();
 	});
@@ -252,7 +253,6 @@ describe('project asset upload resource guards', () => {
 			assetRequest('GAME', [zipHeader], 'game.zip'),
 		)).resolves.toEqual({
 			assetId: 321,
-			url: 'http://localhost:4000/api/assets/protected/asset/new-game.zip',
 		});
 
 		expect(mocks.replaceOrCreateReplaceableAsset).toHaveBeenCalledWith(
@@ -270,5 +270,53 @@ describe('project asset upload resource guards', () => {
 		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
 		expect(mocks.logError).not.toHaveBeenCalled();
 		startSpy.mockRestore();
+	});
+
+	it('normalizes a legacy idempotency result to the assetId-only response', async () => {
+		const replayCoordinator: SingleAssetUploadCoordinator = {
+			async start(_parts, _limits, _owner, beforeUpload) {
+				await beforeUpload?.('legacy-request-hash');
+				throw new Error('Expected the stored idempotency result to short-circuit the upload');
+			},
+		};
+		const service = createProjectAssetService({
+			repository: {
+				createAsset: mocks.createAsset,
+				replaceOrCreateReplaceableAsset: mocks.replaceOrCreateReplaceableAsset,
+				findExhibitionById: mocks.findExhibitionById,
+			},
+			uploadLimits: () => ({
+				posterMaxBytes: MB,
+				imageMaxBytes: MB,
+				gameMaxBytes: 2 * MB,
+				videoMaxBytes: MB,
+				requestMaxBytes: 3 * MB,
+				maxFiles: 20,
+			}),
+			uploadSlots: { acquire: vi.fn(), release: vi.fn() },
+			uploadCoordinator: replayCoordinator,
+			bucketForKind: () => 'test-bucket',
+			wakeDeletionWorker: mocks.wakeDeletionWorker,
+			idempotency: {
+				claim: vi.fn(async () => ({
+					kind: 'succeeded' as const,
+					result: {
+						assetId: 456,
+						url: 'https://legacy.example.test/uploaded.webp',
+					},
+				})),
+				markFailed: vi.fn(),
+			},
+		});
+
+		await expect(service.addAssetToProject(
+			7,
+			1,
+			{
+				...assetRequest('IMAGE', [pngHeader], 'image.png'),
+				idempotencyKey: 'legacy-replay',
+			},
+		)).resolves.toEqual({ assetId: 456 });
+		expect(mocks.createAsset).not.toHaveBeenCalled();
 	});
 });

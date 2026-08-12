@@ -41,6 +41,11 @@ enum AssetPlaybackStatus {
   FAILED
 }
 
+enum ImageRenditionProfile {
+  CARD_480
+  DISPLAY_960
+}
+
 enum Platform {
   PC
   MOBILE
@@ -116,10 +121,13 @@ model Exhibition {
   posterOriginalName String   @default("") @map("poster_original_name")
   posterMimeType     String   @default("") @map("poster_mime_type")
   posterSizeBytes    BigInt   @default(0) @map("poster_size_bytes")
+  posterWidth        Int?     @map("poster_width")
+  posterHeight       Int?     @map("poster_height")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
-  projects Project[] @relation("ExhibitionProjects")
+  projects        Project[]        @relation("ExhibitionProjects")
+  imageRenditions ImageRendition[] @relation("ExhibitionImageRenditions")
 
   @@unique([year, title], name: "year_title")
   @@index([sortOrder, year])
@@ -188,6 +196,8 @@ model Asset {
   mimeType           String              @default("") @map("mime_type")
   playbackMimeType   String              @default("") @map("playback_mime_type")
   sizeBytes          BigInt              @default(0) @map("size_bytes")
+  width              Int?
+  height             Int?
   playbackSizeBytes  BigInt              @default(0) @map("playback_size_bytes")
   playbackStatus     AssetPlaybackStatus @default(PENDING) @map("playback_status")
   playbackError      String              @default("") @map("playback_error")
@@ -195,8 +205,9 @@ model Asset {
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
 
-  project  Project  @relation("ProjectAssets", fields: [projectId], references: [id], onDelete: Cascade)
-  posterOf Project? @relation("ProjectPoster")
+  project         Project          @relation("ProjectAssets", fields: [projectId], references: [id], onDelete: Cascade)
+  posterOf        Project?         @relation("ProjectPoster")
+  imageRenditions ImageRendition[] @relation("AssetImageRenditions")
 
   @@index([projectId, kind, status])
   // Partial unique index `asset_project_game_ready_unique` on (project_id, kind)
@@ -204,6 +215,32 @@ model Asset {
   // `migrations/20260523_allow_multiple_videos/` — Prisma can't express partial-unique
   // in the DSL. VIDEO/IMAGE etc. are intentionally excluded (projects may hold many).
   @@map("assets")
+}
+
+/// A physically present responsive derivative of one canonical public image.
+/// The owner/source CHECK constraint is applied in SQL because Prisma cannot
+/// express an exclusive-or relationship between nullable foreign keys.
+model ImageRendition {
+  id               Int                   @id @default(autoincrement())
+  profile          ImageRenditionProfile
+  storageKey       String                @unique @map("storage_key")
+  sourceStorageKey String                @map("source_storage_key")
+  width            Int
+  height           Int
+  mimeType         String                @map("mime_type")
+  sizeBytes        BigInt                @map("size_bytes")
+  assetId          Int?                  @map("asset_id")
+  exhibitionId     Int?                  @map("exhibition_id")
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  asset      Asset?      @relation("AssetImageRenditions", fields: [assetId], references: [id], onDelete: Cascade)
+  exhibition Exhibition? @relation("ExhibitionImageRenditions", fields: [exhibitionId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, profile])
+  @@unique([exhibitionId, profile])
+  @@index([sourceStorageKey])
+  @@map("image_renditions")
 }
 
 model AuthSession {

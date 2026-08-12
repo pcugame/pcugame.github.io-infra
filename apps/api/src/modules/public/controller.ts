@@ -3,10 +3,12 @@ import { sendOk } from '../../shared/http.js';
 import { parseIntParam } from '../../shared/validation.js';
 import { applyDescriptorHeaders, applyResponseDescriptor } from '../../shared/response-descriptor.js';
 import type { createPublicService } from './service.js';
+import type { createPublicImageService } from './image.service.js';
 import type { createPublicWebglService } from './webgl.service.js';
 
 export interface PublicControllerDependencies {
 	service: ReturnType<typeof createPublicService>;
+	imageService: ReturnType<typeof createPublicImageService>;
 	webglService: ReturnType<typeof createPublicWebglService>;
 }
 
@@ -63,20 +65,51 @@ export function createPublicController(deps: PublicControllerDependencies): Fast
 			},
 		);
 
+		const imageHandler = async (
+			method: 'GET' | 'HEAD',
+			storageKey: string,
+			headers: { 'if-none-match'?: string; 'if-modified-since'?: string },
+			reply: Parameters<typeof applyResponseDescriptor>[0],
+		) => applyResponseDescriptor(
+			reply,
+			await deps.imageService[method === 'GET' ? 'get' : 'head'](storageKey, {
+				ifNoneMatch: headers['if-none-match'],
+				ifModifiedSince: headers['if-modified-since'],
+			}),
+		);
+
+		/** Explicit GET and HEAD avoid Fastify opening a body stream for HEAD. */
+		app.get<{
+			Params: { storageKey: string };
+			Headers: { 'if-none-match'?: string; 'if-modified-since'?: string };
+		}>(
+			'/images/:storageKey',
+			{ exposeHeadRoute: false },
+			async (request, reply) => imageHandler(
+				'GET',
+				request.params.storageKey,
+				request.headers,
+				reply,
+			),
+		);
+		app.head<{
+			Params: { storageKey: string };
+			Headers: { 'if-none-match'?: string; 'if-modified-since'?: string };
+		}>(
+			'/images/:storageKey',
+			async (request, reply) => imageHandler(
+				'HEAD',
+				request.params.storageKey,
+				request.headers,
+				reply,
+			),
+		);
+
 		/** GET /api/public/years — list years with published project counts */
 		app.get('/years', async (_request, reply) => {
 			const items = await deps.service.listYears();
 			sendOk(reply, { items });
 		});
-
-		/** GET /api/public/exhibition-posters/:storageKey — redirect to registered exhibition poster */
-		app.get<{ Params: { storageKey: string } }>(
-			'/exhibition-posters/:storageKey',
-			async (request, reply) => {
-				const url = await deps.service.getExhibitionPosterRedirectUrl(request.params.storageKey);
-				reply.redirect(url);
-			},
-		);
 
 		/** GET /api/public/years/:year/projects — list projects in a year */
 		app.get<{ Params: { year: string } }>(

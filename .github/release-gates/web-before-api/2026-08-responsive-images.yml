@@ -1,0 +1,16 @@
+release: responsive-images
+policy: web-before-api
+immutable: true
+reason: >-
+  This release replaces the public image URL contract with ResponsiveImage and
+  removes the legacy public-image redirect routes. The matching Web build must
+  be live before the API begins serving the new response shape.
+rollout:
+  - Back up PostgreSQL before changing the production schema.
+  - Deploy and verify the Web build for this exact release commit.
+  - Drain the old API, apply the additive migration, and deploy the API build for the same commit.
+  - Run smoke tests, then perform a small image-rendition backfill before the full backfill.
+notes: >-
+  A short Web/old-API contract mismatch is accepted during rollout. Recovery
+  keeps the existing deployment and runbook flow; operators may redeploy the
+  same SHA pair. This declaration does not add an API-before-Web gate.

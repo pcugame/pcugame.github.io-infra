@@ -27,7 +27,7 @@ describe('admin asset logical-operation idempotency', () => {
 		const addAsset = vi.spyOn(adminProjectApi, 'addAsset').mockImplementation(async (input) => {
 			keys.push(input.idempotencyKey);
 			if (keys.length < 3) throw new ApiError(0, 'Network Error', null);
-			return { assetId: keys.length, url: 'https://assets.test/image.webp' };
+			return { assetId: keys.length };
 		});
 		const original = new File(['image'], 'image.png', {
 			type: 'image/png',

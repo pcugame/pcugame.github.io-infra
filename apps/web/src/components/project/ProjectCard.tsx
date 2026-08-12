@@ -1,4 +1,5 @@
 import type { PublicProjectCard } from '../../contracts';
+import { ResponsiveImage } from '../common';
 
 interface Props {
   project: PublicProjectCard;
@@ -14,11 +15,13 @@ export function ProjectCard({ project, onSelect }: Props) {
       onClick={() => onSelect?.(project.slug)}
     >
       <div className="archive-card__image">
-        {project.posterUrl ? (
-          <img
-            src={project.posterUrl}
+        {project.poster ? (
+          <ResponsiveImage
+            image={project.poster}
             alt={`${project.title} 포스터`}
+            sizes="(max-width: 640px) 46vw, (max-width: 1100px) 30vw, 280px"
             loading="lazy"
+            decoding="async"
           />
         ) : (
           <div className="archive-card__placeholder" aria-hidden="true">

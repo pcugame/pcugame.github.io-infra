@@ -938,7 +938,13 @@ describe('project multipart production wiring', () => {
 			},
 		});
 		expect(asset.statusCode, asset.body).toBe(201);
+		expect(asset.json()).toEqual({
+			ok: true,
+			data: { assetId: expect.any(Number) },
+		});
 		expect(harness.ports.calls.assetCreate).toHaveBeenCalledOnce();
+		const assetWrite = harness.ports.calls.assetCreate.mock.calls[0]?.[0];
+		expect(assetWrite?.idempotency?.resultForAsset(123)).toEqual({ assetId: 123 });
 		expect(harness.storage.calls.upload).toHaveBeenCalledOnce();
 		expect(harness.fileSystem.outstanding()).toEqual([]);
 

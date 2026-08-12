@@ -606,6 +606,7 @@ export async function createProductionBackendContext(
 			config,
 			repository: persistence.publicRepository,
 			storage,
+			logger,
 		});
 		const projectAccessRepository = persistence.projectAccessRepository;
 		const projectAccess = createProjectAccessService(projectAccessRepository);

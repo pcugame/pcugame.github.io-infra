@@ -1,10 +1,11 @@
-import crypto from 'node:crypto';
 import path from 'node:path';
 
-export function generateStorageKey(ext: string): string {
-  const uuid = crypto.randomUUID();
-  const safe = ext.replace(/[^a-zA-Z0-9]/g, '');
-  return `${uuid}.${safe}`;
+export function generateStorageKey(
+	ext: string,
+	id: string = globalThis.crypto.randomUUID(),
+): string {
+	const safe = ext.replace(/[^a-zA-Z0-9]/g, '');
+	return `${id}.${safe}`;
 }
 
 /** @deprecated Used only by migration script. S3 uses storageKey directly as object key. */
