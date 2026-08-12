@@ -11,21 +11,27 @@ const deterministicMigrationUrl = new URL(
 );
 
 describe('responsive image schema migration history', () => {
-	it('preserves the already-published foundation migration', async () => {
+	it('keeps the unapplied foundation migration atomic and model-free', async () => {
 		const sql = await readFile(foundationMigrationUrl, 'utf8');
 
+		expect(sql.trimStart().indexOf('BEGIN;')).toBeLessThan(sql.indexOf('ALTER TABLE'));
+		expect(sql.trimEnd().endsWith('COMMIT;')).toBe(true);
 		expect(sql).toContain('ADD COLUMN "width" INTEGER');
 		expect(sql).toContain('ADD COLUMN "height" INTEGER');
 		expect(sql).toContain('ADD COLUMN "poster_width" INTEGER');
 		expect(sql).toContain('ADD COLUMN "poster_height" INTEGER');
-		expect(sql).toContain("CREATE TYPE \"ImageRenditionProfile\" AS ENUM ('CARD_480', 'DISPLAY_960')");
-		expect(sql).toContain('CREATE TABLE "image_renditions"');
-		expect(sql).toContain('CONSTRAINT "image_renditions_owner_xor_check" CHECK');
+		expect(sql).not.toContain('ImageRenditionProfile');
+		expect(sql).not.toContain('image_renditions');
 	});
 
 	it('moves deterministic readiness state onto owners in a follow-up migration', async () => {
 		const sql = await readFile(deterministicMigrationUrl, 'utf8');
 
+		expect(sql).toContain('BEGIN ISOLATION LEVEL READ COMMITTED;');
+		expect(sql.indexOf('BEGIN ISOLATION LEVEL READ COMMITTED;')).toBeLessThan(
+			sql.indexOf('DO $migration$'),
+		);
+		expect(sql.trimEnd().endsWith('COMMIT;')).toBe(true);
 		expect(sql).toContain('ADD COLUMN "card_480_height" INTEGER');
 		expect(sql).toContain('ADD COLUMN "display_960_height" INTEGER');
 		expect(sql).toContain('ADD COLUMN "poster_card_480_height" INTEGER');
@@ -33,13 +39,21 @@ describe('responsive image schema migration history', () => {
 		expect(sql).not.toMatch(/ADD COLUMN "(?:poster_)?(?:width|height)" INTEGER NOT NULL/);
 		expect(sql).not.toContain('UPDATE "assets"');
 		expect(sql).not.toContain('UPDATE "exhibitions"');
-		expect(sql).toContain('IF EXISTS (SELECT 1 FROM "image_renditions")');
+		expect(sql).toContain('rendition_inventory REGCLASS');
+		expect(sql).toContain("to_regclass('\"image_renditions\"')");
+		expect(sql).toContain("current_setting('transaction_isolation') <> 'read committed'");
+		expect(sql).toMatch(/RAISE EXCEPTION[\s\S]*requires READ COMMITTED isolation/);
+		expect(sql).toContain("'LOCK TABLE %s IN ACCESS EXCLUSIVE MODE'");
+		expect(sql).toContain("'SELECT EXISTS (SELECT 1 FROM %s)'");
+		expect(sql.indexOf("'LOCK TABLE %s IN ACCESS EXCLUSIVE MODE'")).toBeLessThan(
+			sql.indexOf("'SELECT EXISTS (SELECT 1 FROM %s)'"),
+		);
 		expect(sql).toMatch(/RAISE EXCEPTION[\s\S]*Cannot remove non-empty image_renditions/);
 		expect(sql.indexOf('RAISE EXCEPTION')).toBeLessThan(
-			sql.indexOf('DROP TABLE "image_renditions"'),
+			sql.indexOf('ADD COLUMN "card_480_height" INTEGER'),
 		);
-		expect(sql).toContain('DROP TABLE "image_renditions"');
-		expect(sql).toContain('DROP TYPE "ImageRenditionProfile"');
+		expect(sql).toContain('DROP TABLE IF EXISTS "image_renditions"');
+		expect(sql).toContain('DROP TYPE IF EXISTS "ImageRenditionProfile"');
 	});
 
 	it('validates that canonical source columns cannot occupy the rendition namespace', async () => {
@@ -49,7 +63,7 @@ describe('responsive image schema migration history', () => {
 			'CONSTRAINT "assets_storage_key_not_deterministic_rendition_check" CHECK',
 		);
 		expect(sql).toContain(
-			'CONSTRAINT "exhibitions_poster_storage_key_not_deterministic_rendition_check" CHECK',
+			'CONSTRAINT "exhibitions_poster_key_not_deterministic_rendition_check" CHECK',
 		);
 		expect(sql).toContain('"poster_storage_key" IS NULL');
 		expect(sql.match(/right\("storage_key"/g)).toHaveLength(2);

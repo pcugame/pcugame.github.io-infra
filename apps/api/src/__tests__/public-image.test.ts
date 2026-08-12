@@ -99,6 +99,8 @@ describe('public image storage response', () => {
 			body: expect.any(Readable),
 		});
 		expect(storage.head).not.toHaveBeenCalled();
+		expect(repository.resolvePublicImage).toHaveBeenCalledOnce();
+		expect(storage.stream).toHaveBeenCalledOnce();
 		expect(storage.stream).toHaveBeenCalledWith('public', storageKey);
 	});
 
@@ -108,6 +110,8 @@ describe('public image storage response', () => {
 			headers: { 'Content-Length': '4', 'Content-Type': 'image/webp' },
 		});
 		expect(storage.stream).not.toHaveBeenCalled();
+		expect(repository.resolvePublicImage).toHaveBeenCalledOnce();
+		expect(storage.head).toHaveBeenCalledOnce();
 	});
 
 	it.each([
@@ -195,6 +199,8 @@ describe('public image reference resolver', () => {
 				kind: { in: ['IMAGE', 'POSTER', 'THUMBNAIL'] },
 			}),
 		}));
+		expect(assetFindFirst).toHaveBeenCalledOnce();
+		expect(exhibitionFindUnique).not.toHaveBeenCalled();
 	});
 
 	it('resolves an applicable asset rendition from its current public source in one query', async () => {

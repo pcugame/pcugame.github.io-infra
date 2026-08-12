@@ -46,6 +46,49 @@ describe('ResponsiveImage', () => {
 		expect(element.className).toBe('poster');
 	});
 
+	it('keeps immutable generation URLs exact across rerenders and changes them on replacement', () => {
+		const generationA: ResponsiveImageData = {
+			original: {
+				url: 'https://api.test/api/public/images/projects%2Fgeneration-a.webp',
+				width: 1200,
+				height: 675,
+			},
+			renditions: [{
+				profile: 'CARD_480',
+				url: 'https://api.test/api/public/images/projects%2Fgeneration-a.webp%2F__pcu_image_rendition__%2Fv1%2Fcard-480.webp',
+				width: 480,
+				height: 270,
+			}],
+		};
+		const { rerender } = render(<ResponsiveImage image={generationA} alt="캐시 포스터" />);
+		const element = screen.getByRole('img', { name: '캐시 포스터' });
+		const firstSrc = element.getAttribute('src');
+		const firstSrcSet = element.getAttribute('srcset');
+		expect(new URL(firstSrc!).search).toBe('');
+		expect(firstSrcSet).not.toContain('?');
+
+		rerender(<ResponsiveImage image={structuredClone(generationA)} alt="캐시 포스터" />);
+		expect(element.getAttribute('src')).toBe(firstSrc);
+		expect(element.getAttribute('srcset')).toBe(firstSrcSet);
+
+		const generationB: ResponsiveImageData = {
+			...generationA,
+			original: {
+				...generationA.original,
+				url: generationA.original.url.replace('generation-a', 'generation-b'),
+			},
+			renditions: generationA.renditions.map((rendition) => ({
+				...rendition,
+				url: rendition.url.replace('generation-a', 'generation-b'),
+			})),
+		};
+		rerender(<ResponsiveImage image={generationB} alt="교체 포스터" />);
+		expect(element.getAttribute('src')).toBe(generationB.original.url);
+		expect(element.getAttribute('src')).not.toBe(firstSrc);
+		expect(element.getAttribute('srcset')).toContain(generationB.renditions[0]!.url);
+		expect(element.getAttribute('srcset')).not.toBe(firstSrcSet);
+	});
+
 	it('falls back from a failed responsive candidate to the original only once', () => {
 		const onError = vi.fn();
 		const { rerender } = render(
