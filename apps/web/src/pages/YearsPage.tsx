@@ -69,7 +69,7 @@ function YearsCardPoster({ ex }: { ex: PublicYearItem }) {
           image={ex.poster}
           alt=""
           sizes="(max-width: 640px) 38vw, (max-width: 1100px) 24vw, 240px"
-          loading="lazy"
+          loading="eager"
           decoding="async"
         />
       ) : (

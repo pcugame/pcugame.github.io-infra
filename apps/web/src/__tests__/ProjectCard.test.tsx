@@ -55,7 +55,8 @@ describe('ProjectCard', () => {
 		expect(poster.getAttribute('src')).toBe('https://images.test/original.webp');
 		expect(poster.getAttribute('srcset')).toContain('https://images.test/card.webp 480w');
 		expect(poster.getAttribute('sizes')).toContain('280px');
-		expect(poster.getAttribute('loading')).toBe('lazy');
+		expect(poster.getAttribute('loading')).toBe('eager');
 		expect(poster.getAttribute('decoding')).toBe('async');
+		expect(poster.getAttribute('fetchpriority')).toBeNull();
 	});
 });
