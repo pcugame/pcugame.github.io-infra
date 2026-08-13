@@ -38,7 +38,11 @@ export interface OrphanServiceDependencies {
 			targetKind: 'EXACT' | 'PREFIX';
 			attemptCount: number;
 		}[]>;
-		markClaimResolved(id: number, claimToken: string, now: Date): Promise<unknown>;
+		markClaimResolved(
+			id: number,
+			claimToken: string,
+			now: Date,
+		): Promise<{ count: number }>;
 		renewActiveClaim(
 			id: number,
 			claimToken: string,
@@ -49,14 +53,14 @@ export interface OrphanServiceDependencies {
 			claimToken: string,
 			reason: string,
 			now: Date,
-		): Promise<unknown>;
+		): Promise<{ count: number; requeued?: boolean }>;
 		markClaimFailed(
 			id: number,
 			claimToken: string,
 			error: unknown,
 			now: Date,
 			nextAttemptAt: Date,
-		): Promise<unknown>;
+		): Promise<{ count: number }>;
 	};
 	references: {
 		collect(): Promise<ObjectReferenceInventory>;
@@ -100,6 +104,16 @@ const STORAGE_REQUEST_TIMEOUT_MS = 60 * 1000;
 const MAX_BACKOFF_MS = 60 * 60 * 1000;
 const NOISY_ATTEMPT_THRESHOLD = 10;
 
+function assertOwnedMutation(
+	result: { count: number },
+	orphanId: number,
+	action: string,
+): void {
+	if (result.count !== 1) {
+		throw new Error(`Orphan deletion claim was lost before ${action} for orphan ${orphanId}`);
+	}
+}
+
 function boundedStorageRequest(signal: AbortSignal) {
 	return {
 		signal: AbortSignal.any([
@@ -133,22 +147,24 @@ export async function runOrphanReaper(
 	try {
 		inventory = await deps.references.collect();
 	} catch (error) {
-		await Promise.allSettled(pending.map((orphan) => {
+		const failureWrites = await Promise.allSettled(pending.map(async (orphan) => {
 			const backoffMs = Math.min(
 				REAP_COOLDOWN_MS * (2 ** Math.min(orphan.attemptCount, 8)),
 				MAX_BACKOFF_MS,
 			);
-			return deps.repository.markClaimFailed(
+			const result = await deps.repository.markClaimFailed(
 				orphan.id,
 				claimToken,
 				error,
 				now,
 				new Date(now.getTime() + backoffMs),
 			);
+			assertOwnedMutation(result, orphan.id, 'failure requeue');
 		}));
+		const requeued = failureWrites.filter(({ status }) => status === 'fulfilled').length;
 		deps.logger.error(
-			{ error, claimed: pending.length },
-			'Orphan reference snapshot failed; claimed deletions were requeued',
+			{ error, claimed: pending.length, requeued },
+			'Orphan reference snapshot failed; active claimed deletions were requeued',
 		);
 		return { tried: pending.length, resolved: 0, failed: pending.length };
 	}
@@ -222,10 +238,8 @@ export async function runOrphanReaper(
 					'live-reference-detected',
 					now,
 				);
-				if (typeof cancellation === 'object'
-					&& cancellation !== null
-					&& 'requeued' in cancellation
-					&& cancellation.requeued === true) {
+				assertOwnedMutation(cancellation, orphan.id, 'reference cancellation');
+				if (cancellation.requeued === true) {
 					continue;
 				}
 				resolved++;
@@ -264,23 +278,26 @@ export async function runOrphanReaper(
 				);
 			}
 			assertClaimOwned();
-			await deps.repository.markClaimResolved(orphan.id, claimToken, now);
+			const resolution = await deps.repository.markClaimResolved(orphan.id, claimToken, now);
+			assertOwnedMutation(resolution, orphan.id, 'resolution');
 			resolved++;
 		} catch (err) {
 			const backoffMs = Math.min(
 				REAP_COOLDOWN_MS * (2 ** Math.min(orphan.attemptCount, 8)),
 				MAX_BACKOFF_MS,
 			);
-			const failureWrite = deps.repository.markClaimFailed(
-				orphan.id,
-				claimToken,
-				err,
-				now,
-				new Date(now.getTime() + backoffMs),
-			);
-			await failureWrite.catch((dbErr) => {
+			try {
+				const failureWrite = await deps.repository.markClaimFailed(
+					orphan.id,
+					claimToken,
+					err,
+					now,
+					new Date(now.getTime() + backoffMs),
+				);
+				assertOwnedMutation(failureWrite, orphan.id, 'failure requeue');
+			} catch (dbErr) {
 				deps.logger.error({ err: dbErr, orphanId: orphan.id }, 'Failed to record orphan reap attempt');
-			});
+			}
 			if (orphan.attemptCount + 1 >= NOISY_ATTEMPT_THRESHOLD) {
 				deps.logger.error(
 					{ err, orphanId: orphan.id, bucket: orphan.bucket, storageKey: orphan.storageKey, attemptCount: orphan.attemptCount + 1 },

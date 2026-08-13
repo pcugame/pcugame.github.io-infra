@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../../generated/prisma/client.js';
+import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 
 export interface DurableDeletionTarget {
 	bucket: string;
@@ -7,7 +7,7 @@ export interface DurableDeletionTarget {
 	targetKind?: 'EXACT' | 'PREFIX';
 }
 
-type OrphanOutboxClient = Pick<PrismaClient, 'orphanObject'>;
+type OrphanOutboxClient = Pick<PrismaClient, 'orphanObject' | '$queryRaw'>;
 
 export const OUTBOX_REQUEUE_CANCEL_REASON = 'business-outbox-requeue-requested';
 
@@ -42,47 +42,62 @@ export async function queueDurableDeletions(
 			},
 			update: { reason: target.reason },
 		});
-		// This helper is called only inside the business transaction that removes
-		// the corresponding live reference. Do not invalidate a current token (a
-		// reference writer must remain blocked while that worker may delete), but
-		// leave a durable signal so a stale "live reference" observation requeues
-		// instead of cancelling this newer business outbox.
-		await client.orphanObject.updateMany({
-			where: {
-				bucket: target.bucket,
-				storageKey: target.storageKey,
-				state: 'DELETE_CLAIMED',
-				claimUntil: { gt: now },
-			},
-			data: {
-				cancelReason: OUTBOX_REQUEUE_CANCEL_REASON,
-				nextAttemptAt: now,
-			},
-		});
-		// Reconciliation uses createOrphanRepository.upsertOrphan instead and keeps
-		// active claims entirely unchanged.
-		await client.orphanObject.updateMany({
-			where: {
-				bucket: target.bucket,
-				storageKey: target.storageKey,
-				OR: [
-					{ state: { not: 'DELETE_CLAIMED' } },
-					{ claimUntil: null },
-					{ claimUntil: { lte: now } },
-				],
-			},
-			data: {
-				targetKind,
-				state: 'PENDING',
-				claimToken: null,
-				claimUntil: null,
-				cancelReason: null,
-				resolvedAt: null,
-				attemptCount: 0,
-				lastTriedAt: null,
-				lastError: null,
-				nextAttemptAt: now,
-			},
-		});
+		// This helper runs inside the reference-removal transaction. Evaluate the
+		// persisted lease once with the database clock: preserve and signal a live
+		// owner, or atomically reset an inactive row for a future reaper claim.
+		await client.$queryRaw(Prisma.sql`
+			WITH database_time AS MATERIALIZED (
+				SELECT clock_timestamp() AS "now"
+			), classified AS MATERIALIZED (
+				SELECT candidate."id",
+					candidate."state" = 'DELETE_CLAIMED'::"OrphanState"
+						AND candidate."claim_until" > database_time."now" AS "is_active"
+				FROM "orphan_objects" AS candidate
+				CROSS JOIN database_time
+				WHERE candidate."bucket" = ${target.bucket}
+					AND candidate."storage_key" = ${target.storageKey}
+			)
+			UPDATE "orphan_objects" AS orphan
+			SET "target_kind" = CASE WHEN classified."is_active"
+					THEN orphan."target_kind"
+					ELSE CAST(${targetKind} AS "OrphanTargetKind")
+				END,
+				"state" = CASE WHEN classified."is_active"
+					THEN orphan."state"
+					ELSE 'PENDING'::"OrphanState"
+				END,
+				"claim_token" = CASE WHEN classified."is_active"
+					THEN orphan."claim_token"
+					ELSE NULL
+				END,
+				"claim_until" = CASE WHEN classified."is_active"
+					THEN orphan."claim_until"
+					ELSE NULL
+				END,
+				"cancel_reason" = CASE WHEN classified."is_active"
+					THEN ${OUTBOX_REQUEUE_CANCEL_REASON}
+					ELSE NULL
+				END,
+				"resolved_at" = CASE WHEN classified."is_active"
+					THEN orphan."resolved_at"
+					ELSE NULL
+				END,
+				"attempt_count" = CASE WHEN classified."is_active"
+					THEN orphan."attempt_count"
+					ELSE 0
+				END,
+				"last_tried_at" = CASE WHEN classified."is_active"
+					THEN orphan."last_tried_at"
+					ELSE NULL
+				END,
+				"last_error" = CASE WHEN classified."is_active"
+					THEN orphan."last_error"
+					ELSE NULL
+				END,
+				"next_attempt_at" = ${now}
+			FROM classified
+			WHERE orphan."id" = classified."id"
+			RETURNING orphan."id"
+		`);
 	}
 }

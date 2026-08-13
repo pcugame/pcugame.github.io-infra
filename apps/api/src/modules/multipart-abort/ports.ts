@@ -9,9 +9,8 @@ export interface MultipartAbortRepository {
 	queue(target: MultipartAbortTarget): Promise<unknown>;
 	claim(
 		limit: number,
-		now: Date,
 		claimToken: string,
-		claimUntil: Date,
+		leaseMs: number,
 	): Promise<Array<{
 		id: string;
 		bucket: string;
@@ -22,9 +21,8 @@ export interface MultipartAbortRepository {
 	renew(
 		id: string,
 		claimToken: string,
-		now: Date,
-		claimUntil: Date,
-	): Promise<unknown>;
+		leaseMs: number,
+	): Promise<{ count: number }>;
 	resolve(id: string, claimToken: string, now: Date): Promise<unknown>;
 	fail(
 		id: string,

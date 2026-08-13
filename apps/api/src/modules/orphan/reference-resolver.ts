@@ -382,7 +382,7 @@ export async function assertNoDeletionClaim(
 				orphan."id",
 				(
 					orphan."state" = 'DELETE_CLAIMED'::"OrphanState"
-					AND orphan."claim_until" > CURRENT_TIMESTAMP
+					AND orphan."claim_until" > clock_timestamp()
 				) AS "activelyClaimed"
 			FROM "orphan_objects" AS orphan
 			CROSS JOIN object_reference_lock
@@ -404,7 +404,7 @@ export async function assertNoDeletionClaim(
 				orphan."id",
 				(
 					orphan."state" = 'DELETE_CLAIMED'::"OrphanState"
-					AND orphan."claim_until" > CURRENT_TIMESTAMP
+					AND orphan."claim_until" > clock_timestamp()
 				) AS "activelyClaimed"
 			FROM "orphan_objects" AS orphan
 			CROSS JOIN object_reference_lock

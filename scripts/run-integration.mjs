@@ -11,6 +11,7 @@ const steps = [
 	[npm, ['run', 'test:integration:import-transaction']],
 	[npm, ['run', 'test:integration:game-upload']],
 	[npm, ['run', 'test:integration:idempotency']],
+	[npm, ['run', 'test:integration:lease-clock-core']],
 	[npm, ['run', 'test:integration:lifecycle-schema']],
 	[npm, ['run', 'test:integration:responsive-image-migration']],
 	[npm, ['run', 'test:integration:storage-recovery']],

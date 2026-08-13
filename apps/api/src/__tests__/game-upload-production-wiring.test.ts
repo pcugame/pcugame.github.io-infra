@@ -314,9 +314,7 @@ describe('game-upload production composition', () => {
 		expect(harness.repository.completePartClaim).toHaveBeenCalledWith({
 			token: claim?.token,
 			etag: 'etag-1',
-			now: new Date('2026-08-11T00:00:00.000Z'),
 		});
-		expect(harness.repository.upsertPartEtag).not.toHaveBeenCalled();
 	});
 
 	it('passes the completion claim token into the atomic terminal outbox commit and only wakes the worker afterward', async () => {
@@ -386,9 +384,8 @@ describe('game-upload production composition', () => {
 		await a.graph.recoverStaleUploads();
 		expect(a.repository.claimStaleCompletingSessions).toHaveBeenCalledWith(
 			new Date('2026-08-10T23:55:00.000Z'),
-			new Date('2026-08-11T00:00:00.000Z'),
 			expect.any(String),
-			new Date('2026-08-11T00:02:00.000Z'),
+			2 * 60 * 1000,
 			50,
 		);
 		expect(a.repository.markFailed).toHaveBeenCalledWith(
@@ -396,7 +393,6 @@ describe('game-upload production composition', () => {
 			undefined,
 			expect.any(String),
 		);
-		expect(a.repository.findStaleCompletingSessions).not.toHaveBeenCalled();
 		expect(b.repository.claimStaleCompletingSessions).not.toHaveBeenCalled();
 	});
 

@@ -17,9 +17,8 @@ export interface UploadIntentRepository {
 	recordAmbiguousError(id: string, error: unknown): Promise<unknown>;
 	claimStale(
 		limit: number,
-		now: Date,
 		claimToken: string,
-		claimUntil: Date,
+		leaseMs: number,
 	): Promise<Array<{
 		id: string;
 		bucket: string;
@@ -30,9 +29,8 @@ export interface UploadIntentRepository {
 	renewClaim(
 		id: string,
 		claimToken: string,
-		now: Date,
-		claimUntil: Date,
-	): Promise<unknown>;
+		leaseMs: number,
+	): Promise<{ count: number }>;
 	markReferenced(id: string, claimToken: string): Promise<unknown>;
 	markMissing(id: string, claimToken: string): Promise<unknown>;
 	queueCleanup(

@@ -50,13 +50,10 @@ function createHarness(session = staleSession()) {
 			findSessionById: vi.fn(),
 			createSessionReplacingActive: vi.fn(),
 			cancelSessionAndClearActive: vi.fn(),
-			upsertPartEtag: vi.fn(),
-			transitionToCompleting: vi.fn(),
 			findPartsBySessionId: vi.fn(),
 			revertToPending: mocks.revertToPending,
 			markFailed: mocks.markFailed,
 			markCompletedObjectFailed: mocks.markCompletedObjectFailed,
-			findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
 			claimStaleCompletingSessions: mocks.claimStale,
 			findActiveSessionsForListing: vi.fn(),
 			findExhibitionById: vi.fn(),
@@ -104,8 +101,11 @@ describe('stale upload recovery', () => {
 		expect(deps.repository.releaseCompletionClaim).toHaveBeenCalledWith(
 			'stale-upload',
 			'id',
-			new Date('2026-07-21T00:10:00.000Z'),
 			'recovery-deferred',
+		);
+		expect(mocks.logWarn).toHaveBeenCalledWith(
+			{ sessionId: 'stale-upload', completionClaimToken: 'id' },
+			'Completing-session recovery claim was lost before deferred release',
 		);
 	});
 
@@ -117,9 +117,8 @@ describe('stale upload recovery', () => {
 
 		expect(mocks.claimStale).toHaveBeenCalledWith(
 			new Date('2026-07-21T00:05:00.000Z'),
-			new Date('2026-07-21T00:10:00.000Z'),
 			'id',
-			new Date('2026-07-21T00:12:00.000Z'),
+			2 * 60 * 1000,
 			50,
 		);
 		expect(mocks.finalize).toHaveBeenCalledWith({

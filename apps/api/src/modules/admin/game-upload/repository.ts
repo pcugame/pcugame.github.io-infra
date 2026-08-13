@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
 	Prisma,
 	type AssetKind,
@@ -21,6 +22,23 @@ import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
 import { assertNoDeletionClaim } from '../../orphan/reference-resolver.js';
 
 type TxClient = Prisma.TransactionClient;
+
+async function lockActiveCompletionClaim(
+	tx: TxClient,
+	sessionId: string,
+	token: string,
+): Promise<boolean> {
+	const active = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+		SELECT "id"
+		FROM "game_upload_sessions"
+		WHERE "id" = ${sessionId}
+			AND "status" = 'COMPLETING'
+			AND "completion_claim_token" = ${token}
+			AND "completion_claim_until" > clock_timestamp()
+		FOR UPDATE
+	`);
+	return active.length === 1;
+}
 
 export interface GameReplacementOutboxConfig {
 	bucket: string;
@@ -58,7 +76,18 @@ const serializableOptions = {
 } as const;
 
 function isRetryableTransactionError(err: unknown): boolean {
-	return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034';
+	if (!(err instanceof Prisma.PrismaClientKnownRequestError)) return false;
+	if (err.code === 'P2034') return true;
+	if (err.code !== 'P2010') return false;
+	const driverError = err.meta?.['driverAdapterError'];
+	if (!driverError || typeof driverError !== 'object' || !('cause' in driverError)) return false;
+	const cause = driverError.cause;
+	return !!cause
+		&& typeof cause === 'object'
+		&& 'kind' in cause
+		&& cause.kind === 'TransactionWriteConflict'
+		&& 'originalCode' in cause
+		&& cause.originalCode === '40001';
 }
 
 export async function withSerializableRetry<T>(
@@ -258,17 +287,6 @@ export function findActiveSessionsForListing(
 	});
 }
 
-/**
- * Atomically transition session from PENDING to COMPLETING.
- * Returns count=0 if another request already transitioned it.
- */
-export function transitionToCompleting(sessionId: string, client: PrismaClient) {
-	return client.gameUploadSession.updateMany({
-		where: { id: sessionId, status: 'PENDING' },
-		data: { status: 'COMPLETING' },
-	});
-}
-
 export function acquirePartClaim(
 	input: {
 		sessionId: string;
@@ -276,11 +294,11 @@ export function acquirePartClaim(
 		generation: number;
 		token: string;
 		owner: string;
-		now: Date;
-		leaseUntil: Date;
+		leaseMs: number;
 	},
 	client: PrismaClient,
 ) {
+	const claimId = randomUUID();
 	return withSerializableRetry(async (tx) => {
 		const session = await tx.gameUploadSession.findUnique({
 			where: { id: input.sessionId },
@@ -289,46 +307,61 @@ export function acquirePartClaim(
 		if (!session || session.status !== 'PENDING' || session.multipartGeneration !== input.generation) {
 			return { kind: 'unavailable' as const };
 		}
-		const existing = await tx.gameUploadPartClaim.findUnique({
-			where: {
-				game_upload_part_claim_session_part: {
-					sessionId: input.sessionId,
-					partNumber: input.partNumber,
-				},
-			},
-		});
-		if (existing) {
-			return existing.leaseUntil <= input.now
-				? { kind: 'expired' as const }
-				: { kind: 'busy' as const };
+		const inserted = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+			INSERT INTO "game_upload_part_claims" (
+				"id", "session_id", "part_number", "token", "generation",
+				"owner", "lease_until", "created_at", "updated_at"
+			)
+			VALUES (
+				${claimId}, ${input.sessionId}, ${input.partNumber}, ${input.token},
+				${input.generation}, ${input.owner},
+				clock_timestamp() + (${input.leaseMs} * INTERVAL '1 millisecond'),
+				clock_timestamp(), clock_timestamp()
+			)
+			ON CONFLICT ("session_id", "part_number") DO NOTHING
+			RETURNING "id"
+		`);
+		if (inserted.length === 1) {
+			return { kind: 'acquired' as const, token: input.token };
 		}
-		await tx.gameUploadPartClaim.create({
-			data: {
-				sessionId: input.sessionId,
-				partNumber: input.partNumber,
-				token: input.token,
-				generation: input.generation,
-				owner: input.owner,
-				leaseUntil: input.leaseUntil,
-			},
-		});
-		return { kind: 'acquired' as const, token: input.token };
+		const existing = await tx.$queryRaw<Array<{ expired: boolean }>>(Prisma.sql`
+			SELECT claim."lease_until" <= clock_timestamp() AS "expired"
+			FROM "game_upload_part_claims" AS claim
+			WHERE claim."session_id" = ${input.sessionId}
+				AND claim."part_number" = ${input.partNumber}
+			FOR UPDATE
+		`);
+		return existing[0]?.expired
+			? { kind: 'expired' as const }
+			: { kind: 'busy' as const };
 	}, client);
 }
 
 export function completePartClaim(
-	input: { token: string; etag: string; now: Date },
+	input: { token: string; etag: string },
 	client: PrismaClient,
 ) {
 	return withSerializableRetry(async (tx) => {
-		const claim = await tx.gameUploadPartClaim.findUnique({
-			where: { token: input.token },
-			include: { session: { select: { status: true, multipartGeneration: true } } },
-		});
-		if (!claim
-			|| claim.leaseUntil <= input.now
-			|| claim.session.status !== 'PENDING'
-			|| claim.session.multipartGeneration !== claim.generation) {
+		const claims = await tx.$queryRaw<Array<{
+			id: string;
+			sessionId: string;
+			partNumber: number;
+			generation: number;
+		}>>(Prisma.sql`
+			SELECT claim."id",
+				claim."session_id" AS "sessionId",
+				claim."part_number" AS "partNumber",
+				claim."generation"
+			FROM "game_upload_part_claims" AS claim
+			JOIN "game_upload_sessions" AS session ON session."id" = claim."session_id"
+			WHERE claim."token" = ${input.token}
+				AND claim."lease_until" > clock_timestamp()
+				AND session."status" = 'PENDING'
+				AND session."multipart_generation" = claim."generation"
+			FOR UPDATE OF claim, session
+		`);
+		const claim = claims[0];
+		if (!claim) {
 			return { accepted: false as const, parts: [] };
 		}
 		await tx.gameUploadPart.upsert({
@@ -356,7 +389,7 @@ export function completePartClaim(
 }
 
 export function claimCompletion(
-	input: { sessionId: string; generation: number; token: string; now: Date; leaseUntil: Date },
+	input: { sessionId: string; generation: number; token: string; leaseMs: number },
 	client: PrismaClient,
 ) {
 	return withSerializableRetry(async (tx) => {
@@ -370,20 +403,20 @@ export function claimCompletion(
 		const currentParts = session.parts.filter((part) => part.generation === input.generation);
 		if (session.partClaims.length > 0) return { count: 0, reason: 'parts-active' as const };
 		if (currentParts.length !== session.totalChunks) return { count: 0, reason: 'parts-missing' as const };
-		const updated = await tx.gameUploadSession.updateMany({
-			where: {
-				id: input.sessionId,
-				status: 'PENDING',
-				multipartGeneration: input.generation,
-			},
-			data: {
-				status: 'COMPLETING',
-				completionClaimToken: input.token,
-				completionClaimUntil: input.leaseUntil,
-				completionLastError: null,
-			},
-		});
-		return { count: updated.count, reason: updated.count === 1 ? null : 'state' as const };
+		const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+			UPDATE "game_upload_sessions"
+			SET "status" = 'COMPLETING',
+				"completion_claim_token" = ${input.token},
+				"completion_claim_until" = clock_timestamp()
+					+ (${input.leaseMs} * INTERVAL '1 millisecond'),
+				"completion_last_error" = NULL,
+				"updated_at" = clock_timestamp()
+			WHERE "id" = ${input.sessionId}
+				AND "status" = 'PENDING'
+				AND "multipart_generation" = ${input.generation}
+			RETURNING "id"
+		`);
+		return { count: updated.length, reason: updated.length === 1 ? null : 'state' as const };
 	}, client);
 }
 
@@ -398,11 +431,29 @@ export function replaceMultipartGeneration(
 	client: PrismaClient,
 ) {
 	return withSerializableRetry(async (tx) => {
-		const session = await tx.gameUploadSession.findUnique({ where: { id: input.sessionId } });
-		if (!session
-			|| session.status !== 'PENDING'
-			|| session.multipartGeneration !== input.expectedGeneration
-			|| !session.s3Key) return { replaced: false as const, durableAbort: null };
+		const sessions = await tx.$queryRaw<Array<{
+			id: string;
+			s3Key: string;
+			s3UploadId: string | null;
+		}>>(Prisma.sql`
+			SELECT session."id",
+				session."s3_key" AS "s3Key",
+				session."s3_upload_id" AS "s3UploadId"
+			FROM "game_upload_sessions" AS session
+			WHERE session."id" = ${input.sessionId}
+				AND session."status" = 'PENDING'
+				AND session."multipart_generation" = ${input.expectedGeneration}
+				AND session."s3_key" IS NOT NULL
+				AND NOT EXISTS (
+					SELECT 1
+					FROM "game_upload_part_claims" AS claim
+					WHERE claim."session_id" = session."id"
+						AND claim."lease_until" > clock_timestamp()
+				)
+			FOR UPDATE OF session
+		`);
+		const session = sessions[0];
+		if (!session) return { replaced: false as const, durableAbort: null };
 		let durableAbort: DurablyTrackedMultipartAbort | null = null;
 		if (session.s3UploadId) {
 			durableAbort = {
@@ -433,29 +484,6 @@ export function replaceMultipartGeneration(
 	}, client);
 }
 
-/** Store or replace an S3 multipart ETag for a part. */
-export async function upsertPartEtag(
-	sessionId: string,
-	partNumber: number,
-	etag: string,
-	client: PrismaClient,
-) {
-	await client.gameUploadPart.upsert({
-		where: {
-			game_upload_part_session_part: {
-				sessionId,
-				partNumber,
-			},
-		},
-		update: { etag },
-		create: { sessionId, partNumber, etag },
-	});
-	return client.gameUploadPart.findMany({
-		where: { sessionId },
-		orderBy: { partNumber: 'asc' },
-	});
-}
-
 export function findPartsBySessionId(sessionId: string, client: PrismaClient) {
 	return client.gameUploadPart.findMany({
 		where: { sessionId },
@@ -467,43 +495,47 @@ export function findPartsBySessionId(sessionId: string, client: PrismaClient) {
 export function revertToPending(
 	sessionId: string,
 	client: PrismaClient,
-	completionClaimToken?: string,
+	completionClaimToken: string,
 ) {
-	return client.gameUploadSession.updateMany({
-		where: {
-			id: sessionId,
-			status: 'COMPLETING',
-			...(completionClaimToken ? { completionClaimToken } : {}),
-		},
-		data: {
-			status: 'PENDING',
-			completionClaimToken: null,
-			completionClaimUntil: null,
-		},
-	});
+	return (async () => {
+		const reverted = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+			UPDATE "game_upload_sessions"
+			SET "status" = 'PENDING',
+				"completion_claim_token" = NULL,
+				"completion_claim_until" = NULL,
+				"updated_at" = clock_timestamp()
+			WHERE "id" = ${sessionId}
+				AND "status" = 'COMPLETING'
+				AND "completion_claim_token" = ${completionClaimToken}
+				AND "completion_claim_until" > clock_timestamp()
+			RETURNING "id"
+		`);
+		return { count: reverted.length };
+	})();
 }
 
 export function markFailed(
 	sessionId: string,
 	storageKey: string | null | undefined,
 	client: PrismaClient,
-	completionClaimToken?: string,
+	completionClaimToken: string,
 ) {
 	return withSerializableRetry(async (tx) => {
-		const result = await tx.gameUploadSession.updateMany({
-			where: {
-				id: sessionId,
-				...(completionClaimToken
-					? { status: 'COMPLETING' as const, completionClaimToken }
-					: { status: { in: ['PENDING', 'COMPLETING'] as const } }),
-			},
-			data: {
-				status: 'FAILED',
-				completionClaimToken: null,
-				completionClaimUntil: null,
-				...(storageKey ? { storageKey } : {}),
-			},
-		});
+		const failed = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+			UPDATE "game_upload_sessions"
+			SET "status" = 'FAILED',
+				"completion_claim_token" = NULL,
+				"completion_claim_until" = NULL,
+				"storage_key" = COALESCE(${storageKey ?? null}, "storage_key"),
+				"updated_at" = clock_timestamp()
+			WHERE "id" = ${sessionId}
+				AND "status" = 'COMPLETING'
+				AND "completion_claim_token" = ${completionClaimToken}
+				AND "completion_claim_until" > clock_timestamp()
+			RETURNING "id"
+		`);
+		const result = { count: failed.length };
+		if (result.count !== 1) return result;
 		await tx.gameUploadActiveSession.deleteMany({
 			where: { sessionId },
 		});
@@ -522,18 +554,19 @@ export function markCompletedObjectFailed(
 		storageKey: string;
 		reason: string;
 		bucket: string;
-		completionClaimToken?: string;
+		completionClaimToken: string;
 	},
 	client: PrismaClient,
 ) {
 	return withSerializableRetry(async (tx) => {
+		if (!await lockActiveCompletionClaim(tx, input.sessionId, input.completionClaimToken)) {
+			return { count: 0 };
+		}
 		const result = await tx.gameUploadSession.updateMany({
 			where: {
 				id: input.sessionId,
 				status: 'COMPLETING',
-				...(input.completionClaimToken
-					? { completionClaimToken: input.completionClaimToken }
-					: {}),
+				completionClaimToken: input.completionClaimToken,
 			},
 			data: {
 				status: 'FAILED',
@@ -573,12 +606,15 @@ export function finalizeCompletedSession(
 		playbackStatus?: AssetPlaybackStatus;
 		playbackError?: string;
 		isPublic: boolean;
-		completionClaimToken?: string;
+		completionClaimToken: string;
 	},
 	outbox: GameReplacementOutboxConfig,
 	client: PrismaClient,
 ): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
 	return withAssetMutationTransaction(client, async (tx) => {
+		if (!await lockActiveCompletionClaim(tx, sessionId, data.completionClaimToken)) {
+			throw new Error('Game upload completion claim is no longer active');
+		}
 		await assertNoDeletionClaim(tx, {
 			bucket: outbox.bucket,
 			key: data.storageKey,
@@ -698,9 +734,7 @@ export function finalizeCompletedSession(
 				id: sessionId,
 				status: 'COMPLETING',
 				uploadKind: 'GAME',
-				...(data.completionClaimToken
-					? { completionClaimToken: data.completionClaimToken }
-					: {}),
+				completionClaimToken: data.completionClaimToken,
 			},
 			data: {
 				status: 'COMPLETED',
@@ -732,12 +766,15 @@ export function finalizeCompletedWebglSession(
 	sourceKey: string,
 	outbox: WebglReplacementOutboxConfig,
 	client: PrismaClient,
-	completionClaimToken?: string,
+	completionClaimToken: string,
 	completionResult: { status: 'COMPLETED'; storageKey: string; sizeBytes: number; webglUrl: string } = {
 		status: 'COMPLETED', storageKey: sourceKey, sizeBytes: 0, webglUrl: '',
 	},
 ): Promise<{ oldEntryKey: string }> {
 	return withSerializableRetry(async (tx) => {
+		if (!await lockActiveCompletionClaim(tx, sessionId, completionClaimToken)) {
+			throw new Error('WebGL upload completion claim is no longer active');
+		}
 		const deployment = parseWebglEntryKey(projectId, entryKey);
 		if (!deployment) throw new Error('Cannot finalize malformed WebGL entry key');
 		await assertNoDeletionClaim(tx, {
@@ -781,7 +818,7 @@ export function finalizeCompletedWebglSession(
 				id: sessionId,
 				status: 'COMPLETING',
 				uploadKind: 'WEBGL',
-				...(completionClaimToken ? { completionClaimToken } : {}),
+				completionClaimToken,
 			},
 			data: {
 				status: 'COMPLETED',
@@ -801,56 +838,37 @@ export function finalizeCompletedWebglSession(
 	}, client);
 }
 
-/**
- * Find sessions stuck in COMPLETING past `cutoff` — these were interrupted by a crash
- * or forced shutdown and would otherwise never progress. Called on boot so a restart
- * gives users a chance to retry rather than waiting for TTL expiry.
- */
-export function findStaleCompletingSessions(cutoff: Date, client: PrismaClient) {
-	return client.gameUploadSession.findMany({
-		where: {
-			status: 'COMPLETING',
-			OR: [
-				{ completionClaimUntil: null, updatedAt: { lt: cutoff } },
-				{ completionClaimUntil: { lt: new Date() } },
-			],
-		},
-	});
-}
-
 export function claimStaleCompletingSessions(
 	cutoff: Date,
-	now: Date,
 	token: string,
-	leaseUntil: Date,
+	leaseMs: number,
 	limit: number,
 	client: PrismaClient,
 ) {
 	return withSerializableRetry(async (tx) => {
-		const candidates = await tx.gameUploadSession.findMany({
-			where: {
-				status: 'COMPLETING',
-				OR: [
-					{ completionClaimUntil: null, updatedAt: { lt: cutoff } },
-					{ completionClaimUntil: { lte: now } },
-				],
-			},
-			select: { id: true },
-			orderBy: { updatedAt: 'asc' },
-			take: limit,
-		});
+		const candidates = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+			WITH candidates AS (
+				SELECT session."id"
+				FROM "game_upload_sessions" AS session
+				WHERE session."status" = 'COMPLETING'
+					AND (
+						(session."completion_claim_until" IS NULL AND session."updated_at" < ${cutoff})
+						OR session."completion_claim_until" <= clock_timestamp()
+					)
+				ORDER BY session."updated_at" ASC
+				LIMIT ${limit}
+				FOR UPDATE OF session SKIP LOCKED
+			)
+			UPDATE "game_upload_sessions" AS session
+			SET "completion_claim_token" = ${token},
+				"completion_claim_until" = clock_timestamp()
+					+ (${leaseMs} * INTERVAL '1 millisecond'),
+				"updated_at" = clock_timestamp()
+			FROM candidates
+			WHERE session."id" = candidates."id"
+			RETURNING session."id"
+		`);
 		if (candidates.length === 0) return [];
-		await tx.gameUploadSession.updateMany({
-			where: {
-				id: { in: candidates.map(({ id }) => id) },
-				status: 'COMPLETING',
-				OR: [
-					{ completionClaimUntil: null, updatedAt: { lt: cutoff } },
-					{ completionClaimUntil: { lte: now } },
-				],
-			},
-			data: { completionClaimToken: token, completionClaimUntil: leaseUntil },
-		});
 		return tx.gameUploadSession.findMany({
 			where: { id: { in: candidates.map(({ id }) => id) }, completionClaimToken: token },
 		});
@@ -894,58 +912,62 @@ export function createGameUploadRepository(
 		),
 		acquirePartClaim: (input: Parameters<typeof acquirePartClaim>[0]) => acquirePartClaim(input, client),
 		completePartClaim: (input: Parameters<typeof completePartClaim>[0]) => completePartClaim(input, client),
-		renewPartClaim: (token: string, now: Date, leaseUntil: Date) => (
-			client.gameUploadPartClaim.updateMany({
-				where: { token, leaseUntil: { gt: now } },
-				data: { leaseUntil },
-			})
-		),
+		renewPartClaim: async (token: string, leaseMs: number) => {
+			const renewed = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "game_upload_part_claims"
+				SET "lease_until" = clock_timestamp()
+						+ (${leaseMs} * INTERVAL '1 millisecond'),
+					"updated_at" = clock_timestamp()
+				WHERE "token" = ${token}
+					AND "lease_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return { count: renewed.length };
+		},
 		claimCompletion: (input: Parameters<typeof claimCompletion>[0]) => claimCompletion(input, client),
-		renewCompletionClaim: (sessionId: string, token: string, now: Date, leaseUntil: Date) => (
-			client.gameUploadSession.updateMany({
-				where: {
-					id: sessionId,
-					status: 'COMPLETING',
-					completionClaimToken: token,
-					completionClaimUntil: { gt: now },
-				},
-				data: { completionClaimUntil: leaseUntil },
-			})
-		),
-		releaseCompletionClaim: (sessionId: string, token: string, now: Date, reason: string) => (
-				client.gameUploadSession.updateMany({
-					where: {
-						id: sessionId,
-						status: 'COMPLETING',
-						completionClaimToken: token,
-					},
-					data: {
-						completionClaimToken: null,
-						completionClaimUntil: now,
-						completionLastError: reason.slice(0, 500),
-					},
-				})
-			),
+		renewCompletionClaim: async (sessionId: string, token: string, leaseMs: number) => {
+			const renewed = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "game_upload_sessions"
+				SET "completion_claim_until" = clock_timestamp()
+						+ (${leaseMs} * INTERVAL '1 millisecond'),
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${sessionId}
+					AND "status" = 'COMPLETING'
+					AND "completion_claim_token" = ${token}
+					AND "completion_claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return { count: renewed.length };
+		},
+		releaseCompletionClaim: async (sessionId: string, token: string, reason: string) => {
+			const released = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "game_upload_sessions"
+				SET "completion_claim_token" = NULL,
+					"completion_claim_until" = clock_timestamp(),
+					"completion_last_error" = ${reason.slice(0, 500)},
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${sessionId}
+					AND "status" = 'COMPLETING'
+					AND "completion_claim_token" = ${token}
+					AND "completion_claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return { count: released.length };
+		},
 		replaceMultipartGeneration: (input: Omit<Parameters<typeof replaceMultipartGeneration>[0], 'abortBucket'>) => (
 			replaceMultipartGeneration({
 				...input,
 				abortBucket: options.abortBucket,
 			}, client)
 		),
-		upsertPartEtag: (
-			sessionId: string,
-			partNumber: number,
-			etag: string,
-		) => upsertPartEtag(sessionId, partNumber, etag, client),
-		transitionToCompleting: (sessionId: string) => transitionToCompleting(sessionId, client),
 		findPartsBySessionId: (sessionId: string) => findPartsBySessionId(sessionId, client),
-		revertToPending: (sessionId: string, completionClaimToken?: string) => (
+		revertToPending: (sessionId: string, completionClaimToken: string) => (
 			revertToPending(sessionId, client, completionClaimToken)
 		),
 		markFailed: (
 			sessionId: string,
-			storageKey?: string | null,
-			completionClaimToken?: string,
+			storageKey: string | null | undefined,
+			completionClaimToken: string,
 		) => (
 			markFailed(sessionId, storageKey, client, completionClaimToken)
 		),
@@ -953,33 +975,43 @@ export function createGameUploadRepository(
 			sessionId: string;
 			storageKey: string;
 			reason: string;
-			completionClaimToken?: string;
+			completionClaimToken: string;
 		}) => markCompletedObjectFailed({
 			...input,
 			bucket: options.abortBucket,
 		}, client),
-		findStaleCompletingSessions: (cutoff: Date) => findStaleCompletingSessions(cutoff, client),
 		claimStaleCompletingSessions: (
 			cutoff: Date,
-			now: Date,
 			token: string,
-			leaseUntil: Date,
+			leaseMs: number,
 			limit: number,
-		) => claimStaleCompletingSessions(cutoff, now, token, leaseUntil, limit, client),
+		) => claimStaleCompletingSessions(cutoff, token, leaseMs, limit, client),
 		findExpiredPendingSessions: (now: Date, limit: number) => client.gameUploadSession.findMany({
 			where: { status: 'PENDING', expiresAt: { lte: now } },
 			orderBy: { expiresAt: 'asc' },
 			take: limit,
 		}),
-		findSessionsWithExpiredPartClaims: (now: Date, limit: number) => client.gameUploadSession.findMany({
-				where: {
-					status: 'PENDING',
-					partClaims: { some: { leaseUntil: { lte: now } } },
-				},
+		findSessionsWithExpiredPartClaims: async (limit: number) => {
+			const expired = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				SELECT session."id"
+				FROM "game_upload_sessions" AS session
+				WHERE session."status" = 'PENDING'
+					AND EXISTS (
+						SELECT 1
+						FROM "game_upload_part_claims" AS claim
+						WHERE claim."session_id" = session."id"
+							AND claim."lease_until" <= clock_timestamp()
+					)
+				ORDER BY session."updated_at" ASC
+				LIMIT ${limit}
+			`);
+			if (expired.length === 0) return [];
+			return client.gameUploadSession.findMany({
+				where: { id: { in: expired.map(({ id }) => id) } },
 				include: { parts: { orderBy: { partNumber: 'asc' } } },
 				orderBy: { updatedAt: 'asc' },
-				take: limit,
-			}),
+			});
+		},
 		findKnownMultipartUploads: () => client.gameUploadSession.findMany({
 			where: { s3UploadId: { not: null }, s3Key: { not: null } },
 			select: { s3Key: true, s3UploadId: true },
@@ -1004,7 +1036,7 @@ export function createGameUploadRepository(
 				playbackStatus?: AssetPlaybackStatus;
 				playbackError?: string;
 				isPublic: boolean;
-				completionClaimToken?: string;
+				completionClaimToken: string;
 			},
 			outbox: GameReplacementOutboxConfig,
 		) => finalizeCompletedSession(
@@ -1021,7 +1053,7 @@ export function createGameUploadRepository(
 			entryKey: string,
 			sourceKey: string,
 			outbox: WebglReplacementOutboxConfig,
-			completionClaimToken?: string,
+			completionClaimToken: string,
 			completionResult?: { status: 'COMPLETED'; storageKey: string; sizeBytes: number; webglUrl: string },
 		) => finalizeCompletedWebglSession(
 			sessionId,
@@ -1053,7 +1085,7 @@ export interface DurableGameUploadRepository extends GameUploadRepository {
 			playbackStatus?: AssetPlaybackStatus;
 			playbackError?: string;
 			isPublic: boolean;
-			completionClaimToken?: string;
+			completionClaimToken: string;
 		},
 		outbox: GameReplacementOutboxConfig,
 	): Promise<{
@@ -1067,7 +1099,7 @@ export interface DurableGameUploadRepository extends GameUploadRepository {
 		entryKey: string,
 		sourceKey: string,
 		outbox: WebglReplacementOutboxConfig,
-		completionClaimToken?: string,
+		completionClaimToken: string,
 		completionResult?: {
 			status: 'COMPLETED';
 			storageKey: string;

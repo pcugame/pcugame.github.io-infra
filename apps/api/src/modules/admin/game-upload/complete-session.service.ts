@@ -76,13 +76,11 @@ export async function completeSession(
 	}
 
 	const completionToken = deps.ids.next();
-	const now = deps.clock.now();
 	const transitioned = await deps.repository.claimCompletion({
 			sessionId: session.id,
 			generation,
 			token: completionToken,
-			now,
-			leaseUntil: new Date(now.getTime() + 2 * 60 * 1000),
+			leaseMs: 2 * 60 * 1000,
 		});
 	if (transitioned.count === 0) {
 		if (transitioned.reason === 'parts-active') {
@@ -96,7 +94,6 @@ export async function completeSession(
 	const completionClaim = createCompletionClaimGuard({
 		sessionId: session.id,
 		token: completionToken,
-		clock: deps.clock,
 		renew: deps.repository.renewCompletionClaim,
 		logHeartbeatFailure: (error) => deps.logger.error(
 			{ error, sessionId: session.id },
@@ -302,15 +299,24 @@ export async function completeSession(
 	} finally {
 		completionClaim.stop();
 		if (!completionStateResolved) {
-			await deps.repository.releaseCompletionClaim(
-				session.id,
-				completionToken,
-				deps.clock.now(),
-				'request-completion-deferred',
-			).catch((error) => deps.logger.error(
-				{ error, sessionId: session.id },
-				'Failed to release request completion claim',
-			));
+			try {
+				const released = await deps.repository.releaseCompletionClaim(
+					session.id,
+					completionToken,
+					'request-completion-deferred',
+				);
+				if (released.count !== 1) {
+					deps.logger.warn(
+						{ sessionId: session.id, completionToken },
+						'Request completion claim was lost before deferred release',
+					);
+				}
+			} catch (error) {
+				deps.logger.error(
+					{ error, sessionId: session.id },
+					'Failed to release request completion claim',
+				);
+			}
 		}
 	}
 }

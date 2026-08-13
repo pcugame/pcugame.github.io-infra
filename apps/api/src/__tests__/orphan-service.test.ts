@@ -230,6 +230,51 @@ describe('orphan object service', () => {
 		);
 	});
 
+	it('does not report resolution when ownership expires at the terminal mutation', async () => {
+		const { deps } = createDependencies();
+		deps.repository.claimPendingOrphans.mockResolvedValue([
+			orphan(18, 'game/expires-after-delete.zip', { bucket: 'protected' }),
+		]);
+		deps.repository.markClaimResolved.mockResolvedValue({ count: 0 });
+		deps.repository.markClaimFailed.mockResolvedValue({ count: 0 });
+		const service = createOrphanService(deps);
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({
+			tried: 1,
+			resolved: 0,
+			failed: 1,
+		});
+		expect(deps.storage.delete).toHaveBeenCalledOnce();
+		expect(deps.logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ orphanId: 18 }),
+			'Failed to record orphan reap attempt',
+		);
+	});
+
+	it('does not report reference cancellation when the claim is no longer active', async () => {
+		const { deps } = createDependencies();
+		deps.repository.claimPendingOrphans.mockResolvedValue([orphan(19, 'still-live.png')]);
+		deps.references.collect.mockResolvedValue({
+			references: [{
+				bucket: 'public',
+				targetKind: 'EXACT',
+				key: 'still-live.png',
+				source: 'asset:19',
+			}],
+			unsafeBuckets: new Set<string>(),
+		});
+		deps.repository.markClaimCancelled.mockResolvedValue({ count: 0 });
+		deps.repository.markClaimFailed.mockResolvedValue({ count: 0 });
+		const service = createOrphanService(deps);
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({
+			tried: 1,
+			resolved: 0,
+			failed: 1,
+		});
+		expect(deps.storage.delete).not.toHaveBeenCalled();
+	});
+
 	it('abandons a later batch row instead of using the stale batch snapshot', async () => {
 		const { deps } = createDependencies();
 		deps.repository.claimPendingOrphans.mockResolvedValue([

@@ -4,6 +4,7 @@ import {
 	createObjectReferenceIndex,
 	type ObjectReferenceInventory,
 } from '../orphan/reference-resolver.js';
+import { createClaimHeartbeatGuard } from '../upload-lifecycle/claim-heartbeat.js';
 import type { NewUploadIntent, UploadIntentRepository } from './ports.js';
 
 const CLAIM_LEASE_MS = 2 * 60 * 1000;
@@ -47,9 +48,8 @@ export function createUploadIntentService(deps: {
 			const claimToken = deps.ids?.next() ?? createClaimToken();
 			const intents = await repository.claimStale(
 				BATCH_SIZE,
-				now,
 				claimToken,
-				new Date(now.getTime() + CLAIM_LEASE_MS),
+				CLAIM_LEASE_MS,
 			);
 			if (intents.length === 0) {
 				return { tried: 0, referenced: 0, queued: 0, missing: 0 };
@@ -81,34 +81,38 @@ export function createUploadIntentService(deps: {
 			let missing = 0;
 			for (const intent of intents) {
 				if (signal?.aborted) break;
-				const heartbeat = setInterval(() => {
-					const heartbeatNow = deps.clock.now();
-					void repository.renewClaim(
+				const claim = createClaimHeartbeatGuard({
+					heartbeatMs: CLAIM_HEARTBEAT_MS,
+					lostMessage: 'Upload intent claim was lost',
+					outerSignal: signal,
+					renew: () => repository.renewClaim(
 						intent.id,
 						claimToken,
-						heartbeatNow,
-						new Date(heartbeatNow.getTime() + CLAIM_LEASE_MS),
-					).catch((error) => deps.logger.error(
+						CLAIM_LEASE_MS,
+					),
+					logHeartbeatFailure: (error) => deps.logger.error(
 						{ error, intentId: intent.id },
 						'Upload-intent claim heartbeat failed',
-					));
-				}, CLAIM_HEARTBEAT_MS);
-				heartbeat.unref();
+					),
+				});
 				try {
 					if (referenceIndex.referencesTarget({
 						bucket: intent.bucket,
 						targetKind: 'EXACT',
 						key: intent.storageKey,
 					}, { ignoreSource: `upload-intent:${intent.id}` })) {
+						await claim.assertOwned();
 						await repository.markReferenced(intent.id, claimToken);
 						referenced++;
 						continue;
 					}
+					await claim.assertOwned();
 					const object = await deps.storage.head(
 						intent.bucket,
 						intent.storageKey,
-						{ signal },
+						{ signal: claim.signal },
 					);
+					await claim.assertOwned();
 					if (!object) {
 						await repository.markMissing(intent.id, claimToken);
 						missing++;
@@ -122,6 +126,13 @@ export function createUploadIntentService(deps: {
 					);
 					queued++;
 				} catch (error) {
+					if (claim.isLost()) {
+						deps.logger.error(
+							{ error, intentId: intent.id },
+							'Upload-intent sweep stopped after claim loss',
+						);
+						continue;
+					}
 					const backoff = Math.min(60 * 60 * 1000, 30_000 * (2 ** Math.min(intent.attemptCount, 8)));
 					await repository.markSweepFailed(
 						intent.id,
@@ -135,7 +146,7 @@ export function createUploadIntentService(deps: {
 						);
 					});
 				} finally {
-					clearInterval(heartbeat);
+					claim.stop();
 				}
 			}
 			deps.logger.info(

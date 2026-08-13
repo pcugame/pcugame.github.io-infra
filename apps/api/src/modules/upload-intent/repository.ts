@@ -5,6 +5,11 @@ import type { NewUploadIntent } from './ports.js';
 
 const SERIALIZABLE = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable } as const;
 
+function requireActiveClaim(updated: readonly { id: string }[]): { count: number } {
+	if (updated.length !== 1) throw new Error('Upload intent claim was lost');
+	return { count: 1 };
+}
+
 export async function commitUploadIntents(
 	tx: Prisma.TransactionClient,
 	intentIds: readonly string[],
@@ -134,7 +139,7 @@ export function createUploadIntentRepository(client: PrismaClient) {
 			});
 		},
 
-		claimStale(limit: number, now: Date, claimToken: string, claimUntil: Date) {
+		claimStale(limit: number, claimToken: string, claimLeaseMs: number) {
 			return client.$queryRaw<Array<{
 				id: string;
 				bucket: string;
@@ -149,15 +154,17 @@ export function createUploadIntentRepository(client: PrismaClient) {
 						'PREPARED'::"UploadIntentState",
 						'UPLOADED'::"UploadIntentState"
 					)
-						AND "not_before" <= ${now}
-						AND "next_attempt_at" <= ${now}
-						AND ("claim_until" IS NULL OR "claim_until" <= ${now})
+						AND "not_before" <= clock_timestamp()
+						AND "next_attempt_at" <= clock_timestamp()
+						AND ("claim_until" IS NULL OR "claim_until" <= clock_timestamp())
 					ORDER BY "created_at"
 					LIMIT ${limit}
 					FOR UPDATE SKIP LOCKED
 				)
 				UPDATE "upload_intents" AS intent
-				SET "claim_token" = ${claimToken}, "claim_until" = ${claimUntil}
+				SET "claim_token" = ${claimToken},
+					"claim_until" = clock_timestamp()
+						+ (${claimLeaseMs} * INTERVAL '1 millisecond')
 				FROM candidates
 				WHERE intent."id" = candidates."id"
 				RETURNING intent."id",
@@ -168,81 +175,97 @@ export function createUploadIntentRepository(client: PrismaClient) {
 			`);
 		},
 
-		renewClaim(id: string, claimToken: string, now: Date, claimUntil: Date) {
-			return client.uploadIntent.updateMany({
-				where: {
-					id,
-					claimToken,
-					claimUntil: { gt: now },
-				},
-				data: { claimUntil },
-			});
+		async renewClaim(id: string, claimToken: string, claimLeaseMs: number) {
+			const renewed = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "upload_intents"
+				SET "claim_until" = clock_timestamp()
+						+ (${claimLeaseMs} * INTERVAL '1 millisecond'),
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${id}
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return { count: renewed.length };
 		},
 
-		markReferenced(id: string, claimToken: string) {
-			return client.uploadIntent.updateMany({
-				where: { id, claimToken },
-				data: {
-					state: 'COMMITTED',
-					claimToken: null,
-					claimUntil: null,
-					lastError: null,
-				},
-			});
+		async markReferenced(id: string, claimToken: string) {
+			const updated = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "upload_intents"
+				SET "state" = 'COMMITTED'::"UploadIntentState",
+					"claim_token" = NULL,
+					"claim_until" = NULL,
+					"last_error" = NULL,
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${id}
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return requireActiveClaim(updated);
 		},
 
-		markMissing(id: string, claimToken: string) {
-			return client.uploadIntent.updateMany({
-				where: { id, claimToken },
-				data: {
-					state: 'RESOLVED',
-					claimToken: null,
-					claimUntil: null,
-					lastError: null,
-				},
-			});
+		async markMissing(id: string, claimToken: string) {
+			const updated = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "upload_intents"
+				SET "state" = 'RESOLVED'::"UploadIntentState",
+					"claim_token" = NULL,
+					"claim_until" = NULL,
+					"last_error" = NULL,
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${id}
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return requireActiveClaim(updated);
 		},
 
 		queueCleanup(id: string, claimToken: string, bucket: string, storageKey: string) {
 			return client.$transaction(async (tx) => {
-				const claimed = await tx.uploadIntent.findFirst({
-					where: { id, claimToken },
-					select: { id: true },
-				});
-				if (!claimed) return { count: 0 };
+				const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+					UPDATE "upload_intents"
+					SET "state" = 'CLEANUP_QUEUED'::"UploadIntentState",
+						"claim_token" = NULL,
+						"claim_until" = NULL,
+						"updated_at" = clock_timestamp()
+					WHERE "id" = ${id}
+						AND "claim_token" = ${claimToken}
+						AND "claim_until" > clock_timestamp()
+					RETURNING "id"
+				`);
+				requireActiveClaim(updated);
 				await queueDurableDeletions(tx, [{
 					bucket,
 					storageKey,
 					targetKind: 'EXACT',
 					reason: 'stale-upload-intent',
 				}]);
-				return tx.uploadIntent.updateMany({
-					where: { id, claimToken },
-					data: {
-						state: 'CLEANUP_QUEUED',
-						claimToken: null,
-						claimUntil: null,
-					},
-				});
+				return { count: 1 };
 			}, SERIALIZABLE);
 		},
 
-		markSweepFailed(
+		async markSweepFailed(
 			id: string,
 			claimToken: string,
 			error: unknown,
 			nextAttemptAt: Date,
 		) {
-			return client.uploadIntent.updateMany({
-				where: { id, claimToken },
-				data: {
-					claimToken: null,
-					claimUntil: null,
-					attemptCount: { increment: 1 },
-					nextAttemptAt,
-					lastError: String(error instanceof Error ? error.message : error).slice(0, 500),
-				},
-			});
+			const message = String(error instanceof Error ? error.message : error).slice(0, 500);
+			const updated = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "upload_intents"
+				SET "claim_token" = NULL,
+					"claim_until" = NULL,
+					"attempt_count" = "attempt_count" + 1,
+					"next_attempt_at" = ${nextAttemptAt},
+					"last_error" = ${message},
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${id}
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return requireActiveClaim(updated);
 		},
 	};
 }
