@@ -4,8 +4,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 import { cruise } from 'dependency-cruiser';
+import extractDepcruiseOptions from 'dependency-cruiser/config-utl/extract-depcruise-options';
 import extractTsConfig from 'dependency-cruiser/config-utl/extract-ts-config';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -17,8 +17,6 @@ const dependencyCruiser = path.join(
 	'.bin',
 	process.platform === 'win32' ? 'depcruise.cmd' : 'depcruise',
 );
-const require = createRequire(import.meta.url);
-const dependencyCruiserConfig = require('../.dependency-cruiser.cjs');
 const expectedAllowedEdges = [
 	{
 		source: 'architecture-fixtures/allowed/controller.ts',
@@ -116,18 +114,16 @@ function outputOf(result) {
 }
 
 async function inspectAllowedGraph() {
+	const extractedOptions = await extractDepcruiseOptions(
+		path.join(packageRoot, '.dependency-cruiser.cjs'),
+	);
 	const { output } = await cruise(
 		['architecture-fixtures/allowed'],
 		{
-			ruleSet: {
-				forbidden: dependencyCruiserConfig.forbidden,
-				options: {
-					...dependencyCruiserConfig.options,
-					// Keep generated modules in this fixture-only graph: allowed/
-					// deliberately imports the generated Prisma client type.
-					exclude: { path: '(^|/)(dist|__tests__)/' },
-				},
-			},
+			...extractedOptions,
+			// Keep generated modules in this fixture-only graph: allowed/
+			// deliberately imports the generated Prisma client type.
+			exclude: { path: '(^|/)(dist|__tests__)/' },
 			tsPreCompilationDeps: true,
 		},
 		{},
