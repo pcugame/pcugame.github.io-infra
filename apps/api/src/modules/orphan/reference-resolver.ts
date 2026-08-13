@@ -151,13 +151,6 @@ export function targetsOverlap(
 	return exact.startsWith(prefix);
 }
 
-export function inventoryReferencesTarget(
-	inventory: ObjectReferenceInventory,
-	target: Pick<ObjectReference, 'bucket' | 'targetKind' | 'key'>,
-): boolean {
-	return createObjectReferenceIndex(inventory).referencesTarget(target);
-}
-
 /**
  * Authoritative inventory for every live object pointer. Asset rows remain live
  * until their state reaches DELETED; upload intents bridge the PUT-to-commit gap.

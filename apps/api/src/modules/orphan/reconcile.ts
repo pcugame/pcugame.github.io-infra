@@ -3,7 +3,7 @@ import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createOrphanRepository } from './repository.js';
 import {
 	collectObjectReferences,
-	inventoryReferencesTarget,
+	createObjectReferenceIndex,
 } from './reference-resolver.js';
 
 export interface ReconcileOptions {
@@ -52,6 +52,7 @@ export async function reconcileObjects(input: {
 		},
 		{ error: (context, message) => logger.error(message, context) },
 	);
+	const referenceIndex = createObjectReferenceIndex(inventory);
 	const fence = new Date(
 		input.options.startedAt.getTime() - input.options.olderThanMinutes * 60 * 1000,
 	);
@@ -70,7 +71,7 @@ export async function reconcileObjects(input: {
 				continue;
 			}
 			if (object.lastModified > fence || object.lastModified > input.options.startedAt) continue;
-			if (inventoryReferencesTarget(inventory, {
+			if (referenceIndex.referencesTarget({
 				bucket,
 				targetKind: 'EXACT',
 				key: object.key,
