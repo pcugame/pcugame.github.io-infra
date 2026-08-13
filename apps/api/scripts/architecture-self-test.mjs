@@ -4,6 +4,9 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { cruise } from 'dependency-cruiser';
+import extractTsConfig from 'dependency-cruiser/config-utl/extract-ts-config';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const guard = path.join(packageRoot, 'scripts', 'architecture-guard.mjs');
@@ -14,6 +17,22 @@ const dependencyCruiser = path.join(
 	'.bin',
 	process.platform === 'win32' ? 'depcruise.cmd' : 'depcruise',
 );
+const require = createRequire(import.meta.url);
+const dependencyCruiserConfig = require('../.dependency-cruiser.cjs');
+const expectedAllowedEdges = [
+	{
+		source: 'architecture-fixtures/allowed/controller.ts',
+		target: 'src/application/ports.ts',
+	},
+	{
+		source: 'architecture-fixtures/allowed/factory.ts',
+		target: 'src/lib/s3.ts',
+	},
+	{
+		source: 'architecture-fixtures/allowed/project.repository.ts',
+		target: 'src/generated/prisma/client.ts',
+	},
+];
 
 const forbiddenCases = [
 	{
@@ -96,6 +115,56 @@ function outputOf(result) {
 	return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
 
+async function inspectAllowedGraph() {
+	const { output } = await cruise(
+		['architecture-fixtures/allowed'],
+		{
+			ruleSet: {
+				forbidden: dependencyCruiserConfig.forbidden,
+				options: {
+					...dependencyCruiserConfig.options,
+					// Keep generated modules in this fixture-only graph: allowed/
+					// deliberately imports the generated Prisma client type.
+					exclude: { path: '(^|/)(dist|__tests__)/' },
+				},
+			},
+			tsPreCompilationDeps: true,
+		},
+		{},
+		{ tsConfig: extractTsConfig(path.join(packageRoot, 'tsconfig.json')) },
+	);
+
+	if (!output || !Array.isArray(output.modules)) {
+		throw new Error('dependency-cruiser did not return a structured module graph');
+	}
+
+	const unresolved = [];
+	const unresolvedTargets = new Set();
+	for (const module of output.modules) {
+		for (const dependency of module.dependencies) {
+			if (dependency.couldNotResolve) {
+				unresolved.push({ source: module.source, target: dependency.module });
+				unresolvedTargets.add(dependency.resolved ?? dependency.module);
+			}
+		}
+	}
+	for (const module of output.modules) {
+		if (module.couldNotResolve && !unresolvedTargets.has(module.source)) {
+			unresolved.push({ source: module.source, target: module.source });
+		}
+	}
+
+	const expected = expectedAllowedEdges.map((edge) => {
+		const source = output.modules.find((module) => module.source === edge.source);
+		const dependency = source?.dependencies.find(
+			(candidate) => candidate.resolved === edge.target,
+		);
+		return { ...edge, dependency };
+	});
+
+	return { expected, unresolved };
+}
+
 let failed = false;
 for (const fixture of forbiddenCases) {
 	const result = runGuard(fixture.target);
@@ -157,6 +226,56 @@ if (allowedDependency.status !== 0) {
 } else {
 	console.log(
 		'[architecture-self-test] PASS dependency-cruiser allowed factory/port graph: exit=0',
+	);
+}
+
+try {
+	const { expected, unresolved } = await inspectAllowedGraph();
+	if (unresolved.length > 0) {
+		failed = true;
+		console.error(
+			'[architecture-self-test] FAIL dependency-cruiser allowed resolution: unresolved dependencies detected:',
+		);
+		for (const dependency of unresolved) {
+			console.error(`  ${dependency.source} -> ${dependency.target}`);
+		}
+	} else {
+		console.log(
+			'[architecture-self-test] PASS dependency-cruiser allowed resolution: all dependencies resolved',
+		);
+	}
+
+	const missingExpectedEdges = expected.filter((edge) => !edge.dependency);
+	if (missingExpectedEdges.length > 0) {
+		failed = true;
+		console.error(
+			'[architecture-self-test] FAIL dependency-cruiser allowed graph: expected dependencies missing:',
+		);
+		for (const edge of missingExpectedEdges) {
+			console.error(`  ${edge.source} -> ${edge.target}`);
+		}
+	} else {
+		console.log(
+			'[architecture-self-test] PASS dependency-cruiser allowed graph: all expected dependencies present',
+		);
+	}
+
+	const unresolvedExpectedEdges = expected.filter(
+		(edge) => edge.dependency && edge.dependency.couldNotResolve,
+	);
+	if (unresolvedExpectedEdges.length > 0) {
+		failed = true;
+		console.error(
+			'[architecture-self-test] FAIL dependency-cruiser allowed graph: expected dependencies unresolved:',
+		);
+		for (const edge of unresolvedExpectedEdges) {
+			console.error(`  ${edge.source} -> ${edge.target}`);
+		}
+	}
+} catch (error) {
+	failed = true;
+	console.error(
+		`[architecture-self-test] FAIL dependency-cruiser allowed resolution: ${error.message}`,
 	);
 }
 
