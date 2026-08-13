@@ -1,12 +1,37 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ObjectStorage } from '../application/ports.js';
+
+const referenceResolverMocks = vi.hoisted(() => ({
+	createObjectReferenceIndex: vi.fn(),
+	createdIndexes: [] as Array<{ referencesTarget: ReturnType<typeof vi.fn> }>,
+}));
+
+vi.mock('../modules/orphan/reference-resolver.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../modules/orphan/reference-resolver.js')>();
+	referenceResolverMocks.createObjectReferenceIndex.mockImplementation(
+		(inventory) => {
+			const index = actual.createObjectReferenceIndex(inventory);
+			const wrappedIndex = {
+				...index,
+				referencesTarget: vi.fn(index.referencesTarget),
+			};
+			referenceResolverMocks.createdIndexes.push(wrappedIndex);
+			return wrappedIndex;
+		},
+	);
+	return {
+		...actual,
+		createObjectReferenceIndex: referenceResolverMocks.createObjectReferenceIndex,
+	};
+});
+
 import {
 	parseReconcileOptions,
 	reconcileObjects,
 } from '../modules/orphan/reconcile.js';
 import {
 	collectObjectReferences,
-	inventoryReferencesTarget,
+	createObjectReferenceIndex,
 	targetsOverlap,
 } from '../modules/orphan/reference-resolver.js';
 
@@ -104,15 +129,26 @@ describe('authoritative object reference inventory', () => {
 		expect(client.asset.findMany).toHaveBeenCalledWith(expect.objectContaining({
 			where: { status: { not: 'DELETED' } },
 		}));
-		expect(inventoryReferencesTarget(inventory, {
+		const referenceIndex = createObjectReferenceIndex(inventory);
+		expect(referenceIndex.referencesTarget({
+			bucket: 'public',
+			targetKind: 'EXACT',
+			key: 'images/original.png',
+		})).toBe(true);
+		expect(referenceIndex.referencesTarget({
 			bucket: 'public',
 			targetKind: 'EXACT',
 			key: `webgl/7/${deploymentId}/site/main.js`,
 		})).toBe(true);
-		expect(inventoryReferencesTarget(inventory, {
+		expect(referenceIndex.referencesTarget({
 			bucket: 'protected',
 			targetKind: 'EXACT',
 			key: 'images/original.png',
+		})).toBe(false);
+		expect(referenceIndex.referencesTarget({
+			bucket: 'public',
+			targetKind: 'EXACT',
+			key: `webgl/7/${deploymentId}/outside/main.js`,
 		})).toBe(false);
 	});
 
@@ -124,12 +160,13 @@ describe('authoritative object reference inventory', () => {
 			logger,
 		);
 		expect(inventory.unsafeBuckets).toEqual(new Set(['public', 'protected']));
-		expect(inventoryReferencesTarget(inventory, {
+		const referenceIndex = createObjectReferenceIndex(inventory);
+		expect(referenceIndex.referencesTarget({
 			bucket: 'public',
 			targetKind: 'EXACT',
 			key: 'otherwise-unreferenced.bin',
 		})).toBe(true);
-		expect(inventoryReferencesTarget(inventory, {
+		expect(referenceIndex.referencesTarget({
 			bucket: 'protected',
 			targetKind: 'EXACT',
 			key: 'otherwise-unreferenced.zip',
@@ -234,6 +271,66 @@ describe('conservative orphan reconciliation', () => {
 			create: expect.objectContaining({
 				storageKey: `webgl/7/${deploymentId}/site/main.js`,
 			}),
+		}));
+	});
+
+	it('reuses one reference index for every reconciled object lookup', async () => {
+		const startedAt = new Date('2026-08-11T12:00:00.000Z');
+		const models = emptyReferenceModels();
+		models.asset.findMany.mockResolvedValue([{
+			id: 1,
+			storageKey: 'live.png',
+			playbackStorageKey: null,
+			isPublic: true,
+			card480Height: null,
+			display960Height: null,
+		}]);
+		models.project.findMany.mockResolvedValue([{
+			id: 7,
+			webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
+		}]);
+		const orphanUpsert = vi.fn().mockResolvedValue({});
+		const prisma = {
+			...models,
+			orphanObject: {
+				upsert: orphanUpsert,
+				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
+			},
+			$queryRaw: vi.fn(),
+		};
+		const storage = {
+			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
+				{ key: 'live.png', lastModified: new Date('2026-08-11T09:00:00.000Z') },
+				{ key: `webgl/7/${deploymentId}/site/main.js`, lastModified: new Date('2026-08-11T09:00:00.000Z') },
+				{ key: 'orphan-public.bin', lastModified: new Date('2026-08-11T09:00:00.000Z') },
+			] : [
+				{ key: 'orphan-protected.bin', lastModified: new Date('2026-08-11T09:00:00.000Z') },
+			]),
+		} as unknown as ObjectStorage;
+		const indexCreationsBefore = referenceResolverMocks.createObjectReferenceIndex.mock.calls.length;
+		const indexesBefore = referenceResolverMocks.createdIndexes.length;
+
+		await expect(reconcileObjects({
+			prisma: prisma as never,
+			storage,
+			publicBucket: 'public',
+			protectedBucket: 'protected',
+			options: parseReconcileOptions(['--apply'], startedAt),
+			logger: { log: vi.fn(), error: vi.fn() },
+		})).resolves.toEqual({ scanned: 4, eligible: 2, enqueued: 2, skippedUnknownAge: 0 });
+
+		expect(referenceResolverMocks.createObjectReferenceIndex).toHaveBeenCalledTimes(
+			indexCreationsBefore + 1,
+		);
+		expect(referenceResolverMocks.createdIndexes[indexesBefore]!.referencesTarget)
+			.toHaveBeenCalledTimes(4);
+		expect(orphanUpsert).toHaveBeenCalledTimes(2);
+		expect(orphanUpsert).toHaveBeenCalledWith(expect.objectContaining({
+			create: expect.objectContaining({ storageKey: 'orphan-public.bin' }),
+		}));
+		expect(orphanUpsert).toHaveBeenCalledWith(expect.objectContaining({
+			create: expect.objectContaining({ storageKey: 'orphan-protected.bin' }),
 		}));
 	});
 });
