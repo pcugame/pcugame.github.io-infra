@@ -18,6 +18,7 @@ const webglSession = {
 	originalName: 'build.zip',
 	totalBytes: 8n,
 	s3Key: deployment.sourceKey,
+	completionClaimToken: 'completion-claim',
 };
 
 function createDependencies() {

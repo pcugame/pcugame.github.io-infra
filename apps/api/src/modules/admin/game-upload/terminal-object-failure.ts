@@ -10,7 +10,7 @@ export async function commitTerminalCompletedObjectFailure(
 		sessionId: string;
 		storageKey: string;
 		reason: string;
-		completionClaimToken?: string;
+		completionClaimToken: string;
 	},
 ): Promise<void> {
 	const committed = await deps.repository.markCompletedObjectFailed(input);

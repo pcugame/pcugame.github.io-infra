@@ -126,13 +126,33 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			'claim-owner',
 			2 * 60 * 1000,
 		)).resolves.toHaveLength(1);
+		const initialClaim = await client.orphanObject.findUniqueOrThrow({
+			where: {
+				orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: claimKey },
+			},
+		});
+		await expect(repository.renewActiveClaim!(
+			initialClaim.id,
+			'wrong-owner',
+			5 * 60 * 1000,
+		)).resolves.toEqual({ count: 0 });
+		await expect(repository.renewActiveClaim!(
+			initialClaim.id,
+			'claim-owner',
+			5 * 60 * 1000,
+		)).resolves.toEqual({ count: 1 });
+		const renewedClaim = await client.orphanObject.findUniqueOrThrow({
+			where: { id: initialClaim.id },
+		});
+		expect(renewedClaim.claimUntil!.getTime())
+			.toBeGreaterThan(initialClaim.claimUntil!.getTime() + 2 * 60 * 1000);
 
 		await repository.upsertOrphan(
 			protectedBucket,
 			claimKey,
 			'reconcile-while-claimed',
 			'EXACT',
-			new Date(),
+			new Date('9990-01-01T00:00:00.000Z'),
 		);
 		await expect(client.orphanObject.findUniqueOrThrow({
 			where: {
@@ -149,12 +169,17 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			},
 			data: { claimUntil: new Date(0) },
 		});
+		await expect(repository.renewActiveClaim!(
+			initialClaim.id,
+			'claim-owner',
+			5 * 60 * 1000,
+		)).resolves.toEqual({ count: 0 });
 		await repository.upsertOrphan(
 			protectedBucket,
 			claimKey,
 			'reconcile-after-expiry',
 			'EXACT',
-			new Date(),
+			new Date('2000-01-01T00:00:00.000Z'),
 		);
 		await expect(client.orphanObject.findUniqueOrThrow({
 			where: {
@@ -169,6 +194,92 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: claimKey },
 			},
 		});
+	});
+
+	it('uses advancing database wall time for reference checks inside a long transaction', async () => {
+		const repository = createOrphanRepository(client);
+		const exactKey = `integration/orphan-durability/${testId}/tx-clock-exact.bin`;
+		const prefixKey = `integration/orphan-durability/${testId}/tx-clock-prefix/`;
+		const now = new Date();
+		await repository.upsertOrphan(protectedBucket, exactKey, 'tx-clock', 'EXACT', now);
+		await repository.upsertOrphan(protectedBucket, prefixKey, 'tx-clock', 'PREFIX', now);
+		await expect(repository.claimPendingOrphans(
+			50,
+			now,
+			'tx-clock-owner',
+			100,
+		)).resolves.toEqual(expect.arrayContaining([
+			expect.objectContaining({ storageKey: exactKey }),
+			expect.objectContaining({ storageKey: prefixKey }),
+		]));
+
+		try {
+			await client.$transaction(async (tx) => {
+				// Establish transaction time while both leases are live. PostgreSQL
+				// CURRENT_TIMESTAMP remains pinned here, while clock_timestamp advances.
+				await tx.$queryRaw`SELECT CURRENT_TIMESTAMP`;
+				await new Promise((resolve) => setTimeout(resolve, 200));
+				await expect(assertNoDeletionClaim(tx, {
+					bucket: protectedBucket,
+					key: exactKey,
+				})).resolves.toBeUndefined();
+				await expect(assertNoDeletionClaim(tx, {
+					bucket: protectedBucket,
+					key: prefixKey,
+					targetKind: 'PREFIX',
+				})).resolves.toBeUndefined();
+			});
+		} finally {
+			await client.orphanObject.deleteMany({
+				where: { bucket: protectedBucket, storageKey: { in: [exactKey, prefixKey] } },
+			});
+		}
+	});
+
+	it('does not report success when the claim expires at the terminal resolution write', async () => {
+		const repository = createOrphanRepository(client);
+		const key = `integration/orphan-durability/${testId}/terminal-expiry.bin`;
+		const now = new Date();
+		await repository.upsertOrphan(protectedBucket, key, 'terminal-expiry', 'EXACT', now);
+		const deleteObject = vi.fn(async () => {
+			await client.orphanObject.update({
+				where: { orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: key } },
+				data: { claimUntil: new Date(0) },
+			});
+		});
+		const service = createOrphanService({
+			clock: { now: () => now },
+			storage: { delete: deleteObject, listKeys: vi.fn().mockResolvedValue([]) },
+			repository,
+			references: {
+				collect: vi.fn().mockResolvedValue({
+					references: [],
+					unsafeBuckets: new Set<string>(),
+				}),
+			},
+			ids: { next: () => 'terminal-expiry-owner' },
+			logger: { info: vi.fn(), error: vi.fn() },
+		});
+
+		try {
+			await expect(service.runOrphanReaper()).resolves.toEqual({
+				tried: 1,
+				resolved: 0,
+				failed: 1,
+			});
+			expect(deleteObject).toHaveBeenCalledOnce();
+			await expect(client.orphanObject.findUniqueOrThrow({
+				where: { orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: key } },
+			})).resolves.toMatchObject({
+				state: 'DELETE_CLAIMED',
+				claimToken: 'terminal-expiry-owner',
+				resolvedAt: null,
+			});
+		} finally {
+			await client.orphanObject.deleteMany({
+				where: { bucket: protectedBucket, storageKey: key },
+			});
+		}
 	});
 
 	it('requeues an older live claim when a newer reference-removal outbox commits', async () => {
@@ -485,6 +596,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				chunkSizeBytes: 4,
 				totalChunks: 1,
 				status: 'COMPLETING',
+				completionClaimToken: 'game-finalize-owner',
+				completionClaimUntil: new Date(Date.now() + 60_000),
 				s3Key: newKey,
 				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 			},
@@ -505,6 +618,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 					mimeType: 'application/zip',
 					sizeBytes: completed.totalBytes,
 					isPublic: false,
+					completionClaimToken: completed.completionClaimToken,
 				},
 				{
 					bucket: protectedBucket,
@@ -526,6 +640,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			originalName: session.originalName,
 			totalBytes: session.totalBytes,
 			s3Key: newKey,
+			completionClaimToken: 'game-finalize-owner',
 		}, { size: 4 })).resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
 		await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))
 			.resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
@@ -659,6 +774,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				chunkSizeBytes: 4,
 				totalChunks: 1,
 				status: 'COMPLETING',
+				completionClaimToken: 'webgl-finalize-owner',
+				completionClaimUntil: new Date(Date.now() + 60_000),
 				s3Key: newSource,
 				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 			},
@@ -677,6 +794,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				completed.s3Key,
 				{ publicBucket, protectedBucket, reason: 'webgl-upload-replace-previous' },
 				client,
+				completed.completionClaimToken,
 			),
 			wakeDeletionWorker,
 			webglUrl: () => '/webgl',
@@ -690,6 +808,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			originalName: session.originalName,
 			totalBytes: session.totalBytes,
 			s3Key: newSource,
+			completionClaimToken: 'webgl-finalize-owner',
 		}, { size: 4 })).resolves.toMatchObject({ status: 'COMPLETED', webglUrl: '/webgl' });
 		await expect(client.project.findUniqueOrThrow({ where: { id: project.id } }))
 			.resolves.toMatchObject({ webglEntryKey: deployment.entryKey });

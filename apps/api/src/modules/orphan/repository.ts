@@ -6,47 +6,44 @@ type OrphanRepositoryClient = Pick<PrismaClient, 'orphanObject' | '$queryRaw'>;
 
 export function createOrphanRepository(client: OrphanRepositoryClient) {
 	return {
-		upsertOrphan(
+		async upsertOrphan(
 			bucket: string,
 			storageKey: string,
 			reason: string,
 			targetKind: 'EXACT' | 'PREFIX' = storageKey.endsWith('/') ? 'PREFIX' : 'EXACT',
 			now = new Date(),
 		) {
-			return (async () => {
-				await client.orphanObject.upsert({
-					where: { orphan_bucket_storage_key: { bucket, storageKey } },
-					create: { bucket, storageKey, reason, targetKind, nextAttemptAt: now },
-					update: { reason },
-				});
-				await client.orphanObject.updateMany({
-					where: {
-						bucket,
-						storageKey,
-						OR: [
-							{ targetKind: { not: targetKind } },
-							{ state: { not: 'DELETE_CLAIMED' } },
-							{ claimUntil: null },
-							{ claimUntil: { lte: now } },
-						],
-					},
-					data: {
-						targetKind,
-						state: 'PENDING',
-						claimToken: null,
-						claimUntil: null,
-						cancelReason: null,
-						resolvedAt: null,
-						attemptCount: 0,
-						lastError: null,
-						lastTriedAt: null,
-						nextAttemptAt: now,
-					},
-				});
-				return client.orphanObject.findUniqueOrThrow({
-					where: { orphan_bucket_storage_key: { bucket, storageKey } },
-				});
-			})();
+			await client.orphanObject.upsert({
+				where: { orphan_bucket_storage_key: { bucket, storageKey } },
+				create: { bucket, storageKey, reason, targetKind, nextAttemptAt: now },
+				update: { reason },
+			});
+			// Reconciliation may reset an inactive row, but a live deletion owner
+			// must remain fenced until PostgreSQL says its lease has expired.
+			await client.$queryRaw(Prisma.sql`
+				UPDATE "orphan_objects"
+				SET "target_kind" = CAST(${targetKind} AS "OrphanTargetKind"),
+					"state" = 'PENDING'::"OrphanState",
+					"claim_token" = NULL,
+					"claim_until" = NULL,
+					"cancel_reason" = NULL,
+					"resolved_at" = NULL,
+					"attempt_count" = 0,
+					"last_error" = NULL,
+					"last_tried_at" = NULL,
+					"next_attempt_at" = ${now}
+				WHERE "bucket" = ${bucket}
+					AND "storage_key" = ${storageKey}
+					AND (
+						"state" <> 'DELETE_CLAIMED'::"OrphanState"
+						OR "claim_until" IS NULL
+						OR "claim_until" <= clock_timestamp()
+					)
+				RETURNING "id"
+			`);
+			return client.orphanObject.findUniqueOrThrow({
+				where: { orphan_bucket_storage_key: { bucket, storageKey } },
+			});
 		},
 
 		claimPendingOrphans: (
@@ -111,30 +108,21 @@ export function createOrphanRepository(client: OrphanRepositoryClient) {
 			});
 		},
 
-		markResolved(id: number, now: Date) {
-			return client.orphanObject.update({
-				where: { id },
-				data: {
-					state: 'RESOLVED',
-					resolvedAt: now,
-					claimToken: null,
-					claimUntil: null,
-					cancelReason: null,
-				},
-			});
-		},
-
-		markClaimResolved(id: number, claimToken: string, now: Date) {
-			return client.orphanObject.updateMany({
-				where: { id, state: 'DELETE_CLAIMED', claimToken },
-				data: {
-					state: 'RESOLVED',
-					resolvedAt: now,
-					claimToken: null,
-					claimUntil: null,
-					cancelReason: null,
-				},
-			});
+		async markClaimResolved(id: number, claimToken: string, now: Date) {
+			const resolved = await client.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+				UPDATE "orphan_objects"
+				SET "state" = 'RESOLVED'::"OrphanState",
+					"resolved_at" = ${now},
+					"claim_token" = NULL,
+					"claim_until" = NULL,
+					"cancel_reason" = NULL
+				WHERE "id" = ${id}
+					AND "state" = 'DELETE_CLAIMED'::"OrphanState"
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return { count: resolved.length };
 		},
 
 		async renewActiveClaim(id: number, claimToken: string, claimLeaseMs: number) {
@@ -158,94 +146,67 @@ export function createOrphanRepository(client: OrphanRepositoryClient) {
 		},
 
 		async markClaimCancelled(id: number, claimToken: string, reason: string, now: Date) {
-			const requeued = await client.orphanObject.updateMany({
-				where: {
-					id,
-					state: 'DELETE_CLAIMED',
-					claimToken,
-					cancelReason: OUTBOX_REQUEUE_CANCEL_REASON,
-				},
-				data: {
-					state: 'PENDING',
-					cancelReason: null,
-					resolvedAt: null,
-					claimToken: null,
-					claimUntil: null,
-					nextAttemptAt: now,
-				},
-			});
-			if (requeued.count === 1) return { ...requeued, requeued: true };
-			const cancelled = await client.orphanObject.updateMany({
-				where: {
-					id,
-					state: 'DELETE_CLAIMED',
-					claimToken,
-					OR: [
-						{ cancelReason: null },
-						{ cancelReason: { not: OUTBOX_REQUEUE_CANCEL_REASON } },
-					],
-				},
-				data: {
-					state: 'CANCELLED',
-					cancelReason: reason,
-					resolvedAt: now,
-					claimToken: null,
-					claimUntil: null,
-				},
-			});
-			if (cancelled.count === 1) return cancelled;
-			// Close the only remaining race: a business outbox may have set the
-			// requeue signal between the two conditional updates above.
-			const racedRequeue = await client.orphanObject.updateMany({
-				where: {
-					id,
-					state: 'DELETE_CLAIMED',
-					claimToken,
-					cancelReason: OUTBOX_REQUEUE_CANCEL_REASON,
-				},
-				data: {
-					state: 'PENDING',
-					cancelReason: null,
-					resolvedAt: null,
-					claimToken: null,
-					claimUntil: null,
-					nextAttemptAt: now,
-				},
-			});
-			return { ...racedRequeue, requeued: racedRequeue.count === 1 };
+			const cancelled = await client.$queryRaw<Array<{ requeued: boolean }>>(Prisma.sql`
+				WITH claimed AS MATERIALIZED (
+					SELECT "id",
+						"cancel_reason" = ${OUTBOX_REQUEUE_CANCEL_REASON} AS "requeue"
+					FROM "orphan_objects"
+					WHERE "id" = ${id}
+						AND "state" = 'DELETE_CLAIMED'::"OrphanState"
+						AND "claim_token" = ${claimToken}
+						AND "claim_until" > clock_timestamp()
+					FOR UPDATE
+				)
+				UPDATE "orphan_objects" AS orphan
+				SET "state" = CASE WHEN claimed."requeue"
+						THEN 'PENDING'::"OrphanState"
+						ELSE 'CANCELLED'::"OrphanState"
+					END,
+					"cancel_reason" = CASE WHEN claimed."requeue" THEN NULL ELSE ${reason} END,
+					"resolved_at" = CASE WHEN claimed."requeue"
+						THEN NULL::timestamp
+						ELSE CAST(${now} AS timestamp)
+					END,
+					"claim_token" = NULL,
+					"claim_until" = NULL,
+					"next_attempt_at" = CASE WHEN claimed."requeue"
+						THEN ${now}
+						ELSE orphan."next_attempt_at"
+					END
+				FROM claimed
+				WHERE orphan."id" = claimed."id"
+				RETURNING claimed."requeue" AS "requeued"
+			`);
+			return {
+				count: cancelled.length,
+				...(cancelled[0]?.requeued ? { requeued: true as const } : {}),
+			};
 		},
 
-		markFailed(id: number, err: unknown, now: Date) {
-			return client.orphanObject.update({
-				where: { id },
-				data: {
-					attemptCount: { increment: 1 },
-					lastTriedAt: now,
-					lastError: String(err instanceof Error ? err.message : err).slice(0, 500),
-				},
-			});
-		},
-
-		markClaimFailed(
+		async markClaimFailed(
 			id: number,
 			claimToken: string,
 			err: unknown,
 			now: Date,
 			nextAttemptAt: Date,
 		) {
-			return client.orphanObject.updateMany({
-				where: { id, state: 'DELETE_CLAIMED', claimToken },
-				data: {
-					state: 'PENDING',
-					claimToken: null,
-					claimUntil: null,
-					cancelReason: null,
-					attemptCount: { increment: 1 },
-					lastTriedAt: now,
-					nextAttemptAt,
-					lastError: String(err instanceof Error ? err.message : err).slice(0, 500),
-				},
-			});
+			const failed = await client.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+				UPDATE "orphan_objects"
+				SET "state" = 'PENDING'::"OrphanState",
+					"claim_token" = NULL,
+					"claim_until" = NULL,
+					"cancel_reason" = NULL,
+					"attempt_count" = "attempt_count" + 1,
+					"last_tried_at" = ${now},
+					"next_attempt_at" = ${nextAttemptAt},
+					"last_error" = ${String(err instanceof Error ? err.message : err).slice(0, 500)}
+				WHERE "id" = ${id}
+					AND "state" = 'DELETE_CLAIMED'::"OrphanState"
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return { count: failed.length };
 		},
 	};
 }

@@ -102,8 +102,7 @@ export interface GameUploadRepository {
 		generation: number;
 		token: string;
 		owner: string;
-		now: Date;
-		leaseUntil: Date;
+		leaseMs: number;
 	}): Promise<
 		| { kind: 'acquired'; token: string }
 		| { kind: 'busy' | 'expired' | 'unavailable' }
@@ -111,26 +110,22 @@ export interface GameUploadRepository {
 	completePartClaim(input: {
 		token: string;
 		etag: string;
-		now: Date;
 	}): Promise<{ accepted: boolean; parts: GameUploadPartRecord[] }>;
-	renewPartClaim(token: string, now: Date, leaseUntil: Date): Promise<{ count: number }>;
+	renewPartClaim(token: string, leaseMs: number): Promise<{ count: number }>;
 	claimCompletion(input: {
 		sessionId: string;
 		generation: number;
 		token: string;
-		now: Date;
-		leaseUntil: Date;
+		leaseMs: number;
 	}): Promise<{ count: number; reason: 'state' | 'parts-active' | 'parts-missing' | null }>;
 	renewCompletionClaim(
 		sessionId: string,
 		token: string,
-		now: Date,
-		leaseUntil: Date,
+		leaseMs: number,
 	): Promise<{ count: number }>;
 	releaseCompletionClaim(
 		sessionId: string,
 		token: string,
-		now: Date,
 		reason: string,
 	): Promise<{ count: number }>;
 	replaceMultipartGeneration(input: {
@@ -139,34 +134,27 @@ export interface GameUploadRepository {
 		newUploadId: string;
 		reason: string;
 	}): Promise<ReplaceMultipartGenerationResult>;
-	upsertPartEtag(sessionId: string, partNumber: number, etag: string): Promise<GameUploadPartRecord[]>;
-	transitionToCompleting(sessionId: string): Promise<{ count: number }>;
 	findPartsBySessionId(sessionId: string): Promise<GameUploadPartRecord[]>;
-	revertToPending(sessionId: string, completionClaimToken?: string): Promise<unknown>;
+	revertToPending(sessionId: string, completionClaimToken: string): Promise<unknown>;
 	markFailed(
 		sessionId: string,
-		storageKey?: string | null,
-		completionClaimToken?: string,
+		storageKey: string | null | undefined,
+		completionClaimToken: string,
 	): Promise<unknown>;
 	markCompletedObjectFailed(input: {
 		sessionId: string;
 		storageKey: string;
 		reason: string;
-		completionClaimToken?: string;
+		completionClaimToken: string;
 	}): Promise<{ count: number }>;
-	findStaleCompletingSessions(cutoff: Date): Promise<GameUploadSessionSummary[]>;
 	claimStaleCompletingSessions(
 		cutoff: Date,
-		now: Date,
 		token: string,
-		leaseUntil: Date,
+		leaseMs: number,
 		limit: number,
 	): Promise<GameUploadSessionSummary[]>;
 	findExpiredPendingSessions(now: Date, limit: number): Promise<GameUploadSessionSummary[]>;
-	findSessionsWithExpiredPartClaims(
-		now: Date,
-		limit: number,
-	): Promise<GameUploadSessionSummary[]>;
+	findSessionsWithExpiredPartClaims(limit: number): Promise<GameUploadSessionSummary[]>;
 	findKnownMultipartUploads(): Promise<Array<{ s3Key: string | null; s3UploadId: string | null }>>;
 	findActiveSessionsForListing(
 		projectId: number,

@@ -30,9 +30,9 @@ export function createIdempotencyService(deps: {
 				id: deps.ids?.next() ?? createClaimToken(),
 				...input,
 				ownerToken,
-				ownerUntil: new Date(now.getTime() + LEASE_MS),
+				ownerLeaseMs: LEASE_MS,
 				expiresAt: new Date(now.getTime() + EXPIRY_MS),
-			}, now);
+			});
 			if (result.kind === 'conflict') throw idempotencyConflict();
 			if (result.kind === 'in_progress') throw operationInProgress();
 			if (result.kind === 'terminal_failed') {
@@ -41,11 +41,9 @@ export function createIdempotencyService(deps: {
 			return result;
 		},
 		async renew(input: { operationId: string; ownerToken: string }): Promise<void> {
-			const now = deps.clock.now();
 			const renewed = await repository.renewOwnership({
 				...input,
-				now,
-				ownerUntil: new Date(now.getTime() + LEASE_MS),
+				leaseMs: LEASE_MS,
 			});
 			if (renewed.count !== 1) {
 				throw new Error('Idempotency operation lease was lost');

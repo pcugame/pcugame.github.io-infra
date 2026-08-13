@@ -47,6 +47,22 @@ they do not wait for the global backlog. Repeated wakes are coalesced into one
 active worker and at most one pending pass. Worker failures are emitted through the
 context logger and retried by later wakes or the periodic maintenance schedule.
 
+Persisted ownership leases use the PostgreSQL clock as their sole source of
+truth. Claim, active-lease checks, renewal, takeover, and token-fenced final
+mutations must compare against `clock_timestamp()`, and lease deadlines must be
+derived as database time plus a duration in the same statement or transaction.
+Application `Clock` values remain valid for business TTLs, retry/backoff
+scheduling, and observations, but must never decide whether a persisted owner is
+still active. Consequently, changing an API process clock must neither steal nor
+revive an upload-intent, multipart-abort, idempotency, game-upload part,
+game-upload completion/recovery, or orphan-deletion lease.
+
+An expired token is stale even when no replacement owner has claimed the row
+yet. Renewal and every token-owned final mutation must fail closed after database
+expiry. Operators must not clear or extend lease columns manually to recover a
+worker; allow the normal PostgreSQL-time takeover path to fence the previous
+token or generation.
+
 Orphan and upload-intent workers claim at most 50 rows and collect one immutable
 reference inventory for the entire claimed batch. A malformed WebGL pointer makes
 the affected buckets fail closed. Do not bypass this check to clear a backlog;

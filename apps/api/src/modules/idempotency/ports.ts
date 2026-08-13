@@ -5,7 +5,7 @@ export interface IdempotencyClaimInput {
 	key: string;
 	requestHash: string;
 	ownerToken: string;
-	ownerUntil: Date;
+	ownerLeaseMs: number;
 	expiresAt: Date;
 }
 
@@ -17,12 +17,11 @@ export type IdempotencyClaim =
 	| { kind: 'terminal_failed'; message: string };
 
 export interface IdempotencyRepository {
-	claim(input: IdempotencyClaimInput, now: Date): Promise<IdempotencyClaim>;
+	claim(input: IdempotencyClaimInput): Promise<IdempotencyClaim>;
 	renewOwnership(input: {
 		operationId: string;
 		ownerToken: string;
-		now: Date;
-		ownerUntil: Date;
+		leaseMs: number;
 	}): Promise<{ count: number }>;
 	markFailed(input: {
 		operationId: string;

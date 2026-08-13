@@ -10,6 +10,7 @@ import {
 	MultipartBusinessCleanupError,
 	UntrackedMultipartCleanupError,
 } from './multipart-cleanup.js';
+import { createClaimHeartbeatGuard } from '../../upload-lifecycle/claim-heartbeat.js';
 
 async function abortUnusedReplacement(
 	deps: GameUploadServiceDependencies,
@@ -95,7 +96,7 @@ export async function uploadChunk(
 	user: { id: number; role: string },
 ): Promise<GameUploadChunkResponse> {
 	deps.uploadSlots.acquire();
-	let claimHeartbeat: NodeJS.Timeout | undefined;
+	let claimHeartbeat: ReturnType<typeof createClaimHeartbeatGuard> | undefined;
 	try {
 		const session = await loadSession(deps, sessionId, user.id, user.role);
 
@@ -120,15 +121,13 @@ export async function uploadChunk(
 		const partNumber = chunkIndex + 1;
 		const generation = session.multipartGeneration ?? 1;
 		const claimToken = deps.ids.next();
-		const now = deps.clock.now();
 		const claim = await deps.repository.acquirePartClaim({
 			sessionId: session.id,
 			partNumber,
 			generation,
 			token: claimToken,
 			owner: `user:${user.id}`,
-			now,
-			leaseUntil: new Date(now.getTime() + 2 * 60 * 1000),
+			leaseMs: 2 * 60 * 1000,
 		});
 		if (claim.kind === 'busy') {
 			throw operationInProgress(`Chunk ${chunkIndex} is already being uploaded`);
@@ -157,18 +156,15 @@ export async function uploadChunk(
 		if (claim.kind === 'unavailable') {
 			throw badRequest('Upload session changed before the chunk claim was acquired');
 		}
-		claimHeartbeat = setInterval(() => {
-			const heartbeatNow = deps.clock.now();
-			void deps.repository.renewPartClaim(
-				claimToken,
-				heartbeatNow,
-				new Date(heartbeatNow.getTime() + 2 * 60 * 1000),
-			).catch((error) => deps.logger.error(
+		claimHeartbeat = createClaimHeartbeatGuard({
+			heartbeatMs: 30 * 1000,
+			lostMessage: `Part-upload claim was lost for session ${session.id}, part ${partNumber}`,
+			renew: () => deps.repository.renewPartClaim(claimToken, 2 * 60 * 1000),
+			logHeartbeatFailure: (error) => deps.logger.error(
 				{ error, sessionId: session.id, partNumber },
 				'Part-upload claim heartbeat failed',
-			));
-		}, 30 * 1000);
-		claimHeartbeat.unref();
+			),
+		});
 		const countedBody = createCountedChunkStream(body, chunkIndex, expectedSize);
 
 		let etag: string;
@@ -179,11 +175,16 @@ export async function uploadChunk(
 				partNumber,
 				countedBody.stream,
 				expectedSize,
+				{ signal: claimHeartbeat.signal },
 			);
 		} catch (err) {
 			countedBody.destroy(err);
+			if (claimHeartbeat.isLost()) {
+				await claimHeartbeat.assertOwned();
+			}
 			throw err;
 		}
+		await claimHeartbeat.assertOwned();
 		const bytesWritten = countedBody.bytesWritten();
 		if (bytesWritten !== expectedSize) {
 			throw badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${bytesWritten}`);
@@ -193,7 +194,6 @@ export async function uploadChunk(
 		const completed = await deps.repository.completePartClaim({
 			token: claimToken,
 			etag,
-			now: deps.clock.now(),
 		});
 		if (!completed.accepted) {
 			const businessError = conflict('Chunk claim expired; the multipart generation must be restarted');
@@ -229,7 +229,7 @@ export async function uploadChunk(
 			totalChunks: session.totalChunks,
 		};
 	} finally {
-		if (claimHeartbeat) clearInterval(claimHeartbeat);
+		claimHeartbeat?.stop();
 		deps.uploadSlots.release();
 	}
 }

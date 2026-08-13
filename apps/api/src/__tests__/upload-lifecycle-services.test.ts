@@ -2,6 +2,8 @@ import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { createMultipartRequestHasher } from '../infrastructure/multipart-request-hasher.js';
 import { createIdempotencyService } from '../modules/idempotency/service.js';
+import type { MultipartAbortRepository } from '../modules/multipart-abort/ports.js';
+import { createMultipartAbortService } from '../modules/multipart-abort/service.js';
 import { createUploadIntentService } from '../modules/upload-intent/service.js';
 import type { UploadIntentRepository } from '../modules/upload-intent/ports.js';
 import { createUploadTempScavenger } from '../modules/upload-intent/temp-scavenger.js';
@@ -53,7 +55,6 @@ describe('idempotency operation service', () => {
 		const renewOwnership = vi.fn()
 			.mockResolvedValueOnce({ count: 1 })
 			.mockResolvedValueOnce({ count: 0 });
-		const now = new Date('2026-08-11T00:00:00.000Z');
 		const service = createIdempotencyService({
 			repository: {
 				claim: vi.fn(),
@@ -61,7 +62,7 @@ describe('idempotency operation service', () => {
 				markFailed: vi.fn(),
 				purgeExpired: vi.fn(),
 			},
-			clock: { now: () => now },
+			clock: { now: () => new Date('2026-08-11T00:00:00.000Z') },
 		});
 
 		await expect(service.renew({ operationId: 'operation', ownerToken: 'owner' }))
@@ -69,8 +70,7 @@ describe('idempotency operation service', () => {
 		expect(renewOwnership).toHaveBeenNthCalledWith(1, {
 			operationId: 'operation',
 			ownerToken: 'owner',
-			now,
-			ownerUntil: new Date('2026-08-11T00:02:00.000Z'),
+			leaseMs: 2 * 60 * 1000,
 		});
 		await expect(service.renew({ operationId: 'operation', ownerToken: 'stale-owner' }))
 			.rejects.toThrow('Idempotency operation lease was lost');
@@ -92,7 +92,7 @@ function intentRepository(
 		isUncommitted: vi.fn(),
 		recordAmbiguousError: vi.fn(),
 		claimStale: vi.fn().mockResolvedValue(intents),
-		renewClaim: vi.fn(),
+		renewClaim: vi.fn(async () => ({ count: 1 })),
 		markReferenced: vi.fn(),
 		markMissing: vi.fn(),
 		queueCleanup: vi.fn(),
@@ -168,6 +168,101 @@ describe('upload-intent convergence', () => {
 		});
 		expect(collect).toHaveBeenCalledOnce();
 		expect(repository.queueCleanup).toHaveBeenCalledTimes(50);
+	});
+
+	it('aborts in-flight object inspection when an expired claim cannot be renewed', async () => {
+		vi.useFakeTimers();
+		try {
+			const repository = intentRepository([
+				{ id: 'expired', bucket: 'public', storageKey: 'expired.png', state: 'UPLOADED', attemptCount: 0 },
+			]);
+			repository.renewClaim
+				.mockResolvedValueOnce({ count: 1 })
+				.mockResolvedValueOnce({ count: 0 });
+			let inspectionStarted!: () => void;
+			const started = new Promise<void>((resolve) => { inspectionStarted = resolve; });
+			const head = vi.fn((_bucket, _key, request?: { signal?: AbortSignal }) => {
+				inspectionStarted();
+				return new Promise<null>((_resolve, reject) => {
+					request?.signal?.addEventListener('abort', () => {
+						reject(request.signal?.reason ?? new Error('aborted'));
+					}, { once: true });
+				});
+			});
+			const service = createUploadIntentService({
+				repository,
+				references: { collect: vi.fn(async () => ({ references: [], unsafeBuckets: new Set<string>() })) },
+				storage: { head },
+				clock: { now: () => new Date('2026-08-11T00:00:00.000Z') },
+				ids: { next: () => 'expired-token' },
+				logger: { info: vi.fn(), error: vi.fn() },
+			});
+
+			const running = service.sweep();
+			await started;
+			await vi.advanceTimersByTimeAsync(30_000);
+			await expect(running).resolves.toEqual({
+				tried: 1,
+				referenced: 0,
+				queued: 0,
+				missing: 0,
+			});
+			expect(repository.markSweepFailed).not.toHaveBeenCalled();
+			expect(repository.markMissing).not.toHaveBeenCalled();
+			expect(repository.queueCleanup).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
+describe('multipart-abort convergence', () => {
+	it('aborts in-flight storage I/O when a wrong-token heartbeat loses the claim', async () => {
+		vi.useFakeTimers();
+		try {
+			const renew = vi.fn()
+				.mockResolvedValueOnce({ count: 1 })
+				.mockResolvedValueOnce({ count: 0 });
+			const repository = {
+				queue: vi.fn(),
+				claim: vi.fn(async () => [{
+					id: 'abort-task',
+					bucket: 'protected',
+					storageKey: 'game.zip',
+					uploadId: 'upload-id',
+					attemptCount: 0,
+				}]),
+				renew,
+				resolve: vi.fn(),
+				fail: vi.fn(),
+			} satisfies MultipartAbortRepository;
+			let abortStarted!: () => void;
+			const started = new Promise<void>((resolve) => { abortStarted = resolve; });
+			const abortMultipart = vi.fn((_bucket, _key, _uploadId, request?: { signal?: AbortSignal }) => {
+				abortStarted();
+				return new Promise<void>((_resolve, reject) => {
+					request?.signal?.addEventListener('abort', () => {
+						reject(request.signal?.reason ?? new Error('aborted'));
+					}, { once: true });
+				});
+			});
+			const service = createMultipartAbortService({
+				repository,
+				storage: { abortMultipart },
+				clock: { now: () => new Date('2026-08-11T00:00:00.000Z') },
+				ids: { next: () => 'wrong-token' },
+				logger: { error: vi.fn() },
+			});
+
+			const running = service.run();
+			await started;
+			await vi.advanceTimersByTimeAsync(30_000);
+			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			expect(repository.resolve).not.toHaveBeenCalled();
+			expect(repository.fail).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
 

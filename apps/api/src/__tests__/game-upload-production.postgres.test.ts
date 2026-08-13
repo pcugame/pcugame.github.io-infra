@@ -680,6 +680,258 @@ describe.runIf(runPostgresIntegration)(
 			}
 		});
 
+		it('serializes part claimants with DB deadlines and fences an expired multipart generation', async () => {
+			const key = `${testId}-part-lease-clock.zip`;
+			const oldUploadId = randomUUID();
+			const session = await createSessionFixture({ s3Key: key, s3UploadId: oldUploadId });
+			const first = createGameUploadRepository(control, { abortBucket: protectedBucket });
+			const second = createGameUploadRepository(recoveryClient, { abortBucket: protectedBucket });
+			const firstToken = randomUUID();
+			const secondToken = randomUUID();
+
+			try {
+				const outcomes = await Promise.all([
+					first.acquirePartClaim({
+						sessionId: session.id,
+						partNumber: 1,
+						generation: 1,
+						token: firstToken,
+						owner: 'clock-skew-future-worker',
+						leaseMs: 2 * 60_000,
+					}),
+					second.acquirePartClaim({
+						sessionId: session.id,
+						partNumber: 1,
+						generation: 1,
+						token: secondToken,
+						owner: 'clock-skew-past-worker',
+						leaseMs: 2 * 60_000,
+					}),
+				]);
+				expect(outcomes.filter(({ kind }) => kind === 'acquired')).toHaveLength(1);
+				expect(outcomes.filter(({ kind }) => kind === 'busy')).toHaveLength(1);
+				const claim = await control.gameUploadPartClaim.findFirstOrThrow({
+					where: { sessionId: session.id, partNumber: 1 },
+				});
+				await expect(second.replaceMultipartGeneration({
+					sessionId: session.id,
+					expectedGeneration: 1,
+					newUploadId: randomUUID(),
+					reason: 'must-not-revoke-live-part-claim',
+				})).resolves.toEqual({ replaced: false, durableAbort: null });
+				await expect(control.gameUploadPartClaim.findUnique({ where: { id: claim.id } }))
+					.resolves.toMatchObject({ token: claim.token, generation: 1 });
+				const [partDatabaseTime] = await control.$queryRaw<Array<{ now: Date }>>`
+					SELECT clock_timestamp() AS "now"
+				`;
+				const partLeaseRemaining = claim.leaseUntil.getTime() - partDatabaseTime!.now.getTime();
+				expect(partLeaseRemaining).toBeGreaterThan(60_000);
+				expect(partLeaseRemaining).toBeLessThan(3 * 60_000);
+				const winningRepository = claim.token === firstToken ? first : second;
+
+				await expect(first.renewPartClaim('wrong-token', 5 * 60_000))
+					.resolves.toEqual({ count: 0 });
+				await expect(winningRepository.renewPartClaim(claim.token, 5 * 60_000))
+					.resolves.toEqual({ count: 1 });
+				const renewed = await control.gameUploadPartClaim.findUniqueOrThrow({
+					where: { id: claim.id },
+				});
+				expect(renewed.leaseUntil.getTime())
+					.toBeGreaterThan(claim.leaseUntil.getTime() + 2 * 60_000);
+
+				await control.gameUploadPartClaim.update({
+					where: { id: claim.id },
+					data: { leaseUntil: new Date(0) },
+				});
+				await expect(winningRepository.renewPartClaim(claim.token, 5 * 60_000))
+					.resolves.toEqual({ count: 0 });
+				await expect(winningRepository.completePartClaim({
+					token: claim.token,
+					etag: 'stale-etag',
+				})).resolves.toEqual({ accepted: false, parts: [] });
+				await expect(second.acquirePartClaim({
+					sessionId: session.id,
+					partNumber: 1,
+					generation: 1,
+					token: randomUUID(),
+					owner: 'post-expiry-worker',
+					leaseMs: 2 * 60_000,
+				})).resolves.toEqual({ kind: 'expired' });
+
+				const newUploadId = randomUUID();
+				await expect(second.replaceMultipartGeneration({
+					sessionId: session.id,
+					expectedGeneration: 1,
+					newUploadId,
+					reason: 'db-expired-part-claim-reset',
+				})).resolves.toMatchObject({ replaced: true });
+				const nextToken = randomUUID();
+				await expect(second.acquirePartClaim({
+					sessionId: session.id,
+					partNumber: 1,
+					generation: 2,
+					token: nextToken,
+					owner: 'new-generation-worker',
+					leaseMs: 2 * 60_000,
+				})).resolves.toEqual({ kind: 'acquired', token: nextToken });
+				await expect(second.completePartClaim({ token: nextToken, etag: 'etag-generation-2' }))
+					.resolves.toMatchObject({ accepted: true });
+				await expect(control.gameUploadPart.findUniqueOrThrow({
+					where: {
+						game_upload_part_session_part: { sessionId: session.id, partNumber: 1 },
+					},
+				})).resolves.toMatchObject({ generation: 2, etag: 'etag-generation-2' });
+			} finally {
+				await runCleanupSteps([
+					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
+					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
+					() => control.multipartAbortTask.deleteMany({
+						where: { bucket: protectedBucket, storageKey: key, uploadId: oldUploadId },
+					}),
+				]);
+			}
+		});
+
+		it('keeps an active completion lease despite a future recovery cutoff and fences expired finalizers', async () => {
+			const key = `${testId}-completion-lease-clock.zip`;
+			const session = await createSessionFixture({ s3Key: key });
+			await control.gameUploadPart.create({
+				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1', generation: 1 },
+			});
+			const owner = createGameUploadRepository(control, { abortBucket: protectedBucket });
+			const recovery = createGameUploadRepository(recoveryClient, { abortBucket: protectedBucket });
+			const ownerToken = randomUUID();
+			const recoveryToken = randomUUID();
+			const competingRecoveryToken = randomUUID();
+
+			try {
+				await expect(owner.claimCompletion({
+					sessionId: session.id,
+					generation: 1,
+					token: ownerToken,
+					leaseMs: 2 * 60_000,
+				})).resolves.toEqual({ count: 1, reason: null });
+				await expect(recovery.claimStaleCompletingSessions(
+					new Date('9990-01-01T00:00:00.000Z'),
+					recoveryToken,
+					2 * 60_000,
+					50,
+				)).resolves.toEqual([]);
+				const activeCompletion = await control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				});
+				const [completionDatabaseTime] = await control.$queryRaw<Array<{ now: Date }>>`
+					SELECT clock_timestamp() AS "now"
+				`;
+				const completionLeaseRemaining = activeCompletion.completionClaimUntil!.getTime()
+					- completionDatabaseTime!.now.getTime();
+				expect(completionLeaseRemaining).toBeGreaterThan(60_000);
+				expect(completionLeaseRemaining).toBeLessThan(3 * 60_000);
+
+				await expect(owner.renewCompletionClaim(session.id, 'wrong-token', 5 * 60_000))
+					.resolves.toEqual({ count: 0 });
+				const firstDeadline = (await control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				})).completionClaimUntil!;
+				await expect(owner.renewCompletionClaim(session.id, ownerToken, 5 * 60_000))
+					.resolves.toEqual({ count: 1 });
+				const renewedDeadline = (await control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				})).completionClaimUntil!;
+				expect(renewedDeadline.getTime())
+					.toBeGreaterThan(firstDeadline.getTime() + 2 * 60_000);
+
+				await control.gameUploadSession.update({
+					where: { id: session.id },
+					data: { completionClaimUntil: new Date(0) },
+				});
+				await expect(owner.renewCompletionClaim(session.id, ownerToken, 5 * 60_000))
+					.resolves.toEqual({ count: 0 });
+				await expect(owner.releaseCompletionClaim(
+					session.id,
+					ownerToken,
+					'stale-release',
+				)).resolves.toEqual({ count: 0 });
+				await expect(owner.revertToPending(session.id, ownerToken))
+					.resolves.toEqual({ count: 0 });
+				await expect(owner.markFailed(session.id, key, ownerToken))
+					.resolves.toEqual({ count: 0 });
+				await expect(owner.markCompletedObjectFailed({
+					sessionId: session.id,
+					storageKey: key,
+					reason: 'stale-terminal-finalizer',
+					completionClaimToken: ownerToken,
+				})).resolves.toEqual({ count: 0 });
+				await expect(owner.finalizeCompletedSession(
+					session.id,
+					projectId,
+					'GAME',
+					{
+						storageKey: key,
+						originalName: 'game.zip',
+						mimeType: 'application/zip',
+						sizeBytes: 1n,
+						isPublic: false,
+						completionClaimToken: ownerToken,
+					},
+					{
+						bucket: protectedBucket,
+						reason: 'replace-game',
+						playbackReason: 'replace-playback',
+					},
+				)).rejects.toThrow('Game upload completion claim is no longer active');
+				const deployment = createWebglDeploymentKeys(projectId, randomUUID());
+				await expect(owner.finalizeCompletedWebglSession(
+					session.id,
+					projectId,
+					deployment.entryKey,
+					deployment.sourceKey,
+					{
+						publicBucket,
+						protectedBucket,
+						reason: 'replace-webgl',
+					},
+					ownerToken,
+				)).rejects.toThrow('WebGL upload completion claim is no longer active');
+
+				const recoveryOutcomes = await Promise.all([
+					owner.claimStaleCompletingSessions(
+						new Date('2000-01-01T00:00:00.000Z'),
+						competingRecoveryToken,
+						2 * 60_000,
+						50,
+					),
+					recovery.claimStaleCompletingSessions(
+						new Date('2000-01-01T00:00:00.000Z'),
+						recoveryToken,
+						2 * 60_000,
+						50,
+					),
+				]);
+				expect(recoveryOutcomes.flat().filter(({ id }) => id === session.id)).toHaveLength(1);
+				const recovered = await control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				});
+				const winningRecoveryToken = recovered.completionClaimToken!;
+				const winningRecoveryRepository = winningRecoveryToken === recoveryToken
+					? recovery
+					: owner;
+				await expect(owner.revertToPending(session.id, ownerToken))
+					.resolves.toEqual({ count: 0 });
+				await expect(winningRecoveryRepository.revertToPending(
+					session.id,
+					winningRecoveryToken,
+				))
+					.resolves.toEqual({ count: 1 });
+			} finally {
+				await runCleanupSteps([
+					() => control.orphanObject.deleteMany({ where: { bucket: protectedBucket, storageKey: key } }),
+					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
+					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
+				]);
+			}
+		});
+
 		it('fences stale part claims when replacing a multipart generation', async () => {
 			const key = `${testId}-generation.zip`;
 			const oldUploadId = randomUUID();
@@ -691,8 +943,7 @@ describe.runIf(runPostgresIntegration)(
 			const repository = createGameUploadRepository(control, {
 				abortBucket: protectedBucket,
 			});
-			const now = new Date('2098-07-31T00:10:00.000Z');
-			const leaseUntil = new Date('2098-07-31T00:11:00.000Z');
+			const leaseMs = 60_000;
 			const staleToken = randomUUID();
 
 			try {
@@ -702,8 +953,7 @@ describe.runIf(runPostgresIntegration)(
 					generation: 1,
 					token: staleToken,
 					owner: 'first-request',
-					now,
-					leaseUntil,
+					leaseMs,
 				})).resolves.toEqual({ kind: 'acquired', token: staleToken });
 				await expect(repository.acquirePartClaim({
 					sessionId: session.id,
@@ -711,8 +961,7 @@ describe.runIf(runPostgresIntegration)(
 					generation: 1,
 					token: randomUUID(),
 					owner: 'second-request',
-					now,
-					leaseUntil,
+					leaseMs,
 				})).resolves.toEqual({ kind: 'busy' });
 				await control.gameUploadPart.create({
 					data: {
@@ -721,6 +970,18 @@ describe.runIf(runPostgresIntegration)(
 						etag: 'old-etag',
 						generation: 1,
 					},
+				});
+				await expect(repository.replaceMultipartGeneration({
+					sessionId: session.id,
+					expectedGeneration: 1,
+					newUploadId,
+					reason: 'must-not-revoke-active-part-claim',
+				})).resolves.toEqual({ replaced: false, durableAbort: null });
+				await expect(control.gameUploadPartClaim.findUnique({ where: { token: staleToken } }))
+					.resolves.toMatchObject({ token: staleToken, generation: 1 });
+				await control.gameUploadPartClaim.update({
+					where: { token: staleToken },
+					data: { leaseUntil: new Date(0) },
 				});
 
 				await expect(repository.replaceMultipartGeneration({
@@ -754,7 +1015,6 @@ describe.runIf(runPostgresIntegration)(
 				await expect(repository.completePartClaim({
 					token: staleToken,
 					etag: 'stale-etag',
-					now,
 				})).resolves.toEqual({ accepted: false, parts: [] });
 				await expect(repository.acquirePartClaim({
 					sessionId: session.id,
@@ -762,8 +1022,7 @@ describe.runIf(runPostgresIntegration)(
 					generation: 1,
 					token: randomUUID(),
 					owner: 'stale-generation',
-					now,
-					leaseUntil,
+					leaseMs,
 				})).resolves.toEqual({ kind: 'unavailable' });
 				await expect(control.multipartAbortTask.findUnique({
 					where: {
@@ -792,8 +1051,7 @@ describe.runIf(runPostgresIntegration)(
 			const repository = createGameUploadRepository(control, {
 				abortBucket: protectedBucket,
 			});
-			const now = new Date('2098-07-31T00:10:00.000Z');
-			const leaseUntil = new Date('2098-07-31T00:11:00.000Z');
+			const leaseMs = 60_000;
 			const partToken = randomUUID();
 			const completionToken = randomUUID();
 
@@ -804,39 +1062,33 @@ describe.runIf(runPostgresIntegration)(
 					generation: 1,
 					token: partToken,
 					owner: 'part-request',
-					now,
-					leaseUntil,
+					leaseMs,
 				});
 				await expect(repository.claimCompletion({
 					sessionId: session.id,
 					generation: 1,
 					token: completionToken,
-					now,
-					leaseUntil,
+					leaseMs,
 				})).resolves.toEqual({ count: 0, reason: 'parts-active' });
 				await expect(repository.completePartClaim({
 					token: partToken,
 					etag: 'etag-1',
-					now,
 				})).resolves.toMatchObject({ accepted: true });
 				await expect(repository.claimCompletion({
 					sessionId: session.id,
 					generation: 1,
 					token: completionToken,
-					now,
-					leaseUntil,
+					leaseMs,
 				})).resolves.toEqual({ count: 1, reason: null });
 				await expect(repository.renewCompletionClaim(
 					session.id,
 					'wrong-token',
-					now,
-					new Date('2098-07-31T00:12:00.000Z'),
+					2 * 60_000,
 				)).resolves.toEqual({ count: 0 });
 				await expect(repository.renewCompletionClaim(
 					session.id,
 					completionToken,
-					now,
-					new Date('2098-07-31T00:12:00.000Z'),
+					2 * 60_000,
 				)).resolves.toEqual({ count: 1 });
 				await expect(repository.acquirePartClaim({
 					sessionId: session.id,
@@ -844,8 +1096,7 @@ describe.runIf(runPostgresIntegration)(
 					generation: 1,
 					token: randomUUID(),
 					owner: 'late-part-request',
-					now,
-					leaseUntil,
+					leaseMs,
 				})).resolves.toEqual({ kind: 'unavailable' });
 			} finally {
 				await runCleanupSteps([

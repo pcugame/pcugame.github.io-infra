@@ -18,8 +18,8 @@ import { createDurableGameUploadRepository } from './helpers/upload-lifecycle.js
 
 const mocks = {
 	findSessionById: vi.fn(),
-	upsertPartEtag: vi.fn(),
 	completePartClaim: vi.fn(),
+	renewPartClaim: vi.fn(),
 	findExhibitionById: vi.fn(),
 	getSiteSettings: vi.fn(),
 	uploadPart: vi.fn(),
@@ -38,16 +38,14 @@ function createDependencies(): GameUploadServiceDependencies {
 	return {
 		repository: createDurableGameUploadRepository({
 			findSessionById: mocks.findSessionById,
-			upsertPartEtag: mocks.upsertPartEtag,
 			completePartClaim: mocks.completePartClaim,
+			renewPartClaim: mocks.renewPartClaim,
 			cancelSessionAndClearActive: vi.fn(),
 			findExhibitionById: mocks.findExhibitionById,
 			createSessionReplacingActive: mocks.createSessionReplacingActive,
 			findActiveSessionsForListing: vi.fn().mockResolvedValue([]),
-			findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
 			findPartsBySessionId: vi.fn().mockResolvedValue([]),
 			revertToPending: vi.fn(),
-			transitionToCompleting: vi.fn(),
 			markFailed: vi.fn(),
 		}),
 		storage: {
@@ -128,11 +126,11 @@ describe('game upload resource guards', () => {
 		uploadLimiter = createUploadLimiter(() => 2);
 		service = createGameUploadService(createDependencies());
 		mocks.findSessionById.mockImplementation(async () => pendingSession());
-		mocks.upsertPartEtag.mockResolvedValue([{ partNumber: 1 }]);
 		mocks.completePartClaim.mockImplementation(async ({ etag }) => ({
 			accepted: true,
 			parts: [{ partNumber: 1, etag, generation: 1 }],
 		}));
+		mocks.renewPartClaim.mockResolvedValue({ count: 1 });
 	});
 
 	afterEach(() => {
@@ -303,9 +301,7 @@ describe('game upload resource guards', () => {
 		expect(mocks.completePartClaim).toHaveBeenCalledWith({
 			token: expect.any(String),
 			etag: 'etag-1024',
-			now: new Date('2026-07-31T00:00:00.000Z'),
 		});
-		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
 	});
 
 	it('does not record chunk state when the request stream aborts and allows retry', async () => {
@@ -351,10 +347,49 @@ describe('game upload resource guards', () => {
 		expect(mocks.completePartClaim).toHaveBeenCalledWith({
 			token: expect.any(String),
 			etag: 'etag-2',
-			now: new Date('2026-07-31T00:00:00.000Z'),
 		});
-		expect(mocks.upsertPartEtag).not.toHaveBeenCalled();
 		expect(uploadLimiter.activeCount()).toBe(0);
+	});
+
+	it('aborts upload and rejects when an expired or wrong-token heartbeat loses the part claim', async () => {
+		vi.useFakeTimers();
+		try {
+			let uploadEntered!: () => void;
+			const entered = new Promise<void>((resolve) => { uploadEntered = resolve; });
+			mocks.renewPartClaim.mockResolvedValue({ count: 0 });
+			mocks.uploadPart.mockImplementation((
+				_key,
+				_uploadId,
+				_partNumber,
+				_body,
+				_contentLength,
+				request?: { signal?: AbortSignal },
+			) => {
+				uploadEntered();
+				return new Promise<string>((_resolve, reject) => {
+					request?.signal?.addEventListener('abort', () => {
+						reject(request.signal?.reason ?? new Error('aborted'));
+					}, { once: true });
+				});
+			});
+
+			const running = service.uploadChunk(
+				'session-1',
+				0,
+				oneByteStream(1),
+				{ id: 11, role: 'USER' },
+			);
+			const rejected = expect(running).rejects.toThrow('Part-upload claim was lost');
+			await entered;
+			await vi.advanceTimersByTimeAsync(30_000);
+
+			await rejected;
+			expect(mocks.completePartClaim).not.toHaveBeenCalled();
+			expect(mocks.renewPartClaim).toHaveBeenCalledWith(expect.any(String), 120_000);
+			expect(uploadLimiter.activeCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('destroys the inbound stream and releases the upload slot when S3 upload fails', async () => {

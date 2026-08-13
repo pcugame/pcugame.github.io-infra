@@ -17,12 +17,10 @@ export class CompletionClaimLostError extends Error {
 export function createCompletionClaimGuard(input: {
 	sessionId: string;
 	token: string;
-	clock: { now(): Date };
 	renew?: (
 		sessionId: string,
 		token: string,
-		now: Date,
-		leaseUntil: Date,
+		leaseMs: number,
 	) => Promise<{ count: number }>;
 	outerSignal?: AbortSignal;
 	logHeartbeatFailure(error: unknown): void;
@@ -49,14 +47,12 @@ export function createCompletionClaimGuard(input: {
 		if (lost) throw lost;
 		if (!input.renew) return;
 
-		const now = input.clock.now();
 		let result: { count: number };
 		try {
 			result = await input.renew(
 				input.sessionId,
 				input.token,
-				now,
-				new Date(now.getTime() + COMPLETION_CLAIM_LEASE_MS),
+				COMPLETION_CLAIM_LEASE_MS,
 			);
 		} catch (error) {
 			throw loseClaim(error);

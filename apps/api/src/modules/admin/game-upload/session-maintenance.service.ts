@@ -102,9 +102,8 @@ export async function sweepStaleCompletingSessions(
 	const completionClaimToken = deps.ids.next();
 	const stale = await deps.repository.claimStaleCompletingSessions(
 			cutoff,
-			now,
 			completionClaimToken,
-			new Date(now.getTime() + 2 * 60 * 1000),
+			2 * 60 * 1000,
 			50,
 		);
 	if (stale.length === 0) return { swept: 0 };
@@ -115,7 +114,6 @@ export async function sweepStaleCompletingSessions(
 		const completionClaim = createCompletionClaimGuard({
 			sessionId: s.id,
 			token: completionClaimToken,
-			clock: deps.clock,
 			renew: deps.repository.renewCompletionClaim,
 			...(signal ? { outerSignal: signal } : {}),
 			logHeartbeatFailure: (error) => deps.logger.error(
@@ -221,15 +219,24 @@ export async function sweepStaleCompletingSessions(
 		} finally {
 			completionClaim.stop();
 			if (!completionStateResolved) {
-				await deps.repository.releaseCompletionClaim(
-					s.id,
-					completionClaimToken,
-					deps.clock.now(),
-					'recovery-deferred',
-				).catch((error) => deps.logger.error(
-					{ error, sessionId: s.id },
-					'Failed to release completing-session recovery claim',
-				));
+				try {
+					const released = await deps.repository.releaseCompletionClaim(
+						s.id,
+						completionClaimToken,
+						'recovery-deferred',
+					);
+					if (released.count !== 1) {
+						deps.logger.warn(
+							{ sessionId: s.id, completionClaimToken },
+							'Completing-session recovery claim was lost before deferred release',
+						);
+					}
+				} catch (error) {
+					deps.logger.error(
+						{ error, sessionId: s.id },
+						'Failed to release completing-session recovery claim',
+					);
+				}
 			}
 		}
 	}
@@ -258,7 +265,6 @@ export async function sweepExpiredPartClaims(
 ): Promise<{ swept: number }> {
 	if (signal?.aborted) return { swept: 0 };
 	const sessions = await deps.repository.findSessionsWithExpiredPartClaims(
-		deps.clock.now(),
 		50,
 	);
 	let swept = 0;

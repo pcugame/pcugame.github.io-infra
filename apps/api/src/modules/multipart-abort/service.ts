@@ -1,5 +1,6 @@
 import type { ObjectStorage } from '../../application/ports.js';
 import { createClaimToken } from '../../shared/claim-token.js';
+import { createClaimHeartbeatGuard } from '../upload-lifecycle/claim-heartbeat.js';
 import type { MultipartAbortRepository } from './ports.js';
 
 const CLAIM_LEASE_MS = 2 * 60 * 1000;
@@ -21,37 +22,47 @@ export function createMultipartAbortService(deps: {
 			const claimToken = deps.ids?.next() ?? createClaimToken();
 			const tasks = await repository.claim(
 				50,
-				now,
 				claimToken,
-				new Date(now.getTime() + CLAIM_LEASE_MS),
+				CLAIM_LEASE_MS,
 			);
 			let resolved = 0;
 			let failed = 0;
 			for (const task of tasks) {
 				if (signal?.aborted) break;
-				const heartbeat = setInterval(() => {
-					const heartbeatNow = deps.clock.now();
-					void repository.renew(
+				const claim = createClaimHeartbeatGuard({
+					heartbeatMs: CLAIM_HEARTBEAT_MS,
+					lostMessage: 'Multipart abort task claim was lost',
+					outerSignal: signal,
+					renew: () => repository.renew(
 						task.id,
 						claimToken,
-						heartbeatNow,
-						new Date(heartbeatNow.getTime() + CLAIM_LEASE_MS),
-					).catch((error) => deps.logger.error(
+						CLAIM_LEASE_MS,
+					),
+					logHeartbeatFailure: (error) => deps.logger.error(
 						{ error, taskId: task.id },
 						'Multipart abort claim heartbeat failed',
-					));
-				}, CLAIM_HEARTBEAT_MS);
-				heartbeat.unref();
+					),
+				});
 				try {
+					await claim.assertOwned();
 					await deps.storage.abortMultipart(
 						task.bucket,
 						task.storageKey,
 						task.uploadId,
-						{ signal },
+						{ signal: claim.signal },
 					);
+					await claim.assertOwned();
 					await repository.resolve(task.id, claimToken, now);
 					resolved++;
 				} catch (error) {
+					if (claim.isLost()) {
+						deps.logger.error(
+							{ error, taskId: task.id },
+							'Multipart abort stopped after claim loss',
+						);
+						failed++;
+						continue;
+					}
 					const backoff = Math.min(60 * 60 * 1000, 30_000 * (2 ** Math.min(task.attemptCount, 8)));
 					await repository.fail(
 						task.id,
@@ -64,7 +75,7 @@ export function createMultipartAbortService(deps: {
 					));
 					failed++;
 				} finally {
-					clearInterval(heartbeat);
+					claim.stop();
 				}
 			}
 			return { tried: tasks.length, resolved, failed };

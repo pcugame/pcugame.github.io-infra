@@ -1,6 +1,11 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import type { MultipartAbortTarget } from './ports.js';
 
+function requireActiveClaim(updated: readonly { id: string }[]): { count: number } {
+	if (updated.length !== 1) throw new Error('Multipart abort task claim was lost');
+	return { count: 1 };
+}
+
 export function queueMultipartAbortTask(
 	tx: Prisma.TransactionClient,
 	target: MultipartAbortTarget,
@@ -18,23 +23,22 @@ export function queueMultipartAbortTask(
 			create: { ...target, nextAttemptAt: now },
 			update: { reason: target.reason },
 		});
-		await tx.multipartAbortTask.updateMany({
-			where: {
-				id: task.id,
-				OR: [
-					{ state: { not: 'CLAIMED' } },
-					{ claimUntil: null },
-					{ claimUntil: { lte: now } },
-				],
-			},
-			data: {
-				state: 'PENDING',
-				nextAttemptAt: now,
-				claimToken: null,
-				claimUntil: null,
-				resolvedAt: null,
-			},
-		});
+		await tx.$queryRaw(Prisma.sql`
+			UPDATE "multipart_abort_tasks"
+			SET "state" = 'PENDING'::"MultipartAbortTaskState",
+				"next_attempt_at" = ${now},
+				"claim_token" = NULL,
+				"claim_until" = NULL,
+				"resolved_at" = NULL,
+				"updated_at" = clock_timestamp()
+			WHERE "id" = ${task.id}
+				AND (
+					"state" <> 'CLAIMED'::"MultipartAbortTaskState"
+					OR "claim_until" IS NULL
+					OR "claim_until" <= clock_timestamp()
+				)
+			RETURNING "id"
+		`);
 		return tx.multipartAbortTask.findUniqueOrThrow({ where: { id: task.id } });
 	})();
 }
@@ -44,7 +48,7 @@ export function createMultipartAbortRepository(client: PrismaClient) {
 		queue(target: MultipartAbortTarget) {
 			return client.$transaction((tx) => queueMultipartAbortTask(tx, target));
 		},
-		claim(limit: number, now: Date, claimToken: string, claimUntil: Date) {
+		claim(limit: number, claimToken: string, claimLeaseMs: number) {
 			return client.$queryRaw<Array<{
 				id: string;
 				bucket: string;
@@ -55,12 +59,12 @@ export function createMultipartAbortRepository(client: PrismaClient) {
 				WITH candidates AS (
 					SELECT "id"
 					FROM "multipart_abort_tasks"
-					WHERE "next_attempt_at" <= ${now}
+					WHERE "next_attempt_at" <= clock_timestamp()
 						AND (
 							"state" = 'PENDING'::"MultipartAbortTaskState"
 							OR (
 								"state" = 'CLAIMED'::"MultipartAbortTaskState"
-								AND ("claim_until" IS NULL OR "claim_until" <= ${now})
+								AND ("claim_until" IS NULL OR "claim_until" <= clock_timestamp())
 							)
 						)
 					ORDER BY "created_at"
@@ -70,7 +74,8 @@ export function createMultipartAbortRepository(client: PrismaClient) {
 				UPDATE "multipart_abort_tasks" AS task
 				SET "state" = 'CLAIMED'::"MultipartAbortTaskState",
 					"claim_token" = ${claimToken},
-					"claim_until" = ${claimUntil}
+					"claim_until" = clock_timestamp()
+						+ (${claimLeaseMs} * INTERVAL '1 millisecond')
 				FROM candidates
 				WHERE task."id" = candidates."id"
 				RETURNING task."id",
@@ -80,46 +85,60 @@ export function createMultipartAbortRepository(client: PrismaClient) {
 					task."attempt_count" AS "attemptCount"
 			`);
 		},
-		renew(id: string, claimToken: string, now: Date, claimUntil: Date) {
-			return client.multipartAbortTask.updateMany({
-				where: {
-					id,
-					state: 'CLAIMED',
-					claimToken,
-					claimUntil: { gt: now },
-				},
-				data: { claimUntil },
-			});
+		async renew(id: string, claimToken: string, claimLeaseMs: number) {
+			const renewed = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "multipart_abort_tasks"
+				SET "claim_until" = clock_timestamp()
+						+ (${claimLeaseMs} * INTERVAL '1 millisecond'),
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${id}
+					AND "state" = 'CLAIMED'::"MultipartAbortTaskState"
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return { count: renewed.length };
 		},
-		resolve(id: string, claimToken: string, now: Date) {
-			return client.multipartAbortTask.updateMany({
-				where: { id, state: 'CLAIMED', claimToken },
-				data: {
-					state: 'RESOLVED',
-					claimToken: null,
-					claimUntil: null,
-					resolvedAt: now,
-					lastError: null,
-				},
-			});
+		async resolve(id: string, claimToken: string, now: Date) {
+			const updated = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "multipart_abort_tasks"
+				SET "state" = 'RESOLVED'::"MultipartAbortTaskState",
+					"claim_token" = NULL,
+					"claim_until" = NULL,
+					"resolved_at" = ${now},
+					"last_error" = NULL,
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${id}
+					AND "state" = 'CLAIMED'::"MultipartAbortTaskState"
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return requireActiveClaim(updated);
 		},
-		fail(
+		async fail(
 			id: string,
 			claimToken: string,
 			error: unknown,
 			nextAttemptAt: Date,
 		) {
-			return client.multipartAbortTask.updateMany({
-				where: { id, state: 'CLAIMED', claimToken },
-				data: {
-					state: 'PENDING',
-					claimToken: null,
-					claimUntil: null,
-					attemptCount: { increment: 1 },
-					nextAttemptAt,
-					lastError: String(error instanceof Error ? error.message : error).slice(0, 500),
-				},
-			});
+			const message = String(error instanceof Error ? error.message : error).slice(0, 500);
+			const updated = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+				UPDATE "multipart_abort_tasks"
+				SET "state" = 'PENDING'::"MultipartAbortTaskState",
+					"claim_token" = NULL,
+					"claim_until" = NULL,
+					"attempt_count" = "attempt_count" + 1,
+					"next_attempt_at" = ${nextAttemptAt},
+					"last_error" = ${message},
+					"updated_at" = clock_timestamp()
+				WHERE "id" = ${id}
+					AND "state" = 'CLAIMED'::"MultipartAbortTaskState"
+					AND "claim_token" = ${claimToken}
+					AND "claim_until" > clock_timestamp()
+				RETURNING "id"
+			`);
+			return requireActiveClaim(updated);
 		},
 	};
 }

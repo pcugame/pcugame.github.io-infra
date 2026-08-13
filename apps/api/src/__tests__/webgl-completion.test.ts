@@ -46,7 +46,6 @@ function deferred<T>() {
 function createHarness() {
 	const mocks = {
 		findSessionById: vi.fn().mockResolvedValue(session()),
-		transitionToCompleting: vi.fn().mockResolvedValue({ count: 1 }),
 		findPartsBySessionId: vi.fn().mockResolvedValue([{ partNumber: 1, etag: 'etag' }]),
 		finalizeCompletedWebglSession: vi.fn().mockResolvedValue({ oldEntryKey: '' }),
 		finalizeGame: vi.fn().mockResolvedValue({
@@ -65,6 +64,7 @@ function createHarness() {
 		markCompletedObjectFailed: vi.fn().mockResolvedValue({ count: 1 }),
 		wakeDeletionWorker: vi.fn(),
 		logError: vi.fn(),
+		logWarn: vi.fn(),
 	};
 	const finalizer = createCompletedUploadFinalizer({
 		readHeader: mocks.readHeader,
@@ -82,13 +82,10 @@ function createHarness() {
 			findSessionById: mocks.findSessionById,
 			createSessionReplacingActive: vi.fn(),
 			cancelSessionAndClearActive: vi.fn(),
-			upsertPartEtag: vi.fn(),
-			transitionToCompleting: mocks.transitionToCompleting,
 			findPartsBySessionId: mocks.findPartsBySessionId,
 			revertToPending: mocks.revertToPending,
 			markFailed: mocks.markFailed,
 			markCompletedObjectFailed: mocks.markCompletedObjectFailed,
-			findStaleCompletingSessions: vi.fn(),
 			findActiveSessionsForListing: vi.fn(),
 			findExhibitionById: vi.fn(),
 		}),
@@ -114,7 +111,7 @@ function createHarness() {
 		wakeDeletionWorker: mocks.wakeDeletionWorker,
 		wakeMaintenance: vi.fn(),
 		recordUntrackedMultipartCleanupFailure: vi.fn(),
-		logger: { error: mocks.logError, warn: vi.fn(), fatal: vi.fn() },
+		logger: { error: mocks.logError, warn: mocks.logWarn, fatal: vi.fn() },
 	};
 	return {
 		mocks,
@@ -177,7 +174,6 @@ function createRestartRecoveryHarness() {
 				findSessionById: async () => ({ ...durable.session }),
 				createSessionReplacingActive: vi.fn(),
 				cancelSessionAndClearActive: vi.fn(),
-				upsertPartEtag: vi.fn(),
 				claimCompletion: async () => {
 					if (durable.session.status !== 'PENDING') {
 						return { count: 0, reason: 'state' as const };
@@ -185,11 +181,9 @@ function createRestartRecoveryHarness() {
 					durable.session.status = 'COMPLETING';
 					return { count: 1, reason: null };
 				},
-				transitionToCompleting: vi.fn().mockResolvedValue({ count: 0 }),
 				findPartsBySessionId: async () => durable.session.parts,
 				revertToPending: vi.fn(),
 				markFailed: vi.fn(),
-				findStaleCompletingSessions: vi.fn().mockResolvedValue([]),
 				claimStaleCompletingSessions: async () => (
 					durable.session.status === 'COMPLETING' ? [{ ...durable.session }] : []
 				),
@@ -291,6 +285,10 @@ describe('WebGL completion atomicity', () => {
 		expect(mocks.findPartsBySessionId).not.toHaveBeenCalled();
 		expect(mocks.completeMultipart).not.toHaveBeenCalled();
 		expect(deps.repository.releaseCompletionClaim).toHaveBeenCalledOnce();
+		expect(mocks.logWarn).toHaveBeenCalledWith(
+			{ sessionId: 'session-webgl', completionToken: 'id' },
+			'Request completion claim was lost before deferred release',
+		);
 	});
 
 	it('preserves COMPLETING when multipart outcome cannot be inspected', async () => {

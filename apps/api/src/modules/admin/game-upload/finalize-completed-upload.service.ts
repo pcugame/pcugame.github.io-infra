@@ -11,7 +11,7 @@ export interface CompletedUploadSession {
 	originalName: string;
 	totalBytes: bigint;
 	s3Key: string;
-	completionClaimToken?: string;
+	completionClaimToken: string;
 }
 
 export interface CompletedUploadFinalizationOptions {
