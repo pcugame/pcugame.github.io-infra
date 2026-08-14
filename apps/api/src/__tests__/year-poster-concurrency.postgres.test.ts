@@ -131,7 +131,8 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 					if (input.failDelete?.has(key)) throw new Error(`storage delete failed: ${key}`);
 					input.objects.delete(key);
 				},
-				listKeys: vi.fn(async () => []),
+				listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
+				deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
 			},
 			repository: createOrphanRepository(input.client),
 			references: createObjectReferenceResolver(
@@ -150,7 +151,8 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 					if (input.failDelete?.has(key)) throw new Error(`storage delete failed: ${key}`);
 					input.objects.delete(key);
 				},
-				listKeys: vi.fn(async () => []),
+				listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
+				deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
 			},
 			orphans: { record: orphanService.recordOrphan },
 			logger: { error: vi.fn() },

@@ -1,4 +1,5 @@
 import { createClaimToken } from '../../shared/claim-token.js';
+import { deletePrefixPages } from '../../application/prefix-deletion.js';
 import {
 	createObjectReferenceIndex,
 	type ObjectReferenceInventory,
@@ -12,11 +13,17 @@ export interface OrphanServiceDependencies {
 			key: string,
 			request?: { signal?: AbortSignal; requestTimeoutMs?: number },
 		): Promise<void>;
-		listKeys(
+		listKeyPage(
 			bucket: string,
 			prefix: string,
+			page: { startAfter?: string; maxKeys: number },
 			request?: { signal?: AbortSignal; requestTimeoutMs?: number },
-		): Promise<string[]>;
+		): Promise<{ keys: string[]; isTruncated: boolean }>;
+		deleteKeys(
+			bucket: string,
+			keys: readonly string[],
+			request?: { signal?: AbortSignal; requestTimeoutMs?: number },
+		): Promise<{ deleted: string[]; failures: Array<{ key: string; code?: string; message?: string }> }>;
 	};
 	repository: {
 		upsertOrphan(
@@ -247,28 +254,23 @@ export async function runOrphanReaper(
 			}
 
 			if (orphan.targetKind === 'PREFIX') {
-				// A successful database-time renewal proves this claim has stayed
-				// continuously live since the batch snapshot. An expired claim can
-				// never be revived, so a stale snapshot fails closed here.
-				await renewOwnedClaim();
-				const keys = await deps.storage.listKeys(
-					orphan.bucket,
-					orphan.storageKey,
-					boundedStorageRequest(operationSignal),
-				);
-				for (const key of keys) {
-					// Prefix batches may outlive one lease. Re-prove continuity before
-					// every destructive request without holding a DB lock during I/O.
-					await renewOwnedClaim();
-					if (operationSignal.aborted) {
-						throw operationSignal.reason ?? new Error('Orphan reaper aborted');
-					}
-					await deps.storage.delete(
-						orphan.bucket,
-						key,
-						boundedStorageRequest(operationSignal),
-					);
-				}
+				await deletePrefixPages({
+					storage: deps.storage,
+					bucket: orphan.bucket,
+					prefix: orphan.storageKey,
+					request: boundedStorageRequest(operationSignal),
+					beforeList: async () => {
+						await renewOwnedClaim();
+						if (operationSignal.aborted) throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+					},
+					beforeDelete: async () => {
+						await renewOwnedClaim();
+						if (operationSignal.aborted) throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+					},
+					onFailures: (failures) => {
+						throw new Error(`S3 bulk delete returned ${failures.length} per-key failures`);
+					},
+				});
 			} else {
 				await renewOwnedClaim();
 				await deps.storage.delete(

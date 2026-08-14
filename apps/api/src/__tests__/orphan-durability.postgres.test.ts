@@ -196,6 +196,88 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		});
 	});
 
+	it('cancels a claimed public PREFIX without S3 work when an active WebGL session already owns that writer fence', async () => {
+		const deploymentId = randomUUID();
+		const sourceKey = `webgl/${projectId}/${deploymentId}/source.zip`;
+		const sitePrefix = parseWebglSourceKey(projectId, sourceKey)!.sitePrefix;
+		const session = await client.gameUploadSession.create({
+			data: {
+				id: randomUUID(), projectId, userId, uploadKind: 'WEBGL', originalName: 'build.zip',
+				totalBytes: 1n, chunkSizeBytes: 1, totalChunks: 1, status: 'PENDING',
+				s3Key: sourceKey, s3UploadId: randomUUID(), expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+			},
+		});
+		await client.gameUploadActiveSession.create({
+			data: { projectId, uploadKind: 'WEBGL', sessionId: session.id },
+		});
+		const repository = createOrphanRepository(client);
+		const listKeyPage = vi.fn();
+		const deleteKeys = vi.fn();
+		try {
+			await repository.upsertOrphan(publicBucket, sitePrefix, 'active-webgl-fence', 'PREFIX', new Date());
+			await expect(createOrphanService({
+				clock: { now: () => new Date() },
+				storage: { delete: vi.fn(), listKeyPage, deleteKeys }, repository,
+				references: createObjectReferenceResolver(
+					client, { publicBucket, protectedBucket }, { error: vi.fn() },
+				),
+				ids: { next: () => 'active-webgl-fence-reaper' }, logger: { info: vi.fn(), error: vi.fn() },
+			}).runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
+			expect(listKeyPage).not.toHaveBeenCalled();
+			expect(deleteKeys).not.toHaveBeenCalled();
+			await expect(client.orphanObject.findUniqueOrThrow({
+				where: { orphan_bucket_storage_key: { bucket: publicBucket, storageKey: sitePrefix } },
+			})).resolves.toMatchObject({ state: 'CANCELLED', cancelReason: 'live-reference-detected' });
+		} finally {
+			await client.orphanObject.deleteMany({ where: { bucket: publicBucket, storageKey: sitePrefix } });
+			await client.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } });
+			await client.gameUploadSession.deleteMany({ where: { id: session.id } });
+		}
+	});
+
+	it('rejects WebGL session creation before it owns a session when a committed public PREFIX claim exists', async () => {
+		const deploymentId = randomUUID();
+		const sourceKey = `webgl/${projectId}/${deploymentId}/source.zip`;
+		const sitePrefix = parseWebglSourceKey(projectId, sourceKey)!.sitePrefix;
+		const sessionId = randomUUID();
+		const repository = createOrphanRepository(client);
+		try {
+			await repository.upsertOrphan(publicBucket, sitePrefix, 'claim-before-writer', 'PREFIX', new Date());
+			await expect(repository.claimPendingOrphans!(50, new Date(), 'prefix-first-claim', 120_000))
+				.resolves.toEqual(expect.arrayContaining([expect.objectContaining({ storageKey: sitePrefix })]));
+			await expect(gameUploadRepository.createSessionReplacingActive({
+				id: sessionId, projectId, userId, uploadKind: 'WEBGL', originalName: 'build.zip',
+				totalBytes: 1n, chunkSizeBytes: 1, totalChunks: 1,
+				s3UploadId: randomUUID(), s3Key: sourceKey, expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+			}, client, protectedBucket, publicBucket)).rejects.toThrow('Object deletion claim overlaps new reference');
+			await expect(client.gameUploadSession.count({ where: { id: sessionId } })).resolves.toBe(0);
+			await expect(client.gameUploadActiveSession.count({ where: { projectId, uploadKind: 'WEBGL' } })).resolves.toBe(0);
+		} finally {
+			await client.orphanObject.deleteMany({ where: { bucket: publicBucket, storageKey: sitePrefix } });
+		}
+	});
+
+	it('fails closed for a malformed active WebGL session in the real reference inventory', async () => {
+		const session = await client.gameUploadSession.create({
+			data: {
+				id: randomUUID(), projectId, userId, uploadKind: 'WEBGL', originalName: 'build.zip',
+				totalBytes: 1n, chunkSizeBytes: 1, totalChunks: 1, status: 'COMPLETING',
+				s3Key: 'webgl/not-a-project/deployment/source.zip', s3UploadId: randomUUID(),
+				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+			},
+		});
+		await client.gameUploadActiveSession.create({ data: { projectId, uploadKind: 'WEBGL', sessionId: session.id } });
+		try {
+			const inventory = await createObjectReferenceResolver(
+				client, { publicBucket, protectedBucket }, { error: vi.fn() },
+			).collect();
+			expect(inventory.unsafeBuckets).toEqual(new Set([publicBucket, protectedBucket]));
+		} finally {
+			await client.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } });
+			await client.gameUploadSession.deleteMany({ where: { id: session.id } });
+		}
+	});
+
 	it('uses advancing database wall time for reference checks inside a long transaction', async () => {
 		const repository = createOrphanRepository(client);
 		const exactKey = `integration/orphan-durability/${testId}/tx-clock-exact.bin`;
@@ -249,7 +331,11 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		});
 		const service = createOrphanService({
 			clock: { now: () => now },
-			storage: { delete: deleteObject, listKeys: vi.fn().mockResolvedValue([]) },
+				storage: {
+					delete: deleteObject,
+					listKeyPage: vi.fn().mockResolvedValue({ keys: [], isTruncated: false }),
+					deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
+				},
 			repository,
 			references: {
 				collect: vi.fn().mockResolvedValue({
@@ -419,7 +505,10 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			return snapshot;
 		});
 		const deleteObject = vi.fn(async () => undefined);
-		const listKeys = vi.fn(async () => [referenceKey]);
+			const listKeyPage = vi.fn(async (_bucket, _prefix, page) => (
+				page.startAfter ? { keys: [], isTruncated: false } : { keys: [referenceKey], isTruncated: false }
+			));
+			const deleteKeys = vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] }));
 		let running: ReturnType<ReturnType<typeof createOrphanService>['runOrphanReaper']> | undefined;
 
 		await repository.upsertOrphan(
@@ -432,7 +521,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		try {
 			const service = createOrphanService({
 				clock: { now: () => new Date() },
-				storage: { delete: deleteObject, listKeys },
+				storage: { delete: deleteObject, listKeyPage, deleteKeys },
 				repository,
 				references: { collect },
 				ids: { next: () => `lease-continuity-worker-${suffix}` },
@@ -473,7 +562,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			releaseSnapshot();
 			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
 			expect(collect).toHaveBeenCalledOnce();
-			expect(listKeys).not.toHaveBeenCalled();
+			expect(listKeyPage).not.toHaveBeenCalled();
 			expect(deleteObject).not.toHaveBeenCalled();
 			await expect(realReferences.isReferenced({
 				bucket: protectedBucket,
@@ -538,7 +627,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			clock: { now: () => reapNow },
 			storage: {
 				delete: recoveredDelete,
-				listKeys: vi.fn().mockResolvedValue([]),
+				listKeyPage: vi.fn().mockResolvedValue({ keys: [], isTruncated: false }),
+				deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
 			},
 			repository: productionOrphanRepository,
 			references: createObjectReferenceResolver(

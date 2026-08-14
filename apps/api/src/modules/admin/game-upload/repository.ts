@@ -12,8 +12,8 @@ import {
 	type GameUploadRepository,
 } from './ports.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
-import { webglDeletionTargetsByEntry } from '../../webgl/deletion-targets.js';
-import { parseWebglEntryKey } from '../../webgl/paths.js';
+import { webglDeletionTargetsByEntry, webglDeletionTargetsBySource } from '../../webgl/deletion-targets.js';
+import { parseWebglEntryKey, parseWebglSourceKey } from '../../webgl/paths.js';
 import {
 	ASSET_MUTATION_TRANSACTION_POLICY,
 	withAssetMutationTransaction,
@@ -136,6 +136,7 @@ type CreateSessionData = {
 
 interface GameUploadRepositoryOptions {
 	abortBucket: string;
+	publicBucket?: string;
 }
 
 /** Create a new session and replace the project's active slot atomically. */
@@ -143,9 +144,18 @@ export function createSessionReplacingActive(
 	data: CreateSessionData,
 	client: PrismaClient,
 	abortBucket: string,
+	publicBucket?: string,
 ) {
 	return withSerializableRetry(async (tx) => {
 		await assertNoDeletionClaim(tx, { bucket: abortBucket, key: data.s3Key });
+		if (data.uploadKind === 'WEBGL') {
+			if (!publicBucket) throw new Error('WebGL session creation requires a public bucket');
+			const keys = parseWebglSourceKey(data.projectId, data.s3Key);
+			if (!keys) throw new Error(`Malformed WebGL source key for project ${data.projectId}`);
+			await assertNoDeletionClaim(tx, {
+				bucket: publicBucket, key: keys.sitePrefix, targetKind: 'PREFIX',
+			});
+		}
 		const active = await tx.gameUploadActiveSession.findUnique({
 			where: {
 				projectId_uploadKind: {
@@ -519,8 +529,14 @@ export function markFailed(
 	storageKey: string | null | undefined,
 	client: PrismaClient,
 	completionClaimToken: string,
+	publicBucket?: string,
+	abortBucket?: string,
 ) {
 	return withSerializableRetry(async (tx) => {
+		const session = await tx.gameUploadSession.findUnique({
+			where: { id: sessionId },
+			select: { uploadKind: true, projectId: true, s3Key: true },
+		});
 		const failed = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 			UPDATE "game_upload_sessions"
 			SET "status" = 'FAILED',
@@ -536,6 +552,13 @@ export function markFailed(
 		`);
 		const result = { count: failed.length };
 		if (result.count !== 1) return result;
+		if (session?.uploadKind === 'WEBGL' && session.s3Key && publicBucket && abortBucket) {
+			await queueDurableDeletions(tx, webglDeletionTargetsBySource(
+				session.projectId, session.s3Key,
+				{ publicBucket, protectedBucket: abortBucket },
+				'webgl-completing-session-failed',
+			));
+		}
 		await tx.gameUploadActiveSession.deleteMany({
 			where: { sessionId },
 		});
@@ -554,6 +577,7 @@ export function markCompletedObjectFailed(
 		storageKey: string;
 		reason: string;
 		bucket: string;
+		publicBucket?: string;
 		completionClaimToken: string;
 	},
 	client: PrismaClient,
@@ -562,6 +586,10 @@ export function markCompletedObjectFailed(
 		if (!await lockActiveCompletionClaim(tx, input.sessionId, input.completionClaimToken)) {
 			return { count: 0 };
 		}
+		const session = await tx.gameUploadSession.findUnique({
+			where: { id: input.sessionId },
+			select: { uploadKind: true, projectId: true, s3Key: true },
+		});
 		const result = await tx.gameUploadSession.updateMany({
 			where: {
 				id: input.sessionId,
@@ -578,12 +606,12 @@ export function markCompletedObjectFailed(
 			},
 		});
 		if (result.count !== 1) return result;
-		await queueDurableDeletions(tx, [{
-			bucket: input.bucket,
-			storageKey: input.storageKey,
-			targetKind: 'EXACT',
-			reason: input.reason,
-		}]);
+		const targets = session?.uploadKind === 'WEBGL' && session.s3Key && input.publicBucket
+			? webglDeletionTargetsBySource(session.projectId, session.s3Key, {
+				protectedBucket: input.bucket, publicBucket: input.publicBucket,
+			}, input.reason)
+			: [{ bucket: input.bucket, storageKey: input.storageKey, targetKind: 'EXACT' as const, reason: input.reason }];
+		await queueDurableDeletions(tx, targets);
 		await tx.gameUploadActiveSession.deleteMany({
 			where: { sessionId: input.sessionId },
 		});
@@ -895,6 +923,7 @@ export function createGameUploadRepository(
 				data,
 				client,
 				options.abortBucket,
+				options.publicBucket,
 			)
 		),
 		cancelSessionAndClearActive: (id: string) => cancelSessionAndClearActive(
@@ -969,7 +998,10 @@ export function createGameUploadRepository(
 			storageKey: string | null | undefined,
 			completionClaimToken: string,
 		) => (
-			markFailed(sessionId, storageKey, client, completionClaimToken)
+			markFailed(
+				sessionId, storageKey, client, completionClaimToken,
+				options.publicBucket, options.abortBucket,
+			)
 		),
 		markCompletedObjectFailed: (input: {
 			sessionId: string;
@@ -979,6 +1011,7 @@ export function createGameUploadRepository(
 		}) => markCompletedObjectFailed({
 			...input,
 			bucket: options.abortBucket,
+			publicBucket: options.publicBucket,
 		}, client),
 		claimStaleCompletingSessions: (
 			cutoff: Date,

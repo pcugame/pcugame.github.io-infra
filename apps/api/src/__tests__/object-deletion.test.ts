@@ -8,7 +8,7 @@ describe('object deletion coordinator', () => {
 	it('does not write an orphan row when object storage deletion succeeds', async () => {
 		const record = vi.fn().mockRejectedValue(new Error('queue must not be used'));
 		const coordinator = createObjectDeletionCoordinator({
-			storage: { delete: vi.fn().mockResolvedValue(undefined), listKeys: vi.fn() },
+			storage: { delete: vi.fn().mockResolvedValue(undefined), listKeyPage: vi.fn(), deleteKeys: vi.fn() },
 			orphans: { record },
 			logger: { error: vi.fn() },
 		});
@@ -23,7 +23,7 @@ describe('object deletion coordinator', () => {
 		const record = vi.fn().mockResolvedValue(undefined);
 		const logError = vi.fn();
 		const coordinator = createObjectDeletionCoordinator({
-			storage: { delete: deleteObject, listKeys: vi.fn() },
+			storage: { delete: deleteObject, listKeyPage: vi.fn(), deleteKeys: vi.fn() },
 			orphans: { record },
 			logger: { error: logError },
 		});
@@ -52,7 +52,8 @@ describe('object deletion coordinator', () => {
 		const coordinator = createObjectDeletionCoordinator({
 			storage: {
 				delete: vi.fn().mockRejectedValue(deleteError),
-				listKeys: vi.fn(),
+				listKeyPage: vi.fn(),
+				deleteKeys: vi.fn(),
 			},
 			orphans: { record: vi.fn().mockRejectedValue(queueError) },
 			logger: { error: logError },
@@ -84,26 +85,29 @@ describe('object deletion coordinator', () => {
 		);
 	});
 
-	it('deletes every key in a prefix and queues only failed keys', async () => {
-		const deleteObject = vi.fn(async (_bucket: string, key: string) => {
-			if (key.endsWith('2.js')) throw new Error('transient');
+	it('deletes prefix batches and hands confirmed partial failures to parent recovery', async () => {
+		const deleteKeys = vi.fn().mockResolvedValue({
+			deleted: ['site/1.js', 'site/3.js'],
+			failures: [{ key: 'site/2.js', code: 'SlowDown' }],
 		});
 		const record = vi.fn().mockResolvedValue(undefined);
 		const coordinator = createObjectDeletionCoordinator({
 			storage: {
-				delete: deleteObject,
-				listKeys: vi.fn().mockResolvedValue(['site/1.js', 'site/2.js', 'site/3.js']),
+				delete: vi.fn(),
+				listKeyPage: vi.fn()
+					.mockResolvedValueOnce({ keys: ['site/1.js', 'site/2.js', 'site/3.js'], isTruncated: false })
+					.mockResolvedValueOnce({ keys: [], isTruncated: false }),
+				deleteKeys,
 			},
 			orphans: { record },
 			logger: { error: vi.fn() },
-			deleteConcurrency: 2,
 		});
 
 		await expect(coordinator.deletePrefixOrQueue('public', 'site/', 'deployment-delete'))
 			.resolves.toBe(3);
-		expect(deleteObject).toHaveBeenCalledTimes(3);
+		expect(deleteKeys).toHaveBeenCalledOnce();
 		expect(record).toHaveBeenCalledOnce();
-		expect(record).toHaveBeenCalledWith('public', 'site/2.js', 'deployment-delete');
+		expect(record).toHaveBeenCalledWith('public', 'site/', 'deployment-delete', 'PREFIX');
 	});
 
 	it('queues the prefix itself when enumeration fails', async () => {
@@ -111,7 +115,8 @@ describe('object deletion coordinator', () => {
 		const coordinator = createObjectDeletionCoordinator({
 			storage: {
 				delete: vi.fn(),
-				listKeys: vi.fn().mockRejectedValue(new Error('list unavailable')),
+				listKeyPage: vi.fn().mockRejectedValue(new Error('list unavailable')),
+				deleteKeys: vi.fn(),
 			},
 			orphans: { record },
 			logger: { error: vi.fn() },
@@ -131,7 +136,8 @@ describe('object deletion coordinator', () => {
 		const coordinator = createObjectDeletionCoordinator({
 			storage: {
 				delete: vi.fn(),
-				listKeys: vi.fn(),
+				listKeyPage: vi.fn(),
+				deleteKeys: vi.fn(),
 			},
 			orphans: { record: vi.fn() },
 			logger: { error: vi.fn() },
@@ -149,13 +155,58 @@ describe('object deletion coordinator', () => {
 		const coordinator = createObjectDeletionCoordinator({
 			storage: {
 				delete: vi.fn(),
-				listKeys: vi.fn().mockRejectedValue(listError),
+				listKeyPage: vi.fn().mockRejectedValue(listError),
+				deleteKeys: vi.fn(),
 			},
 			orphans: { record: vi.fn().mockRejectedValue(queueError) },
 			logger: { error: vi.fn() },
 		});
 
 		await expect(coordinator.deletePrefixOrQueue('public', 'webgl/7/site/', 'replace'))
-			.rejects.toBe(queueError);
+			.rejects.toMatchObject({ input: { operationError: expect.any(Error), queueError } });
+	});
+
+	it('stops a guarded multi-batch rollback before any storage request after claim loss', async () => {
+		const claimLost = new Error('completion claim lost');
+		const listKeyPage = vi.fn().mockResolvedValue({ keys: ['site/a'], isTruncated: true });
+		const deleteKeys = vi.fn().mockResolvedValue({ deleted: ['site/a'], failures: [] });
+		const beforeList = vi.fn()
+			.mockResolvedValueOnce(undefined)
+			.mockRejectedValueOnce(claimLost);
+		const coordinator = createObjectDeletionCoordinator({
+			storage: { delete: vi.fn(), listKeyPage, deleteKeys },
+			orphans: { record: vi.fn() },
+			logger: { error: vi.fn() },
+			prefixPageSize: 1,
+		});
+
+		await expect(coordinator.deletePrefixOrQueue(
+			'public', 'site/', 'webgl-deploy-rollback', {}, { beforeList },
+		)).rejects.toBe(claimLost);
+		expect(listKeyPage).toHaveBeenCalledOnce();
+		expect(deleteKeys).toHaveBeenCalledOnce();
+	});
+
+	it('propagates an abort during bulk deletion without queueing the prefix', async () => {
+		const controller = new AbortController();
+		const abortReason = new Error('completion claim lost');
+		const record = vi.fn();
+		const coordinator = createObjectDeletionCoordinator({
+			storage: {
+				delete: vi.fn(),
+				listKeyPage: vi.fn().mockResolvedValue({ keys: ['site/a'], isTruncated: false }),
+				deleteKeys: vi.fn(async () => {
+					controller.abort(abortReason);
+					throw abortReason;
+				}),
+			},
+			orphans: { record },
+			logger: { error: vi.fn() },
+		});
+
+		await expect(coordinator.deletePrefixOrQueue(
+			'public', 'site/', 'webgl-deploy-rollback', {}, { request: { signal: controller.signal } },
+		)).rejects.toBe(abortReason);
+		expect(record).not.toHaveBeenCalled();
 	});
 });

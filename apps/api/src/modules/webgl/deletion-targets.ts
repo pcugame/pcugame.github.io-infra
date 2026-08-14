@@ -24,6 +24,7 @@ export function webglDeletionTargets(
 		{
 			bucket: buckets.publicBucket,
 			storageKey: keys.sitePrefix,
+			targetKind: 'PREFIX',
 			reason: `${reason}-site`,
 		},
 	];

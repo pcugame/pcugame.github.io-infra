@@ -190,6 +190,8 @@ function fakeStorage() {
 		readRange: vi.fn(),
 		stream: calls.stream,
 		listKeys: vi.fn(),
+		listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
+		deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
 		createMultipart: vi.fn(),
 		uploadPart: vi.fn(),
 		completeMultipart: vi.fn(),

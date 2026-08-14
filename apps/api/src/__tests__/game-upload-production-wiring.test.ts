@@ -91,6 +91,8 @@ function createStorageHarness() {
 		readRange: calls.readRange,
 		stream: async () => null,
 		listKeys: async () => [],
+		listKeyPage: async () => ({ keys: [], isTruncated: false }),
+		deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
 		createMultipart: calls.createMultipart,
 		uploadPart: calls.uploadPart,
 		completeMultipart: calls.completeMultipart,

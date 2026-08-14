@@ -36,6 +36,12 @@ function createDependencies() {
 					_prefix: string,
 					_request?: { signal?: AbortSignal; requestTimeoutMs?: number },
 				): Promise<string[]> => []),
+				listKeyPage: vi.fn(async (): Promise<{ keys: string[]; isTruncated: boolean }> => ({
+					keys: [], isTruncated: false,
+				})),
+				deleteKeys: vi.fn(async (_bucket: string, keys: readonly string[]) => ({
+					deleted: [...keys], failures: [],
+				})),
 			},
 			repository,
 			references: {
@@ -129,22 +135,29 @@ describe('orphan object service', () => {
 
 	it('re-enumerates a durable prefix target before resolving it', async () => {
 		const { deps, now } = createDependencies();
-		deps.storage.listKeys.mockResolvedValue([
-			'webgl/7/build/site/index.html',
-			'webgl/7/build/site/main.js',
-		]);
+		deps.storage.listKeyPage
+			.mockResolvedValueOnce({
+				keys: ['webgl/7/build/site/index.html', 'webgl/7/build/site/main.js'],
+				isTruncated: false,
+			})
+			.mockResolvedValueOnce({ keys: [], isTruncated: false });
 		deps.repository.claimPendingOrphans.mockResolvedValue([
 			orphan(12, 'webgl/7/build/site/', { targetKind: 'PREFIX', attemptCount: 1 }),
 		]);
 		const service = createOrphanService(deps);
 
 		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
-		expect(deps.storage.listKeys).toHaveBeenCalledWith(
+		expect(deps.storage.listKeyPage).toHaveBeenCalledWith(
 			'public',
 			'webgl/7/build/site/',
+			{ maxKeys: 1000 },
 			expect.objectContaining({ requestTimeoutMs: 60_000 }),
 		);
-		expect(deps.storage.delete).toHaveBeenCalledTimes(2);
+		expect(deps.storage.deleteKeys).toHaveBeenCalledWith(
+			'public',
+			['webgl/7/build/site/index.html', 'webgl/7/build/site/main.js'],
+			expect.objectContaining({ requestTimeoutMs: 60_000 }),
+		);
 		expect(deps.repository.renewActiveClaim).toHaveBeenNthCalledWith(
 			1,
 			12,

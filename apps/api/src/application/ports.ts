@@ -42,6 +42,25 @@ export interface StorageRequestOptions {
 	requestTimeoutMs?: number;
 }
 
+/** One lexically ordered S3 ListObjectsV2 page for destructive prefix work. */
+export interface ObjectKeyPage {
+	keys: string[];
+	isTruncated: boolean;
+}
+
+/** A confirmed, per-object bulk deletion failure. */
+export interface ObjectKeyDeleteFailure {
+	key: string;
+	code?: string;
+	message?: string;
+}
+
+/** Every submitted key is accounted for exactly once by the adapter. */
+export interface DeleteKeysResult {
+	deleted: string[];
+	failures: ObjectKeyDeleteFailure[];
+}
+
 /** Time is an input to application code, not hidden process state. */
 export interface Clock {
 	now(): Date;
@@ -109,6 +128,17 @@ export interface ObjectStorage {
 		request?: StorageRequestOptions,
 	): Promise<ObjectStreamResult | null>;
 	listKeys(bucket: string, prefix: string, request?: StorageRequestOptions): Promise<string[]>;
+	listKeyPage(
+		bucket: string,
+		prefix: string,
+		page: { startAfter?: string; maxKeys: number },
+		request?: StorageRequestOptions,
+	): Promise<ObjectKeyPage>;
+	deleteKeys(
+		bucket: string,
+		keys: readonly string[],
+		request?: StorageRequestOptions,
+	): Promise<DeleteKeysResult>;
 	listObjects?(bucket: string, prefix: string, request?: StorageRequestOptions): Promise<StoredObject[]>;
 	createMultipart(
 		bucket: string,

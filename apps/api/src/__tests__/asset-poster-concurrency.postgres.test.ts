@@ -143,7 +143,8 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 					if (failStorage) throw new Error('forced storage failure');
 					objects.delete(key);
 				},
-				listKeys: async () => [],
+				listKeyPage: async () => ({ keys: [], isTruncated: false }),
+				deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
 			},
 			repository: createOrphanRepository(client),
 			references: createObjectReferenceResolver(
@@ -191,7 +192,8 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			clock: { now: () => new Date() },
 			storage: {
 				delete: async (_bucket, key) => { input.objects.delete(key); },
-				listKeys: async () => [],
+				listKeyPage: async () => ({ keys: [], isTruncated: false }),
+				deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
 			},
 			repository: createOrphanRepository(input.client),
 			references: createObjectReferenceResolver(

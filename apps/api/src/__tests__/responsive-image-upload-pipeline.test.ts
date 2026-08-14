@@ -63,6 +63,8 @@ function harness(options: { failUploadNumber?: number; processingError?: Error }
 		readRange: async () => Buffer.alloc(0),
 		stream: async () => null,
 		listKeys: async () => [],
+		listKeyPage: async () => ({ keys: [], isTruncated: false }),
+		deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
 		createMultipart: async () => '',
 		uploadPart: async () => '',
 		completeMultipart: async () => {},

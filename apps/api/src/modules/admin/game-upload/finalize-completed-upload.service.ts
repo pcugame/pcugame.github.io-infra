@@ -37,7 +37,11 @@ export function createCompletedUploadFinalizer(deps: {
 		size: number,
 		options?: CompletedUploadFinalizationOptions,
 	): Promise<WebglDeploymentKeys>;
-	rollbackWebglPublicDeployment(keys: WebglPublicDeploymentKeys, reason: string): Promise<void>;
+	rollbackWebglPublicDeployment(
+		keys: WebglPublicDeploymentKeys,
+		reason: string,
+		options?: CompletedUploadFinalizationOptions,
+	): Promise<void>;
 	finalizeGame(
 		session: CompletedUploadSession,
 	): Promise<{ oldStorageKey: string | null; oldPlaybackStorageKey: string | null }>;
@@ -106,10 +110,18 @@ export function createCompletedUploadFinalizer(deps: {
 							}
 						}
 						if (stillOwnsClaim) {
-							await deps.rollbackWebglPublicDeployment(
-								deployment,
-								'webgl-upload-finalization-failed-site',
-							);
+							if (options.storageRequest || options.assertClaimOwned) {
+								await deps.rollbackWebglPublicDeployment(
+									deployment,
+									'webgl-upload-finalization-failed-site',
+									options,
+								);
+							} else {
+								await deps.rollbackWebglPublicDeployment(
+									deployment,
+									'webgl-upload-finalization-failed-site',
+								);
+							}
 						} else {
 							deps.logError(
 								{ error: err, sessionId: session.id, projectId: session.projectId },

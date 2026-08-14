@@ -81,6 +81,8 @@ function storageHarness() {
 	const calls = {
 		delete: vi.fn(async () => {}),
 		listKeys: vi.fn(async () => [] as string[]),
+		listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
+		deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
 		abortMultipart: vi.fn(async () => {}),
 	};
 	const storage: ObjectStorage = {
@@ -91,6 +93,8 @@ function storageHarness() {
 		readRange: vi.fn(async () => Buffer.alloc(0)),
 		stream: vi.fn(async () => null),
 		listKeys: calls.listKeys,
+		listKeyPage: calls.listKeyPage,
+		deleteKeys: calls.deleteKeys,
 		createMultipart: vi.fn(async () => 'upload'),
 		uploadPart: vi.fn(async () => 'etag'),
 		completeMultipart: vi.fn(),
