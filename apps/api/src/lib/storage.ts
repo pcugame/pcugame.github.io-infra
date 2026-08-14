@@ -2,6 +2,7 @@ import {
 	AbortMultipartUploadCommand,
 	CompleteMultipartUploadCommand,
 	CreateMultipartUploadCommand,
+	DeleteObjectsCommand,
 	DeleteObjectCommand,
 	GetObjectCommand,
 	HeadObjectCommand,
@@ -19,6 +20,17 @@ import type {
 	StorageRequestOptions,
 	StoredObject,
 } from '../application/ports.js';
+
+const MAX_S3_KEYS = 1_000;
+
+/** S3 keys are compared by their UTF-8 binary/byte lexical ordering. */
+function compareS3Keys(left: string, right: string): number {
+	return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
+}
+
+function invalidBulkResponse(message: string): Error {
+	return new Error(`S3 DeleteObjects protocol ambiguity: ${message}`);
+}
 
 function storageErrorMatches(error: unknown, names: readonly string[], statusCode?: number): boolean {
 	if (!error || typeof error !== 'object') return false;
@@ -147,6 +159,67 @@ export function createObjectStorage(
 		},
 		async listKeys(bucket, prefix, request) {
 			return (await listObjects(bucket, prefix, request)).map(({ key }) => key);
+		},
+		async listKeyPage(bucket, prefix, pageOptions, request) {
+			const { startAfter, maxKeys } = pageOptions;
+			if (!Number.isInteger(maxKeys) || maxKeys < 1 || maxKeys > MAX_S3_KEYS) {
+				throw new RangeError(`S3 list maxKeys must be an integer between 1 and ${MAX_S3_KEYS}`);
+			}
+			const response = await client.send(new ListObjectsV2Command({
+				Bucket: bucket,
+				Prefix: prefix,
+				MaxKeys: maxKeys,
+				...(startAfter !== undefined ? { StartAfter: startAfter } : {}),
+			}), requestOptions(request));
+			const keys: string[] = [];
+			let previous: string | undefined;
+			for (const object of response.Contents ?? []) {
+				if (typeof object.Key !== 'string') {
+					throw new Error('S3 ListObjectsV2 returned an object without a key');
+				}
+				if (!object.Key.startsWith(prefix)) {
+					throw new Error('S3 ListObjectsV2 returned a key outside the requested prefix');
+				}
+				if (startAfter !== undefined && compareS3Keys(object.Key, startAfter) <= 0) {
+					throw new Error('S3 ListObjectsV2 returned a key at or before StartAfter');
+				}
+				if (previous !== undefined && compareS3Keys(object.Key, previous) <= 0) {
+					throw new Error('S3 ListObjectsV2 returned duplicate or non-ascending keys');
+				}
+				keys.push(object.Key);
+				previous = object.Key;
+			}
+			if (response.IsTruncated && keys.length === 0) {
+				throw new Error('S3 ListObjectsV2 returned an empty truncated page');
+			}
+			return { keys, isTruncated: response.IsTruncated === true };
+		},
+		async deleteKeys(bucket, keys, request) {
+			if (keys.length < 1 || keys.length > MAX_S3_KEYS) {
+				throw new RangeError(`S3 bulk delete requires between 1 and ${MAX_S3_KEYS} keys`);
+			}
+			const requested = new Set(keys);
+			if (requested.size !== keys.length) throw new RangeError('S3 bulk delete keys must be distinct');
+			const response = await client.send(new DeleteObjectsCommand({
+				Bucket: bucket,
+				Delete: { Objects: keys.map((Key) => ({ Key })), Quiet: false },
+			}), requestOptions(request));
+			const accounted = new Map<string, 'deleted' | 'failure'>();
+			const deleted: string[] = [];
+			const failures: Array<{ key: string; code?: string; message?: string }> = [];
+			const account = (key: unknown, outcome: 'deleted' | 'failure', code?: unknown, message?: unknown) => {
+				if (typeof key !== 'string' || !requested.has(key)) throw invalidBulkResponse('unexpected response key');
+				if (accounted.has(key)) throw invalidBulkResponse('duplicate or contradictory response key');
+				accounted.set(key, outcome);
+				if (outcome === 'deleted') deleted.push(key);
+				else failures.push({ key, ...(typeof code === 'string' ? { code } : {}), ...(typeof message === 'string' ? { message } : {}) });
+			};
+			for (const item of response.Deleted ?? []) account(item.Key, 'deleted');
+			for (const item of response.Errors ?? []) {
+				account(item.Key, item.Code === 'NoSuchKey' ? 'deleted' : 'failure', item.Code, item.Message);
+			}
+			if (accounted.size !== keys.length) throw invalidBulkResponse('missing response key');
+			return { deleted, failures };
 		},
 		listObjects,
 		async createMultipart(bucket, key, contentType = 'application/zip', uploadOptions = {}, request) {

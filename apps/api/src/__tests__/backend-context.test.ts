@@ -79,6 +79,8 @@ function createTestContext(): {
 				readRange: async () => Buffer.alloc(0),
 				stream: async () => null,
 				listKeys: async () => [],
+				listKeyPage: async () => ({ keys: [], isTruncated: false }),
+				deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
 				createMultipart: async () => 'upload-id',
 				uploadPart: async () => 'etag',
 				completeMultipart: async () => {},

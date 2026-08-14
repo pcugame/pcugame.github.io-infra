@@ -184,9 +184,22 @@ function memoryStorage() {
 					[...upload.parts.entries()]
 						.sort(([a], [b]) => a - b)
 						.map(([, value]) => value),
-				),
+		),
 			);
 			multiparts.delete(uploadId);
+		}),
+		listKeyPage: vi.fn(async (bucket, prefix, { startAfter, maxKeys }) => {
+			const keys = [...objects.keys()]
+				.filter((entry) => entry.startsWith(`${bucket}/${prefix}`))
+				.map((entry) => entry.slice(bucket.length + 1))
+				.filter((key) => !startAfter || key > startAfter)
+				.sort();
+			const page = keys.slice(0, maxKeys);
+			return { keys: page, isTruncated: keys.length > page.length };
+		}),
+		deleteKeys: vi.fn(async (bucket, keys) => {
+			for (const key of keys) objects.delete(`${bucket}/${key}`);
+			return { deleted: [...keys], failures: [] };
 		}),
 		abortMultipart: calls.abortMultipart.mockImplementation(async (
 			_bucket,

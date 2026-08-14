@@ -245,6 +245,8 @@ function storageHarness(label: string) {
 		readRange: vi.fn(async () => Buffer.alloc(0)),
 		stream: vi.fn(async () => null),
 		listKeys: vi.fn(async () => []),
+		listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
+		deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
 		createMultipart: vi.fn(async () => 'upload-id'),
 		uploadPart: vi.fn(async () => 'etag'),
 		completeMultipart: vi.fn(async () => {}),

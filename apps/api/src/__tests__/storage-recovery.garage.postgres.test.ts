@@ -2,7 +2,9 @@ import { fork, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { DeleteObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createObjectDeletionCoordinator } from '../application/object-deletion.js';
 import type { ObjectStorage } from '../application/ports.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
@@ -316,6 +318,81 @@ describe.runIf(runStorageIntegration)(
 				await storage.abortMultipart(protectedBucket, multipartKey, uploadId)
 					.catch(() => undefined);
 				await storage.delete(protectedBucket, multipartKey).catch(() => undefined);
+			}
+		});
+
+		it('uses Garage multi-delete for a >1000-key immediate prefix and normalizes already-absent keys', async () => {
+			const prefix = `${key('prefix-bulk-immediate')}/`;
+			const keys = Array.from({ length: 1001 }, (_, index) => `${prefix}${String(index).padStart(4, '0')}.bin`);
+			const uploads = [...keys];
+			const workers = Array.from({ length: 20 }, async () => {
+				for (;;) {
+					const storageKey = uploads.pop();
+					if (!storageKey) return;
+					await upload(publicBucket, storageKey, Buffer.from('x'));
+				}
+			});
+			await Promise.all(workers);
+			const sendSpy = vi.spyOn(s3, 'send');
+			try {
+				const coordinator = createObjectDeletionCoordinator({
+					storage,
+					orphans: { record: vi.fn() },
+					logger: { error: vi.fn() },
+				});
+				await expect(coordinator.deletePrefixOrQueue(publicBucket, prefix, 'garage-prefix-integration'))
+					.resolves.toBe(1001);
+				const sent: unknown[] = sendSpy.mock.calls.map(([command]) => command);
+				const bulk = sent.filter((command): command is DeleteObjectsCommand => command instanceof DeleteObjectsCommand);
+				expect(bulk).toHaveLength(2);
+				expect(bulk.map((command) => command.input.Delete?.Objects?.length)).toEqual([1000, 1]);
+				expect(sent.some((command) => command instanceof DeleteObjectCommand)).toBe(false);
+				await expect(storage.listKeyPage!(publicBucket, prefix, { maxKeys: 1 }))
+					.resolves.toEqual({ keys: [], isTruncated: false });
+				await expect(storage.deleteKeys!(publicBucket, [`${prefix}already-absent.bin`]))
+					.resolves.toEqual({ deleted: [`${prefix}already-absent.bin`], failures: [] });
+			} finally {
+				sendSpy.mockRestore();
+				for (let offset = 0; offset < keys.length; offset += 1000) {
+					await storage.deleteKeys!(publicBucket, keys.slice(offset, offset + 1000))
+						.catch(() => undefined);
+				}
+				for (const storageKey of keys) testObjects.get(publicBucket)?.delete(storageKey);
+			}
+		});
+
+		it('resolves a durable Garage PREFIX only after its batch and final empty check', async () => {
+			const prefix = `${key('prefix-bulk-durable')}/`;
+			const keys = [`${prefix}a.bin`, `${prefix}b.bin`];
+			await Promise.all(keys.map((storageKey) => upload(publicBucket, storageKey, Buffer.from('x'))));
+			const repository = createOrphanRepository(prisma);
+			await repository.upsertOrphan(publicBucket, prefix, 'garage-durable-prefix', 'PREFIX', new Date());
+			const sendSpy = vi.spyOn(s3, 'send');
+			try {
+				const result = await createOrphanService({
+					clock: { now: () => new Date() }, storage, repository,
+					references: createObjectReferenceResolver(
+						prisma, { publicBucket, protectedBucket }, { error: vi.fn() },
+					),
+					ids: { next: () => `garage-prefix-${randomUUID()}` },
+					logger: { info: vi.fn(), error: vi.fn() },
+				}).runOrphanReaper();
+				expect(result).toMatchObject({ failed: 0, resolved: 1 });
+				await expect(prisma.orphanObject.findUniqueOrThrow({
+					where: { orphan_bucket_storage_key: { bucket: publicBucket, storageKey: prefix } },
+				})).resolves.toMatchObject({ state: 'RESOLVED' });
+				const sent: unknown[] = sendSpy.mock.calls.map(([command]) => command);
+				const bulk = sent.filter((command): command is DeleteObjectsCommand => command instanceof DeleteObjectsCommand);
+				expect(bulk).toHaveLength(1);
+				expect(bulk[0]!.input.Delete?.Objects?.length).toBe(2);
+				expect(sent.some((command) => command instanceof DeleteObjectCommand)).toBe(false);
+				await expect(storage.listKeyPage!(publicBucket, prefix, { maxKeys: 1 }))
+					.resolves.toEqual({ keys: [], isTruncated: false });
+			} finally {
+				sendSpy.mockRestore();
+				await prisma.orphanObject.deleteMany({ where: { bucket: publicBucket, storageKey: prefix } });
+				await storage.deleteKeys!(publicBucket, keys).catch(() => undefined);
+				for (const storageKey of keys) testObjects.get(publicBucket)?.delete(storageKey);
 			}
 		});
 

@@ -3,7 +3,7 @@ import {
 	deriveImageRenditionStorageKey,
 	IMAGE_RENDITION_PROFILES,
 } from '../../shared/responsive-image.js';
-import { parseWebglEntryKey } from '../webgl/paths.js';
+import { parseWebglEntryKey, parseWebglSourceKey } from '../webgl/paths.js';
 
 export type ObjectTargetKind = 'EXACT' | 'PREFIX';
 
@@ -194,7 +194,7 @@ export async function collectObjectReferences(
 		}),
 		client.gameUploadSession.findMany({
 			where: { status: { in: ['PENDING', 'COMPLETING'] }, s3Key: { not: null } },
-			select: { id: true, s3Key: true },
+			select: { id: true, s3Key: true, uploadKind: true, projectId: true },
 		}),
 		client.uploadIntent.findMany({
 			where: { state: { in: ['PREPARED', 'UPLOADED'] } },
@@ -327,6 +327,23 @@ export async function collectObjectReferences(
 			targetKind: 'EXACT',
 			key: session.s3Key,
 			source: `upload-session:${session.id}:active`,
+		});
+		if (session.uploadKind !== 'WEBGL') continue;
+		const parsed = parseWebglSourceKey(session.projectId, session.s3Key);
+		if (!parsed) {
+			unsafeBuckets.add(buckets.protectedBucket);
+			unsafeBuckets.add(buckets.publicBucket);
+			logger.error(
+				{ sessionId: session.id, projectId: session.projectId, storageKey: session.s3Key },
+				'Malformed active WebGL upload encountered; WebGL bucket deletion is disabled',
+			);
+			continue;
+		}
+		references.push({
+			bucket: buckets.publicBucket,
+			targetKind: 'PREFIX',
+			key: parsed.sitePrefix,
+			source: `upload-session:${session.id}:webgl-site`,
 		});
 	}
 	for (const intent of intents) {

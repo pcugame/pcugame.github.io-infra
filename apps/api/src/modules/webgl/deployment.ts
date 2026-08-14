@@ -39,6 +39,11 @@ export interface WebglDeploymentDependencies {
 	storageRequest?: StorageRequestOptions;
 }
 
+export interface WebglRollbackOptions {
+	storageRequest?: StorageRequestOptions;
+	assertClaimOwned?: () => Promise<void>;
+}
+
 function combineStorageRequests(
 	base?: StorageRequestOptions,
 	request?: StorageRequestOptions,
@@ -72,15 +77,27 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 	async function rollbackPublicDeployment(
 		keys: WebglPublicDeploymentKeys,
 		reason: string,
+		options: WebglRollbackOptions = {},
 	): Promise<void> {
+		const storageRequest = combineStorageRequests(deps.storageRequest, options.storageRequest);
+		const assertDeletionClaim = async () => {
+			assertRequestActive(storageRequest);
+			await options.assertClaimOwned?.();
+			assertRequestActive(storageRequest);
+		};
+		const context = { projectId: keys.projectId, deploymentId: keys.deploymentId };
+		if (!storageRequest && !options.assertClaimOwned) {
+			await deps.deletion.deletePrefixOrQueue(
+				deps.config.publicBucket, keys.sitePrefix, reason, context,
+			);
+			return;
+		}
 		await deps.deletion.deletePrefixOrQueue(
 			deps.config.publicBucket,
 			keys.sitePrefix,
 			reason,
-			{
-				projectId: keys.projectId,
-				deploymentId: keys.deploymentId,
-			},
+			context,
+			{ request: storageRequest, beforeList: assertDeletionClaim, beforeDelete: assertDeletionClaim },
 		);
 	}
 
@@ -167,7 +184,10 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 				}
 			}
 			if (stillOwnsClaim) {
-				await rollbackPublicDeployment(keys, 'webgl-deploy-rollback');
+				await rollbackPublicDeployment(keys, 'webgl-deploy-rollback', {
+					storageRequest,
+					assertClaimOwned,
+				});
 			} else {
 				deps.logger.warn(
 					{ err: error, projectId, sourceKey, sitePrefix: keys.sitePrefix },

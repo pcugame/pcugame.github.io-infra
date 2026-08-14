@@ -153,7 +153,9 @@ export function createGameUploadProductionGraph(
 			options?.storageRequest,
 			options?.assertClaimOwned,
 		),
-		rollbackWebglPublicDeployment: webgl.rollbackPublicDeployment,
+		rollbackWebglPublicDeployment: (keys, reason, options) => (
+			webgl.rollbackPublicDeployment(keys, reason, options)
+		),
 		finalizeGame: (session) => repository.finalizeCompletedSession(
 			session.id,
 			session.projectId,

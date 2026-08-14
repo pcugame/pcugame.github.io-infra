@@ -226,6 +226,7 @@ export function createProductionUploadLifecycleRuntime(deps: {
 	});
 	const gameUploads = createGameUploadRepository(deps.prisma, {
 		abortBucket: deps.config.S3_BUCKET_PROTECTED,
+		publicBucket: deps.config.S3_BUCKET_PUBLIC,
 	});
 
 	return createUploadLifecycleRuntime({

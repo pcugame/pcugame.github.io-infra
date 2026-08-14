@@ -1,4 +1,5 @@
-import type { ObjectStorage } from './ports.js';
+import type { ObjectStorage, StorageRequestOptions } from './ports.js';
+import { deletePrefixPages, PrefixDeletionPageBudgetError, PrefixDeletionStorageError } from './prefix-deletion.js';
 
 export interface OrphanQueue {
 	record(
@@ -25,6 +26,11 @@ export interface ObjectDeletionCoordinator {
 		prefix: string,
 		reason: string,
 		logContext?: Record<string, unknown>,
+		execution?: {
+			request?: StorageRequestOptions;
+			beforeList?: () => Promise<void> | void;
+			beforeDelete?: () => Promise<void> | void;
+		},
 	): Promise<number>;
 }
 
@@ -58,17 +64,24 @@ export class DurableObjectDeletionError extends Error {
 	}
 }
 
+export class DurablePrefixDeletionError extends Error {
+	constructor(readonly input: { bucket: string; prefix: string; reason: string; operationError: unknown; queueError: unknown }) {
+		super(`Prefix deletion and durable orphan recording both failed for ${input.bucket}/${input.prefix}`, { cause: input.queueError });
+		this.name = 'DurablePrefixDeletionError';
+	}
+}
+
 /**
  * Coordinates non-transactional object deletion with the persistent orphan
  * queue. Storage itself deliberately knows nothing about database recovery.
  */
 export function createObjectDeletionCoordinator(deps: {
-	storage: Pick<ObjectStorage, 'delete' | 'listKeys'>;
+	storage: Pick<ObjectStorage, 'delete' | 'listKeyPage' | 'deleteKeys'>;
 	orphans: OrphanQueue;
 	logger: DeletionLogger;
-	deleteConcurrency?: number;
+	prefixPageSize?: number;
+	prefixMaxListPages?: number;
 }): ObjectDeletionCoordinator {
-	const deleteConcurrency = deps.deleteConcurrency ?? 25;
 
 	async function deleteOrQueue(
 		bucket: string,
@@ -103,24 +116,55 @@ export function createObjectDeletionCoordinator(deps: {
 
 	return {
 		deleteOrQueue,
-		async deletePrefixOrQueue(bucket, prefix, reason, logContext = {}) {
-			let keys: string[];
+		async deletePrefixOrQueue(bucket, prefix, reason, logContext = {}, execution = {}) {
+			let prefixRecorded = false;
 			try {
-				keys = await deps.storage.listKeys(bucket, prefix);
+				return (await deletePrefixPages({
+					storage: deps.storage,
+					bucket,
+					prefix,
+					pageSize: deps.prefixPageSize,
+					maxListPages: deps.prefixMaxListPages,
+					request: execution.request,
+					beforeList: execution.beforeList,
+					beforeDelete: execution.beforeDelete,
+					onFailures: async (failures) => {
+						if (!prefixRecorded) {
+							try {
+								await deps.orphans.record(bucket, prefix, reason, 'PREFIX');
+								prefixRecorded = true;
+							} catch (queueError) {
+								throw new DurablePrefixDeletionError({
+									bucket,
+									prefix,
+									reason,
+									operationError: failures[0],
+									queueError,
+								});
+							}
+						}
+					},
+				})).processed;
 			} catch (err) {
+				if (!(err instanceof PrefixDeletionStorageError || err instanceof PrefixDeletionPageBudgetError)) {
+					throw err;
+				}
+				if (execution.request?.signal?.aborted) {
+					throw execution.request.signal.reason ?? err;
+				}
 				deps.logger.error(
 					{ err, bucket, prefix, reason, ...logContext },
 					'Object prefix enumeration failed — queuing durable prefix retry',
 				);
-				await deps.orphans.record(bucket, prefix, reason, 'PREFIX');
-				return 0;
+				if (!prefixRecorded) {
+					try {
+						await deps.orphans.record(bucket, prefix, reason, 'PREFIX');
+					} catch (queueError) {
+						throw new DurablePrefixDeletionError({ bucket, prefix, reason, operationError: err, queueError });
+					}
+				}
+				return err.processed;
 			}
-			for (let offset = 0; offset < keys.length; offset += deleteConcurrency) {
-				await Promise.all(keys.slice(offset, offset + deleteConcurrency).map((key) =>
-					deleteOrQueue(bucket, key, reason, { ...logContext, prefix }),
-				));
-			}
-			return keys.length;
 		},
 	};
 }

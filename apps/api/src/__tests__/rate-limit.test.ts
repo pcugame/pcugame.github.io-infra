@@ -68,7 +68,9 @@ describe('rate-limit plugin', () => {
 		storage: {
 			upload: async () => {}, presign: async () => '', delete: async () => {},
 			head: async () => null, readRange: async () => Buffer.alloc(0), stream: async () => null,
-			listKeys: async () => [], createMultipart: async () => '', uploadPart: async () => '',
+			listKeys: async () => [], listKeyPage: async () => ({ keys: [], isTruncated: false }),
+			deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
+			createMultipart: async () => '', uploadPart: async () => '',
 			completeMultipart: async () => {}, abortMultipart: async () => {}, listParts: async () => [],
 			listMultipartUploads: async () => [],
 		},
