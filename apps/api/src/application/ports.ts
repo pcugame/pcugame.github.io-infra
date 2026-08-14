@@ -38,8 +38,6 @@ export interface ObjectStreamRequest {
 	ifModifiedSince?: Date;
 	/** Internal representation pin used after metadata-based range decisions. */
 	ifMatch?: string;
-	/** Date fallback for a representation pin when no strong ETag is available. */
-	ifUnmodifiedSince?: Date;
 }
 
 /** A conditional object read completed without opening a response body. */

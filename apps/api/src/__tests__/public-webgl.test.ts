@@ -668,14 +668,13 @@ describe('public WebGL conditional GET contract', () => {
 });
 
 describe('public WebGL If-Range and HEAD contract', () => {
-	it('keeps a matching ordinary precondition authoritative after valid If-Range mismatch', async () => {
+	it('keeps matching If-None-Match authoritative at HEAD for a matching strong ETag If-Range', async () => {
 		const harness = serviceHarness();
-		harness.stream.mockResolvedValueOnce({ kind: 'not-modified', etag, lastModified });
 
 		const response = await harness.service.get(7, 'Build/game.wasm.br', {
 			range: 'bytes=2-5',
-			ifNoneMatch: '"etag-1"',
-			ifRange: '"different"',
+			ifNoneMatch: etag,
+			ifRange: etag,
 		});
 
 		expect(response.status).toBe(304);
@@ -687,24 +686,41 @@ describe('public WebGL If-Range and HEAD contract', () => {
 		expect(harness.stream).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		['strong ETag', '"different"'],
-		['HTTP date', 'Wed, 12 Aug 2026 00:02:03 GMT'],
-	] as const)('uses one full conditional GET after nonmatching INM and %s If-Range mismatch', async (
-		_label,
-		ifRange,
-	) => {
+	it('keeps a matching ordinary precondition authoritative after date If-Range mismatch', async () => {
+		const harness = serviceHarness();
+		harness.stream.mockResolvedValueOnce({ kind: 'not-modified', etag, lastModified });
+
+		const response = await harness.service.get(7, 'Build/game.wasm.br', {
+			range: 'bytes=2-5',
+			ifNoneMatch: '"etag-1"',
+			ifRange: 'Wed, 12 Aug 2026 01:02:03 GMT',
+		});
+
+		expect(response.status).toBe(304);
+		expect(response.body).toBeUndefined();
+		expect(response.headers).not.toHaveProperty('Content-Length');
+		expect(response.headers).not.toHaveProperty('Content-Range');
+		expect(harness.findPublicWebglProject).toHaveBeenCalledOnce();
+		expect(harness.head).not.toHaveBeenCalled();
+		expect(harness.stream).toHaveBeenCalledOnce();
+		expect(harness.stream).toHaveBeenCalledWith('public', storageKey, {
+			ifNoneMatch: '"etag-1"',
+			notModifiedEtagFallback: '"etag-1"',
+		});
+	});
+
+	it('uses one full conditional GET after nonmatching INM and date If-Range mismatch', async () => {
 		const harness = serviceHarness();
 		const response = await harness.service.get(7, 'Build/game.wasm.br', {
 			range: 'bytes=2-5',
 			ifNoneMatch: '"ordinary-miss"',
-			ifRange,
+			ifRange: 'Wed, 12 Aug 2026 01:02:03 GMT',
 		});
 
 		expect(response.status).toBe(200);
 		expect(response.headers).not.toHaveProperty('Content-Range');
 		expect(harness.findPublicWebglProject).toHaveBeenCalledOnce();
-		expect(harness.head).toHaveBeenCalledOnce();
+		expect(harness.head).not.toHaveBeenCalled();
 		expect(harness.stream).toHaveBeenCalledOnce();
 		expect(harness.stream).toHaveBeenCalledWith('public', storageKey, {
 			ifNoneMatch: '"ordinary-miss"',
@@ -712,13 +728,27 @@ describe('public WebGL If-Range and HEAD contract', () => {
 		});
 	});
 
-	it.each([
-		['strong ETag', etag],
-		['HTTP date', 'Wed, 12 Aug 2026 01:02:03 GMT'],
-	] as const)('uses one conditional range GET after nonmatching INM and matching %s If-Range', async (
-		_label,
-		ifRange,
-	) => {
+	it('preserves If-Modified-Since on a full GET after date If-Range mismatch', async () => {
+		const harness = serviceHarness();
+		harness.stream.mockResolvedValueOnce({ kind: 'not-modified', etag, lastModified });
+
+		const response = await harness.service.get(7, 'Build/game.wasm.br', {
+			range: 'bytes=2-5',
+			ifModifiedSince: 'Wed, 12 Aug 2026 01:02:03 GMT',
+			ifRange: 'Wed, 12 Aug 2026 01:02:03 GMT',
+		});
+
+		expect(response.status).toBe(304);
+		expect(response.body).toBeUndefined();
+		expect(response.headers).not.toHaveProperty('Content-Range');
+		expect(harness.head).not.toHaveBeenCalled();
+		expect(harness.stream).toHaveBeenCalledOnce();
+		expect(harness.stream).toHaveBeenCalledWith('public', storageKey, {
+			ifModifiedSince: lastModified,
+		});
+	});
+
+	it('uses one conditional range GET after nonmatching INM and matching strong ETag If-Range', async () => {
 		const harness = serviceHarness();
 		harness.stream.mockResolvedValueOnce(objectResult(
 			Readable.from([Buffer.from('2345')]),
@@ -727,7 +757,7 @@ describe('public WebGL If-Range and HEAD contract', () => {
 		const response = await harness.service.get(7, 'Build/game.wasm.br', {
 			range: 'bytes=2-5',
 			ifNoneMatch: '"ordinary-miss"',
-			ifRange,
+			ifRange: etag,
 		});
 
 		expect(response.status).toBe(206);
@@ -768,13 +798,7 @@ describe('public WebGL If-Range and HEAD contract', () => {
 		});
 	});
 
-	it.each([
-		['strong ETag', etag],
-		['exact HTTP date', 'Wed, 12 Aug 2026 01:02:03 GMT'],
-	] as const)('uses HEAD then one range GET for a matching %s If-Range', async (
-		_label,
-		ifRange,
-	) => {
+	it('uses HEAD then one range GET for a matching strong ETag If-Range', async () => {
 		const harness = serviceHarness();
 		harness.stream.mockResolvedValueOnce(objectResult(
 			Readable.from([Buffer.from('2345')]),
@@ -782,7 +806,7 @@ describe('public WebGL If-Range and HEAD contract', () => {
 		));
 		const response = await harness.service.get(7, 'Build/game.wasm.br', {
 			range: 'bytes=2-5',
-			ifRange,
+			ifRange: etag,
 		});
 		expect(response.status).toBe(206);
 		expect(harness.head).toHaveBeenCalledOnce();
@@ -793,29 +817,27 @@ describe('public WebGL If-Range and HEAD contract', () => {
 		});
 	});
 
-	it('pins a matching date If-Range with Last-Modified when HEAD has no strong ETag', async () => {
+	it.each([
+		['IMF-fixdate', 'Wed, 12 Aug 2026 01:02:03 GMT'],
+		['RFC 850 date', 'Wednesday, 12-Aug-26 01:02:03 GMT'],
+		['asctime date', 'Wed Aug 12 01:02:03 2026'],
+	] as const)('treats an exact %s If-Range date as a mismatch and serves the full body', async (
+		_label,
+		ifRange,
+	) => {
 		const harness = serviceHarness();
-		harness.head.mockResolvedValueOnce({
-			size: content.byteLength,
-			contentType: 'application/wasm',
-			lastModified,
-		});
-		harness.stream.mockResolvedValueOnce(objectResult(
-			Readable.from([Buffer.from('2345')]),
-			{ size: 4, contentRange: 'bytes 2-5/10' },
-		));
 
 		const response = await harness.service.get(7, 'Build/game.wasm.br', {
 			range: 'bytes=2-5',
-			ifRange: 'Wed, 12 Aug 2026 01:02:03 GMT',
+			ifRange,
 		});
 
-		expect(response.status).toBe(206);
-		expect(harness.head).toHaveBeenCalledOnce();
-		expect(harness.stream).toHaveBeenCalledWith('public', storageKey, {
-			range: { kind: 'closed', start: 2n, end: 5n },
-			ifUnmodifiedSince: lastModified,
-		});
+		expect(response.status).toBe(200);
+		expect(response.headers).not.toHaveProperty('Content-Range');
+		await expect(bodyBuffer(response.body)).resolves.toEqual(content);
+		expect(harness.head).not.toHaveBeenCalled();
+		expect(harness.stream).toHaveBeenCalledOnce();
+		expect(harness.stream).toHaveBeenCalledWith('public', storageKey, undefined);
 	});
 
 	it('abandons a range when HEAD cannot identify a representation to pin', async () => {
@@ -948,17 +970,11 @@ describe('public WebGL If-Range and HEAD contract', () => {
 		currentBody.destroy();
 	});
 
-	it.each([
-		['strong ETag', '"different"'],
-		['HTTP date', 'Wed, 12 Aug 2026 00:02:03 GMT'],
-	] as const)('falls back to one full GET after a mismatching %s If-Range', async (
-		_label,
-		ifRange,
-	) => {
+	it('falls back to one full GET after a mismatching strong ETag If-Range', async () => {
 		const harness = serviceHarness();
 		const response = await harness.service.get(7, 'Build/game.wasm.br', {
 			range: 'bytes=2-5',
-			ifRange,
+			ifRange: '"different"',
 		});
 		expect(response.status).toBe(200);
 		expect(response.headers).not.toHaveProperty('Content-Range');

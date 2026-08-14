@@ -145,18 +145,7 @@ describe('object storage streamed GET contract', () => {
 		});
 	});
 
-	it.each([
-		['IfMatch', { ifMatch: '"etag-1"' }, { IfMatch: '"etag-1"' }],
-		[
-			'IfUnmodifiedSince',
-			{ ifUnmodifiedSince: new Date('2026-08-12T01:02:03.000Z') },
-			{ IfUnmodifiedSince: new Date('2026-08-12T01:02:03.000Z') },
-		],
-	] as const)('serializes the internal %s representation pin', async (
-		_label,
-		pin,
-		expected,
-	) => {
+	it('serializes the internal IfMatch representation pin', async () => {
 		const send = vi.fn(async (..._args: unknown[]) => ({
 			Body: new PassThrough(),
 			ContentLength: 4,
@@ -168,7 +157,7 @@ describe('object storage streamed GET contract', () => {
 
 		await storage.stream('public', 'game.data', {
 			range: { kind: 'closed', start: 2n, end: 5n },
-			...pin,
+			ifMatch: '"etag-1"',
 		});
 
 		const command = send.mock.calls[0]![0] as GetObjectCommand;
@@ -176,7 +165,7 @@ describe('object storage streamed GET contract', () => {
 			Bucket: 'public',
 			Key: 'game.data',
 			Range: 'bytes=2-5',
-			...expected,
+			IfMatch: '"etag-1"',
 		});
 	});
 

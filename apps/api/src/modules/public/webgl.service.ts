@@ -106,7 +106,7 @@ interface ReadValidators {
 	ifModifiedSince?: Date;
 }
 
-type RepresentationPin = { ifMatch: string } | { ifUnmodifiedSince: Date };
+type RepresentationPin = { ifMatch: string };
 
 type ReadAttempt =
 	| { kind: 'selected'; range: ObjectByteRange | null; pin?: RepresentationPin }
@@ -138,19 +138,16 @@ function selectValidators(headers: PublicWebglRequestHeaders): ReadValidators {
 function ifRangeMatches(
 	value: string | undefined,
 	metadata: NonNullable<Awaited<ReturnType<ObjectStorage['head']>>>,
-): boolean | undefined {
-	if (value === undefined) return undefined;
-	const tag = parseEntityTag(value);
-	if (tag && !tag.weak) return metadata.etag === tag.value;
-	const date = parseHttpDate(value);
-	if (!date || !metadata.lastModified) return false;
-	return Math.floor(metadata.lastModified.getTime() / 1_000) === Math.floor(date.getTime() / 1_000);
-}
-
-function isValidIfRange(value: string | undefined): boolean {
+): boolean {
 	if (value === undefined) return false;
 	const tag = parseEntityTag(value);
-	return (!!tag && !tag.weak) || parseHttpDate(value) !== undefined;
+	return !!tag && !tag.weak && metadata.etag === tag.value;
+}
+
+function isStrongIfRange(value: string | undefined): boolean {
+	if (value === undefined) return false;
+	const tag = parseEntityTag(value);
+	return !!tag && !tag.weak;
 }
 
 function representationPin(
@@ -158,7 +155,7 @@ function representationPin(
 ): RepresentationPin | undefined {
 	const tag = metadata.etag ? parseEntityTag(metadata.etag) : undefined;
 	if (tag && !tag.weak) return { ifMatch: tag.value };
-	return metadata.lastModified ? { ifUnmodifiedSince: metadata.lastModified } : undefined;
+	return undefined;
 }
 
 function isOutcome(value: ObjectStreamOutcome | ObjectStreamResult | null): value is Exclude<ObjectStreamOutcome, ObjectStreamResult | null> {
@@ -267,11 +264,13 @@ export function createPublicWebglService(deps: {
 		let effectiveRange = requestedRange;
 		let pin: RepresentationPin | undefined;
 		if (requestedRange && headers.ifRange !== undefined) {
-			if (!isValidIfRange(headers.ifRange)) {
-				// Weak and invalid If-Range never permit a partial representation.
+			if (!isStrongIfRange(headers.ifRange)) {
+				// This storage contract cannot prove that Last-Modified is a strong
+				// validator. Date, weak-tag, and invalid If-Range values therefore
+				// mismatch without a metadata lookup and select the full representation.
 				effectiveRange = null;
 			} else {
-				// A valid If-Range needs current metadata. Evaluate ordinary
+				// A strong entity-tag If-Range needs current metadata. Evaluate ordinary
 				// preconditions first, then still forward them on the selected GET
 				// to prevent a change between this HEAD and that GET escaping them.
 				const metadata = await deps.storage.head(deps.config.publicBucket, resolved.storageKey);

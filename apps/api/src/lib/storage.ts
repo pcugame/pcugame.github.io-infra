@@ -189,9 +189,6 @@ export function createObjectStorage(
 					...(streamRequest?.ifNoneMatch ? { IfNoneMatch: streamRequest.ifNoneMatch } : {}),
 					...(streamRequest?.ifModifiedSince ? { IfModifiedSince: streamRequest.ifModifiedSince } : {}),
 					...(streamRequest?.ifMatch ? { IfMatch: streamRequest.ifMatch } : {}),
-					...(streamRequest?.ifUnmodifiedSince
-						? { IfUnmodifiedSince: streamRequest.ifUnmodifiedSince }
-						: {}),
 				}), requestOptions(request));
 				// Garage compares the server's sub-second object timestamp with an
 				// IMF-fixdate request (which only has seconds) and may return 200
