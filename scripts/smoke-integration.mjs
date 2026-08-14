@@ -359,8 +359,25 @@ if (typeof webglUrl !== 'string') throw new Error('WebGL completion did not retu
 const hostedWebglUrl = integrationApiUrl(webglUrl);
 
 const hostedIndex = await fetch(hostedWebglUrl, { headers: { Origin: 'null' } });
-if (!hostedIndex.ok || !(await hostedIndex.text()).includes(webglIndexMarker)) {
+const hostedIndexBody = Buffer.from(await hostedIndex.arrayBuffer());
+if (
+  hostedIndex.status !== 200
+  || hostedIndexBody.byteLength === 0
+  || !hostedIndexBody.toString('utf8').includes(webglIndexMarker)
+) {
   throw new Error(`anonymous WebGL index returned ${hostedIndex.status}`);
+}
+const webglEtag = hostedIndex.headers.get('etag');
+const webglLastModified = hostedIndex.headers.get('last-modified');
+const webglCacheControl = hostedIndex.headers.get('cache-control');
+const hostedIndexLength = Number(hostedIndex.headers.get('content-length'));
+if (!webglEtag || !webglLastModified || !webglCacheControl) {
+  throw new Error('WebGL index GET did not expose ETag, Last-Modified, and Cache-Control');
+}
+if (!Number.isSafeInteger(hostedIndexLength) || hostedIndexLength !== hostedIndexBody.byteLength) {
+  throw new Error(
+    `WebGL index GET returned inconsistent Content-Length (${hostedIndexLength}/${hostedIndexBody.byteLength})`,
+  );
 }
 if (hostedIndex.headers.get('access-control-allow-origin') !== '*') {
   throw new Error('WebGL index did not use credential-free CORS');
@@ -383,6 +400,93 @@ if (!webglCsp.includes(`connect-src ${webglAssetSource}`) || webglCsp.includes("
   throw new Error(`WebGL index did not isolate asset connections: ${webglCsp}`);
 }
 
+const webglEtagConditional = await fetch(hostedWebglUrl, {
+  headers: { Origin: 'null', 'If-None-Match': webglEtag },
+});
+if (
+  webglEtagConditional.status !== 304
+  || (await webglEtagConditional.arrayBuffer()).byteLength !== 0
+) {
+  throw new Error(`WebGL If-None-Match returned ${webglEtagConditional.status} with a body`);
+}
+if (
+  webglEtagConditional.headers.get('etag') !== webglEtag
+  || webglEtagConditional.headers.get('cache-control') !== webglCacheControl
+) {
+  throw new Error('WebGL If-None-Match 304 did not preserve validators and cache policy');
+}
+
+const webglModifiedConditional = await fetch(hostedWebglUrl, {
+  headers: { Origin: 'null', 'If-Modified-Since': webglLastModified },
+});
+if (
+  webglModifiedConditional.status !== 304
+  || (await webglModifiedConditional.arrayBuffer()).byteLength !== 0
+) {
+  throw new Error(`WebGL If-Modified-Since returned ${webglModifiedConditional.status} with a body`);
+}
+
+const indexRangeEnd = Math.min(7, hostedIndexBody.byteLength - 1);
+const expectedIndexRange = hostedIndexBody.subarray(0, indexRangeEnd + 1);
+const hostedIndexRange = await fetch(hostedWebglUrl, {
+  headers: { Origin: 'null', Range: `bytes=0-${indexRangeEnd}` },
+});
+const hostedIndexRangeBody = Buffer.from(await hostedIndexRange.arrayBuffer());
+if (
+  hostedIndexRange.status !== 206
+  || hostedIndexRange.headers.get('content-range') !== (
+    `bytes 0-${indexRangeEnd}/${hostedIndexBody.byteLength}`
+  )
+  || hostedIndexRange.headers.get('content-length') !== String(expectedIndexRange.byteLength)
+  || !hostedIndexRangeBody.equals(expectedIndexRange)
+) {
+  throw new Error(`WebGL index range returned invalid metadata or body (${hostedIndexRange.status})`);
+}
+
+const hostedIndexUnsatisfiable = await fetch(hostedWebglUrl, {
+  headers: { Origin: 'null', Range: `bytes=${hostedIndexBody.byteLength}-` },
+});
+if (
+  hostedIndexUnsatisfiable.status !== 416
+  || hostedIndexUnsatisfiable.headers.get('content-range') !== (
+    `bytes */${hostedIndexBody.byteLength}`
+  )
+  || (await hostedIndexUnsatisfiable.arrayBuffer()).byteLength !== 0
+) {
+  throw new Error(
+    `WebGL unsatisfiable range returned invalid metadata or body (${hostedIndexUnsatisfiable.status})`,
+  );
+}
+
+const hostedIndexIfRangeMatch = await fetch(hostedWebglUrl, {
+  headers: {
+    Origin: 'null',
+    Range: `bytes=0-${indexRangeEnd}`,
+    'If-Range': webglEtag,
+  },
+});
+if (
+  hostedIndexIfRangeMatch.status !== 206
+  || !Buffer.from(await hostedIndexIfRangeMatch.arrayBuffer()).equals(expectedIndexRange)
+) {
+  throw new Error(`WebGL matching If-Range returned ${hostedIndexIfRangeMatch.status}`);
+}
+
+const hostedIndexIfRangeMiss = await fetch(hostedWebglUrl, {
+  headers: {
+    Origin: 'null',
+    Range: `bytes=0-${indexRangeEnd}`,
+    'If-Range': '"integration-mismatch"',
+  },
+});
+if (
+  hostedIndexIfRangeMiss.status !== 200
+  || hostedIndexIfRangeMiss.headers.has('content-range')
+  || !Buffer.from(await hostedIndexIfRangeMiss.arrayBuffer()).equals(hostedIndexBody)
+) {
+  throw new Error(`WebGL mismatching If-Range returned ${hostedIndexIfRangeMiss.status}`);
+}
+
 const hostedWasm = await fetch(new URL(webglWasmPath, hostedWebglUrl), {
   headers: { Origin: 'null', Range: 'bytes=0-7' },
 });
@@ -399,7 +503,9 @@ if (!hostedWasm.headers.get('content-range')?.startsWith('bytes 0-')) {
   throw new Error('WebGL WASM did not return Content-Range');
 }
 await hostedWasm.arrayBuffer();
-console.log('ok: WebGL ZIP deploys and streams anonymously with CSP/CORS/Range/encoding');
+console.log(
+  'ok: WebGL ZIP streams with CSP/CORS/validators/Range/If-Range/416/encoding',
+);
 
 if (keepWebgl) {
   console.log(`ok: retained WebGL fixture for browser checks at ${hostedWebglUrl}`);

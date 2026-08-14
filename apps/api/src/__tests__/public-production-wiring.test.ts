@@ -3,7 +3,13 @@ import { Readable } from 'node:stream';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { FastifyInstance, FastifyPluginAsync } from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AppLogger, ObjectStorage, Scheduler, SettingsStore } from '../application/ports.js';
+import type {
+	AppLogger,
+	ObjectStorage,
+	ObjectStreamRequest,
+	Scheduler,
+	SettingsStore,
+} from '../application/ports.js';
 import { buildApp } from '../app.js';
 import { createProductionBackendContext, type BackendRoutes } from '../backend-context.js';
 import type { Env } from '../config/env.js';
@@ -109,26 +115,57 @@ function repositoryHarness(label: string) {
 }
 
 function storageHarness(label: string) {
+	const objectBody = Buffer.from('0123456789');
+	const lastModified = new Date('2026-07-22T00:00:00.000Z');
 	const calls = {
 		presign: vi.fn(async (bucket: string, key: string) => `https://storage.test/${bucket}/${key}`),
 		head: vi.fn(async () => ({
 			size: 10,
 			contentType: 'image/webp',
 			etag: `"${label}-etag"`,
-			lastModified: new Date('2026-07-22T00:00:00.000Z'),
+			lastModified,
 		})),
 		stream: vi.fn(async (
 			_bucket: string,
 			_key: string,
-			range?: { start: number; end: number },
+			options?: ObjectStreamRequest,
 		) => {
-			const size = range ? range.end - range.start + 1 : 10;
+			if (
+				options?.ifNoneMatch === '*'
+				|| options?.ifNoneMatch?.split(',').map((value) => value.trim()).includes(`"${label}-etag"`)
+				|| (options?.ifModifiedSince !== undefined && lastModified <= options.ifModifiedSince)
+			) {
+				return { kind: 'not-modified' as const, etag: `"${label}-etag"`, lastModified };
+			}
+			let range: { start: number; end: number } | undefined;
+			if (options?.range) {
+				const start = options.range.kind === 'suffix'
+					? Math.max(0, 10 - Number(options.range.length))
+					: Number(options.range.start);
+				const end = options.range.kind === 'closed'
+					? Math.min(Number(options.range.end), 9)
+					: 9;
+				if (start >= 10) {
+					return {
+						kind: 'range-not-satisfiable' as const,
+						size: 10,
+						contentRange: 'bytes */10',
+						etag: `"${label}-etag"`,
+						lastModified,
+					};
+				}
+				range = { start, end };
+			}
+			const responseBody = range
+				? objectBody.subarray(range.start, range.end + 1)
+				: objectBody;
 			return {
-				body: Readable.from([Buffer.alloc(size, label)]),
-				size,
+				body: Readable.from([responseBody]),
+				size: responseBody.byteLength,
 				contentType: 'image/webp',
 				contentRange: range ? `bytes ${range.start}-${range.end}/10` : undefined,
 				etag: `"${label}-etag"`,
+				lastModified,
 			};
 		}),
 	};
@@ -140,9 +177,9 @@ function storageHarness(label: string) {
 		readRange: vi.fn(async () => Buffer.alloc(0)),
 		stream: calls.stream,
 		listKeys: vi.fn(async () => []),
-		createMultipart: vi.fn(async () => 'upload-id'),
 		listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
 		deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
+		createMultipart: vi.fn(async () => 'upload-id'),
 		uploadPart: vi.fn(async () => 'etag'),
 		completeMultipart: vi.fn(),
 		abortMultipart: vi.fn(),
@@ -242,14 +279,15 @@ describe('public/WebGL production wiring', () => {
 		});
 		expect(a.storage.calls.head).not.toHaveBeenCalled();
 
-		a.storage.calls.head.mockResolvedValueOnce(null as never);
+		a.storage.calls.stream.mockResolvedValueOnce(null as never);
 		const missingObject = await app.inject({ method: 'GET', url: '/api/public/webgl/7/' });
 		expect(missingObject.statusCode).toBe(404);
 		expect(missingObject.json()).toMatchObject({
 			ok: false,
 			error: { code: 'NOT_FOUND', message: 'WebGL asset not found' },
 		});
-		expect(a.storage.calls.stream).not.toHaveBeenCalled();
+		expect(a.storage.calls.head).not.toHaveBeenCalled();
+		expect(a.storage.calls.stream).toHaveBeenCalledOnce();
 	});
 
 	it('serves years, year/exhibition projects, detail, and images through the context repository', async () => {
@@ -421,6 +459,136 @@ describe('public/WebGL production wiring', () => {
 		);
 	});
 
+	it('preserves one-read WebGL GET, conditional, Range, If-Range, and explicit HEAD semantics', async () => {
+		const a = await harness('a');
+		const app = await buildApp({ context: a.context });
+		apps.push(app);
+		const resetCounts = () => {
+			a.repository.calls.findPublicWebglProject.mockClear();
+			a.storage.calls.head.mockClear();
+			a.storage.calls.stream.mockClear();
+		};
+
+		const ordinary = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/Build/game.wasm.br',
+		});
+		expect(ordinary.statusCode).toBe(200);
+		expect(ordinary.rawPayload).toEqual(Buffer.from('0123456789'));
+		expect(ordinary.headers).toMatchObject({
+			'content-type': 'application/wasm',
+			'content-encoding': 'br',
+			'content-length': '10',
+			'cache-control': 'public, max-age=300, must-revalidate',
+			'accept-ranges': 'bytes',
+			etag: '"a-etag"',
+			'last-modified': 'Wed, 22 Jul 2026 00:00:00 GMT',
+		});
+		expect(a.repository.calls.findPublicWebglProject).toHaveBeenCalledOnce();
+		expect(a.storage.calls.head).not.toHaveBeenCalled();
+		expect(a.storage.calls.stream).toHaveBeenCalledOnce();
+
+		resetCounts();
+		const notModified = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/Build/game.wasm.br',
+			headers: { 'if-none-match': 'W/"a-etag"' },
+		});
+		expect(notModified.statusCode).toBe(304);
+		expect(notModified.body).toBe('');
+		expect(notModified.headers).toMatchObject({
+			'cache-control': 'public, max-age=300, must-revalidate',
+			etag: '"a-etag"',
+			'last-modified': 'Wed, 22 Jul 2026 00:00:00 GMT',
+		});
+		expect(notModified.headers['content-length']).toBeUndefined();
+		expect(notModified.headers['content-range']).toBeUndefined();
+		expect(a.repository.calls.findPublicWebglProject).toHaveBeenCalledOnce();
+		expect(a.storage.calls.head).not.toHaveBeenCalled();
+		expect(a.storage.calls.stream).toHaveBeenCalledOnce();
+		expect(a.storage.calls.stream).toHaveBeenCalledWith(
+			'a-public',
+			`webgl/7/${deployment}/site/Build/game.wasm.br`,
+			{
+				ifNoneMatch: '"a-etag"',
+				notModifiedEtagFallback: '"a-etag"',
+			},
+		);
+
+		for (const [range, expectedRange, expectedBody] of [
+			['bytes=2-5', 'bytes 2-5/10', '2345'],
+			['bytes=4-', 'bytes 4-9/10', '456789'],
+			['bytes=-3', 'bytes 7-9/10', '789'],
+		] as const) {
+			resetCounts();
+			const partial = await app.inject({
+				method: 'GET',
+				url: '/api/public/webgl/7/Build/game.data',
+				headers: { range },
+			});
+			expect(partial.statusCode).toBe(206);
+			expect(partial.body).toBe(expectedBody);
+			expect(partial.headers['content-range']).toBe(expectedRange);
+			expect(partial.headers['content-length']).toBe(String(expectedBody.length));
+			expect(a.repository.calls.findPublicWebglProject).toHaveBeenCalledOnce();
+			expect(a.storage.calls.head).not.toHaveBeenCalled();
+			expect(a.storage.calls.stream).toHaveBeenCalledOnce();
+		}
+
+		resetCounts();
+		const rangeConditional = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/Build/game.data',
+			headers: {
+				range: 'bytes=2-5',
+				'if-none-match': '"a-etag"',
+				'if-range': '"different"',
+			},
+		});
+		expect(rangeConditional.statusCode).toBe(304);
+		expect(rangeConditional.body).toBe('');
+		expect(a.storage.calls.head).toHaveBeenCalledOnce();
+		expect(a.storage.calls.stream).not.toHaveBeenCalled();
+
+		resetCounts();
+		const ifRangeMismatch = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7/Build/game.data',
+			headers: { range: 'bytes=2-5', 'if-range': '"different"' },
+		});
+		expect(ifRangeMismatch.statusCode).toBe(200);
+		expect(ifRangeMismatch.body).toBe('0123456789');
+		expect(ifRangeMismatch.headers['content-range']).toBeUndefined();
+		expect(a.storage.calls.head).toHaveBeenCalledOnce();
+		expect(a.storage.calls.stream).toHaveBeenCalledOnce();
+
+		resetCounts();
+		const head = await app.inject({
+			method: 'HEAD',
+			url: '/api/public/webgl/7/Build/game.data',
+			headers: { range: 'bytes=2-5', 'if-range': '"a-etag"' },
+		});
+		expect(head.statusCode).toBe(200);
+		expect(head.body).toBe('');
+		expect(head.headers['content-length']).toBe('10');
+		expect(head.headers['content-range']).toBeUndefined();
+		expect(a.repository.calls.findPublicWebglProject).toHaveBeenCalledOnce();
+		expect(a.storage.calls.head).toHaveBeenCalledOnce();
+		expect(a.storage.calls.stream).not.toHaveBeenCalled();
+
+		resetCounts();
+		const conditionalHead = await app.inject({
+			method: 'HEAD',
+			url: '/api/public/webgl/7/Build/game.data',
+			headers: { 'if-modified-since': 'Wed, 22 Jul 2026 00:00:00 GMT' },
+		});
+		expect(conditionalHead.statusCode).toBe(304);
+		expect(conditionalHead.body).toBe('');
+		expect(conditionalHead.headers['content-length']).toBeUndefined();
+		expect(a.storage.calls.head).toHaveBeenCalledOnce();
+		expect(a.storage.calls.stream).not.toHaveBeenCalled();
+	});
+
 	it('preserves OPTIONS, wildcard metadata, ranges, CORS, CSP, and traversal rejection', async () => {
 		const a = await harness('a');
 		const app = await buildApp({ context: a.context });
@@ -505,7 +673,7 @@ describe('public/WebGL production wiring', () => {
 		expect(webglDbFailure.headers['x-frame-options']).toBeUndefined();
 		expect(webglDbFailure.headers['content-security-policy']).toContain('https://web-a.test');
 
-		a.storage.calls.head.mockRejectedValueOnce(new Error('storage unavailable'));
+		a.storage.calls.stream.mockRejectedValueOnce(new Error('storage unavailable'));
 		const storageFailure = await app.inject({
 			method: 'GET',
 			url: '/api/public/webgl/7/',

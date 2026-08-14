@@ -17,6 +17,20 @@ export function createPublicController(deps: PublicControllerDependencies): Fast
 	return async function publicController(app): Promise<void> {
 		const noGlobalCors = { cors: false };
 		const webglRouteOptions = { config: noGlobalCors, helmet: false } as const;
+		const webglGetRouteOptions = {
+			...webglRouteOptions,
+			exposeHeadRoute: false,
+		} as const;
+		const webglHeaders = (headers: Record<string, string | string[] | undefined>) => ({
+			range: typeof headers.range === 'string' ? headers.range : undefined,
+			ifNoneMatch: typeof headers['if-none-match'] === 'string'
+				? headers['if-none-match']
+				: undefined,
+			ifModifiedSince: typeof headers['if-modified-since'] === 'string'
+				? headers['if-modified-since']
+				: undefined,
+			ifRange: typeof headers['if-range'] === 'string' ? headers['if-range'] : undefined,
+		});
 
 		app.options('/webgl/:projectId', webglRouteOptions, async (_request, reply) => {
 			return applyResponseDescriptor(reply, deps.webglService.preflight());
@@ -27,42 +41,53 @@ export function createPublicController(deps: PublicControllerDependencies): Fast
 		app.options('/webgl/:projectId/*', webglRouteOptions, async (_request, reply) => {
 			return applyResponseDescriptor(reply, deps.webglService.preflight());
 		});
+		const webglHandler = async (
+			method: 'GET' | 'HEAD',
+			projectId: string,
+			requestedPath: string,
+			headers: Record<string, string | string[] | undefined>,
+			reply: Parameters<typeof applyResponseDescriptor>[0],
+			rawUrl?: string,
+		) => {
+			applyDescriptorHeaders(reply, deps.webglService.securityHeaders());
+			return applyResponseDescriptor(reply, await deps.webglService[method === 'GET' ? 'get' : 'head'](
+				parseIntParam(projectId, 'Project ID'),
+				requestedPath,
+				webglHeaders(headers),
+				rawUrl,
+			));
+		};
+
 		app.get<{ Params: { projectId: string } }>(
 			'/webgl/:projectId',
-			webglRouteOptions,
-			async (request, reply) => {
-				applyDescriptorHeaders(reply, deps.webglService.securityHeaders());
-				return applyResponseDescriptor(reply, await deps.webglService.stream(
-					parseIntParam(request.params.projectId, 'Project ID'),
-					'index.html',
-					request.headers.range,
-				));
-			},
+			webglGetRouteOptions,
+			async (request, reply) => webglHandler('GET', request.params.projectId, 'index.html', request.headers, reply),
+		);
+		app.head<{ Params: { projectId: string } }>(
+			'/webgl/:projectId', webglRouteOptions,
+			async (request, reply) => webglHandler('HEAD', request.params.projectId, 'index.html', request.headers, reply),
 		);
 		app.get<{ Params: { projectId: string } }>(
 			'/webgl/:projectId/',
-			webglRouteOptions,
-			async (request, reply) => {
-				applyDescriptorHeaders(reply, deps.webglService.securityHeaders());
-				return applyResponseDescriptor(reply, await deps.webglService.stream(
-					parseIntParam(request.params.projectId, 'Project ID'),
-					'index.html',
-					request.headers.range,
-				));
-			},
+			webglGetRouteOptions,
+			async (request, reply) => webglHandler('GET', request.params.projectId, 'index.html', request.headers, reply),
+		);
+		app.head<{ Params: { projectId: string } }>(
+			'/webgl/:projectId/', webglRouteOptions,
+			async (request, reply) => webglHandler('HEAD', request.params.projectId, 'index.html', request.headers, reply),
 		);
 		app.get<{ Params: { projectId: string; '*': string } }>(
 			'/webgl/:projectId/*',
-			webglRouteOptions,
-			async (request, reply) => {
-				applyDescriptorHeaders(reply, deps.webglService.securityHeaders());
-				return applyResponseDescriptor(reply, await deps.webglService.stream(
-					parseIntParam(request.params.projectId, 'Project ID'),
-					request.params['*'] || 'index.html',
-					request.headers.range,
-					request.raw.url,
-				));
-			},
+			webglGetRouteOptions,
+			async (request, reply) => webglHandler(
+				'GET', request.params.projectId, request.params['*'] || 'index.html', request.headers, reply, request.raw.url,
+			),
+		);
+		app.head<{ Params: { projectId: string; '*': string } }>(
+			'/webgl/:projectId/*', webglRouteOptions,
+			async (request, reply) => webglHandler(
+				'HEAD', request.params.projectId, request.params['*'] || 'index.html', request.headers, reply, request.raw.url,
+			),
 		);
 
 		const imageHandler = async (

@@ -132,6 +132,20 @@ describe('public image storage response', () => {
 		expect(storage.stream).toHaveBeenCalledOnce();
 	});
 
+	it.each([
+		'Wed, 31 Feb 2026 01:02:03 GMT',
+		'Thu, 12 Aug 2026 01:02:03 GMT',
+		'Wed, 12 Aug 2026 25:61:61 GMT',
+	])('strictly ignores an invalid HTTP-date validator: %s', async (ifModifiedSince) => {
+		await expect(service.get(storageKey, { ifModifiedSince })).resolves.toMatchObject({
+			status: 200,
+			body: expect.any(Readable),
+		});
+		expect(repository.resolvePublicImage).toHaveBeenCalledOnce();
+		expect(storage.head).toHaveBeenCalledOnce();
+		expect(storage.stream).toHaveBeenCalledOnce();
+	});
+
 	it('rejects unreferenced and physically missing objects without probing unauthorized keys', async () => {
 		repository.resolvePublicImage.mockResolvedValueOnce(null);
 		await expect(service.get('unreferenced.webp')).rejects.toMatchObject({ statusCode: 404 });

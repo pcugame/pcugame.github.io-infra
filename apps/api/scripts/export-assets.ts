@@ -55,8 +55,8 @@ async function main() {
 	const writer = createExportFileWriter({
 		ids: createCryptoIdGenerator(),
 		async getObject(bucket, key, signal) {
-			const object = await resources.storage.stream(bucket, key, undefined, signal);
-			if (!object) throw new Error(`Export object not found: ${key}`);
+			const object = await resources.storage.stream(bucket, key, undefined, { signal });
+			if (!object || 'kind' in object) throw new Error(`Export object not found: ${key}`);
 			return object.body;
 		},
 		createWriteStream: fileSystem.createWriteStream,

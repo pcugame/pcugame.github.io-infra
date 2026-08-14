@@ -143,7 +143,7 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 				undefined,
 				storageRequest,
 			);
-			if (!source) throw badRequest('WebGL source object was not found');
+			if (!source || 'kind' in source) throw badRequest('WebGL source object was not found');
 			await pipeline(source.body, deps.fileSystem.createWriteStream(archivePath));
 			assertRequestActive(storageRequest);
 			await assertClaimOwned?.();
