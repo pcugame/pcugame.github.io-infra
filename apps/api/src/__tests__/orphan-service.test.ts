@@ -297,6 +297,52 @@ describe('orphan object service', () => {
 		}
 	});
 
+	it('does not resolve a bulk delete that reports success after its own request timeout', async () => {
+		vi.useFakeTimers();
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+			const controller = new AbortController();
+			setTimeout(() => {
+				controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+			}, delay);
+			return controller.signal;
+		});
+		try {
+			const { deps } = createDependencies();
+			deps.repository.claimPendingOrphans.mockResolvedValue([
+				orphan(28, 'webgl/28/timeout/', { targetKind: 'PREFIX' }),
+			]);
+			deps.storage.listKeyPage.mockResolvedValue({
+				keys: ['webgl/28/timeout/index.html'], isTruncated: false,
+			});
+			let enteredDelete!: () => void;
+			const deleteEntered = new Promise<void>((resolve) => { enteredDelete = resolve; });
+			deps.storage.deleteKeys.mockImplementation((
+				_bucket: string,
+				keys: readonly string[],
+				request?: { signal?: AbortSignal },
+			) => {
+				enteredDelete();
+				return new Promise((resolve) => {
+					request?.signal?.addEventListener('abort', () => {
+						resolve({ deleted: [...keys], failures: [] });
+					}, { once: true });
+				});
+			});
+			const service = createOrphanService(deps);
+
+			const running = service.runOrphanReaper();
+			await deleteEntered;
+			await vi.advanceTimersByTimeAsync(60_000);
+			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			expect(deps.storage.deleteKeys).toHaveBeenCalledOnce();
+			expect(deps.repository.markClaimResolved).not.toHaveBeenCalled();
+			expect(deps.repository.markClaimFailed).toHaveBeenCalledOnce();
+		} finally {
+			timeoutSpy.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
 	it('coalesces a successful heartbeat renewal with an overlapping prefix pre-delete renewal', async () => {
 		vi.useFakeTimers();
 		try {
@@ -346,7 +392,56 @@ describe('orphan object service', () => {
 		}
 	});
 
-	it('rejects a delayed initial prefix renewal after the bounded attempt signal times out', async () => {
+	it('times out a pending heartbeat and pre-delete renewal flight without issuing DELETE', async () => {
+		vi.useFakeTimers();
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+			const controller = new AbortController();
+			setTimeout(() => {
+				controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+			}, delay);
+			return controller.signal;
+		});
+		try {
+			const { deps } = createDependencies();
+			deps.repository.claimPendingOrphans.mockResolvedValue([
+				orphan(29, 'webgl/29/site/', { targetKind: 'PREFIX' }),
+			]);
+			const renewalNeverSettles = new Promise<{ count: number }>(() => {});
+			deps.repository.renewActiveClaim
+				.mockResolvedValueOnce({ count: 1 })
+				.mockImplementationOnce(() => renewalNeverSettles);
+			let enteredList!: () => void;
+			const listEntered = new Promise<void>((resolve) => { enteredList = resolve; });
+			let releaseList!: () => void;
+			const listReleased = new Promise<void>((resolve) => { releaseList = resolve; });
+			deps.storage.listKeyPage.mockImplementationOnce(async () => {
+				enteredList();
+				await listReleased;
+				return { keys: ['webgl/29/site/index.html'], isTruncated: false };
+			});
+			const service = createOrphanService(deps);
+
+			const running = service.runOrphanReaper();
+			await listEntered;
+			await vi.advanceTimersByTimeAsync(30_000);
+			expect(deps.repository.renewActiveClaim).toHaveBeenCalledTimes(2);
+			releaseList();
+			await vi.advanceTimersByTimeAsync(0);
+			expect(deps.storage.deleteKeys).not.toHaveBeenCalled();
+
+			await vi.advanceTimersByTimeAsync(60_000);
+			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			expect(deps.repository.renewActiveClaim).toHaveBeenCalledTimes(2);
+			expect(deps.storage.deleteKeys).not.toHaveBeenCalled();
+			expect(deps.repository.markClaimResolved).not.toHaveBeenCalled();
+			expect(deps.repository.markClaimFailed).toHaveBeenCalledOnce();
+		} finally {
+			timeoutSpy.mockRestore();
+			vi.useRealTimers();
+		}
+	});
+
+	it('rejects a delayed initial prefix renewal after its independent renewal deadline', async () => {
 		vi.useFakeTimers();
 		let timeoutSignal: AbortSignal | undefined;
 		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
@@ -364,10 +459,7 @@ describe('orphan object service', () => {
 			]);
 			let enteredRenewal!: () => void;
 			const renewalEntered = new Promise<void>((resolve) => { enteredRenewal = resolve; });
-			let resolveRenewal!: (value: { count: number }) => void;
-			const delayedRenewal = new Promise<{ count: number }>((resolve) => {
-				resolveRenewal = resolve;
-			});
+			const delayedRenewal = new Promise<{ count: number }>(() => {});
 			deps.repository.renewActiveClaim.mockImplementationOnce(() => {
 				enteredRenewal();
 				return delayedRenewal;
@@ -381,7 +473,6 @@ describe('orphan object service', () => {
 			await vi.advanceTimersByTimeAsync(60_000);
 			expect(timeoutSignal?.aborted).toBe(true);
 
-			resolveRenewal({ count: 1 });
 			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
 			expect(deps.repository.renewActiveClaim).toHaveBeenCalledOnce();
 			expect(deps.storage.listKeyPage).not.toHaveBeenCalled();
@@ -393,6 +484,39 @@ describe('orphan object service', () => {
 			timeoutSpy.mockRestore();
 			vi.useRealTimers();
 		}
+	});
+
+	it('settles promptly on outer abort while the initial renewal remains pending', async () => {
+		const controller = new AbortController();
+		const { deps } = createDependencies();
+		deps.repository.claimPendingOrphans.mockResolvedValue([
+			orphan(30, 'webgl/30/abort-renewal/', { targetKind: 'PREFIX' }),
+		]);
+		let enteredRenewal!: () => void;
+		const renewalEntered = new Promise<void>((resolve) => { enteredRenewal = resolve; });
+		let rejectLateRenewal!: (error: Error) => void;
+		const pendingRenewal = new Promise<{ count: number }>((_resolve, reject) => {
+			rejectLateRenewal = reject;
+		});
+		deps.repository.renewActiveClaim.mockImplementationOnce(() => {
+			enteredRenewal();
+			return pendingRenewal;
+		});
+		const service = createOrphanService(deps);
+
+		const running = service.runOrphanReaper(controller.signal);
+		await renewalEntered;
+		controller.abort(new Error('shutdown during claim renewal'));
+		await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+		// The race continues to observe the database promise. Its later rejection
+		// neither becomes unhandled nor resumes any storage work.
+		rejectLateRenewal(new Error('late database failure'));
+		await Promise.resolve();
+		expect(deps.storage.listKeyPage).not.toHaveBeenCalled();
+		expect(deps.storage.deleteKeys).not.toHaveBeenCalled();
+		expect(deps.storage.delete).not.toHaveBeenCalled();
+		expect(deps.repository.markClaimResolved).not.toHaveBeenCalled();
+		expect(deps.repository.markClaimFailed).toHaveBeenCalledOnce();
 	});
 
 	it('does not resolve an EXACT delete that reports success after its request is aborted', async () => {
@@ -416,6 +540,47 @@ describe('orphan object service', () => {
 		expect(deps.repository.renewActiveClaim).toHaveBeenCalledOnce();
 		expect(deps.repository.markClaimResolved).not.toHaveBeenCalled();
 		expect(deps.repository.markClaimFailed).toHaveBeenCalledOnce();
+	});
+
+	it('does not resolve an EXACT delete that reports success after its own request timeout', async () => {
+		vi.useFakeTimers();
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+			const controller = new AbortController();
+			setTimeout(() => {
+				controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+			}, delay);
+			return controller.signal;
+		});
+		try {
+			const { deps } = createDependencies();
+			deps.repository.claimPendingOrphans.mockResolvedValue([
+				orphan(31, 'webgl/31/exact.bin'),
+			]);
+			let enteredDelete!: () => void;
+			const deleteEntered = new Promise<void>((resolve) => { enteredDelete = resolve; });
+			deps.storage.delete.mockImplementation((
+				_bucket: string,
+				_key: string,
+				request?: { signal?: AbortSignal },
+			) => {
+				enteredDelete();
+				return new Promise<void>((resolve) => {
+					request?.signal?.addEventListener('abort', () => resolve(), { once: true });
+				});
+			});
+			const service = createOrphanService(deps);
+
+			const running = service.runOrphanReaper();
+			await deleteEntered;
+			await vi.advanceTimersByTimeAsync(60_000);
+			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			expect(deps.storage.delete).toHaveBeenCalledOnce();
+			expect(deps.repository.markClaimResolved).not.toHaveBeenCalled();
+			expect(deps.repository.markClaimFailed).toHaveBeenCalledOnce();
+		} finally {
+			timeoutSpy.mockRestore();
+			vi.useRealTimers();
+		}
 	});
 
 	it.each([

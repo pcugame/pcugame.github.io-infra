@@ -47,6 +47,7 @@ export async function deletePrefixPages(input: {
 	pageSize?: number;
 	maxListPages?: number;
 	request?: StorageRequestOptions;
+	createRequest?: () => StorageRequestOptions;
 	beforeList?: () => Promise<void> | void;
 	beforeDelete?: () => Promise<void> | void;
 	onFailures?: (failures: readonly ObjectKeyDeleteFailure[]) => Promise<void> | void;
@@ -62,12 +63,21 @@ export async function deletePrefixPages(input: {
 	if (maxListPages < pageSize) {
 		throw new RangeError('prefix deletion maxListPages must be at least pageSize');
 	}
+	if (input.request !== undefined && input.createRequest !== undefined) {
+		throw new TypeError('prefix deletion accepts either request or createRequest, not both');
+	}
 
 	let startAfter: string | undefined;
 	let pages = 0;
 	let processed = 0;
 	let hadRecordedPartialFailure = false;
 	let pendingBatch: string[] = [];
+	const requestForOperation = () => input.createRequest?.() ?? input.request;
+	const assertRequestActive = (request: StorageRequestOptions | undefined) => {
+		if (request?.signal?.aborted) {
+			throw request.signal.reason ?? new Error('Prefix deletion storage request aborted');
+		}
+	};
 
 	const list = async (page: { startAfter?: string; maxKeys: number }) => {
 		if (pages >= maxListPages) {
@@ -79,7 +89,12 @@ export async function deletePrefixPages(input: {
 		}
 		await input.beforeList?.();
 		try {
-			const result = await input.storage.listKeyPage(input.bucket, input.prefix, page, input.request);
+			const request = requestForOperation();
+			assertRequestActive(request);
+			const result = await input.storage.listKeyPage(input.bucket, input.prefix, page, request);
+			// Some adapters can resolve after their signal has timed out or been
+			// aborted. Do not accept that stale result as deletion progress.
+			assertRequestActive(request);
 			pages++;
 			return result;
 		} catch (error) {
@@ -93,7 +108,12 @@ export async function deletePrefixPages(input: {
 			await input.beforeDelete?.();
 			let outcome;
 			try {
-				outcome = await input.storage.deleteKeys(input.bucket, batch, input.request);
+				const request = requestForOperation();
+				assertRequestActive(request);
+				outcome = await input.storage.deleteKeys(input.bucket, batch, request);
+				// A possibly-applied batch whose request timed out remains retryable;
+				// it must not contribute to a terminal success in this attempt.
+				assertRequestActive(request);
 			} catch (error) {
 				throw new PrefixDeletionStorageError('delete', error, processed);
 			}

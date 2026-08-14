@@ -10,6 +10,7 @@ import {
 	createObjectDeletionCoordinator,
 	DurablePrefixDeletionError,
 } from '../application/object-deletion.js';
+import { deletePrefixPages } from '../application/prefix-deletion.js';
 import { createObjectStorage } from '../lib/storage.js';
 import { createOrphanService } from '../modules/orphan/service.js';
 import type { ObjectReferenceInventory } from '../modules/orphan/reference-resolver.js';
@@ -100,10 +101,22 @@ describe('issue #29 prefix deletion invariants', () => {
 		expect(live).toEqual(new Set());
 	});
 
-	it('issue #32: bounds durable reaper renewals and bulk deletes across default-budget retries', async () => {
+	it('issue #33: makes bounded progress across slow short pages with a fresh timeout per storage request', async () => {
 		vi.useFakeTimers();
+		const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+			const controller = new AbortController();
+			setTimeout(() => {
+				controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+			}, delay);
+			return controller.signal;
+		});
 		try {
 			const live = new Set(Array.from({ length: 2501 }, (_, index) => key(index)));
+			const requestSignals: AbortSignal[] = [];
+			const liveAfterAttempts: number[] = [];
+			let requestStartedAborted = false;
+			let requestTimeoutWasUnbounded = false;
+			let firstSignalAbortedAtFirstDelete = false;
 			const repository = {
 				upsertOrphan: vi.fn(),
 				claimPendingOrphans: vi.fn().mockResolvedValue([{
@@ -121,14 +134,33 @@ describe('issue #29 prefix deletion invariants', () => {
 			const storage = {
 				delete: vi.fn(),
 				listKeys: vi.fn(),
-				listKeyPage: vi.fn(async (_bucket: string, prefix: string, page: { startAfter?: string }) => {
+				listKeyPage: vi.fn(async (
+					_bucket: string,
+					prefix: string,
+					page: { startAfter?: string },
+					request?: { signal?: AbortSignal; requestTimeoutMs?: number },
+				) => {
+					if (!request?.signal || request.signal.aborted) requestStartedAborted = true;
+					if (request?.requestTimeoutMs !== 60_000) requestTimeoutWasUnbounded = true;
+					requestSignals.push(request!.signal!);
+					await new Promise<void>((resolve) => { setTimeout(resolve, 61); });
 					const candidates = [...live]
 						.filter((value) => value.startsWith(prefix) && value > (page.startAfter ?? ''))
 						.sort();
 					const keys = candidates.slice(0, 1);
 					return { keys, isTruncated: candidates.length > keys.length };
 				}),
-				deleteKeys: vi.fn(async (_bucket: string, keys: readonly string[]) => {
+				deleteKeys: vi.fn(async (
+					_bucket: string,
+					keys: readonly string[],
+					request?: { signal?: AbortSignal; requestTimeoutMs?: number },
+				) => {
+					if (!request?.signal || request.signal.aborted) requestStartedAborted = true;
+					if (request?.requestTimeoutMs !== 60_000) requestTimeoutWasUnbounded = true;
+					requestSignals.push(request!.signal!);
+					if (requestSignals.length > 1 && live.size === 2501) {
+						firstSignalAbortedAtFirstDelete = requestSignals[0]!.aborted;
+					}
 					for (const value of keys) live.delete(value);
 					return { deleted: [...keys], failures: [] };
 				}),
@@ -142,22 +174,45 @@ describe('issue #29 prefix deletion invariants', () => {
 				logger: { info: vi.fn(), error: vi.fn() },
 			});
 
-			await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			const firstAttempt = service.runOrphanReaper();
+			await vi.runAllTimersAsync();
+			await expect(firstAttempt).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			liveAfterAttempts.push(live.size);
 			expect(repository.markClaimFailed).toHaveBeenCalledTimes(1);
 			expect(repository.markClaimResolved).not.toHaveBeenCalled();
-			await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+
+			const secondAttempt = service.runOrphanReaper();
+			await vi.runAllTimersAsync();
+			await expect(secondAttempt).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
+			liveAfterAttempts.push(live.size);
 			expect(repository.markClaimFailed).toHaveBeenCalledTimes(2);
 			expect(repository.markClaimResolved).not.toHaveBeenCalled();
-			await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
+
+			const thirdAttempt = service.runOrphanReaper();
+			await vi.runAllTimersAsync();
+			await expect(thirdAttempt).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
+			liveAfterAttempts.push(live.size);
 
 			expect(storage.deleteKeys.mock.calls.map(([, keys]) => keys.length)).toEqual([1000, 1000, 501]);
+			expect(storage.listKeyPage).toHaveBeenCalledTimes(2502);
 			expect(storage.delete).not.toHaveBeenCalled();
-			// Three attempt-bound renewals plus one authoritative renewal per DELETE batch.
-			expect(repository.renewActiveClaim).toHaveBeenCalledTimes(6);
+			expect(liveAfterAttempts).toEqual([1501, 501, 0]);
+			expect(requestStartedAborted).toBe(false);
+			expect(requestTimeoutWasUnbounded).toBe(false);
+			expect(firstSignalAbortedAtFirstDelete).toBe(true);
+			expect(requestSignals).toHaveLength(2505);
+			expect(new Set(requestSignals).size).toBe(requestSignals.length);
+			expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+			// Long elapsed time legitimately adds heartbeat renewals. The stable
+			// bound is three attempt-entry plus three destructive-bound renewals;
+			// it is not a latency-independent exact total of six.
+			expect(repository.renewActiveClaim.mock.calls.length).toBeGreaterThanOrEqual(6);
+			expect(repository.renewActiveClaim.mock.calls.length).toBeLessThan(20);
 			expect(repository.markClaimResolved).toHaveBeenCalledOnce();
 			expect(repository.markClaimFailed).toHaveBeenCalledTimes(2);
 			expect(live).toEqual(new Set());
 		} finally {
+			timeoutSpy.mockRestore();
 			vi.useRealTimers();
 		}
 	});
@@ -179,7 +234,7 @@ describe('issue #29 prefix deletion invariants', () => {
 		expect(deleteKeys).not.toHaveBeenCalled();
 	});
 
-	it('flushes a pending sub-batch at a valid page budget so retries make bounded progress', async () => {
+	it('flushes fragmented page-budget sub-batches without assuming ceil(N / batchSize) total requests', async () => {
 		const live = new Set(['site/a', 'site/b', 'site/c', 'site/d', 'site/e']);
 		const batches: string[][] = [];
 		const record = vi.fn().mockResolvedValue(undefined);
@@ -208,9 +263,28 @@ describe('issue #29 prefix deletion invariants', () => {
 		await expect(coordinator.deletePrefixOrQueue('public', 'site/', 'budget')).resolves.toBe(4);
 		await expect(coordinator.deletePrefixOrQueue('public', 'site/', 'budget')).resolves.toBe(1);
 		expect(batches).toEqual([['site/a', 'site/b', 'site/c'], ['site/d'], ['site/e']]);
+		// Retry/page-budget fragmentation can legally exceed ceil(5 / 3) even
+		// though every individual batch remains bounded by pageSize.
+		expect(batches.length).toBeGreaterThan(Math.ceil(5 / 3));
 		expect(live).toEqual(new Set());
 		expect(record).toHaveBeenCalledOnce();
 		expect(record).toHaveBeenCalledWith('public', 'site/', 'budget', 'PREFIX');
+	});
+
+	it('rejects ambiguous static and factory request configuration before storage I/O', async () => {
+		const listKeyPage = vi.fn();
+		const deleteKeys = vi.fn();
+		const controller = new AbortController();
+
+		await expect(deletePrefixPages({
+			storage: { listKeyPage, deleteKeys },
+			bucket: 'public',
+			prefix: 'site/',
+			request: { signal: controller.signal },
+			createRequest: () => ({ signal: controller.signal }),
+		})).rejects.toThrow('either request or createRequest, not both');
+		expect(listKeyPage).not.toHaveBeenCalled();
+		expect(deleteKeys).not.toHaveBeenCalled();
 	});
 
 	it('rejects malformed lists at the production adapter boundary and strictly accounts for every bulk response member', async () => {
