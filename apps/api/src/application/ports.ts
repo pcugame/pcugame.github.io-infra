@@ -20,6 +20,59 @@ export interface ObjectStreamResult {
 	contentRange?: string;
 }
 
+/** Framework-neutral byte-range forms, preserving arbitrary decimal precision. */
+export type ObjectByteRange =
+	| { kind: 'closed'; start: bigint; end: bigint }
+	| { kind: 'open'; start: bigint }
+	| { kind: 'suffix'; length: bigint };
+
+/** Native HTTP range and validator inputs for a streamed object read. */
+export interface ObjectStreamRequest {
+	range?: ObjectByteRange;
+	ifNoneMatch?: string;
+	/**
+	 * The single entity-tag proven to match when a storage conditional GET
+	 * returns 304 without validator headers. Never set for wildcard or lists.
+	 */
+	notModifiedEtagFallback?: string;
+	ifModifiedSince?: Date;
+	/** Internal representation pin used after metadata-based range decisions. */
+	ifMatch?: string;
+}
+
+/** A conditional object read completed without opening a response body. */
+export interface ObjectNotModifiedResult {
+	kind: 'not-modified';
+	contentType?: string;
+	cacheControl?: string;
+	etag?: string;
+	lastModified?: Date;
+}
+
+/** Storage rejected an otherwise valid range because it cannot be satisfied. */
+export interface ObjectRangeNotSatisfiableResult {
+	kind: 'range-not-satisfiable';
+	size?: number;
+	contentRange?: string;
+	contentType?: string;
+	cacheControl?: string;
+	etag?: string;
+	lastModified?: Date;
+}
+
+/** Storage rejected an internal representation pin before opening a body. */
+export interface ObjectPreconditionFailedResult {
+	kind: 'precondition-failed';
+	etag?: string;
+	lastModified?: Date;
+}
+
+export type ObjectStreamOutcome = ObjectStreamResult
+	| ObjectNotModifiedResult
+	| ObjectPreconditionFailedResult
+	| ObjectRangeNotSatisfiableResult
+	| null;
+
 export interface CompletedPart {
 	partNumber: number;
 	etag: string;
@@ -124,9 +177,9 @@ export interface ObjectStorage {
 	stream(
 		bucket: string,
 		key: string,
-		range?: { start: number; end: number },
+		streamRequest?: ObjectStreamRequest,
 		request?: StorageRequestOptions,
-	): Promise<ObjectStreamResult | null>;
+	): Promise<ObjectStreamOutcome>;
 	listKeys(bucket: string, prefix: string, request?: StorageRequestOptions): Promise<string[]>;
 	listKeyPage(
 		bucket: string,

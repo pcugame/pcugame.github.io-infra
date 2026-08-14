@@ -1,5 +1,11 @@
 import type { AppLogger, ObjectStorage, ObjectStreamResult } from '../../application/ports.js';
 import { notFound } from '../../shared/errors.js';
+import {
+	matchesConditionalGet,
+	matchesIfModifiedSince as matchesIfModifiedSinceHeader,
+	matchesIfNoneMatch as matchesParsedIfNoneMatch,
+	parseIfNoneMatch,
+} from '../../shared/http-validators.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
 import { PUBLIC_IMAGE_CACHE_CONTROL } from '../../shared/responsive-image.js';
 
@@ -21,28 +27,16 @@ export interface PublicImageServiceDependencies {
 
 type PublicImageMetadata = NonNullable<Awaited<ReturnType<ObjectStorage['head']>>>;
 
-function stripWeakPrefix(value: string): string {
-	return value.trim().replace(/^W\//, '');
-}
-
 /** RFC 9110 If-None-Match comparison is weak for GET and HEAD. */
 export function matchesIfNoneMatch(header: string | undefined, etag: string | undefined): boolean {
-	if (!header) return false;
-	if (header.trim() === '*') return true;
-	if (!etag) return false;
-	const normalizedEtag = stripWeakPrefix(etag);
-	return header.split(',').some((candidate) => stripWeakPrefix(candidate) === normalizedEtag);
+	return matchesParsedIfNoneMatch(parseIfNoneMatch(header), etag);
 }
 
 export function matchesIfModifiedSince(
 	header: string | undefined,
 	lastModified: Date | undefined,
 ): boolean {
-	if (!header || !lastModified) return false;
-	const since = Date.parse(header);
-	if (Number.isNaN(since)) return false;
-	// HTTP dates have second precision, while storage adapters may retain ms.
-	return Math.floor(lastModified.getTime() / 1_000) <= Math.floor(since / 1_000);
+	return matchesIfModifiedSinceHeader(header, lastModified);
 }
 
 function representationHeaders(
@@ -65,10 +59,7 @@ function isNotModified(
 ): boolean {
 	// If-None-Match takes precedence; a present but non-matching validator must
 	// not fall through to If-Modified-Since.
-	if (headers.ifNoneMatch !== undefined) {
-		return matchesIfNoneMatch(headers.ifNoneMatch, metadata.etag);
-	}
-	return matchesIfModifiedSince(headers.ifModifiedSince, metadata.lastModified);
+	return matchesConditionalGet(headers, metadata);
 }
 
 export function createPublicImageService(deps: PublicImageServiceDependencies) {
@@ -92,7 +83,7 @@ export function createPublicImageService(deps: PublicImageServiceDependencies) {
 
 	async function streamObject(resolvedStorageKey: string): Promise<ObjectStreamResult> {
 		const object = await deps.storage.stream(deps.publicBucket, resolvedStorageKey);
-		if (!object) {
+		if (!object || 'kind' in object) {
 			deps.logger.error(
 				{ storageKey: resolvedStorageKey, bucket: deps.publicBucket },
 				'Public image has a current database reference but no storage object',

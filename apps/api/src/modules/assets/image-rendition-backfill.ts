@@ -488,7 +488,7 @@ async function processItem(
 			}
 		}
 		const object = await deps.storage.stream(deps.publicBucket, item.storageKey);
-		if (!object) throw new SourceObjectMissingError(item.storageKey);
+		if (!object || 'kind' in object) throw new SourceObjectMissingError(item.storageKey);
 		await streamPipeline(object.body, deps.fileSystem.createWriteStream(sourcePath));
 		let result: Awaited<ReturnType<typeof processImageRenditions>>;
 		try {

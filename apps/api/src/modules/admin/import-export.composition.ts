@@ -63,7 +63,7 @@ export function createImportExportProductionGraph(
 		ids: deps.ids,
 		async getObject(bucket, key, signal) {
 			const object = await deps.storage.stream(bucket, key, undefined, { signal });
-			if (!object) throw new Error(`Export object not found: ${key}`);
+			if (!object || 'kind' in object) throw new Error(`Export object not found: ${key}`);
 			return object.body;
 		},
 		createWriteStream: (path) => deps.fileSystem.createWriteStream(path),

@@ -73,7 +73,7 @@ async function main() {
 					config.S3_BUCKET_PROTECTED,
 					asset.storageKey,
 				);
-				if (!object) throw new Error(`Object not found: ${asset.storageKey}`);
+				if (!object || 'kind' in object) throw new Error(`Object not found: ${asset.storageKey}`);
 				await pipeline(object.body, createWriteStream(localPath));
 				const result = await processing.video({
 					tmpPath: localPath,

@@ -138,6 +138,9 @@ const PublicProjectQuerySchema = z.object({
 }).strict();
 const WebglHeadersSchema = z.object({
 	range: z.string().optional(),
+	'if-none-match': z.string().optional(),
+	'if-modified-since': z.string().optional(),
+	'if-range': z.string().optional(),
 });
 const IdempotencyHeadersSchema = z.object({
 	'idempotency-key': z.string().min(1).max(200),
@@ -193,7 +196,13 @@ const RedirectResponse = {
 const WebglStreamResponse = {
 	200: StreamBodySchema,
 	206: StreamBodySchema,
+	304: NoContentSchema,
 	416: NoContentSchema,
+	default: ApiErrorResponseSchema,
+};
+const WebglHeadResponse = {
+	200: NoContentSchema,
+	304: NoContentSchema,
 	default: ApiErrorResponseSchema,
 };
 const PublicImageResponse = {
@@ -236,10 +245,10 @@ function contract(input: RouteRuntimeContract): RouteRuntimeContract {
 }
 
 /**
- * Machine-readable union of every explicit route buildApp can register: 55
- * always-active routes plus two non-production dev-auth routes. Fastify's 19
- * synthetic HEAD routes reuse their GET contract and are not counted; public
- * images declare an additional explicit HEAD contract.
+ * Machine-readable union of every explicit route buildApp can register.
+ * Most HEAD routes remain Fastify-generated from their GET contracts; public
+ * images and WebGL assets declare explicit HEAD routes so streams are never
+ * opened to answer metadata-only requests.
  */
 export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 	contract({
@@ -385,6 +394,33 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		body: NoBodySchema,
 		headers: WebglHeadersSchema,
 		response: WebglStreamResponse,
+	}),
+	...[
+		'/api/public/webgl/:projectId',
+		'/api/public/webgl/:projectId/',
+	].map((url) => contract({
+		method: 'HEAD' as const,
+		url,
+		family: 'public-webgl',
+		bodyBoundary: 'none' as const,
+		responseBoundary: 'no-content' as const,
+		params: ProjectIdParamsSchema,
+		querystring: EmptyObjectSchema,
+		body: NoBodySchema,
+		headers: WebglHeadersSchema,
+		response: WebglHeadResponse,
+	})),
+	contract({
+		method: 'HEAD',
+		url: '/api/public/webgl/:projectId/*',
+		family: 'public-webgl',
+		bodyBoundary: 'none',
+		responseBoundary: 'no-content',
+		params: WebglWildcardParamsSchema,
+		querystring: EmptyObjectSchema,
+		body: NoBodySchema,
+		headers: WebglHeadersSchema,
+		response: WebglHeadResponse,
 	}),
 	contract({
 		method: 'GET',

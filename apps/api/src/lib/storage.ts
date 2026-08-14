@@ -17,6 +17,9 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Readable } from 'node:stream';
 import type {
 	ObjectStorage,
+	ObjectByteRange,
+	ObjectStreamOutcome,
+	ObjectStreamRequest,
 	StorageRequestOptions,
 	StoredObject,
 } from '../application/ports.js';
@@ -37,6 +40,43 @@ function storageErrorMatches(error: unknown, names: readonly string[], statusCod
 	const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
 	return (typeof candidate.name === 'string' && names.includes(candidate.name))
 		|| (statusCode !== undefined && candidate.$metadata?.httpStatusCode === statusCode);
+}
+
+function responseHeader(error: unknown, name: string): string | undefined {
+	if (!error || typeof error !== 'object') return undefined;
+	const headers = (error as {
+		$response?: { headers?: Record<string, unknown> };
+	}).$response?.headers;
+	if (!headers) return undefined;
+	const value = headers[name] ?? headers[name.toLowerCase()];
+	return typeof value === 'string' ? value : undefined;
+}
+
+function responseDate(error: unknown, name: string): Date | undefined {
+	const value = responseHeader(error, name);
+	if (!value) return undefined;
+	const time = Date.parse(value);
+	return Number.isNaN(time) ? undefined : new Date(time);
+}
+
+function totalSizeFromContentRange(contentRange: string | undefined): number | undefined {
+	const match = /^bytes\s+\*\/(\d+)$/i.exec(contentRange ?? '');
+	if (!match) return undefined;
+	const size = Number(match[1]);
+	return Number.isSafeInteger(size) ? size : undefined;
+}
+
+function serializeByteRange(range: ObjectByteRange): string {
+	switch (range.kind) {
+		case 'closed': return `bytes=${range.start}-${range.end}`;
+		case 'open': return `bytes=${range.start}-`;
+		case 'suffix': return `bytes=-${range.length}`;
+	}
+}
+
+function isNotModifiedSince(lastModified: Date | undefined, ifModifiedSince: Date | undefined): boolean {
+	return !!lastModified && !!ifModifiedSince
+		&& Math.floor(lastModified.getTime() / 1_000) <= Math.floor(ifModifiedSince.getTime() / 1_000);
 }
 
 /** Bind every object operation to the S3 client owned by one BackendContext. */
@@ -77,7 +117,7 @@ export function createObjectStorage(
 		return objects;
 	}
 
-	return {
+	const storage: ObjectStorage = {
 		async upload(bucket, key, body, contentType, contentLength, uploadOptions = {}, request) {
 			await client.send(new PutObjectCommand({
 				Bucket: bucket,
@@ -135,13 +175,36 @@ export function createObjectStorage(
 			for await (const chunk of response.Body as Readable) chunks.push(Buffer.from(chunk));
 			return Buffer.concat(chunks);
 		},
-		async stream(bucket, key, range, request) {
+		async stream(
+			bucket: string,
+			key: string,
+			streamRequest?: ObjectStreamRequest,
+			request?: StorageRequestOptions,
+		) {
 			try {
 				const response = await client.send(new GetObjectCommand({
 					Bucket: bucket,
 					Key: key,
-					...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
+					...(streamRequest?.range ? { Range: serializeByteRange(streamRequest.range) } : {}),
+					...(streamRequest?.ifNoneMatch ? { IfNoneMatch: streamRequest.ifNoneMatch } : {}),
+					...(streamRequest?.ifModifiedSince ? { IfModifiedSince: streamRequest.ifModifiedSince } : {}),
+					...(streamRequest?.ifMatch ? { IfMatch: streamRequest.ifMatch } : {}),
 				}), requestOptions(request));
+				// Garage compares the server's sub-second object timestamp with an
+				// IMF-fixdate request (which only has seconds) and may return 200
+				// where HTTP's second-precision validator semantics require 304.
+				// Normalize from this same GET response without buffering or another I/O.
+				if (
+					streamRequest?.ifNoneMatch === undefined
+					&& isNotModifiedSince(response.LastModified, streamRequest?.ifModifiedSince)
+				) {
+					(response.Body as Readable | undefined)?.destroy();
+					return {
+						kind: 'not-modified' as const,
+						...(response.ETag ? { etag: response.ETag } : {}),
+						...(response.LastModified ? { lastModified: response.LastModified } : {}),
+					};
+				}
 				return {
 					body: response.Body as Readable,
 					size: response.ContentLength ?? 0,
@@ -154,6 +217,39 @@ export function createObjectStorage(
 				};
 			} catch (error) {
 				if (storageErrorMatches(error, ['NoSuchKey', 'NotFound'], 404)) return null;
+				if (storageErrorMatches(error, ['NotModified'], 304)) {
+					const etag = responseHeader(error, 'etag') ?? streamRequest?.notModifiedEtagFallback;
+					return {
+						kind: 'not-modified' as const,
+						...(etag ? { etag } : {}),
+						...(responseDate(error, 'last-modified') ? {
+							lastModified: responseDate(error, 'last-modified'),
+						} : {}),
+					};
+				}
+				if (storageErrorMatches(error, ['PreconditionFailed'], 412)) {
+					return {
+						kind: 'precondition-failed' as const,
+						...(responseHeader(error, 'etag') ? { etag: responseHeader(error, 'etag') } : {}),
+						...(responseDate(error, 'last-modified') ? {
+							lastModified: responseDate(error, 'last-modified'),
+						} : {}),
+					};
+				}
+				if (storageErrorMatches(error, ['InvalidRange', 'RequestedRangeNotSatisfiable'], 416)) {
+					const contentRange = responseHeader(error, 'content-range');
+					return {
+						kind: 'range-not-satisfiable' as const,
+						...(contentRange ? { contentRange } : {}),
+						...(totalSizeFromContentRange(contentRange) !== undefined
+							? { size: totalSizeFromContentRange(contentRange) }
+							: {}),
+						...(responseHeader(error, 'etag') ? { etag: responseHeader(error, 'etag') } : {}),
+						...(responseDate(error, 'last-modified') ? {
+							lastModified: responseDate(error, 'last-modified'),
+						} : {}),
+					};
+				}
 				throw error;
 			}
 		},
@@ -320,4 +416,5 @@ export function createObjectStorage(
 			return uploads;
 		},
 	};
+	return storage;
 }
