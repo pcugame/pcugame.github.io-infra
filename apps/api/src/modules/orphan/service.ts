@@ -253,19 +253,33 @@ export async function runOrphanReaper(
 				continue;
 			}
 
+			// Start one bounded attempt window before renewal, and use its exact
+			// composed signal for every storage boundary and terminal fence.
+			const storageRequest = boundedStorageRequest(operationSignal);
+			const assertOperationActive = () => {
+				assertClaimOwned();
+				if (storageRequest.signal.aborted) {
+					throw storageRequest.signal.reason ?? new Error('Orphan reaper aborted');
+				}
+			};
+			assertOperationActive();
+
 			if (orphan.targetKind === 'PREFIX') {
+				// Establish ownership once for the attempt. LIST pages are read-only and
+				// only need the local heartbeat/abort fence; every destructive batch
+				// still performs an authoritative renewal immediately before DELETE.
+				await renewOwnedClaim();
 				await deletePrefixPages({
 					storage: deps.storage,
 					bucket: orphan.bucket,
 					prefix: orphan.storageKey,
-					request: boundedStorageRequest(operationSignal),
-					beforeList: async () => {
-						await renewOwnedClaim();
-						if (operationSignal.aborted) throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+					request: storageRequest,
+					beforeList: () => {
+						assertOperationActive();
 					},
 					beforeDelete: async () => {
 						await renewOwnedClaim();
-						if (operationSignal.aborted) throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+						assertOperationActive();
 					},
 					onFailures: (failures) => {
 						throw new Error(`S3 bulk delete returned ${failures.length} per-key failures`);
@@ -273,13 +287,14 @@ export async function runOrphanReaper(
 				});
 			} else {
 				await renewOwnedClaim();
+				assertOperationActive();
 				await deps.storage.delete(
 					orphan.bucket,
 					orphan.storageKey,
-					boundedStorageRequest(operationSignal),
+					storageRequest,
 				);
 			}
-			assertClaimOwned();
+			assertOperationActive();
 			const resolution = await deps.repository.markClaimResolved(orphan.id, claimToken, now);
 			assertOwnedMutation(resolution, orphan.id, 'resolution');
 			resolved++;
