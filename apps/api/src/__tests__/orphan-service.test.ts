@@ -17,7 +17,12 @@ function createDependencies() {
 		upsertOrphan: vi.fn(async () => undefined),
 		claimPendingOrphans: vi.fn(async (): Promise<ClaimedOrphan[]> => []),
 		markClaimResolved: vi.fn(async () => ({ count: 1 })),
-		renewActiveClaim: vi.fn(async () => ({ count: 1 })),
+		renewActiveClaim: vi.fn(async (
+			_id: number,
+			_claimToken: string,
+			_claimLeaseMs: number,
+			_request?: { signal?: AbortSignal },
+		) => ({ count: 1 })),
 		markClaimCancelled: vi.fn(async () => ({ count: 1 })),
 		markClaimFailed: vi.fn(async () => ({ count: 1 })),
 	};
@@ -168,12 +173,14 @@ describe('orphan object service', () => {
 			12,
 			'claim-token',
 			120_000,
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 		expect(deps.repository.renewActiveClaim).toHaveBeenNthCalledWith(
 			2,
 			12,
 			'claim-token',
 			120_000,
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		);
 		expect(deps.repository.renewActiveClaim).toHaveBeenCalledTimes(2);
 		expect(deps.repository.markClaimResolved).toHaveBeenCalledWith(12, 'claim-token', now);
@@ -498,7 +505,9 @@ describe('orphan object service', () => {
 		const pendingRenewal = new Promise<{ count: number }>((_resolve, reject) => {
 			rejectLateRenewal = reject;
 		});
-		deps.repository.renewActiveClaim.mockImplementationOnce(() => {
+		let repositorySignal: AbortSignal | undefined;
+		deps.repository.renewActiveClaim.mockImplementationOnce((_id, _claimToken, _claimLeaseMs, request) => {
+			repositorySignal = request?.signal;
 			enteredRenewal();
 			return pendingRenewal;
 		});
@@ -506,7 +515,9 @@ describe('orphan object service', () => {
 
 		const running = service.runOrphanReaper(controller.signal);
 		await renewalEntered;
+		expect(repositorySignal?.aborted).toBe(false);
 		controller.abort(new Error('shutdown during claim renewal'));
+		expect(repositorySignal?.aborted).toBe(true);
 		await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
 		// The race continues to observe the database promise. Its later rejection
 		// neither becomes unhandled nor resumes any storage work.
@@ -517,6 +528,33 @@ describe('orphan object service', () => {
 		expect(deps.storage.delete).not.toHaveBeenCalled();
 		expect(deps.repository.markClaimResolved).not.toHaveBeenCalled();
 		expect(deps.repository.markClaimFailed).toHaveBeenCalledOnce();
+	});
+
+	it('preserves a DB renewal timeout as an availability error rather than claim loss', async () => {
+		const { deps, now } = createDependencies();
+		const databaseTimeout = Object.assign(
+			new Error('Raw query failed: canceling statement due to statement timeout'),
+			{ code: 'P2010' },
+		);
+		deps.repository.claimPendingOrphans.mockResolvedValue([
+			orphan(32, 'game/database-timeout.bin', { bucket: 'protected' }),
+		]);
+		deps.repository.renewActiveClaim.mockRejectedValue(databaseTimeout);
+		const service = createOrphanService(deps);
+
+		await expect(service.runOrphanReaper()).resolves.toEqual({
+			tried: 1,
+			resolved: 0,
+			failed: 1,
+		});
+		expect(deps.storage.delete).not.toHaveBeenCalled();
+		expect(deps.repository.markClaimFailed).toHaveBeenCalledWith(
+			32,
+			'claim-token',
+			databaseTimeout,
+			now,
+			expect.any(Date),
+		);
 	});
 
 	it('does not resolve an EXACT delete that reports success after its request is aborted', async () => {

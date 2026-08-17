@@ -6,6 +6,7 @@ const docker = process.platform === 'win32' ? 'docker.exe' : 'docker';
 const steps = [
 	[npm, ['run', 'testenv:up']],
 	[npm, ['run', 'test:integration:orphan-durability']],
+	[npm, ['run', 'test:integration:orphan-renewal-timeout']],
 	[npm, ['run', 'test:integration:asset-concurrency']],
 	[npm, ['run', 'test:integration:year-concurrency']],
 	[npm, ['run', 'test:integration:import-transaction']],
