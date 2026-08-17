@@ -110,7 +110,7 @@ function ExhibitionPoster({ ex }: { ex: PublicYearItem }) {
 					image={ex.poster}
 					alt={`${ex.title ?? ex.year} 전시회 포스터`}
 					sizes="(max-width: 640px) 88vw, (max-width: 1100px) 44vw, 420px"
-					loading="lazy"
+					loading="eager"
 					decoding="async"
 				/>
 			) : (

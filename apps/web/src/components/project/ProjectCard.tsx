@@ -20,7 +20,7 @@ export function ProjectCard({ project, onSelect }: Props) {
             image={project.poster}
             alt={`${project.title} 포스터`}
             sizes="(max-width: 640px) 46vw, (max-width: 1100px) 30vw, 280px"
-            loading="lazy"
+            loading="eager"
             decoding="async"
           />
         ) : (
