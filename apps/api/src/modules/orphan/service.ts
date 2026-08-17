@@ -107,6 +107,7 @@ export async function recordOrphan(
 const REAP_BATCH_SIZE = 50;
 const REAP_COOLDOWN_MS = 5 * 60 * 1000;
 const CLAIM_LEASE_MS = 2 * 60 * 1000;
+const CLAIM_RENEWAL_TIMEOUT_MS = 60 * 1000;
 const STORAGE_REQUEST_TIMEOUT_MS = 60 * 1000;
 const MAX_BACKOFF_MS = 60 * 60 * 1000;
 const NOISY_ATTEMPT_THRESHOLD = 10;
@@ -200,26 +201,71 @@ export async function runOrphanReaper(
 		const assertClaimOwned = () => {
 			if (claimLost) throw claimLost;
 		};
-		const renewOwnedClaim = (): Promise<void> => {
+		const renewOwnedClaim = async (): Promise<void> => {
 			assertClaimOwned();
+			if (operationSignal.aborted) {
+				throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+			}
 			renewalFlight ??= (async () => {
+				const renewalDeadline = AbortSignal.timeout(CLAIM_RENEWAL_TIMEOUT_MS);
+				const renewalSignal = AbortSignal.any([operationSignal, renewalDeadline]);
+				let removeAbortListener = () => {};
+				const aborted = new Promise<never>((_resolve, reject) => {
+					const onAbort = () => {
+						reject(renewalSignal.reason ?? new Error('Orphan claim renewal aborted'));
+					};
+					if (renewalSignal.aborted) {
+						onAbort();
+						return;
+					}
+					renewalSignal.addEventListener('abort', onAbort, { once: true });
+					removeAbortListener = () => renewalSignal.removeEventListener('abort', onAbort);
+				});
+				// Promise.race installs both fulfillment and rejection handlers on the
+				// database promise. A late result therefore remains observed but can no
+				// longer authorize storage after this flight has timed out or aborted.
+				let databaseRenewal: Promise<{ count: number }>;
 				try {
-					const result = await deps.repository.renewActiveClaim(
+					databaseRenewal = Promise.resolve(deps.repository.renewActiveClaim(
 						orphan.id,
 						claimToken,
 						CLAIM_LEASE_MS,
-					);
+					));
+				} catch (error) {
+					databaseRenewal = Promise.reject(error);
+				}
+				try {
+					const result = await Promise.race([databaseRenewal, aborted]);
+					if (renewalDeadline.aborted) {
+						const error = renewalDeadline.reason ?? new Error('Orphan claim renewal timed out');
+						loseClaim(error);
+						throw claimLost ?? error;
+					}
+					if (operationSignal.aborted) {
+						throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+					}
 					if (result.count !== 1) {
-						throw new Error('Orphan deletion claim was lost');
+						const error = new Error('Orphan deletion claim was lost');
+						loseClaim(error);
+						throw claimLost ?? error;
 					}
 				} catch (error) {
+					if (renewalDeadline.aborted) {
+						loseClaim(renewalDeadline.reason ?? error);
+						throw claimLost ?? error;
+					}
+					if (operationSignal.aborted) {
+						throw operationSignal.reason ?? error;
+					}
 					loseClaim(error);
 					throw claimLost ?? error;
+				} finally {
+					removeAbortListener();
 				}
 			})().finally(() => {
 				renewalFlight = undefined;
 			});
-			return renewalFlight;
+			await renewalFlight;
 		};
 		heartbeat = setInterval(() => {
 			void renewOwnedClaim().catch((error) => {
@@ -227,7 +273,9 @@ export async function runOrphanReaper(
 					{ error, orphanId: orphan.id },
 					'Orphan deletion claim heartbeat failed',
 				);
-				loseClaim(error);
+				// The renewal flight itself classifies repository/deadline failures as
+				// claim loss. An outer operation abort stops the flight without being
+				// relabelled as lost ownership here.
 			});
 		}, 30 * 1000);
 		heartbeat.unref();
@@ -253,19 +301,30 @@ export async function runOrphanReaper(
 				continue;
 			}
 
+			const assertOperationActive = () => {
+				assertClaimOwned();
+				if (operationSignal.aborted) {
+					throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+				}
+			};
+			assertOperationActive();
+
 			if (orphan.targetKind === 'PREFIX') {
+				// Establish ownership once for the attempt. LIST pages are read-only and
+				// only need the local heartbeat/abort fence; every destructive batch
+				// still performs an authoritative renewal immediately before DELETE.
+				await renewOwnedClaim();
 				await deletePrefixPages({
 					storage: deps.storage,
 					bucket: orphan.bucket,
 					prefix: orphan.storageKey,
-					request: boundedStorageRequest(operationSignal),
-					beforeList: async () => {
-						await renewOwnedClaim();
-						if (operationSignal.aborted) throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+					createRequest: () => boundedStorageRequest(operationSignal),
+					beforeList: () => {
+						assertOperationActive();
 					},
 					beforeDelete: async () => {
 						await renewOwnedClaim();
-						if (operationSignal.aborted) throw operationSignal.reason ?? new Error('Orphan reaper aborted');
+						assertOperationActive();
 					},
 					onFailures: (failures) => {
 						throw new Error(`S3 bulk delete returned ${failures.length} per-key failures`);
@@ -273,13 +332,21 @@ export async function runOrphanReaper(
 				});
 			} else {
 				await renewOwnedClaim();
+				assertOperationActive();
+				const storageRequest = boundedStorageRequest(operationSignal);
+				if (storageRequest.signal.aborted) {
+					throw storageRequest.signal.reason ?? new Error('Orphan reaper aborted');
+				}
 				await deps.storage.delete(
 					orphan.bucket,
 					orphan.storageKey,
-					boundedStorageRequest(operationSignal),
+					storageRequest,
 				);
+				if (storageRequest.signal.aborted) {
+					throw storageRequest.signal.reason ?? new Error('Orphan reaper aborted');
+				}
 			}
-			assertClaimOwned();
+			assertOperationActive();
 			const resolution = await deps.repository.markClaimResolved(orphan.id, claimToken, now);
 			assertOwnedMutation(resolution, orphan.id, 'resolution');
 			resolved++;
