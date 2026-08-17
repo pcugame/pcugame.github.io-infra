@@ -4,6 +4,7 @@ import {
 	createObjectReferenceIndex,
 	type ObjectReferenceInventory,
 } from './reference-resolver.js';
+import { DEFAULT_ORPHAN_CLAIM_RENEWAL_POLICY } from './claim-renewal-policy.js';
 
 export interface OrphanServiceDependencies {
 	clock: { now(): Date };
@@ -54,6 +55,7 @@ export interface OrphanServiceDependencies {
 			id: number,
 			claimToken: string,
 			claimLeaseMs: number,
+			request?: { signal?: AbortSignal },
 		): Promise<{ count: number }>;
 		markClaimCancelled(
 			id: number,
@@ -107,7 +109,7 @@ export async function recordOrphan(
 const REAP_BATCH_SIZE = 50;
 const REAP_COOLDOWN_MS = 5 * 60 * 1000;
 const CLAIM_LEASE_MS = 2 * 60 * 1000;
-const CLAIM_RENEWAL_TIMEOUT_MS = 60 * 1000;
+const CLAIM_RENEWAL_TIMEOUT_MS = DEFAULT_ORPHAN_CLAIM_RENEWAL_POLICY.jsDeadlineMs;
 const STORAGE_REQUEST_TIMEOUT_MS = 60 * 1000;
 const MAX_BACKOFF_MS = 60 * 60 * 1000;
 const NOISY_ATTEMPT_THRESHOLD = 10;
@@ -230,6 +232,7 @@ export async function runOrphanReaper(
 						orphan.id,
 						claimToken,
 						CLAIM_LEASE_MS,
+						{ signal: renewalSignal },
 					));
 				} catch (error) {
 					databaseRenewal = Promise.reject(error);

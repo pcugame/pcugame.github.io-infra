@@ -11,6 +11,7 @@
     "testenv:down": "docker compose -f docker-compose.integration.yml down --remove-orphans",
     "testenv:clean": "docker compose -f docker-compose.integration.yml down -v --remove-orphans",
     "test:integration:orphan-durability": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/orphan-durability.postgres.test.ts",
+    "test:integration:orphan-renewal-timeout": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/orphan-renewal-timeout.postgres.test.ts",
     "test:integration:asset-concurrency": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/asset-poster-concurrency.postgres.test.ts",
     "test:integration:year-concurrency": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/year-poster-concurrency.postgres.test.ts",
     "test:integration:import-transaction": "RUN_POSTGRES_INTEGRATION=true DATABASE_URL='postgresql://pcu_admin:integration@127.0.0.1:15432/pcu_graduationproject_v2?schema=public' npm exec -w apps/api -- vitest run src/__tests__/import-transaction.postgres.test.ts",

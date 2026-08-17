@@ -1,10 +1,26 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
+import {
+	resolveOrphanClaimRenewalPolicy,
+	type OrphanClaimRenewalPolicy,
+} from './claim-renewal-policy.js';
 import { OBJECT_REFERENCE_CLAIM_LOCK_ID } from './reference-resolver.js';
 import { OUTBOX_REQUEUE_CANCEL_REASON } from './outbox.js';
 
-type OrphanRepositoryClient = Pick<PrismaClient, 'orphanObject' | '$queryRaw'>;
+type OrphanRepositoryClient = Pick<PrismaClient, 'orphanObject' | '$queryRaw' | '$transaction'>;
 
-export function createOrphanRepository(client: OrphanRepositoryClient) {
+function assertRenewalActive(signal?: AbortSignal): void {
+	if (signal?.aborted) {
+		throw signal.reason ?? new Error('Orphan claim renewal aborted');
+	}
+}
+
+export function createOrphanRepository(
+	client: OrphanRepositoryClient,
+	options: {
+		claimRenewalPolicy?: Partial<Omit<OrphanClaimRenewalPolicy, 'jsDeadlineMs'>>;
+	} = {},
+) {
+	const claimRenewalPolicy = resolveOrphanClaimRenewalPolicy(options.claimRenewalPolicy);
 	return {
 		async upsertOrphan(
 			bucket: string,
@@ -125,24 +141,52 @@ export function createOrphanRepository(client: OrphanRepositoryClient) {
 			return { count: resolved.length };
 		},
 
-		async renewActiveClaim(id: number, claimToken: string, claimLeaseMs: number) {
-			const renewed = await client.$queryRaw<Array<{ id: number }>>(Prisma.sql`
-				WITH object_reference_lock AS MATERIALIZED (
-					SELECT pg_advisory_xact_lock(${OBJECT_REFERENCE_CLAIM_LOCK_ID})
-				), renewed AS (
-					UPDATE "orphan_objects" AS orphan
-					SET "claim_until" = clock_timestamp()
-						+ (${claimLeaseMs} * INTERVAL '1 millisecond')
-					FROM object_reference_lock
-					WHERE orphan."id" = ${id}
-						AND orphan."state" = 'DELETE_CLAIMED'::"OrphanState"
-						AND orphan."claim_token" = ${claimToken}
-						AND orphan."claim_until" > clock_timestamp()
-					RETURNING orphan."id"
-				)
-				SELECT "id" FROM renewed
-			`);
-			return { count: renewed.length };
+		async renewActiveClaim(
+			id: number,
+			claimToken: string,
+			claimLeaseMs: number,
+			request?: { signal?: AbortSignal },
+		) {
+			return client.$transaction(async (tx) => {
+				assertRenewalActive(request?.signal);
+				await tx.$queryRaw(Prisma.sql`
+					SELECT
+						set_config(
+							'statement_timeout',
+							${`${claimRenewalPolicy.statementTimeoutMs}ms`},
+							true
+						) AS "statementTimeout",
+						set_config(
+							'idle_in_transaction_session_timeout',
+							${`${claimRenewalPolicy.idleTransactionTimeoutMs}ms`},
+							true
+						) AS "idleTransactionTimeout"
+				`);
+				assertRenewalActive(request?.signal);
+				const renewed = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+					WITH object_reference_lock AS MATERIALIZED (
+						SELECT pg_advisory_xact_lock(${OBJECT_REFERENCE_CLAIM_LOCK_ID})
+					), renewed AS (
+						UPDATE "orphan_objects" AS orphan
+						SET "claim_until" = clock_timestamp()
+							+ (${claimLeaseMs} * INTERVAL '1 millisecond')
+						FROM object_reference_lock
+						WHERE orphan."id" = ${id}
+							AND orphan."state" = 'DELETE_CLAIMED'::"OrphanState"
+							AND orphan."claim_token" = ${claimToken}
+							AND orphan."claim_until" > clock_timestamp()
+						RETURNING orphan."id"
+					)
+					SELECT "id" FROM renewed
+				`);
+				// An abort observed before callback return must roll the UPDATE back;
+				// only a committed transaction may report renewed ownership.
+				assertRenewalActive(request?.signal);
+				return { count: renewed.length };
+			}, {
+				maxWait: claimRenewalPolicy.transactionMaxWaitMs,
+				timeout: claimRenewalPolicy.transactionTimeoutMs,
+			});
 		},
 
 		async markClaimCancelled(id: number, claimToken: string, reason: string, now: Date) {
