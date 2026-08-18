@@ -6,6 +6,7 @@ import type {
 	ObjectStorage,
 } from '../../../application/ports.js';
 import type {
+	ActiveUploadTempRegistry,
 	ImageRenditionProfile,
 	SavedUpload,
 	UploadIntentOwner,
@@ -79,6 +80,8 @@ export interface ProjectUploadPipelineDependencies {
 		isUncommitted(id: string): Promise<boolean>;
 		recordAmbiguousError(id: string, error: unknown): Promise<void>;
 	};
+	/** Context-local guard preventing the scavenger from racing active requests. */
+	activeUploadTemps?: Pick<ActiveUploadTempRegistry, 'register' | 'release'>;
 }
 
 type UploadPurpose = 'original' | 'playback' | 'rendition-card-480' | 'rendition-display-960';
@@ -120,6 +123,11 @@ export function createProjectUploadPipeline(
 	deps: ProjectUploadPipelineDependencies,
 ): UploadPipelinePort {
 	const temporaryPaths = new Set<string>();
+	function trackTemporaryPath(temporaryPath: string): void {
+		if (temporaryPaths.has(temporaryPath)) return;
+		temporaryPaths.add(temporaryPath);
+		deps.activeUploadTemps?.register(temporaryPath);
+	}
 	let owner: UploadIntentOwner = {};
 	const objectUploads = createIntentTrackedObjectUploader({
 		storage: deps.storage,
@@ -169,7 +177,7 @@ export function createProjectUploadPipeline(
 			owner = { ...nextOwner };
 		},
 		trackTempFile(filePath) {
-			temporaryPaths.add(filePath);
+			trackTemporaryPath(filePath);
 		},
 
 		async processFile(filePath, kind, originalName): Promise<SavedUpload> {
@@ -200,7 +208,7 @@ export function createProjectUploadPipeline(
 				let playbackMimeType = '';
 				let playbackSizeBytes = 0;
 				if (playback.playback) {
-					temporaryPaths.add(playback.playback.tmpPath);
+					trackTemporaryPath(playback.playback.tmpPath);
 					const playbackUpload = await upload(
 						playback.playback.tmpPath,
 						kind,
@@ -265,13 +273,13 @@ export function createProjectUploadPipeline(
 			} catch (error) {
 				if (error instanceof ImageOutputCleanupError) {
 					for (const residuePath of error.residuePaths) {
-						temporaryPaths.add(residuePath);
+						trackTemporaryPath(residuePath);
 					}
 				}
 				throw error;
 			}
 			for (const output of [processed.original, ...processed.renditions]) {
-				if (output.tmpPath !== filePath) temporaryPaths.add(output.tmpPath);
+				if (output.tmpPath !== filePath) trackTemporaryPath(output.tmpPath);
 			}
 
 			const originalUpload = await upload(
@@ -337,44 +345,52 @@ export function createProjectUploadPipeline(
 
 		async cleanupTemp() {
 			const failures: unknown[] = [];
-			for (const temporaryPath of [...temporaryPaths]) {
-				let removed = false;
-				for (let attempt = 1; attempt <= TEMP_CLEANUP_MAX_ATTEMPTS; attempt++) {
-					try {
-						await deps.fileSystem.remove(temporaryPath);
-						removed = true;
-						break;
-					} catch (error) {
-						if (isMissingFile(error)) {
+			const trackedPaths = [...temporaryPaths];
+			try {
+				for (const temporaryPath of trackedPaths) {
+					let removed = false;
+					for (let attempt = 1; attempt <= TEMP_CLEANUP_MAX_ATTEMPTS; attempt++) {
+						try {
+							await deps.fileSystem.remove(temporaryPath);
 							removed = true;
 							break;
-						}
-						deps.logger.warn(
-							{
-								error,
-								temporaryPath,
-								attempt,
-								maxAttempts: TEMP_CLEANUP_MAX_ATTEMPTS,
-							},
-							'Project upload temp-file cleanup attempt failed',
-						);
-						if (attempt === TEMP_CLEANUP_MAX_ATTEMPTS) {
-							failures.push(error);
+						} catch (error) {
+							if (isMissingFile(error)) {
+								removed = true;
+								break;
+							}
+							deps.logger.warn(
+								{
+									error,
+									temporaryPath,
+									attempt,
+									maxAttempts: TEMP_CLEANUP_MAX_ATTEMPTS,
+								},
+								'Project upload temp-file cleanup attempt failed',
+							);
+							if (attempt === TEMP_CLEANUP_MAX_ATTEMPTS) {
+								failures.push(error);
+							}
 						}
 					}
+					if (removed) temporaryPaths.delete(temporaryPath);
 				}
-				if (removed) temporaryPaths.delete(temporaryPath);
-			}
-			if (failures.length > 0) {
-				const residuePaths = [...temporaryPaths];
-				deps.logger.error(
-					{
-						residuePaths,
-						maxAttempts: TEMP_CLEANUP_MAX_ATTEMPTS,
-					},
-					'Project upload temp-file cleanup exhausted retries',
-				);
-				throw new ProjectTempCleanupError(failures, residuePaths);
+				if (failures.length > 0) {
+					const residuePaths = [...temporaryPaths];
+					deps.logger.error(
+						{
+							residuePaths,
+							maxAttempts: TEMP_CLEANUP_MAX_ATTEMPTS,
+						},
+						'Project upload temp-file cleanup exhausted retries',
+					);
+					throw new ProjectTempCleanupError(failures, residuePaths);
+				}
+			} finally {
+				// The request lifetime has ended even when removal exhausted retries.
+				for (const temporaryPath of trackedPaths) {
+					deps.activeUploadTemps?.release(temporaryPath);
+				}
 			}
 		},
 	};

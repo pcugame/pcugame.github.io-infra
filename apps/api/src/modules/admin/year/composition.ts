@@ -11,6 +11,7 @@ import type {
 } from '../../../application/ports.js';
 import type { Env } from '../../../config/env.js';
 import type { UploadLimits } from '../../../shared/upload-limits.js';
+import type { ActiveUploadTempRegistry } from '../../../application/upload-ports.js';
 import { megabytes, resolveRoleUploadLimits } from '../../../shared/upload-policy.js';
 import { createYearController } from './controller.js';
 import { createExhibitionPosterUploadCoordinator } from './poster-upload.adapter.js';
@@ -48,6 +49,7 @@ export interface YearProductionDependencies {
 	clock: Clock;
 	ids: IdGenerator;
 	uploadLifecycle: UploadLifecycleRuntime;
+	activeUploadTemps?: ActiveUploadTempRegistry;
 }
 
 function uploadLimits(config: YearConfig, role: UserRole): UploadLimits {
@@ -70,6 +72,7 @@ export function createYearProductionGraph(
 			'exhibition-poster-unpersisted',
 		),
 		uploadIntents: deps.uploadLifecycle.uploadIntents,
+		...(deps.activeUploadTemps ? { activeUploadTemps: deps.activeUploadTemps } : {}),
 	});
 	const service = createExhibitionService({
 		apiPublicUrl: deps.config.API_PUBLIC_URL,

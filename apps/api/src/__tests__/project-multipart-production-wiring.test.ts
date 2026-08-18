@@ -948,6 +948,10 @@ describe('project multipart production wiring', () => {
 		const assetWrite = harness.ports.calls.assetCreate.mock.calls[0]?.[0];
 		expect(assetWrite?.idempotency?.resultForAsset(123)).toEqual({ assetId: 123 });
 		expect(harness.storage.calls.upload).toHaveBeenCalledOnce();
+		expect(harness.fileSystem.calls.createWriteStream.mock.calls.length).toBeGreaterThan(0);
+		for (const [temporaryPath] of harness.fileSystem.calls.createWriteStream.mock.calls) {
+			expect(temporaryPath).toContain('/pcugame-upload/');
+		}
 		expect(harness.fileSystem.outstanding()).toEqual([]);
 
 		await harness.app.close();

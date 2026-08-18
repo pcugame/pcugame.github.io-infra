@@ -43,10 +43,37 @@ export function createNodeScheduler(): Scheduler {
 export function createNodeFileSystem(): FileSystem {
 	return {
 	temporaryDirectory: () => os.tmpdir(),
-	stat: async (path) => fs.stat(path),
+	stat: async (path) => {
+		const result = await fs.stat(path);
+		return { size: result.size, lastModified: result.mtime };
+	},
 	access: async (path) => fs.access(path),
 	mkdir: async (path, options) => {
 		await fs.mkdir(path, options);
+	},
+	ensurePrivateDirectory: async (directory) => {
+		await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+		const initial = await fs.lstat(directory);
+		const currentUid = process.getuid?.();
+		if (currentUid === undefined) {
+			throw new Error('Cannot verify upload temp directory ownership on this platform');
+		}
+		if (initial.isSymbolicLink() || !initial.isDirectory()) {
+			throw new Error('Upload temp path must be a real directory, not a link or other entry');
+		}
+		if (initial.uid !== currentUid) {
+			throw new Error('Upload temp directory must be owned by the current process user');
+		}
+		await fs.chmod(directory, 0o700);
+		const verified = await fs.lstat(directory);
+		if (verified.isSymbolicLink()
+			|| !verified.isDirectory()
+			|| verified.uid !== currentUid
+			|| verified.dev !== initial.dev
+			|| verified.ino !== initial.ino
+			|| (verified.mode & 0o777) !== 0o700) {
+			throw new Error('Upload temp directory changed or could not be secured');
+		}
 	},
 	rename: async (from, to) => fs.rename(from, to),
 	remove: async (path) => fs.unlink(path),
@@ -62,16 +89,13 @@ export function createNodeFileSystem(): FileSystem {
 	},
 	createReadStream,
 	createWriteStream,
-	listFiles: async (directory) => {
+	listDirectoryEntries: async (directory) => {
 		const entries = await fs.readdir(directory, { withFileTypes: true });
-		const files = await Promise.all(entries
-			.filter((entry) => entry.isFile())
-			.map(async (entry) => {
-				const filePath = path.join(directory, entry.name);
-				const stat = await fs.stat(filePath);
-				return { name: entry.name, path: filePath, lastModified: stat.mtime };
-			}));
-		return files;
+		return entries.map((entry) => ({
+			name: entry.name,
+			path: path.join(directory, entry.name),
+			isFile: entry.isFile(),
+		}));
 	},
 	};
 }

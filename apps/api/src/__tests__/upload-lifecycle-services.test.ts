@@ -269,25 +269,34 @@ describe('multipart-abort convergence', () => {
 describe('upload temp scavenger', () => {
 	it('removes only aged files in the closed application-owned filename grammar', async () => {
 		const remove = vi.fn().mockResolvedValue(undefined);
+		const directory = '/tmp/pcugame-upload';
 		const scavenger = createUploadTempScavenger({
 			fileSystem: {
-				temporaryDirectory: () => '/tmp',
+				temporaryDirectory: () => directory,
+				stat: vi.fn(async (filePath: string) => ({
+					size: 1,
+					lastModified: filePath.includes('11111111')
+						? new Date('2026-08-11T10:00:00.000Z')
+						: new Date('2026-08-11T11:30:00.000Z'),
+				})),
+				access: vi.fn(),
+				mkdir: vi.fn(),
 				remove,
-				listFiles: vi.fn().mockResolvedValue([
+				listDirectoryEntries: vi.fn().mockResolvedValue([
 					{
 						name: 'pcu-project-upload-11111111-1111-4111-8111-111111111111.webp',
-						path: '/tmp/pcu-project-upload-11111111-1111-4111-8111-111111111111.webp',
-						lastModified: new Date('2026-08-11T10:00:00.000Z'),
+						path: `${directory}/pcu-project-upload-11111111-1111-4111-8111-111111111111.webp`,
+						isFile: true,
 					},
 					{
 						name: 'project-asset-22222222-2222-4222-8222-222222222222',
-						path: '/tmp/project-asset-22222222-2222-4222-8222-222222222222',
-						lastModified: new Date('2026-08-11T11:30:00.000Z'),
+						path: `${directory}/project-asset-22222222-2222-4222-8222-222222222222`,
+						isFile: true,
 					},
 					{
 						name: 'unrelated-user-file',
-						path: '/tmp/unrelated-user-file',
-						lastModified: new Date('2026-08-10T00:00:00.000Z'),
+						path: `${directory}/unrelated-user-file`,
+						isFile: true,
 					},
 				]),
 			},
@@ -295,10 +304,15 @@ describe('upload temp scavenger', () => {
 			logger: { info: vi.fn(), error: vi.fn() },
 		});
 
-		await expect(scavenger.sweep()).resolves.toEqual({ scanned: 3, removed: 1, failed: 0 });
+		await expect(scavenger.sweep()).resolves.toEqual({
+			scanned: 3,
+			candidates: 2,
+			removed: 1,
+			failed: 0,
+		});
 		expect(remove).toHaveBeenCalledOnce();
 		expect(remove).toHaveBeenCalledWith(
-			'/tmp/pcu-project-upload-11111111-1111-4111-8111-111111111111.webp',
+			`${directory}/pcu-project-upload-11111111-1111-4111-8111-111111111111.webp`,
 		);
 	});
 });
