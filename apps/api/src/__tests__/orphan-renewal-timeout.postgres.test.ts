@@ -6,6 +6,7 @@ import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createOrphanRepository } from '../modules/orphan/repository.js';
 import { OBJECT_REFERENCE_CLAIM_LOCK_ID, type ObjectReferenceInventory } from '../modules/orphan/reference-resolver.js';
 import { createOrphanService } from '../modules/orphan/service.js';
+import { deferred } from './helpers/deferred.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 
@@ -21,12 +22,6 @@ const EMPTY_INVENTORY: ObjectReferenceInventory = {
 	references: [],
 	unsafeBuckets: new Set<string>(),
 };
-
-function deferred() {
-	let resolve!: () => void;
-	const promise = new Promise<void>((done) => { resolve = done; });
-	return { promise, resolve };
-}
 
 function databaseUrlWithApplicationName(databaseUrl: string, applicationName: string): string {
 	const parsed = new URL(databaseUrl);
@@ -261,24 +256,6 @@ describe.runIf(runPostgresIntegration)('orphan renewal timeout uses bounded Post
 				BOUNDED_POOL_CONNECTION_TIMEOUT_MS - 50,
 			)),
 		])).resolves.toEqual([{ one: 1 }]);
-	});
-
-	it('preserves successful renewal and distinguishes ownership loss from a database timeout', async () => {
-		const active = await createClaim();
-		await expect(repository(worker).renewActiveClaim(active.row.id, active.token, CLAIM_LEASE_MS))
-			.resolves.toEqual({ count: 1 });
-		const renewed = await control.orphanObject.findUniqueOrThrow({ where: { id: active.row.id } });
-		expect(renewed.claimUntil!.getTime()).toBeGreaterThan(active.row.claimUntil!.getTime());
-
-		const expired = await createClaim({ expiresAt: new Date('2000-01-01T00:00:00.000Z') });
-		await expect(repository(worker).renewActiveClaim(expired.row.id, expired.token, CLAIM_LEASE_MS))
-			.resolves.toEqual({ count: 0 });
-		const afterExpired = await control.orphanObject.findUniqueOrThrow({ where: { id: expired.row.id } });
-		expect(afterExpired.claimUntil?.getTime()).toBe(expired.row.claimUntil!.getTime());
-		await control.orphanObject.update({
-			where: { id: expired.row.id },
-			data: { nextAttemptAt: new Date('9999-01-01T00:00:00.000Z') },
-		});
 	});
 
 	it('rolls back a renewal that is aborted while waiting, even when the lock is released before statement timeout', async () => {

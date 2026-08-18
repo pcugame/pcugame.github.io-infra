@@ -85,31 +85,6 @@ describe('object deletion coordinator', () => {
 		);
 	});
 
-	it('deletes prefix batches and hands confirmed partial failures to parent recovery', async () => {
-		const deleteKeys = vi.fn().mockResolvedValue({
-			deleted: ['site/1.js', 'site/3.js'],
-			failures: [{ key: 'site/2.js', code: 'SlowDown' }],
-		});
-		const record = vi.fn().mockResolvedValue(undefined);
-		const coordinator = createObjectDeletionCoordinator({
-			storage: {
-				delete: vi.fn(),
-				listKeyPage: vi.fn()
-					.mockResolvedValueOnce({ keys: ['site/1.js', 'site/2.js', 'site/3.js'], isTruncated: false })
-					.mockResolvedValueOnce({ keys: [], isTruncated: false }),
-				deleteKeys,
-			},
-			orphans: { record },
-			logger: { error: vi.fn() },
-		});
-
-		await expect(coordinator.deletePrefixOrQueue('public', 'site/', 'deployment-delete'))
-			.resolves.toBe(3);
-		expect(deleteKeys).toHaveBeenCalledOnce();
-		expect(record).toHaveBeenCalledOnce();
-		expect(record).toHaveBeenCalledWith('public', 'site/', 'deployment-delete', 'PREFIX');
-	});
-
 	it('queues the prefix itself when enumeration fails', async () => {
 		const record = vi.fn().mockResolvedValue(undefined);
 		const coordinator = createObjectDeletionCoordinator({

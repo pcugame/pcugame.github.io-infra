@@ -16,6 +16,7 @@ import { createOrphanService } from '../modules/orphan/service.js';
 import type { ObjectReferenceInventory } from '../modules/orphan/reference-resolver.js';
 import { createWebglDeployment } from '../modules/webgl/deployment.js';
 import type { WebglDeploymentKeys } from '../modules/webgl/paths.js';
+import { deferred } from './helpers/deferred.js';
 
 const key = (n: number) => `site/${String(n).padStart(4, '0')}.js`;
 const webglDeployment: WebglDeploymentKeys = {
@@ -504,8 +505,8 @@ describe('issue #29 prefix deletion invariants', () => {
 		vi.useFakeTimers();
 		try {
 			const batchOne = Array.from({ length: 1000 }, (_, index) => key(index));
-			let enteredDelete!: () => void;
-			const deleteEntered = new Promise<void>((resolve) => { enteredDelete = resolve; });
+			const deleteStarted = deferred();
+			const pendingDelete = deferred<{ deleted: string[]; failures: [] }>();
 			let deleteSignal: AbortSignal | undefined;
 			const repository = {
 				upsertOrphan: vi.fn(),
@@ -527,12 +528,11 @@ describe('issue #29 prefix deletion invariants', () => {
 					request?: { signal?: AbortSignal },
 				) => {
 					deleteSignal = request?.signal;
-					enteredDelete();
-					return new Promise<{ deleted: string[]; failures: [] }>((_resolve, reject) => {
-						request?.signal?.addEventListener('abort', () => {
-							reject(request.signal?.reason ?? new Error('aborted'));
-						}, { once: true });
-					});
+					deleteStarted.resolve();
+					request?.signal?.addEventListener('abort', () => {
+						pendingDelete.reject(request.signal?.reason ?? new Error('aborted'));
+					}, { once: true });
+					return pendingDelete.promise;
 				}),
 			};
 			const service = createOrphanService({
@@ -542,7 +542,7 @@ describe('issue #29 prefix deletion invariants', () => {
 			});
 
 			const running = service.runOrphanReaper();
-			await deleteEntered;
+			await deleteStarted.promise;
 			expect(deleteSignal?.aborted).toBe(false);
 			await vi.advanceTimersByTimeAsync(30_000);
 			await expect(running).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
