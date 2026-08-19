@@ -14,6 +14,7 @@ import type {
 import {
 	createMaintenanceSchedule,
 	createProductionBackendContext,
+	createSingleFlightUploadRecovery,
 	type BackendRoutes,
 	type ProductionResourceFactories,
 } from '../backend-context.js';
@@ -56,6 +57,7 @@ const fileSystem: FileSystem = {
 	stat: async () => ({ size: 0 }),
 	access: async () => {},
 	mkdir: async () => {},
+	ensurePrivateDirectory: async () => {},
 	rename: async () => {},
 	remove: async () => {},
 	readRange: async () => Buffer.alloc(0),
@@ -117,6 +119,60 @@ function schedulerHarness() {
 }
 
 describe('production BackendContext resource ownership', () => {
+	it('rejects an unsafe upload directory before startup recovery can enumerate or delete', async () => {
+		const ensurePrivateDirectory = vi.fn(async () => {
+			throw new Error('final upload directory is a symlink');
+		});
+		const listDirectoryEntries = vi.fn(async () => []);
+		const remove = vi.fn(async () => {});
+		const unsafeFileSystem: FileSystem = {
+			...fileSystem,
+			ensurePrivateDirectory,
+			listDirectoryEntries,
+			remove,
+		};
+		const context = await createProductionBackendContext(testConfig, {
+			persistence: createScriptedBackendPersistence(),
+			routes: emptyRoutes,
+			resources: {
+				uploadLifecycle: ownedTestUploadLifecycleResource(),
+				fileSystem: { value: unsafeFileSystem, ownership: 'borrowed' },
+				logger: { value: testLogger, ownership: 'borrowed' },
+				settings: { value: settingsHarness('', []).store, ownership: 'borrowed' },
+				s3: { value: fakeS3('', []), ownership: 'borrowed' },
+			},
+		});
+
+		await expect(context.start()).rejects.toThrow('final upload directory is a symlink');
+		expect(ensurePrivateDirectory).toHaveBeenCalledWith('/tmp/pcugame-upload');
+		expect(listDirectoryEntries).not.toHaveBeenCalled();
+		expect(remove).not.toHaveBeenCalled();
+	});
+
+	it('coalesces the complete upload recovery sequence across overlapping callers', async () => {
+		let release!: () => void;
+		const barrier = new Promise<void>((resolve) => { release = resolve; });
+		let entered!: () => void;
+		const started = new Promise<void>((resolve) => { entered = resolve; });
+		const gameRecovery = vi.fn(async () => {
+			entered();
+			await barrier;
+		});
+		const tempSweep = vi.fn(async () => {});
+		const recover = createSingleFlightUploadRecovery(gameRecovery, tempSweep);
+		const alreadyAborted = new AbortController();
+		alreadyAborted.abort();
+		const abortedCall = recover(alreadyAborted.signal);
+		const first = recover();
+		await started;
+		const overlapping = recover();
+		expect(overlapping).toBe(first);
+		release();
+		await Promise.all([abortedCall, first, overlapping]);
+		expect(gameRecovery).toHaveBeenCalledOnce();
+		expect(tempSweep).toHaveBeenCalledOnce();
+	});
+
 	it('waits for an in-flight orphan reaper before closing its maintenance schedule', async () => {
 		const harness = schedulerHarness();
 		let release!: () => void;

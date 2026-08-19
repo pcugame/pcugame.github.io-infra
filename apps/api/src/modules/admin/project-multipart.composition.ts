@@ -28,7 +28,10 @@ import { createSubmitProjectService } from './project/project-submit.service.js'
 import { createProjectUploadPipeline } from './project/project-upload.adapter.js';
 import type { ProjectUploadProcessing } from './project/project-upload.adapter.js';
 import type { ProjectApplicationRepository } from './project/ports.js';
-import type { MultipartRequestHasher } from '../../application/upload-ports.js';
+import type {
+	ActiveUploadTempRegistry,
+	MultipartRequestHasher,
+} from '../../application/upload-ports.js';
 import { createMultipartCollector } from '../assets/upload/multipart-collector.js';
 import { createMeProjectController } from '../me/project/controller.js';
 import { createMeRoutes } from '../me/me.routes.js';
@@ -73,6 +76,7 @@ export interface ProjectMultipartProductionDependencies {
 	access: ReturnType<typeof createProjectAccessService>;
 	repository: ProjectApplicationRepository;
 	uploadLifecycle: UploadLifecycleRuntime;
+	activeUploadTemps?: ActiveUploadTempRegistry;
 }
 
 async function uploadLimits(
@@ -104,6 +108,7 @@ export function createProjectMultipartProductionGraph(
 		bucketForKind: (kind) => bucketForKind(kind, deps.config),
 		deleteUnpersistedObject: deps.uploadLifecycle.orphanDeletions.deleteOrQueue,
 		uploadIntents: deps.uploadLifecycle.uploadIntents,
+		...(deps.activeUploadTemps ? { activeUploadTemps: deps.activeUploadTemps } : {}),
 	});
 	const limits = (role: UserRole) => uploadLimits(deps.config, deps.settings, role);
 	const submitService = createSubmitProjectService({

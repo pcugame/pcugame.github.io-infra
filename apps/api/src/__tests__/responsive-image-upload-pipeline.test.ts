@@ -8,6 +8,7 @@ import type {
 import { createProjectUploadPipeline } from '../modules/admin/project/project-upload.adapter.js';
 import { ImageOutputCleanupError } from '../modules/assets/upload/image-processing.js';
 import { deriveImageRenditionStorageKey } from '../shared/responsive-image.js';
+import { createActiveUploadTempRegistry } from '../modules/upload-intent/temp-scavenger.js';
 
 const logger: AppLogger = {
 	child: () => logger,
@@ -19,7 +20,11 @@ const logger: AppLogger = {
 	fatal: vi.fn(),
 };
 
-function harness(options: { failUploadNumber?: number; processingError?: Error } = {}) {
+function harness(options: {
+	failUploadNumber?: number;
+	processingError?: Error;
+	cleanupFailure?: boolean;
+} = {}) {
 	const files = new Map<string, Buffer>([
 		['/tmp/source', Buffer.from('source')],
 		['/tmp/source.webp', Buffer.alloc(100)],
@@ -32,6 +37,13 @@ function harness(options: { failUploadNumber?: number; processingError?: Error }
 	let id = 0;
 	let uploadNumber = 0;
 	let intentNumber = 0;
+	let cleanupFailure = options.cleanupFailure ?? false;
+	const registry = createActiveUploadTempRegistry();
+	const activeUploadTemps = {
+		register: vi.fn((temporaryPath: string) => registry.register(temporaryPath)),
+		release: vi.fn((temporaryPath: string) => registry.release(temporaryPath)),
+		isActive: (temporaryPath: string) => registry.isActive(temporaryPath),
+	};
 
 	const fileSystem = {
 		temporaryDirectory: () => '/tmp',
@@ -41,6 +53,9 @@ function harness(options: { failUploadNumber?: number; processingError?: Error }
 		rename: async () => {},
 		remove: async (path: string) => {
 			removed.push(path);
+			if (cleanupFailure) {
+				throw Object.assign(new Error('cleanup failed'), { code: 'EIO' });
+			}
 			files.delete(path);
 		},
 		readRange: async () => Buffer.alloc(0),
@@ -137,6 +152,7 @@ function harness(options: { failUploadNumber?: number; processingError?: Error }
 			deleted.push(key);
 		},
 		uploadIntents,
+		activeUploadTemps,
 	});
 	pipeline.trackTempFile('/tmp/source');
 	return {
@@ -147,6 +163,8 @@ function harness(options: { failUploadNumber?: number; processingError?: Error }
 		events,
 		deleted,
 		removed,
+		activeUploadTemps,
+		allowCleanup: () => { cleanupFailure = false; },
 	};
 }
 
@@ -200,6 +218,15 @@ describe('responsive image upload bundle lifecycle', () => {
 			'/tmp/source.card-480.webp',
 			'/tmp/source.display-960.webp',
 		]));
+		expect(test.activeUploadTemps.register.mock.calls.map(([temporaryPath]) => temporaryPath))
+			.toEqual([
+				'/tmp/source',
+				'/tmp/source.webp',
+				'/tmp/source.card-480.webp',
+				'/tmp/source.display-960.webp',
+			]);
+		expect(test.activeUploadTemps.release.mock.calls.map(([temporaryPath]) => temporaryPath))
+			.toEqual(test.activeUploadTemps.register.mock.calls.map(([temporaryPath]) => temporaryPath));
 	});
 
 	it('hands rare processor cleanup residue back to request-owned temp cleanup', async () => {
@@ -215,6 +242,27 @@ describe('responsive image upload bundle lifecycle', () => {
 		expect(new Set(test.removed)).toEqual(new Set([
 			'/tmp/source',
 			'/tmp/source.card-480.webp',
+		]));
+	});
+
+	it('releases every active path when terminal cleanup exhausts retries', async () => {
+		const test = harness({ cleanupFailure: true });
+		await test.pipeline.processFile('/tmp/source', 'IMAGE', 'source.png');
+		expect(test.activeUploadTemps.isActive('/tmp/source.display-960.webp')).toBe(true);
+
+		await expect(test.pipeline.cleanupTemp()).rejects.toThrow('temp-file cleanup failed');
+		expect(test.activeUploadTemps.isActive('/tmp/source')).toBe(false);
+		expect(test.activeUploadTemps.isActive('/tmp/source.display-960.webp')).toBe(false);
+		const attemptsAfterFailure = test.removed.length;
+
+		test.allowCleanup();
+		await expect(test.pipeline.cleanupTemp()).resolves.toBeUndefined();
+		expect(test.removed).toHaveLength(attemptsAfterFailure + 4);
+		expect(new Set(test.removed)).toEqual(new Set([
+			'/tmp/source',
+			'/tmp/source.webp',
+			'/tmp/source.card-480.webp',
+			'/tmp/source.display-960.webp',
 		]));
 	});
 

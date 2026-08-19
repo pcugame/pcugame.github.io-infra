@@ -81,7 +81,11 @@ import {
 import type { ProjectUploadProcessing } from './modules/admin/project/project-upload.adapter.js';
 import { createNodeProjectUploadProcessing } from './infrastructure/project-upload-processing.js';
 import { createMultipartRequestHasher } from './infrastructure/multipart-request-hasher.js';
-import { createUploadTempScavenger } from './modules/upload-intent/temp-scavenger.js';
+import {
+	createActiveUploadTempRegistry,
+	createUploadTempFileSystem,
+	createUploadTempScavenger,
+} from './modules/upload-intent/temp-scavenger.js';
 import {
 	createUploadLifecycleMetrics,
 	type UploadLifecycleMetrics,
@@ -470,6 +474,30 @@ export function createMaintenanceSchedule(
 	};
 }
 
+/** Coalesce the complete game-recovery + temp-sweep sequence, not just either half. */
+export function createSingleFlightUploadRecovery(
+	recoverGame: (signal?: AbortSignal) => Promise<void>,
+	sweepTemps: (signal?: AbortSignal) => Promise<unknown>,
+): (signal?: AbortSignal) => Promise<void> {
+	let inFlight: Promise<void> | undefined;
+	return (signal?: AbortSignal) => {
+		// Maintenance callers normally share one context signal. Reject a
+		// pre-aborted invocation before it can become the shared operation.
+		if (signal?.aborted) return Promise.resolve();
+		if (inFlight) return inFlight;
+		const operation = (async () => {
+			try {
+				await recoverGame(signal);
+				if (!signal?.aborted) await sweepTemps(signal);
+			} finally {
+				inFlight = undefined;
+			}
+		})();
+		inFlight = operation;
+		return operation;
+	};
+}
+
 /**
  * Build one production resource graph from explicit config. No DB/S3 operation,
  * timer, maintenance task, or signal listener starts until context.start().
@@ -505,8 +533,22 @@ export async function createProductionBackendContext(
 		const ids = await resource('ids', () => factories.ids(config));
 		const scheduler = await resource('scheduler', () => factories.scheduler(config));
 		const fileSystem = await resource('fileSystem', () => factories.fileSystem(config));
+		const uploadFileSystem = createUploadTempFileSystem(fileSystem);
+		const activeUploadTemps = createActiveUploadTempRegistry();
+		owner.register('uploadTempDirectory', owned(
+			uploadFileSystem,
+			undefined,
+			() => {
+				if (!uploadFileSystem.ensurePrivateDirectory) {
+					throw new Error(
+						'Production FileSystem must support secure upload temp directory verification',
+					);
+				}
+				return uploadFileSystem.ensurePrivateDirectory(uploadFileSystem.temporaryDirectory());
+			},
+		));
 		const projectUploads = await factories.projectUploadProcessing(
-			fileSystem,
+			uploadFileSystem,
 			logger,
 			config,
 		);
@@ -629,13 +671,14 @@ export async function createProductionBackendContext(
 			config,
 			repository: persistence.exhibitionRepository,
 			storage,
-			fileSystem,
+			fileSystem: uploadFileSystem,
 			settings,
 			uploadLimiter,
 			logger,
 			clock,
 			ids,
 			uploadLifecycle,
+			activeUploadTemps,
 		});
 		let assetsBanned: AssetsBannedProductionGraph | undefined;
 		if (!options.routes) {
@@ -675,15 +718,16 @@ export async function createProductionBackendContext(
 		const projectMultipart = createProjectMultipartProductionGraph({
 			config,
 			storage,
-			fileSystem,
+			fileSystem: uploadFileSystem,
 			settings,
 			uploadLimiter,
 			logger,
 			clock,
 			ids,
 			processing: projectUploads,
-			requestHasher: createMultipartRequestHasher(fileSystem),
+			requestHasher: createMultipartRequestHasher(uploadFileSystem),
 			uploadLifecycle,
+			activeUploadTemps,
 			access: projectMemberSettings.projectAccess,
 			repository: projectMemberSettings.projectRepository,
 		});
@@ -701,7 +745,9 @@ export async function createProductionBackendContext(
 			uploadLifecycle,
 		});
 		const uploadTempScavenger = createUploadTempScavenger({
-			fileSystem,
+			fileSystem: uploadFileSystem,
+			legacyRootDirectory: fileSystem.temporaryDirectory(),
+			active: activeUploadTemps,
 			clock,
 			logger,
 		});
@@ -710,12 +756,24 @@ export async function createProductionBackendContext(
 			() => gameUpload.close(),
 			() => gameUpload.recoverStaleUploads(),
 		));
-		const authSessions = auth.repository;
-		const maintenance: BackgroundMaintenance = {
-			async recoverStaleUploads(signal) {
-				await gameUpload.recoverStaleUploads(signal);
-				if (!signal?.aborted) await uploadTempScavenger.sweep(signal);
+		owner.register('uploadTempRecovery', owned(
+			uploadTempScavenger,
+			undefined,
+			async () => {
+				try {
+					await uploadTempScavenger.recoverOnStartup();
+				} catch (error) {
+					logger.error(error, 'Upload temp startup recovery crashed');
+				}
 			},
+		));
+		const authSessions = auth.repository;
+		const recoverUploads = createSingleFlightUploadRecovery(
+			(signal) => gameUpload.recoverStaleUploads(signal),
+			(signal) => uploadTempScavenger.sweep(signal),
+		);
+		const maintenance: BackgroundMaintenance = {
+			recoverStaleUploads: recoverUploads,
 			async purgeExpiredSessions(before, signal) {
 				if (signal?.aborted) return 0;
 				return persistence.authRepository.purgeExpired(before);

@@ -58,6 +58,13 @@ export interface UploadPipelinePort {
 	cleanupTemp(): Promise<void>;
 }
 
+/** Context-local guard for upload temp files that must not be scavenged yet. */
+export interface ActiveUploadTempRegistry {
+	register(temporaryPath: string): void;
+	release(temporaryPath: string): void;
+	isActive(temporaryPath: string): boolean;
+}
+
 export interface MultipartCollectorPort {
 	collect(
 		parts: AsyncIterable<MultipartPart>,

@@ -6,7 +6,10 @@ import type {
 	IdGenerator,
 	ObjectStorage,
 } from '../../../application/ports.js';
-import type { PosterUploadCoordinator } from '../../../application/upload-ports.js';
+import type {
+	ActiveUploadTempRegistry,
+	PosterUploadCoordinator,
+} from '../../../application/upload-ports.js';
 import { badRequest, payloadTooLarge } from '../../../shared/errors.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import { processImage } from '../../assets/upload/image-processing.js';
@@ -39,6 +42,7 @@ export interface ExhibitionPosterUploadDependencies {
 		isUncommitted(id: string): Promise<boolean>;
 		recordAmbiguousError(id: string, error: unknown): Promise<void>;
 	};
+	activeUploadTemps?: ActiveUploadTempRegistry;
 }
 
 async function readHeader(
@@ -112,6 +116,7 @@ export function createExhibitionPosterUploadCoordinator(
 					}
 				},
 				...(deps.uploadIntents ? { uploadIntents: deps.uploadIntents } : {}),
+				...(deps.activeUploadTemps ? { activeUploadTemps: deps.activeUploadTemps } : {}),
 			});
 			uploadPipeline.setOwner?.(owner);
 
