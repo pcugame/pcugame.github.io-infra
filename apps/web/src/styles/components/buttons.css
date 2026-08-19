@@ -83,3 +83,27 @@
   font-size: 1rem;
 }
 
+@media (max-width: 640px) {
+  .btn {
+    min-height: 40px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+  }
+
+  .btn--small {
+    min-height: 34px;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+  }
+
+  .btn--large {
+    width: 100%;
+    min-height: 48px;
+    font-size: 0.95rem;
+    border-radius: 12px;
+  }
+
+  .btn--primary {
+    box-shadow: none;
+  }
+}

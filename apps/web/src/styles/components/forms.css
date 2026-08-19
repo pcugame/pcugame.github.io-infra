@@ -1,4 +1,23 @@
-/* ── Forms ─────────────────────────────────────────────────────── */
+/* ── Shared forms ────────────────────────────────────────────── */
+
+[data-theme='dark'] input,
+[data-theme='dark'] textarea,
+[data-theme='dark'] select {
+  background: #131315;
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+[data-theme='dark'] input:focus,
+[data-theme='dark'] textarea:focus,
+[data-theme='dark'] select:focus {
+  box-shadow: 0 0 0 3px rgba(124, 172, 248, 0.15);
+}
+
+[data-theme='dark'] input::placeholder,
+[data-theme='dark'] textarea::placeholder {
+  color: #606068;
+}
 
 form.project-form {
   margin-bottom: 2.5rem;
@@ -39,113 +58,6 @@ fieldset.status-section legend {
   color: var(--color-text-muted);
   margin-top: 0.35rem;
   line-height: 1.5;
-}
-
-/* ── Admin Import Page ───────────────────────────────────────── */
-
-.admin-import-page__desc {
-  margin-bottom: 1.5rem;
-  opacity: 0.7;
-  font-size: 0.9em;
-}
-
-.admin-import-dropzone {
-  padding: 2rem;
-  text-align: center;
-  cursor: pointer;
-  margin-bottom: 1.5rem;
-  border-style: dashed !important;
-  transition: opacity 0.15s ease, border-color 0.15s ease;
-}
-
-.admin-import-dropzone:hover {
-  border-color: var(--color-primary, #6366f1);
-}
-
-.admin-import-dropzone--loading {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-.admin-import-dropzone__title {
-  margin-bottom: 0.5rem;
-  font-weight: 600;
-}
-
-.admin-import-dropzone__hint {
-  font-size: 0.85em;
-  opacity: 0.6;
-}
-
-.admin-import-section-title {
-  font-weight: 800;
-  font-size: 1rem;
-  margin-bottom: 1rem;
-  letter-spacing: -0.01em;
-}
-
-.admin-import-section-subtitle {
-  font-weight: 600;
-  font-size: 0.9rem;
-  margin-bottom: 0.5rem;
-}
-
-.admin-import-badge {
-  display: inline-block;
-  font-size: 0.82rem;
-  font-weight: 600;
-  padding: 0.15rem 0.6rem;
-  border-radius: 999px;
-}
-
-.admin-import-badge--new {
-  color: var(--color-success, #4caf50);
-  background: color-mix(in srgb, var(--color-success, #4caf50) 12%, transparent);
-}
-
-.admin-import-badge--existing {
-  color: var(--color-warning, #ff9800);
-  background: color-mix(in srgb, var(--color-warning, #ff9800) 12%, transparent);
-}
-
-.admin-import-result {
-  padding: 1.75rem;
-  margin-bottom: 1.5rem;
-  border-left: 4px solid var(--color-success, #4caf50);
-}
-
-.admin-import-result__title {
-  font-weight: 700;
-  margin-bottom: 0.75rem;
-  color: var(--color-success, #4caf50);
-}
-
-.admin-import-result__list {
-  margin: 0;
-  padding-left: 1.5rem;
-}
-
-.admin-import-result__list li {
-  margin-bottom: 0.25rem;
-}
-
-.admin-import-help {
-  margin-top: 2rem;
-}
-
-.admin-import-help summary {
-  cursor: pointer;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-
-.admin-import-help__code {
-  padding: 1rem;
-  border-radius: 12px;
-  overflow: auto;
-  font-size: 0.85em;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
 }
 
 .form-field {
@@ -203,7 +115,20 @@ fieldset.status-section legend {
   margin-top: 0.25rem;
 }
 
-/* ── Custom exhibition <select> replacement ────────────────────── */
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+/* ── Exhibition select ───────────────────────────────────────── */
 
 .exhibition-select {
   position: relative;
@@ -393,10 +318,9 @@ fieldset.status-section legend {
   background: color-mix(in srgb, var(--color-primary) 20%, transparent);
 }
 
-/* ── Styled file input ─────────────────────────────────────────── */
+/* ── File input ──────────────────────────────────────────────── */
 
-.form-field input[type='file'],
-.game-upload__file-input input[type='file'] {
+.form-field input[type='file'] {
   width: 100%;
   padding: 0.5rem;
   font-size: 0.85rem;
@@ -409,21 +333,18 @@ fieldset.status-section legend {
   transition: border-color 0.2s, background 0.2s;
 }
 
-.form-field input[type='file']:hover,
-.game-upload__file-input input[type='file']:hover {
+.form-field input[type='file']:hover {
   border-color: var(--color-primary);
   background: color-mix(in srgb, var(--color-primary) 4%, var(--color-bg));
 }
 
-.form-field input[type='file']:focus,
-.game-upload__file-input input[type='file']:focus {
+.form-field input[type='file']:focus {
   outline: none;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-.form-field input[type='file']::file-selector-button,
-.game-upload__file-input input[type='file']::file-selector-button {
+.form-field input[type='file']::file-selector-button {
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 600;
@@ -438,217 +359,92 @@ fieldset.status-section legend {
   box-shadow: 0 1px 4px rgba(26, 81, 175, 0.15);
 }
 
-.form-field input[type='file']::file-selector-button:hover,
-.game-upload__file-input input[type='file']::file-selector-button:hover {
+.form-field input[type='file']::file-selector-button:hover {
   background: var(--color-primary);
   box-shadow: 0 2px 8px rgba(26, 81, 175, 0.25);
   transform: translateY(-1px);
 }
 
-.form-field input[type='file']::file-selector-button:active,
-.game-upload__file-input input[type='file']::file-selector-button:active {
+.form-field input[type='file']::file-selector-button:active {
   transform: translateY(0);
   box-shadow: 0 1px 2px rgba(26, 81, 175, 0.15);
 }
 
-[data-theme='dark'] .form-field input[type='file'],
-[data-theme='dark'] .game-upload__file-input input[type='file'] {
+[data-theme='dark'] .form-field input[type='file'] {
   background: #131315;
   border-color: var(--color-border);
   color: var(--color-text-muted);
 }
 
-[data-theme='dark'] .form-field input[type='file']:hover,
-[data-theme='dark'] .game-upload__file-input input[type='file']:hover {
+[data-theme='dark'] .form-field input[type='file']:hover {
   background: color-mix(in srgb, var(--color-primary) 6%, #131315);
   border-color: var(--color-primary);
 }
 
-[data-theme='dark'] .form-field input[type='file']:focus,
-[data-theme='dark'] .game-upload__file-input input[type='file']:focus {
+[data-theme='dark'] .form-field input[type='file']:focus {
   box-shadow: 0 0 0 3px rgba(124, 172, 248, 0.15);
 }
 
-[data-theme='dark'] .form-field input[type='file']::file-selector-button,
-[data-theme='dark'] .game-upload__file-input input[type='file']::file-selector-button {
+[data-theme='dark'] .form-field input[type='file']::file-selector-button {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
-.form-actions {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 1rem;
-}
+@media (max-width: 768px) {
+  .form-row {
+    flex-direction: column;
+  }
 
-.form-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 1rem;
-}
+  .project-form fieldset,
+  .year-create-form fieldset,
+  fieldset.status-section {
+    padding: 1rem;
+  }
 
-
-/* ── Member Row (New Page) ────────────────────────────────────── */
-
-.member-row {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-end;
-  padding: 0.75rem;
-  background: var(--color-bg);
-  border-radius: 6px;
-  margin-bottom: 0.5rem;
-}
-
-.member-row .form-field {
-  flex: 1;
-  margin-bottom: 0;
-}
-
-/* ── Member List (Edit Page) ──────────────────────────────────── */
-
-.member-list {
-  list-style: none;
-  margin-bottom: 1rem;
-}
-
-.member-list__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.member-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-}
-
-.asset-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-}
-
-.member-add-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.member-add-row input {
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.85rem;
-}
-
-/* ── Asset List ───────────────────────────────────────────────── */
-
-.asset-list {
-  list-style: none;
-  margin-bottom: 1.5rem;
-}
-
-.asset-list__item {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.6rem 0;
-  border-bottom: 1px solid var(--color-border);
-  font-size: 0.85rem;
-}
-
-.asset-thumb {
-  width: 60px;
-  height: 40px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-
-.asset-upload-section {
-  margin-top: 1.5rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.asset-upload-section h4 {
-  margin-bottom: 0.75rem;
-}
-
-/* ── Poster Preview ───────────────────────────────────────────── */
-
-.poster-preview {
-  margin-top: 0.5rem;
-}
-
-.poster-preview img {
-  max-width: 200px;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-}
-
-.file-info {
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-  margin-top: 0.25rem;
-}
-
-.file-selected-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.25rem;
-}
-
-.file-selected-row .file-info {
-  margin-top: 0;
-}
-
-/* ── Edit Page ────────────────────────────────────────────────── */
-
-.edit-meta {
-  color: var(--color-text-muted);
-  font-size: 0.85rem;
-  margin-bottom: 1.5rem;
-}
-
-.edit-meta code {
-  background: var(--color-bg);
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
+  .form-actions {
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 640px) {
-/* ── 폼: 모바일 풀 너비 ────────────────────────────────── */
-  .form-field input[type='text'],
-  .form-field input[type='number'],
-  .form-field input[type='url'],
-  .form-field textarea,
-  .form-field select {
-    font-size: 16px; /* iOS 줌 방지 */
-    padding: 0.7rem 0.85rem;
-    border-radius: 10px;
+  .project-form fieldset,
+  .year-create-form fieldset,
+  fieldset.status-section {
+    padding: 1rem;
+    border-radius: 12px;
+    margin-bottom: 0.75rem;
+    border-width: 0.5px;
+  }
+
+  .project-form legend,
+  .year-create-form h3,
+  fieldset.status-section legend {
+    font-size: 1.1rem;
+  }
+
+  .form-field {
+    margin-bottom: 0.85rem;
   }
 
   .form-field label {
     font-size: 0.72rem;
   }
 
-  .form-field input[type='file'],
-  .game-upload__file-input input[type='file'] {
+  .form-field input[type='text'],
+  .form-field input[type='number'],
+  .form-field input[type='url'],
+  .form-field textarea,
+  .form-field select {
+    font-size: 16px;
+    padding: 0.6rem 0.75rem;
+    border-radius: 10px;
+  }
+
+  .form-field input[type='file'] {
     font-size: 0.8rem;
     padding: 0.55rem;
   }
 
-  .form-field input[type='file']::file-selector-button,
-  .game-upload__file-input input[type='file']::file-selector-button {
+  .form-field input[type='file']::file-selector-button {
     font-size: 0.75rem;
     padding: 0.45rem 0.75rem;
     margin-right: 0.5rem;
@@ -665,5 +461,6 @@ fieldset.status-section legend {
   .form-actions .btn {
     flex: 1;
     min-width: 0;
+    justify-content: center;
   }
 }

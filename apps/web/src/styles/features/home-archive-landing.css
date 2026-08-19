@@ -1,4 +1,110 @@
-/* ── 홈 아카이브 레이아웃 ─────────────────────────────────── */
+/* ── Home archive theme ─────────────────────────────────────── */
+
+.home-landing {
+  --h-bg: #e7ecff;
+  --h-surface: #f5f5f9;
+  --h-primary: #1a51af;
+  --h-primary-btn: #2461d4;
+  --h-text: #0f172a;
+  --h-text-muted: #64748b;
+  --h-border: #dce6f5;
+  --h-radius: 12px;
+  --h-shadow-md: 0 4px 24px rgba(26, 81, 175, 0.12);
+
+  background: var(--h-bg);
+  color: var(--h-text);
+}
+
+[data-theme='dark'] .home-landing {
+  --h-bg: #161618;
+  --h-surface: #1e1e21;
+  --h-primary: #7cacf8;
+  --h-primary-btn: #5a94f0;
+  --h-text: #e4e4e7;
+  --h-text-muted: #8b8b92;
+  --h-border: #2e2e33;
+  --h-shadow-md: 0 4px 24px rgba(0, 0, 0, 0.45);
+}
+
+.home-landing :focus-visible {
+  outline: 2px solid var(--h-primary);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* ── Current home heading ────────────────────────────────────── */
+
+.home-hero__eyebrow {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--h-text-muted);
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.home-hero__eyebrow::before {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 2px;
+  background: var(--h-primary);
+  flex-shrink: 0;
+}
+
+.home-hero__title {
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--h-text);
+  margin-bottom: 1.25rem;
+}
+
+.home-hero__accent {
+  color: var(--h-primary-btn);
+}
+
+.home-hero__desc {
+  font-size: 1rem;
+  color: var(--h-text-muted);
+  line-height: 1.75;
+  margin-bottom: 2rem;
+  max-width: 420px;
+}
+
+@keyframes home-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .home-hero__eyebrow {
+    animation: home-fade-up 0.55s ease both;
+    animation-delay: 0.05s;
+  }
+
+  .home-hero__title {
+    animation: home-fade-up 0.55s ease both;
+    animation-delay: 0.15s;
+  }
+
+  .home-hero__desc {
+    animation: home-fade-up 0.55s ease both;
+    animation-delay: 0.25s;
+  }
+}
+
+/* ── Home archive layout ─────────────────────────────────────── */
 
 .home-archive-header {
   padding-top: 2rem;
@@ -166,6 +272,10 @@
 }
 
 @media (max-width: 640px) {
+  .home-hero__eyebrow {
+    display: none;
+  }
+
   .home-archive-header {
     padding-top: 1.25rem;
   }

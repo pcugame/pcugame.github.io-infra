@@ -1,0 +1,175 @@
+/* ── Shared admin collections ────────────────────────────────── */
+
+.admin-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+form.admin-card {
+  padding: 1.75rem;
+  margin-bottom: 1.5rem;
+}
+
+form.admin-card h3 {
+  font-weight: 800;
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  letter-spacing: -0.01em;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 0.45rem 1rem;
+  text-align: left;
+  font-size: 0.88rem;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.admin-table .admin-table__title-cell {
+  white-space: normal;
+  word-break: break-word;
+  width: 100%;
+}
+
+.admin-table .admin-table__title-cell strong {
+  display: block;
+  overflow: hidden;
+}
+
+.admin-table th {
+  background: transparent;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-top: 0.85rem;
+  padding-bottom: 0.85rem;
+}
+
+.admin-table tbody tr {
+  transition: background 0.1s ease;
+}
+
+.admin-table tbody tr:hover {
+  background: var(--color-bg);
+}
+
+.admin-table tbody td {
+  height: 3.25rem;
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table td {
+  vertical-align: middle;
+}
+
+.admin-table td strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.admin-table .text-muted {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+.admin-table__sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.admin-table__sortable:hover {
+  color: var(--color-primary);
+}
+
+.admin-table__row--selected {
+  background: rgba(26, 81, 175, 0.06);
+}
+
+.admin-mobile-cards {
+  display: none;
+}
+
+[data-theme='dark'] .admin-card {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme='dark'] .admin-table tbody tr:hover {
+  background: #252528;
+}
+
+@media (max-width: 1100px) {
+  .admin-table .admin-table__col--creator {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-card {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-table {
+    min-width: 580px;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: 0.6rem 0.65rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  form.admin-card {
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-desktop-only {
+    display: none;
+  }
+
+  .admin-mobile-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .admin-card {
+    border-radius: 12px;
+    border-width: 0.5px;
+  }
+
+  form.admin-card {
+    padding: 1rem;
+    border-radius: 12px;
+  }
+
+  form.admin-card h3 {
+    font-size: 0.92rem;
+  }
+
+  .admin-table th,
+  .admin-table td {
+    padding: 0.55rem 0.6rem;
+    font-size: 0.78rem;
+  }
+}

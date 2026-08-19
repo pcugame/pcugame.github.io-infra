@@ -93,3 +93,31 @@
   white-space: normal;
 }
 
+@media (max-width: 640px) {
+  .login-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    flex: 1;
+    padding: 1.5rem;
+  }
+
+  .login-card {
+    border: none;
+    box-shadow: none;
+    background: transparent;
+    padding: 0;
+    max-width: 320px;
+  }
+
+  .login-card h1 {
+    font-size: 1.5rem;
+    font-weight: 800;
+  }
+
+  .login-card p {
+    font-size: 0.88rem;
+  }
+}

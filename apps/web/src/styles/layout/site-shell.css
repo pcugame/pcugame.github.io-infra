@@ -20,6 +20,20 @@
   padding-bottom: 3rem;
 }
 
+.main--home {
+  padding-top: 0;
+  padding-bottom: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.main--home > .home-landing {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ── Header ───────────────────────────────────────────────────── */
 
 .site-topnav {
@@ -32,40 +46,6 @@
   width: 100%;
 }
 
-/* ── Site Theme Toggle ───────────────────────────────────────── */
-
-.site-theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 1.5px solid var(--color-border);
-  border-radius: 50%;
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
-  flex-shrink: 0;
-  padding: 0;
-}
-
-.site-theme-toggle:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-
-[data-theme='dark'] .site-theme-toggle {
-  border-color: #3a3a40;
-  color: #9a9aa0;
-}
-
-[data-theme='dark'] .site-theme-toggle:hover {
-  border-color: #7cacf8;
-  color: #7cacf8;
-  background: rgba(124, 172, 248, 0.08);
-}
-
 /* ── Mobile Top Bar (모바일 전용 로고 바) ────────────────────── */
 
 .mobile-topbar {
@@ -73,6 +53,10 @@
 }
 
 @media (max-width: 640px) {
+  .container {
+    padding: 0 1rem;
+  }
+
   /* 모바일: 데스크톱 상단 바 제거 → 하단 바로 대체 */
   .site-topnav {
     display: none;
@@ -132,13 +116,7 @@
   }
 
   .main--home {
-    padding: 0 1rem 1rem;
-  }
-
-  /* 모든 페이지 배경 통일 */
-  .archive-page,
-  .years-landing {
-    background: transparent;
+    padding: 0 1rem 0;
   }
 
   /* 어드민: main 패딩 제거 → admin-content가 자체 패딩 사용 */
@@ -198,11 +176,17 @@
     background: none;
     border: none;
     cursor: pointer;
-    transition: color 0.15s;
+    transition: color 0.15s, opacity 0.1s, transform 0.1s;
     min-width: 0;
     flex: 1;
     font-family: inherit;
     line-height: 1.2;
+    border-radius: 8px;
+  }
+
+  .mobile-bottom-nav__item:active {
+    opacity: 0.6;
+    transform: scale(0.92);
   }
 
   .mobile-bottom-nav__item:hover {
@@ -229,17 +213,4 @@
     padding-bottom: 60px;
   }
 
-  /* 홈 히어로: 스크롤 없음, main 여백 없음 */
-  .layout:has(.home-hero--full) {
-    padding-bottom: 0;
-    overflow: hidden;
-    height: 100svh;
-  }
-
-  .layout:has(.home-hero--full) > .main {
-    padding: 0;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-  }
 }

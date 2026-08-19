@@ -1,0 +1,338 @@
+/* ── Admin project filters and bulk actions ──────────────────── */
+
+.admin-filter-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 1.5rem;
+  padding: 0.3rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  width: fit-content;
+}
+
+.admin-filter-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.admin-filter-tab:hover {
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+.admin-filter-tab--active {
+  background: var(--color-primary-btn, var(--color-primary));
+  color: #fff;
+  box-shadow: 0 1px 4px rgba(26, 81, 175, 0.25);
+}
+
+.admin-filter-tab--active:hover {
+  background: var(--color-primary-hover);
+  color: #fff;
+}
+
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin-search {
+  flex: 1;
+  min-width: 180px;
+  max-width: 360px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.admin-search:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.admin-filter-input {
+  width: 7.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.admin-filter-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.admin-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.admin-bulk-actions__count {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-right: 0.25rem;
+}
+
+.admin-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.admin-pagination__summary,
+.admin-pagination__page {
+  font-size: 0.86rem;
+  color: var(--color-text-muted);
+}
+
+.admin-pagination__controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-pagination__page {
+  min-width: 4rem;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* ── Selectable mobile project cards ────────────────────────── */
+
+.admin-pcard {
+  position: relative;
+}
+
+.admin-pcard__selected-mark {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 1;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-pcard__link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--color-text);
+}
+
+.admin-pcard--selected {
+  box-shadow: 0 0 0 2px var(--color-primary);
+  background: rgba(26, 81, 175, 0.07);
+}
+
+.admin-mobile-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  margin-bottom: 0.5rem;
+}
+
+.admin-mobile-select-bar__all,
+.admin-mobile-select-bar__cancel {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.3rem 0.65rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  background: var(--color-bg);
+  color: var(--color-text);
+  transition: background 0.15s;
+}
+
+.admin-mobile-select-bar__cancel {
+  margin-left: auto;
+  color: var(--color-text-muted);
+}
+
+.admin-mobile-select-bar__count {
+  font-size: 0.82rem;
+  color: var(--color-text-muted);
+}
+
+.admin-mobile-cards--selecting .admin-pcard {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.admin-year-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--color-primary);
+  background: rgba(26, 81, 175, 0.08);
+  padding: 0.15rem 0.55rem;
+  border-radius: 6px;
+  letter-spacing: -0.01em;
+}
+
+[data-theme='dark'] .admin-filter-tabs {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+[data-theme='dark'] .admin-filter-tab:hover {
+  background: #252528;
+}
+
+[data-theme='dark'] .admin-year-badge {
+  background: rgba(124, 172, 248, 0.1);
+  color: #7cacf8;
+}
+
+@media (max-width: 768px) {
+  .admin-filter-tabs {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-filter-tab {
+    padding: 0.4rem 0.7rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-filter-tabs {
+    width: 100%;
+    border-radius: 10px;
+    padding: 3px;
+    gap: 2px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .admin-filter-tab {
+    flex: 1;
+    justify-content: center;
+    border-radius: 8px;
+    padding: 0.5rem 0.35rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .admin-filter-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .admin-filter-tabs {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .admin-pcard {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem;
+    background: var(--color-surface);
+    border: 0.5px solid var(--color-border);
+    border-radius: 12px;
+    text-decoration: none;
+    color: var(--color-text);
+    transition: transform 0.1s, background 0.12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .admin-pcard:hover {
+    text-decoration: none;
+  }
+
+  .admin-pcard:active {
+    transform: scale(0.98);
+    background: var(--color-bg);
+  }
+
+  .admin-pcard__top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.6rem;
+  }
+
+  .admin-pcard__title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    line-height: 1.35;
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .admin-pcard__meta {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.72rem;
+    color: var(--color-text-muted);
+    flex-wrap: wrap;
+  }
+
+  .admin-pcard__dot {
+    opacity: 0.35;
+    font-size: 0.6rem;
+  }
+
+  .admin-pcard .admin-year-badge {
+    font-size: 0.72rem;
+    padding: 0.1rem 0.4rem;
+  }
+
+  .admin-pcard .badge {
+    font-size: 0.65rem;
+    padding: 0.12rem 0.45rem;
+    flex-shrink: 0;
+  }
+
+  .admin-year-badge {
+    font-size: 0.78rem;
+  }
+}
