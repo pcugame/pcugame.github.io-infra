@@ -1,0 +1,149 @@
+/* ── Admin exhibition poster ─────────────────────────────────── */
+
+.admin-exhibition-poster {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 12rem;
+}
+
+.admin-exhibition-poster--compact {
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-exhibition-poster__preview {
+  width: 2.75rem;
+  aspect-ratio: 210 / 297;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.admin-exhibition-poster__preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.admin-exhibition-poster__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.admin-exhibition-poster__name {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.admin-exhibition-poster__size {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+}
+
+.admin-exhibition-poster__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .admin-ycard {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.85rem 1rem;
+    background: var(--color-surface);
+    border: 0.5px solid var(--color-border);
+    border-radius: 12px;
+    transition: border-color 0.15s;
+  }
+
+  .admin-ycard--editing {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(26, 81, 175, 0.08);
+  }
+
+  .admin-ycard__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .admin-ycard__year {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: var(--color-text);
+    letter-spacing: -0.02em;
+  }
+
+  .admin-ycard__details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.85rem;
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+  }
+
+  .admin-ycard .admin-exhibition-poster__preview {
+    width: 2.5rem;
+  }
+
+  .admin-ycard .admin-exhibition-poster__name {
+    max-width: 12rem;
+  }
+
+  .admin-ycard__label {
+    font-weight: 600;
+    color: var(--color-text-muted);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 0.2rem;
+  }
+
+  .admin-ycard__form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .admin-ycard__form .form-field input[type='text'],
+  .admin-ycard__form .form-field input[type='number'] {
+    font-size: 16px;
+    padding: 0.55rem 0.65rem;
+    border-radius: 8px;
+  }
+
+  .admin-ycard__row {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+  }
+
+  .admin-ycard__actions {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .admin-ycard__actions .btn {
+    flex: 1;
+    justify-content: center;
+  }
+}

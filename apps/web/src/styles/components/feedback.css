@@ -48,3 +48,181 @@
   font-weight: 500;
   margin: 0.5rem 0;
 }
+
+/* ── Status badges ───────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.badge--published {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.badge--archived {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.incomplete-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.15em 0.5em;
+  font-size: 0.7em;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.incomplete-notice {
+  margin: 0.5rem 0 1rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius);
+}
+
+.incomplete-notice--missing {
+  color: #991b1b;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+[data-theme='dark'] .badge--published {
+  background: rgba(52, 211, 153, 0.12);
+  color: #34d399;
+}
+
+[data-theme='dark'] .badge--archived {
+  background: rgba(156, 163, 175, 0.12);
+  color: #9ca3af;
+}
+
+[data-theme='dark'] .error-box {
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+/* ── Mock role switcher ──────────────────────────────────────── */
+
+.mock-switcher {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  font-size: 0.72rem;
+}
+
+.mock-switcher__label {
+  font-weight: 700;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.mock-switcher__btns {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.mock-switcher__btn {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: all 0.15s;
+}
+
+.mock-switcher__btn:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.mock-switcher__btn--active {
+  border-color: transparent;
+}
+
+@media (max-width: 640px) {
+  .page-center {
+    min-height: calc(100vh - 120px);
+    min-height: calc(100svh - 120px);
+    justify-content: center;
+    padding: 2rem;
+  }
+
+  .spinner {
+    width: 28px;
+    height: 28px;
+    border-width: 2.5px;
+  }
+
+  .page-center p {
+    font-size: 0.82rem;
+  }
+
+  .error-box {
+    border-radius: 12px;
+    padding: 1rem;
+    margin: 0.75rem 0;
+  }
+
+  .error-box__message {
+    font-size: 0.88rem;
+  }
+
+  .error-box .btn {
+    width: 100%;
+    margin-top: 0.75rem;
+  }
+
+  .empty-state {
+    padding: 4rem 1.5rem;
+    min-height: 40vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .empty-state p {
+    font-size: 0.92rem;
+  }
+
+  .badge {
+    font-size: 0.68rem;
+    padding: 0.15rem 0.5rem;
+  }
+
+  .mock-switcher {
+    bottom: 68px;
+    right: 0.5rem;
+    padding: 0.3rem 0.5rem;
+  }
+}

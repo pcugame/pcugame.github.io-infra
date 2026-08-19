@@ -127,9 +127,4 @@
     display: none;
   }
 
-  /* 모바일: eyebrow 영문 + 왼쪽 막대 숨김 */
-  .home-hero__eyebrow {
-    display: none;
-  }
-
 }

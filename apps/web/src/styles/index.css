@@ -1,7 +1,3 @@
-/* ══════════════════════════════════════════════════════════════
-   PCU 게임공학과 졸업작품 전시 - 기본 스타일
-   ══════════════════════════════════════════════════════════════ */
-
 @import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
 
 @import './foundation/tokens.css';
@@ -9,9 +5,15 @@
 @import './foundation/animations.css';
 @import './layout/site-shell.css';
 @import './components/buttons.css';
+@import './components/forms.css';
 @import './components/feedback.css';
-@import './features/admin-forms.css';
-@import './features/admin.css';
+@import './features/admin-layout.css';
+@import './features/admin-collections.css';
+@import './features/admin-projects.css';
+@import './features/admin-exhibitions.css';
+@import './features/admin-import.css';
+@import './features/admin-project-editor.css';
+@import './features/project-submission.css';
 @import './features/admin-export.css';
 @import './features/upload.css';
 @import './features/archive.css';
@@ -19,30 +21,6 @@
 @import './features/project.css';
 @import './features/auth-pages.css';
 @import './features/profile.css';
-@import './features/home.css';
+@import './features/home-nav.css';
+@import './features/home-archive-landing.css';
 @import './features/exhibitions.css';
-@import './responsive/mobile.css';
-
-/* ── Badge ────────────────────────────────────────────────────── */
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.badge--published {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.badge--archived {
-  background: #e5e7eb;
-  color: #374151;
-}
-

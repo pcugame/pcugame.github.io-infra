@@ -102,6 +102,56 @@
   margin-bottom: 0.85rem;
 }
 
+.game-upload__file-input input[type='file'] {
+  width: 100%;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: var(--color-text-muted);
+  border: 1.5px dashed var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.game-upload__file-input input[type='file']:hover {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 4%, var(--color-bg));
+}
+
+.game-upload__file-input input[type='file']:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.game-upload__file-input input[type='file']::file-selector-button {
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 0.9rem;
+  margin-right: 0.75rem;
+  border: none;
+  border-radius: 8px;
+  background: var(--color-primary-btn, var(--color-primary));
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  box-shadow: 0 1px 4px rgba(26, 81, 175, 0.15);
+}
+
+.game-upload__file-input input[type='file']::file-selector-button:hover {
+  background: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(26, 81, 175, 0.25);
+  transform: translateY(-1px);
+}
+
+.game-upload__file-input input[type='file']::file-selector-button:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(26, 81, 175, 0.15);
+}
+
 .game-upload__progress-wrap {
   margin-bottom: 0.85rem;
 }
@@ -165,40 +215,6 @@
   font-size: 0.9rem;
 }
 
-/* ── Edit Page helpers ───────────────────────────────────── */
-
-.asset-current-poster {
-  margin-bottom: 0.5rem;
-  font-size: 0.88rem;
-}
-
-.asset-poster-label {
-  margin-left: 0.5rem;
-  color: var(--color-primary);
-}
-
-.member-edit-input {
-  width: 100px;
-  padding: 0.35rem 0.55rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-family: inherit;
-  background: var(--color-surface);
-}
-
-.member-edit-input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.member-sort-order {
-  color: var(--color-text-muted);
-  font-size: 0.85em;
-  margin-left: 0.5rem;
-}
-
 /* ── Dark — game upload overrides ────────────────────────── */
 
 [data-theme='dark'] .game-upload {
@@ -218,12 +234,38 @@
   background: #2e2e33;
 }
 
-[data-theme='dark'] .member-edit-input {
+[data-theme='dark'] .game-upload__file-input input[type='file'] {
   background: #131315;
-  color: var(--color-text);
   border-color: var(--color-border);
+  color: var(--color-text-muted);
 }
 
-[data-theme='dark'] .member-edit-input:focus {
+[data-theme='dark'] .game-upload__file-input input[type='file']:hover {
+  background: color-mix(in srgb, var(--color-primary) 6%, #131315);
+  border-color: var(--color-primary);
+}
+
+[data-theme='dark'] .game-upload__file-input input[type='file']:focus {
   box-shadow: 0 0 0 3px rgba(124, 172, 248, 0.15);
+}
+
+[data-theme='dark'] .game-upload__file-input input[type='file']::file-selector-button {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 640px) {
+  .game-upload {
+    padding: 1rem;
+  }
+
+  .game-upload__file-input input[type='file'] {
+    font-size: 0.8rem;
+    padding: 0.55rem;
+  }
+
+  .game-upload__file-input input[type='file']::file-selector-button {
+    font-size: 0.75rem;
+    padding: 0.45rem 0.75rem;
+    margin-right: 0.5rem;
+  }
 }

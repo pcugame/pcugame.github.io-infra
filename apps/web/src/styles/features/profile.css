@@ -114,3 +114,50 @@
   padding: 0.7rem 1rem;
 }
 
+@media (max-width: 640px) {
+  .me-page {
+    max-width: 100%;
+    padding-top: 0.5rem;
+  }
+
+  .me-profile {
+    margin-bottom: 1.25rem;
+  }
+
+  .me-profile__avatar {
+    width: 64px;
+    height: 64px;
+    font-size: 1.5rem;
+  }
+
+  .me-profile__name {
+    font-size: 1.2rem;
+  }
+
+  .me-card {
+    border-radius: 12px;
+    border: 0.5px solid var(--color-border);
+  }
+
+  .me-card .btn {
+    border-radius: 10px;
+    padding: 0.65rem 1rem;
+  }
+
+  .me-info-item {
+    padding: 0.75rem 1rem;
+  }
+
+  .me-info-item__label {
+    font-size: 0.75rem;
+  }
+
+  .me-info-item__value {
+    font-size: 0.85rem;
+  }
+
+  .me-logout-btn {
+    border-radius: 10px;
+    padding: 0.65rem 1rem;
+  }
+}
