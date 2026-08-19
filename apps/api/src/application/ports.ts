@@ -240,6 +240,21 @@ export interface FileStat {
 	lastModified?: Date;
 }
 
+export interface FileMetadata extends FileStat {
+	isFile: boolean;
+	isSymbolicLink: boolean;
+	identity: {
+		device: string;
+		inode: string;
+	};
+}
+
+export interface FileClaimExpectation {
+	size: number;
+	lastModifiedMs: number;
+	identity: FileMetadata['identity'];
+}
+
 export interface DirectoryEntry {
 	name: string;
 	path: string;
@@ -254,6 +269,23 @@ export interface FileSystem {
 	mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
 	/** Create/verify a final-component, current-user-owned directory with mode 0700. */
 	ensurePrivateDirectory?(path: string): Promise<void>;
+	/** Read metadata for the final path component without following symbolic links. */
+	lstat?(path: string): Promise<FileMetadata>;
+	/** Durably create one small state record without replacing an existing path. */
+	createFileExclusive?(path: string, contents?: string): Promise<'created' | 'exists'>;
+	readTextFile?(path: string): Promise<string>;
+	/**
+	 * Atomically claim the current source into a private quarantine and remove it
+	 * only when its no-follow identity and freshness metadata still match. Without
+	 * an expectation, it only confirms absence and restores any file it claims.
+	 */
+	claimAndRemoveFile?(
+		path: string,
+		quarantineDirectory: string,
+		expected?: FileClaimExpectation,
+	): Promise<'removed' | 'missing' | 'changed'>;
+	/** Unlink one state record and durably sync its parent directory. */
+	removeFileDurable?(path: string): Promise<void>;
 	rename(from: string, to: string): Promise<void>;
 	remove(path: string): Promise<void>;
 	readRange(path: string, start: number, end: number): Promise<Buffer>;

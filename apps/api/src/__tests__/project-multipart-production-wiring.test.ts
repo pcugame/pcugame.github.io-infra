@@ -1,5 +1,7 @@
 import { Readable } from 'node:stream';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import type { S3Client } from '@aws-sdk/client-s3';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
 import fastifyMultipart from '@fastify/multipart';
@@ -275,7 +277,7 @@ function storageHarness(label: string) {
 	};
 }
 
-function fileSystemHarness(label: string) {
+function fileSystemHarness(label: string, baseTemporaryDirectory?: string) {
 	const base = createNodeFileSystem();
 	const created = new Set<string>();
 	const removed = new Set<string>();
@@ -328,6 +330,9 @@ function fileSystemHarness(label: string) {
 	};
 	const fileSystem: FileSystem = {
 		...base,
+		...(baseTemporaryDirectory
+			? { temporaryDirectory: () => baseTemporaryDirectory }
+			: {}),
 		createWriteStream: calls.createWriteStream,
 		createReadStream: calls.createReadStream,
 		remove: calls.remove,
@@ -346,7 +351,12 @@ function fileSystemHarness(label: string) {
 			await calls.remove(filePath).catch(() => undefined);
 		}
 	}
-	fileSystemTeardowns.push(() => recoverAndRemoveOutstanding());
+	fileSystemTeardowns.push(async () => {
+		await recoverAndRemoveOutstanding();
+		if (baseTemporaryDirectory) {
+			await rm(baseTemporaryDirectory, { recursive: true, force: true });
+		}
+	});
 
 	return {
 		fileSystem,
@@ -390,10 +400,13 @@ function limiterHarness() {
 	};
 }
 
-function graphHarness(label: string, options: { imageMaxMb?: number } = {}) {
+function graphHarness(
+	label: string,
+	options: { imageMaxMb?: number; baseTemporaryDirectory?: string } = {},
+) {
 	const ports = portHarness(label);
 	const storage = storageHarness(label);
-	const fileSystem = fileSystemHarness(label);
+	const fileSystem = fileSystemHarness(label, options.baseTemporaryDirectory);
 	const limiter = limiterHarness();
 	const settings: SettingsStore = {
 		get: vi.fn(async () => ({ maxGameFileMb: 2, maxChunkSizeMb: 1 })),
@@ -634,7 +647,11 @@ async function contextAppHarness(
 		processing: ProjectUploadProcessing,
 	) => ProjectUploadProcessing,
 ) {
-	const harness = graphHarness(label);
+	const baseTemporaryDirectory = await mkdtemp(path.join(
+		os.tmpdir(),
+		`pcugame-${label}-`,
+	));
+	const harness = graphHarness(label, { baseTemporaryDirectory });
 	const scheduler: Scheduler = {
 		every: vi.fn(() => ({ cancel: vi.fn() })),
 		delay: vi.fn(async () => {}),
@@ -749,6 +766,7 @@ async function contextAppHarness(
 	);
 	const app = await buildApp({ context });
 	apps.push(app);
+	await context.start();
 	return {
 		...harness,
 		app,
