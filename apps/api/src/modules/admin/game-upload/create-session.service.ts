@@ -7,6 +7,7 @@ import { resolveChunkSizeBytes } from './session-sizing.js';
 import { SOURCE_IDENTITY_BLOCK_SIZE_BYTES, validateSourceIdentity } from './source-identity.js';
 import {
 	ActiveUploadCompletionInProgressError,
+	DirectUploadQuotaExceededError,
 	type GameUploadServiceDependencies,
 } from './ports.js';
 import {
@@ -14,7 +15,7 @@ import {
 	cleanupUntrackedMultipart,
 	UntrackedMultipartCleanupError,
 } from './multipart-cleanup.js';
-import { recordGameUploadEvent } from './observability.js';
+import { recordGameUploadEvent, safeGameUploadLogContext } from './observability.js';
 import { assertMultipartPartCount } from './direct-multipart.js';
 
 /** Create a new chunked upload session for a project */
@@ -64,6 +65,30 @@ export async function createSession(
 		throw new AppError(500, 'Upload chunk size must align with source identity blocks', 'INTERNAL_ERROR');
 	}
 	const sourceIdentity = validateSourceIdentity(body, totalBytes);
+	try {
+		await deps.repository.assertCanCreateSession({
+			projectId,
+			userId: user.id,
+			uploadKind,
+			totalBytes: BigInt(totalBytes),
+			limits: deps.config.directUploadQuota,
+		});
+	} catch (err) {
+		if (err instanceof DirectUploadQuotaExceededError) {
+			recordGameUploadEvent(deps, 'quota_rejected', {
+				actorId: user.id,
+				projectId,
+				uploadKind,
+				quota: err.quota,
+				result: 'rejected',
+			});
+			throw new AppError(429, 'Direct upload quota exceeded', 'RATE_LIMITED');
+		}
+		if (err instanceof ActiveUploadCompletionInProgressError) {
+			throw conflict(err.message);
+		}
+		throw err;
+	}
 	const s3Key = deps.storageKey(uploadKind, projectId);
 	const s3UploadId = await deps.storage.createMultipart(s3Key);
 	const expiresAt = new Date(
@@ -77,7 +102,6 @@ export async function createSession(
 			projectId,
 			userId: user.id,
 			uploadKind,
-			transport: 'DIRECT_MULTIPART',
 			originalName,
 			totalBytes: BigInt(totalBytes),
 			chunkSizeBytes,
@@ -89,11 +113,22 @@ export async function createSession(
 			s3UploadId,
 			s3Key,
 			expiresAt,
-		});
+		}, deps.config.directUploadQuota);
 	} catch (err) {
 		const businessError = err instanceof ActiveUploadCompletionInProgressError
 			? conflict(err.message)
-			: err;
+			: err instanceof DirectUploadQuotaExceededError
+				? new AppError(429, 'Direct upload quota exceeded', 'RATE_LIMITED')
+				: err;
+		if (err instanceof DirectUploadQuotaExceededError) {
+			recordGameUploadEvent(deps, 'quota_rejected', {
+				actorId: user.id,
+				projectId,
+				uploadKind,
+				quota: err.quota,
+				result: 'rejected-after-storage-allocation-race',
+			});
+		}
 		try {
 			await cleanupUntrackedMultipart(deps, {
 				key: s3Key,
@@ -121,7 +156,7 @@ export async function createSession(
 		// committed the durable task before this prompt, best-effort abort.
 		await deps.storage.abortMultipart(abort.key, abort.uploadId).catch((err) => {
 			deps.logger.error(
-				{ err, sessionId: abort.sessionId, s3Key: abort.key, tracking: abort.tracking },
+				safeGameUploadLogContext({ err, sessionId: abort.sessionId, action: 'prompt_abort', result: 'failed' }),
 				'Failed to abort multipart upload while replacing active session',
 			);
 		});
@@ -132,16 +167,8 @@ export async function createSession(
 		sessionId: created.session.id,
 		generation: 1,
 		uploadKind,
-		transport: 'DIRECT_MULTIPART',
 		declaredBytes: totalBytes,
 		result: 'created',
-	});
-	recordGameUploadEvent(deps, 'direct_transport_selected', {
-		actorId: user.id,
-		projectId,
-		sessionId: created.session.id,
-		generation: 1,
-		result: 'selected',
 	});
 
 	return {
@@ -153,7 +180,6 @@ export async function createSession(
 		sourceIdentityBlockSizeBytes: sourceIdentity.blockSizeBytes,
 		expiresAt: expiresAt.toISOString(),
 		uploadKind,
-		transport: 'DIRECT_MULTIPART',
 		generation: 1,
 	};
 }

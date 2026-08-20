@@ -1,13 +1,26 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { ExportResult, ExportStatusResponse } from '@pcu/contracts';
+import type { ExportStartResponse, ExportStatusResponse } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { requireRole } from '../../../plugins/auth.js';
 import { badRequest } from '../../../shared/errors.js';
-import type { createExportService } from './service.js';
 
 export interface ExportControllerDependencies {
-	service: ReturnType<typeof createExportService>;
-	outDir?: string;
+	repository: {
+		createJob(input: {
+			id: string;
+			requestedById: number;
+			year: number | null;
+			dryRun: boolean;
+		}): Promise<{ id: string }>;
+		latestJob(): Promise<{
+			id: string;
+			status: string;
+			progress: ExportStatusResponse['progress'];
+			result: ExportStatusResponse['result'];
+			error: string | null;
+		} | null>;
+	};
+	ids: { next(): string };
 }
 
 export function createExportController(
@@ -15,49 +28,31 @@ export function createExportController(
 ): FastifyPluginAsync {
 	return async function exportController(app): Promise<void> {
 	/**
-	 * POST /export — export assets from S3 to NAS filesystem.
+	 * POST /export — enqueue a durable export job for the processing worker.
 	 *
 	 * Body (optional):
 	 *   { year?: number, dryRun?: boolean }
 	 *
-	 * Writes to NAS_EXPORT_PATH env var directory.
-	 * Idempotent: existing files are skipped on re-run.
-	 *
-	 * Returns 409 if another export is already in progress.
-	 * Detects client disconnect and aborts early.
+	 * Returns 409 if another queued/running export exists. Once committed, the
+	 * job is independent of the request and API process lifecycle.
 	 */
 	app.post<{ Body: { year?: number; dryRun?: boolean } }>(
 		'/export',
 		{ preHandler: requireRole('ADMIN') },
 		async (request, reply) => {
-			const nasPath = deps.outDir;
-			if (!nasPath) throw badRequest('NAS_EXPORT_PATH is not configured');
-
 			const body = (request.body ?? {});
 			const year = body.year ? Number(body.year) : undefined;
 			if (year != null && (!Number.isInteger(year) || year < 2000)) {
 				throw badRequest('Invalid year');
 			}
 
-			// Build an AbortController tied to the client connection
-			const ac = new AbortController();
-			const onClose = () => {
-				if (!reply.sent) ac.abort();
-			};
-			request.raw.once('aborted', onClose);
-			reply.raw.once('close', onClose);
-			try {
-				const result = await deps.service.exportAssets({
-					outDir: nasPath,
-					year,
-					dryRun: body.dryRun ?? false,
-					signal: ac.signal,
-				});
-				sendOk<ExportResult>(reply, result);
-			} finally {
-				request.raw.off('aborted', onClose);
-				reply.raw.off('close', onClose);
-			}
+			const job = await deps.repository.createJob({
+				id: deps.ids.next(),
+				requestedById: request.currentUser!.id,
+				year: year ?? null,
+				dryRun: body.dryRun ?? false,
+			});
+			sendOk<ExportStartResponse>(reply, { jobId: job.id, status: 'QUEUED' }, 202);
 		},
 	);
 
@@ -71,8 +66,14 @@ export function createExportController(
 		'/export/status',
 		{ preHandler: requireRole('ADMIN') },
 		async (_request, reply) => {
-			const progress = deps.service.getExportProgress();
-			sendOk<ExportStatusResponse>(reply, { running: progress !== null, progress });
+			const job = await deps.repository.latestJob();
+			sendOk<ExportStatusResponse>(reply, job ? {
+				running: job.status === 'QUEUED' || job.status === 'RUNNING',
+				progress: job.progress,
+				jobId: job.id,
+				result: job.result,
+				error: job.error,
+			} : { running: false, progress: null });
 		},
 	);
 	};

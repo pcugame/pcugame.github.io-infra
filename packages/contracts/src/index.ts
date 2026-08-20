@@ -85,6 +85,7 @@ export type {
 	ExportProgressFile,
 	ExportResult,
 	ExportStatusResponse,
+	ExportStartResponse,
 	ImportExecuteResult,
 	ImportPreviewExhibition,
 	ImportPreviewResult,
@@ -92,7 +93,6 @@ export type {
 
 export type {
 	GameUploadCreateSessionRequest,
-	GameUploadChunkResponse,
 	GameUploadCompleteResponse,
 	GameUploadCompletionResponse,
 	GameUploadCompleteRequest,
@@ -103,7 +103,6 @@ export type {
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
-	GameUploadTransport,
 	GameUploadUploadedPart,
 	GameUploadVerifyingResponse,
 	UploadKind,

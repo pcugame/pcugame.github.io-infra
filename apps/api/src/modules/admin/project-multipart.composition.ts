@@ -1,4 +1,4 @@
-import type { AssetKind, UserRole } from '@pcu/contracts';
+import type { UserRole } from '@pcu/contracts';
 import type { FastifyPluginAsync } from 'fastify';
 import type {
 	AppLogger,
@@ -11,7 +11,6 @@ import type {
 } from '../../application/ports.js';
 import type { Env } from '../../config/env.js';
 import {
-	bucketForAssetKind,
 	megabytes,
 	resolveRoleUploadLimits,
 	type UploadLimits,
@@ -41,7 +40,7 @@ type ProjectMultipartConfig = Pick<
 	Env,
 	| 'WEB_PUBLIC_URL'
 	| 'S3_BUCKET_PUBLIC'
-	| 'S3_BUCKET_PROTECTED'
+	| 'INLINE_UPLOAD_MAX_BYTES'
 	| 'UPLOAD_USER_IMAGE_MAX_MB'
 	| 'UPLOAD_USER_GAME_MAX_MB'
 	| 'UPLOAD_USER_REQUEST_MAX_MB'
@@ -88,24 +87,18 @@ async function uploadLimits(
 	return resolveRoleUploadLimits(config, role, { maxGameFileMb: site.maxGameFileMb });
 }
 
-function bucketForKind(kind: AssetKind, config: ProjectMultipartConfig): string {
-	return bucketForAssetKind(kind, {
-		publicBucket: config.S3_BUCKET_PUBLIC,
-		protectedBucket: config.S3_BUCKET_PROTECTED,
-	});
-}
-
 /** Compose ticket-011 exclusively from resources and ports owned by one context. */
 export function createProjectMultipartProductionGraph(
 	deps: ProjectMultipartProductionDependencies,
 ): ProjectMultipartProductionGraph {
+	const inlineMaxBytes = deps.config.INLINE_UPLOAD_MAX_BYTES ?? megabytes(16);
 	const createPipeline = () => createProjectUploadPipeline({
 		storage: deps.storage,
 		fileSystem: deps.fileSystem,
 		ids: deps.ids,
 		logger: deps.logger,
 		processing: deps.processing,
-		bucketForKind: (kind) => bucketForKind(kind, deps.config),
+		bucketForKind: () => deps.config.S3_BUCKET_PUBLIC,
 		deleteUnpersistedObject: deps.uploadLifecycle.orphanDeletions.deleteOrQueue,
 		uploadIntents: deps.uploadLifecycle.uploadIntents,
 		...(deps.activeUploadTemps ? { activeUploadTemps: deps.activeUploadTemps } : {}),
@@ -114,16 +107,7 @@ export function createProjectMultipartProductionGraph(
 	const submitService = createSubmitProjectService({
 		webPublicUrl: deps.config.WEB_PUBLIC_URL,
 		repository: deps.repository,
-		uploadLimits: limits,
-		uploadSlots: deps.uploadLimiter,
-		createPipeline,
-		multipartCollector: createMultipartCollector({
-			fileSystem: deps.fileSystem,
-			ids: deps.ids,
-		}),
 		logger: deps.logger,
-		recordPostCommitCleanupFailure:
-			deps.uploadLifecycle.metrics.recordPostCommitCleanupFailure,
 		requestHasher: deps.requestHasher,
 		idempotency: deps.uploadLifecycle.idempotency,
 	});
@@ -137,7 +121,7 @@ export function createProjectMultipartProductionGraph(
 			createPipeline,
 			requestHasher: deps.requestHasher,
 		}),
-		bucketForKind: (kind) => bucketForKind(kind, deps.config),
+		bucketForKind: () => deps.config.S3_BUCKET_PUBLIC,
 		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
 		logger: deps.logger,
 		recordPostCommitCleanupFailure:
@@ -154,19 +138,19 @@ export function createProjectMultipartProductionGraph(
 		service: submitService,
 		route: {
 			...route,
-			bodyLimit: megabytes(deps.config.UPLOAD_PRIVILEGED_REQUEST_MAX_MB),
+			bodyLimit: Math.min(inlineMaxBytes, megabytes(2)),
 		},
 	});
 	const assetController = createProjectAssetUploadController({
 		service: assetService,
 		access: deps.access,
-		bodyLimit: megabytes(deps.config.UPLOAD_PRIVILEGED_REQUEST_MAX_MB),
+		bodyLimit: inlineMaxBytes,
 	});
 	const meSubmit = createMeProjectController({
 		service: submitService,
 		route: {
 			...route,
-			bodyLimit: megabytes(deps.config.UPLOAD_USER_REQUEST_MAX_MB),
+			bodyLimit: Math.min(inlineMaxBytes, megabytes(2)),
 		},
 	});
 
@@ -175,7 +159,10 @@ export function createProjectMultipartProductionGraph(
 			submitController: adminSubmit,
 			assetController,
 		}),
-		meController: createMeRoutes({ projectController: meSubmit }),
+		meController: createMeRoutes({
+			projectController: meSubmit,
+			assetController,
+		}),
 		projectAccess: deps.access,
 		projectRepository: deps.repository,
 	};

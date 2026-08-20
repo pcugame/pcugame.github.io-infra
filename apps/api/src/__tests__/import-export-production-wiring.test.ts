@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { PassThrough, Readable, Writable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
 import fastifyMultipart from '@fastify/multipart';
 import type { S3Client } from '@aws-sdk/client-s3';
@@ -20,7 +20,6 @@ import {
 	createImportExportProductionGraph,
 	type ExportRepository,
 } from '../modules/admin/import-export.composition.js';
-import { createExportProgressStore } from '../modules/admin/export/service.js';
 import type {
 	ImportRepository,
 	ImportTransactionRepository,
@@ -31,14 +30,6 @@ import { createScriptedBackendPersistence } from './helpers/backend-persistence.
 import { ownedTestUploadLifecycleResource } from './helpers/upload-lifecycle.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
-const imageDestination = '/nas/ExportedAssets/2026_Show/Ticket 010/image.png';
-
-function deferred<T>() {
-	let resolve!: (value: T) => void;
-	const promise = new Promise<T>((done) => { resolve = done; });
-	return { promise, resolve };
-}
-
 function fakeLogger(): AppLogger {
 	const logger = {
 		child: () => logger,
@@ -73,6 +64,8 @@ function exportProject() {
 function repositoryHarness(projects = [exportProject()]) {
 	const calls = {
 		findProjectsWithAssets: vi.fn().mockResolvedValue(projects),
+		createJob: vi.fn(async (input: { id: string }) => ({ id: input.id })),
+		latestJob: vi.fn().mockResolvedValue(null),
 		findProjectBySlug: vi.fn().mockResolvedValue(null),
 		createProjectWithMembers: vi.fn().mockResolvedValue({ id: 1 }),
 		findExhibitionByComposite: vi.fn().mockResolvedValue(null),
@@ -94,6 +87,8 @@ function repositoryHarness(projects = [exportProject()]) {
 	};
 	const exportRepository: ExportRepository = {
 		findProjectsWithAssets: calls.findProjectsWithAssets,
+		createJob: calls.createJob,
+		latestJob: calls.latestJob,
 	};
 	return { importRepository, exportRepository, calls };
 }
@@ -207,25 +202,25 @@ function harness(options: {
 	projects?: ReturnType<typeof exportProject>[];
 	fileSystem?: MemoryFileSystem;
 	storage?: ReturnType<typeof fakeStorage>;
+	inlineMaxBytes?: number;
 } = {}) {
 	const repositories = repositoryHarness(options.projects);
 	const storage = options.storage ?? fakeStorage();
 	const fileSystem = options.fileSystem ?? memoryFileSystem();
 	const logger = fakeLogger();
-	const progress = createExportProgressStore();
 	let id = 0;
 	const graph = createImportExportProductionGraph({
-		config: { ...defaultTestEnv, NAS_EXPORT_PATH: '/nas' },
+		config: {
+			...defaultTestEnv,
+			NAS_EXPORT_PATH: '/nas',
+			INLINE_UPLOAD_MAX_BYTES:
+				options.inlineMaxBytes ?? defaultTestEnv.INLINE_UPLOAD_MAX_BYTES,
+		},
 		importRepository: repositories.importRepository,
 		exportRepository: repositories.exportRepository,
-		storage: storage.storage,
-		fileSystem,
-		exportProgress: progress,
-		clock: { now: () => new Date('2026-07-24T00:00:00.000Z') },
 		ids: { next: () => `id-${++id}` },
-		logger,
 	});
-	return { graph, repositories, storage, fileSystem, logger, progress };
+	return { graph, repositories, storage, fileSystem, logger };
 }
 
 async function routeApp(
@@ -366,30 +361,42 @@ async function contextHarness() {
 				value: createProtectedDownloadLimiter(),
 				ownership: 'borrowed',
 			},
-			exportProgress: {
-				value: state.progress,
-				ownership: 'owned',
-				close: () => {
-					events.push('progress-close');
-					expect(state.fileSystem.temporary.size).toBe(0);
-					state.progress.close();
-				},
-			},
 		},
 	});
 	contexts.push(context);
 	return { ...state, context, events };
 }
 
-function multipartJson(raw: string, contentType = 'application/json') {
+function multipartJson(
+	raw: string,
+	contentType = 'application/json',
+	fieldname = 'file',
+) {
 	const boundary = 'ticket-010-json';
 	return {
 		headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
 		payload: Buffer.from(
 			`--${boundary}\r\n`
-			+ 'Content-Disposition: form-data; name="file"; filename="import.json"\r\n'
+			+ `Content-Disposition: form-data; name="${fieldname}"; filename="import.json"\r\n`
 			+ `Content-Type: ${contentType}\r\n\r\n`
 			+ `${raw}\r\n`
+			+ `--${boundary}--\r\n`,
+		),
+	};
+}
+
+function multipartJsonTwice() {
+	const boundary = 'ticket-010-json-twice';
+	const part = (filename: string) => (
+		`Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`
+		+ 'Content-Type: application/json\r\n\r\n'
+		+ '{}\r\n'
+	);
+	return {
+		headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+		payload: Buffer.from(
+			`--${boundary}\r\n${part('first.json')}`
+			+ `--${boundary}\r\n${part('second.json')}`
 			+ `--${boundary}--\r\n`,
 		),
 	};
@@ -404,6 +411,16 @@ afterEach(async () => {
 });
 
 describe('import/export production wiring', () => {
+	it('keeps the Fastify export control graph free of object streams and NAS writers', async () => {
+		const source = await readFile(
+			new URL('../modules/admin/import-export.composition.ts', import.meta.url),
+			'utf8',
+		);
+		expect(source).not.toMatch(/storage[.]stream|createWriteStream|createExportFileWriter/);
+		expect(source).toMatch(/createJob|latestJob/);
+		expect(source).toMatch(/export\/ports[.]js/);
+		expect(source).not.toMatch(/export\/service[.]js|export\/file[.]adapter[.]js/);
+	});
 	it('imports, composes, and registers the actual admin controllers without external I/O', async () => {
 		const sources = await Promise.all([
 			'modules/admin/import/controller.ts',
@@ -439,8 +456,9 @@ describe('import/export production wiring', () => {
 			'src/modules/admin/import-export.composition.ts',
 			'src/modules/admin/import/controller.ts',
 			'src/modules/admin/export/controller.ts',
-			'src/modules/admin/export/file.adapter.ts',
 		]));
+		expect(modules).not.toContain('src/modules/admin/export/service.ts');
+		expect(modules).not.toContain('src/modules/admin/export/file.adapter.ts');
 		const forbidden = modules.filter((source) => (
 			source === 'src/config/env.ts'
 			|| /^src\/lib\/(prisma|s3|storage|logger)\.ts$/.test(source)
@@ -492,122 +510,107 @@ describe('import/export production wiring', () => {
 		expect(rejectedSize.statusCode).toBe(413);
 	});
 
-	it('isolates A/B progress and lets B continue after closing and aborting A', async () => {
-		const a = await contextHarness();
-		const b = await contextHarness();
-		b.repositories.calls.findProjectsWithAssets.mockResolvedValue([]);
-		const pending = new PassThrough();
-		a.storage.calls.stream.mockResolvedValue({
-			body: pending,
-			size: 4,
-			contentType: 'image/png',
-		});
-		const appA = await routePluginApp(a.context.routes.admin);
-		const appB = await routePluginApp(b.context.routes.admin);
-		apps.push(appA, appB);
-
-		const exportA = appA.inject({
+	it('caps chunked encoded import bodies and rejects unknown or multiple parts without hanging', async () => {
+		const capped = harness({ projects: [], inlineMaxBytes: 160 });
+		const cappedApp = await routeApp(capped.graph);
+		apps.push(cappedApp);
+		const oversized = multipartJson(JSON.stringify({ value: 'x'.repeat(512) }));
+		const body = oversized.payload;
+		const rejectedEncoded = await cappedApp.inject({
 			method: 'POST',
-			url: '/api/admin/export',
-			payload: { year: 2026 },
+			url: '/api/admin/import/preview',
+			headers: oversized.headers,
+			payload: Readable.from([
+				body.subarray(0, 80),
+				body.subarray(80, 160),
+				body.subarray(160),
+			]),
 		});
-		await vi.waitFor(() => expect(a.storage.calls.stream).toHaveBeenCalledOnce());
-		expect((await appA.inject({
-			method: 'GET',
-			url: '/api/admin/export/status',
-		})).json().data).toMatchObject({ running: true });
-		expect((await appB.inject({
-			method: 'GET',
-			url: '/api/admin/export/status',
-		})).json().data).toEqual({ running: false, progress: null });
+		expect(rejectedEncoded.statusCode, rejectedEncoded.body).toBe(413);
+		expect(capped.repositories.calls.runTransaction).not.toHaveBeenCalled();
 
-		await a.context.close();
-		await expect(exportA).resolves.toMatchObject({ statusCode: 200 });
-		expect(a.progress.get()).toBeNull();
-		expect(a.fileSystem.temporary.size).toBe(0);
-		await expect(appB.inject({
+		const strict = harness({ projects: [] });
+		const strictApp = await routeApp(strict.graph);
+		apps.push(strictApp);
+		const unknown = await strictApp.inject({
 			method: 'POST',
-			url: '/api/admin/export',
-			payload: { dryRun: true },
-		})).resolves.toMatchObject({ statusCode: 200 });
-		expect(b.progress.get()).toBeNull();
-		await b.context.close();
+			url: '/api/admin/import/preview',
+			...multipartJson('{}', 'application/json', 'unknown'),
+		});
+		expect(unknown.statusCode).toBe(400);
+
+		const multiple = await strictApp.inject({
+			method: 'POST',
+			url: '/api/admin/import/execute',
+			...multipartJsonTwice(),
+		});
+		expect(multiple.statusCode).toBeGreaterThanOrEqual(400);
+		expect(strict.repositories.calls.runTransaction).not.toHaveBeenCalled();
 	});
 
-	it('makes concurrent/double BackendContext close await one abort cleanup before progress closes', async () => {
-		const state = await contextHarness();
-		const pending = new PassThrough();
-		const cleanupEntered = deferred<void>();
-		const cleanupRelease = deferred<void>();
-		let abortCount = 0;
-		state.storage.calls.stream.mockImplementation(async (
-			_bucket: string,
-			_key: string,
-			_range: unknown,
-			request?: { signal?: AbortSignal },
-		) => {
-			request?.signal?.addEventListener('abort', () => { abortCount += 1; }, { once: true });
-			return { body: pending, size: 4, contentType: 'image/png' };
-		});
-		const deferredRemove = vi.fn(async (path: string) => {
-			cleanupEntered.resolve();
-			await cleanupRelease.promise;
-			state.fileSystem.files.delete(path);
-			state.fileSystem.temporary.delete(path);
-		});
-		state.fileSystem.remove = deferredRemove;
-		const finishSpy = vi.spyOn(state.progress, 'finish');
-		const progressCloseSpy = vi.spyOn(state.progress, 'close');
-		const app = await routePluginApp(state.context.routes.admin);
+	it('commits a durable export job and reports DB-backed status without reading object bytes', async () => {
+		const state = harness();
+		const app = await routeApp(state.graph);
 		apps.push(app);
 
-		const running = app.inject({ method: 'POST', url: '/api/admin/export', payload: {} });
-		await vi.waitFor(() => expect(state.storage.calls.stream).toHaveBeenCalledOnce());
-		const firstClose = state.context.close();
-		const secondClose = state.context.close();
-		expect(secondClose).toBe(firstClose);
-		await cleanupEntered.promise;
-		let closeSettled = false;
-		void firstClose.then(() => { closeSettled = true; });
-		await Promise.resolve();
-		expect(closeSettled).toBe(false);
-		expect(state.events).toEqual([]);
-		cleanupRelease.resolve();
-		await Promise.all([firstClose, secondClose]);
-		const response = await running;
-		expect(response.statusCode).toBe(200);
-		expect(response.json().data).toMatchObject({
-			aborted: true,
-			downloaded: 0,
-			failed: 0,
+		const started = await app.inject({
+			method: 'POST',
+			url: '/api/admin/export',
+			payload: { year: 2026, dryRun: true },
 		});
-		expect(state.events).toEqual(['progress-close']);
-		expect(abortCount).toBe(1);
-		expect(deferredRemove).toHaveBeenCalledOnce();
-		expect(finishSpy).toHaveBeenCalledOnce();
-		expect(progressCloseSpy).toHaveBeenCalledOnce();
-		expect(state.fileSystem.temporary.size).toBe(0);
-		expect(state.context.close()).toBe(firstClose);
-		await state.context.close();
-		expect(progressCloseSpy).toHaveBeenCalledOnce();
-		expect(state.context.resourceOwnership).toEqual(expect.arrayContaining([
-			{ name: 'importExport', ownership: 'owned' },
-			{ name: 'exportProgress', ownership: 'owned' },
-		]));
+		expect(started.statusCode, started.body).toBe(202);
+		expect(started.json().data).toEqual({ jobId: 'id-1', status: 'QUEUED' });
+		expect(state.repositories.calls.createJob).toHaveBeenCalledWith({
+			id: 'id-1',
+			requestedById: 9,
+			year: 2026,
+			dryRun: true,
+		});
+		expect(state.repositories.calls.findProjectsWithAssets).not.toHaveBeenCalled();
+		expect(state.storage.calls.stream).not.toHaveBeenCalled();
+		expect(state.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
+
+		state.repositories.calls.latestJob.mockResolvedValueOnce({
+			id: 'id-1',
+			status: 'RUNNING',
+			progress: { phase: 'downloading', downloaded: 3 },
+			result: null,
+			error: null,
+		});
+		const status = await app.inject({ method: 'GET', url: '/api/admin/export/status' });
+		expect(status.statusCode).toBe(200);
+		expect(status.json().data).toMatchObject({
+			running: true,
+			jobId: 'id-1',
+			progress: { phase: 'downloading', downloaded: 3 },
+		});
 	});
 
-	it('propagates a real client disconnect through storage and cleans temp/progress', async () => {
+	it('returns a repository-fenced conflict for a second active export job', async () => {
 		const state = harness();
-		const pending = new PassThrough();
-		let receivedSignal: AbortSignal | undefined;
-		state.storage.calls.stream.mockImplementation(async (
-			_bucket: string,
-			_key: string,
-			_range: unknown,
-			request?: { signal?: AbortSignal },
-		) => {
-			receivedSignal = request?.signal;
-			return { body: pending, size: 4, contentType: 'image/png' };
+		state.repositories.calls.createJob.mockRejectedValueOnce(Object.assign(
+			new Error('Export is already in progress'),
+			{ statusCode: 409, code: 'CONFLICT' },
+		));
+		const app = await routeApp(state.graph);
+		apps.push(app);
+
+		const response = await app.inject({ method: 'POST', url: '/api/admin/export', payload: {} });
+		expect(response.statusCode).toBe(409);
+		expect(state.storage.calls.stream).not.toHaveBeenCalled();
+		expect(state.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
+	});
+
+	it('does not bind a committed durable job to client or API graph lifetime', async () => {
+		const state = harness();
+		let release!: () => void;
+		let entered!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const started = new Promise<void>((resolve) => { entered = resolve; });
+		state.repositories.calls.createJob.mockImplementationOnce(async (input: { id: string }) => {
+			entered();
+			await gate;
+			return { id: input.id };
 		});
 		const app = await routeApp(state.graph);
 		apps.push(app);
@@ -621,148 +624,13 @@ describe('import/export production wiring', () => {
 			body: '{}',
 			signal: abort.signal,
 		});
-		await vi.waitFor(() => expect(state.storage.calls.stream).toHaveBeenCalledOnce());
+		await started;
 		abort.abort();
+		release();
 		await expect(request).rejects.toThrow();
-		await vi.waitFor(() => {
-			expect(receivedSignal?.aborted).toBe(true);
-			expect(state.fileSystem.temporary.size).toBe(0);
-			expect(state.progress.get()).toBeNull();
-		});
-	});
-
-	it('treats a missing storage object as failed, leaves no file/temp, and releases the lock', async () => {
-		const state = harness();
-		state.storage.calls.stream.mockResolvedValueOnce(null);
-		const app = await routeApp(state.graph);
-		apps.push(app);
-
-		const missing = await app.inject({ method: 'POST', url: '/api/admin/export', payload: {} });
-		expect(missing.statusCode).toBe(200);
-		expect(missing.json().data).toMatchObject({
-			totalFiles: 1,
-			failed: 1,
-			downloaded: 0,
-			aborted: false,
-		});
-		expect(state.fileSystem.files.has(imageDestination)).toBe(false);
-		expect(state.fileSystem.temporary.size).toBe(0);
-		expect(state.progress.get()).toBeNull();
-
-		const later = await app.inject({
-			method: 'POST',
-			url: '/api/admin/export',
-			payload: { dryRun: true },
-		});
-		expect(later.statusCode).toBe(200);
-		expect(later.json().data).toMatchObject({ failed: 0, downloaded: 0 });
-	});
-
-	it('rejects a concurrent start and releases status/lock after storage read failure', async () => {
-		const state = harness();
-		const gate = deferred<void>();
-		state.storage.calls.stream.mockImplementation(async () => {
-			await gate.promise;
-			throw new Error('S3 read failed');
-		});
-		const app = await routeApp(state.graph);
-		apps.push(app);
-
-		const first = app.inject({ method: 'POST', url: '/api/admin/export', payload: {} });
-		await vi.waitFor(() => expect(state.storage.calls.stream).toHaveBeenCalledOnce());
-		const concurrent = await app.inject({ method: 'POST', url: '/api/admin/export', payload: {} });
-		expect(concurrent.statusCode).toBe(409);
-		gate.resolve();
-		const result = await first;
-		expect(result.statusCode).toBe(200);
-		expect(result.json().data).toMatchObject({ failed: 1, downloaded: 0 });
-		expect((await app.inject({
-			method: 'GET',
-			url: '/api/admin/export/status',
-		})).json().data).toEqual({ running: false, progress: null });
-	});
-
-	it.each([
-		['write', 'filesystem write failed'],
-		['rename', 'filesystem rename failed'],
-	] as const)('cleans sibling temp and releases progress after %s failure', async (fault, message) => {
-		const fileSystem = memoryFileSystem();
-		fileSystem.faults[fault] = new Error(message);
-		const state = harness({ fileSystem });
-		const app = await routeApp(state.graph);
-		apps.push(app);
-
-		const response = await app.inject({ method: 'POST', url: '/api/admin/export', payload: {} });
-		expect(response.statusCode).toBe(200);
-		expect(response.json().data).toMatchObject({ failed: 1, downloaded: 0 });
-		expect(fileSystem.temporary.size).toBe(0);
-		expect(state.progress.get()).toBeNull();
-	});
-
-	it('exports a WebGL-only protected source ZIP through sibling-temp atomic rename', async () => {
-		const deploymentId = '123e4567-e89b-42d3-a456-426614174000';
-		const project = {
-			...exportProject(),
-			webglEntryKey: `webgl/71/${deploymentId}/site/index.html`,
-			assets: [],
-		};
-		const state = harness({ projects: [project] });
-		const app = await routeApp(state.graph);
-		apps.push(app);
-
-		const response = await app.inject({ method: 'POST', url: '/api/admin/export', payload: {} });
-		const finalPath = '/nas/ExportedAssets/2026_Show/Ticket 010/webgl/webgl.zip';
-		const temporaryPath = `${finalPath}.id-1.tmp`;
-		expect(response.statusCode).toBe(200);
-		expect(response.json().data).toMatchObject({
-			totalFiles: 1,
-			downloaded: 1,
-			failed: 0,
-		});
-		expect(state.storage.calls.stream).toHaveBeenCalledWith(
-			'pcu-protected',
-			`webgl/71/${deploymentId}/source.zip`,
-			undefined,
-			expect.objectContaining({ signal: expect.any(AbortSignal) }),
-		);
-		expect(state.storage.calls.stream.mock.calls.some(([bucket]) => bucket === 'pcu-public')).toBe(false);
-		expect(state.fileSystem.calls.rename).toHaveBeenCalledWith(temporaryPath, finalPath);
-		expect(state.fileSystem.files.get(finalPath)?.toString()).toBe('data');
-		expect(state.fileSystem.files.has(temporaryPath)).toBe(false);
-		expect(state.fileSystem.temporary.size).toBe(0);
-	});
-
-	it('diagnoses the exact temp left by rename+cleanup failure without success overcount', async () => {
-		const fileSystem = memoryFileSystem();
-		const renameError = new Error('rename failed');
-		const cleanupError = new Error('cleanup failed');
-		const temporaryPath = `${imageDestination}.id-1.tmp`;
-		fileSystem.faults.rename = renameError;
-		fileSystem.faults.remove = cleanupError;
-		const state = harness({ fileSystem });
-		const app = await routeApp(state.graph);
-		apps.push(app);
-
-		const response = await app.inject({ method: 'POST', url: '/api/admin/export', payload: {} });
-		expect(response.statusCode).toBe(200);
-		expect(response.json().data).toMatchObject({ failed: 1, downloaded: 0 });
-		expect(fileSystem.files.has(imageDestination)).toBe(false);
-		expect(fileSystem.files.get(temporaryPath)?.toString()).toBe('data');
-		expect(fileSystem.temporary).toEqual(new Set([temporaryPath]));
-		expect(state.logger.warn).toHaveBeenCalledWith(
-			{ err: cleanupError, path: temporaryPath },
-			'Failed to remove partial export file',
-		);
-		expect(state.progress.get()).toBeNull();
-		fileSystem.faults.rename = undefined;
-		fileSystem.faults.remove = undefined;
-		await fileSystem.remove(temporaryPath);
-		expect(fileSystem.files.has(temporaryPath)).toBe(false);
-		expect(fileSystem.temporary.size).toBe(0);
-		await expect(app.inject({
-			method: 'POST',
-			url: '/api/admin/export',
-			payload: { dryRun: true },
-		})).resolves.toMatchObject({ statusCode: 200 });
+		await vi.waitFor(() => expect(state.repositories.calls.createJob).toHaveBeenCalledOnce());
+		await expect(state.graph.close()).resolves.toBeUndefined();
+		expect(state.storage.calls.stream).not.toHaveBeenCalled();
+		expect(state.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
 	});
 });

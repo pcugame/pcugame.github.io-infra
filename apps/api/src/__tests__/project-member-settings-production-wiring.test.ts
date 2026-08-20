@@ -225,9 +225,8 @@ function portHarness() {
 		bulkUpdateStatus: async (_ids, status) => calls.projectUpdateMany({ status }),
 		findExhibitionById: vi.fn(async () => null),
 		findProjectByExhibitionAndSlug: vi.fn(async () => null),
-		createProjectWithAssets: vi.fn(async () => { throw new Error('not scripted'); }),
+		createProjectMetadata: vi.fn(async () => { throw new Error('not scripted'); }),
 		createAsset: vi.fn(async () => { throw new Error('not scripted'); }),
-		replaceOrCreateReplaceableAsset: vi.fn(async () => { throw new Error('not scripted'); }),
 	};
 	const accessRepository = {
 		findProject: calls.projectFindUnique,
@@ -296,6 +295,7 @@ function graphHarness(
 	const graph = createProjectMemberSettingsProductionGraph({
 		config: {
 			API_PUBLIC_URL: `https://api-${label}.test`,
+			PUBLIC_ASSET_BASE_URL: `https://assets-${label}.test`,
 			S3_BUCKET_PUBLIC: `${label}-public`,
 			S3_BUCKET_PROTECTED: `${label}-protected`,
 			UPLOAD_CHUNK_SIZE_MB: 10,

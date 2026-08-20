@@ -1,14 +1,22 @@
-import type { SubmitProjectResponse } from '../../contracts';
-import { uploadFormData } from './client';
+import type { SubmitProjectPayload, SubmitProjectResponse } from '../../contracts';
+import { api, uploadFormData } from './client';
 
 export const userProjectApi = {
-  submit(input: { formData: FormData; idempotencyKey: string }) {
-    return uploadFormData<SubmitProjectResponse>(
+  submit(input: { payload: SubmitProjectPayload; idempotencyKey: string }) {
+    return api.post<SubmitProjectResponse>(
       '/api/me/projects/submit',
+      input.payload,
+      { headers: { 'Idempotency-Key': input.idempotencyKey } },
+    );
+  },
+
+  addAsset(input: { projectId: number; formData: FormData; idempotencyKey: string }) {
+    return uploadFormData<{ assetId: number }>(
+      `/api/me/projects/${input.projectId}/assets`,
       input.formData,
       {
-        title: '작품 파일 업로드',
-        processingMessage: '파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
+        title: '소형 자산 업로드',
+        processingMessage: '이미지 전송과 변환을 진행하고 있습니다.',
         headers: { 'Idempotency-Key': input.idempotencyKey },
       },
     );

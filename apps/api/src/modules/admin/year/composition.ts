@@ -21,9 +21,10 @@ import type { UploadLifecycleRuntime } from '../../upload-lifecycle/ports.js';
 
 type YearConfig = Pick<
 	Env,
-	| 'API_PUBLIC_URL'
+	| 'PUBLIC_ASSET_BASE_URL'
 	| 'S3_BUCKET_PUBLIC'
 	| 'S3_BUCKET_PROTECTED'
+	| 'INLINE_UPLOAD_MAX_BYTES'
 	| 'UPLOAD_USER_IMAGE_MAX_MB'
 	| 'UPLOAD_USER_GAME_MAX_MB'
 	| 'UPLOAD_USER_REQUEST_MAX_MB'
@@ -75,7 +76,7 @@ export function createYearProductionGraph(
 		...(deps.activeUploadTemps ? { activeUploadTemps: deps.activeUploadTemps } : {}),
 	});
 	const service = createExhibitionService({
-		apiPublicUrl: deps.config.API_PUBLIC_URL,
+		publicAssetBaseUrl: deps.config.PUBLIC_ASSET_BASE_URL,
 		posterBucket: deps.config.S3_BUCKET_PUBLIC,
 		protectedBucket: deps.config.S3_BUCKET_PROTECTED,
 		repository: deps.repository,
@@ -92,7 +93,7 @@ export function createYearProductionGraph(
 	return {
 		exhibitionController: createYearController({
 			service,
-			uploadBodyLimit: megabytes(deps.config.UPLOAD_PRIVILEGED_REQUEST_MAX_MB),
+			uploadBodyLimit: deps.config.INLINE_UPLOAD_MAX_BYTES ?? megabytes(16),
 		}),
 	};
 }

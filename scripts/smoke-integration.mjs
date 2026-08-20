@@ -6,6 +6,10 @@ import { brotliCompressSync, gzipSync } from 'node:zlib';
 const apiBase = process.env.INTEGRATION_API_BASE_URL || 'http://localhost:4000';
 const webBase = process.env.INTEGRATION_WEB_BASE_URL || 'http://localhost:5173';
 const origin = process.env.INTEGRATION_ORIGIN || webBase;
+const publicAssetBase = process.env.INTEGRATION_PUBLIC_ASSET_BASE_URL
+  || 'http://pcu-public.web.garage.localhost:3904';
+const publicAssetInternalUrl = process.env.INTEGRATION_PUBLIC_ASSET_INTERNAL_URL || publicAssetBase;
+const signedS3InternalUrl = process.env.INTEGRATION_SIGNED_S3_INTERNAL_URL;
 const webglFixturePath = process.env.INTEGRATION_WEBGL_ZIP;
 const keepWebgl = process.env.INTEGRATION_KEEP_WEBGL === 'true';
 
@@ -83,15 +87,22 @@ function resolveIntegrationS3Target(url) {
   const target = new URL(url);
   const signedHost = target.host;
   const apiHostname = new URL(apiBase).hostname;
-  // The API deliberately signs the browser-visible localhost endpoint while
-  // this smoke client runs in a sibling container.  Connect to Garage over the
-  // Compose network but preserve the signed Host header byte-for-byte.
+  // The API deliberately signs the browser-visible upload-part origin while
+  // this smoke client can run in a sibling container. Connect to that ordinary
+  // byte proxy over the Compose network, but preserve the signed Host header
+  // byte-for-byte so the request exercises the same signature and byte limit.
   if (
     (target.hostname === 'localhost' || target.hostname === '127.0.0.1')
     && apiHostname !== 'localhost'
     && apiHostname !== '127.0.0.1'
   ) {
-    target.hostname = 'garage';
+    if (!signedS3InternalUrl) {
+      throw new Error('INTEGRATION_SIGNED_S3_INTERNAL_URL is required for container smoke');
+    }
+    const internalTarget = new URL(signedS3InternalUrl);
+    target.protocol = internalTarget.protocol;
+    target.hostname = internalTarget.hostname;
+    target.port = internalTarget.port;
   } else if (target.hostname === 'garage' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1')) {
     target.hostname = '127.0.0.1';
   }
@@ -142,6 +153,40 @@ function integrationApiUrl(url) {
     target.host = internalApi.host;
   }
   return target.toString();
+}
+
+async function requestPublicOrigin(url, {
+  method = 'GET',
+  headers = {},
+} = {}) {
+  const browserTarget = new URL(url);
+  const target = new URL(browserTarget.pathname + browserTarget.search, publicAssetInternalUrl);
+  const response = await new Promise((resolve, reject) => {
+    const request = httpRequest(target, {
+      method,
+      headers: { ...headers, Host: browserTarget.host },
+    }, (incoming) => {
+      const chunks = [];
+      incoming.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      incoming.on('end', () => resolve({
+        status: incoming.statusCode ?? 0,
+        rawHeaders: incoming.headers,
+        body: Buffer.concat(chunks),
+      }));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+  const responseHeaders = new Headers();
+  for (const [name, value] of Object.entries(response.rawHeaders)) {
+    if (Array.isArray(value)) value.forEach((item) => responseHeaders.append(name, item));
+    else if (value !== undefined) responseHeaders.set(name, value);
+  }
+  return {
+    status: response.status,
+    headers: responseHeaders,
+    arrayBuffer: async () => response.body,
+  };
 }
 
 function crc32(input) {
@@ -257,8 +302,11 @@ if (untrustedMe?.data?.authenticated) {
 }
 console.log('ok: API/WebGL-origin requests cannot reuse frontend sessions');
 
-const publicImageUrl = `${apiBase}/api/public/images/integration-poster.png`;
-const assetRes = await fetch(publicImageUrl, { redirect: 'manual' });
+const publicImageUrl = new URL('integration-poster.png', `${publicAssetBase}/`).toString();
+if (new URL(publicImageUrl).origin === new URL(apiBase).origin) {
+  throw new Error('public image URL unexpectedly uses the API origin');
+}
+const assetRes = await requestPublicOrigin(publicImageUrl);
 if (assetRes.status !== 200) {
   throw new Error(`public image stream returned ${assetRes.status}`);
 }
@@ -272,20 +320,24 @@ if ((await assetRes.arrayBuffer()).byteLength === 0) {
   throw new Error('public image stream returned an empty body');
 }
 
-const assetHead = await fetch(publicImageUrl, { method: 'HEAD' });
+const assetHead = await requestPublicOrigin(publicImageUrl, { method: 'HEAD' });
 if (assetHead.status !== 200 || !assetHead.headers.get('content-length')) {
   throw new Error(`public image HEAD returned invalid metadata (${assetHead.status})`);
 }
 const imageEtag = assetHead.headers.get('etag');
 if (imageEtag) {
-  const conditional = await fetch(publicImageUrl, {
+  const conditional = await requestPublicOrigin(publicImageUrl, {
     headers: { 'If-None-Match': imageEtag },
   });
   if (conditional.status !== 304 || (await conditional.arrayBuffer()).byteLength !== 0) {
     throw new Error('public image conditional request did not return a bodyless 304');
   }
 }
-console.log('ok: public image direct stream, HEAD, and immutable cache');
+const legacyPublicImage = await fetch(`${apiBase}/api/public/images/integration-poster.png`);
+if (legacyPublicImage.status !== 404) {
+  throw new Error(`legacy API public image byte route returned ${legacyPublicImage.status}`);
+}
+console.log('ok: public image uses the non-API origin; legacy relay is absent');
 
 const { body: publicProject } = await fetchJson(
   `${apiBase}/api/public/projects/integration-public-asset`,
@@ -358,14 +410,16 @@ async function createUploadSession(originalName, body, uploadKind) {
 
 function assertDirectMultipartSession(session, uploadKind) {
   if (session?.uploadKind !== uploadKind
-    || session.transport !== 'DIRECT_MULTIPART'
+    || Object.prototype.hasOwnProperty.call(session, 'transport')
+	|| typeof session.sessionId !== 'string'
+	|| session.sessionId.length === 0
     || !Number.isSafeInteger(session.generation)
     || session.generation < 1
     || !Number.isSafeInteger(session.totalChunks)
     || session.totalChunks < 1
     || !Number.isSafeInteger(session.chunkSizeBytes)
     || session.chunkSizeBytes < 1) {
-    throw new Error(`${uploadKind} session did not negotiate DIRECT_MULTIPART`);
+    throw new Error(`${uploadKind} session did not satisfy the direct-only contract`);
   }
 }
 
@@ -381,6 +435,15 @@ async function uploadDirectMultipart(session, bytes) {
 
   for (let offset = 0; offset < partNumbers.length; offset += 8) {
     const requestedPartNumbers = partNumbers.slice(offset, offset + 8);
+		const requestedParts = requestedPartNumbers.map((partNumber) => {
+			const start = (partNumber - 1) * session.chunkSizeBytes;
+			const body = bytes.subarray(start, Math.min(start + session.chunkSizeBytes, bytes.length));
+			return {
+				partNumber,
+				body,
+				checksumSha256: createHash('sha256').update(body).digest('base64'),
+			};
+		});
     const { body: signedResponse } = await fetchJson(
       `${apiBase}/api/admin/game-upload-sessions/${session.sessionId}/part-urls`,
       {
@@ -390,7 +453,13 @@ async function uploadDirectMultipart(session, bytes) {
           Cookie: cookie,
           Origin: origin,
         },
-        body: JSON.stringify({ generation: session.generation, partNumbers: requestedPartNumbers }),
+        body: JSON.stringify({
+				generation: session.generation,
+				parts: requestedParts.map(({ partNumber, checksumSha256 }) => ({
+					partNumber,
+					checksumSha256,
+				})),
+			}),
       },
     );
     const signed = signedResponse?.data;
@@ -403,10 +472,18 @@ async function uploadDirectMultipart(session, bytes) {
       throw new Error('part-urls response did not contain exactly the requested parts');
     }
 
-    for (const partNumber of requestedPartNumbers) {
+		if (Object.prototype.hasOwnProperty.call(signed, 'transport')) {
+			throw new Error('part-urls response exposed a legacy transport selector');
+		}
+
+    for (const { partNumber, body: partBody, checksumSha256 } of requestedParts) {
       const capability = capabilities.get(partNumber);
-      const start = (partNumber - 1) * session.chunkSizeBytes;
-      const partBody = bytes.subarray(start, Math.min(start + session.chunkSizeBytes, bytes.length));
+			const requiredChecksum = Object.entries(capability.requiredHeaders ?? {})
+				.find(([name]) => name.toLowerCase() === 'x-amz-checksum-sha256')?.[1];
+			const queryChecksum = new URL(capability.url).searchParams.get('x-amz-checksum-sha256');
+			if ((requiredChecksum ?? queryChecksum) !== checksumSha256) {
+				throw new Error(`direct UploadPart ${partNumber} capability checksum mismatch`);
+			}
       const put = await requestIntegrationS3(capability.url, {
         method: 'PUT',
         headers: {
@@ -521,9 +598,12 @@ console.log('ok: concurrent direct completion is fenced or idempotent');
 const webglComplete = await waitForDirectCompletion(webglSession, webglManifest);
 const webglUrl = webglComplete?.webglUrl;
 if (typeof webglUrl !== 'string') throw new Error('WebGL completion did not return webglUrl');
-const hostedWebglUrl = integrationApiUrl(webglUrl);
+if (new URL(webglUrl).origin === new URL(apiBase).origin) {
+  throw new Error('WebGL completion returned the API origin');
+}
+const hostedWebglUrl = webglUrl;
 
-const hostedIndex = await fetch(hostedWebglUrl, { headers: { Origin: 'null' } });
+const hostedIndex = await requestPublicOrigin(hostedWebglUrl, { headers: { Origin: origin } });
 const hostedIndexBody = Buffer.from(await hostedIndex.arrayBuffer());
 if (
   hostedIndex.status !== 200
@@ -539,13 +619,16 @@ const hostedIndexLength = Number(hostedIndex.headers.get('content-length'));
 if (!webglEtag || !webglLastModified || !webglCacheControl) {
   throw new Error('WebGL index GET did not expose ETag, Last-Modified, and Cache-Control');
 }
+if (webglCacheControl !== 'public, max-age=60') {
+	throw new Error(`WebGL entry returned unexpected short cache policy: ${webglCacheControl}`);
+}
 if (!Number.isSafeInteger(hostedIndexLength) || hostedIndexLength !== hostedIndexBody.byteLength) {
   throw new Error(
     `WebGL index GET returned inconsistent Content-Length (${hostedIndexLength}/${hostedIndexBody.byteLength})`,
   );
 }
-if (hostedIndex.headers.get('access-control-allow-origin') !== '*') {
-  throw new Error('WebGL index did not use credential-free CORS');
+if (hostedIndex.headers.get('access-control-allow-origin') !== new URL(origin).origin) {
+  throw new Error('WebGL index did not use the exact configured CORS origin');
 }
 if (hostedIndex.headers.has('access-control-allow-credentials')) {
   throw new Error('WebGL index unexpectedly allowed credentials');
@@ -553,20 +636,43 @@ if (hostedIndex.headers.has('access-control-allow-credentials')) {
 if (hostedIndex.headers.has('x-frame-options')) {
   throw new Error('WebGL index retained the global iframe denial header');
 }
+for (const [header, expected] of [
+  ['cross-origin-resource-policy', 'cross-origin'],
+  ['cross-origin-embedder-policy', 'require-corp'],
+  ['cross-origin-opener-policy', 'same-origin'],
+  ['x-content-type-options', 'nosniff'],
+]) {
+  if (hostedIndex.headers.get(header) !== expected) {
+    throw new Error(`WebGL index returned unexpected ${header}`);
+  }
+}
 const webglCsp = hostedIndex.headers.get('content-security-policy') || '';
 if (!webglCsp.includes(`frame-ancestors ${new URL(origin).origin}`)) {
   throw new Error(`WebGL index returned an unexpected CSP: ${webglCsp}`);
 }
-// The container reaches the API as `http://api:4000`, while generated public
-// URLs intentionally use the browser-facing API_PUBLIC_URL (`localhost`). CSP
-// must be asserted against the wire contract, not the test runner's route.
-const webglAssetSource = `${new URL(webglUrl).origin}/api/public/webgl/`;
-if (!webglCsp.includes(`connect-src ${webglAssetSource}`) || webglCsp.includes("connect-src 'self'")) {
+if (!webglCsp.includes("connect-src 'self'") || webglCsp.includes('/api/public/webgl/')) {
   throw new Error(`WebGL index did not isolate asset connections: ${webglCsp}`);
 }
+const hostedIndexHead = await requestPublicOrigin(hostedWebglUrl, {
+  method: 'HEAD',
+  headers: { Origin: origin },
+});
+if (hostedIndexHead.status !== 200
+  || hostedIndexHead.headers.get('etag') !== webglEtag
+  || hostedIndexHead.headers.get('content-length') !== String(hostedIndexBody.byteLength)
+  || (await hostedIndexHead.arrayBuffer()).byteLength !== 0) {
+  throw new Error('WebGL public-origin HEAD did not preserve object metadata');
+}
 
-const webglEtagConditional = await fetch(hostedWebglUrl, {
-  headers: { Origin: 'null', 'If-None-Match': webglEtag },
+const rejectedCorsOrigin = await requestPublicOrigin(hostedWebglUrl, {
+  headers: { Origin: 'https://attacker.invalid' },
+});
+if (rejectedCorsOrigin.headers.has('access-control-allow-origin')) {
+  throw new Error('public origin reflected an unconfigured CORS origin');
+}
+
+const webglEtagConditional = await requestPublicOrigin(hostedWebglUrl, {
+  headers: { Origin: origin, 'If-None-Match': webglEtag },
 });
 if (
   webglEtagConditional.status !== 304
@@ -581,8 +687,8 @@ if (
   throw new Error('WebGL If-None-Match 304 did not preserve validators and cache policy');
 }
 
-const webglModifiedConditional = await fetch(hostedWebglUrl, {
-  headers: { Origin: 'null', 'If-Modified-Since': webglLastModified },
+const webglModifiedConditional = await requestPublicOrigin(hostedWebglUrl, {
+  headers: { Origin: origin, 'If-Modified-Since': webglLastModified },
 });
 if (
   webglModifiedConditional.status !== 304
@@ -593,8 +699,8 @@ if (
 
 const indexRangeEnd = Math.min(7, hostedIndexBody.byteLength - 1);
 const expectedIndexRange = hostedIndexBody.subarray(0, indexRangeEnd + 1);
-const hostedIndexRange = await fetch(hostedWebglUrl, {
-  headers: { Origin: 'null', Range: `bytes=0-${indexRangeEnd}` },
+const hostedIndexRange = await requestPublicOrigin(hostedWebglUrl, {
+  headers: { Origin: origin, Range: `bytes=0-${indexRangeEnd}` },
 });
 const hostedIndexRangeBody = Buffer.from(await hostedIndexRange.arrayBuffer());
 if (
@@ -608,24 +714,23 @@ if (
   throw new Error(`WebGL index range returned invalid metadata or body (${hostedIndexRange.status})`);
 }
 
-const hostedIndexUnsatisfiable = await fetch(hostedWebglUrl, {
-  headers: { Origin: 'null', Range: `bytes=${hostedIndexBody.byteLength}-` },
+const hostedIndexUnsatisfiable = await requestPublicOrigin(hostedWebglUrl, {
+  headers: { Origin: origin, Range: `bytes=${hostedIndexBody.byteLength}-` },
 });
 if (
   hostedIndexUnsatisfiable.status !== 416
   || hostedIndexUnsatisfiable.headers.get('content-range') !== (
     `bytes */${hostedIndexBody.byteLength}`
   )
-  || (await hostedIndexUnsatisfiable.arrayBuffer()).byteLength !== 0
 ) {
   throw new Error(
     `WebGL unsatisfiable range returned invalid metadata or body (${hostedIndexUnsatisfiable.status})`,
   );
 }
 
-const hostedIndexIfRangeMatch = await fetch(hostedWebglUrl, {
+const hostedIndexIfRangeMatch = await requestPublicOrigin(hostedWebglUrl, {
   headers: {
-    Origin: 'null',
+    Origin: origin,
     Range: `bytes=0-${indexRangeEnd}`,
     'If-Range': webglEtag,
   },
@@ -637,9 +742,9 @@ if (
   throw new Error(`WebGL matching If-Range returned ${hostedIndexIfRangeMatch.status}`);
 }
 
-const hostedIndexIfRangeMiss = await fetch(hostedWebglUrl, {
+const hostedIndexIfRangeMiss = await requestPublicOrigin(hostedWebglUrl, {
   headers: {
-    Origin: 'null',
+    Origin: origin,
     Range: `bytes=0-${indexRangeEnd}`,
     'If-Range': '"integration-mismatch"',
   },
@@ -652,8 +757,8 @@ if (
   throw new Error(`WebGL mismatching If-Range returned ${hostedIndexIfRangeMiss.status}`);
 }
 
-const hostedWasm = await fetch(new URL(webglWasmPath, hostedWebglUrl), {
-  headers: { Origin: 'null', Range: 'bytes=0-7' },
+const hostedWasm = await requestPublicOrigin(new URL(webglWasmPath, hostedWebglUrl), {
+  headers: { Origin: origin, Range: 'bytes=0-7' },
 });
 if (hostedWasm.status !== 206) {
   throw new Error(`WebGL WASM range returned ${hostedWasm.status}`);
@@ -664,13 +769,26 @@ if (hostedWasm.headers.get('content-type') !== 'application/wasm') {
 if (hostedWasm.headers.get('content-encoding') !== 'br') {
   throw new Error('WebGL WASM did not preserve Brotli Content-Encoding');
 }
+if (hostedWasm.headers.get('cache-control') !== 'public, max-age=31536000, immutable') {
+	throw new Error('WebGL generation artifact did not return the immutable cache policy');
+}
 if (!hostedWasm.headers.get('content-range')?.startsWith('bytes 0-')) {
   throw new Error('WebGL WASM did not return Content-Range');
 }
 await hostedWasm.arrayBuffer();
 console.log(
-  'ok: WebGL ZIP streams with CSP/CORS/validators/Range/If-Range/416/encoding',
+  'ok: public-origin WebGL has CSP/exact CORS/validators/Range/If-Range/416/encoding',
 );
+
+const queryPreserved = await requestPublicOrigin(`${hostedWebglUrl}?probe=path-and-query`);
+if (queryPreserved.status !== 200
+  || !Buffer.from(await queryPreserved.arrayBuffer()).equals(hostedIndexBody)) {
+  throw new Error('public reverse proxy changed the object path, query, or body');
+}
+const oldWebglRelay = await fetch(`${apiBase}/api/public/webgl/${projectId}/`);
+if (oldWebglRelay.status !== 404) {
+  throw new Error(`legacy API WebGL byte route returned ${oldWebglRelay.status}`);
+}
 
 if (keepWebgl) {
   console.log(`ok: retained WebGL fixture for browser checks at ${hostedWebglUrl}`);
@@ -679,10 +797,12 @@ if (keepWebgl) {
     method: 'DELETE',
     headers: { Cookie: cookie, Origin: origin },
   });
-  const deletedWebgl = await fetch(hostedWebglUrl, { headers: { Origin: 'null' } });
-  if (deletedWebgl.status !== 404) {
-    throw new Error(`deleted WebGL deployment remained public with ${deletedWebgl.status}`);
-  }
+	await waitFor('deleted WebGL exact-prefix cleanup', async () => {
+		const deletedWebgl = await requestPublicOrigin(hostedWebglUrl, { headers: { Origin: origin } });
+		if (deletedWebgl.status !== 404) {
+			throw new Error(`deleted WebGL deployment remained public with ${deletedWebgl.status}`);
+		}
+	});
   const { body: projectAfterWebglDelete } = await fetchJson(
     `${apiBase}/api/public/projects/integration-public-asset`,
   );

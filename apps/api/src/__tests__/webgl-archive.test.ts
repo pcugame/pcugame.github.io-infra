@@ -234,13 +234,21 @@ describe('WebGL paths and response metadata', () => {
 	it('limits iframe ancestors to the configured frontend origin', () => {
 		const csp = webglContentSecurityPolicy(
 			'https://pcugame.github.io/site/path',
-			'https://api.example.com/base',
+			'https://assets.example.com/base',
 		);
 		expect(csp).toContain('frame-ancestors https://pcugame.github.io');
-		expect(csp).toContain('script-src https://api.example.com/api/public/webgl/');
-		expect(csp).toContain('connect-src https://api.example.com/api/public/webgl/');
+		expect(csp).toContain('script-src https://assets.example.com');
+		expect(csp).toContain('connect-src https://assets.example.com');
+		expect(csp).not.toContain('api.example.com');
 		expect(csp).toContain("frame-src 'none'");
 		expect(csp).not.toContain("script-src 'self'");
 		expect(csp).not.toContain('frame-ancestors *');
+	});
+
+	it('marks every immutable deployment object, including index.html, as immutable', () => {
+		expect(webglContentMetadata('index.html').cacheControl)
+			.toBe('public, max-age=31536000, immutable');
+		expect(webglContentMetadata('Build/game.wasm.br').cacheControl)
+			.toBe('public, max-age=31536000, immutable');
 	});
 });

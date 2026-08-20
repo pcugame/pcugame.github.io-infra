@@ -3,6 +3,7 @@ import type {
 	Prisma,
 	PrismaClient,
 	ProjectStatus,
+	UploadKind,
 } from '../../../generated/prisma/client.js';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
 import { operationInProgress } from '../../../shared/errors.js';
@@ -23,6 +24,7 @@ import {
 	projectAssetDeletionTargets,
 	projectWebglDeletionTargets,
 } from './project-deletion-targets.js';
+import { parseWebglEntryKey } from '../../webgl/paths.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -94,8 +96,12 @@ async function lockProjects(
 async function lockLiveUploads(
 	tx: TxClient,
 	projectIds: readonly number[],
+	uploadKind?: UploadKind,
 ): Promise<LiveProjectUpload[]> {
 	if (projectIds.length === 0) return [];
+	const kindFilter = uploadKind === undefined
+		? PrismaRuntime.empty
+		: PrismaRuntime.sql`AND "upload_kind" = CAST(${uploadKind} AS "UploadKind")`;
 	return tx.$queryRaw<LiveProjectUpload[]>(PrismaRuntime.sql`
 		SELECT
 			"id",
@@ -108,6 +114,7 @@ async function lockLiveUploads(
 		FROM "game_upload_sessions"
 		WHERE "project_id" IN (${PrismaRuntime.join([...new Set(projectIds)].sort((left, right) => left - right))})
 			AND "status" IN ('PENDING', 'COMPLETING', 'VERIFYING')
+			${kindFilter}
 		ORDER BY "project_id", "id"
 		FOR UPDATE
 	`);
@@ -117,6 +124,30 @@ function assertNoInFlightCompletion(uploads: readonly LiveProjectUpload[]): void
 	if (uploads.some((upload) => upload.status !== 'PENDING')) {
 		throw operationInProgress('Project deletion is blocked while an upload is completing or verifying');
 	}
+}
+
+async function currentWebglSources(
+	tx: TxClient,
+	projects: readonly LockedProject[],
+): Promise<Map<number, string>> {
+	const targets = projects.flatMap((project) => {
+		const deployment = parseWebglEntryKey(project.id, project.webglEntryKey);
+		return deployment ? [{ projectId: project.id, deploymentId: deployment.deploymentId }] : [];
+	});
+	if (targets.length === 0) return new Map();
+	const sessions = await tx.gameUploadSession.findMany({
+		where: {
+			status: 'COMPLETED',
+			uploadKind: 'WEBGL',
+			storageKey: { not: null },
+			OR: targets.map(({ projectId, deploymentId }) => ({
+				projectId,
+				webglDeploymentId: deploymentId,
+			})),
+		},
+		select: { projectId: true, storageKey: true },
+	});
+	return new Map(sessions.map((session) => [session.projectId, session.storageKey!]));
 }
 
 const projectListPlayableKinds: AssetKind[] = ['GAME', 'VIDEO'];
@@ -204,8 +235,18 @@ function buildProjectListOrderBy(
 }
 
 function retryableTransactionError(error: unknown): boolean {
-	return error instanceof PrismaRuntime.PrismaClientKnownRequestError
-		&& (error.code === 'P2034' || error.code === 'P2002');
+	if (!(error instanceof PrismaRuntime.PrismaClientKnownRequestError)) return false;
+	if (error.code === 'P2034' || error.code === 'P2002') return true;
+	if (error.code !== 'P2010') return false;
+	const driverError = error.meta?.['driverAdapterError'];
+	if (!driverError || typeof driverError !== 'object' || !('cause' in driverError)) return false;
+	const cause = driverError.cause;
+	return !!cause
+		&& typeof cause === 'object'
+		&& 'kind' in cause
+		&& cause.kind === 'TransactionWriteConflict'
+		&& 'originalCode' in cause
+		&& cause.originalCode === '40001';
 }
 
 async function withSerializableRetry<T>(
@@ -266,13 +307,16 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 				const project = (await lockProjects(tx, [id]))[0];
 				if (!project) throw new Error(`Project ${id} was not found`);
 				const activeUploads = await lockLiveUploads(tx, [id]);
+				const webglSources = await currentWebglSources(tx, [project]);
 				assertNoInFlightCompletion(activeUploads);
 				const assets = await tx.asset.findMany({
 					where: { projectId: id },
 				});
 				await queueDurableDeletions(tx, [
 					...projectAssetDeletionTargets(assets, outbox),
-					...projectWebglDeletionTargets(id, project.webglEntryKey, outbox),
+					...projectWebglDeletionTargets(
+						id, project.webglEntryKey, outbox, webglSources.get(id),
+					),
 					...liveUploadDeletionTargets(id, activeUploads, outbox),
 				]);
 				for (const upload of activeUploads) {
@@ -302,15 +346,18 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 			return withSerializableRetry(client, async (tx) => {
 				const project = (await lockProjects(tx, [projectId]))[0];
 				if (!project) throw new Error(`Project ${projectId} was not found`);
-				const liveUploads = await lockLiveUploads(tx, [projectId]);
-				const liveWebglUploads = liveUploads.filter((upload) => upload.uploadKind === 'WEBGL');
+				const liveUploads = await lockLiveUploads(tx, [projectId], 'WEBGL');
+				const webglSources = await currentWebglSources(tx, [project]);
+				const liveWebglUploads = liveUploads;
 				assertNoInFlightCompletion(liveWebglUploads);
 				const active = await tx.gameUploadActiveSession.findUnique({
 					where: { projectId_uploadKind: { projectId, uploadKind: 'WEBGL' } },
 					include: { session: true },
 				});
 				await queueDurableDeletions(tx, [
-					...projectWebglDeletionTargets(projectId, project.webglEntryKey, outbox),
+					...projectWebglDeletionTargets(
+						projectId, project.webglEntryKey, outbox, webglSources.get(projectId),
+					),
 					...liveUploadDeletionTargets(projectId, liveWebglUploads, outbox),
 				]);
 				for (const upload of liveWebglUploads) {
@@ -340,6 +387,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 			return withSerializableRetry(client, async (tx) => {
 				const projects = await lockProjects(tx, ids);
 				const activeUploads = await lockLiveUploads(tx, projects.map((project) => project.id));
+				const webglSources = await currentWebglSources(tx, projects);
 				assertNoInFlightCompletion(activeUploads);
 				const assets = await tx.asset.findMany({
 					where: { projectId: { in: ids } },
@@ -350,6 +398,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						project.id,
 						project.webglEntryKey,
 						outbox,
+						webglSources.get(project.id),
 					)),
 					...projects.flatMap((project) => liveUploadDeletionTargets(
 						project.id,
@@ -388,7 +437,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 				where: { project_exhibition_slug: { exhibitionId, slug } },
 			});
 		},
-		createProjectWithAssets(data) {
+		createProjectMetadata(data) {
 			return client.$transaction(async (tx) => {
 				const project = await tx.project.create({
 					data: {
@@ -398,6 +447,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						summary: data.summary,
 						description: data.description,
 						status: data.status,
+						isIncomplete: data.isIncomplete,
 						creatorId: data.creatorId,
 						members: {
 							create: data.members.map((member, index) => ({
@@ -410,41 +460,6 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					},
 				});
 
-				let posterAssetId: number | null = null;
-				for (const savedFile of data.savedFiles) {
-					const asset = await tx.asset.create({
-						data: {
-							projectId: project.id,
-							kind: savedFile.kind,
-							storageKey: savedFile.storageKey,
-							playbackStorageKey: savedFile.playbackStorageKey ?? null,
-							originalName: savedFile.originalName,
-							mimeType: savedFile.mimeType,
-							playbackMimeType: savedFile.playbackMimeType ?? '',
-							sizeBytes: BigInt(savedFile.sizeBytes),
-							playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
-							playbackStatus: savedFile.playbackStatus ?? 'PENDING',
-							playbackError: savedFile.playbackError ?? '',
-							isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO',
-							width: savedFile.width,
-							height: savedFile.height,
-							...assetImageRenditionReadiness(savedFile.renditions ?? []),
-						},
-					});
-					if (savedFile.kind === 'POSTER' && posterAssetId === null) {
-						posterAssetId = asset.id;
-					}
-				}
-				if (posterAssetId !== null) {
-					await tx.project.update({
-						where: { id: project.id },
-						data: { posterAssetId },
-					});
-				}
-				await commitUploadIntents(
-					tx,
-					data.savedFiles.flatMap((savedFile) => savedFile.uploadIntentIds ?? []),
-				);
 				if (data.idempotency) {
 					await succeedIdempotencyOperation(tx, {
 						operationId: data.idempotency.operationId,
@@ -461,6 +476,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					uploadIntentIds = [],
 					idempotency,
 					renditions = [],
+					setAsProjectPoster = false,
 					...assetData
 				} = data;
 				const asset = await tx.asset.create({
@@ -469,6 +485,12 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						...assetImageRenditionReadiness(renditions),
 					},
 				});
+				if (setAsProjectPoster) {
+					await tx.project.update({
+						where: { id: data.projectId },
+						data: { posterAssetId: asset.id },
+					});
+				}
 				await commitUploadIntents(tx, uploadIntentIds);
 				if (idempotency) {
 					await succeedIdempotencyOperation(tx, {
@@ -479,14 +501,6 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 				}
 				return asset;
 			});
-		},
-		replaceOrCreateReplaceableAsset(projectId, kind, data, outbox) {
-			return assetMutation.replaceOrCreateReplaceableAsset(
-				projectId,
-				kind,
-				data,
-				outbox,
-			);
 		},
 	};
 }

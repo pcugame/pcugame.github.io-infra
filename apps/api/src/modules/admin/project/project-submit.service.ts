@@ -1,39 +1,20 @@
-import type { AssetKind, ProjectStatus, UserRole } from '@pcu/contracts';
+import type { ProjectStatus } from '@pcu/contracts';
 import { AppError, badRequest, conflict, forbidden, isUniqueConstraintError } from '../../../shared/errors.js';
-import type { UploadLimits } from '../../../shared/upload-policy.js';
 import { toSlug } from '../../../shared/slug.js';
+import type { JsonCommandInput } from '../../../application/http-input.js';
+import { parseBody, SubmitProjectPayload } from '../../../shared/validation.js';
+import type { MultipartRequestHasher } from '../../../application/upload-ports.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import { generateUniqueSlug, nextSlugCandidate } from './slug.service.js';
-import type { MultipartCommandInput } from '../../../application/http-input.js';
-import { parseBody, SubmitProjectPayload } from '../../../shared/validation.js';
-import type {
-	CollectedUploadFile,
-	MultipartCollectorPort,
-	MultipartRequestHasher,
-	SavedUpload,
-	UploadPipelinePort,
-} from '../../../application/upload-ports.js';
 import type { SubmitProjectRepository } from './ports.js';
 
 export interface SubmitProjectDependencies {
 	webPublicUrl: string;
 	repository: SubmitProjectRepository;
-	uploadLimits(role: UserRole): UploadLimits | Promise<UploadLimits>;
-	uploadSlots: { acquire(): void; release(): void };
-	createPipeline(): UploadPipelinePort;
-	multipartCollector: MultipartCollectorPort;
-	logger?: {
-		error(context: Record<string, unknown>, message: string): void;
-	};
-	recordPostCommitCleanupFailure?: () => void;
-	requestHasher?: MultipartRequestHasher;
+	requestHasher: MultipartRequestHasher;
+	logger?: { error(context: Record<string, unknown>, message: string): void };
 	idempotency?: {
-		claim(input: {
-			actorId: number;
-			scope: string;
-			key: string;
-			requestHash: string;
-		}): Promise<
+		claim(input: { actorId: number; scope: string; key: string; requestHash: string }): Promise<
 			| { kind: 'acquired'; operationId: string; ownerToken: string }
 			| { kind: 'succeeded'; result: unknown }
 		>;
@@ -47,31 +28,8 @@ export interface SubmitProjectDependencies {
 	};
 }
 
-/** Process collected file parts through the upload pipeline */
-export async function processFileParts(
-	fileParts: CollectedUploadFile[],
-	pipeline: UploadPipelinePort,
-): Promise<SavedUpload[]> {
-	const savedFiles: SavedUpload[] = [];
-	for (const fp of fileParts) {
-		let kind: AssetKind;
-		if (fp.fieldname === 'poster') kind = 'POSTER';
-		else if (fp.fieldname === 'images[]') kind = 'IMAGE';
-		else if (fp.fieldname === 'gameFile') kind = 'GAME';
-		else if (fp.fieldname === 'videoFile') kind = 'VIDEO';
-		else continue;
-
-		savedFiles.push(await pipeline.processFile(fp.tmpPath, kind, fp.filename));
-	}
-	return savedFiles;
-}
-
 export type SubmitProjectAudience = 'admin' | 'user';
-
-export interface SubmitProjectOptions {
-	audience: SubmitProjectAudience;
-}
-
+export interface SubmitProjectOptions { audience: SubmitProjectAudience }
 export interface SubmitProjectResult {
 	id: number;
 	slug: string;
@@ -93,22 +51,10 @@ function isSubmitProjectResult(value: unknown): value is SubmitProjectResult {
 }
 
 const USER_SUBMIT_FORBIDDEN_TOP_LEVEL_FIELDS = [
-	'status',
-	'sortOrder',
-	'isIncomplete',
-	'creator',
-	'creatorId',
-	'creatorUserId',
-	'createdBy',
-	'createdByUserId',
-	'createdByUserName',
-	'posterAssetId',
-	'assetIds',
-	'ids',
-	'bulkStatus',
-	'bulkDelete',
+	'status', 'sortOrder', 'isIncomplete', 'creator', 'creatorId', 'creatorUserId',
+	'createdBy', 'createdByUserId', 'createdByUserName', 'posterAssetId', 'assetIds',
+	'ids', 'bulkStatus', 'bulkDelete',
 ] as const;
-
 const USER_SUBMIT_FORBIDDEN_MEMBER_FIELDS = ['userId', 'sortOrder'] as const;
 
 function hasOwn(obj: Record<string, unknown>, key: string): boolean {
@@ -117,48 +63,42 @@ function hasOwn(obj: Record<string, unknown>, key: string): boolean {
 
 function assertUserSubmitPayloadPolicy(rawPayload: unknown): void {
 	if (!rawPayload || typeof rawPayload !== 'object' || Array.isArray(rawPayload)) return;
-
 	const payload = rawPayload as Record<string, unknown>;
 	for (const field of USER_SUBMIT_FORBIDDEN_TOP_LEVEL_FIELDS) {
 		if (hasOwn(payload, field)) {
 			throw badRequest(`Field "${field}" is not allowed for user project submission`, 'USER_SUBMIT_FORBIDDEN_FIELD');
 		}
 	}
-
-	const members = payload.members;
-	if (!Array.isArray(members)) return;
-
-	members.forEach((member, index) => {
+	if (!Array.isArray(payload.members)) return;
+	payload.members.forEach((member, index) => {
 		if (!member || typeof member !== 'object' || Array.isArray(member)) return;
-		const memberPayload = member as Record<string, unknown>;
 		for (const field of USER_SUBMIT_FORBIDDEN_MEMBER_FIELDS) {
-			if (hasOwn(memberPayload, field)) {
+			if (hasOwn(member as Record<string, unknown>, field)) {
 				throw badRequest(`Field "members.${index}.${field}" is not allowed for user project submission`, 'USER_SUBMIT_FORBIDDEN_FIELD');
 			}
 		}
 	});
 }
 
-/**
- * Full submit flow: validate payload, generate slug, process files,
- * create project in DB. Handles upload slot and pipeline lifecycle.
- */
+/** Create project metadata only. Client file bytes are handled after commit. */
 export async function submitProject(
 	deps: SubmitProjectDependencies,
-	input: MultipartCommandInput,
+	input: JsonCommandInput,
 	options: SubmitProjectOptions = { audience: 'admin' },
 ): Promise<SubmitProjectResult> {
 	const user = input.actor;
-	const isAdminAudience = options.audience === 'admin';
-	if (isAdminAudience && user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
+	if (options.audience === 'admin' && user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
 		throw forbidden('Admin project submission requires operator or admin role');
 	}
+	if (options.audience === 'user') assertUserSubmitPayloadPolicy(input.body);
 
-	const policyRole: UserRole = options.audience === 'user' ? 'USER' : user.role;
-	const limits = await deps.uploadLimits(policyRole);
-	const pipeline = deps.createPipeline();
-	let result: SubmitProjectResult | undefined;
-	let failure: unknown;
+	const { exhibitionId, title, summary, description, members } = parseBody(
+		SubmitProjectPayload,
+		input.body,
+	);
+	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
+	assertUploadAllowed(exhibition, exhibitionId, options.audience === 'user' ? 'USER' : user.role);
+
 	let operation: { operationId: string; ownerToken: string } | undefined;
 	let operationHeartbeat: NodeJS.Timeout | undefined;
 	const stopOperationHeartbeat = () => {
@@ -166,112 +106,50 @@ export async function submitProject(
 		operationHeartbeat = undefined;
 	};
 
-	deps.uploadSlots.acquire();
 	try {
-		const { payloadJson, fileParts } = await deps.multipartCollector.collect(
-			input.parts,
-			pipeline,
-			limits,
-		);
-
-		if (!payloadJson) throw badRequest('Missing payload field');
-
-		let rawPayload: unknown;
-		try { rawPayload = JSON.parse(payloadJson); }
-		catch { throw badRequest('Invalid payload JSON'); }
-
-		if (options.audience === 'user') {
-			assertUserSubmitPayloadPolicy(rawPayload);
-		}
-
-		const { exhibitionId, title, summary, description, members } =
-			parseBody(SubmitProjectPayload, rawPayload);
-		pipeline.setOwner?.({ actorId: user.id, exhibitionId });
-
-		const exhibition = await deps.repository.findExhibitionById(exhibitionId);
-		assertUploadAllowed(exhibition, exhibitionId, policyRole);
-
 		if (input.idempotencyKey && deps.idempotency) {
-			if (!deps.requestHasher) throw new Error('Idempotency hashing is unavailable');
-			const requestHash = await deps.requestHasher.hash(rawPayload, fileParts);
 			const claimed = await deps.idempotency.claim({
 				actorId: user.id,
 				scope: `project-submit:${options.audience}`,
 				key: input.idempotencyKey,
-				requestHash,
+				requestHash: await deps.requestHasher.hash(input.body, []),
 			});
 			if (claimed.kind === 'succeeded') {
-				if (!isSubmitProjectResult(claimed.result)) {
-					throw new Error('Stored idempotency result is malformed');
-				}
-				result = claimed.result;
-				return result;
+				if (!isSubmitProjectResult(claimed.result)) throw new Error('Stored idempotency result is malformed');
+				return claimed.result;
 			}
 			operation = claimed;
 			if (deps.idempotency.renew) {
 				operationHeartbeat = setInterval(() => {
-					void deps.idempotency!.renew!(operation!).catch((error) => {
-						deps.logger?.error(
-							{ error, operationId: operation?.operationId },
-							'Idempotency operation heartbeat failed',
-						);
-					});
+					void deps.idempotency!.renew!(operation!).catch((error) => deps.logger?.error(
+						{ error, operationId: operation?.operationId },
+						'Idempotency operation heartbeat failed',
+					));
 				}, 30 * 1000);
 				operationHeartbeat.unref();
 			}
-			pipeline.setOwner?.({
-				operationId: operation.operationId,
-				actorId: user.id,
-				exhibitionId,
-			});
 		}
 
 		const baseSlug = toSlug(title);
 		let slug = await generateUniqueSlug(deps.repository, exhibition.id, title);
-		const savedFiles = await processFileParts(fileParts, pipeline);
 		const status: ProjectStatus = 'PUBLISHED';
-
-		// Retry on slug TOCTOU: between generateUniqueSlug's SELECT and createProjectWithAssets'
-		// INSERT, a concurrent submit can claim the same slug. P2002 on `slug` → pick the next
-		// candidate and retry. Cap retries so a truly stuck state (e.g. DB error) surfaces.
-		let project: Awaited<ReturnType<typeof deps.repository.createProjectWithAssets>> | undefined;
+		let project: { id: number; slug: string } | undefined;
 		let retryAttempt = 0;
 		const maxRetries = 5;
 		while (true) {
 			try {
-				project = await deps.repository.createProjectWithAssets({
+				project = await deps.repository.createProjectMetadata({
 					exhibitionId: exhibition.id,
 					slug,
 					title,
 					summary,
 					description,
+					isIncomplete: true,
 					status,
 					creatorId: user.id,
 					members: options.audience === 'user'
-						? members.map((m) => ({
-								name: m.name,
-								studentId: m.studentId,
-							}))
-						: members.map((m) => ({
-								...m,
-								userId: m.userId,
-							})),
-					savedFiles: savedFiles.map((sf) => ({
-						kind: sf.kind,
-						storageKey: sf.storageKey,
-						playbackStorageKey: sf.playbackStorageKey ?? null,
-						originalName: sf.originalName,
-						mimeType: sf.mimeType,
-						playbackMimeType: sf.playbackMimeType ?? '',
-						sizeBytes: sf.sizeBytes,
-						width: sf.width,
-						height: sf.height,
-						renditions: sf.renditions,
-						playbackSizeBytes: sf.playbackSizeBytes ?? 0,
-						playbackStatus: sf.playbackStatus,
-						playbackError: sf.playbackError,
-						uploadIntentIds: sf.uploadIntentIds,
-					})),
+						? members.map((member) => ({ name: member.name, studentId: member.studentId }))
+						: members.map((member) => ({ ...member, userId: member.userId })),
 					...(operation ? {
 						idempotency: {
 							...operation,
@@ -287,89 +165,50 @@ export async function submitProject(
 					} : {}),
 				});
 				break;
-			} catch (err) {
-				if (isUniqueConstraintError(err, 'slug') && retryAttempt < maxRetries) {
+			} catch (error) {
+				if (!isUniqueConstraintError(error, 'slug') || retryAttempt >= maxRetries) throw error;
+				retryAttempt++;
+				let candidate = nextSlugCandidate(baseSlug, retryAttempt);
+				while (await deps.repository.findProjectByExhibitionAndSlug(exhibition.id, candidate)) {
 					retryAttempt++;
-					// Walk past any slugs that arrived while we were losing races.
-					let candidate = nextSlugCandidate(baseSlug, retryAttempt);
-					while (await deps.repository.findProjectByExhibitionAndSlug(exhibition.id, candidate)) {
-						retryAttempt++;
-						if (retryAttempt > maxRetries) break;
-						candidate = nextSlugCandidate(baseSlug, retryAttempt);
-					}
-					if (retryAttempt > maxRetries) {
-						throw conflict('Failed to allocate a unique slug after repeated contention');
-					}
-					slug = candidate;
-					continue;
+					if (retryAttempt > maxRetries) break;
+					candidate = nextSlugCandidate(baseSlug, retryAttempt);
 				}
-				throw err;
+				if (retryAttempt > maxRetries) throw conflict('Failed to allocate a unique slug after repeated contention');
+				slug = candidate;
 			}
 		}
 
-		result = {
+		return {
 			id: project.id,
 			slug: project.slug,
 			year: exhibition.year,
 			status,
 			adminEditUrl: `${deps.webPublicUrl}/admin/projects/${project.id}/edit`,
-			publicUrl: `${deps.webPublicUrl}/years/${exhibition.year}/${slug}`,
+			publicUrl: `${deps.webPublicUrl}/years/${exhibition.year}/${project.slug}`,
 		};
-		stopOperationHeartbeat();
-	} catch (err) {
-		stopOperationHeartbeat();
-		failure = err;
+	} catch (error) {
 		if (operation && deps.idempotency) {
 			await deps.idempotency.markFailed({
 				...operation,
-				terminal: err instanceof AppError
-					&& err.statusCode >= 400
-					&& err.statusCode < 500
-					&& err.statusCode !== 409,
-				error: err,
-			}).catch((markError) => {
-				deps.logger?.error(
-					{ error: markError, operationId: operation?.operationId },
-					'Failed to persist idempotency operation failure',
-				);
-			});
+				terminal: error instanceof AppError
+					&& error.statusCode >= 400 && error.statusCode < 500 && error.statusCode !== 409,
+				error,
+			}).catch((markError) => deps.logger?.error(
+				{ error: markError, operationId: operation?.operationId },
+				'Failed to persist idempotency operation failure',
+			));
 		}
-		try {
-			await pipeline.rollbackCommitted();
-		} catch (rollbackError) {
-			failure = new AggregateError(
-				[err, rollbackError],
-				'Project submission and durable upload rollback failed',
-			);
-		}
+		throw error;
 	} finally {
 		stopOperationHeartbeat();
-		deps.uploadSlots.release();
-		try {
-			await pipeline.cleanupTemp();
-		} catch (cleanupError) {
-			if (result !== undefined && failure === undefined) {
-				deps.recordPostCommitCleanupFailure?.();
-				deps.logger?.error(
-					{ error: cleanupError, projectId: result.id },
-					'Post-commit project temp cleanup failed',
-				);
-			} else {
-				failure = failure === undefined ? cleanupError : new AggregateError(
-						[failure, cleanupError],
-						'Project submission and temp cleanup failed',
-					);
-			}
-		}
 	}
-	if (failure !== undefined) throw failure;
-	return result!;
 }
 
 export function createSubmitProjectService(deps: SubmitProjectDependencies) {
 	return {
 		submitProject: (
-			input: MultipartCommandInput,
+			input: JsonCommandInput,
 			options: SubmitProjectOptions = { audience: 'admin' },
 		) => submitProject(deps, input, options),
 	};

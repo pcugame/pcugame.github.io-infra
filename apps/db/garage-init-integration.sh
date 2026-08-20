@@ -23,6 +23,7 @@ echo "=== Garage integration init: creating buckets ==="
 $GARAGE bucket create "$PUBLIC_BUCKET" 2>/dev/null || echo "Bucket $PUBLIC_BUCKET already exists"
 $GARAGE bucket create "$PROTECTED_BUCKET" 2>/dev/null || echo "Bucket $PROTECTED_BUCKET already exists"
 $GARAGE bucket create "$STAGING_BUCKET" 2>/dev/null || echo "Bucket $STAGING_BUCKET already exists"
+$GARAGE bucket website --allow "$PUBLIC_BUCKET" >/dev/null
 
 echo "=== Garage integration init: creating deterministic credential ==="
 if $GARAGE key info "$KEY_NAME" >/dev/null 2>&1; then

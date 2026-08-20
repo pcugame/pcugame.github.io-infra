@@ -1,0 +1,56 @@
+# Browser UploadPart data plane. nginx buffers and enforces the physical body
+# ceiling before opening the upstream request, so an oversized part never
+# consumes Garage storage. Access logs deliberately omit the signed query and
+# raw upload ID.
+log_format upload_part_boundary
+  'action=$upload_part_action method=$request_method uri=$uri status=$status request_bytes=$request_length response_bytes=$bytes_sent';
+
+map $status $upload_part_action {
+  default upload_part_proxy;
+  413 oversized_part_rejected;
+}
+
+map "$request_method:$http_content_type" $upload_part_content_type_allowed {
+  default 0;
+  ~^OPTIONS: 1;
+  ~^GET: 1;
+  ~^HEAD: 1;
+  "PUT:application/octet-stream" 1;
+}
+
+server {
+  listen ${NGINX_LISTEN_PORT};
+  server_name _;
+
+  access_log /var/log/nginx/access.log upload_part_boundary;
+  error_log /var/log/nginx/error.log crit;
+
+  client_max_body_size ${UPLOAD_PART_MAX_BYTES};
+  client_body_buffer_size 128k;
+  client_body_temp_path /var/cache/nginx/client_temp 1 2;
+
+  location / {
+    # The same browser-visible SigV4 endpoint also carries short-lived
+    # protected GET redirects. It remains an ordinary byte-preserving data
+    # plane; only PUT request bodies are subject to the part ceiling.
+    if ($request_method !~ ^(GET|HEAD|PUT|OPTIONS)$) { return 405; }
+    if ($upload_part_content_type_allowed = 0) { return 415; }
+
+    # No URI suffix on proxy_pass: path and the complete SigV4 query are
+    # forwarded byte-for-byte. Preserve the browser-visible Host because it is
+    # part of the presigned canonical request.
+    proxy_pass ${GARAGE_S3_UPSTREAM};
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header Connection "";
+    proxy_ssl_server_name on;
+    proxy_ssl_name ${GARAGE_S3_TLS_SERVER_NAME};
+    proxy_request_buffering on;
+    proxy_buffering off;
+  }
+
+  location = /__pcu_proxy_health {
+    access_log off;
+    return 204;
+  }
+}

@@ -65,7 +65,7 @@ describe('deterministic responsive image keys', () => {
 });
 
 describe('responsive image readiness serialization', () => {
-	const { serializeResponsiveImage } = createResponsiveImageSerializer('https://api.example.test/');
+	const { serializeResponsiveImage } = createResponsiveImageSerializer('https://assets.example.test/');
 
 	it('derives ordered rendition URLs and target widths from readiness heights', () => {
 		expect(serializeResponsiveImage({
@@ -76,18 +76,18 @@ describe('responsive image readiness serialization', () => {
 			display960Height: 640,
 		})).toEqual({
 			original: {
-				url: 'https://api.example.test/api/public/images/generation.webp',
+				url: 'https://assets.example.test/generation.webp',
 				width: 1200,
 				height: 800,
 			},
 			renditions: [{
 				profile: 'CARD_480',
-				url: 'https://api.example.test/api/public/images/generation.webp%2F__pcu_image_rendition__%2Fv1%2Fcard-480.webp',
+				url: 'https://assets.example.test/generation.webp/__pcu_image_rendition__/v1/card-480.webp',
 				width: 480,
 				height: 320,
 			}, {
 				profile: 'DISPLAY_960',
-				url: 'https://api.example.test/api/public/images/generation.webp%2F__pcu_image_rendition__%2Fv1%2Fdisplay-960.webp',
+				url: 'https://assets.example.test/generation.webp/__pcu_image_rendition__/v1/display-960.webp',
 				width: 960,
 				height: 640,
 			}],
@@ -113,7 +113,7 @@ describe('responsive image readiness serialization', () => {
 	it('keeps a legacy original usable without dimensions or readiness state', () => {
 		expect(serializeResponsiveImage({ storageKey: 'legacy/nested image.png' })).toEqual({
 			original: {
-				url: 'https://api.example.test/api/public/images/legacy%2Fnested%20image.png',
+				url: 'https://assets.example.test/legacy/nested%20image.png',
 			},
 			renditions: [],
 		});
@@ -129,7 +129,7 @@ describe('responsive image readiness serialization', () => {
 			display960Height: 480,
 		})).toEqual({
 			original: {
-				url: `https://api.example.test/api/public/images/${encodeURIComponent(legacyReservedKey)}`,
+				url: `https://assets.example.test/${legacyReservedKey}`,
 				width: 1200,
 				height: 600,
 			},

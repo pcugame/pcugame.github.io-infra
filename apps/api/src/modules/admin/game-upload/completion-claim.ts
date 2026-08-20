@@ -23,6 +23,8 @@ export function createCompletionClaimGuard(input: {
 		leaseMs: number,
 	) => Promise<{ count: number }>;
 	outerSignal?: AbortSignal;
+	leaseMs?: number;
+	heartbeatMs?: number;
 	logHeartbeatFailure(error: unknown): void;
 }) {
 	const claimAbort = new AbortController();
@@ -50,9 +52,9 @@ export function createCompletionClaimGuard(input: {
 		let result: { count: number };
 		try {
 			result = await input.renew(
-				input.sessionId,
-				input.token,
-				COMPLETION_CLAIM_LEASE_MS,
+			input.sessionId,
+			input.token,
+			input.leaseMs ?? COMPLETION_CLAIM_LEASE_MS,
 			);
 		} catch (error) {
 			throw loseClaim(error);
@@ -65,7 +67,7 @@ export function createCompletionClaimGuard(input: {
 			void renew().catch((error) => {
 				if (active) input.logHeartbeatFailure(error);
 			});
-		}, COMPLETION_CLAIM_HEARTBEAT_MS);
+		}, input.heartbeatMs ?? COMPLETION_CLAIM_HEARTBEAT_MS);
 		heartbeat.unref();
 	}
 

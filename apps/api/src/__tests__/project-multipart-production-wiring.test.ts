@@ -31,7 +31,7 @@ import { createProjectAccessService } from '../modules/admin/project-access.serv
 import type {
 	ProjectApplicationRepository,
 	ProjectAssetWriteData,
-	SubmitProjectWriteData,
+	SubmitProjectMetadataWriteData,
 } from '../modules/admin/project/ports.js';
 import { createProjectMultipartProductionGraph } from '../modules/admin/project-multipart.composition.js';
 import {
@@ -65,7 +65,7 @@ interface ProjectPortRow {
 	id: number;
 	exhibitionId: number;
 	creatorId: number;
-	status: SubmitProjectWriteData['status'];
+	status: SubmitProjectMetadataWriteData['status'];
 	slug: string;
 	title: string;
 }
@@ -102,7 +102,7 @@ function portHarness(label: string) {
 		projectFindBySlug: vi.fn(async (exhibitionId: number, slug: string) => (
 			slugs.get(`${exhibitionId}\0${slug}`) ?? null
 		)),
-		projectCreate: vi.fn(async (data: SubmitProjectWriteData) => {
+		projectCreate: vi.fn(async (data: SubmitProjectMetadataWriteData) => {
 			if (failProjectCreate) throw failProjectCreate;
 			successfulProjectCreates += 1;
 			const row = {
@@ -151,24 +151,11 @@ function portHarness(label: string) {
 				}
 			: null),
 		findProjectByExhibitionAndSlug: calls.projectFindBySlug,
-		async createProjectWithAssets(data) {
+		async createProjectMetadata(data) {
 			const created = await calls.projectCreate(data);
-			for (const file of data.savedFiles) {
-				await calls.assetCreate({
-					...file,
-					projectId: created.id,
-					isPublic: file.kind !== 'GAME' && file.kind !== 'VIDEO',
-					sizeBytes: BigInt(file.sizeBytes),
-					playbackSizeBytes: BigInt(file.playbackSizeBytes ?? 0),
-				});
-			}
 			return created;
 		},
 		createAsset: calls.assetCreate,
-		async replaceOrCreateReplaceableAsset(projectId, kind, data) {
-			const asset = await calls.assetCreate({ projectId, kind, ...data });
-			return { assetId: asset.id, oldStorageKey: null, oldPlaybackStorageKey: null };
-		},
 	};
 	const accessRepository = {
 		findProject: calls.projectFindUnique,
@@ -403,7 +390,7 @@ function limiterHarness() {
 
 function graphHarness(
 	label: string,
-	options: { imageMaxMb?: number; baseTemporaryDirectory?: string } = {},
+	options: { imageMaxMb?: number; inlineMaxBytes?: number; baseTemporaryDirectory?: string } = {},
 ) {
 	const ports = portHarness(label);
 	const storage = storageHarness(label);
@@ -419,8 +406,10 @@ function graphHarness(
 		...defaultTestEnv,
 		API_PUBLIC_URL: `https://${label}.api.test`,
 		WEB_PUBLIC_URL: `https://${label}.web.test`,
+		PUBLIC_ASSET_BASE_URL: `https://${label}.assets.test`,
 		S3_BUCKET_PUBLIC: `${label}-public`,
 		S3_BUCKET_PROTECTED: `${label}-protected`,
+		INLINE_UPLOAD_MAX_BYTES: options.inlineMaxBytes ?? defaultTestEnv.INLINE_UPLOAD_MAX_BYTES,
 		UPLOAD_USER_IMAGE_MAX_MB: options.imageMaxMb ?? 1,
 		UPLOAD_USER_GAME_MAX_MB: 2,
 		UPLOAD_USER_REQUEST_MAX_MB: 2,
@@ -535,18 +524,14 @@ function assetMultipart(file = tinyPng, filename = 'image.png') {
 }
 
 function submitMultipart(payload = submitPayload(), file?: Buffer) {
-	return multipart([
-		{ type: 'field', name: 'payload', value: payload },
-		...(file
-			? [{
-					type: 'file' as const,
-					name: 'images[]',
-					filename: 'image.png',
-					contentType: 'image/png',
-					value: file,
-				}]
-			: []),
-	]);
+	void file;
+	return {
+		headers: {
+			'content-type': 'application/json',
+			'idempotency-key': `test-${Math.random().toString(16).slice(2)}`,
+		},
+		payload,
+	};
 }
 
 function abortedAssetMultipart() {
@@ -851,6 +836,30 @@ function contextUnhandledError(
 }
 
 describe('project multipart production wiring', () => {
+	it('keeps generic project processing image-only with no GAME or VIDEO runtime branch', async () => {
+		const harness = graphHarness('inline-processing-contract');
+		const processing = createNodeProjectUploadProcessing(
+			harness.fileSystem.fileSystem,
+			logger,
+		);
+		expect(Object.keys(processing).sort()).toEqual([
+			'processImage',
+			'processPdf',
+			'validate',
+		]);
+
+		const sources = await Promise.all([
+			'modules/admin/project/project-file-validation.ts',
+			'modules/admin/project/project-upload.adapter.ts',
+			'infrastructure/project-upload-processing.ts',
+		].map((file) => readFile(new URL(`../${file}`, import.meta.url), 'utf8')));
+		for (const source of sources) {
+			expect(source).not.toMatch(
+				/isAllowedGameType|isAllowedVideoType|validateZipArchiveObject|processVideo|video-processing/,
+			);
+		}
+	});
+
 	it('registers without I/O and has no transitive runtime/env/global resource dependency', async () => {
 		const sources = await Promise.all([
 			'modules/admin/project/multipart.controller.ts',
@@ -1010,9 +1019,8 @@ describe('project multipart production wiring', () => {
 			},
 		});
 		expect(malformed.statusCode).toBe(400);
-		expect(malformed.json().error.message).toBe('Invalid payload JSON');
-		expect(invalid.limiter.calls.acquire).toHaveBeenCalledOnce();
-		expect(invalid.limiter.calls.release).toHaveBeenCalledOnce();
+		expect(invalid.limiter.calls.acquire).not.toHaveBeenCalled();
+		expect(invalid.limiter.calls.release).not.toHaveBeenCalled();
 		expect(invalid.limiter.active()).toBe(0);
 		expect(invalid.fileSystem.outstanding()).toEqual([]);
 		expect(contextUnhandledError(invalid)).toBeUndefined();
@@ -1055,8 +1063,8 @@ describe('project multipart production wiring', () => {
 		expect(harness.ports.calls.projectFindUnique).toHaveBeenCalledWith(7);
 		expect(harness.ports.calls.assetCreate).toHaveBeenCalled();
 		expect(harness.limiter.active()).toBe(0);
-		expect(harness.limiter.calls.acquire).toHaveBeenCalledTimes(2);
-		expect(harness.limiter.calls.release).toHaveBeenCalledTimes(2);
+		expect(harness.limiter.calls.acquire).toHaveBeenCalledOnce();
+		expect(harness.limiter.calls.release).toHaveBeenCalledOnce();
 		expect(harness.fileSystem.outstanding()).toEqual([]);
 	});
 
@@ -1093,7 +1101,8 @@ describe('project multipart production wiring', () => {
 		});
 		expect(malformed.statusCode).toBe(400);
 		expect(malformedHarness.storage.calls.upload).not.toHaveBeenCalled();
-		expectReleased(malformedHarness);
+		expect(malformedHarness.limiter.calls.acquire).not.toHaveBeenCalled();
+		expect(malformedHarness.fileSystem.outstanding()).toEqual([]);
 
 		const signatureHarness = graphHarness('signature');
 		const signatureApp = await routeApp(signatureHarness);
@@ -1140,6 +1149,33 @@ describe('project multipart production wiring', () => {
 		expect(rejectedHarness.limiter.active()).toBe(0);
 		expect(rejectedHarness.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
 		expect(rejectedHarness.storage.calls.upload).not.toHaveBeenCalled();
+	});
+
+	it('limits chunked encoded multipart bytes before Fastify temp ingress', async () => {
+		const harness = graphHarness('encoded-cap', { inlineMaxBytes: 100 });
+		const app = await routeApp(harness);
+		apps.push(app);
+		const request = assetMultipart(Buffer.alloc(200, 1), 'oversized.png');
+		const encoded = request.payload as Buffer;
+		const response = await app.inject({
+			method: 'POST',
+			url: '/api/admin/projects/7/assets',
+			headers: request.headers,
+			payload: Readable.from([
+				encoded.subarray(0, 64),
+				encoded.subarray(64, 128),
+				encoded.subarray(128),
+			]),
+		});
+
+		expect(response.statusCode, response.body).toBe(413);
+		expect(harness.limiter.calls.acquire).toHaveBeenCalledOnce();
+		expect(harness.limiter.calls.release).toHaveBeenCalledOnce();
+		// The physical raw gate now rejects before Busboy opens a temp sink.
+		expect(harness.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
+		expect(harness.fileSystem.outstanding()).toEqual([]);
+		expect(harness.storage.calls.upload).not.toHaveBeenCalled();
+		expect(harness.ports.calls.assetCreate).not.toHaveBeenCalled();
 	});
 
 	it('cleans an aborted real multipart stream and releases the slot once', async () => {
@@ -1243,19 +1279,17 @@ describe('project multipart production wiring', () => {
 		apps.push(permanentApp);
 		const failed = await permanentApp.inject({
 			method: 'POST',
-			url: '/api/admin/projects/submit',
-			...submitMultipart('{invalid-json', tinyPng),
+			url: '/api/admin/projects/7/assets',
+			...assetMultipart(Buffer.from('GIF89a unsupported'), 'bad.gif'),
 		});
 		expect(failed.statusCode).toBe(500);
-		expect(permanent.ports.calls.projectCreate).not.toHaveBeenCalled();
+		expect(permanent.ports.calls.assetCreate).not.toHaveBeenCalled();
 		expect(permanent.storage.calls.upload).not.toHaveBeenCalled();
 		expect(permanent.fileSystem.calls.remove).toHaveBeenCalledTimes(3);
 		expect(permanent.fileSystem.outstanding()).toHaveLength(1);
 		const permanentErrorTree = errorLeaves(observedErrors[0]);
 		expect(permanentErrorTree).toEqual(expect.arrayContaining([
-			expect.objectContaining({
-				message: 'Invalid payload JSON',
-			}),
+				expect.objectContaining({ message: expect.stringMatching(/unsupported|validation/i) }),
 			expect.any(ProjectTempCleanupError),
 		]));
 		expect(logger.error).toHaveBeenCalledWith(
@@ -1288,14 +1322,14 @@ describe('project multipart production wiring', () => {
 		expectReleased(deletedHarness);
 
 		const queuedHarness = graphHarness('db-queue');
-		queuedHarness.ports.failProject();
+		queuedHarness.ports.failAsset();
 		queuedHarness.storage.failDelete();
 		const queuedApp = await routeApp(queuedHarness);
 		apps.push(queuedApp);
 		const queued = await queuedApp.inject({
 			method: 'POST',
-			url: '/api/admin/projects/submit',
-			...submitMultipart(submitPayload(), tinyPng),
+			url: '/api/admin/projects/7/assets',
+			...assetMultipart(),
 		});
 		expect(queued.statusCode).toBe(500);
 		const key = queuedHarness.storage.calls.upload.mock.calls[0]?.[1];
@@ -1310,8 +1344,8 @@ describe('project multipart production wiring', () => {
 
 	it('surfaces cleanup plus durable queue double failure without DB success', async () => {
 		const harness = graphHarness('double-failure');
-		const projectDbError = new Error('project DB original');
-		harness.ports.failProject(projectDbError);
+		const projectDbError = new Error('asset DB original');
+		harness.ports.failAsset(projectDbError);
 		harness.storage.failDelete();
 		harness.ports.failOrphan();
 		const observedErrors: unknown[] = [];
@@ -1319,29 +1353,29 @@ describe('project multipart production wiring', () => {
 		apps.push(app);
 		const failed = await app.inject({
 			method: 'POST',
-			url: '/api/admin/projects/submit',
-			...submitMultipart(submitPayload(), tinyPng),
+			url: '/api/admin/projects/7/assets',
+			...assetMultipart(),
 		});
 		expect(failed.statusCode).toBe(500);
 		expect(failed.json().error.message).toMatch(/durable .*rollback failed/i);
 		expect(errorLeaves(observedErrors[0])).toContain(projectDbError);
-		expect(harness.ports.calls.projectCreate).toHaveBeenCalledOnce();
+		expect(harness.ports.calls.assetCreate).toHaveBeenCalledOnce();
 		expect(harness.ports.orphans.size).toBe(0);
 		expectReleased(harness);
 	});
 
 	it('preserves DB, durable rollback, and permanent temp failures in one actual route error tree', async () => {
 		const harness = await contextAppHarness('context-all-failures');
-		const projectDbError = new Error('context project DB original');
-		harness.ports.failProject(projectDbError);
+		const projectDbError = new Error('context asset DB original');
+		harness.ports.failAsset(projectDbError);
 		harness.storage.failDelete(new Error('context storage delete failed'));
 		harness.ports.failOrphan(new Error('context durable queue failed'));
 		harness.fileSystem.failRemovePermanently();
 
-		const request = submitMultipart(submitPayload(), tinyPng);
+		const request = assetMultipart();
 		const failed = await harness.app.inject({
 			method: 'POST',
-			url: '/api/admin/projects/submit',
+			url: '/api/admin/projects/7/assets',
 			...request,
 			headers: {
 				...request.headers,
@@ -1368,8 +1402,7 @@ describe('project multipart production wiring', () => {
 		expect(tempCleanup?.residuePaths.length).toBeGreaterThanOrEqual(
 			harness.fileSystem.outstanding().length,
 		);
-		expect(harness.ports.calls.projectCreate).toHaveBeenCalledOnce();
-		expect(harness.ports.projectCreateSuccesses()).toBe(0);
+		expect(harness.ports.calls.assetCreate).toHaveBeenCalledOnce();
 		expect(harness.ports.orphans.size).toBe(0);
 		expect(harness.limiter.calls.acquire).toHaveBeenCalledOnce();
 		expect(harness.limiter.calls.release).toHaveBeenCalledOnce();

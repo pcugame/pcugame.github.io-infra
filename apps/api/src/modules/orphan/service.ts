@@ -6,6 +6,7 @@ import {
 } from './reference-resolver.js';
 import { DEFAULT_ORPHAN_CLAIM_RENEWAL_POLICY } from './claim-renewal-policy.js';
 import { createOrphanClaimLeaseGuard } from './claim-lease-guard.js';
+import { safeOperationalLogContext } from '../../shared/safe-log-context.js';
 
 export interface OrphanServiceDependencies {
 	clock: { now(): Date };
@@ -100,7 +101,7 @@ export async function recordOrphan(
 		);
 	} catch (err) {
 		deps.logger.error(
-			{ err, bucket, storageKey, reason },
+			safeOperationalLogContext({ err, action: 'record_orphan', result: 'failed' }),
 			'Failed to durably record orphan',
 		);
 		throw err;
@@ -174,7 +175,13 @@ export async function runOrphanReaper(
 		}));
 		const requeued = failureWrites.filter(({ status }) => status === 'fulfilled').length;
 		deps.logger.error(
-			{ error, claimed: pending.length, requeued },
+			safeOperationalLogContext({
+				error,
+				action: 'reference_snapshot',
+				result: 'failed',
+				claimedCount: pending.length,
+				requeuedCount: requeued,
+			}),
 			'Orphan reference snapshot failed; active claimed deletions were requeued',
 		);
 		return { tried: pending.length, resolved: 0, failed: pending.length };
@@ -199,7 +206,12 @@ export async function runOrphanReaper(
 			),
 			logHeartbeatFailure: (error) => {
 				deps.logger.error(
-					{ error, orphanId: orphan.id },
+					safeOperationalLogContext({
+						error,
+						taskId: orphan.id,
+						action: 'claim_heartbeat',
+						result: 'failed',
+					}),
 					'Orphan deletion claim heartbeat failed',
 				);
 			},
@@ -284,11 +296,25 @@ export async function runOrphanReaper(
 				);
 				assertOwnedMutation(failureWrite, orphan.id, 'failure requeue');
 			} catch (dbErr) {
-				deps.logger.error({ err: dbErr, orphanId: orphan.id }, 'Failed to record orphan reap attempt');
+				deps.logger.error(
+					safeOperationalLogContext({
+						err: dbErr,
+						taskId: orphan.id,
+						action: 'requeue_orphan',
+						result: 'failed',
+					}),
+					'Failed to record orphan reap attempt',
+				);
 			}
 			if (orphan.attemptCount + 1 >= NOISY_ATTEMPT_THRESHOLD) {
 				deps.logger.error(
-					{ err, orphanId: orphan.id, bucket: orphan.bucket, storageKey: orphan.storageKey, attemptCount: orphan.attemptCount + 1 },
+					safeOperationalLogContext({
+						err,
+						taskId: orphan.id,
+						action: 'reap_orphan',
+						result: 'failed',
+						attemptCount: orphan.attemptCount + 1,
+					}),
 					'Orphan reap has failed repeatedly — manual intervention likely needed',
 				);
 			}
@@ -298,7 +324,13 @@ export async function runOrphanReaper(
 		}
 	}
 
-	deps.logger.info({ tried: pending.length, resolved, failed }, 'Orphan reaper batch complete');
+	deps.logger.info(safeOperationalLogContext({
+		action: 'reap_batch',
+		result: failed === 0 ? 'completed' : 'partial_failure',
+		processedCount: pending.length,
+		resolvedCount: resolved,
+		failedCount: failed,
+	}), 'Orphan reaper batch complete');
 	return { tried: pending.length, resolved, failed };
 }
 

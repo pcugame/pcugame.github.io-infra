@@ -16,6 +16,7 @@ import {
 	projectAssetDeletionTargets,
 	projectWebglDeletionTargets,
 } from '../project/project-deletion-targets.js';
+import { parseWebglEntryKey } from '../../webgl/paths.js';
 import type {
 	ExhibitionDeletionOutboxConfig,
 	PosterDeletionOutboxConfig,
@@ -244,6 +245,22 @@ export function createExhibitionRepository(
 			const activeUploads = await lockLiveUploads(tx, projects.map((project) => project.id));
 			assertNoInFlightCompletion(activeUploads);
 			const assets = await tx.asset.findMany({ where: { project: { exhibitionId: id } } });
+			const completedWebglSources = projects.length === 0
+				? []
+				: await tx.gameUploadSession.findMany({
+					where: {
+						projectId: { in: projects.map((project) => project.id) },
+						status: 'COMPLETED',
+						uploadKind: 'WEBGL',
+						storageKey: { not: null },
+						webglDeploymentId: { not: null },
+					},
+					select: {
+						projectId: true,
+						webglDeploymentId: true,
+						storageKey: true,
+					},
+				});
 			const targets = [
 				...(existing.posterStorageKey ? [{
 					bucket: outbox.publicBucket,
@@ -256,11 +273,19 @@ export function createExhibitionRepository(
 					`${outbox.reason}-poster-rendition`,
 				),
 				...projectAssetDeletionTargets(assets, outbox),
-				...projects.flatMap((project) => projectWebglDeletionTargets(
-					project.id,
-					project.webglEntryKey,
-					outbox,
-				)),
+				...projects.flatMap((project) => {
+					const deployment = parseWebglEntryKey(project.id, project.webglEntryKey);
+					const source = completedWebglSources.find((session) => (
+						session.projectId === project.id
+						&& session.webglDeploymentId === deployment?.deploymentId
+					));
+					return projectWebglDeletionTargets(
+						project.id,
+						project.webglEntryKey,
+						outbox,
+						source?.storageKey,
+					);
+				}),
 				...projects.flatMap((project) => liveUploadDeletionTargets(
 					project.id,
 					activeUploads.filter((upload) => upload.projectId === project.id),

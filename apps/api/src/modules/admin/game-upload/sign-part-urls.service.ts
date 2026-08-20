@@ -6,11 +6,11 @@ import type {
 import {
 	AppError,
 	badRequest,
-	conflict,
-	forbidden,
-	notFound,
 } from '../../../shared/errors.js';
-import type { GameUploadPartSigningDependencies } from './ports.js';
+import {
+	DirectUploadQuotaExceededError,
+	type GameUploadPartSigningDependencies,
+} from './ports.js';
 import { recordGameUploadEvent } from './observability.js';
 
 export async function signPartUrls(
@@ -19,49 +19,60 @@ export async function signPartUrls(
 	actor: { id: number; role: UserRole },
 	body: GameUploadPartUrlsRequest,
 ): Promise<GameUploadPartUrlsResponse> {
-	const session = await deps.repository.findSessionById(sessionId);
-	if (!session) throw notFound('Upload session not found');
-	const isPrivileged = actor.role === 'ADMIN' || actor.role === 'OPERATOR';
-	if (!isPrivileged && session.userId !== actor.id) {
-		throw forbidden('Not your upload session');
-	}
-	await deps.authorizeProjectWrite(actor, session.projectId);
-	if (session.transport !== 'DIRECT_MULTIPART') {
-		throw badRequest('Part URLs are unavailable for an API chunk proxy session');
-	}
-	if (session.status !== 'PENDING') {
-		throw badRequest(`Cannot issue part URLs: session is ${session.status}`);
-	}
-	if (session.expiresAt <= deps.clock.now()) {
-		// Signing is fail-closed only. Expiration state transitions and durable
-		// multipart-abort cleanup are maintenance-worker responsibilities.
-		throw badRequest('Upload session has expired');
-	}
-	const generation = session.multipartGeneration ?? 1;
-	if (body.generation !== generation) {
-		throw conflict('Upload generation is stale');
-	}
-	if (!await deps.repository.isSessionActive(session.id)) {
-		throw conflict('Upload session has been replaced');
-	}
-	if (!session.s3Key || !session.s3UploadId) {
-		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
-	}
-	if (body.partNumbers.length === 0
-		|| body.partNumbers.length > deps.config.uploadPartUrlBatchMax) {
+	if (body.parts.length === 0
+		|| body.parts.length > deps.config.uploadPartUrlBatchMax) {
 		throw badRequest(
-			`partNumbers must contain 1..${deps.config.uploadPartUrlBatchMax} entries`,
+			`parts must contain 1..${deps.config.uploadPartUrlBatchMax} entries`,
 		);
 	}
-	const unique = new Set<number>();
-	for (const partNumber of body.partNumbers) {
-		if (!Number.isSafeInteger(partNumber)
-			|| partNumber < 1
-			|| partNumber > session.totalChunks) {
-			throw badRequest(`Part number must be between 1 and ${session.totalChunks}`);
+	const unique = new Map<number, string>();
+	for (const part of body.parts) {
+		const { partNumber, checksumSha256 } = part;
+		if (!Number.isSafeInteger(partNumber) || partNumber < 1) {
+			throw badRequest('Part number must be a positive safe integer');
+		}
+		if (!/^[A-Za-z0-9+/]{43}=$/.test(checksumSha256)) {
+			throw badRequest(`Part ${partNumber} checksum must be base64 SHA-256`);
 		}
 		if (unique.has(partNumber)) throw badRequest(`Duplicate part number: ${partNumber}`);
-		unique.add(partNumber);
+		unique.set(partNumber, checksumSha256);
+	}
+	let reserved: Awaited<ReturnType<typeof deps.repository.reservePartCapabilities>>;
+	try {
+		reserved = await deps.repository.reservePartCapabilities({
+			sessionId,
+			actor,
+			generation: body.generation,
+			partNumbers: [...unique.keys()],
+			maxIssuesPerWindow: deps.config.uploadPartUrlRefreshMax,
+			issueWindowMs: deps.config.uploadPartUrlRefreshWindowMs,
+			quota: deps.config.directUploadQuota,
+		});
+	} catch (err) {
+		if (err instanceof DirectUploadQuotaExceededError) {
+			recordGameUploadEvent(deps, 'quota_rejected', {
+				actorId: actor.id,
+				sessionId,
+				quota: err.quota,
+				result: 'rejected',
+			});
+			throw new AppError(429, 'Direct upload capability quota exceeded', 'RATE_LIMITED');
+		}
+		if (err instanceof AppError && err.statusCode === 409
+			&& err.message.toLowerCase().includes('generation')) {
+			recordGameUploadEvent(deps, 'stale_generation_rejected', {
+				actorId: actor.id,
+				sessionId,
+				generation: body.generation,
+				result: 'rejected',
+			});
+		}
+		throw err;
+	}
+	const { session } = reserved;
+	const generation = session.multipartGeneration ?? 1;
+	if (!session.s3Key || !session.s3UploadId) {
+		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
 	}
 	const remainingSeconds = Math.floor(
 		(session.expiresAt.getTime() - deps.clock.now().getTime()) / 1000,
@@ -70,7 +81,7 @@ export async function signPartUrls(
 	if (expiresInSeconds <= 0) throw badRequest('Upload session has expired');
 	const expiresAt = new Date(deps.clock.now().getTime() + expiresInSeconds * 1000);
 	const parts = [];
-	for (const partNumber of [...unique].sort((a, b) => a - b)) {
+	for (const partNumber of [...unique.keys()].sort((a, b) => a - b)) {
 		parts.push({
 			partNumber,
 			url: await deps.partSigner.presignUploadPart(
@@ -78,6 +89,7 @@ export async function signPartUrls(
 				session.s3UploadId,
 				partNumber,
 				expiresInSeconds,
+				unique.get(partNumber)!,
 			),
 			requiredHeaders: { 'content-type': 'application/octet-stream' },
 		});
@@ -90,5 +102,15 @@ export async function signPartUrls(
 		partCount: parts.length,
 		result: 'issued',
 	});
+	if (reserved.isRefresh) {
+		recordGameUploadEvent(deps, 'upload_part_url_refreshed', {
+			actorId: actor.id,
+			projectId: session.projectId,
+			sessionId: session.id,
+			generation,
+			partCount: parts.length,
+			result: 'refreshed',
+		});
+	}
 	return { generation, expiresAt: expiresAt.toISOString(), parts };
 }

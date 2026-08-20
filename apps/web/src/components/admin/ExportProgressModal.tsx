@@ -12,6 +12,7 @@ interface Props {
 	result: ExportResult | null;
 	error: string | null;
 	onClose: () => void;
+	onFinished: (result: ExportResult | null, error: string | null) => void;
 }
 
 const PHASE_LABEL: Record<ExportPhase, string> = {
@@ -35,6 +36,7 @@ export function ExportProgressModal({
 	result,
 	error,
 	onClose,
+	onFinished,
 }: Props) {
 	// 진행 중일 때만 폴링. 끝나면 자동 중지.
 	const { data: status } = useQuery({
@@ -45,6 +47,12 @@ export function ExportProgressModal({
 		refetchIntervalInBackground: true,
 		staleTime: 0,
 	});
+
+	useEffect(() => {
+		if (!open || !isRunning || !status || status.running) return;
+		if (status.result) onFinished(status.result, null);
+		else onFinished(null, status.error ?? '내보내기 worker가 작업을 완료하지 못했습니다.');
+	}, [open, isRunning, status, onFinished]);
 
 	// ESC: 실행 중에는 무시
 	useEffect(() => {

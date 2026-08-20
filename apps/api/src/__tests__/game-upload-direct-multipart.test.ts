@@ -13,7 +13,7 @@ import {
 	getSessionStatus,
 	sweepStaleCompletingSessions,
 } from '../modules/admin/game-upload/session-maintenance.service.js';
-import { forbidden } from '../shared/errors.js';
+import { conflict, forbidden } from '../shared/errors.js';
 import { createDurableGameUploadRepository } from './helpers/upload-lifecycle.js';
 import {
 	assertMultipartPartCount,
@@ -21,6 +21,7 @@ import {
 } from '../modules/admin/game-upload/direct-multipart.js';
 
 const MIB = 1024 * 1024;
+const PART_CHECKSUM = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 function directSession(
 	overrides: Partial<GameUploadSessionRecord> = {},
@@ -33,7 +34,6 @@ function directSession(
 		projectId: 7,
 		userId: 11,
 		uploadKind: 'GAME',
-		transport: 'DIRECT_MULTIPART',
 		originalName: 'game.zip',
 		totalBytes: 6n * BigInt(MIB),
 		chunkSizeBytes: 5 * MIB,
@@ -42,13 +42,11 @@ function directSession(
 		sourceIdentity: 'a'.repeat(64),
 		sourceIdentityBlockSizeBytes: MIB,
 		sourceIdentityBlockManifest: Buffer.concat(digests),
-		uploadedChunks: [],
 		status: 'PENDING',
 		expiresAt: new Date('2026-08-20T01:00:00.000Z'),
 		s3UploadId: 'upload-1',
 		s3Key: 'direct-generation.zip',
 		storageKey: null,
-		parts: [],
 		multipartGeneration: 3,
 		project: { status: 'PUBLISHED' },
 		...overrides,
@@ -63,6 +61,8 @@ function harness(session = directSession()) {
 	const repository = createDurableGameUploadRepository({
 		findSessionById: vi.fn(async () => session),
 		isSessionActive: vi.fn(async () => true),
+		assertCanCreateSession: vi.fn(async () => undefined),
+		reservePartCapabilities: vi.fn(async () => ({ session, isRefresh: false })),
 		claimCompletion: vi.fn(async () => ({ count: 1, reason: null })),
 		markVerifying: vi.fn(async () => ({ count: 1 })),
 		revertToPending: vi.fn(async () => ({ count: 1 })),
@@ -71,7 +71,6 @@ function harness(session = directSession()) {
 	const storage = {
 		createMultipart: vi.fn(async () => 'upload-new'),
 		abortMultipart: vi.fn(async () => undefined),
-		uploadPart: vi.fn(async () => 'legacy-etag'),
 		completeMultipart: vi.fn(async () => { storageCompleted = true; }),
 		listParts: vi.fn(async () => storedParts),
 		listMultipartUploads: vi.fn(async () => []),
@@ -89,9 +88,7 @@ function harness(session = directSession()) {
 		repository,
 		storage,
 		partSigner: { presignUploadPart: signer },
-		finalizer: { finalize: vi.fn() },
 		settings: { get: vi.fn() },
-		uploadSlots: { acquire: vi.fn(), release: vi.fn() },
 		clock: { now: () => new Date('2026-08-20T00:00:00.000Z') },
 		ids: { next: () => 'completion-token' },
 		lifecycle: { isAcceptingNewWork: () => true },
@@ -101,13 +98,19 @@ function harness(session = directSession()) {
 			uploadSessionTtlMinutes: 60,
 			uploadPartUrlBatchMax: 16,
 			uploadPartUrlTtlSeconds: 300,
+			uploadPartUrlRefreshMax: 64,
+			uploadPartUrlRefreshWindowMs: 300_000,
+			directUploadQuota: {
+				actorActiveSessions: 4,
+				projectActiveSessions: 2,
+				actorOutstandingBytes: 10n * 1024n * 1024n * 1024n,
+			},
 		},
 		roleGameMaxBytes: () => 10 * MIB,
 		storageKey: () => 'unused.zip',
 		deleteOrQueue: vi.fn(async () => undefined),
 		wakeDeletionWorker: vi.fn(),
 		wakeMaintenance: vi.fn(),
-		wakeValidationWorker: vi.fn(),
 		recordUntrackedMultipartCleanupFailure: vi.fn(),
 		logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 	};
@@ -131,25 +134,27 @@ describe('direct multipart game upload control plane', () => {
 	});
 
 	it('issues only bounded, current-generation UploadPart capabilities', async () => {
-		const { service, signer, authorizeProjectWrite } = harness();
+		const { service, signer, repository } = harness();
 		await expect(service.signPartUrls(
 			'direct-session',
 			{ id: 11, role: 'USER' },
-			{ generation: 3, partNumbers: [2, 1] },
+			{ generation: 3, parts: [{ partNumber: 2, checksumSha256: PART_CHECKSUM }, { partNumber: 1, checksumSha256: PART_CHECKSUM }] },
 		)).resolves.toMatchObject({
 			generation: 3,
 			parts: [{ partNumber: 1 }, { partNumber: 2 }],
 		});
-		expect(authorizeProjectWrite).toHaveBeenCalledWith(
-			{ id: 11, role: 'USER' },
-			7,
-		);
+		expect(repository.reservePartCapabilities).toHaveBeenCalledWith(expect.objectContaining({
+			actor: { id: 11, role: 'USER' },
+			generation: 3,
+			partNumbers: [2, 1],
+		}));
 		expect(signer).toHaveBeenNthCalledWith(
 			1,
 			'direct-generation.zip',
 			'upload-1',
 			1,
 			300,
+			PART_CHECKSUM,
 		);
 	});
 
@@ -157,17 +162,13 @@ describe('direct multipart game upload control plane', () => {
 		const { deps } = harness();
 		const signingDeps = createGameUploadPartSigningDependencies(deps);
 		expect(Object.keys(signingDeps).sort()).toEqual([
-			'authorizeProjectWrite',
 			'clock',
 			'config',
 			'logger',
 			'partSigner',
 			'repository',
 		]);
-		expect(Object.keys(signingDeps.repository).sort()).toEqual([
-			'findSessionById',
-			'isSessionActive',
-		]);
+		expect(Object.keys(signingDeps.repository)).toEqual(['reservePartCapabilities']);
 		expect(Object.keys(signingDeps.partSigner)).toEqual(['presignUploadPart']);
 		expect(signingDeps).not.toHaveProperty('storage');
 		expect(signingDeps).not.toHaveProperty('finalizer');
@@ -176,17 +177,22 @@ describe('direct multipart game upload control plane', () => {
 
 	it('rejects stale generations, duplicate parts, and signing after access removal', async () => {
 		const stale = harness();
+		vi.mocked(stale.repository.reservePartCapabilities).mockRejectedValueOnce(
+			conflict('Upload generation is stale'),
+		);
 		await expect(stale.service.signPartUrls(
-			'direct-session', { id: 11, role: 'USER' }, { generation: 2, partNumbers: [1] },
+			'direct-session', { id: 11, role: 'USER' }, { generation: 2, parts: [{ partNumber: 1, checksumSha256: PART_CHECKSUM }] },
 		)).rejects.toMatchObject({ statusCode: 409 });
 		await expect(stale.service.signPartUrls(
-			'direct-session', { id: 11, role: 'USER' }, { generation: 3, partNumbers: [1, 1] },
+			'direct-session', { id: 11, role: 'USER' }, { generation: 3, parts: [{ partNumber: 1, checksumSha256: PART_CHECKSUM }, { partNumber: 1, checksumSha256: PART_CHECKSUM }] },
 		)).rejects.toMatchObject({ statusCode: 400 });
 
 		const removed = harness();
-		removed.authorizeProjectWrite.mockRejectedValueOnce(forbidden('Not project owner or member'));
+		vi.mocked(removed.repository.reservePartCapabilities).mockRejectedValueOnce(
+			forbidden('Not project owner or member'),
+		);
 		await expect(removed.service.signPartUrls(
-			'direct-session', { id: 11, role: 'USER' }, { generation: 3, partNumbers: [1] },
+			'direct-session', { id: 11, role: 'USER' }, { generation: 3, parts: [{ partNumber: 1, checksumSha256: PART_CHECKSUM }] },
 		)).rejects.toMatchObject({ statusCode: 403 });
 		expect(removed.signer).not.toHaveBeenCalled();
 	});
@@ -223,21 +229,16 @@ describe('direct multipart game upload control plane', () => {
 			generation: 3,
 			verifiedSizeBytes: 6 * MIB,
 		}));
-		expect(deps.finalizer.finalize).not.toHaveBeenCalled();
-		expect(deps.wakeValidationWorker).toHaveBeenCalledOnce();
+		expect(deps).not.toHaveProperty('finalizer');
 	});
 
 	it.each(['VERIFYING', 'COMPLETED'] as const)(
 		'requires a current-generation manifest before idempotent %s response',
 		async (status) => {
 			const completionResult = status === 'COMPLETED'
-				? { status: 'COMPLETED', storageKey: 'direct-generation.zip', sizeBytes: 6 * MIB }
+				? { status: 'COMPLETED', sessionId: 'direct-session', generation: 3, sizeBytes: 6 * MIB, uploadKind: 'GAME', assetId: 19 }
 				: undefined;
 			const current = harness(directSession({ status, completionResult }));
-			await expect(current.service.completeSession(
-				'direct-session',
-				{ id: 11, role: 'USER' },
-			)).rejects.toMatchObject({ statusCode: 400 });
 			await expect(current.service.completeSession(
 				'direct-session',
 				{ id: 11, role: 'USER' },
@@ -252,25 +253,6 @@ describe('direct multipart game upload control plane', () => {
 			expect(current.storage.completeMultipart).not.toHaveBeenCalled();
 		},
 	);
-
-	it('preserves bodyless idempotency for completed legacy proxy sessions', async () => {
-		const legacy = harness(directSession({
-			transport: 'API_CHUNK_PROXY',
-			status: 'COMPLETED',
-			completionResult: {
-				status: 'COMPLETED',
-				storageKey: 'legacy-generation.zip',
-				sizeBytes: 6 * MIB,
-			},
-		}));
-		await expect(legacy.service.completeSession(
-			'direct-session',
-			{ id: 11, role: 'USER' },
-		)).resolves.toMatchObject({
-			status: 'COMPLETED',
-			storageKey: 'legacy-generation.zip',
-		});
-	});
 
 	it('never trusts a client ETag or missing ListParts size', async () => {
 		const mismatch = harness();
@@ -326,7 +308,7 @@ describe('direct multipart game upload control plane', () => {
 		expect(direct.repository.releaseCompletionClaim).toHaveBeenCalledWith(
 			'direct-session',
 			'completion-token',
-			'direct-completion-deferred',
+			'completion-deferred',
 		);
 
 		vi.mocked(direct.repository.claimStaleCompletingSessions).mockResolvedValueOnce([
@@ -342,7 +324,52 @@ describe('direct multipart game upload control plane', () => {
 			storageKey: 'direct-generation.zip',
 			verifiedSizeBytes: 6 * MIB,
 		}));
-		expect(direct.deps.finalizer.finalize).not.toHaveBeenCalled();
+		expect(direct.deps).not.toHaveProperty('finalizer');
+	});
+
+	it('claims the next stale completion only after the active item has settled', async () => {
+		const direct = harness();
+		const first = directSession({
+			id: 'stale-first',
+			status: 'COMPLETING',
+			s3Key: 'first.zip',
+			s3UploadId: null,
+		});
+		const second = directSession({
+			id: 'stale-second',
+			status: 'COMPLETING',
+			s3Key: null,
+			s3UploadId: null,
+		});
+		vi.mocked(direct.repository.claimStaleCompletingSessions)
+			.mockResolvedValueOnce([first])
+			.mockResolvedValueOnce([second])
+			.mockResolvedValueOnce([]);
+		let releaseHead!: () => void;
+		const headGate = new Promise<void>((resolve) => { releaseHead = resolve; });
+		direct.storage.head.mockImplementationOnce(async () => {
+			await headGate;
+			return null;
+		});
+
+		const sweep = sweepStaleCompletingSessions(direct.deps);
+		await vi.waitFor(() => expect(direct.storage.head).toHaveBeenCalledOnce());
+		expect(direct.repository.claimStaleCompletingSessions).toHaveBeenCalledTimes(1);
+		expect(direct.repository.claimStaleCompletingSessions).toHaveBeenCalledWith(
+			expect.any(Date),
+			expect.any(String),
+			2 * 60 * 1000,
+			1,
+		);
+
+		releaseHead();
+		await expect(sweep).resolves.toEqual({ swept: 2 });
+		expect(direct.repository.claimStaleCompletingSessions).toHaveBeenCalledTimes(3);
+		expect(direct.repository.markFailed).toHaveBeenCalledWith(
+			'stale-second',
+			undefined,
+			expect.any(String),
+		);
 	});
 
 	it('preserves COMPLETING when post-Complete HEAD fails', async () => {
@@ -397,9 +424,8 @@ describe('direct multipart game upload control plane', () => {
 			'direct-session',
 			{ id: 11, role: 'USER' },
 		)).resolves.toMatchObject({
-			transport: 'DIRECT_MULTIPART',
 			generation: 3,
-			uploadedChunks: [0],
+			uploadedCount: 1,
 			parts: [{ partNumber: 1, etag: 'garage-1', sizeBytes: 5 * MIB }],
 		});
 	});
@@ -426,7 +452,7 @@ describe('direct multipart game upload control plane', () => {
 		await expect(expired.service.signPartUrls(
 			'direct-session',
 			{ id: 11, role: 'USER' },
-			{ generation: 3, partNumbers: [1] },
+			{ generation: 3, parts: [{ partNumber: 1, checksumSha256: PART_CHECKSUM }] },
 		)).rejects.toMatchObject({ statusCode: 400 });
 		expect(expired.repository.expireSessionAndClearActive).not.toHaveBeenCalled();
 		expect(expired.storage.abortMultipart).not.toHaveBeenCalled();
@@ -437,7 +463,7 @@ describe('direct multipart game upload control plane', () => {
 		['removed member', forbidden('Not project owner or member')],
 		['upload-disabled exhibition', forbidden('Upload is disabled')],
 	] as const)(
-		'checks current %s policy before expired status/complete/cancel/legacy preParsing mutation',
+		'checks current %s policy before expired status/complete/cancel mutation',
 		async (_reason, policyError) => {
 			const actions = [
 				(service: ReturnType<typeof createGameUploadService>) => service.getSessionStatus(
@@ -450,11 +476,6 @@ describe('direct multipart game upload control plane', () => {
 				),
 				(service: ReturnType<typeof createGameUploadService>) => service.cancelSession(
 					'direct-session', { id: 11, role: 'USER' },
-				),
-				(service: ReturnType<typeof createGameUploadService>) => (
-					service.authorizeLegacyChunkUpload(
-						'direct-session', { id: 11, role: 'USER' },
-					)
 				),
 			];
 			for (const action of actions) {

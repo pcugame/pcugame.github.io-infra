@@ -30,7 +30,6 @@ export async function registerRateLimit(app: FastifyInstance, cfg: Env): Promise
 		allowList: (req: FastifyRequest) =>
 			req.url === '/api/health'
 			|| req.url === '/api/health/deep'
-			|| req.url.startsWith('/api/assets/protected/')
 			|| /^\/api\/assets\/\d+\/download(?:\?|$)/.test(req.url),
 		skipOnError: true,
 		// The plugin reads `statusCode` from our returned object to set the HTTP status,

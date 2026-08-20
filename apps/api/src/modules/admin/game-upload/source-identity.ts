@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { AppError, badRequest, conflict } from '../../../shared/errors.js';
 
 export const SOURCE_IDENTITY_ALGORITHM = 'SHA256_BLOCK_MANIFEST_V1' as const;
@@ -69,8 +71,8 @@ export function assertSessionHasSourceIdentity(session: {
 		|| !HEX_SHA256.test(session.sourceIdentity ?? '')
 		|| session.sourceIdentityBlockSizeBytes !== SOURCE_IDENTITY_BLOCK_SIZE_BYTES
 		|| !session.sourceIdentityBlockManifest?.length) {
-		throw conflict('This legacy upload session cannot be resumed; start a new upload', {
-			reason: 'LEGACY_UPLOAD_SESSION',
+		throw conflict('This upload session has no valid source identity; start a new upload', {
+			reason: 'SOURCE_IDENTITY_MISSING',
 		});
 	}
 }
@@ -90,72 +92,95 @@ export function assertSourceIdentityMatches(session: Parameters<typeof assertSes
 	}
 }
 
-export function assertChunkMatchesManifest(input: {
-	buffer: Buffer;
-	chunkIndex: number;
-	chunkSizeBytes: number;
-	manifest: Uint8Array;
-}): string {
-	const { buffer, chunkIndex, chunkSizeBytes, manifest } = input;
-	const firstBlock = (chunkIndex * chunkSizeBytes) / SOURCE_IDENTITY_BLOCK_SIZE_BYTES;
-	if (!Number.isInteger(firstBlock) || manifest.length % 32 !== 0) {
-		throw new Error('Invalid persisted source identity alignment');
-	}
-	for (let offset = 0, block = firstBlock; offset < buffer.length; offset += SOURCE_IDENTITY_BLOCK_SIZE_BYTES, block += 1) {
-		const actual = createHash('sha256').update(buffer.subarray(offset, Math.min(offset + SOURCE_IDENTITY_BLOCK_SIZE_BYTES, buffer.length))).digest();
-		const expected = manifest.subarray(block * 32, block * 32 + 32);
-		if (expected.length !== 32 || !actual.equals(expected)) {
-			throw conflict('Chunk content does not match this upload session', { reason: 'CHUNK_CONTENT_MISMATCH' });
-		}
-	}
-	return createHash('sha256').update(buffer).digest('hex');
-}
-
 /**
- * Recomputes a completed direct-upload identity one fixed-size block at a
- * time. The largest resident object buffer is 1 MiB; the claim is checked on
- * both sides of every internal storage read.
+ * Materialize one protected object GET into worker-local storage while checking
+ * the browser's block manifest. Object chunks may have arbitrary boundaries;
+ * only one 1 MiB hash state and the storage SDK's bounded stream buffers are
+ * resident. Claim renewal is deliberately time-based in the caller rather than
+ * coupled to the number of source blocks.
  */
-export async function validateCompletedSourceIdentity(input: {
+export async function materializeAndValidateCompletedSource(input: {
 	totalBytes: bigint;
 	sourceIdentityAlgorithm?: string | null;
 	sourceIdentity?: string | null;
 	sourceIdentityBlockSizeBytes?: number | null;
 	sourceIdentityBlockManifest?: Uint8Array | null;
-	readRange(start: number, end: number): Promise<Buffer>;
-	assertClaimOwned?: () => Promise<void>;
-}): Promise<void> {
+	source: Readable;
+	destination: NodeJS.WritableStream;
+	signal?: AbortSignal;
+	physicalByteLimit: number;
+	onBytes?(bytes: number): void;
+}): Promise<{ bytesWritten: number }> {
 	assertSessionHasSourceIdentity(input);
 	const totalBytes = Number(input.totalBytes);
 	if (!Number.isSafeInteger(totalBytes) || totalBytes <= 0) {
 		throw new Error('Persisted upload size is outside the safe integer range');
 	}
+	if (!Number.isSafeInteger(input.physicalByteLimit) || input.physicalByteLimit < totalBytes) {
+		throw new Error('Validation temp disk budget cannot contain the declared object');
+	}
 	const blockCount = Math.ceil(totalBytes / SOURCE_IDENTITY_BLOCK_SIZE_BYTES);
 	if (input.sourceIdentityBlockManifest.length !== blockCount * 32) {
 		throw new Error('Persisted source identity manifest length is invalid');
 	}
-	const manifest = Buffer.from(input.sourceIdentityBlockManifest);
+	const expectedManifest = Buffer.from(input.sourceIdentityBlockManifest);
 	const actualDigests: string[] = [];
-	for (let block = 0; block < blockCount; block += 1) {
-		await input.assertClaimOwned?.();
-		const start = block * SOURCE_IDENTITY_BLOCK_SIZE_BYTES;
-		const end = Math.min(totalBytes, start + SOURCE_IDENTITY_BLOCK_SIZE_BYTES) - 1;
-		const bytes = await input.readRange(start, end);
-		await input.assertClaimOwned?.();
-		const expectedLength = end - start + 1;
-		if (bytes.length !== expectedLength) {
-			throw new AppError(
-				500,
-				`Completed source block ${block} size mismatch`,
-				'SIZE_MISMATCH',
-			);
-		}
-		const digest = createHash('sha256').update(bytes).digest();
-		const expected = manifest.subarray(block * 32, block * 32 + 32);
-		if (!digest.equals(expected)) {
+	let blockHash = createHash('sha256');
+	let blockBytes = 0;
+	let bytesWritten = 0;
+
+	function finishBlock(): void {
+		const block = actualDigests.length;
+		const digest = blockHash.digest();
+		const expected = expectedManifest.subarray(block * 32, block * 32 + 32);
+		if (expected.length !== 32 || !digest.equals(expected)) {
 			throw badRequest('Completed object does not match the upload source identity');
 		}
 		actualDigests.push(digest.toString('hex'));
+		blockHash = createHash('sha256');
+		blockBytes = 0;
+	}
+
+	await pipeline(
+		input.source,
+		async function* hashAndBound(source) {
+			for await (const raw of source) {
+				if (input.signal?.aborted) {
+					throw input.signal.reason ?? new Error('Validation source stream was aborted');
+				}
+				const chunk = Buffer.from(raw as Buffer | Uint8Array | string);
+				bytesWritten += chunk.length;
+				if (bytesWritten > totalBytes || bytesWritten > input.physicalByteLimit) {
+					throw new AppError(500, 'Completed source exceeds its declared size', 'SIZE_MISMATCH');
+				}
+				for (let offset = 0; offset < chunk.length;) {
+					const take = Math.min(
+						SOURCE_IDENTITY_BLOCK_SIZE_BYTES - blockBytes,
+						chunk.length - offset,
+					);
+					blockHash.update(chunk.subarray(offset, offset + take));
+					blockBytes += take;
+					offset += take;
+					if (blockBytes === SOURCE_IDENTITY_BLOCK_SIZE_BYTES) finishBlock();
+				}
+				input.onBytes?.(chunk.length);
+				yield chunk;
+			}
+		},
+		input.destination,
+		...(input.signal ? [{ signal: input.signal }] : []),
+	);
+
+	if (bytesWritten !== totalBytes) {
+		throw new AppError(
+			500,
+			`Completed source size mismatch: expected ${totalBytes}, got ${bytesWritten}`,
+			'SIZE_MISMATCH',
+		);
+	}
+	if (blockBytes > 0) finishBlock();
+	if (actualDigests.length !== blockCount) {
+		throw new AppError(500, 'Completed source block count mismatch', 'SIZE_MISMATCH');
 	}
 	const actualRoot = sourceIdentityRoot(
 		totalBytes,
@@ -165,4 +190,5 @@ export async function validateCompletedSourceIdentity(input: {
 	if (actualRoot !== input.sourceIdentity) {
 		throw badRequest('Completed object source identity root mismatch');
 	}
+	return { bytesWritten };
 }

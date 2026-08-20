@@ -140,15 +140,7 @@ describe.runIf(runStorageIntegration)(
 			});
 		}
 
-		function gameService(overrides: {
-			uploadPart?: (
-				key: string,
-				uploadId: string,
-				partNumber: number,
-				body: NodeJS.ReadableStream,
-				contentLength: number,
-			) => Promise<string>;
-		} = {}) {
+		function gameService() {
 			return createGameUploadService({
 				repository: gameRepository,
 				storage: {
@@ -160,16 +152,6 @@ describe.runIf(runStorageIntegration)(
 						protectedBucket,
 						storageKey,
 						uploadId,
-					),
-					uploadPart: overrides.uploadPart ?? (
-						(storageKey, uploadId, partNumber, body, contentLength) => storage.uploadPart(
-							protectedBucket,
-							storageKey,
-							uploadId,
-							partNumber,
-							body as Readable,
-							contentLength,
-						)
 					),
 					completeMultipart: (storageKey, uploadId, parts) => storage.completeMultipart(
 						protectedBucket,
@@ -189,47 +171,17 @@ describe.runIf(runStorageIntegration)(
 					head: (storageKey) => storage.head(protectedBucket, storageKey),
 				},
 				partSigner: { presignUploadPart: async () => 'https://storage.test/part' },
-				finalizer: {
-					async finalize(session, object) {
-						await gameRepository.finalizeCompletedSession(
-							session.id,
-							session.projectId,
-							'GAME',
-							{
-								storageKey: session.s3Key,
-								originalName: session.originalName,
-								mimeType: 'application/zip',
-								sizeBytes: session.totalBytes,
-								isPublic: false,
-								completionClaimToken: session.completionClaimToken,
-							},
-							{
-								bucket: protectedBucket,
-								reason: 'integration-game-replace',
-								playbackReason: 'integration-game-playback-replace',
-							},
-						);
-						testObjects.get(protectedBucket)?.add(session.s3Key);
-						return {
-							status: 'COMPLETED' as const,
-							storageKey: session.s3Key,
-							sizeBytes: object.size,
-						};
-					},
-				},
 				settings: { get: async () => ({ maxGameFileMb: 20, maxChunkSizeMb: 5 }) },
-				uploadSlots: { acquire: () => {}, release: () => {} },
 				clock: { now: () => new Date() },
 				ids: { next: () => randomUUID() },
 				lifecycle: { isAcceptingNewWork: () => true },
 				authorizeProjectWrite: async () => undefined,
-				config: { uploadChunkSizeMb: 5, uploadSessionTtlMinutes: 60, uploadPartUrlBatchMax: 16, uploadPartUrlTtlSeconds: 300 },
+				config: { uploadChunkSizeMb: 5, uploadSessionTtlMinutes: 60, uploadPartUrlBatchMax: 16, uploadPartUrlTtlSeconds: 300, uploadPartUrlRefreshMax: 64, uploadPartUrlRefreshWindowMs: 300_000, directUploadQuota: { actorActiveSessions: 4, projectActiveSessions: 2, actorOutstandingBytes: 10n * 1024n * 1024n * 1024n } },
 				roleGameMaxBytes: () => 20 * MIB,
 				storageKey: () => key(`game-${randomUUID()}.zip`),
 				deleteOrQueue: async () => {},
 				wakeDeletionWorker: vi.fn(),
 				wakeMaintenance: vi.fn(),
-				wakeValidationWorker: vi.fn(),
 				recordUntrackedMultipartCleanupFailure: vi.fn(),
 				logger: { error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 			});
@@ -563,111 +515,6 @@ describe.runIf(runStorageIntegration)(
 			await prisma.orphanObject.deleteMany({
 				where: { storageKey: { in: [afterPut.storageKey, duringCommit.storageKey] } },
 			});
-		});
-
-		it('isolates parallel parts and resets a real multipart generation on ETag mismatch', async () => {
-			let releaseFirst!: () => void;
-			let enteredFirst!: () => void;
-			const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve; });
-			const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-			const service = gameService({
-				async uploadPart(storageKey, uploadId, partNumber, body, contentLength) {
-					enteredFirst();
-					await firstGate;
-					return storage.uploadPart(
-						protectedBucket,
-						storageKey,
-						uploadId,
-						partNumber,
-						body as Readable,
-						contentLength,
-					);
-				},
-			});
-			const actor = { id: userId, role: 'ADMIN' as const };
-			const parallelBytes = Buffer.alloc(5 * MIB, 0x61);
-			const created = await service.createSession(projectId, exhibitionId, actor, {
-				originalName: 'parallel.zip',
-				totalBytes: 5 * MIB,
-				...sourceIdentityForBuffer(parallelBytes),
-			});
-			// The production graph now defaults new sessions to DIRECT_MULTIPART.
-			// This test deliberately exercises the retained legacy chunk claim and
-			// generation-reset path, so make its fixture transport explicit before
-			// it invokes the legacy chunk endpoint.
-			await prisma.gameUploadSession.update({
-				where: { id: created.sessionId },
-				data: { transport: 'API_CHUNK_PROXY' },
-			});
-			const firstUpload = service.uploadChunk(
-				created.sessionId,
-				0,
-				Readable.from([parallelBytes]),
-				actor,
-				{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: created.sourceIdentity },
-			);
-			await firstEntered;
-			await expect(service.uploadChunk(
-				created.sessionId,
-				0,
-				Readable.from([Buffer.alloc(5 * MIB, 0x62)]),
-				actor,
-				{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: created.sourceIdentity },
-		)).rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
-			releaseFirst();
-			await expect(firstUpload).resolves.toMatchObject({ uploadedCount: 1 });
-			const completed = await service.completeSession(created.sessionId, actor);
-			expect(completed).toMatchObject({ status: 'COMPLETED', sizeBytes: 5 * MIB });
-			await expect(service.completeSession(created.sessionId, actor)).resolves.toEqual(completed);
-
-			const mismatchService = gameService();
-			const mismatchBytes = Buffer.alloc(5 * MIB, 0x63);
-			const mismatch = await mismatchService.createSession(projectId, exhibitionId, actor, {
-				originalName: 'mismatch.zip',
-				totalBytes: 5 * MIB,
-				...sourceIdentityForBuffer(mismatchBytes),
-			});
-			await prisma.gameUploadSession.update({
-				where: { id: mismatch.sessionId },
-				data: { transport: 'API_CHUNK_PROXY' },
-			});
-			await mismatchService.uploadChunk(
-				mismatch.sessionId,
-				0,
-				Readable.from([mismatchBytes]),
-				actor,
-				{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: mismatch.sourceIdentity },
-			);
-			await prisma.gameUploadPart.updateMany({
-				where: { sessionId: mismatch.sessionId },
-				data: { etag: 'wrong-etag' },
-			});
-			await expect(mismatchService.completeSession(mismatch.sessionId, actor))
-				.rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
-			await expect(prisma.gameUploadSession.findUniqueOrThrow({
-				where: { id: mismatch.sessionId },
-				include: { parts: true, partClaims: true },
-			})).resolves.toMatchObject({
-				status: 'PENDING',
-				multipartGeneration: 2,
-				parts: [],
-				partClaims: [],
-			});
-			await expect(prisma.multipartAbortTask.count({
-				where: { storageKey: { startsWith: keyPrefix }, state: 'PENDING' },
-			})).resolves.toBeGreaterThanOrEqual(1);
-			await mismatchService.cancelSession(mismatch.sessionId, actor);
-			const abortWorker = createMultipartAbortService({
-				repository: createMultipartAbortRepository(prisma),
-				storage,
-				clock: { now: () => new Date(Date.now() + 1_000) },
-				ids: { next: () => randomUUID() },
-				logger: { error: vi.fn() },
-			});
-			await expect(abortWorker.run()).resolves.toMatchObject({ failed: 0 });
-			await expect(prisma.multipartAbortTask.count({
-				where: { storageKey: { startsWith: keyPrefix }, state: 'PENDING' },
-			})).resolves.toBe(0);
 		});
 
 		it('reconciles by bucket and preserves every authoritative pointer', async () => {

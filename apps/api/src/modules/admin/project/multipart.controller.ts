@@ -6,6 +6,10 @@ import type { createProjectAccessService } from '../project-access.service.js';
 import type { createProjectAssetService } from './project-asset.service.js';
 import type { createSubmitProjectService } from './project-submit.service.js';
 import { assertIdempotencyKey } from '../../idempotency/service.js';
+import {
+	limitEncodedMultipartBody,
+	rethrowEncodedMultipartError,
+} from '../../../shared/encoded-multipart-limit.js';
 
 type SubmitService = ReturnType<typeof createSubmitProjectService>;
 type AssetService = ReturnType<typeof createProjectAssetService>;
@@ -37,7 +41,7 @@ export function createAdminProjectSubmitController(deps: {
 					request.headers['idempotency-key'],
 				);
 				const result = await deps.service.submitProject(
-					{ actor: request.currentUser!, parts: request.parts(), idempotencyKey },
+					{ actor: request.currentUser!, body: request.body, idempotencyKey },
 					{ audience: 'admin' },
 				);
 				sendCreated(reply, result);
@@ -56,6 +60,9 @@ export function createProjectAssetUploadController(deps: {
 			'/projects/:id/assets',
 			{
 				preHandler: requireLogin,
+				preParsing: async (_request, _reply, payload) => (
+					limitEncodedMultipartBody(payload, deps.bodyLimit)
+				),
 				bodyLimit: deps.bodyLimit,
 				handlerTimeout: 45 * 60 * 1000,
 			},
@@ -66,11 +73,16 @@ export function createProjectAssetUploadController(deps: {
 				const projectId = parseIntParam(request.params.id);
 				const actor = request.currentUser!;
 				const project = await deps.access.loadProjectWithAccess(actor, projectId);
-				const result = await deps.service.addAssetToProject(
-					projectId,
-					project.exhibitionId,
-					{ actor, parts: request.parts(), idempotencyKey },
-				);
+				let result;
+				try {
+					result = await deps.service.addAssetToProject(
+						projectId,
+						project.exhibitionId,
+						{ actor, parts: request.parts(), idempotencyKey },
+					);
+				} catch (error) {
+					rethrowEncodedMultipartError(request.raw, deps.bodyLimit, error);
+				}
 				sendCreated(reply, result);
 			},
 		);

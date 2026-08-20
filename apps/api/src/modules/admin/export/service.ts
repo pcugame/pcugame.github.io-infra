@@ -7,22 +7,8 @@ import type {
 } from '@pcu/contracts';
 import { conflict } from '../../../shared/errors.js';
 import { parseWebglEntryKey } from '../../webgl/paths.js';
-
-export interface ExportProject {
-	id: number;
-	title: string;
-	webglEntryKey: string;
-	exhibition: { year: number; title: string };
-	members: { name: string; studentId: string; sortOrder: number }[];
-	assets: {
-		id: number;
-		kind: AssetKind;
-		storageKey: string;
-		originalName: string;
-		mimeType: string;
-		sizeBytes: bigint;
-	}[];
-}
+import type { ExportProject } from './ports.js';
+export type { ExportProject } from './ports.js';
 
 function safeDirName(name: string): string {
 	return name
@@ -156,7 +142,7 @@ export function createExportService(
 		const projects = await deps.findProjects(options.year);
 		const totalFiles = projects.reduce(
 			(sum, project) => sum + project.assets.length
-				+ (parseWebglEntryKey(project.id, project.webglEntryKey) ? 1 : 0),
+				+ (parseWebglEntryKey(project.id, project.webglEntryKey) && project.webglSourceKey ? 1 : 0),
 			0,
 		);
 		const result: ExportResult = {
@@ -208,12 +194,12 @@ export function createExportService(
 				return { asset, fileName, destination: join(fullDir, fileName) };
 			});
 			const webgl = parseWebglEntryKey(project.id, project.webglEntryKey);
-			if (webgl) {
+			if (webgl && project.webglSourceKey) {
 				projectFiles.push({
 					asset: {
 						id: -project.id,
 						kind: 'WEBGL',
-						storageKey: webgl.sourceKey,
+						storageKey: project.webglSourceKey,
 						originalName: 'webgl.zip',
 					},
 					fileName: 'webgl/webgl.zip',
@@ -262,7 +248,7 @@ export function createExportService(
 						result.aborted = true;
 						break;
 					}
-					deps.logError({ err, storageKey: asset.storageKey }, 'Export download failed');
+					deps.logError({ err, assetId: asset.id, projectId: project.id }, 'Export download failed');
 					result.failed++;
 					progressStore.update((progress) => { progress.failed = result.failed; });
 					setCurrentFileStatus(asset.id, 'failed');

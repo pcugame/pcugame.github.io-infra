@@ -19,6 +19,11 @@ $GARAGE bucket create pcu-public 2>/dev/null || echo "Bucket pcu-public already 
 $GARAGE bucket create pcu-protected 2>/dev/null || echo "Bucket pcu-protected already exists"
 $GARAGE bucket create pcu-staging 2>/dev/null || echo "Bucket pcu-staging already exists"
 
+# Garage's s3_web endpoint serves only buckets explicitly enabled as websites.
+# The public bucket contains validated immutable generations; protected and
+# staging buckets deliberately remain unavailable on this endpoint.
+$GARAGE bucket website --allow pcu-public >/dev/null
+
 echo "=== Garage init: creating local credential ==="
 # Create key and extract credentials
 KEY_OUTPUT=$($GARAGE key create pcu-dev-key 2>/dev/null || $GARAGE key info --show-secret pcu-dev-key 2>/dev/null)

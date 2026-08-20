@@ -5,23 +5,24 @@ import type {
 	SingleAssetUploadCoordinator,
 	UploadPipelinePort,
 } from '../application/upload-ports.js';
+import type { MultipartPart } from '../application/http-input.js';
 import { createProjectAssetService } from '../modules/admin/project/project-asset.service.js';
 import { createProjectAssetUploadCoordinator } from '../modules/admin/project/project-asset-upload.adapter.js';
 import { createNodeFileSystem } from '../infrastructure/production-ports.js';
 
 const mocks = {
 	createAsset: vi.fn(),
-	replaceOrCreateReplaceableAsset: vi.fn(),
 	findExhibitionById: vi.fn(),
 	wakeDeletionWorker: vi.fn(),
 	processFile: vi.fn(),
 	rollbackCommitted: vi.fn(),
 	logError: vi.fn(),
+	acquire: vi.fn(),
+	release: vi.fn(),
 };
 
 const MB = 1024 * 1024;
 const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 let id = 0;
 let trackedTempFiles: string[] = [];
 let cleanupSizes: number[] = [];
@@ -51,7 +52,6 @@ const singleAssetUploadCoordinator = createProjectAssetUploadCoordinator({
 const projectAssetService = createProjectAssetService({
 	repository: {
 		createAsset: mocks.createAsset,
-		replaceOrCreateReplaceableAsset: mocks.replaceOrCreateReplaceableAsset,
 		findExhibitionById: mocks.findExhibitionById,
 	},
 	uploadLimits: () => ({
@@ -62,7 +62,7 @@ const projectAssetService = createProjectAssetService({
 		requestMaxBytes: 3 * MB,
 		maxFiles: 20,
 	}),
-	uploadSlots: { acquire: vi.fn(), release: vi.fn() },
+	uploadSlots: { acquire: mocks.acquire, release: mocks.release },
 	uploadCoordinator: singleAssetUploadCoordinator,
 	bucketForKind: () => 'test-bucket',
 	wakeDeletionWorker: mocks.wakeDeletionWorker,
@@ -107,6 +107,15 @@ function assetRequest(kind: string, chunks: Buffer[], filename: string, fileFirs
 	return {
 		actor: { id: 1, role: 'OPERATOR' as const },
 		parts,
+	};
+}
+
+function requestWithParts(parts: MultipartPart[]) {
+	return {
+		actor: { id: 1, role: 'OPERATOR' as const },
+		parts: (async function* multipartParts() {
+			for (const part of parts) yield part;
+		})(),
 	};
 }
 
@@ -190,21 +199,72 @@ describe('project asset upload resource guards', () => {
 		await expect(fsp.access(firstTrackedTempFile(trackedTempFiles))).rejects.toThrow();
 	});
 
-	it('rejects oversized GAME during temp write and cleans the temp file', async () => {
+	it.each(['GAME', 'VIDEO'])('rejects %s before opening a temp file or consuming bytes', async (kind) => {
 		await expect(
 			projectAssetService.addAssetToProject(
 				7,
 				1,
-				assetRequest('GAME', chunksWithHeader(zipHeader, 3 * MB, 512 * 1024), 'game.zip'),
+				assetRequest(kind, [Buffer.alloc(3 * MB)], 'large.bin'),
 			),
 		).rejects.toMatchObject({
-			statusCode: 413,
-			code: 'PAYLOAD_TOO_LARGE',
+			statusCode: 400,
 		});
 
 		expect(mocks.processFile).not.toHaveBeenCalled();
-		expect(cleanupSizes[0]).toBeLessThanOrEqual(2 * MB);
+		expect(trackedTempFiles).toEqual([]);
+	});
+
+	it('does not request the file part after a non-inline kind', async () => {
+		let filePartRequested = false;
+		const parts = (async function* multipartParts() {
+			yield { type: 'field' as const, fieldname: 'kind', value: 'GAME' };
+			filePartRequested = true;
+			yield {
+				type: 'file' as const,
+				fieldname: 'file',
+				filename: 'game.zip',
+				file: Readable.from([Buffer.alloc(MB)]),
+			};
+		})();
+		await expect(projectAssetService.addAssetToProject(7, 1, {
+			actor: { id: 1, role: 'OPERATOR' },
+			parts,
+		})).rejects.toMatchObject({ statusCode: 400 });
+		expect(filePartRequested).toBe(false);
+		expect(mocks.release).toHaveBeenCalledOnce();
+	});
+
+	it('rejects duplicate and trailing grammar while cleaning temp and releasing the slot', async () => {
+		await expect(projectAssetService.addAssetToProject(7, 1, requestWithParts([
+			{ type: 'field', fieldname: 'kind', value: 'IMAGE' },
+			{ type: 'field', fieldname: 'kind', value: 'IMAGE' },
+		]))).rejects.toMatchObject({ statusCode: 400 });
+		expect(trackedTempFiles).toEqual([]);
+		expect(mocks.release).toHaveBeenCalledOnce();
+
+		vi.clearAllMocks();
+		await expect(projectAssetService.addAssetToProject(7, 1, requestWithParts([
+			{ type: 'field', fieldname: 'kind', value: 'IMAGE' },
+			{
+				type: 'file', fieldname: 'file', filename: 'image.png',
+				file: Readable.from([pngHeader]),
+			},
+			{ type: 'field', fieldname: 'unexpected', value: 'trailing' },
+		]))).rejects.toMatchObject({ statusCode: 400 });
+		expect(mocks.processFile).not.toHaveBeenCalled();
+		expect(mocks.release).toHaveBeenCalledOnce();
 		await expect(fsp.access(firstTrackedTempFile(trackedTempFiles))).rejects.toThrow();
+	});
+
+	it('drains an unknown first file stream without hanging or creating temp state', async () => {
+		const unknown = Readable.from([Buffer.alloc(128)]);
+		await expect(projectAssetService.addAssetToProject(7, 1, requestWithParts([{
+			type: 'file', fieldname: 'unknown', filename: 'unknown.bin', file: unknown,
+		}]))).rejects.toMatchObject({ statusCode: 400 });
+		if (!unknown.readableEnded) await new Promise<void>((resolve) => unknown.once('end', resolve));
+		expect(unknown.readableEnded).toBe(true);
+		expect(trackedTempFiles).toEqual([]);
+		expect(mocks.release).toHaveBeenCalledOnce();
 	});
 
 	it('keeps the normal single-asset upload flow working', async () => {
@@ -227,7 +287,7 @@ describe('project asset upload resource guards', () => {
 		await expect(fsp.access(tempFile)).rejects.toThrow();
 	});
 
-	it('wakes durable deletion after a committed GAME replacement without rolling it back', async () => {
+	it('fails closed if a coordinator violates the inline-kind contract', async () => {
 		const rollback = vi.fn();
 		const cleanup = vi.fn();
 		const startSpy = vi.spyOn(singleAssetUploadCoordinator, 'start').mockResolvedValue({
@@ -241,34 +301,15 @@ describe('project asset upload resource guards', () => {
 			rollback,
 			cleanup,
 		});
-		mocks.replaceOrCreateReplaceableAsset.mockResolvedValue({
-			assetId: 321,
-			oldStorageKey: 'asset/old-game.zip',
-			oldPlaybackStorageKey: null,
-		});
-
 		await expect(projectAssetService.addAssetToProject(
 			7,
 			1,
-			assetRequest('GAME', [zipHeader], 'game.zip'),
-		)).resolves.toEqual({
-			assetId: 321,
-		});
+			assetRequest('GAME', [Buffer.from([0x50, 0x4b, 0x03, 0x04])], 'game.zip'),
+		)).rejects.toThrow(/non-inline asset kind/);
 
-		expect(mocks.replaceOrCreateReplaceableAsset).toHaveBeenCalledWith(
-			7,
-			'GAME',
-			expect.objectContaining({ storageKey: 'asset/new-game.zip' }),
-			{
-				bucket: 'test-bucket',
-				reason: 'project-asset-replace-previous',
-				playbackReason: 'project-asset-replace-previous-playback',
-			},
-		);
-		expect(rollback).not.toHaveBeenCalled();
+		expect(mocks.createAsset).not.toHaveBeenCalled();
+		expect(rollback).toHaveBeenCalledOnce();
 		expect(cleanup).toHaveBeenCalledOnce();
-		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
-		expect(mocks.logError).not.toHaveBeenCalled();
 		startSpy.mockRestore();
 	});
 
@@ -282,7 +323,6 @@ describe('project asset upload resource guards', () => {
 		const service = createProjectAssetService({
 			repository: {
 				createAsset: mocks.createAsset,
-				replaceOrCreateReplaceableAsset: mocks.replaceOrCreateReplaceableAsset,
 				findExhibitionById: mocks.findExhibitionById,
 			},
 			uploadLimits: () => ({

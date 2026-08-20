@@ -1,7 +1,11 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { uploadGameFile, type GameUploadSession } from '../lib/api/game-upload';
+import {
+	listGameUploadSessions,
+	uploadGameFile,
+	type GameUploadSession,
+} from '../lib/api/game-upload';
 
 vi.mock('../lib/upload', () => ({
 	startUpload: vi.fn(() => 'upload-test'),
@@ -12,18 +16,14 @@ vi.mock('../lib/upload', () => ({
 
 const IDENTITY = 'a'.repeat(64);
 
-function session(
-	totalChunks = 1,
-	transport: 'DIRECT_MULTIPART' | 'API_CHUNK_PROXY' | null = 'DIRECT_MULTIPART',
-): GameUploadSession {
+function session(totalChunks = 1): GameUploadSession {
 	return {
 		sessionId: 'session-direct',
 		chunkSizeBytes: 2,
 		totalChunks,
 		expiresAt: '2026-08-21T00:00:00.000Z',
 		uploadKind: 'GAME',
-		...(transport === null ? {} : { transport }),
-		...(transport === 'DIRECT_MULTIPART' ? { generation: 7 } : {}),
+		generation: 7,
 		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
 		sourceIdentity: IDENTITY,
 		sourceIdentityBlockSizeBytes: 1048576,
@@ -55,6 +55,11 @@ function requestBody(init?: RequestInit): Record<string, unknown> {
 	return JSON.parse(String(init?.body)) as Record<string, unknown>;
 }
 
+function requestedPartNumbers(init?: RequestInit): number[] {
+	const body = requestBody(init);
+	return (body.parts as Array<{ partNumber: number }>).map(({ partNumber }) => partNumber);
+}
+
 beforeEach(() => {
 	vi.restoreAllMocks();
 });
@@ -64,6 +69,14 @@ afterEach(() => {
 });
 
 describe('direct multipart game upload', () => {
+	it('does not reinterpret an old status without required uploadKind as GAME', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => json({
+			items: [{ sessionId: 'old-response-without-kind' }],
+		})));
+
+		await expect(listGameUploadSessions(7, 'GAME')).resolves.toEqual({ items: [] });
+	});
+
 	it('uploads browser bytes only to signed Garage URLs and polls VERIFYING to completion', async () => {
 		const calls: Array<{ url: string; init?: RequestInit }> = [];
 		let statusCalls = 0;
@@ -71,7 +84,7 @@ describe('direct multipart game upload', () => {
 			const url = String(input);
 			calls.push({ url, init });
 			if (url.includes('/part-urls')) {
-				const partNumbers = requestBody(init).partNumbers as number[];
+				const partNumbers = requestedPartNumbers(init);
 				return json({
 					generation: 7,
 					expiresAt: '2026-08-20T01:00:00.000Z',
@@ -89,7 +102,7 @@ describe('direct multipart game upload', () => {
 				const completionCalls = calls.filter(({ url: calledUrl }) => calledUrl.endsWith('/complete')).length;
 				return completionCalls === 1
 					? json({ status: 'VERIFYING', sessionId: 'session-direct', generation: 7, sizeBytes: 6 }, 202)
-					: json({ status: 'COMPLETED', storageKey: 'protected/game.zip', sizeBytes: 6 });
+					: json({ status: 'COMPLETED', sessionId: 'session-direct', generation: 7, sizeBytes: 6, uploadKind: 'GAME', assetId: 11 });
 			}
 			if (apiPath(input).endsWith('/session-direct')) {
 				statusCalls++;
@@ -125,7 +138,7 @@ describe('direct multipart game upload', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
 			if (url.includes('/part-urls')) {
-				const partNumbers = requestBody(init).partNumbers as number[];
+				const partNumbers = requestedPartNumbers(init);
 				return json({ generation: 7, expiresAt: 'later', parts: partNumbers.map((partNumber) => ({
 					partNumber,
 					url: `https://garage.example/${partNumber}`,
@@ -140,7 +153,7 @@ describe('direct multipart game upload', () => {
 				return uploaded(`"${url.split('/').at(-1)}"`);
 			}
 			if (url.endsWith('/complete')) {
-				return json({ status: 'COMPLETED', storageKey: 'protected/game.zip', sizeBytes: 20 });
+				return json({ status: 'COMPLETED', sessionId: 'session-direct', generation: 7, sizeBytes: 20, uploadKind: 'GAME', assetId: 11 });
 			}
 			throw new Error(`Unexpected URL: ${url}`);
 		}));
@@ -166,7 +179,7 @@ describe('direct multipart game upload', () => {
 			if (url.endsWith('/expired')) return new Response(null, { status: 403 });
 			if (url.endsWith('/fresh')) return uploaded('"fresh-etag"');
 			if (url.endsWith('/complete')) {
-				return json({ status: 'COMPLETED', storageKey: 'protected/game.zip', sizeBytes: 2 });
+				return json({ status: 'COMPLETED', sessionId: 'session-direct', generation: 7, sizeBytes: 2, uploadKind: 'GAME', assetId: 11 });
 			}
 			throw new Error(`Unexpected URL: ${url} ${String(init?.method)}`);
 		}));
@@ -313,28 +326,6 @@ describe('direct multipart game upload', () => {
 		expect(putSignal?.aborted).toBe(true);
 	});
 
-	it.each([
-		['an absent transport', null],
-		['an explicit API_CHUNK_PROXY transport', 'API_CHUNK_PROXY' as const],
-	])('keeps the legacy chunk route for %s', async (_label, transport) => {
-		const urls: string[] = [];
-		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			urls.push(url);
-			if (url.includes('/chunks/0')) {
-				return json({ index: 0, bytesWritten: 2, uploadedCount: 1, totalChunks: 1 });
-			}
-			if (url.endsWith('/complete')) {
-				return json({ status: 'COMPLETED', storageKey: 'protected/game.zip', sizeBytes: 2 });
-			}
-			throw new Error(`Unexpected URL: ${url}`);
-		}));
-
-		await uploadGameFile(fileForParts(1), session(1, transport), { title: 'game' }).start();
-		expect(urls.some((url) => url.includes('/chunks/0'))).toBe(true);
-		expect(urls.some((url) => url.includes('/part-urls'))).toBe(false);
-	});
-
 	it('resumes from Garage-reconciled parts without re-uploading successful parts', async () => {
 		const signedBatches: number[][] = [];
 		const garageUrls: string[] = [];
@@ -342,7 +333,7 @@ describe('direct multipart game upload', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
 			if (url.includes('/part-urls')) {
-				const partNumbers = requestBody(init).partNumbers as number[];
+				const partNumbers = requestedPartNumbers(init);
 				signedBatches.push(partNumbers);
 				return json({ generation: 7, expiresAt: 'later', parts: partNumbers.map((partNumber) => ({
 					partNumber, url: `https://garage.example/${partNumber}`, requiredHeaders: {},
@@ -354,14 +345,13 @@ describe('direct multipart game upload', () => {
 			}
 			if (url.endsWith('/complete')) {
 				completionBody = requestBody(init);
-				return json({ status: 'COMPLETED', storageKey: 'protected/game.zip', sizeBytes: 4 });
+				return json({ status: 'COMPLETED', sessionId: 'session-direct', generation: 7, sizeBytes: 4, uploadKind: 'GAME', assetId: 11 });
 			}
 			throw new Error(`Unexpected URL: ${url}`);
 		}));
 
 		await uploadGameFile(fileForParts(2), session(2), {
 			title: 'game',
-			startFrom: [0],
 			resumeParts: [{ partNumber: 1, etag: '"etag-1"', sizeBytes: 2 }],
 		}).start();
 
@@ -380,7 +370,7 @@ describe('direct multipart game upload', () => {
 			urls.push(url);
 			if (apiPath(input).endsWith('/session-direct')) return json({ status: 'COMPLETED' });
 			if (url.endsWith('/complete')) {
-				return json({ status: 'COMPLETED', storageKey: 'protected/game.zip', sizeBytes: 2 });
+				return json({ status: 'COMPLETED', sessionId: 'session-direct', generation: 7, sizeBytes: 2, uploadKind: 'GAME', assetId: 11 });
 			}
 			throw new Error(`Unexpected URL: ${url}`);
 		}));
@@ -420,7 +410,7 @@ describe('direct multipart game upload', () => {
 				completionBodies.push(requestBody(init));
 				return completionBodies.length === 1
 					? json({ status: 'VERIFYING', sessionId: 'session-direct', generation: 7, sizeBytes: 4 }, 202)
-					: json({ status: 'COMPLETED', storageKey: 'protected/game.zip', sizeBytes: 4 });
+					: json({ status: 'COMPLETED', sessionId: 'session-direct', generation: 7, sizeBytes: 4, uploadKind: 'GAME', assetId: 11 });
 			}
 			throw new Error(`Unexpected URL: ${url}`);
 		}));
@@ -481,7 +471,7 @@ describe('direct multipart game upload', () => {
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input);
 			if (url.includes('/part-urls')) {
-				const partNumbers = requestBody(init).partNumbers as number[];
+				const partNumbers = requestedPartNumbers(init);
 				batchSizes.push(partNumbers.length);
 				return json({ generation: 7, expiresAt: 'later', parts: partNumbers.map((partNumber) => ({
 					partNumber, url: `https://garage.example/${partNumber}`, requiredHeaders: {},
@@ -489,7 +479,7 @@ describe('direct multipart game upload', () => {
 			}
 			if (url.startsWith('https://garage.example/')) return uploaded(`"${url.split('/').at(-1)}"`);
 			if (url.endsWith('/complete')) {
-				return json({ status: 'COMPLETED', storageKey: 'protected/game.zip', sizeBytes: 40 });
+				return json({ status: 'COMPLETED', sessionId: 'session-direct', generation: 7, sizeBytes: 40, uploadKind: 'GAME', assetId: 11 });
 			}
 			throw new Error(`Unexpected URL: ${url}`);
 		}));

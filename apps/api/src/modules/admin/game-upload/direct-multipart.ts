@@ -1,6 +1,5 @@
 import type {
 	GameUploadCompletePart,
-	GameUploadTransport,
 	GameUploadUploadedPart,
 } from '@pcu/contracts';
 import { AppError, badRequest, conflict } from '../../../shared/errors.js';
@@ -16,12 +15,6 @@ export function assertMultipartPartCount(totalParts: number): void {
 			'MULTIPART_PART_LIMIT',
 		);
 	}
-}
-
-export function resolvedUploadTransport(
-	record: { transport: GameUploadTransport },
-): GameUploadTransport {
-	return record.transport;
 }
 
 function normalizeEtag(etag: string): string {

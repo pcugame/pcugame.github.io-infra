@@ -62,12 +62,12 @@ export type SerializableProject = {
 	assets: SerializableAsset[];
 };
 
-export function createProjectSerializer(baseUrl: string) {
-	const base = baseUrl.replace(/\/$/, '');
+export function createProjectSerializer(apiPublicUrl: string, publicAssetBaseUrl: string) {
+	const base = apiPublicUrl.replace(/\/$/, '');
 	const protectedAssetUrl = (assetId: number, variant: 'original' | 'playback' = 'original') => (
 		protectedAssetUrlFor(base, assetId, variant)
 	);
-	const responsiveImages = createResponsiveImageSerializer(base);
+	const responsiveImages = createResponsiveImageSerializer(publicAssetBaseUrl);
 
 	function serializeProjectDetail(project: SerializableProject): AdminProjectDetail {
 		const videos = project.assets
@@ -100,7 +100,7 @@ export function createProjectSerializer(baseUrl: string) {
 				? responsiveImages.serializeResponsiveImage(project.poster!)
 				: undefined,
 			webglUrl: parseWebglEntryKey(project.id, project.webglEntryKey ?? '')
-				? webglUrl(base, project.id)
+				? webglUrl(publicAssetBaseUrl, project.webglEntryKey!)
 				: undefined,
 			members: project.members.map((m) => ({
 				id: m.id,

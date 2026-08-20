@@ -1,13 +1,8 @@
 import type {
-	GameUploadCompleteResponse,
-	GameUploadTransport,
 	SiteSettingsData,
 	UploadKind,
 	UserRole,
 } from '@pcu/contracts';
-import type { Readable } from 'node:stream';
-import type { StorageRequestOptions } from '../../../application/ports.js';
-import type { CompletedUploadSession } from './finalize-completed-upload.service.js';
 
 /** Raised by the repository's serializable active-slot transaction. */
 export class ActiveUploadCompletionInProgressError extends Error {
@@ -17,11 +12,39 @@ export class ActiveUploadCompletionInProgressError extends Error {
 	}
 }
 
+export type DirectUploadQuotaKind =
+	| 'ACTOR_ACTIVE_SESSIONS'
+	| 'PROJECT_ACTIVE_SESSIONS'
+	| 'ACTOR_OUTSTANDING_BYTES'
+	| 'PART_URL_REFRESH';
+
+/** Stable application error raised by transaction-bound quota enforcement. */
+export class DirectUploadQuotaExceededError extends Error {
+	constructor(public readonly quota: DirectUploadQuotaKind) {
+		super(`Direct upload quota exceeded: ${quota}`);
+		this.name = 'DirectUploadQuotaExceededError';
+	}
+}
+
+/** The final pointer target changed after this direct session was created. */
+export class GameUploadTargetFencedError extends Error {
+	readonly terminalStateCommitted = true;
+
+	constructor() {
+		super('The GAME replacement target changed while the upload was in progress');
+		this.name = 'GameUploadTargetFencedError';
+	}
+}
+
+export interface DirectUploadQuotaLimits {
+	actorActiveSessions: number;
+	projectActiveSessions: number;
+	actorOutstandingBytes: bigint;
+}
+
 export interface GameUploadPartRecord {
 	partNumber: number;
 	etag: string;
-	contentSha256?: string | null;
-	generation?: number;
 }
 
 export interface GameUploadStoredPartRecord extends GameUploadPartRecord {
@@ -34,7 +57,6 @@ export interface GameUploadSessionRecord {
 	projectId: number;
 	userId: number;
 	uploadKind: UploadKind;
-	transport: GameUploadTransport;
 	originalName: string;
 	totalBytes: bigint;
 	chunkSizeBytes: number;
@@ -43,22 +65,23 @@ export interface GameUploadSessionRecord {
 	sourceIdentity?: string | null;
 	sourceIdentityBlockSizeBytes?: number | null;
 	sourceIdentityBlockManifest?: Uint8Array | null;
-	uploadedChunks: number[];
 	status: string;
 	expiresAt: Date;
 	s3UploadId: string | null;
 	s3Key: string | null;
 	storageKey?: string | null;
-	parts: GameUploadPartRecord[];
 	multipartGeneration?: number;
+	partUrlIssueWindowCount?: number;
+	partUrlIssueWindowStartedAt?: Date | null;
+	partUrlLastIssuedAt?: Date | null;
 	completionResult?: unknown;
 	completionClaimUntil?: Date | null;
+	webglDeploymentId?: string | null;
 	activeSlot?: { sessionId: string } | null;
 	project: { status: string };
 }
 
-export interface GameUploadSessionSummary extends Omit<GameUploadSessionRecord, 'parts' | 'project'> {
-	parts?: GameUploadPartRecord[];
+export interface GameUploadSessionSummary extends Omit<GameUploadSessionRecord, 'project'> {
 	project?: { status: string };
 }
 
@@ -67,7 +90,6 @@ export interface NewGameUploadSession {
 	projectId: number;
 	userId: number;
 	uploadKind: UploadKind;
-	transport: GameUploadTransport;
 	originalName: string;
 	totalBytes: bigint;
 	chunkSizeBytes: number;
@@ -98,14 +120,29 @@ export type CancelGameUploadResult =
 	| { count: 0; durableAbort: null }
 	| { count: 1; durableAbort: DurablyTrackedMultipartAbort | null };
 
-export type ReplaceMultipartGenerationResult =
-	| { replaced: false; durableAbort: null }
-	| { replaced: true; durableAbort: DurablyTrackedMultipartAbort | null };
-
 export interface GameUploadRepository {
 	findSessionById(id: string): Promise<GameUploadSessionRecord | null>;
 	isSessionActive(sessionId: string): Promise<boolean>;
-	createSessionReplacingActive(data: NewGameUploadSession): Promise<{
+	assertCanCreateSession(input: {
+		projectId: number;
+		userId: number;
+		uploadKind: UploadKind;
+		totalBytes: bigint;
+		limits: DirectUploadQuotaLimits;
+	}): Promise<void>;
+	reservePartCapabilities(input: {
+		sessionId: string;
+		actor: { id: number; role: UserRole };
+		generation: number;
+		partNumbers: number[];
+		maxIssuesPerWindow: number;
+		issueWindowMs: number;
+		quota: DirectUploadQuotaLimits;
+	}): Promise<{ session: GameUploadSessionRecord; isRefresh: boolean }>;
+	createSessionReplacingActive(
+		data: NewGameUploadSession,
+		limits: DirectUploadQuotaLimits,
+	): Promise<{
 		session: { id: string };
 		durableAborts: DurablyTrackedMultipartAbort[];
 	}>;
@@ -116,31 +153,12 @@ export interface GameUploadRepository {
 		uploadId: string;
 		reason: string;
 	}): Promise<unknown>;
-	acquirePartClaim(input: {
-		sessionId: string;
-		partNumber: number;
-		generation: number;
-		token: string;
-		owner: string;
-		leaseMs: number;
-		contentSha256: string;
-	}): Promise<
-		| { kind: 'acquired'; token: string }
-		| { kind: 'already-uploaded'; parts: GameUploadPartRecord[] }
-		| { kind: 'conflict' | 'busy' | 'expired' | 'unavailable' }
-	>;
-	completePartClaim(input: {
-		token: string;
-		etag: string;
-		contentSha256: string;
-	}): Promise<{ accepted: boolean; conflict?: boolean; parts: GameUploadPartRecord[] }>;
-	renewPartClaim(token: string, leaseMs: number): Promise<{ count: number }>;
 	claimCompletion(input: {
 		sessionId: string;
 		generation: number;
 		token: string;
 		leaseMs: number;
-	}): Promise<{ count: number; reason: 'state' | 'parts-active' | 'parts-missing' | null }>;
+	}): Promise<{ count: number; reason: 'state' | 'parts-missing' | null }>;
 	markVerifying(input: {
 		sessionId: string;
 		generation: number;
@@ -148,11 +166,6 @@ export interface GameUploadRepository {
 		verifiedSizeBytes: number;
 		completionClaimToken: string;
 	}): Promise<{ count: number }>;
-	claimVerifyingSessions(
-		token: string,
-		leaseMs: number,
-		limit: number,
-	): Promise<GameUploadSessionSummary[]>;
 	renewCompletionClaim(
 		sessionId: string,
 		token: string,
@@ -163,25 +176,12 @@ export interface GameUploadRepository {
 		token: string,
 		reason: string,
 	): Promise<{ count: number }>;
-	replaceMultipartGeneration(input: {
-		sessionId: string;
-		expectedGeneration: number;
-		newUploadId: string;
-		reason: string;
-	}): Promise<ReplaceMultipartGenerationResult>;
-	findPartsBySessionId(sessionId: string): Promise<GameUploadPartRecord[]>;
 	revertToPending(sessionId: string, completionClaimToken: string): Promise<unknown>;
 	markFailed(
 		sessionId: string,
 		storageKey: string | null | undefined,
 		completionClaimToken: string,
 	): Promise<unknown>;
-	markCompletedObjectFailed(input: {
-		sessionId: string;
-		storageKey: string;
-		reason: string;
-		completionClaimToken: string;
-	}): Promise<{ count: number }>;
 	claimStaleCompletingSessions(
 		cutoff: Date,
 		token: string,
@@ -189,7 +189,6 @@ export interface GameUploadRepository {
 		limit: number,
 	): Promise<GameUploadSessionSummary[]>;
 	findExpiredPendingSessions(now: Date, limit: number): Promise<GameUploadSessionSummary[]>;
-	findSessionsWithExpiredPartClaims(limit: number): Promise<GameUploadSessionSummary[]>;
 	findKnownMultipartUploads(): Promise<Array<{ s3Key: string | null; s3UploadId: string | null }>>;
 	findActiveSessionsForListing(
 		projectId: number,
@@ -210,14 +209,6 @@ export interface GameUploadStorage {
 		uploadId: string,
 		request?: { signal?: AbortSignal },
 	): Promise<void>;
-	uploadPart(
-		key: string,
-		uploadId: string,
-		partNumber: number,
-		body: Readable,
-		contentLength: number,
-		request?: { signal?: AbortSignal },
-	): Promise<string>;
 	completeMultipart(
 		key: string,
 		uploadId: string,
@@ -247,6 +238,7 @@ export interface GameUploadPartSigner {
 		uploadId: string,
 		partNumber: number,
 		expiresInSeconds: number,
+		checksumSha256: string,
 	): Promise<string>;
 }
 
@@ -256,21 +248,27 @@ export interface GameUploadPartSigner {
  * and completion use-cases rather than being reachable from signing code.
  */
 export interface GameUploadPartSigningRepository {
-	findSessionById(id: string): Promise<GameUploadSessionRecord | null>;
-	isSessionActive(sessionId: string): Promise<boolean>;
+	reservePartCapabilities(input: {
+		sessionId: string;
+		actor: { id: number; role: UserRole };
+		generation: number;
+		partNumbers: number[];
+		maxIssuesPerWindow: number;
+		issueWindowMs: number;
+		quota: DirectUploadQuotaLimits;
+	}): Promise<{ session: GameUploadSessionRecord; isRefresh: boolean }>;
 }
 
 export interface GameUploadPartSigningDependencies {
 	repository: GameUploadPartSigningRepository;
 	partSigner: GameUploadPartSigner;
 	clock: { now(): Date };
-	authorizeProjectWrite(
-		actor: { id: number; role: UserRole },
-		projectId: number,
-	): Promise<void>;
 	config: {
 		uploadPartUrlBatchMax: number;
 		uploadPartUrlTtlSeconds: number;
+		uploadPartUrlRefreshMax: number;
+		uploadPartUrlRefreshWindowMs: number;
+		directUploadQuota: DirectUploadQuotaLimits;
 	};
 	logger: {
 		info?(context: Record<string, unknown>, message: string): void;
@@ -281,18 +279,7 @@ export interface GameUploadServiceDependencies {
 	repository: GameUploadRepository;
 	storage: GameUploadStorage;
 	partSigner: GameUploadPartSigner;
-	finalizer: {
-		finalize(
-			session: CompletedUploadSession,
-			object: { size: number },
-			options?: {
-				storageRequest?: StorageRequestOptions;
-				assertClaimOwned?: () => Promise<void>;
-			},
-		): Promise<GameUploadCompleteResponse>;
-	};
 	settings: { get(): Promise<SiteSettingsData> };
-	uploadSlots: { acquire(): void; release(): void };
 	clock: { now(): Date };
 	ids: { next(): string };
 	lifecycle: { isAcceptingNewWork(): boolean };
@@ -305,13 +292,15 @@ export interface GameUploadServiceDependencies {
 		uploadSessionTtlMinutes: number;
 		uploadPartUrlBatchMax: number;
 		uploadPartUrlTtlSeconds: number;
+		uploadPartUrlRefreshMax: number;
+		uploadPartUrlRefreshWindowMs: number;
+		directUploadQuota: DirectUploadQuotaLimits;
 	};
 	roleGameMaxBytes(role: UserRole): number;
 	storageKey(uploadKind: UploadKind, projectId: number): string;
 	deleteOrQueue(key: string, reason: string, context: Record<string, unknown>): Promise<void>;
 	wakeDeletionWorker(): void;
 	wakeMaintenance(): void;
-	wakeValidationWorker(): void;
 	recordPostCommitCleanupFailure?: () => void;
 	recordUntrackedMultipartCleanupFailure(): void;
 	logger: {

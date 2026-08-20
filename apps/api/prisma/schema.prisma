@@ -52,11 +52,6 @@ enum UploadKind {
   WEBGL
 }
 
-enum GameUploadTransport {
-  API_CHUNK_PROXY
-  DIRECT_MULTIPART
-}
-
 enum OrphanTargetKind {
   EXACT
   PREFIX
@@ -233,14 +228,13 @@ model AuthSession {
   @@map("auth_sessions")
 }
 
-/// Tracks a resumable chunked game-file upload session.
-/// Uses S3 multipart upload — chunks go directly to object storage.
+/// Tracks a resumable direct-multipart GAME or WEBGL upload session.
+/// Client object bytes never traverse the API process.
 model GameUploadSession {
   id                   String     @id @default(uuid())
   projectId            Int        @map("project_id")
   userId               Int        @map("user_id")
   uploadKind           UploadKind @default(GAME) @map("upload_kind")
-  transport            GameUploadTransport @default(API_CHUNK_PROXY)
   originalName         String     @map("original_name")
   totalBytes           BigInt     @map("total_bytes")
   chunkSizeBytes       Int        @map("chunk_size_bytes")
@@ -249,28 +243,33 @@ model GameUploadSession {
   sourceIdentity       String?    @map("source_identity")
   sourceIdentityBlockSizeBytes Int? @map("source_identity_block_size_bytes")
   sourceIdentityBlockManifest Bytes? @map("source_identity_block_manifest")
-  uploadedChunks       Int[]      @default([]) @map("uploaded_chunks")
   // DB CHECK constraint `game_upload_sessions_status_check` limits this to the
   // states in state-machine.ts. Prisma cannot model this check in the DSL.
   status               String     @default("PENDING") // PENDING | COMPLETING | VERIFYING | COMPLETED | REJECTED | CANCELLED | EXPIRED | FAILED
-  stagingPath          String     @default("") @map("staging_path") // legacy, no longer used
   storageKey           String?    @map("storage_key") // set on completion
   s3UploadId           String?    @map("s3_upload_id")
   s3Key                String?    @map("s3_key")
-  s3PartEtags          Json?      @map("s3_part_etags") // [{partNumber: Int, etag: String}]
   multipartGeneration  Int        @default(1) @map("multipart_generation")
+  partUrlIssueWindowCount Int      @default(0) @map("part_url_issue_window_count")
+  partUrlIssueWindowStartedAt DateTime? @map("part_url_issue_window_started_at")
+  partUrlLastIssuedAt  DateTime?  @map("part_url_last_issued_at")
   completionClaimToken String?    @map("completion_claim_token")
   completionClaimUntil DateTime?  @map("completion_claim_until")
   completionLastError  String?    @map("completion_last_error")
   completionResult     Json?      @map("completion_result")
+  // GAME replacement fence captured while the project mutation row is locked.
+  // Both null means no READY GAME existed when this session was created.
+  expectedTargetAssetId Int?      @map("expected_target_asset_id")
+  expectedTargetAssetUpdatedAt DateTime? @map("expected_target_asset_updated_at")
+  // Worker-only opaque public generation. It is persisted under a live claim
+  // before the first public PUT and is not serialized until Project is READY.
+  webglDeploymentId    String?    @map("webgl_deployment_id")
   expiresAt            DateTime   @map("expires_at")
   createdAt            DateTime   @default(now()) @map("created_at")
   updatedAt            DateTime   @updatedAt @map("updated_at")
 
   project    Project                  @relation("ProjectGameUploads", fields: [projectId], references: [id], onDelete: Cascade)
   user       User                     @relation("UserGameUploads", fields: [userId], references: [id], onDelete: Cascade)
-  parts      GameUploadPart[]         @relation("GameUploadSessionParts")
-  partClaims GameUploadPartClaim[]    @relation("GameUploadSessionPartClaims")
   activeSlot GameUploadActiveSession? @relation("GameUploadSessionActiveSlot")
 
   @@index([projectId])
@@ -278,41 +277,6 @@ model GameUploadSession {
   @@index([userId])
   @@index([status, expiresAt])
   @@map("game_upload_sessions")
-}
-
-model GameUploadPart {
-  id         Int      @id @default(autoincrement())
-  sessionId  String   @map("session_id")
-  partNumber Int      @map("part_number")
-  etag       String
-  contentSha256 String? @map("content_sha256")
-  generation Int      @default(1)
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-
-  session GameUploadSession @relation("GameUploadSessionParts", fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@unique([sessionId, partNumber], name: "game_upload_part_session_part", map: "game_upload_parts_session_id_part_number_key")
-  @@index([sessionId])
-  @@map("game_upload_parts")
-}
-
-model GameUploadPartClaim {
-  id         String   @id @default(uuid())
-  sessionId  String   @map("session_id")
-  partNumber Int      @map("part_number")
-  token      String   @unique
-  generation Int
-  owner      String   @default("")
-  leaseUntil DateTime @map("lease_until")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-
-  session GameUploadSession @relation("GameUploadSessionPartClaims", fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@unique([sessionId, partNumber], name: "game_upload_part_claim_session_part", map: "game_upload_part_claim_session_part")
-  @@index([leaseUntil])
-  @@map("game_upload_part_claims")
 }
 
 model GameUploadActiveSession {
@@ -327,6 +291,28 @@ model GameUploadActiveSession {
 
   @@id([projectId, uploadKind], name: "projectId_uploadKind")
   @@map("game_upload_active_sessions")
+}
+
+/// Durable control-plane request consumed only by the export processing role.
+model ExportJob {
+  id            String    @id @default(uuid())
+  requestedById Int       @map("requested_by_id")
+  year          Int?
+  dryRun        Boolean   @default(false) @map("dry_run")
+  status        String    @default("QUEUED") // QUEUED | RUNNING | COMPLETED | FAILED
+  progress      Json?
+  result        Json?
+  error         String?
+  claimToken    String?   @map("claim_token")
+  claimUntil    DateTime? @map("claim_until")
+  startedAt     DateTime? @map("started_at")
+  finishedAt    DateTime? @map("finished_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, createdAt])
+  @@index([claimUntil])
+  @@map("export_jobs")
 }
 
 /// IP addresses permanently banned from downloading protected assets.

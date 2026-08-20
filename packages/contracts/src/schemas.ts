@@ -39,6 +39,10 @@ export const SubmitProjectPayloadBaseSchema = z.object({
 	members: z.array(ProjectMemberInputSchema).min(1),
 });
 
+/** Asset kinds intentionally small enough to cross the API process. */
+export const InlineAssetKindSchema = z.enum(['POSTER', 'IMAGE', 'THUMBNAIL']);
+export type InlineAssetKind = z.infer<typeof InlineAssetKindSchema>;
+
 export const UpdateProjectBaseSchema = z.object({
 	title: z.string().min(1).max(120).optional(),
 	summary: z.string().max(300).optional(),

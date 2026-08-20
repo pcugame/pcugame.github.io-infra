@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { pipeline as streamPipeline } from 'node:stream/promises';
-import type { AssetKind } from '@pcu/contracts';
+import type { InlineAssetKind } from '@pcu/contracts';
 import type {
 	FileSystem,
 	IdGenerator,
@@ -17,7 +17,7 @@ import {
 } from '../../../shared/upload-policy.js';
 import { detectFileType } from '../../../shared/file-signature.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
-import { AssetKindEnum } from '../../../shared/validation.js';
+import { InlineAssetKindEnum } from '../../../shared/validation.js';
 
 export interface ProjectAssetUploadDependencies {
 	fileSystem: FileSystem;
@@ -38,17 +38,30 @@ export function createProjectAssetUploadCoordinator(
 			const pipeline = deps.createPipeline();
 			if (owner) pipeline.setOwner?.(owner);
 			try {
-				let kind: AssetKind | null = null;
+				let kind: InlineAssetKind | null = null;
 				let fileTmpPath: string | null = null;
 				let fileOriginalName = '';
+				let grammarState: 'kind' | 'file' | 'done' = 'kind';
 
 				for await (const part of parts) {
-					if (part.type === 'field' && part.fieldname === 'kind') {
-						const parsed = AssetKindEnum.safeParse(part.value);
+					if (grammarState === 'kind') {
+						if (part.type !== 'field' || part.fieldname !== 'kind') {
+							if (part.type === 'file') part.file.resume();
+							throw badRequest('Inline asset multipart must begin with exactly one kind field');
+						}
+						const parsed = InlineAssetKindEnum.safeParse(part.value);
 						if (!parsed.success) throw badRequest(`Invalid asset kind: ${part.value}`);
 						kind = parsed.data;
-					} else if (part.type === 'file' && part.fieldname === 'file') {
-						if (!kind) throw badRequest('Asset kind must be provided before file');
+						grammarState = 'file';
+						continue;
+					}
+
+					if (grammarState === 'file') {
+						if (!kind) throw new Error('Inline multipart grammar lost its validated kind');
+						if (part.type !== 'file' || part.fieldname !== 'file') {
+							if (part.type === 'file') part.file.resume();
+							throw badRequest('Inline asset multipart requires exactly one file after kind');
+						}
 						assertValidUploadFilename(part.filename);
 						const tmpPath = path.join(
 							deps.fileSystem.temporaryDirectory(),
@@ -62,11 +75,16 @@ export function createProjectAssetUploadCoordinator(
 						);
 						fileTmpPath = tmpPath;
 						fileOriginalName = part.filename;
+						grammarState = 'done';
+						continue;
 					}
+
+					if (part.type === 'file') part.file.resume();
+					throw badRequest('Inline asset multipart contains trailing or duplicate parts');
 				}
 
-				if (!kind) throw badRequest('Missing asset kind');
-				if (!fileTmpPath) throw badRequest('No file provided');
+				if (grammarState === 'kind' || !kind) throw badRequest('Missing asset kind');
+				if (grammarState !== 'done' || !fileTmpPath) throw badRequest('No file provided');
 
 				const header = await deps.fileSystem.readRange(fileTmpPath, 0, 15);
 				const exactLimit = kindLimitForMime(

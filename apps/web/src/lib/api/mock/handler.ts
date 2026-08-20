@@ -54,10 +54,15 @@ type MockGameSession = {
 	totalBytes: number;
 	chunkSizeBytes: number;
 	totalChunks: number;
-	uploadedChunks: number[];
 	uploadedCount: number;
+	parts: Array<{ partNumber: number; etag: string; sizeBytes: number }>;
 	status: string;
 	expiresAt: string;
+	uploadKind: 'GAME' | 'WEBGL';
+	generation: number;
+	sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1';
+	sourceIdentity: string;
+	sourceIdentityBlockSizeBytes: 1048576;
 };
 
 const mockGameSessions = new Map<string, MockGameSession>();
@@ -283,10 +288,15 @@ const routes: MockRoute[] = [
 					totalBytes,
 					chunkSizeBytes,
 					totalChunks,
-					uploadedChunks: [],
 					uploadedCount: 0,
+					parts: [],
 					status: 'PENDING',
 					expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+					uploadKind: body.uploadKind === 'WEBGL' ? 'WEBGL' : 'GAME',
+					generation: 1,
+					sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+					sourceIdentity: String(body.sourceIdentity),
+					sourceIdentityBlockSizeBytes: 1048576,
 				};
 				mockGameSessions.set(session.sessionId, session);
 				return {
@@ -294,6 +304,11 @@ const routes: MockRoute[] = [
 					chunkSizeBytes: session.chunkSizeBytes,
 					totalChunks: session.totalChunks,
 					expiresAt: session.expiresAt,
+					uploadKind: session.uploadKind,
+					generation: session.generation,
+					sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
+					sourceIdentity: session.sourceIdentity,
+					sourceIdentityBlockSizeBytes: session.sourceIdentityBlockSizeBytes,
 				};
 			}
 
@@ -305,21 +320,26 @@ const routes: MockRoute[] = [
 		},
 	},
 	{
-		pattern: /^\/api\/admin\/game-upload-sessions\/([^/]+)\/chunks\/(\d+)$/,
-		handler: (match) => {
+		pattern: /^\/api\/admin\/game-upload-sessions\/([^/]+)\/part-urls$/,
+		handler: (match, _method, options) => {
 			const sessionId = match[1] ?? '';
 			const session = mockGameSessions.get(sessionId) ?? notFound();
-			const index = Number(match[2]);
-			if (!session.uploadedChunks.includes(index)) {
-				session.uploadedChunks.push(index);
-				session.uploadedChunks.sort((a, b) => a - b);
-				session.uploadedCount = session.uploadedChunks.length;
-			}
+			const body = parseJsonBody(options.body);
+			const partNumbers = Array.isArray(body.parts)
+				? body.parts.flatMap((value) => (
+					typeof value === 'object' && value !== null && typeof value.partNumber === 'number'
+						? [value.partNumber]
+						: []
+				))
+				: [];
 			return {
-				index,
-				bytesWritten: session.chunkSizeBytes,
-				uploadedCount: session.uploadedCount,
-				totalChunks: session.totalChunks,
+				generation: session.generation,
+				expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+				parts: partNumbers.map((partNumber) => ({
+					partNumber,
+					url: `https://mock-storage.invalid/${sessionId}/${partNumber}`,
+					requiredHeaders: { 'content-type': 'application/octet-stream' },
+				})),
 			};
 		},
 	},
@@ -331,8 +351,12 @@ const routes: MockRoute[] = [
 			session.status = 'COMPLETED';
 			return {
 				status: 'COMPLETED',
-				storageKey: `mock/game/${session.sessionId}.zip`,
+				sessionId: session.sessionId,
+				generation: session.generation,
 				sizeBytes: session.totalBytes,
+				...(session.uploadKind === 'WEBGL'
+					? { uploadKind: 'WEBGL', webglUrl: `https://assets.example.test/webgl/${session.projectId}/mock/site/index.html` }
+					: { uploadKind: 'GAME', assetId: 900 }),
 			};
 		},
 	},

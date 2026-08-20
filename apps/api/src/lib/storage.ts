@@ -142,7 +142,7 @@ export function createObjectStorage(
 				}),
 			}), { expiresIn: presignOptions.ttlSec ?? options.defaultPresignTtlSec });
 		},
-		async presignUploadPart(bucket, key, uploadId, partNumber, expiresInSeconds) {
+		async presignUploadPart(bucket, key, uploadId, partNumber, expiresInSeconds, checksumSha256) {
 			if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
 				throw new RangeError('S3 multipart partNumber must be an integer between 1 and 10000');
 			}
@@ -154,6 +154,7 @@ export function createObjectStorage(
 				Key: key,
 				UploadId: uploadId,
 				PartNumber: partNumber,
+				ChecksumSHA256: checksumSha256,
 			}), { expiresIn: expiresInSeconds });
 		},
 		async delete(bucket, key, request) {

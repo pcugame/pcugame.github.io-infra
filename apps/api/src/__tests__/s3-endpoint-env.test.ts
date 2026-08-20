@@ -10,6 +10,7 @@ const base = {
 	CORS_ALLOWED_ORIGINS: 'http://localhost:5173',
 	API_PUBLIC_URL: 'http://localhost:4000',
 	WEB_PUBLIC_URL: 'http://localhost:5173',
+	PUBLIC_ASSET_BASE_URL: 'http://localhost:3902',
 	S3_REGION: 'garage',
 	S3_ACCESS_KEY_ID: 'test-access-key',
 	S3_SECRET_ACCESS_KEY: 'test-secret-key',

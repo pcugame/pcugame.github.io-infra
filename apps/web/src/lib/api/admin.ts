@@ -8,6 +8,7 @@ import type {
   AdminProjectListQuery,
   AdminProjectListResponse,
   AdminProjectDetail,
+  SubmitProjectPayload,
   SubmitProjectResponse,
   BulkUpdateProjectStatusRequest,
   BulkDeleteProjectsRequest,
@@ -20,7 +21,7 @@ import type {
   UpdateSiteSettingsRequest,
   ImportPreviewResult,
   ImportExecuteResult,
-  ExportResult,
+  ExportStartResponse,
   ExportStatusResponse,
 } from '../../contracts';
 import { api, uploadFormData } from './client';
@@ -92,16 +93,12 @@ export const adminProjectApi = {
     return api.delete<void>(`/api/admin/projects/${id}/webgl`);
   },
 
-  /** 작품 + 파일 일괄 등록 (multipart/form-data) */
-  submit(input: { formData: FormData; idempotencyKey: string }) {
-    return uploadFormData<SubmitProjectResponse>(
+  /** Create metadata first; assets use dedicated post-create workflows. */
+  submit(input: { payload: SubmitProjectPayload; idempotencyKey: string }) {
+    return api.post<SubmitProjectResponse>(
       '/api/admin/projects/submit',
-      input.formData,
-      {
-        title: '작품 파일 업로드',
-        processingMessage: '파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
-        headers: { 'Idempotency-Key': input.idempotencyKey },
-      },
+      input.payload,
+      { headers: { 'Idempotency-Key': input.idempotencyKey } },
     );
   },
 
@@ -208,7 +205,7 @@ export const adminBannedIpApi = {
 
 export const adminExportApi = {
   run(year?: number) {
-    return api.post<ExportResult>('/api/admin/export', { year });
+    return api.post<ExportStartResponse>('/api/admin/export', { year });
   },
 
   status() {

@@ -1,337 +1,287 @@
-# Upload lifecycle and direct-transport runbook
+# 객체 전송 control-plane cutover runbook
 
-## Release status and compatibility gate
+이 문서는 GAME·WEBGL의 browser-to-object-storage 전환과 공개 origin
+전환을 한 번의 breaking cutover로 배포하는 절차다. 구 Web/API writer와 신 writer를
+동시에 실행하지 않는다. schema downgrade는 지원하지 않으며 장애 시 기본 복구 전략은
+forward-fix다.
 
-This branch is a cutover candidate, not a change that can be merged into production
-one component at a time. It deliberately makes every newly-created GAME/WEBGL
-session `DIRECT_MULTIPART`. Rows that existed before the migration remain
-`API_CHUNK_PROXY`, and the legacy chunk route remains capable of finishing those
-rows. An old Web client connected to the new API, however, would create a direct
-session and then try the incompatible chunk route. Do not deploy this branch until
-the Web/API pair and the browser-to-Garage network path have passed the cutover
-matrix below.
+## 완료 후 byte 경계
 
-Required pre-cutover evidence:
+| 자산 | Client → data plane | API | Processing worker | Delivery |
+| --- | --- | --- | --- | --- |
+| GAME | Garage protected/staging multipart | 인증·인가, capability, Complete/Abort, 상태 전이 | 순차 검증 후 READY pointer commit | `assetId` 정책 판정 후 짧은 presigned GET으로 302 |
+| WEBGL ZIP | Garage protected multipart | 인증·인가, capability, Complete/Abort, 검증 enqueue | 한 번의 source read로 검증·immutable generation 전개 | public origin의 immutable entry/artifact URL |
+| VIDEO 신규 업로드 | 지원하지 않음; inline/generic contract에서 거부 | 신규 upload capability 없음 | 없음 | 기존 `READY` VIDEO만 `assetId` 정책 판정 후 302 |
+| 소형 이미지·포스터·문서 | inline cap 이하의 Fastify stream | stream 단계와 logical size를 모두 제한 | 필요한 rendition 처리 | public origin immutable URL |
 
-1. New Web + old API receives no `transport` field and uses the legacy chunk path.
-   This verifies Web-before-API compatibility while production remains unchanged.
-2. New Web + new API completes GAME and WEBGL through browser-to-Garage `PUT`,
-   including resume, URL refresh, cancellation, validation, and replacement.
-3. A migrated `API_CHUNK_PROXY` row can still be resumed and completed through the
-   legacy route. This is recovery compatibility, not a fallback for a failed direct
-   session.
-4. No Web code automatically switches a `DIRECT_MULTIPART` session to the legacy
-   byte proxy after a direct failure.
-5. Browser network capture shows part bytes only on the public Garage signing
-   origin; API traffic contains JSON control requests only.
-6. The production Garage CORS and reverse-proxy checks in this runbook pass from
-   every configured Web origin.
+Fastify는 direct part, completed object 검증 stream, public image/WebGL response body를
+읽지 않는다. `pcu-protected`와 `pcu-staging`은 website 공개 대상이 아니다.
+VIDEO direct staging은 이번 cutover의 구현 범위에 포함되지 않았다. UI와 API는 신규
+VIDEO upload를 명시적으로 비지원하며, 대형 VIDEO bytes를 Fastify로 우회 전송하는
+경로도 없다. 기존에 이미 `READY`인 VIDEO의 조회·재생 delivery만 보존한다.
 
-When the release is approved, drain old API writers, apply the new migration, and
-deploy the tested Web/API pair within the maintenance window. Each `BackendContext`
-owns the maintenance and validation execution context. Do not run old and new upload
-writers concurrently. After replacement, wait at least 60 minutes before
-`reconcile-orphans.ts --apply`; always review its dry run first.
+### Client-facing ingress inventory
 
-Rollback must stop and drain the new API and its validation/maintenance workers
-before restoring an old writer. Preserve `game_upload_sessions`, `upload_intents`,
-`multipart_abort_tasks`, and `orphan_objects`. A rollback does not make already
-completed browser uploads disposable.
+`INLINE_UPLOAD_MAX_BYTES`의 기본값과 schema 상한은 모두 16 MiB이다. multipart route의
+`bodyLimit`와 `preParsing` limiter는 multipart boundary와 header를 포함한 encoded request
+전체에 같은 상한을 적용한다. 따라서 per-file logical 상한이 encoded 상한과 같거나 더 큰
+경우에도 실제 허용 파일 크기는 multipart overhead만큼 더 작다.
 
-The legacy chunk route can be removed only after all of the following are true:
+| Route | Content type과 형식 | Encoded request 상한 | Logical 상한 | Fastify byte 역할 |
+| --- | --- | --- | --- | --- |
+| `POST /api/admin/projects/submit`, `POST /api/me/projects/submit` | JSON metadata만 허용 | 2 MiB (`min(INLINE_UPLOAD_MAX_BYTES, 2 MiB)`) | request schema | metadata control request만 처리 |
+| `POST /api/admin/projects/:id/assets`, `POST /api/me/projects/:id/assets` | `kind` field 1개 후 `file` 1개; `POSTER`·`IMAGE`·`THUMBNAIL`만 허용 | 16 MiB 기본값; `bodyLimit`와 streaming `preParsing`에 동일 적용 | 일반 사용자 image/poster 10 MiB, ADMIN·OPERATOR 15 MiB; encoded 상한도 동시 적용 | 소형 inline 자산만 임시 파일과 processing pipeline으로 전달 |
+| `POST /api/admin/exhibitions/:id/poster` | `poster` file 1개, field·추가 part 금지 | 16 MiB 기본값; `bodyLimit`와 streaming `preParsing`에 동일 적용 | ADMIN·OPERATOR image 15 MiB; PDF limiter는 50 MiB이지만 encoded 16 MiB 상한이 먼저 적용 | 소형 poster 원본만 처리 |
+| `POST /api/admin/import/preview`, `POST /api/admin/import/execute` | `file` JSON file 1개, field·추가 part 금지 | 16 MiB 기본값; `bodyLimit`와 streaming `preParsing`에 동일 적용 | JSON file 10 MiB, buffer 최대 10 MiB | 제한된 JSON import만 처리 |
+| GAME·WEBGL direct session control routes | JSON control payload | 전역 JSON 2 MiB 상한 | part body 없음 | capability, status, Complete·Abort만 처리; part bytes는 browser에서 Garage로 직접 전송 |
+| VIDEO 신규 upload | 지원하지 않음 | 해당 file ingress route 없음 | 해당 없음 | 기존 `READY` VIDEO 조회·delivery만 유지 |
 
-- no non-terminal `API_CHUNK_PROXY` session remains;
-- direct upload completion, resume, and CORS metrics have been observed for the
-  agreed support window;
-- access logs show no legacy chunk requests from supported clients;
-- the recovery and rollback procedure no longer needs the route;
-- Web support for the legacy contract has been intentionally ended and the route
-  removal has its own contract change.
+위 표의 multipart route 세 종류(project asset, exhibition poster, import) 외에는
+client-facing multipart ingress를 등록하지 않는다. `GAME`·`VIDEO` kind는 project asset
+contract에서 file stream 소비 전에 거부된다.
 
-## Direct multipart lifecycle
+## 필수 환경과 권한
 
-The API is the control plane and Garage is the client-facing upload data plane:
+| 구분 | 설정 | 의미 |
+| --- | --- | --- |
+| storage | `S3_INTERNAL_ENDPOINT` | API/worker 전용 내부 S3 endpoint |
+| signing | `S3_PUBLIC_SIGNING_ENDPOINT` | browser가 접근하며 서명 당시 Host/path/query가 보존되는 endpoint |
+| public | `PUBLIC_ASSET_BASE_URL` | `S3_BUCKET_PUBLIC` root의 별도 public origin; API host 금지 |
+| proxy upstream | `GARAGE_S3_UPSTREAM`, `GARAGE_PUBLIC_WEB_UPSTREAM` | production nginx가 연결할 Garage S3/website root origin |
+| proxy TLS | `GARAGE_S3_TLS_SERVER_NAME`, `GARAGE_PUBLIC_WEB_TLS_SERVER_NAME` | HTTPS upstream SNI; browser-visible Host와 분리 |
+| proxy bind | `UPLOAD_PART_PROXY_BIND_HOST/PORT`, `PUBLIC_ORIGIN_BIND_HOST/PORT` | host TLS proxy가 전달할 loopback listener |
+| buckets | `S3_BUCKET_PUBLIC`, `S3_BUCKET_PROTECTED`, `S3_BUCKET_STAGING` | 공개 결과, 보호 원본, untrusted staging 분리 |
+| capability | `UPLOAD_PART_URL_TTL_SEC`, `UPLOAD_PART_URL_BATCH_MAX` | part capability TTL과 batch 상한 |
+| inline | `INLINE_UPLOAD_MAX_BYTES` 또는 현재 schema의 동등 설정 | Fastify stream/file/request cap의 단일 기준 |
+| worker | `VALIDATION_WORKER_CONCURRENCY`, `VALIDATION_WORKER_POLL_MS` | claim 수와 실제 병렬 처리 수, poll 간격 |
+| worker disk | `VALIDATION_WORKER_TEMP_ROOT`, `VALIDATION_WORKER_TEMP_DISK_BUDGET_BYTES` | API와 분리된 bounded temp storage |
+| worker lease | `VALIDATION_WORKER_CLAIM_LEASE_MS` | PostgreSQL clock 기반 active claim lease |
+| CORS | `S3_CORS_ALLOWED_ORIGINS` | direct PUT이 허용되는 정확한 Web origin 목록 |
+| public CORS | `PUBLIC_CORS_ORIGIN_PRIMARY`, `PUBLIC_CORS_ORIGIN_SECONDARY` | public GET/HEAD가 반환할 정확한 origin |
+| iframe | `WEB_PUBLIC_ORIGIN` | WebGL CSP `frame-ancestors`의 정확한 origin |
+| lifecycle | `INCOMPLETE_MULTIPART_MAX_AGE` | 만료 session보다 충분히 긴 Garage incomplete multipart 보존 기간(기본 `2d`) |
+| lifecycle CLI | `GARAGE_MAINTENANCE_CONFIG_HOST_PATH`, `GARAGE_MAINTENANCE_IMAGE` | read-only Garage admin config와 pinned CLI image |
 
-1. The API authenticates and authorizes session creation, chooses a session-unique
-   key and generation, calls Garage `CreateMultipartUpload`, and commits the session
-   in PostgreSQL.
-2. The Web requests a bounded batch of part capabilities. The API rechecks current
-   project write access, session state, expiration, active replacement, generation,
-   and part-number bounds. It returns short-lived presigned `UploadPart` URLs.
-3. The browser sends each part directly to Garage with bounded concurrency. An
-   `ETag` is upload metadata, not a file checksum.
-4. Completion rechecks authorization and fencing, compares the client manifest with
-   Garage `ListParts` (numbers, ETags, and sizes), and builds the Garage
-   `CompleteMultipartUpload` request only from the listed parts.
-5. After `CompleteMultipartUpload`, API `HEAD` verifies object existence and size.
-   The transaction moves the session to `VERIFYING`; it does not create a READY
-   Asset or public pointer.
-6. The PostgreSQL-backed validation worker claims `VERIFYING` rows with a lease,
-   reads only the ranges needed for signature/ZIP validation, and commits Asset
-   replacement plus session completion transactionally. WebGL deployment writes
-   validated output to the public bucket. A GAME object stays in the protected
-   bucket.
-7. Deterministic validation failures become `REJECTED` only after durable object
-   cleanup is recorded. Transient or ambiguous failures stay retryable and must not
-   be forced to READY/REJECTED by an operator guess.
+credential은 가능한 한 API multipart administration/signing, validation protected read,
+public generation write, protected download signing, cleanup exact delete/abort, public
+website read 역할로 분리한다. Garage IAM이 operation 단위로 충분히 세분화되지 않으면
+bucket, immutable key namespace, 별도 credential, process/container 경계를 함께
+사용한다. presigned URL, signature query, access key, secret, raw upload ID는 로그에
+남기지 않는다.
 
-P0 uses the documented large-object exception: a direct upload targets a unique,
-private key in `pcu-protected`. The object is an untrusted generation until its DB
-session reaches READY; no Asset relation, public pointer, or download grant resolves
-to it. API ownership of create/complete/abort plus generation fencing prevents an
-expired part URL or old upload ID from replacing a READY generation. `pcu-staging`
-is provisioned for later single-PUT and P2 upload flows; it is not falsely described
-as the current GAME/WEBGL target.
+Garage v1.1의 incomplete multipart 정리는 API cleanup outbox와 별개인 age-based
+safety net이다. `server/deploy.sh up`은 user-systemd timer를 설치해 protected/staging
+bucket에 다음 명령을 주기적으로 실행한다. DB의 exact-key/upload-ID abort task를 이
+명령으로 대체하거나 migration에서 broad cleanup을 수행해서는 안 된다.
 
-`UploadIntent` remains separate. It tracks an object created before its business DB
-commit and enables compensation. A `GameUploadSession` is the actor/project/
-generation authorization record. Neither replaces the other.
+```bash
+garage -c /etc/garage.toml bucket cleanup-incomplete-uploads \
+  --older-than 2d pcu-protected pcu-staging
+systemctl --user status garage-incomplete-upload-cleanup.timer
+journalctl --user -u garage-incomplete-upload-cleanup.service --since today
+```
 
-## Storage endpoints, buckets, and CORS
+운영 로그에는 고정된 `action/result`만 남고 Garage CLI의 locator 포함 가능 출력은
+노출하지 않는다. `INCOMPLETE_MULTIPART_MAX_AGE`는 `UPLOAD_SESSION_TTL_MINUTES`보다
+반드시 길어야 하며 deploy가 이를 fail-closed로 검증한다.
 
-- `S3_INTERNAL_ENDPOINT` is reachable by API/worker processes and is used for all
-  privileged object I/O and inspection.
-- `S3_PUBLIC_SIGNING_ENDPOINT` is the browser-visible Garage S3 origin used by the
-  separate presigning client. Never string-rewrite a signed internal URL.
-- `S3_ENDPOINT` is a deprecated input alias only; new deployments must set both
-  explicit endpoints.
-- `pcu-protected` contains protected immutable objects and P0's untrusted unique
-  multipart generations. `pcu-public` contains validated public objects.
-  `pcu-staging` is reserved for untrusted staging workflows.
+## Garage와 ordinary public proxy
 
-The local/integration initializer installs Garage bucket CORS, not Fastify CORS, on
-`pcu-protected` and `pcu-staging`. `S3_CORS_ALLOWED_ORIGINS` must list exact Web
-origins. The rules allow only `PUT` and `HEAD`, explicitly list signed request
-headers, expose `ETag`, and reject wildcard origins. Production credentials should
-be split as far as Garage permits: upload administration/signing on protected or
-staging, validation read/write as needed, download signing with protected read, and
-public origin with public read only. Bucket separation and key-scoped presigned
-capabilities are the practical boundary when fine-grained IAM/STS is unavailable.
+현재 pin은 `dxflrs/garage:v1.1.0`이다. 이 이미지의 CLI는 다음 명령을 제공한다.
 
-If a reverse proxy exposes Garage, it must be an ordinary byte-preserving transport
-proxy. It must pass the signed Host, path, query string, request method, and headers
-without normalization or reconstruction. A Fastify/Node service that reads a body
-and makes a second SDK request is not an acceptable proxy.
+```bash
+garage -c /etc/garage.toml bucket website --allow pcu-public
+```
 
-Configure Garage lifecycle expiration for incomplete multipart uploads after an
-operator-approved retention period. This is defense in depth; it does not replace
-`MultipartAbortTask`, generation fencing, or worker alerts.
+`apps/db/garage-init*.sh`는 public bucket에만 이 명령을 적용한다. Garage website
+endpoint는 요청 `Host`로 bucket 또는 bucket alias를 결정한다. production public
+hostname이 bucket 이름과 다르면 먼저 global bucket alias를 생성한다.
 
-## Worker and request-path expectations
+```bash
+garage -c /etc/garage.toml bucket alias pcu-public assets.example.org
+garage -c /etc/garage.toml bucket website --allow pcu-public
+```
 
-Business transactions commit pointer changes and their deletion/abort outbox rows
-atomically. After commit, request handlers only call the context-owned wake method;
-they do not wait for the global backlog. Repeated wakes are coalesced into one
-active worker and at most one pending pass. Worker failures are emitted through the
-context logger and retried by later wakes or the periodic maintenance schedule.
+`apps/db/public-origin.nginx.conf.template`는 Node/application proxy가 아닌 ordinary
+byte-preserving nginx다.
 
-Persisted ownership leases use the PostgreSQL clock as their sole source of
-truth. Claim, active-lease checks, renewal, takeover, and token-fenced final
-mutations must compare against `clock_timestamp()`, and lease deadlines must be
-derived as database time plus a duration in the same statement or transaction.
-Application `Clock` values remain valid for business TTLs, retry/backoff
-scheduling, and observations, but must never decide whether a persisted owner is
-still active. Consequently, changing an API process clock must neither steal nor
-revive an upload-intent, multipart-abort, idempotency, game-upload part,
-game-upload completion/recovery, or orphan-deletion lease.
+- 원래 `Host`, escaped path, query를 Garage `s3_web` endpoint로 보존한다.
+- GET, HEAD, OPTIONS 이외의 method를 거부한다.
+- buffering과 gzip 변환을 끄고 bytes, ETag, Last-Modified, Content-Encoding, MIME,
+  Cache-Control, Range 의미를 보존한다.
+- exact CORS, CORP, COEP, COOP, CSP, `nosniff`, `no-referrer`를 추가한다.
+- WebGL deployment UUID가 entry URL에도 포함되지만 `index.html` entry는
+  `public, max-age=60`으로 짧게 캐시한다. 같은 generation의 `.js`, `.wasm`, data
+  artifact는 `public, max-age=31536000, immutable`로 게시한다. mutable alias나
+  latest pointer를 추가하지 않는다.
 
-An expired token is stale even when no replacement owner has claimed the row
-yet. Renewal and every token-owned final mutation must fail closed after database
-expiry. Operators must not clear or extend lease columns manually to recover a
-worker; allow the normal PostgreSQL-time takeover path to fence the previous
-token or generation.
+direct UploadPart endpoint 앞 proxy도 signed `Host`, escaped path와 query를 변경하면
+안 된다. URL 문자열을 내부 hostname으로 rewrite하지 않는다. 최대 part body 제한은
+storage write 전 proxy ingress에서 적용하고 Garage integration test로 검증한다.
 
-Orphan and upload-intent workers claim at most 50 rows and collect one immutable
-reference inventory for the entire claimed batch. A malformed WebGL pointer makes
-the affected buckets fail closed. Do not bypass this check to clear a backlog;
-repair the pointer first and allow a later worker pass to converge.
+production에서 이 proxy들은 외부 전제가 아니다. CI가 두 template을 deploy directory로
+복사하고 `server/deploy.sh up`이 `gp-upload-part-origin`과 `gp-public-origin` nginx
+container를 API와 별개로 직접 기동한다. 두 container는 서로 다른 pod port를 사용하며
+host에는 기본적으로 `127.0.0.1:3901`, `127.0.0.1:3904`로만 publish된다. 기존 host TLS
+proxy/DNS가 각각 `S3_PUBLIC_SIGNING_ENDPOINT`, `PUBLIC_ASSET_BASE_URL` hostname을 이
+listener에 연결해야 한다. deploy는 다음을 fail-closed로 확인한다.
 
-## Critical untracked multipart cleanup failure
+- exact CORS/Web origin이며 wildcard 또는 복수 값을 단일 변수에 넣지 않았는지
+- upstream과 public endpoint가 path/query/fragment 없는 root origin인지
+- rendered nginx config에 미치환 변수가 없고 `nginx -t`가 성공하는지
+- 각 transport health와 Garage website upstream probe가 성공하는지
+- public/signing hostname이 API hostname과 다른지
 
-Alert on either of these context-local signals:
+UploadPart access log와 public access log는 `$uri`만 기록하고 `$args` 또는 전체 request
+line을 기록하지 않는다. 따라서 SigV4 query, upload ID, credential은 nginx access
+log에 남지 않는다. UploadPart는 `proxy_request_buffering on`과
+`server/deploy.sh`는 `UPLOAD_CHUNK_SIZE_MB`에서 nginx의
+`UPLOAD_PART_MAX_BYTES`를 파생한다. 운영 env에 assertion 값을 함께 적은 경우 두 값이
+정확히 일치하지 않으면 배포를 중단하여, 큰 proxy cap의 storage exhaustion과 작은 cap의
+정상 part 오거부를 모두 방지한다. nginx는 Garage upstream write 전에 물리 상한을 적용한다.
 
-- log event `untracked_multipart_cleanup_unrecoverable` at fatal level;
-- `untrackedMultipartCleanupFailureCount()` increasing above zero.
+공식 근거:
 
-This event means a newly created multipart upload could neither be aborted in
-object storage nor recorded in `multipart_abort_tasks`. The originating request is
-failed. The log retains the key, reason, and sanitized error name/code/message, but
-deliberately excludes the upload ID, raw error objects, signed URLs, query strings,
-and credentials. Treat it as storage residue with no application queue record:
+- <https://garagehq.deuxfleurs.fr/documentation/cookbook/exposing-websites/>
+- <https://garagehq.deuxfleurs.fr/documentation/cookbook/reverse-proxy/>
 
-1. Use the exact logged key and event time to inspect multipart uploads through the
-   restricted storage administration interface. Keep any discovered upload ID out
-   of application logs, tickets, and chat.
-2. Restore PostgreSQL and object-storage connectivity before retrying cleanup.
-3. Abort the exact matching multipart upload in that restricted interface, then
-   verify it no longer appears in the multipart listing.
-4. If an immediate abort is unsafe or unavailable, insert an operator-reviewed
-   durable abort task for the exact target and verify the maintenance worker claims
-   it. Do not substitute a broad prefix deletion.
-5. Correlate the failed HTTP mutation and confirm that no session/pointer row was
-   committed for the untracked upload.
+## 배포 전 점검
 
-Prompt abort failures logged with
-`tracking=durable-abort-task-committed` are different: the repository transaction
-already committed the exact durable abort task. Verify the task remains queued and
-the worker is progressing; those failures do not by themselves invalidate the
-already committed business response.
+1. 구 Web/API writer에 maintenance mode를 적용하고 in-flight JSON control request를
+   drain한다. 이미 browser에서 Garage로 진행 중인 PUT은 API shutdown과 독립적이다.
+2. direct part endpoint의 exact CORS origins, exposed `ETag`, allowed methods를 실제
+   browser origin으로 확인한다.
+3. public hostname이 Garage bucket name 또는 alias와 일치하는지 확인한다.
+4. public proxy에서 GET/HEAD, Range 206, invalid Range 416, ETag 304,
+   Last-Modified 304, If-Range, MIME, Content-Encoding, cache/security headers를 확인한다.
+5. preserved DB backup 복구 시간과 storage cleanup backlog를 확인한다.
+6. 다음 audit은 read-only다.
 
-## Protected download boundary
+```bash
+npm run audit:game-upload-cutover --workspace=apps/api
+```
 
-The canonical route is `GET /api/assets/:assetId/download?variant=original|playback`.
-It resolves a READY Asset and variant, evaluates the centralized delivery policy,
-checks the manual denylist and transient limiter, then returns a short-lived 302
-presigned GET with `Referrer-Policy: no-referrer`. GAME filename disposition is
-preserved. The response never contains an object body and Fastify does not implement
-GET, HEAD, or Range semantics for the protected object.
+audit의 legacy 상태별 session 수, nonterminal 수, active slot, upload ID/key residue,
+READY asset 충돌 후보, 기존 abort/deletion task, 삭제 예정 row와 비정상 참조를 변경
+승인 기록에 첨부한다. 비정상 READY 참조나 cleanup target 충돌이 있으면 cutover를
+시작하지 않는다.
 
-Protected delivery was already a presigned 302 before this branch. The P0 change is
-the domain boundary: new serializers use `assetId`, variant and current Asset state
-instead of exposing `storageKey` as the canonical identity. The old
-`/api/assets/protected/:storageKey` route remains a deprecated compatibility route
-that delegates to the same policy/grant path.
+## Breaking cutover 순서
 
-`BannedIp` is now a manual denylist only. A transient excess returns 429 and
-`Retry-After`; it does not insert a row. The limiter scopes authenticated actor,
-action, asset, and client IP where available, and the manual denylist fails closed
-before the transient bucket. Administrator unban remains supported.
+아래 순서를 바꾸지 않는다.
+
+1. old Web/API writer drain 및 종료
+2. legacy session audit dry-run 결과 보존
+3. PostgreSQL preserved DB backup 및 복구 가능성 확인
+4. legacy residue cleanup/outbox follow-up migration 적용
+5. 나머지 schema follow-up migration 적용 (`npx prisma migrate deploy`)
+6. migration-generated exact abort/deletion task와 terminal state 수 대조
+7. Garage exact CORS, incomplete multipart lifecycle, public bucket website/alias 설정
+8. nginx template과 exact origin/upstream 환경을 배포 directory에 반영
+9. candidate image로 `server/deploy.sh cutover`를 실행한다. 이 명령이 old API/worker를
+   drain한 뒤 read-only audit → 검증 가능한 preserved backup → explicit migration 순서를
+   fail-closed로 수행한다. transport 제거 migration만 적용되고 target-fence cleanup
+   migration이 아직 pending인 preserved DB도 direct PENDING/COMPLETING/VERIFYING residue와
+   canonical bucket을 audit한다. 두 cleanup migration이 모두 적용된 재실행에서만 destructive
+   audit을 version-gate로 건너뛰고 backup과 pending forward migration을 다시 검증한다.
+10. `server/deploy.sh up`으로 UploadPart/public nginx 검증 후 새 API를 배포한다. API
+    image의 기본 CMD는 migration을 실행하지 않는다.
+11. validation/transform worker를 별도 executable/container로 배포
+12. API와 worker health가 확인된 뒤에만 새 Web을 배포한다. cutover release gate는
+    matching API workflow 성공 전 Web workflow를 차단한다.
+13. cleanup worker가 migration-generated task를 claim/처리하는지 확인
+14. GAME·WEBGL direct upload canary(create → signed part PUT → Complete → VERIFYING → READY)
+15. public image/WebGL origin canary(GET/HEAD/Range/validator/encoding/security header)
+16. 구 chunk, raw storage key, public image/WebGL API byte route가 404인지 확인
+17. queue lag, active worker, verification bytes/duration, cleanup backlog, untracked
+    multipart와 storage residue가 정상 범위인지 확인
+
+old writer와 new writer가 겹쳤거나 audit 이후 old writer가 row를 추가하였다면 배포를
+중단한다. backup 시점부터 audit/migration을 다시 수행한다.
+
+## Canary 명령
+
+로컬/integration 구성은 public proxy를 `:3904`에, Garage website diagnostics를
+`:3902`에 노출한다.
+
+```bash
+curl -fsSI \
+  -H 'Host: pcu-public.web.garage.localhost:3904' \
+  http://127.0.0.1:3904/integration-poster.png
+
+curl -fsS -D- \
+  -H 'Host: pcu-public.web.garage.localhost:3904' \
+  -H 'Range: bytes=0-7' \
+  http://127.0.0.1:3904/integration-poster.png
+```
+
+API-down independence와 proxy byte 보존은 aggregate integration 마지막 단계에서 API를
+중지한 뒤 `scripts/check-public-origin-api-down.mjs`로 검증한다. 이 test는 public
+proxy 응답과 Garage website 직접 응답의 SHA-256/ETag를 비교한다.
+
+## Rollback과 장애 복구
+
+이 cutover는 schema와 Web contract가 breaking이므로 old API 재실행을 rollback으로
+간주하지 않는다.
+
+1. 새 Web/API writer와 worker의 신규 claim을 중지하고 active item을 drain한다.
+2. 이미 READY가 된 direct object와 immutable public generation을 보존한다.
+3. VERIFYING row와 protected/staging object를 보존한다. 확인 없이 삭제 task를 만들지
+   않는다.
+4. durable abort/deletion outbox를 보존한다. cleanup worker를 중복 실행해도 exact
+   target idempotency가 유지되어야 한다.
+5. migration 후 schema에는 old writer를 연결하지 않는다. workflow와 deploy script도
+   candidate 실패 시 old image를 자동 재기동하지 않는다. code/schema 문제는
+   forward-fix migration과 새 image로 복구한다.
+6. Web만 되돌려 direct-only contract와 불일치시키지 않는다. Web/API는 검증된 동일
+   release pair로만 교체한다.
+7. DB backup 복구는 migration 자체가 잘못되어 forward-fix로 데이터 의미를 복구할 수
+   없고, cutover 이후 신규 READY mutation을 모두 폐기하기로 승인한 경우에만 수행한다.
+   DB만 복구하지 말고 이후 storage object/outbox reconciliation 계획도 승인한다.
+
+public origin 장애는 API byte relay를 되살리는 이유가 아니다. nginx/Garage website,
+DNS/TLS, bucket alias와 public-read 경계를 복구한다. API가 public object body를 읽거나
+새 Node proxy를 배포하는 우회는 금지한다.
 
 ## Troubleshooting
 
-### Direct upload or resume failure
+### public origin 404
 
-1. Record actor/project/session/generation/part number and the stable API error code.
-   Never paste a complete presigned URL into tickets, chat, or logs.
-2. Query the session transport, status, expiry, generation, active-slot relation,
-   storage key, and upload ID. Confirm the actor still has current write access.
-3. For `PENDING`, compare the expected part layout with Garage `ListParts`. A part in
-   Garage but absent from browser memory is resumable; status reconciliation must
-   not force a re-upload solely because a control message was lost.
-4. Inspect browser network traffic. Part `PUT` must target
-   `S3_PUBLIC_SIGNING_ENDPOINT`; the API should see only create, sign, status,
-   complete, and cancel control requests.
-5. Do not switch the session to the legacy route. Cancel/recreate only after its
-   abort task or prompt abort has been durably accounted for.
+- `garage bucket info pcu-public`에서 website enabled 상태를 확인한다.
+- 요청 Host가 `pcu-public.<s3_web.root_domain>` 또는 configured global alias인지 확인한다.
+- proxy가 `$http_host`를 upstream에 전달하고 path/query를 normalize하지 않는지 확인한다.
+- DB pointer가 가리키는 immutable key가 public bucket에 실제 존재하는지 확인한다.
 
-### CORS failure or unreadable ETag
+### Range/validator/encoding 불일치
 
-- Verify the failing request is against Garage rather than Fastify.
-- Read back bucket CORS with `get-bucket-cors`; confirm the exact browser Origin,
-  `PUT`, required signed request headers, and exposed `ETag` are present.
-- Check both the preflight response and the actual PUT response. A successful PUT
-  with an unreadable `ETag` is still a client failure because completion cannot
-  construct its manifest.
-- Do not solve the issue with `AllowedOrigins: ["*"]`, a Fastify CORS change, or an
-  application body proxy.
+- nginx gzip, content transform, cache revalidation override가 꺼져 있는지 확인한다.
+- upload metadata의 Content-Type, Content-Encoding, Cache-Control을 HEAD로 확인한다.
+- proxy와 Garage 직접 응답의 body digest, ETag, Last-Modified, Content-Range를 비교한다.
+- `.wasm.br`는 `Content-Type: application/wasm`, `Content-Encoding: br`여야 한다.
 
-### Public signing endpoint or signature mismatch
+### direct PUT 실패
 
-- Decode only the non-secret URL origin/path for local inspection and confirm the
-  origin equals `S3_PUBLIC_SIGNING_ENDPOINT`, not the container-only internal name.
-- Confirm `S3_FORCE_PATH_STYLE` matches the proxy/Garage routing model.
-- Replay a newly issued capability without copying it to logs. Compare the browser
-  Host, raw path, raw query, method, and signed headers at the reverse proxy and
-  Garage. Redirects, path decoding, slash normalization, query sorting/removal, or
-  Host rewriting invalidate the signature.
-- Test the same operation against `S3_INTERNAL_ENDPOINT` with server credentials to
-  separate storage health from public signing/routing health. Never repair a signed
-  URL by string replacement.
+- 요청이 Fastify가 아니라 `S3_PUBLIC_SIGNING_ENDPOINT`로 향하는지 확인한다.
+- signed URL 전체를 로그에 남기지 말고 scheme/host/path template, session/generation,
+  part number와 status만 비교한다.
+- proxy가 signed Host/path/query와 required content type/checksum header를 바꾸지 않는지
+  확인한다.
+- CORS origin은 scheme/host/port까지 정확히 일치하고 response에서 `ETag`가 노출되어야
+  한다.
 
-### Stuck COMPLETING or VERIFYING
+### worker queue 정체
 
-- `COMPLETING`: inspect object `HEAD` and multipart `ListParts`. If object existence
-  or upload existence is ambiguous, restore connectivity and let the fenced recovery
-  path decide; do not manually mark a terminal state.
-- `VERIFYING`: confirm the row is claimable after its PostgreSQL-time lease expires,
-  the immutable object still exists with the expected size, and the context-owned
-  worker is running. The worker logs transient failures and releases or expires its
-  claim for retry.
-- A deterministic validation failure should have a `REJECTED` session and a durable
-  orphan/deletion record. A transient decoder, storage, DB, or claim-loss failure
-  must remain retryable.
+- capacity가 N이면 최대 N개 row만 claim하고 즉시 N개를 처리하는지 확인한다.
+- active item에만 heartbeat가 있고 PostgreSQL `clock_timestamp()` lease/token fencing이
+  적용되는지 확인한다.
+- shutdown signal이 storage read, transform, pointer/outbox commit 경계에 전달되는지
+  확인한다.
+- temp disk budget을 초과하면 새 claim을 중단하고 active item을 fail-closed한다.
 
-### Incomplete multipart and object cleanup
+## 관측 항목
 
-- Inspect `multipart_abort_tasks` before attempting any manual abort. A queued task
-  is the durable source of truth; a prompt abort is only an optimization.
-- Inspect `orphan_objects` and `upload_intents` before deleting an object. Never use
-  a broad prefix deletion as a substitute for an exact durable task.
-- Correlate session generation with key/upload ID so an old cleanup cannot target a
-  replacement generation.
-- For staging cleanup in later flows, require the same exact-key outbox discipline.
-  `pcu-staging` lifecycle expiration is defense in depth, not the business record.
-
-### Legacy use and byte-boundary audit
-
-- `legacy_proxy_transport_selected` indicates a migrated legacy session used the
-  old path. New session creation should emit `direct_transport_selected`.
-- Direct lifecycle logs currently include `upload_session_created`,
-  `upload_part_urls_issued`, `upload_session_completed_storage`, and
-  `upload_session_verifying`, followed by `upload_session_ready`,
-  `upload_session_rejected`, or `upload_session_expired` as applicable. Protected
-  grants and throttles emit
-  `protected_download_grant` and `protected_download_rate_limited`. Contexts contain
-  IDs/action/result, not capability URLs.
-- Run `npm run architecture`. The guard reports exactly two known
-  `legacy-client-delivery-relays`: public image and WebGL. Any new object read in a
-  client-facing delivery module, feature-local S3 SDK client, Node/Fastify asset
-  proxy, direct UploadPart body relay, or signer admin authority fails its fixture.
-- Browser/API telemetry should show declared/verified object sizes separately and
-  zero direct part bytes at API ingress. API restart during an already-started
-  browser-to-Garage PUT must not terminate that PUT.
-
-## Public asset delivery: known P1 boundary
-
-P0 does **not** move public image or WebGL response bodies out of Fastify. The
-existing `public/image.service.ts` and `public/webgl.service.ts` still call object
-storage `HEAD`/`stream` and implement GET/HEAD/Range/conditional semantics. The
-architecture guard carries an exact two-file debt allowlist so no additional
-application origin can be introduced. Therefore a check that public assets already
-go directly to Garage is expected to fail on this branch; do not report P1 complete.
-
-P1 must be implemented as a separate, reviewable boundary change:
-
-1. Introduce `PUBLIC_ASSET_BASE_URL` for a browser-accessible Garage public endpoint
-   or an ordinary reverse proxy; do not add a Node/Fastify asset server.
-2. Publish image renditions at immutable generation keys and have public serializers
-   return origin URLs. Convert `/api/public/images/:storageKey` to a compatibility
-   redirect, then remove the image relay allowlist entry.
-3. Publish each validated WebGL generation under an immutable public prefix and
-   return its entry URL. Garage/proxy must own GET, HEAD, Range, validators, MIME and
-   content encoding. Use short/no-cache for an entry pointer or `index.html` and
-   long `max-age, immutable` for generation artifacts. Preserve CSP and required
-   CORS/CORP/COEP/COOP headers at the origin. Convert legacy API routes to redirects
-   and remove the WebGL relay allowlist entry.
-4. Add production integration evidence that public URLs bypass Fastify and that the
-   proxy preserves response bytes and HTTP semantics.
-
-Public revocation semantics must remain explicit. `PUBLIC_STATIC` means anyone with
-the URL may fetch it and previously delivered/cache-held bytes cannot be recalled;
-immutable caching is allowed. `PROTECTED` means each new access needs an API grant
-and can be revoked by stopping short-TTL URL issuance. Confidential or immediately
-revocable data must never be published to `pcu-public`.
-
-## Sequenced follow-up work
-
-- **P2:** add direct staging and PostgreSQL validation jobs for VIDEO and large PDF,
-  then split project metadata submission from large-file transfer. Keep the current
-  small-image proxy for bounded low-concurrency transforms; do not force every small
-  file through direct upload.
-- **P3:** only after P0/P1/P2 are stable, evaluate generalizing
-  `GameUploadSession` into a purpose-based object session. Remove legacy chunk
-  claims/body streaming only after the legacy removal gate above. Do not erase the
-  existing generation fencing, leases, completion ambiguity recovery, UploadIntent,
-  orphan outbox, or multipart abort task model during that refactor.
-
-## Storage data-plane boundary verification status
-
-| Boundary | Status in this branch | Evidence and limitation |
-|---|---|---|
-| `DIRECT_MULTIPART` part byte | Implemented | The direct route accepts JSON part-number batches; Web PUT targets presigned Garage URLs. The legacy readable route remains only for `API_CHUNK_PROXY` recovery. |
-| Protected canonical download | Implemented | `assetId`/variant policy resolution returns a 302 presigned GET. No protected object body, HEAD, or Range is generated by Fastify. |
-| Public image delivery | Follow-up required (P1) | Existing Fastify `HEAD`/`stream` relay remains under one exact guard allowlist entry. |
-| Public WebGL delivery | Follow-up required (P1) | Existing Fastify GET/HEAD/Range/conditional relay remains under one exact guard allowlist entry. |
-| New application asset proxy | Verified absent by architecture guard | Feature-local S3 SDK/GetObject, object read ports, Node HTTP/fetch proxy, stream piping, and Fastify object-body responses have forbidden fixtures. A normal nginx/Caddy/Traefik/Garage proxy is outside this prohibition. |
-| Multipart Complete/Abort | Implemented as Garage operations | The fenced completion service invokes the storage adapter's Garage `CompleteMultipartUpload`; cancellation/cleanup invokes Garage `AbortMultipartUpload`. The browser receives neither authority. |
-| Internal object byte read | Implemented and separated | Validation composition uses bounded `readRange` and WebGL transform reads internally. The guard prohibits those ports in new client-facing delivery modules; the two P1 legacy public relays are explicitly identified above. |
+cutover 동안 direct session create, part capability issue/refresh, storage complete,
+verification queued/started/bytes/duration/retry, READY/REJECTED/cancel/expire,
+replacement/stale generation/quota/oversized rejection, worker queue lag/active/temp disk,
+cleanup backlog/untracked multipart, public origin health를 확인한다. 모든 event는 stable
+actor/project/session/asset/generation/action/result만 기록한다.

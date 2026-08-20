@@ -29,21 +29,6 @@ export function createAssetsController(deps: AssetsControllerDependencies): Fast
 			},
 		);
 
-		/** @deprecated Storage-key compatibility route; remove after client migration. */
-		app.get<{ Params: { storageKey: string } }>(
-			'/assets/protected/:storageKey',
-			async (request, reply) => {
-				return applyResponseDescriptor(
-					reply,
-					await deps.service.streamProtectedAsset(
-						request.params.storageKey,
-						request.ip,
-						request.currentUser,
-					),
-				);
-			},
-		);
-
 		/** DELETE /api/admin/assets/:assetId — delete an asset */
 		app.delete<{ Params: { assetId: string } }>(
 			'/admin/assets/:assetId',

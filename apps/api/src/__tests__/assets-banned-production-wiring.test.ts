@@ -88,7 +88,6 @@ function portHarness(initialBans: string[] = []) {
 		createdAt: new Date('2026-07-22T00:00:00.000Z'),
 	}));
 	const calls = {
-		assetFindFirst: vi.fn(),
 		assetFindUnique: vi.fn(),
 		bannedFindMany: vi.fn(async () => bans.map(({ ip }) => ({ ip }))),
 		bannedList: vi.fn(async () => [...bans]),
@@ -123,7 +122,6 @@ function portHarness(initialBans: string[] = []) {
 	return {
 		calls,
 		assetsRepository: {
-			findAssetByStorageKey: calls.assetFindFirst,
 			findAssetByIdForDownload: calls.assetFindUnique,
 			findAssetByIdWithProject: vi.fn(async () => null),
 			claimAssetForDeletion: vi.fn(async () => null),
@@ -232,7 +230,6 @@ describe('assets/banned-IP production vertical slice', () => {
 			const adminApp = await routeApp(harness.graph.bannedIpController, '/api/admin', true);
 			apps.push(assetsApp, adminApp);
 
-			expect(harness.calls.assetFindFirst).not.toHaveBeenCalled();
 			expect(harness.calls.bannedFindMany).not.toHaveBeenCalled();
 			expect(harness.calls.presign).not.toHaveBeenCalled();
 			expect(harness.calls.delete).not.toHaveBeenCalled();
@@ -245,13 +242,13 @@ describe('assets/banned-IP production vertical slice', () => {
 
 	it('fails closed before warmup and keeps a failed warmup fatal and idempotent', async () => {
 		const harness = graphHarness();
-		harness.calls.assetFindFirst.mockResolvedValue(protectedAsset());
+		harness.calls.assetFindUnique.mockResolvedValue(protectedAsset());
 		const app = await routeApp(harness.graph.assetsController, '/api');
 		apps.push(app);
 
 		const beforeWarmup = await app.inject({
 			method: 'GET',
-			url: '/api/assets/protected/game.zip',
+			url: '/api/assets/42/download?variant=original',
 			remoteAddress: '203.0.113.10',
 		});
 		expect(beforeWarmup.statusCode).toBe(503);
@@ -295,6 +292,11 @@ describe('assets/banned-IP production vertical slice', () => {
 		);
 		expect(harness.storage.stream).not.toHaveBeenCalled();
 		expect(harness.storage.readRange).not.toHaveBeenCalled();
+		const legacy = await app.inject({
+			method: 'GET',
+			url: '/api/assets/protected/playback.mp4',
+		});
+		expect(legacy.statusCode).toBe(404);
 	});
 
 	it('rejects an unsupported canonical download variant before asset lookup or presign', async () => {
@@ -319,14 +321,14 @@ describe('assets/banned-IP production vertical slice', () => {
 
 	it('blocks recovered manual bans and returns transient 429 without DB mutation', async () => {
 		const recovered = graphHarness(['203.0.113.10'], 1);
-		recovered.calls.assetFindFirst.mockResolvedValue(protectedAsset());
+		recovered.calls.assetFindUnique.mockResolvedValue(protectedAsset());
 		await recovered.graph.warmup.start();
 		const app = await routeApp(recovered.graph.assetsController, '/api');
 		apps.push(app);
 
 		const banned = await app.inject({
 			method: 'GET',
-			url: '/api/assets/protected/game.zip',
+			url: '/api/assets/42/download?variant=original',
 			remoteAddress: '203.0.113.10',
 		});
 		expect(banned.statusCode).toBe(403);
@@ -334,7 +336,7 @@ describe('assets/banned-IP production vertical slice', () => {
 
 		const first = await app.inject({
 			method: 'GET',
-			url: '/api/assets/protected/game.zip',
+			url: '/api/assets/42/download?variant=original',
 			remoteAddress: '203.0.113.20',
 			headers: { range: 'bytes=0-7' },
 		});
@@ -348,7 +350,7 @@ describe('assets/banned-IP production vertical slice', () => {
 
 		const exceeded = await app.inject({
 			method: 'GET',
-			url: '/api/assets/protected/game.zip',
+			url: '/api/assets/42/download?variant=original',
 			remoteAddress: '203.0.113.20',
 		});
 		expect(exceeded.statusCode).toBe(429);

@@ -38,13 +38,6 @@ const assetUploadFields = [
 			`포스터 교체 (JPG · PNG · WebP 최대 ${limits.posterMaxMb}MB / PDF 최대 ${limits.posterPdfMaxMb}MB, PDF는 첫 페이지를 WEBP로 자동 변환)`,
 	},
 	{
-		kind: 'VIDEO',
-		accept: 'video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv',
-		multiple: true,
-		getLabel: (limits: ClientUploadLimits) =>
-			`동영상 업로드 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 최대 ${limits.videoMaxMb}MB)`,
-	},
-	{
 		kind: 'IMAGE',
 		accept: 'image/jpeg,image/png,image/webp,application/pdf,.pdf',
 		multiple: false,
@@ -194,13 +187,16 @@ export function AdminProjectAssetManager({
 										if (files.length > 0) {
 											void handleAddAssetFiles(
 												kind,
-												kind === 'VIDEO' ? files : files.slice(0, 1),
+												files.slice(0, 1),
 											).catch(() => {});
 										}
 									}}
 								/>
 							</div>
 						))}
+						<p className="field-hint">
+							동영상 신규 업로드는 direct staging 워크플로우 배포 전까지 지원하지 않습니다.
+						</p>
 						{addAssetError != null && (
 							<p className="field-error">{getApiErrorMessage(addAssetError)}</p>
 						)}

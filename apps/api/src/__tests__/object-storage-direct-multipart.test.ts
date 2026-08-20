@@ -27,6 +27,7 @@ describe('direct multipart storage capabilities', () => {
 			'upload-id-1',
 			3,
 			120,
+			'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
 		);
 		const signed = new URL(url);
 		expect(signed.origin).toBe('https://assets.example.test');

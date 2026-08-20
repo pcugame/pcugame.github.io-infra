@@ -19,7 +19,6 @@ export function SubmissionFileFieldset({
 		clearWebglFile,
 		clearImages,
 		clearPoster,
-		clearVideo,
 		fileSizeError,
 		gameFile,
 		gameInputRef,
@@ -28,14 +27,11 @@ export function SubmissionFileFieldset({
 		handleWebglChange,
 		handleImagesChange,
 		handlePosterChange,
-		handleVideoChange,
 		imageFiles,
 		imagesInputRef,
 		posterFile,
 		posterInputRef,
 		posterPreview,
-		videoFiles,
-		videoInputRef,
 		webglFile,
 	} = files;
 
@@ -80,29 +76,10 @@ export function SubmissionFileFieldset({
 			</div>
 
 			<div className="form-field">
-				<label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 최대 {limits.videoMaxMb}MB)</label>
-				<input
-					id="videoFile"
-					type="file"
-					accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
-					multiple
-					ref={videoInputRef}
-					onChange={handleVideoChange}
-				/>
-				{videoFiles.length > 0 && (
-					<div className="file-selected-row">
-						<p className="file-info">
-							{videoFiles.length}개 파일 선택됨: {videoFiles.map((file) => file.name).join(', ')}
-						</p>
-						<button
-							type="button"
-							className="btn btn--danger btn--small"
-							onClick={clearVideo}
-						>
-							제거
-						</button>
-					</div>
-				)}
+				<label>동영상</label>
+				<p className="field-hint">
+					대용량 동영상은 API 업로드를 지원하지 않습니다. direct staging 워크플로우가 배포된 후 사용할 수 있습니다.
+				</p>
 			</div>
 
 			<div className="form-field">

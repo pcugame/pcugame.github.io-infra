@@ -10,12 +10,11 @@ import {
 
 const limits: ClientUploadLimits = {
 	imageMaxMb: 10,
-	imagePdfMaxMb: 100,
+	imagePdfMaxMb: 16,
 	posterMaxMb: 15,
-	posterPdfMaxMb: 50,
+	posterPdfMaxMb: 16,
 	gameMaxMb: 5120,
-	videoMaxMb: 1024,
-	requestMaxMb: 1200,
+	requestMaxMb: 16,
 	maxFiles: 20,
 };
 
@@ -32,9 +31,8 @@ describe('fileValidation', () => {
 
 	it('uses pdf-specific image and poster limits', () => {
 		expect(getAssetLimitMb('POSTER', file('poster.png', 1, 'image/png'), limits)).toBe(15);
-		expect(getAssetLimitMb('POSTER', file('poster.pdf', 1), limits)).toBe(50);
-		expect(getAssetLimitMb('IMAGE', file('image.pdf', 1), limits)).toBe(100);
-		expect(getAssetLimitMb('VIDEO', file('demo.mp4', 1, 'video/mp4'), limits)).toBe(1024);
+		expect(getAssetLimitMb('POSTER', file('poster.pdf', 1), limits)).toBe(16);
+		expect(getAssetLimitMb('IMAGE', file('image.pdf', 1), limits)).toBe(16);
 	});
 
 	it('finds the first oversized file for an asset kind', () => {

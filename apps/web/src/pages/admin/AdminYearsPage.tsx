@@ -27,17 +27,7 @@ export default function AdminYearsPage() {
 
 	const exportMutation = useMutation({
 		mutationFn: (year: number) => adminExportApi.run(year),
-		onSuccess: (result) => {
-			if (result.aborted) {
-				setExportError(
-					`내보내기가 중단되었습니다. (다운로드: ${result.downloaded}, 실패: ${result.failed})`,
-				);
-				setExportResult(null);
-			} else {
-				setExportResult(result);
-				setExportError(null);
-			}
-		},
+		onSuccess: () => setExportError(null),
 		onError: (err) => {
 			if (isApiError(err) && err.status === 409) {
 				setExportError(
@@ -50,7 +40,8 @@ export default function AdminYearsPage() {
 		},
 	});
 
-	const isAnyExporting = exportMutation.isPending;
+	const isAnyExporting = exportMutation.isPending
+		|| (exportMutation.isSuccess && exportResult === null && exportError === null);
 
 	const handleExport = (year: number) => {
 		if (!window.confirm(
@@ -68,6 +59,11 @@ export default function AdminYearsPage() {
 		setExportResult(null);
 		setExportError(null);
 		exportMutation.reset();
+	};
+
+	const handleExportFinished = (result: ExportResult | null, error: string | null) => {
+		setExportResult(result);
+		setExportError(error);
 	};
 
 	// 내보내기 중 새로고침/탭 닫기 경고
@@ -275,6 +271,7 @@ export default function AdminYearsPage() {
 				result={exportResult}
 				error={exportError}
 				onClose={handleModalClose}
+				onFinished={handleExportFinished}
 			/>
 		</div>
 	);

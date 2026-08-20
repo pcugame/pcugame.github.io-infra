@@ -1,5 +1,5 @@
 import { Transform } from 'node:stream';
-import type { AssetKind } from '@pcu/contracts';
+import type { AssetKind, InlineAssetKind } from '@pcu/contracts';
 import { AppError } from './errors.js';
 import { detectFileType, SIZE_LIMITS } from './file-signature.js';
 
@@ -18,6 +18,7 @@ export interface UploadLimits {
 }
 
 export interface RoleUploadPolicyConfig {
+	INLINE_UPLOAD_MAX_BYTES?: number;
 	UPLOAD_USER_IMAGE_MAX_MB: number;
 	UPLOAD_USER_GAME_MAX_MB: number;
 	UPLOAD_USER_REQUEST_MAX_MB: number;
@@ -50,21 +51,22 @@ export function resolveRoleUploadLimits(
 ): UploadLimits {
 	const privileged = role === 'ADMIN' || role === 'OPERATOR';
 	const gameMaxBytes = resolveRoleGameMaxBytes(config, role);
+	const inlineMaxBytes = config.INLINE_UPLOAD_MAX_BYTES ?? megabytes(16);
 	const configured: UploadLimits = privileged
 		? {
-			posterMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_IMAGE_MAX_MB),
-			imageMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_IMAGE_MAX_MB),
+			posterMaxBytes: Math.min(inlineMaxBytes, megabytes(config.UPLOAD_PRIVILEGED_IMAGE_MAX_MB)),
+			imageMaxBytes: Math.min(inlineMaxBytes, megabytes(config.UPLOAD_PRIVILEGED_IMAGE_MAX_MB)),
 			gameMaxBytes,
-			videoMaxBytes: megabytes(1024),
-			requestMaxBytes: megabytes(config.UPLOAD_PRIVILEGED_REQUEST_MAX_MB),
+			videoMaxBytes: 0,
+			requestMaxBytes: inlineMaxBytes,
 			maxFiles: config.UPLOAD_PRIVILEGED_MAX_FILES,
 		}
 		: {
-			posterMaxBytes: megabytes(config.UPLOAD_USER_IMAGE_MAX_MB),
-			imageMaxBytes: megabytes(config.UPLOAD_USER_IMAGE_MAX_MB),
+			posterMaxBytes: Math.min(inlineMaxBytes, megabytes(config.UPLOAD_USER_IMAGE_MAX_MB)),
+			imageMaxBytes: Math.min(inlineMaxBytes, megabytes(config.UPLOAD_USER_IMAGE_MAX_MB)),
 			gameMaxBytes,
-			videoMaxBytes: megabytes(200),
-			requestMaxBytes: megabytes(config.UPLOAD_USER_REQUEST_MAX_MB),
+			videoMaxBytes: 0,
+			requestMaxBytes: inlineMaxBytes,
 			maxFiles: config.UPLOAD_USER_MAX_FILES,
 		};
 	return options.maxGameFileMb === undefined
@@ -96,8 +98,6 @@ export function kindLimit(limits: UploadLimits, kind: AssetKind): number {
 const FIELDNAME_MAP: Record<string, AssetKind> = {
 	poster: 'POSTER',
 	'images[]': 'IMAGE',
-	gameFile: 'GAME',
-	videoFile: 'VIDEO',
 };
 
 export function fieldnameToKind(fieldname: string): AssetKind | undefined {
@@ -128,17 +128,17 @@ export function kindLimitForMime(
 ): number {
 	const baseLimit = kindLimit(limits, kind);
 	if (kind === 'POSTER' && mime === 'application/pdf') {
-		return Math.max(baseLimit, SIZE_LIMITS.posterPdf);
+		return Math.min(limits.requestMaxBytes, Math.max(baseLimit, SIZE_LIMITS.posterPdf));
 	}
 	if (kind === 'IMAGE' && mime === 'application/pdf') {
-		return Math.max(baseLimit, SIZE_LIMITS.imagePdf);
+		return Math.min(limits.requestMaxBytes, Math.max(baseLimit, SIZE_LIMITS.imagePdf));
 	}
 	return baseLimit;
 }
 
 export function createKindAwareByteLimiter(
 	limits: UploadLimits,
-	kind: AssetKind,
+	kind: InlineAssetKind,
 	label = 'File',
 ): Transform {
 	const headerBytesNeeded = 16;

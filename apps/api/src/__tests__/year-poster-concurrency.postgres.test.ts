@@ -18,7 +18,7 @@ const BARRIER_NAMESPACE = 50_090;
 const REPETITIONS = 3;
 
 function publicImageUrl(storageKey: string): string {
-	return `${API_PUBLIC_URL}/api/public/images/${encodeURIComponent(storageKey)}`;
+	return `${API_PUBLIC_URL}/${storageKey.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 function deferred() {
@@ -169,7 +169,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			onRetry: input.onRetry ? () => input.onRetry?.() : undefined,
 		});
 		const service = createExhibitionService({
-			apiPublicUrl: API_PUBLIC_URL,
+			publicAssetBaseUrl: API_PUBLIC_URL,
 			posterBucket: bucket,
 			repository,
 			uploadLimits: () => ({

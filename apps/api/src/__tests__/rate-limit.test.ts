@@ -5,7 +5,6 @@ import { defaultTestEnv } from './helpers/app-mocks.js';
 import type { BackendContext } from '../backend-context.js';
 import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
-import { createExportProgressStore } from '../modules/admin/export/service.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
 
 // Use very tight limits so the test doesn't need to send 300+ requests.
@@ -89,7 +88,6 @@ describe('rate-limit plugin', () => {
 			update: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
 			invalidate: () => {},
 		},
-		exportProgress: createExportProgressStore(),
 		uploadLifecycleMetrics: createUploadLifecycleMetrics(),
 		uploadLifecycle: createTestUploadLifecycleRuntime(),
 		lifecycle: {

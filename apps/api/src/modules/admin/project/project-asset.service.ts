@@ -1,4 +1,4 @@
-import type { AssetKind } from '@pcu/contracts';
+import type { InlineAssetKind } from '@pcu/contracts';
 import { AppError } from '../../../shared/errors.js';
 import type { MultipartCommandInput } from '../../../application/http-input.js';
 import type {
@@ -14,7 +14,7 @@ export interface ProjectAssetServiceDependencies {
 	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits | Promise<UploadLimits>;
 	uploadSlots: { acquire(): void; release(): void };
 	uploadCoordinator: SingleAssetUploadCoordinator;
-	bucketForKind(kind: AssetKind): string;
+	bucketForKind(kind: InlineAssetKind): string;
 	wakeDeletionWorker(): void;
 	logger?: {
 		error(context: Record<string, unknown>, message: string): void;
@@ -55,13 +55,9 @@ class AssetIdempotencyReplay extends Error {
 	}
 }
 
-export function isReplaceableAssetKind(kind: AssetKind): boolean {
-	return kind === 'GAME';
-}
-
 /**
  * Add a single asset to an existing project via multipart upload.
- * Handles GAME asset replacement logic.
+ * The transport contract can represent only small inline image kinds.
  */
 export async function addAssetToProject(
 	deps: ProjectAssetServiceDependencies,
@@ -129,48 +125,10 @@ export async function addAssetToProject(
 		);
 		const savedFile = upload.savedFile;
 
-		// Replace existing GAME asset if uploading a new one. Other kinds, including VIDEO, always create.
-		// DB write goes first — deletes of the prior S3 object happen only after commit so a mid-
-		// flight failure can't leave the project pointing at a storageKey we already deleted.
-		const isReplaceable = isReplaceableAssetKind(savedFile.kind);
-		let assetId: number;
-		let oldStorageKey: string | null = null;
-		let oldPlaybackStorageKey: string | null = null;
-
-		if (isReplaceable) {
-			const bucket = deps.bucketForKind(savedFile.kind);
-			const result = await deps.repository.replaceOrCreateReplaceableAsset(projectId, savedFile.kind, {
-				storageKey: savedFile.storageKey,
-				playbackStorageKey: savedFile.playbackStorageKey ?? null,
-				originalName: savedFile.originalName,
-				mimeType: savedFile.mimeType,
-				playbackMimeType: savedFile.playbackMimeType ?? '',
-				sizeBytes: BigInt(savedFile.sizeBytes),
-				width: savedFile.width,
-				height: savedFile.height,
-				renditions: savedFile.renditions,
-				playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
-				playbackStatus: savedFile.playbackStatus,
-				playbackError: savedFile.playbackError,
-				isPublic: false,
-				uploadIntentIds: savedFile.uploadIntentIds,
-				...(operation ? {
-					idempotency: {
-						...operation,
-						resultForAsset: (createdAssetId: number) => ({ assetId: createdAssetId }),
-					},
-				} : {}),
-			}, {
-				bucket,
-				reason: 'project-asset-replace-previous',
-				playbackReason: 'project-asset-replace-previous-playback',
-			});
-			assetId = result.assetId;
-			oldStorageKey = result.oldStorageKey;
-			oldPlaybackStorageKey = result.oldPlaybackStorageKey;
-			uploadPersisted = true;
-		} else {
-			const asset = await deps.repository.createAsset({
+		if (savedFile.kind !== 'POSTER' && savedFile.kind !== 'IMAGE' && savedFile.kind !== 'THUMBNAIL') {
+			throw new Error('Inline upload coordinator returned a non-inline asset kind');
+		}
+		const asset = await deps.repository.createAsset({
 				projectId,
 				kind: savedFile.kind,
 				storageKey: savedFile.storageKey,
@@ -185,7 +143,8 @@ export async function addAssetToProject(
 				playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
 				playbackStatus: savedFile.playbackStatus,
 				playbackError: savedFile.playbackError,
-				isPublic: savedFile.kind !== 'VIDEO',
+				isPublic: true,
+				setAsProjectPoster: savedFile.kind === 'POSTER',
 				uploadIntentIds: savedFile.uploadIntentIds,
 				...(operation ? {
 					idempotency: {
@@ -194,13 +153,10 @@ export async function addAssetToProject(
 					},
 				} : {}),
 			});
-			assetId = asset.id;
-			uploadPersisted = true;
-		}
+		const assetId = asset.id;
+		uploadPersisted = true;
 		response = { assetId };
 		stopOperationHeartbeat();
-
-		if (oldStorageKey || oldPlaybackStorageKey) deps.wakeDeletionWorker();
 	} catch (err) {
 		stopOperationHeartbeat();
 		if (err instanceof AssetIdempotencyReplay) {

@@ -12,30 +12,27 @@ export interface ClientUploadLimits {
 	posterMaxMb: number;
 	posterPdfMaxMb: number;
 	gameMaxMb: number;
-	videoMaxMb: number;
 	requestMaxMb: number;
 	maxFiles: number;
 }
 
 const USER_LIMITS: ClientUploadLimits = {
 	imageMaxMb: 10,
-	imagePdfMaxMb: 100,
+	imagePdfMaxMb: 16,
 	posterMaxMb: 10,
-	posterPdfMaxMb: 50,
+	posterPdfMaxMb: 16,
 	gameMaxMb: 5120,
-	videoMaxMb: 200,
-	requestMaxMb: 250,
+	requestMaxMb: 16,
 	maxFiles: 10,
 };
 
 const PRIVILEGED_LIMITS: ClientUploadLimits = {
 	imageMaxMb: 15,
-	imagePdfMaxMb: 100,
+	imagePdfMaxMb: 16,
 	posterMaxMb: 15,
-	posterPdfMaxMb: 50,
+	posterPdfMaxMb: 16,
 	gameMaxMb: 5120,
-	videoMaxMb: 1024,
-	requestMaxMb: 1200,
+	requestMaxMb: 16,
 	maxFiles: 20,
 };
 

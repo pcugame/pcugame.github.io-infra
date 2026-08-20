@@ -7,7 +7,7 @@ import { createResponsiveImageSerializer } from '../../../shared/responsive-imag
 import type { ExhibitionRepository, ExhibitionRecord } from './ports.js';
 
 export interface ExhibitionServiceDependencies {
-	apiPublicUrl: string;
+	publicAssetBaseUrl: string;
 	posterBucket: string;
 	protectedBucket?: string;
 	repository: ExhibitionRepository;
@@ -30,7 +30,7 @@ function serializeExhibition(
 	deps: ExhibitionServiceDependencies,
 	e: ExhibitionRecord,
 ): AdminExhibitionItem {
-	const { serializeResponsiveImage } = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const { serializeResponsiveImage } = createResponsiveImageSerializer(deps.publicAssetBaseUrl);
 	return {
 		id: e.id,
 		year: e.year,

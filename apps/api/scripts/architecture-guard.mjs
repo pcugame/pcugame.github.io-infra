@@ -13,22 +13,6 @@ const targetNames = requestedTargets.length > 0 ? requestedTargets : ['src'];
 const ignoredDirectoryNames = new Set(['node_modules', 'dist', 'generated', '__tests__']);
 const sourceExtensions = /\.(?:[cm]?ts|tsx)$/;
 
-/**
- * The request context is deliberately process-bound: Fastify seeds a separate
- * store for every request and no external resource is opened by constructing it.
- * Keep this allowlist exact (file + binding + constructor). New entries require a
- * lifecycle/ownership explanation here and a review of the architecture fixture.
- */
-const statefulAppBoundaryAllowlist = new Map([
-	[
-		'src/lib/request-context.ts#requestContext',
-		{
-			creator: 'AsyncLocalStorage',
-			reason: 'request-scoped propagation seeded at the Fastify app boundary',
-		},
-	],
-]);
-
 const legacyStatefulExports = new Set([
 	'_resetActiveUploads',
 	'abortMultipartUpload',
@@ -113,17 +97,6 @@ const statefulConstructorPattern =
 	/(?:Client|Coordinator|FileSystem|Lifecycle|Limiter|Logger|Repository|Runtime|Scheduler|Service|Storage|Store)$/;
 
 /**
- * P1 debt only. These two services predate the control-plane boundary and still
- * relay public image/WebGL bodies through Fastify. Keeping the allowlist exact
- * makes the debt visible while preventing a second application-level origin
- * from being added. Delete entries as each route becomes an origin redirect.
- */
-const legacyClientDeliveryRelayAllowlist = new Set([
-	'src/modules/public/image.service.ts',
-	'src/modules/public/webgl.service.ts',
-]);
-
-/**
  * Internal object reads are application semantics, not client delivery. Keep
  * this list exact (file + enclosing operation) so a neutral filename or a
  * renamed receiver cannot silently create a new application-level asset
@@ -132,28 +105,24 @@ const legacyClientDeliveryRelayAllowlist = new Set([
  */
 const internalObjectReadAllowlist = new Map([
 	[
+		'src/modules/admin/game-upload/composition.ts',
+		new Set(['createGameUploadProductionGraph']),
+	],
+	[
 		'src/modules/admin/export/file.adapter.ts',
 		new Set(['saveObject']),
 	],
 	[
 		'src/modules/admin/game-upload/complete-session.service.ts',
-		new Set(['completeDirectSession', 'completeSession']),
-	],
-	[
-		'src/modules/admin/game-upload/composition.ts',
-		new Set(['createGameUploadProductionGraph']),
+		new Set(['completeMultipartSession', 'completeSession']),
 	],
 	[
 		'src/modules/admin/game-upload/session-maintenance.service.ts',
-		new Set(['sweepStaleCompletingSessions', 'sweepVerifyingSessions']),
+		new Set(['sweepStaleCompletingSessions']),
 	],
 	[
-		'src/modules/admin/game-upload/source-identity.ts',
-		new Set(['validateCompletedSourceIdentity']),
-	],
-	[
-		'src/modules/admin/import-export.composition.ts',
-		new Set(['createImportExportProductionGraph']),
+		'src/modules/admin/game-upload/validation-worker.composition.ts',
+		new Set(['process']),
 	],
 	[
 		'src/modules/admin/project/project-asset-upload.adapter.ts',
@@ -166,10 +135,6 @@ const internalObjectReadAllowlist = new Map([
 	[
 		'src/modules/assets/image-rendition-backfill.ts',
 		new Set(['processItem']),
-	],
-	[
-		'src/modules/assets/upload/video-processing.adapter.ts',
-		new Set(['hasFastStart']),
 	],
 	[
 		'src/modules/assets/upload/zip-validation.ts',
@@ -190,30 +155,34 @@ const internalObjectReadAllowlist = new Map([
 	],
 	[
 		'src/modules/webgl/deployment.ts',
-		new Set(['deploySource']),
+		new Set(['deployArchive', 'deploySource']),
 	],
+]);
+
+/**
+ * Full object bodies belong only to executables that are never part of the API
+ * graph. Metadata recovery (`head`) remains separately allowlisted above. This
+ * second boundary intentionally does not grant complete-session functions a
+ * file/function-wide exemption: adding `storage.stream()` beside a legitimate
+ * HEAD must fail the guard.
+ */
+const processingObjectBodyReadAllowlist = new Map([
+	['src/modules/admin/export/file.adapter.ts', new Set(['saveObject'])],
+	['src/modules/admin/game-upload/validation-worker.composition.ts', new Set(['process'])],
+	['src/modules/assets/image-rendition-backfill.ts', new Set(['processItem'])],
+	['src/modules/webgl/deployment.ts', new Set(['deploySource'])],
 ]);
 
 const applicationPipeAllowlist = new Map([
 	[
-		'src/modules/admin/game-upload/chunk-stream.ts',
-		new Set(['createCountedChunkStream']),
+		'src/modules/admin/game-upload/source-identity.ts',
+		new Set(['materializeAndValidateCompletedSource']),
 	],
 ]);
 
 const multipartCompleteCallerAllowlist = new Set([
 	'src/modules/admin/game-upload/complete-session.service.ts',
 	'src/modules/admin/game-upload/composition.ts',
-]);
-
-/**
- * P3 debt only. This is the sole application-level UploadPart byte relay kept
- * for already-created API_CHUNK_PROXY sessions. The composition adapter is not
- * a client action and is checked separately as a composition root. Do not add
- * another service/function here; delete this entry with the legacy route.
- */
-const legacyUploadPartRelayAllowlist = new Map([
-	['src/modules/admin/game-upload/upload-chunk.service.ts', new Set(['uploadChunk'])],
 ]);
 
 const applicationProxyImports = new Set([
@@ -224,12 +193,31 @@ const applicationProxyImports = new Set([
 	'undici',
 ]);
 
+const exportProcessingSources = new Set([
+	'src/modules/admin/export/file.adapter',
+	'src/modules/admin/export/service',
+	'src/modules/admin/export/worker',
+	'src/modules/admin/export/worker-loop',
+]);
+
+function isExportProcessingRole(file) {
+	return file === 'src/export-worker.ts'
+		|| file === 'scripts/export-assets.ts'
+		|| file.startsWith('src/modules/admin/export/');
+}
+
 const directUploadFilePattern = /(?:direct[-.]?(?:multipart|upload)|part[-.]?urls?)/i;
 const directUploadFunctionPattern = /direct/i;
 const clientDeliveryFilePattern = /(?:asset[-.]?origin|client[-.]?delivery|protected[-.]?download|public[-.]?(?:asset|download|metadata)|(?:^|[/.])download[.-])/i;
 const objectReadMethodNames = new Set([
 	'getObject',
 	'head',
+	'readObjectRange',
+	'readRange',
+	'stream',
+]);
+const objectBodyReadMethodNames = new Set([
+	'getObject',
 	'readObjectRange',
 	'readRange',
 	'stream',
@@ -408,15 +396,6 @@ function isDirectUploadOperation(node, file) {
 	return false;
 }
 
-function enclosingFunctionName(node) {
-	let current = node.parent;
-	while (current) {
-		if (ts.isFunctionLike(current)) return functionLikeName(current);
-		current = current.parent;
-	}
-	return undefined;
-}
-
 function enclosingFunctionNames(node) {
 	const names = [];
 	let current = node.parent;
@@ -434,13 +413,6 @@ function isAllowedInEnclosingOperation(node, file, allowlist) {
 	const allowedFunctions = allowlist.get(file);
 	if (!allowedFunctions) return false;
 	return enclosingFunctionNames(node).some((name) => allowedFunctions.has(name));
-}
-
-function isLegacyUploadPartRelay(node, file) {
-	const allowedFunctions = legacyUploadPartRelayAllowlist.get(file);
-	if (!allowedFunctions) return false;
-	const functionName = enclosingFunctionName(node);
-	return functionName !== undefined && allowedFunctions.has(functionName);
 }
 
 function isGameUploadServiceFile(file) {
@@ -883,6 +855,14 @@ const inventory = {
 	'feature-local-s3-imports': 0,
 	'direct-upload-byte-relays': 0,
 	'multipart-complete-callers': 0,
+	'unowned-multipart-complete-callers': 0,
+	'storage-key-canonical-routes': 0,
+	'protected-download-bodies': 0,
+	'public-metadata-presign-authorities': 0,
+	'signed-url-loggings': 0,
+	'direct-controller-body-streams': 0,
+	'api-export-processing-imports': 0,
+	'api-object-body-reads': 0,
 };
 const violations = [];
 const violationKeys = new Set();
@@ -1014,6 +994,15 @@ for (const fileName of files) {
 				`feature code cannot implement an object transport proxy; use Garage/public origin or an external reverse proxy (${dependencyDescription(edge)})`,
 			);
 		}
+		if (exportProcessingSources.has(edge.source) && !isExportProcessingRole(file)) {
+			inventory['api-export-processing-imports']++;
+			addViolation(
+				'no-api-export-processing-import',
+				file,
+				edge.node,
+				`export object reads and NAS writes belong only to the export-worker processing role (${dependencyDescription(edge)})`,
+			);
+		}
 
 		if (!isCompositionRoot(file) && isLegacyStatefulSource(edge.source)) {
 			const valueNames = edge.names
@@ -1057,7 +1046,6 @@ for (const fileName of files) {
 			&& propertyNameText(node.name) === 'storage'
 			&& node.type
 			&& isClientFacingDeliveryFile(file)
-			&& !legacyClientDeliveryRelayAllowlist.has(file)
 			&& /(?:getObject|head|readObjectRange|readRange|stream)/.test(node.type.getText())
 		) {
 			addViolation(
@@ -1094,11 +1082,36 @@ for (const fileName of files) {
 					&& objectReadAliases.has(unwrapExpression(node.expression).text)
 				)
 			);
+			const objectBodyReadCall = objectReadCall && (
+				callName === 'getObject'
+				|| callName === 'stream'
+				|| (
+					callName !== undefined
+					&& objectBodyReadMethodNames.has(callName)
+					&& isStorageMethodCall(node, objectBodyReadMethodNames)
+				)
+				|| (
+					ts.isIdentifier(unwrapExpression(node.expression))
+					&& objectReadAliases.has(unwrapExpression(node.expression).text)
+				)
+			);
+			if (
+				isGuardedFeatureCode(file)
+				&& objectBodyReadCall
+				&& !isAllowedInEnclosingOperation(node, file, processingObjectBodyReadAllowlist)
+			) {
+				inventory['api-object-body-reads']++;
+				addViolation(
+					'no-api-object-body-read',
+					file,
+					node,
+					'completed object bodies may be read only by an explicit validation/export processing role',
+				);
+			}
 			if (
 				isGuardedFeatureCode(file)
 				&& objectReadCall
 				&& !isRouteRegistration(node)
-				&& !legacyClientDeliveryRelayAllowlist.has(file)
 				&& !isAllowedInEnclosingOperation(node, file, internalObjectReadAllowlist)
 			) {
 				inventory['client-delivery-object-reads']++;
@@ -1112,6 +1125,7 @@ for (const fileName of files) {
 			if (callName === 'completeMultipart') {
 				inventory['multipart-complete-callers']++;
 				if (!multipartCompleteCallerAllowlist.has(file)) {
+					inventory['unowned-multipart-complete-callers']++;
 					addViolation(
 						'no-unowned-multipart-complete',
 						file,
@@ -1124,7 +1138,7 @@ for (const fileName of files) {
 				callName === 'uploadPart'
 				&& (
 					isDirectUploadOperation(node, file)
-					|| (isGameUploadServiceFile(file) && !isLegacyUploadPartRelay(node, file))
+					|| isGameUploadServiceFile(file)
 				)
 			) {
 				inventory['direct-upload-byte-relays']++;
@@ -1148,7 +1162,6 @@ for (const fileName of files) {
 			}
 			if (
 				isClientFacingDeliveryFile(file)
-				&& !legacyClientDeliveryRelayAllowlist.has(file)
 				&& isStorageMethodCall(node, objectReadMethodNames)
 			) {
 				inventory['client-delivery-object-reads']++;
@@ -1176,10 +1189,10 @@ for (const fileName of files) {
 			}
 			if (
 				isClientFacingDeliveryFile(file)
-				&& !legacyClientDeliveryRelayAllowlist.has(file)
 				&& callName === 'send'
 				&& node.arguments.some((argument) => /(?:^|\.)(?:body|object|payload|stream)$/.test(argument.getText()))
 			) {
+				inventory['protected-download-bodies']++;
 				addViolation(
 					'no-protected-download-body',
 					file,
@@ -1192,6 +1205,7 @@ for (const fileName of files) {
 				&& /public/.test(file)
 				&& /^(?:presign|getSignedUrl)$/.test(callName ?? '')
 			) {
+				inventory['public-metadata-presign-authorities']++;
 				addViolation(
 					'no-public-metadata-presign-authority',
 					file,
@@ -1203,6 +1217,7 @@ for (const fileName of files) {
 			if (callName && ['debug', 'error', 'fatal', 'info', 'trace', 'warn'].includes(callName)) {
 				const context = node.arguments[0];
 				if (context && identifierOrPropertyLooksSensitive(context, signedCapabilityBindings)) {
+					inventory['signed-url-loggings']++;
 					addViolation(
 						'no-presigned-url-logging',
 						file,
@@ -1218,20 +1233,18 @@ for (const fileName of files) {
 					route?.includes(':storageKey')
 					&& (route.includes('/assets') || route.includes('protected'))
 				) {
-					const allowedLegacyRoute = file === 'src/modules/assets/controller.ts'
-						&& route === '/assets/protected/:storageKey';
-					if (!allowedLegacyRoute) {
-						addViolation(
-							'no-canonical-storage-key-route',
-							file,
-							node,
-							'new external asset routes use assetId; raw storageKey routes are compatibility-only',
-						);
-					}
+					inventory['storage-key-canonical-routes']++;
+					addViolation(
+						'no-canonical-storage-key-route',
+						file,
+						node,
+						'external asset routes use assetId; raw storageKey routes are forbidden',
+					);
 				}
 				if (route && /(?:direct|part-urls)/.test(route)) {
 					for (const argument of node.arguments.slice(1)) {
 						if (containsReadableStreamType(argument)) {
+							inventory['direct-controller-body-streams']++;
 							addViolation(
 								'no-direct-controller-body-stream',
 								file,
@@ -1241,6 +1254,7 @@ for (const fileName of files) {
 						}
 						const uploadPartCall = containsCallNamed(argument, new Set(['uploadPart']));
 						if (uploadPartCall) {
+							inventory['direct-controller-body-streams']++;
 							addViolation(
 								'no-direct-controller-body-stream',
 								file,
@@ -1274,7 +1288,6 @@ for (const fileName of files) {
 			(ts.isPropertyAssignment(node) || ts.isMethodDeclaration(node))
 			&& propertyNameText(node.name) === 'body'
 			&& isClientFacingDeliveryFile(file)
-			&& !legacyClientDeliveryRelayAllowlist.has(file)
 		) {
 			let current = node.parent;
 			let deliveryFunction = false;
@@ -1290,6 +1303,7 @@ for (const fileName of files) {
 				current = current.parent;
 			}
 			if (deliveryFunction) {
+				inventory['protected-download-bodies']++;
 				addViolation(
 					'no-protected-download-body',
 					file,
@@ -1302,10 +1316,6 @@ for (const fileName of files) {
 		ts.forEachChild(node, inspectControlPlaneBoundary);
 	}
 	inspectControlPlaneBoundary(sourceFile);
-
-	if (legacyClientDeliveryRelayAllowlist.has(file)) {
-		inventory['legacy-client-delivery-relays']++;
-	}
 
 	for (const statement of sourceFile.statements) {
 		if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
@@ -1324,8 +1334,7 @@ for (const fileName of files) {
 		const declarationKind = statement.declarationList.flags & ts.NodeFlags.Const ? 'const' : 'mutable';
 		for (const declaration of statement.declarationList.declarations) {
 			if (!ts.isIdentifier(declaration.name)) continue;
-			const bindingKey = `${file}#${declaration.name.text}`;
-			if (declarationKind === 'mutable' && !statefulAppBoundaryAllowlist.has(bindingKey)) {
+			if (declarationKind === 'mutable') {
 				addViolation(
 					'no-module-mutable-state',
 					file,
@@ -1336,8 +1345,6 @@ for (const fileName of files) {
 			if (!declaration.initializer) continue;
 			const creation = findImmediateStatefulCreation(declaration.initializer, bindings);
 			if (!creation) continue;
-			const allowed = statefulAppBoundaryAllowlist.get(bindingKey);
-			if (allowed?.creator === creation.creator) continue;
 			addViolation(
 				'no-stateful-module-singleton',
 				file,
@@ -1402,6 +1409,6 @@ if (violations.length > 0) {
 	process.exitCode = 1;
 } else {
 	console.log(
-		`[architecture-guard] PASS violations=0 files=${files.length} state-allowlist=${statefulAppBoundaryAllowlist.size}`,
+		`[architecture-guard] PASS violations=0 files=${files.length} state-allowlist=0`,
 	);
 }

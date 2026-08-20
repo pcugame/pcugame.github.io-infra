@@ -27,10 +27,8 @@ export function createScriptedBackendPersistence(
 			findExhibitionsByYear: async () => [],
 			findPublishedProjectsInExhibitions: async () => [],
 			findExhibitionById: async () => null,
-			resolvePublicImage: async () => null,
 			findPublishedProjectById: async () => null,
 			findPublishedProjectBySlug: async () => null,
-			findPublicWebglProject: async () => null,
 		},
 		projectAccessRepository: {
 			findProject: async () => null,
@@ -48,9 +46,8 @@ export function createScriptedBackendPersistence(
 			bulkDeleteProjectsReturningAssets: async () => unscripted('project.bulkDeleteProjectsReturningAssets'),
 			findExhibitionById: async () => null,
 			findProjectByExhibitionAndSlug: async () => null,
-			createProjectWithAssets: async () => unscripted('project.createProjectWithAssets'),
+			createProjectMetadata: async () => unscripted('project.createProjectMetadata'),
 			createAsset: async () => unscripted('project.createAsset'),
-			replaceOrCreateReplaceableAsset: async () => unscripted('project.replaceOrCreateReplaceableAsset'),
 			bulkUpdateStatus: async () => ({ count: 0 }),
 		},
 		memberRepository: {
@@ -72,7 +69,6 @@ export function createScriptedBackendPersistence(
 			clearExhibitionPoster: async () => null,
 		},
 		assetsRepository: {
-			findAssetByStorageKey: async () => null,
 			findAssetByIdForDownload: async () => null,
 			findAssetByIdWithProject: async () => null,
 			claimAssetForDeletion: async () => null,
@@ -90,6 +86,8 @@ export function createScriptedBackendPersistence(
 		},
 		exportRepository: {
 			findProjectsWithAssets: async () => [],
+			createJob: async ({ id }) => ({ id }),
+			latestJob: async () => null,
 		},
 	};
 

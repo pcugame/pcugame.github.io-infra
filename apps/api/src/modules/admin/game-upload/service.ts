@@ -1,20 +1,18 @@
 /**
- * Resumable chunked game-file upload service (S3 multipart).
+ * Resumable direct game-file upload control plane (S3 multipart).
  *
  * Flow:
  *   1. createSession()    -> create S3 multipart upload + DB session
- *   2. uploadChunk()      -> upload one S3 part
- *   3. getSessionStatus() -> query progress
- *   4. completeSession()  -> complete multipart upload -> GAME asset
+ *   2. signPartUrls()     -> issue short-lived UploadPart capabilities
+ *   3. getSessionStatus() -> reconcile progress from Garage ListParts
+ *   4. completeSession()  -> complete multipart upload -> verification queue
  *   5. cancelSession()    -> abort multipart upload + cleanup
  */
 
-export { createCountedChunkStream, chunkByteLength, toError } from './chunk-stream.js';
 export { assertGameUploadSessionWritable } from './session-policy.js';
-export { chunkUploadBodyLimitBytes, resolveChunkSizeBytes } from './session-sizing.js';
+export { resolveChunkSizeBytes } from './session-sizing.js';
 
 import { createSession } from './create-session.service.js';
-import { authorizeLegacyChunkUpload, uploadChunk } from './upload-chunk.service.js';
 import { completeSession } from './complete-session.service.js';
 import { signPartUrls } from './sign-part-urls.service.js';
 import {
@@ -22,10 +20,8 @@ import {
 	getSessionStatus,
 	listSessions,
 	sweepExpiredPendingSessions,
-	sweepExpiredPartClaims,
 	sweepStaleCompletingSessions,
 	sweepUntrackedMultipartUploads,
-	sweepVerifyingSessions,
 } from './session-maintenance.service.js';
 import type {
 	GameUploadPartSigningDependencies,
@@ -38,21 +34,22 @@ export function createGameUploadPartSigningDependencies(
 ): GameUploadPartSigningDependencies {
 	return {
 		repository: {
-			findSessionById: (id) => deps.repository.findSessionById(id),
-			isSessionActive: (sessionId) => deps.repository.isSessionActive(sessionId),
+			reservePartCapabilities: (input) => deps.repository.reservePartCapabilities(input),
 		},
 		partSigner: {
-			presignUploadPart: (key, uploadId, partNumber, expiresInSeconds) => (
-				deps.partSigner.presignUploadPart(key, uploadId, partNumber, expiresInSeconds)
+			presignUploadPart: (key, uploadId, partNumber, expiresInSeconds, checksumSha256) => (
+				deps.partSigner.presignUploadPart(
+					key, uploadId, partNumber, expiresInSeconds, checksumSha256,
+				)
 			),
 		},
 		clock: { now: () => deps.clock.now() },
-		authorizeProjectWrite: (actor, projectId) => (
-			deps.authorizeProjectWrite(actor, projectId)
-		),
 		config: {
 			uploadPartUrlBatchMax: deps.config.uploadPartUrlBatchMax,
 			uploadPartUrlTtlSeconds: deps.config.uploadPartUrlTtlSeconds,
+			uploadPartUrlRefreshMax: deps.config.uploadPartUrlRefreshMax,
+			uploadPartUrlRefreshWindowMs: deps.config.uploadPartUrlRefreshWindowMs,
+			directUploadQuota: deps.config.directUploadQuota,
 		},
 		logger: {
 			info: deps.logger.info
@@ -68,12 +65,6 @@ export function createGameUploadService(deps: GameUploadServiceDependencies) {
 	return {
 		createSession: (...args: Parameters<typeof createSession> extends [unknown, ...infer Rest] ? Rest : never) => (
 			createSession(deps, ...args)
-		),
-		uploadChunk: (...args: Parameters<typeof uploadChunk> extends [unknown, ...infer Rest] ? Rest : never) => (
-			uploadChunk(deps, ...args)
-		),
-		authorizeLegacyChunkUpload: (...args: Parameters<typeof authorizeLegacyChunkUpload> extends [unknown, ...infer Rest] ? Rest : never) => (
-			authorizeLegacyChunkUpload(deps, ...args)
 		),
 		signPartUrls: (...args: Parameters<typeof signPartUrls> extends [unknown, ...infer Rest] ? Rest : never) => (
 			signPartUrls(partSigningDeps, ...args)
@@ -93,13 +84,9 @@ export function createGameUploadService(deps: GameUploadServiceDependencies) {
 		sweepStaleCompletingSessions: (signal?: AbortSignal) => (
 			sweepStaleCompletingSessions(deps, signal)
 		),
-		sweepVerifyingSessions: (signal?: AbortSignal) => (
-			sweepVerifyingSessions(deps, signal)
-		),
 		sweepExpiredPendingSessions: (signal?: AbortSignal) => (
 			sweepExpiredPendingSessions(deps, signal)
 		),
-		sweepExpiredPartClaims: (signal?: AbortSignal) => sweepExpiredPartClaims(deps, signal),
 		sweepUntrackedMultipartUploads: (signal?: AbortSignal) => (
 			sweepUntrackedMultipartUploads(deps, signal)
 		),

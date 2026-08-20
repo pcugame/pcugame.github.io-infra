@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createOrphanService } from '../modules/orphan/service.js';
 import {
@@ -62,9 +62,18 @@ describe('orphan service durable recording', () => {
 		await expect(service.recordOrphan('public', 'lost.png', 'rollback'))
 			.rejects.toBe(databaseError);
 		expect(deps.logger.error).toHaveBeenCalledWith(
-			{ err: databaseError, bucket: 'public', storageKey: 'lost.png', reason: 'rollback' },
+			{
+				action: 'record_orphan',
+				err: { name: 'Error' },
+				result: 'failed',
+			},
 			'Failed to durably record orphan',
 		);
+		const context = vi.mocked(deps.logger.error).mock.calls[0]?.[0];
+		expect(JSON.stringify(context)).not.toContain('lost.png');
+		expect(JSON.stringify(context)).not.toContain('public');
+		expect(JSON.stringify(context)).not.toContain('rollback');
+		expect(JSON.stringify(context)).not.toContain('database unavailable');
 	});
 });
 

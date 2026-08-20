@@ -96,6 +96,7 @@ export interface ObjectStoreUploadPartSigner {
 		uploadId: string,
 		partNumber: number,
 		expiresInSeconds: number,
+		checksumSha256: string,
 	): Promise<string>;
 }
 

@@ -1,9 +1,8 @@
 /**
  * Game-file upload client.
  *
- * DIRECT_MULTIPART sessions send bytes from the browser straight to Garage.
- * Sessions created by an older API (no transport field) keep using the legacy
- * API chunk route. The selected transport never changes during a session.
+ * Object bytes move from the browser straight to Garage. The API only creates
+ * sessions, issues capabilities, reconciles ListParts, and commits completion.
  */
 
 import { env } from '../env';
@@ -11,12 +10,11 @@ import { ApiError } from './client';
 import { failUpload, finishUpload, startUpload, updateUpload } from '../upload';
 import type { FileIdentity } from '../upload/file-identity';
 import type {
-	GameUploadChunkResponse,
 	GameUploadCompletionResponse,
 	GameUploadCompleteRequest,
 	GameUploadCreateSessionRequest,
 	GameUploadPartUrlsResponse,
-	GameUploadSession as ContractGameUploadSession,
+	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
 	GameUploadUploadedPart,
@@ -25,11 +23,7 @@ import type {
 
 // ── Types ────────────────────────────────────────────────────
 
-/** Runtime-compatible shape for sessions returned by old and new APIs. */
-export type GameUploadSession = Omit<ContractGameUploadSession, 'transport'> & {
-	transport?: 'DIRECT_MULTIPART' | 'API_CHUNK_PROXY';
-};
-export type { GameUploadStatus };
+export type { GameUploadSession, GameUploadStatus };
 
 export interface GameUploadProgress {
 	uploadedChunks: number;
@@ -49,14 +43,12 @@ export interface GameUploadController {
 export interface UploadGameFileOptions {
 	title: string;
 	onProgress?: (progress: GameUploadProgress) => void;
-	startFrom?: number[];
 	/** Garage-reconciled parts returned by the status endpoint. */
 	resumeParts?: GameUploadUploadedPart[];
 	/** Resume polling after storage completion without sending bytes again. */
 	resumeFinalizationStatus?: 'COMPLETING' | 'VERIFYING';
 }
 
-const DIRECT_TRANSPORT = 'DIRECT_MULTIPART';
 const DIRECT_CONCURRENCY = 4;
 // The API accepts a configurable batch size from 8 through 32. Keep the
 // browser-side request at the minimum so every supported deployment setting
@@ -65,12 +57,6 @@ const SIGN_BATCH_SIZE = 8;
 const MAX_PART_ATTEMPTS = 3;
 const VERIFY_POLL_INTERVAL_MS = 2_000;
 const VERIFY_TIMEOUT_MS = 30 * 60 * 1_000;
-
-type RuntimeTransport = 'DIRECT_MULTIPART' | 'API_CHUNK_PROXY' | undefined;
-
-function runtimeTransport(session: GameUploadSession | GameUploadStatus): RuntimeTransport {
-	return (session as { transport?: RuntimeTransport }).transport;
-}
 
 function abortError(): Error {
 	return new Error('Upload aborted');
@@ -95,6 +81,16 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
 			resolve();
 		}, ms);
 		signal.addEventListener('abort', onAbort, { once: true });
+	});
+}
+
+function readBlobBytes(blob: Blob): Promise<ArrayBuffer> {
+	if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer();
+	return new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.onerror = () => reject(reader.error ?? new Error('파트 checksum 읽기 실패'));
+		reader.onload = () => resolve(reader.result as ArrayBuffer);
+		reader.readAsArrayBuffer(blob);
 	});
 }
 
@@ -172,7 +168,7 @@ export async function listGameUploadSessions(
 		`/api/admin/projects/${projectId}/game-upload-sessions`,
 	);
 	return uploadKind
-		? { items: response.items.filter((item) => (item.uploadKind ?? 'GAME') === uploadKind) }
+		? { items: response.items.filter((item) => item.uploadKind === uploadKind) }
 		: response;
 }
 
@@ -201,22 +197,11 @@ export function uploadGameFile(
 ): GameUploadController {
 	let taskId: string | null = null;
 	const abortController = new AbortController();
-	// Old APIs omit transport. That is a legacy proxy session, fixed for the
-	// entire lifetime of this controller; failures never switch transports.
-	const transport = runtimeTransport(session) ?? 'API_CHUNK_PROXY';
-
-	const uploadedSet = new Set(options.startFrom ?? []);
 	const completedParts = new Map<number, GameUploadUploadedPart>();
-	if (transport === DIRECT_TRANSPORT) {
-		for (const part of options.resumeParts ?? []) {
-			if (part.partNumber >= 1 && part.partNumber <= session.totalChunks) {
-				completedParts.set(part.partNumber, part);
-				uploadedSet.add(part.partNumber - 1);
-			}
-		}
-		// A direct part is resumable only when Garage returned its ETag and size.
-		for (const index of [...uploadedSet]) {
-			if (!completedParts.has(index + 1)) uploadedSet.delete(index);
+	const partChecksumCache = new Map<number, string>();
+	for (const part of options.resumeParts ?? []) {
+		if (part.partNumber >= 1 && part.partNumber <= session.totalChunks) {
+			completedParts.set(part.partNumber, part);
 		}
 	}
 
@@ -235,15 +220,14 @@ export function uploadGameFile(
 
 	function reportProgress() {
 		const uploadTaskId = ensureTask();
-		const uploadedBytes = transport === DIRECT_TRANSPORT
-			? [...completedParts.values()].reduce((total, part) => total + part.sizeBytes, 0)
-			: uploadedSet.size * session.chunkSizeBytes;
+		const uploadedBytes = [...completedParts.values()]
+			.reduce((total, part) => total + part.sizeBytes, 0);
 		const progress = {
-			uploadedChunks: uploadedSet.size,
+			uploadedChunks: completedParts.size,
 			totalChunks: session.totalChunks,
 			uploadedBytes: Math.min(uploadedBytes, file.size),
 			totalBytes: file.size,
-			percent: Math.round((uploadedSet.size / session.totalChunks) * 100),
+			percent: Math.round((completedParts.size / session.totalChunks) * 100),
 		};
 		options.onProgress?.(progress);
 		updateUpload(uploadTaskId, {
@@ -256,16 +240,34 @@ export function uploadGameFile(
 
 	async function signPartUrls(partNumbers: number[]): Promise<GameUploadPartUrlsResponse> {
 		throwIfAborted(abortController.signal);
-		const generation = (session as { generation?: number }).generation;
-		if (!Number.isSafeInteger(generation) || generation === undefined || generation < 1) {
+		const generation = session.generation;
+		if (!Number.isSafeInteger(generation) || generation < 1) {
 			throw new Error('직접 업로드 세션 generation이 없습니다. 새 업로드 세션을 시작하세요.');
 		}
+		const parts = await Promise.all(partNumbers.map(async (partNumber) => {
+			const cached = partChecksumCache.get(partNumber);
+			if (cached) return { partNumber, checksumSha256: cached };
+			const start = (partNumber - 1) * session.chunkSizeBytes;
+			const end = Math.min(start + session.chunkSizeBytes, file.size);
+			const body = file.slice(start, end);
+			throwIfAborted(abortController.signal);
+			const digest = new Uint8Array(await crypto.subtle.digest(
+				'SHA-256',
+				await readBlobBytes(body),
+			));
+			throwIfAborted(abortController.signal);
+			let binary = '';
+			for (const byte of digest) binary += String.fromCharCode(byte);
+			const checksumSha256 = btoa(binary);
+			partChecksumCache.set(partNumber, checksumSha256);
+			return { partNumber, checksumSha256 };
+		}));
 		const response = await apiRequest<GameUploadPartUrlsResponse>(
 			`/api/admin/game-upload-sessions/${session.sessionId}/part-urls`,
 			{
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ generation, partNumbers }),
+				body: JSON.stringify({ generation, parts }),
 				signal: abortController.signal,
 			},
 		);
@@ -290,6 +292,9 @@ export function uploadGameFile(
 		const start = (partNumber - 1) * session.chunkSizeBytes;
 		const end = Math.min(start + session.chunkSizeBytes, file.size);
 		const body = file.slice(start, end);
+		if (import.meta.env.VITE_MOCK === 'true') {
+			return { partNumber, etag: `"mock-etag-${partNumber}"`, sizeBytes: body.size };
+		}
 		let capability = initialCapability;
 		let lastError: unknown;
 
@@ -355,7 +360,6 @@ export function uploadGameFile(
 						// request; do not mutate local progress after batch cancellation.
 						throwIfAborted(abortController.signal);
 						completedParts.set(partNumber, part);
-						uploadedSet.add(partNumber - 1);
 						reportProgress();
 					}
 				} catch (error) {
@@ -382,9 +386,8 @@ export function uploadGameFile(
 			throwIfAborted(abortController.signal);
 			const status = await getGameUploadStatus(session.sessionId, abortController.signal);
 			if (status.status === 'PENDING') {
-				const expectedGeneration = (session as { generation?: number }).generation;
+				const expectedGeneration = session.generation;
 				if (!Number.isSafeInteger(expectedGeneration)
-					|| expectedGeneration === undefined
 					|| status.generation !== expectedGeneration) {
 					throw new Error('업로드 복구 중 session generation이 변경되었습니다. 세션 상태를 다시 확인하세요.');
 				}
@@ -400,10 +403,8 @@ export function uploadGameFile(
 					);
 				}
 				completedParts.clear();
-				uploadedSet.clear();
 				for (const part of recoveredParts) {
 					completedParts.set(part.partNumber, part);
-					uploadedSet.add(part.partNumber - 1);
 				}
 				completeBody = { generation: expectedGeneration, parts: recoveredParts };
 				const recoveredCompletion = await apiRequest<GameUploadCompletionResponse>(
@@ -446,8 +447,8 @@ export function uploadGameFile(
 	}
 
 	async function startDirect(): Promise<GameUploadCompletionResponse> {
-		const generation = (session as { generation?: number }).generation;
-		if (!Number.isSafeInteger(generation) || generation === undefined || generation < 1) {
+		const generation = session.generation;
+		if (!Number.isSafeInteger(generation) || generation < 1) {
 			throw new Error('직접 업로드 세션 generation이 없습니다.');
 		}
 		if (options.resumeFinalizationStatus) {
@@ -488,66 +489,12 @@ export function uploadGameFile(
 		return waitUntilValidationFinishes(completion, body);
 	}
 
-	async function startLegacy(): Promise<GameUploadCompletionResponse> {
-		for (let i = 0; i < session.totalChunks; i++) {
-			throwIfAborted(abortController.signal);
-			if (uploadedSet.has(i)) continue;
-
-			const start = i * session.chunkSizeBytes;
-			const end = Math.min(start + session.chunkSizeBytes, file.size);
-			const chunk = file.slice(start, end);
-			const identityQuery = new URLSearchParams({
-				sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
-				sourceIdentity: session.sourceIdentity,
-			});
-			let lastErr: unknown;
-			for (let attempt = 0; attempt < MAX_PART_ATTEMPTS; attempt++) {
-				throwIfAborted(abortController.signal);
-				try {
-					await apiRequest<GameUploadChunkResponse>(
-						`/api/admin/game-upload-sessions/${session.sessionId}/chunks/${i}?${identityQuery.toString()}`,
-						{
-							method: 'PUT',
-							headers: { 'Content-Type': 'application/octet-stream' },
-							body: chunk,
-							signal: abortController.signal,
-						},
-					);
-					lastErr = null;
-					break;
-				} catch (err) {
-					if (abortController.signal.aborted) throw abortError();
-					lastErr = err;
-					if (attempt < MAX_PART_ATTEMPTS - 1) {
-						await abortableDelay(1000 * (attempt + 1), abortController.signal);
-					}
-				}
-			}
-			if (lastErr) throw lastErr;
-			uploadedSet.add(i);
-			reportProgress();
-		}
-		const uploadTaskId = ensureTask();
-		updateUpload(uploadTaskId, {
-			phase: 'processing',
-			loadedBytes: file.size,
-			totalBytes: file.size,
-			percent: 99,
-		});
-		return apiRequest<GameUploadCompletionResponse>(
-			`/api/admin/game-upload-sessions/${session.sessionId}/complete`,
-			{ method: 'POST', signal: abortController.signal },
-		);
-	}
-
 	async function start() {
 		const uploadTaskId = ensureTask();
 		try {
 			reportProgress();
 
-			const result = transport === DIRECT_TRANSPORT
-				? await startDirect()
-				: await startLegacy();
+			const result = await startDirect();
 
 			finishUpload(uploadTaskId);
 			return result;

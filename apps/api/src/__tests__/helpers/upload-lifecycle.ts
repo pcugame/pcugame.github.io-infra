@@ -62,6 +62,10 @@ export function createDurableGameUploadRepository(
 	const repository: DurableGameUploadRepository = {
 		findSessionById: vi.fn(async () => null),
 		isSessionActive: vi.fn(async () => true),
+		assertCanCreateSession: vi.fn(async () => undefined),
+		reservePartCapabilities: vi.fn(async () => {
+			throw new Error('No test upload session configured for capability reservation');
+		}),
 		createSessionReplacingActive: vi.fn(async (data) => ({
 			session: { id: data.id },
 			durableAborts: [],
@@ -69,25 +73,17 @@ export function createDurableGameUploadRepository(
 		cancelSessionAndClearActive: vi.fn(async () => ({ count: 1 as const, durableAbort: null })),
 		expireSessionAndClearActive: vi.fn(async () => ({ count: 1 as const, durableAbort: null })),
 		queueAbortTask: vi.fn(async () => undefined),
-		acquirePartClaim: vi.fn(async (input) => ({
-			kind: 'acquired' as const,
-			token: input.token,
-		})),
-		completePartClaim: vi.fn(async () => ({ accepted: true as const, parts: [] })),
-		renewPartClaim: vi.fn(async () => ({ count: 1 })),
 		claimCompletion: vi.fn(async () => ({ count: 1, reason: null })),
 		markVerifying: vi.fn(async () => ({ count: 1 })),
 		claimVerifyingSessions: vi.fn(async () => []),
 		renewCompletionClaim: vi.fn(async () => ({ count: 1 })),
 		releaseCompletionClaim: vi.fn(async () => ({ count: 1 })),
-		replaceMultipartGeneration: vi.fn(async () => ({ replaced: true, durableAbort: null })),
-		findPartsBySessionId: vi.fn(async () => []),
 		revertToPending: vi.fn(async () => ({ count: 1 })),
 		markFailed: vi.fn(async () => ({ count: 1 })),
 		markCompletedObjectFailed: vi.fn(async () => ({ count: 1 })),
+		reserveWebglDeployment: vi.fn(async ({ candidateDeploymentId }) => candidateDeploymentId),
 		claimStaleCompletingSessions: vi.fn(async () => []),
 		findExpiredPendingSessions: vi.fn(async () => []),
-		findSessionsWithExpiredPartClaims: vi.fn(async () => []),
 		findKnownMultipartUploads: vi.fn(async () => []),
 		findActiveSessionsForListing: vi.fn(async () => []),
 		findExhibitionById: vi.fn(async () => null),

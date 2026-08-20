@@ -3,7 +3,8 @@ import {
 	deriveImageRenditionStorageKey,
 	IMAGE_RENDITION_PROFILES,
 } from '../../shared/responsive-image.js';
-import { parseWebglEntryKey, parseWebglSourceKey } from '../webgl/paths.js';
+import { createWebglPublicDeploymentKeys, parseWebglEntryKey } from '../webgl/paths.js';
+import { safeOperationalLogContext } from '../../shared/safe-log-context.js';
 
 export type ObjectTargetKind = 'EXACT' | 'PREFIX';
 
@@ -27,6 +28,15 @@ export interface ObjectReferenceBuckets {
 
 export interface ObjectReferenceLogger {
 	error(context: Record<string, unknown>, message: string): void;
+}
+
+export class ObjectReferenceClaimConflictError extends Error {
+	readonly code = 'OBJECT_REFERENCE_CLAIM_CONFLICT';
+
+	constructor() {
+		super('Object deletion claim overlaps a new reference');
+		this.name = 'ObjectReferenceClaimConflictError';
+	}
 }
 
 interface ReferenceTrieNode {
@@ -208,6 +218,7 @@ export async function collectObjectReferences(
 				storageKey: true,
 				uploadKind: true,
 				projectId: true,
+				webglDeploymentId: true,
 			},
 		}),
 		client.uploadIntent.findMany({
@@ -245,12 +256,12 @@ export async function collectObjectReferences(
 			} catch (error) {
 				unsafeBuckets.add(buckets.publicBucket);
 				logger.error(
-					{
+					safeOperationalLogContext({
 						error,
 						assetId: asset.id,
-						storageKey: asset.storageKey,
-						profile: definition.profile,
-					},
+						action: 'resolve_asset_rendition',
+						result: 'malformed_pointer',
+					}),
 					'Malformed asset rendition readiness encountered; public bucket deletion is disabled',
 				);
 				continue;
@@ -282,12 +293,12 @@ export async function collectObjectReferences(
 			} catch (error) {
 				unsafeBuckets.add(buckets.publicBucket);
 				logger.error(
-					{
+					safeOperationalLogContext({
 						error,
-						exhibitionId: exhibition.id,
-						storageKey: exhibition.posterStorageKey,
-						profile: definition.profile,
-					},
+						taskId: exhibition.id,
+						action: 'resolve_exhibition_rendition',
+						result: 'malformed_pointer',
+					}),
 					'Malformed exhibition rendition readiness encountered; public bucket deletion is disabled',
 				);
 				continue;
@@ -307,17 +318,15 @@ export async function collectObjectReferences(
 			unsafeBuckets.add(buckets.publicBucket);
 			unsafeBuckets.add(buckets.protectedBucket);
 			logger.error(
-				{ projectId: project.id, webglEntryKey: project.webglEntryKey },
+				safeOperationalLogContext({
+					projectId: project.id,
+					action: 'resolve_webgl_pointer',
+					result: 'malformed_pointer',
+				}),
 				'Malformed WebGL pointer encountered; WebGL bucket deletion is disabled',
 			);
 			continue;
 		}
-		references.push({
-			bucket: buckets.protectedBucket,
-			targetKind: 'EXACT',
-			key: parsed.sourceKey,
-			source: `project:${project.id}:webgl-source`,
-		});
 		references.push({
 			bucket: buckets.publicBucket,
 			targetKind: 'PREFIX',
@@ -351,27 +360,39 @@ export async function collectObjectReferences(
 			});
 		}
 		if (session.uploadKind !== 'WEBGL') continue;
-		for (const sourceKey of sourceKeys) {
-			const parsed = parseWebglSourceKey(session.projectId, sourceKey);
-			if (!parsed) {
-				unsafeBuckets.add(buckets.protectedBucket);
-				unsafeBuckets.add(buckets.publicBucket);
-				logger.error(
-					{ sessionId: session.id, projectId: session.projectId, storageKey: sourceKey },
-					'Malformed active WebGL upload encountered; WebGL bucket deletion is disabled',
-				);
-				continue;
+		if (!session.webglDeploymentId) continue;
+		// A processing claim persists this opaque generation before the first
+		// public PUT. It is the only safe restart/reference fence; source UUIDs
+		// must never be treated as public deployment identities.
+		let deployment;
+		try {
+			deployment = createWebglPublicDeploymentKeys(
+				session.projectId,
+				session.webglDeploymentId,
+			);
+			if (!parseWebglEntryKey(session.projectId, deployment.entryKey)) {
+				throw new Error('Invalid WebGL deployment UUID');
 			}
-			// This is a deletion fence for a possible already-written generation,
-			// not a public READY pointer. Project.webglEntryKey remains the only
-			// public deployment authority.
-			references.push({
-				bucket: buckets.publicBucket,
-				targetKind: 'PREFIX',
-				key: parsed.sitePrefix,
-				source: `upload-session:${session.id}:webgl-site`,
-			});
+		} catch (error) {
+			unsafeBuckets.add(buckets.publicBucket);
+			logger.error(
+				safeOperationalLogContext({
+					error,
+					sessionId: session.id,
+					projectId: session.projectId,
+					action: 'resolve_webgl_deployment',
+					result: 'malformed_pointer',
+				}),
+				'Malformed durable WebGL deployment identity; public deletion is disabled',
+			);
+			continue;
 		}
+		references.push({
+			bucket: buckets.publicBucket,
+			targetKind: 'PREFIX',
+			key: deployment.sitePrefix,
+			source: `upload-session:${session.id}:webgl-site`,
+		});
 	}
 	for (const intent of intents) {
 		references.push({
@@ -462,6 +483,6 @@ export async function assertNoDeletionClaim(
 			FOR UPDATE OF orphan
 		`;
 	if (overlapping.some((row) => row.activelyClaimed)) {
-		throw new Error(`Object deletion claim overlaps new reference: ${target.bucket}/${target.key}`);
+		throw new ObjectReferenceClaimConflictError();
 	}
 }

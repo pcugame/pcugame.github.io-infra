@@ -6,33 +6,68 @@ interface WebglDeploymentIdentity {
 }
 
 /** The protected recovery input. Deleting it makes restart recovery impossible. */
-export interface WebglProtectedSourceKeys extends WebglDeploymentIdentity {
+export interface WebglProtectedSourceKeys {
+	projectId: number;
+	sourceDeploymentId?: string;
 	sourceKey: string;
 }
 
 /** The replaceable public output. It is safe to roll this back before pointer commit. */
 export interface WebglPublicDeploymentKeys extends WebglDeploymentIdentity {
-	sitePrefix: string;
-}
-
-export interface WebglDeploymentKeys extends WebglProtectedSourceKeys, WebglPublicDeploymentKeys {
 	deploymentPrefix: string;
+	sitePrefix: string;
 	entryKey: string;
 }
 
-export function createWebglDeploymentKeys(
+export interface WebglDeploymentKeys extends WebglPublicDeploymentKeys {
+	sourceDeploymentId?: string;
+	sourceKey: string;
+}
+
+export function createWebglProtectedSourceKeys(
+	projectId: number,
+	sourceDeploymentId: string,
+): WebglProtectedSourceKeys {
+	return {
+		projectId,
+		sourceDeploymentId,
+		sourceKey: `webgl/${projectId}/${sourceDeploymentId}/source.zip`,
+	};
+}
+
+export function createWebglPublicDeploymentKeys(
 	projectId: number,
 	deploymentId: string,
-): WebglDeploymentKeys {
+): WebglPublicDeploymentKeys {
 	const deploymentPrefix = `webgl/${projectId}/${deploymentId}/`;
 	const sitePrefix = `${deploymentPrefix}site/`;
 	return {
 		projectId,
 		deploymentId,
 		deploymentPrefix,
-		sourceKey: `${deploymentPrefix}source.zip`,
 		sitePrefix,
 		entryKey: `${sitePrefix}index.html`,
+	};
+}
+
+export function createWebglDeploymentKeys(
+	projectId: number,
+	deploymentId: string,
+): WebglDeploymentKeys {
+	return {
+		...createWebglProtectedSourceKeys(projectId, deploymentId),
+		...createWebglPublicDeploymentKeys(projectId, deploymentId),
+	};
+}
+
+/** Bind a protected source generation to an independently opaque public generation. */
+export function bindWebglDeploymentKeys(
+	source: WebglProtectedSourceKeys,
+	deploymentId: string,
+): WebglDeploymentKeys {
+	return {
+		...source,
+		...createWebglPublicDeploymentKeys(source.projectId, deploymentId),
 	};
 }
 
@@ -46,6 +81,13 @@ export function parseWebglSourceKey(projectId: number, sourceKey: string): Webgl
 	return match?.[1] ? createWebglDeploymentKeys(projectId, match[1]) : null;
 }
 
-export function webglUrl(apiPublicUrl: string, projectId: number): string {
-	return `${apiPublicUrl.replace(/\/$/, '')}/api/public/webgl/${projectId}/`;
+/** Return the immutable deployment entry URL owned by the public object origin. */
+export function webglUrl(publicAssetBaseUrl: string, entryKey: string): string {
+	if (!new RegExp(`^webgl/[1-9]\\d*/${UUID_RE}/site/index\\.html$`, 'i').test(entryKey)) {
+		throw new Error('Cannot serialize malformed WebGL entry key');
+	}
+	return `${publicAssetBaseUrl.replace(/\/$/, '')}/${entryKey
+		.split('/')
+		.map((segment) => encodeURIComponent(segment))
+		.join('/')}`;
 }

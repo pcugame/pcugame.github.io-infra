@@ -48,31 +48,28 @@ export function webglContentMetadata(pathname: string): WebglContentMetadata {
 	}
 
 	const contentType = MIME_TYPES[extname(decodedName)] ?? 'application/octet-stream';
-	const isHtml = contentType.startsWith('text/html');
 	return {
 		contentType,
 		contentEncoding,
-		// The public URL is stable across deployments, so resources must revalidate.
-		cacheControl: isHtml
-			? 'no-cache, no-store, must-revalidate'
-			: 'public, max-age=300, must-revalidate',
+		// The deployment UUID is part of every URL, including index.html. A new
+		// deployment creates a new prefix, so all published objects are immutable.
+		cacheControl: 'public, max-age=31536000, immutable',
 	};
 }
 
-export function webglContentSecurityPolicy(frontendUrl: string, apiUrl: string): string {
+export function webglContentSecurityPolicy(frontendUrl: string, publicAssetBaseUrl: string): string {
 	const frontendOrigin = new URL(frontendUrl).origin;
-	const apiOrigin = new URL(apiUrl).origin;
-	const webglAssetSource = `${apiOrigin}/api/public/webgl/`;
+	const publicAssetOrigin = new URL(publicAssetBaseUrl).origin;
 	return [
 		"default-src 'none'",
-		`script-src ${webglAssetSource} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,
-		`style-src ${webglAssetSource} 'unsafe-inline'`,
-		`img-src ${webglAssetSource} data: blob:`,
-		`media-src ${webglAssetSource} data: blob:`,
-		`font-src ${webglAssetSource} data:`,
-		`connect-src ${webglAssetSource} data: blob:`,
-		`worker-src ${webglAssetSource} blob:`,
-		`child-src ${webglAssetSource} blob:`,
+		`script-src ${publicAssetOrigin} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,
+		`style-src ${publicAssetOrigin} 'unsafe-inline'`,
+		`img-src ${publicAssetOrigin} data: blob:`,
+		`media-src ${publicAssetOrigin} data: blob:`,
+		`font-src ${publicAssetOrigin} data:`,
+		`connect-src ${publicAssetOrigin} data: blob:`,
+		`worker-src ${publicAssetOrigin} blob:`,
+		`child-src ${publicAssetOrigin} blob:`,
 		"frame-src 'none'",
 		"object-src 'none'",
 		"base-uri 'none'",

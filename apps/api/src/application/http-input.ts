@@ -28,3 +28,9 @@ export interface MultipartCommandInput {
 	parts: AsyncIterable<MultipartPart>;
 	idempotencyKey?: string;
 }
+
+export interface JsonCommandInput {
+	actor: Actor;
+	body: unknown;
+	idempotencyKey?: string;
+}

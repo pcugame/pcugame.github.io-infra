@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createProjectSerializer } from '../modules/admin/project/serializer.js';
-import { isReplaceableAssetKind } from '../modules/admin/project/project-asset.service.js';
 
-const { protectedAssetUrl, serializeProjectDetail } = createProjectSerializer('https://api.example.com');
+const { protectedAssetUrl, serializeProjectDetail } = createProjectSerializer(
+	'https://api.example.com',
+	'https://assets.example.com',
+);
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -73,13 +75,6 @@ describe('protectedAssetUrl', () => {
 	});
 });
 
-describe('asset replacement policy', () => {
-	it('keeps GAME replaceable and lets VIDEO create additional assets', () => {
-		expect(isReplaceableAssetKind('GAME')).toBe(true);
-		expect(isReplaceableAssetKind('VIDEO')).toBe(false);
-	});
-});
-
 // ── serializeProjectDetail ──────────────────────────────────
 
 describe('serializeProjectDetail', () => {
@@ -111,7 +106,7 @@ describe('serializeProjectDetail', () => {
 			poster: { storageKey: 'img.png', kind: 'IMAGE', status: 'READY' },
 		}));
 		expect(result.poster).toEqual({
-			original: { url: 'https://api.example.com/api/public/images/img.png' },
+			original: { url: 'https://assets.example.com/img.png' },
 			renditions: [],
 		});
 	});
@@ -134,7 +129,9 @@ describe('serializeProjectDetail', () => {
 		const result = serializeProjectDetail(fakeProject({
 			webglEntryKey: 'webgl/1/123e4567-e89b-42d3-a456-426614174000/site/index.html',
 		}));
-		expect(result.webglUrl).toBe('https://api.example.com/api/public/webgl/1/');
+		expect(result.webglUrl).toBe(
+			'https://assets.example.com/webgl/1/123e4567-e89b-42d3-a456-426614174000/site/index.html',
+		);
 	});
 
 	it('preserves posterAssetId when set', () => {
@@ -164,13 +161,13 @@ describe('serializeProjectDetail', () => {
 			kind: 'IMAGE',
 			image: {
 				original: {
-					url: 'https://api.example.com/api/public/images/img.png',
+					url: 'https://assets.example.com/img.png',
 					width: 1200,
 					height: 800,
 				},
 				renditions: [{
 					profile: 'DISPLAY_960',
-					url: 'https://api.example.com/api/public/images/img.png%2F__pcu_image_rendition__%2Fv1%2Fdisplay-960.webp',
+					url: 'https://assets.example.com/img.png/__pcu_image_rendition__/v1/display-960.webp',
 					width: 960,
 					height: 640,
 				}],

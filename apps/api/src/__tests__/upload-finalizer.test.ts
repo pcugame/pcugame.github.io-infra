@@ -19,18 +19,20 @@ const webglSession = {
 	totalBytes: 8n,
 	s3Key: deployment.sourceKey,
 	completionClaimToken: 'completion-claim',
+	generation: 3,
 };
 
 function createDependencies() {
 	return {
 		readHeader: vi.fn().mockResolvedValue(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0])),
 		validateGameArchive: vi.fn().mockResolvedValue(undefined),
+		reserveWebglDeployment: vi.fn().mockResolvedValue(deployment.deploymentId),
 		deployWebgl: vi.fn().mockResolvedValue(deployment),
 		rollbackWebglPublicDeployment: vi.fn().mockResolvedValue(undefined),
-		finalizeGame: vi.fn().mockResolvedValue({ oldStorageKey: null, oldPlaybackStorageKey: null }),
+		finalizeGame: vi.fn().mockResolvedValue({ assetId: 17, oldStorageKey: null, oldPlaybackStorageKey: null }),
 		finalizeWebgl: vi.fn().mockResolvedValue({ oldEntryKey: '' }),
 		wakeDeletionWorker: vi.fn(),
-		webglUrl: vi.fn().mockReturnValue('https://api.example.com/api/public/webgl/7/'),
+		webglUrl: vi.fn().mockReturnValue('https://assets.example.com/webgl/7/deployment/site/index.html'),
 		logError: vi.fn(),
 	};
 }
@@ -50,16 +52,17 @@ describe('completed upload finalizer', () => {
 		expect(deps.deployWebgl).not.toHaveBeenCalled();
 	});
 
-	it('rolls back only the new public tree when the DB pointer swap fails', async () => {
+	it('retains the durable opaque public tree for same-prefix retry when DB pointer swap fails', async () => {
 		const deps = createDependencies();
 		deps.finalizeWebgl.mockRejectedValueOnce(new Error('database unavailable'));
 		const finalizer = createCompletedUploadFinalizer(deps);
 
 		await expect(finalizer.finalize(webglSession, { size: 8 }))
 			.rejects.toThrow('database unavailable');
-		expect(deps.rollbackWebglPublicDeployment).toHaveBeenCalledWith(
-			deployment,
-			'webgl-upload-finalization-failed-site',
+		expect(deps.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
+		expect(deps.logError).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: 'upload-1', projectId: 7 }),
+			'WebGL pointer commit did not complete; retaining durable deployment for retry',
 		);
 		expect(deps.wakeDeletionWorker).not.toHaveBeenCalled();
 	});
@@ -71,7 +74,7 @@ describe('completed upload finalizer', () => {
 		let assertions = 0;
 		const assertClaimOwned = vi.fn(async () => {
 			assertions++;
-			if (assertions === 4) {
+			if (assertions === 5) {
 				controller.abort(claimLost);
 				throw claimLost;
 			}
@@ -88,7 +91,7 @@ describe('completed upload finalizer', () => {
 		expect(deps.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
 		expect(deps.logError).toHaveBeenCalledWith(
 			expect.objectContaining({ sessionId: 'upload-1', projectId: 7 }),
-			'WebGL completion claim was lost; retaining deployment for reference-aware reconciliation',
+			'WebGL pointer commit did not complete; retaining durable deployment for retry',
 		);
 	});
 
@@ -100,9 +103,11 @@ describe('completed upload finalizer', () => {
 
 		await expect(finalizer.finalize(webglSession, { size: 8 })).resolves.toEqual({
 			status: 'COMPLETED',
-			storageKey: deployment.sourceKey,
+			sessionId: 'upload-1',
+			generation: 3,
 			sizeBytes: 8,
-			webglUrl: 'https://api.example.com/api/public/webgl/7/',
+			uploadKind: 'WEBGL',
+			webglUrl: 'https://assets.example.com/webgl/7/deployment/site/index.html',
 		});
 		expect(deps.wakeDeletionWorker).toHaveBeenCalledOnce();
 		expect(deps.logError).not.toHaveBeenCalled();

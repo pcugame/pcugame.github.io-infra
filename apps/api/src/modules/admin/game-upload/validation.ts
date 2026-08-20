@@ -4,7 +4,10 @@ const PositiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTE
 
 export const GameUploadPartUrlsBody = z.object({
 	generation: PositiveSafeInteger,
-	partNumbers: z.array(PositiveSafeInteger),
+	parts: z.array(z.object({
+		partNumber: PositiveSafeInteger,
+		checksumSha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
+	}).strict()),
 }).strict();
 
 export const GameUploadCompleteBody = z.object({

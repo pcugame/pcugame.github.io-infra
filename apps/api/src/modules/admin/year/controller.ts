@@ -2,6 +2,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import { sendOk, sendCreated } from '../../../shared/http.js';
 import { parseBody, parseIntParam, CreateExhibitionBody, UpdateExhibitionBody } from '../../../shared/validation.js';
 import { requireLogin, requireRole } from '../../../plugins/auth.js';
+import {
+	limitEncodedMultipartBody,
+	rethrowEncodedMultipartError,
+} from '../../../shared/encoded-multipart-limit.js';
 import type { createExhibitionService } from './service.js';
 
 export interface YearControllerDependencies {
@@ -57,15 +61,23 @@ export function createYearController(deps: YearControllerDependencies): FastifyP
 			'/exhibitions/:id/poster',
 			{
 				preHandler: requireRole('ADMIN', 'OPERATOR'),
+				preParsing: async (_request, _reply, payload) => (
+					limitEncodedMultipartBody(payload, deps.uploadBodyLimit)
+				),
 				bodyLimit: deps.uploadBodyLimit,
 				handlerTimeout: 45 * 60 * 1000,
 			},
 			async (request, reply) => {
 				const id = parseIntParam(request.params.id);
-				const updated = await deps.service.replacePoster(id, {
-					actor: request.currentUser!,
-					parts: request.parts(),
-				});
+				let updated;
+				try {
+					updated = await deps.service.replacePoster(id, {
+						actor: request.currentUser!,
+						parts: request.parts(),
+					});
+				} catch (error) {
+					rethrowEncodedMultipartError(request.raw, deps.uploadBodyLimit, error);
+				}
 				sendOk(reply, updated);
 			},
 		);

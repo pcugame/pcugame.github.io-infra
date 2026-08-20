@@ -110,6 +110,11 @@ const forbiddenCases = [
 		guardRule: 'no-client-delivery-object-read',
 	},
 	{
+		name: 'API completion operation object body read',
+		target: 'architecture-fixtures/forbidden/api-completion-object-read',
+		guardRule: 'no-api-object-body-read',
+	},
+	{
 		name: 'feature-local S3 SDK',
 		target: 'architecture-fixtures/forbidden/feature-s3',
 		guardRule: 'no-feature-local-s3-data-plane',
@@ -168,6 +173,11 @@ const forbiddenCases = [
 		name: 'public metadata presign authority',
 		target: 'architecture-fixtures/forbidden/public-presign',
 		guardRule: 'no-public-metadata-presign-authority',
+	},
+	{
+		name: 'API graph importing export processing',
+		target: 'architecture-fixtures/forbidden/api-export-processing',
+		guardRule: 'no-api-export-processing-import',
 	},
 ];
 

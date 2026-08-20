@@ -3,15 +3,17 @@ import fastifyMultipart from '@fastify/multipart';
 import type { Env } from '../config/env.js';
 
 export async function registerMultipart(app: FastifyInstance, cfg: Env): Promise<void> {
-  // Global ceiling = privileged game max (the absolute largest single file
-  // any user can upload).  Per-file and per-request role-based limits are
-  // enforced in the route handlers via streaming byte limiters.
-  const globalMaxBytes = cfg.UPLOAD_PRIVILEGED_GAME_MAX_MB * 1024 * 1024;
+  // Multipart is an inline-only ingress boundary. Large assets use direct
+  // browser-to-storage capabilities and never enter Fastify.
+  const globalMaxBytes = cfg.INLINE_UPLOAD_MAX_BYTES ?? 16 * 1024 * 1024;
 
   await app.register(fastifyMultipart, {
     limits: {
       fileSize: globalMaxBytes,
       files: cfg.UPLOAD_PRIVILEGED_MAX_FILES,
+      fields: 32,
+      parts: cfg.UPLOAD_PRIVILEGED_MAX_FILES + 32,
+      headerPairs: 32,
     },
     attachFieldsToBody: false,
   });

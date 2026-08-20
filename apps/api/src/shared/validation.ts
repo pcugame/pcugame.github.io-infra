@@ -10,6 +10,7 @@ import {
 	DevAuthLoginRequestSchema,
 	GameUploadCreateSessionSchema,
 	GoogleAuthRequestSchema,
+	InlineAssetKindSchema,
 	ProjectStatusSchema,
 	SetProjectPosterSchema,
 	SubmitProjectPayloadBaseSchema,
@@ -23,6 +24,7 @@ import {
 
 export const ProjectStatusEnum = ProjectStatusSchema;
 export const AssetKindEnum = AssetKindSchema;
+export const InlineAssetKindEnum = InlineAssetKindSchema;
 
 // ── Exhibition ──────────────────────────────────────────────
 
@@ -74,7 +76,7 @@ export const SubmitProjectPayload = SubmitProjectPayloadBaseSchema.extend({
 	exhibitionId: CanonicalPositiveIntegerInput,
 	summary: SubmitProjectPayloadBaseSchema.shape.summary.default(''),
 	description: SubmitProjectPayloadBaseSchema.shape.description.default(''),
-});
+}).strict();
 
 export type SubmitProjectPayloadT = z.infer<typeof SubmitProjectPayload>;
 
@@ -124,11 +126,6 @@ export const DevAuthLoginErrorBody = DevAuthLoginErrorRequestSchema;
 export const GameUploadCreateSessionBody = GameUploadCreateSessionSchema.extend({
 	totalBytes: CanonicalPositiveIntegerInput,
 });
-
-export const GameUploadChunkIdentityQuery = z.object({
-	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'),
-	sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
-}).strict();
 
 export const AssetDownloadQuery = z.object({
 	variant: z.enum(['original', 'playback']).optional(),

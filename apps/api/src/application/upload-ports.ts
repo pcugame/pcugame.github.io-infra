@@ -1,6 +1,7 @@
 import type {
 	AssetKind,
 	AssetPlaybackStatus,
+	InlineAssetKind,
 } from '@pcu/contracts';
 import type { MultipartPart } from './http-input.js';
 import type { UploadLimits } from '../shared/upload-policy.js';
@@ -53,7 +54,7 @@ export interface MultipartRequestHasher {
 export interface UploadPipelinePort {
 	setOwner?(owner: UploadIntentOwner): void;
 	trackTempFile(path: string): void;
-	processFile(path: string, kind: AssetKind, originalName: string): Promise<SavedUpload>;
+	processFile(path: string, kind: InlineAssetKind, originalName: string): Promise<SavedUpload>;
 	rollbackCommitted(): Promise<void>;
 	cleanupTemp(): Promise<void>;
 }

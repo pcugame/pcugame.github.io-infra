@@ -9,15 +9,11 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'server/deploy.sh'
+      - 'apps/db/upload-part.nginx.conf.template'
+      - 'apps/db/public-origin.nginx.conf.template'
       - '.github/workflows/deploy-api.yml'
-      - '.github/release-gates/web-before-api/**'
+      - '.github/release-gates/cutover-maintenance/**'
   workflow_dispatch:
-    inputs:
-      require_web_first:
-        description: 'Wait for a successful Web deployment of this exact ref before deploying the API'
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   actions: read
@@ -78,115 +74,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine release ordering
-        id: release-order
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          MANUAL_REQUIRE_WEB_FIRST: ${{ inputs.require_web_first }}
-        run: |
-          set -euo pipefail
-
-          require_web_first=false
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            require_web_first="${MANUAL_REQUIRE_WEB_FIRST:-false}"
-          else
-            if git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-              changed_paths="$(git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}")"
-            else
-              changed_paths="$(git show --pretty='' --name-only "${GITHUB_SHA}")"
-            fi
-            if grep -q '^\.github/release-gates/web-before-api/' <<< "${changed_paths}"; then
-              require_web_first=true
-            fi
-          fi
-
-          echo "require_web_first=${require_web_first}" >> "${GITHUB_OUTPUT}"
-
-      - name: Wait for matching Web deployment
-        if: steps.release-order.outputs.require_web_first == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          web_run_id=""
-          web_workflow_succeeded=false
-          for attempt in $(seq 1 240); do
-            if [ -z "${web_run_id}" ]; then
-              web_run_id="$(
-                gh api --method GET \
-                  "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-web-pages.yml/runs" \
-                  -f head_sha="${GITHUB_SHA}" \
-                  -f per_page=10 \
-                  --jq '.workflow_runs[0].id // empty'
-              )"
-            fi
-
-            if [ -z "${web_run_id}" ]; then
-              if (( attempt % 6 == 1 )); then
-                echo "Waiting for the matching Web workflow run to appear..."
-              fi
-              sleep 10
-              continue
-            fi
-
-            web_state="$(
-              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${web_run_id}" \
-                --jq '[.status, (.conclusion // ""), .html_url] | @tsv'
-            )"
-            IFS=$'\t' read -r status conclusion run_url <<< "${web_state}"
-
-            if [ "${status}" = "completed" ]; then
-              if [ "${conclusion}" = "success" ]; then
-                echo "Web deployment succeeded: ${run_url}"
-                web_workflow_succeeded=true
-                break
-              fi
-
-              echo "Web deployment ended with ${conclusion}: ${run_url}"
-              exit 1
-            fi
-
-            if (( attempt % 6 == 1 )); then
-              echo "Web deployment is ${status}: ${run_url}"
-            fi
-            sleep 10
-          done
-
-          if [ "${web_workflow_succeeded}" != "true" ]; then
-            echo "Timed out waiting for Web deployment run ${web_run_id:-unknown}."
-            exit 1
-          fi
-
-          for attempt in $(seq 1 120); do
-            deployed_sha="$(
-              curl --fail --silent --show-error --location --max-time 10 \
-                "https://pcugame.github.io/release-sha.txt?expected=${GITHUB_SHA}" \
-                2>/dev/null || true
-            )"
-            if [ "${deployed_sha}" = "${GITHUB_SHA}" ]; then
-              echo "Production Web serves the compatible release ${GITHUB_SHA}."
-              exit 0
-            fi
-            if (( attempt % 6 == 1 )); then
-              echo "Waiting for GitHub Pages to serve Web release ${GITHUB_SHA}..."
-            fi
-            sleep 10
-          done
-
-          echo "GitHub Pages did not serve Web release ${GITHUB_SHA} before timeout."
-          exit 1
-
-      - name: Copy deploy script to server
+      - name: Copy deploy scripts to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh
+          source: server/deploy.sh,server/garage-incomplete-upload-cleanup.sh
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
+          overwrite: true
+
+      - name: Copy transport proxy templates to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: apps/db/upload-part.nginx.conf.template,apps/db/public-origin.nginx.conf.template
+          target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          strip_components: 2
           overwrite: true
 
       - name: SSH deploy to server
@@ -203,42 +112,12 @@ jobs:
             printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
             export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
             chmod +x "${DEPLOY_DIR}/deploy.sh"
-
-            if podman container exists gp-postgres; then
-              umask 077
-              backup_dir="${DEPLOY_DIR}/backups"
-              backup_file="${backup_dir}/pre-webgl-${{ github.sha }}-$(date -u +%Y%m%dT%H%M%SZ).dump"
-              mkdir -p "${backup_dir}"
-              echo "Creating pre-deploy PostgreSQL backup at ${backup_file}"
-              if ! podman exec gp-postgres sh -c 'exec pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > "${backup_file}"; then
-                rm -f "${backup_file}"
-                echo "Database backup failed; refusing to deploy."
-                exit 1
-              fi
-              if [ ! -s "${backup_file}" ]; then
-                rm -f "${backup_file}"
-                echo "Database backup was empty; refusing to deploy."
-                exit 1
-              fi
-            fi
-
-            rollback_tag="localhost/pcu-graduationproject-v2-api:rollback"
-            previous_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null || true)"
-            if [ -n "${previous_image_id}" ]; then
-              podman untag "${rollback_tag}" 2>/dev/null || true
-              podman tag "${previous_image_id}" "${rollback_tag}"
-            fi
-
-            if ! API_IMAGE="${API_IMAGE}" PULL_API_IMAGE=true "${DEPLOY_DIR}/deploy.sh" up; then
-              echo "Candidate deployment failed. Restoring the previous API image."
-              if [ -z "${previous_image_id}" ]; then
-                echo "No previous API image was available for rollback."
-                exit 1
-              fi
-              API_IMAGE="${rollback_tag}" PULL_API_IMAGE=false "${DEPLOY_DIR}/deploy.sh" up
-              echo "Rollback completed; failing the workflow to surface the rejected deployment."
-              exit 1
-            fi
+            chmod +x "${DEPLOY_DIR}/garage-incomplete-upload-cleanup.sh"
+            # Breaking schema/contract cutover: the candidate image owns the
+            # read-only audit and migration. Old writers are drained first and
+            # are never automatically restarted after the DDL boundary.
+            API_IMAGE="${API_IMAGE}" PULL_API_IMAGE=true "${DEPLOY_DIR}/deploy.sh" cutover
+            API_IMAGE="${API_IMAGE}" PULL_API_IMAGE=false "${DEPLOY_DIR}/deploy.sh" up
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}

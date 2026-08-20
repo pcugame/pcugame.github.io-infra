@@ -1,0 +1,18 @@
+release: control-plane-object-transfer
+policy: api-workers-before-web-maintenance
+immutable: true
+reason: >-
+  The direct-only upload and delivery contract removes legacy schema and routes.
+  Old writers must be drained before the audit/backup/migration boundary, and
+  the candidate API plus processing workers must be healthy before Web changes.
+rollout:
+  - Drain old Web/API/worker writers and reject new mutations.
+  - Run the read-only legacy audit and stop on any blocker.
+  - Create and validate the preserved PostgreSQL backup.
+  - Apply forward-only migrations with the candidate image.
+  - Start and verify the candidate API, validation worker, and export worker.
+  - Deploy the matching Web build only after those health gates pass.
+notes: >-
+  Failure after migration drains the candidate and requires a forward fix or an
+  explicitly approved pre-migration backup restore. An old API image must never
+  be automatically restarted against the breaking schema.

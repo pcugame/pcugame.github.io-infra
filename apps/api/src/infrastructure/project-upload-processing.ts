@@ -6,8 +6,6 @@ import type { ProjectUploadProcessing } from '../modules/admin/project/project-u
 import { validateProjectUploadFile } from '../modules/admin/project/project-file-validation.js';
 import { processImage } from '../modules/assets/upload/image-processing.js';
 import { processPdf } from '../modules/assets/upload/pdf-processing.js';
-import { processVideo } from '../modules/assets/upload/video-processing.js';
-import { createNodeVideoProcessingOperations } from '../modules/assets/upload/video-processing.adapter.js';
 
 /**
  * Node/sharp/ffmpeg adapter. The project application graph sees only
@@ -18,7 +16,6 @@ export function createNodeProjectUploadProcessing(
 	fileSystem: FileSystem,
 	logger: AppLogger,
 ): ProjectUploadProcessing {
-	const videoOperations = createNodeVideoProcessingOperations(fileSystem);
 	return {
 		validate: (filePath, kind) => validateProjectUploadFile(
 			fileSystem,
@@ -27,6 +24,5 @@ export function createNodeProjectUploadProcessing(
 		),
 		processImage: (input) => processImage(input, fileSystem),
 		processPdf: (input) => processPdf(input, logger, fileSystem),
-		processVideo: (input) => processVideo(input, logger, videoOperations),
 	};
 }

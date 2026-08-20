@@ -9,9 +9,11 @@ import type {
 } from '../../application/ports.js';
 import type { ObjectDeletionCoordinator } from '../../application/object-deletion.js';
 import { badRequest } from '../../shared/errors.js';
+import { safeOperationalLogContext } from '../../shared/safe-log-context.js';
 import { validateWebglZipArchiveObject } from '../assets/upload/zip-validation.js';
 import { analyzeWebglArchive, uploadWebglArchive } from './archive.js';
 import {
+	bindWebglDeploymentKeys,
 	parseWebglEntryKey,
 	parseWebglSourceKey,
 	type WebglDeploymentKeys,
@@ -24,10 +26,10 @@ export interface WebglDeploymentDependencies {
 		publicBucket: string;
 		protectedBucket: string;
 	};
-	storage: Pick<ObjectStorage, 'readRange' | 'stream' | 'upload'>;
+	storage: Pick<ObjectStorage, 'stream' | 'upload'>;
 	fileSystem: Pick<
 		FileSystem,
-		'temporaryDirectory' | 'createWriteStream' | 'remove'
+		'temporaryDirectory' | 'createWriteStream' | 'readRange' | 'remove'
 	>;
 	ids: IdGenerator;
 	deletion: Pick<
@@ -101,52 +103,32 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 		);
 	}
 
-	async function deploySource(
+	async function deployArchive(
 		projectId: number,
 		sourceKey: string,
+		deploymentId: string,
+		archivePath: string,
 		sizeBytes: number,
 		request?: StorageRequestOptions,
 		assertClaimOwned?: () => Promise<void>,
 	): Promise<WebglDeploymentKeys> {
-		const keys = parseWebglSourceKey(projectId, sourceKey);
-		if (!keys) throw badRequest('WebGL upload has an invalid deployment key');
+		const sourceKeys = parseWebglSourceKey(projectId, sourceKey);
+		if (!sourceKeys) throw badRequest('WebGL upload has an invalid protected source key');
+		const keys = bindWebglDeploymentKeys(sourceKeys, deploymentId);
 		const storageRequest = combineStorageRequests(deps.storageRequest, request);
 		assertRequestActive(storageRequest);
 		await assertClaimOwned?.();
 
 		const summary = await validateWebglZipArchiveObject(
 			sizeBytes,
-			(start, end) => deps.storage.readRange(
-				deps.config.protectedBucket,
-				sourceKey,
-				start,
-				end,
-				storageRequest,
-			),
+			(start, end) => deps.fileSystem.readRange(archivePath, start, end),
 		);
 		assertRequestActive(storageRequest);
 		await assertClaimOwned?.();
 		const layout = analyzeWebglArchive(summary);
-		const tempId = deps.ids.next().replace(/[^a-zA-Z0-9-]/g, '');
-		if (!tempId) throw new Error('WebGL deployment ID generator returned an unsafe value');
-		const archivePath = join(
-			deps.fileSystem.temporaryDirectory(),
-			`pcu-webgl-${tempId}.zip`,
-		);
 		const uploadedKeys: string[] = [];
 
 		try {
-			assertRequestActive(storageRequest);
-			const source = await deps.storage.stream(
-				deps.config.protectedBucket,
-				sourceKey,
-				undefined,
-				storageRequest,
-			);
-			if (!source || 'kind' in source) throw badRequest('WebGL source object was not found');
-			await pipeline(source.body, deps.fileSystem.createWriteStream(archivePath));
-			assertRequestActive(storageRequest);
-			await assertClaimOwned?.();
 			await uploadWebglArchive(
 				archivePath,
 				deps.config.publicBucket,
@@ -173,32 +155,78 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 			}
 			return keys;
 		} catch (error) {
-			// Enumerate the whole prefix so an upload that reached object storage
-			// but whose response was interrupted cannot escape compensation.
-			let stillOwnsClaim = !storageRequest?.signal?.aborted;
-			if (stillOwnsClaim && assertClaimOwned) {
-				try {
-					await assertClaimOwned();
-				} catch {
-					stillOwnsClaim = false;
-				}
-			}
-			if (stillOwnsClaim) {
-				await rollbackPublicDeployment(keys, 'webgl-deploy-rollback', {
-					storageRequest,
-					assertClaimOwned,
-				});
-			} else {
-				deps.logger.warn(
-					{ err: error, projectId, sourceKey, sitePrefix: keys.sitePrefix },
-					'WebGL deployment was interrupted without its completion claim; retaining partial output for reconciliation',
-				);
-			}
+			// The public generation was persisted by the processing repository
+			// before this method was called. Retaining partial immutable output lets
+			// restart retry the same exact prefix; terminal failure owns durable
+			// exact-prefix cleanup in the same transaction as its state change.
+			deps.logger.warn(
+				safeOperationalLogContext({
+					err: error,
+					projectId,
+					generation: deploymentId,
+					action: 'deploy_webgl',
+					result: 'interrupted',
+				}),
+				'WebGL deployment was interrupted; retaining its durable prefix for retry',
+			);
 			throw error;
+		}
+	}
+
+	/**
+	 * Compatibility adapter for internal callers that do not already own a
+	 * worker-local archive. It performs one sequential protected-object GET and
+	 * all ZIP metadata/decode work against that immutable local copy.
+	 */
+	async function deploySource(
+		projectId: number,
+		sourceKey: string,
+		deploymentId: string,
+		sizeBytes: number,
+		request?: StorageRequestOptions,
+		assertClaimOwned?: () => Promise<void>,
+	): Promise<WebglDeploymentKeys> {
+		const storageRequest = combineStorageRequests(deps.storageRequest, request);
+		const tempId = deps.ids.next().replace(/[^a-zA-Z0-9-]/g, '');
+		if (!tempId) throw new Error('WebGL deployment ID generator returned an unsafe value');
+		const archivePath = join(
+			deps.fileSystem.temporaryDirectory(),
+			`pcu-webgl-${tempId}.zip`,
+		);
+		try {
+			assertRequestActive(storageRequest);
+			await assertClaimOwned?.();
+			const source = await deps.storage.stream(
+				deps.config.protectedBucket,
+				sourceKey,
+				undefined,
+				storageRequest,
+			);
+			if (!source || 'kind' in source) throw badRequest('WebGL source object was not found');
+			await pipeline(source.body, deps.fileSystem.createWriteStream(archivePath), {
+				...(storageRequest?.signal ? { signal: storageRequest.signal } : {}),
+			});
+			if (source.size !== sizeBytes) throw badRequest('WebGL source object size changed');
+			await assertClaimOwned?.();
+			return await deployArchive(
+				projectId,
+				sourceKey,
+				deploymentId,
+				archivePath,
+				sizeBytes,
+				storageRequest,
+				assertClaimOwned,
+			);
 		} finally {
 			await deps.fileSystem.remove(archivePath).catch((error) => {
 				deps.logger.warn(
-					{ err: error, archivePath, projectId },
+					safeOperationalLogContext({
+						err: error,
+						projectId,
+						generation: deploymentId,
+						action: 'remove_webgl_temp',
+						result: 'failed',
+					}),
 					'Failed to remove WebGL deployment temp archive',
 				);
 			});
@@ -215,7 +243,7 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 			reason,
 			{
 				projectId: keys.projectId,
-				deploymentId: keys.deploymentId,
+				deploymentId: keys.sourceDeploymentId ?? 'protected-source',
 			},
 		);
 	}
@@ -238,7 +266,11 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 		const keys = parseWebglEntryKey(projectId, entryKey);
 		if (!keys) {
 			deps.logger.error(
-				{ projectId, entryKey, reason },
+				safeOperationalLogContext({
+					projectId,
+					action: 'delete_webgl_deployment',
+					result: 'malformed_pointer',
+				}),
 				'Refusing to delete malformed WebGL entry key',
 			);
 			throw new Error(`Malformed WebGL entry key for project ${projectId}`);
@@ -247,6 +279,7 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 	}
 
 	return {
+		deployArchive,
 		deploySource,
 		rollbackPublicDeployment,
 		deleteProtectedSource,

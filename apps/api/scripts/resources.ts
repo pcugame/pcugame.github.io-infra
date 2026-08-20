@@ -13,29 +13,6 @@ import { createUploadLifecycleMetrics } from '../src/lib/upload-lifecycle-metric
 import { createProductionUploadLifecycleRuntime } from '../src/modules/upload-lifecycle/runtime.js';
 import { createNodeProjectUploadProcessing } from '../src/infrastructure/project-upload-processing.js';
 import { createProjectUploadPipeline } from '../src/modules/admin/project/project-upload.adapter.js';
-import {
-	processImage,
-	type ImageProcessingInput,
-	type ImageProcessingResult,
-} from '../src/modules/assets/upload/image-processing.js';
-import {
-	processPdf,
-	type PdfProcessingInput,
-} from '../src/modules/assets/upload/pdf-processing.js';
-import {
-	processVideo,
-	type VideoProcessingInput,
-	type VideoProcessingResult,
-} from '../src/modules/assets/upload/video-processing.js';
-import {
-	createNodeVideoProcessingOperations,
-} from '../src/modules/assets/upload/video-processing.adapter.js';
-
-export interface ScriptUploadProcessing {
-	image(input: ImageProcessingInput): Promise<ImageProcessingResult>;
-	pdf(input: PdfProcessingInput): Promise<ImageProcessingResult>;
-	video(input: VideoProcessingInput): Promise<VideoProcessingResult>;
-}
 
 export function bucketForKind(
 	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>,
@@ -44,18 +21,6 @@ export function bucketForKind(
 	return kind === 'GAME' || kind === 'VIDEO'
 		? config.S3_BUCKET_PROTECTED
 		: config.S3_BUCKET_PUBLIC;
-}
-
-/** CPU/filesystem adapters for one administrative upload invocation. */
-export function createScriptUploadProcessing(config: Env): ScriptUploadProcessing {
-	const fileSystem = createNodeFileSystem();
-	const logger = createRootLogger(config);
-	const videoOperations = createNodeVideoProcessingOperations(fileSystem);
-	return {
-		image: (input) => processImage(input, fileSystem),
-		pdf: (input) => processPdf(input, logger, fileSystem),
-		video: (input) => processVideo(input, logger, videoOperations),
-	};
 }
 
 /** Resources owned by a one-shot administrative script invocation. */

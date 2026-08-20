@@ -39,14 +39,16 @@ export interface AssetWriteData {
 export interface ProjectAssetWriteData extends AssetWriteData {
 	projectId: number;
 	kind: AssetKind;
+	setAsProjectPoster?: boolean;
 }
 
-export interface SubmitProjectWriteData {
+export interface SubmitProjectMetadataWriteData {
 	exhibitionId: number;
 	slug: string;
 	title: string;
 	summary?: string;
 	description?: string;
+	isIncomplete: boolean;
 	status: ProjectStatus;
 	creatorId: number;
 	members: Array<{
@@ -54,22 +56,6 @@ export interface SubmitProjectWriteData {
 		studentId: string;
 		sortOrder?: number;
 		userId?: number;
-	}>;
-	savedFiles: Array<{
-		kind: AssetKind;
-		storageKey: string;
-		playbackStorageKey?: string | null;
-		originalName: string;
-		mimeType: string;
-		playbackMimeType?: string;
-		sizeBytes: number;
-		width?: number;
-		height?: number;
-		renditions?: SavedImageRendition[];
-		playbackSizeBytes?: number;
-		playbackStatus?: AssetPlaybackStatus;
-		playbackError?: string;
-		uploadIntentIds?: string[];
 	}>;
 	idempotency?: {
 		operationId: string;
@@ -117,6 +103,7 @@ export interface DeletionOutboxConfig {
 	reason: string;
 }
 
+/** Internal image/poster replacement transaction contract; not an upload API kind. */
 export interface AssetReplacementOutboxConfig {
 	bucket: string;
 	reason: string;
@@ -167,18 +154,8 @@ export interface ProjectRepository {
 
 	findExhibitionById(id: number): Promise<ExhibitionUploadRecord | null>;
 	findProjectByExhibitionAndSlug(exhibitionId: number, slug: string): Promise<unknown | null>;
-	createProjectWithAssets(data: SubmitProjectWriteData): Promise<{ id: number; slug: string }>;
+	createProjectMetadata(data: SubmitProjectMetadataWriteData): Promise<{ id: number; slug: string }>;
 	createAsset(data: ProjectAssetWriteData): Promise<{ id: number }>;
-	replaceOrCreateReplaceableAsset(
-		projectId: number,
-		kind: AssetKind,
-		data: AssetWriteData,
-		outbox: AssetReplacementOutboxConfig,
-	): Promise<{
-		assetId: number;
-		oldStorageKey: string | null;
-		oldPlaybackStorageKey: string | null;
-	}>;
 }
 
 export type ProjectCrudRepository = Pick<ProjectRepository,
@@ -194,11 +171,11 @@ export type ProjectCrudRepository = Pick<ProjectRepository,
 >;
 
 export type SubmitProjectRepository = Pick<ProjectRepository,
-	'createProjectWithAssets' | 'findExhibitionById' | 'findProjectByExhibitionAndSlug'
+	'createProjectMetadata' | 'findExhibitionById' | 'findProjectByExhibitionAndSlug'
 >;
 
 export type ProjectAssetRepository = Pick<ProjectRepository,
-	'createAsset' | 'findExhibitionById' | 'replaceOrCreateReplaceableAsset'
+	'createAsset' | 'findExhibitionById'
 >;
 
 /** Complete application-facing project port assembled once by BackendContext. */

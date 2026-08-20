@@ -231,7 +231,11 @@ describe('orphan service ownership fences', () => {
 		await expect(service.runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 0, failed: 1 });
 		expect(deps.storage.delete).toHaveBeenCalledOnce();
 		expect(deps.logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ orphanId: 18 }),
+			expect.objectContaining({
+				taskId: 18,
+				action: 'requeue_orphan',
+				result: 'failed',
+			}),
 			'Failed to record orphan reap attempt',
 		);
 	});

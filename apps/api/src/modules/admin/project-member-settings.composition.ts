@@ -32,6 +32,7 @@ export interface ProjectMemberSettingsProductionDependencies {
 	config: Pick<
 		Env,
 		| 'API_PUBLIC_URL'
+		| 'PUBLIC_ASSET_BASE_URL'
 		| 'S3_BUCKET_PUBLIC'
 		| 'S3_BUCKET_PROTECTED'
 		| 'UPLOAD_CHUNK_SIZE_MB'
@@ -51,7 +52,10 @@ export interface ProjectMemberSettingsProductionDependencies {
 export function createProjectMemberSettingsProductionGraph(
 	deps: ProjectMemberSettingsProductionDependencies,
 ): ProjectMemberSettingsProductionGraph {
-	const serializer = createProjectSerializer(deps.config.API_PUBLIC_URL);
+	const serializer = createProjectSerializer(
+		deps.config.API_PUBLIC_URL,
+		deps.config.PUBLIC_ASSET_BASE_URL,
+	);
 	const projectService = createProjectService({
 		repository: deps.projectRepository,
 		serializeProjectDetail: serializer.serializeProjectDetail,

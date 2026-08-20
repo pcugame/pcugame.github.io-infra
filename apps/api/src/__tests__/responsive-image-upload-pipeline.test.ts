@@ -125,7 +125,6 @@ function harness(options: {
 			};
 		}),
 		processPdf: vi.fn(async () => { throw new Error('not used'); }),
-		processVideo: vi.fn(async () => { throw new Error('not used'); }),
 	};
 	const uploadIntents = {
 		prepare: vi.fn(async ({ storageKey }: { storageKey: string }) => {

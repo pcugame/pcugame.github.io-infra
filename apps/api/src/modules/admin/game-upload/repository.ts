@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import {
 	Prisma,
 	type AssetKind,
@@ -9,13 +8,26 @@ import {
 import type { UserRole } from '@pcu/contracts';
 import {
 	ActiveUploadCompletionInProgressError,
+	DirectUploadQuotaExceededError,
+	GameUploadTargetFencedError,
 	type DurablyTrackedMultipartAbort,
+	type DirectUploadQuotaLimits,
 	type GameUploadRepository,
+	type GameUploadSessionSummary,
 	type NewGameUploadSession,
 } from './ports.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
-import { webglDeletionTargetsByEntry, webglDeletionTargetsBySource } from '../../webgl/deletion-targets.js';
-import { parseWebglEntryKey, parseWebglSourceKey } from '../../webgl/paths.js';
+import {
+	webglDeletionTargetsByEntry,
+	webglDeletionTargetsBySource,
+	webglPublicDeletionTarget,
+	webglSourceDeletionTarget,
+} from '../../webgl/deletion-targets.js';
+import {
+	createWebglPublicDeploymentKeys,
+	parseWebglEntryKey,
+	parseWebglSourceKey,
+} from '../../webgl/paths.js';
 import {
 	ASSET_MUTATION_TRANSACTION_POLICY,
 	withAssetMutationTransaction,
@@ -24,6 +36,7 @@ import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
 import { assertNoDeletionClaim } from '../../orphan/reference-resolver.js';
 import { assertWriteAccess } from '../project-access.service.js';
 import { assertUploadAllowed } from '../upload-guard.js';
+import { badRequest, conflict, forbidden, notFound } from '../../../shared/errors.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -38,6 +51,112 @@ async function lockProjectForUploadMutation(
 		FOR UPDATE
 	`);
 	if (projects.length === 0) throw new Error('Project no longer exists');
+}
+
+async function lockActorForUploadMutation(
+	tx: TxClient,
+	actorId: number,
+): Promise<{ id: number; role: string }> {
+	const actors = await tx.$queryRaw<Array<{ id: number; role: string }>>(Prisma.sql`
+		SELECT "id", "role"::text AS "role"
+		FROM "users"
+		WHERE "id" = ${actorId}
+		FOR UPDATE
+	`);
+	const actor = actors[0];
+	if (!actor) throw notFound('Upload actor no longer exists');
+	return actor;
+}
+
+async function activeQuotaUsage(
+	tx: TxClient,
+	input: { actorId: number; projectId: number; excludeSessionId?: string },
+): Promise<{ actorActive: number; projectActive: number; actorBytes: bigint }> {
+	const exclusion = input.excludeSessionId
+		? Prisma.sql`AND session."id" <> ${input.excludeSessionId}`
+		: Prisma.empty;
+	const [usage] = await tx.$queryRaw<Array<{
+		actorActive: number;
+		projectActive: number;
+		actorBytes: bigint;
+	}>>(Prisma.sql`
+		SELECT
+			COUNT(*) FILTER (WHERE session."user_id" = ${input.actorId})::integer
+				AS "actorActive",
+			COUNT(*) FILTER (WHERE session."project_id" = ${input.projectId})::integer
+				AS "projectActive",
+			COALESCE(SUM(session."total_bytes") FILTER (
+				WHERE session."user_id" = ${input.actorId}
+			), 0)::bigint AS "actorBytes"
+		FROM "game_upload_active_sessions" AS slot
+		JOIN "game_upload_sessions" AS session ON session."id" = slot."session_id"
+		WHERE session."status" IN ('PENDING', 'COMPLETING', 'VERIFYING')
+		${exclusion}
+	`);
+	return usage ?? { actorActive: 0, projectActive: 0, actorBytes: 0n };
+}
+
+async function assertProjectedQuota(
+	tx: TxClient,
+	input: {
+		actorId: number;
+		projectId: number;
+		totalBytes: bigint;
+		limits: DirectUploadQuotaLimits;
+		excludeSessionId?: string;
+	},
+): Promise<void> {
+	const usage = await activeQuotaUsage(tx, input);
+	if (usage.actorActive + 1 > input.limits.actorActiveSessions) {
+		throw new DirectUploadQuotaExceededError('ACTOR_ACTIVE_SESSIONS');
+	}
+	if (usage.projectActive + 1 > input.limits.projectActiveSessions) {
+		throw new DirectUploadQuotaExceededError('PROJECT_ACTIVE_SESSIONS');
+	}
+	if (usage.actorBytes + input.totalBytes > input.limits.actorOutstandingBytes) {
+		throw new DirectUploadQuotaExceededError('ACTOR_OUTSTANDING_BYTES');
+	}
+}
+
+async function assertCurrentCreatePolicy(
+	tx: TxClient,
+	input: { actorId: number; actorRole: UserRole; projectId: number },
+): Promise<void> {
+	const [policy] = await tx.$queryRaw<Array<{
+		creatorId: number;
+		exhibitionId: number;
+		exhibitionYear: number;
+		exhibitionTitle: string;
+		isUploadEnabled: boolean;
+	}>>(Prisma.sql`
+		SELECT project."creator_id" AS "creatorId",
+			exhibition."id" AS "exhibitionId",
+			exhibition."year" AS "exhibitionYear",
+			exhibition."title" AS "exhibitionTitle",
+			exhibition."is_upload_enabled" AS "isUploadEnabled"
+		FROM "projects" AS project
+		JOIN "exhibitions" AS exhibition ON exhibition."id" = project."exhibition_id"
+		WHERE project."id" = ${input.projectId}
+		FOR SHARE OF exhibition
+	`);
+	if (!policy) throw notFound('Upload project no longer exists');
+	const isPrivileged = input.actorRole === 'ADMIN' || input.actorRole === 'OPERATOR';
+	const memberships = isPrivileged ? [{ id: 0 }] : await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+		SELECT "id"
+		FROM "project_members"
+		WHERE "project_id" = ${input.projectId}
+			AND "user_id" = ${input.actorId}
+		FOR SHARE
+	`);
+	assertWriteAccess(input.actorRole, policy.creatorId, input.actorId, {
+		isMember: memberships.length > 0,
+	});
+	assertUploadAllowed({
+		id: policy.exhibitionId,
+		year: policy.exhibitionYear,
+		title: policy.exhibitionTitle,
+		isUploadEnabled: policy.isUploadEnabled,
+	}, policy.exhibitionId, input.actorRole);
 }
 
 async function lockExhibitionForProjectFinalization(
@@ -139,25 +258,18 @@ export interface WebglReplacementOutboxConfig {
 	reason: string;
 }
 
-const sessionWithProjectAndParts = {
+const sessionWithProject = {
 	include: {
 		project: { select: { status: true } },
-		parts: { orderBy: { partNumber: 'asc' as const } },
 		activeSlot: { select: { sessionId: true } },
 	},
 } satisfies Prisma.GameUploadSessionDefaultArgs;
 
 export type UploadSessionRecord = Prisma.GameUploadSessionGetPayload<
-	typeof sessionWithProjectAndParts
+	typeof sessionWithProject
 >;
 
-const sessionWithParts = {
-	include: { parts: { orderBy: { partNumber: 'asc' as const } } },
-} satisfies Prisma.GameUploadSessionDefaultArgs;
-
-export type UploadSessionWithParts = Prisma.GameUploadSessionGetPayload<
-	typeof sessionWithParts
->;
+export type UploadSessionSummaryRecord = Prisma.GameUploadSessionGetPayload<Record<string, never>>;
 
 const serializableOptions = {
 	isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -204,7 +316,7 @@ export function findSessionById(
 ): Promise<UploadSessionRecord | null> {
 	return client.gameUploadSession.findUnique({
 		where: { id },
-		...sessionWithProjectAndParts,
+		...sessionWithProject,
 	});
 }
 
@@ -215,22 +327,217 @@ interface GameUploadRepositoryOptions {
 	publicBucket?: string;
 }
 
+/** Fast, side-effect-free quota preflight before allocating a storage upload ID. */
+export function assertCanCreateSession(
+	input: {
+		projectId: number;
+		userId: number;
+		uploadKind: UploadKind;
+		totalBytes: bigint;
+		limits: DirectUploadQuotaLimits;
+	},
+	client: PrismaClient,
+): Promise<void> {
+	return withSerializableRetry(async (tx) => {
+		// Use the same stable lock order as final creation. The second quota check
+		// in createSessionReplacingActive closes the storage-allocation race.
+		await lockProjectForUploadMutation(tx, input.projectId);
+		const actor = await lockActorForUploadMutation(tx, input.userId);
+		await assertCurrentCreatePolicy(tx, {
+			actorId: actor.id,
+			actorRole: actor.role as UserRole,
+			projectId: input.projectId,
+		});
+		const active = await tx.gameUploadActiveSession.findUnique({
+			where: {
+				projectId_uploadKind: {
+					projectId: input.projectId,
+					uploadKind: input.uploadKind,
+				},
+			},
+			include: { session: true },
+		});
+		if (active?.session.status === 'COMPLETING' || active?.session.status === 'VERIFYING') {
+			throw new ActiveUploadCompletionInProgressError();
+		}
+		await assertProjectedQuota(tx, {
+			actorId: input.userId,
+			projectId: input.projectId,
+			totalBytes: input.totalBytes,
+			limits: input.limits,
+			...(active ? { excludeSessionId: active.sessionId } : {}),
+		});
+	}, client);
+}
+
+/**
+ * Atomically reserve one capability batch after re-checking every mutable
+ * authority and quota. The returned upload locator is the transaction's
+ * snapshot; no raw upload ID is ever persisted outside the session itself.
+ */
+export function reservePartCapabilities(
+	input: {
+		sessionId: string;
+		actor: { id: number; role: UserRole };
+		generation: number;
+		partNumbers: number[];
+		maxIssuesPerWindow: number;
+		issueWindowMs: number;
+		quota: DirectUploadQuotaLimits;
+	},
+	client: PrismaClient,
+): Promise<{ session: UploadSessionRecord; isRefresh: boolean }> {
+	return withSerializableRetry(async (tx) => {
+		const locator = await tx.gameUploadSession.findUnique({
+			where: { id: input.sessionId },
+			select: { projectId: true },
+		});
+		if (!locator) throw notFound('Upload session not found');
+		await lockProjectForUploadMutation(tx, locator.projectId);
+		const currentActor = await lockActorForUploadMutation(tx, input.actor.id);
+		const session = await tx.gameUploadSession.findUnique({
+			where: { id: input.sessionId },
+			...sessionWithProject,
+		});
+		if (!session) throw notFound('Upload session not found');
+		const currentRole = currentActor.role as UserRole;
+		const isPrivileged = currentRole === 'ADMIN' || currentRole === 'OPERATOR';
+		if (!isPrivileged && session.userId !== input.actor.id) {
+			throw forbidden('Not your upload session');
+		}
+
+		const [policy] = await tx.$queryRaw<Array<{
+			creatorId: number;
+			exhibitionId: number;
+			exhibitionYear: number;
+			exhibitionTitle: string;
+			isUploadEnabled: boolean;
+		}>>(Prisma.sql`
+			SELECT project."creator_id" AS "creatorId",
+				exhibition."id" AS "exhibitionId",
+				exhibition."year" AS "exhibitionYear",
+				exhibition."title" AS "exhibitionTitle",
+				exhibition."is_upload_enabled" AS "isUploadEnabled"
+			FROM "projects" AS project
+			JOIN "exhibitions" AS exhibition
+				ON exhibition."id" = project."exhibition_id"
+			WHERE project."id" = ${session.projectId}
+			FOR SHARE OF exhibition
+		`);
+		if (!policy) throw notFound('Upload project no longer exists');
+		const memberships = isPrivileged ? [{ id: 0 }] : await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+			SELECT "id"
+			FROM "project_members"
+			WHERE "project_id" = ${session.projectId}
+				AND "user_id" = ${input.actor.id}
+			FOR SHARE
+		`);
+		assertWriteAccess(currentRole, policy.creatorId, input.actor.id, {
+			isMember: memberships.length > 0,
+		});
+		assertUploadAllowed({
+			id: policy.exhibitionId,
+			year: policy.exhibitionYear,
+			title: policy.exhibitionTitle,
+			isUploadEnabled: policy.isUploadEnabled,
+		}, policy.exhibitionId, currentRole);
+
+		if (session.status !== 'PENDING') {
+			throw badRequest(`Cannot issue part URLs: session is ${session.status}`);
+		}
+		if (session.multipartGeneration !== input.generation) {
+			throw conflict('Upload generation is stale');
+		}
+		if (session.activeSlot?.sessionId !== session.id) {
+			throw conflict('Upload session has been replaced');
+		}
+		const [databaseTime] = await tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`
+			SELECT clock_timestamp() AS "now"
+		`);
+		if (!databaseTime || session.expiresAt <= databaseTime.now) {
+			throw badRequest('Upload session has expired');
+		}
+		if (!session.s3Key || !session.s3UploadId) {
+			throw new Error('Session is missing S3 multipart info');
+		}
+		for (const partNumber of input.partNumbers) {
+			if (!Number.isSafeInteger(partNumber)
+				|| partNumber < 1
+				|| partNumber > session.totalChunks) {
+				throw badRequest(`Part number must be between 1 and ${session.totalChunks}`);
+			}
+		}
+		await assertProjectedQuota(tx, {
+			actorId: session.userId,
+			projectId: session.projectId,
+			totalBytes: session.totalBytes,
+			limits: input.quota,
+			excludeSessionId: session.id,
+		});
+
+		const [issueState] = await tx.$queryRaw<Array<{ lastIssuedAt: Date | null }>>(Prisma.sql`
+			SELECT "part_url_last_issued_at" AS "lastIssuedAt"
+			FROM "game_upload_sessions"
+			WHERE "id" = ${session.id}
+			FOR UPDATE
+		`);
+		const isRefresh = issueState?.lastIssuedAt !== null;
+		const reserved = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+			UPDATE "game_upload_sessions"
+			SET "part_url_issue_window_count" = CASE
+					WHEN "part_url_issue_window_started_at" IS NULL
+						OR "part_url_issue_window_started_at" <= clock_timestamp()
+							- (${input.issueWindowMs} * INTERVAL '1 millisecond')
+					THEN 1
+					ELSE "part_url_issue_window_count" + 1
+				END,
+				"part_url_issue_window_started_at" = CASE
+					WHEN "part_url_issue_window_started_at" IS NULL
+						OR "part_url_issue_window_started_at" <= clock_timestamp()
+							- (${input.issueWindowMs} * INTERVAL '1 millisecond')
+					THEN clock_timestamp()
+					ELSE "part_url_issue_window_started_at"
+				END,
+				"part_url_last_issued_at" = clock_timestamp(),
+				"updated_at" = clock_timestamp()
+			WHERE "id" = ${session.id}
+				AND "status" = 'PENDING'
+				AND "multipart_generation" = ${input.generation}
+				AND "expires_at" > clock_timestamp()
+				AND (
+					"part_url_issue_window_started_at" IS NULL
+					OR "part_url_issue_window_started_at" <= clock_timestamp()
+						- (${input.issueWindowMs} * INTERVAL '1 millisecond')
+					OR "part_url_issue_window_count" < ${input.maxIssuesPerWindow}
+				)
+			RETURNING "id"
+		`);
+		if (reserved.length !== 1) {
+			throw new DirectUploadQuotaExceededError('PART_URL_REFRESH');
+		}
+		return { session, isRefresh };
+	}, client);
+}
+
 /** Create a new session and replace the project's active slot atomically. */
 export function createSessionReplacingActive(
 	data: CreateSessionData,
+	limits: DirectUploadQuotaLimits,
 	client: PrismaClient,
 	abortBucket: string,
 	publicBucket?: string,
 ) {
 	return withSerializableRetry(async (tx) => {
+		await lockProjectForUploadMutation(tx, data.projectId);
+		const actor = await lockActorForUploadMutation(tx, data.userId);
+		await assertCurrentCreatePolicy(tx, {
+			actorId: actor.id,
+			actorRole: actor.role as UserRole,
+			projectId: data.projectId,
+		});
 		await assertNoDeletionClaim(tx, { bucket: abortBucket, key: data.s3Key });
-		if (data.uploadKind === 'WEBGL') {
-			if (!publicBucket) throw new Error('WebGL session creation requires a public bucket');
-			const keys = parseWebglSourceKey(data.projectId, data.s3Key);
-			if (!keys) throw new Error(`Malformed WebGL source key for project ${data.projectId}`);
-			await assertNoDeletionClaim(tx, {
-				bucket: publicBucket, key: keys.sitePrefix, targetKind: 'PREFIX',
-			});
+		if (data.uploadKind === 'WEBGL' && !parseWebglSourceKey(data.projectId, data.s3Key)) {
+			throw new Error(`Malformed WebGL source key for project ${data.projectId}`);
 		}
 		const active = await tx.gameUploadActiveSession.findUnique({
 			where: {
@@ -242,6 +549,19 @@ export function createSessionReplacingActive(
 			include: { session: true },
 		});
 		const durableAborts: DurablyTrackedMultipartAbort[] = [];
+		const expectedTargetRows = data.uploadKind === 'GAME'
+			? await tx.$queryRaw<Array<{ id: number; updatedAt: Date }>>(Prisma.sql`
+				SELECT "id", "updated_at" AS "updatedAt"
+				FROM "assets"
+				WHERE "project_id" = ${data.projectId}
+					AND "kind" = 'GAME'::"AssetKind"
+					AND "status" = 'READY'::"AssetStatus"
+				ORDER BY "id"
+				LIMIT 1
+				FOR UPDATE
+			`)
+			: [];
+		const expectedTarget = expectedTargetRows[0] ?? null;
 
 		// A completing upload may already have committed its multipart object. It
 		// must retain the active slot until finalization/recovery reaches a terminal
@@ -249,6 +569,13 @@ export function createSessionReplacingActive(
 		if (active?.session.status === 'COMPLETING' || active?.session.status === 'VERIFYING') {
 			throw new ActiveUploadCompletionInProgressError();
 		}
+		await assertProjectedQuota(tx, {
+			actorId: data.userId,
+			projectId: data.projectId,
+			totalBytes: data.totalBytes,
+			limits,
+			...(active ? { excludeSessionId: active.sessionId } : {}),
+		});
 
 		if (active) {
 			if (active.session.s3Key && active.session.s3UploadId) {
@@ -280,6 +607,8 @@ export function createSessionReplacingActive(
 			data: {
 				...data,
 				sourceIdentityBlockManifest: Buffer.from(data.sourceIdentityBlockManifest),
+				expectedTargetAssetId: expectedTarget?.id ?? null,
+				expectedTargetAssetUpdatedAt: expectedTarget?.updatedAt ?? null,
 			},
 		});
 		await tx.gameUploadActiveSession.upsert({
@@ -367,145 +696,15 @@ export function findActiveSessionsForListing(
 	projectId: number,
 	opts: { userId?: number },
 	client: PrismaClient,
-): Promise<UploadSessionWithParts[]> {
+): Promise<UploadSessionSummaryRecord[]> {
 	return client.gameUploadSession.findMany({
 		where: {
 			projectId,
 			status: { in: ['PENDING', 'COMPLETING', 'VERIFYING'] },
 			...(opts.userId ? { userId: opts.userId } : {}),
 		},
-		...sessionWithParts,
 		orderBy: { createdAt: 'desc' },
 	});
-}
-
-export function acquirePartClaim(
-	input: {
-		sessionId: string;
-		partNumber: number;
-		generation: number;
-		token: string;
-		owner: string;
-		leaseMs: number;
-		contentSha256?: string;
-	},
-	client: PrismaClient,
-) {
-	const claimId = randomUUID();
-	return withSerializableRetry(async (tx) => {
-		const session = await tx.gameUploadSession.findUnique({
-			where: { id: input.sessionId },
-			select: { status: true, multipartGeneration: true },
-		});
-		if (!session || session.status !== 'PENDING' || session.multipartGeneration !== input.generation) {
-			return { kind: 'unavailable' as const };
-		}
-		const existingPart = await tx.gameUploadPart.findUnique({
-			where: { game_upload_part_session_part: { sessionId: input.sessionId, partNumber: input.partNumber } },
-		});
-		if (existingPart && existingPart.generation === input.generation) {
-			if (input.contentSha256 && existingPart.contentSha256 === input.contentSha256) {
-				const parts = await tx.gameUploadPart.findMany({
-					where: { sessionId: input.sessionId, generation: input.generation },
-					orderBy: { partNumber: 'asc' },
-				});
-				return { kind: 'already-uploaded' as const, parts };
-			}
-			return { kind: 'conflict' as const };
-		}
-		const inserted = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-			INSERT INTO "game_upload_part_claims" (
-				"id", "session_id", "part_number", "token", "generation",
-				"owner", "lease_until", "created_at", "updated_at"
-			)
-			VALUES (
-				${claimId}, ${input.sessionId}, ${input.partNumber}, ${input.token},
-				${input.generation}, ${input.owner},
-				clock_timestamp() + (${input.leaseMs} * INTERVAL '1 millisecond'),
-				clock_timestamp(), clock_timestamp()
-			)
-			ON CONFLICT ("session_id", "part_number") DO NOTHING
-			RETURNING "id"
-		`);
-		if (inserted.length === 1) {
-			return { kind: 'acquired' as const, token: input.token };
-		}
-		const existing = await tx.$queryRaw<Array<{ expired: boolean }>>(Prisma.sql`
-			SELECT claim."lease_until" <= clock_timestamp() AS "expired"
-			FROM "game_upload_part_claims" AS claim
-			WHERE claim."session_id" = ${input.sessionId}
-				AND claim."part_number" = ${input.partNumber}
-			FOR UPDATE
-		`);
-		return existing[0]?.expired
-			? { kind: 'expired' as const }
-			: { kind: 'busy' as const };
-	}, client);
-}
-
-export function completePartClaim(
-	input: { token: string; etag: string; contentSha256?: string },
-	client: PrismaClient,
-) {
-	return withSerializableRetry(async (tx) => {
-		const claims = await tx.$queryRaw<Array<{
-			id: string;
-			sessionId: string;
-			partNumber: number;
-			generation: number;
-		}>>(Prisma.sql`
-			SELECT claim."id",
-				claim."session_id" AS "sessionId",
-				claim."part_number" AS "partNumber",
-				claim."generation"
-			FROM "game_upload_part_claims" AS claim
-			JOIN "game_upload_sessions" AS session ON session."id" = claim."session_id"
-			WHERE claim."token" = ${input.token}
-				AND claim."lease_until" > clock_timestamp()
-				AND session."status" = 'PENDING'
-				AND session."multipart_generation" = claim."generation"
-			FOR UPDATE OF claim, session
-		`);
-		const claim = claims[0];
-		if (!claim) {
-			return { accepted: false as const, parts: [] };
-		}
-		const existingPart = await tx.gameUploadPart.findUnique({
-			where: {
-				game_upload_part_session_part: {
-					sessionId: claim.sessionId,
-					partNumber: claim.partNumber,
-				},
-			},
-		});
-		if (existingPart && existingPart.generation === claim.generation
-			&& existingPart.contentSha256 !== input.contentSha256) {
-			await tx.gameUploadPartClaim.delete({ where: { id: claim.id } });
-			return { accepted: false as const, conflict: true as const, parts: [] };
-		}
-		await tx.gameUploadPart.upsert({
-			where: {
-				game_upload_part_session_part: {
-					sessionId: claim.sessionId,
-					partNumber: claim.partNumber,
-				},
-			},
-			update: { etag: input.etag, generation: claim.generation, contentSha256: input.contentSha256 },
-			create: {
-				sessionId: claim.sessionId,
-				partNumber: claim.partNumber,
-				etag: input.etag,
-				contentSha256: input.contentSha256,
-				generation: claim.generation,
-			},
-		});
-		await tx.gameUploadPartClaim.delete({ where: { id: claim.id } });
-		const parts = await tx.gameUploadPart.findMany({
-			where: { sessionId: claim.sessionId, generation: claim.generation },
-			orderBy: { partNumber: 'asc' },
-		});
-		return { accepted: true as const, parts };
-	}, client);
 }
 
 export function claimCompletion(
@@ -521,7 +720,7 @@ export function claimCompletion(
 		await lockProjectForUploadMutation(tx, locator.projectId);
 		const session = await tx.gameUploadSession.findUnique({
 			where: { id: input.sessionId },
-			include: { parts: true, partClaims: true, activeSlot: true },
+			include: { activeSlot: true },
 		});
 		if (!session || session.status !== 'PENDING'
 			|| session.multipartGeneration !== input.generation
@@ -534,16 +733,11 @@ export function claimCompletion(
 		if (!databaseTime || session.expiresAt <= databaseTime.now) {
 			return { count: 0, reason: 'state' as const };
 		}
-		const currentParts = session.parts.filter((part) => part.generation === input.generation);
-		if (session.partClaims.length > 0) return { count: 0, reason: 'parts-active' as const };
 		const sourceIdentityMissing = session.sourceIdentityAlgorithm !== 'SHA256_BLOCK_MANIFEST_V1'
 			|| !session.sourceIdentity
 			|| session.sourceIdentityBlockSizeBytes !== 1048576
 			|| !session.sourceIdentityBlockManifest;
-		const proxyPartsMissing = session.transport === 'API_CHUNK_PROXY'
-			&& (currentParts.length !== session.totalChunks
-				|| currentParts.some((part) => !part.contentSha256));
-		if (sourceIdentityMissing || proxyPartsMissing) {
+		if (sourceIdentityMissing) {
 			return { count: 0, reason: 'parts-missing' as const };
 		}
 		const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -593,7 +787,6 @@ export function markVerifying(
 				"updated_at" = clock_timestamp()
 			WHERE "id" = ${input.sessionId}
 				AND "status" = 'COMPLETING'
-				AND "transport" = 'DIRECT_MULTIPART'
 				AND "multipart_generation" = ${input.generation}
 				AND "completion_claim_token" = ${input.completionClaimToken}
 				AND "completion_claim_until" > clock_timestamp()
@@ -601,77 +794,6 @@ export function markVerifying(
 		`);
 		return { count: updated.length };
 	})();
-}
-
-export function replaceMultipartGeneration(
-	input: {
-		sessionId: string;
-		expectedGeneration: number;
-		newUploadId: string;
-		abortBucket: string;
-		reason: string;
-	},
-	client: PrismaClient,
-) {
-	return withSerializableRetry(async (tx) => {
-		const sessions = await tx.$queryRaw<Array<{
-			id: string;
-			s3Key: string;
-			s3UploadId: string | null;
-		}>>(Prisma.sql`
-			SELECT session."id",
-				session."s3_key" AS "s3Key",
-				session."s3_upload_id" AS "s3UploadId"
-			FROM "game_upload_sessions" AS session
-			WHERE session."id" = ${input.sessionId}
-				AND session."status" = 'PENDING'
-				AND session."multipart_generation" = ${input.expectedGeneration}
-				AND session."s3_key" IS NOT NULL
-				AND NOT EXISTS (
-					SELECT 1
-					FROM "game_upload_part_claims" AS claim
-					WHERE claim."session_id" = session."id"
-						AND claim."lease_until" > clock_timestamp()
-				)
-			FOR UPDATE OF session
-		`);
-		const session = sessions[0];
-		if (!session) return { replaced: false as const, durableAbort: null };
-		let durableAbort: DurablyTrackedMultipartAbort | null = null;
-		if (session.s3UploadId) {
-			durableAbort = {
-				tracking: 'durable-abort-task-committed',
-				sessionId: session.id,
-				key: session.s3Key,
-				uploadId: session.s3UploadId,
-				reason: input.reason,
-			};
-			await queueMultipartAbortTask(tx, {
-				bucket: input.abortBucket,
-				storageKey: durableAbort.key,
-				uploadId: durableAbort.uploadId,
-				reason: durableAbort.reason,
-			});
-		}
-		await tx.gameUploadPart.deleteMany({ where: { sessionId: input.sessionId } });
-		await tx.gameUploadPartClaim.deleteMany({ where: { sessionId: input.sessionId } });
-		await tx.gameUploadSession.update({
-			where: { id: input.sessionId },
-			data: {
-				s3UploadId: input.newUploadId,
-				multipartGeneration: { increment: 1 },
-				uploadedChunks: [],
-			},
-		});
-		return { replaced: true as const, durableAbort };
-	}, client);
-}
-
-export function findPartsBySessionId(sessionId: string, client: PrismaClient) {
-	return client.gameUploadPart.findMany({
-		where: { sessionId },
-		orderBy: { partNumber: 'asc' },
-	});
 }
 
 /** Revert a COMPLETING session back to PENDING (for retry on error) */
@@ -761,7 +883,12 @@ export function markCompletedObjectFailed(
 		}
 		const session = await tx.gameUploadSession.findUnique({
 			where: { id: input.sessionId },
-			select: { uploadKind: true, projectId: true, s3Key: true, transport: true },
+			select: {
+				uploadKind: true,
+				projectId: true,
+				s3Key: true,
+				webglDeploymentId: true,
+			},
 		});
 		const result = await tx.gameUploadSession.updateMany({
 			where: {
@@ -770,7 +897,7 @@ export function markCompletedObjectFailed(
 				completionClaimToken: input.completionClaimToken,
 			},
 			data: {
-				status: session?.transport === 'DIRECT_MULTIPART' ? 'REJECTED' : 'FAILED',
+				status: 'REJECTED',
 				storageKey: input.storageKey,
 				s3UploadId: null,
 				s3Key: null,
@@ -779,16 +906,82 @@ export function markCompletedObjectFailed(
 			},
 		});
 		if (result.count !== 1) return result;
-		const targets = session?.uploadKind === 'WEBGL' && session.s3Key && input.publicBucket
-			? webglDeletionTargetsBySource(session.projectId, session.s3Key, {
-				protectedBucket: input.bucket, publicBucket: input.publicBucket,
-			}, input.reason)
+		const source = session?.uploadKind === 'WEBGL' && session.s3Key
+			? parseWebglSourceKey(session.projectId, session.s3Key)
+			: null;
+		const targets = source
+			? [
+				webglSourceDeletionTarget(source, input.bucket, input.reason),
+				...(input.publicBucket && session?.webglDeploymentId
+					? [webglPublicDeletionTarget(
+						createWebglPublicDeploymentKeys(session.projectId, session.webglDeploymentId),
+						input.publicBucket,
+						input.reason,
+					)]
+					: []),
+			]
 			: [{ bucket: input.bucket, storageKey: input.storageKey, targetKind: 'EXACT' as const, reason: input.reason }];
 		await queueDurableDeletions(tx, targets);
 		await tx.gameUploadActiveSession.deleteMany({
 			where: { sessionId: input.sessionId },
 		});
 		return result;
+	}, client);
+}
+
+/**
+ * Persist the worker-only public generation before its first PUT. COALESCE and
+ * the active PostgreSQL claim fence make retries/restarts converge on exactly
+ * one prefix without exposing it through an API response.
+ */
+export function reserveWebglDeployment(
+	input: {
+		sessionId: string;
+		completionClaimToken: string;
+		candidateDeploymentId: string;
+		publicBucket: string;
+	},
+	client: PrismaClient,
+): Promise<string> {
+	return withSerializableRetry(async (tx) => {
+		const session = await tx.gameUploadSession.findUnique({
+			where: { id: input.sessionId },
+			select: {
+				projectId: true,
+				uploadKind: true,
+				status: true,
+				completionClaimToken: true,
+				completionClaimUntil: true,
+				webglDeploymentId: true,
+			},
+		});
+		if (!session || session.uploadKind !== 'WEBGL' || session.status !== 'VERIFYING'
+			|| session.completionClaimToken !== input.completionClaimToken) {
+			throw new Error('WebGL deployment reservation claim is no longer active');
+		}
+		const deploymentId = session.webglDeploymentId ?? input.candidateDeploymentId;
+		const keys = createWebglPublicDeploymentKeys(session.projectId, deploymentId);
+		if (!parseWebglEntryKey(session.projectId, keys.entryKey)) {
+			throw new Error('WebGL deployment ID generator returned an unsafe value');
+		}
+		await assertNoDeletionClaim(tx, {
+			bucket: input.publicBucket,
+			key: keys.sitePrefix,
+			targetKind: 'PREFIX',
+		});
+		const reserved = await tx.$queryRaw<Array<{ webglDeploymentId: string }>>(Prisma.sql`
+			UPDATE "game_upload_sessions"
+			SET "webgl_deployment_id" = COALESCE("webgl_deployment_id", ${deploymentId}),
+				"updated_at" = clock_timestamp()
+			WHERE "id" = ${input.sessionId}
+				AND "upload_kind" = 'WEBGL'::"UploadKind"
+				AND "status" = 'VERIFYING'
+				AND "completion_claim_token" = ${input.completionClaimToken}
+				AND "completion_claim_until" > clock_timestamp()
+			RETURNING "webgl_deployment_id" AS "webglDeploymentId"
+		`);
+		if (!reserved[0]) throw new Error('WebGL deployment reservation claim was lost');
+		return reserved[0].webglDeploymentId;
 	}, client);
 }
 
@@ -818,6 +1011,14 @@ export function finalizeCompletedSession(
 		if (!await lockActiveCompletionClaim(tx, sessionId, data.completionClaimToken)) {
 			throw new Error('Game upload completion claim is no longer active');
 		}
+		const uploadSession = await tx.gameUploadSession.findUniqueOrThrow({
+			where: { id: sessionId },
+			select: {
+				multipartGeneration: true,
+				expectedTargetAssetId: true,
+				expectedTargetAssetUpdatedAt: true,
+			},
+		});
 		await assertCurrentFinalizationPolicy(tx, sessionId, projectId);
 		await assertNoDeletionClaim(tx, {
 			bucket: outbox.bucket,
@@ -833,11 +1034,13 @@ export function finalizeCompletedSession(
 			id: number;
 			storageKey: string;
 			playbackStorageKey: string | null;
+			updatedAt: Date;
 		}>>(Prisma.sql`
 			SELECT
 				"id",
 				"storage_key" AS "storageKey",
-				"playback_storage_key" AS "playbackStorageKey"
+				"playback_storage_key" AS "playbackStorageKey",
+				"updated_at" AS "updatedAt"
 			FROM "assets"
 			WHERE "project_id" = ${projectId}
 				AND "kind" = CAST(${kind} AS "AssetKind")
@@ -847,6 +1050,49 @@ export function finalizeCompletedSession(
 			FOR UPDATE
 		`);
 		const existing = existingRows[0] ?? null;
+		const expectedMatches = existing
+			? uploadSession.expectedTargetAssetId === existing.id
+				&& uploadSession.expectedTargetAssetUpdatedAt?.getTime() === existing.updatedAt.getTime()
+			: uploadSession.expectedTargetAssetId === null
+				&& uploadSession.expectedTargetAssetUpdatedAt === null;
+		if (!expectedMatches) {
+			await queueDurableDeletions(tx, [
+				{
+					bucket: outbox.bucket,
+					storageKey: data.storageKey,
+					reason: 'game-upload-stale-target-fenced',
+				},
+				...(data.playbackStorageKey && data.playbackStorageKey !== data.storageKey
+					? [{
+						bucket: outbox.bucket,
+						storageKey: data.playbackStorageKey,
+						reason: 'game-upload-stale-target-playback-fenced',
+					}]
+					: []),
+			]);
+			const fenced = await tx.gameUploadSession.updateMany({
+				where: {
+					id: sessionId,
+					status: { in: ['COMPLETING', 'VERIFYING'] },
+					uploadKind: 'GAME',
+					completionClaimToken: data.completionClaimToken,
+				},
+				data: {
+					status: 'REJECTED',
+					storageKey: data.storageKey,
+					s3Key: null,
+					s3UploadId: null,
+					completionClaimToken: null,
+					completionClaimUntil: null,
+					completionLastError: 'STALE_TARGET_ASSET',
+				},
+			});
+			if (fenced.count !== 1) {
+				throw new Error('Game upload session is no longer completing');
+			}
+			await tx.gameUploadActiveSession.deleteMany({ where: { sessionId } });
+			return { fenced: true as const };
+		}
 
 		let result: { assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null };
 		if (existing) {
@@ -940,8 +1186,11 @@ export function finalizeCompletedSession(
 				completionClaimUntil: null,
 				completionResult: {
 					status: 'COMPLETED',
-					storageKey: data.storageKey,
+					sessionId,
+					generation: uploadSession.multipartGeneration,
 					sizeBytes: Number(data.sizeBytes),
+					uploadKind: 'GAME',
+					assetId: result.assetId,
 				},
 			},
 		});
@@ -952,8 +1201,11 @@ export function finalizeCompletedSession(
 			where: { sessionId },
 		});
 
-		return result;
-	}, ASSET_MUTATION_TRANSACTION_POLICY);
+		return { fenced: false as const, result };
+	}, ASSET_MUTATION_TRANSACTION_POLICY).then((outcome) => {
+		if (outcome.fenced) throw new GameUploadTargetFencedError();
+		return outcome.result;
+	});
 }
 
 export function finalizeCompletedWebglSession(
@@ -964,8 +1216,13 @@ export function finalizeCompletedWebglSession(
 	outbox: WebglReplacementOutboxConfig,
 	client: PrismaClient,
 	completionClaimToken: string,
-	completionResult: { status: 'COMPLETED'; storageKey: string; sizeBytes: number; webglUrl: string } = {
-		status: 'COMPLETED', storageKey: sourceKey, sizeBytes: 0, webglUrl: '',
+	completionResult: {
+		status: 'COMPLETED';
+		sessionId: string;
+		generation: number;
+		sizeBytes: number;
+		uploadKind: 'WEBGL';
+		webglUrl: string;
 	},
 ): Promise<{ oldEntryKey: string }> {
 	return withSerializableRetry(async (tx) => {
@@ -977,6 +1234,13 @@ export function finalizeCompletedWebglSession(
 		await assertCurrentFinalizationPolicy(tx, sessionId, projectId);
 		const deployment = parseWebglEntryKey(projectId, entryKey);
 		if (!deployment) throw new Error('Cannot finalize malformed WebGL entry key');
+		const completingSession = await tx.gameUploadSession.findUniqueOrThrow({
+			where: { id: sessionId },
+			select: { webglDeploymentId: true },
+		});
+		if (completingSession.webglDeploymentId !== deployment.deploymentId) {
+			throw new Error('WebGL public generation does not match its durable reservation');
+		}
 		await assertNoDeletionClaim(tx, {
 			bucket: outbox.protectedBucket,
 			key: sourceKey,
@@ -993,23 +1257,39 @@ export function finalizeCompletedWebglSession(
 		const oldDeployment = project.webglEntryKey === entryKey
 			? null
 			: parseWebglEntryKey(projectId, project.webglEntryKey);
-		await queueDurableDeletions(tx, webglDeletionTargetsByEntry(
-			projectId,
-			project.webglEntryKey === entryKey ? '' : project.webglEntryKey,
-			outbox,
-			outbox.reason,
-		));
+		const oldSourceSession = oldDeployment
+			? await tx.gameUploadSession.findFirst({
+				where: {
+					id: { not: sessionId },
+					status: 'COMPLETED',
+					uploadKind: 'WEBGL',
+					webglDeploymentId: oldDeployment.deploymentId,
+				},
+				select: { id: true, storageKey: true },
+			})
+			: null;
+		await queueDurableDeletions(tx, [
+			...webglDeletionTargetsByEntry(
+				projectId,
+				project.webglEntryKey === entryKey ? '' : project.webglEntryKey,
+				outbox,
+				outbox.reason,
+			),
+			...(oldSourceSession?.storageKey && oldSourceSession.storageKey !== sourceKey
+				? [{
+					bucket: outbox.protectedBucket,
+					storageKey: oldSourceSession.storageKey,
+					reason: `${outbox.reason}-source`,
+				}]
+				: []),
+		]);
 		await tx.project.update({
 			where: { id: projectId },
 			data: { webglEntryKey: entryKey },
 		});
-		if (oldDeployment?.sourceKey && oldDeployment.sourceKey !== sourceKey) {
-			await tx.gameUploadSession.updateMany({
-				where: {
-					id: { not: sessionId },
-					status: 'COMPLETED',
-					storageKey: oldDeployment.sourceKey,
-				},
+		if (oldSourceSession?.storageKey && oldSourceSession.storageKey !== sourceKey) {
+			await tx.gameUploadSession.update({
+				where: { id: oldSourceSession.id },
 				data: { storageKey: null },
 			});
 		}
@@ -1019,6 +1299,7 @@ export function finalizeCompletedWebglSession(
 				status: { in: ['COMPLETING', 'VERIFYING'] },
 				uploadKind: 'WEBGL',
 				completionClaimToken,
+				webglDeploymentId: deployment.deploymentId,
 			},
 			data: {
 				status: 'COMPLETED',
@@ -1090,7 +1371,6 @@ export function claimVerifyingSessions(
 				JOIN "game_upload_active_sessions" AS active
 					ON active."session_id" = session."id"
 				WHERE session."status" = 'VERIFYING'
-					AND session."transport" = 'DIRECT_MULTIPART'
 					AND (
 						session."completion_claim_until" IS NULL
 						OR session."completion_claim_until" <= clock_timestamp()
@@ -1135,9 +1415,12 @@ export function createGameUploadRepository(
 		isSessionActive: async (sessionId: string) => (
 			await client.gameUploadActiveSession.count({ where: { sessionId } }) === 1
 		),
-		createSessionReplacingActive: (data: CreateSessionData) => (
+		assertCanCreateSession: (input) => assertCanCreateSession(input, client),
+		reservePartCapabilities: (input) => reservePartCapabilities(input, client),
+		createSessionReplacingActive: (data: CreateSessionData, limits: DirectUploadQuotaLimits) => (
 			createSessionReplacingActive(
 				data,
+				limits,
 				client,
 				options.abortBucket,
 				options.publicBucket,
@@ -1163,20 +1446,6 @@ export function createGameUploadRepository(
 				reason: target.reason,
 			}))
 		),
-		acquirePartClaim: (input: Parameters<typeof acquirePartClaim>[0]) => acquirePartClaim(input, client),
-		completePartClaim: (input: Parameters<typeof completePartClaim>[0]) => completePartClaim(input, client),
-		renewPartClaim: async (token: string, leaseMs: number) => {
-			const renewed = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-				UPDATE "game_upload_part_claims"
-				SET "lease_until" = clock_timestamp()
-						+ (${leaseMs} * INTERVAL '1 millisecond'),
-					"updated_at" = clock_timestamp()
-				WHERE "token" = ${token}
-					AND "lease_until" > clock_timestamp()
-				RETURNING "id"
-			`);
-			return { count: renewed.length };
-		},
 		claimCompletion: (input: Parameters<typeof claimCompletion>[0]) => claimCompletion(input, client),
 		markVerifying: (input: Parameters<typeof markVerifying>[0]) => markVerifying(input, client),
 		claimVerifyingSessions: (
@@ -1213,13 +1482,6 @@ export function createGameUploadRepository(
 			`);
 			return { count: released.length };
 		},
-		replaceMultipartGeneration: (input: Omit<Parameters<typeof replaceMultipartGeneration>[0], 'abortBucket'>) => (
-			replaceMultipartGeneration({
-				...input,
-				abortBucket: options.abortBucket,
-			}, client)
-		),
-		findPartsBySessionId: (sessionId: string) => findPartsBySessionId(sessionId, client),
 		revertToPending: (sessionId: string, completionClaimToken: string) => (
 			revertToPending(sessionId, client, completionClaimToken)
 		),
@@ -1243,6 +1505,17 @@ export function createGameUploadRepository(
 			bucket: options.abortBucket,
 			publicBucket: options.publicBucket,
 		}, client),
+		reserveWebglDeployment: (input: {
+			sessionId: string;
+			completionClaimToken: string;
+			candidateDeploymentId: string;
+		}) => {
+			if (!options.publicBucket) throw new Error('WebGL deployment requires a public bucket');
+			return reserveWebglDeployment({
+				...input,
+				publicBucket: options.publicBucket,
+			}, client);
+		},
 		claimStaleCompletingSessions: (
 			cutoff: Date,
 			token: string,
@@ -1254,27 +1527,6 @@ export function createGameUploadRepository(
 			orderBy: { expiresAt: 'asc' },
 			take: limit,
 		}),
-		findSessionsWithExpiredPartClaims: async (limit: number) => {
-			const expired = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-				SELECT session."id"
-				FROM "game_upload_sessions" AS session
-				WHERE session."status" = 'PENDING'
-					AND EXISTS (
-						SELECT 1
-						FROM "game_upload_part_claims" AS claim
-						WHERE claim."session_id" = session."id"
-							AND claim."lease_until" <= clock_timestamp()
-					)
-				ORDER BY session."updated_at" ASC
-				LIMIT ${limit}
-			`);
-			if (expired.length === 0) return [];
-			return client.gameUploadSession.findMany({
-				where: { id: { in: expired.map(({ id }) => id) } },
-				include: { parts: { orderBy: { partNumber: 'asc' } } },
-				orderBy: { updatedAt: 'asc' },
-			});
-		},
 		findKnownMultipartUploads: () => client.gameUploadSession.findMany({
 			where: { s3UploadId: { not: null }, s3Key: { not: null } },
 			select: { s3Key: true, s3UploadId: true },
@@ -1317,7 +1569,14 @@ export function createGameUploadRepository(
 			sourceKey: string,
 			outbox: WebglReplacementOutboxConfig,
 			completionClaimToken: string,
-			completionResult?: { status: 'COMPLETED'; storageKey: string; sizeBytes: number; webglUrl: string },
+			completionResult: {
+				status: 'COMPLETED';
+				sessionId: string;
+				generation: number;
+				sizeBytes: number;
+				uploadKind: 'WEBGL';
+				webglUrl: string;
+			},
 		) => finalizeCompletedWebglSession(
 			sessionId,
 			projectId,
@@ -1333,6 +1592,22 @@ export function createGameUploadRepository(
 
 /** The complete production persistence contract, including durability/fencing methods. */
 export interface DurableGameUploadRepository extends GameUploadRepository {
+	claimVerifyingSessions(
+		token: string,
+		leaseMs: number,
+		limit: number,
+	): Promise<GameUploadSessionSummary[]>;
+	markCompletedObjectFailed(input: {
+		sessionId: string;
+		storageKey: string;
+		reason: string;
+		completionClaimToken: string;
+	}): Promise<{ count: number }>;
+	reserveWebglDeployment(input: {
+		sessionId: string;
+		completionClaimToken: string;
+		candidateDeploymentId: string;
+	}): Promise<string>;
 	finalizeCompletedSession(
 		sessionId: string,
 		projectId: number,
@@ -1363,10 +1638,12 @@ export interface DurableGameUploadRepository extends GameUploadRepository {
 		sourceKey: string,
 		outbox: WebglReplacementOutboxConfig,
 		completionClaimToken: string,
-		completionResult?: {
+		completionResult: {
 			status: 'COMPLETED';
-			storageKey: string;
+			sessionId: string;
+			generation: number;
 			sizeBytes: number;
+			uploadKind: 'WEBGL';
 			webglUrl: string;
 		},
 	): Promise<{ oldEntryKey: string }>;

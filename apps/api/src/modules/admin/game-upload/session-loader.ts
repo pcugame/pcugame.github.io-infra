@@ -1,7 +1,7 @@
 import type { UserRole } from '@pcu/contracts';
 import { badRequest, forbidden, notFound } from '../../../shared/errors.js';
 import type { GameUploadServiceDependencies } from './ports.js';
-import { recordGameUploadEvent } from './observability.js';
+import { recordGameUploadEvent, safeGameUploadLogContext } from './observability.js';
 
 /** Load and validate a session (ownership, expiry) */
 export async function loadSession(
@@ -41,12 +41,12 @@ export async function loadSession(
 				cancelled.durableAbort.key,
 				cancelled.durableAbort.uploadId,
 			).catch((err) => {
-				deps.logger.error({
+				deps.logger.error(safeGameUploadLogContext({
 					err,
 					sessionId: cancelled.durableAbort?.sessionId,
-					s3Key: cancelled.durableAbort?.key,
-					tracking: cancelled.durableAbort?.tracking,
-				}, 'Failed to abort multipart upload for expired session');
+					action: 'prompt_abort',
+					result: 'failed',
+				}), 'Failed to abort multipart upload for expired session');
 			});
 		}
 		if (cancelled.count === 1) {

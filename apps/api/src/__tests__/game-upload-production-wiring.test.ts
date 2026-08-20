@@ -1,11 +1,9 @@
 import { createHash } from 'node:crypto';
-import { Readable } from 'node:stream';
 import { readFile } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
 import { cruise, type ICruiseResult } from 'dependency-cruiser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppLogger, ObjectStorage, SettingsStore } from '../application/ports.js';
-import { createNodeFileSystem } from '../infrastructure/production-ports.js';
 import { createAdminRoutes } from '../modules/admin/admin.routes.js';
 import {
 	createGameUploadProductionGraph,
@@ -20,6 +18,8 @@ import {
 	createTestUploadLifecycleRuntime,
 } from './helpers/upload-lifecycle.js';
 import { forbidden } from '../shared/errors.js';
+import { AppError } from '../shared/errors.js';
+import { createValidationWorker } from '../modules/admin/game-upload/validation-worker.service.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const apps: FastifyInstance[] = [];
@@ -53,18 +53,15 @@ function session(
 		projectId: 7,
 		userId: 11,
 		uploadKind: 'GAME',
-		transport: 'API_CHUNK_PROXY',
 		originalName: 'game.zip',
 		totalBytes: 1n,
 		chunkSizeBytes: 1,
 		totalChunks: 1,
-		uploadedChunks: [],
 		status: 'PENDING',
 		expiresAt: new Date('2026-08-12T00:00:00.000Z'),
 		s3UploadId: 'multipart-1',
 		s3Key: 'game-object.zip',
 		storageKey: null,
-		parts: [],
 		multipartGeneration: 1,
 		...sourceForByte(1),
 		project: { status: 'PUBLISHED' },
@@ -76,6 +73,7 @@ function createStorageHarness() {
 	let headResult: { size: number; contentType: string } | null = null;
 	let header: Buffer = Buffer.from('not-a-zip');
 	let uploadPartGate: Promise<void> | undefined;
+	let listPartsGate: Promise<void> | undefined;
 	const calls = {
 		presignUploadPart: vi.fn(async () => 'https://storage.test/upload-part'),
 		createMultipart: vi.fn(async () => 'multipart-new'),
@@ -95,7 +93,10 @@ function createStorageHarness() {
 		}),
 		completeMultipart: vi.fn(async () => undefined),
 		delete: vi.fn(async () => undefined),
-		listParts: vi.fn(async () => [{ partNumber: 1, etag: 'etag-1', sizeBytes: 1 }]),
+		listParts: vi.fn(async () => {
+			if (listPartsGate) await listPartsGate;
+			return [{ partNumber: 1, etag: 'etag-1', sizeBytes: 1 }];
+		}),
 		listMultipartUploads: vi.fn(async () => []),
 		head: vi.fn(async () => headResult),
 		readRange: vi.fn(async () => header),
@@ -124,6 +125,7 @@ function createStorageHarness() {
 		setHead(value: typeof headResult) { headResult = value; },
 		setHeader(value: Buffer) { header = value; },
 		blockUploadPart(gate: Promise<void>) { uploadPartGate = gate; },
+		blockListParts(gate: Promise<void>) { listPartsGate = gate; },
 	};
 }
 
@@ -164,8 +166,6 @@ function graphHarness() {
 	const graph = createGameUploadProductionGraph({
 		config: {
 			...defaultTestEnv,
-			API_PUBLIC_URL: 'https://api.test',
-			S3_BUCKET_PUBLIC: 'public',
 			S3_BUCKET_PROTECTED: 'protected',
 			UPLOAD_CHUNK_SIZE_MB: 1,
 			UPLOAD_SESSION_TTL_MINUTES: 60,
@@ -173,7 +173,6 @@ function graphHarness() {
 			UPLOAD_PRIVILEGED_GAME_MAX_MB: 8,
 		},
 		storage: storage.storage,
-		fileSystem: createNodeFileSystem(),
 		settings,
 		uploadLimiter: createUploadLimiter(() => 2),
 		lifecycle: {
@@ -255,6 +254,7 @@ describe('game-upload production composition', () => {
 			'utf8',
 		);
 		expect(source).not.toMatch(/lib\/(prisma|s3|storage|logger)|createGameUploadRepository/);
+		expect(source).not.toMatch(/\.readRange\(|\.stream\(|createCompletedUploadFinalizer|sweepVerifyingSessions/);
 
 		const interval = vi.spyOn(globalThis, 'setInterval');
 		const harness = graphHarness();
@@ -272,8 +272,8 @@ describe('game-upload production composition', () => {
 		expect(modules).toEqual(expect.arrayContaining([
 			'src/modules/admin/game-upload/composition.ts',
 			'src/modules/admin/game-upload/controller.ts',
-			'src/modules/webgl/deployment.ts',
 		]));
+		expect(modules).not.toContain('src/modules/webgl/deployment.ts');
 		expect(modules).not.toContain('src/modules/admin/game-upload/repository.ts');
 		expect(modules).not.toContain('src/modules/orphan/service.ts');
 	});
@@ -296,7 +296,9 @@ describe('game-upload production composition', () => {
 				reason: 'active-upload-replaced',
 			}],
 		});
-		harness.storage.calls.abortMultipart.mockRejectedValueOnce(new Error('prompt abort failed'));
+		harness.storage.calls.abortMultipart.mockRejectedValueOnce(new Error(
+			'prompt abort failed old-upload https://garage.test/key?X-Amz-Signature=secret',
+		));
 		const app = await routeApp(harness.graph);
 		const response = await app.inject({
 			method: 'POST',
@@ -306,7 +308,6 @@ describe('game-upload production composition', () => {
 
 		expect(response.statusCode, response.body).toBe(201);
 		expect(response.json().data).toMatchObject({
-			transport: 'DIRECT_MULTIPART',
 			generation: 1,
 		});
 		expect(harness.repository.createSessionReplacingActive).toHaveBeenCalledWith(
@@ -315,44 +316,50 @@ describe('game-upload production composition', () => {
 				s3UploadId: 'multipart-new',
 				s3Key: expect.stringMatching(/\.zip$/),
 			}),
+			expect.objectContaining({
+				actorActiveSessions: defaultTestEnv.DIRECT_UPLOAD_ACTOR_ACTIVE_SESSION_MAX,
+				projectActiveSessions: defaultTestEnv.DIRECT_UPLOAD_PROJECT_ACTIVE_SESSION_MAX,
+			}),
 		);
 		expect(harness.uploadLifecycle.wakeMaintenance).toHaveBeenCalledOnce();
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ sessionId: 'old-session' }),
+			expect.objectContaining({
+				sessionId: 'old-session',
+				action: 'prompt_abort',
+				result: 'failed',
+			}),
 			'Failed to abort multipart upload while replacing active session',
 		);
+		const loggedContext = vi.mocked(logger.error).mock.calls.at(-1)?.[0];
+		expect(JSON.stringify(loggedContext)).not.toContain('old.zip');
+		expect(JSON.stringify(loggedContext)).not.toContain('old-upload');
+		expect(JSON.stringify(loggedContext)).not.toContain('X-Amz-Signature');
 	});
 
 	it('wires the public UploadPart signer with configured bounds and rechecks upload policy', async () => {
 		const harness = graphHarness();
-		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
-			transport: 'DIRECT_MULTIPART',
+		const activeSession = session({
 			multipartGeneration: 4,
-		}));
-		vi.mocked(harness.repository.findExhibitionById).mockResolvedValue({
-			id: 1,
-			year: 2026,
-			title: 'Closed exhibition',
-			isUploadEnabled: false,
 		});
+		vi.mocked(harness.repository.reservePartCapabilities).mockRejectedValueOnce(
+			forbidden('Upload is disabled'),
+		);
 
 		await expect(harness.graph.service.signPartUrls(
 			'session-1',
 			{ id: 11, role: 'USER' },
-			{ generation: 4, partNumbers: [1] },
+			{ generation: 4, parts: [{ partNumber: 1, checksumSha256: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' }] },
 		)).rejects.toMatchObject({ statusCode: 403 });
 		expect(harness.storage.calls.presignUploadPart).not.toHaveBeenCalled();
 
-		vi.mocked(harness.repository.findExhibitionById).mockResolvedValue({
-			id: 1,
-			year: 2026,
-			title: 'Open exhibition',
-			isUploadEnabled: true,
+		vi.mocked(harness.repository.reservePartCapabilities).mockResolvedValueOnce({
+			session: activeSession,
+			isRefresh: false,
 		});
 		await expect(harness.graph.service.signPartUrls(
 			'session-1',
 			{ id: 11, role: 'USER' },
-			{ generation: 4, partNumbers: [1] },
+			{ generation: 4, parts: [{ partNumber: 1, checksumSha256: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' }] },
 		)).resolves.toMatchObject({ generation: 4, parts: [{ partNumber: 1 }] });
 		expect(harness.storage.calls.presignUploadPart).toHaveBeenCalledWith(
 			'protected',
@@ -360,13 +367,13 @@ describe('game-upload production composition', () => {
 			'multipart-1',
 			1,
 			defaultTestEnv.UPLOAD_PART_URL_TTL_SEC,
+			'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
 		);
 	});
 
-	it('never sends a DIRECT_MULTIPART body through the legacy chunk relay and returns 202 after storage completion', async () => {
+	it('has no API byte route and returns 202 after storage completion', async () => {
 		const harness = graphHarness();
 		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
-			transport: 'DIRECT_MULTIPART',
 			multipartGeneration: 1,
 		}));
 		harness.storage.calls.listParts.mockResolvedValue([
@@ -381,7 +388,7 @@ describe('game-upload production composition', () => {
 			headers: { 'content-type': 'application/octet-stream' },
 			payload: Buffer.from([1]),
 		});
-		expect(rejectedChunk.statusCode).toBe(400);
+		expect(rejectedChunk.statusCode).toBe(404);
 		expect(harness.storage.calls.uploadPart).not.toHaveBeenCalled();
 
 		const completed = await app.inject({
@@ -412,9 +419,7 @@ describe('game-upload production composition', () => {
 		];
 
 		const otherUser = graphHarness();
-		vi.mocked(otherUser.repository.findSessionById).mockResolvedValue(session({
-			transport: 'DIRECT_MULTIPART',
-		}));
+		vi.mocked(otherUser.repository.findSessionById).mockResolvedValue(session());
 		const otherUserApp = await routeApp(otherUser.graph, { id: 12, role: 'USER' });
 		for (const action of actions) {
 			const response = await otherUserApp.inject(action);
@@ -425,9 +430,7 @@ describe('game-upload production composition', () => {
 
 		for (const role of ['ADMIN', 'OPERATOR'] as const) {
 			const privileged = graphHarness();
-			vi.mocked(privileged.repository.findSessionById).mockResolvedValue(session({
-				transport: 'DIRECT_MULTIPART',
-			}));
+			vi.mocked(privileged.repository.findSessionById).mockResolvedValue(session());
 			privileged.storage.calls.listParts.mockResolvedValue([
 				{ partNumber: 1, etag: 'garage-etag', sizeBytes: 1 },
 			]);
@@ -439,9 +442,7 @@ describe('game-upload production composition', () => {
 		}
 
 		const removed = graphHarness();
-		vi.mocked(removed.repository.findSessionById).mockResolvedValue(session({
-			transport: 'DIRECT_MULTIPART',
-		}));
+		vi.mocked(removed.repository.findSessionById).mockResolvedValue(session());
 		removed.access.loadProjectWithAccess.mockRejectedValue(
 			forbidden('Not project owner or member'),
 		);
@@ -454,66 +455,28 @@ describe('game-upload production composition', () => {
 		expect(removed.repository.cancelSessionAndClearActive).not.toHaveBeenCalled();
 	});
 
-	it('uses required part-claim and generation ports instead of a legacy ETag write shortcut', async () => {
+	it('commits deterministic validation failure through the claim-fenced outbox before waking deletion', async () => {
 		const harness = graphHarness();
-		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
-			multipartGeneration: 3,
-		}));
-		vi.mocked(harness.repository.completePartClaim).mockResolvedValue({
-			accepted: true,
-			parts: [{ partNumber: 1, etag: 'etag-1', generation: 3 }],
-		});
-		const app = await routeApp(harness.graph);
-		const response = await app.inject({
-			method: 'PUT',
-			url: `/api/admin/game-upload-sessions/session-1/chunks/0?sourceIdentityAlgorithm=SHA256_BLOCK_MANIFEST_V1&sourceIdentity=${session().sourceIdentity}`,
-			headers: { 'content-type': 'application/octet-stream' },
-			payload: Buffer.from([1]),
-		});
-
-		expect(response.statusCode, response.body).toBe(200);
-		const claim = vi.mocked(harness.repository.acquirePartClaim).mock.calls[0]?.[0];
-		expect(claim).toMatchObject({
-			sessionId: 'session-1',
-			partNumber: 1,
-			generation: 3,
-			token: expect.any(String),
-		});
-		expect(harness.repository.completePartClaim).toHaveBeenCalledWith({
-			token: claim?.token,
-			etag: 'etag-1',
-			contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex'),
-		});
-	});
-
-	it('passes the completion claim token into the atomic terminal outbox commit and only wakes the worker afterward', async () => {
-		const harness = graphHarness();
-		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
-			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex') }],
-		}));
-		vi.mocked(harness.repository.findPartsBySessionId).mockResolvedValue([
-			{ partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex') },
+		vi.mocked(harness.repository.claimVerifyingSessions).mockResolvedValue([
+			session({ status: 'VERIFYING', storageKey: 'game-object.zip' }),
 		]);
-		harness.storage.setHead({ size: 1, contentType: 'application/zip' });
-		harness.storage.setHeader(Buffer.from('not-a-zip'));
-		const app = await routeApp(harness.graph);
-		const response = await app.inject({
-			method: 'POST',
-			url: '/api/admin/game-upload-sessions/session-1/complete',
+		const worker = createValidationWorker({
+			repository: harness.repository,
+			ids: idGenerator(),
+			processor: { process: vi.fn(async () => {
+				throw new AppError(400, 'invalid archive');
+			}) },
+			wakeDeletionWorker: harness.uploadLifecycle.wakeDeletionWorker,
+			logger,
+			options: { concurrency: 1, claimLeaseMs: 120_000 },
 		});
 
-		expect(response.statusCode, response.body).toBe(400);
-		const completion = vi.mocked(harness.repository.claimCompletion).mock.calls[0]?.[0];
-		expect(completion).toMatchObject({
-			sessionId: 'session-1',
-			generation: 1,
-			token: expect.any(String),
-		});
+		await expect(worker.runPass()).resolves.toMatchObject({ claimed: 1, rejected: 1 });
 		expect(harness.repository.markCompletedObjectFailed).toHaveBeenCalledWith({
 			sessionId: 'session-1',
 			storageKey: 'game-object.zip',
-			reason: 'game-upload-completion-invalid',
-			completionClaimToken: completion?.token,
+			reason: 'game-direct-validation-rejected',
+			completionClaimToken: expect.any(String),
 		});
 		expect(harness.uploadLifecycle.wakeDeletionWorker).toHaveBeenCalledOnce();
 		expect(harness.storage.calls.delete).not.toHaveBeenCalled();
@@ -521,24 +484,24 @@ describe('game-upload production composition', () => {
 
 	it('does not wake deletion or report terminal success when the atomic outbox commit fails', async () => {
 		const harness = graphHarness();
-		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
-			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex') }],
-		}));
-		vi.mocked(harness.repository.findPartsBySessionId).mockResolvedValue([
-			{ partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex') },
+		vi.mocked(harness.repository.claimVerifyingSessions).mockResolvedValue([
+			session({ status: 'VERIFYING', storageKey: 'game-object.zip' }),
 		]);
 		vi.mocked(harness.repository.markCompletedObjectFailed).mockRejectedValue(
 			new Error('atomic outbox unavailable'),
 		);
-		harness.storage.setHead({ size: 1, contentType: 'application/zip' });
-		const app = await routeApp(harness.graph);
-		const response = await app.inject({
-			method: 'POST',
-			url: '/api/admin/game-upload-sessions/session-1/complete',
+		const worker = createValidationWorker({
+			repository: harness.repository,
+			ids: idGenerator(),
+			processor: { process: vi.fn(async () => {
+				throw new AppError(400, 'invalid archive');
+			}) },
+			wakeDeletionWorker: harness.uploadLifecycle.wakeDeletionWorker,
+			logger,
+			options: { concurrency: 1, claimLeaseMs: 120_000 },
 		});
 
-		expect(response.statusCode).toBe(500);
-		expect(response.json().error.message).toContain('atomic outbox unavailable');
+		await expect(worker.runPass()).rejects.toThrow('atomic outbox unavailable');
 		expect(harness.uploadLifecycle.wakeDeletionWorker).not.toHaveBeenCalled();
 		expect(harness.storage.calls.delete).not.toHaveBeenCalled();
 	});
@@ -546,16 +509,18 @@ describe('game-upload production composition', () => {
 	it('uses claimed recovery and keeps two injected durable runtimes isolated', async () => {
 		const a = graphHarness();
 		const b = graphHarness();
-		vi.mocked(a.repository.claimStaleCompletingSessions).mockResolvedValue([
-			session({ id: 'stale-a', s3Key: null, s3UploadId: null, status: 'COMPLETING' }),
-		]);
+		vi.mocked(a.repository.claimStaleCompletingSessions)
+			.mockResolvedValueOnce([
+				session({ id: 'stale-a', s3Key: null, s3UploadId: null, status: 'COMPLETING' }),
+			])
+			.mockResolvedValueOnce([]);
 
 		await a.graph.recoverStaleUploads();
 		expect(a.repository.claimStaleCompletingSessions).toHaveBeenCalledWith(
 			new Date('2026-08-10T23:55:00.000Z'),
 			expect.any(String),
 			2 * 60 * 1000,
-			50,
+			1,
 		);
 		expect(a.repository.markFailed).toHaveBeenCalledWith(
 			'stale-a',
@@ -570,42 +535,32 @@ describe('game-upload production composition', () => {
 		const b = graphHarness();
 		vi.mocked(a.repository.findSessionById).mockResolvedValue(session());
 		vi.mocked(b.repository.findSessionById).mockResolvedValue(session({ id: 'session-b', ...sourceForByte(2) }));
-		vi.mocked(a.repository.completePartClaim).mockResolvedValue({
-			accepted: true,
-			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1 }],
-		});
-		vi.mocked(b.repository.completePartClaim).mockResolvedValue({
-			accepted: true,
-			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1 }],
-		});
+		a.storage.setHead({ size: 1, contentType: 'application/zip' });
+		b.storage.setHead({ size: 1, contentType: 'application/zip' });
 		let release!: () => void;
 		const gate = new Promise<void>((resolve) => { release = resolve; });
-		a.storage.blockUploadPart(gate);
+		a.storage.blockListParts(gate);
 
-		const activeA = a.graph.service.uploadChunk(
+		const activeA = a.graph.service.completeSession(
 			'session-1',
-			0,
-			Readable.from([Buffer.from([1])]),
 			{ id: 11, role: 'ADMIN' },
-			{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: session().sourceIdentity! },
+			{ generation: 1, parts: [{ partNumber: 1, etag: 'etag-1', sizeBytes: 1 }] },
 		);
-		await vi.waitFor(() => expect(a.storage.calls.uploadPart).toHaveBeenCalledOnce());
+		await vi.waitFor(() => expect(a.storage.calls.listParts).toHaveBeenCalledOnce());
 		let closed = false;
 		const closing = a.graph.close().then(() => { closed = true; });
 		await Promise.resolve();
 		expect(closed).toBe(false);
 
-		await expect(b.graph.service.uploadChunk(
+		await expect(b.graph.service.completeSession(
 			'session-b',
-			0,
-			Readable.from([Buffer.from([2])]),
 			{ id: 11, role: 'ADMIN' },
-			{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: sourceForByte(2).sourceIdentity },
-		)).resolves.toMatchObject({ uploadedCount: 1 });
+			{ generation: 1, parts: [{ partNumber: 1, etag: 'etag-1', sizeBytes: 1 }] },
+		)).resolves.toMatchObject({ status: 'VERIFYING' });
 		release();
 		await Promise.all([activeA, closing]);
 		expect(closed).toBe(true);
-		expect(b.repository.completePartClaim).toHaveBeenCalledOnce();
+		expect(b.repository.markVerifying).toHaveBeenCalledOnce();
 		await b.graph.close();
 	});
 });

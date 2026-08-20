@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { InlineAssetKind } from '@pcu/contracts';
 
 import {
 	SubmitProjectPayloadSchema,
@@ -11,18 +12,25 @@ import {
 import { adminExhibitionApi, isApiError } from '../../lib/api';
 import { getProjectSubmitApi, type ProjectSubmissionMode } from '../../lib/api/project-submit';
 import { queryKeys } from '../../lib/query';
-import { buildSubmitFormData } from '../../lib/utils';
+import { buildAssetFormData } from '../../lib/utils';
 import {
 	createIdempotencyFingerprint,
-	fingerprintFile,
 	useStableIdempotencyOperation,
 } from '../../lib/idempotency-operation';
 import { useMe } from '../auth';
 import type { SubmissionFilesState } from './useSubmissionFiles';
 
+export interface InlineSubmissionUpload {
+	id: string;
+	kind: InlineAssetKind;
+	file: File;
+	status: 'pending' | 'uploading' | 'ready' | 'failed';
+	error?: unknown;
+}
+
 interface UseProjectSubmissionFormParams {
 	mode: ProjectSubmissionMode;
-	files: Pick<SubmissionFilesState, 'posterFile' | 'imageFiles' | 'videoFiles' | 'gameFile' | 'webglFile'>;
+	files: Pick<SubmissionFilesState, 'posterFile' | 'imageFiles' | 'gameFile' | 'webglFile'>;
 }
 
 export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFormParams) {
@@ -31,22 +39,23 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 	const { user } = useMe();
 	const isAdminMode = mode === 'admin';
 	const isPrivileged = isAdminMode && (user?.role === 'ADMIN' || user?.role === 'OPERATOR');
+	const projectApi = getProjectSubmitApi(mode);
 	const copy = isAdminMode
 		? {
 				eyebrow: 'Admin Project',
 				title: '운영자 작품 등록',
 				submitLabel: '작품 등록',
-				submittingLabel: '등록 중…',
-				gameUploadHint: '작품 등록 후 자동으로 청크 업로드가 시작됩니다. 중간에 끊겨도 이어서 올릴 수 있습니다.',
-				webglUploadHint: '게임 ZIP과 별도로 업로드됩니다. ZIP 루트 또는 단일 폴더 아래에 index.html이 있어야 합니다.',
+				submittingLabel: '메타데이터 등록 중…',
+				gameUploadHint: '작품 등록 후 브라우저에서 저장소로 direct multipart 업로드합니다.',
+				webglUploadHint: '게임 ZIP과 별도의 direct multipart 세션을 사용합니다.',
 			}
 		: {
 				eyebrow: 'My Project',
 				title: '내 작품 제출',
 				submitLabel: '작품 제출',
-				submittingLabel: '제출 중…',
-				gameUploadHint: '작품 제출 후 자동으로 청크 업로드가 시작됩니다. 중간에 끊겨도 이어서 올릴 수 있습니다.',
-				webglUploadHint: '게임 ZIP과 별도로 업로드됩니다. ZIP 루트 또는 단일 폴더 아래에 index.html이 있어야 합니다.',
+				submittingLabel: '메타데이터 등록 중…',
+				gameUploadHint: '작품 제출 후 브라우저에서 저장소로 direct multipart 업로드합니다.',
+				webglUploadHint: '게임 ZIP과 별도의 direct multipart 세션을 사용합니다.',
 			};
 
 	const { data: yearsData } = useQuery({
@@ -54,7 +63,6 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		queryFn: adminExhibitionApi.list,
 	});
 	const years = yearsData?.items ?? [];
-
 	const form = useForm<SubmitProjectPayloadInput>({
 		resolver: zodResolver(SubmitProjectPayloadSchema),
 		defaultValues: {
@@ -62,101 +70,116 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			title: '',
 			summary: '',
 			description: '',
-			members: [
-				{
-					name: user?.name ?? '',
-					studentId: user?.studentId ?? '',
-					...(isAdminMode && user?.id ? { userId: user.id } : {}),
-				},
-			],
+			members: [{
+				name: user?.name ?? '',
+				studentId: user?.studentId ?? '',
+				...(isAdminMode && user?.id ? { userId: user.id } : {}),
+			}],
 		},
 	});
-	const {
-		control,
-		getValues,
-		setValue,
-		formState: { errors },
-	} = form;
-
-	const membersFieldArray = useFieldArray({
-		control,
-		name: 'members',
-	});
+	const { control, getValues, setValue, formState: { errors } } = form;
+	const membersFieldArray = useFieldArray({ control, name: 'members' });
 
 	useEffect(() => {
 		if (!user || membersFieldArray.fields.length === 0) return;
-
 		const firstMember = getValues('members.0');
-		if (!firstMember?.name) {
-			setValue('members.0.name', user.name, { shouldValidate: true });
-		}
+		if (!firstMember?.name) setValue('members.0.name', user.name, { shouldValidate: true });
 		if (!firstMember?.studentId && user.studentId) {
 			setValue('members.0.studentId', user.studentId, { shouldValidate: true });
 		}
-		if (isAdminMode && !firstMember?.userId) {
-			setValue('members.0.userId', user.id);
-		}
+		if (isAdminMode && !firstMember?.userId) setValue('members.0.userId', user.id);
 	}, [membersFieldArray.fields.length, getValues, isAdminMode, setValue, user]);
 
 	const selectedExhibitionId = useWatch({ control, name: 'exhibitionId' });
 	const selectedYearItem = years.find((year) => year.id === Number(selectedExhibitionId));
 	const isUploadLocked = selectedYearItem != null && !selectedYearItem.isUploadEnabled && !isPrivileged;
 	const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
+	const [inlineUploads, setInlineUploads] = useState<InlineSubmissionUpload[]>([]);
 	const idempotencyOperation = useStableIdempotencyOperation();
 
+	const uploadInlineAsset = useCallback(async (
+		projectId: number,
+		item: InlineSubmissionUpload,
+	) => {
+		setInlineUploads((current) => current.map((candidate) => candidate.id === item.id
+			? { ...candidate, status: 'uploading', error: undefined }
+			: candidate));
+		try {
+			await projectApi.addAsset({
+				projectId,
+				formData: buildAssetFormData(item.kind, item.file),
+				idempotencyKey: item.id,
+			});
+			setInlineUploads((current) => current.map((candidate) => candidate.id === item.id
+				? { ...candidate, status: 'ready', error: undefined }
+				: candidate));
+		} catch (error) {
+			setInlineUploads((current) => current.map((candidate) => candidate.id === item.id
+				? { ...candidate, status: 'failed', error }
+				: candidate));
+		}
+	}, [projectApi]);
+
+	const uploadInlineAssets = useCallback(async (
+		projectId: number,
+		items: InlineSubmissionUpload[],
+	) => {
+		// One-at-a-time keeps total API ingress, temp disk and transform memory bounded.
+		for (const item of items) await uploadInlineAsset(projectId, item);
+	}, [uploadInlineAsset]);
+
 	const submitMutation = useMutation({
-		mutationFn: ({ formData, idempotencyKey }: {
-			formData: FormData;
+		mutationFn: ({ payload, idempotencyKey }: {
+			payload: SubmitProjectPayloadInput;
 			idempotencyKey: string;
 			fingerprint: string;
-		}) => getProjectSubmitApi(mode).submit({ formData, idempotencyKey }),
+		}) => projectApi.submit({ payload, idempotencyKey }),
 		retry: (failureCount, error) => failureCount < 1
-			&& isApiError(error)
-			&& error.status === 0
-			&& error.statusText === 'Network Error',
+			&& isApiError(error) && error.status === 0 && error.statusText === 'Network Error',
 		retryDelay: 0,
 		onSuccess: (res, operation) => {
 			idempotencyOperation.complete(operation.fingerprint);
 			qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 			qc.invalidateQueries({ queryKey: queryKeys.publicYears });
 			qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
-
-			if (files.gameFile || files.webglFile) {
-				setCreatedProjectId(res.id);
-			} else {
-				navigate(isAdminMode ? `/admin/projects/${res.id}/edit` : '/me/projects');
-			}
+			const items: InlineSubmissionUpload[] = [
+				...(files.posterFile ? [{
+					id: crypto.randomUUID(),
+					kind: 'POSTER' as const,
+					file: files.posterFile,
+					status: 'pending' as const,
+				}] : []),
+				...files.imageFiles.map((file) => ({
+					id: crypto.randomUUID(),
+					kind: 'IMAGE' as const,
+					file,
+					status: 'pending' as const,
+				})),
+			];
+			setCreatedProjectId(res.id);
+			setInlineUploads(items);
+			void uploadInlineAssets(res.id, items);
 		},
 	});
 
 	const onSubmit = (data: SubmitProjectPayloadInput) => {
+		const payload = { ...data, members: data.members.map((member) => ({ ...member })) };
 		if (isAdminMode && user) {
-			const linkedMember = data.members.find((member) => member.name === user.name);
+			const linkedMember = payload.members.find((member) => member.name === user.name);
 			if (linkedMember) linkedMember.userId = user.id;
 		}
-		const fd = buildSubmitFormData(data, {
-			poster: files.posterFile ?? undefined,
-			images: files.imageFiles.length > 0 ? files.imageFiles : undefined,
-			videoFiles: files.videoFiles.length > 0 ? files.videoFiles : undefined,
-		});
-		const fingerprint = createIdempotencyFingerprint({
-			mode,
-			payload: data,
-			files: {
-				poster: files.posterFile ? fingerprintFile(files.posterFile) : null,
-				images: files.imageFiles.map(fingerprintFile),
-				videos: files.videoFiles.map(fingerprintFile),
-				game: files.gameFile ? fingerprintFile(files.gameFile) : null,
-				webgl: files.webglFile ? fingerprintFile(files.webglFile) : null,
-			},
-		});
+		const fingerprint = createIdempotencyFingerprint({ mode, payload });
 		submitMutation.mutate({
-			formData: fd,
+			payload,
 			fingerprint,
 			idempotencyKey: idempotencyOperation.keyFor(fingerprint),
 		});
 	};
 
+	const retryInlineUpload = useCallback((item: InlineSubmissionUpload) => {
+		if (!createdProjectId) return;
+		void uploadInlineAsset(createdProjectId, item);
+	}, [createdProjectId, uploadInlineAsset]);
 	const goToEdit = useCallback(() => {
 		if (!createdProjectId) return;
 		navigate(isAdminMode ? `/admin/projects/${createdProjectId}/edit` : '/me/projects');
@@ -168,10 +191,13 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		errors,
 		form,
 		goToEdit,
+		inlineUploads,
+		inlineUploadsComplete: inlineUploads.every((item) => item.status === 'ready'),
 		isSubmitting: submitMutation.isPending,
 		isUploadLocked,
 		membersFieldArray,
 		onSubmit,
+		retryInlineUpload,
 		selectedYearItem,
 		showGameProgress: createdProjectId !== null,
 		submitMutation,

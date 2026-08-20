@@ -21,7 +21,8 @@ services:
     restart: unless-stopped
     ports:
       - "3900:3900"   # S3 API
-      - "3902:3902"   # Admin API
+      - "3902:3902"   # Garage website endpoint (diagnostics only)
+      - "3903:3903"   # Garage admin API (local only)
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
       - garage_data:/var/lib/garage/data
@@ -51,6 +52,50 @@ services:
       - garage_meta:/var/lib/garage/meta:ro
     entrypoint: ["/bin/sh", "/garage-init.sh"]
     restart: "no"
+
+  upload-part-origin:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      UPLOAD_PART_MAX_BYTES: ${UPLOAD_PART_MAX_BYTES:-10m}
+      NGINX_LISTEN_PORT: 8080
+      GARAGE_S3_UPSTREAM: ${GARAGE_S3_UPSTREAM:-http://garage:3900}
+      GARAGE_S3_TLS_SERVER_NAME: ${GARAGE_S3_TLS_SERVER_NAME:-garage}
+    ports:
+      - "3901:8080"
+    volumes:
+      - ./upload-part.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  public-origin:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: 8080
+      GARAGE_PUBLIC_WEB_UPSTREAM: ${GARAGE_PUBLIC_WEB_UPSTREAM:-http://garage:3902}
+      GARAGE_PUBLIC_WEB_TLS_SERVER_NAME: ${GARAGE_PUBLIC_WEB_TLS_SERVER_NAME:-garage}
+      PUBLIC_CORS_ORIGIN_PRIMARY: ${PUBLIC_CORS_ORIGIN_PRIMARY:-http://localhost:5173}
+      PUBLIC_CORS_ORIGIN_SECONDARY: ${PUBLIC_CORS_ORIGIN_SECONDARY:-http://127.0.0.1:5173}
+      WEB_PUBLIC_ORIGIN: ${WEB_PUBLIC_ORIGIN:-http://localhost:5173}
+    ports:
+      - "3904:8080"
+    volumes:
+      - ./public-origin.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pg_data:

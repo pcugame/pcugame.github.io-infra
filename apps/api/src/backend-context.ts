@@ -35,10 +35,6 @@ import { createRootLogger } from './lib/logger.js';
 import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
 import type { DownloadRateLimiter } from './shared/download-rate-limit.js';
 import {
-	createExportProgressStore,
-	type ExportProgressStore,
-} from './modules/admin/export/service.js';
-import {
 	createAssetsBannedProductionGraph,
 	type AssetsBannedProductionGraph,
 } from './modules/assets/composition.js';
@@ -264,7 +260,6 @@ export interface BackendContext {
 	uploadLimiter: UploadLimiter;
 	protectedDownloads: DownloadRateLimiter;
 	settings: SettingsStore;
-	exportProgress: ExportProgressStore;
 	uploadLifecycleMetrics: UploadLifecycleMetrics;
 	uploadLifecycle: UploadLifecycleRuntime;
 	lifecycle: Lifecycle;
@@ -302,7 +297,6 @@ export interface ProductionResourceFactories {
 	uploadLimiter(config: Env): MaybePromise<UploadLimiter & { close(): void }>;
 	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
 	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
-	exportProgress(config: Env): MaybePromise<ExportProgressStore>;
 	routes(
 		config: Env,
 		assetsBanned: AssetsBannedProductionGraph,
@@ -330,7 +324,6 @@ export interface ProductionResourceOverrides {
 	uploadLimiter: ResourceLease<UploadLimiter>;
 	lifecycle: ResourceLease<Lifecycle>;
 	protectedDownloads: ResourceLease<DownloadRateLimiter>;
-	exportProgress: ResourceLease<ExportProgressStore>;
 	uploadLifecycle: ResourceLease<UploadLifecycleRuntime>;
 }
 
@@ -375,7 +368,6 @@ const defaultFactories: ProductionResourceFactories = {
 	uploadLimiter: (config) => createUploadLimiterPort(config.UPLOAD_MAX_CONCURRENT),
 	lifecycle: (clock, scheduler) => createLifecyclePort(clock, scheduler),
 	protectedDownloads: (clock, scheduler) => createProtectedDownloadLimiter({ clock, scheduler }),
-	exportProgress: () => createExportProgressStore(),
 	routes: loadProductionRoutes,
 };
 
@@ -623,11 +615,6 @@ export async function createProductionBackendContext(
 			(limiter) => limiter.close(),
 			(limiter) => limiter.start(),
 		);
-		const exportProgress = await resource(
-			'exportProgress',
-			() => factories.exportProgress(config),
-			(progress) => progress.close(),
-		);
 		const persistence: BackendPersistencePorts = options.persistence ?? (() => {
 			if (!prisma) throw new Error('Prisma persistence was not initialized');
 			return {
@@ -656,8 +643,6 @@ export async function createProductionBackendContext(
 		const publicGraph = createPublicProductionGraph({
 			config,
 			repository: persistence.publicRepository,
-			storage,
-			logger,
 		});
 		const projectAccessRepository = persistence.projectAccessRepository;
 		const projectAccess = createProjectAccessService(projectAccessRepository);
@@ -713,12 +698,7 @@ export async function createProductionBackendContext(
 			config,
 			importRepository: persistence.importRepository,
 			exportRepository: persistence.exportRepository,
-			storage,
-			fileSystem,
-			exportProgress,
-			clock,
 			ids,
-			logger,
 		});
 		owner.register('importExport', owned(
 			importExport,
@@ -743,7 +723,6 @@ export async function createProductionBackendContext(
 		const gameUpload = createGameUploadProductionGraph({
 			config,
 			storage,
-			fileSystem,
 			settings,
 			uploadLimiter,
 			lifecycle,
@@ -819,7 +798,6 @@ export async function createProductionBackendContext(
 			uploadLimiter,
 			protectedDownloads,
 			settings,
-			exportProgress,
 			uploadLifecycleMetrics,
 			uploadLifecycle,
 			lifecycle,

@@ -43,7 +43,6 @@ interface Props {
 }
 
 const FILE_IDENTITY_MISMATCH_MESSAGE = '선택한 파일이 이 업로드 세션을 시작한 파일과 다릅니다. 원래 파일을 선택하거나 새 업로드를 시작하세요.';
-const LEGACY_SESSION_MESSAGE = '이전 형식의 업로드 세션은 안전하게 재개할 수 없습니다. 새 업로드를 시작하세요.';
 
 type SessionWithIdentity = {
 	sourceIdentityAlgorithm: typeof SOURCE_IDENTITY_ALGORITHM;
@@ -84,8 +83,6 @@ function getUploadIntegrityErrorMessage(error: unknown): string | null {
 			return FILE_IDENTITY_MISMATCH_MESSAGE;
 		case 'CHUNK_CONTENT_MISMATCH':
 			return '업로드 청크 무결성 충돌이 발생했습니다. 새 업로드를 시작하세요.';
-		case 'LEGACY_UPLOAD_SESSION':
-			return LEGACY_SESSION_MESSAGE;
 		default:
 			return null;
 	}
@@ -139,8 +136,7 @@ export default function GameUploadWidget({
 	const doUpload = useCallback(async (
 		uploadFile: File,
 		sess: GameUploadSession,
-		uploadedChunks: number[] = [],
-		resumeParts?: GameUploadStatus['parts'],
+		resumeParts: GameUploadStatus['parts'] = [],
 		resumeFinalizationStatus?: 'COMPLETING' | 'VERIFYING',
 	) => {
 		setState(resumeFinalizationStatus ? 'completing' : 'uploading');
@@ -148,7 +144,6 @@ export default function GameUploadWidget({
 
 		const ctrl = uploadGameFile(uploadFile, sess, {
 			title: labels.uploadTitle,
-			startFrom: uploadedChunks,
 			resumeParts,
 			resumeFinalizationStatus,
 			onProgress: (p) => {
@@ -219,9 +214,7 @@ export default function GameUploadWidget({
 
 		try {
 			const status = await getGameUploadStatus(resumeSession.sessionId);
-			if (!hasSessionIdentity(status)) {
-				throw new Error(LEGACY_SESSION_MESSAGE);
-			}
+			if (!hasSessionIdentity(status)) throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
 			if (file.size !== status.totalBytes) {
 				throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
 			}
@@ -235,7 +228,6 @@ export default function GameUploadWidget({
 				totalChunks: status.totalChunks,
 				expiresAt: status.expiresAt,
 				uploadKind: status.uploadKind,
-				transport: status.transport,
 				generation: status.generation,
 				sourceIdentityAlgorithm: status.sourceIdentityAlgorithm,
 				sourceIdentity: status.sourceIdentity,
@@ -245,7 +237,6 @@ export default function GameUploadWidget({
 			await doUpload(
 				file,
 				sess,
-				status.uploadedChunks,
 				status.parts,
 				status.status === 'COMPLETING' || status.status === 'VERIFYING'
 					? status.status
@@ -264,9 +255,7 @@ export default function GameUploadWidget({
 		try {
 			const status = await getGameUploadStatus(session.sessionId);
 			if (status.status === 'PENDING' || status.status === 'COMPLETING' || status.status === 'VERIFYING') {
-				if (!hasSessionIdentity(status)) {
-					throw new Error(LEGACY_SESSION_MESSAGE);
-				}
+				if (!hasSessionIdentity(status)) throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
 				if (file.size !== status.totalBytes) {
 					throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
 				}
@@ -280,12 +269,11 @@ export default function GameUploadWidget({
 					totalChunks: status.totalChunks,
 					expiresAt: status.expiresAt,
 					uploadKind: status.uploadKind,
-					transport: status.transport,
 					generation: status.generation,
 					sourceIdentityAlgorithm: status.sourceIdentityAlgorithm,
 					sourceIdentity: status.sourceIdentity,
 					sourceIdentityBlockSizeBytes: status.sourceIdentityBlockSizeBytes,
-				}, status.uploadedChunks, status.parts,
+				}, status.parts,
 				status.status === 'COMPLETING' || status.status === 'VERIFYING'
 					? status.status
 					: undefined);

@@ -77,11 +77,19 @@ export function projectWebglDeletionTargets(
 	projectId: number,
 	webglEntryKey: string,
 	config: DeletionOutboxConfig,
+	protectedSourceKey?: string | null,
 ): DurableDeletionTarget[] {
-	return webglDeletionTargetsByEntry(
-		projectId,
-		webglEntryKey,
-		config,
-		config.reason,
-	);
+	return [
+		...webglDeletionTargetsByEntry(
+			projectId,
+			webglEntryKey,
+			config,
+			config.reason,
+		),
+		...(protectedSourceKey ? [{
+			bucket: config.protectedBucket,
+			storageKey: protectedSourceKey,
+			reason: `${config.reason}-source`,
+		}] : []),
+	];
 }

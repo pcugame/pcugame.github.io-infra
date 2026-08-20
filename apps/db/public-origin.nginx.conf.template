@@ -1,0 +1,84 @@
+map $http_origin $public_cors_origin {
+	default "";
+	"${PUBLIC_CORS_ORIGIN_PRIMARY}" $http_origin;
+	"${PUBLIC_CORS_ORIGIN_SECONDARY}" $http_origin;
+}
+
+# Immutable generation objects are the default. Only the mutable WebGL entry
+# document has a short cache lifetime; every rendition/artifact path is safe
+# to cache permanently because publishing never overwrites a generation.
+map $uri $public_cache_control {
+	default "public, max-age=31536000, immutable";
+	~*/index[.]html$ "public, max-age=60";
+}
+
+# This cache is scoped only to the public Garage website origin. It preserves
+# Garage bytes and metadata while allowing nginx to merge a revalidation 304
+# with the cached representation validators that Garage v1.1 omits. Protected
+# signed downloads never traverse this server.
+proxy_cache_path /var/cache/nginx/public-assets
+	levels=1:2 keys_zone=public_asset_cache:16m max_size=1g inactive=24h use_temp_path=off;
+
+log_format public_asset_boundary
+	'action=public_asset_proxy method=$request_method uri=$uri status=$status response_bytes=$bytes_sent';
+
+server {
+	listen ${NGINX_LISTEN_PORT};
+	server_name _;
+
+	access_log /var/log/nginx/access.log public_asset_boundary;
+	error_log /var/log/nginx/error.log crit;
+	gzip off;
+	client_max_body_size 0;
+
+	location = /__pcu_proxy_health {
+		access_log off;
+		return 204;
+	}
+
+	location / {
+		limit_except GET HEAD OPTIONS { deny all; }
+		# Public reads do not require credentials. Answer preflight at the
+		# transport proxy so the public bucket does not need upload CORS grants.
+		if ($request_method = OPTIONS) { return 204; }
+
+		# No URI component is present in proxy_pass, so nginx forwards the
+		# original escaped path and query byte-for-byte. Garage website routing
+		# also requires the original Host (including a configured bucket alias).
+		proxy_pass ${GARAGE_PUBLIC_WEB_UPSTREAM};
+		proxy_http_version 1.1;
+		proxy_set_header Host $http_host;
+		proxy_set_header Connection "";
+		proxy_ssl_server_name on;
+		proxy_ssl_name ${GARAGE_PUBLIC_WEB_TLS_SERVER_NAME};
+		proxy_pass_request_headers on;
+		proxy_request_buffering off;
+		proxy_buffering on;
+		proxy_cache public_asset_cache;
+		proxy_cache_methods GET HEAD;
+		proxy_cache_key "$scheme|$host|$request_uri";
+		# Retain a representation only as a validator/body merge buffer. Revalidate
+		# every public request so exact deletion is observable immediately instead
+		# of serving a removed generation for the browser cache lifetime.
+		proxy_ignore_headers Cache-Control Expires Set-Cookie Vary;
+		proxy_cache_valid 200 206 0s;
+		proxy_cache_valid 404 1m;
+		proxy_cache_revalidate on;
+		proxy_cache_lock on;
+		proxy_cache_convert_head on;
+		proxy_hide_header Cache-Control;
+
+		add_header Access-Control-Allow-Origin $public_cors_origin always;
+		add_header Cache-Control $public_cache_control always;
+		add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+		add_header Access-Control-Allow-Headers "Range, If-Range, If-None-Match, If-Modified-Since" always;
+		add_header Access-Control-Expose-Headers "ETag, Last-Modified, Content-Length, Content-Range, Content-Encoding" always;
+		add_header Vary "Origin" always;
+		add_header Cross-Origin-Resource-Policy "cross-origin" always;
+		add_header Cross-Origin-Embedder-Policy "require-corp" always;
+		add_header Cross-Origin-Opener-Policy "same-origin" always;
+		add_header X-Content-Type-Options "nosniff" always;
+		add_header Referrer-Policy "no-referrer" always;
+		add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors ${WEB_PUBLIC_ORIGIN}" always;
+	}
+}

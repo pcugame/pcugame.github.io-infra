@@ -57,8 +57,9 @@ describe('fieldnameToKind', () => {
 		expect(fieldnameToKind('images[]')).toBe('IMAGE');
 	});
 
-	it('maps gameFile → GAME', () => {
-		expect(fieldnameToKind('gameFile')).toBe('GAME');
+	it('does not map legacy large-file fields', () => {
+		expect(fieldnameToKind('gameFile')).toBeUndefined();
+		expect(fieldnameToKind('videoFile')).toBeUndefined();
 	});
 
 	it('returns undefined for unknown field', () => {
@@ -136,16 +137,12 @@ describe('createByteLimiter', () => {
 
 describe('createKindAwareByteLimiter', () => {
 	const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-	const mp4Header = Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]);
-	const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
 
-	async function expectPayloadTooLarge(kind: 'IMAGE' | 'VIDEO' | 'GAME', firstChunk: Buffer, maxBytes: number) {
+	async function expectPayloadTooLarge(kind: 'IMAGE', firstChunk: Buffer, maxBytes: number) {
 		const limiter = createKindAwareByteLimiter(
 			{
 				...fakeLimits,
 				imageMaxBytes: kind === 'IMAGE' ? maxBytes : fakeLimits.imageMaxBytes,
-				videoMaxBytes: kind === 'VIDEO' ? maxBytes : fakeLimits.videoMaxBytes,
-				gameMaxBytes: kind === 'GAME' ? maxBytes : fakeLimits.gameMaxBytes,
 			},
 			kind,
 			`${kind.toLowerCase()}.bin`,
@@ -165,13 +162,6 @@ describe('createKindAwareByteLimiter', () => {
 		await expectPayloadTooLarge('IMAGE', pngHeader, 1024);
 	});
 
-	it('rejects oversized VIDEO at video limit', async () => {
-		await expectPayloadTooLarge('VIDEO', mp4Header, 1024);
-	});
-
-	it('rejects oversized GAME at game limit', async () => {
-		await expectPayloadTooLarge('GAME', zipHeader, 1024);
-	});
 });
 
 // ── Concurrent upload semaphore (using explicit max) ────────

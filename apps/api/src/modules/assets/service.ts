@@ -78,7 +78,6 @@ export interface AssetsServiceDependencies {
 		error(context: Record<string, unknown>, message: string): void;
 	};
 	repository: {
-		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
 		findAssetByIdForDownload(id: number): Promise<ProtectedAssetStreamRecord | null>;
 		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
 		claimAssetForDeletion(id: number): Promise<AssetDeletionClaim | null>;
@@ -243,19 +242,6 @@ export async function downloadAssetById(
 	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user);
 }
 
-/** @deprecated Compatibility route for old storage-key URLs. */
-export async function streamProtectedAsset(
-	deps: AssetsServiceDependencies,
-	storageKey: string,
-	clientIp: string,
-	user: ProtectedAssetAccessUser | undefined,
-): Promise<HttpResponseDescriptor> {
-	const asset = await deps.repository.findAssetByStorageKey(storageKey);
-	if (!asset) throw notFound('Asset not found');
-	const variant: AssetDownloadVariant = asset.playbackStorageKey === storageKey ? 'playback' : 'original';
-	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user);
-}
-
 /** Delete an asset using a locked DB identity claim around storage I/O. */
 export async function deleteAsset(
 	deps: AssetsServiceDependencies,
@@ -290,11 +276,6 @@ export function createAssetsService(deps: AssetsServiceDependencies) {
 			clientIp: string,
 			user: ProtectedAssetAccessUser | undefined,
 		) => downloadAssetById(deps, assetId, variant, clientIp, user),
-		streamProtectedAsset: (
-			storageKey: string,
-			clientIp: string,
-			user: ProtectedAssetAccessUser | undefined,
-		) => streamProtectedAsset(deps, storageKey, clientIp, user),
 		deleteAsset: (assetId: number, actor: Actor) => deleteAsset(deps, assetId, actor),
 	};
 }

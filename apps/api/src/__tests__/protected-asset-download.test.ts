@@ -3,7 +3,6 @@ import { AppError } from '../shared/errors.js';
 import { createAssetsService } from '../modules/assets/service.js';
 
 const mocks = {
-	findAssetByStorageKey: vi.fn(),
 	findAssetByIdForDownload: vi.fn(),
 	upsertBannedIp: vi.fn(),
 	getPresignedUrl: vi.fn(),
@@ -22,14 +21,12 @@ const assetsService = createAssetsService({
 	},
 	logger: { info: vi.fn(), error: mocks.loggerError },
 	repository: {
-		findAssetByStorageKey: mocks.findAssetByStorageKey,
 		findAssetByIdForDownload: mocks.findAssetByIdForDownload,
 		findAssetByIdWithProject: vi.fn(),
 		claimAssetForDeletion: vi.fn(),
 		completeAssetDeletion: vi.fn(),
 	},
 });
-const { streamProtectedAsset } = assetsService;
 const { downloadAssetById } = assetsService;
 
 function asset(opts: {
@@ -75,13 +72,13 @@ describe('protected asset redirects', () => {
 	it.each(['GAME', 'VIDEO'])('applies a transient limiter to %s redirects without persisting bans', async (kind) => {
 		const key = `${kind.toLowerCase()}.bin`;
 		const ip = `203.0.113.${kind === 'GAME' ? '10' : '11'}`;
-		mocks.findAssetByStorageKey.mockResolvedValue({ ...asset({ kind }), storageKey: key });
+		mocks.findAssetByIdForDownload.mockResolvedValue({ ...asset({ kind }), storageKey: key });
 		mocks.limiterCheck.mockReturnValueOnce({ status: 'ok' }).mockReturnValueOnce({
 			status: 'rate_limited',
 			retryAfterSec: 12,
 		});
 
-		const firstResponse = await streamProtectedAsset(key, ip, undefined);
+		const firstResponse = await downloadAssetById(42, 'original', ip, undefined);
 
 		expect(mocks.limiterCheck).toHaveBeenNthCalledWith(
 			1,
@@ -103,7 +100,7 @@ describe('protected asset redirects', () => {
 			location: `https://signed.example/protected-bucket/${key}`,
 		});
 
-		await expect(streamProtectedAsset(key, ip, undefined)).rejects.toMatchObject({
+		await expect(downloadAssetById(42, 'original', ip, undefined)).rejects.toMatchObject({
 			statusCode: 429,
 			code: 'RATE_LIMITED',
 			details: { retryAfterSec: 12 },
@@ -113,7 +110,7 @@ describe('protected asset redirects', () => {
 	});
 
 	it('uses project and ordered member data for the GAME download filename', async () => {
-		mocks.findAssetByStorageKey.mockResolvedValue({
+		mocks.findAssetByIdForDownload.mockResolvedValue({
 			id: 42,
 			projectId: 7,
 			status: 'READY',
@@ -132,7 +129,7 @@ describe('protected asset redirects', () => {
 			},
 		});
 
-		await streamProtectedAsset('game.zip', '203.0.113.20', undefined);
+		await downloadAssetById(42, 'original', '203.0.113.20', undefined);
 
 		expect(mocks.getPresignedUrl).toHaveBeenCalledWith(
 			'protected-bucket',
@@ -146,12 +143,12 @@ describe('protected asset redirects', () => {
 	});
 
 	it('falls back to game.zip when the friendly GAME filename exceeds 255 bytes', async () => {
-		mocks.findAssetByStorageKey.mockResolvedValue({
+		mocks.findAssetByIdForDownload.mockResolvedValue({
 			...asset({ kind: 'GAME', title: '가'.repeat(84), memberIds: [1] }),
 			storageKey: 'game.zip',
 		});
 
-		await streamProtectedAsset('game.zip', '203.0.113.21', undefined);
+		await downloadAssetById(42, 'original', '203.0.113.21', undefined);
 
 		expect(mocks.getPresignedUrl).toHaveBeenCalledWith(
 			'protected-bucket',
@@ -167,16 +164,16 @@ describe('protected asset redirects', () => {
 	it.each(['IMAGE', 'POSTER'])('keeps protected %s assets non-public and rate-limits authorized redirects', async (kind) => {
 		const key = `${kind.toLowerCase()}.jpg`;
 		const ip = `203.0.113.${kind === 'IMAGE' ? '12' : '13'}`;
-		mocks.findAssetByStorageKey.mockResolvedValue({ ...asset({ kind, creatorId: 7 }), storageKey: key });
+		mocks.findAssetByIdForDownload.mockResolvedValue({ ...asset({ kind, creatorId: 7 }), storageKey: key });
 
-		await expect(streamProtectedAsset(key, ip, undefined)).rejects.toMatchObject({
+		await expect(downloadAssetById(42, 'original', ip, undefined)).rejects.toMatchObject({
 			statusCode: 401,
 			code: 'UNAUTHORIZED',
 		});
 		expect(mocks.limiterCheck).not.toHaveBeenCalled();
 		expect(mocks.getPresignedUrl).not.toHaveBeenCalled();
 
-		const response = await streamProtectedAsset(key, ip, { id: 7, role: 'USER' });
+		const response = await downloadAssetById(42, 'original', ip, { id: 7, role: 'USER' });
 
 		expect(mocks.limiterCheck).toHaveBeenCalledWith(ip, '7:DOWNLOAD_ORIGINAL:42');
 		expect(response.location).toBe(`https://signed.example/public-bucket/${key}`);
@@ -260,7 +257,7 @@ describe('protected asset redirects', () => {
 	});
 
 	it('does not run the limiter before access checks for unauthorized protected assets', async () => {
-		mocks.findAssetByStorageKey.mockResolvedValue({
+		mocks.findAssetByIdForDownload.mockResolvedValue({
 			...asset({ kind: 'VIDEO', status: 'LEGACY', creatorId: 1 }),
 			storageKey: 'video.mp4',
 			playbackStorageKey: null,
@@ -269,7 +266,7 @@ describe('protected asset redirects', () => {
 			throw new AppError(403, 'banned', 'IP_BANNED');
 		});
 
-		await expect(streamProtectedAsset('video.mp4', '203.0.113.14', { id: 9, role: 'USER' }))
+		await expect(downloadAssetById(42, 'original', '203.0.113.14', { id: 9, role: 'USER' }))
 			.rejects.toMatchObject({
 				statusCode: 403,
 				code: 'FORBIDDEN',

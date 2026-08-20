@@ -34,11 +34,9 @@ direct service calling UploadPart, a direct completion function colocated in a
 generically named completion service, an object read through a delivery dependency,
 a feature-local AWS SDK import, a Node HTTP asset proxy, an over-privileged signer
 port, an unrelated multipart completer, and signed capability data passed to a
-logger. Production retains an exact debt allowlist for the two pre-existing public
-image/WebGL relay services. Do not expand that allowlist; remove each entry when P1
-moves the corresponding route to Garage/public origin.
-
-The legacy `API_CHUNK_PROXY` UploadPart relay has its own exact file-and-function
-allowlist for `upload-chunk.service.ts#uploadChunk`. Composition may adapt that
-port, but no other game-upload service function may invoke UploadPart. Remove the
-allowlist entry together with the legacy chunk route during the P3 contract step.
+logger. Public image/WebGL delivery and UploadPart byte relays have no debt
+allowlist: any application object read used for client delivery, or any game-upload
+service invocation of UploadPart, fails the production guard.
+The completion fixture also proves that a legitimate control-plane function
+allowlisted for HEAD/ListParts cannot gain full-object `stream` authority merely
+by colocating the call inside that same function.

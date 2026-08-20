@@ -251,9 +251,6 @@ describe('production BackendContext resource ownership', () => {
 		a.protectedDownloads.addBan('10.0.0.1');
 		expect(a.protectedDownloads.isBanned('10.0.0.1')).toBe(true);
 		expect(b.protectedDownloads.isBanned('10.0.0.1')).toBe(false);
-		a.exportProgress.start(2025, 1);
-		expect(a.exportProgress.get()).toMatchObject({ year: 2025 });
-		expect(b.exportProgress.get()).toBeNull();
 		await a.settings.update({ maxGameFileMb: 1500 });
 		await expect(a.settings.get()).resolves.toMatchObject({ maxGameFileMb: 1500 });
 		await expect(b.settings.get()).resolves.toMatchObject({ maxGameFileMb: 2000 });
@@ -269,7 +266,6 @@ describe('production BackendContext resource ownership', () => {
 		expect(aScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
 		expect(bScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 0)).toBe(true);
 		expect(() => b.protectedDownloads.check('10.0.0.2')).not.toThrow();
-		expect(b.exportProgress.get()).toBeNull();
 		expect(borrowedLogger.close).not.toHaveBeenCalled();
 		expect(a.resourceOwnership).toContainEqual({ name: 'logger', ownership: 'borrowed' });
 		expect(a.resourceOwnership).toContainEqual({ name: 'settings', ownership: 'owned' });
@@ -282,8 +278,7 @@ describe('production BackendContext resource ownership', () => {
 		['storage', ['s3']],
 		['uploadLimiter', ['settings', 's3']],
 		['lifecycle', ['upload', 'settings', 's3']],
-		['exportProgress', ['protected', 'lifecycle', 'upload', 'settings', 's3']],
-		['routes', ['export', 'protected', 'lifecycle', 'upload', 'settings', 's3']],
+		['routes', ['protected', 'lifecycle', 'upload', 'settings', 's3']],
 	] as const)('preserves the %s construction error and closes prior resources in reverse', async (failure, expected) => {
 		const events: string[] = [];
 		const original = new Error(`failure:${failure}`);
@@ -321,13 +316,6 @@ describe('production BackendContext resource ownership', () => {
 				start: () => {},
 				close: () => { events.push('protected'); },
 			} as unknown as ReturnType<typeof createProtectedDownloadLimiter>),
-			exportProgress: () => fail('exportProgress', {
-				start: () => {},
-				get: () => null,
-				update: () => {},
-				finish: () => {},
-				close: () => { events.push('export'); },
-			}),
 			routes: () => fail('routes', emptyRoutes),
 		};
 
@@ -432,6 +420,7 @@ describe('production BackendContext resource ownership', () => {
 			UPLOAD_MAX_CONCURRENT: 1,
 			API_PUBLIC_URL: `https://${label}.api.test`,
 			WEB_PUBLIC_URL: `https://${label}.web.test`,
+			PUBLIC_ASSET_BASE_URL: `https://${label}.assets.test`,
 			S3_BUCKET_PUBLIC: `${label}-public`,
 			S3_BUCKET_PROTECTED: `${label}-protected`,
 		}, {
@@ -524,9 +513,6 @@ describe('production BackendContext resource ownership', () => {
 		a.protectedDownloads.addBan('10.0.0.15');
 		expect(a.protectedDownloads.isBanned('10.0.0.15')).toBe(true);
 		expect(b.protectedDownloads.isBanned('10.0.0.15')).toBe(false);
-		a.exportProgress.start(2026, 1);
-		expect(a.exportProgress.get()).toMatchObject({ year: 2026 });
-		expect(b.exportProgress.get()).toBeNull();
 
 		await Promise.all([a.start(), b.start()]);
 		expect(aSettings.start).toHaveBeenCalledOnce();
@@ -603,8 +589,6 @@ describe('production BackendContext resource ownership', () => {
 		let enteredStart!: () => void;
 		const entered = new Promise<void>((resolve) => { enteredStart = resolve; });
 		const firstClose = vi.fn(() => { events.push('first:close'); });
-		const laterStart = vi.fn();
-		const laterClose = vi.fn(() => { events.push('later:close'); });
 		const settings = settingsHarness('race', events);
 		const s3 = fakeS3('race', events);
 		const context = await createProductionBackendContext(testConfig, {
@@ -627,14 +611,6 @@ describe('production BackendContext resource ownership', () => {
 					},
 					close: firstClose,
 				},
-				exportProgress: {
-					value: {
-						start: () => {}, get: () => null, update: () => {}, finish: () => {}, close: () => {},
-					},
-					ownership: 'owned',
-					start: laterStart,
-					close: laterClose,
-				},
 			},
 		});
 
@@ -645,9 +621,7 @@ describe('production BackendContext resource ownership', () => {
 		await expect(starting).rejects.toThrow('aborted by close');
 		await closing;
 		await context.close();
-		expect(laterStart).not.toHaveBeenCalled();
 		expect(firstClose).toHaveBeenCalledOnce();
-		expect(laterClose).toHaveBeenCalledOnce();
-		expect(events.slice(0, 2)).toEqual(['later:close', 'first:close']);
+		expect(events[0]).toBe('first:close');
 	});
 });

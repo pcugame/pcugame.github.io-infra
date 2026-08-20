@@ -4,7 +4,7 @@ import { collectObjectReferences, createObjectReferenceIndex } from '../modules/
 
 const deployment = '11111111-1111-4111-8111-111111111111';
 
-function clientForActiveWebgl(s3Key: string) {
+function clientForActiveWebgl(s3Key: string, webglDeploymentId: string | null = null) {
 	return {
 		asset: { findMany: vi.fn().mockResolvedValue([]) },
 		exhibition: { findMany: vi.fn().mockResolvedValue([]) },
@@ -13,7 +13,7 @@ function clientForActiveWebgl(s3Key: string) {
 			findMany: vi.fn(async (query: { where: { status: unknown } }) =>
 				query.where.status === 'COMPLETED'
 					? []
-					: [{ id: 'active', s3Key, uploadKind: 'WEBGL', projectId: 7 }]),
+					: [{ id: 'active', s3Key, uploadKind: 'WEBGL', projectId: 7, webglDeploymentId }]),
 		},
 		uploadIntent: { findMany: vi.fn().mockResolvedValue([]) },
 	};
@@ -23,6 +23,7 @@ function clientForVerifyingUpload(input: {
 	uploadKind: 'GAME' | 'WEBGL';
 	s3Key: string | null;
 	storageKey: string | null;
+	webglDeploymentId?: string | null;
 }) {
 	return {
 		asset: { findMany: vi.fn().mockResolvedValue([]) },
@@ -35,6 +36,7 @@ function clientForVerifyingUpload(input: {
 					: [{
 						id: 'verifying', projectId: 7, status: 'VERIFYING',
 						uploadKind: input.uploadKind, s3Key: input.s3Key, storageKey: input.storageKey,
+						webglDeploymentId: input.webglDeploymentId ?? null,
 					}]),
 		},
 		uploadIntent: { findMany: vi.fn().mockResolvedValue([]) },
@@ -44,7 +46,7 @@ function clientForVerifyingUpload(input: {
 describe('active WebGL prefix reference fence (#29)', () => {
 	it('publishes an active WebGL site PREFIX reference that blocks an overlapping reaper claim', async () => {
 		const inventory = await collectObjectReferences(
-			clientForActiveWebgl(`webgl/7/${deployment}/source.zip`) as never,
+			clientForActiveWebgl('webgl/7/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/source.zip', deployment) as never,
 			{ publicBucket: 'public', protectedBucket: 'protected' }, { error: vi.fn() },
 		);
 		expect(inventory.references).toContainEqual({
@@ -60,10 +62,10 @@ describe('active WebGL prefix reference fence (#29)', () => {
 	it('fails closed for malformed active WebGL identity in both buckets', async () => {
 		const logger = { error: vi.fn() };
 		const inventory = await collectObjectReferences(
-			clientForActiveWebgl('webgl/7/not-a-deployment/source.zip') as never,
+			clientForActiveWebgl('webgl/7/not-a-source/source.zip', 'not-a-deployment') as never,
 			{ publicBucket: 'public', protectedBucket: 'protected' }, logger,
 		);
-		expect(inventory.unsafeBuckets).toEqual(new Set(['protected', 'public']));
+		expect(inventory.unsafeBuckets).toEqual(new Set(['public']));
 		expect(createObjectReferenceIndex(inventory).referencesTarget({
 			bucket: 'public', targetKind: 'PREFIX', key: 'unrelated/',
 		})).toBe(true);
@@ -99,6 +101,7 @@ describe('active WebGL prefix reference fence (#29)', () => {
 				uploadKind: 'WEBGL',
 				s3Key: `webgl/7/${newDeployment}/source.zip`,
 				storageKey: `webgl/7/${oldDeployment}/source.zip`,
+				webglDeploymentId: deployment,
 			}) as never,
 			{ publicBucket: 'public', protectedBucket: 'protected' }, { error: vi.fn() },
 		);
@@ -107,11 +110,7 @@ describe('active WebGL prefix reference fence (#29)', () => {
 			expect.objectContaining({ bucket: 'protected', key: `webgl/7/${newDeployment}/source.zip` }),
 			expect.objectContaining({ bucket: 'protected', key: `webgl/7/${oldDeployment}/source.zip` }),
 			expect.objectContaining({
-				bucket: 'public', targetKind: 'PREFIX', key: `webgl/7/${newDeployment}/site/`,
-				source: 'upload-session:verifying:webgl-site',
-			}),
-			expect.objectContaining({
-				bucket: 'public', targetKind: 'PREFIX', key: `webgl/7/${oldDeployment}/site/`,
+				bucket: 'public', targetKind: 'PREFIX', key: `webgl/7/${deployment}/site/`,
 				source: 'upload-session:verifying:webgl-site',
 			}),
 		]));
