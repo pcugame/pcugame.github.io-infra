@@ -26,6 +26,10 @@ AGENTS.md
 admin-preview.html
 apps/web/src/pages/admin/AdminPreview.tsx
 
+# 로컬 진단 문서
+/docs/260817_webgl-upload-play-diagnostic.html
+/docs/260817_webgl-upload-play-diagnostic.pdf
+
 # 개인 메모
 홍보.md
 
