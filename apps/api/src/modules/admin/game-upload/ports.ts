@@ -19,6 +19,7 @@ export class ActiveUploadCompletionInProgressError extends Error {
 export interface GameUploadPartRecord {
 	partNumber: number;
 	etag: string;
+	contentSha256?: string | null;
 	generation?: number;
 }
 
@@ -31,6 +32,10 @@ export interface GameUploadSessionRecord {
 	totalBytes: bigint;
 	chunkSizeBytes: number;
 	totalChunks: number;
+	sourceIdentityAlgorithm?: string | null;
+	sourceIdentity?: string | null;
+	sourceIdentityBlockSizeBytes?: number | null;
+	sourceIdentityBlockManifest?: Uint8Array | null;
 	uploadedChunks: number[];
 	status: string;
 	expiresAt: Date;
@@ -58,6 +63,10 @@ export interface NewGameUploadSession {
 	totalBytes: bigint;
 	chunkSizeBytes: number;
 	totalChunks: number;
+	sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1';
+	sourceIdentity: string;
+	sourceIdentityBlockSizeBytes: number;
+	sourceIdentityBlockManifest: Uint8Array;
 	s3UploadId: string;
 	s3Key: string;
 	expiresAt: Date;
@@ -103,14 +112,17 @@ export interface GameUploadRepository {
 		token: string;
 		owner: string;
 		leaseMs: number;
+		contentSha256: string;
 	}): Promise<
 		| { kind: 'acquired'; token: string }
-		| { kind: 'busy' | 'expired' | 'unavailable' }
+		| { kind: 'already-uploaded'; parts: GameUploadPartRecord[] }
+		| { kind: 'conflict' | 'busy' | 'expired' | 'unavailable' }
 	>;
 	completePartClaim(input: {
 		token: string;
 		etag: string;
-	}): Promise<{ accepted: boolean; parts: GameUploadPartRecord[] }>;
+		contentSha256: string;
+	}): Promise<{ accepted: boolean; conflict?: boolean; parts: GameUploadPartRecord[] }>;
 	renewPartClaim(token: string, leaseMs: number): Promise<{ count: number }>;
 	claimCompletion(input: {
 		sessionId: string;

@@ -1,5 +1,5 @@
 import { fork, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { DeleteObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
@@ -12,6 +12,7 @@ import { createS3Client } from '../lib/s3.js';
 import { createObjectStorage } from '../lib/storage.js';
 import { createGameUploadRepository } from '../modules/admin/game-upload/repository.js';
 import { createGameUploadService } from '../modules/admin/game-upload/service.js';
+import { sourceIdentityRoot } from '../modules/admin/game-upload/source-identity.js';
 import { createMultipartAbortRepository } from '../modules/multipart-abort/repository.js';
 import { createMultipartAbortService } from '../modules/multipart-abort/service.js';
 import { createOrphanRepository } from '../modules/orphan/repository.js';
@@ -24,6 +25,19 @@ import { createWebglDeploymentKeys } from '../modules/webgl/paths.js';
 
 const runStorageIntegration = process.env['RUN_STORAGE_INTEGRATION'] === 'true';
 const MIB = 1024 * 1024;
+
+function sourceIdentityForBuffer(file: Buffer) {
+	const sourceIdentityBlockDigests: string[] = [];
+	for (let offset = 0; offset < file.length; offset += MIB) {
+		sourceIdentityBlockDigests.push(createHash('sha256').update(file.subarray(offset, offset + MIB)).digest('hex'));
+	}
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(file.length, MIB, sourceIdentityBlockDigests),
+		sourceIdentityBlockSizeBytes: MIB as 1048576,
+		sourceIdentityBlockDigests,
+	};
+}
 
 describe.runIf(runStorageIntegration)(
 	'crash-safe storage lifecycle with Garage and PostgreSQL',
@@ -568,15 +582,18 @@ describe.runIf(runStorageIntegration)(
 				},
 			});
 			const actor = { id: userId, role: 'ADMIN' as const };
+			const parallelBytes = Buffer.alloc(5 * MIB, 0x61);
 			const created = await service.createSession(projectId, exhibitionId, actor, {
 				originalName: 'parallel.zip',
 				totalBytes: 5 * MIB,
+				...sourceIdentityForBuffer(parallelBytes),
 			});
 			const firstUpload = service.uploadChunk(
 				created.sessionId,
 				0,
-				Readable.from([Buffer.alloc(5 * MIB, 0x61)]),
+				Readable.from([parallelBytes]),
 				actor,
+				{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: created.sourceIdentity },
 			);
 			await firstEntered;
 			await expect(service.uploadChunk(
@@ -584,7 +601,8 @@ describe.runIf(runStorageIntegration)(
 				0,
 				Readable.from([Buffer.alloc(5 * MIB, 0x62)]),
 				actor,
-			)).rejects.toMatchObject({ code: 'OPERATION_IN_PROGRESS', statusCode: 409 });
+				{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: created.sourceIdentity },
+		)).rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
 			releaseFirst();
 			await expect(firstUpload).resolves.toMatchObject({ uploadedCount: 1 });
 			const completed = await service.completeSession(created.sessionId, actor);
@@ -592,15 +610,18 @@ describe.runIf(runStorageIntegration)(
 			await expect(service.completeSession(created.sessionId, actor)).resolves.toEqual(completed);
 
 			const mismatchService = gameService();
+			const mismatchBytes = Buffer.alloc(5 * MIB, 0x63);
 			const mismatch = await mismatchService.createSession(projectId, exhibitionId, actor, {
 				originalName: 'mismatch.zip',
 				totalBytes: 5 * MIB,
+				...sourceIdentityForBuffer(mismatchBytes),
 			});
 			await mismatchService.uploadChunk(
 				mismatch.sessionId,
 				0,
-				Readable.from([Buffer.alloc(5 * MIB, 0x63)]),
+				Readable.from([mismatchBytes]),
 				actor,
+				{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: mismatch.sourceIdentity },
 			);
 			await prisma.gameUploadPart.updateMany({
 				where: { sessionId: mismatch.sessionId },
@@ -636,6 +657,10 @@ describe.runIf(runStorageIntegration)(
 
 		it('reconciles by bucket and preserves every authoritative pointer', async () => {
 			const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+			const completedBytes = Buffer.from(key('completed.zip'));
+			const pendingBytes = Buffer.from(key('pending.zip'));
+			const completedIdentity = sourceIdentityForBuffer(completedBytes);
+			const pendingIdentity = sourceIdentityForBuffer(pendingBytes);
 			const deployment = createWebglDeploymentKeys(
 				projectId,
 				project.webglEntryKey.split('/')[2]!,
@@ -656,13 +681,21 @@ describe.runIf(runStorageIntegration)(
 				data: [
 					{
 						id: randomUUID(), projectId, userId, uploadKind: 'GAME',
-						originalName: 'completed.zip', totalBytes: 1n, chunkSizeBytes: 5 * MIB,
+						originalName: 'completed.zip', totalBytes: BigInt(completedBytes.length), chunkSizeBytes: 5 * MIB,
+						sourceIdentityAlgorithm: completedIdentity.sourceIdentityAlgorithm,
+						sourceIdentity: completedIdentity.sourceIdentity,
+						sourceIdentityBlockSizeBytes: completedIdentity.sourceIdentityBlockSizeBytes,
+						sourceIdentityBlockManifest: Buffer.from(completedIdentity.sourceIdentityBlockDigests.join(''), 'hex'),
 						totalChunks: 1, status: 'COMPLETED', storageKey: key('completed.zip'),
 						expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 					},
 					{
 						id: randomUUID(), projectId, userId, uploadKind: 'GAME',
-						originalName: 'pending.zip', totalBytes: 1n, chunkSizeBytes: 5 * MIB,
+						originalName: 'pending.zip', totalBytes: BigInt(pendingBytes.length), chunkSizeBytes: 5 * MIB,
+						sourceIdentityAlgorithm: pendingIdentity.sourceIdentityAlgorithm,
+						sourceIdentity: pendingIdentity.sourceIdentity,
+						sourceIdentityBlockSizeBytes: pendingIdentity.sourceIdentityBlockSizeBytes,
+						sourceIdentityBlockManifest: Buffer.from(pendingIdentity.sourceIdentityBlockDigests.join(''), 'hex'),
 						totalChunks: 1, status: 'PENDING', s3Key: key('pending.zip'),
 						s3UploadId: 'tracked-upload', expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 					},

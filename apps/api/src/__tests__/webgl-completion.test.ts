@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { completeSession } from '../modules/admin/game-upload/complete-session.service.js';
 import { cancelSession } from '../modules/admin/game-upload/session-maintenance.service.js';
@@ -6,6 +7,7 @@ import { createGameUploadService } from '../modules/admin/game-upload/service.js
 import type { GameUploadServiceDependencies } from '../modules/admin/game-upload/ports.js';
 import type { WebglDeploymentKeys } from '../modules/webgl/paths.js';
 import { createDurableGameUploadRepository } from './helpers/upload-lifecycle.js';
+import { sourceIdentityRoot } from '../modules/admin/game-upload/source-identity.js';
 
 const sourceKey = 'webgl/7/123e4567-e89b-42d3-a456-426614174000/source.zip';
 const deployed: WebglDeploymentKeys = {
@@ -18,6 +20,7 @@ const deployed: WebglDeploymentKeys = {
 };
 
 function session() {
+	const digest = createHash('sha256').update(Buffer.alloc(8)).digest('hex');
 	return {
 		id: 'session-webgl',
 		projectId: 7,
@@ -32,7 +35,11 @@ function session() {
 		expiresAt: new Date('2026-07-22T00:00:00.000Z'),
 		s3UploadId: 'multipart',
 		s3Key: sourceKey,
-		parts: [{ partNumber: 1, etag: 'etag' }],
+		parts: [{ partNumber: 1, etag: 'etag', contentSha256: digest }],
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(8, 1_048_576, [digest]),
+		sourceIdentityBlockSizeBytes: 1_048_576,
+		sourceIdentityBlockManifest: Buffer.from(digest, 'hex'),
 		project: { status: 'PUBLISHED' },
 	};
 }
@@ -46,7 +53,7 @@ function deferred<T>() {
 function createHarness() {
 	const mocks = {
 		findSessionById: vi.fn().mockResolvedValue(session()),
-		findPartsBySessionId: vi.fn().mockResolvedValue([{ partNumber: 1, etag: 'etag' }]),
+		findPartsBySessionId: vi.fn().mockResolvedValue([{ partNumber: 1, etag: 'etag', contentSha256: createHash('sha256').update(Buffer.alloc(8)).digest('hex') }]),
 		finalizeCompletedWebglSession: vi.fn().mockResolvedValue({ oldEntryKey: '' }),
 		finalizeGame: vi.fn().mockResolvedValue({
 			oldStorageKey: null,
@@ -240,6 +247,27 @@ function createRestartRecoveryHarness() {
 
 describe('WebGL completion atomicity', () => {
 	beforeEach(() => vi.clearAllMocks());
+
+	it('returns an existing legacy COMPLETED result without finalizing or mutating storage', async () => {
+		const { mocks, deps, complete } = createHarness();
+		vi.mocked(deps.repository.findSessionById).mockResolvedValueOnce({
+			...session(),
+			status: 'COMPLETED',
+			completionResult: { status: 'COMPLETED', storageKey: sourceKey, sizeBytes: 8 },
+			sourceIdentityAlgorithm: null,
+			sourceIdentity: null,
+			sourceIdentityBlockSizeBytes: null,
+			sourceIdentityBlockManifest: null,
+		});
+
+		await expect(complete()).resolves.toEqual({
+			status: 'COMPLETED', storageKey: sourceKey, sizeBytes: 8,
+		});
+		expect(mocks.completeMultipart).not.toHaveBeenCalled();
+		expect(mocks.deployWebgl).not.toHaveBeenCalled();
+		expect(mocks.finalizeCompletedWebglSession).not.toHaveBeenCalled();
+		expect(deps.repository.claimCompletion).not.toHaveBeenCalled();
+	});
 
 	it('does not swap the DB pointer before every hosted file is deployed', async () => {
 		const { mocks, complete } = createHarness();

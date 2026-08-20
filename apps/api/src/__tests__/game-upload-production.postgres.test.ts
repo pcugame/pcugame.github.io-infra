@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
@@ -24,8 +24,25 @@ import { createProjectAccessService } from '../modules/admin/project-access.serv
 import { createWebglDeploymentKeys } from '../modules/webgl/paths.js';
 import { createUploadLimiter } from '../shared/upload-limits.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { sourceIdentityRoot } from '../modules/admin/game-upload/source-identity.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
+const SOURCE_BLOCK_SIZE = 1_048_576;
+
+function sourceIdentityForSize(totalBytes: bigint) {
+	const digest = createHash('sha256').update(Buffer.from('postgres-fixture-source')).digest('hex');
+	const blockDigests = Array.from(
+		{ length: Math.ceil(Number(totalBytes) / SOURCE_BLOCK_SIZE) },
+		() => digest,
+	);
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(Number(totalBytes), SOURCE_BLOCK_SIZE, blockDigests),
+		sourceIdentityBlockSizeBytes: SOURCE_BLOCK_SIZE,
+		sourceIdentityBlockManifest: Buffer.from(blockDigests.join(''), 'hex'),
+		sourceIdentityBlockDigests: blockDigests,
+	};
+}
 
 const logger: AppLogger = {
 	child: () => logger,
@@ -409,6 +426,8 @@ describe.runIf(runPostgresIntegration)(
 			totalBytes?: bigint;
 			updatedAt?: Date;
 		}) {
+			const totalBytes = input.totalBytes ?? 1n;
+			const { sourceIdentityBlockDigests: _sourceIdentityBlockDigests, ...sourceIdentity } = sourceIdentityForSize(totalBytes);
 			const session = await control.gameUploadSession.create({
 				data: {
 					id: input.id ?? randomUUID(),
@@ -416,9 +435,10 @@ describe.runIf(runPostgresIntegration)(
 					userId,
 					uploadKind: input.uploadKind ?? 'GAME',
 					originalName: input.uploadKind === 'WEBGL' ? 'build.zip' : 'game.zip',
-					totalBytes: input.totalBytes ?? 1n,
-					chunkSizeBytes: Number(input.totalBytes ?? 1n),
+					totalBytes,
+					chunkSizeBytes: SOURCE_BLOCK_SIZE,
 					totalChunks: 1,
+					...sourceIdentity,
 					status: input.status ?? 'PENDING',
 					s3Key: input.s3Key,
 					s3UploadId: input.s3UploadId ?? randomUUID(),
@@ -500,12 +520,19 @@ describe.runIf(runPostgresIntegration)(
 				s3Key: `${testId}-active.zip`,
 			});
 			const service = graph(control).service;
+			const identity = sourceIdentityForSize(1n);
 
 			await expect(service.createSession(
 				projectId,
 				exhibitionId,
 				{ id: userId, role: 'ADMIN' },
-				{ originalName: 'replacement.zip', totalBytes: 1 },
+				{
+					originalName: 'replacement.zip', totalBytes: 1,
+					sourceIdentityAlgorithm: identity.sourceIdentityAlgorithm,
+					sourceIdentity: identity.sourceIdentity,
+					sourceIdentityBlockSizeBytes: identity.sourceIdentityBlockSizeBytes,
+					sourceIdentityBlockDigests: identity.sourceIdentityBlockDigests,
+				},
 			)).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
 			await expect(control.gameUploadSession.findUniqueOrThrow({
 				where: { id: completing.id },
@@ -533,6 +560,7 @@ describe.runIf(runPostgresIntegration)(
 			const newSessionId = randomUUID();
 			const newKey = `${testId}-replace-new.zip`;
 			const runtime = productionRuntime(control);
+			const { sourceIdentityBlockDigests: _newDigests, ...newIdentity } = sourceIdentityForSize(1n);
 
 			try {
 				const result = await runtime.gameUploads.createSessionReplacingActive({
@@ -542,8 +570,9 @@ describe.runIf(runPostgresIntegration)(
 					uploadKind: 'GAME',
 					originalName: 'replacement.zip',
 					totalBytes: 1n,
-					chunkSizeBytes: 1,
+					chunkSizeBytes: SOURCE_BLOCK_SIZE,
 					totalChunks: 1,
+					...newIdentity,
 					s3UploadId: randomUUID(),
 					s3Key: newKey,
 					expiresAt: new Date('2099-01-01T00:00:00.000Z'),
@@ -604,6 +633,7 @@ describe.runIf(runPostgresIntegration)(
 				s3UploadId: oldUploadId,
 			});
 			const newSessionId = randomUUID();
+			const { sourceIdentityBlockDigests: _newDigests, ...newIdentity } = sourceIdentityForSize(1n);
 			const suffix = oldSession.id.replaceAll('-', '_');
 			const functionName = `ticket_012_abort_${suffix}`;
 			const triggerName = `${functionName}_trigger`;
@@ -643,8 +673,9 @@ describe.runIf(runPostgresIntegration)(
 					uploadKind: 'GAME',
 					originalName: 'must-rollback.zip',
 					totalBytes: 1n,
-					chunkSizeBytes: 1,
+					chunkSizeBytes: SOURCE_BLOCK_SIZE,
 					totalChunks: 1,
+					...newIdentity,
 					s3UploadId: randomUUID(),
 					s3Key: `${testId}-replace-rollback-new.zip`,
 					expiresAt: new Date('2099-01-01T00:00:00.000Z'),
@@ -711,6 +742,7 @@ describe.runIf(runPostgresIntegration)(
 						token: firstToken,
 						owner: 'clock-skew-future-worker',
 						leaseMs: 2 * 60_000,
+						contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 					}),
 					second.acquirePartClaim({
 						sessionId: session.id,
@@ -719,6 +751,7 @@ describe.runIf(runPostgresIntegration)(
 						token: secondToken,
 						owner: 'clock-skew-past-worker',
 						leaseMs: 2 * 60_000,
+						contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 					}),
 				]);
 				expect(outcomes.filter(({ kind }) => kind === 'acquired')).toHaveLength(1);
@@ -761,7 +794,8 @@ describe.runIf(runPostgresIntegration)(
 				await expect(winningRepository.completePartClaim({
 					token: claim.token,
 					etag: 'stale-etag',
-				})).resolves.toEqual({ accepted: false, parts: [] });
+				contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+})).resolves.toEqual({ accepted: false, parts: [] });
 				await expect(second.acquirePartClaim({
 					sessionId: session.id,
 					partNumber: 1,
@@ -769,7 +803,8 @@ describe.runIf(runPostgresIntegration)(
 					token: randomUUID(),
 					owner: 'post-expiry-worker',
 					leaseMs: 2 * 60_000,
-				})).resolves.toEqual({ kind: 'expired' });
+				contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+})).resolves.toEqual({ kind: 'expired' });
 
 				const newUploadId = randomUUID();
 				await expect(second.replaceMultipartGeneration({
@@ -786,8 +821,9 @@ describe.runIf(runPostgresIntegration)(
 					token: nextToken,
 					owner: 'new-generation-worker',
 					leaseMs: 2 * 60_000,
-				})).resolves.toEqual({ kind: 'acquired', token: nextToken });
-				await expect(second.completePartClaim({ token: nextToken, etag: 'etag-generation-2' }))
+				contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+})).resolves.toEqual({ kind: 'acquired', token: nextToken });
+				await expect(second.completePartClaim({ token: nextToken, etag: 'etag-generation-2', contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }))
 					.resolves.toMatchObject({ accepted: true });
 				await expect(control.gameUploadPart.findUniqueOrThrow({
 					where: {
@@ -809,7 +845,7 @@ describe.runIf(runPostgresIntegration)(
 			const key = `${testId}-completion-lease-clock.zip`;
 			const session = await createSessionFixture({ s3Key: key });
 			await control.gameUploadPart.create({
-				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1', generation: 1 },
+				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
 			});
 			const owner = createGameUploadRepository(control, { abortBucket: protectedBucket });
 			const recovery = createGameUploadRepository(recoveryClient, { abortBucket: protectedBucket });
@@ -945,6 +981,51 @@ describe.runIf(runPostgresIntegration)(
 			}
 		});
 
+		it('keeps an existing part immutable across idempotent and conflicting repository claims', async () => {
+			const key = `${testId}-source-identity-part-conflict.zip`;
+			const session = await createSessionFixture({ s3Key: key });
+			const repository = createGameUploadRepository(control, { abortBucket: protectedBucket });
+			const retryRepository = createGameUploadRepository(recoveryClient, { abortBucket: protectedBucket });
+			const digestA = createHash('sha256').update(Buffer.from([0x41])).digest('hex');
+			const digestB = createHash('sha256').update(Buffer.from([0x42])).digest('hex');
+
+			try {
+				await control.gameUploadPart.create({
+					data: {
+						sessionId: session.id,
+						partNumber: 1,
+						etag: 'etag-a',
+						generation: 1,
+						contentSha256: digestA,
+					},
+				});
+
+				const [same, different] = await Promise.all([
+					repository.acquirePartClaim({
+						sessionId: session.id, partNumber: 1, generation: 1,
+						token: randomUUID(), owner: 'idempotent-retry', leaseMs: 60_000,
+						contentSha256: digestA,
+					}),
+					retryRepository.acquirePartClaim({
+						sessionId: session.id, partNumber: 1, generation: 1,
+						token: randomUUID(), owner: 'conflicting-retry', leaseMs: 60_000,
+						contentSha256: digestB,
+					}),
+				]);
+
+				expect(same).toMatchObject({ kind: 'already-uploaded' });
+				expect(different).toEqual({ kind: 'conflict' });
+				await expect(control.gameUploadPart.findUniqueOrThrow({
+					where: { game_upload_part_session_part: { sessionId: session.id, partNumber: 1 } },
+				})).resolves.toMatchObject({ etag: 'etag-a', generation: 1, contentSha256: digestA });
+			} finally {
+				await runCleanupSteps([
+					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
+					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
+				]);
+			}
+		});
+
 		it('fences stale part claims when replacing a multipart generation', async () => {
 			const key = `${testId}-generation.zip`;
 			const oldUploadId = randomUUID();
@@ -967,6 +1048,7 @@ describe.runIf(runPostgresIntegration)(
 					token: staleToken,
 					owner: 'first-request',
 					leaseMs,
+					contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 				})).resolves.toEqual({ kind: 'acquired', token: staleToken });
 				await expect(repository.acquirePartClaim({
 					sessionId: session.id,
@@ -975,6 +1057,7 @@ describe.runIf(runPostgresIntegration)(
 					token: randomUUID(),
 					owner: 'second-request',
 					leaseMs,
+					contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 				})).resolves.toEqual({ kind: 'busy' });
 				await control.gameUploadPart.create({
 					data: {
@@ -982,6 +1065,7 @@ describe.runIf(runPostgresIntegration)(
 						partNumber: 1,
 						etag: 'old-etag',
 						generation: 1,
+						contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 					},
 				});
 				await expect(repository.replaceMultipartGeneration({
@@ -1028,7 +1112,8 @@ describe.runIf(runPostgresIntegration)(
 				await expect(repository.completePartClaim({
 					token: staleToken,
 					etag: 'stale-etag',
-				})).resolves.toEqual({ accepted: false, parts: [] });
+				contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+})).resolves.toEqual({ accepted: false, parts: [] });
 				await expect(repository.acquirePartClaim({
 					sessionId: session.id,
 					partNumber: 1,
@@ -1036,6 +1121,7 @@ describe.runIf(runPostgresIntegration)(
 					token: randomUUID(),
 					owner: 'stale-generation',
 					leaseMs,
+					contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 				})).resolves.toEqual({ kind: 'unavailable' });
 				await expect(control.multipartAbortTask.findUnique({
 					where: {
@@ -1076,6 +1162,7 @@ describe.runIf(runPostgresIntegration)(
 					token: partToken,
 					owner: 'part-request',
 					leaseMs,
+					contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 				});
 				await expect(repository.claimCompletion({
 					sessionId: session.id,
@@ -1086,7 +1173,8 @@ describe.runIf(runPostgresIntegration)(
 				await expect(repository.completePartClaim({
 					token: partToken,
 					etag: 'etag-1',
-				})).resolves.toMatchObject({ accepted: true });
+				contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+})).resolves.toMatchObject({ accepted: true });
 				await expect(repository.claimCompletion({
 					sessionId: session.id,
 					generation: 1,
@@ -1110,6 +1198,7 @@ describe.runIf(runPostgresIntegration)(
 					token: randomUUID(),
 					owner: 'late-part-request',
 					leaseMs,
+					contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 				})).resolves.toEqual({ kind: 'unavailable' });
 			} finally {
 				await runCleanupSteps([
@@ -1128,7 +1217,7 @@ describe.runIf(runPostgresIntegration)(
 				totalBytes: 1n,
 			});
 			await control.gameUploadPart.create({
-				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1' },
+				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1', contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
 			});
 			storage.seedMultipart(
 				protectedBucket,
@@ -1311,7 +1400,7 @@ describe.runIf(runPostgresIntegration)(
 				totalBytes: 1n,
 			});
 			await control.gameUploadPart.create({
-				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1' },
+				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1', contentSha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
 			});
 			storage.seedMultipart(
 				protectedBucket,

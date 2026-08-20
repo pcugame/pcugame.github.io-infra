@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { completeSession } from '../modules/admin/game-upload/complete-session.service.js';
 import { createSession } from '../modules/admin/game-upload/create-session.service.js';
@@ -11,6 +12,18 @@ import {
 } from '../modules/admin/game-upload/multipart-cleanup.js';
 import type { GameUploadServiceDependencies } from '../modules/admin/game-upload/ports.js';
 import { createDurableGameUploadRepository } from './helpers/upload-lifecycle.js';
+import { sourceIdentityRoot } from '../modules/admin/game-upload/source-identity.js';
+
+function sourceForBuffer(file: Buffer) {
+	const digest = createHash('sha256').update(file).digest('hex');
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(file.length, 1_048_576, [digest]),
+		sourceIdentityBlockSizeBytes: 1_048_576,
+		sourceIdentityBlockManifest: Buffer.from(digest, 'hex'),
+		sourceIdentityBlockDigests: [digest],
+	};
+}
 
 function harness() {
 	const abortMultipart = vi.fn(async () => undefined);
@@ -150,7 +163,7 @@ describe('untracked multipart cleanup durability', () => {
 				7,
 				1,
 				{ id: 11, role: 'ADMIN' },
-				{ originalName: 'game.zip', totalBytes: 1 },
+				{ originalName: 'game.zip', totalBytes: 1, ...sourceForBuffer(Buffer.from([0])) },
 			);
 		} catch (error) {
 			thrown = error;
@@ -182,7 +195,7 @@ describe('untracked multipart cleanup durability', () => {
 			7,
 			1,
 			{ id: 11, role: 'ADMIN' },
-			{ originalName: 'game.zip', totalBytes: 1 },
+			{ originalName: 'game.zip', totalBytes: 1, ...sourceForBuffer(Buffer.from([0])) },
 		)).resolves.toMatchObject({ sessionId: 'new-session-id' });
 
 		expect(wakeMaintenance).toHaveBeenCalledOnce();
@@ -223,6 +236,7 @@ describe('untracked multipart cleanup durability', () => {
 			s3Key: 'new-object.zip',
 			parts: [],
 			multipartGeneration: 1,
+			...sourceForBuffer(Buffer.from([0])),
 			project: { status: 'PUBLISHED' },
 		});
 		vi.mocked(repository.acquirePartClaim).mockResolvedValueOnce({ kind: 'expired' });
@@ -238,6 +252,7 @@ describe('untracked multipart cleanup durability', () => {
 				0,
 				Readable.from([Buffer.from([0])]),
 				{ id: 11, role: 'ADMIN' },
+				{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: sourceForBuffer(Buffer.from([0])).sourceIdentity },
 			);
 		} catch (error) {
 			thrown = error;
@@ -281,12 +296,13 @@ describe('untracked multipart cleanup durability', () => {
 			expiresAt: new Date('2026-08-12T00:00:00.000Z'),
 			s3UploadId: 'old-upload-id',
 			s3Key: 'new-object.zip',
-			parts: [{ partNumber: 1, etag: 'database-etag', generation: 1 }],
+			parts: [{ partNumber: 1, etag: 'database-etag', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([0])).digest('hex') }],
 			multipartGeneration: 1,
+			...sourceForBuffer(Buffer.from([0])),
 			project: { status: 'PUBLISHED' },
 		});
 		vi.mocked(repository.findPartsBySessionId).mockResolvedValueOnce([
-			{ partNumber: 1, etag: 'database-etag', generation: 1 },
+			{ partNumber: 1, etag: 'database-etag', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([0])).digest('hex') },
 		]);
 		vi.mocked(deps.storage.listParts).mockResolvedValueOnce([
 			{ partNumber: 1, etag: 'different-storage-etag' },

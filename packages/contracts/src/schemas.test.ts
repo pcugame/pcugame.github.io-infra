@@ -132,15 +132,23 @@ describe('exhibition and auth schemas', () => {
 		expect(GoogleAuthRequestSchema.safeParse({ credential: '' }).success).toBe(false);
 		expect(DevAuthLoginRequestSchema.safeParse({ role: 'OPERATOR' }).success).toBe(true);
 		expect(DevAuthLoginErrorRequestSchema.safeParse({ scenario: 'domain-not-allowed' }).success).toBe(true);
-		expect(GameUploadCreateSessionSchema.safeParse({ originalName: 'game.zip', totalBytes: 1 }).success).toBe(true);
+		const identity = {
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+			sourceIdentity: '0'.repeat(64),
+			sourceIdentityBlockSizeBytes: 1048576 as const,
+			sourceIdentityBlockDigests: ['1'.repeat(64)],
+		};
+		expect(GameUploadCreateSessionSchema.safeParse({ originalName: 'game.zip', totalBytes: 1, ...identity }).success).toBe(true);
 		expect(GameUploadCreateSessionSchema.safeParse({ originalName: '', totalBytes: 0 }).success).toBe(false);
 		expect(GameUploadCreateSessionSchema.safeParse({
 			originalName: 'game.zip',
 			totalBytes: 1.5,
+			...identity,
 		}).success).toBe(false);
 		expect(GameUploadCreateSessionSchema.safeParse({
 			originalName: 'game.zip',
 			totalBytes: Number.MAX_SAFE_INTEGER + 1,
+			...identity,
 		}).success).toBe(false);
 	});
 });

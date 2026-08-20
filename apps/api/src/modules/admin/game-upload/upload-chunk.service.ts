@@ -1,6 +1,5 @@
 import type { GameUploadChunkResponse } from '@pcu/contracts';
 import { AppError, badRequest, conflict, operationInProgress } from '../../../shared/errors.js';
-import { createCountedChunkStream } from './chunk-stream.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
 import type { GameUploadServiceDependencies } from './ports.js';
@@ -11,6 +10,33 @@ import {
 	UntrackedMultipartCleanupError,
 } from './multipart-cleanup.js';
 import { createClaimHeartbeatGuard } from '../../upload-lifecycle/claim-heartbeat.js';
+import { Readable } from 'node:stream';
+import {
+	assertChunkMatchesManifest,
+	assertSourceIdentityMatches,
+} from './source-identity.js';
+
+async function readValidatedChunk(
+	body: NodeJS.ReadableStream,
+	chunkIndex: number,
+	expectedSize: number,
+): Promise<Buffer> {
+	const chunks: Buffer[] = [];
+	let written = 0;
+	for await (const value of body as AsyncIterable<Buffer | Uint8Array | string>) {
+		const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+		written += chunk.length;
+		if (written > expectedSize) {
+			(body as { destroy?: (error?: Error) => void }).destroy?.();
+			throw new AppError(413, `Chunk ${chunkIndex} exceeds expected size`, 'PAYLOAD_TOO_LARGE');
+		}
+		chunks.push(chunk);
+	}
+	if (written !== expectedSize) {
+		throw badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${written}`);
+	}
+	return Buffer.concat(chunks, expectedSize);
+}
 
 async function abortUnusedReplacement(
 	deps: GameUploadServiceDependencies,
@@ -94,6 +120,7 @@ export async function uploadChunk(
 	chunkIndex: number,
 	body: NodeJS.ReadableStream,
 	user: { id: number; role: string },
+	query: { sourceIdentityAlgorithm?: string; sourceIdentity?: string },
 ): Promise<GameUploadChunkResponse> {
 	deps.uploadSlots.acquire();
 	let claimHeartbeat: ReturnType<typeof createClaimHeartbeatGuard> | undefined;
@@ -120,6 +147,14 @@ export async function uploadChunk(
 
 		const partNumber = chunkIndex + 1;
 		const generation = session.multipartGeneration ?? 1;
+		assertSourceIdentityMatches(session, query);
+		const chunkBuffer = await readValidatedChunk(body, chunkIndex, expectedSize);
+		const contentSha256 = assertChunkMatchesManifest({
+			buffer: chunkBuffer,
+			chunkIndex,
+			chunkSizeBytes: session.chunkSizeBytes,
+			manifest: session.sourceIdentityBlockManifest!,
+		});
 		const claimToken = deps.ids.next();
 		const claim = await deps.repository.acquirePartClaim({
 			sessionId: session.id,
@@ -128,7 +163,21 @@ export async function uploadChunk(
 			token: claimToken,
 			owner: `user:${user.id}`,
 			leaseMs: 2 * 60 * 1000,
+			contentSha256,
 		});
+		if (claim.kind === 'already-uploaded') {
+			return {
+				index: chunkIndex,
+				bytesWritten: expectedSize,
+				uploadedCount: claim.parts.length,
+				totalChunks: session.totalChunks,
+			};
+		}
+		if (claim.kind === 'conflict') {
+			throw conflict('Chunk content does not match the previously uploaded chunk', {
+				reason: 'CHUNK_CONTENT_MISMATCH',
+			});
+		}
 		if (claim.kind === 'busy') {
 			throw operationInProgress(`Chunk ${chunkIndex} is already being uploaded`);
 		}
@@ -165,36 +214,36 @@ export async function uploadChunk(
 				'Part-upload claim heartbeat failed',
 			),
 		});
-		const countedBody = createCountedChunkStream(body, chunkIndex, expectedSize);
-
 		let etag: string;
 		try {
 			etag = await deps.storage.uploadPart(
 				session.s3Key,
 				session.s3UploadId,
 				partNumber,
-				countedBody.stream,
+				Readable.from(chunkBuffer),
 				expectedSize,
 				{ signal: claimHeartbeat.signal },
 			);
 		} catch (err) {
-			countedBody.destroy(err);
 			if (claimHeartbeat.isLost()) {
 				await claimHeartbeat.assertOwned();
 			}
 			throw err;
 		}
 		await claimHeartbeat.assertOwned();
-		const bytesWritten = countedBody.bytesWritten();
-		if (bytesWritten !== expectedSize) {
-			throw badRequest(`Chunk ${chunkIndex}: expected ${expectedSize} bytes, got ${bytesWritten}`);
-		}
+		const bytesWritten = expectedSize;
 
 		let parts;
 		const completed = await deps.repository.completePartClaim({
 			token: claimToken,
 			etag,
+			contentSha256,
 		});
+		if (completed.conflict) {
+			throw conflict('Chunk content does not match the previously uploaded chunk', {
+				reason: 'CHUNK_CONTENT_MISMATCH',
+			});
+		}
 		if (!completed.accepted) {
 			const businessError = conflict('Chunk claim expired; the multipart generation must be restarted');
 			try {

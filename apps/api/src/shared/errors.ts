@@ -40,8 +40,8 @@ export function notFound(message = 'Not found'): AppError {
   return new AppError(404, message, 'NOT_FOUND');
 }
 
-export function conflict(message: string): AppError {
-  return new AppError(409, message, 'CONFLICT');
+export function conflict(message: string, details?: unknown): AppError {
+	return new AppError(409, message, 'CONFLICT', details);
 }
 
 export function idempotencyConflict(message = 'Idempotency key was already used for another request'): AppError {

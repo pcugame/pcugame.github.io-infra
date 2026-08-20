@@ -4,6 +4,7 @@ import { AppError, badRequest, conflict } from '../../../shared/errors.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
 import { assertUploadAllowed } from '../upload-guard.js';
 import { resolveChunkSizeBytes } from './session-sizing.js';
+import { SOURCE_IDENTITY_BLOCK_SIZE_BYTES, validateSourceIdentity } from './source-identity.js';
 import {
 	ActiveUploadCompletionInProgressError,
 	type GameUploadServiceDependencies,
@@ -20,7 +21,7 @@ export async function createSession(
 	projectId: number,
 	exhibitionId: number,
 	user: { id: number; role: UserRole },
-	body: { originalName?: string; totalBytes?: number; uploadKind?: UploadKind },
+	body: { originalName?: string; totalBytes?: number; uploadKind?: UploadKind; sourceIdentityAlgorithm?: string; sourceIdentity?: string; sourceIdentityBlockSizeBytes?: number; sourceIdentityBlockDigests?: string[] },
 ): Promise<GameUploadSession> {
 	// Refuse to start new multi-chunk sessions once shutdown has begun; in-flight
 	// completion calls are still allowed so existing uploads do not get truncated.
@@ -56,6 +57,10 @@ export async function createSession(
 	}
 
 	const totalChunks = Math.ceil(totalBytes / chunkSizeBytes);
+	if (chunkSizeBytes % SOURCE_IDENTITY_BLOCK_SIZE_BYTES !== 0) {
+		throw new AppError(500, 'Upload chunk size must align with source identity blocks', 'INTERNAL_ERROR');
+	}
+	const sourceIdentity = validateSourceIdentity(body, totalBytes);
 	const s3Key = deps.storageKey(uploadKind, projectId);
 	const s3UploadId = await deps.storage.createMultipart(s3Key);
 	const expiresAt = new Date(
@@ -73,6 +78,10 @@ export async function createSession(
 			totalBytes: BigInt(totalBytes),
 			chunkSizeBytes,
 			totalChunks,
+			sourceIdentityAlgorithm: sourceIdentity.algorithm,
+			sourceIdentity: sourceIdentity.identity,
+			sourceIdentityBlockSizeBytes: sourceIdentity.blockSizeBytes,
+			sourceIdentityBlockManifest: sourceIdentity.manifest,
 			s3UploadId,
 			s3Key,
 			expiresAt,
@@ -118,6 +127,9 @@ export async function createSession(
 		sessionId: created.session.id,
 		chunkSizeBytes,
 		totalChunks,
+		sourceIdentityAlgorithm: sourceIdentity.algorithm,
+		sourceIdentity: sourceIdentity.identity,
+		sourceIdentityBlockSizeBytes: sourceIdentity.blockSizeBytes,
 		expiresAt: expiresAt.toISOString(),
 		uploadKind,
 	};

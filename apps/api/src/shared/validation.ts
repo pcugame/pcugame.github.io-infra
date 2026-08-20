@@ -125,6 +125,11 @@ export const GameUploadCreateSessionBody = GameUploadCreateSessionSchema.extend(
 	totalBytes: CanonicalPositiveIntegerInput,
 });
 
+export const GameUploadChunkIdentityQuery = z.object({
+	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'),
+	sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
 // ── Helper ───────────────────────────────────────────────────
 
 import { AppError } from './errors.js';

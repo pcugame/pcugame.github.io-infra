@@ -9,6 +9,7 @@ import type {
 import { sendOk, sendCreated } from '../../../shared/http.js';
 import {
 	GameUploadCreateSessionBody,
+	GameUploadChunkIdentityQuery,
 	parseBody,
 	parseIntParam,
 	parseNonNegativeIntParam,
@@ -65,7 +66,7 @@ export function createGameUploadController(
 	);
 
 	/** PUT /game-upload-sessions/:sessionId/chunks/:index — upload one chunk */
-	app.put<{ Params: { sessionId: string; index: string } }>(
+	app.put<{ Params: { sessionId: string; index: string }; Querystring: { sourceIdentityAlgorithm?: string; sourceIdentity?: string } }>(
 		'/game-upload-sessions/:sessionId/chunks/:index',
 		{
 			preHandler: requireLogin,
@@ -79,6 +80,7 @@ export function createGameUploadController(
 				parseNonNegativeIntParam(request.params.index, 'Chunk index'),
 				request.body as NodeJS.ReadableStream,
 				{ id: user.id, role: user.role },
+				parseBody(GameUploadChunkIdentityQuery, request.query),
 			);
 			sendOk<GameUploadChunkResponse>(reply, result);
 		},

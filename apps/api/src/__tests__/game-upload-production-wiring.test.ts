@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { readFile } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
@@ -11,6 +12,7 @@ import {
 	type GameUploadProductionGraph,
 } from '../modules/admin/game-upload/composition.js';
 import type { GameUploadSessionRecord } from '../modules/admin/game-upload/ports.js';
+import { sourceIdentityRoot } from '../modules/admin/game-upload/source-identity.js';
 import { createUploadLimiter } from '../shared/upload-limits.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 import {
@@ -20,6 +22,17 @@ import {
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const apps: FastifyInstance[] = [];
+
+function sourceForByte(value: number) {
+	const digest = createHash('sha256').update(Buffer.from([value])).digest('hex');
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(1, 1024 * 1024, [digest]),
+		sourceIdentityBlockSizeBytes: 1024 * 1024,
+		sourceIdentityBlockManifest: Buffer.from(digest, 'hex'),
+		sourceIdentityBlockDigests: [digest],
+	};
+}
 
 const logger: AppLogger = {
 	child: () => logger,
@@ -51,6 +64,7 @@ function session(
 		storageKey: null,
 		parts: [],
 		multipartGeneration: 1,
+		...sourceForByte(1),
 		project: { status: 'PUBLISHED' },
 		...overrides,
 	};
@@ -270,7 +284,7 @@ describe('game-upload production composition', () => {
 		const response = await app.inject({
 			method: 'POST',
 			url: '/api/admin/projects/7/game-upload-sessions',
-			payload: { originalName: 'game.zip', totalBytes: 1 },
+			payload: { originalName: 'game.zip', totalBytes: 1, ...sourceForByte(1) },
 		});
 
 		expect(response.statusCode, response.body).toBe(201);
@@ -300,7 +314,7 @@ describe('game-upload production composition', () => {
 		const app = await routeApp(harness.graph);
 		const response = await app.inject({
 			method: 'PUT',
-			url: '/api/admin/game-upload-sessions/session-1/chunks/0',
+			url: `/api/admin/game-upload-sessions/session-1/chunks/0?sourceIdentityAlgorithm=SHA256_BLOCK_MANIFEST_V1&sourceIdentity=${session().sourceIdentity}`,
 			headers: { 'content-type': 'application/octet-stream' },
 			payload: Buffer.from([1]),
 		});
@@ -316,16 +330,17 @@ describe('game-upload production composition', () => {
 		expect(harness.repository.completePartClaim).toHaveBeenCalledWith({
 			token: claim?.token,
 			etag: 'etag-1',
+			contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex'),
 		});
 	});
 
 	it('passes the completion claim token into the atomic terminal outbox commit and only wakes the worker afterward', async () => {
 		const harness = graphHarness();
 		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
-			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1 }],
+			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex') }],
 		}));
 		vi.mocked(harness.repository.findPartsBySessionId).mockResolvedValue([
-			{ partNumber: 1, etag: 'etag-1', generation: 1 },
+			{ partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex') },
 		]);
 		harness.storage.setHead({ size: 1, contentType: 'application/zip' });
 		harness.storage.setHeader(Buffer.from('not-a-zip'));
@@ -355,10 +370,10 @@ describe('game-upload production composition', () => {
 	it('does not wake deletion or report terminal success when the atomic outbox commit fails', async () => {
 		const harness = graphHarness();
 		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
-			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1 }],
+			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex') }],
 		}));
 		vi.mocked(harness.repository.findPartsBySessionId).mockResolvedValue([
-			{ partNumber: 1, etag: 'etag-1', generation: 1 },
+			{ partNumber: 1, etag: 'etag-1', generation: 1, contentSha256: createHash('sha256').update(Buffer.from([1])).digest('hex') },
 		]);
 		vi.mocked(harness.repository.markCompletedObjectFailed).mockRejectedValue(
 			new Error('atomic outbox unavailable'),
@@ -402,7 +417,7 @@ describe('game-upload production composition', () => {
 		const a = graphHarness();
 		const b = graphHarness();
 		vi.mocked(a.repository.findSessionById).mockResolvedValue(session());
-		vi.mocked(b.repository.findSessionById).mockResolvedValue(session({ id: 'session-b' }));
+		vi.mocked(b.repository.findSessionById).mockResolvedValue(session({ id: 'session-b', ...sourceForByte(2) }));
 		vi.mocked(a.repository.completePartClaim).mockResolvedValue({
 			accepted: true,
 			parts: [{ partNumber: 1, etag: 'etag-1', generation: 1 }],
@@ -420,6 +435,7 @@ describe('game-upload production composition', () => {
 			0,
 			Readable.from([Buffer.from([1])]),
 			{ id: 11, role: 'ADMIN' },
+			{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: session().sourceIdentity! },
 		);
 		await vi.waitFor(() => expect(a.storage.calls.uploadPart).toHaveBeenCalledOnce());
 		let closed = false;
@@ -432,6 +448,7 @@ describe('game-upload production composition', () => {
 			0,
 			Readable.from([Buffer.from([2])]),
 			{ id: 11, role: 'ADMIN' },
+			{ sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: sourceForByte(2).sourceIdentity },
 		)).resolves.toMatchObject({ uploadedCount: 1 });
 		release();
 		await Promise.all([activeA, closing]);

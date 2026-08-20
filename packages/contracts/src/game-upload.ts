@@ -3,6 +3,10 @@ export type UploadKind = 'GAME' | 'WEBGL';
 export type GameUploadCreateSessionRequest = {
 	originalName: string;
 	totalBytes: number;
+	sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1';
+	sourceIdentity: string;
+	sourceIdentityBlockSizeBytes: 1048576;
+	sourceIdentityBlockDigests: string[];
 	uploadKind?: UploadKind;
 };
 
@@ -12,6 +16,9 @@ export type GameUploadSession = {
 	totalChunks: number;
 	expiresAt: string;
 	uploadKind: UploadKind;
+	sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1';
+	sourceIdentity: string;
+	sourceIdentityBlockSizeBytes: 1048576;
 };
 
 export type GameUploadStatus = {
@@ -26,6 +33,9 @@ export type GameUploadStatus = {
 	uploadedCount: number;
 	status: string;
 	expiresAt: string;
+	sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' | null;
+	sourceIdentity: string | null;
+	sourceIdentityBlockSizeBytes: 1048576 | null;
 };
 
 export type GameUploadSessionListResponse = {
