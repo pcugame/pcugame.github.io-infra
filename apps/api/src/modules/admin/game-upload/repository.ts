@@ -305,6 +305,7 @@ export function acquirePartClaim(
 		token: string;
 		owner: string;
 		leaseMs: number;
+		contentSha256?: string;
 	},
 	client: PrismaClient,
 ) {
@@ -316,6 +317,19 @@ export function acquirePartClaim(
 		});
 		if (!session || session.status !== 'PENDING' || session.multipartGeneration !== input.generation) {
 			return { kind: 'unavailable' as const };
+		}
+		const existingPart = await tx.gameUploadPart.findUnique({
+			where: { game_upload_part_session_part: { sessionId: input.sessionId, partNumber: input.partNumber } },
+		});
+		if (existingPart && existingPart.generation === input.generation) {
+			if (input.contentSha256 && existingPart.contentSha256 === input.contentSha256) {
+				const parts = await tx.gameUploadPart.findMany({
+					where: { sessionId: input.sessionId, generation: input.generation },
+					orderBy: { partNumber: 'asc' },
+				});
+				return { kind: 'already-uploaded' as const, parts };
+			}
+			return { kind: 'conflict' as const };
 		}
 		const inserted = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 			INSERT INTO "game_upload_part_claims" (
@@ -348,7 +362,7 @@ export function acquirePartClaim(
 }
 
 export function completePartClaim(
-	input: { token: string; etag: string },
+	input: { token: string; etag: string; contentSha256?: string },
 	client: PrismaClient,
 ) {
 	return withSerializableRetry(async (tx) => {
@@ -374,6 +388,19 @@ export function completePartClaim(
 		if (!claim) {
 			return { accepted: false as const, parts: [] };
 		}
+		const existingPart = await tx.gameUploadPart.findUnique({
+			where: {
+				game_upload_part_session_part: {
+					sessionId: claim.sessionId,
+					partNumber: claim.partNumber,
+				},
+			},
+		});
+		if (existingPart && existingPart.generation === claim.generation
+			&& existingPart.contentSha256 !== input.contentSha256) {
+			await tx.gameUploadPartClaim.delete({ where: { id: claim.id } });
+			return { accepted: false as const, conflict: true as const, parts: [] };
+		}
 		await tx.gameUploadPart.upsert({
 			where: {
 				game_upload_part_session_part: {
@@ -381,11 +408,12 @@ export function completePartClaim(
 					partNumber: claim.partNumber,
 				},
 			},
-			update: { etag: input.etag, generation: claim.generation },
+			update: { etag: input.etag, generation: claim.generation, contentSha256: input.contentSha256 },
 			create: {
 				sessionId: claim.sessionId,
 				partNumber: claim.partNumber,
 				etag: input.etag,
+				contentSha256: input.contentSha256,
 				generation: claim.generation,
 			},
 		});
@@ -412,7 +440,14 @@ export function claimCompletion(
 		}
 		const currentParts = session.parts.filter((part) => part.generation === input.generation);
 		if (session.partClaims.length > 0) return { count: 0, reason: 'parts-active' as const };
-		if (currentParts.length !== session.totalChunks) return { count: 0, reason: 'parts-missing' as const };
+		if (session.sourceIdentityAlgorithm !== 'SHA256_BLOCK_MANIFEST_V1'
+			|| !session.sourceIdentity
+			|| session.sourceIdentityBlockSizeBytes !== 1048576
+			|| !session.sourceIdentityBlockManifest
+			|| currentParts.length !== session.totalChunks
+			|| currentParts.some((part) => !part.contentSha256)) {
+			return { count: 0, reason: 'parts-missing' as const };
+		}
 		const updated = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 			UPDATE "game_upload_sessions"
 			SET "status" = 'COMPLETING',

@@ -2,6 +2,7 @@ import type { GameUploadCompleteResponse } from '@pcu/contracts';
 import { AppError, badRequest, conflict, operationInProgress } from '../../../shared/errors.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
+import { assertSessionHasSourceIdentity } from './source-identity.js';
 import { assertUploadStateTransition } from './state-machine.js';
 import { isTerminalUploadFinalizationError } from './finalize-completed-upload.service.js';
 import { commitTerminalCompletedObjectFailure } from './terminal-object-failure.js';
@@ -45,6 +46,11 @@ export async function completeSession(
 			};
 		}
 	}
+	// A completed session is an immutable record.  In particular, legacy
+	// completed rows must remain readable/idempotent rather than being sent back
+	// through the mutation/finalization path merely because they predate source
+	// identities.
+	assertSessionHasSourceIdentity(session);
 	if (session.status === 'COMPLETING') {
 		throw operationInProgress('Upload completion is already in progress');
 	}
@@ -63,6 +69,9 @@ export async function completeSession(
 	const currentParts = session.parts.filter(
 		(part: { generation?: number }) => (part.generation ?? generation) === generation,
 	);
+	if (currentParts.some((part) => !part.contentSha256)) {
+		throw conflict('Upload session is missing verified chunk identities', { reason: 'LEGACY_UPLOAD_SESSION' });
+	}
 	const uploadedChunks = currentParts.length > 0
 		? currentParts.map((part: { partNumber: number }) => part.partNumber - 1)
 		: session.uploadedChunks;

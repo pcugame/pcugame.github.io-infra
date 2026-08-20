@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Prisma, type PrismaClient } from '../generated/prisma/client.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
@@ -22,6 +22,27 @@ import { createUploadIntentRepository } from '../modules/upload-intent/repositor
 import { parseWebglEntryKey, parseWebglSourceKey } from '../modules/webgl/paths.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
+const ACTIVE_SOURCE_BYTES = 1_048_576;
+
+/** A real one-block source manifest for active-session PostgreSQL fixtures. */
+const ACTIVE_SOURCE_IDENTITY = (() => {
+	const source = Buffer.alloc(ACTIVE_SOURCE_BYTES, 0x6f);
+	const manifest = createHash('sha256').update(source).digest();
+	const header = Buffer.allocUnsafe(16);
+	header.writeBigUInt64BE(BigInt(source.length), 0);
+	header.writeUInt32BE(ACTIVE_SOURCE_BYTES, 8);
+	header.writeUInt32BE(1, 12);
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+		sourceIdentity: createHash('sha256')
+			.update(Buffer.from('PCU-UPLOAD-SOURCE-V1\0', 'utf8'))
+			.update(header)
+			.update(manifest)
+			.digest('hex'),
+		sourceIdentityBlockSizeBytes: ACTIVE_SOURCE_BYTES,
+		sourceIdentityBlockManifest: manifest,
+	};
+})();
 
 describe.runIf(runPostgresIntegration)('orphan durability with production PostgreSQL repositories', () => {
 	let client: PrismaClient;
@@ -203,7 +224,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		const session = await client.gameUploadSession.create({
 			data: {
 				id: randomUUID(), projectId, userId, uploadKind: 'WEBGL', originalName: 'build.zip',
-				totalBytes: 1n, chunkSizeBytes: 1, totalChunks: 1, status: 'PENDING',
+				totalBytes: BigInt(ACTIVE_SOURCE_BYTES), chunkSizeBytes: ACTIVE_SOURCE_BYTES, totalChunks: 1, status: 'PENDING',
+				...ACTIVE_SOURCE_IDENTITY,
 				s3Key: sourceKey, s3UploadId: randomUUID(), expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 			},
 		});
@@ -247,7 +269,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				.resolves.toEqual(expect.arrayContaining([expect.objectContaining({ storageKey: sitePrefix })]));
 			await expect(gameUploadRepository.createSessionReplacingActive({
 				id: sessionId, projectId, userId, uploadKind: 'WEBGL', originalName: 'build.zip',
-				totalBytes: 1n, chunkSizeBytes: 1, totalChunks: 1,
+				totalBytes: BigInt(ACTIVE_SOURCE_BYTES), chunkSizeBytes: ACTIVE_SOURCE_BYTES, totalChunks: 1,
+				...ACTIVE_SOURCE_IDENTITY,
 				s3UploadId: randomUUID(), s3Key: sourceKey, expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 			}, client, protectedBucket, publicBucket)).rejects.toThrow('Object deletion claim overlaps new reference');
 			await expect(client.gameUploadSession.count({ where: { id: sessionId } })).resolves.toBe(0);
@@ -261,7 +284,8 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		const session = await client.gameUploadSession.create({
 			data: {
 				id: randomUUID(), projectId, userId, uploadKind: 'WEBGL', originalName: 'build.zip',
-				totalBytes: 1n, chunkSizeBytes: 1, totalChunks: 1, status: 'COMPLETING',
+				totalBytes: BigInt(ACTIVE_SOURCE_BYTES), chunkSizeBytes: ACTIVE_SOURCE_BYTES, totalChunks: 1, status: 'COMPLETING',
+				...ACTIVE_SOURCE_IDENTITY,
 				s3Key: 'webgl/not-a-project/deployment/source.zip', s3UploadId: randomUUID(),
 				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 			},
@@ -682,10 +706,11 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				userId,
 				uploadKind: 'GAME',
 				originalName: 'new.zip',
-				totalBytes: 4n,
-				chunkSizeBytes: 4,
+				totalBytes: BigInt(ACTIVE_SOURCE_BYTES),
+				chunkSizeBytes: ACTIVE_SOURCE_BYTES,
 				totalChunks: 1,
 				status: 'COMPLETING',
+				...ACTIVE_SOURCE_IDENTITY,
 				completionClaimToken: 'game-finalize-owner',
 				completionClaimUntil: new Date(Date.now() + 60_000),
 				s3Key: newKey,
@@ -731,7 +756,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			totalBytes: session.totalBytes,
 			s3Key: newKey,
 			completionClaimToken: 'game-finalize-owner',
-		}, { size: 4 })).resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
+		}, { size: ACTIVE_SOURCE_BYTES })).resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
 		await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))
 			.resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
 		await expect(client.asset.findFirstOrThrow({
@@ -860,10 +885,11 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				userId,
 				uploadKind: 'WEBGL',
 				originalName: 'webgl.zip',
-				totalBytes: 4n,
-				chunkSizeBytes: 4,
+				totalBytes: BigInt(ACTIVE_SOURCE_BYTES),
+				chunkSizeBytes: ACTIVE_SOURCE_BYTES,
 				totalChunks: 1,
 				status: 'COMPLETING',
+				...ACTIVE_SOURCE_IDENTITY,
 				completionClaimToken: 'webgl-finalize-owner',
 				completionClaimUntil: new Date(Date.now() + 60_000),
 				s3Key: newSource,
@@ -899,7 +925,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			totalBytes: session.totalBytes,
 			s3Key: newSource,
 			completionClaimToken: 'webgl-finalize-owner',
-		}, { size: 4 })).resolves.toMatchObject({ status: 'COMPLETED', webglUrl: '/webgl' });
+		}, { size: ACTIVE_SOURCE_BYTES })).resolves.toMatchObject({ status: 'COMPLETED', webglUrl: '/webgl' });
 		await expect(client.project.findUniqueOrThrow({ where: { id: project.id } }))
 			.resolves.toMatchObject({ webglEntryKey: deployment.entryKey });
 		await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))

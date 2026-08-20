@@ -8,6 +8,7 @@
 import { env } from '../env';
 import { ApiError } from './client';
 import { failUpload, finishUpload, startUpload, updateUpload } from '../upload';
+import type { FileIdentity } from '../upload/file-identity';
 import type {
 	GameUploadChunkResponse,
 	GameUploadCompleteResponse,
@@ -76,6 +77,7 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
 export async function createGameUploadSession(
 	projectId: number,
 	file: File,
+	identity: FileIdentity,
 	uploadKind: UploadKind = 'GAME',
 ): Promise<GameUploadSession> {
 	return apiRequest<GameUploadSession>(
@@ -86,6 +88,10 @@ export async function createGameUploadSession(
 			body: JSON.stringify({
 				originalName: file.name,
 				totalBytes: file.size,
+				sourceIdentityAlgorithm: identity.sourceIdentityAlgorithm,
+				sourceIdentity: identity.sourceIdentity,
+				sourceIdentityBlockSizeBytes: identity.sourceIdentityBlockSizeBytes,
+				sourceIdentityBlockDigests: identity.sourceIdentityBlockDigests,
 				uploadKind,
 			} satisfies GameUploadCreateSessionRequest),
 		},
@@ -186,6 +192,10 @@ export function uploadGameFile(
 				const start = i * session.chunkSizeBytes;
 				const end = Math.min(start + session.chunkSizeBytes, file.size);
 				const chunk = file.slice(start, end);
+				const identityQuery = new URLSearchParams({
+					sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
+					sourceIdentity: session.sourceIdentity,
+				});
 
 				// Retry up to 3 times per chunk
 				let lastErr: unknown;
@@ -193,7 +203,7 @@ export function uploadGameFile(
 					if (aborted) throw new Error('Upload aborted');
 					try {
 						await apiRequest<GameUploadChunkResponse>(
-							`/api/admin/game-upload-sessions/${session.sessionId}/chunks/${i}`,
+							`/api/admin/game-upload-sessions/${session.sessionId}/chunks/${i}?${identityQuery.toString()}`,
 							{
 								method: 'PUT',
 								headers: { 'Content-Type': 'application/octet-stream' },

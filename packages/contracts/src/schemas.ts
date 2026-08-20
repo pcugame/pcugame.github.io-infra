@@ -116,6 +116,10 @@ export const DevAuthLoginErrorRequestSchema = z.object({
 export const GameUploadCreateSessionSchema = z.object({
 	originalName: z.string().min(1),
 	totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'),
+	sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+	sourceIdentityBlockSizeBytes: z.literal(1048576),
+	sourceIdentityBlockDigests: z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1),
 	uploadKind: UploadKindSchema.optional(),
 });
 

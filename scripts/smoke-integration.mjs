@@ -1,4 +1,5 @@
 import { request as httpRequest } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 
@@ -10,6 +11,35 @@ const keepWebgl = process.env.INTEGRATION_KEEP_WEBGL === 'true';
 
 const timeoutMs = Number(process.env.INTEGRATION_SMOKE_TIMEOUT_MS || 180_000);
 const pollIntervalMs = 2_000;
+const SOURCE_IDENTITY_BLOCK_SIZE_BYTES = 1_048_576;
+const SOURCE_IDENTITY_ALGORITHM = 'SHA256_BLOCK_MANIFEST_V1';
+const SOURCE_IDENTITY_ROOT_PREFIX = Buffer.from('PCU-UPLOAD-SOURCE-V1\0', 'utf8');
+
+function sourceIdentityForBytes(bytes) {
+  const sourceIdentityBlockDigests = [];
+  const digestBuffers = [];
+  for (let offset = 0; offset < bytes.length; offset += SOURCE_IDENTITY_BLOCK_SIZE_BYTES) {
+    const digest = createHash('sha256')
+      .update(bytes.subarray(offset, offset + SOURCE_IDENTITY_BLOCK_SIZE_BYTES))
+      .digest();
+    digestBuffers.push(digest);
+    sourceIdentityBlockDigests.push(digest.toString('hex'));
+  }
+  const header = Buffer.alloc(16);
+  header.writeBigUInt64BE(BigInt(bytes.length), 0);
+  header.writeUInt32BE(SOURCE_IDENTITY_BLOCK_SIZE_BYTES, 8);
+  header.writeUInt32BE(digestBuffers.length, 12);
+  return {
+    sourceIdentityAlgorithm: SOURCE_IDENTITY_ALGORITHM,
+    sourceIdentity: createHash('sha256')
+      .update(SOURCE_IDENTITY_ROOT_PREFIX)
+      .update(header)
+      .update(Buffer.concat(digestBuffers))
+      .digest('hex'),
+    sourceIdentityBlockSizeBytes: SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
+    sourceIdentityBlockDigests,
+  };
+}
 
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -275,6 +305,7 @@ if (webglFixturePath) {
 }
 
 async function createUploadSession(originalName, body, uploadKind) {
+	const sourceIdentity = sourceIdentityForBytes(body);
   const { body: response } = await fetchJson(
     `${apiBase}/api/admin/projects/${projectId}/game-upload-sessions`,
     {
@@ -284,7 +315,7 @@ async function createUploadSession(originalName, body, uploadKind) {
         Cookie: cookie,
         Origin: origin,
       },
-      body: JSON.stringify({ originalName, totalBytes: body.length, uploadKind }),
+      body: JSON.stringify({ originalName, totalBytes: body.length, uploadKind, ...sourceIdentity }),
     },
   );
   return response?.data;
@@ -324,8 +355,14 @@ await fetchJson(`${apiBase}/api/admin/game-upload-sessions/${gameSession.session
   headers: { Cookie: cookie, Origin: origin },
 });
 
+const webglChunkUrl = new URL(
+  `/api/admin/game-upload-sessions/${webglSession.sessionId}/chunks/0`,
+  apiBase,
+);
+webglChunkUrl.searchParams.set('sourceIdentityAlgorithm', webglSession.sourceIdentityAlgorithm);
+webglChunkUrl.searchParams.set('sourceIdentity', webglSession.sourceIdentity);
 await fetchJson(
-  `${apiBase}/api/admin/game-upload-sessions/${webglSession.sessionId}/chunks/0`,
+  webglChunkUrl.toString(),
   {
     method: 'PUT',
     headers: {

@@ -434,6 +434,9 @@ export const GameUploadSessionSchema = z.object({
 	totalChunks: PositiveIntegerSchema,
 	expiresAt: IsoDateTimeSchema,
 	uploadKind: UploadKindSchema,
+	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'),
+	sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+	sourceIdentityBlockSizeBytes: z.literal(1048576),
 }).strict();
 
 export const GameUploadStatusSchema = z.object({
@@ -448,6 +451,9 @@ export const GameUploadStatusSchema = z.object({
 	uploadedCount: NonNegativeIntegerSchema,
 	status: GameUploadStatusValueSchema,
 	expiresAt: IsoDateTimeSchema,
+	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1').nullable(),
+	sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+	sourceIdentityBlockSizeBytes: z.literal(1048576).nullable(),
 }).strict();
 
 export const GameUploadSessionListResponseSchema = z.object({

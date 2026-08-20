@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultTestEnv } from './helpers/app-mocks.js';
@@ -30,6 +30,27 @@ const mocks = {
 	safeDeleteObject: vi.fn(),
 	createSessionReplacingActive: vi.fn(),
 };
+
+const BLOCK_SIZE = 1024 * 1024;
+
+function sourceIdentityForBlocks(values: number[]) {
+	const digests = values.map((value) => createHash('sha256').update(Buffer.alloc(BLOCK_SIZE, value)).digest());
+	const manifest = Buffer.concat(digests);
+	const header = Buffer.allocUnsafe(16);
+	header.writeBigUInt64BE(BigInt(values.length * BLOCK_SIZE), 0);
+	header.writeUInt32BE(BLOCK_SIZE, 8);
+	header.writeUInt32BE(values.length, 12);
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: createHash('sha256')
+			.update('PCU-UPLOAD-SOURCE-V1\0', 'utf8')
+			.update(header)
+			.update(manifest)
+			.digest('hex'),
+		sourceIdentityBlockSizeBytes: BLOCK_SIZE,
+		sourceIdentityBlockManifest: manifest,
+	};
+}
 
 let uploadLimiter: UploadConcurrencyLimiter;
 let service: ReturnType<typeof createGameUploadService>;
@@ -83,13 +104,14 @@ function createDependencies(): GameUploadServiceDependencies {
 }
 
 function pendingSession() {
+	const identity = sourceIdentityForBlocks([0, 1, 2, 3]);
 	return {
 		id: 'session-1',
 		projectId: 7,
 		userId: 11,
 		originalName: 'game.zip',
-		totalBytes: 4n,
-		chunkSizeBytes: 1,
+		totalBytes: BigInt(4 * BLOCK_SIZE),
+		chunkSizeBytes: BLOCK_SIZE,
 		totalChunks: 4,
 		uploadedChunks: [],
 		status: 'PENDING',
@@ -97,13 +119,22 @@ function pendingSession() {
 		s3UploadId: 'multipart-1',
 		s3Key: 'protected/game.zip',
 		s3PartEtags: [],
+		...identity,
 		parts: [],
 		project: { status: 'PUBLISHED' },
 	};
 }
 
-function oneByteStream(value: number) {
-	return Readable.from([Buffer.from([value])]);
+function sourceQuery(values = [0, 1, 2, 3]) {
+	const identity = sourceIdentityForBlocks(values);
+	return {
+		sourceIdentityAlgorithm: identity.sourceIdentityAlgorithm,
+		sourceIdentity: identity.sourceIdentity,
+	};
+}
+
+function chunkStream(value: number) {
+	return Readable.from([Buffer.alloc(BLOCK_SIZE, value)]);
 }
 
 async function consumeStream(stream: NodeJS.ReadableStream): Promise<number> {
@@ -193,11 +224,13 @@ describe('game upload resource guards', () => {
 
 		const game = await service.createSession(7, 1, { id: 11, role: 'USER' }, {
 			originalName: 'game.zip',
-			totalBytes: 1024,
+			totalBytes: BLOCK_SIZE,
+			...{ ...sourceIdentityForBlocks([0]), sourceIdentityBlockDigests: [createHash('sha256').update(Buffer.alloc(BLOCK_SIZE)).digest('hex')] },
 		});
 		const webgl = await service.createSession(7, 1, { id: 11, role: 'USER' }, {
 			originalName: 'webgl.zip',
-			totalBytes: 2048,
+			totalBytes: BLOCK_SIZE,
+			...{ ...sourceIdentityForBlocks([0]), sourceIdentityBlockDigests: [createHash('sha256').update(Buffer.alloc(BLOCK_SIZE)).digest('hex')] },
 			uploadKind: 'WEBGL',
 		});
 
@@ -228,7 +261,8 @@ describe('game upload resource guards', () => {
 
 		await expect(service.createSession(7, 1, { id: 11, role: 'USER' }, {
 			originalName: 'replacement.zip',
-			totalBytes: 1024,
+			totalBytes: BLOCK_SIZE,
+			...{ ...sourceIdentityForBlocks([0]), sourceIdentityBlockDigests: [createHash('sha256').update(Buffer.alloc(BLOCK_SIZE)).digest('hex')] },
 		})).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
 
 		expect(mocks.abortMultipartUpload).toHaveBeenCalledOnce();
@@ -254,12 +288,12 @@ describe('game upload resource guards', () => {
 			return etag;
 		});
 
-		const first = service.uploadChunk('session-1', 0, oneByteStream(0), { id: 11, role: 'USER' });
-		const second = service.uploadChunk('session-1', 1, oneByteStream(1), { id: 11, role: 'USER' });
+		const first = service.uploadChunk('session-1', 0, chunkStream(0), { id: 11, role: 'USER' }, sourceQuery());
+		const second = service.uploadChunk('session-1', 1, chunkStream(1), { id: 11, role: 'USER' }, sourceQuery());
 		await vi.waitFor(() => expect(gates).toHaveLength(2));
 
 		await expect(
-			service.uploadChunk('session-1', 2, oneByteStream(2), { id: 11, role: 'USER' }),
+			service.uploadChunk('session-1', 2, chunkStream(2), { id: 11, role: 'USER' }, sourceQuery()),
 		).rejects.toMatchObject({
 			statusCode: 429,
 			code: 'TOO_MANY_UPLOADS',
@@ -275,16 +309,42 @@ describe('game upload resource guards', () => {
 		expect(uploadLimiter.activeCount()).toBe(0);
 	});
 
-	it('streams chunk bodies to S3 without buffering the full part', async () => {
+	it('returns null source identity for a legacy status but rejects legacy mutation', async () => {
+		const {
+			sourceIdentityAlgorithm: _algorithm,
+			sourceIdentity: _identity,
+			sourceIdentityBlockSizeBytes: _blockSize,
+			sourceIdentityBlockManifest: _manifest,
+			...legacy
+		} = pendingSession();
+		mocks.findSessionById.mockResolvedValue(legacy);
+
+		await expect(service.getSessionStatus('session-1', { id: 11, role: 'USER' }))
+			.resolves.toMatchObject({ sourceIdentityAlgorithm: null, sourceIdentity: null, sourceIdentityBlockSizeBytes: null });
+		await expect(service.uploadChunk(
+			'session-1', 0, chunkStream(0), { id: 11, role: 'USER' }, sourceQuery(),
+		)).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT', details: { reason: 'LEGACY_UPLOAD_SESSION' } });
+		expect(mocks.uploadPart).not.toHaveBeenCalled();
+	});
+
+	it('rejects a missing chunk source-identity query before storage mutation', async () => {
+		await expect(service.uploadChunk(
+			'session-1', 0, chunkStream(0), { id: 11, role: 'USER' }, {},
+		)).rejects.toMatchObject({ statusCode: 400, code: 'VALIDATION_ERROR' });
+		expect(mocks.uploadPart).not.toHaveBeenCalled();
+	});
+
+	it('buffers one verified chunk before handing it to S3', async () => {
 		mocks.findSessionById.mockResolvedValueOnce({
 			...pendingSession(),
-			totalBytes: 1024n,
-			chunkSizeBytes: 1024,
+			totalBytes: BigInt(BLOCK_SIZE),
+			chunkSizeBytes: BLOCK_SIZE,
 			totalChunks: 1,
+			...sourceIdentityForBlocks([0]),
 		});
 		mocks.uploadPart.mockImplementation(async (_key, _uploadId, _partNumber, body: NodeJS.ReadableStream, contentLength: number) => {
 			expect(Buffer.isBuffer(body)).toBe(false);
-			expect(contentLength).toBe(1024);
+			expect(contentLength).toBe(BLOCK_SIZE);
 			const bytes = await consumeStream(body);
 			return `etag-${bytes}`;
 		});
@@ -292,15 +352,15 @@ describe('game upload resource guards', () => {
 		const result = await service.uploadChunk(
 			'session-1',
 			0,
-			Readable.from(Array.from({ length: 16 }, () => Buffer.alloc(64))),
+			Readable.from(Array.from({ length: 16 }, () => Buffer.alloc(BLOCK_SIZE / 16))),
 			{ id: 11, role: 'USER' },
+			sourceQuery([0]),
 		);
 
-		expect(result.bytesWritten).toBe(1024);
+		expect(result.bytesWritten).toBe(BLOCK_SIZE);
 		expect(mocks.uploadPart).toHaveBeenCalledTimes(1);
 		expect(mocks.completePartClaim).toHaveBeenCalledWith({
-			token: expect.any(String),
-			etag: 'etag-1024',
+			token: expect.any(String), etag: `etag-${BLOCK_SIZE}`, contentSha256: expect.any(String),
 		});
 	});
 
@@ -308,15 +368,17 @@ describe('game upload resource guards', () => {
 		mocks.findSessionById
 			.mockResolvedValueOnce({
 				...pendingSession(),
-				totalBytes: 2n,
-				chunkSizeBytes: 2,
+				totalBytes: BigInt(BLOCK_SIZE),
+				chunkSizeBytes: BLOCK_SIZE,
 				totalChunks: 1,
+				...sourceIdentityForBlocks([0]),
 			})
 			.mockResolvedValueOnce({
 				...pendingSession(),
-				totalBytes: 2n,
-				chunkSizeBytes: 2,
+				totalBytes: BigInt(BLOCK_SIZE),
+				chunkSizeBytes: BLOCK_SIZE,
 				totalChunks: 1,
+				...sourceIdentityForBlocks([0]),
 			});
 		mocks.uploadPart.mockImplementation(async (_key, _uploadId, _partNumber, body: NodeJS.ReadableStream) => {
 			const bytes = await consumeStream(body);
@@ -331,7 +393,7 @@ describe('game upload resource guards', () => {
 		});
 
 		await expect(
-			service.uploadChunk('session-1', 0, aborted, { id: 11, role: 'USER' }),
+			service.uploadChunk('session-1', 0, aborted, { id: 11, role: 'USER' }, sourceQuery([0])),
 		).rejects.toThrow('client aborted');
 		expect(mocks.completePartClaim).not.toHaveBeenCalled();
 		expect(uploadLimiter.activeCount()).toBe(0);
@@ -339,14 +401,16 @@ describe('game upload resource guards', () => {
 		const retried = await service.uploadChunk(
 			'session-1',
 			0,
-			Readable.from([Buffer.from([1, 2])]),
+			chunkStream(0),
 			{ id: 11, role: 'USER' },
+			sourceQuery([0]),
 		);
 
-		expect(retried.bytesWritten).toBe(2);
+		expect(retried.bytesWritten).toBe(BLOCK_SIZE);
 		expect(mocks.completePartClaim).toHaveBeenCalledWith({
 			token: expect.any(String),
-			etag: 'etag-2',
+			etag: `etag-${BLOCK_SIZE}`,
+			contentSha256: expect.any(String),
 		});
 		expect(uploadLimiter.activeCount()).toBe(0);
 	});
@@ -376,8 +440,9 @@ describe('game upload resource guards', () => {
 			const running = service.uploadChunk(
 				'session-1',
 				0,
-				oneByteStream(1),
+				chunkStream(0),
 				{ id: 11, role: 'USER' },
+				sourceQuery(),
 			);
 			const rejected = expect(running).rejects.toThrow('Part-upload claim was lost');
 			await entered;
@@ -394,14 +459,10 @@ describe('game upload resource guards', () => {
 
 	it('destroys the inbound stream and releases the upload slot when S3 upload fails', async () => {
 		mocks.uploadPart.mockRejectedValueOnce(new Error('s3 upload failed'));
-		const source = new Readable({
-			read() {
-				this.push(Buffer.from([1]));
-			},
-		});
+		const source = chunkStream(0);
 
 		await expect(
-			service.uploadChunk('session-1', 0, source, { id: 11, role: 'USER' }),
+			service.uploadChunk('session-1', 0, source, { id: 11, role: 'USER' }, sourceQuery()),
 		).rejects.toThrow('s3 upload failed');
 
 		expect(source.destroyed).toBe(true);

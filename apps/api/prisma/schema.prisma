@@ -239,6 +239,10 @@ model GameUploadSession {
   totalBytes           BigInt     @map("total_bytes")
   chunkSizeBytes       Int        @map("chunk_size_bytes")
   totalChunks          Int        @map("total_chunks")
+  sourceIdentityAlgorithm String? @map("source_identity_algorithm")
+  sourceIdentity       String?    @map("source_identity")
+  sourceIdentityBlockSizeBytes Int? @map("source_identity_block_size_bytes")
+  sourceIdentityBlockManifest Bytes? @map("source_identity_block_manifest")
   uploadedChunks       Int[]      @default([]) @map("uploaded_chunks")
   // DB CHECK constraint `game_upload_sessions_status_check` limits this to the
   // states in state-machine.ts. Prisma cannot model this check in the DSL.
@@ -275,6 +279,7 @@ model GameUploadPart {
   sessionId  String   @map("session_id")
   partNumber Int      @map("part_number")
   etag       String
+  contentSha256 String? @map("content_sha256")
   generation Int      @default(1)
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")

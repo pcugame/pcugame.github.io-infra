@@ -46,6 +46,11 @@ export async function getSessionStatus(
 		uploadedCount: uploadedChunks.length,
 		status: session.status,
 		expiresAt: session.expiresAt.toISOString(),
+		sourceIdentityAlgorithm: session.sourceIdentityAlgorithm === 'SHA256_BLOCK_MANIFEST_V1'
+			? session.sourceIdentityAlgorithm : null,
+		sourceIdentity: session.sourceIdentity ?? null,
+		sourceIdentityBlockSizeBytes: session.sourceIdentityBlockSizeBytes === 1048576
+			? session.sourceIdentityBlockSizeBytes : null,
 	};
 }
 
@@ -445,6 +450,11 @@ export async function listSessions(
 			uploadedCount: uploadedChunks.length,
 			status: s.status,
 			expiresAt: s.expiresAt.toISOString(),
+			sourceIdentityAlgorithm: s.sourceIdentityAlgorithm === 'SHA256_BLOCK_MANIFEST_V1'
+				? s.sourceIdentityAlgorithm : null,
+			sourceIdentity: s.sourceIdentity ?? null,
+			sourceIdentityBlockSizeBytes: s.sourceIdentityBlockSizeBytes === 1048576
+				? s.sourceIdentityBlockSizeBytes : null,
 		};
 	});
 }
