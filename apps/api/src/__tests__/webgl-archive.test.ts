@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { analyzeWebglArchive } from '../modules/webgl/archive.js';
+import { analyzeWebglArchive, uploadWebglArchive } from '../modules/webgl/archive.js';
 import { webglContentMetadata, webglContentSecurityPolicy } from '../modules/webgl/content.js';
 import { createWebglDeploymentKeys, parseWebglEntryKey, parseWebglSourceKey } from '../modules/webgl/paths.js';
 import { validateWebglZipArchiveFile } from '../modules/assets/upload/zip-file-validation.adapter.js';
@@ -78,6 +78,8 @@ describe('WebGL ZIP validation', () => {
 	it('accepts a root build and preserves Brotli/Gzip resource paths', async () => {
 		const summary = await validateWebglZipArchiveFile(await archive([
 			{ name: 'index.html' },
+			{ name: 'Build/game.loader.js' },
+			{ name: 'Build/game.framework.js.br' },
 			{ name: 'Build/game.wasm.br' },
 			{ name: 'Build/game.data.gz' },
 		]));
@@ -85,6 +87,8 @@ describe('WebGL ZIP validation', () => {
 		expect(layout.wrapperPrefix).toBe('');
 		expect([...layout.files.values()]).toEqual([
 			'index.html',
+			'Build/game.loader.js',
+			'Build/game.framework.js.br',
 			'Build/game.wasm.br',
 			'Build/game.data.gz',
 		]);
@@ -93,12 +97,39 @@ describe('WebGL ZIP validation', () => {
 	it('accepts exactly one wrapper directory and strips it for hosting', async () => {
 		const summary = await validateWebglZipArchiveFile(await archive([
 			{ name: 'MyBuild/index.html' },
+			{ name: 'MyBuild/Build/game.loader.js' },
+			{ name: 'MyBuild/Build/game.framework.js' },
+			{ name: 'MyBuild/Build/game.wasm' },
+			{ name: 'MyBuild/Build/game.data' },
 			{ name: 'MyBuild/TemplateData/style.css' },
 		]));
 		const layout = analyzeWebglArchive(summary);
 		expect(layout.wrapperPrefix).toBe('MyBuild/');
-		expect([...layout.files.values()]).toEqual(['index.html', 'TemplateData/style.css']);
+		expect([...layout.files.values()]).toEqual([
+			'index.html',
+			'Build/game.loader.js',
+			'Build/game.framework.js',
+			'Build/game.wasm',
+			'Build/game.data',
+			'TemplateData/style.css',
+		]);
 	});
+
+	it.each(['loader.js', 'framework.js', 'wasm', 'data'])(
+		'requires the Unity Build %s artifact',
+		async (missing) => {
+			const entries = [
+				{ name: 'index.html' },
+				{ name: 'Build/game.loader.js', kind: 'loader.js' },
+				{ name: 'Build/game.framework.js', kind: 'framework.js' },
+				{ name: 'Build/game.wasm', kind: 'wasm' },
+				{ name: 'Build/game.data', kind: 'data' },
+			].filter(({ kind }) => kind === undefined || kind !== missing)
+				.map(({ name }) => ({ name }));
+			const summary = await validateWebglZipArchiveFile(await archive(entries));
+			expect(() => analyzeWebglArchive(summary)).toThrow(`missing required Unity Build ${missing}`);
+		},
+	);
 
 	it.each([
 		{ name: 'missing index', entries: [{ name: 'Build/game.wasm' }], message: 'must contain index.html' },
@@ -122,15 +153,62 @@ describe('WebGL ZIP validation', () => {
 			{ name: 'Build/bomb.data', compressedSize: 1, uncompressedSize: 101 },
 		]))).rejects.toThrow('compression ratio');
 
-		const symlink = await validateWebglZipArchiveFile(await archive([
+		await expect(validateWebglZipArchiveFile(await archive([
 			{ name: 'index.html' },
 			{
 				name: 'Build/link',
 				versionMadeBy: (3 << 8) | 20,
 				externalFileAttributes: 0o120777 * 0x10000,
 			},
-		]));
-		expect(() => analyzeWebglArchive(symlink)).toThrow('Symbolic links');
+		]))).rejects.toThrow('Symbolic links');
+	});
+
+	it('classifies local decode corruption as deterministic but preserves storage failures', async () => {
+		const corruptFile = await archive([
+			{ name: 'index.html' },
+			{ name: 'Build/game.loader.js' },
+			{ name: 'Build/game.framework.js' },
+			{ name: 'Build/game.wasm' },
+			{
+				name: 'Build/game.data',
+				compressionMethod: 8,
+				compressedSize: 2,
+				uncompressedSize: 2,
+			},
+		]);
+		const corruptLayout = analyzeWebglArchive(
+			await validateWebglZipArchiveFile(corruptFile),
+		);
+		const publicUpload = vi.fn(async (_bucket, _key, body) => {
+			for await (const _chunk of body as AsyncIterable<Buffer>) {
+				// A corrupt later entry must fail preflight before this is invoked.
+			}
+		});
+		await expect(uploadWebglArchive(
+			corruptFile,
+			'public',
+			'webgl/7/generation/site/',
+			corruptLayout,
+			publicUpload,
+		)).rejects.toMatchObject({ statusCode: 400 });
+		expect(publicUpload).not.toHaveBeenCalled();
+
+		const validFile = await archive([
+			{ name: 'index.html' },
+			{ name: 'Build/game.loader.js' },
+			{ name: 'Build/game.framework.js' },
+			{ name: 'Build/game.wasm' },
+			{ name: 'Build/game.data' },
+		]);
+		const validLayout = analyzeWebglArchive(await validateWebglZipArchiveFile(validFile));
+		const storageFailure = new Error('object storage unavailable');
+		await expect(uploadWebglArchive(
+			validFile,
+			'public',
+			'webgl/7/generation/site/',
+			validLayout,
+			async () => { throw storageFailure; },
+		)).rejects.toBe(storageFailure);
 	});
 });
 

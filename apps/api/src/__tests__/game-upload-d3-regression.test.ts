@@ -37,6 +37,7 @@ function session(overrides: Partial<GameUploadSessionRecord> = {}): GameUploadSe
 		projectId: 7,
 		userId: 11,
 		uploadKind: 'GAME',
+		transport: 'API_CHUNK_PROXY',
 		originalName: 'resume-a.zip',
 		totalBytes: BigInt(SOURCE_A.length),
 		chunkSizeBytes: SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
@@ -118,6 +119,7 @@ function createHarness(record = session()) {
 			listMultipartUploads: vi.fn(async () => []),
 			head: vi.fn(async () => ({ size: SOURCE_A.length, contentType: 'application/zip' })),
 		},
+		partSigner: { presignUploadPart: vi.fn(async () => 'https://storage.test/part') },
 		finalizer: {
 			finalize: vi.fn(async () => ({
 				status: 'COMPLETED' as const,
@@ -130,12 +132,14 @@ function createHarness(record = session()) {
 		clock: { now: () => new Date() },
 		ids: { next: vi.fn(() => 'claim-d3') },
 		lifecycle: { isAcceptingNewWork: () => true },
-		config: { uploadChunkSizeMb: 1, uploadSessionTtlMinutes: 60 },
+		authorizeProjectWrite: vi.fn(async () => undefined),
+		config: { uploadChunkSizeMb: 1, uploadSessionTtlMinutes: 60, uploadPartUrlBatchMax: 16, uploadPartUrlTtlSeconds: 300 },
 		roleGameMaxBytes: () => 5120 * 1024 * 1024,
 		storageKey: () => 'protected/d3.zip',
 		deleteOrQueue: vi.fn(async () => undefined),
 		wakeDeletionWorker: vi.fn(),
 		wakeMaintenance: vi.fn(),
+		wakeValidationWorker: vi.fn(),
 		recordUntrackedMultipartCleanupFailure: vi.fn(),
 		logger: { error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 	};

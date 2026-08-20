@@ -3,18 +3,24 @@ import { badRequest } from '../../../shared/errors.js';
 export type UploadSessionState =
 	| 'PENDING'
 	| 'COMPLETING'
+	| 'VERIFYING'
 	| 'COMPLETED'
+	| 'REJECTED'
 	| 'FAILED'
-	| 'CANCELLED';
+	| 'CANCELLED'
+	| 'EXPIRED';
 
 const ALLOWED_TRANSITIONS: Record<UploadSessionState, readonly UploadSessionState[]> = {
-	PENDING: ['COMPLETING', 'CANCELLED', 'FAILED'],
+	PENDING: ['COMPLETING', 'CANCELLED', 'EXPIRED', 'FAILED'],
 	// PENDING is the retry path used only when multipart completion demonstrably
 	// did not create the final object.
-	COMPLETING: ['PENDING', 'COMPLETED', 'FAILED'],
+	COMPLETING: ['PENDING', 'VERIFYING', 'COMPLETED', 'REJECTED', 'FAILED'],
+	VERIFYING: ['COMPLETED', 'REJECTED'],
 	COMPLETED: [],
+	REJECTED: [],
 	FAILED: [],
 	CANCELLED: [],
+	EXPIRED: [],
 };
 
 export function isUploadSessionState(value: string): value is UploadSessionState {

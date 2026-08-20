@@ -28,10 +28,12 @@
 ```mermaid
 flowchart LR
     B[브라우저] --> W[React Web\nGitHub Pages]
-    W -->|JSON API·session cookie| A[Fastify API]
-    B -->|WebGL·다운로드 요청| A
+    W -->|JSON control request·session cookie| A[Fastify API\ncontrol plane]
+    B -->|signed UploadPart PUT| S[(S3 호환 객체 저장소\nGarage)]
+    B -->|protected signed GET| S
+    B -->|현재: 공개 이미지·WebGL legacy route| A
     A --> P[(PostgreSQL)]
-    A --> S[(S3 호환 객체 저장소\nGarage)]
+    A -->|create/list/complete/abort/head\nvalidation·cleanup| S
     A --> N[NAS 내보내기 경로\n선택 사항]
 ```
 
@@ -43,7 +45,7 @@ flowchart LR
 | PostgreSQL | PostgreSQL 16 | 사용자, 전시회, 작품, 자산 metadata, session, 업로드 상태 저장 |
 | Garage | S3 호환 객체 저장소 | 공개·보호 자산과 multipart 업로드 객체 저장 |
 
-Web은 정적 SPA로 빌드된다. API는 공개·인증·운영 route를 제공하고, PostgreSQL과 객체 저장소 사이의 자산 상태를 관리한다. 게임과 WebGL 대용량 파일은 브라우저에서 S3 multipart 단위로 전송하며, API는 업로드 session, 완료 claim, 정리 작업과 orphan object를 데이터베이스에 기록한다.
+Web은 정적 SPA로 빌드된다. API는 인증·인가, 업로드 capability, multipart 완료, 검증, 자산 pointer와 durable cleanup을 관리하는 control plane이다. GAME·WebGL part byte는 브라우저에서 Garage로 직접 전송된다. 보호 다운로드도 API가 READY 자산과 권한을 판정한 뒤 presigned GET으로 redirect한다. 공개 이미지와 WebGL byte는 아직 Fastify가 중계하는 P1 미완료 경계이며, 이를 Garage public origin으로 옮기는 정확한 후속 절차는 업로드 lifecycle runbook에 기록되어 있다.
 
 ## 저장소 구조
 
@@ -122,7 +124,7 @@ docker compose -f apps/db/docker-compose.yml up -d --build
 docker compose -f apps/db/docker-compose.yml logs garage-init
 ```
 
-`garage-init`는 `pcu-public`, `pcu-protected` bucket과 `pcu-dev-key`를 구성한다. 출력된 access key ID와 secret key를 API 환경 변수에 반영한다. 저장소의 기본 PostgreSQL 접속 정보는 개발용이며 운영 환경에 사용하지 않는다.
+`garage-init`는 `pcu-public`, `pcu-protected`, `pcu-staging` bucket, 로컬 key와 direct-upload bucket CORS를 구성한다. key 조회는 Garage 관리 인터페이스를 사용하고 access key ID와 secret key를 API 환경 변수에 반영한다. 저장소의 기본 PostgreSQL 접속 정보는 개발용이며 운영 환경에 사용하지 않는다.
 
 ### 3. 환경 변수 구성
 
@@ -134,6 +136,9 @@ cp apps/web/.env.example apps/web/.env.local
 `apps/api/.env`에서 최소한 다음 항목을 로컬 환경에 정합한다.
 
 - `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: `garage-init`에서 생성한 값
+- `S3_INTERNAL_ENDPOINT`: API/worker에서 Garage로 접근하는 내부 endpoint
+- `S3_PUBLIC_SIGNING_ENDPOINT`: 브라우저가 접근하는 presigned request endpoint
+- `S3_CORS_ALLOWED_ORIGINS`: Garage bucket CORS에 허용할 정확한 Web origin 목록
 - `GOOGLE_CLIENT_IDS`, `VITE_GOOGLE_CLIENT_ID`: 실제 Google OAuth를 확인할 때 사용하는 같은 Web client ID
 - `DEV_AUTH_ENABLED=true`, `VITE_DEV_AUTH_ENABLED=true`: 로컬 역할별 동작을 OAuth 없이 확인할 때만 설정
 
@@ -193,9 +198,11 @@ npm run build
 
 ## 데이터와 자산 경계
 
-- PostgreSQL은 자산의 `storageKey`, 공개 여부, 크기, MIME type, 처리 상태를 저장한다.
-- Garage의 `pcu-public` bucket은 공개 자산, `pcu-protected` bucket은 보호 자산을 저장한다.
-- API는 현재 공개 참조로 확인된 이미지를 불변 cache header와 함께 직접 stream한다. GAME·VIDEO 등 보호 자산은 권한을 검사한 뒤 기존처럼 짧은 유효 기간의 presigned URL로 redirect한다.
+- PostgreSQL은 actor/project/Asset/GameUploadSession 상태, generation fencing, claim/lease, idempotency와 cleanup outbox의 source of truth다.
+- Garage의 `pcu-public` bucket은 검증된 공개 자산, `pcu-protected` bucket은 보호 자산과 P0의 session별 untrusted direct generation을 저장한다. `pcu-staging`은 후속 single-PUT·대형 일반 업로드 staging 경계다.
+- GAME·WebGL direct upload는 API가 key, generation, upload ID, part 범위와 만료를 결정하고 browser-visible endpoint로 `UploadPart`만 presign한다. Complete/Abort는 API가 Garage operation으로 수행하며, 완료 후 HEAD와 검증을 통과하기 전에는 Asset READY나 다운로드 pointer가 생기지 않는다.
+- 보호 자산의 canonical route는 `assetId`와 variant를 해석하고 짧은 유효 기간의 presigned URL로 302 redirect한다. 이 동작 자체는 기존에도 redirect였으며, 이번 변경은 raw `storageKey` 대신 domain identity와 중앙 delivery policy를 canonical 경계로 확립한다.
+- 공개 이미지와 WebGL은 현재 Fastify stream 경로를 유지한다. 이는 알려진 P1 debt이며 새 public origin 구현이 아니다. 별도 Node asset proxy를 추가하지 않고 Garage public endpoint 또는 일반 reverse proxy로 이전해야 한다.
 - 영상 업로드는 재생용 자산 처리 상태를 별도로 기록한다.
 - Unity WebGL ZIP은 archive 경로와 content encoding을 검증한 뒤 공개 실행 경로로 제공한다.
 - multipart 업로드의 중단·만료·완료 실패는 background maintenance와 durable task table로 복구한다.
@@ -203,6 +210,8 @@ npm run build
 업로드 lifecycle 관련 schema 변경이나 운영 정리 작업 전에는 [업로드 lifecycle 배포 runbook](docs/upload-lifecycle-runbook.md)을 확인한다. `reconcile-orphans.ts --apply`는 신규 API 전환 후 최소 60분을 대기하고 dry run 결과를 검토한 뒤 실행하도록 규정되어 있다.
 
 ## 배포 구조
+
+direct multipart 전환 branch는 독립 배포 대상이 아니다. 신규 Web은 old API 응답에 `transport`가 없으면 legacy path를 사용할 수 있으나, old Web은 신규 API가 생성한 `DIRECT_MULTIPART` session을 처리하지 못한다. 따라서 운영 환경은 현재 구성을 유지하고, [업로드 lifecycle runbook](docs/upload-lifecycle-runbook.md)의 cutover matrix와 Garage 공개 경로 검증을 완료한 Web/API 조합만 maintenance window에서 전환한다.
 
 ### Web
 

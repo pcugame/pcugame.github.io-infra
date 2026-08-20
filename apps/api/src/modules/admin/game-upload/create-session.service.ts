@@ -14,6 +14,8 @@ import {
 	cleanupUntrackedMultipart,
 	UntrackedMultipartCleanupError,
 } from './multipart-cleanup.js';
+import { recordGameUploadEvent } from './observability.js';
+import { assertMultipartPartCount } from './direct-multipart.js';
 
 /** Create a new chunked upload session for a project */
 export async function createSession(
@@ -57,6 +59,7 @@ export async function createSession(
 	}
 
 	const totalChunks = Math.ceil(totalBytes / chunkSizeBytes);
+	assertMultipartPartCount(totalChunks);
 	if (chunkSizeBytes % SOURCE_IDENTITY_BLOCK_SIZE_BYTES !== 0) {
 		throw new AppError(500, 'Upload chunk size must align with source identity blocks', 'INTERNAL_ERROR');
 	}
@@ -74,6 +77,7 @@ export async function createSession(
 			projectId,
 			userId: user.id,
 			uploadKind,
+			transport: 'DIRECT_MULTIPART',
 			originalName,
 			totalBytes: BigInt(totalBytes),
 			chunkSizeBytes,
@@ -122,6 +126,23 @@ export async function createSession(
 			);
 		});
 	}
+	recordGameUploadEvent(deps, 'upload_session_created', {
+		actorId: user.id,
+		projectId,
+		sessionId: created.session.id,
+		generation: 1,
+		uploadKind,
+		transport: 'DIRECT_MULTIPART',
+		declaredBytes: totalBytes,
+		result: 'created',
+	});
+	recordGameUploadEvent(deps, 'direct_transport_selected', {
+		actorId: user.id,
+		projectId,
+		sessionId: created.session.id,
+		generation: 1,
+		result: 'selected',
+	});
 
 	return {
 		sessionId: created.session.id,
@@ -132,5 +153,7 @@ export async function createSession(
 		sourceIdentityBlockSizeBytes: sourceIdentity.blockSizeBytes,
 		expiresAt: expiresAt.toISOString(),
 		uploadKind,
+		transport: 'DIRECT_MULTIPART',
+		generation: 1,
 	};
 }

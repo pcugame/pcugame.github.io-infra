@@ -5,7 +5,7 @@ function assetDeletionHarness() {
 	const repository = {
 		findAllBannedIps: vi.fn(),
 		findAssetByStorageKey: vi.fn(),
-		upsertBannedIp: vi.fn(),
+		findAssetByIdForDownload: vi.fn(),
 		findAssetByIdWithProject: vi.fn().mockResolvedValue({
 			id: 41,
 			projectId: 7,
@@ -24,7 +24,6 @@ function assetDeletionHarness() {
 	};
 	const wakeDeletionWorker = vi.fn();
 	const deps = {
-		protectedBucket: 'protected',
 		presign: vi.fn(),
 		bucketForKind: () => 'protected',
 		wakeDeletionWorker,

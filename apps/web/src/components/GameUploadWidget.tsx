@@ -140,13 +140,17 @@ export default function GameUploadWidget({
 		uploadFile: File,
 		sess: GameUploadSession,
 		uploadedChunks: number[] = [],
+		resumeParts?: GameUploadStatus['parts'],
+		resumeFinalizationStatus?: 'COMPLETING' | 'VERIFYING',
 	) => {
-		setState('uploading');
+		setState(resumeFinalizationStatus ? 'completing' : 'uploading');
 		setError(null);
 
 		const ctrl = uploadGameFile(uploadFile, sess, {
 			title: labels.uploadTitle,
 			startFrom: uploadedChunks,
+			resumeParts,
+			resumeFinalizationStatus,
 			onProgress: (p) => {
 				setProgress(p);
 				if (p.percent >= 100) setState('completing');
@@ -231,12 +235,22 @@ export default function GameUploadWidget({
 				totalChunks: status.totalChunks,
 				expiresAt: status.expiresAt,
 				uploadKind: status.uploadKind,
+				transport: status.transport,
+				generation: status.generation,
 				sourceIdentityAlgorithm: status.sourceIdentityAlgorithm,
 				sourceIdentity: status.sourceIdentity,
 				sourceIdentityBlockSizeBytes: status.sourceIdentityBlockSizeBytes,
 			};
 			setSession(sess);
-			await doUpload(file, sess, status.uploadedChunks);
+			await doUpload(
+				file,
+				sess,
+				status.uploadedChunks,
+				status.parts,
+				status.status === 'COMPLETING' || status.status === 'VERIFYING'
+					? status.status
+					: undefined,
+			);
 		} catch (err) {
 			setError(getUploadIntegrityErrorMessage(err) ?? getApiErrorMessage(err));
 			setState('error');
@@ -249,7 +263,7 @@ export default function GameUploadWidget({
 		if (!file || !session) return;
 		try {
 			const status = await getGameUploadStatus(session.sessionId);
-			if (status.status === 'PENDING') {
+			if (status.status === 'PENDING' || status.status === 'COMPLETING' || status.status === 'VERIFYING') {
 				if (!hasSessionIdentity(status)) {
 					throw new Error(LEGACY_SESSION_MESSAGE);
 				}
@@ -266,10 +280,15 @@ export default function GameUploadWidget({
 					totalChunks: status.totalChunks,
 					expiresAt: status.expiresAt,
 					uploadKind: status.uploadKind,
+					transport: status.transport,
+					generation: status.generation,
 					sourceIdentityAlgorithm: status.sourceIdentityAlgorithm,
 					sourceIdentity: status.sourceIdentity,
 					sourceIdentityBlockSizeBytes: status.sourceIdentityBlockSizeBytes,
-				}, status.uploadedChunks);
+				}, status.uploadedChunks, status.parts,
+				status.status === 'COMPLETING' || status.status === 'VERIFYING'
+					? status.status
+					: undefined);
 			} else {
 				const identity = await computeFileIdentity(file);
 				const replacement = await createGameUploadSession(projectId, file, identity, uploadKind);

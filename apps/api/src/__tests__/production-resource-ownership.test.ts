@@ -68,6 +68,7 @@ const fileSystem: FileSystem = {
 const storage: ObjectStorage = {
 	upload: async () => {},
 	presign: async () => 'https://storage.test/object',
+	presignUploadPart: async () => 'https://storage.test/upload-part',
 	delete: async () => {},
 	head: async () => null,
 	readRange: async () => Buffer.alloc(0),

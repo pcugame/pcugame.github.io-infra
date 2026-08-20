@@ -25,6 +25,8 @@ interface ZipEntrySpec {
 	compressionMethod?: number;
 	compressedSize?: number;
 	uncompressedSize?: number;
+	versionMadeBy?: number;
+	externalFileAttributes?: number;
 }
 
 function makeZip(entries: ZipEntrySpec[]): Buffer {
@@ -51,13 +53,14 @@ function makeZip(entries: ZipEntrySpec[]): Buffer {
 
 		const central = Buffer.alloc(46 + name.length);
 		central.writeUInt32LE(0x02014b50, 0);
-		central.writeUInt16LE(20, 4);
+		central.writeUInt16LE(entry.versionMadeBy ?? 20, 4);
 		central.writeUInt16LE(20, 6);
 		central.writeUInt16LE(flags, 8);
 		central.writeUInt16LE(method, 10);
 		central.writeUInt32LE(compressedSize, 20);
 		central.writeUInt32LE(uncompressedSize, 24);
 		central.writeUInt16LE(name.length, 28);
+		central.writeUInt32LE(entry.externalFileAttributes ?? 0, 38);
 		central.writeUInt32LE(offset, 42);
 		name.copy(central, 46);
 		centralParts.push(central);
@@ -157,6 +160,17 @@ describe('validateFile', () => {
 		} satisfies Partial<AppError>);
 	});
 
+	it.each(['game/./payload.bin', 'game/../payload.bin'])(
+		'rejects raw dot path segment %s before normalization',
+		async (name) => {
+			const tmpPath = await makeTempFile('game.zip', makeZip([{ name }]));
+			await expect(validateFile(tmpPath, 'GAME')).rejects.toMatchObject({
+				statusCode: 400,
+				message: 'ZIP archive contains an unsafe file path',
+			} satisfies Partial<AppError>);
+		},
+	);
+
 	it('rejects encrypted ZIP entries', async () => {
 		const tmpPath = await makeTempFile('game.zip', makeZip([{ name: 'game.dat', flags: 0x1 }]));
 
@@ -185,5 +199,56 @@ describe('validateFile', () => {
 			statusCode: 400,
 			message: 'Nested archives are not allowed in game ZIP files',
 		} satisfies Partial<AppError>);
+	});
+
+	it('cross-checks every local header instead of trusting only the central directory', async () => {
+		const zip = makeZip([
+			{ name: 'game/index.html' },
+			{ name: 'game/build.bin', compressedSize: 1, uncompressedSize: 1 },
+		]);
+		const signature = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+		const secondHeader = zip.indexOf(signature, zip.indexOf(signature) + signature.length);
+		expect(secondHeader).toBeGreaterThan(0);
+		zip.writeUInt32LE(0, secondHeader);
+		const tmpPath = await makeTempFile('game.zip', zip);
+
+		await expect(validateFile(tmpPath, 'GAME')).rejects.toMatchObject({
+			statusCode: 400,
+			message: 'ZIP local file header signature is invalid',
+		} satisfies Partial<AppError>);
+	});
+
+	it('rejects impossible EOCD entry/count metadata before issuing an invalid range read', async () => {
+		const zip = makeZip([{ name: 'game/index.html' }]);
+		zip.writeUInt32LE(0, zip.length - 22 + 12);
+		const tmpPath = await makeTempFile('game.zip', zip);
+
+		await expect(validateFile(tmpPath, 'GAME')).rejects.toMatchObject({
+			statusCode: 400,
+			message: 'ZIP archive central directory size is invalid',
+		} satisfies Partial<AppError>);
+	});
+
+	it('rejects symlinks, unsupported filesystem entries, and compression methods for GAME', async () => {
+		const unixVersion = (3 << 8) | 20;
+		const symlink = await makeTempFile('symlink.zip', makeZip([{
+			name: 'game/link',
+			versionMadeBy: unixVersion,
+			externalFileAttributes: (0o120777 * 0x10000) >>> 0,
+		}]));
+		await expect(validateFile(symlink, 'GAME')).rejects.toThrow('Symbolic links');
+
+		const fifo = await makeTempFile('fifo.zip', makeZip([{
+			name: 'game/pipe',
+			versionMadeBy: unixVersion,
+			externalFileAttributes: (0o010644 * 0x10000) >>> 0,
+		}]));
+		await expect(validateFile(fifo, 'GAME')).rejects.toThrow('unsupported filesystem entry');
+
+		const method = await makeTempFile('method.zip', makeZip([{
+			name: 'game/data.bin',
+			compressionMethod: 12,
+		}]));
+		await expect(validateFile(method, 'GAME')).rejects.toThrow('unsupported compression method');
 	});
 });

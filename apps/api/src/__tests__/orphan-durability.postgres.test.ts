@@ -33,7 +33,7 @@ const ACTIVE_SOURCE_IDENTITY = (() => {
 	header.writeUInt32BE(ACTIVE_SOURCE_BYTES, 8);
 	header.writeUInt32BE(1, 12);
 	return {
-		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
 		sourceIdentity: createHash('sha256')
 			.update(Buffer.from('PCU-UPLOAD-SOURCE-V1\0', 'utf8'))
 			.update(header)
@@ -257,6 +257,115 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		}
 	});
 
+	it('cancels a claimed protected object while DIRECT_MULTIPART is VERIFYING', async () => {
+		const sourceKey = `integration/orphan-durability/${testId}/verifying-${randomUUID()}.zip`;
+		const session = await client.gameUploadSession.create({
+			data: {
+				id: randomUUID(), projectId, userId, uploadKind: 'GAME', transport: 'DIRECT_MULTIPART',
+				originalName: 'game.zip', totalBytes: BigInt(ACTIVE_SOURCE_BYTES),
+				chunkSizeBytes: ACTIVE_SOURCE_BYTES, totalChunks: 1, status: 'VERIFYING',
+				...ACTIVE_SOURCE_IDENTITY,
+				s3Key: sourceKey, storageKey: sourceKey,
+				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+			},
+		});
+		const repository = createOrphanRepository(client);
+		const remove = vi.fn();
+		try {
+			await repository.upsertOrphan(protectedBucket, sourceKey, 'verifying-source-fence', 'EXACT', new Date());
+			await expect(createOrphanService({
+				clock: { now: () => new Date() },
+				storage: { delete: remove, listKeyPage: vi.fn(), deleteKeys: vi.fn() }, repository,
+				references: createObjectReferenceResolver(
+					client, { publicBucket, protectedBucket }, { error: vi.fn() },
+				),
+				ids: { next: () => 'verifying-source-reaper' }, logger: { info: vi.fn(), error: vi.fn() },
+			}).runOrphanReaper()).resolves.toEqual({ tried: 1, resolved: 1, failed: 0 });
+			expect(remove).not.toHaveBeenCalled();
+			await expect(client.orphanObject.findUniqueOrThrow({
+				where: { orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: sourceKey } },
+			})).resolves.toMatchObject({ state: 'CANCELLED', cancelReason: 'live-reference-detected' });
+		} finally {
+			await client.orphanObject.deleteMany({ where: { bucket: protectedBucket, storageKey: sourceKey } });
+			await client.gameUploadSession.deleteMany({ where: { id: session.id } });
+		}
+	});
+
+	it('rejects parent deletion mutations while a direct WebGL source is VERIFYING', async () => {
+		const deploymentId = randomUUID();
+		const project = await createProjectFixture();
+		const sourceKey = `webgl/${project.id}/${deploymentId}/source.zip`;
+		const entryKey = parseWebglSourceKey(project.id, sourceKey)!.entryKey;
+		await client.project.update({ where: { id: project.id }, data: { webglEntryKey: entryKey } });
+		const session = await client.gameUploadSession.create({
+			data: {
+				id: randomUUID(), projectId: project.id, userId, uploadKind: 'WEBGL', transport: 'DIRECT_MULTIPART',
+				originalName: 'build.zip', totalBytes: BigInt(ACTIVE_SOURCE_BYTES),
+				chunkSizeBytes: ACTIVE_SOURCE_BYTES, totalChunks: 1, status: 'VERIFYING',
+				...ACTIVE_SOURCE_IDENTITY,
+				s3Key: sourceKey, storageKey: sourceKey,
+				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+			},
+		});
+		await client.gameUploadActiveSession.create({
+			data: { projectId: project.id, uploadKind: 'WEBGL', sessionId: session.id },
+		});
+		const outbox = { publicBucket, protectedBucket, reason: 'verifying-parent-delete' };
+		try {
+			await expect(projectRepository.clearWebglDeployment(project.id, outbox))
+				.rejects.toMatchObject({ code: 'OPERATION_IN_PROGRESS' });
+			await expect(projectRepository.deleteProjectReturningAssets(project.id, outbox))
+				.rejects.toMatchObject({ code: 'OPERATION_IN_PROGRESS' });
+			await expect(projectRepository.bulkDeleteProjectsReturningAssets([project.id], outbox))
+				.rejects.toMatchObject({ code: 'OPERATION_IN_PROGRESS' });
+			await expect(client.project.findUniqueOrThrow({ where: { id: project.id } }))
+				.resolves.toMatchObject({ webglEntryKey: entryKey });
+			await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))
+				.resolves.toMatchObject({ status: 'VERIFYING', storageKey: sourceKey });
+			await expect(client.orphanObject.count({
+				where: { bucket: { in: [publicBucket, protectedBucket] }, storageKey: { contains: deploymentId } },
+			})).resolves.toBe(0);
+		} finally {
+			await client.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } });
+			await client.gameUploadSession.deleteMany({ where: { id: session.id } });
+			await client.project.deleteMany({ where: { id: project.id } });
+		}
+	});
+
+	it('does not block WebGL clear for an unrelated GAME verifier', async () => {
+		const project = await createProjectFixture();
+		const sourceKey = `integration/orphan-durability/${testId}/game-${randomUUID()}.zip`;
+		const session = await client.gameUploadSession.create({
+			data: {
+				id: randomUUID(), projectId: project.id, userId, uploadKind: 'GAME', transport: 'DIRECT_MULTIPART',
+				originalName: 'game.zip', totalBytes: BigInt(ACTIVE_SOURCE_BYTES),
+				chunkSizeBytes: ACTIVE_SOURCE_BYTES, totalChunks: 1, status: 'VERIFYING',
+				...ACTIVE_SOURCE_IDENTITY,
+				s3Key: sourceKey, storageKey: sourceKey,
+				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+			},
+		});
+		await client.gameUploadActiveSession.create({
+			data: { projectId: project.id, uploadKind: 'GAME', sessionId: session.id },
+		});
+		try {
+			await expect(projectRepository.clearWebglDeployment(project.id, {
+				publicBucket,
+				protectedBucket,
+				reason: 'unrelated-game-verifier',
+			})).resolves.toMatchObject({ cancelledSession: null });
+			await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))
+				.resolves.toMatchObject({ status: 'VERIFYING', storageKey: sourceKey });
+			await expect(client.gameUploadActiveSession.findUniqueOrThrow({
+				where: { projectId_uploadKind: { projectId: project.id, uploadKind: 'GAME' } },
+			})).resolves.toMatchObject({ sessionId: session.id });
+		} finally {
+			await client.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } });
+			await client.gameUploadSession.deleteMany({ where: { id: session.id } });
+			await client.project.deleteMany({ where: { id: project.id } });
+		}
+	});
+
 	it('rejects WebGL session creation before it owns a session when a committed public PREFIX claim exists', async () => {
 		const deploymentId = randomUUID();
 		const sourceKey = `webgl/${projectId}/${deploymentId}/source.zip`;
@@ -268,7 +377,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			await expect(repository.claimPendingOrphans!(50, new Date(), 'prefix-first-claim', 120_000))
 				.resolves.toEqual(expect.arrayContaining([expect.objectContaining({ storageKey: sitePrefix })]));
 			await expect(gameUploadRepository.createSessionReplacingActive({
-				id: sessionId, projectId, userId, uploadKind: 'WEBGL', originalName: 'build.zip',
+				id: sessionId, projectId, userId, uploadKind: 'WEBGL', transport: 'API_CHUNK_PROXY', originalName: 'build.zip',
 				totalBytes: BigInt(ACTIVE_SOURCE_BYTES), chunkSizeBytes: ACTIVE_SOURCE_BYTES, totalChunks: 1,
 				...ACTIVE_SOURCE_IDENTITY,
 				s3UploadId: randomUUID(), s3Key: sourceKey, expiresAt: new Date('2099-01-01T00:00:00.000Z'),
@@ -622,12 +731,11 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		});
 		const wakeDeletionWorker = vi.fn();
 		const createCaller = () => createAssetsService({
-			protectedBucket: 'protected',
 			presign: vi.fn(),
 			bucketForKind: () => 'protected',
 			wakeDeletionWorker,
 			loadProjectWithAccess: vi.fn().mockResolvedValue(undefined),
-			downloadLimiter: { check: vi.fn().mockReturnValue('ok') },
+			downloadLimiter: { check: vi.fn().mockReturnValue({ status: 'ok' }) },
 			logger: { info: vi.fn(), error: vi.fn() },
 			repository: assetsRepository,
 		});

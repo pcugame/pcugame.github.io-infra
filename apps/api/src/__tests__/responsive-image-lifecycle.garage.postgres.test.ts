@@ -157,12 +157,11 @@ describe.runIf(runIntegration)('deterministic responsive image durable lifecycle
 			},
 		});
 		const service = createAssetsService({
-			protectedBucket,
 			presign: async () => '',
 			bucketForKind: () => publicBucket,
 			wakeDeletionWorker: vi.fn(),
 			loadProjectWithAccess: async () => ({}),
-			downloadLimiter: { check: () => 'ok' },
+			downloadLimiter: { check: () => ({ status: 'ok' }) },
 			logger: { info: vi.fn(), error: vi.fn() },
 			repository: createAssetsRepository(prisma),
 		});

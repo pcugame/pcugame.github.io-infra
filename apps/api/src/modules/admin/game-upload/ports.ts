@@ -1,5 +1,6 @@
 import type {
 	GameUploadCompleteResponse,
+	GameUploadTransport,
 	SiteSettingsData,
 	UploadKind,
 	UserRole,
@@ -23,11 +24,17 @@ export interface GameUploadPartRecord {
 	generation?: number;
 }
 
+export interface GameUploadStoredPartRecord extends GameUploadPartRecord {
+	/** S3 ListParts metadata; absent values must fail closed on direct completion. */
+	sizeBytes?: number;
+}
+
 export interface GameUploadSessionRecord {
 	id: string;
 	projectId: number;
 	userId: number;
 	uploadKind: UploadKind;
+	transport: GameUploadTransport;
 	originalName: string;
 	totalBytes: bigint;
 	chunkSizeBytes: number;
@@ -46,6 +53,7 @@ export interface GameUploadSessionRecord {
 	multipartGeneration?: number;
 	completionResult?: unknown;
 	completionClaimUntil?: Date | null;
+	activeSlot?: { sessionId: string } | null;
 	project: { status: string };
 }
 
@@ -59,6 +67,7 @@ export interface NewGameUploadSession {
 	projectId: number;
 	userId: number;
 	uploadKind: UploadKind;
+	transport: GameUploadTransport;
 	originalName: string;
 	totalBytes: bigint;
 	chunkSizeBytes: number;
@@ -95,11 +104,13 @@ export type ReplaceMultipartGenerationResult =
 
 export interface GameUploadRepository {
 	findSessionById(id: string): Promise<GameUploadSessionRecord | null>;
+	isSessionActive(sessionId: string): Promise<boolean>;
 	createSessionReplacingActive(data: NewGameUploadSession): Promise<{
 		session: { id: string };
 		durableAborts: DurablyTrackedMultipartAbort[];
 	}>;
 	cancelSessionAndClearActive(id: string): Promise<CancelGameUploadResult>;
+	expireSessionAndClearActive(id: string): Promise<CancelGameUploadResult>;
 	queueAbortTask(target: {
 		key: string;
 		uploadId: string;
@@ -130,6 +141,18 @@ export interface GameUploadRepository {
 		token: string;
 		leaseMs: number;
 	}): Promise<{ count: number; reason: 'state' | 'parts-active' | 'parts-missing' | null }>;
+	markVerifying(input: {
+		sessionId: string;
+		generation: number;
+		storageKey: string;
+		verifiedSizeBytes: number;
+		completionClaimToken: string;
+	}): Promise<{ count: number }>;
+	claimVerifyingSessions(
+		token: string,
+		leaseMs: number,
+		limit: number,
+	): Promise<GameUploadSessionSummary[]>;
 	renewCompletionClaim(
 		sessionId: string,
 		token: string,
@@ -205,7 +228,7 @@ export interface GameUploadStorage {
 		key: string,
 		uploadId: string,
 		request?: { signal?: AbortSignal },
-	): Promise<GameUploadPartRecord[]>;
+	): Promise<GameUploadStoredPartRecord[]>;
 	listMultipartUploads(prefix: string, request?: { signal?: AbortSignal }): Promise<Array<{
 		key: string;
 		uploadId: string;
@@ -217,9 +240,47 @@ export interface GameUploadStorage {
 	} | null>;
 }
 
+/** Capability-only port: it cannot complete, abort, delete, or relay bytes. */
+export interface GameUploadPartSigner {
+	presignUploadPart(
+		key: string,
+		uploadId: string,
+		partNumber: number,
+		expiresInSeconds: number,
+	): Promise<string>;
+}
+
+/**
+ * Deliberately read-only session authority for the UploadPart capability issuer.
+ * Expiration cleanup and every multipart mutation remain owned by maintenance
+ * and completion use-cases rather than being reachable from signing code.
+ */
+export interface GameUploadPartSigningRepository {
+	findSessionById(id: string): Promise<GameUploadSessionRecord | null>;
+	isSessionActive(sessionId: string): Promise<boolean>;
+}
+
+export interface GameUploadPartSigningDependencies {
+	repository: GameUploadPartSigningRepository;
+	partSigner: GameUploadPartSigner;
+	clock: { now(): Date };
+	authorizeProjectWrite(
+		actor: { id: number; role: UserRole },
+		projectId: number,
+	): Promise<void>;
+	config: {
+		uploadPartUrlBatchMax: number;
+		uploadPartUrlTtlSeconds: number;
+	};
+	logger: {
+		info?(context: Record<string, unknown>, message: string): void;
+	};
+}
+
 export interface GameUploadServiceDependencies {
 	repository: GameUploadRepository;
 	storage: GameUploadStorage;
+	partSigner: GameUploadPartSigner;
 	finalizer: {
 		finalize(
 			session: CompletedUploadSession,
@@ -235,15 +296,26 @@ export interface GameUploadServiceDependencies {
 	clock: { now(): Date };
 	ids: { next(): string };
 	lifecycle: { isAcceptingNewWork(): boolean };
-	config: { uploadChunkSizeMb: number; uploadSessionTtlMinutes: number };
+	authorizeProjectWrite(
+		actor: { id: number; role: UserRole },
+		projectId: number,
+	): Promise<void>;
+	config: {
+		uploadChunkSizeMb: number;
+		uploadSessionTtlMinutes: number;
+		uploadPartUrlBatchMax: number;
+		uploadPartUrlTtlSeconds: number;
+	};
 	roleGameMaxBytes(role: UserRole): number;
 	storageKey(uploadKind: UploadKind, projectId: number): string;
 	deleteOrQueue(key: string, reason: string, context: Record<string, unknown>): Promise<void>;
 	wakeDeletionWorker(): void;
 	wakeMaintenance(): void;
+	wakeValidationWorker(): void;
 	recordPostCommitCleanupFailure?: () => void;
 	recordUntrackedMultipartCleanupFailure(): void;
 	logger: {
+		info?(context: Record<string, unknown>, message: string): void;
 		error(context: Record<string, unknown>, message: string): void;
 		warn(context: Record<string, unknown>, message: string): void;
 		fatal(context: Record<string, unknown>, message: string): void;

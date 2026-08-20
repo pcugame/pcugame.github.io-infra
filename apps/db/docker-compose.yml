@@ -40,9 +40,14 @@ services:
     depends_on:
       garage:
         condition: service_healthy
+    # This is consumed only by Garage's S3 PutBucketCors initializer, never by
+    # Fastify CORS. Override from the host with exact browser origins.
+    environment:
+      S3_CORS_ALLOWED_ORIGINS: ${S3_CORS_ALLOWED_ORIGINS:-http://localhost:5173}
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
       - ./garage-init.sh:/garage-init.sh:ro
+      - ./garage-configure-cors.sh:/garage-configure-cors.sh:ro
       - garage_meta:/var/lib/garage/meta:ro
     entrypoint: ["/bin/sh", "/garage-init.sh"]
     restart: "no"

@@ -15,9 +15,11 @@ import {
 	ExportStatusResponseSchema,
 	GameUploadChunkResponseSchema,
 	GameUploadCompleteResponseSchema,
+	GameUploadPartUrlsResponseSchema,
 	GameUploadSessionListResponseSchema,
 	GameUploadSessionSchema,
 	GameUploadStatusSchema,
+	GameUploadVerifyingResponseSchema,
 	GoogleAuthResponseSchema,
 	ImportExecuteResultSchema,
 	ImportPreviewResultSchema,
@@ -36,6 +38,7 @@ import {
 import {
 	AddMemberBody,
 	AdminProjectListQuery,
+	AssetDownloadQuery,
 	BulkDeleteBody,
 	BulkStatusBody,
 	CreateExhibitionBody,
@@ -152,6 +155,18 @@ const OctetStreamSchema = z.custom<NodeJS.ReadableStream>((value) => (
 	&& 'pipe' in value
 	&& typeof value.pipe === 'function'
 ));
+const GameUploadPartUrlsContractBody = z.object({
+	generation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+	partNumbers: z.array(z.number().int().positive().max(Number.MAX_SAFE_INTEGER)),
+}).strict();
+const GameUploadCompleteContractBody = z.object({
+	generation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+	parts: z.array(z.object({
+		partNumber: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+		etag: z.string().min(1).max(1024),
+		sizeBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+	}).strict()),
+}).strict();
 
 const ExportBodySchema = z.union([
 	z.object({
@@ -266,6 +281,28 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 			400: z.string(),
 			default: ApiErrorResponseSchema,
 		},
+	}),
+	contract({
+		method: 'POST',
+		url: '/api/admin/game-upload-sessions/:sessionId/part-urls',
+		family: 'game-upload',
+		bodyBoundary: 'json',
+		responseBoundary: 'json',
+		params: SessionParamsSchema,
+		querystring: EmptyObjectSchema,
+		body: GameUploadPartUrlsContractBody,
+		response: jsonResponse(GameUploadPartUrlsResponseSchema),
+	}),
+	contract({
+		method: 'GET',
+		url: '/api/assets/:assetId/download',
+		family: 'assets',
+		bodyBoundary: 'none',
+		responseBoundary: 'redirect',
+		params: AssetIdParamsSchema,
+		querystring: AssetDownloadQuery,
+		body: NoBodySchema,
+		response: RedirectResponse,
 	}),
 	contract({
 		method: 'GET',
@@ -786,12 +823,16 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		method: 'POST',
 		url: '/api/admin/game-upload-sessions/:sessionId/complete',
 		family: 'game-upload',
-		bodyBoundary: 'none',
+		bodyBoundary: 'json',
 		responseBoundary: 'json',
 		params: SessionParamsSchema,
 		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		response: jsonResponse(GameUploadCompleteResponseSchema),
+		body: z.union([GameUploadCompleteContractBody, z.null()]).optional(),
+		response: {
+			200: apiSuccessSchema(GameUploadCompleteResponseSchema),
+			202: apiSuccessSchema(GameUploadVerifyingResponseSchema),
+			default: ApiErrorResponseSchema,
+		},
 	}),
 	contract({
 		method: 'DELETE',

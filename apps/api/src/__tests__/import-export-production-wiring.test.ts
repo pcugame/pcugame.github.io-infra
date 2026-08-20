@@ -185,6 +185,7 @@ function fakeStorage() {
 	const storage: ObjectStorage = {
 		upload: vi.fn(),
 		presign: vi.fn(),
+		presignUploadPart: vi.fn(async () => 'https://storage.test/upload-part'),
 		delete: vi.fn(),
 		head: vi.fn(),
 		readRange: vi.fn(),

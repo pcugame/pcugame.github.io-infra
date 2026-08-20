@@ -89,6 +89,86 @@ const forbiddenCases = [
 		target: 'architecture-fixtures/forbidden/stateful-import/wildcard.ts',
 		guardRule: 'no-noncomposition-stateful-import',
 	},
+	{
+		name: 'direct controller readable body',
+		target: 'architecture-fixtures/forbidden/direct-controller-stream',
+		guardRule: 'no-direct-controller-body-stream',
+	},
+	{
+		name: 'direct service UploadPart relay',
+		target: 'architecture-fixtures/forbidden/direct-service-relay',
+		guardRule: 'no-direct-upload-byte-relay',
+	},
+	{
+		name: 'colocated direct completion UploadPart relay',
+		target: 'architecture-fixtures/forbidden/direct-completion-relay',
+		guardRule: 'no-direct-upload-byte-relay',
+	},
+	{
+		name: 'client delivery storage byte read',
+		target: 'architecture-fixtures/forbidden/client-delivery-read',
+		guardRule: 'no-client-delivery-object-read',
+	},
+	{
+		name: 'feature-local S3 SDK',
+		target: 'architecture-fixtures/forbidden/feature-s3',
+		guardRule: 'no-feature-local-s3-data-plane',
+	},
+	{
+		name: 'application asset proxy',
+		target: 'architecture-fixtures/forbidden/application-asset-proxy',
+		guardRule: 'no-application-asset-proxy',
+	},
+	{
+		name: 'application fetch asset proxy',
+		target: 'architecture-fixtures/forbidden/application-fetch-proxy',
+		guardRule: 'no-application-asset-proxy',
+	},
+	{
+		name: 'neutral-name application asset proxy',
+		target: 'architecture-fixtures/forbidden/neutral-application-proxy',
+		guardRule: 'no-application-asset-proxy',
+	},
+	{
+		name: 'neutral-name aliased object-read delivery',
+		target: 'architecture-fixtures/forbidden/neutral-object-read',
+		guardRule: 'no-client-delivery-object-read',
+	},
+	{
+		name: 'canonical raw storage-key route',
+		target: 'architecture-fixtures/forbidden/storage-key-route',
+		guardRule: 'no-canonical-storage-key-route',
+	},
+	{
+		name: 'protected download response body',
+		target: 'architecture-fixtures/forbidden/protected-download-body',
+		guardRule: 'no-protected-download-body',
+	},
+	{
+		name: 'unowned multipart completion',
+		target: 'architecture-fixtures/forbidden/unowned-complete',
+		guardRule: 'no-unowned-multipart-complete',
+	},
+	{
+		name: 'signer admin authority',
+		target: 'architecture-fixtures/forbidden/signer-authority',
+		guardRule: 'no-signer-admin-authority',
+	},
+	{
+		name: 'presigned URL logger context',
+		target: 'architecture-fixtures/forbidden/presigned-log',
+		guardRule: 'no-presigned-url-logging',
+	},
+	{
+		name: 'controller process env',
+		target: 'architecture-fixtures/forbidden/controller-process-env',
+		guardRule: 'no-controller-process-env',
+	},
+	{
+		name: 'public metadata presign authority',
+		target: 'architecture-fixtures/forbidden/public-presign',
+		guardRule: 'no-public-metadata-presign-authority',
+	},
 ];
 
 function runGuard(target) {

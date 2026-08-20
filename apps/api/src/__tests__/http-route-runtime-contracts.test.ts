@@ -41,6 +41,7 @@ function createStorageStub(): ObjectStorage {
 	return {
 		upload: async () => {},
 		presign: async () => 'https://storage.test/object',
+		presignUploadPart: async () => 'https://storage.test/upload-part',
 		delete: async () => {},
 		head: async () => ({ size: 0, contentType: 'application/octet-stream' }),
 		readRange: async () => Buffer.alloc(0),
@@ -205,6 +206,19 @@ describe('production HTTP runtime contracts', () => {
 			url: '/api/public/years//projects',
 		});
 		expect(empty.statusCode).toBe(400);
+	});
+
+	it('rejects unsupported protected-download variants at the registered runtime boundary', async () => {
+		const response = await app.inject({
+			method: 'GET',
+			url: '/api/assets/42/download?variant=thumbnail',
+		});
+
+		expect(response.statusCode, response.body).toBe(400);
+		expect(response.json()).toMatchObject({
+			ok: false,
+			error: { code: 'VALIDATION_ERROR' },
+		});
 	});
 
 	it('leaves non-canonical numeric-looking project identifiers available as slugs', async () => {

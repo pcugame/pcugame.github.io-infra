@@ -164,12 +164,11 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			});
 		};
 		const service = createAssetsService({
-			protectedBucket: bucket,
 			presign: vi.fn(),
 			bucketForKind: () => bucket,
 			wakeDeletionWorker,
 			loadProjectWithAccess: async () => ({}),
-			downloadLimiter: { check: () => 'ok' },
+			downloadLimiter: { check: () => ({ status: 'ok' }) },
 			logger: { info: vi.fn(), error: vi.fn() },
 			repository: createAssetsRepository(client),
 		});

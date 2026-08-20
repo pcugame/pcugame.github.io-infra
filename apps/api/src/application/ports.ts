@@ -76,6 +76,27 @@ export type ObjectStreamOutcome = ObjectStreamResult
 export interface CompletedPart {
 	partNumber: number;
 	etag: string;
+	/**
+	 * S3 ListParts reports this authoritative byte count. It is optional only so
+	 * legacy completion records (which predate direct browser transport) remain
+	 * representable; direct multipart completion must require it.
+	 */
+	sizeBytes?: number;
+}
+
+/**
+ * The only browser-upload capability a direct multipart session needs. Keeping
+ * this separate from multipart administration prevents a part-url issuer from
+ * acquiring complete, abort, or delete authority by convenience.
+ */
+export interface ObjectStoreUploadPartSigner {
+	presignUploadPart(
+		bucket: string,
+		key: string,
+		uploadId: string,
+		partNumber: number,
+		expiresInSeconds: number,
+	): Promise<string>;
 }
 
 export interface StoredObject {
@@ -159,6 +180,12 @@ export interface ObjectStorage {
 		key: string,
 		options?: { ttlSec?: number; responseContentDisposition?: string },
 	): Promise<string>;
+	/**
+	 * Browser-facing capability for one already-created multipart part. The
+	 * concrete adapter signs with the public S3 endpoint; all object I/O remains
+	 * bound to the internal endpoint client.
+	 */
+	presignUploadPart?: ObjectStoreUploadPartSigner['presignUploadPart'];
 	delete(bucket: string, key: string, request?: StorageRequestOptions): Promise<void>;
 	head(bucket: string, key: string, request?: StorageRequestOptions): Promise<{
 		size: number;
@@ -233,6 +260,8 @@ export interface ObjectStorage {
 		prefix: string,
 		request?: StorageRequestOptions,
 	): Promise<MultipartUpload[]>;
+	/** Releases a separately-owned browser presigning client, when present. */
+	close?(): void;
 }
 
 export interface FileStat {

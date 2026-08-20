@@ -73,7 +73,7 @@ export function createScriptedBackendPersistence(
 		},
 		assetsRepository: {
 			findAssetByStorageKey: async () => null,
-			upsertBannedIp: async () => undefined,
+			findAssetByIdForDownload: async () => null,
 			findAssetByIdWithProject: async () => null,
 			claimAssetForDeletion: async () => null,
 			completeAssetDeletion: async () => undefined,

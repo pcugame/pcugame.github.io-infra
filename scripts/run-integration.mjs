@@ -14,6 +14,8 @@ const steps = [
 	[npm, ['run', 'test:integration:idempotency']],
 	[npm, ['run', 'test:integration:lease-clock-core']],
 	[npm, ['run', 'test:integration:lifecycle-schema']],
+	[npm, ['run', 'test:integration:direct-multipart']],
+	[npm, ['run', 'test:integration:direct-control-plane']],
 	[npm, ['run', 'test:integration:responsive-image-migration']],
 	[npm, ['run', 'test:integration:storage-recovery']],
 	[npm, ['run', 'test:integration:responsive-images']],

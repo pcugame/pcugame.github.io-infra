@@ -65,11 +65,11 @@ function fakeAsset(overrides: Partial<ReturnType<typeof fakeProject>['assets'][n
 
 describe('protectedAssetUrl', () => {
 	it('returns a protected asset URL', () => {
-		expect(protectedAssetUrl('abc.zip')).toBe('https://api.example.com/api/assets/protected/abc.zip');
+		expect(protectedAssetUrl(42)).toBe('https://api.example.com/api/assets/42/download?variant=original');
 	});
 
 	it('keeps VIDEO downloads on the protected route', () => {
-		expect(protectedAssetUrl('vid.mp4')).toBe('https://api.example.com/api/assets/protected/vid.mp4');
+		expect(protectedAssetUrl(43, 'playback')).toBe('https://api.example.com/api/assets/43/download?variant=playback');
 	});
 });
 
@@ -199,9 +199,9 @@ describe('serializeProjectDetail', () => {
 			})],
 		}));
 		expect(result.video).toEqual({
-			url: 'https://api.example.com/api/assets/protected/vid.mp4',
+			url: 'https://api.example.com/api/assets/2/download?variant=playback',
 			mimeType: 'video/mp4',
-			originalDownloadUrl: 'https://api.example.com/api/assets/protected/vid.mp4',
+			originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',
 			playbackStatus: 'READY',
 			playbackError: undefined,
 		});
@@ -236,8 +236,8 @@ describe('serializeProjectDetail', () => {
 
 		expect(result.video).toBe(result.videos[0]);
 		expect(result.videos.map((v) => v.url)).toEqual([
-			'https://api.example.com/api/assets/protected/first.mp4',
-			'https://api.example.com/api/assets/protected/second-playback.mp4',
+			'https://api.example.com/api/assets/2/download?variant=playback',
+			'https://api.example.com/api/assets/3/download?variant=playback',
 		]);
 	});
 
@@ -258,15 +258,15 @@ describe('serializeProjectDetail', () => {
 		}));
 
 		expect(result.video).toMatchObject({
-			url: 'https://api.example.com/api/assets/protected/playback.mp4',
+			url: 'https://api.example.com/api/assets/2/download?variant=playback',
 			mimeType: 'video/mp4',
-			originalDownloadUrl: 'https://api.example.com/api/assets/protected/original.mov',
+			originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',
 			playbackStatus: 'READY',
 		});
 		expect(result.assets[0]).toMatchObject({
-			url: 'https://api.example.com/api/assets/protected/original.mov',
-			playbackUrl: 'https://api.example.com/api/assets/protected/playback.mp4',
-			originalDownloadUrl: 'https://api.example.com/api/assets/protected/original.mov',
+			url: 'https://api.example.com/api/assets/2/download?variant=playback',
+			playbackUrl: 'https://api.example.com/api/assets/2/download?variant=playback',
+			originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',
 		});
 	});
 

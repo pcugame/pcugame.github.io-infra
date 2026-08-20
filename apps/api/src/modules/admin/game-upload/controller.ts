@@ -1,7 +1,10 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type {
 	GameUploadChunkResponse,
-	GameUploadCompleteResponse,
+	GameUploadCompletionResponse,
+	GameUploadCompleteRequest,
+	GameUploadPartUrlsRequest,
+	GameUploadPartUrlsResponse,
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
@@ -15,7 +18,9 @@ import {
 	parseNonNegativeIntParam,
 } from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
+import { badRequest, unsupportedMediaType } from '../../../shared/errors.js';
 import type { createGameUploadService } from './service.js';
+import { GameUploadCompleteBody, GameUploadPartUrlsBody } from './validation.js';
 
 type GameUploadService = ReturnType<typeof createGameUploadService>;
 
@@ -69,6 +74,29 @@ export function createGameUploadController(
 	app.put<{ Params: { sessionId: string; index: string }; Querystring: { sourceIdentityAlgorithm?: string; sourceIdentity?: string } }>(
 		'/game-upload-sessions/:sessionId/chunks/:index',
 		{
+			preParsing: async (request, reply, payload) => {
+				// Preserve the route's validation-before-auth contract while gating
+				// legacy relay authority before Fastify exposes the payload to a handler.
+				parseNonNegativeIntParam(request.params.index, 'Chunk index');
+				const mediaType = request.headers['content-type']
+					?.split(';', 1)[0]
+					?.trim()
+					.toLowerCase();
+				if (mediaType !== 'application/octet-stream') {
+					if (mediaType !== 'application/json') {
+						throw unsupportedMediaType('Content-Type must be application/octet-stream');
+					}
+					throw badRequest('Content-Type must be application/octet-stream');
+				}
+				parseBody(GameUploadChunkIdentityQuery, request.query);
+				await requireLogin(request, reply);
+				const user = request.currentUser!;
+				await deps.service.authorizeLegacyChunkUpload(
+					request.params.sessionId,
+					{ id: user.id, role: user.role },
+				);
+				return payload;
+			},
 			preHandler: requireLogin,
 			bodyLimit: deps.chunkUploadBodyLimitBytes,
 			handlerTimeout: 45 * 60 * 1000,
@@ -83,6 +111,21 @@ export function createGameUploadController(
 				parseBody(GameUploadChunkIdentityQuery, request.query),
 			);
 			sendOk<GameUploadChunkResponse>(reply, result);
+		},
+	);
+
+	/** Issue short-lived UploadPart capabilities; no object bytes enter Fastify. */
+	app.post<{ Params: { sessionId: string }; Body: GameUploadPartUrlsRequest }>(
+		'/game-upload-sessions/:sessionId/part-urls',
+		{ preHandler: requireLogin },
+		async (request, reply) => {
+			const user = request.currentUser!;
+			const result = await deps.service.signPartUrls(
+				request.params.sessionId,
+				{ id: user.id, role: user.role },
+				parseBody(GameUploadPartUrlsBody, request.body),
+			);
+			sendOk<GameUploadPartUrlsResponse>(reply, result);
 		},
 	);
 
@@ -101,7 +144,7 @@ export function createGameUploadController(
 	);
 
 	/** POST /game-upload-sessions/:sessionId/complete — finalize chunked upload */
-	app.post<{ Params: { sessionId: string } }>(
+	app.post<{ Params: { sessionId: string }; Body: GameUploadCompleteRequest }>(
 		'/game-upload-sessions/:sessionId/complete',
 		{ preHandler: requireLogin, handlerTimeout: 45 * 60 * 1000 },
 		async (request, reply) => {
@@ -109,8 +152,15 @@ export function createGameUploadController(
 			const result = await deps.service.completeSession(
 				request.params.sessionId,
 				{ id: user.id, role: user.role },
+				request.body === undefined
+					? undefined
+					: parseBody(GameUploadCompleteBody, request.body),
 			);
-			sendOk<GameUploadCompleteResponse>(reply, result);
+			sendOk<GameUploadCompletionResponse>(
+				reply,
+				result,
+				result.status === 'VERIFYING' ? 202 : 200,
+			);
 		},
 	);
 

@@ -1,4 +1,4 @@
-import type { GameUploadChunkResponse } from '@pcu/contracts';
+import type { GameUploadChunkResponse, UserRole } from '@pcu/contracts';
 import { AppError, badRequest, conflict, operationInProgress } from '../../../shared/errors.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
@@ -15,6 +15,8 @@ import {
 	assertChunkMatchesManifest,
 	assertSourceIdentityMatches,
 } from './source-identity.js';
+import { resolvedUploadTransport } from './direct-multipart.js';
+import { recordGameUploadEvent } from './observability.js';
 
 async function readValidatedChunk(
 	body: NodeJS.ReadableStream,
@@ -119,13 +121,16 @@ export async function uploadChunk(
 	sessionId: string,
 	chunkIndex: number,
 	body: NodeJS.ReadableStream,
-	user: { id: number; role: string },
+	user: { id: number; role: UserRole },
 	query: { sourceIdentityAlgorithm?: string; sourceIdentity?: string },
 ): Promise<GameUploadChunkResponse> {
 	deps.uploadSlots.acquire();
 	let claimHeartbeat: ReturnType<typeof createClaimHeartbeatGuard> | undefined;
 	try {
 		const session = await loadSession(deps, sessionId, user.id, user.role);
+		if (resolvedUploadTransport(session) !== 'API_CHUNK_PROXY') {
+			throw badRequest('DIRECT_MULTIPART sessions do not accept chunk bodies through the API');
+		}
 
 		if (session.status !== 'PENDING') {
 			throw badRequest(`Cannot upload chunks: session is ${session.status}`);
@@ -281,4 +286,25 @@ export async function uploadChunk(
 		claimHeartbeat?.stop();
 		deps.uploadSlots.release();
 	}
+}
+/**
+ * Runs before Fastify parses an octet-stream body. It prevents a direct
+ * multipart session from ever entering the legacy application byte relay.
+ */
+export async function authorizeLegacyChunkUpload(
+	deps: GameUploadServiceDependencies,
+	sessionId: string,
+	user: { id: number; role: UserRole },
+): Promise<void> {
+	const session = await loadSession(deps, sessionId, user.id, user.role);
+	if (resolvedUploadTransport(session) !== 'API_CHUNK_PROXY') {
+		throw badRequest('DIRECT_MULTIPART sessions do not accept chunk bodies through the API');
+	}
+	recordGameUploadEvent(deps, 'legacy_proxy_transport_selected', {
+		actorId: user.id,
+		projectId: session.projectId,
+		sessionId: session.id,
+		generation: session.multipartGeneration ?? 1,
+		result: 'selected',
+	});
 }

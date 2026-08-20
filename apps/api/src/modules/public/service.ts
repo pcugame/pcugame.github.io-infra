@@ -83,8 +83,12 @@ export interface PublicServiceDependencies {
 	};
 }
 
-function protectedAssetUrl(deps: PublicServiceDependencies, storageKey: string): string {
-	return `${deps.apiPublicUrl}/api/assets/protected/${storageKey}`;
+function protectedAssetUrl(
+	deps: PublicServiceDependencies,
+	assetId: number,
+	variant: 'original' | 'playback' = 'original',
+): string {
+	return `${deps.apiPublicUrl}/api/assets/${assetId}/download?variant=${variant}`;
 }
 
 function isPublicPoster(poster: PublicPosterRecord | null): poster is PublicPosterRecord {
@@ -248,7 +252,7 @@ export async function getProjectDetail(
 	const videos = project.assets
 		.filter((a) => a.kind === 'VIDEO' && a.playbackStatus === 'READY')
 		.map((videoAsset) => ({
-			url: protectedAssetUrl(deps, videoAsset.playbackStorageKey ?? videoAsset.storageKey),
+			url: protectedAssetUrl(deps, videoAsset.id, 'playback'),
 			mimeType: videoAsset.playbackStorageKey
 				? videoAsset.playbackMimeType || 'video/mp4'
 				: videoAsset.mimeType || 'video/mp4',
@@ -278,7 +282,7 @@ export async function getProjectDetail(
 			? responsiveImages.serializeResponsiveImage(poster)
 			: undefined,
 		gameDownloadUrl: gameAsset
-			? protectedAssetUrl(deps, gameAsset.storageKey)
+			? protectedAssetUrl(deps, gameAsset.id)
 			: undefined,
 		webglUrl: project.webglEntryKey && parseWebglEntryKey(project.id, project.webglEntryKey)
 			? webglUrl(deps.apiPublicUrl, project.id)

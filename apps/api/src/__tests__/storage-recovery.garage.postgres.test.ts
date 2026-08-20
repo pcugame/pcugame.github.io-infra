@@ -188,6 +188,7 @@ describe.runIf(runStorageIntegration)(
 					),
 					head: (storageKey) => storage.head(protectedBucket, storageKey),
 				},
+				partSigner: { presignUploadPart: async () => 'https://storage.test/part' },
 				finalizer: {
 					async finalize(session, object) {
 						await gameRepository.finalizeCompletedSession(
@@ -221,12 +222,14 @@ describe.runIf(runStorageIntegration)(
 				clock: { now: () => new Date() },
 				ids: { next: () => randomUUID() },
 				lifecycle: { isAcceptingNewWork: () => true },
-				config: { uploadChunkSizeMb: 5, uploadSessionTtlMinutes: 60 },
+				authorizeProjectWrite: async () => undefined,
+				config: { uploadChunkSizeMb: 5, uploadSessionTtlMinutes: 60, uploadPartUrlBatchMax: 16, uploadPartUrlTtlSeconds: 300 },
 				roleGameMaxBytes: () => 20 * MIB,
 				storageKey: () => key(`game-${randomUUID()}.zip`),
 				deleteOrQueue: async () => {},
 				wakeDeletionWorker: vi.fn(),
 				wakeMaintenance: vi.fn(),
+				wakeValidationWorker: vi.fn(),
 				recordUntrackedMultipartCleanupFailure: vi.fn(),
 				logger: { error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 			});
@@ -318,8 +321,8 @@ describe.runIf(runStorageIntegration)(
 				);
 				await expect(storage.listParts!(protectedBucket, multipartKey, uploadId))
 					.resolves.toEqual([
-						{ partNumber: 1, etag: etag1 },
-						{ partNumber: 2, etag: etag2 },
+						{ partNumber: 1, etag: etag1, sizeBytes: first.length },
+						{ partNumber: 2, etag: etag2, sizeBytes: final.length },
 					]);
 				await storage.completeMultipart(protectedBucket, multipartKey, uploadId, [
 					{ partNumber: 1, etag: etag1 },
@@ -588,6 +591,14 @@ describe.runIf(runStorageIntegration)(
 				totalBytes: 5 * MIB,
 				...sourceIdentityForBuffer(parallelBytes),
 			});
+			// The production graph now defaults new sessions to DIRECT_MULTIPART.
+			// This test deliberately exercises the retained legacy chunk claim and
+			// generation-reset path, so make its fixture transport explicit before
+			// it invokes the legacy chunk endpoint.
+			await prisma.gameUploadSession.update({
+				where: { id: created.sessionId },
+				data: { transport: 'API_CHUNK_PROXY' },
+			});
 			const firstUpload = service.uploadChunk(
 				created.sessionId,
 				0,
@@ -615,6 +626,10 @@ describe.runIf(runStorageIntegration)(
 				originalName: 'mismatch.zip',
 				totalBytes: 5 * MIB,
 				...sourceIdentityForBuffer(mismatchBytes),
+			});
+			await prisma.gameUploadSession.update({
+				where: { id: mismatch.sessionId },
+				data: { transport: 'API_CHUNK_PROXY' },
 			});
 			await mismatchService.uploadChunk(
 				mismatch.sessionId,

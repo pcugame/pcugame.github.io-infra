@@ -242,6 +242,7 @@ function storageHarness(label: string) {
 	const storage: ObjectStorage = {
 		upload: calls.upload as ObjectStorage['upload'],
 		presign: vi.fn(async () => `https://${label}.storage.test/object`),
+		presignUploadPart: vi.fn(async () => `https://${label}.storage.test/upload-part`),
 		delete: calls.delete,
 		head: vi.fn(async () => null),
 		readRange: vi.fn(async () => Buffer.alloc(0)),

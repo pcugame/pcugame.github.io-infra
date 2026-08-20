@@ -61,11 +61,13 @@ export function createDurableGameUploadRepository(
 ): DurableGameUploadRepository {
 	const repository: DurableGameUploadRepository = {
 		findSessionById: vi.fn(async () => null),
+		isSessionActive: vi.fn(async () => true),
 		createSessionReplacingActive: vi.fn(async (data) => ({
 			session: { id: data.id },
 			durableAborts: [],
 		})),
 		cancelSessionAndClearActive: vi.fn(async () => ({ count: 1 as const, durableAbort: null })),
+		expireSessionAndClearActive: vi.fn(async () => ({ count: 1 as const, durableAbort: null })),
 		queueAbortTask: vi.fn(async () => undefined),
 		acquirePartClaim: vi.fn(async (input) => ({
 			kind: 'acquired' as const,
@@ -74,6 +76,8 @@ export function createDurableGameUploadRepository(
 		completePartClaim: vi.fn(async () => ({ accepted: true as const, parts: [] })),
 		renewPartClaim: vi.fn(async () => ({ count: 1 })),
 		claimCompletion: vi.fn(async () => ({ count: 1, reason: null })),
+		markVerifying: vi.fn(async () => ({ count: 1 })),
+		claimVerifyingSessions: vi.fn(async () => []),
 		renewCompletionClaim: vi.fn(async () => ({ count: 1 })),
 		releaseCompletionClaim: vi.fn(async () => ({ count: 1 })),
 		replaceMultipartGeneration: vi.fn(async () => ({ replaced: true, durableAbort: null })),

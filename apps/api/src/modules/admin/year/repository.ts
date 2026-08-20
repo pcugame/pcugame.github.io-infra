@@ -3,7 +3,7 @@ import {
 	type PrismaClient,
 } from '../../../generated/prisma/client.js';
 import type { SavedImageRendition } from '../../../application/upload-ports.js';
-import { conflict } from '../../../shared/errors.js';
+import { conflict, operationInProgress } from '../../../shared/errors.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
 import { commitUploadIntents } from '../../upload-intent/repository.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
@@ -22,6 +22,94 @@ import type {
 } from './ports.js';
 
 type TransactionClient = Prisma.TransactionClient;
+
+type LiveExhibitionUpload = {
+	id: string;
+	projectId: number;
+	status: 'PENDING' | 'COMPLETING' | 'VERIFYING';
+	uploadKind: string;
+	s3Key: string | null;
+	storageKey: string | null;
+	s3UploadId: string | null;
+};
+
+/**
+ * PENDING sessions may own multipart parts but cannot own a completed source.
+ * Parent deletion is rejected for COMPLETING/VERIFYING so their owner can
+ * resolve storage ambiguity before the parent disappears.
+ */
+function liveUploadDeletionTargets(
+	projectId: number,
+	uploads: readonly LiveExhibitionUpload[],
+	outbox: ExhibitionDeletionOutboxConfig,
+) {
+	return uploads.flatMap((upload) => [...new Set([upload.storageKey, upload.s3Key]
+		.filter((key): key is string => typeof key === 'string' && key.length > 0))]
+		.flatMap((key) => projectActiveUploadDeletionTargets(projectId, [{
+			uploadKind: upload.uploadKind,
+			s3Key: key,
+		}], outbox)));
+}
+
+async function cancelLiveUploadSessions(
+	tx: TransactionClient,
+	sessionIds: readonly string[],
+) {
+	if (sessionIds.length === 0) return;
+	const ids = [...new Set(sessionIds)];
+	await tx.gameUploadSession.updateMany({
+		where: { id: { in: ids }, status: 'PENDING' },
+		data: {
+			status: 'CANCELLED',
+			completionClaimToken: null,
+			completionClaimUntil: null,
+		},
+	});
+}
+
+type LockedProject = { id: number; webglEntryKey: string };
+
+async function lockProjects(
+	tx: TransactionClient,
+	ids: readonly number[],
+): Promise<LockedProject[]> {
+	if (ids.length === 0) return [];
+	return tx.$queryRaw<LockedProject[]>(Prisma.sql`
+		SELECT "id", "webgl_entry_key" AS "webglEntryKey"
+		FROM "projects"
+		WHERE "id" IN (${Prisma.join([...new Set(ids)].sort((left, right) => left - right))})
+		ORDER BY "id"
+		FOR UPDATE
+	`);
+}
+
+async function lockLiveUploads(
+	tx: TransactionClient,
+	projectIds: readonly number[],
+): Promise<LiveExhibitionUpload[]> {
+	if (projectIds.length === 0) return [];
+	return tx.$queryRaw<LiveExhibitionUpload[]>(Prisma.sql`
+		SELECT
+			"id",
+			"project_id" AS "projectId",
+			"status",
+			"upload_kind"::text AS "uploadKind",
+			"s3_key" AS "s3Key",
+			"storage_key" AS "storageKey",
+			"s3_upload_id" AS "s3UploadId"
+		FROM "game_upload_sessions"
+		WHERE "project_id" IN (${Prisma.join([...new Set(projectIds)].sort((left, right) => left - right))})
+			AND "status" IN ('PENDING', 'COMPLETING', 'VERIFYING')
+		ORDER BY "project_id", "id"
+		FOR UPDATE
+	`);
+}
+
+function assertNoInFlightCompletion(uploads: readonly LiveExhibitionUpload[]): void {
+	if (uploads.some((upload) => upload.status !== 'PENDING')) {
+		throw operationInProgress('Exhibition deletion is blocked while an upload is completing or verifying');
+	}
+}
 
 export interface ExhibitionMutationTransactionPolicy {
 	readonly isolationLevel: typeof Prisma.TransactionIsolationLevel.Serializable;
@@ -145,26 +233,17 @@ export function createExhibitionRepository(
 		return withExhibitionMutationTransaction(prisma, async (tx) => {
 			const existing = await lockExhibition(tx, id);
 			if (!existing) return null;
-			const [projects, activeUploads, assets] = await Promise.all([
-				tx.project.findMany({
-					where: { exhibitionId: id },
-					select: { id: true, webglEntryKey: true },
-				}),
-				tx.gameUploadSession.findMany({
-					where: {
-						project: { exhibitionId: id },
-						status: { in: ['PENDING', 'COMPLETING'] },
-					},
-					select: {
-						id: true,
-						projectId: true,
-						uploadKind: true,
-						s3Key: true,
-						s3UploadId: true,
-					},
-				}),
-				tx.asset.findMany({ where: { project: { exhibitionId: id } } }),
-			]);
+			// Keep project locking deterministic with project deletion/finalization.
+			// The exhibition row is already locked above, so no new project can be
+			// moved into this exhibition while the snapshot is established.
+			const projects = await lockProjects(
+				tx,
+				(await tx.project.findMany({ where: { exhibitionId: id }, select: { id: true } }))
+					.map((project) => project.id),
+			);
+			const activeUploads = await lockLiveUploads(tx, projects.map((project) => project.id));
+			assertNoInFlightCompletion(activeUploads);
+			const assets = await tx.asset.findMany({ where: { project: { exhibitionId: id } } });
 			const targets = [
 				...(existing.posterStorageKey ? [{
 					bucket: outbox.publicBucket,
@@ -182,7 +261,7 @@ export function createExhibitionRepository(
 					project.webglEntryKey,
 					outbox,
 				)),
-				...projects.flatMap((project) => projectActiveUploadDeletionTargets(
+				...projects.flatMap((project) => liveUploadDeletionTargets(
 					project.id,
 					activeUploads.filter((upload) => upload.projectId === project.id),
 					outbox,
@@ -198,6 +277,10 @@ export function createExhibitionRepository(
 					reason: `${outbox.reason}-active-multipart`,
 				});
 			}
+			await cancelLiveUploadSessions(tx, activeUploads.map((upload) => upload.id));
+			await tx.gameUploadActiveSession.deleteMany({
+				where: { projectId: { in: projects.map((project) => project.id) } },
+			});
 			await tx.exhibition.delete({ where: { id } });
 			return { ...existing, cleanupQueued: targets.length > 0 || activeUploads.length > 0 };
 		}, policy);

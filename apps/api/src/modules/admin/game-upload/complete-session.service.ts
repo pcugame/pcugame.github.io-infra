@@ -1,4 +1,9 @@
-import type { GameUploadCompleteResponse } from '@pcu/contracts';
+import type {
+	GameUploadCompleteRequest,
+	GameUploadCompletionResponse,
+	GameUploadSession,
+	UserRole,
+} from '@pcu/contracts';
 import { AppError, badRequest, conflict, operationInProgress } from '../../../shared/errors.js';
 import { loadSession } from './session-loader.js';
 import { assertGameUploadSessionWritable } from './session-policy.js';
@@ -13,6 +18,13 @@ import {
 	cleanupUntrackedMultipart,
 	UntrackedMultipartCleanupError,
 } from './multipart-cleanup.js';
+import {
+	crossCheckSubmittedAndStoredParts,
+	validateStoredParts,
+	validateSubmittedCompletionParts,
+} from './direct-multipart.js';
+import type { GameUploadSessionRecord } from './ports.js';
+import { recordGameUploadEvent } from './observability.js';
 
 function resultCount(result: unknown): number | undefined {
 	return typeof result === 'object'
@@ -27,16 +39,207 @@ function signalRequest(signal?: AbortSignal): [] | [{ signal: AbortSignal }] {
 	return signal ? [{ signal }] : [];
 }
 
+async function completeDirectSession(
+	deps: GameUploadServiceDependencies,
+	session: GameUploadSessionRecord,
+	body: GameUploadCompleteRequest,
+): Promise<GameUploadCompletionResponse> {
+	assertSessionHasSourceIdentity(session);
+	const generation = session.multipartGeneration ?? 1;
+	if (body.generation !== generation) throw conflict('Upload generation is stale');
+	if (session.status === 'VERIFYING') {
+		return {
+			status: 'VERIFYING',
+			sessionId: session.id,
+			generation,
+			sizeBytes: Number(session.totalBytes),
+		};
+	}
+	if (session.status === 'COMPLETING') {
+		throw operationInProgress('Upload completion is already in progress');
+	}
+	if (session.status !== 'PENDING') {
+		throw badRequest(`Cannot complete: session is ${session.status}`);
+	}
+	if (!await deps.repository.isSessionActive(session.id)) {
+		throw conflict('Upload session has been replaced');
+	}
+	if (!session.s3UploadId || !session.s3Key) {
+		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
+	}
+	const submitted = validateSubmittedCompletionParts(body.parts, session.totalChunks);
+	assertUploadStateTransition(session.status, 'COMPLETING');
+
+	const completionToken = deps.ids.next();
+	const transitioned = await deps.repository.claimCompletion({
+		sessionId: session.id,
+		generation,
+		token: completionToken,
+		leaseMs: 2 * 60 * 1000,
+	});
+	if (transitioned.count === 0) {
+		if (transitioned.reason === 'parts-active') {
+			throw operationInProgress('A legacy chunk upload is still active');
+		}
+		throw conflict('Session changed before direct completion could be claimed');
+	}
+
+	let s3Completed = false;
+	let completionStateResolved = false;
+	const storageKey = session.s3Key;
+	const completionClaim = createCompletionClaimGuard({
+		sessionId: session.id,
+		token: completionToken,
+		renew: deps.repository.renewCompletionClaim,
+		logHeartbeatFailure: (error) => deps.logger.error(
+			{ error, sessionId: session.id },
+			'Direct completion claim heartbeat failed',
+		),
+	});
+	const storageRequest = { signal: completionClaim.signal };
+	try {
+		await completionClaim.assertOwned();
+		const listed = await deps.storage.listParts(
+			session.s3Key,
+			session.s3UploadId,
+			...signalRequest(storageRequest.signal),
+		);
+		await completionClaim.assertOwned();
+		const stored = validateStoredParts({
+			parts: listed,
+			totalBytes: session.totalBytes,
+			chunkSizeBytes: session.chunkSizeBytes,
+			totalChunks: session.totalChunks,
+			requireComplete: true,
+		});
+		crossCheckSubmittedAndStoredParts(submitted, stored);
+
+		// Complete is built exclusively from the authoritative ListParts result.
+		await deps.storage.completeMultipart(
+			session.s3Key,
+			session.s3UploadId,
+			stored.map(({ partNumber, etag }) => ({ partNumber, etag })),
+			...signalRequest(storageRequest.signal),
+		);
+		s3Completed = true;
+		await completionClaim.assertOwned();
+		const head = await deps.storage.head(storageKey, ...signalRequest(storageRequest.signal));
+		if (!head) {
+			throw new AppError(500, 'Completed object not found in S3', 'INTERNAL_ERROR');
+		}
+		await completionClaim.assertOwned();
+		recordGameUploadEvent(deps, 'upload_session_completed_storage', {
+			projectId: session.projectId,
+			sessionId: session.id,
+			generation,
+			declaredBytes: Number(session.totalBytes),
+			verifiedBytes: head.size,
+			result: 'completed',
+		});
+		const verifying = await deps.repository.markVerifying({
+			sessionId: session.id,
+			generation,
+			storageKey,
+			verifiedSizeBytes: head.size,
+			completionClaimToken: completionToken,
+		});
+		if (verifying.count !== 1) throw completionClaim.loseClaim();
+		completionStateResolved = true;
+		recordGameUploadEvent(deps, 'upload_session_verifying', {
+			projectId: session.projectId,
+			sessionId: session.id,
+			generation,
+			result: 'queued',
+		});
+		completionClaim.stop();
+		deps.wakeValidationWorker();
+		return {
+			status: 'VERIFYING',
+			sessionId: session.id,
+			generation,
+			sizeBytes: head.size,
+		};
+	} catch (error) {
+		if (completionStateResolved) throw error;
+		if (completionClaim.isLost()) {
+			deps.logger.warn(
+				{ error, sessionId: session.id, storageKey },
+				'Direct completion claim was lost; preserving current state',
+			);
+			throw error;
+		}
+		if (!s3Completed) {
+			try {
+				s3Completed = await deps.storage.head(
+					storageKey,
+					...signalRequest(storageRequest.signal),
+				) !== null;
+			} catch (inspectionError) {
+				deps.logger.error(
+					{ error: inspectionError, sessionId: session.id, storageKey },
+					'Direct multipart completion outcome is ambiguous; preserving COMPLETING',
+				);
+				throw error;
+			}
+			if (!s3Completed) {
+				try {
+					await deps.storage.listParts(
+						session.s3Key,
+						session.s3UploadId,
+						...signalRequest(storageRequest.signal),
+					);
+				} catch (inspectionError) {
+					deps.logger.error(
+						{ error: inspectionError, sessionId: session.id, storageKey },
+						'Direct multipart object and upload state are both ambiguous; preserving COMPLETING',
+					);
+					throw error;
+				}
+			}
+		}
+		if (!s3Completed) {
+			assertUploadStateTransition('COMPLETING', 'PENDING');
+			await completionClaim.assertOwned();
+			const reverted = await deps.repository.revertToPending(session.id, completionToken);
+			if (resultCount(reverted) !== 1) throw completionClaim.loseClaim();
+			completionStateResolved = true;
+		}
+		throw error;
+	} finally {
+		completionClaim.stop();
+		if (!completionStateResolved) {
+			try {
+				await deps.repository.releaseCompletionClaim(
+					session.id,
+					completionToken,
+					'direct-completion-deferred',
+				);
+			} catch (releaseError) {
+				deps.logger.error(
+					{ error: releaseError, sessionId: session.id },
+					'Failed to release deferred direct completion claim',
+				);
+			}
+		}
+	}
+}
+
 /** Finalize a chunked upload: complete S3 multipart, validate ZIP, create GAME asset */
 export async function completeSession(
 	deps: GameUploadServiceDependencies,
 	sessionId: string,
-	user: { id: number; role: string },
-): Promise<GameUploadCompleteResponse> {
+	user: { id: number; role: UserRole },
+	body?: GameUploadCompleteRequest,
+): Promise<GameUploadCompletionResponse> {
 	const session = await loadSession(deps, sessionId, user.id, user.role);
+	if (session.transport === 'DIRECT_MULTIPART') {
+		if (!body) throw badRequest('Direct multipart completion manifest is required');
+		const generation = session.multipartGeneration ?? 1;
+		if (body.generation !== generation) throw conflict('Upload generation is stale');
+	}
 	if (session.status === 'COMPLETED') {
 		if (session.completionResult && typeof session.completionResult === 'object') {
-			return session.completionResult as GameUploadCompleteResponse;
+			return session.completionResult as GameUploadCompletionResponse;
 		}
 		if (session.storageKey) {
 			return {
@@ -45,6 +248,9 @@ export async function completeSession(
 				sizeBytes: Number(session.totalBytes),
 			};
 		}
+	}
+	if (session.transport === 'DIRECT_MULTIPART') {
+		return completeDirectSession(deps, session, body!);
 	}
 	// A completed session is an immutable record.  In particular, legacy
 	// completed rows must remain readable/idempotent rather than being sent back

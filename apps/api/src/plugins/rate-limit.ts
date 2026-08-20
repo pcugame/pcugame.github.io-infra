@@ -9,7 +9,7 @@ import type { ApiError } from '../shared/http.js';
  *
  * - `/api/health` and `/api/health/deep` — monitoring probes should never trip
  *   the limiter, and the LB polls the shallow one on a short interval.
- * - `/api/assets/protected/*` — covered by the domain-specific protected download
+ * - protected download routes — covered by the domain-specific protected download
  *   limiter after asset lookup/access checks. Running both on the same path would
  *   double-count and confuse operators.
  *
@@ -30,7 +30,8 @@ export async function registerRateLimit(app: FastifyInstance, cfg: Env): Promise
 		allowList: (req: FastifyRequest) =>
 			req.url === '/api/health'
 			|| req.url === '/api/health/deep'
-			|| req.url.startsWith('/api/assets/protected/'),
+			|| req.url.startsWith('/api/assets/protected/')
+			|| /^\/api\/assets\/\d+\/download(?:\?|$)/.test(req.url),
 		skipOnError: true,
 		// The plugin reads `statusCode` from our returned object to set the HTTP status,
 		// then sends the whole object as the JSON body. Including it here lands the

@@ -141,6 +141,18 @@ describe('rate-limit plugin', () => {
 		expect(body.error.code).toBe('RATE_LIMITED');
 	});
 
+	it('leaves canonical protected-download routes to the scoped domain limiter', async () => {
+		const downloadIp = '203.0.113.70';
+		const responses = await Promise.all(Array.from({ length: 8 }, () => app.inject({
+			method: 'GET',
+			url: '/api/assets/42/download?variant=original',
+			remoteAddress: downloadIp,
+		})));
+		// The test context has an empty assets controller, so 404 proves requests
+		// reached routing instead of the global limiter's 429 short circuit.
+		expect(responses.every((response) => response.statusCode === 404)).toBe(true);
+	});
+
 	it('blocks the login route with its tighter bucket before the global one would', async () => {
 		// Login bucket is max 3; global is max 5. The 4th login must be 429. Use a distinct IP
 		// from the previous test so this bucket starts fresh.

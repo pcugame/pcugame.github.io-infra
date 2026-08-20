@@ -52,6 +52,11 @@ enum UploadKind {
   WEBGL
 }
 
+enum GameUploadTransport {
+  API_CHUNK_PROXY
+  DIRECT_MULTIPART
+}
+
 enum OrphanTargetKind {
   EXACT
   PREFIX
@@ -235,6 +240,7 @@ model GameUploadSession {
   projectId            Int        @map("project_id")
   userId               Int        @map("user_id")
   uploadKind           UploadKind @default(GAME) @map("upload_kind")
+  transport            GameUploadTransport @default(API_CHUNK_PROXY)
   originalName         String     @map("original_name")
   totalBytes           BigInt     @map("total_bytes")
   chunkSizeBytes       Int        @map("chunk_size_bytes")
@@ -246,7 +252,7 @@ model GameUploadSession {
   uploadedChunks       Int[]      @default([]) @map("uploaded_chunks")
   // DB CHECK constraint `game_upload_sessions_status_check` limits this to the
   // states in state-machine.ts. Prisma cannot model this check in the DSL.
-  status               String     @default("PENDING") // PENDING | COMPLETING | COMPLETED | CANCELLED | FAILED
+  status               String     @default("PENDING") // PENDING | COMPLETING | VERIFYING | COMPLETED | REJECTED | CANCELLED | EXPIRED | FAILED
   stagingPath          String     @default("") @map("staging_path") // legacy, no longer used
   storageKey           String?    @map("storage_key") // set on completion
   s3UploadId           String?    @map("s3_upload_id")

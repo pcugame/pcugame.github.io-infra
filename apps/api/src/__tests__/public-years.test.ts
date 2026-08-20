@@ -216,11 +216,11 @@ describe('public exhibition years', () => {
 		expect(result.video).toBe(result.videos[0]);
 		expect(result.videos).toEqual([
 			{
-				url: 'https://api.example.com/api/assets/protected/first.mp4',
+				url: 'https://api.example.com/api/assets/1/download?variant=playback',
 				mimeType: 'video/mp4',
 			},
 			{
-				url: 'https://api.example.com/api/assets/protected/second.mp4',
+				url: 'https://api.example.com/api/assets/2/download?variant=playback',
 				mimeType: 'video/mp4',
 			},
 		]);

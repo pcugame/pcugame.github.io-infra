@@ -29,7 +29,7 @@ import {
 	createUploadLimiterPort,
 } from './infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
-import { createS3Client } from './lib/s3.js';
+import { createS3Client, createS3PresigningClient } from './lib/s3.js';
 import { createObjectStorage } from './lib/storage.js';
 import { createRootLogger } from './lib/logger.js';
 import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
@@ -365,6 +365,11 @@ const defaultFactories: ProductionResourceFactories = {
 	s3: (config) => createS3Client(config),
 	storage: (client, config) => createObjectStorage(client, {
 		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
+		// A distinct client preserves the hostname/path covered by the browser
+		// capability signature. Internal S3 calls must never use this endpoint.
+		...(config.S3_PUBLIC_SIGNING_ENDPOINT !== config.S3_INTERNAL_ENDPOINT
+			? { presigningClient: createS3PresigningClient(config) }
+			: {}),
 	}),
 	settings: (client, logger) => createPrismaSettingsStore(client, logger),
 	uploadLimiter: (config) => createUploadLimiterPort(config.UPLOAD_MAX_CONCURRENT),
@@ -561,7 +566,11 @@ export async function createProductionBackendContext(
 				(client) => client.$disconnect(),
 			);
 		const s3 = await resource('s3', () => factories.s3(config), (client) => client.destroy());
-		const storage = await resource('storage', () => factories.storage(s3, config));
+		const storage = await resource(
+			'storage',
+			() => factories.storage(s3, config),
+			(value) => value.close?.(),
+		);
 		const uploadLifecycle = await resource(
 			'uploadLifecycle',
 			() => {

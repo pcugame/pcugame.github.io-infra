@@ -53,6 +53,7 @@ function schedulerHarness() {
 function storageHarness() {
 	const calls = {
 		presign: vi.fn(async (bucket: string, key: string) => `https://storage.test/${bucket}/${key}`),
+		presignUploadPart: vi.fn(async () => 'https://storage.test/upload-part'),
 		delete: vi.fn(async () => {}),
 		listKeys: vi.fn(async () => [] as string[]),
 		listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
@@ -61,6 +62,7 @@ function storageHarness() {
 	const storage: ObjectStorage = {
 		upload: vi.fn(),
 		presign: calls.presign,
+		presignUploadPart: calls.presignUploadPart,
 		delete: calls.delete,
 		head: vi.fn(async () => null),
 		readRange: vi.fn(async () => Buffer.alloc(0)),
@@ -87,6 +89,7 @@ function portHarness(initialBans: string[] = []) {
 	}));
 	const calls = {
 		assetFindFirst: vi.fn(),
+		assetFindUnique: vi.fn(),
 		bannedFindMany: vi.fn(async () => bans.map(({ ip }) => ({ ip }))),
 		bannedList: vi.fn(async () => [...bans]),
 		bannedFindById: vi.fn(async (id: number) => bans.find((row) => row.id === id) ?? null),
@@ -121,7 +124,7 @@ function portHarness(initialBans: string[] = []) {
 		calls,
 		assetsRepository: {
 			findAssetByStorageKey: calls.assetFindFirst,
-			upsertBannedIp: calls.bannedUpsert,
+			findAssetByIdForDownload: calls.assetFindUnique,
 			findAssetByIdWithProject: vi.fn(async () => null),
 			claimAssetForDeletion: vi.fn(async () => null),
 			completeAssetDeletion: vi.fn(async () => undefined),
@@ -139,7 +142,13 @@ function portHarness(initialBans: string[] = []) {
 
 function protectedAsset() {
 	return {
+		id: 42,
+		projectId: 7,
+		status: 'READY',
 		kind: 'GAME',
+		storageKey: 'game.zip',
+		playbackStorageKey: null,
+		playbackStatus: 'PENDING',
 		project: {
 			creatorId: 1,
 			title: 'Context Game',
@@ -152,7 +161,10 @@ function protectedAsset() {
 async function routeApp(plugin: FastifyPluginAsync, prefix: string, asAdmin = false) {
 	const app = Fastify();
 	app.setErrorHandler((error, _request, reply) => {
-		const failure = error as { statusCode?: number; code?: string };
+		const failure = error as { statusCode?: number; code?: string; details?: { retryAfterSec?: number } };
+		if (failure.statusCode === 429 && failure.details?.retryAfterSec) {
+			reply.header('Retry-After', String(failure.details.retryAfterSec));
+		}
 		reply.status(failure.statusCode ?? 500).send({ code: failure.code });
 	});
 	if (asAdmin) {
@@ -255,7 +267,57 @@ describe('assets/banned-IP production vertical slice', () => {
 		expect(harness.limiter._bannedSize()).toBe(0);
 	});
 
-	it('blocks recovered DB bans and preserves protected redirect, Range, and rate-limit wiring', async () => {
+	it('wires the canonical assetId route to a presigned redirect without object reads', async () => {
+		const harness = graphHarness();
+		harness.calls.assetFindUnique.mockResolvedValue({
+			...protectedAsset(),
+			kind: 'VIDEO',
+			storageKey: 'original.mov',
+			playbackStorageKey: 'playback.mp4',
+			playbackStatus: 'READY',
+		});
+		await harness.graph.warmup.start();
+		const app = await routeApp(harness.graph.assetsController, '/api');
+		apps.push(app);
+
+		const response = await app.inject({
+			method: 'GET',
+			url: '/api/assets/42/download?variant=playback',
+			remoteAddress: '203.0.113.22',
+		});
+
+		expect(response.statusCode).toBe(302);
+		expect(response.headers.location).toBe('https://storage.test/pcu-protected/playback.mp4');
+		expect(harness.calls.presign).toHaveBeenCalledWith(
+			'pcu-protected',
+			'playback.mp4',
+			{ ttlSec: testConfig.S3_PRESIGN_TTL_SEC },
+		);
+		expect(harness.storage.stream).not.toHaveBeenCalled();
+		expect(harness.storage.readRange).not.toHaveBeenCalled();
+	});
+
+	it('rejects an unsupported canonical download variant before asset lookup or presign', async () => {
+		const harness = graphHarness();
+		await harness.graph.warmup.start();
+		const app = await routeApp(harness.graph.assetsController, '/api');
+		apps.push(app);
+
+		const response = await app.inject({
+			method: 'GET',
+			url: '/api/assets/42/download?variant=thumbnail',
+			remoteAddress: '203.0.113.23',
+		});
+
+		expect(response.statusCode).toBe(400);
+		expect(response.json()).toMatchObject({ code: 'VALIDATION_ERROR' });
+		expect(harness.calls.assetFindUnique).not.toHaveBeenCalled();
+		expect(harness.calls.presign).not.toHaveBeenCalled();
+		expect(harness.storage.stream).not.toHaveBeenCalled();
+		expect(harness.storage.readRange).not.toHaveBeenCalled();
+	});
+
+	it('blocks recovered manual bans and returns transient 429 without DB mutation', async () => {
 		const recovered = graphHarness(['203.0.113.10'], 1);
 		recovered.calls.assetFindFirst.mockResolvedValue(protectedAsset());
 		await recovered.graph.warmup.start();
@@ -289,11 +351,9 @@ describe('assets/banned-IP production vertical slice', () => {
 			url: '/api/assets/protected/game.zip',
 			remoteAddress: '203.0.113.20',
 		});
-		expect(exceeded.statusCode).toBe(403);
-		expect(recovered.calls.bannedUpsert).toHaveBeenCalledWith(
-			'203.0.113.20',
-			expect.any(String),
-		);
+		expect(exceeded.statusCode).toBe(429);
+		expect(exceeded.headers['retry-after']).toBe('900');
+		expect(recovered.calls.bannedUpsert).not.toHaveBeenCalled();
 	});
 
 	it('keeps context A/B cache and buckets independent, scopes admin mutation, and closes only A', async () => {
@@ -336,7 +396,7 @@ describe('assets/banned-IP production vertical slice', () => {
 		expect(a.context.protectedDownloads.isBanned('203.0.113.30')).toBe(true);
 		expect(b.context.protectedDownloads.isBanned('203.0.113.30')).toBe(true);
 
-		expect(a.context.protectedDownloads.check('203.0.113.40')).toBe('ok');
+		expect(a.context.protectedDownloads.check('203.0.113.40')).toEqual({ status: 'ok' });
 		expect(a.context.protectedDownloads._bucketSize()).toBe(1);
 		expect(b.context.protectedDownloads._bucketSize()).toBe(0);
 

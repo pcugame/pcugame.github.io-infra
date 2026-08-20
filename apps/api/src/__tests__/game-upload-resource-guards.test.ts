@@ -78,15 +78,19 @@ function createDependencies(): GameUploadServiceDependencies {
 			listMultipartUploads: vi.fn(async () => []),
 			head: mocks.headObject,
 		},
+		partSigner: { presignUploadPart: vi.fn(async () => 'https://storage.test/part') },
 		finalizer: { finalize: vi.fn() },
 		settings: { get: mocks.getSiteSettings },
 		uploadSlots: uploadLimiter,
 		clock: { now: () => new Date('2026-07-31T00:00:00.000Z') },
 		ids: { next: randomUUID },
 		lifecycle: { isAcceptingNewWork: () => true },
+		authorizeProjectWrite: vi.fn(async () => undefined),
 		config: {
 			uploadChunkSizeMb: 10,
 			uploadSessionTtlMinutes: defaultTestEnv.UPLOAD_SESSION_TTL_MINUTES,
+			uploadPartUrlBatchMax: defaultTestEnv.UPLOAD_PART_URL_BATCH_MAX,
+			uploadPartUrlTtlSeconds: defaultTestEnv.UPLOAD_PART_URL_TTL_SEC,
 		},
 		roleGameMaxBytes: () => defaultTestEnv.UPLOAD_USER_GAME_MAX_MB * 1024 * 1024,
 		storageKey: (uploadKind, projectId) => {
@@ -98,6 +102,7 @@ function createDependencies(): GameUploadServiceDependencies {
 		deleteOrQueue: mocks.safeDeleteObject,
 		wakeDeletionWorker: vi.fn(),
 		wakeMaintenance: vi.fn(),
+		wakeValidationWorker: vi.fn(),
 		recordUntrackedMultipartCleanupFailure: vi.fn(),
 		logger: { error: vi.fn(), warn: vi.fn(), fatal: vi.fn() },
 	};
@@ -109,6 +114,8 @@ function pendingSession() {
 		id: 'session-1',
 		projectId: 7,
 		userId: 11,
+		uploadKind: 'GAME' as const,
+		transport: 'API_CHUNK_PROXY' as const,
 		originalName: 'game.zip',
 		totalBytes: BigInt(4 * BLOCK_SIZE),
 		chunkSizeBytes: BLOCK_SIZE,
@@ -118,9 +125,11 @@ function pendingSession() {
 		expiresAt: new Date(Date.now() + 60_000),
 		s3UploadId: 'multipart-1',
 		s3Key: 'protected/game.zip',
+		storageKey: null,
 		s3PartEtags: [],
 		...identity,
 		parts: [],
+		multipartGeneration: 1,
 		project: { status: 'PUBLISHED' },
 	};
 }
@@ -207,6 +216,38 @@ describe('game upload resource guards', () => {
 			expect(mocks.createSessionReplacingActive).not.toHaveBeenCalled();
 		},
 	);
+
+	it('rejects sessions requiring more than the S3 multipart part limit before CreateMultipart', async () => {
+		const deps = createDependencies();
+		deps.config.uploadChunkSizeMb = 5;
+		deps.roleGameMaxBytes = () => 100_000 * BLOCK_SIZE;
+		mocks.findExhibitionById.mockResolvedValue({
+			id: 1,
+			year: 2026,
+			title: '',
+			isUploadEnabled: true,
+		});
+		mocks.getSiteSettings.mockResolvedValue({
+			maxGameFileMb: 100_000,
+			maxChunkSizeMb: 5,
+		});
+		const oversized = createGameUploadService(deps);
+		await expect(oversized.createSession(
+			7,
+			1,
+			{ id: 11, role: 'USER' },
+			{
+				originalName: 'too-many-parts.zip',
+				totalBytes: (10_000 * 5 * BLOCK_SIZE) + 1,
+			},
+		)).rejects.toMatchObject({
+			statusCode: 400,
+			code: 'MULTIPART_PART_LIMIT',
+			message: 'Multipart upload requires between 1 and 10000 parts',
+		});
+		expect(mocks.createMultipartUpload).not.toHaveBeenCalled();
+		expect(mocks.createSessionReplacingActive).not.toHaveBeenCalled();
+	});
 
 	it('creates independent GAME and WEBGL sessions with different storage layouts', async () => {
 		mocks.findExhibitionById.mockResolvedValue({

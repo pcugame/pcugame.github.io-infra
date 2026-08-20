@@ -130,6 +130,10 @@ export const GameUploadChunkIdentityQuery = z.object({
 	sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 
+export const AssetDownloadQuery = z.object({
+	variant: z.enum(['original', 'playback']).optional(),
+}).strict();
+
 // ── Helper ───────────────────────────────────────────────────
 
 import { AppError } from './errors.js';

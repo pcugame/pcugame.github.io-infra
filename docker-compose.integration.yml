@@ -1,12 +1,21 @@
 name: pcu-integration
 
 x-s3-env: &s3-env
+  # S3_ENDPOINT remains available only for legacy workers/tests.
   S3_ENDPOINT: http://garage:3900
+  S3_INTERNAL_ENDPOINT: http://garage:3900
+  # localhost is a browser-visible alias for this local Garage port. It proves
+  # signing against a distinct host from internal I/O, but does not exercise a
+  # production reverse proxy; deploys must separately verify Host/path/query
+  # preservation at that proxy boundary.
+  S3_PUBLIC_SIGNING_ENDPOINT: http://localhost:3900
   S3_REGION: garage
   S3_ACCESS_KEY_ID: GK000000000000000000000001
   S3_SECRET_ACCESS_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
   S3_BUCKET_PUBLIC: pcu-public
   S3_BUCKET_PROTECTED: pcu-protected
+  S3_BUCKET_STAGING: pcu-staging
+  S3_CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
   S3_FORCE_PATH_STYLE: "true"
   S3_PRESIGN_TTL_SEC: "60"
 
@@ -60,6 +69,7 @@ services:
     volumes:
       - ./apps/db/garage.toml:/etc/garage.toml:ro
       - ./apps/db/garage-init-integration.sh:/garage-init-integration.sh:ro
+      - ./apps/db/garage-configure-cors.sh:/garage-configure-cors.sh:ro
       - integration_garage_meta:/var/lib/garage/meta:ro
     entrypoint: ["/bin/sh", "/garage-init-integration.sh"]
 

@@ -8,10 +8,15 @@ describe('game upload state machine', () => {
 	it.each([
 		['PENDING', 'COMPLETING'],
 		['PENDING', 'CANCELLED'],
+		['PENDING', 'EXPIRED'],
 		['PENDING', 'FAILED'],
 		['COMPLETING', 'PENDING'],
+		['COMPLETING', 'VERIFYING'],
 		['COMPLETING', 'COMPLETED'],
+		['COMPLETING', 'REJECTED'],
 		['COMPLETING', 'FAILED'],
+		['VERIFYING', 'COMPLETED'],
+		['VERIFYING', 'REJECTED'],
 	] as const)('allows %s -> %s', (current, next) => {
 		expect(() => assertUploadStateTransition(current, next)).not.toThrow();
 	});
@@ -20,6 +25,8 @@ describe('game upload state machine', () => {
 		['COMPLETED', 'PENDING'],
 		['FAILED', 'COMPLETING'],
 		['CANCELLED', 'COMPLETING'],
+		['EXPIRED', 'PENDING'],
+		['REJECTED', 'VERIFYING'],
 		['UNKNOWN', 'FAILED'],
 	] as const)('rejects %s -> %s', (current, next) => {
 		expect(() => assertUploadStateTransition(current, next)).toThrowError(

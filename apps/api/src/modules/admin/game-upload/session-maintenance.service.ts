@@ -1,4 +1,4 @@
-import type { GameUploadStatus } from '@pcu/contracts';
+import type { GameUploadStatus, UserRole } from '@pcu/contracts';
 import { badRequest } from '../../../shared/errors.js';
 import { loadSession } from './session-loader.js';
 import { assertUploadStateTransition } from './state-machine.js';
@@ -12,6 +12,8 @@ import {
 	MultipartBusinessCleanupError,
 	UntrackedMultipartCleanupError,
 } from './multipart-cleanup.js';
+import { resolvedUploadTransport, validateStoredParts } from './direct-multipart.js';
+import { recordGameUploadEvent } from './observability.js';
 
 function signalRequest(signal?: AbortSignal): [] | [{ signal: AbortSignal }] {
 	return signal ? [{ signal }] : [];
@@ -30,14 +32,34 @@ function resultCount(result: unknown): number | undefined {
 export async function getSessionStatus(
 	deps: GameUploadServiceDependencies,
 	sessionId: string,
-	user: { id: number; role: string },
+	user: { id: number; role: UserRole },
 ): Promise<GameUploadStatus> {
 	const session = await loadSession(deps, sessionId, user.id, user.role);
-	const uploadedChunks = uploadedChunksForSession(session);
+	const transport = resolvedUploadTransport(session);
+	const directParts = transport === 'DIRECT_MULTIPART'
+		&& session.status === 'PENDING'
+		&& session.s3Key
+		&& session.s3UploadId
+		? validateStoredParts({
+			parts: await deps.storage.listParts(session.s3Key, session.s3UploadId),
+			totalBytes: session.totalBytes,
+			chunkSizeBytes: session.chunkSizeBytes,
+			totalChunks: session.totalChunks,
+			requireComplete: false,
+		})
+		: undefined;
+	const uploadedChunks = directParts
+		? directParts.map((part) => part.partNumber - 1)
+		: transport === 'DIRECT_MULTIPART'
+			&& ['COMPLETING', 'VERIFYING', 'COMPLETED'].includes(session.status)
+				? Array.from({ length: session.totalChunks }, (_, index) => index)
+				: uploadedChunksForSession(session);
 	return {
 		sessionId: session.id,
 		projectId: session.projectId,
 		uploadKind: session.uploadKind,
+		transport,
+		generation: session.multipartGeneration ?? 1,
 		originalName: session.originalName,
 		totalBytes: Number(session.totalBytes),
 		chunkSizeBytes: session.chunkSizeBytes,
@@ -51,6 +73,7 @@ export async function getSessionStatus(
 		sourceIdentity: session.sourceIdentity ?? null,
 		sourceIdentityBlockSizeBytes: session.sourceIdentityBlockSizeBytes === 1048576
 			? session.sourceIdentityBlockSizeBytes : null,
+		...(directParts ? { parts: directParts } : {}),
 	};
 }
 
@@ -63,7 +86,7 @@ function uploadedChunksForSession(session: { parts?: { partNumber: number }[]; u
 export async function cancelSession(
 	deps: GameUploadServiceDependencies,
 	sessionId: string,
-	user: { id: number; role: string },
+	user: { id: number; role: UserRole },
 ) {
 	const session = await loadSession(deps, sessionId, user.id, user.role);
 
@@ -106,11 +129,11 @@ export async function sweepStaleCompletingSessions(
 	const cutoff = new Date(now.getTime() - 5 * 60 * 1000);
 	const completionClaimToken = deps.ids.next();
 	const stale = await deps.repository.claimStaleCompletingSessions(
-			cutoff,
-			completionClaimToken,
-			2 * 60 * 1000,
-			50,
-		);
+		cutoff,
+		completionClaimToken,
+		2 * 60 * 1000,
+		50,
+	);
 	if (stale.length === 0) return { swept: 0 };
 
 	for (const s of stale) {
@@ -128,31 +151,59 @@ export async function sweepStaleCompletingSessions(
 		});
 		const operationSignal = completionClaim.signal;
 		try {
-		await completionClaim.assertOwned();
-		if (!s.s3Key) {
-			const failed = await deps.repository.markFailed(s.id, undefined, completionClaimToken);
-			if (resultCount(failed) !== 1) {
-				throw completionClaim.loseClaim();
-			}
-			completionStateResolved = true;
-			continue;
-		}
-
-		let finalObject: Awaited<ReturnType<GameUploadServiceDependencies['storage']['head']>>;
-		try {
-			finalObject = await deps.storage.head(s.s3Key, ...signalRequest(operationSignal));
 			await completionClaim.assertOwned();
-		} catch (err) {
-			deps.logger.error(
-				{ err, sessionId: s.id, s3Key: s.s3Key },
-				'Boot sweep: failed to inspect stale COMPLETING object; leaving it recoverable',
-			);
-			continue;
-		}
-		if (finalObject) {
+			if (!s.s3Key) {
+				const failed = await deps.repository.markFailed(s.id, undefined, completionClaimToken);
+				if (resultCount(failed) !== 1) {
+					throw completionClaim.loseClaim();
+				}
+				completionStateResolved = true;
+				continue;
+			}
+
+			let finalObject: Awaited<ReturnType<GameUploadServiceDependencies['storage']['head']>>;
 			try {
+				finalObject = await deps.storage.head(s.s3Key, ...signalRequest(operationSignal));
 				await completionClaim.assertOwned();
-				const finalizationSession = {
+			} catch (err) {
+				deps.logger.error(
+					{ err, sessionId: s.id, s3Key: s.s3Key },
+					'Boot sweep: failed to inspect stale COMPLETING object; leaving it recoverable',
+				);
+				continue;
+			}
+			if (finalObject) {
+				if (s.transport === 'DIRECT_MULTIPART') {
+					await completionClaim.assertOwned();
+					const verifying = await deps.repository.markVerifying({
+						sessionId: s.id,
+						generation: s.multipartGeneration ?? 1,
+						storageKey: s.s3Key,
+						verifiedSizeBytes: finalObject.size,
+						completionClaimToken,
+					});
+					if (verifying.count !== 1) throw completionClaim.loseClaim();
+					completionStateResolved = true;
+					recordGameUploadEvent(deps, 'upload_session_completed_storage', {
+						projectId: s.projectId,
+						sessionId: s.id,
+						generation: s.multipartGeneration ?? 1,
+						declaredBytes: Number(s.totalBytes),
+						verifiedBytes: finalObject.size,
+						result: 'recovered',
+					});
+					recordGameUploadEvent(deps, 'upload_session_verifying', {
+						projectId: s.projectId,
+						sessionId: s.id,
+						generation: s.multipartGeneration ?? 1,
+						result: 'queued',
+					});
+					deps.wakeValidationWorker();
+					continue;
+				}
+				try {
+					await completionClaim.assertOwned();
+					const finalizationSession = {
 					id: s.id,
 					projectId: s.projectId,
 					uploadKind: s.uploadKind,
@@ -160,14 +211,14 @@ export async function sweepStaleCompletingSessions(
 					totalBytes: s.totalBytes,
 					s3Key: s.s3Key,
 					completionClaimToken,
-				};
-				await deps.finalizer.finalize(finalizationSession, finalObject, {
-					storageRequest: { signal: completionClaim.signal },
-					assertClaimOwned: completionClaim.assertOwned,
-				});
-				completionStateResolved = true;
-			} catch (err) {
-				if (isTerminalUploadFinalizationError(err)) {
+					};
+					await deps.finalizer.finalize(finalizationSession, finalObject, {
+						storageRequest: { signal: completionClaim.signal },
+						assertClaimOwned: completionClaim.assertOwned,
+					});
+					completionStateResolved = true;
+				} catch (err) {
+					if (isTerminalUploadFinalizationError(err)) {
 					await completionClaim.assertOwned();
 					deps.logger.error({ err, sessionId: s.id, s3Key: s.s3Key }, 'Boot sweep: completed upload is invalid');
 					await commitTerminalCompletedObjectFailure(deps, {
@@ -179,18 +230,18 @@ export async function sweepStaleCompletingSessions(
 						completionClaimToken,
 					});
 					completionStateResolved = true;
-				} else {
-					deps.logger.error(
-						{ err, sessionId: s.id, s3Key: s.s3Key },
-						'Boot sweep: transient finalization failure; leaving session recoverable',
-					);
+					} else {
+						deps.logger.error(
+							{ err, sessionId: s.id, s3Key: s.s3Key },
+							'Boot sweep: transient finalization failure; leaving session recoverable',
+						);
+					}
 				}
+				continue;
 			}
-			continue;
-		}
 
-		if (s.s3UploadId) {
-			try {
+			if (s.s3UploadId) {
+				try {
 				await deps.storage.listParts(s.s3Key, s.s3UploadId, ...signalRequest(operationSignal));
 				await completionClaim.assertOwned();
 				const reverted = await deps.repository.revertToPending(
@@ -202,20 +253,20 @@ export async function sweepStaleCompletingSessions(
 				}
 				completionStateResolved = true;
 				continue;
-			} catch (error) {
-				deps.logger.error(
-					{ error, sessionId: s.id, s3Key: s.s3Key },
-					'Recovery could not disambiguate multipart state; leaving COMPLETING',
-				);
-				continue;
+				} catch (error) {
+					deps.logger.error(
+						{ error, sessionId: s.id, s3Key: s.s3Key },
+						'Recovery could not disambiguate multipart state; leaving COMPLETING',
+					);
+					continue;
+				}
 			}
-		}
-		await completionClaim.assertOwned();
-		const failed = await deps.repository.markFailed(s.id, undefined, completionClaimToken);
-		if (resultCount(failed) !== 1) {
-			throw completionClaim.loseClaim();
-		}
-		completionStateResolved = true;
+			await completionClaim.assertOwned();
+			const failed = await deps.repository.markFailed(s.id, undefined, completionClaimToken);
+			if (resultCount(failed) !== 1) {
+				throw completionClaim.loseClaim();
+			}
+			completionStateResolved = true;
 		} catch (error) {
 			deps.logger.error(
 				{ error, sessionId: s.id, s3Key: s.s3Key },
@@ -247,6 +298,144 @@ export async function sweepStaleCompletingSessions(
 	}
 	deps.logger.warn({ count: stale.length }, 'Boot sweep: inspected stale COMPLETING sessions');
 	return { swept: stale.length };
+}
+
+/**
+ * Context-owned PostgreSQL polling worker for completed, untrusted objects.
+ * A claimed row remains VERIFYING on transient failure and is retried after
+ * the lease expires; only deterministic validation errors become REJECTED.
+ */
+export async function sweepVerifyingSessions(
+	deps: GameUploadServiceDependencies,
+	signal?: AbortSignal,
+): Promise<{ claimed: number; ready: number; rejected: number }> {
+	if (signal?.aborted) return { claimed: 0, ready: 0, rejected: 0 };
+	const claimToken = deps.ids.next();
+	const sessions = await deps.repository.claimVerifyingSessions(
+		claimToken,
+		2 * 60 * 1000,
+		10,
+	);
+	let ready = 0;
+	let rejected = 0;
+	for (const session of sessions) {
+		if (signal?.aborted) break;
+		let resolved = false;
+		const claim = createCompletionClaimGuard({
+			sessionId: session.id,
+			token: claimToken,
+			renew: deps.repository.renewCompletionClaim,
+			...(signal ? { outerSignal: signal } : {}),
+			logHeartbeatFailure: (error) => deps.logger.error(
+				{ error, sessionId: session.id },
+				'Upload validation claim heartbeat failed',
+			),
+		});
+		try {
+			await claim.assertOwned();
+			const storageKey = session.s3Key ?? session.storageKey;
+			if (!storageKey) {
+				throw new Error('VERIFYING session is missing its immutable storage key');
+			}
+			const object = await deps.storage.head(storageKey, { signal: claim.signal });
+			await claim.assertOwned();
+			if (!object) {
+				await commitTerminalCompletedObjectFailure(deps, {
+					sessionId: session.id,
+					storageKey,
+					reason: session.uploadKind === 'WEBGL'
+						? 'webgl-direct-validation-object-missing'
+						: 'game-direct-validation-object-missing',
+					completionClaimToken: claimToken,
+				});
+				resolved = true;
+				rejected += 1;
+				recordGameUploadEvent(deps, 'upload_session_rejected', {
+					projectId: session.projectId,
+					sessionId: session.id,
+					generation: session.multipartGeneration ?? 1,
+					result: 'object_missing',
+				});
+				continue;
+			}
+			await deps.finalizer.finalize({
+				id: session.id,
+				projectId: session.projectId,
+				uploadKind: session.uploadKind,
+				originalName: session.originalName,
+				totalBytes: session.totalBytes,
+				s3Key: storageKey,
+				completionClaimToken: claimToken,
+				transport: resolvedUploadTransport(session),
+				sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
+				sourceIdentity: session.sourceIdentity,
+				sourceIdentityBlockSizeBytes: session.sourceIdentityBlockSizeBytes,
+				sourceIdentityBlockManifest: session.sourceIdentityBlockManifest,
+			}, object, {
+				storageRequest: { signal: claim.signal },
+				assertClaimOwned: claim.assertOwned,
+			});
+			resolved = true;
+			ready += 1;
+			recordGameUploadEvent(deps, 'upload_session_ready', {
+				projectId: session.projectId,
+				sessionId: session.id,
+				generation: session.multipartGeneration ?? 1,
+				result: 'ready',
+			});
+		} catch (error) {
+			if (!claim.isLost() && isTerminalUploadFinalizationError(error)) {
+				const storageKey = session.s3Key ?? session.storageKey;
+				if (storageKey) {
+					await claim.assertOwned();
+					await commitTerminalCompletedObjectFailure(deps, {
+						sessionId: session.id,
+						storageKey,
+						reason: session.uploadKind === 'WEBGL'
+							? 'webgl-direct-validation-rejected'
+							: 'game-direct-validation-rejected',
+						completionClaimToken: claimToken,
+					});
+					resolved = true;
+					rejected += 1;
+					recordGameUploadEvent(deps, 'upload_session_rejected', {
+						projectId: session.projectId,
+						sessionId: session.id,
+						generation: session.multipartGeneration ?? 1,
+						result: 'validation_failed',
+					});
+					continue;
+				}
+			}
+			deps.logger.error(
+				{ error, sessionId: session.id },
+				'Upload validation failed transiently; leaving VERIFYING for retry',
+			);
+			recordGameUploadEvent(deps, 'validation_retry', {
+				projectId: session.projectId,
+				sessionId: session.id,
+				generation: session.multipartGeneration ?? 1,
+				result: 'retry_scheduled',
+			});
+		} finally {
+			claim.stop();
+			if (!resolved) {
+				try {
+					await deps.repository.releaseCompletionClaim(
+						session.id,
+						claimToken,
+						'validation-retry',
+					);
+				} catch (error) {
+					deps.logger.error(
+						{ error, sessionId: session.id },
+						'Failed to release upload validation claim',
+					);
+				}
+			}
+		}
+	}
+	return { claimed: sessions.length, ready, rejected };
 }
 
 async function abortUnusedMultipart(
@@ -365,9 +554,15 @@ export async function sweepExpiredPendingSessions(
 	for (const session of expired) {
 		if (signal?.aborted) break;
 		try {
-			const cancelled = await deps.repository.cancelSessionAndClearActive(session.id);
+			const cancelled = await deps.repository.expireSessionAndClearActive(session.id);
 			if (cancelled.count !== 1) continue;
 			swept++;
+			recordGameUploadEvent(deps, 'upload_session_expired', {
+				projectId: session.projectId,
+				sessionId: session.id,
+				generation: session.multipartGeneration ?? 1,
+				result: 'expired',
+			});
 			if (cancelled.durableAbort) {
 				deps.wakeMaintenance();
 				await deps.storage.abortMultipart(
@@ -428,20 +623,41 @@ export async function sweepUntrackedMultipartUploads(
 export async function listSessions(
 	deps: GameUploadServiceDependencies,
 	projectId: number,
-	user: { id: number; role: string },
+	user: { id: number; role: UserRole },
 ): Promise<GameUploadStatus[]> {
+	await deps.authorizeProjectWrite(user, projectId);
 	const isPrivileged = user.role === 'ADMIN' || user.role === 'OPERATOR';
 	const sessions = await deps.repository.findActiveSessionsForListing(
 		projectId,
 		isPrivileged ? {} : { userId: user.id },
 	);
 
-	return sessions.map((s) => {
-		const uploadedChunks = uploadedChunksForSession(s);
+	return Promise.all(sessions.map(async (s) => {
+		const transport = resolvedUploadTransport(s);
+		const directParts = transport === 'DIRECT_MULTIPART'
+			&& s.status === 'PENDING'
+			&& s.s3Key
+			&& s.s3UploadId
+			? validateStoredParts({
+				parts: await deps.storage.listParts(s.s3Key, s.s3UploadId),
+				totalBytes: s.totalBytes,
+				chunkSizeBytes: s.chunkSizeBytes,
+				totalChunks: s.totalChunks,
+				requireComplete: false,
+			})
+			: undefined;
+		const uploadedChunks = directParts
+			? directParts.map((part) => part.partNumber - 1)
+			: transport === 'DIRECT_MULTIPART'
+				&& ['COMPLETING', 'VERIFYING', 'COMPLETED'].includes(s.status)
+					? Array.from({ length: s.totalChunks }, (_, index) => index)
+					: uploadedChunksForSession(s);
 		return {
 			sessionId: s.id,
 			projectId: s.projectId,
 			uploadKind: s.uploadKind,
+			transport,
+			generation: s.multipartGeneration ?? 1,
 			originalName: s.originalName,
 			totalBytes: Number(s.totalBytes),
 			chunkSizeBytes: s.chunkSizeBytes,
@@ -455,6 +671,7 @@ export async function listSessions(
 			sourceIdentity: s.sourceIdentity ?? null,
 			sourceIdentityBlockSizeBytes: s.sourceIdentityBlockSizeBytes === 1048576
 				? s.sourceIdentityBlockSizeBytes : null,
+			...(directParts ? { parts: directParts } : {}),
 		};
-	});
+	}));
 }

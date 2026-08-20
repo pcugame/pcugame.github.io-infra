@@ -22,6 +22,8 @@ import { createGameUploadService } from './service.js';
 import { chunkUploadBodyLimitBytes } from './session-sizing.js';
 import { resolveRoleGameMaxBytes } from '../../../shared/upload-policy.js';
 import type { UploadLifecycleRuntime } from '../../upload-lifecycle/ports.js';
+import { assertUploadAllowed } from '../upload-guard.js';
+import { validateCompletedSourceIdentity } from './source-identity.js';
 
 type GameUploadConfig = Pick<
 	Env,
@@ -30,6 +32,8 @@ type GameUploadConfig = Pick<
 	| 'S3_BUCKET_PROTECTED'
 	| 'UPLOAD_CHUNK_SIZE_MB'
 	| 'UPLOAD_SESSION_TTL_MINUTES'
+	| 'UPLOAD_PART_URL_BATCH_MAX'
+	| 'UPLOAD_PART_URL_TTL_SEC'
 	| 'UPLOAD_USER_GAME_MAX_MB'
 	| 'UPLOAD_PRIVILEGED_GAME_MAX_MB'
 >;
@@ -111,6 +115,10 @@ function createWorkflowActivity() {
 export function createGameUploadProductionGraph(
 	deps: GameUploadProductionDependencies,
 ): GameUploadProductionGraph {
+	const presignUploadPart = deps.storage.presignUploadPart;
+	if (!presignUploadPart) {
+		throw new Error('Game upload direct transport requires an UploadPart signer');
+	}
 	const repository = deps.uploadLifecycle.gameUploads;
 	const deletion = deps.uploadLifecycle.orphanDeletions;
 	const activity = createWorkflowActivity();
@@ -127,6 +135,21 @@ export function createGameUploadProductionGraph(
 		storageRequest: multipartStorageRequest(undefined, activity.signal),
 	});
 	const finalizer = createCompletedUploadFinalizer({
+		validateSourceIdentity: (session, options) => validateCompletedSourceIdentity({
+			totalBytes: session.totalBytes,
+			sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
+			sourceIdentity: session.sourceIdentity,
+			sourceIdentityBlockSizeBytes: session.sourceIdentityBlockSizeBytes,
+			sourceIdentityBlockManifest: session.sourceIdentityBlockManifest,
+			readRange: (start, end) => deps.storage.readRange(
+				deps.config.S3_BUCKET_PROTECTED,
+				session.s3Key,
+				start,
+				end,
+				multipartStorageRequest(options.storageRequest, activity.signal),
+			),
+			assertClaimOwned: options.assertClaimOwned,
+		}),
 		readHeader: (key, request) => deps.storage.readRange(
 			deps.config.S3_BUCKET_PROTECTED,
 			key,
@@ -198,8 +221,35 @@ export function createGameUploadProductionGraph(
 		webglUrl: (projectId) => webglUrl(deps.config.API_PUBLIC_URL, projectId),
 		logError: (context, message) => deps.logger.error(context, message),
 	});
-	const rawService = createGameUploadService({
+	let rawService: ReturnType<typeof createGameUploadService>;
+	let validationPending = false;
+	let validationScheduled = false;
+	function wakeValidationWorker(): void {
+		validationPending = true;
+		if (validationScheduled) return;
+		validationScheduled = true;
+		queueMicrotask(() => {
+			validationScheduled = false;
+			if (!validationPending) return;
+			validationPending = false;
+			void activity.run(() => rawService.sweepVerifyingSessions()).catch((error) => {
+				deps.logger.error({ error }, 'Context-owned upload validation worker failed');
+			});
+		});
+	}
+	rawService = createGameUploadService({
 		repository,
+		partSigner: {
+			presignUploadPart: (key, uploadId, partNumber, expiresInSeconds) => (
+				presignUploadPart(
+					deps.config.S3_BUCKET_PROTECTED,
+					key,
+					uploadId,
+					partNumber,
+					expiresInSeconds,
+				)
+			),
+		},
 		storage: {
 			createMultipart: (key, request) => deps.storage.createMultipart(
 				deps.config.S3_BUCKET_PROTECTED,
@@ -255,9 +305,16 @@ export function createGameUploadProductionGraph(
 		clock: deps.clock,
 		ids: deps.ids,
 		lifecycle: deps.lifecycle,
+		authorizeProjectWrite: async (actor, projectId) => {
+			const project = await deps.access.loadProjectWithAccess(actor, projectId);
+			const exhibition = await repository.findExhibitionById(project.exhibitionId);
+			assertUploadAllowed(exhibition, project.exhibitionId, actor.role);
+		},
 		config: {
 			uploadChunkSizeMb: deps.config.UPLOAD_CHUNK_SIZE_MB,
 			uploadSessionTtlMinutes: deps.config.UPLOAD_SESSION_TTL_MINUTES,
+			uploadPartUrlBatchMax: deps.config.UPLOAD_PART_URL_BATCH_MAX,
+			uploadPartUrlTtlSeconds: deps.config.UPLOAD_PART_URL_TTL_SEC,
 		},
 		roleGameMaxBytes: (role: UserRole) => resolveRoleGameMaxBytes(deps.config, role),
 		storageKey: (uploadKind, projectId) => {
@@ -274,6 +331,7 @@ export function createGameUploadProductionGraph(
 		),
 		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
 		wakeMaintenance: deps.uploadLifecycle.wakeMaintenance,
+		wakeValidationWorker,
 		recordUntrackedMultipartCleanupFailure:
 			deps.uploadLifecycle.metrics.recordUntrackedMultipartCleanupFailure,
 		recordPostCommitCleanupFailure:
@@ -283,12 +341,19 @@ export function createGameUploadProductionGraph(
 	const service: GameUploadService = {
 		createSession: (...args) => activity.run(() => rawService.createSession(...args)),
 		uploadChunk: (...args) => activity.run(() => rawService.uploadChunk(...args)),
+		authorizeLegacyChunkUpload: (...args) => activity.run(
+			() => rawService.authorizeLegacyChunkUpload(...args),
+		),
+		signPartUrls: (...args) => activity.run(() => rawService.signPartUrls(...args)),
 		completeSession: (...args) => activity.run(() => rawService.completeSession(...args)),
 		cancelSession: (...args) => activity.run(() => rawService.cancelSession(...args)),
 		getSessionStatus: (...args) => activity.run(() => rawService.getSessionStatus(...args)),
 		listSessions: (...args) => activity.run(() => rawService.listSessions(...args)),
 		sweepStaleCompletingSessions: (signal?: AbortSignal) => activity.run(
 			() => rawService.sweepStaleCompletingSessions(signal),
+		),
+		sweepVerifyingSessions: (signal?: AbortSignal) => activity.run(
+			() => rawService.sweepVerifyingSessions(signal),
 		),
 		sweepExpiredPendingSessions: (signal?: AbortSignal) => activity.run(
 			() => rawService.sweepExpiredPendingSessions(signal),
@@ -316,6 +381,7 @@ export function createGameUploadProductionGraph(
 			if (!recoveryPromise) {
 				const maintenanceWork: Promise<unknown>[] = [
 					service.sweepStaleCompletingSessions(signal),
+					service.sweepVerifyingSessions(signal),
 					service.sweepExpiredPendingSessions(signal),
 					service.sweepExpiredPartClaims(signal),
 					service.sweepUntrackedMultipartUploads(signal),

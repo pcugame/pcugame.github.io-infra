@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const envSchema = z
+export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: z.coerce.number().int().positive().default(4000),
@@ -80,14 +80,24 @@ const envSchema = z
     UPLOAD_CHUNK_SIZE_MB: z.coerce.number().int().min(5).default(10),        // S3 multipart minimum
     // UPLOAD_STAGING_ROOT removed — chunked uploads now use S3 multipart
     UPLOAD_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(1440), // 24 hours
+	// Browser direct-multipart capabilities. These are deliberately bounded;
+	// individual services still enforce their session-specific part range.
+	UPLOAD_PART_URL_TTL_SEC: z.coerce.number().int().min(1).max(900).default(300),
+	UPLOAD_PART_URL_BATCH_MAX: z.coerce.number().int().min(8).max(32).default(16),
 
     // ── S3-compatible object storage (Garage) ─────────────
-    S3_ENDPOINT: z.string().url(),
+	// S3_ENDPOINT is a deprecated rollout alias. Object I/O always uses the
+	// internal endpoint; browser presigned URLs are signed against the public
+	// endpoint rather than having an already-signed URL string rewritten.
+	S3_INTERNAL_ENDPOINT: z.string().url().optional(),
+	S3_PUBLIC_SIGNING_ENDPOINT: z.string().url().optional(),
+	S3_ENDPOINT: z.string().url().optional(),
     S3_REGION: z.string().default('garage'),
     S3_ACCESS_KEY_ID: z.string().min(1),
     S3_SECRET_ACCESS_KEY: z.string().min(1),
     S3_BUCKET_PUBLIC: z.string().default('pcu-public'),
     S3_BUCKET_PROTECTED: z.string().default('pcu-protected'),
+	S3_BUCKET_STAGING: z.string().default('pcu-staging'),
     S3_FORCE_PATH_STYLE: z
       .enum(['true', 'false'])
       .default('true')
@@ -98,6 +108,43 @@ const envSchema = z
     // Mount path where exported asset files are written (e.g. /mnt/nas)
     NAS_EXPORT_PATH: z.string().optional(),
   })
+	.superRefine((value, ctx) => {
+		if (!value.S3_INTERNAL_ENDPOINT && !value.S3_ENDPOINT) {
+			ctx.addIssue({
+				code: 'custom',
+				path: ['S3_INTERNAL_ENDPOINT'],
+				message: 'S3_INTERNAL_ENDPOINT or deprecated S3_ENDPOINT is required',
+			});
+		}
+		// A newly configured internal endpoint must never quietly become the
+		// browser hostname. Operators must explicitly provide the public signer
+		// endpoint, or deliberately retain the legacy alias during migration.
+		if (value.S3_INTERNAL_ENDPOINT
+			&& !value.S3_PUBLIC_SIGNING_ENDPOINT
+			&& !value.S3_ENDPOINT) {
+			ctx.addIssue({
+				code: 'custom',
+				path: ['S3_PUBLIC_SIGNING_ENDPOINT'],
+				message: 'S3_PUBLIC_SIGNING_ENDPOINT or deprecated S3_ENDPOINT is required',
+			});
+		}
+	})
+	.transform((value) => {
+		const internalEndpoint = value.S3_INTERNAL_ENDPOINT ?? value.S3_ENDPOINT;
+		if (!internalEndpoint) throw new Error('S3 endpoint validation invariant failed');
+		const publicSigningEndpoint = value.S3_PUBLIC_SIGNING_ENDPOINT ?? value.S3_ENDPOINT;
+		if (!publicSigningEndpoint) {
+			throw new Error('S3 public signing endpoint validation invariant failed');
+		}
+		return {
+			...value,
+			S3_INTERNAL_ENDPOINT: internalEndpoint,
+			S3_PUBLIC_SIGNING_ENDPOINT: publicSigningEndpoint,
+			// Keep the normalized legacy property temporarily for scripts and
+			// out-of-process workers that have not yet migrated their input names.
+			S3_ENDPOINT: value.S3_ENDPOINT ?? internalEndpoint,
+		};
+	})
 ;
 
 export type Env = z.infer<typeof envSchema>;

@@ -32,6 +32,8 @@ import {
 	ExportStatusResponseSchema,
 	GameUploadChunkResponseSchema,
 	GameUploadCompleteResponseSchema,
+	GameUploadCompletionResponseSchema,
+	GameUploadPartUrlsResponseSchema,
 	GameUploadSessionListResponseSchema,
 	GameUploadSessionSchema,
 	GameUploadStatusSchema,
@@ -110,6 +112,25 @@ describe('response runtime schemas', () => {
 		expect(runtimeSchemasMatchTransportTypes.every(Boolean)).toBe(true);
 	});
 
+	it('keeps old upload responses valid while accepting direct transport fields', () => {
+		const legacyShape = {
+			sessionId: 'session-1',
+			chunkSizeBytes: 5 * 1024 * 1024,
+			totalChunks: 1,
+			expiresAt: '2026-08-20T01:00:00.000Z',
+			uploadKind: 'GAME' as const,
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+			sourceIdentity: 'a'.repeat(64),
+			sourceIdentityBlockSizeBytes: 1048576 as const,
+		};
+		expect(GameUploadSessionSchema.parse(legacyShape)).not.toHaveProperty('transport');
+		expect(GameUploadSessionSchema.parse({
+			...legacyShape,
+			transport: 'DIRECT_MULTIPART',
+			generation: 1,
+		})).toMatchObject({ transport: 'DIRECT_MULTIPART', generation: 1 });
+	});
+
 	it('accepts representative auth, public, admin, and upload responses', () => {
 		expect(GoogleAuthResponseSchema.parse({
 			user: {
@@ -158,6 +179,23 @@ describe('response runtime schemas', () => {
 			storageKey: 'games/1/game.zip',
 			sizeBytes: 1,
 		})).toMatchObject({ status: 'COMPLETED' });
+
+		expect(GameUploadPartUrlsResponseSchema.parse({
+			generation: 1,
+			expiresAt: '2026-08-20T00:05:00.000Z',
+			parts: [{
+				partNumber: 1,
+				url: 'https://garage.example.test/object?signature=secret',
+				requiredHeaders: { 'content-type': 'application/octet-stream' },
+			}],
+		})).toMatchObject({ generation: 1, parts: [{ partNumber: 1 }] });
+
+		expect(GameUploadCompletionResponseSchema.parse({
+			status: 'VERIFYING',
+			sessionId: 'session-1',
+			generation: 1,
+			sizeBytes: 1,
+		})).toMatchObject({ status: 'VERIFYING' });
 
 		expect(PublicProjectDetailResponseSchema.parse({
 			id: 1,
@@ -277,7 +315,7 @@ describe('response runtime schemas', () => {
 				{
 					id: 11,
 					kind: 'VIDEO',
-					url: 'https://api.example.test/api/assets/protected/video.mp4',
+					url: 'https://api.example.test/api/assets/11/download?variant=playback',
 					originalName: 'video.mp4',
 					size: 456,
 				},

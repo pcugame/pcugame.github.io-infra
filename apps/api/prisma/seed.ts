@@ -184,8 +184,10 @@ function requiredEnv(name: string): string {
 }
 
 function integrationS3Client(): S3Client {
-  return new S3Client({
-    endpoint: requiredEnv('S3_ENDPOINT'),
+	return new S3Client({
+		// Seed writes are server-side object I/O. Keep the deprecated endpoint
+		// alias only for existing integration invocations.
+		endpoint: process.env.S3_INTERNAL_ENDPOINT || requiredEnv('S3_ENDPOINT'),
     region: process.env.S3_REGION || 'garage',
     credentials: {
       accessKeyId: requiredEnv('S3_ACCESS_KEY_ID'),

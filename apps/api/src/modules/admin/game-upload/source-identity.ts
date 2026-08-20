@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { badRequest, conflict } from '../../../shared/errors.js';
+import { AppError, badRequest, conflict } from '../../../shared/errors.js';
 
 export const SOURCE_IDENTITY_ALGORITHM = 'SHA256_BLOCK_MANIFEST_V1' as const;
 export const SOURCE_IDENTITY_BLOCK_SIZE_BYTES = 1_048_576 as const;
@@ -109,4 +109,60 @@ export function assertChunkMatchesManifest(input: {
 		}
 	}
 	return createHash('sha256').update(buffer).digest('hex');
+}
+
+/**
+ * Recomputes a completed direct-upload identity one fixed-size block at a
+ * time. The largest resident object buffer is 1 MiB; the claim is checked on
+ * both sides of every internal storage read.
+ */
+export async function validateCompletedSourceIdentity(input: {
+	totalBytes: bigint;
+	sourceIdentityAlgorithm?: string | null;
+	sourceIdentity?: string | null;
+	sourceIdentityBlockSizeBytes?: number | null;
+	sourceIdentityBlockManifest?: Uint8Array | null;
+	readRange(start: number, end: number): Promise<Buffer>;
+	assertClaimOwned?: () => Promise<void>;
+}): Promise<void> {
+	assertSessionHasSourceIdentity(input);
+	const totalBytes = Number(input.totalBytes);
+	if (!Number.isSafeInteger(totalBytes) || totalBytes <= 0) {
+		throw new Error('Persisted upload size is outside the safe integer range');
+	}
+	const blockCount = Math.ceil(totalBytes / SOURCE_IDENTITY_BLOCK_SIZE_BYTES);
+	if (input.sourceIdentityBlockManifest.length !== blockCount * 32) {
+		throw new Error('Persisted source identity manifest length is invalid');
+	}
+	const manifest = Buffer.from(input.sourceIdentityBlockManifest);
+	const actualDigests: string[] = [];
+	for (let block = 0; block < blockCount; block += 1) {
+		await input.assertClaimOwned?.();
+		const start = block * SOURCE_IDENTITY_BLOCK_SIZE_BYTES;
+		const end = Math.min(totalBytes, start + SOURCE_IDENTITY_BLOCK_SIZE_BYTES) - 1;
+		const bytes = await input.readRange(start, end);
+		await input.assertClaimOwned?.();
+		const expectedLength = end - start + 1;
+		if (bytes.length !== expectedLength) {
+			throw new AppError(
+				500,
+				`Completed source block ${block} size mismatch`,
+				'SIZE_MISMATCH',
+			);
+		}
+		const digest = createHash('sha256').update(bytes).digest();
+		const expected = manifest.subarray(block * 32, block * 32 + 32);
+		if (!digest.equals(expected)) {
+			throw badRequest('Completed object does not match the upload source identity');
+		}
+		actualDigests.push(digest.toString('hex'));
+	}
+	const actualRoot = sourceIdentityRoot(
+		totalBytes,
+		SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
+		actualDigests,
+	);
+	if (actualRoot !== input.sourceIdentity) {
+		throw badRequest('Completed object source identity root mismatch');
+	}
 }

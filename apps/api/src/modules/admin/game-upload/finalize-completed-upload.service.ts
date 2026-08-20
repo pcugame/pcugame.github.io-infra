@@ -1,4 +1,4 @@
-import type { GameUploadCompleteResponse, UploadKind } from '@pcu/contracts';
+import type { GameUploadCompleteResponse, GameUploadTransport, UploadKind } from '@pcu/contracts';
 import type { StorageRequestOptions } from '../../../application/ports.js';
 import { AppError, badRequest } from '../../../shared/errors.js';
 import { detectFileType, isAllowedGameType } from '../../../shared/file-signature.js';
@@ -12,6 +12,11 @@ export interface CompletedUploadSession {
 	totalBytes: bigint;
 	s3Key: string;
 	completionClaimToken: string;
+	transport?: GameUploadTransport;
+	sourceIdentityAlgorithm?: string | null;
+	sourceIdentity?: string | null;
+	sourceIdentityBlockSizeBytes?: number | null;
+	sourceIdentityBlockManifest?: Uint8Array | null;
 }
 
 export interface CompletedUploadFinalizationOptions {
@@ -29,6 +34,10 @@ export function isTerminalUploadFinalizationError(error: unknown): boolean {
 }
 
 export function createCompletedUploadFinalizer(deps: {
+	validateSourceIdentity?(
+		session: CompletedUploadSession,
+		options: CompletedUploadFinalizationOptions,
+	): Promise<void>;
 	readHeader(key: string, request?: StorageRequestOptions): Promise<Buffer>;
 	validateGameArchive(key: string, size: number, request?: StorageRequestOptions): Promise<void>;
 	deployWebgl(
@@ -66,6 +75,13 @@ export function createCompletedUploadFinalizer(deps: {
 					`Final file size mismatch: expected ${session.totalBytes}, got ${object.size}`,
 					'SIZE_MISMATCH',
 				);
+			}
+			if (session.transport === 'DIRECT_MULTIPART') {
+				if (!deps.validateSourceIdentity) {
+					throw new Error('Direct upload finalizer is missing source identity validation');
+				}
+				await deps.validateSourceIdentity(session, options);
+				await options.assertClaimOwned?.();
 			}
 			const detected = detectFileType(await deps.readHeader(
 				session.s3Key,

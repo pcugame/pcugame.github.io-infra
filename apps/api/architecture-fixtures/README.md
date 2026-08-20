@@ -27,3 +27,18 @@ dependency-cruiser rule names. Verify both paths: run the self-test normally,
 then temporarily change one real `allowed/` import to a nonexistent module and
 confirm that the self-test fails specifically with its unresolved-dependency
 diagnostic. Restore the import and rerun the self-test before committing.
+
+The object data-plane fixtures intentionally exercise structural bypasses rather
+than method-name search alone: a direct route annotated with a readable body, a
+direct service calling UploadPart, a direct completion function colocated in a
+generically named completion service, an object read through a delivery dependency,
+a feature-local AWS SDK import, a Node HTTP asset proxy, an over-privileged signer
+port, an unrelated multipart completer, and signed capability data passed to a
+logger. Production retains an exact debt allowlist for the two pre-existing public
+image/WebGL relay services. Do not expand that allowlist; remove each entry when P1
+moves the corresponding route to Garage/public origin.
+
+The legacy `API_CHUNK_PROXY` UploadPart relay has its own exact file-and-function
+allowlist for `upload-chunk.service.ts#uploadChunk`. Composition may adapt that
+port, but no other game-upload service function may invoke UploadPart. Remove the
+allowlist entry together with the legacy chunk route during the P3 contract step.

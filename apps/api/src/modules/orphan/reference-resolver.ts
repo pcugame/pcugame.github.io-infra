@@ -193,8 +193,22 @@ export async function collectObjectReferences(
 			select: { id: true, storageKey: true },
 		}),
 		client.gameUploadSession.findMany({
-			where: { status: { in: ['PENDING', 'COMPLETING'] }, s3Key: { not: null } },
-			select: { id: true, s3Key: true, uploadKind: true, projectId: true },
+			// A direct multipart completion has already produced an immutable
+			// protected object when it enters VERIFYING.  It is not an Asset yet,
+			// so this durable session pointer is the only reference that can fence
+			// an orphan reaper while validation/retry is in progress.  storageKey is
+			// the completed-object pointer; s3Key is retained as its recovery alias.
+			where: {
+				status: { in: ['PENDING', 'COMPLETING', 'VERIFYING'] },
+				OR: [{ s3Key: { not: null } }, { storageKey: { not: null } }],
+			},
+			select: {
+				id: true,
+				s3Key: true,
+				storageKey: true,
+				uploadKind: true,
+				projectId: true,
+			},
 		}),
 		client.uploadIntent.findMany({
 			where: { state: { in: ['PREPARED', 'UPLOADED'] } },
@@ -321,30 +335,43 @@ export async function collectObjectReferences(
 		});
 	}
 	for (const session of activeSessions) {
-		if (!session.s3Key) continue;
-		references.push({
-			bucket: buckets.protectedBucket,
-			targetKind: 'EXACT',
-			key: session.s3Key,
-			source: `upload-session:${session.id}:active`,
-		});
-		if (session.uploadKind !== 'WEBGL') continue;
-		const parsed = parseWebglSourceKey(session.projectId, session.s3Key);
-		if (!parsed) {
-			unsafeBuckets.add(buckets.protectedBucket);
-			unsafeBuckets.add(buckets.publicBucket);
-			logger.error(
-				{ sessionId: session.id, projectId: session.projectId, storageKey: session.s3Key },
-				'Malformed active WebGL upload encountered; WebGL bucket deletion is disabled',
-			);
-			continue;
+		// Normally direct VERIFYING storageKey and s3Key are the same immutable
+		// generation. Keep both aliases live if a partially recovered row ever
+		// contains different values: deleting either is worse than temporarily
+		// retaining an extra protected object.
+		const sourceKeys = [...new Set([session.storageKey, session.s3Key].filter(
+			(key): key is string => typeof key === 'string' && key.length > 0,
+		))];
+		for (const sourceKey of sourceKeys) {
+			references.push({
+				bucket: buckets.protectedBucket,
+				targetKind: 'EXACT',
+				key: sourceKey,
+				source: `upload-session:${session.id}:active-source`,
+			});
 		}
-		references.push({
-			bucket: buckets.publicBucket,
-			targetKind: 'PREFIX',
-			key: parsed.sitePrefix,
-			source: `upload-session:${session.id}:webgl-site`,
-		});
+		if (session.uploadKind !== 'WEBGL') continue;
+		for (const sourceKey of sourceKeys) {
+			const parsed = parseWebglSourceKey(session.projectId, sourceKey);
+			if (!parsed) {
+				unsafeBuckets.add(buckets.protectedBucket);
+				unsafeBuckets.add(buckets.publicBucket);
+				logger.error(
+					{ sessionId: session.id, projectId: session.projectId, storageKey: sourceKey },
+					'Malformed active WebGL upload encountered; WebGL bucket deletion is disabled',
+				);
+				continue;
+			}
+			// This is a deletion fence for a possible already-written generation,
+			// not a public READY pointer. Project.webglEntryKey remains the only
+			// public deployment authority.
+			references.push({
+				bucket: buckets.publicBucket,
+				targetKind: 'PREFIX',
+				key: parsed.sitePrefix,
+				source: `upload-session:${session.id}:webgl-site`,
+			});
+		}
 	}
 	for (const intent of intents) {
 		references.push({

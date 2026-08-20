@@ -14,8 +14,9 @@ export { assertGameUploadSessionWritable } from './session-policy.js';
 export { chunkUploadBodyLimitBytes, resolveChunkSizeBytes } from './session-sizing.js';
 
 import { createSession } from './create-session.service.js';
-import { uploadChunk } from './upload-chunk.service.js';
+import { authorizeLegacyChunkUpload, uploadChunk } from './upload-chunk.service.js';
 import { completeSession } from './complete-session.service.js';
+import { signPartUrls } from './sign-part-urls.service.js';
 import {
 	cancelSession,
 	getSessionStatus,
@@ -24,17 +25,58 @@ import {
 	sweepExpiredPartClaims,
 	sweepStaleCompletingSessions,
 	sweepUntrackedMultipartUploads,
+	sweepVerifyingSessions,
 } from './session-maintenance.service.js';
-import type { GameUploadServiceDependencies } from './ports.js';
+import type {
+	GameUploadPartSigningDependencies,
+	GameUploadServiceDependencies,
+} from './ports.js';
+
+/** Isolate UploadPart signing from every multipart mutation and byte port. */
+export function createGameUploadPartSigningDependencies(
+	deps: GameUploadServiceDependencies,
+): GameUploadPartSigningDependencies {
+	return {
+		repository: {
+			findSessionById: (id) => deps.repository.findSessionById(id),
+			isSessionActive: (sessionId) => deps.repository.isSessionActive(sessionId),
+		},
+		partSigner: {
+			presignUploadPart: (key, uploadId, partNumber, expiresInSeconds) => (
+				deps.partSigner.presignUploadPart(key, uploadId, partNumber, expiresInSeconds)
+			),
+		},
+		clock: { now: () => deps.clock.now() },
+		authorizeProjectWrite: (actor, projectId) => (
+			deps.authorizeProjectWrite(actor, projectId)
+		),
+		config: {
+			uploadPartUrlBatchMax: deps.config.uploadPartUrlBatchMax,
+			uploadPartUrlTtlSeconds: deps.config.uploadPartUrlTtlSeconds,
+		},
+		logger: {
+			info: deps.logger.info
+				? (context, message) => deps.logger.info?.(context, message)
+				: undefined,
+		},
+	};
+}
 
 /** Build the application use-cases from explicit ports. */
 export function createGameUploadService(deps: GameUploadServiceDependencies) {
+	const partSigningDeps = createGameUploadPartSigningDependencies(deps);
 	return {
 		createSession: (...args: Parameters<typeof createSession> extends [unknown, ...infer Rest] ? Rest : never) => (
 			createSession(deps, ...args)
 		),
 		uploadChunk: (...args: Parameters<typeof uploadChunk> extends [unknown, ...infer Rest] ? Rest : never) => (
 			uploadChunk(deps, ...args)
+		),
+		authorizeLegacyChunkUpload: (...args: Parameters<typeof authorizeLegacyChunkUpload> extends [unknown, ...infer Rest] ? Rest : never) => (
+			authorizeLegacyChunkUpload(deps, ...args)
+		),
+		signPartUrls: (...args: Parameters<typeof signPartUrls> extends [unknown, ...infer Rest] ? Rest : never) => (
+			signPartUrls(partSigningDeps, ...args)
 		),
 		completeSession: (...args: Parameters<typeof completeSession> extends [unknown, ...infer Rest] ? Rest : never) => (
 			completeSession(deps, ...args)
@@ -50,6 +92,9 @@ export function createGameUploadService(deps: GameUploadServiceDependencies) {
 		),
 		sweepStaleCompletingSessions: (signal?: AbortSignal) => (
 			sweepStaleCompletingSessions(deps, signal)
+		),
+		sweepVerifyingSessions: (signal?: AbortSignal) => (
+			sweepVerifyingSessions(deps, signal)
 		),
 		sweepExpiredPendingSessions: (signal?: AbortSignal) => (
 			sweepExpiredPendingSessions(deps, signal)

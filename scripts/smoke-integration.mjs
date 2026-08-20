@@ -79,22 +79,55 @@ async function fetchJson(url, options) {
   return { res, body };
 }
 
-async function fetchIntegrationS3Headers(url) {
+function resolveIntegrationS3Target(url) {
   const target = new URL(url);
   const signedHost = target.host;
   const apiHostname = new URL(apiBase).hostname;
-  if (target.hostname === 'garage' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1')) {
+  // The API deliberately signs the browser-visible localhost endpoint while
+  // this smoke client runs in a sibling container.  Connect to Garage over the
+  // Compose network but preserve the signed Host header byte-for-byte.
+  if (
+    (target.hostname === 'localhost' || target.hostname === '127.0.0.1')
+    && apiHostname !== 'localhost'
+    && apiHostname !== '127.0.0.1'
+  ) {
+    target.hostname = 'garage';
+  } else if (target.hostname === 'garage' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1')) {
     target.hostname = '127.0.0.1';
   }
 
+  return { target, signedHost };
+}
+
+async function requestIntegrationS3(url, {
+  method = 'GET',
+  headers = {},
+  body,
+} = {}) {
+  const { target, signedHost } = resolveIntegrationS3Target(url);
+
   return new Promise((resolve, reject) => {
-    const request = httpRequest(target, { headers: { Host: signedHost } }, (response) => {
-      resolve({ status: response.statusCode ?? 0, headers: response.headers });
-      response.destroy();
+    const request = httpRequest(target, {
+      method,
+      headers: { ...headers, Host: signedHost },
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      response.on('end', () => {
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          body: Buffer.concat(chunks),
+        });
+      });
     });
     request.on('error', reject);
-    request.end();
+    request.end(body);
   });
+}
+
+async function fetchIntegrationS3Headers(url) {
+  return requestIntegrationS3(url);
 }
 
 function integrationApiUrl(url) {
@@ -290,6 +323,8 @@ const wasmBr = brotliCompressSync(wasmBody);
 const dataGz = gzipSync(Buffer.from('integration Unity data'));
 const syntheticWebglZip = makeStoredZip([
   ['UnityBuild/index.html', '<!doctype html><meta charset="utf-8"><title>Integration WebGL</title>'],
+  ['UnityBuild/Build/integration.loader.js', 'createUnityInstance()'],
+  ['UnityBuild/Build/integration.framework.js', 'var unityFramework = true;'],
   ['UnityBuild/Build/integration.wasm.br', wasmBr],
   ['UnityBuild/Build/integration.data.gz', dataGz],
   ['UnityBuild/TemplateData/style.css', 'html,body{margin:0;background:#000}'],
@@ -321,11 +356,118 @@ async function createUploadSession(originalName, body, uploadKind) {
   return response?.data;
 }
 
+function assertDirectMultipartSession(session, uploadKind) {
+  if (session?.uploadKind !== uploadKind
+    || session.transport !== 'DIRECT_MULTIPART'
+    || !Number.isSafeInteger(session.generation)
+    || session.generation < 1
+    || !Number.isSafeInteger(session.totalChunks)
+    || session.totalChunks < 1
+    || !Number.isSafeInteger(session.chunkSizeBytes)
+    || session.chunkSizeBytes < 1) {
+    throw new Error(`${uploadKind} session did not negotiate DIRECT_MULTIPART`);
+  }
+}
+
+/**
+ * Browser-equivalent direct UploadPart transport.  This intentionally has no
+ * API chunk route: changing a direct session into an API byte relay would
+ * invalidate the control-plane boundary this smoke test protects.
+ */
+async function uploadDirectMultipart(session, bytes) {
+  assertDirectMultipartSession(session, session.uploadKind);
+  const parts = [];
+  const partNumbers = Array.from({ length: session.totalChunks }, (_, index) => index + 1);
+
+  for (let offset = 0; offset < partNumbers.length; offset += 8) {
+    const requestedPartNumbers = partNumbers.slice(offset, offset + 8);
+    const { body: signedResponse } = await fetchJson(
+      `${apiBase}/api/admin/game-upload-sessions/${session.sessionId}/part-urls`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: cookie,
+          Origin: origin,
+        },
+        body: JSON.stringify({ generation: session.generation, partNumbers: requestedPartNumbers }),
+      },
+    );
+    const signed = signedResponse?.data;
+    if (signed?.generation !== session.generation || !Array.isArray(signed.parts)) {
+      throw new Error('part-urls response did not preserve the direct session generation');
+    }
+    const capabilities = new Map(signed.parts.map((part) => [part.partNumber, part]));
+    if (capabilities.size !== requestedPartNumbers.length
+      || requestedPartNumbers.some((partNumber) => !capabilities.has(partNumber))) {
+      throw new Error('part-urls response did not contain exactly the requested parts');
+    }
+
+    for (const partNumber of requestedPartNumbers) {
+      const capability = capabilities.get(partNumber);
+      const start = (partNumber - 1) * session.chunkSizeBytes;
+      const partBody = bytes.subarray(start, Math.min(start + session.chunkSizeBytes, bytes.length));
+      const put = await requestIntegrationS3(capability.url, {
+        method: 'PUT',
+        headers: {
+          Origin: origin,
+          ...capability.requiredHeaders,
+        },
+        body: partBody,
+      });
+      const etag = put.headers.etag;
+      if (put.status !== 200 || typeof etag !== 'string' || !etag) {
+        throw new Error(`direct UploadPart ${partNumber} failed (${put.status}; ETag=${String(etag)})`);
+      }
+      parts.push({ partNumber, etag, sizeBytes: partBody.length });
+    }
+  }
+
+  return { generation: session.generation, parts };
+}
+
+async function completeDirectSession(session, manifest) {
+  const completionUrl = `${apiBase}/api/admin/game-upload-sessions/${session.sessionId}/complete`;
+  const response = await fetch(completionUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Cookie: cookie,
+      Origin: origin,
+    },
+    body: JSON.stringify(manifest),
+  });
+  const text = await response.text();
+  let body;
+  try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  return { response, body };
+}
+
+async function waitForDirectCompletion(session, manifest) {
+  return waitFor(`${session.uploadKind} validation`, async () => {
+    const { body: statusResponse } = await fetchJson(
+      `${apiBase}/api/admin/game-upload-sessions/${session.sessionId}`,
+      { headers: { Cookie: cookie, Origin: origin } },
+    );
+    const status = statusResponse?.data;
+    if (status?.status === 'COMPLETED') {
+      const completed = await completeDirectSession(session, manifest);
+      if (completed.response.status !== 200 || completed.body?.data?.status !== 'COMPLETED') {
+        throw new Error(`completed direct session did not return its idempotent result (${completed.response.status})`);
+      }
+      return completed.body.data;
+    }
+    if (['REJECTED', 'FAILED', 'CANCELLED', 'EXPIRED'].includes(status?.status)) {
+      throw new Error(`direct ${session.uploadKind} session reached terminal ${status.status}`);
+    }
+    throw new Error(`direct ${session.uploadKind} session is still ${status?.status ?? 'unknown'}`);
+  });
+}
+
 const gameSession = await createUploadSession('game-probe.zip', gameProbeZip, 'GAME');
 const webglSession = await createUploadSession('webgl.zip', webglZip, 'WEBGL');
-if (gameSession?.uploadKind !== 'GAME' || webglSession?.uploadKind !== 'WEBGL') {
-  throw new Error('upload sessions did not preserve independent upload kinds');
-}
+assertDirectMultipartSession(gameSession, 'GAME');
+assertDirectMultipartSession(webglSession, 'WEBGL');
 
 const { body: activeSessions } = await fetchJson(
 	`${apiBase}/api/admin/projects/${projectId}/game-upload-sessions`,
@@ -337,61 +479,47 @@ if (!activeKinds.has('GAME') || !activeKinds.has('WEBGL')) {
 }
 console.log('ok: GAME and WEBGL upload sessions coexist independently');
 
-const missingChunkComplete = await fetch(
-  `${apiBase}/api/admin/game-upload-sessions/${gameSession.sessionId}/complete`,
-  { method: 'POST', headers: { Cookie: cookie, Origin: origin } },
-);
-if (missingChunkComplete.status !== 400) {
-  throw new Error(`missing-chunk completion returned ${missingChunkComplete.status}`);
+const missingPartComplete = await completeDirectSession(gameSession, {
+  generation: gameSession.generation,
+  parts: [{ partNumber: 1, etag: '"not-uploaded"', sizeBytes: gameProbeZip.length }],
+});
+if (missingPartComplete.response.status !== 409 || missingPartComplete.body?.error?.code !== 'CONFLICT') {
+  throw new Error(
+    `missing-part direct completion returned ${missingPartComplete.response.status} (${JSON.stringify(missingPartComplete.body)})`,
+  );
 }
-const missingChunkBody = await missingChunkComplete.json();
-if (missingChunkBody?.error?.code !== 'ERROR') {
-  throw new Error('missing-chunk completion did not preserve the existing ERROR envelope');
-}
-console.log('ok: completion rejects sessions with missing chunks');
+console.log('ok: direct completion rejects a manifest whose Garage parts are missing');
 
 await fetchJson(`${apiBase}/api/admin/game-upload-sessions/${gameSession.sessionId}`, {
   method: 'DELETE',
   headers: { Cookie: cookie, Origin: origin },
 });
 
-const webglChunkUrl = new URL(
-  `/api/admin/game-upload-sessions/${webglSession.sessionId}/chunks/0`,
-  apiBase,
-);
-webglChunkUrl.searchParams.set('sourceIdentityAlgorithm', webglSession.sourceIdentityAlgorithm);
-webglChunkUrl.searchParams.set('sourceIdentity', webglSession.sourceIdentity);
-await fetchJson(
-  webglChunkUrl.toString(),
-  {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      Cookie: cookie,
-      Origin: origin,
-    },
-    body: webglZip,
-  },
-);
-const completionUrl = `${apiBase}/api/admin/game-upload-sessions/${webglSession.sessionId}/complete`;
-const completionOptions = { method: 'POST', headers: { Cookie: cookie, Origin: origin } };
-const completionResponses = await Promise.all([
-  fetch(completionUrl, completionOptions),
-  fetch(completionUrl, completionOptions),
+const webglManifest = await uploadDirectMultipart(webglSession, webglZip);
+const concurrentCompletions = await Promise.all([
+  completeDirectSession(webglSession, webglManifest),
+  completeDirectSession(webglSession, webglManifest),
 ]);
-const completionStatuses = completionResponses.map((response) => response.status).sort((a, b) => a - b);
-if (completionStatuses[0] !== 200 || completionStatuses[1] !== 400) {
-  throw new Error(`concurrent completion returned ${completionStatuses.join(', ')}`);
+const completionStatuses = concurrentCompletions
+  .map(({ response }) => response.status)
+  .sort((a, b) => a - b);
+const acceptedCompletions = concurrentCompletions.filter(({ response, body }) => (
+  (response.status === 202 && body?.data?.status === 'VERIFYING')
+  || (response.status === 200 && body?.data?.status === 'COMPLETED')
+));
+const rejectedCompletions = concurrentCompletions.filter(({ response, body }) => (
+  response.status === 409
+  && ['OPERATION_IN_PROGRESS', 'CONFLICT'].includes(body?.error?.code)
+));
+if (acceptedCompletions.length < 1
+  || acceptedCompletions.length + rejectedCompletions.length !== concurrentCompletions.length) {
+  throw new Error(
+    `concurrent direct completion returned unsupported results: ${completionStatuses.join(', ')} ${JSON.stringify(concurrentCompletions.map(({ body }) => body))}`,
+  );
 }
-const successfulCompletion = completionResponses.find((response) => response.status === 200);
-const rejectedCompletion = completionResponses.find((response) => response.status === 400);
-const webglComplete = await successfulCompletion.json();
-const duplicateComplete = await rejectedCompletion.json();
-if (duplicateComplete?.error?.code !== 'ERROR') {
-  throw new Error('duplicate completion did not preserve the existing ERROR envelope');
-}
-console.log('ok: concurrent completion has exactly one winner');
-const webglUrl = webglComplete?.data?.webglUrl;
+console.log('ok: concurrent direct completion is fenced or idempotent');
+const webglComplete = await waitForDirectCompletion(webglSession, webglManifest);
+const webglUrl = webglComplete?.webglUrl;
 if (typeof webglUrl !== 'string') throw new Error('WebGL completion did not return webglUrl');
 const hostedWebglUrl = integrationApiUrl(webglUrl);
 

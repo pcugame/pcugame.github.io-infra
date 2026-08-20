@@ -53,18 +53,21 @@ function harness() {
 			listMultipartUploads: vi.fn(async () => []),
 			head: vi.fn(async () => null),
 		},
+		partSigner: { presignUploadPart: vi.fn(async () => 'https://storage.test/part') },
 		finalizer: { finalize: vi.fn() },
 		settings: { get: vi.fn(async () => ({ maxGameFileMb: 8, maxChunkSizeMb: 1 })) },
 		uploadSlots: { acquire: vi.fn(), release: vi.fn() },
 		clock: { now: () => new Date('2026-08-11T00:00:00.000Z') },
 		ids: { next: () => 'new-session-id' },
 		lifecycle: { isAcceptingNewWork: () => true },
-		config: { uploadChunkSizeMb: 1, uploadSessionTtlMinutes: 60 },
+		authorizeProjectWrite: vi.fn(async () => undefined),
+		config: { uploadChunkSizeMb: 1, uploadSessionTtlMinutes: 60, uploadPartUrlBatchMax: 16, uploadPartUrlTtlSeconds: 300 },
 		roleGameMaxBytes: () => 8 * 1024 * 1024,
 		storageKey: () => 'new-object.zip',
 		deleteOrQueue: vi.fn(async () => undefined),
 		wakeDeletionWorker: vi.fn(),
 		wakeMaintenance,
+		wakeValidationWorker: vi.fn(),
 		recordUntrackedMultipartCleanupFailure,
 		logger,
 	};
@@ -113,8 +116,10 @@ describe('untracked multipart cleanup durability', () => {
 			recordUntrackedMultipartCleanupFailure,
 			logger,
 		} = harness();
-		const abortError = new Error('storage unavailable');
-		const queueError = new Error('database unavailable');
+		const abortError = new Error(
+			`storage unavailable for ${target.uploadId} https://garage.test/object?X-Amz-Signature=secret`,
+		);
+		const queueError = new Error(`database unavailable uploadId=${target.uploadId}`);
 		abortMultipart.mockRejectedValueOnce(abortError);
 		vi.mocked(repository.queueAbortTask).mockRejectedValueOnce(queueError);
 
@@ -136,15 +141,29 @@ describe('untracked multipart cleanup durability', () => {
 		expect((thrown as AggregateError).errors).toEqual([abortError, queueError]);
 		expect(recordUntrackedMultipartCleanupFailure).toHaveBeenCalledOnce();
 		expect(logger.fatal).toHaveBeenCalledWith(
-			expect.objectContaining({
+			{
 				event: 'untracked_multipart_cleanup_unrecoverable',
 				key: target.key,
-				uploadId: target.uploadId,
-				abortError,
-				queueError,
-			}),
+				reason: target.reason,
+				abortFailure: {
+					name: 'Error',
+					message: 'storage unavailable for [redacted] [redacted-url]',
+				},
+				queueFailure: {
+					name: 'Error',
+					message: 'database unavailable [redacted-query]',
+				},
+			},
 			'CRITICAL: untracked multipart abort and durable queue both failed',
 		);
+		const fatalContext = logger.fatal.mock.calls[0]?.[0];
+		expect(JSON.stringify(fatalContext)).not.toContain(target.uploadId);
+		expect(JSON.stringify(fatalContext)).not.toContain('X-Amz-Signature');
+		expect(fatalContext).not.toHaveProperty('cleanupError');
+		expect(fatalContext).not.toHaveProperty('abortError');
+		expect(fatalContext).not.toHaveProperty('queueError');
+		expect(Object.keys(thrown as object)).not.toContain('uploadId');
+		expect(JSON.stringify(thrown)).not.toContain(target.uploadId);
 	});
 
 	it('preserves the business failure and both cleanup-channel failures', async () => {
@@ -225,6 +244,7 @@ describe('untracked multipart cleanup durability', () => {
 			projectId: 7,
 			userId: 11,
 			uploadKind: 'GAME',
+			transport: 'API_CHUNK_PROXY',
 			originalName: 'game.zip',
 			totalBytes: 1n,
 			chunkSizeBytes: 1,
@@ -287,6 +307,7 @@ describe('untracked multipart cleanup durability', () => {
 			projectId: 7,
 			userId: 11,
 			uploadKind: 'GAME',
+			transport: 'API_CHUNK_PROXY',
 			originalName: 'game.zip',
 			totalBytes: 1n,
 			chunkSizeBytes: 1,

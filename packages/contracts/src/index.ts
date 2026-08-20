@@ -94,9 +94,18 @@ export type {
 	GameUploadCreateSessionRequest,
 	GameUploadChunkResponse,
 	GameUploadCompleteResponse,
+	GameUploadCompletionResponse,
+	GameUploadCompleteRequest,
+	GameUploadCompletePart,
+	GameUploadPartUrl,
+	GameUploadPartUrlsRequest,
+	GameUploadPartUrlsResponse,
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
+	GameUploadTransport,
+	GameUploadUploadedPart,
+	GameUploadVerifyingResponse,
 	UploadKind,
 } from './game-upload.js';
 

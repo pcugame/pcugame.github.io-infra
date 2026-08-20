@@ -186,13 +186,19 @@ do_up() {
     -e "UPLOAD_ROOT_PROTECTED=/app/storage/protected" \
     -e "UPLOAD_ROOT_PUBLIC=/app/storage/public" \
     -e "LOG_LEVEL=${LOG_LEVEL:-info}" \
-    -e "S3_ENDPOINT=${S3_ENDPOINT}" \
+	-e "S3_INTERNAL_ENDPOINT=${S3_INTERNAL_ENDPOINT:-${S3_ENDPOINT:?S3_INTERNAL_ENDPOINT or deprecated S3_ENDPOINT is required}}" \
+	-e "S3_PUBLIC_SIGNING_ENDPOINT=${S3_PUBLIC_SIGNING_ENDPOINT:-${S3_ENDPOINT:?S3_PUBLIC_SIGNING_ENDPOINT or deprecated S3_ENDPOINT is required}}" \
+	-e "S3_ENDPOINT=${S3_ENDPOINT:-${S3_INTERNAL_ENDPOINT:?S3_INTERNAL_ENDPOINT is required}}" \
     -e "S3_REGION=${S3_REGION:-us-east-1}" \
     -e "S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}" \
     -e "S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}" \
     -e "S3_BUCKET_PUBLIC=${S3_BUCKET_PUBLIC:-pcu-public}" \
     -e "S3_BUCKET_PROTECTED=${S3_BUCKET_PROTECTED:-pcu-protected}" \
+	-e "S3_BUCKET_STAGING=${S3_BUCKET_STAGING:-pcu-staging}" \
     -e "S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}" \
+	-e "S3_PRESIGN_TTL_SEC=${S3_PRESIGN_TTL_SEC:-60}" \
+	-e "UPLOAD_PART_URL_TTL_SEC=${UPLOAD_PART_URL_TTL_SEC:-300}" \
+	-e "UPLOAD_PART_URL_BATCH_MAX=${UPLOAD_PART_URL_BATCH_MAX:-16}" \
     -e "NAS_EXPORT_PATH=${nas_export_container_path}" \
     -v "${STORAGE_HOST_PATH}/protected:/app/storage/protected:Z" \
     -v "${STORAGE_HOST_PATH}/public:/app/storage/public:Z" \

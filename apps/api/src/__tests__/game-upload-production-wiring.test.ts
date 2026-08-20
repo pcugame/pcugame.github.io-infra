@@ -19,6 +19,7 @@ import {
 	createDurableGameUploadRepository,
 	createTestUploadLifecycleRuntime,
 } from './helpers/upload-lifecycle.js';
+import { forbidden } from '../shared/errors.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const apps: FastifyInstance[] = [];
@@ -52,6 +53,7 @@ function session(
 		projectId: 7,
 		userId: 11,
 		uploadKind: 'GAME',
+		transport: 'API_CHUNK_PROXY',
 		originalName: 'game.zip',
 		totalBytes: 1n,
 		chunkSizeBytes: 1,
@@ -75,6 +77,7 @@ function createStorageHarness() {
 	let header: Buffer = Buffer.from('not-a-zip');
 	let uploadPartGate: Promise<void> | undefined;
 	const calls = {
+		presignUploadPart: vi.fn(async () => 'https://storage.test/upload-part'),
 		createMultipart: vi.fn(async () => 'multipart-new'),
 		abortMultipart: vi.fn(async () => undefined),
 		uploadPart: vi.fn(async (
@@ -92,7 +95,7 @@ function createStorageHarness() {
 		}),
 		completeMultipart: vi.fn(async () => undefined),
 		delete: vi.fn(async () => undefined),
-		listParts: vi.fn(async () => [{ partNumber: 1, etag: 'etag-1' }]),
+		listParts: vi.fn(async () => [{ partNumber: 1, etag: 'etag-1', sizeBytes: 1 }]),
 		listMultipartUploads: vi.fn(async () => []),
 		head: vi.fn(async () => headResult),
 		readRange: vi.fn(async () => header),
@@ -100,6 +103,7 @@ function createStorageHarness() {
 	const storage: ObjectStorage = {
 		upload: async () => {},
 		presign: async () => 'https://storage.test/object',
+		presignUploadPart: calls.presignUploadPart,
 		delete: calls.delete,
 		head: calls.head,
 		readRange: calls.readRange,
@@ -135,7 +139,14 @@ function idGenerator() {
 
 function graphHarness() {
 	const storage = createStorageHarness();
-	const repository = createDurableGameUploadRepository();
+	const repository = createDurableGameUploadRepository({
+		findExhibitionById: vi.fn(async () => ({
+			id: 1,
+			year: 2026,
+			title: 'Exhibition',
+			isUploadEnabled: true,
+		})),
+	});
 	const uploadLifecycle = createTestUploadLifecycleRuntime({ gameUploads: repository });
 	const settings: SettingsStore = {
 		get: vi.fn(async () => ({ maxGameFileMb: 8, maxChunkSizeMb: 1 })),
@@ -183,22 +194,28 @@ function graphHarness() {
 	return { graph, repository, uploadLifecycle, storage, settings, access };
 }
 
-function actorPlugin(controller: FastifyPluginAsync): FastifyPluginAsync {
+function actorPlugin(
+	controller: FastifyPluginAsync,
+	actor: { id: number; role: 'USER' | 'ADMIN' | 'OPERATOR' } = { id: 11, role: 'ADMIN' },
+): FastifyPluginAsync {
 	return async (app) => {
-		app.addHook('preHandler', async (request) => {
+		app.addHook('onRequest', async (request) => {
 			request.currentUser = {
-				id: 11,
+				id: actor.id,
 				googleSub: 'game-upload-wiring',
 				email: 'admin@example.test',
 				name: 'Admin',
-				role: 'ADMIN',
+				role: actor.role,
 			};
 		});
 		await app.register(controller);
 	};
 }
 
-async function routeApp(graph: GameUploadProductionGraph): Promise<FastifyInstance> {
+async function routeApp(
+	graph: GameUploadProductionGraph,
+	actor?: { id: number; role: 'USER' | 'ADMIN' | 'OPERATOR' },
+): Promise<FastifyInstance> {
 	const app = Fastify({ logger: false });
 	app.setErrorHandler((error, _request, reply) => {
 		const failure = error as { statusCode?: number; code?: string };
@@ -220,7 +237,7 @@ async function routeApp(graph: GameUploadProductionGraph): Promise<FastifyInstan
 		exportController: emptyRoute,
 		projectMultipartController: emptyRoute,
 		gameUploadController: graph.controller,
-	})), { prefix: '/api/admin' });
+	}), actor), { prefix: '/api/admin' });
 	await app.ready();
 	apps.push(app);
 	return app;
@@ -288,6 +305,10 @@ describe('game-upload production composition', () => {
 		});
 
 		expect(response.statusCode, response.body).toBe(201);
+		expect(response.json().data).toMatchObject({
+			transport: 'DIRECT_MULTIPART',
+			generation: 1,
+		});
 		expect(harness.repository.createSessionReplacingActive).toHaveBeenCalledWith(
 			expect.objectContaining({
 				id: expect.any(String),
@@ -300,6 +321,137 @@ describe('game-upload production composition', () => {
 			expect.objectContaining({ sessionId: 'old-session' }),
 			'Failed to abort multipart upload while replacing active session',
 		);
+	});
+
+	it('wires the public UploadPart signer with configured bounds and rechecks upload policy', async () => {
+		const harness = graphHarness();
+		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
+			transport: 'DIRECT_MULTIPART',
+			multipartGeneration: 4,
+		}));
+		vi.mocked(harness.repository.findExhibitionById).mockResolvedValue({
+			id: 1,
+			year: 2026,
+			title: 'Closed exhibition',
+			isUploadEnabled: false,
+		});
+
+		await expect(harness.graph.service.signPartUrls(
+			'session-1',
+			{ id: 11, role: 'USER' },
+			{ generation: 4, partNumbers: [1] },
+		)).rejects.toMatchObject({ statusCode: 403 });
+		expect(harness.storage.calls.presignUploadPart).not.toHaveBeenCalled();
+
+		vi.mocked(harness.repository.findExhibitionById).mockResolvedValue({
+			id: 1,
+			year: 2026,
+			title: 'Open exhibition',
+			isUploadEnabled: true,
+		});
+		await expect(harness.graph.service.signPartUrls(
+			'session-1',
+			{ id: 11, role: 'USER' },
+			{ generation: 4, partNumbers: [1] },
+		)).resolves.toMatchObject({ generation: 4, parts: [{ partNumber: 1 }] });
+		expect(harness.storage.calls.presignUploadPart).toHaveBeenCalledWith(
+			'protected',
+			'game-object.zip',
+			'multipart-1',
+			1,
+			defaultTestEnv.UPLOAD_PART_URL_TTL_SEC,
+		);
+	});
+
+	it('never sends a DIRECT_MULTIPART body through the legacy chunk relay and returns 202 after storage completion', async () => {
+		const harness = graphHarness();
+		vi.mocked(harness.repository.findSessionById).mockResolvedValue(session({
+			transport: 'DIRECT_MULTIPART',
+			multipartGeneration: 1,
+		}));
+		harness.storage.calls.listParts.mockResolvedValue([
+			{ partNumber: 1, etag: 'garage-etag', sizeBytes: 1 },
+		]);
+		harness.storage.setHead({ size: 1, contentType: 'application/zip' });
+		const app = await routeApp(harness.graph);
+
+		const rejectedChunk = await app.inject({
+			method: 'PUT',
+			url: '/api/admin/game-upload-sessions/session-1/chunks/0',
+			headers: { 'content-type': 'application/octet-stream' },
+			payload: Buffer.from([1]),
+		});
+		expect(rejectedChunk.statusCode).toBe(400);
+		expect(harness.storage.calls.uploadPart).not.toHaveBeenCalled();
+
+		const completed = await app.inject({
+			method: 'POST',
+			url: '/api/admin/game-upload-sessions/session-1/complete',
+			payload: {
+				generation: 1,
+				parts: [{ partNumber: 1, etag: 'garage-etag', sizeBytes: 1 }],
+			},
+		});
+		expect(completed.statusCode, completed.body).toBe(202);
+		expect(completed.json().data).toMatchObject({ status: 'VERIFYING', generation: 1 });
+		expect(harness.repository.markVerifying).toHaveBeenCalled();
+	});
+
+	it('enforces owner access and privileged overrides on direct status, complete, and cancel routes', async () => {
+		const actions = [
+			{ method: 'GET' as const, url: '/api/admin/game-upload-sessions/session-1' },
+			{
+				method: 'POST' as const,
+				url: '/api/admin/game-upload-sessions/session-1/complete',
+				payload: {
+					generation: 1,
+					parts: [{ partNumber: 1, etag: 'garage-etag', sizeBytes: 1 }],
+				},
+			},
+			{ method: 'DELETE' as const, url: '/api/admin/game-upload-sessions/session-1' },
+		];
+
+		const otherUser = graphHarness();
+		vi.mocked(otherUser.repository.findSessionById).mockResolvedValue(session({
+			transport: 'DIRECT_MULTIPART',
+		}));
+		const otherUserApp = await routeApp(otherUser.graph, { id: 12, role: 'USER' });
+		for (const action of actions) {
+			const response = await otherUserApp.inject(action);
+			expect(response.statusCode, `${action.method} ${response.body}`).toBe(403);
+		}
+		expect(otherUser.storage.calls.completeMultipart).not.toHaveBeenCalled();
+		expect(otherUser.repository.cancelSessionAndClearActive).not.toHaveBeenCalled();
+
+		for (const role of ['ADMIN', 'OPERATOR'] as const) {
+			const privileged = graphHarness();
+			vi.mocked(privileged.repository.findSessionById).mockResolvedValue(session({
+				transport: 'DIRECT_MULTIPART',
+			}));
+			privileged.storage.calls.listParts.mockResolvedValue([
+				{ partNumber: 1, etag: 'garage-etag', sizeBytes: 1 },
+			]);
+			privileged.storage.setHead({ size: 1, contentType: 'application/zip' });
+			const app = await routeApp(privileged.graph, { id: 12, role });
+			const responses = [];
+			for (const action of actions) responses.push(await app.inject(action));
+			expect(responses.map(({ statusCode }) => statusCode)).toEqual([200, 202, 204]);
+		}
+
+		const removed = graphHarness();
+		vi.mocked(removed.repository.findSessionById).mockResolvedValue(session({
+			transport: 'DIRECT_MULTIPART',
+		}));
+		removed.access.loadProjectWithAccess.mockRejectedValue(
+			forbidden('Not project owner or member'),
+		);
+		const removedApp = await routeApp(removed.graph, { id: 11, role: 'USER' });
+		for (const action of actions) {
+			const response = await removedApp.inject(action);
+			expect(response.statusCode, `${action.method} ${response.body}`).toBe(403);
+		}
+		expect(removed.storage.calls.completeMultipart).not.toHaveBeenCalled();
+		expect(removed.repository.cancelSessionAndClearActive).not.toHaveBeenCalled();
 	});
 
 	it('uses required part-claim and generation ports instead of a legacy ETag write shortcut', async () => {

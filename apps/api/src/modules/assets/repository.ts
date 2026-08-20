@@ -63,6 +63,26 @@ export function createAssetsRepository(
 			});
 		},
 
+		/** Resolve canonical download identity without hiding a non-READY status. */
+		findAssetByIdForDownload(id: number) {
+			return client.asset.findUnique({
+				where: { id },
+				include: {
+					project: {
+						select: {
+							creatorId: true,
+							title: true,
+							status: true,
+							members: {
+								select: { id: true, userId: true, name: true, studentId: true, sortOrder: true },
+								orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+							},
+						},
+					},
+				},
+			});
+		},
+
 		/** Find an asset by ID with its project relation */
 		findAssetByIdWithProject(id: number) {
 			return client.asset.findUnique({
@@ -216,15 +236,6 @@ export function createAssetsRepository(
 					}
 				}
 			}, transactionPolicy);
-		},
-
-		/** Upsert a banned IP record */
-		upsertBannedIp(ip: string, reason: string) {
-			return client.bannedIp.upsert({
-				where: { ip },
-				create: { ip, reason },
-				update: {},
-			});
 		},
 
 		/** Load all banned IPs (for in-memory cache init) */

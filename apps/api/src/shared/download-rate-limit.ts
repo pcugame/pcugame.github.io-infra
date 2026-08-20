@@ -1,12 +1,9 @@
 /**
  * In-memory IP-based rate limiter for protected asset downloads.
  *
- * When an IP exceeds the threshold, it is permanently banned via
- * a callback (which writes to the DB). Subsequent requests from
- * banned IPs are rejected immediately without counting.
- *
- * Banned IPs are cached in-memory for fast lookups; the DB is the
- * source of truth, synced on startup and on ban/unban events.
+ * The transient window never mutates the durable denylist. Banned IPs are
+ * administrator-managed in the DB and cached here; ordinary excess traffic is
+ * throttled only until its sliding window expires.
  */
 
 import { AppError } from './errors.js';
@@ -14,6 +11,10 @@ import { AppError } from './errors.js';
 interface BucketEntry {
 	timestamps: number[];
 }
+
+export type DownloadRateLimitResult =
+	| { status: 'ok' }
+	| { status: 'rate_limited'; retryAfterSec: number };
 
 export interface RateLimitClock {
 	now(): Date;
@@ -77,7 +78,9 @@ export class DownloadRateLimiter {
 	addBan(ip: string): void {
 		this.assertOpen();
 		this.bannedIps.add(ip);
-		this.buckets.delete(ip);
+		for (const key of this.buckets.keys()) {
+			if (key.startsWith(`${ip}\u0000`)) this.buckets.delete(key);
+		}
 	}
 
 	/** Remove an IP from the in-memory ban cache (called after DB delete). */
@@ -96,15 +99,15 @@ export class DownloadRateLimiter {
 	 * Check rate limit for the given IP.
 	 *
 	 * - If IP is banned → throws 403 immediately.
-	 * - If rate limit exceeded → returns 'ban' (caller should persist the ban).
+	 * - If rate limit exceeded → returns a temporary retry hint.
 	 * - Otherwise records the hit and returns 'ok'.
 	 */
-	check(ip: string): 'ok' | 'ban' {
+	check(ip: string, scope = ip): DownloadRateLimitResult {
 		this.assertOpen();
 		if (this.bannedIps.has(ip)) {
 			throw new AppError(
 				403,
-				'Your IP has been blocked due to excessive download requests.',
+				'Your IP has been blocked by an administrator.',
 				'IP_BANNED',
 			);
 		}
@@ -112,24 +115,23 @@ export class DownloadRateLimiter {
 		const now = this.clock.now().getTime();
 		const cutoff = now - this.windowMs;
 
-		let entry = this.buckets.get(ip);
+		const bucketKey = `${ip}\u0000${scope}`;
+		let entry = this.buckets.get(bucketKey);
 		if (!entry) {
 			entry = { timestamps: [] };
-			this.buckets.set(ip, entry);
+			this.buckets.set(bucketKey, entry);
 		}
 
 		// Remove expired timestamps
 		entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
 
 		if (entry.timestamps.length >= this.maxHits) {
-			// Signal caller to persist the ban
-			this.bannedIps.add(ip);
-			this.buckets.delete(ip);
-			return 'ban';
+			const retryAfterMs = Math.max(1, entry.timestamps[0]! + this.windowMs - now);
+			return { status: 'rate_limited', retryAfterSec: Math.ceil(retryAfterMs / 1000) };
 		}
 
 		entry.timestamps.push(now);
-		return 'ok';
+		return { status: 'ok' };
 	}
 
 	private sweep(): void {

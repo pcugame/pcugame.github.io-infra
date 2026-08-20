@@ -2,10 +2,10 @@ import type { GameUploadServiceDependencies } from './ports.js';
 
 export class UntrackedMultipartCleanupError extends AggregateError {
 	readonly key: string;
-	readonly uploadId: string;
+	readonly uploadId!: string;
 	readonly reason: string;
-	readonly abortError: unknown;
-	readonly queueError: unknown;
+	readonly abortError!: unknown;
+	readonly queueError!: unknown;
 
 	constructor(input: {
 		key: string;
@@ -20,17 +20,19 @@ export class UntrackedMultipartCleanupError extends AggregateError {
 		);
 		this.name = 'UntrackedMultipartCleanupError';
 		this.key = input.key;
-		this.uploadId = input.uploadId;
 		this.reason = input.reason;
-		this.abortError = input.abortError;
-		this.queueError = input.queueError;
+		Object.defineProperties(this, {
+			uploadId: { value: input.uploadId, enumerable: false },
+			abortError: { value: input.abortError, enumerable: false },
+			queueError: { value: input.queueError, enumerable: false },
+		});
 	}
 }
 
 export class MultipartBusinessCleanupError extends AggregateError {
-	readonly businessError: unknown;
-	readonly businessErrors: readonly unknown[];
-	readonly cleanupError: UntrackedMultipartCleanupError;
+	readonly businessError!: unknown;
+	readonly businessErrors!: readonly unknown[];
+	readonly cleanupError!: UntrackedMultipartCleanupError;
 
 	constructor(
 		businessError: unknown | readonly unknown[],
@@ -42,10 +44,37 @@ export class MultipartBusinessCleanupError extends AggregateError {
 			: [businessError];
 		super([...businessErrors, cleanupError], message);
 		this.name = 'MultipartBusinessCleanupError';
-		this.businessError = businessErrors[0];
-		this.businessErrors = businessErrors;
-		this.cleanupError = cleanupError;
+		Object.defineProperties(this, {
+			businessError: { value: businessErrors[0], enumerable: false },
+			businessErrors: { value: businessErrors, enumerable: false },
+			cleanupError: { value: cleanupError, enumerable: false },
+		});
 	}
+}
+
+function sanitizedErrorDescriptor(error: unknown, secrets: readonly string[]): {
+	name: string;
+	code?: string;
+	message: string;
+} {
+	const candidate = error && typeof error === 'object'
+		? error as { name?: unknown; code?: unknown; message?: unknown }
+		: {};
+	let message = typeof candidate.message === 'string'
+		? candidate.message
+		: 'Non-Error failure';
+	for (const secret of secrets) {
+		if (secret) message = message.replaceAll(secret, '[redacted]');
+	}
+	message = message
+		.replace(/https?:\/\/[^\s]+/gi, '[redacted-url]')
+		.replace(/(?:X-Amz-(?:Signature|Credential)|uploadId)=[^&\s]+/gi, '[redacted-query]')
+		.slice(0, 300);
+	return {
+		name: typeof candidate.name === 'string' ? candidate.name : 'UnknownError',
+		...(typeof candidate.code === 'string' ? { code: candidate.code.slice(0, 100) } : {}),
+		message,
+	};
 }
 
 /**
@@ -75,12 +104,10 @@ export async function cleanupUntrackedMultipart(
 			deps.logger.fatal(
 				{
 					event: 'untracked_multipart_cleanup_unrecoverable',
-					cleanupError,
-					abortError,
-					queueError,
 					key: target.key,
-					uploadId: target.uploadId,
 					reason: target.reason,
+					abortFailure: sanitizedErrorDescriptor(abortError, [target.uploadId]),
+					queueFailure: sanitizedErrorDescriptor(queueError, [target.uploadId]),
 				},
 				'CRITICAL: untracked multipart abort and durable queue both failed',
 			);
