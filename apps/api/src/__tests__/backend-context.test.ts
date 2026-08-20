@@ -6,7 +6,6 @@ import type { Env } from '../config/env.js';
 import { buildApp } from '../app.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
-import { createExportProgressStore } from '../modules/admin/export/service.js';
 import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 
 function testConfig(): Env {
@@ -130,7 +129,6 @@ function createTestContext(): {
 				inFlight: () => inFlight,
 				waitForDrain: async () => 'drained',
 			},
-			exportProgress: createExportProgressStore(),
 			databaseHealth: { check: async () => true },
 			authSessions: {
 				find: authSessionFind,

@@ -6,7 +6,6 @@ import type {
 	BannedIpListResponse,
 	ExportResult,
 	ExportStatusResponse,
-	GameUploadChunkResponse,
 	GameUploadCompleteResponse,
 	GameUploadSession,
 	GameUploadSessionListResponse,
@@ -30,8 +29,9 @@ import {
 	BannedIpListResponseSchema,
 	ExportResultSchema,
 	ExportStatusResponseSchema,
-	GameUploadChunkResponseSchema,
 	GameUploadCompleteResponseSchema,
+	GameUploadCompletionResponseSchema,
+	GameUploadPartUrlsResponseSchema,
 	GameUploadSessionListResponseSchema,
 	GameUploadSessionSchema,
 	GameUploadStatusSchema,
@@ -98,16 +98,34 @@ const runtimeSchemasMatchTransportTypes: [
 	IsAssignable<z.output<typeof GameUploadSessionSchema>, GameUploadSession>,
 	IsAssignable<z.output<typeof GameUploadStatusSchema>, GameUploadStatus>,
 	IsAssignable<z.output<typeof GameUploadSessionListResponseSchema>, GameUploadSessionListResponse>,
-	IsAssignable<z.output<typeof GameUploadChunkResponseSchema>, GameUploadChunkResponse>,
 	IsAssignable<z.output<typeof GameUploadCompleteResponseSchema>, GameUploadCompleteResponse>,
 ] = [
 	true, true, true, true, true, true, true, true, true, true, true,
-	true, true, true, true, true, true, true, true, true, true,
+	true, true, true, true, true, true, true, true, true,
 ];
 
 describe('response runtime schemas', () => {
 	it('stays assignable to every shared transport response type', () => {
 		expect(runtimeSchemasMatchTransportTypes.every(Boolean)).toBe(true);
+	});
+
+	it('requires the single direct session contract and rejects compatibility fields', () => {
+		const directShape = {
+			sessionId: 'session-1',
+			chunkSizeBytes: 5 * 1024 * 1024,
+			totalChunks: 1,
+			expiresAt: '2026-08-20T01:00:00.000Z',
+			uploadKind: 'GAME' as const,
+			generation: 1,
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+			sourceIdentity: 'a'.repeat(64),
+			sourceIdentityBlockSizeBytes: 1048576 as const,
+		};
+		expect(GameUploadSessionSchema.parse(directShape)).toEqual(directShape);
+		expect(GameUploadSessionSchema.safeParse({
+			...directShape,
+			transport: 'DIRECT_MULTIPART',
+		}).success).toBe(false);
 	});
 
 	it('accepts representative auth, public, admin, and upload responses', () => {
@@ -155,9 +173,29 @@ describe('response runtime schemas', () => {
 
 		expect(GameUploadCompleteResponseSchema.parse({
 			status: 'COMPLETED',
-			storageKey: 'games/1/game.zip',
+			sessionId: 'session-1',
+			generation: 1,
 			sizeBytes: 1,
+			uploadKind: 'GAME',
+			assetId: 7,
 		})).toMatchObject({ status: 'COMPLETED' });
+
+		expect(GameUploadPartUrlsResponseSchema.parse({
+			generation: 1,
+			expiresAt: '2026-08-20T00:05:00.000Z',
+			parts: [{
+				partNumber: 1,
+				url: 'https://garage.example.test/object?signature=secret',
+				requiredHeaders: { 'content-type': 'application/octet-stream' },
+			}],
+		})).toMatchObject({ generation: 1, parts: [{ partNumber: 1 }] });
+
+		expect(GameUploadCompletionResponseSchema.parse({
+			status: 'VERIFYING',
+			sessionId: 'session-1',
+			generation: 1,
+			sizeBytes: 1,
+		})).toMatchObject({ status: 'VERIFYING' });
 
 		expect(PublicProjectDetailResponseSchema.parse({
 			id: 1,
@@ -277,7 +315,7 @@ describe('response runtime schemas', () => {
 				{
 					id: 11,
 					kind: 'VIDEO',
-					url: 'https://api.example.test/api/assets/protected/video.mp4',
+					url: 'https://api.example.test/api/assets/11/download?variant=playback',
 					originalName: 'video.mp4',
 					size: 456,
 				},
@@ -317,11 +355,13 @@ describe('response runtime schemas', () => {
 		expect(PublicYearListResponseSchema.safeParse({
 			items: [{ id: 1, year: 2026.5, projectCount: 0 }],
 		}).success).toBe(false);
-		expect(GameUploadChunkResponseSchema.safeParse({
-			index: -1,
-			bytesWritten: 1,
-			uploadedCount: 1,
-			totalChunks: 1,
+		expect(GameUploadCompleteResponseSchema.safeParse({
+			status: 'COMPLETED',
+			sessionId: 'session-1',
+			generation: 1,
+			sizeBytes: 1,
+			uploadKind: 'GAME',
+			storageKey: 'internal/key.zip',
 		}).success).toBe(false);
 		expect(ExportStatusResponseSchema.safeParse({
 			running: true,

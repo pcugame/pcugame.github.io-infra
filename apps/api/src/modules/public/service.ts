@@ -63,6 +63,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 
 export interface PublicServiceDependencies {
 	apiPublicUrl: string;
+	publicAssetBaseUrl: string;
 	repository: {
 		findExhibitionsWithPublishedCounts(): Promise<{
 			id: number;
@@ -83,8 +84,12 @@ export interface PublicServiceDependencies {
 	};
 }
 
-function protectedAssetUrl(deps: PublicServiceDependencies, storageKey: string): string {
-	return `${deps.apiPublicUrl}/api/assets/protected/${storageKey}`;
+function protectedAssetUrl(
+	deps: PublicServiceDependencies,
+	assetId: number,
+	variant: 'original' | 'playback' = 'original',
+): string {
+	return `${deps.apiPublicUrl}/api/assets/${assetId}/download?variant=${variant}`;
 }
 
 function isPublicPoster(poster: PublicPosterRecord | null): poster is PublicPosterRecord {
@@ -94,7 +99,7 @@ function isPublicPoster(poster: PublicPosterRecord | null): poster is PublicPost
 /** List all years with published project counts */
 export async function listYears(deps: PublicServiceDependencies): Promise<PublicYearItem[]> {
 	const exhibitions = await deps.repository.findExhibitionsWithPublishedCounts();
-	const responsiveImages = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const responsiveImages = createResponsiveImageSerializer(deps.publicAssetBaseUrl);
 	return exhibitions.map((e) => ({
 		id: e.id,
 		year: e.year,
@@ -127,7 +132,7 @@ export async function listProjectsByYear(
 	const exhibitionMap = new Map(exhibitionRecords.map((e) => [e.id, e]));
 
 	const projects = await deps.repository.findPublishedProjectsInExhibitions(exhibitionIds);
-	const responsiveImages = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const responsiveImages = createResponsiveImageSerializer(deps.publicAssetBaseUrl);
 
 	const exhibitions = exhibitionRecords.map((e) => ({
 		id: e.id,
@@ -168,7 +173,7 @@ export async function listProjectsByExhibition(
 	if (!exhibition) throw notFound('Exhibition not found');
 
 	const projects = await deps.repository.findPublishedProjectsInExhibitions([id]);
-	const responsiveImages = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const responsiveImages = createResponsiveImageSerializer(deps.publicAssetBaseUrl);
 
 	const items = projects.map((p) => {
 		const poster = p.poster;
@@ -232,7 +237,7 @@ export async function getProjectDetail(
 	}
 
 	if (!project) throw notFound('Project not found');
-	const responsiveImages = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const responsiveImages = createResponsiveImageSerializer(deps.publicAssetBaseUrl);
 
 	const images = project.assets
 		.filter((a) => a.isPublic === true && (a.kind === 'IMAGE' || a.kind === 'POSTER'))
@@ -248,7 +253,7 @@ export async function getProjectDetail(
 	const videos = project.assets
 		.filter((a) => a.kind === 'VIDEO' && a.playbackStatus === 'READY')
 		.map((videoAsset) => ({
-			url: protectedAssetUrl(deps, videoAsset.playbackStorageKey ?? videoAsset.storageKey),
+			url: protectedAssetUrl(deps, videoAsset.id, 'playback'),
 			mimeType: videoAsset.playbackStorageKey
 				? videoAsset.playbackMimeType || 'video/mp4'
 				: videoAsset.mimeType || 'video/mp4',
@@ -278,10 +283,10 @@ export async function getProjectDetail(
 			? responsiveImages.serializeResponsiveImage(poster)
 			: undefined,
 		gameDownloadUrl: gameAsset
-			? protectedAssetUrl(deps, gameAsset.storageKey)
+			? protectedAssetUrl(deps, gameAsset.id)
 			: undefined,
 		webglUrl: project.webglEntryKey && parseWebglEntryKey(project.id, project.webglEntryKey)
-			? webglUrl(deps.apiPublicUrl, project.id)
+			? webglUrl(deps.publicAssetBaseUrl, project.webglEntryKey)
 			: undefined,
 		status: project.status,
 	};

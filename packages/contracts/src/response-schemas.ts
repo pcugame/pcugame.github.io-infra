@@ -46,6 +46,7 @@ export const ApiErrorCodeSchema = z.enum([
 	'DRAINING',
 	'INTERNAL_ERROR',
 	'SIZE_MISMATCH',
+	'MULTIPART_PART_LIMIT',
 	'IDEMPOTENCY_CONFLICT',
 	'OPERATION_IN_PROGRESS',
 ]);
@@ -90,9 +91,12 @@ const PlatformSchema = z.enum(['PC', 'MOBILE', 'WEB']);
 const GameUploadStatusValueSchema = z.enum([
 	'PENDING',
 	'COMPLETING',
+	'VERIFYING',
 	'COMPLETED',
+	'REJECTED',
 	'CANCELLED',
 	'FAILED',
+	'EXPIRED',
 ]);
 const OpaqueSessionIdSchema = z.string().min(1).max(200).refine(
 	(value) => !value.includes('\0'),
@@ -416,6 +420,9 @@ export const ExportProgressSchema = z.object({
 export const ExportStatusResponseSchema = z.object({
 	running: z.boolean(),
 	progress: ExportProgressSchema.nullable(),
+	jobId: z.string().optional(),
+	result: z.lazy(() => ExportResultSchema).nullable().optional(),
+	error: z.string().nullable().optional(),
 }).strict();
 
 export const ExportResultSchema = z.object({
@@ -434,36 +441,74 @@ export const GameUploadSessionSchema = z.object({
 	totalChunks: PositiveIntegerSchema,
 	expiresAt: IsoDateTimeSchema,
 	uploadKind: UploadKindSchema,
+	generation: PositiveIntegerSchema,
+	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'),
+	sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+	sourceIdentityBlockSizeBytes: z.literal(1048576),
 }).strict();
 
 export const GameUploadStatusSchema = z.object({
 	sessionId: OpaqueSessionIdSchema,
 	projectId: PositiveIntegerSchema,
 	uploadKind: UploadKindSchema,
+	generation: PositiveIntegerSchema,
 	originalName: z.string().min(1),
 	totalBytes: PositiveIntegerSchema,
 	chunkSizeBytes: PositiveIntegerSchema,
 	totalChunks: PositiveIntegerSchema,
-	uploadedChunks: z.array(NonNegativeIntegerSchema),
 	uploadedCount: NonNegativeIntegerSchema,
 	status: GameUploadStatusValueSchema,
 	expiresAt: IsoDateTimeSchema,
+	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1').nullable(),
+	sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+	sourceIdentityBlockSizeBytes: z.literal(1048576).nullable(),
+	parts: z.array(z.object({
+		partNumber: PositiveIntegerSchema,
+		etag: z.string().min(1),
+		sizeBytes: PositiveIntegerSchema,
+	}).strict()),
 }).strict();
 
 export const GameUploadSessionListResponseSchema = z.object({
 	items: z.array(GameUploadStatusSchema),
 }).strict();
 
-export const GameUploadChunkResponseSchema = z.object({
-	index: NonNegativeIntegerSchema,
-	bytesWritten: PositiveIntegerSchema,
-	uploadedCount: PositiveIntegerSchema,
-	totalChunks: PositiveIntegerSchema,
+export const GameUploadPartUrlsResponseSchema = z.object({
+	generation: PositiveIntegerSchema,
+	expiresAt: IsoDateTimeSchema,
+	parts: z.array(z.object({
+		partNumber: PositiveIntegerSchema,
+		url: UrlSchema,
+		requiredHeaders: z.record(z.string(), z.string()),
+	}).strict()),
 }).strict();
 
-export const GameUploadCompleteResponseSchema = z.object({
+const GameUploadCompletedBaseSchema = z.object({
 	status: z.literal('COMPLETED'),
-	storageKey: z.string().min(1),
+	sessionId: OpaqueSessionIdSchema,
+	generation: PositiveIntegerSchema,
 	sizeBytes: PositiveIntegerSchema,
-	webglUrl: UrlSchema.optional(),
+});
+
+export const GameUploadCompleteResponseSchema = z.union([
+	GameUploadCompletedBaseSchema.extend({
+		uploadKind: z.literal('GAME'),
+		assetId: PositiveIntegerSchema,
+	}).strict(),
+	GameUploadCompletedBaseSchema.extend({
+		uploadKind: z.literal('WEBGL'),
+		webglUrl: UrlSchema,
+	}).strict(),
+]);
+
+export const GameUploadVerifyingResponseSchema = z.object({
+	status: z.literal('VERIFYING'),
+	sessionId: OpaqueSessionIdSchema,
+	generation: PositiveIntegerSchema,
+	sizeBytes: PositiveIntegerSchema,
 }).strict();
+
+export const GameUploadCompletionResponseSchema = z.union([
+	GameUploadCompleteResponseSchema,
+	GameUploadVerifyingResponseSchema,
+]);

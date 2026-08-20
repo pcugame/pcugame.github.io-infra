@@ -1,5 +1,5 @@
 import { fork, type ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { DeleteObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3';
@@ -12,6 +12,7 @@ import { createS3Client } from '../lib/s3.js';
 import { createObjectStorage } from '../lib/storage.js';
 import { createGameUploadRepository } from '../modules/admin/game-upload/repository.js';
 import { createGameUploadService } from '../modules/admin/game-upload/service.js';
+import { sourceIdentityRoot } from '../modules/admin/game-upload/source-identity.js';
 import { createMultipartAbortRepository } from '../modules/multipart-abort/repository.js';
 import { createMultipartAbortService } from '../modules/multipart-abort/service.js';
 import { createOrphanRepository } from '../modules/orphan/repository.js';
@@ -24,6 +25,19 @@ import { createWebglDeploymentKeys } from '../modules/webgl/paths.js';
 
 const runStorageIntegration = process.env['RUN_STORAGE_INTEGRATION'] === 'true';
 const MIB = 1024 * 1024;
+
+function sourceIdentityForBuffer(file: Buffer) {
+	const sourceIdentityBlockDigests: string[] = [];
+	for (let offset = 0; offset < file.length; offset += MIB) {
+		sourceIdentityBlockDigests.push(createHash('sha256').update(file.subarray(offset, offset + MIB)).digest('hex'));
+	}
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(file.length, MIB, sourceIdentityBlockDigests),
+		sourceIdentityBlockSizeBytes: MIB as 1048576,
+		sourceIdentityBlockDigests,
+	};
+}
 
 describe.runIf(runStorageIntegration)(
 	'crash-safe storage lifecycle with Garage and PostgreSQL',
@@ -126,15 +140,7 @@ describe.runIf(runStorageIntegration)(
 			});
 		}
 
-		function gameService(overrides: {
-			uploadPart?: (
-				key: string,
-				uploadId: string,
-				partNumber: number,
-				body: NodeJS.ReadableStream,
-				contentLength: number,
-			) => Promise<string>;
-		} = {}) {
+		function gameService() {
 			return createGameUploadService({
 				repository: gameRepository,
 				storage: {
@@ -146,16 +152,6 @@ describe.runIf(runStorageIntegration)(
 						protectedBucket,
 						storageKey,
 						uploadId,
-					),
-					uploadPart: overrides.uploadPart ?? (
-						(storageKey, uploadId, partNumber, body, contentLength) => storage.uploadPart(
-							protectedBucket,
-							storageKey,
-							uploadId,
-							partNumber,
-							body as Readable,
-							contentLength,
-						)
 					),
 					completeMultipart: (storageKey, uploadId, parts) => storage.completeMultipart(
 						protectedBucket,
@@ -174,40 +170,13 @@ describe.runIf(runStorageIntegration)(
 					),
 					head: (storageKey) => storage.head(protectedBucket, storageKey),
 				},
-				finalizer: {
-					async finalize(session, object) {
-						await gameRepository.finalizeCompletedSession(
-							session.id,
-							session.projectId,
-							'GAME',
-							{
-								storageKey: session.s3Key,
-								originalName: session.originalName,
-								mimeType: 'application/zip',
-								sizeBytes: session.totalBytes,
-								isPublic: false,
-								completionClaimToken: session.completionClaimToken,
-							},
-							{
-								bucket: protectedBucket,
-								reason: 'integration-game-replace',
-								playbackReason: 'integration-game-playback-replace',
-							},
-						);
-						testObjects.get(protectedBucket)?.add(session.s3Key);
-						return {
-							status: 'COMPLETED' as const,
-							storageKey: session.s3Key,
-							sizeBytes: object.size,
-						};
-					},
-				},
+				partSigner: { presignUploadPart: async () => 'https://storage.test/part' },
 				settings: { get: async () => ({ maxGameFileMb: 20, maxChunkSizeMb: 5 }) },
-				uploadSlots: { acquire: () => {}, release: () => {} },
 				clock: { now: () => new Date() },
 				ids: { next: () => randomUUID() },
 				lifecycle: { isAcceptingNewWork: () => true },
-				config: { uploadChunkSizeMb: 5, uploadSessionTtlMinutes: 60 },
+				authorizeProjectWrite: async () => undefined,
+				config: { uploadChunkSizeMb: 5, uploadSessionTtlMinutes: 60, uploadPartUrlBatchMax: 16, uploadPartUrlTtlSeconds: 300, uploadPartUrlRefreshMax: 64, uploadPartUrlRefreshWindowMs: 300_000, directUploadQuota: { actorActiveSessions: 4, projectActiveSessions: 2, actorOutstandingBytes: 10n * 1024n * 1024n * 1024n } },
 				roleGameMaxBytes: () => 20 * MIB,
 				storageKey: () => key(`game-${randomUUID()}.zip`),
 				deleteOrQueue: async () => {},
@@ -304,8 +273,8 @@ describe.runIf(runStorageIntegration)(
 				);
 				await expect(storage.listParts!(protectedBucket, multipartKey, uploadId))
 					.resolves.toEqual([
-						{ partNumber: 1, etag: etag1 },
-						{ partNumber: 2, etag: etag2 },
+						{ partNumber: 1, etag: etag1, sizeBytes: first.length },
+						{ partNumber: 2, etag: etag2, sizeBytes: final.length },
 					]);
 				await storage.completeMultipart(protectedBucket, multipartKey, uploadId, [
 					{ partNumber: 1, etag: etag1 },
@@ -548,94 +517,12 @@ describe.runIf(runStorageIntegration)(
 			});
 		});
 
-		it('isolates parallel parts and resets a real multipart generation on ETag mismatch', async () => {
-			let releaseFirst!: () => void;
-			let enteredFirst!: () => void;
-			const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve; });
-			const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-			const service = gameService({
-				async uploadPart(storageKey, uploadId, partNumber, body, contentLength) {
-					enteredFirst();
-					await firstGate;
-					return storage.uploadPart(
-						protectedBucket,
-						storageKey,
-						uploadId,
-						partNumber,
-						body as Readable,
-						contentLength,
-					);
-				},
-			});
-			const actor = { id: userId, role: 'ADMIN' as const };
-			const created = await service.createSession(projectId, exhibitionId, actor, {
-				originalName: 'parallel.zip',
-				totalBytes: 5 * MIB,
-			});
-			const firstUpload = service.uploadChunk(
-				created.sessionId,
-				0,
-				Readable.from([Buffer.alloc(5 * MIB, 0x61)]),
-				actor,
-			);
-			await firstEntered;
-			await expect(service.uploadChunk(
-				created.sessionId,
-				0,
-				Readable.from([Buffer.alloc(5 * MIB, 0x62)]),
-				actor,
-			)).rejects.toMatchObject({ code: 'OPERATION_IN_PROGRESS', statusCode: 409 });
-			releaseFirst();
-			await expect(firstUpload).resolves.toMatchObject({ uploadedCount: 1 });
-			const completed = await service.completeSession(created.sessionId, actor);
-			expect(completed).toMatchObject({ status: 'COMPLETED', sizeBytes: 5 * MIB });
-			await expect(service.completeSession(created.sessionId, actor)).resolves.toEqual(completed);
-
-			const mismatchService = gameService();
-			const mismatch = await mismatchService.createSession(projectId, exhibitionId, actor, {
-				originalName: 'mismatch.zip',
-				totalBytes: 5 * MIB,
-			});
-			await mismatchService.uploadChunk(
-				mismatch.sessionId,
-				0,
-				Readable.from([Buffer.alloc(5 * MIB, 0x63)]),
-				actor,
-			);
-			await prisma.gameUploadPart.updateMany({
-				where: { sessionId: mismatch.sessionId },
-				data: { etag: 'wrong-etag' },
-			});
-			await expect(mismatchService.completeSession(mismatch.sessionId, actor))
-				.rejects.toMatchObject({ code: 'CONFLICT', statusCode: 409 });
-			await expect(prisma.gameUploadSession.findUniqueOrThrow({
-				where: { id: mismatch.sessionId },
-				include: { parts: true, partClaims: true },
-			})).resolves.toMatchObject({
-				status: 'PENDING',
-				multipartGeneration: 2,
-				parts: [],
-				partClaims: [],
-			});
-			await expect(prisma.multipartAbortTask.count({
-				where: { storageKey: { startsWith: keyPrefix }, state: 'PENDING' },
-			})).resolves.toBeGreaterThanOrEqual(1);
-			await mismatchService.cancelSession(mismatch.sessionId, actor);
-			const abortWorker = createMultipartAbortService({
-				repository: createMultipartAbortRepository(prisma),
-				storage,
-				clock: { now: () => new Date(Date.now() + 1_000) },
-				ids: { next: () => randomUUID() },
-				logger: { error: vi.fn() },
-			});
-			await expect(abortWorker.run()).resolves.toMatchObject({ failed: 0 });
-			await expect(prisma.multipartAbortTask.count({
-				where: { storageKey: { startsWith: keyPrefix }, state: 'PENDING' },
-			})).resolves.toBe(0);
-		});
-
 		it('reconciles by bucket and preserves every authoritative pointer', async () => {
 			const project = await prisma.project.findUniqueOrThrow({ where: { id: projectId } });
+			const completedBytes = Buffer.from(key('completed.zip'));
+			const pendingBytes = Buffer.from(key('pending.zip'));
+			const completedIdentity = sourceIdentityForBuffer(completedBytes);
+			const pendingIdentity = sourceIdentityForBuffer(pendingBytes);
 			const deployment = createWebglDeploymentKeys(
 				projectId,
 				project.webglEntryKey.split('/')[2]!,
@@ -656,13 +543,21 @@ describe.runIf(runStorageIntegration)(
 				data: [
 					{
 						id: randomUUID(), projectId, userId, uploadKind: 'GAME',
-						originalName: 'completed.zip', totalBytes: 1n, chunkSizeBytes: 5 * MIB,
+						originalName: 'completed.zip', totalBytes: BigInt(completedBytes.length), chunkSizeBytes: 5 * MIB,
+						sourceIdentityAlgorithm: completedIdentity.sourceIdentityAlgorithm,
+						sourceIdentity: completedIdentity.sourceIdentity,
+						sourceIdentityBlockSizeBytes: completedIdentity.sourceIdentityBlockSizeBytes,
+						sourceIdentityBlockManifest: Buffer.from(completedIdentity.sourceIdentityBlockDigests.join(''), 'hex'),
 						totalChunks: 1, status: 'COMPLETED', storageKey: key('completed.zip'),
 						expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 					},
 					{
 						id: randomUUID(), projectId, userId, uploadKind: 'GAME',
-						originalName: 'pending.zip', totalBytes: 1n, chunkSizeBytes: 5 * MIB,
+						originalName: 'pending.zip', totalBytes: BigInt(pendingBytes.length), chunkSizeBytes: 5 * MIB,
+						sourceIdentityAlgorithm: pendingIdentity.sourceIdentityAlgorithm,
+						sourceIdentity: pendingIdentity.sourceIdentity,
+						sourceIdentityBlockSizeBytes: pendingIdentity.sourceIdentityBlockSizeBytes,
+						sourceIdentityBlockManifest: Buffer.from(pendingIdentity.sourceIdentityBlockDigests.join(''), 'hex'),
 						totalChunks: 1, status: 'PENDING', s3Key: key('pending.zip'),
 						s3UploadId: 'tracked-upload', expiresAt: new Date('2099-01-01T00:00:00.000Z'),
 					},

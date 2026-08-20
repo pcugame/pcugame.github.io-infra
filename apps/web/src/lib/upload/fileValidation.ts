@@ -1,6 +1,8 @@
 import type { ClientUploadLimits } from '../upload-limits';
 
-export type UploadAssetKind = 'POSTER' | 'IMAGE' | 'VIDEO';
+import type { InlineAssetKind } from '@pcu/contracts';
+
+export type UploadAssetKind = Extract<InlineAssetKind, 'POSTER' | 'IMAGE'>;
 
 const mb = 1024 * 1024;
 
@@ -17,7 +19,6 @@ export function getAssetLimitMb(
 	file: File,
 	limits: ClientUploadLimits,
 ): number {
-	if (kind === 'VIDEO') return limits.videoMaxMb;
 	if (kind === 'POSTER') return isPdfFile(file) ? limits.posterPdfMaxMb : limits.posterMaxMb;
 	return isPdfFile(file) ? limits.imagePdfMaxMb : limits.imageMaxMb;
 }

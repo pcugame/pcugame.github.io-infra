@@ -1,50 +1,21 @@
 import type { GameUploadServiceDependencies } from './ports.js';
+import { safeLogError } from '../../../shared/safe-log-context.js';
 
-export class UntrackedMultipartCleanupError extends AggregateError {
-	readonly key: string;
-	readonly uploadId: string;
-	readonly reason: string;
-	readonly abortError: unknown;
-	readonly queueError: unknown;
+export class UntrackedMultipartCleanupError extends Error {
+	readonly code = 'UNTRACKED_MULTIPART_CLEANUP_FAILED';
 
-	constructor(input: {
-		key: string;
-		uploadId: string;
-		reason: string;
-		abortError: unknown;
-		queueError: unknown;
-	}) {
-		super(
-			[input.abortError, input.queueError],
-			`Untracked multipart upload could not be aborted or durably queued: ${input.key}`,
-		);
+	constructor() {
+		super('Untracked multipart cleanup failed');
 		this.name = 'UntrackedMultipartCleanupError';
-		this.key = input.key;
-		this.uploadId = input.uploadId;
-		this.reason = input.reason;
-		this.abortError = input.abortError;
-		this.queueError = input.queueError;
 	}
 }
 
-export class MultipartBusinessCleanupError extends AggregateError {
-	readonly businessError: unknown;
-	readonly businessErrors: readonly unknown[];
-	readonly cleanupError: UntrackedMultipartCleanupError;
+export class MultipartBusinessCleanupError extends Error {
+	readonly code = 'BUSINESS_AND_MULTIPART_CLEANUP_FAILED';
 
-	constructor(
-		businessError: unknown | readonly unknown[],
-		cleanupError: UntrackedMultipartCleanupError,
-		message: string,
-	) {
-		const businessErrors = Array.isArray(businessError)
-			? businessError
-			: [businessError];
-		super([...businessErrors, cleanupError], message);
+	constructor() {
+		super('Business operation and multipart cleanup failed');
 		this.name = 'MultipartBusinessCleanupError';
-		this.businessError = businessErrors[0];
-		this.businessErrors = businessErrors;
-		this.cleanupError = cleanupError;
 	}
 }
 
@@ -66,21 +37,14 @@ export async function cleanupUntrackedMultipart(
 			deps.wakeMaintenance();
 			return 'queued';
 		} catch (queueError) {
-			const cleanupError = new UntrackedMultipartCleanupError({
-				...target,
-				abortError,
-				queueError,
-			});
+			const cleanupError = new UntrackedMultipartCleanupError();
 			deps.recordUntrackedMultipartCleanupFailure();
 			deps.logger.fatal(
 				{
-					event: 'untracked_multipart_cleanup_unrecoverable',
-					cleanupError,
-					abortError,
-					queueError,
-					key: target.key,
-					uploadId: target.uploadId,
-					reason: target.reason,
+					action: 'untracked_multipart_cleanup',
+					result: 'unrecoverable',
+					abortFailure: safeLogError(abortError),
+					queueFailure: safeLogError(queueError),
 				},
 				'CRITICAL: untracked multipart abort and durable queue both failed',
 			);
@@ -90,9 +54,9 @@ export async function cleanupUntrackedMultipart(
 }
 
 export function aggregateBusinessAndCleanupError(
-	businessError: unknown | readonly unknown[],
-	cleanupError: UntrackedMultipartCleanupError,
-	message: string,
+	_businessError: unknown | readonly unknown[],
+	_cleanupError: UntrackedMultipartCleanupError,
+	_message: string,
 ): MultipartBusinessCleanupError {
-	return new MultipartBusinessCleanupError(businessError, cleanupError, message);
+	return new MultipartBusinessCleanupError();
 }

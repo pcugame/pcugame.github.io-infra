@@ -12,6 +12,7 @@ import { getProjectDetail, listProjectsByYear, listYears } from '../modules/publ
 
 const dependencies = {
 	apiPublicUrl: 'https://api.example.com',
+	publicAssetBaseUrl: 'https://assets.example.com',
 	repository: {
 		findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
 		findExhibitionsByYear: mocks.findExhibitionsByYear,
@@ -55,13 +56,13 @@ describe('public exhibition years', () => {
 				projectCount: 7,
 				poster: {
 					original: {
-						url: 'https://api.example.com/api/public/images/poster.webp',
+						url: 'https://assets.example.com/poster.webp',
 						width: 1200,
 						height: 800,
 					},
 					renditions: [{
 						profile: 'CARD_480',
-						url: 'https://api.example.com/api/public/images/poster.webp%2F__pcu_image_rendition__%2Fv1%2Fcard-480.webp',
+						url: 'https://assets.example.com/poster.webp/__pcu_image_rendition__/v1/card-480.webp',
 						width: 480,
 						height: 320,
 					}],
@@ -81,7 +82,7 @@ describe('public exhibition years', () => {
 
 		await expect(listYears(dependencies)).resolves.toMatchObject([{
 			poster: {
-				original: { url: 'https://api.example.com/api/public/images/legacy.webp' },
+				original: { url: 'https://assets.example.com/legacy.webp' },
 				renditions: [],
 			},
 		}]);
@@ -216,11 +217,11 @@ describe('public exhibition years', () => {
 		expect(result.video).toBe(result.videos[0]);
 		expect(result.videos).toEqual([
 			{
-				url: 'https://api.example.com/api/assets/protected/first.mp4',
+				url: 'https://api.example.com/api/assets/1/download?variant=playback',
 				mimeType: 'video/mp4',
 			},
 			{
-				url: 'https://api.example.com/api/assets/protected/second.mp4',
+				url: 'https://api.example.com/api/assets/2/download?variant=playback',
 				mimeType: 'video/mp4',
 			},
 		]);
@@ -268,7 +269,7 @@ describe('public exhibition years', () => {
 			id: 2,
 			kind: 'POSTER',
 			image: {
-				original: { url: 'https://api.example.com/api/public/images/public-image.webp' },
+				original: { url: 'https://assets.example.com/public-image.webp' },
 				renditions: [],
 			},
 		}]);

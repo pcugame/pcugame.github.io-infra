@@ -27,3 +27,16 @@ dependency-cruiser rule names. Verify both paths: run the self-test normally,
 then temporarily change one real `allowed/` import to a nonexistent module and
 confirm that the self-test fails specifically with its unresolved-dependency
 diagnostic. Restore the import and rerun the self-test before committing.
+
+The object data-plane fixtures intentionally exercise structural bypasses rather
+than method-name search alone: a direct route annotated with a readable body, a
+direct service calling UploadPart, a direct completion function colocated in a
+generically named completion service, an object read through a delivery dependency,
+a feature-local AWS SDK import, a Node HTTP asset proxy, an over-privileged signer
+port, an unrelated multipart completer, and signed capability data passed to a
+logger. Public image/WebGL delivery and UploadPart byte relays have no debt
+allowlist: any application object read used for client delivery, or any game-upload
+service invocation of UploadPart, fails the production guard.
+The completion fixture also proves that a legitimate control-plane function
+allowlisted for HEAD/ListParts cannot gain full-object `stream` authority merely
+by colocating the call inside that same function.

@@ -1,11 +1,19 @@
-import type { GameUploadServiceDependencies } from './ports.js';
-
 /**
  * Resolve a deterministically invalid object produced by CompleteMultipartUpload.
  * The repository commits FAILED + outbox atomically before the worker wake.
  */
 export async function commitTerminalCompletedObjectFailure(
-	deps: GameUploadServiceDependencies,
+	deps: {
+		repository: {
+			markCompletedObjectFailed(input: {
+				sessionId: string;
+				storageKey: string;
+				reason: string;
+				completionClaimToken: string;
+			}): Promise<{ count: number }>;
+		};
+		wakeDeletionWorker(): void;
+	},
 	input: {
 		sessionId: string;
 		storageKey: string;

@@ -30,10 +30,13 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 		errors,
 		form,
 		goToEdit,
+		inlineUploads,
+		inlineUploadsComplete,
 		isSubmitting,
 		isUploadLocked,
 		membersFieldArray,
 		onSubmit,
+		retryInlineUpload,
 		selectedYearItem,
 		showGameProgress,
 		submitMutation,
@@ -48,8 +51,8 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 		if (!createdProjectId) return;
 		const gameReady = !files.gameFile || gameUploadFinished;
 		const webglReady = !files.webglFile || webglUploadFinished;
-		if (gameReady && webglReady) goToEdit();
-	}, [createdProjectId, files.gameFile, files.webglFile, gameUploadFinished, goToEdit, webglUploadFinished]);
+		if (inlineUploadsComplete && gameReady && webglReady) goToEdit();
+	}, [createdProjectId, files.gameFile, files.webglFile, gameUploadFinished, goToEdit, inlineUploadsComplete, webglUploadFinished]);
 
 	const openPreview = () => setPreviewSnapshot(getValues());
 	const closePreview = () => setPreviewSnapshot(null);
@@ -64,7 +67,32 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 			</div>
 
 			{showGameProgress && (
-				<div className="submission-chunked-uploads">
+				<div className="submission-direct-uploads">
+					{inlineUploads.length > 0 && (
+						<section aria-label="소형 자산 업로드 상태">
+							<h2>포스터·이미지</h2>
+							<ul>
+								{inlineUploads.map((item) => (
+									<li key={item.id}>
+										{item.file.name}: {
+											item.status === 'ready' ? 'READY'
+												: item.status === 'failed' ? '업로드 실패'
+													: item.status === 'uploading' ? '업로드·변환 중…'
+														: '대기 중'
+										}
+										{item.status === 'failed' && (
+											<>
+												<p className="field-error">{getApiErrorMessage(item.error)}</p>
+												<button type="button" onClick={() => retryInlineUpload(item)}>
+													다시 시도
+												</button>
+											</>
+										)}
+									</li>
+								))}
+							</ul>
+						</section>
+					)}
 					{files.gameFile && (
 						<GameUploadWidget
 							projectId={createdProjectId!}
@@ -142,7 +170,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 					}}
 					poster={files.posterFile}
 					images={files.imageFiles}
-					videos={files.videoFiles}
+					videos={[]}
 					game={files.gameFile}
 					exhibitionLabel={selectedYearItem ? `${selectedYearItem.year}년 전시` : undefined}
 					onClose={closePreview}

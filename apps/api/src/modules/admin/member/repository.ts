@@ -19,8 +19,16 @@ export function createMemberRepository(client: PrismaClient) {
 			return client.projectMember.update({ where: { id }, data });
 		},
 
-		deleteMember(id: number) {
-			return client.projectMember.delete({ where: { id } });
+		deleteMember(id: number, projectId: number) {
+			return client.$transaction(async (tx) => {
+				// Upload finalization takes this same project lock before its final
+				// membership check. A removal and READY pointer commit therefore have
+				// one observable order instead of a check/delete race.
+				await tx.$queryRaw<Array<{ id: number }>>`
+					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
+				`;
+				return tx.projectMember.deleteMany({ where: { id, projectId } });
+			});
 		},
 
 		/** Lock both rows in stable ID order before atomically swapping sortOrder. */

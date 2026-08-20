@@ -22,7 +22,7 @@ const mocks = {
 };
 
 const exhibitionService = createExhibitionService({
-	apiPublicUrl: 'https://api.example.test',
+	publicAssetBaseUrl: 'https://assets.example.test',
 	posterBucket: 'public-bucket',
 	repository: {
 		findAllExhibitions: mocks.findAllExhibitions,
@@ -108,13 +108,13 @@ describe('admin exhibition service', () => {
 				projectCount: 3,
 				poster: {
 					original: {
-						url: 'https://api.example.test/api/public/images/poster.webp',
+						url: 'https://assets.example.test/poster.webp',
 						width: 1200,
 						height: 800,
 					},
 					renditions: [{
 						profile: 'CARD_480',
-						url: 'https://api.example.test/api/public/images/poster.webp%2F__pcu_image_rendition__%2Fv1%2Fcard-480.webp',
+						url: 'https://assets.example.test/poster.webp/__pcu_image_rendition__/v1/card-480.webp',
 						width: 480,
 						height: 320,
 					}],
@@ -145,7 +145,7 @@ describe('admin exhibition service', () => {
 			expect.objectContaining({
 				poster: {
 					original: {
-						url: 'https://api.example.test/api/public/images/legacy%20poster.webp',
+						url: 'https://assets.example.test/legacy%20poster.webp',
 					},
 					renditions: [],
 				},

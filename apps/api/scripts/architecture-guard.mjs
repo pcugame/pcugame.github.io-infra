@@ -13,22 +13,6 @@ const targetNames = requestedTargets.length > 0 ? requestedTargets : ['src'];
 const ignoredDirectoryNames = new Set(['node_modules', 'dist', 'generated', '__tests__']);
 const sourceExtensions = /\.(?:[cm]?ts|tsx)$/;
 
-/**
- * The request context is deliberately process-bound: Fastify seeds a separate
- * store for every request and no external resource is opened by constructing it.
- * Keep this allowlist exact (file + binding + constructor). New entries require a
- * lifecycle/ownership explanation here and a review of the architecture fixture.
- */
-const statefulAppBoundaryAllowlist = new Map([
-	[
-		'src/lib/request-context.ts#requestContext',
-		{
-			creator: 'AsyncLocalStorage',
-			reason: 'request-scoped propagation seeded at the Fastify app boundary',
-		},
-	],
-]);
-
 const legacyStatefulExports = new Set([
 	'_resetActiveUploads',
 	'abortMultipartUpload',
@@ -111,6 +95,139 @@ const statefulCreatorPattern =
 	/^create[A-Z].*(?:Client|Clock|Coordinator|FileSystem|Generator|Graph|Lifecycle|Limiter|Logger|Pipeline|Repository|Runtime|Scheduler|Service|Storage|Store|Writer)$/;
 const statefulConstructorPattern =
 	/(?:Client|Coordinator|FileSystem|Lifecycle|Limiter|Logger|Repository|Runtime|Scheduler|Service|Storage|Store)$/;
+
+/**
+ * Internal object reads are application semantics, not client delivery. Keep
+ * this list exact (file + enclosing operation) so a neutral filename or a
+ * renamed receiver cannot silently create a new application-level asset
+ * origin. Entries are intentionally grouped by why bytes/metadata are read:
+ * validation/transform, recovery/cleanup, or fenced multipart completion.
+ */
+const internalObjectReadAllowlist = new Map([
+	[
+		'src/modules/admin/game-upload/composition.ts',
+		new Set(['createGameUploadProductionGraph']),
+	],
+	[
+		'src/modules/admin/export/file.adapter.ts',
+		new Set(['saveObject']),
+	],
+	[
+		'src/modules/admin/game-upload/complete-session.service.ts',
+		new Set(['completeMultipartSession', 'completeSession']),
+	],
+	[
+		'src/modules/admin/game-upload/session-maintenance.service.ts',
+		new Set(['sweepStaleCompletingSessions']),
+	],
+	[
+		'src/modules/admin/game-upload/validation-worker.composition.ts',
+		new Set(['process']),
+	],
+	[
+		'src/modules/admin/project/project-asset-upload.adapter.ts',
+		new Set(['start']),
+	],
+	[
+		'src/modules/admin/project/project-file-validation.ts',
+		new Set(['validateProjectUploadFile']),
+	],
+	[
+		'src/modules/assets/image-rendition-backfill.ts',
+		new Set(['processItem']),
+	],
+	[
+		'src/modules/assets/upload/zip-validation.ts',
+		new Set([
+			'validateLocalFileHeaders',
+			'validateWebglZipArchiveObject',
+			'validateZipArchive',
+			'validateZipArchiveObject',
+		]),
+	],
+	[
+		'src/modules/upload-intent/service.ts',
+		new Set(['sweep']),
+	],
+	[
+		'src/modules/upload-intent/temp-scavenger.ts',
+		new Set(['createUploadTempFileSystem']),
+	],
+	[
+		'src/modules/webgl/deployment.ts',
+		new Set(['deployArchive', 'deploySource']),
+	],
+]);
+
+/**
+ * Full object bodies belong only to executables that are never part of the API
+ * graph. Metadata recovery (`head`) remains separately allowlisted above. This
+ * second boundary intentionally does not grant complete-session functions a
+ * file/function-wide exemption: adding `storage.stream()` beside a legitimate
+ * HEAD must fail the guard.
+ */
+const processingObjectBodyReadAllowlist = new Map([
+	['src/modules/admin/export/file.adapter.ts', new Set(['saveObject'])],
+	['src/modules/admin/game-upload/validation-worker.composition.ts', new Set(['process'])],
+	['src/modules/assets/image-rendition-backfill.ts', new Set(['processItem'])],
+	['src/modules/webgl/deployment.ts', new Set(['deploySource'])],
+]);
+
+const applicationPipeAllowlist = new Map([
+	[
+		'src/modules/admin/game-upload/source-identity.ts',
+		new Set(['materializeAndValidateCompletedSource']),
+	],
+]);
+
+const multipartCompleteCallerAllowlist = new Set([
+	'src/modules/admin/game-upload/complete-session.service.ts',
+	'src/modules/admin/game-upload/composition.ts',
+]);
+
+const applicationProxyImports = new Set([
+	'http-proxy',
+	'http-proxy-middleware',
+	'node:http',
+	'node:https',
+	'undici',
+]);
+
+const exportProcessingSources = new Set([
+	'src/modules/admin/export/file.adapter',
+	'src/modules/admin/export/service',
+	'src/modules/admin/export/worker',
+	'src/modules/admin/export/worker-loop',
+]);
+
+function isExportProcessingRole(file) {
+	return file === 'src/export-worker.ts'
+		|| file === 'scripts/export-assets.ts'
+		|| file.startsWith('src/modules/admin/export/');
+}
+
+const directUploadFilePattern = /(?:direct[-.]?(?:multipart|upload)|part[-.]?urls?)/i;
+const directUploadFunctionPattern = /direct/i;
+const clientDeliveryFilePattern = /(?:asset[-.]?origin|client[-.]?delivery|protected[-.]?download|public[-.]?(?:asset|download|metadata)|(?:^|[/.])download[.-])/i;
+const objectReadMethodNames = new Set([
+	'getObject',
+	'head',
+	'readObjectRange',
+	'readRange',
+	'stream',
+]);
+const objectBodyReadMethodNames = new Set([
+	'getObject',
+	'readObjectRange',
+	'readRange',
+	'stream',
+]);
+const signerForbiddenAuthorityNames = new Set([
+	'abortMultipart',
+	'completeMultipart',
+	'delete',
+	'deleteObject',
+]);
 
 function posix(value) {
 	return value.split(path.sep).join('/');
@@ -228,6 +345,270 @@ function isRepositoryFile(file) {
 
 function isFeatureFile(file) {
 	return file.startsWith('src/modules/') || file.includes('/src/modules/');
+}
+
+function isGuardedFeatureCode(file) {
+	return isFeatureFile(file) || file.startsWith('architecture-fixtures/forbidden/');
+}
+
+function isDirectUploadFile(file) {
+	return directUploadFilePattern.test(file);
+}
+
+function functionLikeName(node) {
+	if (
+		ts.isFunctionDeclaration(node)
+		|| ts.isFunctionExpression(node)
+		|| ts.isMethodDeclaration(node)
+		|| ts.isGetAccessorDeclaration(node)
+		|| ts.isSetAccessorDeclaration(node)
+	) {
+		if (node.name) return propertyNameText(node.name);
+	}
+	if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+		const parent = node.parent;
+		if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+			return parent.name.text;
+		}
+		if (ts.isPropertyAssignment(parent) || ts.isPropertyDeclaration(parent)) {
+			return propertyNameText(parent.name);
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Direct transport operations do not all live in files named `direct-*`.
+ * In particular, the fenced completion service keeps its direct branch in
+ * `completeDirectSession`. Inspect the enclosing function as well as the file
+ * so renaming or colocating that branch cannot turn it into an UploadPart relay.
+ */
+function isDirectUploadOperation(node, file) {
+	if (isDirectUploadFile(file)) return true;
+	let current = node.parent;
+	while (current) {
+		if (ts.isFunctionLike(current)) {
+			const name = functionLikeName(current);
+			if (name && directUploadFunctionPattern.test(name)) return true;
+		}
+		current = current.parent;
+	}
+	return false;
+}
+
+function enclosingFunctionNames(node) {
+	const names = [];
+	let current = node.parent;
+	while (current) {
+		if (ts.isFunctionLike(current)) {
+			const name = functionLikeName(current);
+			if (name) names.push(name);
+		}
+		current = current.parent;
+	}
+	return names;
+}
+
+function isAllowedInEnclosingOperation(node, file, allowlist) {
+	const allowedFunctions = allowlist.get(file);
+	if (!allowedFunctions) return false;
+	return enclosingFunctionNames(node).some((name) => allowedFunctions.has(name));
+}
+
+function isGameUploadServiceFile(file) {
+	return file.startsWith('src/modules/admin/game-upload/') && !isCompositionRoot(file);
+}
+
+function isClientFacingDeliveryFile(file) {
+	return (
+		/(?:^|\/)src\/modules\/public\/(?:.+\.)?(?:controller|serializer|service)\.(?:[cm]?ts|tsx)$/.test(file)
+		|| /(?:^|\/)src\/modules\/assets\/(?:controller|service)\.(?:[cm]?ts|tsx)$/.test(file)
+		|| clientDeliveryFilePattern.test(file)
+	);
+}
+
+function propertyNameText(name) {
+	if (!name) return undefined;
+	if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+		return name.text;
+	}
+	return undefined;
+}
+
+function memberName(expression) {
+	const current = unwrapExpression(expression);
+	if (ts.isPropertyAccessExpression(current)) return current.name.text;
+	if (
+		ts.isElementAccessExpression(current)
+		&& current.argumentExpression
+		&& ts.isStringLiteral(current.argumentExpression)
+	) {
+		return current.argumentExpression.text;
+	}
+	if (ts.isIdentifier(current)) return current.text;
+	return undefined;
+}
+
+function literalRoute(call) {
+	const first = call.arguments[0];
+	return first && ts.isStringLiteralLike(first) ? first.text : undefined;
+}
+
+function isRouteRegistration(call) {
+	const method = memberName(call.expression);
+	return method !== undefined
+		&& ['delete', 'get', 'head', 'options', 'patch', 'post', 'put'].includes(method)
+		&& literalRoute(call) !== undefined;
+}
+
+function containsReadableStreamType(node) {
+	let found = false;
+	function visit(current) {
+		if (found) return;
+		if (
+			ts.isTypeReferenceNode(current)
+			&& /(?:^|\.)Readable(?:Stream)?$/.test(current.typeName.getText())
+		) {
+			found = true;
+			return;
+		}
+		if (
+			ts.isExpressionWithTypeArguments(current)
+			&& /(?:^|\.)Readable(?:Stream)?$/.test(current.expression.getText())
+		) {
+			found = true;
+			return;
+		}
+		if (ts.isTypeQueryNode(current) && /Readable(?:Stream)?/.test(current.exprName.getText())) {
+			found = true;
+			return;
+		}
+		ts.forEachChild(current, visit);
+	}
+	visit(node);
+	return found;
+}
+
+function containsCallNamed(node, names) {
+	let found;
+	function visit(current) {
+		if (found) return;
+		if (ts.isCallExpression(current)) {
+			const name = memberName(current.expression);
+			if (name && names.has(name)) {
+				found = current;
+				return;
+			}
+		}
+		ts.forEachChild(current, visit);
+	}
+	visit(node);
+	return found;
+}
+
+function isStorageMethodCall(call, methodNames) {
+	const name = memberName(call.expression);
+	if (!name || !methodNames.has(name)) return false;
+	const expression = unwrapExpression(call.expression);
+	if (!ts.isPropertyAccessExpression(expression) && !ts.isElementAccessExpression(expression)) {
+		return false;
+	}
+	const receiver = expression.expression.getText();
+	return /(?:^|\.)(?:inspector|objectStorage|objectStore|storage)$/.test(receiver);
+}
+
+function collectObjectReadAliases(sourceFile) {
+	const aliases = new Set();
+	let changed = true;
+	while (changed) {
+		changed = false;
+		function add(name) {
+			if (!name || aliases.has(name)) return;
+			aliases.add(name);
+			changed = true;
+		}
+		function initializerIsObjectRead(expression) {
+			const current = unwrapExpression(expression);
+			if (ts.isIdentifier(current)) return aliases.has(current.text);
+			return (
+				(ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current))
+				&& objectReadMethodNames.has(memberName(current) ?? '')
+			);
+		}
+		function visit(node) {
+			if (
+				ts.isVariableDeclaration(node)
+				&& ts.isIdentifier(node.name)
+				&& node.initializer
+				&& initializerIsObjectRead(node.initializer)
+			) {
+				add(node.name.text);
+			}
+			if (
+				(ts.isVariableDeclaration(node) || ts.isParameter(node))
+				&& ts.isObjectBindingPattern(node.name)
+			) {
+				for (const element of node.name.elements) {
+					const property = propertyNameText(element.propertyName ?? element.name);
+					if (
+						property
+						&& objectReadMethodNames.has(property)
+						&& ts.isIdentifier(element.name)
+					) {
+						add(element.name.text);
+					}
+				}
+			}
+			ts.forEachChild(node, visit);
+		}
+		visit(sourceFile);
+	}
+	return aliases;
+}
+
+function isFeatureLocalS3Source(source) {
+	return source === '@aws-sdk/client-s3'
+		|| source === '@aws-sdk/s3-request-presigner'
+		|| /(?:^|\/)src\/lib\/(?:s3|storage)$/.test(source);
+}
+
+function identifierOrPropertyLooksSensitive(node, signedBindings) {
+	if (expressionCreatesSignedCapability(node)) return true;
+	let found = false;
+	function visit(current) {
+		if (found) return;
+		if (ts.isIdentifier(current) && signedBindings.has(current.text)) {
+			found = true;
+			return;
+		}
+		if (ts.isPropertyAssignment(current) || ts.isShorthandPropertyAssignment(current)) {
+			const name = propertyNameText(current.name);
+			if (name && /(?:accessKey|credential|presigned|signature|signed(?:Url)?)$/i.test(name)) {
+				found = true;
+				return;
+			}
+		}
+		ts.forEachChild(current, visit);
+	}
+	visit(node);
+	return found;
+}
+
+function expressionCreatesSignedCapability(expression) {
+	let found = false;
+	function visit(current) {
+		if (found) return;
+		if (ts.isCallExpression(current)) {
+			const name = memberName(current.expression);
+			if (name && /^(?:getSignedUrl|presign|presignUploadPart|signUploadPart)$/i.test(name)) {
+				found = true;
+				return;
+			}
+		}
+		ts.forEachChild(current, visit);
+	}
+	visit(expression);
+	return found;
 }
 
 function isCompositionRoot(file) {
@@ -469,6 +850,19 @@ const inventory = {
 	'repository-global-prisma-imports': 0,
 	'non-composition-stateful-imports': 0,
 	'feature-runtime-imports': 0,
+	'legacy-client-delivery-relays': 0,
+	'client-delivery-object-reads': 0,
+	'feature-local-s3-imports': 0,
+	'direct-upload-byte-relays': 0,
+	'multipart-complete-callers': 0,
+	'unowned-multipart-complete-callers': 0,
+	'storage-key-canonical-routes': 0,
+	'protected-download-bodies': 0,
+	'public-metadata-presign-authorities': 0,
+	'signed-url-loggings': 0,
+	'direct-controller-body-streams': 0,
+	'api-export-processing-imports': 0,
+	'api-object-body-reads': 0,
 };
 const violations = [];
 const violationKeys = new Set();
@@ -583,6 +977,32 @@ for (const fileName of files) {
 				`features connect through ports/composition, never runtime modules (${dependencyDescription(edge)})`,
 			);
 		}
+		if (isFeatureFile(file) && isFeatureLocalS3Source(edge.source)) {
+			inventory['feature-local-s3-imports']++;
+			addViolation(
+				'no-feature-local-s3-data-plane',
+				file,
+				edge.node,
+				`feature code must use a least-authority port, never an SDK/client storage adapter (${dependencyDescription(edge)})`,
+			);
+		}
+		if (isGuardedFeatureCode(file) && applicationProxyImports.has(edge.source)) {
+			addViolation(
+				'no-application-asset-proxy',
+				file,
+				edge.node,
+				`feature code cannot implement an object transport proxy; use Garage/public origin or an external reverse proxy (${dependencyDescription(edge)})`,
+			);
+		}
+		if (exportProcessingSources.has(edge.source) && !isExportProcessingRole(file)) {
+			inventory['api-export-processing-imports']++;
+			addViolation(
+				'no-api-export-processing-import',
+				file,
+				edge.node,
+				`export object reads and NAS writes belong only to the export-worker processing role (${dependencyDescription(edge)})`,
+			);
+		}
 
 		if (!isCompositionRoot(file) && isLegacyStatefulSource(edge.source)) {
 			const valueNames = edge.names
@@ -605,6 +1025,298 @@ for (const fileName of files) {
 		}
 	}
 
+	const signedCapabilityBindings = new Set();
+	const objectReadAliases = collectObjectReadAliases(sourceFile);
+	function collectSignedCapabilityBindings(node) {
+		if (
+			ts.isVariableDeclaration(node)
+			&& ts.isIdentifier(node.name)
+			&& node.initializer
+			&& expressionCreatesSignedCapability(node.initializer)
+		) {
+			signedCapabilityBindings.add(node.name.text);
+		}
+		ts.forEachChild(node, collectSignedCapabilityBindings);
+	}
+	collectSignedCapabilityBindings(sourceFile);
+
+	function inspectControlPlaneBoundary(node) {
+		if (
+			(ts.isPropertySignature(node) || ts.isPropertyDeclaration(node))
+			&& propertyNameText(node.name) === 'storage'
+			&& node.type
+			&& isClientFacingDeliveryFile(file)
+			&& /(?:getObject|head|readObjectRange|readRange|stream)/.test(node.type.getText())
+		) {
+			addViolation(
+				'no-client-delivery-object-read',
+				file,
+				node,
+				'client-facing delivery dependencies cannot expose object read/HEAD/Range authority',
+			);
+		}
+
+		if (
+			ts.isInterfaceDeclaration(node)
+			&& /(?:Signer$|Capability|PartUrls?|UploadPart)/.test(node.name.text)
+		) {
+			for (const member of node.members) {
+				const name = propertyNameText(member.name);
+				if (name && signerForbiddenAuthorityNames.has(name)) {
+					addViolation(
+						'no-signer-admin-authority',
+						file,
+						member,
+						`signer port ${node.name.text} must not expose ${name}`,
+					);
+				}
+			}
+		}
+
+		if (ts.isCallExpression(node)) {
+			const callName = memberName(node.expression);
+			const objectReadCall = (
+				(callName !== undefined && objectReadMethodNames.has(callName))
+				|| (
+					ts.isIdentifier(unwrapExpression(node.expression))
+					&& objectReadAliases.has(unwrapExpression(node.expression).text)
+				)
+			);
+			const objectBodyReadCall = objectReadCall && (
+				callName === 'getObject'
+				|| callName === 'stream'
+				|| (
+					callName !== undefined
+					&& objectBodyReadMethodNames.has(callName)
+					&& isStorageMethodCall(node, objectBodyReadMethodNames)
+				)
+				|| (
+					ts.isIdentifier(unwrapExpression(node.expression))
+					&& objectReadAliases.has(unwrapExpression(node.expression).text)
+				)
+			);
+			if (
+				isGuardedFeatureCode(file)
+				&& objectBodyReadCall
+				&& !isAllowedInEnclosingOperation(node, file, processingObjectBodyReadAllowlist)
+			) {
+				inventory['api-object-body-reads']++;
+				addViolation(
+					'no-api-object-body-read',
+					file,
+					node,
+					'completed object bodies may be read only by an explicit validation/export processing role',
+				);
+			}
+			if (
+				isGuardedFeatureCode(file)
+				&& objectReadCall
+				&& !isRouteRegistration(node)
+				&& !isAllowedInEnclosingOperation(node, file, internalObjectReadAllowlist)
+			) {
+				inventory['client-delivery-object-reads']++;
+				addViolation(
+					'no-client-delivery-object-read',
+					file,
+					node,
+					`object read/HEAD/Range through ${callName ?? 'an aliased reader'} is not an exact validation, transform, recovery, or completion operation`,
+				);
+			}
+			if (callName === 'completeMultipart') {
+				inventory['multipart-complete-callers']++;
+				if (!multipartCompleteCallerAllowlist.has(file)) {
+					inventory['unowned-multipart-complete-callers']++;
+					addViolation(
+						'no-unowned-multipart-complete',
+						file,
+						node,
+						'CompleteMultipartUpload authority belongs only to the fenced completion service and its composition adapter',
+					);
+				}
+			}
+			if (
+				callName === 'uploadPart'
+				&& (
+					isDirectUploadOperation(node, file)
+					|| isGameUploadServiceFile(file)
+				)
+			) {
+				inventory['direct-upload-byte-relays']++;
+				addViolation(
+					'no-direct-upload-byte-relay',
+					file,
+					node,
+					'direct upload services issue capabilities; they never accept or forward part bodies',
+				);
+			}
+			if (
+				isDirectUploadFile(file)
+				&& signerForbiddenAuthorityNames.has(callName ?? '')
+			) {
+				addViolation(
+					'no-signer-admin-authority',
+					file,
+					node,
+					`part-signing code must not invoke ${callName}`,
+				);
+			}
+			if (
+				isClientFacingDeliveryFile(file)
+				&& isStorageMethodCall(node, objectReadMethodNames)
+			) {
+				inventory['client-delivery-object-reads']++;
+				addViolation(
+					'no-client-delivery-object-read',
+					file,
+					node,
+					`client-facing delivery cannot implement object GET/HEAD/Range through ${callName}; issue a capability or public-origin URL`,
+				);
+			}
+			if (
+				isGuardedFeatureCode(file)
+				&& (callName === 'fetch' || callName === 'pipe')
+				&& !(
+					callName === 'pipe'
+					&& isAllowedInEnclosingOperation(node, file, applicationPipeAllowlist)
+				)
+			) {
+				addViolation(
+					'no-application-asset-proxy',
+					file,
+					node,
+					`${callName} is not permitted as an object transport boundary in feature code; use Garage/public origin or an external reverse proxy`,
+				);
+			}
+			if (
+				isClientFacingDeliveryFile(file)
+				&& callName === 'send'
+				&& node.arguments.some((argument) => /(?:^|\.)(?:body|object|payload|stream)$/.test(argument.getText()))
+			) {
+				inventory['protected-download-bodies']++;
+				addViolation(
+					'no-protected-download-body',
+					file,
+					node,
+					'client-facing asset routes cannot send an object body/stream through Fastify',
+				);
+			}
+			if (
+				isClientFacingDeliveryFile(file)
+				&& /public/.test(file)
+				&& /^(?:presign|getSignedUrl)$/.test(callName ?? '')
+			) {
+				inventory['public-metadata-presign-authorities']++;
+				addViolation(
+					'no-public-metadata-presign-authority',
+					file,
+					node,
+					'public metadata/delivery services return immutable public-origin URLs and must not mint protected capabilities',
+				);
+			}
+
+			if (callName && ['debug', 'error', 'fatal', 'info', 'trace', 'warn'].includes(callName)) {
+				const context = node.arguments[0];
+				if (context && identifierOrPropertyLooksSensitive(context, signedCapabilityBindings)) {
+					inventory['signed-url-loggings']++;
+					addViolation(
+						'no-presigned-url-logging',
+						file,
+						node,
+						'logger context must contain stable IDs/action/result only, never a signed URL, signature, access key, or credential',
+					);
+				}
+			}
+
+			if (isRouteRegistration(node)) {
+				const route = literalRoute(node);
+				if (
+					route?.includes(':storageKey')
+					&& (route.includes('/assets') || route.includes('protected'))
+				) {
+					inventory['storage-key-canonical-routes']++;
+					addViolation(
+						'no-canonical-storage-key-route',
+						file,
+						node,
+						'external asset routes use assetId; raw storageKey routes are forbidden',
+					);
+				}
+				if (route && /(?:direct|part-urls)/.test(route)) {
+					for (const argument of node.arguments.slice(1)) {
+						if (containsReadableStreamType(argument)) {
+							inventory['direct-controller-body-streams']++;
+							addViolation(
+								'no-direct-controller-body-stream',
+								file,
+								argument,
+								'direct UploadPart routes accept JSON control messages, never a readable request body stream',
+							);
+						}
+						const uploadPartCall = containsCallNamed(argument, new Set(['uploadPart']));
+						if (uploadPartCall) {
+							inventory['direct-controller-body-streams']++;
+							addViolation(
+								'no-direct-controller-body-stream',
+								file,
+								uploadPartCall,
+								'direct routes may issue UploadPart URLs but cannot call UploadPart with client bytes',
+							);
+						}
+					}
+				}
+			}
+		}
+
+		if (isControllerFile(file) && ts.isPropertyAccessExpression(node)) {
+			if (
+				node.name.text === 'env'
+				&& (
+					(ts.isIdentifier(node.expression) && node.expression.text === 'process')
+					|| node.expression.getText() === 'globalThis.process'
+				)
+			) {
+				addViolation(
+					'no-controller-process-env',
+					file,
+					node,
+					'controllers receive validated configuration through their factory; they cannot read process.env',
+				);
+			}
+		}
+
+		if (
+			(ts.isPropertyAssignment(node) || ts.isMethodDeclaration(node))
+			&& propertyNameText(node.name) === 'body'
+			&& isClientFacingDeliveryFile(file)
+		) {
+			let current = node.parent;
+			let deliveryFunction = false;
+			while (current) {
+				if (
+					(ts.isFunctionDeclaration(current) || ts.isMethodDeclaration(current))
+					&& current.name
+					&& /(?:download|grantProtected)/i.test(current.name.getText())
+				) {
+					deliveryFunction = true;
+					break;
+				}
+				current = current.parent;
+			}
+			if (deliveryFunction) {
+				inventory['protected-download-bodies']++;
+				addViolation(
+					'no-protected-download-body',
+					file,
+					node,
+					'protected canonical download returns a presigned redirect descriptor, never an object body',
+				);
+			}
+		}
+
+		ts.forEachChild(node, inspectControlPlaneBoundary);
+	}
+	inspectControlPlaneBoundary(sourceFile);
+
 	for (const statement of sourceFile.statements) {
 		if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
 			const creation = findImmediateStatefulCreation(statement.expression, bindings);
@@ -622,8 +1334,7 @@ for (const fileName of files) {
 		const declarationKind = statement.declarationList.flags & ts.NodeFlags.Const ? 'const' : 'mutable';
 		for (const declaration of statement.declarationList.declarations) {
 			if (!ts.isIdentifier(declaration.name)) continue;
-			const bindingKey = `${file}#${declaration.name.text}`;
-			if (declarationKind === 'mutable' && !statefulAppBoundaryAllowlist.has(bindingKey)) {
+			if (declarationKind === 'mutable') {
 				addViolation(
 					'no-module-mutable-state',
 					file,
@@ -634,8 +1345,6 @@ for (const fileName of files) {
 			if (!declaration.initializer) continue;
 			const creation = findImmediateStatefulCreation(declaration.initializer, bindings);
 			if (!creation) continue;
-			const allowed = statefulAppBoundaryAllowlist.get(bindingKey);
-			if (allowed?.creator === creation.creator) continue;
 			addViolation(
 				'no-stateful-module-singleton',
 				file,
@@ -700,6 +1409,6 @@ if (violations.length > 0) {
 	process.exitCode = 1;
 } else {
 	console.log(
-		`[architecture-guard] PASS violations=0 files=${files.length} state-allowlist=${statefulAppBoundaryAllowlist.size}`,
+		`[architecture-guard] PASS violations=0 files=${files.length} state-allowlist=0`,
 	);
 }

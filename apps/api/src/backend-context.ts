@@ -29,15 +29,11 @@ import {
 	createUploadLimiterPort,
 } from './infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
-import { createS3Client } from './lib/s3.js';
+import { createS3Client, createS3PresigningClient } from './lib/s3.js';
 import { createObjectStorage } from './lib/storage.js';
 import { createRootLogger } from './lib/logger.js';
 import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
 import type { DownloadRateLimiter } from './shared/download-rate-limit.js';
-import {
-	createExportProgressStore,
-	type ExportProgressStore,
-} from './modules/admin/export/service.js';
 import {
 	createAssetsBannedProductionGraph,
 	type AssetsBannedProductionGraph,
@@ -264,7 +260,6 @@ export interface BackendContext {
 	uploadLimiter: UploadLimiter;
 	protectedDownloads: DownloadRateLimiter;
 	settings: SettingsStore;
-	exportProgress: ExportProgressStore;
 	uploadLifecycleMetrics: UploadLifecycleMetrics;
 	uploadLifecycle: UploadLifecycleRuntime;
 	lifecycle: Lifecycle;
@@ -302,7 +297,6 @@ export interface ProductionResourceFactories {
 	uploadLimiter(config: Env): MaybePromise<UploadLimiter & { close(): void }>;
 	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
 	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
-	exportProgress(config: Env): MaybePromise<ExportProgressStore>;
 	routes(
 		config: Env,
 		assetsBanned: AssetsBannedProductionGraph,
@@ -330,7 +324,6 @@ export interface ProductionResourceOverrides {
 	uploadLimiter: ResourceLease<UploadLimiter>;
 	lifecycle: ResourceLease<Lifecycle>;
 	protectedDownloads: ResourceLease<DownloadRateLimiter>;
-	exportProgress: ResourceLease<ExportProgressStore>;
 	uploadLifecycle: ResourceLease<UploadLifecycleRuntime>;
 }
 
@@ -365,12 +358,16 @@ const defaultFactories: ProductionResourceFactories = {
 	s3: (config) => createS3Client(config),
 	storage: (client, config) => createObjectStorage(client, {
 		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
+		// A distinct client preserves the hostname/path covered by the browser
+		// capability signature. Internal S3 calls must never use this endpoint.
+		...(config.S3_PUBLIC_SIGNING_ENDPOINT !== config.S3_INTERNAL_ENDPOINT
+			? { presigningClient: createS3PresigningClient(config) }
+			: {}),
 	}),
 	settings: (client, logger) => createPrismaSettingsStore(client, logger),
 	uploadLimiter: (config) => createUploadLimiterPort(config.UPLOAD_MAX_CONCURRENT),
 	lifecycle: (clock, scheduler) => createLifecyclePort(clock, scheduler),
 	protectedDownloads: (clock, scheduler) => createProtectedDownloadLimiter({ clock, scheduler }),
-	exportProgress: () => createExportProgressStore(),
 	routes: loadProductionRoutes,
 };
 
@@ -561,7 +558,11 @@ export async function createProductionBackendContext(
 				(client) => client.$disconnect(),
 			);
 		const s3 = await resource('s3', () => factories.s3(config), (client) => client.destroy());
-		const storage = await resource('storage', () => factories.storage(s3, config));
+		const storage = await resource(
+			'storage',
+			() => factories.storage(s3, config),
+			(value) => value.close?.(),
+		);
 		const uploadLifecycle = await resource(
 			'uploadLifecycle',
 			() => {
@@ -614,11 +615,6 @@ export async function createProductionBackendContext(
 			(limiter) => limiter.close(),
 			(limiter) => limiter.start(),
 		);
-		const exportProgress = await resource(
-			'exportProgress',
-			() => factories.exportProgress(config),
-			(progress) => progress.close(),
-		);
 		const persistence: BackendPersistencePorts = options.persistence ?? (() => {
 			if (!prisma) throw new Error('Prisma persistence was not initialized');
 			return {
@@ -647,8 +643,6 @@ export async function createProductionBackendContext(
 		const publicGraph = createPublicProductionGraph({
 			config,
 			repository: persistence.publicRepository,
-			storage,
-			logger,
 		});
 		const projectAccessRepository = persistence.projectAccessRepository;
 		const projectAccess = createProjectAccessService(projectAccessRepository);
@@ -704,12 +698,7 @@ export async function createProductionBackendContext(
 			config,
 			importRepository: persistence.importRepository,
 			exportRepository: persistence.exportRepository,
-			storage,
-			fileSystem,
-			exportProgress,
-			clock,
 			ids,
-			logger,
 		});
 		owner.register('importExport', owned(
 			importExport,
@@ -734,7 +723,6 @@ export async function createProductionBackendContext(
 		const gameUpload = createGameUploadProductionGraph({
 			config,
 			storage,
-			fileSystem,
 			settings,
 			uploadLimiter,
 			lifecycle,
@@ -810,7 +798,6 @@ export async function createProductionBackendContext(
 			uploadLimiter,
 			protectedDownloads,
 			settings,
-			exportProgress,
 			uploadLifecycleMetrics,
 			uploadLifecycle,
 			lifecycle,

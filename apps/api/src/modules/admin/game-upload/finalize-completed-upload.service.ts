@@ -12,6 +12,11 @@ export interface CompletedUploadSession {
 	totalBytes: bigint;
 	s3Key: string;
 	completionClaimToken: string;
+	generation?: number;
+	sourceIdentityAlgorithm?: string | null;
+	sourceIdentity?: string | null;
+	sourceIdentityBlockSizeBytes?: number | null;
+	sourceIdentityBlockManifest?: Uint8Array | null;
 }
 
 export interface CompletedUploadFinalizationOptions {
@@ -34,9 +39,11 @@ export function createCompletedUploadFinalizer(deps: {
 	deployWebgl(
 		projectId: number,
 		key: string,
+		deploymentId: string,
 		size: number,
 		options?: CompletedUploadFinalizationOptions,
 	): Promise<WebglDeploymentKeys>;
+	reserveWebglDeployment(session: CompletedUploadSession): Promise<string>;
 	rollbackWebglPublicDeployment(
 		keys: WebglPublicDeploymentKeys,
 		reason: string,
@@ -44,13 +51,13 @@ export function createCompletedUploadFinalizer(deps: {
 	): Promise<void>;
 	finalizeGame(
 		session: CompletedUploadSession,
-	): Promise<{ oldStorageKey: string | null; oldPlaybackStorageKey: string | null }>;
+	): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }>;
 	finalizeWebgl(
 		session: CompletedUploadSession,
 		deployment: WebglDeploymentKeys,
 	): Promise<{ oldEntryKey: string }>;
 	wakeDeletionWorker(): void;
-	webglUrl(projectId: number): string;
+	webglUrl(entryKey: string): string;
 	logError(context: Record<string, unknown>, message: string): void;
 }) {
 	return {
@@ -81,9 +88,12 @@ export function createCompletedUploadFinalizer(deps: {
 				let pointerFinalized = false;
 				try {
 					await options.assertClaimOwned?.();
+					const deploymentId = await deps.reserveWebglDeployment(session);
+					await options.assertClaimOwned?.();
 					deployment = await deps.deployWebgl(
 						session.projectId,
 						session.s3Key,
+						deploymentId,
 						object.size,
 						options,
 					);
@@ -95,39 +105,21 @@ export function createCompletedUploadFinalizer(deps: {
 					}
 					return {
 						status: 'COMPLETED',
-						storageKey: session.s3Key,
+						sessionId: session.id,
+						generation: session.generation ?? 1,
 						sizeBytes: Number(session.totalBytes),
-						webglUrl: deps.webglUrl(session.projectId),
+						uploadKind: 'WEBGL',
+						webglUrl: deps.webglUrl(deployment.entryKey),
 					};
 				} catch (err) {
 					if (deployment && !pointerFinalized) {
-						let stillOwnsClaim = !options.storageRequest?.signal?.aborted;
-						if (stillOwnsClaim && options.assertClaimOwned) {
-							try {
-								await options.assertClaimOwned();
-							} catch {
-								stillOwnsClaim = false;
-							}
-						}
-						if (stillOwnsClaim) {
-							if (options.storageRequest || options.assertClaimOwned) {
-								await deps.rollbackWebglPublicDeployment(
-									deployment,
-									'webgl-upload-finalization-failed-site',
-									options,
-								);
-							} else {
-								await deps.rollbackWebglPublicDeployment(
-									deployment,
-									'webgl-upload-finalization-failed-site',
-								);
-							}
-						} else {
-							deps.logError(
-								{ error: err, sessionId: session.id, projectId: session.projectId },
-								'WebGL completion claim was lost; retaining deployment for reference-aware reconciliation',
-							);
-						}
+						// The opaque prefix is already durable on the VERIFYING row.
+						// Retain partial output for same-prefix retry. A deterministic
+						// terminal transition queues its exact prefix atomically.
+						deps.logError(
+							{ error: err, sessionId: session.id, projectId: session.projectId },
+							'WebGL pointer commit did not complete; retaining durable deployment for retry',
+						);
 					}
 					throw err;
 				}
@@ -143,8 +135,11 @@ export function createCompletedUploadFinalizer(deps: {
 			if (result.oldStorageKey || result.oldPlaybackStorageKey) deps.wakeDeletionWorker();
 			return {
 				status: 'COMPLETED',
-				storageKey: session.s3Key,
+				sessionId: session.id,
+				generation: session.generation ?? 1,
 				sizeBytes: Number(session.totalBytes),
+				uploadKind: 'GAME',
+				assetId: result.assetId,
 			};
 		},
 	};

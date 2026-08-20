@@ -13,10 +13,3 @@ export function resolveChunkSizeBytes(
 	// defense in depth for a stale cache during a rolling deployment.
 	return Math.floor(Math.max(MIN_MULTIPART_CHUNK_MB, chunkSizeMb) * MB);
 }
-
-export function chunkUploadBodyLimitBytes(cfg: { UPLOAD_CHUNK_SIZE_MB: number }): number {
-	return Math.max(
-		MIN_MULTIPART_CHUNK_MB * MB,
-		Math.floor(cfg.UPLOAD_CHUNK_SIZE_MB * MB),
-	);
-}

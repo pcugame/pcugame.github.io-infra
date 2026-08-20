@@ -137,18 +137,14 @@ export function useAdminProjectMutations({
 		});
 	};
 
-	const addAsset = async (kind: 'POSTER' | 'VIDEO' | 'IMAGE', file: File) => {
+	const addAsset = async (kind: 'POSTER' | 'IMAGE', file: File) => {
 		const fd = buildAssetFormData(kind, file);
 		const fingerprint = createIdempotencyFingerprint({
 			projectId,
 			kind,
 			file: fingerprintFile(file),
 		});
-		const uploadTitle = kind === 'POSTER'
-			? '포스터 업로드'
-			: kind === 'VIDEO'
-				? '동영상 업로드'
-				: '이미지 업로드';
+		const uploadTitle = kind === 'POSTER' ? '포스터 업로드' : '이미지 업로드';
 		const res = await addAssetMutation.mutateAsync({
 			fd,
 			title: uploadTitle,

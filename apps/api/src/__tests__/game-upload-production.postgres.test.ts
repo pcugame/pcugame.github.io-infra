@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
@@ -9,11 +9,14 @@ import type {
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createNodeFileSystem } from '../infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createS3Client, createS3PresigningClient } from '../lib/s3.js';
+import { createObjectStorage } from '../lib/storage.js';
 import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
 import {
 	createGameUploadProductionGraph,
 	type GameUploadProductionGraph,
 } from '../modules/admin/game-upload/composition.js';
+import { createGameUploadValidationGraph } from '../modules/admin/game-upload/validation-worker.composition.js';
 import { createGameUploadRepository } from '../modules/admin/game-upload/repository.js';
 import {
 	createProductionUploadLifecycleRuntime,
@@ -21,11 +24,59 @@ import {
 } from '../modules/upload-lifecycle/runtime.js';
 import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
 import { createProjectAccessService } from '../modules/admin/project-access.service.js';
-import { createWebglDeploymentKeys } from '../modules/webgl/paths.js';
+import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
+import {
+	createWebglDeploymentKeys,
+	createWebglPublicDeploymentKeys,
+	parseWebglSourceKey,
+} from '../modules/webgl/paths.js';
+import { createOrphanRepository } from '../modules/orphan/repository.js';
+import { createOrphanService } from '../modules/orphan/service.js';
+import { createObjectReferenceResolver } from '../modules/orphan/reference-resolver.js';
 import { createUploadLimiter } from '../shared/upload-limits.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
+import { sourceIdentityRoot } from '../modules/admin/game-upload/source-identity.js';
+import {
+	DirectUploadQuotaExceededError,
+	GameUploadTargetFencedError,
+} from '../modules/admin/game-upload/ports.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
+const runStorageIntegration = process.env['RUN_STORAGE_INTEGRATION'] === 'true';
+const SOURCE_BLOCK_SIZE = 1_048_576;
+
+function sourceIdentityForSize(totalBytes: bigint) {
+	const digest = createHash('sha256').update(Buffer.from('postgres-fixture-source')).digest('hex');
+	const blockDigests = Array.from(
+		{ length: Math.ceil(Number(totalBytes) / SOURCE_BLOCK_SIZE) },
+		() => digest,
+	);
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(Number(totalBytes), SOURCE_BLOCK_SIZE, blockDigests),
+		sourceIdentityBlockSizeBytes: SOURCE_BLOCK_SIZE,
+		sourceIdentityBlockManifest: Buffer.from(blockDigests.join(''), 'hex'),
+		sourceIdentityBlockDigests: blockDigests,
+	};
+}
+
+function sourceIdentityForBuffer(bytes: Buffer) {
+	const blockDigests: string[] = [];
+	for (let offset = 0; offset < bytes.length; offset += SOURCE_BLOCK_SIZE) {
+		blockDigests.push(createHash('sha256')
+			.update(bytes.subarray(offset, Math.min(bytes.length, offset + SOURCE_BLOCK_SIZE)))
+			.digest('hex'));
+	}
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(bytes.length, SOURCE_BLOCK_SIZE, blockDigests),
+		sourceIdentityBlockSizeBytes: SOURCE_BLOCK_SIZE,
+		sourceIdentityBlockManifest: Buffer.concat(
+			blockDigests.map((digest) => Buffer.from(digest, 'hex')),
+		),
+		sourceIdentityBlockDigests: blockDigests,
+	};
+}
 
 const logger: AppLogger = {
 	child: () => logger,
@@ -133,6 +184,9 @@ function memoryStorage() {
 			objects.set(`${bucket}/${key}`, await bodyBuffer(body));
 		}),
 		presign: vi.fn(async () => 'https://storage.test/object'),
+		presignUploadPart: vi.fn(async (_bucket, _key, _uploadId, partNumber) => (
+			`https://storage.test/upload-part/${partNumber}`
+		)),
 		delete: calls.delete.mockImplementation(async (bucket, key) => {
 			if (deleteFailure) throw deleteFailure;
 			objects.delete(`${bucket}/${key}`);
@@ -213,7 +267,11 @@ function memoryStorage() {
 			if (!upload) throw new Error('multipart not found');
 			return [...upload.parts.keys()]
 				.sort((left, right) => left - right)
-				.map((partNumber) => ({ partNumber, etag: `etag-${partNumber}` }));
+				.map((partNumber) => ({
+					partNumber,
+					etag: `etag-${partNumber}`,
+					sizeBytes: upload.parts.get(partNumber)!.length,
+				}));
 		}),
 		listMultipartUploads: vi.fn(async (bucket, prefix) => [...multiparts.entries()]
 			.filter(([, upload]) => upload.bucket === bucket && upload.key.startsWith(prefix))
@@ -339,24 +397,25 @@ describe.runIf(runPostgresIntegration)(
 			invalidate: () => {},
 		};
 
-		function graph(client: PrismaClient): GameUploadProductionGraph {
+		function graph(
+			client: PrismaClient,
+			objectStorage: ObjectStorage = storage.storage,
+			buckets = { publicBucket, protectedBucket },
+		): GameUploadProductionGraph {
 			const access = createProjectAccessService(
 				createProjectAccessRepository(client),
 			);
-			const uploadLifecycle = productionRuntime(client);
+			const uploadLifecycle = productionRuntime(client, objectStorage, buckets);
 			const value = createGameUploadProductionGraph({
 				config: {
 					...defaultTestEnv,
-					API_PUBLIC_URL: 'https://ticket-012.api.test',
-					S3_BUCKET_PUBLIC: publicBucket,
-					S3_BUCKET_PROTECTED: protectedBucket,
+					S3_BUCKET_PROTECTED: buckets.protectedBucket,
 					UPLOAD_CHUNK_SIZE_MB: 1,
 					UPLOAD_SESSION_TTL_MINUTES: 60,
 					UPLOAD_USER_GAME_MAX_MB: 8,
 					UPLOAD_PRIVILEGED_GAME_MAX_MB: 8,
 				},
-				storage: storage.storage,
-				fileSystem: createNodeFileSystem(),
+				storage: objectStorage,
 				settings,
 				uploadLimiter: createUploadLimiter(() => 2),
 				lifecycle: {
@@ -383,14 +442,44 @@ describe.runIf(runPostgresIntegration)(
 			return value;
 		}
 
-		function productionRuntime(client: PrismaClient): UploadLifecycleRuntime {
+		function validationGraph(
+			client: PrismaClient,
+			objectStorage: ObjectStorage = storage.storage,
+			buckets = { publicBucket, protectedBucket },
+		) {
+			const uploadLifecycle = productionRuntime(client, objectStorage, buckets);
+			return createGameUploadValidationGraph({
+				config: {
+					PUBLIC_ASSET_BASE_URL: 'https://ticket-012.assets.test',
+					S3_BUCKET_PUBLIC: buckets.publicBucket,
+					S3_BUCKET_PROTECTED: buckets.protectedBucket,
+				},
+				storage: objectStorage,
+				fileSystem: createNodeFileSystem(),
+				ids: { next: () => randomUUID() },
+				logger,
+				uploadLifecycle,
+				options: {
+					concurrency: 1,
+					claimLeaseMs: 120_000,
+					tempRoot: createNodeFileSystem().temporaryDirectory(),
+					tempDiskBudgetBytes: 32 * 1024 * 1024,
+				},
+			});
+		}
+
+		function productionRuntime(
+			client: PrismaClient,
+			objectStorage: ObjectStorage = storage.storage,
+			buckets = { publicBucket, protectedBucket },
+		): UploadLifecycleRuntime {
 			const runtime = createProductionUploadLifecycleRuntime({
 				config: {
-					S3_BUCKET_PUBLIC: publicBucket,
-					S3_BUCKET_PROTECTED: protectedBucket,
+					S3_BUCKET_PUBLIC: buckets.publicBucket,
+					S3_BUCKET_PROTECTED: buckets.protectedBucket,
 				},
 				prisma: client,
-				storage: storage.storage,
+				storage: objectStorage,
 				clock: { now: () => new Date('2098-07-31T00:10:00.000Z') },
 				ids: { next: () => randomUUID() },
 				logger,
@@ -405,10 +494,19 @@ describe.runIf(runPostgresIntegration)(
 			uploadKind?: 'GAME' | 'WEBGL';
 			status?: string;
 			s3Key: string;
-			s3UploadId?: string;
+			s3UploadId?: string | null;
+			storageKey?: string | null;
 			totalBytes?: bigint;
+			sourceBytes?: Buffer;
+			expiresAt?: Date;
 			updatedAt?: Date;
+			expectedTargetAssetId?: number | null;
+			expectedTargetAssetUpdatedAt?: Date | null;
 		}) {
+			const totalBytes = input.totalBytes ?? BigInt(input.sourceBytes?.length ?? 1);
+			const { sourceIdentityBlockDigests: _sourceIdentityBlockDigests, ...sourceIdentity } = input.sourceBytes
+				? sourceIdentityForBuffer(input.sourceBytes)
+				: sourceIdentityForSize(totalBytes);
 			const session = await control.gameUploadSession.create({
 				data: {
 					id: input.id ?? randomUUID(),
@@ -416,13 +514,17 @@ describe.runIf(runPostgresIntegration)(
 					userId,
 					uploadKind: input.uploadKind ?? 'GAME',
 					originalName: input.uploadKind === 'WEBGL' ? 'build.zip' : 'game.zip',
-					totalBytes: input.totalBytes ?? 1n,
-					chunkSizeBytes: Number(input.totalBytes ?? 1n),
+					totalBytes,
+					chunkSizeBytes: SOURCE_BLOCK_SIZE,
 					totalChunks: 1,
+					...sourceIdentity,
 					status: input.status ?? 'PENDING',
 					s3Key: input.s3Key,
-					s3UploadId: input.s3UploadId ?? randomUUID(),
-					expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+					s3UploadId: input.s3UploadId === undefined ? randomUUID() : input.s3UploadId,
+					storageKey: input.storageKey ?? null,
+					expectedTargetAssetId: input.expectedTargetAssetId ?? null,
+					expectedTargetAssetUpdatedAt: input.expectedTargetAssetUpdatedAt ?? null,
+					expiresAt: input.expiresAt ?? new Date('2099-01-01T00:00:00.000Z'),
 				},
 			});
 			if (input.updatedAt) {
@@ -500,12 +602,19 @@ describe.runIf(runPostgresIntegration)(
 				s3Key: `${testId}-active.zip`,
 			});
 			const service = graph(control).service;
+			const identity = sourceIdentityForSize(1n);
 
 			await expect(service.createSession(
 				projectId,
 				exhibitionId,
 				{ id: userId, role: 'ADMIN' },
-				{ originalName: 'replacement.zip', totalBytes: 1 },
+				{
+					originalName: 'replacement.zip', totalBytes: 1,
+					sourceIdentityAlgorithm: identity.sourceIdentityAlgorithm,
+					sourceIdentity: identity.sourceIdentity,
+					sourceIdentityBlockSizeBytes: identity.sourceIdentityBlockSizeBytes,
+					sourceIdentityBlockDigests: identity.sourceIdentityBlockDigests,
+				},
 			)).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
 			await expect(control.gameUploadSession.findUniqueOrThrow({
 				where: { id: completing.id },
@@ -515,12 +624,95 @@ describe.runIf(runPostgresIntegration)(
 					projectId_uploadKind: { projectId, uploadKind: 'GAME' },
 				},
 			})).resolves.toMatchObject({ sessionId: completing.id });
-			expect(storage.calls.abortMultipart).toHaveBeenCalled();
+			expect(storage.calls.abortMultipart).not.toHaveBeenCalled();
 
 			await control.gameUploadActiveSession.deleteMany({
 				where: { sessionId: completing.id },
 			});
 			await control.gameUploadSession.delete({ where: { id: completing.id } });
+		});
+
+		it('persists and atomically resets the UploadPart capability refresh window', async () => {
+			const active = await createSessionFixture({
+				uploadKind: 'GAME',
+				s3Key: `${testId}-capability-window.zip`,
+			});
+			const repository = createGameUploadRepository(control, {
+				abortBucket: protectedBucket,
+				publicBucket,
+			});
+			const request = {
+				sessionId: active.id,
+				actor: { id: userId, role: 'ADMIN' as const },
+				generation: 1,
+				partNumbers: [1],
+				maxIssuesPerWindow: 2,
+				issueWindowMs: 300_000,
+				quota: {
+					actorActiveSessions: 4,
+					projectActiveSessions: 2,
+					actorOutstandingBytes: 10n * 1024n * 1024n * 1024n,
+				},
+			};
+			try {
+				await expect(repository.reservePartCapabilities(request)).resolves.toMatchObject({
+					isRefresh: false,
+					session: { id: active.id },
+				});
+				await expect(repository.reservePartCapabilities(request)).resolves.toMatchObject({
+					isRefresh: true,
+				});
+				await expect(repository.reservePartCapabilities(request)).rejects.toBeInstanceOf(
+					DirectUploadQuotaExceededError,
+				);
+				await control.$executeRaw`
+					UPDATE "game_upload_sessions"
+					SET "part_url_issue_window_started_at" = clock_timestamp() - INTERVAL '10 minutes'
+					WHERE "id" = ${active.id}
+				`;
+				await expect(repository.reservePartCapabilities(request)).resolves.toMatchObject({
+					isRefresh: true,
+				});
+			} finally {
+				await control.gameUploadActiveSession.deleteMany({ where: { sessionId: active.id } });
+				await control.gameUploadSession.deleteMany({ where: { id: active.id } });
+			}
+		});
+
+		it('enforces actor/project declared-byte quota while accounting replacement in the same slot', async () => {
+			const active = await createSessionFixture({
+				uploadKind: 'GAME',
+				s3Key: `${testId}-quota-active.zip`,
+				totalBytes: 7n,
+			});
+			const repository = createGameUploadRepository(control, {
+				abortBucket: protectedBucket,
+				publicBucket,
+			});
+			const limits = {
+				actorActiveSessions: 1,
+				projectActiveSessions: 1,
+				actorOutstandingBytes: 8n,
+			};
+			try {
+				await expect(repository.assertCanCreateSession({
+					projectId,
+					userId,
+					uploadKind: 'GAME',
+					totalBytes: 8n,
+					limits,
+				})).resolves.toBeUndefined();
+				await expect(repository.assertCanCreateSession({
+					projectId,
+					userId,
+					uploadKind: 'WEBGL',
+					totalBytes: 1n,
+					limits,
+				})).rejects.toBeInstanceOf(DirectUploadQuotaExceededError);
+			} finally {
+				await control.gameUploadActiveSession.deleteMany({ where: { sessionId: active.id } });
+				await control.gameUploadSession.deleteMany({ where: { id: active.id } });
+			}
 		});
 
 		it('uses the production lifecycle repository to atomically replace an active upload and queue its abort', async () => {
@@ -533,6 +725,7 @@ describe.runIf(runPostgresIntegration)(
 			const newSessionId = randomUUID();
 			const newKey = `${testId}-replace-new.zip`;
 			const runtime = productionRuntime(control);
+			const { sourceIdentityBlockDigests: _newDigests, ...newIdentity } = sourceIdentityForSize(1n);
 
 			try {
 				const result = await runtime.gameUploads.createSessionReplacingActive({
@@ -542,11 +735,16 @@ describe.runIf(runPostgresIntegration)(
 					uploadKind: 'GAME',
 					originalName: 'replacement.zip',
 					totalBytes: 1n,
-					chunkSizeBytes: 1,
+					chunkSizeBytes: SOURCE_BLOCK_SIZE,
 					totalChunks: 1,
+					...newIdentity,
 					s3UploadId: randomUUID(),
 					s3Key: newKey,
 					expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+				}, {
+					actorActiveSessions: 4,
+					projectActiveSessions: 2,
+					actorOutstandingBytes: 10n * 1024n * 1024n * 1024n,
 				});
 
 				expect(result.session.id).toBe(newSessionId);
@@ -604,6 +802,7 @@ describe.runIf(runPostgresIntegration)(
 				s3UploadId: oldUploadId,
 			});
 			const newSessionId = randomUUID();
+			const { sourceIdentityBlockDigests: _newDigests, ...newIdentity } = sourceIdentityForSize(1n);
 			const suffix = oldSession.id.replaceAll('-', '_');
 			const functionName = `ticket_012_abort_${suffix}`;
 			const triggerName = `${functionName}_trigger`;
@@ -643,11 +842,16 @@ describe.runIf(runPostgresIntegration)(
 					uploadKind: 'GAME',
 					originalName: 'must-rollback.zip',
 					totalBytes: 1n,
-					chunkSizeBytes: 1,
+					chunkSizeBytes: SOURCE_BLOCK_SIZE,
 					totalChunks: 1,
+					...newIdentity,
 					s3UploadId: randomUUID(),
 					s3Key: `${testId}-replace-rollback-new.zip`,
 					expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+				}, {
+					actorActiveSessions: 4,
+					projectActiveSessions: 2,
+					actorOutstandingBytes: 10n * 1024n * 1024n * 1024n,
 				})).rejects.toThrow('ticket-012 forced multipart abort outbox failure');
 
 				await expect(control.gameUploadSession.findUniqueOrThrow({
@@ -693,114 +897,97 @@ describe.runIf(runPostgresIntegration)(
 			}
 		});
 
-		it('serializes part claimants with DB deadlines and fences an expired multipart generation', async () => {
-			const key = `${testId}-part-lease-clock.zip`;
-			const oldUploadId = randomUUID();
-			const session = await createSessionFixture({ s3Key: key, s3UploadId: oldUploadId });
-			const first = createGameUploadRepository(control, { abortBucket: protectedBucket });
-			const second = createGameUploadRepository(recoveryClient, { abortBucket: protectedBucket });
-			const firstToken = randomUUID();
-			const secondToken = randomUUID();
+		it('atomically fences a stale GAME target snapshot and preserves the newer READY asset', async () => {
+			const oldKey = `${testId}-snapshot-old.zip`;
+			const newerKey = `${testId}-snapshot-newer.zip`;
+			const candidateKey = `${testId}-snapshot-candidate.zip`;
+			const oldAsset = await control.asset.create({
+				data: {
+					projectId, kind: 'GAME', status: 'READY', storageKey: oldKey,
+					originalName: 'old.zip', mimeType: 'application/zip', sizeBytes: 1n,
+				},
+			});
+			const repository = createGameUploadRepository(control, { abortBucket: protectedBucket });
+			const sessionId = randomUUID();
+			const { sourceIdentityBlockDigests: _digests, ...identity } = sourceIdentityForSize(1n);
+			await repository.createSessionReplacingActive({
+				id: sessionId, projectId, userId, uploadKind: 'GAME', originalName: 'candidate.zip',
+				totalBytes: 1n, chunkSizeBytes: SOURCE_BLOCK_SIZE, totalChunks: 1,
+				...identity, s3Key: candidateKey, s3UploadId: randomUUID(),
+				expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+			}, {
+				actorActiveSessions: 4,
+				projectActiveSessions: 2,
+				actorOutstandingBytes: 10n * 1024n * 1024n * 1024n,
+			});
+			const session = await control.gameUploadSession.findUniqueOrThrow({ where: { id: sessionId } });
+			expect(session).toMatchObject({
+				expectedTargetAssetId: oldAsset.id,
+				expectedTargetAssetUpdatedAt: oldAsset.updatedAt,
+			});
+			const token = randomUUID();
+			await control.gameUploadSession.update({
+				where: { id: session.id },
+				data: {
+					status: 'VERIFYING',
+					storageKey: candidateKey,
+					completionClaimToken: token,
+					completionClaimUntil: new Date('2099-01-01T00:00:00.000Z'),
+				},
+			});
+			await control.asset.update({ where: { id: oldAsset.id }, data: { status: 'DELETED' } });
+			const newerAsset = await control.asset.create({
+				data: {
+					projectId, kind: 'GAME', status: 'READY', storageKey: newerKey,
+					originalName: 'newer.zip', mimeType: 'application/zip', sizeBytes: 1n,
+				},
+			});
 
 			try {
-				const outcomes = await Promise.all([
-					first.acquirePartClaim({
-						sessionId: session.id,
-						partNumber: 1,
-						generation: 1,
-						token: firstToken,
-						owner: 'clock-skew-future-worker',
-						leaseMs: 2 * 60_000,
-					}),
-					second.acquirePartClaim({
-						sessionId: session.id,
-						partNumber: 1,
-						generation: 1,
-						token: secondToken,
-						owner: 'clock-skew-past-worker',
-						leaseMs: 2 * 60_000,
-					}),
-				]);
-				expect(outcomes.filter(({ kind }) => kind === 'acquired')).toHaveLength(1);
-				expect(outcomes.filter(({ kind }) => kind === 'busy')).toHaveLength(1);
-				const claim = await control.gameUploadPartClaim.findFirstOrThrow({
-					where: { sessionId: session.id, partNumber: 1 },
-				});
-				await expect(second.replaceMultipartGeneration({
-					sessionId: session.id,
-					expectedGeneration: 1,
-					newUploadId: randomUUID(),
-					reason: 'must-not-revoke-live-part-claim',
-				})).resolves.toEqual({ replaced: false, durableAbort: null });
-				await expect(control.gameUploadPartClaim.findUnique({ where: { id: claim.id } }))
-					.resolves.toMatchObject({ token: claim.token, generation: 1 });
-				const [partDatabaseTime] = await control.$queryRaw<Array<{ now: Date }>>`
-					SELECT clock_timestamp() AS "now"
-				`;
-				const partLeaseRemaining = claim.leaseUntil.getTime() - partDatabaseTime!.now.getTime();
-				expect(partLeaseRemaining).toBeGreaterThan(60_000);
-				expect(partLeaseRemaining).toBeLessThan(3 * 60_000);
-				const winningRepository = claim.token === firstToken ? first : second;
-
-				await expect(first.renewPartClaim('wrong-token', 5 * 60_000))
-					.resolves.toEqual({ count: 0 });
-				await expect(winningRepository.renewPartClaim(claim.token, 5 * 60_000))
-					.resolves.toEqual({ count: 1 });
-				const renewed = await control.gameUploadPartClaim.findUniqueOrThrow({
-					where: { id: claim.id },
-				});
-				expect(renewed.leaseUntil.getTime())
-					.toBeGreaterThan(claim.leaseUntil.getTime() + 2 * 60_000);
-
-				await control.gameUploadPartClaim.update({
-					where: { id: claim.id },
-					data: { leaseUntil: new Date(0) },
-				});
-				await expect(winningRepository.renewPartClaim(claim.token, 5 * 60_000))
-					.resolves.toEqual({ count: 0 });
-				await expect(winningRepository.completePartClaim({
-					token: claim.token,
-					etag: 'stale-etag',
-				})).resolves.toEqual({ accepted: false, parts: [] });
-				await expect(second.acquirePartClaim({
-					sessionId: session.id,
-					partNumber: 1,
-					generation: 1,
-					token: randomUUID(),
-					owner: 'post-expiry-worker',
-					leaseMs: 2 * 60_000,
-				})).resolves.toEqual({ kind: 'expired' });
-
-				const newUploadId = randomUUID();
-				await expect(second.replaceMultipartGeneration({
-					sessionId: session.id,
-					expectedGeneration: 1,
-					newUploadId,
-					reason: 'db-expired-part-claim-reset',
-				})).resolves.toMatchObject({ replaced: true });
-				const nextToken = randomUUID();
-				await expect(second.acquirePartClaim({
-					sessionId: session.id,
-					partNumber: 1,
-					generation: 2,
-					token: nextToken,
-					owner: 'new-generation-worker',
-					leaseMs: 2 * 60_000,
-				})).resolves.toEqual({ kind: 'acquired', token: nextToken });
-				await expect(second.completePartClaim({ token: nextToken, etag: 'etag-generation-2' }))
-					.resolves.toMatchObject({ accepted: true });
-				await expect(control.gameUploadPart.findUniqueOrThrow({
-					where: {
-						game_upload_part_session_part: { sessionId: session.id, partNumber: 1 },
+				await expect(repository.finalizeCompletedSession(
+					session.id,
+					projectId,
+					'GAME',
+					{
+						storageKey: candidateKey,
+						originalName: 'candidate.zip',
+						mimeType: 'application/zip',
+						sizeBytes: 1n,
+						isPublic: false,
+						completionClaimToken: token,
 					},
-				})).resolves.toMatchObject({ generation: 2, etag: 'etag-generation-2' });
+					{
+						bucket: protectedBucket,
+						reason: 'replace-game',
+						playbackReason: 'replace-playback',
+					},
+				)).rejects.toBeInstanceOf(GameUploadTargetFencedError);
+				await expect(control.asset.findUniqueOrThrow({ where: { id: newerAsset.id } }))
+					.resolves.toMatchObject({ status: 'READY', storageKey: newerKey });
+				await expect(control.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))
+					.resolves.toMatchObject({
+						status: 'REJECTED', storageKey: candidateKey,
+						completionClaimToken: null, completionLastError: 'STALE_TARGET_ASSET',
+					});
+				await expect(control.gameUploadActiveSession.findUnique({
+					where: { projectId_uploadKind: { projectId, uploadKind: 'GAME' } },
+				})).resolves.toBeNull();
+				await expect(control.orphanObject.findUnique({
+					where: {
+						orphan_bucket_storage_key: {
+							bucket: protectedBucket,
+							storageKey: candidateKey,
+						},
+					},
+				})).resolves.toMatchObject({ state: 'PENDING', targetKind: 'EXACT' });
 			} finally {
 				await runCleanupSteps([
 					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
 					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
-					() => control.multipartAbortTask.deleteMany({
-						where: { bucket: protectedBucket, storageKey: key, uploadId: oldUploadId },
+					() => control.orphanObject.deleteMany({
+						where: { bucket: protectedBucket, storageKey: candidateKey },
 					}),
+					() => control.asset.deleteMany({ where: { id: { in: [oldAsset.id, newerAsset.id] } } }),
 				]);
 			}
 		});
@@ -808,9 +995,6 @@ describe.runIf(runPostgresIntegration)(
 		it('keeps an active completion lease despite a future recovery cutoff and fences expired finalizers', async () => {
 			const key = `${testId}-completion-lease-clock.zip`;
 			const session = await createSessionFixture({ s3Key: key });
-			await control.gameUploadPart.create({
-				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1', generation: 1 },
-			});
 			const owner = createGameUploadRepository(control, { abortBucket: protectedBucket });
 			const recovery = createGameUploadRepository(recoveryClient, { abortBucket: protectedBucket });
 			const ownerToken = randomUUID();
@@ -905,6 +1089,14 @@ describe.runIf(runPostgresIntegration)(
 						reason: 'replace-webgl',
 					},
 					ownerToken,
+					{
+						status: 'COMPLETED',
+						sessionId: session.id,
+						generation: 1,
+						sizeBytes: 1,
+						uploadKind: 'WEBGL',
+						webglUrl: 'https://ticket-012.assets.test/webgl/index.html',
+					},
 				)).rejects.toThrow('WebGL upload completion claim is no longer active');
 
 				const recoveryOutcomes = await Promise.all([
@@ -945,173 +1137,48 @@ describe.runIf(runPostgresIntegration)(
 			}
 		});
 
-		it('fences stale part claims when replacing a multipart generation', async () => {
-			const key = `${testId}-generation.zip`;
-			const oldUploadId = randomUUID();
-			const newUploadId = randomUUID();
+		it('re-checks expiration with the database clock after waiting on the project lock', async () => {
+			const expiresAt = new Date(Date.now() + 800);
 			const session = await createSessionFixture({
-				s3Key: key,
-				s3UploadId: oldUploadId,
+				s3Key: `${testId}-expires-while-locked.zip`,
+				expiresAt,
 			});
-			const repository = createGameUploadRepository(control, {
-				abortBucket: protectedBucket,
+			const repository = createGameUploadRepository(control, { abortBucket: protectedBucket });
+			let releaseProjectLock!: () => void;
+			let reportProjectLock!: () => void;
+			const projectLocked = new Promise<void>((resolve) => { reportProjectLock = resolve; });
+			const release = new Promise<void>((resolve) => { releaseProjectLock = resolve; });
+			const blocker = recoveryClient.$transaction(async (tx) => {
+				await tx.$queryRaw`
+					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
+				`;
+				reportProjectLock();
+				await release;
 			});
-			const leaseMs = 60_000;
-			const staleToken = randomUUID();
-
 			try {
-				await expect(repository.acquirePartClaim({
+				await projectLocked;
+				let settled = false;
+				const claim = repository.claimCompletion({
 					sessionId: session.id,
-					partNumber: 1,
-					generation: 1,
-					token: staleToken,
-					owner: 'first-request',
-					leaseMs,
-				})).resolves.toEqual({ kind: 'acquired', token: staleToken });
-				await expect(repository.acquirePartClaim({
-					sessionId: session.id,
-					partNumber: 1,
 					generation: 1,
 					token: randomUUID(),
-					owner: 'second-request',
-					leaseMs,
-				})).resolves.toEqual({ kind: 'busy' });
-				await control.gameUploadPart.create({
-					data: {
-						sessionId: session.id,
-						partNumber: 1,
-						etag: 'old-etag',
-						generation: 1,
-					},
-				});
-				await expect(repository.replaceMultipartGeneration({
-					sessionId: session.id,
-					expectedGeneration: 1,
-					newUploadId,
-					reason: 'must-not-revoke-active-part-claim',
-				})).resolves.toEqual({ replaced: false, durableAbort: null });
-				await expect(control.gameUploadPartClaim.findUnique({ where: { token: staleToken } }))
-					.resolves.toMatchObject({ token: staleToken, generation: 1 });
-				await control.gameUploadPartClaim.update({
-					where: { token: staleToken },
-					data: { leaseUntil: new Date(0) },
-				});
-
-				await expect(repository.replaceMultipartGeneration({
-					sessionId: session.id,
-					expectedGeneration: 1,
-					newUploadId,
-					reason: 'expired-part-claim-reset',
-				})).resolves.toEqual({
-					replaced: true,
-					durableAbort: {
-						tracking: 'durable-abort-task-committed',
-						sessionId: session.id,
-						key,
-						uploadId: oldUploadId,
-						reason: 'expired-part-claim-reset',
-					},
-				});
+					leaseMs: 60_000,
+				}).finally(() => { settled = true; });
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				expect(settled).toBe(false);
+				await new Promise((resolve) => setTimeout(
+					resolve,
+					Math.max(0, expiresAt.getTime() - Date.now() + 50),
+				));
+				releaseProjectLock();
+				await blocker;
+				await expect(claim).resolves.toEqual({ count: 0, reason: 'state' });
 				await expect(control.gameUploadSession.findUniqueOrThrow({
 					where: { id: session.id },
-				})).resolves.toMatchObject({
-					multipartGeneration: 2,
-					s3UploadId: newUploadId,
-					uploadedChunks: [],
-				});
-				await expect(control.gameUploadPartClaim.count({
-					where: { sessionId: session.id },
-				})).resolves.toBe(0);
-				await expect(control.gameUploadPart.count({
-					where: { sessionId: session.id },
-				})).resolves.toBe(0);
-				await expect(repository.completePartClaim({
-					token: staleToken,
-					etag: 'stale-etag',
-				})).resolves.toEqual({ accepted: false, parts: [] });
-				await expect(repository.acquirePartClaim({
-					sessionId: session.id,
-					partNumber: 1,
-					generation: 1,
-					token: randomUUID(),
-					owner: 'stale-generation',
-					leaseMs,
-				})).resolves.toEqual({ kind: 'unavailable' });
-				await expect(control.multipartAbortTask.findUnique({
-					where: {
-						multipart_abort_bucket_key_upload: {
-							bucket: protectedBucket,
-							storageKey: key,
-							uploadId: oldUploadId,
-						},
-					},
-				})).resolves.toMatchObject({ reason: 'expired-part-claim-reset' });
+				})).resolves.toMatchObject({ status: 'PENDING', completionClaimToken: null });
 			} finally {
-				await runCleanupSteps([
-					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
-					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
-					() => control.multipartAbortTask.deleteMany({
-						where: { bucket: protectedBucket, storageKey: key, uploadId: oldUploadId },
-					}),
-				]);
-			}
-		});
-
-		it('blocks completion while a part claim is active and fences later part work after completion claim', async () => {
-			const session = await createSessionFixture({
-				s3Key: `${testId}-completion-claim.zip`,
-			});
-			const repository = createGameUploadRepository(control, {
-				abortBucket: protectedBucket,
-			});
-			const leaseMs = 60_000;
-			const partToken = randomUUID();
-			const completionToken = randomUUID();
-
-			try {
-				await repository.acquirePartClaim({
-					sessionId: session.id,
-					partNumber: 1,
-					generation: 1,
-					token: partToken,
-					owner: 'part-request',
-					leaseMs,
-				});
-				await expect(repository.claimCompletion({
-					sessionId: session.id,
-					generation: 1,
-					token: completionToken,
-					leaseMs,
-				})).resolves.toEqual({ count: 0, reason: 'parts-active' });
-				await expect(repository.completePartClaim({
-					token: partToken,
-					etag: 'etag-1',
-				})).resolves.toMatchObject({ accepted: true });
-				await expect(repository.claimCompletion({
-					sessionId: session.id,
-					generation: 1,
-					token: completionToken,
-					leaseMs,
-				})).resolves.toEqual({ count: 1, reason: null });
-				await expect(repository.renewCompletionClaim(
-					session.id,
-					'wrong-token',
-					2 * 60_000,
-				)).resolves.toEqual({ count: 0 });
-				await expect(repository.renewCompletionClaim(
-					session.id,
-					completionToken,
-					2 * 60_000,
-				)).resolves.toEqual({ count: 1 });
-				await expect(repository.acquirePartClaim({
-					sessionId: session.id,
-					partNumber: 1,
-					generation: 1,
-					token: randomUUID(),
-					owner: 'late-part-request',
-					leaseMs,
-				})).resolves.toEqual({ kind: 'unavailable' });
-			} finally {
+				releaseProjectLock();
+				await blocker.catch(() => undefined);
 				await runCleanupSteps([
 					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
 					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
@@ -1126,9 +1193,6 @@ describe.runIf(runPostgresIntegration)(
 				s3Key: key,
 				s3UploadId: uploadId,
 				totalBytes: 1n,
-			});
-			await control.gameUploadPart.create({
-				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1' },
 			});
 			storage.seedMultipart(
 				protectedBucket,
@@ -1210,10 +1274,12 @@ describe.runIf(runPostgresIntegration)(
 					firstGraph.service.completeSession(
 						session.id,
 						{ id: userId, role: 'ADMIN' },
+						{ generation: 1, parts: [{ partNumber: 1, etag: 'etag-1', sizeBytes: 1 }] },
 					),
 					secondGraph.service.completeSession(
 						session.id,
 						{ id: userId, role: 'ADMIN' },
+						{ generation: 1, parts: [{ partNumber: 1, etag: 'etag-1', sizeBytes: 1 }] },
 					),
 				];
 				await vi.waitFor(async () => {
@@ -1229,7 +1295,10 @@ describe.runIf(runPostgresIntegration)(
 						WHERE application_name IN (${firstApplication}, ${secondApplication})
 							AND state = 'active'
 							AND wait_event_type = 'Lock'
-							AND query ILIKE '%UPDATE%game_upload_sessions%'
+							AND (
+								query ILIKE '%UPDATE%game_upload_sessions%'
+								OR (query ILIKE '%FROM "projects"%' AND query ILIKE '%FOR UPDATE%')
+							)
 					`;
 					expect(observed).toHaveLength(2);
 					expect(
@@ -1247,19 +1316,21 @@ describe.runIf(runPostgresIntegration)(
 				lockHeld = false;
 
 				const outcomes = await Promise.allSettled(operations);
-				expect(outcomes.every(({ status }) => status === 'rejected')).toBe(true);
-				expect(outcomes.filter((outcome) => (
-					outcome.status === 'rejected'
-					&& /session is COMPLETING|already being completed/.test(
-						String(outcome.reason instanceof Error
-							? outcome.reason.message
-							: outcome.reason),
-					)
-				))).toHaveLength(1);
+				expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+				const rejected = outcomes.filter((outcome) => outcome.status === 'rejected');
+				expect(rejected).toHaveLength(1);
+				expect(rejected[0]).toMatchObject({
+					status: 'rejected',
+					reason: expect.objectContaining({ statusCode: 409, code: 'CONFLICT' }),
+				});
 				expect(storage.calls.completeMultipart).toHaveBeenCalledTimes(1);
+				await expect(validationGraph(control).worker.runPass()).resolves.toMatchObject({
+					claimed: 1,
+					rejected: 1,
+				});
 				await expect(control.gameUploadSession.findUniqueOrThrow({
 					where: { id: session.id },
-				})).resolves.toMatchObject({ status: 'FAILED' });
+				})).resolves.toMatchObject({ status: 'REJECTED' });
 			} finally {
 				if (lockHeld) {
 					try {
@@ -1302,6 +1373,819 @@ describe.runIf(runPostgresIntegration)(
 			}
 		});
 
+		it('blocks parent deletion and an early reaper while Garage Complete is in flight', async () => {
+			const isolatedStorage = memoryStorage();
+			const archive = makeStoredZip([{ name: 'game/index.html', body: Buffer.from('late-object') }]);
+			const source = sourceIdentityForBuffer(archive);
+			const service = graph(control, isolatedStorage.storage).service;
+			const projectRepository = createProjectCrudRepository(control);
+			let releaseComplete!: () => void;
+			let reportCompleteEntered!: () => void;
+			const completeEntered = new Promise<void>((resolve) => { reportCompleteEntered = resolve; });
+			const release = new Promise<void>((resolve) => { releaseComplete = resolve; });
+			const baseComplete = isolatedStorage.calls.completeMultipart.getMockImplementation()!;
+			isolatedStorage.calls.completeMultipart.mockImplementationOnce(async (
+				bucket: string,
+				key: string,
+				uploadId: string,
+			) => {
+				reportCompleteEntered();
+				await release;
+				return baseComplete(bucket, key, uploadId);
+			});
+			let sessionId: string | undefined;
+			let sourceKey: string | undefined;
+			let completion: Promise<unknown> | undefined;
+			try {
+				const created = await service.createSession(
+					projectId,
+					exhibitionId,
+					{ id: userId, role: 'ADMIN' },
+					{
+						originalName: 'paused-complete.zip',
+						totalBytes: archive.length,
+						uploadKind: 'GAME',
+						sourceIdentityAlgorithm: source.sourceIdentityAlgorithm,
+						sourceIdentity: source.sourceIdentity,
+						sourceIdentityBlockSizeBytes: source.sourceIdentityBlockSizeBytes,
+						sourceIdentityBlockDigests: source.sourceIdentityBlockDigests,
+					},
+				);
+				sessionId = created.sessionId;
+				const row = await control.gameUploadSession.findUniqueOrThrow({
+					where: { id: created.sessionId },
+				});
+				sourceKey = row.s3Key!;
+				isolatedStorage.seedMultipart(
+					protectedBucket,
+					sourceKey,
+					row.s3UploadId!,
+					1,
+					archive,
+				);
+				completion = service.completeSession(
+					created.sessionId,
+					{ id: userId, role: 'ADMIN' },
+					{
+						generation: 1,
+						parts: [{ partNumber: 1, etag: 'etag-1', sizeBytes: archive.length }],
+					},
+				);
+				await completeEntered;
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: created.sessionId },
+				})).resolves.toMatchObject({ status: 'COMPLETING' });
+				expect(isolatedStorage.objects.has(`${protectedBucket}/${sourceKey}`)).toBe(false);
+
+				await expect(projectRepository.deleteProjectReturningAssets(projectId, {
+					publicBucket,
+					protectedBucket,
+					reason: 'paused-complete-parent-delete',
+				})).rejects.toMatchObject({ code: 'OPERATION_IN_PROGRESS', statusCode: 409 });
+				await expect(control.project.findUnique({ where: { id: projectId } })).resolves.not.toBeNull();
+
+				const orphanRepository = createOrphanRepository(control);
+				await orphanRepository.upsertOrphan(
+					protectedBucket,
+					sourceKey,
+					'paused-complete-early-reaper',
+					'EXACT',
+					new Date(),
+				);
+				isolatedStorage.calls.delete.mockClear();
+				const earlyReaper = await createOrphanService({
+					clock: { now: () => new Date() },
+					storage: isolatedStorage.storage,
+					repository: orphanRepository,
+					references: createObjectReferenceResolver(
+						control,
+						{ publicBucket, protectedBucket },
+						{ error: vi.fn() },
+					),
+					ids: { next: () => 'paused-complete-reaper' },
+					logger: { info: vi.fn(), error: vi.fn() },
+				}).runOrphanReaper();
+				expect(earlyReaper).toMatchObject({ failed: 0 });
+				expect(earlyReaper.tried).toBeGreaterThanOrEqual(1);
+				expect(isolatedStorage.calls.delete).not.toHaveBeenCalledWith(
+					protectedBucket,
+					sourceKey,
+					expect.anything(),
+				);
+				await expect(control.orphanObject.findUniqueOrThrow({
+					where: {
+						orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: sourceKey },
+					},
+				})).resolves.toMatchObject({
+					state: 'CANCELLED',
+					cancelReason: 'live-reference-detected',
+				});
+
+				releaseComplete();
+				await expect(completion).resolves.toMatchObject({ status: 'VERIFYING' });
+				await expect(validationGraph(control, isolatedStorage.storage).worker.runPass())
+					.resolves.toMatchObject({ claimed: 1, ready: 1 });
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: created.sessionId },
+				})).resolves.toMatchObject({ status: 'COMPLETED', storageKey: sourceKey });
+				expect(isolatedStorage.objects.has(`${protectedBucket}/${sourceKey}`)).toBe(true);
+				await expect(control.asset.count({ where: { storageKey: sourceKey } })).resolves.toBe(1);
+			} finally {
+				releaseComplete();
+				await completion?.catch(() => undefined);
+				if (sourceKey) isolatedStorage.objects.delete(`${protectedBucket}/${sourceKey}`);
+				if (sessionId) {
+					await runCleanupSteps([
+						() => control.gameUploadActiveSession.deleteMany({ where: { sessionId } }),
+						() => control.asset.deleteMany({ where: { storageKey: sourceKey } }),
+						() => control.orphanObject.deleteMany({
+							where: { bucket: protectedBucket, storageKey: sourceKey },
+						}),
+						() => control.gameUploadSession.deleteMany({ where: { id: sessionId } }),
+					]);
+				}
+			}
+		});
+
+		it('runs direct multipart through authoritative storage completion and the PostgreSQL verifier', async () => {
+			const archive = makeStoredZip([{ name: 'game/index.html', body: Buffer.from('ready') }]);
+			const source = sourceIdentityForBuffer(archive);
+			const service = graph(control).service;
+			let sessionId: string | undefined;
+			let sourceKey: string | undefined;
+			try {
+				const created = await service.createSession(
+					projectId,
+					exhibitionId,
+					{ id: userId, role: 'ADMIN' },
+					{
+						originalName: 'direct-game.zip',
+						totalBytes: archive.length,
+						uploadKind: 'GAME',
+						sourceIdentityAlgorithm: source.sourceIdentityAlgorithm,
+						sourceIdentity: source.sourceIdentity,
+						sourceIdentityBlockSizeBytes: source.sourceIdentityBlockSizeBytes,
+						sourceIdentityBlockDigests: source.sourceIdentityBlockDigests,
+					},
+				);
+				sessionId = created.sessionId;
+				expect(created).toMatchObject({ generation: 1 });
+				const row = await control.gameUploadSession.findUniqueOrThrow({
+					where: { id: created.sessionId },
+				});
+				sourceKey = row.s3Key!;
+				expect(row).toMatchObject({
+					status: 'PENDING',
+					multipartGeneration: 1,
+				});
+				storage.seedMultipart(
+					protectedBucket,
+					row.s3Key!,
+					row.s3UploadId!,
+					1,
+					archive,
+				);
+
+				await expect(service.completeSession(
+					created.sessionId,
+					{ id: userId, role: 'ADMIN' },
+					{
+						generation: 1,
+						parts: [{ partNumber: 1, etag: 'etag-1', sizeBytes: archive.length }],
+					},
+				)).resolves.toEqual({
+					status: 'VERIFYING',
+					sessionId: created.sessionId,
+					generation: 1,
+					sizeBytes: archive.length,
+				});
+
+				await expect(validationGraph(control).worker.runPass()).resolves.toMatchObject({
+					claimed: 1,
+					ready: 1,
+				});
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: created.sessionId },
+				})).resolves.toMatchObject({
+					status: 'COMPLETED',
+					storageKey: row.s3Key,
+					s3UploadId: null,
+				});
+				await expect(control.asset.findFirstOrThrow({
+					where: { projectId, kind: 'GAME', storageKey: row.s3Key! },
+				})).resolves.toMatchObject({ status: 'READY', isPublic: false });
+				await expect(control.gameUploadActiveSession.findUnique({
+					where: { projectId_uploadKind: { projectId, uploadKind: 'GAME' } },
+				})).resolves.toBeNull();
+			} finally {
+				if (sourceKey) storage.objects.delete(`${protectedBucket}/${sourceKey}`);
+				if (sessionId) {
+					await runCleanupSteps([
+						() => control.gameUploadActiveSession.deleteMany({ where: { sessionId } }),
+						() => control.asset.deleteMany({ where: { storageKey: sourceKey } }),
+						() => control.orphanObject.deleteMany({
+							where: { bucket: protectedBucket, storageKey: sourceKey },
+						}),
+						() => control.gameUploadSession.deleteMany({ where: { id: sessionId } }),
+					]);
+				}
+			}
+		});
+
+		it('persists one opaque WebGL public prefix across retry and queues exact cleanup on terminal failure', async () => {
+			const sourceDeploymentId = randomUUID();
+			const sourceKey = `webgl/${projectId}/${sourceDeploymentId}/source.zip`;
+			const claimToken = randomUUID();
+			const session = await createSessionFixture({
+				uploadKind: 'WEBGL',
+				status: 'VERIFYING',
+				s3Key: sourceKey,
+				s3UploadId: null,
+				storageKey: sourceKey,
+			});
+			await control.gameUploadSession.update({
+				where: { id: session.id },
+				data: {
+					completionClaimToken: claimToken,
+					completionClaimUntil: new Date(Date.now() + 120_000),
+				},
+			});
+			const repository = createGameUploadRepository(control, {
+				abortBucket: protectedBucket,
+				publicBucket,
+			});
+			const firstCandidate = randomUUID();
+			const retryCandidate = randomUUID();
+			try {
+				await expect(repository.reserveWebglDeployment({
+					sessionId: session.id,
+					completionClaimToken: claimToken,
+					candidateDeploymentId: firstCandidate,
+				})).resolves.toBe(firstCandidate);
+				await expect(repository.reserveWebglDeployment({
+					sessionId: session.id,
+					completionClaimToken: claimToken,
+					candidateDeploymentId: retryCandidate,
+				})).resolves.toBe(firstCandidate);
+				expect(firstCandidate).not.toBe(sourceDeploymentId);
+
+				await control.gameUploadSession.update({
+					where: { id: session.id },
+					data: { completionClaimUntil: new Date(0) },
+				});
+				await expect(repository.reserveWebglDeployment({
+					sessionId: session.id,
+					completionClaimToken: claimToken,
+					candidateDeploymentId: randomUUID(),
+				})).rejects.toThrow('claim was lost');
+
+				await control.gameUploadSession.update({
+					where: { id: session.id },
+					data: { completionClaimUntil: new Date(Date.now() + 120_000) },
+				});
+				await expect(repository.markCompletedObjectFailed({
+					sessionId: session.id,
+					storageKey: sourceKey,
+					reason: 'opaque-webgl-rejected',
+					completionClaimToken: claimToken,
+				})).resolves.toEqual({ count: 1 });
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				})).resolves.toMatchObject({ status: 'REJECTED', webglDeploymentId: firstCandidate });
+				await expect(control.gameUploadActiveSession.count({
+					where: { sessionId: session.id },
+				})).resolves.toBe(0);
+				const publicKeys = createWebglPublicDeploymentKeys(projectId, firstCandidate);
+				await expect(control.orphanObject.findUnique({
+					where: { orphan_bucket_storage_key: { bucket: publicBucket, storageKey: publicKeys.sitePrefix } },
+				})).resolves.toMatchObject({ targetKind: 'PREFIX', reason: 'opaque-webgl-rejected-site' });
+				await expect(control.orphanObject.findUnique({
+					where: { orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: sourceKey } },
+				})).resolves.toMatchObject({ targetKind: 'EXACT', reason: 'opaque-webgl-rejected-source' });
+			} finally {
+				await control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } });
+				await control.orphanObject.deleteMany({
+					where: {
+						OR: [
+							{ bucket: protectedBucket, storageKey: sourceKey },
+							{
+								bucket: publicBucket,
+								storageKey: createWebglPublicDeploymentKeys(projectId, firstCandidate).sitePrefix,
+							},
+						],
+					},
+				});
+				await control.gameUploadSession.deleteMany({ where: { id: session.id } });
+			}
+		});
+
+		it.runIf(runStorageIntegration)(
+			'connects browser-signed Garage UploadPart to PostgreSQL VERIFYING and READY production wiring',
+			async () => {
+				const s3Config = {
+					S3_INTERNAL_ENDPOINT: process.env['S3_INTERNAL_ENDPOINT']
+						?? process.env['S3_ENDPOINT']
+						?? 'http://127.0.0.1:3900',
+					S3_PUBLIC_SIGNING_ENDPOINT: process.env['S3_PUBLIC_SIGNING_ENDPOINT']
+						?? process.env['S3_ENDPOINT']
+						?? 'http://localhost:3900',
+					S3_REGION: process.env['S3_REGION'] ?? 'garage',
+					S3_ACCESS_KEY_ID: process.env['S3_ACCESS_KEY_ID'] ?? '',
+					S3_SECRET_ACCESS_KEY: process.env['S3_SECRET_ACCESS_KEY'] ?? '',
+					S3_FORCE_PATH_STYLE: true,
+				};
+				const internal = createS3Client(s3Config);
+				const signer = createS3PresigningClient(s3Config);
+				const garage = createObjectStorage(internal, {
+					defaultPresignTtlSec: 60,
+					presigningClient: signer,
+				});
+				const buckets = {
+					publicBucket: process.env['S3_BUCKET_PUBLIC'] ?? 'pcu-public',
+					protectedBucket: process.env['S3_BUCKET_PROTECTED'] ?? 'pcu-protected',
+				};
+				const archive = makeStoredZip([{
+					name: 'game/index.html',
+					body: Buffer.from('garage-postgres-ready'),
+				}]);
+				const source = sourceIdentityForBuffer(archive);
+				let sessionId: string | undefined;
+				let sourceKey: string | undefined;
+				let uploadId: string | undefined;
+				let completed = false;
+				try {
+					const service = graph(control, garage, buckets).service;
+					const created = await service.createSession(
+						projectId,
+						exhibitionId,
+						{ id: userId, role: 'ADMIN' },
+						{
+							originalName: 'garage-direct-game.zip',
+							totalBytes: archive.length,
+							uploadKind: 'GAME',
+							sourceIdentityAlgorithm: source.sourceIdentityAlgorithm,
+							sourceIdentity: source.sourceIdentity,
+							sourceIdentityBlockSizeBytes: source.sourceIdentityBlockSizeBytes,
+							sourceIdentityBlockDigests: source.sourceIdentityBlockDigests,
+						},
+					);
+					sessionId = created.sessionId;
+					const row = await control.gameUploadSession.findUniqueOrThrow({
+						where: { id: created.sessionId },
+					});
+					sourceKey = row.s3Key!;
+					uploadId = row.s3UploadId!;
+					const capability = await service.signPartUrls(
+						created.sessionId,
+						{ id: userId, role: 'ADMIN' },
+						{ generation: 1, parts: [{ partNumber: 1, checksumSha256: createHash('sha256').update(archive).digest('base64') }] },
+					);
+					expect(capability).toMatchObject({
+						generation: 1,
+						parts: [{ partNumber: 1, requiredHeaders: { 'content-type': 'application/octet-stream' } }],
+					});
+					const signedPart = capability.parts[0]!;
+					const browserPut = await fetch(signedPart.url, {
+						method: 'PUT',
+						headers: {
+							...signedPart.requiredHeaders,
+							Origin: 'http://localhost:5173',
+						},
+						body: archive,
+					});
+					expect(browserPut.status).toBe(200);
+					const stored = await garage.listParts(
+						buckets.protectedBucket,
+						sourceKey,
+						uploadId,
+					);
+					expect(stored).toEqual([
+						expect.objectContaining({ partNumber: 1, sizeBytes: archive.length }),
+					]);
+
+					await expect(service.completeSession(
+						created.sessionId,
+						{ id: userId, role: 'ADMIN' },
+						{
+							generation: 1,
+							parts: [{
+								partNumber: 1,
+								etag: stored[0]!.etag,
+								sizeBytes: stored[0]!.sizeBytes!,
+							}],
+						},
+					)).resolves.toMatchObject({ status: 'VERIFYING' });
+					completed = true;
+					await expect(validationGraph(control, garage, buckets).worker.runPass())
+						.resolves.toMatchObject({ claimed: 1, ready: 1 });
+					await vi.waitFor(async () => {
+						await expect(control.gameUploadSession.findUniqueOrThrow({
+							where: { id: created.sessionId },
+						})).resolves.toMatchObject({ status: 'COMPLETED', storageKey: sourceKey });
+					}, { timeout: 15_000, interval: 100 });
+					await expect(control.asset.findFirstOrThrow({
+						where: { projectId, kind: 'GAME', storageKey: sourceKey },
+					})).resolves.toMatchObject({ status: 'READY' });
+					await expect(garage.head(buckets.protectedBucket, sourceKey))
+						.resolves.toMatchObject({ size: archive.length });
+				} finally {
+					if (sourceKey) {
+						if (completed) {
+							await garage.delete(buckets.protectedBucket, sourceKey).catch(() => undefined);
+						} else if (uploadId) {
+							await garage.abortMultipart(
+								buckets.protectedBucket,
+								sourceKey,
+								uploadId,
+							).catch(() => undefined);
+						}
+					}
+					if (sessionId) {
+						await runCleanupSteps([
+							() => control.gameUploadActiveSession.deleteMany({ where: { sessionId } }),
+							() => control.asset.deleteMany({ where: { storageKey: sourceKey } }),
+							() => control.orphanObject.deleteMany({
+								where: { bucket: buckets.protectedBucket, storageKey: sourceKey },
+							}),
+							() => control.gameUploadSession.deleteMany({ where: { id: sessionId } }),
+						]);
+					}
+					garage.close?.();
+					internal.destroy();
+				}
+			},
+		);
+
+		it.runIf(runStorageIntegration)(
+			'connects browser-signed Garage UploadPart to WebGL validation and immutable public deployment',
+			async () => {
+				const s3Config = {
+					S3_INTERNAL_ENDPOINT: process.env['S3_INTERNAL_ENDPOINT']
+						?? process.env['S3_ENDPOINT']
+						?? 'http://127.0.0.1:3900',
+					S3_PUBLIC_SIGNING_ENDPOINT: process.env['S3_PUBLIC_SIGNING_ENDPOINT']
+						?? process.env['S3_ENDPOINT']
+						?? 'http://localhost:3900',
+					S3_REGION: process.env['S3_REGION'] ?? 'garage',
+					S3_ACCESS_KEY_ID: process.env['S3_ACCESS_KEY_ID'] ?? '',
+					S3_SECRET_ACCESS_KEY: process.env['S3_SECRET_ACCESS_KEY'] ?? '',
+					S3_FORCE_PATH_STYLE: true,
+				};
+				const internal = createS3Client(s3Config);
+				const signer = createS3PresigningClient(s3Config);
+				const garage = createObjectStorage(internal, {
+					defaultPresignTtlSec: 60,
+					presigningClient: signer,
+				});
+				const buckets = {
+					publicBucket: process.env['S3_BUCKET_PUBLIC'] ?? 'pcu-public',
+					protectedBucket: process.env['S3_BUCKET_PROTECTED'] ?? 'pcu-protected',
+				};
+				const archive = makeStoredZip([
+					{ name: 'index.html', body: Buffer.from('<html>garage webgl ready</html>') },
+					{ name: 'Build/game.loader.js', body: Buffer.from('loader') },
+					{ name: 'Build/game.framework.js', body: Buffer.from('framework') },
+					{ name: 'Build/game.wasm', body: Buffer.from([0, 97, 115, 109]) },
+					{ name: 'Build/game.data', body: Buffer.from('data') },
+				]);
+				const source = sourceIdentityForBuffer(archive);
+				let sessionId: string | undefined;
+				let sourceKey: string | undefined;
+				let uploadId: string | undefined;
+				let sourceDeployment: ReturnType<typeof parseWebglSourceKey> = null;
+				let deployment: ReturnType<typeof createWebglPublicDeploymentKeys> | null = null;
+				let productionGraph: GameUploadProductionGraph | undefined;
+				let multipartCompleted = false;
+				const previousProject = await control.project.findUniqueOrThrow({
+					where: { id: projectId },
+					select: { webglEntryKey: true },
+				});
+				try {
+					await control.project.update({
+						where: { id: projectId },
+						data: { webglEntryKey: '' },
+					});
+					productionGraph = graph(control, garage, buckets);
+					const service = productionGraph.service;
+					const created = await service.createSession(
+						projectId,
+						exhibitionId,
+						{ id: userId, role: 'ADMIN' },
+						{
+							originalName: 'garage-direct-webgl.zip',
+							totalBytes: archive.length,
+							uploadKind: 'WEBGL',
+							sourceIdentityAlgorithm: source.sourceIdentityAlgorithm,
+							sourceIdentity: source.sourceIdentity,
+							sourceIdentityBlockSizeBytes: source.sourceIdentityBlockSizeBytes,
+							sourceIdentityBlockDigests: source.sourceIdentityBlockDigests,
+						},
+					);
+					sessionId = created.sessionId;
+					const row = await control.gameUploadSession.findUniqueOrThrow({
+						where: { id: created.sessionId },
+					});
+					sourceKey = row.s3Key!;
+					uploadId = row.s3UploadId!;
+					sourceDeployment = parseWebglSourceKey(projectId, sourceKey);
+					expect(sourceDeployment).not.toBeNull();
+
+					const capability = await service.signPartUrls(
+						created.sessionId,
+						{ id: userId, role: 'ADMIN' },
+						{ generation: 1, parts: [{ partNumber: 1, checksumSha256: createHash('sha256').update(archive).digest('base64') }] },
+					);
+					const signedPart = capability.parts[0]!;
+					const browserPut = await fetch(signedPart.url, {
+						method: 'PUT',
+						headers: {
+							...signedPart.requiredHeaders,
+							Origin: 'http://localhost:5173',
+						},
+						body: archive,
+					});
+					expect(browserPut.status).toBe(200);
+					const stored = await garage.listParts(
+						buckets.protectedBucket,
+						sourceKey,
+						uploadId,
+					);
+					expect(stored).toEqual([
+						expect.objectContaining({ partNumber: 1, sizeBytes: archive.length }),
+					]);
+					await expect(control.project.findUniqueOrThrow({
+						where: { id: projectId },
+					})).resolves.toMatchObject({ webglEntryKey: '' });
+
+					const completion = await service.completeSession(
+						created.sessionId,
+						{ id: userId, role: 'ADMIN' },
+						{
+							generation: 1,
+							parts: [{
+								partNumber: 1,
+								etag: stored[0]!.etag,
+								sizeBytes: stored[0]!.sizeBytes!,
+							}],
+						},
+					);
+					expect(completion).toMatchObject({ status: 'VERIFYING' });
+					multipartCompleted = true;
+					await expect(validationGraph(control, garage, buckets).worker.runPass())
+						.resolves.toMatchObject({ claimed: 1, ready: 1 });
+
+					await vi.waitFor(async () => {
+						const completedSession = await control.gameUploadSession.findUniqueOrThrow({
+							where: { id: created.sessionId },
+						});
+						expect(completedSession).toMatchObject({
+							status: 'COMPLETED',
+							storageKey: sourceKey,
+							s3UploadId: null,
+						});
+						expect(completedSession.webglDeploymentId).toEqual(expect.any(String));
+					}, { timeout: 15_000, interval: 100 });
+					const completedSession = await control.gameUploadSession.findUniqueOrThrow({
+						where: { id: created.sessionId },
+					});
+					deployment = createWebglPublicDeploymentKeys(
+						projectId,
+						completedSession.webglDeploymentId!,
+					);
+					expect(deployment!.deploymentId).not.toBe(sourceDeployment!.deploymentId);
+
+					await expect(control.project.findUniqueOrThrow({
+						where: { id: projectId },
+					})).resolves.toMatchObject({ webglEntryKey: deployment!.entryKey });
+					for (const key of [
+						deployment!.entryKey,
+						`${deployment!.sitePrefix}Build/game.loader.js`,
+						`${deployment!.sitePrefix}Build/game.framework.js`,
+						`${deployment!.sitePrefix}Build/game.wasm`,
+						`${deployment!.sitePrefix}Build/game.data`,
+					]) {
+						await expect(garage.head(buckets.publicBucket, key)).resolves.not.toBeNull();
+					}
+					await expect(garage.head(buckets.protectedBucket, sourceKey))
+						.resolves.toMatchObject({ size: archive.length });
+				} finally {
+					const graphToClose = productionGraph;
+					const sessionToDelete = sessionId;
+					const sourceToDelete = sourceKey;
+					const uploadToAbort = uploadId;
+					const deploymentToDelete = deployment;
+					try {
+						await runCleanupSteps([
+							...(graphToClose ? [() => graphToClose.close()] : []),
+							() => control.project.update({
+								where: { id: projectId },
+								data: { webglEntryKey: previousProject.webglEntryKey },
+							}),
+							...sessionToDelete
+								? [
+									() => control.gameUploadActiveSession.deleteMany({
+										where: { sessionId: sessionToDelete },
+									}),
+									() => control.orphanObject.deleteMany({
+										where: {
+											OR: [
+												...(sourceToDelete ? [{
+													bucket: buckets.protectedBucket,
+													storageKey: sourceToDelete,
+												}] : []),
+												...(deploymentToDelete ? [{
+													bucket: buckets.publicBucket,
+													storageKey: deploymentToDelete.sitePrefix,
+												}] : []),
+											],
+										},
+									}),
+									() => control.gameUploadSession.deleteMany({
+										where: { id: sessionToDelete },
+									}),
+								]
+								: [],
+							...(!multipartCompleted && sourceToDelete && uploadToAbort
+								? [() => garage.abortMultipart(
+									buckets.protectedBucket,
+									sourceToDelete,
+									uploadToAbort,
+								).catch(() => undefined)]
+								: []),
+							...(deploymentToDelete
+								? [async () => {
+									const publicKeys = await garage.listKeys(
+										buckets.publicBucket,
+										deploymentToDelete.sitePrefix,
+									);
+									if (publicKeys.length > 0) {
+										const deleted = await garage.deleteKeys(
+											buckets.publicBucket,
+											publicKeys,
+										);
+										expect(deleted.failures).toEqual([]);
+									}
+									await expect(garage.listKeys(
+										buckets.publicBucket,
+										deploymentToDelete.sitePrefix,
+									)).resolves.toEqual([]);
+								}]
+								: []),
+							...(sourceToDelete
+								? [async () => {
+									await garage.delete(buckets.protectedBucket, sourceToDelete);
+									await expect(garage.head(buckets.protectedBucket, sourceToDelete))
+										.resolves.toBeNull();
+								}]
+								: []),
+						]);
+					} finally {
+						garage.close?.();
+						internal.destroy();
+					}
+				}
+			},
+		);
+
+		it('claims one VERIFYING row exactly once across PostgreSQL workers', async () => {
+			const archive = makeStoredZip([{ name: 'game/index.html' }]);
+			const key = `${testId}-duplicate-verifier.zip`;
+			const session = await createSessionFixture({
+				status: 'VERIFYING',
+				s3Key: key,
+				storageKey: key,
+				s3UploadId: null,
+				sourceBytes: archive,
+			});
+			const first = createGameUploadRepository(control, { abortBucket: protectedBucket });
+			const second = createGameUploadRepository(recoveryClient, { abortBucket: protectedBucket });
+			const firstToken = randomUUID();
+			const secondToken = randomUUID();
+			try {
+				const [firstClaim, secondClaim] = await Promise.all([
+					first.claimVerifyingSessions(firstToken, 60_000, 1),
+					second.claimVerifyingSessions(secondToken, 60_000, 1),
+				]);
+				expect(firstClaim.length + secondClaim.length).toBe(1);
+				const winner = firstClaim.length === 1
+					? { repository: first, token: firstToken }
+					: { repository: second, token: secondToken };
+				await expect(winner.repository.releaseCompletionClaim(
+					session.id,
+					winner.token,
+					'test-release',
+				)).resolves.toEqual({ count: 1 });
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				})).resolves.toMatchObject({ status: 'VERIFYING', completionClaimToken: null });
+			} finally {
+				await runCleanupSteps([
+					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
+					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
+				]);
+			}
+		});
+
+		it('rejects a verifier when the session actor loses current project access', async () => {
+			const archive = makeStoredZip([{ name: 'game/index.html', body: Buffer.from('denied') }]);
+			const key = `${testId}-removed-before-finalize.zip`;
+			const replacementCreator = await control.user.create({
+				data: {
+					googleSub: `ticket-012-replacement-${randomUUID()}`,
+					email: `ticket-012-replacement-${randomUUID()}@example.test`,
+					name: 'Replacement creator',
+					role: 'USER',
+				},
+			});
+			const session = await createSessionFixture({
+				status: 'VERIFYING',
+				s3Key: key,
+				storageKey: key,
+				s3UploadId: null,
+				sourceBytes: archive,
+			});
+			storage.put(protectedBucket, key, archive);
+			try {
+				await control.user.update({ where: { id: userId }, data: { role: 'USER' } });
+				await control.project.update({
+					where: { id: projectId },
+					data: { creatorId: replacementCreator.id },
+				});
+				await control.projectMember.deleteMany({ where: { projectId, userId } });
+
+				await expect(validationGraph(control).worker.runPass()).resolves.toEqual({
+					claimed: 1,
+					ready: 0,
+					rejected: 1,
+					retried: 0,
+				});
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				})).resolves.toMatchObject({ status: 'REJECTED' });
+				await expect(control.asset.count({ where: { storageKey: key } })).resolves.toBe(0);
+				await expect(control.orphanObject.findUniqueOrThrow({
+					where: { orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: key } },
+				})).resolves.toMatchObject({ state: 'PENDING' });
+			} finally {
+				await control.project.update({ where: { id: projectId }, data: { creatorId: userId } });
+				await control.user.update({ where: { id: userId }, data: { role: 'ADMIN' } });
+				storage.objects.delete(`${protectedBucket}/${key}`);
+				await runCleanupSteps([
+					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
+					() => control.orphanObject.deleteMany({
+						where: { bucket: protectedBucket, storageKey: key },
+					}),
+					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
+					() => control.user.deleteMany({ where: { id: replacementCreator.id } }),
+				]);
+			}
+		});
+
+		it('rejects a verifier when exhibition uploads are disabled after completion', async () => {
+			const archive = makeStoredZip([{ name: 'game/index.html', body: Buffer.from('disabled') }]);
+			const key = `${testId}-disabled-before-finalize.zip`;
+			const session = await createSessionFixture({
+				status: 'VERIFYING',
+				s3Key: key,
+				storageKey: key,
+				s3UploadId: null,
+				sourceBytes: archive,
+			});
+			storage.put(protectedBucket, key, archive);
+			try {
+				await control.user.update({ where: { id: userId }, data: { role: 'USER' } });
+				await control.exhibition.update({
+					where: { id: exhibitionId },
+					data: { isUploadEnabled: false },
+				});
+
+				await expect(validationGraph(control).worker.runPass()).resolves.toEqual({
+					claimed: 1,
+					ready: 0,
+					rejected: 1,
+					retried: 0,
+				});
+				await expect(control.gameUploadSession.findUniqueOrThrow({
+					where: { id: session.id },
+				})).resolves.toMatchObject({ status: 'REJECTED' });
+				await expect(control.asset.count({ where: { storageKey: key } })).resolves.toBe(0);
+			} finally {
+				await control.exhibition.update({
+					where: { id: exhibitionId },
+					data: { isUploadEnabled: true },
+				});
+				await control.user.update({ where: { id: userId }, data: { role: 'ADMIN' } });
+				storage.objects.delete(`${protectedBucket}/${key}`);
+				await runCleanupSteps([
+					() => control.gameUploadActiveSession.deleteMany({ where: { sessionId: session.id } }),
+					() => control.orphanObject.deleteMany({
+						where: { bucket: protectedBucket, storageKey: key },
+					}),
+					() => control.gameUploadSession.deleteMany({ where: { id: session.id } }),
+				]);
+			}
+		});
+
 		it('rolls back terminal state and preserves the object when atomic outbox persistence fails', async () => {
 			const key = `${testId}-double-failure.zip`;
 			const uploadId = randomUUID();
@@ -1309,9 +2193,6 @@ describe.runIf(runPostgresIntegration)(
 				s3Key: key,
 				s3UploadId: uploadId,
 				totalBytes: 1n,
-			});
-			await control.gameUploadPart.create({
-				data: { sessionId: session.id, partNumber: 1, etag: 'etag-1' },
 			});
 			storage.seedMultipart(
 				protectedBucket,
@@ -1355,11 +2236,13 @@ describe.runIf(runPostgresIntegration)(
 				triggerCreated = true;
 				storage.calls.delete.mockClear();
 				storage.failDelete();
-				try {
-					await graph(control).service.completeSession(
+				await graph(control).service.completeSession(
 						session.id,
 						{ id: userId, role: 'ADMIN' },
+						{ generation: 1, parts: [{ partNumber: 1, etag: 'etag-1', sizeBytes: 1 }] },
 					);
+				try {
+					await validationGraph(control).worker.runPass();
 				} catch (error) {
 					failure = error;
 				}
@@ -1368,8 +2251,8 @@ describe.runIf(runPostgresIntegration)(
 				await expect(control.gameUploadSession.findUniqueOrThrow({
 					where: { id: session.id },
 				})).resolves.toMatchObject({
-					status: 'COMPLETING',
-					storageKey: null,
+					status: 'VERIFYING',
+					storageKey: key,
 				});
 				await expect(control.gameUploadActiveSession.findUnique({
 					where: {
@@ -1412,14 +2295,17 @@ describe.runIf(runPostgresIntegration)(
 			const deployment = createWebglDeploymentKeys(projectId, randomUUID());
 			const archive = makeStoredZip([
 				{ name: 'index.html', body: Buffer.from('<html>ticket 012</html>') },
+				{ name: 'Build/game.loader.js', body: Buffer.from('loader') },
+				{ name: 'Build/game.framework.js', body: Buffer.from('framework') },
 				{ name: 'Build/game.wasm', body: Buffer.from([0, 97, 115, 109]) },
+				{ name: 'Build/game.data', body: Buffer.from('data') },
 			]);
 			storage.put(protectedBucket, deployment.sourceKey, archive);
 			const session = await createSessionFixture({
 				uploadKind: 'WEBGL',
 				status: 'COMPLETING',
 				s3Key: deployment.sourceKey,
-				totalBytes: BigInt(archive.length),
+				sourceBytes: archive,
 				updatedAt: new Date('2098-07-31T00:00:00.000Z'),
 			});
 			const pointerFailure = new Error('forced DB pointer failure');
@@ -1428,16 +2314,26 @@ describe.runIf(runPostgresIntegration)(
 			await firstGraph.recoverStaleUploads();
 			await expect(control.gameUploadSession.findUniqueOrThrow({
 				where: { id: session.id },
-			})).resolves.toMatchObject({ status: 'COMPLETING' });
+			})).resolves.toMatchObject({ status: 'VERIFYING' });
 			expect(storage.objects.has(`${protectedBucket}/${deployment.sourceKey}`)).toBe(true);
+			const firstValidation = validationGraph(pointerFaultClient(control, pointerFailure));
+			await firstValidation.worker.runPass();
+			const reserved = await control.gameUploadSession.findUniqueOrThrow({
+				where: { id: session.id },
+			});
+			expect(reserved.status).toBe('VERIFYING');
+			expect(reserved.webglDeploymentId).toMatch(/^[0-9a-f-]{36}$/);
+			expect(reserved.webglDeploymentId).not.toBe(deployment.deploymentId);
 			expect(
 				[...storage.objects.keys()]
-					.filter((key) => key.startsWith(`${publicBucket}/${deployment.sitePrefix}`)),
-			).toEqual([]);
+					.some((key) => key.startsWith(
+						`${publicBucket}/webgl/${projectId}/${reserved.webglDeploymentId}/site/`,
+					)),
+			).toBe(true);
 			await firstGraph.close();
 
-			const secondGraph = graph(recoveryClient);
-			await secondGraph.recoverStaleUploads();
+			const secondValidation = validationGraph(recoveryClient);
+			await secondValidation.worker.runPass();
 			await expect(control.gameUploadSession.findUniqueOrThrow({
 				where: { id: session.id },
 			})).resolves.toMatchObject({
@@ -1446,20 +2342,24 @@ describe.runIf(runPostgresIntegration)(
 			});
 			await expect(control.project.findUniqueOrThrow({
 				where: { id: projectId },
-			})).resolves.toMatchObject({ webglEntryKey: deployment.entryKey });
+			})).resolves.toMatchObject({
+				webglEntryKey: `webgl/${projectId}/${reserved.webglDeploymentId}/site/index.html`,
+			});
 			await expect(control.gameUploadActiveSession.findUnique({
 				where: {
 					projectId_uploadKind: { projectId, uploadKind: 'WEBGL' },
 				},
 			})).resolves.toBeNull();
 			expect(storage.objects.has(`${protectedBucket}/${deployment.sourceKey}`)).toBe(true);
+			const publicPrefix = `${publicBucket}/webgl/${projectId}/${reserved.webglDeploymentId}/site/`;
 			expect(
-				[...storage.objects.keys()]
-					.filter((key) => key.startsWith(`${publicBucket}/${deployment.sitePrefix}`))
-					.sort(),
+				[...storage.objects.keys()].filter((key) => key.startsWith(publicPrefix)).sort(),
 			).toEqual([
-				`${publicBucket}/${deployment.sitePrefix}Build/game.wasm`,
-				`${publicBucket}/${deployment.entryKey}`,
+				`${publicPrefix}Build/game.data`,
+				`${publicPrefix}Build/game.framework.js`,
+				`${publicPrefix}Build/game.loader.js`,
+				`${publicPrefix}Build/game.wasm`,
+				`${publicPrefix}index.html`,
 			]);
 		});
 	},

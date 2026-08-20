@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { createProjectSerializer } from '../modules/admin/project/serializer.js';
-import { isReplaceableAssetKind } from '../modules/admin/project/project-asset.service.js';
 
-const { protectedAssetUrl, serializeProjectDetail } = createProjectSerializer('https://api.example.com');
+const { protectedAssetUrl, serializeProjectDetail } = createProjectSerializer(
+	'https://api.example.com',
+	'https://assets.example.com',
+);
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -65,18 +67,11 @@ function fakeAsset(overrides: Partial<ReturnType<typeof fakeProject>['assets'][n
 
 describe('protectedAssetUrl', () => {
 	it('returns a protected asset URL', () => {
-		expect(protectedAssetUrl('abc.zip')).toBe('https://api.example.com/api/assets/protected/abc.zip');
+		expect(protectedAssetUrl(42)).toBe('https://api.example.com/api/assets/42/download?variant=original');
 	});
 
 	it('keeps VIDEO downloads on the protected route', () => {
-		expect(protectedAssetUrl('vid.mp4')).toBe('https://api.example.com/api/assets/protected/vid.mp4');
-	});
-});
-
-describe('asset replacement policy', () => {
-	it('keeps GAME replaceable and lets VIDEO create additional assets', () => {
-		expect(isReplaceableAssetKind('GAME')).toBe(true);
-		expect(isReplaceableAssetKind('VIDEO')).toBe(false);
+		expect(protectedAssetUrl(43, 'playback')).toBe('https://api.example.com/api/assets/43/download?variant=playback');
 	});
 });
 
@@ -111,7 +106,7 @@ describe('serializeProjectDetail', () => {
 			poster: { storageKey: 'img.png', kind: 'IMAGE', status: 'READY' },
 		}));
 		expect(result.poster).toEqual({
-			original: { url: 'https://api.example.com/api/public/images/img.png' },
+			original: { url: 'https://assets.example.com/img.png' },
 			renditions: [],
 		});
 	});
@@ -134,7 +129,9 @@ describe('serializeProjectDetail', () => {
 		const result = serializeProjectDetail(fakeProject({
 			webglEntryKey: 'webgl/1/123e4567-e89b-42d3-a456-426614174000/site/index.html',
 		}));
-		expect(result.webglUrl).toBe('https://api.example.com/api/public/webgl/1/');
+		expect(result.webglUrl).toBe(
+			'https://assets.example.com/webgl/1/123e4567-e89b-42d3-a456-426614174000/site/index.html',
+		);
 	});
 
 	it('preserves posterAssetId when set', () => {
@@ -164,13 +161,13 @@ describe('serializeProjectDetail', () => {
 			kind: 'IMAGE',
 			image: {
 				original: {
-					url: 'https://api.example.com/api/public/images/img.png',
+					url: 'https://assets.example.com/img.png',
 					width: 1200,
 					height: 800,
 				},
 				renditions: [{
 					profile: 'DISPLAY_960',
-					url: 'https://api.example.com/api/public/images/img.png%2F__pcu_image_rendition__%2Fv1%2Fdisplay-960.webp',
+					url: 'https://assets.example.com/img.png/__pcu_image_rendition__/v1/display-960.webp',
 					width: 960,
 					height: 640,
 				}],
@@ -199,9 +196,9 @@ describe('serializeProjectDetail', () => {
 			})],
 		}));
 		expect(result.video).toEqual({
-			url: 'https://api.example.com/api/assets/protected/vid.mp4',
+			url: 'https://api.example.com/api/assets/2/download?variant=playback',
 			mimeType: 'video/mp4',
-			originalDownloadUrl: 'https://api.example.com/api/assets/protected/vid.mp4',
+			originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',
 			playbackStatus: 'READY',
 			playbackError: undefined,
 		});
@@ -236,8 +233,8 @@ describe('serializeProjectDetail', () => {
 
 		expect(result.video).toBe(result.videos[0]);
 		expect(result.videos.map((v) => v.url)).toEqual([
-			'https://api.example.com/api/assets/protected/first.mp4',
-			'https://api.example.com/api/assets/protected/second-playback.mp4',
+			'https://api.example.com/api/assets/2/download?variant=playback',
+			'https://api.example.com/api/assets/3/download?variant=playback',
 		]);
 	});
 
@@ -258,15 +255,15 @@ describe('serializeProjectDetail', () => {
 		}));
 
 		expect(result.video).toMatchObject({
-			url: 'https://api.example.com/api/assets/protected/playback.mp4',
+			url: 'https://api.example.com/api/assets/2/download?variant=playback',
 			mimeType: 'video/mp4',
-			originalDownloadUrl: 'https://api.example.com/api/assets/protected/original.mov',
+			originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',
 			playbackStatus: 'READY',
 		});
 		expect(result.assets[0]).toMatchObject({
-			url: 'https://api.example.com/api/assets/protected/original.mov',
-			playbackUrl: 'https://api.example.com/api/assets/protected/playback.mp4',
-			originalDownloadUrl: 'https://api.example.com/api/assets/protected/original.mov',
+			url: 'https://api.example.com/api/assets/2/download?variant=playback',
+			playbackUrl: 'https://api.example.com/api/assets/2/download?variant=playback',
+			originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',
 		});
 	});
 

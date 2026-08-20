@@ -85,6 +85,7 @@ export type {
 	ExportProgressFile,
 	ExportResult,
 	ExportStatusResponse,
+	ExportStartResponse,
 	ImportExecuteResult,
 	ImportPreviewExhibition,
 	ImportPreviewResult,
@@ -92,11 +93,18 @@ export type {
 
 export type {
 	GameUploadCreateSessionRequest,
-	GameUploadChunkResponse,
 	GameUploadCompleteResponse,
+	GameUploadCompletionResponse,
+	GameUploadCompleteRequest,
+	GameUploadCompletePart,
+	GameUploadPartUrl,
+	GameUploadPartUrlsRequest,
+	GameUploadPartUrlsResponse,
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
+	GameUploadUploadedPart,
+	GameUploadVerifyingResponse,
 	UploadKind,
 } from './game-upload.js';
 

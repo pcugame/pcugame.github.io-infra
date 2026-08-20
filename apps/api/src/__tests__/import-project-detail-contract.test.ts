@@ -25,9 +25,13 @@ const importService = createImportService({
 		runTransaction: mocks.runTransaction,
 	},
 });
-const { serializeProjectDetail } = createProjectSerializer('https://api.example.com');
+const { serializeProjectDetail } = createProjectSerializer(
+	'https://api.example.com',
+	'https://assets.example.com',
+);
 const publicService = createPublicService({
 	apiPublicUrl: 'https://api.example.com',
+	publicAssetBaseUrl: 'https://assets.example.com',
 	repository: {
 		findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
 		findExhibitionsByYear: mocks.findExhibitionsByYear,

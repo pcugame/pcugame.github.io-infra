@@ -3,6 +3,8 @@ import {
 	parseWebglEntryKey,
 	parseWebglSourceKey,
 	type WebglDeploymentKeys,
+	type WebglProtectedSourceKeys,
+	type WebglPublicDeploymentKeys,
 } from './paths.js';
 
 export interface WebglDeletionBuckets {
@@ -30,6 +32,27 @@ export function webglDeletionTargets(
 	];
 }
 
+export function webglPublicDeletionTarget(
+	keys: WebglPublicDeploymentKeys,
+	bucket: string,
+	reason: string,
+): DurableDeletionTarget {
+	return {
+		bucket,
+		storageKey: keys.sitePrefix,
+		targetKind: 'PREFIX',
+		reason: `${reason}-site`,
+	};
+}
+
+export function webglSourceDeletionTarget(
+	keys: WebglProtectedSourceKeys,
+	bucket: string,
+	reason: string,
+): DurableDeletionTarget {
+	return { bucket, storageKey: keys.sourceKey, reason: `${reason}-source` };
+}
+
 export function webglDeletionTargetsByEntry(
 	projectId: number,
 	entryKey: string,
@@ -39,7 +62,7 @@ export function webglDeletionTargetsByEntry(
 	if (!entryKey) return [];
 	const keys = parseWebglEntryKey(projectId, entryKey);
 	if (!keys) throw new Error(`Malformed WebGL entry key for project ${projectId}`);
-	return webglDeletionTargets(keys, buckets, reason);
+	return [webglPublicDeletionTarget(keys, buckets.publicBucket, reason)];
 }
 
 export function webglDeletionTargetsBySource(
@@ -53,5 +76,5 @@ export function webglDeletionTargetsBySource(
 	if (!keys) {
 		return [{ bucket: buckets.protectedBucket, storageKey: sourceKey, reason }];
 	}
-	return webglDeletionTargets(keys, buckets, reason);
+	return [webglSourceDeletionTarget(keys, buckets.protectedBucket, reason)];
 }

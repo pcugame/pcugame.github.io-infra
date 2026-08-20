@@ -8,6 +8,7 @@ ACCESS_KEY_ID="${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}"
 SECRET_ACCESS_KEY="${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}"
 PUBLIC_BUCKET="${S3_BUCKET_PUBLIC:-pcu-public}"
 PROTECTED_BUCKET="${S3_BUCKET_PROTECTED:-pcu-protected}"
+STAGING_BUCKET="${S3_BUCKET_STAGING:-pcu-staging}"
 
 echo "=== Garage integration init: configuring layout ==="
 NODE_ID=$($GARAGE status 2>/dev/null | awk '/^[0-9a-f]/ { print $1; exit }')
@@ -21,8 +22,10 @@ $GARAGE layout apply --version 1 2>/dev/null || echo "Layout already applied"
 echo "=== Garage integration init: creating buckets ==="
 $GARAGE bucket create "$PUBLIC_BUCKET" 2>/dev/null || echo "Bucket $PUBLIC_BUCKET already exists"
 $GARAGE bucket create "$PROTECTED_BUCKET" 2>/dev/null || echo "Bucket $PROTECTED_BUCKET already exists"
+$GARAGE bucket create "$STAGING_BUCKET" 2>/dev/null || echo "Bucket $STAGING_BUCKET already exists"
+$GARAGE bucket website --allow "$PUBLIC_BUCKET" >/dev/null
 
-echo "=== Garage integration init: creating deterministic access key ==="
+echo "=== Garage integration init: creating deterministic credential ==="
 if $GARAGE key info "$KEY_NAME" >/dev/null 2>&1; then
   echo "Key $KEY_NAME already exists"
 elif $GARAGE key import --yes -n "$KEY_NAME" "$ACCESS_KEY_ID" "$SECRET_ACCESS_KEY" >/dev/null 2>&1; then
@@ -34,7 +37,11 @@ else
 fi
 
 echo "=== Garage integration init: granting bucket permissions ==="
-$GARAGE bucket allow "$PUBLIC_BUCKET" --read --write --owner --key "$KEY_NAME" 2>/dev/null || true
-$GARAGE bucket allow "$PROTECTED_BUCKET" --read --write --owner --key "$KEY_NAME" 2>/dev/null || true
+$GARAGE bucket allow "$PUBLIC_BUCKET" --read --write --owner --key "$KEY_NAME" >/dev/null 2>&1 || true
+$GARAGE bucket allow "$PROTECTED_BUCKET" --read --write --owner --key "$KEY_NAME" >/dev/null 2>&1 || true
+$GARAGE bucket allow "$STAGING_BUCKET" --read --write --owner --key "$KEY_NAME" >/dev/null 2>&1 || true
+
+S3_INTERNAL_ENDPOINT="${S3_INTERNAL_ENDPOINT:-${S3_ENDPOINT:-http://garage:3900}}" \
+/bin/sh /garage-configure-cors.sh "$STAGING_BUCKET" "$PROTECTED_BUCKET"
 
 echo "=== Garage integration init: done ==="

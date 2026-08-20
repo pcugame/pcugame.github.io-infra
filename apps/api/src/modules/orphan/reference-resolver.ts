@@ -3,7 +3,8 @@ import {
 	deriveImageRenditionStorageKey,
 	IMAGE_RENDITION_PROFILES,
 } from '../../shared/responsive-image.js';
-import { parseWebglEntryKey, parseWebglSourceKey } from '../webgl/paths.js';
+import { createWebglPublicDeploymentKeys, parseWebglEntryKey } from '../webgl/paths.js';
+import { safeOperationalLogContext } from '../../shared/safe-log-context.js';
 
 export type ObjectTargetKind = 'EXACT' | 'PREFIX';
 
@@ -27,6 +28,15 @@ export interface ObjectReferenceBuckets {
 
 export interface ObjectReferenceLogger {
 	error(context: Record<string, unknown>, message: string): void;
+}
+
+export class ObjectReferenceClaimConflictError extends Error {
+	readonly code = 'OBJECT_REFERENCE_CLAIM_CONFLICT';
+
+	constructor() {
+		super('Object deletion claim overlaps a new reference');
+		this.name = 'ObjectReferenceClaimConflictError';
+	}
 }
 
 interface ReferenceTrieNode {
@@ -193,8 +203,23 @@ export async function collectObjectReferences(
 			select: { id: true, storageKey: true },
 		}),
 		client.gameUploadSession.findMany({
-			where: { status: { in: ['PENDING', 'COMPLETING'] }, s3Key: { not: null } },
-			select: { id: true, s3Key: true, uploadKind: true, projectId: true },
+			// A direct multipart completion has already produced an immutable
+			// protected object when it enters VERIFYING.  It is not an Asset yet,
+			// so this durable session pointer is the only reference that can fence
+			// an orphan reaper while validation/retry is in progress.  storageKey is
+			// the completed-object pointer; s3Key is retained as its recovery alias.
+			where: {
+				status: { in: ['PENDING', 'COMPLETING', 'VERIFYING'] },
+				OR: [{ s3Key: { not: null } }, { storageKey: { not: null } }],
+			},
+			select: {
+				id: true,
+				s3Key: true,
+				storageKey: true,
+				uploadKind: true,
+				projectId: true,
+				webglDeploymentId: true,
+			},
 		}),
 		client.uploadIntent.findMany({
 			where: { state: { in: ['PREPARED', 'UPLOADED'] } },
@@ -231,12 +256,12 @@ export async function collectObjectReferences(
 			} catch (error) {
 				unsafeBuckets.add(buckets.publicBucket);
 				logger.error(
-					{
+					safeOperationalLogContext({
 						error,
 						assetId: asset.id,
-						storageKey: asset.storageKey,
-						profile: definition.profile,
-					},
+						action: 'resolve_asset_rendition',
+						result: 'malformed_pointer',
+					}),
 					'Malformed asset rendition readiness encountered; public bucket deletion is disabled',
 				);
 				continue;
@@ -268,12 +293,12 @@ export async function collectObjectReferences(
 			} catch (error) {
 				unsafeBuckets.add(buckets.publicBucket);
 				logger.error(
-					{
+					safeOperationalLogContext({
 						error,
-						exhibitionId: exhibition.id,
-						storageKey: exhibition.posterStorageKey,
-						profile: definition.profile,
-					},
+						taskId: exhibition.id,
+						action: 'resolve_exhibition_rendition',
+						result: 'malformed_pointer',
+					}),
 					'Malformed exhibition rendition readiness encountered; public bucket deletion is disabled',
 				);
 				continue;
@@ -293,17 +318,15 @@ export async function collectObjectReferences(
 			unsafeBuckets.add(buckets.publicBucket);
 			unsafeBuckets.add(buckets.protectedBucket);
 			logger.error(
-				{ projectId: project.id, webglEntryKey: project.webglEntryKey },
+				safeOperationalLogContext({
+					projectId: project.id,
+					action: 'resolve_webgl_pointer',
+					result: 'malformed_pointer',
+				}),
 				'Malformed WebGL pointer encountered; WebGL bucket deletion is disabled',
 			);
 			continue;
 		}
-		references.push({
-			bucket: buckets.protectedBucket,
-			targetKind: 'EXACT',
-			key: parsed.sourceKey,
-			source: `project:${project.id}:webgl-source`,
-		});
 		references.push({
 			bucket: buckets.publicBucket,
 			targetKind: 'PREFIX',
@@ -321,28 +344,53 @@ export async function collectObjectReferences(
 		});
 	}
 	for (const session of activeSessions) {
-		if (!session.s3Key) continue;
-		references.push({
-			bucket: buckets.protectedBucket,
-			targetKind: 'EXACT',
-			key: session.s3Key,
-			source: `upload-session:${session.id}:active`,
-		});
+		// Normally direct VERIFYING storageKey and s3Key are the same immutable
+		// generation. Keep both aliases live if a partially recovered row ever
+		// contains different values: deleting either is worse than temporarily
+		// retaining an extra protected object.
+		const sourceKeys = [...new Set([session.storageKey, session.s3Key].filter(
+			(key): key is string => typeof key === 'string' && key.length > 0,
+		))];
+		for (const sourceKey of sourceKeys) {
+			references.push({
+				bucket: buckets.protectedBucket,
+				targetKind: 'EXACT',
+				key: sourceKey,
+				source: `upload-session:${session.id}:active-source`,
+			});
+		}
 		if (session.uploadKind !== 'WEBGL') continue;
-		const parsed = parseWebglSourceKey(session.projectId, session.s3Key);
-		if (!parsed) {
-			unsafeBuckets.add(buckets.protectedBucket);
+		if (!session.webglDeploymentId) continue;
+		// A processing claim persists this opaque generation before the first
+		// public PUT. It is the only safe restart/reference fence; source UUIDs
+		// must never be treated as public deployment identities.
+		let deployment;
+		try {
+			deployment = createWebglPublicDeploymentKeys(
+				session.projectId,
+				session.webglDeploymentId,
+			);
+			if (!parseWebglEntryKey(session.projectId, deployment.entryKey)) {
+				throw new Error('Invalid WebGL deployment UUID');
+			}
+		} catch (error) {
 			unsafeBuckets.add(buckets.publicBucket);
 			logger.error(
-				{ sessionId: session.id, projectId: session.projectId, storageKey: session.s3Key },
-				'Malformed active WebGL upload encountered; WebGL bucket deletion is disabled',
+				safeOperationalLogContext({
+					error,
+					sessionId: session.id,
+					projectId: session.projectId,
+					action: 'resolve_webgl_deployment',
+					result: 'malformed_pointer',
+				}),
+				'Malformed durable WebGL deployment identity; public deletion is disabled',
 			);
 			continue;
 		}
 		references.push({
 			bucket: buckets.publicBucket,
 			targetKind: 'PREFIX',
-			key: parsed.sitePrefix,
+			key: deployment.sitePrefix,
 			source: `upload-session:${session.id}:webgl-site`,
 		});
 	}
@@ -435,6 +483,6 @@ export async function assertNoDeletionClaim(
 			FOR UPDATE OF orphan
 		`;
 	if (overlapping.some((row) => row.activelyClaimed)) {
-		throw new Error(`Object deletion claim overlaps new reference: ${target.bucket}/${target.key}`);
+		throw new ObjectReferenceClaimConflictError();
 	}
 }

@@ -319,6 +319,7 @@ function settingsHarness(): SettingsStore {
 function graphHarness(options: {
 	privilegedImageMaxMb?: number;
 	privilegedRequestMaxMb?: number;
+	inlineMaxBytes?: number;
 } = {}) {
 	const repository = repositoryHarness();
 	const storage = storageHarness();
@@ -328,7 +329,9 @@ function graphHarness(options: {
 	const config = {
 		...defaultTestEnv,
 		API_PUBLIC_URL: 'https://api.example.test',
+		PUBLIC_ASSET_BASE_URL: 'https://assets.example.test',
 		S3_BUCKET_PUBLIC: 'public',
+		INLINE_UPLOAD_MAX_BYTES: options.inlineMaxBytes ?? defaultTestEnv.INLINE_UPLOAD_MAX_BYTES,
 		UPLOAD_USER_IMAGE_MAX_MB: 1,
 		UPLOAD_USER_GAME_MAX_MB: 1,
 		UPLOAD_USER_REQUEST_MAX_MB: 1,
@@ -381,6 +384,7 @@ function multipartPoster(
 	file = tinyPng,
 	filename = 'poster.png',
 	contentType = 'image/png',
+	fieldname = 'poster',
 ) {
 	const boundary = 'ticket-009-boundary';
 	return {
@@ -388,10 +392,41 @@ function multipartPoster(
 		payload: Buffer.concat([
 			Buffer.from(
 				`--${boundary}\r\n`
-				+ `Content-Disposition: form-data; name="poster"; filename="${filename}"\r\n`
+				+ `Content-Disposition: form-data; name="${fieldname}"; filename="${filename}"\r\n`
 				+ `Content-Type: ${contentType}\r\n\r\n`,
 			),
 			file,
+			Buffer.from(`\r\n--${boundary}--\r\n`),
+		]),
+	};
+}
+
+function multipartPosterWithTrailingPart(kind: 'file' | 'field') {
+	const boundary = 'ticket-009-trailing-boundary';
+	const trailing = kind === 'file'
+		? Buffer.concat([
+			Buffer.from(
+				`\r\n--${boundary}\r\n`
+				+ 'Content-Disposition: form-data; name="poster"; filename="second.png"\r\n'
+				+ 'Content-Type: image/png\r\n\r\n',
+			),
+			tinyPng,
+		])
+		: Buffer.from(
+			`\r\n--${boundary}\r\n`
+			+ 'Content-Disposition: form-data; name="caption"\r\n\r\n'
+			+ 'not-allowed',
+		);
+	return {
+		headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
+		payload: Buffer.concat([
+			Buffer.from(
+				`--${boundary}\r\n`
+				+ 'Content-Disposition: form-data; name="poster"; filename="poster.png"\r\n'
+				+ 'Content-Type: image/png\r\n\r\n',
+			),
+			tinyPng,
+			trailing,
 			Buffer.from(`\r\n--${boundary}--\r\n`),
 		]),
 	};
@@ -635,6 +670,58 @@ describe('year production wiring', () => {
 		expect(oversizeHarness.fileSystem.created.size).toBeGreaterThan(0);
 		expect(oversizeHarness.fileSystem.outstanding()).toEqual([]);
 		expect(oversizeHarness.activeUploads()).toBe(0);
+	});
+
+	it('enforces the encoded request cap before acquiring an upload slot or opening temp storage', async () => {
+		const harness = graphHarness({ inlineMaxBytes: 160 });
+		const app = await routeApp(harness);
+		apps.push(app);
+		const request = multipartPoster(Buffer.alloc(512));
+		const body = request.payload;
+		const rejected = await app.inject({
+			method: 'POST',
+			url: '/api/admin/exhibitions/1/poster',
+			headers: request.headers,
+			payload: Readable.from([
+				body.subarray(0, 80),
+				body.subarray(80, 160),
+				body.subarray(160),
+			]),
+		});
+		expect(rejected.statusCode).toBe(413);
+		expect(harness.limiter.calls.acquire).toHaveBeenCalledOnce();
+		expect(harness.limiter.calls.release).toHaveBeenCalledOnce();
+		expect(harness.fileSystem.outstanding()).toEqual([]);
+		expect(harness.activeUploads()).toBe(0);
+	});
+
+	it('rejects unknown, duplicate, and trailing poster parts without hanging or leaking resources', async () => {
+		const unknownHarness = graphHarness();
+		const unknownApp = await routeApp(unknownHarness);
+		apps.push(unknownApp);
+		const unknown = await unknownApp.inject({
+			method: 'POST',
+			url: '/api/admin/exhibitions/1/poster',
+			...multipartPoster(tinyPng, 'poster.png', 'image/png', 'unknown'),
+		});
+		expect(unknown.statusCode).toBe(400);
+		expect(unknownHarness.fileSystem.calls.createWriteStream).not.toHaveBeenCalled();
+		expect(unknownHarness.activeUploads()).toBe(0);
+
+		for (const kind of ['file', 'field'] as const) {
+			const harness = graphHarness();
+			const app = await routeApp(harness);
+			apps.push(app);
+			const rejected = await app.inject({
+				method: 'POST',
+				url: '/api/admin/exhibitions/1/poster',
+				...multipartPosterWithTrailingPart(kind),
+			});
+			expect(rejected.statusCode).toBeGreaterThanOrEqual(400);
+			expect(harness.storage.calls.upload).not.toHaveBeenCalled();
+			expect(harness.fileSystem.outstanding()).toEqual([]);
+			expect(harness.activeUploads()).toBe(0);
+		}
 	});
 
 	it('cleans an aborted multipart stream through the injected filesystem', async () => {

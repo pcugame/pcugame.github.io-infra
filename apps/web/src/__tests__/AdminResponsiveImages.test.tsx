@@ -113,12 +113,11 @@ describe('admin responsive image previews', () => {
 				projectId={project.id}
 				limits={{
 					imageMaxMb: 10,
-					imagePdfMaxMb: 100,
+					imagePdfMaxMb: 16,
 					posterMaxMb: 10,
-					posterPdfMaxMb: 50,
+					posterPdfMaxMb: 16,
 					gameMaxMb: 5120,
-					videoMaxMb: 200,
-					requestMaxMb: 250,
+					requestMaxMb: 16,
 					maxFiles: 10,
 				}}
 				canEditContent={false}

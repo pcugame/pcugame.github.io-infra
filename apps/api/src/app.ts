@@ -1,7 +1,6 @@
 import Fastify from 'fastify';
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
-import { requestContext } from './lib/request-context.js';
 import { registerHelmet } from './plugins/helmet.js';
 import { registerRateLimit } from './plugins/rate-limit.js';
 import { registerCors } from './plugins/cors.js';
@@ -234,13 +233,9 @@ async function buildAppWithContext(
 		await context.close();
 	});
 
-	// Seed the AsyncLocalStorage request context. `enterWith` mutates the current
-	// async scope so every downstream `await` (plugins, handlers, services, repos)
-	// sees the same child logger. Also echo the request id on the response so
-	// clients/ops can cross-reference a failing request with server logs.
+	// Echo Fastify's request id so clients/ops can cross-reference a failing
+	// request with the request-owned logger. There is no process-global context.
 	app.addHook('onRequest', async (request, reply) => {
-		const log = context.logger.child({ reqId: request.id });
-		requestContext.enterWith({ reqId: request.id, log });
 		reply.header('x-request-id', request.id);
 	});
 

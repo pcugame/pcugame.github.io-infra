@@ -3,6 +3,7 @@ import type {
 	Prisma,
 	PrismaClient,
 } from '../../../generated/prisma/client.js';
+import type { InlineAssetKind } from '@pcu/contracts';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
 import { notFound } from '../../../shared/errors.js';
 import { assertValidPosterAsset } from '../../../shared/poster-validation.js';
@@ -49,7 +50,7 @@ export function createProjectAssetMutationRepository(
 	async function lockReadyAsset(
 		tx: TxClient,
 		projectId: number,
-		kind: AssetKind,
+		kind: InlineAssetKind,
 	): Promise<LockedReplaceableAsset | null> {
 		const rows = await tx.$queryRaw<LockedReplaceableAsset[]>(PrismaRuntime.sql`
 			SELECT
@@ -70,7 +71,7 @@ export function createProjectAssetMutationRepository(
 	return {
 		replaceOrCreateReplaceableAsset(
 			projectId: number,
-			kind: AssetKind,
+			kind: InlineAssetKind,
 			data: AssetWriteData,
 			outbox: AssetReplacementOutboxConfig,
 		): Promise<{
@@ -78,6 +79,9 @@ export function createProjectAssetMutationRepository(
 			oldStorageKey: string | null;
 			oldPlaybackStorageKey: string | null;
 		}> {
+			if (kind !== 'POSTER' && kind !== 'IMAGE' && kind !== 'THUMBNAIL') {
+				throw new Error('Generic asset replacement only accepts inline image kinds');
+			}
 			return withAssetMutationTransaction(client, async (tx) => {
 				await lockProject(tx, projectId);
 				const existing = await lockReadyAsset(tx, projectId, kind);
@@ -112,16 +116,6 @@ export function createProjectAssetMutationRepository(
 						where: { id: projectId, posterAssetId: existing.id },
 						data: { posterAssetId: null },
 					});
-					if (existing.storageKey !== data.storageKey) {
-						await tx.gameUploadSession.updateMany({
-							where: {
-								projectId,
-								status: 'COMPLETED',
-								storageKey: existing.storageKey,
-							},
-							data: { storageKey: null },
-						});
-					}
 					await tx.asset.update({
 						where: { id: existing.id },
 						data: { status: 'DELETED' },

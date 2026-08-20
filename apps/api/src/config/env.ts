@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const envSchema = z
+export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: z.coerce.number().int().positive().default(4000),
@@ -38,6 +38,9 @@ const envSchema = z
       .refine((arr) => arr.length > 0, 'CORS_ALLOWED_ORIGINS must contain at least one valid origin'),
     API_PUBLIC_URL: z.string().url(),
     WEB_PUBLIC_URL: z.string().url(),
+    // Ordinary byte-preserving public origin rooted at the public bucket.
+    // Public image and immutable WebGL object bytes never traverse Fastify.
+    PUBLIC_ASSET_BASE_URL: z.string().url(),
     // Legacy local storage paths — only used by migration script
     UPLOAD_ROOT_PROTECTED: z.string().default('/app/storage/protected').optional(),
     UPLOAD_ROOT_PUBLIC: z.string().default('/app/storage/public').optional(),
@@ -61,8 +64,15 @@ const envSchema = z
     // Project submit — uploads are a rare, heavyweight action.
     RATE_LIMIT_SUBMIT_MAX: z.coerce.number().int().positive().default(30),
     RATE_LIMIT_SUBMIT_WINDOW_MS: z.coerce.number().int().positive().default(3_600_000),
+	RATE_LIMIT_DIRECT_SESSION_CREATE_MAX: z.coerce.number().int().positive().default(12),
+	RATE_LIMIT_DIRECT_SESSION_CREATE_WINDOW_MS: z.coerce.number().int().positive().default(3_600_000),
+	RATE_LIMIT_DIRECT_PART_URL_MAX: z.coerce.number().int().positive().default(120),
+	RATE_LIMIT_DIRECT_PART_URL_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 
     // ── Upload limits (MB / count) ──────────────────────────
+    // Absolute ceiling for every client file allowed through Fastify.
+    INLINE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().max(16 * 1024 * 1024)
+      .default(16 * 1024 * 1024),
     // USER limits (tighter — for regular students)
     UPLOAD_USER_IMAGE_MAX_MB: z.coerce.number().positive().default(10),
     UPLOAD_USER_GAME_MAX_MB: z.coerce.number().positive().default(5120),
@@ -80,14 +90,41 @@ const envSchema = z
     UPLOAD_CHUNK_SIZE_MB: z.coerce.number().int().min(5).default(10),        // S3 multipart minimum
     // UPLOAD_STAGING_ROOT removed — chunked uploads now use S3 multipart
     UPLOAD_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(1440), // 24 hours
+	// Browser direct-multipart capabilities. These are deliberately bounded;
+	// individual services still enforce their session-specific part range.
+	UPLOAD_PART_URL_TTL_SEC: z.coerce.number().int().min(1).max(900).default(300),
+	UPLOAD_PART_URL_BATCH_MAX: z.coerce.number().int().min(8).max(32).default(16),
+	UPLOAD_PART_URL_REFRESH_MAX: z.coerce.number().int().min(1).max(1000).default(64),
+	UPLOAD_PART_URL_REFRESH_WINDOW_MS: z.coerce.number().int().min(1000).default(300_000),
+	DIRECT_UPLOAD_ACTOR_ACTIVE_SESSION_MAX: z.coerce.number().int().min(1).max(100).default(4),
+	DIRECT_UPLOAD_PROJECT_ACTIVE_SESSION_MAX: z.coerce.number().int().min(1).max(10).default(2),
+	DIRECT_UPLOAD_ACTOR_OUTSTANDING_MAX_BYTES: z.coerce.number().int().positive()
+		.max(Number.MAX_SAFE_INTEGER).default(10 * 1024 * 1024 * 1024),
+
+	// Dedicated validation worker lifecycle and bounded local resources.
+	VALIDATION_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(2),
+	VALIDATION_WORKER_POLL_MS: z.coerce.number().int().min(100).default(5_000),
+	VALIDATION_WORKER_TEMP_ROOT: z.string().min(1).default('/tmp/pcu-validation'),
+	VALIDATION_WORKER_TEMP_DISK_BUDGET_BYTES: z.coerce.number().int().positive()
+		.default(12_884_901_888),
+	VALIDATION_WORKER_CLAIM_LEASE_MS: z.coerce.number().int().positive().default(600_000),
+	EXPORT_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(1),
+	EXPORT_WORKER_POLL_MS: z.coerce.number().int().min(100).default(5_000),
+	EXPORT_WORKER_CLAIM_LEASE_MS: z.coerce.number().int().min(60_000).default(600_000),
 
     // ── S3-compatible object storage (Garage) ─────────────
-    S3_ENDPOINT: z.string().url(),
+	// S3_ENDPOINT is a deprecated rollout alias. Object I/O always uses the
+	// internal endpoint; browser presigned URLs are signed against the public
+	// endpoint rather than having an already-signed URL string rewritten.
+	S3_INTERNAL_ENDPOINT: z.string().url().optional(),
+	S3_PUBLIC_SIGNING_ENDPOINT: z.string().url().optional(),
+	S3_ENDPOINT: z.string().url().optional(),
     S3_REGION: z.string().default('garage'),
     S3_ACCESS_KEY_ID: z.string().min(1),
     S3_SECRET_ACCESS_KEY: z.string().min(1),
     S3_BUCKET_PUBLIC: z.string().default('pcu-public'),
     S3_BUCKET_PROTECTED: z.string().default('pcu-protected'),
+	S3_BUCKET_STAGING: z.string().default('pcu-staging'),
     S3_FORCE_PATH_STYLE: z
       .enum(['true', 'false'])
       .default('true')
@@ -96,8 +133,45 @@ const envSchema = z
 
     // ── NAS export ──────────────────────────────────────
     // Mount path where exported asset files are written (e.g. /mnt/nas)
-    NAS_EXPORT_PATH: z.string().optional(),
+    NAS_EXPORT_PATH: z.string().min(1).optional(),
   })
+	.superRefine((value, ctx) => {
+		if (!value.S3_INTERNAL_ENDPOINT && !value.S3_ENDPOINT) {
+			ctx.addIssue({
+				code: 'custom',
+				path: ['S3_INTERNAL_ENDPOINT'],
+				message: 'S3_INTERNAL_ENDPOINT or deprecated S3_ENDPOINT is required',
+			});
+		}
+		// A newly configured internal endpoint must never quietly become the
+		// browser hostname. Operators must explicitly provide the public signer
+		// endpoint, or deliberately retain the legacy alias during migration.
+		if (value.S3_INTERNAL_ENDPOINT
+			&& !value.S3_PUBLIC_SIGNING_ENDPOINT
+			&& !value.S3_ENDPOINT) {
+			ctx.addIssue({
+				code: 'custom',
+				path: ['S3_PUBLIC_SIGNING_ENDPOINT'],
+				message: 'S3_PUBLIC_SIGNING_ENDPOINT or deprecated S3_ENDPOINT is required',
+			});
+		}
+	})
+	.transform((value) => {
+		const internalEndpoint = value.S3_INTERNAL_ENDPOINT ?? value.S3_ENDPOINT;
+		if (!internalEndpoint) throw new Error('S3 endpoint validation invariant failed');
+		const publicSigningEndpoint = value.S3_PUBLIC_SIGNING_ENDPOINT ?? value.S3_ENDPOINT;
+		if (!publicSigningEndpoint) {
+			throw new Error('S3 public signing endpoint validation invariant failed');
+		}
+		return {
+			...value,
+			S3_INTERNAL_ENDPOINT: internalEndpoint,
+			S3_PUBLIC_SIGNING_ENDPOINT: publicSigningEndpoint,
+			// Keep the normalized legacy property temporarily for scripts and
+			// out-of-process workers that have not yet migrated their input names.
+			S3_ENDPOINT: value.S3_ENDPOINT ?? internalEndpoint,
+		};
+	})
 ;
 
 export type Env = z.infer<typeof envSchema>;

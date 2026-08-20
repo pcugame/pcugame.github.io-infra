@@ -82,8 +82,9 @@ function isNotModifiedSince(lastModified: Date | undefined, ifModifiedSince: Dat
 /** Bind every object operation to the S3 client owned by one BackendContext. */
 export function createObjectStorage(
 	client: S3Client,
-	options: { defaultPresignTtlSec: number },
+	options: { defaultPresignTtlSec: number; presigningClient?: S3Client },
 ): ObjectStorage {
+	const presigningClient = options.presigningClient ?? client;
 	const requestOptions = (request?: StorageRequestOptions) => ({
 		...(request?.signal ? { abortSignal: request.signal } : {}),
 		...(request?.requestTimeoutMs !== undefined
@@ -133,13 +134,28 @@ export function createObjectStorage(
 			}), requestOptions(request));
 		},
 		async presign(bucket, key, presignOptions = {}) {
-			return getSignedUrl(client, new GetObjectCommand({
+			return getSignedUrl(presigningClient, new GetObjectCommand({
 				Bucket: bucket,
 				Key: key,
 				...(presignOptions.responseContentDisposition && {
 					ResponseContentDisposition: presignOptions.responseContentDisposition,
 				}),
 			}), { expiresIn: presignOptions.ttlSec ?? options.defaultPresignTtlSec });
+		},
+		async presignUploadPart(bucket, key, uploadId, partNumber, expiresInSeconds, checksumSha256) {
+			if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
+				throw new RangeError('S3 multipart partNumber must be an integer between 1 and 10000');
+			}
+			if (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 1 || expiresInSeconds > 604_800) {
+				throw new RangeError('S3 presign expiration must be an integer between 1 and 604800 seconds');
+			}
+			return getSignedUrl(presigningClient, new UploadPartCommand({
+				Bucket: bucket,
+				Key: key,
+				UploadId: uploadId,
+				PartNumber: partNumber,
+				ChecksumSHA256: checksumSha256,
+			}), { expiresIn: expiresInSeconds });
 		},
 		async delete(bucket, key, request) {
 			await client.send(
@@ -367,7 +383,7 @@ export function createObjectStorage(
 			}
 		},
 		async listParts(bucket, key, uploadId, request) {
-			const parts = [] as Array<{ partNumber: number; etag: string }>;
+			const parts = [] as Array<{ partNumber: number; etag: string; sizeBytes: number }>;
 			let partNumberMarker: string | undefined;
 			do {
 				const page = await client.send(new ListPartsCommand({
@@ -378,7 +394,13 @@ export function createObjectStorage(
 				}), requestOptions(request));
 				for (const part of page.Parts ?? []) {
 					if (part.PartNumber === undefined || !part.ETag) continue;
-					parts.push({ partNumber: part.PartNumber, etag: part.ETag });
+					const sizeBytes = part.Size;
+					if (typeof sizeBytes !== 'number'
+						|| !Number.isSafeInteger(sizeBytes)
+						|| sizeBytes < 0) {
+						throw new Error('S3 ListParts returned a part without a valid byte size');
+					}
+					parts.push({ partNumber: part.PartNumber, etag: part.ETag, sizeBytes });
 				}
 				partNumberMarker = page.IsTruncated
 					? page.NextPartNumberMarker
@@ -414,6 +436,11 @@ export function createObjectStorage(
 				}
 			} while (keyMarker || uploadIdMarker);
 			return uploads;
+		},
+		close() {
+			// The internal client is owned by BackendContext. A distinct public
+			// signer client belongs to this adapter and has no object-I/O authority.
+			if (presigningClient !== client) presigningClient.destroy();
 		},
 	};
 	return storage;

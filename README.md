@@ -28,22 +28,29 @@
 ```mermaid
 flowchart LR
     B[브라우저] --> W[React Web\nGitHub Pages]
-    W -->|JSON API·session cookie| A[Fastify API]
-    B -->|WebGL·다운로드 요청| A
+    W -->|JSON control request·session cookie| A[Fastify API\ncontrol plane]
+    B -->|signed UploadPart PUT| S[(S3 호환 객체 저장소\nGarage)]
+    B -->|protected signed GET| S
+    B -->|현재: 공개 이미지·WebGL legacy route| A
     A --> P[(PostgreSQL)]
-    A --> S[(S3 호환 객체 저장소\nGarage)]
+    A -->|create/list/complete/abort/head\nvalidation·cleanup| S
     A --> N[NAS 내보내기 경로\n선택 사항]
 ```
 
 | 구성 요소 | 구현 | 역할 |
 |---|---|---|
 | `apps/web` | React 19, Vite 8, React Router, TanStack Query | 공개 전시, 작품 제출, 운영 화면 |
-| `apps/api` | Node.js 22, Fastify 5, Prisma 7 | 인증, 작품·전시 관리, 파일 처리, 공개 자산 제공 |
+| `apps/api` | Node.js 22, Fastify 5, Prisma 7 | 인증, 작품·전시 관리, capability·상태 전이 control plane |
 | `packages/contracts` | TypeScript, Zod | Web과 API가 공유하는 요청·응답 schema와 enum |
 | PostgreSQL | PostgreSQL 16 | 사용자, 전시회, 작품, 자산 metadata, session, 업로드 상태 저장 |
 | Garage | S3 호환 객체 저장소 | 공개·보호 자산과 multipart 업로드 객체 저장 |
 
-Web은 정적 SPA로 빌드된다. API는 공개·인증·운영 route를 제공하고, PostgreSQL과 객체 저장소 사이의 자산 상태를 관리한다. 게임과 WebGL 대용량 파일은 브라우저에서 S3 multipart 단위로 전송하며, API는 업로드 session, 완료 claim, 정리 작업과 orphan object를 데이터베이스에 기록한다.
+Web은 정적 SPA로 빌드된다. API는 인증·인가, 업로드 capability, multipart 완료,
+검증 queue, 자산 pointer와 durable cleanup을 관리하는 control plane이다. 대형 client
+byte는 브라우저에서 Garage로 직접 전송되고 검증·변환은 별도 worker가 수행한다.
+보호 다운로드는 API가 READY 자산과 권한을 판정한 뒤 presigned GET으로 redirect한다.
+공개 이미지와 immutable WebGL generation은 Garage website 앞 ordinary nginx public
+origin에서 제공되며 Fastify를 통과하지 않는다.
 
 ## 저장소 구조
 
@@ -89,6 +96,7 @@ npm run testenv:up
 | API | <http://localhost:4000> |
 | API 상태 | <http://localhost:4000/api/health> |
 | Garage S3 API | <http://localhost:3900> |
+| Public asset origin | <http://pcu-public.web.garage.localhost:3904> |
 
 통합 환경은 `DEV_AUTH_ENABLED=true`로 실행된다. 로그인 화면의 개발용 인증 기능에서 `USER`, `OPERATOR`, `ADMIN` 동작을 확인할 수 있다. 이 route는 `NODE_ENV=production`에서 등록되지 않는다.
 
@@ -122,7 +130,9 @@ docker compose -f apps/db/docker-compose.yml up -d --build
 docker compose -f apps/db/docker-compose.yml logs garage-init
 ```
 
-`garage-init`는 `pcu-public`, `pcu-protected` bucket과 `pcu-dev-key`를 구성한다. 출력된 access key ID와 secret key를 API 환경 변수에 반영한다. 저장소의 기본 PostgreSQL 접속 정보는 개발용이며 운영 환경에 사용하지 않는다.
+`garage-init`는 세 bucket, 로컬 key, direct-upload bucket CORS를 구성하고
+`pcu-public`만 Garage website로 공개한다. `public-origin` nginx는 원래 Host/path/query와
+object metadata를 보존하면서 exact CORS와 WebGL security header를 추가한다.
 
 ### 3. 환경 변수 구성
 
@@ -134,6 +144,10 @@ cp apps/web/.env.example apps/web/.env.local
 `apps/api/.env`에서 최소한 다음 항목을 로컬 환경에 정합한다.
 
 - `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: `garage-init`에서 생성한 값
+- `S3_INTERNAL_ENDPOINT`: API/worker에서 Garage로 접근하는 내부 endpoint
+- `S3_PUBLIC_SIGNING_ENDPOINT`: 브라우저가 접근하는 presigned request endpoint
+- `PUBLIC_ASSET_BASE_URL`: API와 독립적인 public bucket origin
+- `S3_CORS_ALLOWED_ORIGINS`: Garage bucket CORS에 허용할 정확한 Web origin 목록
 - `GOOGLE_CLIENT_IDS`, `VITE_GOOGLE_CLIENT_ID`: 실제 Google OAuth를 확인할 때 사용하는 같은 Web client ID
 - `DEV_AUTH_ENABLED=true`, `VITE_DEV_AUTH_ENABLED=true`: 로컬 역할별 동작을 OAuth 없이 확인할 때만 설정
 
@@ -189,13 +203,19 @@ npm audit --audit-level=high
 npm run build
 ```
 
-전체 통합 test는 Docker image build와 서비스 기동을 포함한다. 고정 포트 `15432`, `3900`, `3902`, `3903`, `4000`, `5173`을 사용하므로 기존 process와의 충돌 여부를 먼저 확인한다.
+전체 통합 test는 Docker image build와 서비스 기동을 포함한다. 고정 포트 `15432`,
+`3900`, `3902`, `3903`, `3904`, `4000`, `5173`을 사용한다.
 
 ## 데이터와 자산 경계
 
-- PostgreSQL은 자산의 `storageKey`, 공개 여부, 크기, MIME type, 처리 상태를 저장한다.
-- Garage의 `pcu-public` bucket은 공개 자산, `pcu-protected` bucket은 보호 자산을 저장한다.
-- API는 현재 공개 참조로 확인된 이미지를 불변 cache header와 함께 직접 stream한다. GAME·VIDEO 등 보호 자산은 권한을 검사한 뒤 기존처럼 짧은 유효 기간의 presigned URL로 redirect한다.
+- PostgreSQL은 actor/project/Asset/GameUploadSession 상태, generation fencing, claim/lease, idempotency와 cleanup outbox의 source of truth다.
+- Garage의 `pcu-public` bucket은 검증된 공개 generation, `pcu-protected` bucket은 보호
+  원본, `pcu-staging`은 untrusted direct staging object를 저장한다.
+- GAME·WebGL direct upload는 API가 key, generation, upload ID, part 범위와 만료를 결정하고 browser-visible endpoint로 `UploadPart`만 presign한다. Complete/Abort는 API가 Garage operation으로 수행하며, 완료 후 HEAD와 검증을 통과하기 전에는 Asset READY나 다운로드 pointer가 생기지 않는다.
+- 보호 자산의 canonical route는 `assetId`와 variant를 해석하고 짧은 유효 기간의 presigned URL로 302 redirect한다. 이 동작 자체는 기존에도 redirect였으며, 이번 변경은 raw `storageKey` 대신 domain identity와 중앙 delivery policy를 canonical 경계로 확립한다.
+- 공개 이미지와 WebGL은 `PUBLIC_ASSET_BASE_URL`의 immutable URL을 사용한다. Garage가
+  Range·validator·MIME·encoding·cache를, ordinary nginx가 exact CORS와 security
+  header를 소유한다.
 - 영상 업로드는 재생용 자산 처리 상태를 별도로 기록한다.
 - Unity WebGL ZIP은 archive 경로와 content encoding을 검증한 뒤 공개 실행 경로로 제공한다.
 - multipart 업로드의 중단·만료·완료 실패는 background maintenance와 durable task table로 복구한다.
@@ -203,6 +223,10 @@ npm run build
 업로드 lifecycle 관련 schema 변경이나 운영 정리 작업 전에는 [업로드 lifecycle 배포 runbook](docs/upload-lifecycle-runbook.md)을 확인한다. `reconcile-orphans.ts --apply`는 신규 API 전환 후 최소 60분을 대기하고 dry run 결과를 검토한 뒤 실행하도록 규정되어 있다.
 
 ## 배포 구조
+
+이 전환은 breaking cutover다. old/new writer를 병행하지 않으며 Web/API/worker를
+[업로드 lifecycle runbook](docs/upload-lifecycle-runbook.md)의 순서로 같은 release
+pair로 배포한다. schema downgrade 대신 forward-fix를 사용한다.
 
 ### Web
 

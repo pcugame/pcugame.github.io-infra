@@ -40,7 +40,10 @@ const deploymentId = '11111111-1111-4111-8111-111111111111';
 function referenceClient(input: { malformedWebgl?: boolean } = {}) {
 	const gameUploadSession = {
 		findMany: vi.fn()
-			.mockResolvedValueOnce([{ id: 'completed', storageKey: 'game/completed.zip' }])
+			.mockResolvedValueOnce([
+				{ id: 'completed', storageKey: 'game/completed.zip' },
+				{ id: 'completed-webgl', storageKey: `webgl/7/${deploymentId}/source.zip` },
+			])
 			.mockResolvedValueOnce([
 				{ id: 'pending', s3Key: 'game/pending.zip' },
 				{ id: 'completing', s3Key: 'game/completing.zip' },

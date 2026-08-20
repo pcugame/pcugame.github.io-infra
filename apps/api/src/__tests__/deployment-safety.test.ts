@@ -29,59 +29,107 @@ describe('production deployment safety', () => {
 		expect(productionEnvExample).toMatch(/^TRUST_PROXY=1$/m);
 	});
 
-	it('deploys the matching Web commit before opening the API SSH deployment path', () => {
+	it('deploys the breaking API and workers before allowing the matching Web cutover', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
 		const webWorkflow = repositoryFile('.github/workflows/deploy-web-pages.yml');
-		const webGate = apiWorkflow.indexOf('- name: Wait for matching Web deployment');
 		const sshDeploy = apiWorkflow.indexOf('- name: SSH deploy to server');
-		const gateBlock = apiWorkflow.slice(webGate, sshDeploy);
+		const apiGate = webWorkflow.indexOf('- name: Enforce API and workers before breaking-cutover Web');
+		const webBuild = webWorkflow.indexOf('- name: Build');
 
-		expect(webGate).toBeGreaterThanOrEqual(0);
-		expect(sshDeploy).toBeGreaterThan(webGate);
+		expect(sshDeploy).toBeGreaterThanOrEqual(0);
+		expect(apiGate).toBeGreaterThanOrEqual(0);
+		expect(webBuild).toBeGreaterThan(apiGate);
 		expect(apiWorkflow).toContain('actions: read');
-		expect(gateBlock).toContain("if: steps.release-order.outputs.require_web_first == 'true'");
-		expect(gateBlock).toContain('deploy-web-pages.yml/runs');
-		expect(gateBlock).toContain('-f head_sha="${GITHUB_SHA}"');
-		expect(gateBlock).toContain('Web deployment succeeded: ${run_url}');
-		expect(gateBlock).toContain('https://pcugame.github.io/release-sha.txt?expected=${GITHUB_SHA}');
-		expect(gateBlock).toContain('if [ "${deployed_sha}" = "${GITHUB_SHA}" ]');
-		expect(webWorkflow).not.toContain('Wait for matching API deployment');
-		expect(webWorkflow).not.toContain('deploy-api.yml/runs');
+		expect(apiWorkflow).toContain('deploy.sh" cutover');
+		expect(apiWorkflow).not.toContain('Wait for matching Web deployment');
+		expect(webWorkflow).toContain('deploy-api.yml/runs');
+		expect(webWorkflow).toContain('-f head_sha="${GITHUB_SHA}"');
+		expect(webWorkflow).toContain('Matching API/worker deployment failed');
 		expect(webWorkflow.indexOf('- name: Stamp release commit')).toBeLessThan(
 			webWorkflow.indexOf('- name: Deploy to pcugame.github.io'),
 		);
 		expect(webWorkflow).toContain('dist/release-sha.txt');
 	});
 
-	it('gates only explicitly declared compatibility releases', () => {
+	it('uses an explicit maintenance gate for the breaking direct-only release', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
-		const releaseDeclaration = repositoryFile(
-			'.github/release-gates/web-before-api/2026-08-upload-idempotency.yml',
-		);
-		const responsiveImageDeclaration = repositoryFile(
-			'.github/release-gates/web-before-api/2026-08-responsive-images.yml',
+		const cutoverDeclaration = repositoryFile(
+			'.github/release-gates/cutover-maintenance/2026-08-control-plane-object-transfer.yml',
 		);
 		const apiPaths = pushPaths(repositoryFile('.github/workflows/deploy-api.yml'));
 		const webPaths = pushPaths(repositoryFile('.github/workflows/deploy-web-pages.yml'));
-		const releaseGatePath = '.github/release-gates/web-before-api/**';
+		const releaseGatePath = '.github/release-gates/cutover-maintenance/**';
 
-		expect(apiWorkflow).toContain('git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}"');
-		expect(apiWorkflow).toContain("grep -q '^\\.github/release-gates/web-before-api/'");
 		expect(apiPaths).toContain(releaseGatePath);
 		expect(webPaths).toContain(releaseGatePath);
 		expect(webPaths).not.toContain('apps/api/**');
 		expect(apiPaths).not.toContain('apps/web/**');
-		expect(releaseDeclaration).toContain('Idempotency-Key');
-		expect(responsiveImageDeclaration).toContain('policy: web-before-api');
-		expect(responsiveImageDeclaration).toContain('same commit');
-		expect(responsiveImageDeclaration).not.toContain('policy: api-before-web');
+		expect(cutoverDeclaration).toContain('policy: api-workers-before-web-maintenance');
+		expect(cutoverDeclaration).toContain('Old writers must be drained');
+		expect(cutoverDeclaration).toContain('old API image must never');
+		expect(apiWorkflow).not.toContain('previous_api_image');
 	});
 
-	it('keeps manual API hotfixes independent unless Web-first is requested', () => {
+	it('does not offer a Web-first compatibility bypass for manual API deployment', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
 
-		expect(apiWorkflow).toContain('require_web_first:');
-		expect(apiWorkflow).toContain('default: false');
-		expect(apiWorkflow).toContain('MANUAL_REQUIRE_WEB_FIRST: ${{ inputs.require_web_first }}');
+		expect(apiWorkflow).toContain('workflow_dispatch:');
+		expect(apiWorkflow).not.toContain('require_web_first');
+		expect(apiWorkflow).not.toContain('MANUAL_REQUIRE_WEB_FIRST');
+	});
+
+	it('installs a pinned age-based Garage incomplete-upload safety net without replacing exact cleanup tasks', () => {
+		const deployScript = repositoryFile('server/deploy.sh');
+		const cleanupScript = repositoryFile('server/garage-incomplete-upload-cleanup.sh');
+		const productionEnvExample = repositoryFile('server/.env.example');
+		const runbook = repositoryFile('docs/upload-lifecycle-runbook.md');
+		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
+
+		expect(deployScript).toContain('bucket cleanup-incomplete-uploads --help');
+		expect(deployScript).toContain('INCOMPLETE_MULTIPART_MAX_AGE must exceed UPLOAD_SESSION_TTL_MINUTES');
+		expect(deployScript).toContain('garage-incomplete-upload-cleanup.timer');
+		expect(deployScript).toContain('OnUnitActiveSec=6h');
+		expect(cleanupScript).toContain('bucket cleanup-incomplete-uploads --older-than "$max_age"');
+		expect(cleanupScript).toContain('"$protected_bucket" "$staging_bucket"');
+		expect(cleanupScript).toContain('>/dev/null 2>&1');
+		expect(productionEnvExample).toMatch(/^INCOMPLETE_MULTIPART_MAX_AGE=2d$/m);
+		expect(productionEnvExample).toMatch(/^GARAGE_MAINTENANCE_IMAGE=dxflrs\/garage:v1\.1\.0$/m);
+		expect(apiWorkflow).toContain('garage-incomplete-upload-cleanup.sh');
+		expect(apiWorkflow).toContain('chmod +x "${DEPLOY_DIR}/garage-incomplete-upload-cleanup.sh"');
+		expect(runbook).toContain('DB의 exact-key/upload-ID abort task');
+	});
+
+	it('starts the aggregate integration suite from a fresh integration-only Compose volume', () => {
+		const integrationRunner = repositoryFile('scripts/run-integration.mjs');
+		const rootPackage = JSON.parse(repositoryFile('package.json')) as {
+			scripts: Record<string, string>;
+		};
+		const resetStep = integrationRunner.indexOf("[npm, ['run', 'testenv:reset']]");
+		const stopBackgroundWorkers = integrationRunner.indexOf(
+			"'stop', 'validation-worker', 'export-worker'",
+		);
+		const firstPostgresTest = integrationRunner.indexOf(
+			"[npm, ['run', 'test:integration:orphan-durability']]",
+		);
+
+		expect(resetStep).toBeGreaterThanOrEqual(0);
+		expect(stopBackgroundWorkers).toBeGreaterThan(resetStep);
+		expect(stopBackgroundWorkers).toBeLessThan(firstPostgresTest);
+		expect(resetStep).toBeLessThan(firstPostgresTest);
+		expect(integrationRunner).not.toContain("[npm, ['run', 'testenv:up']]");
+		expect(rootPackage.scripts['testenv:reset']).toBe(
+			'docker compose -f docker-compose.integration.yml down -v --remove-orphans && npm run testenv:up',
+		);
+		expect(rootPackage.scripts['testenv:reset']).not.toContain('DATABASE_URL');
+		expect(integrationRunner).toContain(
+			"'up', '-d', '--no-deps', '--wait', 'validation-worker'",
+		);
+		expect(integrationRunner).toContain(
+			"'run', '--rm', '--no-deps', 'e2e'",
+		);
+		const integrationCompose = repositoryFile('docker-compose.integration.yml');
+		expect(integrationCompose).toContain(
+			'INTEGRATION_SIGNED_S3_INTERNAL_URL: http://upload-part-origin:8080',
+		);
 	});
 });

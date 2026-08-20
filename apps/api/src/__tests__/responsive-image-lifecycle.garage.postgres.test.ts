@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import type { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 import type { PrismaClient } from '../generated/prisma/client.js';
@@ -15,8 +14,6 @@ import { backfillImageRenditions } from '../modules/assets/image-rendition-backf
 import { createOrphanRepository } from '../modules/orphan/repository.js';
 import { createObjectReferenceResolver } from '../modules/orphan/reference-resolver.js';
 import { createOrphanService } from '../modules/orphan/service.js';
-import { createPublicImageService } from '../modules/public/image.service.js';
-import { createPublicRepository } from '../modules/public/repository.js';
 import { createUploadIntentRepository } from '../modules/upload-intent/repository.js';
 import { createUploadIntentService } from '../modules/upload-intent/service.js';
 import { deriveImageRenditionStorageKey } from '../shared/responsive-image.js';
@@ -157,12 +154,11 @@ describe.runIf(runIntegration)('deterministic responsive image durable lifecycle
 			},
 		});
 		const service = createAssetsService({
-			protectedBucket,
 			presign: async () => '',
 			bucketForKind: () => publicBucket,
 			wakeDeletionWorker: vi.fn(),
 			loadProjectWithAccess: async () => ({}),
-			downloadLimiter: { check: () => 'ok' },
+			downloadLimiter: { check: () => ({ status: 'ok' }) },
 			logger: { info: vi.fn(), error: vi.fn() },
 			repository: createAssetsRepository(prisma),
 		});
@@ -244,17 +240,9 @@ describe.runIf(runIntegration)('deterministic responsive image durable lifecycle
 			where: { storageKey: { in: [card, display] }, state: 'COMMITTED' },
 		})).resolves.toBe(2);
 
-		const publicRepository = createPublicRepository(prisma);
-		const publicImages = createPublicImageService({
-			publicBucket,
-			repository: publicRepository,
-			storage,
-			logger,
+		await expect(storage.head(publicBucket, card)).resolves.toMatchObject({
+			contentType: 'image/webp',
 		});
-		const response = await publicImages.get(card);
-		expect(response.status).toBe(200);
-		if (!('body' in response) || !response.body) throw new Error('Expected public rendition body');
-		for await (const _chunk of response.body as Readable) { /* consume */ }
 
 		const replacement = key('after-backfill-replacement');
 		await createProjectAssetMutationRepository(prisma).replaceOrCreateReplaceableAsset(
@@ -272,8 +260,6 @@ describe.runIf(runIntegration)('deterministic responsive image durable lifecycle
 			},
 			{ bucket: publicBucket, reason: 'backfill-replace', playbackReason: 'backfill-replace-playback' },
 		);
-		await expect(publicRepository.resolvePublicImage(card)).resolves.toBeNull();
-		await expect(publicImages.get(card)).rejects.toMatchObject({ statusCode: 404 });
 		await expectQueued(bundle(source));
 	});
 

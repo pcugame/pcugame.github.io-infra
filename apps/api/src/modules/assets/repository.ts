@@ -37,16 +37,10 @@ export function createAssetsRepository(
 	transactionPolicy: AssetMutationTransactionPolicy = ASSET_MUTATION_TRANSACTION_POLICY,
 ) {
 	return {
-		/** Find any READY asset by storageKey (including protected) */
-		findAssetByStorageKey(storageKey: string) {
-			return client.asset.findFirst({
-				where: {
-					status: 'READY',
-					OR: [
-						{ storageKey },
-						{ playbackStorageKey: storageKey },
-					],
-				},
+		/** Resolve canonical download identity without hiding a non-READY status. */
+		findAssetByIdForDownload(id: number) {
+			return client.asset.findUnique({
+				where: { id },
 				include: {
 					project: {
 						select: {
@@ -216,15 +210,6 @@ export function createAssetsRepository(
 					}
 				}
 			}, transactionPolicy);
-		},
-
-		/** Upsert a banned IP record */
-		upsertBannedIp(ip: string, reason: string) {
-			return client.bannedIp.upsert({
-				where: { ip },
-				create: { ip, reason },
-				update: {},
-			});
 		},
 
 		/** Load all banned IPs (for in-memory cache init) */

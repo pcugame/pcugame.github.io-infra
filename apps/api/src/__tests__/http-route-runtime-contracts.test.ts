@@ -1,4 +1,3 @@
-import { Readable } from 'node:stream';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
 	isResponseSerializationError,
@@ -41,6 +40,7 @@ function createStorageStub(): ObjectStorage {
 	return {
 		upload: async () => {},
 		presign: async () => 'https://storage.test/object',
+		presignUploadPart: async () => 'https://storage.test/upload-part',
 		delete: async () => {},
 		head: async () => ({ size: 0, contentType: 'application/octet-stream' }),
 		readRange: async () => Buffer.alloc(0),
@@ -167,7 +167,7 @@ describe('production HTTP runtime contracts', () => {
 			expect(route.querystring).toBeDefined();
 			expect(route.response).toBeDefined();
 			expect(route.bodyBoundary).toMatch(
-				/^(none|json|multipart|octet-stream|cors-plugin)$/,
+				/^(none|json|multipart|cors-plugin)$/,
 			);
 			expect(route.responseBoundary).toMatch(
 				/^(json|no-content|redirect|stream|errors-only|cors-plugin)$/,
@@ -175,7 +175,7 @@ describe('production HTTP runtime contracts', () => {
 			if (route.bodyBoundary === 'multipart') {
 				expect(route.body).toBeUndefined();
 			}
-			if (route.bodyBoundary === 'json' || route.bodyBoundary === 'octet-stream') {
+			if (route.bodyBoundary === 'json') {
 				expect(route.body).toBeDefined();
 			}
 		}
@@ -207,6 +207,19 @@ describe('production HTTP runtime contracts', () => {
 		expect(empty.statusCode).toBe(400);
 	});
 
+	it('rejects unsupported protected-download variants at the registered runtime boundary', async () => {
+		const response = await app.inject({
+			method: 'GET',
+			url: '/api/assets/42/download?variant=thumbnail',
+		});
+
+		expect(response.statusCode, response.body).toBe(400);
+		expect(response.json()).toMatchObject({
+			ok: false,
+			error: { code: 'VALIDATION_ERROR' },
+		});
+	});
+
 	it('leaves non-canonical numeric-looking project identifiers available as slugs', async () => {
 		for (const slug of ['0001', '1e3', '+1', '1.0', '0x10', '9007199254740992']) {
 			const response = await app.inject({
@@ -217,7 +230,7 @@ describe('production HTTP runtime contracts', () => {
 		}
 	});
 
-	it('rejects malformed JSON, chunk index, and wrong octet-stream bodies', async () => {
+	it('rejects malformed JSON and keeps the removed byte-ingress route absent', async () => {
 		const malformedJson = await app.inject({
 			method: 'POST',
 			url: '/api/auth/google',
@@ -259,7 +272,7 @@ describe('production HTTP runtime contracts', () => {
 				},
 				payload: Buffer.from([1]),
 			});
-			expect(response.statusCode, `${index}: ${response.body}`).toBe(400);
+			expect(response.statusCode, `${index}: ${response.body}`).toBe(404);
 		}
 
 		const wrongTransport = await app.inject({
@@ -271,7 +284,7 @@ describe('production HTTP runtime contracts', () => {
 			},
 			payload: {},
 		});
-		expect(wrongTransport.statusCode).toBe(400);
+		expect(wrongTransport.statusCode).toBe(404);
 
 		const unsupportedTransport = await app.inject({
 			method: 'PUT',
@@ -282,11 +295,7 @@ describe('production HTTP runtime contracts', () => {
 			},
 			payload: 'chunk=1',
 		});
-		expect(unsupportedTransport.statusCode, unsupportedTransport.body).toBe(415);
-		expect(unsupportedTransport.json()).toMatchObject({
-			ok: false,
-			error: { code: 'UNSUPPORTED_MEDIA_TYPE' },
-		});
+		expect(unsupportedTransport.statusCode, unsupportedTransport.body).toBe(404);
 
 		const nonMultipartTransport = await app.inject({
 			method: 'POST',
@@ -382,7 +391,6 @@ describe('production HTTP runtime contracts', () => {
 				payload: { role: 'ROOT' },
 			},
 			{ family: 'public', method: 'GET', url: '/api/public/years?unexpected=1' },
-			{ family: 'public-webgl', method: 'GET', url: '/api/public/webgl/1x' },
 			{ family: 'assets', method: 'DELETE', url: '/api/admin/assets/1x' },
 			{
 				family: 'me-project',
@@ -503,6 +511,70 @@ describe('production HTTP runtime contracts', () => {
 		}
 	});
 
+	it('accepts only checksum-bound direct part capability requests at the Fastify boundary', async () => {
+		const capabilityApp = Fastify();
+		capabilityApp.setValidatorCompiler(validatorCompiler);
+		capabilityApp.setSerializerCompiler(serializerCompiler);
+		registerRouteSchemas(capabilityApp);
+		capabilityApp.setErrorHandler((error, _request, reply) => {
+			reply.status(400).send({
+				ok: false,
+				error: {
+					code: 'VALIDATION_ERROR',
+					message: error instanceof Error ? error.message : 'Invalid request',
+				},
+			});
+		});
+		capabilityApp.post('/api/admin/game-upload-sessions/:sessionId/part-urls', async (request) => {
+			const body = request.body as {
+				generation: number;
+				parts: Array<{ partNumber: number; checksumSha256: string }>;
+			};
+			return {
+				ok: true,
+				data: {
+					generation: body.generation,
+					expiresAt: '2026-08-20T12:00:00.000Z',
+					parts: body.parts.map(({ partNumber, checksumSha256 }) => ({
+						partNumber,
+						url: `https://storage.example.test/upload/${partNumber}`,
+						requiredHeaders: { 'x-amz-checksum-sha256': checksumSha256 },
+					})),
+				},
+			};
+		});
+		await capabilityApp.ready();
+		try {
+			const checksumSha256 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+			const valid = await capabilityApp.inject({
+				method: 'POST',
+				url: '/api/admin/game-upload-sessions/session-1/part-urls',
+				payload: { generation: 1, parts: [{ partNumber: 1, checksumSha256 }] },
+			});
+			expect(valid.statusCode, valid.body).toBe(200);
+			expect(valid.json()).toMatchObject({
+				ok: true,
+				data: { generation: 1, parts: [{ partNumber: 1 }] },
+			});
+
+			const staleShape = await capabilityApp.inject({
+				method: 'POST',
+				url: '/api/admin/game-upload-sessions/session-1/part-urls',
+				payload: { generation: 1, partNumbers: [1] },
+			});
+			expect(staleShape.statusCode, staleShape.body).toBe(400);
+
+			const unbound = await capabilityApp.inject({
+				method: 'POST',
+				url: '/api/admin/game-upload-sessions/session-1/part-urls',
+				payload: { generation: 1, parts: [{ partNumber: 1 }] },
+			});
+			expect(unbound.statusCode, unbound.body).toBe(400);
+		} finally {
+			await capabilityApp.close();
+		}
+	});
+
 	it('rejects an un-inventoried route even when it supplies broad schema slots', async () => {
 		const guardApp = Fastify();
 		registerRouteSchemas(guardApp);
@@ -525,7 +597,7 @@ describe('production HTTP runtime contracts', () => {
 		}
 	});
 
-	it('keeps CORS, health, stream, and response serialization boundaries executable', async () => {
+	it('keeps CORS, health, removed relay, and response serialization boundaries executable', async () => {
 		const preflight = await app.inject({
 			method: 'OPTIONS',
 			url: '/api/arbitrary-preflight-target',
@@ -559,44 +631,11 @@ describe('production HTTP runtime contracts', () => {
 		const health = await app.inject({ method: 'GET', url: '/api/health' });
 		expect(health.statusCode, health.body).toBe(200);
 
-		const streamApp = Fastify();
-		streamApp.setValidatorCompiler(validatorCompiler);
-		streamApp.setSerializerCompiler(serializerCompiler);
-		registerRouteSchemas(streamApp);
-		streamApp.setErrorHandler((error, _request, reply) => {
-			const validationFailure = (
-				typeof error === 'object'
-				&& error !== null
-				&& 'validation' in error
-				&& Boolean(error.validation)
-			);
-			reply.status(validationFailure ? 400 : 500).send({
-				ok: false,
-				error: {
-					code: validationFailure ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR',
-					message: validationFailure ? 'Validation failed' : 'Internal server error',
-				},
-			});
+		const removedWebglRelay = await app.inject({
+			method: 'GET',
+			url: '/api/public/webgl/7',
 		});
-		streamApp.get('/api/public/webgl/:projectId', async (_request, reply) => (
-			reply.type('application/octet-stream').send(Readable.from(['streamed']))
-		));
-		await streamApp.ready();
-		try {
-			const streamed = await streamApp.inject({
-				method: 'GET',
-				url: '/api/public/webgl/7',
-			});
-			expect(streamed.statusCode).toBe(200);
-			expect(streamed.body).toBe('streamed');
-			const malformed = await streamApp.inject({
-				method: 'GET',
-				url: '/api/public/webgl/7x',
-			});
-			expect(malformed.statusCode).toBe(400);
-		} finally {
-			await streamApp.close();
-		}
+		expect(removedWebglRelay.statusCode).toBe(404);
 	});
 
 	it('turns a handler/schema response mismatch into a serialization failure', async () => {
@@ -704,12 +743,16 @@ describe('production HTTP runtime contracts', () => {
 					sessionId: 'session',
 					projectId: 1,
 					uploadKind: 'GAME',
+					generation: 1,
 					originalName: 'game.zip',
 					totalBytes: 1,
 					chunkSizeBytes: 1,
 					totalChunks: 1,
-					uploadedChunks: [],
+					sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+					sourceIdentity: '0'.repeat(64),
+					sourceIdentityBlockSizeBytes: 1048576,
 					uploadedCount: 0,
+					parts: [],
 					status: 'PENDING',
 					expiresAt: '2026-07-31T00:00:00.000Z',
 				},
@@ -750,6 +793,11 @@ describe('production HTTP runtime contracts', () => {
 				method: 'POST',
 				routeUrl: '/api/me/projects/submit',
 				requestUrl: '/api/me/projects/submit',
+				payload: {
+					exhibitionId: 1,
+					title: 'Contract project',
+					members: [{ name: 'Student', studentId: '20260001' }],
+				},
 			},
 			{
 				family: 'admin-exhibitions',

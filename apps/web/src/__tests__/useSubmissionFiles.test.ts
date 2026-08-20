@@ -7,12 +7,11 @@ import type { ClientUploadLimits } from '../lib/upload-limits';
 
 const limits: ClientUploadLimits = {
 	imageMaxMb: 10,
-	imagePdfMaxMb: 100,
+	imagePdfMaxMb: 16,
 	posterMaxMb: 5,
-	posterPdfMaxMb: 25,
-	videoMaxMb: 100,
+	posterPdfMaxMb: 16,
 	gameMaxMb: 5120,
-	requestMaxMb: 250,
+	requestMaxMb: 16,
 	maxFiles: 10,
 };
 
@@ -71,19 +70,10 @@ describe('useSubmissionFiles', () => {
 		expect((event.target as HTMLInputElement).value).toBe('');
 	});
 
-	it('appends valid video selections and clears the input value', () => {
+	it('does not expose a generic VIDEO selection path', () => {
 		const { result } = renderHook(() => useSubmissionFiles({ limits }));
-		const first = file('first.mp4', 'video/mp4', 1024);
-		const second = file('second.mp4', 'video/mp4', 1024);
-		const firstEvent = eventWithFiles([first]);
-		const secondEvent = eventWithFiles([second]);
-
-		act(() => result.current.handleVideoChange(firstEvent));
-		act(() => result.current.handleVideoChange(secondEvent));
-
-		expect(result.current.videoFiles).toEqual([first, second]);
-		expect((firstEvent.target as HTMLInputElement).value).toBe('');
-		expect((secondEvent.target as HTMLInputElement).value).toBe('');
+		expect('handleVideoChange' in result.current).toBe(false);
+		expect('videoFiles' in result.current).toBe(false);
 	});
 
 	it('rejects game files larger than the configured game upload limit', () => {

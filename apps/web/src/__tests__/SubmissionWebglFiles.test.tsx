@@ -8,12 +8,11 @@ import type { ClientUploadLimits } from '../lib/upload-limits';
 
 const limits: ClientUploadLimits = {
 	imageMaxMb: 10,
-	imagePdfMaxMb: 100,
+	imagePdfMaxMb: 16,
 	posterMaxMb: 10,
-	posterPdfMaxMb: 50,
-	videoMaxMb: 200,
+	posterPdfMaxMb: 16,
 	gameMaxMb: 5120,
-	requestMaxMb: 250,
+	requestMaxMb: 16,
 	maxFiles: 10,
 };
 

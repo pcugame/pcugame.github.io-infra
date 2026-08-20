@@ -97,17 +97,28 @@ export type ResponsiveImageSourceRecord = {
 	display960Height?: number | null;
 };
 
+/** Encode an object key for a path-based public origin without collapsing its hierarchy. */
+export function publicObjectUrl(publicAssetBaseUrl: string, storageKey: string): string {
+	if (!storageKey || storageKey.startsWith('/')) {
+		throw new Error('Public object storage key must be a non-empty relative path');
+	}
+	const encodedKey = storageKey
+		.split('/')
+		.map((segment) => encodeURIComponent(segment).replace(/[!'()*]/g, (value) => (
+			`%${value.charCodeAt(0).toString(16).toUpperCase()}`
+		)))
+		.join('/');
+	return `${publicAssetBaseUrl.replace(/\/$/, '')}/${encodedKey}`;
+}
+
 /**
  * Build the one canonical public-image response shape. A nullable height is
  * the persisted readiness marker. A rendition is advertised only when its
  * source is wider than the profile (so it was not enlarged) and that marker is
  * present. The original remains available for legacy rows without dimensions.
  */
-export function createResponsiveImageSerializer(apiPublicUrl: string) {
-	const base = apiPublicUrl.replace(/\/$/, '');
-	const publicImageUrl = (storageKey: string) => (
-		`${base}/api/public/images/${encodeURIComponent(storageKey)}`
-	);
+export function createResponsiveImageSerializer(publicAssetBaseUrl: string) {
+	const publicImageUrl = (storageKey: string) => publicObjectUrl(publicAssetBaseUrl, storageKey);
 
 	function serializeResponsiveImage(source: ResponsiveImageSourceRecord): ResponsiveImage {
 		return {

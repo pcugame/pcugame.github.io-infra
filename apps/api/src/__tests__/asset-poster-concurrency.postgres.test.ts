@@ -6,7 +6,6 @@ import { createProjectAssetMutationRepository } from '../modules/admin/project/a
 import { createProjectAssetService } from '../modules/admin/project/project-asset.service.js';
 import { createAssetsRepository } from '../modules/assets/repository.js';
 import { createAssetsService } from '../modules/assets/service.js';
-import { ASSET_MUTATION_TRANSACTION_POLICY } from '../modules/assets/mutation-transaction.js';
 import { createOrphanRepository } from '../modules/orphan/repository.js';
 import { createOrphanService } from '../modules/orphan/service.js';
 import { createObjectReferenceResolver } from '../modules/orphan/reference-resolver.js';
@@ -164,30 +163,26 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			});
 		};
 		const service = createAssetsService({
-			protectedBucket: bucket,
 			presign: vi.fn(),
 			bucketForKind: () => bucket,
 			wakeDeletionWorker,
 			loadProjectWithAccess: async () => ({}),
-			downloadLimiter: { check: () => 'ok' },
+			downloadLimiter: { check: () => ({ status: 'ok' }) },
 			logger: { info: vi.fn(), error: vi.fn() },
 			repository: createAssetsRepository(client),
 		});
 		return Object.assign(service, { drainDeletion: () => deletionWork });
 	}
 
-	function createGameUploadService(input: {
+	function createRejectedBulkUploadService(input: {
 		client: PrismaClient;
 		storageKey: string;
 		objects: Set<string>;
-		maxAttempts?: number;
+		kind: 'GAME' | 'VIDEO';
 	}) {
 		const rollback = vi.fn(async () => { input.objects.delete(input.storageKey); });
 		const cleanup = vi.fn(async () => {});
-		const mutationRepository = createProjectAssetMutationRepository(input.client, {
-			...ASSET_MUTATION_TRANSACTION_POLICY,
-			maxAttempts: input.maxAttempts ?? ASSET_MUTATION_TRANSACTION_POLICY.maxAttempts,
-		});
+		const createAsset = vi.fn();
 		const orphanService = createOrphanService({
 			clock: { now: () => new Date() },
 			storage: {
@@ -214,9 +209,8 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 		};
 		const service = createProjectAssetService({
 			repository: {
-				...mutationRepository,
 				findExhibitionById: (id) => input.client.exhibition.findUnique({ where: { id } }),
-				createAsset: (data) => input.client.asset.create({ data, select: { id: true } }),
+				createAsset,
 			},
 			uploadLimits: () => ({
 				posterMaxBytes: 1024,
@@ -233,10 +227,10 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 					return {
 						savedFile: {
 							storageKey: input.storageKey,
-							mimeType: 'application/zip',
+							mimeType: input.kind === 'GAME' ? 'application/zip' : 'video/mp4',
 							sizeBytes: 8,
-							originalName: 'replacement.zip',
-							kind: 'GAME' as const,
+							originalName: input.kind === 'GAME' ? 'replacement.zip' : 'replacement.mp4',
+							kind: input.kind,
 						},
 						rollback,
 						cleanup,
@@ -246,7 +240,7 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			bucketForKind: () => bucket,
 			wakeDeletionWorker,
 		});
-		return { service, rollback, cleanup, drainDeletion: () => deletionWork };
+		return { service, rollback, cleanup, createAsset, drainDeletion: () => deletionWork };
 	}
 
 	async function expectProjectInvariants(projectId: number, objects: Set<string>) {
@@ -363,42 +357,33 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 		]);
 	});
 
-	it('repeats delete -> GAME replace with both critical sections inside PostgreSQL barriers', async () => {
+	it('rejects generic GAME before its pointer can enter the inline asset mutation boundary', async () => {
 		for (let iteration = 0; iteration < REPETITIONS; iteration += 1) {
 			const project = await createProjectFixture();
-			const oldKey = `integration/ticket-005/${testId}/delete-replace-${iteration}-old.zip`;
-			const newKey = `integration/ticket-005/${testId}/delete-replace-${iteration}-new.zip`;
+			const oldKey = `integration/ticket-005/${testId}/direct-required-${iteration}-old.zip`;
+			const rejectedKey = `integration/ticket-005/${testId}/direct-required-${iteration}-new.zip`;
 			const oldAsset = await createAssetFixture(project.id, 'GAME', oldKey);
 			const objects = new Set([oldKey]);
-			const deletion = createDeletionService(operationA, objects);
-			const upload = createGameUploadService({ client: operationB, storageKey: newKey, objects });
-			const barrier = await armBarrier('assets', oldAsset.id);
-			let released = false;
-			try {
-				const deleting = deletion.deleteAsset(oldAsset.id, { id: userId, role: 'ADMIN' });
-				await waitForDatabaseLock('ticket005-operation-a');
-				const replacing = upload.service.addAssetToProject(
+			const upload = createRejectedBulkUploadService({
+				client: operationB,
+				storageKey: rejectedKey,
+				objects,
+				kind: 'GAME',
+			});
+
+			await expect(upload.service.addAssetToProject(
 					project.id,
 					exhibitionId,
 					{ actor: { id: userId, role: 'ADMIN' }, parts: emptyParts() },
-				);
-				await waitForDatabaseLock('ticket005-operation-b');
-				await barrier.release();
-				released = true;
-				await expect(Promise.all([deleting, replacing])).resolves.toHaveLength(2);
-			} finally {
-				if (!released) await barrier.release();
-			}
-			await Promise.all([deletion.drainDeletion(), upload.drainDeletion()]);
-
+			)).rejects.toThrow('Inline upload coordinator returned a non-inline asset kind');
+			expect(upload.createAsset).not.toHaveBeenCalled();
+			expect(upload.rollback).toHaveBeenCalledOnce();
+			expect(upload.cleanup).toHaveBeenCalledOnce();
 			await expect(control.asset.findUniqueOrThrow({ where: { id: oldAsset.id } }))
-				.resolves.toMatchObject({ status: 'DELETED', storageKey: oldKey });
-			const ready = await control.asset.findFirstOrThrow({
-				where: { projectId: project.id, kind: 'GAME', status: 'READY' },
-			});
-			expect(ready.id).not.toBe(oldAsset.id);
-			expect(ready.storageKey).toBe(newKey);
-			expect(objects).toEqual(new Set([newKey]));
+				.resolves.toMatchObject({ status: 'READY', storageKey: oldKey });
+			await expect(control.asset.count({ where: { projectId: project.id, storageKey: rejectedKey } }))
+				.resolves.toBe(0);
+			expect(objects).toEqual(new Set([oldKey]));
 			await expectProjectInvariants(project.id, objects);
 		}
 	});
@@ -507,63 +492,28 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 		}
 	});
 
-	it('durably cleans a losing GAME upload when bounded retry is exhausted', async () => {
+	it('rejects generic VIDEO and rolls back staged bytes without a database pointer', async () => {
 		for (let iteration = 0; iteration < REPETITIONS; iteration += 1) {
 			const project = await createProjectFixture();
-			const oldKey = `integration/ticket-005/${testId}/loser-${iteration}-old.zip`;
-			const winnerKey = `integration/ticket-005/${testId}/loser-${iteration}-winner.zip`;
-			const loserKey = `integration/ticket-005/${testId}/loser-${iteration}-loser.zip`;
-			const oldAsset = await createAssetFixture(project.id, 'GAME', oldKey);
-			const objects = new Set([oldKey]);
-			const winner = createGameUploadService({
-				client: operationA,
-				storageKey: winnerKey,
-				objects,
-				maxAttempts: 1,
-			});
-			const loser = createGameUploadService({
+			const rejectedKey = `integration/ticket-005/${testId}/direct-video-required-${iteration}.mp4`;
+			const objects = new Set<string>();
+			const upload = createRejectedBulkUploadService({
 				client: operationB,
-				storageKey: loserKey,
+				storageKey: rejectedKey,
 				objects,
-				maxAttempts: 1,
+				kind: 'VIDEO',
 			});
-			const barrier = await armBarrier('assets', oldAsset.id);
-			let released = false;
-			let loserResult!: Promise<unknown>;
-			try {
-				const winnerResult = winner.service.addAssetToProject(
+
+			await expect(upload.service.addAssetToProject(
 					project.id,
 					exhibitionId,
 					{ actor: { id: userId, role: 'ADMIN' }, parts: emptyParts() },
-				);
-				await waitForDatabaseLock('ticket005-operation-a');
-				loserResult = loser.service.addAssetToProject(
-					project.id,
-					exhibitionId,
-					{ actor: { id: userId, role: 'ADMIN' }, parts: emptyParts() },
-				);
-				await waitForDatabaseLock('ticket005-operation-b');
-				await barrier.release();
-				released = true;
-				const [winnerOutcome, loserOutcome] = await Promise.allSettled([
-					winnerResult,
-					loserResult,
-				]);
-				if (winnerOutcome.status !== 'fulfilled') throw winnerOutcome.reason;
-				expect(winnerOutcome.value.assetId).toBeGreaterThan(0);
-				expect(loserOutcome).toMatchObject({
-					status: 'rejected',
-					reason: { statusCode: 409, code: 'CONFLICT' },
-				});
-			} finally {
-				if (!released) await barrier.release();
-			}
-			await Promise.all([winner.drainDeletion(), loser.drainDeletion()]);
-			expect(loser.rollback).toHaveBeenCalledOnce();
-			expect(objects).toEqual(new Set([winnerKey]));
-			await expect(control.asset.findUniqueOrThrow({ where: { id: oldAsset.id } }))
-				.resolves.toMatchObject({ status: 'DELETED', storageKey: oldKey });
-			await expect(control.asset.count({ where: { projectId: project.id, storageKey: loserKey } }))
+			)).rejects.toThrow('Inline upload coordinator returned a non-inline asset kind');
+			expect(upload.createAsset).not.toHaveBeenCalled();
+			expect(upload.rollback).toHaveBeenCalledOnce();
+			expect(upload.cleanup).toHaveBeenCalledOnce();
+			expect(objects.size).toBe(0);
+			await expect(control.asset.count({ where: { projectId: project.id, storageKey: rejectedKey } }))
 				.resolves.toBe(0);
 			await expectProjectInvariants(project.id, objects);
 		}

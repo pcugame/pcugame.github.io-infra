@@ -81,9 +81,6 @@ function createPosterProcessing(
 		},
 		processImage: (input) => processImage(input, deps.fileSystem),
 		processPdf: (input) => processPdf(input, deps.logger, deps.fileSystem),
-		processVideo: async () => {
-			throw new Error('Exhibition upload does not process video');
-		},
 	};
 }
 
@@ -123,15 +120,23 @@ export function createExhibitionPosterUploadCoordinator(
 			try {
 				let temporaryPath: string | null = null;
 				let originalName = '';
-				let fileCount = 0;
+				let hasPoster = false;
 
 				for await (const part of parts) {
-					if (part.type !== 'file') continue;
-					if (part.fieldname !== 'poster') {
-						throw badRequest('Multipart field must be poster');
+					if (part.type !== 'file') {
+						throw badRequest('Multipart body must contain exactly one poster file');
 					}
-					fileCount += 1;
-					if (fileCount > 1) throw badRequest('Only one poster file is allowed');
+					if (hasPoster || part.fieldname !== 'poster') {
+						// Busboy pauses the multipart parser on an unconsumed file. Drain an
+						// invalid or trailing file before rejecting so the request cannot hang.
+						part.file.resume();
+						throw badRequest(
+							hasPoster
+								? 'Only one poster file is allowed'
+								: 'Multipart field must be poster',
+						);
+					}
+					hasPoster = true;
 					assertValidUploadFilename(part.filename);
 
 					const nextPath = path.join(

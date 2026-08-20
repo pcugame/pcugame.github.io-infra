@@ -6,7 +6,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../lib/query';
-import { getApiErrorMessage } from '../lib/api';
+import { ApiError, getApiErrorMessage } from '../lib/api';
 import {
 	createGameUploadSession,
 	getGameUploadStatus,
@@ -18,6 +18,12 @@ import {
 	type GameUploadController,
 	type GameUploadStatus,
 } from '../lib/api/game-upload';
+import {
+	computeFileIdentity,
+	SOURCE_IDENTITY_ALGORITHM,
+	SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
+	type FileIdentity,
+} from '../lib/upload/file-identity';
 import type { UploadKind } from '../contracts';
 
 type UploadState = 'idle' | 'uploading' | 'completing' | 'completed' | 'error' | 'cancelled';
@@ -34,6 +40,52 @@ interface Props {
 	onSkip?: () => void;
 	/** GAME and WEBGL use fully independent server-side sessions. */
 	uploadKind?: UploadKind;
+}
+
+const FILE_IDENTITY_MISMATCH_MESSAGE = '선택한 파일이 이 업로드 세션을 시작한 파일과 다릅니다. 원래 파일을 선택하거나 새 업로드를 시작하세요.';
+
+type SessionWithIdentity = {
+	sourceIdentityAlgorithm: typeof SOURCE_IDENTITY_ALGORITHM;
+	sourceIdentity: string;
+	sourceIdentityBlockSizeBytes: typeof SOURCE_IDENTITY_BLOCK_SIZE_BYTES;
+};
+
+function hasSessionIdentity<T extends GameUploadSession | GameUploadStatus>(
+	session: T,
+): session is T & SessionWithIdentity {
+	return session.sourceIdentityAlgorithm === SOURCE_IDENTITY_ALGORITHM
+		&& typeof session.sourceIdentity === 'string'
+		&& /^[a-f0-9]{64}$/.test(session.sourceIdentity)
+		&& session.sourceIdentityBlockSizeBytes === SOURCE_IDENTITY_BLOCK_SIZE_BYTES;
+}
+
+function matchesSessionIdentity(
+	identity: FileIdentity,
+	session: GameUploadSession | GameUploadStatus,
+): boolean {
+	return hasSessionIdentity(session)
+		&& identity.sourceIdentityAlgorithm === session.sourceIdentityAlgorithm
+		&& identity.sourceIdentity === session.sourceIdentity
+		&& identity.sourceIdentityBlockSizeBytes === session.sourceIdentityBlockSizeBytes;
+}
+
+function getUploadIntegrityErrorMessage(error: unknown): string | null {
+	if (!(error instanceof ApiError) || error.status !== 409 || typeof error.body !== 'object' || error.body === null) {
+		return null;
+	}
+	const body = error.body as Record<string, unknown>;
+	const errorPayload = body.error;
+	if (typeof errorPayload !== 'object' || errorPayload === null) return null;
+	const details = (errorPayload as Record<string, unknown>).details;
+	if (typeof details !== 'object' || details === null) return null;
+	switch ((details as Record<string, unknown>).reason) {
+		case 'SOURCE_IDENTITY_MISMATCH':
+			return FILE_IDENTITY_MISMATCH_MESSAGE;
+		case 'CHUNK_CONTENT_MISMATCH':
+			return '업로드 청크 무결성 충돌이 발생했습니다. 새 업로드를 시작하세요.';
+		default:
+			return null;
+	}
 }
 
 export default function GameUploadWidget({
@@ -84,14 +136,16 @@ export default function GameUploadWidget({
 	const doUpload = useCallback(async (
 		uploadFile: File,
 		sess: GameUploadSession,
-		uploadedChunks: number[] = [],
+		resumeParts: GameUploadStatus['parts'] = [],
+		resumeFinalizationStatus?: 'COMPLETING' | 'VERIFYING',
 	) => {
-		setState('uploading');
+		setState(resumeFinalizationStatus ? 'completing' : 'uploading');
 		setError(null);
 
 		const ctrl = uploadGameFile(uploadFile, sess, {
 			title: labels.uploadTitle,
-			startFrom: uploadedChunks,
+			resumeParts,
+			resumeFinalizationStatus,
 			onProgress: (p) => {
 				setProgress(p);
 				if (p.percent >= 100) setState('completing');
@@ -108,7 +162,7 @@ export default function GameUploadWidget({
 			if ((err as Error).message === 'Upload aborted') {
 				setState('cancelled');
 			} else {
-				setError(getApiErrorMessage(err));
+				setError(getUploadIntegrityErrorMessage(err) ?? getApiErrorMessage(err));
 				setState('error');
 			}
 		}
@@ -119,11 +173,15 @@ export default function GameUploadWidget({
 		if (submittingRef.current) return;
 		submittingRef.current = true;
 		try {
-			const sess = await createGameUploadSession(projectId, file, uploadKind);
+			const identity = await computeFileIdentity(file);
+			const sess = await createGameUploadSession(projectId, file, identity, uploadKind);
+			if (!matchesSessionIdentity(identity, sess)) {
+				throw new Error('업로드 세션의 파일 identity를 확인할 수 없습니다. 새 업로드를 시작하세요.');
+			}
 			setSession(sess);
 			await doUpload(file, sess);
 		} catch (err) {
-			setError(getApiErrorMessage(err));
+			setError(getUploadIntegrityErrorMessage(err) ?? getApiErrorMessage(err));
 			setState('error');
 		} finally {
 			submittingRef.current = false;
@@ -156,17 +214,36 @@ export default function GameUploadWidget({
 
 		try {
 			const status = await getGameUploadStatus(resumeSession.sessionId);
+			if (!hasSessionIdentity(status)) throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
+			if (file.size !== status.totalBytes) {
+				throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
+			}
+			const identity = await computeFileIdentity(file);
+			if (!matchesSessionIdentity(identity, status)) {
+				throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
+			}
 			const sess: GameUploadSession = {
 				sessionId: status.sessionId,
 				chunkSizeBytes: status.chunkSizeBytes,
 				totalChunks: status.totalChunks,
 				expiresAt: status.expiresAt,
 				uploadKind: status.uploadKind,
+				generation: status.generation,
+				sourceIdentityAlgorithm: status.sourceIdentityAlgorithm,
+				sourceIdentity: status.sourceIdentity,
+				sourceIdentityBlockSizeBytes: status.sourceIdentityBlockSizeBytes,
 			};
 			setSession(sess);
-			await doUpload(file, sess, status.uploadedChunks);
+			await doUpload(
+				file,
+				sess,
+				status.parts,
+				status.status === 'COMPLETING' || status.status === 'VERIFYING'
+					? status.status
+					: undefined,
+			);
 		} catch (err) {
-			setError(getApiErrorMessage(err));
+			setError(getUploadIntegrityErrorMessage(err) ?? getApiErrorMessage(err));
 			setState('error');
 		} finally {
 			submittingRef.current = false;
@@ -177,15 +254,40 @@ export default function GameUploadWidget({
 		if (!file || !session) return;
 		try {
 			const status = await getGameUploadStatus(session.sessionId);
-			if (status.status === 'PENDING') {
-				await doUpload(file, session, status.uploadedChunks);
+			if (status.status === 'PENDING' || status.status === 'COMPLETING' || status.status === 'VERIFYING') {
+				if (!hasSessionIdentity(status)) throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
+				if (file.size !== status.totalBytes) {
+					throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
+				}
+				const identity = await computeFileIdentity(file);
+				if (!matchesSessionIdentity(identity, status)) {
+					throw new Error(FILE_IDENTITY_MISMATCH_MESSAGE);
+				}
+				await doUpload(file, {
+					sessionId: status.sessionId,
+					chunkSizeBytes: status.chunkSizeBytes,
+					totalChunks: status.totalChunks,
+					expiresAt: status.expiresAt,
+					uploadKind: status.uploadKind,
+					generation: status.generation,
+					sourceIdentityAlgorithm: status.sourceIdentityAlgorithm,
+					sourceIdentity: status.sourceIdentity,
+					sourceIdentityBlockSizeBytes: status.sourceIdentityBlockSizeBytes,
+				}, status.parts,
+				status.status === 'COMPLETING' || status.status === 'VERIFYING'
+					? status.status
+					: undefined);
 			} else {
-				const replacement = await createGameUploadSession(projectId, file, uploadKind);
+				const identity = await computeFileIdentity(file);
+				const replacement = await createGameUploadSession(projectId, file, identity, uploadKind);
+				if (!matchesSessionIdentity(identity, replacement)) {
+					throw new Error('업로드 세션의 파일 identity를 확인할 수 없습니다. 새 업로드를 시작하세요.');
+				}
 				setSession(replacement);
 				await doUpload(file, replacement);
 			}
 		} catch (err) {
-			setError(getApiErrorMessage(err));
+			setError(getUploadIntegrityErrorMessage(err) ?? getApiErrorMessage(err));
 			setState('error');
 		}
 	}, [file, session, doUpload, projectId, uploadKind]);

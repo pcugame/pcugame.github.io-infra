@@ -11,7 +11,7 @@ export interface MemberServiceDependencies {
 		}): Promise<{ id: number }>;
 		findMemberInProject(memberId: number, projectId: number): Promise<{ id: number } | null>;
 		updateMember(id: number, patch: { name?: string; studentId?: string; sortOrder?: number }): Promise<unknown>;
-		deleteMember(id: number): Promise<unknown>;
+		deleteMember(id: number, projectId: number): Promise<unknown>;
 		swapMemberOrder(memberIdA: number, memberIdB: number, projectId: number): Promise<unknown | null>;
 	};
 }
@@ -49,7 +49,7 @@ export async function deleteMember(deps: MemberServiceDependencies, projectId: n
 	const member = await deps.repository.findMemberInProject(memberId, projectId);
 	if (!member) throw notFound('Member not found');
 
-	await deps.repository.deleteMember(member.id);
+	await deps.repository.deleteMember(member.id, projectId);
 }
 
 /** Swap sortOrder of two members. Throws 404 if either is not found. */

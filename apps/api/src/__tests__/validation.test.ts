@@ -507,9 +507,17 @@ describe('GameUploadCreateSessionBody', () => {
     expect(GameUploadCreateSessionBody.parse({
       originalName: 'game.zip',
       totalBytes: '1024',
+      sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+      sourceIdentity: '0'.repeat(64),
+      sourceIdentityBlockSizeBytes: 1048576,
+      sourceIdentityBlockDigests: ['1'.repeat(64)],
     })).toEqual({
       originalName: 'game.zip',
       totalBytes: 1024,
+      sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+      sourceIdentity: '0'.repeat(64),
+      sourceIdentityBlockSizeBytes: 1048576,
+      sourceIdentityBlockDigests: ['1'.repeat(64)],
     });
   });
 
@@ -519,6 +527,10 @@ describe('GameUploadCreateSessionBody', () => {
       expect(GameUploadCreateSessionBody.safeParse({
         originalName: 'game.zip',
         totalBytes,
+        sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+        sourceIdentity: '0'.repeat(64),
+        sourceIdentityBlockSizeBytes: 1048576,
+        sourceIdentityBlockDigests: ['1'.repeat(64)],
       }).success).toBe(false);
     },
   );

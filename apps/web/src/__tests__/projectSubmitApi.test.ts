@@ -23,14 +23,18 @@ import { getProjectSubmitApi } from '../lib/api/project-submit';
 
 describe('project submit API selection', () => {
 	it('/me/projects/new user mode submits to the me endpoint', async () => {
-		const fd = new FormData();
+		const payload = {
+			exhibitionId: 1,
+			title: 'Game',
+			members: [{ name: 'Student', studentId: '20260001' }],
+		};
 		const idempotencyKey = 'user-operation-key';
 
-		await getProjectSubmitApi('user').submit({ formData: fd, idempotencyKey });
+		await getProjectSubmitApi('user').submit({ payload, idempotencyKey });
 
-		expect(mocks.uploadFormData).toHaveBeenCalledWith(
+		expect(mocks.api.post).toHaveBeenCalledWith(
 			'/api/me/projects/submit',
-			fd,
+			payload,
 			expect.objectContaining({
 				headers: { 'Idempotency-Key': idempotencyKey },
 			}),
@@ -38,14 +42,18 @@ describe('project submit API selection', () => {
 	});
 
 	it('/admin/projects/new admin mode submits to the admin endpoint', async () => {
-		const fd = new FormData();
+		const payload = {
+			exhibitionId: 1,
+			title: 'Game',
+			members: [{ name: 'Student', studentId: '20260001' }],
+		};
 		const idempotencyKey = 'admin-operation-key';
 
-		await getProjectSubmitApi('admin').submit({ formData: fd, idempotencyKey });
+		await getProjectSubmitApi('admin').submit({ payload, idempotencyKey });
 
-		expect(mocks.uploadFormData).toHaveBeenCalledWith(
+		expect(mocks.api.post).toHaveBeenCalledWith(
 			'/api/admin/projects/submit',
-			fd,
+			payload,
 			expect.objectContaining({
 				headers: { 'Idempotency-Key': idempotencyKey },
 			}),

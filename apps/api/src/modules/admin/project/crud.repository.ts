@@ -3,8 +3,10 @@ import type {
 	Prisma,
 	PrismaClient,
 	ProjectStatus,
+	UploadKind,
 } from '../../../generated/prisma/client.js';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
+import { operationInProgress } from '../../../shared/errors.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
 import type {
 	DeletionOutboxConfig,
@@ -22,8 +24,131 @@ import {
 	projectAssetDeletionTargets,
 	projectWebglDeletionTargets,
 } from './project-deletion-targets.js';
+import { parseWebglEntryKey } from '../../webgl/paths.js';
 
 type TxClient = Prisma.TransactionClient;
+
+type LiveProjectUpload = {
+	id: string;
+	projectId: number;
+	status: 'PENDING' | 'COMPLETING' | 'VERIFYING';
+	uploadKind: string;
+	s3Key: string | null;
+	storageKey: string | null;
+	s3UploadId: string | null;
+};
+
+/**
+ * PENDING sessions have no completed object but may own multipart parts. The
+ * completed states are deliberately not deleted here: callers first reject the
+ * parent mutation and let the completion/verification owner resolve them.
+ */
+function liveUploadDeletionTargets(
+	projectId: number,
+	uploads: readonly LiveProjectUpload[],
+	outbox: DeletionOutboxConfig,
+) {
+	return uploads.flatMap((upload) => [...new Set([upload.storageKey, upload.s3Key]
+		.filter((key): key is string => typeof key === 'string' && key.length > 0))]
+		.flatMap((key) => projectActiveUploadDeletionTargets(projectId, [{
+			uploadKind: upload.uploadKind,
+			s3Key: key,
+		}], outbox)));
+}
+
+async function cancelLiveUploadSessions(
+	tx: TxClient,
+	sessionIds: readonly string[],
+) {
+	if (sessionIds.length === 0) return;
+	const ids = [...new Set(sessionIds)];
+	await tx.gameUploadSession.updateMany({
+		where: { id: { in: ids }, status: 'PENDING' },
+		data: {
+			status: 'CANCELLED',
+			completionClaimToken: null,
+			completionClaimUntil: null,
+		},
+	});
+}
+
+type LockedProject = { id: number; webglEntryKey: string };
+
+/**
+ * Parent mutations and upload finalization lock project rows first. The order
+ * is deterministic for bulk deletion and blocks a late child-session insert
+ * before the live-session snapshot is taken.
+ */
+async function lockProjects(
+	tx: TxClient,
+	ids: readonly number[],
+): Promise<LockedProject[]> {
+	if (ids.length === 0) return [];
+	return tx.$queryRaw<LockedProject[]>(PrismaRuntime.sql`
+		SELECT "id", "webgl_entry_key" AS "webglEntryKey"
+		FROM "projects"
+		WHERE "id" IN (${PrismaRuntime.join([...new Set(ids)].sort((left, right) => left - right))})
+		ORDER BY "id"
+		FOR UPDATE
+	`);
+}
+
+async function lockLiveUploads(
+	tx: TxClient,
+	projectIds: readonly number[],
+	uploadKind?: UploadKind,
+): Promise<LiveProjectUpload[]> {
+	if (projectIds.length === 0) return [];
+	const kindFilter = uploadKind === undefined
+		? PrismaRuntime.empty
+		: PrismaRuntime.sql`AND "upload_kind" = CAST(${uploadKind} AS "UploadKind")`;
+	return tx.$queryRaw<LiveProjectUpload[]>(PrismaRuntime.sql`
+		SELECT
+			"id",
+			"project_id" AS "projectId",
+			"status",
+			"upload_kind"::text AS "uploadKind",
+			"s3_key" AS "s3Key",
+			"storage_key" AS "storageKey",
+			"s3_upload_id" AS "s3UploadId"
+		FROM "game_upload_sessions"
+		WHERE "project_id" IN (${PrismaRuntime.join([...new Set(projectIds)].sort((left, right) => left - right))})
+			AND "status" IN ('PENDING', 'COMPLETING', 'VERIFYING')
+			${kindFilter}
+		ORDER BY "project_id", "id"
+		FOR UPDATE
+	`);
+}
+
+function assertNoInFlightCompletion(uploads: readonly LiveProjectUpload[]): void {
+	if (uploads.some((upload) => upload.status !== 'PENDING')) {
+		throw operationInProgress('Project deletion is blocked while an upload is completing or verifying');
+	}
+}
+
+async function currentWebglSources(
+	tx: TxClient,
+	projects: readonly LockedProject[],
+): Promise<Map<number, string>> {
+	const targets = projects.flatMap((project) => {
+		const deployment = parseWebglEntryKey(project.id, project.webglEntryKey);
+		return deployment ? [{ projectId: project.id, deploymentId: deployment.deploymentId }] : [];
+	});
+	if (targets.length === 0) return new Map();
+	const sessions = await tx.gameUploadSession.findMany({
+		where: {
+			status: 'COMPLETED',
+			uploadKind: 'WEBGL',
+			storageKey: { not: null },
+			OR: targets.map(({ projectId, deploymentId }) => ({
+				projectId,
+				webglDeploymentId: deploymentId,
+			})),
+		},
+		select: { projectId: true, storageKey: true },
+	});
+	return new Map(sessions.map((session) => [session.projectId, session.storageKey!]));
+}
 
 const projectListPlayableKinds: AssetKind[] = ['GAME', 'VIDEO'];
 const projectListInclude = {
@@ -110,8 +235,18 @@ function buildProjectListOrderBy(
 }
 
 function retryableTransactionError(error: unknown): boolean {
-	return error instanceof PrismaRuntime.PrismaClientKnownRequestError
-		&& (error.code === 'P2034' || error.code === 'P2002');
+	if (!(error instanceof PrismaRuntime.PrismaClientKnownRequestError)) return false;
+	if (error.code === 'P2034' || error.code === 'P2002') return true;
+	if (error.code !== 'P2010') return false;
+	const driverError = error.meta?.['driverAdapterError'];
+	if (!driverError || typeof driverError !== 'object' || !('cause' in driverError)) return false;
+	const cause = driverError.cause;
+	return !!cause
+		&& typeof cause === 'object'
+		&& 'kind' in cause
+		&& cause.kind === 'TransactionWriteConflict'
+		&& 'originalCode' in cause
+		&& cause.originalCode === '40001';
 }
 
 async function withSerializableRetry<T>(
@@ -168,22 +303,21 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 			return client.project.update({ where: { id }, data, include: projectDetailInclude });
 		},
 		deleteProjectReturningAssets(id, outbox) {
-			return client.$transaction(async (tx) => {
-				const project = await tx.project.findUniqueOrThrow({
-					where: { id },
-					select: { webglEntryKey: true },
-				});
-				const activeUploads = await tx.gameUploadSession.findMany({
-					where: { projectId: id, status: { in: ['PENDING', 'COMPLETING'] } },
-					select: { id: true, uploadKind: true, s3Key: true, s3UploadId: true },
-				});
+			return withSerializableRetry(client, async (tx) => {
+				const project = (await lockProjects(tx, [id]))[0];
+				if (!project) throw new Error(`Project ${id} was not found`);
+				const activeUploads = await lockLiveUploads(tx, [id]);
+				const webglSources = await currentWebglSources(tx, [project]);
+				assertNoInFlightCompletion(activeUploads);
 				const assets = await tx.asset.findMany({
 					where: { projectId: id },
 				});
 				await queueDurableDeletions(tx, [
 					...projectAssetDeletionTargets(assets, outbox),
-					...projectWebglDeletionTargets(id, project.webglEntryKey, outbox),
-					...projectActiveUploadDeletionTargets(id, activeUploads, outbox),
+					...projectWebglDeletionTargets(
+						id, project.webglEntryKey, outbox, webglSources.get(id),
+					),
+					...liveUploadDeletionTargets(id, activeUploads, outbox),
 				]);
 				for (const upload of activeUploads) {
 					if (!upload.s3Key || !upload.s3UploadId) continue;
@@ -194,6 +328,10 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						reason: `${outbox.reason}-active-multipart`,
 					});
 				}
+				// Only PENDING rows reach here. COMPLETING/VERIFYING cause a full
+				// rollback above so a late Complete cannot materialize after cleanup.
+				await cancelLiveUploadSessions(tx, activeUploads.map((upload) => upload.id));
+				await tx.gameUploadActiveSession.deleteMany({ where: { projectId: id } });
 				await tx.project.update({
 					where: { id },
 					data: { posterAssetId: null },
@@ -206,35 +344,37 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 		},
 		clearWebglDeployment(projectId, outbox) {
 			return withSerializableRetry(client, async (tx) => {
-				const project = await tx.project.findUniqueOrThrow({
-					where: { id: projectId },
-					select: { webglEntryKey: true },
-				});
+				const project = (await lockProjects(tx, [projectId]))[0];
+				if (!project) throw new Error(`Project ${projectId} was not found`);
+				const liveUploads = await lockLiveUploads(tx, [projectId], 'WEBGL');
+				const webglSources = await currentWebglSources(tx, [project]);
+				const liveWebglUploads = liveUploads;
+				assertNoInFlightCompletion(liveWebglUploads);
 				const active = await tx.gameUploadActiveSession.findUnique({
 					where: { projectId_uploadKind: { projectId, uploadKind: 'WEBGL' } },
 					include: { session: true },
 				});
 				await queueDurableDeletions(tx, [
-					...projectWebglDeletionTargets(projectId, project.webglEntryKey, outbox),
-					...projectActiveUploadDeletionTargets(projectId, active?.session ? [active.session] : [], outbox),
+					...projectWebglDeletionTargets(
+						projectId, project.webglEntryKey, outbox, webglSources.get(projectId),
+					),
+					...liveUploadDeletionTargets(projectId, liveWebglUploads, outbox),
 				]);
-				if (active?.session.s3Key && active.session.s3UploadId) {
+				for (const upload of liveWebglUploads) {
+					if (!upload.s3Key || !upload.s3UploadId) continue;
 					await queueMultipartAbortTask(tx, {
 						bucket: outbox.protectedBucket,
-						storageKey: active.session.s3Key,
-						uploadId: active.session.s3UploadId,
+						storageKey: upload.s3Key,
+						uploadId: upload.s3UploadId,
 						reason: `${outbox.reason}-active-multipart`,
 					});
 				}
-				if (active) {
-					await tx.gameUploadSession.updateMany({
-						where: { id: active.sessionId, status: { in: ['PENDING', 'COMPLETING'] } },
-						data: { status: 'CANCELLED' },
-					});
-					await tx.gameUploadActiveSession.deleteMany({ where: { sessionId: active.sessionId } });
-				}
+				await cancelLiveUploadSessions(tx, liveWebglUploads.map((upload) => upload.id));
+				await tx.gameUploadActiveSession.deleteMany({
+					where: { projectId, uploadKind: 'WEBGL' },
+				});
 				await tx.project.update({ where: { id: projectId }, data: { webglEntryKey: '' } });
-				return { oldEntryKey: project.webglEntryKey, cancelledSession: active?.session ?? null };
+				return { oldEntryKey: project.webglEntryKey, cancelledSession: active?.session ?? liveWebglUploads[0] ?? null };
 			});
 		},
 		findAssetById(id) {
@@ -244,15 +384,11 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 			return assetMutation.setProjectPoster(projectId, assetId);
 		},
 		bulkDeleteProjectsReturningAssets(ids, outbox) {
-			return client.$transaction(async (tx) => {
-				const projects = await tx.project.findMany({
-					where: { id: { in: ids } },
-					select: { id: true, webglEntryKey: true },
-				});
-				const activeUploads = await tx.gameUploadSession.findMany({
-					where: { projectId: { in: ids }, status: { in: ['PENDING', 'COMPLETING'] } },
-					select: { id: true, projectId: true, uploadKind: true, s3Key: true, s3UploadId: true },
-				});
+			return withSerializableRetry(client, async (tx) => {
+				const projects = await lockProjects(tx, ids);
+				const activeUploads = await lockLiveUploads(tx, projects.map((project) => project.id));
+				const webglSources = await currentWebglSources(tx, projects);
+				assertNoInFlightCompletion(activeUploads);
 				const assets = await tx.asset.findMany({
 					where: { projectId: { in: ids } },
 				});
@@ -262,8 +398,9 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						project.id,
 						project.webglEntryKey,
 						outbox,
+						webglSources.get(project.id),
 					)),
-					...projects.flatMap((project) => projectActiveUploadDeletionTargets(
+					...projects.flatMap((project) => liveUploadDeletionTargets(
 						project.id,
 						activeUploads.filter((upload) => upload.projectId === project.id),
 						outbox,
@@ -278,6 +415,8 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						reason: `${outbox.reason}-active-multipart`,
 					});
 				}
+				await cancelLiveUploadSessions(tx, activeUploads.map((upload) => upload.id));
+				await tx.gameUploadActiveSession.deleteMany({ where: { projectId: { in: ids } } });
 				await tx.project.updateMany({
 					where: { id: { in: ids } },
 					data: { posterAssetId: null },
@@ -298,7 +437,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 				where: { project_exhibition_slug: { exhibitionId, slug } },
 			});
 		},
-		createProjectWithAssets(data) {
+		createProjectMetadata(data) {
 			return client.$transaction(async (tx) => {
 				const project = await tx.project.create({
 					data: {
@@ -308,6 +447,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						summary: data.summary,
 						description: data.description,
 						status: data.status,
+						isIncomplete: data.isIncomplete,
 						creatorId: data.creatorId,
 						members: {
 							create: data.members.map((member, index) => ({
@@ -320,41 +460,6 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					},
 				});
 
-				let posterAssetId: number | null = null;
-				for (const savedFile of data.savedFiles) {
-					const asset = await tx.asset.create({
-						data: {
-							projectId: project.id,
-							kind: savedFile.kind,
-							storageKey: savedFile.storageKey,
-							playbackStorageKey: savedFile.playbackStorageKey ?? null,
-							originalName: savedFile.originalName,
-							mimeType: savedFile.mimeType,
-							playbackMimeType: savedFile.playbackMimeType ?? '',
-							sizeBytes: BigInt(savedFile.sizeBytes),
-							playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
-							playbackStatus: savedFile.playbackStatus ?? 'PENDING',
-							playbackError: savedFile.playbackError ?? '',
-							isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO',
-							width: savedFile.width,
-							height: savedFile.height,
-							...assetImageRenditionReadiness(savedFile.renditions ?? []),
-						},
-					});
-					if (savedFile.kind === 'POSTER' && posterAssetId === null) {
-						posterAssetId = asset.id;
-					}
-				}
-				if (posterAssetId !== null) {
-					await tx.project.update({
-						where: { id: project.id },
-						data: { posterAssetId },
-					});
-				}
-				await commitUploadIntents(
-					tx,
-					data.savedFiles.flatMap((savedFile) => savedFile.uploadIntentIds ?? []),
-				);
 				if (data.idempotency) {
 					await succeedIdempotencyOperation(tx, {
 						operationId: data.idempotency.operationId,
@@ -371,6 +476,7 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 					uploadIntentIds = [],
 					idempotency,
 					renditions = [],
+					setAsProjectPoster = false,
 					...assetData
 				} = data;
 				const asset = await tx.asset.create({
@@ -379,6 +485,12 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 						...assetImageRenditionReadiness(renditions),
 					},
 				});
+				if (setAsProjectPoster) {
+					await tx.project.update({
+						where: { id: data.projectId },
+						data: { posterAssetId: asset.id },
+					});
+				}
 				await commitUploadIntents(tx, uploadIntentIds);
 				if (idempotency) {
 					await succeedIdempotencyOperation(tx, {
@@ -389,14 +501,6 @@ export function createProjectCrudRepository(client: PrismaClient): ProjectCrudRe
 				}
 				return asset;
 			});
-		},
-		replaceOrCreateReplaceableAsset(projectId, kind, data, outbox) {
-			return assetMutation.replaceOrCreateReplaceableAsset(
-				projectId,
-				kind,
-				data,
-				outbox,
-			);
 		},
 	};
 }

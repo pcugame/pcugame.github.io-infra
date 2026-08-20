@@ -28,7 +28,7 @@ export function createMeProjectController(deps: {
 					request.headers['idempotency-key'],
 				);
 				const result = await deps.service.submitProject(
-					{ actor: request.currentUser!, parts: request.parts(), idempotencyKey },
+					{ actor: request.currentUser!, body: request.body, idempotencyKey },
 					{ audience: 'user' },
 				);
 				sendCreated(reply, result);

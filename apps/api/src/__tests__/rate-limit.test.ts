@@ -5,7 +5,6 @@ import { defaultTestEnv } from './helpers/app-mocks.js';
 import type { BackendContext } from '../backend-context.js';
 import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
-import { createExportProgressStore } from '../modules/admin/export/service.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
 
 // Use very tight limits so the test doesn't need to send 300+ requests.
@@ -89,7 +88,6 @@ describe('rate-limit plugin', () => {
 			update: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
 			invalidate: () => {},
 		},
-		exportProgress: createExportProgressStore(),
 		uploadLifecycleMetrics: createUploadLifecycleMetrics(),
 		uploadLifecycle: createTestUploadLifecycleRuntime(),
 		lifecycle: {
@@ -139,6 +137,18 @@ describe('rate-limit plugin', () => {
 		const body = JSON.parse(limited.body);
 		expect(body.ok).toBe(false);
 		expect(body.error.code).toBe('RATE_LIMITED');
+	});
+
+	it('leaves canonical protected-download routes to the scoped domain limiter', async () => {
+		const downloadIp = '203.0.113.70';
+		const responses = await Promise.all(Array.from({ length: 8 }, () => app.inject({
+			method: 'GET',
+			url: '/api/assets/42/download?variant=original',
+			remoteAddress: downloadIp,
+		})));
+		// The test context has an empty assets controller, so 404 proves requests
+		// reached routing instead of the global limiter's 429 short circuit.
+		expect(responses.every((response) => response.statusCode === 404)).toBe(true);
 	});
 
 	it('blocks the login route with its tighter bucket before the global one would', async () => {

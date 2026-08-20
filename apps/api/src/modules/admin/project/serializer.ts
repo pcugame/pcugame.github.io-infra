@@ -6,8 +6,8 @@ import {
 } from '../../../shared/responsive-image.js';
 import { parseWebglEntryKey, webglUrl } from '../../webgl/paths.js';
 
-function protectedAssetUrlFor(base: string, storageKey: string): string {
-	return `${base}/api/assets/protected/${storageKey}`;
+function protectedAssetUrlFor(base: string, assetId: number, variant: 'original' | 'playback' = 'original'): string {
+	return `${base}/api/assets/${assetId}/download?variant=${variant}`;
 }
 
 export type SerializableAsset = {
@@ -27,12 +27,6 @@ export type SerializableAsset = {
 	playbackStatus: AssetPlaybackStatus;
 	playbackError: string;
 };
-
-function playbackKeyFor(asset: SerializableAsset): string {
-	return asset.kind === 'VIDEO' && asset.playbackStorageKey
-		? asset.playbackStorageKey
-		: asset.storageKey;
-}
 
 function playbackMimeFor(asset: SerializableAsset): string {
 	return asset.kind === 'VIDEO' && asset.playbackStorageKey
@@ -68,18 +62,20 @@ export type SerializableProject = {
 	assets: SerializableAsset[];
 };
 
-export function createProjectSerializer(baseUrl: string) {
-	const base = baseUrl.replace(/\/$/, '');
-	const protectedAssetUrl = (storageKey: string) => protectedAssetUrlFor(base, storageKey);
-	const responsiveImages = createResponsiveImageSerializer(base);
+export function createProjectSerializer(apiPublicUrl: string, publicAssetBaseUrl: string) {
+	const base = apiPublicUrl.replace(/\/$/, '');
+	const protectedAssetUrl = (assetId: number, variant: 'original' | 'playback' = 'original') => (
+		protectedAssetUrlFor(base, assetId, variant)
+	);
+	const responsiveImages = createResponsiveImageSerializer(publicAssetBaseUrl);
 
 	function serializeProjectDetail(project: SerializableProject): AdminProjectDetail {
 		const videos = project.assets
 			.filter((a) => a.kind === 'VIDEO')
 			.map((videoAsset) => ({
-				url: protectedAssetUrl(playbackKeyFor(videoAsset)),
+				url: protectedAssetUrl(videoAsset.id, 'playback'),
 				mimeType: playbackMimeFor(videoAsset),
-				originalDownloadUrl: protectedAssetUrl(videoAsset.storageKey),
+				originalDownloadUrl: protectedAssetUrl(videoAsset.id),
 				playbackStatus: videoAsset.playbackStatus,
 				playbackError: videoAsset.playbackError || undefined,
 			}));
@@ -104,7 +100,7 @@ export function createProjectSerializer(baseUrl: string) {
 				? responsiveImages.serializeResponsiveImage(project.poster!)
 				: undefined,
 			webglUrl: parseWebglEntryKey(project.id, project.webglEntryKey ?? '')
-				? webglUrl(base, project.id)
+				? webglUrl(publicAssetBaseUrl, project.webglEntryKey!)
 				: undefined,
 			members: project.members.map((m) => ({
 				id: m.id,
@@ -126,9 +122,9 @@ export function createProjectSerializer(baseUrl: string) {
 				return {
 					id: a.id,
 					kind: a.kind,
-					url: protectedAssetUrl(a.storageKey),
-					originalDownloadUrl: a.kind === 'VIDEO' ? protectedAssetUrl(a.storageKey) : undefined,
-					playbackUrl: a.kind === 'VIDEO' ? protectedAssetUrl(playbackKeyFor(a)) : undefined,
+					url: protectedAssetUrl(a.id, a.kind === 'VIDEO' ? 'playback' : 'original'),
+					originalDownloadUrl: a.kind === 'VIDEO' ? protectedAssetUrl(a.id) : undefined,
+					playbackUrl: a.kind === 'VIDEO' ? protectedAssetUrl(a.id, 'playback') : undefined,
 					playbackStatus: a.kind === 'VIDEO' ? a.playbackStatus : undefined,
 					playbackError: a.kind === 'VIDEO' && a.playbackError ? a.playbackError : undefined,
 					originalName: a.originalName,

@@ -1,17 +1,23 @@
-import type { GameUploadCompleteResponse } from '@pcu/contracts';
+import type {
+	GameUploadCompletionResponse,
+	GameUploadCompleteRequest,
+	UserRole,
+} from '@pcu/contracts';
 import { AppError, badRequest, conflict, operationInProgress } from '../../../shared/errors.js';
 import { loadSession } from './session-loader.js';
-import { assertGameUploadSessionWritable } from './session-policy.js';
+import { assertSessionHasSourceIdentity } from './source-identity.js';
 import { assertUploadStateTransition } from './state-machine.js';
-import { isTerminalUploadFinalizationError } from './finalize-completed-upload.service.js';
-import { commitTerminalCompletedObjectFailure } from './terminal-object-failure.js';
-import type { GameUploadServiceDependencies } from './ports.js';
+import type {
+	GameUploadServiceDependencies,
+	GameUploadSessionRecord,
+} from './ports.js';
 import { createCompletionClaimGuard } from './completion-claim.js';
 import {
-	aggregateBusinessAndCleanupError,
-	cleanupUntrackedMultipart,
-	UntrackedMultipartCleanupError,
-} from './multipart-cleanup.js';
+	crossCheckSubmittedAndStoredParts,
+	validateStoredParts,
+	validateSubmittedCompletionParts,
+} from './direct-multipart.js';
+import { recordGameUploadEvent, safeGameUploadLogContext } from './observability.js';
 
 function resultCount(result: unknown): number | undefined {
 	return typeof result === 'object'
@@ -26,69 +32,57 @@ function signalRequest(signal?: AbortSignal): [] | [{ signal: AbortSignal }] {
 	return signal ? [{ signal }] : [];
 }
 
-/** Finalize a chunked upload: complete S3 multipart, validate ZIP, create GAME asset */
-export async function completeSession(
+async function completeMultipartSession(
 	deps: GameUploadServiceDependencies,
-	sessionId: string,
-	user: { id: number; role: string },
-): Promise<GameUploadCompleteResponse> {
-	const session = await loadSession(deps, sessionId, user.id, user.role);
-	if (session.status === 'COMPLETED') {
-		if (session.completionResult && typeof session.completionResult === 'object') {
-			return session.completionResult as GameUploadCompleteResponse;
-		}
-		if (session.storageKey) {
-			return {
-				status: 'COMPLETED',
-				storageKey: session.storageKey,
-				sizeBytes: Number(session.totalBytes),
-			};
-		}
+	session: GameUploadSessionRecord,
+	body: GameUploadCompleteRequest,
+): Promise<GameUploadCompletionResponse> {
+	assertSessionHasSourceIdentity(session);
+	const generation = session.multipartGeneration ?? 1;
+	if (body.generation !== generation) {
+		recordGameUploadEvent(deps, 'stale_generation_rejected', {
+			projectId: session.projectId,
+			sessionId: session.id,
+			generation: body.generation,
+			result: 'rejected',
+		});
+		throw conflict('Upload generation is stale');
+	}
+	if (session.status === 'VERIFYING') {
+		return {
+			status: 'VERIFYING',
+			sessionId: session.id,
+			generation,
+			sizeBytes: Number(session.totalBytes),
+		};
 	}
 	if (session.status === 'COMPLETING') {
 		throw operationInProgress('Upload completion is already in progress');
 	}
-
 	if (session.status !== 'PENDING') {
 		throw badRequest(`Cannot complete: session is ${session.status}`);
 	}
-	assertUploadStateTransition(session.status, 'COMPLETING');
-	assertGameUploadSessionWritable(session.project.status, user.role);
-
+	if (!await deps.repository.isSessionActive(session.id)) {
+		throw conflict('Upload session has been replaced');
+	}
 	if (!session.s3UploadId || !session.s3Key) {
 		throw new AppError(500, 'Session is missing S3 multipart info', 'INTERNAL_ERROR');
 	}
-
-	const generation = session.multipartGeneration ?? 1;
-	const currentParts = session.parts.filter(
-		(part: { generation?: number }) => (part.generation ?? generation) === generation,
-	);
-	const uploadedChunks = currentParts.length > 0
-		? currentParts.map((part: { partNumber: number }) => part.partNumber - 1)
-		: session.uploadedChunks;
-	const uploaded = new Set(uploadedChunks);
-	const missing: number[] = [];
-	for (let i = 0; i < session.totalChunks; i++) {
-		if (!uploaded.has(i)) missing.push(i);
-	}
-	if (missing.length > 0) {
-		throw badRequest(`Missing ${missing.length} chunks: [${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '...' : ''}]`);
-	}
+	const submitted = validateSubmittedCompletionParts(body.parts, session.totalChunks);
+	assertUploadStateTransition(session.status, 'COMPLETING');
 
 	const completionToken = deps.ids.next();
 	const transitioned = await deps.repository.claimCompletion({
-			sessionId: session.id,
-			generation,
-			token: completionToken,
-			leaseMs: 2 * 60 * 1000,
-		});
+		sessionId: session.id,
+		generation,
+		token: completionToken,
+		leaseMs: 2 * 60 * 1000,
+	});
 	if (transitioned.count === 0) {
-		if (transitioned.reason === 'parts-active') {
-			throw operationInProgress('A chunk upload is still active');
-		}
-		throw badRequest('Session is already being completed by another request');
+		throw conflict('Session changed before completion could be claimed');
 	}
-	let s3Completed = false;
+
+	let storageCompleted = false;
 	let completionStateResolved = false;
 	const storageKey = session.s3Key;
 	const completionClaim = createCompletionClaimGuard({
@@ -96,227 +90,160 @@ export async function completeSession(
 		token: completionToken,
 		renew: deps.repository.renewCompletionClaim,
 		logHeartbeatFailure: (error) => deps.logger.error(
-			{ error, sessionId: session.id },
+			safeGameUploadLogContext({ error, sessionId: session.id, action: 'claim_heartbeat', result: 'failed' }),
 			'Completion claim heartbeat failed',
 		),
 	});
 	const storageRequest = { signal: completionClaim.signal };
 	try {
 		await completionClaim.assertOwned();
-		const dbParts = await deps.repository.findPartsBySessionId(session.id);
+		const listed = await deps.storage.listParts(
+			session.s3Key,
+			session.s3UploadId,
+			...signalRequest(storageRequest.signal),
+		);
 		await completionClaim.assertOwned();
-		const parts = dbParts
-			.filter((part) => (part.generation ?? generation) === generation)
-			.map((part) => ({ partNumber: part.partNumber, etag: part.etag }));
-		if (parts.length !== session.totalChunks) {
-			throw new AppError(500, `Part ETag count mismatch: expected ${session.totalChunks}, got ${parts.length}`, 'INTERNAL_ERROR');
-		}
-		{
-			const actualParts = await deps.storage.listParts(
-				session.s3Key,
-				session.s3UploadId,
-				...signalRequest(storageRequest?.signal),
-			);
-			await completionClaim.assertOwned();
-			const normalize = (etag: string) => etag.trim().replace(/^"|"$/g, '');
-			const matches = actualParts.length === parts.length && parts.every((part, index) => {
-				const actual = actualParts[index];
-				return actual?.partNumber === part.partNumber
-					&& normalize(actual.etag) === normalize(part.etag);
-			});
-			if (!matches) {
-				const businessError = conflict('Stored multipart parts did not match claimed ETags; re-upload all chunks');
-				const reverted = await deps.repository.revertToPending(
-					session.id,
-					completionToken,
-				);
-				if (resultCount(reverted) !== 1) {
-					throw completionClaim.loseClaim();
-				}
-				completionStateResolved = true;
-				completionClaim.stop();
-				const nextUploadId = await deps.storage.createMultipart(
-					session.s3Key,
-					...signalRequest(storageRequest.signal),
-				);
-				let reset: Awaited<ReturnType<typeof deps.repository.replaceMultipartGeneration>>;
-				try {
-					reset = await deps.repository.replaceMultipartGeneration({
-						sessionId: session.id,
-						expectedGeneration: generation,
-						newUploadId: nextUploadId,
-						reason: 'list-parts-mismatch-generation-reset',
-					});
-				} catch (replacementError) {
-					try {
-						await cleanupUntrackedMultipart(deps, {
-							key: session.s3Key,
-							uploadId: nextUploadId,
-							reason: 'list-parts-mismatch-reset-persistence-failed',
-						}, storageRequest);
-					} catch (cleanupError) {
-						if (cleanupError instanceof UntrackedMultipartCleanupError) {
-							throw aggregateBusinessAndCleanupError(
-								[businessError, replacementError],
-								cleanupError,
-								'Multipart mismatch, generation replacement, and cleanup all failed',
-							);
-						}
-						throw cleanupError;
-					}
-					throw new AggregateError(
-						[businessError, replacementError],
-						'Multipart mismatch and generation replacement both failed',
-					);
-				}
-				if (!reset.replaced) {
-					try {
-						await cleanupUntrackedMultipart(deps, {
-							key: session.s3Key,
-							uploadId: nextUploadId,
-							reason: 'unused-list-parts-mismatch-reset',
-						}, storageRequest);
-					} catch (cleanupError) {
-						if (cleanupError instanceof UntrackedMultipartCleanupError) {
-							throw aggregateBusinessAndCleanupError(
-								businessError,
-								cleanupError,
-								'Multipart mismatch and replacement cleanup both failed',
-							);
-						}
-						throw cleanupError;
-					}
-				} else if (reset.durableAbort) {
-					deps.wakeMaintenance();
-				}
-				throw businessError;
-			}
-		}
+		const stored = validateStoredParts({
+			parts: listed,
+			totalBytes: session.totalBytes,
+			chunkSizeBytes: session.chunkSizeBytes,
+			totalChunks: session.totalChunks,
+			requireComplete: true,
+		});
+		crossCheckSubmittedAndStoredParts(submitted, stored);
 
+		// Complete is built only from the authoritative Garage ListParts result.
 		await deps.storage.completeMultipart(
 			session.s3Key,
 			session.s3UploadId,
-			parts,
-			...signalRequest(storageRequest?.signal),
+			stored.map(({ partNumber, etag }) => ({ partNumber, etag })),
+			...signalRequest(storageRequest.signal),
 		);
-		s3Completed = true;
+		storageCompleted = true;
 		await completionClaim.assertOwned();
-
-		const head = await deps.storage.head(storageKey, ...signalRequest(storageRequest?.signal));
+		const head = await deps.storage.head(storageKey, ...signalRequest(storageRequest.signal));
 		if (!head) {
 			throw new AppError(500, 'Completed object not found in S3', 'INTERNAL_ERROR');
 		}
 		await completionClaim.assertOwned();
-		const finalizationSession = {
-			id: session.id,
+		recordGameUploadEvent(deps, 'upload_session_completed_storage', {
 			projectId: session.projectId,
-			uploadKind: session.uploadKind,
-			originalName: session.originalName,
-			totalBytes: session.totalBytes,
-			s3Key: storageKey,
+			sessionId: session.id,
+			generation,
+			declaredBytes: Number(session.totalBytes),
+			verifiedBytes: head.size,
+			result: 'completed',
+		});
+		const verifying = await deps.repository.markVerifying({
+			sessionId: session.id,
+			generation,
+			storageKey,
+			verifiedSizeBytes: head.size,
 			completionClaimToken: completionToken,
-		};
-		const result = await deps.finalizer.finalize(finalizationSession, head, {
-				storageRequest,
-				assertClaimOwned: completionClaim.assertOwned,
-			});
+		});
+		if (verifying.count !== 1) throw completionClaim.loseClaim();
 		completionStateResolved = true;
-		return result;
-	} catch (err) {
-		if (completionStateResolved) throw err;
+		recordGameUploadEvent(deps, 'upload_session_verifying', {
+			projectId: session.projectId,
+			sessionId: session.id,
+			generation,
+			result: 'queued',
+		});
+		completionClaim.stop();
+		return {
+			status: 'VERIFYING',
+			sessionId: session.id,
+			generation,
+			sizeBytes: head.size,
+		};
+	} catch (error) {
+		if (completionStateResolved) throw error;
 		if (completionClaim.isLost()) {
 			deps.logger.warn(
-				{ err, sessionId: session.id, storageKey },
-				'Upload completion claim was lost; preserving COMPLETING state for the current owner',
+				safeGameUploadLogContext({ error, sessionId: session.id, action: 'complete', result: 'claim_lost' }),
+				'Completion claim was lost; preserving current state',
 			);
-			throw err;
+			throw error;
 		}
-		if (!s3Completed) {
+		if (!storageCompleted) {
 			try {
-				s3Completed = await deps.storage.head(
+				storageCompleted = await deps.storage.head(
 					storageKey,
-					...signalRequest(storageRequest?.signal),
+					...signalRequest(storageRequest.signal),
 				) !== null;
 			} catch (inspectionError) {
 				deps.logger.error(
-					{ err: inspectionError, sessionId: session.id, storageKey },
-					'Could not determine whether multipart completion created the final object; preserving COMPLETING state',
+					safeGameUploadLogContext({ error: inspectionError, sessionId: session.id, action: 'head_completed_object', result: 'ambiguous' }),
+					'Multipart completion outcome is ambiguous; preserving COMPLETING',
 				);
-				throw err;
+				throw error;
 			}
-			if (!s3Completed) {
+			if (!storageCompleted) {
 				try {
 					await deps.storage.listParts(
 						session.s3Key,
 						session.s3UploadId,
-						...signalRequest(storageRequest?.signal),
+						...signalRequest(storageRequest.signal),
 					);
 				} catch (inspectionError) {
 					deps.logger.error(
-						{ err: inspectionError, sessionId: session.id, storageKey },
-						'Multipart completion and upload state are both ambiguous; preserving COMPLETING state',
+						safeGameUploadLogContext({ error: inspectionError, sessionId: session.id, action: 'list_parts_recovery', result: 'ambiguous' }),
+						'Multipart object and upload state are ambiguous; preserving COMPLETING',
 					);
-					throw err;
+					throw error;
 				}
 			}
 		}
-
-		if (s3Completed) {
-			if (isTerminalUploadFinalizationError(err)) {
-				await completionClaim.assertOwned();
-				await commitTerminalCompletedObjectFailure(deps, {
-					sessionId: session.id,
-					storageKey,
-					reason: session.uploadKind === 'WEBGL'
-						? 'webgl-upload-completion-invalid'
-						: 'game-upload-completion-invalid',
-					completionClaimToken: completionToken,
-				});
-				completionStateResolved = true;
-			} else {
-				deps.logger.warn(
-					{ err, sessionId: session.id, storageKey },
-					'Upload finalization failed after storage completion; preserving for restart recovery',
-				);
-			}
-		} else {
+		if (!storageCompleted) {
 			assertUploadStateTransition('COMPLETING', 'PENDING');
 			await completionClaim.assertOwned();
-			try {
-				const reverted = await deps.repository.revertToPending(
-					session.id,
-					completionToken,
-				);
-				if (resultCount(reverted) !== 1) {
-					throw completionClaim.loseClaim();
-				}
-				completionStateResolved = true;
-			} catch (revertErr) {
-				deps.logger.error({ err: revertErr, sessionId: session.id }, 'Failed to revert session to PENDING after pre-S3-complete error');
-			}
+			const reverted = await deps.repository.revertToPending(session.id, completionToken);
+			if (resultCount(reverted) !== 1) throw completionClaim.loseClaim();
+			completionStateResolved = true;
 		}
-		throw err;
+		throw error;
 	} finally {
 		completionClaim.stop();
 		if (!completionStateResolved) {
 			try {
-				const released = await deps.repository.releaseCompletionClaim(
+				await deps.repository.releaseCompletionClaim(
 					session.id,
 					completionToken,
-					'request-completion-deferred',
+					'completion-deferred',
 				);
-				if (released.count !== 1) {
-					deps.logger.warn(
-						{ sessionId: session.id, completionToken },
-						'Request completion claim was lost before deferred release',
-					);
-				}
-			} catch (error) {
+			} catch (releaseError) {
 				deps.logger.error(
-					{ error, sessionId: session.id },
-					'Failed to release request completion claim',
+					safeGameUploadLogContext({ error: releaseError, sessionId: session.id, action: 'release_claim', result: 'failed' }),
+					'Failed to release deferred completion claim',
 				);
 			}
 		}
 	}
+}
+
+/** Complete the browser-to-Garage multipart upload and queue verification. */
+export async function completeSession(
+	deps: GameUploadServiceDependencies,
+	sessionId: string,
+	user: { id: number; role: UserRole },
+	body: GameUploadCompleteRequest,
+): Promise<GameUploadCompletionResponse> {
+	const session = await loadSession(deps, sessionId, user.id, user.role);
+	const generation = session.multipartGeneration ?? 1;
+	if (body.generation !== generation) {
+		recordGameUploadEvent(deps, 'stale_generation_rejected', {
+			projectId: session.projectId,
+			sessionId: session.id,
+			generation: body.generation,
+			result: 'rejected',
+		});
+		throw conflict('Upload generation is stale');
+	}
+	if (session.status === 'COMPLETED') {
+		if (session.completionResult && typeof session.completionResult === 'object') {
+			return session.completionResult as GameUploadCompletionResponse;
+		}
+		throw new AppError(500, 'Completed session is missing its domain result', 'INTERNAL_ERROR');
+	}
+	return completeMultipartSession(deps, session, body);
 }

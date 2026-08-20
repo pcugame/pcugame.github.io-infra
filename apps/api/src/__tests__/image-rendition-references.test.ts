@@ -102,14 +102,19 @@ describe('image rendition reference inventory', () => {
 			key: malformedSource,
 			source: 'asset:9:original',
 		});
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({
-				assetId: 9,
-				storageKey: malformedSource,
-				profile: 'CARD_480',
-				error: expect.any(Error),
-			}),
-			expect.stringContaining('public bucket deletion is disabled'),
-		);
+		expect(logger.error).toHaveBeenCalledOnce();
+		const [context, message] = logger.error.mock.calls[0]!;
+		expect(context).toEqual({
+			assetId: 9,
+			action: 'resolve_asset_rendition',
+			result: 'malformed_pointer',
+			error: { name: expect.any(String) },
+		});
+		expect(context).not.toHaveProperty('storageKey');
+		expect(context).not.toHaveProperty('profile');
+		expect(context.error).not.toBeInstanceOf(Error);
+		expect(JSON.stringify(context)).not.toContain(malformedSource);
+		expect(JSON.stringify(context)).not.toContain('CARD_480');
+		expect(message).toContain('public bucket deletion is disabled');
 	});
 });

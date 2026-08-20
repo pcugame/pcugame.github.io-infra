@@ -621,8 +621,8 @@ describe('issue #29 prefix deletion invariants', () => {
 		});
 		const adapter = createWebglDeployment({
 			config: { protectedBucket: 'protected', publicBucket: 'public' },
-			storage: { readRange: vi.fn(), stream: vi.fn(), upload: vi.fn() },
-			fileSystem: { temporaryDirectory: () => '/tmp', createWriteStream: vi.fn(), remove: vi.fn() },
+			storage: { stream: vi.fn(), upload: vi.fn() },
+			fileSystem: { temporaryDirectory: () => '/tmp', createWriteStream: vi.fn(), readRange: vi.fn(), remove: vi.fn() },
 			ids: { next: () => 'safe-id' }, deletion: coordinator,
 			logger: { warn: vi.fn(), error: vi.fn() },
 		});

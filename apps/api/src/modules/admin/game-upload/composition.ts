@@ -3,7 +3,6 @@ import type { FastifyPluginAsync } from 'fastify';
 import type {
 	AppLogger,
 	Clock,
-	FileSystem,
 	IdGenerator,
 	Lifecycle,
 	ObjectStorage,
@@ -12,24 +11,30 @@ import type {
 } from '../../../application/ports.js';
 import type { Env } from '../../../config/env.js';
 import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
-import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
-import { createWebglDeployment } from '../../webgl/deployment.js';
-import { createWebglDeploymentKeys, webglUrl } from '../../webgl/paths.js';
+import { createWebglDeploymentKeys } from '../../webgl/paths.js';
 import type { createProjectAccessService } from '../project-access.service.js';
-import { createCompletedUploadFinalizer } from './finalize-completed-upload.service.js';
 import { createGameUploadController } from './controller.js';
 import { createGameUploadService } from './service.js';
-import { chunkUploadBodyLimitBytes } from './session-sizing.js';
 import { resolveRoleGameMaxBytes } from '../../../shared/upload-policy.js';
 import type { UploadLifecycleRuntime } from '../../upload-lifecycle/ports.js';
+import { assertUploadAllowed } from '../upload-guard.js';
 
 type GameUploadConfig = Pick<
 	Env,
-	| 'API_PUBLIC_URL'
-	| 'S3_BUCKET_PUBLIC'
 	| 'S3_BUCKET_PROTECTED'
 	| 'UPLOAD_CHUNK_SIZE_MB'
 	| 'UPLOAD_SESSION_TTL_MINUTES'
+	| 'UPLOAD_PART_URL_BATCH_MAX'
+	| 'UPLOAD_PART_URL_TTL_SEC'
+	| 'UPLOAD_PART_URL_REFRESH_MAX'
+	| 'UPLOAD_PART_URL_REFRESH_WINDOW_MS'
+	| 'DIRECT_UPLOAD_ACTOR_ACTIVE_SESSION_MAX'
+	| 'DIRECT_UPLOAD_PROJECT_ACTIVE_SESSION_MAX'
+	| 'DIRECT_UPLOAD_ACTOR_OUTSTANDING_MAX_BYTES'
+	| 'RATE_LIMIT_DIRECT_SESSION_CREATE_MAX'
+	| 'RATE_LIMIT_DIRECT_SESSION_CREATE_WINDOW_MS'
+	| 'RATE_LIMIT_DIRECT_PART_URL_MAX'
+	| 'RATE_LIMIT_DIRECT_PART_URL_WINDOW_MS'
 	| 'UPLOAD_USER_GAME_MAX_MB'
 	| 'UPLOAD_PRIVILEGED_GAME_MAX_MB'
 >;
@@ -39,7 +44,6 @@ type GameUploadService = ReturnType<typeof createGameUploadService>;
 export interface GameUploadProductionDependencies {
 	config: GameUploadConfig;
 	storage: ObjectStorage;
-	fileSystem: FileSystem;
 	settings: SettingsStore;
 	uploadLimiter: UploadLimiter;
 	lifecycle: Lifecycle;
@@ -111,95 +115,27 @@ function createWorkflowActivity() {
 export function createGameUploadProductionGraph(
 	deps: GameUploadProductionDependencies,
 ): GameUploadProductionGraph {
+	const presignUploadPart = deps.storage.presignUploadPart;
+	if (!presignUploadPart) {
+		throw new Error('Game upload direct transport requires an UploadPart signer');
+	}
 	const repository = deps.uploadLifecycle.gameUploads;
 	const deletion = deps.uploadLifecycle.orphanDeletions;
 	const activity = createWorkflowActivity();
-	const webgl = createWebglDeployment({
-		config: {
-			publicBucket: deps.config.S3_BUCKET_PUBLIC,
-			protectedBucket: deps.config.S3_BUCKET_PROTECTED,
-		},
-		storage: deps.storage,
-		fileSystem: deps.fileSystem,
-		ids: deps.ids,
-		deletion,
-		logger: deps.logger,
-		storageRequest: multipartStorageRequest(undefined, activity.signal),
-	});
-	const finalizer = createCompletedUploadFinalizer({
-		readHeader: (key, request) => deps.storage.readRange(
-			deps.config.S3_BUCKET_PROTECTED,
-			key,
-			0,
-			7,
-			multipartStorageRequest(request, activity.signal),
-		),
-		validateGameArchive: async (key, size, request) => {
-			await validateZipArchiveObject(
-				size,
-				(start, end) => deps.storage.readRange(
-					deps.config.S3_BUCKET_PROTECTED,
-					key,
-					start,
-					end,
-					multipartStorageRequest(request, activity.signal),
-				),
-			);
-		},
-		deployWebgl: (projectId, key, size, options) => webgl.deploySource(
-			projectId,
-			key,
-			size,
-			options?.storageRequest,
-			options?.assertClaimOwned,
-		),
-		rollbackWebglPublicDeployment: (keys, reason, options) => (
-			webgl.rollbackPublicDeployment(keys, reason, options)
-		),
-		finalizeGame: (session) => repository.finalizeCompletedSession(
-			session.id,
-			session.projectId,
-			'GAME',
-			{
-				storageKey: session.s3Key,
-				originalName: session.originalName,
-				mimeType: 'application/zip',
-				sizeBytes: session.totalBytes,
-				isPublic: false,
-				completionClaimToken: session.completionClaimToken,
-			},
-			{
-				bucket: deps.config.S3_BUCKET_PROTECTED,
-				reason: 'game-upload-replace-previous',
-				playbackReason: 'game-upload-replace-previous-playback',
-			},
-		),
-		finalizeWebgl: (session, deployment) => (
-			repository.finalizeCompletedWebglSession(
-				session.id,
-				session.projectId,
-				deployment.entryKey,
-				session.s3Key,
-				{
-					publicBucket: deps.config.S3_BUCKET_PUBLIC,
-					protectedBucket: deps.config.S3_BUCKET_PROTECTED,
-					reason: 'webgl-upload-replace-previous',
-				},
-				session.completionClaimToken,
-				{
-					status: 'COMPLETED',
-					storageKey: session.s3Key,
-					sizeBytes: Number(session.totalBytes),
-					webglUrl: webglUrl(deps.config.API_PUBLIC_URL, session.projectId),
-				},
-			)
-		),
-		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
-		webglUrl: (projectId) => webglUrl(deps.config.API_PUBLIC_URL, projectId),
-		logError: (context, message) => deps.logger.error(context, message),
-	});
 	const rawService = createGameUploadService({
 		repository,
+		partSigner: {
+			presignUploadPart: (key, uploadId, partNumber, expiresInSeconds, checksumSha256) => (
+				presignUploadPart(
+					deps.config.S3_BUCKET_PROTECTED,
+					key,
+					uploadId,
+					partNumber,
+					expiresInSeconds,
+					checksumSha256,
+				)
+			),
+		},
 		storage: {
 			createMultipart: (key, request) => deps.storage.createMultipart(
 				deps.config.S3_BUCKET_PROTECTED,
@@ -213,17 +149,6 @@ export function createGameUploadProductionGraph(
 				key,
 				uploadId,
 				multipartStorageRequest(request, activity.signal),
-			),
-			uploadPart: (key, uploadId, partNumber, body, contentLength, request) => (
-				deps.storage.uploadPart(
-					deps.config.S3_BUCKET_PROTECTED,
-					key,
-					uploadId,
-					partNumber,
-					body,
-					contentLength,
-					multipartStorageRequest(request, activity.signal),
-				)
 			),
 			completeMultipart: (key, uploadId, parts, request) => deps.storage.completeMultipart(
 				deps.config.S3_BUCKET_PROTECTED,
@@ -249,15 +174,27 @@ export function createGameUploadProductionGraph(
 				multipartStorageRequest(request, activity.signal),
 			),
 		},
-		finalizer,
 		settings: deps.settings,
-		uploadSlots: deps.uploadLimiter,
 		clock: deps.clock,
 		ids: deps.ids,
 		lifecycle: deps.lifecycle,
+		authorizeProjectWrite: async (actor, projectId) => {
+			const project = await deps.access.loadProjectWithAccess(actor, projectId);
+			const exhibition = await repository.findExhibitionById(project.exhibitionId);
+			assertUploadAllowed(exhibition, project.exhibitionId, actor.role);
+		},
 		config: {
 			uploadChunkSizeMb: deps.config.UPLOAD_CHUNK_SIZE_MB,
 			uploadSessionTtlMinutes: deps.config.UPLOAD_SESSION_TTL_MINUTES,
+			uploadPartUrlBatchMax: deps.config.UPLOAD_PART_URL_BATCH_MAX,
+			uploadPartUrlTtlSeconds: deps.config.UPLOAD_PART_URL_TTL_SEC,
+			uploadPartUrlRefreshMax: deps.config.UPLOAD_PART_URL_REFRESH_MAX,
+			uploadPartUrlRefreshWindowMs: deps.config.UPLOAD_PART_URL_REFRESH_WINDOW_MS,
+			directUploadQuota: {
+				actorActiveSessions: deps.config.DIRECT_UPLOAD_ACTOR_ACTIVE_SESSION_MAX,
+				projectActiveSessions: deps.config.DIRECT_UPLOAD_PROJECT_ACTIVE_SESSION_MAX,
+				actorOutstandingBytes: BigInt(deps.config.DIRECT_UPLOAD_ACTOR_OUTSTANDING_MAX_BYTES),
+			},
 		},
 		roleGameMaxBytes: (role: UserRole) => resolveRoleGameMaxBytes(deps.config, role),
 		storageKey: (uploadKind, projectId) => {
@@ -282,7 +219,7 @@ export function createGameUploadProductionGraph(
 	});
 	const service: GameUploadService = {
 		createSession: (...args) => activity.run(() => rawService.createSession(...args)),
-		uploadChunk: (...args) => activity.run(() => rawService.uploadChunk(...args)),
+		signPartUrls: (...args) => activity.run(() => rawService.signPartUrls(...args)),
 		completeSession: (...args) => activity.run(() => rawService.completeSession(...args)),
 		cancelSession: (...args) => activity.run(() => rawService.cancelSession(...args)),
 		getSessionStatus: (...args) => activity.run(() => rawService.getSessionStatus(...args)),
@@ -292,9 +229,6 @@ export function createGameUploadProductionGraph(
 		),
 		sweepExpiredPendingSessions: (signal?: AbortSignal) => activity.run(
 			() => rawService.sweepExpiredPendingSessions(signal),
-		),
-		sweepExpiredPartClaims: (signal?: AbortSignal) => activity.run(
-			() => rawService.sweepExpiredPartClaims(signal),
 		),
 		sweepUntrackedMultipartUploads: (signal?: AbortSignal) => activity.run(
 			() => rawService.sweepUntrackedMultipartUploads(signal),
@@ -306,9 +240,16 @@ export function createGameUploadProductionGraph(
 		controller: createGameUploadController({
 			service,
 			access: deps.access,
-			chunkUploadBodyLimitBytes: chunkUploadBodyLimitBytes({
-				UPLOAD_CHUNK_SIZE_MB: deps.config.UPLOAD_CHUNK_SIZE_MB,
-			}),
+			rateLimit: {
+				create: {
+					max: deps.config.RATE_LIMIT_DIRECT_SESSION_CREATE_MAX,
+					timeWindow: deps.config.RATE_LIMIT_DIRECT_SESSION_CREATE_WINDOW_MS,
+				},
+				partUrls: {
+					max: deps.config.RATE_LIMIT_DIRECT_PART_URL_MAX,
+					timeWindow: deps.config.RATE_LIMIT_DIRECT_PART_URL_WINDOW_MS,
+				},
+			},
 		}),
 		service,
 		recoverStaleUploads(signal?: AbortSignal) {
@@ -317,7 +258,6 @@ export function createGameUploadProductionGraph(
 				const maintenanceWork: Promise<unknown>[] = [
 					service.sweepStaleCompletingSessions(signal),
 					service.sweepExpiredPendingSessions(signal),
-					service.sweepExpiredPartClaims(signal),
 					service.sweepUntrackedMultipartUploads(signal),
 				];
 				recoveryPromise = Promise.allSettled(maintenanceWork).then((results) => {

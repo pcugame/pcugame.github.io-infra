@@ -6,6 +6,7 @@ import type { WebglDeploymentKeys } from '../modules/webgl/paths.js';
 const deployment: WebglDeploymentKeys = {
 	projectId: 7,
 	deploymentId: '123e4567-e89b-42d3-a456-426614174000',
+	sourceDeploymentId: '123e4567-e89b-42d3-a456-426614174000',
 	deploymentPrefix: 'webgl/7/123e4567-e89b-42d3-a456-426614174000/',
 	sourceKey: 'webgl/7/123e4567-e89b-42d3-a456-426614174000/source.zip',
 	sitePrefix: 'webgl/7/123e4567-e89b-42d3-a456-426614174000/site/',
@@ -21,7 +22,6 @@ function harness() {
 	const adapter = createWebglDeployment({
 		config: { protectedBucket: 'protected', publicBucket: 'public' },
 		storage: {
-			readRange: vi.fn(),
 			stream: vi.fn(),
 			upload: vi.fn(),
 		},
@@ -32,6 +32,7 @@ function harness() {
 					callback();
 				},
 			}),
+			readRange: vi.fn(),
 			remove: vi.fn(),
 		},
 		ids: { next: () => '123e4567-e89b-42d3-a456-426614174999' },
@@ -93,9 +94,16 @@ describe('WebGL deployment compensation boundaries', () => {
 			'project-delete',
 		)).rejects.toThrow('Malformed WebGL entry key for project 7');
 		expect(logError).toHaveBeenCalledWith(
-			{ projectId: 7, entryKey: 'webgl/not-a-valid-entry', reason: 'project-delete' },
+			{
+				action: 'delete_webgl_deployment',
+				projectId: 7,
+				result: 'malformed_pointer',
+			},
 			'Refusing to delete malformed WebGL entry key',
 		);
+		const context = vi.mocked(logError).mock.calls[0]?.[0];
+		expect(JSON.stringify(context)).not.toContain('webgl/not-a-valid-entry');
+		expect(JSON.stringify(context)).not.toContain('project-delete');
 		expect(deletion.deleteOrQueue).not.toHaveBeenCalled();
 		expect(deletion.deletePrefixOrQueue).not.toHaveBeenCalled();
 	});

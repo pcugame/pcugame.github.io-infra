@@ -63,6 +63,7 @@ describe('NAS WebGL export', () => {
 			id: 17,
 			title: '작품',
 			webglEntryKey: 'webgl/17/123e4567-e89b-42d3-a456-426614174000/site/index.html',
+			webglSourceKey: 'webgl/17/223e4567-e89b-42d3-a456-426614174000/source.zip',
 			exhibition: { year: 2026, title: '졸업전시' },
 			members: [{ name: '학생', studentId: '20260001', sortOrder: 0 }],
 			assets: [{
@@ -89,6 +90,7 @@ describe('NAS WebGL export', () => {
 			id: 18,
 			title: '웹게임',
 			webglEntryKey: 'webgl/18/123e4567-e89b-42d3-a456-426614174000/site/index.html',
+			webglSourceKey: 'webgl/18/223e4567-e89b-42d3-a456-426614174000/source.zip',
 			exhibition: { year: 2026, title: '' },
 			members: [],
 			assets: [],
@@ -104,6 +106,7 @@ describe('NAS WebGL export', () => {
 			id: 19,
 			title: '실제내보내기',
 			webglEntryKey: 'webgl/19/123e4567-e89b-42d3-a456-426614174000/site/index.html',
+			webglSourceKey: sourceKey,
 			exhibition: { year: 2026, title: '전시' },
 			members: [],
 			assets: [],

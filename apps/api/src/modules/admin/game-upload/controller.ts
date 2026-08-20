@@ -1,7 +1,9 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type {
-	GameUploadChunkResponse,
-	GameUploadCompleteResponse,
+	GameUploadCompletionResponse,
+	GameUploadCompleteRequest,
+	GameUploadPartUrlsRequest,
+	GameUploadPartUrlsResponse,
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
@@ -11,10 +13,10 @@ import {
 	GameUploadCreateSessionBody,
 	parseBody,
 	parseIntParam,
-	parseNonNegativeIntParam,
 } from '../../../shared/validation.js';
 import { requireLogin } from '../../../plugins/auth.js';
 import type { createGameUploadService } from './service.js';
+import { GameUploadCompleteBody, GameUploadPartUrlsBody } from './validation.js';
 
 type GameUploadService = ReturnType<typeof createGameUploadService>;
 
@@ -26,7 +28,10 @@ export interface GameUploadControllerDependencies {
 			projectId: number,
 		): Promise<{ exhibitionId: number }>;
 	};
-	chunkUploadBodyLimitBytes: number;
+	rateLimit: {
+		create: { max: number; timeWindow: number };
+		partUrls: { max: number; timeWindow: number };
+	};
 }
 
 /** Register chunked game-upload routes */
@@ -34,18 +39,10 @@ export function createGameUploadController(
 	deps: GameUploadControllerDependencies,
 ): FastifyPluginAsync {
 	return async function gameUploadController(app): Promise<void> {
-	// Register octet-stream parser for this plugin scope only
-	app.addContentTypeParser(
-		'application/octet-stream',
-		function (_request: FastifyRequest, payload: NodeJS.ReadableStream, done: (err: Error | null, body?: unknown) => void) {
-			done(null, payload);
-		},
-	);
-
 	/** POST /projects/:id/game-upload-sessions — create upload session */
 	app.post<{ Params: { id: string } }>(
 		'/projects/:id/game-upload-sessions',
-		{ preHandler: requireLogin },
+		{ preHandler: requireLogin, config: { rateLimit: deps.rateLimit.create } },
 		async (request, reply) => {
 			const projectId = parseIntParam(request.params.id);
 			const project = await deps.access.loadProjectWithAccess(
@@ -64,23 +61,18 @@ export function createGameUploadController(
 		},
 	);
 
-	/** PUT /game-upload-sessions/:sessionId/chunks/:index — upload one chunk */
-	app.put<{ Params: { sessionId: string; index: string } }>(
-		'/game-upload-sessions/:sessionId/chunks/:index',
-		{
-			preHandler: requireLogin,
-			bodyLimit: deps.chunkUploadBodyLimitBytes,
-			handlerTimeout: 45 * 60 * 1000,
-		},
+	/** Issue short-lived UploadPart capabilities; no object bytes enter Fastify. */
+	app.post<{ Params: { sessionId: string }; Body: GameUploadPartUrlsRequest }>(
+		'/game-upload-sessions/:sessionId/part-urls',
+		{ preHandler: requireLogin, config: { rateLimit: deps.rateLimit.partUrls } },
 		async (request, reply) => {
 			const user = request.currentUser!;
-			const result = await deps.service.uploadChunk(
+			const result = await deps.service.signPartUrls(
 				request.params.sessionId,
-				parseNonNegativeIntParam(request.params.index, 'Chunk index'),
-				request.body as NodeJS.ReadableStream,
 				{ id: user.id, role: user.role },
+				parseBody(GameUploadPartUrlsBody, request.body),
 			);
-			sendOk<GameUploadChunkResponse>(reply, result);
+			sendOk<GameUploadPartUrlsResponse>(reply, result);
 		},
 	);
 
@@ -99,7 +91,7 @@ export function createGameUploadController(
 	);
 
 	/** POST /game-upload-sessions/:sessionId/complete — finalize chunked upload */
-	app.post<{ Params: { sessionId: string } }>(
+	app.post<{ Params: { sessionId: string }; Body: GameUploadCompleteRequest }>(
 		'/game-upload-sessions/:sessionId/complete',
 		{ preHandler: requireLogin, handlerTimeout: 45 * 60 * 1000 },
 		async (request, reply) => {
@@ -107,8 +99,13 @@ export function createGameUploadController(
 			const result = await deps.service.completeSession(
 				request.params.sessionId,
 				{ id: user.id, role: user.role },
+				parseBody(GameUploadCompleteBody, request.body),
 			);
-			sendOk<GameUploadCompleteResponse>(reply, result);
+			sendOk<GameUploadCompletionResponse>(
+				reply,
+				result,
+				result.status === 'VERIFYING' ? 202 : 200,
+			);
 		},
 	);
 

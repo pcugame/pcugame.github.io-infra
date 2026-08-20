@@ -1,4 +1,4 @@
-import type { AssetKind } from '@pcu/contracts';
+import type { InlineAssetKind } from '@pcu/contracts';
 import type {
 	AppLogger,
 	FileSystem,
@@ -12,7 +12,6 @@ import type {
 	UploadIntentOwner,
 	UploadPipelinePort,
 } from '../../../application/upload-ports.js';
-import { badRequest } from '../../../shared/errors.js';
 import { deriveImageRenditionStorageKey } from '../../../shared/responsive-image.js';
 import { generateStorageKey } from '../../../shared/storage-path.js';
 import type {
@@ -24,32 +23,13 @@ import type { PdfProcessingInput } from '../../assets/upload/pdf-processing.js';
 import { createIntentTrackedObjectUploader } from '../../assets/upload/intent-tracked-object-upload.js';
 import { storageOptionsForAsset } from '../../assets/upload/storage-policy.js';
 
-interface ProcessedFile {
-	tmpPath: string;
-	mimeType: string;
-	ext: string;
-	sizeBytes: number;
-}
-
-interface ProcessedVideo {
-	playback: null | {
-		tmpPath: string;
-		mimeType: string;
-		ext: string;
-		sizeBytes: number;
-	};
-	playbackStatus: 'READY' | 'FAILED';
-	playbackError: string;
-}
-
 export interface ProjectUploadProcessing {
 	validate(
 		filePath: string,
-		kind: AssetKind,
+		kind: InlineAssetKind,
 	): Promise<{ mimeType: string; ext: string; sizeBytes: number }>;
 	processImage(input: ImageProcessingInput): Promise<ImageProcessingResult>;
 	processPdf(input: PdfProcessingInput): Promise<ImageProcessingResult>;
-	processVideo(input: ProcessedFile): Promise<ProcessedVideo>;
 }
 
 export interface ProjectUploadPipelineDependencies {
@@ -59,7 +39,7 @@ export interface ProjectUploadPipelineDependencies {
 	logger: AppLogger;
 	processing: ProjectUploadProcessing;
 	purposePrefix?: 'project' | 'exhibition';
-	bucketForKind(kind: AssetKind): string;
+	bucketForKind(kind: InlineAssetKind): string;
 	deleteUnpersistedObject(
 		bucket: string,
 		key: string,
@@ -143,7 +123,7 @@ export function createProjectUploadPipeline(
 
 	async function upload(
 		filePath: string,
-		kind: AssetKind,
+		kind: InlineAssetKind,
 		extension: string,
 		contentType: string,
 		purpose: UploadPurpose,
@@ -180,82 +160,10 @@ export function createProjectUploadPipeline(
 			trackTemporaryPath(filePath);
 		},
 
-		async processFile(filePath, kind, originalName): Promise<SavedUpload> {
+		async processFile(filePath, kind: InlineAssetKind, originalName): Promise<SavedUpload> {
 			const validated = await deps.processing.validate(filePath, kind);
 
-			if (kind === 'VIDEO') {
-				const playback = await deps.processing.processVideo({
-					tmpPath: filePath,
-					mimeType: validated.mimeType,
-					ext: validated.ext,
-					sizeBytes: validated.sizeBytes,
-				});
-				if (playback.playbackStatus === 'FAILED') {
-					throw badRequest(
-						`Video validation failed: ${playback.playbackError || 'unsupported or corrupt video'}`,
-					);
-				}
-
-				const original = await upload(
-					filePath,
-					kind,
-					validated.ext,
-					validated.mimeType,
-					'original',
-				);
-				let playbackStorageKey: string | null = null;
-				let playbackIntentId: string | undefined;
-				let playbackMimeType = '';
-				let playbackSizeBytes = 0;
-				if (playback.playback) {
-					trackTemporaryPath(playback.playback.tmpPath);
-					const playbackUpload = await upload(
-						playback.playback.tmpPath,
-						kind,
-						playback.playback.ext,
-						playback.playback.mimeType,
-						'playback',
-					);
-					playbackStorageKey = playbackUpload.key;
-					playbackIntentId = playbackUpload.intentId;
-					playbackMimeType = playback.playback.mimeType;
-					playbackSizeBytes = playback.playback.sizeBytes;
-				}
-				return {
-					storageKey: original.key,
-					playbackStorageKey,
-					mimeType: validated.mimeType,
-					playbackMimeType,
-					sizeBytes: validated.sizeBytes,
-					playbackSizeBytes,
-					playbackStatus: playback.playbackStatus,
-					playbackError: playback.playbackError,
-					originalName,
-					kind,
-					uploadIntentIds: [original.intentId, playbackIntentId]
-						.filter((id): id is string => typeof id === 'string'),
-				};
-			}
-
-			if (kind === 'GAME') {
-				const uploaded = await upload(
-					filePath,
-					kind,
-					validated.ext,
-					validated.mimeType,
-					'original',
-				);
-				return {
-					storageKey: uploaded.key,
-					mimeType: validated.mimeType,
-					sizeBytes: validated.sizeBytes,
-					originalName,
-					kind,
-					uploadIntentIds: uploaded.intentId ? [uploaded.intentId] : [],
-				};
-			}
-
-			const createRenditions = kind === 'IMAGE' || kind === 'POSTER';
+			const createRenditions = kind !== 'THUMBNAIL';
 			let processed: ImageProcessingResult;
 			try {
 				processed = validated.mimeType === 'application/pdf'

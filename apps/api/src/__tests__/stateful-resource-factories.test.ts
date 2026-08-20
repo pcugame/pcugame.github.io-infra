@@ -169,9 +169,9 @@ describe('stateful resource factories', () => {
 		expect(schedulerA.scheduler.every).toHaveBeenCalledWith(50, expect.any(Function));
 		expect(schedulerB.scheduler.every).toHaveBeenCalledOnce();
 
-		expect(b.check('10.0.0.2')).toBe('ok');
+		expect(b.check('10.0.0.2')).toEqual({ status: 'ok' });
 		nowB = 1_001;
-		expect(b.check('10.0.0.2')).toBe('ok');
+		expect(b.check('10.0.0.2')).toEqual({ status: 'ok' });
 		b.check('10.0.0.3');
 		nowB = 2_002;
 		schedulerB.run();
@@ -258,7 +258,8 @@ describe('stateful resource factories', () => {
 			const emptyRoute: FastifyPluginAsync = async () => {};
 			const findBannedIps = vi.fn().mockResolvedValue([]);
 			const objectStorage: ObjectStorage = {
-				upload: async () => {}, presign: async () => '', delete: async () => {},
+				upload: async () => {}, presign: async () => '',
+				presignUploadPart: async () => 'https://storage.test/upload-part', delete: async () => {},
 				head: async () => null, readRange: async () => Buffer.alloc(0), stream: async () => null,
 				listKeys: async () => [], listKeyPage: async () => ({ keys: [], isTruncated: false }),
 				deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),

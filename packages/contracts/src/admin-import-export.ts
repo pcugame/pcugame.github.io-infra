@@ -50,6 +50,14 @@ export type ExportProgress = {
 export type ExportStatusResponse = {
 	running: boolean;
 	progress: ExportProgress | null;
+	jobId?: string;
+	result?: ExportResult | null;
+	error?: string | null;
+};
+
+export type ExportStartResponse = {
+	jobId: string;
+	status: 'QUEUED';
 };
 
 export type ExportResult = {
