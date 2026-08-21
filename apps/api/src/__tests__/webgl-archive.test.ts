@@ -78,6 +78,8 @@ describe('WebGL ZIP validation', () => {
 	it('accepts a root build and preserves Brotli/Gzip resource paths', async () => {
 		const summary = await validateWebglZipArchiveFile(await archive([
 			{ name: 'index.html' },
+			{ name: 'Build/game.loader.js' },
+			{ name: 'Build/game.framework.js' },
 			{ name: 'Build/game.wasm.br' },
 			{ name: 'Build/game.data.gz' },
 		]));
@@ -85,6 +87,8 @@ describe('WebGL ZIP validation', () => {
 		expect(layout.wrapperPrefix).toBe('');
 		expect([...layout.files.values()]).toEqual([
 			'index.html',
+			'Build/game.loader.js',
+			'Build/game.framework.js',
 			'Build/game.wasm.br',
 			'Build/game.data.gz',
 		]);
@@ -94,10 +98,21 @@ describe('WebGL ZIP validation', () => {
 		const summary = await validateWebglZipArchiveFile(await archive([
 			{ name: 'MyBuild/index.html' },
 			{ name: 'MyBuild/TemplateData/style.css' },
+			{ name: 'MyBuild/Build/game.loader.js' },
+			{ name: 'MyBuild/Build/game.framework.js' },
+			{ name: 'MyBuild/Build/game.wasm' },
+			{ name: 'MyBuild/Build/game.data' },
 		]));
 		const layout = analyzeWebglArchive(summary);
 		expect(layout.wrapperPrefix).toBe('MyBuild/');
-		expect([...layout.files.values()]).toEqual(['index.html', 'TemplateData/style.css']);
+		expect([...layout.files.values()]).toEqual([
+			'index.html',
+			'TemplateData/style.css',
+			'Build/game.loader.js',
+			'Build/game.framework.js',
+			'Build/game.wasm',
+			'Build/game.data',
+		]);
 	});
 
 	it.each([
@@ -159,8 +174,8 @@ describe('WebGL paths and response metadata', () => {
 			'https://api.example.com/base',
 		);
 		expect(csp).toContain('frame-ancestors https://pcugame.github.io');
-		expect(csp).toContain('script-src https://api.example.com/api/public/webgl/');
-		expect(csp).toContain('connect-src https://api.example.com/api/public/webgl/');
+		expect(csp).toContain('script-src https://api.example.com ');
+		expect(csp).toContain('connect-src https://api.example.com ');
 		expect(csp).toContain("frame-src 'none'");
 		expect(csp).not.toContain("script-src 'self'");
 		expect(csp).not.toContain('frame-ancestors *');

@@ -30,14 +30,12 @@ import {
 } from './infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
-import { createObjectStorage } from './lib/storage.js';
+import { createDirectMultipartControlStorage, createMultipartPartPresigner, createObjectStorage } from './lib/storage.js';
 import { createRootLogger } from './lib/logger.js';
 import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
+import { forbidden, notFound } from './shared/errors.js';
 import type { DownloadRateLimiter } from './shared/download-rate-limit.js';
-import {
-	createExportProgressStore,
-	type ExportProgressStore,
-} from './modules/admin/export/service.js';
+import { resolveRoleUploadLimits } from './shared/upload-policy.js';
 import {
 	createAssetsBannedProductionGraph,
 	type AssetsBannedProductionGraph,
@@ -78,6 +76,8 @@ import {
 	createGameUploadProductionGraph,
 	type GameUploadProductionGraph,
 } from './modules/admin/game-upload/composition.js';
+import { createAssetUploadControlGraph, createUnavailableAssetUploadControlGraph } from './modules/asset-upload/composition.js';
+import { createAssetUploadRepository } from './modules/asset-upload/repository.js';
 import type { ProjectUploadProcessing } from './modules/admin/project/project-upload.adapter.js';
 import { createNodeProjectUploadProcessing } from './infrastructure/project-upload-processing.js';
 import { createMultipartRequestHasher } from './infrastructure/multipart-request-hasher.js';
@@ -264,7 +264,6 @@ export interface BackendContext {
 	uploadLimiter: UploadLimiter;
 	protectedDownloads: DownloadRateLimiter;
 	settings: SettingsStore;
-	exportProgress: ExportProgressStore;
 	uploadLifecycleMetrics: UploadLifecycleMetrics;
 	uploadLifecycle: UploadLifecycleRuntime;
 	lifecycle: Lifecycle;
@@ -302,7 +301,6 @@ export interface ProductionResourceFactories {
 	uploadLimiter(config: Env): MaybePromise<UploadLimiter & { close(): void }>;
 	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
 	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
-	exportProgress(config: Env): MaybePromise<ExportProgressStore>;
 	routes(
 		config: Env,
 		assetsBanned: AssetsBannedProductionGraph,
@@ -313,6 +311,7 @@ export interface ProductionResourceFactories {
 		importExport: ImportExportProductionGraph,
 		projectMultipart: ProjectMultipartProductionGraph,
 		gameUpload: GameUploadProductionGraph,
+		directAssetUpload: ReturnType<typeof createAssetUploadControlGraph> | ReturnType<typeof createUnavailableAssetUploadControlGraph>,
 	): MaybePromise<BackendRoutes>;
 }
 
@@ -330,7 +329,6 @@ export interface ProductionResourceOverrides {
 	uploadLimiter: ResourceLease<UploadLimiter>;
 	lifecycle: ResourceLease<Lifecycle>;
 	protectedDownloads: ResourceLease<DownloadRateLimiter>;
-	exportProgress: ResourceLease<ExportProgressStore>;
 	uploadLifecycle: ResourceLease<UploadLifecycleRuntime>;
 }
 
@@ -370,7 +368,6 @@ const defaultFactories: ProductionResourceFactories = {
 	uploadLimiter: (config) => createUploadLimiterPort(config.UPLOAD_MAX_CONCURRENT),
 	lifecycle: (clock, scheduler) => createLifecyclePort(clock, scheduler),
 	protectedDownloads: (clock, scheduler) => createProtectedDownloadLimiter({ clock, scheduler }),
-	exportProgress: () => createExportProgressStore(),
 	routes: loadProductionRoutes,
 };
 
@@ -384,6 +381,7 @@ async function loadProductionRoutes(
 	importExport: ImportExportProductionGraph,
 	projectMultipart: ProjectMultipartProductionGraph,
 	gameUpload: GameUploadProductionGraph,
+	directAssetUpload: ReturnType<typeof createAssetUploadControlGraph> | ReturnType<typeof createUnavailableAssetUploadControlGraph>,
 ): Promise<BackendRoutes> {
 	const admin = await import('./modules/admin/admin.routes.js');
 	return {
@@ -397,6 +395,7 @@ async function loadProductionRoutes(
 			bannedIpController: assetsBanned.bannedIpController,
 			projectMultipartController: projectMultipart.projectMultipartController,
 			gameUploadController: gameUpload.controller,
+			directAssetUploadController: directAssetUpload.controller,
 		}),
 		me: projectMultipart.meController,
 		assets: assetsBanned.assetsController,
@@ -562,6 +561,16 @@ export async function createProductionBackendContext(
 			);
 		const s3 = await resource('s3', () => factories.s3(config), (client) => client.destroy());
 		const storage = await resource('storage', () => factories.storage(s3, config));
+		// Presigning must use the browser-visible NAS upload origin. It is a
+		// separate S3 client so internal Garage endpoints never leak into URLs.
+		const directSigningClient = createS3Client({
+			...config,
+			S3_ENDPOINT: config.S3_PUBLIC_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
+		});
+		const directSigningS3 = owner.register('directSigningS3', owned(
+			directSigningClient,
+			() => directSigningClient.destroy(),
+		));
 		const uploadLifecycle = await resource(
 			'uploadLifecycle',
 			() => {
@@ -614,11 +623,6 @@ export async function createProductionBackendContext(
 			(limiter) => limiter.close(),
 			(limiter) => limiter.start(),
 		);
-		const exportProgress = await resource(
-			'exportProgress',
-			() => factories.exportProgress(config),
-			(progress) => progress.close(),
-		);
 		const persistence: BackendPersistencePorts = options.persistence ?? (() => {
 			if (!prisma) throw new Error('Prisma persistence was not initialized');
 			return {
@@ -626,7 +630,10 @@ export async function createProductionBackendContext(
 				authRepository: createAuthRepository(prisma),
 				publicRepository: createPublicRepository(prisma),
 				projectAccessRepository: createProjectAccessRepository(prisma),
-				projectRepository: createProjectCrudRepository(prisma),
+				projectRepository: createProjectCrudRepository(prisma, {
+					publicBucket: config.S3_BUCKET_PUBLIC,
+					protectedBucket: config.S3_BUCKET_PROTECTED,
+				}),
 				memberRepository: createMemberRepository(prisma),
 				exhibitionRepository: createExhibitionRepository(prisma),
 				assetsRepository: createAssetsRepository(prisma),
@@ -647,7 +654,6 @@ export async function createProductionBackendContext(
 		const publicGraph = createPublicProductionGraph({
 			config,
 			repository: persistence.publicRepository,
-			storage,
 			logger,
 		});
 		const projectAccessRepository = persistence.projectAccessRepository;
@@ -701,15 +707,9 @@ export async function createProductionBackendContext(
 			));
 		}
 		const importExport = createImportExportProductionGraph({
-			config,
 			importRepository: persistence.importRepository,
 			exportRepository: persistence.exportRepository,
-			storage,
-			fileSystem,
-			exportProgress,
-			clock,
 			ids,
-			logger,
 		});
 		owner.register('importExport', owned(
 			importExport,
@@ -744,6 +744,36 @@ export async function createProductionBackendContext(
 			access: projectMemberSettings.projectAccess,
 			uploadLifecycle,
 		});
+		const directAssetUpload = prisma ? createAssetUploadControlGraph({
+			repository: createAssetUploadRepository(prisma),
+			storage: createDirectMultipartControlStorage(s3),
+			partSigner: createMultipartPartPresigner(directSigningS3),
+			clock,
+			ids,
+			config: {
+				bucket: config.S3_BUCKET_PROTECTED,
+				sessionTtlMs: config.UPLOAD_SESSION_TTL_MINUTES * 60_000,
+				partSizeBytes: config.DIRECT_UPLOAD_PART_SIZE_MB * 1024 * 1024,
+				partUrlTtlSeconds: config.DIRECT_UPLOAD_PART_URL_TTL_SEC,
+				partUrlIssueWindowMs: config.DIRECT_UPLOAD_PART_URL_WINDOW_MS,
+				partUrlIssueMax: config.DIRECT_UPLOAD_PART_URL_MAX,
+				maxBytesFor: (actor, kind) => {
+					const limits = resolveRoleUploadLimits(config, actor.role);
+					if (kind === 'VIDEO') return limits.videoMaxBytes;
+					if (kind === 'IMAGE') return limits.imageMaxBytes;
+					if (kind === 'POSTER') return limits.posterMaxBytes;
+					return limits.gameMaxBytes;
+				},
+			},
+			authorizeProjectWrite: async (actor, projectId) => projectAccess.loadProjectWithAccess(actor as Parameters<typeof projectAccess.loadProjectWithAccess>[0], projectId),
+			authorizeExhibitionWrite: async (actor, exhibitionId) => {
+				if (actor.role !== 'ADMIN' && actor.role !== 'OPERATOR') {
+					throw forbidden('Only operators can modify exhibition assets');
+				}
+				const exhibition = await prisma.exhibition.findUnique({ where: { id: exhibitionId }, select: { id: true } });
+				if (!exhibition) throw notFound('Exhibition not found');
+			},
+		}) : createUnavailableAssetUploadControlGraph();
 		const uploadTempScavenger = createUploadTempScavenger({
 			fileSystem: uploadFileSystem,
 			legacyRootDirectory: fileSystem.temporaryDirectory(),
@@ -796,6 +826,7 @@ export async function createProductionBackendContext(
 			importExport,
 			projectMultipart,
 			gameUpload,
+			directAssetUpload,
 		);
 
 		return {
@@ -810,7 +841,6 @@ export async function createProductionBackendContext(
 			uploadLimiter,
 			protectedDownloads,
 			settings,
-			exportProgress,
 			uploadLifecycleMetrics,
 			uploadLifecycle,
 			lifecycle,

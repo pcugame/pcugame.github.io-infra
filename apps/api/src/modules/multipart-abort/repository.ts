@@ -21,7 +21,7 @@ export function queueMultipartAbortTask(
 				},
 			},
 			create: { ...target, nextAttemptAt: now },
-			update: { reason: target.reason },
+			update: { reason: target.reason, ...(target.uploadSessionId ? { uploadSessionId: target.uploadSessionId } : {}) },
 		});
 		await tx.$queryRaw(Prisma.sql`
 			UPDATE "multipart_abort_tasks"

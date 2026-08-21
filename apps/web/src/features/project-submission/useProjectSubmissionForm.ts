@@ -121,7 +121,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			qc.invalidateQueries({ queryKey: queryKeys.publicYears });
 			qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
 
-			if (files.gameFile || files.webglFile) {
+			if (files.gameFile || files.webglFile || files.videoFiles.length > 0 || files.posterFile || files.imageFiles.length > 0) {
 				setCreatedProjectId(res.id);
 			} else {
 				navigate(isAdminMode ? `/admin/projects/${res.id}/edit` : '/me/projects');
@@ -134,11 +134,10 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			const linkedMember = data.members.find((member) => member.name === user.name);
 			if (linkedMember) linkedMember.userId = user.id;
 		}
-		const fd = buildSubmitFormData(data, {
-			poster: files.posterFile ?? undefined,
-			images: files.imageFiles.length > 0 ? files.imageFiles : undefined,
-			videoFiles: files.videoFiles.length > 0 ? files.videoFiles : undefined,
-		});
+		// New clients submit metadata first. GAME/WEBGL/VIDEO/POSTER/IMAGE bytes
+		// subsequently use Garage multipart capabilities after project identity
+		// exists; the inline multipart API is a Phase-1 legacy bridge only.
+		const fd = buildSubmitFormData(data, {});
 		const fingerprint = createIdempotencyFingerprint({
 			mode,
 			payload: data,

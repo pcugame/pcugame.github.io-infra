@@ -107,7 +107,6 @@ function createDevAuthTestContext(cfg = config()): BackendContext {
 			untrackedMultipartCleanupFailureCount: () => 0,
 		},
 		uploadLifecycle,
-		exportProgress: {} as BackendContext['exportProgress'],
 		lifecycle: {
 			state: () => state,
 			setState: (next) => { state = next; },

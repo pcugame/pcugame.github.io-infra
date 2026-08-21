@@ -1,5 +1,4 @@
-import { useRef } from 'react';
-import type { ChangeEvent } from 'react';
+import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -9,9 +8,9 @@ import {
 } from '../../../contracts/schemas';
 import type { AdminExhibitionItem } from '../../../contracts';
 import { ResponsiveImage } from '../../../components/common';
+import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
 import { adminExhibitionApi, getApiErrorMessage } from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
-import { buildExhibitionPosterFormData } from '../../../lib/utils/formData';
 
 type ExhibitionRowProps = {
 	year: AdminExhibitionItem;
@@ -289,37 +288,17 @@ function YearPosterControls({
 	compact?: boolean;
 }) {
 	const qc = useQueryClient();
-	const inputRef = useRef<HTMLInputElement>(null);
+	const [directUploadBusy, setDirectUploadBusy] = useState(false);
 
 	const invalidate = () => {
 		qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
 		qc.invalidateQueries({ queryKey: queryKeys.publicYears });
 	};
 
-	const uploadMutation = useMutation({
-		mutationFn: (file: File) =>
-			adminExhibitionApi.uploadPoster(
-				year.id,
-				buildExhibitionPosterFormData(file),
-			),
-		onSuccess: () => {
-			invalidate();
-		},
-		onSettled: () => {
-			if (inputRef.current) inputRef.current.value = '';
-		},
-	});
-
 	const deletePosterMutation = useMutation({
 		mutationFn: () => adminExhibitionApi.deletePoster(year.id),
 		onSuccess: invalidate,
 	});
-
-	const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-		const file = event.currentTarget.files?.[0];
-		if (!file) return;
-		uploadMutation.mutate(file);
-	};
 
 	const handleDelete = () => {
 		if (!year.poster) return;
@@ -328,7 +307,7 @@ function YearPosterControls({
 		}
 	};
 
-	const isBusy = uploadMutation.isPending || deletePosterMutation.isPending;
+	const isBusy = directUploadBusy || deletePosterMutation.isPending;
 	const sizeLabel = formatPosterSize(year.posterSize);
 
 	return (
@@ -356,21 +335,13 @@ function YearPosterControls({
 					<span className="admin-exhibition-poster__size">{sizeLabel}</span>
 				)}
 				<div className="admin-exhibition-poster__actions">
-					<input
-						ref={inputRef}
-						type="file"
-						accept="image/jpeg,image/png,image/webp,application/pdf,.pdf"
-						className="sr-only"
-						onChange={handleFileChange}
+					<DirectImageUploadWidget
+						owner={{ type: 'EXHIBITION', id: year.id }}
+						kind="POSTER"
+						hideTitle
+						onComplete={invalidate}
+						onBusyChange={setDirectUploadBusy}
 					/>
-					<button
-						type="button"
-						className="btn btn--secondary btn--small"
-						onClick={() => inputRef.current?.click()}
-						disabled={isBusy}
-					>
-						{uploadMutation.isPending ? '업로드 중…' : year.poster ? '교체' : '업로드'}
-					</button>
 					{year.poster && (
 						<button
 							type="button"
@@ -382,9 +353,9 @@ function YearPosterControls({
 						</button>
 					)}
 				</div>
-				{(uploadMutation.error || deletePosterMutation.error) && (
+				{deletePosterMutation.error && (
 					<span className="field-error">
-						{getApiErrorMessage(uploadMutation.error ?? deletePosterMutation.error)}
+						{getApiErrorMessage(deletePosterMutation.error)}
 					</span>
 				)}
 			</div>

@@ -10,10 +10,7 @@ import {
 } from '../shared/site-settings.js';
 import { createUploadLimiter } from '../shared/upload-limits.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
-import {
-	createExportProgressStore,
-	createExportService,
-} from '../modules/admin/export/service.js';
+import { createExportService } from '../modules/admin/export/service.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
 import { ownedTestUploadLifecycleResource } from './helpers/upload-lifecycle.js';
@@ -169,9 +166,9 @@ describe('stateful resource factories', () => {
 		expect(schedulerA.scheduler.every).toHaveBeenCalledWith(50, expect.any(Function));
 		expect(schedulerB.scheduler.every).toHaveBeenCalledOnce();
 
-		expect(b.check('10.0.0.2')).toBe('ok');
+		expect(b.check('10.0.0.2')).toEqual({ status: 'ok' });
 		nowB = 1_001;
-		expect(b.check('10.0.0.2')).toBe('ok');
+		expect(b.check('10.0.0.2')).toEqual({ status: 'ok' });
 		b.check('10.0.0.3');
 		nowB = 2_002;
 		schedulerB.run();
@@ -187,28 +184,9 @@ describe('stateful resource factories', () => {
 		expect(schedulerB.cancel).toHaveBeenCalledOnce();
 	});
 
-	it('keeps export locks and progress isolated and requires an explicit store', () => {
-		const a = createExportProgressStore();
-		const b = createExportProgressStore();
-
-		a.start(2025, 100);
-		expect(a.get()).toMatchObject({ year: 2025, startedAt: 100 });
-		expect(b.get()).toBeNull();
-		expect(() => a.start(2026, 200)).toThrow();
-		expect(() => b.start(2026, 200)).not.toThrow();
-
-		a.close();
-		a.close();
-		expect(a.get()).toBeNull();
-		expect(b.get()).toMatchObject({ year: 2026, startedAt: 200 });
-		b.close();
-	});
-
-	it('performs no DB, S3, timer, or background work while factories are created', () => {
-		const findProjects = vi.fn().mockResolvedValue([]);
-		const pathExists = vi.fn().mockResolvedValue(false);
-		const ensureDirectory = vi.fn().mockResolvedValue(undefined);
-		const saveObject = vi.fn().mockResolvedValue(undefined);
+	it('performs no DB, S3, timer, or background work while job controls are created', () => {
+		const createJob = vi.fn();
+		const latestJob = vi.fn();
 		const rateScheduler = createRateLimitScheduler();
 		const settingsRepository: SiteSettingsRepository = {
 			loadOrCreate: vi.fn().mockResolvedValue({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
@@ -223,23 +201,14 @@ describe('stateful resource factories', () => {
 		createUploadLimiter(() => 1);
 		createProtectedDownloadLimiter({ scheduler: rateScheduler.scheduler });
 		createExportService({
-			findProjects,
-			pathExists,
-			ensureDirectory,
-			saveObject,
-			bucketForKind: () => 'public',
-			protectedBucket: 'protected',
-			now: () => 0,
-			logWarn: vi.fn(),
-			logError: vi.fn(),
-		}, createExportProgressStore());
+			repository: { createJob, latestJob },
+			ids: { next: () => 'job' },
+		});
 
 		expect(settingsRepository.loadOrCreate).not.toHaveBeenCalled();
 		expect(settingsRepository.update).not.toHaveBeenCalled();
-		expect(findProjects).not.toHaveBeenCalled();
-		expect(pathExists).not.toHaveBeenCalled();
-		expect(ensureDirectory).not.toHaveBeenCalled();
-		expect(saveObject).not.toHaveBeenCalled();
+		expect(createJob).not.toHaveBeenCalled();
+		expect(latestJob).not.toHaveBeenCalled();
 		expect(rateScheduler.scheduler.every).not.toHaveBeenCalled();
 	});
 

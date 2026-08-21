@@ -61,6 +61,24 @@ type MockGameSession = {
 };
 
 const mockGameSessions = new Map<string, MockGameSession>();
+type MockDirectAssetSession = {
+	sessionId: string;
+	owner: { type: 'PROJECT' | 'EXHIBITION'; id: number };
+	kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER';
+	generation: number;
+	partSizeBytes: number;
+	totalParts: number;
+	expiresAt: string;
+	originalName: string;
+	totalBytes: number;
+	sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1';
+	sourceIdentity: string;
+	state: 'UPLOADING' | 'VERIFYING' | 'READY' | 'CANCELLED';
+	parts: Map<number, { etag: string; sizeBytes: number }>;
+};
+const mockDirectAssetSessions = new Map<string, MockDirectAssetSession>();
+let mockExportJobId = 0;
+let mockDirectAssetSessionId = 0;
 
 function parseJsonBody(body: unknown): Record<string, unknown> {
 	if (typeof body !== 'string') return {};
@@ -177,6 +195,122 @@ const routes: MockRoute[] = [
 		},
 	},
 
+	// ── Direct multipart controls ─────────────────────────────
+	// These routes mirror the canonical Garage capability protocol.  Mock
+	// UploadPart uses a separate mock://-style path rather than an API body.
+	{
+		pattern: /^\/api\/admin\/(projects|exhibitions)\/(\d+)\/direct-(game|webgl|video|image|poster)-upload-sessions$/,
+		handler: (match, method, options) => {
+			requireAdmin();
+			if (method !== 'POST') return notFound();
+			const ownerType = match[1] === 'projects' ? 'PROJECT' : 'EXHIBITION';
+			const kind = String(match[3]).toUpperCase() as MockDirectAssetSession['kind'];
+			if (ownerType === 'EXHIBITION' && kind !== 'POSTER') return notFound();
+			const body = parseJsonBody(options.body);
+			const totalBytes = Math.max(1, Number(body.totalBytes ?? 1));
+			const partSizeBytes = 5 * 1024 * 1024;
+			const session: MockDirectAssetSession = {
+				sessionId: `mock-direct-${++mockDirectAssetSessionId}`,
+				owner: { type: ownerType, id: Number(match[2]) },
+				kind,
+				generation: 1,
+				partSizeBytes,
+				totalParts: Math.max(1, Math.ceil(totalBytes / partSizeBytes)),
+				expiresAt: new Date(Date.now() + 300_000).toISOString(),
+				originalName: String(body.originalName ?? 'mock-upload.bin'),
+				totalBytes,
+				sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+				sourceIdentity: String(body.sourceIdentity ?? '0'.repeat(64)),
+				state: 'UPLOADING',
+				parts: new Map(),
+			};
+			mockDirectAssetSessions.set(session.sessionId, session);
+			return {
+				sessionId: session.sessionId,
+				owner: session.owner,
+				generation: session.generation,
+				partSizeBytes: session.partSizeBytes,
+				totalParts: session.totalParts,
+				expiresAt: session.expiresAt,
+				sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
+				sourceIdentity: session.sourceIdentity,
+			};
+		},
+	},
+	{
+		pattern: /^\/api\/admin\/direct-asset-upload-sessions\/([^/]+)\/part-urls$/,
+		handler: (match, method, options) => {
+			requireAdmin();
+			if (method !== 'POST') return notFound();
+			const session = mockDirectAssetSessions.get(match[1] ?? '') ?? notFound();
+			if (session.state !== 'UPLOADING') return notFound();
+			const body = parseJsonBody(options.body);
+			const requested = Array.isArray(body.parts) ? body.parts : [];
+			return {
+				parts: requested.map((part) => {
+					const partNumber = Number((part as { partNumber?: unknown }).partNumber);
+					return {
+						partNumber,
+						url: `/mock/garage-upload/${session.sessionId}/${partNumber}`,
+						requiredHeaders: {},
+					};
+				}),
+			};
+		},
+	},
+	{
+		pattern: /^\/mock\/garage-upload\/([^/]+)\/(\d+)$/,
+		handler: (match, method, options) => {
+			if (method !== 'PUT') return notFound();
+			const session = mockDirectAssetSessions.get(match[1] ?? '') ?? notFound();
+			if (session.state !== 'UPLOADING') return notFound();
+			const partNumber = Number(match[2]);
+			const sizeBytes = options.body instanceof Blob ? options.body.size : 0;
+			const etag = `mock-etag-${session.sessionId}-${partNumber}`;
+			session.parts.set(partNumber, { etag, sizeBytes });
+			return { etag };
+		},
+	},
+	{
+		pattern: /^\/api\/admin\/direct-asset-upload-sessions\/([^/]+)\/complete$/,
+		handler: (match, method) => {
+			requireAdmin();
+			if (method !== 'POST') return notFound();
+			const session = mockDirectAssetSessions.get(match[1] ?? '') ?? notFound();
+			if (session.state !== 'UPLOADING') return notFound();
+			// The actual worker owns verification.  The mock makes the next status
+			// poll READY while preserving the VERIFYING completion response shape.
+			session.state = 'READY';
+			return { status: 'VERIFYING', sessionId: session.sessionId, generation: session.generation, sizeBytes: session.totalBytes };
+		},
+	},
+	{
+		pattern: /^\/api\/admin\/direct-asset-upload-sessions\/([^/]+)$/,
+		handler: (match, method) => {
+			requireAdmin();
+			const session = mockDirectAssetSessions.get(match[1] ?? '') ?? notFound();
+			if (method === 'DELETE') {
+				session.state = 'CANCELLED';
+				return undefined;
+			}
+			return {
+				sessionId: session.sessionId,
+				owner: session.owner,
+				kind: session.kind,
+				state: session.state,
+				generation: session.generation,
+				originalName: session.originalName,
+				totalBytes: session.totalBytes,
+				partSizeBytes: session.partSizeBytes,
+				totalParts: session.totalParts,
+				expiresAt: session.expiresAt,
+				sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
+				sourceIdentity: session.sourceIdentity,
+				parts: [...session.parts].map(([partNumber, part]) => ({ partNumber, ...part })),
+			};
+		},
+	},
+
 	// ── Admin Settings ──
 	{
 		pattern: /^\/api\/admin\/settings$/,
@@ -231,22 +365,25 @@ const routes: MockRoute[] = [
 		pattern: /^\/api\/admin\/export\/status$/,
 		handler: () => {
 			requireAdmin();
-			return { running: false, progress: null };
+			return {
+				running: false,
+				progress: null,
+				jobId: `mock-export-${mockExportJobId || 1}`,
+				state: 'READY',
+				result: {
+					projects: 6, totalFiles: 18, downloaded: 18, skipped: 0, failed: 0,
+					aborted: false, paths: ['mock/ExportedAssets/2025/mock-project/poster.webp'],
+				},
+				error: null,
+			};
 		},
 	},
 	{
 		pattern: /^\/api\/admin\/export$/,
 		handler: () => {
 			requireAdmin();
-			return {
-				projects: 6,
-				totalFiles: 18,
-				downloaded: 18,
-				skipped: 0,
-				failed: 0,
-				aborted: false,
-				paths: ['mock/ExportedAssets/2025/mock-project/poster.webp'],
-			};
+			mockExportJobId++;
+			return { jobId: `mock-export-${mockExportJobId}`, state: 'QUEUED' };
 		},
 	},
 

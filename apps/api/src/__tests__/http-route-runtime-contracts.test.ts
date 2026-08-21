@@ -96,7 +96,8 @@ async function createContractApp(
 		NODE_ENV: nodeEnv,
 		DEV_AUTH_ENABLED: devAuthEnabled,
 		LOG_LEVEL: 'info',
-		NAS_EXPORT_PATH: '/tmp/pcu-route-contract-export',
+		PUBLIC_ASSET_ORIGIN: 'https://assets.route-contract.test',
+		NAS_EXPORT_ROOT: '/tmp/pcu-route-contract-export',
 		GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS],
 		CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS],
 	}, {
@@ -133,19 +134,25 @@ describe('production HTTP runtime contracts', () => {
 
 		const developmentRoutes = routeRuntimeContractsFor({ includeDevAuth: true });
 		const productionRoutes = routeRuntimeContractsFor({ includeDevAuth: false });
+		// This test intentionally injects persistence rather than Prisma. The
+		// canonical direct-upload graph is Prisma-backed and is covered by its own
+		// control-plane tests; every route that this constructed app can register
+		// remains inventory-checked here.
+		const routesInInjectedGraph = developmentRoutes.filter(({ family }) => family !== 'direct-asset-upload');
+		const productionRoutesInInjectedGraph = productionRoutes.filter(({ family }) => family !== 'direct-asset-upload');
 		expect(developmentRoutes).toEqual(ROUTE_RUNTIME_CONTRACTS);
 		expect(productionRoutes).toEqual(
 			ROUTE_RUNTIME_CONTRACTS.filter(({ family }) => family !== 'dev-auth'),
 		);
 
-		for (const route of developmentRoutes) {
+		for (const route of routesInInjectedGraph) {
 			const routerUrl = route.url === '*' ? '/*' : route.url;
 			expect(
 				app.hasRoute({ method: route.method, url: routerUrl }),
 				`${route.method} ${route.url}`,
 			).toBe(true);
 		}
-		for (const route of productionRoutes) {
+		for (const route of productionRoutesInInjectedGraph) {
 			const routerUrl = route.url === '*' ? '/*' : route.url;
 			expect(
 				productionApp.hasRoute({ method: route.method, url: routerUrl }),
@@ -155,7 +162,7 @@ describe('production HTTP runtime contracts', () => {
 		for (const route of ROUTE_RUNTIME_CONTRACTS.filter(({ family }) => family === 'dev-auth')) {
 			expect(productionApp.hasRoute({ method: route.method, url: route.url })).toBe(false);
 		}
-		const productionGets = productionRoutes.filter(({ method }) => method === 'GET');
+		const productionGets = productionRoutesInInjectedGraph.filter(({ method }) => method === 'GET');
 		for (const route of productionGets) {
 			expect(productionApp.hasRoute({ method: 'HEAD', url: route.url })).toBe(true);
 		}
@@ -474,17 +481,9 @@ describe('production HTTP runtime contracts', () => {
 		registerRouteSchemas(exportApp);
 		exportApp.post<{ Body: { year?: number; dryRun?: boolean } }>(
 			'/api/admin/export',
-			async (request) => ({
+			async (_request, reply) => reply.status(202).send({
 				ok: true,
-				data: {
-					projects: 0,
-					totalFiles: 0,
-					downloaded: 0,
-					skipped: 0,
-					failed: 0,
-					aborted: request.body.dryRun ?? false,
-					paths: [],
-				},
+				data: { jobId: 'route-contract-export', state: 'QUEUED' },
 			}),
 		);
 		await exportApp.ready();
@@ -493,10 +492,10 @@ describe('production HTTP runtime contracts', () => {
 				method: 'POST',
 				url: '/api/admin/export',
 			});
-			expect(response.statusCode, response.body).toBe(200);
+			expect(response.statusCode, response.body).toBe(202);
 			expect(response.json()).toMatchObject({
 				ok: true,
-				data: { aborted: false },
+				data: { jobId: 'route-contract-export', state: 'QUEUED' },
 			});
 		} finally {
 			await exportApp.close();

@@ -418,3 +418,117 @@ export function createObjectStorage(
 	};
 	return storage;
 }
+
+/**
+ * Narrow browser-capability adapter for the direct multipart control plane.
+ * It deliberately is not an ObjectStorage method: feature code receives only
+ * this signer, never GetObject or a byte-upload function.
+ */
+export function createMultipartPartPresigner(
+	client: S3Client,
+): {
+	presignUploadPart(
+		bucket: string,
+		key: string,
+		uploadId: string,
+		partNumber: number,
+		expiresInSeconds: number,
+		checksumSha256: string,
+	): Promise<string>;
+} {
+	return {
+		async presignUploadPart(bucket, key, uploadId, partNumber, expiresInSeconds, checksumSha256) {
+			if (!Number.isSafeInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
+				throw new RangeError('multipart partNumber must be between 1 and 10000');
+			}
+			if (!Number.isSafeInteger(expiresInSeconds) || expiresInSeconds < 1 || expiresInSeconds > 604_800) {
+				throw new RangeError('multipart capability expiry must be between 1 second and 7 days');
+			}
+			if (!/^[A-Za-z0-9+/]{43}=$/.test(checksumSha256)) {
+				throw new RangeError('multipart capability requires a base64 SHA-256 checksum');
+			}
+			return getSignedUrl(client, new UploadPartCommand({
+				Bucket: bucket,
+				Key: key,
+				UploadId: uploadId,
+				PartNumber: partNumber,
+				ChecksumSHA256: checksumSha256,
+			}), {
+				expiresIn: expiresInSeconds,
+				// Keep the checksum as a required signed request header. Hoisting it
+				// into the query while also asking the browser to send the header is
+				// rejected by Garage as an unsigned x-amz-checksum-sha256 header.
+				unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+			});
+		},
+	};
+}
+
+/**
+ * Direct control-plane storage port. This deliberately excludes GetObject and
+ * UploadPart-with-body so it is safe to inject into Fastify route composition.
+ * Validation workers receive a different, read-capable port.
+ */
+export function createDirectMultipartControlStorage(client: S3Client) {
+	return {
+		async createMultipart(bucket: string, key: string, contentType: string): Promise<string> {
+			const response = await client.send(new CreateMultipartUploadCommand({
+				Bucket: bucket,
+				Key: key,
+				ContentType: contentType,
+			}));
+			if (!response.UploadId) throw new Error('S3 CreateMultipartUpload returned no UploadId');
+			return response.UploadId;
+		},
+		async listParts(bucket: string, key: string, uploadId: string): Promise<Array<{
+			partNumber: number;
+			etag: string;
+			sizeBytes: number;
+		}>> {
+			const parts: Array<{ partNumber: number; etag: string; sizeBytes: number }> = [];
+			let marker: string | undefined;
+			do {
+				const page = await client.send(new ListPartsCommand({
+					Bucket: bucket, Key: key, UploadId: uploadId, PartNumberMarker: marker,
+				}));
+				for (const part of page.Parts ?? []) {
+					const partNumber = part.PartNumber;
+					const sizeBytes = part.Size;
+					if (!Number.isSafeInteger(partNumber) || !part.ETag || !Number.isSafeInteger(sizeBytes)) {
+						throw new Error('S3 ListParts returned an incomplete part record');
+					}
+					parts.push({ partNumber: partNumber as number, etag: part.ETag, sizeBytes: sizeBytes as number });
+				}
+				marker = page.IsTruncated ? page.NextPartNumberMarker : undefined;
+			} while (marker);
+			return parts.sort((left, right) => left.partNumber - right.partNumber);
+		},
+		async completeMultipart(bucket: string, key: string, uploadId: string, parts: ReadonlyArray<{
+			partNumber: number;
+			etag: string;
+		}>): Promise<void> {
+			await client.send(new CompleteMultipartUploadCommand({
+				Bucket: bucket,
+				Key: key,
+				UploadId: uploadId,
+				MultipartUpload: { Parts: [...parts].sort((left, right) => left.partNumber - right.partNumber).map((part) => ({ PartNumber: part.partNumber, ETag: part.etag })) },
+			}));
+		},
+		async head(bucket: string, key: string): Promise<{ size: number; etag?: string } | null> {
+			try {
+				const result = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+				return { size: result.ContentLength ?? 0, ...(result.ETag ? { etag: result.ETag } : {}) };
+			} catch (error) {
+				if (storageErrorMatches(error, ['NotFound', 'NoSuchKey'], 404)) return null;
+				throw error;
+			}
+		},
+		async abortMultipart(bucket: string, key: string, uploadId: string): Promise<void> {
+			try {
+				await client.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId: uploadId }));
+			} catch (error) {
+				if (!storageErrorMatches(error, ['NoSuchUpload'])) throw error;
+			}
+		},
+	};
+}

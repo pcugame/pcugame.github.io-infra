@@ -3,6 +3,8 @@ export interface MultipartAbortTarget {
 	storageKey: string;
 	uploadId: string;
 	reason: string;
+	/** Canonical direct session provenance; optional for Phase-1 legacy tasks. */
+	uploadSessionId?: string;
 }
 
 export interface MultipartAbortRepository {

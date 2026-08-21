@@ -20,6 +20,31 @@ export interface WebglDeploymentKeys extends WebglProtectedSourceKeys, WebglPubl
 	entryKey: string;
 }
 
+export interface CanonicalWebglPublicKeys {
+	projectId: number;
+	deploymentId: string;
+	publicPrefix: string;
+	entryObjectKey: string;
+}
+
+/** Canonical immutable public generation. Protected upload identity is separate. */
+export function createCanonicalWebglPublicKeys(
+	projectId: number,
+	deploymentId: string,
+): CanonicalWebglPublicKeys {
+	if (!Number.isSafeInteger(projectId) || projectId < 1
+		|| !new RegExp(`^${UUID_RE}$`, 'i').test(deploymentId)) {
+		throw new Error('Invalid canonical WebGL deployment identity');
+	}
+	const publicPrefix = `public/webgl/${projectId}/${deploymentId}/`;
+	return {
+		projectId,
+		deploymentId,
+		publicPrefix,
+		entryObjectKey: `${publicPrefix}index.html`,
+	};
+}
+
 export function createWebglDeploymentKeys(
 	projectId: number,
 	deploymentId: string,

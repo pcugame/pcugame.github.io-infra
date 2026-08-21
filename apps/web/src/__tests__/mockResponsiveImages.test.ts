@@ -62,4 +62,41 @@ describe('responsive image mock fixtures', () => {
 			expectDeclaredPlaceholderSize(rendition.url, rendition.width, rendition.height);
 		}
 	});
+
+	it('simulates the exhibition POSTER direct Garage capability flow without FormData relay', async () => {
+		const sourceIdentity = 'a'.repeat(64);
+		const session = await handleMockRequest<{
+			sessionId: string;
+			owner: { type: string; id: number };
+			generation: number;
+		}>(
+			'/api/admin/exhibitions/2/direct-poster-upload-sessions',
+			{
+				method: 'POST',
+				body: JSON.stringify({
+					originalName: 'poster.webp', totalBytes: 6, sourceIdentity,
+					sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+				}),
+			},
+		);
+		expect(session.owner).toEqual({ type: 'EXHIBITION', id: 2 });
+
+		const signed = await handleMockRequest<{ parts: Array<{ url: string }> }>(
+			`/api/admin/direct-asset-upload-sessions/${session.sessionId}/part-urls`,
+			{ method: 'POST', body: JSON.stringify({ generation: session.generation, parts: [{ partNumber: 1 }] }) },
+		);
+		const uploaded = await handleMockRequest<{ etag: string }>(signed.parts[0]!.url, {
+			method: 'PUT', body: new Blob(['poster']),
+		});
+		expect(uploaded.etag).toContain(session.sessionId);
+
+		await handleMockRequest(
+			`/api/admin/direct-asset-upload-sessions/${session.sessionId}/complete`,
+			{ method: 'POST', body: JSON.stringify({ generation: session.generation, parts: [{ partNumber: 1, etag: uploaded.etag, sizeBytes: 6 }] }) },
+		);
+		const status = await handleMockRequest<{ state: string }>(
+			`/api/admin/direct-asset-upload-sessions/${session.sessionId}`,
+		);
+		expect(status.state).toBe('READY');
+	});
 });

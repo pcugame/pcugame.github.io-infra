@@ -9,7 +9,7 @@ import type {
 } from '../../application/ports.js';
 import type { ObjectDeletionCoordinator } from '../../application/object-deletion.js';
 import { badRequest } from '../../shared/errors.js';
-import { validateWebglZipArchiveObject } from '../assets/upload/zip-validation.js';
+import { validateBoundedZipFile } from '../archive/bounded-zip-validator.js';
 import { analyzeWebglArchive, uploadWebglArchive } from './archive.js';
 import {
 	parseWebglEntryKey,
@@ -114,19 +114,6 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 		assertRequestActive(storageRequest);
 		await assertClaimOwned?.();
 
-		const summary = await validateWebglZipArchiveObject(
-			sizeBytes,
-			(start, end) => deps.storage.readRange(
-				deps.config.protectedBucket,
-				sourceKey,
-				start,
-				end,
-				storageRequest,
-			),
-		);
-		assertRequestActive(storageRequest);
-		await assertClaimOwned?.();
-		const layout = analyzeWebglArchive(summary);
 		const tempId = deps.ids.next().replace(/[^a-zA-Z0-9-]/g, '');
 		if (!tempId) throw new Error('WebGL deployment ID generator returned an unsafe value');
 		const archivePath = join(
@@ -147,25 +134,37 @@ export function createWebglDeployment(deps: WebglDeploymentDependencies) {
 			await pipeline(source.body, deps.fileSystem.createWriteStream(archivePath));
 			assertRequestActive(storageRequest);
 			await assertClaimOwned?.();
-			await uploadWebglArchive(
+			const summary = await validateBoundedZipFile(archivePath, {
+				profile: 'WEBGL',
+				maxArchiveBytes: sizeBytes,
+				...(storageRequest?.signal ? { signal: storageRequest.signal } : {}),
+			});
+			const layout = analyzeWebglArchive(summary);
+			uploadedKeys.push(...await uploadWebglArchive({
 				archivePath,
-				deps.config.publicBucket,
-				keys.sitePrefix,
+				publicBucket: deps.config.publicBucket,
+				publicPrefix: keys.sitePrefix,
 				layout,
-				async (bucket, key, body, contentType, contentLength, options) => {
-					assertRequestActive(storageRequest);
-					return deps.storage.upload(
-						bucket,
-						key,
-						body,
-						contentType,
-						contentLength,
-						options,
-						storageRequest,
-					);
+				...(storageRequest?.signal ? { signal: storageRequest.signal } : {}),
+				uploader: {
+					put: async (object) => {
+						assertRequestActive(storageRequest);
+						await deps.storage.upload(
+							object.bucket,
+							object.objectKey,
+							object.body,
+							object.contentType,
+							object.contentLength,
+							{
+								contentType: object.contentType,
+								...(object.contentEncoding ? { contentEncoding: object.contentEncoding } : {}),
+								cacheControl: object.cacheControl,
+							},
+							storageRequest,
+						);
+					},
 				},
-				(key) => uploadedKeys.push(key),
-			);
+			}));
 			assertRequestActive(storageRequest);
 			await assertClaimOwned?.();
 			if (!uploadedKeys.includes(keys.entryKey)) {

@@ -5,6 +5,8 @@ import { getApiErrorMessage } from '../../lib/api';
 import type { ProjectSubmissionMode } from '../../lib/api/project-submit';
 import { getClientUploadLimits } from '../../lib/upload-limits';
 import GameUploadWidget from '../../components/GameUploadWidget';
+import DirectVideoUploadWidget from '../../components/DirectVideoUploadWidget';
+import DirectImageUploadWidget from '../../components/DirectImageUploadWidget';
 import { ProjectPreviewModal } from '../../components/project/ProjectPreviewModal';
 import { useMe } from '../auth';
 import { SubmissionActions } from './SubmissionActions';
@@ -43,13 +45,19 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	const [previewSnapshot, setPreviewSnapshot] = useState<SubmitProjectPayloadInput | null>(null);
 	const [gameUploadFinished, setGameUploadFinished] = useState(false);
 	const [webglUploadFinished, setWebglUploadFinished] = useState(false);
+	const [videoUploadFinished, setVideoUploadFinished] = useState(false);
+	const [posterUploadFinished, setPosterUploadFinished] = useState(false);
+	const [imageUploadFinished, setImageUploadFinished] = useState(false);
 
 	useEffect(() => {
 		if (!createdProjectId) return;
 		const gameReady = !files.gameFile || gameUploadFinished;
 		const webglReady = !files.webglFile || webglUploadFinished;
-		if (gameReady && webglReady) goToEdit();
-	}, [createdProjectId, files.gameFile, files.webglFile, gameUploadFinished, goToEdit, webglUploadFinished]);
+		const videoReady = files.videoFiles.length === 0 || videoUploadFinished;
+		const posterReady = !files.posterFile || posterUploadFinished;
+		const imagesReady = files.imageFiles.length === 0 || imageUploadFinished;
+		if (gameReady && webglReady && videoReady && posterReady && imagesReady) goToEdit();
+	}, [createdProjectId, files.gameFile, files.imageFiles.length, files.posterFile, files.videoFiles.length, files.webglFile, gameUploadFinished, goToEdit, imageUploadFinished, posterUploadFinished, videoUploadFinished, webglUploadFinished]);
 
 	const openPreview = () => setPreviewSnapshot(getValues());
 	const closePreview = () => setPreviewSnapshot(null);
@@ -83,6 +91,33 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 							uploadKind="WEBGL"
 							onComplete={() => setWebglUploadFinished(true)}
 							onSkip={() => setWebglUploadFinished(true)}
+						/>
+					)}
+					{files.videoFiles.length > 0 && (
+						<DirectVideoUploadWidget
+							projectId={createdProjectId!}
+							initialFiles={files.videoFiles}
+							autoStart
+							onComplete={() => setVideoUploadFinished(true)}
+							onSkip={() => setVideoUploadFinished(true)}
+						/>
+					)}
+					{files.posterFile && (
+						<DirectImageUploadWidget
+							owner={{ type: 'PROJECT', id: createdProjectId! }}
+							kind="POSTER"
+							initialFiles={[files.posterFile]}
+							autoStart
+							onComplete={() => setPosterUploadFinished(true)}
+						/>
+					)}
+					{files.imageFiles.length > 0 && (
+						<DirectImageUploadWidget
+							owner={{ type: 'PROJECT', id: createdProjectId! }}
+							kind="IMAGE"
+							initialFiles={files.imageFiles}
+							autoStart
+							onComplete={() => setImageUploadFinished(true)}
 						/>
 					)}
 				</div>

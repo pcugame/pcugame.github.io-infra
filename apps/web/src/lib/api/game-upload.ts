@@ -15,8 +15,16 @@ import type {
 	GameUploadSession,
 	GameUploadSessionListResponse,
 	GameUploadStatus,
+	DirectGameUploadCompletionResponse,
+	DirectGameUploadCompleteRequest,
+	DirectGameUploadCreateSessionRequest,
+	DirectGameUploadPartUrlsRequest,
+	DirectAssetUploadStatus,
+	DirectAssetUploadKind,
+	DirectAssetUploadOwner,
 	UploadKind,
 } from '../../contracts';
+import { createFileSourceIdentity } from '../file-identity';
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -245,4 +253,173 @@ export function uploadGameFile(
 		start,
 		abort: () => { aborted = true; },
 	};
+}
+
+/**
+ * Canonical GAME data-plane client. The API only exchanges JSON controls;
+ * every File slice is PUT directly to the Garage UploadPart capability.
+ */
+export type DirectAssetUploadSession = {
+	sessionId: string;
+	owner: DirectAssetUploadOwner;
+	generation: number;
+	partSizeBytes: number;
+	totalParts: number;
+	expiresAt: string;
+	sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1';
+	sourceIdentity: string;
+	kind: DirectAssetUploadKind;
+};
+
+function checksumBase64(bytes: ArrayBuffer): string {
+	const view = new Uint8Array(bytes);
+	let binary = '';
+	// Avoid spreading a multi-megabyte typed array into String.fromCharCode.
+	for (let offset = 0; offset < view.length; offset += 0x8000) {
+		binary += String.fromCharCode(...view.subarray(offset, Math.min(offset + 0x8000, view.length)));
+	}
+	return btoa(binary);
+}
+
+export async function getDirectAssetUploadStatus(sessionId: string): Promise<DirectAssetUploadStatus> {
+	return apiRequest<DirectAssetUploadStatus>(`/api/admin/direct-asset-upload-sessions/${sessionId}`);
+}
+
+export async function cancelDirectAssetUploadSession(sessionId: string): Promise<void> {
+	await apiRequest<void>(`/api/admin/direct-asset-upload-sessions/${sessionId}`, { method: 'DELETE' });
+}
+
+/** Poll JSON control state only; Garage never passes archive bytes through the API. */
+export async function waitForDirectAssetReady(
+	sessionId: string,
+	options: { intervalMs?: number; timeoutMs?: number } = {},
+): Promise<DirectAssetUploadStatus> {
+	const intervalMs = options.intervalMs ?? 1_500;
+	const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
+	for (;;) {
+		const status = await getDirectAssetUploadStatus(sessionId);
+		if (status.state === 'READY') return status;
+		if (['REJECTED', 'CANCELLED', 'EXPIRED'].includes(status.state)) {
+			throw new Error(`Direct upload ${status.state.toLowerCase()}`);
+		}
+		if (Date.now() >= deadline) throw new Error('Direct upload verification is taking longer than expected');
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+}
+
+/**
+ * Garage UploadPart is deliberately outside the API control plane. Mock mode
+ * uses an in-memory presigned-capability simulator so local UI exercises the
+ * same session/part/complete flow without falling back to an API byte relay.
+ */
+async function putDirectUploadPart(
+	capability: { url: string; requiredHeaders: Record<string, string> },
+	body: Blob,
+): Promise<string> {
+	if (import.meta.env.VITE_MOCK === 'true') {
+		const { handleMockRequest } = await import('./mock/handler');
+		const result = await handleMockRequest<{ etag?: string }>(capability.url, {
+			method: 'PUT', body,
+		});
+		if (!result.etag) throw new Error('Mock UploadPart response omitted ETag');
+		return result.etag;
+	}
+	const response = await fetch(capability.url, {
+		method: 'PUT', headers: capability.requiredHeaders, body,
+	});
+	if (!response.ok) throw new Error(`Direct UploadPart failed (${response.status})`);
+	const etag = response.headers.get('etag');
+	if (!etag) throw new Error('Direct UploadPart response omitted ETag');
+	return etag;
+}
+
+/**
+ * Canonical GAME/WEBGL data-plane client.  `resume` is recovered from an
+ * earlier status result; completed Garage parts are not uploaded again.
+ */
+export async function uploadDirectAssetFile(
+	ownerOrProjectId: DirectAssetUploadOwner | number,
+	file: File,
+	kind: DirectAssetUploadKind,
+	onProgress?: (progress: GameUploadProgress) => void,
+	options: { resume?: DirectAssetUploadSession; onSession?: (session: DirectAssetUploadSession) => void } = {},
+): Promise<DirectGameUploadCompletionResponse> {
+	const owner: DirectAssetUploadOwner = typeof ownerOrProjectId === 'number'
+		? { type: 'PROJECT', id: ownerOrProjectId }
+		: ownerOrProjectId;
+	if (owner.type === 'EXHIBITION' && kind !== 'POSTER') {
+		throw new Error('Only poster uploads may be owned by an exhibition');
+	}
+	const source = await createFileSourceIdentity(file);
+	let session: DirectAssetUploadSession;
+	let uploaded = new Map<number, { etag: string; sizeBytes: number }>();
+	if (options.resume) {
+		const status = await getDirectAssetUploadStatus(options.resume.sessionId);
+		if (status.owner.type !== owner.type || status.owner.id !== owner.id || status.kind !== kind || status.generation !== options.resume.generation
+			|| status.totalBytes !== file.size || status.originalName !== file.name
+			|| status.sourceIdentity !== source.sourceIdentity || status.state !== 'UPLOADING') {
+			throw new Error('Selected file does not match an upload session that can be resumed');
+		}
+		session = {
+			sessionId: status.sessionId, generation: status.generation, partSizeBytes: status.partSizeBytes,
+			totalParts: status.totalParts, expiresAt: status.expiresAt,
+			sourceIdentityAlgorithm: status.sourceIdentityAlgorithm, sourceIdentity: status.sourceIdentity, kind, owner: status.owner,
+		};
+		uploaded = new Map(status.parts.map((part) => [part.partNumber, { etag: part.etag, sizeBytes: part.sizeBytes }]));
+	} else {
+		const created = await apiRequest<DirectAssetUploadSession>(
+			`/api/admin/${owner.type === 'PROJECT' ? 'projects' : 'exhibitions'}/${owner.id}/direct-${kind.toLowerCase()}-upload-sessions`, {
+				method: 'POST', headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ originalName: file.name, totalBytes: file.size, declaredMimeType: file.type || undefined, ...source } satisfies DirectGameUploadCreateSessionRequest),
+			},
+		);
+		session = { ...created, kind };
+	}
+	options.onSession?.(session);
+	const parts: DirectGameUploadCompleteRequest['parts'] = [];
+	for (let partNumber = 1; partNumber <= session.totalParts; partNumber += 1) {
+		const start = (partNumber - 1) * session.partSizeBytes;
+		const body = file.slice(start, Math.min(start + session.partSizeBytes, file.size));
+		const existing = uploaded.get(partNumber);
+		if (existing?.sizeBytes === body.size) {
+			parts.push({ partNumber, etag: existing.etag, sizeBytes: existing.sizeBytes });
+			onProgress?.({ uploadedChunks: parts.length, totalChunks: session.totalParts, uploadedBytes: Math.min(parts.length * session.partSizeBytes, file.size), totalBytes: file.size, percent: Math.round((parts.length / session.totalParts) * 100) });
+			continue;
+		}
+		const checksum = checksumBase64(await crypto.subtle.digest('SHA-256', await body.arrayBuffer()));
+		const signed = await apiRequest<{ parts: Array<{ partNumber: number; url: string; requiredHeaders: Record<string, string> }> }>(
+			`/api/admin/direct-asset-upload-sessions/${session.sessionId}/part-urls`,
+			{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ generation: session.generation, parts: [{ partNumber, checksumSha256: checksum }] } satisfies DirectGameUploadPartUrlsRequest) },
+		);
+		const capability = signed.parts[0];
+		if (!capability) throw new Error('Direct upload capability was not issued');
+		const etag = await putDirectUploadPart(capability, body);
+		parts.push({ partNumber, etag, sizeBytes: body.size });
+		onProgress?.({ uploadedChunks: partNumber, totalChunks: session.totalParts, uploadedBytes: Math.min(partNumber * session.partSizeBytes, file.size), totalBytes: file.size, percent: Math.round((partNumber / session.totalParts) * 100) });
+	}
+	return apiRequest<DirectGameUploadCompletionResponse>(`/api/admin/direct-asset-upload-sessions/${session.sessionId}/complete`, {
+		method: 'POST', headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ generation: session.generation, parts } satisfies DirectGameUploadCompleteRequest),
+	});
+}
+
+/** Backward-compatible GAME export while callers migrate to the generic name. */
+export async function uploadGameFileDirect(projectId: number, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
+	return uploadDirectAssetFile(projectId, file, 'GAME', onProgress);
+}
+
+export async function uploadImageFileDirect(owner: DirectAssetUploadOwner, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
+	return uploadDirectAssetFile(owner, file, 'IMAGE', onProgress);
+}
+
+export async function uploadPosterFileDirect(owner: DirectAssetUploadOwner, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
+	return uploadDirectAssetFile(owner, file, 'POSTER', onProgress);
+}
+
+export async function uploadWebglFileDirect(projectId: number, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
+	return uploadDirectAssetFile(projectId, file, 'WEBGL', onProgress);
+}
+
+export async function uploadVideoFileDirect(projectId: number, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
+	return uploadDirectAssetFile(projectId, file, 'VIDEO', onProgress);
 }

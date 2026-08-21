@@ -13,10 +13,15 @@ import {
 	listGameUploadSessions,
 	cancelGameUploadSession,
 	uploadGameFile,
+	uploadDirectAssetFile,
+	waitForDirectAssetReady,
+	cancelDirectAssetUploadSession,
+	getDirectAssetUploadStatus,
 	type GameUploadSession,
 	type GameUploadProgress,
 	type GameUploadController,
 	type GameUploadStatus,
+	type DirectAssetUploadSession,
 } from '../lib/api/game-upload';
 import type { UploadKind } from '../contracts';
 
@@ -55,10 +60,20 @@ export default function GameUploadWidget({
 	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [session, setSession] = useState<GameUploadSession | null>(null);
+	const [directSession, setDirectSession] = useState<DirectAssetUploadSession | null>(null);
 	const [resumeSession, setResumeSession] = useState<GameUploadStatus | null>(null);
 	const controllerRef = useRef<GameUploadController | null>(null);
 	const autoStartedRef = useRef(false);
 	const submittingRef = useRef(false);
+	const directSessionStorageKey = `pcu.direct-asset-upload:${projectId}:${uploadKind}`;
+	const rememberDirectSession = useCallback((next: DirectAssetUploadSession) => {
+		setDirectSession(next);
+		window.sessionStorage.setItem(directSessionStorageKey, JSON.stringify(next));
+	}, [directSessionStorageKey]);
+	const forgetDirectSession = useCallback(() => {
+		setDirectSession(null);
+		window.sessionStorage.removeItem(directSessionStorageKey);
+	}, [directSessionStorageKey]);
 
 	// Check for existing resumable session on mount
 	useEffect(() => {
@@ -74,6 +89,28 @@ export default function GameUploadWidget({
 		check();
 		return () => { cancelled = true; };
 	}, [projectId, uploadKind]);
+
+	// Only a non-secret session locator is retained.  A resumed request still
+	// recomputes the full source identity before it can obtain another part URL.
+	useEffect(() => {
+		let cancelled = false;
+		async function restoreDirectSession() {
+			const raw = window.sessionStorage.getItem(directSessionStorageKey);
+			if (!raw) return;
+			try {
+				const candidate = JSON.parse(raw) as DirectAssetUploadSession;
+				if (candidate.kind !== uploadKind) throw new Error('direct upload kind mismatch');
+				const status = await getDirectAssetUploadStatus(candidate.sessionId);
+				if (!cancelled && status.state === 'UPLOADING' && status.generation === candidate.generation) {
+					setDirectSession(candidate);
+					return;
+				}
+			} catch { /* stale, unauthorised, or invalid saved locator */ }
+			window.sessionStorage.removeItem(directSessionStorageKey);
+		}
+		void restoreDirectSession();
+		return () => { cancelled = true; };
+	}, [directSessionStorageKey, uploadKind]);
 
 	const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
 		const f = e.target.files?.[0] ?? null;
@@ -119,6 +156,23 @@ export default function GameUploadWidget({
 		if (submittingRef.current) return;
 		submittingRef.current = true;
 		try {
+			if (uploadKind === 'GAME' || uploadKind === 'WEBGL') {
+				setState('uploading');
+				setError(null);
+				const completion = await uploadDirectAssetFile(projectId, file, uploadKind, (p) => {
+					setProgress(p);
+					if (p.percent >= 100) setState('completing');
+				}, { onSession: rememberDirectSession });
+				if (completion.status === 'VERIFYING') {
+					setState('completing');
+					await waitForDirectAssetReady(completion.sessionId);
+				}
+				setState('completed');
+				forgetDirectSession();
+				qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
+				onComplete?.();
+				return;
+			}
 			const sess = await createGameUploadSession(projectId, file, uploadKind);
 			setSession(sess);
 			await doUpload(file, sess);
@@ -128,7 +182,7 @@ export default function GameUploadWidget({
 		} finally {
 			submittingRef.current = false;
 		}
-	}, [file, projectId, doUpload, uploadKind]);
+	}, [file, projectId, doUpload, uploadKind, qc, onComplete, rememberDirectSession, forgetDirectSession]);
 
 	// Auto-start on mount when initialFile + autoStart are provided
 	useEffect(() => {
@@ -174,8 +228,25 @@ export default function GameUploadWidget({
 	}, [file, resumeSession, doUpload]);
 
 	const handleRetry = useCallback(async () => {
-		if (!file || !session) return;
+		if (!file) return;
 		try {
+			if (directSession) {
+				setState('uploading');
+				const completion = await uploadDirectAssetFile(projectId, file, directSession.kind, (p) => {
+					setProgress(p);
+					if (p.percent >= 100) setState('completing');
+				}, { resume: directSession, onSession: rememberDirectSession });
+				if (completion.status === 'VERIFYING') {
+					setState('completing');
+					await waitForDirectAssetReady(completion.sessionId);
+				}
+				forgetDirectSession();
+				setState('completed');
+				qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
+				onComplete?.();
+				return;
+			}
+			if (!session) return;
 			const status = await getGameUploadStatus(session.sessionId);
 			if (status.status === 'PENDING') {
 				await doUpload(file, session, status.uploadedChunks);
@@ -188,25 +259,37 @@ export default function GameUploadWidget({
 			setError(getApiErrorMessage(err));
 			setState('error');
 		}
-	}, [file, session, doUpload, projectId, uploadKind]);
+	}, [file, session, directSession, doUpload, projectId, uploadKind, qc, onComplete, rememberDirectSession, forgetDirectSession]);
 
-	const handleAbort = useCallback(() => {
+	const handleAbort = useCallback(async () => {
+		if (directSession) {
+			try {
+				await cancelDirectAssetUploadSession(directSession.sessionId);
+				setState('cancelled');
+				forgetDirectSession();
+			} catch (err) {
+				setError(getApiErrorMessage(err));
+			}
+			return;
+		}
 		controllerRef.current?.abort();
-	}, []);
+	}, [directSession, forgetDirectSession]);
 
 	const handleCancel = useCallback(async () => {
-		const sid = session?.sessionId ?? resumeSession?.sessionId;
+		const sid = directSession?.sessionId ?? session?.sessionId ?? resumeSession?.sessionId;
 		if (!sid) return;
 		try {
-			await cancelGameUploadSession(sid);
+			if (directSession) await cancelDirectAssetUploadSession(sid);
+			else await cancelGameUploadSession(sid);
 			setState('cancelled');
 			setSession(null);
+			forgetDirectSession();
 			setResumeSession(null);
 			setProgress(null);
 		} catch (err) {
 			setError(getApiErrorMessage(err));
 		}
-	}, [session, resumeSession]);
+	}, [session, directSession, resumeSession, forgetDirectSession]);
 
 	const fileSizeMB = file ? (file.size / 1024 / 1024).toFixed(1) : '0';
 
@@ -224,6 +307,11 @@ export default function GameUploadWidget({
 					<p className="game-upload__resume-hint">
 						재개하려면 동일한 {labels.noun}을 선택 후 "이어올리기" 버튼을 누르세요.
 					</p>
+				</div>
+			)}
+			{directSession && !resumeSession && state === 'idle' && (
+				<div className="game-upload__resume-banner">
+					<p className="game-upload__resume-text">직접 업로드가 중단되었습니다. 동일한 {labels.noun}을 선택해 재개하세요.</p>
 				</div>
 			)}
 
@@ -272,7 +360,7 @@ export default function GameUploadWidget({
 
 			{/* Action buttons */}
 			<div className="game-upload__actions">
-				{(state === 'idle' || state === 'error' || state === 'cancelled') && file && !resumeSession && !session && (
+				{(state === 'idle' || state === 'error' || state === 'cancelled') && file && !resumeSession && !session && !directSession && (
 					<button className="btn btn--primary" onClick={handleStart}>
 						업로드 시작
 					</button>
@@ -289,19 +377,26 @@ export default function GameUploadWidget({
 					</>
 				)}
 
+				{state === 'idle' && file && directSession && !resumeSession && (
+					<>
+						<button className="btn btn--primary" onClick={handleRetry}>이어올리기</button>
+						<button className="btn btn--danger btn--small" onClick={handleCancel}>취소 (세션 삭제)</button>
+					</>
+				)}
+
 				{state === 'uploading' && (
 					<button className="btn btn--danger" onClick={handleAbort}>
 						일시정지
 					</button>
 				)}
 
-				{(state === 'error' || state === 'cancelled') && session && (
+				{(state === 'error' || state === 'cancelled') && (session || directSession) && (
 					<button className="btn btn--primary" onClick={handleRetry}>
 						재시도
 					</button>
 				)}
 
-				{(state === 'error' || state === 'cancelled') && (session || resumeSession) && (
+				{(state === 'error' || state === 'cancelled') && (session || directSession || resumeSession) && (
 					<button className="btn btn--danger btn--small" onClick={handleCancel}>
 						취소 (세션 삭제)
 					</button>

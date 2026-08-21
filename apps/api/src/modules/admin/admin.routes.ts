@@ -10,6 +10,7 @@ export interface AdminRouteDependencies {
 	exportController: FastifyPluginAsync;
 	projectMultipartController: FastifyPluginAsync;
 	gameUploadController: FastifyPluginAsync;
+	directAssetUploadController?: FastifyPluginAsync;
 }
 
 /** Registration itself is pure; migrated ticket-008/009/010 controllers are explicit ports. */
@@ -20,6 +21,7 @@ export function createAdminRoutes(deps: AdminRouteDependencies): FastifyPluginAs
 		await app.register(deps.projectMultipartController);
 		await app.register(deps.memberController);
 		await app.register(deps.gameUploadController);
+		if (deps.directAssetUploadController) await app.register(deps.directAssetUploadController);
 		await app.register(deps.bannedIpController);
 		await app.register(deps.settingsController);
 		await app.register(deps.importController);

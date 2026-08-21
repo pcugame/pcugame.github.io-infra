@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizePublicAssetOrigin } from '../shared/public-origin.js';
 
 const envSchema = z
   .object({
@@ -38,6 +39,7 @@ const envSchema = z
       .refine((arr) => arr.length > 0, 'CORS_ALLOWED_ORIGINS must contain at least one valid origin'),
     API_PUBLIC_URL: z.string().url(),
     WEB_PUBLIC_URL: z.string().url(),
+    PUBLIC_ASSET_ORIGIN: z.string().url().optional(),
     // Legacy local storage paths — only used by migration script
     UPLOAD_ROOT_PROTECTED: z.string().default('/app/storage/protected').optional(),
     UPLOAD_ROOT_PUBLIC: z.string().default('/app/storage/public').optional(),
@@ -83,6 +85,9 @@ const envSchema = z
 
     // ── S3-compatible object storage (Garage) ─────────────
     S3_ENDPOINT: z.string().url(),
+    // Browser-visible UploadPart origin. Keep this separate from the API's
+    // internal Garage endpoint; production must use the NAS upload proxy.
+    S3_PUBLIC_SIGNING_ENDPOINT: z.string().url().optional(),
     S3_REGION: z.string().default('garage'),
     S3_ACCESS_KEY_ID: z.string().min(1),
     S3_SECRET_ACCESS_KEY: z.string().min(1),
@@ -93,10 +98,53 @@ const envSchema = z
       .default('true')
       .transform((v) => v === 'true'),
     S3_PRESIGN_TTL_SEC: z.coerce.number().int().positive().default(60),
+    DIRECT_UPLOAD_PART_SIZE_MB: z.coerce.number().int().min(5).max(5120).default(16),
+    DIRECT_UPLOAD_PART_URL_TTL_SEC: z.coerce.number().int().min(10).max(3600).default(300),
+    DIRECT_UPLOAD_PART_URL_WINDOW_MS: z.coerce.number().int().min(1000).default(300_000),
+    DIRECT_UPLOAD_PART_URL_MAX: z.coerce.number().int().positive().default(64),
+    DIRECT_UPLOAD_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-direct-upload'),
+    DIRECT_UPLOAD_WORKER_TEMP_MAX_MB: z.coerce.number().int().positive().default(6144),
+    DIRECT_UPLOAD_WORKER_POLL_MS: z.coerce.number().int().min(100).default(5_000),
+    VIDEO_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-video-worker'),
+    VIDEO_WORKER_TEMP_DISK_MB: z.coerce.number().int().positive().default(2048),
+    VIDEO_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),
+    IMAGE_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-image-worker'),
+    IMAGE_WORKER_TEMP_MAX_MB: z.coerce.number().int().positive().default(512),
+    IMAGE_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),
 
-    // ── NAS export ──────────────────────────────────────
-    // Mount path where exported asset files are written (e.g. /mnt/nas)
-    NAS_EXPORT_PATH: z.string().optional(),
+    // ── NAS export worker ───────────────────────────────
+    // Private mount, never an HTTP origin. Required only by worker:export.
+    NAS_EXPORT_ROOT: z.string().optional(),
+    EXPORT_WORKER_FILE_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(2),
+    EXPORT_WORKER_LEASE_MS: z.coerce.number().int().min(10_000).default(120_000),
+    EXPORT_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),
+    EXPORT_WORKER_MAX_OBJECT_BYTES: z.coerce.number().int().positive().default(4 * 1024 * 1024 * 1024),
+    EXPORT_WORKER_MAX_JOB_BYTES: z.coerce.number().int().positive().default(32 * 1024 * 1024 * 1024),
+    EXPORT_WORKER_RETRY_BASE_MS: z.coerce.number().int().positive().default(5_000),
+  })
+  .superRefine((value, context) => {
+    if (value.NODE_ENV !== 'production') return;
+    if (!value.PUBLIC_ASSET_ORIGIN) {
+      context.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_ASSET_ORIGIN'],
+        message: 'PUBLIC_ASSET_ORIGIN is required in production',
+      });
+      return;
+    }
+    if (!value.S3_PUBLIC_SIGNING_ENDPOINT) {
+      context.addIssue({ code: 'custom', path: ['S3_PUBLIC_SIGNING_ENDPOINT'], message: 'S3_PUBLIC_SIGNING_ENDPOINT is required in production' });
+    } else if (new URL(value.S3_PUBLIC_SIGNING_ENDPOINT).origin === new URL(value.S3_ENDPOINT).origin) {
+      context.addIssue({ code: 'custom', path: ['S3_PUBLIC_SIGNING_ENDPOINT'], message: 'S3_PUBLIC_SIGNING_ENDPOINT must be separate from internal S3_ENDPOINT in production' });
+    }
+    if (normalizePublicAssetOrigin(value.PUBLIC_ASSET_ORIGIN)
+      === normalizePublicAssetOrigin(value.API_PUBLIC_URL)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_ASSET_ORIGIN'],
+        message: 'PUBLIC_ASSET_ORIGIN must be separate from API_PUBLIC_URL in production',
+      });
+    }
   })
 ;
 
