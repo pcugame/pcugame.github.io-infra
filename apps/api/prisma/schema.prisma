@@ -26,9 +26,13 @@ enum AssetKind {
   POSTER
   GAME
   VIDEO
+  WEBGL
 }
 
 enum AssetStatus {
+  PENDING
+  VERIFYING
+  PROCESSING
   READY
   DELETING
   DELETED
@@ -41,6 +45,32 @@ enum AssetPlaybackStatus {
   FAILED
 }
 
+enum AssetRepresentationRole {
+  ORIGINAL
+  PLAYBACK
+  CARD_480
+  DISPLAY_960
+  WEBGL_SOURCE
+}
+
+enum AssetRepresentationState {
+  PENDING
+  VERIFYING
+  READY
+  FAILED
+  DELETING
+  DELETED
+}
+
+enum WebglDeploymentState {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  DELETING
+  DELETED
+}
+
 enum Platform {
   PC
   MOBILE
@@ -50,6 +80,25 @@ enum Platform {
 enum UploadKind {
   GAME
   WEBGL
+}
+
+enum AssetUploadKind {
+  GAME
+  WEBGL
+  VIDEO
+  IMAGE
+  POSTER
+}
+
+enum AssetUploadSessionState {
+  ALLOCATING
+  UPLOADING
+  COMPLETING
+  VERIFYING
+  READY
+  REJECTED
+  CANCELLED
+  EXPIRED
 }
 
 enum OrphanTargetKind {
@@ -85,6 +134,14 @@ enum MultipartAbortTaskState {
   RESOLVED
 }
 
+enum ExportJobState {
+  QUEUED
+  RUNNING
+  READY
+  FAILED
+  CANCELLED
+}
+
 // ─── Models ───────────────────────────────────────────
 
 model User {
@@ -98,10 +155,12 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  sessions    AuthSession[]       @relation("UserSessions")
-  projects    Project[]           @relation("ProjectCreator")
-  memberships ProjectMember[]     @relation("UserMemberships")
-  gameUploads GameUploadSession[] @relation("UserGameUploads")
+  sessions     AuthSession[]        @relation("UserSessions")
+  projects     Project[]            @relation("ProjectCreator")
+  memberships  ProjectMember[]      @relation("UserMemberships")
+  gameUploads  GameUploadSession[]  @relation("UserGameUploads")
+  assetUploads AssetUploadSession[] @relation("UserAssetUploads")
+  exportJobs   ExportJob[]          @relation("UserExportJobs")
 
   @@map("users")
 }
@@ -120,10 +179,14 @@ model Exhibition {
   posterHeight           Int?     @map("poster_height")
   posterCard480Height    Int?     @map("poster_card_480_height")
   posterDisplay960Height Int?     @map("poster_display_960_height")
+  posterAssetId          Int?     @unique @map("poster_asset_id")
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
-  projects Project[] @relation("ExhibitionProjects")
+  projects     Project[]            @relation("ExhibitionProjects")
+  assets       Asset[]              @relation("ExhibitionAssets")
+  poster       Asset?               @relation("ExhibitionPoster", fields: [posterAssetId], references: [id], onDelete: SetNull)
+  assetUploads AssetUploadSession[] @relation("ExhibitionAssetUploads")
 
   @@unique([year, title], name: "year_title")
   @@index([sortOrder, year])
@@ -131,31 +194,35 @@ model Exhibition {
 }
 
 model Project {
-  id            Int           @id @default(autoincrement())
-  exhibitionId  Int           @map("exhibition_id")
-  slug          String
-  title         String
-  summary       String        @default("")
-  description   String        @default("")
-  isIncomplete  Boolean       @default(false) @map("is_incomplete")
-  status        ProjectStatus @default(PUBLISHED)
-  sortOrder     Int           @default(0) @map("sort_order")
-  githubUrl     String        @default("") @map("github_url")
-  platforms     Platform[]    @default([])
-  posterAssetId Int?          @unique @map("poster_asset_id")
-  webglEntryKey String        @default("") @map("webgl_entry_key")
-  creatorId     Int           @map("creator_id")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
+  id                       Int           @id @default(autoincrement())
+  exhibitionId             Int           @map("exhibition_id")
+  slug                     String
+  title                    String
+  summary                  String        @default("")
+  description              String        @default("")
+  isIncomplete             Boolean       @default(false) @map("is_incomplete")
+  status                   ProjectStatus @default(PUBLISHED)
+  sortOrder                Int           @default(0) @map("sort_order")
+  githubUrl                String        @default("") @map("github_url")
+  platforms                Platform[]    @default([])
+  posterAssetId            Int?          @unique @map("poster_asset_id")
+  webglEntryKey            String        @default("") @map("webgl_entry_key")
+  currentWebglDeploymentId String?       @unique @map("current_webgl_deployment_id")
+  creatorId                Int           @map("creator_id")
+  createdAt                DateTime      @default(now()) @map("created_at")
+  updatedAt                DateTime      @updatedAt @map("updated_at")
 
-  exhibition Exhibition @relation("ExhibitionProjects", fields: [exhibitionId], references: [id], onDelete: Cascade)
-  creator    User       @relation("ProjectCreator", fields: [creatorId], references: [id], onDelete: Cascade)
-  poster     Asset?     @relation("ProjectPoster", fields: [posterAssetId], references: [id], onDelete: SetNull)
+  exhibition             Exhibition       @relation("ExhibitionProjects", fields: [exhibitionId], references: [id], onDelete: Cascade)
+  creator                User             @relation("ProjectCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  poster                 Asset?           @relation("ProjectPoster", fields: [posterAssetId], references: [id], onDelete: SetNull)
+  currentWebglDeployment WebglDeployment? @relation("ProjectCurrentWebglDeployment", fields: [currentWebglDeploymentId], references: [id], onDelete: SetNull)
 
   members           ProjectMember[]           @relation("ProjectMembers")
   assets            Asset[]                   @relation("ProjectAssets")
   gameUploads       GameUploadSession[]       @relation("ProjectGameUploads")
   activeGameUploads GameUploadActiveSession[] @relation("ProjectActiveGameUploads")
+  webglDeployments  WebglDeployment[]         @relation("ProjectWebglDeployments")
+  assetUploads      AssetUploadSession[]      @relation("ProjectAssetUploads")
 
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
   @@index([exhibitionId, status, sortOrder])
@@ -183,10 +250,11 @@ model ProjectMember {
 
 model Asset {
   id                 Int                 @id @default(autoincrement())
-  projectId          Int                 @map("project_id")
+  projectId          Int?                @map("project_id")
+  exhibitionId       Int?                @map("exhibition_id")
   kind               AssetKind
   status             AssetStatus         @default(READY)
-  storageKey         String              @unique @map("storage_key")
+  storageKey         String?             @unique @map("storage_key")
   playbackStorageKey String?             @unique @map("playback_storage_key")
   originalName       String              @default("") @map("original_name")
   mimeType           String              @default("") @map("mime_type")
@@ -203,15 +271,186 @@ model Asset {
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
 
-  project  Project  @relation("ProjectAssets", fields: [projectId], references: [id], onDelete: Cascade)
-  posterOf Project? @relation("ProjectPoster")
+  project            Project?              @relation("ProjectAssets", fields: [projectId], references: [id], onDelete: Cascade)
+  exhibition         Exhibition?           @relation("ExhibitionAssets", fields: [exhibitionId], references: [id], onDelete: Cascade)
+  posterOf           Project?              @relation("ProjectPoster")
+  posterOfExhibition Exhibition?           @relation("ExhibitionPoster")
+  representations    AssetRepresentation[] @relation("AssetRepresentations")
+  expectedByUploads  AssetUploadSession[]  @relation("AssetUploadExpectedTarget")
+  resultOfUploads    AssetUploadSession[]  @relation("AssetUploadResult")
 
   @@index([projectId, kind, status])
+  @@index([exhibitionId, kind, status])
   // Partial unique index `asset_project_game_ready_unique` on (project_id, kind)
   // WHERE status = 'READY' AND kind = 'GAME' is applied via raw SQL in
   // `migrations/20260523_allow_multiple_videos/` — Prisma can't express partial-unique
   // in the DSL. VIDEO/IMAGE etc. are intentionally excluded (projects may hold many).
   @@map("assets")
+}
+
+model AssetRepresentation {
+  id                      String                   @id @default(uuid())
+  assetId                 Int                      @map("asset_id")
+  role                    AssetRepresentationRole
+  bucket                  String
+  objectKey               String                   @map("object_key")
+  mimeType                String                   @default("") @map("mime_type")
+  sizeBytes               BigInt                   @default(0) @map("size_bytes")
+  checksumAlgorithm       String?                  @map("checksum_algorithm")
+  checksum                String?
+  etag                    String?
+  sourceIdentityAlgorithm String?                  @map("source_identity_algorithm")
+  sourceIdentity          String?                  @map("source_identity")
+  state                   AssetRepresentationState @default(PENDING)
+  error                   String?
+  width                   Int?
+  height                  Int?
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+
+  asset            Asset                @relation("AssetRepresentations", fields: [assetId], references: [id], onDelete: Cascade)
+  webglDeployments WebglDeployment[]    @relation("WebglDeploymentSourceRepresentation")
+  resultOfUploads  AssetUploadSession[] @relation("AssetUploadResultRepresentation")
+
+  @@unique([assetId, role], name: "asset_representation_asset_role", map: "asset_representations_asset_id_role_key")
+  @@index([bucket, objectKey], map: "asset_representations_bucket_object_key_idx")
+  @@index([state], map: "asset_representations_state_idx")
+  @@index([sourceIdentityAlgorithm, sourceIdentity], map: "asset_representations_source_identity_idx")
+  @@map("asset_representations")
+}
+
+model WebglDeployment {
+  id                     String               @id @default(uuid())
+  projectId              Int                  @map("project_id")
+  sourceRepresentationId String               @map("source_representation_id")
+  publicBucket           String               @map("public_bucket")
+  publicPrefix           String               @map("public_prefix")
+  entryObjectKey         String               @map("entry_object_key")
+  objectManifest         Json?                @map("object_manifest")
+  state                  WebglDeploymentState @default(PENDING)
+  error                  String?
+  createdAt              DateTime             @default(now()) @map("created_at")
+  updatedAt              DateTime             @updatedAt @map("updated_at")
+
+  project              Project             @relation("ProjectWebglDeployments", fields: [projectId], references: [id], onDelete: Cascade)
+  sourceRepresentation AssetRepresentation @relation("WebglDeploymentSourceRepresentation", fields: [sourceRepresentationId], references: [id], onDelete: Cascade)
+  currentForProject    Project?            @relation("ProjectCurrentWebglDeployment")
+  reservedForUpload    AssetUploadSession? @relation("AssetUploadReservedWebglDeployment")
+
+  @@index([projectId, state], map: "webgl_deployments_project_id_state_idx")
+  @@index([sourceRepresentationId], map: "webgl_deployments_source_representation_id_idx")
+  @@index([publicBucket, publicPrefix], map: "webgl_deployments_public_bucket_prefix_idx")
+  @@map("webgl_deployments")
+}
+
+/// Canonical direct-to-Garage multipart session for all bulk asset kinds.
+/// Garage ListParts is authoritative; no part/chunk rows are persisted here.
+model AssetUploadSession {
+  id                           String                  @id @default(uuid())
+  projectId                    Int?                    @map("project_id")
+  exhibitionId                 Int?                    @map("exhibition_id")
+  userId                       Int                     @map("user_id")
+  kind                         AssetUploadKind
+  state                        AssetUploadSessionState @default(ALLOCATING)
+  originalName                 String                  @map("original_name")
+  declaredMimeType             String                  @default("") @map("declared_mime_type")
+  totalBytes                   BigInt                  @map("total_bytes")
+  partSizeBytes                Int                     @map("part_size_bytes")
+  totalParts                   Int                     @map("total_parts")
+  bucket                       String
+  objectKey                    String                  @map("object_key")
+  uploadId                     String?                 @map("upload_id")
+  generation                   Int                     @default(1)
+  partUrlIssueWindowCount      Int                     @default(0) @map("part_url_issue_window_count")
+  partUrlIssueWindowStartedAt  DateTime?               @map("part_url_issue_window_started_at")
+  partUrlLastIssuedAt          DateTime?               @map("part_url_last_issued_at")
+  sourceIdentityAlgorithm      String                  @map("source_identity_algorithm")
+  sourceIdentity               String                  @map("source_identity")
+  sourceIdentityBlockSizeBytes Int                     @map("source_identity_block_size_bytes")
+  sourceIdentityBlockManifest  Json                    @map("source_identity_block_manifest")
+  completionLeaseToken         String?                 @map("completion_lease_token")
+  completionLeaseUntil         DateTime?               @map("completion_lease_until")
+  completionError              String?                 @map("completion_error")
+  completionResult             Json?                   @map("completion_result")
+  validationLeaseToken         String?                 @map("validation_lease_token")
+  validationLeaseUntil         DateTime?               @map("validation_lease_until")
+  validationError              String?                 @map("validation_error")
+  validationAttemptCount       Int                     @default(0) @map("validation_attempt_count")
+  expectedTargetAssetId        Int?                    @map("expected_target_asset_id")
+  expectedTargetAssetUpdatedAt DateTime?               @map("expected_target_asset_updated_at")
+  resultAssetId                Int?                    @unique @map("result_asset_id")
+  resultRepresentationId       String?                 @unique @map("result_representation_id")
+  reservedWebglDeploymentId    String?                 @unique @map("reserved_webgl_deployment_id")
+  expiresAt                    DateTime                @map("expires_at")
+  completedAt                  DateTime?               @map("completed_at")
+  createdAt                    DateTime                @default(now()) @map("created_at")
+  updatedAt                    DateTime                @updatedAt @map("updated_at")
+
+  project                 Project?             @relation("ProjectAssetUploads", fields: [projectId], references: [id], onDelete: Restrict)
+  exhibition              Exhibition?          @relation("ExhibitionAssetUploads", fields: [exhibitionId], references: [id], onDelete: Restrict)
+  user                    User                 @relation("UserAssetUploads", fields: [userId], references: [id], onDelete: Restrict)
+  expectedTargetAsset     Asset?               @relation("AssetUploadExpectedTarget", fields: [expectedTargetAssetId], references: [id], onDelete: SetNull)
+  resultAsset             Asset?               @relation("AssetUploadResult", fields: [resultAssetId], references: [id], onDelete: SetNull)
+  resultRepresentation    AssetRepresentation? @relation("AssetUploadResultRepresentation", fields: [resultRepresentationId], references: [id], onDelete: SetNull)
+  reservedWebglDeployment WebglDeployment?     @relation("AssetUploadReservedWebglDeployment", fields: [reservedWebglDeploymentId], references: [id], onDelete: SetNull)
+  abortTasks              MultipartAbortTask[] @relation("AssetUploadAbortTasks")
+
+  // Partial unique index `asset_upload_sessions_active_project_kind_key` on
+  // (project_id, kind) for active states is installed by the expand SQL.
+  @@index([projectId, kind, state], map: "asset_upload_sessions_project_kind_state_idx")
+  @@index([exhibitionId, kind, state], map: "asset_upload_sessions_exhibition_kind_state_idx")
+  @@index([userId, state], map: "asset_upload_sessions_user_state_idx")
+  @@index([state, expiresAt], map: "asset_upload_sessions_state_expires_at_idx")
+  @@index([state, completionLeaseUntil], map: "asset_upload_sessions_completion_recovery_idx")
+  @@index([state, validationLeaseUntil], map: "asset_upload_sessions_validation_recovery_idx")
+  @@index([bucket, objectKey], map: "asset_upload_sessions_bucket_object_key_idx")
+  @@index([expectedTargetAssetId, expectedTargetAssetUpdatedAt], map: "asset_upload_sessions_expected_target_fence_idx")
+  @@index([userId, partUrlIssueWindowStartedAt], map: "asset_upload_sessions_part_url_issue_window_idx")
+  @@map("asset_upload_sessions")
+}
+
+/// Durable control-plane request consumed only by the export processing role.
+model ExportJob {
+  id            String         @id @default(uuid())
+  requestedById Int            @map("requested_by_id")
+  year          Int?
+  dryRun        Boolean        @default(false) @map("dry_run")
+  state         ExportJobState @default(QUEUED)
+  snapshot      Json?
+  snapshotHash  String?        @map("snapshot_hash")
+  progress      Json?
+  result        Json?
+  error         String?
+  claimToken    String?        @map("claim_token")
+  claimUntil    DateTime?      @map("claim_until")
+  attemptCount  Int            @default(0) @map("attempt_count")
+  maxAttempts   Int            @default(5) @map("max_attempts")
+  nextAttemptAt DateTime       @default(now()) @map("next_attempt_at")
+  startedAt     DateTime?      @map("started_at")
+  finishedAt    DateTime?      @map("finished_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  requestedBy User @relation("UserExportJobs", fields: [requestedById], references: [id], onDelete: Restrict)
+
+  // Partial unique index `export_jobs_single_active_idx` is installed by SQL.
+  @@index([state, nextAttemptAt, createdAt], map: "export_jobs_claim_idx")
+  @@index([claimUntil], map: "export_jobs_claim_until_idx")
+  @@index([requestedById, createdAt], map: "export_jobs_requested_by_created_at_idx")
+  @@map("export_jobs")
+}
+
+model MigrationMetric {
+  name           String
+  scope          String    @default("")
+  value          BigInt    @default(0)
+  lastObservedAt DateTime? @map("last_observed_at")
+  details        Json?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@id([name, scope], name: "name_scope")
+  @@map("migration_metrics")
 }
 
 model AuthSession {
@@ -417,9 +656,13 @@ model MultipartAbortTask {
   createdAt     DateTime                @default(now()) @map("created_at")
   updatedAt     DateTime                @updatedAt @map("updated_at")
 
+  uploadSessionId String?             @map("upload_session_id")
+  uploadSession   AssetUploadSession? @relation("AssetUploadAbortTasks", fields: [uploadSessionId], references: [id], onDelete: SetNull)
+
   @@unique([bucket, storageKey, uploadId], name: "multipart_abort_bucket_key_upload", map: "multipart_abort_bucket_key_upload")
   @@index([state, nextAttemptAt])
   @@index([claimUntil])
+  @@index([uploadSessionId])
   @@map("multipart_abort_tasks")
 }
 
