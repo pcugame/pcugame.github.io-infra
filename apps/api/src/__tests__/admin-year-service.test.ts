@@ -153,6 +153,54 @@ describe('admin exhibition service', () => {
 		]);
 	});
 
+	it('serializes canonical poster representations by their physical object keys', async () => {
+		mocks.findAllExhibitions.mockResolvedValue([
+			exhibition({
+				posterAssetId: 20,
+				posterStorageKey: null,
+				poster: {
+					id: 20,
+					status: 'READY',
+					originalName: 'canonical.webp',
+					sizeBytes: 800n,
+					width: 1_200,
+					height: 600,
+					representations: [{
+						role: 'ORIGINAL',
+						objectKey: 'assets/20/original/g1.webp',
+						width: 1_200,
+						height: 600,
+					}, {
+						role: 'CARD_480',
+						objectKey: 'assets/20/card/custom-generation.webp',
+						width: 480,
+						height: 240,
+					}],
+				},
+			}),
+		]);
+
+		await expect(listExhibitions()).resolves.toEqual([
+			expect.objectContaining({
+				poster: {
+					original: {
+						url: 'https://api.example.test/api/public/images/assets%2F20%2Foriginal%2Fg1.webp',
+						width: 1_200,
+						height: 600,
+					},
+					renditions: [{
+						profile: 'CARD_480',
+						url: 'https://api.example.test/api/public/images/assets%2F20%2Fcard%2Fcustom-generation.webp',
+						width: 480,
+						height: 240,
+					}],
+				},
+				posterOriginalName: 'canonical.webp',
+				posterSize: 800,
+			}),
+		]);
+	});
+
 	it('creates an exhibition when the year-title pair is unused', async () => {
 		mocks.findExhibitionByComposite.mockResolvedValue(null);
 		mocks.createExhibition.mockResolvedValue({ id: 7, year: 2027 });

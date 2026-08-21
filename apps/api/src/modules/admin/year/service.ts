@@ -3,7 +3,10 @@ import { notFound, conflict } from '../../../shared/errors.js';
 import type { UploadLimits } from '../../../shared/upload-limits.js';
 import type { MultipartCommandInput } from '../../../application/http-input.js';
 import type { PosterUploadCoordinator, ProcessedUpload } from '../../../application/upload-ports.js';
-import { createResponsiveImageSerializer } from '../../../shared/responsive-image.js';
+import {
+	createResponsiveImageSerializer,
+	IMAGE_RENDITION_PROFILES,
+} from '../../../shared/responsive-image.js';
 import type { ExhibitionRepository, ExhibitionRecord } from './ports.js';
 
 export interface ExhibitionServiceDependencies {
@@ -30,7 +33,46 @@ function serializeExhibition(
 	deps: ExhibitionServiceDependencies,
 	e: ExhibitionRecord,
 ): AdminExhibitionItem {
-	const { serializeResponsiveImage } = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const { publicImageUrl, serializeResponsiveImage } = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const original = e.poster?.status === 'READY'
+		? e.poster.representations.find((representation) => representation.role === 'ORIGINAL')
+		: undefined;
+	const posterSource = original ? {
+		storageKey: original.objectKey,
+		width: original.width ?? e.poster?.width,
+		height: original.height ?? e.poster?.height,
+		card480Height: e.poster?.representations.find((representation) => (
+			representation.role === 'CARD_480'
+		))?.height,
+		display960Height: e.poster?.representations.find((representation) => (
+			representation.role === 'DISPLAY_960'
+		))?.height,
+	} : e.posterStorageKey ? {
+		storageKey: e.posterStorageKey,
+		width: e.posterWidth,
+		height: e.posterHeight,
+		card480Height: e.posterCard480Height,
+		display960Height: e.posterDisplay960Height,
+	} : null;
+	const canonicalPoster = original ? {
+		original: {
+			url: publicImageUrl(original.objectKey),
+			...(original.width != null ? { width: original.width } : {}),
+			...(original.height != null ? { height: original.height } : {}),
+		},
+		renditions: IMAGE_RENDITION_PROFILES.flatMap((definition) => {
+			const rendition = e.poster?.representations.find((candidate) => (
+				candidate.role === definition.profile
+			));
+			if (!rendition || rendition.height == null) return [];
+			return [{
+				profile: definition.profile,
+				url: publicImageUrl(rendition.objectKey),
+				width: rendition.width ?? definition.width,
+				height: rendition.height,
+			}];
+		}),
+	} : undefined;
 	return {
 		id: e.id,
 		year: e.year,
@@ -38,17 +80,11 @@ function serializeExhibition(
 		isUploadEnabled: e.isUploadEnabled,
 		sortOrder: e.sortOrder,
 		projectCount: e._count.projects,
-		poster: e.posterStorageKey
-			? serializeResponsiveImage({
-				storageKey: e.posterStorageKey,
-				width: e.posterWidth,
-				height: e.posterHeight,
-				card480Height: e.posterCard480Height,
-				display960Height: e.posterDisplay960Height,
-			})
-			: undefined,
-		posterOriginalName: e.posterOriginalName || undefined,
-		posterSize: e.posterStorageKey ? Number(e.posterSizeBytes) : undefined,
+		poster: canonicalPoster ?? (posterSource
+			? serializeResponsiveImage(posterSource)
+			: undefined),
+		posterOriginalName: e.poster?.originalName || e.posterOriginalName || undefined,
+		posterSize: posterSource ? Number(e.poster?.sizeBytes ?? e.posterSizeBytes) : undefined,
 	};
 }
 
@@ -137,7 +173,7 @@ export async function replacePoster(
 		if (!result) throw notFound('Exhibition not found');
 		uploadPersisted = true;
 
-		if (result.oldStorageKey && result.oldStorageKey !== savedFile.storageKey) {
+		if (result.cleanupQueued || (result.oldStorageKey && result.oldStorageKey !== savedFile.storageKey)) {
 			cleanupCommittedPoster(deps);
 		}
 
@@ -169,7 +205,7 @@ export async function deletePoster(deps: ExhibitionServiceDependencies, id: numb
 	});
 	if (!result) throw notFound('Exhibition not found');
 
-	if (result.oldStorageKey) {
+	if (result.cleanupQueued || result.oldStorageKey) {
 		cleanupCommittedPoster(deps);
 	}
 }

@@ -15,6 +15,9 @@ export interface ExhibitionUploadRecord {
 }
 
 export interface AssetWriteData {
+	/** Physical destination bucket. Older in-process callers may omit this; the
+	 * repository derives it from the public/protected policy during Phase 1. */
+	bucket?: string;
 	storageKey: string;
 	playbackStorageKey?: string | null;
 	originalName: string;
@@ -56,6 +59,7 @@ export interface SubmitProjectWriteData {
 		userId?: number;
 	}>;
 	savedFiles: Array<{
+		bucket?: string;
 		kind: AssetKind;
 		storageKey: string;
 		playbackStorageKey?: string | null;
@@ -89,7 +93,12 @@ export interface ProjectListRecord {
 	members: Array<{ name: string; studentId: string }>;
 	updatedAt: Date;
 	assets: Array<{ kind: AssetKind }>;
-	poster: { kind: AssetKind; status: string; storageKey: string } | null;
+	poster: {
+		kind: AssetKind;
+		status: string;
+		storageKey: string | null;
+		representations?: Array<{ role: string; objectKey: string }>;
+	} | null;
 }
 
 export interface ProjectDetailRecord extends SerializableProject {
@@ -105,10 +114,11 @@ export interface ActiveUploadCleanup {
 
 export interface DeletedAssetRecord {
 	id: number;
-	projectId: number;
+	projectId: number | null;
 	kind: AssetKind;
-	storageKey: string;
+	storageKey: string | null;
 	playbackStorageKey: string | null;
+	representations?: Array<{ role: string; bucket: string; objectKey: string }>;
 }
 
 export interface DeletionOutboxConfig {

@@ -14,7 +14,10 @@ export interface ProjectServiceDependencies {
 	abortMultipart(key: string, uploadId: string): Promise<void>;
 	wakeDeletionWorker(): void;
 	wakeMaintenance(): void;
-	logger: { error(context: Record<string, unknown>, message: string): void };
+	logger: {
+		error(context: Record<string, unknown>, message: string): void;
+		warn?(context: Record<string, unknown>, message: string): void;
+	};
 	recordPostCommitCleanupFailure?: () => void;
 }
 
@@ -49,7 +52,16 @@ export async function listProjects(
 		title: p.title,
 		slug: p.slug,
 		year: p.exhibition.year,
-		isIncomplete: effectiveIsIncomplete(p.isIncomplete, p.assets, p.poster),
+		isIncomplete: effectiveIsIncomplete(
+			p.isIncomplete,
+			p.assets,
+			p.poster ? {
+				...p.poster,
+				storageKey: p.poster.representations?.find((representation) => (
+					representation.role === 'ORIGINAL'
+				))?.objectKey ?? p.poster.storageKey ?? '',
+			} : null,
+		),
 		status: p.status,
 		createdByUserName: p.creator.name || undefined,
 		memberNames: p.members.map((m) => m.name),
@@ -84,6 +96,12 @@ export async function getProjectDetail(
 		const isMember = !!(await deps.repository.isMemberOfProject(project.id, userId));
 		if (!isMember) throw forbidden('Not your project');
 	}
+	if (project.currentWebglDeploymentId == null && project.webglEntryKey) {
+		deps.logger.warn?.(
+			{ projectId: project.id },
+			'Admin project response used legacy WebGL deployment fallback',
+		);
+	}
 
 	return deps.serializeProjectDetail(project);
 }
@@ -105,6 +123,12 @@ export async function updateProject(
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	});
+	if (updated.currentWebglDeploymentId == null && updated.webglEntryKey) {
+		deps.logger.warn?.(
+			{ projectId: updated.id },
+			'Admin project response used legacy WebGL deployment fallback',
+		);
+	}
 
 	return deps.serializeProjectDetail(updated);
 }
@@ -172,7 +196,10 @@ export async function bulkDeleteProjects(deps: ProjectServiceDependencies, ids: 
 	return {
 		deleted: result.count,
 		assetsRemoved: assets.length,
-		webglBuildsRemoved: projects.filter((project) => project.webglEntryKey).length,
+		webglBuildsRemoved: projects.filter((project) => {
+			const snapshot = project as typeof project & { currentWebglDeploymentId?: string | null };
+			return !!project.webglEntryKey || snapshot.currentWebglDeploymentId != null;
+		}).length,
 	};
 }
 

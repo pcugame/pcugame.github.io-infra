@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { MAX_NEW_PROJECT_TITLE_BYTES, utf8ByteLength } from './filename-policy.js';
 
 export const ProjectStatusSchema = z.enum(['PUBLISHED', 'ARCHIVED']);
-export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO']);
+export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO', 'WEBGL']);
 export const UserRoleSchema = z.enum(['USER', 'OPERATOR', 'ADMIN']);
 export const UploadKindSchema = z.enum(['GAME', 'WEBGL']);
 export const AdminProjectListSortSchema = z.enum(['createdAt', 'title', 'year', 'status']);

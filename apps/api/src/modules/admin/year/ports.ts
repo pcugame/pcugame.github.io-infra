@@ -14,6 +14,21 @@ export interface ExhibitionRecord {
 	posterHeight?: number | null;
 	posterCard480Height?: number | null;
 	posterDisplay960Height?: number | null;
+	posterAssetId?: number | null;
+	poster?: {
+		id: number;
+		status: string;
+		originalName: string;
+		sizeBytes: bigint;
+		width: number | null;
+		height: number | null;
+		representations: Array<{
+			role: string;
+			objectKey: string;
+			width: number | null;
+			height: number | null;
+		}>;
+	} | null;
 	_count: { projects: number };
 }
 
@@ -56,9 +71,14 @@ export interface ExhibitionRepository {
 		height?: number;
 		renditions?: SavedImageRendition[];
 		uploadIntentIds?: string[];
-	}, outbox: PosterDeletionOutboxConfig): Promise<{ updated: ExhibitionRecord; oldStorageKey: string | null } | null>;
+	}, outbox: PosterDeletionOutboxConfig): Promise<{
+		updated: ExhibitionRecord;
+		oldStorageKey: string | null;
+		cleanupQueued?: boolean;
+	} | null>;
 	clearExhibitionPoster(id: number, outbox: PosterDeletionOutboxConfig): Promise<{
 		updated: ExhibitionRecord;
 		oldStorageKey: string | null;
+		cleanupQueued?: boolean;
 	} | null>;
 }

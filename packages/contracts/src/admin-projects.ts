@@ -81,6 +81,11 @@ export type AdminProjectDetail = {
 	posterAssetId?: number;
 	poster?: ResponsiveImage;
 	webglUrl?: string;
+	webglDeployment?: {
+		id: string;
+		url: string;
+		createdAt: string;
+	};
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
 	assets: Array<({
 		id: number;
@@ -90,7 +95,7 @@ export type AdminProjectDetail = {
 		size: number;
 	} | {
 		id: number;
-		kind: Exclude<AssetKind, 'THUMBNAIL' | 'IMAGE' | 'POSTER'>;
+		kind: Extract<AssetKind, 'GAME' | 'VIDEO'>;
 		url: string;
 		originalDownloadUrl?: string;
 		playbackUrl?: string;

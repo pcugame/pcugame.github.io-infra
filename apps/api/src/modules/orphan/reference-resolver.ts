@@ -158,7 +158,11 @@ export function targetsOverlap(
 export async function collectObjectReferences(
 	client: Pick<
 		PrismaClient,
-		'asset' | 'exhibition' | 'project' | 'gameUploadSession' | 'uploadIntent'
+		| 'asset'
+		| 'exhibition'
+		| 'project'
+		| 'gameUploadSession'
+		| 'uploadIntent'
 	>,
 	buckets: ObjectReferenceBuckets,
 	logger: ObjectReferenceLogger,
@@ -173,6 +177,10 @@ export async function collectObjectReferences(
 				isPublic: true,
 				card480Height: true,
 				display960Height: true,
+				representations: {
+					where: { state: { not: 'DELETED' } },
+					select: { id: true, role: true, bucket: true, objectKey: true },
+				},
 			},
 		}),
 		client.exhibition.findMany({
@@ -205,13 +213,23 @@ export async function collectObjectReferences(
 	const references: ObjectReference[] = [];
 	const unsafeBuckets = new Set<string>();
 	for (const asset of assets) {
+		for (const representation of asset.representations ?? []) {
+			references.push({
+				bucket: representation.bucket,
+				targetKind: 'EXACT',
+				key: representation.objectKey,
+				source: `asset:${asset.id}:representation:${representation.role}:${representation.id}`,
+			});
+		}
 		const bucket = asset.isPublic ? buckets.publicBucket : buckets.protectedBucket;
-		references.push({
-			bucket,
-			targetKind: 'EXACT',
-			key: asset.storageKey,
-			source: `asset:${asset.id}:original`,
-		});
+		if (asset.storageKey) {
+			references.push({
+				bucket,
+				targetKind: 'EXACT',
+				key: asset.storageKey,
+				source: `asset:${asset.id}:legacy-original`,
+			});
+		}
 		if (asset.playbackStorageKey) {
 			references.push({
 				bucket,
@@ -221,6 +239,7 @@ export async function collectObjectReferences(
 			});
 		}
 		for (const definition of IMAGE_RENDITION_PROFILES) {
+			if (!asset.storageKey) continue;
 			if (asset[definition.heightField] == null) continue;
 			let renditionStorageKey: string;
 			try {

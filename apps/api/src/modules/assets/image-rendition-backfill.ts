@@ -71,16 +71,21 @@ interface AssetBackfillItem {
 	height: number | null;
 	card480Height: number | null;
 	display960Height: number | null;
+	mimeType?: string;
+	sizeBytes?: bigint;
 }
 
 interface ExhibitionBackfillItem {
 	owner: 'exhibition';
 	id: number;
+	assetId: number;
 	storageKey: string;
 	width: number | null;
 	height: number | null;
 	posterCard480Height: number | null;
 	posterDisplay960Height: number | null;
+	mimeType?: string;
+	sizeBytes?: bigint;
 }
 
 type BackfillItem = AssetBackfillItem | ExhibitionBackfillItem;
@@ -90,6 +95,8 @@ interface UploadedRendition {
 	storageKey: string;
 	width: number;
 	height: number;
+	mimeType: string;
+	sizeBytes: bigint;
 	intentId: string;
 }
 
@@ -233,6 +240,8 @@ async function loadItems(
 					height: true,
 					card480Height: true,
 					display960Height: true,
+					mimeType: true,
+					sizeBytes: true,
 				},
 			}),
 		options.owner === 'asset'
@@ -251,10 +260,14 @@ async function loadItems(
 					posterHeight: true,
 					posterCard480Height: true,
 					posterDisplay960Height: true,
+					posterAssetId: true,
+					posterMimeType: true,
+					posterSizeBytes: true,
 				},
 			}),
 	]);
-	const assetItems: AssetBackfillItem[] = assets.map((asset) => ({
+	const assetItems: AssetBackfillItem[] = assets.flatMap((asset) => (
+		asset.projectId === null || asset.storageKey === null ? [] : [{
 		owner: 'asset',
 		id: asset.id,
 		projectId: asset.projectId,
@@ -264,16 +277,24 @@ async function loadItems(
 		height: asset.height,
 		card480Height: asset.card480Height,
 		display960Height: asset.display960Height,
-	}));
-	const exhibitionItems: ExhibitionBackfillItem[] = exhibitions.map((exhibition) => ({
+		mimeType: asset.mimeType,
+		sizeBytes: asset.sizeBytes,
+	}]
+	));
+	const exhibitionItems: ExhibitionBackfillItem[] = exhibitions.flatMap((exhibition) => (
+		exhibition.posterAssetId === null || exhibition.posterStorageKey === null ? [] : [{
 		owner: 'exhibition',
 		id: exhibition.id,
-		storageKey: exhibition.posterStorageKey!,
+		assetId: exhibition.posterAssetId,
+		storageKey: exhibition.posterStorageKey,
 		width: exhibition.posterWidth,
 		height: exhibition.posterHeight,
 		posterCard480Height: exhibition.posterCard480Height,
 		posterDisplay960Height: exhibition.posterDisplay960Height,
-	}));
+		mimeType: exhibition.posterMimeType,
+		sizeBytes: exhibition.posterSizeBytes,
+	}]
+	));
 	if (options.owner === 'asset') return assetItems;
 	if (options.owner === 'exhibition') return exhibitionItems;
 	const interleaved: BackfillItem[] = [];
@@ -324,9 +345,80 @@ async function uploadRenditions(
 			storageKey,
 			width: rendition.width,
 			height: rendition.height,
+			mimeType: rendition.mimeType,
+			sizeBytes: BigInt(rendition.sizeBytes),
 			intentId,
 		};
 		uploaded.push(record);
+	}
+}
+
+async function upsertCanonicalRenditionState(
+	tx: Prisma.TransactionClient,
+	input: {
+		assetId: number;
+		storageKey: string;
+		publicBucket: string;
+		mimeType?: string;
+		sizeBytes?: bigint;
+		dimensions: { width: number; height: number };
+		uploaded: readonly UploadedRendition[];
+	},
+): Promise<void> {
+	await tx.assetRepresentation.upsert({
+		where: {
+			asset_representation_asset_role: { assetId: input.assetId, role: 'ORIGINAL' },
+		},
+		create: {
+			assetId: input.assetId,
+			role: 'ORIGINAL',
+			bucket: input.publicBucket,
+			objectKey: input.storageKey,
+			mimeType: input.mimeType ?? '',
+			sizeBytes: input.sizeBytes ?? 0n,
+			state: 'READY',
+			width: input.dimensions.width,
+			height: input.dimensions.height,
+		},
+		update: {
+			bucket: input.publicBucket,
+			objectKey: input.storageKey,
+			state: 'READY',
+			error: null,
+			width: input.dimensions.width,
+			height: input.dimensions.height,
+		},
+	});
+	for (const rendition of input.uploaded) {
+		await tx.assetRepresentation.upsert({
+			where: {
+				asset_representation_asset_role: {
+					assetId: input.assetId,
+					role: rendition.profile,
+				},
+			},
+			create: {
+				assetId: input.assetId,
+				role: rendition.profile,
+				bucket: input.publicBucket,
+				objectKey: rendition.storageKey,
+				mimeType: rendition.mimeType,
+				sizeBytes: rendition.sizeBytes,
+				state: 'READY',
+				width: rendition.width,
+				height: rendition.height,
+			},
+			update: {
+				bucket: input.publicBucket,
+				objectKey: rendition.storageKey,
+				mimeType: rendition.mimeType,
+				sizeBytes: rendition.sizeBytes,
+				state: 'READY',
+				error: null,
+				width: rendition.width,
+				height: rendition.height,
+			},
+		});
 	}
 }
 
@@ -385,6 +477,15 @@ async function commitAssetItem(
 			},
 			select: { id: true },
 		});
+		await upsertCanonicalRenditionState(tx, {
+			assetId: item.id,
+			storageKey: item.storageKey,
+			publicBucket: deps.publicBucket,
+			mimeType: item.mimeType,
+			sizeBytes: item.sizeBytes,
+			dimensions,
+			uploaded,
+		});
 		await commitUploadIntents(tx, uploaded.map(({ intentId }) => intentId));
 	}, ASSET_MUTATION_TRANSACTION_POLICY);
 }
@@ -398,12 +499,15 @@ async function commitExhibitionItem(
 	await withExhibitionMutationTransaction(deps.prisma, async (tx) => {
 		const exhibitions = await tx.$queryRaw<Array<{
 			posterStorageKey: string | null;
+			posterAssetId: number | null;
 		}>>(Prisma.sql`
-			SELECT "poster_storage_key" AS "posterStorageKey"
+			SELECT
+				"poster_storage_key" AS "posterStorageKey",
+				"poster_asset_id" AS "posterAssetId"
 			FROM "exhibitions" WHERE "id" = ${item.id} FOR UPDATE
 		`);
 		const current = exhibitions[0];
-		if (current?.posterStorageKey !== item.storageKey) {
+		if (current?.posterStorageKey !== item.storageKey || current.posterAssetId !== item.assetId) {
 			throw new SourceChangedError(item.owner, item.id);
 		}
 		await tx.exhibition.update({
@@ -414,6 +518,15 @@ async function commitExhibitionItem(
 				...exhibitionReadinessPatch(uploaded),
 			},
 			select: { id: true },
+		});
+		await upsertCanonicalRenditionState(tx, {
+			assetId: item.assetId,
+			storageKey: item.storageKey,
+			publicBucket: deps.publicBucket,
+			mimeType: item.mimeType,
+			sizeBytes: item.sizeBytes,
+			dimensions,
+			uploaded,
 		});
 		await commitUploadIntents(tx, uploaded.map(({ intentId }) => intentId));
 	}, EXHIBITION_MUTATION_TRANSACTION_POLICY);

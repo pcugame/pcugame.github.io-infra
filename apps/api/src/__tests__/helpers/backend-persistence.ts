@@ -27,7 +27,7 @@ export function createScriptedBackendPersistence(
 			findExhibitionsByYear: async () => [],
 			findPublishedProjectsInExhibitions: async () => [],
 			findExhibitionById: async () => null,
-			resolvePublicImage: async () => null,
+			resolvePublicImageBridge: async () => null,
 			findPublishedProjectById: async () => null,
 			findPublishedProjectBySlug: async () => null,
 			findPublicWebglProject: async () => null,
@@ -72,7 +72,9 @@ export function createScriptedBackendPersistence(
 			clearExhibitionPoster: async () => null,
 		},
 		assetsRepository: {
-			findAssetByStorageKey: async () => null,
+			findAssetByIdForDownload: async () => null,
+			findAssetsByLegacyStorageKey: async () => [],
+			recordMigrationObservations: async () => undefined,
 			upsertBannedIp: async () => undefined,
 			findAssetByIdWithProject: async () => null,
 			claimAssetForDeletion: async () => null,
@@ -89,7 +91,8 @@ export function createScriptedBackendPersistence(
 			runTransaction: async () => unscripted('import.runTransaction'),
 		},
 		exportRepository: {
-			findProjectsWithAssets: async () => [],
+			createJob: async ({ id }) => ({ id }),
+			latestJob: async () => null,
 		},
 	};
 

@@ -12,7 +12,9 @@ import {
 import { validateZipArchiveObject } from '../../assets/upload/zip-validation.js';
 import type { ValidatedFile } from '../../assets/upload/upload-types.js';
 
-const KIND_SIZE_LIMITS: Record<AssetKind, number> = {
+type InlineAssetKind = Exclude<AssetKind, 'WEBGL'>;
+
+const KIND_SIZE_LIMITS: Record<InlineAssetKind, number> = {
 	GAME: SIZE_LIMITS.game,
 	POSTER: SIZE_LIMITS.poster,
 	THUMBNAIL: SIZE_LIMITS.poster,
@@ -25,6 +27,9 @@ export async function validateProjectUploadFile(
 	filePath: string,
 	kind: AssetKind,
 ): Promise<ValidatedFile> {
+	if (kind === 'WEBGL') {
+		throw badRequest('WebGL uses the direct multipart upload session');
+	}
 	const stat = await fileSystem.stat(filePath);
 	const sizeBytes = stat.size;
 	const fileType = detectFileType(await fileSystem.readRange(filePath, 0, 15));

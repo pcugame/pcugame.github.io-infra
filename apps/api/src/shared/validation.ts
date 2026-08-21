@@ -125,6 +125,10 @@ export const GameUploadCreateSessionBody = GameUploadCreateSessionSchema.extend(
 	totalBytes: CanonicalPositiveIntegerInput,
 });
 
+export const AssetDownloadQuery = z.object({
+	variant: z.enum(['original', 'playback']).optional(),
+}).strict();
+
 // ── Helper ───────────────────────────────────────────────────
 
 import { AppError } from './errors.js';

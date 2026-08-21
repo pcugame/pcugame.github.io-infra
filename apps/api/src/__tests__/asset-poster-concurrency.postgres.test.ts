@@ -267,9 +267,13 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 		expect(readyGames.length).toBeLessThanOrEqual(1);
 		const readyAssets = await control.asset.findMany({
 			where: { projectId, status: 'READY' },
+			include: { representations: { where: { state: 'READY' } } },
 		});
 		for (const asset of readyAssets) {
-			expect(objects.has(asset.storageKey), `missing READY object ${asset.storageKey}`).toBe(true);
+			const originalKey = asset.representations.find(({ role }) => role === 'ORIGINAL')?.objectKey
+				?? asset.storageKey;
+			expect(originalKey).not.toBeNull();
+			expect(objects.has(originalKey!), `missing READY object ${originalKey}`).toBe(true);
 			if (asset.playbackStorageKey) {
 				expect(objects.has(asset.playbackStorageKey)).toBe(true);
 			}

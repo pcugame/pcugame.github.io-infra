@@ -140,6 +140,7 @@ export async function addAssetToProject(
 		if (isReplaceable) {
 			const bucket = deps.bucketForKind(savedFile.kind);
 			const result = await deps.repository.replaceOrCreateReplaceableAsset(projectId, savedFile.kind, {
+				bucket,
 				storageKey: savedFile.storageKey,
 				playbackStorageKey: savedFile.playbackStorageKey ?? null,
 				originalName: savedFile.originalName,
@@ -170,7 +171,9 @@ export async function addAssetToProject(
 			oldPlaybackStorageKey = result.oldPlaybackStorageKey;
 			uploadPersisted = true;
 		} else {
+			const bucket = deps.bucketForKind(savedFile.kind);
 			const asset = await deps.repository.createAsset({
+				bucket,
 				projectId,
 				kind: savedFile.kind,
 				storageKey: savedFile.storageKey,

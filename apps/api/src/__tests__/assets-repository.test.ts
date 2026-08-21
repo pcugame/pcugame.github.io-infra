@@ -21,6 +21,10 @@ describe('assets repository', () => {
 					status: 'READY',
 					storageKey: 'poster/current.png',
 					playbackStorageKey: null,
+				}])
+				.mockResolvedValueOnce([{
+					id: 'rep-original', role: 'ORIGINAL', bucket: 'public-v2',
+					objectKey: 'public/assets/42/original/g1.webp', updatedAt: new Date(1), checksum: 'sha256',
 				}]),
 		};
 		const repository = createAssetsRepository({
@@ -31,6 +35,9 @@ describe('assets repository', () => {
 			id: 42,
 			previousStatus: 'READY',
 			storageKey: 'poster/current.png',
+			representations: [expect.objectContaining({
+				id: 'rep-original', bucket: 'public-v2', objectKey: 'public/assets/42/original/g1.webp',
+			})],
 		});
 		expect(updateAsset).toHaveBeenCalledWith({
 			where: { id: 42 },
@@ -57,7 +64,8 @@ describe('assets repository', () => {
 					status: 'DELETING',
 					storageKey: 'poster/current.png',
 					playbackStorageKey: null,
-				}]),
+				}])
+				.mockResolvedValueOnce([]),
 			asset: { updateMany },
 			gameUploadSession: { updateMany: sessionUpdateMany },
 			orphanObject: {
@@ -75,6 +83,7 @@ describe('assets repository', () => {
 			previousStatus: 'READY' as const,
 			storageKey: 'poster/current.png',
 			playbackStorageKey: null,
+			representations: [],
 			alreadyDeleted: false,
 		};
 
@@ -116,5 +125,73 @@ describe('assets repository', () => {
 				reason: 'asset-delete',
 			}),
 		}));
+	});
+
+	it('queues canonical public/protected representations and deduplicates a legacy locator in the terminal transaction', async () => {
+		const updatedAt = new Date(10);
+		const orphanUpsert = vi.fn().mockResolvedValue({});
+		const tx = {
+			$queryRaw: vi.fn()
+				.mockResolvedValueOnce([{ id: 7 }])
+				.mockResolvedValueOnce([{
+					id: 42, projectId: 7, kind: 'GAME', status: 'DELETING',
+					storageKey: 'same.zip', playbackStorageKey: null,
+				}])
+				.mockResolvedValueOnce([
+					{ id: 'original', role: 'ORIGINAL', bucket: 'protected', objectKey: 'same.zip', updatedAt, checksum: 'one' },
+					{ id: 'preview', role: 'CARD_480', bucket: 'public', objectKey: 'public/assets/42/card/g1.webp', updatedAt, checksum: 'two' },
+				]),
+			asset: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+			gameUploadSession: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+			orphanObject: { upsert: orphanUpsert },
+		};
+		const repository = createAssetsRepository({
+			$transaction: vi.fn(async (operation) => operation(tx)),
+		} as unknown as PrismaClient);
+		await repository.completeAssetDeletion({
+			id: 42, projectId: 7, kind: 'GAME', previousStatus: 'READY',
+			storageKey: 'same.zip', playbackStorageKey: null, alreadyDeleted: false,
+			representations: [
+				{ id: 'original', role: 'ORIGINAL', bucket: 'protected', objectKey: 'same.zip', updatedAt, checksum: 'one' },
+				{ id: 'preview', role: 'CARD_480', bucket: 'public', objectKey: 'public/assets/42/card/g1.webp', updatedAt, checksum: 'two' },
+			],
+		}, { bucket: 'protected', reason: 'asset-delete', playbackReason: 'asset-delete-playback' });
+
+		expect(orphanUpsert).toHaveBeenCalledTimes(2);
+		expect(orphanUpsert).toHaveBeenCalledWith(expect.objectContaining({
+			create: expect.objectContaining({ bucket: 'public', storageKey: 'public/assets/42/card/g1.webp' }),
+		}));
+	});
+
+	it('rejects a representation CAS race before terminal status or outbox writes', async () => {
+		const claimedAt = new Date(10);
+		const tx = {
+			$queryRaw: vi.fn()
+				.mockResolvedValueOnce([{ id: 7 }])
+				.mockResolvedValueOnce([{
+					id: 42, projectId: 7, kind: 'IMAGE', status: 'DELETING', storageKey: null, playbackStorageKey: null,
+				}])
+				.mockResolvedValueOnce([{
+					id: 'original', role: 'ORIGINAL', bucket: 'public', objectKey: 'public/assets/42/g2.webp',
+					updatedAt: new Date(11), checksum: 'new',
+				}]),
+			asset: { updateMany: vi.fn() },
+			gameUploadSession: { updateMany: vi.fn() },
+			orphanObject: { upsert: vi.fn() },
+		};
+		const repository = createAssetsRepository({
+			$transaction: vi.fn(async (operation) => operation(tx)),
+		} as unknown as PrismaClient);
+		await expect(repository.completeAssetDeletion({
+			id: 42, projectId: 7, kind: 'IMAGE', previousStatus: 'READY', storageKey: null,
+			playbackStorageKey: null, alreadyDeleted: false,
+			representations: [{
+				id: 'original', role: 'ORIGINAL', bucket: 'public', objectKey: 'public/assets/42/g1.webp',
+				updatedAt: claimedAt, checksum: 'old',
+			}],
+		}, { bucket: 'public', reason: 'asset-delete', playbackReason: 'asset-delete-playback' }))
+			.rejects.toMatchObject({ statusCode: 409 });
+		expect(tx.asset.updateMany).not.toHaveBeenCalled();
+		expect(tx.orphanObject.upsert).not.toHaveBeenCalled();
 	});
 });

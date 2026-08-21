@@ -4,7 +4,9 @@ import { deleteAsset } from '../modules/assets/service.js';
 function assetDeletionHarness() {
 	const repository = {
 		findAllBannedIps: vi.fn(),
-		findAssetByStorageKey: vi.fn(),
+		findAssetByIdForDownload: vi.fn(),
+		findAssetsByLegacyStorageKey: vi.fn(),
+		recordMigrationObservations: vi.fn(),
 		upsertBannedIp: vi.fn(),
 		findAssetByIdWithProject: vi.fn().mockResolvedValue({
 			id: 41,
@@ -18,6 +20,7 @@ function assetDeletionHarness() {
 			previousStatus: 'READY' as const,
 			storageKey: 'games/current.zip',
 			playbackStorageKey: 'games/current-playback.mp4',
+			representations: [],
 			alreadyDeleted: false,
 		}),
 		completeAssetDeletion: vi.fn().mockResolvedValue(undefined),
@@ -45,6 +48,7 @@ describe('durable object deletion callers', () => {
 		repository.claimAssetForDeletion.mockResolvedValueOnce({
 			id: 41, projectId: 7, kind: 'GAME', previousStatus: 'READY',
 			storageKey: 'games/current.zip', playbackStorageKey: null, alreadyDeleted: false,
+			representations: [],
 		});
 
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))

@@ -30,6 +30,7 @@ describe('shared enum schemas', () => {
 
 	it('keeps asset kinds and roles constrained', () => {
 		expect(AssetKindSchema.safeParse('VIDEO').success).toBe(true);
+		expect(AssetKindSchema.safeParse('WEBGL').success).toBe(true);
 		expect(AssetKindSchema.safeParse('AUDIO').success).toBe(false);
 		expect(UserRoleSchema.safeParse('ADMIN').success).toBe(true);
 		expect(UserRoleSchema.safeParse('ROOT').success).toBe(false);

@@ -29,6 +29,7 @@ import {
 	ApiErrorResponseSchema,
 	BannedIpListResponseSchema,
 	ExportResultSchema,
+	ExportStartResponseSchema,
 	ExportStatusResponseSchema,
 	GameUploadChunkResponseSchema,
 	GameUploadCompleteResponseSchema,
@@ -210,6 +211,16 @@ describe('response runtime schemas', () => {
 				failed: 0,
 			},
 		}).progress?.currentProjectFiles[0]?.assetId).toBe(-7);
+		expect(ExportStartResponseSchema.parse({ jobId: 'export-job-1', state: 'QUEUED' }))
+			.toEqual({ jobId: 'export-job-1', state: 'QUEUED' });
+		expect(ExportStatusResponseSchema.parse({
+			running: false,
+			progress: null,
+			jobId: 'export-job-1',
+			state: 'READY',
+			result: { projects: 1, totalFiles: 2, downloaded: 2, skipped: 0, failed: 0, aborted: false, paths: [] },
+			error: null,
+		}).state).toBe('READY');
 	});
 
 	it('validates the success/error envelopes and rejects non-JSON error details', () => {

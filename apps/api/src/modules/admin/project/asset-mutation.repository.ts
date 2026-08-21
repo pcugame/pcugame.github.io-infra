@@ -15,17 +15,18 @@ import { queueDurableDeletions } from '../../orphan/outbox.js';
 import { commitUploadIntents } from '../../upload-intent/repository.js';
 import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
 import {
-	assetImageRenditionReadiness,
 	imageRenditionDeletionTargets,
 } from '../../assets/image-rendition-lifecycle.js';
+import { createCanonicalAsset } from '../../assets/representation-write.js';
 import type { AssetReplacementOutboxConfig, AssetWriteData } from './ports.js';
 
 type TxClient = Prisma.TransactionClient;
 
 type LockedReplaceableAsset = {
 	id: number;
-	storageKey: string;
+	storageKey: string | null;
 	playbackStorageKey: string | null;
+	representations: Array<{ role: string; bucket: string; objectKey: string }>;
 };
 
 /**
@@ -51,7 +52,7 @@ export function createProjectAssetMutationRepository(
 		projectId: number,
 		kind: AssetKind,
 	): Promise<LockedReplaceableAsset | null> {
-		const rows = await tx.$queryRaw<LockedReplaceableAsset[]>(PrismaRuntime.sql`
+		const rows = await tx.$queryRaw<Array<Omit<LockedReplaceableAsset, 'representations'>>>(PrismaRuntime.sql`
 			SELECT
 				"id",
 				"storage_key" AS "storageKey",
@@ -64,7 +65,15 @@ export function createProjectAssetMutationRepository(
 			LIMIT 1
 			FOR UPDATE
 		`);
-		return rows[0] ?? null;
+		const asset = rows[0];
+		if (!asset) return null;
+		return {
+			...asset,
+			representations: await tx.assetRepresentation.findMany({
+				where: { assetId: asset.id, state: { not: 'DELETED' } },
+				select: { role: true, bucket: true, objectKey: true },
+			}),
+		};
 	}
 
 	return {
@@ -84,7 +93,12 @@ export function createProjectAssetMutationRepository(
 
 				if (existing) {
 					await queueDurableDeletions(tx, [
-						...(existing.storageKey !== data.storageKey
+						...existing.representations.map((representation) => ({
+							bucket: representation.bucket,
+							storageKey: representation.objectKey,
+							reason: `${outbox.reason}-representation-${representation.role.toLowerCase()}`,
+						})),
+						...(existing.storageKey && existing.storageKey !== data.storageKey
 							? [{
 									bucket: outbox.bucket,
 									storageKey: existing.storageKey,
@@ -100,7 +114,7 @@ export function createProjectAssetMutationRepository(
 									reason: outbox.playbackReason,
 								}]
 							: []),
-						...(kind === 'IMAGE' || kind === 'POSTER'
+						...(existing.storageKey && (kind === 'IMAGE' || kind === 'POSTER')
 							? imageRenditionDeletionTargets(
 								outbox.bucket,
 								existing.storageKey,
@@ -112,7 +126,7 @@ export function createProjectAssetMutationRepository(
 						where: { id: projectId, posterAssetId: existing.id },
 						data: { posterAssetId: null },
 					});
-					if (existing.storageKey !== data.storageKey) {
+					if (existing.storageKey && existing.storageKey !== data.storageKey) {
 						await tx.gameUploadSession.updateMany({
 							where: {
 								projectId,
@@ -129,25 +143,11 @@ export function createProjectAssetMutationRepository(
 					});
 				}
 
-				const created = await tx.asset.create({
-					data: {
-						projectId,
-						kind,
-						storageKey: data.storageKey,
-						playbackStorageKey: data.playbackStorageKey ?? null,
-						originalName: data.originalName,
-						mimeType: data.mimeType,
-						playbackMimeType: data.playbackMimeType ?? '',
-						sizeBytes: data.sizeBytes,
-						playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
-						playbackStatus: data.playbackStatus ?? 'PENDING',
-						playbackError: data.playbackError ?? '',
-						isPublic: data.isPublic,
-						width: data.width,
-						height: data.height,
-						...assetImageRenditionReadiness(data.renditions ?? []),
-					},
-					select: { id: true },
+				const created = await createCanonicalAsset(tx, {
+					projectId,
+					kind,
+					...data,
+					bucket: data.bucket ?? outbox.bucket,
 				});
 				await commitUploadIntents(tx, data.uploadIntentIds ?? []);
 				if (data.idempotency) {

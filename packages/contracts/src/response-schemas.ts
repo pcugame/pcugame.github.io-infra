@@ -290,6 +290,11 @@ export const AdminProjectDetailSchema = z.object({
 	posterAssetId: PositiveIntegerSchema.optional(),
 	poster: ResponsiveImageSchema.optional(),
 	webglUrl: UrlSchema.optional(),
+	webglDeployment: z.object({
+		id: z.string().uuid(),
+		url: UrlSchema,
+		createdAt: IsoDateTimeSchema,
+	}).strict().optional(),
 	members: z.array(z.object({
 		id: PositiveIntegerSchema,
 		name: z.string(),
@@ -416,6 +421,10 @@ export const ExportProgressSchema = z.object({
 export const ExportStatusResponseSchema = z.object({
 	running: z.boolean(),
 	progress: ExportProgressSchema.nullable(),
+	jobId: z.string().min(1).optional(),
+	state: z.enum(['QUEUED', 'RUNNING', 'READY', 'FAILED', 'CANCELLED']).optional(),
+	result: z.lazy(() => ExportResultSchema).nullable().optional(),
+	error: z.string().min(1).nullable().optional(),
 }).strict();
 
 export const ExportResultSchema = z.object({
@@ -426,6 +435,11 @@ export const ExportResultSchema = z.object({
 	failed: NonNegativeIntegerSchema,
 	aborted: z.boolean(),
 	paths: z.array(z.string()),
+}).strict();
+
+export const ExportStartResponseSchema = z.object({
+	jobId: z.string().min(1),
+	state: z.literal('QUEUED'),
 }).strict();
 
 export const GameUploadSessionSchema = z.object({

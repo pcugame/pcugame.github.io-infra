@@ -8,9 +8,9 @@ import { queueDurableDeletions } from '../../orphan/outbox.js';
 import { commitUploadIntents } from '../../upload-intent/repository.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
 import {
-	exhibitionImageRenditionReadiness,
 	imageRenditionDeletionTargets,
 } from '../../assets/image-rendition-lifecycle.js';
+import { createCanonicalAsset } from '../../assets/representation-write.js';
 import {
 	projectActiveUploadDeletionTargets,
 	projectAssetDeletionTargets,
@@ -77,17 +77,27 @@ export async function withExhibitionMutationTransaction<T>(
 async function lockExhibition(
 	tx: TransactionClient,
 	id: number,
-): Promise<{ id: number; posterStorageKey: string | null } | null> {
-	const rows = await tx.$queryRaw<Array<{ id: number; posterStorageKey: string | null }>>`
+): Promise<{ id: number; posterStorageKey: string | null; posterAssetId: number | null } | null> {
+	const rows = await tx.$queryRaw<Array<{
+		id: number;
+		posterStorageKey: string | null;
+		posterAssetId: number | null;
+	}>>`
 		SELECT
 			"id",
-			"poster_storage_key" AS "posterStorageKey"
+			"poster_storage_key" AS "posterStorageKey",
+			"poster_asset_id" AS "posterAssetId"
 		FROM "exhibitions"
 		WHERE "id" = ${id}
 		FOR UPDATE
 	`;
 	return rows[0] ?? null;
 }
+
+const exhibitionPosterInclude = {
+	_count: { select: { projects: true } },
+	poster: { include: { representations: { where: { state: 'READY' as const } } } },
+} as const;
 
 /**
  * Context-owned repository. Poster pointer mutations lock the exhibition row
@@ -102,9 +112,7 @@ export function createExhibitionRepository(
 	function findAllExhibitions() {
 		return prisma.exhibition.findMany({
 			orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
-			include: {
-				_count: { select: { projects: true } },
-			},
+			include: exhibitionPosterInclude,
 		});
 	}
 
@@ -124,9 +132,7 @@ export function createExhibitionRepository(
 	function findExhibitionByIdWithCount(id: number) {
 		return prisma.exhibition.findUnique({
 			where: { id },
-			include: {
-				_count: { select: { projects: true } },
-			},
+			include: exhibitionPosterInclude,
 		});
 	}
 
@@ -163,7 +169,10 @@ export function createExhibitionRepository(
 						s3UploadId: true,
 					},
 				}),
-				tx.asset.findMany({ where: { project: { exhibitionId: id } } }),
+				tx.asset.findMany({
+					where: { OR: [{ project: { exhibitionId: id } }, { exhibitionId: id }] },
+					include: { representations: true },
+				}),
 			]);
 			const targets = [
 				...(existing.posterStorageKey ? [{
@@ -211,9 +220,7 @@ export function createExhibitionRepository(
 		return prisma.exhibition.update({
 			where: { id },
 			data,
-			include: {
-				_count: { select: { projects: true } },
-			},
+			include: exhibitionPosterInclude,
 		});
 	}
 
@@ -235,6 +242,18 @@ export function createExhibitionRepository(
 		return withExhibitionMutationTransaction(prisma, async (tx) => {
 			const existing = await lockExhibition(tx, id);
 			if (!existing) return null;
+			const previousPoster = existing.posterAssetId === null ? null : await tx.asset.findUnique({
+				where: { id: existing.posterAssetId },
+				include: { representations: true },
+			});
+			if (previousPoster) {
+				await queueDurableDeletions(tx, projectAssetDeletionTargets([previousPoster], {
+					publicBucket: outbox.bucket,
+					protectedBucket: outbox.bucket,
+					reason: outbox.reason,
+				}));
+				await tx.asset.update({ where: { id: previousPoster.id }, data: { status: 'DELETED' } });
+			}
 			if (existing.posterStorageKey && existing.posterStorageKey !== data.storageKey) {
 				await queueDurableDeletions(tx, [
 					{
@@ -250,31 +269,46 @@ export function createExhibitionRepository(
 				]);
 			}
 
+			const poster = await createCanonicalAsset(tx, {
+				exhibitionId: id,
+				kind: 'POSTER',
+				bucket: outbox.bucket,
+				storageKey: data.storageKey,
+				originalName: data.originalName,
+				mimeType: data.mimeType,
+				sizeBytes: data.sizeBytes,
+				isPublic: true,
+				width: data.width,
+				height: data.height,
+				renditions: data.renditions,
+			});
+
 			await tx.exhibition.update({
 				where: { id },
 				data: {
-					posterStorageKey: data.storageKey,
-					posterOriginalName: data.originalName,
-					posterMimeType: data.mimeType,
-					posterSizeBytes: data.sizeBytes,
-					posterWidth: data.width,
-					posterHeight: data.height,
-					...exhibitionImageRenditionReadiness(data.renditions ?? []),
+					posterAssetId: poster.id,
+					posterStorageKey: null,
+					posterOriginalName: '',
+					posterMimeType: '',
+					posterSizeBytes: 0,
+					posterWidth: null,
+					posterHeight: null,
+					posterCard480Height: null,
+					posterDisplay960Height: null,
 				},
-				include: {
-					_count: { select: { projects: true } },
-				},
+				include: exhibitionPosterInclude,
 			});
 			await commitUploadIntents(tx, data.uploadIntentIds ?? []);
 
 			return {
 				updated: await tx.exhibition.findUniqueOrThrow({
 					where: { id },
-					include: {
-						_count: { select: { projects: true } },
-					},
+					include: exhibitionPosterInclude,
 				}),
 				oldStorageKey: existing.posterStorageKey,
+				cleanupQueued: previousPoster !== null || (
+					existing.posterStorageKey !== null && existing.posterStorageKey !== data.storageKey
+				),
 			};
 		}, policy);
 	}
@@ -284,6 +318,18 @@ export function createExhibitionRepository(
 		return withExhibitionMutationTransaction(prisma, async (tx) => {
 			const existing = await lockExhibition(tx, id);
 			if (!existing) return null;
+			const previousPoster = existing.posterAssetId === null ? null : await tx.asset.findUnique({
+				where: { id: existing.posterAssetId },
+				include: { representations: true },
+			});
+			if (previousPoster) {
+				await queueDurableDeletions(tx, projectAssetDeletionTargets([previousPoster], {
+					publicBucket: outbox.bucket,
+					protectedBucket: outbox.bucket,
+					reason: outbox.reason,
+				}));
+				await tx.asset.update({ where: { id: previousPoster.id }, data: { status: 'DELETED' } });
+			}
 			if (existing.posterStorageKey) {
 				await queueDurableDeletions(tx, [
 					{
@@ -302,6 +348,7 @@ export function createExhibitionRepository(
 			const updated = await tx.exhibition.update({
 				where: { id },
 				data: {
+					posterAssetId: null,
 					posterStorageKey: null,
 					posterOriginalName: '',
 					posterMimeType: '',
@@ -311,12 +358,14 @@ export function createExhibitionRepository(
 					posterCard480Height: null,
 					posterDisplay960Height: null,
 				},
-				include: {
-					_count: { select: { projects: true } },
-				},
+				include: exhibitionPosterInclude,
 			});
 
-			return { updated, oldStorageKey: existing.posterStorageKey };
+			return {
+				updated,
+				oldStorageKey: existing.posterStorageKey,
+				cleanupQueued: previousPoster !== null || existing.posterStorageKey !== null,
+			};
 		}, policy);
 	}
 

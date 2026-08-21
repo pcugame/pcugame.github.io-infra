@@ -18,6 +18,7 @@ function fakeExhibition(overrides: Partial<Exhibition> = {}): Exhibition {
 		posterHeight: null,
 		posterCard480Height: null,
 		posterDisplay960Height: null,
+		posterAssetId: null,
 		createdAt: new Date(),
 		updatedAt: new Date(),
 		...overrides,

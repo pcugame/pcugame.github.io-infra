@@ -120,7 +120,9 @@ function portHarness(initialBans: string[] = []) {
 	return {
 		calls,
 		assetsRepository: {
-			findAssetByStorageKey: calls.assetFindFirst,
+			findAssetByIdForDownload: vi.fn(async () => null),
+			findAssetsByLegacyStorageKey: calls.assetFindFirst,
+			recordMigrationObservations: vi.fn(async () => undefined),
 			upsertBannedIp: calls.bannedUpsert,
 			findAssetByIdWithProject: vi.fn(async () => null),
 			claimAssetForDeletion: vi.fn(async () => null),
@@ -139,7 +141,14 @@ function portHarness(initialBans: string[] = []) {
 
 function protectedAsset() {
 	return {
+		id: 1,
+		projectId: 7,
 		kind: 'GAME',
+		status: 'READY',
+		storageKey: 'game.zip',
+		playbackStorageKey: null,
+		playbackStatus: 'PENDING',
+		representations: [],
 		project: {
 			creatorId: 1,
 			title: 'Context Game',
@@ -233,7 +242,7 @@ describe('assets/banned-IP production vertical slice', () => {
 
 	it('fails closed before warmup and keeps a failed warmup fatal and idempotent', async () => {
 		const harness = graphHarness();
-		harness.calls.assetFindFirst.mockResolvedValue(protectedAsset());
+		harness.calls.assetFindFirst.mockResolvedValue([protectedAsset()]);
 		const app = await routeApp(harness.graph.assetsController, '/api');
 		apps.push(app);
 
@@ -255,9 +264,9 @@ describe('assets/banned-IP production vertical slice', () => {
 		expect(harness.limiter._bannedSize()).toBe(0);
 	});
 
-	it('blocks recovered DB bans and preserves protected redirect, Range, and rate-limit wiring', async () => {
+	it('blocks recovered DB bans, preserves protected redirect, and treats ordinary principal excess as temporary', async () => {
 		const recovered = graphHarness(['203.0.113.10'], 1);
-		recovered.calls.assetFindFirst.mockResolvedValue(protectedAsset());
+		recovered.calls.assetFindFirst.mockResolvedValue([protectedAsset()]);
 		await recovered.graph.warmup.start();
 		const app = await routeApp(recovered.graph.assetsController, '/api');
 		apps.push(app);
@@ -289,11 +298,8 @@ describe('assets/banned-IP production vertical slice', () => {
 			url: '/api/assets/protected/game.zip',
 			remoteAddress: '203.0.113.20',
 		});
-		expect(exceeded.statusCode).toBe(403);
-		expect(recovered.calls.bannedUpsert).toHaveBeenCalledWith(
-			'203.0.113.20',
-			expect.any(String),
-		);
+		expect(exceeded.statusCode).toBe(429);
+		expect(recovered.calls.bannedUpsert).not.toHaveBeenCalled();
 	});
 
 	it('keeps context A/B cache and buckets independent, scopes admin mutation, and closes only A', async () => {
@@ -336,7 +342,7 @@ describe('assets/banned-IP production vertical slice', () => {
 		expect(a.context.protectedDownloads.isBanned('203.0.113.30')).toBe(true);
 		expect(b.context.protectedDownloads.isBanned('203.0.113.30')).toBe(true);
 
-		expect(a.context.protectedDownloads.check('203.0.113.40')).toBe('ok');
+		expect(a.context.protectedDownloads.check('203.0.113.40')).toEqual({ status: 'ok' });
 		expect(a.context.protectedDownloads._bucketSize()).toBe(1);
 		expect(b.context.protectedDownloads._bucketSize()).toBe(0);
 

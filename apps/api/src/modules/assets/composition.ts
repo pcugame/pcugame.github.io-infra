@@ -23,7 +23,7 @@ export interface AssetsBannedProductionGraph {
 }
 
 export interface AssetsBannedProductionDependencies {
-	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED'>;
+	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED' | 'S3_PRESIGN_TTL_SEC'>;
 	assetsRepository: AssetsServiceDependencies['repository'] & {
 		findAllBannedIps(): Promise<{ ip: string }[]>;
 	};
@@ -48,7 +48,9 @@ export function createAssetsBannedProductionGraph(
 
 	const assetsService = createAssetsService({
 		protectedBucket: deps.config.S3_BUCKET_PROTECTED,
+		presignTtlSec: deps.config.S3_PRESIGN_TTL_SEC,
 		presign: (bucket, key, options) => deps.storage.presign(bucket, key, options),
+		clock: deps.clock,
 		bucketForKind: (kind: AssetKind) => (
 			kind === 'GAME' || kind === 'VIDEO'
 				? deps.config.S3_BUCKET_PROTECTED

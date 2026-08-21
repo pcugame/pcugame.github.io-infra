@@ -100,7 +100,7 @@ describe('image rendition reference inventory', () => {
 			bucket: 'public',
 			targetKind: 'EXACT',
 			key: malformedSource,
-			source: 'asset:9:original',
+			source: 'asset:9:legacy-original',
 		});
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -111,5 +111,38 @@ describe('image rendition reference inventory', () => {
 			}),
 			expect.stringContaining('public bucket deletion is disabled'),
 		);
+	});
+
+	it('takes canonical representation bucket/key ownership without legacy locators', async () => {
+		const inventory = await collectObjectReferences({
+			asset: delegate([{
+				id: 12,
+				storageKey: null,
+				playbackStorageKey: null,
+				isPublic: false,
+				card480Height: null,
+				display960Height: null,
+				representations: [{
+					id: 'rep-1',
+					role: 'ORIGINAL',
+					bucket: 'canonical-protected',
+					objectKey: 'assets/12/original/g1',
+				}],
+			}]),
+			exhibition: delegate(),
+			project: delegate(),
+			gameUploadSession: delegate(),
+			uploadIntent: delegate(),
+		} as never, {
+			publicBucket: 'legacy-public',
+			protectedBucket: 'legacy-protected',
+		}, { error: vi.fn() });
+
+		expect(inventory.references).toEqual([{
+			bucket: 'canonical-protected',
+			targetKind: 'EXACT',
+			key: 'assets/12/original/g1',
+			source: 'asset:12:representation:ORIGINAL:rep-1',
+		}]);
 	});
 });

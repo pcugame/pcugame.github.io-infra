@@ -441,6 +441,7 @@ async function applyHarness(options: {
 		if (data.display960Height !== undefined) assetRecord.display960Height = data.display960Height;
 		return { id: 5 };
 	});
+	const representationUpsert = vi.fn(async (_input: unknown) => ({}));
 	const outboxUpsert = vi.fn();
 	const tx = {
 		$queryRaw: vi.fn(async () => {
@@ -455,6 +456,7 @@ async function applyHarness(options: {
 			return [];
 		}),
 		asset: { update: assetUpdate },
+		assetRepresentation: { upsert: representationUpsert },
 		orphanObject: {
 			upsert: outboxUpsert,
 			updateMany: vi.fn(),
@@ -505,6 +507,7 @@ async function applyHarness(options: {
 		prepare,
 		transaction,
 		assetUpdate,
+		representationUpsert,
 		outboxUpsert,
 		loggerError,
 		streamErrors,
@@ -650,6 +653,11 @@ describe('image rendition backfill apply', () => {
 				card480Height: 240,
 				display960Height: 480,
 			});
+			expect(harness.representationUpsert).toHaveBeenCalledTimes(2);
+			expect(harness.representationUpsert.mock.calls.map(([write]) => (
+				(write as { where: { asset_representation_asset_role: { role: string } } })
+					.where.asset_representation_asset_role.role
+			))).toEqual(['ORIGINAL', 'DISPLAY_960']);
 		} finally {
 			await nodeFileSystem.rm(harness.temporaryDirectory, { recursive: true, force: true });
 		}
@@ -707,6 +715,11 @@ describe('image rendition backfill apply', () => {
 				card480Height: 240,
 				display960Height: 480,
 			});
+			expect(harness.representationUpsert).toHaveBeenCalledTimes(3);
+			expect(harness.representationUpsert.mock.calls.map(([write]) => (
+				(write as { where: { asset_representation_asset_role: { role: string } } })
+					.where.asset_representation_asset_role.role
+			))).toEqual(['ORIGINAL', 'CARD_480', 'DISPLAY_960']);
 			expect([...harness.uploadedObjects.keys()].sort()).toEqual([
 				deriveImageRenditionStorageKey('source.webp', 'CARD_480'),
 				deriveImageRenditionStorageKey('source.webp', 'DISPLAY_960'),
