@@ -21,22 +21,24 @@ export default function AdminYearsPage() {
 	const isAdmin = user?.role === 'ADMIN';
 
 	// ── NAS 내보내기 ──────────────────────────────────────────
-	const [exportResult, setExportResult] = useState<ExportResult | null>(null);
 	const [exportError, setExportError] = useState<string | null>(null);
 	const [modalYear, setModalYear] = useState<number | null>(null);
+	const [exportJobId, setExportJobId] = useState<string | null>(null);
+	const exportStatus = useQuery({
+		queryKey: queryKeys.adminExportStatus,
+		queryFn: adminExportApi.status,
+		enabled: exportJobId !== null,
+		refetchInterval: exportJobId !== null ? 1500 : false,
+		refetchIntervalInBackground: true,
+		staleTime: 0,
+	});
 
 	const exportMutation = useMutation({
 		mutationFn: (year: number) => adminExportApi.run(year),
-		onSuccess: (result) => {
-			if (result.aborted) {
-				setExportError(
-					`내보내기가 중단되었습니다. (다운로드: ${result.downloaded}, 실패: ${result.failed})`,
-				);
-				setExportResult(null);
-			} else {
-				setExportResult(result);
-				setExportError(null);
-			}
+		onSuccess: (job) => {
+			setExportJobId(job.jobId);
+			setExportError(null);
+			void qc.invalidateQueries({ queryKey: queryKeys.adminExportStatus });
 		},
 		onError: (err) => {
 			if (isApiError(err) && err.status === 409) {
@@ -46,17 +48,31 @@ export default function AdminYearsPage() {
 			} else {
 				setExportError(getApiErrorMessage(err));
 			}
-			setExportResult(null);
 		},
 	});
 
-	const isAnyExporting = exportMutation.isPending;
+	const currentExportStatus = exportStatus.data;
+	const isCurrentJobTerminal = currentExportStatus?.jobId === exportJobId
+		&& (currentExportStatus.state === 'READY'
+			|| currentExportStatus.state === 'FAILED'
+			|| currentExportStatus.state === 'CANCELLED');
+	const exportResult: ExportResult | null = isCurrentJobTerminal
+		&& currentExportStatus?.state === 'READY'
+		? currentExportStatus.result ?? null
+		: null;
+	const completedExportError = isCurrentJobTerminal && currentExportStatus?.state !== 'READY'
+		? currentExportStatus?.error ?? (
+			currentExportStatus?.state === 'CANCELLED'
+				? '내보내기 작업이 취소되었습니다.'
+				: '내보내기 작업이 실패했습니다.'
+		)
+		: null;
+	const isAnyExporting = exportMutation.isPending || (exportJobId !== null && !isCurrentJobTerminal);
 
 	const handleExport = (year: number) => {
 		if (!window.confirm(
 			`${year}년도 에셋을 NAS로 내보내시겠습니까?\n\n대용량 파일 다운로드가 포함되어 수 분이 소요될 수 있습니다.`
 		)) return;
-		setExportResult(null);
 		setExportError(null);
 		setModalYear(year);
 		exportMutation.mutate(year);
@@ -65,8 +81,8 @@ export default function AdminYearsPage() {
 	const handleModalClose = () => {
 		// 진행 중 닫기는 모달 자체에서 막힘 — 여기서는 완료/실패 후만 호출됨
 		setModalYear(null);
-		setExportResult(null);
 		setExportError(null);
+		setExportJobId(null);
 		exportMutation.reset();
 	};
 
@@ -234,7 +250,7 @@ export default function AdminYearsPage() {
 										isDeleting={deleteMutation.isPending}
 										isAdmin={isAdmin}
 										onExport={() => handleExport(y.year)}
-										isExporting={exportMutation.isPending && exportMutation.variables === y.year}
+									isExporting={isAnyExporting && modalYear === y.year}
 										isAnyExporting={isAnyExporting}
 									/>
 								))}
@@ -260,7 +276,7 @@ export default function AdminYearsPage() {
 								isDeleting={deleteMutation.isPending}
 								isAdmin={isAdmin}
 								onExport={() => handleExport(y.year)}
-								isExporting={exportMutation.isPending && exportMutation.variables === y.year}
+								isExporting={isAnyExporting && modalYear === y.year}
 								isAnyExporting={isAnyExporting}
 							/>
 						))}
@@ -271,9 +287,10 @@ export default function AdminYearsPage() {
 			<ExportProgressModal
 				open={modalYear !== null}
 				year={modalYear ?? 0}
-				isRunning={exportMutation.isPending}
+				isRunning={isAnyExporting}
+				status={exportStatus.data}
 				result={exportResult}
-				error={exportError}
+				error={exportError ?? completedExportError}
 				onClose={handleModalClose}
 			/>
 		</div>

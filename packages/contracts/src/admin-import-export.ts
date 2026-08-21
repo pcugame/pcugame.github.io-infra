@@ -46,10 +46,23 @@ export type ExportProgress = {
 	failed: number;
 };
 
+export type ExportJobState = 'QUEUED' | 'RUNNING' | 'READY' | 'FAILED' | 'CANCELLED';
+
+/** POST /api/admin/export: accepted durable work, not synchronous object delivery. */
+export type ExportStartResponse = {
+	jobId: string;
+	state: 'QUEUED';
+};
+
 /** GET /api/admin/export/status */
 export type ExportStatusResponse = {
 	running: boolean;
 	progress: ExportProgress | null;
+	/** Additive job metadata; absent only when no export has ever been requested. */
+	jobId?: string;
+	state?: ExportJobState;
+	result?: ExportResult | null;
+	error?: string | null;
 };
 
 export type ExportResult = {

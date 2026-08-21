@@ -20,7 +20,7 @@ import type {
   UpdateSiteSettingsRequest,
   ImportPreviewResult,
   ImportExecuteResult,
-  ExportResult,
+  ExportStartResponse,
   ExportStatusResponse,
 } from '../../contracts';
 import { api, uploadFormData } from './client';
@@ -208,7 +208,7 @@ export const adminBannedIpApi = {
 
 export const adminExportApi = {
   run(year?: number) {
-    return api.post<ExportResult>('/api/admin/export', { year });
+    return api.post<ExportStartResponse>('/api/admin/export', { year });
   },
 
   status() {
