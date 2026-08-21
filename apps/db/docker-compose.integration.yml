@@ -1,0 +1,14 @@
+services:
+  garage-init:
+    environment:
+      S3_ACCESS_KEY_ID: GK000000000000000000000000
+      S3_SECRET_ACCESS_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+      S3_BUCKET_PUBLIC: pcu-public
+      S3_BUCKET_PROTECTED: pcu-protected
+    volumes:
+      - ./garage-init-integration.sh:/garage-init.sh:ro
+
+  public-origin:
+    environment:
+      S3_BUCKET_PUBLIC: pcu-public
+      GARAGE_PUBLIC_BUCKET_HOST: pcu-public.web.garage.localhost

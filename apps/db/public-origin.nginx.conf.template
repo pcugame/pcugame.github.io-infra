@@ -1,0 +1,78 @@
+map $http_origin $pcu_public_cors_origin {
+  default "";
+  "${PUBLIC_CORS_ORIGIN_PRIMARY}" $http_origin;
+  "${PUBLIC_CORS_ORIGIN_SECONDARY}" $http_origin;
+}
+
+# Only responses that actually contain an immutable public representation get
+# a long-lived browser cache. Errors (and a bare revalidation 304) are never
+# immutable cache entries.
+map $status $pcu_public_cache_control {
+  default "no-store";
+  200 "public, max-age=31536000, immutable";
+  206 "public, max-age=31536000, immutable";
+}
+
+log_format pcu_public_origin
+  'method=$request_method uri=$uri status=$status bytes_out=$bytes_sent';
+
+server {
+  listen ${NGINX_LISTEN_PORT};
+  server_name _;
+
+  access_log /var/log/nginx/access.log pcu_public_origin;
+  error_log /var/log/nginx/error.log warn;
+  gzip off;
+  client_max_body_size 0;
+
+  location = /__pcu_public_health {
+    access_log off;
+    return 204;
+  }
+
+  location / {
+    if ($request_method = OPTIONS) { return 204; }
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+
+    # Nginx does not cache or synthesize object metadata. Range, conditional
+    # request headers, MIME, Content-Encoding, ETag and Last-Modified pass
+    # through Garage's public website origin unchanged.
+    proxy_pass ${GARAGE_PUBLIC_WEB_UPSTREAM};
+    proxy_http_version 1.1;
+    # Garage website routing is bucket-host based. This is deliberately not the
+    # browser Host and is validated against S3_BUCKET_PUBLIC by deployment tests.
+    proxy_set_header Host ${GARAGE_PUBLIC_BUCKET_HOST};
+    proxy_set_header Connection "";
+    proxy_ssl_server_name on;
+    proxy_ssl_name ${GARAGE_PUBLIC_WEB_TLS_SERVER_NAME};
+    proxy_pass_request_headers on;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    # Apply the status-specific policy below instead of allowing an upstream
+    # default to mark an error response immutable.
+    proxy_hide_header Cache-Control;
+    proxy_hide_header Access-Control-Allow-Origin;
+    proxy_hide_header Access-Control-Allow-Methods;
+    proxy_hide_header Access-Control-Allow-Headers;
+    proxy_hide_header Access-Control-Expose-Headers;
+    proxy_hide_header Access-Control-Max-Age;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+    proxy_next_upstream error timeout http_502 http_503 http_504;
+    proxy_next_upstream_tries 1;
+
+    add_header Cache-Control $pcu_public_cache_control always;
+    add_header Access-Control-Allow-Origin $pcu_public_cors_origin always;
+    add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+    add_header Access-Control-Allow-Headers "Range, If-Range, If-None-Match, If-Modified-Since" always;
+    add_header Access-Control-Expose-Headers "ETag, Last-Modified, Content-Length, Content-Range, Content-Encoding" always;
+    add_header Vary "Origin" always;
+    add_header Cross-Origin-Resource-Policy "cross-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors ${WEB_PUBLIC_ORIGIN}" always;
+  }
+}
