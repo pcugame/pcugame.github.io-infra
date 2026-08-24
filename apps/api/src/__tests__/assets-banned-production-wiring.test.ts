@@ -60,7 +60,6 @@ function storageHarness() {
 	};
 	const storage: ObjectStorage = {
 		upload: vi.fn(),
-		presign: calls.presign,
 		delete: calls.delete,
 		head: vi.fn(async () => null),
 		readRange: vi.fn(async () => Buffer.alloc(0)),
@@ -195,7 +194,7 @@ function graphHarness(initialBans: string[] = [], maxHits = 30) {
 		assetsRepository: ports.assetsRepository,
 		bannedIpRepository: ports.bannedIpRepository,
 		projectAccess: ports.projectAccess,
-		storage: storage.storage,
+		protectedDownloadPresigner: { presign: storage.calls.presign },
 		downloadLimiter: limiter,
 		logger: testLogger,
 		clock: { now: () => new Date('2026-07-22T00:00:00.000Z') },

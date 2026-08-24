@@ -67,7 +67,6 @@ const fileSystem: FileSystem = {
 
 const storage: ObjectStorage = {
 	upload: async () => {},
-	presign: async () => 'https://storage.test/object',
 	delete: async () => {},
 	head: async () => null,
 	readRange: async () => Buffer.alloc(0),
@@ -119,6 +118,43 @@ function schedulerHarness() {
 }
 
 describe('production BackendContext resource ownership', () => {
+	it('owns and destroys upload and protected-download signing clients independently', async () => {
+		const events: string[] = [];
+		const internal = fakeS3('internal', events);
+		const uploadSigning = fakeS3('upload-signing', events);
+		const protectedSigning = fakeS3('protected-signing', events);
+		const context = await createProductionBackendContext(testConfig, {
+			persistence: createScriptedBackendPersistence(),
+			routes: emptyRoutes,
+			resources: {
+				uploadLifecycle: ownedTestUploadLifecycleResource(),
+				logger: { value: testLogger, ownership: 'borrowed' },
+				settings: { value: settingsHarness('', []).store, ownership: 'borrowed' },
+				s3: { value: internal, ownership: 'borrowed' },
+				storage: { value: storage, ownership: 'borrowed' },
+				uploadSigningS3: {
+					value: uploadSigning,
+					ownership: 'owned',
+					close: () => uploadSigning.destroy(),
+				},
+				protectedDownloadSigningS3: {
+					value: protectedSigning,
+					ownership: 'owned',
+					close: () => protectedSigning.destroy(),
+				},
+			},
+		});
+
+		expect(context.resourceOwnership).toContainEqual({ name: 'uploadSigningS3', ownership: 'owned' });
+		expect(context.resourceOwnership).toContainEqual({ name: 'protectedDownloadSigningS3', ownership: 'owned' });
+		await context.close();
+		await context.close();
+		expect(protectedSigning.destroy).toHaveBeenCalledOnce();
+		expect(uploadSigning.destroy).toHaveBeenCalledOnce();
+		expect(internal.destroy).not.toHaveBeenCalled();
+		expect(events).toEqual(['protected-signing:s3', 'upload-signing:s3']);
+	});
+
 	it('runs direct upload recovery once at maintenance startup instead of waiting for the first interval', async () => {
 		const harness = schedulerHarness();
 		const recoverStaleUploads = vi.fn(async () => {});

@@ -72,7 +72,6 @@ function createTestContext(): {
 			ids: { next: () => `request-${++requestSequence}` },
 			storage: {
 				upload: async () => {},
-				presign: async () => 'https://storage.test/object',
 				delete: async () => {},
 				head: storageHead,
 				readRange: async () => Buffer.alloc(0),

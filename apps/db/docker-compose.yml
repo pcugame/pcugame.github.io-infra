@@ -99,6 +99,42 @@ services:
       timeout: 5s
       retries: 5
 
+  # Browser protected-object capability data plane. It accepts only GET/HEAD
+  # for object keys under the configured protected path-style bucket.
+  protected-download-origin:
+    image: nginx:1.27-alpine
+    profiles: ["nas-data-plane"]
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: 8080
+      S3_BUCKET_PROTECTED: ${S3_BUCKET_PROTECTED:-pcu-protected}
+      PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS: ${PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:-512}
+      PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS: ${PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS:-128}
+      GARAGE_S3_UPSTREAM: ${GARAGE_S3_UPSTREAM:-http://garage:3900}
+      GARAGE_S3_TLS_SERVER_NAME: ${GARAGE_S3_TLS_SERVER_NAME:-garage}
+    ports:
+      - "${NAS_PROTECTED_DOWNLOAD_BIND_ADDRESS:-127.0.0.1}:${NAS_PROTECTED_DOWNLOAD_PORT:-3906}:8080"
+    volumes:
+      - ./protected-download.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./validate-data-plane-env.sh:/docker-entrypoint.d/05-validate-data-plane-env.sh:ro
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=16m
+      - /var/log/nginx:rw,noexec,nosuid,size=16m
+      - /var/run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /etc/nginx/conf.d:rw,noexec,nosuid,size=1m
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    networks: [garage_private, data_plane_edge]
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Browser public-object data plane. There is no volume for NAS exports and
   # no route to the Garage S3/admin API from this proxy.
   public-origin:
@@ -148,7 +184,7 @@ volumes:
 networks:
   garage_private:
     internal: true
-  # Only the two byte-plane reverse proxies join this publish-capable bridge.
+  # Only the three byte-plane reverse proxies join this publish-capable bridge.
   # Garage and garage-init remain garage_private-only, so S3 website/admin/
   # management listeners cannot become host-published through this network.
   data_plane_edge:

@@ -39,7 +39,6 @@ function createLogger(): AppLogger {
 function createStorageStub(): ObjectStorage {
 	return {
 		upload: async () => {},
-		presign: async () => 'https://storage.test/object',
 		delete: async () => {},
 		head: async () => ({ size: 0, contentType: 'application/octet-stream' }),
 		readRange: async () => Buffer.alloc(0),

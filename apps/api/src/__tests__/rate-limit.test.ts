@@ -73,7 +73,7 @@ describe('rate-limit plugin', () => {
 		logger,
 		ids: { next: () => `rate-limit-${++requestSequence}` },
 		storage: {
-			upload: async () => {}, presign: async () => '', delete: async () => {},
+			upload: async () => {}, delete: async () => {},
 			head: async () => null, readRange: async () => Buffer.alloc(0), stream: async () => null,
 			listKeys: async () => [], listKeyPage: async () => ({ keys: [], isTruncated: false }),
 			deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),

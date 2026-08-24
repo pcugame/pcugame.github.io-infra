@@ -7,10 +7,11 @@ import { join } from 'node:path';
 
 const read = (file) => readFile(new URL(file, import.meta.url), 'utf8');
 const here = new URL('.', import.meta.url);
-const [compose, garage, upload, publicOrigin, corsScript, initScript, integrationInitScript, initDockerfile, envValidator, liveTest] = await Promise.all([
+const [compose, garage, upload, protectedDownload, publicOrigin, corsScript, initScript, integrationInitScript, initDockerfile, envValidator, liveTest] = await Promise.all([
 	read('./docker-compose.yml'),
 	read('./garage.toml'),
 	read('./upload-part.nginx.conf.template'),
+	read('./protected-download.nginx.conf.template'),
 	read('./public-origin.nginx.conf.template'),
 	read('./garage-configure-cors.sh'),
 	read('./garage-init.sh'),
@@ -26,16 +27,19 @@ assert.match(compose, /127\.0\.0\.1:\$\{POSTGRES_LOCAL_PORT:-5432\}:5432/);
 assert.doesNotMatch(compose, /- "5432:5432"/);
 assert.match(compose, /\$\{NAS_UPLOAD_BIND_ADDRESS:-127\.0\.0\.1\}:\$\{NAS_UPLOAD_PORT:-3901\}:8080/);
 assert.match(compose, /\$\{NAS_PUBLIC_BIND_ADDRESS:-127\.0\.0\.1\}:\$\{NAS_PUBLIC_PORT:-3904\}:8080/);
+assert.match(compose, /\$\{NAS_PROTECTED_DOWNLOAD_BIND_ADDRESS:-127\.0\.0\.1\}:\$\{NAS_PROTECTED_DOWNLOAD_PORT:-3906\}:8080/);
 assert.doesNotMatch(compose, /"3902:3902"|"3903:3903"/);
 assert.match(compose, /garage_private:\n\s+internal: true/);
 assert.match(compose, /data_plane_edge:\n\s+driver: bridge/);
 const garageService = compose.slice(compose.indexOf('\n  garage:\n'), compose.indexOf('\n  garage-init:\n'));
 const initService = compose.slice(compose.indexOf('\n  garage-init:\n'), compose.indexOf('\n  upload-part-origin:\n'));
-const uploadService = compose.slice(compose.indexOf('\n  upload-part-origin:\n'), compose.indexOf('\n  public-origin:\n'));
+const uploadService = compose.slice(compose.indexOf('\n  upload-part-origin:\n'), compose.indexOf('\n  protected-download-origin:\n'));
+const protectedDownloadService = compose.slice(compose.indexOf('\n  protected-download-origin:\n'), compose.indexOf('\n  public-origin:\n'));
 const publicService = compose.slice(compose.indexOf('\n  public-origin:\n'), compose.indexOf('\nvolumes:\n'));
 assert.doesNotMatch(garageService, /data_plane_edge/);
 assert.doesNotMatch(initService, /data_plane_edge/);
 assert.match(uploadService, /networks: \[garage_private, data_plane_edge\]/);
+assert.match(protectedDownloadService, /networks: \[garage_private, data_plane_edge\]/);
 assert.match(publicService, /networks: \[garage_private, data_plane_edge\]/);
 assert.match(compose, /UPLOAD_PART_GLOBAL_CONNECTIONS: \$\{UPLOAD_PART_GLOBAL_CONNECTIONS:-512\}/);
 assert.match(compose, /UPLOAD_PART_PER_IP_CONNECTIONS: \$\{UPLOAD_PART_PER_IP_CONNECTIONS:-128\}/);
@@ -64,6 +68,35 @@ assert.doesNotMatch(upload, /request_method = OPTIONS\) \{ return 204/);
 assert.doesNotMatch(upload, /proxy_cache/);
 assert.match(upload, /\$uri status=\$status/);
 assert.doesNotMatch(upload, /\$request_uri/);
+
+for (const required of [
+	'location /${S3_BUCKET_PROTECTED}/',
+	'location = /${S3_BUCKET_PROTECTED}',
+	'location = /${S3_BUCKET_PROTECTED}/',
+	'if ($request_method !~ ^(GET|HEAD)$) { return 405; }',
+	'proxy_pass_request_headers on',
+	'proxy_set_header Host $http_host',
+	'proxy_set_header Content-Length ""',
+	'proxy_set_header Transfer-Encoding ""',
+	'proxy_pass_request_body off',
+	'proxy_request_buffering off',
+	'proxy_buffering off',
+	'proxy_hide_header Cache-Control',
+	'Cache-Control "private, no-store" always',
+	'proxy_connect_timeout 5s',
+	'proxy_read_timeout 120s',
+	'proxy_next_upstream off',
+]) assert.ok(protectedDownload.includes(required), `protected download boundary missing: ${required}`);
+assert.match(protectedDownload, /error_log \/dev\/null crit/);
+assert.match(protectedDownload, /client_max_body_size 1k/);
+assert.match(protectedDownload, /\$http_content_length ~ \^\[1-9\]\[0-9\]\*\$.*return 413/);
+assert.match(protectedDownload, /\$http_transfer_encoding != "".*return 400/);
+assert.match(protectedDownload, /method=\$request_method uri=\$uri/);
+assert.doesNotMatch(protectedDownload, /\$request_uri|\$args|proxy_cache/);
+assert.match(protectedDownload, /location \/ \{ return 404; \}/);
+assert.doesNotMatch(protectedDownload, /\^\(GET\|HEAD\|PUT|OPTIONS/);
+assert.match(envValidator, /S3_BUCKET_PROTECTED.*DNS-compatible/);
+assert.match(envValidator, /PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS.*-ge 50/);
 
 for (const required of [
 	'if ($request_method !~ ^(GET|HEAD)$) { return 405; }',

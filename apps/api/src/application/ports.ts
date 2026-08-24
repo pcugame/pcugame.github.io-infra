@@ -156,11 +156,6 @@ export interface ObjectStorage {
 		options?: UploadObjectOptions,
 		request?: StorageRequestOptions,
 	): Promise<void>;
-	presign(
-		bucket: string,
-		key: string,
-		options?: { ttlSec?: number; responseContentDisposition?: string },
-	): Promise<string>;
 	delete(bucket: string, key: string, request?: StorageRequestOptions): Promise<void>;
 	head(bucket: string, key: string, request?: StorageRequestOptions): Promise<{
 		size: number;

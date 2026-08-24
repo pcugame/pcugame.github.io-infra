@@ -101,7 +101,7 @@ function repositoryHarness(label: string) {
 function storageHarness() {
 	const calls = { presign: vi.fn(), head: vi.fn(), stream: vi.fn() };
 	const storage: ObjectStorage = {
-		upload: vi.fn(async () => undefined), presign: calls.presign, delete: vi.fn(async () => undefined), head: calls.head,
+		upload: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), head: calls.head,
 		readRange: vi.fn(async () => Buffer.alloc(0)), stream: calls.stream,
 		listKeys: vi.fn(async () => []), listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
 		deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),

@@ -81,6 +81,24 @@ services:
     ports:
       - "3905:8080"
 
+  protected-download-origin:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: "8080"
+      S3_BUCKET_PROTECTED: pcu-protected
+      GARAGE_S3_UPSTREAM: http://garage:3900
+      GARAGE_S3_TLS_SERVER_NAME: garage
+      PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS: "512"
+      PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS: "128"
+    volumes:
+      - ./apps/db/protected-download.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - "3906:8080"
+
   public-origin:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -114,6 +132,8 @@ services:
       db-init:
         condition: service_completed_successfully
       upload-origin:
+        condition: service_started
+      protected-download-origin:
         condition: service_started
       public-origin:
         condition: service_started
@@ -163,6 +183,7 @@ services:
       EXPORT_WORKER_MAX_OBJECT_BYTES: "5368709120"
       EXPORT_WORKER_MAX_JOB_BYTES: "34359738368"
       S3_PUBLIC_SIGNING_ENDPOINT: http://localhost:3905
+      S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: http://localhost:3906
       <<: *s3-env
     ports:
       - "4000:4000"
@@ -282,6 +303,10 @@ services:
       INTEGRATION_ORIGIN: http://localhost:5173
       INTEGRATION_PUBLIC_ASSET_BASE_URL: http://public-origin:8080
       INTEGRATION_UPLOAD_PART_BASE_URL: http://upload-origin:8080
+      INTEGRATION_PROTECTED_DOWNLOAD_BASE_URL: http://protected-download-origin:8080
+      INTEGRATION_GARAGE_BASE_URL: http://garage:3900
+      INTEGRATION_S3_ACCESS_KEY_ID: GK000000000000000000000001
+      INTEGRATION_S3_SECRET_ACCESS_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
     volumes:
       - .:/app:ro
     command: ["node", "scripts/smoke-integration.mjs"]

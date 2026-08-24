@@ -1,5 +1,5 @@
 import { request as httpRequest } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 
@@ -11,6 +11,12 @@ const internalPublicAssetBase = process.env.INTEGRATION_PUBLIC_ASSET_BASE_URL
   : null;
 const internalUploadPartBase = process.env.INTEGRATION_UPLOAD_PART_BASE_URL
   ? new URL(process.env.INTEGRATION_UPLOAD_PART_BASE_URL)
+  : null;
+const internalProtectedDownloadBase = process.env.INTEGRATION_PROTECTED_DOWNLOAD_BASE_URL
+  ? new URL(process.env.INTEGRATION_PROTECTED_DOWNLOAD_BASE_URL)
+  : null;
+const internalGarageBase = process.env.INTEGRATION_GARAGE_BASE_URL
+  ? new URL(process.env.INTEGRATION_GARAGE_BASE_URL)
   : null;
 const webglFixturePath = process.env.INTEGRATION_WEBGL_ZIP;
 const keepWebgl = process.env.INTEGRATION_KEEP_WEBGL === 'true';
@@ -56,21 +62,29 @@ async function fetchJson(url, options) {
   return { res, body };
 }
 
-async function fetchIntegrationS3Headers(url) {
+async function requestPresignedObject(url, options = {}) {
   const target = new URL(url);
   const signedHost = target.host;
-  const apiHostname = new URL(apiBase).hostname;
-  if (target.hostname === 'garage' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1')) {
-    target.hostname = '127.0.0.1';
+  if (options.internalBase) {
+    target.protocol = options.internalBase.protocol;
+    target.host = options.internalBase.host;
   }
 
   return new Promise((resolve, reject) => {
-    const request = httpRequest(target, { headers: { Host: signedHost } }, (response) => {
-      resolve({ status: response.statusCode ?? 0, headers: response.headers });
-      response.destroy();
+    const request = httpRequest(target, {
+      method: options.method || 'GET',
+      headers: { ...options.headers, Host: signedHost },
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      response.once('end', () => resolve({
+        status: response.statusCode ?? 0,
+        headers: response.headers,
+        body: Buffer.concat(chunks),
+      }));
     });
     request.on('error', reject);
-    request.end();
+    request.end(options.body);
   });
 }
 
@@ -94,6 +108,59 @@ function integrationPublicAssetUrl(url) {
   target.protocol = internalPublicAssetBase.protocol;
   target.host = internalPublicAssetBase.host;
   return target.toString();
+}
+
+function sigV4Encode(value) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => (
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+  ));
+}
+
+function hmacSha256(key, value) {
+  return createHmac('sha256', key).update(value).digest();
+}
+
+/** Minimal dependency-free SigV4 object capability for integration data-plane smoke. */
+function signIntegrationObject(method, originUrl, bucket, key) {
+  const originUrlObject = new URL(originUrl);
+  const accessKeyId = process.env.INTEGRATION_S3_ACCESS_KEY_ID
+    || 'GK000000000000000000000001';
+  const secretAccessKey = process.env.INTEGRATION_S3_SECRET_ACCESS_KEY
+    || '0000000000000000000000000000000000000000000000000000000000000001';
+  const region = 'garage';
+  const service = 's3';
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const canonicalUri = `/${sigV4Encode(bucket)}/${key.split('/').map(sigV4Encode).join('/')}`;
+  const query = new Map([
+    ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+    ['X-Amz-Credential', `${accessKeyId}/${credentialScope}`],
+    ['X-Amz-Date', amzDate],
+    ['X-Amz-Expires', '60'],
+    ['X-Amz-SignedHeaders', 'host'],
+  ]);
+  const canonicalQuery = [...query.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => `${sigV4Encode(name)}=${sigV4Encode(value)}`)
+    .join('&');
+  const canonicalRequest = [
+    method, canonicalUri, canonicalQuery,
+    `host:${originUrlObject.host}\n`, 'host', 'UNSIGNED-PAYLOAD',
+  ].join('\n');
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    createHash('sha256').update(canonicalRequest).digest('hex'),
+  ].join('\n');
+  const dateKey = hmacSha256(Buffer.from(`AWS4${secretAccessKey}`), dateStamp);
+  const regionKey = hmacSha256(dateKey, region);
+  const serviceKey = hmacSha256(regionKey, service);
+  const signingKey = hmacSha256(serviceKey, 'aws4_request');
+  const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+  return `${originUrlObject.origin}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
 
 function crc32(input) {
@@ -256,10 +323,22 @@ if (gameRedirect.status !== 302) {
 }
 const gameLocation = gameRedirect.headers.get('location');
 if (!gameLocation) throw new Error('game download redirect did not include a presigned URL');
+if (new URL(gameLocation).origin !== 'http://localhost:3906') {
+  throw new Error(`protected redirect leaked the wrong signing origin: ${new URL(gameLocation).origin}`);
+}
+const capabilityTtl = Number(new URL(gameLocation).searchParams.get('X-Amz-Expires'));
+if (!Number.isInteger(capabilityTtl) || capabilityTtl <= 0 || capabilityTtl > 60) {
+  throw new Error(`protected redirect returned an invalid capability TTL: ${capabilityTtl}`);
+}
 
-const gameObject = await fetchIntegrationS3Headers(gameLocation);
-if (gameObject.status < 200 || gameObject.status >= 300) {
+const gameObject = await requestPresignedObject(gameLocation, {
+  internalBase: internalProtectedDownloadBase,
+});
+if (gameObject.status !== 200 || gameObject.body.byteLength === 0) {
   throw new Error(`presigned game download returned ${gameObject.status}`);
+}
+if (gameObject.headers['cache-control'] !== 'private, no-store') {
+  throw new Error('protected download response was cacheable');
 }
 const disposition = gameObject.headers['content-disposition'] || '';
 const expectedFilename =
@@ -267,7 +346,144 @@ const expectedFilename =
 if (!disposition.includes('filename="game.zip"') || !disposition.includes(expectedFilename)) {
   throw new Error(`game download returned unexpected Content-Disposition: ${disposition}`);
 }
+
+const protectedRangeEnd = Math.min(7, gameObject.body.byteLength - 1);
+const protectedRange = await requestPresignedObject(gameLocation, {
+  internalBase: internalProtectedDownloadBase,
+  headers: { Range: `bytes=0-${protectedRangeEnd}` },
+});
+if (
+  protectedRange.status !== 206
+  || protectedRange.body.byteLength !== protectedRangeEnd + 1
+  || !protectedRange.headers['content-range']?.startsWith(`bytes 0-${protectedRangeEnd}/`)
+) throw new Error(`protected signed Range GET returned ${protectedRange.status}`);
+
+const signedLocation = new URL(gameLocation);
+const protectedPrefix = '/pcu-protected/';
+if (!signedLocation.pathname.startsWith(protectedPrefix)) {
+  throw new Error(`protected capability used an unexpected path: ${signedLocation.pathname}`);
+}
+const protectedKey = decodeURIComponent(signedLocation.pathname.slice(protectedPrefix.length));
+const signedHeadUrl = signIntegrationObject(
+  'HEAD',
+  signedLocation.origin,
+  'pcu-protected',
+  protectedKey,
+);
+const protectedHead = await requestPresignedObject(signedHeadUrl, {
+  method: 'HEAD',
+  internalBase: internalProtectedDownloadBase,
+});
+if (protectedHead.status !== 200 || protectedHead.body.byteLength !== 0) {
+  throw new Error(`protected signed HEAD returned ${protectedHead.status} with a body`);
+}
+
+const fixedBody = Buffer.from('GET requests must not carry bodies');
+const fixedBodyGet = await requestPresignedObject(gameLocation, {
+  internalBase: internalProtectedDownloadBase,
+  headers: { 'Content-Length': String(fixedBody.byteLength) },
+  body: fixedBody,
+});
+if (fixedBodyGet.status !== 413) {
+  throw new Error(`protected proxy accepted fixed-length GET body (${fixedBodyGet.status})`);
+}
+const chunkedBodyGet = await requestPresignedObject(gameLocation, {
+  internalBase: internalProtectedDownloadBase,
+  headers: { 'Transfer-Encoding': 'chunked' },
+  body: Buffer.from('chunked GET body must stop locally'),
+});
+if (chunkedBodyGet.status !== 400) {
+  throw new Error(`protected proxy accepted chunked GET body (${chunkedBodyGet.status})`);
+}
+
+const unsignedObjectUrl = new URL(gameLocation);
+unsignedObjectUrl.search = '';
+const unsignedObject = await requestPresignedObject(unsignedObjectUrl, {
+  internalBase: internalProtectedDownloadBase,
+});
+if (unsignedObject.status !== 403) {
+  throw new Error(`protected proxy accepted unsigned object GET (${unsignedObject.status})`);
+}
+for (const [label, pathname] of [
+  ['protected bucket list', '/pcu-protected/'],
+  ['public bucket', '/pcu-public/public/images/integration/poster/original.png'],
+  ['S3 service root', '/'],
+]) {
+  const forbiddenUrl = new URL(gameLocation);
+  forbiddenUrl.pathname = pathname;
+  forbiddenUrl.search = '';
+  const response = await requestPresignedObject(forbiddenUrl, {
+    internalBase: internalProtectedDownloadBase,
+  });
+  if (response.status !== 404) throw new Error(`${label} reached protected proxy (${response.status})`);
+}
+const protectedPut = await requestPresignedObject(gameLocation, {
+  method: 'PUT',
+  internalBase: internalProtectedDownloadBase,
+  body: Buffer.from('must-not-upload'),
+});
+if (protectedPut.status !== 405) {
+  throw new Error(`protected proxy accepted PUT (${protectedPut.status})`);
+}
+const uploadProxyGet = await requestPresignedObject(gameLocation, {
+  internalBase: internalUploadPartBase || new URL('http://localhost:3905'),
+});
+if (uploadProxyGet.status !== 405) {
+  throw new Error(`UploadPart proxy accepted protected GET (${uploadProxyGet.status})`);
+}
+console.log('ok: protected delivery origin, TTL, GET/HEAD/Range and closed proxy boundary');
 console.log('ok: game download uses the friendly Content-Disposition filename');
+
+const legacyKey = 'legacy/서울 space/literal % + plus: @ amp& equals=.bin';
+const legacyBytes = Buffer.from('escaped protected legacy object bytes: 서울 % + : @ & =');
+const directGarageOrigin = 'http://localhost:3900';
+const legacyPutUrl = signIntegrationObject('PUT', directGarageOrigin, 'pcu-protected', legacyKey);
+const legacyDeleteUrl = signIntegrationObject('DELETE', directGarageOrigin, 'pcu-protected', legacyKey);
+try {
+  const createdLegacy = await requestPresignedObject(legacyPutUrl, {
+    method: 'PUT',
+    internalBase: internalGarageBase,
+    headers: { 'Content-Length': String(legacyBytes.byteLength) },
+    body: legacyBytes,
+  });
+  if (createdLegacy.status !== 200) {
+    throw new Error(`escaped legacy PutObject returned ${createdLegacy.status}`);
+  }
+  const legacyBrowserUrl = signIntegrationObject(
+    'GET', 'http://localhost:3906', 'pcu-protected', legacyKey,
+  );
+  const legacyGet = await requestPresignedObject(legacyBrowserUrl, {
+    internalBase: internalProtectedDownloadBase,
+  });
+  if (legacyGet.status !== 200 || !legacyGet.body.equals(legacyBytes)) {
+    throw new Error(`escaped legacy protected GET returned ${legacyGet.status}`);
+  }
+  const legacyHead = await requestPresignedObject(signIntegrationObject(
+    'HEAD', 'http://localhost:3906', 'pcu-protected', legacyKey,
+  ), {
+    method: 'HEAD',
+    internalBase: internalProtectedDownloadBase,
+  });
+  if (legacyHead.status !== 200 || legacyHead.body.byteLength !== 0) {
+    throw new Error(`escaped legacy protected HEAD returned ${legacyHead.status}`);
+  }
+  const legacyRange = await requestPresignedObject(legacyBrowserUrl, {
+    internalBase: internalProtectedDownloadBase,
+    headers: { Range: 'bytes=0-8' },
+  });
+  if (legacyRange.status !== 206 || !legacyRange.body.equals(legacyBytes.subarray(0, 9))) {
+    throw new Error(`escaped legacy protected Range GET returned ${legacyRange.status}`);
+  }
+  console.log('ok: escaped UTF-8/space/percent/reserved legacy key preserves signed path/Host/query');
+} finally {
+  const deletedLegacy = await requestPresignedObject(legacyDeleteUrl, {
+    method: 'DELETE',
+    internalBase: internalGarageBase,
+  });
+  if (deletedLegacy.status !== 204) {
+    throw new Error(`escaped legacy cleanup returned ${deletedLegacy.status}`);
+  }
+}
 
 const projectId = publicProject?.data?.id;
 if (!Number.isInteger(projectId)) throw new Error('integration public project did not expose a numeric ID');

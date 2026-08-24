@@ -16,6 +16,19 @@ if [ -n "${UPLOAD_PART_GLOBAL_CONNECTIONS:-}" ]; then
     || fail "global connection limit must be at least the per-IP ceiling"
 fi
 
+if [ -n "${PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:-}" ]; then
+  case "$PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:$PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS" in
+    *[!0-9:]*|:*|*:) fail "protected download connection limits must be positive integers" ;;
+  esac
+  [ "$PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS" -ge 50 ] \
+    || fail "PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS must support at least 50 NAT users"
+  [ "$PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS" -ge "$PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS" ] \
+    || fail "protected download global limit must be at least the per-IP ceiling"
+  case "${S3_BUCKET_PROTECTED:-}" in
+    ''|*[!a-z0-9.-]*) fail "S3_BUCKET_PROTECTED is not a DNS-compatible bucket name" ;;
+  esac
+fi
+
 if [ -n "${GARAGE_PUBLIC_BUCKET_HOST:-}" ]; then
   case "${S3_BUCKET_PUBLIC:-}" in
     ''|*[!a-z0-9.-]*) fail "S3_BUCKET_PUBLIC is not a DNS-compatible bucket name" ;;

@@ -30,7 +30,14 @@ import {
 } from './infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
-import { createDirectMultipartControlStorage, createMultipartPartPresigner, createMultipartRecoveryStorage, createObjectStorage } from './lib/storage.js';
+import {
+	createDirectMultipartControlStorage,
+	createMultipartPartPresigner,
+	createMultipartRecoveryStorage,
+	createObjectStorage,
+	createProtectedDownloadPresigner,
+	type ProtectedDownloadPresigner,
+} from './lib/storage.js';
 import { createRootLogger } from './lib/logger.js';
 import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
 import { forbidden, notFound } from './shared/errors.js';
@@ -276,7 +283,10 @@ export interface ProductionResourceFactories {
 	googleTokens(config: Env): MaybePromise<GoogleTokenVerifier>;
 	prisma(config: Env): MaybePromise<PrismaClient>;
 	s3(config: Env): MaybePromise<S3Client>;
+	uploadSigningS3(config: Env): MaybePromise<S3Client>;
+	protectedDownloadSigningS3(config: Env): MaybePromise<S3Client>;
 	storage(client: S3Client, config: Env): MaybePromise<ObjectStorage>;
+	protectedDownloadPresigner(client: S3Client, config: Env): MaybePromise<ProtectedDownloadPresigner>;
 	settings(
 		client: PrismaClient,
 		logger: AppLogger,
@@ -307,6 +317,8 @@ export interface ProductionResourceOverrides {
 	googleTokens: ResourceLease<GoogleTokenVerifier>;
 	prisma: ResourceLease<PrismaClient>;
 	s3: ResourceLease<S3Client>;
+	uploadSigningS3: ResourceLease<S3Client>;
+	protectedDownloadSigningS3: ResourceLease<S3Client>;
 	storage: ResourceLease<ObjectStorage>;
 	settings: ResourceLease<SettingsStore>;
 	uploadLimiter: ResourceLease<UploadLimiter>;
@@ -341,7 +353,18 @@ const defaultFactories: ProductionResourceFactories = {
 			: [{ emit: 'stdout', level: 'error' }],
 	}),
 	s3: (config) => createS3Client(config),
+	uploadSigningS3: (config) => createS3Client({
+		...config,
+		S3_ENDPOINT: config.S3_PUBLIC_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
+	}),
+	protectedDownloadSigningS3: (config) => createS3Client({
+		...config,
+		S3_ENDPOINT: config.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
+	}),
 	storage: (client, config) => createObjectStorage(client, {
+		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
+	}),
+	protectedDownloadPresigner: (client, config) => createProtectedDownloadPresigner(client, {
 		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
 	}),
 	settings: (client, logger) => createPrismaSettingsStore(client, logger),
@@ -532,14 +555,20 @@ export async function createProductionBackendContext(
 		const storage = await resource('storage', () => factories.storage(s3, config));
 		// Presigning must use the browser-visible NAS upload origin. It is a
 		// separate S3 client so internal Garage endpoints never leak into URLs.
-		const directSigningClient = createS3Client({
-			...config,
-			S3_ENDPOINT: config.S3_PUBLIC_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
-		});
-		const directSigningS3 = owner.register('directSigningS3', owned(
-			directSigningClient,
-			() => directSigningClient.destroy(),
-		));
+		const directSigningS3 = await resource(
+			'uploadSigningS3',
+			() => factories.uploadSigningS3(config),
+			(client) => client.destroy(),
+		);
+		const protectedDownloadSigningS3 = await resource(
+			'protectedDownloadSigningS3',
+			() => factories.protectedDownloadSigningS3(config),
+			(client) => client.destroy(),
+		);
+		const protectedDownloadPresigner = await factories.protectedDownloadPresigner(
+			protectedDownloadSigningS3,
+			config,
+		);
 		const uploadLifecycle = await resource(
 			'uploadLifecycle',
 			() => {
@@ -654,7 +683,7 @@ export async function createProductionBackendContext(
 				assetsRepository: persistence.assetsRepository,
 				bannedIpRepository: persistence.bannedIpRepository,
 				projectAccess,
-				storage,
+				protectedDownloadPresigner,
 				downloadLimiter: protectedDownloads,
 				logger,
 				clock,

@@ -14,12 +14,13 @@ Run this profile on the NAS. The only externally published services are:
 | Surface | Default port | Purpose |
 | --- | ---: | --- |
 | `upload-part-origin` | 3901 | Browser presigned `UploadPart` PUT |
+| `protected-download-origin` | 3906 | Short-lived protected-object GET/HEAD capabilities |
 | `public-origin` | 3904 | Validated public image and immutable WebGL generation GET/HEAD |
 
 Garage S3 is bound to NAS loopback solely for NAS-local API/workers. Garage
 website and admin listeners have no host ports. Do not publish Garage admin,
 management endpoints, raw Garage volumes, or the NAS filesystem export path.
-The compose services share the private `garage_private` network; neither Nginx
+The compose services share the private `garage_private` network; no Nginx
 service mounts the Garage data/meta volumes or an export path.
 
 ## Required deployment values
@@ -33,9 +34,14 @@ export NAS_UPLOAD_BIND_ADDRESS=203.0.113.10
 export NAS_UPLOAD_PORT=443
 export NAS_PUBLIC_BIND_ADDRESS=203.0.113.11
 export NAS_PUBLIC_PORT=443
+export NAS_PROTECTED_DOWNLOAD_BIND_ADDRESS=203.0.113.12
+export NAS_PROTECTED_DOWNLOAD_PORT=443
 export UPLOAD_PART_MAX_BYTES=16m
 export UPLOAD_PART_GLOBAL_CONNECTIONS=512
 export UPLOAD_PART_PER_IP_CONNECTIONS=128
+export PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS=512
+export PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS=128
+export S3_BUCKET_PROTECTED=pcu-protected
 export S3_BUCKET_PUBLIC=pcu-public
 export GARAGE_PUBLIC_BUCKET_HOST=pcu-public.web.garage.localhost
 export S3_CORS_ALLOWED_ORIGINS=https://www.example.edu,https://admin.example.edu
@@ -57,6 +63,7 @@ refreshes/retries that idempotent part through the control plane.
 ```bash
 docker compose -f apps/db/docker-compose.yml --profile nas-data-plane config
 docker compose -f apps/db/docker-compose.yml --profile nas-data-plane exec upload-part-origin nginx -t
+docker compose -f apps/db/docker-compose.yml --profile nas-data-plane exec protected-download-origin nginx -t
 docker compose -f apps/db/docker-compose.yml --profile nas-data-plane exec public-origin nginx -t
 node apps/db/deployment-boundaries.test.mjs
 LIVE_GARAGE_PROXY_TEST=1 apps/db/live-data-plane.test.sh
@@ -81,3 +88,7 @@ upload state machine. Do not point either origin at the NAS export filesystem.
 Public-object responses preserve Garage Range/HEAD/304/416 semantics and
 object metadata. Only 200/206 immutable generation responses receive a
 long-lived browser cache directive; 404, 429 and every 5xx are `no-store`.
+Protected delivery is a separate origin: only signed GET/HEAD object paths under
+`/${S3_BUCKET_PROTECTED}/` reach Garage. Bucket roots, public buckets, unsigned
+requests, writes, preflights, and generic S3/admin paths fail closed. Its access
+log excludes the SigV4 query and every response is `private, no-store`.

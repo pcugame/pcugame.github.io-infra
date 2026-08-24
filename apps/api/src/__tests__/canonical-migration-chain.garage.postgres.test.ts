@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { Prisma, type PrismaClient } from '../generated/prisma/client.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createS3Client } from '../lib/s3.js';
-import { createDirectMultipartControlStorage, createObjectStorage } from '../lib/storage.js';
+import { createDirectMultipartControlStorage, createObjectStorage, createProtectedDownloadPresigner } from '../lib/storage.js';
 import { createCanonicalBackfillProgress, runCanonicalBackfill } from '../modules/migration/canonical-backfill.js';
 import { createCanonicalBackfillRepository } from '../modules/migration/canonical-backfill.prisma.js';
 import { createCanonicalObjectMaterializer } from '../infrastructure/canonical-object-migration.s3.js';
@@ -53,12 +53,13 @@ function directSourceProof(bytes: Buffer) {
 async function exerciseCanonicalHttpAndDataPlane(input: {
 	client: PrismaClient;
 	storage: ReturnType<typeof createObjectStorage>;
+	presigner: ReturnType<typeof createProtectedDownloadPresigner>;
 	assetId: number;
 	expectedBytes: bigint;
 }): Promise<void> {
 	const service = createAssetsService({
 		presignTtlSec: 60,
-		presign: (bucket, key, options) => input.storage.presign(bucket, key, options),
+		presign: (bucket, key, options) => input.presigner.presign(bucket, key, options),
 		wakeDeletionWorker() {},
 		loadProjectWithAccess: async () => undefined,
 		downloadLimiter: { check: () => 'ok' as const },
@@ -347,6 +348,7 @@ describe.runIf(enabled)('master fixture expand -> backfill -> preflight -> contr
 		S3_FORCE_PATH_STYLE: true,
 	});
 	const uploaded: Array<{ bucket: string; key: string }> = [];
+	const presigner = createProtectedDownloadPresigner(s3, { defaultPresignTtlSec: 60 });
 
 	beforeAll(async () => {
 		databaseUrl = process.env['DATABASE_URL'] ?? '';
@@ -560,6 +562,7 @@ describe.runIf(enabled)('master fixture expand -> backfill -> preflight -> contr
 		await exerciseCanonicalHttpAndDataPlane({
 			client: migrationClient,
 			storage,
+			presigner,
 			assetId: 42_001,
 			expectedBytes: 4_194_304n,
 		});
@@ -697,6 +700,7 @@ describe.runIf(enabled)('master fixture expand -> backfill -> preflight -> contr
 		await exerciseCanonicalHttpAndDataPlane({
 			client: migrationClient,
 			storage,
+			presigner,
 			assetId: 42_001,
 			expectedBytes: 4_194_304n,
 		});

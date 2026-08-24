@@ -67,6 +67,7 @@ release_common_args() {
     -e "LOG_LEVEL=${LOG_LEVEL:-info}"
     -e "S3_ENDPOINT=${S3_ENDPOINT}"
     -e "S3_PUBLIC_SIGNING_ENDPOINT=${S3_PUBLIC_SIGNING_ENDPOINT}"
+    -e "S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT=${S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT}"
     -e "PUBLIC_ASSET_ORIGIN=${PUBLIC_ASSET_ORIGIN}"
     -e "S3_REGION=${S3_REGION:-garage}"
     -e "S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}"
@@ -120,17 +121,49 @@ run_release_entry() {
 }
 
 validate_production_boundaries() {
-  for name in S3_ENDPOINT S3_PUBLIC_SIGNING_ENDPOINT PUBLIC_ASSET_ORIGIN; do
-    local value="${!name:-}"
-    [[ "$value" == https://* ]] || {
-      echo "ERROR: $name must be an explicit HTTPS origin"
-      return 1
-    }
-  done
-  [[ "$S3_ENDPOINT" != "$S3_PUBLIC_SIGNING_ENDPOINT" ]] || {
-    echo "ERROR: private S3_ENDPOINT and browser S3_PUBLIC_SIGNING_ENDPOINT must differ"
-    return 1
+  node - \
+    "$S3_ENDPOINT" \
+    "$S3_PUBLIC_SIGNING_ENDPOINT" \
+    "$S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT" \
+    "$PUBLIC_ASSET_ORIGIN" <<'NODE'
+const names = [
+  'S3_ENDPOINT',
+  'S3_PUBLIC_SIGNING_ENDPOINT',
+  'S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT',
+  'PUBLIC_ASSET_ORIGIN',
+];
+const values = process.argv.slice(2);
+const origins = new Map();
+for (let index = 0; index < names.length; index += 1) {
+  const name = names[index];
+  const value = values[index] ?? '';
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    console.error(`ERROR: ${name} must be an exact HTTPS origin`);
+    process.exit(1);
   }
+  if (
+    parsed.protocol !== 'https:'
+    || parsed.username !== ''
+    || parsed.password !== ''
+    || parsed.pathname !== '/'
+    || parsed.search !== ''
+    || parsed.hash !== ''
+    || value.endsWith('/')
+  ) {
+    console.error(`ERROR: ${name} must be an exact HTTPS origin without credentials, path, query, fragment, or trailing slash`);
+    process.exit(1);
+  }
+  const previous = origins.get(parsed.origin);
+  if (previous) {
+    console.error(`ERROR: ${name} normalized origin collides with ${previous}`);
+    process.exit(1);
+  }
+  origins.set(parsed.origin, name);
+}
+NODE
   [[ "${S3_PRIVATE_NETWORK_CONFIRMED:-false}" == "true" ]] || {
     echo "ERROR: set S3_PRIVATE_NETWORK_CONFIRMED=true only after firewalling Garage S3 to this host; never expose Garage admin/management listeners"
     return 1
@@ -567,6 +600,7 @@ do_up() {
     -e "LOG_LEVEL=${LOG_LEVEL:-info}"
     -e "S3_ENDPOINT=${S3_ENDPOINT}"
     -e "S3_PUBLIC_SIGNING_ENDPOINT=${S3_PUBLIC_SIGNING_ENDPOINT}"
+    -e "S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT=${S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT}"
     -e "PUBLIC_ASSET_ORIGIN=${PUBLIC_ASSET_ORIGIN}"
     -e "S3_REGION=${S3_REGION:-garage}"
     -e "S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}"
@@ -749,12 +783,14 @@ case "${1:-up}" in
   backfill) shift; do_backfill "$@" ;;
   contract-preflight) shift; do_contract_preflight "$@" ;;
   capacity-preflight) do_capacity_preflight ;;
+  boundary-preflight) load_env; validate_production_boundaries ;;
   mark-read-cutover) do_mark_read_cutover ;;
-  restart) do_down; do_up ;;
+  # do_up validates every boundary before its own down/up replacement phase.
+  restart) do_up ;;
   logs)    do_logs "${2:-api}" ;;
   status)  do_status ;;
   *)
-    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
+    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
     exit 1
     ;;
 esac

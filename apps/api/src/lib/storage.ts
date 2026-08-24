@@ -26,6 +26,32 @@ import type {
 
 const MAX_S3_KEYS = 1_000;
 
+/** The only object capability exposed to protected HTTP route composition. */
+export interface ProtectedDownloadPresigner {
+	presign(
+		bucket: string,
+		key: string,
+		options?: { ttlSec?: number; responseContentDisposition?: string },
+	): Promise<string>;
+}
+
+export function createProtectedDownloadPresigner(
+	client: S3Client,
+	options: { defaultPresignTtlSec: number },
+): ProtectedDownloadPresigner {
+	return {
+		async presign(bucket, key, presignOptions = {}) {
+			return getSignedUrl(client, new GetObjectCommand({
+				Bucket: bucket,
+				Key: key,
+				...(presignOptions.responseContentDisposition && {
+					ResponseContentDisposition: presignOptions.responseContentDisposition,
+				}),
+			}), { expiresIn: presignOptions.ttlSec ?? options.defaultPresignTtlSec });
+		},
+	};
+}
+
 /** S3 keys are compared by their UTF-8 binary/byte lexical ordering. */
 function compareS3Keys(left: string, right: string): number {
 	return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
@@ -96,7 +122,7 @@ function isNotModifiedSince(lastModified: Date | undefined, ifModifiedSince: Dat
 /** Bind every object operation to the S3 client owned by one BackendContext. */
 export function createObjectStorage(
 	client: S3Client,
-	options: { defaultPresignTtlSec: number },
+	_options: { defaultPresignTtlSec: number },
 ): ObjectStorage {
 	const requestOptions = (request?: StorageRequestOptions) => ({
 		...(request?.signal ? { abortSignal: request.signal } : {}),
@@ -152,15 +178,6 @@ export function createObjectStorage(
 				}),
 				...(contentLength != null && { ContentLength: contentLength }),
 			}), requestOptions(request));
-		},
-		async presign(bucket, key, presignOptions = {}) {
-			return getSignedUrl(client, new GetObjectCommand({
-				Bucket: bucket,
-				Key: key,
-				...(presignOptions.responseContentDisposition && {
-					ResponseContentDisposition: presignOptions.responseContentDisposition,
-				}),
-			}), { expiresIn: presignOptions.ttlSec ?? options.defaultPresignTtlSec });
 		},
 		async delete(bucket, key, request) {
 			await client.send(
