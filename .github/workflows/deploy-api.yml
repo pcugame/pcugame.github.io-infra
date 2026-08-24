@@ -1,32 +1,17 @@
-name: Build and Deploy API
+name: Build Phase 1 API Release Image
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'apps/api/**'
-      - 'packages/contracts/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'server/deploy.sh'
-      - '.github/workflows/deploy-api.yml'
-      - '.github/release-gates/web-before-api/**'
   workflow_dispatch:
-    inputs:
-      require_web_first:
-        description: 'Wait for a successful Web deployment of this exact ref before deploying the API'
-        required: true
-        default: false
-        type: boolean
 
 permissions:
-  actions: read
   contents: read
   packages: write
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,207 +27,75 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate --workspace=apps/api
 
-      - name: Test API
-        run: npm test --workspace=apps/api
+      - name: Test Phase 1 release tree
+        run: npm run test:scripts --workspace=apps/api
 
-      - name: Build API
+      - name: Test API
+        run: npm exec --workspace=apps/api -- vitest run
+
+      - name: Build API and release CLIs
         run: npm run build --workspace=apps/api
 
       - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+
+      - name: Build and push immutable Phase 1 image
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: apps/api/Dockerfile
           push: true
-          platforms: ${{ vars.API_TARGET_PLATFORMS || 'linux/amd64' }}
+          platforms: linux/amd64
           build-args: |
             VCS_REF=${{ github.sha }}
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest
-            ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:sha-${{ github.sha }}
-          # GHA cache layers: unchanged stages (apt-get, npm ci, sharp workaround) are
-          # pulled from cache; only stages touched by the diff re-run. `mode=max` caches
-          # intermediate stages too so deps + builder both benefit, not just the final
-          # image. Branch-scoped per GHA cache rules; 10 GB soft limit is comfortable.
+          tags: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:phase1-sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Determine release ordering
-        id: release-order
+      - name: Verify the pushed image by immutable digest
         env:
-          BEFORE_SHA: ${{ github.event.before }}
-          MANUAL_REQUIRE_WEB_FIRST: ${{ inputs.require_web_first }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          require_web_first=false
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            require_web_first="${MANUAL_REQUIRE_WEB_FIRST:-false}"
-          else
-            if git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-              changed_paths="$(git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}")"
-            else
-              changed_paths="$(git show --pretty='' --name-only "${GITHUB_SHA}")"
-            fi
-            if grep -q '^\.github/release-gates/web-before-api/' <<< "${changed_paths}"; then
-              require_web_first=true
-            fi
-          fi
+          immutable_image="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+          docker pull "${immutable_image}"
 
-          echo "require_web_first=${require_web_first}" >> "${GITHUB_OUTPUT}"
+          revision="$(docker image inspect "${immutable_image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+          test "${revision}" = "${SOURCE_SHA}"
 
-      - name: Wait for matching Web deployment
-        if: steps.release-order.outputs.require_web_first == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
+          marker="$(docker run --rm --entrypoint node "${immutable_image}" dist/phase1-release-manifest.js)"
+          test "${marker}" = 'PCU_PHASE1_RUNTIME_V1'
 
-          web_run_id=""
-          web_workflow_succeeded=false
-          for attempt in $(seq 1 240); do
-            if [ -z "${web_run_id}" ]; then
-              web_run_id="$(
-                gh api --method GET \
-                  "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-web-pages.yml/runs" \
-                  -f head_sha="${GITHUB_SHA}" \
-                  -f per_page=10 \
-                  --jq '.workflow_runs[0].id // empty'
-              )"
-            fi
+          docker run --rm --entrypoint sh "${immutable_image}" -eu -c '
+            test -f dist/server.js
+            for worker in game-validation webgl video image export; do
+              test -f "dist/${worker}-worker.js"
+            done
+            for cli in backfill-canonical-assets preflight-canonical-contract release-migrate snapshot-garage-inventory verify-cutover-report; do
+              test -f "dist-release/scripts/${cli}.js"
+            done
+            for migration in \
+              20260821400000_project_submission_draft_status \
+              20260821500000_project_submission_expand \
+              20260821550000_project_submission_finalizing_status \
+              20260821600000_project_publication_expand \
+              20260821700000_canonical_object_relocation_expand; do
+              test -f "prisma/migrations/${migration}/migration.sql"
+            done
+            test ! -e prisma/migrations/20260822000000_canonical_asset_contract
+          '
 
-            if [ -z "${web_run_id}" ]; then
-              if (( attempt % 6 == 1 )); then
-                echo "Waiting for the matching Web workflow run to appear..."
-              fi
-              sleep 10
-              continue
-            fi
-
-            web_state="$(
-              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${web_run_id}" \
-                --jq '[.status, (.conclusion // ""), .html_url] | @tsv'
-            )"
-            IFS=$'\t' read -r status conclusion run_url <<< "${web_state}"
-
-            if [ "${status}" = "completed" ]; then
-              if [ "${conclusion}" = "success" ]; then
-                echo "Web deployment succeeded: ${run_url}"
-                web_workflow_succeeded=true
-                break
-              fi
-
-              echo "Web deployment ended with ${conclusion}: ${run_url}"
-              exit 1
-            fi
-
-            if (( attempt % 6 == 1 )); then
-              echo "Web deployment is ${status}: ${run_url}"
-            fi
-            sleep 10
-          done
-
-          if [ "${web_workflow_succeeded}" != "true" ]; then
-            echo "Timed out waiting for Web deployment run ${web_run_id:-unknown}."
-            exit 1
-          fi
-
-          for attempt in $(seq 1 120); do
-            deployed_sha="$(
-              curl --fail --silent --show-error --location --max-time 10 \
-                "https://pcugame.github.io/release-sha.txt?expected=${GITHUB_SHA}" \
-                2>/dev/null || true
-            )"
-            if [ "${deployed_sha}" = "${GITHUB_SHA}" ]; then
-              echo "Production Web serves the compatible release ${GITHUB_SHA}."
-              exit 0
-            fi
-            if (( attempt % 6 == 1 )); then
-              echo "Waiting for GitHub Pages to serve Web release ${GITHUB_SHA}..."
-            fi
-            sleep 10
-          done
-
-          echo "GitHub Pages did not serve Web release ${GITHUB_SHA} before timeout."
-          exit 1
-
-      - name: Copy deploy script to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh
-          target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
-          strip_components: 1
-          overwrite: true
-
-      - name: SSH deploy to server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,API_IMAGE
-          script_stop: true
-          script: |
-            export PATH=$PATH:/usr/local/bin:/usr/bin
-            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
-            chmod +x "${DEPLOY_DIR}/deploy.sh"
-
-            if podman container exists gp-postgres; then
-              umask 077
-              backup_dir="${DEPLOY_DIR}/backups"
-              backup_file="${backup_dir}/pre-webgl-${{ github.sha }}-$(date -u +%Y%m%dT%H%M%SZ).dump"
-              mkdir -p "${backup_dir}"
-              echo "Creating pre-deploy PostgreSQL backup at ${backup_file}"
-              if ! podman exec gp-postgres sh -c 'exec pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > "${backup_file}"; then
-                rm -f "${backup_file}"
-                echo "Database backup failed; refusing to deploy."
-                exit 1
-              fi
-              if [ ! -s "${backup_file}" ]; then
-                rm -f "${backup_file}"
-                echo "Database backup was empty; refusing to deploy."
-                exit 1
-              fi
-            fi
-
-            rollback_tag="localhost/pcu-graduationproject-v2-api:rollback"
-            previous_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null || true)"
-            if [ -n "${previous_image_id}" ]; then
-              podman untag "${rollback_tag}" 2>/dev/null || true
-              podman tag "${previous_image_id}" "${rollback_tag}"
-            fi
-
-            if ! API_IMAGE="${API_IMAGE}" PULL_API_IMAGE=true "${DEPLOY_DIR}/deploy.sh" up; then
-              echo "Candidate deployment failed. Restoring the previous API image."
-              if [ -z "${previous_image_id}" ]; then
-                echo "No previous API image was available for rollback."
-                exit 1
-              fi
-              API_IMAGE="${rollback_tag}" PULL_API_IMAGE=false "${DEPLOY_DIR}/deploy.sh" up
-              echo "Rollback completed; failing the workflow to surface the rejected deployment."
-              exit 1
-            fi
-        env:
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
-          API_IMAGE: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:sha-${{ github.sha }}
+          {
+            echo '### Phase 1 API release image'
+            echo "- Image: \`${immutable_image}\`"
+            echo "- Source SHA: \`${SOURCE_SHA}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

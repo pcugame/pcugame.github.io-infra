@@ -62,4 +62,20 @@ describe('Phase 1 release artifact tree', () => {
 		expect(assetsService).toContain('asset_download_legacy_fallback');
 		expect(publicBridge).toContain('public_webgl_legacy_bridge');
 	});
+
+	it('builds an immutable Phase 1 image without deploying or publishing latest', async () => {
+		const workflow = await read('../../.github/workflows/deploy-api.yml');
+		expect(workflow).toContain('name: Build Phase 1 API Release Image');
+		expect(workflow).toMatch(/^on:\n  workflow_dispatch:\n\npermissions:/m);
+		expect(workflow).not.toContain('\n  deploy:');
+		expect(workflow).not.toContain(':latest');
+		expect(workflow).toContain('id: build');
+		expect(workflow).toContain('IMAGE_DIGEST: ${{ steps.build.outputs.digest }}');
+		expect(workflow).toContain('immutable_image="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"');
+		expect(workflow).toContain('docker pull "${immutable_image}"');
+		expect(workflow).toContain('PCU_PHASE1_RUNTIME_V1');
+		expect(workflow).toContain('test ! -e prisma/migrations/20260822000000_canonical_asset_contract');
+		expect(workflow).toContain('org.opencontainers.image.revision');
+		expect(workflow).toContain('${GITHUB_STEP_SUMMARY}');
+	});
 });
