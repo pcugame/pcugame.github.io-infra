@@ -78,4 +78,25 @@ describe('Phase 1 release artifact tree', () => {
 		expect(workflow).toContain('org.opencontainers.image.revision');
 		expect(workflow).toContain('${GITHUB_STEP_SUMMARY}');
 	});
+
+	it('does not ship a dispatchable or publishing GitHub Pages workflow', async () => {
+		const workflowRoot = new URL('../../.github/workflows/', apiRoot);
+		const workflowNames = await readdir(workflowRoot);
+		expect(workflowNames).not.toContain('deploy-web-pages.yml');
+
+		const workflowSources = await Promise.all(
+			workflowNames
+				.filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
+				.map((name) => readFile(new URL(name, workflowRoot), 'utf8')),
+		);
+		const allWorkflows = workflowSources.join('\n');
+		for (const publisherMarker of [
+			'PAGES_DEPLOY_TOKEN',
+			'peaceiris/actions-gh-pages',
+			'publish_dir: apps/web/dist',
+			'external_repository: pcugame/pcugame.github.io',
+			'Deploy Web to GitHub Pages',
+		]) expect(allWorkflows).not.toContain(publisherMarker);
+		expect(allWorkflows).not.toMatch(/group:\s*['"]?pages['"]?/);
+	});
 });
