@@ -19,6 +19,7 @@ PROJECT_PUBLICATION_WORKER_CONTAINER="gp-worker-project-publication"
 PG_IMAGE="docker.io/library/postgres:16-alpine"
 API_IMAGE="${API_IMAGE:-ghcr.io/pcugame/pcu-graduationproject-v2-api:latest}"
 MIGRATION_IMAGE="${MIGRATION_IMAGE:-$API_IMAGE}"
+RELEASE_IMAGE_REPOSITORY="ghcr.io/pcugame/pcu-graduationproject-v2-api"
 PULL_API_IMAGE="${PULL_API_IMAGE:-true}"
 PG_VOLUME="gp_pg_data"
 API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"
@@ -52,8 +53,8 @@ require_immutable_release_images() {
   for pair in "API_IMAGE=${API_IMAGE}" "MIGRATION_IMAGE=${MIGRATION_IMAGE}"; do
     local name="${pair%%=*}"
     local image="${pair#*=}"
-    [[ "$image" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || {
-      echo "ERROR: $name must use an immutable @sha256 release digest: $image"
+    [[ "$image" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]] || {
+      echo "ERROR: $name must use an immutable @sha256 release digest from the exact authorized repository ${RELEASE_IMAGE_REPOSITORY}@sha256:<64 lowercase hex>: $image"
       return 1
     }
   done
@@ -616,6 +617,52 @@ do_mark_read_cutover() {
   echo "Canonical-first read cutover recorded. Observe zero fallback reads for at least 24 hours."
 }
 
+do_verify_phase1_observation_window() {
+  local expected_started_at="${1:-}"
+  local observation_file="${CUTOVER_STATE_DIR}/phase1-observation"
+  [[ -f "$observation_file" ]] || {
+    echo "ERROR: server-side Phase 1 observation record is missing"
+    return 1
+  }
+  [[ "$expected_started_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || {
+    echo "ERROR: expected observation start must be a canonical UTC timestamp"
+    return 1
+  }
+  OBSERVATION_RECORD="$observation_file" EXPECTED_OBSERVATION_START="$expected_started_at" \
+    node --input-type=module <<'NODE'
+import { readFile } from 'node:fs/promises';
+
+const record = await readFile(process.env.OBSERVATION_RECORD, 'utf8');
+const fields = new Map();
+for (const line of record.split('\n')) {
+  if (!line) continue;
+  const separator = line.indexOf('=');
+  if (separator <= 0) throw new Error('Phase 1 observation record is malformed');
+  const key = line.slice(0, separator);
+  const value = line.slice(separator + 1);
+  if (!/^[a-z0-9_]+$/.test(key) || fields.has(key)) {
+    throw new Error('Phase 1 observation record contains an invalid or duplicate field');
+  }
+  fields.set(key, value);
+}
+const startedAt = fields.get('read_cutover_at');
+if (startedAt !== process.env.EXPECTED_OBSERVATION_START) {
+  throw new Error('attested observation start does not match the server-side record');
+}
+const started = Date.parse(startedAt);
+if (!Number.isFinite(started)) throw new Error('server-side observation start is invalid');
+const elapsed = Date.now() - started;
+const hour = 60 * 60 * 1000;
+if (elapsed < 24 * hour) {
+  throw new Error(`server-side observation is only ${Math.floor(elapsed / hour)}h old`);
+}
+if (elapsed > 31 * 24 * hour) {
+  throw new Error('server-side observation is older than 31 days; run a new preflight');
+}
+console.log('Server-side Phase 1 observation window is current.');
+NODE
+}
+
 do_verify_final_web() {
   local expected_sha="${1:-}"
   load_env
@@ -1033,13 +1080,14 @@ case "${1:-up}" in
   release-artifact-preflight) do_release_artifact_preflight "${2:-}" ;;
   authorize-phase1-rollback) do_authorize_phase1_rollback "${2:-}" ;;
   verify-final-web) do_verify_final_web "${2:-}" ;;
+  verify-observation-window) do_verify_phase1_observation_window "${2:-}" ;;
   mark-read-cutover) do_mark_read_cutover ;;
   # do_up validates every boundary before its own down/up replacement phase.
   restart) do_up ;;
   logs)    do_logs "${2:-api}" ;;
   status)  do_status ;;
   *)
-    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|release-artifact-preflight [phase1|phase2]|authorize-phase1-rollback <nonce>|verify-final-web <git-sha>|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
+    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|release-artifact-preflight [phase1|phase2]|authorize-phase1-rollback <nonce>|verify-final-web <git-sha>|verify-observation-window <started-at>|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
     exit 1
     ;;
 esac

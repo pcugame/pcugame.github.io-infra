@@ -61,10 +61,25 @@ standalone publication cannot replace `release-sha.txt` between exact-SHA
 verification and contract DDL. Contract preflight and destructive DDL remain
 blocked until the marker matches.
 
+Both production workflows fail unless they run in
+`pcugame/pcugame.github.io-infra` from its exact `master` default branch. Before
+publishing, they also query the GitHub API and fail closed unless
+`pcugame/pcugame.github.io` is active with `master` as its default branch and
+classic branch protection restricts pushes to one actor. Configure the repository
+variable `PAGES_DEPLOY_ACTOR` to the login owning `PAGES_DEPLOY_TOKEN`; that token
+must be able to read repository/branch-protection metadata and publish contents.
+Protection must apply to administrators, forbid deletion, allow the sole actor's
+force publication, and contain exactly that user with no team or app push actor.
+This is required because the external Pages repository does not share this
+repository's workflow concurrency lock.
+
 Then copy the exact server-side
 `read_cutover_at` value into the Phase 2 workflow input and enter
 `I_ATTEST_24H_ZERO_FALLBACK`. The workflow rejects timestamps under 24 hours, stale
-attestations, or values that differ from the server record. It then drains again,
+attestations, or values that differ from the server record. After any production
+environment approval delay, the server re-reads the record and recomputes the age
+from its own clock immediately before drain; it accepts only 24 hours through 31
+days. It then drains again,
 takes another DB backup and Garage snapshot, runs the object-aware contract
 preflight, applies the contract, verifies its durable `_prisma_migrations` record,
 and starts the Phase 2 runtime with all six workers, including project

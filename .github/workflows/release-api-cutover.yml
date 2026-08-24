@@ -45,13 +45,28 @@ jobs:
       phase1_image: ${{ steps.release.outputs.phase1_image }}
       phase1_source_sha: ${{ steps.release.outputs.phase1_source_sha }}
     steps:
+      - name: Fail closed outside the production control default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [ "${GITHUB_REPOSITORY}" = pcugame/pcugame.github.io-infra ]
+          [ "${GITHUB_DEFAULT_BRANCH}" = master ]
+          [ "${GITHUB_REF}" = refs/heads/master ]
+
+      - uses: actions/checkout@v4
+
+      - name: Verify production control repository and default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node server/verify-github-release-boundaries.mjs control
+
       - id: release
         env:
           RELEASE_PHASE: ${{ inputs.phase }}
           PHASE1_IMAGE: ${{ inputs.phase1_api_image }}
           PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
           FINAL_IMAGE: ${{ inputs.final_api_image }}
-          EXPECTED_IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api
+          EXPECTED_IMAGE_REPO: ghcr.io/pcugame/pcu-graduationproject-v2-api
           OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
           OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
         run: |
@@ -107,7 +122,27 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Fail closed outside the production control default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [ "${GITHUB_REPOSITORY}" = pcugame/pcugame.github.io-infra ]
+          [ "${GITHUB_DEFAULT_BRANCH}" = master ]
+          [ "${GITHUB_REF}" = refs/heads/master ]
+
       - uses: actions/checkout@v4
+
+      - name: Re-verify production control repository and default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node server/verify-github-release-boundaries.mjs control
+
+      - name: Preflight external Pages single-writer boundary before maintenance
+        if: ${{ inputs.phase == 'phase2' }}
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
+        run: node server/verify-github-release-boundaries.mjs pages
 
       - name: Copy release controls to server
         uses: appleboy/scp-action@v0.1.7
@@ -326,6 +361,10 @@ jobs:
             # Prove the exact final artifact before downtime. The API and every
             # worker remain stopped from this drain through web publication and DDL.
             "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
+            # Environment approval can outlive the browser-side authorization
+            # check. Re-read the server record and evaluate its age using the
+            # production server clock immediately before mutations are drained.
+            "${DEPLOY_DIR}/deploy.sh" verify-observation-window "${OBSERVATION_STARTED_AT}"
             "${DEPLOY_DIR}/deploy.sh" drain
             "${DEPLOY_DIR}/deploy.sh" backup "phase2-${RELEASE_SOURCE_SHA}"
             "${DEPLOY_DIR}/deploy.sh" inventory "/release-state/garage-before-contract-${RELEASE_SOURCE_SHA}.json"
@@ -373,6 +412,13 @@ jobs:
         if: ${{ inputs.phase == 'phase2' }}
         working-directory: apps/web
         run: printf '%s\n' "${GITHUB_SHA}" > dist/release-sha.txt
+
+      - name: Verify external Pages repository single-writer boundary
+        if: ${{ inputs.phase == 'phase2' }}
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
+        run: node server/verify-github-release-boundaries.mjs pages
 
       - name: Publish exact final web while mutations remain drained
         if: ${{ inputs.phase == 'phase2' }}

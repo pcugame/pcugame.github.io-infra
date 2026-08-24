@@ -48,6 +48,7 @@ assert.match(deploy, /PCU_RELEASE_SCHEMA_PHASE === "phase2"[\s\S]*project-public
 assert.match(deploy, /release_schema_phase" == phase2[\s\S]*PROJECT_PUBLICATION_WORKER_CONTAINER/);
 assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == false[\s\S]*assert_phase1_rollback_authorization/);
 assert.match(deploy, /must use an immutable @sha256 release digest/);
+assert.match(deploy, /ghcr\\\.io\/pcugame\/pcu-graduationproject-v2-api@sha256/);
 assert.match(deploy, /image source revision label does not match RELEASE_SOURCE_SHA/);
 assert.match(deploy, /rollback image tag no longer resolves to the authorized image ID/);
 assert.doesNotMatch(deploy, /\*:\s*sha-|localhost\/\*:rollback-/);
@@ -309,7 +310,7 @@ exit 0
 `);
 await chmod(fakePodman, 0o755);
 const releaseDigest = `sha256:${'1'.repeat(64)}`;
-const releaseImage = `ghcr.io/pcugame/api@${releaseDigest}`;
+const releaseImage = `ghcr.io/pcugame/pcu-graduationproject-v2-api@${releaseDigest}`;
 const releaseSourceSha = '2'.repeat(40);
 const releaseImageId = `sha256:${'3'.repeat(64)}`;
 const releaseEnv = {
@@ -331,6 +332,20 @@ const mutableTagRelease = await runBoundary(boundaryFixture, 'release-artifact-p
 }, ['phase2']);
 assert.notEqual(mutableTagRelease.status, 0, 'mutable sha-* release tag unexpectedly passed');
 assert.match(`${mutableTagRelease.stdout}\n${mutableTagRelease.stderr}`, /must use an immutable @sha256/);
+
+for (const unauthorizedImage of [
+	`registry.example/pcugame/pcu-graduationproject-v2-api@${releaseDigest}`,
+	`ghcr.io/other/pcu-graduationproject-v2-api@${releaseDigest}`,
+	`ghcr.io/pcugame/other-api@${releaseDigest}`,
+]) {
+	const unauthorizedRelease = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
+		...releaseEnv,
+		API_IMAGE: unauthorizedImage,
+		MIGRATION_IMAGE: unauthorizedImage,
+	}, ['phase2']);
+	assert.notEqual(unauthorizedRelease.status, 0, `${unauthorizedImage} unexpectedly passed`);
+	assert.match(`${unauthorizedRelease.stdout}\n${unauthorizedRelease.stderr}`, /exact authorized repository/);
+}
 
 const digestMismatch = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
 	...releaseEnv,
@@ -393,6 +408,42 @@ const replayedRollback = await runBoundary(boundaryFixture, 'release-artifact-pr
 }, ['phase1']);
 assert.notEqual(replayedRollback.status, 0, 'consumed rollback authorization unexpectedly replayed');
 assert.match(`${replayedRollback.stdout}\n${replayedRollback.stderr}`, /authorization is absent or already consumed/);
+
+// A browser-side authorization check can become stale while an environment
+// approval waits. The production server re-reads its own observation record
+// and evaluates the 24-hour/31-day window immediately before drain.
+const observationDir = join(fixtureDir, 'cutover-state');
+await mkdir(observationDir, { recursive: true });
+const canonicalUtc = (date) => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+const runObservationWindow = async (ageMs, expectedOverride) => {
+	const startedAt = canonicalUtc(new Date(Date.now() - ageMs));
+	await writeFile(join(observationDir, 'phase1-observation'), [
+		`read_cutover_at=${startedAt}`,
+		`phase1_api_image=${releaseImage}`,
+		'',
+	].join('\n'));
+	const result = await runBoundary(
+		boundaryFixture,
+		'verify-observation-window',
+		{},
+		[expectedOverride ?? startedAt],
+	);
+	return { result, startedAt };
+};
+const currentObservation = await runObservationWindow(25 * 60 * 60 * 1000);
+assert.equal(currentObservation.result.status, 0, currentObservation.result.stderr || currentObservation.result.stdout);
+const delayedTooLittle = await runObservationWindow(23 * 60 * 60 * 1000);
+assert.notEqual(delayedTooLittle.result.status, 0, 'observation younger than 24h unexpectedly passed');
+assert.match(`${delayedTooLittle.result.stdout}\n${delayedTooLittle.result.stderr}`, /only 23h old/);
+const delayedTooLong = await runObservationWindow(32 * 24 * 60 * 60 * 1000);
+assert.notEqual(delayedTooLong.result.status, 0, 'approval-delayed observation older than 31d unexpectedly passed');
+assert.match(`${delayedTooLong.result.stdout}\n${delayedTooLong.result.stderr}`, /older than 31 days/);
+const mismatchedObservation = await runObservationWindow(
+	25 * 60 * 60 * 1000,
+	canonicalUtc(new Date(Date.now() - 26 * 60 * 60 * 1000)),
+);
+assert.notEqual(mismatchedObservation.result.status, 0, 'mismatched observation attestation unexpectedly passed');
+assert.match(`${mismatchedObservation.result.stdout}\n${mismatchedObservation.result.stderr}`, /does not match the server-side record/);
 
 const runCapacity = async (fixture) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);

@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import {
+	assertControlWorkflowIdentity,
+	assertPagesRepositoryBoundary,
+} from './verify-github-release-boundaries.mjs';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
@@ -31,7 +35,20 @@ assert.match(webWorkflow, /printf '%s\\n' "\$\{GITHUB_SHA\}" > dist\/release-sha
 for (const workflow of [webWorkflow, cutover]) {
 	assert.match(workflow, /group: production-object-cutover/);
 	assert.match(workflow, /cancel-in-progress: false/);
+	assert.match(workflow, /node server\/verify-github-release-boundaries\.mjs control/);
+	assert.match(workflow, /GITHUB_DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/);
+	assert.match(workflow, /\[ "\$\{GITHUB_REPOSITORY\}" = pcugame\/pcugame\.github\.io-infra \]/);
+	assert.match(workflow, /\[ "\$\{GITHUB_DEFAULT_BRANCH\}" = master \]/);
+	assert.match(workflow, /\[ "\$\{GITHUB_REF\}" = refs\/heads\/master \]/);
+	assert.match(workflow, /node server\/verify-github-release-boundaries\.mjs pages/);
+	const pagesPublish = workflow.indexOf('peaceiris/actions-gh-pages@v4');
+	const pagesBoundary = workflow.lastIndexOf('node server/verify-github-release-boundaries.mjs pages', pagesPublish);
+	assert.ok(pagesBoundary >= 0 && pagesPublish > pagesBoundary, 'Pages repository boundary must be re-verified immediately before publication');
 }
+const cutoverJob = cutover.slice(cutover.indexOf('  cutover:'));
+assert.match(cutoverJob, /environment: production[\s\S]*Re-verify production control repository and default branch/);
+assert.match(cutoverJob, /Preflight external Pages single-writer boundary before maintenance/);
+assert.match(cutover, /EXPECTED_IMAGE_REPO: ghcr\.io\/pcugame\/pcu-graduationproject-v2-api/);
 assert.match(cutover, /final_api_image must be an immutable @sha256 digest/);
 assert.match(cutover, /phase1_api_image must be an immutable @sha256 digest/);
 for (const marker of [
@@ -85,12 +102,17 @@ assert.match(phase2Block, /current_phase1_source_sha[\s\S]*phase1_source_sha/);
 const attestedPhase2 = phase2Block.indexOf('[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]');
 const phase2Drain = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain', attestedPhase2);
 const finalArtifactPreflight = phase2Block.indexOf('release-artifact-preflight phase2', attestedPhase2);
+const serverObservationWindow = phase2Block.indexOf('verify-observation-window "${OBSERVATION_STARTED_AT}"', finalArtifactPreflight);
 const finalWebPublish = phase2Block.indexOf('- name: Publish exact final web while mutations remain drained');
 const finalWebGate = phase2Block.indexOf('verify-final-web "${RELEASE_SOURCE_SHA}"');
 const phase2Preflight = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" contract-preflight', finalWebGate);
 const phase2Contract = phase2Block.indexOf('release-migrate apply-contract');
 const phase2Runtime = phase2Block.indexOf('RELEASE_SCHEMA_PHASE=phase2 "${DEPLOY_DIR}/deploy.sh" up', phase2Contract);
 assert.ok(finalArtifactPreflight >= 0 && finalArtifactPreflight < phase2Drain, 'final artifact preflight must precede downtime');
+assert.ok(
+	finalArtifactPreflight < serverObservationWindow && serverObservationWindow < phase2Drain,
+	'server observation age must be re-read and checked after approval, immediately before drain',
+);
 assert.ok(phase2Drain < finalWebPublish && finalWebPublish < finalWebGate, 'same-SHA final web must publish after drain and before its exact marker gate');
 assert.ok(finalWebGate < phase2Preflight && phase2Preflight < phase2Contract, 'final web gate must precede contract preflight and DDL');
 assert.ok(phase2Contract < phase2Runtime, 'final runtime must start only after contract DDL');
@@ -134,5 +156,40 @@ assert.match(cutover, /podman stop gp-api[\s\S]*smoke-data-plane\.mjs[\s\S]*podm
 const forwardFix = cutover.slice(cutover.indexOf('phase2-forward-fix ]; then'), cutover.indexOf('[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]', cutover.indexOf('phase2-forward-fix ]; then')));
 assert.match(forwardFix, /release-assert phase2/);
 assert.doesNotMatch(forwardFix, /rollback_tag|previous_image/);
+
+assert.doesNotThrow(() => assertControlWorkflowIdentity({
+	repository: 'pcugame/pcugame.github.io-infra',
+	ref: 'refs/heads/master',
+	defaultBranch: 'master',
+}));
+for (const context of [
+	{ repository: 'fork/pcugame.github.io-infra', ref: 'refs/heads/master', defaultBranch: 'master' },
+	{ repository: 'pcugame/pcugame.github.io-infra', ref: 'refs/heads/salvage/object-transfer-v2', defaultBranch: 'master' },
+	{ repository: 'pcugame/pcugame.github.io-infra', ref: 'refs/heads/master', defaultBranch: 'main' },
+]) assert.throws(() => assertControlWorkflowIdentity(context));
+
+const pagesBoundaryFixture = {
+	repository: { full_name: 'pcugame/pcugame.github.io', default_branch: 'master', archived: false },
+	authenticatedUser: { login: 'release-bot' },
+	expectedActor: 'release-bot',
+	protection: {
+		enforce_admins: { enabled: true },
+		allow_deletions: { enabled: false },
+		allow_force_pushes: { enabled: true },
+		restrictions: { users: [{ login: 'release-bot' }], teams: [], apps: [] },
+	},
+};
+assert.doesNotThrow(() => assertPagesRepositoryBoundary(pagesBoundaryFixture));
+for (const invalidBoundary of [
+	{ ...pagesBoundaryFixture, repository: { ...pagesBoundaryFixture.repository, full_name: 'attacker/pages' } },
+	{ ...pagesBoundaryFixture, authenticatedUser: { login: 'another-writer' } },
+	{ ...pagesBoundaryFixture, protection: { ...pagesBoundaryFixture.protection, enforce_admins: { enabled: false } } },
+	{ ...pagesBoundaryFixture, protection: { ...pagesBoundaryFixture.protection, allow_force_pushes: { enabled: false } } },
+	{ ...pagesBoundaryFixture, protection: { ...pagesBoundaryFixture.protection, restrictions: undefined } },
+	{ ...pagesBoundaryFixture, protection: {
+		...pagesBoundaryFixture.protection,
+		restrictions: { users: [{ login: 'release-bot' }, { login: 'second-writer' }], teams: [], apps: [] },
+	} },
+]) assert.throws(() => assertPagesRepositoryBoundary(invalidBoundary));
 
 console.log('Two-phase release ordering, artifacts, and rollback fence: OK');
