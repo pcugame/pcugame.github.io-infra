@@ -29,12 +29,15 @@ describe('production deployment safety', () => {
 		expect(productionEnvExample).toMatch(/^TRUST_PROXY=1$/m);
 	});
 
-	it('publishes a tested immutable API image without an implicit production cutover', () => {
+	it('publishes a tested API image and records its immutable digest without an implicit production cutover', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
 		expect(apiWorkflow).toContain('actions: read');
 		expect(apiWorkflow).toContain('npm test --workspace=apps/api');
 		expect(apiWorkflow).toContain('npm run build --workspace=apps/api');
-		expect(apiWorkflow).toContain('pcu-graduationproject-v2-api:sha-${{ github.sha }}');
+		expect(apiWorkflow).toContain('id: release-image');
+		expect(apiWorkflow).toContain('RELEASE_SOURCE_SHA=${{ github.sha }}');
+		expect(apiWorkflow).toContain('${{ steps.release-image.outputs.digest }}');
+		expect(apiWorkflow).not.toContain(':sha-${{ github.sha }}');
 		expect(apiWorkflow).not.toContain('SSH deploy to server');
 	});
 
