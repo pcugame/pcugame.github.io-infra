@@ -35,6 +35,10 @@ const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true'
 const migrationsUrl = new URL('../../prisma/migrations/', import.meta.url);
 const contractMigration = '20260822000000_canonical_asset_contract';
 const canonicalExpandMigration = '20260821000000_canonical_asset_expand';
+const legacyBridgeMetricNames = [
+	'asset_download_legacy_fallback', 'asset_download_legacy_route', 'public_image_legacy_bridge',
+	'public_image_legacy_fallback', 'public_webgl_legacy_bridge', 'public_webgl_legacy_fallback', 'export_legacy_fallback',
+] as const;
 const buckets = {
 	protectedBucket: process.env['S3_BUCKET_PROTECTED'] ?? 'pcu-protected',
 	publicBucket: process.env['S3_BUCKET_PUBLIC'] ?? 'pcu-public',
@@ -567,15 +571,41 @@ describe.runIf(enabled)('master fixture expand -> backfill -> preflight -> contr
 			expectedBytes: 4_194_304n,
 		});
 
-		for (const name of [
-			'asset_download_legacy_fallback', 'asset_download_legacy_route', 'public_image_legacy_bridge',
-			'public_image_legacy_fallback', 'public_webgl_legacy_bridge', 'public_webgl_legacy_fallback', 'export_legacy_fallback',
-		]) {
-			await migrationClient.$executeRaw(Prisma.sql`
-				INSERT INTO "migration_metrics" ("name", "scope", "value", "last_observed_at", "updated_at")
-				VALUES (${name}, '', 0, CURRENT_TIMESTAMP - INTERVAL '25 hours', CURRENT_TIMESTAMP)
+			const [phase1ProjectDefault] = await migrationClient.$queryRaw<Array<{ defaultExpression: string | null }>>(Prisma.sql`
+				SELECT column_default AS "defaultExpression"
+				FROM information_schema.columns
+				WHERE table_schema = current_schema() AND table_name = 'projects' AND column_name = 'status'
 			`);
-		}
+			expect(phase1ProjectDefault?.defaultExpression).toContain('PUBLISHED');
+
+			for (const name of legacyBridgeMetricNames) {
+				await migrationClient.$executeRaw(Prisma.sql`
+					INSERT INTO "migration_metrics" ("name", "scope", "value", "last_observed_at", "updated_at")
+					VALUES
+						(${name}, '', 9, CURRENT_TIMESTAMP - INTERVAL '25 hours', CURRENT_TIMESTAMP),
+						(${name}, 'legacy-scope', 7, CURRENT_TIMESTAMP - INTERVAL '25 hours', CURRENT_TIMESTAMP)
+				`);
+			}
+			const resetAt = new Date('2026-08-24T01:02:03.456Z');
+			const preflightRepository = createContractPreflightRepository(migrationClient);
+			await preflightRepository.resetLegacyBridgeObservations(resetAt);
+			const resetMetrics = await migrationClient.$queryRaw<Array<{
+				name: string; scope: string; value: bigint; lastObservedAt: Date;
+			}>>(Prisma.sql`
+				SELECT "name", "scope", "value", "last_observed_at" AS "lastObservedAt"
+				FROM "migration_metrics"
+				WHERE "name" IN (${Prisma.join([...legacyBridgeMetricNames])})
+				ORDER BY "name", "scope"
+			`);
+			expect(resetMetrics).toHaveLength(legacyBridgeMetricNames.length * 2);
+			expect(resetMetrics.every((metric) => metric.value === 0n && metric.lastObservedAt.getTime() === resetAt.getTime())).toBe(true);
+			for (const name of legacyBridgeMetricNames) {
+				expect(resetMetrics.some((metric) => metric.name === name && metric.scope === '')).toBe(true);
+			}
+			await migrationClient.$executeRaw(Prisma.sql`
+				UPDATE "migration_metrics" SET "last_observed_at" = CURRENT_TIMESTAMP - INTERVAL '25 hours'
+				WHERE "name" IN (${Prisma.join([...legacyBridgeMetricNames])})
+			`);
 		const objects = [
 			...(await storage.listKeys(buckets.protectedBucket, '')).map((key) => ({ bucket: buckets.protectedBucket, key })),
 			...(await storage.listKeys(buckets.publicBucket, '')).map((key) => ({ bucket: buckets.publicBucket, key })),
@@ -660,8 +690,14 @@ describe.runIf(enabled)('master fixture expand -> backfill -> preflight -> contr
 			{ kind: 'WEBGL', objectKey: copiedKey },
 		]);
 
-		const contract = await readFile(new URL(`${contractMigration}/migration.sql`, migrationsUrl), 'utf8');
-		await migrationClient.$executeRawUnsafe(contract);
+			const contract = await readFile(new URL(`${contractMigration}/migration.sql`, migrationsUrl), 'utf8');
+			await migrationClient.$executeRawUnsafe(contract);
+			const [phase2ProjectDefault] = await migrationClient.$queryRaw<Array<{ defaultExpression: string | null }>>(Prisma.sql`
+				SELECT column_default AS "defaultExpression"
+				FROM information_schema.columns
+				WHERE table_schema = current_schema() AND table_name = 'projects' AND column_name = 'status'
+			`);
+			expect(phase2ProjectDefault?.defaultExpression).toContain('DRAFT');
 		const relocationCleanup = await migrationClient.$queryRaw<Array<{ id: number; bucket: string; storageKey: string }>>(Prisma.sql`
 			SELECT "id", "bucket", "storage_key" AS "storageKey"
 			FROM "orphan_objects"

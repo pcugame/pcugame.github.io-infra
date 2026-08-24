@@ -16,8 +16,6 @@ CREATE TYPE "ProjectSubmissionItemState" AS ENUM (
   'CANCELLED'
 );
 
-ALTER TABLE "projects" ALTER COLUMN "status" SET DEFAULT 'DRAFT'::"ProjectStatus";
-
 CREATE TABLE "project_submissions" (
   "id" TEXT NOT NULL,
   "project_id" INTEGER NOT NULL,

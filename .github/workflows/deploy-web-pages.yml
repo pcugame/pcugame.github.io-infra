@@ -1,15 +1,9 @@
 name: Deploy Web to GitHub Pages
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'apps/web/**'
-      - 'packages/contracts/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/deploy-web-pages.yml'
-      - '.github/release-gates/web-before-api/**'
+  # Final web publication is an explicit Phase 2 maintenance-window action.
+  # Master pushes must not expose the DRAFT/submission contract while the
+  # dedicated Phase 1 API is still serving the observation window.
   workflow_dispatch:
 
 permissions:
@@ -22,6 +16,7 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
       - uses: actions/checkout@v4

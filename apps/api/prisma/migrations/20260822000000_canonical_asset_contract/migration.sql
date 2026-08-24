@@ -1652,6 +1652,11 @@ $function$;
 
 -- Legacy rows are no longer needed once every check above succeeds. Drop
 -- dependent child tables before their session root and enum.
+-- Phase 1 keeps the master-compatible PUBLISHED default because its runtime
+-- does not own publication. The final runtime is deployed and verified before
+-- this contract boundary, so new projects may now enter the DRAFT workflow.
+ALTER TABLE "projects" ALTER COLUMN "status" SET DEFAULT 'DRAFT'::"ProjectStatus";
+
 -- Phase 1 called this a rolling URL window. The actual invariant is a
 -- session-lifetime multipart capability budget, so contract the physical
 -- names as well and discard the never-used per-user window index.

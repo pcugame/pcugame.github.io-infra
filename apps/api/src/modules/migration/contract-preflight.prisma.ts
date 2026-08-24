@@ -109,6 +109,16 @@ export function createContractPreflightRepository(client: PrismaClient): Contrac
 		},
 		async resetLegacyBridgeObservations(observedAt) {
 			await client.$executeRaw(Prisma.sql`
+				WITH reset_existing AS (
+					UPDATE "migration_metrics"
+					SET "value" = 0,
+						"last_observed_at" = ${observedAt},
+						"details" = '{"reset":"contract-preflight"}'::jsonb,
+						"updated_at" = CURRENT_TIMESTAMP
+					WHERE "name" IN (${Prisma.join([...LEGACY_BRIDGE_METRIC_NAMES])})
+						AND "scope" <> ''
+					RETURNING "name"
+				)
 				INSERT INTO "migration_metrics" ("name", "scope", "value", "last_observed_at", "details", "updated_at")
 				SELECT "name", '', 0, ${observedAt}, '{"reset":"contract-preflight"}'::jsonb, CURRENT_TIMESTAMP
 				FROM (VALUES ${Prisma.join(LEGACY_BRIDGE_METRIC_NAMES.map((name) => Prisma.sql`(${name})`))}) AS requested("name")

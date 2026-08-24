@@ -6,8 +6,21 @@ const migrationUrl = new URL(
 	import.meta.url,
 );
 const schemaUrl = new URL('../../prisma/schema.prisma', import.meta.url);
+const submissionExpandUrl = new URL(
+	'../../prisma/migrations/20260821500000_project_submission_expand/migration.sql',
+	import.meta.url,
+);
 
 describe('canonical asset Phase 2 contract policy', () => {
+	it('changes the project default only at the final contract boundary', async () => {
+		const [expand, contract] = await Promise.all([
+			readFile(submissionExpandUrl, 'utf8'),
+			readFile(migrationUrl, 'utf8'),
+		]);
+		expect(expand).not.toContain('ALTER COLUMN "status" SET DEFAULT \'DRAFT\'');
+		expect(contract).toContain('ALTER COLUMN "status" SET DEFAULT \'DRAFT\'::"ProjectStatus"');
+	});
+
 	it('runs every database-only gate before the first destructive statement', async () => {
 		const sql = await readFile(migrationUrl, 'utf8');
 		const preflightStart = sql.indexOf('DO $contract_preflight$');

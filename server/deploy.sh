@@ -275,19 +275,91 @@ do_capacity_preflight() {
 # In particular, a library-only image-worker module must not masquerade as a
 # runnable worker and leave IMAGE/POSTER jobs permanently unprocessed.
 validate_worker_entries() {
-  podman run --rm --entrypoint node "$API_IMAGE" -e '
+  local release_schema_phase="$1"
+  podman run --rm --entrypoint node \
+    -e "PCU_RELEASE_SCHEMA_PHASE=${release_schema_phase}" "$API_IMAGE" -e '
     const fs = require("node:fs");
     const entries = [
       "dist/game-validation-worker.js", "dist/webgl-worker.js",
       "dist/video-worker.js", "dist/image-worker.js", "dist/export-worker.js",
-      "dist/project-publication-worker.js",
     ];
+    if (process.env.PCU_RELEASE_SCHEMA_PHASE === "phase2") {
+      entries.push("dist/project-publication-worker.js");
+    }
     for (const entry of entries) {
       if (!fs.existsSync(entry)) throw new Error(`missing worker entry: ${entry}`);
       const source = fs.readFileSync(entry, "utf8");
       if (!source.includes("process.argv[1]")) throw new Error(`worker is not directly executable: ${entry}`);
     }
   '
+}
+
+validate_phase1_runtime_marker() {
+  local marker
+  marker="$(podman run --rm --entrypoint node "$API_IMAGE" dist/phase1-release-manifest.js)" || {
+    echo "ERROR: Phase 1 image is missing the dedicated runtime manifest"
+    return 1
+  }
+  [[ "$marker" == "PCU_PHASE1_RUNTIME_V1" ]] || {
+    echo "ERROR: Phase 1 runtime manifest returned an unexpected marker"
+    return 1
+  }
+}
+
+validate_release_image_pair() {
+  local release_schema_phase="$1"
+  if [[ "${START_DEDICATED_WORKERS:-true}" == false ]]; then
+    [[ "$release_schema_phase" == phase1 && "$API_IMAGE" == localhost/*:rollback-* ]] || {
+      echo "ERROR: disabling dedicated workers is permitted only for the fenced Phase 1 old-image rollback"
+      return 1
+    }
+    return 0
+  fi
+  [[ "$API_IMAGE" == "$MIGRATION_IMAGE" ]] || {
+    echo "ERROR: $release_schema_phase requires API_IMAGE and MIGRATION_IMAGE to be the same immutable release artifact"
+    return 1
+  }
+}
+
+pull_release_images() {
+  if [[ "$PULL_API_IMAGE" == "true" ]]; then
+    podman pull -q "$API_IMAGE"
+    if [[ "$MIGRATION_IMAGE" != "$API_IMAGE" ]]; then
+      podman pull -q "$MIGRATION_IMAGE"
+    fi
+  else
+    podman image inspect "$API_IMAGE" >/dev/null
+    podman image inspect "$MIGRATION_IMAGE" >/dev/null
+    echo "Using existing local API image: $API_IMAGE"
+  fi
+}
+
+validate_release_artifacts() {
+  local release_schema_phase="$1"
+  [[ "$release_schema_phase" == phase1 || "$release_schema_phase" == phase2 ]] || {
+    echo "ERROR: release artifact preflight requires phase1 or phase2"
+    return 1
+  }
+  validate_release_image_pair "$release_schema_phase"
+  pull_release_images
+  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
+    if [[ "$release_schema_phase" == phase1 ]]; then
+      validate_phase1_runtime_marker
+    fi
+    validate_worker_entries "$release_schema_phase"
+  else
+    echo "WARNING: Phase 1 runtime marker and dedicated workers are bypassed for explicitly authorized pre-contract legacy rollback"
+  fi
+  validate_release_entries
+}
+
+do_release_artifact_preflight() {
+  local release_schema_phase="${1:-}"
+  load_env
+  validate_production_boundaries
+  require_immutable_release_images
+  validate_release_artifacts "$release_schema_phase"
+  echo "$release_schema_phase release artifacts passed preflight without stopping the current deployment."
 }
 
 validate_release_entries() {
@@ -423,6 +495,11 @@ do_mark_read_cutover() {
     echo "ERROR: phase1 API is not running"
     return 1
   }
+  [[ "$API_IMAGE" == "$MIGRATION_IMAGE" ]] || {
+    echo "ERROR: refusing to record a mixed-image Phase 1 observation"
+    return 1
+  }
+  validate_phase1_runtime_marker
   run_release_entry dist-release/scripts/release-migrate.js assert-runtime phase1
   podman exec "$API_CONTAINER" wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
   {
@@ -432,6 +509,75 @@ do_mark_read_cutover() {
   } > "${CUTOVER_STATE_DIR}/phase1-observation"
   chmod 600 "${CUTOVER_STATE_DIR}/phase1-observation"
   echo "Canonical-first read cutover recorded. Observe zero fallback reads for at least 24 hours."
+}
+
+do_verify_final_web() {
+  local expected_sha="${1:-}"
+  load_env
+  [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "ERROR: verify-final-web requires the exact 40-character lowercase Git commit SHA"
+    return 1
+  }
+  EXPECTED_WEB_RELEASE_SHA="$expected_sha" WEB_RELEASE_BASE_URL="$WEB_PUBLIC_URL" node --input-type=module <<'NODE'
+const expectedSha = process.env.EXPECTED_WEB_RELEASE_SHA;
+const baseUrl = process.env.WEB_RELEASE_BASE_URL;
+let url;
+try {
+  const base = new URL(baseUrl);
+  if (base.protocol !== 'https:' || base.pathname !== '/' || base.search || base.hash) {
+    throw new Error('WEB_PUBLIC_URL must be an exact HTTPS origin');
+  }
+  url = new URL('/release-sha.txt', base);
+} catch (error) {
+  console.error(`ERROR: cannot construct final web release marker URL: ${error.message}`);
+  process.exit(1);
+}
+const response = await fetch(url, {
+  redirect: 'manual',
+  cache: 'no-store',
+  headers: {
+    Accept: 'text/plain',
+    'Accept-Encoding': 'identity',
+    'Cache-Control': 'no-cache',
+  },
+  signal: AbortSignal.timeout(5000),
+});
+if (response.status !== 200) {
+  throw new Error(`final web release marker returned HTTP ${response.status}; redirects are forbidden`);
+}
+const contentType = response.headers.get('content-type') ?? '';
+if (!/^text\/plain(?:;\s*charset=utf-8)?$/i.test(contentType)) {
+  throw new Error(`final web release marker has unexpected Content-Type ${contentType || '(missing)'}`);
+}
+const contentEncoding = response.headers.get('content-encoding');
+if (contentEncoding !== null && contentEncoding.toLowerCase() !== 'identity') {
+  throw new Error(`final web release marker ignored identity encoding: ${contentEncoding}`);
+}
+const expected = Buffer.from(`${expectedSha}\n`, 'utf8');
+const declaredLength = response.headers.get('content-length');
+if (declaredLength !== null && Number(declaredLength) !== expected.length) {
+  throw new Error(`final web release marker has unexpected Content-Length ${declaredLength}`);
+}
+const reader = response.body?.getReader();
+if (!reader) throw new Error('final web release marker has no response body');
+const chunks = [];
+let length = 0;
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  length += value.byteLength;
+  if (length > expected.length) {
+    await reader.cancel();
+    throw new Error('final web release marker body is longer than the exact SHA marker');
+  }
+  chunks.push(Buffer.from(value));
+}
+const actual = Buffer.concat(chunks, length);
+if (!actual.equals(expected)) {
+  throw new Error('final web release marker does not exactly equal GITHUB_SHA followed by one LF');
+}
+console.log(`Final web release ${expectedSha} verified without redirect.`);
+NODE
 }
 
 # ── Wait for PostgreSQL ────────────────────────────────────────
@@ -536,23 +682,7 @@ do_up() {
   # Real pull errors still surface via exit code and set -e.)
   echo "Pulling images..."
   podman pull -q "$PG_IMAGE"
-  if [[ "$PULL_API_IMAGE" == "true" ]]; then
-    podman pull -q "$API_IMAGE"
-    if [[ "$MIGRATION_IMAGE" != "$API_IMAGE" ]]; then
-      podman pull -q "$MIGRATION_IMAGE"
-    fi
-  else
-    podman image inspect "$API_IMAGE" >/dev/null
-    podman image inspect "$MIGRATION_IMAGE" >/dev/null
-    echo "Using existing local API image: $API_IMAGE"
-  fi
-
-  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
-    validate_worker_entries
-  else
-    echo "WARNING: dedicated workers disabled for explicitly authorized pre-contract legacy rollback"
-  fi
-  validate_release_entries
+  validate_release_artifacts "$release_schema_phase"
 
   # Remove old containers/pod if they exist
   do_down
@@ -702,8 +832,10 @@ do_up() {
     start_worker "$EXPORT_WORKER_CONTAINER" "export worker" dist/export-worker.js \
       -e "NAS_EXPORT_ROOT=${nas_export_container_path}" \
       -v "${nas_export_host_path}:${nas_export_container_path}:rw,Z"
-    start_worker "$PROJECT_PUBLICATION_WORKER_CONTAINER" "project publication worker" \
-      dist/project-publication-worker.js
+    if [[ "$release_schema_phase" == phase2 ]]; then
+      start_worker "$PROJECT_PUBLICATION_WORKER_CONTAINER" "project publication worker" \
+        dist/project-publication-worker.js
+    fi
   fi
 
   # ── Generate systemd service with restart delay ──
@@ -784,13 +916,15 @@ case "${1:-up}" in
   contract-preflight) shift; do_contract_preflight "$@" ;;
   capacity-preflight) do_capacity_preflight ;;
   boundary-preflight) load_env; validate_production_boundaries ;;
+  release-artifact-preflight) do_release_artifact_preflight "${2:-}" ;;
+  verify-final-web) do_verify_final_web "${2:-}" ;;
   mark-read-cutover) do_mark_read_cutover ;;
   # do_up validates every boundary before its own down/up replacement phase.
   restart) do_up ;;
   logs)    do_logs "${2:-api}" ;;
   status)  do_status ;;
   *)
-    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
+    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|release-artifact-preflight [phase1|phase2]|verify-final-web <git-sha>|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
     exit 1
     ;;
 esac

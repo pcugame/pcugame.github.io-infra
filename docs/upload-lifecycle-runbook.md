@@ -7,7 +7,14 @@ environment approval.
 
 ## Canonical asset Phase 1 (expand)
 
-Provide the immutable Phase 1 API/worker image and dispatch `phase1`. The workflow
+Provide the immutable, dedicated Phase 1 API/worker image and dispatch `phase1`.
+The same image is used for API, workers, expand migration, backfill, inventory,
+and reconciliation. It must execute `dist/phase1-release-manifest.js` and print
+exactly `PCU_PHASE1_RUNTIME_V1`; this and the five Phase 1 worker entries are
+verified before the current deployment is stopped. Phase 1 deliberately does not
+start the project-publication worker and keeps the master-compatible
+`projects.status = PUBLISHED` default. Keep the existing legacy-compatible web
+deployed throughout the observation window. The workflow
 performs, in order:
 
 1. drain API and every worker while leaving PostgreSQL online;
@@ -27,13 +34,34 @@ file; do not use the TypeScript source runner in production.
 
 ## Canonical asset Phase 2 (contract)
 
-After at least 24 hours with zero fallback telemetry, copy the exact server-side
+After at least 24 hours with zero fallback telemetry, deploy the final web from
+the exact contract commit by manually dispatching **Deploy Web to GitHub Pages**
+during the Phase 2 maintenance window. Master pushes only build/test through the
+normal checks and never publish this web automatically. Its root
+`release-sha.txt` must contain exactly the 40-character commit SHA followed by one
+LF. The server rejects redirects, HTML/error bodies, added whitespace, wrong
+lengths, non-200 responses, and responses that exceed the five-second timeout.
+Only after the Phase 2 runtime artifact preflight and mutation drain does the
+workflow verify this web marker; contract preflight and destructive DDL remain
+blocked until it matches.
+
+Then copy the exact server-side
 `read_cutover_at` value into the Phase 2 workflow input and enter
 `I_ATTEST_24H_ZERO_FALLBACK`. The workflow rejects timestamps under 24 hours, stale
 attestations, or values that differ from the server record. It then drains again,
 takes another DB backup and Garage snapshot, runs the object-aware contract
 preflight, applies the contract, verifies its durable `_prisma_migrations` record,
-and starts the Phase 2 runtime.
+and starts the Phase 2 runtime with all six workers, including project
+publication. The contract changes the project default to `DRAFT` only after the
+final web has been verified; a Phase 1 observation can therefore never expose the
+new submission lifecycle to an incompatible web build.
+
+The Phase 1 observation record stores both `phase1_api_image` and
+`migration_image`. Recording fails unless they are identical, and Phase 2 checks
+that equality again before draining. `--reset-observation` atomically zeroes every
+existing non-empty compatibility metric scope and refreshes its observation time,
+while also ensuring a `scope=''` seed exists for every known producer. A stale or
+nonzero scope therefore cannot survive reset unnoticed.
 
 The contract is a destructive DDL boundary. After it is recorded, old-image
 automatic rollback is forbidden even if health or smoke tests fail. Recover with a

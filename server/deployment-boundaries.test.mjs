@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -41,6 +41,12 @@ assert.match(exportStart, /NAS_EXPORT_ROOT/);
 assert.match(exportStart, /nas_export_host_path/);
 assert.match(deploy, /Forward-only deploy complete/);
 assert.doesNotMatch(deploy, /do_rollback|API_IMAGE_PREVIOUS|podman\s+tag[^\n]+previous/i);
+assert.match(deploy, /dist\/phase1-release-manifest\.js/);
+assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
+assert.match(deploy, /release-artifact-preflight\) do_release_artifact_preflight/);
+assert.match(deploy, /PCU_RELEASE_SCHEMA_PHASE === "phase2"[\s\S]*project-publication-worker\.js/);
+assert.match(deploy, /release_schema_phase" == phase2[\s\S]*PROJECT_PUBLICATION_WORKER_CONTAINER/);
+assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == false[\s\S]*localhost\/\*:rollback-/);
 
 for (const [name, value] of [
 	['DIRECT_UPLOAD_PART_URL_REFRESH_MAX', '64'],
@@ -110,15 +116,70 @@ const boundaryFixture = exactFixture.replace(
 	/^S3_PRIVATE_NETWORK_CONFIRMED=.*$/m,
 	'S3_PRIVATE_NETWORK_CONFIRMED=true',
 );
-const runBoundary = async (fixture, command = 'boundary-preflight', extraEnv = {}) => {
+const runBoundary = async (fixture, command = 'boundary-preflight', extraEnv = {}, commandArgs = []) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);
-	return spawnSync('bash', [deployPath, command], {
+	return spawnSync('bash', [deployPath, command, ...commandArgs], {
 		encoding: 'utf8',
 		env: { ...process.env, DEPLOY_DIR: fixtureDir, ...extraEnv },
 	});
 };
 const acceptedBoundary = await runBoundary(boundaryFixture);
 assert.equal(acceptedBoundary.status, 0, acceptedBoundary.stderr || acceptedBoundary.stdout);
+
+// Exercise the exact final-web marker contract over HTTPS. The verifier must
+// accept only SHA + one LF and must not follow a redirect to a matching body.
+const webKey = join(fixtureDir, 'web-marker.key');
+const webCert = join(fixtureDir, 'web-marker.crt');
+const certificate = spawnSync('openssl', [
+	'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+	'-subj', '/CN=127.0.0.1', '-keyout', webKey, '-out', webCert,
+], { encoding: 'utf8' });
+assert.equal(certificate.status, 0, certificate.stderr);
+const webServer = join(fixtureDir, 'web-marker-server.mjs');
+await writeFile(webServer, `
+import https from 'node:https';
+import { readFileSync } from 'node:fs';
+const [keyPath, certPath, mode, sha] = process.argv.slice(2);
+const server = https.createServer({ key: readFileSync(keyPath), cert: readFileSync(certPath) }, (_request, response) => {
+  if (mode === 'redirect') {
+    response.writeHead(302, { Location: '/release-sha.txt' });
+    response.end();
+    return;
+  }
+  const body = mode === 'exact' || mode === 'html' ? sha + '\\n' : sha + ' \\n';
+  response.writeHead(200, { 'Content-Type': mode === 'html' ? 'text/html' : 'text/plain', 'Content-Length': Buffer.byteLength(body) });
+  response.end(body);
+});
+server.listen(0, '127.0.0.1', () => process.stdout.write(String(server.address().port) + '\\n'));
+`);
+const expectedWebSha = 'a'.repeat(40);
+const verifyWebMarker = async (mode) => {
+	const child = spawn(process.execPath, [webServer, webKey, webCert, mode, expectedWebSha], {
+		stdio: ['ignore', 'pipe', 'pipe'],
+	});
+	const port = await new Promise((resolve, reject) => {
+		const timeout = setTimeout(() => reject(new Error('HTTPS fixture did not start')), 3_000);
+		child.once('error', reject);
+		child.stdout.once('data', (chunk) => {
+			clearTimeout(timeout);
+			resolve(Number(String(chunk).trim()));
+		});
+	});
+	try {
+		const fixture = boundaryFixture.replace(/^WEB_PUBLIC_URL=.*$/m, `WEB_PUBLIC_URL=https://127.0.0.1:${port}`);
+		return await runBoundary(fixture, 'verify-final-web', {
+			NODE_TLS_REJECT_UNAUTHORIZED: '0',
+		}, [expectedWebSha]);
+	} finally {
+		child.kill('SIGTERM');
+	}
+};
+const exactWeb = await verifyWebMarker('exact');
+assert.equal(exactWeb.status, 0, exactWeb.stderr || exactWeb.stdout);
+for (const mode of ['whitespace', 'html', 'redirect']) {
+	const rejectedWeb = await verifyWebMarker(mode);
+	assert.notEqual(rejectedWeb.status, 0, `${mode} final-web marker unexpectedly passed`);
+}
 for (const [name, replacement, expectedError] of [
 	['S3_ENDPOINT', 'S3_ENDPOINT=https://operator@garage-s3.private.example', /without credentials/],
 	['S3_PUBLIC_SIGNING_ENDPOINT', 'S3_PUBLIC_SIGNING_ENDPOINT=https://replace-with-upload-host/s3', /without credentials, path/],
@@ -180,6 +241,17 @@ assert.ok(
 	upFunction.indexOf('validate_production_boundaries') < upFunction.indexOf('do_down'),
 	'do_up must validate production boundaries before its down/up replacement phase',
 );
+assert.ok(
+	upFunction.indexOf('validate_release_artifacts "$release_schema_phase"') < upFunction.indexOf('do_down'),
+	'do_up must validate the phase marker and worker set before replacing the deployment',
+);
+assert.match(deploy, /redirect: 'manual'/);
+assert.match(deploy, /AbortSignal\.timeout\(5000\)/);
+assert.match(deploy, /response\.status !== 200/);
+assert.match(deploy, /unexpected Content-Type/);
+assert.match(deploy, /'Accept-Encoding': 'identity'/);
+assert.match(deploy, /Buffer\.from\(`\$\{expectedSha\}\\n`/);
+assert.match(deploy, /actual\.equals\(expected\)/);
 for (const [label, fixture] of [
 	['malformed', boundaryFixture.replace(
 		/^S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT=.*$/m,

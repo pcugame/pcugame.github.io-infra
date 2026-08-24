@@ -105,10 +105,8 @@ jobs:
             export PATH=$PATH:/usr/local/bin:/usr/bin
             export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
             export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
-            export MIGRATION_IMAGE="${FINAL_IMAGE}"
             chmod +x "${DEPLOY_DIR}/deploy.sh"
             printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-            podman pull -q "${MIGRATION_IMAGE}"
 
             rollback_tag="localhost/pcu-graduationproject-v2-api:rollback-${GITHUB_SHA}"
             previous_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null || true)"
@@ -140,6 +138,11 @@ jobs:
 
             if [ "${RELEASE_PHASE}" = phase1 ]; then
               export API_IMAGE="${PHASE1_IMAGE}"
+              export MIGRATION_IMAGE="${PHASE1_IMAGE}"
+              # The dedicated Phase 1 image owns both the runtime and every
+              # expand/backfill CLI. Prove its marker and five worker entries
+              # before the current deployment is stopped.
+              "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase1
               if [ -n "${previous_image_id}" ]; then
                 podman untag "${rollback_tag}" 2>/dev/null || true
                 podman tag "${previous_image_id}" "${rollback_tag}"
@@ -195,7 +198,9 @@ jobs:
             fi
 
             export API_IMAGE="${FINAL_IMAGE}"
+            export MIGRATION_IMAGE="${FINAL_IMAGE}"
             if [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then
+              "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
               "${DEPLOY_DIR}/deploy.sh" drain
               "${DEPLOY_DIR}/deploy.sh" backup "phase2-forward-fix-${GITHUB_SHA}"
               "${DEPLOY_DIR}/deploy.sh" release-assert phase2
@@ -212,13 +217,22 @@ jobs:
             }
             # shellcheck disable=SC1090
             source "${CUTOVER_STATE_DIR}/phase1-observation"
+            [ "${phase1_api_image}" = "${migration_image}" ] || {
+              echo "Phase 1 observation was recorded with mixed API/migration images"
+              exit 1
+            }
             [ "${read_cutover_at}" = "${OBSERVATION_STARTED_AT}" ] || {
               echo "Attested observation start does not match the server-side read cutover record"
               exit 1
             }
+            # Phase 1 intentionally keeps the legacy-compatible web. During
+            # this maintenance window the final web must land first, and its
+            # exact stamped commit must be visible without redirects.
+            "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
             "${DEPLOY_DIR}/deploy.sh" drain
             "${DEPLOY_DIR}/deploy.sh" backup "phase2-${GITHUB_SHA}"
             "${DEPLOY_DIR}/deploy.sh" inventory "/release-state/garage-before-contract-${GITHUB_SHA}.json"
+            "${DEPLOY_DIR}/deploy.sh" verify-final-web "${GITHUB_SHA}"
             "${DEPLOY_DIR}/deploy.sh" contract-preflight \
               --inventory-input="/release-state/garage-before-contract-${GITHUB_SHA}.json" \
               --report-output=/release-state/phase2-contract-preflight.json

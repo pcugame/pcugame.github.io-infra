@@ -3,11 +3,12 @@ import { readFile } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
-const [dockerfile, packageJson, deploy, buildWorkflow, cutover, smoke, releaseMigration] = await Promise.all([
+const [dockerfile, packageJson, deploy, buildWorkflow, webWorkflow, cutover, smoke, releaseMigration] = await Promise.all([
 	read('apps/api/Dockerfile'),
 	read('apps/api/package.json'),
 	read('server/deploy.sh'),
 	read('.github/workflows/deploy-api.yml'),
+	read('.github/workflows/deploy-web-pages.yml'),
 	read('.github/workflows/release-api-cutover.yml'),
 	read('server/smoke-data-plane.mjs'),
 	read('apps/api/scripts/release-migrate.ts'),
@@ -20,6 +21,10 @@ for (const cli of ['release:backfill', 'release:preflight', 'release:inventory',
 }
 
 assert.doesNotMatch(buildWorkflow, /^  deploy:/m, 'push/build workflow must never deploy');
+assert.doesNotMatch(webWorkflow, /^  push:/m, 'master pushes must not publish the Phase 2 web during Phase 1 observation');
+assert.match(webWorkflow, /^  workflow_dispatch:/m);
+assert.match(webWorkflow, /^    environment: production$/m);
+assert.match(webWorkflow, /printf '%s\\n' "\$\{GITHUB_SHA\}" > dist\/release-sha\.txt/);
 for (const marker of [
 	'drain', 'legacy-audit', 'backup "phase1-', 'garage-before-expand-',
 	'apply-expand', 'backfill --apply', 'phase1-reconciliation', 'mark-read-cutover',
@@ -28,6 +33,9 @@ for (const marker of [
 ]) assert.ok(cutover.includes(marker), `cutover workflow missing ${marker}`);
 
 const ordered = [
+	'export API_IMAGE="${PHASE1_IMAGE}"',
+	'export MIGRATION_IMAGE="${PHASE1_IMAGE}"',
+	'release-artifact-preflight phase1',
 	'"${DEPLOY_DIR}/deploy.sh" drain',
 	'"${DEPLOY_DIR}/deploy.sh" legacy-audit',
 	'"${DEPLOY_DIR}/deploy.sh" backup "phase1-',
@@ -45,6 +53,28 @@ for (const marker of ordered) {
 	assert.ok(next > cursor, `Phase 1 order violation at ${marker}`);
 	cursor = next;
 }
+
+const phase1Block = cutover.slice(
+	cutover.indexOf('if [ "${RELEASE_PHASE}" = phase1 ]; then'),
+	cutover.indexOf('export API_IMAGE="${FINAL_IMAGE}"'),
+);
+assert.match(phase1Block, /export API_IMAGE="\$\{PHASE1_IMAGE\}"[\s\S]*export MIGRATION_IMAGE="\$\{PHASE1_IMAGE\}"/);
+assert.doesNotMatch(phase1Block, /MIGRATION_IMAGE="\$\{FINAL_IMAGE\}"/);
+assert.ok(
+	phase1Block.indexOf('release-artifact-preflight phase1') < phase1Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain'),
+	'Phase 1 marker/worker validation must precede the first mutation drain',
+);
+const phase2Block = cutover.slice(cutover.indexOf('export API_IMAGE="${FINAL_IMAGE}"'));
+assert.match(phase2Block, /export API_IMAGE="\$\{FINAL_IMAGE\}"[\s\S]*export MIGRATION_IMAGE="\$\{FINAL_IMAGE\}"/);
+assert.match(phase2Block, /\[ "\$\{phase1_api_image\}" = "\$\{migration_image\}" \]/);
+
+const attestedPhase2 = phase2Block.indexOf('[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]');
+const phase2Drain = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain', attestedPhase2);
+const finalWebGate = phase2Block.indexOf('verify-final-web "${GITHUB_SHA}"');
+const phase2Preflight = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" contract-preflight', finalWebGate);
+const phase2Contract = phase2Block.indexOf('release-migrate apply-contract');
+assert.ok(phase2Drain >= 0 && phase2Drain < finalWebGate, 'final web gate must run after the Phase 2 drain');
+assert.ok(finalWebGate < phase2Preflight && phase2Preflight < phase2Contract, 'final web gate must precede contract preflight and DDL');
 
 const destructiveBoundary = cutover.indexOf('# DESTRUCTIVE DDL BOUNDARY');
 assert.ok(destructiveBoundary > cutover.indexOf('release-migrate apply-contract'));
@@ -64,6 +94,10 @@ for (const migration of [
 assert.match(releaseMigration, /stagedMigrate\(PHASE1_TARGET_MIGRATION/);
 assert.match(deploy, /RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2/);
 assert.match(deploy, /mutation drain marker is absent/);
+assert.match(deploy, /dist\/phase1-release-manifest\.js/);
+assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
+assert.match(deploy, /refusing to record a mixed-image Phase 1 observation/);
+assert.match(deploy, /phase1_api_image=\$\{API_IMAGE\}[\s\S]*migration_image=\$\{MIGRATION_IMAGE\}/);
 assert.match(deploy, /--entrypoint node \\\n\s+"\$API_IMAGE" dist\/server\.js/);
 
 for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(status), `data-plane smoke missing ${status}`);
