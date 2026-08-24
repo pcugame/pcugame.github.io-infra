@@ -339,10 +339,23 @@ jobs:
               echo "Phase 1 observation source SHA is malformed"
               exit 1
             }
-            current_phase1_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null)" || {
+            raw_current_phase1_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null)" || {
               echo "Phase 1 API is unavailable before contract cutover"
               exit 1
             }
+            # BEGIN PHASE1_IMAGE_ID_NORMALIZER (exercised from the release test)
+            normalize_podman_image_id() {
+              local raw_image_id="${1:-}"
+              local image_id="${raw_image_id#sha256:}"
+              [[ "${image_id}" =~ ^[0-9a-f]{64}$ && \
+                ( "${raw_image_id}" = "${image_id}" || "${raw_image_id}" = "sha256:${image_id}" ) ]] || {
+                echo "Phase 1 API returned a malformed image ID" >&2
+                return 1
+              }
+              printf '%s\n' "${image_id}"
+            }
+            # END PHASE1_IMAGE_ID_NORMALIZER
+            current_phase1_image_id="$(normalize_podman_image_id "${raw_current_phase1_image_id}")" || exit 1
             [ "${current_phase1_image_id}" = "${phase1_image_id}" ] || {
               echo "Running Phase 1 API image changed after observation was recorded"
               exit 1

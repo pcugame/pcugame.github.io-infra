@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import {
 	assertControlWorkflowIdentity,
@@ -97,7 +98,37 @@ assert.match(phase2Block, /export API_IMAGE="\$\{FINAL_IMAGE\}"[\s\S]*export MIG
 assert.match(phase2Block, /\[ "\$\{phase1_api_image\}" = "\$\{migration_image\}" \]/);
 assert.match(phase2Block, /\[ "\$\{phase1_image_digest\}" = "\$\{migration_image_digest\}" \]/);
 assert.match(phase2Block, /current_phase1_image_id[\s\S]*phase1_image_id/);
+assert.match(phase2Block, /raw_current_phase1_image_id[\s\S]*normalize_podman_image_id[\s\S]*current_phase1_image_id/);
 assert.match(phase2Block, /current_phase1_source_sha[\s\S]*phase1_source_sha/);
+
+const normalizerStartMarker = '# BEGIN PHASE1_IMAGE_ID_NORMALIZER (exercised from the release test)';
+const normalizerEndMarker = '# END PHASE1_IMAGE_ID_NORMALIZER';
+const normalizerStart = cutover.indexOf(normalizerStartMarker);
+const normalizerEnd = cutover.indexOf(normalizerEndMarker, normalizerStart);
+assert.ok(normalizerStart >= 0 && normalizerEnd > normalizerStart, 'workflow image ID normalizer markers are missing');
+const workflowNormalizer = cutover
+	.slice(normalizerStart + normalizerStartMarker.length, normalizerEnd)
+	.split('\n')
+	.map((line) => line.replace(/^ {12}/, ''))
+	.join('\n');
+const imageIdHex = 'a'.repeat(64);
+for (const acceptedImageId of [imageIdHex, `sha256:${imageIdHex}`]) {
+	const accepted = spawnSync('bash', ['-c', [
+		'set -euo pipefail',
+		workflowNormalizer,
+		`[ "$(normalize_podman_image_id '${acceptedImageId}')" = '${imageIdHex}' ]`,
+	].join('\n')], { encoding: 'utf8' });
+	assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
+}
+for (const malformedImageId of [`sha512:${imageIdHex}`, `sha256:${imageIdHex}0`, imageIdHex.toUpperCase()]) {
+	const rejected = spawnSync('bash', ['-c', [
+		'set -euo pipefail',
+		workflowNormalizer,
+		`normalize_podman_image_id '${malformedImageId}'`,
+	].join('\n')], { encoding: 'utf8' });
+	assert.notEqual(rejected.status, 0, `${malformedImageId} unexpectedly passed workflow normalization`);
+	assert.match(`${rejected.stdout}\n${rejected.stderr}`, /malformed image ID/);
+}
 
 const attestedPhase2 = phase2Block.indexOf('[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]');
 const phase2Drain = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain', attestedPhase2);
