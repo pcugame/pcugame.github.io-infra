@@ -100,8 +100,9 @@ const envSchema = z
     S3_PRESIGN_TTL_SEC: z.coerce.number().int().positive().default(60),
     DIRECT_UPLOAD_PART_SIZE_MB: z.coerce.number().int().min(5).max(5120).default(16),
     DIRECT_UPLOAD_PART_URL_TTL_SEC: z.coerce.number().int().min(10).max(3600).default(300),
-    DIRECT_UPLOAD_PART_URL_WINDOW_MS: z.coerce.number().int().min(1000).default(300_000),
-    DIRECT_UPLOAD_PART_URL_MAX: z.coerce.number().int().positive().default(64),
+    // Session-lifetime replacement capability allowance.  Initial issuance is
+    // always permitted for every multipart part; only re-issuance spends this.
+    DIRECT_UPLOAD_PART_URL_REFRESH_MAX: z.coerce.number().int().min(0).max(1024).default(64),
     DIRECT_UPLOAD_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-direct-upload'),
     DIRECT_UPLOAD_WORKER_TEMP_MAX_MB: z.coerce.number().int().positive().default(6144),
     DIRECT_UPLOAD_WORKER_POLL_MS: z.coerce.number().int().min(100).default(5_000),
@@ -118,7 +119,7 @@ const envSchema = z
     EXPORT_WORKER_FILE_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(2),
     EXPORT_WORKER_LEASE_MS: z.coerce.number().int().min(10_000).default(120_000),
     EXPORT_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),
-    EXPORT_WORKER_MAX_OBJECT_BYTES: z.coerce.number().int().positive().default(4 * 1024 * 1024 * 1024),
+    EXPORT_WORKER_MAX_OBJECT_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024 * 1024),
     EXPORT_WORKER_MAX_JOB_BYTES: z.coerce.number().int().positive().default(32 * 1024 * 1024 * 1024),
     EXPORT_WORKER_RETRY_BASE_MS: z.coerce.number().int().positive().default(5_000),
   })

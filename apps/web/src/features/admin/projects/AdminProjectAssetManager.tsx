@@ -5,20 +5,14 @@ import GameUploadWidget from '../../../components/GameUploadWidget';
 import DirectVideoUploadWidget from '../../../components/DirectVideoUploadWidget';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
 import { ResponsiveImage } from '../../../components/common';
-import type { ClientUploadLimits } from '../../../lib/upload-limits';
 
 interface AdminProjectAssetManagerProps {
 	project: AdminProjectDetail;
 	projectId: number;
-	limits: ClientUploadLimits;
 	canEditContent: boolean;
-	addAssetError: unknown;
-	isAddingAsset: boolean;
 	isSettingPoster: boolean;
 	isRemovingAsset: boolean;
 	isRemovingWebgl: boolean;
-	/** Legacy inline upload bridge; new controls below never invoke it. */
-	onAddAsset: (kind: 'IMAGE' | 'POSTER', file: File) => Promise<void>;
 	onSetPoster: (assetId: number) => void;
 	onRemoveAsset: (assetId: number) => void;
 	onRemoveWebgl: () => void;
@@ -28,7 +22,6 @@ export function AdminProjectAssetManager({
 	project,
 	projectId,
 	canEditContent,
-	addAssetError,
 	isSettingPoster,
 	isRemovingAsset,
 	isRemovingWebgl,
@@ -130,7 +123,6 @@ export function AdminProjectAssetManager({
 						<DirectImageUploadWidget owner={{ type: 'PROJECT', id: projectId }} kind="POSTER" />
 						<DirectImageUploadWidget owner={{ type: 'PROJECT', id: projectId }} kind="IMAGE" />
 						<DirectVideoUploadWidget projectId={projectId} />
-						{addAssetError != null && <p className="field-hint">기존 inline 업로드 오류는 legacy client에만 적용됩니다.</p>}
 					</div>
 
 					<GameUploadWidget projectId={projectId} uploadKind="GAME" />

@@ -6,8 +6,6 @@ import { createAssetsService } from '../modules/assets/service.js';
 
 const mocks = {
 	findById: vi.fn(),
-	findByLegacyKey: vi.fn(),
-	recordMetrics: vi.fn(),
 	upsertBan: vi.fn(),
 	presign: vi.fn(),
 	limit: vi.fn(),
@@ -15,19 +13,14 @@ const mocks = {
 };
 
 const service = createAssetsService({
-	protectedBucket: 'legacy-protected',
 	presignTtlSec: 45,
 	presign: mocks.presign,
-	clock: { now: () => new Date('2026-08-21T00:00:00.000Z') },
-	bucketForKind: () => 'deletion-bucket',
 	wakeDeletionWorker: vi.fn(),
 	loadProjectWithAccess: vi.fn(),
 	downloadLimiter: { check: mocks.limit },
 	logger: { info: vi.fn(), warn: mocks.warn, error: vi.fn() },
 	repository: {
 		findAssetByIdForDownload: mocks.findById,
-		findAssetsByLegacyStorageKey: mocks.findByLegacyKey,
-		recordMigrationObservations: mocks.recordMetrics,
 		upsertBannedIp: mocks.upsertBan,
 		findAssetByIdWithProject: vi.fn(),
 		claimAssetForDeletion: vi.fn(),
@@ -42,9 +35,6 @@ function asset(options: {
 	creatorId?: number;
 	memberIds?: number[];
 	representations?: Array<{ role: string; bucket: string; objectKey: string; state: string }>;
-	storageKey?: string | null;
-	playbackStorageKey?: string | null;
-	playbackStatus?: string;
 	project?: null;
 } = {}) {
 	return {
@@ -52,11 +42,6 @@ function asset(options: {
 		projectId: options.project === null ? null : 7,
 		kind: options.kind ?? 'GAME',
 		status: options.assetStatus ?? 'READY',
-		storageKey: options.storageKey === undefined ? 'legacy/original.zip' : options.storageKey,
-		playbackStorageKey: options.playbackStorageKey === undefined
-			? 'legacy/playback.mp4'
-			: options.playbackStorageKey,
-		playbackStatus: options.playbackStatus ?? 'READY',
 		representations: options.representations ?? [{
 			role: 'ORIGINAL', bucket: 'canonical-protected', objectKey: 'assets/42/original/g1', state: 'READY',
 		}],
@@ -80,7 +65,6 @@ describe('canonical protected asset capability', () => {
 		vi.clearAllMocks();
 		mocks.presign.mockResolvedValue('https://garage.test/signed');
 		mocks.limit.mockReturnValue({ status: 'ok' });
-		mocks.recordMetrics.mockResolvedValue(undefined);
 		mocks.upsertBan.mockResolvedValue(undefined);
 	});
 
@@ -99,16 +83,14 @@ describe('canonical protected asset capability', () => {
 			location: 'https://garage.test/signed',
 		});
 		expect(response.body).toBeUndefined();
-		expect(mocks.recordMetrics).not.toHaveBeenCalled();
 		expect(mocks.limit).toHaveBeenCalledWith(
 			'203.0.113.1',
 			'anonymous:203.0.113.1:DOWNLOAD_ORIGINAL:42',
 		);
 	});
 
-	it('registers canonical assetId+variant and legacy bridge routes as redirects', async () => {
+	it('registers only the canonical assetId+variant route', async () => {
 		mocks.findById.mockResolvedValue(asset());
-		mocks.findByLegacyKey.mockResolvedValue([asset()]);
 		const app = Fastify();
 		await app.register(createAssetsController({ service }), { prefix: '/api' });
 		await app.ready();
@@ -122,8 +104,7 @@ describe('canonical protected asset capability', () => {
 			const bridge = await app.inject({
 				method: 'GET', url: '/api/assets/protected/legacy%2Foriginal.zip',
 			});
-			expect(bridge.statusCode).toBe(302);
-			expect(bridge.headers.location).toBe('https://garage.test/signed');
+			expect(bridge.statusCode).toBe(404);
 		} finally {
 			await app.close();
 		}
@@ -141,27 +122,7 @@ describe('canonical protected asset capability', () => {
 		expect(mocks.presign).toHaveBeenCalledWith('private', 'video/playback', { ttlSec: 45 });
 	});
 
-	it.each([
-		['original', 'legacy/original.zip', 'ORIGINAL'],
-		['playback', 'legacy/playback.mp4', 'PLAYBACK'],
-	] as const)('persists telemetry for a %s legacy fallback', async (variant, key, role) => {
-		mocks.findById.mockResolvedValue(asset({ kind: 'VIDEO', representations: [] }));
-		await service.downloadAssetById(42, variant, '203.0.113.3', undefined);
-
-		expect(mocks.presign).toHaveBeenCalledWith('legacy-protected', key, { ttlSec: 45 });
-		expect(mocks.recordMetrics).toHaveBeenCalledWith([{
-			name: 'asset_download_legacy_fallback',
-			scope: variant,
-			observedAt: new Date('2026-08-21T00:00:00.000Z'),
-			details: { assetId: 42, role },
-		}]);
-		expect(mocks.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ metric: 'asset_download_legacy_fallback', assetId: 42, variant }),
-			'protected_download_compatibility_read',
-		);
-	});
-
-	it('never falls back past a non-READY canonical row or playback to original', async () => {
+	it('fails closed for a missing/non-READY canonical row and never maps playback to original', async () => {
 		mocks.findById.mockResolvedValue(asset({
 			kind: 'VIDEO',
 			representations: [{ role: 'PLAYBACK', bucket: 'private', objectKey: 'pending', state: 'VERIFYING' }],
@@ -169,43 +130,28 @@ describe('canonical protected asset capability', () => {
 		await expect(service.downloadAssetById(42, 'playback', '203.0.113.4', undefined))
 			.rejects.toMatchObject({ statusCode: 404 });
 
-		mocks.findById.mockResolvedValue(asset({
-			kind: 'VIDEO', representations: [], playbackStorageKey: null, playbackStatus: 'READY',
-		}));
+		mocks.findById.mockResolvedValue(asset({ kind: 'VIDEO', representations: [] }));
 		await expect(service.downloadAssetById(42, 'playback', '203.0.113.4', undefined))
 			.rejects.toMatchObject({ statusCode: 404 });
 		expect(mocks.presign).not.toHaveBeenCalled();
 	});
 
-	it('keeps the old URL as a separately measured bridge into canonical resolution', async () => {
-		mocks.findByLegacyKey.mockResolvedValue([asset()]);
-		await service.downloadAssetByLegacyStorageKey('legacy/original.zip', '203.0.113.5', undefined);
+	it('redirects a READY VIDEO original while its FAILED playback remains unavailable', async () => {
+		mocks.findById.mockResolvedValue(asset({
+			kind: 'VIDEO',
+			representations: [
+				{ role: 'ORIGINAL', bucket: 'private', objectKey: 'video/original.mov', state: 'READY' },
+				{ role: 'PLAYBACK', bucket: 'private', objectKey: 'video/playback.mp4', state: 'FAILED' },
+			],
+		}));
 
+		await expect(service.downloadAssetById(42, 'original', '203.0.113.5', undefined))
+			.resolves.toMatchObject({ status: 302, location: 'https://garage.test/signed' });
 		expect(mocks.presign).toHaveBeenCalledWith(
-			'canonical-protected',
-			'assets/42/original/g1',
-			expect.objectContaining({ ttlSec: 45 }),
+			'private', 'video/original.mov', { ttlSec: 45 },
 		);
-		expect(mocks.recordMetrics).toHaveBeenCalledWith([{
-			name: 'asset_download_legacy_route',
-			scope: 'original',
-			observedAt: new Date('2026-08-21T00:00:00.000Z'),
-			details: { assetId: 42, role: 'ORIGINAL' },
-		}]);
-	});
-
-	it('fails clearly for missing, duplicate, and ambiguous legacy identity', async () => {
-		mocks.findByLegacyKey.mockResolvedValue([]);
-		await expect(service.downloadAssetByLegacyStorageKey('missing', '203.0.113.6', undefined))
+		await expect(service.downloadAssetById(42, 'playback', '203.0.113.5', undefined))
 			.rejects.toMatchObject({ statusCode: 404 });
-
-		mocks.findByLegacyKey.mockResolvedValue([asset(), { ...asset(), id: 43 }]);
-		await expect(service.downloadAssetByLegacyStorageKey('legacy/original.zip', '203.0.113.6', undefined))
-			.rejects.toMatchObject({ statusCode: 500, code: 'INTERNAL_ERROR' });
-
-		mocks.findByLegacyKey.mockResolvedValue([asset({ storageKey: 'same', playbackStorageKey: 'same' })]);
-		await expect(service.downloadAssetByLegacyStorageKey('same', '203.0.113.6', undefined))
-			.rejects.toMatchObject({ statusCode: 500, code: 'INTERNAL_ERROR' });
 	});
 
 	it('preserves public and admin/creator/member authorization semantics', async () => {

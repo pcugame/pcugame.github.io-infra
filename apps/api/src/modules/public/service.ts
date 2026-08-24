@@ -8,9 +8,7 @@ import type {
 	PublicProjectDetailResponse,
 } from '@pcu/contracts';
 import { notFound } from '../../shared/errors.js';
-import { isPosterUrlSafe } from '../../shared/poster-validation.js';
 import { publicObjectUrl } from '../../shared/public-origin.js';
-import { parseWebglEntryKey } from '../webgl/paths.js';
 import {
 	serializePublicImage,
 	type PublicImageRepresentationRecord,
@@ -19,12 +17,6 @@ import {
 interface PublicPosterRecord {
 	kind: AssetKind;
 	status: string;
-	isPublic: boolean;
-	storageKey: string | null;
-	width?: number | null;
-	height?: number | null;
-	card480Height?: number | null;
-	display960Height?: number | null;
 	representations?: PublicImageRepresentationRecord[];
 }
 
@@ -44,7 +36,6 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	platforms?: Platform[];
 	isIncomplete: boolean;
 	status: ProjectStatus;
-	webglEntryKey?: string | null;
 	currentWebglDeploymentId?: string | null;
 	currentWebglDeployment?: {
 		id: string;
@@ -58,16 +49,6 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	assets: {
 		id: number;
 		kind: AssetKind;
-		isPublic: boolean;
-		storageKey: string | null;
-		width?: number | null;
-		height?: number | null;
-		card480Height?: number | null;
-		display960Height?: number | null;
-		playbackStorageKey?: string | null;
-		mimeType: string;
-		playbackMimeType?: string;
-		playbackStatus?: string;
 		representations?: PublicImageRepresentationRecord[];
 	}[];
 }
@@ -76,17 +57,11 @@ export interface PublicServiceDependencies {
 	apiPublicUrl: string;
 	publicAssetOrigin?: string;
 	publicBucket?: string;
-	logger?: { warn(record: Record<string, unknown>, message: string): void };
 	repository: {
 		findExhibitionsWithPublishedCounts(): Promise<{
 			id: number;
 			year: number;
 			title: string;
-			posterStorageKey: string | null;
-			posterWidth?: number | null;
-			posterHeight?: number | null;
-			posterCard480Height?: number | null;
-			posterDisplay960Height?: number | null;
 			posterAssetId?: number | null;
 			poster?: PublicPosterRecord | null;
 			_count: { projects: number };
@@ -96,11 +71,6 @@ export interface PublicServiceDependencies {
 		findExhibitionById(id: number): Promise<{ id: number; year: number; title: string } | null>;
 		findPublishedProjectById(id: number): Promise<PublicProjectDetailRecord | null>;
 		findPublishedProjectBySlug(slug: string, exhibitionIds?: number[]): Promise<PublicProjectDetailRecord | null>;
-		recordMigrationMetric?(
-			name: string,
-			scope: string,
-			details?: Record<string, unknown>,
-		): Promise<void>;
 	};
 }
 
@@ -108,21 +78,19 @@ function protectedAssetUrl(deps: PublicServiceDependencies, assetId: number, var
 	return `${deps.apiPublicUrl.replace(/\/$/, '')}/api/assets/${assetId}/download?variant=${variant}`;
 }
 
-function isPublicPoster(poster: PublicPosterRecord | null): poster is PublicPosterRecord {
-	return poster?.isPublic === true && (
-		(poster.representations?.length ?? 0) > 0
-		|| (poster.storageKey != null && isPosterUrlSafe({ ...poster, storageKey: poster.storageKey }))
-	);
+function isPublicPoster(poster: PublicPosterRecord | null, bucket: string): poster is PublicPosterRecord {
+	return poster?.status === 'READY'
+		&& poster.representations?.some((representation) => (
+			representation.role === 'ORIGINAL'
+			&& representation.state === 'READY'
+			&& representation.bucket === bucket
+		)) === true;
 }
 
-function imageOptions(deps: PublicServiceDependencies, scope: string, details: Record<string, unknown>) {
+function imageOptions(deps: PublicServiceDependencies) {
 	return {
 		publicAssetOrigin: deps.publicAssetOrigin ?? deps.apiPublicUrl,
 		publicBucket: deps.publicBucket ?? 'pcu-public',
-		onLegacyFallback: async () => {
-			await deps.repository.recordMigrationMetric?.('public_image_legacy_fallback', scope, details);
-			deps.logger?.warn(details, 'Public response used legacy image representation fallback');
-		},
 	};
 }
 
@@ -134,15 +102,9 @@ export async function listYears(deps: PublicServiceDependencies): Promise<Public
 		year: e.year,
 		title: e.title || undefined,
 		projectCount: e._count.projects,
-		poster: e.posterAssetId != null
-			? (e.poster ? await serializePublicImage(e.poster, imageOptions(deps, 'year-poster', { exhibitionId: e.id })) : undefined)
-			: (e.posterStorageKey ? await serializePublicImage({
-				storageKey: e.posterStorageKey,
-				width: e.posterWidth,
-				height: e.posterHeight,
-				card480Height: e.posterCard480Height,
-				display960Height: e.posterDisplay960Height,
-			}, imageOptions(deps, 'year-poster', { exhibitionId: e.id })) : undefined),
+		poster: e.posterAssetId != null && e.poster && isPublicPoster(e.poster, deps.publicBucket ?? 'pcu-public')
+			? await serializePublicImage(e.poster, imageOptions(deps))
+			: undefined,
 	})));
 }
 
@@ -177,8 +139,8 @@ export async function listProjectsByYear(
 			slug: p.slug,
 			title: p.title,
 			summary: p.summary || undefined,
-			poster: isPublicPoster(poster)
-				? await serializePublicImage(poster, imageOptions(deps, 'project-poster', { projectId: p.id }))
+			poster: isPublicPoster(poster, deps.publicBucket ?? 'pcu-public')
+				? await serializePublicImage(poster, imageOptions(deps))
 				: undefined,
 			members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
 			exhibitionId: p.exhibitionId,
@@ -210,8 +172,8 @@ export async function listProjectsByExhibition(
 			slug: p.slug,
 			title: p.title,
 			summary: p.summary || undefined,
-			poster: isPublicPoster(poster)
-				? await serializePublicImage(poster, imageOptions(deps, 'project-poster', { projectId: p.id }))
+			poster: isPublicPoster(poster, deps.publicBucket ?? 'pcu-public')
+				? await serializePublicImage(poster, imageOptions(deps))
 				: undefined,
 			members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
 			exhibitionId: p.exhibitionId,
@@ -266,34 +228,44 @@ export async function getProjectDetail(
 
 	if (!project) throw notFound('Project not found');
 	const images = (await Promise.all(project.assets
-		.filter((a) => a.isPublic === true && (a.kind === 'IMAGE' || a.kind === 'POSTER'))
+		.filter((a) => a.kind === 'IMAGE' || a.kind === 'POSTER')
 		.map(async (a) => {
-			const image = await serializePublicImage(a, imageOptions(deps, 'project-image', { assetId: a.id }));
+			const image = await serializePublicImage(a, imageOptions(deps));
 			return image ? { id: a.id, kind: a.kind as 'IMAGE' | 'POSTER', image } : undefined;
 		}))).filter((image): image is NonNullable<typeof image> => image !== undefined);
 
-	const gameAssets = project.assets.filter((a) => a.kind === 'GAME');
+	const gameAssets = project.assets.filter((asset) => asset.kind === 'GAME'
+		&& asset.representations?.some((representation) => (
+			representation.role === 'ORIGINAL' && representation.state === 'READY'
+		)));
 	const gameAsset = gameAssets.length > 0 ? gameAssets[gameAssets.length - 1] : undefined;
 
 	const videos = project.assets.flatMap((videoAsset) => {
 		if (videoAsset.kind !== 'VIDEO') return [];
-		const canonical = videoAsset.representations ?? [];
-		const playback = canonical.find((representation) => representation.role === 'PLAYBACK');
-		if (canonical.length > 0 && playback?.state !== 'READY') return [];
-		if (canonical.length === 0 && videoAsset.playbackStatus !== 'READY') return [];
+		const original = videoAsset.representations?.find((representation) => representation.role === 'ORIGINAL');
+		const playback = videoAsset.representations?.find((representation) => representation.role === 'PLAYBACK');
+		if (original?.state !== 'READY') return [];
+		const playbackStatus = playback?.state === 'READY'
+			? 'READY' as const
+			: playback?.state === 'FAILED' ? 'FAILED' as const : 'PENDING' as const;
 		return [{
-			url: protectedAssetUrl(deps, videoAsset.id, 'playback'),
-			mimeType: videoAsset.playbackMimeType || videoAsset.mimeType || 'video/mp4',
+			...(playbackStatus === 'READY'
+				? { url: protectedAssetUrl(deps, videoAsset.id, 'playback') }
+				: {}),
+			mimeType: playback?.mimeType || original.mimeType || 'video/mp4',
+			originalDownloadUrl: protectedAssetUrl(deps, videoAsset.id, 'original'),
+			playbackStatus,
+			...(playback?.error ? { playbackError: playback.error } : {}),
 		}];
 	});
-	const video = videos[0] ?? null;
-	const poster = isPublicPoster(project.poster) ? project.poster : null;
+	const video = videos.find((candidate) => candidate.playbackStatus === 'READY') ?? videos[0] ?? null;
+	const poster = isPublicPoster(project.poster, deps.publicBucket ?? 'pcu-public') ? project.poster : null;
 	const serializedPoster = poster
-		? await serializePublicImage(poster, imageOptions(deps, 'project-poster', { projectId: project.id }))
+		? await serializePublicImage(poster, imageOptions(deps))
 		: undefined;
 	const validKinds = new Set(project.assets.map((asset) => asset.kind));
 	const isIncomplete = project.isIncomplete !== false
-		|| !gameAsset || videos.length === 0 || !serializedPoster;
+		|| !gameAsset || !videos.some((candidate) => candidate.playbackStatus === 'READY') || !serializedPoster;
 	let webglEntryUrl: string | undefined;
 	if (project.currentWebglDeploymentId != null) {
 		const deployment = project.currentWebglDeployment;
@@ -303,12 +275,11 @@ export async function getProjectDetail(
 			&& deployment.entryObjectKey.startsWith(deployment.publicPrefix)) {
 			webglEntryUrl = publicObjectUrl(deps.publicAssetOrigin ?? deps.apiPublicUrl, deployment.entryObjectKey);
 		}
-	} else if (project.webglEntryKey && parseWebglEntryKey(project.id, project.webglEntryKey)) {
-		await deps.repository.recordMigrationMetric?.('public_webgl_legacy_fallback', 'project-response', { projectId: project.id });
-		deps.logger?.warn({ projectId: project.id }, 'Public response used legacy WebGL deployment fallback');
-		webglEntryUrl = publicObjectUrl(deps.publicAssetOrigin ?? deps.apiPublicUrl, project.webglEntryKey);
 	}
 
+	if (project.status === 'DRAFT') {
+		throw new Error('DRAFT project escaped the public repository boundary');
+	}
 	return {
 		id: project.id,
 		year: project.exhibition.year,

@@ -19,6 +19,10 @@ export interface VerifyingVideoSession {
 	sourceIdentityBlockManifest: unknown;
 	validationLeaseToken: string | null;
 	validationLeaseUntil: Date | null;
+	validationAttemptCount?: number;
+	resultAssetId: number | null;
+	resultRepresentationId: string | null;
+	completionResult: unknown;
 }
 
 export interface GeneratedPlaybackIntent {
@@ -32,6 +36,10 @@ export interface VideoReadyResult {
 	playbackRepresentationId: string;
 }
 
+export interface VideoOriginalReadyResult extends VideoReadyResult {
+	playbackState: 'VERIFYING' | 'READY';
+}
+
 export interface VideoWorkerRepository {
 	claimVideoVerifying(limit: number, token: string, leaseMs: number): Promise<VerifyingVideoSession[]>;
 	renewVideoLease(sessionId: string, token: string, leaseMs: number): Promise<boolean>;
@@ -42,7 +50,7 @@ export interface VideoWorkerRepository {
 		notBefore: Date;
 	}): Promise<GeneratedPlaybackIntent>;
 	markPlaybackUploaded(intentId: string): Promise<void>;
-	commitVideoReady(input: {
+	commitVideoOriginalReady(input: {
 		session: VerifyingVideoSession;
 		token: string;
 		originalMimeType: string;
@@ -52,10 +60,37 @@ export interface VideoWorkerRepository {
 			bucket: string;
 			objectKey: string;
 			mimeType: string;
+		};
+	}): Promise<VideoOriginalReadyResult>;
+	commitVideoPlaybackReady(input: {
+		session: VerifyingVideoSession;
+		token: string;
+		assetId: number;
+		originalRepresentationId: string;
+		playbackRepresentationId: string;
+		playback: {
+			bucket: string;
+			objectKey: string;
+			mimeType: string;
 			sizeBytes: bigint;
+			checksumSha256?: string;
 			intentId?: string;
 		};
 	}): Promise<VideoReadyResult>;
+	commitVideoPlaybackFailed(input: {
+		session: VerifyingVideoSession;
+		token: string;
+		assetId: number;
+		originalRepresentationId: string;
+		playbackRepresentationId: string;
+		reason: string;
+	}): Promise<boolean>;
+	requestPlaybackRepair(input: {
+		sessionId: string;
+		generation: number;
+		sourceIdentityAlgorithm: string;
+		sourceIdentity: string;
+	}): Promise<boolean>;
 	rejectVideo(input: {
 		session: VerifyingVideoSession;
 		token: string;
@@ -71,13 +106,14 @@ export interface VideoWorkerStorage {
 		size: number;
 		etag?: string;
 	}>;
-	head(bucket: string, key: string, signal?: AbortSignal): Promise<{ size: number; etag?: string } | null>;
+	head(bucket: string, key: string, signal?: AbortSignal): Promise<{ size: number; etag?: string; checksumSha256?: string } | null>;
 	upload(input: {
 		bucket: string;
 		key: string;
 		body: Readable;
 		contentType: string;
 		contentLength: number;
+		checksumSha256: string;
 		signal?: AbortSignal;
 	}): Promise<void>;
 }

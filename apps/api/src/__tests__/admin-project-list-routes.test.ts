@@ -168,7 +168,6 @@ describe('admin project list route query', () => {
 	});
 
 	it.each([
-		'/api/admin/projects?status=DRAFT',
 		'/api/admin/projects?sort=updatedAt',
 		'/api/admin/projects?order=sideways',
 	])('rejects non-whitelisted query value %s', async (url) => {
@@ -176,6 +175,13 @@ describe('admin project list route query', () => {
 
 		expect(res.statusCode).toBe(400);
 		expect(mocks.listProjects).not.toHaveBeenCalled();
+	});
+
+	it('accepts DRAFT as an administrative publication-workflow status', async () => {
+		const res = await listProjects('/api/admin/projects?status=DRAFT');
+
+		expect(res.statusCode).toBe(200);
+		expect(mocks.listProjects).toHaveBeenCalledWith(303, 'ADMIN', expect.objectContaining({ status: 'DRAFT' }));
 	});
 
 	it('passes USER role through for role-scoped pagination', async () => {

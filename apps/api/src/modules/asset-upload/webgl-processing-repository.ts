@@ -1,13 +1,14 @@
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { withAssetMutationTransaction } from '../assets/mutation-transaction.js';
-import { queueDurableDeletions } from '../orphan/outbox.js';
+import { queueDurableDeletions, type DurableDeletionTarget } from '../orphan/outbox.js';
 import type {
 	CanonicalWebglUploadSession,
 	ReservedWebglDeployment,
 	WebglProcessingRepository,
 } from '../webgl/processing.js';
-import { assertWebglPublishedObjectManifest } from '../webgl/processing.js';
+import { assertWebglPublishedObjectManifest } from '../webgl/manifest.js';
 import type { WebglProcessingWorkerRepository } from '../webgl/processing-worker.js';
+import { createCanonicalWebglStagingKeys } from '../webgl/paths.js';
 
 type WebglProcessingPersistence = WebglProcessingRepository & WebglProcessingWorkerRepository;
 
@@ -55,6 +56,7 @@ function canonicalSession(session: {
 	resultAssetId: number | null;
 	resultRepresentationId: string | null;
 	reservedWebglDeploymentId: string | null;
+	validationAttemptCount: number;
 	resultRepresentation: {
 		id: string;
 		assetId: number;
@@ -87,6 +89,7 @@ function canonicalSession(session: {
 		resultAssetId: session.resultAssetId,
 		resultRepresentationId: session.resultRepresentationId,
 		reservedWebglDeploymentId: session.reservedWebglDeploymentId,
+		validationAttemptCount: session.validationAttemptCount,
 		sourceRepresentation: {
 			id: source.id,
 			assetId: source.assetId,
@@ -121,6 +124,7 @@ function invalidCanonicalSession(session: {
 	resultAssetId: number | null;
 	resultRepresentationId: string | null;
 	reservedWebglDeploymentId: string | null;
+	validationAttemptCount: number;
 }): CanonicalWebglUploadSession {
 	const assetId = session.resultAssetId ?? -1;
 	const representationId = session.resultRepresentationId ?? `invalid-${session.id}`;
@@ -136,6 +140,7 @@ function invalidCanonicalSession(session: {
 		resultAssetId: assetId,
 		resultRepresentationId: representationId,
 		reservedWebglDeploymentId: session.reservedWebglDeploymentId,
+		validationAttemptCount: session.validationAttemptCount,
 		sourceRepresentation: {
 			id: representationId, assetId, role: 'WEBGL_SOURCE', state: 'VERIFYING',
 			bucket: '', objectKey: '', sizeBytes: 0n, updatedAt: new Date(0),
@@ -231,12 +236,12 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 		async releaseValidationLease(input) {
 			await client.$queryRaw(Prisma.sql`
 				UPDATE "asset_upload_sessions"
-				SET "validation_lease_token" = NULL, "validation_lease_until" = NULL,
-					"validation_error" = ${input.error.slice(0, 2_000)}, "updated_at" = clock_timestamp()
+				SET "validation_error" = ${input.error.slice(0, 2_000)}, "updated_at" = clock_timestamp()
 				WHERE "id" = ${input.sessionId} AND "generation" = ${input.generation}
 					AND "kind" = 'WEBGL'::"AssetUploadKind"
 					AND "state" = 'VERIFYING'::"AssetUploadSessionState"
 					AND "validation_lease_token" = ${input.claimToken}
+					AND "validation_lease_until" > clock_timestamp()
 			`);
 		},
 
@@ -273,11 +278,21 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 						entryObjectKey: session.reservedWebglDeployment.entryObjectKey,
 						state: reservationState(session.reservedWebglDeployment.state),
 						expectedCurrentDeploymentId: expected,
+						outputBucket: session.reservedWebglDeployment.stagingBucket
+							?? session.reservedWebglDeployment.publicBucket,
+						outputPrefix: session.reservedWebglDeployment.stagingPrefix
+							?? session.reservedWebglDeployment.publicPrefix,
+						outputEntryObjectKey: session.reservedWebglDeployment.stagingEntryObjectKey
+							?? session.reservedWebglDeployment.entryObjectKey,
+						publicationStaged: session.reservedWebglDeployment.stagingBucket !== null,
 					} satisfies ReservedWebglDeployment;
 				}
 				const project = await tx.project.findUniqueOrThrow({
-					where: { id: session.projectId }, select: { currentWebglDeploymentId: true },
+					where: { id: session.projectId }, select: { currentWebglDeploymentId: true, status: true },
 				});
+				const staging = project.status === 'DRAFT'
+					? createCanonicalWebglStagingKeys(session.projectId, input.candidateDeploymentId)
+					: null;
 				const deployment = await tx.webglDeployment.create({
 					data: {
 						id: input.candidateDeploymentId,
@@ -286,6 +301,11 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 						publicBucket: input.publicBucket,
 						publicPrefix: input.publicPrefix,
 						entryObjectKey: input.entryObjectKey,
+						...(staging ? {
+							stagingBucket: input.protectedBucket,
+							stagingPrefix: staging.stagingPrefix,
+							stagingEntryObjectKey: staging.stagingEntryObjectKey,
+						} : {}),
 						state: 'PROCESSING',
 					},
 				});
@@ -307,6 +327,10 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 					entryObjectKey: deployment.entryObjectKey,
 					state: reservationState(deployment.state),
 					expectedCurrentDeploymentId: project.currentWebglDeploymentId,
+					outputBucket: deployment.stagingBucket ?? deployment.publicBucket,
+					outputPrefix: deployment.stagingPrefix ?? deployment.publicPrefix,
+					outputEntryObjectKey: deployment.stagingEntryObjectKey ?? deployment.entryObjectKey,
+					publicationStaged: deployment.stagingBucket !== null,
 				} satisfies ReservedWebglDeployment;
 			});
 		},
@@ -335,20 +359,24 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 						throw new Error('WebGL READY commit identity mismatch');
 					}
 					if (deployment.state === 'READY' && session.state === 'READY') return 'ALREADY_READY' as const;
-					assertWebglPublishedObjectManifest(
-						input.objectManifest,
-						deployment.publicPrefix,
-						deployment.entryObjectKey,
-					);
+					const outputPrefix = deployment.stagingPrefix ?? deployment.publicPrefix;
+					const outputEntryObjectKey = deployment.stagingEntryObjectKey ?? deployment.entryObjectKey;
+					assertWebglPublishedObjectManifest(input.objectManifest, outputPrefix, outputEntryObjectKey);
+					if (deployment.stagingBucket !== null
+						&& input.objectManifest.objects.some((object) => object.checksumSha256 === null)) {
+						throw new Error('Staged WebGL object manifest requires SHA-256 for publication');
+					}
 					const expected = expectedPointerFromCompletionResult(session.completionResult);
 					if (expected === undefined || expected !== input.expectedCurrentDeploymentId) {
 						throw new Error('WebGL pointer snapshot is malformed');
 					}
-					const pointer = await tx.project.updateMany({
-						where: { id: session.projectId, currentWebglDeploymentId: expected },
-						data: { currentWebglDeploymentId: deployment.id },
-					});
-					if (pointer.count !== 1) throw new WebglPointerFenceError();
+					if (deployment.stagingBucket === null) {
+						const pointer = await tx.project.updateMany({
+							where: { id: session.projectId, currentWebglDeploymentId: expected },
+							data: { currentWebglDeploymentId: deployment.id },
+						});
+						if (pointer.count !== 1) throw new WebglPointerFenceError();
+					}
 					const representation = await tx.assetRepresentation.updateMany({
 						where: {
 							id: input.representationId,
@@ -364,7 +392,9 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 						where: { id: deployment.id },
 						data: {
 							state: 'READY', error: null,
-							objectManifest: input.objectManifest as unknown as Prisma.InputJsonValue,
+							...(deployment.stagingBucket === null
+								? { objectManifest: input.objectManifest as unknown as Prisma.InputJsonValue }
+								: { stagingObjectManifest: input.objectManifest as unknown as Prisma.InputJsonValue }),
 						},
 					});
 					await tx.assetUploadSession.update({
@@ -377,13 +407,8 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 								},
 						},
 					});
-					if (expected && expected !== deployment.id) {
-						const old = await tx.webglDeployment.findUnique({ where: { id: expected } });
-						if (old) await queueDurableDeletions(tx, [{
-							bucket: old.publicBucket, storageKey: old.publicPrefix,
-							targetKind: 'PREFIX', reason: 'webgl-public-generation-superseded',
-						}]);
-					}
+					// READY deployments are immutable history. Superseding only moves the
+					// project pointer; it never deletes bytes behind an immutable URL.
 					return 'COMMITTED' as const;
 				});
 			} catch (error) {
@@ -401,6 +426,10 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 					|| session.state !== 'VERIFYING' || session.validationLeaseToken !== input.claimToken) return;
 				const owned = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 					SELECT "id" FROM "asset_upload_sessions" WHERE "id" = ${input.sessionId}
+						AND "generation" = ${input.generation}
+						AND "kind" = 'WEBGL'::"AssetUploadKind"
+						AND "state" = 'VERIFYING'::"AssetUploadSessionState"
+						AND "validation_lease_token" = ${input.claimToken}
 						AND "validation_lease_until" > clock_timestamp()
 				`);
 				if (owned.length !== 1) return;
@@ -416,7 +445,11 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 					where: { id: session.reservedWebglDeployment.id }, data: { state: 'FAILED', error: input.reason.slice(0, 2_000) },
 				});
 				await queueDurableDeletions(tx, [
-					{ bucket: input.publicBucket, storageKey: input.publicPrefix, targetKind: 'PREFIX', reason: input.reason },
+					{
+						bucket: session.reservedWebglDeployment?.stagingBucket ?? input.publicBucket,
+						storageKey: session.reservedWebglDeployment?.stagingPrefix ?? input.publicPrefix,
+						targetKind: 'PREFIX', reason: input.reason,
+					},
 					{ bucket: session.bucket, storageKey: session.objectKey, reason: input.reason },
 				]);
 			});
@@ -424,11 +457,17 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 
 		async rejectInvalidSource(input) {
 			await client.$transaction(async (tx) => {
-				const session = await tx.assetUploadSession.findUnique({ where: { id: input.sessionId } });
+				const session = await tx.assetUploadSession.findUnique({
+					where: { id: input.sessionId }, include: { reservedWebglDeployment: true },
+				});
 				if (!session || session.kind !== 'WEBGL' || session.generation !== input.generation
 					|| session.state !== 'VERIFYING' || session.validationLeaseToken !== input.claimToken) return;
 				const owned = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 					SELECT "id" FROM "asset_upload_sessions" WHERE "id" = ${session.id}
+						AND "generation" = ${input.generation}
+						AND "kind" = 'WEBGL'::"AssetUploadKind"
+						AND "state" = 'VERIFYING'::"AssetUploadSessionState"
+						AND "validation_lease_token" = ${input.claimToken}
 						AND "validation_lease_until" > clock_timestamp()
 				`);
 				if (owned.length !== 1) return;
@@ -440,12 +479,28 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 					where: { id: session.resultRepresentationId }, data: { state: 'FAILED', error: input.error.slice(0, 2_000) },
 				});
 				if (session.resultAssetId) await tx.asset.update({ where: { id: session.resultAssetId }, data: { status: 'FAILED' } });
-				if (session.reservedWebglDeploymentId) await tx.webglDeployment.update({
-					where: { id: session.reservedWebglDeploymentId }, data: { state: 'FAILED', error: input.error.slice(0, 2_000) },
-				});
-				await queueDurableDeletions(tx, [{
-					bucket: session.bucket, storageKey: session.objectKey, reason: 'webgl-source-validation-rejected',
-				}]);
+				const candidate = session.reservedWebglDeployment;
+				const targets: DurableDeletionTarget[] = [];
+				if (candidate && (candidate.state === 'PENDING'
+					|| candidate.state === 'PROCESSING' || candidate.state === 'FAILED')) {
+					if (candidate.state !== 'FAILED') await tx.webglDeployment.update({
+						where: { id: candidate.id }, data: { state: 'FAILED', error: input.error.slice(0, 2_000) },
+					});
+					// The persisted reservation is the only namespace this attempt owns.
+					// Never infer a project prefix or touch immutable READY history.
+					targets.push({
+						bucket: candidate.stagingBucket ?? candidate.publicBucket,
+						storageKey: candidate.stagingPrefix ?? candidate.publicPrefix,
+						targetKind: 'PREFIX',
+						reason: 'webgl-processing-dead-letter-candidate',
+					});
+				}
+				if (!input.error.startsWith('OPERATOR_REQUIRED:')) {
+					targets.push({
+						bucket: session.bucket, storageKey: session.objectKey, reason: 'webgl-source-validation-rejected',
+					});
+				}
+				await queueDurableDeletions(tx, targets);
 			});
 		},
 	};

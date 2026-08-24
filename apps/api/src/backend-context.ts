@@ -30,7 +30,7 @@ import {
 } from './infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
-import { createDirectMultipartControlStorage, createMultipartPartPresigner, createObjectStorage } from './lib/storage.js';
+import { createDirectMultipartControlStorage, createMultipartPartPresigner, createMultipartRecoveryStorage, createObjectStorage } from './lib/storage.js';
 import { createRootLogger } from './lib/logger.js';
 import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
 import { forbidden, notFound } from './shared/errors.js';
@@ -72,20 +72,9 @@ import {
 	createProjectMultipartProductionGraph,
 	type ProjectMultipartProductionGraph,
 } from './modules/admin/project-multipart.composition.js';
-import {
-	createGameUploadProductionGraph,
-	type GameUploadProductionGraph,
-} from './modules/admin/game-upload/composition.js';
 import { createAssetUploadControlGraph, createUnavailableAssetUploadControlGraph } from './modules/asset-upload/composition.js';
 import { createAssetUploadRepository } from './modules/asset-upload/repository.js';
-import type { ProjectUploadProcessing } from './modules/admin/project/project-upload.adapter.js';
-import { createNodeProjectUploadProcessing } from './infrastructure/project-upload-processing.js';
-import { createMultipartRequestHasher } from './infrastructure/multipart-request-hasher.js';
-import {
-	createActiveUploadTempRegistry,
-	createUploadTempFileSystem,
-	createUploadTempScavenger,
-} from './modules/upload-intent/temp-scavenger.js';
+import { createAssetUploadRecoveryService } from './modules/asset-upload/recovery.service.js';
 import {
 	createUploadLifecycleMetrics,
 	type UploadLifecycleMetrics,
@@ -284,11 +273,6 @@ export interface ProductionResourceFactories {
 	ids(config: Env): MaybePromise<IdGenerator>;
 	scheduler(config: Env): MaybePromise<Scheduler>;
 	fileSystem(config: Env): MaybePromise<FileSystem>;
-	projectUploadProcessing(
-		fileSystem: FileSystem,
-		logger: AppLogger,
-		config: Env,
-	): MaybePromise<ProjectUploadProcessing>;
 	googleTokens(config: Env): MaybePromise<GoogleTokenVerifier>;
 	prisma(config: Env): MaybePromise<PrismaClient>;
 	s3(config: Env): MaybePromise<S3Client>;
@@ -310,7 +294,6 @@ export interface ProductionResourceFactories {
 		year: YearProductionGraph,
 		importExport: ImportExportProductionGraph,
 		projectMultipart: ProjectMultipartProductionGraph,
-		gameUpload: GameUploadProductionGraph,
 		directAssetUpload: ReturnType<typeof createAssetUploadControlGraph> | ReturnType<typeof createUnavailableAssetUploadControlGraph>,
 	): MaybePromise<BackendRoutes>;
 }
@@ -348,9 +331,6 @@ const defaultFactories: ProductionResourceFactories = {
 	ids: () => createCryptoIdGenerator(),
 	scheduler: () => createNodeScheduler(),
 	fileSystem: () => createNodeFileSystem(),
-	projectUploadProcessing: (fileSystem, logger) => (
-		createNodeProjectUploadProcessing(fileSystem, logger)
-	),
 	googleTokens: () => createGoogleTokenVerifier(),
 	prisma: (config) => createPrismaClientForDatabase(config.DATABASE_URL, {
 		log: config.NODE_ENV === 'development'
@@ -380,7 +360,6 @@ async function loadProductionRoutes(
 	year: YearProductionGraph,
 	importExport: ImportExportProductionGraph,
 	projectMultipart: ProjectMultipartProductionGraph,
-	gameUpload: GameUploadProductionGraph,
 	directAssetUpload: ReturnType<typeof createAssetUploadControlGraph> | ReturnType<typeof createUnavailableAssetUploadControlGraph>,
 ): Promise<BackendRoutes> {
 	const admin = await import('./modules/admin/admin.routes.js');
@@ -394,7 +373,6 @@ async function loadProductionRoutes(
 			...importExport,
 			bannedIpController: assetsBanned.bannedIpController,
 			projectMultipartController: projectMultipart.projectMultipartController,
-			gameUploadController: gameUpload.controller,
 			directAssetUploadController: directAssetUpload.controller,
 		}),
 		me: projectMultipart.meController,
@@ -459,6 +437,16 @@ export function createMaintenanceSchedule(
 					logger.error(error, 'Upload lifecycle maintenance iteration crashed');
 				}
 			})));
+			// Do not wait a full interval after a process restart: a crashed
+			// completion lease and an unrecorded Garage multipart must be reclaimed
+			// before they hold an active upload slot indefinitely.
+			void runTracked(async () => {
+				try {
+					await maintenance.recoverStaleUploads(abortController.signal);
+				} catch (error) {
+					logger.error(error, 'Startup direct upload recovery crashed');
+				}
+			});
 		},
 		close() {
 			closePromise ??= (async () => {
@@ -532,25 +520,6 @@ export async function createProductionBackendContext(
 		const ids = await resource('ids', () => factories.ids(config));
 		const scheduler = await resource('scheduler', () => factories.scheduler(config));
 		const fileSystem = await resource('fileSystem', () => factories.fileSystem(config));
-		const uploadFileSystem = createUploadTempFileSystem(fileSystem);
-		const activeUploadTemps = createActiveUploadTempRegistry();
-		owner.register('uploadTempDirectory', owned(
-			uploadFileSystem,
-			undefined,
-			() => {
-				if (!uploadFileSystem.ensurePrivateDirectory) {
-					throw new Error(
-						'Production FileSystem must support secure upload temp directory verification',
-					);
-				}
-				return uploadFileSystem.ensurePrivateDirectory(uploadFileSystem.temporaryDirectory());
-			},
-		));
-		const projectUploads = await factories.projectUploadProcessing(
-			uploadFileSystem,
-			logger,
-			config,
-		);
 		const googleTokens = await resource('googleTokens', () => factories.googleTokens(config));
 		const prisma = options.persistence
 			? undefined
@@ -676,15 +645,7 @@ export async function createProductionBackendContext(
 		const year = createYearProductionGraph({
 			config,
 			repository: persistence.exhibitionRepository,
-			storage,
-			fileSystem: uploadFileSystem,
-			settings,
-			uploadLimiter,
-			logger,
-			clock,
-			ids,
 			uploadLifecycle,
-			activeUploadTemps,
 		});
 		let assetsBanned: AssetsBannedProductionGraph | undefined;
 		if (!options.routes) {
@@ -717,35 +678,13 @@ export async function createProductionBackendContext(
 		));
 		const projectMultipart = createProjectMultipartProductionGraph({
 			config,
-			storage,
-			fileSystem: uploadFileSystem,
-			settings,
-			uploadLimiter,
-			logger,
-			clock,
-			ids,
-			processing: projectUploads,
-			requestHasher: createMultipartRequestHasher(uploadFileSystem),
 			uploadLifecycle,
-			activeUploadTemps,
 			access: projectMemberSettings.projectAccess,
 			repository: projectMemberSettings.projectRepository,
 		});
-		const gameUpload = createGameUploadProductionGraph({
-			config,
-			storage,
-			fileSystem,
-			settings,
-			uploadLimiter,
-			lifecycle,
-			clock,
-			ids,
-			logger,
-			access: projectMemberSettings.projectAccess,
-			uploadLifecycle,
-		});
-		const directAssetUpload = prisma ? createAssetUploadControlGraph({
-			repository: createAssetUploadRepository(prisma),
+		const directAssetUploadRepository = prisma ? createAssetUploadRepository(prisma) : undefined;
+		const directAssetUpload = prisma && directAssetUploadRepository ? createAssetUploadControlGraph({
+			repository: directAssetUploadRepository,
 			storage: createDirectMultipartControlStorage(s3),
 			partSigner: createMultipartPartPresigner(directSigningS3),
 			clock,
@@ -755,8 +694,7 @@ export async function createProductionBackendContext(
 				sessionTtlMs: config.UPLOAD_SESSION_TTL_MINUTES * 60_000,
 				partSizeBytes: config.DIRECT_UPLOAD_PART_SIZE_MB * 1024 * 1024,
 				partUrlTtlSeconds: config.DIRECT_UPLOAD_PART_URL_TTL_SEC,
-				partUrlIssueWindowMs: config.DIRECT_UPLOAD_PART_URL_WINDOW_MS,
-				partUrlIssueMax: config.DIRECT_UPLOAD_PART_URL_MAX,
+				partUrlRefreshMax: config.DIRECT_UPLOAD_PART_URL_REFRESH_MAX,
 				maxBytesFor: (actor, kind) => {
 					const limits = resolveRoleUploadLimits(config, actor.role);
 					if (kind === 'VIDEO') return limits.videoMaxBytes;
@@ -774,36 +712,23 @@ export async function createProductionBackendContext(
 				if (!exhibition) throw notFound('Exhibition not found');
 			},
 		}) : createUnavailableAssetUploadControlGraph();
-		const uploadTempScavenger = createUploadTempScavenger({
-			fileSystem: uploadFileSystem,
-			legacyRootDirectory: fileSystem.temporaryDirectory(),
-			active: activeUploadTemps,
-			clock,
-			logger,
-		});
-		owner.register('gameUploadWorkflow', owned(
-			gameUpload,
-			() => gameUpload.close(),
-			() => gameUpload.recoverStaleUploads(),
-		));
-		owner.register('uploadTempRecovery', owned(
-			uploadTempScavenger,
-			undefined,
-			async () => {
-				try {
-					await uploadTempScavenger.recoverOnStartup();
-				} catch (error) {
-					logger.error(error, 'Upload temp startup recovery crashed');
-				}
-			},
-		));
+		const directAssetUploadRecovery = directAssetUploadRepository
+			? createAssetUploadRecoveryService({
+				repository: directAssetUploadRepository,
+				storage: createMultipartRecoveryStorage(s3),
+				clock,
+				ids,
+				logger,
+				wakeMaintenance: () => uploadLifecycle.wakeMaintenance(),
+				bucket: config.S3_BUCKET_PROTECTED,
+			})
+			: undefined;
 		const authSessions = auth.repository;
-		const recoverUploads = createSingleFlightUploadRecovery(
-			(signal) => gameUpload.recoverStaleUploads(signal),
-			(signal) => uploadTempScavenger.sweep(signal),
-		);
 		const maintenance: BackgroundMaintenance = {
-			recoverStaleUploads: recoverUploads,
+			recoverStaleUploads: async (signal) => {
+				if (!directAssetUploadRecovery || signal?.aborted) return;
+				await directAssetUploadRecovery.recover(signal);
+			},
 			async purgeExpiredSessions(before, signal) {
 				if (signal?.aborted) return 0;
 				return persistence.authRepository.purgeExpired(before);
@@ -825,7 +750,6 @@ export async function createProductionBackendContext(
 			year,
 			importExport,
 			projectMultipart,
-			gameUpload,
 			directAssetUpload,
 		);
 

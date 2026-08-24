@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPublicDeliveryBridgeService } from './delivery-bridge.service.js';
+import Fastify from 'fastify';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createPublicController } from './controller.js';
 import { serializePublicImage } from './image-serialization.js';
 
 const servers: ReturnType<typeof createServer>[] = [];
@@ -11,51 +12,36 @@ afterEach(async () => {
 
 describe('public direct delivery', () => {
 	it('serializes canonical image representations directly to the public origin', async () => {
-		const fallback = vi.fn();
 		const image = await serializePublicImage({
-			storageKey: 'legacy/image.webp',
 			representations: [
 				{ role: 'ORIGINAL', state: 'READY', bucket: 'public', objectKey: 'images/a b/original.webp', width: 1200, height: 800 },
 				{ role: 'CARD_480', state: 'READY', bucket: 'public', objectKey: 'images/a b/card.webp', width: 480, height: 320 },
 			],
-		}, { publicAssetOrigin: 'https://assets.example.test', publicBucket: 'public', onLegacyFallback: fallback });
+		}, { publicAssetOrigin: 'https://assets.example.test', publicBucket: 'public' });
 
 		expect(image).toEqual({
 			original: { url: 'https://assets.example.test/images/a%20b/original.webp', width: 1200, height: 800 },
 			renditions: [{ profile: 'CARD_480', url: 'https://assets.example.test/images/a%20b/card.webp', width: 480, height: 320 }],
 		});
-		expect(fallback).not.toHaveBeenCalled();
 	});
 
-	it('does not use legacy columns when a canonical representation set is malformed', async () => {
-		const fallback = vi.fn();
+	it('fails closed when a canonical representation set is malformed', async () => {
 		const image = await serializePublicImage({
-			storageKey: 'legacy/image.webp',
 			representations: [{ role: 'ORIGINAL', state: 'FAILED', bucket: 'public', objectKey: 'images/failed.webp' }],
-		}, { publicAssetOrigin: 'https://assets.example.test', publicBucket: 'public', onLegacyFallback: fallback });
+		}, { publicAssetOrigin: 'https://assets.example.test', publicBucket: 'public' });
 		expect(image).toBeUndefined();
-		expect(fallback).not.toHaveBeenCalled();
 	});
 
-	it('keeps legacy API routes redirect-only and records fallback telemetry', async () => {
-		const recordMigrationMetric = vi.fn();
-		const service = createPublicDeliveryBridgeService({
-			publicAssetOrigin: 'https://assets.example.test',
-			publicBucket: 'public',
-			logger: { warn: vi.fn() },
-			repository: {
-				resolvePublicImageBridge: vi.fn().mockResolvedValue({ bucket: 'public', objectKey: 'images/x.webp', usedLegacy: true }),
-				findPublicWebglProject: vi.fn(),
-				recordMigrationMetric,
-			},
-		});
-		expect(await service.image('old-key')).toMatchObject({
-			status: 307,
-			headers: { Location: 'https://assets.example.test/images/x.webp', 'Cache-Control': 'no-store' },
-		});
-		expect(recordMigrationMetric).toHaveBeenCalledWith(
-			'public_image_legacy_bridge', 'api-route', { usedLegacyLookup: true },
-		);
+	it('does not register storage-key image or project-id WebGL routes', async () => {
+		const app = Fastify();
+		await app.register(createPublicController({ service: {} as never }), { prefix: '/api/public' });
+		await app.ready();
+		for (const url of [
+			'/api/public/images/old-key.webp',
+			'/api/public/assets/old-key.webp',
+			'/api/public/webgl/7/index.html',
+		]) expect((await app.inject({ method: 'GET', url })).statusCode).toBe(404);
+		await app.close();
 	});
 
 	it('serves a serialized URL while no API server exists', async () => {

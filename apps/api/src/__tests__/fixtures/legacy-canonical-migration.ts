@@ -163,7 +163,9 @@ export const legacyCanonicalMigrationFixture = {
 		kind: 'IMAGE', status: 'READY', storageKey: imageKey, playbackStorageKey: null,
 		originalName: 'planet@2x.webp', mimeType: 'image/webp', playbackMimeType: '',
 		sizeBytes: 200_100n, playbackSizeBytes: 0n, playbackStatus: 'PENDING', isPublic: true,
-		width: 1_200, height: 800, card480Height: 320, display960Height: 640,
+		// This production-shaped legacy row predates deterministic responsive
+		// renditions. Backfill must generate both physical bytes and provenance.
+		width: 1_200, height: 800, card480Height: null, display960Height: null,
 	}, {
 		// A WEBGL source archive was represented as GAME before UploadKind WEBGL
 		// existed as a first-class domain asset.
@@ -190,6 +192,16 @@ export const legacyCanonicalMigrationFixture = {
 		originalName: 'failed-video.webm', mimeType: 'video/webm', playbackMimeType: '',
 		sizeBytes: 100n, playbackSizeBytes: 0n, playbackStatus: 'FAILED', isPublic: false,
 		width: null, height: null, card480Height: null, display960Height: null,
+	}, {
+		// The original remains a valid downloadable asset even though historical
+		// playback generation failed. Contract must not discard the ORIGINAL.
+		id: 42_008,
+		projectId: publishedProjectId,
+		kind: 'VIDEO', status: 'READY',
+		storageKey: 'uploads/videos/2025/playback-failed-original.webm', playbackStorageKey: null,
+		originalName: 'playback-failed-original.webm', mimeType: 'video/webm', playbackMimeType: '',
+		sizeBytes: 321_000n, playbackSizeBytes: 0n, playbackStatus: 'FAILED', isPublic: false,
+		width: 1_280, height: 720, card480Height: null, display960Height: null,
 	}] satisfies readonly LegacyAsset[],
 	gameUploadSessions: [{
 		// The completed session is the legacy DB-shaped proof that asset 42_005
@@ -235,9 +247,8 @@ export const legacyCanonicalMigrationObjectInventory: readonly LegacyHeadObject[
 	{ bucket: 'public', key: renditionKey(posterKey, 'card-480'), mimeType: 'image/webp', size: 42_001n, etag: '"legacy-poster-card-etag"', checksumSha256: 'e'.repeat(64) },
 	{ bucket: 'public', key: renditionKey(posterKey, 'display-960'), mimeType: 'image/webp', size: 100_001n, etag: '"legacy-poster-display-etag"', checksumSha256: 'f'.repeat(64) },
 	{ bucket: 'public', key: imageKey, mimeType: 'image/webp', size: 200_100n, etag: '"legacy-image-etag"', checksumSha256: '1'.repeat(64) },
-	{ bucket: 'public', key: renditionKey(imageKey, 'card-480'), mimeType: 'image/webp', size: 31_000n, etag: '"legacy-image-card-etag"', checksumSha256: '2'.repeat(64) },
-	{ bucket: 'public', key: renditionKey(imageKey, 'display-960'), mimeType: 'image/webp', size: 78_000n, etag: '"legacy-image-display-etag"', checksumSha256: '3'.repeat(64) },
 	{ bucket: 'protected', key: webglSourceKey, mimeType: 'application/zip', size: 6_291_456n, etag: '"legacy-webgl-source-etag"', checksumSha256: '4'.repeat(64) },
+	{ bucket: 'protected', key: 'uploads/videos/2025/playback-failed-original.webm', mimeType: 'video/webm', size: 321_000n, etag: '"legacy-playback-failed-original-etag"', checksumSha256: 'a'.repeat(64) },
 	{ bucket: 'public', key: `${webglPublicPrefix}index.html`, mimeType: 'text/html; charset=utf-8', size: 1_024n, etag: '"legacy-webgl-index-etag"', checksumSha256: '5'.repeat(64) },
 	{ bucket: 'public', key: `${webglPublicPrefix}Build/game.loader.js`, mimeType: 'application/javascript', size: 2_048n, etag: '"legacy-webgl-loader-etag"', checksumSha256: '6'.repeat(64) },
 	{ bucket: 'public', key: `${webglPublicPrefix}Build/game.wasm.br`, mimeType: 'application/wasm', size: 3_072n, etag: '"legacy-webgl-wasm-etag"', checksumSha256: '7'.repeat(64) },
@@ -259,7 +270,7 @@ export const legacyCanonicalMigrationExpected = {
 		{ legacyAssetId: 42_004, role: 'CARD_480', bucket: 'public', key: renditionKey(imageKey, 'card-480') },
 		{ legacyAssetId: 42_004, role: 'DISPLAY_960', bucket: 'public', key: renditionKey(imageKey, 'display-960') },
 		{ legacyAssetId: 42_005, role: 'ORIGINAL', bucket: 'protected', key: webglSourceKey },
-		{ legacyAssetId: 42_005, role: 'WEBGL_SOURCE', bucket: 'protected', key: webglSourceKey },
+		{ legacyAssetId: 42_008, role: 'ORIGINAL', bucket: 'protected', key: 'uploads/videos/2025/playback-failed-original.webm' },
 	],
 	exhibitionPoster: {
 		legacyExhibitionId: exhibitionId,
@@ -271,7 +282,9 @@ export const legacyCanonicalMigrationExpected = {
 	},
 	webglDeployment: {
 		projectId: archivedProjectId,
-		sourceAssetId: 42_005,
+		sourceLegacyGameAssetId: 42_005,
+		sourceCanonicalAssetKind: 'WEBGL',
+		sourceCanonicalKey: `protected/assets/webgl/${archivedProjectId}/${webglDeploymentId}/source.zip`,
 		sourceUploadSessionId: 'a1017537-6772-4ccd-8e49-4ccf8609a2a1',
 		legacyEntryKey: `${webglPublicPrefix}index.html`,
 		publicPrefix: webglPublicPrefix,
@@ -282,6 +295,10 @@ export const legacyCanonicalMigrationExpected = {
 		],
 		state: 'READY',
 	},
+	generatedRenditions: [
+		{ legacyAssetId: 42_004, role: 'CARD_480', bucket: 'public', key: renditionKey(imageKey, 'card-480') },
+		{ legacyAssetId: 42_004, role: 'DISPLAY_960', bucket: 'public', key: renditionKey(imageKey, 'display-960') },
+	],
 	unresolvedWebglDeployment: {
 		projectId: unresolvedProjectId,
 		legacyEntryKey: `webgl/${unresolvedProjectId}/not-a-generation/index.html`,

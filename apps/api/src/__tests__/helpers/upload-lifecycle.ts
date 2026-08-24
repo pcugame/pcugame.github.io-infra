@@ -2,7 +2,6 @@ import { vi } from 'vitest';
 
 import { createUploadLifecycleMetrics } from '../../lib/upload-lifecycle-metrics.js';
 import type { ResourceLease } from '../../backend-context.js';
-import type { DurableGameUploadRepository } from '../../modules/admin/game-upload/repository.js';
 import type { UploadLifecycleRuntime } from '../../modules/upload-lifecycle/ports.js';
 
 export function createTestUploadLifecycleRuntime(
@@ -34,7 +33,6 @@ export function createTestUploadLifecycleRuntime(
 			queue: vi.fn(async () => undefined),
 			run: vi.fn(async () => ({ tried: 0, resolved: 0, failed: 0 })),
 		},
-		gameUploads: createDurableGameUploadRepository(),
 		metrics: createUploadLifecycleMetrics(),
 		wakeDeletionWorker: vi.fn(),
 		wakeMaintenance: vi.fn(),
@@ -54,45 +52,4 @@ export function ownedTestUploadLifecycleResource(
 		start: runtime.start,
 		close: runtime.close,
 	};
-}
-
-export function createDurableGameUploadRepository(
-	overrides: Partial<DurableGameUploadRepository> = {},
-): DurableGameUploadRepository {
-	const repository: DurableGameUploadRepository = {
-		findSessionById: vi.fn(async () => null),
-		createSessionReplacingActive: vi.fn(async (data) => ({
-			session: { id: data.id },
-			durableAborts: [],
-		})),
-		cancelSessionAndClearActive: vi.fn(async () => ({ count: 1 as const, durableAbort: null })),
-		queueAbortTask: vi.fn(async () => undefined),
-		acquirePartClaim: vi.fn(async (input) => ({
-			kind: 'acquired' as const,
-			token: input.token,
-		})),
-		completePartClaim: vi.fn(async () => ({ accepted: true as const, parts: [] })),
-		renewPartClaim: vi.fn(async () => ({ count: 1 })),
-		claimCompletion: vi.fn(async () => ({ count: 1, reason: null })),
-		renewCompletionClaim: vi.fn(async () => ({ count: 1 })),
-		releaseCompletionClaim: vi.fn(async () => ({ count: 1 })),
-		replaceMultipartGeneration: vi.fn(async () => ({ replaced: true, durableAbort: null })),
-		findPartsBySessionId: vi.fn(async () => []),
-		revertToPending: vi.fn(async () => ({ count: 1 })),
-		markFailed: vi.fn(async () => ({ count: 1 })),
-		markCompletedObjectFailed: vi.fn(async () => ({ count: 1 })),
-		claimStaleCompletingSessions: vi.fn(async () => []),
-		findExpiredPendingSessions: vi.fn(async () => []),
-		findSessionsWithExpiredPartClaims: vi.fn(async () => []),
-		findKnownMultipartUploads: vi.fn(async () => []),
-		findActiveSessionsForListing: vi.fn(async () => []),
-		findExhibitionById: vi.fn(async () => null),
-		finalizeCompletedSession: vi.fn(async () => ({
-			assetId: 1,
-			oldStorageKey: null,
-			oldPlaybackStorageKey: null,
-		})),
-		finalizeCompletedWebglSession: vi.fn(async () => ({ oldEntryKey: '' })),
-	};
-	return { ...repository, ...overrides };
 }

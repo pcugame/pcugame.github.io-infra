@@ -1,16 +1,15 @@
 import { createClaimHeartbeatGuard } from '../upload-lifecycle/claim-heartbeat.js';
 import { materializeAndValidateGameSource } from '../admin/game-upload/validation-worker.game-processor.js';
+import { decodePersistedSourceIdentityManifest } from '../admin/game-upload/source-identity.js';
 import type { AssetUploadRepository, AssetUploadValidationStorage } from './ports.js';
+import {
+	isWorkerSourceObjectMissing,
+	MAX_WORKER_VALIDATION_ATTEMPTS,
+	retryBudgetReason,
+	WorkerGenerationFencedError,
+} from '../upload-lifecycle/worker-errors.js';
 
 const VALIDATION_LEASE_MS = 120_000;
-
-function manifestBytes(value: unknown): Uint8Array {
-	if (typeof value === 'string') return Buffer.from(value, 'base64');
-	if (Array.isArray(value) && value.every((part) => typeof part === 'string')) {
-		return Buffer.concat(value.map((part) => Buffer.from(part, 'hex')));
-	}
-	throw new Error('Asset upload source manifest is malformed');
-}
 
 /** Dedicated worker use-case; no Fastify imports or response stream capability. */
 export function createGameUploadValidationWorker(deps: {
@@ -49,7 +48,7 @@ export function createGameUploadValidationWorker(deps: {
 							sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
 							sourceIdentity: session.sourceIdentity,
 							sourceIdentityBlockSizeBytes: session.sourceIdentityBlockSizeBytes,
-							sourceIdentityBlockManifest: manifestBytes(session.sourceIdentityBlockManifest),
+							sourceIdentityBlockManifest: decodePersistedSourceIdentityManifest(session.sourceIdentityBlockManifest),
 						},
 						source: source.body,
 						tempRoot: deps.tempRoot,
@@ -65,11 +64,15 @@ export function createGameUploadValidationWorker(deps: {
 						retried++;
 						continue;
 					}
-					// ZIP, source-identity, and declared-size failures are deterministic.
+					// ZIP, source-identity, declared-size, and authoritative 404 failures are deterministic.
 					const message = String(error instanceof Error ? error.message : error);
-					if (/ZIP|source identity|size mismatch|invalid|corrupt|CRC/i.test(message)) {
-						await deps.repository.markRejected(session.id, token, message);
-						rejected++;
+					const terminal = isWorkerSourceObjectMissing(error)
+						|| error instanceof WorkerGenerationFencedError
+						|| /ZIP|source identity|size mismatch|invalid|corrupt|CRC|GAME_REPLACEMENT_FENCE_LOST/i.test(message);
+					if (terminal || (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
+						const reason = terminal ? message : retryBudgetReason('GAME', error);
+						if (await deps.repository.markRejected(session.id, session.generation, token, reason)) rejected++;
+						else retried++;
 					} else {
 						deps.logger.error({ error, sessionId: session.id }, 'Direct GAME validation will retry');
 						retried++;

@@ -7,7 +7,7 @@ import {
 	uploadDirectAssetFile,
 	waitForDirectAssetReady,
 	type DirectAssetUploadSession,
-	type GameUploadProgress,
+	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
 import { queryKeys } from '../lib/query';
 
@@ -25,6 +25,7 @@ interface Props {
 	autoStart?: boolean;
 	onComplete?: () => void;
 	onSkip?: () => void;
+	submissionItems?: readonly { id: string; clientToken: string }[];
 }
 
 /**
@@ -38,11 +39,12 @@ export default function DirectVideoUploadWidget({
 	autoStart = false,
 	onComplete,
 	onSkip,
+	submissionItems = [],
 }: Props) {
 	const qc = useQueryClient();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
-	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
+	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
 	const [resumable, setResumable] = useState<SavedVideoSession | null>(null);
@@ -110,6 +112,7 @@ export default function DirectVideoUploadWidget({
 				}, {
 					resume: matchingResume,
 					onSession: (session) => remember(session, file),
+					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
 				});
 				if (completion.status === 'VERIFYING') {
 					setPhase('verifying');
@@ -127,7 +130,7 @@ export default function DirectVideoUploadWidget({
 		} finally {
 			submitting.current = false;
 		}
-	}, [forget, onComplete, projectId, qc, remember]);
+	}, [forget, onComplete, projectId, qc, remember, submissionItems]);
 
 	useEffect(() => {
 		if (!autoStart || autoStarted.current || initialFiles.length === 0) return;

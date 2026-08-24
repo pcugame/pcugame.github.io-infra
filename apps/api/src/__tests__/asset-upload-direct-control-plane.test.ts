@@ -1,14 +1,33 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { SOURCE_IDENTITY_BLOCK_SIZE_BYTES, sourceIdentityRoot } from '../modules/admin/game-upload/source-identity.js';
+import {
+	decodePersistedSourceIdentityManifest,
+	SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
+	sourceIdentityRoot,
+} from '../modules/admin/game-upload/source-identity.js';
 import { createAssetUploadService } from '../modules/asset-upload/service.js';
 import type { AssetUploadRepository, AssetUploadSessionRecord } from '../modules/asset-upload/ports.js';
+import { DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX } from '@pcu/contracts';
+import { reservePartCapabilityCount } from '../modules/asset-upload/repository.js';
 
 function sourceProof(bytes: Buffer) {
 	const digests = [createHash('sha256').update(bytes).digest('hex')];
 	return {
 		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
 		sourceIdentity: sourceIdentityRoot(bytes.length, SOURCE_IDENTITY_BLOCK_SIZE_BYTES, digests),
+		sourceIdentityBlockSizeBytes: SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
+		sourceIdentityBlockDigests: digests,
+	};
+}
+
+function sourceProofForSize(sizeBytes: number) {
+	const digests = Array.from(
+		{ length: Math.ceil(sizeBytes / SOURCE_IDENTITY_BLOCK_SIZE_BYTES) },
+		() => '00'.repeat(32),
+	);
+	return {
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
+		sourceIdentity: sourceIdentityRoot(sizeBytes, SOURCE_IDENTITY_BLOCK_SIZE_BYTES, digests),
 		sourceIdentityBlockSizeBytes: SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
 		sourceIdentityBlockDigests: digests,
 	};
@@ -25,10 +44,15 @@ function session(overrides: Partial<AssetUploadSessionRecord> = {}): AssetUpload
 	};
 }
 
-function harness(current = session()) {
+function harness(current = session(), configOverrides: Partial<{
+	partSizeBytes: number;
+	partUrlRefreshMax: number;
+	maxBytesFor(actor: { id: number; role: string }, kind: string): number;
+}> = {}) {
 	const repository = {
 		createAllocating: vi.fn(async (value) => session({ ...value, state: 'ALLOCATING', uploadId: null })),
 		expireStaleAllocations: vi.fn(async () => 0),
+		failAllocation: vi.fn(async () => true),
 		setAllocated: vi.fn(async () => true), findById: vi.fn(async () => current),
 		reservePartCapabilities: vi.fn(async () => current), claimCompletion: vi.fn(async () => 'claimed' as const), renewCompletion: vi.fn(async () => true),
 		markVerifying: vi.fn(async () => true), revertUploading: vi.fn(async () => true), queueAbort: vi.fn(async () => undefined),
@@ -44,7 +68,11 @@ function harness(current = session()) {
 	const service = createAssetUploadService({
 		repository, storage, partSigner: { presignUploadPart: vi.fn(async (_b, _k, _u, part) => `https://garage.test/part/${part}`) },
 		clock: { now: () => new Date('2026-08-21T00:00:00.000Z') }, ids: { next: () => 'direct-game-1' },
-		config: { bucket: 'protected', sessionTtlMs: 60_000, partSizeBytes: 5, partUrlTtlSeconds: 60, partUrlIssueWindowMs: 60_000, partUrlIssueMax: 20, maxBytesFor: () => 100 },
+		config: {
+			bucket: 'protected', sessionTtlMs: 60_000, partSizeBytes: 5,
+			partUrlTtlSeconds: 60, partUrlRefreshMax: 20, maxBytesFor: () => 100,
+			...configOverrides,
+		},
 		authorizeProjectWrite: vi.fn(async () => ({ exhibitionId: 1, status: 'PUBLISHED' })),
 		authorizeExhibitionWrite: vi.fn(async () => undefined),
 	});
@@ -59,6 +87,34 @@ describe('canonical direct GAME control plane', () => {
 		expect(repository.createAllocating).toHaveBeenCalledBefore(storage.createMultipart as never);
 		expect(repository.expireStaleAllocations).toHaveBeenCalledWith({ type: 'PROJECT', id: 7 });
 		expect(storage).not.toHaveProperty('uploadPart');
+		const allocating = (repository.createAllocating as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+		expect(decodePersistedSourceIdentityManifest(allocating.sourceIdentityBlockManifest))
+			.toEqual(Buffer.from(sourceProof(bytes).sourceIdentityBlockDigests[0]!, 'hex'));
+	});
+
+	it('closes an ALLOCATING slot after an ambiguous CreateMultipart failure so retry is immediately available', async () => {
+		const { service, repository, storage } = harness();
+		const bytes = Buffer.from('fixture');
+		storage.createMultipart.mockRejectedValueOnce(new Error('Garage connection reset'));
+
+		await expect(service.createGameSession({ id: 11, role: 'USER' }, 7, {
+			originalName: 'game.zip', totalBytes: bytes.length, ...sourceProof(bytes),
+		})).rejects.toMatchObject({ statusCode: 503 });
+		expect(repository.failAllocation).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: 'direct-game-1', generation: 1, reason: expect.stringContaining('Garage connection reset'),
+		}));
+
+		await expect(service.createGameSession({ id: 11, role: 'USER' }, 7, {
+			originalName: 'game.zip', totalBytes: bytes.length, ...sourceProof(bytes),
+		})).resolves.toMatchObject({ sessionId: 'direct-game-1' });
+		expect(repository.createAllocating).toHaveBeenCalledTimes(2);
+	});
+
+	it('accepts only the canonical base64 source-manifest representation for direct workers', () => {
+		expect(() => decodePersistedSourceIdentityManifest({ digests: ['a'.repeat(64)] }))
+			.toThrow('Persisted source identity manifest is malformed');
+		expect(() => decodePersistedSourceIdentityManifest(['a'.repeat(64)]))
+			.toThrow('Persisted source identity manifest is malformed');
 	});
 
 	it('creates IMAGE/POSTER sessions with exactly one authorized domain owner', async () => {
@@ -108,6 +164,37 @@ describe('canonical direct GAME control plane', () => {
 		expect(repository.revertUploading).not.toHaveBeenCalled();
 	});
 
+	it('returns the durable VERIFYING outcome when ambiguous completion loses its mark CAS', async () => {
+		const current = session();
+		const { service, storage, repository } = harness(current);
+		storage.completeMultipart.mockRejectedValueOnce(new Error('Garage connection reset'));
+		storage.head.mockResolvedValueOnce({ size: 7, etag: '"complete"' });
+		(repository.markVerifying as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+		(repository.findById as unknown as ReturnType<typeof vi.fn>)
+			.mockResolvedValueOnce(current)
+			.mockResolvedValueOnce(session({ state: 'VERIFYING' }));
+
+		await expect(service.complete({ id: 11, role: 'USER' }, 'direct-game-1', {
+			generation: 1,
+			parts: [{ partNumber: 1, etag: 'one', sizeBytes: 5 }, { partNumber: 2, etag: 'two', sizeBytes: 2 }],
+		})).resolves.toMatchObject({ status: 'VERIFYING', generation: 1, sizeBytes: 7 });
+		expect(repository.markVerifying).toHaveBeenCalledOnce();
+	});
+
+	it('reverts only its own unexpired completion lease when no completed object exists', async () => {
+		const { service, storage, repository } = harness();
+		storage.completeMultipart.mockRejectedValueOnce(new Error('Garage connection reset'));
+		(storage.head as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+
+		await expect(service.complete({ id: 11, role: 'USER' }, 'direct-game-1', {
+			generation: 1,
+			parts: [{ partNumber: 1, etag: 'one', sizeBytes: 5 }, { partNumber: 2, etag: 'two', sizeBytes: 2 }],
+		})).rejects.toThrow('Garage connection reset');
+		expect(repository.revertUploading).toHaveBeenCalledWith(
+			'direct-game-1', 1, 'direct-game-1', expect.stringContaining('Garage connection reset'),
+		);
+	});
+
 	it('rejects a client manifest that disagrees with Garage', async () => {
 		const { service, storage } = harness();
 		await expect(service.complete({ id: 11, role: 'USER' }, 'direct-game-1', { generation: 1, parts: [{ partNumber: 1, etag: 'forged', sizeBytes: 5 }, { partNumber: 2, etag: 'two', sizeBytes: 2 }] })).rejects.toMatchObject({ statusCode: 409 });
@@ -122,6 +209,75 @@ describe('canonical direct GAME control plane', () => {
 		})).resolves.toMatchObject({ generation: 1, totalParts: 3 });
 		expect(repository.createAllocating).toHaveBeenCalledWith(expect.objectContaining({ kind: 'WEBGL' }));
 		expect(storage.createMultipart).toHaveBeenCalledWith('protected', expect.stringContaining('/source.zip'), 'application/zip');
+	});
+
+	it('accepts the exact 5 GiB boundary as 320 parts and rejects max + 1 without allocating storage', async () => {
+		const maximum = 5 * 1024 * 1024 * 1024;
+		const { service, repository, storage } = harness(session(), {
+			partSizeBytes: 16 * 1024 * 1024,
+			maxBytesFor: () => maximum,
+		});
+		await expect(service.createGameSession({ id: 11, role: 'USER' }, 7, {
+			originalName: 'maximum.zip', totalBytes: maximum, ...sourceProofForSize(maximum),
+		})).resolves.toMatchObject({ totalParts: 320, partSizeBytes: 16 * 1024 * 1024 });
+		await expect(service.createGameSession({ id: 11, role: 'USER' }, 7, {
+			originalName: 'too-large.zip', totalBytes: maximum + 1, ...sourceProofForSize(maximum + 1),
+		})).rejects.toMatchObject({ statusCode: 400 });
+		expect(repository.createAllocating).toHaveBeenCalledTimes(1);
+		expect(storage.createMultipart).toHaveBeenCalledTimes(1);
+	});
+
+	it('issues bounded batches and fences every URL batch by generation', async () => {
+		const current = session({ totalParts: 320, totalBytes: BigInt(5 * 1024 * 1024 * 1024) });
+		const { service, repository } = harness(current, { partUrlRefreshMax: 64 });
+		const checksumSha256 = Buffer.alloc(32).toString('base64');
+		const batch = Array.from({ length: DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX }, (_, index) => ({
+			partNumber: index + 1, checksumSha256,
+		}));
+		await expect(service.signParts({ id: 11, role: 'USER' }, current.id, {
+			generation: 1, parts: batch,
+		})).resolves.toMatchObject({ generation: 1, parts: expect.arrayContaining([
+			expect.objectContaining({ partNumber: 1 }), expect.objectContaining({ partNumber: 32 }),
+		]) });
+		expect(repository.reservePartCapabilities).toHaveBeenCalledWith({
+			sessionId: current.id, actorId: 11, generation: 1,
+			partCount: DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX, maxRefreshIssues: 64,
+		});
+
+		await expect(service.signParts({ id: 11, role: 'USER' }, current.id, {
+			generation: 1,
+			parts: [...batch, { partNumber: 33, checksumSha256 }],
+		})).rejects.toMatchObject({ statusCode: 400 });
+		await expect(service.signParts({ id: 11, role: 'USER' }, current.id, {
+			generation: 2, parts: [batch[0]!],
+		})).rejects.toMatchObject({ statusCode: 409 });
+	});
+
+	it('persists a session-lifetime totalParts plus bounded-refresh capability budget across batches', () => {
+		let issued = 0;
+		for (let batch = 0; batch < 10; batch += 1) {
+			issued = reservePartCapabilityCount({ totalParts: 320, issued, requested: 32, maxRefreshIssues: 64 });
+		}
+		expect(issued).toBe(320);
+		issued = reservePartCapabilityCount({ totalParts: 320, issued, requested: 64, maxRefreshIssues: 64 });
+		expect(issued).toBe(384);
+		expect(() => reservePartCapabilityCount({
+			totalParts: 320, issued, requested: 1, maxRefreshIssues: 64,
+		})).toThrow('DIRECT_UPLOAD_CAPABILITY_QUOTA');
+	});
+
+	it('does not turn repeated replacement requests into a rolling-window allowance', () => {
+		let issued = 0;
+		// A client may request the same part repeatedly after a URL expires. Each
+		// replacement consumes the one persisted session-lifetime budget.
+		for (let request = 0; request < 3; request += 1) {
+			issued = reservePartCapabilityCount({ totalParts: 2, issued, requested: 1, maxRefreshIssues: 2 });
+		}
+		expect(issued).toBe(3);
+		issued = reservePartCapabilityCount({ totalParts: 2, issued, requested: 1, maxRefreshIssues: 2 });
+		expect(issued).toBe(4);
+		expect(() => reservePartCapabilityCount({ totalParts: 2, issued, requested: 1, maxRefreshIssues: 2 }))
+			.toThrow('DIRECT_UPLOAD_CAPABILITY_QUOTA');
 	});
 
 	it('allocates VIDEO as opaque bytes and leaves MIME verification to the worker', async () => {

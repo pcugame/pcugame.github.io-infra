@@ -22,6 +22,9 @@ import {
 	runCanonicalBackfill,
 } from '../src/modules/migration/canonical-backfill.js';
 import { createCanonicalBackfillRepository } from '../src/modules/migration/canonical-backfill.prisma.js';
+import { createCanonicalObjectMaterializer } from '../src/infrastructure/canonical-object-migration.s3.js';
+import { runContractPreflight } from '../src/modules/migration/contract-preflight.js';
+import { createContractPreflightRepository } from '../src/modules/migration/contract-preflight.prisma.js';
 import type {
 	CanonicalBackfillMode,
 	CanonicalBackfillProgress,
@@ -30,6 +33,7 @@ import type {
 interface CliPaths {
 	progressFile: string;
 	failuresFile: string;
+	reportFile: string;
 	resetProgress: boolean;
 }
 
@@ -43,6 +47,7 @@ function cliPaths(args: readonly string[], mode: CanonicalBackfillMode): CliPath
 	return {
 		progressFile: resolve(valueOption(args, 'progress-file') || `${stem}.progress.json`),
 		failuresFile: resolve(valueOption(args, 'failures-file') || `${stem}.failures.json`),
+		reportFile: resolve(valueOption(args, 'report-file') || `${stem}.report.json`),
 		resetProgress: args.includes('--reset-progress'),
 	};
 }
@@ -71,7 +76,7 @@ async function atomicJson(path: string, value: unknown): Promise<void> {
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);
 	if (args.includes('--help')) {
-		console.log('backfill-canonical-assets [--apply|--dry-run] [--batch-size=N] [--progress-file=PATH] [--failures-file=PATH] [--reset-progress]');
+		console.log('backfill-canonical-assets [--apply|--dry-run] [--batch-size=N] [--progress-file=PATH] [--failures-file=PATH] [--report-file=PATH] [--reset-progress]');
 		return;
 	}
 	const options = parseCanonicalBackfillOptions(args);
@@ -85,6 +90,10 @@ async function main(): Promise<void> {
 		const progress = await readProgress(paths.progressFile, mode, paths.resetProgress);
 		const result = await runCanonicalBackfill({
 			repository: createCanonicalBackfillRepository(prisma),
+			materializer: createCanonicalObjectMaterializer(s3, {
+				tempRoot: config.IMAGE_WORKER_TEMP_ROOT,
+				limits: { maxTempBytes: config.IMAGE_WORKER_TEMP_MAX_MB * 1024 * 1024 },
+			}),
 			verifier: {
 				async head(bucket, key) {
 					const metadata = await storage.head(bucket, key);
@@ -119,12 +128,63 @@ async function main(): Promise<void> {
 			generatedAt: new Date().toISOString(),
 			failures: result.failures,
 		});
-		console.log(JSON.stringify({
+		const listed = await Promise.all([
+			storage.listKeys(config.S3_BUCKET_PROTECTED, ''),
+			storage.listKeys(config.S3_BUCKET_PUBLIC, ''),
+			storage.listMultipartUploads(config.S3_BUCKET_PROTECTED, ''),
+			storage.listMultipartUploads(config.S3_BUCKET_PUBLIC, ''),
+		]);
+		const capturedAt = new Date().toISOString();
+		const reconciliation = await runContractPreflight({
+			repository: createContractPreflightRepository(prisma),
+			inventory: {
+				identity: `canonical-backfill-reconciliation:${capturedAt}`,
+				capturedAt,
+				objects: [
+					...listed[0].map((key) => ({ bucket: config.S3_BUCKET_PROTECTED, key })),
+					...listed[1].map((key) => ({ bucket: config.S3_BUCKET_PUBLIC, key })),
+				],
+				multipartUploads: [
+					...listed[2].map((upload) => ({ bucket: config.S3_BUCKET_PROTECTED, key: upload.key, uploadId: upload.uploadId })),
+					...listed[3].map((upload) => ({ bucket: config.S3_BUCKET_PUBLIC, key: upload.key, uploadId: upload.uploadId })),
+				],
+			},
+			head: async (bucket, key, signal) => {
+				const metadata = await storage.head(bucket, key, { signal });
+				if (!metadata) return null;
+				if (!Number.isSafeInteger(metadata.size) || metadata.size < 0) {
+					throw new Error(`Garage HEAD returned unsafe size for ${bucket}/${key}`);
+				}
+				return {
+					sizeBytes: BigInt(metadata.size), mimeType: metadata.contentType,
+					etag: metadata.etag ?? null, checksumSha256: metadata.checksumSha256 ?? null,
+				};
+			},
+			options: {
+				batchSize: options.batchSize,
+				protectedBucket: config.S3_BUCKET_PROTECTED,
+				publicBucket: config.S3_BUCKET_PUBLIC,
+			},
+		});
+		const report = {
+			version: 2,
 			event: 'canonical_backfill_complete',
-			...result,
+			mode: result.mode,
+			executionStats: result.stats,
+			progress: result.progress,
+			failures: result.failures,
+			reconciliation: {
+				counts: reconciliation.counts,
+				blockers: reconciliation.blockers,
+				clean: reconciliation.clean,
+				inventorySnapshot: reconciliation.inventorySnapshot,
+			},
 			progressFile: paths.progressFile,
 			failuresFile: paths.failuresFile,
-		}, null, 2));
+			reportFile: paths.reportFile,
+		};
+		await atomicJson(paths.reportFile, report);
+		console.log(JSON.stringify(report, null, 2));
 		if (result.failures.length > 0) process.exitCode = 2;
 	} finally {
 		s3.destroy();

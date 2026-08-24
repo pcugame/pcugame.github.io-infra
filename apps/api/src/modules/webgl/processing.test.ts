@@ -6,7 +6,13 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { deflateRawSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SOURCE_IDENTITY_BLOCK_SIZE_BYTES, sourceIdentityRoot } from '../admin/game-upload/source-identity.js';
+import {
+	encodePersistedSourceIdentityManifest,
+	SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
+	sourceIdentityRoot,
+} from '../admin/game-upload/source-identity.js';
+import { createAssetUploadService } from '../asset-upload/service.js';
+import type { AssetUploadRepository } from '../asset-upload/ports.js';
 import { createWebglTempDiskBudget } from './processing.composition.js';
 import {
 	createWebglProcessingProcessor,
@@ -17,6 +23,7 @@ import {
 	type WebglProcessingRepository,
 } from './processing.js';
 import { createWebglProcessingWorker } from './processing-worker.js';
+import { WorkerSourceObjectMissingError } from '../upload-lifecycle/worker-errors.js';
 
 const tempRoots: string[] = [];
 
@@ -105,10 +112,13 @@ function identity(bytes: Buffer) {
 			.update(bytes.subarray(offset, offset + SOURCE_IDENTITY_BLOCK_SIZE_BYTES)).digest('hex'));
 	}
 	return {
-		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const,
 		sourceIdentityBlockSizeBytes: SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
-		sourceIdentityBlockManifest: { digests },
+		sourceIdentityBlockManifest: encodePersistedSourceIdentityManifest(
+			Buffer.concat(digests.map((digest) => Buffer.from(digest, 'hex'))),
+		),
 		sourceIdentity: sourceIdentityRoot(bytes.length, SOURCE_IDENTITY_BLOCK_SIZE_BYTES, digests),
+		sourceIdentityBlockDigests: digests,
 	};
 }
 
@@ -172,6 +182,10 @@ async function harness(bytes = unityZip()) {
 				entryObjectKey: `public/webgl/7/${deploymentId}/index.html`,
 				state: 'PENDING',
 				expectedCurrentDeploymentId: 'old-deployment',
+				outputBucket: 'public',
+				outputPrefix: `public/webgl/7/${deploymentId}/`,
+				outputEntryObjectKey: `public/webgl/7/${deploymentId}/index.html`,
+				publicationStaged: false,
 			};
 			expect(input.candidateDeploymentId).toMatch(/^[0-9a-f-]{36}$/);
 			return reservation;
@@ -207,13 +221,14 @@ async function harness(bytes = unityZip()) {
 				sizeBytes: object.bytes.length,
 				mimeType: object.type,
 				etag: `"${createHash('md5').update(object.bytes).digest('hex')}"`,
-				checksumSha256: null,
+				checksumSha256: createHash('sha256').update(object.bytes).digest('hex'),
 			} : null;
 		}),
 	};
 	const ids = [randomUUID(), randomUUID()];
 	const processor = createWebglProcessingProcessor({
 		publicBucket: 'public',
+		protectedBucket: 'protected',
 		tempRoot,
 		physicalArchiveByteLimit: 1024 * 1024,
 		diskBudget: createWebglTempDiskBudget(2 * 1024 * 1024),
@@ -237,6 +252,72 @@ async function harness(bytes = unityZip()) {
 }
 
 describe('canonical WebGL processing', () => {
+	it('carries the API-created base64 source manifest through VERIFYING into worker materialization', async () => {
+		const state = await harness();
+		const proof = identity(state.bytes);
+		let persisted: Record<string, unknown> | undefined;
+		const repository = {
+			expireStaleAllocations: vi.fn(async () => 0),
+			createAllocating: vi.fn(async (input) => {
+				persisted = input;
+				return {
+					...state.uploadSession,
+					...input,
+					state: 'ALLOCATING' as const,
+					uploadId: null,
+				};
+			}),
+			setAllocated: vi.fn(async () => true),
+		} as unknown as AssetUploadRepository;
+		const service = createAssetUploadService({
+			repository,
+			storage: {
+				createMultipart: vi.fn(async () => 'garage-upload'),
+				listParts: vi.fn(), completeMultipart: vi.fn(), head: vi.fn(), abortMultipart: vi.fn(),
+			},
+			partSigner: { presignUploadPart: vi.fn() },
+			clock: { now: () => new Date('2026-08-21T00:00:00Z') },
+			ids: { next: () => state.uploadSession.id },
+			config: {
+				bucket: 'protected', sessionTtlMs: 60_000, partSizeBytes: 5 * 1024 * 1024,
+				partUrlTtlSeconds: 60, partUrlRefreshMax: 1,
+				maxBytesFor: () => 10 * 1024 * 1024,
+			},
+			authorizeProjectWrite: vi.fn(async () => ({ exhibitionId: 1, status: 'PUBLISHED' })),
+		});
+
+		await service.createWebglSession({ id: 11, role: 'USER' }, 7, {
+			originalName: 'webgl.zip', totalBytes: state.bytes.length,
+			sourceIdentityAlgorithm: proof.sourceIdentityAlgorithm,
+			sourceIdentity: proof.sourceIdentity,
+			sourceIdentityBlockSizeBytes: proof.sourceIdentityBlockSizeBytes,
+			sourceIdentityBlockDigests: proof.sourceIdentityBlockDigests,
+		});
+		expect(persisted?.sourceIdentityBlockManifest).toBe(proof.sourceIdentityBlockManifest);
+
+		// This is the durable row after CompleteMultipart has atomically advanced it
+		// to VERIFYING. The worker receives exactly the API-encoded JSON value.
+		Object.assign(state.uploadSession, {
+			state: 'VERIFYING',
+			bucket: persisted?.bucket,
+			objectKey: persisted?.objectKey,
+			generation: persisted?.generation,
+			sourceIdentityAlgorithm: persisted?.sourceIdentityAlgorithm,
+			sourceIdentity: persisted?.sourceIdentity,
+			sourceIdentityBlockSizeBytes: persisted?.sourceIdentityBlockSizeBytes,
+			sourceIdentityBlockManifest: persisted?.sourceIdentityBlockManifest,
+		});
+		Object.assign(state.uploadSession.sourceRepresentation, {
+			bucket: persisted?.bucket,
+			objectKey: persisted?.objectKey,
+			sourceIdentityAlgorithm: persisted?.sourceIdentityAlgorithm,
+			sourceIdentity: persisted?.sourceIdentity,
+		});
+		await expect(state.processor.process(state.uploadSession, state.context)).resolves.toMatchObject({
+			deploymentId: state.deploymentId,
+		});
+	});
+
 	it('fully validates before reserving/publishing and commits the immutable generation last', async () => {
 		const state = await harness();
 		const result = await state.processor.process(state.uploadSession, state.context);
@@ -261,7 +342,7 @@ describe('canonical WebGL processing', () => {
 					expect.objectContaining({
 						objectKey: `public/webgl/7/${state.deploymentId}/index.html`,
 						sizeBytes: '18', mimeType: 'text/html; charset=utf-8', contentEncoding: null,
-						etag: expect.any(String), checksumSha256: null,
+						etag: expect.any(String), checksumSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
 					}),
 				]),
 			}),
@@ -310,6 +391,23 @@ describe('canonical WebGL processing', () => {
 		await expect(state.processor.process(state.uploadSession, state.context))
 			.rejects.toThrow('unavailable for manifest recovery');
 		expect(state.repository.commitReady).not.toHaveBeenCalled();
+	});
+
+	it('classifies an authoritative WEBGL_SOURCE 404 as terminal validation', async () => {
+		const state = await harness();
+		const missing = new WorkerSourceObjectMissingError('Canonical WEBGL_SOURCE object does not exist');
+		const tempRoot = await mkdtemp(join(tmpdir(), 'pcu-webgl-missing-test-'));
+		tempRoots.push(tempRoot);
+		// Build a fresh processor seam so the missing response occurs before materialization.
+		const processor = createWebglProcessingProcessor({
+			publicBucket: 'public', protectedBucket: 'protected', tempRoot,
+			physicalArchiveByteLimit: 1024 * 1024, diskBudget: createWebglTempDiskBudget(2 * 1024 * 1024),
+			repository: state.repository, storage: { openSource: vi.fn(async () => { throw missing; }) },
+			uploader: state.uploader, ids: { next: () => randomUUID() }, logger: { warn: vi.fn() },
+		});
+		await expect(processor.process(state.uploadSession, state.context))
+			.rejects.toBeInstanceOf(WebglTerminalValidationError);
+		expect(state.repository.reserveDeployment).not.toHaveBeenCalled();
 	});
 
 	it('persists the preflight-compatible manifest in the same READY transaction', async () => {

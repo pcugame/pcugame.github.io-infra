@@ -1,57 +1,57 @@
-/**
- * Chunked game-file upload client.
- *
- * Splits a File into chunks and uploads them sequentially with
- * resume/retry support. Progress is tracked per-chunk.
- */
+/** Direct Garage multipart client for GAME, WEBGL, VIDEO, IMAGE, and POSTER. */
 
 import { env } from '../env';
 import { ApiError } from './client';
-import { failUpload, finishUpload, startUpload, updateUpload } from '../upload';
 import type {
-	GameUploadChunkResponse,
-	GameUploadCompleteResponse,
-	GameUploadCreateSessionRequest,
-	GameUploadSession,
-	GameUploadSessionListResponse,
-	GameUploadStatus,
 	DirectGameUploadCompletionResponse,
 	DirectGameUploadCompleteRequest,
 	DirectGameUploadCreateSessionRequest,
 	DirectGameUploadPartUrlsRequest,
+	DirectGameUploadPartUrlsResponse,
 	DirectAssetUploadStatus,
 	DirectAssetUploadKind,
 	DirectAssetUploadOwner,
-	UploadKind,
 } from '../../contracts';
+import { DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE } from '../../contracts';
 import { createFileSourceIdentity } from '../file-identity';
 
-// ── Types ────────────────────────────────────────────────────
-
-export type { GameUploadSession, GameUploadStatus };
-
-export interface GameUploadProgress {
+export interface DirectAssetUploadProgress {
 	uploadedChunks: number;
 	totalChunks: number;
 	uploadedBytes: number;
 	totalBytes: number;
 	percent: number;
 }
+const CONTROL_RETRY_ATTEMPTS = 4;
+const UPLOAD_PART_RETRY_ATTEMPTS = 4;
 
-export interface GameUploadController {
-	/** Start or resume the upload. Returns when fully complete. */
-	start: () => Promise<GameUploadCompleteResponse>;
-	/** Abort the in-progress upload (can still be resumed later). */
-	abort: () => void;
+function retryAfterMs(value: string | null, fallbackMs: number): number {
+	if (!value) return fallbackMs;
+	const seconds = Number(value);
+	if (Number.isFinite(seconds) && seconds >= 0) return Math.max(1, Math.ceil(seconds * 1_000));
+	const timestamp = Date.parse(value);
+	return Number.isFinite(timestamp) ? Math.max(1, timestamp - Date.now()) : fallbackMs;
 }
 
-export interface UploadGameFileOptions {
-	title: string;
-	onProgress?: (progress: GameUploadProgress) => void;
-	startFrom?: number[];
+function wait(delayMs: number, signal?: AbortSignal | null): Promise<void> {
+	if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+	return new Promise((resolve, reject) => {
+		const finish = () => {
+			signal?.removeEventListener('abort', abort);
+			resolve();
+		};
+		const abort = () => {
+			window.clearTimeout(timer);
+			reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+		};
+		const timer = window.setTimeout(finish, delayMs);
+		signal?.addEventListener('abort', abort, { once: true });
+	});
 }
 
-// ── Helpers ──────────────────────────────────────────────────
+function isTransientControlError(error: unknown): boolean {
+	return !(error instanceof ApiError) || error.status === 429 || error.status >= 500;
+}
 
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
 	if (import.meta.env.VITE_MOCK === 'true') {
@@ -63,200 +63,29 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
 	}
 
 	const url = `${env.API_BASE_URL}${path}`;
-	const res = await fetch(url, { ...init, credentials: 'include' });
+	for (let attempt = 0; ; attempt += 1) {
+		const res = await fetch(url, { ...init, credentials: 'include' });
+		if (res.ok) {
+			if (res.status === 204) return undefined as T;
+			const json = await res.json() as Record<string, unknown>;
+			if (json.ok && json.data) return json.data as T;
+			return json as T;
+		}
 
-	if (!res.ok) {
 		let body: unknown;
 		try { body = await res.json(); } catch { body = null; }
-		throw new ApiError(res.status, res.statusText, body);
-	}
-
-	if (res.status === 204) return undefined as T;
-
-	const json = await res.json() as Record<string, unknown>;
-	if (json.ok && json.data) return json.data as T;
-	return json as T;
-}
-
-// ── Public API ───────────────────────────────────────────────
-
-/** Create a new upload session for a game file. */
-export async function createGameUploadSession(
-	projectId: number,
-	file: File,
-	uploadKind: UploadKind = 'GAME',
-): Promise<GameUploadSession> {
-	return apiRequest<GameUploadSession>(
-		`/api/admin/projects/${projectId}/game-upload-sessions`,
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				originalName: file.name,
-				totalBytes: file.size,
-				uploadKind,
-			} satisfies GameUploadCreateSessionRequest),
-		},
-	);
-}
-
-/** Get the current status of an upload session. */
-export async function getGameUploadStatus(
-	sessionId: string,
-): Promise<GameUploadStatus> {
-	return apiRequest<GameUploadStatus>(
-		`/api/admin/game-upload-sessions/${sessionId}`,
-	);
-}
-
-/** List active sessions for a project. */
-export async function listGameUploadSessions(
-	projectId: number,
-	uploadKind?: UploadKind,
-): Promise<GameUploadSessionListResponse> {
-	const response = await apiRequest<GameUploadSessionListResponse>(
-		`/api/admin/projects/${projectId}/game-upload-sessions`,
-	);
-	return uploadKind
-		? { items: response.items.filter((item) => (item.uploadKind ?? 'GAME') === uploadKind) }
-		: response;
-}
-
-/** Cancel an upload session. */
-export async function cancelGameUploadSession(
-	sessionId: string,
-): Promise<void> {
-	await apiRequest<void>(
-		`/api/admin/game-upload-sessions/${sessionId}`,
-		{ method: 'DELETE' },
-	);
-}
-
-/**
- * Upload a file in chunks with progress tracking and resume support.
- *
- * @param file        The game ZIP file
- * @param session     The session from createGameUploadSession
- * @param options     Upload title, progress callback, and resume chunk indices
- * @returns controller with start() and abort()
- */
-export function uploadGameFile(
-	file: File,
-	session: GameUploadSession,
-	options: UploadGameFileOptions,
-): GameUploadController {
-	let aborted = false;
-	let taskId: string | null = null;
-
-	const uploadedSet = new Set(options.startFrom ?? []);
-
-	function ensureTask() {
-		if (taskId) return taskId;
-		taskId = startUpload({
-			title: options.title,
-			phase: 'uploading',
-			totalBytes: file.size,
-			loadedBytes: 0,
-			percent: 0,
-			processingMessage: '파일 조립 및 검증이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
-		});
-		return taskId;
-	}
-
-	function reportProgress() {
-		const uploadTaskId = ensureTask();
-		const uploadedBytes = uploadedSet.size * session.chunkSizeBytes;
-		const progress = {
-			uploadedChunks: uploadedSet.size,
-			totalChunks: session.totalChunks,
-			uploadedBytes: Math.min(uploadedBytes, file.size),
-			totalBytes: file.size,
-			percent: Math.round((uploadedSet.size / session.totalChunks) * 100),
-		};
-		options.onProgress?.(progress);
-		updateUpload(uploadTaskId, {
-			phase: 'uploading',
-			loadedBytes: progress.uploadedBytes,
-			totalBytes: progress.totalBytes,
-			percent: Math.min(99, progress.percent),
-		});
-	}
-
-	async function start() {
-		const uploadTaskId = ensureTask();
-		try {
-			reportProgress();
-
-			for (let i = 0; i < session.totalChunks; i++) {
-				if (aborted) throw new Error('Upload aborted');
-				if (uploadedSet.has(i)) continue; // already uploaded (resume)
-
-				const start = i * session.chunkSizeBytes;
-				const end = Math.min(start + session.chunkSizeBytes, file.size);
-				const chunk = file.slice(start, end);
-
-				// Retry up to 3 times per chunk
-				let lastErr: unknown;
-				for (let attempt = 0; attempt < 3; attempt++) {
-					if (aborted) throw new Error('Upload aborted');
-					try {
-						await apiRequest<GameUploadChunkResponse>(
-							`/api/admin/game-upload-sessions/${session.sessionId}/chunks/${i}`,
-							{
-								method: 'PUT',
-								headers: { 'Content-Type': 'application/octet-stream' },
-								body: chunk,
-							},
-						);
-						lastErr = null;
-						break;
-					} catch (err) {
-						lastErr = err;
-						// Wait before retry (exponential backoff)
-						if (attempt < 2) {
-							await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-						}
-					}
-				}
-				if (lastErr) throw lastErr;
-
-				uploadedSet.add(i);
-				reportProgress();
-			}
-
-			updateUpload(uploadTaskId, {
-				phase: 'processing',
-				loadedBytes: file.size,
-				totalBytes: file.size,
-				percent: 99,
-			});
-
-			// All chunks uploaded — finalize
-			const result = await apiRequest<GameUploadCompleteResponse>(
-				`/api/admin/game-upload-sessions/${session.sessionId}/complete`,
-				{ method: 'POST' },
-			);
-
-			finishUpload(uploadTaskId);
-			return result;
-		} catch (err) {
-			if ((err as Error).message === 'Upload aborted') {
-				failUpload(uploadTaskId, '업로드가 일시정지되었습니다.');
-			} else {
-				failUpload(uploadTaskId, err instanceof Error ? err.message : '업로드 중 오류가 발생했습니다.');
-			}
-			throw err;
+		if (res.status !== 429 || attempt >= CONTROL_RETRY_ATTEMPTS) {
+			throw new ApiError(res.status, res.statusText, body);
 		}
+		await wait(
+			retryAfterMs(res.headers.get('retry-after'), Math.min(30_000, 1_000 * (2 ** attempt))),
+			init.signal,
+		);
 	}
-
-	return {
-		start,
-		abort: () => { aborted = true; },
-	};
 }
 
 /**
- * Canonical GAME data-plane client. The API only exchanges JSON controls;
+ * Canonical data-plane client. The API only exchanges JSON controls;
  * every File slice is PUT directly to the Garage UploadPart capability.
  */
 export type DirectAssetUploadSession = {
@@ -292,18 +121,35 @@ export async function cancelDirectAssetUploadSession(sessionId: string): Promise
 /** Poll JSON control state only; Garage never passes archive bytes through the API. */
 export async function waitForDirectAssetReady(
 	sessionId: string,
-	options: { intervalMs?: number; timeoutMs?: number } = {},
+	options: { intervalMs?: number; maxIntervalMs?: number; timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<DirectAssetUploadStatus> {
 	const intervalMs = options.intervalMs ?? 1_500;
-	const deadline = Date.now() + (options.timeoutMs ?? 10 * 60_000);
+	const maxIntervalMs = options.maxIntervalMs ?? 15_000;
+	const deadline = options.timeoutMs === undefined ? undefined : Date.now() + options.timeoutMs;
+	let transientFailures = 0;
 	for (;;) {
-		const status = await getDirectAssetUploadStatus(sessionId);
+		if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('Aborted', 'AbortError');
+		let status: DirectAssetUploadStatus;
+		try {
+			status = await apiRequest<DirectAssetUploadStatus>(
+				`/api/admin/direct-asset-upload-sessions/${sessionId}`,
+				{ signal: options.signal },
+			);
+			transientFailures = 0;
+		} catch (error) {
+			if (options.signal?.aborted || !isTransientControlError(error)) throw error;
+			transientFailures += 1;
+			await wait(Math.min(maxIntervalMs, intervalMs * (2 ** Math.min(transientFailures, 4))), options.signal);
+			continue;
+		}
 		if (status.state === 'READY') return status;
 		if (['REJECTED', 'CANCELLED', 'EXPIRED'].includes(status.state)) {
 			throw new Error(`Direct upload ${status.state.toLowerCase()}`);
 		}
-		if (Date.now() >= deadline) throw new Error('Direct upload verification is taking longer than expected');
-		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+		if (deadline !== undefined && Date.now() >= deadline) {
+			throw new Error('Direct upload verification is taking longer than the requested wait period');
+		}
+		await wait(intervalMs, options.signal);
 	}
 }
 
@@ -312,6 +158,22 @@ export async function waitForDirectAssetReady(
  * uses an in-memory presigned-capability simulator so local UI exercises the
  * same session/part/complete flow without falling back to an API byte relay.
  */
+class DirectUploadPartError extends Error {
+	readonly status: number;
+	readonly retryAfterMilliseconds: number | undefined;
+
+	constructor(
+		status: number,
+		retryAfterMilliseconds: number | undefined,
+		options?: { cause?: unknown },
+	) {
+		super(`Direct UploadPart failed (${status || 'network'})`, options);
+		this.name = 'DirectUploadPartError';
+		this.status = status;
+		this.retryAfterMilliseconds = retryAfterMilliseconds;
+	}
+}
+
 async function putDirectUploadPart(
 	capability: { url: string; requiredHeaders: Record<string, string> },
 	body: Blob,
@@ -324,13 +186,80 @@ async function putDirectUploadPart(
 		if (!result.etag) throw new Error('Mock UploadPart response omitted ETag');
 		return result.etag;
 	}
-	const response = await fetch(capability.url, {
-		method: 'PUT', headers: capability.requiredHeaders, body,
-	});
-	if (!response.ok) throw new Error(`Direct UploadPart failed (${response.status})`);
+	let response: Response;
+	try {
+		response = await fetch(capability.url, {
+			method: 'PUT', headers: capability.requiredHeaders, body,
+		});
+	} catch (error) {
+		throw new DirectUploadPartError(0, undefined, { cause: error });
+	}
+	if (!response.ok) {
+		throw new DirectUploadPartError(
+			response.status,
+			response.status === 429
+				? retryAfterMs(response.headers.get('retry-after'), 1_000)
+				: undefined,
+		);
+	}
 	const etag = response.headers.get('etag');
 	if (!etag) throw new Error('Direct UploadPart response omitted ETag');
 	return etag;
+}
+
+type PreparedPart = { partNumber: number; body: Blob; checksumSha256: string };
+type PartCapability = DirectGameUploadPartUrlsResponse['parts'][number];
+
+async function requestPartCapabilities(
+	session: DirectAssetUploadSession,
+	parts: readonly PreparedPart[],
+): Promise<Map<number, PartCapability>> {
+	const signed = await apiRequest<DirectGameUploadPartUrlsResponse>(
+		`/api/admin/direct-asset-upload-sessions/${session.sessionId}/part-urls`,
+		{
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				generation: session.generation,
+				parts: parts.map(({ partNumber, checksumSha256 }) => ({ partNumber, checksumSha256 })),
+			} satisfies DirectGameUploadPartUrlsRequest),
+		},
+	);
+	if (signed.generation !== session.generation || signed.parts.length !== parts.length) {
+		throw new Error('Direct upload capability response did not match the session generation');
+	}
+	const requested = new Set(parts.map((part) => part.partNumber));
+	const capabilities = new Map<number, PartCapability>();
+	for (const capability of signed.parts) {
+		if (!requested.has(capability.partNumber) || capabilities.has(capability.partNumber)) {
+			throw new Error('Direct upload capability response contained an unexpected part');
+		}
+		capabilities.set(capability.partNumber, capability);
+	}
+	return capabilities;
+}
+
+async function putPartWithBoundedRetry(
+	session: DirectAssetUploadSession,
+	part: PreparedPart,
+	initialCapability: PartCapability,
+): Promise<string> {
+	let capability = initialCapability;
+	for (let attempt = 0; ; attempt += 1) {
+		try {
+			return await putDirectUploadPart(capability, part.body);
+		} catch (error) {
+			if (!(error instanceof DirectUploadPartError) || attempt >= UPLOAD_PART_RETRY_ATTEMPTS) throw error;
+			if (error.status === 429) {
+				await wait(error.retryAfterMilliseconds ?? Math.min(30_000, 1_000 * (2 ** attempt)));
+				continue;
+			}
+			if (error.status !== 0 && error.status !== 401 && error.status !== 403 && error.status < 500) throw error;
+			await wait(Math.min(8_000, 500 * (2 ** attempt)));
+			const refreshed = await requestPartCapabilities(session, [part]);
+			capability = refreshed.get(part.partNumber)!;
+		}
+	}
 }
 
 /**
@@ -341,8 +270,12 @@ export async function uploadDirectAssetFile(
 	ownerOrProjectId: DirectAssetUploadOwner | number,
 	file: File,
 	kind: DirectAssetUploadKind,
-	onProgress?: (progress: GameUploadProgress) => void,
-	options: { resume?: DirectAssetUploadSession; onSession?: (session: DirectAssetUploadSession) => void } = {},
+	onProgress?: (progress: DirectAssetUploadProgress) => void,
+	options: {
+		resume?: DirectAssetUploadSession;
+		onSession?: (session: DirectAssetUploadSession) => void;
+		submissionItem?: { id: string; clientToken: string };
+	} = {},
 ): Promise<DirectGameUploadCompletionResponse> {
 	const owner: DirectAssetUploadOwner = typeof ownerOrProjectId === 'number'
 		? { type: 'PROJECT', id: ownerOrProjectId }
@@ -370,56 +303,55 @@ export async function uploadDirectAssetFile(
 		const created = await apiRequest<DirectAssetUploadSession>(
 			`/api/admin/${owner.type === 'PROJECT' ? 'projects' : 'exhibitions'}/${owner.id}/direct-${kind.toLowerCase()}-upload-sessions`, {
 				method: 'POST', headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ originalName: file.name, totalBytes: file.size, declaredMimeType: file.type || undefined, ...source } satisfies DirectGameUploadCreateSessionRequest),
+				body: JSON.stringify({
+					originalName: file.name,
+					totalBytes: file.size,
+					declaredMimeType: file.type || undefined,
+					...source,
+					...(options.submissionItem ? { submissionItem: options.submissionItem } : {}),
+				} satisfies DirectGameUploadCreateSessionRequest),
 			},
 		);
 		session = { ...created, kind };
 	}
 	options.onSession?.(session);
-	const parts: DirectGameUploadCompleteRequest['parts'] = [];
-	for (let partNumber = 1; partNumber <= session.totalParts; partNumber += 1) {
-		const start = (partNumber - 1) * session.partSizeBytes;
-		const body = file.slice(start, Math.min(start + session.partSizeBytes, file.size));
-		const existing = uploaded.get(partNumber);
-		if (existing?.sizeBytes === body.size) {
-			parts.push({ partNumber, etag: existing.etag, sizeBytes: existing.sizeBytes });
-			onProgress?.({ uploadedChunks: parts.length, totalChunks: session.totalParts, uploadedBytes: Math.min(parts.length * session.partSizeBytes, file.size), totalBytes: file.size, percent: Math.round((parts.length / session.totalParts) * 100) });
-			continue;
+	const parts: DirectGameUploadCompleteRequest['parts'] = [...uploaded.entries()]
+		.map(([partNumber, part]) => ({ partNumber, ...part }))
+		.sort((a, b) => a.partNumber - b.partNumber);
+	let uploadedBytes = parts.reduce((total, part) => total + part.sizeBytes, 0);
+	const pendingPartNumbers = Array.from({ length: session.totalParts }, (_, index) => index + 1)
+		.filter((partNumber) => !uploaded.has(partNumber));
+	for (let offset = 0; offset < pendingPartNumbers.length; offset += DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE) {
+		const batchNumbers = pendingPartNumbers.slice(offset, offset + DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE);
+		const prepared: PreparedPart[] = [];
+		for (const partNumber of batchNumbers) {
+			const start = (partNumber - 1) * session.partSizeBytes;
+			const body = file.slice(start, Math.min(start + session.partSizeBytes, file.size));
+			prepared.push({
+				partNumber,
+				body,
+				checksumSha256: checksumBase64(await crypto.subtle.digest('SHA-256', await body.arrayBuffer())),
+			});
 		}
-		const checksum = checksumBase64(await crypto.subtle.digest('SHA-256', await body.arrayBuffer()));
-		const signed = await apiRequest<{ parts: Array<{ partNumber: number; url: string; requiredHeaders: Record<string, string> }> }>(
-			`/api/admin/direct-asset-upload-sessions/${session.sessionId}/part-urls`,
-			{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ generation: session.generation, parts: [{ partNumber, checksumSha256: checksum }] } satisfies DirectGameUploadPartUrlsRequest) },
-		);
-		const capability = signed.parts[0];
-		if (!capability) throw new Error('Direct upload capability was not issued');
-		const etag = await putDirectUploadPart(capability, body);
-		parts.push({ partNumber, etag, sizeBytes: body.size });
-		onProgress?.({ uploadedChunks: partNumber, totalChunks: session.totalParts, uploadedBytes: Math.min(partNumber * session.partSizeBytes, file.size), totalBytes: file.size, percent: Math.round((partNumber / session.totalParts) * 100) });
+		const capabilities = await requestPartCapabilities(session, prepared);
+		for (const part of prepared) {
+			const capability = capabilities.get(part.partNumber);
+			if (!capability) throw new Error('Direct upload capability was not issued');
+			const etag = await putPartWithBoundedRetry(session, part, capability);
+			parts.push({ partNumber: part.partNumber, etag, sizeBytes: part.body.size });
+			uploadedBytes += part.body.size;
+			onProgress?.({
+				uploadedChunks: parts.length,
+				totalChunks: session.totalParts,
+				uploadedBytes,
+				totalBytes: file.size,
+				percent: Math.round((parts.length / session.totalParts) * 100),
+			});
+		}
 	}
+	parts.sort((a, b) => a.partNumber - b.partNumber);
 	return apiRequest<DirectGameUploadCompletionResponse>(`/api/admin/direct-asset-upload-sessions/${session.sessionId}/complete`, {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ generation: session.generation, parts } satisfies DirectGameUploadCompleteRequest),
 	});
-}
-
-/** Backward-compatible GAME export while callers migrate to the generic name. */
-export async function uploadGameFileDirect(projectId: number, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
-	return uploadDirectAssetFile(projectId, file, 'GAME', onProgress);
-}
-
-export async function uploadImageFileDirect(owner: DirectAssetUploadOwner, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
-	return uploadDirectAssetFile(owner, file, 'IMAGE', onProgress);
-}
-
-export async function uploadPosterFileDirect(owner: DirectAssetUploadOwner, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
-	return uploadDirectAssetFile(owner, file, 'POSTER', onProgress);
-}
-
-export async function uploadWebglFileDirect(projectId: number, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
-	return uploadDirectAssetFile(projectId, file, 'WEBGL', onProgress);
-}
-
-export async function uploadVideoFileDirect(projectId: number, file: File, onProgress?: (progress: GameUploadProgress) => void): Promise<DirectGameUploadCompletionResponse> {
-	return uploadDirectAssetFile(projectId, file, 'VIDEO', onProgress);
 }

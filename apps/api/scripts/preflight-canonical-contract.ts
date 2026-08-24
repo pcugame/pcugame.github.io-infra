@@ -17,6 +17,7 @@ import { createContractPreflightRepository } from '../src/modules/migration/cont
 type CliOptions = {
 	inventoryInput?: string;
 	inventoryOutput?: string;
+	reportOutput?: string;
 	batchSize: number;
 	headTimeoutMs: number;
 	resetObservation: boolean;
@@ -34,7 +35,7 @@ export function parseContractPreflightCli(args: readonly string[]): CliOptions {
 	if (!Number.isInteger(headTimeoutMs) || headTimeoutMs < 100 || headTimeoutMs > 60_000) throw new Error('head-timeout-ms must be between 100 and 60000');
 	const known = new Set(['--reset-observation']);
 	for (const arg of args) {
-		if (known.has(arg) || ['inventory-input', 'inventory-output', 'batch-size', 'head-timeout-ms', 'confirm-reset'].some((name) => arg.startsWith(`--${name}=`))) continue;
+		if (known.has(arg) || ['inventory-input', 'inventory-output', 'report-output', 'batch-size', 'head-timeout-ms', 'confirm-reset'].some((name) => arg.startsWith(`--${name}=`))) continue;
 		throw new Error(`Unknown preflight option: ${arg}`);
 	}
 	const resetObservation = args.includes('--reset-observation');
@@ -45,6 +46,7 @@ export function parseContractPreflightCli(args: readonly string[]): CliOptions {
 	return {
 		...(option(args, 'inventory-input') ? { inventoryInput: resolve(option(args, 'inventory-input')!) } : {}),
 		...(option(args, 'inventory-output') ? { inventoryOutput: resolve(option(args, 'inventory-output')!) } : {}),
+		...(option(args, 'report-output') ? { reportOutput: resolve(option(args, 'report-output')!) } : {}),
 		batchSize, headTimeoutMs, resetObservation, resetConfirmation,
 	};
 }
@@ -58,7 +60,12 @@ function parseInventory(value: unknown): ContractInventorySnapshot {
 	if (!snapshot.objects.every((object) => object && typeof object.bucket === 'string' && typeof object.key === 'string')) {
 		throw new Error('inventory snapshot contains an invalid object');
 	}
-	return snapshot as ContractInventorySnapshot;
+	const multipartUploads = snapshot.multipartUploads ?? [];
+	if (!Array.isArray(multipartUploads) || !multipartUploads.every((upload) => upload
+		&& typeof upload.bucket === 'string' && typeof upload.key === 'string' && typeof upload.uploadId === 'string')) {
+		throw new Error('inventory snapshot contains an invalid multipart upload');
+	}
+	return { ...snapshot, multipartUploads } as ContractInventorySnapshot;
 }
 
 async function atomicJson(path: string, value: unknown): Promise<void> {
@@ -78,6 +85,8 @@ async function main(): Promise<number> {
 		const listed = options.inventoryInput ? null : await Promise.all([
 			storage.listKeys(config.S3_BUCKET_PROTECTED, ''),
 			storage.listKeys(config.S3_BUCKET_PUBLIC, ''),
+			storage.listMultipartUploads(config.S3_BUCKET_PROTECTED, ''),
+			storage.listMultipartUploads(config.S3_BUCKET_PUBLIC, ''),
 		]);
 		const inventory = options.inventoryInput
 			? parseInventory(JSON.parse(await readFile(options.inventoryInput, 'utf8')))
@@ -88,14 +97,35 @@ async function main(): Promise<number> {
 					...(listed?.[0] ?? []).map((key) => ({ bucket: config.S3_BUCKET_PROTECTED, key })),
 					...(listed?.[1] ?? []).map((key) => ({ bucket: config.S3_BUCKET_PUBLIC, key })),
 				],
+				multipartUploads: [
+					...(listed?.[2] ?? []).map((upload) => ({ bucket: config.S3_BUCKET_PROTECTED, key: upload.key, uploadId: upload.uploadId })),
+					...(listed?.[3] ?? []).map((upload) => ({ bucket: config.S3_BUCKET_PUBLIC, key: upload.key, uploadId: upload.uploadId })),
+				],
 			};
 		if (options.inventoryOutput) await atomicJson(options.inventoryOutput, inventory);
 		const report = await runContractPreflight({
 			repository: createContractPreflightRepository(prisma),
 			inventory,
-			head: async (bucket, key, signal) => (await storage.head(bucket, key, { signal })) !== null,
-			options,
+			head: async (bucket, key, signal) => {
+				const metadata = await storage.head(bucket, key, { signal });
+				if (!metadata) return null;
+				if (!Number.isSafeInteger(metadata.size) || metadata.size < 0) {
+					throw new Error(`Garage HEAD returned unsafe size for ${bucket}/${key}`);
+				}
+				return {
+					sizeBytes: BigInt(metadata.size),
+					mimeType: metadata.contentType,
+					etag: metadata.etag ?? null,
+					checksumSha256: metadata.checksumSha256 ?? null,
+				};
+			},
+			options: {
+				...options,
+				protectedBucket: config.S3_BUCKET_PROTECTED,
+				publicBucket: config.S3_BUCKET_PUBLIC,
+			},
 		});
+		if (options.reportOutput) await atomicJson(options.reportOutput, report);
 		console.log(JSON.stringify(report, null, 2));
 		return report.clean ? 0 : 1;
 	} catch (error) {

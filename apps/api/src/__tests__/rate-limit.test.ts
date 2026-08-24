@@ -11,6 +11,7 @@ import {
 	GLOBAL_IP_ABUSE_CEILING_MIN,
 	directUploadSessionId,
 	globalIpAbuseCeiling,
+	isCanonicalAssetDownload,
 	isDirectUploadControl,
 } from '../plugins/rate-limit.js';
 
@@ -181,17 +182,33 @@ describe('rate-limit plugin', () => {
 
 	it('allows 50 authenticated principals behind one NAT and isolates actor/session abuse', () => {
 		let now = 0;
-		const limiter = new DirectControlPrincipalLimiter(60_000, 100, 2, () => now);
+		const limiter = new DirectControlPrincipalLimiter(60_000, 600, 240, () => now);
 		const natIp = '198.51.100.50';
 		for (let actorId = 1; actorId <= 50; actorId++) {
-			expect(limiter.check(actorId, `session-${actorId}`), `${natIp} actor ${actorId}`).toEqual({ allowed: true });
+			const sessionId = `session-${actorId}`;
+			// create + 40 eight-part URL batches + polls + refreshes + complete + download
+			// stays well below the 5,000 request IP abuse ceiling as an aggregate.
+			expect(limiter.check(actorId), `${natIp} actor ${actorId} create`).toEqual({ allowed: true });
+			for (let request = 0; request < 55; request += 1) {
+				expect(limiter.check(actorId, sessionId), `${natIp} actor ${actorId} request ${request}`)
+					.toEqual({ allowed: true });
+			}
 		}
-		expect(limiter.check(1, 'hot-session')).toEqual({ allowed: true });
-		expect(limiter.check(1, 'hot-session')).toEqual({ allowed: true });
-		expect(limiter.check(1, 'hot-session')).toEqual({ allowed: false, retryAfterSec: 60 });
+		expect(50 * 56).toBeLessThan(GLOBAL_IP_ABUSE_CEILING_MIN);
+		for (let request = 0; request < 240; request += 1) {
+			expect(limiter.check(999, 'hot-session')).toEqual({ allowed: true });
+		}
+		expect(limiter.check(999, 'hot-session')).toEqual({ allowed: false, retryAfterSec: 60 });
 		expect(limiter.check(2, 'independent-session')).toEqual({ allowed: true });
 		now = 60_000;
-		expect(limiter.check(1, 'hot-session')).toEqual({ allowed: true });
+		expect(limiter.check(999, 'hot-session')).toEqual({ allowed: true });
+	});
+
+	it('allowlists only the canonical assetId download route from the global IP bucket', () => {
+		expect(isCanonicalAssetDownload('/api/assets/42/download')).toBe(true);
+		expect(isCanonicalAssetDownload('/api/assets/42/download?variant=playback')).toBe(true);
+		expect(isCanonicalAssetDownload('/api/assets/protected/legacy.zip')).toBe(false);
+		expect(isCanonicalAssetDownload('/api/assets/42')).toBe(false);
 	});
 
 	it.each([

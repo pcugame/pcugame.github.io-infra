@@ -10,7 +10,6 @@ import {
   BulkStatusBody,
   DevAuthLoginBody,
   DevAuthLoginErrorBody,
-  GameUploadCreateSessionBody,
   UpdateMemberBody,
   SwapMembersBody,
   SetPosterBody,
@@ -18,7 +17,6 @@ import {
   ProjectStatusEnum,
   AssetKindEnum,
   parseIntParam,
-  parseNonNegativeIntParam,
 } from '../shared/validation.js';
 import type {
   AddMemberRequest,
@@ -35,8 +33,6 @@ import type {
   DevAuthLoginErrorRequestSchemaInput,
   DevAuthLoginRequest,
   DevAuthLoginRequestSchemaInput,
-  GameUploadCreateSessionRequest,
-  GameUploadCreateSessionSchemaInput,
   GoogleAuthRequest,
   GoogleAuthRequestSchemaInput,
   SetProjectPosterRequest,
@@ -117,10 +113,6 @@ const devAuthLoginErrorSchemaMatchesContract: IsExact<
   DevAuthLoginErrorRequestSchemaInput,
   DevAuthLoginErrorRequest
 > = true;
-const gameUploadCreateSessionSchemaMatchesContract: IsExact<
-  GameUploadCreateSessionSchemaInput,
-  GameUploadCreateSessionRequest
-> = true;
 
 // ── Enum schemas ─────────────────────────────────────────────
 
@@ -140,16 +132,15 @@ describe('ProjectStatusEnum', () => {
     expect(googleAuthSchemaMatchesContract).toBe(true);
     expect(devAuthLoginSchemaMatchesContract).toBe(true);
     expect(devAuthLoginErrorSchemaMatchesContract).toBe(true);
-    expect(gameUploadCreateSessionSchemaMatchesContract).toBe(true);
   });
 
   it('accepts valid statuses', () => {
+		expect(ProjectStatusEnum.parse('DRAFT')).toBe('DRAFT');
     expect(ProjectStatusEnum.parse('PUBLISHED')).toBe('PUBLISHED');
     expect(ProjectStatusEnum.parse('ARCHIVED')).toBe('ARCHIVED');
   });
 
   it('rejects invalid status', () => {
-    expect(() => ProjectStatusEnum.parse('DRAFT')).toThrow();
     expect(() => ProjectStatusEnum.parse('DELETED')).toThrow();
     expect(() => ProjectStatusEnum.parse('')).toThrow();
     expect(() => ProjectStatusEnum.parse(123)).toThrow();
@@ -502,28 +493,6 @@ describe('DevAuthLoginErrorBody', () => {
   });
 });
 
-describe('GameUploadCreateSessionBody', () => {
-  it('coerces canonical totalBytes for API input', () => {
-    expect(GameUploadCreateSessionBody.parse({
-      originalName: 'game.zip',
-      totalBytes: '1024',
-    })).toEqual({
-      originalName: 'game.zip',
-      totalBytes: 1024,
-    });
-  });
-
-  it.each([1.5, '+1', '1.0', '1e2', ' 1 ', '0x10', '999999999999999999999'])(
-    'rejects non-canonical, fractional, or unsafe totalBytes %s',
-    (totalBytes) => {
-      expect(GameUploadCreateSessionBody.safeParse({
-        originalName: 'game.zip',
-        totalBytes,
-      }).success).toBe(false);
-    },
-  );
-});
-
 // ── parseIntParam ─────────────────────────────────────────────
 
 describe('parseIntParam', () => {
@@ -551,20 +520,6 @@ describe('parseIntParam', () => {
     'throws on non-canonical or unsafe integer %s',
     (value) => {
       expect(() => parseIntParam(value)).toThrow();
-    },
-  );
-});
-
-describe('parseNonNegativeIntParam', () => {
-  it('accepts canonical zero-based chunk indexes', () => {
-    expect(parseNonNegativeIntParam('0', 'Chunk index')).toBe(0);
-    expect(parseNonNegativeIntParam('42', 'Chunk index')).toBe(42);
-  });
-
-  it.each(['', '-1', '+1', '1x', '1.5', '1e2', '999999999999999999999'])(
-    'rejects malformed chunk index %s',
-    (value) => {
-      expect(() => parseNonNegativeIntParam(value, 'Chunk index')).toThrow();
     },
   );
 });

@@ -119,9 +119,29 @@ function schedulerHarness() {
 }
 
 describe('production BackendContext resource ownership', () => {
-	it('rejects an unsafe upload directory before startup recovery can enumerate or delete', async () => {
+	it('runs direct upload recovery once at maintenance startup instead of waiting for the first interval', async () => {
+		const harness = schedulerHarness();
+		const recoverStaleUploads = vi.fn(async () => {});
+		const schedule = createMaintenanceSchedule(
+			harness.scheduler,
+			{ now: () => new Date(0) },
+			{
+				recoverStaleUploads,
+				purgeExpiredSessions: vi.fn(async () => 0),
+				reapOrphans: vi.fn(async () => {}),
+			},
+			testLogger,
+		);
+
+		schedule.start();
+		await vi.waitFor(() => expect(recoverStaleUploads).toHaveBeenCalledOnce());
+		expect(harness.tasks).toHaveLength(3);
+		await schedule.close();
+	});
+
+	it('does not revive the removed inline-upload directory scavenger at startup', async () => {
 		const ensurePrivateDirectory = vi.fn(async () => {
-			throw new Error('final upload directory is a symlink');
+			throw new Error('legacy inline upload directory must not be touched');
 		});
 		const listDirectoryEntries = vi.fn(async () => []);
 		const remove = vi.fn(async () => {});
@@ -143,8 +163,8 @@ describe('production BackendContext resource ownership', () => {
 			},
 		});
 
-		await expect(context.start()).rejects.toThrow('final upload directory is a symlink');
-		expect(ensurePrivateDirectory).toHaveBeenCalledWith('/tmp/pcugame-upload');
+		await expect(context.start()).resolves.toBeUndefined();
+		expect(ensurePrivateDirectory).not.toHaveBeenCalled();
 		expect(listDirectoryEntries).not.toHaveBeenCalled();
 		expect(remove).not.toHaveBeenCalled();
 	});

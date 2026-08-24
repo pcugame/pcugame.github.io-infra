@@ -36,9 +36,9 @@ const activeSource = 'webgl/7/123e4567-e89b-42d3-b456-426614174111/source.zip';
 const activeWebgl = {
 	id: 'webgl-session',
 	projectId: 7,
-	uploadKind: 'WEBGL',
-	s3Key: activeSource,
-	s3UploadId: 'webgl-multipart',
+	kind: 'WEBGL',
+	objectKey: activeSource,
+	uploadId: 'webgl-multipart',
 };
 
 describe('WebGL deletion cleanup', () => {
@@ -69,13 +69,13 @@ describe('WebGL deletion cleanup', () => {
 		const gameUpload = {
 			id: 'game-session',
 			projectId: 7,
-			uploadKind: 'GAME',
-			s3Key: 'uploads/game.zip',
-			s3UploadId: 'game-multipart',
+			kind: 'GAME',
+			objectKey: 'uploads/game.zip',
+			uploadId: 'game-multipart',
 		};
 		mocks.deleteProjectReturningAssets.mockResolvedValue({
-			assets: [{ id: 5, storageKey: 'poster.webp' }],
-			webglEntryKey: oldEntry,
+			assets: [{ id: 5, representations: [] }],
+			currentWebglDeploymentId: '123e4567-e89b-42d3-a456-426614174000',
 			activeUploads: [gameUpload, activeWebgl],
 		});
 
@@ -96,8 +96,8 @@ describe('WebGL deletion cleanup', () => {
 			result: { count: 2 },
 			assets: [],
 			projects: [
-				{ id: 7, webglEntryKey: oldEntry },
-				{ id: 8, webglEntryKey: '' },
+				{ id: 7, currentWebglDeploymentId: '123e4567-e89b-42d3-a456-426614174000' },
+				{ id: 8, currentWebglDeploymentId: null },
 			],
 			activeUploads: [activeWebgl],
 		});

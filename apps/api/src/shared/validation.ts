@@ -8,7 +8,6 @@ import {
 	CreateExhibitionBaseSchema,
 	DevAuthLoginErrorRequestSchema,
 	DevAuthLoginRequestSchema,
-	GameUploadCreateSessionSchema,
 	GoogleAuthRequestSchema,
 	ProjectStatusSchema,
 	SetProjectPosterSchema,
@@ -119,12 +118,6 @@ export const DevAuthLoginBody = DevAuthLoginRequestSchema;
 
 export const DevAuthLoginErrorBody = DevAuthLoginErrorRequestSchema;
 
-// ── Game upload session ──────────────────────────────────────
-
-export const GameUploadCreateSessionBody = GameUploadCreateSessionSchema.extend({
-	totalBytes: CanonicalPositiveIntegerInput,
-});
-
 export const AssetDownloadQuery = z.object({
 	variant: z.enum(['original', 'playback']).optional(),
 }).strict();
@@ -148,14 +141,6 @@ export function parseBody<TSchema extends z.ZodType>(
 export function parseIntParam(value: string, name = 'ID'): number {
 	const n = Number(value);
 	if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(n) || n <= 0) {
-		throw new AppError(400, `Invalid ${name}`, 'VALIDATION_ERROR');
-	}
-	return n;
-}
-
-export function parseNonNegativeIntParam(value: string, name: string): number {
-	const n = Number(value);
-	if (!/^(0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(n)) {
 		throw new AppError(400, `Invalid ${name}`, 'VALIDATION_ERROR');
 	}
 	return n;

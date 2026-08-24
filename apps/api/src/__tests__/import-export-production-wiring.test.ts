@@ -79,7 +79,6 @@ async function appFor(graph: ReturnType<typeof createImportExportProductionGraph
 		importController: graph.importController,
 		exportController: graph.exportController,
 		projectMultipartController: emptyRoute,
-		gameUploadController: emptyRoute,
 	}), { prefix: '/api/admin' });
 	await app.ready();
 	apps.push(app);

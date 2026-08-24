@@ -7,6 +7,8 @@ export interface UploadObjectOptions {
 	contentEncoding?: string;
 	cacheControl?: string;
 	contentType?: string;
+	/** Hex SHA-256 persisted as the S3 ChecksumSHA256 object attribute. */
+	checksumSha256?: string;
 }
 
 export interface ObjectStreamResult {
@@ -166,6 +168,7 @@ export interface ObjectStorage {
 		cacheControl?: string;
 		etag?: string;
 		lastModified?: Date;
+		checksumSha256?: string;
 	} | null>;
 	readRange(
 		bucket: string,

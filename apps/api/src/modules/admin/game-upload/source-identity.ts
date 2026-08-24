@@ -19,6 +19,28 @@ function asManifest(digests: readonly string[]): Buffer {
 	return Buffer.concat(digests.map((digest) => Buffer.from(digest, 'hex')));
 }
 
+/** The sole persisted JSON representation: canonical padded base64 bytes. */
+export function encodePersistedSourceIdentityManifest(manifest: Uint8Array): string {
+	return Buffer.from(manifest).toString('base64');
+}
+
+/**
+ * Decode the canonical manifest written by the direct session allocator.
+ * Historical digest arrays/objects are intentionally not accepted by workers:
+ * Phase 2 direct sessions persist one unambiguous byte representation.
+ */
+export function decodePersistedSourceIdentityManifest(value: unknown): Buffer {
+	if (typeof value !== 'string' || value.length === 0 || value.length % 4 !== 0
+		|| !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+		throw new Error('Persisted source identity manifest is malformed');
+	}
+	const decoded = Buffer.from(value, 'base64');
+	if (decoded.length === 0 || decoded.toString('base64') !== value) {
+		throw new Error('Persisted source identity manifest is malformed');
+	}
+	return decoded;
+}
+
 export function sourceIdentityRoot(totalBytes: number, blockSizeBytes: number, digests: readonly string[]): string {
 	const header = Buffer.allocUnsafe(16);
 	header.writeBigUInt64BE(BigInt(totalBytes), 0);

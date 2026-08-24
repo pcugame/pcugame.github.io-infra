@@ -1,9 +1,9 @@
 import { posix as pathPosix } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import yauzl, { type Entry } from 'yauzl';
 import { badRequest } from '../../shared/errors.js';
 import type { BoundedZipValidationSummary } from '../archive/bounded-zip-validator.js';
-import type { ZipValidationSummary } from '../assets/upload/zip-validation.js';
 import { webglContentMetadata } from './content.js';
 
 function normalizedEntryName(fileName: string): string {
@@ -41,24 +41,13 @@ function assertRequiredUnityArtifacts(hostedPaths: Iterable<string>): void {
 }
 
 /** Apply Unity layout rules after the common validator fully decoded every entry. */
-export function analyzeWebglArchive(
-	summary: BoundedZipValidationSummary | ZipValidationSummary,
-): WebglArchiveLayout {
-	if ('profile' in summary && summary.profile !== 'WEBGL') {
+export function analyzeWebglArchive(summary: BoundedZipValidationSummary): WebglArchiveLayout {
+	if (summary.profile !== 'WEBGL') {
 		throw new Error('WebGL layout requires the WEBGL ZIP policy');
-	}
-	for (const entry of summary.entries) {
-		if ('versionMadeBy' in entry && ((entry.versionMadeBy >>> 8) & 0xff) === 3) {
-			const fileType = (entry.externalFileAttributes >>> 16) & 0o170000;
-			if (fileType === 0o120000) throw badRequest('Symbolic links are not allowed in WebGL ZIP files');
-			if (fileType !== 0 && fileType !== 0o100000 && fileType !== 0o040000) {
-				throw badRequest('WebGL ZIP contains an unsupported filesystem entry');
-			}
-		}
 	}
 	const files = summary.entries
 		.filter((entry) => !entry.isDirectory)
-		.map((entry) => ({ path: 'path' in entry ? entry.path : entry.fileName }));
+		.map((entry) => ({ path: entry.path }));
 	const indexes = files.filter(({ path }) => path === 'index.html' || path.endsWith('/index.html'));
 	if (indexes.length === 0) throw badRequest('WebGL ZIP must contain index.html');
 	if (indexes.length > 1) throw badRequest('WebGL ZIP must contain exactly one index.html');
@@ -102,8 +91,23 @@ export interface WebglPublicObjectUploader {
 		contentType: string;
 		contentEncoding?: string;
 		cacheControl: string;
+		checksumSha256: string;
 		signal?: AbortSignal;
 	}): Promise<void>;
+}
+
+async function hashEntry(zip: yauzl.ZipFile, entry: Entry, signal?: AbortSignal): Promise<string> {
+	const hash = createHash('sha256');
+	let size = 0;
+	const body = await zip.openReadStreamPromise(entry);
+	for await (const chunk of body) {
+		throwIfAborted(signal);
+		const bytes = Buffer.from(chunk);
+		size += bytes.length;
+		hash.update(bytes);
+	}
+	if (size !== entry.uncompressedSize) throw badRequest('WebGL ZIP entry size changed during publication staging');
+	return hash.digest('hex');
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -142,6 +146,7 @@ export async function uploadWebglArchive(input: {
 			if (entry.isEncrypted() || !entry.canDecodeFileData()) {
 				throw badRequest('WebGL ZIP entry cannot be decoded');
 			}
+			const checksumSha256 = await hashEntry(zip, entry, input.signal);
 			const body = await zip.openReadStreamPromise(entry);
 			const objectKey = `${input.publicPrefix}${hostedPath}`;
 			const metadata = webglContentMetadata(hostedPath);
@@ -153,6 +158,7 @@ export async function uploadWebglArchive(input: {
 				contentType: metadata.contentType,
 				...(metadata.contentEncoding ? { contentEncoding: metadata.contentEncoding } : {}),
 				cacheControl: metadata.cacheControl,
+				checksumSha256,
 				...(input.signal ? { signal: input.signal } : {}),
 			});
 			uploadedKeys.push(objectKey);

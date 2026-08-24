@@ -29,59 +29,33 @@ describe('production deployment safety', () => {
 		expect(productionEnvExample).toMatch(/^TRUST_PROXY=1$/m);
 	});
 
-	it('deploys the matching Web commit before opening the API SSH deployment path', () => {
+	it('publishes a tested immutable API image without an implicit production cutover', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
-		const webWorkflow = repositoryFile('.github/workflows/deploy-web-pages.yml');
-		const webGate = apiWorkflow.indexOf('- name: Wait for matching Web deployment');
-		const sshDeploy = apiWorkflow.indexOf('- name: SSH deploy to server');
-		const gateBlock = apiWorkflow.slice(webGate, sshDeploy);
-
-		expect(webGate).toBeGreaterThanOrEqual(0);
-		expect(sshDeploy).toBeGreaterThan(webGate);
 		expect(apiWorkflow).toContain('actions: read');
-		expect(gateBlock).toContain("if: steps.release-order.outputs.require_web_first == 'true'");
-		expect(gateBlock).toContain('deploy-web-pages.yml/runs');
-		expect(gateBlock).toContain('-f head_sha="${GITHUB_SHA}"');
-		expect(gateBlock).toContain('Web deployment succeeded: ${run_url}');
-		expect(gateBlock).toContain('https://pcugame.github.io/release-sha.txt?expected=${GITHUB_SHA}');
-		expect(gateBlock).toContain('if [ "${deployed_sha}" = "${GITHUB_SHA}" ]');
-		expect(webWorkflow).not.toContain('Wait for matching API deployment');
-		expect(webWorkflow).not.toContain('deploy-api.yml/runs');
-		expect(webWorkflow.indexOf('- name: Stamp release commit')).toBeLessThan(
-			webWorkflow.indexOf('- name: Deploy to pcugame.github.io'),
-		);
-		expect(webWorkflow).toContain('dist/release-sha.txt');
+		expect(apiWorkflow).toContain('npm test --workspace=apps/api');
+		expect(apiWorkflow).toContain('npm run build --workspace=apps/api');
+		expect(apiWorkflow).toContain('pcu-graduationproject-v2-api:sha-${{ github.sha }}');
+		expect(apiWorkflow).not.toContain('SSH deploy to server');
 	});
 
-	it('gates only explicitly declared compatibility releases', () => {
+	it('keeps cutover state and release tooling out of the image-publishing workflow', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
-		const releaseDeclaration = repositoryFile(
-			'.github/release-gates/web-before-api/2026-08-upload-idempotency.yml',
-		);
-		const responsiveImageDeclaration = repositoryFile(
-			'.github/release-gates/web-before-api/2026-08-responsive-images.yml',
-		);
 		const apiPaths = pushPaths(repositoryFile('.github/workflows/deploy-api.yml'));
-		const webPaths = pushPaths(repositoryFile('.github/workflows/deploy-web-pages.yml'));
 		const releaseGatePath = '.github/release-gates/web-before-api/**';
 
-		expect(apiWorkflow).toContain('git diff --name-only "${BEFORE_SHA}" "${GITHUB_SHA}"');
-		expect(apiWorkflow).toContain("grep -q '^\\.github/release-gates/web-before-api/'");
 		expect(apiPaths).toContain(releaseGatePath);
-		expect(webPaths).toContain(releaseGatePath);
-		expect(webPaths).not.toContain('apps/api/**');
 		expect(apiPaths).not.toContain('apps/web/**');
-		expect(releaseDeclaration).toContain('Idempotency-Key');
-		expect(responsiveImageDeclaration).toContain('policy: web-before-api');
-		expect(responsiveImageDeclaration).toContain('same commit');
-		expect(responsiveImageDeclaration).not.toContain('policy: api-before-web');
+		expect(apiWorkflow).not.toContain('release-migrate');
+		expect(apiWorkflow).not.toContain('contract-migrate');
 	});
 
-	it('keeps manual API hotfixes independent unless Web-first is requested', () => {
+	it('leaves production release authorization to the explicit server cutover procedure', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
+		const deployScript = repositoryFile('server/deploy.sh');
 
-		expect(apiWorkflow).toContain('require_web_first:');
-		expect(apiWorkflow).toContain('default: false');
-		expect(apiWorkflow).toContain('MANUAL_REQUIRE_WEB_FIRST: ${{ inputs.require_web_first }}');
+		expect(apiWorkflow).toContain('workflow_dispatch:');
+		expect(deployScript).toContain('assert_mutation_drained');
+		expect(deployScript).toContain('require_immutable_release_images');
+		expect(deployScript).toContain('validate_production_boundaries');
 	});
 });

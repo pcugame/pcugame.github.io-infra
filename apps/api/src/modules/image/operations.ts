@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { copyFile, lstat, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { ImageRejectedError } from './errors.js';
+import { AggregateOutputBudget, writeBoundedOutput } from './output-budget.js';
 import { assertPdfPagePolicy, assertRasterPolicy, type ImageWorkerLimits } from './policy.js';
 import type { BoundedImageCommandRunner, ImageOperations, LocalImageOutput, RasterInfo } from './ports.js';
 
@@ -12,6 +13,37 @@ async function assertRegular(path: string): Promise<void> {
 	if (!metadata.isFile() || metadata.isSymbolicLink()) {
 		throw new ImageRejectedError('Worker input/output must be a regular file', 'RESOURCE_LIMIT');
 	}
+}
+
+async function privateWorkspaceUsage(path: string): Promise<number> {
+	const root = resolve(path);
+	const metadata = await lstat(root);
+	if (!metadata.isDirectory() || metadata.isSymbolicLink() || await realpath(root) !== root) {
+		throw new ImageRejectedError('Image output workspace must be a real private directory', 'RESOURCE_LIMIT');
+	}
+	let bytes = 0;
+	for (const entry of await readdir(root)) {
+		const child = join(root, entry);
+		const childMetadata = await lstat(child);
+		if (!childMetadata.isFile() || childMetadata.isSymbolicLink()) {
+			throw new ImageRejectedError('Image workspace contains an unsupported filesystem entry', 'RESOURCE_LIMIT');
+		}
+		if (!Number.isSafeInteger(childMetadata.size) || childMetadata.size > Number.MAX_SAFE_INTEGER - bytes) {
+			throw new ImageRejectedError('Image workspace size is not safely representable', 'RESOURCE_LIMIT');
+		}
+		bytes += childMetadata.size;
+	}
+	return bytes;
+}
+
+function assertWorkspaceFile(rootPath: string, filePath: string, extension?: string): string {
+	const root = resolve(rootPath);
+	const file = resolve(filePath);
+	if (dirname(file) !== root || basename(file) !== basename(filePath)
+		|| (extension !== undefined && extname(file) !== extension)) {
+		throw new ImageRejectedError('Image output path escaped its private workspace', 'RESOURCE_LIMIT');
+	}
+	return file;
 }
 
 async function sha256(path: string): Promise<string> {
@@ -73,29 +105,46 @@ export function createImageOperations(
 		async renderPdfFirstPage(inputPath, outputPath, signal) {
 			await assertRegular(inputPath);
 			const root = resolve(dirname(inputPath));
-			const output = resolve(outputPath);
-			if (dirname(output) !== root || basename(output).includes('/') || extname(output) !== '.png') {
-				throw new ImageRejectedError('PDF output path escaped its private workspace', 'RESOURCE_LIMIT');
-			}
+			const output = assertWorkspaceFile(root, outputPath, '.png');
 			const info = await runner.run({
 				file: 'pdfinfo', args: [inputPath], timeoutMs: limits.pdfTimeoutMs,
 				maxOutputBytes: limits.commandOutputBytes, signal,
 			});
 			const pages = parsePdfPages(info.stdout);
 			assertPdfPagePolicy(pages, limits);
-			await runner.run({
-				file: 'pdftoppm',
-				args: ['-f', '1', '-l', '1', '-singlefile', '-png', '-r', '144', inputPath, output.slice(0, -4)],
-				timeoutMs: limits.pdfTimeoutMs, maxOutputBytes: limits.commandOutputBytes, signal,
-			});
+			const remainingBytes = limits.maxTempBytes - await privateWorkspaceUsage(root);
+			const outputBudget = Math.min(limits.maxOutputBytes, remainingBytes);
+			if (!Number.isSafeInteger(outputBudget) || outputBudget < 1) {
+				throw new ImageRejectedError('PDF raster has no remaining temp-disk budget', 'RESOURCE_LIMIT');
+			}
+			try {
+				await runner.run({
+					file: 'pdftoppm',
+					// With one selected page and no output prefix, Poppler writes PNG bytes to stdout.
+					args: ['-f', '1', '-l', '1', '-singlefile', '-png', '-r', '144', inputPath],
+					timeoutMs: limits.pdfTimeoutMs, maxOutputBytes: limits.commandOutputBytes,
+					stdoutFile: { path: output, maxBytes: outputBudget }, signal,
+				});
+			} catch (error) {
+				await rm(output, { force: true }).catch(() => undefined);
+				throw error;
+			}
 			await assertRegular(outputPath);
+			const outputMetadata = await stat(outputPath);
+			if (outputMetadata.size < 1 || outputMetadata.size > outputBudget) {
+				await rm(output, { force: true }).catch(() => undefined);
+				throw new ImageRejectedError('PDF raster exceeded its write-time budget', 'RESOURCE_LIMIT');
+			}
 			return { pages };
 		},
 
 		async createOutputs(input) {
 			if (input.signal?.aborted) throw input.signal.reason;
+			const root = resolve(input.outputDirectory);
 			const rasterPath = input.sourceMimeType === 'application/pdf' ? input.pdfRasterPath : input.sourcePath;
 			if (!rasterPath) throw new ImageRejectedError('PDF raster output is missing', 'PDF_INVALID');
+			assertWorkspaceFile(root, input.sourcePath);
+			assertWorkspaceFile(root, rasterPath);
 			await assertRegular(rasterPath);
 			const source = sharp(rasterPath, { failOn: 'error', limitInputPixels: limits.maxPixels }).rotate();
 			const metadata = await source.metadata();
@@ -104,35 +153,59 @@ export function createImageOperations(
 				: input.sourceMimeType === 'image/jpeg' ? 'jpg'
 					: input.sourceMimeType === 'image/png' ? 'png' : 'webp';
 			const originalMime = input.sourceMimeType === 'application/pdf' ? 'image/webp' : input.sourceMimeType;
-			const originalPath = join(input.outputDirectory, `original.${originalExtension}`);
-			if (input.sourceMimeType === 'application/pdf') {
-				await source.clone().webp({ quality: 88 }).toFile(originalPath);
-			} else {
-				await copyFile(input.sourcePath, originalPath);
-			}
+			const originalPath = assertWorkspaceFile(root, join(root, `original.${originalExtension}`));
 			const renditionSpecs = [
-				{ role: 'CARD_480' as const, width: 480, path: join(input.outputDirectory, 'card-480.webp') },
-				{ role: 'DISPLAY_960' as const, width: 960, path: join(input.outputDirectory, 'display-960.webp') },
+				{ role: 'CARD_480' as const, width: 480, path: assertWorkspaceFile(root, join(root, 'card-480.webp')) },
+				{ role: 'DISPLAY_960' as const, width: 960, path: assertWorkspaceFile(root, join(root, 'display-960.webp')) },
 			];
-			// Encode sequentially: libvips may otherwise hold multiple decoded pixel
-			// graphs at once and defeat the worker's decoded-memory budget.
-			for (const rendition of renditionSpecs) {
-				await source.clone().resize({ width: rendition.width, withoutEnlargement: true })
-					.webp({ quality: 82 }).toFile(rendition.path);
+			const initialBytes = await privateWorkspaceUsage(root);
+			const aggregateBytes = limits.maxTempBytes - initialBytes;
+			if (!Number.isSafeInteger(aggregateBytes) || aggregateBytes < 1) {
+				throw new ImageRejectedError('Image outputs have no remaining temp-disk budget', 'RESOURCE_LIMIT');
 			}
-			const outputs = [await outputRecord({
-				role: 'ORIGINAL', path: originalPath, mimeType: originalMime,
-				extension: originalExtension, ...dimensions,
-			}, limits.maxOutputBytes)];
-			for (const rendition of renditionSpecs) {
-				const outputMetadata = await sharp(rendition.path).metadata();
-				if (!outputMetadata.width || !outputMetadata.height) throw new ImageRejectedError('Rendition dimensions missing', 'RASTER_INVALID');
-				outputs.push(await outputRecord({
-					role: rendition.role, path: rendition.path, mimeType: 'image/webp', extension: 'webp',
-					width: outputMetadata.width, height: outputMetadata.height,
-				}, limits.maxOutputBytes));
+			const aggregateBudget = new AggregateOutputBudget(aggregateBytes);
+			const createdPaths = new Set<string>();
+			try {
+				await writeBoundedOutput({
+					source: input.sourceMimeType === 'application/pdf'
+						? source.clone().webp({ quality: 88 })
+						: createReadStream(input.sourcePath),
+					destination: originalPath,
+					fileLimitBytes: limits.maxOutputBytes,
+					aggregateBudget,
+					onCreate: () => createdPaths.add(originalPath),
+					...(input.signal ? { signal: input.signal } : {}),
+				});
+				// Encode sequentially: libvips may otherwise hold multiple decoded pixel
+				// graphs at once and defeat the worker's decoded-memory budget.
+				for (const rendition of renditionSpecs) {
+					await writeBoundedOutput({
+						source: source.clone().resize({ width: rendition.width, withoutEnlargement: true })
+							.webp({ quality: 82 }),
+						destination: rendition.path,
+						fileLimitBytes: limits.maxOutputBytes,
+						aggregateBudget,
+						onCreate: () => createdPaths.add(rendition.path),
+						...(input.signal ? { signal: input.signal } : {}),
+					});
+				}
+				const outputs = [await outputRecord({
+					role: 'ORIGINAL', path: originalPath, mimeType: originalMime,
+					extension: originalExtension, ...dimensions,
+				}, limits.maxOutputBytes)];
+				for (const rendition of renditionSpecs) {
+					const outputMetadata = await sharp(rendition.path).metadata();
+					if (!outputMetadata.width || !outputMetadata.height) throw new ImageRejectedError('Rendition dimensions missing', 'RASTER_INVALID');
+					outputs.push(await outputRecord({
+						role: rendition.role, path: rendition.path, mimeType: 'image/webp', extension: 'webp',
+						width: outputMetadata.width, height: outputMetadata.height,
+					}, limits.maxOutputBytes));
+				}
+				return outputs;
+			} catch (error) {
+				await Promise.all([...createdPaths].map((path) => rm(path, { force: true }).catch(() => undefined)));
+				throw error;
 			}
-			return outputs;
 		},
 	};
 }

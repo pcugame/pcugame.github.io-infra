@@ -8,6 +8,7 @@ import { createObjectStorage } from './lib/storage.js';
 import { runImageWorkerLoop } from './modules/image/loop.js';
 import { createImageWorkerComposition } from './modules/image/composition.js';
 import { createPrismaImageWorkerRepository } from './modules/image/prisma.repository.js';
+import { WorkerSourceObjectMissingError } from './modules/upload-lifecycle/worker-errors.js';
 
 /** Dedicated Garage-to-private-workspace image/PDF worker; it never imports Fastify. */
 export async function runImageWorker(): Promise<void> {
@@ -24,20 +25,30 @@ export async function runImageWorker(): Promise<void> {
 	process.once('SIGINT', stop);
 	try {
 		const graph = createImageWorkerComposition({
-			repository: createPrismaImageWorkerRepository(prisma, { publicBucket: config.S3_BUCKET_PUBLIC }),
+			repository: createPrismaImageWorkerRepository(prisma, {
+				publicBucket: config.S3_BUCKET_PUBLIC,
+				protectedBucket: config.S3_BUCKET_PROTECTED,
+			}),
 			storage: {
 				async stream(bucket, key, signal) {
 					const object = await storage.stream(bucket, key, undefined, { signal });
-					if (!object || 'kind' in object) throw new Error('Image source object is unavailable');
+					if (!object || 'kind' in object) {
+						throw new WorkerSourceObjectMissingError('Canonical IMAGE/POSTER source object does not exist');
+					}
 					return { body: object.body, size: object.size };
 				},
 				async head(bucket, key, signal) {
 					const object = await storage.head(bucket, key, { signal });
-					return object ? { size: object.size } : null;
+					return object ? {
+						size: object.size,
+						...(object.checksumSha256 ? { checksumSha256: object.checksumSha256 } : {}),
+						...(object.etag ? { etag: object.etag } : {}),
+					} : null;
 				},
 				async upload(input) {
 					await storage.upload(input.bucket, input.key, input.body, input.contentType, input.contentLength, {
 						cacheControl: 'public, max-age=31536000, immutable',
+						checksumSha256: input.checksumSha256,
 					}, { signal: input.signal });
 				},
 			},
@@ -49,6 +60,8 @@ export async function runImageWorker(): Promise<void> {
 			logger,
 			limits: { maxTempBytes: config.IMAGE_WORKER_TEMP_MAX_MB * 1024 * 1024 },
 		});
+		const removed = await graph.cleanupStaleWorkspaces(new Date(Date.now() - 24 * 60 * 60_000));
+		if (removed > 0) logger.warn({ removed }, 'Removed stale IMAGE worker temp directories');
 		await runImageWorkerLoop({
 			worker: graph.worker,
 			signal: abort.signal,

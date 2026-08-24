@@ -4,6 +4,7 @@ import { DEFAULT_IMAGE_WORKER_LIMITS, type ImageWorkerLimits } from './policy.js
 import { createImageProcessor } from './processor.js';
 import type { ImageWorkerRepository, ImageWorkerStorage } from './ports.js';
 import { createImageWorker } from './worker.js';
+import { cleanupStaleWorkerDirectories } from '../upload-lifecycle/worker-workspace.js';
 
 /** Worker-only composition; the future Prisma adapter is injected after owner/session schema expansion. */
 export function createImageWorkerComposition(input: {
@@ -25,5 +26,12 @@ export function createImageWorkerComposition(input: {
 	const operations = createImageOperations(createBoundedImageCommandRunner(), limits);
 	const processor = createImageProcessor({ ...input, operations, limits });
 	const worker = createImageWorker({ repository: input.repository, processor, ids: input.ids, logger: input.logger });
-	return { operations, processor, worker };
+	return {
+		operations,
+		processor,
+		worker,
+		cleanupStaleWorkspaces: (cutoff: Date) => cleanupStaleWorkerDirectories({
+			tempRoot: input.tempRoot, prefix: 'pcu-image-worker-', cutoff,
+		}),
+	};
 }

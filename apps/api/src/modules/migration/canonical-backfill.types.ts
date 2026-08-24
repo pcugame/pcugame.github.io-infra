@@ -15,7 +15,11 @@ export type CanonicalFailureCode =
 	| 'SOURCE_NOT_PROVEN'
 	| 'CONCURRENT_CHANGE'
 	| 'CANONICAL_CONFLICT'
-	| 'OBJECT_HEAD_FAILED';
+	| 'OBJECT_HEAD_FAILED'
+	| 'COPY_FAILED'
+	| 'COPY_CONFLICT'
+	| 'REPAIR_REQUIRED'
+	| 'REPAIR_FAILED';
 
 export interface CanonicalBackfillFailure {
 	ref: CanonicalWorkRef;
@@ -50,6 +54,73 @@ export interface CanonicalObjectHeadVerifier {
 	): Promise<{ keys: string[]; isTruncated: boolean }>;
 }
 
+export interface CanonicalWebglSourceCopy {
+	sourceBucket: string;
+	sourceKey: string;
+	destinationBucket: string;
+	destinationKey: string;
+	expected: ObjectHeadRecord;
+}
+
+export interface CanonicalObjectCopy {
+	sourceBucket: string;
+	sourceKey: string;
+	destinationBucket: string;
+	destinationKey: string;
+	expected: ObjectHeadRecord;
+}
+
+export interface CanonicalObjectRelocation {
+	workKind: CanonicalWorkKind;
+	workRef: string;
+	role: string;
+	copy: CanonicalObjectCopy;
+	verified: ObjectHeadRecord;
+}
+
+export interface CanonicalImageRepair {
+	sourceBucket: string;
+	sourceKey: string;
+	sourceMimeType: string;
+	sourceSizeBytes: bigint;
+	missing: Array<{
+		role: 'CARD_480' | 'DISPLAY_960';
+		width: 480 | 960;
+		objectKey: string;
+	}>;
+}
+
+export interface CanonicalMaterializationTarget {
+	bucket: string;
+	objectKey: string;
+	reason: string;
+}
+
+export interface CanonicalMaterializationHooks {
+	/** Persist cleanup intent before the first byte is created. */
+	beforeCreate(target: CanonicalMaterializationTarget): Promise<void>;
+}
+
+/**
+ * Migration-only object materializer. It is intentionally absent from the
+ * Fastify graph and may read/copy bytes under bounded worker-style limits.
+ */
+export interface CanonicalObjectMaterializer {
+	ensureCanonicalObjectCopy(copy: CanonicalObjectCopy, hooks?: CanonicalMaterializationHooks): Promise<{
+		head: ObjectHeadRecord;
+		created: boolean;
+	}>;
+	ensureWebglSourceCopy(copy: CanonicalWebglSourceCopy, hooks?: CanonicalMaterializationHooks): Promise<{
+		head: ObjectHeadRecord;
+		created: boolean;
+	}>;
+	ensureImageRenditions(repair: CanonicalImageRepair, hooks?: CanonicalMaterializationHooks): Promise<{
+		representations: CanonicalRepresentationPlan[];
+		created: number;
+		reused: number;
+	}>;
+}
+
 export type LegacyAssetKind = 'THUMBNAIL' | 'IMAGE' | 'POSTER' | 'GAME' | 'VIDEO' | 'WEBGL';
 
 export interface LegacyAssetRow {
@@ -72,6 +143,8 @@ export interface LegacyAssetRow {
 	card480Height: number | null;
 	display960Height: number | null;
 	updatedAt: Date;
+	/** A prior run already installed every required READY representation in its final namespace. */
+	canonicalBackfillComplete?: boolean;
 }
 
 export interface LegacyExhibitionRow {
@@ -104,6 +177,9 @@ export interface LegacyWebglRow {
 	updatedAt: Date;
 	sourceProof: LegacyWebglSourceProof | null;
 	sourceLegacyAssetId: number | null;
+	sourceLegacyAssetKind: 'GAME' | 'WEBGL' | null;
+	/** Existing legacy rows claim the source key, but cannot prove one valid owner. */
+	sourceOwnershipConflict?: boolean;
 }
 
 export type CanonicalRepresentationRole =
@@ -131,11 +207,15 @@ export interface CanonicalRepresentationPlan {
 export interface CanonicalAssetPlan {
 	row: LegacyAssetRow;
 	representations: CanonicalRepresentationPlan[];
+	imageRepair: CanonicalImageRepair | null;
+	relocations?: CanonicalObjectRelocation[];
 }
 
 export interface CanonicalExhibitionPlan {
 	row: LegacyExhibitionRow;
 	representations: CanonicalRepresentationPlan[];
+	imageRepair: CanonicalImageRepair | null;
+	relocations?: CanonicalObjectRelocation[];
 }
 
 export interface CanonicalWebglPlan {
@@ -145,6 +225,8 @@ export interface CanonicalWebglPlan {
 	publicPrefix: string;
 	entryObjectKey: string;
 	source: CanonicalRepresentationPlan;
+	sourceCopy: CanonicalWebglSourceCopy | null;
+	relocations?: CanonicalObjectRelocation[];
 	entry: ObjectHeadRecord;
 	objectManifest: {
 		version: 1;
@@ -171,6 +253,9 @@ export interface CanonicalBackfillRepository {
 	getAsset(id: number): Promise<LegacyAssetRow | null>;
 	getExhibition(id: number): Promise<LegacyExhibitionRow | null>;
 	getWebglProject(id: number): Promise<LegacyWebglRow | null>;
+	prepareMaterializationCleanup(target: CanonicalMaterializationTarget): Promise<void>;
+	prepareObjectRelocation(relocation: Omit<CanonicalObjectRelocation, 'verified'>): Promise<void>;
+	markObjectRelocationMaterialized(relocation: CanonicalObjectRelocation): Promise<void>;
 	applyAsset(plan: CanonicalAssetPlan): Promise<CanonicalApplyOutcome>;
 	applyExhibition(plan: CanonicalExhibitionPlan): Promise<CanonicalApplyOutcome>;
 	applyWebgl(plan: CanonicalWebglPlan): Promise<CanonicalApplyOutcome>;
@@ -188,6 +273,11 @@ export interface CanonicalBackfillStats {
 	assetsCreated: number;
 	representations: number;
 	deployments: number;
+	objectCopies: number;
+	objectsReused: number;
+	imageRepairs: number;
+	repairsPlanned: number;
+	objectCopiesPlanned: number;
 	failures: number;
 }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { effectiveIsIncomplete } from '../shared/project-completeness.js';
 
 describe('effectiveIsIncomplete', () => {
-	const readyPoster = { kind: 'POSTER' as const, status: 'READY', storageKey: 'poster.webp' };
+	const readyPoster = { kind: 'POSTER' as const, status: 'READY', hasReadyOriginal: true };
 
 	it('never marks a project incomplete when the DB flag is false', () => {
 		expect(effectiveIsIncomplete(false, [], null)).toBe(false);
@@ -25,12 +25,12 @@ describe('effectiveIsIncomplete', () => {
 		expect(effectiveIsIncomplete(
 			true,
 			[{ kind: 'GAME' }, { kind: 'VIDEO' }],
-			{ kind: 'GAME', status: 'READY', storageKey: 'game.zip' },
+			{ kind: 'GAME', status: 'READY', hasReadyOriginal: true },
 		)).toBe(true);
 		expect(effectiveIsIncomplete(
 			true,
 			[{ kind: 'GAME' }, { kind: 'VIDEO' }],
-			{ kind: 'POSTER', status: 'DELETED', storageKey: 'poster.webp' },
+			{ kind: 'POSTER', status: 'DELETED', hasReadyOriginal: true },
 		)).toBe(true);
 	});
 });

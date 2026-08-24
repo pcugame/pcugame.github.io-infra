@@ -44,13 +44,6 @@ interface ProtectedAssetDownloadRecord extends AssetDownloadIdentity {
 	}) | null;
 }
 
-interface MigrationObservation {
-	name: 'asset_download_legacy_fallback' | 'asset_download_legacy_route';
-	scope: AssetDownloadVariant;
-	observedAt: Date;
-	details: { assetId: number; role: 'ORIGINAL' | 'PLAYBACK' };
-}
-
 interface AssetDeletionLookup {
 	id: number;
 	projectId: number;
@@ -62,21 +55,16 @@ interface AssetDeletionClaim {
 	projectId: number;
 	kind: AssetKind;
 	previousStatus: 'PENDING' | 'VERIFYING' | 'PROCESSING' | 'READY' | 'DELETING' | 'DELETED' | 'FAILED';
-	storageKey: string | null;
-	playbackStorageKey: string | null;
 	alreadyDeleted: boolean;
 }
 
 export interface AssetsServiceDependencies {
-	protectedBucket: string;
 	presignTtlSec?: number;
 	presign(
 		bucket: string,
 		key: string,
 		options?: { ttlSec?: number; responseContentDisposition?: string },
 	): Promise<string>;
-	clock?: { now(): Date };
-	bucketForKind(kind: AssetKind): string;
 	wakeDeletionWorker(): void;
 	loadProjectWithAccess(actor: Actor, projectId: number): Promise<unknown>;
 	downloadLimiter: {
@@ -89,14 +77,12 @@ export interface AssetsServiceDependencies {
 	};
 	repository: {
 		findAssetByIdForDownload(id: number): Promise<ProtectedAssetDownloadRecord | null>;
-		findAssetsByLegacyStorageKey(key: string): Promise<ProtectedAssetDownloadRecord[]>;
-		recordMigrationObservations(observations: MigrationObservation[]): Promise<void>;
 		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
 		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
 		claimAssetForDeletion(id: number): Promise<AssetDeletionClaim | null>;
 		completeAssetDeletion(
 			claim: AssetDeletionClaim,
-			outbox: { bucket: string; reason: string; playbackReason: string },
+			outbox: { reason: string },
 		): Promise<void>;
 	};
 }
@@ -174,48 +160,12 @@ function actionFor(variant: AssetDownloadVariant): AssetDeliveryAction {
 	return variant === 'playback' ? 'DOWNLOAD_PLAYBACK' : 'DOWNLOAD_ORIGINAL';
 }
 
-async function recordCompatibilityReads(
-	deps: AssetsServiceDependencies,
-	assetId: number,
-	variant: AssetDownloadVariant,
-	role: 'ORIGINAL' | 'PLAYBACK',
-	legacyFallback: boolean,
-	legacyRoute: boolean,
-): Promise<void> {
-	const observedAt = deps.clock?.now() ?? new Date();
-	const observations: MigrationObservation[] = [
-		...(legacyFallback ? [{
-			name: 'asset_download_legacy_fallback' as const,
-			scope: variant,
-			observedAt,
-			details: { assetId, role },
-		}] : []),
-		...(legacyRoute ? [{
-			name: 'asset_download_legacy_route' as const,
-			scope: variant,
-			observedAt,
-			details: { assetId, role },
-		}] : []),
-	];
-	if (observations.length === 0) return;
-	await deps.repository.recordMigrationObservations(observations);
-	for (const observation of observations) {
-		deps.logger.warn?.({
-			metric: observation.name,
-			assetId,
-			variant,
-			role,
-		}, 'protected_download_compatibility_read');
-	}
-}
-
 async function grantProtectedAssetDownload(
 	deps: AssetsServiceDependencies,
 	asset: ProtectedAssetDownloadRecord,
 	variant: AssetDownloadVariant,
 	clientIp: string,
 	user: ProtectedAssetAccessUser | undefined,
-	legacyRoute: boolean,
 ): Promise<HttpResponseDescriptor> {
 	if (!asset.project || asset.projectId === null) {
 		throw new AppError(500, 'Protected asset has no project identity', 'INTERNAL_ERROR');
@@ -225,7 +175,7 @@ async function grantProtectedAssetDownload(
 		if (!user) throw unauthorized();
 		throw forbidden('Not allowed to access this asset');
 	}
-	const representation = resolveDownloadRepresentation(asset, variant, deps.protectedBucket);
+	const representation = resolveDownloadRepresentation(asset, variant);
 
 	const principalScope = user
 		? `user:${user.id}:${action}:${asset.id}`
@@ -245,14 +195,6 @@ async function grantProtectedAssetDownload(
 		throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
 	}
 
-	await recordCompatibilityReads(
-		deps,
-		asset.id,
-		variant,
-		representation.role,
-		representation.source === 'legacy',
-		legacyRoute,
-	);
 	const downloadOptions = asset.kind === 'GAME'
 		? {
 			ttlSec: deps.presignTtlSec ?? 60,
@@ -278,35 +220,7 @@ export async function downloadAssetById(
 ): Promise<HttpResponseDescriptor> {
 	const asset = await deps.repository.findAssetByIdForDownload(assetId);
 	if (!asset) throw notFound('Asset not found');
-	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user, false);
-}
-
-/** Phase-1 bridge: resolve legacy physical identity, then use the canonical grant path. */
-export async function downloadAssetByLegacyStorageKey(
-	deps: AssetsServiceDependencies,
-	storageKey: string,
-	clientIp: string,
-	user: ProtectedAssetAccessUser | undefined,
-): Promise<HttpResponseDescriptor> {
-	const assets = await deps.repository.findAssetsByLegacyStorageKey(storageKey);
-	if (assets.length === 0) throw notFound('Asset not found');
-	if (assets.length !== 1) {
-		throw new AppError(500, 'Legacy storage identity has duplicate ownership', 'INTERNAL_ERROR');
-	}
-	const asset = assets[0]!;
-	const original = asset.storageKey === storageKey;
-	const playback = asset.playbackStorageKey === storageKey;
-	if (original === playback) {
-		throw new AppError(500, 'Legacy storage identity is ambiguous', 'INTERNAL_ERROR');
-	}
-	return grantProtectedAssetDownload(
-		deps,
-		asset,
-		playback ? 'playback' : 'original',
-		clientIp,
-		user,
-		true,
-	);
+	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user);
 }
 
 /** Delete an asset using a locked DB identity claim around storage I/O. */
@@ -321,11 +235,8 @@ export async function deleteAsset(
 
 	const asset = await deps.repository.claimAssetForDeletion(assetId);
 	if (!asset) throw notFound('Asset not found');
-	const bucket = deps.bucketForKind(asset.kind);
 	await deps.repository.completeAssetDeletion(asset, {
-		bucket,
 		reason: 'asset-delete',
-		playbackReason: 'asset-delete-playback',
 	});
 
 	// The transaction above owns durability. The request only coalesces a worker
@@ -343,11 +254,6 @@ export function createAssetsService(deps: AssetsServiceDependencies) {
 			clientIp: string,
 			user: ProtectedAssetAccessUser | undefined,
 		) => downloadAssetById(deps, assetId, variant, clientIp, user),
-		downloadAssetByLegacyStorageKey: (
-			storageKey: string,
-			clientIp: string,
-			user: ProtectedAssetAccessUser | undefined,
-		) => downloadAssetByLegacyStorageKey(deps, storageKey, clientIp, user),
 		deleteAsset: (assetId: number, actor: Actor) => deleteAsset(deps, assetId, actor),
 	};
 }

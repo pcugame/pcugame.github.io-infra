@@ -8,7 +8,6 @@ import {
 	CreateExhibitionBaseSchema,
 	DevAuthLoginErrorRequestSchema,
 	DevAuthLoginRequestSchema,
-	GameUploadCreateSessionSchema,
 	GoogleAuthRequestSchema,
 	ProjectMemberInputSchema,
 	ProjectStatusSchema,
@@ -22,10 +21,10 @@ import {
 } from './schemas.js';
 
 describe('shared enum schemas', () => {
-	it('accepts only public project statuses', () => {
+	it('accepts draft plus public project statuses', () => {
 		expect(ProjectStatusSchema.safeParse('PUBLISHED').success).toBe(true);
 		expect(ProjectStatusSchema.safeParse('ARCHIVED').success).toBe(true);
-		expect(ProjectStatusSchema.safeParse('DRAFT').success).toBe(false);
+		expect(ProjectStatusSchema.safeParse('DRAFT').success).toBe(true);
 	});
 
 	it('keeps asset kinds and roles constrained', () => {
@@ -54,6 +53,7 @@ describe('project payload schemas', () => {
 			exhibitionId: 1,
 			title: 'Project',
 			members: [member],
+			manifest: [],
 		});
 	});
 
@@ -128,20 +128,10 @@ describe('exhibition and auth schemas', () => {
 		expect(UpdateExhibitionBaseSchema.safeParse({ sortOrder: -1 }).success).toBe(false);
 	});
 
-	it('validates auth and game upload payloads', () => {
+	it('validates auth payloads', () => {
 		expect(GoogleAuthRequestSchema.safeParse({ credential: 'token' }).success).toBe(true);
 		expect(GoogleAuthRequestSchema.safeParse({ credential: '' }).success).toBe(false);
 		expect(DevAuthLoginRequestSchema.safeParse({ role: 'OPERATOR' }).success).toBe(true);
 		expect(DevAuthLoginErrorRequestSchema.safeParse({ scenario: 'domain-not-allowed' }).success).toBe(true);
-		expect(GameUploadCreateSessionSchema.safeParse({ originalName: 'game.zip', totalBytes: 1 }).success).toBe(true);
-		expect(GameUploadCreateSessionSchema.safeParse({ originalName: '', totalBytes: 0 }).success).toBe(false);
-		expect(GameUploadCreateSessionSchema.safeParse({
-			originalName: 'game.zip',
-			totalBytes: 1.5,
-		}).success).toBe(false);
-		expect(GameUploadCreateSessionSchema.safeParse({
-			originalName: 'game.zip',
-			totalBytes: Number.MAX_SAFE_INTEGER + 1,
-		}).success).toBe(false);
 	});
 });

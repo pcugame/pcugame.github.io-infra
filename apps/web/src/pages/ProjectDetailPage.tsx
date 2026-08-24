@@ -116,7 +116,7 @@ export default function ProjectDetailPage() {
         <section className="project-detail__video">
           <h3>영상</h3>
           {projectVideos.map((video, i) => (
-            <div key={`${video.url}-${i}`} className="project-detail__video-item">
+            <div key={`${video.url ?? video.originalDownloadUrl ?? 'video'}-${i}`} className="project-detail__video-item">
               <h4>동영상{i + 1}</h4>
               <ProjectVideo
                 video={video}

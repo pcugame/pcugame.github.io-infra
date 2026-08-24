@@ -132,6 +132,34 @@ describe.runIf(runPostgresIntegration)('responsive image migrations with Postgre
 		};
 	}
 
+	async function canonicalRepresentationCatalog(schema: string): Promise<{
+		columns: string[];
+		roles: string[];
+	}> {
+		const columns = await control.$queryRawUnsafe<Array<{ column_name: string }>>(`
+			SELECT column_name
+			FROM information_schema.columns
+			WHERE table_schema = '${schema}'
+				AND table_name = 'asset_representations'
+				AND column_name IN ('width', 'height')
+			ORDER BY column_name
+		`);
+		const roles = await control.$queryRawUnsafe<Array<{ enumlabel: string }>>(`
+			SELECT pg_enum.enumlabel
+			FROM pg_type
+			JOIN pg_namespace ON pg_namespace.oid = pg_type.typnamespace
+			JOIN pg_enum ON pg_enum.enumtypid = pg_type.oid
+			WHERE pg_namespace.nspname = '${schema}'
+				AND pg_type.typname = 'AssetRepresentationRole'
+				AND pg_enum.enumlabel IN ('CARD_480', 'DISPLAY_960')
+			ORDER BY pg_enum.enumlabel
+		`);
+		return {
+			columns: columns.map(({ column_name }) => column_name),
+			roles: roles.map(({ enumlabel }) => enumlabel),
+		};
+	}
+
 	async function createLegacyRenditionInventory(schema: string): Promise<void> {
 		const quotedSchema = quotedIdentifier(schema);
 		await control.$executeRawUnsafe(`
@@ -202,23 +230,20 @@ describe.runIf(runPostgresIntegration)('responsive image migrations with Postgre
 		await control.$disconnect();
 	});
 
-	it('applies the complete checked-in fresh path without creating a rendition model', async () => {
+	it('applies the complete checked-in fresh path with canonical representation dimensions and roles', async () => {
 		const schema = await createEmptySchema();
 
 		for (const migration of checkedInMigrations) {
 			await runMigration(schema, migration);
 		}
 
-		expect(await featureColumns(schema)).toEqual([
-			'card_480_height',
-			'display_960_height',
-			'height',
-			'poster_card_480_height',
-			'poster_display_960_height',
-			'poster_height',
-			'poster_width',
-			'width',
-		]);
+		// Legacy owner/variant height columns are gone. Dimensions and responsive
+		// variants live on explicit AssetRepresentation rows instead.
+		expect(await featureColumns(schema)).toEqual(['height', 'width']);
+		expect(await canonicalRepresentationCatalog(schema)).toEqual({
+			columns: ['height', 'width'],
+			roles: ['CARD_480', 'DISPLAY_960'],
+		});
 		expect(await renditionCatalog(schema)).toEqual({
 			tableExists: false,
 			typeExists: false,

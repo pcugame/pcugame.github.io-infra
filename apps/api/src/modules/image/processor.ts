@@ -29,6 +29,7 @@ export function createImageProcessor(deps: ImageProcessorDependencies) {
 			if (session.bucket !== deps.protectedBucket) {
 				throw new ImageRejectedError('Image source is outside the protected upload bucket', 'MAGIC_INVALID');
 			}
+			await assertOwned();
 			const source = await deps.storage.stream(session.bucket, session.objectKey, signal);
 			if (source.size !== Number(session.totalBytes)) {
 				throw new ImageRejectedError('Completed source size mismatch', 'SOURCE_IDENTITY_INVALID');
@@ -67,26 +68,33 @@ export function createImageProcessor(deps: ImageProcessorDependencies) {
 				if (physicalBytes > deps.limits.maxTempBytes) {
 					throw new ImageRejectedError('Image processing exceeded its temp disk budget', 'RESOURCE_LIMIT');
 				}
+				await assertOwned();
 				const plan = await deps.repository.prepareOutputPlan({
-					session,
+					session, token,
 					outputs: outputs.map(({ role, extension, mimeType, width, height }) => ({ role, extension, mimeType, width, height })),
 					notBefore: new Date(deps.clock.now().getTime() + 2 * 60 * 60_000),
 				});
-				if (plan.outputs.length !== outputs.length || plan.outputs.some(({ bucket }) => bucket !== deps.publicBucket)) {
-					throw new Error('Repository returned an invalid public output plan');
+				if (plan.outputs.length !== outputs.length || plan.outputs.some((output) => (
+					output.bucket !== deps.publicBucket && output.bucket !== deps.protectedBucket
+				) || (output.bucket === deps.protectedBucket
+					&& (output.publicationBucket !== deps.publicBucket || !output.publicationObjectKey)))) {
+					throw new Error('Repository returned an invalid image output plan');
 				}
 				for (const output of outputs) {
 					const target = plan.outputs.find(({ role }) => role === output.role);
 					if (!target) throw new Error(`Output plan omitted ${output.role}`);
+					await assertOwned();
 					const existing = await deps.storage.head(target.bucket, target.objectKey, signal);
 					if (existing?.size !== output.sizeBytes || existing.checksumSha256 !== output.checksumSha256) {
+						await assertOwned();
 						await deps.storage.upload({
 							bucket: target.bucket, key: target.objectKey, body: createReadStream(output.path),
 							contentType: output.mimeType, contentLength: output.sizeBytes,
 							checksumSha256: output.checksumSha256, signal,
 						});
 					}
-					await deps.repository.markOutputUploaded(target.intentId);
+					await assertOwned();
+					await deps.repository.markOutputUploaded({ session, token, intentId: target.intentId });
 				}
 				await assertOwned();
 				await deps.repository.commitReady({
@@ -96,11 +104,15 @@ export function createImageProcessor(deps: ImageProcessorDependencies) {
 						const target = plan.outputs.find(({ role }) => role === output.role);
 						if (!target) throw new Error(`Output plan omitted ${output.role}`);
 						const { path: _path, extension: _extension, ...metadata } = output;
-						return { ...metadata, bucket: target.bucket, objectKey: target.objectKey, intentId: target.intentId };
+						return {
+							...metadata, bucket: target.bucket, objectKey: target.objectKey, intentId: target.intentId,
+							...(target.publicationBucket ? { publicationBucket: target.publicationBucket } : {}),
+							...(target.publicationObjectKey ? { publicationObjectKey: target.publicationObjectKey } : {}),
+						};
 					}),
 				});
 				deps.logger.info({ sessionId: session.id, assetId: plan.assetId, sourceMimeType: workspace.mimeType },
-					'Image worker committed canonical public representations');
+					'Image worker committed canonical ready representations');
 				return { assetId: plan.assetId };
 			} finally {
 				await workspace.cleanup();

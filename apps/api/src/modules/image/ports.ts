@@ -23,6 +23,9 @@ export interface VerifyingImageSession {
 	sourceIdentity: string;
 	sourceIdentityBlockSizeBytes: number;
 	sourceIdentityBlockManifest: unknown;
+	validationAttemptCount?: number;
+	expectedTargetAssetId?: number | null;
+	expectedTargetAssetUpdatedAt?: Date | null;
 }
 
 export interface LocalImageOutput {
@@ -42,6 +45,8 @@ export interface PreparedImageOutput {
 	objectKey: string;
 	intentId: string;
 	intentState: 'PREPARED' | 'UPLOADED';
+	publicationBucket?: string;
+	publicationObjectKey?: string;
 }
 
 export interface PreparedImagePlan {
@@ -54,17 +59,24 @@ export interface ImageWorkerRepository {
 	renewLease(sessionId: string, token: string, leaseMs: number): Promise<boolean>;
 	prepareOutputPlan(input: {
 		session: VerifyingImageSession;
+		token: string;
 		outputs: Array<Pick<LocalImageOutput, 'role' | 'extension' | 'mimeType' | 'width' | 'height'>>;
 		notBefore: Date;
 	}): Promise<PreparedImagePlan>;
-	markOutputUploaded(intentId: string): Promise<void>;
+	markOutputUploaded(input: { session: VerifyingImageSession; token: string; intentId: string }): Promise<void>;
 	commitReady(input: {
 		session: VerifyingImageSession;
 		token: string;
 		assetId: string;
 		/** Queue the protected staging source for durable deletion in the same transaction. */
 		sourceCleanup: { bucket: string; objectKey: string };
-		outputs: Array<Omit<LocalImageOutput, 'path' | 'extension'> & { bucket: string; objectKey: string; intentId: string }>;
+		outputs: Array<Omit<LocalImageOutput, 'path' | 'extension'> & {
+			bucket: string;
+			objectKey: string;
+			intentId: string;
+			publicationBucket?: string;
+			publicationObjectKey?: string;
+		}>;
 	}): Promise<void>;
 	/** Rejects the session and queues its source plus all PREPARED/UPLOADED plan intents for cleanup atomically. */
 	reject(input: { session: VerifyingImageSession; token: string; reason: string }): Promise<boolean>;
@@ -72,7 +84,7 @@ export interface ImageWorkerRepository {
 
 export interface ImageWorkerStorage {
 	stream(bucket: string, key: string, signal?: AbortSignal): Promise<{ body: Readable; size: number }>;
-	head(bucket: string, key: string, signal?: AbortSignal): Promise<{ size: number; checksumSha256?: string } | null>;
+	head(bucket: string, key: string, signal?: AbortSignal): Promise<{ size: number; checksumSha256?: string; etag?: string } | null>;
 	upload(input: { bucket: string; key: string; body: Readable; contentType: string; contentLength: number; checksumSha256: string; signal?: AbortSignal }): Promise<void>;
 }
 
@@ -96,5 +108,14 @@ export interface ImageOperations {
 }
 
 export interface BoundedImageCommandRunner {
-	run(input: { file: string; args: readonly string[]; timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal }): Promise<{ stdout: string; stderr: string }>;
+	run(input: {
+		file: string;
+		args: readonly string[];
+		timeoutMs: number;
+		/** Combined stdout/stderr diagnostic capture. stdout is not captured when stdoutFile is used. */
+		maxOutputBytes: number;
+		/** Streams stdout to a new regular file with a write-time byte ceiling. */
+		stdoutFile?: { path: string; maxBytes: number };
+		signal?: AbortSignal;
+	}): Promise<{ stdout: string; stderr: string }>;
 }

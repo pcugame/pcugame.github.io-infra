@@ -42,6 +42,20 @@ function storageErrorMatches(error: unknown, names: readonly string[], statusCod
 		|| (statusCode !== undefined && candidate.$metadata?.httpStatusCode === statusCode);
 }
 
+function checksumHex(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	try {
+		const bytes = Buffer.from(value, 'base64');
+		return bytes.length === 32 ? bytes.toString('hex') : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function commandAbortOptions(request?: { signal?: AbortSignal }) {
+	return request?.signal ? { abortSignal: request.signal } : undefined;
+}
+
 function responseHeader(error: unknown, name: string): string | undefined {
 	if (!error || typeof error !== 'object') return undefined;
 	const headers = (error as {
@@ -119,6 +133,10 @@ export function createObjectStorage(
 
 	const storage: ObjectStorage = {
 		async upload(bucket, key, body, contentType, contentLength, uploadOptions = {}, request) {
+			if (uploadOptions.checksumSha256 !== undefined
+				&& !/^[a-f0-9]{64}$/i.test(uploadOptions.checksumSha256)) {
+				throw new Error('Object SHA-256 checksum must be 64 hexadecimal characters');
+			}
 			await client.send(new PutObjectCommand({
 				Bucket: bucket,
 				Key: key,
@@ -129,6 +147,9 @@ export function createObjectStorage(
 				}),
 				...(uploadOptions.contentEncoding && { ContentEncoding: uploadOptions.contentEncoding }),
 				...(uploadOptions.cacheControl && { CacheControl: uploadOptions.cacheControl }),
+				...(uploadOptions.checksumSha256 && {
+					ChecksumSHA256: Buffer.from(uploadOptions.checksumSha256, 'hex').toString('base64'),
+				}),
 				...(contentLength != null && { ContentLength: contentLength }),
 			}), requestOptions(request));
 		},
@@ -150,7 +171,7 @@ export function createObjectStorage(
 		async head(bucket, key, request) {
 			try {
 				const response = await client.send(
-					new HeadObjectCommand({ Bucket: bucket, Key: key }),
+					new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: 'ENABLED' }),
 					requestOptions(request),
 				);
 				return {
@@ -159,6 +180,7 @@ export function createObjectStorage(
 					...(response.CacheControl ? { cacheControl: response.CacheControl } : {}),
 					...(response.ETag ? { etag: response.ETag } : {}),
 					...(response.LastModified ? { lastModified: response.LastModified } : {}),
+					...(checksumHex(response.ChecksumSHA256) ? { checksumSha256: checksumHex(response.ChecksumSHA256) } : {}),
 				};
 			} catch (error) {
 				if (storageErrorMatches(error, ['NotFound'], 404)) return null;
@@ -480,7 +502,7 @@ export function createDirectMultipartControlStorage(client: S3Client) {
 			if (!response.UploadId) throw new Error('S3 CreateMultipartUpload returned no UploadId');
 			return response.UploadId;
 		},
-		async listParts(bucket: string, key: string, uploadId: string): Promise<Array<{
+		async listParts(bucket: string, key: string, uploadId: string, request?: { signal?: AbortSignal }): Promise<Array<{
 			partNumber: number;
 			etag: string;
 			sizeBytes: number;
@@ -490,7 +512,7 @@ export function createDirectMultipartControlStorage(client: S3Client) {
 			do {
 				const page = await client.send(new ListPartsCommand({
 					Bucket: bucket, Key: key, UploadId: uploadId, PartNumberMarker: marker,
-				}));
+				}), commandAbortOptions(request));
 				for (const part of page.Parts ?? []) {
 					const partNumber = part.PartNumber;
 					const sizeBytes = part.Size;
@@ -506,17 +528,17 @@ export function createDirectMultipartControlStorage(client: S3Client) {
 		async completeMultipart(bucket: string, key: string, uploadId: string, parts: ReadonlyArray<{
 			partNumber: number;
 			etag: string;
-		}>): Promise<void> {
+		}>, request?: { signal?: AbortSignal }): Promise<void> {
 			await client.send(new CompleteMultipartUploadCommand({
 				Bucket: bucket,
 				Key: key,
 				UploadId: uploadId,
 				MultipartUpload: { Parts: [...parts].sort((left, right) => left.partNumber - right.partNumber).map((part) => ({ PartNumber: part.partNumber, ETag: part.etag })) },
-			}));
+			}), commandAbortOptions(request));
 		},
-		async head(bucket: string, key: string): Promise<{ size: number; etag?: string } | null> {
+		async head(bucket: string, key: string, request?: { signal?: AbortSignal }): Promise<{ size: number; etag?: string } | null> {
 			try {
-				const result = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+				const result = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }), commandAbortOptions(request));
 				return { size: result.ContentLength ?? 0, ...(result.ETag ? { etag: result.ETag } : {}) };
 			} catch (error) {
 				if (storageErrorMatches(error, ['NotFound', 'NoSuchKey'], 404)) return null;
@@ -529,6 +551,53 @@ export function createDirectMultipartControlStorage(client: S3Client) {
 			} catch (error) {
 				if (!storageErrorMatches(error, ['NoSuchUpload'])) throw error;
 			}
+		},
+	};
+}
+
+/**
+ * Maintenance-only adapter for recovery of direct multipart sessions.  It is
+ * intentionally separate from the Fastify control-plane storage port: list
+ * inventory can be expensive, but it never grants object-body access.
+ */
+export function createMultipartRecoveryStorage(client: S3Client) {
+	const control = createDirectMultipartControlStorage(client);
+	return {
+		listParts: control.listParts,
+		completeMultipart: control.completeMultipart,
+		head: control.head,
+		async listMultipartUploads(
+			bucket: string,
+			prefix: string,
+			request?: { signal?: AbortSignal },
+		): Promise<Array<{ key: string; uploadId: string; initiated?: Date }>> {
+			const uploads: Array<{ key: string; uploadId: string; initiated?: Date }> = [];
+			let keyMarker: string | undefined;
+			let uploadIdMarker: string | undefined;
+			do {
+				const page = await client.send(new ListMultipartUploadsCommand({
+					Bucket: bucket,
+					Prefix: prefix,
+					KeyMarker: keyMarker,
+					UploadIdMarker: uploadIdMarker,
+				}), commandAbortOptions(request));
+				for (const upload of page.Uploads ?? []) {
+					if (!upload.Key || !upload.UploadId) continue;
+					uploads.push({
+						key: upload.Key,
+						uploadId: upload.UploadId,
+						...(upload.Initiated ? { initiated: upload.Initiated } : {}),
+					});
+				}
+				if (page.IsTruncated) {
+					keyMarker = page.NextKeyMarker;
+					uploadIdMarker = page.NextUploadIdMarker;
+				} else {
+					keyMarker = undefined;
+					uploadIdMarker = undefined;
+				}
+			} while (keyMarker || uploadIdMarker);
+			return uploads;
 		},
 	};
 }

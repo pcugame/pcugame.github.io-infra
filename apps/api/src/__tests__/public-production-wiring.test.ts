@@ -39,10 +39,8 @@ function repositoryHarness(label: string) {
 	const calls = {
 		findExhibitionsWithPublishedCounts: vi.fn(async () => [{
 			id: 1, year: 2026, title: `${label} Show`, posterAssetId: 10,
-			posterStorageKey: null, posterWidth: null, posterHeight: null,
-			posterCard480Height: null, posterDisplay960Height: null,
 			poster: {
-				kind: 'POSTER' as const, status: 'READY', isPublic: true, storageKey: null,
+				kind: 'POSTER' as const, status: 'READY',
 				representations: [{ role: 'ORIGINAL', state: 'READY', bucket: `${label}-public`, objectKey: `public/images/${label}-poster.webp`, width: 1200, height: 800 }],
 			},
 			_count: { projects: 1 },
@@ -53,27 +51,41 @@ function repositoryHarness(label: string) {
 		findPublishedProjectById: vi.fn(async () => ({
 			id: 7, exhibitionId: 1, slug: `${label}-game`, title: `${label} Game`, summary: '', description: '',
 			isIncomplete: false, status: 'PUBLISHED' as const,
-			webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
 			currentWebglDeploymentId: deploymentId,
 			currentWebglDeployment: {
 				id: deploymentId, publicBucket: `${label}-public`, publicPrefix,
 				entryObjectKey: `${publicPrefix}index.html`, state: 'READY',
 			},
-			exhibition: { year: 2026 }, members: [], assets: [], poster: null,
+			exhibition: { year: 2026 }, members: [], poster: null,
+			assets: [
+				{
+					id: 20, kind: 'GAME' as const,
+					representations: [{ role: 'ORIGINAL', state: 'READY', bucket: `${label}-protected`, objectKey: 'protected/assets/20/original/g1.zip' }],
+				},
+				{
+					id: 21, kind: 'VIDEO' as const,
+					representations: [
+						{ role: 'ORIGINAL', state: 'READY', bucket: `${label}-protected`, objectKey: 'protected/assets/21/original/g1.mov', mimeType: 'video/quicktime' },
+						{ role: 'PLAYBACK', state: 'READY', bucket: `${label}-protected`, objectKey: 'protected/assets/21/playback/g1.mp4', mimeType: 'video/mp4' },
+					],
+				},
+				{
+					id: 22, kind: 'IMAGE' as const,
+					representations: [
+						{ role: 'ORIGINAL', state: 'READY', bucket: `${label}-public`, objectKey: 'public/images/22/original/g1.webp', width: 1200, height: 800 },
+						{ role: 'CARD_480', state: 'READY', bucket: `${label}-public`, objectKey: 'public/images/22/card-480/g1.webp', width: 480, height: 320 },
+					],
+				},
+				{
+					id: 23, kind: 'VIDEO' as const,
+					representations: [
+						{ role: 'ORIGINAL', state: 'READY', bucket: `${label}-protected`, objectKey: 'protected/assets/23/original/g1.mov', mimeType: 'video/quicktime' },
+						{ role: 'PLAYBACK', state: 'FAILED', bucket: `${label}-protected`, objectKey: 'protected/assets/23/playback/g1.mp4', mimeType: 'video/mp4', error: 'encoder failed' },
+					],
+				},
+			],
 		})),
 		findPublishedProjectBySlug: vi.fn(async () => null),
-		resolvePublicImageBridge: vi.fn(async (storageKey: string) => ({
-			bucket: `${label}-public`, objectKey: storageKey, usedLegacy: false,
-		})),
-		findPublicWebglProject: vi.fn(async () => ({
-			id: 7, webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
-			currentWebglDeploymentId: deploymentId,
-			currentWebglDeployment: {
-				id: deploymentId, publicBucket: `${label}-public`, publicPrefix,
-				entryObjectKey: `${publicPrefix}index.html`, state: 'READY',
-			},
-		})),
-		recordMigrationMetric: vi.fn(async () => undefined),
 	};
 	const repository: PublicProductionRepository = {
 		findExhibitionsWithPublishedCounts: calls.findExhibitionsWithPublishedCounts,
@@ -82,9 +94,6 @@ function repositoryHarness(label: string) {
 		findExhibitionById: calls.findExhibitionById,
 		findPublishedProjectById: calls.findPublishedProjectById,
 		findPublishedProjectBySlug: calls.findPublishedProjectBySlug,
-		resolvePublicImageBridge: calls.resolvePublicImageBridge,
-		findPublicWebglProject: calls.findPublicWebglProject,
-		recordMigrationMetric: calls.recordMigrationMetric,
 	};
 	return { calls, repository, publicPrefix };
 }
@@ -134,7 +143,7 @@ afterEach(async () => {
 });
 
 describe('public production direct-delivery wiring', () => {
-	it('boots with every registered wildcard bridge route in the runtime inventory and no storage I/O', async () => {
+	it('does not register removed storage-key or project-id bridge routes', async () => {
 		const instance = await harness('a');
 		const app = await buildApp({ context: instance.context });
 		apps.push(app);
@@ -145,8 +154,7 @@ describe('public production direct-delivery wiring', () => {
 			'/api/public/webgl/7/Build/game.wasm.br',
 		]) {
 			const response = await app.inject({ method: 'GET', url });
-			expect(response.statusCode).toBe(307);
-			expect(response.body).toBe('');
+			expect(response.statusCode).toBe(404);
 		}
 		expect(instance.storage.calls.presign).not.toHaveBeenCalled();
 		expect(instance.storage.calls.head).not.toHaveBeenCalled();
@@ -169,13 +177,32 @@ describe('public production direct-delivery wiring', () => {
 		expect(detail.statusCode).toBe(200);
 		expect(detail.json()).toMatchObject({
 			ok: true,
-			data: { webglUrl: `https://assets-a.test/${instance.publicRepository.publicPrefix}index.html` },
+			data: {
+				gameDownloadUrl: 'https://api-a.test/api/assets/20/download?variant=original',
+				video: {
+					url: 'https://api-a.test/api/assets/21/download?variant=playback',
+					originalDownloadUrl: 'https://api-a.test/api/assets/21/download?variant=original',
+				},
+				videos: expect.arrayContaining([expect.objectContaining({
+					originalDownloadUrl: 'https://api-a.test/api/assets/23/download?variant=original',
+					playbackStatus: 'FAILED',
+					playbackError: 'encoder failed',
+				})]),
+				images: [{
+					id: 22,
+					image: {
+						original: { url: 'https://assets-a.test/public/images/22/original/g1.webp' },
+						renditions: [{ url: 'https://assets-a.test/public/images/22/card-480/g1.webp' }],
+					},
+				}],
+				webglUrl: `https://assets-a.test/${instance.publicRepository.publicPrefix}index.html`,
+			},
 		});
 		expect(detail.json().data.webglUrl).not.toContain('/api/public/webgl/');
 		expect(instance.storage.calls.stream).not.toHaveBeenCalled();
 	});
 
-	it('bridges GET and HEAD to the same public generation without relaying Range or object bytes', async () => {
+	it('does not revive removed WebGL bridges for GET, HEAD, or Range', async () => {
 		const instance = await harness('a');
 		const app = await buildApp({ context: instance.context });
 		apps.push(app);
@@ -186,12 +213,7 @@ describe('public production direct-delivery wiring', () => {
 				url: '/api/public/webgl/7/Build/game.wasm.br',
 				headers: { range: 'bytes=0-7' },
 			});
-			expect(response.statusCode).toBe(307);
-			expect(response.body).toBe('');
-			expect(response.headers).toMatchObject({
-				location: `https://assets-a.test/${instance.publicRepository.publicPrefix}Build/game.wasm.br`,
-				'cache-control': 'no-store',
-			});
+			expect(response.statusCode).toBe(404);
 		}
 		expect(instance.storage.calls.head).not.toHaveBeenCalled();
 		expect(instance.storage.calls.stream).not.toHaveBeenCalled();

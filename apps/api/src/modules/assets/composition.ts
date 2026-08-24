@@ -1,4 +1,3 @@
-import type { AssetKind } from '@pcu/contracts';
 import type { FastifyPluginAsync } from 'fastify';
 import type { AppLogger, Clock, ObjectStorage } from '../../application/ports.js';
 import type { DownloadRateLimiter } from '../../shared/download-rate-limit.js';
@@ -47,15 +46,8 @@ export function createAssetsBannedProductionGraph(
 	const gate = createBannedIpStartupGate(deps.downloadLimiter);
 
 	const assetsService = createAssetsService({
-		protectedBucket: deps.config.S3_BUCKET_PROTECTED,
 		presignTtlSec: deps.config.S3_PRESIGN_TTL_SEC,
 		presign: (bucket, key, options) => deps.storage.presign(bucket, key, options),
-		clock: deps.clock,
-		bucketForKind: (kind: AssetKind) => (
-			kind === 'GAME' || kind === 'VIDEO'
-				? deps.config.S3_BUCKET_PROTECTED
-				: deps.config.S3_BUCKET_PUBLIC
-		),
 		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
 		loadProjectWithAccess: deps.projectAccess.loadProjectWithAccess,
 		downloadLimiter: gate,

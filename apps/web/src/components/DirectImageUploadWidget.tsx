@@ -8,7 +8,7 @@ import {
 	uploadDirectAssetFile,
 	waitForDirectAssetReady,
 	type DirectAssetUploadSession,
-	type GameUploadProgress,
+	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
 import { queryKeys } from '../lib/query';
 
@@ -31,6 +31,7 @@ interface Props {
 	hideTitle?: boolean;
 	/** Lets an enclosing owner control mutually exclusive mutations such as delete. */
 	onBusyChange?: (busy: boolean) => void;
+	submissionItems?: readonly { id: string; clientToken: string }[];
 }
 
 /**
@@ -45,11 +46,12 @@ export default function DirectImageUploadWidget({
 	onComplete,
 	hideTitle = false,
 	onBusyChange,
+	submissionItems = [],
 }: Props) {
 	const qc = useQueryClient();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
-	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
+	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
 	const [resumable, setResumable] = useState<SavedImageSession | null>(null);
@@ -115,7 +117,11 @@ export default function DirectImageUploadWidget({
 				const completion = await uploadDirectAssetFile(owner, file, kind, (next) => {
 					setProgress(next);
 					if (next.percent >= 100) setPhase('verifying');
-				}, { resume: matchingResume, onSession: (session) => remember(session, file) });
+				}, {
+					resume: matchingResume,
+					onSession: (session) => remember(session, file),
+					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
+				});
 				if (completion.status === 'VERIFYING') {
 					setPhase('verifying');
 					await waitForDirectAssetReady(completion.sessionId);
@@ -132,7 +138,7 @@ export default function DirectImageUploadWidget({
 		} finally {
 			submitting.current = false;
 		}
-	}, [forget, invalidateOwner, kind, onComplete, owner, remember]);
+	}, [forget, invalidateOwner, kind, onComplete, owner, remember, submissionItems]);
 
 	useEffect(() => {
 		if (!autoStart || autoStarted.current || initialFiles.length === 0) return;

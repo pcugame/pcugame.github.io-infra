@@ -14,7 +14,7 @@ export interface ExportSnapshotObject {
 	etag: string | null;
 	representationUpdatedAt: string | null;
 	originalName: string;
-	source: 'canonical' | 'legacy';
+	source: 'canonical';
 }
 
 export interface ExportProjectSnapshot {

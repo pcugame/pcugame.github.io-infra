@@ -20,9 +20,13 @@ function session(id: string, storageKey: string, updatedAt: string) {
 
 function repositoryFor(sessions: ReturnType<typeof session>[]) {
 	const client = {
-		project: { findMany: vi.fn(async () => [project]) },
-		gameUploadSession: { findMany: vi.fn(async () => sessions) },
-		asset: { findUnique: vi.fn(async () => null) },
+		$queryRaw: vi.fn(async (query: { strings?: readonly string[] }) => {
+			const sql = query.strings?.join('?') ?? '';
+			if (sql.includes('FROM "projects"')) return [project];
+			if (sql.includes('FROM "game_upload_sessions"')) return sessions;
+			if (sql.includes('FROM "assets"')) return [];
+			throw new Error(`unexpected SQL: ${sql}`);
+		}),
 	} as unknown as PrismaClient;
 	return createCanonicalBackfillRepository(client);
 }

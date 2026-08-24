@@ -2,8 +2,6 @@ import { createHash } from 'node:crypto';
 import type { ExportProgress, ExportResult } from '@pcu/contracts';
 import { Prisma, type PrismaClient } from '../../../generated/prisma/client.js';
 import { conflict } from '../../../shared/errors.js';
-import { deriveImageRenditionStorageKey } from '../../../shared/responsive-image.js';
-import { parseWebglEntryKey } from '../../webgl/paths.js';
 import type {
 	ClaimedExportJob,
 	ExportJobStatus,
@@ -98,78 +96,8 @@ function assertUniqueOwnership(projects: ExportProjectSnapshot[]): void {
 
 export function createExportRepository(
 	client: PrismaClient,
-	buckets?: { publicBucket: string; protectedBucket: string },
+	_buckets?: { publicBucket: string; protectedBucket: string },
 ) {
-	async function metric(scope: string, details: Record<string, unknown>): Promise<void> {
-		await client.migrationMetric.upsert({
-			where: { name_scope: { name: 'export_legacy_fallback', scope } },
-			create: { name: 'export_legacy_fallback', scope, value: 1n, lastObservedAt: new Date(), details: details as Prisma.InputJsonValue },
-			update: { value: { increment: 1n }, lastObservedAt: new Date(), details: details as Prisma.InputJsonValue },
-		});
-	}
-
-	async function legacyAssetObjects(asset: {
-		id: number;
-		kind: ExportSnapshotObject['kind'];
-		storageKey: string | null;
-		originalName: string;
-		mimeType: string;
-		sizeBytes: bigint;
-		updatedAt: Date;
-		width: number | null;
-		card480Height: number | null;
-		display960Height: number | null;
-	}): Promise<ExportSnapshotObject[]> {
-		if (!buckets) throw new Error('Export snapshot buckets are not configured');
-		if (!asset.storageKey) {
-			throw new ExportSnapshotInvariantError('MISSING', `Legacy asset ${asset.id} has no object key`);
-		}
-		const bucket = asset.kind === 'GAME' || asset.kind === 'VIDEO'
-			? buckets.protectedBucket
-			: buckets.publicBucket;
-		await metric(`asset:${asset.id}`, { kind: asset.kind });
-		const objects: ExportSnapshotObject[] = [{
-			id: `legacy-asset:${asset.id}:ORIGINAL`,
-			assetId: asset.id,
-			kind: asset.kind,
-			role: 'ORIGINAL',
-			bucket,
-			objectKey: asset.storageKey,
-			mimeType: asset.mimeType,
-			sizeBytes: asSafeNumber(asset.sizeBytes, `asset ${asset.id}`),
-			etag: null,
-			representationUpdatedAt: asset.updatedAt.toISOString(),
-			originalName: asset.originalName,
-			source: 'legacy',
-		}];
-		if (asset.kind === 'IMAGE' || asset.kind === 'POSTER' || asset.kind === 'THUMBNAIL') {
-			for (const rendition of [
-				{ role: 'CARD_480' as const, height: asset.card480Height },
-				{ role: 'DISPLAY_960' as const, height: asset.display960Height },
-			]) {
-				if (rendition.height === null) continue;
-				if (asset.width === null || rendition.height < 1) {
-					throw new ExportSnapshotInvariantError('MALFORMED', `Legacy rendition for asset ${asset.id} is malformed`);
-				}
-				objects.push({
-					id: `legacy-asset:${asset.id}:${rendition.role}`,
-					assetId: asset.id,
-					kind: asset.kind,
-					role: rendition.role,
-					bucket,
-					objectKey: deriveImageRenditionStorageKey(asset.storageKey, rendition.role),
-					mimeType: 'image/webp',
-					sizeBytes: null,
-					etag: null,
-					representationUpdatedAt: asset.updatedAt.toISOString(),
-					originalName: `${rendition.role.toLowerCase()}.webp`,
-					source: 'legacy',
-				});
-			}
-		}
-		return objects;
-	}
-
 	return {
 		async createJob(input: {
 			id: string;
@@ -267,14 +195,17 @@ export function createExportRepository(
 			snapshot: ExportSnapshot;
 			hash: string;
 		}> {
-			if (job.snapshot && job.snapshotHash) return { snapshot: job.snapshot, hash: job.snapshotHash };
-			if (!buckets) throw new Error('Export snapshot buckets are not configured');
+			if (job.snapshot && job.snapshotHash) {
+				if (job.snapshot.projects.some((project) => project.objects.some(
+					(object) => (object as { source: string }).source !== 'canonical',
+				))) throw new ExportSnapshotInvariantError('MALFORMED', 'Persisted export snapshot contains a non-canonical object');
+				return { snapshot: job.snapshot, hash: job.snapshotHash };
+			}
 			const rows = await client.project.findMany({
 				where: {
 					OR: [
 						{ assets: { some: { status: 'READY' } } },
 						{ currentWebglDeploymentId: { not: null } },
-						{ webglEntryKey: { not: '' } },
 					],
 					...(job.year === null ? {} : { exhibition: { year: job.year } }),
 				},
@@ -295,10 +226,6 @@ export function createExportRepository(
 			for (const project of rows) {
 				const objects: ExportSnapshotObject[] = [];
 				for (const asset of project.assets) {
-					if (asset.representations.length === 0) {
-						objects.push(...await legacyAssetObjects(asset));
-						continue;
-					}
 					const original = asset.representations.find((representation) => representation.role === 'ORIGINAL');
 					if (!original || original.state !== 'READY') {
 						throw new ExportSnapshotInvariantError('MISSING', `Asset ${asset.id} has no READY ORIGINAL representation`);
@@ -329,34 +256,6 @@ export function createExportRepository(
 						role: 'WEBGL_SOURCE',
 						representation,
 					}));
-				} else if (project.webglEntryKey) {
-					const parsed = parseWebglEntryKey(project.id, project.webglEntryKey);
-					if (!parsed) throw new ExportSnapshotInvariantError('MALFORMED', `Project ${project.id} has a malformed legacy WebGL pointer`);
-					const source = await client.gameUploadSession.findFirst({
-						where: {
-							projectId: project.id,
-							uploadKind: 'WEBGL',
-							status: 'COMPLETED',
-							OR: [{ storageKey: parsed.sourceKey }, { s3Key: parsed.sourceKey }],
-						},
-						orderBy: { updatedAt: 'desc' },
-					});
-					if (!source) throw new ExportSnapshotInvariantError('MISSING', `Project ${project.id} legacy WebGL source is not proven`);
-					await metric(`webgl:${project.id}`, { source: 'legacy-session' });
-					objects.push({
-						id: `legacy-webgl:${source.id}`,
-						assetId: -project.id,
-						kind: 'WEBGL',
-						role: 'WEBGL_SOURCE',
-						bucket: buckets.protectedBucket,
-						objectKey: parsed.sourceKey,
-						mimeType: 'application/zip',
-						sizeBytes: asSafeNumber(source.totalBytes, `legacy WebGL session ${source.id}`),
-						etag: null,
-						representationUpdatedAt: source.updatedAt.toISOString(),
-						originalName: 'webgl.zip',
-						source: 'legacy',
-					});
 				}
 				projects.push({
 					id: project.id,
@@ -390,15 +289,14 @@ export function createExportRepository(
 		async snapshotStillCurrent(snapshot: ExportSnapshot): Promise<boolean> {
 			const projectPointers = await client.project.findMany({
 				where: { id: { in: snapshot.projects.map((project) => project.id) } },
-				select: { id: true, currentWebglDeploymentId: true, webglEntryKey: true },
+				select: { id: true, currentWebglDeploymentId: true },
 			});
 			const pointerByProject = new Map(projectPointers.map((project) => [project.id, project]));
 			for (const project of snapshot.projects) {
 				const current = pointerByProject.get(project.id);
 				if (!current || current.currentWebglDeploymentId !== project.currentWebglDeploymentId) return false;
 			}
-			const canonical = snapshot.projects.flatMap((project) => project.objects)
-				.filter((object) => object.source === 'canonical');
+			const canonical = snapshot.projects.flatMap((project) => project.objects);
 			if (canonical.length > 0) {
 				const rows = await client.assetRepresentation.findMany({
 					where: { id: { in: canonical.map((object) => object.id) } },
@@ -410,38 +308,6 @@ export function createExportRepository(
 						|| current.objectKey !== object.objectKey
 						|| current.updatedAt.toISOString() !== object.representationUpdatedAt
 						|| asSafeNumber(current.sizeBytes, `representation ${current.id}`) !== object.sizeBytes) return false;
-				}
-			}
-			const legacyAssets = snapshot.projects.flatMap((project) => project.objects)
-				.filter((object) => object.source === 'legacy' && object.id.startsWith('legacy-asset:'));
-			if (legacyAssets.length > 0) {
-				const ids = [...new Set(legacyAssets.map((object) => object.assetId))];
-				const assets = await client.asset.findMany({ where: { id: { in: ids } } });
-				const byId = new Map(assets.map((asset) => [asset.id, asset]));
-				for (const object of legacyAssets) {
-					const asset = byId.get(object.assetId);
-					if (!asset || asset.status !== 'READY'
-						|| asset.updatedAt.toISOString() !== object.representationUpdatedAt
-						|| !asset.storageKey) return false;
-					const expectedKey = object.role === 'ORIGINAL'
-						? asset.storageKey
-						: object.role === 'CARD_480' || object.role === 'DISPLAY_960'
-							? deriveImageRenditionStorageKey(asset.storageKey, object.role)
-							: null;
-					if (expectedKey !== object.objectKey) return false;
-				}
-			}
-			const legacyWebgl = snapshot.projects.flatMap((project) => project.objects)
-				.filter((object) => object.source === 'legacy' && object.id.startsWith('legacy-webgl:'));
-			if (legacyWebgl.length > 0) {
-				const sessionIds = legacyWebgl.map((object) => object.id.slice('legacy-webgl:'.length));
-				const sessions = await client.gameUploadSession.findMany({ where: { id: { in: sessionIds } } });
-				const byId = new Map(sessions.map((session) => [session.id, session]));
-				for (const object of legacyWebgl) {
-					const session = byId.get(object.id.slice('legacy-webgl:'.length));
-					if (!session || session.status !== 'COMPLETED'
-						|| session.updatedAt.toISOString() !== object.representationUpdatedAt
-						|| (session.storageKey !== object.objectKey && session.s3Key !== object.objectKey)) return false;
 				}
 			}
 			return true;
