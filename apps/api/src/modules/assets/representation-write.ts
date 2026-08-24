@@ -2,6 +2,7 @@ import type { SavedImageRendition } from '../../application/upload-ports.js';
 import type {
 	AssetKind,
 	AssetPlaybackStatus,
+	AssetRepresentationRole,
 	Prisma,
 } from '../../generated/prisma/client.js';
 import { deriveImageRenditionStorageKey } from '../../shared/responsive-image.js';
@@ -24,6 +25,8 @@ export interface CanonicalAssetObjectWrite {
 	height?: number;
 	renditions?: readonly SavedImageRendition[];
 	isPublic: boolean;
+	/** WEBGL sources use the same canonical physical-identity writer with a domain-specific role. */
+	originalRole?: Extract<AssetRepresentationRole, 'ORIGINAL' | 'WEBGL_SOURCE'>;
 }
 
 export interface CanonicalAssetOwner {
@@ -35,7 +38,7 @@ function representationsFor(data: CanonicalAssetObjectWrite): Prisma.AssetRepres
 	const originalBucket = data.originalBucket ?? data.bucket;
 	if (!originalBucket) throw new Error('Canonical asset original bucket is required');
 	const representations: Prisma.AssetRepresentationCreateWithoutAssetInput[] = [{
-		role: 'ORIGINAL',
+		role: data.originalRole ?? 'ORIGINAL',
 		bucket: originalBucket,
 		objectKey: data.storageKey,
 		mimeType: data.mimeType,

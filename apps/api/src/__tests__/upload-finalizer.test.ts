@@ -108,4 +108,14 @@ describe('completed upload finalizer', () => {
 		expect(deps.logError).not.toHaveBeenCalled();
 		expect(deps.rollbackWebglPublicDeployment).not.toHaveBeenCalled();
 	});
+
+	it('wakes deletion for canonical replacements that have no legacy locator to return', async () => {
+		const deps = createDependencies();
+		deps.finalizeWebgl.mockResolvedValueOnce({ oldEntryKey: '', cleanupQueued: true });
+		const finalizer = createCompletedUploadFinalizer(deps);
+
+		await expect(finalizer.finalize(webglSession, { size: 8 }))
+			.resolves.toMatchObject({ status: 'COMPLETED' });
+		expect(deps.wakeDeletionWorker).toHaveBeenCalledOnce();
+	});
 });

@@ -195,7 +195,7 @@ function graphHarness(initialBans: string[] = [], maxHits = 30) {
 		assetsRepository: ports.assetsRepository,
 		bannedIpRepository: ports.bannedIpRepository,
 		projectAccess: ports.projectAccess,
-		storage: storage.storage,
+		protectedDownloadPresigner: { presign: storage.calls.presign },
 		downloadLimiter: limiter,
 		logger: testLogger,
 		clock: { now: () => new Date('2026-07-22T00:00:00.000Z') },
@@ -316,6 +316,7 @@ describe('assets/banned-IP production vertical slice', () => {
 				}),
 				factories: {
 					scheduler: () => scheduler.scheduler,
+					protectedDownloadPresigner: () => ({ presign: storage.calls.presign }),
 					routes: (_config, graph): BackendRoutes => ({
 						auth: emptyRoute,
 						devAuth: emptyRoute,
@@ -373,6 +374,7 @@ describe('assets/banned-IP production vertical slice', () => {
 				}),
 				factories: {
 					scheduler: () => scheduler.scheduler,
+					protectedDownloadPresigner: () => ({ presign: storage.calls.presign }),
 					routes: (_config, graph): BackendRoutes => ({
 						auth: emptyRoute,
 						devAuth: emptyRoute,

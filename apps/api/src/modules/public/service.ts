@@ -265,6 +265,9 @@ export async function getProjectDetail(
 	}
 
 	if (!project) throw notFound('Project not found');
+	// The expand database knows DRAFT for future submission aggregates, while
+	// Phase 1 public contracts intentionally remain PUBLISHED/ARCHIVED only.
+	if (project.status !== 'PUBLISHED' && project.status !== 'ARCHIVED') throw notFound('Project not found');
 	const images = (await Promise.all(project.assets
 		.filter((a) => a.isPublic === true && (a.kind === 'IMAGE' || a.kind === 'POSTER'))
 		.map(async (a) => {

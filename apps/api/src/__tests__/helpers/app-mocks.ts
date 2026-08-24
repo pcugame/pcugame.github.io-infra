@@ -44,6 +44,7 @@ export const defaultTestEnv = {
 	UPLOAD_SESSION_TTL_MINUTES: 1440,
 	S3_ENDPOINT: 'http://localhost:3900',
 	S3_PUBLIC_SIGNING_ENDPOINT: 'http://localhost:3901',
+	S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: 'http://localhost:3906',
 	S3_REGION: 'garage',
 	S3_ACCESS_KEY_ID: 'test',
 	S3_SECRET_ACCESS_KEY: 'test',

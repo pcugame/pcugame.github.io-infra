@@ -16,8 +16,44 @@ enum UserRole {
 }
 
 enum ProjectStatus {
+  DRAFT
   PUBLISHED
   ARCHIVED
+}
+
+enum ProjectSubmissionState {
+  PENDING
+  FINALIZING
+  PUBLISHED
+  CANCELLED
+}
+
+enum ProjectSubmissionItemState {
+  EXPECTED
+  UPLOADING
+  VERIFYING
+  READY
+  FAILED
+  CANCELLED
+}
+
+enum ProjectSubmissionPlaybackState {
+  NONE
+  READY
+  FAILED
+}
+
+enum ProjectPublicationJobState {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum StorageVisibility {
+  PROTECTED
+  PUBLIC
 }
 
 enum AssetKind {
@@ -161,6 +197,7 @@ model User {
   gameUploads  GameUploadSession[]  @relation("UserGameUploads")
   assetUploads AssetUploadSession[] @relation("UserAssetUploads")
   exportJobs   ExportJob[]          @relation("UserExportJobs")
+  submissions  ProjectSubmission[]  @relation("UserProjectSubmissions")
 
   @@map("users")
 }
@@ -223,6 +260,8 @@ model Project {
   activeGameUploads GameUploadActiveSession[] @relation("ProjectActiveGameUploads")
   webglDeployments  WebglDeployment[]         @relation("ProjectWebglDeployments")
   assetUploads      AssetUploadSession[]      @relation("ProjectAssetUploads")
+  submission        ProjectSubmission?
+  publicationJob    ProjectPublicationJob?
 
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
   @@index([exhibitionId, status, sortOrder])
@@ -278,6 +317,7 @@ model Asset {
   representations    AssetRepresentation[] @relation("AssetRepresentations")
   expectedByUploads  AssetUploadSession[]  @relation("AssetUploadExpectedTarget")
   resultOfUploads    AssetUploadSession[]  @relation("AssetUploadResult")
+  submissionItems    ProjectSubmissionItem[] @relation("ProjectSubmissionItemAsset")
 
   @@index([projectId, kind, status])
   @@index([exhibitionId, kind, status])
@@ -288,12 +328,26 @@ model Asset {
   @@map("assets")
 }
 
+/// Phase-1 registry seeded by the release control plane. Foreign-key
+/// enforcement is intentionally deferred to the Phase-2 contract migration.
+model StorageBucket {
+  bucket     String            @id
+  visibility StorageVisibility @unique
+  createdAt  DateTime          @default(now()) @map("created_at")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  @@index([visibility], map: "storage_buckets_visibility_idx")
+  @@map("storage_buckets")
+}
+
 model AssetRepresentation {
   id                      String                   @id @default(uuid())
   assetId                 Int                      @map("asset_id")
   role                    AssetRepresentationRole
   bucket                  String
   objectKey               String                   @map("object_key")
+  publicationBucket       String?                  @map("publication_bucket")
+  publicationObjectKey    String?                  @map("publication_object_key")
   mimeType                String                   @default("") @map("mime_type")
   sizeBytes               BigInt                   @default(0) @map("size_bytes")
   checksumAlgorithm       String?                  @map("checksum_algorithm")
@@ -311,8 +365,10 @@ model AssetRepresentation {
   asset            Asset                @relation("AssetRepresentations", fields: [assetId], references: [id], onDelete: Cascade)
   webglDeployments WebglDeployment[]    @relation("WebglDeploymentSourceRepresentation")
   resultOfUploads  AssetUploadSession[] @relation("AssetUploadResultRepresentation")
+  submissionItems  ProjectSubmissionItem[] @relation("ProjectSubmissionItemRepresentation")
 
   @@unique([assetId, role], name: "asset_representation_asset_role", map: "asset_representations_asset_id_role_key")
+  @@unique([publicationBucket, publicationObjectKey], name: "asset_representation_publication_target", map: "asset_representations_publication_target_key")
   @@index([bucket, objectKey], map: "asset_representations_bucket_object_key_idx")
   @@index([state], map: "asset_representations_state_idx")
   @@index([sourceIdentityAlgorithm, sourceIdentity], map: "asset_representations_source_identity_idx")
@@ -327,6 +383,10 @@ model WebglDeployment {
   publicPrefix           String               @map("public_prefix")
   entryObjectKey         String               @map("entry_object_key")
   objectManifest         Json?                @map("object_manifest")
+  stagingBucket          String?              @map("staging_bucket")
+  stagingPrefix          String?              @map("staging_prefix")
+  stagingEntryObjectKey  String?              @map("staging_entry_object_key")
+  stagingObjectManifest  Json?                @map("staging_object_manifest")
   state                  WebglDeploymentState @default(PENDING)
   error                  String?
   createdAt              DateTime             @default(now()) @map("created_at")
@@ -336,6 +396,7 @@ model WebglDeployment {
   sourceRepresentation AssetRepresentation @relation("WebglDeploymentSourceRepresentation", fields: [sourceRepresentationId], references: [id], onDelete: Cascade)
   currentForProject    Project?            @relation("ProjectCurrentWebglDeployment")
   reservedForUpload    AssetUploadSession? @relation("AssetUploadReservedWebglDeployment")
+  submissionItems      ProjectSubmissionItem[] @relation("ProjectSubmissionItemWebglDeployment")
 
   @@index([projectId, state], map: "webgl_deployments_project_id_state_idx")
   @@index([sourceRepresentationId], map: "webgl_deployments_source_representation_id_idx")
@@ -381,6 +442,7 @@ model AssetUploadSession {
   resultAssetId                Int?                    @unique @map("result_asset_id")
   resultRepresentationId       String?                 @unique @map("result_representation_id")
   reservedWebglDeploymentId    String?                 @unique @map("reserved_webgl_deployment_id")
+  submissionItemId             String?                 @unique @map("submission_item_id")
   expiresAt                    DateTime                @map("expires_at")
   completedAt                  DateTime?               @map("completed_at")
   createdAt                    DateTime                @default(now()) @map("created_at")
@@ -393,6 +455,7 @@ model AssetUploadSession {
   resultAsset             Asset?               @relation("AssetUploadResult", fields: [resultAssetId], references: [id], onDelete: SetNull)
   resultRepresentation    AssetRepresentation? @relation("AssetUploadResultRepresentation", fields: [resultRepresentationId], references: [id], onDelete: SetNull)
   reservedWebglDeployment WebglDeployment?     @relation("AssetUploadReservedWebglDeployment", fields: [reservedWebglDeploymentId], references: [id], onDelete: SetNull)
+  submissionItem          ProjectSubmissionItem? @relation("ProjectSubmissionItemUpload", fields: [submissionItemId], references: [id], onDelete: SetNull)
   abortTasks              MultipartAbortTask[] @relation("AssetUploadAbortTasks")
 
   // Partial unique index `asset_upload_sessions_active_project_kind_key` on
@@ -407,6 +470,111 @@ model AssetUploadSession {
   @@index([expectedTargetAssetId, expectedTargetAssetUpdatedAt], map: "asset_upload_sessions_expected_target_fence_idx")
   @@index([userId, partUrlIssueWindowStartedAt], map: "asset_upload_sessions_part_url_issue_window_idx")
   @@map("asset_upload_sessions")
+}
+
+/// Durable aggregate guarding first publication until every selected direct
+/// upload has reached a canonical READY result.
+model ProjectSubmission {
+  id          String                 @id @default(uuid())
+  projectId   Int                    @unique @map("project_id")
+  actorId     Int                    @map("actor_id")
+  state       ProjectSubmissionState @default(PENDING)
+  publishedAt DateTime?              @map("published_at")
+  cancelledAt DateTime?              @map("cancelled_at")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+
+  project        Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  actor          User                    @relation("UserProjectSubmissions", fields: [actorId], references: [id], onDelete: Restrict)
+  items          ProjectSubmissionItem[]
+  publicationJob ProjectPublicationJob?
+
+  @@unique([id, projectId], name: "project_submission_identity", map: "project_submissions_id_project_id_key")
+  @@index([actorId, state], map: "project_submissions_actor_state_idx")
+  @@index([state, updatedAt], map: "project_submissions_state_updated_at_idx")
+  @@map("project_submissions")
+}
+
+model ProjectSubmissionItem {
+  id                      String                         @id @default(uuid())
+  submissionId            String                         @map("submission_id")
+  kind                    AssetUploadKind
+  slot                    String
+  clientToken             String                         @map("client_token")
+  required                Boolean                        @default(true)
+  state                   ProjectSubmissionItemState     @default(EXPECTED)
+  boundGeneration         Int?                           @map("bound_generation")
+  resultAssetId           Int?                           @map("result_asset_id")
+  resultRepresentationId  String?                        @map("result_representation_id")
+  resultWebglDeploymentId String?                        @map("result_webgl_deployment_id")
+  failureReason           String?                        @map("failure_reason")
+  playbackState           ProjectSubmissionPlaybackState @default(NONE) @map("playback_state")
+  playbackError           String?                        @map("playback_error")
+  createdAt               DateTime                       @default(now()) @map("created_at")
+  updatedAt               DateTime                       @updatedAt @map("updated_at")
+
+  projectSubmission     ProjectSubmission    @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  uploadSession         AssetUploadSession?  @relation("ProjectSubmissionItemUpload")
+  resultAsset           Asset?               @relation("ProjectSubmissionItemAsset", fields: [resultAssetId], references: [id], onDelete: SetNull)
+  resultRepresentation  AssetRepresentation? @relation("ProjectSubmissionItemRepresentation", fields: [resultRepresentationId], references: [id], onDelete: SetNull)
+  resultWebglDeployment WebglDeployment?     @relation("ProjectSubmissionItemWebglDeployment", fields: [resultWebglDeploymentId], references: [id], onDelete: SetNull)
+
+  @@unique([submissionId, slot], name: "project_submission_item_slot", map: "project_submission_items_submission_id_slot_key")
+  @@unique([submissionId, clientToken], name: "project_submission_item_client_token", map: "project_submission_items_submission_id_client_token_key")
+  @@index([submissionId, state], map: "project_submission_items_submission_state_idx")
+  @@index([resultAssetId], map: "project_submission_items_result_asset_idx")
+  @@index([resultRepresentationId], map: "project_submission_items_result_representation_idx")
+  @@index([resultWebglDeploymentId], map: "project_submission_items_result_webgl_idx")
+  @@map("project_submission_items")
+}
+
+model ProjectPublicationJob {
+  id           String                     @id @default(uuid())
+  projectId    Int                        @unique @map("project_id")
+  submissionId String                     @unique @map("submission_id")
+  state        ProjectPublicationJobState @default(PENDING)
+  plan         Json
+  claimToken   String?                    @map("claim_token")
+  claimUntil   DateTime?                  @map("claim_until")
+  attemptCount Int                        @default(0) @map("attempt_count")
+  lastError    String?                    @map("last_error")
+  completedAt  DateTime?                  @map("completed_at")
+  createdAt    DateTime                   @default(now()) @map("created_at")
+  updatedAt    DateTime                   @updatedAt @map("updated_at")
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  submission ProjectSubmission @relation(fields: [submissionId, projectId], references: [id, projectId], onDelete: Cascade)
+
+  @@unique([submissionId, projectId], name: "project_publication_job_submission_identity", map: "project_publication_jobs_submission_id_project_id_key")
+  @@index([state, claimUntil, createdAt], map: "project_publication_jobs_claim_idx")
+  @@map("project_publication_jobs")
+}
+
+/// Phase-1 durable ledger for materialized object relocation. The Phase-2
+/// contract migration consumes and removes it after pointer commit.
+model CanonicalObjectRelocation {
+  id                   String   @id
+  workKind             String   @map("work_kind")
+  workRef              String   @map("work_ref")
+  role                 String
+  sourceBucket         String   @map("source_bucket")
+  sourceObjectKey      String   @map("source_object_key")
+  destinationBucket    String   @map("destination_bucket")
+  destinationObjectKey String   @map("destination_object_key")
+  sizeBytes            BigInt   @map("size_bytes")
+  mimeType             String   @map("mime_type")
+  checksumSha256       String?  @map("checksum_sha256")
+  state                String   @default("PREPARED")
+  materializedAt       DateTime? @map("materialized_at")
+  committedAt          DateTime? @map("committed_at")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@unique([sourceBucket, sourceObjectKey, destinationBucket, destinationObjectKey], name: "canonical_object_relocation_identity", map: "canonical_object_relocations_identity_key")
+  @@index([state, updatedAt], map: "canonical_object_relocations_state_idx")
+  @@index([sourceBucket, sourceObjectKey], map: "canonical_object_relocations_source_idx")
+  @@index([destinationBucket, destinationObjectKey], map: "canonical_object_relocations_destination_idx")
+  @@map("canonical_object_relocations")
 }
 
 /// Durable control-plane request consumed only by the export processing role.

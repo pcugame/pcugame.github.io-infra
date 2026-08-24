@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist-release",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": [
+    "scripts/backfill-canonical-assets.ts",
+    "scripts/preflight-canonical-contract.ts",
+    "scripts/release-migrate.ts",
+    "scripts/snapshot-garage-inventory.ts",
+    "scripts/verify-cutover-report.ts"
+  ],
+  "exclude": ["node_modules", "dist", "dist-release", "src/**/*.test.ts", "src/__tests__/**"]
+}

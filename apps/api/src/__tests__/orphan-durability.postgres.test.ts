@@ -733,11 +733,17 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			completionClaimToken: 'game-finalize-owner',
 		}, { size: 4 })).resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
 		await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))
-			.resolves.toMatchObject({ status: 'COMPLETED', storageKey: newKey });
-		await expect(client.asset.findFirstOrThrow({
+			.resolves.toMatchObject({ status: 'COMPLETED', storageKey: null });
+		const canonicalGame = await client.asset.findFirstOrThrow({
 			where: { projectId: project.id, kind: 'GAME', status: 'READY' },
-		}))
-			.resolves.toMatchObject({ storageKey: newKey });
+			include: { representations: true },
+		});
+		expect(canonicalGame).toMatchObject({ storageKey: null, playbackStorageKey: null });
+		expect(canonicalGame.representations).toEqual([
+			expect.objectContaining({
+				role: 'ORIGINAL', bucket: protectedBucket, objectKey: newKey, state: 'READY',
+			}),
+		]);
 		await expect(client.orphanObject.count({ where: { bucket: protectedBucket, storageKey: oldKey } }))
 			.resolves.toBe(1);
 		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
@@ -797,9 +803,16 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				orphan_bucket_storage_key: { bucket: protectedBucket, storageKey: oldKey },
 			},
 		})).resolves.toMatchObject({ state: 'PENDING', reason: 'generic-game-replace' });
-		await expect(client.asset.findFirstOrThrow({
+		const canonicalGame = await client.asset.findFirstOrThrow({
 			where: { projectId: project.id, kind: 'GAME', status: 'READY' },
-		})).resolves.toMatchObject({ storageKey: newKey });
+			include: { representations: true },
+		});
+		expect(canonicalGame).toMatchObject({ storageKey: null, playbackStorageKey: null });
+		expect(canonicalGame.representations).toEqual([
+			expect.objectContaining({
+				role: 'ORIGINAL', bucket: protectedBucket, objectKey: newKey, state: 'READY',
+			}),
+		]);
 	});
 
 	it('commits project deletion with exact and WebGL-prefix outbox rows before one coalesced wake', async () => {
@@ -851,7 +864,44 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		const oldDeployment = randomUUID();
 		const newDeployment = randomUUID();
 		const oldEntry = `webgl/${project.id}/${oldDeployment}/site/index.html`;
-		await client.project.update({ where: { id: project.id }, data: { webglEntryKey: oldEntry } });
+		const oldKeys = parseWebglEntryKey(project.id, oldEntry)!;
+		const oldSourceAsset = await client.asset.create({
+			data: {
+				projectId: project.id,
+				kind: 'WEBGL',
+				status: 'READY',
+				originalName: 'backfilled-webgl.zip',
+				mimeType: 'application/zip',
+				sizeBytes: 4n,
+				representations: {
+					create: {
+						role: 'WEBGL_SOURCE',
+						bucket: protectedBucket,
+						objectKey: oldKeys.sourceKey,
+						mimeType: 'application/zip',
+						sizeBytes: 4n,
+						state: 'READY',
+					},
+				},
+			},
+			include: { representations: true },
+		});
+		const oldSourceRepresentation = oldSourceAsset.representations[0]!;
+		await client.webglDeployment.create({
+			data: {
+				id: oldDeployment,
+				projectId: project.id,
+				sourceRepresentationId: oldSourceRepresentation.id,
+				publicBucket,
+				publicPrefix: oldKeys.sitePrefix,
+				entryObjectKey: oldKeys.entryKey,
+				state: 'READY',
+			},
+		});
+		await client.project.update({
+			where: { id: project.id },
+			data: { webglEntryKey: oldEntry, currentWebglDeploymentId: oldDeployment },
+		});
 		const newSource = `webgl/${project.id}/${newDeployment}/source.zip`;
 		const deployment = parseWebglSourceKey(project.id, newSource)!;
 		const session = await client.gameUploadSession.create({
@@ -900,11 +950,38 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			s3Key: newSource,
 			completionClaimToken: 'webgl-finalize-owner',
 		}, { size: 4 })).resolves.toMatchObject({ status: 'COMPLETED', webglUrl: '/webgl' });
-		await expect(client.project.findUniqueOrThrow({ where: { id: project.id } }))
-			.resolves.toMatchObject({ webglEntryKey: deployment.entryKey });
+		const canonicalProject = await client.project.findUniqueOrThrow({
+			where: { id: project.id },
+			include: {
+				currentWebglDeployment: {
+					include: { sourceRepresentation: { include: { asset: true } } },
+				},
+			},
+		});
+		expect(canonicalProject).toMatchObject({
+			webglEntryKey: oldEntry,
+			currentWebglDeploymentId: deployment.deploymentId,
+		});
+		expect(canonicalProject.currentWebglDeployment).toMatchObject({
+			id: deployment.deploymentId,
+			publicBucket,
+			publicPrefix: deployment.sitePrefix,
+			entryObjectKey: deployment.entryKey,
+			state: 'READY',
+			sourceRepresentation: {
+				role: 'WEBGL_SOURCE',
+				bucket: protectedBucket,
+				objectKey: newSource,
+				state: 'READY',
+				asset: { kind: 'WEBGL', storageKey: null, playbackStorageKey: null },
+			},
+		});
 		await expect(client.gameUploadSession.findUniqueOrThrow({ where: { id: session.id } }))
-			.resolves.toMatchObject({ status: 'COMPLETED', storageKey: newSource });
-		const oldKeys = parseWebglEntryKey(project.id, oldEntry)!;
+			.resolves.toMatchObject({ status: 'COMPLETED', storageKey: null });
+		await expect(client.webglDeployment.findUniqueOrThrow({ where: { id: oldDeployment } }))
+			.resolves.toMatchObject({ state: 'FAILED' });
+		await expect(client.asset.findUniqueOrThrow({ where: { id: oldSourceAsset.id } }))
+			.resolves.toMatchObject({ status: 'DELETED', storageKey: null });
 		await expect(client.orphanObject.count({
 			where: {
 				OR: [
@@ -965,8 +1042,16 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			actor: { id: userId, role: 'ADMIN' },
 			parts,
 		})).resolves.toMatchObject({ id: exhibition.id });
-		await expect(client.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
-			.resolves.toMatchObject({ posterStorageKey: newKey });
+		const canonicalExhibition = await client.exhibition.findUniqueOrThrow({
+			where: { id: exhibition.id },
+			include: { poster: { include: { representations: true } } },
+		});
+		expect(canonicalExhibition).toMatchObject({ posterStorageKey: null });
+		expect(canonicalExhibition.poster?.representations).toEqual([
+			expect.objectContaining({
+				role: 'ORIGINAL', bucket: publicBucket, objectKey: newKey, state: 'READY',
+			}),
+		]);
 		await expect(client.orphanObject.count({ where: { bucket: publicBucket, storageKey: oldKey } }))
 			.resolves.toBe(1);
 

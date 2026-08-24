@@ -177,6 +177,48 @@ describe('authoritative object reference inventory', () => {
 			{ bucket: 'public', targetKind: 'PREFIX', key: 'a/b/c/' },
 		)).toBe(true);
 	});
+
+	it('uses the canonical current WebGL identity and ignores a stale legacy fallback pointer', async () => {
+		const canonicalDeploymentId = '22222222-2222-4222-8222-222222222222';
+		const client = referenceClient();
+		client.project.findMany.mockResolvedValue([{
+			id: 7,
+			webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
+			currentWebglDeploymentId: canonicalDeploymentId,
+			currentWebglDeployment: {
+				id: canonicalDeploymentId,
+				state: 'READY',
+				publicBucket: 'public',
+				publicPrefix: `webgl/7/${canonicalDeploymentId}/site/`,
+				entryObjectKey: `webgl/7/${canonicalDeploymentId}/site/index.html`,
+				sourceRepresentation: {
+					id: 'webgl-source-representation',
+					state: 'READY',
+					bucket: 'protected',
+					objectKey: `webgl/7/${canonicalDeploymentId}/source.zip`,
+				},
+			},
+		}]);
+		const inventory = await collectObjectReferences(
+			client as never,
+			{ publicBucket: 'public', protectedBucket: 'protected' },
+			{ error: vi.fn() },
+		);
+
+		expect(inventory.references).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				bucket: 'public', targetKind: 'PREFIX',
+				key: `webgl/7/${canonicalDeploymentId}/site/`,
+			}),
+			expect.objectContaining({
+				bucket: 'protected', targetKind: 'EXACT',
+				key: `webgl/7/${canonicalDeploymentId}/source.zip`,
+			}),
+		]));
+		expect(inventory.references).not.toContainEqual(expect.objectContaining({
+			key: `webgl/7/${deploymentId}/site/`,
+		}));
+	});
 });
 
 function emptyReferenceModels() {

@@ -44,11 +44,11 @@ export function createCompletedUploadFinalizer(deps: {
 	): Promise<void>;
 	finalizeGame(
 		session: CompletedUploadSession,
-	): Promise<{ oldStorageKey: string | null; oldPlaybackStorageKey: string | null }>;
+	): Promise<{ oldStorageKey: string | null; oldPlaybackStorageKey: string | null; cleanupQueued?: boolean }>;
 	finalizeWebgl(
 		session: CompletedUploadSession,
 		deployment: WebglDeploymentKeys,
-	): Promise<{ oldEntryKey: string }>;
+	): Promise<{ oldEntryKey: string; cleanupQueued?: boolean }>;
 	wakeDeletionWorker(): void;
 	webglUrl(projectId: number): string;
 	logError(context: Record<string, unknown>, message: string): void;
@@ -90,7 +90,7 @@ export function createCompletedUploadFinalizer(deps: {
 					await options.assertClaimOwned?.();
 					const result = await deps.finalizeWebgl(session, deployment);
 					pointerFinalized = true;
-					if (result.oldEntryKey && result.oldEntryKey !== deployment.entryKey) {
+					if (result.cleanupQueued || (result.oldEntryKey && result.oldEntryKey !== deployment.entryKey)) {
 						deps.wakeDeletionWorker();
 					}
 					return {
@@ -140,7 +140,7 @@ export function createCompletedUploadFinalizer(deps: {
 			);
 			await options.assertClaimOwned?.();
 			const result = await deps.finalizeGame(session);
-			if (result.oldStorageKey || result.oldPlaybackStorageKey) deps.wakeDeletionWorker();
+			if (result.cleanupQueued || result.oldStorageKey || result.oldPlaybackStorageKey) deps.wakeDeletionWorker();
 			return {
 				status: 'COMPLETED',
 				storageKey: session.s3Key,

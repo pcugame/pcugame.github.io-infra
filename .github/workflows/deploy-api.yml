@@ -60,6 +60,8 @@ jobs:
           file: apps/api/Dockerfile
           push: true
           platforms: ${{ vars.API_TARGET_PLATFORMS || 'linux/amd64' }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest
             ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:sha-${{ github.sha }}

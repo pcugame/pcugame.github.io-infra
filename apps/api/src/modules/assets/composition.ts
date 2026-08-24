@@ -1,6 +1,7 @@
 import type { AssetKind } from '@pcu/contracts';
 import type { FastifyPluginAsync } from 'fastify';
-import type { AppLogger, Clock, ObjectStorage } from '../../application/ports.js';
+import type { AppLogger, Clock } from '../../application/ports.js';
+import type { ProtectedDownloadPresigner } from '../../lib/storage.js';
 import type { DownloadRateLimiter } from '../../shared/download-rate-limit.js';
 import type { Env } from '../../config/env.js';
 import type { createProjectAccessService } from '../admin/project-access.service.js';
@@ -29,7 +30,7 @@ export interface AssetsBannedProductionDependencies {
 	};
 	bannedIpRepository: BannedIpServiceDependencies['repository'];
 	projectAccess: ReturnType<typeof createProjectAccessService>;
-	storage: ObjectStorage;
+	protectedDownloadPresigner: ProtectedDownloadPresigner;
 	downloadLimiter: DownloadRateLimiter;
 	logger: AppLogger;
 	clock: Clock;
@@ -49,7 +50,7 @@ export function createAssetsBannedProductionGraph(
 	const assetsService = createAssetsService({
 		protectedBucket: deps.config.S3_BUCKET_PROTECTED,
 		presignTtlSec: deps.config.S3_PRESIGN_TTL_SEC,
-		presign: (bucket, key, options) => deps.storage.presign(bucket, key, options),
+		presign: (bucket, key, options) => deps.protectedDownloadPresigner.presign(bucket, key, options),
 		clock: deps.clock,
 		bucketForKind: (kind: AssetKind) => (
 			kind === 'GAME' || kind === 'VIDEO'

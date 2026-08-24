@@ -1,4 +1,5 @@
-import { parseWebglEntryKey } from '../webgl/paths.js';
+import { createHash } from 'node:crypto';
+import { createCanonicalWebglPublicKeys, parseWebglEntryKey } from '../webgl/paths.js';
 import type {
 	CanonicalApplyOutcome,
 	CanonicalAssetPlan,
@@ -12,6 +13,9 @@ import type {
 	CanonicalExhibitionPlan,
 	CanonicalFailureCode,
 	CanonicalObjectHeadVerifier,
+	CanonicalObjectMaterializer,
+	CanonicalObjectCopy,
+	CanonicalObjectRelocation,
 	CanonicalRepresentationPlan,
 	CanonicalWebglPlan,
 	CanonicalWorkRef,
@@ -26,6 +30,18 @@ const BROWSER_PLAYABLE_VIDEO_MIMES = new Set(['video/mp4', 'video/webm', 'video/
 const PHASES = ['assets', 'exhibitions', 'webgl'] as const;
 const WEBGL_MANIFEST_PAGE_SIZE = 500;
 const MAX_WEBGL_MANIFEST_OBJECTS = 10_000;
+const SAFE_EXTENSION_BY_MIME = new Map([
+	['application/zip', 'zip'],
+	['application/x-zip-compressed', 'zip'],
+	['application/pdf', 'pdf'],
+	['image/jpeg', 'jpg'],
+	['image/png', 'png'],
+	['image/webp', 'webp'],
+	['video/mp4', 'mp4'],
+	['video/quicktime', 'mov'],
+	['video/webm', 'webm'],
+	['video/ogg', 'ogv'],
+]);
 
 class CanonicalPlanError extends Error {
 	constructor(
@@ -80,6 +96,112 @@ function representationFromHead(
 		width: dimensions.width,
 		height: dimensions.height,
 	};
+}
+
+function stableGeneration(representation: CanonicalRepresentationPlan): string {
+	if (!representation.sourceIdentityAlgorithm || !representation.sourceIdentity) {
+		throw new CanonicalPlanError(
+			'SOURCE_NOT_PROVEN',
+			`${representation.role} source lacks immutable checksum/ETag provenance`,
+		);
+	}
+	return createHash('sha256')
+		.update(representation.sourceIdentityAlgorithm)
+		.update('\0')
+		.update(representation.sourceIdentity)
+		.digest('hex')
+		.slice(0, 32);
+}
+
+function safeExtension(mimeType: string): string {
+	const extension = SAFE_EXTENSION_BY_MIME.get(normalizedMime(mimeType));
+	if (!extension) {
+		throw new CanonicalPlanError('MALFORMED_LEGACY_ROW', `unsupported canonical object MIME: ${mimeType}`);
+	}
+	return extension;
+}
+
+function representationDestination(input: {
+	ownerPrefix: string;
+	bucket: string;
+	representation: CanonicalRepresentationPlan;
+}): string {
+	return `${input.ownerPrefix}/${input.representation.role.toLowerCase()}/${stableGeneration(input.representation)}.${safeExtension(input.representation.mimeType)}`;
+}
+
+function objectCopyForRepresentation(
+	representation: CanonicalRepresentationPlan,
+	destinationBucket: string,
+	destinationKey: string,
+): CanonicalObjectCopy {
+	return {
+		sourceBucket: representation.bucket,
+		sourceKey: representation.objectKey,
+		destinationBucket,
+		destinationKey,
+		expected: {
+			size: representation.sizeBytes,
+			mimeType: representation.mimeType,
+			...(representation.etag ? { etag: representation.etag } : {}),
+			...(representation.checksumAlgorithm?.toUpperCase() === 'SHA256' && representation.checksum
+				? { checksumSha256: representation.checksum }
+				: {}),
+		},
+	};
+}
+
+async function materializeRepresentationNamespace(input: {
+	representations: CanonicalRepresentationPlan[];
+	destinationBucket: string;
+	ownerPrefix: string;
+	materializer: CanonicalObjectMaterializer;
+	repository: CanonicalBackfillRepository;
+	workKind: 'asset' | 'exhibition';
+	workRef: string;
+}): Promise<{ representations: CanonicalRepresentationPlan[]; created: number; reused: number; relocations: CanonicalObjectRelocation[] }> {
+	let created = 0;
+	let reused = 0;
+	const relocations: CanonicalObjectRelocation[] = [];
+	const representations: CanonicalRepresentationPlan[] = [];
+	for (const source of input.representations) {
+		const rolePrefix = `${input.ownerPrefix}/${source.role.toLowerCase()}/`;
+		if (source.bucket === input.destinationBucket && source.objectKey.startsWith(rolePrefix)) {
+			representations.push(source);
+			continue;
+		}
+		const destinationKey = representationDestination({
+			ownerPrefix: input.ownerPrefix,
+			bucket: input.destinationBucket,
+			representation: source,
+		});
+		const copy = objectCopyForRepresentation(source, input.destinationBucket, destinationKey);
+		const prepared = {
+			workKind: input.workKind,
+			workRef: input.workRef,
+			role: source.role,
+			copy,
+		};
+		await input.repository.prepareObjectRelocation(prepared);
+		const outcome = await input.materializer.ensureCanonicalObjectCopy(copy, {
+			beforeCreate: (target) => input.repository.prepareMaterializationCleanup(target),
+		});
+		const relocation = { ...prepared, verified: outcome.head };
+		await input.repository.markObjectRelocationMaterialized(relocation);
+		created += Number(outcome.created);
+		reused += Number(!outcome.created);
+		relocations.push(relocation);
+		const canonical = representationFromHead(
+			source.role,
+			input.destinationBucket,
+			destinationKey,
+			outcome.head,
+			{ width: source.width, height: source.height },
+		);
+		canonical.sourceIdentityAlgorithm = 'MIGRATION_COPY_SHA256';
+		canonical.sourceIdentity = outcome.head.checksumSha256 ?? canonical.sourceIdentity;
+		representations.push(canonical);
+	}
+	return { representations, created, reused, relocations };
 }
 
 function expectedBucketForAsset(row: LegacyAssetRow, buckets: CanonicalBuckets): string {
@@ -168,6 +290,7 @@ export async function planLegacyAsset(
 	verify: VerifyHead,
 	buckets: CanonicalBuckets,
 ): Promise<CanonicalAssetPlan | null> {
+	if (row.canonicalBackfillComplete) return null;
 	if (row.status !== 'READY' || !row.storageKey) return null;
 	const bucket = expectedBucketForAsset(row, buckets);
 	assertPositiveSize(row.sizeBytes, `asset ${row.id}`);
@@ -215,12 +338,22 @@ export async function planLegacyAsset(
 		}
 	}
 
+	let imageRepair: CanonicalAssetPlan['imageRepair'] = null;
 	if (IMAGE_KINDS.has(row.kind)) {
+		const generation = stableGeneration(representations[0]!);
+		const missing: NonNullable<CanonicalAssetPlan['imageRepair']>['missing'] = [];
 		for (const rendition of [
-			{ role: 'CARD_480' as const, marker: row.card480Height, width: 480, profile: 'card-480' as const },
-			{ role: 'DISPLAY_960' as const, marker: row.display960Height, width: 960, profile: 'display-960' as const },
+			{ role: 'CARD_480' as const, marker: row.card480Height, width: 480 as const, profile: 'card-480' as const },
+			{ role: 'DISPLAY_960' as const, marker: row.display960Height, width: 960 as const, profile: 'display-960' as const },
 		]) {
-			if (rendition.marker === null) continue;
+			if (rendition.marker === null) {
+				missing.push({
+					role: rendition.role,
+					width: rendition.width,
+					objectKey: `public/images/${row.id}/${rendition.role.toLowerCase()}/${generation}.webp`,
+				});
+				continue;
+			}
 			if (!Number.isInteger(rendition.marker) || rendition.marker <= 0) {
 				throw new CanonicalPlanError('MALFORMED_LEGACY_ROW', `asset ${row.id} has invalid rendition dimensions`);
 			}
@@ -231,8 +364,17 @@ export async function planLegacyAsset(
 				{ width: rendition.width, height: rendition.marker },
 			));
 		}
+		if (missing.length > 0) {
+			imageRepair = {
+				sourceBucket: bucket,
+				sourceKey: row.storageKey,
+				sourceMimeType: row.mimeType,
+				sourceSizeBytes: row.sizeBytes,
+				missing,
+			};
+		}
 	}
-	return { row, representations };
+	return { row, representations, imageRepair };
 }
 
 export async function planLegacyExhibition(
@@ -250,11 +392,20 @@ export async function planLegacyExhibition(
 		'ORIGINAL', buckets.publicBucket, row.posterStorageKey, original,
 		{ width: row.posterWidth, height: row.posterHeight },
 	)];
+	const generation = stableGeneration(representations[0]!);
+	const missing: NonNullable<CanonicalExhibitionPlan['imageRepair']>['missing'] = [];
 	for (const rendition of [
-		{ role: 'CARD_480' as const, marker: row.posterCard480Height, width: 480, profile: 'card-480' as const },
-		{ role: 'DISPLAY_960' as const, marker: row.posterDisplay960Height, width: 960, profile: 'display-960' as const },
+		{ role: 'CARD_480' as const, marker: row.posterCard480Height, width: 480 as const, profile: 'card-480' as const },
+		{ role: 'DISPLAY_960' as const, marker: row.posterDisplay960Height, width: 960 as const, profile: 'display-960' as const },
 	]) {
-		if (rendition.marker === null) continue;
+		if (rendition.marker === null) {
+			missing.push({
+				role: rendition.role,
+				width: rendition.width,
+				objectKey: `public/images/exhibitions/${row.id}/${rendition.role.toLowerCase()}/${generation}.webp`,
+			});
+			continue;
+		}
 		if (!Number.isInteger(rendition.marker) || rendition.marker <= 0) {
 			throw new CanonicalPlanError('MALFORMED_LEGACY_ROW', `exhibition ${row.id} has invalid rendition dimensions`);
 		}
@@ -265,7 +416,17 @@ export async function planLegacyExhibition(
 			{ width: rendition.width, height: rendition.marker },
 		));
 	}
-	return { row, representations };
+	return {
+		row,
+		representations,
+		imageRepair: missing.length > 0 ? {
+			sourceBucket: buckets.publicBucket,
+			sourceKey: row.posterStorageKey,
+			sourceMimeType: row.posterMimeType,
+			sourceSizeBytes: row.posterSizeBytes,
+			missing,
+		} : null,
+	};
 }
 
 export async function planLegacyWebgl(
@@ -283,6 +444,12 @@ export async function planLegacyWebgl(
 		throw new CanonicalPlanError(
 			'SOURCE_NOT_PROVEN',
 			`project ${row.id} has no completed WEBGL upload proving its current source`,
+		);
+	}
+	if (row.sourceOwnershipConflict) {
+		throw new CanonicalPlanError(
+			'AMBIGUOUS_OBJECT',
+			`project ${row.id} WebGL source key has ambiguous or invalid legacy ownership`,
 		);
 	}
 	if (row.sourceProof.deploymentId !== deployment.deploymentId) {
@@ -334,6 +501,10 @@ export async function planLegacyWebgl(
 	if (normalizedMime(entry.head.mimeType) !== 'text/html') {
 		throw new CanonicalPlanError('MALFORMED_LEGACY_ROW', `WebGL project ${row.id} entry MIME is not text/html`);
 	}
+	const needsIsolatedCopy = row.sourceLegacyAssetKind === 'GAME';
+	const sourceDestinationKey = needsIsolatedCopy
+		? `protected/assets/webgl/${row.id}/${deployment.deploymentId}/source.zip`
+		: row.sourceProof.storageKey;
 	return {
 		row,
 		deploymentId: deployment.deploymentId,
@@ -341,9 +512,16 @@ export async function planLegacyWebgl(
 		publicPrefix: deployment.sitePrefix,
 		entryObjectKey: deployment.entryKey,
 		source: representationFromHead(
-			'WEBGL_SOURCE', buckets.protectedBucket, row.sourceProof.storageKey,
+			'WEBGL_SOURCE', buckets.protectedBucket, sourceDestinationKey,
 			sourceHead, { width: null, height: null },
 		),
+		sourceCopy: needsIsolatedCopy ? {
+			sourceBucket: buckets.protectedBucket,
+			sourceKey: row.sourceProof.storageKey,
+			destinationBucket: buckets.protectedBucket,
+			destinationKey: sourceDestinationKey,
+			expected: sourceHead,
+		} : null,
 		entry: entry.head,
 		objectManifest: {
 			version: 1,
@@ -366,6 +544,11 @@ function emptyStats(): CanonicalBackfillStats {
 		assetsCreated: 0,
 		representations: 0,
 		deployments: 0,
+		objectCopies: 0,
+		objectsReused: 0,
+		imageRepairs: 0,
+		repairsPlanned: 0,
+		objectCopiesPlanned: 0,
 		failures: 0,
 	};
 }
@@ -424,7 +607,7 @@ export function parseCanonicalBackfillOptions(args: readonly string[]): Canonica
 		if (arg === '--apply') apply = true;
 		else if (arg === '--dry-run') apply = false;
 		else if (arg.startsWith('--batch-size=')) batchSize = Number(arg.slice('--batch-size='.length));
-		else if (arg.startsWith('--progress-file=') || arg.startsWith('--failures-file=')
+		else if (arg.startsWith('--progress-file=') || arg.startsWith('--failures-file=') || arg.startsWith('--report-file=')
 			|| arg === '--reset-progress') continue;
 		else throw new Error(`Unknown canonical backfill option: ${arg}`);
 	}
@@ -458,6 +641,7 @@ function addOutcome(stats: CanonicalBackfillStats, outcome: CanonicalApplyOutcom
 export async function runCanonicalBackfill(deps: {
 	repository: CanonicalBackfillRepository;
 	verifier: CanonicalObjectHeadVerifier;
+	materializer?: CanonicalObjectMaterializer;
 	protectedBucket: string;
 	publicBucket: string;
 	progress: CanonicalBackfillProgress;
@@ -506,6 +690,79 @@ export async function runCanonicalBackfill(deps: {
 			}
 			stats.eligible += 1;
 			if (deps.options.apply) {
+				if (ref.kind === 'webgl') {
+					const webgl = plan as CanonicalWebglPlan;
+					if (webgl.sourceCopy) {
+						if (!deps.materializer) {
+							throw new CanonicalPlanError('REPAIR_REQUIRED', `webgl ${ref.id} requires an isolated source copy`);
+						}
+						try {
+							const copied = await deps.materializer.ensureWebglSourceCopy(webgl.sourceCopy, {
+								beforeCreate: (target) => deps.repository.prepareMaterializationCleanup(target),
+							});
+							webgl.source = representationFromHead(
+								'WEBGL_SOURCE', webgl.sourceCopy.destinationBucket,
+								webgl.sourceCopy.destinationKey, copied.head,
+								{ width: null, height: null },
+							);
+							webgl.source.sourceIdentityAlgorithm = 'MIGRATION_COPY_SHA256';
+							stats[copied.created ? 'objectCopies' : 'objectsReused'] += 1;
+						} catch (error) {
+							if (error instanceof CanonicalPlanError) throw error;
+							throw new CanonicalPlanError('COPY_FAILED', `webgl ${ref.id} source copy failed: ${error instanceof Error ? error.message : String(error)}`);
+						}
+					}
+				} else {
+					const imagePlan = plan as CanonicalAssetPlan | CanonicalExhibitionPlan;
+					if (imagePlan.imageRepair) {
+						if (!deps.materializer) {
+							throw new CanonicalPlanError('REPAIR_REQUIRED', `${ref.kind} ${ref.id} requires responsive image repair`);
+						}
+						try {
+							const repaired = await deps.materializer.ensureImageRenditions(imagePlan.imageRepair, {
+								beforeCreate: (target) => deps.repository.prepareMaterializationCleanup(target),
+							});
+							const expectedRoles = new Set(imagePlan.imageRepair.missing.map(({ role }) => role));
+							if (repaired.representations.length !== expectedRoles.size
+								|| repaired.representations.some((candidate) => !expectedRoles.has(candidate.role as 'CARD_480' | 'DISPLAY_960'))) {
+								throw new Error('materializer returned an incomplete rendition set');
+							}
+							imagePlan.representations.push(...repaired.representations);
+							stats.imageRepairs += repaired.created;
+							stats.objectsReused += repaired.reused;
+						} catch (error) {
+							if (error instanceof CanonicalPlanError) throw error;
+							throw new CanonicalPlanError('REPAIR_FAILED', `${ref.kind} ${ref.id} image repair failed: ${error instanceof Error ? error.message : String(error)}`);
+						}
+					}
+					const requiresPublicImageNamespace = ref.kind === 'exhibition'
+						|| (ref.kind === 'asset' && IMAGE_KINDS.has((imagePlan as CanonicalAssetPlan).row.kind));
+					if (requiresPublicImageNamespace) {
+						if (!deps.materializer) {
+							throw new CanonicalPlanError('REPAIR_REQUIRED', `${ref.kind} ${ref.id} requires canonical publication relocation`);
+						}
+						try {
+							const relocated = await materializeRepresentationNamespace({
+								representations: imagePlan.representations,
+								destinationBucket: buckets.publicBucket,
+								ownerPrefix: ref.kind === 'asset'
+									? `public/images/${ref.id}`
+									: `public/images/exhibitions/${ref.id}`,
+								materializer: deps.materializer,
+								repository: deps.repository,
+								workKind: ref.kind,
+								workRef: String(ref.id),
+							});
+							imagePlan.representations = relocated.representations;
+							imagePlan.relocations = relocated.relocations;
+							stats.objectCopies += relocated.created;
+							stats.objectsReused += relocated.reused;
+						} catch (error) {
+							if (error instanceof CanonicalPlanError) throw error;
+							throw new CanonicalPlanError('COPY_FAILED', `${ref.kind} ${ref.id} publication relocation failed: ${error instanceof Error ? error.message : String(error)}`);
+						}
+					}
+				}
 				const outcome = ref.kind === 'asset'
 					? await deps.repository.applyAsset(plan as CanonicalAssetPlan)
 					: ref.kind === 'exhibition'
@@ -517,12 +774,28 @@ export async function runCanonicalBackfill(deps: {
 			} else {
 				stats.assetsCreated += ref.kind === 'asset'
 					? 0
-					: ref.kind === 'webgl' && (plan as CanonicalWebglPlan).row.sourceLegacyAssetId !== null
+					: ref.kind === 'webgl' && (plan as CanonicalWebglPlan).row.sourceLegacyAssetKind === 'WEBGL'
 						? 0
 						: 1;
-				stats.representations += ref.kind === 'webgl'
-					? 1
-					: (plan as CanonicalAssetPlan | CanonicalExhibitionPlan).representations.length;
+				if (ref.kind === 'webgl') {
+					stats.representations += 1;
+					stats.repairsPlanned += (plan as CanonicalWebglPlan).sourceCopy ? 1 : 0;
+				} else {
+					const imagePlan = plan as CanonicalAssetPlan | CanonicalExhibitionPlan;
+					stats.representations += imagePlan.representations.length + (imagePlan.imageRepair?.missing.length ?? 0);
+					stats.repairsPlanned += imagePlan.imageRepair?.missing.length ?? 0;
+					const requiresPublicImageNamespace = ref.kind === 'exhibition'
+						|| (ref.kind === 'asset' && IMAGE_KINDS.has((imagePlan as CanonicalAssetPlan).row.kind));
+					if (requiresPublicImageNamespace) {
+						const ownerPrefix = ref.kind === 'asset'
+							? `public/images/${ref.id}`
+							: `public/images/exhibitions/${ref.id}`;
+						stats.objectCopiesPlanned += imagePlan.representations.filter((representation) => (
+							representation.bucket !== buckets.publicBucket
+							|| !representation.objectKey.startsWith(`${ownerPrefix}/${representation.role.toLowerCase()}/`)
+						)).length;
+					}
+				}
 				stats.deployments += ref.kind === 'webgl' ? 1 : 0;
 			}
 			failures.delete(refKey(ref));

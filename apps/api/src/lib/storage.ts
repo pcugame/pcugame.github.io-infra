@@ -26,6 +26,32 @@ import type {
 
 const MAX_S3_KEYS = 1_000;
 
+/** Narrow GET-only capability exposed to protected-download composition. */
+export interface ProtectedDownloadPresigner {
+	presign(
+		bucket: string,
+		key: string,
+		options?: { ttlSec?: number; responseContentDisposition?: string },
+	): Promise<string>;
+}
+
+export function createProtectedDownloadPresigner(
+	client: S3Client,
+	options: { defaultPresignTtlSec: number },
+): ProtectedDownloadPresigner {
+	return {
+		async presign(bucket, key, presignOptions = {}) {
+			return getSignedUrl(client, new GetObjectCommand({
+				Bucket: bucket,
+				Key: key,
+				...(presignOptions.responseContentDisposition && {
+					ResponseContentDisposition: presignOptions.responseContentDisposition,
+				}),
+			}), { expiresIn: presignOptions.ttlSec ?? options.defaultPresignTtlSec });
+		},
+	};
+}
+
 /** S3 keys are compared by their UTF-8 binary/byte lexical ordering. */
 function compareS3Keys(left: string, right: string): number {
 	return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
@@ -40,6 +66,16 @@ function storageErrorMatches(error: unknown, names: readonly string[], statusCod
 	const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
 	return (typeof candidate.name === 'string' && names.includes(candidate.name))
 		|| (statusCode !== undefined && candidate.$metadata?.httpStatusCode === statusCode);
+}
+
+function checksumHex(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	try {
+		const bytes = Buffer.from(value, 'base64');
+		return bytes.length === 32 ? bytes.toString('hex') : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function responseHeader(error: unknown, name: string): string | undefined {
@@ -150,7 +186,7 @@ export function createObjectStorage(
 		async head(bucket, key, request) {
 			try {
 				const response = await client.send(
-					new HeadObjectCommand({ Bucket: bucket, Key: key }),
+					new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: 'ENABLED' }),
 					requestOptions(request),
 				);
 				return {
@@ -159,6 +195,7 @@ export function createObjectStorage(
 					...(response.CacheControl ? { cacheControl: response.CacheControl } : {}),
 					...(response.ETag ? { etag: response.ETag } : {}),
 					...(response.LastModified ? { lastModified: response.LastModified } : {}),
+					...(checksumHex(response.ChecksumSHA256) ? { checksumSha256: checksumHex(response.ChecksumSHA256) } : {}),
 				};
 			} catch (error) {
 				if (storageErrorMatches(error, ['NotFound'], 404)) return null;

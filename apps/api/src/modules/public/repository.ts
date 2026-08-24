@@ -204,16 +204,18 @@ export function createPublicRepository(prisma: PrismaClient) {
 		},
 
 		/** Find a published project by numeric ID */
-		findPublishedProjectById(id: number) {
-			return prisma.project.findFirst({
+		async findPublishedProjectById(id: number) {
+			const project = await prisma.project.findFirst({
 				where: { id, status: { in: PUBLIC_PROJECT_STATUSES } },
 				include: projectDetailInclude,
 			});
+			if (!project || (project.status !== 'PUBLISHED' && project.status !== 'ARCHIVED')) return null;
+			return { ...project, status: project.status };
 		},
 
 		/** Find a published project by slug, optionally scoped to exhibitionIds */
-		findPublishedProjectBySlug(slug: string, exhibitionIds?: number[]) {
-			return prisma.project.findFirst({
+		async findPublishedProjectBySlug(slug: string, exhibitionIds?: number[]) {
+			const project = await prisma.project.findFirst({
 				where: {
 					slug,
 					status: { in: PUBLIC_PROJECT_STATUSES },
@@ -221,6 +223,8 @@ export function createPublicRepository(prisma: PrismaClient) {
 				},
 				include: projectDetailInclude,
 			});
+			if (!project || (project.status !== 'PUBLISHED' && project.status !== 'ARCHIVED')) return null;
+			return { ...project, status: project.status };
 		},
 
 		/** Resolve the currently active WebGL pointer for a publicly visible project. */

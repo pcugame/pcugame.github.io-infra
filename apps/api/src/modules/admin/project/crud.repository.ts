@@ -2,8 +2,9 @@ import type {
 	AssetKind,
 	Prisma,
 	PrismaClient,
-	ProjectStatus,
+	ProjectStatus as PrismaProjectStatus,
 } from '../../../generated/prisma/client.js';
+import type { ProjectStatus } from '@pcu/contracts';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
 import type {
@@ -26,6 +27,13 @@ import {
 } from './project-deletion-targets.js';
 
 type TxClient = Prisma.TransactionClient;
+
+function phase1ProjectStatus<T extends { status: PrismaProjectStatus }>(project: T): Omit<T, 'status'> & { status: ProjectStatus } {
+	if (project.status === 'DRAFT') {
+		throw conflict('DRAFT projects require the Phase 2 publication runtime');
+	}
+	return { ...project, status: project.status };
+}
 
 const projectListPlayableKinds: AssetKind[] = ['GAME', 'VIDEO'];
 const projectListInclude = {
@@ -233,12 +241,12 @@ export function createProjectCrudRepository(
 					include: projectListInclude,
 				}),
 			]);
-			return { totalItems, items };
+			return { totalItems, items: items.map(phase1ProjectStatus) };
 		},
 		async findProjectById(id) {
 			const project = await client.project.findUnique({ where: { id }, include: projectDetailInclude });
 			if (project) await recordLegacyWebglFallback(project);
-			return project;
+			return project ? phase1ProjectStatus(project) : null;
 		},
 		isMemberOfProject(projectId, userId) {
 			return client.projectMember.findFirst({ where: { projectId, userId } });
@@ -246,7 +254,7 @@ export function createProjectCrudRepository(
 		async updateProject(id, data) {
 			const project = await client.project.update({ where: { id }, data, include: projectDetailInclude });
 			await recordLegacyWebglFallback(project);
-			return project;
+			return phase1ProjectStatus(project);
 		},
 		deleteProjectReturningAssets(id, outbox) {
 			return client.$transaction(async (tx) => {

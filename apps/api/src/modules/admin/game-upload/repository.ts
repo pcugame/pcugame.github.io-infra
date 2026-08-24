@@ -20,6 +20,7 @@ import {
 } from '../../assets/mutation-transaction.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
 import { assertNoDeletionClaim } from '../../orphan/reference-resolver.js';
+import { createCanonicalAsset } from '../../assets/representation-write.js';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -638,7 +639,7 @@ export function finalizeCompletedSession(
 	},
 	outbox: GameReplacementOutboxConfig,
 	client: PrismaClient,
-): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null }> {
+): Promise<{ assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null; cleanupQueued: boolean }> {
 	return withAssetMutationTransaction(client, async (tx) => {
 		if (!await lockActiveCompletionClaim(tx, sessionId, data.completionClaimToken)) {
 			throw new Error('Game upload completion claim is no longer active');
@@ -662,7 +663,7 @@ export function finalizeCompletedSession(
 		if (projects.length === 0) throw new Error('Project no longer exists');
 		const existingRows = await tx.$queryRaw<Array<{
 			id: number;
-			storageKey: string;
+			storageKey: string | null;
 			playbackStorageKey: string | null;
 		}>>(Prisma.sql`
 			SELECT
@@ -678,11 +679,24 @@ export function finalizeCompletedSession(
 			FOR UPDATE
 		`);
 		const existing = existingRows[0] ?? null;
+		const existingRepresentations = existing
+			? await tx.assetRepresentation.findMany({
+				where: { assetId: existing.id, state: { not: 'DELETED' } },
+				select: { role: true, bucket: true, objectKey: true },
+			})
+			: [];
 
-		let result: { assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null };
+		let result: { assetId: number; oldStorageKey: string | null; oldPlaybackStorageKey: string | null; cleanupQueued: boolean };
 		if (existing) {
-			await queueDurableDeletions(tx, [
-				...(existing.storageKey !== data.storageKey
+			const deletionTargets = [
+				...existingRepresentations
+					.filter(({ bucket, objectKey }) => bucket !== outbox.bucket || objectKey !== data.storageKey)
+					.map((representation) => ({
+						bucket: representation.bucket,
+						storageKey: representation.objectKey,
+						reason: `${outbox.reason}-representation-${representation.role.toLowerCase()}`,
+					})),
+				...(existing.storageKey && existing.storageKey !== data.storageKey
 					? [{ bucket: outbox.bucket, storageKey: existing.storageKey, reason: outbox.reason }]
 					: []),
 				...(existing.playbackStorageKey
@@ -694,7 +708,8 @@ export function finalizeCompletedSession(
 						reason: outbox.playbackReason,
 					}]
 					: []),
-			]);
+			];
+			await queueDurableDeletions(tx, deletionTargets);
 			await tx.project.updateMany({
 				where: { id: projectId, posterAssetId: existing.id },
 				data: { posterAssetId: null },
@@ -704,7 +719,7 @@ export function finalizeCompletedSession(
 				data: { status: 'DELETED' },
 				select: { id: true },
 			});
-			if (existing.storageKey !== data.storageKey) {
+			if (existing.storageKey && existing.storageKey !== data.storageKey) {
 				await tx.gameUploadSession.updateMany({
 					where: {
 						id: { not: sessionId },
@@ -714,47 +729,26 @@ export function finalizeCompletedSession(
 					data: { storageKey: null },
 				});
 			}
-			const created = await tx.asset.create({
-				data: {
-					projectId,
-					kind,
-					storageKey: data.storageKey,
-					playbackStorageKey: data.playbackStorageKey ?? null,
-					originalName: data.originalName,
-					mimeType: data.mimeType,
-					playbackMimeType: data.playbackMimeType ?? '',
-					sizeBytes: data.sizeBytes,
-					playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
-					playbackStatus: data.playbackStatus ?? 'PENDING',
-					playbackError: data.playbackError ?? '',
-					isPublic: data.isPublic,
-				},
-				select: { id: true },
+			const created = await createCanonicalAsset(tx, {
+				projectId,
+				kind,
+				originalBucket: outbox.bucket,
+				...data,
 			});
 			result = {
 				assetId: created.id,
 				oldStorageKey: existing.storageKey,
 				oldPlaybackStorageKey: existing.playbackStorageKey,
+				cleanupQueued: deletionTargets.length > 0,
 			};
 		} else {
-			const created = await tx.asset.create({
-				data: {
-					projectId,
-					kind,
-					storageKey: data.storageKey,
-					playbackStorageKey: data.playbackStorageKey ?? null,
-					originalName: data.originalName,
-					mimeType: data.mimeType,
-					playbackMimeType: data.playbackMimeType ?? '',
-					sizeBytes: data.sizeBytes,
-					playbackSizeBytes: data.playbackSizeBytes ?? BigInt(0),
-					playbackStatus: data.playbackStatus ?? 'PENDING',
-					playbackError: data.playbackError ?? '',
-					isPublic: data.isPublic,
-				},
-				select: { id: true },
+			const created = await createCanonicalAsset(tx, {
+				projectId,
+				kind,
+				originalBucket: outbox.bucket,
+				...data,
 			});
-			result = { assetId: created.id, oldStorageKey: null, oldPlaybackStorageKey: null };
+			result = { assetId: created.id, oldStorageKey: null, oldPlaybackStorageKey: null, cleanupQueued: false };
 		}
 
 		const completed = await tx.gameUploadSession.updateMany({
@@ -766,7 +760,6 @@ export function finalizeCompletedSession(
 			},
 			data: {
 				status: 'COMPLETED',
-				storageKey: data.storageKey,
 				completionClaimToken: null,
 				completionClaimUntil: null,
 				completionResult: {
@@ -798,13 +791,24 @@ export function finalizeCompletedWebglSession(
 	completionResult: { status: 'COMPLETED'; storageKey: string; sizeBytes: number; webglUrl: string } = {
 		status: 'COMPLETED', storageKey: sourceKey, sizeBytes: 0, webglUrl: '',
 	},
-): Promise<{ oldEntryKey: string }> {
-	return withSerializableRetry(async (tx) => {
+): Promise<{ oldEntryKey: string; cleanupQueued: boolean }> {
+	return withAssetMutationTransaction(client, async (tx) => {
 		if (!await lockActiveCompletionClaim(tx, sessionId, completionClaimToken)) {
 			throw new Error('WebGL upload completion claim is no longer active');
 		}
+		const completingSession = await tx.gameUploadSession.findUniqueOrThrow({
+			where: { id: sessionId },
+			select: { projectId: true, uploadKind: true, originalName: true, totalBytes: true },
+		});
+		if (completingSession.projectId !== projectId || completingSession.uploadKind !== 'WEBGL') {
+			throw new Error('WebGL upload completion session identity mismatch');
+		}
 		const deployment = parseWebglEntryKey(projectId, entryKey);
 		if (!deployment) throw new Error('Cannot finalize malformed WebGL entry key');
+		const source = parseWebglSourceKey(projectId, sourceKey);
+		if (!source || source.deploymentId !== deployment.deploymentId) {
+			throw new Error('Cannot finalize mismatched WebGL source identity');
+		}
 		await assertNoDeletionClaim(tx, {
 			bucket: outbox.protectedBucket,
 			key: sourceKey,
@@ -816,27 +820,96 @@ export function finalizeCompletedWebglSession(
 		});
 		const project = await tx.project.findUniqueOrThrow({
 			where: { id: projectId },
-			select: { webglEntryKey: true },
+			select: {
+				webglEntryKey: true,
+				currentWebglDeploymentId: true,
+				currentWebglDeployment: {
+					select: {
+						id: true,
+						publicBucket: true,
+						publicPrefix: true,
+						sourceRepresentation: {
+							select: { assetId: true, bucket: true, objectKey: true },
+						},
+					},
+				},
+			},
 		});
-		const oldDeployment = project.webglEntryKey === entryKey
+		const oldCanonical = project.currentWebglDeploymentId === deployment.deploymentId
 			? null
-			: parseWebglEntryKey(projectId, project.webglEntryKey);
-		await queueDurableDeletions(tx, webglDeletionTargetsByEntry(
+			: project.currentWebglDeployment;
+		const legacyTargets = project.currentWebglDeploymentId === null && project.webglEntryKey !== entryKey
+			? webglDeletionTargetsByEntry(projectId, project.webglEntryKey, outbox, outbox.reason)
+			: [];
+		const canonicalTargets = oldCanonical
+			? [
+				{
+					bucket: oldCanonical.publicBucket,
+					storageKey: oldCanonical.publicPrefix,
+					targetKind: 'PREFIX' as const,
+					reason: `${outbox.reason}-site`,
+				},
+				...(oldCanonical.sourceRepresentation.objectKey !== sourceKey
+					? [{
+						bucket: oldCanonical.sourceRepresentation.bucket,
+						storageKey: oldCanonical.sourceRepresentation.objectKey,
+						reason: `${outbox.reason}-source`,
+					}]
+					: []),
+			]
+			: [];
+		const deletionTargets = [...legacyTargets, ...canonicalTargets];
+		await queueDurableDeletions(tx, deletionTargets);
+		if (oldCanonical) {
+			// A backfilled/current canonical deployment can be replaced while the
+			// Phase-1 legacy transport is still live. Retire both metadata owners in
+			// the same transaction as the new current pointer and its deletion outbox.
+			await tx.webglDeployment.update({
+				where: { id: oldCanonical.id },
+				data: { state: 'FAILED' },
+			});
+			await tx.asset.update({
+				where: { id: oldCanonical.sourceRepresentation.assetId },
+				data: { status: 'DELETED' },
+			});
+		}
+		const asset = await createCanonicalAsset(tx, {
 			projectId,
-			project.webglEntryKey === entryKey ? '' : project.webglEntryKey,
-			outbox,
-			outbox.reason,
-		));
+			kind: 'WEBGL',
+			originalRole: 'WEBGL_SOURCE',
+			originalBucket: outbox.protectedBucket,
+			storageKey: sourceKey,
+			originalName: completingSession.originalName,
+			mimeType: 'application/zip',
+			sizeBytes: completingSession.totalBytes,
+			isPublic: false,
+		});
+		const sourceRepresentation = asset.representations.find(({ role }) => role === 'WEBGL_SOURCE');
+		if (!sourceRepresentation) throw new Error('Canonical WebGL source representation was not created');
+		await tx.webglDeployment.create({
+			data: {
+				id: deployment.deploymentId,
+				projectId,
+				sourceRepresentationId: sourceRepresentation.id,
+				publicBucket: outbox.publicBucket,
+				publicPrefix: deployment.sitePrefix,
+				entryObjectKey: deployment.entryKey,
+				state: 'READY',
+			},
+		});
 		await tx.project.update({
 			where: { id: projectId },
-			data: { webglEntryKey: entryKey },
+			data: { currentWebglDeploymentId: deployment.deploymentId },
 		});
-		if (oldDeployment?.sourceKey && oldDeployment.sourceKey !== sourceKey) {
+		const oldLegacyDeployment = project.currentWebglDeploymentId === null
+			? parseWebglEntryKey(projectId, project.webglEntryKey)
+			: null;
+		if (oldLegacyDeployment?.sourceKey && oldLegacyDeployment.sourceKey !== sourceKey) {
 			await tx.gameUploadSession.updateMany({
 				where: {
 					id: { not: sessionId },
 					status: 'COMPLETED',
-					storageKey: oldDeployment.sourceKey,
+					storageKey: oldLegacyDeployment.sourceKey,
 				},
 				data: { storageKey: null },
 			});
@@ -850,7 +923,6 @@ export function finalizeCompletedWebglSession(
 			},
 			data: {
 				status: 'COMPLETED',
-				storageKey: sourceKey,
 				completionClaimToken: null,
 				completionClaimUntil: null,
 				completionResult,
@@ -862,8 +934,8 @@ export function finalizeCompletedWebglSession(
 		await tx.gameUploadActiveSession.deleteMany({
 			where: { sessionId },
 		});
-		return { oldEntryKey: project.webglEntryKey };
-	}, client);
+		return { oldEntryKey: project.webglEntryKey, cleanupQueued: deletionTargets.length > 0 };
+	}, ASSET_MUTATION_TRANSACTION_POLICY);
 }
 
 export function claimStaleCompletingSessions(
@@ -1125,6 +1197,7 @@ export interface DurableGameUploadRepository extends GameUploadRepository {
 		assetId: number;
 		oldStorageKey: string | null;
 		oldPlaybackStorageKey: string | null;
+		cleanupQueued?: boolean;
 	}>;
 	finalizeCompletedWebglSession(
 		sessionId: string,
@@ -1139,5 +1212,5 @@ export interface DurableGameUploadRepository extends GameUploadRepository {
 			sizeBytes: number;
 			webglUrl: string;
 		},
-	): Promise<{ oldEntryKey: string }>;
+	): Promise<{ oldEntryKey: string; cleanupQueued?: boolean }>;
 }

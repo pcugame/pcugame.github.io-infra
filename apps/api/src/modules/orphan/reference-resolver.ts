@@ -193,8 +193,29 @@ export async function collectObjectReferences(
 			},
 		}),
 		client.project.findMany({
-			where: { webglEntryKey: { not: '' } },
-			select: { id: true, webglEntryKey: true },
+			where: {
+				OR: [
+					{ currentWebglDeploymentId: { not: null } },
+					{ webglEntryKey: { not: '' } },
+				],
+			},
+			select: {
+				id: true,
+				webglEntryKey: true,
+				currentWebglDeploymentId: true,
+				currentWebglDeployment: {
+					select: {
+						id: true,
+						state: true,
+						publicBucket: true,
+						publicPrefix: true,
+						entryObjectKey: true,
+						sourceRepresentation: {
+							select: { id: true, state: true, bucket: true, objectKey: true },
+						},
+					},
+				},
+			},
 		}),
 		client.gameUploadSession.findMany({
 			where: { status: 'COMPLETED', storageKey: { not: null } },
@@ -307,6 +328,37 @@ export async function collectObjectReferences(
 	}
 
 	for (const project of projects) {
+		if (project.currentWebglDeploymentId != null) {
+			const deployment = project.currentWebglDeployment;
+			const source = deployment?.sourceRepresentation;
+			if (!deployment || deployment.id !== project.currentWebglDeploymentId
+				|| deployment.state !== 'READY' || deployment.publicBucket !== buckets.publicBucket
+				|| !deployment.publicPrefix.endsWith('/')
+				|| !deployment.entryObjectKey.startsWith(deployment.publicPrefix)
+				|| !source || source.state !== 'READY' || !source.bucket.trim()
+				|| !source.objectKey.trim()) {
+				unsafeBuckets.add(buckets.publicBucket);
+				unsafeBuckets.add(buckets.protectedBucket);
+				logger.error(
+					{ projectId: project.id, currentWebglDeploymentId: project.currentWebglDeploymentId },
+					'Malformed canonical WebGL pointer encountered; WebGL bucket deletion is disabled',
+				);
+				continue;
+			}
+			references.push({
+				bucket: source.bucket,
+				targetKind: 'EXACT',
+				key: source.objectKey,
+				source: `project:${project.id}:webgl-deployment-source:${source.id}`,
+			});
+			references.push({
+				bucket: deployment.publicBucket,
+				targetKind: 'PREFIX',
+				key: deployment.publicPrefix,
+				source: `project:${project.id}:webgl-deployment:${deployment.id}`,
+			});
+			continue;
+		}
 		const parsed = parseWebglEntryKey(project.id, project.webglEntryKey);
 		if (!parsed) {
 			unsafeBuckets.add(buckets.publicBucket);

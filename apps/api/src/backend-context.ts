@@ -30,7 +30,13 @@ import {
 } from './infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
-import { createDirectMultipartControlStorage, createMultipartPartPresigner, createObjectStorage } from './lib/storage.js';
+import {
+	createDirectMultipartControlStorage,
+	createMultipartPartPresigner,
+	createObjectStorage,
+	createProtectedDownloadPresigner,
+	type ProtectedDownloadPresigner,
+} from './lib/storage.js';
 import { createRootLogger } from './lib/logger.js';
 import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
 import { forbidden, notFound } from './shared/errors.js';
@@ -293,6 +299,7 @@ export interface ProductionResourceFactories {
 	prisma(config: Env): MaybePromise<PrismaClient>;
 	s3(config: Env): MaybePromise<S3Client>;
 	storage(client: S3Client, config: Env): MaybePromise<ObjectStorage>;
+	protectedDownloadPresigner(client: S3Client, config: Env): MaybePromise<ProtectedDownloadPresigner>;
 	settings(
 		client: PrismaClient,
 		logger: AppLogger,
@@ -362,6 +369,9 @@ const defaultFactories: ProductionResourceFactories = {
 	}),
 	s3: (config) => createS3Client(config),
 	storage: (client, config) => createObjectStorage(client, {
+		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
+	}),
+	protectedDownloadPresigner: (client, config) => createProtectedDownloadPresigner(client, {
 		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
 	}),
 	settings: (client, logger) => createPrismaSettingsStore(client, logger),
@@ -571,6 +581,20 @@ export async function createProductionBackendContext(
 			directSigningClient,
 			() => directSigningClient.destroy(),
 		));
+		// Protected GET capabilities use a distinct browser-visible origin and
+		// a narrow presigner. Upload PUT URLs can never be issued through it.
+		const protectedDownloadSigningClient = createS3Client({
+			...config,
+			S3_ENDPOINT: config.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
+		});
+		const protectedDownloadSigningS3 = owner.register('protectedDownloadSigningS3', owned(
+			protectedDownloadSigningClient,
+			() => protectedDownloadSigningClient.destroy(),
+		));
+		const protectedDownloadPresigner = await factories.protectedDownloadPresigner(
+			protectedDownloadSigningS3,
+			config,
+		);
 		const uploadLifecycle = await resource(
 			'uploadLifecycle',
 			() => {
@@ -693,7 +717,7 @@ export async function createProductionBackendContext(
 				assetsRepository: persistence.assetsRepository,
 				bannedIpRepository: persistence.bannedIpRepository,
 				projectAccess,
-				storage,
+				protectedDownloadPresigner,
 				downloadLimiter: protectedDownloads,
 				logger,
 				clock,

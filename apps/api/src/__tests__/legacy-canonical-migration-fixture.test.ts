@@ -18,9 +18,10 @@ describe('legacy canonical migration fixture', () => {
 		expect(assets).toEqual(expect.arrayContaining([
 			expect.objectContaining({ kind: 'VIDEO', playbackStorageKey: expect.any(String), playbackStatus: 'READY' }),
 			expect.objectContaining({ kind: 'POSTER', card480Height: expect.any(Number), display960Height: expect.any(Number) }),
-			expect.objectContaining({ kind: 'IMAGE', card480Height: expect.any(Number), display960Height: expect.any(Number) }),
+			expect.objectContaining({ kind: 'IMAGE', card480Height: null, display960Height: null }),
 			expect.objectContaining({ status: 'DELETED' }),
 			expect.objectContaining({ status: 'FAILED' }),
+			expect.objectContaining({ kind: 'VIDEO', status: 'READY', playbackStatus: 'FAILED', playbackStorageKey: null }),
 		]));
 		expect(projects.map((project) => project.status)).toEqual(expect.arrayContaining(['PUBLISHED', 'ARCHIVED']));
 		expect(projects).toEqual(expect.arrayContaining([
@@ -43,10 +44,12 @@ describe('legacy canonical migration fixture', () => {
 		expect(exhibitions[0]).toMatchObject({ posterStorageKey: expect.any(String), posterCard480Height: expect.any(Number) });
 	});
 
-	it('has a HEAD record for every representation that must survive Phase 1', () => {
+	it('separates legacy physical objects from the exact rendition objects migration must generate', () => {
 		const inventory = new Set(legacyCanonicalMigrationObjectInventory.map((object) => `${object.bucket}:${object.key}`));
+		const generated = new Set(legacyCanonicalMigrationExpected.generatedRenditions.map((object) => `${object.bucket}:${object.key}`));
 		for (const representation of legacyCanonicalMigrationExpected.representations) {
-			expect(inventory).toContain(`${representation.bucket}:${representation.key}`);
+			const identity = `${representation.bucket}:${representation.key}`;
+			expect(inventory.has(identity) || generated.has(identity)).toBe(true);
 		}
 		for (const representation of legacyCanonicalMigrationExpected.exhibitionPoster.representations) {
 			expect(inventory).toContain(`${representation.bucket}:${representation.key}`);
@@ -55,6 +58,8 @@ describe('legacy canonical migration fixture', () => {
 			expect(object.checksumSha256).toMatch(/^[a-f0-9]{64}$/);
 			expect(object.size).toBeGreaterThan(0n);
 		}
+		expect(generated.size).toBe(2);
+		expect([...generated].every((identity) => !inventory.has(identity))).toBe(true);
 	});
 
 	it('is repeat-loadable through deterministic upserts and attaches the poster only after its asset exists', async () => {
@@ -68,7 +73,7 @@ describe('legacy canonical migration fixture', () => {
 		await loadLegacyCanonicalMigrationFixture(client);
 		await loadLegacyCanonicalMigrationFixture(client);
 
-		expect(calls).toHaveLength((1 + 1 + 3 + 7 + 1 + 3) * 2);
+		expect(calls).toHaveLength((1 + 1 + 3 + 8 + 1 + 3) * 2);
 		expect(calls.every((call) => typeof call.input.where.id === 'number' || typeof call.input.where.id === 'string')).toBe(true);
 		const firstPosterPointer = calls.findIndex((call) => call.model === 'project' && call.input.update.posterAssetId === 42_003);
 		const firstPosterAsset = calls.findIndex((call) => call.model === 'asset' && call.input.where.id === 42_003);

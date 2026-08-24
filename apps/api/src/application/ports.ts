@@ -166,6 +166,7 @@ export interface ObjectStorage {
 		cacheControl?: string;
 		etag?: string;
 		lastModified?: Date;
+		checksumSha256?: string;
 	} | null>;
 	readRange(
 		bucket: string,
