@@ -10,8 +10,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: 'pages'
-  cancel-in-progress: true
+  # Repository-wide lock shared with the schema cutover. A standalone web
+  # publication can never race the exact-SHA gate between drain and contract.
+  group: production-object-cutover
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:

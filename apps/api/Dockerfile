@@ -48,6 +48,8 @@ RUN npm run build --workspace=@pcu/contracts && \
 
 # ── Stage 3: Production image ──
 FROM node:22-bookworm-slim AS runner
+ARG RELEASE_SOURCE_SHA
+LABEL org.opencontainers.image.revision="${RELEASE_SOURCE_SHA}"
 WORKDIR /app
 ENV NODE_ENV=production
 

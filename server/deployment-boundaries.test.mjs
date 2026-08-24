@@ -46,7 +46,11 @@ assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
 assert.match(deploy, /release-artifact-preflight\) do_release_artifact_preflight/);
 assert.match(deploy, /PCU_RELEASE_SCHEMA_PHASE === "phase2"[\s\S]*project-publication-worker\.js/);
 assert.match(deploy, /release_schema_phase" == phase2[\s\S]*PROJECT_PUBLICATION_WORKER_CONTAINER/);
-assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == false[\s\S]*localhost\/\*:rollback-/);
+assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == false[\s\S]*assert_phase1_rollback_authorization/);
+assert.match(deploy, /must use an immutable @sha256 release digest/);
+assert.match(deploy, /image source revision label does not match RELEASE_SOURCE_SHA/);
+assert.match(deploy, /rollback image tag no longer resolves to the authorized image ID/);
+assert.doesNotMatch(deploy, /\*:\s*sha-|localhost\/\*:rollback-/);
 
 for (const [name, value] of [
 	['DIRECT_UPLOAD_PART_URL_REFRESH_MAX', '64'],
@@ -272,6 +276,123 @@ for (const [label, fixture] of [
 		`Podman ran before ${label} restart preflight failed`,
 	);
 }
+
+// Production release artifacts are authorized by registry digest plus the OCI
+// source-revision label. Mutable sha-* tags, digest disagreement, and a label
+// from another commit all fail before the current deployment is stopped.
+await writeFile(fakePodman, `#!/bin/sh
+set -eu
+if [ "\${1:-}" = pull ]; then exit 0; fi
+if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
+  case " $* " in
+    *"{{.Digest}}"*) printf '%s\\n' "\${FAKE_IMAGE_DIGEST:-}" ;;
+    *"{{.Id}}"*) printf '%s\\n' "\${FAKE_IMAGE_ID:-}" ;;
+    *"org.opencontainers.image.revision"*) printf '%s\\n' "\${FAKE_IMAGE_REVISION:-}" ;;
+    *) : ;;
+  esac
+  exit 0
+fi
+if [ "\${1:-}" = inspect ]; then
+  case " $* " in
+    *"{{.Image}}"*) printf '%s\\n' "\${FAKE_CONTAINER_IMAGE_ID:-}" ;;
+    *"{{.State.Status}}"*) printf '%s\\n' running ;;
+    *) : ;;
+  esac
+  exit 0
+fi
+if [ "\${1:-}" = exec ]; then
+  case " $* " in *wget*) printf '%s\\n' '{"ok":true}' ;; esac
+  exit 0
+fi
+if [ "\${1:-}" = run ]; then exit 0; fi
+exit 0
+`);
+await chmod(fakePodman, 0o755);
+const releaseDigest = `sha256:${'1'.repeat(64)}`;
+const releaseImage = `ghcr.io/pcugame/api@${releaseDigest}`;
+const releaseSourceSha = '2'.repeat(40);
+const releaseImageId = `sha256:${'3'.repeat(64)}`;
+const releaseEnv = {
+	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+	API_IMAGE: releaseImage,
+	MIGRATION_IMAGE: releaseImage,
+	RELEASE_SOURCE_SHA: releaseSourceSha,
+	FAKE_IMAGE_DIGEST: releaseDigest,
+	FAKE_IMAGE_REVISION: releaseSourceSha,
+	FAKE_IMAGE_ID: releaseImageId,
+};
+const exactRelease = await runBoundary(boundaryFixture, 'release-artifact-preflight', releaseEnv, ['phase2']);
+assert.equal(exactRelease.status, 0, exactRelease.stderr || exactRelease.stdout);
+
+const mutableTagRelease = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
+	...releaseEnv,
+	API_IMAGE: 'ghcr.io/pcugame/api:sha-deadbeef',
+	MIGRATION_IMAGE: 'ghcr.io/pcugame/api:sha-deadbeef',
+}, ['phase2']);
+assert.notEqual(mutableTagRelease.status, 0, 'mutable sha-* release tag unexpectedly passed');
+assert.match(`${mutableTagRelease.stdout}\n${mutableTagRelease.stderr}`, /must use an immutable @sha256/);
+
+const digestMismatch = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
+	...releaseEnv,
+	FAKE_IMAGE_DIGEST: `sha256:${'4'.repeat(64)}`,
+}, ['phase2']);
+assert.notEqual(digestMismatch.status, 0, 'retargeted/mismatched digest unexpectedly passed');
+assert.match(`${digestMismatch.stdout}\n${digestMismatch.stderr}`, /digest does not match/);
+
+const labelMismatch = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
+	...releaseEnv,
+	FAKE_IMAGE_REVISION: '5'.repeat(40),
+}, ['phase2']);
+assert.notEqual(labelMismatch.status, 0, 'wrong OCI source revision unexpectedly passed');
+assert.match(`${labelMismatch.stdout}\n${labelMismatch.stderr}`, /source revision label does not match/);
+
+// A local rollback tag is never authority. The server records the exact
+// current image ID plus a nonce, and a later tag retarget is rejected.
+const rollbackNonce = '6'.repeat(64);
+const rollbackImage = 'localhost/pcu-api:rollback-test';
+const authorizeRollback = await runBoundary(boundaryFixture, 'authorize-phase1-rollback', {
+	...releaseEnv,
+	FAKE_CONTAINER_IMAGE_ID: releaseImageId,
+}, [rollbackNonce]);
+assert.equal(authorizeRollback.status, 0, authorizeRollback.stderr || authorizeRollback.stdout);
+assert.equal(spawnSync('stat', ['-c', '%a', join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization')], { encoding: 'utf8' }).stdout.trim(), '600');
+
+const rollbackEnv = {
+	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+	API_IMAGE: rollbackImage,
+	MIGRATION_IMAGE: rollbackImage,
+	RELEASE_SCHEMA_PHASE: 'phase1',
+	START_DEDICATED_WORKERS: 'false',
+	PULL_API_IMAGE: 'false',
+	ROLLBACK_AUTH_NONCE: rollbackNonce,
+};
+const retargetedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
+	...rollbackEnv,
+	FAKE_IMAGE_ID: `sha256:${'7'.repeat(64)}`,
+}, ['phase1']);
+assert.notEqual(retargetedRollback.status, 0, 'forged rollback tag unexpectedly passed');
+assert.match(`${retargetedRollback.stdout}\n${retargetedRollback.stderr}`, /no longer resolves to the authorized image ID/);
+const exactRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
+	...rollbackEnv,
+	FAKE_IMAGE_ID: releaseImageId,
+}, ['phase1']);
+assert.equal(exactRollback.status, 0, exactRollback.stderr || exactRollback.stdout);
+const fakeSystemctl = join(fakeBin, 'systemctl');
+await writeFile(fakeSystemctl, '#!/bin/sh\nexit 0\n');
+await chmod(fakeSystemctl, 0o755);
+const consumedRollback = await runBoundary(boundaryFixture, 'up', {
+	...rollbackEnv,
+	FAKE_IMAGE_ID: releaseImageId,
+});
+assert.equal(consumedRollback.status, 0, consumedRollback.stderr || consumedRollback.stdout);
+assert.equal(spawnSync('test', ['!', '-e', join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization')]).status, 0);
+assert.equal(spawnSync('test', ['!', '-e', join(fixtureDir, 'cutover-state', 'phase1-rollback.consumed')]).status, 0);
+const replayedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
+	...rollbackEnv,
+	FAKE_IMAGE_ID: releaseImageId,
+}, ['phase1']);
+assert.notEqual(replayedRollback.status, 0, 'consumed rollback authorization unexpectedly replayed');
+assert.match(`${replayedRollback.stdout}\n${replayedRollback.stderr}`, /authorization is absent or already consumed/);
 
 const runCapacity = async (fixture) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);

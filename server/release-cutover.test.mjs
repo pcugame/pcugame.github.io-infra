@@ -21,10 +21,19 @@ for (const cli of ['release:backfill', 'release:preflight', 'release:inventory',
 }
 
 assert.doesNotMatch(buildWorkflow, /^  deploy:/m, 'push/build workflow must never deploy');
+assert.match(dockerfile, /LABEL org\.opencontainers\.image\.revision="\$\{RELEASE_SOURCE_SHA\}"/);
+assert.match(buildWorkflow, /RELEASE_SOURCE_SHA=\$\{\{ github\.sha \}\}/);
+assert.doesNotMatch(buildWorkflow, /:sha-\$\{\{ github\.sha \}\}/);
 assert.doesNotMatch(webWorkflow, /^  push:/m, 'master pushes must not publish the Phase 2 web during Phase 1 observation');
 assert.match(webWorkflow, /^  workflow_dispatch:/m);
 assert.match(webWorkflow, /^    environment: production$/m);
 assert.match(webWorkflow, /printf '%s\\n' "\$\{GITHUB_SHA\}" > dist\/release-sha\.txt/);
+for (const workflow of [webWorkflow, cutover]) {
+	assert.match(workflow, /group: production-object-cutover/);
+	assert.match(workflow, /cancel-in-progress: false/);
+}
+assert.match(cutover, /final_api_image must be an immutable @sha256 digest/);
+assert.match(cutover, /phase1_api_image must be an immutable @sha256 digest/);
 for (const marker of [
 	'drain', 'legacy-audit', 'backup "phase1-', 'garage-before-expand-',
 	'apply-expand', 'backfill --apply', 'phase1-reconciliation', 'mark-read-cutover',
@@ -35,7 +44,9 @@ for (const marker of [
 const ordered = [
 	'export API_IMAGE="${PHASE1_IMAGE}"',
 	'export MIGRATION_IMAGE="${PHASE1_IMAGE}"',
+	'export RELEASE_SOURCE_SHA="${PHASE1_SOURCE_SHA}"',
 	'release-artifact-preflight phase1',
+	'authorize-phase1-rollback "${rollback_nonce}"',
 	'"${DEPLOY_DIR}/deploy.sh" drain',
 	'"${DEPLOY_DIR}/deploy.sh" legacy-audit',
 	'"${DEPLOY_DIR}/deploy.sh" backup "phase1-',
@@ -64,17 +75,26 @@ assert.ok(
 	phase1Block.indexOf('release-artifact-preflight phase1') < phase1Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain'),
 	'Phase 1 marker/worker validation must precede the first mutation drain',
 );
-const phase2Block = cutover.slice(cutover.indexOf('export API_IMAGE="${FINAL_IMAGE}"'));
+const phase2Block = cutover.slice(cutover.indexOf('- name: Prepare atomic Phase 2 maintenance window'));
 assert.match(phase2Block, /export API_IMAGE="\$\{FINAL_IMAGE\}"[\s\S]*export MIGRATION_IMAGE="\$\{FINAL_IMAGE\}"/);
 assert.match(phase2Block, /\[ "\$\{phase1_api_image\}" = "\$\{migration_image\}" \]/);
+assert.match(phase2Block, /\[ "\$\{phase1_image_digest\}" = "\$\{migration_image_digest\}" \]/);
+assert.match(phase2Block, /current_phase1_image_id[\s\S]*phase1_image_id/);
+assert.match(phase2Block, /current_phase1_source_sha[\s\S]*phase1_source_sha/);
 
 const attestedPhase2 = phase2Block.indexOf('[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]');
 const phase2Drain = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain', attestedPhase2);
-const finalWebGate = phase2Block.indexOf('verify-final-web "${GITHUB_SHA}"');
+const finalArtifactPreflight = phase2Block.indexOf('release-artifact-preflight phase2', attestedPhase2);
+const finalWebPublish = phase2Block.indexOf('- name: Publish exact final web while mutations remain drained');
+const finalWebGate = phase2Block.indexOf('verify-final-web "${RELEASE_SOURCE_SHA}"');
 const phase2Preflight = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" contract-preflight', finalWebGate);
 const phase2Contract = phase2Block.indexOf('release-migrate apply-contract');
-assert.ok(phase2Drain >= 0 && phase2Drain < finalWebGate, 'final web gate must run after the Phase 2 drain');
+const phase2Runtime = phase2Block.indexOf('RELEASE_SCHEMA_PHASE=phase2 "${DEPLOY_DIR}/deploy.sh" up', phase2Contract);
+assert.ok(finalArtifactPreflight >= 0 && finalArtifactPreflight < phase2Drain, 'final artifact preflight must precede downtime');
+assert.ok(phase2Drain < finalWebPublish && finalWebPublish < finalWebGate, 'same-SHA final web must publish after drain and before its exact marker gate');
 assert.ok(finalWebGate < phase2Preflight && phase2Preflight < phase2Contract, 'final web gate must precede contract preflight and DDL');
+assert.ok(phase2Contract < phase2Runtime, 'final runtime must start only after contract DDL');
+assert.match(phase2Block.slice(phase2Drain, phase2Contract), /Test final web[\s\S]*Build final web[\s\S]*Stamp exact cutover commit[\s\S]*peaceiris\/actions-gh-pages@v4/);
 
 const destructiveBoundary = cutover.indexOf('# DESTRUCTIVE DDL BOUNDARY');
 assert.ok(destructiveBoundary > cutover.indexOf('release-migrate apply-contract'));
@@ -98,6 +118,15 @@ assert.match(deploy, /dist\/phase1-release-manifest\.js/);
 assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
 assert.match(deploy, /refusing to record a mixed-image Phase 1 observation/);
 assert.match(deploy, /phase1_api_image=\$\{API_IMAGE\}[\s\S]*migration_image=\$\{MIGRATION_IMAGE\}/);
+assert.match(deploy, /phase1_image_digest=\$\(release_image_digest "\$API_IMAGE"\)/);
+assert.match(deploy, /phase1_image_id=\$\(release_image_id "\$API_IMAGE"\)/);
+assert.match(deploy, /phase1_source_sha=\$\{RELEASE_SOURCE_SHA\}/);
+assert.match(deploy, /must use an immutable @sha256 release digest/);
+assert.match(deploy, /org\.opencontainers\.image\.revision/);
+assert.match(deploy, /authorize-phase1-rollback\) do_authorize_phase1_rollback/);
+assert.match(deploy, /ROLLBACK_AUTH_NONCE/);
+assert.match(deploy, /rollback image tag no longer resolves to the authorized image ID/);
+assert.match(deploy, /mv "\$ROLLBACK_AUTH_FILE" "\$ROLLBACK_CONSUMED_FILE"/);
 assert.match(deploy, /--entrypoint node \\\n\s+"\$API_IMAGE" dist\/server\.js/);
 
 for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(status), `data-plane smoke missing ${status}`);

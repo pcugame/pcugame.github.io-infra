@@ -49,6 +49,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
+        id: release-image
         with:
           context: .
           file: apps/api/Dockerfile
@@ -56,10 +57,17 @@ jobs:
           platforms: ${{ vars.API_TARGET_PLATFORMS || 'linux/amd64' }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:latest
-            ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:sha-${{ github.sha }}
+          build-args: |
+            RELEASE_SOURCE_SHA=${{ github.sha }}
           # GHA cache layers: unchanged stages (apt-get, npm ci, sharp workaround) are
           # pulled from cache; only stages touched by the diff re-run. `mode=max` caches
           # intermediate stages too so deps + builder both benefit, not just the final
           # image. Branch-scoped per GHA cache rules; 10 GB soft limit is comfortable.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Record immutable release digest
+        run: |
+          printf 'Use this exact production input (mutable tags are rejected):\n%s@%s\n' \
+            'ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api' \
+            '${{ steps.release-image.outputs.digest }}' >> "${GITHUB_STEP_SUMMARY}"

@@ -24,6 +24,8 @@ PG_VOLUME="gp_pg_data"
 API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"
 HEALTHCHECK_TIMEOUT=90  # seconds
 CUTOVER_STATE_DIR="${CUTOVER_STATE_DIR:-${DEPLOY_DIR}/cutover-state}"
+ROLLBACK_AUTH_FILE="${CUTOVER_STATE_DIR}/phase1-rollback.authorization"
+ROLLBACK_CONSUMED_FILE="${CUTOVER_STATE_DIR}/phase1-rollback.consumed"
 RUNTIME_CONTAINERS=(
   "$API_CONTAINER" "$GAME_WORKER_CONTAINER" "$WEBGL_WORKER_CONTAINER"
   "$VIDEO_WORKER_CONTAINER" "$IMAGE_WORKER_CONTAINER" "$EXPORT_WORKER_CONTAINER"
@@ -43,14 +45,112 @@ load_env() {
 }
 
 require_immutable_release_images() {
+  if [[ "${START_DEDICATED_WORKERS:-true}" == false ]]; then
+    assert_phase1_rollback_authorization
+    return
+  fi
   for pair in "API_IMAGE=${API_IMAGE}" "MIGRATION_IMAGE=${MIGRATION_IMAGE}"; do
     local name="${pair%%=*}"
     local image="${pair#*=}"
-    [[ "$image" == *@sha256:* || "$image" == *:sha-* || "$image" == localhost/*:rollback-* ]] || {
-      echo "ERROR: $name must use an immutable digest or sha-* release tag: $image"
+    [[ "$image" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] || {
+      echo "ERROR: $name must use an immutable @sha256 release digest: $image"
       return 1
     }
   done
+}
+
+release_image_id() {
+  podman image inspect "$1" --format '{{.Id}}'
+}
+
+release_image_digest() {
+  podman image inspect "$1" --format '{{.Digest}}'
+}
+
+validate_release_source_identity() {
+  local image="$1"
+  [[ "${RELEASE_SOURCE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "ERROR: RELEASE_SOURCE_SHA must be the exact lowercase 40-character source commit"
+    return 1
+  }
+  local requested_digest="${image##*@}"
+  local actual_digest
+  actual_digest="$(release_image_digest "$image")"
+  [[ "$actual_digest" == "$requested_digest" ]] || {
+    echo "ERROR: pulled image digest does not match the authorized reference"
+    return 1
+  }
+  local source_revision
+  source_revision="$(podman image inspect "$image" --format '{{ index .Labels "org.opencontainers.image.revision" }}')"
+  [[ "$source_revision" == "$RELEASE_SOURCE_SHA" ]] || {
+    echo "ERROR: image source revision label does not match RELEASE_SOURCE_SHA"
+    return 1
+  }
+}
+
+assert_phase1_rollback_authorization() {
+  [[ "${RELEASE_SCHEMA_PHASE:-}" == phase1 && "${START_DEDICATED_WORKERS:-true}" == false ]] || {
+    echo "ERROR: legacy runtime rollback is permitted only for Phase 1"
+    return 1
+  }
+  [[ "${PULL_API_IMAGE:-true}" == false && "$API_IMAGE" == "$MIGRATION_IMAGE" ]] || {
+    echo "ERROR: Phase 1 rollback must use one already-local API/migration image"
+    return 1
+  }
+  [[ "${ROLLBACK_AUTH_NONCE:-}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "ERROR: Phase 1 rollback requires its one-time authorization nonce"
+    return 1
+  }
+  [[ -f "$ROLLBACK_AUTH_FILE" && ! -e "$ROLLBACK_CONSUMED_FILE" ]] || {
+    echo "ERROR: Phase 1 rollback authorization is absent or already consumed"
+    return 1
+  }
+  local authorized_image_id authorized_nonce extra
+  read -r authorized_image_id authorized_nonce extra < "$ROLLBACK_AUTH_FILE"
+  [[ -z "${extra:-}" && "$authorized_image_id" =~ ^sha256:[0-9a-f]{64}$ && "$authorized_nonce" == "$ROLLBACK_AUTH_NONCE" ]] || {
+    echo "ERROR: Phase 1 rollback authorization is malformed or nonce-mismatched"
+    return 1
+  }
+  local actual_image_id
+  actual_image_id="$(release_image_id "$API_IMAGE")"
+  [[ "$actual_image_id" == "$authorized_image_id" ]] || {
+    echo "ERROR: rollback image tag no longer resolves to the authorized image ID"
+    return 1
+  }
+  AUTHORIZED_ROLLBACK_IMAGE_ID="$authorized_image_id"
+}
+
+consume_phase1_rollback_authorization() {
+  assert_phase1_rollback_authorization
+  mv "$ROLLBACK_AUTH_FILE" "$ROLLBACK_CONSUMED_FILE"
+  chmod 600 "$ROLLBACK_CONSUMED_FILE"
+  # Stop resolving the mutable local tag after authorization is consumed.
+  API_IMAGE="$AUTHORIZED_ROLLBACK_IMAGE_ID"
+  MIGRATION_IMAGE="$AUTHORIZED_ROLLBACK_IMAGE_ID"
+}
+
+do_authorize_phase1_rollback() {
+  local nonce="${1:-}"
+  load_env
+  [[ "$nonce" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "ERROR: authorize-phase1-rollback requires a 64-character lowercase hex nonce"
+    return 1
+  }
+  local current_image_id
+  current_image_id="$(podman inspect "$API_CONTAINER" --format '{{.Image}}' 2>/dev/null)" || {
+    echo "ERROR: current API container is unavailable for rollback authorization"
+    return 1
+  }
+  [[ "$current_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo "ERROR: current API container returned a malformed image ID"
+    return 1
+  }
+  mkdir -p "$CUTOVER_STATE_DIR"
+  umask 077
+  rm -f "$ROLLBACK_CONSUMED_FILE"
+  printf '%s %s\n' "$current_image_id" "$nonce" > "$ROLLBACK_AUTH_FILE"
+  chmod 600 "$ROLLBACK_AUTH_FILE"
+  echo "One-time Phase 1 rollback authorization recorded for the current image ID."
 }
 
 database_url_in_pod() {
@@ -114,6 +214,7 @@ run_release_entry() {
   load_env
   validate_production_boundaries
   require_immutable_release_images
+  validate_release_source_identity "$MIGRATION_IMAGE"
   mkdir -p "$CUTOVER_STATE_DIR"
   assert_postgres_running
   release_common_args
@@ -309,10 +410,8 @@ validate_phase1_runtime_marker() {
 validate_release_image_pair() {
   local release_schema_phase="$1"
   if [[ "${START_DEDICATED_WORKERS:-true}" == false ]]; then
-    [[ "$release_schema_phase" == phase1 && "$API_IMAGE" == localhost/*:rollback-* ]] || {
-      echo "ERROR: disabling dedicated workers is permitted only for the fenced Phase 1 old-image rollback"
-      return 1
-    }
+    [[ "$release_schema_phase" == phase1 ]] || return 1
+    assert_phase1_rollback_authorization
     return 0
   fi
   [[ "$API_IMAGE" == "$MIGRATION_IMAGE" ]] || {
@@ -343,14 +442,15 @@ validate_release_artifacts() {
   validate_release_image_pair "$release_schema_phase"
   pull_release_images
   if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
+    validate_release_source_identity "$API_IMAGE"
     if [[ "$release_schema_phase" == phase1 ]]; then
       validate_phase1_runtime_marker
     fi
     validate_worker_entries "$release_schema_phase"
+    validate_release_entries
   else
     echo "WARNING: Phase 1 runtime marker and dedicated workers are bypassed for explicitly authorized pre-contract legacy rollback"
   fi
-  validate_release_entries
 }
 
 do_release_artifact_preflight() {
@@ -500,12 +600,17 @@ do_mark_read_cutover() {
     return 1
   }
   validate_phase1_runtime_marker
+  validate_release_source_identity "$API_IMAGE"
   run_release_entry dist-release/scripts/release-migrate.js assert-runtime phase1
   podman exec "$API_CONTAINER" wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
   {
     echo "read_cutover_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "phase1_api_image=${API_IMAGE}"
     echo "migration_image=${MIGRATION_IMAGE}"
+    echo "phase1_image_digest=$(release_image_digest "$API_IMAGE")"
+    echo "migration_image_digest=$(release_image_digest "$MIGRATION_IMAGE")"
+    echo "phase1_image_id=$(release_image_id "$API_IMAGE")"
+    echo "phase1_source_sha=${RELEASE_SOURCE_SHA}"
   } > "${CUTOVER_STATE_DIR}/phase1-observation"
   chmod 600 "${CUTOVER_STATE_DIR}/phase1-observation"
   echo "Canonical-first read cutover recorded. Observe zero fallback reads for at least 24 hours."
@@ -684,6 +789,10 @@ do_up() {
   podman pull -q "$PG_IMAGE"
   validate_release_artifacts "$release_schema_phase"
 
+  if [[ "${START_DEDICATED_WORKERS:-true}" == false ]]; then
+    consume_phase1_rollback_authorization
+  fi
+
   # Remove old containers/pod if they exist
   do_down
 
@@ -718,8 +827,12 @@ do_up() {
   # Refuse to start application processes against the wrong schema phase.
   # This is intentionally separate from migration application.
   release_common_args
-  podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" \
-    dist-release/scripts/release-migrate.js assert-runtime "$release_schema_phase"
+  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
+    podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" \
+      dist-release/scripts/release-migrate.js assert-runtime "$release_schema_phase"
+  else
+    echo "Skipping new release CLI schema assertion for the one-time pre-contract legacy rollback."
+  fi
 
   # Fix DATABASE_URL: in a pod, containers share localhost
   # Replace the hostname 'postgres' with '127.0.0.1' since they're in the same pod
@@ -873,6 +986,7 @@ do_up() {
   echo ""
   podman ps --pod --filter "pod=$POD_NAME"
   rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
+  rm -f "$ROLLBACK_AUTH_FILE" "$ROLLBACK_CONSUMED_FILE"
 }
 
 # ── Logs ───────────────────────────────────────────────────────
@@ -917,6 +1031,7 @@ case "${1:-up}" in
   capacity-preflight) do_capacity_preflight ;;
   boundary-preflight) load_env; validate_production_boundaries ;;
   release-artifact-preflight) do_release_artifact_preflight "${2:-}" ;;
+  authorize-phase1-rollback) do_authorize_phase1_rollback "${2:-}" ;;
   verify-final-web) do_verify_final_web "${2:-}" ;;
   mark-read-cutover) do_mark_read_cutover ;;
   # do_up validates every boundary before its own down/up replacement phase.
@@ -924,7 +1039,7 @@ case "${1:-up}" in
   logs)    do_logs "${2:-api}" ;;
   status)  do_status ;;
   *)
-    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|release-artifact-preflight [phase1|phase2]|verify-final-web <git-sha>|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
+    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|release-artifact-preflight [phase1|phase2]|authorize-phase1-rollback <nonce>|verify-final-web <git-sha>|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
     exit 1
     ;;
 esac

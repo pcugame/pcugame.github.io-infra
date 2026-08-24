@@ -1,13 +1,19 @@
 # Upload lifecycle deployment runbook
 
 The API and worker image never runs `prisma migrate deploy` as a startup side
-effect. Pushes build immutable `sha-*` images only. Production schema changes use
-the protected **Authorized API Schema Cutover** workflow and its `production`
-environment approval.
+effect. Pushes build and publish an OCI-revision-labeled image, and the build
+summary exposes its immutable registry digest. Production release commands accept
+that `@sha256` digest only; the mutable `latest` convenience tag is never release
+authority. Schema changes use the protected **Authorized API Schema Cutover**
+workflow and its `production` environment approval.
 
 ## Canonical asset Phase 1 (expand)
 
-Provide the immutable, dedicated Phase 1 API/worker image and dispatch `phase1`.
+Provide the immutable `@sha256` Phase 1 API/worker image, its exact 40-character
+source commit as `phase1_source_sha`, and dispatch `phase1`. Mutable tags,
+including `sha-*`, are rejected. The pulled manifest digest must equal the input
+digest and its OCI `org.opencontainers.image.revision` label must equal the
+attested source commit before any mutation process is stopped.
 The same image is used for API, workers, expand migration, backfill, inventory,
 and reconciliation. It must execute `dist/phase1-release-manifest.js` and print
 exactly `PCU_PHASE1_RUNTIME_V1`; this and the five Phase 1 worker entries are
@@ -34,16 +40,26 @@ file; do not use the TypeScript source runner in production.
 
 ## Canonical asset Phase 2 (contract)
 
-After at least 24 hours with zero fallback telemetry, deploy the final web from
-the exact contract commit by manually dispatching **Deploy Web to GitHub Pages**
-during the Phase 2 maintenance window. Master pushes only build/test through the
-normal checks and never publish this web automatically. Its root
+After at least 24 hours with zero fallback telemetry, dispatch `phase2` with the
+final API/worker `@sha256` digest from the exact contract commit. Do not publish
+the final web first. The protected cutover workflow verifies the final artifact,
+drains API and all workers, takes the backup and inventory, then builds, tests,
+stamps, and publishes the final web from its own `GITHUB_SHA` while mutations
+remain drained. Only that same authorized workflow execution may proceed to the
+web marker gate, contract preflight, destructive DDL, final runtime, and smoke.
+Its root
 `release-sha.txt` must contain exactly the 40-character commit SHA followed by one
 LF. The server rejects redirects, HTML/error bodies, added whitespace, wrong
 lengths, non-200 responses, and responses that exceed the five-second timeout.
-Only after the Phase 2 runtime artifact preflight and mutation drain does the
-workflow verify this web marker; contract preflight and destructive DDL remain
-blocked until it matches.
+The workflow retries this exact check for at most five minutes to allow Pages
+publication to converge; expiry leaves the API/workers drained and does not apply
+the contract.
+Both this workflow and the standalone **Deploy Web to GitHub Pages** workflow use
+the repository-wide `production-object-cutover` concurrency group with
+`cancel-in-progress: false` and the production environment approval. Therefore a
+standalone publication cannot replace `release-sha.txt` between exact-SHA
+verification and contract DDL. Contract preflight and destructive DDL remain
+blocked until the marker matches.
 
 Then copy the exact server-side
 `read_cutover_at` value into the Phase 2 workflow input and enter
@@ -57,8 +73,11 @@ final web has been verified; a Phase 1 observation can therefore never expose th
 new submission lifecycle to an incompatible web build.
 
 The Phase 1 observation record stores both `phase1_api_image` and
-`migration_image`. Recording fails unless they are identical, and Phase 2 checks
-that equality again before draining. `--reset-observation` atomically zeroes every
+`migration_image`, their resolved digests, the local image ID, and the OCI source revision. Recording
+fails unless API and migration references are identical, and Phase 2 checks both
+reference and resolved-digest equality again before draining. It also requires
+the currently running Phase 1 API to retain that exact image ID and source label.
+`--reset-observation` atomically zeroes every
 existing non-empty compatibility metric scope and refreshes its observation time,
 while also ensuring a `scope=''` seed exists for every known producer. A stale or
 nonzero scope therefore cannot survive reset unnoticed.
@@ -72,6 +91,14 @@ master-only database, or a mismatched runtime/schema phase fails closed.
 For a corrected image after this boundary, dispatch `phase2-forward-fix` with
 `I_ACKNOWLEDGE_CONTRACT_FORWARD_FIX`; that path first verifies the contract's DB
 record and never executes legacy preflight code or an old-image rollback.
+
+The sole pre-contract rollback is also identity-fenced. Immediately after the
+Phase 1 artifact preflight, the workflow records the currently running API image
+ID and a random cutover nonce in a mode-0600 server file. A rollback must present
+that nonce and resolve its local convenience tag to the exact recorded image ID;
+the authorization is atomically consumed before replacement begins and deleted
+after success. A forged or retargeted `rollback-*` tag has no authority, and a
+consumed nonce cannot be retried.
 
 Final smoke tests exercise the NAS public origin with GET, HEAD, 304, 206, and 416,
 then repeat the byte checks while the Fastify API container is stopped. This proves
