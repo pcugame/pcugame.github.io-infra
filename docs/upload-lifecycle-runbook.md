@@ -1,32 +1,53 @@
 # Upload lifecycle deployment runbook
 
-The upload-lifecycle migration introduces database claims that old API processes do
-not understand. Use this order for production deployment:
+The API and worker image never runs `prisma migrate deploy` as a startup side
+effect. Pushes build immutable `sha-*` images only. Production schema changes use
+the protected **Authorized API Schema Cutover** workflow and its `production`
+environment approval.
 
-1. Deploy the Web client first. The old API safely ignores `Idempotency-Key`.
-2. Drain every old API instance so old and new upload writers never serve traffic
-   at the same time.
-3. Apply the Prisma migration, then start only the new API version. Each
-   `BackendContext` owns exactly one `UploadLifecycleRuntime`; its startup,
-   periodic maintenance, wake coalescing, abort signal, and shutdown drain cover
-   orphan deletion, stale completion, expired sessions, upload intents,
-   multipart-abort tasks, and untracked-multipart recovery.
-4. Wait at least 60 minutes after the final API replacement before running
-   `reconcile-orphans.ts --apply`. Reconcile is dry-run by default; review a dry-run
-   before every apply run.
+## Canonical asset Phase 1 (expand)
 
-GitHub Actions expresses this ordering only for releases that need it. Add an
-immutable declaration under `.github/release-gates/web-before-api/` in the same
-compatibility-breaking change. That declaration triggers both component workflows,
-and the API deploy job waits for a successful Web deployment of the exact push SHA
-and for the production Pages endpoint to serve that SHA from `release-sha.txt`
-before opening the SSH deployment channel. The declaration affects only the push
-that adds or changes it; later independent API or Web changes remain independent.
+Provide the immutable Phase 1 API/worker image and dispatch `phase1`. The workflow
+performs, in order:
 
-For a manually staged compatibility release, dispatch the Web workflow for the
-target ref first, then dispatch the API workflow for the same ref with
-`require_web_first=true`. The default `false` preserves independent manual API
-hotfixes. Do not select the independent path for a contract-breaking API release.
+1. drain API and every worker while leaving PostgreSQL online;
+2. write a legacy-row audit, a PostgreSQL custom-format backup plus SHA-256, and a
+   Garage object/multipart inventory snapshot;
+3. verify the master migration baseline and apply only the expand migration;
+4. start the Phase 1 API/workers, then drain them for a dry-run and resumable apply
+   backfill;
+5. take a new Garage inventory and verify reconciliation (only the newly reset
+   24-hour fallback-observation window may remain blocked);
+6. restart Phase 1, verify canonical-first reads, and persist the exact observation
+   start in `cutover-state/phase1-observation`.
+
+Backfill progress, failures, and reports live under `cutover-state/`. Do not delete
+them between retries. The compiled CLI is idempotent and resumes from its progress
+file; do not use the TypeScript source runner in production.
+
+## Canonical asset Phase 2 (contract)
+
+After at least 24 hours with zero fallback telemetry, copy the exact server-side
+`read_cutover_at` value into the Phase 2 workflow input and enter
+`I_ATTEST_24H_ZERO_FALLBACK`. The workflow rejects timestamps under 24 hours, stale
+attestations, or values that differ from the server record. It then drains again,
+takes another DB backup and Garage snapshot, runs the object-aware contract
+preflight, applies the contract, verifies its durable `_prisma_migrations` record,
+and starts the Phase 2 runtime.
+
+The contract is a destructive DDL boundary. After it is recorded, old-image
+automatic rollback is forbidden even if health or smoke tests fail. Recover with a
+forward fix, or with an explicitly authorized PostgreSQL backup restore followed
+by Garage state reconciliation. The workflow permits an old-image rollback only
+when the additive Phase 1 runtime fails before contract. A fresh database, a
+master-only database, or a mismatched runtime/schema phase fails closed.
+For a corrected image after this boundary, dispatch `phase2-forward-fix` with
+`I_ACKNOWLEDGE_CONTRACT_FORWARD_FIX`; that path first verifies the contract's DB
+record and never executes legacy preflight code or an old-image rollback.
+
+Final smoke tests exercise the NAS public origin with GET, HEAD, 304, 206, and 416,
+then repeat the byte checks while the Fastify API container is stopped. This proves
+public bytes do not depend on the control plane.
 
 Configure the S3-compatible bucket lifecycle to expire incomplete multipart uploads
 after an operator-approved retention period. This is defense in depth for uploads

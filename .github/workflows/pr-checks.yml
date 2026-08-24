@@ -26,6 +26,9 @@ jobs:
       - name: Test migration policy guard
         run: node --test scripts/check-migration-policy.test.mjs
 
+      - name: Test two-phase release boundaries
+        run: node server/deployment-boundaries.test.mjs && node server/release-cutover.test.mjs
+
       - name: Check migration history and review signals
         env:
           MIGRATION_POLICY_BASE: ${{ github.event.pull_request.base.sha || 'origin/master' }}

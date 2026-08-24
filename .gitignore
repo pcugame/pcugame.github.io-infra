@@ -2,6 +2,7 @@
 node_modules
 apps/api/src/generated/prisma/
 packages/contracts/dist/
+apps/api/dist-release/
 
 # Environment
 .env

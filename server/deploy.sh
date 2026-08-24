@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # deploy.sh — podman-native deployment script (no docker-compose needed)
-# Usage: ./deploy.sh [up|down|restart|logs|status]
+# Usage: ./deploy.sh [up|down|drain|backup|release-*|logs|status]
 # Requires: podman, .env file in the same directory as this script or DEPLOY_DIR env var
 set -euo pipefail
 
@@ -15,15 +15,19 @@ WEBGL_WORKER_CONTAINER="gp-worker-webgl"
 VIDEO_WORKER_CONTAINER="gp-worker-video"
 IMAGE_WORKER_CONTAINER="gp-worker-image"
 EXPORT_WORKER_CONTAINER="gp-worker-export"
+PROJECT_PUBLICATION_WORKER_CONTAINER="gp-worker-project-publication"
 PG_IMAGE="docker.io/library/postgres:16-alpine"
 API_IMAGE="${API_IMAGE:-ghcr.io/pcugame/pcu-graduationproject-v2-api:latest}"
+MIGRATION_IMAGE="${MIGRATION_IMAGE:-$API_IMAGE}"
 PULL_API_IMAGE="${PULL_API_IMAGE:-true}"
 PG_VOLUME="gp_pg_data"
 API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"
 HEALTHCHECK_TIMEOUT=90  # seconds
+CUTOVER_STATE_DIR="${CUTOVER_STATE_DIR:-${DEPLOY_DIR}/cutover-state}"
 RUNTIME_CONTAINERS=(
   "$API_CONTAINER" "$GAME_WORKER_CONTAINER" "$WEBGL_WORKER_CONTAINER"
   "$VIDEO_WORKER_CONTAINER" "$IMAGE_WORKER_CONTAINER" "$EXPORT_WORKER_CONTAINER"
+  "$PROJECT_PUBLICATION_WORKER_CONTAINER"
 )
 
 # ── Load .env ──────────────────────────────────────────────────
@@ -36,6 +40,83 @@ load_env() {
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   set +a
+}
+
+require_immutable_release_images() {
+  for pair in "API_IMAGE=${API_IMAGE}" "MIGRATION_IMAGE=${MIGRATION_IMAGE}"; do
+    local name="${pair%%=*}"
+    local image="${pair#*=}"
+    [[ "$image" == *@sha256:* || "$image" == *:sha-* || "$image" == localhost/*:rollback-* ]] || {
+      echo "ERROR: $name must use an immutable digest or sha-* release tag: $image"
+      return 1
+    }
+  done
+}
+
+database_url_in_pod() {
+  echo "${DATABASE_URL//@postgres:/@127.0.0.1:}"
+}
+
+release_common_args() {
+  local db_url
+  db_url="$(database_url_in_pod)"
+  RELEASE_CONTAINER_ARGS=(
+    --rm --pod "$POD_NAME"
+    -e "NODE_ENV=production"
+    -e "DATABASE_URL=${db_url}"
+    -e "LOG_LEVEL=${LOG_LEVEL:-info}"
+    -e "S3_ENDPOINT=${S3_ENDPOINT}"
+    -e "S3_PUBLIC_SIGNING_ENDPOINT=${S3_PUBLIC_SIGNING_ENDPOINT}"
+    -e "PUBLIC_ASSET_ORIGIN=${PUBLIC_ASSET_ORIGIN}"
+    -e "S3_REGION=${S3_REGION:-garage}"
+    -e "S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}"
+    -e "S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}"
+    -e "S3_BUCKET_PUBLIC=${S3_BUCKET_PUBLIC:-pcu-public}"
+    -e "S3_BUCKET_PROTECTED=${S3_BUCKET_PROTECTED:-pcu-protected}"
+    -e "S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}"
+    -v "${CUTOVER_STATE_DIR}:/release-state:rw,Z"
+  )
+  if [[ -n "${S3_TLS_CA_HOST_PATH:-}" ]]; then
+    RELEASE_CONTAINER_ARGS+=(
+      -e "NODE_EXTRA_CA_CERTS=/run/secrets/garage-ca.pem"
+      -v "${S3_TLS_CA_HOST_PATH}:/run/secrets/garage-ca.pem:ro,Z"
+    )
+  fi
+}
+
+assert_postgres_running() {
+  local state
+  state=$(podman inspect --format '{{.State.Status}}' "$PG_CONTAINER" 2>/dev/null || echo missing)
+  [[ "$state" == running ]] || {
+    echo "ERROR: PostgreSQL must already be running for a release operation (state: $state)"
+    return 1
+  }
+  wait_for_pg
+}
+
+assert_mutation_drained() {
+  [[ -f "${CUTOVER_STATE_DIR}/mutation-drained" ]] || {
+    echo "ERROR: mutation drain marker is absent; run '$0 drain' first"
+    return 1
+  }
+  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
+    [[ "$(podman inspect --format '{{.State.Status}}' "$ctr" 2>/dev/null || echo missing)" != running ]] || {
+      echo "ERROR: mutation-capable process is still running: $ctr"
+      return 1
+    }
+  done
+}
+
+run_release_entry() {
+  local entry="$1"
+  shift
+  load_env
+  validate_production_boundaries
+  require_immutable_release_images
+  mkdir -p "$CUTOVER_STATE_DIR"
+  assert_postgres_running
+  release_common_args
+  podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" "$entry" "$@"
 }
 
 validate_production_boundaries() {
@@ -60,6 +141,103 @@ validate_production_boundaries() {
   fi
 }
 
+require_unsigned_integer() {
+  local name="$1"
+  local value="${!name:-}"
+  [[ "$value" =~ ^[0-9]+$ ]] || {
+    echo "ERROR: $name must be an unsigned integer"
+    return 1
+  }
+}
+
+require_exact_capacity_value() {
+  local name="$1"
+  local expected="$2"
+  require_unsigned_integer "$name" || return 1
+  [[ "${!name}" == "$expected" ]] || {
+    echo "ERROR: $name must equal $expected for this release (got ${!name})"
+    return 1
+  }
+}
+
+# Fail before the current deployment is stopped when process limits cannot
+# cover API-accepted work or when a worker destination lacks staging space.
+# Garage is on the NAS, so its free bytes are measured there and attested here;
+# the API host must never mount the raw Garage data volume to perform this check.
+validate_capacity_boundaries() {
+  local nas_export_host_path="$1"
+  local gib=$((1024 * 1024 * 1024))
+  local mib=$((1024 * 1024))
+
+  for obsolete in DIRECT_UPLOAD_PART_URL_WINDOW_MS DIRECT_UPLOAD_PART_URL_MAX; do
+    if [[ -n "${!obsolete+x}" ]]; then
+      echo "ERROR: obsolete $obsolete is set; use DIRECT_UPLOAD_PART_URL_REFRESH_MAX=64"
+      return 1
+    fi
+  done
+
+  require_exact_capacity_value DIRECT_UPLOAD_PART_URL_REFRESH_MAX 64 || return 1
+  require_exact_capacity_value DIRECT_UPLOAD_WORKER_TEMP_MAX_MB 6144 || return 1
+  require_exact_capacity_value EXPORT_WORKER_MAX_OBJECT_BYTES 5368709120 || return 1
+  require_exact_capacity_value EXPORT_WORKER_MAX_JOB_BYTES 34359738368 || return 1
+  for name in UPLOAD_USER_GAME_MAX_MB UPLOAD_PRIVILEGED_GAME_MAX_MB \
+    NAS_EXPORT_STAGING_HEADROOM_BYTES GARAGE_DEPLOYMENT_HEADROOM_BYTES \
+    GARAGE_CAPACITY_ATTESTED_AVAILABLE_BYTES; do
+    require_unsigned_integer "$name" || return 1
+  done
+
+  local max_accepted_archive_mb="$UPLOAD_USER_GAME_MAX_MB"
+  if (( UPLOAD_PRIVILEGED_GAME_MAX_MB > max_accepted_archive_mb )); then
+    max_accepted_archive_mb="$UPLOAD_PRIVILEGED_GAME_MAX_MB"
+  fi
+  if (( max_accepted_archive_mb > DIRECT_UPLOAD_WORKER_TEMP_MAX_MB )); then
+    echo "ERROR: GAME/WEBGL accepted archive maximum exceeds the 6 GiB worker tmpfs budget"
+    return 1
+  fi
+  if (( max_accepted_archive_mb * mib > EXPORT_WORKER_MAX_OBJECT_BYTES )); then
+    echo "ERROR: accepted GAME/WebGL object maximum exceeds EXPORT_WORKER_MAX_OBJECT_BYTES"
+    return 1
+  fi
+  if (( EXPORT_WORKER_MAX_JOB_BYTES < EXPORT_WORKER_MAX_OBJECT_BYTES )); then
+    echo "ERROR: EXPORT_WORKER_MAX_JOB_BYTES must cover EXPORT_WORKER_MAX_OBJECT_BYTES"
+    return 1
+  fi
+  if (( NAS_EXPORT_STAGING_HEADROOM_BYTES < 1 || GARAGE_DEPLOYMENT_HEADROOM_BYTES < 1 )); then
+    echo "ERROR: NAS and Garage capacity headroom must each be positive"
+    return 1
+  fi
+
+  [[ -d "$nas_export_host_path" ]] || {
+    echo "ERROR: NAS export path does not exist for capacity preflight: $nas_export_host_path"
+    return 1
+  }
+  local nas_available_kib
+  nas_available_kib="$(df -Pk -- "$nas_export_host_path" | awk 'NR == 2 { print $4 }')"
+  [[ "$nas_available_kib" =~ ^[0-9]+$ ]] || {
+    echo "ERROR: could not determine NAS staging free space at $nas_export_host_path"
+    return 1
+  }
+  local nas_available_bytes=$((nas_available_kib * 1024))
+  local nas_required_bytes=$((EXPORT_WORKER_MAX_JOB_BYTES + NAS_EXPORT_STAGING_HEADROOM_BYTES))
+  if (( nas_available_bytes < nas_required_bytes )); then
+    echo "ERROR: NAS staging requires ${nas_required_bytes} free bytes; found ${nas_available_bytes}"
+    return 1
+  fi
+
+  local garage_required_bytes=$((15 * gib + GARAGE_DEPLOYMENT_HEADROOM_BYTES))
+  if (( GARAGE_CAPACITY_ATTESTED_AVAILABLE_BYTES < garage_required_bytes )); then
+    echo "ERROR: Garage requires 15 GiB per WebGL deployment plus headroom (${garage_required_bytes} bytes); NAS attestation reports ${GARAGE_CAPACITY_ATTESTED_AVAILABLE_BYTES}"
+    return 1
+  fi
+  echo "Capacity preflight passed: NAS staging=${nas_available_bytes} bytes, Garage attested=${GARAGE_CAPACITY_ATTESTED_AVAILABLE_BYTES} bytes."
+}
+
+do_capacity_preflight() {
+  load_env
+  local nas_export_host_path="${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
+  validate_capacity_boundaries "$nas_export_host_path"
+}
+
 # Validate every dedicated process before stopping the current deployment.
 # In particular, a library-only image-worker module must not masquerade as a
 # runnable worker and leave IMAGE/POSTER jobs permanently unprocessed.
@@ -69,6 +247,7 @@ validate_worker_entries() {
     const entries = [
       "dist/game-validation-worker.js", "dist/webgl-worker.js",
       "dist/video-worker.js", "dist/image-worker.js", "dist/export-worker.js",
+      "dist/project-publication-worker.js",
     ];
     for (const entry of entries) {
       if (!fs.existsSync(entry)) throw new Error(`missing worker entry: ${entry}`);
@@ -76,6 +255,150 @@ validate_worker_entries() {
       if (!source.includes("process.argv[1]")) throw new Error(`worker is not directly executable: ${entry}`);
     }
   '
+}
+
+validate_release_entries() {
+  podman run --rm --entrypoint node "$MIGRATION_IMAGE" -e '
+    const fs = require("node:fs");
+    const entries = [
+      "dist-release/scripts/backfill-canonical-assets.js",
+      "dist-release/scripts/preflight-canonical-contract.js",
+      "dist-release/scripts/release-migrate.js",
+      "dist-release/scripts/snapshot-garage-inventory.js",
+      "dist-release/scripts/verify-cutover-report.js",
+    ];
+    for (const entry of entries) {
+      if (!fs.existsSync(entry)) throw new Error(`missing compiled release CLI: ${entry}`);
+    }
+  '
+}
+
+# Stop every process that can mutate domain/object state while preserving the
+# PostgreSQL container and pod for backups, audits, and explicit migrations.
+do_drain() {
+  load_env
+  mkdir -p "$CUTOVER_STATE_DIR"
+  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
+    podman stop "$ctr" --time 30 2>/dev/null || true
+  done
+  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
+    [[ "$(podman inspect --format '{{.State.Status}}' "$ctr" 2>/dev/null || echo missing)" != running ]] || {
+      echo "ERROR: failed to drain mutation process $ctr"
+      return 1
+    }
+  done
+  {
+    echo "drained_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "api_image=${API_IMAGE}"
+  } > "${CUTOVER_STATE_DIR}/mutation-drained"
+  chmod 600 "${CUTOVER_STATE_DIR}/mutation-drained"
+  echo "Mutation drain complete; PostgreSQL remains online."
+}
+
+do_backup() {
+  local label="${1:-manual}"
+  load_env
+  assert_postgres_running
+  assert_mutation_drained
+  [[ "$label" =~ ^[A-Za-z0-9._-]+$ ]] || {
+    echo "ERROR: backup label contains unsupported characters"
+    return 1
+  }
+  local backup_dir="${DEPLOY_DIR}/backups"
+  local backup_file="${backup_dir}/${label}-$(date -u +%Y%m%dT%H%M%SZ).dump"
+  umask 077
+  mkdir -p "$backup_dir"
+  if ! podman exec "$PG_CONTAINER" sh -c 'exec pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$backup_file"; then
+    rm -f "$backup_file"
+    echo "ERROR: PostgreSQL backup failed"
+    return 1
+  fi
+  [[ -s "$backup_file" ]] || {
+    rm -f "$backup_file"
+    echo "ERROR: PostgreSQL backup is empty"
+    return 1
+  }
+  sha256sum "$backup_file" > "${backup_file}.sha256"
+  echo "PostgreSQL backup: $backup_file"
+}
+
+do_legacy_audit() {
+  load_env
+  assert_postgres_running
+  assert_mutation_drained
+  mkdir -p "$CUTOVER_STATE_DIR"
+  local report="${CUTOVER_STATE_DIR}/legacy-audit-$(date -u +%Y%m%dT%H%M%SZ).tsv"
+  podman exec -i "$PG_CONTAINER" psql \
+    -X --set ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    --csv > "$report" <<'SQL'
+SELECT 'assets_total' AS metric, count(*)::text AS value FROM assets
+UNION ALL SELECT 'assets_with_storage_key', count(*)::text FROM assets WHERE storage_key IS NOT NULL
+UNION ALL SELECT 'videos_with_playback_key', count(*)::text FROM assets WHERE playback_storage_key IS NOT NULL
+UNION ALL SELECT 'projects_with_webgl_entry', count(*)::text FROM projects WHERE webgl_entry_key <> ''
+UNION ALL SELECT 'active_legacy_upload_sessions', count(*)::text FROM game_upload_sessions
+  WHERE status NOT IN ('COMPLETED', 'CANCELLED', 'FAILED', 'RESOLVED');
+SQL
+  chmod 600 "$report"
+  echo "Legacy audit: $report"
+}
+
+do_release_migration() {
+  local action="${1:-status}"
+  [[ "$action" == status || "$action" == apply-expand || "$action" == apply-contract ]] || {
+    echo "ERROR: release-migrate action must be status, apply-expand, or apply-contract"
+    return 1
+  }
+  if [[ "$action" != status ]]; then
+    assert_mutation_drained
+  fi
+  run_release_entry dist-release/scripts/release-migrate.js "$action"
+}
+
+do_release_assert() {
+  local phase="${1:-}"
+  [[ "$phase" == phase1 || "$phase" == phase2 ]] || {
+    echo "ERROR: release-assert requires phase1 or phase2"
+    return 1
+  }
+  run_release_entry dist-release/scripts/release-migrate.js assert-runtime "$phase"
+}
+
+do_inventory_snapshot() {
+  assert_mutation_drained
+  local output="${1:-/release-state/garage-inventory-$(date -u +%Y%m%dT%H%M%SZ).json}"
+  [[ "$output" == /release-state/* ]] || {
+    echo "ERROR: inventory output must be under /release-state"
+    return 1
+  }
+  run_release_entry dist-release/scripts/snapshot-garage-inventory.js "--output=$output"
+}
+
+do_backfill() {
+  assert_mutation_drained
+  run_release_entry dist-release/scripts/backfill-canonical-assets.js "$@"
+}
+
+do_contract_preflight() {
+  assert_mutation_drained
+  run_release_entry dist-release/scripts/preflight-canonical-contract.js "$@"
+}
+
+do_mark_read_cutover() {
+  load_env
+  mkdir -p "$CUTOVER_STATE_DIR"
+  [[ "$(podman inspect --format '{{.State.Status}}' "$API_CONTAINER" 2>/dev/null || echo missing)" == running ]] || {
+    echo "ERROR: phase1 API is not running"
+    return 1
+  }
+  run_release_entry dist-release/scripts/release-migrate.js assert-runtime phase1
+  podman exec "$API_CONTAINER" wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
+  {
+    echo "read_cutover_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "phase1_api_image=${API_IMAGE}"
+    echo "migration_image=${MIGRATION_IMAGE}"
+  } > "${CUTOVER_STATE_DIR}/phase1-observation"
+  chmod 600 "${CUTOVER_STATE_DIR}/phase1-observation"
+  echo "Canonical-first read cutover recorded. Observe zero fallback reads for at least 24 hours."
 }
 
 # ── Wait for PostgreSQL ────────────────────────────────────────
@@ -156,9 +479,21 @@ verify_running() {
 do_up() {
   load_env
   validate_production_boundaries
+  require_immutable_release_images
+  mkdir -p "$CUTOVER_STATE_DIR"
+
+  local release_schema_phase="${RELEASE_SCHEMA_PHASE:-}"
+  [[ "$release_schema_phase" == phase1 || "$release_schema_phase" == phase2 ]] || {
+    echo "ERROR: RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2"
+    return 1
+  }
 
   local nas_export_host_path="${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
   local nas_export_container_path="${NAS_EXPORT_PATH:-/nas}"
+
+  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
+    validate_capacity_boundaries "$nas_export_host_path"
+  fi
 
   # Ensure volume exists
   podman volume inspect "$PG_VOLUME" &>/dev/null || podman volume create "$PG_VOLUME"
@@ -170,12 +505,21 @@ do_up() {
   podman pull -q "$PG_IMAGE"
   if [[ "$PULL_API_IMAGE" == "true" ]]; then
     podman pull -q "$API_IMAGE"
+    if [[ "$MIGRATION_IMAGE" != "$API_IMAGE" ]]; then
+      podman pull -q "$MIGRATION_IMAGE"
+    fi
   else
     podman image inspect "$API_IMAGE" >/dev/null
+    podman image inspect "$MIGRATION_IMAGE" >/dev/null
     echo "Using existing local API image: $API_IMAGE"
   fi
 
-  validate_worker_entries
+  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
+    validate_worker_entries
+  else
+    echo "WARNING: dedicated workers disabled for explicitly authorized pre-contract legacy rollback"
+  fi
+  validate_release_entries
 
   # Remove old containers/pod if they exist
   do_down
@@ -208,6 +552,12 @@ do_up() {
   # Wait for PostgreSQL to accept connections
   wait_for_pg
 
+  # Refuse to start application processes against the wrong schema phase.
+  # This is intentionally separate from migration application.
+  release_common_args
+  podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" \
+    dist-release/scripts/release-migrate.js assert-runtime "$release_schema_phase"
+
   # Fix DATABASE_URL: in a pod, containers share localhost
   # Replace the hostname 'postgres' with '127.0.0.1' since they're in the same pod
   local db_url="${DATABASE_URL//\@postgres:/\@127.0.0.1:}"
@@ -227,6 +577,12 @@ do_up() {
     -e "API_PUBLIC_URL=${API_PUBLIC_URL}"
     -e "WEB_PUBLIC_URL=${WEB_PUBLIC_URL}"
     -e "CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}"
+    -e "DIRECT_UPLOAD_PART_URL_REFRESH_MAX=${DIRECT_UPLOAD_PART_URL_REFRESH_MAX}"
+    -e "UPLOAD_USER_GAME_MAX_MB=${UPLOAD_USER_GAME_MAX_MB}"
+    -e "UPLOAD_PRIVILEGED_GAME_MAX_MB=${UPLOAD_PRIVILEGED_GAME_MAX_MB}"
+    -e "DIRECT_UPLOAD_WORKER_TEMP_MAX_MB=${DIRECT_UPLOAD_WORKER_TEMP_MAX_MB}"
+    -e "EXPORT_WORKER_MAX_OBJECT_BYTES=${EXPORT_WORKER_MAX_OBJECT_BYTES}"
+    -e "EXPORT_WORKER_MAX_JOB_BYTES=${EXPORT_WORKER_MAX_JOB_BYTES}"
   )
   local ca_args=()
   if [[ -n "${S3_TLS_CA_HOST_PATH:-}" ]]; then
@@ -255,7 +611,8 @@ do_up() {
     -e "COOKIE_SAME_SITE=${COOKIE_SAME_SITE:-none}" \
     -e "GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}" \
     -e "ALLOWED_GOOGLE_HD=${ALLOWED_GOOGLE_HD:-}" \
-    "$API_IMAGE"
+    --entrypoint node \
+    "$API_IMAGE" dist/server.js
 
   # Verify API container is actually running
   verify_running "$API_CONTAINER" "API"
@@ -291,20 +648,29 @@ do_up() {
       --restart unless-stopped \
       "${common_env[@]}" \
       "${ca_args[@]}" \
-      --tmpfs /tmp:rw,noexec,nosuid,size=4g \
       "$@" \
       --entrypoint node \
       "$API_IMAGE" "$entry"
     verify_running "$container" "$label"
   }
 
-  start_worker "$GAME_WORKER_CONTAINER" "GAME validation worker" dist/game-validation-worker.js
-  start_worker "$WEBGL_WORKER_CONTAINER" "WebGL worker" dist/webgl-worker.js
-  start_worker "$VIDEO_WORKER_CONTAINER" "VIDEO worker" dist/video-worker.js
-  start_worker "$IMAGE_WORKER_CONTAINER" "IMAGE/PDF worker" dist/image-worker.js
-  start_worker "$EXPORT_WORKER_CONTAINER" "export worker" dist/export-worker.js \
-    -e "NAS_EXPORT_ROOT=${nas_export_container_path}" \
-    -v "${nas_export_host_path}:${nas_export_container_path}:rw,Z"
+  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
+    # These are independent, container-owned tmpfs mounts. They are neither a
+    # shared host mount nor a shared 4 GiB pool between GAME and WebGL.
+    start_worker "$GAME_WORKER_CONTAINER" "GAME validation worker" dist/game-validation-worker.js \
+      --tmpfs /tmp:rw,noexec,nosuid,size=6g
+    start_worker "$WEBGL_WORKER_CONTAINER" "WebGL worker" dist/webgl-worker.js \
+      --tmpfs /tmp:rw,noexec,nosuid,size=6g
+    start_worker "$VIDEO_WORKER_CONTAINER" "VIDEO worker" dist/video-worker.js \
+      --tmpfs /tmp:rw,noexec,nosuid,size=2g
+    start_worker "$IMAGE_WORKER_CONTAINER" "IMAGE/PDF worker" dist/image-worker.js \
+      --tmpfs /tmp:rw,noexec,nosuid,size=512m
+    start_worker "$EXPORT_WORKER_CONTAINER" "export worker" dist/export-worker.js \
+      -e "NAS_EXPORT_ROOT=${nas_export_container_path}" \
+      -v "${nas_export_host_path}:${nas_export_container_path}:rw,Z"
+    start_worker "$PROJECT_PUBLICATION_WORKER_CONTAINER" "project publication worker" \
+      dist/project-publication-worker.js
+  fi
 
   # ── Generate systemd service with restart delay ──
   echo "Generating systemd service for pod..."
@@ -340,6 +706,7 @@ do_up() {
   podman pod ps --filter "name=$POD_NAME"
   echo ""
   podman ps --pod --filter "pod=$POD_NAME"
+  rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
 }
 
 # ── Logs ───────────────────────────────────────────────────────
@@ -373,11 +740,21 @@ do_status() {
 case "${1:-up}" in
   up)      do_up ;;
   down)    do_down ;;
+  drain)   do_drain ;;
+  backup)  do_backup "${2:-manual}" ;;
+  legacy-audit) do_legacy_audit ;;
+  release-migrate) do_release_migration "${2:-status}" ;;
+  release-assert) do_release_assert "${2:-}" ;;
+  inventory) do_inventory_snapshot "${2:-}" ;;
+  backfill) shift; do_backfill "$@" ;;
+  contract-preflight) shift; do_contract_preflight "$@" ;;
+  capacity-preflight) do_capacity_preflight ;;
+  mark-read-cutover) do_mark_read_cutover ;;
   restart) do_down; do_up ;;
   logs)    do_logs "${2:-api}" ;;
   status)  do_status ;;
   *)
-    echo "Usage: $0 {up|down|restart|logs [api|pg]|status}"
+    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
     exit 1
     ;;
 esac
