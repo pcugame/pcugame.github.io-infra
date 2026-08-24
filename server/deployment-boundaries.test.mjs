@@ -287,7 +287,7 @@ if [ "\${1:-}" = pull ]; then exit 0; fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   case " $* " in
     *"{{.Digest}}"*) printf '%s\\n' "\${FAKE_IMAGE_DIGEST:-}" ;;
-    *"{{.Id}}"*) printf '%s\\n' "\${FAKE_IMAGE_ID:-}" ;;
+    *"{{.Id}}"*) printf '%s\\n' "\${FAKE_IMAGE_ID:-${'3'.repeat(64)}}" ;;
     *"org.opencontainers.image.revision"*) printf '%s\\n' "\${FAKE_IMAGE_REVISION:-}" ;;
     *) : ;;
   esac
@@ -295,7 +295,7 @@ if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
 fi
 if [ "\${1:-}" = inspect ]; then
   case " $* " in
-    *"{{.Image}}"*) printf '%s\\n' "\${FAKE_CONTAINER_IMAGE_ID:-}" ;;
+    *"{{.Image}}"*) printf '%s\\n' "\${FAKE_CONTAINER_IMAGE_ID:-${'3'.repeat(64)}}" ;;
     *"{{.State.Status}}"*) printf '%s\\n' running ;;
     *) : ;;
   esac
@@ -312,7 +312,7 @@ await chmod(fakePodman, 0o755);
 const releaseDigest = `sha256:${'1'.repeat(64)}`;
 const releaseImage = `ghcr.io/pcugame/pcu-graduationproject-v2-api@${releaseDigest}`;
 const releaseSourceSha = '2'.repeat(40);
-const releaseImageId = `sha256:${'3'.repeat(64)}`;
+const releaseImageId = '3'.repeat(64);
 const releaseEnv = {
 	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
 	API_IMAGE: releaseImage,
@@ -320,7 +320,6 @@ const releaseEnv = {
 	RELEASE_SOURCE_SHA: releaseSourceSha,
 	FAKE_IMAGE_DIGEST: releaseDigest,
 	FAKE_IMAGE_REVISION: releaseSourceSha,
-	FAKE_IMAGE_ID: releaseImageId,
 };
 const exactRelease = await runBoundary(boundaryFixture, 'release-artifact-preflight', releaseEnv, ['phase2']);
 assert.equal(exactRelease.status, 0, exactRelease.stderr || exactRelease.stdout);
@@ -367,10 +366,24 @@ const rollbackNonce = '6'.repeat(64);
 const rollbackImage = 'localhost/pcu-api:rollback-test';
 const authorizeRollback = await runBoundary(boundaryFixture, 'authorize-phase1-rollback', {
 	...releaseEnv,
-	FAKE_CONTAINER_IMAGE_ID: releaseImageId,
 }, [rollbackNonce]);
 assert.equal(authorizeRollback.status, 0, authorizeRollback.stderr || authorizeRollback.stdout);
 assert.equal(spawnSync('stat', ['-c', '%a', join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization')], { encoding: 'utf8' }).stdout.trim(), '600');
+assert.match(
+	await readFile(join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization'), 'utf8'),
+	new RegExp(`^${releaseImageId} ${rollbackNonce}\\n$`),
+	'bare Podman image ID was not persisted canonically',
+);
+const prefixedAuthorizeRollback = await runBoundary(boundaryFixture, 'authorize-phase1-rollback', {
+	...releaseEnv,
+	FAKE_CONTAINER_IMAGE_ID: `sha256:${releaseImageId}`,
+}, [rollbackNonce]);
+assert.equal(prefixedAuthorizeRollback.status, 0, prefixedAuthorizeRollback.stderr || prefixedAuthorizeRollback.stdout);
+assert.match(
+	await readFile(join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization'), 'utf8'),
+	new RegExp(`^${releaseImageId} ${rollbackNonce}\\n$`),
+	'prefixed Podman image ID was not normalized to the canonical bare ID',
+);
 
 const rollbackEnv = {
 	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
@@ -389,15 +402,20 @@ assert.notEqual(retargetedRollback.status, 0, 'forged rollback tag unexpectedly 
 assert.match(`${retargetedRollback.stdout}\n${retargetedRollback.stderr}`, /no longer resolves to the authorized image ID/);
 const exactRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
 	...rollbackEnv,
-	FAKE_IMAGE_ID: releaseImageId,
+	FAKE_IMAGE_ID: `sha256:${releaseImageId}`,
 }, ['phase1']);
 assert.equal(exactRollback.status, 0, exactRollback.stderr || exactRollback.stdout);
+const malformedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
+	...rollbackEnv,
+	FAKE_IMAGE_ID: `sha512:${releaseImageId}`,
+}, ['phase1']);
+assert.notEqual(malformedRollback.status, 0, 'malformed local image ID unexpectedly passed');
+assert.match(`${malformedRollback.stdout}\n${malformedRollback.stderr}`, /malformed local image ID/);
 const fakeSystemctl = join(fakeBin, 'systemctl');
 await writeFile(fakeSystemctl, '#!/bin/sh\nexit 0\n');
 await chmod(fakeSystemctl, 0o755);
 const consumedRollback = await runBoundary(boundaryFixture, 'up', {
 	...rollbackEnv,
-	FAKE_IMAGE_ID: releaseImageId,
 });
 assert.equal(consumedRollback.status, 0, consumedRollback.stderr || consumedRollback.stdout);
 assert.equal(spawnSync('test', ['!', '-e', join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization')]).status, 0);

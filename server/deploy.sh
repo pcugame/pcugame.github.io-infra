@@ -61,7 +61,21 @@ require_immutable_release_images() {
 }
 
 release_image_id() {
-  podman image inspect "$1" --format '{{.Id}}'
+  local raw_image_id
+  raw_image_id="$(podman image inspect "$1" --format '{{.Id}}')" || return 1
+  normalize_local_image_id "$raw_image_id"
+}
+
+normalize_local_image_id() {
+  local raw_image_id="${1:-}"
+  local image_id="${raw_image_id#sha256:}"
+  [[ "$image_id" =~ ^[0-9a-f]{64}$ && ( "$raw_image_id" == "$image_id" || "$raw_image_id" == "sha256:${image_id}" ) ]] || {
+    echo "ERROR: Podman returned a malformed local image ID" >&2
+    return 1
+  }
+  # Podman versions differ between a bare hex ID and sha256:<hex>. Persist
+  # and compare the bare 64-hex form so both representations converge.
+  printf '%s\n' "$image_id"
 }
 
 release_image_digest() {
@@ -108,8 +122,12 @@ assert_phase1_rollback_authorization() {
   }
   local authorized_image_id authorized_nonce extra
   read -r authorized_image_id authorized_nonce extra < "$ROLLBACK_AUTH_FILE"
-  [[ -z "${extra:-}" && "$authorized_image_id" =~ ^sha256:[0-9a-f]{64}$ && "$authorized_nonce" == "$ROLLBACK_AUTH_NONCE" ]] || {
+  [[ -z "${extra:-}" && "$authorized_nonce" == "$ROLLBACK_AUTH_NONCE" ]] || {
     echo "ERROR: Phase 1 rollback authorization is malformed or nonce-mismatched"
+    return 1
+  }
+  authorized_image_id="$(normalize_local_image_id "$authorized_image_id")" || {
+    echo "ERROR: Phase 1 rollback authorization contains a malformed image ID"
     return 1
   }
   local actual_image_id
@@ -137,12 +155,12 @@ do_authorize_phase1_rollback() {
     echo "ERROR: authorize-phase1-rollback requires a 64-character lowercase hex nonce"
     return 1
   }
-  local current_image_id
-  current_image_id="$(podman inspect "$API_CONTAINER" --format '{{.Image}}' 2>/dev/null)" || {
+  local current_image_id raw_current_image_id
+  raw_current_image_id="$(podman inspect "$API_CONTAINER" --format '{{.Image}}' 2>/dev/null)" || {
     echo "ERROR: current API container is unavailable for rollback authorization"
     return 1
   }
-  [[ "$current_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  current_image_id="$(normalize_local_image_id "$raw_current_image_id")" || {
     echo "ERROR: current API container returned a malformed image ID"
     return 1
   }
