@@ -13,18 +13,27 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createPrismaClientForDatabase } from '../src/lib/prisma-client.js';
 
-const BASELINE_MIGRATION = '20260812010000_deterministic_responsive_images';
-const CANONICAL_EXPAND_MIGRATION = '20260821000000_canonical_asset_expand';
-const PROJECT_DRAFT_MIGRATION = '20260821400000_project_submission_draft_status';
-const PROJECT_SUBMISSION_MIGRATION = '20260821500000_project_submission_expand';
-const PROJECT_FINALIZING_MIGRATION = '20260821550000_project_submission_finalizing_status';
-const PHASE1_TARGET_MIGRATION = '20260821700000_canonical_object_relocation_expand';
-const CONTRACT_MIGRATION = '20260822000000_canonical_asset_contract';
+export const BASELINE_MIGRATION = '20260812010000_deterministic_responsive_images';
+export const CANONICAL_EXPAND_MIGRATION = '20260821000000_canonical_asset_expand';
+export const PROJECT_DRAFT_MIGRATION = '20260821400000_project_submission_draft_status';
+export const PROJECT_SUBMISSION_MIGRATION = '20260821500000_project_submission_expand';
+export const PROJECT_FINALIZING_MIGRATION = '20260821550000_project_submission_finalizing_status';
+export const PROJECT_PUBLICATION_MIGRATION = '20260821600000_project_publication_expand';
+export const PHASE1_TARGET_MIGRATION = '20260821700000_canonical_object_relocation_expand';
+export const REQUIRED_EXPAND_MIGRATIONS = [
+	CANONICAL_EXPAND_MIGRATION,
+	PROJECT_DRAFT_MIGRATION,
+	PROJECT_SUBMISSION_MIGRATION,
+	PROJECT_FINALIZING_MIGRATION,
+	PROJECT_PUBLICATION_MIGRATION,
+	PHASE1_TARGET_MIGRATION,
+] as const;
+export const CONTRACT_MIGRATION = '20260822000000_canonical_asset_contract';
 
 type RuntimePhase = 'phase1' | 'phase2';
 type Command = 'status' | 'apply-expand' | 'apply-contract' | 'assert-runtime';
 
-type MigrationRow = {
+export type MigrationRow = {
 	migration_name: string;
 	finished_at: Date | null;
 	rolled_back_at: Date | null;
@@ -73,37 +82,24 @@ function completed(rows: readonly MigrationRow[]): Set<string> {
 	return new Set(rows.filter((row) => row.finished_at && !row.rolled_back_at).map((row) => row.migration_name));
 }
 
-function releaseStatus(rows: readonly MigrationRow[]) {
+export function releaseStatus(rows: readonly MigrationRow[]) {
 	const applied = completed(rows);
 	return {
 		baseline: applied.has(BASELINE_MIGRATION),
 		canonicalExpand: applied.has(CANONICAL_EXPAND_MIGRATION),
 		projectDraftExpand: applied.has(PROJECT_DRAFT_MIGRATION),
 		projectSubmissionExpand: applied.has(PROJECT_SUBMISSION_MIGRATION),
-		projectPublicationExpand: applied.has(PHASE1_TARGET_MIGRATION),
-		expand: [
-			CANONICAL_EXPAND_MIGRATION,
-			PROJECT_DRAFT_MIGRATION,
-			PROJECT_SUBMISSION_MIGRATION,
-			PROJECT_FINALIZING_MIGRATION,
-			PHASE1_TARGET_MIGRATION,
-		]
-			.every((migration) => applied.has(migration)),
+		projectPublicationExpand: applied.has(PROJECT_PUBLICATION_MIGRATION),
+		canonicalObjectRelocationExpand: applied.has(PHASE1_TARGET_MIGRATION),
+		expand: REQUIRED_EXPAND_MIGRATIONS.every((migration) => applied.has(migration)),
 		contract: applied.has(CONTRACT_MIGRATION),
 		completedMigrations: [...applied].sort(),
 	};
 }
 
-function assertNoFailedReleaseMigration(rows: readonly MigrationRow[]): void {
+export function assertNoFailedReleaseMigration(rows: readonly MigrationRow[]): void {
 	const failed = rows.filter((row) => (
-		([
-			CANONICAL_EXPAND_MIGRATION,
-			PROJECT_DRAFT_MIGRATION,
-			PROJECT_SUBMISSION_MIGRATION,
-			PROJECT_FINALIZING_MIGRATION,
-			PHASE1_TARGET_MIGRATION,
-			CONTRACT_MIGRATION,
-		] as string[]).includes(row.migration_name)
+		([...REQUIRED_EXPAND_MIGRATIONS, CONTRACT_MIGRATION] as string[]).includes(row.migration_name)
 		&& (!row.finished_at || row.rolled_back_at)
 	));
 	if (failed.length > 0) {
@@ -169,7 +165,7 @@ async function verifyStorageBucketRegistry(databaseUrl: string): Promise<void> {
 	}
 }
 
-function assertRuntime(rows: readonly MigrationRow[], phase: RuntimePhase): void {
+export function assertRuntime(rows: readonly MigrationRow[], phase: RuntimePhase): void {
 	assertNoFailedReleaseMigration(rows);
 	const status = releaseStatus(rows);
 	if (!status.baseline) throw new Error(`required master baseline ${BASELINE_MIGRATION} is not applied`);
@@ -264,10 +260,12 @@ async function main(): Promise<void> {
 	console.log(JSON.stringify({ event: 'release_migration_applied_and_recorded', command, ...status }, null, 2));
 }
 
-void main().catch((error) => {
-	console.error(JSON.stringify({
-		event: 'release_migration_failed_closed',
-		message: error instanceof Error ? error.message : String(error),
-	}));
-	process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	void main().catch((error) => {
+		console.error(JSON.stringify({
+			event: 'release_migration_failed_closed',
+			message: error instanceof Error ? error.message : String(error),
+		}));
+		process.exitCode = 1;
+	});
+}
