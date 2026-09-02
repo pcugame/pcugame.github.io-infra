@@ -172,6 +172,60 @@ describe('createKindAwareByteLimiter', () => {
 	it('rejects oversized GAME at game limit', async () => {
 		await expectPayloadTooLarge('GAME', zipHeader, 1024);
 	});
+
+	it('applies the larger PDF limit after async detection across short chunks', async () => {
+		const limiter = createKindAwareByteLimiter(
+			{ ...fakeLimits, imageMaxBytes: 1024 },
+			'IMAGE',
+			'source.pdf',
+		);
+		const chunks = [Buffer.from('%P'), Buffer.from('DF-1.7\n'), Buffer.alloc(5000, 0x61)];
+		const received: Buffer[] = [];
+		const sink = new Writable({
+			write(chunk: Buffer, _enc, cb) {
+				received.push(chunk);
+				cb();
+			},
+		});
+
+		await expect(pipeline(Readable.from(chunks), limiter, sink)).resolves.toBeUndefined();
+		expect(Buffer.concat(received)).toEqual(Buffer.concat(chunks));
+	});
+
+	it('withholds 4099 sample bytes and releases them in order at byte 4100', async () => {
+		const limiter = createKindAwareByteLimiter(fakeLimits, 'IMAGE');
+		const received: Buffer[] = [];
+		limiter.on('data', (chunk: Buffer) => received.push(chunk));
+		const prefix = Buffer.alloc(4099, 0x61);
+		const boundary = Buffer.from([0x62]);
+
+		await new Promise<void>((resolve, reject) => {
+			limiter.write(prefix, (error) => error ? reject(error) : resolve());
+		});
+		expect(received).toEqual([]);
+
+		await new Promise<void>((resolve, reject) => {
+			limiter.write(boundary, (error) => error ? reject(error) : resolve());
+		});
+		expect(Buffer.concat(received)).toEqual(Buffer.concat([prefix, boundary]));
+		limiter.destroy();
+	});
+
+	it('keeps the base limit and existing error contract for short unsupported input', async () => {
+		const limiter = createKindAwareByteLimiter(
+			{ ...fakeLimits, imageMaxBytes: 1024 },
+			'IMAGE',
+			'source.bin',
+		);
+		const source = Readable.from([Buffer.from('not a known type'), Buffer.alloc(1024)]);
+		const sink = new Writable({ write(_chunk, _enc, cb) { cb(); } });
+
+		await expect(pipeline(source, limiter, sink)).rejects.toMatchObject({
+			statusCode: 413,
+			code: 'PAYLOAD_TOO_LARGE',
+			message: 'source.bin exceeds IMAGE size limit of 0MB',
+		});
+	});
 });
 
 // ── Concurrent upload semaphore (using explicit max) ────────

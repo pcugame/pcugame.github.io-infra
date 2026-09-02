@@ -50,6 +50,7 @@
     "@smithy/node-http-handler": "^4.6.0",
     "dotenv": "^17.4.2",
     "fastify": "^5.11.3",
+    "file-type": "22.0.2",
     "google-auth-library": "^10.6.2",
     "pdf-to-img": "^6.2.0",
     "pino": "^9.5.0",

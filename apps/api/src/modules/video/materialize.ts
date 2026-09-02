@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { detectFileType, isAllowedVideoType } from '../../shared/file-signature.js';
+import { detectFileTypeFromFile, isAllowedVideoType } from '../../shared/file-signature.js';
 import { materializeAndValidateCompletedSource } from '../admin/game-upload/source-identity.js';
 import type { VerifyingVideoSession } from './ports.js';
 import { VideoInfrastructureError, VideoRejectedError } from './errors.js';
@@ -68,16 +68,7 @@ export async function materializeVideoWorkspace(input: {
 			physicalByteLimit: input.maxSourceBytes,
 			signal: input.signal,
 		});
-		const handle = await open(inputPath, 'r');
-		let header: Buffer;
-		try {
-			header = Buffer.alloc(16);
-			const result = await handle.read(header, 0, header.length, 0);
-			header = header.subarray(0, result.bytesRead);
-		} finally {
-			await handle.close();
-		}
-		const detected = detectFileType(header);
+		const detected = await detectFileTypeFromFile(inputPath, { signal: input.signal });
 		if (!detected || !isAllowedVideoType(detected)) {
 			throw new VideoRejectedError('Video magic bytes are unsupported', 'MAGIC_INVALID');
 		}

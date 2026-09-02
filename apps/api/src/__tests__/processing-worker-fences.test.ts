@@ -190,6 +190,27 @@ describe('worker workspace recovery', () => {
 });
 
 describe('image source materialization classification', () => {
+	it('classifies the complete materialized file instead of trusting the declared MIME', async () => {
+		const root = await mkdtemp(join(tmpdir(), 'image-materialize-test-'));
+		roots.push(root);
+		const bytes = Buffer.from(
+			'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+			'base64',
+		);
+		const proof = sourceProof(bytes);
+		const workspace = await materializeImageSource({
+			session: imageSession({
+				originalName: 'mislabelled.bin', declaredMimeType: 'application/octet-stream',
+				totalBytes: BigInt(bytes.length), ...proof,
+			}),
+			body: Readable.from([bytes]), tempRoot: root, maxBytes: 1024,
+		});
+
+		expect(workspace.mimeType).toBe('image/png');
+		await workspace.cleanup();
+		expect(await readdir(root)).toEqual([]);
+	});
+
 	it.each(['ECONNRESET', 'EIO'])('preserves a mid-stream %s as a transient infrastructure error', async (code) => {
 		const root = await mkdtemp(join(tmpdir(), 'image-materialize-test-'));
 		roots.push(root);
