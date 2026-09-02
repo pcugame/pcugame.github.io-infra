@@ -18,6 +18,8 @@ import { createAssetsService } from '../modules/assets/service.js';
 import { createAssetsController } from '../modules/assets/controller.js';
 import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
 import { createAssetUploadService } from '../modules/asset-upload/service.js';
+import { createMultipartAbortRepository } from '../modules/multipart-abort/repository.js';
+import { createMultipartAbortService } from '../modules/multipart-abort/service.js';
 import {
 	SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
 	SOURCE_IDENTITY_ALGORITHM,
@@ -96,6 +98,7 @@ async function exerciseFiveKindDirectControls(input: {
 }): Promise<void> {
 	const repository = createAssetUploadRepository(input.client);
 	const storage = createDirectMultipartControlStorage(input.s3);
+	const lifecycleStorage = createObjectStorage(input.s3, { defaultPresignTtlSec: 60 });
 	const actor = { id: 41_011, role: 'ADMIN' } as const;
 	const service = createAssetUploadService({
 		repository,
@@ -113,6 +116,7 @@ async function exerciseFiveKindDirectControls(input: {
 		},
 		authorizeProjectWrite: async () => ({ exhibitionId: 41_001, status: 'PUBLISHED' }),
 		authorizeExhibitionWrite: async () => undefined,
+		wakeMaintenance: () => undefined,
 	});
 	const bytes = Buffer.from('canonical direct control fixture');
 	const proof = directSourceProof(bytes);
@@ -124,14 +128,40 @@ async function exerciseFiveKindDirectControls(input: {
 		{ kind: 'POSTER', create: () => service.createProjectPosterSession(actor, 41_021, { originalName: 'poster.pdf', declaredMimeType: 'application/pdf', totalBytes: bytes.length, ...proof }) },
 	] as const;
 	const sessionIds: string[] = [];
+	const multipartUploads: Array<{ key: string; uploadId: string }> = [];
 	for (const request of requests) {
 		const created = await request.create();
 		sessionIds.push(created.sessionId);
 		const session = await repository.findById(created.sessionId);
 		expect(session).toMatchObject({ kind: request.kind, state: 'UPLOADING', generation: 1 });
 		expect(session?.objectKey).toMatch(/^protected\/uploads\/[^/]+\/1\/source\.(zip|bin)$/);
+		multipartUploads.push({ key: session!.objectKey, uploadId: session!.uploadId! });
 		await service.cancel(actor, created.sessionId);
-		await storage.abortMultipart(session!.bucket, session!.objectKey, session!.uploadId!);
+	}
+	for (const upload of multipartUploads) {
+		expect(await lifecycleStorage.listMultipartUploads(buckets.protectedBucket, upload.key))
+			.toEqual([expect.objectContaining(upload)]);
+	}
+	const abortWorker = createMultipartAbortService({
+		repository: createMultipartAbortRepository(input.client),
+		storage: lifecycleStorage,
+		clock: { now: () => new Date() },
+		ids: { next: () => randomUUID() },
+		logger: { error() {} },
+	});
+	await expect(abortWorker.run()).resolves.toEqual({ tried: 5, resolved: 5, failed: 0 });
+	const abortTasks = await input.client.multipartAbortTask.findMany({
+		where: { uploadSessionId: { in: sessionIds } },
+		select: { state: true, storageKey: true, uploadId: true },
+	});
+	expect(abortTasks).toHaveLength(5);
+	expect(abortTasks.every((task) => task.state === 'RESOLVED')).toBe(true);
+	for (const upload of multipartUploads) {
+		expect(abortTasks).toContainEqual(expect.objectContaining({
+			storageKey: upload.key,
+			uploadId: upload.uploadId,
+		}));
+		expect(await lifecycleStorage.listMultipartUploads(buckets.protectedBucket, upload.key)).toHaveLength(0);
 	}
 	const rows = await input.client.$queryRaw<Array<{ kind: string; state: string }>>(Prisma.sql`
 		SELECT "kind"::text AS "kind", "state"::text AS "state"

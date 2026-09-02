@@ -82,6 +82,7 @@ export function createAssetUploadService(deps: {
 	};
 	authorizeProjectWrite(actor: { id: number; role: string }, projectId: number): Promise<{ exhibitionId: number; status: string }>;
 	authorizeExhibitionWrite?(actor: { id: number; role: string }, exhibitionId: number): Promise<void>;
+	wakeMaintenance(): void;
 }) {
 	async function authorizeOwnerWrite(actor: { id: number; role: string }, owner: DirectAssetUploadOwner): Promise<void> {
 		if (owner.type === 'PROJECT') {
@@ -263,6 +264,10 @@ export function createAssetUploadService(deps: {
 			const session = await loadOwned(sessionId, actor);
 			const cancelled = await deps.repository.cancel(session.id, session.userId);
 			if (!cancelled.cancelled) throw conflict('Upload session cannot be cancelled');
+			// cancel() resolves only after its transaction (including the abort
+			// outbox insert) commits, so waking maintenance here cannot race ahead
+			// of durable work becoming visible.
+			deps.wakeMaintenance();
 		},
 
 		async complete(actor: { id: number; role: string }, sessionId: string, body: DirectGameUploadCompleteRequest) {

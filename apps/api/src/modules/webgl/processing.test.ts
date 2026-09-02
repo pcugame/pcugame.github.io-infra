@@ -284,6 +284,7 @@ describe('canonical WebGL processing', () => {
 				maxBytesFor: () => 10 * 1024 * 1024,
 			},
 			authorizeProjectWrite: vi.fn(async () => ({ exhibitionId: 1, status: 'PUBLISHED' })),
+			wakeMaintenance: vi.fn(),
 		});
 
 		await service.createWebglSession({ id: 11, role: 'USER' }, 7, {

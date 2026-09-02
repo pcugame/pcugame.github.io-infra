@@ -740,6 +740,7 @@ export async function createProductionBackendContext(
 				const exhibition = await prisma.exhibition.findUnique({ where: { id: exhibitionId }, select: { id: true } });
 				if (!exhibition) throw notFound('Exhibition not found');
 			},
+			wakeMaintenance: () => uploadLifecycle.wakeMaintenance(),
 		}) : createUnavailableAssetUploadControlGraph();
 		const directAssetUploadRecovery = directAssetUploadRepository
 			? createAssetUploadRecoveryService({

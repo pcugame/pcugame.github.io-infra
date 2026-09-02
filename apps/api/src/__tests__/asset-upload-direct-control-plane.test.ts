@@ -49,11 +49,13 @@ function harness(current = session(), configOverrides: Partial<{
 	partUrlRefreshMax: number;
 	maxBytesFor(actor: { id: number; role: string }, kind: string): number;
 }> = {}) {
+	const wakeMaintenance = vi.fn();
 	const repository = {
 		createAllocating: vi.fn(async (value) => session({ ...value, state: 'ALLOCATING', uploadId: null })),
 		expireStaleAllocations: vi.fn(async () => 0),
 		failAllocation: vi.fn(async () => true),
 		setAllocated: vi.fn(async () => true), findById: vi.fn(async () => current),
+		cancel: vi.fn(async () => ({ cancelled: true })),
 		reservePartCapabilities: vi.fn(async () => current), claimCompletion: vi.fn(async () => 'claimed' as const), renewCompletion: vi.fn(async () => true),
 		markVerifying: vi.fn(async () => true), revertUploading: vi.fn(async () => true), queueAbort: vi.fn(async () => undefined),
 		claimVerifying: vi.fn(async () => []), renewValidation: vi.fn(async () => true), commitGameReady: vi.fn(), markRejected: vi.fn(),
@@ -75,8 +77,9 @@ function harness(current = session(), configOverrides: Partial<{
 		},
 		authorizeProjectWrite: vi.fn(async () => ({ exhibitionId: 1, status: 'PUBLISHED' })),
 		authorizeExhibitionWrite: vi.fn(async () => undefined),
+		wakeMaintenance,
 	});
-	return { service, repository, storage };
+	return { service, repository, storage, wakeMaintenance };
 }
 
 describe('canonical direct GAME control plane', () => {
@@ -291,4 +294,28 @@ describe('canonical direct GAME control plane', () => {
 		}));
 		expect(storage.createMultipart).toHaveBeenCalledWith('protected', expect.stringMatching(/source\.bin$/), 'application/octet-stream');
 	});
+
+	it('treats durable CANCELLED as an idempotent cancel and wakes maintenance after success', async () => {
+		const current = session({ state: 'CANCELLED', uploadId: null });
+		const { service, repository, wakeMaintenance } = harness(current);
+		(repository.cancel as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ cancelled: true });
+
+		await expect(service.cancel({ id: 11, role: 'USER' }, current.id)).resolves.toBeUndefined();
+		expect(repository.cancel).toHaveBeenCalledWith(current.id, current.userId);
+		expect(wakeMaintenance).toHaveBeenCalledOnce();
+		expect(repository.cancel).toHaveBeenCalledBefore(wakeMaintenance);
+	});
+
+	it.each(['COMPLETING', 'VERIFYING', 'READY'] as const)(
+		'preserves the cancel conflict for %s sessions and does not wake maintenance',
+		async (state) => {
+			const current = session({ state });
+			const { service, repository, wakeMaintenance } = harness(current);
+			(repository.cancel as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ cancelled: false });
+
+			await expect(service.cancel({ id: 11, role: 'USER' }, current.id))
+				.rejects.toMatchObject({ statusCode: 409 });
+			expect(wakeMaintenance).not.toHaveBeenCalled();
+		},
+	);
 });
