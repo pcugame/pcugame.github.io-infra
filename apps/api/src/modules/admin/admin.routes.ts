@@ -9,7 +9,7 @@ export interface AdminRouteDependencies {
 	importController: FastifyPluginAsync;
 	exportController: FastifyPluginAsync;
 	projectMultipartController: FastifyPluginAsync;
-	gameUploadController: FastifyPluginAsync;
+	directAssetUploadController?: FastifyPluginAsync;
 }
 
 /** Registration itself is pure; migrated ticket-008/009/010 controllers are explicit ports. */
@@ -19,7 +19,8 @@ export function createAdminRoutes(deps: AdminRouteDependencies): FastifyPluginAs
 		await app.register(deps.projectController);
 		await app.register(deps.projectMultipartController);
 		await app.register(deps.memberController);
-		await app.register(deps.gameUploadController);
+		// GAME/WEBGL/VIDEO now enter only through direct AssetUpload control routes.
+		if (deps.directAssetUploadController) await app.register(deps.directAssetUploadController);
 		await app.register(deps.bannedIpController);
 		await app.register(deps.settingsController);
 		await app.register(deps.importController);

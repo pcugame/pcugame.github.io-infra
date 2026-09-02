@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -111,23 +111,10 @@ describe('admin responsive image previews', () => {
 			<AdminProjectAssetManager
 				project={project}
 				projectId={project.id}
-				limits={{
-					imageMaxMb: 10,
-					imagePdfMaxMb: 100,
-					posterMaxMb: 10,
-					posterPdfMaxMb: 50,
-					gameMaxMb: 5120,
-					videoMaxMb: 200,
-					requestMaxMb: 250,
-					maxFiles: 10,
-				}}
 				canEditContent={false}
-				addAssetError={null}
-				isAddingAsset={false}
 				isSettingPoster={false}
 				isRemovingAsset={false}
 				isRemovingWebgl={false}
-				onAddAsset={vi.fn()}
 				onSetPoster={vi.fn()}
 				onRemoveAsset={vi.fn()}
 				onRemoveWebgl={vi.fn()}
@@ -141,5 +128,63 @@ describe('admin responsive image previews', () => {
 		}
 		expect(screen.queryByRole('img', { name: 'video.mp4' })).toBeNull();
 		expect(screen.getByText(/\[VIDEO\] video\.mp4/)).toBeTruthy();
+	});
+
+	it('uses the reusable direct VIDEO uploader for administrator multiple-video additions', () => {
+		const project: AdminProjectDetail = {
+			id: 2, title: 'Video project', slug: 'video-project', year: 2026,
+			platforms: ['PC'], isIncomplete: false, video: null, videos: [],
+			status: 'PUBLISHED', sortOrder: 0, members: [], assets: [],
+		};
+		const { container } = withQueryClient(
+			<AdminProjectAssetManager
+				project={project}
+				projectId={project.id}
+				canEditContent
+				isSettingPoster={false}
+				isRemovingAsset={false}
+				isRemovingWebgl={false}
+				onSetPoster={vi.fn()}
+				onRemoveAsset={vi.fn()}
+				onRemoveWebgl={vi.fn()}
+			/>,
+		);
+		expect(screen.getByRole('heading', { name: '동영상 업로드' })).toBeTruthy();
+		expect(container.querySelector('input[accept*="video/mp4"]')?.hasAttribute('multiple')).toBe(true);
+	});
+
+	it('displays and deletes the current immutable WebGL deployment', () => {
+		const onRemoveWebgl = vi.fn();
+		const deploymentId = '123e4567-e89b-42d3-a456-426614174000';
+		const project: AdminProjectDetail = {
+			id: 3, title: 'WebGL project', slug: 'webgl-project', year: 2026,
+			platforms: ['WEB'], isIncomplete: false, video: null, videos: [],
+			status: 'PUBLISHED', sortOrder: 0, members: [], assets: [],
+			webglUrl: `https://assets.test/public/webgl/3/${deploymentId}/index.html`,
+			webglDeployment: {
+				id: deploymentId,
+				url: `https://assets.test/public/webgl/3/${deploymentId}/index.html`,
+				createdAt: '2026-08-21T00:00:00.000Z',
+			},
+		};
+		withQueryClient(
+			<AdminProjectAssetManager
+				project={project}
+				projectId={project.id}
+				canEditContent
+				isSettingPoster={false}
+				isRemovingAsset={false}
+				isRemovingWebgl={false}
+				onSetPoster={vi.fn()}
+				onRemoveAsset={vi.fn()}
+				onRemoveWebgl={onRemoveWebgl}
+			/>,
+		);
+
+		expect(screen.getByText(deploymentId)).toBeTruthy();
+		expect(screen.getByRole('link', { name: '플레이 페이지 열기' }).getAttribute('href'))
+			.toBe('/projects/3/play');
+		fireEvent.click(screen.getByRole('button', { name: 'WebGL 빌드 삭제' }));
+		expect(onRemoveWebgl).toHaveBeenCalledOnce();
 	});
 });

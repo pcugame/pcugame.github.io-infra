@@ -1,49 +1,55 @@
+import { readFile } from 'node:fs/promises';
+import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppError } from '../shared/errors.js';
+import { createAssetsController } from '../modules/assets/controller.js';
 import { createAssetsService } from '../modules/assets/service.js';
 
 const mocks = {
-	findAssetByStorageKey: vi.fn(),
-	upsertBannedIp: vi.fn(),
-	getPresignedUrl: vi.fn(),
-	limiterCheck: vi.fn(),
-	loggerError: vi.fn(),
+	findById: vi.fn(),
+	upsertBan: vi.fn(),
+	presign: vi.fn(),
+	limit: vi.fn(),
+	warn: vi.fn(),
 };
 
-const assetsService = createAssetsService({
-	protectedBucket: 'protected-bucket',
-	presign: mocks.getPresignedUrl,
-	bucketForKind: () => 'bucket',
+const service = createAssetsService({
+	presignTtlSec: 45,
+	presign: mocks.presign,
 	wakeDeletionWorker: vi.fn(),
 	loadProjectWithAccess: vi.fn(),
-	downloadLimiter: {
-		check: mocks.limiterCheck,
-	},
-	logger: { info: vi.fn(), error: mocks.loggerError },
+	downloadLimiter: { check: mocks.limit },
+	logger: { info: vi.fn(), warn: mocks.warn, error: vi.fn() },
 	repository: {
-		findAssetByStorageKey: mocks.findAssetByStorageKey,
-		upsertBannedIp: mocks.upsertBannedIp,
+		findAssetByIdForDownload: mocks.findById,
+		upsertBannedIp: mocks.upsertBan,
 		findAssetByIdWithProject: vi.fn(),
 		claimAssetForDeletion: vi.fn(),
 		completeAssetDeletion: vi.fn(),
 	},
 });
-const { streamProtectedAsset } = assetsService;
 
-function asset(opts: {
-	kind: string;
-	status?: string;
+function asset(options: {
+	kind?: string;
+	projectStatus?: string;
+	assetStatus?: string;
 	creatorId?: number;
 	memberIds?: number[];
-	title?: string;
-}) {
+	representations?: Array<{ role: string; bucket: string; objectKey: string; state: string }>;
+	project?: null;
+} = {}) {
 	return {
-		kind: opts.kind,
-		project: {
-			creatorId: opts.creatorId ?? 1,
-			title: opts.title ?? '별빛 게임',
-			status: opts.status ?? 'PUBLISHED',
-			members: (opts.memberIds ?? []).map((userId, index) => ({
+		id: 42,
+		projectId: options.project === null ? null : 7,
+		kind: options.kind ?? 'GAME',
+		status: options.assetStatus ?? 'READY',
+		representations: options.representations ?? [{
+			role: 'ORIGINAL', bucket: 'canonical-protected', objectKey: 'assets/42/original/g1', state: 'READY',
+		}],
+		project: options.project === null ? null : {
+			creatorId: options.creatorId ?? 1,
+			title: '별빛 게임',
+			status: options.projectStatus ?? 'PUBLISHED',
+			members: (options.memberIds ?? []).map((userId, index) => ({
 				id: index + 1,
 				userId,
 				name: `학생${index + 1}`,
@@ -54,121 +60,157 @@ function asset(opts: {
 	};
 }
 
-describe('protected asset redirects', () => {
+describe('canonical protected asset capability', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.getPresignedUrl.mockImplementation((bucket: string, key: string) =>
-			Promise.resolve(`https://signed.example/${bucket}/${key}`),
-		);
-		mocks.upsertBannedIp.mockResolvedValue({});
-		mocks.limiterCheck.mockReturnValue('ok');
+		mocks.presign.mockResolvedValue('https://garage.test/signed');
+		mocks.limit.mockReturnValue({ status: 'ok' });
+		mocks.upsertBan.mockResolvedValue(undefined);
 	});
 
-	it.each(['GAME', 'VIDEO'])('applies the protected download limiter to %s redirects and persists bans', async (kind) => {
-		const key = `${kind.toLowerCase()}.bin`;
-		const ip = `203.0.113.${kind === 'GAME' ? '10' : '11'}`;
-		mocks.findAssetByStorageKey.mockResolvedValue(asset({ kind }));
-		mocks.limiterCheck.mockReturnValueOnce('ok').mockReturnValueOnce('ban');
+	it('prefers canonical ORIGINAL and returns only a short redirect capability', async () => {
+		mocks.findById.mockResolvedValue(asset());
+		const response = await service.downloadAssetById(42, 'original', '203.0.113.1', undefined);
 
-		const firstResponse = await streamProtectedAsset(key, ip, undefined);
-
-		expect(mocks.limiterCheck).toHaveBeenNthCalledWith(1, ip);
-		if (kind === 'GAME') {
-			expect(mocks.getPresignedUrl).toHaveBeenCalledWith(
-				'protected-bucket',
-				key,
-				expect.objectContaining({ responseContentDisposition: expect.stringContaining("filename*=UTF-8''") }),
-			);
-		} else {
-			expect(mocks.getPresignedUrl).toHaveBeenCalledWith('protected-bucket', key);
-		}
-		expect(firstResponse).toEqual({
+		expect(mocks.presign).toHaveBeenCalledWith(
+			'canonical-protected',
+			'assets/42/original/g1',
+			expect.objectContaining({ ttlSec: 45, responseContentDisposition: expect.any(String) }),
+		);
+		expect(response).toEqual({
 			status: 302,
 			headers: { 'Referrer-Policy': 'no-referrer' },
-			location: `https://signed.example/protected-bucket/${key}`,
+			location: 'https://garage.test/signed',
 		});
-
-		await expect(streamProtectedAsset(key, ip, undefined)).rejects.toMatchObject({
-			statusCode: 403,
-			code: 'FORBIDDEN',
-		});
-
-		expect(mocks.limiterCheck).toHaveBeenNthCalledWith(2, ip);
-		expect(mocks.upsertBannedIp).toHaveBeenCalledWith(ip, 'Rate limit exceeded (protected asset download)');
-	});
-
-	it('uses project and ordered member data for the GAME download filename', async () => {
-		mocks.findAssetByStorageKey.mockResolvedValue({
-			kind: 'GAME',
-			project: {
-				creatorId: 1,
-				title: '별빛 게임',
-				status: 'PUBLISHED',
-				members: [
-					{ id: 2, userId: 2, name: '김철수', studentId: '2026002', sortOrder: 1 },
-					{ id: 1, userId: 1, name: '홍길동', studentId: '2026001', sortOrder: 0 },
-				],
-			},
-		});
-
-		await streamProtectedAsset('game.zip', '203.0.113.20', undefined);
-
-		expect(mocks.getPresignedUrl).toHaveBeenCalledWith(
-			'protected-bucket',
-			'game.zip',
-			{
-				responseContentDisposition:
-					'attachment; filename="game.zip"; filename*=UTF-8\'\'%EB%B3%84%EB%B9%9B%20%EA%B2%8C%EC%9E%84_%ED%99%8D%EA%B8%B8%EB%8F%99_2026001_%EA%B9%80%EC%B2%A0%EC%88%98_2026002.zip',
-			},
+		expect(response.body).toBeUndefined();
+		expect(mocks.limit).toHaveBeenCalledWith(
+			'203.0.113.1',
+			'anonymous:203.0.113.1:DOWNLOAD_ORIGINAL:42',
 		);
 	});
 
-	it('falls back to game.zip when the friendly GAME filename exceeds 255 bytes', async () => {
-		mocks.findAssetByStorageKey.mockResolvedValue(asset({ kind: 'GAME', title: '가'.repeat(84), memberIds: [1] }));
-
-		await streamProtectedAsset('game.zip', '203.0.113.21', undefined);
-
-		expect(mocks.getPresignedUrl).toHaveBeenCalledWith(
-			'protected-bucket',
-			'game.zip',
-			{
-				responseContentDisposition:
-					'attachment; filename="game.zip"; filename*=UTF-8\'\'game.zip',
-			},
-		);
-	});
-
-	it.each(['IMAGE', 'POSTER'])('keeps protected %s assets non-public and rate-limits authorized redirects', async (kind) => {
-		const key = `${kind.toLowerCase()}.jpg`;
-		const ip = `203.0.113.${kind === 'IMAGE' ? '12' : '13'}`;
-		mocks.findAssetByStorageKey.mockResolvedValue(asset({ kind, creatorId: 7 }));
-
-		await expect(streamProtectedAsset(key, ip, undefined)).rejects.toMatchObject({
-			statusCode: 401,
-			code: 'UNAUTHORIZED',
-		});
-		expect(mocks.limiterCheck).not.toHaveBeenCalled();
-		expect(mocks.getPresignedUrl).not.toHaveBeenCalled();
-
-		const response = await streamProtectedAsset(key, ip, { id: 7, role: 'USER' });
-
-		expect(mocks.limiterCheck).toHaveBeenCalledWith(ip);
-		expect(response.location).toBe(`https://signed.example/protected-bucket/${key}`);
-	});
-
-	it('does not run the limiter before access checks for unauthorized protected assets', async () => {
-		mocks.findAssetByStorageKey.mockResolvedValue(asset({ kind: 'VIDEO', status: 'LEGACY', creatorId: 1 }));
-		mocks.limiterCheck.mockImplementation(() => {
-			throw new AppError(403, 'banned', 'IP_BANNED');
-		});
-
-		await expect(streamProtectedAsset('video.mp4', '203.0.113.14', { id: 9, role: 'USER' }))
-			.rejects.toMatchObject({
-				statusCode: 403,
-				code: 'FORBIDDEN',
+	it('registers only the canonical assetId+variant route', async () => {
+		mocks.findById.mockResolvedValue(asset());
+		const app = Fastify();
+		await app.register(createAssetsController({ service }), { prefix: '/api' });
+		await app.ready();
+		try {
+			const canonical = await app.inject({
+				method: 'GET', url: '/api/assets/42/download?variant=original',
 			});
-		expect(mocks.limiterCheck).not.toHaveBeenCalled();
-		expect(mocks.getPresignedUrl).not.toHaveBeenCalled();
+			expect(canonical.statusCode).toBe(302);
+			expect(canonical.headers.location).toBe('https://garage.test/signed');
+
+			const bridge = await app.inject({
+				method: 'GET', url: '/api/assets/protected/legacy%2Foriginal.zip',
+			});
+			expect(bridge.statusCode).toBe(404);
+		} finally {
+			await app.close();
+		}
 	});
 
+	it('resolves VIDEO playback independently from original', async () => {
+		mocks.findById.mockResolvedValue(asset({
+			kind: 'VIDEO',
+			representations: [
+				{ role: 'ORIGINAL', bucket: 'private', objectKey: 'video/original', state: 'READY' },
+				{ role: 'PLAYBACK', bucket: 'private', objectKey: 'video/playback', state: 'READY' },
+			],
+		}));
+		await service.downloadAssetById(42, 'playback', '203.0.113.2', undefined);
+		expect(mocks.presign).toHaveBeenCalledWith('private', 'video/playback', { ttlSec: 45 });
+	});
+
+	it('fails closed for a missing/non-READY canonical row and never maps playback to original', async () => {
+		mocks.findById.mockResolvedValue(asset({
+			kind: 'VIDEO',
+			representations: [{ role: 'PLAYBACK', bucket: 'private', objectKey: 'pending', state: 'VERIFYING' }],
+		}));
+		await expect(service.downloadAssetById(42, 'playback', '203.0.113.4', undefined))
+			.rejects.toMatchObject({ statusCode: 404 });
+
+		mocks.findById.mockResolvedValue(asset({ kind: 'VIDEO', representations: [] }));
+		await expect(service.downloadAssetById(42, 'playback', '203.0.113.4', undefined))
+			.rejects.toMatchObject({ statusCode: 404 });
+		expect(mocks.presign).not.toHaveBeenCalled();
+	});
+
+	it('redirects a READY VIDEO original while its FAILED playback remains unavailable', async () => {
+		mocks.findById.mockResolvedValue(asset({
+			kind: 'VIDEO',
+			representations: [
+				{ role: 'ORIGINAL', bucket: 'private', objectKey: 'video/original.mov', state: 'READY' },
+				{ role: 'PLAYBACK', bucket: 'private', objectKey: 'video/playback.mp4', state: 'FAILED' },
+			],
+		}));
+
+		await expect(service.downloadAssetById(42, 'original', '203.0.113.5', undefined))
+			.resolves.toMatchObject({ status: 302, location: 'https://garage.test/signed' });
+		expect(mocks.presign).toHaveBeenCalledWith(
+			'private', 'video/original.mov', { ttlSec: 45 },
+		);
+		await expect(service.downloadAssetById(42, 'playback', '203.0.113.5', undefined))
+			.rejects.toMatchObject({ statusCode: 404 });
+	});
+
+	it('preserves public and admin/creator/member authorization semantics', async () => {
+		for (const projectStatus of ['PUBLISHED', 'ARCHIVED']) {
+			mocks.findById.mockResolvedValue(asset({ kind: 'VIDEO', projectStatus }));
+			await expect(service.downloadAssetById(42, 'original', '203.0.113.7', undefined))
+				.resolves.toMatchObject({ status: 302 });
+		}
+
+		mocks.findById.mockResolvedValue(asset({ projectStatus: 'PRIVATE', creatorId: 10, memberIds: [11] }));
+		await expect(service.downloadAssetById(42, 'original', '203.0.113.7', undefined))
+			.rejects.toMatchObject({ statusCode: 401 });
+		for (const actor of [
+			{ id: 10, role: 'USER' as const },
+			{ id: 11, role: 'USER' as const },
+			{ id: 99, role: 'ADMIN' as const },
+		]) {
+			await expect(service.downloadAssetById(42, 'original', '203.0.113.7', actor))
+				.resolves.toMatchObject({ status: 302 });
+		}
+	});
+
+	it('authorizes and checks READY before limiting or signing', async () => {
+		mocks.findById.mockResolvedValue(asset({ projectStatus: 'PRIVATE', creatorId: 1, assetStatus: 'VERIFYING' }));
+		await expect(service.downloadAssetById(
+			42, 'original', '203.0.113.8', { id: 2, role: 'USER' },
+		)).rejects.toMatchObject({ statusCode: 403 });
+		expect(mocks.limit).not.toHaveBeenCalled();
+
+		mocks.findById.mockResolvedValue(asset({ assetStatus: 'VERIFYING' }));
+		await expect(service.downloadAssetById(42, 'original', '203.0.113.8', undefined))
+			.rejects.toMatchObject({ statusCode: 404 });
+		expect(mocks.limit).not.toHaveBeenCalled();
+		expect(mocks.presign).not.toHaveBeenCalled();
+	});
+
+	it('throttles a principal but persists a ban only at the IP abuse ceiling', async () => {
+		mocks.findById.mockResolvedValue(asset());
+		mocks.limit.mockReturnValueOnce({ status: 'rate_limited', retryAfterSec: 9 });
+		await expect(service.downloadAssetById(
+			42, 'original', '203.0.113.9', { id: 50, role: 'USER' },
+		)).rejects.toMatchObject({ statusCode: 429, code: 'RATE_LIMITED', details: { retryAfterSec: 9 } });
+		expect(mocks.upsertBan).not.toHaveBeenCalled();
+
+		mocks.limit.mockReturnValueOnce({ status: 'abuse_ceiling' });
+		await expect(service.downloadAssetById(
+			42, 'original', '203.0.113.9', { id: 50, role: 'USER' },
+		)).rejects.toMatchObject({ statusCode: 403 });
+		expect(mocks.upsertBan).toHaveBeenCalledWith(
+			'203.0.113.9', 'Protected download IP abuse ceiling exceeded',
+		);
+	});
+
+	it('keeps the Fastify graph free of object-body reads and relays', async () => {
+		const graph = (await Promise.all([
+			readFile(new URL('../modules/assets/controller.ts', import.meta.url), 'utf8'),
+			readFile(new URL('../modules/assets/service.ts', import.meta.url), 'utf8'),
+		])).join('\n');
+		expect(graph).not.toMatch(/storage\.stream|GetObjectCommand|createReadStream|reply\.send\([^)]*body/);
+		expect(graph).toContain('deps.presign');
+	});
 });

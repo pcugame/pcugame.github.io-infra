@@ -85,15 +85,15 @@ describe('assertValidPosterAsset', () => {
 
 describe('isPosterUrlSafe', () => {
 	it('returns true for POSTER kind in READY status', () => {
-		expect(isPosterUrlSafe({ kind: 'POSTER', status: 'READY', storageKey: 'k' })).toBe(true);
+		expect(isPosterUrlSafe({ kind: 'POSTER', status: 'READY', hasReadyOriginal: true })).toBe(true);
 	});
 
 	it('returns true for IMAGE kind in READY status', () => {
-		expect(isPosterUrlSafe({ kind: 'IMAGE', status: 'READY', storageKey: 'k' })).toBe(true);
+		expect(isPosterUrlSafe({ kind: 'IMAGE', status: 'READY', hasReadyOriginal: true })).toBe(true);
 	});
 
 	it('returns true for THUMBNAIL kind in READY status', () => {
-		expect(isPosterUrlSafe({ kind: 'THUMBNAIL', status: 'READY', storageKey: 'k' })).toBe(true);
+		expect(isPosterUrlSafe({ kind: 'THUMBNAIL', status: 'READY', hasReadyOriginal: true })).toBe(true);
 	});
 
 	it('returns false for null poster', () => {
@@ -101,14 +101,14 @@ describe('isPosterUrlSafe', () => {
 	});
 
 	it('returns false for GAME kind', () => {
-		expect(isPosterUrlSafe({ kind: 'GAME', status: 'READY', storageKey: 'k' })).toBe(false);
+		expect(isPosterUrlSafe({ kind: 'GAME', status: 'READY', hasReadyOriginal: true })).toBe(false);
 	});
 
 	it('returns false for DELETING status', () => {
-		expect(isPosterUrlSafe({ kind: 'POSTER', status: 'DELETING', storageKey: 'k' })).toBe(false);
+		expect(isPosterUrlSafe({ kind: 'POSTER', status: 'DELETING', hasReadyOriginal: true })).toBe(false);
 	});
 
 	it('returns false for DELETED status', () => {
-		expect(isPosterUrlSafe({ kind: 'IMAGE', status: 'DELETED', storageKey: 'k' })).toBe(false);
+		expect(isPosterUrlSafe({ kind: 'IMAGE', status: 'DELETED', hasReadyOriginal: true })).toBe(false);
 	});
 });

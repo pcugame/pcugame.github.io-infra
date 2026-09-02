@@ -48,7 +48,7 @@ function projectRecord() {
 		status: 'PUBLISHED' as const,
 		sortOrder: 0,
 		posterAssetId: null as number | null,
-		webglEntryKey: `webgl/7/${deployment}/site/index.html`,
+		currentWebglDeploymentId: deployment as string | null,
 		poster: null as null | { storageKey: string; kind: 'POSTER'; status: string },
 		members: [{
 			id: 11,
@@ -72,6 +72,7 @@ function projectRecord() {
 			playbackSizeBytes: 0n,
 			playbackStatus: 'READY' as const,
 			playbackError: '',
+			representations: [],
 		}],
 		updatedAt: new Date('2026-07-24T00:00:00.000Z'),
 	};
@@ -87,7 +88,6 @@ function storageHarness() {
 	};
 	const storage: ObjectStorage = {
 		upload: vi.fn(),
-		presign: vi.fn(async () => 'https://storage.test/object'),
 		delete: calls.delete,
 		head: vi.fn(async () => null),
 		readRange: vi.fn(async () => Buffer.alloc(0)),
@@ -190,6 +190,7 @@ function portHarness() {
 		}),
 	};
 	const repository: ProjectApplicationRepository = {
+		auditActiveSubmissions: async () => ({ draftProjects: 0, pendingSubmissions: 0, finalizingSubmissions: 0, activePublicationJobs: 0 }),
 		findProjectsForUser: calls.projectList,
 		findProjectById: calls.projectFindUnique,
 		isMemberOfProject: async (projectId, userId) => calls.projectMemberFindFirst({ projectId, userId }),
@@ -199,13 +200,12 @@ function portHarness() {
 			const assets = [...project.assets];
 			await calls.assetDeleteMany();
 			await calls.projectDelete();
-			return { assets, webglEntryKey: project.webglEntryKey, activeUploads: [] };
+			return { assets, activeUploads: [] };
 		},
 		async clearWebglDeployment(_id, outbox) {
 			await calls.orphanUpsert(outbox);
-			const oldEntryKey = project.webglEntryKey;
-			project.webglEntryKey = '';
-			return { oldEntryKey, cancelledSession: null };
+			project.currentWebglDeploymentId = null;
+			return { cancelledSession: null };
 		},
 		findAssetById: calls.findAssetById,
 		setProjectPoster: calls.setProjectPoster,
@@ -217,16 +217,17 @@ function portHarness() {
 			return {
 				result,
 				assets,
-				projects: [{ id: project.id, webglEntryKey: project.webglEntryKey }],
+				projects: [{ id: project.id, currentWebglDeploymentId: project.currentWebglDeploymentId }],
 				activeUploads: [],
 			};
 		},
 		bulkUpdateStatus: async (_ids, status) => calls.projectUpdateMany({ status }),
 		findExhibitionById: vi.fn(async () => null),
+		findSubmissionForActor: vi.fn(async () => null),
+		finalizeSubmission: vi.fn(async () => { throw new Error('not scripted'); }),
+		cancelSubmission: vi.fn(async () => { throw new Error('not scripted'); }),
 		findProjectByExhibitionAndSlug: vi.fn(async () => null),
 		createProjectWithAssets: vi.fn(async () => { throw new Error('not scripted'); }),
-		createAsset: vi.fn(async () => { throw new Error('not scripted'); }),
-		replaceOrCreateReplaceableAsset: vi.fn(async () => { throw new Error('not scripted'); }),
 	};
 	const accessRepository = {
 		findProject: calls.projectFindUnique,
@@ -342,7 +343,6 @@ async function routeApp(
 		importController: emptyRoute,
 		exportController: emptyRoute,
 		projectMultipartController: emptyRoute,
-		gameUploadController: emptyRoute,
 	}), { prefix: '/api/admin' });
 	await app.ready();
 	return app;
@@ -502,7 +502,7 @@ describe('project/member/settings production wiring', () => {
 		});
 		expect(durableWebglDelete.statusCode).toBe(204);
 		expect(webglHarness.ports.calls.orphanUpsert).toHaveBeenCalled();
-		expect(webglHarness.ports.getProject().webglEntryKey).toBe('');
+		expect(webglHarness.ports.getProject().currentWebglDeploymentId).toBeNull();
 		expect(webglHarness.storage.calls.delete).not.toHaveBeenCalled();
 		expect(webglHarness.uploadLifecycle.wakeDeletionWorker).toHaveBeenCalledOnce();
 

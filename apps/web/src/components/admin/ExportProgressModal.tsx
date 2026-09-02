@@ -1,14 +1,12 @@
 import { useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { adminExportApi } from '../../lib/api';
 import type { ExportResult } from '../../lib/api';
-import type { ExportFileStatus, ExportPhase } from '../../contracts';
-import { queryKeys } from '../../lib/query';
+import type { ExportFileStatus, ExportPhase, ExportStatusResponse } from '../../contracts';
 
 interface Props {
 	open: boolean;
 	year: number;
 	isRunning: boolean;
+	status: ExportStatusResponse | undefined;
 	result: ExportResult | null;
 	error: string | null;
 	onClose: () => void;
@@ -32,20 +30,11 @@ export function ExportProgressModal({
 	open,
 	year,
 	isRunning,
+	status,
 	result,
 	error,
 	onClose,
 }: Props) {
-	// 진행 중일 때만 폴링. 끝나면 자동 중지.
-	const { data: status } = useQuery({
-		queryKey: queryKeys.adminExportStatus,
-		queryFn: adminExportApi.status,
-		enabled: open && isRunning,
-		refetchInterval: open && isRunning ? 1500 : false,
-		refetchIntervalInBackground: true,
-		staleTime: 0,
-	});
-
 	// ESC: 실행 중에는 무시
 	useEffect(() => {
 		if (!open) return;

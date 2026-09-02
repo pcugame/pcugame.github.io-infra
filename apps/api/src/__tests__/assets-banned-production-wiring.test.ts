@@ -60,7 +60,6 @@ function storageHarness() {
 	};
 	const storage: ObjectStorage = {
 		upload: vi.fn(),
-		presign: calls.presign,
 		delete: calls.delete,
 		head: vi.fn(async () => null),
 		readRange: vi.fn(async () => Buffer.alloc(0)),
@@ -120,7 +119,7 @@ function portHarness(initialBans: string[] = []) {
 	return {
 		calls,
 		assetsRepository: {
-			findAssetByStorageKey: calls.assetFindFirst,
+			findAssetByIdForDownload: calls.assetFindFirst,
 			upsertBannedIp: calls.bannedUpsert,
 			findAssetByIdWithProject: vi.fn(async () => null),
 			claimAssetForDeletion: vi.fn(async () => null),
@@ -139,7 +138,16 @@ function portHarness(initialBans: string[] = []) {
 
 function protectedAsset() {
 	return {
+		id: 1,
+		projectId: 7,
 		kind: 'GAME',
+		status: 'READY',
+		representations: [{
+			role: 'ORIGINAL',
+			bucket: 'pcu-protected',
+			objectKey: 'assets/1/original/g1.zip',
+			state: 'READY',
+		}],
 		project: {
 			creatorId: 1,
 			title: 'Context Game',
@@ -186,7 +194,7 @@ function graphHarness(initialBans: string[] = [], maxHits = 30) {
 		assetsRepository: ports.assetsRepository,
 		bannedIpRepository: ports.bannedIpRepository,
 		projectAccess: ports.projectAccess,
-		storage: storage.storage,
+		protectedDownloadPresigner: { presign: storage.calls.presign },
 		downloadLimiter: limiter,
 		logger: testLogger,
 		clock: { now: () => new Date('2026-07-22T00:00:00.000Z') },
@@ -239,7 +247,7 @@ describe('assets/banned-IP production vertical slice', () => {
 
 		const beforeWarmup = await app.inject({
 			method: 'GET',
-			url: '/api/assets/protected/game.zip',
+			url: '/api/assets/1/download?variant=original',
 			remoteAddress: '203.0.113.10',
 		});
 		expect(beforeWarmup.statusCode).toBe(503);
@@ -255,7 +263,7 @@ describe('assets/banned-IP production vertical slice', () => {
 		expect(harness.limiter._bannedSize()).toBe(0);
 	});
 
-	it('blocks recovered DB bans and preserves protected redirect, Range, and rate-limit wiring', async () => {
+	it('blocks recovered DB bans, preserves protected redirect, and treats ordinary principal excess as temporary', async () => {
 		const recovered = graphHarness(['203.0.113.10'], 1);
 		recovered.calls.assetFindFirst.mockResolvedValue(protectedAsset());
 		await recovered.graph.warmup.start();
@@ -264,7 +272,7 @@ describe('assets/banned-IP production vertical slice', () => {
 
 		const banned = await app.inject({
 			method: 'GET',
-			url: '/api/assets/protected/game.zip',
+			url: '/api/assets/1/download?variant=original',
 			remoteAddress: '203.0.113.10',
 		});
 		expect(banned.statusCode).toBe(403);
@@ -272,28 +280,25 @@ describe('assets/banned-IP production vertical slice', () => {
 
 		const first = await app.inject({
 			method: 'GET',
-			url: '/api/assets/protected/game.zip',
+			url: '/api/assets/1/download?variant=original',
 			remoteAddress: '203.0.113.20',
 			headers: { range: 'bytes=0-7' },
 		});
 		expect(first.statusCode).toBe(302);
-		expect(first.headers.location).toBe('https://storage.test/pcu-protected/game.zip');
+		expect(first.headers.location).toBe('https://storage.test/pcu-protected/assets/1/original/g1.zip');
 		expect(recovered.calls.presign).toHaveBeenCalledWith(
 			'pcu-protected',
-			'game.zip',
+			'assets/1/original/g1.zip',
 			expect.objectContaining({ responseContentDisposition: expect.any(String) }),
 		);
 
 		const exceeded = await app.inject({
 			method: 'GET',
-			url: '/api/assets/protected/game.zip',
+			url: '/api/assets/1/download?variant=original',
 			remoteAddress: '203.0.113.20',
 		});
-		expect(exceeded.statusCode).toBe(403);
-		expect(recovered.calls.bannedUpsert).toHaveBeenCalledWith(
-			'203.0.113.20',
-			expect.any(String),
-		);
+		expect(exceeded.statusCode).toBe(429);
+		expect(recovered.calls.bannedUpsert).not.toHaveBeenCalled();
 	});
 
 	it('keeps context A/B cache and buckets independent, scopes admin mutation, and closes only A', async () => {
@@ -336,7 +341,7 @@ describe('assets/banned-IP production vertical slice', () => {
 		expect(a.context.protectedDownloads.isBanned('203.0.113.30')).toBe(true);
 		expect(b.context.protectedDownloads.isBanned('203.0.113.30')).toBe(true);
 
-		expect(a.context.protectedDownloads.check('203.0.113.40')).toBe('ok');
+		expect(a.context.protectedDownloads.check('203.0.113.40')).toEqual({ status: 'ok' });
 		expect(a.context.protectedDownloads._bucketSize()).toBe(1);
 		expect(b.context.protectedDownloads._bucketSize()).toBe(0);
 

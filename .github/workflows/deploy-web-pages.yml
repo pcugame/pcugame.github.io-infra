@@ -1,32 +1,42 @@
 name: Deploy Web to GitHub Pages
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'apps/web/**'
-      - 'packages/contracts/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/deploy-web-pages.yml'
-      - '.github/release-gates/web-before-api/**'
+  # Final web publication is an explicit Phase 2 maintenance-window action.
+  # Master pushes must not expose the DRAFT/submission contract while the
+  # dedicated Phase 1 API is still serving the observation window.
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: 'pages'
-  cancel-in-progress: true
+  # Repository-wide lock shared with the schema cutover. A standalone web
+  # publication can never race the exact-SHA gate between drain and contract.
+  group: production-object-cutover
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
+      - name: Fail closed outside the production control default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [ "${GITHUB_REPOSITORY}" = pcugame/pcugame.github.io-infra ]
+          [ "${GITHUB_DEFAULT_BRANCH}" = master ]
+          [ "${GITHUB_REF}" = refs/heads/master ]
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Verify production control repository and default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node server/verify-github-release-boundaries.mjs control
 
       - uses: actions/setup-node@v4
         with:
@@ -56,6 +66,12 @@ jobs:
       - name: Stamp release commit
         working-directory: apps/web
         run: printf '%s\n' "${GITHUB_SHA}" > dist/release-sha.txt
+
+      - name: Verify external Pages repository single-writer boundary
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
+        run: node server/verify-github-release-boundaries.mjs pages
 
       - name: Deploy to pcugame.github.io
         uses: peaceiris/actions-gh-pages@v4

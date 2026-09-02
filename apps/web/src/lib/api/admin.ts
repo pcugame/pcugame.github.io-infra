@@ -9,6 +9,7 @@ import type {
   AdminProjectListResponse,
   AdminProjectDetail,
   SubmitProjectResponse,
+  ProjectSubmissionStatusResponse,
   BulkUpdateProjectStatusRequest,
   BulkDeleteProjectsRequest,
   SetProjectPosterRequest,
@@ -20,7 +21,7 @@ import type {
   UpdateSiteSettingsRequest,
   ImportPreviewResult,
   ImportExecuteResult,
-  ExportResult,
+  ExportStartResponse,
   ExportStatusResponse,
 } from '../../contracts';
 import { api, uploadFormData } from './client';
@@ -42,13 +43,6 @@ export const adminExhibitionApi = {
 
   delete(id: number) {
     return api.delete<void>(`/api/admin/exhibitions/${id}`);
-  },
-
-  uploadPoster(id: number, formData: FormData) {
-    return uploadFormData<AdminExhibitionItem>(`/api/admin/exhibitions/${id}/poster`, formData, {
-      title: '전시회 포스터 업로드',
-      processingMessage: '포스터 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
-    });
   },
 
   deletePoster(id: number) {
@@ -105,22 +99,16 @@ export const adminProjectApi = {
     );
   },
 
-  /** 기존 프로젝트에 자산 추가 */
-  addAsset(input: {
-    projectId: number;
-    formData: FormData;
-    idempotencyKey: string;
-    title?: string;
-  }) {
-    return uploadFormData<{ assetId: number }>(
-      `/api/admin/projects/${input.projectId}/assets`,
-      input.formData,
-      {
-        title: input.title ?? '자산 업로드',
-        processingMessage: '파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
-        headers: { 'Idempotency-Key': input.idempotencyKey },
-      },
-    );
+  getSubmission(projectId: number) {
+    return api.get<ProjectSubmissionStatusResponse>(`/api/admin/projects/${projectId}/submission`);
+  },
+
+  finalizeSubmission(projectId: number) {
+    return api.post<ProjectSubmissionStatusResponse>(`/api/admin/projects/${projectId}/submission/finalize`);
+  },
+
+  cancelSubmission(projectId: number) {
+    return api.delete<ProjectSubmissionStatusResponse>(`/api/admin/projects/${projectId}/submission`);
   },
 
   /** 포스터 지정 */
@@ -208,7 +196,7 @@ export const adminBannedIpApi = {
 
 export const adminExportApi = {
   run(year?: number) {
-    return api.post<ExportResult>('/api/admin/export', { year });
+    return api.post<ExportStartResponse>('/api/admin/export', { year });
   },
 
   status() {

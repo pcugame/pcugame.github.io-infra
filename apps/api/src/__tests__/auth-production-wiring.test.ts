@@ -32,7 +32,6 @@ function config(label: string, overrides: Partial<Env> = {}): Env {
 function storage(): ObjectStorage {
 	return {
 		upload: async () => {},
-		presign: async () => 'https://storage.test/object',
 		delete: async () => {},
 		head: async () => null,
 		readRange: async () => Buffer.alloc(0),

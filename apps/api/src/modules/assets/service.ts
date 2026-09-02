@@ -3,6 +3,18 @@ import type { AssetKind, UserRole } from '@pcu/contracts';
 import type { Actor } from '../../application/http-input.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
 import { AppError, notFound, forbidden, unauthorized } from '../../shared/errors.js';
+import type { DownloadRateLimitResult } from '../../shared/download-rate-limit.js';
+import {
+	authorizeAssetDelivery,
+	type AssetDeliveryAction,
+} from './delivery-policy.js';
+import {
+	resolveDownloadRepresentation,
+	type AssetDownloadIdentity,
+	type AssetDownloadVariant,
+} from './download-resolver.js';
+
+export type { AssetDownloadVariant } from './download-resolver.js';
 
 type ProtectedAssetAccessUser = {
 	id: number;
@@ -18,8 +30,9 @@ type ProtectedAssetAccessRecord = {
 	};
 };
 
-interface ProtectedAssetStreamRecord extends ProtectedAssetAccessRecord {
-	project: ProtectedAssetAccessRecord['project'] & {
+interface ProtectedAssetDownloadRecord extends AssetDownloadIdentity {
+	projectId: number | null;
+	project: (ProtectedAssetAccessRecord['project'] & {
 		title: string;
 		members: {
 			id: number;
@@ -28,7 +41,7 @@ interface ProtectedAssetStreamRecord extends ProtectedAssetAccessRecord {
 			studentId: string;
 			sortOrder: number;
 		}[];
-	};
+	}) | null;
 }
 
 interface AssetDeletionLookup {
@@ -41,37 +54,35 @@ interface AssetDeletionClaim {
 	id: number;
 	projectId: number;
 	kind: AssetKind;
-	previousStatus: 'READY' | 'DELETING' | 'DELETED' | 'FAILED';
-	storageKey: string;
-	playbackStorageKey: string | null;
+	previousStatus: 'PENDING' | 'VERIFYING' | 'PROCESSING' | 'READY' | 'DELETING' | 'DELETED' | 'FAILED';
 	alreadyDeleted: boolean;
 }
 
 export interface AssetsServiceDependencies {
-	protectedBucket: string;
+	presignTtlSec?: number;
 	presign(
 		bucket: string,
 		key: string,
-		options?: { responseContentDisposition: string },
+		options?: { ttlSec?: number; responseContentDisposition?: string },
 	): Promise<string>;
-	bucketForKind(kind: AssetKind): string;
 	wakeDeletionWorker(): void;
 	loadProjectWithAccess(actor: Actor, projectId: number): Promise<unknown>;
 	downloadLimiter: {
-		check(ip: string): 'ok' | 'ban';
+		check(ip: string, principalScope?: string): DownloadRateLimitResult | 'ok' | 'ban';
 	};
 	logger: {
-		info(message: string): void;
+		info(context: Record<string, unknown>, message: string): void;
+		warn?(context: Record<string, unknown>, message: string): void;
 		error(context: Record<string, unknown>, message: string): void;
 	};
 	repository: {
-		findAssetByStorageKey(key: string): Promise<ProtectedAssetStreamRecord | null>;
+		findAssetByIdForDownload(id: number): Promise<ProtectedAssetDownloadRecord | null>;
 		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
 		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
 		claimAssetForDeletion(id: number): Promise<AssetDeletionClaim | null>;
 		completeAssetDeletion(
 			claim: AssetDeletionClaim,
-			outbox: { bucket: string; reason: string; playbackReason: string },
+			outbox: { reason: string },
 		): Promise<void>;
 	};
 }
@@ -79,7 +90,7 @@ export interface AssetsServiceDependencies {
 export interface BannedIpStartupGate {
 	warm(ips: string[]): void;
 	remove(ip: string): void;
-	check(ip: string): 'ok' | 'ban';
+	check(ip: string, principalScope?: string): DownloadRateLimitResult;
 	isReady(): boolean;
 }
 
@@ -91,7 +102,7 @@ export interface BannedIpStartupGate {
 export function createBannedIpStartupGate(limiter: {
 	loadBannedIps(ips: string[]): void;
 	removeBan(ip: string): void;
-	check(ip: string): 'ok' | 'ban';
+	check(ip: string, principalScope?: string): DownloadRateLimitResult;
 }): BannedIpStartupGate {
 	let ready = false;
 	return {
@@ -100,7 +111,7 @@ export function createBannedIpStartupGate(limiter: {
 			ready = true;
 		},
 		remove: (ip) => limiter.removeBan(ip),
-		check(ip) {
+		check(ip, principalScope) {
 			if (!ready) {
 				throw new AppError(
 					503,
@@ -108,7 +119,7 @@ export function createBannedIpStartupGate(limiter: {
 					'BANNED_IP_CACHE_UNAVAILABLE',
 				);
 			}
-			return limiter.check(ip);
+			return limiter.check(ip, principalScope);
 		},
 		isReady: () => ready,
 	};
@@ -142,51 +153,74 @@ export function canStreamProtectedAsset(
 	asset: ProtectedAssetAccessRecord,
 	user?: ProtectedAssetAccessUser,
 ): boolean {
-	const isPublicProject = asset.project.status === 'PUBLISHED' || asset.project.status === 'ARCHIVED';
-	if (isPublicProject && (asset.kind === 'GAME' || asset.kind === 'VIDEO')) {
-		return true;
-	}
-
-	if (!user) return false;
-	if (user.role === 'ADMIN' || user.role === 'OPERATOR') return true;
-	if (asset.project.creatorId === user.id) return true;
-	return asset.project.members.some((member) => member.userId === user.id);
+	return authorizeAssetDelivery({ action: 'DOWNLOAD_ORIGINAL', asset, actor: user });
 }
 
-/** Redirect to a presigned S3 URL for a protected asset with IP-based rate limiting */
-export async function streamProtectedAsset(
+function actionFor(variant: AssetDownloadVariant): AssetDeliveryAction {
+	return variant === 'playback' ? 'DOWNLOAD_PLAYBACK' : 'DOWNLOAD_ORIGINAL';
+}
+
+async function grantProtectedAssetDownload(
 	deps: AssetsServiceDependencies,
-	storageKey: string,
+	asset: ProtectedAssetDownloadRecord,
+	variant: AssetDownloadVariant,
 	clientIp: string,
 	user: ProtectedAssetAccessUser | undefined,
 ): Promise<HttpResponseDescriptor> {
-	const asset = await deps.repository.findAssetByStorageKey(storageKey);
-	if (!asset) throw notFound('Asset not found');
-	if (!canStreamProtectedAsset(asset, user)) {
+	if (!asset.project || asset.projectId === null) {
+		throw new AppError(500, 'Protected asset has no project identity', 'INTERNAL_ERROR');
+	}
+	const action = actionFor(variant);
+	if (!authorizeAssetDelivery({ action, asset: { ...asset, project: asset.project }, actor: user })) {
 		if (!user) throw unauthorized();
 		throw forbidden('Not allowed to access this asset');
 	}
+	const representation = resolveDownloadRepresentation(asset, variant);
 
-	// Count only authorized protected redirects so access checks cannot be bypassed
-	// or masked by rate-limit state.
-	const result = deps.downloadLimiter.check(clientIp);
-	if (result === 'ban') {
-		await deps.repository.upsertBannedIp(clientIp, 'Rate limit exceeded (protected asset download)')
+	const principalScope = user
+		? `user:${user.id}:${action}:${asset.id}`
+		: `anonymous:${clientIp}:${action}:${asset.id}`;
+	const result = deps.downloadLimiter.check(clientIp, principalScope);
+	if (result !== 'ok' && result !== 'ban' && result.status === 'rate_limited') {
+		throw new AppError(
+			429,
+			'Too many protected download requests. Try again later.',
+			'RATE_LIMITED',
+			{ retryAfterSec: result.retryAfterSec },
+		);
+	}
+	if (result === 'ban' || (result !== 'ok' && result.status === 'abuse_ceiling')) {
+		await deps.repository.upsertBannedIp(clientIp, 'Protected download IP abuse ceiling exceeded')
 			.catch((err) => deps.logger.error({ err }, 'Failed to persist IP ban'));
 		throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
 	}
 
 	const downloadOptions = asset.kind === 'GAME'
 		? {
+			ttlSec: deps.presignTtlSec ?? 60,
 			responseContentDisposition: attachmentContentDisposition(
 				buildGameDownloadFilename(asset.project.title, asset.project.members).filename,
 			),
 		}
-		: undefined;
-	const url = downloadOptions
-		? await deps.presign(deps.protectedBucket, storageKey, downloadOptions)
-		: await deps.presign(deps.protectedBucket, storageKey);
+		: { ttlSec: deps.presignTtlSec ?? 60 };
+	const url = await deps.presign(
+		representation.bucket,
+		representation.objectKey,
+		downloadOptions,
+	);
 	return { status: 302, headers: { 'Referrer-Policy': 'no-referrer' }, location: url };
+}
+
+export async function downloadAssetById(
+	deps: AssetsServiceDependencies,
+	assetId: number,
+	variant: AssetDownloadVariant,
+	clientIp: string,
+	user: ProtectedAssetAccessUser | undefined,
+): Promise<HttpResponseDescriptor> {
+	const asset = await deps.repository.findAssetByIdForDownload(assetId);
+	if (!asset) throw notFound('Asset not found');
+	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user);
 }
 
 /** Delete an asset using a locked DB identity claim around storage I/O. */
@@ -201,11 +235,8 @@ export async function deleteAsset(
 
 	const asset = await deps.repository.claimAssetForDeletion(assetId);
 	if (!asset) throw notFound('Asset not found');
-	const bucket = deps.bucketForKind(asset.kind);
 	await deps.repository.completeAssetDeletion(asset, {
-		bucket,
 		reason: 'asset-delete',
-		playbackReason: 'asset-delete-playback',
 	});
 
 	// The transaction above owns durability. The request only coalesces a worker
@@ -217,11 +248,12 @@ export async function deleteAsset(
 
 export function createAssetsService(deps: AssetsServiceDependencies) {
 	return {
-		streamProtectedAsset: (
-			storageKey: string,
+		downloadAssetById: (
+			assetId: number,
+			variant: AssetDownloadVariant,
 			clientIp: string,
 			user: ProtectedAssetAccessUser | undefined,
-		) => streamProtectedAsset(deps, storageKey, clientIp, user),
+		) => downloadAssetById(deps, assetId, variant, clientIp, user),
 		deleteAsset: (assetId: number, actor: Actor) => deleteAsset(deps, assetId, actor),
 	};
 }

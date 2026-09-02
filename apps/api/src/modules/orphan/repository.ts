@@ -8,6 +8,15 @@ import { OUTBOX_REQUEUE_CANCEL_REASON } from './outbox.js';
 
 type OrphanRepositoryClient = Pick<PrismaClient, 'orphanObject' | '$queryRaw' | '$transaction'>;
 
+export interface OrphanUpsertOptions {
+	/**
+	 * Recovery is allowed only for the durable cancellation made by the live
+	 * reference fence. Unlike normal orphan recording, this must never create
+	 * a row or alter a row whose state changed after the caller's preflight.
+	 */
+	requireCancelledLiveReference?: boolean;
+}
+
 function assertRenewalActive(signal?: AbortSignal): void {
 	if (signal?.aborted) {
 		throw signal.reason ?? new Error('Orphan claim renewal aborted');
@@ -28,7 +37,31 @@ export function createOrphanRepository(
 			reason: string,
 			targetKind: 'EXACT' | 'PREFIX' = storageKey.endsWith('/') ? 'PREFIX' : 'EXACT',
 			now = new Date(),
+			options: OrphanUpsertOptions = {},
 		) {
+			if (options.requireCancelledLiveReference) {
+				const rearmed = await client.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+					UPDATE "orphan_objects"
+					SET "reason" = ${reason},
+						"target_kind" = 'EXACT'::"OrphanTargetKind",
+						"state" = 'PENDING'::"OrphanState",
+						"claim_token" = NULL,
+						"claim_until" = NULL,
+						"cancel_reason" = NULL,
+						"resolved_at" = NULL,
+						"attempt_count" = 0,
+						"last_error" = NULL,
+						"last_tried_at" = NULL,
+						"next_attempt_at" = ${now}
+					WHERE "bucket" = ${bucket}
+						AND "storage_key" = ${storageKey}
+						AND "state" = 'CANCELLED'::"OrphanState"
+						AND "cancel_reason" = 'live-reference-detected'
+						AND "target_kind" = 'EXACT'::"OrphanTargetKind"
+					RETURNING "id"
+				`);
+				return { rearmed: rearmed.length === 1 };
+			}
 			await client.orphanObject.upsert({
 				where: { orphan_bucket_storage_key: { bucket, storageKey } },
 				create: { bucket, storageKey, reason, targetKind, nextAttemptAt: now },

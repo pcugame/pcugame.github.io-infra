@@ -148,12 +148,14 @@ const INTEGRATION_USERS = {
 };
 
 const INTEGRATION_PROJECT_SLUGS = [
-  'integration-public-asset',
-  'integration-archived',
-  'integration-student-owned',
-  'integration-member-project',
-  'integration-other-owned',
-  'integration-incomplete',
+	'integration-public-asset',
+	'integration-webgl-deployment',
+	'integration-archived',
+	'integration-student-owned',
+	'integration-member-project',
+	'integration-other-owned',
+	'integration-incomplete',
+	'integration-draft-project',
 ];
 
 const INTEGRATION_EXHIBITIONS = [
@@ -208,7 +210,49 @@ async function uploadIntegrationObject(
     Body: body,
     ContentType: contentType,
     ContentLength: body.length,
-  }));
+	}));
+}
+
+type ReadyRepresentation = {
+	role: 'ORIGINAL' | 'PLAYBACK' | 'CARD_480' | 'DISPLAY_960' | 'WEBGL_SOURCE';
+	bucket: string;
+	objectKey: string;
+	mimeType: string;
+	sizeBytes: bigint;
+	width?: number;
+	height?: number;
+	state?: 'READY' | 'FAILED';
+	error?: string;
+};
+
+/**
+ * Integration data deliberately creates the same graph the workers commit:
+ * Asset is the domain identity and every byte location lives exclusively on a
+ * representation.  Keeping this helper here prevents the integration seed
+ * from silently reintroducing pre-contract scalar object columns.
+ */
+async function createIntegrationAsset(input: {
+	projectId?: number;
+	exhibitionId?: number;
+	kind: 'GAME' | 'VIDEO' | 'IMAGE' | 'POSTER' | 'WEBGL';
+	originalName: string;
+	representations: ReadyRepresentation[];
+}) {
+	return prisma.asset.create({
+		data: {
+			...(input.projectId != null ? { projectId: input.projectId } : {}),
+			...(input.exhibitionId != null ? { exhibitionId: input.exhibitionId } : {}),
+			kind: input.kind,
+			status: 'READY',
+			originalName: input.originalName,
+			representations: {
+				create: input.representations.map((representation) => ({
+					...representation,
+					state: representation.state ?? 'READY',
+				})),
+			},
+		},
+	});
 }
 
 async function upsertIntegrationUser(user: typeof INTEGRATION_USERS[keyof typeof INTEGRATION_USERS]) {
@@ -238,25 +282,53 @@ async function seedIntegrationData() {
   const publicBucket = process.env.S3_BUCKET_PUBLIC || 'pcu-public';
   const protectedBucket = process.env.S3_BUCKET_PROTECTED || 'pcu-protected';
   const s3 = integrationS3Client();
+	await prisma.storageBucket.upsert({
+		where: { bucket: protectedBucket },
+		update: { visibility: 'PROTECTED' },
+		create: { bucket: protectedBucket, visibility: 'PROTECTED' },
+	});
+	await prisma.storageBucket.upsert({
+		where: { bucket: publicBucket },
+		update: { visibility: 'PUBLIC' },
+		create: { bucket: publicBucket, visibility: 'PUBLIC' },
+	});
 
-  await prisma.asset.deleteMany({
-    where: {
-      storageKey: {
-        in: [
-          'integration-poster.png',
-          'integration-image.png',
-          'integration-video.mp4',
-          'integration-game.zip',
-        ],
-      },
-    },
-  });
-  await prisma.project.deleteMany({ where: { slug: { in: INTEGRATION_PROJECT_SLUGS } } });
-  await prisma.exhibition.deleteMany({
-    where: {
-      OR: INTEGRATION_EXHIBITIONS.map((item) => ({ year: item.year, title: item.title })),
-    },
-  });
+	// The integration seed is intentionally rerunnable after smoke/e2e traffic.
+	// Upload sessions restrict project/exhibition deletion, so remove only the
+	// sessions owned by this seed graph before replacing that graph atomically.
+	await prisma.$transaction(async (tx) => {
+		const exhibitions = await tx.exhibition.findMany({
+			where: { OR: INTEGRATION_EXHIBITIONS.map((item) => ({ year: item.year, title: item.title })) },
+			select: { id: true },
+		});
+		const exhibitionIds = exhibitions.map(({ id }) => id);
+		const projects = await tx.project.findMany({
+			where: {
+				OR: [
+					{ slug: { in: INTEGRATION_PROJECT_SLUGS } },
+					...(exhibitionIds.length > 0 ? [{ exhibitionId: { in: exhibitionIds } }] : []),
+				],
+			},
+			select: { id: true },
+		});
+		const projectIds = projects.map(({ id }) => id);
+		if (projectIds.length > 0 || exhibitionIds.length > 0) {
+			await tx.assetUploadSession.deleteMany({
+				where: {
+					OR: [
+						...(projectIds.length > 0 ? [{ projectId: { in: projectIds } }] : []),
+						...(exhibitionIds.length > 0 ? [{ exhibitionId: { in: exhibitionIds } }] : []),
+					],
+				},
+			});
+		}
+		if (projectIds.length > 0) {
+			await tx.project.deleteMany({ where: { id: { in: projectIds } } });
+		}
+		if (exhibitionIds.length > 0) {
+			await tx.exhibition.deleteMany({ where: { id: { in: exhibitionIds } } });
+		}
+	});
 
   const [student, operator, admin, other] = await Promise.all([
     upsertIntegrationUser(INTEGRATION_USERS.student),
@@ -269,25 +341,68 @@ async function seedIntegrationData() {
     where: { userId: { in: [student.id, operator.id, admin.id, other.id] } },
   });
 
-  await uploadIntegrationObject(s3, publicBucket, '.healthcheck', Buffer.from('ok'), 'text/plain');
-  await uploadIntegrationObject(s3, publicBucket, 'integration-exhibition-poster.png', ONE_BY_ONE_PNG, 'image/png');
-  await uploadIntegrationObject(s3, publicBucket, 'integration-poster.png', ONE_BY_ONE_PNG, 'image/png');
-  await uploadIntegrationObject(s3, publicBucket, 'integration-image.png', ONE_BY_ONE_PNG, 'image/png');
-  await uploadIntegrationObject(s3, protectedBucket, 'integration-video.mp4', TINY_MP4, 'video/mp4');
-  await uploadIntegrationObject(s3, protectedBucket, 'integration-game.zip', EMPTY_ZIP, 'application/zip');
+	await uploadIntegrationObject(s3, publicBucket, '.healthcheck', Buffer.from('ok'), 'text/plain');
+	const projectPosterKeys = {
+		original: 'public/images/integration/poster/original.png',
+		card480: 'public/images/integration/poster/card-480.png',
+		display960: 'public/images/integration/poster/display-960.png',
+	} as const;
+	const projectImageKeys = {
+		original: 'public/images/integration/image/original.png',
+		card480: 'public/images/integration/image/card-480.png',
+		display960: 'public/images/integration/image/display-960.png',
+	} as const;
+	for (const key of [...Object.values(projectPosterKeys), ...Object.values(projectImageKeys)]) {
+		await uploadIntegrationObject(s3, publicBucket, key, ONE_BY_ONE_PNG, 'image/png');
+	}
+	await uploadIntegrationObject(s3, protectedBucket, 'integration-video.mp4', TINY_MP4, 'video/mp4');
+	await uploadIntegrationObject(s3, protectedBucket, 'integration-video-playback.mp4', TINY_MP4, 'video/mp4');
+	await uploadIntegrationObject(s3, protectedBucket, 'integration-video-failed.mp4', TINY_MP4, 'video/mp4');
+	await uploadIntegrationObject(s3, protectedBucket, 'integration-game.zip', EMPTY_ZIP, 'application/zip');
+	await uploadIntegrationObject(s3, protectedBucket, 'integration-webgl-source.zip', EMPTY_ZIP, 'application/zip');
+	await uploadIntegrationObject(s3, publicBucket, 'public/webgl/integration-fixture/index.html', Buffer.from('<!doctype html><title>integration webgl</title>'), 'text/html');
+	await uploadIntegrationObject(s3, publicBucket, 'public/webgl/integration-fixture/Build/game.js', Buffer.from('console.log("integration webgl")'), 'application/javascript');
 
-  const uploadOpen = await prisma.exhibition.create({
-    data: {
-      year: 2026,
-      title: 'Integration Upload Open',
-      isUploadEnabled: true,
-      sortOrder: 0,
-      posterStorageKey: 'integration-exhibition-poster.png',
-      posterOriginalName: 'integration-exhibition-poster.png',
-      posterMimeType: 'image/png',
-      posterSizeBytes: BigInt(ONE_BY_ONE_PNG.length),
-    },
-  });
+	const uploadOpen = await prisma.exhibition.create({
+		data: {
+			year: 2026,
+			title: 'Integration Upload Open',
+			isUploadEnabled: true,
+			sortOrder: 0,
+		},
+	});
+	const exhibitionPosterPrefix = `public/images/exhibitions/${uploadOpen.id}`;
+	const exhibitionPosterKeys = {
+		original: `${exhibitionPosterPrefix}/original/integration-seed-v1.png`,
+		card480: `${exhibitionPosterPrefix}/card_480/integration-seed-v1.png`,
+		display960: `${exhibitionPosterPrefix}/display_960/integration-seed-v1.png`,
+	} as const;
+	for (const key of Object.values(exhibitionPosterKeys)) {
+		await uploadIntegrationObject(s3, publicBucket, key, ONE_BY_ONE_PNG, 'image/png');
+	}
+	const exhibitionPoster = await createIntegrationAsset({
+		exhibitionId: uploadOpen.id,
+		kind: 'POSTER',
+		originalName: 'integration-exhibition-poster.png',
+		representations: [
+			{
+				role: 'ORIGINAL', bucket: publicBucket, objectKey: exhibitionPosterKeys.original,
+				mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 1, height: 1,
+			},
+			{
+				role: 'CARD_480', bucket: publicBucket, objectKey: exhibitionPosterKeys.card480,
+				mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 480, height: 480,
+			},
+			{
+				role: 'DISPLAY_960', bucket: publicBucket, objectKey: exhibitionPosterKeys.display960,
+				mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 960, height: 960,
+			},
+		],
+	});
+	await prisma.exhibition.update({
+		where: { id: uploadOpen.id },
+		data: { posterAssetId: exhibitionPoster.id },
+	});
   const uploadClosed = await prisma.exhibition.create({
     data: {
       year: 2027,
@@ -320,57 +435,60 @@ async function seedIntegrationData() {
     },
   });
 
-  const poster = await prisma.asset.create({
-    data: {
-      projectId: publicProject.id,
-      kind: 'POSTER',
-      storageKey: 'integration-poster.png',
-      originalName: 'integration-poster.png',
-      mimeType: 'image/png',
-      sizeBytes: BigInt(ONE_BY_ONE_PNG.length),
-      isPublic: true,
-    },
-  });
+	const poster = await createIntegrationAsset({
+		projectId: publicProject.id,
+		kind: 'POSTER',
+		originalName: 'integration-poster.png',
+		representations: [
+			{ role: 'ORIGINAL', bucket: publicBucket, objectKey: projectPosterKeys.original, mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 1, height: 1 },
+			{ role: 'CARD_480', bucket: publicBucket, objectKey: projectPosterKeys.card480, mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 480, height: 480 },
+			{ role: 'DISPLAY_960', bucket: publicBucket, objectKey: projectPosterKeys.display960, mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 960, height: 960 },
+		],
+	});
   await prisma.project.update({
     where: { id: publicProject.id },
     data: { posterAssetId: poster.id },
   });
-  await prisma.asset.createMany({
-    data: [
-      {
-        projectId: publicProject.id,
-        kind: 'IMAGE',
-        storageKey: 'integration-image.png',
-        originalName: 'integration-image.png',
-        mimeType: 'image/png',
-        sizeBytes: BigInt(ONE_BY_ONE_PNG.length),
-        isPublic: true,
-      },
-      {
-        projectId: publicProject.id,
-        kind: 'VIDEO',
-        storageKey: 'integration-video.mp4',
-        originalName: 'integration-video.mp4',
-        mimeType: 'video/mp4',
-        sizeBytes: BigInt(TINY_MP4.length),
-        playbackStatus: 'READY',
-        isPublic: false,
-      },
-      {
-        projectId: publicProject.id,
-        kind: 'GAME',
-        storageKey: 'integration-game.zip',
-        originalName: 'integration-game.zip',
-        mimeType: 'application/zip',
-        sizeBytes: BigInt(EMPTY_ZIP.length),
-        playbackStatus: 'READY',
-        isPublic: false,
-      },
-    ],
-  });
+	await createIntegrationAsset({
+		projectId: publicProject.id,
+		kind: 'IMAGE',
+		originalName: 'integration-image.png',
+		representations: [
+			{ role: 'ORIGINAL', bucket: publicBucket, objectKey: projectImageKeys.original, mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 1, height: 1 },
+			{ role: 'CARD_480', bucket: publicBucket, objectKey: projectImageKeys.card480, mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 480, height: 480 },
+			{ role: 'DISPLAY_960', bucket: publicBucket, objectKey: projectImageKeys.display960, mimeType: 'image/png', sizeBytes: BigInt(ONE_BY_ONE_PNG.length), width: 960, height: 960 },
+		],
+	});
+	await createIntegrationAsset({
+		projectId: publicProject.id,
+		kind: 'VIDEO',
+		originalName: 'integration-video.mp4',
+		representations: [
+			{ role: 'ORIGINAL', bucket: protectedBucket, objectKey: 'integration-video.mp4', mimeType: 'video/mp4', sizeBytes: BigInt(TINY_MP4.length) },
+			{ role: 'PLAYBACK', bucket: protectedBucket, objectKey: 'integration-video-playback.mp4', mimeType: 'video/mp4', sizeBytes: BigInt(TINY_MP4.length) },
+		],
+	});
+	await createIntegrationAsset({
+		projectId: publicProject.id,
+		kind: 'VIDEO',
+		originalName: 'integration-video-failed.mp4',
+		representations: [
+			{ role: 'ORIGINAL', bucket: protectedBucket, objectKey: 'integration-video-failed.mp4', mimeType: 'video/mp4', sizeBytes: BigInt(TINY_MP4.length) },
+			{ role: 'PLAYBACK', bucket: protectedBucket, objectKey: 'integration-video-failed-playback.mp4', mimeType: 'video/mp4', sizeBytes: 0n, state: 'FAILED', error: 'integration fixture: transcode failed' },
+		],
+	});
+	await createIntegrationAsset({
+		projectId: publicProject.id,
+		kind: 'GAME',
+		originalName: 'integration-game.zip',
+		representations: [{
+			role: 'ORIGINAL', bucket: protectedBucket, objectKey: 'integration-game.zip',
+			mimeType: 'application/zip', sizeBytes: BigInt(EMPTY_ZIP.length),
+		}],
+	});
 
-  await prisma.project.createMany({
-    data: [
+	await prisma.project.createMany({
+		data: [
       {
         exhibitionId: uploadOpen.id,
         slug: 'integration-archived',
@@ -395,17 +513,80 @@ async function seedIntegrationData() {
         status: 'PUBLISHED',
         creatorId: other.id,
       },
-      {
-        exhibitionId: uploadClosed.id,
+			{
+				exhibitionId: uploadClosed.id,
         slug: 'integration-incomplete',
         title: 'Integration Incomplete Project',
         summary: 'Incomplete project in upload-disabled exhibition.',
         isIncomplete: true,
         status: 'PUBLISHED',
         creatorId: student.id,
-      },
-    ],
-  });
+			},
+			{
+				exhibitionId: uploadOpen.id,
+				slug: 'integration-draft-project',
+				title: 'Integration Draft Project',
+				summary: 'Draft project intentionally excluded from public reads.',
+				status: 'DRAFT',
+				creatorId: student.id,
+			},
+		],
+	});
+
+	const webglProject = await prisma.project.create({
+		data: {
+			exhibitionId: uploadOpen.id,
+			slug: 'integration-webgl-deployment',
+			title: 'Integration Immutable WebGL Deployment',
+			summary: 'Published canonical WebGL deployment fixture.',
+			status: 'PUBLISHED',
+			creatorId: student.id,
+		},
+	});
+	const webglSource = await createIntegrationAsset({
+		projectId: webglProject.id,
+		kind: 'WEBGL',
+		originalName: 'integration-webgl-source.zip',
+		representations: [{
+			role: 'WEBGL_SOURCE', bucket: protectedBucket, objectKey: 'integration-webgl-source.zip',
+			mimeType: 'application/zip', sizeBytes: BigInt(EMPTY_ZIP.length),
+		}],
+	});
+	const webglSourceRepresentation = await prisma.assetRepresentation.findUniqueOrThrow({
+		where: { asset_representation_asset_role: { assetId: webglSource.id, role: 'WEBGL_SOURCE' } },
+	});
+	const deploymentId = '11111111-1111-4111-8111-111111111111';
+	const publicPrefix = 'public/webgl/integration-fixture/';
+	await prisma.webglDeployment.create({
+		data: {
+			id: deploymentId,
+			projectId: webglProject.id,
+			sourceRepresentationId: webglSourceRepresentation.id,
+			publicBucket,
+			publicPrefix,
+			entryObjectKey: `${publicPrefix}index.html`,
+			objectManifest: {
+				version: '1',
+				objects: [
+					{
+						objectKey: `${publicPrefix}index.html`,
+						sizeBytes: Buffer.byteLength('<!doctype html><title>integration webgl</title>'),
+						mimeType: 'text/html',
+					},
+					{
+						objectKey: `${publicPrefix}Build/game.js`,
+						sizeBytes: Buffer.byteLength('console.log("integration webgl")'),
+						mimeType: 'application/javascript',
+					},
+				],
+			},
+			state: 'READY',
+		},
+	});
+	await prisma.project.update({
+		where: { id: webglProject.id },
+		data: { currentWebglDeploymentId: deploymentId },
+	});
 
   await prisma.project.create({
     data: {
@@ -426,7 +607,7 @@ async function seedIntegrationData() {
 
   console.log('통합 테스트 사용자:', student.email, operator.email, admin.email);
   console.log('통합 테스트 전시:', uploadOpen.id, uploadClosed.id, emptyExhibition.id);
-  console.log('통합 테스트 fixture asset storage key: integration-poster.png');
+	console.log('통합 테스트 canonical representation fixture: integration-poster.png');
 }
 
 // ── JSON 파일에서 실제 데이터 임포트 ──────────────────

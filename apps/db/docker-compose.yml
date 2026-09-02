@@ -1,9 +1,11 @@
 services:
+  # PostgreSQL remains available to the existing local-development workflow.
+  # Externally published NAS byte origins are opt-in through the profile below.
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_LOCAL_PORT:-5432}:5432"
     environment:
       POSTGRES_DB: pcu_graduationproject_v2
       POSTGRES_USER: pcu_admin
@@ -16,16 +18,19 @@ services:
       timeout: 5s
       retries: 5
 
+  # All Garage listeners are reachable only on garage_private. The S3 listener
+  # is additionally loopback-bound for a NAS-local API/worker process; website
+  # and management listeners have no host publication at all.
   garage:
     image: dxflrs/garage:v1.1.0
     restart: unless-stopped
     ports:
-      - "3900:3900"   # S3 API
-      - "3902:3902"   # Admin API
+      - "127.0.0.1:${GARAGE_S3_LOCAL_PORT:-3900}:3900"
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
       - garage_data:/var/lib/garage/data
       - garage_meta:/var/lib/garage/meta
+    networks: [garage_private]
     healthcheck:
       test: ["CMD", "/garage", "-c", "/etc/garage.toml", "status"]
       interval: 10s
@@ -40,12 +45,133 @@ services:
     depends_on:
       garage:
         condition: service_healthy
+    environment:
+      # Production must override this with its exact browser origins. The local
+      # fallback is a concrete origin, intentionally never a wildcard.
+      S3_INTERNAL_ENDPOINT: ${S3_INTERNAL_ENDPOINT:-http://garage:3900}
+      S3_CORS_ALLOWED_ORIGINS: ${S3_CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      S3_REGION: ${S3_REGION:-garage}
     volumes:
       - ./garage.toml:/etc/garage.toml:ro
       - ./garage-init.sh:/garage-init.sh:ro
       - garage_meta:/var/lib/garage/meta:ro
+    networks: [garage_private]
     entrypoint: ["/bin/sh", "/garage-init.sh"]
     restart: "no"
+
+  # Browser UploadPart data plane. It is the only externally published path to
+  # Garage's S3 API; Garage validates SigV4 itself and nginx never terminates
+  # or interprets a multipart body.
+  upload-part-origin:
+    image: nginx:1.27-alpine
+    profiles: ["nas-data-plane"]
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: 8080
+      UPLOAD_PART_MAX_BYTES: ${UPLOAD_PART_MAX_BYTES:-16m}
+      UPLOAD_PART_GLOBAL_CONNECTIONS: ${UPLOAD_PART_GLOBAL_CONNECTIONS:-512}
+      UPLOAD_PART_PER_IP_CONNECTIONS: ${UPLOAD_PART_PER_IP_CONNECTIONS:-128}
+      GARAGE_S3_UPSTREAM: ${GARAGE_S3_UPSTREAM:-http://garage:3900}
+      GARAGE_S3_TLS_SERVER_NAME: ${GARAGE_S3_TLS_SERVER_NAME:-garage}
+    ports:
+      - "${NAS_UPLOAD_BIND_ADDRESS:-127.0.0.1}:${NAS_UPLOAD_PORT:-3901}:8080"
+    volumes:
+      - ./upload-part.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./validate-data-plane-env.sh:/docker-entrypoint.d/05-validate-data-plane-env.sh:ro
+    # Request buffering is disabled: only bounded nginx connection buffers use
+    # this tmpfs. Global/per-IP connection ceilings bound slow clients while a
+    # 50-user school NAT remains well below the per-IP abuse ceiling.
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+      - /var/log/nginx:rw,noexec,nosuid,size=16m
+      - /var/run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /etc/nginx/conf.d:rw,noexec,nosuid,size=1m
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    networks: [garage_private, data_plane_edge]
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Browser protected-object capability data plane. It accepts only GET/HEAD
+  # for object keys under the configured protected path-style bucket.
+  protected-download-origin:
+    image: nginx:1.27-alpine
+    profiles: ["nas-data-plane"]
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: 8080
+      S3_BUCKET_PROTECTED: ${S3_BUCKET_PROTECTED:-pcu-protected}
+      PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS: ${PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:-512}
+      PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS: ${PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS:-128}
+      GARAGE_S3_UPSTREAM: ${GARAGE_S3_UPSTREAM:-http://garage:3900}
+      GARAGE_S3_TLS_SERVER_NAME: ${GARAGE_S3_TLS_SERVER_NAME:-garage}
+    ports:
+      - "${NAS_PROTECTED_DOWNLOAD_BIND_ADDRESS:-127.0.0.1}:${NAS_PROTECTED_DOWNLOAD_PORT:-3906}:8080"
+    volumes:
+      - ./protected-download.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./validate-data-plane-env.sh:/docker-entrypoint.d/05-validate-data-plane-env.sh:ro
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=16m
+      - /var/log/nginx:rw,noexec,nosuid,size=16m
+      - /var/run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /etc/nginx/conf.d:rw,noexec,nosuid,size=1m
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    networks: [garage_private, data_plane_edge]
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Browser public-object data plane. There is no volume for NAS exports and
+  # no route to the Garage S3/admin API from this proxy.
+  public-origin:
+    image: nginx:1.27-alpine
+    profiles: ["nas-data-plane"]
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: 8080
+      GARAGE_PUBLIC_WEB_UPSTREAM: ${GARAGE_PUBLIC_WEB_UPSTREAM:-http://garage:3902}
+      GARAGE_PUBLIC_WEB_TLS_SERVER_NAME: ${GARAGE_PUBLIC_WEB_TLS_SERVER_NAME:-garage}
+      S3_BUCKET_PUBLIC: ${S3_BUCKET_PUBLIC:-pcu-public}
+      GARAGE_PUBLIC_BUCKET_HOST: ${GARAGE_PUBLIC_BUCKET_HOST:-pcu-public.web.garage.localhost}
+      PUBLIC_CORS_ORIGIN_PRIMARY: ${PUBLIC_CORS_ORIGIN_PRIMARY:-http://localhost:5173}
+      PUBLIC_CORS_ORIGIN_SECONDARY: ${PUBLIC_CORS_ORIGIN_SECONDARY:-http://127.0.0.1:5173}
+      WEB_PUBLIC_ORIGIN: ${WEB_PUBLIC_ORIGIN:-http://localhost:5173}
+    ports:
+      - "${NAS_PUBLIC_BIND_ADDRESS:-127.0.0.1}:${NAS_PUBLIC_PORT:-3904}:8080"
+    volumes:
+      - ./public-origin.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./validate-data-plane-env.sh:/docker-entrypoint.d/05-validate-data-plane-env.sh:ro
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+      - /var/log/nginx:rw,noexec,nosuid,size=16m
+      - /var/run:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+      - /etc/nginx/conf.d:rw,noexec,nosuid,size=1m
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    networks: [garage_private, data_plane_edge]
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pg_data:
@@ -54,3 +180,12 @@ volumes:
     driver: local
   garage_meta:
     driver: local
+
+networks:
+  garage_private:
+    internal: true
+  # Only the three byte-plane reverse proxies join this publish-capable bridge.
+  # Garage and garage-init remain garage_private-only, so S3 website/admin/
+  # management listeners cannot become host-published through this network.
+  data_plane_edge:
+    driver: bridge

@@ -14,7 +14,10 @@ export interface ProjectServiceDependencies {
 	abortMultipart(key: string, uploadId: string): Promise<void>;
 	wakeDeletionWorker(): void;
 	wakeMaintenance(): void;
-	logger: { error(context: Record<string, unknown>, message: string): void };
+	logger: {
+		error(context: Record<string, unknown>, message: string): void;
+		warn?(context: Record<string, unknown>, message: string): void;
+	};
 	recordPostCommitCleanupFailure?: () => void;
 }
 
@@ -49,7 +52,16 @@ export async function listProjects(
 		title: p.title,
 		slug: p.slug,
 		year: p.exhibition.year,
-		isIncomplete: effectiveIsIncomplete(p.isIncomplete, p.assets, p.poster),
+		isIncomplete: effectiveIsIncomplete(
+			p.isIncomplete,
+			p.assets,
+			p.poster ? {
+				...p.poster,
+				hasReadyOriginal: p.poster.representations?.some((representation) => (
+					representation.role === 'ORIGINAL'
+				)) ?? false,
+			} : null,
+		),
 		status: p.status,
 		createdByUserName: p.creator.name || undefined,
 		memberNames: p.members.map((m) => m.name),
@@ -84,7 +96,6 @@ export async function getProjectDetail(
 		const isMember = !!(await deps.repository.isMemberOfProject(project.id, userId));
 		if (!isMember) throw forbidden('Not your project');
 	}
-
 	return deps.serializeProjectDetail(project);
 }
 
@@ -105,7 +116,6 @@ export async function updateProject(
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	});
-
 	return deps.serializeProjectDetail(updated);
 }
 
@@ -126,11 +136,11 @@ async function abortTrackedMultipartUploads(
 	projectId?: number,
 ): Promise<void> {
 	await Promise.all(activeUploads.map(async (session) => {
-		if (session.s3UploadId && session.s3Key) {
-			await deps.abortMultipart(session.s3Key, session.s3UploadId).catch((err) => {
+		if (session.uploadId && session.objectKey) {
+			await deps.abortMultipart(session.objectKey, session.uploadId).catch((err) => {
 				deps.recordPostCommitCleanupFailure?.();
 				deps.logger.error(
-					{ err, projectId: projectId ?? session.projectId, s3Key: session.s3Key },
+					{ err, projectId: projectId ?? session.projectId, objectKey: session.objectKey },
 					'Best-effort tracked multipart abort failed; durable task retained',
 				);
 			});
@@ -172,7 +182,7 @@ export async function bulkDeleteProjects(deps: ProjectServiceDependencies, ids: 
 	return {
 		deleted: result.count,
 		assetsRemoved: assets.length,
-		webglBuildsRemoved: projects.filter((project) => project.webglEntryKey).length,
+		webglBuildsRemoved: projects.filter((project) => project.currentWebglDeploymentId != null).length,
 	};
 }
 

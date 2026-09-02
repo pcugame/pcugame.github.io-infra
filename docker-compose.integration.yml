@@ -63,7 +63,63 @@ services:
       - integration_garage_meta:/var/lib/garage/meta:ro
     entrypoint: ["/bin/sh", "/garage-init-integration.sh"]
 
+  upload-origin:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: "8080"
+      GARAGE_S3_UPSTREAM: http://garage:3900
+      GARAGE_S3_TLS_SERVER_NAME: garage
+      UPLOAD_PART_MAX_BYTES: 6g
+      UPLOAD_PART_GLOBAL_CONNECTIONS: "512"
+      UPLOAD_PART_PER_IP_CONNECTIONS: "128"
+    volumes:
+      - ./apps/db/upload-part.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - "3905:8080"
+
+  protected-download-origin:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: "8080"
+      S3_BUCKET_PROTECTED: pcu-protected
+      GARAGE_S3_UPSTREAM: http://garage:3900
+      GARAGE_S3_TLS_SERVER_NAME: garage
+      PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS: "512"
+      PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS: "128"
+    volumes:
+      - ./apps/db/protected-download.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - "3906:8080"
+
+  public-origin:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      NGINX_LISTEN_PORT: "8080"
+      GARAGE_PUBLIC_WEB_UPSTREAM: http://garage:3902
+      GARAGE_PUBLIC_WEB_TLS_SERVER_NAME: garage
+      GARAGE_PUBLIC_BUCKET_HOST: pcu-public.web.garage.localhost
+      PUBLIC_CORS_ORIGIN_PRIMARY: http://localhost:5173
+      PUBLIC_CORS_ORIGIN_SECONDARY: "null"
+      WEB_PUBLIC_ORIGIN: http://localhost:5173
+    volumes:
+      - ./apps/db/public-origin.nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - "3904:8080"
+
   api:
+    image: pcu-integration-api:local
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -73,9 +129,17 @@ services:
         condition: service_healthy
       garage-init:
         condition: service_completed_successfully
+      db-init:
+        condition: service_completed_successfully
+      upload-origin:
+        condition: service_started
+      protected-download-origin:
+        condition: service_started
+      public-origin:
+        condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    environment:
+    environment: &api-env
       NODE_ENV: test
       PORT: "4000"
       LOG_LEVEL: info
@@ -95,6 +159,7 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       API_PUBLIC_URL: http://localhost:4000
       WEB_PUBLIC_URL: http://localhost:5173
+      PUBLIC_ASSET_ORIGIN: http://localhost:3904
       RATE_LIMIT_GLOBAL_MAX: "1000"
       RATE_LIMIT_GLOBAL_WINDOW_MS: "60000"
       RATE_LIMIT_LOGIN_MAX: "100"
@@ -113,19 +178,92 @@ services:
       UPLOAD_CHUNKED_GAME_MAX_MB: "5120"
       UPLOAD_CHUNK_SIZE_MB: "10"
       UPLOAD_SESSION_TTL_MINUTES: "1440"
+      DIRECT_UPLOAD_PART_URL_REFRESH_MAX: "64"
+      DIRECT_UPLOAD_WORKER_TEMP_MAX_MB: "6144"
+      EXPORT_WORKER_MAX_OBJECT_BYTES: "5368709120"
+      EXPORT_WORKER_MAX_JOB_BYTES: "34359738368"
+      S3_PUBLIC_SIGNING_ENDPOINT: http://localhost:3905
+      S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: http://localhost:3906
       <<: *s3-env
     ports:
       - "4000:4000"
-    command: >
-      sh -c "npx prisma migrate deploy &&
-             SEED_USE_DIST=true npx tsx prisma/seed.ts --integration &&
-             node dist/server.js"
+    command: ["node", "dist/server.js"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/health"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 20s
+
+  # Test-only database initialization is a dedicated one-shot process. The API
+  # image itself never mutates schema or seeds data at startup.
+  db-init:
+    image: pcu-integration-api:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+    environment: *api-env
+    command: >
+      sh -c "npx prisma migrate deploy &&
+             SEED_USE_DIST=true npx tsx prisma/seed.ts --integration"
+    restart: "no"
+
+  game-validation-worker:
+    image: pcu-integration-api:local
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment: *api-env
+    # Independent container tmpfs; it is not a host mount shared with WebGL.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=6g
+    command: ["node", "dist/game-validation-worker.js"]
+
+  webgl-worker:
+    image: pcu-integration-api:local
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment: *api-env
+    # Independent container tmpfs; it is not a host mount shared with GAME.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=6g
+    command: ["node", "dist/webgl-worker.js"]
+
+  video-worker:
+    image: pcu-integration-api:local
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment: *api-env
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=2g
+    command: ["node", "dist/video-worker.js"]
+
+  image-worker:
+    image: pcu-integration-api:local
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment: *api-env
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
+    command: ["node", "dist/image-worker.js"]
+
+  project-publication-worker:
+    image: pcu-integration-api:local
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment: *api-env
+    command: ["node", "dist/project-publication-worker.js"]
 
   web:
     image: node:22-bookworm-slim
@@ -163,6 +301,12 @@ services:
       INTEGRATION_API_BASE_URL: http://api:4000
       INTEGRATION_WEB_BASE_URL: http://web:5173
       INTEGRATION_ORIGIN: http://localhost:5173
+      INTEGRATION_PUBLIC_ASSET_BASE_URL: http://public-origin:8080
+      INTEGRATION_UPLOAD_PART_BASE_URL: http://upload-origin:8080
+      INTEGRATION_PROTECTED_DOWNLOAD_BASE_URL: http://protected-download-origin:8080
+      INTEGRATION_GARAGE_BASE_URL: http://garage:3900
+      INTEGRATION_S3_ACCESS_KEY_ID: GK000000000000000000000001
+      INTEGRATION_S3_SECRET_ACCESS_KEY: "0000000000000000000000000000000000000000000000000000000000000001"
     volumes:
       - .:/app:ro
     command: ["node", "scripts/smoke-integration.mjs"]

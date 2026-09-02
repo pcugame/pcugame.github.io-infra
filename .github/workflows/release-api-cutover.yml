@@ -1,0 +1,526 @@
+name: Authorized API Schema Cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: 'Authorized migration phase'
+        required: true
+        type: choice
+        options: [phase1, phase2, phase2-forward-fix]
+      phase1_api_image:
+        description: 'Immutable @sha256 Phase 1 API/worker image (required for phase1)'
+        required: false
+        type: string
+      phase1_source_sha:
+        description: 'Exact 40-character source SHA in the Phase 1 image label (required for phase1)'
+        required: false
+        type: string
+      final_api_image:
+        description: 'Immutable @sha256 final API/worker image (required for phase2 and forward fix)'
+        required: false
+        type: string
+      observation_started_at:
+        description: 'Phase 1 canonical-read observation start (ISO-8601, required for phase2)'
+        required: false
+        type: string
+      observation_attestation:
+        description: 'For phase2 enter I_ATTEST_24H_ZERO_FALLBACK; for forward fix enter I_ACKNOWLEDGE_CONTRACT_FORWARD_FIX'
+        required: false
+        type: string
+
+concurrency:
+  group: production-object-cutover
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    outputs:
+      final_image: ${{ steps.release.outputs.final_image }}
+      phase1_image: ${{ steps.release.outputs.phase1_image }}
+      phase1_source_sha: ${{ steps.release.outputs.phase1_source_sha }}
+    steps:
+      - name: Fail closed outside the production control default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [ "${GITHUB_REPOSITORY}" = pcugame/pcugame.github.io-infra ]
+          [ "${GITHUB_DEFAULT_BRANCH}" = master ]
+          [ "${GITHUB_REF}" = refs/heads/master ]
+
+      - uses: actions/checkout@v4
+
+      - name: Verify production control repository and default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node server/verify-github-release-boundaries.mjs control
+
+      - id: release
+        env:
+          RELEASE_PHASE: ${{ inputs.phase }}
+          PHASE1_IMAGE: ${{ inputs.phase1_api_image }}
+          PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
+          FINAL_IMAGE: ${{ inputs.final_api_image }}
+          EXPECTED_IMAGE_REPO: ghcr.io/pcugame/pcu-graduationproject-v2-api
+          OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
+          OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
+        run: |
+          set -euo pipefail
+          is_authorized_digest() {
+            local image="$1"
+            local prefix="${EXPECTED_IMAGE_REPO}@sha256:"
+            [[ "$image" == "${prefix}"* ]] || return 1
+            local digest="${image#"${prefix}"}"
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          }
+          if [ "${RELEASE_PHASE}" = phase1 ]; then
+            is_authorized_digest "${PHASE1_IMAGE}" || {
+              echo "phase1_api_image must be an immutable @sha256 digest in ${EXPECTED_IMAGE_REPO}"
+              exit 1
+            }
+            [[ "${PHASE1_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "phase1_source_sha must be an exact lowercase 40-character Git SHA"
+              exit 1
+            }
+          elif [ "${RELEASE_PHASE}" = phase2 ]; then
+            is_authorized_digest "${FINAL_IMAGE}" || {
+              echo "final_api_image must be an immutable @sha256 digest in ${EXPECTED_IMAGE_REPO}"
+              exit 1
+            }
+            [[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]] || {
+              echo "phase2 requires the exact 24-hour zero-fallback attestation"
+              exit 1
+            }
+            OBSERVATION_STARTED_AT="${OBSERVATION_STARTED_AT}" node - <<'NODE'
+          const started = Date.parse(process.env.OBSERVATION_STARTED_AT || '');
+          if (!Number.isFinite(started)) throw new Error('observation_started_at must be ISO-8601');
+          const elapsed = Date.now() - started;
+          if (elapsed < 24 * 60 * 60 * 1000) throw new Error(`observation is only ${Math.floor(elapsed / 3600000)}h old`);
+          if (elapsed > 31 * 24 * 60 * 60 * 1000) throw new Error('observation attestation is stale; run a new preflight');
+          NODE
+          else
+            is_authorized_digest "${FINAL_IMAGE}" || {
+              echo "final_api_image must be an immutable @sha256 digest in ${EXPECTED_IMAGE_REPO}"
+              exit 1
+            }
+            [[ "${OBSERVATION_ATTESTATION}" = I_ACKNOWLEDGE_CONTRACT_FORWARD_FIX ]] || {
+              echo "phase2-forward-fix requires the exact contract acknowledgement"
+              exit 1
+            }
+          fi
+          echo "final_image=${FINAL_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "phase1_image=${PHASE1_IMAGE}" >> "${GITHUB_OUTPUT}"
+          echo "phase1_source_sha=${PHASE1_SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
+
+  cutover:
+    needs: authorize
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Fail closed outside the production control default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [ "${GITHUB_REPOSITORY}" = pcugame/pcugame.github.io-infra ]
+          [ "${GITHUB_DEFAULT_BRANCH}" = master ]
+          [ "${GITHUB_REF}" = refs/heads/master ]
+
+      - uses: actions/checkout@v4
+
+      - name: Re-verify production control repository and default branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node server/verify-github-release-boundaries.mjs control
+
+      - name: Preflight external Pages single-writer boundary before maintenance
+        if: ${{ inputs.phase == 'phase2' }}
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
+        run: node server/verify-github-release-boundaries.mjs pages
+
+      - name: Copy release controls to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: server/deploy.sh,server/smoke-data-plane.mjs
+          target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          strip_components: 1
+          overwrite: true
+
+      - name: Run Phase 1 or Phase 2 forward fix
+        if: ${{ inputs.phase != 'phase2' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,RELEASE_PHASE,PHASE1_IMAGE,PHASE1_SOURCE_SHA,FINAL_IMAGE,RELEASE_SOURCE_SHA,OBSERVATION_STARTED_AT,OBSERVATION_ATTESTATION,SMOKE_PUBLIC_OBJECT_URL
+          script_stop: true
+          command_timeout: 60m
+          script: |
+            set -euo pipefail
+            export PATH=$PATH:/usr/local/bin:/usr/bin
+            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
+            export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
+            chmod +x "${DEPLOY_DIR}/deploy.sh"
+            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
+            rollback_tag="localhost/pcu-graduationproject-v2-api:rollback-${RELEASE_SOURCE_SHA}"
+            previous_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null || true)"
+
+            final_smoke() {
+              [ -n "${SMOKE_PUBLIC_OBJECT_URL}" ] || {
+                echo "SMOKE_PUBLIC_OBJECT_URL is required for final data-plane smoke"
+                return 1
+              }
+              node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
+              podman stop gp-api --time 30
+              trap 'podman start gp-api >/dev/null 2>&1 || true' EXIT
+              node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
+              podman start gp-api
+              trap - EXIT
+              api_recovered=false
+              for _attempt in $(seq 1 45); do
+                if podman exec gp-api wget -qO- http://localhost:4000/api/health 2>/dev/null | grep -q '"ok":true'; then
+                  api_recovered=true
+                  break
+                fi
+                sleep 2
+              done
+              [ "${api_recovered}" = true ] || {
+                echo "API did not recover after the API-down data-plane smoke"
+                return 1
+              }
+            }
+
+            if [ "${RELEASE_PHASE}" = phase1 ]; then
+              export API_IMAGE="${PHASE1_IMAGE}"
+              export MIGRATION_IMAGE="${PHASE1_IMAGE}"
+              export RELEASE_SOURCE_SHA="${PHASE1_SOURCE_SHA}"
+              # The dedicated Phase 1 image owns both the runtime and every
+              # expand/backfill CLI. Prove its marker and five worker entries
+              # before the current deployment is stopped.
+              "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase1
+              if [ -n "${previous_image_id}" ]; then
+                rollback_nonce="$(openssl rand -hex 32)"
+                "${DEPLOY_DIR}/deploy.sh" authorize-phase1-rollback "${rollback_nonce}"
+                podman untag "${rollback_tag}" 2>/dev/null || true
+                podman tag "${previous_image_id}" "${rollback_tag}"
+              fi
+
+              "${DEPLOY_DIR}/deploy.sh" drain
+              "${DEPLOY_DIR}/deploy.sh" legacy-audit
+              "${DEPLOY_DIR}/deploy.sh" backup "phase1-${RELEASE_SOURCE_SHA}"
+              "${DEPLOY_DIR}/deploy.sh" inventory "/release-state/garage-before-expand-${RELEASE_SOURCE_SHA}.json"
+              "${DEPLOY_DIR}/deploy.sh" release-migrate status
+              "${DEPLOY_DIR}/deploy.sh" release-migrate apply-expand
+
+              # Expand is additive. Only this pre-contract boundary permits a
+              # safe old-image rollback if the Phase 1 runtime is unhealthy.
+              if ! RELEASE_SCHEMA_PHASE=phase1 "${DEPLOY_DIR}/deploy.sh" up; then
+                echo "Phase 1 runtime failed before contract; attempting the explicitly fenced safe image rollback."
+                [ -n "${previous_image_id}" ] || exit 1
+                API_IMAGE="${rollback_tag}" MIGRATION_IMAGE="${rollback_tag}" \
+                  PULL_API_IMAGE=false START_DEDICATED_WORKERS=false ROLLBACK_AUTH_NONCE="${rollback_nonce}" \
+                  RELEASE_SCHEMA_PHASE=phase1 "${DEPLOY_DIR}/deploy.sh" up
+                exit 1
+              fi
+
+              "${DEPLOY_DIR}/deploy.sh" drain
+              "${DEPLOY_DIR}/deploy.sh" backfill --batch-size=100 \
+                --progress-file=/release-state/canonical-assets.dry-run.progress.json \
+                --failures-file=/release-state/canonical-assets.dry-run.failures.json \
+                --report-file=/release-state/canonical-assets.dry-run.report.json
+              "${DEPLOY_DIR}/deploy.sh" backfill --apply --batch-size=100 \
+                --progress-file=/release-state/canonical-assets.apply.progress.json \
+                --failures-file=/release-state/canonical-assets.apply.failures.json \
+                --report-file=/release-state/canonical-assets.apply.report.json
+              "${DEPLOY_DIR}/deploy.sh" inventory "/release-state/garage-after-backfill-${RELEASE_SOURCE_SHA}.json"
+              set +e
+              "${DEPLOY_DIR}/deploy.sh" contract-preflight \
+                --reset-observation --confirm-reset=RESET_LEGACY_BRIDGE_OBSERVATION \
+                --inventory-input="/release-state/garage-after-backfill-${RELEASE_SOURCE_SHA}.json" \
+                --report-output=/release-state/phase1-reconciliation.json
+              reconciliation_status=$?
+              set -e
+              # A fresh 24h observation is the only allowed blocker at this point.
+              [ "${reconciliation_status}" -eq 1 ] || {
+                echo "Expected the fresh observation-window gate after reconciliation, got ${reconciliation_status}."
+                exit 1
+              }
+              podman run --rm --pod graduationproject \
+                -v "${CUTOVER_STATE_DIR}:/release-state:ro,Z" --entrypoint node "${MIGRATION_IMAGE}" \
+                dist-release/scripts/verify-cutover-report.js observation-start \
+                /release-state/phase1-reconciliation.json
+              RELEASE_SCHEMA_PHASE=phase1 "${DEPLOY_DIR}/deploy.sh" up
+              "${DEPLOY_DIR}/deploy.sh" mark-read-cutover
+              echo "Phase 1 complete. Use cutover-state/phase1-observation only after >=24h of zero fallback telemetry."
+              exit 0
+            fi
+
+            export API_IMAGE="${FINAL_IMAGE}"
+            export MIGRATION_IMAGE="${FINAL_IMAGE}"
+            if [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then
+              "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
+              "${DEPLOY_DIR}/deploy.sh" drain
+              "${DEPLOY_DIR}/deploy.sh" backup "phase2-forward-fix-${RELEASE_SOURCE_SHA}"
+              "${DEPLOY_DIR}/deploy.sh" release-assert phase2
+              # Contract is already recorded: this path is forward-only and
+              # deliberately contains no previous-image rollback.
+              RELEASE_SCHEMA_PHASE=phase2 "${DEPLOY_DIR}/deploy.sh" up
+              final_smoke
+              exit 0
+            fi
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
+          RELEASE_PHASE: ${{ inputs.phase }}
+          PHASE1_IMAGE: ${{ needs.authorize.outputs.phase1_image }}
+          PHASE1_SOURCE_SHA: ${{ needs.authorize.outputs.phase1_source_sha }}
+          FINAL_IMAGE: ${{ needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
+          OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+
+      - name: Prepare atomic Phase 2 maintenance window
+        if: ${{ inputs.phase == 'phase2' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,OBSERVATION_STARTED_AT,OBSERVATION_ATTESTATION
+          script_stop: true
+          command_timeout: 60m
+          script: |
+            set -euo pipefail
+            export PATH=$PATH:/usr/local/bin:/usr/bin
+            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
+            export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
+            export API_IMAGE="${FINAL_IMAGE}"
+            export MIGRATION_IMAGE="${FINAL_IMAGE}"
+            chmod +x "${DEPLOY_DIR}/deploy.sh"
+            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
+            [ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]
+            [ -f "${CUTOVER_STATE_DIR}/phase1-observation" ] || {
+              echo "Server-side Phase 1 observation record is missing"
+              exit 1
+            }
+            # shellcheck disable=SC1090
+            source "${CUTOVER_STATE_DIR}/phase1-observation"
+            [ "${phase1_api_image}" = "${migration_image}" ] || {
+              echo "Phase 1 observation was recorded with mixed API/migration images"
+              exit 1
+            }
+            [ "${phase1_image_digest}" = "${migration_image_digest}" ] || {
+              echo "Phase 1 observation was recorded with mixed resolved digests"
+              exit 1
+            }
+            [ "${phase1_api_image##*@}" = "${phase1_image_digest}" ] && \
+              [ "${migration_image##*@}" = "${migration_image_digest}" ] || {
+              echo "Phase 1 observation digest does not match its immutable image reference"
+              exit 1
+            }
+            [[ "${phase1_source_sha}" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "Phase 1 observation source SHA is malformed"
+              exit 1
+            }
+            raw_current_phase1_image_id="$(podman inspect gp-api --format '{{.Image}}' 2>/dev/null)" || {
+              echo "Phase 1 API is unavailable before contract cutover"
+              exit 1
+            }
+            # BEGIN PHASE1_IMAGE_ID_NORMALIZER (exercised from the release test)
+            normalize_podman_image_id() {
+              local raw_image_id="${1:-}"
+              local image_id="${raw_image_id#sha256:}"
+              [[ "${image_id}" =~ ^[0-9a-f]{64}$ && \
+                ( "${raw_image_id}" = "${image_id}" || "${raw_image_id}" = "sha256:${image_id}" ) ]] || {
+                echo "Phase 1 API returned a malformed image ID" >&2
+                return 1
+              }
+              printf '%s\n' "${image_id}"
+            }
+            # END PHASE1_IMAGE_ID_NORMALIZER
+            current_phase1_image_id="$(normalize_podman_image_id "${raw_current_phase1_image_id}")" || exit 1
+            [ "${current_phase1_image_id}" = "${phase1_image_id}" ] || {
+              echo "Running Phase 1 API image changed after observation was recorded"
+              exit 1
+            }
+            current_phase1_source_sha="$(podman image inspect "${phase1_image_id}" \
+              --format '{{ index .Labels "org.opencontainers.image.revision" }}')"
+            [ "${current_phase1_source_sha}" = "${phase1_source_sha}" ] || {
+              echo "Running Phase 1 API source label changed after observation was recorded"
+              exit 1
+            }
+            [ "${read_cutover_at}" = "${OBSERVATION_STARTED_AT}" ] || {
+              echo "Attested observation start does not match the server-side read cutover record"
+              exit 1
+            }
+
+            # Prove the exact final artifact before downtime. The API and every
+            # worker remain stopped from this drain through web publication and DDL.
+            "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
+            # Environment approval can outlive the browser-side authorization
+            # check. Re-read the server record and evaluate its age using the
+            # production server clock immediately before mutations are drained.
+            "${DEPLOY_DIR}/deploy.sh" verify-observation-window "${OBSERVATION_STARTED_AT}"
+            "${DEPLOY_DIR}/deploy.sh" drain
+            "${DEPLOY_DIR}/deploy.sh" backup "phase2-${RELEASE_SOURCE_SHA}"
+            "${DEPLOY_DIR}/deploy.sh" inventory "/release-state/garage-before-contract-${RELEASE_SOURCE_SHA}.json"
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
+          FINAL_IMAGE: ${{ needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
+          OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
+
+      - name: Set up Node for final web
+        if: ${{ inputs.phase == 'phase2' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install final web dependencies
+        if: ${{ inputs.phase == 'phase2' }}
+        run: npm ci --workspace=apps/web --include-workspace-root
+
+      - name: Test final web
+        if: ${{ inputs.phase == 'phase2' }}
+        working-directory: apps/web
+        run: npm test
+
+      - name: Lint final web
+        if: ${{ inputs.phase == 'phase2' }}
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: Build final web
+        if: ${{ inputs.phase == 'phase2' }}
+        working-directory: apps/web
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/' }}
+        run: npm run build
+
+      - name: Stamp exact cutover commit
+        if: ${{ inputs.phase == 'phase2' }}
+        working-directory: apps/web
+        run: printf '%s\n' "${GITHUB_SHA}" > dist/release-sha.txt
+
+      - name: Verify external Pages repository single-writer boundary
+        if: ${{ inputs.phase == 'phase2' }}
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
+        run: node server/verify-github-release-boundaries.mjs pages
+
+      - name: Publish exact final web while mutations remain drained
+        if: ${{ inputs.phase == 'phase2' }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          external_repository: pcugame/pcugame.github.io
+          publish_branch: master
+          publish_dir: apps/web/dist
+          user_name: bipolarrr
+          user_email: challengedbipolar@gmail.com
+
+      - name: Verify final web and commit Phase 2 contract
+        if: ${{ inputs.phase == 'phase2' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,SMOKE_PUBLIC_OBJECT_URL
+          script_stop: true
+          command_timeout: 60m
+          script: |
+            set -euo pipefail
+            export PATH=$PATH:/usr/local/bin:/usr/bin
+            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
+            export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
+            export API_IMAGE="${FINAL_IMAGE}"
+            export MIGRATION_IMAGE="${FINAL_IMAGE}"
+            chmod +x "${DEPLOY_DIR}/deploy.sh"
+            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
+            # This re-check asserts the drained marker and stopped processes;
+            # the shared workflow lock prevents any repository web publisher
+            # from replacing the marker between this gate and contract DDL.
+            web_verified=false
+            for _attempt in $(seq 1 60); do
+              if "${DEPLOY_DIR}/deploy.sh" verify-final-web "${RELEASE_SOURCE_SHA}"; then
+                web_verified=true
+                break
+              fi
+              sleep 5
+            done
+            [ "${web_verified}" = true ] || {
+              echo "Final web did not expose the exact release SHA within five minutes; contract remains unapplied."
+              exit 1
+            }
+            "${DEPLOY_DIR}/deploy.sh" contract-preflight \
+              --inventory-input="/release-state/garage-before-contract-${RELEASE_SOURCE_SHA}.json" \
+              --report-output=/release-state/phase2-contract-preflight.json
+            "${DEPLOY_DIR}/deploy.sh" release-migrate status
+            "${DEPLOY_DIR}/deploy.sh" release-migrate apply-contract
+
+            # DESTRUCTIVE DDL BOUNDARY: no old-image rollback exists below.
+            # Any failure is a forward fix, or an explicit PostgreSQL restore
+            # plus Garage inventory reconciliation authorized by an operator.
+            if ! RELEASE_SCHEMA_PHASE=phase2 "${DEPLOY_DIR}/deploy.sh" up; then
+              echo "Contract is recorded in DB. Automatic old-image rollback is forbidden. Forward-fix, or explicitly restore DB backup and reconcile Garage."
+              exit 1
+            fi
+            "${DEPLOY_DIR}/deploy.sh" release-migrate status
+
+            [ -n "${SMOKE_PUBLIC_OBJECT_URL}" ] || {
+              echo "SMOKE_PUBLIC_OBJECT_URL is required for final data-plane smoke"
+              exit 1
+            }
+            node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
+            podman stop gp-api --time 30
+            trap 'podman start gp-api >/dev/null 2>&1 || true' EXIT
+            node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
+            podman start gp-api
+            trap - EXIT
+            api_recovered=false
+            for _attempt in $(seq 1 45); do
+              if podman exec gp-api wget -qO- http://localhost:4000/api/health 2>/dev/null | grep -q '"ok":true'; then
+                api_recovered=true
+                break
+              fi
+              sleep 2
+            done
+            [ "${api_recovered}" = true ] || {
+              echo "API did not recover after the API-down data-plane smoke"
+              exit 1
+            }
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
+          FINAL_IMAGE: ${{ needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}

@@ -14,7 +14,7 @@ const POSTER_ELIGIBLE_KINDS = new Set<AssetKind>(['POSTER', 'IMAGE', 'THUMBNAIL'
 
 export interface PosterCandidate {
 	id: number;
-	projectId: number;
+	projectId: number | null;
 	kind: AssetKind;
 	status: string;
 }
@@ -59,10 +59,10 @@ export function assertValidPosterAsset(
 export function isPosterUrlSafe(poster: {
 	kind: AssetKind;
 	status: string;
-	storageKey: string;
+	hasReadyOriginal: boolean;
 } | null): boolean {
 	if (!poster) return false;
 	if (!POSTER_ELIGIBLE_KINDS.has(poster.kind)) return false;
 	if (poster.status !== 'READY') return false;
-	return true;
+	return poster.hasReadyOriginal;
 }

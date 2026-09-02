@@ -5,7 +5,6 @@ import type { createIdempotencyService } from '../idempotency/service.js';
 import type { createMultipartAbortService } from '../multipart-abort/service.js';
 import type { createOrphanService } from '../orphan/service.js';
 import type { createUploadIntentService } from '../upload-intent/service.js';
-import type { DurableGameUploadRepository } from '../admin/game-upload/repository.js';
 
 export type IdempotencyService = ReturnType<typeof createIdempotencyService>;
 export type UploadIntentService = ReturnType<typeof createUploadIntentService>;
@@ -18,7 +17,6 @@ export interface UploadLifecycleRuntime {
 	uploadIntents: UploadIntentService;
 	orphanDeletions: ObjectDeletionCoordinator;
 	multipartAborts: MultipartAbortService;
-	gameUploads: DurableGameUploadRepository;
 	metrics: UploadLifecycleMetrics;
 	wakeDeletionWorker(): void;
 	wakeMaintenance(): void;
@@ -32,7 +30,6 @@ export interface UploadLifecycleRuntimeServices {
 	uploadIntents: UploadIntentService;
 	orphanDeletions: ObjectDeletionCoordinator;
 	multipartAborts: MultipartAbortService;
-	gameUploads: DurableGameUploadRepository;
 	orphans: OrphanService;
 	clock: Clock;
 	logger: AppLogger;

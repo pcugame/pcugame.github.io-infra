@@ -5,13 +5,15 @@ import {
 	buildPosterReplaceFormData,
 } from '../lib/utils/formData';
 import type { SubmitProjectPayloadInput } from '../contracts/schemas';
+import type { ProjectSubmissionManifestItem } from '../contracts';
 
-function fakePayload(): SubmitProjectPayloadInput {
+function fakePayload(): SubmitProjectPayloadInput & { manifest: ProjectSubmissionManifestItem[] } {
 	return {
 		exhibitionId: 1,
 		title: 'Test Game',
 		summary: 'A test',
 		members: [{ name: '홍길동', studentId: '20251234' }],
+		manifest: [],
 	};
 }
 

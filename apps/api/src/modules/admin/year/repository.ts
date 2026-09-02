@@ -2,15 +2,9 @@ import {
 	Prisma,
 	type PrismaClient,
 } from '../../../generated/prisma/client.js';
-import type { SavedImageRendition } from '../../../application/upload-ports.js';
 import { conflict } from '../../../shared/errors.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
-import { commitUploadIntents } from '../../upload-intent/repository.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
-import {
-	exhibitionImageRenditionReadiness,
-	imageRenditionDeletionTargets,
-} from '../../assets/image-rendition-lifecycle.js';
 import {
 	projectActiveUploadDeletionTargets,
 	projectAssetDeletionTargets,
@@ -77,17 +71,25 @@ export async function withExhibitionMutationTransaction<T>(
 async function lockExhibition(
 	tx: TransactionClient,
 	id: number,
-): Promise<{ id: number; posterStorageKey: string | null } | null> {
-	const rows = await tx.$queryRaw<Array<{ id: number; posterStorageKey: string | null }>>`
+): Promise<{ id: number; posterAssetId: number | null } | null> {
+	const rows = await tx.$queryRaw<Array<{
+		id: number;
+		posterAssetId: number | null;
+	}>>`
 		SELECT
 			"id",
-			"poster_storage_key" AS "posterStorageKey"
+			"poster_asset_id" AS "posterAssetId"
 		FROM "exhibitions"
 		WHERE "id" = ${id}
 		FOR UPDATE
 	`;
 	return rows[0] ?? null;
 }
+
+const exhibitionPosterInclude = {
+	_count: { select: { projects: true } },
+	poster: { include: { representations: { where: { state: 'READY' as const } } } },
+} as const;
 
 /**
  * Context-owned repository. Poster pointer mutations lock the exhibition row
@@ -102,9 +104,7 @@ export function createExhibitionRepository(
 	function findAllExhibitions() {
 		return prisma.exhibition.findMany({
 			orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
-			include: {
-				_count: { select: { projects: true } },
-			},
+			include: exhibitionPosterInclude,
 		});
 	}
 
@@ -124,9 +124,7 @@ export function createExhibitionRepository(
 	function findExhibitionByIdWithCount(id: number) {
 		return prisma.exhibition.findUnique({
 			where: { id },
-			include: {
-				_count: { select: { projects: true } },
-			},
+			include: exhibitionPosterInclude,
 		});
 	}
 
@@ -148,58 +146,70 @@ export function createExhibitionRepository(
 			const [projects, activeUploads, assets] = await Promise.all([
 				tx.project.findMany({
 					where: { exhibitionId: id },
-					select: { id: true, webglEntryKey: true },
+					select: {
+						id: true,
+						webglDeployments: {
+							select: {
+								id: true, projectId: true, publicBucket: true, publicPrefix: true,
+								entryObjectKey: true, objectManifest: true,
+								sourceRepresentation: {
+									select: { id: true, assetId: true, role: true, bucket: true, objectKey: true },
+								},
+							},
+						},
+					},
 				}),
-				tx.gameUploadSession.findMany({
+				tx.assetUploadSession.findMany({
 					where: {
 						project: { exhibitionId: id },
-						status: { in: ['PENDING', 'COMPLETING'] },
+						state: { in: ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'] },
 					},
 					select: {
 						id: true,
 						projectId: true,
-						uploadKind: true,
-						s3Key: true,
-						s3UploadId: true,
+						kind: true,
+						objectKey: true,
+						uploadId: true,
 					},
 				}),
-				tx.asset.findMany({ where: { project: { exhibitionId: id } } }),
+				tx.asset.findMany({
+					where: { OR: [{ project: { exhibitionId: id } }, { exhibitionId: id }] },
+					include: { representations: true },
+				}),
 			]);
+			const canonicalActiveUploads = activeUploads.map((upload) => ({
+				projectId: upload.projectId ?? undefined,
+				uploadKind: upload.kind,
+				objectKey: upload.objectKey,
+				uploadId: upload.uploadId,
+				canonicalSessionId: upload.id,
+			}));
 			const targets = [
-				...(existing.posterStorageKey ? [{
-					bucket: outbox.publicBucket,
-					storageKey: existing.posterStorageKey,
-					reason: `${outbox.reason}-poster`,
-				}] : []),
-				...imageRenditionDeletionTargets(
-					outbox.publicBucket,
-					existing.posterStorageKey,
-					`${outbox.reason}-poster-rendition`,
-				),
 				...projectAssetDeletionTargets(assets, outbox),
 				...projects.flatMap((project) => projectWebglDeletionTargets(
 					project.id,
-					project.webglEntryKey,
 					outbox,
+					project.webglDeployments,
 				)),
 				...projects.flatMap((project) => projectActiveUploadDeletionTargets(
 					project.id,
-					activeUploads.filter((upload) => upload.projectId === project.id),
+					canonicalActiveUploads.filter((upload) => upload.projectId === project.id),
 					outbox,
 				)),
 			];
 			await queueDurableDeletions(tx, targets);
-			for (const upload of activeUploads) {
-				if (!upload.s3Key || !upload.s3UploadId) continue;
+			for (const upload of canonicalActiveUploads) {
+				if (!upload.objectKey || !upload.uploadId) continue;
 				await queueMultipartAbortTask(tx, {
 					bucket: outbox.protectedBucket,
-					storageKey: upload.s3Key,
-					uploadId: upload.s3UploadId,
+					storageKey: upload.objectKey,
+					uploadId: upload.uploadId,
 					reason: `${outbox.reason}-active-multipart`,
+					uploadSessionId: upload.canonicalSessionId,
 				});
 			}
 			await tx.exhibition.delete({ where: { id } });
-			return { ...existing, cleanupQueued: targets.length > 0 || activeUploads.length > 0 };
+			return { id: existing.id, cleanupQueued: targets.length > 0 || canonicalActiveUploads.length > 0 };
 		}, policy);
 	}
 
@@ -211,112 +221,37 @@ export function createExhibitionRepository(
 		return prisma.exhibition.update({
 			where: { id },
 			data,
-			include: {
-				_count: { select: { projects: true } },
-			},
+			include: exhibitionPosterInclude,
 		});
 	}
 
-	/** Store processed poster metadata on an exhibition and return the previous key. */
-	async function replaceExhibitionPoster(
-		id: number,
-		data: {
-			storageKey: string;
-			originalName: string;
-			mimeType: string;
-			sizeBytes: bigint;
-			width?: number;
-			height?: number;
-			renditions?: SavedImageRendition[];
-			uploadIntentIds?: string[];
-		},
-		outbox: PosterDeletionOutboxConfig,
-	) {
-		return withExhibitionMutationTransaction(prisma, async (tx) => {
-			const existing = await lockExhibition(tx, id);
-			if (!existing) return null;
-			if (existing.posterStorageKey && existing.posterStorageKey !== data.storageKey) {
-				await queueDurableDeletions(tx, [
-					{
-						bucket: outbox.bucket,
-						storageKey: existing.posterStorageKey,
-						reason: outbox.reason,
-					},
-					...imageRenditionDeletionTargets(
-						outbox.bucket,
-						existing.posterStorageKey,
-						`${outbox.reason}-rendition`,
-					),
-				]);
-			}
-
-			await tx.exhibition.update({
-				where: { id },
-				data: {
-					posterStorageKey: data.storageKey,
-					posterOriginalName: data.originalName,
-					posterMimeType: data.mimeType,
-					posterSizeBytes: data.sizeBytes,
-					posterWidth: data.width,
-					posterHeight: data.height,
-					...exhibitionImageRenditionReadiness(data.renditions ?? []),
-				},
-				include: {
-					_count: { select: { projects: true } },
-				},
-			});
-			await commitUploadIntents(tx, data.uploadIntentIds ?? []);
-
-			return {
-				updated: await tx.exhibition.findUniqueOrThrow({
-					where: { id },
-					include: {
-						_count: { select: { projects: true } },
-					},
-				}),
-				oldStorageKey: existing.posterStorageKey,
-			};
-		}, policy);
-	}
-
-	/** Clear poster metadata from an exhibition and return the removed key. */
+	/** Clear a canonical poster pointer and enqueue its representation cleanup. */
 	async function clearExhibitionPoster(id: number, outbox: PosterDeletionOutboxConfig) {
 		return withExhibitionMutationTransaction(prisma, async (tx) => {
 			const existing = await lockExhibition(tx, id);
 			if (!existing) return null;
-			if (existing.posterStorageKey) {
-				await queueDurableDeletions(tx, [
-					{
-						bucket: outbox.bucket,
-						storageKey: existing.posterStorageKey,
-						reason: outbox.reason,
-					},
-					...imageRenditionDeletionTargets(
-						outbox.bucket,
-						existing.posterStorageKey,
-						`${outbox.reason}-rendition`,
-					),
-				]);
+			const previousPoster = existing.posterAssetId === null ? null : await tx.asset.findUnique({
+				where: { id: existing.posterAssetId },
+				include: { representations: true },
+			});
+			if (previousPoster) {
+				await queueDurableDeletions(tx, projectAssetDeletionTargets([previousPoster], {
+					publicBucket: outbox.bucket,
+					protectedBucket: outbox.bucket,
+					reason: outbox.reason,
+				}));
+				await tx.asset.update({ where: { id: previousPoster.id }, data: { status: 'DELETED' } });
 			}
-
 			const updated = await tx.exhibition.update({
 				where: { id },
-				data: {
-					posterStorageKey: null,
-					posterOriginalName: '',
-					posterMimeType: '',
-					posterSizeBytes: 0,
-					posterWidth: null,
-					posterHeight: null,
-					posterCard480Height: null,
-					posterDisplay960Height: null,
-				},
-				include: {
-					_count: { select: { projects: true } },
-				},
+				data: { posterAssetId: null },
+				include: exhibitionPosterInclude,
 			});
 
-			return { updated, oldStorageKey: existing.posterStorageKey };
+			return {
+				updated,
+				cleanupQueued: previousPoster !== null,
+			};
 		}, policy);
 	}
 
@@ -328,7 +263,6 @@ export function createExhibitionRepository(
 		createExhibition,
 		deleteExhibition,
 		updateExhibition,
-		replaceExhibitionPoster,
 		clearExhibitionPoster,
 	};
 }

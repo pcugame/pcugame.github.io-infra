@@ -30,14 +30,19 @@ import {
 } from './infrastructure/production-ports.js';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
-import { createObjectStorage } from './lib/storage.js';
+import {
+	createDirectMultipartControlStorage,
+	createMultipartPartPresigner,
+	createMultipartRecoveryStorage,
+	createObjectStorage,
+	createProtectedDownloadPresigner,
+	type ProtectedDownloadPresigner,
+} from './lib/storage.js';
 import { createRootLogger } from './lib/logger.js';
 import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
+import { forbidden, notFound } from './shared/errors.js';
 import type { DownloadRateLimiter } from './shared/download-rate-limit.js';
-import {
-	createExportProgressStore,
-	type ExportProgressStore,
-} from './modules/admin/export/service.js';
+import { resolveRoleUploadLimits } from './shared/upload-policy.js';
 import {
 	createAssetsBannedProductionGraph,
 	type AssetsBannedProductionGraph,
@@ -74,18 +79,9 @@ import {
 	createProjectMultipartProductionGraph,
 	type ProjectMultipartProductionGraph,
 } from './modules/admin/project-multipart.composition.js';
-import {
-	createGameUploadProductionGraph,
-	type GameUploadProductionGraph,
-} from './modules/admin/game-upload/composition.js';
-import type { ProjectUploadProcessing } from './modules/admin/project/project-upload.adapter.js';
-import { createNodeProjectUploadProcessing } from './infrastructure/project-upload-processing.js';
-import { createMultipartRequestHasher } from './infrastructure/multipart-request-hasher.js';
-import {
-	createActiveUploadTempRegistry,
-	createUploadTempFileSystem,
-	createUploadTempScavenger,
-} from './modules/upload-intent/temp-scavenger.js';
+import { createAssetUploadControlGraph, createUnavailableAssetUploadControlGraph } from './modules/asset-upload/composition.js';
+import { createAssetUploadRepository } from './modules/asset-upload/repository.js';
+import { createAssetUploadRecoveryService } from './modules/asset-upload/recovery.service.js';
 import {
 	createUploadLifecycleMetrics,
 	type UploadLifecycleMetrics,
@@ -264,7 +260,6 @@ export interface BackendContext {
 	uploadLimiter: UploadLimiter;
 	protectedDownloads: DownloadRateLimiter;
 	settings: SettingsStore;
-	exportProgress: ExportProgressStore;
 	uploadLifecycleMetrics: UploadLifecycleMetrics;
 	uploadLifecycle: UploadLifecycleRuntime;
 	lifecycle: Lifecycle;
@@ -285,15 +280,13 @@ export interface ProductionResourceFactories {
 	ids(config: Env): MaybePromise<IdGenerator>;
 	scheduler(config: Env): MaybePromise<Scheduler>;
 	fileSystem(config: Env): MaybePromise<FileSystem>;
-	projectUploadProcessing(
-		fileSystem: FileSystem,
-		logger: AppLogger,
-		config: Env,
-	): MaybePromise<ProjectUploadProcessing>;
 	googleTokens(config: Env): MaybePromise<GoogleTokenVerifier>;
 	prisma(config: Env): MaybePromise<PrismaClient>;
 	s3(config: Env): MaybePromise<S3Client>;
+	uploadSigningS3(config: Env): MaybePromise<S3Client>;
+	protectedDownloadSigningS3(config: Env): MaybePromise<S3Client>;
 	storage(client: S3Client, config: Env): MaybePromise<ObjectStorage>;
+	protectedDownloadPresigner(client: S3Client, config: Env): MaybePromise<ProtectedDownloadPresigner>;
 	settings(
 		client: PrismaClient,
 		logger: AppLogger,
@@ -302,7 +295,6 @@ export interface ProductionResourceFactories {
 	uploadLimiter(config: Env): MaybePromise<UploadLimiter & { close(): void }>;
 	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
 	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
-	exportProgress(config: Env): MaybePromise<ExportProgressStore>;
 	routes(
 		config: Env,
 		assetsBanned: AssetsBannedProductionGraph,
@@ -312,7 +304,7 @@ export interface ProductionResourceFactories {
 		year: YearProductionGraph,
 		importExport: ImportExportProductionGraph,
 		projectMultipart: ProjectMultipartProductionGraph,
-		gameUpload: GameUploadProductionGraph,
+		directAssetUpload: ReturnType<typeof createAssetUploadControlGraph> | ReturnType<typeof createUnavailableAssetUploadControlGraph>,
 	): MaybePromise<BackendRoutes>;
 }
 
@@ -325,12 +317,13 @@ export interface ProductionResourceOverrides {
 	googleTokens: ResourceLease<GoogleTokenVerifier>;
 	prisma: ResourceLease<PrismaClient>;
 	s3: ResourceLease<S3Client>;
+	uploadSigningS3: ResourceLease<S3Client>;
+	protectedDownloadSigningS3: ResourceLease<S3Client>;
 	storage: ResourceLease<ObjectStorage>;
 	settings: ResourceLease<SettingsStore>;
 	uploadLimiter: ResourceLease<UploadLimiter>;
 	lifecycle: ResourceLease<Lifecycle>;
 	protectedDownloads: ResourceLease<DownloadRateLimiter>;
-	exportProgress: ResourceLease<ExportProgressStore>;
 	uploadLifecycle: ResourceLease<UploadLifecycleRuntime>;
 }
 
@@ -350,9 +343,6 @@ const defaultFactories: ProductionResourceFactories = {
 	ids: () => createCryptoIdGenerator(),
 	scheduler: () => createNodeScheduler(),
 	fileSystem: () => createNodeFileSystem(),
-	projectUploadProcessing: (fileSystem, logger) => (
-		createNodeProjectUploadProcessing(fileSystem, logger)
-	),
 	googleTokens: () => createGoogleTokenVerifier(),
 	prisma: (config) => createPrismaClientForDatabase(config.DATABASE_URL, {
 		log: config.NODE_ENV === 'development'
@@ -363,14 +353,24 @@ const defaultFactories: ProductionResourceFactories = {
 			: [{ emit: 'stdout', level: 'error' }],
 	}),
 	s3: (config) => createS3Client(config),
+	uploadSigningS3: (config) => createS3Client({
+		...config,
+		S3_ENDPOINT: config.S3_PUBLIC_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
+	}),
+	protectedDownloadSigningS3: (config) => createS3Client({
+		...config,
+		S3_ENDPOINT: config.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
+	}),
 	storage: (client, config) => createObjectStorage(client, {
+		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
+	}),
+	protectedDownloadPresigner: (client, config) => createProtectedDownloadPresigner(client, {
 		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
 	}),
 	settings: (client, logger) => createPrismaSettingsStore(client, logger),
 	uploadLimiter: (config) => createUploadLimiterPort(config.UPLOAD_MAX_CONCURRENT),
 	lifecycle: (clock, scheduler) => createLifecyclePort(clock, scheduler),
 	protectedDownloads: (clock, scheduler) => createProtectedDownloadLimiter({ clock, scheduler }),
-	exportProgress: () => createExportProgressStore(),
 	routes: loadProductionRoutes,
 };
 
@@ -383,7 +383,7 @@ async function loadProductionRoutes(
 	year: YearProductionGraph,
 	importExport: ImportExportProductionGraph,
 	projectMultipart: ProjectMultipartProductionGraph,
-	gameUpload: GameUploadProductionGraph,
+	directAssetUpload: ReturnType<typeof createAssetUploadControlGraph> | ReturnType<typeof createUnavailableAssetUploadControlGraph>,
 ): Promise<BackendRoutes> {
 	const admin = await import('./modules/admin/admin.routes.js');
 	return {
@@ -396,7 +396,7 @@ async function loadProductionRoutes(
 			...importExport,
 			bannedIpController: assetsBanned.bannedIpController,
 			projectMultipartController: projectMultipart.projectMultipartController,
-			gameUploadController: gameUpload.controller,
+			directAssetUploadController: directAssetUpload.controller,
 		}),
 		me: projectMultipart.meController,
 		assets: assetsBanned.assetsController,
@@ -460,6 +460,16 @@ export function createMaintenanceSchedule(
 					logger.error(error, 'Upload lifecycle maintenance iteration crashed');
 				}
 			})));
+			// Do not wait a full interval after a process restart: a crashed
+			// completion lease and an unrecorded Garage multipart must be reclaimed
+			// before they hold an active upload slot indefinitely.
+			void runTracked(async () => {
+				try {
+					await maintenance.recoverStaleUploads(abortController.signal);
+				} catch (error) {
+					logger.error(error, 'Startup direct upload recovery crashed');
+				}
+			});
 		},
 		close() {
 			closePromise ??= (async () => {
@@ -533,25 +543,6 @@ export async function createProductionBackendContext(
 		const ids = await resource('ids', () => factories.ids(config));
 		const scheduler = await resource('scheduler', () => factories.scheduler(config));
 		const fileSystem = await resource('fileSystem', () => factories.fileSystem(config));
-		const uploadFileSystem = createUploadTempFileSystem(fileSystem);
-		const activeUploadTemps = createActiveUploadTempRegistry();
-		owner.register('uploadTempDirectory', owned(
-			uploadFileSystem,
-			undefined,
-			() => {
-				if (!uploadFileSystem.ensurePrivateDirectory) {
-					throw new Error(
-						'Production FileSystem must support secure upload temp directory verification',
-					);
-				}
-				return uploadFileSystem.ensurePrivateDirectory(uploadFileSystem.temporaryDirectory());
-			},
-		));
-		const projectUploads = await factories.projectUploadProcessing(
-			uploadFileSystem,
-			logger,
-			config,
-		);
 		const googleTokens = await resource('googleTokens', () => factories.googleTokens(config));
 		const prisma = options.persistence
 			? undefined
@@ -562,6 +553,22 @@ export async function createProductionBackendContext(
 			);
 		const s3 = await resource('s3', () => factories.s3(config), (client) => client.destroy());
 		const storage = await resource('storage', () => factories.storage(s3, config));
+		// Presigning must use the browser-visible NAS upload origin. It is a
+		// separate S3 client so internal Garage endpoints never leak into URLs.
+		const directSigningS3 = await resource(
+			'uploadSigningS3',
+			() => factories.uploadSigningS3(config),
+			(client) => client.destroy(),
+		);
+		const protectedDownloadSigningS3 = await resource(
+			'protectedDownloadSigningS3',
+			() => factories.protectedDownloadSigningS3(config),
+			(client) => client.destroy(),
+		);
+		const protectedDownloadPresigner = await factories.protectedDownloadPresigner(
+			protectedDownloadSigningS3,
+			config,
+		);
 		const uploadLifecycle = await resource(
 			'uploadLifecycle',
 			() => {
@@ -614,11 +621,6 @@ export async function createProductionBackendContext(
 			(limiter) => limiter.close(),
 			(limiter) => limiter.start(),
 		);
-		const exportProgress = await resource(
-			'exportProgress',
-			() => factories.exportProgress(config),
-			(progress) => progress.close(),
-		);
 		const persistence: BackendPersistencePorts = options.persistence ?? (() => {
 			if (!prisma) throw new Error('Prisma persistence was not initialized');
 			return {
@@ -626,7 +628,10 @@ export async function createProductionBackendContext(
 				authRepository: createAuthRepository(prisma),
 				publicRepository: createPublicRepository(prisma),
 				projectAccessRepository: createProjectAccessRepository(prisma),
-				projectRepository: createProjectCrudRepository(prisma),
+				projectRepository: createProjectCrudRepository(prisma, {
+					publicBucket: config.S3_BUCKET_PUBLIC,
+					protectedBucket: config.S3_BUCKET_PROTECTED,
+				}),
 				memberRepository: createMemberRepository(prisma),
 				exhibitionRepository: createExhibitionRepository(prisma),
 				assetsRepository: createAssetsRepository(prisma),
@@ -647,7 +652,6 @@ export async function createProductionBackendContext(
 		const publicGraph = createPublicProductionGraph({
 			config,
 			repository: persistence.publicRepository,
-			storage,
 			logger,
 		});
 		const projectAccessRepository = persistence.projectAccessRepository;
@@ -670,15 +674,7 @@ export async function createProductionBackendContext(
 		const year = createYearProductionGraph({
 			config,
 			repository: persistence.exhibitionRepository,
-			storage,
-			fileSystem: uploadFileSystem,
-			settings,
-			uploadLimiter,
-			logger,
-			clock,
-			ids,
 			uploadLifecycle,
-			activeUploadTemps,
 		});
 		let assetsBanned: AssetsBannedProductionGraph | undefined;
 		if (!options.routes) {
@@ -687,7 +683,7 @@ export async function createProductionBackendContext(
 				assetsRepository: persistence.assetsRepository,
 				bannedIpRepository: persistence.bannedIpRepository,
 				projectAccess,
-				storage,
+				protectedDownloadPresigner,
 				downloadLimiter: protectedDownloads,
 				logger,
 				clock,
@@ -701,15 +697,9 @@ export async function createProductionBackendContext(
 			));
 		}
 		const importExport = createImportExportProductionGraph({
-			config,
 			importRepository: persistence.importRepository,
 			exportRepository: persistence.exportRepository,
-			storage,
-			fileSystem,
-			exportProgress,
-			clock,
 			ids,
-			logger,
 		});
 		owner.register('importExport', owned(
 			importExport,
@@ -717,63 +707,58 @@ export async function createProductionBackendContext(
 		));
 		const projectMultipart = createProjectMultipartProductionGraph({
 			config,
-			storage,
-			fileSystem: uploadFileSystem,
-			settings,
-			uploadLimiter,
-			logger,
-			clock,
-			ids,
-			processing: projectUploads,
-			requestHasher: createMultipartRequestHasher(uploadFileSystem),
 			uploadLifecycle,
-			activeUploadTemps,
 			access: projectMemberSettings.projectAccess,
 			repository: projectMemberSettings.projectRepository,
 		});
-		const gameUpload = createGameUploadProductionGraph({
-			config,
-			storage,
-			fileSystem,
-			settings,
-			uploadLimiter,
-			lifecycle,
+		const directAssetUploadRepository = prisma ? createAssetUploadRepository(prisma) : undefined;
+		const directAssetUpload = prisma && directAssetUploadRepository ? createAssetUploadControlGraph({
+			repository: directAssetUploadRepository,
+			storage: createDirectMultipartControlStorage(s3),
+			partSigner: createMultipartPartPresigner(directSigningS3),
 			clock,
 			ids,
-			logger,
-			access: projectMemberSettings.projectAccess,
-			uploadLifecycle,
-		});
-		const uploadTempScavenger = createUploadTempScavenger({
-			fileSystem: uploadFileSystem,
-			legacyRootDirectory: fileSystem.temporaryDirectory(),
-			active: activeUploadTemps,
-			clock,
-			logger,
-		});
-		owner.register('gameUploadWorkflow', owned(
-			gameUpload,
-			() => gameUpload.close(),
-			() => gameUpload.recoverStaleUploads(),
-		));
-		owner.register('uploadTempRecovery', owned(
-			uploadTempScavenger,
-			undefined,
-			async () => {
-				try {
-					await uploadTempScavenger.recoverOnStartup();
-				} catch (error) {
-					logger.error(error, 'Upload temp startup recovery crashed');
-				}
+			config: {
+				bucket: config.S3_BUCKET_PROTECTED,
+				sessionTtlMs: config.UPLOAD_SESSION_TTL_MINUTES * 60_000,
+				partSizeBytes: config.DIRECT_UPLOAD_PART_SIZE_MB * 1024 * 1024,
+				partUrlTtlSeconds: config.DIRECT_UPLOAD_PART_URL_TTL_SEC,
+				partUrlRefreshMax: config.DIRECT_UPLOAD_PART_URL_REFRESH_MAX,
+				maxBytesFor: (actor, kind) => {
+					const limits = resolveRoleUploadLimits(config, actor.role);
+					if (kind === 'VIDEO') return limits.videoMaxBytes;
+					if (kind === 'IMAGE') return limits.imageMaxBytes;
+					if (kind === 'POSTER') return limits.posterMaxBytes;
+					return limits.gameMaxBytes;
+				},
 			},
-		));
+			authorizeProjectWrite: async (actor, projectId) => projectAccess.loadProjectWithAccess(actor as Parameters<typeof projectAccess.loadProjectWithAccess>[0], projectId),
+			authorizeExhibitionWrite: async (actor, exhibitionId) => {
+				if (actor.role !== 'ADMIN' && actor.role !== 'OPERATOR') {
+					throw forbidden('Only operators can modify exhibition assets');
+				}
+				const exhibition = await prisma.exhibition.findUnique({ where: { id: exhibitionId }, select: { id: true } });
+				if (!exhibition) throw notFound('Exhibition not found');
+			},
+			wakeMaintenance: () => uploadLifecycle.wakeMaintenance(),
+		}) : createUnavailableAssetUploadControlGraph();
+		const directAssetUploadRecovery = directAssetUploadRepository
+			? createAssetUploadRecoveryService({
+				repository: directAssetUploadRepository,
+				storage: createMultipartRecoveryStorage(s3),
+				clock,
+				ids,
+				logger,
+				wakeMaintenance: () => uploadLifecycle.wakeMaintenance(),
+				bucket: config.S3_BUCKET_PROTECTED,
+			})
+			: undefined;
 		const authSessions = auth.repository;
-		const recoverUploads = createSingleFlightUploadRecovery(
-			(signal) => gameUpload.recoverStaleUploads(signal),
-			(signal) => uploadTempScavenger.sweep(signal),
-		);
 		const maintenance: BackgroundMaintenance = {
-			recoverStaleUploads: recoverUploads,
+			recoverStaleUploads: async (signal) => {
+				if (!directAssetUploadRecovery || signal?.aborted) return;
+				await directAssetUploadRecovery.recover(signal);
+			},
 			async purgeExpiredSessions(before, signal) {
 				if (signal?.aborted) return 0;
 				return persistence.authRepository.purgeExpired(before);
@@ -795,7 +780,7 @@ export async function createProductionBackendContext(
 			year,
 			importExport,
 			projectMultipart,
-			gameUpload,
+			directAssetUpload,
 		);
 
 		return {
@@ -810,7 +795,6 @@ export async function createProductionBackendContext(
 			uploadLimiter,
 			protectedDownloads,
 			settings,
-			exportProgress,
 			uploadLifecycleMetrics,
 			uploadLifecycle,
 			lifecycle,

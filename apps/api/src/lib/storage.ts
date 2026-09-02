@@ -26,6 +26,32 @@ import type {
 
 const MAX_S3_KEYS = 1_000;
 
+/** The only object capability exposed to protected HTTP route composition. */
+export interface ProtectedDownloadPresigner {
+	presign(
+		bucket: string,
+		key: string,
+		options?: { ttlSec?: number; responseContentDisposition?: string },
+	): Promise<string>;
+}
+
+export function createProtectedDownloadPresigner(
+	client: S3Client,
+	options: { defaultPresignTtlSec: number },
+): ProtectedDownloadPresigner {
+	return {
+		async presign(bucket, key, presignOptions = {}) {
+			return getSignedUrl(client, new GetObjectCommand({
+				Bucket: bucket,
+				Key: key,
+				...(presignOptions.responseContentDisposition && {
+					ResponseContentDisposition: presignOptions.responseContentDisposition,
+				}),
+			}), { expiresIn: presignOptions.ttlSec ?? options.defaultPresignTtlSec });
+		},
+	};
+}
+
 /** S3 keys are compared by their UTF-8 binary/byte lexical ordering. */
 function compareS3Keys(left: string, right: string): number {
 	return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
@@ -40,6 +66,20 @@ function storageErrorMatches(error: unknown, names: readonly string[], statusCod
 	const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
 	return (typeof candidate.name === 'string' && names.includes(candidate.name))
 		|| (statusCode !== undefined && candidate.$metadata?.httpStatusCode === statusCode);
+}
+
+function checksumHex(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	try {
+		const bytes = Buffer.from(value, 'base64');
+		return bytes.length === 32 ? bytes.toString('hex') : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function commandAbortOptions(request?: { signal?: AbortSignal }) {
+	return request?.signal ? { abortSignal: request.signal } : undefined;
 }
 
 function responseHeader(error: unknown, name: string): string | undefined {
@@ -82,7 +122,7 @@ function isNotModifiedSince(lastModified: Date | undefined, ifModifiedSince: Dat
 /** Bind every object operation to the S3 client owned by one BackendContext. */
 export function createObjectStorage(
 	client: S3Client,
-	options: { defaultPresignTtlSec: number },
+	_options: { defaultPresignTtlSec: number },
 ): ObjectStorage {
 	const requestOptions = (request?: StorageRequestOptions) => ({
 		...(request?.signal ? { abortSignal: request.signal } : {}),
@@ -119,6 +159,10 @@ export function createObjectStorage(
 
 	const storage: ObjectStorage = {
 		async upload(bucket, key, body, contentType, contentLength, uploadOptions = {}, request) {
+			if (uploadOptions.checksumSha256 !== undefined
+				&& !/^[a-f0-9]{64}$/i.test(uploadOptions.checksumSha256)) {
+				throw new Error('Object SHA-256 checksum must be 64 hexadecimal characters');
+			}
 			await client.send(new PutObjectCommand({
 				Bucket: bucket,
 				Key: key,
@@ -129,17 +173,11 @@ export function createObjectStorage(
 				}),
 				...(uploadOptions.contentEncoding && { ContentEncoding: uploadOptions.contentEncoding }),
 				...(uploadOptions.cacheControl && { CacheControl: uploadOptions.cacheControl }),
+				...(uploadOptions.checksumSha256 && {
+					ChecksumSHA256: Buffer.from(uploadOptions.checksumSha256, 'hex').toString('base64'),
+				}),
 				...(contentLength != null && { ContentLength: contentLength }),
 			}), requestOptions(request));
-		},
-		async presign(bucket, key, presignOptions = {}) {
-			return getSignedUrl(client, new GetObjectCommand({
-				Bucket: bucket,
-				Key: key,
-				...(presignOptions.responseContentDisposition && {
-					ResponseContentDisposition: presignOptions.responseContentDisposition,
-				}),
-			}), { expiresIn: presignOptions.ttlSec ?? options.defaultPresignTtlSec });
 		},
 		async delete(bucket, key, request) {
 			await client.send(
@@ -150,7 +188,7 @@ export function createObjectStorage(
 		async head(bucket, key, request) {
 			try {
 				const response = await client.send(
-					new HeadObjectCommand({ Bucket: bucket, Key: key }),
+					new HeadObjectCommand({ Bucket: bucket, Key: key, ChecksumMode: 'ENABLED' }),
 					requestOptions(request),
 				);
 				return {
@@ -159,6 +197,7 @@ export function createObjectStorage(
 					...(response.CacheControl ? { cacheControl: response.CacheControl } : {}),
 					...(response.ETag ? { etag: response.ETag } : {}),
 					...(response.LastModified ? { lastModified: response.LastModified } : {}),
+					...(checksumHex(response.ChecksumSHA256) ? { checksumSha256: checksumHex(response.ChecksumSHA256) } : {}),
 				};
 			} catch (error) {
 				if (storageErrorMatches(error, ['NotFound'], 404)) return null;
@@ -417,4 +456,165 @@ export function createObjectStorage(
 		},
 	};
 	return storage;
+}
+
+/**
+ * Narrow browser-capability adapter for the direct multipart control plane.
+ * It deliberately is not an ObjectStorage method: feature code receives only
+ * this signer, never GetObject or a byte-upload function.
+ */
+export function createMultipartPartPresigner(
+	client: S3Client,
+): {
+	presignUploadPart(
+		bucket: string,
+		key: string,
+		uploadId: string,
+		partNumber: number,
+		expiresInSeconds: number,
+		checksumSha256: string,
+	): Promise<string>;
+} {
+	return {
+		async presignUploadPart(bucket, key, uploadId, partNumber, expiresInSeconds, checksumSha256) {
+			if (!Number.isSafeInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
+				throw new RangeError('multipart partNumber must be between 1 and 10000');
+			}
+			if (!Number.isSafeInteger(expiresInSeconds) || expiresInSeconds < 1 || expiresInSeconds > 604_800) {
+				throw new RangeError('multipart capability expiry must be between 1 second and 7 days');
+			}
+			if (!/^[A-Za-z0-9+/]{43}=$/.test(checksumSha256)) {
+				throw new RangeError('multipart capability requires a base64 SHA-256 checksum');
+			}
+			return getSignedUrl(client, new UploadPartCommand({
+				Bucket: bucket,
+				Key: key,
+				UploadId: uploadId,
+				PartNumber: partNumber,
+				ChecksumSHA256: checksumSha256,
+			}), {
+				expiresIn: expiresInSeconds,
+				// Keep the checksum as a required signed request header. Hoisting it
+				// into the query while also asking the browser to send the header is
+				// rejected by Garage as an unsigned x-amz-checksum-sha256 header.
+				unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+			});
+		},
+	};
+}
+
+/**
+ * Direct control-plane storage port. This deliberately excludes GetObject and
+ * UploadPart-with-body so it is safe to inject into Fastify route composition.
+ * Validation workers receive a different, read-capable port.
+ */
+export function createDirectMultipartControlStorage(client: S3Client) {
+	return {
+		async createMultipart(bucket: string, key: string, contentType: string): Promise<string> {
+			const response = await client.send(new CreateMultipartUploadCommand({
+				Bucket: bucket,
+				Key: key,
+				ContentType: contentType,
+			}));
+			if (!response.UploadId) throw new Error('S3 CreateMultipartUpload returned no UploadId');
+			return response.UploadId;
+		},
+		async listParts(bucket: string, key: string, uploadId: string, request?: { signal?: AbortSignal }): Promise<Array<{
+			partNumber: number;
+			etag: string;
+			sizeBytes: number;
+		}>> {
+			const parts: Array<{ partNumber: number; etag: string; sizeBytes: number }> = [];
+			let marker: string | undefined;
+			do {
+				const page = await client.send(new ListPartsCommand({
+					Bucket: bucket, Key: key, UploadId: uploadId, PartNumberMarker: marker,
+				}), commandAbortOptions(request));
+				for (const part of page.Parts ?? []) {
+					const partNumber = part.PartNumber;
+					const sizeBytes = part.Size;
+					if (!Number.isSafeInteger(partNumber) || !part.ETag || !Number.isSafeInteger(sizeBytes)) {
+						throw new Error('S3 ListParts returned an incomplete part record');
+					}
+					parts.push({ partNumber: partNumber as number, etag: part.ETag, sizeBytes: sizeBytes as number });
+				}
+				marker = page.IsTruncated ? page.NextPartNumberMarker : undefined;
+			} while (marker);
+			return parts.sort((left, right) => left.partNumber - right.partNumber);
+		},
+		async completeMultipart(bucket: string, key: string, uploadId: string, parts: ReadonlyArray<{
+			partNumber: number;
+			etag: string;
+		}>, request?: { signal?: AbortSignal }): Promise<void> {
+			await client.send(new CompleteMultipartUploadCommand({
+				Bucket: bucket,
+				Key: key,
+				UploadId: uploadId,
+				MultipartUpload: { Parts: [...parts].sort((left, right) => left.partNumber - right.partNumber).map((part) => ({ PartNumber: part.partNumber, ETag: part.etag })) },
+			}), commandAbortOptions(request));
+		},
+		async head(bucket: string, key: string, request?: { signal?: AbortSignal }): Promise<{ size: number; etag?: string } | null> {
+			try {
+				const result = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }), commandAbortOptions(request));
+				return { size: result.ContentLength ?? 0, ...(result.ETag ? { etag: result.ETag } : {}) };
+			} catch (error) {
+				if (storageErrorMatches(error, ['NotFound', 'NoSuchKey'], 404)) return null;
+				throw error;
+			}
+		},
+		async abortMultipart(bucket: string, key: string, uploadId: string): Promise<void> {
+			try {
+				await client.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId: uploadId }));
+			} catch (error) {
+				if (!storageErrorMatches(error, ['NoSuchUpload'])) throw error;
+			}
+		},
+	};
+}
+
+/**
+ * Maintenance-only adapter for recovery of direct multipart sessions.  It is
+ * intentionally separate from the Fastify control-plane storage port: list
+ * inventory can be expensive, but it never grants object-body access.
+ */
+export function createMultipartRecoveryStorage(client: S3Client) {
+	const control = createDirectMultipartControlStorage(client);
+	return {
+		listParts: control.listParts,
+		completeMultipart: control.completeMultipart,
+		head: control.head,
+		async listMultipartUploads(
+			bucket: string,
+			prefix: string,
+			request?: { signal?: AbortSignal },
+		): Promise<Array<{ key: string; uploadId: string; initiated?: Date }>> {
+			const uploads: Array<{ key: string; uploadId: string; initiated?: Date }> = [];
+			let keyMarker: string | undefined;
+			let uploadIdMarker: string | undefined;
+			do {
+				const page = await client.send(new ListMultipartUploadsCommand({
+					Bucket: bucket,
+					Prefix: prefix,
+					KeyMarker: keyMarker,
+					UploadIdMarker: uploadIdMarker,
+				}), commandAbortOptions(request));
+				for (const upload of page.Uploads ?? []) {
+					if (!upload.Key || !upload.UploadId) continue;
+					uploads.push({
+						key: upload.Key,
+						uploadId: upload.UploadId,
+						...(upload.Initiated ? { initiated: upload.Initiated } : {}),
+					});
+				}
+				if (page.IsTruncated) {
+					keyMarker = page.NextKeyMarker;
+					uploadIdMarker = page.NextUploadIdMarker;
+				} else {
+					keyMarker = undefined;
+					uploadIdMarker = undefined;
+				}
+			} while (keyMarker || uploadIdMarker);
+			return uploads;
+		},
+	};
 }

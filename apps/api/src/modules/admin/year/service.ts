@@ -1,36 +1,35 @@
 import type { AdminExhibitionItem, CreateExhibitionRequest, UpdateExhibitionRequest } from '@pcu/contracts';
 import { notFound, conflict } from '../../../shared/errors.js';
-import type { UploadLimits } from '../../../shared/upload-limits.js';
-import type { MultipartCommandInput } from '../../../application/http-input.js';
-import type { PosterUploadCoordinator, ProcessedUpload } from '../../../application/upload-ports.js';
-import { createResponsiveImageSerializer } from '../../../shared/responsive-image.js';
+import { serializePublicImage } from '../../public/image-serialization.js';
 import type { ExhibitionRepository, ExhibitionRecord } from './ports.js';
 
 export interface ExhibitionServiceDependencies {
-	apiPublicUrl: string;
+	publicAssetOrigin?: string;
 	posterBucket: string;
 	protectedBucket?: string;
 	repository: ExhibitionRepository;
-	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits;
-	uploadSlots: { acquire(): void; release(): void };
-	posterUpload: PosterUploadCoordinator;
 	wakeDeletionWorker(): void;
-	wakeMaintenance?(): void;
-	logger?: {
-		error(context: Record<string, unknown>, message: string): void;
-	};
-	recordPostCommitCleanupFailure?: () => void;
 }
 
 function cleanupCommittedPoster(deps: ExhibitionServiceDependencies): void {
 	deps.wakeDeletionWorker();
 }
 
-function serializeExhibition(
+async function serializeExhibition(
 	deps: ExhibitionServiceDependencies,
 	e: ExhibitionRecord,
-): AdminExhibitionItem {
-	const { serializeResponsiveImage } = createResponsiveImageSerializer(deps.apiPublicUrl);
+): Promise<AdminExhibitionItem> {
+	const canonicalPoster = e.poster?.status === 'READY' && deps.publicAssetOrigin
+		? await serializePublicImage(e.poster, {
+			publicAssetOrigin: deps.publicAssetOrigin,
+			publicBucket: deps.posterBucket,
+		})
+		: undefined;
+	const original = canonicalPoster ? e.poster?.representations.find((representation) => (
+		representation.role === 'ORIGINAL'
+		&& representation.state === 'READY'
+		&& representation.bucket === deps.posterBucket
+	)) : undefined;
 	return {
 		id: e.id,
 		year: e.year,
@@ -38,24 +37,16 @@ function serializeExhibition(
 		isUploadEnabled: e.isUploadEnabled,
 		sortOrder: e.sortOrder,
 		projectCount: e._count.projects,
-		poster: e.posterStorageKey
-			? serializeResponsiveImage({
-				storageKey: e.posterStorageKey,
-				width: e.posterWidth,
-				height: e.posterHeight,
-				card480Height: e.posterCard480Height,
-				display960Height: e.posterDisplay960Height,
-			})
-			: undefined,
-		posterOriginalName: e.posterOriginalName || undefined,
-		posterSize: e.posterStorageKey ? Number(e.posterSizeBytes) : undefined,
+		poster: canonicalPoster,
+		posterOriginalName: e.poster?.originalName || undefined,
+		posterSize: original ? Number(original.sizeBytes) : undefined,
 	};
 }
 
 /** List all exhibitions with project counts, mapped to API shape */
 export async function listExhibitions(deps: ExhibitionServiceDependencies): Promise<AdminExhibitionItem[]> {
 	const exhibitions = await deps.repository.findAllExhibitions();
-	return exhibitions.map((exhibition) => serializeExhibition(deps, exhibition));
+	return Promise.all(exhibitions.map((exhibition) => serializeExhibition(deps, exhibition)));
 }
 
 /** Create an exhibition after checking for duplicates */
@@ -76,9 +67,8 @@ export async function deleteExhibition(deps: ExhibitionServiceDependencies, id: 
 	});
 	if (!deleted) throw notFound('Exhibition not found');
 
-	if (deleted.cleanupQueued ?? !!deleted.posterStorageKey) {
+	if (deleted.cleanupQueued) {
 		cleanupCommittedPoster(deps);
-		deps.wakeMaintenance?.();
 	}
 }
 
@@ -97,69 +87,7 @@ export async function updateExhibition(
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	});
 
-	return {
-		...serializeExhibition(deps, updated),
-	};
-}
-
-export async function replacePoster(
-	deps: ExhibitionServiceDependencies,
-	id: number,
-	input: MultipartCommandInput,
-): Promise<AdminExhibitionItem> {
-	const existing = await deps.repository.findExhibitionById(id);
-	if (!existing) throw notFound('Exhibition not found');
-
-	const limits = deps.uploadLimits(input.actor.role);
-	let upload: ProcessedUpload | null = null;
-	let uploadPersisted = false;
-
-	deps.uploadSlots.acquire();
-	try {
-		upload = await deps.posterUpload.start(input.parts, limits, {
-			actorId: input.actor.id,
-			exhibitionId: id,
-		});
-		const savedFile = upload.savedFile;
-		const result = await deps.repository.replaceExhibitionPoster(id, {
-			storageKey: savedFile.storageKey,
-			originalName: savedFile.originalName,
-			mimeType: savedFile.mimeType,
-			sizeBytes: BigInt(savedFile.sizeBytes),
-			width: savedFile.width,
-			height: savedFile.height,
-			renditions: savedFile.renditions,
-			uploadIntentIds: savedFile.uploadIntentIds,
-		}, {
-			bucket: deps.posterBucket,
-			reason: 'exhibition-poster-replace-previous',
-		});
-		if (!result) throw notFound('Exhibition not found');
-		uploadPersisted = true;
-
-		if (result.oldStorageKey && result.oldStorageKey !== savedFile.storageKey) {
-			cleanupCommittedPoster(deps);
-		}
-
-		return serializeExhibition(deps, result.updated);
-	} catch (err) {
-		if (upload && !uploadPersisted) await upload.rollback();
-		throw err;
-	} finally {
-		deps.uploadSlots.release();
-		if (upload) {
-			try {
-				await upload.cleanup();
-			} catch (cleanupError) {
-				if (!uploadPersisted) throw cleanupError;
-				deps.recordPostCommitCleanupFailure?.();
-				deps.logger?.error(
-					{ error: cleanupError, exhibitionId: id },
-					'Post-commit exhibition poster temp cleanup failed',
-				);
-			}
-		}
-	}
+	return serializeExhibition(deps, updated);
 }
 
 export async function deletePoster(deps: ExhibitionServiceDependencies, id: number): Promise<void> {
@@ -169,7 +97,7 @@ export async function deletePoster(deps: ExhibitionServiceDependencies, id: numb
 	});
 	if (!result) throw notFound('Exhibition not found');
 
-	if (result.oldStorageKey) {
+	if (result.cleanupQueued) {
 		cleanupCommittedPoster(deps);
 	}
 }
@@ -182,7 +110,6 @@ export function createExhibitionService(deps: ExhibitionServiceDependencies) {
 		updateExhibition: (id: number, patch: UpdateExhibitionRequest) => (
 			updateExhibition(deps, id, patch)
 		),
-		replacePoster: (id: number, input: MultipartCommandInput) => replacePoster(deps, id, input),
 		deletePoster: (id: number) => deletePoster(deps, id),
 	};
 }

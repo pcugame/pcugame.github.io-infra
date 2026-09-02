@@ -8,22 +8,16 @@ import type {
 	PublicProjectDetailResponse,
 } from '@pcu/contracts';
 import { notFound } from '../../shared/errors.js';
-import { isPosterUrlSafe } from '../../shared/poster-validation.js';
-import { effectiveIsIncomplete } from '../../shared/project-completeness.js';
+import { publicObjectUrl } from '../../shared/public-origin.js';
 import {
-	createResponsiveImageSerializer,
-} from '../../shared/responsive-image.js';
-import { parseWebglEntryKey, webglUrl } from '../webgl/paths.js';
+	serializePublicImage,
+	type PublicImageRepresentationRecord,
+} from './image-serialization.js';
 
 interface PublicPosterRecord {
 	kind: AssetKind;
 	status: string;
-	isPublic: boolean;
-	storageKey: string;
-	width?: number | null;
-	height?: number | null;
-	card480Height?: number | null;
-	display960Height?: number | null;
+	representations?: PublicImageRepresentationRecord[];
 }
 
 interface PublicProjectListRecord {
@@ -42,37 +36,34 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	platforms?: Platform[];
 	isIncomplete: boolean;
 	status: ProjectStatus;
-	webglEntryKey?: string;
+	currentWebglDeploymentId?: string | null;
+	currentWebglDeployment?: {
+		id: string;
+		publicBucket: string;
+		publicPrefix: string;
+		entryObjectKey: string;
+		state: string;
+	} | null;
 	exhibition: { year: number };
 	members: { id: number; name: string; studentId: string }[];
 	assets: {
 		id: number;
 		kind: AssetKind;
-		isPublic: boolean;
-		storageKey: string;
-		width?: number | null;
-		height?: number | null;
-		card480Height?: number | null;
-		display960Height?: number | null;
-		playbackStorageKey?: string | null;
-		mimeType: string;
-		playbackMimeType?: string;
-		playbackStatus?: string;
+		representations?: PublicImageRepresentationRecord[];
 	}[];
 }
 
 export interface PublicServiceDependencies {
 	apiPublicUrl: string;
+	publicAssetOrigin?: string;
+	publicBucket?: string;
 	repository: {
 		findExhibitionsWithPublishedCounts(): Promise<{
 			id: number;
 			year: number;
 			title: string;
-			posterStorageKey: string | null;
-			posterWidth?: number | null;
-			posterHeight?: number | null;
-			posterCard480Height?: number | null;
-			posterDisplay960Height?: number | null;
+			posterAssetId?: number | null;
+			poster?: PublicPosterRecord | null;
 			_count: { projects: number };
 		}[]>;
 		findExhibitionsByYear(year: number): Promise<{ id: number; year: number; title: string }[]>;
@@ -83,31 +74,38 @@ export interface PublicServiceDependencies {
 	};
 }
 
-function protectedAssetUrl(deps: PublicServiceDependencies, storageKey: string): string {
-	return `${deps.apiPublicUrl}/api/assets/protected/${storageKey}`;
+function protectedAssetUrl(deps: PublicServiceDependencies, assetId: number, variant: string): string {
+	return `${deps.apiPublicUrl.replace(/\/$/, '')}/api/assets/${assetId}/download?variant=${variant}`;
 }
 
-function isPublicPoster(poster: PublicPosterRecord | null): poster is PublicPosterRecord {
-	return poster?.isPublic === true && isPosterUrlSafe(poster);
+function isPublicPoster(poster: PublicPosterRecord | null, bucket: string): poster is PublicPosterRecord {
+	return poster?.status === 'READY'
+		&& poster.representations?.some((representation) => (
+			representation.role === 'ORIGINAL'
+			&& representation.state === 'READY'
+			&& representation.bucket === bucket
+		)) === true;
+}
+
+function imageOptions(deps: PublicServiceDependencies) {
+	return {
+		publicAssetOrigin: deps.publicAssetOrigin ?? deps.apiPublicUrl,
+		publicBucket: deps.publicBucket ?? 'pcu-public',
+	};
 }
 
 /** List all years with published project counts */
 export async function listYears(deps: PublicServiceDependencies): Promise<PublicYearItem[]> {
 	const exhibitions = await deps.repository.findExhibitionsWithPublishedCounts();
-	const responsiveImages = createResponsiveImageSerializer(deps.apiPublicUrl);
-	return exhibitions.map((e) => ({
+	return Promise.all(exhibitions.map(async (e) => ({
 		id: e.id,
 		year: e.year,
 		title: e.title || undefined,
 		projectCount: e._count.projects,
-		poster: e.posterStorageKey ? responsiveImages.serializeResponsiveImage({
-			storageKey: e.posterStorageKey,
-			width: e.posterWidth,
-			height: e.posterHeight,
-			card480Height: e.posterCard480Height,
-			display960Height: e.posterDisplay960Height,
-		}) : undefined,
-	}));
+		poster: e.posterAssetId != null && e.poster && isPublicPoster(e.poster, deps.publicBucket ?? 'pcu-public')
+			? await serializePublicImage(e.poster, imageOptions(deps))
+			: undefined,
+	})));
 }
 
 /** List published projects for a given year number (supports multiple exhibitions) */
@@ -127,14 +125,13 @@ export async function listProjectsByYear(
 	const exhibitionMap = new Map(exhibitionRecords.map((e) => [e.id, e]));
 
 	const projects = await deps.repository.findPublishedProjectsInExhibitions(exhibitionIds);
-	const responsiveImages = createResponsiveImageSerializer(deps.apiPublicUrl);
 
 	const exhibitions = exhibitionRecords.map((e) => ({
 		id: e.id,
 		title: e.title || `${yearNum} 전시`,
 	}));
 
-	const items = projects.map((p) => {
+	const items = await Promise.all(projects.map(async (p) => {
 		const ex = exhibitionMap.get(p.exhibitionId);
 		const poster = p.poster;
 		return {
@@ -142,14 +139,14 @@ export async function listProjectsByYear(
 			slug: p.slug,
 			title: p.title,
 			summary: p.summary || undefined,
-			poster: isPublicPoster(poster)
-				? responsiveImages.serializeResponsiveImage(poster)
+			poster: isPublicPoster(poster, deps.publicBucket ?? 'pcu-public')
+				? await serializePublicImage(poster, imageOptions(deps))
 				: undefined,
 			members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
 			exhibitionId: p.exhibitionId,
 			exhibitionTitle: ex?.title || `${yearNum} 전시`,
 		};
-	});
+	}));
 
 	return { year: yearNum, exhibitions, items, empty: items.length === 0 };
 }
@@ -168,23 +165,21 @@ export async function listProjectsByExhibition(
 	if (!exhibition) throw notFound('Exhibition not found');
 
 	const projects = await deps.repository.findPublishedProjectsInExhibitions([id]);
-	const responsiveImages = createResponsiveImageSerializer(deps.apiPublicUrl);
-
-	const items = projects.map((p) => {
+	const items = await Promise.all(projects.map(async (p) => {
 		const poster = p.poster;
 		return {
 			id: p.id,
 			slug: p.slug,
 			title: p.title,
 			summary: p.summary || undefined,
-			poster: isPublicPoster(poster)
-				? responsiveImages.serializeResponsiveImage(poster)
+			poster: isPublicPoster(poster, deps.publicBucket ?? 'pcu-public')
+				? await serializePublicImage(poster, imageOptions(deps))
 				: undefined,
 			members: p.members.map((m) => ({ name: m.name, studentId: m.studentId })),
 			exhibitionId: p.exhibitionId,
 			exhibitionTitle: exhibition.title || `${exhibition.year} 전시`,
 		};
-	});
+	}));
 
 	return {
 		exhibition: {
@@ -232,30 +227,59 @@ export async function getProjectDetail(
 	}
 
 	if (!project) throw notFound('Project not found');
-	const responsiveImages = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const images = (await Promise.all(project.assets
+		.filter((a) => a.kind === 'IMAGE' || a.kind === 'POSTER')
+		.map(async (a) => {
+			const image = await serializePublicImage(a, imageOptions(deps));
+			return image ? { id: a.id, kind: a.kind as 'IMAGE' | 'POSTER', image } : undefined;
+		}))).filter((image): image is NonNullable<typeof image> => image !== undefined);
 
-	const images = project.assets
-		.filter((a) => a.isPublic === true && (a.kind === 'IMAGE' || a.kind === 'POSTER'))
-		.map((a) => ({
-			id: a.id,
-			kind: a.kind as 'IMAGE' | 'POSTER',
-			image: responsiveImages.serializeResponsiveImage(a),
-		}));
-
-	const gameAssets = project.assets.filter((a) => a.kind === 'GAME');
+	const gameAssets = project.assets.filter((asset) => asset.kind === 'GAME'
+		&& asset.representations?.some((representation) => (
+			representation.role === 'ORIGINAL' && representation.state === 'READY'
+		)));
 	const gameAsset = gameAssets.length > 0 ? gameAssets[gameAssets.length - 1] : undefined;
 
-	const videos = project.assets
-		.filter((a) => a.kind === 'VIDEO' && a.playbackStatus === 'READY')
-		.map((videoAsset) => ({
-			url: protectedAssetUrl(deps, videoAsset.playbackStorageKey ?? videoAsset.storageKey),
-			mimeType: videoAsset.playbackStorageKey
-				? videoAsset.playbackMimeType || 'video/mp4'
-				: videoAsset.mimeType || 'video/mp4',
-		}));
-	const video = videos[0] ?? null;
-	const poster = isPublicPoster(project.poster) ? project.poster : null;
+	const videos = project.assets.flatMap((videoAsset) => {
+		if (videoAsset.kind !== 'VIDEO') return [];
+		const original = videoAsset.representations?.find((representation) => representation.role === 'ORIGINAL');
+		const playback = videoAsset.representations?.find((representation) => representation.role === 'PLAYBACK');
+		if (original?.state !== 'READY') return [];
+		const playbackStatus = playback?.state === 'READY'
+			? 'READY' as const
+			: playback?.state === 'FAILED' ? 'FAILED' as const : 'PENDING' as const;
+		return [{
+			...(playbackStatus === 'READY'
+				? { url: protectedAssetUrl(deps, videoAsset.id, 'playback') }
+				: {}),
+			mimeType: playback?.mimeType || original.mimeType || 'video/mp4',
+			originalDownloadUrl: protectedAssetUrl(deps, videoAsset.id, 'original'),
+			playbackStatus,
+			...(playback?.error ? { playbackError: playback.error } : {}),
+		}];
+	});
+	const video = videos.find((candidate) => candidate.playbackStatus === 'READY') ?? videos[0] ?? null;
+	const poster = isPublicPoster(project.poster, deps.publicBucket ?? 'pcu-public') ? project.poster : null;
+	const serializedPoster = poster
+		? await serializePublicImage(poster, imageOptions(deps))
+		: undefined;
+	const validKinds = new Set(project.assets.map((asset) => asset.kind));
+	const isIncomplete = project.isIncomplete !== false
+		|| !gameAsset || !videos.some((candidate) => candidate.playbackStatus === 'READY') || !serializedPoster;
+	let webglEntryUrl: string | undefined;
+	if (project.currentWebglDeploymentId != null) {
+		const deployment = project.currentWebglDeployment;
+		if (deployment?.id === project.currentWebglDeploymentId
+			&& deployment.state === 'READY'
+			&& deployment.publicBucket === (deps.publicBucket ?? 'pcu-public')
+			&& deployment.entryObjectKey.startsWith(deployment.publicPrefix)) {
+			webglEntryUrl = publicObjectUrl(deps.publicAssetOrigin ?? deps.apiPublicUrl, deployment.entryObjectKey);
+		}
+	}
 
+	if (project.status === 'DRAFT') {
+		throw new Error('DRAFT project escaped the public repository boundary');
+	}
 	return {
 		id: project.id,
 		year: project.exhibition.year,
@@ -265,7 +289,7 @@ export async function getProjectDetail(
 		description: project.description || undefined,
 		githubUrl: project.githubUrl || undefined,
 		platforms: project.platforms ?? [],
-		isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, poster),
+		isIncomplete: isIncomplete || !validKinds.has('GAME'),
 		video,
 		videos,
 		members: project.members.map((m) => ({
@@ -274,15 +298,11 @@ export async function getProjectDetail(
 			studentId: m.studentId,
 		})),
 		images,
-		poster: poster
-			? responsiveImages.serializeResponsiveImage(poster)
-			: undefined,
+		poster: serializedPoster,
 		gameDownloadUrl: gameAsset
-			? protectedAssetUrl(deps, gameAsset.storageKey)
+			? protectedAssetUrl(deps, gameAsset.id, 'original')
 			: undefined,
-		webglUrl: project.webglEntryKey && parseWebglEntryKey(project.id, project.webglEntryKey)
-			? webglUrl(deps.apiPublicUrl, project.id)
-			: undefined,
+		webglUrl: webglEntryUrl,
 		status: project.status,
 	};
 }

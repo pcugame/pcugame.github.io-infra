@@ -168,7 +168,6 @@ describe('admin project list route query', () => {
 	});
 
 	it.each([
-		'/api/admin/projects?status=DRAFT',
 		'/api/admin/projects?sort=updatedAt',
 		'/api/admin/projects?order=sideways',
 	])('rejects non-whitelisted query value %s', async (url) => {
@@ -176,6 +175,13 @@ describe('admin project list route query', () => {
 
 		expect(res.statusCode).toBe(400);
 		expect(mocks.listProjects).not.toHaveBeenCalled();
+	});
+
+	it('accepts DRAFT as an administrative publication-workflow status', async () => {
+		const res = await listProjects('/api/admin/projects?status=DRAFT');
+
+		expect(res.statusCode).toBe(200);
+		expect(mocks.listProjects).toHaveBeenCalledWith(303, 'ADMIN', expect.objectContaining({ status: 'DRAFT' }));
 	});
 
 	it('passes USER role through for role-scoped pagination', async () => {
@@ -186,5 +192,97 @@ describe('admin project list route query', () => {
 			page: 3,
 			limit: 20,
 		}));
+	});
+});
+
+describe('project deletion route authorization', () => {
+	beforeEach(async () => {
+		vi.clearAllMocks();
+		mocks.loadProjectWithAccess.mockResolvedValue({ status: 'PUBLISHED' });
+		mocks.deleteProject.mockResolvedValue(undefined);
+		mocks.bulkDeleteProjects.mockResolvedValue({
+			deleted: 2,
+			assetsRemoved: 3,
+			webglBuildsRemoved: 1,
+		});
+		app = await buildTestApp();
+	});
+
+	afterEach(async () => {
+		await app.close();
+	});
+
+	it.each(['USER', 'OPERATOR', 'ADMIN'] as const)(
+		'allows an authenticated %s through the single-delete resource access policy',
+		async (role) => {
+			const response = await app.inject({
+				method: 'DELETE',
+				url: '/api/admin/projects/17',
+				headers: { 'x-test-role': role },
+			});
+
+			expect(response.statusCode).toBe(204);
+			expect(mocks.loadProjectWithAccess).toHaveBeenCalledWith(
+				expect.objectContaining({ role }),
+				17,
+			);
+			expect(mocks.deleteProject).toHaveBeenCalledWith(17);
+		},
+	);
+
+	it('fails a single delete closed when project ownership/membership access is denied', async () => {
+		mocks.loadProjectWithAccess.mockRejectedValueOnce(Object.assign(
+			new Error('Not project owner'),
+			{ statusCode: 403, code: 'FORBIDDEN' },
+		));
+
+		const response = await app.inject({
+			method: 'DELETE',
+			url: '/api/admin/projects/17',
+			headers: { 'x-test-role': 'USER' },
+		});
+
+		expect(response.statusCode).toBe(403);
+		expect(mocks.deleteProject).not.toHaveBeenCalled();
+	});
+
+	it('requires authentication before the single-delete access lookup', async () => {
+		const response = await app.inject({
+			method: 'DELETE',
+			url: '/api/admin/projects/17',
+		});
+
+		expect(response.statusCode).toBe(401);
+		expect(mocks.loadProjectWithAccess).not.toHaveBeenCalled();
+		expect(mocks.deleteProject).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		[undefined, 401],
+		['USER', 403],
+		['OPERATOR', 403],
+	] as const)('rejects %s for bulk delete with %i', async (role, statusCode) => {
+		const response = await app.inject({
+			method: 'POST',
+			url: '/api/admin/projects/bulk/delete',
+			...(role ? { headers: { 'x-test-role': role } } : {}),
+			payload: { ids: [17, 18] },
+		});
+
+		expect(response.statusCode).toBe(statusCode);
+		expect(mocks.bulkDeleteProjects).not.toHaveBeenCalled();
+	});
+
+	it('allows only ADMIN to execute bulk delete without per-project access lookup', async () => {
+		const response = await app.inject({
+			method: 'POST',
+			url: '/api/admin/projects/bulk/delete',
+			headers: { 'x-test-role': 'ADMIN' },
+			payload: { ids: [17, 18] },
+		});
+
+		expect(response.statusCode).toBe(200);
+		expect(mocks.bulkDeleteProjects).toHaveBeenCalledWith([17, 18]);
+		expect(mocks.loadProjectWithAccess).not.toHaveBeenCalled();
 	});
 });

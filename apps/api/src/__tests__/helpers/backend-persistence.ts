@@ -27,10 +27,8 @@ export function createScriptedBackendPersistence(
 			findExhibitionsByYear: async () => [],
 			findPublishedProjectsInExhibitions: async () => [],
 			findExhibitionById: async () => null,
-			resolvePublicImage: async () => null,
 			findPublishedProjectById: async () => null,
 			findPublishedProjectBySlug: async () => null,
-			findPublicWebglProject: async () => null,
 		},
 		projectAccessRepository: {
 			findProject: async () => null,
@@ -49,8 +47,10 @@ export function createScriptedBackendPersistence(
 			findExhibitionById: async () => null,
 			findProjectByExhibitionAndSlug: async () => null,
 			createProjectWithAssets: async () => unscripted('project.createProjectWithAssets'),
-			createAsset: async () => unscripted('project.createAsset'),
-			replaceOrCreateReplaceableAsset: async () => unscripted('project.replaceOrCreateReplaceableAsset'),
+			findSubmissionForActor: async () => null,
+			finalizeSubmission: async () => unscripted('project.finalizeSubmission'),
+			cancelSubmission: async () => unscripted('project.cancelSubmission'),
+			auditActiveSubmissions: async () => ({ draftProjects: 0, pendingSubmissions: 0, finalizingSubmissions: 0, activePublicationJobs: 0 }),
 			bulkUpdateStatus: async () => ({ count: 0 }),
 		},
 		memberRepository: {
@@ -68,11 +68,10 @@ export function createScriptedBackendPersistence(
 			createExhibition: async () => unscripted('exhibition.createExhibition'),
 			deleteExhibition: async () => null,
 			updateExhibition: async () => unscripted('exhibition.updateExhibition'),
-			replaceExhibitionPoster: async () => null,
 			clearExhibitionPoster: async () => null,
 		},
 		assetsRepository: {
-			findAssetByStorageKey: async () => null,
+			findAssetByIdForDownload: async () => null,
 			upsertBannedIp: async () => undefined,
 			findAssetByIdWithProject: async () => null,
 			claimAssetForDeletion: async () => null,
@@ -89,7 +88,8 @@ export function createScriptedBackendPersistence(
 			runTransaction: async () => unscripted('import.runTransaction'),
 		},
 		exportRepository: {
-			findProjectsWithAssets: async () => [],
+			createJob: async ({ id }) => ({ id }),
+			latestJob: async () => null,
 		},
 	};
 

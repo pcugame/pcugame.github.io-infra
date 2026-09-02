@@ -7,699 +7,329 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const requestedTargets = process.argv.slice(2);
-const targetNames = requestedTargets.length > 0 ? requestedTargets : ['src'];
+const targets = process.argv.length > 2 ? process.argv.slice(2) : ['src', 'scripts'];
+const ignored = new Set(['node_modules', 'dist', 'generated', '__tests__']);
 
-const ignoredDirectoryNames = new Set(['node_modules', 'dist', 'generated', '__tests__']);
-const sourceExtensions = /\.(?:[cm]?ts|tsx)$/;
+const posix = (value) => value.split(path.sep).join('/');
+const relative = (value) => posix(path.relative(packageRoot, value));
+const withoutExtension = (value) => value.replace(/\.(?:[cm]?[jt]s|tsx|jsx)$/, '');
 
-/**
- * The request context is deliberately process-bound: Fastify seeds a separate
- * store for every request and no external resource is opened by constructing it.
- * Keep this allowlist exact (file + binding + constructor). New entries require a
- * lifecycle/ownership explanation here and a review of the architecture fixture.
- */
-const statefulAppBoundaryAllowlist = new Map([
-	[
-		'src/lib/request-context.ts#requestContext',
-		{
-			creator: 'AsyncLocalStorage',
-			reason: 'request-scoped propagation seeded at the Fastify app boundary',
-		},
-	],
-]);
-
-const legacyStatefulExports = new Set([
-	'_resetActiveUploads',
-	'abortMultipartUpload',
-	'acquireUploadSlot',
-	'activeUploadCount',
-	'bucketForKind',
-	'completeMultipartUpload',
-	'createMultipartUpload',
-	'decInFlight',
-	'deleteObject',
-	'exportAssets',
-	'exportService',
-	'gameDownloadLimiter',
-	'getExportProgress',
-	'getInFlight',
-	'getLifecycleState',
-	'getObjectStream',
-	'getPresignedUrl',
-	'getSiteSettings',
-	'headObject',
-	'incInFlight',
-	'isAcceptingNewWork',
-	'legacySiteSettingsStore',
-	'listObjectKeys',
-	'logger',
-	'nodeFileSystem',
-	'nodeScheduler',
-	'objectStorage',
-	'prisma',
-	'prismaHealth',
-	'processLifecycle',
-	'processLimiter',
-	'processUploadLimiter',
-	'productionService',
-	'readObjectRange',
-	'releaseUploadSlot',
-	'rootLogger',
-	's3',
-	'setLifecycleState',
-	'systemClock',
-	'cryptoIdGenerator',
-	'uploadFile',
-	'uploadPart',
-	'waitForDrain',
-]);
-
-const statefulCreatorNames = new Set([
-	'AbortController',
-	'AsyncLocalStorage',
-	'EventEmitter',
-	'Map',
-	'OAuth2Client',
-	'PrismaClient',
-	'S3Client',
-	'WeakMap',
-	'WeakSet',
-	'createCachedSettingsStore',
-	'createCryptoIdGenerator',
-	'createDownloadRateLimiter',
-	'createExportProgressStore',
-	'createLifecycle',
-	'createLifecyclePort',
-	'createNodeFileSystem',
-	'createNodeScheduler',
-	'createObjectStorage',
-	'createPrismaClientForDatabase',
-	'createProtectedDownloadLimiter',
-	'createRootLogger',
-	'createReadStream',
-	'createS3Client',
-	'createSystemClock',
-	'createUploadLimiter',
-	'createUploadLimiterPort',
-	'createWriteStream',
-	'setInterval',
-	'setTimeout',
-]);
-
-const statefulCreatorPattern =
-	/^create[A-Z].*(?:Client|Clock|Coordinator|FileSystem|Generator|Graph|Lifecycle|Limiter|Logger|Pipeline|Repository|Runtime|Scheduler|Service|Storage|Store|Writer)$/;
-const statefulConstructorPattern =
-	/(?:Client|Coordinator|FileSystem|Lifecycle|Limiter|Logger|Repository|Runtime|Scheduler|Service|Storage|Store)$/;
-
-function posix(value) {
-	return value.split(path.sep).join('/');
-}
-
-function relativeFileName(fileName) {
-	return posix(path.relative(packageRoot, fileName));
-}
-
-function collectFiles(targetPath, files) {
-	const name = path.basename(targetPath);
-	if (ignoredDirectoryNames.has(name)) return;
-	const info = statSync(targetPath);
-	if (info.isDirectory()) {
-		for (const child of readdirSync(targetPath).sort()) {
-			collectFiles(path.join(targetPath, child), files);
-		}
+function collect(target, output) {
+	if (ignored.has(path.basename(target))) return;
+	const metadata = statSync(target);
+	if (metadata.isDirectory()) {
+		for (const child of readdirSync(target).sort()) collect(path.join(target, child), output);
 		return;
 	}
-	if (info.isFile() && sourceExtensions.test(targetPath) && !targetPath.endsWith('.d.ts')) {
-		files.push(path.resolve(targetPath));
-	}
+	if (/\.(?:[cm]?ts|tsx)$/.test(target) && !target.endsWith('.d.ts')) output.push(target);
 }
 
 const files = [];
-for (const targetName of targetNames) {
-	const targetPath = path.resolve(packageRoot, targetName);
-	if (!existsSync(targetPath)) {
-		console.error(`[architecture-guard] target-not-found ${posix(targetName)}`);
+for (const target of targets) {
+	const absolute = path.resolve(packageRoot, target);
+	if (!existsSync(absolute)) {
+		console.error(`[architecture-guard] target-not-found ${posix(target)}`);
 		process.exitCode = 2;
 		continue;
 	}
-	collectFiles(targetPath, files);
+	collect(absolute, files);
 }
-
 if (process.exitCode === 2) process.exit();
 
-files.sort();
-
-function stripSourceExtension(value) {
-	return value.replace(/\.(?:[cm]?[jt]s|tsx|jsx)$/, '');
-}
-
-function resolveModuleSource(fileName, moduleSpecifier) {
-	if (moduleSpecifier.startsWith('.')) {
-		return stripSourceExtension(
-			posix(path.relative(packageRoot, path.resolve(path.dirname(fileName), moduleSpecifier))),
-		);
-	}
-	if (moduleSpecifier.startsWith('/')) {
-		return stripSourceExtension(posix(path.relative(packageRoot, moduleSpecifier)));
-	}
-	return stripSourceExtension(moduleSpecifier);
-}
-
-function isRuntimeSource(source) {
-	return /(?:^|\/)(?:runtime|[^/]+\.runtime)$/.test(source);
-}
-
-function isEnvSource(source) {
-	return source === 'src/config/env' || source.endsWith('/src/config/env');
-}
-
-function isGlobalPrismaSource(source) {
-	return source === 'src/lib/prisma' || source.endsWith('/src/lib/prisma');
-}
-
-function isStatefulBoundarySource(source) {
-	return (
-		/(?:^|\/)src\/infrastructure\/production-ports$/.test(source)
-		|| /(?:^|\/)src\/shared\/(?:download-rate-limit|protected-download-limiter|site-settings|upload-limits)$/.test(source)
-	);
-}
-
-function isGlobalResourceSource(source) {
-	return (
-		isGlobalPrismaSource(source)
-		|| /(?:^|\/)src\/lib\/(?:lifecycle|logger|s3|storage)$/.test(source)
-		|| source === 'src/object-deletion'
-		|| source.endsWith('/src/object-deletion')
-		|| isStatefulBoundarySource(source)
-		|| isRuntimeSource(source)
-	);
-}
-
-function isLegacyStatefulSource(source) {
-	return (
-		isGlobalResourceSource(source)
-		|| /(?:^|\/)src\/modules\/admin\/export\/service$/.test(source)
-	);
-}
-
-function isStatefulAdapterSource(source) {
-	return (
-		isLegacyStatefulSource(source)
-		|| source === '@aws-sdk/client-s3'
-		|| source === '@prisma/client'
-		|| source === 'google-auth-library'
-		|| /(?:^|\/)src\/generated\/prisma\/client$/.test(source)
-		|| /(?:^|\/)src\/lib\/prisma-client$/.test(source)
-	);
-}
-
-function isControllerFile(file) {
-	return /(?:^|\/)(?:[^/]+\.)?controller\.(?:[cm]?ts|tsx)$/.test(file);
-}
-
-function isIndexFile(file) {
-	return /(?:^|\/)index\.(?:[cm]?ts|tsx)$/.test(file);
-}
-
-function isRepositoryFile(file) {
-	return /(?:^|\/)(?:[^/]+\.)?repository\.(?:[cm]?ts|tsx)$/.test(file);
-}
-
-function isFeatureFile(file) {
-	return file.startsWith('src/modules/') || file.includes('/src/modules/');
-}
-
-function isCompositionRoot(file) {
-	return (
-		file === 'src/app.ts'
-		|| file === 'src/backend-context.ts'
-		|| file === 'src/server.ts'
-		|| file.startsWith('src/infrastructure/')
-		|| /(?:^|\/)(?:composition|[^/]+\.composition)\.(?:[cm]?ts|tsx)$/.test(file)
-	);
-}
-
-function importedNames(importDeclaration) {
-	const clause = importDeclaration.importClause;
+function importNames(node) {
+	const clause = node.importClause;
 	if (!clause) return [];
 	const names = [];
-	if (clause.name) {
-		names.push({
-			imported: 'default',
-			local: clause.name.text,
-			typeOnly: clause.isTypeOnly,
-		});
+	if (clause.name) names.push({ typeOnly: clause.isTypeOnly });
+	if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+		names.push({ typeOnly: clause.isTypeOnly });
 	}
-	const bindings = clause.namedBindings;
-	if (bindings && ts.isNamespaceImport(bindings)) {
-		names.push({
-			imported: '*',
-			local: bindings.name.text,
-			typeOnly: clause.isTypeOnly,
-		});
-	}
-	if (bindings && ts.isNamedImports(bindings)) {
-		for (const element of bindings.elements) {
-			names.push({
-				imported: element.propertyName?.text ?? element.name.text,
-				local: element.name.text,
-				typeOnly: clause.isTypeOnly || element.isTypeOnly,
-			});
+	if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+		for (const element of clause.namedBindings.elements) {
+			names.push({ typeOnly: clause.isTypeOnly || element.isTypeOnly });
 		}
 	}
 	return names;
 }
 
-function exportedNames(exportDeclaration) {
-	const clause = exportDeclaration.exportClause;
-	if (!clause || !ts.isNamedExports(clause)) {
-		return [{ imported: '*', local: '*', typeOnly: exportDeclaration.isTypeOnly }];
+function resolveSource(fileName, specifier) {
+	if (specifier.startsWith('.')) {
+		return withoutExtension(relative(path.resolve(path.dirname(fileName), specifier)));
 	}
-	return clause.elements.map((element) => ({
-		imported: element.propertyName?.text ?? element.name.text,
-		local: element.name.text,
-		typeOnly: exportDeclaration.isTypeOnly || element.isTypeOnly,
-	}));
+	return specifier.startsWith('/') ? withoutExtension(relative(specifier)) : specifier;
 }
 
-function collectDependencies(sourceFile, fileName) {
+function importsOf(sourceFile, fileName) {
 	const edges = [];
-	const bindings = new Map();
-
-	function addEdge(node, moduleSpecifier, kind, names) {
-		const source = resolveModuleSource(fileName, moduleSpecifier);
-		edges.push({ node, moduleSpecifier, source, kind, names });
-		if (kind !== 'import') return;
-		for (const name of names) {
-			bindings.set(name.local, {
-				imported: name.imported,
-				source,
-				typeOnly: name.typeOnly,
-			});
-		}
-	}
-
 	function visit(node) {
 		if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-			addEdge(
+			const names = importNames(node);
+			edges.push({
 				node,
-				node.moduleSpecifier.text,
-				'import',
-				importedNames(node),
-			);
-		} else if (
-			ts.isExportDeclaration(node)
-			&& node.moduleSpecifier
-			&& ts.isStringLiteral(node.moduleSpecifier)
-		) {
-			addEdge(
+				specifier: node.moduleSpecifier.text,
+				source: resolveSource(fileName, node.moduleSpecifier.text),
+				runtime: !node.importClause || names.some(({ typeOnly }) => !typeOnly),
+			});
+		} else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+			edges.push({
 				node,
-				node.moduleSpecifier.text,
-				'export',
-				exportedNames(node),
-			);
-		} else if (
-			ts.isCallExpression(node)
-			&& node.expression.kind === ts.SyntaxKind.ImportKeyword
-			&& node.arguments.length === 1
-			&& ts.isStringLiteral(node.arguments[0])
-		) {
-			addEdge(
+				specifier: node.moduleSpecifier.text,
+				source: resolveSource(fileName, node.moduleSpecifier.text),
+				runtime: !node.isTypeOnly,
+			});
+		} else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+			&& node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
+			edges.push({
 				node,
-				node.arguments[0].text,
-				'dynamic-import',
-				[{ imported: '*', local: '*', typeOnly: false }],
-			);
+				specifier: node.arguments[0].text,
+				source: resolveSource(fileName, node.arguments[0].text),
+				runtime: true,
+			});
 		}
 		ts.forEachChild(node, visit);
 	}
-
 	visit(sourceFile);
-	return { edges, bindings };
+	return edges;
 }
 
-function unwrapExpression(expression) {
-	let current = expression;
-	while (
-		ts.isParenthesizedExpression(current)
-		|| ts.isAsExpression(current)
-		|| ts.isTypeAssertionExpression(current)
-		|| ts.isNonNullExpression(current)
-		|| ts.isSatisfiesExpression(current)
-	) {
-		current = current.expression;
+const modules = new Map();
+const byStem = new Map();
+for (const fileName of files.sort()) {
+	const file = relative(fileName);
+	const sourceFile = ts.createSourceFile(file, readFileSync(fileName, 'utf8'), ts.ScriptTarget.Latest, true,
+		file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+	const module = { file, sourceFile, imports: importsOf(sourceFile, fileName) };
+	modules.set(file, module);
+	byStem.set(withoutExtension(file), module);
+}
+
+const isController = (file) => /(?:^|\/)(?:[^/]+\.)?controller\.(?:[cm]?ts|tsx)$/.test(file);
+const isApiRoot = (file) => ['src/app.ts', 'src/server.ts', 'src/backend-context.ts'].includes(file) || isController(file);
+const isWorkerEntry = (file) => /(?:^|\/)[^/]*worker\.(?:[cm]?ts|tsx)$/.test(file);
+
+function reachable(rootPredicate) {
+	const output = new Set();
+	const pending = [...modules.values()].filter(({ file }) => rootPredicate(file));
+	while (pending.length) {
+		const current = pending.pop();
+		if (!current || output.has(current.file)) continue;
+		output.add(current.file);
+		for (const edge of current.imports) {
+			const target = edge.runtime && byStem.get(edge.source);
+			if (target && !output.has(target.file)) pending.push(target);
+		}
 	}
+	return output;
+}
+
+const apiGraph = reachable(isApiRoot);
+const workerGraph = reachable(isWorkerEntry);
+const isInfrastructure = (file) => file.startsWith('src/infrastructure/')
+	|| /^src\/lib\/(?:s3|storage)\.(?:[cm]?ts|tsx)$/.test(file);
+const isFeature = (file) => file.startsWith('src/modules/') || file.includes('/src/modules/');
+const isWorkerComposition = (file) => workerGraph.has(file) && (isWorkerEntry(file)
+	|| /(?:^|\/)(?:composition|[^/]+\.composition)\.(?:[cm]?ts|tsx)$/.test(file));
+const isStorageSdk = (source) => source === '@aws-sdk/client-s3' || source === '@aws-sdk/s3-request-presigner';
+const isApiOnlySource = (source) => source === 'fastify'
+	|| /(?:^|\/)src\/(?:app|server|backend-context)$/.test(source)
+	|| /(?:^|\/)(?:[^/]+\.)?controller$/.test(source);
+const isWorkerSource = (source) => /(?:^|\/)[^/]*worker(?:\.[^/]+)?$/.test(source)
+	|| /(?:^|\/)(?:validation-worker|processing)\.composition$/.test(source)
+	|| /(?:^|\/)modules\/(?:video|webgl)\/composition$/.test(source);
+
+function isProcessingSource(source, importer) {
+	if (['node:child_process', 'sharp', 'pdf-to-img'].includes(source)) return true;
+	if (/(?:^|\/)(?:bounded-)?(?:archive|zip)[^/]*validator$/.test(source)) return true;
+	if (source.startsWith('src/modules/archive/')) return true;
+	if (source === 'src/infrastructure/project-upload-processing') return true;
+	if (/^src\/modules\/assets\/upload\/(?:file-validator|image-processing|pdf-processing|video-processing(?:\.adapter)?|zip-file-validation(?:\.adapter)?)$/.test(source)) return true;
+	if (/^src\/modules\/video\/(?:command-runner|composition|ffmpeg-operations|loop|materialize|processor|worker)$/.test(source)) return true;
+	if (/^src\/modules\/webgl\/(?:deployment|processing|processing\.composition)$/.test(source)) return true;
+	if (/^src\/modules\/admin\/export\/(?:file\.adapter|nas-staging\.adapter|worker|worker-loop)$/.test(source)) return true;
+	return /^node:fs(?:\/promises)?$/.test(source) && !isInfrastructure(importer) && !importer.startsWith('src/config/');
+}
+
+function unwrap(expression) {
+	let current = expression;
+	while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current)
+		|| ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current)
+		|| ts.isSatisfiesExpression(current) || ts.isAwaitExpression(current)) current = current.expression;
 	return current;
 }
 
-function describeCallee(expression, bindings) {
-	const callee = unwrapExpression(expression);
-	if (ts.isIdentifier(callee)) {
-		const binding = bindings.get(callee.text);
-		return {
-			name: binding?.imported ?? callee.text,
-			local: callee.text,
-			source: binding?.source,
-		};
+function memberName(expression) {
+	const current = unwrap(expression);
+	if (ts.isPropertyAccessExpression(current)) return current.name.text;
+	if (ts.isElementAccessExpression(current) && current.argumentExpression && ts.isStringLiteral(current.argumentExpression)) {
+		return current.argumentExpression.text;
 	}
-	if (ts.isPropertyAccessExpression(callee)) {
-		if (ts.isIdentifier(callee.expression)) {
-			const binding = bindings.get(callee.expression.text);
-			if (binding?.imported === '*') {
-				return {
-					name: callee.name.text,
-					local: `${callee.expression.text}.${callee.name.text}`,
-					source: binding.source,
-				};
-			}
-		}
-		return { name: callee.name.text, local: callee.getText(), source: undefined };
-	}
-	if (
-		ts.isElementAccessExpression(callee)
-		&& ts.isIdentifier(callee.expression)
-		&& callee.argumentExpression
-		&& ts.isStringLiteral(callee.argumentExpression)
-	) {
-		const binding = bindings.get(callee.expression.text);
-		return {
-			name: callee.argumentExpression.text,
-			local: `${callee.expression.text}[${JSON.stringify(callee.argumentExpression.text)}]`,
-			source: binding?.source,
-		};
-	}
-	return { name: callee.getText(), local: callee.getText(), source: undefined };
+	return ts.isIdentifier(current) ? current.text : undefined;
 }
 
-function isStatefulCreator(descriptor) {
-	if (statefulCreatorNames.has(descriptor.name)) return true;
-	if (statefulCreatorPattern.test(descriptor.name)) return true;
-	if (statefulConstructorPattern.test(descriptor.name)) return true;
-	return (
-		(descriptor.name === 'default' || descriptor.name === '*')
-		&& descriptor.source !== undefined
-		&& isStatefulAdapterSource(descriptor.source)
-	);
+function receiver(expression) {
+	const current = unwrap(expression);
+	return ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)
+		? current.expression.getText() : '';
 }
 
-function findImmediateStatefulCreation(expression, bindings) {
-	let found;
+const storageReceiver = (text) => /(?:^|\.)(?:inspector|objectStorage|objectStore|storage)$/.test(text);
+const fileReceiver = (text) => /(?:^|\.)(?:fileSystem|fs|fsp)$/.test(text);
 
-	function visit(node, immediatelyExecuted = false) {
-		if (found) return;
-		const current = ts.isExpression(node) ? unwrapExpression(node) : node;
-
-		if (ts.isCallExpression(current) || ts.isNewExpression(current)) {
-			const descriptor = describeCallee(current.expression, bindings);
-			if (isStatefulCreator(descriptor)) {
-				found = {
-					creator: descriptor.name,
-					text: descriptor.local,
-				};
-				return;
-			}
-			if (
-				ts.isCallExpression(current)
-				&& (
-					ts.isArrowFunction(unwrapExpression(current.expression))
-					|| ts.isFunctionExpression(unwrapExpression(current.expression))
-				)
-			) {
-				visit(unwrapExpression(current.expression), true);
-			}
-			for (const argument of current.arguments ?? []) visit(argument);
-			return;
-		}
-
-		if (ts.isFunctionLike(current) && !immediatelyExecuted) return;
-		if (ts.isFunctionLike(current) && immediatelyExecuted) {
-			if (current.body) visit(current.body);
-			return;
-		}
-
-		ts.forEachChild(current, (child) => visit(child));
-	}
-
-	visit(expression);
-	return found;
+function isObjectRead(call) {
+	const name = memberName(call.expression);
+	const owner = receiver(call.expression);
+	return (['getObject', 'readObjectRange', 'readRange', 'stream'].includes(name) && storageReceiver(owner))
+		|| (['createReadStream', 'createWriteStream'].includes(name) && (!owner || fileReceiver(owner)));
 }
 
-function referencesGlobalPrisma(expression, bindings) {
-	let found = false;
-	function visit(node) {
-		if (found) return;
-		if (ts.isIdentifier(node)) {
-			const binding = bindings.get(node.text);
-			if (binding && isGlobalPrismaSource(binding.source)) {
-				found = true;
-				return;
-			}
-		}
-		ts.forEachChild(node, visit);
-	}
-	visit(expression);
-	return found;
+function isObjectWrite(call) {
+	return ['putObject', 'upload', 'uploadPart'].includes(memberName(call.expression))
+		&& storageReceiver(receiver(call.expression));
 }
 
-const inventory = {
-	'runtime-files': 0,
-	'controller-runtime-imports': 0,
-	'controller-env-imports': 0,
-	'repository-global-prisma-imports': 0,
-	'non-composition-stateful-imports': 0,
-	'feature-runtime-imports': 0,
-};
-const violations = [];
-const violationKeys = new Set();
-
-function addViolation(rule, file, node, message) {
-	const sourceFile = node.getSourceFile();
-	const location = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-	const key = `${rule}\0${file}\0${location.line}\0${message}`;
-	if (violationKeys.has(key)) return;
-	violationKeys.add(key);
-	violations.push({
-		rule,
-		file,
-		line: location.line + 1,
-		column: location.character + 1,
-		message,
-	});
-}
-
-function dependencyDescription(edge) {
-	return `${edge.kind} ${JSON.stringify(edge.moduleSpecifier)}`;
-}
-
-for (const fileName of files) {
-	const file = relativeFileName(fileName);
-	const sourceFile = ts.createSourceFile(
-		file,
-		readFileSync(fileName, 'utf8'),
-		ts.ScriptTarget.Latest,
-		true,
-		file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-	);
-	const { edges, bindings } = collectDependencies(sourceFile, fileName);
-
-	for (const diagnostic of sourceFile.parseDiagnostics) {
-		const node = diagnostic.start === undefined
-			? sourceFile
-			: findNodeAtPosition(sourceFile, diagnostic.start);
-		addViolation(
-			'architecture-guard-parse-error',
-			file,
-			node,
-			ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
-		);
-	}
-
-	if (/\.runtime\.(?:[cm]?ts|tsx)$/.test(file)) {
-		inventory['runtime-files']++;
-		addViolation(
-			'no-runtime-file',
-			file,
-			sourceFile,
-			'feature runtime modules must be replaced with factories and explicit composition',
-		);
-	}
-
-	for (const edge of edges) {
-		const runtime = isRuntimeSource(edge.source);
-		const env = isEnvSource(edge.source);
-		const globalPrisma = isGlobalPrismaSource(edge.source);
-		const globalResource = isGlobalResourceSource(edge.source);
-
-		if (isControllerFile(file) && runtime) {
-			inventory['controller-runtime-imports']++;
-			addViolation(
-				'no-controller-runtime',
-				file,
-				edge.node,
-				`controllers receive runtime dependencies through ports (${dependencyDescription(edge)})`,
-			);
+function collectBodies(sourceFile) {
+	const bindings = new Set();
+	let changed = true;
+	while (changed) {
+		changed = false;
+		function add(name) {
+			if (name && !bindings.has(name)) { bindings.add(name); changed = true; }
 		}
-		if (isControllerFile(file) && env) {
-			inventory['controller-env-imports']++;
-			addViolation(
-				'no-controller-env',
-				file,
-				edge.node,
-				`controllers receive validated configuration through their factory (${dependencyDescription(edge)})`,
-			);
+		function looksLikeBody(expression) {
+			const value = unwrap(expression);
+			if (ts.isIdentifier(value)) return bindings.has(value.text);
+			if (ts.isCallExpression(value)) return isObjectRead(value);
+			return (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value))
+				&& ['body', 'stream'].includes(memberName(value));
 		}
-		if (isControllerFile(file) && globalResource && !runtime) {
-			addViolation(
-				'no-controller-global-resource',
-				file,
-				edge.node,
-				`controllers cannot own global resource adapters (${dependencyDescription(edge)})`,
-			);
-		}
-		if (isIndexFile(file) && (runtime || env || globalResource)) {
-			addViolation(
-				'no-index-resource-reexport',
-				file,
-				edge.node,
-				`index barrels cannot hide runtime/env/global resource dependencies (${dependencyDescription(edge)})`,
-			);
-		}
-		if (isRepositoryFile(file) && globalPrisma) {
-			inventory['repository-global-prisma-imports']++;
-			addViolation(
-				'no-repository-global-prisma',
-				file,
-				edge.node,
-				`repository factories must receive Prisma explicitly (${dependencyDescription(edge)})`,
-			);
-		}
-		if (isFeatureFile(file) && runtime) {
-			inventory['feature-runtime-imports']++;
-			addViolation(
-				'no-feature-runtime',
-				file,
-				edge.node,
-				`features connect through ports/composition, never runtime modules (${dependencyDescription(edge)})`,
-			);
-		}
-
-		if (!isCompositionRoot(file) && isLegacyStatefulSource(edge.source)) {
-			const valueNames = edge.names
-				.filter((name) => !name.typeOnly)
-				.map((name) => name.imported);
-				const legacyNames = valueNames.filter((name) => (
-					name === '*'
-					? true
-					: legacyStatefulExports.has(name)
-				));
-			if (legacyNames.length > 0) {
-				inventory['non-composition-stateful-imports']++;
-				addViolation(
-					'no-noncomposition-stateful-import',
-					file,
-					edge.node,
-					`stateful process exports belong to composition roots (${legacyNames.join(', ')} from ${JSON.stringify(edge.moduleSpecifier)})`,
-				);
-			}
-		}
-	}
-
-	for (const statement of sourceFile.statements) {
-		if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
-			const creation = findImmediateStatefulCreation(statement.expression, bindings);
-			if (creation) {
-				addViolation(
-					'no-stateful-module-singleton',
-					file,
-					statement,
-					`default export immediately creates ${creation.text}; export a factory instead`,
-				);
-			}
-			continue;
-		}
-		if (!ts.isVariableStatement(statement)) continue;
-		const declarationKind = statement.declarationList.flags & ts.NodeFlags.Const ? 'const' : 'mutable';
-		for (const declaration of statement.declarationList.declarations) {
-			if (!ts.isIdentifier(declaration.name)) continue;
-			const bindingKey = `${file}#${declaration.name.text}`;
-			if (declarationKind === 'mutable' && !statefulAppBoundaryAllowlist.has(bindingKey)) {
-				addViolation(
-					'no-module-mutable-state',
-					file,
-					declaration,
-					`module-level ${declaration.name.text} must move inside an owned factory`,
-				);
-			}
-			if (!declaration.initializer) continue;
-			const creation = findImmediateStatefulCreation(declaration.initializer, bindings);
-			if (!creation) continue;
-			const allowed = statefulAppBoundaryAllowlist.get(bindingKey);
-			if (allowed?.creator === creation.creator) continue;
-			addViolation(
-				'no-stateful-module-singleton',
-				file,
-				declaration,
-				`module-level ${declaration.name.text} immediately creates ${creation.text}; create it inside the composition-owned factory`,
-			);
-		}
-	}
-
-	if (isRepositoryFile(file)) {
-		function inspectRepositoryDefaults(node) {
-			if (ts.isFunctionLike(node)) {
-				for (const parameter of node.parameters) {
-					if (!parameter.initializer) continue;
-					const creation = findImmediateStatefulCreation(parameter.initializer, bindings);
-					if (creation || referencesGlobalPrisma(parameter.initializer, bindings)) {
-						addViolation(
-							'no-repository-default-resource',
-							file,
-							parameter,
-							'repository resources must be required parameters, never hidden defaults',
-						);
+		function visit(node) {
+			if (ts.isVariableDeclaration(node) && node.initializer) {
+				if (ts.isIdentifier(node.name) && looksLikeBody(node.initializer)) add(node.name.text);
+				if (ts.isObjectBindingPattern(node.name) && looksLikeBody(node.initializer)) {
+					for (const element of node.name.elements) {
+						const name = memberName(element.propertyName ?? element.name);
+						if (['body', 'stream'].includes(name) && ts.isIdentifier(element.name)) add(element.name.text);
 					}
 				}
 			}
-			ts.forEachChild(node, inspectRepositoryDefaults);
+			ts.forEachChild(node, visit);
 		}
-		inspectRepositoryDefaults(sourceFile);
+		visit(sourceFile);
 	}
+	return bindings;
 }
 
-function findNodeAtPosition(sourceFile, position) {
-	let result = sourceFile;
-	function visit(node) {
-		if (position < node.getFullStart() || position > node.getEnd()) return;
-		result = node;
-		ts.forEachChild(node, visit);
+function expressionIsBody(expression, bodies) {
+	const value = unwrap(expression);
+	if (ts.isIdentifier(value)) return bodies.has(value.text) || /^(?:body|objectBody|readable|stream)$/.test(value.text);
+	if (ts.isCallExpression(value)) return isObjectRead(value);
+	return (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value))
+		&& ['body', 'stream'].includes(memberName(value));
+}
+
+const inventory = {
+	'api-graph-files': apiGraph.size,
+	'worker-graph-files': workerGraph.size,
+	'api-object-body-reads': 0,
+	'api-object-body-sends': 0,
+	'api-upload-body-relays': 0,
+	'api-processing-imports': 0,
+	'feature-storage-sdk-imports': 0,
+	'worker-api-imports': 0,
+};
+const violations = [];
+const seen = new Set();
+
+function report(rule, module, node, message) {
+	const position = module.sourceFile.getLineAndCharacterOfPosition(node.getStart(module.sourceFile));
+	const key = `${rule}\0${module.file}\0${position.line}\0${position.character}`;
+	if (seen.has(key)) return;
+	seen.add(key);
+	violations.push({ rule, file: module.file, line: position.line + 1, column: position.character + 1, message });
+}
+
+for (const module of modules.values()) {
+	for (const diagnostic of module.sourceFile.parseDiagnostics) {
+		report('architecture-guard-parse-error', module, module.sourceFile,
+			ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'));
 	}
-	visit(sourceFile);
-	return result;
+	for (const edge of module.imports) {
+		if (!edge.runtime) continue;
+		if (apiGraph.has(module.file) && isWorkerSource(edge.source)) {
+			report('no-api-worker-import', module, edge.node,
+				`Fastify graph imports worker composition ${JSON.stringify(edge.specifier)}`);
+		}
+		if (apiGraph.has(module.file) && isProcessingSource(edge.source, module.file)) {
+			inventory['api-processing-imports']++;
+			report('no-api-processing-import', module, edge.node,
+				`Fastify graph imports byte processing or filesystem authority ${JSON.stringify(edge.specifier)}`);
+		}
+		if (isFeature(module.file) && isStorageSdk(edge.source) && !isInfrastructure(module.file)
+			&& !isWorkerComposition(module.file)) {
+			inventory['feature-storage-sdk-imports']++;
+			report('no-feature-storage-sdk-import', module, edge.node,
+				`feature code imports storage SDK directly from ${JSON.stringify(edge.specifier)}`);
+		}
+		if (workerGraph.has(module.file) && isApiOnlySource(edge.source)) {
+			inventory['worker-api-imports']++;
+			report('no-worker-api-import', module, edge.node,
+				`worker graph imports Fastify/API-only module ${JSON.stringify(edge.specifier)}`);
+		}
+	}
+
+	if (!apiGraph.has(module.file) || isInfrastructure(module.file)) continue;
+	const bodies = collectBodies(module.sourceFile);
+	function inspect(node) {
+		if (ts.isCallExpression(node)) {
+			const name = memberName(node.expression);
+			const owner = receiver(node.expression);
+			if (isObjectRead(node)) {
+				inventory['api-object-body-reads']++;
+				report('no-api-object-body-read', module, node,
+					`Fastify graph reads object/file bytes through ${node.expression.getText()}`);
+			}
+			if (isObjectWrite(node)) {
+				inventory['api-upload-body-relays']++;
+				report(name === 'uploadPart' ? 'no-api-uploadpart-relay' : 'no-api-object-body-write', module, node,
+					`Fastify graph writes client/object bytes through ${node.expression.getText()}`);
+			}
+			if (['send', 'write', 'end'].includes(name) && /(?:^|\.)(?:raw|reply|res|response)$/.test(owner)
+				&& node.arguments.some((argument) => expressionIsBody(argument, bodies))) {
+				inventory['api-object-body-sends']++;
+				report('no-api-object-body-send', module, node,
+					'Fastify response graph sends an object body/stream instead of a capability or redirect');
+			}
+			if (name === 'pipe' && /(?:^|\.)(?:raw|reply|res|response)$/.test(node.arguments[0]?.getText() ?? '')) {
+				inventory['api-object-body-sends']++;
+				report('no-api-object-body-send', module, node, 'Fastify response graph pipes bytes to the client');
+			}
+			if (name === 'pipeline' && node.arguments.some((argument) =>
+				/(?:^|\.)(?:raw|reply|res|response)$/.test(argument.getText()))) {
+				inventory['api-object-body-sends']++;
+				report('no-api-object-body-send', module, node, 'Fastify response graph pipelines bytes to the client');
+			}
+		}
+		if (ts.isNewExpression(node) && ts.isIdentifier(unwrap(node.expression))) {
+			if (unwrap(node.expression).text === 'GetObjectCommand') {
+				report('no-api-object-body-read', module, node, 'Fastify feature graph constructs GetObjectCommand directly');
+			}
+			if (unwrap(node.expression).text === 'UploadPartCommand') {
+				report('no-api-uploadpart-relay', module, node, 'Fastify feature graph constructs UploadPartCommand directly');
+			}
+		}
+		ts.forEachChild(node, inspect);
+	}
+	inspect(module.sourceFile);
 }
 
-violations.sort((a, b) => (
-	a.file.localeCompare(b.file)
-	|| a.line - b.line
-	|| a.column - b.column
-	|| a.rule.localeCompare(b.rule)
-));
-
-for (const [name, count] of Object.entries(inventory)) {
-	console.log(`[architecture-guard] inventory ${name}=${count}`);
-}
-
+violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column || a.rule.localeCompare(b.rule));
+for (const [name, count] of Object.entries(inventory)) console.log(`[architecture-guard] inventory ${name}=${count}`);
 for (const violation of violations) {
-	console.error(
-		`[architecture-guard] ${violation.rule} ${violation.file}:${violation.line}:${violation.column} ${violation.message}`,
-	);
+	console.error(`[architecture-guard] ${violation.rule} ${violation.file}:${violation.line}:${violation.column} ${violation.message}`);
 }
-
-if (violations.length > 0) {
-	console.error(`[architecture-guard] FAIL violations=${violations.length} files=${files.length}`);
+if (violations.length) {
+	console.error(`[architecture-guard] FAIL violations=${violations.length} files=${modules.size}`);
 	process.exitCode = 1;
 } else {
-	console.log(
-		`[architecture-guard] PASS violations=0 files=${files.length} state-allowlist=${statefulAppBoundaryAllowlist.size}`,
-	);
+	console.log(`[architecture-guard] PASS violations=0 files=${modules.size}`);
 }

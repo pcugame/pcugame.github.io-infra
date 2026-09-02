@@ -1,4 +1,4 @@
-import { GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
@@ -26,6 +26,32 @@ describe('object storage HEAD metadata', () => {
 			lastModified,
 		});
 		expect(send).toHaveBeenCalledOnce();
+	});
+
+	it('round-trips authoritative SHA-256 metadata for idempotent worker PUT recovery', async () => {
+		const checksum = 'ab'.repeat(32);
+		const send = vi.fn()
+			.mockResolvedValueOnce({})
+			.mockResolvedValueOnce({
+				ContentLength: 3,
+				ContentType: 'image/webp',
+				ETag: '"etag"',
+				ChecksumSHA256: Buffer.from(checksum, 'hex').toString('base64'),
+			});
+		const storage = createObjectStorage({ send } as unknown as S3Client, {
+			defaultPresignTtlSec: 60,
+		});
+
+		await storage.upload('public', 'image.webp', Buffer.from('abc'), 'image/webp', 3, {
+			checksumSha256: checksum,
+		});
+		await expect(storage.head('public', 'image.webp')).resolves.toMatchObject({
+			size: 3, etag: '"etag"', checksumSha256: checksum,
+		});
+		const put = send.mock.calls[0]![0] as PutObjectCommand;
+		expect(put.input.ChecksumSHA256).toBe(Buffer.from(checksum, 'hex').toString('base64'));
+		const head = send.mock.calls[1]![0] as HeadObjectCommand;
+		expect(head.input.ChecksumMode).toBe('ENABLED');
 	});
 
 	it('returns null only for object-not-found and propagates storage failures', async () => {

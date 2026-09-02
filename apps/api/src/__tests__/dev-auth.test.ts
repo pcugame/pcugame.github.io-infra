@@ -69,7 +69,6 @@ function createDevAuthTestContext(cfg = config()): BackendContext {
 		ids: { next: () => `dev-auth-request-${++requestId}` },
 		storage: {
 			upload: async () => {},
-			presign: async () => 'https://storage.test/object',
 			delete: async () => {},
 			head: async () => null,
 			readRange: async () => Buffer.alloc(0),
@@ -107,7 +106,6 @@ function createDevAuthTestContext(cfg = config()): BackendContext {
 			untrackedMultipartCleanupFailureCount: () => 0,
 		},
 		uploadLifecycle,
-		exportProgress: {} as BackendContext['exportProgress'],
 		lifecycle: {
 			state: () => state,
 			setState: (next) => { state = next; },

@@ -11,4 +11,6 @@ export type {
   ImportPreviewExhibition,
   ImportExecuteResult,
   ExportResult,
+	ExportStartResponse,
+	ExportStatusResponse,
 } from '../../contracts';

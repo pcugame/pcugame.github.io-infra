@@ -6,7 +6,6 @@ import type { Env } from '../config/env.js';
 import { buildApp } from '../app.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
-import { createExportProgressStore } from '../modules/admin/export/service.js';
 import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 
 function testConfig(): Env {
@@ -73,7 +72,6 @@ function createTestContext(): {
 			ids: { next: () => `request-${++requestSequence}` },
 			storage: {
 				upload: async () => {},
-				presign: async () => 'https://storage.test/object',
 				delete: async () => {},
 				head: storageHead,
 				readRange: async () => Buffer.alloc(0),
@@ -130,7 +128,6 @@ function createTestContext(): {
 				inFlight: () => inFlight,
 				waitForDrain: async () => 'drained',
 			},
-			exportProgress: createExportProgressStore(),
 			databaseHealth: { check: async () => true },
 			authSessions: {
 				find: authSessionFind,

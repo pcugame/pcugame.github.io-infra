@@ -55,7 +55,7 @@ describe('site settings upload limits', () => {
 		});
 	});
 
-	it('keeps maxChunkSizeMb aligned with the chunk upload route body limit', async () => {
+	it('keeps the multipart part-size policy within its configured maximum', async () => {
 		await expect(settingsService.updateSettings({ maxChunkSizeMb: 11 })).rejects.toMatchObject({
 			statusCode: 400,
 		});

@@ -1,0 +1,70 @@
+# Protected capability data-plane boundary. Never log the raw target or query:
+# SigV4 query parameters are bearer capabilities until their short expiry.
+log_format pcu_protected_download
+  'method=$request_method uri=$uri status=$status bytes_out=$bytes_sent range=$http_range';
+
+limit_conn_zone $binary_remote_addr zone=pcu_protected_download_per_ip:10m;
+limit_conn_zone $server_addr zone=pcu_protected_download_global:10m;
+
+server {
+  listen ${NGINX_LISTEN_PORT};
+  server_name _;
+
+  access_log /var/log/nginx/access.log pcu_protected_download;
+  # Upstream errors can include the complete request target. Discard this
+  # channel so SigV4 query capabilities can never reach files/docker logs;
+  # query-free access status remains available below.
+  error_log /dev/null crit;
+  limit_conn pcu_protected_download_global ${PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS};
+  limit_conn pcu_protected_download_per_ip ${PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS};
+  limit_conn_status 429;
+
+  client_max_body_size 1k;
+  client_body_timeout 10s;
+  send_timeout 120s;
+
+  # Neither successful protected bytes nor errors may be retained by shared or
+  # browser caches after the signed capability is gone.
+  proxy_hide_header Cache-Control;
+  add_header Cache-Control "private, no-store" always;
+  add_header X-Content-Type-Options "nosniff" always;
+
+  location = /__pcu_protected_download_health {
+    access_log off;
+    return 204;
+  }
+
+  # Bucket roots are list operations, never protected object delivery.
+  location = /${S3_BUCKET_PROTECTED} { return 404; }
+  location = /${S3_BUCKET_PROTECTED}/ { return 404; }
+
+  # Path-style access is restricted to object keys in exactly one protected
+  # bucket. With no URI on proxy_pass, nginx preserves the original escaped
+  # path and complete SigV4 query. The signed browser Host is preserved too.
+  location /${S3_BUCKET_PROTECTED}/ {
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+    if ($http_content_length ~ ^[1-9][0-9]*$) { return 413; }
+    if ($http_transfer_encoding != "") { return 400; }
+
+    proxy_pass ${GARAGE_S3_UPSTREAM};
+    proxy_http_version 1.1;
+    proxy_pass_request_headers on;
+    proxy_set_header Host $http_host;
+    proxy_set_header Connection "";
+    proxy_set_header Content-Length "";
+    proxy_set_header Transfer-Encoding "";
+    proxy_ssl_server_name on;
+    proxy_ssl_name ${GARAGE_S3_TLS_SERVER_NAME};
+    proxy_pass_request_body off;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 30s;
+    proxy_read_timeout 120s;
+    proxy_next_upstream off;
+  }
+
+  # Public buckets, S3 service roots, admin paths and all other generic S3
+  # surfaces fail locally and are never sent to Garage.
+  location / { return 404; }
+}

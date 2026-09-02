@@ -7,6 +7,10 @@
  *
  * Usage:
  *   npx tsx scripts/reconcile-orphans.ts [--apply] [--older-than-minutes=60]
+ *     [--exact-target=<bucket>:<object-key>]
+ *
+ * Exact targets are an operator recovery path for a previously cancelled
+ * live-reference deletion row. They use HEAD only and never enumerate a bucket.
  */
 
 import { pathToFileURL } from 'node:url';

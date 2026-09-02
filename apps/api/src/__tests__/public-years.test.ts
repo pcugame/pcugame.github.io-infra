@@ -12,6 +12,8 @@ import { getProjectDetail, listProjectsByYear, listYears } from '../modules/publ
 
 const dependencies = {
 	apiPublicUrl: 'https://api.example.com',
+	publicAssetOrigin: 'https://assets.example.com',
+	publicBucket: 'pcu-public',
 	repository: {
 		findExhibitionsWithPublishedCounts: mocks.findExhibitionsWithPublishedCounts,
 		findExhibitionsByYear: mocks.findExhibitionsByYear,
@@ -32,17 +34,19 @@ describe('public exhibition years', () => {
 		mocks.findPublishedProjectBySlug.mockReset();
 	});
 
-	it('includes an exhibition responsive image when a poster key is present', async () => {
+	it('includes an exhibition responsive image from its canonical poster representations', async () => {
 		mocks.findExhibitionsWithPublishedCounts.mockResolvedValue([
 			{
 				id: 1,
 				year: 2026,
 				title: '졸업작품 전시회',
-				posterStorageKey: 'poster.webp',
-				posterWidth: 1200,
-				posterHeight: 800,
-				posterCard480Height: 320,
-				posterDisplay960Height: null,
+				posterAssetId: 11,
+				poster: {
+					kind: 'POSTER', status: 'READY', representations: [
+						{ role: 'ORIGINAL', bucket: 'pcu-public', objectKey: 'images/11/original/g1.webp', state: 'READY', mimeType: 'image/webp', width: 1200, height: 800 },
+						{ role: 'CARD_480', bucket: 'pcu-public', objectKey: 'images/11/card/g1.webp', state: 'READY', mimeType: 'image/webp', width: 480, height: 320 },
+					],
+				},
 				_count: { projects: 7 },
 			},
 		]);
@@ -55,13 +59,13 @@ describe('public exhibition years', () => {
 				projectCount: 7,
 				poster: {
 					original: {
-						url: 'https://api.example.com/api/public/images/poster.webp',
+						url: 'https://assets.example.com/images/11/original/g1.webp',
 						width: 1200,
 						height: 800,
 					},
 					renditions: [{
 						profile: 'CARD_480',
-						url: 'https://api.example.com/api/public/images/poster.webp%2F__pcu_image_rendition__%2Fv1%2Fcard-480.webp',
+						url: 'https://assets.example.com/images/11/card/g1.webp',
 						width: 480,
 						height: 320,
 					}],
@@ -70,21 +74,16 @@ describe('public exhibition years', () => {
 		]);
 	});
 
-	it('keeps legacy exhibition posters usable without metadata or renditions', async () => {
+	it('omits a year poster that has no canonical ready public representation', async () => {
 		mocks.findExhibitionsWithPublishedCounts.mockResolvedValue([{
 			id: 1,
 			year: 2025,
 			title: '',
-			posterStorageKey: 'legacy.webp',
+			posterAssetId: null,
 			_count: { projects: 0 },
 		}]);
 
-		await expect(listYears(dependencies)).resolves.toMatchObject([{
-			poster: {
-				original: { url: 'https://api.example.com/api/public/images/legacy.webp' },
-				renditions: [],
-			},
-		}]);
+		await expect(listYears(dependencies)).resolves.toMatchObject([{ poster: undefined }]);
 	});
 
 	it('returns archived projects in public year listings', async () => {
@@ -190,22 +189,18 @@ describe('public exhibition years', () => {
 				{
 					id: 1,
 					kind: 'VIDEO',
-					isPublic: false,
-					storageKey: 'first.mov',
-					playbackStorageKey: 'first.mp4',
-					mimeType: 'video/quicktime',
-					playbackMimeType: 'video/mp4',
-					playbackStatus: 'READY',
+					representations: [
+						{ role: 'ORIGINAL', state: 'READY', mimeType: 'video/quicktime' },
+						{ role: 'PLAYBACK', state: 'READY', mimeType: 'video/mp4' },
+					],
 				},
 				{
 					id: 2,
 					kind: 'VIDEO',
-					isPublic: false,
-					storageKey: 'second.mp4',
-					playbackStorageKey: null,
-					mimeType: 'video/mp4',
-					playbackMimeType: '',
-					playbackStatus: 'READY',
+					representations: [
+						{ role: 'ORIGINAL', state: 'READY', mimeType: 'video/mp4' },
+						{ role: 'PLAYBACK', state: 'READY', mimeType: 'video/mp4' },
+					],
 				},
 			],
 			poster: null,
@@ -213,15 +208,19 @@ describe('public exhibition years', () => {
 
 		const result = await getProjectDetail(dependencies, '10');
 
-		expect(result.video).toBe(result.videos[0]);
+		expect(result.video).toEqual(result.videos[0]);
 		expect(result.videos).toEqual([
 			{
-				url: 'https://api.example.com/api/assets/protected/first.mp4',
+				url: 'https://api.example.com/api/assets/1/download?variant=playback',
 				mimeType: 'video/mp4',
+				originalDownloadUrl: 'https://api.example.com/api/assets/1/download?variant=original',
+				playbackStatus: 'READY',
 			},
 			{
-				url: 'https://api.example.com/api/assets/protected/second.mp4',
+				url: 'https://api.example.com/api/assets/2/download?variant=playback',
 				mimeType: 'video/mp4',
+				originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',
+				playbackStatus: 'READY',
 			},
 		]);
 	});
@@ -241,23 +240,18 @@ describe('public exhibition years', () => {
 				{
 					id: 1,
 					kind: 'IMAGE',
-					isPublic: false,
-					storageKey: 'private-image.webp',
-					mimeType: 'image/webp',
+					representations: [{ role: 'ORIGINAL', state: 'READY', bucket: 'private', objectKey: 'private-image.webp', mimeType: 'image/webp' }],
 				},
 				{
 					id: 2,
 					kind: 'POSTER',
-					isPublic: true,
-					storageKey: 'public-image.webp',
-					mimeType: 'image/webp',
+					representations: [{ role: 'ORIGINAL', state: 'READY', bucket: 'pcu-public', objectKey: 'images/2/original/g1.webp', mimeType: 'image/webp' }],
 				},
 			],
 			poster: {
 				kind: 'IMAGE',
 				status: 'READY',
-				isPublic: false,
-				storageKey: 'private-poster.webp',
+				representations: [{ role: 'ORIGINAL', state: 'READY', bucket: 'private', objectKey: 'private-poster.webp', mimeType: 'image/webp' }],
 			},
 		});
 
@@ -268,7 +262,7 @@ describe('public exhibition years', () => {
 			id: 2,
 			kind: 'POSTER',
 			image: {
-				original: { url: 'https://api.example.com/api/public/images/public-image.webp' },
+				original: { url: 'https://assets.example.com/images/2/original/g1.webp' },
 				renditions: [],
 			},
 		}]);

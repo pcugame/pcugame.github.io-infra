@@ -15,7 +15,7 @@ interface Props {
 }
 
 type MediaItem =
-	| { type: 'video'; url: string; mimeType: string; label: string }
+	| { type: 'video'; url?: string; mimeType: string; originalDownloadUrl?: string; playbackStatus?: 'PENDING' | 'READY' | 'FAILED'; playbackError?: string; label: string }
 	| { type: 'poster'; image: ResponsiveImageData; label: string }
 	| { type: 'image'; id: number; image: ResponsiveImageData; label: string };
 
@@ -76,6 +76,9 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 				type: 'video',
 				url: video.url,
 				mimeType: video.mimeType,
+				originalDownloadUrl: video.originalDownloadUrl,
+				playbackStatus: video.playbackStatus,
+				playbackError: video.playbackError,
 				label: `동영상${i + 1}`,
 			});
 		});
@@ -138,7 +141,13 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								<div className="modal-visual__frame">
 									{current.type === 'video' ? (
 										<ProjectVideo
-											video={{ url: current.url, mimeType: current.mimeType }}
+										video={{
+											url: current.url,
+											mimeType: current.mimeType,
+											originalDownloadUrl: current.originalDownloadUrl,
+											playbackStatus: current.playbackStatus,
+											playbackError: current.playbackError,
+										}}
 											poster={project.poster}
 											title={project.title}
 										/>

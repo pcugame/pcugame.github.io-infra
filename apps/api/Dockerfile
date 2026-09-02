@@ -48,11 +48,13 @@ RUN npm run build --workspace=@pcu/contracts && \
 
 # ── Stage 3: Production image ──
 FROM node:22-bookworm-slim AS runner
+ARG RELEASE_SOURCE_SHA
+LABEL org.opencontainers.image.revision="${RELEASE_SOURCE_SHA}"
 WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg wget openssl && \
+    apt-get install -y --no-install-recommends ffmpeg poppler-utils wget openssl && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --system --gid 1001 appgroup && \
     useradd --system --uid 1001 --gid appgroup --no-create-home --shell /usr/sbin/nologin appuser
@@ -61,13 +63,13 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/packages/contracts ./packages/contracts
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/apps/api/dist-release ./apps/api/dist-release
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
 COPY --from=builder /app/apps/api/prisma.config.ts ./apps/api/prisma.config.ts
 COPY --from=builder /app/apps/api/package.json ./apps/api/
 COPY --from=builder /app/package.json ./
 
-RUN npm install -g tsx && \
-    mkdir -p /app/storage/protected /app/storage/public && \
+RUN mkdir -p /app/storage/protected /app/storage/public && \
     chown -R appuser:appgroup /app/storage
 
 USER appuser
@@ -79,4 +81,6 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:4000/api/health || exit 1
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]
+# Schema changes are an explicit release operation. API/worker processes never
+# apply pending migrations as a startup side effect.
+CMD ["node", "dist/server.js"]

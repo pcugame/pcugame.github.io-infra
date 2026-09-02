@@ -65,6 +65,10 @@ export type {
 	SortOrder,
 	SubmitProjectPayload,
 	SubmitProjectResponse,
+	ProjectSubmissionManifestItem,
+	ProjectSubmissionItemStatus,
+	ProjectSubmissionStatusResponse,
+	ProjectSubmissionAuditResponse,
 	SwapProjectMembersRequest,
 	UpdateMemberRequest,
 	UpdateProjectRequest,
@@ -83,7 +87,9 @@ export type {
 	ExportPhase,
 	ExportProgress,
 	ExportProgressFile,
+	ExportJobState,
 	ExportResult,
+	ExportStartResponse,
 	ExportStatusResponse,
 	ImportExecuteResult,
 	ImportPreviewExhibition,
@@ -91,13 +97,21 @@ export type {
 } from './admin-import-export.js';
 
 export type {
-	GameUploadCreateSessionRequest,
-	GameUploadChunkResponse,
-	GameUploadCompleteResponse,
-	GameUploadSession,
-	GameUploadSessionListResponse,
-	GameUploadStatus,
+	DirectGameUploadCompletionResponse,
+	DirectGameUploadCompleteRequest,
+	DirectGameUploadCreateSessionRequest,
+	DirectAssetUploadStatus,
+	DirectAssetUploadKind,
+	DirectAssetUploadOwner,
+	DirectGameUploadPart,
+	DirectGameUploadPartUrlsRequest,
+	DirectGameUploadPartUrlsResponse,
+	DirectUploadSourceIdentity,
 	UploadKind,
+} from './game-upload.js';
+export {
+	DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE,
+	DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX,
 } from './game-upload.js';
 
 export * from './schemas.js';

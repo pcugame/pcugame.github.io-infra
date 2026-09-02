@@ -48,21 +48,17 @@ export function webglContentMetadata(pathname: string): WebglContentMetadata {
 	}
 
 	const contentType = MIME_TYPES[extname(decodedName)] ?? 'application/octet-stream';
-	const isHtml = contentType.startsWith('text/html');
 	return {
 		contentType,
 		contentEncoding,
-		// The public URL is stable across deployments, so resources must revalidate.
-		cacheControl: isHtml
-			? 'no-cache, no-store, must-revalidate'
-			: 'public, max-age=300, must-revalidate',
+		// Deployment identity is embedded in every URL, including index.html.
+		cacheControl: 'public, max-age=31536000, immutable',
 	};
 }
 
-export function webglContentSecurityPolicy(frontendUrl: string, apiUrl: string): string {
+export function webglContentSecurityPolicy(frontendUrl: string, publicAssetBaseUrl: string): string {
 	const frontendOrigin = new URL(frontendUrl).origin;
-	const apiOrigin = new URL(apiUrl).origin;
-	const webglAssetSource = `${apiOrigin}/api/public/webgl/`;
+	const webglAssetSource = new URL(publicAssetBaseUrl).origin;
 	return [
 		"default-src 'none'",
 		`script-src ${webglAssetSource} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,

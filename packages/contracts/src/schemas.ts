@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { MAX_NEW_PROJECT_TITLE_BYTES, utf8ByteLength } from './filename-policy.js';
 
-export const ProjectStatusSchema = z.enum(['PUBLISHED', 'ARCHIVED']);
-export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO']);
+export const ProjectStatusSchema = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
+const MutableProjectStatusSchema = z.enum(['PUBLISHED', 'ARCHIVED']);
+export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO', 'WEBGL']);
 export const UserRoleSchema = z.enum(['USER', 'OPERATOR', 'ADMIN']);
-export const UploadKindSchema = z.enum(['GAME', 'WEBGL']);
 export const AdminProjectListSortSchema = z.enum(['createdAt', 'title', 'year', 'status']);
 export const SortOrderSchema = z.enum(['asc', 'desc']);
 export const DevAuthErrorScenarioSchema = z.enum([
@@ -37,6 +37,12 @@ export const SubmitProjectPayloadBaseSchema = z.object({
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
 	members: z.array(ProjectMemberInputSchema).min(1),
+	manifest: z.array(z.object({
+		kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER']),
+		slot: z.string().regex(/^(game|webgl|poster|video:[0-9]+|image:[0-9]+)$/),
+		clientToken: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
+		required: z.literal(true).default(true),
+	}).strict()).max(250).default([]),
 });
 
 export const UpdateProjectBaseSchema = z.object({
@@ -44,7 +50,7 @@ export const UpdateProjectBaseSchema = z.object({
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
 	isIncomplete: z.boolean().optional(),
-	status: ProjectStatusSchema.optional(),
+	status: MutableProjectStatusSchema.optional(),
 	sortOrder: SafeNonNegativeIntegerSchema.optional(),
 });
 
@@ -60,7 +66,7 @@ export const AdminProjectListQueryBaseSchema = z.object({
 
 export const BulkUpdateProjectStatusSchema = z.object({
 	ids: z.array(SafePositiveIntegerSchema).min(1).max(500),
-	status: ProjectStatusSchema,
+	status: MutableProjectStatusSchema,
 });
 
 export const BulkDeleteProjectsSchema = z.object({
@@ -113,12 +119,6 @@ export const DevAuthLoginErrorRequestSchema = z.object({
 	scenario: DevAuthErrorScenarioSchema,
 });
 
-export const GameUploadCreateSessionSchema = z.object({
-	originalName: z.string().min(1),
-	totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-	uploadKind: UploadKindSchema.optional(),
-});
-
 export type ProjectMemberInputSchemaInput = z.infer<typeof ProjectMemberInputSchema>;
 export type SubmitProjectPayloadBaseSchemaInput = z.infer<typeof SubmitProjectPayloadBaseSchema>;
 export type UpdateProjectBaseSchemaInput = z.infer<typeof UpdateProjectBaseSchema>;
@@ -134,4 +134,3 @@ export type SwapProjectMembersSchemaInput = z.infer<typeof SwapProjectMembersSch
 export type GoogleAuthRequestSchemaInput = z.infer<typeof GoogleAuthRequestSchema>;
 export type DevAuthLoginRequestSchemaInput = z.infer<typeof DevAuthLoginRequestSchema>;
 export type DevAuthLoginErrorRequestSchemaInput = z.infer<typeof DevAuthLoginErrorRequestSchema>;
-export type GameUploadCreateSessionSchemaInput = z.infer<typeof GameUploadCreateSessionSchema>;

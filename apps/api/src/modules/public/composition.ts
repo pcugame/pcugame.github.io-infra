@@ -1,34 +1,27 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { AppLogger, ObjectStorage } from '../../application/ports.js';
+import { normalizePublicAssetOrigin } from '../../shared/public-origin.js';
 import { createPublicController } from './controller.js';
-import { createPublicImageService, type PublicImageRepository } from './image.service.js';
 import { createPublicService, type PublicServiceDependencies } from './service.js';
-import {
-	createPublicWebglService,
-	type PublicWebglRepository,
-} from './webgl.service.js';
 
-export type PublicProductionRepository = PublicServiceDependencies['repository']
-	& PublicImageRepository
-	& PublicWebglRepository;
+export type PublicProductionRepository = PublicServiceDependencies['repository'];
 
 export interface PublicProductionGraph {
 	repository: PublicProductionRepository;
 	service: ReturnType<typeof createPublicService>;
-	imageService: ReturnType<typeof createPublicImageService>;
-	webglService: ReturnType<typeof createPublicWebglService>;
 	controller: FastifyPluginAsync;
 }
 
 export interface PublicProductionDependencies {
 	config: {
+		NODE_ENV: string;
 		API_PUBLIC_URL: string;
 		WEB_PUBLIC_URL: string;
+		PUBLIC_ASSET_ORIGIN?: string;
 		S3_BUCKET_PUBLIC: string;
 	};
 	repository: PublicProductionRepository;
-	storage: ObjectStorage;
-	logger: Pick<AppLogger, 'error'>;
+	/** Accepted by the root composition for uniform logging ownership; canonical public reads emit no fallback logs. */
+	logger: unknown;
 }
 
 /** Compose public reads exclusively from resources owned by one BackendContext. */
@@ -36,30 +29,22 @@ export function createPublicProductionGraph(
 	deps: PublicProductionDependencies,
 ): PublicProductionGraph {
 	const repository = deps.repository;
+	const publicAssetOrigin = deps.config.PUBLIC_ASSET_ORIGIN ?? deps.config.API_PUBLIC_URL;
+	if (deps.config.NODE_ENV === 'production' && (
+		!deps.config.PUBLIC_ASSET_ORIGIN
+		|| normalizePublicAssetOrigin(publicAssetOrigin) === normalizePublicAssetOrigin(deps.config.API_PUBLIC_URL)
+	)) {
+		throw new Error('Production public asset delivery requires a dedicated PUBLIC_ASSET_ORIGIN');
+	}
 	const service = createPublicService({
 		apiPublicUrl: deps.config.API_PUBLIC_URL,
-		repository,
-	});
-	const imageService = createPublicImageService({
+		publicAssetOrigin,
 		publicBucket: deps.config.S3_BUCKET_PUBLIC,
 		repository,
-		storage: deps.storage,
-		logger: deps.logger,
-	});
-	const webglService = createPublicWebglService({
-		config: {
-			apiPublicUrl: deps.config.API_PUBLIC_URL,
-			webPublicUrl: deps.config.WEB_PUBLIC_URL,
-			publicBucket: deps.config.S3_BUCKET_PUBLIC,
-		},
-		repository,
-		storage: deps.storage,
 	});
 	return {
 		repository,
 		service,
-		imageService,
-		webglService,
-		controller: createPublicController({ service, imageService, webglService }),
+		controller: createPublicController({ service }),
 	};
 }

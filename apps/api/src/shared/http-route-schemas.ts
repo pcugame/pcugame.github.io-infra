@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifySchema } from 'fastify';
 import { z } from 'zod';
+import { DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX } from '@pcu/contracts';
 import {
 	AdminExhibitionItemSchema,
 	AdminExhibitionListResponseSchema,
@@ -11,23 +12,19 @@ import {
 	BulkStatusResponseSchema,
 	CreateExhibitionResponseSchema,
 	CreatedMemberResponseSchema,
-	ExportResultSchema,
+	ExportStartResponseSchema,
 	ExportStatusResponseSchema,
-	GameUploadChunkResponseSchema,
-	GameUploadCompleteResponseSchema,
-	GameUploadSessionListResponseSchema,
-	GameUploadSessionSchema,
-	GameUploadStatusSchema,
 	GoogleAuthResponseSchema,
 	ImportExecuteResultSchema,
 	ImportPreviewResultSchema,
 	LogoutResponseSchema,
 	MeResponseSchema,
-	ProjectAssetUploadResponseSchema,
 	PublicExhibitionProjectsResponseSchema,
 	PublicProjectDetailResponseSchema,
 	PublicYearListResponseSchema,
 	PublicYearProjectsResponseSchema,
+	ProjectSubmissionStatusResponseSchema,
+	ProjectSubmissionAuditResponseSchema,
 	SetProjectPosterResponseSchema,
 	SiteSettingsDataSchema,
 	SubmitProjectResponseSchema,
@@ -41,17 +38,17 @@ import {
 	CreateExhibitionBody,
 	DevAuthLoginBody,
 	DevAuthLoginErrorBody,
-	GameUploadCreateSessionBody,
 	GoogleLoginBody,
 	SetPosterBody,
 	SwapMembersBody,
 	UpdateExhibitionBody,
 	UpdateMemberBody,
 	UpdateProjectBody,
+	AssetDownloadQuery,
 } from './validation.js';
 
 type RouteMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
-export type RouteBodyBoundary = 'none' | 'json' | 'multipart' | 'octet-stream' | 'cors-plugin';
+export type RouteBodyBoundary = 'none' | 'json' | 'multipart' | 'cors-plugin';
 export type RouteResponseBoundary =
 	| 'json'
 	| 'no-content'
@@ -69,9 +66,8 @@ export interface RouteRuntimeContract {
 	params: z.ZodType;
 	querystring: z.ZodType;
 	/**
-	 * Multipart is intentionally absent: @fastify/multipart plus the feature
-	 * collector own the streaming payload. Octet-stream has an actual stream
-	 * schema because its scoped content-type parser assigns request.body.
+	 * Multipart is intentionally absent: metadata submission and import parsing
+	 * own scalar fields; binary assets use direct Garage multipart sessions.
 	 */
 	body?: z.ZodType;
 	headers?: z.ZodType;
@@ -84,14 +80,10 @@ const EmptyObjectSchema = z.object({}).strict();
 const NoBodySchema = z.null().optional();
 const NoContentSchema = z.undefined();
 const RedirectBodySchema = z.never();
-const StreamBodySchema = z.never();
 const CheckSchema = z.enum(['ok', 'fail']);
 
 const PositiveIntegerParamSchema = z.string()
 	.regex(/^[1-9]\d*$/)
-	.refine((value) => Number.isSafeInteger(Number(value)), 'Integer is outside the safe range');
-const NonNegativeIntegerParamSchema = z.string()
-	.regex(/^(0|[1-9]\d*)$/)
 	.refine((value) => Number.isSafeInteger(Number(value)), 'Integer is outside the safe range');
 const YearParamSchema = z.string()
 	.regex(/^\d{4}$/)
@@ -103,54 +95,45 @@ const SessionIdParamSchema = z.string().min(1).max(200).refine(
 	(value) => !value.includes('\0'),
 	'Session ID contains a NUL byte',
 );
-const StorageKeyParamSchema = z.string().min(1).max(1024).refine(
-	(value) => !value.includes('\0'),
-	'Storage key contains a NUL byte',
-);
 const SlugOrIdParamSchema = z.string().min(1).max(200).refine(
 	(value) => !value.includes('\0'),
 	'Project identifier contains a NUL byte',
 );
-const WebglPathParamSchema = z.string().min(1).max(2048).refine(
-	(value) => !value.includes('\0'),
-	'WebGL path contains a NUL byte',
-);
 
 const IdParamsSchema = z.object({ id: PositiveIntegerParamSchema }).strict();
-const ProjectIdParamsSchema = z.object({ projectId: PositiveIntegerParamSchema }).strict();
 const AssetIdParamsSchema = z.object({ assetId: PositiveIntegerParamSchema }).strict();
 const SessionParamsSchema = z.object({ sessionId: SessionIdParamSchema }).strict();
 const MemberParamsSchema = z.object({
 	id: PositiveIntegerParamSchema,
 	memberId: PositiveIntegerParamSchema,
 }).strict();
-const ChunkParamsSchema = z.object({
-	sessionId: SessionIdParamSchema,
-	index: NonNegativeIntegerParamSchema,
-}).strict();
-const WebglWildcardParamsSchema = z.object({
-	projectId: PositiveIntegerParamSchema,
-	'*': WebglPathParamSchema,
-}).strict();
 
 const PublicProjectQuerySchema = z.object({
 	year: YearParamSchema.optional(),
 }).strict();
-const WebglHeadersSchema = z.object({
-	range: z.string().optional(),
-	'if-none-match': z.string().optional(),
-	'if-modified-since': z.string().optional(),
-	'if-range': z.string().optional(),
-});
 const IdempotencyHeadersSchema = z.object({
 	'idempotency-key': z.string().min(1).max(200),
 }).passthrough();
-const OctetStreamSchema = z.custom<NodeJS.ReadableStream>((value) => (
-	typeof value === 'object'
-	&& value !== null
-	&& 'pipe' in value
-	&& typeof value.pipe === 'function'
-));
+const DirectSourceIdentityBody = z.object({
+	originalName: z.string().min(1).max(255), totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
+	sourceIdentityBlockSizeBytes: z.literal(1_048_576), sourceIdentityBlockDigests: z.array(z.string().regex(/^[a-f0-9]{64}$/)),
+	declaredMimeType: z.string().max(255).optional(),
+	submissionItem: z.object({
+		id: z.string().uuid(),
+		clientToken: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
+	}).strict().optional(),
+}).strict();
+const DirectPartUrlsBody = z.object({ generation: z.number().int().positive(), parts: z.array(z.object({ partNumber: z.number().int().positive(), checksumSha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/) }).strict()).min(1).max(DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX) }).strict();
+const DirectCompleteBody = z.object({ generation: z.number().int().positive(), parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string().min(1), sizeBytes: z.number().int().positive() }).strict()) }).strict();
+const DirectOwnerSchema = z.discriminatedUnion('type', [
+	z.object({ type: z.literal('PROJECT'), id: z.number().int().positive() }),
+	z.object({ type: z.literal('EXHIBITION'), id: z.number().int().positive() }),
+]);
+const DirectSessionResponseSchema = z.object({ sessionId: z.string(), owner: DirectOwnerSchema, generation: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string(), sourceIdentityBlockSizeBytes: z.literal(1_048_576) });
+const DirectStatusResponseSchema = z.object({ sessionId: z.string(), projectId: z.number().int().positive().optional(), exhibitionId: z.number().int().positive().optional(), owner: DirectOwnerSchema, kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER']), state: z.string(), generation: z.number().int().positive(), originalName: z.string(), totalBytes: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/), parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string(), sizeBytes: z.number().int().positive() })) });
+const DirectPartUrlsResponseSchema = z.object({ generation: z.number().int().positive(), expiresAt: z.string(), parts: z.array(z.object({ partNumber: z.number().int().positive(), url: z.string().url(), requiredHeaders: z.record(z.string(), z.string()) })) });
+const DirectCompletionResponseSchema = z.object({ status: z.enum(['VERIFYING', 'READY']), sessionId: z.string(), generation: z.number().int().positive(), sizeBytes: z.number().int().positive() });
 
 const ExportBodySchema = z.union([
 	z.object({
@@ -191,27 +174,7 @@ const NoContentResponse = {
 };
 const RedirectResponse = {
 	302: RedirectBodySchema,
-	default: ApiErrorResponseSchema,
-};
-const WebglStreamResponse = {
-	200: StreamBodySchema,
-	206: StreamBodySchema,
-	304: NoContentSchema,
-	416: NoContentSchema,
-	default: ApiErrorResponseSchema,
-};
-const WebglHeadResponse = {
-	200: NoContentSchema,
-	304: NoContentSchema,
-	default: ApiErrorResponseSchema,
-};
-const PublicImageResponse = {
-	200: StreamBodySchema,
-	304: NoContentSchema,
-	default: ApiErrorResponseSchema,
-};
-const WebglPreflightResponse = {
-	204: NoContentSchema,
+	307: RedirectBodySchema,
 	default: ApiErrorResponseSchema,
 };
 const ErrorsOnlyResponse = {
@@ -343,85 +306,6 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		body: DevAuthLoginErrorBody,
 		response: ErrorsOnlyResponse,
 	}),
-	...[
-		'/api/public/webgl/:projectId',
-		'/api/public/webgl/:projectId/',
-	].map((url) => contract({
-		method: 'OPTIONS' as const,
-		url,
-		family: 'public-webgl',
-		bodyBoundary: 'none' as const,
-		responseBoundary: 'no-content' as const,
-		params: ProjectIdParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		response: WebglPreflightResponse,
-	})),
-	contract({
-		method: 'OPTIONS',
-		url: '/api/public/webgl/:projectId/*',
-		family: 'public-webgl',
-		bodyBoundary: 'none',
-		responseBoundary: 'no-content',
-		params: WebglWildcardParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		response: WebglPreflightResponse,
-	}),
-	...[
-		'/api/public/webgl/:projectId',
-		'/api/public/webgl/:projectId/',
-	].map((url) => contract({
-		method: 'GET' as const,
-		url,
-		family: 'public-webgl',
-		bodyBoundary: 'none' as const,
-		responseBoundary: 'stream' as const,
-		params: ProjectIdParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		headers: WebglHeadersSchema,
-		response: WebglStreamResponse,
-	})),
-	contract({
-		method: 'GET',
-		url: '/api/public/webgl/:projectId/*',
-		family: 'public-webgl',
-		bodyBoundary: 'none',
-		responseBoundary: 'stream',
-		params: WebglWildcardParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		headers: WebglHeadersSchema,
-		response: WebglStreamResponse,
-	}),
-	...[
-		'/api/public/webgl/:projectId',
-		'/api/public/webgl/:projectId/',
-	].map((url) => contract({
-		method: 'HEAD' as const,
-		url,
-		family: 'public-webgl',
-		bodyBoundary: 'none' as const,
-		responseBoundary: 'no-content' as const,
-		params: ProjectIdParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		headers: WebglHeadersSchema,
-		response: WebglHeadResponse,
-	})),
-	contract({
-		method: 'HEAD',
-		url: '/api/public/webgl/:projectId/*',
-		family: 'public-webgl',
-		bodyBoundary: 'none',
-		responseBoundary: 'no-content',
-		params: WebglWildcardParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		headers: WebglHeadersSchema,
-		response: WebglHeadResponse,
-	}),
 	contract({
 		method: 'GET',
 		url: '/api/public/years',
@@ -432,36 +316,6 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		querystring: EmptyObjectSchema,
 		body: NoBodySchema,
 		response: jsonResponse(PublicYearListResponseSchema),
-	}),
-	contract({
-		method: 'GET',
-		url: '/api/public/images/:storageKey',
-		family: 'public',
-		bodyBoundary: 'none',
-		responseBoundary: 'stream',
-		params: z.object({ storageKey: StorageKeyParamSchema }).strict(),
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		headers: z.object({
-			'if-none-match': z.string().optional(),
-			'if-modified-since': z.string().optional(),
-		}).passthrough(),
-		response: PublicImageResponse,
-	}),
-	contract({
-		method: 'HEAD',
-		url: '/api/public/images/:storageKey',
-		family: 'public',
-		bodyBoundary: 'none',
-		responseBoundary: 'stream',
-		params: z.object({ storageKey: StorageKeyParamSchema }).strict(),
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		headers: z.object({
-			'if-none-match': z.string().optional(),
-			'if-modified-since': z.string().optional(),
-		}).passthrough(),
-		response: PublicImageResponse,
 	}),
 	contract({
 		method: 'GET',
@@ -498,12 +352,12 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 	}),
 	contract({
 		method: 'GET',
-		url: '/api/assets/protected/:storageKey',
+		url: '/api/assets/:assetId/download',
 		family: 'assets',
 		bodyBoundary: 'none',
 		responseBoundary: 'redirect',
-		params: z.object({ storageKey: StorageKeyParamSchema }).strict(),
-		querystring: EmptyObjectSchema,
+		params: AssetIdParamsSchema,
+		querystring: AssetDownloadQuery,
 		body: NoBodySchema,
 		response: RedirectResponse,
 	}),
@@ -529,6 +383,9 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		headers: IdempotencyHeadersSchema,
 		response: jsonResponse(SubmitProjectResponseSchema, 201),
 	}),
+	contract({ method: 'GET', url: '/api/me/projects/:id/submission', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
+	contract({ method: 'POST', url: '/api/me/projects/:id/submission/finalize', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
+	contract({ method: 'DELETE', url: '/api/me/projects/:id/submission', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
 	contract({
 		method: 'GET',
 		url: '/api/admin/exhibitions',
@@ -571,16 +428,6 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		params: IdParamsSchema,
 		querystring: EmptyObjectSchema,
 		body: UpdateExhibitionBody,
-		response: jsonResponse(AdminExhibitionItemSchema),
-	}),
-	contract({
-		method: 'POST',
-		url: '/api/admin/exhibitions/:id/poster',
-		family: 'admin-exhibitions',
-		bodyBoundary: 'multipart',
-		responseBoundary: 'json',
-		params: IdParamsSchema,
-		querystring: EmptyObjectSchema,
 		response: jsonResponse(AdminExhibitionItemSchema),
 	}),
 	contract({
@@ -671,17 +518,10 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		headers: IdempotencyHeadersSchema,
 		response: jsonResponse(SubmitProjectResponseSchema, 201),
 	}),
-	contract({
-		method: 'POST',
-		url: '/api/admin/projects/:id/assets',
-		family: 'admin-projects',
-		bodyBoundary: 'multipart',
-		responseBoundary: 'json',
-		params: IdParamsSchema,
-		querystring: EmptyObjectSchema,
-		headers: IdempotencyHeadersSchema,
-		response: jsonResponse(ProjectAssetUploadResponseSchema, 201),
-	}),
+	contract({ method: 'GET', url: '/api/admin/projects/:id/submission', family: 'admin-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
+	contract({ method: 'GET', url: '/api/admin/project-submissions/audit', family: 'admin-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionAuditResponseSchema) }),
+	contract({ method: 'POST', url: '/api/admin/projects/:id/submission/finalize', family: 'admin-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
+	contract({ method: 'DELETE', url: '/api/admin/projects/:id/submission', family: 'admin-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
 	contract({
 		method: 'PATCH',
 		url: '/api/admin/projects/:id/poster',
@@ -749,70 +589,54 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		response: NoContentResponse,
 	}),
 	contract({
-		method: 'POST',
-		url: '/api/admin/projects/:id/game-upload-sessions',
-		family: 'game-upload',
-		bodyBoundary: 'json',
-		responseBoundary: 'json',
-		params: IdParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: GameUploadCreateSessionBody,
-		response: jsonResponse(GameUploadSessionSchema, 201),
+		method: 'POST', url: '/api/admin/projects/:id/direct-game-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
 	}),
 	contract({
-		method: 'PUT',
-		url: '/api/admin/game-upload-sessions/:sessionId/chunks/:index',
-		family: 'game-upload',
-		bodyBoundary: 'octet-stream',
-		responseBoundary: 'json',
-		params: ChunkParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: OctetStreamSchema,
-		response: jsonResponse(GameUploadChunkResponseSchema),
+		method: 'POST', url: '/api/admin/projects/:id/direct-webgl-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
 	}),
 	contract({
-		method: 'GET',
-		url: '/api/admin/game-upload-sessions/:sessionId',
-		family: 'game-upload',
-		bodyBoundary: 'none',
-		responseBoundary: 'json',
-		params: SessionParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		response: jsonResponse(GameUploadStatusSchema),
+		method: 'POST', url: '/api/admin/projects/:id/direct-video-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
 	}),
 	contract({
-		method: 'POST',
-		url: '/api/admin/game-upload-sessions/:sessionId/complete',
-		family: 'game-upload',
-		bodyBoundary: 'none',
-		responseBoundary: 'json',
-		params: SessionParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		response: jsonResponse(GameUploadCompleteResponseSchema),
+		method: 'POST', url: '/api/admin/projects/:id/direct-image-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
 	}),
 	contract({
-		method: 'DELETE',
-		url: '/api/admin/game-upload-sessions/:sessionId',
-		family: 'game-upload',
-		bodyBoundary: 'none',
-		responseBoundary: 'no-content',
-		params: SessionParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		response: NoContentResponse,
+		method: 'POST', url: '/api/admin/projects/:id/direct-poster-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
 	}),
 	contract({
-		method: 'GET',
-		url: '/api/admin/projects/:id/game-upload-sessions',
-		family: 'game-upload',
-		bodyBoundary: 'none',
-		responseBoundary: 'json',
-		params: IdParamsSchema,
-		querystring: EmptyObjectSchema,
-		body: NoBodySchema,
-		response: jsonResponse(GameUploadSessionListResponseSchema),
+		method: 'POST', url: '/api/admin/exhibitions/:id/direct-poster-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
+	}),
+	contract({
+		method: 'POST', url: '/api/admin/direct-asset-upload-sessions/:sessionId/part-urls', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: SessionParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectPartUrlsBody, response: jsonResponse(DirectPartUrlsResponseSchema),
+	}),
+	contract({
+		method: 'GET', url: '/api/admin/direct-asset-upload-sessions/:sessionId', family: 'direct-asset-upload',
+		bodyBoundary: 'none', responseBoundary: 'json', params: SessionParamsSchema, querystring: EmptyObjectSchema,
+		body: NoBodySchema, response: jsonResponse(DirectStatusResponseSchema),
+	}),
+	contract({
+		method: 'POST', url: '/api/admin/direct-asset-upload-sessions/:sessionId/complete', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: SessionParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectCompleteBody, response: jsonResponse(DirectCompletionResponseSchema),
+	}),
+	contract({
+		method: 'DELETE', url: '/api/admin/direct-asset-upload-sessions/:sessionId', family: 'direct-asset-upload',
+		bodyBoundary: 'none', responseBoundary: 'no-content', params: SessionParamsSchema, querystring: EmptyObjectSchema,
+		body: NoBodySchema, response: NoContentResponse,
 	}),
 	contract({
 		method: 'GET',
@@ -887,7 +711,7 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		params: EmptyObjectSchema,
 		querystring: EmptyObjectSchema,
 		body: ExportBodySchema,
-		response: jsonResponse(ExportResultSchema),
+		response: jsonResponse(ExportStartResponseSchema, 202),
 	}),
 	contract({
 		method: 'GET',
@@ -954,7 +778,6 @@ export function registerRouteSchemas(app: FastifyInstance): void {
 			runtimeContract.body !== undefined
 			&& (
 				runtimeContract.bodyBoundary === 'json'
-				|| runtimeContract.bodyBoundary === 'octet-stream'
 				|| (
 					runtimeContract.bodyBoundary === 'none'
 					&& methodSupportsBody

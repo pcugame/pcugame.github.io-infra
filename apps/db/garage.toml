@@ -5,6 +5,10 @@ db_engine = "sqlite"
 
 replication_factor = 1
 
+# These container listeners are isolated by Compose's internal
+# `garage_private` network. Only the S3 API receives a loopback host mapping;
+# the website and admin listeners are reachable solely through their dedicated
+# Nginx origin or NAS-local management tooling.
 rpc_bind_addr = "[::]:3901"
 rpc_public_addr = "garage:3901"
 rpc_secret = "0000000000000000000000000000000000000000000000000000000000000000"

@@ -1,4 +1,16 @@
 import { z } from 'zod';
+import { normalizePublicAssetOrigin } from '../shared/public-origin.js';
+
+const exactHttpOrigin = z.string().url().refine((value) => {
+  const url = new URL(value);
+  return (url.protocol === 'http:' || url.protocol === 'https:')
+    && url.username === ''
+    && url.password === ''
+    && url.pathname === '/'
+    && url.search === ''
+    && url.hash === ''
+    && !value.endsWith('/');
+}, 'must be an exact HTTP(S) origin without credentials, path, query, fragment, or trailing slash');
 
 const envSchema = z
   .object({
@@ -38,6 +50,7 @@ const envSchema = z
       .refine((arr) => arr.length > 0, 'CORS_ALLOWED_ORIGINS must contain at least one valid origin'),
     API_PUBLIC_URL: z.string().url(),
     WEB_PUBLIC_URL: z.string().url(),
+    PUBLIC_ASSET_ORIGIN: exactHttpOrigin.optional(),
     // Legacy local storage paths — only used by migration script
     UPLOAD_ROOT_PROTECTED: z.string().default('/app/storage/protected').optional(),
     UPLOAD_ROOT_PUBLIC: z.string().default('/app/storage/public').optional(),
@@ -82,7 +95,13 @@ const envSchema = z
     UPLOAD_SESSION_TTL_MINUTES: z.coerce.number().int().positive().default(1440), // 24 hours
 
     // ── S3-compatible object storage (Garage) ─────────────
-    S3_ENDPOINT: z.string().url(),
+    S3_ENDPOINT: exactHttpOrigin,
+    // Browser-visible UploadPart origin. Keep this separate from the API's
+    // internal Garage endpoint; production must use the NAS upload proxy.
+    S3_PUBLIC_SIGNING_ENDPOINT: exactHttpOrigin.optional(),
+    // Browser-visible protected-object delivery origin. This is deliberately
+    // distinct from both the internal Garage endpoint and UploadPart proxy.
+    S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: exactHttpOrigin.optional(),
     S3_REGION: z.string().default('garage'),
     S3_ACCESS_KEY_ID: z.string().min(1),
     S3_SECRET_ACCESS_KEY: z.string().min(1),
@@ -93,14 +112,97 @@ const envSchema = z
       .default('true')
       .transform((v) => v === 'true'),
     S3_PRESIGN_TTL_SEC: z.coerce.number().int().positive().default(60),
+    DIRECT_UPLOAD_PART_SIZE_MB: z.coerce.number().int().min(5).max(5120).default(16),
+    DIRECT_UPLOAD_PART_URL_TTL_SEC: z.coerce.number().int().min(10).max(3600).default(300),
+    // Session-lifetime replacement capability allowance.  Initial issuance is
+    // always permitted for every multipart part; only re-issuance spends this.
+    DIRECT_UPLOAD_PART_URL_REFRESH_MAX: z.coerce.number().int().min(0).max(1024).default(64),
+    DIRECT_UPLOAD_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-direct-upload'),
+    DIRECT_UPLOAD_WORKER_TEMP_MAX_MB: z.coerce.number().int().positive().default(6144),
+    DIRECT_UPLOAD_WORKER_POLL_MS: z.coerce.number().int().min(100).default(5_000),
+    VIDEO_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-video-worker'),
+    VIDEO_WORKER_TEMP_DISK_MB: z.coerce.number().int().positive().default(2048),
+    VIDEO_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),
+    IMAGE_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-image-worker'),
+    IMAGE_WORKER_TEMP_MAX_MB: z.coerce.number().int().positive().default(512),
+    IMAGE_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),
 
-    // ── NAS export ──────────────────────────────────────
-    // Mount path where exported asset files are written (e.g. /mnt/nas)
-    NAS_EXPORT_PATH: z.string().optional(),
+    // ── NAS export worker ───────────────────────────────
+    // Private mount, never an HTTP origin. Required only by worker:export.
+    NAS_EXPORT_ROOT: z.string().optional(),
+    EXPORT_WORKER_FILE_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(2),
+    EXPORT_WORKER_LEASE_MS: z.coerce.number().int().min(10_000).default(120_000),
+    EXPORT_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),
+    EXPORT_WORKER_MAX_OBJECT_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024 * 1024),
+    EXPORT_WORKER_MAX_JOB_BYTES: z.coerce.number().int().positive().default(32 * 1024 * 1024 * 1024),
+    EXPORT_WORKER_RETRY_BASE_MS: z.coerce.number().int().positive().default(5_000),
+  })
+  .superRefine((value, context) => {
+    if (value.NODE_ENV !== 'production') return;
+    if (!value.PUBLIC_ASSET_ORIGIN) {
+      context.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_ASSET_ORIGIN'],
+        message: 'PUBLIC_ASSET_ORIGIN is required in production',
+      });
+    }
+    if (!value.S3_PUBLIC_SIGNING_ENDPOINT) {
+      context.addIssue({ code: 'custom', path: ['S3_PUBLIC_SIGNING_ENDPOINT'], message: 'S3_PUBLIC_SIGNING_ENDPOINT is required in production' });
+    }
+    if (!value.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT) {
+      context.addIssue({
+        code: 'custom',
+        path: ['S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT'],
+        message: 'S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT is required in production',
+      });
+    }
+    const storageOrigins = [
+      ['S3_ENDPOINT', value.S3_ENDPOINT],
+      ['S3_PUBLIC_SIGNING_ENDPOINT', value.S3_PUBLIC_SIGNING_ENDPOINT],
+      ['S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT', value.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT],
+      ['PUBLIC_ASSET_ORIGIN', value.PUBLIC_ASSET_ORIGIN],
+    ] as const;
+    const seenOrigins = new Map<string, string>();
+    for (const [name, endpoint] of storageOrigins) {
+      if (!endpoint) continue;
+      const parsedEndpoint = new URL(endpoint);
+      if (parsedEndpoint.protocol !== 'https:') {
+        context.addIssue({
+          code: 'custom',
+          path: [name],
+          message: `${name} must use HTTPS in production`,
+        });
+      }
+      const origin = parsedEndpoint.origin;
+      const previous = seenOrigins.get(origin);
+      if (previous) {
+        context.addIssue({
+          code: 'custom',
+          path: [name],
+          message: `${name} must use a distinct origin from ${previous} in production`,
+        });
+      } else {
+        seenOrigins.set(origin, name);
+      }
+    }
+    if (value.PUBLIC_ASSET_ORIGIN
+      && normalizePublicAssetOrigin(value.PUBLIC_ASSET_ORIGIN)
+      === normalizePublicAssetOrigin(value.API_PUBLIC_URL)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_ASSET_ORIGIN'],
+        message: 'PUBLIC_ASSET_ORIGIN must be separate from API_PUBLIC_URL in production',
+      });
+    }
   })
 ;
 
 export type Env = z.infer<typeof envSchema>;
+
+/** Parse an explicit environment snapshot (also used by boundary tests). */
+export function parseEnv(input: NodeJS.ProcessEnv): Env {
+  return envSchema.parse(input);
+}
 
 /**
  * Fixed-phrase hint per Zod issue code. Intentionally does NOT consult

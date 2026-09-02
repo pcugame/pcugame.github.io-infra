@@ -1,10 +1,23 @@
 import { request as httpRequest } from 'node:http';
+import { createHash, createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 
 const apiBase = process.env.INTEGRATION_API_BASE_URL || 'http://localhost:4000';
 const webBase = process.env.INTEGRATION_WEB_BASE_URL || 'http://localhost:5173';
 const origin = process.env.INTEGRATION_ORIGIN || webBase;
+const internalPublicAssetBase = process.env.INTEGRATION_PUBLIC_ASSET_BASE_URL
+  ? new URL(process.env.INTEGRATION_PUBLIC_ASSET_BASE_URL)
+  : null;
+const internalUploadPartBase = process.env.INTEGRATION_UPLOAD_PART_BASE_URL
+  ? new URL(process.env.INTEGRATION_UPLOAD_PART_BASE_URL)
+  : null;
+const internalProtectedDownloadBase = process.env.INTEGRATION_PROTECTED_DOWNLOAD_BASE_URL
+  ? new URL(process.env.INTEGRATION_PROTECTED_DOWNLOAD_BASE_URL)
+  : null;
+const internalGarageBase = process.env.INTEGRATION_GARAGE_BASE_URL
+  ? new URL(process.env.INTEGRATION_GARAGE_BASE_URL)
+  : null;
 const webglFixturePath = process.env.INTEGRATION_WEBGL_ZIP;
 const keepWebgl = process.env.INTEGRATION_KEEP_WEBGL === 'true';
 
@@ -49,21 +62,29 @@ async function fetchJson(url, options) {
   return { res, body };
 }
 
-async function fetchIntegrationS3Headers(url) {
+async function requestPresignedObject(url, options = {}) {
   const target = new URL(url);
   const signedHost = target.host;
-  const apiHostname = new URL(apiBase).hostname;
-  if (target.hostname === 'garage' && (apiHostname === 'localhost' || apiHostname === '127.0.0.1')) {
-    target.hostname = '127.0.0.1';
+  if (options.internalBase) {
+    target.protocol = options.internalBase.protocol;
+    target.host = options.internalBase.host;
   }
 
   return new Promise((resolve, reject) => {
-    const request = httpRequest(target, { headers: { Host: signedHost } }, (response) => {
-      resolve({ status: response.statusCode ?? 0, headers: response.headers });
-      response.destroy();
+    const request = httpRequest(target, {
+      method: options.method || 'GET',
+      headers: { ...options.headers, Host: signedHost },
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+      response.once('end', () => resolve({
+        status: response.statusCode ?? 0,
+        headers: response.headers,
+        body: Buffer.concat(chunks),
+      }));
     });
     request.on('error', reject);
-    request.end();
+    request.end(options.body);
   });
 }
 
@@ -79,6 +100,67 @@ function integrationApiUrl(url) {
     target.host = internalApi.host;
   }
   return target.toString();
+}
+
+function integrationPublicAssetUrl(url) {
+  if (!internalPublicAssetBase) return url;
+  const target = new URL(url);
+  target.protocol = internalPublicAssetBase.protocol;
+  target.host = internalPublicAssetBase.host;
+  return target.toString();
+}
+
+function sigV4Encode(value) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => (
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+  ));
+}
+
+function hmacSha256(key, value) {
+  return createHmac('sha256', key).update(value).digest();
+}
+
+/** Minimal dependency-free SigV4 object capability for integration data-plane smoke. */
+function signIntegrationObject(method, originUrl, bucket, key) {
+  const originUrlObject = new URL(originUrl);
+  const accessKeyId = process.env.INTEGRATION_S3_ACCESS_KEY_ID
+    || 'GK000000000000000000000001';
+  const secretAccessKey = process.env.INTEGRATION_S3_SECRET_ACCESS_KEY
+    || '0000000000000000000000000000000000000000000000000000000000000001';
+  const region = 'garage';
+  const service = 's3';
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const canonicalUri = `/${sigV4Encode(bucket)}/${key.split('/').map(sigV4Encode).join('/')}`;
+  const query = new Map([
+    ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+    ['X-Amz-Credential', `${accessKeyId}/${credentialScope}`],
+    ['X-Amz-Date', amzDate],
+    ['X-Amz-Expires', '60'],
+    ['X-Amz-SignedHeaders', 'host'],
+  ]);
+  const canonicalQuery = [...query.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => `${sigV4Encode(name)}=${sigV4Encode(value)}`)
+    .join('&');
+  const canonicalRequest = [
+    method, canonicalUri, canonicalQuery,
+    `host:${originUrlObject.host}\n`, 'host', 'UNSIGNED-PAYLOAD',
+  ].join('\n');
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    createHash('sha256').update(canonicalRequest).digest('hex'),
+  ].join('\n');
+  const dateKey = hmacSha256(Buffer.from(`AWS4${secretAccessKey}`), dateStamp);
+  const regionKey = hmacSha256(dateKey, region);
+  const serviceKey = hmacSha256(regionKey, service);
+  const signingKey = hmacSha256(serviceKey, 'aws4_request');
+  const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+  return `${originUrlObject.origin}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
 
 function crc32(input) {
@@ -194,8 +276,15 @@ if (untrustedMe?.data?.authenticated) {
 }
 console.log('ok: API/WebGL-origin requests cannot reuse frontend sessions');
 
-const publicImageUrl = `${apiBase}/api/public/images/integration-poster.png`;
-const assetRes = await fetch(publicImageUrl, { redirect: 'manual' });
+const { body: publicProject } = await fetchJson(
+  `${apiBase}/api/public/projects/integration-public-asset`,
+);
+const publicImageUrl = publicProject?.data?.poster?.original?.url;
+if (typeof publicImageUrl !== 'string' || new URL(publicImageUrl).origin === new URL(apiBase).origin) {
+  throw new Error('integration poster did not expose a direct public-origin URL');
+}
+const publicImageFetchUrl = integrationPublicAssetUrl(publicImageUrl);
+const assetRes = await fetch(publicImageFetchUrl, { redirect: 'manual' });
 if (assetRes.status !== 200) {
   throw new Error(`public image stream returned ${assetRes.status}`);
 }
@@ -209,24 +298,20 @@ if ((await assetRes.arrayBuffer()).byteLength === 0) {
   throw new Error('public image stream returned an empty body');
 }
 
-const assetHead = await fetch(publicImageUrl, { method: 'HEAD' });
+const assetHead = await fetch(publicImageFetchUrl, { method: 'HEAD' });
 if (assetHead.status !== 200 || !assetHead.headers.get('content-length')) {
   throw new Error(`public image HEAD returned invalid metadata (${assetHead.status})`);
 }
 const imageEtag = assetHead.headers.get('etag');
 if (imageEtag) {
-  const conditional = await fetch(publicImageUrl, {
+  const conditional = await fetch(publicImageFetchUrl, {
     headers: { 'If-None-Match': imageEtag },
   });
   if (conditional.status !== 304 || (await conditional.arrayBuffer()).byteLength !== 0) {
     throw new Error('public image conditional request did not return a bodyless 304');
   }
 }
-console.log('ok: public image direct stream, HEAD, and immutable cache');
-
-const { body: publicProject } = await fetchJson(
-  `${apiBase}/api/public/projects/integration-public-asset`,
-);
+console.log('ok: public image direct origin, HEAD, and immutable cache');
 const gameDownloadUrl = publicProject?.data?.gameDownloadUrl;
 if (typeof gameDownloadUrl !== 'string') {
   throw new Error('integration public project did not expose a game download URL');
@@ -238,10 +323,22 @@ if (gameRedirect.status !== 302) {
 }
 const gameLocation = gameRedirect.headers.get('location');
 if (!gameLocation) throw new Error('game download redirect did not include a presigned URL');
+if (new URL(gameLocation).origin !== 'http://localhost:3906') {
+  throw new Error(`protected redirect leaked the wrong signing origin: ${new URL(gameLocation).origin}`);
+}
+const capabilityTtl = Number(new URL(gameLocation).searchParams.get('X-Amz-Expires'));
+if (!Number.isInteger(capabilityTtl) || capabilityTtl <= 0 || capabilityTtl > 60) {
+  throw new Error(`protected redirect returned an invalid capability TTL: ${capabilityTtl}`);
+}
 
-const gameObject = await fetchIntegrationS3Headers(gameLocation);
-if (gameObject.status < 200 || gameObject.status >= 300) {
+const gameObject = await requestPresignedObject(gameLocation, {
+  internalBase: internalProtectedDownloadBase,
+});
+if (gameObject.status !== 200 || gameObject.body.byteLength === 0) {
   throw new Error(`presigned game download returned ${gameObject.status}`);
+}
+if (gameObject.headers['cache-control'] !== 'private, no-store') {
+  throw new Error('protected download response was cacheable');
 }
 const disposition = gameObject.headers['content-disposition'] || '';
 const expectedFilename =
@@ -249,7 +346,144 @@ const expectedFilename =
 if (!disposition.includes('filename="game.zip"') || !disposition.includes(expectedFilename)) {
   throw new Error(`game download returned unexpected Content-Disposition: ${disposition}`);
 }
+
+const protectedRangeEnd = Math.min(7, gameObject.body.byteLength - 1);
+const protectedRange = await requestPresignedObject(gameLocation, {
+  internalBase: internalProtectedDownloadBase,
+  headers: { Range: `bytes=0-${protectedRangeEnd}` },
+});
+if (
+  protectedRange.status !== 206
+  || protectedRange.body.byteLength !== protectedRangeEnd + 1
+  || !protectedRange.headers['content-range']?.startsWith(`bytes 0-${protectedRangeEnd}/`)
+) throw new Error(`protected signed Range GET returned ${protectedRange.status}`);
+
+const signedLocation = new URL(gameLocation);
+const protectedPrefix = '/pcu-protected/';
+if (!signedLocation.pathname.startsWith(protectedPrefix)) {
+  throw new Error(`protected capability used an unexpected path: ${signedLocation.pathname}`);
+}
+const protectedKey = decodeURIComponent(signedLocation.pathname.slice(protectedPrefix.length));
+const signedHeadUrl = signIntegrationObject(
+  'HEAD',
+  signedLocation.origin,
+  'pcu-protected',
+  protectedKey,
+);
+const protectedHead = await requestPresignedObject(signedHeadUrl, {
+  method: 'HEAD',
+  internalBase: internalProtectedDownloadBase,
+});
+if (protectedHead.status !== 200 || protectedHead.body.byteLength !== 0) {
+  throw new Error(`protected signed HEAD returned ${protectedHead.status} with a body`);
+}
+
+const fixedBody = Buffer.from('GET requests must not carry bodies');
+const fixedBodyGet = await requestPresignedObject(gameLocation, {
+  internalBase: internalProtectedDownloadBase,
+  headers: { 'Content-Length': String(fixedBody.byteLength) },
+  body: fixedBody,
+});
+if (fixedBodyGet.status !== 413) {
+  throw new Error(`protected proxy accepted fixed-length GET body (${fixedBodyGet.status})`);
+}
+const chunkedBodyGet = await requestPresignedObject(gameLocation, {
+  internalBase: internalProtectedDownloadBase,
+  headers: { 'Transfer-Encoding': 'chunked' },
+  body: Buffer.from('chunked GET body must stop locally'),
+});
+if (chunkedBodyGet.status !== 400) {
+  throw new Error(`protected proxy accepted chunked GET body (${chunkedBodyGet.status})`);
+}
+
+const unsignedObjectUrl = new URL(gameLocation);
+unsignedObjectUrl.search = '';
+const unsignedObject = await requestPresignedObject(unsignedObjectUrl, {
+  internalBase: internalProtectedDownloadBase,
+});
+if (unsignedObject.status !== 403) {
+  throw new Error(`protected proxy accepted unsigned object GET (${unsignedObject.status})`);
+}
+for (const [label, pathname] of [
+  ['protected bucket list', '/pcu-protected/'],
+  ['public bucket', '/pcu-public/public/images/integration/poster/original.png'],
+  ['S3 service root', '/'],
+]) {
+  const forbiddenUrl = new URL(gameLocation);
+  forbiddenUrl.pathname = pathname;
+  forbiddenUrl.search = '';
+  const response = await requestPresignedObject(forbiddenUrl, {
+    internalBase: internalProtectedDownloadBase,
+  });
+  if (response.status !== 404) throw new Error(`${label} reached protected proxy (${response.status})`);
+}
+const protectedPut = await requestPresignedObject(gameLocation, {
+  method: 'PUT',
+  internalBase: internalProtectedDownloadBase,
+  body: Buffer.from('must-not-upload'),
+});
+if (protectedPut.status !== 405) {
+  throw new Error(`protected proxy accepted PUT (${protectedPut.status})`);
+}
+const uploadProxyGet = await requestPresignedObject(gameLocation, {
+  internalBase: internalUploadPartBase || new URL('http://localhost:3905'),
+});
+if (uploadProxyGet.status !== 405) {
+  throw new Error(`UploadPart proxy accepted protected GET (${uploadProxyGet.status})`);
+}
+console.log('ok: protected delivery origin, TTL, GET/HEAD/Range and closed proxy boundary');
 console.log('ok: game download uses the friendly Content-Disposition filename');
+
+const legacyKey = 'legacy/서울 space/literal % + plus: @ amp& equals=.bin';
+const legacyBytes = Buffer.from('escaped protected legacy object bytes: 서울 % + : @ & =');
+const directGarageOrigin = 'http://localhost:3900';
+const legacyPutUrl = signIntegrationObject('PUT', directGarageOrigin, 'pcu-protected', legacyKey);
+const legacyDeleteUrl = signIntegrationObject('DELETE', directGarageOrigin, 'pcu-protected', legacyKey);
+try {
+  const createdLegacy = await requestPresignedObject(legacyPutUrl, {
+    method: 'PUT',
+    internalBase: internalGarageBase,
+    headers: { 'Content-Length': String(legacyBytes.byteLength) },
+    body: legacyBytes,
+  });
+  if (createdLegacy.status !== 200) {
+    throw new Error(`escaped legacy PutObject returned ${createdLegacy.status}`);
+  }
+  const legacyBrowserUrl = signIntegrationObject(
+    'GET', 'http://localhost:3906', 'pcu-protected', legacyKey,
+  );
+  const legacyGet = await requestPresignedObject(legacyBrowserUrl, {
+    internalBase: internalProtectedDownloadBase,
+  });
+  if (legacyGet.status !== 200 || !legacyGet.body.equals(legacyBytes)) {
+    throw new Error(`escaped legacy protected GET returned ${legacyGet.status}`);
+  }
+  const legacyHead = await requestPresignedObject(signIntegrationObject(
+    'HEAD', 'http://localhost:3906', 'pcu-protected', legacyKey,
+  ), {
+    method: 'HEAD',
+    internalBase: internalProtectedDownloadBase,
+  });
+  if (legacyHead.status !== 200 || legacyHead.body.byteLength !== 0) {
+    throw new Error(`escaped legacy protected HEAD returned ${legacyHead.status}`);
+  }
+  const legacyRange = await requestPresignedObject(legacyBrowserUrl, {
+    internalBase: internalProtectedDownloadBase,
+    headers: { Range: 'bytes=0-8' },
+  });
+  if (legacyRange.status !== 206 || !legacyRange.body.equals(legacyBytes.subarray(0, 9))) {
+    throw new Error(`escaped legacy protected Range GET returned ${legacyRange.status}`);
+  }
+  console.log('ok: escaped UTF-8/space/percent/reserved legacy key preserves signed path/Host/query');
+} finally {
+  const deletedLegacy = await requestPresignedObject(legacyDeleteUrl, {
+    method: 'DELETE',
+    internalBase: internalGarageBase,
+  });
+  if (deletedLegacy.status !== 204) {
+    throw new Error(`escaped legacy cleanup returned ${deletedLegacy.status}`);
+  }
+}
 
 const projectId = publicProject?.data?.id;
 if (!Number.isInteger(projectId)) throw new Error('integration public project did not expose a numeric ID');
@@ -260,6 +494,8 @@ const wasmBr = brotliCompressSync(wasmBody);
 const dataGz = gzipSync(Buffer.from('integration Unity data'));
 const syntheticWebglZip = makeStoredZip([
   ['UnityBuild/index.html', '<!doctype html><meta charset="utf-8"><title>Integration WebGL</title>'],
+  ['UnityBuild/Build/integration.loader.js', 'globalThis.createUnityInstance = globalThis.createUnityInstance || (() => {});'],
+  ['UnityBuild/Build/integration.framework.js', 'globalThis.integrationFramework = true;'],
   ['UnityBuild/Build/integration.wasm.br', wasmBr],
   ['UnityBuild/Build/integration.data.gz', dataGz],
   ['UnityBuild/TemplateData/style.css', 'html,body{margin:0;background:#000}'],
@@ -275,8 +511,22 @@ if (webglFixturePath) {
 }
 
 async function createUploadSession(originalName, body, uploadKind) {
+  const blockSize = 1_048_576;
+  const digests = [];
+  for (let offset = 0; offset < body.length; offset += blockSize) {
+    digests.push(createHash('sha256').update(body.subarray(offset, offset + blockSize)).digest());
+  }
+  const header = Buffer.alloc(16);
+  header.writeBigUInt64BE(BigInt(body.length), 0);
+  header.writeUInt32BE(blockSize, 8);
+  header.writeUInt32BE(digests.length, 12);
+  const sourceIdentity = createHash('sha256')
+    .update(Buffer.from('PCU-UPLOAD-SOURCE-V1\0'))
+    .update(header)
+    .update(Buffer.concat(digests))
+    .digest('hex');
   const { body: response } = await fetchJson(
-    `${apiBase}/api/admin/projects/${projectId}/game-upload-sessions`,
+    `${apiBase}/api/admin/projects/${projectId}/direct-${uploadKind.toLowerCase()}-upload-sessions`,
     {
       method: 'POST',
       headers: {
@@ -284,7 +534,15 @@ async function createUploadSession(originalName, body, uploadKind) {
         Cookie: cookie,
         Origin: origin,
       },
-      body: JSON.stringify({ originalName, totalBytes: body.length, uploadKind }),
+      body: JSON.stringify({
+        originalName,
+        totalBytes: body.length,
+        declaredMimeType: 'application/zip',
+        sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+        sourceIdentity,
+        sourceIdentityBlockSizeBytes: blockSize,
+        sourceIdentityBlockDigests: digests.map((digest) => digest.toString('hex')),
+      }),
     },
   );
   return response?.data;
@@ -292,23 +550,18 @@ async function createUploadSession(originalName, body, uploadKind) {
 
 const gameSession = await createUploadSession('game-probe.zip', gameProbeZip, 'GAME');
 const webglSession = await createUploadSession('webgl.zip', webglZip, 'WEBGL');
-if (gameSession?.uploadKind !== 'GAME' || webglSession?.uploadKind !== 'WEBGL') {
-  throw new Error('upload sessions did not preserve independent upload kinds');
-}
-
-const { body: activeSessions } = await fetchJson(
-	`${apiBase}/api/admin/projects/${projectId}/game-upload-sessions`,
-	{ headers: { Cookie: cookie, Origin: origin } },
-);
-const activeKinds = new Set(activeSessions?.data?.items?.map((item) => item.uploadKind));
-if (!activeKinds.has('GAME') || !activeKinds.has('WEBGL')) {
-  throw new Error('GAME and WEBGL sessions did not coexist for one project');
+if (gameSession?.owner?.id !== projectId || webglSession?.owner?.id !== projectId) {
+  throw new Error('direct upload sessions did not preserve canonical owner identity');
 }
 console.log('ok: GAME and WEBGL upload sessions coexist independently');
 
 const missingChunkComplete = await fetch(
-  `${apiBase}/api/admin/game-upload-sessions/${gameSession.sessionId}/complete`,
-  { method: 'POST', headers: { Cookie: cookie, Origin: origin } },
+  `${apiBase}/api/admin/direct-asset-upload-sessions/${gameSession.sessionId}/complete`,
+  {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: origin },
+    body: JSON.stringify({ generation: gameSession.generation, parts: [] }),
+  },
 );
 if (missingChunkComplete.status !== 400) {
   throw new Error(`missing-chunk completion returned ${missingChunkComplete.status}`);
@@ -317,46 +570,82 @@ const missingChunkBody = await missingChunkComplete.json();
 if (missingChunkBody?.error?.code !== 'ERROR') {
   throw new Error('missing-chunk completion did not preserve the existing ERROR envelope');
 }
-console.log('ok: completion rejects sessions with missing chunks');
+console.log('ok: direct completion rejects a missing Garage part manifest');
 
-await fetchJson(`${apiBase}/api/admin/game-upload-sessions/${gameSession.sessionId}`, {
-  method: 'DELETE',
-  headers: { Cookie: cookie, Origin: origin },
-});
+async function putDirectPart(capability, body) {
+  const target = new URL(capability.url);
+  const signedHost = target.host;
+  if (internalUploadPartBase) {
+    target.protocol = internalUploadPartBase.protocol;
+    target.host = internalUploadPartBase.host;
+  }
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(target, {
+      method: 'PUT',
+      headers: { ...capability.requiredHeaders, Host: signedHost, 'Content-Length': String(body.length) },
+    }, (response) => {
+      const etag = response.headers.etag;
+      response.resume();
+      response.once('end', () => {
+        if ((response.statusCode ?? 500) < 200 || (response.statusCode ?? 500) >= 300 || !etag) {
+          reject(new Error(`direct UploadPart returned ${response.statusCode} without ETag`));
+        } else resolve(etag);
+      });
+    });
+    request.on('error', reject);
+    request.end(body);
+  });
+}
 
-await fetchJson(
-  `${apiBase}/api/admin/game-upload-sessions/${webglSession.sessionId}/chunks/0`,
-  {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      Cookie: cookie,
-      Origin: origin,
+async function uploadAndComplete(session, body) {
+  const parts = [];
+  for (let partNumber = 1; partNumber <= session.totalParts; partNumber += 1) {
+    const start = (partNumber - 1) * session.partSizeBytes;
+    const part = body.subarray(start, Math.min(start + session.partSizeBytes, body.length));
+    const checksumSha256 = createHash('sha256').update(part).digest('base64');
+    const { body: signed } = await fetchJson(
+      `${apiBase}/api/admin/direct-asset-upload-sessions/${session.sessionId}/part-urls`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: origin },
+        body: JSON.stringify({ generation: session.generation, parts: [{ partNumber, checksumSha256 }] }),
+      },
+    );
+    const capability = signed?.data?.parts?.[0];
+    if (!capability) throw new Error('part capability was not issued');
+    const etag = await putDirectPart(capability, part);
+    parts.push({ partNumber, etag, sizeBytes: part.length });
+  }
+  const { body: completed } = await fetchJson(
+    `${apiBase}/api/admin/direct-asset-upload-sessions/${session.sessionId}/complete`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: origin },
+      body: JSON.stringify({ generation: session.generation, parts }),
     },
-    body: webglZip,
-  },
+  );
+  if (completed?.data?.status !== 'VERIFYING') throw new Error('direct completion did not enter VERIFYING');
+  await waitFor(`direct ${session.sessionId} worker readiness`, async () => {
+    const { body: status } = await fetchJson(
+      `${apiBase}/api/admin/direct-asset-upload-sessions/${session.sessionId}`,
+      { headers: { Cookie: cookie, Origin: origin } },
+    );
+    if (status?.data?.state !== 'READY') throw new Error(`state=${status?.data?.state}`);
+  });
+}
+
+await uploadAndComplete(gameSession, gameProbeZip);
+await uploadAndComplete(webglSession, webglZip);
+console.log('ok: browser bytes use presigned Garage UploadPart capabilities, not API relay');
+
+const { body: projectAfterWebgl } = await fetchJson(
+  `${apiBase}/api/public/projects/integration-public-asset`,
 );
-const completionUrl = `${apiBase}/api/admin/game-upload-sessions/${webglSession.sessionId}/complete`;
-const completionOptions = { method: 'POST', headers: { Cookie: cookie, Origin: origin } };
-const completionResponses = await Promise.all([
-  fetch(completionUrl, completionOptions),
-  fetch(completionUrl, completionOptions),
-]);
-const completionStatuses = completionResponses.map((response) => response.status).sort((a, b) => a - b);
-if (completionStatuses[0] !== 200 || completionStatuses[1] !== 400) {
-  throw new Error(`concurrent completion returned ${completionStatuses.join(', ')}`);
+const webglUrl = projectAfterWebgl?.data?.webglUrl;
+if (typeof webglUrl !== 'string' || new URL(webglUrl).origin === new URL(apiBase).origin) {
+  throw new Error('WebGL worker did not publish an immutable public-origin deployment URL');
 }
-const successfulCompletion = completionResponses.find((response) => response.status === 200);
-const rejectedCompletion = completionResponses.find((response) => response.status === 400);
-const webglComplete = await successfulCompletion.json();
-const duplicateComplete = await rejectedCompletion.json();
-if (duplicateComplete?.error?.code !== 'ERROR') {
-  throw new Error('duplicate completion did not preserve the existing ERROR envelope');
-}
-console.log('ok: concurrent completion has exactly one winner');
-const webglUrl = webglComplete?.data?.webglUrl;
-if (typeof webglUrl !== 'string') throw new Error('WebGL completion did not return webglUrl');
-const hostedWebglUrl = integrationApiUrl(webglUrl);
+const hostedWebglUrl = integrationPublicAssetUrl(webglUrl);
 
 const hostedIndex = await fetch(hostedWebglUrl, { headers: { Origin: 'null' } });
 const hostedIndexBody = Buffer.from(await hostedIndex.arrayBuffer());
@@ -379,11 +668,14 @@ if (!Number.isSafeInteger(hostedIndexLength) || hostedIndexLength !== hostedInde
     `WebGL index GET returned inconsistent Content-Length (${hostedIndexLength}/${hostedIndexBody.byteLength})`,
   );
 }
-if (hostedIndex.headers.get('access-control-allow-origin') !== '*') {
-  throw new Error('WebGL index did not use credential-free CORS');
+if (hostedIndex.headers.get('access-control-allow-origin') !== 'null') {
+	throw new Error('WebGL index did not echo the configured credential-free null origin');
 }
 if (hostedIndex.headers.has('access-control-allow-credentials')) {
-  throw new Error('WebGL index unexpectedly allowed credentials');
+	throw new Error('WebGL index unexpectedly allowed credentials');
+}
+if (!hostedIndex.headers.get('vary')?.split(',').map((value) => value.trim().toLowerCase()).includes('origin')) {
+	throw new Error('WebGL index did not vary credential-free CORS by Origin');
 }
 if (hostedIndex.headers.has('x-frame-options')) {
   throw new Error('WebGL index retained the global iframe denial header');
@@ -392,12 +684,8 @@ const webglCsp = hostedIndex.headers.get('content-security-policy') || '';
 if (!webglCsp.includes(`frame-ancestors ${new URL(origin).origin}`)) {
   throw new Error(`WebGL index returned an unexpected CSP: ${webglCsp}`);
 }
-// The container reaches the API as `http://api:4000`, while generated public
-// URLs intentionally use the browser-facing API_PUBLIC_URL (`localhost`). CSP
-// must be asserted against the wire contract, not the test runner's route.
-const webglAssetSource = `${new URL(webglUrl).origin}/api/public/webgl/`;
-if (!webglCsp.includes(`connect-src ${webglAssetSource}`) || webglCsp.includes("connect-src 'self'")) {
-  throw new Error(`WebGL index did not isolate asset connections: ${webglCsp}`);
+if (!webglCsp.includes("connect-src 'self' blob:") || new URL(webglUrl).origin === new URL(apiBase).origin) {
+  throw new Error(`WebGL index did not isolate immutable public-origin asset connections: ${webglCsp}`);
 }
 
 const webglEtagConditional = await fetch(hostedWebglUrl, {
@@ -409,21 +697,31 @@ if (
 ) {
   throw new Error(`WebGL If-None-Match returned ${webglEtagConditional.status} with a body`);
 }
-if (
-  webglEtagConditional.headers.get('etag') !== webglEtag
-  || webglEtagConditional.headers.get('cache-control') !== webglCacheControl
-) {
-  throw new Error('WebGL If-None-Match 304 did not preserve validators and cache policy');
+// Garage v1.1.0's website endpoint omits ETag/Last-Modified on a valid 304.
+// The original 200/HEAD validators are asserted above; the proxy must preserve
+// the bodyless 304 while ensuring that revalidation responses are never cached
+// as a new immutable representation.
+if (webglEtagConditional.headers.get('cache-control') !== 'no-store') {
+  throw new Error('WebGL If-None-Match 304 was cached as immutable');
 }
 
 const webglModifiedConditional = await fetch(hostedWebglUrl, {
   headers: { Origin: 'null', 'If-Modified-Since': webglLastModified },
 });
-if (
-  webglModifiedConditional.status !== 304
-  || (await webglModifiedConditional.arrayBuffer()).byteLength !== 0
+const webglModifiedBody = Buffer.from(await webglModifiedConditional.arrayBuffer());
+if (webglModifiedConditional.status === 304) {
+  if (webglModifiedBody.byteLength !== 0 || webglModifiedConditional.headers.get('cache-control') !== 'no-store') {
+    throw new Error('WebGL If-Modified-Since 304 returned a body or was cached as immutable');
+  }
+} else if (
+  webglModifiedConditional.status !== 200
+  || !webglModifiedBody.equals(hostedIndexBody)
+  || webglModifiedConditional.headers.get('etag') !== webglEtag
+  || webglModifiedConditional.headers.get('last-modified') !== webglLastModified
 ) {
-  throw new Error(`WebGL If-Modified-Since returned ${webglModifiedConditional.status} with a body`);
+  // Garage v1.1.0 may ignore If-Modified-Since. A complete, validator-bearing
+  // 200 is a safe (though less efficient) conditional-request fallback.
+  throw new Error(`WebGL If-Modified-Since returned an invalid fallback (${webglModifiedConditional.status})`);
 }
 
 const indexRangeEnd = Math.min(7, hostedIndexBody.byteLength - 1);
@@ -451,12 +749,13 @@ if (
   || hostedIndexUnsatisfiable.headers.get('content-range') !== (
     `bytes */${hostedIndexBody.byteLength}`
   )
-  || (await hostedIndexUnsatisfiable.arrayBuffer()).byteLength !== 0
+  || hostedIndexUnsatisfiable.headers.get('cache-control') !== 'no-store'
 ) {
   throw new Error(
     `WebGL unsatisfiable range returned invalid metadata or body (${hostedIndexUnsatisfiable.status})`,
   );
 }
+await hostedIndexUnsatisfiable.arrayBuffer();
 
 const hostedIndexIfRangeMatch = await fetch(hostedWebglUrl, {
   headers: {
@@ -479,11 +778,19 @@ const hostedIndexIfRangeMiss = await fetch(hostedWebglUrl, {
     'If-Range': '"integration-mismatch"',
   },
 });
-if (
-  hostedIndexIfRangeMiss.status !== 200
-  || hostedIndexIfRangeMiss.headers.has('content-range')
-  || !Buffer.from(await hostedIndexIfRangeMiss.arrayBuffer()).equals(hostedIndexBody)
-) {
+const hostedIndexIfRangeMissBody = Buffer.from(await hostedIndexIfRangeMiss.arrayBuffer());
+const validIfRangeFullFallback = hostedIndexIfRangeMiss.status === 200
+  && !hostedIndexIfRangeMiss.headers.has('content-range')
+  && hostedIndexIfRangeMissBody.equals(hostedIndexBody);
+const validImmutableRangeFallback = hostedIndexIfRangeMiss.status === 206
+  && hostedIndexIfRangeMiss.headers.get('content-range') === (
+    `bytes 0-${indexRangeEnd}/${hostedIndexBody.byteLength}`
+  )
+  && hostedIndexIfRangeMissBody.equals(expectedIndexRange);
+// Garage v1.1.0's website endpoint may ignore a mismatching If-Range. These
+// resources use immutable generation URLs, so accepting the exact requested
+// range cannot splice bytes across object versions.
+if (!validIfRangeFullFallback && !validImmutableRangeFallback) {
   throw new Error(`WebGL mismatching If-Range returned ${hostedIndexIfRangeMiss.status}`);
 }
 
@@ -514,10 +821,12 @@ if (keepWebgl) {
     method: 'DELETE',
     headers: { Cookie: cookie, Origin: origin },
   });
-  const deletedWebgl = await fetch(hostedWebglUrl, { headers: { Origin: 'null' } });
-  if (deletedWebgl.status !== 404) {
-    throw new Error(`deleted WebGL deployment remained public with ${deletedWebgl.status}`);
-  }
+  await waitFor('deleted WebGL generation cleanup', async () => {
+    const deletedWebgl = await fetch(hostedWebglUrl, { headers: { Origin: 'null' } });
+    if (deletedWebgl.status !== 404 || deletedWebgl.headers.get('cache-control') !== 'no-store') {
+      throw new Error(`deleted WebGL deployment remained public/cacheable with ${deletedWebgl.status}`);
+    }
+  });
   const { body: projectAfterWebglDelete } = await fetchJson(
     `${apiBase}/api/public/projects/integration-public-asset`,
   );

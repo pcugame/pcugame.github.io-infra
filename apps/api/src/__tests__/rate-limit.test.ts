@@ -5,8 +5,15 @@ import { defaultTestEnv } from './helpers/app-mocks.js';
 import type { BackendContext } from '../backend-context.js';
 import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
 import { createUploadLifecycleMetrics } from '../lib/upload-lifecycle-metrics.js';
-import { createExportProgressStore } from '../modules/admin/export/service.js';
 import { createProtectedDownloadLimiter } from '../shared/protected-download-limiter.js';
+import {
+	DirectControlPrincipalLimiter,
+	GLOBAL_IP_ABUSE_CEILING_MIN,
+	directUploadSessionId,
+	globalIpAbuseCeiling,
+	isCanonicalAssetDownload,
+	isDirectUploadControl,
+} from '../plugins/rate-limit.js';
 
 // Use very tight limits so the test doesn't need to send 300+ requests.
 const testEnv = {
@@ -66,7 +73,7 @@ describe('rate-limit plugin', () => {
 		logger,
 		ids: { next: () => `rate-limit-${++requestSequence}` },
 		storage: {
-			upload: async () => {}, presign: async () => '', delete: async () => {},
+			upload: async () => {}, delete: async () => {},
 			head: async () => null, readRange: async () => Buffer.alloc(0), stream: async () => null,
 			listKeys: async () => [], listKeyPage: async () => ({ keys: [], isTruncated: false }),
 			deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
@@ -89,7 +96,6 @@ describe('rate-limit plugin', () => {
 			update: async () => ({ maxGameFileMb: 5120, maxChunkSizeMb: 10 }),
 			invalidate: () => {},
 		},
-		exportProgress: createExportProgressStore(),
 		uploadLifecycleMetrics: createUploadLifecycleMetrics(),
 		uploadLifecycle: createTestUploadLifecycleRuntime(),
 		lifecycle: {
@@ -122,23 +128,12 @@ describe('rate-limit plugin', () => {
 
 	const clientIp = '203.0.113.7';
 
-	it('blocks a GET route after the global bucket is exhausted', async () => {
-		// /api/me has no per-route override, so it uses the global bucket (max 5).
-		const responses = [];
+	it('treats the global IP limit as a high abuse ceiling', async () => {
+		expect(globalIpAbuseCeiling(5)).toBe(GLOBAL_IP_ABUSE_CEILING_MIN);
 		for (let i = 0; i < 7; i++) {
-			responses.push(
-				await app.inject({ method: 'GET', url: '/api/me', remoteAddress: clientIp }),
-			);
+			const response = await app.inject({ method: 'GET', url: '/api/me', remoteAddress: clientIp });
+			expect(response.statusCode).toBe(200);
 		}
-		const codes = responses.map((r) => r.statusCode);
-		const firstLimited = codes.indexOf(429);
-		expect(firstLimited).toBeGreaterThanOrEqual(0);
-		expect(firstLimited).toBeLessThanOrEqual(5);
-		const limited = responses[firstLimited]!;
-		expect(limited.headers['retry-after']).toBeDefined();
-		const body = JSON.parse(limited.body);
-		expect(body.ok).toBe(false);
-		expect(body.error.code).toBe('RATE_LIMITED');
 	});
 
 	it('blocks the login route with its tighter bucket before the global one would', async () => {
@@ -162,7 +157,7 @@ describe('rate-limit plugin', () => {
 		expect(codes.slice(3).some((c) => c === 429)).toBe(true);
 	});
 
-	it('uses the forwarded client IP behind the single trusted nginx hop', async () => {
+	it('accepts the forwarded client IP behind the single trusted nginx hop without making NAT the normal quota', async () => {
 		const proxyAddress = '127.0.0.1';
 		const firstClientCodes: number[] = [];
 		for (let i = 0; i < 7; i++) {
@@ -175,7 +170,7 @@ describe('rate-limit plugin', () => {
 			firstClientCodes.push(response.statusCode);
 		}
 
-		expect(firstClientCodes).toContain(429);
+		expect(firstClientCodes).not.toContain(429);
 		const independentClient = await app.inject({
 			method: 'GET',
 			url: '/api/me',
@@ -183,6 +178,58 @@ describe('rate-limit plugin', () => {
 			headers: { 'x-forwarded-for': '198.51.100.11' },
 		});
 		expect(independentClient.statusCode).toBe(200);
+	});
+
+	it('allows 50 authenticated principals behind one NAT and isolates actor/session abuse', () => {
+		let now = 0;
+		const limiter = new DirectControlPrincipalLimiter(60_000, 600, 240, () => now);
+		const natIp = '198.51.100.50';
+		for (let actorId = 1; actorId <= 50; actorId++) {
+			const sessionId = `session-${actorId}`;
+			// create + 40 eight-part URL batches + polls + refreshes + complete + download
+			// stays well below the 5,000 request IP abuse ceiling as an aggregate.
+			expect(limiter.check(actorId), `${natIp} actor ${actorId} create`).toEqual({ allowed: true });
+			for (let request = 0; request < 55; request += 1) {
+				expect(limiter.check(actorId, sessionId), `${natIp} actor ${actorId} request ${request}`)
+					.toEqual({ allowed: true });
+			}
+		}
+		expect(50 * 56).toBeLessThan(GLOBAL_IP_ABUSE_CEILING_MIN);
+		for (let request = 0; request < 240; request += 1) {
+			expect(limiter.check(999, 'hot-session')).toEqual({ allowed: true });
+		}
+		expect(limiter.check(999, 'hot-session')).toEqual({ allowed: false, retryAfterSec: 60 });
+		expect(limiter.check(2, 'independent-session')).toEqual({ allowed: true });
+		now = 60_000;
+		expect(limiter.check(999, 'hot-session')).toEqual({ allowed: true });
+	});
+
+	it('allowlists only the canonical assetId download route from the global IP bucket', () => {
+		expect(isCanonicalAssetDownload('/api/assets/42/download')).toBe(true);
+		expect(isCanonicalAssetDownload('/api/assets/42/download?variant=playback')).toBe(true);
+		expect(isCanonicalAssetDownload('/api/assets/protected/legacy.zip')).toBe(false);
+		expect(isCanonicalAssetDownload('/api/assets/42')).toBe(false);
+	});
+
+	it.each([
+		['create project poster', '/api/admin/projects/12/direct-poster-upload-sessions', undefined],
+		['create exhibition poster', '/api/admin/exhibitions/12/direct-poster-upload-sessions', undefined],
+		['status', '/api/admin/direct-asset-upload-sessions/session-12', 'session-12'],
+		['part URL refresh', '/api/admin/direct-asset-upload-sessions/session-12/part-urls', 'session-12'],
+		['completion', '/api/admin/direct-asset-upload-sessions/session-12/complete?generation=3', 'session-12'],
+		['cancellation', '/api/admin/direct-asset-upload-sessions/session-12', 'session-12'],
+	])('recognizes deployed /api/admin direct control path: %s', (_label, path, sessionId) => {
+		expect(isDirectUploadControl(path)).toBe(true);
+		expect(directUploadSessionId(path)).toBe(sessionId);
+	});
+
+	it.each([
+		'/api/admin/exhibitions/12/poster',
+		'/api/admin/projects/12/assets',
+		'/api/admin/direct-asset-upload-sessions',
+		'/api/direct-asset-upload-sessions/session-12/unknown',
+	])('does not classify non-control route as direct control: %s', (path) => {
+		expect(isDirectUploadControl(path)).toBe(false);
 	});
 
 	it.each(['/api/health', '/api/health/deep'])(

@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { ResponsiveImage } from '@pcu/contracts';
 
@@ -64,5 +64,24 @@ describe('ProjectVideo', () => {
 		expect(container.querySelector('video')?.getAttribute('poster')).toBe(
 			smallPoster.original.url,
 		);
+	});
+
+	it('hides playback and preserves the original download when playback failed', () => {
+		const { container } = render(
+			<ProjectVideo
+				video={{
+					mimeType: 'video/quicktime',
+					originalDownloadUrl: 'https://api.test/api/assets/42/download?variant=original',
+					playbackStatus: 'FAILED',
+					playbackError: 'encoder failed',
+				}}
+				poster={poster}
+				title="Game"
+			/>,
+		);
+
+		expect(container.querySelector('video')).toBeNull();
+		expect(screen.getByRole('link', { name: '동영상 원본 다운로드' }).getAttribute('href'))
+			.toBe('https://api.test/api/assets/42/download?variant=original');
 	});
 });

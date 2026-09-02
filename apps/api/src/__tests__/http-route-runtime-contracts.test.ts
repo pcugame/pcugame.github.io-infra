@@ -1,4 +1,3 @@
-import { Readable } from 'node:stream';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
 	isResponseSerializationError,
@@ -40,7 +39,6 @@ function createLogger(): AppLogger {
 function createStorageStub(): ObjectStorage {
 	return {
 		upload: async () => {},
-		presign: async () => 'https://storage.test/object',
 		delete: async () => {},
 		head: async () => ({ size: 0, contentType: 'application/octet-stream' }),
 		readRange: async () => Buffer.alloc(0),
@@ -96,7 +94,8 @@ async function createContractApp(
 		NODE_ENV: nodeEnv,
 		DEV_AUTH_ENABLED: devAuthEnabled,
 		LOG_LEVEL: 'info',
-		NAS_EXPORT_PATH: '/tmp/pcu-route-contract-export',
+		PUBLIC_ASSET_ORIGIN: 'https://assets.route-contract.test',
+		NAS_EXPORT_ROOT: '/tmp/pcu-route-contract-export',
 		GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS],
 		CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS],
 	}, {
@@ -133,19 +132,23 @@ describe('production HTTP runtime contracts', () => {
 
 		const developmentRoutes = routeRuntimeContractsFor({ includeDevAuth: true });
 		const productionRoutes = routeRuntimeContractsFor({ includeDevAuth: false });
+		// Injected persistence receives an unavailable direct controller, so the
+		// route shape is still inventory-checked without pretending uploads work.
+		const routesInInjectedGraph = developmentRoutes;
+		const productionRoutesInInjectedGraph = productionRoutes;
 		expect(developmentRoutes).toEqual(ROUTE_RUNTIME_CONTRACTS);
 		expect(productionRoutes).toEqual(
 			ROUTE_RUNTIME_CONTRACTS.filter(({ family }) => family !== 'dev-auth'),
 		);
 
-		for (const route of developmentRoutes) {
+		for (const route of routesInInjectedGraph) {
 			const routerUrl = route.url === '*' ? '/*' : route.url;
 			expect(
 				app.hasRoute({ method: route.method, url: routerUrl }),
 				`${route.method} ${route.url}`,
 			).toBe(true);
 		}
-		for (const route of productionRoutes) {
+		for (const route of productionRoutesInInjectedGraph) {
 			const routerUrl = route.url === '*' ? '/*' : route.url;
 			expect(
 				productionApp.hasRoute({ method: route.method, url: routerUrl }),
@@ -155,7 +158,7 @@ describe('production HTTP runtime contracts', () => {
 		for (const route of ROUTE_RUNTIME_CONTRACTS.filter(({ family }) => family === 'dev-auth')) {
 			expect(productionApp.hasRoute({ method: route.method, url: route.url })).toBe(false);
 		}
-		const productionGets = productionRoutes.filter(({ method }) => method === 'GET');
+		const productionGets = productionRoutesInInjectedGraph.filter(({ method }) => method === 'GET');
 		for (const route of productionGets) {
 			expect(productionApp.hasRoute({ method: 'HEAD', url: route.url })).toBe(true);
 		}
@@ -167,7 +170,7 @@ describe('production HTTP runtime contracts', () => {
 			expect(route.querystring).toBeDefined();
 			expect(route.response).toBeDefined();
 			expect(route.bodyBoundary).toMatch(
-				/^(none|json|multipart|octet-stream|cors-plugin)$/,
+				/^(none|json|multipart|cors-plugin)$/,
 			);
 			expect(route.responseBoundary).toMatch(
 				/^(json|no-content|redirect|stream|errors-only|cors-plugin)$/,
@@ -175,7 +178,7 @@ describe('production HTTP runtime contracts', () => {
 			if (route.bodyBoundary === 'multipart') {
 				expect(route.body).toBeUndefined();
 			}
-			if (route.bodyBoundary === 'json' || route.bodyBoundary === 'octet-stream') {
+			if (route.bodyBoundary === 'json') {
 				expect(route.body).toBeDefined();
 			}
 		}
@@ -217,7 +220,7 @@ describe('production HTTP runtime contracts', () => {
 		}
 	});
 
-	it('rejects malformed JSON, chunk index, and wrong octet-stream bodies', async () => {
+	it('rejects malformed JSON and unsupported multipart transports', async () => {
 		const malformedJson = await app.inject({
 			method: 'POST',
 			url: '/api/auth/google',
@@ -248,45 +251,6 @@ describe('production HTTP runtime contracts', () => {
 			payload: {},
 		});
 		expect(settings.statusCode).toBe(400);
-
-		for (const index of ['1x', '-1', '+1', '1.5', '999999999999999999999']) {
-			const response = await app.inject({
-				method: 'PUT',
-				url: `/api/admin/game-upload-sessions/session/chunks/${index}`,
-				headers: {
-					origin: 'http://localhost:5173',
-					'content-type': 'application/octet-stream',
-				},
-				payload: Buffer.from([1]),
-			});
-			expect(response.statusCode, `${index}: ${response.body}`).toBe(400);
-		}
-
-		const wrongTransport = await app.inject({
-			method: 'PUT',
-			url: '/api/admin/game-upload-sessions/session/chunks/0',
-			headers: {
-				origin: 'http://localhost:5173',
-				'content-type': 'application/json',
-			},
-			payload: {},
-		});
-		expect(wrongTransport.statusCode).toBe(400);
-
-		const unsupportedTransport = await app.inject({
-			method: 'PUT',
-			url: '/api/admin/game-upload-sessions/session/chunks/0',
-			headers: {
-				origin: 'http://localhost:5173',
-				'content-type': 'application/x-www-form-urlencoded',
-			},
-			payload: 'chunk=1',
-		});
-		expect(unsupportedTransport.statusCode, unsupportedTransport.body).toBe(415);
-		expect(unsupportedTransport.json()).toMatchObject({
-			ok: false,
-			error: { code: 'UNSUPPORTED_MEDIA_TYPE' },
-		});
 
 		const nonMultipartTransport = await app.inject({
 			method: 'POST',
@@ -343,11 +307,6 @@ describe('production HTTP runtime contracts', () => {
 			},
 			{
 				method: 'POST' as const,
-				url: '/api/admin/projects/1/game-upload-sessions',
-				payload: { originalName: 'game.zip', totalBytes: 1.5 },
-			},
-			{
-				method: 'POST' as const,
 				url: '/api/admin/export',
 				payload: { year: '2e3' },
 			},
@@ -382,7 +341,6 @@ describe('production HTTP runtime contracts', () => {
 				payload: { role: 'ROOT' },
 			},
 			{ family: 'public', method: 'GET', url: '/api/public/years?unexpected=1' },
-			{ family: 'public-webgl', method: 'GET', url: '/api/public/webgl/1x' },
 			{ family: 'assets', method: 'DELETE', url: '/api/admin/assets/1x' },
 			{
 				family: 'me-project',
@@ -405,12 +363,6 @@ describe('production HTTP runtime contracts', () => {
 				method: 'POST',
 				url: '/api/admin/projects/1x/members',
 				payload: { name: 'Student', studentId: '20260001' },
-			},
-			{
-				family: 'game-upload',
-				method: 'POST',
-				url: '/api/admin/projects/1/game-upload-sessions',
-				payload: { originalName: 'game.zip', totalBytes: 1.5 },
 			},
 			{
 				family: 'admin-banned-ips',
@@ -474,17 +426,9 @@ describe('production HTTP runtime contracts', () => {
 		registerRouteSchemas(exportApp);
 		exportApp.post<{ Body: { year?: number; dryRun?: boolean } }>(
 			'/api/admin/export',
-			async (request) => ({
+			async (_request, reply) => reply.status(202).send({
 				ok: true,
-				data: {
-					projects: 0,
-					totalFiles: 0,
-					downloaded: 0,
-					skipped: 0,
-					failed: 0,
-					aborted: request.body.dryRun ?? false,
-					paths: [],
-				},
+				data: { jobId: 'route-contract-export', state: 'QUEUED' },
 			}),
 		);
 		await exportApp.ready();
@@ -493,10 +437,10 @@ describe('production HTTP runtime contracts', () => {
 				method: 'POST',
 				url: '/api/admin/export',
 			});
-			expect(response.statusCode, response.body).toBe(200);
+			expect(response.statusCode, response.body).toBe(202);
 			expect(response.json()).toMatchObject({
 				ok: true,
-				data: { aborted: false },
+				data: { jobId: 'route-contract-export', state: 'QUEUED' },
 			});
 		} finally {
 			await exportApp.close();
@@ -525,7 +469,7 @@ describe('production HTTP runtime contracts', () => {
 		}
 	});
 
-	it('keeps CORS, health, stream, and response serialization boundaries executable', async () => {
+	it('keeps CORS, health, and response serialization boundaries executable', async () => {
 		const preflight = await app.inject({
 			method: 'OPTIONS',
 			url: '/api/arbitrary-preflight-target',
@@ -559,44 +503,6 @@ describe('production HTTP runtime contracts', () => {
 		const health = await app.inject({ method: 'GET', url: '/api/health' });
 		expect(health.statusCode, health.body).toBe(200);
 
-		const streamApp = Fastify();
-		streamApp.setValidatorCompiler(validatorCompiler);
-		streamApp.setSerializerCompiler(serializerCompiler);
-		registerRouteSchemas(streamApp);
-		streamApp.setErrorHandler((error, _request, reply) => {
-			const validationFailure = (
-				typeof error === 'object'
-				&& error !== null
-				&& 'validation' in error
-				&& Boolean(error.validation)
-			);
-			reply.status(validationFailure ? 400 : 500).send({
-				ok: false,
-				error: {
-					code: validationFailure ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR',
-					message: validationFailure ? 'Validation failed' : 'Internal server error',
-				},
-			});
-		});
-		streamApp.get('/api/public/webgl/:projectId', async (_request, reply) => (
-			reply.type('application/octet-stream').send(Readable.from(['streamed']))
-		));
-		await streamApp.ready();
-		try {
-			const streamed = await streamApp.inject({
-				method: 'GET',
-				url: '/api/public/webgl/7',
-			});
-			expect(streamed.statusCode).toBe(200);
-			expect(streamed.body).toBe('streamed');
-			const malformed = await streamApp.inject({
-				method: 'GET',
-				url: '/api/public/webgl/7x',
-			});
-			expect(malformed.statusCode).toBe(400);
-		} finally {
-			await streamApp.close();
-		}
 	});
 
 	it('turns a handler/schema response mismatch into a serialization failure', async () => {
@@ -678,7 +584,9 @@ describe('production HTTP runtime contracts', () => {
 					id: 1,
 					slug: 'game',
 					year: 2026,
-					status: 'PUBLISHED',
+					status: 'DRAFT',
+					submissionId: '11111111-1111-4111-8111-111111111111',
+					items: [],
 					adminEditUrl: 'https://api.example.test/admin/projects/1',
 				},
 			},
@@ -698,22 +606,6 @@ describe('production HTTP runtime contracts', () => {
 				},
 			},
 			'admin-members': { ok: true, data: { id: 1 } },
-			'game-upload': {
-				ok: true,
-				data: {
-					sessionId: 'session',
-					projectId: 1,
-					uploadKind: 'GAME',
-					originalName: 'game.zip',
-					totalBytes: 1,
-					chunkSizeBytes: 1,
-					totalChunks: 1,
-					uploadedChunks: [],
-					uploadedCount: 0,
-					status: 'PENDING',
-					expiresAt: '2026-07-31T00:00:00.000Z',
-				},
-			},
 			'admin-banned-ips': { ok: true, data: { items: [] } },
 			'admin-settings': {
 				ok: true,
@@ -769,12 +661,6 @@ describe('production HTTP runtime contracts', () => {
 				routeUrl: '/api/admin/projects/:id/members',
 				requestUrl: '/api/admin/projects/1/members',
 				payload: { name: 'Student', studentId: '20260001' },
-			},
-			{
-				family: 'game-upload',
-				method: 'GET',
-				routeUrl: '/api/admin/game-upload-sessions/:sessionId',
-				requestUrl: '/api/admin/game-upload-sessions/session',
 			},
 			{
 				family: 'admin-banned-ips',

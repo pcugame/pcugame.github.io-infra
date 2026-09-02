@@ -4,60 +4,37 @@ module.exports = {
 		{
 			name: 'no-circular',
 			severity: 'error',
-			from: { path: '^src' },
+			from: { path: '^(?:src|architecture-fixtures)' },
 			to: { circular: true },
 		},
 		{
-			name: 'controllers-do-not-use-repositories',
+			name: 'no-api-processing-import',
 			severity: 'error',
-			from: { path: 'controller\\.ts$' },
-			to: { path: '(repository|lib/prisma)\\.ts$' },
-		},
-		{
-			name: 'controllers-and-indexes-do-not-use-runtime-or-env',
-			severity: 'error',
-			from: { path: '(controller|index)\\.ts$' },
-			to: { path: '(?:\\.runtime|/runtime|config/env)\\.ts$' },
-		},
-		{
-			name: 'controllers-and-indexes-do-not-use-global-resources',
-			severity: 'error',
-			from: { path: '(controller|index)\\.ts$' },
+			from: { path: '(?:app|server|backend-context|controller|service)\\.ts$' },
 			to: {
-				path: '(?:^|/)src/(?:infrastructure/production-ports|lib/(?:lifecycle|logger|prisma|s3|storage)|object-deletion|shared/(?:download-rate-limit|protected-download-limiter|site-settings|upload-limits))\\.ts$',
+				path: '(?:^node:child_process$|^sharp$|^pdf-to-img$|bounded-zip-validator|/modules/archive/|/modules/assets/upload/(?:file-validator|image-processing|pdf-processing|video-processing|zip-file-validation)|/modules/video/(?:command-runner|composition|ffmpeg-operations|materialize|processor|worker)|/modules/webgl/(?:deployment|processing)|/modules/admin/export/(?:file\\.adapter|nas-staging\\.adapter|worker))',
 			},
 		},
 		{
-			name: 'repositories-do-not-use-global-prisma',
+			name: 'no-api-worker-import',
 			severity: 'error',
-			from: { path: '(?:repository|\\.repository)\\.ts$' },
-			to: { path: '(?:^|/)src/lib/prisma\\.ts$' },
+			from: { path: '(?:app|server|backend-context|controller|service)\\.ts$' },
+			to: { path: '(?:worker|validation-worker|processing\\.composition)\\.ts$' },
 		},
 		{
-			name: 'features-do-not-use-runtime',
+			name: 'no-feature-storage-sdk-import',
 			severity: 'error',
-			from: { path: '(?:^|/)src/modules/' },
-			to: { path: '(?:\\.runtime|/runtime)\\.ts$' },
-		},
-		{
-			name: 'application-services-do-not-use-fastify',
-			severity: 'error',
-			from: { path: '(service|serializer|state-machine)\\.ts$' },
-			to: { path: '^fastify$' },
-		},
-		{
-			name: 'application-services-do-not-use-infrastructure',
-			severity: 'error',
-			from: { path: '(service|serializer|state-machine)\\.ts$' },
-			to: {
-				path: '(config/env|lib/(prisma|s3|storage)|object-deletion|repository)\\.ts$|\\.(runtime|adapter)\\.ts$',
+			from: {
+				path: '(?:^|/)src/modules/',
+				pathNot: '(?:^|/)(?:composition|[^/]+\\.composition|[^/]*worker)\\.ts$',
 			},
+			to: { path: '@aws-sdk/(?:client-s3|s3-request-presigner)' },
 		},
 		{
-			name: 'application-ports-do-not-use-infrastructure',
+			name: 'no-worker-api-import',
 			severity: 'error',
-			from: { path: '^src/application/' },
-			to: { path: '^src/(config|generated|infrastructure|lib|modules/.+/(runtime|repository))' },
+			from: { path: '(?:^|/)[^/]*worker\\.ts$' },
+			to: { path: '(?:^fastify$|/(?:app|server|backend-context|[^/]*controller)\\.ts$)' },
 		},
 	],
 	options: {
@@ -65,8 +42,6 @@ module.exports = {
 		exclude: { path: '(^|/)(dist|generated|__tests__)/' },
 		tsConfig: { fileName: 'tsconfig.json' },
 		enhancedResolveOptions: { exportsFields: ['exports'] },
-		reporterOptions: {
-			dot: { collapsePattern: 'node_modules/[^/]+' },
-		},
+		reporterOptions: { dot: { collapsePattern: 'node_modules/[^/]+' } },
 	},
 };

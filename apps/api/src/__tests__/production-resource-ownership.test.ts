@@ -67,7 +67,6 @@ const fileSystem: FileSystem = {
 
 const storage: ObjectStorage = {
 	upload: async () => {},
-	presign: async () => 'https://storage.test/object',
 	delete: async () => {},
 	head: async () => null,
 	readRange: async () => Buffer.alloc(0),
@@ -119,9 +118,66 @@ function schedulerHarness() {
 }
 
 describe('production BackendContext resource ownership', () => {
-	it('rejects an unsafe upload directory before startup recovery can enumerate or delete', async () => {
+	it('owns and destroys upload and protected-download signing clients independently', async () => {
+		const events: string[] = [];
+		const internal = fakeS3('internal', events);
+		const uploadSigning = fakeS3('upload-signing', events);
+		const protectedSigning = fakeS3('protected-signing', events);
+		const context = await createProductionBackendContext(testConfig, {
+			persistence: createScriptedBackendPersistence(),
+			routes: emptyRoutes,
+			resources: {
+				uploadLifecycle: ownedTestUploadLifecycleResource(),
+				logger: { value: testLogger, ownership: 'borrowed' },
+				settings: { value: settingsHarness('', []).store, ownership: 'borrowed' },
+				s3: { value: internal, ownership: 'borrowed' },
+				storage: { value: storage, ownership: 'borrowed' },
+				uploadSigningS3: {
+					value: uploadSigning,
+					ownership: 'owned',
+					close: () => uploadSigning.destroy(),
+				},
+				protectedDownloadSigningS3: {
+					value: protectedSigning,
+					ownership: 'owned',
+					close: () => protectedSigning.destroy(),
+				},
+			},
+		});
+
+		expect(context.resourceOwnership).toContainEqual({ name: 'uploadSigningS3', ownership: 'owned' });
+		expect(context.resourceOwnership).toContainEqual({ name: 'protectedDownloadSigningS3', ownership: 'owned' });
+		await context.close();
+		await context.close();
+		expect(protectedSigning.destroy).toHaveBeenCalledOnce();
+		expect(uploadSigning.destroy).toHaveBeenCalledOnce();
+		expect(internal.destroy).not.toHaveBeenCalled();
+		expect(events).toEqual(['protected-signing:s3', 'upload-signing:s3']);
+	});
+
+	it('runs direct upload recovery once at maintenance startup instead of waiting for the first interval', async () => {
+		const harness = schedulerHarness();
+		const recoverStaleUploads = vi.fn(async () => {});
+		const schedule = createMaintenanceSchedule(
+			harness.scheduler,
+			{ now: () => new Date(0) },
+			{
+				recoverStaleUploads,
+				purgeExpiredSessions: vi.fn(async () => 0),
+				reapOrphans: vi.fn(async () => {}),
+			},
+			testLogger,
+		);
+
+		schedule.start();
+		await vi.waitFor(() => expect(recoverStaleUploads).toHaveBeenCalledOnce());
+		expect(harness.tasks).toHaveLength(3);
+		await schedule.close();
+	});
+
+	it('does not revive the removed inline-upload directory scavenger at startup', async () => {
 		const ensurePrivateDirectory = vi.fn(async () => {
-			throw new Error('final upload directory is a symlink');
+			throw new Error('legacy inline upload directory must not be touched');
 		});
 		const listDirectoryEntries = vi.fn(async () => []);
 		const remove = vi.fn(async () => {});
@@ -143,8 +199,8 @@ describe('production BackendContext resource ownership', () => {
 			},
 		});
 
-		await expect(context.start()).rejects.toThrow('final upload directory is a symlink');
-		expect(ensurePrivateDirectory).toHaveBeenCalledWith('/tmp/pcugame-upload');
+		await expect(context.start()).resolves.toBeUndefined();
+		expect(ensurePrivateDirectory).not.toHaveBeenCalled();
 		expect(listDirectoryEntries).not.toHaveBeenCalled();
 		expect(remove).not.toHaveBeenCalled();
 	});
@@ -250,9 +306,6 @@ describe('production BackendContext resource ownership', () => {
 		a.protectedDownloads.addBan('10.0.0.1');
 		expect(a.protectedDownloads.isBanned('10.0.0.1')).toBe(true);
 		expect(b.protectedDownloads.isBanned('10.0.0.1')).toBe(false);
-		a.exportProgress.start(2025, 1);
-		expect(a.exportProgress.get()).toMatchObject({ year: 2025 });
-		expect(b.exportProgress.get()).toBeNull();
 		await a.settings.update({ maxGameFileMb: 1500 });
 		await expect(a.settings.get()).resolves.toMatchObject({ maxGameFileMb: 1500 });
 		await expect(b.settings.get()).resolves.toMatchObject({ maxGameFileMb: 2000 });
@@ -268,7 +321,6 @@ describe('production BackendContext resource ownership', () => {
 		expect(aScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 1)).toBe(true);
 		expect(bScheduler.tasks.every(({ cancel }) => cancel.mock.calls.length === 0)).toBe(true);
 		expect(() => b.protectedDownloads.check('10.0.0.2')).not.toThrow();
-		expect(b.exportProgress.get()).toBeNull();
 		expect(borrowedLogger.close).not.toHaveBeenCalled();
 		expect(a.resourceOwnership).toContainEqual({ name: 'logger', ownership: 'borrowed' });
 		expect(a.resourceOwnership).toContainEqual({ name: 'settings', ownership: 'owned' });
@@ -281,8 +333,7 @@ describe('production BackendContext resource ownership', () => {
 		['storage', ['s3']],
 		['uploadLimiter', ['settings', 's3']],
 		['lifecycle', ['upload', 'settings', 's3']],
-		['exportProgress', ['protected', 'lifecycle', 'upload', 'settings', 's3']],
-		['routes', ['export', 'protected', 'lifecycle', 'upload', 'settings', 's3']],
+		['routes', ['protected', 'lifecycle', 'upload', 'settings', 's3']],
 	] as const)('preserves the %s construction error and closes prior resources in reverse', async (failure, expected) => {
 		const events: string[] = [];
 		const original = new Error(`failure:${failure}`);
@@ -320,13 +371,6 @@ describe('production BackendContext resource ownership', () => {
 				start: () => {},
 				close: () => { events.push('protected'); },
 			} as unknown as ReturnType<typeof createProtectedDownloadLimiter>),
-			exportProgress: () => fail('exportProgress', {
-				start: () => {},
-				get: () => null,
-				update: () => {},
-				finish: () => {},
-				close: () => { events.push('export'); },
-			}),
 			routes: () => fail('routes', emptyRoutes),
 		};
 
@@ -431,6 +475,7 @@ describe('production BackendContext resource ownership', () => {
 			UPLOAD_MAX_CONCURRENT: 1,
 			API_PUBLIC_URL: `https://${label}.api.test`,
 			WEB_PUBLIC_URL: `https://${label}.web.test`,
+			PUBLIC_ASSET_ORIGIN: `https://${label}.assets.test`,
 			S3_BUCKET_PUBLIC: `${label}-public`,
 			S3_BUCKET_PROTECTED: `${label}-protected`,
 		}, {
@@ -523,9 +568,6 @@ describe('production BackendContext resource ownership', () => {
 		a.protectedDownloads.addBan('10.0.0.15');
 		expect(a.protectedDownloads.isBanned('10.0.0.15')).toBe(true);
 		expect(b.protectedDownloads.isBanned('10.0.0.15')).toBe(false);
-		a.exportProgress.start(2026, 1);
-		expect(a.exportProgress.get()).toMatchObject({ year: 2026 });
-		expect(b.exportProgress.get()).toBeNull();
 
 		await Promise.all([a.start(), b.start()]);
 		expect(aSettings.start).toHaveBeenCalledOnce();
@@ -602,8 +644,6 @@ describe('production BackendContext resource ownership', () => {
 		let enteredStart!: () => void;
 		const entered = new Promise<void>((resolve) => { enteredStart = resolve; });
 		const firstClose = vi.fn(() => { events.push('first:close'); });
-		const laterStart = vi.fn();
-		const laterClose = vi.fn(() => { events.push('later:close'); });
 		const settings = settingsHarness('race', events);
 		const s3 = fakeS3('race', events);
 		const context = await createProductionBackendContext(testConfig, {
@@ -626,14 +666,6 @@ describe('production BackendContext resource ownership', () => {
 					},
 					close: firstClose,
 				},
-				exportProgress: {
-					value: {
-						start: () => {}, get: () => null, update: () => {}, finish: () => {}, close: () => {},
-					},
-					ownership: 'owned',
-					start: laterStart,
-					close: laterClose,
-				},
 			},
 		});
 
@@ -644,9 +676,7 @@ describe('production BackendContext resource ownership', () => {
 		await expect(starting).rejects.toThrow('aborted by close');
 		await closing;
 		await context.close();
-		expect(laterStart).not.toHaveBeenCalled();
 		expect(firstClose).toHaveBeenCalledOnce();
-		expect(laterClose).toHaveBeenCalledOnce();
-		expect(events.slice(0, 2)).toEqual(['later:close', 'first:close']);
+		expect(events).toEqual(['first:close']);
 	});
 });

@@ -20,6 +20,52 @@ export interface WebglDeploymentKeys extends WebglProtectedSourceKeys, WebglPubl
 	entryKey: string;
 }
 
+export interface CanonicalWebglPublicKeys {
+	projectId: number;
+	deploymentId: string;
+	publicPrefix: string;
+	entryObjectKey: string;
+}
+
+export interface CanonicalWebglStagingKeys {
+	projectId: number;
+	deploymentId: string;
+	stagingPrefix: string;
+	stagingEntryObjectKey: string;
+}
+
+/** Canonical immutable public generation. Protected upload identity is separate. */
+export function createCanonicalWebglPublicKeys(
+	projectId: number,
+	deploymentId: string,
+): CanonicalWebglPublicKeys {
+	if (!Number.isSafeInteger(projectId) || projectId < 1
+		|| !new RegExp(`^${UUID_RE}$`, 'i').test(deploymentId)) {
+		throw new Error('Invalid canonical WebGL deployment identity');
+	}
+	const publicPrefix = `public/webgl/${projectId}/${deploymentId}/`;
+	return {
+		projectId,
+		deploymentId,
+		publicPrefix,
+		entryObjectKey: `${publicPrefix}index.html`,
+	};
+}
+
+export function createCanonicalWebglStagingKeys(
+	projectId: number,
+	deploymentId: string,
+): CanonicalWebglStagingKeys {
+	createCanonicalWebglPublicKeys(projectId, deploymentId);
+	const stagingPrefix = `protected/publication-staging/projects/${projectId}/webgl/${deploymentId}/`;
+	return {
+		projectId,
+		deploymentId,
+		stagingPrefix,
+		stagingEntryObjectKey: `${stagingPrefix}index.html`,
+	};
+}
+
 export function createWebglDeploymentKeys(
 	projectId: number,
 	deploymentId: string,
@@ -44,8 +90,4 @@ export function parseWebglEntryKey(projectId: number, entryKey: string): WebglDe
 export function parseWebglSourceKey(projectId: number, sourceKey: string): WebglDeploymentKeys | null {
 	const match = new RegExp(`^webgl/${projectId}/(${UUID_RE})/source\\.zip$`, 'i').exec(sourceKey);
 	return match?.[1] ? createWebglDeploymentKeys(projectId, match[1]) : null;
-}
-
-export function webglUrl(apiPublicUrl: string, projectId: number): string {
-	return `${apiPublicUrl.replace(/\/$/, '')}/api/public/webgl/${projectId}/`;
 }
