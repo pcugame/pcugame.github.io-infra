@@ -25,6 +25,14 @@ export interface DirectAssetUploadProgress {
 const CONTROL_RETRY_ATTEMPTS = 4;
 const UPLOAD_PART_RETRY_ATTEMPTS = 4;
 
+function throwIfAborted(signal?: AbortSignal | null): void {
+	if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+}
+
+function isAbortError(error: unknown): boolean {
+	return error instanceof DOMException && error.name === 'AbortError';
+}
+
 function retryAfterMs(value: string | null, fallbackMs: number): number {
 	if (!value) return fallbackMs;
 	const seconds = Number(value);
@@ -53,33 +61,48 @@ function isTransientControlError(error: unknown): boolean {
 	return !(error instanceof ApiError) || error.status === 429 || error.status >= 500;
 }
 
-async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function apiRequest<T>(
+	path: string,
+	init: RequestInit = {},
+	retrySignal?: AbortSignal,
+): Promise<T> {
+	const effectiveRetrySignal = retrySignal ?? init.signal;
+	throwIfAborted(effectiveRetrySignal);
 	if (import.meta.env.VITE_MOCK === 'true') {
 		const { handleMockRequest } = await import('./mock/handler');
-		return handleMockRequest<T>(path, {
+		const result = await handleMockRequest<T>(path, {
 			method: init.method ?? 'GET',
 			body: init.body,
 		});
+		throwIfAborted(init.signal);
+		return result;
 	}
 
 	const url = `${env.API_BASE_URL}${path}`;
 	for (let attempt = 0; ; attempt += 1) {
+		throwIfAborted(effectiveRetrySignal);
 		const res = await fetch(url, { ...init, credentials: 'include' });
 		if (res.ok) {
-			if (res.status === 204) return undefined as T;
+			if (res.status === 204) {
+				throwIfAborted(init.signal);
+				return undefined as T;
+			}
 			const json = await res.json() as Record<string, unknown>;
+			throwIfAborted(init.signal);
 			if (json.ok && json.data) return json.data as T;
 			return json as T;
 		}
 
+		throwIfAborted(effectiveRetrySignal);
 		let body: unknown;
 		try { body = await res.json(); } catch { body = null; }
+		throwIfAborted(effectiveRetrySignal);
 		if (res.status !== 429 || attempt >= CONTROL_RETRY_ATTEMPTS) {
 			throw new ApiError(res.status, res.statusText, body);
 		}
 		await wait(
 			retryAfterMs(res.headers.get('retry-after'), Math.min(30_000, 1_000 * (2 ** attempt))),
-			init.signal,
+			effectiveRetrySignal,
 		);
 	}
 }
@@ -110,8 +133,14 @@ function checksumBase64(bytes: ArrayBuffer): string {
 	return btoa(binary);
 }
 
-export async function getDirectAssetUploadStatus(sessionId: string): Promise<DirectAssetUploadStatus> {
-	return apiRequest<DirectAssetUploadStatus>(`/api/admin/direct-asset-upload-sessions/${sessionId}`);
+export async function getDirectAssetUploadStatus(
+	sessionId: string,
+	signal?: AbortSignal,
+): Promise<DirectAssetUploadStatus> {
+	return apiRequest<DirectAssetUploadStatus>(
+		`/api/admin/direct-asset-upload-sessions/${sessionId}`,
+		{ signal },
+	);
 }
 
 export async function cancelDirectAssetUploadSession(sessionId: string): Promise<void> {
@@ -177,21 +206,26 @@ class DirectUploadPartError extends Error {
 async function putDirectUploadPart(
 	capability: { url: string; requiredHeaders: Record<string, string> },
 	body: Blob,
+	signal?: AbortSignal,
 ): Promise<string> {
+	throwIfAborted(signal);
 	if (import.meta.env.VITE_MOCK === 'true') {
 		const { handleMockRequest } = await import('./mock/handler');
 		const result = await handleMockRequest<{ etag?: string }>(capability.url, {
 			method: 'PUT', body,
 		});
+		throwIfAborted(signal);
 		if (!result.etag) throw new Error('Mock UploadPart response omitted ETag');
 		return result.etag;
 	}
 	let response: Response;
 	try {
 		response = await fetch(capability.url, {
-			method: 'PUT', headers: capability.requiredHeaders, body,
+			method: 'PUT', headers: capability.requiredHeaders, body, signal,
 		});
 	} catch (error) {
+		throwIfAborted(signal);
+		if (isAbortError(error)) throw error;
 		throw new DirectUploadPartError(0, undefined, { cause: error });
 	}
 	if (!response.ok) {
@@ -213,7 +247,9 @@ type PartCapability = DirectGameUploadPartUrlsResponse['parts'][number];
 async function requestPartCapabilities(
 	session: DirectAssetUploadSession,
 	parts: readonly PreparedPart[],
+	signal?: AbortSignal,
 ): Promise<Map<number, PartCapability>> {
+	throwIfAborted(signal);
 	const signed = await apiRequest<DirectGameUploadPartUrlsResponse>(
 		`/api/admin/direct-asset-upload-sessions/${session.sessionId}/part-urls`,
 		{
@@ -224,7 +260,9 @@ async function requestPartCapabilities(
 				parts: parts.map(({ partNumber, checksumSha256 }) => ({ partNumber, checksumSha256 })),
 			} satisfies DirectGameUploadPartUrlsRequest),
 		},
+		signal,
 	);
+	throwIfAborted(signal);
 	if (signed.generation !== session.generation || signed.parts.length !== parts.length) {
 		throw new Error('Direct upload capability response did not match the session generation');
 	}
@@ -243,20 +281,24 @@ async function putPartWithBoundedRetry(
 	session: DirectAssetUploadSession,
 	part: PreparedPart,
 	initialCapability: PartCapability,
+	signal?: AbortSignal,
 ): Promise<string> {
 	let capability = initialCapability;
 	for (let attempt = 0; ; attempt += 1) {
+		throwIfAborted(signal);
 		try {
-			return await putDirectUploadPart(capability, part.body);
+			return await putDirectUploadPart(capability, part.body, signal);
 		} catch (error) {
+			throwIfAborted(signal);
+			if (isAbortError(error)) throw error;
 			if (!(error instanceof DirectUploadPartError) || attempt >= UPLOAD_PART_RETRY_ATTEMPTS) throw error;
 			if (error.status === 429) {
-				await wait(error.retryAfterMilliseconds ?? Math.min(30_000, 1_000 * (2 ** attempt)));
+				await wait(error.retryAfterMilliseconds ?? Math.min(30_000, 1_000 * (2 ** attempt)), signal);
 				continue;
 			}
 			if (error.status !== 0 && error.status !== 401 && error.status !== 403 && error.status < 500) throw error;
-			await wait(Math.min(8_000, 500 * (2 ** attempt)));
-			const refreshed = await requestPartCapabilities(session, [part]);
+			await wait(Math.min(8_000, 500 * (2 ** attempt)), signal);
+			const refreshed = await requestPartCapabilities(session, [part], signal);
 			capability = refreshed.get(part.partNumber)!;
 		}
 	}
@@ -275,6 +317,7 @@ export async function uploadDirectAssetFile(
 		resume?: DirectAssetUploadSession;
 		onSession?: (session: DirectAssetUploadSession) => void;
 		submissionItem?: { id: string; clientToken: string };
+		signal?: AbortSignal;
 	} = {},
 ): Promise<DirectGameUploadCompletionResponse> {
 	const owner: DirectAssetUploadOwner = typeof ownerOrProjectId === 'number'
@@ -283,11 +326,14 @@ export async function uploadDirectAssetFile(
 	if (owner.type === 'EXHIBITION' && kind !== 'POSTER') {
 		throw new Error('Only poster uploads may be owned by an exhibition');
 	}
-	const source = await createFileSourceIdentity(file);
+	throwIfAborted(options.signal);
+	const source = await createFileSourceIdentity(file, { signal: options.signal });
+	throwIfAborted(options.signal);
 	let session: DirectAssetUploadSession;
 	let uploaded = new Map<number, { etag: string; sizeBytes: number }>();
 	if (options.resume) {
-		const status = await getDirectAssetUploadStatus(options.resume.sessionId);
+		const status = await getDirectAssetUploadStatus(options.resume.sessionId, options.signal);
+		throwIfAborted(options.signal);
 		if (status.owner.type !== owner.type || status.owner.id !== owner.id || status.kind !== kind || status.generation !== options.resume.generation
 			|| status.totalBytes !== file.size || status.originalName !== file.name
 			|| status.sourceIdentity !== source.sourceIdentity || status.state !== 'UPLOADING') {
@@ -311,10 +357,12 @@ export async function uploadDirectAssetFile(
 					...(options.submissionItem ? { submissionItem: options.submissionItem } : {}),
 				} satisfies DirectGameUploadCreateSessionRequest),
 			},
+			options.signal,
 		);
 		session = { ...created, kind };
 	}
 	options.onSession?.(session);
+	throwIfAborted(options.signal);
 	const parts: DirectGameUploadCompleteRequest['parts'] = [...uploaded.entries()]
 		.map(([partNumber, part]) => ({ partNumber, ...part }))
 		.sort((a, b) => a.partNumber - b.partNumber);
@@ -322,22 +370,29 @@ export async function uploadDirectAssetFile(
 	const pendingPartNumbers = Array.from({ length: session.totalParts }, (_, index) => index + 1)
 		.filter((partNumber) => !uploaded.has(partNumber));
 	for (let offset = 0; offset < pendingPartNumbers.length; offset += DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE) {
+		throwIfAborted(options.signal);
 		const batchNumbers = pendingPartNumbers.slice(offset, offset + DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE);
 		const prepared: PreparedPart[] = [];
 		for (const partNumber of batchNumbers) {
+			throwIfAborted(options.signal);
 			const start = (partNumber - 1) * session.partSizeBytes;
 			const body = file.slice(start, Math.min(start + session.partSizeBytes, file.size));
+			const bytes = await body.arrayBuffer();
+			throwIfAborted(options.signal);
+			const checksum = await crypto.subtle.digest('SHA-256', bytes);
+			throwIfAborted(options.signal);
 			prepared.push({
 				partNumber,
 				body,
-				checksumSha256: checksumBase64(await crypto.subtle.digest('SHA-256', await body.arrayBuffer())),
+				checksumSha256: checksumBase64(checksum),
 			});
 		}
-		const capabilities = await requestPartCapabilities(session, prepared);
+		const capabilities = await requestPartCapabilities(session, prepared, options.signal);
 		for (const part of prepared) {
+			throwIfAborted(options.signal);
 			const capability = capabilities.get(part.partNumber);
 			if (!capability) throw new Error('Direct upload capability was not issued');
-			const etag = await putPartWithBoundedRetry(session, part, capability);
+			const etag = await putPartWithBoundedRetry(session, part, capability, options.signal);
 			parts.push({ partNumber: part.partNumber, etag, sizeBytes: part.body.size });
 			uploadedBytes += part.body.size;
 			onProgress?.({
@@ -347,11 +402,15 @@ export async function uploadDirectAssetFile(
 				totalBytes: file.size,
 				percent: Math.round((parts.length / session.totalParts) * 100),
 			});
+			throwIfAborted(options.signal);
 		}
 	}
 	parts.sort((a, b) => a.partNumber - b.partNumber);
-	return apiRequest<DirectGameUploadCompletionResponse>(`/api/admin/direct-asset-upload-sessions/${session.sessionId}/complete`, {
+	throwIfAborted(options.signal);
+	const completion = await apiRequest<DirectGameUploadCompletionResponse>(`/api/admin/direct-asset-upload-sessions/${session.sessionId}/complete`, {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ generation: session.generation, parts } satisfies DirectGameUploadCompleteRequest),
-	});
+	}, options.signal);
+	throwIfAborted(options.signal);
+	return completion;
 }

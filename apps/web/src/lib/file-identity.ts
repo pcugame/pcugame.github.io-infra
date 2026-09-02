@@ -12,15 +12,25 @@ async function sha256(bytes: ArrayBuffer | Uint8Array): Promise<Uint8Array> {
 	return new Uint8Array(await crypto.subtle.digest('SHA-256', source));
 }
 
+function throwIfAborted(signal?: AbortSignal): void {
+	if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+}
+
 /** Browser-side source proof used before any direct UploadPart capability. */
-export async function createFileSourceIdentity(file: File): Promise<DirectUploadSourceIdentity> {
+export async function createFileSourceIdentity(
+	file: File,
+	options: { signal?: AbortSignal } = {},
+): Promise<DirectUploadSourceIdentity> {
 	const digests: string[] = [];
 	const digestBytes: Uint8Array[] = [];
 	for (let offset = 0; offset < file.size; offset += SOURCE_IDENTITY_BLOCK_SIZE_BYTES) {
+		throwIfAborted(options.signal);
 		const digest = await sha256(await file.slice(offset, offset + SOURCE_IDENTITY_BLOCK_SIZE_BYTES).arrayBuffer());
+		throwIfAborted(options.signal);
 		digestBytes.push(digest);
 		digests.push(hex(digest));
 	}
+	throwIfAborted(options.signal);
 	const header = new ArrayBuffer(16);
 	const view = new DataView(header);
 	view.setBigUint64(0, BigInt(file.size));
@@ -33,9 +43,11 @@ export async function createFileSourceIdentity(file: File): Promise<DirectUpload
 	rootInput.set(prefix);
 	rootInput.set(new Uint8Array(header), prefix.length);
 	rootInput.set(manifest, prefix.length + 16);
+	const sourceIdentity = hex(await sha256(rootInput));
+	throwIfAborted(options.signal);
 	return {
 		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
-		sourceIdentity: hex(await sha256(rootInput)),
+		sourceIdentity,
 		sourceIdentityBlockSizeBytes: SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
 		sourceIdentityBlockDigests: digests,
 	};
