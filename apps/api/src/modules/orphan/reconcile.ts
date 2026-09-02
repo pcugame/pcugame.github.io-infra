@@ -10,6 +10,12 @@ export interface ReconcileOptions {
 	apply: boolean;
 	olderThanMinutes: number;
 	startedAt: Date;
+	exactTargets?: ExactReconcileTarget[];
+}
+
+export interface ExactReconcileTarget {
+	bucket: string;
+	key: string;
 }
 
 export function parseReconcileOptions(
@@ -17,14 +23,45 @@ export function parseReconcileOptions(
 	startedAt = new Date(),
 ): ReconcileOptions {
 	const apply = argv.includes('--apply');
+	const exactTargets: ExactReconcileTarget[] = [];
+	const exactTargetIdentities = new Set<string>();
+	for (const argument of argv) {
+		if (argument === '--exact-target' || argument.startsWith('--exact-target=')) {
+			if (!argument.startsWith('--exact-target=')) {
+				throw new Error('--exact-target must have the form <bucket>:<object-key>');
+			}
+			const value = argument.slice('--exact-target='.length);
+			const separator = value.indexOf(':');
+			const bucket = separator < 0 ? '' : value.slice(0, separator);
+			const key = separator < 0 ? '' : value.slice(separator + 1);
+			if (!bucket || !key) {
+				throw new Error('--exact-target must have the form <bucket>:<object-key>');
+			}
+			const identity = `${bucket}\0${key}`;
+			if (exactTargetIdentities.has(identity)) {
+				throw new Error(`Duplicate --exact-target: ${bucket}:${key}`);
+			}
+			exactTargetIdentities.add(identity);
+			exactTargets.push({ bucket, key });
+		}
+	}
 	const ageArgument = argv.find((argument) => argument.startsWith('--older-than-minutes='));
+	const ageValue = ageArgument?.slice('--older-than-minutes='.length);
+	if (ageValue !== undefined && ageValue.trim().length === 0) {
+		throw new Error('--older-than-minutes must be a non-negative number');
+	}
 	const olderThanMinutes = ageArgument
-		? Number(ageArgument.slice('--older-than-minutes='.length))
+		? Number(ageValue)
 		: 60;
 	if (!Number.isFinite(olderThanMinutes) || olderThanMinutes < 0) {
 		throw new Error('--older-than-minutes must be a non-negative number');
 	}
-	return { apply, olderThanMinutes, startedAt };
+	return {
+		apply,
+		olderThanMinutes,
+		startedAt,
+		...(exactTargets.length > 0 ? { exactTargets } : {}),
+	};
 }
 
 async function listAllObjects(storage: ObjectStorage, bucket: string): Promise<StoredObject[]> {
@@ -32,6 +69,16 @@ async function listAllObjects(storage: ObjectStorage, bucket: string): Promise<S
 	// Older adapters expose keys only. Unknown LastModified is intentionally not
 	// synthesized: the age fence must fail closed.
 	return (await storage.listKeys(bucket, '')).map((key) => ({ key }));
+}
+
+function createAgeFence(options: ReconcileOptions): Date {
+	const fence = new Date(
+		options.startedAt.getTime() - options.olderThanMinutes * 60 * 1000,
+	);
+	if (Number.isNaN(fence.getTime())) {
+		throw new Error('--older-than-minutes produces an invalid age fence');
+	}
+	return fence;
 }
 
 export async function reconcileObjects(input: {
@@ -43,7 +90,17 @@ export async function reconcileObjects(input: {
 	logger?: Pick<Console, 'log' | 'error'>;
 }): Promise<{ scanned: number; eligible: number; enqueued: number; skippedUnknownAge: number }> {
 	const logger = input.logger ?? console;
+	const fence = createAgeFence(input.options);
 	const orphanRepository = createOrphanRepository(input.prisma);
+	const exactTargets = input.options.exactTargets ?? [];
+	if (exactTargets.length > 0) {
+		const configuredBuckets = new Set([input.publicBucket, input.protectedBucket]);
+		for (const target of exactTargets) {
+			if (!configuredBuckets.has(target.bucket)) {
+				throw new Error(`--exact-target bucket is not configured: ${target.bucket}`);
+			}
+		}
+	}
 	const inventory = await collectObjectReferences(
 		input.prisma,
 		{
@@ -53,9 +110,15 @@ export async function reconcileObjects(input: {
 		{ error: (context, message) => logger.error(message, context) },
 	);
 	const referenceIndex = createObjectReferenceIndex(inventory);
-	const fence = new Date(
-		input.options.startedAt.getTime() - input.options.olderThanMinutes * 60 * 1000,
-	);
+	if (exactTargets.length > 0) {
+		return reconcileExactTargets({
+			...input,
+			logger,
+			referenceIndex,
+			orphanRepository,
+			fence,
+		});
+	}
 
 	let scanned = 0;
 	let eligible = 0;
@@ -66,7 +129,7 @@ export async function reconcileObjects(input: {
 		scanned += objects.length;
 		const candidates: StoredObject[] = [];
 		for (const object of objects) {
-			if (!object.lastModified) {
+			if (!object.lastModified || Number.isNaN(object.lastModified.getTime())) {
 				skippedUnknownAge++;
 				continue;
 			}
@@ -101,4 +164,85 @@ export async function reconcileObjects(input: {
 		}
 	}
 	return { scanned, eligible, enqueued, skippedUnknownAge };
+}
+
+async function reconcileExactTargets(input: {
+	prisma: PrismaClient;
+	storage: ObjectStorage;
+	publicBucket: string;
+	protectedBucket: string;
+	options: ReconcileOptions;
+	logger: Pick<Console, 'log' | 'error'>;
+	referenceIndex: ReturnType<typeof createObjectReferenceIndex>;
+	orphanRepository: ReturnType<typeof createOrphanRepository>;
+	fence: Date;
+}): Promise<{ scanned: number; eligible: number; enqueued: number; skippedUnknownAge: number }> {
+	let eligible = 0;
+	let enqueued = 0;
+	let skippedUnknownAge = 0;
+	const exactTargets = input.options.exactTargets ?? [];
+	for (const target of exactTargets) {
+		// Exact mode deliberately establishes the current object state with one
+		// HEAD per supplied target; it must not expand a target into bucket LIST.
+		const object = await input.storage.head(target.bucket, target.key);
+		const existing = await input.prisma.orphanObject.findUnique({
+			where: {
+				orphan_bucket_storage_key: { bucket: target.bucket, storageKey: target.key },
+			},
+		});
+		if (existing?.state !== 'CANCELLED'
+			|| existing.cancelReason !== 'live-reference-detected'
+			|| existing.targetKind !== 'EXACT') {
+			input.logger.log(`[${target.bucket}] exact ${target.key} skipped=not-cancelled-live-reference-outbox`);
+			continue;
+		}
+
+		if (input.referenceIndex.referencesTarget({
+			bucket: target.bucket,
+			targetKind: 'EXACT',
+			key: target.key,
+		})) {
+			input.logger.log(`[${target.bucket}] exact ${target.key} skipped=live-reference-detected`);
+			continue;
+		}
+		if (object && (!object.lastModified || Number.isNaN(object.lastModified.getTime()))) {
+			skippedUnknownAge++;
+			input.logger.log(`[${target.bucket}] exact ${target.key} skipped=unknown-age`);
+			continue;
+		}
+		if (object?.lastModified && (object.lastModified > input.fence
+			|| object.lastModified > input.options.startedAt)) {
+			input.logger.log(`[${target.bucket}] exact ${target.key} skipped=recent`);
+			continue;
+		}
+
+		const decision = object ? 'would-rearm' : 'would-rearm-absent';
+		if (!input.options.apply) {
+			eligible++;
+			input.logger.log(`[${target.bucket}] exact ${target.key} ${decision}`);
+			continue;
+		}
+		const rearm = await input.orphanRepository.upsertOrphan(
+			target.bucket,
+			target.key,
+			'reconcile',
+			'EXACT',
+			input.options.startedAt,
+			{ requireCancelledLiveReference: true },
+		);
+		if (!('rearmed' in rearm) || !rearm.rearmed) {
+			input.logger.log(`[${target.bucket}] exact ${target.key} skipped=outbox-state-changed`);
+			continue;
+		}
+		eligible++;
+		enqueued++;
+		input.logger.log(`[${target.bucket}] exact ${target.key} rearmed${object ? '' : '-absent'}`);
+	}
+
+	return {
+		scanned: exactTargets.length,
+		eligible,
+		enqueued,
+		skippedUnknownAge,
+	};
 }
