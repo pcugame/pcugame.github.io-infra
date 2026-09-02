@@ -115,7 +115,8 @@ describe('direct asset upload browser client', () => {
 		const createStarted = new Promise<void>((resolve) => { markCreateStarted = resolve; });
 		let finishCreate!: (response: Response) => void;
 		const createResponse = new Promise<Response>((resolve) => { finishCreate = resolve; });
-		const fetchMock = vi.fn(async (request: string | URL | Request, _init?: RequestInit) => {
+		const fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
+			void init;
 			const url = String(request);
 			if (url.endsWith('/api/admin/projects/7/direct-game-upload-sessions')) {
 				markCreateStarted();
