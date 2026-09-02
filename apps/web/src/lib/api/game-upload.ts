@@ -74,15 +74,15 @@ async function apiRequest<T>(
 			method: init.method ?? 'GET',
 			body: init.body,
 		});
-		throwIfAborted(effectiveRetrySignal);
+		throwIfAborted(init.signal);
 		return result;
 	}
 
 	const url = `${env.API_BASE_URL}${path}`;
 	const res = await fetch(url, { ...init, credentials: 'include' });
-	throwIfAborted(effectiveRetrySignal);
 
 	if (!res.ok) {
+		throwIfAborted(effectiveRetrySignal);
 		let body: unknown;
 		try { body = await res.json(); } catch { body = null; }
 		throwIfAborted(effectiveRetrySignal);
@@ -90,12 +90,12 @@ async function apiRequest<T>(
 	}
 
 	if (res.status === 204) {
-		throwIfAborted(effectiveRetrySignal);
+		throwIfAborted(init.signal);
 		return undefined as T;
 	}
 
 	const json = await res.json() as Record<string, unknown>;
-	throwIfAborted(effectiveRetrySignal);
+	throwIfAborted(init.signal);
 	if (json.ok && json.data) return json.data as T;
 	return json as T;
 }

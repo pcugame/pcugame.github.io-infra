@@ -93,6 +93,61 @@ describe('direct asset upload browser client', () => {
 			.toBe(true);
 	});
 
+	it('delivers a late successful create locator before honoring pause', async () => {
+		vi.stubGlobal('crypto', webcrypto as unknown as Crypto);
+		if (typeof Blob.prototype.arrayBuffer !== 'function') {
+			installedBlobArrayBuffer = true;
+			Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+				configurable: true,
+				value(this: Blob) {
+					return new Promise<ArrayBuffer>((resolve, reject) => {
+						const reader = new FileReader();
+						reader.onerror = () => reject(reader.error);
+						reader.onload = () => resolve(reader.result as ArrayBuffer);
+						reader.readAsArrayBuffer(this);
+					});
+				},
+			});
+		}
+		const controller = new AbortController();
+		const onSession = vi.fn();
+		let markCreateStarted!: () => void;
+		const createStarted = new Promise<void>((resolve) => { markCreateStarted = resolve; });
+		let finishCreate!: (response: Response) => void;
+		const createResponse = new Promise<Response>((resolve) => { finishCreate = resolve; });
+		const fetchMock = vi.fn(async (request: string | URL | Request, _init?: RequestInit) => {
+			const url = String(request);
+			if (url.endsWith('/api/admin/projects/7/direct-game-upload-sessions')) {
+				markCreateStarted();
+				return createResponse;
+			}
+			throw new Error(`Unexpected request: ${url}`);
+		});
+		vi.stubGlobal('fetch', fetchMock);
+
+		const upload = uploadDirectAssetFile(
+			7,
+			new File(['123'], 'game.zip', { type: 'application/zip' }),
+			'GAME',
+			undefined,
+			{ signal: controller.signal, onSession },
+		);
+		await createStarted;
+		const reason = new DOMException('Paused', 'AbortError');
+		controller.abort(reason);
+		finishCreate(jsonResponse({
+			sessionId: 'session-late-create', owner: { type: 'PROJECT', id: 7 }, generation: 1,
+			partSizeBytes: 3, totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z',
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64),
+		}));
+
+		await expect(upload).rejects.toBe(reason);
+		expect(onSession).toHaveBeenCalledOnce();
+		expect(onSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'session-late-create' }));
+		expect(fetchMock).toHaveBeenCalledOnce();
+		expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeUndefined();
+	});
+
 	it('prefers pause over a concurrent capability HTTP failure after preserving the created session', async () => {
 		vi.stubGlobal('crypto', webcrypto as unknown as Crypto);
 		if (typeof Blob.prototype.arrayBuffer !== 'function') {
