@@ -69,12 +69,24 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 		async cancel(sessionId, actorId) {
 			return client.$transaction(async (tx) => {
 				const session = await tx.assetUploadSession.findUnique({ where: { id: sessionId } });
-				if (!session || session.userId !== actorId || !['ALLOCATING', 'UPLOADING'].includes(session.state)) return { cancelled: false };
+				if (!session || session.userId !== actorId) return { cancelled: false };
+				if (session.state === 'CANCELLED') return { cancelled: true };
+				if (!['ALLOCATING', 'UPLOADING'].includes(session.state)) return { cancelled: false };
 				const updated = await tx.assetUploadSession.updateMany({
-					where: { id: sessionId, state: { in: ['ALLOCATING', 'UPLOADING'] } },
+					where: { id: sessionId, userId: actorId, state: { in: ['ALLOCATING', 'UPLOADING'] } },
 					data: { state: 'CANCELLED', uploadId: null, completionLeaseToken: null, completionLeaseUntil: null },
 				});
-				if (!updated.count) return { cancelled: false };
+				if (!updated.count) {
+					// A concurrent DELETE may have committed while this transaction was
+					// waiting on the conditional UPDATE. Re-read the durable state so a
+					// lost first response can be retried idempotently without weakening
+					// the conflict policy for completion and terminal success states.
+					const durable = await tx.assetUploadSession.findUnique({
+						where: { id: sessionId },
+						select: { userId: true, state: true },
+					});
+					return { cancelled: durable?.userId === actorId && durable.state === 'CANCELLED' };
+				}
 				if (session.uploadId) {
 					await queueMultipartAbortTask(tx, { bucket: session.bucket, storageKey: session.objectKey, uploadId: session.uploadId, reason: 'direct-asset-upload-cancelled', uploadSessionId: session.id });
 					return { cancelled: true, abort: { bucket: session.bucket, objectKey: session.objectKey, uploadId: session.uploadId } };

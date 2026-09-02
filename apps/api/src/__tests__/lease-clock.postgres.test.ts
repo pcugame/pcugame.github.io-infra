@@ -11,6 +11,7 @@ import { createMultipartAbortRepository } from '../modules/multipart-abort/repos
 import { createMultipartAbortService } from '../modules/multipart-abort/service.js';
 import { createUploadIntentRepository } from '../modules/upload-intent/repository.js';
 import { createUploadIntentService } from '../modules/upload-intent/service.js';
+import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 const FAR_PAST = new Date('2000-01-01T00:00:00.000Z');
@@ -191,6 +192,64 @@ describe.runIf(runPostgresIntegration)(
 				createUploadIntentRepository(secondWorker).claimStale(1, 'intent-second', 60_000),
 			]);
 			expect([...first, ...second].filter((row) => row.id === id)).toHaveLength(1);
+		});
+
+		it('makes direct multipart cancel durable and idempotent across concurrent connections', async () => {
+			const exhibition = await control.exhibition.create({
+				data: { year: 30_000 + actorId, title: `direct-cancel-${testId}` },
+			});
+			const project = await control.project.create({
+				data: {
+					exhibitionId: exhibition.id,
+					creatorId: actorId,
+					slug: `direct-cancel-${testId}`,
+					title: 'Direct cancel concurrency',
+				},
+			});
+			const sessionId = randomUUID();
+			const objectKey = `protected/uploads/${sessionId}/1/source.zip`;
+			const uploadId = `cancel-${testId}`;
+			const first = createAssetUploadRepository(firstWorker);
+			const second = createAssetUploadRepository(secondWorker);
+			try {
+				await control.assetUploadSession.create({
+					data: {
+						id: sessionId, projectId: project.id, userId: actorId, kind: 'GAME', state: 'UPLOADING',
+						originalName: 'cancel.zip', declaredMimeType: 'application/zip', totalBytes: 7n,
+						partSizeBytes: 5, totalParts: 2, bucket, objectKey, uploadId,
+						generation: 1, sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'c'.repeat(64),
+						sourceIdentityBlockSizeBytes: 1024, sourceIdentityBlockManifest: '', expiresAt: FAR_FUTURE,
+					},
+				});
+
+				const outcomes = await Promise.all([
+					first.cancel(sessionId, actorId),
+					second.cancel(sessionId, actorId),
+				]);
+				expect(outcomes).toEqual([
+					expect.objectContaining({ cancelled: true }),
+					expect.objectContaining({ cancelled: true }),
+				]);
+				expect(outcomes.filter((result) => result.abort)).toHaveLength(1);
+				await expect(first.cancel(sessionId, actorId)).resolves.toEqual({ cancelled: true });
+
+				await expect(control.assetUploadSession.findUniqueOrThrow({ where: { id: sessionId } }))
+					.resolves.toMatchObject({ state: 'CANCELLED', uploadId: null });
+				await expect(control.multipartAbortTask.findMany({ where: { bucket, storageKey: objectKey } }))
+					.resolves.toEqual([expect.objectContaining({ uploadId, uploadSessionId: sessionId })]);
+
+				await expect(first.reservePartCapabilities({
+					sessionId, actorId, generation: 1, partCount: 1, windowMs: 60_000, maxIssues: 1,
+				})).rejects.toThrow('DIRECT_UPLOAD_CAPABILITY_REJECTED');
+				await expect(first.claimCompletion({
+					sessionId, actorId, generation: 1, token: 'cancelled-completion', leaseMs: 60_000,
+				})).resolves.toBe('invalid');
+			} finally {
+				await control.multipartAbortTask.deleteMany({ where: { bucket, storageKey: objectKey } });
+				await control.assetUploadSession.deleteMany({ where: { id: sessionId } });
+				await control.project.delete({ where: { id: project.id } });
+				await control.exhibition.delete({ where: { id: exhibition.id } });
+			}
 		});
 
 		it('uses PostgreSQL time for multipart-abort takeover and fences stale resolve/failure', async () => {
