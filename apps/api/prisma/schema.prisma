@@ -288,6 +288,7 @@ model ProjectMember {
 }
 
 model Asset {
+  videoSortOrder Int? @map("video_sort_order")
   id                 Int                 @id @default(autoincrement())
   projectId          Int?                @map("project_id")
   exhibitionId       Int?                @map("exhibition_id")

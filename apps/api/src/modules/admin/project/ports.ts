@@ -167,6 +167,7 @@ export interface ProjectRepository {
 		cancelledSession: ActiveUploadCleanup | null;
 	}>;
 	findAssetById(id: number): Promise<PosterCandidate | null>;
+	setProjectVideoOrder(projectId: number, expectedOrder: number[], order: number[]): Promise<{ order: number[] }>;
 	setProjectPoster(projectId: number, assetId: number): Promise<unknown>;
 	bulkDeleteProjectsReturningAssets(ids: number[], outbox: DeletionOutboxConfig): Promise<{
 		result: { count: number };
@@ -200,6 +201,7 @@ export type ProjectCrudRepository = Pick<ProjectRepository,
 	| 'findProjectsForUser'
 	| 'isMemberOfProject'
 	| 'setProjectPoster'
+	| 'setProjectVideoOrder'
 	| 'updateProject'
 >;
 

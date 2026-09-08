@@ -1,3 +1,5 @@
+import { normalizeProjectVideoOrder, countReservedProjectVideos, MAX_PROJECT_VIDEOS } from '../assets/video-order.js';
+import { conflict } from '../../shared/errors.js';
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { createCanonicalAsset } from '../assets/representation-write.js';
 import { withAssetMutationTransaction } from '../assets/mutation-transaction.js';
@@ -28,6 +30,12 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.projectId} FOR UPDATE`);
 				} else {
 					await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "exhibitions" WHERE "id" = ${input.exhibitionId!} FOR UPDATE`);
+				}
+				if (input.kind === 'VIDEO') {
+					if (input.projectId === null) throw conflict('VIDEO uploads must be project-owned');
+					const videos = await normalizeProjectVideoOrder(tx, input.projectId);
+					const reserved = await countReservedProjectVideos(tx, input.projectId);
+					if (videos.length + reserved >= MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
 				}
 				const expected = input.kind === 'GAME' && input.projectId !== null
 					? await tx.asset.findFirst({

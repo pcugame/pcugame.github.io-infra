@@ -50,6 +50,51 @@ describe('DirectVideoUploadWidget', () => {
 		expect(waitForDirectAssetReady).toHaveBeenNthCalledWith(2, 'video-2', { signal: expect.any(AbortSignal) });
 	});
 
+	it('blocks a direct-upload selection larger than the available video slots', () => {
+		const { container } = render(
+			<QueryClientProvider client={new QueryClient()}>
+				<DirectVideoUploadWidget projectId={77} maxFiles={2} />
+			</QueryClientProvider>,
+		);
+		const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+		const files = Array.from({ length: 3 }, (_, index) =>
+			new File(['video'], `video-${index}.mp4`, { type: 'video/mp4' }),
+		);
+
+		fireEvent.change(input, { target: { files } });
+
+		expect(screen.getByText('동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다. 현재 2개까지 추가할 수 있습니다.')).toBeTruthy();
+		expect(screen.queryByText(/3개 동영상 선택됨/)).toBeNull();
+	});
+
+	it('allows a resumed queue when only its remaining files fit the available slots', async () => {
+		const files = Array.from({ length: 5 }, (_, index) =>
+			new File(['video'], `video-${index}.mp4`, { type: 'video/mp4' }),
+		);
+		const session = {
+			sessionId: 'video-resume', owner: { type: 'PROJECT', id: 77 }, generation: 1, partSizeBytes: 16,
+			totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z', sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'h'.repeat(64), kind: 'VIDEO',
+		};
+		window.sessionStorage.setItem('pcu.direct-video-upload:77', JSON.stringify({
+			session, originalName: files[2]!.name, totalBytes: files[2]!.size, completed: 2,
+		}));
+		getDirectAssetUploadStatus.mockResolvedValue({
+			...session, state: 'UPLOADING', originalName: files[2]!.name, totalBytes: files[2]!.size, parts: [],
+		});
+		const { container } = render(
+			<QueryClientProvider client={new QueryClient()}>
+				<DirectVideoUploadWidget projectId={77} maxFiles={3} />
+			</QueryClientProvider>,
+		);
+
+		await waitFor(() => expect(getDirectAssetUploadStatus).toHaveBeenCalledWith('video-resume', expect.any(AbortSignal)));
+		fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files } });
+
+		expect(screen.getByText('5개 동영상 선택됨 (2/5 완료)')).toBeTruthy();
+		expect(screen.getByRole('button', { name: '이어올리기' })).toBeTruthy();
+		expect(screen.queryByText(/현재 3개까지 추가할 수 있습니다/)).toBeNull();
+	});
+
 	it('pauses the current file without starting the next one, then resumes from the completed offset', async () => {
 		const first = new File(['a'], 'first.mp4', { type: 'video/mp4' });
 		const second = new File(['b'], 'second.webm', { type: 'video/webm' });

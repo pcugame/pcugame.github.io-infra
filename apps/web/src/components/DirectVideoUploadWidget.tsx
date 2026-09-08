@@ -13,6 +13,8 @@ import { queryKeys } from '../lib/query';
 
 type Phase = 'idle' | 'uploading' | 'verifying' | 'ready' | 'error';
 
+const EMPTY_VIDEO_FILES: readonly File[] = [];
+
 interface SavedVideoSession {
 	session: DirectAssetUploadSession;
 	originalName: string;
@@ -27,6 +29,8 @@ interface Props {
 	autoStart?: boolean;
 	onComplete?: () => void;
 	onSkip?: () => void;
+	/** Available VIDEO slots for this upload operation (project maximum is five). */
+	maxFiles?: number;
 }
 
 /**
@@ -35,10 +39,11 @@ interface Props {
  */
 export default function DirectVideoUploadWidget({
 	projectId,
-	initialFiles = [],
+	initialFiles = EMPTY_VIDEO_FILES,
 	autoStart = false,
 	onComplete,
 	onSkip,
+	maxFiles = 5,
 }: Props) {
 	const qc = useQueryClient();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
@@ -481,8 +486,16 @@ export default function DirectVideoUploadWidget({
 					accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
 					onChange={(event) => {
 						const selected = Array.from(event.target.files ?? []);
-						setFiles(selected);
 						const saved = resumableRef.current;
+						const pendingCount = Math.max(0, selected.length - (saved?.completed ?? 0));
+						if (pendingCount > maxFiles) {
+							setFiles([]);
+							updateCompleted(0);
+							setError(`동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다. 현재 ${maxFiles}개까지 추가할 수 있습니다.`);
+							event.target.value = '';
+							return;
+						}
+						setFiles(selected);
 						if (saved && !matchesSavedFile(selected, saved)) {
 							setError('중단된 파일과 선택한 파일 순서 또는 크기가 일치하지 않습니다.');
 							return;
@@ -491,6 +504,7 @@ export default function DirectVideoUploadWidget({
 						else updateCompleted(0);
 						setError(null);
 					}}
+					disabled={maxFiles <= 0}
 				/>
 			)}
 			{files.length > 0 && <p className="file-info">{files.length}개 동영상 선택됨 ({completed}/{files.length} 완료)</p>}

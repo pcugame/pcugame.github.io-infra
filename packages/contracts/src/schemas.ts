@@ -135,3 +135,8 @@ export type GoogleAuthRequestSchemaInput = z.infer<typeof GoogleAuthRequestSchem
 export type DevAuthLoginRequestSchemaInput = z.infer<typeof DevAuthLoginRequestSchema>;
 export type DevAuthLoginErrorRequestSchemaInput = z.infer<typeof DevAuthLoginErrorRequestSchema>;
 export type GameUploadCreateSessionSchemaInput = z.infer<typeof GameUploadCreateSessionSchema>;
+
+export const SetProjectVideoOrderSchema = z.object({
+	expectedOrder: z.array(z.number().int().positive()),
+	order: z.array(z.number().int().positive()),
+}).strict();

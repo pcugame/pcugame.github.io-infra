@@ -12,6 +12,7 @@ import {
 	GoogleAuthRequestSchema,
 	ProjectStatusSchema,
 	SetProjectPosterSchema,
+	SetProjectVideoOrderSchema,
 	SubmitProjectPayloadBaseSchema,
 	SwapProjectMembersSchema,
 	UpdateExhibitionBaseSchema,
@@ -160,3 +161,5 @@ export function parseNonNegativeIntParam(value: string, name: string): number {
 	}
 	return n;
 }
+
+export const SetProjectVideoOrderBody = SetProjectVideoOrderSchema;

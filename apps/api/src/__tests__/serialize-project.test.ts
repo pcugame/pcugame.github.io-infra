@@ -287,6 +287,7 @@ describe('serializeProjectDetail', () => {
 			})],
 		}));
 		expect(result.video).toEqual({
+			assetId: 2, sortOrder: null, role: 'MAIN',
 			url: 'https://api.example.com/api/assets/2/download?variant=playback',
 			mimeType: 'video/mp4',
 			originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',

@@ -96,6 +96,7 @@ export type AdminProjectDetail = {
 	} | {
 		id: number;
 		kind: Extract<AssetKind, 'GAME' | 'VIDEO'>;
+		videoSortOrder?: number | null;
 		url: string;
 		originalDownloadUrl?: string;
 		playbackUrl?: string;
@@ -139,3 +140,5 @@ export type SwapProjectMembersRequest = {
 	memberIdA: number;
 	memberIdB: number;
 };
+
+export type SetProjectVideoOrderRequest = { expectedOrder: number[]; order: number[] };

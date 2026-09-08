@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	BASELINE_MIGRATION,
 	PROJECT_PUBLICATION_MIGRATION,
+	PROJECT_VIDEO_ORDER_MIGRATION,
 	REQUIRED_EXPAND_MIGRATIONS,
 	assertNoFailedReleaseMigration,
 	assertRuntime,
@@ -47,4 +48,11 @@ describe('Phase 1 release migration history policy', () => {
 			`release migration history contains failed/rolled-back rows: ${PROJECT_PUBLICATION_MIGRATION}`,
 		);
 	});
+	it('requires the additive video-order migration before starting the new Phase 1 runtime', () => {
+		const missing = completePhase1History().filter((row) => row.migration_name !== PROJECT_VIDEO_ORDER_MIGRATION);
+		expect(releaseStatus(missing)).toMatchObject({ canonicalObjectRelocationExpand: true, projectVideoOrderExpand: false, expand: false });
+		expect(() => assertRuntime(missing)).toThrow('phase1 runtime requires expand=applied');
+		expect(releaseStatus(completePhase1History())).toMatchObject({ projectVideoOrderExpand: true, expand: true });
+	});
+
 });

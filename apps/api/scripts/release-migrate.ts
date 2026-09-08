@@ -20,6 +20,8 @@ export const PROJECT_SUBMISSION_MIGRATION = '20260821500000_project_submission_e
 export const PROJECT_FINALIZING_MIGRATION = '20260821550000_project_submission_finalizing_status';
 export const PROJECT_PUBLICATION_MIGRATION = '20260821600000_project_publication_expand';
 export const PHASE1_TARGET_MIGRATION = '20260821700000_canonical_object_relocation_expand';
+export const PROJECT_VIDEO_ORDER_MIGRATION = '20260821800000_project_video_order_expand';
+export const PHASE1_MIGRATION_CEILING = PROJECT_VIDEO_ORDER_MIGRATION;
 export const REQUIRED_EXPAND_MIGRATIONS = [
 	CANONICAL_EXPAND_MIGRATION,
 	PROJECT_DRAFT_MIGRATION,
@@ -27,6 +29,7 @@ export const REQUIRED_EXPAND_MIGRATIONS = [
 	PROJECT_FINALIZING_MIGRATION,
 	PROJECT_PUBLICATION_MIGRATION,
 	PHASE1_TARGET_MIGRATION,
+	PROJECT_VIDEO_ORDER_MIGRATION,
 ] as const;
 // Phase 1 deliberately knows the Phase-2 record name only to fail closed if a
 // contract database is paired with this expand-compatible runtime. The
@@ -93,6 +96,7 @@ export function releaseStatus(rows: readonly MigrationRow[]) {
 		projectSubmissionExpand: applied.has(PROJECT_SUBMISSION_MIGRATION),
 		projectPublicationExpand: applied.has(PROJECT_PUBLICATION_MIGRATION),
 		canonicalObjectRelocationExpand: applied.has(PHASE1_TARGET_MIGRATION),
+		projectVideoOrderExpand: applied.has(PROJECT_VIDEO_ORDER_MIGRATION),
 		expand: REQUIRED_EXPAND_MIGRATIONS.every((migration) => applied.has(migration)),
 		contract: applied.has(CONTRACT_MIGRATION),
 		completedMigrations: [...applied].sort(),
@@ -187,7 +191,7 @@ async function run(command: string, args: readonly string[], cwd: string, env: N
 	});
 }
 
-async function stagedMigrate(target: typeof PHASE1_TARGET_MIGRATION, databaseUrl: string): Promise<void> {
+async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING, databaseUrl: string): Promise<void> {
 	const root = apiRoot();
 	const sourcePrisma = join(root, 'prisma');
 	const migrationNames = (await readdir(join(sourcePrisma, 'migrations'), { withFileTypes: true }))
@@ -244,7 +248,7 @@ async function main(): Promise<void> {
 	}
 
 	if (status.contract) throw new Error('contract is already applied; expand runtime must never be deployed');
-	if (!status.expand) await stagedMigrate(PHASE1_TARGET_MIGRATION, databaseUrl);
+	if (!status.expand) await stagedMigrate(PHASE1_MIGRATION_CEILING, databaseUrl);
 	await seedStorageBucketRegistry(databaseUrl);
 
 	rows = await migrationRows(databaseUrl);

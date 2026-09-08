@@ -13,6 +13,7 @@ describe('Phase 1 release artifact tree', () => {
 			'20260821550000_project_submission_finalizing_status',
 			'20260821600000_project_publication_expand',
 			'20260821700000_canonical_object_relocation_expand',
+			'20260821800000_project_video_order_expand',
 		]) expect(migrations).toContain(name);
 		expect(migrations).not.toContain('20260822000000_canonical_asset_contract');
 		const submissionExpand = await read('prisma/migrations/20260821500000_project_submission_expand/migration.sql');

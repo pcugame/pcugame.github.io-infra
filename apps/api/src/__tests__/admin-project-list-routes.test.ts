@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 	updateProject: vi.fn(),
 	deleteProject: vi.fn(),
 	deleteWebgl: vi.fn(),
+	setVideoOrder: vi.fn(),
 	setPoster: vi.fn(),
 	bulkDeleteProjects: vi.fn(),
 	loadProjectWithAccess: vi.fn(),
@@ -61,6 +62,7 @@ const projectController = createProjectController({
 		deleteProject: mocks.deleteProject,
 		deleteWebgl: mocks.deleteWebgl,
 		setPoster: mocks.setPoster,
+		setVideoOrder: mocks.setVideoOrder,
 		bulkDeleteProjects: mocks.bulkDeleteProjects,
 	} as ReturnType<typeof createProjectService>,
 	access: { loadProjectWithAccess: mocks.loadProjectWithAccess },
@@ -187,4 +189,27 @@ describe('admin project list route query', () => {
 			limit: 20,
 		}));
 	});
+	it('checks access and forwards the complete expected video order', async () => {
+		mocks.setVideoOrder.mockResolvedValue({ order: [12, 11] });
+		const res = await app.inject({ method: 'PUT', url: '/api/admin/projects/7/videos/order',
+			headers: { 'x-test-role': 'ADMIN' }, payload: { expectedOrder: [11, 12], order: [12, 11] } });
+		expect(res.statusCode).toBe(200);
+		expect(mocks.loadProjectWithAccess).toHaveBeenCalledWith(expect.objectContaining({ id: 303 }), 7);
+		expect(mocks.setVideoOrder).toHaveBeenCalledWith(7, [11, 12], [12, 11]);
+	});
+	it('lets the repository return 409 for a legacy project with more than five videos', async () => {
+		mocks.setVideoOrder.mockRejectedValue(Object.assign(new Error('Project exceeds the five video limit'), { statusCode: 409 }));
+		const order = [1, 2, 3, 4, 5, 6];
+		const res = await app.inject({ method: 'PUT', url: '/api/admin/projects/7/videos/order',
+			headers: { 'x-test-role': 'ADMIN' }, payload: { expectedOrder: order, order } });
+		expect(res.statusCode).toBe(409);
+	});
+	it('denies video ordering when the actor has no project access', async () => {
+		mocks.loadProjectWithAccess.mockRejectedValueOnce(Object.assign(new Error('Not your project'), { statusCode: 403 }));
+		const res = await app.inject({ method: 'PUT', url: '/api/admin/projects/7/videos/order',
+			headers: { 'x-test-role': 'USER' }, payload: { expectedOrder: [11], order: [11] } });
+		expect(res.statusCode).toBe(403);
+		expect(mocks.setVideoOrder).not.toHaveBeenCalled();
+	});
+
 });

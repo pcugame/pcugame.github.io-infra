@@ -1,3 +1,5 @@
+import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS, nextProjectVideoOrder } from '../../assets/video-order.js';
+import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
 import type {
 	AssetKind,
 	Prisma,
@@ -19,7 +21,7 @@ import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
 import { createCanonicalAsset } from '../../assets/representation-write.js';
 import { parseWebglEntryKey } from '../../webgl/paths.js';
-import { conflict } from '../../../shared/errors.js';
+import { conflict, notFound } from '../../../shared/errors.js';
 import {
 	projectActiveUploadDeletionTargets,
 	projectAssetDeletionTargets,
@@ -67,7 +69,7 @@ export const projectDetailInclude = {
 	assets: {
 		where: { status: 'READY' as const },
 		orderBy: { createdAt: 'asc' as const },
-		include: { representations: { where: { state: 'READY' as const } } },
+		include: { representations: { where: { OR: [{ state: 'READY' }, { role: 'PLAYBACK' }] as Prisma.AssetRepresentationWhereInput[] } } },
 	},
 	poster: { include: { representations: { where: { state: 'READY' as const } } } },
 	currentWebglDeployment: true,
@@ -431,6 +433,25 @@ export function createProjectCrudRepository(
 				status: asset.status,
 			};
 		},
+		setProjectVideoOrder(projectId, expectedOrder, order) {
+			return withAssetMutationTransaction(client, async (tx) => {
+				const projects = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
+					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
+				`);
+				if (!projects.length) throw notFound('Project not found');
+				const videos = await getProjectVideos(tx, projectId);
+				const current = videos.map(({ id }) => id);
+				if (current.length > MAX_PROJECT_VIDEOS) throw conflict('Project exceeds the five video limit');
+				if (expectedOrder.length !== current.length || expectedOrder.some((id, index) => id !== current[index])) {
+					throw conflict('Video order changed; refresh and try again');
+				}
+				if (order.length !== current.length || new Set(order).size !== current.length || order.some((id) => !current.includes(id))) {
+					throw conflict('Order must contain every current video exactly once');
+				}
+				await rewriteProjectVideoOrder(tx, projectId, order);
+				return { order };
+			});
+		},
 		setProjectPoster(projectId, assetId) {
 			return assetMutation.setProjectPoster(projectId, assetId);
 		},
@@ -521,6 +542,7 @@ export function createProjectCrudRepository(
 			});
 		},
 		createProjectWithAssets(data) {
+			if (data.savedFiles.filter((file) => file.kind === 'VIDEO').length > MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
 			return client.$transaction(async (tx) => {
 				const project = await tx.project.create({
 					data: {
@@ -543,10 +565,12 @@ export function createProjectCrudRepository(
 				});
 
 				let posterAssetId: number | null = null;
+				let videoSortOrder = 0;
 				for (const savedFile of data.savedFiles) {
 					const asset = await createCanonicalAsset(tx, {
 						projectId: project.id,
 						kind: savedFile.kind,
+						...(savedFile.kind === 'VIDEO' ? { videoSortOrder: videoSortOrder++ } : {}),
 						bucket: savedFile.bucket ?? (
 							savedFile.kind === 'GAME' || savedFile.kind === 'VIDEO'
 								? buckets.protectedBucket
@@ -591,15 +615,18 @@ export function createProjectCrudRepository(
 			});
 		},
 		createAsset(data) {
-			return client.$transaction(async (tx) => {
+			return withAssetMutationTransaction(client, async (tx) => {
 				const {
 					uploadIntentIds = [],
 					idempotency,
 					renditions = [],
 					...assetData
 				} = data;
+				const videoSortOrder = assetData.kind === 'VIDEO'
+					? await nextProjectVideoOrder(tx, assetData.projectId) : undefined;
 				const asset = await createCanonicalAsset(tx, {
 					...assetData,
+					videoSortOrder,
 					bucket: assetData.bucket
 						?? (assetData.isPublic ? buckets.publicBucket : buckets.protectedBucket),
 					renditions,

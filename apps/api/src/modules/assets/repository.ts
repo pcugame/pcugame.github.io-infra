@@ -1,3 +1,4 @@
+import { getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from './video-order.js';
 import {
 	Prisma,
 	type AssetKind,
@@ -210,6 +211,10 @@ export function createAssetsRepository(
 						data: { status: 'DELETING' },
 						select: { id: true },
 					});
+				}
+				if (asset.kind === 'VIDEO' && asset.status === 'READY'
+					&& (await getProjectVideos(tx, asset.projectId)).length <= MAX_PROJECT_VIDEOS) {
+					await normalizeProjectVideoOrder(tx, asset.projectId);
 				}
 				await tx.project.updateMany({
 					where: { id: asset.projectId, posterAssetId: asset.id },

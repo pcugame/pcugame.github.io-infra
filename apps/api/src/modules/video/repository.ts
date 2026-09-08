@@ -1,3 +1,4 @@
+import { nextProjectVideoOrder } from '../assets/video-order.js';
 import {
 	Prisma,
 	type AssetUploadSession,
@@ -160,6 +161,7 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 
 		commitVideoReady(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
+				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.session.projectId} FOR UPDATE`);
 				const session = await tx.assetUploadSession.findUnique({ where: { id: input.session.id } });
 				if (!session || session.projectId === null || session.exhibitionId !== null) {
 					throw new Error('VIDEO upload session must be project-owned');
@@ -177,11 +179,13 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 				if (owned.length !== 1) {
 					throw new Error('VIDEO validation lease lost');
 				}
+				const videoSortOrder = await nextProjectVideoOrder(tx, session.projectId, session.id);
 				const separatePlayback = input.playback.objectKey !== session.objectKey
 					|| input.playback.bucket !== session.bucket;
 				const asset = await createCanonicalAsset(tx, {
 					projectId: session.projectId,
 					kind: 'VIDEO',
+					videoSortOrder,
 					originalBucket: session.bucket,
 					storageKey: session.objectKey,
 					playbackBucket: input.playback.bucket,

@@ -21,6 +21,7 @@ const projectService = createProjectService({
 		isMemberOfProject: vi.fn(),
 		updateProject: vi.fn(),
 		findAssetById: vi.fn(),
+		setProjectVideoOrder: vi.fn(),
 		setProjectPoster: vi.fn(),
 	},
 	serializeProjectDetail: vi.fn(),

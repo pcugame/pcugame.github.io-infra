@@ -44,6 +44,7 @@ import {
 	GameUploadCreateSessionBody,
 	GoogleLoginBody,
 	SetPosterBody,
+	SetProjectVideoOrderBody,
 	SwapMembersBody,
 	UpdateExhibitionBody,
 	UpdateMemberBody,
@@ -671,6 +672,7 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		headers: IdempotencyHeadersSchema,
 		response: jsonResponse(ProjectAssetUploadResponseSchema, 201),
 	}),
+	contract({ method: 'PUT', url: '/api/admin/projects/:id/videos/order', family: 'admin-projects', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: SetProjectVideoOrderBody, response: jsonResponse(z.object({ order: z.array(z.number().int().positive()).max(5) }).strict()) }),
 	contract({
 		method: 'PATCH',
 		url: '/api/admin/projects/:id/poster',

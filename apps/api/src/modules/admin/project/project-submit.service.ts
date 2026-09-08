@@ -52,6 +52,7 @@ export async function processFileParts(
 	fileParts: CollectedUploadFile[],
 	pipeline: UploadPipelinePort,
 ): Promise<SavedUpload[]> {
+	if (fileParts.filter((part) => part.fieldname === 'videoFile').length > 5) throw badRequest('A project supports at most 5 videos');
 	const savedFiles: SavedUpload[] = [];
 	for (const fp of fileParts) {
 		let kind: AssetKind;

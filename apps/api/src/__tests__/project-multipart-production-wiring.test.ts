@@ -139,6 +139,7 @@ function portHarness(label: string) {
 		deleteProjectReturningAssets: vi.fn(async () => { throw new Error('not scripted'); }),
 		clearWebglDeployment: vi.fn(async () => { throw new Error('not scripted'); }),
 		findAssetById: vi.fn(async () => null),
+		setProjectVideoOrder: vi.fn(async (_id, _expectedOrder, order) => ({ order })),
 		setProjectPoster: vi.fn(async () => undefined),
 		bulkDeleteProjectsReturningAssets: vi.fn(async () => { throw new Error('not scripted'); }),
 		bulkUpdateStatus: vi.fn(async () => ({ count: 0 })),

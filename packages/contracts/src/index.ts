@@ -62,6 +62,7 @@ export type {
 	BulkUpdateProjectStatusRequest,
 	PaginationInfo,
 	SetProjectPosterRequest,
+	SetProjectVideoOrderRequest,
 	SortOrder,
 	SubmitProjectPayload,
 	SubmitProjectResponse,

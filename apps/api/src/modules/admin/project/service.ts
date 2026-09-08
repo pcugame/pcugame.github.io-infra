@@ -216,6 +216,7 @@ export function createProjectService(deps: ProjectServiceDependencies) {
 		updateProject: ((...args) => updateProject(deps, ...args)) as WithoutDependencies<typeof updateProject>,
 		deleteProject: ((...args) => deleteProject(deps, ...args)) as WithoutDependencies<typeof deleteProject>,
 		deleteWebgl: ((...args) => deleteWebgl(deps, ...args)) as WithoutDependencies<typeof deleteWebgl>,
+		setVideoOrder: (projectId: number, expectedOrder: number[], order: number[]) => deps.repository.setProjectVideoOrder(projectId, expectedOrder, order),
 		setPoster: ((...args) => setPoster(deps, ...args)) as WithoutDependencies<typeof setPoster>,
 		bulkDeleteProjects: ((...args) => bulkDeleteProjects(deps, ...args)) as WithoutDependencies<typeof bulkDeleteProjects>,
 	};

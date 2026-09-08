@@ -80,7 +80,7 @@ function representationsFor(data: CanonicalAssetObjectWrite): Prisma.AssetRepres
  */
 export async function createCanonicalAsset(
 	tx: Prisma.TransactionClient,
-	input: CanonicalAssetOwner & CanonicalAssetObjectWrite & { kind: AssetKind },
+	input: CanonicalAssetOwner & CanonicalAssetObjectWrite & { kind: AssetKind; videoSortOrder?: number },
 ) {
 	if ((input.projectId === undefined) === (input.exhibitionId === undefined)) {
 		throw new Error('Canonical asset must have exactly one domain owner');
@@ -90,6 +90,7 @@ export async function createCanonicalAsset(
 			projectId: input.projectId,
 			exhibitionId: input.exhibitionId,
 			kind: input.kind,
+			videoSortOrder: input.videoSortOrder,
 			status: 'READY',
 			storageKey: null,
 			playbackStorageKey: null,

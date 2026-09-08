@@ -1,3 +1,4 @@
+import { compareProjectVideos } from '../../../shared/project-video-order.js';
 import type { AdminProjectDetail, AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from '@pcu/contracts';
 import { isPosterUrlSafe } from '../../../shared/poster-validation.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
@@ -18,6 +19,8 @@ function canonicalProtectedAssetUrl(base: string, assetId: number, variant: 'ori
 
 type SerializableRepresentation = {
 	role: string;
+	state?: string;
+	error?: string | null;
 	objectKey: string;
 	mimeType: string;
 	width?: number | null;
@@ -30,6 +33,8 @@ export type SerializableAsset = {
 	storageKey: string | null;
 	playbackStorageKey: string | null;
 	originalName: string;
+	videoSortOrder?: number | null;
+	createdAt?: Date;
 	mimeType: string;
 	playbackMimeType: string;
 	sizeBytes: bigint;
@@ -47,7 +52,13 @@ function representation(
 	asset: { representations?: SerializableRepresentation[] },
 	role: string,
 ): SerializableRepresentation | undefined {
-	return asset.representations?.find((candidate) => candidate.role === role);
+	return asset.representations?.find((candidate) => candidate.role === role && (candidate.state === undefined || candidate.state === 'READY'));
+}
+
+function playbackStatusFor(asset: SerializableAsset): AssetPlaybackStatus {
+	const playback = asset.representations?.find((candidate) => candidate.role === 'PLAYBACK');
+	if (playback) return playback.state === undefined || playback.state === 'READY' ? 'READY' : playback.state === 'FAILED' ? 'FAILED' : 'PENDING';
+	return asset.playbackStatus;
 }
 
 function playbackMimeFor(asset: SerializableAsset): string {
@@ -180,12 +191,17 @@ export function createProjectSerializer(
 			: null;
 		const videos = project.assets
 			.filter((a) => a.kind === 'VIDEO')
-			.map((videoAsset) => ({
-				url: canonicalProtectedAssetUrl(base, videoAsset.id, 'playback'),
+			.sort(compareProjectVideos)
+			.map((videoAsset, index) => ({
+				assetId: videoAsset.id,
+				sortOrder: videoAsset.videoSortOrder ?? null,
+				role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,
+				...(playbackStatusFor(videoAsset) === 'READY'
+					? { url: canonicalProtectedAssetUrl(base, videoAsset.id, 'playback') } : {}),
 				mimeType: playbackMimeFor(videoAsset),
 				originalDownloadUrl: canonicalProtectedAssetUrl(base, videoAsset.id, 'original'),
-				playbackStatus: representation(videoAsset, 'PLAYBACK') ? 'READY' : videoAsset.playbackStatus,
-				playbackError: videoAsset.playbackError || undefined,
+				playbackStatus: playbackStatusFor(videoAsset),
+				playbackError: videoAsset.representations?.find((rep) => rep.role === 'PLAYBACK')?.error || videoAsset.playbackError || undefined,
 			}));
 		const video = videos[0] ?? null;
 
@@ -242,6 +258,7 @@ export function createProjectSerializer(
 				return [{
 					id: a.id,
 					kind: a.kind,
+					...(a.kind === 'VIDEO' ? { videoSortOrder: a.videoSortOrder ?? null } : {}),
 					url: canonicalProtectedAssetUrl(base, a.id, 'original'),
 					originalDownloadUrl: a.kind === 'VIDEO'
 						? canonicalProtectedAssetUrl(base, a.id, 'original')
@@ -249,10 +266,8 @@ export function createProjectSerializer(
 					playbackUrl: a.kind === 'VIDEO'
 						? canonicalProtectedAssetUrl(base, a.id, 'playback')
 						: undefined,
-					playbackStatus: a.kind === 'VIDEO' && representation(a, 'PLAYBACK')
-						? 'READY'
-						: a.kind === 'VIDEO' ? a.playbackStatus : undefined,
-					playbackError: a.kind === 'VIDEO' && a.playbackError ? a.playbackError : undefined,
+					playbackStatus: a.kind === 'VIDEO' ? playbackStatusFor(a) : undefined,
+					playbackError: a.kind === 'VIDEO' ? a.representations?.find((rep) => rep.role === 'PLAYBACK')?.error || a.playbackError || undefined : undefined,
 					originalName: a.originalName,
 					size: Number(a.sizeBytes),
 				}];

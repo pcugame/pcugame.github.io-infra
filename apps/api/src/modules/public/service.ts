@@ -1,3 +1,4 @@
+import { compareProjectVideos } from '../../shared/project-video-order.js';
 import type {
 	AssetKind,
 	Platform,
@@ -57,6 +58,8 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	members: { id: number; name: string; studentId: string }[];
 	assets: {
 		id: number;
+		videoSortOrder?: number | null;
+		createdAt?: Date;
 		kind: AssetKind;
 		isPublic: boolean;
 		storageKey: string | null;
@@ -68,7 +71,8 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 		mimeType: string;
 		playbackMimeType?: string;
 		playbackStatus?: string;
-		representations?: PublicImageRepresentationRecord[];
+		playbackError?: string;
+		representations?: Array<PublicImageRepresentationRecord & { mimeType?: string; error?: string | null }>;
 	}[];
 }
 
@@ -278,15 +282,23 @@ export async function getProjectDetail(
 	const gameAssets = project.assets.filter((a) => a.kind === 'GAME');
 	const gameAsset = gameAssets.length > 0 ? gameAssets[gameAssets.length - 1] : undefined;
 
-	const videos = project.assets.flatMap((videoAsset) => {
-		if (videoAsset.kind !== 'VIDEO') return [];
+	const videos = project.assets.filter((asset) => asset.kind === 'VIDEO' && ((asset.representations?.length ?? 0) > 0
+			? asset.representations?.some((rep) => rep.role === 'ORIGINAL' && rep.state === 'READY') : !!asset.storageKey))
+		.sort(compareProjectVideos).flatMap((videoAsset, index) => {
 		const canonical = videoAsset.representations ?? [];
 		const playback = canonical.find((representation) => representation.role === 'PLAYBACK');
-		if (canonical.length > 0 && playback?.state !== 'READY') return [];
-		if (canonical.length === 0 && videoAsset.playbackStatus !== 'READY') return [];
+		const playbackStatus = canonical.length > 0
+			? playback?.state === 'READY' ? 'READY' as const : playback?.state === 'FAILED' ? 'FAILED' as const : 'PENDING' as const
+			: videoAsset.playbackStatus === 'READY' ? 'READY' as const : videoAsset.playbackStatus === 'FAILED' ? 'FAILED' as const : 'PENDING' as const;
 		return [{
-			url: protectedAssetUrl(deps, videoAsset.id, 'playback'),
-			mimeType: videoAsset.playbackMimeType || videoAsset.mimeType || 'video/mp4',
+			assetId: videoAsset.id,
+			sortOrder: videoAsset.videoSortOrder ?? null,
+			role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,
+			...(playbackStatus === 'READY' ? { url: protectedAssetUrl(deps, videoAsset.id, 'playback') } : {}),
+			mimeType: playback?.mimeType || videoAsset.playbackMimeType || videoAsset.mimeType || 'video/mp4',
+			originalDownloadUrl: protectedAssetUrl(deps, videoAsset.id, 'original'),
+			playbackStatus,
+			...((playback?.error || videoAsset.playbackError) ? { playbackError: playback?.error || videoAsset.playbackError } : {}),
 		}];
 	});
 	const video = videos[0] ?? null;
@@ -296,7 +308,7 @@ export async function getProjectDetail(
 		: undefined;
 	const validKinds = new Set(project.assets.map((asset) => asset.kind));
 	const isIncomplete = project.isIncomplete !== false
-		|| !gameAsset || videos.length === 0 || !serializedPoster;
+		|| !gameAsset || !videos.some((candidate) => candidate.playbackStatus === 'READY') || !serializedPoster;
 	let webglEntryUrl: string | undefined;
 	if (project.currentWebglDeploymentId != null) {
 		const deployment = project.currentWebglDeployment;

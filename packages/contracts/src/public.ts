@@ -47,7 +47,11 @@ export type PublicExhibitionProjectsResponse = {
 
 /** Project video (locally uploaded) */
 export type ProjectVideo = {
-	url: string;
+	assetId: number;
+	sortOrder: number | null;
+	role: 'MAIN' | 'ADDITIONAL';
+	/** Present only when a READY browser-playable representation exists. */
+	url?: string;
 	mimeType: string;
 	originalDownloadUrl?: string;
 	playbackStatus?: AssetPlaybackStatus;

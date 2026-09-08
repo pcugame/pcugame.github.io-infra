@@ -39,6 +39,7 @@ export interface SubmissionFilesState {
 }
 
 const mb = 1024 * 1024;
+const MAX_PROJECT_VIDEOS = 5;
 
 export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): SubmissionFilesState {
 	const [posterFile, setPosterFile] = useState<File | null>(null);
@@ -169,6 +170,11 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 
 	const handleVideoChange = (e: ChangeEvent<HTMLInputElement>) => {
 		const files = Array.from(e.target.files ?? []);
+		if (videoFiles.length + files.length > MAX_PROJECT_VIDEOS) {
+			setFileSizeError(`동영상은 프로젝트당 최대 ${MAX_PROJECT_VIDEOS}개까지 선택할 수 있습니다.`);
+			e.target.value = '';
+			return;
+		}
 		const oversized = findOversizedAssetFile('VIDEO', files, limits);
 		if (oversized) {
 			setFileSizeError(

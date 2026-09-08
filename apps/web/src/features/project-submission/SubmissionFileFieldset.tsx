@@ -80,7 +80,7 @@ export function SubmissionFileFieldset({
 			</div>
 
 			<div className="form-field">
-				<label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 최대 {limits.videoMaxMb}MB)</label>
+				<label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 파일당 최대 {limits.videoMaxMb}MB, 프로젝트당 최대 5개)</label>
 				<input
 					id="videoFile"
 					type="file"

@@ -186,12 +186,22 @@ export const PublicExhibitionProjectsResponseSchema = z.object({
 }).strict();
 
 export const ProjectVideoSchema = z.object({
-	url: UrlSchema,
+	assetId: PositiveIntegerSchema,
+	sortOrder: z.number().int().min(0).max(4).nullable(),
+	role: z.enum(['MAIN', 'ADDITIONAL']),
+	url: UrlSchema.optional(),
 	mimeType: z.string().min(1),
 	originalDownloadUrl: UrlSchema.optional(),
 	playbackStatus: AssetPlaybackStatusSchema.optional(),
 	playbackError: z.string().optional(),
-}).strict();
+}).strict()
+	.refine((video) => video.url !== undefined || video.originalDownloadUrl !== undefined, {
+		message: 'Video must expose playback or original download capability',
+	})
+	.refine((video) => video.playbackStatus !== 'READY' || video.url !== undefined, {
+		message: 'READY playback requires a playback URL',
+		path: ['url'],
+	});
 
 export const PublicProjectImageSchema = z.object({
 	id: PositiveIntegerSchema,
@@ -313,6 +323,7 @@ export const AdminProjectDetailSchema = z.object({
 		z.object({
 			id: PositiveIntegerSchema,
 			kind: z.enum(['GAME', 'VIDEO']),
+			videoSortOrder: z.number().int().min(0).max(4).nullable().optional(),
 			url: UrlSchema,
 			originalDownloadUrl: UrlSchema.optional(),
 			playbackUrl: UrlSchema.optional(),

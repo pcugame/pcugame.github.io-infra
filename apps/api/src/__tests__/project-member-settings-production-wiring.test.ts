@@ -177,6 +177,7 @@ function portHarness() {
 		findAssetById: vi.fn(async (id: number) => (
 			project.assets.find((asset) => asset.id === id) ?? null
 		)),
+		setProjectVideoOrder: vi.fn(),
 		setProjectPoster: vi.fn(async (projectId: number, assetId: number) => {
 			const asset = await calls.findAssetById(assetId);
 			if (!asset) throw notFound('Asset not found');
@@ -208,6 +209,7 @@ function portHarness() {
 			return { oldEntryKey, cancelledSession: null };
 		},
 		findAssetById: calls.findAssetById,
+		setProjectVideoOrder: calls.setProjectVideoOrder,
 		setProjectPoster: calls.setProjectPoster,
 		async bulkDeleteProjectsReturningAssets(_ids, outbox) {
 			await calls.orphanUpsert(outbox);
