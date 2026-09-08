@@ -36,6 +36,16 @@ for (const entry of [
 
 const apiRun = deploy.slice(deploy.indexOf('echo "Starting API..."'), deploy.indexOf('# Verify API container'));
 assert.doesNotMatch(apiRun, /NAS_EXPORT|nas_export|\/app\/storage/);
+const commonRuntimeEnv = deploy.slice(
+	deploy.indexOf('local common_env=('),
+	deploy.indexOf('local ca_args=()'),
+);
+for (const name of ['SESSION_SECRET', 'GOOGLE_CLIENT_IDS']) {
+	assert.ok(
+		commonRuntimeEnv.includes(`-e "${name}=\${${name}}"`),
+		`dedicated workers must receive ${name} required by loadEnv`,
+	);
+}
 const exportStart = deploy.slice(deploy.indexOf('start_worker "$EXPORT_WORKER_CONTAINER"'));
 assert.match(exportStart, /NAS_EXPORT_ROOT/);
 assert.match(exportStart, /nas_export_host_path/);

@@ -259,6 +259,7 @@ jobs:
                 exit 1
               }
               podman run --rm --pod graduationproject \
+                --user 0:0 \
                 -v "${CUTOVER_STATE_DIR}:/release-state:ro,Z" --entrypoint node "${MIGRATION_IMAGE}" \
                 dist-release/scripts/verify-cutover-report.js observation-start \
                 /release-state/phase1-reconciliation.json

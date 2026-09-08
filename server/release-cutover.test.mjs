@@ -89,6 +89,11 @@ const phase1Block = cutover.slice(
 );
 assert.match(phase1Block, /export API_IMAGE="\$\{PHASE1_IMAGE\}"[\s\S]*export MIGRATION_IMAGE="\$\{PHASE1_IMAGE\}"/);
 assert.doesNotMatch(phase1Block, /MIGRATION_IMAGE="\$\{FINAL_IMAGE\}"/);
+assert.match(
+	phase1Block,
+	/podman run --rm --pod graduationproject \\\n\s+--user 0:0 \\\n\s+-v "\$\{CUTOVER_STATE_DIR\}:\/release-state:ro,Z"/,
+	'observation-start verifier must read rootless release-state files as the deploy user mapping',
+);
 assert.ok(
 	phase1Block.indexOf('release-artifact-preflight phase1') < phase1Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain'),
 	'Phase 1 marker/worker validation must precede the first mutation drain',
