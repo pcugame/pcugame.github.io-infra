@@ -4,6 +4,8 @@ set -euo pipefail
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
 release_image="${1:?immutable image digest required}"
 release_revision="${2:?source revision required}"
+release_publish_web="${3:-false}"
+[[ "$release_publish_web" == true || "$release_publish_web" == false ]]
 [[ "$release_image" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
 [[ "$release_revision" =~ ^[0-9a-f]{40}$ ]]
 set -a
@@ -39,6 +41,22 @@ FROM "_prisma_migrations";
 SQL
 )"
 [[ "$state" == '1|0|0' ]] || { echo "Existing Phase 1 migration history required: $state"; exit 1; }
+assert_legacy_web_video_compatibility() {
+  [[ "$release_publish_web" == false ]] || return 0
+  local unavailable
+  unavailable="$(query <<'SQL'
+SELECT count(*) FROM assets a WHERE a.kind = 'VIDEO' AND a.status = 'READY'
+AND NOT (CASE WHEN EXISTS (SELECT 1 FROM asset_representations r WHERE r.asset_id = a.id)
+  THEN EXISTS (SELECT 1 FROM asset_representations r WHERE r.asset_id = a.id AND r.role = 'PLAYBACK' AND r.state = 'READY')
+  ELSE a.playback_status = 'READY' AND a.playback_storage_key IS NOT NULL END);
+SQL
+)"
+  [[ "$unavailable" == 0 ]] || {
+    echo "Cannot update API alone: $unavailable videos require the new web playback fallback." >&2
+    return 1
+  }
+}
+assert_legacy_web_video_compatibility
 maintenance_started=false
 cleanup() {
   local code=$?
@@ -59,6 +77,7 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 maintenance_started=true
 "$control" drain
+assert_legacy_web_video_compatibility
 "$control" backup "video-order-${RELEASE_SOURCE_SHA}"
 mkdir -p "$CUTOVER_STATE_DIR"
 audit_prefix="${CUTOVER_STATE_DIR}/video-order-${RELEASE_SOURCE_SHA}-$(date -u +%Y%m%dT%H%M%SZ)"

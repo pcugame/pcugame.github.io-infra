@@ -3,6 +3,11 @@ name: Update Phase 1 Video Ordering
 on:
   workflow_dispatch:
     inputs:
+      publish_web:
+        description: 'Also publish compatible Phase 1 web (requires verified Pages single-writer configuration)'
+        required: true
+        default: false
+        type: boolean
       phase1_api_image:
         description: 'Verified immutable Phase 1 image digest'
         required: true
@@ -28,6 +33,7 @@ jobs:
       - name: Verify production control branch
         env:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PUBLISH_WEB: ${{ inputs.publish_web }}
           PHASE1_IMAGE: ${{ inputs.phase1_api_image }}
           PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
         run: |
@@ -38,14 +44,19 @@ jobs:
           [[ "$PHASE1_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$PHASE1_IMAGE" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
       - uses: actions/checkout@v4
-      - name: Verify deployment boundaries before maintenance
+      - name: Verify control boundary before maintenance
         env:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
           PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
         run: |
           node server/verify-github-release-boundaries.mjs control
-          node server/verify-github-release-boundaries.mjs pages
+      - name: Verify Pages boundary before maintenance
+        if: ${{ inputs.publish_web }}
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
+        run: node server/verify-github-release-boundaries.mjs pages
       - name: Checkout exact Phase 1 web source
         uses: actions/checkout@v4
         with:
@@ -92,6 +103,7 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          PUBLISH_WEB: ${{ inputs.publish_web }}
           PHASE1_IMAGE: ${{ inputs.phase1_api_image }}
           PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
         with:
@@ -99,7 +111,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,PHASE1_IMAGE,PHASE1_SOURCE_SHA
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,PHASE1_IMAGE,PHASE1_SOURCE_SHA,PUBLISH_WEB
           script_stop: true
           command_timeout: 30m
           script: |
@@ -107,13 +119,15 @@ jobs:
             export PATH=$PATH:/usr/local/bin:/usr/bin
             printf '%s' "$GHCR_TOKEN" | podman login ghcr.io -u "$GHCR_USERNAME" --password-stdin
             chmod +x "$DEPLOY_DIR/deploy.sh" "$DEPLOY_DIR/release-phase1-video-update.sh"
-            "$DEPLOY_DIR/release-phase1-video-update.sh" "$PHASE1_IMAGE" "$PHASE1_SOURCE_SHA"
+            "$DEPLOY_DIR/release-phase1-video-update.sh" "$PHASE1_IMAGE" "$PHASE1_SOURCE_SHA" "$PUBLISH_WEB"
       - name: Reverify Pages writer before publishing
+        if: ${{ inputs.publish_web }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
           PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
         run: node server/verify-github-release-boundaries.mjs pages
       - name: Publish compatible Phase 1 web
+        if: ${{ inputs.publish_web }}
         uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
@@ -123,6 +137,7 @@ jobs:
           user_name: bipolarrr
           user_email: challengedbipolar@gmail.com
       - name: Verify Pages serves the exact Phase 1 release
+        if: ${{ inputs.publish_web }}
         uses: appleboy/ssh-action@v1.0.3
         env:
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}

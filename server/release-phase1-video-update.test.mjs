@@ -19,6 +19,7 @@ function run(extra = {}, args = [digest, 'b'.repeat(40)]) {
 if [[ "$1" == run ]]; then exit 0; fi
 sql="$(cat)"
 if [[ "$sql" == *'_prisma_migrations'* ]]; then echo "\${TEST_HISTORY:-1|0|0}";
+elif [[ "$sql" == *'SELECT count(*) FROM assets a'* ]]; then echo \"\${TEST_UNAVAILABLE:-0}\";
 elif [[ "$sql" == *'SELECT id, project_id'* ]]; then
   echo '1|7||VIDEO|READY|source|playback'
   if [[ "\${TEST_TAMPER:-}" == 1 && -f "$DEPLOY_DIR/snapshot" ]]; then echo changed; fi
@@ -81,6 +82,12 @@ test('conflicting configured image fails before any release control action', () 
 });
 test('capacity failure does not stop the existing runtime', () => {
   const result = run({ TEST_FAIL: 'capacity-preflight' });
+  assert.notEqual(result.status, 0);
+  assert(!result.trace.includes('drain'));
+});
+
+test('API-only deployment refuses videos that require the new web fallback before maintenance', () => {
+  const result = run({ TEST_UNAVAILABLE: '1' });
   assert.notEqual(result.status, 0);
   assert(!result.trace.includes('drain'));
 });
