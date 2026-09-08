@@ -171,6 +171,11 @@ const releaseCommonArgs = deploy.slice(
 	deploy.indexOf('release_common_args() {'),
 	deploy.indexOf('assert_postgres_running() {'),
 );
+assert.match(
+	releaseCommonArgs,
+	/--user 0:0/,
+	'release CLIs must map to the rootless Podman host user when writing release state',
+);
 for (const name of [
 	'SESSION_SECRET',
 	'GOOGLE_CLIENT_IDS',

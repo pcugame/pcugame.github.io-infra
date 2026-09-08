@@ -181,6 +181,7 @@ release_common_args() {
   db_url="$(database_url_in_pod)"
   RELEASE_CONTAINER_ARGS=(
     --rm --pod "$POD_NAME"
+    --user 0:0
     -e "NODE_ENV=production"
     -e "DATABASE_URL=${db_url}"
     -e "LOG_LEVEL=${LOG_LEVEL:-info}"
