@@ -1046,8 +1046,16 @@ do_up() {
   fi
 
   # Reload and enable
-  systemctl --user daemon-reload
-  systemctl --user enable "pod-${POD_NAME}.service" 2>/dev/null || true
+  # A non-interactive sudo invocation does not inherit the user manager bus
+  # environment. Target the manager belonging to the account running deploy.sh
+  # (rather than the invoking root account) explicitly.
+  local systemd_user_runtime_dir="/run/user/$(id -u)"
+  XDG_RUNTIME_DIR="$systemd_user_runtime_dir" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=${systemd_user_runtime_dir}/bus" \
+    systemctl --user daemon-reload
+  XDG_RUNTIME_DIR="$systemd_user_runtime_dir" \
+  DBUS_SESSION_BUS_ADDRESS="unix:path=${systemd_user_runtime_dir}/bus" \
+    systemctl --user enable "pod-${POD_NAME}.service" 2>/dev/null || true
   echo "Systemd service enabled for pod '$POD_NAME'."
 
   echo ""
