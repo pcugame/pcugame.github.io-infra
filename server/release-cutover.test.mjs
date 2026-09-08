@@ -167,6 +167,22 @@ for (const migration of [
 assert.match(releaseMigration, /stagedMigrate\(PHASE1_TARGET_MIGRATION/);
 assert.match(deploy, /RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2/);
 assert.match(deploy, /mutation drain marker is absent/);
+const releaseCommonArgs = deploy.slice(
+	deploy.indexOf('release_common_args() {'),
+	deploy.indexOf('assert_postgres_running() {'),
+);
+for (const name of [
+	'SESSION_SECRET',
+	'GOOGLE_CLIENT_IDS',
+	'CORS_ALLOWED_ORIGINS',
+	'API_PUBLIC_URL',
+	'WEB_PUBLIC_URL',
+]) {
+	assert.ok(
+		releaseCommonArgs.includes(`-e "${name}=\${${name}}"`),
+		`release containers must receive ${name}`,
+	);
+}
 assert.match(deploy, /dist\/phase1-release-manifest\.js/);
 assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
 assert.match(deploy, /refusing to record a mixed-image Phase 1 observation/);
