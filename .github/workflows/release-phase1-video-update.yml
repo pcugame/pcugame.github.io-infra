@@ -1,0 +1,145 @@
+name: Update Phase 1 Video Ordering
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase1_api_image:
+        description: 'Verified immutable Phase 1 image digest'
+        required: true
+        type: string
+      phase1_source_sha:
+        description: 'Exact source SHA of the Phase 1 artifact'
+        required: true
+        type: string
+
+concurrency:
+  group: production-object-cutover
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Verify production control branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PHASE1_IMAGE: ${{ inputs.phase1_api_image }}
+          PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_REPOSITORY" = pcugame/pcugame.github.io-infra ]
+          [ "$GITHUB_DEFAULT_BRANCH" = master ]
+          [ "$GITHUB_REF" = refs/heads/master ]
+          [[ "$PHASE1_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PHASE1_IMAGE" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
+      - uses: actions/checkout@v4
+      - name: Verify deployment boundaries before maintenance
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
+        run: |
+          node server/verify-github-release-boundaries.mjs control
+          node server/verify-github-release-boundaries.mjs pages
+      - name: Checkout exact Phase 1 web source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.phase1_source_sha }}
+          path: phase1-source
+      - name: Verify Phase 1 artifact tree
+        working-directory: phase1-source
+        run: |
+          test -f apps/api/src/phase1-release-manifest.ts
+          test -f apps/api/prisma/migrations/20260821800000_project_video_order_expand/migration.sql
+          test ! -e apps/api/prisma/migrations/20260822000000_canonical_asset_contract
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: phase1-source/package-lock.json
+      - name: Validate and build Phase 1 web before maintenance
+        working-directory: phase1-source
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/' }}
+          RELEASE_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
+        run: |
+          npm ci --workspace=apps/web --include-workspace-root
+          npm test -w apps/web
+          npm run lint -w apps/web
+          npm run build -w apps/web
+          printf '%s\n' "$RELEASE_SOURCE_SHA" > apps/web/dist/release-sha.txt
+      - name: Copy reviewed release controls
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: server/deploy.sh,server/release-phase1-video-update.sh
+          target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          strip_components: 1
+          overwrite: true
+      - name: Back up and apply only the additive Phase 1 update
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          PHASE1_IMAGE: ${{ inputs.phase1_api_image }}
+          PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,PHASE1_IMAGE,PHASE1_SOURCE_SHA
+          script_stop: true
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            export PATH=$PATH:/usr/local/bin:/usr/bin
+            printf '%s' "$GHCR_TOKEN" | podman login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            chmod +x "$DEPLOY_DIR/deploy.sh" "$DEPLOY_DIR/release-phase1-video-update.sh"
+            "$DEPLOY_DIR/release-phase1-video-update.sh" "$PHASE1_IMAGE" "$PHASE1_SOURCE_SHA"
+      - name: Reverify Pages writer before publishing
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
+        run: node server/verify-github-release-boundaries.mjs pages
+      - name: Publish compatible Phase 1 web
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          external_repository: pcugame/pcugame.github.io
+          publish_branch: master
+          publish_dir: phase1-source/apps/web/dist
+          user_name: bipolarrr
+          user_email: challengedbipolar@gmail.com
+      - name: Verify Pages serves the exact Phase 1 release
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: DEPLOY_DIR,PHASE1_SOURCE_SHA
+          script_stop: true
+          command_timeout: 7m
+          script: |
+            set -euo pipefail
+            for attempt in $(seq 1 30); do
+              if "$DEPLOY_DIR/deploy.sh" verify-final-web "$PHASE1_SOURCE_SHA"; then exit 0; fi
+              sleep 10
+            done
+            echo 'Phase 1 API is updated, but Pages did not serve the expected release within five minutes.' >&2
+            exit 1
