@@ -1,35 +1,78 @@
 import type { AdminExhibitionItem, CreateExhibitionRequest, UpdateExhibitionRequest } from '@pcu/contracts';
 import { notFound, conflict } from '../../../shared/errors.js';
-import { serializePublicImage } from '../../public/image-serialization.js';
+import type { UploadLimits } from '../../../shared/upload-limits.js';
+import type { MultipartCommandInput } from '../../../application/http-input.js';
+import type { PosterUploadCoordinator, ProcessedUpload } from '../../../application/upload-ports.js';
+import {
+	createResponsiveImageSerializer,
+	IMAGE_RENDITION_PROFILES,
+} from '../../../shared/responsive-image.js';
 import type { ExhibitionRepository, ExhibitionRecord } from './ports.js';
 
 export interface ExhibitionServiceDependencies {
-	publicAssetOrigin?: string;
+	apiPublicUrl: string;
 	posterBucket: string;
 	protectedBucket?: string;
 	repository: ExhibitionRepository;
+	uploadLimits(role: MultipartCommandInput['actor']['role']): UploadLimits;
+	uploadSlots: { acquire(): void; release(): void };
+	posterUpload: PosterUploadCoordinator;
 	wakeDeletionWorker(): void;
+	wakeMaintenance?(): void;
+	logger?: {
+		error(context: Record<string, unknown>, message: string): void;
+	};
+	recordPostCommitCleanupFailure?: () => void;
 }
 
 function cleanupCommittedPoster(deps: ExhibitionServiceDependencies): void {
 	deps.wakeDeletionWorker();
 }
 
-async function serializeExhibition(
+function serializeExhibition(
 	deps: ExhibitionServiceDependencies,
 	e: ExhibitionRecord,
-): Promise<AdminExhibitionItem> {
-	const canonicalPoster = e.poster?.status === 'READY' && deps.publicAssetOrigin
-		? await serializePublicImage(e.poster, {
-			publicAssetOrigin: deps.publicAssetOrigin,
-			publicBucket: deps.posterBucket,
-		})
+): AdminExhibitionItem {
+	const { publicImageUrl, serializeResponsiveImage } = createResponsiveImageSerializer(deps.apiPublicUrl);
+	const original = e.poster?.status === 'READY'
+		? e.poster.representations.find((representation) => representation.role === 'ORIGINAL')
 		: undefined;
-	const original = canonicalPoster ? e.poster?.representations.find((representation) => (
-		representation.role === 'ORIGINAL'
-		&& representation.state === 'READY'
-		&& representation.bucket === deps.posterBucket
-	)) : undefined;
+	const posterSource = original ? {
+		storageKey: original.objectKey,
+		width: original.width ?? e.poster?.width,
+		height: original.height ?? e.poster?.height,
+		card480Height: e.poster?.representations.find((representation) => (
+			representation.role === 'CARD_480'
+		))?.height,
+		display960Height: e.poster?.representations.find((representation) => (
+			representation.role === 'DISPLAY_960'
+		))?.height,
+	} : e.posterStorageKey ? {
+		storageKey: e.posterStorageKey,
+		width: e.posterWidth,
+		height: e.posterHeight,
+		card480Height: e.posterCard480Height,
+		display960Height: e.posterDisplay960Height,
+	} : null;
+	const canonicalPoster = original ? {
+		original: {
+			url: publicImageUrl(original.objectKey),
+			...(original.width != null ? { width: original.width } : {}),
+			...(original.height != null ? { height: original.height } : {}),
+		},
+		renditions: IMAGE_RENDITION_PROFILES.flatMap((definition) => {
+			const rendition = e.poster?.representations.find((candidate) => (
+				candidate.role === definition.profile
+			));
+			if (!rendition || rendition.height == null) return [];
+			return [{
+				profile: definition.profile,
+				url: publicImageUrl(rendition.objectKey),
+				width: rendition.width ?? definition.width,
+				height: rendition.height,
+			}];
+		}),
+	} : undefined;
 	return {
 		id: e.id,
 		year: e.year,
@@ -37,16 +80,18 @@ async function serializeExhibition(
 		isUploadEnabled: e.isUploadEnabled,
 		sortOrder: e.sortOrder,
 		projectCount: e._count.projects,
-		poster: canonicalPoster,
-		posterOriginalName: e.poster?.originalName || undefined,
-		posterSize: original ? Number(original.sizeBytes) : undefined,
+		poster: canonicalPoster ?? (posterSource
+			? serializeResponsiveImage(posterSource)
+			: undefined),
+		posterOriginalName: e.poster?.originalName || e.posterOriginalName || undefined,
+		posterSize: posterSource ? Number(e.poster?.sizeBytes ?? e.posterSizeBytes) : undefined,
 	};
 }
 
 /** List all exhibitions with project counts, mapped to API shape */
 export async function listExhibitions(deps: ExhibitionServiceDependencies): Promise<AdminExhibitionItem[]> {
 	const exhibitions = await deps.repository.findAllExhibitions();
-	return Promise.all(exhibitions.map((exhibition) => serializeExhibition(deps, exhibition)));
+	return exhibitions.map((exhibition) => serializeExhibition(deps, exhibition));
 }
 
 /** Create an exhibition after checking for duplicates */
@@ -67,8 +112,9 @@ export async function deleteExhibition(deps: ExhibitionServiceDependencies, id: 
 	});
 	if (!deleted) throw notFound('Exhibition not found');
 
-	if (deleted.cleanupQueued) {
+	if (deleted.cleanupQueued ?? !!deleted.posterStorageKey) {
 		cleanupCommittedPoster(deps);
+		deps.wakeMaintenance?.();
 	}
 }
 
@@ -87,7 +133,69 @@ export async function updateExhibition(
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	});
 
-	return serializeExhibition(deps, updated);
+	return {
+		...serializeExhibition(deps, updated),
+	};
+}
+
+export async function replacePoster(
+	deps: ExhibitionServiceDependencies,
+	id: number,
+	input: MultipartCommandInput,
+): Promise<AdminExhibitionItem> {
+	const existing = await deps.repository.findExhibitionById(id);
+	if (!existing) throw notFound('Exhibition not found');
+
+	const limits = deps.uploadLimits(input.actor.role);
+	let upload: ProcessedUpload | null = null;
+	let uploadPersisted = false;
+
+	deps.uploadSlots.acquire();
+	try {
+		upload = await deps.posterUpload.start(input.parts, limits, {
+			actorId: input.actor.id,
+			exhibitionId: id,
+		});
+		const savedFile = upload.savedFile;
+		const result = await deps.repository.replaceExhibitionPoster(id, {
+			storageKey: savedFile.storageKey,
+			originalName: savedFile.originalName,
+			mimeType: savedFile.mimeType,
+			sizeBytes: BigInt(savedFile.sizeBytes),
+			width: savedFile.width,
+			height: savedFile.height,
+			renditions: savedFile.renditions,
+			uploadIntentIds: savedFile.uploadIntentIds,
+		}, {
+			bucket: deps.posterBucket,
+			reason: 'exhibition-poster-replace-previous',
+		});
+		if (!result) throw notFound('Exhibition not found');
+		uploadPersisted = true;
+
+		if (result.cleanupQueued || (result.oldStorageKey && result.oldStorageKey !== savedFile.storageKey)) {
+			cleanupCommittedPoster(deps);
+		}
+
+		return serializeExhibition(deps, result.updated);
+	} catch (err) {
+		if (upload && !uploadPersisted) await upload.rollback();
+		throw err;
+	} finally {
+		deps.uploadSlots.release();
+		if (upload) {
+			try {
+				await upload.cleanup();
+			} catch (cleanupError) {
+				if (!uploadPersisted) throw cleanupError;
+				deps.recordPostCommitCleanupFailure?.();
+				deps.logger?.error(
+					{ error: cleanupError, exhibitionId: id },
+					'Post-commit exhibition poster temp cleanup failed',
+				);
+			}
+		}
+	}
 }
 
 export async function deletePoster(deps: ExhibitionServiceDependencies, id: number): Promise<void> {
@@ -97,7 +205,7 @@ export async function deletePoster(deps: ExhibitionServiceDependencies, id: numb
 	});
 	if (!result) throw notFound('Exhibition not found');
 
-	if (result.cleanupQueued) {
+	if (result.cleanupQueued || result.oldStorageKey) {
 		cleanupCommittedPoster(deps);
 	}
 }
@@ -110,6 +218,7 @@ export function createExhibitionService(deps: ExhibitionServiceDependencies) {
 		updateExhibition: (id: number, patch: UpdateExhibitionRequest) => (
 			updateExhibition(deps, id, patch)
 		),
+		replacePoster: (id: number, input: MultipartCommandInput) => replacePoster(deps, id, input),
 		deletePoster: (id: number) => deletePoster(deps, id),
 	};
 }

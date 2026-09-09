@@ -6,8 +6,6 @@ import {
 	type WebglProcessingWorkerOptions,
 	type WebglProcessingWorkerRepository,
 } from './processing-worker.js';
-import { WorkerSourceObjectMissingError } from '../upload-lifecycle/worker-errors.js';
-import { cleanupStaleWorkerDirectories } from '../upload-lifecycle/worker-workspace.js';
 
 export type WebglProcessingPersistence = WebglProcessingRepository
 	& WebglProcessingWorkerRepository;
@@ -42,7 +40,6 @@ export function createWebglTempDiskBudget(maxBytes: number) {
 /** Processing-only graph. Fastify and BackendContext must never import it. */
 export function createWebglProcessingGraph(deps: {
 	publicBucket: string;
-	protectedBucket: string;
 	storage: Pick<ObjectStorage, 'stream' | 'upload' | 'head'>;
 	repository: WebglProcessingPersistence;
 	ids: IdGenerator;
@@ -53,7 +50,6 @@ export function createWebglProcessingGraph(deps: {
 	const diskBudget = createWebglTempDiskBudget(deps.options.tempDiskBudgetBytes);
 	const processor = createWebglProcessingProcessor({
 		publicBucket: deps.publicBucket,
-		protectedBucket: deps.protectedBucket,
 		tempRoot: deps.options.tempRoot,
 		physicalArchiveByteLimit: deps.options.physicalArchiveByteLimit,
 		diskBudget,
@@ -67,7 +63,7 @@ export function createWebglProcessingGraph(deps: {
 					{ signal: input.signal },
 				);
 				if (!source || 'kind' in source) {
-					throw new WorkerSourceObjectMissingError('Canonical WEBGL_SOURCE object does not exist');
+					throw new Error('Canonical WEBGL_SOURCE object is unavailable');
 				}
 				return { body: source.body, sizeBytes: source.size };
 			},
@@ -83,7 +79,6 @@ export function createWebglProcessingGraph(deps: {
 					contentType: object.contentType,
 					...(object.contentEncoding ? { contentEncoding: object.contentEncoding } : {}),
 					cacheControl: object.cacheControl,
-					checksumSha256: object.checksumSha256,
 				},
 				object.signal ? { signal: object.signal } : undefined,
 			),
@@ -94,7 +89,7 @@ export function createWebglProcessingGraph(deps: {
 					sizeBytes: head.size,
 					mimeType: head.contentType,
 					etag: head.etag ?? null,
-					checksumSha256: head.checksumSha256 ?? null,
+					checksumSha256: null,
 				};
 			},
 		},
@@ -118,13 +113,5 @@ export function createWebglProcessingGraph(deps: {
 		pollIntervalMs: deps.options.pollIntervalMs,
 		logger: deps.logger,
 	});
-	return {
-		diskBudget,
-		processor,
-		worker,
-		loop,
-		cleanupStaleWorkspaces: (cutoff: Date) => cleanupStaleWorkerDirectories({
-			tempRoot: deps.options.tempRoot, prefix: 'pcu-webgl-processing-', cutoff,
-		}),
-	};
+	return { diskBudget, processor, worker, loop };
 }

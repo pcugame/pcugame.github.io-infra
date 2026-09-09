@@ -7,7 +7,6 @@ import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
 import { createObjectStorage } from './lib/storage.js';
 import { createExportProcessingGraph } from './modules/admin/export/processing.composition.js';
-import { assertExportWorkerCapacity } from './shared/worker-capacity.js';
 
 function containsPath(parent: string, child: string): boolean {
 	const relation = relative(parent, child);
@@ -20,7 +19,6 @@ function containsPath(parent: string, child: string): boolean {
  * the worker-only staging adapter at materialization time.
  */
 export function exportWorkerConfig(config: ReturnType<typeof loadEnv>) {
-	assertExportWorkerCapacity(config);
 	const rawRoot = config.NAS_EXPORT_ROOT;
 	if (!rawRoot) throw new Error('NAS_EXPORT_ROOT is required by the export worker');
 	if (rawRoot.includes('\0') || !isAbsolute(rawRoot)) {

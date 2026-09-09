@@ -1,25 +1,32 @@
+import type { SavedImageRendition } from '../../application/upload-ports.js';
 import type {
 	AssetKind,
+	AssetPlaybackStatus,
 	AssetRepresentationRole,
-	AssetRepresentationState,
 	Prisma,
 } from '../../generated/prisma/client.js';
+import { deriveImageRenditionStorageKey } from '../../shared/responsive-image.js';
 
-export interface CanonicalAssetRepresentationWrite {
-	role: AssetRepresentationRole;
-	bucket: string;
-	objectKey: string;
+export interface CanonicalAssetObjectWrite {
+	/** Canonical callers name the source bucket explicitly. `bucket` is Phase-1 inline-write compatibility only. */
+	originalBucket?: string;
+	bucket?: string;
+	storageKey: string;
+	playbackBucket?: string;
+	playbackStorageKey?: string | null;
+	originalName: string;
 	mimeType: string;
+	playbackMimeType?: string;
 	sizeBytes: bigint;
-	state: AssetRepresentationState;
+	playbackSizeBytes?: bigint;
+	playbackStatus?: AssetPlaybackStatus;
+	playbackError?: string;
 	width?: number;
 	height?: number;
-	checksumAlgorithm?: string;
-	checksum?: string;
-	etag?: string;
-	sourceIdentityAlgorithm?: string;
-	sourceIdentity?: string;
-	error?: string;
+	renditions?: readonly SavedImageRendition[];
+	isPublic: boolean;
+	/** WEBGL sources use the same canonical physical-identity writer with a domain-specific role. */
+	originalRole?: Extract<AssetRepresentationRole, 'ORIGINAL' | 'WEBGL_SOURCE'>;
 }
 
 export interface CanonicalAssetOwner {
@@ -27,64 +34,53 @@ export interface CanonicalAssetOwner {
 	exhibitionId?: number;
 }
 
-function failInvalidRepresentation(message: string): never {
-	throw new Error(`Canonical asset representation invalid: ${message}`);
-}
-
-function representationsFor(
-	representations: readonly CanonicalAssetRepresentationWrite[],
-): Prisma.AssetRepresentationCreateWithoutAssetInput[] {
-	if (representations.length === 0) failInvalidRepresentation('at least one representation is required');
-	const roles = new Set<string>();
-	let original: CanonicalAssetRepresentationWrite | undefined;
-	for (const representation of representations) {
-		if (!representation.role || roles.has(representation.role)) {
-			failInvalidRepresentation(`duplicate or empty role ${String(representation.role)}`);
-		}
-		roles.add(representation.role);
-		if (!representation.bucket.trim() || !representation.objectKey.trim() || !representation.mimeType.trim()) {
-			failInvalidRepresentation(`role ${representation.role} requires bucket, objectKey, and mimeType`);
-		}
-		if (representation.sizeBytes < 0n) failInvalidRepresentation(`role ${representation.role} has a negative size`);
-		if ((representation.width !== undefined && representation.width <= 0)
-			|| (representation.height !== undefined && representation.height <= 0)) {
-			failInvalidRepresentation(`role ${representation.role} has invalid dimensions`);
-		}
-		if (representation.role === 'ORIGINAL') original = representation;
+function representationsFor(data: CanonicalAssetObjectWrite): Prisma.AssetRepresentationCreateWithoutAssetInput[] {
+	const originalBucket = data.originalBucket ?? data.bucket;
+	if (!originalBucket) throw new Error('Canonical asset original bucket is required');
+	const representations: Prisma.AssetRepresentationCreateWithoutAssetInput[] = [{
+		role: data.originalRole ?? 'ORIGINAL',
+		bucket: originalBucket,
+		objectKey: data.storageKey,
+		mimeType: data.mimeType,
+		sizeBytes: data.sizeBytes,
+		state: 'READY',
+		width: data.width,
+		height: data.height,
+	}];
+	if (data.playbackStatus === 'READY') {
+		representations.push({
+			role: 'PLAYBACK',
+			bucket: data.playbackBucket ?? originalBucket,
+			objectKey: data.playbackStorageKey ?? data.storageKey,
+			mimeType: data.playbackMimeType || data.mimeType || 'video/mp4',
+			sizeBytes: data.playbackStorageKey
+				? data.playbackSizeBytes ?? 0n
+				: data.sizeBytes,
+			state: 'READY',
+		});
 	}
-	if (!original) failInvalidRepresentation('ORIGINAL representation is required');
-	if (original.state !== 'READY') failInvalidRepresentation('ORIGINAL representation must be READY');
-
-	return representations.map((representation) => ({
-		role: representation.role,
-		storageBucket: { connect: { bucket: representation.bucket } },
-		objectKey: representation.objectKey,
-		mimeType: representation.mimeType,
-		sizeBytes: representation.sizeBytes,
-		state: representation.state,
-		...(representation.width !== undefined ? { width: representation.width } : {}),
-		...(representation.height !== undefined ? { height: representation.height } : {}),
-		...(representation.checksumAlgorithm !== undefined ? { checksumAlgorithm: representation.checksumAlgorithm } : {}),
-		...(representation.checksum !== undefined ? { checksum: representation.checksum } : {}),
-		...(representation.etag !== undefined ? { etag: representation.etag } : {}),
-		...(representation.sourceIdentityAlgorithm !== undefined ? { sourceIdentityAlgorithm: representation.sourceIdentityAlgorithm } : {}),
-		...(representation.sourceIdentity !== undefined ? { sourceIdentity: representation.sourceIdentity } : {}),
-		...(representation.error !== undefined ? { error: representation.error } : {}),
-	}));
+	for (const rendition of data.renditions ?? []) {
+		representations.push({
+			role: rendition.profile,
+			bucket: originalBucket,
+			objectKey: deriveImageRenditionStorageKey(data.storageKey, rendition.profile),
+			mimeType: 'image/webp',
+			state: 'READY',
+			width: rendition.width,
+			height: rendition.height,
+		});
+	}
+	return representations;
 }
 
 /**
- * Asset owns only domain identity. Every physical object and variant is an
- * explicit caller-supplied representation; this adapter never derives keys or
- * interprets nullable legacy transport fields.
+ * Phase-1 canonical writer. Physical locators and variant readiness are owned
+ * exclusively by representation rows; legacy Asset locator/scalar fields stay
+ * null/default for every new write.
  */
 export async function createCanonicalAsset(
 	tx: Prisma.TransactionClient,
-	input: CanonicalAssetOwner & {
-		kind: AssetKind;
-		originalName: string;
-		representations: readonly CanonicalAssetRepresentationWrite[];
-	},
+	input: CanonicalAssetOwner & CanonicalAssetObjectWrite & { kind: AssetKind; videoSortOrder?: number },
 ) {
 	if ((input.projectId === undefined) === (input.exhibitionId === undefined)) {
 		throw new Error('Canonical asset must have exactly one domain owner');
@@ -94,10 +90,36 @@ export async function createCanonicalAsset(
 			projectId: input.projectId,
 			exhibitionId: input.exhibitionId,
 			kind: input.kind,
+			videoSortOrder: input.videoSortOrder,
 			status: 'READY',
+			storageKey: null,
+			playbackStorageKey: null,
 			originalName: input.originalName,
-			representations: { create: representationsFor(input.representations) },
+			mimeType: input.mimeType,
+			sizeBytes: input.sizeBytes,
+			playbackMimeType: '',
+			playbackSizeBytes: 0n,
+			playbackStatus: 'PENDING',
+			playbackError: '',
+			isPublic: input.isPublic,
+			width: input.width,
+			height: input.height,
+			card480Height: null,
+			display960Height: null,
+			representations: { create: representationsFor(input) },
 		},
 		include: { representations: true },
 	});
+}
+
+export interface PhysicalAssetSnapshot {
+	id: number;
+	kind: AssetKind;
+	storageKey: string | null;
+	playbackStorageKey: string | null;
+	representations: Array<{
+		role: string;
+		bucket: string;
+		objectKey: string;
+	}>;
 }

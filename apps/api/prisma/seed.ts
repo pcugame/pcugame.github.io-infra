@@ -238,11 +238,19 @@ async function createIntegrationAsset(input: {
 	originalName: string;
 	representations: ReadyRepresentation[];
 }) {
+	const previousVideo = input.kind === 'VIDEO'
+		? await prisma.asset.aggregate({
+			where: { projectId: input.projectId, kind: 'VIDEO', status: 'READY' },
+			_max: { videoSortOrder: true },
+		})
+		: null;
 	return prisma.asset.create({
 		data: {
 			...(input.projectId != null ? { projectId: input.projectId } : {}),
 			...(input.exhibitionId != null ? { exhibitionId: input.exhibitionId } : {}),
 			kind: input.kind,
+			isPublic: input.kind === 'IMAGE' || input.kind === 'POSTER',
+			...(previousVideo ? { videoSortOrder: (previousVideo._max.videoSortOrder ?? -1) + 1 } : {}),
 			status: 'READY',
 			originalName: input.originalName,
 			representations: {

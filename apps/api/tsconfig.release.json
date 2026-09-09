@@ -12,7 +12,15 @@
     "scripts/preflight-canonical-contract.ts",
     "scripts/release-migrate.ts",
     "scripts/snapshot-garage-inventory.ts",
-    "scripts/verify-cutover-report.ts"
+    "scripts/verify-cutover-report.ts",
+    "scripts/correct-canonical-assets.ts",
+    "scripts/correct-canonical-poster.ts"
   ],
-  "exclude": ["node_modules", "dist", "dist-release", "src/**/*.test.ts", "src/__tests__/**"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-release",
+    "src/**/*.test.ts",
+    "src/__tests__/**"
+  ]
 }

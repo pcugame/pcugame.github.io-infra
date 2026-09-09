@@ -2,7 +2,6 @@ import type { ProjectStatus } from '../../../contracts';
 import type { AdminProjectStatusFilter } from './useAdminProjectList';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '제출 중',
 	PUBLISHED: '공개',
 	ARCHIVED: '보관',
 };
@@ -21,7 +20,7 @@ interface AdminProjectsToolbarProps {
 	onYearFilter: (value: string) => void;
 	onCompositionStart: () => void;
 	onCompositionEnd: (value: string) => void;
-	onBulkStatus: (status: Exclude<ProjectStatus, 'DRAFT'>) => void;
+	onBulkStatus: (status: ProjectStatus) => void;
 	onBulkDelete: () => void;
 }
 

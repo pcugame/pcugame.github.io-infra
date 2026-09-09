@@ -5,16 +5,25 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../lib/query';
 import { getApiErrorMessage } from '../lib/api';
 import {
+	cancelGameUploadSession,
 	cancelDirectAssetUploadSession,
+	createGameUploadSession,
+	getGameUploadStatus,
 	getDirectAssetUploadStatus,
+	listGameUploadSessions,
+	uploadGameFile,
 	uploadDirectAssetFile,
 	waitForDirectAssetReady,
-	type DirectAssetUploadProgress,
+	type GameUploadController,
+	type GameUploadProgress,
+	type GameUploadSession,
+	type GameUploadStatus,
 	type DirectAssetUploadSession,
 } from '../lib/api/game-upload';
 import type { UploadKind } from '../contracts';
 
 type UploadState = 'idle' | 'uploading' | 'verifying' | 'completed' | 'error';
+type LegacyUploadState = 'idle' | 'uploading' | 'completing' | 'completed' | 'error' | 'cancelled';
 
 interface Props {
 	projectId: number;
@@ -23,7 +32,6 @@ interface Props {
 	onComplete?: () => void;
 	onSkip?: () => void;
 	uploadKind?: UploadKind;
-	submissionItem?: { id: string; clientToken: string };
 }
 
 export default function GameUploadWidget({
@@ -33,20 +41,26 @@ export default function GameUploadWidget({
 	onComplete,
 	onSkip,
 	uploadKind = 'GAME',
-	submissionItem,
 }: Props) {
 	const qc = useQueryClient();
 	const fileInputId = useId();
 	const isWebgl = uploadKind === 'WEBGL';
 	const labels = isWebgl
-		? { title: 'WebGL 빌드 업로드 (ZIP 파일)', noun: 'WebGL 빌드' }
-		: { title: '게임 파일 업로드 (ZIP 파일)', noun: '게임 파일' };
+		? { title: 'WebGL 빌드 업로드 (ZIP 파일)', uploadTitle: 'WebGL 빌드 업로드', noun: 'WebGL 빌드' }
+		: { title: '게임 파일 업로드 (ZIP 파일)', uploadTitle: '게임 파일 업로드', noun: '게임 파일' };
 	const [file, setFile] = useState<File | null>(initialFile ?? null);
 	const [state, setState] = useState<UploadState>('idle');
-	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
+	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [session, setSession] = useState<DirectAssetUploadSession | null>(null);
 	const [sessionRestored, setSessionRestored] = useState(false);
+	const [legacyState, setLegacyState] = useState<LegacyUploadState>('idle');
+	const [legacyProgress, setLegacyProgress] = useState<GameUploadProgress | null>(null);
+	const [legacyError, setLegacyError] = useState<string | null>(null);
+	const [legacySession, setLegacySession] = useState<GameUploadSession | null>(null);
+	const [legacyResumeSession, setLegacyResumeSession] = useState<GameUploadStatus | null>(null);
+	const legacyControllerRef = useRef<GameUploadController | null>(null);
+	const legacySubmittingRef = useRef(false);
 	const mountedRef = useRef(true);
 	const sessionRef = useRef<DirectAssetUploadSession | null>(null);
 	const submittingRef = useRef(false);
@@ -77,7 +91,7 @@ export default function GameUploadWidget({
 		mountedRef.current && runRef.current?.token === token
 	), []);
 	const beginRun = useCallback(() => {
-		if (submittingRef.current || cancellingRef.current || !mountedRef.current) return null;
+		if (submittingRef.current || legacySubmittingRef.current || cancellingRef.current || !mountedRef.current) return null;
 		const controller = new AbortController();
 		const token = ++runTokenRef.current;
 		pausedRunTokenRef.current = null;
@@ -104,6 +118,18 @@ export default function GameUploadWidget({
 			abortActiveRun();
 		};
 	}, [abortActiveRun]);
+
+	useEffect(() => {
+		let cancelled = false;
+		async function restoreLegacySession() {
+			try {
+				const response = await listGameUploadSessions(projectId, uploadKind);
+				if (!cancelled && response.items.length > 0) setLegacyResumeSession(response.items[0]);
+			} catch { /* Legacy discovery must not block the direct uploader. */ }
+		}
+		void restoreLegacySession();
+		return () => { cancelled = true; };
+	}, [projectId, uploadKind]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -180,7 +206,40 @@ export default function GameUploadWidget({
 	const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
 		setFile(event.target.files?.[0] ?? null);
 		setError(null);
+		setLegacyError(null);
 	}, []);
+
+	const runLegacyUpload = useCallback(async (
+		uploadFile: File,
+		candidate: GameUploadSession,
+		uploadedChunks: number[] = [],
+	) => {
+		setLegacyState('uploading');
+		setLegacyError(null);
+		const controller = uploadGameFile(uploadFile, candidate, {
+			title: labels.uploadTitle,
+			startFrom: uploadedChunks,
+			onProgress: (next) => {
+				setLegacyProgress(next);
+				if (next.percent >= 100) setLegacyState('completing');
+			},
+		});
+		legacyControllerRef.current = controller;
+		try {
+			await controller.start();
+			setLegacyState('completed');
+			qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
+			onComplete?.();
+		} catch (cause) {
+			if ((cause as Error).message === 'Upload aborted') setLegacyState('cancelled');
+			else {
+				setLegacyError(getApiErrorMessage(cause));
+				setLegacyState('error');
+			}
+		} finally {
+			if (legacyControllerRef.current === controller) legacyControllerRef.current = null;
+		}
+	}, [labels.uploadTitle, onComplete, projectId, qc]);
 
 	const waitForSessionReady = useCallback(async (
 		candidate: DirectAssetUploadSession,
@@ -283,7 +342,6 @@ export default function GameUploadWidget({
 					} else if (current || paused) rememberSession(next, true);
 					else if (sessionRef.current === null) rememberSession(next, false);
 				},
-				...(submissionItem ? { submissionItem } : {}),
 				signal: controller.signal,
 			});
 			if (!isCurrentRun(token)) return;
@@ -306,7 +364,7 @@ export default function GameUploadWidget({
 				submittingRef.current = false;
 			}
 		}
-	}, [beginRun, cancelLateCreatedSession, forgetSession, isCurrentRun, onComplete, projectId, qc, rememberSession, submissionItem, uploadKind, waitForSessionReady]);
+	}, [beginRun, cancelLateCreatedSession, forgetSession, isCurrentRun, onComplete, projectId, qc, rememberSession, uploadKind, waitForSessionReady]);
 
 	const resumeUpload = useCallback(async (uploadFile: File, candidate: DirectAssetUploadSession) => {
 		const activeRun = beginRun();
@@ -345,7 +403,7 @@ export default function GameUploadWidget({
 	}, [beginRun, forgetSession, isCurrentRun, onComplete, projectId, qc, runUpload, waitForSessionReady]);
 
 	useEffect(() => {
-		if (!autoStart || !initialFile || !sessionRestored || autoStartedRef.current) return;
+		if (!autoStart || !initialFile || !sessionRestored || autoStartedRef.current || legacySubmittingRef.current) return;
 		autoStartedRef.current = true;
 		if (!autoPausedRef.current && state !== 'completed') {
 			if (session) void resumeUpload(initialFile, session);
@@ -356,7 +414,7 @@ export default function GameUploadWidget({
 	}, [autoStart, initialFile, sessionRestored, state]);
 
 	const handleStart = useCallback(() => {
-		if (file) void runUpload(file);
+		if (file && !legacySubmittingRef.current) void runUpload(file);
 	}, [file, runUpload]);
 	const handleResume = useCallback(() => {
 		if (file && session) void resumeUpload(file, session);
@@ -429,20 +487,101 @@ export default function GameUploadWidget({
 		}
 	}, [abortActiveRun, forgetSession, onComplete, projectId, qc, rememberSession, waitForSessionReady]);
 
+	const handleLegacyResume = useCallback(async () => {
+		if (!legacyResumeSession || state !== 'idle' || submittingRef.current || legacySubmittingRef.current) return;
+		if (!file) {
+			setLegacyError('이전 업로드를 재개하려면 동일한 파일을 다시 선택하세요.');
+			return;
+		}
+		if (file.size !== legacyResumeSession.totalBytes) {
+			setLegacyError(`파일 크기 불일치: 선택한 파일 ${file.size}B vs 세션 ${legacyResumeSession.totalBytes}B. 동일한 파일을 선택하세요.`);
+			return;
+		}
+		legacySubmittingRef.current = true;
+		autoStartedRef.current = true;
+		try {
+			const status = await getGameUploadStatus(legacySession?.sessionId ?? legacyResumeSession.sessionId);
+			const candidate: GameUploadSession = status.status === 'PENDING'
+				? {
+					sessionId: status.sessionId,
+					chunkSizeBytes: status.chunkSizeBytes,
+					totalChunks: status.totalChunks,
+					expiresAt: status.expiresAt,
+					uploadKind: status.uploadKind,
+				}
+				: await createGameUploadSession(projectId, file, uploadKind);
+			setLegacySession(candidate);
+			await runLegacyUpload(file, candidate, status.status === 'PENDING' ? status.uploadedChunks : []);
+		} catch (cause) {
+			setLegacyError(getApiErrorMessage(cause));
+			setLegacyState('error');
+		} finally {
+			legacySubmittingRef.current = false;
+		}
+	}, [file, legacyResumeSession, legacySession, projectId, runLegacyUpload, state, uploadKind]);
+
+	const handleLegacyPause = useCallback(() => {
+		legacyControllerRef.current?.abort();
+	}, []);
+
+	const handleLegacyCancel = useCallback(async () => {
+		if (state !== 'idle' || submittingRef.current) return;
+		const sessionId = legacySession?.sessionId ?? legacyResumeSession?.sessionId;
+		if (!sessionId) return;
+		try {
+			await cancelGameUploadSession(sessionId);
+			setLegacyState('cancelled');
+			setLegacySession(null);
+			setLegacyResumeSession(null);
+			setLegacyProgress(null);
+			setLegacyError(null);
+		} catch (cause) {
+			setLegacyError(getApiErrorMessage(cause));
+			setLegacyState('error');
+		}
+	}, [legacyResumeSession, legacySession, state]);
+
 	const fileSizeMB = file ? (file.size / 1024 / 1024).toFixed(1) : '0';
+	const directOwnsUi = state !== 'idle' || session !== null || pausedRunTokenRef.current !== null;
+	const directUiAvailable = directOwnsUi || (!legacyResumeSession && !legacySession
+		&& (legacyState === 'idle' || legacyState === 'error' || legacyState === 'cancelled'));
 	return (
 		<div className="game-upload">
 			<h3 className="game-upload__title">{labels.title}</h3>
-			{session && state === 'idle' && (
+			{legacyResumeSession && legacyState === 'idle' && state === 'idle' && !directOwnsUi && (
+				<div className="game-upload__resume-banner">
+					<p className="game-upload__resume-text">
+						미완료 업로드가 있습니다: <strong>{legacyResumeSession.originalName}</strong>
+						{' '}({legacyResumeSession.uploadedCount}/{legacyResumeSession.totalChunks} 청크 완료)
+					</p>
+					<p className="game-upload__resume-hint">
+						재개하려면 동일한 {labels.noun}을 선택 후 "이어올리기" 버튼을 누르세요.
+					</p>
+				</div>
+			)}
+			{session && !legacyResumeSession && state === 'idle' && (
 				<div className="game-upload__resume-banner">
 					<p className="game-upload__resume-text">직접 업로드가 중단되었습니다. 동일한 {labels.noun}을 선택해 재개하세요.</p>
 				</div>
 			)}
-			{(state === 'idle' || state === 'error') && (
+			{(state === 'idle' || state === 'error') && (legacyState === 'idle' || legacyState === 'error' || legacyState === 'cancelled') && (
 				<div className="game-upload__file-input">
 					<label className="sr-only" htmlFor={fileInputId}>{labels.noun} ZIP 파일 선택</label>
 					<input id={fileInputId} type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={handleFileChange} />
 					{file && <p className="game-upload__file-summary">{file.name} — {fileSizeMB}MB</p>}
+				</div>
+			)}
+			{legacyProgress && (legacyState === 'uploading' || legacyState === 'completing' || legacyState === 'completed') && (
+				<div className="game-upload__progress-wrap">
+					<div className="game-upload__progress-track">
+						<div className={`game-upload__progress-bar ${legacyState === 'completed' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${legacyProgress.percent}%` }} />
+						<span className="game-upload__progress-label">{legacyProgress.percent}% ({legacyProgress.uploadedChunks}/{legacyProgress.totalChunks})</span>
+					</div>
+					<p className="game-upload__progress-status">
+						{legacyState === 'completing' && '파일 조립 중…'}
+						{legacyState === 'completed' && '업로드 완료!'}
+						{legacyState === 'uploading' && `${(legacyProgress.uploadedBytes / 1024 / 1024).toFixed(0)}MB / ${(legacyProgress.totalBytes / 1024 / 1024).toFixed(0)}MB`}
+					</p>
 				</div>
 			)}
 			{progress && (state === 'uploading' || state === 'verifying' || state === 'completed') && (
@@ -459,17 +598,30 @@ export default function GameUploadWidget({
 				</div>
 			)}
 			{error && <div className="game-upload__error" role="alert">{error}</div>}
+			{legacyError && <div className="game-upload__error" role="alert">{legacyError}</div>}
 			<div className="game-upload__actions">
-				{state === 'idle' && file && !session && <button className="btn btn--primary" type="button" onClick={handleStart}>업로드 시작</button>}
-				{state === 'idle' && file && session && <>
+				{legacyState === 'idle' && state === 'idle' && !directOwnsUi && file && legacyResumeSession && <>
+					<button className="btn btn--primary" type="button" onClick={() => void handleLegacyResume()}>이어올리기</button>
+					<button className="btn btn--secondary" type="button" onClick={handleStart}>새로 시작</button>
+				</>}
+				{state === 'idle' && !directOwnsUi && legacyState === 'uploading' && <>
+					<button className="btn btn--danger" type="button" onClick={handleLegacyPause}>일시 정지</button>
+				</>}
+				{state === 'idle' && !directOwnsUi && (legacyState === 'error' || legacyState === 'cancelled') && (legacySession || legacyResumeSession) && <>
+					{file && <button className="btn btn--primary" type="button" onClick={() => void handleLegacyResume()}>재시도</button>}
+					<button className="btn btn--danger btn--small" type="button" onClick={() => void handleLegacyCancel()}>취소 (세션 삭제)</button>
+				</>}
+				{legacyState === 'completed' && <span className="game-upload__complete-text">업로드 완료</span>}
+				{directUiAvailable && state === 'idle' && file && !session && <button className="btn btn--primary" type="button" onClick={handleStart}>업로드 시작</button>}
+				{directUiAvailable && state === 'idle' && file && session && <>
 					<button className="btn btn--primary" type="button" onClick={handleResume}>이어올리기</button>
 					<button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>
 				</>}
-				{state === 'error' && file && <button className="btn btn--primary" type="button" onClick={session ? handleResume : handleStart}>재시도</button>}
-				{(state === 'uploading' || state === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={handlePause}>일시 정지</button>}
-				{(state === 'uploading' || state === 'verifying' || (state === 'error' && session)) && <button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>}
-				{state === 'completed' && <span className="game-upload__complete-text">업로드 완료</span>}
-				{onSkip && state !== 'uploading' && state !== 'verifying' && state !== 'completed' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
+				{directUiAvailable && state === 'error' && file && <button className="btn btn--primary" type="button" onClick={session ? handleResume : handleStart}>재시도</button>}
+				{directUiAvailable && (state === 'uploading' || state === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={handlePause}>일시 정지</button>}
+				{directUiAvailable && (state === 'uploading' || state === 'verifying' || (state === 'error' && session)) && <button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>}
+				{directUiAvailable && state === 'completed' && <span className="game-upload__complete-text">업로드 완료</span>}
+				{onSkip && state !== 'uploading' && state !== 'verifying' && state !== 'completed' && legacyState !== 'uploading' && legacyState !== 'completing' && legacyState !== 'completed' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
 			</div>
 		</div>
 	);

@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, ResponsiveImage } from '../components/common';
-import { ProjectActions, ProjectPublicMeta, ProjectVideo } from '../components/project';
+import { ProjectActions, ProjectAttachments, ProjectPublicMeta, ProjectVideo } from '../components/project';
+import { getVideoLabel } from '../lib/video-label';
 
 export default function ProjectDetailPage() {
   const { year: yearParam, slug, projectId } = useParams<{
@@ -115,9 +116,9 @@ export default function ProjectDetailPage() {
       {projectVideos.length > 0 && (
         <section className="project-detail__video">
           <h3>영상</h3>
-          {projectVideos.map((video, i) => (
-            <div key={`${video.url ?? video.originalDownloadUrl ?? 'video'}-${i}`} className="project-detail__video-item">
-              <h4>동영상{i + 1}</h4>
+		  {projectVideos.map((video, index) => (
+			<div key={video.assetId ?? video.url ?? index} className="project-detail__video-item">
+			  <h4>{getVideoLabel(video, index)}</h4>
               <ProjectVideo
                 video={video}
                 poster={project.poster}
@@ -157,6 +158,7 @@ export default function ProjectDetailPage() {
           />
         </section>
       )}
+      <ProjectAttachments attachments={project.attachments} className="project-detail__attachments" />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { Readable, Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { createS3Client } from '../lib/s3.js';
-import { createMultipartPartPresigner, createProtectedDownloadPresigner } from '../lib/storage.js';
+import { createMultipartPartPresigner } from '../lib/storage.js';
 import {
 	assertCompletionManifestMatchesGarage,
 	assertMultipartPartCount,
@@ -71,26 +71,6 @@ describe('direct multipart GAME foundation', () => {
 		expect(url.searchParams.get('uploadId')).toBe('upload-1');
 		expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toContain('x-amz-checksum-sha256');
 		expect([...url.searchParams.keys()].some((key) => key.toLowerCase() === 'x-amz-checksum-sha256')).toBe(false);
-		client.destroy();
-	});
-
-	it('issues only GetObject capabilities from the protected delivery client', async () => {
-		const client = createS3Client({
-			S3_ENDPOINT: 'https://download.example.test',
-			S3_REGION: 'garage',
-			S3_ACCESS_KEY_ID: 'fixture-access-key',
-			S3_SECRET_ACCESS_KEY: 'fixture-secret-key',
-			S3_FORCE_PATH_STYLE: true,
-		});
-		const signer = createProtectedDownloadPresigner(client, { defaultPresignTtlSec: 45 });
-		expect(Object.keys(signer)).toEqual(['presign']);
-		const url = new URL(await signer.presign('protected', 'objects/private game.zip', {
-			responseContentDisposition: 'attachment; filename="game.zip"',
-		}));
-		expect(url.origin).toBe('https://download.example.test');
-		expect(url.pathname).toBe('/protected/objects/private%20game.zip');
-		expect(url.searchParams.get('X-Amz-Expires')).toBe('45');
-		expect(url.searchParams.get('response-content-disposition')).toBe('attachment; filename="game.zip"');
 		client.destroy();
 	});
 

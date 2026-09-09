@@ -1,0 +1,194 @@
+import type {
+	AssetKind,
+	Prisma,
+	PrismaClient,
+} from '../../../generated/prisma/client.js';
+import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
+import { notFound } from '../../../shared/errors.js';
+import { assertValidPosterAsset } from '../../../shared/poster-validation.js';
+import {
+	ASSET_MUTATION_TRANSACTION_POLICY,
+	type AssetMutationTransactionPolicy,
+	withAssetMutationTransaction,
+} from '../../assets/mutation-transaction.js';
+import { queueDurableDeletions } from '../../orphan/outbox.js';
+import { commitUploadIntents } from '../../upload-intent/repository.js';
+import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
+import {
+	imageRenditionDeletionTargets,
+} from '../../assets/image-rendition-lifecycle.js';
+import { createCanonicalAsset } from '../../assets/representation-write.js';
+import type { AssetReplacementOutboxConfig, AssetWriteData } from './ports.js';
+
+type TxClient = Prisma.TransactionClient;
+
+type LockedReplaceableAsset = {
+	id: number;
+	storageKey: string | null;
+	playbackStorageKey: string | null;
+	representations: Array<{ role: string; bucket: string; objectKey: string }>;
+};
+
+/**
+ * Ticket-005 project asset mutation contract used by the context-owned project
+ * graph. The caller supplies the client; this module never captures a default.
+ */
+export function createProjectAssetMutationRepository(
+	client: PrismaClient,
+	transactionPolicy: AssetMutationTransactionPolicy = ASSET_MUTATION_TRANSACTION_POLICY,
+) {
+	async function lockProject(tx: TxClient, projectId: number): Promise<void> {
+		const rows = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
+			SELECT "id"
+			FROM "projects"
+			WHERE "id" = ${projectId}
+			FOR UPDATE
+		`);
+		if (rows.length === 0) throw notFound('Project not found');
+	}
+
+	async function lockReadyAsset(
+		tx: TxClient,
+		projectId: number,
+		kind: AssetKind,
+	): Promise<LockedReplaceableAsset | null> {
+		const rows = await tx.$queryRaw<Array<Omit<LockedReplaceableAsset, 'representations'>>>(PrismaRuntime.sql`
+			SELECT
+				"id",
+				"storage_key" AS "storageKey",
+				"playback_storage_key" AS "playbackStorageKey"
+			FROM "assets"
+			WHERE "project_id" = ${projectId}
+				AND "kind" = CAST(${kind} AS "AssetKind")
+				AND "status" = 'READY'
+			ORDER BY "id"
+			LIMIT 1
+			FOR UPDATE
+		`);
+		const asset = rows[0];
+		if (!asset) return null;
+		return {
+			...asset,
+			representations: await tx.assetRepresentation.findMany({
+				where: { assetId: asset.id, state: { not: 'DELETED' } },
+				select: { role: true, bucket: true, objectKey: true },
+			}),
+		};
+	}
+
+	return {
+		replaceOrCreateReplaceableAsset(
+			projectId: number,
+			kind: AssetKind,
+			data: AssetWriteData,
+			outbox: AssetReplacementOutboxConfig,
+		): Promise<{
+			assetId: number;
+			oldStorageKey: string | null;
+			oldPlaybackStorageKey: string | null;
+		}> {
+			return withAssetMutationTransaction(client, async (tx) => {
+				await lockProject(tx, projectId);
+				const existing = await lockReadyAsset(tx, projectId, kind);
+
+				if (existing) {
+					await queueDurableDeletions(tx, [
+						...existing.representations.map((representation) => ({
+							bucket: representation.bucket,
+							storageKey: representation.objectKey,
+							reason: `${outbox.reason}-representation-${representation.role.toLowerCase()}`,
+						})),
+						...(existing.storageKey && existing.storageKey !== data.storageKey
+							? [{
+									bucket: outbox.bucket,
+									storageKey: existing.storageKey,
+									reason: outbox.reason,
+								}]
+							: []),
+						...(existing.playbackStorageKey
+							&& existing.playbackStorageKey !== data.playbackStorageKey
+							&& existing.playbackStorageKey !== data.storageKey
+							? [{
+									bucket: outbox.bucket,
+									storageKey: existing.playbackStorageKey,
+									reason: outbox.playbackReason,
+								}]
+							: []),
+						...(existing.storageKey && (kind === 'IMAGE' || kind === 'POSTER')
+							? imageRenditionDeletionTargets(
+								outbox.bucket,
+								existing.storageKey,
+								`${outbox.reason}-rendition`,
+							)
+							: []),
+					]);
+					await tx.project.updateMany({
+						where: { id: projectId, posterAssetId: existing.id },
+						data: { posterAssetId: null },
+					});
+					if (existing.storageKey && existing.storageKey !== data.storageKey) {
+						await tx.gameUploadSession.updateMany({
+							where: {
+								projectId,
+								status: 'COMPLETED',
+								storageKey: existing.storageKey,
+							},
+							data: { storageKey: null },
+						});
+					}
+					await tx.asset.update({
+						where: { id: existing.id },
+						data: { status: 'DELETED' },
+						select: { id: true },
+					});
+				}
+
+				const created = await createCanonicalAsset(tx, {
+					projectId,
+					kind,
+					...data,
+					bucket: data.bucket ?? outbox.bucket,
+				});
+				await commitUploadIntents(tx, data.uploadIntentIds ?? []);
+				if (data.idempotency) {
+					await succeedIdempotencyOperation(tx, {
+						operationId: data.idempotency.operationId,
+						ownerToken: data.idempotency.ownerToken,
+						result: data.idempotency.resultForAsset(created.id),
+					});
+				}
+				return {
+					assetId: created.id,
+					oldStorageKey: existing?.storageKey ?? null,
+					oldPlaybackStorageKey: existing?.playbackStorageKey ?? null,
+				};
+			}, transactionPolicy);
+		},
+
+		setProjectPoster(projectId: number, assetId: number): Promise<unknown> {
+			return withAssetMutationTransaction(client, async (tx) => {
+				await lockProject(tx, projectId);
+				const rows = await tx.$queryRaw<Array<{
+					id: number;
+					projectId: number;
+					kind: AssetKind;
+					status: string;
+				}>>(PrismaRuntime.sql`
+					SELECT
+						"id",
+						"project_id" AS "projectId",
+						"kind"::text AS "kind",
+						"status"::text AS "status"
+					FROM "assets"
+					WHERE "id" = ${assetId}
+					FOR UPDATE
+				`);
+				assertValidPosterAsset(rows[0] ?? null, projectId);
+				return tx.project.update({
+					where: { id: projectId },
+					data: { posterAssetId: assetId },
+				});
+			}, transactionPolicy);
+		},
+	};
+}

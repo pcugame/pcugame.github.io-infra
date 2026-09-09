@@ -39,42 +39,54 @@ import { createOrphanRepository } from '../modules/orphan/repository.js';
 const deploymentId = '11111111-1111-4111-8111-111111111111';
 
 function referenceClient(input: { malformedWebgl?: boolean } = {}) {
+	const gameUploadSession = {
+		findMany: vi.fn()
+			.mockResolvedValueOnce([{ id: 'completed', storageKey: 'game/completed.zip' }])
+			.mockResolvedValueOnce([
+				{ id: 'pending', s3Key: 'game/pending.zip' },
+				{ id: 'completing', s3Key: 'game/completing.zip' },
+			]),
+	};
 	return {
 		asset: {
 			findMany: vi.fn().mockResolvedValue([
 				{
 					id: 1,
-					representations: [
-						{ id: 'image-original', role: 'ORIGINAL', bucket: 'public', objectKey: 'images/original.png' },
-						{ id: 'image-card', role: 'CARD_480', bucket: 'public', objectKey: 'images/card.webp' },
-					],
+					storageKey: 'images/original.png',
+					playbackStorageKey: 'images/playback.webp',
+					isPublic: true,
+					card480Height: null,
+					display960Height: null,
 				},
 				{
 					id: 2,
-					representations: [{ id: 'video-original', role: 'ORIGINAL', bucket: 'protected', objectKey: 'videos/original.mp4' }],
+					storageKey: 'videos/original.mp4',
+					playbackStorageKey: null,
+					isPublic: false,
+					card480Height: null,
+					display960Height: null,
+				},
+			]),
+		},
+		exhibition: {
+			findMany: vi.fn().mockResolvedValue([
+				{
+					id: 3,
+					posterStorageKey: 'posters/exhibition.png',
+					posterCard480Height: null,
+					posterDisplay960Height: null,
 				},
 			]),
 		},
 		project: {
 			findMany: vi.fn().mockResolvedValue([{
 				id: 7,
-				currentWebglDeployment: input.malformedWebgl ? {
-					id: deploymentId, publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
-					entryObjectKey: 'webgl/not-safe/index.html',
-					sourceRepresentation: { role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
-				} : {
-					id: deploymentId, publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
-					entryObjectKey: `webgl/7/${deploymentId}/site/index.html`,
-					sourceRepresentation: { role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
-				},
+				webglEntryKey: input.malformedWebgl
+					? 'webgl/not-safe/index.html'
+					: `webgl/7/${deploymentId}/site/index.html`,
 			}]),
 		},
-		assetUploadSession: {
-			findMany: vi.fn().mockResolvedValue([
-				{ id: 'pending', bucket: 'protected', objectKey: 'game/pending.zip' },
-				{ id: 'completing', bucket: 'protected', objectKey: 'game/completing.zip' },
-			]),
-		},
+		gameUploadSession,
 		uploadIntent: {
 			findMany: vi.fn().mockResolvedValue([{
 				id: 'intent',
@@ -97,7 +109,9 @@ describe('authoritative object reference inventory', () => {
 
 		expect(inventory.references).toEqual(expect.arrayContaining([
 			expect.objectContaining({ bucket: 'public', key: 'images/original.png', targetKind: 'EXACT' }),
+			expect.objectContaining({ bucket: 'public', key: 'images/playback.webp', targetKind: 'EXACT' }),
 			expect.objectContaining({ bucket: 'protected', key: 'videos/original.mp4', targetKind: 'EXACT' }),
+			expect.objectContaining({ bucket: 'public', key: 'posters/exhibition.png', targetKind: 'EXACT' }),
 			expect.objectContaining({
 				bucket: 'public',
 				key: `webgl/7/${deploymentId}/site/`,
@@ -108,6 +122,7 @@ describe('authoritative object reference inventory', () => {
 				key: `webgl/7/${deploymentId}/source.zip`,
 				targetKind: 'EXACT',
 			}),
+			expect.objectContaining({ bucket: 'protected', key: 'game/completed.zip' }),
 			expect.objectContaining({ bucket: 'protected', key: 'game/pending.zip' }),
 			expect.objectContaining({ bucket: 'protected', key: 'game/completing.zip' }),
 			expect.objectContaining({ bucket: 'protected', key: 'intent/in-flight.zip' }),
@@ -163,13 +178,58 @@ describe('authoritative object reference inventory', () => {
 			{ bucket: 'public', targetKind: 'PREFIX', key: 'a/b/c/' },
 		)).toBe(true);
 	});
+
+	it('uses the canonical current WebGL identity and ignores a stale legacy fallback pointer', async () => {
+		const canonicalDeploymentId = '22222222-2222-4222-8222-222222222222';
+		const client = referenceClient();
+		client.project.findMany.mockResolvedValue([{
+			id: 7,
+			webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
+			currentWebglDeploymentId: canonicalDeploymentId,
+			currentWebglDeployment: {
+				id: canonicalDeploymentId,
+				state: 'READY',
+				publicBucket: 'public',
+				publicPrefix: `webgl/7/${canonicalDeploymentId}/site/`,
+				entryObjectKey: `webgl/7/${canonicalDeploymentId}/site/index.html`,
+				sourceRepresentation: {
+					id: 'webgl-source-representation',
+					state: 'READY',
+					bucket: 'protected',
+					objectKey: `webgl/7/${canonicalDeploymentId}/source.zip`,
+				},
+			},
+		}]);
+		const inventory = await collectObjectReferences(
+			client as never,
+			{ publicBucket: 'public', protectedBucket: 'protected' },
+			{ error: vi.fn() },
+		);
+
+		expect(inventory.references).toEqual(expect.arrayContaining([
+			expect.objectContaining({
+				bucket: 'public', targetKind: 'PREFIX',
+				key: `webgl/7/${canonicalDeploymentId}/site/`,
+			}),
+			expect.objectContaining({
+				bucket: 'protected', targetKind: 'EXACT',
+				key: `webgl/7/${canonicalDeploymentId}/source.zip`,
+			}),
+		]));
+		expect(inventory.references).not.toContainEqual(expect.objectContaining({
+			key: `webgl/7/${deploymentId}/site/`,
+		}));
+	});
 });
 
 function emptyReferenceModels() {
 	return {
 		asset: { findMany: vi.fn().mockResolvedValue([]) },
+		exhibition: { findMany: vi.fn().mockResolvedValue([]) },
 		project: { findMany: vi.fn().mockResolvedValue([]) },
-		assetUploadSession: { findMany: vi.fn().mockResolvedValue([]) },
+		gameUploadSession: {
+			findMany: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]),
+		},
 		uploadIntent: { findMany: vi.fn().mockResolvedValue([]) },
 	};
 }
@@ -222,7 +282,7 @@ describe('conservative orphan reconciliation', () => {
 				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
 				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
 			},
-			$queryRaw: vi.fn(),
+			$queryRaw: vi.fn().mockResolvedValue([]),
 		};
 		const storage = {
 			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
@@ -265,11 +325,7 @@ describe('conservative orphan reconciliation', () => {
 		const models = emptyReferenceModels();
 		models.project.findMany.mockResolvedValue([{
 			id: 7,
-			currentWebglDeployment: {
-				id: deploymentId, publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
-				entryObjectKey: `webgl/7/${deploymentId}/site/index.html`,
-				sourceRepresentation: { role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
-			},
+			webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
 		}]);
 		const orphanUpsert = vi.fn().mockResolvedValue({});
 		const prisma = {
@@ -279,7 +335,7 @@ describe('conservative orphan reconciliation', () => {
 				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
 				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
 			},
-			$queryRaw: vi.fn(),
+			$queryRaw: vi.fn().mockResolvedValue([]),
 		};
 		const storage = {
 			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
@@ -314,15 +370,15 @@ describe('conservative orphan reconciliation', () => {
 		const models = emptyReferenceModels();
 		models.asset.findMany.mockResolvedValue([{
 			id: 1,
-			representations: [{ id: 'live', role: 'ORIGINAL', bucket: 'public', objectKey: 'live.png' }],
+			storageKey: 'live.png',
+			playbackStorageKey: null,
+			isPublic: true,
+			card480Height: null,
+			display960Height: null,
 		}]);
 		models.project.findMany.mockResolvedValue([{
 			id: 7,
-			currentWebglDeployment: {
-				id: deploymentId, publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
-				entryObjectKey: `webgl/7/${deploymentId}/site/index.html`,
-				sourceRepresentation: { role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
-			},
+			webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
 		}]);
 		const orphanUpsert = vi.fn().mockResolvedValue({});
 		const prisma = {
@@ -332,7 +388,7 @@ describe('conservative orphan reconciliation', () => {
 				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
 				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
 			},
-			$queryRaw: vi.fn(),
+			$queryRaw: vi.fn().mockResolvedValue([]),
 		};
 		const storage = {
 			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
@@ -403,7 +459,7 @@ describe('conservative orphan reconciliation', () => {
 				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
 				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
 			},
-			$queryRaw: vi.fn().mockResolvedValue([{ id: 1 }]),
+			$queryRaw: vi.fn().mockResolvedValueOnce([]).mockResolvedValue([{ id: 1 }]),
 		};
 		const storage = {
 			head: vi.fn(async (_bucket: string, key: string) => ({
@@ -440,7 +496,7 @@ describe('conservative orphan reconciliation', () => {
 		expect(storage.delete).not.toHaveBeenCalled();
 		expect(storage.head).toHaveBeenCalledTimes(6);
 		expect(orphanUpsert).not.toHaveBeenCalled();
-		expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+		expect(prisma.$queryRaw).toHaveBeenCalledTimes(3);
 		expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('skipped=live-reference-detected'));
 		expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('skipped=recent'));
 		expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('skipped=unknown-age'));
@@ -461,7 +517,7 @@ describe('conservative orphan reconciliation', () => {
 				}),
 				findUniqueOrThrow: vi.fn(),
 			},
-			$queryRaw: vi.fn(),
+			$queryRaw: vi.fn().mockResolvedValue([]),
 		};
 		const storage = {
 			head: vi.fn().mockResolvedValue({

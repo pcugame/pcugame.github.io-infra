@@ -2,8 +2,6 @@ import type { ObjectStorage } from '../../application/ports.js';
 import { createGameUploadValidationWorker } from './validation-worker.service.js';
 import { createGameUploadValidationLoop } from './validation-worker.loop.js';
 import type { AssetUploadRepository } from './ports.js';
-import { WorkerSourceObjectMissingError } from '../upload-lifecycle/worker-errors.js';
-import { cleanupStaleGameWorkspaces } from '../admin/game-upload/validation-worker.game-processor.js';
 
 /**
  * Separate process composition contract. Do not import this module from the
@@ -23,16 +21,10 @@ export function createAssetUploadValidationGraph(deps: {
 		storage: {
 			async stream(bucket, key, request) {
 				const object = await deps.storage.stream(bucket, key, undefined, request);
-				if (!object || 'kind' in object) {
-					throw new WorkerSourceObjectMissingError('Completed direct GAME source object does not exist');
-				}
+				if (!object || 'kind' in object) throw new Error('Completed direct upload object is unavailable');
 				return { body: object.body, size: object.size };
 			},
 		},
 	});
-	return {
-		worker,
-		loop: createGameUploadValidationLoop(worker),
-		cleanupStaleWorkspaces: (cutoff: Date) => cleanupStaleGameWorkspaces(deps.tempRoot, cutoff),
-	};
+	return { worker, loop: createGameUploadValidationLoop(worker) };
 }

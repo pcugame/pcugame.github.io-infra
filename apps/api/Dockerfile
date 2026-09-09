@@ -27,8 +27,8 @@ RUN npm ci
 # directly so they land in /app/node_modules/@img/, where the hoisted sharp
 # module will find the matching binary and libvips at runtime.
 RUN npm install --no-save \
-      @img/sharp-linux-x64@0.35.3 \
-      @img/sharp-libvips-linux-x64@1.3.2
+      @img/sharp-linux-x64@0.35.4 \
+      @img/sharp-libvips-linux-x64@1.3.3
 
 # ── Stage 2: Build TypeScript ──
 FROM node:22-bookworm-slim AS builder
@@ -45,6 +45,10 @@ COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 RUN npm run build --workspace=@pcu/contracts && \
     npm run db:generate --workspace=apps/api && \
     npm run build --workspace=apps/api
+
+# Keep immutable contract history in Git, but ship only the authorized Phase 1
+# migration prefix. Runtime and integration containers cannot apply Phase 2.
+RUN rm -rf apps/api/prisma/migrations/20260822000000_canonical_asset_contract
 
 # ── Stage 3: Production image ──
 FROM node:22-bookworm-slim AS runner
@@ -81,6 +85,6 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:4000/api/health || exit 1
 
-# Schema changes are an explicit release operation. API/worker processes never
-# apply pending migrations as a startup side effect.
+# Phase 1 schema expansion is an explicit, fenced release operation. Runtime
+# startup never applies pending migrations as a side effect.
 CMD ["node", "dist/server.js"]
