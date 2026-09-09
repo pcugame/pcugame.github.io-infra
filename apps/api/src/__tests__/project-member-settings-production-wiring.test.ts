@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
+import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppLogger, ObjectStorage, Scheduler } from '../application/ports.js';
@@ -18,6 +19,7 @@ import {
 } from './helpers/upload-lifecycle.js';
 import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
 import { notFound } from '../shared/errors.js';
+import { registerRouteSchemas } from '../shared/http-route-schemas.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const deployment = '123e4567-e89b-42d3-a456-426614174000';
@@ -317,8 +319,14 @@ function graphHarness(
 async function routeApp(
 	harness: ReturnType<typeof graphHarness>,
 	user: { id: number; role: 'ADMIN' | 'OPERATOR' | 'USER' } = { id: 1, role: 'ADMIN' },
+	options: { runtimeContracts?: boolean } = {},
 ): Promise<FastifyInstance> {
 	const app = Fastify({ logger: false });
+	if (options.runtimeContracts) {
+		app.setValidatorCompiler(validatorCompiler);
+		app.setSerializerCompiler(serializerCompiler);
+		registerRouteSchemas(app);
+	}
 	app.addHook('preHandler', async (request) => {
 		request.currentUser = {
 			...user,
@@ -428,6 +436,80 @@ describe('project/member/settings production wiring', () => {
 		});
 		expect(denied.statusCode).toBe(403);
 		expect(deniedHarness.ports.calls.projectUpdate).not.toHaveBeenCalled();
+	});
+
+	it('serializes an empty material list through the authenticated GET and PATCH response contracts', async () => {
+		const harness = graphHarness();
+		harness.ports.getProject().assets = [];
+		const app = await routeApp(harness, undefined, { runtimeContracts: true });
+		apps.push(app);
+
+		const detail = await app.inject({ method: 'GET', url: '/api/admin/projects/7' });
+		expect(detail.statusCode, detail.body).toBe(200);
+		expect(detail.json().data.attachments).toEqual([]);
+
+		const updated = await app.inject({
+			method: 'PATCH',
+			url: '/api/admin/projects/7',
+			payload: { title: 'Updated without materials' },
+		});
+		expect(updated.statusCode, updated.body).toBe(200);
+		expect(updated.json().data.attachments).toEqual([]);
+	});
+
+	it('serializes READY document and attachment metadata through the authenticated detail response contract', async () => {
+		const harness = graphHarness();
+		harness.ports.getProject().assets = [
+			{
+				id: 31,
+				projectId: 7,
+				kind: 'DOCUMENT',
+				status: 'READY',
+				storageKey: 'legacy/manual.pdf',
+				playbackStorageKey: null,
+				originalName: 'manual.pdf',
+				mimeType: 'application/pdf',
+				playbackMimeType: '',
+				sizeBytes: 1024n,
+				playbackSizeBytes: 0n,
+				playbackStatus: 'READY',
+				playbackError: '',
+				representations: [{ role: 'ORIGINAL', state: 'READY', objectKey: 'assets/31/original/manual.pdf', mimeType: 'application/pdf', sizeBytes: 1024n },],
+			},
+			{
+				id: 32,
+				projectId: 7,
+				kind: 'ATTACHMENT',
+				status: 'READY',
+				storageKey: 'legacy/source.zip',
+				playbackStorageKey: null,
+				originalName: 'source.zip',
+				mimeType: 'application/zip',
+				playbackMimeType: '',
+				sizeBytes: 2048n,
+				playbackSizeBytes: 0n,
+				playbackStatus: 'READY',
+				playbackError: '',
+				representations: [{ role: 'ORIGINAL', state: 'READY', objectKey: 'assets/32/original/source.zip', mimeType: 'application/zip', sizeBytes: 2048n },],
+			},
+		] as unknown as ReturnType<typeof harness.ports.getProject>['assets'];
+		const app = await routeApp(harness, undefined, { runtimeContracts: true });
+		apps.push(app);
+
+		const detail = await app.inject({ method: 'GET', url: '/api/admin/projects/7' });
+		expect(detail.statusCode, detail.body).toBe(200);
+		expect(detail.json().data.attachments).toEqual([
+			{ assetId: 31, kind: 'DOCUMENT', originalName: 'manual.pdf', mimeType: 'application/pdf', sizeBytes: 1024, downloadUrl: 'https://api-a.test/api/assets/31/download?variant=original' },
+			{ assetId: 32, kind: 'ATTACHMENT', originalName: 'source.zip', mimeType: 'application/zip', sizeBytes: 2048, downloadUrl: 'https://api-a.test/api/assets/32/download?variant=original' },
+		]);
+
+		const updated = await app.inject({
+			method: 'PATCH',
+			url: '/api/admin/projects/7',
+			payload: { title: 'Updated with materials' },
+		});
+		expect(updated.statusCode, updated.body).toBe(200);
+		expect(updated.json().data.attachments).toEqual(detail.json().data.attachments);
 	});
 
 	it('preserves project list/detail/update/poster failures without forbidden mutations', async () => {

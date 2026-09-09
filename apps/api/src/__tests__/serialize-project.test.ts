@@ -37,7 +37,7 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 		members: [] as { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[],
 		assets: [] as {
 			id: number;
-			kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO' | 'WEBGL';
+			kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO' | 'WEBGL' | 'DOCUMENT' | 'ATTACHMENT';
 			storageKey: string | null;
 			playbackStorageKey: string | null;
 			originalName: string;
@@ -272,6 +272,44 @@ describe('serializeProjectDetail', () => {
 		const result = serializeProjectDetail(fakeProject({ assets: [] }));
 		expect(result.video).toBeNull();
 		expect(result.videos).toEqual([]);
+		expect(result.attachments).toEqual([]);
+	});
+
+	it('serializes READY documents and attachments as downloadable project materials', () => {
+		const result = serializeProjectDetail(fakeProject({
+			assets: [
+				fakeAsset({
+					id: 31,
+					kind: 'DOCUMENT',
+					storageKey: 'legacy/manual.pdf',
+					originalName: 'manual.pdf',
+					mimeType: 'application/pdf',
+					sizeBytes: 1024n,
+					representations: [{
+						role: 'ORIGINAL', state: 'READY', objectKey: 'assets/31/original/manual.pdf',
+						mimeType: 'application/pdf', sizeBytes: 1024n,
+					}],
+				}),
+				fakeAsset({
+					id: 32,
+					kind: 'ATTACHMENT',
+					storageKey: 'legacy/source.zip',
+					originalName: 'source.zip',
+					mimeType: 'application/zip',
+					sizeBytes: 2048n,
+					representations: [{
+						role: 'ORIGINAL', state: 'READY', objectKey: 'assets/32/original/source.zip',
+						mimeType: 'application/zip', sizeBytes: 2048n,
+					}],
+				}),
+			],
+		}));
+
+		expect(result.attachments).toEqual([
+			{ assetId: 31, kind: 'DOCUMENT', originalName: 'manual.pdf', mimeType: 'application/pdf', sizeBytes: 1024, downloadUrl: 'https://api.example.com/api/assets/31/download?variant=original' },
+			{ assetId: 32, kind: 'ATTACHMENT', originalName: 'source.zip', mimeType: 'application/zip', sizeBytes: 2048, downloadUrl: 'https://api.example.com/api/assets/32/download?variant=original' },
+		]);
+		expect(AdminProjectDetailSchema.safeParse(result).success).toBe(true);
 	});
 
 	it('returns video object when VIDEO asset exists', () => {

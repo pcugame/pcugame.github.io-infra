@@ -205,6 +205,21 @@ export function createProjectSerializer(
 				playbackError: videoAsset.representations?.find((rep) => rep.role === 'PLAYBACK')?.error || videoAsset.playbackError || undefined,
 			}));
 		const video = videos[0] ?? null;
+		const attachments = project.assets.flatMap<NonNullable<AdminProjectDetail['attachments']>[number]>((asset) => {
+			if (asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT') return [];
+			const original = asset.representations?.find((candidate) => (
+				candidate.role === 'ORIGINAL' && candidate.state === 'READY'
+			));
+			if (!original) return [];
+			return [{
+				assetId: asset.id,
+				kind: asset.kind,
+				originalName: asset.originalName,
+				mimeType: original.mimeType || asset.mimeType,
+				sizeBytes: Number(original.sizeBytes ?? asset.sizeBytes),
+				downloadUrl: canonicalProtectedAssetUrl(base, asset.id, 'original'),
+			}];
+		});
 
 		return {
 			id: project.id,
@@ -242,6 +257,7 @@ export function createProjectSerializer(
 				sortOrder: m.sortOrder,
 				userId: m.userId,
 			})),
+			attachments,
 			assets: project.assets.flatMap<AdminProjectDetail['assets'][number]>((a) => {
 				if (a.kind === 'IMAGE' || a.kind === 'POSTER' || a.kind === 'THUMBNAIL') {
 					return [{
