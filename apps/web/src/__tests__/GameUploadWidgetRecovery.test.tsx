@@ -146,6 +146,145 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 		expect(await screen.findByText('업로드 완료')).toBeTruthy();
 	});
 
+	it('keeps a restored terminal locator until the user explicitly starts a new upload', async () => {
+		const saved = {
+			sessionId: 'webgl-rejected', owner: { type: 'PROJECT', id: 7 }, generation: 1,
+			partSizeBytes: 16, totalParts: 2, expiresAt: '2026-08-22T00:00:00.000Z',
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'k'.repeat(64), kind: 'WEBGL',
+		};
+		window.sessionStorage.setItem('pcu.direct-asset-upload:7:WEBGL', JSON.stringify(saved));
+		controls.getStatus.mockResolvedValue({ ...saved, state: 'REJECTED', originalName: 'webgl.zip', totalBytes: 4, parts: [] });
+		controls.upload.mockImplementation(() => new Promise(() => undefined));
+		const file = new File(['webgl'], 'webgl.zip', { type: 'application/zip' });
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<GameUploadWidget projectId={7} initialFile={file} autoStart uploadKind="WEBGL" />
+			</QueryClientProvider>,
+		);
+
+		expect(await screen.findByText('업로드 세션을 다시 이어올릴 수 없습니다. 원본 ZIP 파일을 선택한 뒤 새 업로드 시작을 눌러 다시 올리세요.')).toBeTruthy();
+		expect(screen.getByRole('button', { name: '새 업로드 시작' })).toBeTruthy();
+		expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:WEBGL')).not.toBeNull();
+		expect(controls.upload).not.toHaveBeenCalled();
+		expect(controls.cancel).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByRole('button', { name: '새 업로드 시작' }));
+		await waitFor(() => expect(controls.upload).toHaveBeenCalledOnce());
+		expect(controls.cancel).not.toHaveBeenCalled();
+		expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:WEBGL')).toBeNull();
+	});
+
+	it('does not treat a terminal status from another generation as this locator terminal', async () => {
+		const saved = {
+			sessionId: 'game-generation-one', owner: { type: 'PROJECT', id: 7 }, generation: 1,
+			partSizeBytes: 16, totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z',
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'n'.repeat(64), kind: 'GAME',
+		};
+		window.sessionStorage.setItem('pcu.direct-asset-upload:7:GAME', JSON.stringify(saved));
+		controls.getStatus.mockResolvedValue({ ...saved, generation: 2, state: 'REJECTED', originalName: 'game.zip', totalBytes: 4, parts: [] });
+		const file = new File(['game'], 'game.zip', { type: 'application/zip' });
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<GameUploadWidget projectId={7} initialFile={file} />
+			</QueryClientProvider>,
+		);
+
+		expect(await screen.findByRole('button', { name: '이어올리기' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: '새 업로드 시작' })).toBeNull();
+		expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME')).not.toBeNull();
+	});
+
+	it('ignores a paused restored session status after the user has started a newer upload', async () => {
+		const saved = {
+			sessionId: 'game-old-session', owner: { type: 'PROJECT', id: 7 }, generation: 1,
+			partSizeBytes: 16, totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z',
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'o'.repeat(64), kind: 'GAME',
+		};
+		const replacement = { ...saved, sessionId: 'game-new-session', generation: 2 };
+		let resolveOldStatus!: (status: typeof saved & { state: string; originalName: string; totalBytes: number; parts: unknown[] }) => void;
+		const oldStatus = new Promise<typeof saved & { state: string; originalName: string; totalBytes: number; parts: unknown[] }>((resolve) => {
+			resolveOldStatus = resolve;
+		});
+		window.sessionStorage.setItem('pcu.direct-asset-upload:7:GAME', JSON.stringify(saved));
+		controls.getStatus.mockReturnValue(oldStatus);
+		controls.cancel.mockResolvedValue(undefined);
+		controls.upload.mockImplementation((_projectId, _file, _kind, _onProgress, options) => {
+			options.onSession(replacement);
+			return new Promise(() => undefined);
+		});
+		const file = new File(['game'], 'game.zip', { type: 'application/zip' });
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<GameUploadWidget projectId={7} initialFile={file} />
+			</QueryClientProvider>,
+		);
+
+		fireEvent.click(await screen.findByRole('button', { name: '취소 (세션 삭제)' }));
+		await waitFor(() => expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME')).toBeNull());
+		fireEvent.click(screen.getByRole('button', { name: '업로드 시작' }));
+		await screen.findByRole('button', { name: '일시 정지' });
+		fireEvent.click(screen.getByRole('button', { name: '일시 정지' }));
+		await act(async () => {
+			resolveOldStatus({ ...saved, state: 'REJECTED', originalName: 'game.zip', totalBytes: 4, parts: [] });
+		});
+
+		expect(JSON.parse(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME') ?? '{}')).toMatchObject({
+			sessionId: 'game-new-session', generation: 2,
+		});
+		expect(screen.queryByRole('button', { name: '새 업로드 시작' })).toBeNull();
+		expect(screen.getByRole('button', { name: '이어올리기' })).toBeTruthy();
+	});
+
+	it('offers a new upload after readiness polling confirms rejection', async () => {
+		const saved = {
+			sessionId: 'game-rejected-after-verifying', owner: { type: 'PROJECT', id: 7 }, generation: 1,
+			partSizeBytes: 16, totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z',
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'l'.repeat(64), kind: 'GAME',
+		};
+		controls.upload.mockImplementation((_projectId, _file, _kind, _onProgress, options) => {
+			options.onSession(saved);
+			return Promise.resolve({ status: 'VERIFYING', sessionId: saved.sessionId });
+		});
+		controls.waitReady.mockRejectedValue(new Error('rejected'));
+		controls.getStatus.mockResolvedValue({ ...saved, state: 'REJECTED', originalName: 'game.zip', totalBytes: 4, parts: [] });
+		const file = new File(['game'], 'game.zip', { type: 'application/zip' });
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<GameUploadWidget projectId={7} initialFile={file} autoStart />
+			</QueryClientProvider>,
+		);
+
+		expect(await screen.findByRole('button', { name: '새 업로드 시작' })).toBeTruthy();
+		expect(screen.getByText('업로드 세션을 다시 이어올릴 수 없습니다. 원본 ZIP 파일을 선택한 뒤 새 업로드 시작을 눌러 다시 올리세요.')).toBeTruthy();
+		expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME')).not.toBeNull();
+		expect(controls.cancel).not.toHaveBeenCalled();
+	});
+
+	it('offers a new upload when an explicit resume finds an expired session', async () => {
+		const saved = {
+			sessionId: 'game-expired-after-resume', owner: { type: 'PROJECT', id: 7 }, generation: 1,
+			partSizeBytes: 16, totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z',
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'm'.repeat(64), kind: 'GAME',
+		};
+		window.sessionStorage.setItem('pcu.direct-asset-upload:7:GAME', JSON.stringify(saved));
+		controls.getStatus
+			.mockResolvedValueOnce({ ...saved, state: 'UPLOADING', originalName: 'game.zip', totalBytes: 4, parts: [] })
+			.mockResolvedValueOnce({ ...saved, state: 'EXPIRED', originalName: 'game.zip', totalBytes: 4, parts: [] });
+		const file = new File(['game'], 'game.zip', { type: 'application/zip' });
+		render(
+			<QueryClientProvider client={new QueryClient()}>
+				<GameUploadWidget projectId={7} initialFile={file} />
+			</QueryClientProvider>,
+		);
+
+		fireEvent.click(await screen.findByRole('button', { name: '이어올리기' }));
+		expect(await screen.findByRole('button', { name: '새 업로드 시작' })).toBeTruthy();
+		expect(screen.queryByRole('button', { name: '이어올리기' })).toBeNull();
+		expect(controls.upload).not.toHaveBeenCalled();
+		expect(controls.cancel).not.toHaveBeenCalled();
+		expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME')).not.toBeNull();
+	});
+
 	it('keeps its locator after a failed delete until a status read confirms cancellation', async () => {
 		const saved = {
 			sessionId: 'game-cancelled', owner: { type: 'PROJECT', id: 7 }, generation: 1,
@@ -215,6 +354,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 		await waitFor(() => expect(controls.getStatus).toHaveBeenCalledTimes(2));
 		expect(controls.upload).not.toHaveBeenCalled();
 		expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME')).not.toBeNull();
+		expect(screen.queryByRole('button', { name: '새 업로드 시작' })).toBeNull();
 	});
 
 	it('forgets a restored CANCELLED locator and does not auto-resume it', async () => {
