@@ -7,6 +7,7 @@ import { withAssetMutationTransaction } from '../assets/mutation-transaction.js'
 import { assertNoDeletionClaim } from '../orphan/reference-resolver.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 import { commitUploadIntents } from '../upload-intent/repository.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
 import type {
 	GeneratedPlaybackIntent,
 	VerifyingVideoSession,
@@ -181,11 +182,12 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 
 		commitVideoOriginalReady(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
-				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.session.projectId} FOR UPDATE`);
 				const session = await tx.assetUploadSession.findUnique({ where: { id: input.session.id } });
 				if (!session || session.projectId === null || session.exhibitionId !== null) {
 					throw new Error('VIDEO upload session must be project-owned');
 				}
+				const actor = await tx.user.findUniqueOrThrow({ where: { id: session.userId }, select: { id: true, role: true } });
+				await assertProjectUploadWriteAccessInTransaction(tx, actor, session.projectId);
 				const owned = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 					SELECT "id" FROM "asset_upload_sessions"
 					WHERE "id" = ${input.session.id}
@@ -307,6 +309,7 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 						},
 					},
 				});
+				await tx.project.update({ where: { id: session.projectId }, data: { version: { increment: 1 } } });
 				return {
 					assetId: asset.id,
 					originalRepresentationId: original.id,

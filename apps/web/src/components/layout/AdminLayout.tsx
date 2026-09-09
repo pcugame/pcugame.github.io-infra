@@ -7,6 +7,7 @@ type NavItem = { to: string; label: string; icon: string; end: boolean; adminOnl
 const ADMIN_NAV: NavItem[] = [
   { to: '/admin/projects', label: '작품 관리', icon: 'grid', end: true },
   { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
+  { to: '/admin/change-requests', label: '변경 요청', icon: 'clipboard', end: false },
   { to: '/admin/years', label: '전시회 추가', icon: 'calendar', end: false },
   { to: '/admin/settings', label: '사이트 설정', icon: 'settings', end: false },
   { to: '/admin/banned-ips', label: 'IP 차단 관리', icon: 'shield', end: false },
@@ -46,6 +47,11 @@ const ICONS: Record<string, ReactElement> = {
   upload: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  ),
+  clipboard: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 4a3 3 0 0 1 6 0" /><line x1="9" y1="12" x2="15" y2="12" /><line x1="9" y1="16" x2="15" y2="16" />
     </svg>
   ),
 };

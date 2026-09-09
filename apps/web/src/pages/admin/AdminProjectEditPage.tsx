@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import type { AddMemberInput, UpdateProjectFormInput } from '../../contracts/schemas';
@@ -44,9 +44,11 @@ export default function AdminProjectEditPage() {
 	if (error) return <ErrorMessage error={error} onReset={() => refetch()} />;
 	if (!project) return null;
 
+	// Capability is computed at the API boundary.  Operators retain direct access
+	// even when an exhibition is closed, while contributors must submit a request.
 	const limits = getClientUploadLimits(user?.role ?? 'USER');
-	const canEditContent = true;
 	const isPrivileged = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
+	const canEditContent = isPrivileged || project.canEdit === true;
 
 	const onSubmitUpdate = (data: UpdateProjectFormInput) => {
 		mutations.updateMutation.mutate({
@@ -71,12 +73,19 @@ export default function AdminProjectEditPage() {
 				슬러그: <code>{project.slug}</code> | 연도: <span className="admin-year-badge">{project.year}</span>
 				{project.isIncomplete && ' | 불완전 자료'}
 			</p>
+			{!canEditContent && project.canRequestChange && (
+				<div className="admin-card" style={{ marginBottom: '1rem' }}>
+					<p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p>
+					<Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link>
+				</div>
+			)}
 
 			<AdminProjectBasicInfoForm
 				project={project}
 				error={mutations.updateMutation.error}
 				isDirtySubmitting={mutations.updateMutation.isPending}
 				isSuccess={mutations.updateMutation.isSuccess}
+				canEditContent={canEditContent}
 				onSubmit={onSubmitUpdate}
 			/>
 

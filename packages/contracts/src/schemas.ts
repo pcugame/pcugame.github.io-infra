@@ -80,15 +80,19 @@ export const SetProjectPosterSchema = z.object({
 export const CreateExhibitionBaseSchema = z.object({
 	year: z.number().int().min(2021).max(2100),
 	title: z.string().max(100).optional(),
+	isModificationEnabled: z.boolean().optional(),
 	isUploadEnabled: z.boolean().optional(),
 	sortOrder: SafeNonNegativeIntegerSchema.optional(),
-});
+}).refine((value) => value.isModificationEnabled === undefined || value.isUploadEnabled === undefined
+	|| value.isModificationEnabled === value.isUploadEnabled, { message: 'Modification flags disagree', path: ['isModificationEnabled'] });
 
 export const UpdateExhibitionBaseSchema = z.object({
 	title: z.string().max(100).optional(),
+	isModificationEnabled: z.boolean().optional(),
 	isUploadEnabled: z.boolean().optional(),
 	sortOrder: SafeNonNegativeIntegerSchema.optional(),
-});
+}).refine((value) => value.isModificationEnabled === undefined || value.isUploadEnabled === undefined
+	|| value.isModificationEnabled === value.isUploadEnabled, { message: 'Modification flags disagree', path: ['isModificationEnabled'] });
 
 export const AddMemberSchema = z.object({
 	name: z.string().min(1).max(50),

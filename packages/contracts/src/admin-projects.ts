@@ -13,6 +13,10 @@ export type UpdateProjectRequest = {
 };
 
 export type AdminProjectItem = {
+	isModificationEnabled?: boolean;
+	canEdit?: boolean;
+	canDelete?: boolean;
+	canRequestChange?: boolean;
 	id: number;
 	title: string;
 	slug: string;
@@ -66,6 +70,10 @@ export type AdminProjectListResponse = {
 };
 
 export type AdminProjectDetail = {
+	isModificationEnabled?: boolean;
+	canEdit?: boolean;
+	canDelete?: boolean;
+	canRequestChange?: boolean;
 	id: number;
 	title: string;
 	slug: string;

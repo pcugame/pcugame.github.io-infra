@@ -49,7 +49,7 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 		});
 		actorId = actor.id;
 		const exhibition = await prisma.exhibition.create({
-			data: { year: 2098, title: testId, isUploadEnabled: true },
+			data: { year: 2098, title: testId, isModificationEnabled: true },
 		});
 		exhibitionId = exhibition.id;
 	}, 60_000);

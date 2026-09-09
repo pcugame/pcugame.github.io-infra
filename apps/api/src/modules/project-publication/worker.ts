@@ -93,6 +93,7 @@ export function createProjectPublicationWorker(deps: {
 				renew: () => deps.repository.renew(job.id, token, leaseMs).then((owned) => ({ count: owned ? 1 : 0 })),
 				logHeartbeatFailure: (error) => deps.logger.error({ error, jobId: job.id }, 'Project publication heartbeat failed'),
 			});
+			let validatedJob: ValidatedProjectPublicationJob | undefined;
 			try {
 				const validated = await deps.repository.validatePlan(job, token);
 				if (validated.status !== 'VALID') {
@@ -100,6 +101,7 @@ export function createProjectPublicationWorker(deps: {
 						? { claimed: 1, completed: 0, retried: 0, failed: 1, cancelled: 0 }
 						: { claimed: 1, completed: 0, retried: 0, failed: 0, cancelled: 1 };
 				}
+				validatedJob = validated.job;
 				await copyProjectPublicationObjects({
 					job: validated.job,
 					storage: deps.storage,
@@ -112,10 +114,13 @@ export function createProjectPublicationWorker(deps: {
 					? { claimed: 1, completed: 1, retried: 0, failed: 0, cancelled: 0 }
 					: { claimed: 1, completed: 0, retried: 0, failed: 0, cancelled: 1 };
 			} catch (error) {
+				// A deleted job can make complete() fail before the next heartbeat
+				// notices lease loss. Requeue after storage I/O has stopped in either
+				// case, using only a plan verified against the canonical DB snapshot.
+				await deps.repository.queueCancelledCleanup(job.id, validatedJob?.plan).catch((cleanupError) => {
+					deps.logger.error({ error: cleanupError, jobId: job.id }, 'Failed to requeue cancelled publication cleanup');
+				});
 				if (claim.isLost()) {
-					await deps.repository.queueCancelledCleanup(job.id).catch((cleanupError) => {
-						deps.logger.error({ error: cleanupError, jobId: job.id }, 'Failed to requeue cancelled publication cleanup');
-					});
 					return { claimed: 1, completed: 0, retried: 0, failed: 0, cancelled: 1 };
 				}
 				if (error instanceof ProjectPublicationInvariantError) {

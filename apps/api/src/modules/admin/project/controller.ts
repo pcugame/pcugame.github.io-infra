@@ -62,7 +62,7 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 				if (patch.status !== undefined) {
 					deps.status.assertTransition(project.status, patch.status, user.role);
 				}
-				sendOk(reply, await deps.service.updateProject(projectId, patch));
+				sendOk(reply, await deps.service.updateProject(projectId, patch, user));
 			},
 		);
 
@@ -72,7 +72,7 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 			async (request, reply) => {
 				const projectId = parseIntParam(request.params.id);
 				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
-				await deps.service.deleteProject(projectId);
+				await deps.service.deleteProject(projectId, request.currentUser!);
 				reply.status(204).send();
 			},
 		);
@@ -102,7 +102,7 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 				const projectId = parseIntParam(request.params.id);
 				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
 				const { assetId } = parseBody(SetPosterBody, request.body);
-				sendOk(reply, await deps.service.setPoster(projectId, assetId));
+				sendOk(reply, await deps.service.setPoster(projectId, assetId, request.currentUser!));
 			},
 		);
 
@@ -113,7 +113,7 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 				const projectId = parseIntParam(request.params.id);
 				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
 				const { expectedOrder, order } = parseBody(SetProjectVideoOrderBody, request.body);
-				sendOk(reply, await deps.service.setVideoOrder(projectId, expectedOrder, order));
+				sendOk(reply, await deps.service.setVideoOrder(projectId, expectedOrder, order, request.currentUser!));
 			},
 		);
 
@@ -123,7 +123,7 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 			async (request, reply) => {
 				const projectId = parseIntParam(request.params.id);
 				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
-				await deps.service.deleteWebgl(projectId);
+				await deps.service.deleteWebgl(projectId, request.currentUser!);
 				reply.status(204).send();
 			},
 		);

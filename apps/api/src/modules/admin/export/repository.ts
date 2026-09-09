@@ -203,6 +203,7 @@ export function createExportRepository(
 			}
 			const rows = await client.project.findMany({
 				where: {
+					changeRequestDraft: null,
 					OR: [
 						{ assets: { some: { status: 'READY' } } },
 						{ currentWebglDeploymentId: { not: null } },
@@ -288,7 +289,7 @@ export function createExportRepository(
 
 		async snapshotStillCurrent(snapshot: ExportSnapshot): Promise<boolean> {
 			const projectPointers = await client.project.findMany({
-				where: { id: { in: snapshot.projects.map((project) => project.id) } },
+				where: { id: { in: snapshot.projects.map((project) => project.id) }, changeRequestDraft: null },
 				select: { id: true, currentWebglDeploymentId: true },
 			});
 			const pointerByProject = new Map(projectPointers.map((project) => [project.id, project]));

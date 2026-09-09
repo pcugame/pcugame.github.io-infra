@@ -147,12 +147,12 @@ export default function ExhibitionSelect({
 			<span
 				className={
 					'exhibition-select__title' +
-					(it.isUploadEnabled ? ' exhibition-select__title--active' : '')
+					((it.isModificationEnabled ?? it.isUploadEnabled) ? ' exhibition-select__title--active' : '')
 				}
 			>
 				{it.title ?? ''}
 			</span>
-			{!it.isUploadEnabled && (
+			{!(it.isModificationEnabled ?? it.isUploadEnabled) && (
 				<span className="exhibition-select__lock-pill">업로드 잠김</span>
 			)}
 		</>

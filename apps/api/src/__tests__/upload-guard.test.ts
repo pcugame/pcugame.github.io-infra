@@ -8,7 +8,7 @@ function fakeExhibition(overrides: Partial<Exhibition> = {}): Exhibition {
 		id: 1,
 		year: 2025,
 		title: '',
-		isUploadEnabled: true,
+		isModificationEnabled: true,
 		sortOrder: 0,
 		posterAssetId: null,
 		createdAt: new Date(),
@@ -32,22 +32,22 @@ describe('assertUploadAllowed', () => {
 	});
 
 	it('allows USER when uploads are enabled', () => {
-		const ex = fakeExhibition({ isUploadEnabled: true });
+		const ex = fakeExhibition({ isModificationEnabled: true });
 		expect(() => assertUploadAllowed(ex, 2025, 'USER')).not.toThrow();
 	});
 
 	it('allows OPERATOR when uploads are enabled', () => {
-		const ex = fakeExhibition({ isUploadEnabled: true });
+		const ex = fakeExhibition({ isModificationEnabled: true });
 		expect(() => assertUploadAllowed(ex, 2025, 'OPERATOR')).not.toThrow();
 	});
 
 	it('allows ADMIN when uploads are enabled', () => {
-		const ex = fakeExhibition({ isUploadEnabled: true });
+		const ex = fakeExhibition({ isModificationEnabled: true });
 		expect(() => assertUploadAllowed(ex, 2025, 'ADMIN')).not.toThrow();
 	});
 
 	it('blocks USER when uploads are disabled', () => {
-		const ex = fakeExhibition({ isUploadEnabled: false });
+		const ex = fakeExhibition({ isModificationEnabled: false });
 		try {
 			assertUploadAllowed(ex, 2025, 'USER');
 			expect.fail('should have thrown');
@@ -59,12 +59,12 @@ describe('assertUploadAllowed', () => {
 	});
 
 	it('allows OPERATOR when uploads are disabled', () => {
-		const ex = fakeExhibition({ isUploadEnabled: false });
+		const ex = fakeExhibition({ isModificationEnabled: false });
 		expect(() => assertUploadAllowed(ex, 2025, 'OPERATOR')).not.toThrow();
 	});
 
 	it('allows ADMIN when uploads are disabled', () => {
-		const ex = fakeExhibition({ isUploadEnabled: false });
+		const ex = fakeExhibition({ isModificationEnabled: false });
 		expect(() => assertUploadAllowed(ex, 2025, 'ADMIN')).not.toThrow();
 	});
 });

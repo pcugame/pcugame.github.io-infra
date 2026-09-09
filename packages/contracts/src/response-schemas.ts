@@ -243,6 +243,7 @@ export const AdminExhibitionItemSchema = z.object({
 	id: PositiveIntegerSchema,
 	year: YearSchema,
 	title: z.string().optional(),
+	isModificationEnabled: z.boolean().optional(),
 	isUploadEnabled: z.boolean(),
 	sortOrder: NonNegativeIntegerSchema,
 	projectCount: NonNegativeIntegerSchema,
@@ -261,6 +262,10 @@ export const CreateExhibitionResponseSchema = z.object({
 }).strict();
 
 export const AdminProjectItemSchema = z.object({
+	isModificationEnabled: z.boolean().optional(),
+	canEdit: z.boolean().optional(),
+	canDelete: z.boolean().optional(),
+	canRequestChange: z.boolean().optional(),
 	id: PositiveIntegerSchema,
 	title: z.string(),
 	slug: z.string().min(1),
@@ -288,6 +293,10 @@ export const AdminProjectListResponseSchema = z.object({
 }).strict();
 
 export const AdminProjectDetailSchema = z.object({
+	isModificationEnabled: z.boolean().optional(),
+	canEdit: z.boolean().optional(),
+	canDelete: z.boolean().optional(),
+	canRequestChange: z.boolean().optional(),
 	id: PositiveIntegerSchema,
 	title: z.string(),
 	slug: z.string().min(1),

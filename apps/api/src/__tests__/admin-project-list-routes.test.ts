@@ -228,7 +228,7 @@ describe('project deletion route authorization', () => {
 				expect.objectContaining({ role }),
 				17,
 			);
-			expect(mocks.deleteProject).toHaveBeenCalledWith(17);
+		expect(mocks.deleteProject).toHaveBeenCalledWith(17, expect.objectContaining({ role }));
 		},
 	);
 
@@ -293,7 +293,7 @@ describe('project deletion route authorization', () => {
 			headers: { 'x-test-role': 'ADMIN' }, payload: { expectedOrder: [11, 12], order: [12, 11] } });
 		expect(res.statusCode).toBe(200);
 		expect(mocks.loadProjectWithAccess).toHaveBeenCalledWith(expect.objectContaining({ id: 303 }), 7);
-		expect(mocks.setVideoOrder).toHaveBeenCalledWith(7, [11, 12], [12, 11]);
+	expect(mocks.setVideoOrder).toHaveBeenCalledWith(7, [11, 12], [12, 11], expect.objectContaining({ role: 'ADMIN' }));
 	});
 	it('lets the repository return 409 for a legacy project with more than five videos', async () => {
 		mocks.setVideoOrder.mockRejectedValue(Object.assign(new Error('Project exceeds the five video limit'), { statusCode: 409 }));

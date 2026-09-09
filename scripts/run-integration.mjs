@@ -109,6 +109,7 @@ const steps = [
 	[npm, ['run', 'test:integration:canonical-migration-chain']],
 	[npm, ['run', 'test:integration:project-assets']],
 	[npm, ['run', 'test:integration:phase2-transition']],
+	[npm, ['run', 'test:integration:year-change-approval']],
 	[docker, ['compose', '-f', 'docker-compose.integration.yml', '--profile', 'e2e', 'run', '--rm', 'e2e']],
 ];
 

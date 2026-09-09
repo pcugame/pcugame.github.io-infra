@@ -1,8 +1,11 @@
+import { assertProjectWriteAccessInTransaction } from '../admin/project-access.service.js';
+import { forbidden } from '../../shared/errors.js';
+import { applyProjectChange, deleteProjectInTransaction, lockProject, validateSource } from '../project-change/transaction.js';
+import { rebuildProjectPublicationPlan } from './plan-builder.js';
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 import type { ClaimedProjectPublicationJob, ProjectPublicationRepository } from './ports.js';
 import {
-	createProjectPublicationPlan,
 	parseProjectPublicationPlan,
 	publicationCleanupTargets,
 	type ProjectPublicationPlan,
@@ -31,83 +34,6 @@ function planFingerprint(plan: ProjectPublicationPlan): string {
 	return JSON.stringify(stable(normalized));
 }
 
-async function rebuildProjectPublicationPlan(
-	tx: Prisma.TransactionClient,
-	input: { projectId: number; submissionId: string },
-): Promise<ProjectPublicationPlan> {
-	const [protectedBucket, publicBucket, items] = await Promise.all([
-		tx.storageBucket.findUnique({ where: { visibility: 'PROTECTED' } }),
-		tx.storageBucket.findUnique({ where: { visibility: 'PUBLIC' } }),
-		tx.projectSubmissionItem.findMany({
-			where: { submissionId: input.submissionId },
-			orderBy: { id: 'asc' },
-			include: {
-				uploadSession: true,
-				resultAsset: { include: { representations: { orderBy: { id: 'asc' } } } },
-				resultRepresentation: true,
-				resultWebglDeployment: true,
-			},
-		}),
-	]);
-	if (!protectedBucket || !publicBucket) throw new Error('canonical storage bucket registry is incomplete');
-	const representations: Parameters<typeof createProjectPublicationPlan>[0]['representations'] = [];
-	const webglDeployments: Parameters<typeof createProjectPublicationPlan>[0]['webglDeployments'] = [];
-	for (const item of items) {
-		const session = item.uploadSession;
-		const asset = item.resultAsset;
-		const source = item.resultRepresentation;
-		if (!item.required || item.state !== 'READY' || !session || session.state !== 'READY'
-			|| item.boundGeneration === null || session.generation !== item.boundGeneration
-			|| session.resultAssetId !== item.resultAssetId
-			|| session.resultRepresentationId !== item.resultRepresentationId
-			|| !asset || asset.id !== item.resultAssetId || asset.projectId !== input.projectId
-			|| asset.exhibitionId !== null || asset.kind !== item.kind || asset.status !== 'READY'
-			|| !source || source.id !== item.resultRepresentationId || source.assetId !== asset.id
-			|| source.state !== 'READY'
-			|| source.role !== (item.kind === 'WEBGL' ? 'WEBGL_SOURCE' : 'ORIGINAL')
-			|| source.sourceIdentityAlgorithm !== session.sourceIdentityAlgorithm
-			|| source.sourceIdentity !== session.sourceIdentity) {
-			throw new Error(`submission item ${item.id} lost its asset, generation, or source ownership fence`);
-		}
-		if (item.kind === 'IMAGE' || item.kind === 'POSTER') {
-			const publicationRoles = new Set(['ORIGINAL', 'CARD_480', 'DISPLAY_960']);
-			const imageRepresentations = asset.representations.filter((representation) => publicationRoles.has(representation.role));
-			if (imageRepresentations.length !== 3 || new Set(imageRepresentations.map(({ role }) => role)).size !== 3) {
-				throw new Error(`submission item ${item.id} lost an image publication role`);
-			}
-			for (const representation of imageRepresentations) {
-				if (!['ORIGINAL', 'CARD_480', 'DISPLAY_960'].includes(representation.role)
-					|| representation.state !== 'READY'
-					|| representation.sourceIdentityAlgorithm !== session.sourceIdentityAlgorithm
-					|| representation.sourceIdentity !== session.sourceIdentity) {
-					throw new Error(`submission item ${item.id} image role lost its source fence`);
-				}
-				representations.push({
-					...representation,
-					role: representation.role as 'ORIGINAL' | 'CARD_480' | 'DISPLAY_960',
-					generation: session.generation,
-				});
-			}
-		}
-		if (item.kind === 'WEBGL') {
-			const deployment = item.resultWebglDeployment;
-			if (!deployment || deployment.id !== item.resultWebglDeploymentId
-				|| deployment.projectId !== input.projectId
-				|| deployment.sourceRepresentationId !== source.id || deployment.state !== 'READY') {
-				throw new Error(`submission item ${item.id} lost its WebGL deployment fence`);
-			}
-			webglDeployments.push(deployment);
-		}
-	}
-	return createProjectPublicationPlan({
-		projectId: input.projectId,
-		submissionId: input.submissionId,
-		protectedBucket: protectedBucket.bucket,
-		publicBucket: publicBucket.bucket,
-		representations,
-		webglDeployments,
-	});
-}
 
 export function createProjectPublicationRepository(client: PrismaClient): ProjectPublicationRepository {
 	return {
@@ -147,6 +73,8 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 
 		async validatePlan(job, token) {
 			return client.$transaction(async (tx) => {
+				const changeRequest = await tx.projectChangeRequest.findUnique({ where: { stagingProjectId: job.projectId } });
+				if (changeRequest?.projectId !== null && changeRequest?.projectId !== undefined) await lockProject(tx, changeRequest.projectId);
 				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${job.projectId} FOR UPDATE`);
 				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "project_submissions" WHERE "id" = ${job.submissionId} FOR UPDATE`);
 				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "project_publication_jobs" WHERE "id" = ${job.id} FOR UPDATE`);
@@ -154,6 +82,11 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 					where: { id: job.id }, include: { project: true, submission: true },
 				});
 				if (current.state === 'CANCELLED' || current.submission.state === 'CANCELLED') return { status: 'CANCELLED' as const };
+				if (changeRequest && (changeRequest.state !== 'APPLYING' || !await validateSource(tx, changeRequest))) {
+					await tx.projectChangeRequest.update({ where: { id: changeRequest.id }, data: { state: 'CONFLICT', error: 'Project changed or requester lost access' } });
+					await deleteProjectInTransaction(tx, job.projectId);
+					return { status: 'CANCELLED' as const };
+				}
 				if (current.state !== 'PROCESSING' || current.claimToken !== token
 					|| !current.claimUntil || current.claimUntil <= new Date()
 					|| current.projectId !== job.projectId || current.submissionId !== job.submissionId
@@ -200,6 +133,7 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 					},
 				});
 				if (failed.count !== 1) throw new Error('Project publication lease was lost while rejecting an invalid plan');
+				if (changeRequest) await tx.projectChangeRequest.update({ where: { id: changeRequest.id }, data: { state: 'FAILED', error: invalidReason } });
 				return { status: 'FAILED' as const, error: invalidReason };
 			}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 		},
@@ -218,6 +152,8 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 
 		async complete(job, token) {
 			return client.$transaction(async (tx) => {
+				const changeRequest = await tx.projectChangeRequest.findUnique({ where: { stagingProjectId: job.projectId } });
+				if (changeRequest?.projectId !== null && changeRequest?.projectId !== undefined) await lockProject(tx, changeRequest.projectId);
 				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${job.projectId} FOR UPDATE`);
 				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "project_submissions" WHERE "id" = ${job.submissionId} FOR UPDATE`);
 				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "project_publication_jobs" WHERE "id" = ${job.id} FOR UPDATE`);
@@ -232,6 +168,7 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 					|| planFingerprint(persistedPlan) !== planFingerprint(job.plan)) {
 					throw new Error('Project publication job, submission, project, or plan identity changed');
 				}
+				if (current.state === 'COMPLETED' && changeRequest?.state === 'COMPLETED') return 'COMPLETED' as const;
 				if (current.state === 'COMPLETED' && current.project.status === 'PUBLISHED'
 					&& current.submission.state === 'PUBLISHED') return 'COMPLETED' as const;
 				if (current.state === 'CANCELLED' || current.submission.state === 'CANCELLED') {
@@ -245,6 +182,16 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 					|| !current.claimUntil || current.claimUntil <= new Date()
 					|| current.project.status !== 'DRAFT' || current.submission.state !== 'FINALIZING') {
 					throw new Error('Project publication lease or aggregate fence was lost');
+				}
+				if (changeRequest && (changeRequest.state !== 'APPLYING' || !await validateSource(tx, changeRequest))) {
+					await tx.projectChangeRequest.update({ where: { id: changeRequest.id }, data: { state: 'CONFLICT', error: 'Project changed or requester lost access' } });
+					await deleteProjectInTransaction(tx, job.projectId);
+					return 'CANCELLED' as const;
+				}
+				if (!changeRequest) {
+					const actor = await tx.user.findUnique({ where: { id: current.submission.actorId }, select: { id: true, role: true } });
+					if (!actor) throw forbidden('Submission owner no longer exists');
+					await assertProjectWriteAccessInTransaction(tx, actor, job.projectId);
 				}
 				const invalidItems = await tx.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
 					SELECT count(*)::bigint AS "count"
@@ -346,11 +293,16 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 						&& object.targetObjectKey === target.storageKey);
 					return !isPublicTarget;
 				}));
-				const project = await tx.project.updateMany({ where: { id: job.projectId, status: 'DRAFT' }, data: { status: 'PUBLISHED' } });
-				if (project.count !== 1) throw new Error('Project publication CAS failed');
+				if (changeRequest) {
+					await applyProjectChange(tx, changeRequest);
+				} else {
+					const project = await tx.project.updateMany({ where: { id: job.projectId, status: 'DRAFT' }, data: { status: 'PUBLISHED', version: { increment: 1 } } });
+					if (project.count !== 1) throw new Error('Project publication CAS failed');
+				}
+
 				const submission = await tx.projectSubmission.updateMany({
 					where: { id: job.submissionId, state: 'FINALIZING' },
-					data: { state: 'PUBLISHED', publishedAt: new Date() },
+					data: changeRequest ? { state: 'CANCELLED', cancelledAt: new Date() } : { state: 'PUBLISHED', publishedAt: new Date() },
 				});
 				if (submission.count !== 1) throw new Error('Submission publication CAS failed');
 				await tx.projectPublicationJob.update({
@@ -374,18 +326,29 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 		},
 
 		async fail(jobId, token, error) {
-			const updated = await client.projectPublicationJob.updateMany({
-				where: { id: jobId, state: 'PROCESSING', claimToken: token },
-				data: { state: 'FAILED', claimToken: null, claimUntil: null, lastError: safeError(error) },
+			return client.$transaction(async tx => {
+				const updated = await tx.projectPublicationJob.updateMany({
+					where: { id: jobId, state: 'PROCESSING', claimToken: token },
+					data: { state: 'FAILED', claimToken: null, claimUntil: null, lastError: safeError(error) },
+				});
+				if (updated.count === 1) {
+					const job = await tx.projectPublicationJob.findUniqueOrThrow({ where: { id: jobId } });
+					await tx.projectChangeRequest.updateMany({ where: { stagingProjectId: job.projectId, state: 'APPLYING' }, data: { state: 'FAILED', error: safeError(error) } });
+				}
+				return updated.count === 1;
 			});
-			return updated.count === 1;
 		},
 
-		async queueCancelledCleanup(jobId) {
+		async queueCancelledCleanup(jobId, validatedPlan) {
 			await client.$transaction(async (tx) => {
 				const job = await tx.projectPublicationJob.findUnique({ where: { id: jobId }, select: { state: true, plan: true } });
-				if (!job || job.state !== 'CANCELLED') return;
-				await queueDurableDeletions(tx, publicationCleanupTargets(parseProjectPublicationPlan(job.plan)));
+				if (job && job.state !== 'CANCELLED') return;
+				// Source deletion cascades the staging job. Its worker may finish an
+				// in-flight PUT after the first cleanup has already run, so retain the
+				// DB-validated immutable plan until copying stops. The deletion worker
+				// still checks live references before removing any transferred object.
+				const plan = job?.plan ?? validatedPlan;
+				if (plan) await queueDurableDeletions(tx, publicationCleanupTargets(parseProjectPublicationPlan(plan)));
 			});
 		},
 	};

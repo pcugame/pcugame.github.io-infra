@@ -26,16 +26,17 @@ function isRetryableAssetMutationError(error: unknown): boolean {
 
 	// Prisma's PostgreSQL driver adapter reports a 40001 raised by raw
 	// `SELECT ... FOR UPDATE` as P2010 instead of P2034. Match the exact
-	// structured cause; unrelated raw-query failures are never retried.
+	// structured cause; unrelated raw-query failures are never retried. A raw
+	// deadlock is exposed as a PostgreSQL cause rather than WriteConflict.
 	const driverError = error.meta?.['driverAdapterError'];
 	if (!driverError || typeof driverError !== 'object' || !('cause' in driverError)) return false;
 	const cause = driverError.cause;
 	return !!cause
 		&& typeof cause === 'object'
 		&& 'kind' in cause
-		&& cause.kind === 'TransactionWriteConflict'
 		&& 'originalCode' in cause
-		&& cause.originalCode === '40001';
+		&& ((cause.kind === 'TransactionWriteConflict' && cause.originalCode === '40001')
+			|| (cause.kind === 'postgres' && cause.originalCode === '40P01'));
 }
 
 export async function withAssetMutationTransaction<T>(

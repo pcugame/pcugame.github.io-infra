@@ -18,6 +18,8 @@ const LoginPage = lazy(() => import('../pages/LoginPage'));
 const MePage = lazy(() => import('../pages/MePage'));
 const MyProjectsPage = lazy(() => import('../pages/MyProjectsPage'));
 const UserProjectSubmitPage = lazy(() => import('../pages/UserProjectSubmitPage'));
+const ProjectChangeRequestPage = lazy(() => import('../pages/ProjectChangeRequestPage'));
+const MyChangeRequestPage = lazy(() => import('../pages/MyChangeRequestPage'));
 const AdminProjectsPage = lazy(() => import('../pages/admin/AdminProjectsPage'));
 const AdminProjectNewPage = lazy(() => import('../pages/admin/AdminProjectNewPage'));
 const AdminProjectEditPage = lazy(() => import('../pages/admin/AdminProjectEditPage'));
@@ -25,6 +27,8 @@ const AdminYearsPage = lazy(() => import('../pages/admin/AdminYearsPage'));
 const AdminBannedIpsPage = lazy(() => import('../pages/admin/AdminBannedIpsPage'));
 const AdminSettingsPage = lazy(() => import('../pages/admin/AdminSettingsPage'));
 const AdminImportPage = lazy(() => import('../pages/admin/AdminImportPage'));
+const AdminChangeRequestsPage = lazy(() => import('../pages/admin/AdminChangeRequestsPage'));
+const AdminChangeRequestReviewPage = lazy(() => import('../pages/admin/AdminChangeRequestReviewPage'));
 
 
 function Lazy({ children }: { children: React.ReactNode }) {
@@ -124,6 +128,15 @@ export const routes: RouteObject[] = [
             </RequireAuth>
           ),
         },
+        {
+          path: '/me/projects/:id/change-request',
+          element: (
+            <RequireAuth>
+              <Lazy><ProjectChangeRequestPage /></Lazy>
+            </RequireAuth>
+          ),
+        },
+        { path: '/me/change-requests/:id', element: (<RequireAuth><Lazy><MyChangeRequestPage /></Lazy></RequireAuth>) },
 
         // ── Admin ──────────────────────────────────────────
         {
@@ -165,6 +178,22 @@ export const routes: RouteObject[] = [
                   <Lazy>
                     <AdminProjectEditPage />
                   </Lazy>
+                </RequireRole>
+              ),
+            },
+            {
+              path: 'change-requests',
+              element: (
+                <RequireRole allowed={['OPERATOR', 'ADMIN']}>
+                  <Lazy><AdminChangeRequestsPage /></Lazy>
+                </RequireRole>
+              ),
+            },
+            {
+              path: 'change-requests/:id',
+              element: (
+                <RequireRole allowed={['OPERATOR', 'ADMIN']}>
+                  <Lazy><AdminChangeRequestReviewPage /></Lazy>
                 </RequireRole>
               ),
             },

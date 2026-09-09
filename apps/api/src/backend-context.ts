@@ -1,3 +1,8 @@
+import { createUnavailableProjectChangeService } from './modules/project-change/composition.js';
+import type { ProjectChangeRepository } from './modules/project-change/ports.js';
+import { createProjectChangeRepository } from './modules/project-change/repository.js';
+import { createProjectChangeService } from './modules/project-change/service.js';
+import { createProjectChangeController } from './modules/project-change/controller.js';
 import type { FastifyPluginAsync } from 'fastify';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { PrismaClient } from './generated/prisma/client.js';
@@ -114,6 +119,7 @@ export interface BackendPersistencePorts {
 	authRepository: AuthProductionRepository;
 	publicRepository: PublicProductionRepository;
 	projectAccessRepository: ProjectAccessRepository;
+	projectChangeRepository?: ProjectChangeRepository;
 	projectRepository: ProjectApplicationRepository;
 	memberRepository: MemberServiceDependencies['repository'];
 	exhibitionRepository: ExhibitionRepository;
@@ -628,6 +634,7 @@ export async function createProductionBackendContext(
 				authRepository: createAuthRepository(prisma),
 				publicRepository: createPublicRepository(prisma),
 				projectAccessRepository: createProjectAccessRepository(prisma),
+				projectChangeRepository: createProjectChangeRepository(prisma),
 				projectRepository: createProjectCrudRepository(prisma, {
 					publicBucket: config.S3_BUCKET_PUBLIC,
 					protectedBucket: config.S3_BUCKET_PROTECTED,
@@ -733,7 +740,7 @@ export async function createProductionBackendContext(
 					return limits.gameMaxBytes;
 				},
 			},
-			authorizeProjectWrite: async (actor, projectId) => projectAccess.loadProjectWithAccess(actor as Parameters<typeof projectAccess.loadProjectWithAccess>[0], projectId),
+			authorizeProjectWrite: async (actor, projectId) => projectAccess.loadProjectForUpload(actor as Parameters<typeof projectAccess.loadProjectForUpload>[0], projectId),
 			authorizeExhibitionWrite: async (actor, exhibitionId) => {
 				if (actor.role !== 'ADMIN' && actor.role !== 'OPERATOR') {
 					throw forbidden('Only operators can modify exhibition assets');
@@ -772,7 +779,7 @@ export async function createProductionBackendContext(
 			() => maintenanceSchedule.close(),
 			() => maintenanceSchedule.start(),
 		));
-		const routes = options.routes ?? await factories.routes(
+		const baseRoutes = options.routes ?? await factories.routes(
 			config,
 			assetsBanned!,
 			auth,
@@ -783,6 +790,21 @@ export async function createProductionBackendContext(
 			projectMultipart,
 			directAssetUpload,
 		);
+
+		const routes = { ...baseRoutes };
+		if (!options.routes) {
+			const changes = persistence.projectChangeRepository
+				? createProjectChangeService(persistence.projectChangeRepository)
+				: createUnavailableProjectChangeService();
+			routes.me = async (app) => {
+				await app.register(baseRoutes.me);
+				await app.register(createProjectChangeController(changes, 'me'));
+			};
+			routes.admin = async (app) => {
+				await app.register(baseRoutes.admin);
+				await app.register(createProjectChangeController(changes, 'admin'));
+			};
+		}
 
 		return {
 			config,

@@ -26,13 +26,18 @@ export const AssetKindEnum = AssetKindSchema;
 
 // ── Exhibition ──────────────────────────────────────────────
 
-export const CreateExhibitionBody = CreateExhibitionBaseSchema.extend({
-	title: CreateExhibitionBaseSchema.shape.title.default(''),
-	isUploadEnabled: CreateExhibitionBaseSchema.shape.isUploadEnabled.default(true),
-	sortOrder: CreateExhibitionBaseSchema.shape.sortOrder.default(0),
-});
+export const CreateExhibitionBody = CreateExhibitionBaseSchema.transform(({ isUploadEnabled, ...value }) => ({
+	...value,
+	title: value.title ?? '',
+	isModificationEnabled: value.isModificationEnabled ?? isUploadEnabled ?? true,
+	sortOrder: value.sortOrder ?? 0,
+}));
 
-export const UpdateExhibitionBody = UpdateExhibitionBaseSchema;
+export const UpdateExhibitionBody = UpdateExhibitionBaseSchema.transform(({ isUploadEnabled, ...value }) => ({
+	...value,
+	...(value.isModificationEnabled !== undefined || isUploadEnabled !== undefined
+		? { isModificationEnabled: value.isModificationEnabled ?? isUploadEnabled } : {}),
+}));
 
 // ── Project update ───────────────────────────────────────────
 

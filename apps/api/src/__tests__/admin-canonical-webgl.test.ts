@@ -54,10 +54,11 @@ describe('canonical admin WebGL integration', () => {
 					webglDeployments: [snapshot],
 				})),
 				updateMany: vi.fn(async () => ({ count: 1 })),
+				update: vi.fn(async () => ({ id: 7 })),
 			},
 			assetUploadSession: { findMany: vi.fn(async () => []), updateMany: vi.fn() },
 			orphanObject: { upsert },
-			$queryRaw: vi.fn(async () => []),
+			$queryRaw: vi.fn(async () => [{ id: 7 }]),
 			webglDeployment: { deleteMany: deleteDeployments },
 			assetRepresentation: { deleteMany: vi.fn(async () => ({ count: 1 })) },
 			asset: { deleteMany: vi.fn(async () => ({ count: 1 })) },
@@ -86,8 +87,10 @@ describe('canonical admin WebGL integration', () => {
 					currentWebglDeploymentId: deploymentId, webglDeployments: [],
 				})),
 				updateMany: vi.fn(async () => ({ count: 0 })),
+				update: vi.fn(async () => ({ id: 7 })),
 			},
 			assetUploadSession: { findMany: vi.fn(async () => []) },
+			$queryRaw: vi.fn(async () => [{ id: 7 }]),
 			webglDeployment: { deleteMany: deleteDeployments },
 		};
 		const repository = createProjectCrudRepository({

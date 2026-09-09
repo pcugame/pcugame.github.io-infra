@@ -80,7 +80,7 @@ export interface AssetsServiceDependencies {
 		findAssetByIdForDownload(id: number): Promise<ProtectedAssetDownloadRecord | null>;
 		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
 		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
-		claimAssetForDeletion(id: number): Promise<AssetDeletionClaim | null>;
+		claimAssetForDeletion(id: number, actor?: Actor): Promise<AssetDeletionClaim | null>;
 		completeAssetDeletion(
 			claim: AssetDeletionClaim,
 			outbox: { reason: string },
@@ -234,7 +234,7 @@ export async function deleteAsset(
 	if (!lookup) throw notFound('Asset not found');
 	await deps.loadProjectWithAccess(actor, lookup.projectId);
 
-	const asset = await deps.repository.claimAssetForDeletion(assetId);
+	const asset = await deps.repository.claimAssetForDeletion(assetId, actor);
 	if (!asset) throw notFound('Asset not found');
 	await deps.repository.completeAssetDeletion(asset, {
 		reason: 'asset-delete',

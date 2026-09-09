@@ -9,6 +9,7 @@ import type {
 import { assertWebglPublishedObjectManifest } from '../webgl/manifest.js';
 import type { WebglProcessingWorkerRepository } from '../webgl/processing-worker.js';
 import { createCanonicalWebglStagingKeys } from '../webgl/paths.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
 
 type WebglProcessingPersistence = WebglProcessingRepository & WebglProcessingWorkerRepository;
 
@@ -353,6 +354,10 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 					if (session.projectId === null || session.exhibitionId !== null) {
 						throw new Error('WebGL upload session must have exactly one project owner');
 					}
+					const actor = await tx.user.findUniqueOrThrow({
+						where: { id: session.userId }, select: { id: true, role: true },
+					});
+					await assertProjectUploadWriteAccessInTransaction(tx, actor, session.projectId);
 					const deployment = session.reservedWebglDeployment;
 					if (!deployment || deployment.id !== input.deploymentId || session.resultAssetId !== input.assetId
 						|| session.resultRepresentationId !== input.representationId) {
@@ -406,6 +411,9 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 								status: 'READY', deploymentId: deployment.id, assetId: input.assetId, representationId: input.representationId,
 								},
 						},
+					});
+					await tx.project.update({
+						where: { id: session.projectId }, data: { version: { increment: 1 } },
 					});
 					// READY deployments are immutable history. Superseding only moves the
 					// project pointer; it never deletes bytes behind an immutable URL.

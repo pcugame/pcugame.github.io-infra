@@ -76,7 +76,7 @@ export function createGameUploadValidationWorker(deps: {
 					const message = String(error instanceof Error ? error.message : error);
 					const terminal = isWorkerSourceObjectMissing(error)
 						|| error instanceof WorkerGenerationFencedError
-						|| /ZIP|source identity|size mismatch|invalid|corrupt|CRC|GAME_REPLACEMENT_FENCE_LOST/i.test(message);
+						|| /ZIP|source identity|size mismatch|invalid|corrupt|CRC|GAME_REPLACEMENT_FENCE_LOST|Project modifications are closed|staging project/i.test(message);
 					if (terminal || (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
 						const reason = terminal ? message : retryBudgetReason('GAME', error);
 						if (await deps.repository.markRejected(session.id, session.generation, token, reason)) rejected++;

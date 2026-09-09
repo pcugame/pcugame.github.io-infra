@@ -101,7 +101,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	const selectedExhibitionId = useWatch({ control, name: 'exhibitionId' });
 	const selectedYearItem = years.find((year) => year.id === Number(selectedExhibitionId));
-	const isUploadLocked = selectedYearItem != null && !selectedYearItem.isUploadEnabled && !isPrivileged;
+	const isUploadLocked = selectedYearItem != null && !(selectedYearItem.isModificationEnabled ?? selectedYearItem.isUploadEnabled) && !isPrivileged;
 	const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
 	const [createdSubmission, setCreatedSubmission] = useState<SubmitProjectResponse | null>(null);
 	const [submissionItems, setSubmissionItems] = useState<ProjectSubmissionItemStatus[]>([]);

@@ -47,4 +47,20 @@ describe('project materials', () => {
 		expect(() => resolveDownloadRepresentation(asset, 'playback')).toThrow();
 		expect(authorizeAssetDelivery({ action: 'DOWNLOAD_ORIGINAL', asset: { ...asset, project: { ...asset.project, status: 'DRAFT' } } })).toBe(false);
 	});
+	it('limits draft change-request previews to the active requester or an operator', () => {
+		const asset = {
+			kind: 'IMAGE',
+			project: {
+				status: 'DRAFT', creatorId: 99, members: [],
+				changeRequestDraft: {
+					actorId: 7, state: 'DRAFT',
+					project: { creatorId: 3, members: [{ userId: 7 }] },
+				},
+			},
+		};
+		expect(authorizeAssetDelivery({ action: 'DOWNLOAD_ORIGINAL', asset, actor: { id: 7, role: 'USER' } })).toBe(true);
+		expect(authorizeAssetDelivery({ action: 'DOWNLOAD_ORIGINAL', asset, actor: { id: 8, role: 'USER' } })).toBe(false);
+		expect(authorizeAssetDelivery({ action: 'DOWNLOAD_ORIGINAL', asset, actor: { id: 9, role: 'OPERATOR' } })).toBe(true);
+		expect(resolveDownloadRepresentation({ ...asset, id: 2, status: 'READY', representations: [{ role: 'ORIGINAL', state: 'READY', bucket: 'protected', objectKey: 'draft-image' }] }, 'original')).toMatchObject({ objectKey: 'draft-image' });
+	});
 });

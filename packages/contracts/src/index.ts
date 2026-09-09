@@ -119,3 +119,6 @@ export {
 
 export * from './schemas.js';
 export * from './response-schemas.js';
+
+export * from './project-changes.js';
+export * from './project-change-schemas.js';

@@ -13,6 +13,11 @@ export interface AssetDeliveryPolicyRecord {
 		creatorId: number;
 		status: string;
 		members: { userId: number | null }[];
+		changeRequestDraft?: {
+			actorId: number;
+			state: string;
+			project: { creatorId: number; members: { userId: number | null }[] } | null;
+		} | null;
 	};
 }
 
@@ -29,6 +34,12 @@ export function authorizeAssetDelivery(input: {
 
 	if (!actor) return false;
 	if (actor.role === 'ADMIN' || actor.role === 'OPERATOR') return true;
+	const staging = asset.project.changeRequestDraft;
+	if (staging) {
+		const source = staging.project;
+		return source !== null && ['DRAFT', 'PENDING', 'APPLYING', 'FAILED'].includes(staging.state)
+			&& (source.creatorId === actor.id || source.members.some((member) => member.userId === actor.id));
+	}
 	if (asset.project.creatorId === actor.id) return true;
 	return asset.project.members.some((member) => member.userId === actor.id);
 }

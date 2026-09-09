@@ -11,7 +11,13 @@ function harness(initialOrders: Array<number | null> = []) {
 	const items = new Map<string, number>();
 	const tx = {
 		$queryRaw: vi.fn(async () => [{ id: 7 }]),
-		project: { findUniqueOrThrow: vi.fn(async () => ({ status: 'PUBLISHED' })) },
+		project: {
+			findUniqueOrThrow: vi.fn(async () => ({ status: 'PUBLISHED' })),
+			findUnique: vi.fn(async () => ({ creatorId: 9, exhibitionId: 1, exhibition: { isModificationEnabled: true }, changeRequestDraft: null })),
+			update: vi.fn(async () => ({ id: 7 })),
+		},
+		user: { findUniqueOrThrow: vi.fn(async () => ({ id: 9, role: 'USER' })) },
+		exhibition: { findUniqueOrThrow: vi.fn(async () => ({ isModificationEnabled: true })) },
 		projectSubmissionItem: { findUnique: vi.fn(async ({ where }: { where: { id: string } }) => ({ kind: 'VIDEO', slot: `video:${items.get(where.id)}`, projectSubmission: { projectId: 7, state: 'PENDING' } })) },
 		asset: {
 			findMany: vi.fn(async () => [...assets].sort((a, b) => (a.videoSortOrder ?? 99) - (b.videoSortOrder ?? 99) || a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id)),

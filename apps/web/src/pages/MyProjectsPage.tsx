@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ProjectStatus } from '../contracts';
-import { adminProjectApi } from '../lib/api';
+import { adminProjectApi, changeRequestApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
 
@@ -18,10 +19,24 @@ const STATUS_COLORS: Record<ProjectStatus, string> = {
 };
 
 export default function MyProjectsPage() {
+	const queryClient = useQueryClient();
 	const { data, isLoading, error, refetch } = useQuery({
 		queryKey: queryKeys.adminProjectsList({ page: 1, limit: 100 }),
 		queryFn: () => adminProjectApi.list({ page: 1, limit: 100 }),
 	});
+	const deleteMutation = useMutation({
+		mutationFn: (projectId: number) => adminProjectApi.delete(projectId),
+		onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.adminProjects }),
+	});
+	const changeRequestsQuery = useQuery({
+		queryKey: queryKeys.changeRequests,
+		queryFn: () => changeRequestApi.listMine({ limit: 20 }),
+	});
+	const deleteProject = (id: number, title: string) => {
+		if (window.confirm(`“${title}” 작품을 삭제하시겠습니까?\n\n삭제된 작품과 연결된 파일은 복구할 수 없습니다.`)) {
+			deleteMutation.mutate(id);
+		}
+	};
 
 	if (isLoading) return <LoadingSpinner />;
 	if (error) return <ErrorMessage error={error} onReset={() => refetch()} />;
@@ -74,12 +89,14 @@ export default function MyProjectsPage() {
 										<td>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
 										<td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
 										<td>
-											<Link
-												to={`/admin/projects/${p.id}/edit`}
-												className="btn btn--small btn--secondary"
-											>
-												수정
-											</Link>
+											{p.canEdit || p.canDelete ? (
+												<>
+													{p.canEdit && <Link to={`/admin/projects/${p.id}/edit`} className="btn btn--small btn--secondary">수정</Link>}
+													{p.canDelete && <button type="button" className="btn btn--small btn--danger" disabled={deleteMutation.isPending} onClick={() => deleteProject(p.id, p.title)}>삭제</button>}
+												</>
+											) : p.canRequestChange ? (
+												<Link to={`/me/projects/${p.id}/change-request`} className="btn btn--small btn--secondary">변경 요청</Link>
+											) : <span className="text-muted">변경 불가</span>}
 										</td>
 									</tr>
 								))}
@@ -90,7 +107,7 @@ export default function MyProjectsPage() {
 					<div className="admin-mobile-cards">
 						{projects.map((p) => (
 							<div key={p.id} className="admin-pcard">
-								<Link to={`/admin/projects/${p.id}/edit`} className="admin-pcard__link">
+								<Link to={p.canEdit ? `/admin/projects/${p.id}/edit` : `/me/projects/${p.id}/change-request`} className="admin-pcard__link">
 									<div className="admin-pcard__top">
 										<h3 className="admin-pcard__title">{p.title}</h3>
 										{p.isIncomplete && <span className="incomplete-badge">불완전</span>}
@@ -106,10 +123,21 @@ export default function MyProjectsPage() {
 										<span>{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</span>
 									</div>
 								</Link>
+								{p.canDelete && <button type="button" className="btn btn--danger btn--small" disabled={deleteMutation.isPending} onClick={() => deleteProject(p.id, p.title)}>삭제</button>}
 							</div>
 						))}
 					</div>
 				</>
+			)}
+			{changeRequestsQuery.data && changeRequestsQuery.data.items.length > 0 && (
+				<section className="admin-card" style={{ marginTop: '1.5rem' }}>
+					<h2>변경 요청 이력 <span className="text-muted">(최근 20건)</span></h2>
+					<ul className="member-list">
+						{changeRequestsQuery.data.items.map((request) => (
+							<li key={request.id}><Link to={`/me/change-requests/${request.id}`}>{request.projectTitle} · {request.kind === 'DELETE' ? '삭제' : '수정'} · {request.state} · {new Date(request.updatedAt).toLocaleDateString('ko-KR')}</Link></li>
+						))}
+					</ul>
+				</section>
 			)}
 		</div>
 	);

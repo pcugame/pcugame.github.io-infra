@@ -7,7 +7,7 @@ const origin = 'https://assets.example.test';
 
 function exhibition(poster: ExhibitionRecord['poster']): ExhibitionRecord {
 	return {
-		id: 7, year: 2026, title: 'Show', isUploadEnabled: true, sortOrder: 0,
+		id: 7, year: 2026, title: 'Show', isModificationEnabled: true, sortOrder: 0,
 		posterAssetId: 42, poster, _count: { projects: 3 },
 	};
 }

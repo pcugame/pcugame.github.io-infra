@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	BASELINE_MIGRATION,
 	CONTRACT_MIGRATION,
+	PROJECT_CHANGE_MIGRATION,
 	PROJECT_VIDEO_ORDER_MIGRATION,
 	PROJECT_PUBLICATION_MIGRATION,
 	REQUIRED_EXPAND_MIGRATIONS,
@@ -71,14 +72,29 @@ describe('Phase 2 release migration history policy', () => {
 	});
 
 	it('accepts complete contract history and fences out Phase 1', () => {
-		const history = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION)];
+		const history = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION), completedMigration(PROJECT_CHANGE_MIGRATION)];
 		expect(() => assertRuntime(history, 'phase2')).not.toThrow();
 		expect(() => assertRuntime(history, 'phase1')).toThrow('contract=not-applied');
 	});
 
 	it('rejects a contract receipt with missing prerequisite history', () => {
-		const history = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION)]
+		const history = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION), completedMigration(PROJECT_CHANGE_MIGRATION)]
 			.filter((row) => row.migration_name !== PROJECT_PUBLICATION_MIGRATION);
 		expect(() => assertRuntime(history, 'phase2')).toThrow('complete expand history');
+	});
+});
+
+describe('project change release schema', () => {
+	it('requires the additive request migration for the new phase2 runtime', () => {
+		const old = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION)];
+		expect(() => assertRuntime(old, 'phase2')).toThrow('project change migration');
+		expect(() => assertRuntime([...old, completedMigration(PROJECT_CHANGE_MIGRATION)], 'phase2')).not.toThrow();
+	});
+	it('does not add the request migration to phase1 or waive its contract prohibition', () => {
+		expect(() => assertRuntime(completePhase1History(), 'phase1')).not.toThrow();
+		expect(() => assertRuntime([...completePhase1History(), completedMigration(CONTRACT_MIGRATION), completedMigration(PROJECT_CHANGE_MIGRATION)], 'phase1')).toThrow();
+	});
+	it('rejects a failed request migration', () => {
+		expect(() => assertNoFailedReleaseMigration([{ migration_name: PROJECT_CHANGE_MIGRATION, finished_at: null, rolled_back_at: null }])).toThrow(PROJECT_CHANGE_MIGRATION);
 	});
 });

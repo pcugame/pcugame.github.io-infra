@@ -171,8 +171,8 @@ for (const migration of [
 ]) assert.ok(releaseMigration.includes(migration), `Phase 1 bundle omits ${migration}`);
 assert.match(releaseMigration, /stagedMigrate\(PHASE1_MIGRATION_CEILING/);
 assert.match(releaseMigration, /assert-runtime requires phase1 or phase2/);
-assert.match(releaseMigration, /phase2 runtime requires complete expand history and the contract migration DB record/);
-assert.match(releaseMigration, /stagedMigrate\(CONTRACT_MIGRATION/);
+assert.match(releaseMigration, /phase2 runtime requires complete expand history, the contract migration DB record and project change migration DB record/);
+assert.match(releaseMigration, /stagedMigrate\(PROJECT_CHANGE_MIGRATION/);
 assert.doesNotMatch(dockerfile, /rm -rf apps\/api\/prisma\/migrations\/20260822000000_canonical_asset_contract/);
 assert.match(deploy, /RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2/);
 assert.match(deploy, /mutation drain marker is absent/);

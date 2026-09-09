@@ -167,7 +167,7 @@ describe('CreateExhibitionBody', () => {
     expect(result).toEqual({
       year: 2025,
       title: '',
-      isUploadEnabled: true,
+      isModificationEnabled: true,
       sortOrder: 0,
     });
   });
@@ -176,12 +176,12 @@ describe('CreateExhibitionBody', () => {
     const result = CreateExhibitionBody.parse({
       year: 2026,
       title: '졸업전시',
-      isUploadEnabled: false,
+      isModificationEnabled: false,
       sortOrder: 5,
     });
     expect(result.year).toBe(2026);
     expect(result.title).toBe('졸업전시');
-    expect(result.isUploadEnabled).toBe(false);
+    expect(result.isModificationEnabled).toBe(false);
     expect(result.sortOrder).toBe(5);
   });
 
@@ -222,7 +222,7 @@ describe('UpdateExhibitionBody', () => {
     const result = UpdateExhibitionBody.parse({ title: '수정', sortOrder: 3 });
     expect(result.title).toBe('수정');
     expect(result.sortOrder).toBe(3);
-    expect(result.isUploadEnabled).toBeUndefined();
+    expect(result.isModificationEnabled).toBeUndefined();
   });
 });
 

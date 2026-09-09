@@ -48,6 +48,9 @@ type TestRole = 'USER' | 'OPERATOR' | 'ADMIN';
 type TestProject = {
 	id: number;
 	creatorId: number;
+	exhibitionId: number;
+	exhibition: { isModificationEnabled: boolean };
+	changeRequestDraft: null;
 };
 
 type TestMember = {
@@ -156,12 +159,28 @@ describe('member profile routes', () => {
 		mocks.projectMemberDelete.mockReset();
 		mocks.transaction.mockReset();
 
-		project = { id: 1, creatorId: 999 };
+		project = { id: 1, creatorId: 999, exhibitionId: 1, exhibition: { isModificationEnabled: true }, changeRequestDraft: null };
 		members = [
 			{ id: 10, projectId: 1, name: 'Writer', studentId: '20240001', sortOrder: 0, userId: 101 },
 			{ id: 11, projectId: 1, name: 'Target', studentId: '20240002', sortOrder: 1, userId: null },
 		];
 		installPrismaMocks();
+		mocks.transaction.mockImplementation(async (work: (tx: unknown) => unknown) => work({
+			$queryRaw: async () => [{ id: 1 }],
+			project: {
+				findUniqueOrThrow: async () => project,
+				update: async () => project,
+			},
+			exhibition: { findUniqueOrThrow: async () => ({ isModificationEnabled: true }) },
+			projectMember: {
+				updateMany: async ({ where, data }: { where: { id: number; projectId: number }; data: Partial<TestMember> }) => {
+					const member = members.find((row) => row.id === where.id && row.projectId === where.projectId);
+					if (!member) return { count: 0 };
+					Object.assign(member, data);
+					return { count: 1 };
+				},
+			},
+		}));
 	});
 
 	it('allows a linked USER project writer to update member profile fields', async () => {
@@ -177,14 +196,6 @@ describe('member profile routes', () => {
 			studentId: '20249999',
 			sortOrder: 3,
 			userId: null,
-		});
-		expect(mocks.projectMemberUpdate).toHaveBeenCalledWith({
-			where: { id: 11 },
-			data: {
-				name: 'Updated',
-				studentId: '20249999',
-				sortOrder: 3,
-			},
 		});
 	});
 

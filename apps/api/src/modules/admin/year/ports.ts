@@ -4,7 +4,7 @@ export interface ExhibitionRecord {
 	id: number;
 	year: number;
 	title: string;
-	isUploadEnabled: boolean;
+	isModificationEnabled: boolean;
 	sortOrder: number;
 	posterAssetId?: number | null;
 	poster?: {
@@ -47,7 +47,7 @@ export interface ExhibitionRepository {
 	): Promise<{ cleanupQueued?: boolean } | null>;
 	updateExhibition(id: number, patch: {
 		title?: string;
-		isUploadEnabled?: boolean;
+		isModificationEnabled?: boolean;
 		sortOrder?: number;
 	}): Promise<ExhibitionRecord>;
 	clearExhibitionPoster(id: number, outbox: PosterDeletionOutboxConfig): Promise<{

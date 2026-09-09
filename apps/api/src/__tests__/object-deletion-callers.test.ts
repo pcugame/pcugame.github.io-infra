@@ -90,7 +90,7 @@ describe('durable object deletion callers', () => {
 
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
 			.rejects.toThrow('database unavailable');
-		expect(repository.claimAssetForDeletion).toHaveBeenCalledWith(41);
+		expect(repository.claimAssetForDeletion).toHaveBeenCalledWith(41, { id: 1, role: 'ADMIN' });
 		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
 		expect(wakeDeletionWorker).not.toHaveBeenCalled();
 	});

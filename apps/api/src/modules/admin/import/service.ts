@@ -27,7 +27,7 @@ export interface ImportTransactionRepository {
 	upsertExhibition(data: {
 		year: number;
 		title: string;
-		isUploadEnabled?: boolean;
+		isModificationEnabled?: boolean;
 	}): Promise<{ id: number }>;
 	findProjectBySlug(exhibitionId: number, slug: string): Promise<{ id: number } | null>;
 	createProjectWithMembers(data: ImportProjectCreate): Promise<unknown>;
@@ -66,8 +66,11 @@ export const ImportProject = z.object({
 export const ImportYear = z.object({
 	year: z.number().int().min(2000).max(2100),
 	title: z.string().max(100).optional().default(''),
-	isUploadEnabled: z.boolean().optional().default(true),
-});
+	isModificationEnabled: z.boolean().optional(),
+	isUploadEnabled: z.boolean().optional(),
+}).refine((value) => value.isModificationEnabled === undefined || value.isUploadEnabled === undefined
+	|| value.isModificationEnabled === value.isUploadEnabled, 'Modification flags disagree')
+	.transform(({ isUploadEnabled, ...value }) => ({ ...value, isModificationEnabled: value.isModificationEnabled ?? isUploadEnabled ?? true }));
 
 export const ImportDataSchema = z.object({
 	years: z.array(ImportYear).optional().default([]),
@@ -182,7 +185,7 @@ export async function executeImport(
 				const created = await repository.upsertExhibition({
 					year: y.year,
 					title,
-					isUploadEnabled: y.isUploadEnabled,
+					isModificationEnabled: y.isModificationEnabled,
 				});
 				exhibitionMap.set(`${y.year}::${title}`, created.id);
 				exhibitionsCreated++;

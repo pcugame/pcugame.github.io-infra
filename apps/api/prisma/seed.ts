@@ -83,7 +83,7 @@ async function seedTestData(creatorId: number) {
   const exhibition = await prisma.exhibition.upsert({
     where: { year_title: { year: 2026, title: '졸업작품 전시회' } },
     update: {},
-    create: { year: 2026, title: '졸업작품 전시회', isUploadEnabled: true },
+    create: { year: 2026, title: '졸업작품 전시회', isModificationEnabled: true },
   });
 
   const existing = await prisma.project.findUnique({
@@ -367,7 +367,7 @@ async function seedIntegrationData() {
 		data: {
 			year: 2026,
 			title: 'Integration Upload Open',
-			isUploadEnabled: true,
+			isModificationEnabled: true,
 			sortOrder: 0,
 		},
 	});
@@ -407,7 +407,7 @@ async function seedIntegrationData() {
     data: {
       year: 2027,
       title: 'Integration Upload Closed',
-      isUploadEnabled: false,
+      isModificationEnabled: false,
       sortOrder: 1,
     },
   });
@@ -415,7 +415,7 @@ async function seedIntegrationData() {
     data: {
       year: 2028,
       title: 'Integration Empty Exhibition',
-      isUploadEnabled: true,
+      isModificationEnabled: true,
       sortOrder: 2,
     },
   });
@@ -615,7 +615,7 @@ async function seedIntegrationData() {
 interface ImportYear {
   year: number;
   title?: string;
-  isUploadEnabled?: boolean;
+  isModificationEnabled?: boolean;
 }
 
 interface ImportMember {
@@ -663,8 +663,8 @@ async function importFromJson(filePath: string, creatorId: number) {
       const yearTitle = y.title ?? '';
       const created = await prisma.exhibition.upsert({
         where: { year_title: { year: y.year, title: yearTitle } },
-        update: { isUploadEnabled: y.isUploadEnabled ?? true },
-        create: { year: y.year, title: yearTitle, isUploadEnabled: y.isUploadEnabled ?? true },
+        update: { isModificationEnabled: y.isModificationEnabled ?? true },
+        create: { year: y.year, title: yearTitle, isModificationEnabled: y.isModificationEnabled ?? true },
       });
       exhibitionMap.set(y.year, created.id);
       console.log(`전시회: ${y.year} — ${yearTitle || '(제목 없음)'} (${created.id})`);
@@ -683,7 +683,7 @@ async function importFromJson(filePath: string, creatorId: number) {
         const ex = await prisma.exhibition.upsert({
           where: { year_title: { year: p.year, title: defaultTitle } },
           update: {},
-          create: { year: p.year, title: defaultTitle, isUploadEnabled: true },
+          create: { year: p.year, title: defaultTitle, isModificationEnabled: true },
         });
         exhibitionMap.set(p.year, ex.id);
       }

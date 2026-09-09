@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 import { WorkerGenerationFencedError } from '../upload-lifecycle/worker-errors.js';
 import { commitUploadIntents } from '../upload-intent/repository.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
 import type {
 	ImageUploadKind,
 	ImageWorkerRepository,
@@ -211,6 +212,12 @@ export function createPrismaImageWorkerRepository(
 			const assetId = Number(assetIdText);
 			if (!Number.isSafeInteger(assetId) || assetId < 1) throw new Error('Image output asset id is invalid');
 			await client.$transaction(async (tx) => {
+				if (session.owner.type === 'PROJECT') {
+					const actor = await tx.user.findUniqueOrThrow({
+						where: { id: Number(session.actorId) }, select: { id: true, role: true },
+					});
+					await assertProjectUploadWriteAccessInTransaction(tx, actor, Number(session.owner.id));
+				}
 				if (session.kind === 'POSTER' && session.expectedTargetAssetId == null
 					&& session.expectedTargetAssetUpdatedAt != null) {
 					throw new WorkerGenerationFencedError('POSTER');
@@ -289,6 +296,9 @@ export function createPrismaImageWorkerRepository(
 					validationLeaseToken: null, validationLeaseUntil: null,
 					completionResult: { status: 'READY', assetId, representation: 'ORIGINAL' },
 				} });
+				if (session.owner.type === 'PROJECT') {
+					await tx.project.update({ where: { id: Number(session.owner.id) }, data: { version: { increment: 1 } } });
+				}
 					await queueDurableDeletions(tx, [{ bucket: sourceCleanup.bucket, storageKey: sourceCleanup.objectKey, reason: 'direct-image-source-processed' }]);
 			});
 		},

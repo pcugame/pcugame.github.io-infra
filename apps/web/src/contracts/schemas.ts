@@ -53,14 +53,14 @@ export type UpdateProjectFormInput = z.infer<typeof UpdateProjectFormSchema>;
 
 // ── 전시회 생성/수정 ────────────────────────────────────────
 
-export const CreateExhibitionSchema = CreateExhibitionBaseSchema.extend({
+export const CreateExhibitionSchema = CreateExhibitionBaseSchema.safeExtend({
   year: z.number().int().min(2021).max(2100),
   title: z.string().max(100).optional().or(z.literal('')),
 });
 
 export type CreateExhibitionInput = z.infer<typeof CreateExhibitionSchema>;
 
-export const UpdateExhibitionSchema = UpdateExhibitionBaseSchema.extend({
+export const UpdateExhibitionSchema = UpdateExhibitionBaseSchema.safeExtend({
   title: z.string().max(100).optional().or(z.literal('')),
 });
 

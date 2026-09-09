@@ -1,7 +1,7 @@
 import { AppError, notFound } from '../../shared/errors.js';
 
 export type AssetDownloadVariant = 'original' | 'playback';
-export type DownloadRepresentationRole = 'ORIGINAL' | 'PLAYBACK';
+export type DownloadRepresentationRole = 'ORIGINAL' | 'PLAYBACK' | 'WEBGL_SOURCE';
 
 export interface AssetDownloadRepresentation {
 	role: string;
@@ -33,14 +33,17 @@ export function resolveDownloadRepresentation(
 	variant: AssetDownloadVariant,
 ): ResolvedDownloadRepresentation {
 	if (asset.status !== 'READY') throw notFound('Asset is not ready for download');
-	if (asset.kind !== 'GAME' && asset.kind !== 'VIDEO' && asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT') {
-		throw notFound('Protected download is not available for this asset kind');
+	if (asset.kind !== 'GAME' && asset.kind !== 'VIDEO' && asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT'
+		&& asset.kind !== 'IMAGE' && asset.kind !== 'POSTER' && asset.kind !== 'THUMBNAIL') {
+		if (asset.kind !== 'WEBGL') {
+			throw notFound('Protected download is not available for this asset kind');
+		}
 	}
 	if (variant === 'playback' && asset.kind !== 'VIDEO') {
 		throw notFound('Asset playback representation does not exist');
 	}
 
-	const role = roleFor(variant);
+	const role = asset.kind === 'WEBGL' ? 'WEBGL_SOURCE' : roleFor(variant);
 	const canonical = asset.representations.find((representation) => representation.role === role);
 	if (canonical) {
 		if (canonical.state !== 'READY') {

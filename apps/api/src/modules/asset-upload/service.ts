@@ -147,6 +147,7 @@ export function createAssetUploadService(deps: {
 			projectId: owner.type === 'PROJECT' ? owner.id : null,
 			exhibitionId: owner.type === 'EXHIBITION' ? owner.id : null,
 			userId: actor.id, kind, originalName: body.originalName,
+			actorRole: actor.role,
 			// Browser MIME is advisory.  Workers derive the trusted type from the
 			// completed bytes after Garage multipart completion.
 			declaredMimeType: body.declaredMimeType?.slice(0, 255) ?? (kind === 'GAME' || kind === 'WEBGL' ? 'application/zip' : ''), totalBytes: BigInt(body.totalBytes),
