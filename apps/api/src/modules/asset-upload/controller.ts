@@ -1,5 +1,4 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX } from '@pcu/contracts';
 import { z } from 'zod';
 import { sendCreated, sendOk } from '../../shared/http.js';
 import { AppError } from '../../shared/errors.js';
@@ -15,18 +14,8 @@ const SourceIdentityBody = z.object({
 	sourceIdentityBlockSizeBytes: z.literal(1_048_576),
 	sourceIdentityBlockDigests: z.array(z.string().regex(/^[a-f0-9]{64}$/)),
 	declaredMimeType: z.string().max(255).optional(),
-	submissionItem: z.object({
-		id: z.string().uuid(),
-		clientToken: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
-	}).strict().optional(),
 }).strict();
-const PartUrlsBody = z.object({
-	generation: z.number().int().positive(),
-	parts: z.array(z.object({
-		partNumber: z.number().int().positive(),
-		checksumSha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/),
-	}).strict()).min(1).max(DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX),
-}).strict();
+const PartUrlsBody = z.object({ generation: z.number().int().positive(), parts: z.array(z.object({ partNumber: z.number().int().positive(), checksumSha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/) }).strict()).min(1) }).strict();
 const CompleteBody = z.object({ generation: z.number().int().positive(), parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string().min(1), sizeBytes: z.number().int().positive() }).strict()) }).strict();
 
 type Service = ReturnType<typeof createAssetUploadService>;
@@ -48,6 +37,12 @@ export function createAssetUploadController(deps: { service: Service }): Fastify
 		app.post<{ Params: { id: string } }>('/projects/:id/direct-video-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
 			const result = await deps.service.createVideoSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body));
 			sendCreated(reply, result);
+		});
+		app.post<{ Params: { id: string } }>('/projects/:id/direct-document-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
+			sendCreated(reply, await deps.service.createDocumentSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body)));
+		});
+		app.post<{ Params: { id: string } }>('/projects/:id/direct-attachment-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
+			sendCreated(reply, await deps.service.createAttachmentSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body)));
 		});
 		app.post<{ Params: { id: string } }>('/projects/:id/direct-image-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
 			const result = await deps.service.createImageSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body));
@@ -91,6 +86,8 @@ export function createUnavailableAssetUploadController(): FastifyPluginAsync {
 		app.post('/projects/:id/direct-game-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-webgl-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-video-upload-sessions', { preHandler: requireLogin }, unavailable);
+		app.post('/projects/:id/direct-document-upload-sessions', { preHandler: requireLogin }, unavailable);
+		app.post('/projects/:id/direct-attachment-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-image-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/exhibitions/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, unavailable);

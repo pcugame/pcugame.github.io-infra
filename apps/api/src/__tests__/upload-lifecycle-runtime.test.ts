@@ -31,6 +31,7 @@ function runtimeHarness() {
 		uploadIntents: ports.uploadIntents,
 		orphanDeletions: ports.orphanDeletions,
 		multipartAborts: ports.multipartAborts,
+		gameUploads: ports.gameUploads,
 		orphans: {
 			recordOrphan: vi.fn(async () => undefined),
 			runOrphanReaper,

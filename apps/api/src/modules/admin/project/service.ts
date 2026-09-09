@@ -57,9 +57,9 @@ export async function listProjects(
 			p.assets,
 			p.poster ? {
 				...p.poster,
-				hasReadyOriginal: p.poster.representations?.some((representation) => (
+				storageKey: p.poster.representations?.find((representation) => (
 					representation.role === 'ORIGINAL'
-				)) ?? false,
+				))?.objectKey ?? p.poster.storageKey ?? '',
 			} : null,
 		),
 		status: p.status,
@@ -96,6 +96,13 @@ export async function getProjectDetail(
 		const isMember = !!(await deps.repository.isMemberOfProject(project.id, userId));
 		if (!isMember) throw forbidden('Not your project');
 	}
+	if (project.currentWebglDeploymentId == null && project.webglEntryKey) {
+		deps.logger.warn?.(
+			{ projectId: project.id },
+			'Admin project response used legacy WebGL deployment fallback',
+		);
+	}
+
 	return deps.serializeProjectDetail(project);
 }
 
@@ -116,6 +123,13 @@ export async function updateProject(
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	});
+	if (updated.currentWebglDeploymentId == null && updated.webglEntryKey) {
+		deps.logger.warn?.(
+			{ projectId: updated.id },
+			'Admin project response used legacy WebGL deployment fallback',
+		);
+	}
+
 	return deps.serializeProjectDetail(updated);
 }
 
@@ -136,11 +150,11 @@ async function abortTrackedMultipartUploads(
 	projectId?: number,
 ): Promise<void> {
 	await Promise.all(activeUploads.map(async (session) => {
-		if (session.uploadId && session.objectKey) {
-			await deps.abortMultipart(session.objectKey, session.uploadId).catch((err) => {
+		if (session.s3UploadId && session.s3Key) {
+			await deps.abortMultipart(session.s3Key, session.s3UploadId).catch((err) => {
 				deps.recordPostCommitCleanupFailure?.();
 				deps.logger.error(
-					{ err, projectId: projectId ?? session.projectId, objectKey: session.objectKey },
+					{ err, projectId: projectId ?? session.projectId, s3Key: session.s3Key },
 					'Best-effort tracked multipart abort failed; durable task retained',
 				);
 			});
@@ -182,7 +196,10 @@ export async function bulkDeleteProjects(deps: ProjectServiceDependencies, ids: 
 	return {
 		deleted: result.count,
 		assetsRemoved: assets.length,
-		webglBuildsRemoved: projects.filter((project) => project.currentWebglDeploymentId != null).length,
+		webglBuildsRemoved: projects.filter((project) => {
+			const snapshot = project as typeof project & { currentWebglDeploymentId?: string | null };
+			return !!project.webglEntryKey || snapshot.currentWebglDeploymentId != null;
+		}).length,
 	};
 }
 
@@ -199,6 +216,7 @@ export function createProjectService(deps: ProjectServiceDependencies) {
 		updateProject: ((...args) => updateProject(deps, ...args)) as WithoutDependencies<typeof updateProject>,
 		deleteProject: ((...args) => deleteProject(deps, ...args)) as WithoutDependencies<typeof deleteProject>,
 		deleteWebgl: ((...args) => deleteWebgl(deps, ...args)) as WithoutDependencies<typeof deleteWebgl>,
+		setVideoOrder: (projectId: number, expectedOrder: number[], order: number[]) => deps.repository.setProjectVideoOrder(projectId, expectedOrder, order),
 		setPoster: ((...args) => setPoster(deps, ...args)) as WithoutDependencies<typeof setPoster>,
 		bulkDeleteProjects: ((...args) => bulkDeleteProjects(deps, ...args)) as WithoutDependencies<typeof bulkDeleteProjects>,
 	};

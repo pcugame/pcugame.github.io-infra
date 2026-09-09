@@ -1,14 +1,13 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { requireLogin } from '../../../shared/auth-guards.js';
-import { sendCreated, sendOk } from '../../../shared/http.js';
-import { parseIntParam } from '../../../shared/validation.js';
+import { sendCreated } from '../../../shared/http.js';
 import type { createSubmitProjectService } from '../../admin/project/project-submit.service.js';
 import { assertIdempotencyKey } from '../../idempotency/service.js';
-import { readMetadataPayload } from '../../admin/project/metadata-payload.js';
 
 export function createMeProjectController(deps: {
 	service: ReturnType<typeof createSubmitProjectService>;
 	route: {
+		bodyLimit: number;
 		rateLimit: {
 			max: number;
 			timeWindow: number;
@@ -20,6 +19,8 @@ export function createMeProjectController(deps: {
 			'/projects/submit',
 			{
 				preHandler: requireLogin,
+				bodyLimit: deps.route.bodyLimit,
+				handlerTimeout: 45 * 60 * 1000,
 				config: { rateLimit: deps.route.rateLimit },
 			},
 			async (request, reply) => {
@@ -27,23 +28,11 @@ export function createMeProjectController(deps: {
 					request.headers['idempotency-key'],
 				);
 				const result = await deps.service.submitProject(
-					{ actor: request.currentUser!, payload: await readMetadataPayload(request.parts() as AsyncIterable<never>), idempotencyKey },
+					{ actor: request.currentUser!, parts: request.parts(), idempotencyKey },
 					{ audience: 'user' },
 				);
 				sendCreated(reply, result);
 			},
 		);
-		app.get<{ Params: { id: string } }>('/projects/:id/submission', { preHandler: requireLogin }, async (request, reply) => {
-			sendOk(reply, await deps.service.status(request.currentUser!, parseIntParam(request.params.id)));
-		});
-		app.post<{ Params: { id: string } }>('/projects/:id/submission/finalize', {
-			preHandler: requireLogin,
-			config: { rateLimit: deps.route.rateLimit },
-		}, async (request, reply) => {
-			sendOk(reply, await deps.service.finalize(request.currentUser!, parseIntParam(request.params.id)));
-		});
-		app.delete<{ Params: { id: string } }>('/projects/:id/submission', { preHandler: requireLogin }, async (request, reply) => {
-			sendOk(reply, await deps.service.cancel(request.currentUser!, parseIntParam(request.params.id)));
-		});
 	};
 }

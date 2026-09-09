@@ -1,4 +1,4 @@
-name: Update Phase 1 Video Ordering
+name: Update Phase 1 Runtime
 
 on:
   workflow_dispatch:
@@ -42,6 +42,7 @@ jobs:
           [ "$GITHUB_DEFAULT_BRANCH" = master ]
           [ "$GITHUB_REF" = refs/heads/master ]
           [[ "$PHASE1_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PHASE1_SOURCE_SHA" == "$GITHUB_SHA" ]] || { echo "Phase 1 source must be the exact dispatched master commit"; exit 1; }
           [[ "$PHASE1_IMAGE" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
       - uses: actions/checkout@v4
       - name: Verify control boundary before maintenance
@@ -64,7 +65,9 @@ jobs:
         run: |
           test -f apps/api/src/phase1-release-manifest.ts
           test -f apps/api/prisma/migrations/20260821800000_project_video_order_expand/migration.sql
-          test ! -e apps/api/prisma/migrations/20260822000000_canonical_asset_contract
+          # Contract SQL remains immutable in Git; the Phase 1 image excludes it.
+          test -f apps/api/prisma/migrations/20260821910000_project_material_constraints_expand/migration.sql
+          test -f apps/api/prisma/migrations/20260822000000_canonical_asset_contract/migration.sql
       - uses: actions/setup-node@v4
         with:
           node-version: 22

@@ -5,15 +5,13 @@ import {
 	buildPosterReplaceFormData,
 } from '../lib/utils/formData';
 import type { SubmitProjectPayloadInput } from '../contracts/schemas';
-import type { ProjectSubmissionManifestItem } from '../contracts';
 
-function fakePayload(): SubmitProjectPayloadInput & { manifest: ProjectSubmissionManifestItem[] } {
+function fakePayload(): SubmitProjectPayloadInput {
 	return {
 		exhibitionId: 1,
 		title: 'Test Game',
 		summary: 'A test',
 		members: [{ name: '홍길동', studentId: '20251234' }],
-		manifest: [],
 	};
 }
 
@@ -56,6 +54,15 @@ describe('buildSubmitFormData', () => {
 		const videos = [fakeFile('demo-1.mp4'), fakeFile('demo-2.mp4')];
 		const fd = buildSubmitFormData(fakePayload(), { videoFiles: videos });
 		expect(fd.getAll('videoFile')).toHaveLength(2);
+	});
+
+	it('appends documents[] and attachments[] for the legacy Phase 1 submission endpoint', () => {
+		const fd = buildSubmitFormData(fakePayload(), {
+			documents: [fakeFile('guide.pdf')],
+			attachments: [fakeFile('notes.txt'), fakeFile('extra.bin')],
+		});
+		expect(fd.getAll('documents[]')).toHaveLength(1);
+		expect(fd.getAll('attachments[]')).toHaveLength(2);
 	});
 
 	it('contains only payload when no files provided', () => {

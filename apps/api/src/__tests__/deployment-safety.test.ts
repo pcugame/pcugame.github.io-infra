@@ -48,7 +48,7 @@ describe('production deployment safety', () => {
 
 		expect(apiPaths).toContain(releaseGatePath);
 		expect(apiPaths).not.toContain('apps/web/**');
-		expect(apiWorkflow).not.toContain('release-migrate');
+		expect(apiWorkflow).not.toMatch(/release-migrate(?:\.js)?[\s"']+(?:apply-expand|apply-contract)/);
 		expect(apiWorkflow).not.toContain('contract-migrate');
 	});
 

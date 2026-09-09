@@ -6,6 +6,11 @@ import type {
 	BannedIpListResponse,
 	ExportResult,
 	ExportStatusResponse,
+	GameUploadChunkResponse,
+	GameUploadCompleteResponse,
+	GameUploadSession,
+	GameUploadSessionListResponse,
+	GameUploadStatus,
 	GoogleAuthResponse,
 	ImportExecuteResult,
 	ImportPreviewResult,
@@ -26,6 +31,11 @@ import {
 	ExportResultSchema,
 	ExportStartResponseSchema,
 	ExportStatusResponseSchema,
+	GameUploadChunkResponseSchema,
+	GameUploadCompleteResponseSchema,
+	GameUploadSessionListResponseSchema,
+	GameUploadSessionSchema,
+	GameUploadStatusSchema,
 	GoogleAuthResponseSchema,
 	ImportExecuteResultSchema,
 	ImportPreviewResultSchema,
@@ -36,7 +46,7 @@ import {
 	PublicYearListResponseSchema,
 	PublicYearProjectsResponseSchema,
 	ProjectAssetUploadResponseSchema,
-	ProjectVideoSchema,
+	PublicUploadConfigSchema,
 	ResponsiveImageSchema,
 	SiteSettingsDataSchema,
 	SubmitProjectResponseSchema,
@@ -45,20 +55,20 @@ import {
 
 const responsiveImage = {
 	original: {
-		url: 'https://assets.example.test/public/images/asset-1/original/g1.webp',
+		url: 'https://api.example.test/api/public/images/original.webp',
 		width: 1200,
 		height: 1680,
 	},
 	renditions: [
 		{
 			profile: 'CARD_480' as const,
-			url: 'https://assets.example.test/public/images/asset-1/card-480/g1.webp',
+			url: 'https://api.example.test/api/public/images/card.webp',
 			width: 480,
 			height: 672,
 		},
 		{
 			profile: 'DISPLAY_960' as const,
-			url: 'https://assets.example.test/public/images/asset-1/display-960/g1.webp',
+			url: 'https://api.example.test/api/public/images/display.webp',
 			width: 960,
 			height: 1344,
 		},
@@ -87,9 +97,14 @@ const runtimeSchemasMatchTransportTypes: [
 	IsAssignable<z.output<typeof ImportExecuteResultSchema>, ImportExecuteResult>,
 	IsAssignable<z.output<typeof ExportStatusResponseSchema>, ExportStatusResponse>,
 	IsAssignable<z.output<typeof ExportResultSchema>, ExportResult>,
+	IsAssignable<z.output<typeof GameUploadSessionSchema>, GameUploadSession>,
+	IsAssignable<z.output<typeof GameUploadStatusSchema>, GameUploadStatus>,
+	IsAssignable<z.output<typeof GameUploadSessionListResponseSchema>, GameUploadSessionListResponse>,
+	IsAssignable<z.output<typeof GameUploadChunkResponseSchema>, GameUploadChunkResponse>,
+	IsAssignable<z.output<typeof GameUploadCompleteResponseSchema>, GameUploadCompleteResponse>,
 ] = [
 	true, true, true, true, true, true, true, true, true, true, true,
-	true, true, true, true, true, true,
+	true, true, true, true, true, true, true, true, true, true,
 ];
 
 describe('response runtime schemas', () => {
@@ -140,7 +155,13 @@ describe('response runtime schemas', () => {
 			},
 		}).items[0]?.status).toBe('PUBLISHED');
 
-		expect(PublicProjectDetailResponseSchema.parse({
+		expect(GameUploadCompleteResponseSchema.parse({
+			status: 'COMPLETED',
+			storageKey: 'games/1/game.zip',
+			sizeBytes: 1,
+		})).toMatchObject({ status: 'COMPLETED' });
+
+		const legacyProject = PublicProjectDetailResponseSchema.parse({
 			id: 1,
 			year: 2026,
 			slug: 'legacy-link',
@@ -153,20 +174,28 @@ describe('response runtime schemas', () => {
 			members: [],
 			images: [],
 			status: 'PUBLISHED',
-		}).githubUrl).toBe('github.com/legacy/project');
+		});
+		expect(legacyProject.githubUrl).toBe('github.com/legacy/project');
+		expect(legacyProject.attachments).toEqual([]);
+		expect(PublicProjectDetailResponseSchema.parse({
+			...legacyProject,
+			attachments: [{ assetId: 12, kind: 'DOCUMENT', originalName: 'guide.pdf', mimeType: 'application/pdf', sizeBytes: 1024, downloadUrl: 'https://api.example.test/api/assets/12/download' }],
+		}).attachments).toHaveLength(1);
+		expect(PublicUploadConfigSchema.parse({ materialMaxCount: 5, materialMaxBytes: 52_428_800 }))
+			.toMatchObject({ materialMaxCount: 5 });
 
 		expect(ResponsiveImageSchema.parse({
-			original: { url: 'https://assets.example.test/public/images/asset-2/original/g1.webp' },
+			original: { url: 'https://api.example.test/api/public/images/legacy.webp' },
 			renditions: [],
 		})).toEqual({
-			original: { url: 'https://assets.example.test/public/images/asset-2/original/g1.webp' },
+			original: { url: 'https://api.example.test/api/public/images/legacy.webp' },
 			renditions: [],
 		});
 
 		expect(ProjectAssetUploadResponseSchema.parse({ assetId: 7 })).toEqual({ assetId: 7 });
 		expect(ProjectAssetUploadResponseSchema.safeParse({
 			assetId: 7,
-			url: 'https://assets.example.test/public/images/asset-3/original/g1.webp',
+			url: 'https://api.example.test/api/public/images/uploaded.webp',
 		}).success).toBe(false);
 
 		expect(ExportStatusResponseSchema.parse({
@@ -268,7 +297,7 @@ describe('response runtime schemas', () => {
 				{
 					id: 11,
 					kind: 'VIDEO',
-					url: 'https://api.example.test/api/assets/42/download?variant=playback',
+					url: 'https://api.example.test/api/assets/protected/video.mp4',
 					originalName: 'video.mp4',
 					size: 456,
 				},
@@ -298,26 +327,6 @@ describe('response runtime schemas', () => {
 		}).success).toBe(false);
 	});
 
-	it('represents original-only video access without inventing a playback URL', () => {
-		expect(ProjectVideoSchema.parse({
-			mimeType: 'video/quicktime',
-			originalDownloadUrl: 'https://api.example.test/api/assets/42/download?variant=original',
-			playbackStatus: 'FAILED',
-			playbackError: 'encoder failed',
-		})).toEqual({
-			mimeType: 'video/quicktime',
-			originalDownloadUrl: 'https://api.example.test/api/assets/42/download?variant=original',
-			playbackStatus: 'FAILED',
-			playbackError: 'encoder failed',
-		});
-		expect(ProjectVideoSchema.safeParse({ mimeType: 'video/mp4' }).success).toBe(false);
-		expect(ProjectVideoSchema.safeParse({
-			mimeType: 'video/mp4',
-			originalDownloadUrl: 'https://api.example.test/api/assets/42/download?variant=original',
-			playbackStatus: 'READY',
-		}).success).toBe(false);
-	});
-
 	it('rejects shape drift, unsafe integers, invalid years, and extra response fields', () => {
 		expect(PublicYearListResponseSchema.safeParse({
 			items: [{ id: 1, year: 2026, projectCount: 0, unexpected: true }],
@@ -327,6 +336,12 @@ describe('response runtime schemas', () => {
 		}).success).toBe(false);
 		expect(PublicYearListResponseSchema.safeParse({
 			items: [{ id: 1, year: 2026.5, projectCount: 0 }],
+		}).success).toBe(false);
+		expect(GameUploadChunkResponseSchema.safeParse({
+			index: -1,
+			bytesWritten: 1,
+			uploadedCount: 1,
+			totalChunks: 1,
 		}).success).toBe(false);
 		expect(ExportStatusResponseSchema.safeParse({
 			running: true,

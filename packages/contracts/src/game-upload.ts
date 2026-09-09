@@ -1,14 +1,64 @@
 export type UploadKind = 'GAME' | 'WEBGL';
 
-/** Canonical direct control-plane session kinds. */
-export type DirectAssetUploadKind = UploadKind | 'VIDEO' | 'IMAGE' | 'POSTER';
+/** New direct control-plane session kinds; legacy chunk sessions remain GAME/WEBGL only. */
+export type DirectAssetUploadKind = UploadKind | 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT';
 
 /** Canonical owner identity for a direct multipart session. */
 export type DirectAssetUploadOwner =
 	| { type: 'PROJECT'; id: number }
 	| { type: 'EXHIBITION'; id: number };
 
-/** Direct multipart source proof, verified by the processing worker. */
+export type GameUploadCreateSessionRequest = {
+	originalName: string;
+	totalBytes: number;
+	uploadKind?: UploadKind;
+};
+
+export type GameUploadSession = {
+	sessionId: string;
+	chunkSizeBytes: number;
+	totalChunks: number;
+	expiresAt: string;
+	uploadKind: UploadKind;
+};
+
+export type GameUploadStatus = {
+	sessionId: string;
+	projectId: number;
+	uploadKind: UploadKind;
+	originalName: string;
+	totalBytes: number;
+	chunkSizeBytes: number;
+	totalChunks: number;
+	uploadedChunks: number[];
+	uploadedCount: number;
+	status: string;
+	expiresAt: string;
+};
+
+export type GameUploadSessionListResponse = {
+	items: GameUploadStatus[];
+};
+
+export type GameUploadChunkResponse = {
+	index: number;
+	bytesWritten: number;
+	uploadedCount: number;
+	totalChunks: number;
+};
+
+export type GameUploadCompleteResponse = {
+	status: 'COMPLETED';
+	storageKey: string;
+	sizeBytes: number;
+	webglUrl?: string;
+};
+
+/**
+ * Phase-1 direct-multipart contract.  These are intentionally separate from
+ * the legacy chunk contract above: old clients can resume a legacy session
+ * while newly-enabled clients never send object bytes to the API.
+ */
 export type DirectUploadSourceIdentity = {
 	sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1';
 	sourceIdentity: string;
@@ -22,11 +72,6 @@ export type DirectGameUploadCreateSessionRequest = {
 	uploadKind?: UploadKind;
 	/** Advisory only; the worker establishes content type from decoded bytes. */
 	declaredMimeType?: string;
-	/** Required when the owner is a not-yet-published project submission. */
-	submissionItem?: {
-		id: string;
-		clientToken: string;
-	};
 } & DirectUploadSourceIdentity;
 
 export type DirectGameUploadPart = {
@@ -35,18 +80,8 @@ export type DirectGameUploadPart = {
 	sizeBytes: number;
 };
 
-/**
- * Control-plane bound, not an upload concurrency setting.  Clients may choose
- * a smaller batch to keep browser hashing memory bounded.
- */
-export const DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX = 32;
-
-/** Browser batches at most 8 * 16 MiB (128 MiB) of pending checksums at once. */
-export const DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE = 8;
-
 export type DirectGameUploadPartUrlsRequest = {
 	generation: number;
-	/** At most DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX entries. */
 	parts: Array<{
 		partNumber: number;
 		/** Base64 SHA-256 of precisely the body sent to UploadPart. */

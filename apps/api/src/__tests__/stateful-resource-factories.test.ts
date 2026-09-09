@@ -227,7 +227,7 @@ describe('stateful resource factories', () => {
 			const emptyRoute: FastifyPluginAsync = async () => {};
 			const findBannedIps = vi.fn().mockResolvedValue([]);
 			const objectStorage: ObjectStorage = {
-				upload: async () => {}, delete: async () => {},
+				upload: async () => {}, presign: async () => '', delete: async () => {},
 				head: async () => null, readRange: async () => Buffer.alloc(0), stream: async () => null,
 				listKeys: async () => [], listKeyPage: async () => ({ keys: [], isTruncated: false }),
 				deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),

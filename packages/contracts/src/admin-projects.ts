@@ -1,5 +1,5 @@
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
-import type { ProjectVideo } from './public.js';
+import type { ProjectAttachment, ProjectVideo } from './public.js';
 import type { ResponsiveImage } from './responsive-image.js';
 
 export type UpdateProjectRequest = {
@@ -7,7 +7,7 @@ export type UpdateProjectRequest = {
 	summary?: string;
 	description?: string;
 	isIncomplete?: boolean;
-	status?: Exclude<ProjectStatus, 'DRAFT'>;
+	status?: ProjectStatus;
 	sortOrder?: number;
 };
 
@@ -39,7 +39,7 @@ export type AdminProjectListQuery = {
 
 export type BulkUpdateProjectStatusRequest = {
 	ids: number[];
-	status: Exclude<ProjectStatus, 'DRAFT'>;
+	status: ProjectStatus;
 };
 
 export type BulkDeleteProjectsRequest = {
@@ -96,6 +96,7 @@ export type AdminProjectDetail = {
 	} | {
 		id: number;
 		kind: Extract<AssetKind, 'GAME' | 'VIDEO'>;
+		videoSortOrder?: number | null;
 		url: string;
 		originalDownloadUrl?: string;
 		playbackUrl?: string;
@@ -103,7 +104,15 @@ export type AdminProjectDetail = {
 		playbackError?: string;
 		originalName: string;
 		size: number;
+	} | {
+		id: number;
+		kind: Extract<AssetKind, 'DOCUMENT' | 'ATTACHMENT'>;
+		originalName: string;
+		mimeType: string;
+		size: number;
+		downloadUrl: string;
 	})>;
+	attachments?: ProjectAttachment[];
 };
 
 export type SubmitProjectPayload = {
@@ -112,50 +121,13 @@ export type SubmitProjectPayload = {
 	summary?: string;
 	description?: string;
 	members: { name: string; studentId: string; sortOrder?: number; userId?: number }[];
-	manifest: ProjectSubmissionManifestItem[];
-};
-
-export type ProjectSubmissionManifestItem = {
-	kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER';
-	slot: string;
-	clientToken: string;
-	required: true;
-};
-
-export type ProjectSubmissionItemStatus = ProjectSubmissionManifestItem & {
-	id: string;
-	state: 'EXPECTED' | 'UPLOADING' | 'VERIFYING' | 'READY' | 'FAILED' | 'CANCELLED';
-	sessionId?: string;
-	generation?: number;
-	failureReason?: string;
-	playbackState?: 'READY' | 'FAILED';
-	playbackError?: string;
-};
-
-export type ProjectSubmissionStatusResponse = {
-	submissionId: string;
-	projectId: number;
-	projectStatus: ProjectStatus;
-	state: 'PENDING' | 'FINALIZING' | 'PUBLISHED' | 'CANCELLED';
-	publicationState?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
-	publicationError?: string;
-	items: ProjectSubmissionItemStatus[];
-};
-
-export type ProjectSubmissionAuditResponse = {
-	draftProjects: number;
-	pendingSubmissions: number;
-	finalizingSubmissions: number;
-	activePublicationJobs: number;
 };
 
 export type SubmitProjectResponse = {
 	id: number;
 	slug: string;
 	year: number;
-	status: 'DRAFT';
-	submissionId: string;
-	items: ProjectSubmissionItemStatus[];
+	status: 'PUBLISHED';
 	adminEditUrl: string;
 	publicUrl?: string;
 };
@@ -176,3 +148,5 @@ export type SwapProjectMembersRequest = {
 	memberIdA: number;
 	memberIdB: number;
 };
+
+export type SetProjectVideoOrderRequest = { expectedOrder: number[]; order: number[] };

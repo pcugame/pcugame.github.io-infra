@@ -47,6 +47,9 @@ export type PublicExhibitionProjectsResponse = {
 
 /** Project video (locally uploaded) */
 export type ProjectVideo = {
+	assetId: number;
+	sortOrder: number | null;
+	role: 'MAIN' | 'ADDITIONAL';
 	/** Present only when a READY browser-playable representation exists. */
 	url?: string;
 	mimeType: string;
@@ -68,6 +71,21 @@ export type PublicProjectMember = {
 	studentId: string;
 };
 
+export type ProjectAttachment = {
+	assetId: number;
+	kind: 'DOCUMENT' | 'ATTACHMENT';
+	originalName: string;
+	mimeType: string;
+	sizeBytes: number;
+	downloadUrl: string;
+};
+
+/** Optional capability fields keep a web-first deployment compatible with older APIs. */
+export type PublicUploadConfig = {
+	materialMaxCount?: number;
+	materialMaxBytes?: number;
+};
+
 export type PublicProjectDetailResponse = {
 	id: number;
 	year: number;
@@ -82,6 +100,7 @@ export type PublicProjectDetailResponse = {
 	videos: ProjectVideo[];
 	members: PublicProjectMember[];
 	images: PublicProjectImage[];
+	attachments?: ProjectAttachment[];
 	poster?: ResponsiveImage;
 	gameDownloadUrl?: string;
 	webglUrl?: string;

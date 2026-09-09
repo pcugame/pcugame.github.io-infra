@@ -1,13 +1,20 @@
 import type { FastifyPluginAsync } from 'fastify';
+import type { AppLogger } from '../../application/ports.js';
 import { normalizePublicAssetOrigin } from '../../shared/public-origin.js';
 import { createPublicController } from './controller.js';
+import {
+	createPublicDeliveryBridgeService,
+	type PublicDeliveryBridgeRepository,
+} from './delivery-bridge.service.js';
 import { createPublicService, type PublicServiceDependencies } from './service.js';
 
-export type PublicProductionRepository = PublicServiceDependencies['repository'];
+export type PublicProductionRepository = PublicServiceDependencies['repository']
+	& PublicDeliveryBridgeRepository;
 
 export interface PublicProductionGraph {
 	repository: PublicProductionRepository;
 	service: ReturnType<typeof createPublicService>;
+	deliveryBridge: ReturnType<typeof createPublicDeliveryBridgeService>;
 	controller: FastifyPluginAsync;
 }
 
@@ -20,8 +27,7 @@ export interface PublicProductionDependencies {
 		S3_BUCKET_PUBLIC: string;
 	};
 	repository: PublicProductionRepository;
-	/** Accepted by the root composition for uniform logging ownership; canonical public reads emit no fallback logs. */
-	logger: unknown;
+	logger: Pick<AppLogger, 'warn' | 'error'>;
 }
 
 /** Compose public reads exclusively from resources owned by one BackendContext. */
@@ -41,10 +47,18 @@ export function createPublicProductionGraph(
 		publicAssetOrigin,
 		publicBucket: deps.config.S3_BUCKET_PUBLIC,
 		repository,
+		logger: deps.logger,
+	});
+	const deliveryBridge = createPublicDeliveryBridgeService({
+		publicAssetOrigin,
+		publicBucket: deps.config.S3_BUCKET_PUBLIC,
+		repository,
+		logger: deps.logger,
 	});
 	return {
 		repository,
 		service,
-		controller: createPublicController({ service }),
+		deliveryBridge,
+		controller: createPublicController({ service, deliveryBridge }),
 	};
 }

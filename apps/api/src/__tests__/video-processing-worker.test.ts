@@ -10,7 +10,6 @@ import { DEFAULT_VIDEO_LIMITS } from '../modules/video/policy.js';
 import { createVideoProcessor } from '../modules/video/processor.js';
 import type { VerifyingVideoSession, VideoProbe } from '../modules/video/ports.js';
 import { createVideoProcessingWorker } from '../modules/video/worker.js';
-import { WorkerSourceObjectMissingError } from '../modules/upload-lifecycle/worker-errors.js';
 
 function sourceBytes(): Buffer {
 	const source = Buffer.alloc(64);
@@ -19,9 +18,6 @@ function sourceBytes(): Buffer {
 	source.write('isom', 8, 'ascii');
 	return source;
 }
-
-const generatedPlayback = Buffer.alloc(128);
-const generatedPlaybackChecksum = createHash('sha256').update(generatedPlayback).digest('hex');
 
 function videoSession(source = sourceBytes()): VerifyingVideoSession {
 	const digest = createHash('sha256').update(source).digest();
@@ -43,9 +39,6 @@ function videoSession(source = sourceBytes()): VerifyingVideoSession {
 		sourceIdentityBlockManifest: digest.toString('base64'),
 		validationLeaseToken: 'lease',
 		validationLeaseUntil: new Date(Date.now() + 60_000),
-		resultAssetId: null,
-		resultRepresentationId: null,
-		completionResult: null,
 	};
 }
 
@@ -71,16 +64,16 @@ function probe(overrides: Partial<VideoProbe> = {}): VideoProbe {
 async function processorHarness(input: {
 	inputProbe?: VideoProbe;
 	outputProbe?: VideoProbe;
-	playbackCommitError?: Error;
-	existingPlayback?: { size: number; checksumSha256?: string };
+	commitError?: Error;
+	existingPlayback?: boolean;
 } = {}) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-processor-test-'));
 	const source = sourceBytes();
 	const upload = vi.fn(async ({ body }: { body: Readable }) => {
 		for await (const _chunk of body) { /* drain */ }
 	});
-	const commitVideoPlaybackReady = input.playbackCommitError
-		? vi.fn(async () => { throw input.playbackCommitError; })
+	const commitVideoReady = input.commitError
+		? vi.fn(async () => { throw input.commitError; })
 		: vi.fn(async () => ({
 			assetId: 20,
 			originalRepresentationId: 'original',
@@ -91,27 +84,19 @@ async function processorHarness(input: {
 		renewVideoLease: vi.fn(),
 		preparePlaybackIntent: vi.fn(async () => ({ id: 'intent-1', state: 'PREPARED' as const })),
 		markPlaybackUploaded: vi.fn(async () => {}),
-		commitVideoOriginalReady: vi.fn(async () => ({
-			assetId: 20,
-			originalRepresentationId: 'original',
-			playbackRepresentationId: 'playback',
-			playbackState: 'VERIFYING' as const,
-		})),
-		commitVideoPlaybackReady,
-		commitVideoPlaybackFailed: vi.fn(async () => true),
-		requestPlaybackRepair: vi.fn(),
+		commitVideoReady,
 		rejectVideo: vi.fn(),
 	};
 	const probes = [input.inputProbe ?? probe(), input.outputProbe ?? probe()];
 	const operations = {
 		probe: vi.fn(async () => probes.shift() ?? probe()),
 		verifyDecode: vi.fn(async () => {}),
-		remux: vi.fn(async (_input: string, output: string) => fs.writeFile(output, generatedPlayback)),
-		reencode: vi.fn(async (_input: string, output: string) => fs.writeFile(output, generatedPlayback)),
+		remux: vi.fn(async (_input: string, output: string) => fs.writeFile(output, Buffer.alloc(128))),
+		reencode: vi.fn(async (_input: string, output: string) => fs.writeFile(output, Buffer.alloc(128))),
 	};
 	const storage = {
 		stream: vi.fn(async () => ({ body: Readable.from([source]), size: source.length, etag: 'source-etag' })),
-		head: vi.fn(async () => input.existingPlayback ?? null),
+		head: vi.fn(async () => input.existingPlayback ? { size: 128 } : null),
 		upload,
 	};
 	const logger = { info: vi.fn(), warn: vi.fn() };
@@ -142,14 +127,11 @@ describe('direct VIDEO processor', () => {
 			await expect(harness.processor.process(videoSession(), 'token')).resolves.toEqual({
 				strategy: 'passthrough',
 				assetId: 20,
-				playbackState: 'READY',
 			});
 			expect(harness.operations.verifyDecode).toHaveBeenCalledOnce();
 			expect(harness.storage.upload).not.toHaveBeenCalled();
-			expect(harness.repository.commitVideoOriginalReady).toHaveBeenCalledWith(expect.objectContaining({
+			expect(harness.repository.commitVideoReady).toHaveBeenCalledWith(expect.objectContaining({
 				originalMimeType: 'video/mp4',
-			}));
-			expect(harness.repository.commitVideoPlaybackReady).toHaveBeenCalledWith(expect.objectContaining({
 				playback: expect.objectContaining({
 					objectKey: 'protected/uploads/session-video-1/1/source.bin',
 					mimeType: 'video/mp4',
@@ -171,24 +153,15 @@ describe('direct VIDEO processor', () => {
 		});
 		try {
 			await expect(harness.processor.process(videoSession(), 'token')).resolves.toMatchObject({
-				strategy: 'reencode', assetId: 20, playbackState: 'READY',
+				strategy: 'reencode', assetId: 20,
 			});
-			expect(harness.repository.commitVideoOriginalReady.mock.invocationCallOrder[0])
-				.toBeLessThan(harness.operations.reencode.mock.invocationCallOrder[0]!);
 			expect(harness.operations.reencode).toHaveBeenCalledWith(
 				expect.any(String), expect.any(String), expect.any(Number), undefined,
 			);
 			expect(harness.repository.preparePlaybackIntent.mock.invocationCallOrder[0])
 				.toBeLessThan(harness.storage.upload.mock.invocationCallOrder[0]!);
 			expect(harness.repository.markPlaybackUploaded.mock.invocationCallOrder[0])
-				.toBeLessThan(harness.repository.commitVideoPlaybackReady.mock.invocationCallOrder[0]!);
-			expect(harness.storage.upload).toHaveBeenCalledWith(expect.objectContaining({
-				contentLength: generatedPlayback.length,
-				checksumSha256: generatedPlaybackChecksum,
-			}));
-			expect(harness.repository.commitVideoPlaybackReady).toHaveBeenCalledWith(expect.objectContaining({
-				playback: expect.objectContaining({ checksumSha256: generatedPlaybackChecksum }),
-			}));
+				.toBeLessThan(harness.repository.commitVideoReady.mock.invocationCallOrder[0]!);
 		} finally {
 			await fs.rm(harness.root, { recursive: true, force: true });
 		}
@@ -197,7 +170,7 @@ describe('direct VIDEO processor', () => {
 	it('retains the durable generated-object intent when DB commit fails and cleans temp files', async () => {
 		const harness = await processorHarness({
 			inputProbe: probe({ videoCodec: 'vp9', formatNames: ['webm'], fastStart: false }),
-			playbackCommitError: new Error('database unavailable'),
+			commitError: new Error('database unavailable'),
 		});
 		try {
 			await expect(harness.processor.process(videoSession(), 'token')).rejects.toThrow('database unavailable');
@@ -212,54 +185,12 @@ describe('direct VIDEO processor', () => {
 	it('recovers an already uploaded deterministic generation without another Garage PUT', async () => {
 		const harness = await processorHarness({
 			inputProbe: probe({ videoCodec: 'vp9', formatNames: ['webm'], fastStart: false }),
-			existingPlayback: { size: generatedPlayback.length, checksumSha256: generatedPlaybackChecksum },
+			existingPlayback: true,
 		});
 		try {
 			await harness.processor.process(videoSession(), 'token');
 			expect(harness.storage.upload).not.toHaveBeenCalled();
 			expect(harness.repository.markPlaybackUploaded).toHaveBeenCalledOnce();
-		} finally {
-			await fs.rm(harness.root, { recursive: true, force: true });
-		}
-	});
-
-	it('overwrites a same-size playback object when its authoritative checksum is wrong', async () => {
-		const harness = await processorHarness({
-			inputProbe: probe({ videoCodec: 'vp9', formatNames: ['webm'], fastStart: false }),
-			existingPlayback: { size: generatedPlayback.length, checksumSha256: '0'.repeat(64) },
-		});
-		try {
-			await harness.processor.process(videoSession(), 'token');
-			expect(harness.storage.upload).toHaveBeenCalledOnce();
-			expect(harness.storage.upload).toHaveBeenCalledWith(expect.objectContaining({
-				checksumSha256: generatedPlaybackChecksum,
-			}));
-		} finally {
-			await fs.rm(harness.root, { recursive: true, force: true });
-		}
-	});
-
-	it('keeps the validated original READY when playback generation fails', async () => {
-		const harness = await processorHarness({
-			inputProbe: probe({ videoCodec: 'vp9', formatNames: ['webm'], fastStart: false }),
-		});
-		harness.operations.reencode.mockRejectedValueOnce(new Error('ffmpeg encoder unavailable'));
-		try {
-			await expect(harness.processor.process(videoSession(), 'token')).resolves.toEqual({
-				strategy: 'reencode',
-				assetId: 20,
-				playbackState: 'FAILED',
-			});
-			expect(harness.repository.commitVideoOriginalReady).toHaveBeenCalledOnce();
-			expect(harness.repository.commitVideoPlaybackFailed).toHaveBeenCalledWith(expect.objectContaining({
-				assetId: 20,
-				originalRepresentationId: 'original',
-				playbackRepresentationId: 'playback',
-				reason: expect.stringContaining('ffmpeg encoder unavailable'),
-			}));
-			expect(harness.repository.commitVideoPlaybackReady).not.toHaveBeenCalled();
-			expect(harness.repository.rejectVideo).not.toHaveBeenCalled();
-			expect(harness.storage.upload).not.toHaveBeenCalled();
 		} finally {
 			await fs.rm(harness.root, { recursive: true, force: true });
 		}
@@ -274,10 +205,7 @@ describe('VIDEO worker failure classification', () => {
 			renewVideoLease: vi.fn(async () => true),
 			preparePlaybackIntent: vi.fn(),
 			markPlaybackUploaded: vi.fn(),
-			commitVideoOriginalReady: vi.fn(),
-			commitVideoPlaybackReady: vi.fn(),
-			commitVideoPlaybackFailed: vi.fn(),
-			requestPlaybackRepair: vi.fn(),
+			commitVideoReady: vi.fn(),
 			rejectVideo: vi.fn(async () => true),
 		};
 	}
@@ -296,22 +224,6 @@ describe('VIDEO worker failure classification', () => {
 		await expect(worker.runPass()).resolves.toMatchObject({ rejected: 1, retried: 0 });
 		expect(repository.rejectVideo).toHaveBeenCalledWith(expect.objectContaining({
 			reason: 'CORRUPT_MEDIA: corrupt stream',
-		}));
-	});
-
-	it('terminalizes an authoritative Garage source 404 without treating it as an outage', async () => {
-		const processor = { process: vi.fn(async () => {
-			throw new WorkerSourceObjectMissingError('Canonical VIDEO source object does not exist');
-		}) };
-		const worker = createVideoProcessingWorker({
-			repository: repository as never,
-			processor: processor as never,
-			ids: { next: () => 'token' },
-			logger: { error: vi.fn(), warn: vi.fn() },
-		});
-		await expect(worker.runPass()).resolves.toMatchObject({ rejected: 1, retried: 0 });
-		expect(repository.rejectVideo).toHaveBeenCalledWith(expect.objectContaining({
-			reason: expect.stringMatching(/^SOURCE_OBJECT_MISSING:/),
 		}));
 	});
 

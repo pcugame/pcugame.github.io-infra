@@ -11,6 +11,7 @@ import { createOrphanRepository } from '../orphan/repository.js';
 import { createOrphanService } from '../orphan/service.js';
 import { createUploadIntentRepository } from '../upload-intent/repository.js';
 import { createUploadIntentService } from '../upload-intent/service.js';
+import { createGameUploadRepository } from '../admin/game-upload/repository.js';
 import type {
 	UploadLifecycleRuntime,
 	UploadLifecycleRuntimeServices,
@@ -126,6 +127,7 @@ export function createUploadLifecycleRuntime(
 		uploadIntents: services.uploadIntents,
 		orphanDeletions: services.orphanDeletions,
 		multipartAborts: services.multipartAborts,
+		gameUploads: services.gameUploads,
 		metrics: services.metrics,
 		wakeDeletionWorker() {
 			if (closing) return;
@@ -222,11 +224,17 @@ export function createProductionUploadLifecycleRuntime(deps: {
 		ids: deps.ids,
 		logger: deps.logger,
 	});
+	const gameUploads = createGameUploadRepository(deps.prisma, {
+		abortBucket: deps.config.S3_BUCKET_PROTECTED,
+		publicBucket: deps.config.S3_BUCKET_PUBLIC,
+	});
+
 	return createUploadLifecycleRuntime({
 		idempotency,
 		uploadIntents,
 		orphanDeletions,
 		multipartAborts,
+		gameUploads,
 		orphans,
 		clock: deps.clock,
 		logger: deps.logger,

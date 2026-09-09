@@ -1,8 +1,10 @@
 import type {
 	AssetKind,
+	AssetPlaybackStatus,
 	ProjectStatus,
 } from '@pcu/contracts';
 import type { PosterCandidate } from '../../../shared/poster-validation.js';
+import type { SavedImageRendition } from '../../../application/upload-ports.js';
 import type { SerializableProject } from './serializer.js';
 
 export interface ExhibitionUploadRecord {
@@ -10,6 +12,36 @@ export interface ExhibitionUploadRecord {
 	year: number;
 	title: string;
 	isUploadEnabled: boolean;
+}
+
+export interface AssetWriteData {
+	/** Physical destination bucket. Older in-process callers may omit this; the
+	 * repository derives it from the public/protected policy during Phase 1. */
+	bucket?: string;
+	storageKey: string;
+	playbackStorageKey?: string | null;
+	originalName: string;
+	mimeType: string;
+	playbackMimeType?: string;
+	sizeBytes: bigint;
+	width?: number;
+	height?: number;
+	renditions?: SavedImageRendition[];
+	playbackSizeBytes?: bigint;
+	playbackStatus?: AssetPlaybackStatus;
+	playbackError?: string;
+	isPublic: boolean;
+	uploadIntentIds?: string[];
+	idempotency?: {
+		operationId: string;
+		ownerToken: string;
+		resultForAsset(assetId: number): Record<string, unknown>;
+	};
+}
+
+export interface ProjectAssetWriteData extends AssetWriteData {
+	projectId: number;
+	kind: AssetKind;
 }
 
 export interface SubmitProjectWriteData {
@@ -26,43 +58,28 @@ export interface SubmitProjectWriteData {
 		sortOrder?: number;
 		userId?: number;
 	}>;
-	manifest: Array<{
-		kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER';
-		slot: string;
-		clientToken: string;
-		required: true;
+	savedFiles: Array<{
+		bucket?: string;
+		kind: AssetKind;
+		storageKey: string;
+		playbackStorageKey?: string | null;
+		originalName: string;
+		mimeType: string;
+		playbackMimeType?: string;
+		sizeBytes: number;
+		width?: number;
+		height?: number;
+		renditions?: SavedImageRendition[];
+		playbackSizeBytes?: number;
+		playbackStatus?: AssetPlaybackStatus;
+		playbackError?: string;
+		uploadIntentIds?: string[];
 	}>;
 	idempotency?: {
 		operationId: string;
 		ownerToken: string;
-		resultForProject(project: {
-			id: number;
-			slug: string;
-			submission: ProjectSubmissionRecord;
-		}): Record<string, unknown>;
+		resultForProject(project: { id: number; slug: string }): Record<string, unknown>;
 	};
-}
-
-export interface ProjectSubmissionRecord {
-	id: string;
-	projectId: number;
-	actorId: number;
-	state: 'PENDING' | 'FINALIZING' | 'PUBLISHED' | 'CANCELLED';
-	project: { id: number; status: ProjectStatus };
-	items: Array<{
-		id: string;
-		kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER';
-		slot: string;
-		clientToken: string;
-		required: boolean;
-		state: 'EXPECTED' | 'UPLOADING' | 'VERIFYING' | 'READY' | 'FAILED' | 'CANCELLED';
-		boundGeneration: number | null;
-		failureReason: string | null;
-		playbackState: 'NONE' | 'READY' | 'FAILED';
-		playbackError: string | null;
-		uploadSession: { id: string; generation: number } | null;
-	}>;
-	publicationJob: { state: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; lastError: string | null } | null;
 }
 
 export interface ProjectListRecord {
@@ -79,6 +96,7 @@ export interface ProjectListRecord {
 	poster: {
 		kind: AssetKind;
 		status: string;
+		storageKey: string | null;
 		representations?: Array<{ role: string; objectKey: string }>;
 	} | null;
 }
@@ -90,21 +108,29 @@ export interface ProjectDetailRecord extends SerializableProject {
 export interface ActiveUploadCleanup {
 	projectId?: number;
 	uploadKind: string;
-	objectKey: string | null;
-	uploadId: string | null;
+	s3Key: string | null;
+	s3UploadId: string | null;
 }
 
 export interface DeletedAssetRecord {
 	id: number;
 	projectId: number | null;
 	kind: AssetKind;
-	representations: Array<{ role: string; bucket: string; objectKey: string }>;
+	storageKey: string | null;
+	playbackStorageKey: string | null;
+	representations?: Array<{ role: string; bucket: string; objectKey: string }>;
 }
 
 export interface DeletionOutboxConfig {
 	publicBucket: string;
 	protectedBucket: string;
 	reason: string;
+}
+
+export interface AssetReplacementOutboxConfig {
+	bucket: string;
+	reason: string;
+	playbackReason: string;
 }
 
 export interface ProjectRepository {
@@ -133,31 +159,37 @@ export interface ProjectRepository {
 	}): Promise<ProjectDetailRecord>;
 	deleteProjectReturningAssets(id: number, outbox: DeletionOutboxConfig): Promise<{
 		assets: DeletedAssetRecord[];
+		webglEntryKey: string;
 		activeUploads: ActiveUploadCleanup[];
 	}>;
 	clearWebglDeployment(projectId: number, outbox: DeletionOutboxConfig): Promise<{
+		oldEntryKey: string;
 		cancelledSession: ActiveUploadCleanup | null;
 	}>;
 	findAssetById(id: number): Promise<PosterCandidate | null>;
+	setProjectVideoOrder(projectId: number, expectedOrder: number[], order: number[]): Promise<{ order: number[] }>;
 	setProjectPoster(projectId: number, assetId: number): Promise<unknown>;
 	bulkDeleteProjectsReturningAssets(ids: number[], outbox: DeletionOutboxConfig): Promise<{
 		result: { count: number };
 		assets: DeletedAssetRecord[];
-		projects: Array<{ id: number; currentWebglDeploymentId: string | null }>;
+		projects: Array<{ id: number; webglEntryKey: string }>;
 		activeUploads: Array<ActiveUploadCleanup & { projectId: number }>;
 	}>;
 
 	findExhibitionById(id: number): Promise<ExhibitionUploadRecord | null>;
 	findProjectByExhibitionAndSlug(exhibitionId: number, slug: string): Promise<unknown | null>;
-	createProjectWithAssets(data: SubmitProjectWriteData): Promise<{
-		id: number;
-		slug: string;
-		submission: ProjectSubmissionRecord;
+	createProjectWithAssets(data: SubmitProjectWriteData): Promise<{ id: number; slug: string }>;
+	createAsset(data: ProjectAssetWriteData): Promise<{ id: number }>;
+	replaceOrCreateReplaceableAsset(
+		projectId: number,
+		kind: AssetKind,
+		data: AssetWriteData,
+		outbox: AssetReplacementOutboxConfig,
+	): Promise<{
+		assetId: number;
+		oldStorageKey: string | null;
+		oldPlaybackStorageKey: string | null;
 	}>;
-	findSubmissionForActor(projectId: number, actor: { id: number; role: string }): Promise<ProjectSubmissionRecord | null>;
-	finalizeSubmission(projectId: number, actor: { id: number; role: string }): Promise<ProjectSubmissionRecord>;
-	cancelSubmission(projectId: number, actor: { id: number; role: string }): Promise<ProjectSubmissionRecord>;
-	auditActiveSubmissions(): Promise<{ draftProjects: number; pendingSubmissions: number; finalizingSubmissions: number; activePublicationJobs: number }>;
 }
 
 export type ProjectCrudRepository = Pick<ProjectRepository,
@@ -169,16 +201,22 @@ export type ProjectCrudRepository = Pick<ProjectRepository,
 	| 'findProjectsForUser'
 	| 'isMemberOfProject'
 	| 'setProjectPoster'
+	| 'setProjectVideoOrder'
 	| 'updateProject'
 >;
 
 export type SubmitProjectRepository = Pick<ProjectRepository,
-	'auditActiveSubmissions' | 'cancelSubmission' | 'createProjectWithAssets' | 'finalizeSubmission' | 'findExhibitionById' | 'findProjectByExhibitionAndSlug' | 'findSubmissionForActor'
+	'createProjectWithAssets' | 'findExhibitionById' | 'findProjectByExhibitionAndSlug'
+>;
+
+export type ProjectAssetRepository = Pick<ProjectRepository,
+	'createAsset' | 'findExhibitionById' | 'replaceOrCreateReplaceableAsset'
 >;
 
 /** Complete application-facing project port assembled once by BackendContext. */
 export type ProjectApplicationRepository = ProjectCrudRepository
 	& SubmitProjectRepository
+	& ProjectAssetRepository
 	& {
 		bulkUpdateStatus(ids: number[], status: ProjectStatus): Promise<{ count: number }>;
 	};

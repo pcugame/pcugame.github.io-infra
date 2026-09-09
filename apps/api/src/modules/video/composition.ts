@@ -8,15 +8,12 @@ import { createVideoProcessor } from './processor.js';
 import { createVideoWorkerRepository } from './repository.js';
 import type { VideoWorkerStorage } from './ports.js';
 import { createVideoProcessingWorker } from './worker.js';
-import { WorkerSourceObjectMissingError } from '../upload-lifecycle/worker-errors.js';
 
 function createVideoWorkerStorage(storage: ObjectStorage): VideoWorkerStorage {
 	return {
 		async stream(bucket, key, signal) {
 			const result = await storage.stream(bucket, key, undefined, { signal });
-			if (!result || 'kind' in result) {
-				throw new WorkerSourceObjectMissingError('Canonical VIDEO source object does not exist');
-			}
+			if (!result || 'kind' in result) throw new Error('Garage VIDEO source is unavailable');
 			return {
 				body: result.body,
 				size: result.size,
@@ -28,7 +25,6 @@ function createVideoWorkerStorage(storage: ObjectStorage): VideoWorkerStorage {
 			return result ? {
 				size: result.size,
 				...(result.etag ? { etag: result.etag } : {}),
-				...(result.checksumSha256 ? { checksumSha256: result.checksumSha256 } : {}),
 			} : null;
 		},
 		upload(input) {
@@ -38,7 +34,7 @@ function createVideoWorkerStorage(storage: ObjectStorage): VideoWorkerStorage {
 				input.body,
 				input.contentType,
 				input.contentLength,
-				{ checksumSha256: input.checksumSha256 },
+				{},
 				{ signal: input.signal },
 			);
 		},

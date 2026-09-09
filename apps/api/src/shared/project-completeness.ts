@@ -21,7 +21,7 @@ import { isPosterUrlSafe } from './poster-validation.js';
 export function effectiveIsIncomplete(
 	dbIsIncomplete: boolean,
 	assets: { kind: AssetKind }[],
-	poster: { kind: AssetKind; status: string; hasReadyOriginal: boolean } | null,
+	poster: { kind: AssetKind; status: string; storageKey: string } | null,
 ): boolean {
 	if (!dbIsIncomplete) return false;
 

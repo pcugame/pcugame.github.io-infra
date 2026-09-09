@@ -256,15 +256,6 @@ services:
       - /tmp:rw,noexec,nosuid,size=512m
     command: ["node", "dist/image-worker.js"]
 
-  project-publication-worker:
-    image: pcu-integration-api:local
-    restart: unless-stopped
-    depends_on:
-      db-init:
-        condition: service_completed_successfully
-    environment: *api-env
-    command: ["node", "dist/project-publication-worker.js"]
-
   web:
     image: node:22-bookworm-slim
     restart: unless-stopped
@@ -278,7 +269,7 @@ services:
       VITE_DEV_AUTH_ENABLED: "true"
       VITE_ALLOWED_HOSTS: web
     ports:
-      - "5173:5173"
+      - "${INTEGRATION_WEB_PORT:-5173}:5173"
     volumes:
       - .:/app
       - integration_node_modules:/app/node_modules

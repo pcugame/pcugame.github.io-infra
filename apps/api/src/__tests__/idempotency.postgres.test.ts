@@ -16,7 +16,6 @@ describe.runIf(runPostgresIntegration)('idempotency operations with PostgreSQL',
 	let userId: number;
 	let exhibitionId: number;
 	let assetProjectId: number;
-	const publicBucket = 'pcu-public';
 	const now = new Date('2026-08-11T00:00:00.000Z');
 
 	function service() {
@@ -32,11 +31,6 @@ describe.runIf(runPostgresIntegration)('idempotency operations with PostgreSQL',
 		if (!databaseUrl) throw new Error('DATABASE_URL is required');
 		prisma = createPrismaClientForDatabase(databaseUrl);
 		await prisma.$connect();
-		await prisma.storageBucket.upsert({
-			where: { bucket: publicBucket },
-			update: { visibility: 'PUBLIC' },
-			create: { bucket: publicBucket, visibility: 'PUBLIC' },
-		});
 		const user = await prisma.user.create({
 			data: {
 				googleSub: `idempotency-${testId}`,
@@ -56,7 +50,6 @@ describe.runIf(runPostgresIntegration)('idempotency operations with PostgreSQL',
 				creatorId: userId,
 				slug: `idempotency-assets-${testId}`,
 				title: 'Idempotency asset fixture',
-				status: 'PUBLISHED',
 			},
 		});
 		assetProjectId = project.id;
@@ -148,19 +141,15 @@ describe.runIf(runPostgresIntegration)('idempotency operations with PostgreSQL',
 
 		const winner = acquired[0]!;
 		const result = await prisma.$transaction(async (tx) => {
-			const imagePrefix = `public/images/${testId}/idempotency`;
 			const asset = await tx.asset.create({
 				data: {
 					projectId: assetProjectId,
 					kind: 'IMAGE',
+					storageKey: `integration/idempotency/${testId}.png`,
 					originalName: 'image.png',
-					representations: {
-						create: [
-							{ role: 'ORIGINAL', storageBucket: { connect: { bucket: publicBucket } }, objectKey: `${imagePrefix}/original.png`, mimeType: 'image/png', sizeBytes: 8n, state: 'READY' },
-							{ role: 'CARD_480', storageBucket: { connect: { bucket: publicBucket } }, objectKey: `${imagePrefix}/card-480.webp`, mimeType: 'image/webp', sizeBytes: 6n, state: 'READY' },
-							{ role: 'DISPLAY_960', storageBucket: { connect: { bucket: publicBucket } }, objectKey: `${imagePrefix}/display-960.webp`, mimeType: 'image/webp', sizeBytes: 7n, state: 'READY' },
-						],
-					},
+					mimeType: 'image/png',
+					sizeBytes: 8n,
+					isPublic: true,
 				},
 			});
 			const stored = { assetId: asset.id, url: `/assets/${asset.id}` };
@@ -177,12 +166,7 @@ describe.runIf(runPostgresIntegration)('idempotency operations with PostgreSQL',
 			result,
 		});
 		await expect(prisma.asset.count({
-			where: {
-				projectId: assetProjectId,
-				representations: {
-					some: { bucket: publicBucket, objectKey: `public/images/${testId}/idempotency/original.png` },
-				},
-			},
+			where: { projectId: assetProjectId, storageKey: `integration/idempotency/${testId}.png` },
 		})).resolves.toBe(1);
 		await expect(service().claim({ ...input, requestHash: 'other-file-sha256' }))
 			.rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT', statusCode: 409 });

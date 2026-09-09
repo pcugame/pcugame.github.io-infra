@@ -67,6 +67,7 @@ const fileSystem: FileSystem = {
 
 const storage: ObjectStorage = {
 	upload: async () => {},
+	presign: async () => 'https://storage.test/object',
 	delete: async () => {},
 	head: async () => null,
 	readRange: async () => Buffer.alloc(0),
@@ -118,66 +119,9 @@ function schedulerHarness() {
 }
 
 describe('production BackendContext resource ownership', () => {
-	it('owns and destroys upload and protected-download signing clients independently', async () => {
-		const events: string[] = [];
-		const internal = fakeS3('internal', events);
-		const uploadSigning = fakeS3('upload-signing', events);
-		const protectedSigning = fakeS3('protected-signing', events);
-		const context = await createProductionBackendContext(testConfig, {
-			persistence: createScriptedBackendPersistence(),
-			routes: emptyRoutes,
-			resources: {
-				uploadLifecycle: ownedTestUploadLifecycleResource(),
-				logger: { value: testLogger, ownership: 'borrowed' },
-				settings: { value: settingsHarness('', []).store, ownership: 'borrowed' },
-				s3: { value: internal, ownership: 'borrowed' },
-				storage: { value: storage, ownership: 'borrowed' },
-				uploadSigningS3: {
-					value: uploadSigning,
-					ownership: 'owned',
-					close: () => uploadSigning.destroy(),
-				},
-				protectedDownloadSigningS3: {
-					value: protectedSigning,
-					ownership: 'owned',
-					close: () => protectedSigning.destroy(),
-				},
-			},
-		});
-
-		expect(context.resourceOwnership).toContainEqual({ name: 'uploadSigningS3', ownership: 'owned' });
-		expect(context.resourceOwnership).toContainEqual({ name: 'protectedDownloadSigningS3', ownership: 'owned' });
-		await context.close();
-		await context.close();
-		expect(protectedSigning.destroy).toHaveBeenCalledOnce();
-		expect(uploadSigning.destroy).toHaveBeenCalledOnce();
-		expect(internal.destroy).not.toHaveBeenCalled();
-		expect(events).toEqual(['protected-signing:s3', 'upload-signing:s3']);
-	});
-
-	it('runs direct upload recovery once at maintenance startup instead of waiting for the first interval', async () => {
-		const harness = schedulerHarness();
-		const recoverStaleUploads = vi.fn(async () => {});
-		const schedule = createMaintenanceSchedule(
-			harness.scheduler,
-			{ now: () => new Date(0) },
-			{
-				recoverStaleUploads,
-				purgeExpiredSessions: vi.fn(async () => 0),
-				reapOrphans: vi.fn(async () => {}),
-			},
-			testLogger,
-		);
-
-		schedule.start();
-		await vi.waitFor(() => expect(recoverStaleUploads).toHaveBeenCalledOnce());
-		expect(harness.tasks).toHaveLength(3);
-		await schedule.close();
-	});
-
-	it('does not revive the removed inline-upload directory scavenger at startup', async () => {
+	it('rejects an unsafe upload directory before startup recovery can enumerate or delete', async () => {
 		const ensurePrivateDirectory = vi.fn(async () => {
-			throw new Error('legacy inline upload directory must not be touched');
+			throw new Error('final upload directory is a symlink');
 		});
 		const listDirectoryEntries = vi.fn(async () => []);
 		const remove = vi.fn(async () => {});
@@ -199,8 +143,8 @@ describe('production BackendContext resource ownership', () => {
 			},
 		});
 
-		await expect(context.start()).resolves.toBeUndefined();
-		expect(ensurePrivateDirectory).not.toHaveBeenCalled();
+		await expect(context.start()).rejects.toThrow('final upload directory is a symlink');
+		expect(ensurePrivateDirectory).toHaveBeenCalledWith('/tmp/pcugame-upload');
 		expect(listDirectoryEntries).not.toHaveBeenCalled();
 		expect(remove).not.toHaveBeenCalled();
 	});
