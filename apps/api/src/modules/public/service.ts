@@ -1,3 +1,4 @@
+import { compareProjectVideos } from '../../shared/project-video-order.js';
 import type {
 	AssetKind,
 	Platform,
@@ -48,6 +49,9 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	members: { id: number; name: string; studentId: string }[];
 	assets: {
 		id: number;
+		videoSortOrder?: number | null;
+		createdAt?: Date;
+		originalName?: string;
 		kind: AssetKind;
 		representations?: PublicImageRepresentationRecord[];
 	}[];
@@ -240,7 +244,9 @@ export async function getProjectDetail(
 		)));
 	const gameAsset = gameAssets.length > 0 ? gameAssets[gameAssets.length - 1] : undefined;
 
-	const videos = project.assets.flatMap((videoAsset) => {
+	const videos = project.assets.filter((asset) => asset.kind === 'VIDEO'
+		&& asset.representations?.some((rep) => rep.role === 'ORIGINAL' && rep.state === 'READY'))
+		.sort(compareProjectVideos).flatMap((videoAsset, index) => {
 		if (videoAsset.kind !== 'VIDEO') return [];
 		const original = videoAsset.representations?.find((representation) => representation.role === 'ORIGINAL');
 		const playback = videoAsset.representations?.find((representation) => representation.role === 'PLAYBACK');
@@ -249,6 +255,9 @@ export async function getProjectDetail(
 			? 'READY' as const
 			: playback?.state === 'FAILED' ? 'FAILED' as const : 'PENDING' as const;
 		return [{
+			assetId: videoAsset.id,
+			sortOrder: videoAsset.videoSortOrder ?? null,
+			role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,
 			...(playbackStatus === 'READY'
 				? { url: protectedAssetUrl(deps, videoAsset.id, 'playback') }
 				: {}),
@@ -258,7 +267,7 @@ export async function getProjectDetail(
 			...(playback?.error ? { playbackError: playback.error } : {}),
 		}];
 	});
-	const video = videos.find((candidate) => candidate.playbackStatus === 'READY') ?? videos[0] ?? null;
+	const video = videos[0] ?? null;
 	const poster = isPublicPoster(project.poster, deps.publicBucket ?? 'pcu-public') ? project.poster : null;
 	const serializedPoster = poster
 		? await serializePublicImage(poster, imageOptions(deps))
@@ -292,6 +301,11 @@ export async function getProjectDetail(
 		isIncomplete: isIncomplete || !validKinds.has('GAME'),
 		video,
 		videos,
+		attachments: project.assets.flatMap((asset) => {
+			if (asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT') return [];
+			const original = asset.representations?.find((rep) => rep.role === 'ORIGINAL' && rep.state === 'READY');
+			return original ? [{ assetId: asset.id, kind: asset.kind, originalName: asset.originalName ?? `material-${asset.id}`, mimeType: original.mimeType ?? 'application/octet-stream', sizeBytes: Number(original.sizeBytes ?? 0), downloadUrl: protectedAssetUrl(deps, asset.id, 'original') }] : [];
+		}),
 		members: project.members.map((m) => ({
 			id: m.id,
 			name: m.name,

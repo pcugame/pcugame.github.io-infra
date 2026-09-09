@@ -174,6 +174,9 @@ export const PublicExhibitionProjectsResponseSchema = z.object({
 }).strict();
 
 export const ProjectVideoSchema = z.object({
+	assetId: PositiveIntegerSchema,
+	sortOrder: z.number().int().min(0).max(4).nullable(),
+	role: z.enum(['MAIN', 'ADDITIONAL']),
 	url: UrlSchema.optional(),
 	mimeType: z.string().min(1),
 	originalDownloadUrl: UrlSchema.optional(),
@@ -200,6 +203,21 @@ export const PublicProjectMemberSchema = z.object({
 	studentId: z.string(),
 }).strict();
 
+export const ProjectAttachmentSchema = z.object({
+	assetId: PositiveIntegerSchema,
+	kind: z.enum(['DOCUMENT', 'ATTACHMENT']),
+	originalName: z.string().min(1),
+	mimeType: z.string().min(1),
+	sizeBytes: NonNegativeIntegerSchema,
+	downloadUrl: UrlSchema,
+}).strict();
+
+/** Optional capability fields preserve web-first deployment compatibility. */
+export const PublicUploadConfigSchema = z.object({
+	materialMaxCount: PositiveIntegerSchema.optional(),
+	materialMaxBytes: PositiveIntegerSchema.optional(),
+}).strict();
+
 export const PublicProjectDetailResponseSchema = z.object({
 	id: PositiveIntegerSchema,
 	year: YearSchema,
@@ -214,6 +232,7 @@ export const PublicProjectDetailResponseSchema = z.object({
 	videos: z.array(ProjectVideoSchema),
 	members: z.array(PublicProjectMemberSchema),
 	images: z.array(PublicProjectImageSchema),
+	attachments: z.array(ProjectAttachmentSchema).default([]),
 	poster: ResponsiveImageSchema.optional(),
 	gameDownloadUrl: UrlSchema.optional(),
 	webglUrl: UrlSchema.optional(),
@@ -308,6 +327,7 @@ export const AdminProjectDetailSchema = z.object({
 		z.object({
 			id: PositiveIntegerSchema,
 			kind: z.enum(['GAME', 'VIDEO']),
+			videoSortOrder: z.number().int().min(0).max(4).nullable().optional(),
 			url: UrlSchema,
 			originalDownloadUrl: UrlSchema.optional(),
 			playbackUrl: UrlSchema.optional(),
@@ -316,7 +336,16 @@ export const AdminProjectDetailSchema = z.object({
 			originalName: z.string(),
 			size: NonNegativeIntegerSchema,
 		}).strict(),
+		z.object({
+			id: PositiveIntegerSchema,
+			kind: z.enum(['DOCUMENT', 'ATTACHMENT']),
+			originalName: z.string(),
+			mimeType: z.string().min(1),
+			size: NonNegativeIntegerSchema,
+			downloadUrl: UrlSchema,
+		}).strict(),
 	])),
+	attachments: z.array(ProjectAttachmentSchema).default([]),
 }).strict();
 
 export const SubmitProjectResponseSchema = z.object({
@@ -327,7 +356,7 @@ export const SubmitProjectResponseSchema = z.object({
 	submissionId: z.string().uuid(),
 	items: z.array(z.object({
 		id: z.string().uuid(),
-		kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER']),
+		kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER', 'DOCUMENT', 'ATTACHMENT']),
 		slot: z.string(),
 		clientToken: z.string(),
 		required: z.literal(true),

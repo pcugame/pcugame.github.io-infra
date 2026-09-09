@@ -33,13 +33,14 @@ export type {
 } from './auth.js';
 
 export type {
-	ProjectAttachment,
 	ProjectVideo,
 	PublicExhibition,
 	PublicExhibitionProjectsResponse,
 	PublicProjectCard,
 	PublicProjectDetailResponse,
 	PublicProjectImage,
+	ProjectAttachment,
+	PublicUploadConfig,
 	PublicProjectMember,
 	PublicYearItem,
 	PublicYearListResponse,
@@ -63,6 +64,7 @@ export type {
 	BulkUpdateProjectStatusRequest,
 	PaginationInfo,
 	SetProjectPosterRequest,
+	SetProjectVideoOrderRequest,
 	SortOrder,
 	SubmitProjectPayload,
 	SubmitProjectResponse,

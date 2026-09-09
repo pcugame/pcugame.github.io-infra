@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import type { SubmitProjectPayloadInput } from '../../contracts/schemas';
 import { getApiErrorMessage } from '../../lib/api';
 import type { ProjectSubmissionMode } from '../../lib/api/project-submit';
-import { getClientUploadLimits } from '../../lib/upload-limits';
+import { getClientUploadLimits, materialUploadLimitsFromConfig } from '../../lib/upload-limits';
+import { publicApi } from '../../lib/api';
 import GameUploadWidget from '../../components/GameUploadWidget';
 import DirectVideoUploadWidget from '../../components/DirectVideoUploadWidget';
 import DirectImageUploadWidget from '../../components/DirectImageUploadWidget';
@@ -24,7 +26,12 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	const { user } = useMe();
 	const isAdminMode = mode === 'admin';
 	const limits = getClientUploadLimits(isAdminMode ? user?.role ?? 'USER' : 'USER');
-	const files = useSubmissionFiles({ limits });
+	const { data: uploadConfig } = useQuery({
+		queryKey: ['public-upload-config'],
+		queryFn: publicApi.getUploadConfig,
+	});
+	const materialLimits = materialUploadLimitsFromConfig(uploadConfig);
+	const files = useSubmissionFiles({ limits, materialLimits });
 	const submission = useProjectSubmissionForm({ mode, files });
 	const {
 		copy,
@@ -46,16 +53,16 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	} = submission;
 	const { control, getValues, handleSubmit, register } = form;
 	const [previewSnapshot, setPreviewSnapshot] = useState<SubmitProjectPayloadInput | null>(null);
-	const itemsFor = (kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER') => submissionItems
+	const itemsFor = (kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT') => submissionItems
 		.filter((item) => item.kind === kind)
 		.sort((left, right) => left.slot.localeCompare(right.slot, undefined, { numeric: true }));
-	const uploadItemsFor = (kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER') => itemsFor(kind)
+	const uploadItemsFor = (kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT') => itemsFor(kind)
 		.filter((item) => item.state !== 'READY');
 	const bindingFor = (kind: 'GAME' | 'WEBGL') => {
 		const item = uploadItemsFor(kind)[0];
 		return item ? { id: item.id, clientToken: item.clientToken } : undefined;
 	};
-	const bindingsFor = (kind: 'VIDEO' | 'IMAGE' | 'POSTER') => uploadItemsFor(kind)
+	const bindingsFor = (kind: 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT') => uploadItemsFor(kind)
 		.map((item) => ({ id: item.id, clientToken: item.clientToken }));
 	const uploadFinished = () => {
 		if (createdProjectId) void finalizeIfReady(createdProjectId);
@@ -129,6 +136,31 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 							onComplete={uploadFinished}
 						/>
 					)}
+					{uploadItemsFor('DOCUMENT').length > 0 && materialLimits && (
+						<DirectVideoUploadWidget
+							key={uploadItemsFor('DOCUMENT').map((item) => item.id).join(':')}
+							projectId={createdProjectId!}
+							initialFiles={files.documentFiles}
+							autoStart={files.documentFiles.length > 0}
+							submissionItems={bindingsFor('DOCUMENT')}
+							kind="DOCUMENT"
+							label="문서"
+							accept="text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.xls,.xlsx,.ppt,.pptx"
+							onComplete={uploadFinished}
+						/>
+					)}
+					{uploadItemsFor('ATTACHMENT').length > 0 && materialLimits && (
+						<DirectVideoUploadWidget
+							key={uploadItemsFor('ATTACHMENT').map((item) => item.id).join(':')}
+							projectId={createdProjectId!}
+							initialFiles={files.attachmentFiles}
+							autoStart={files.attachmentFiles.length > 0}
+							submissionItems={bindingsFor('ATTACHMENT')}
+							kind="ATTACHMENT"
+							label="첨부자료"
+							onComplete={uploadFinished}
+						/>
+					)}
 				</div>
 			)}
 			{submissionError != null && (
@@ -163,6 +195,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 						gameUploadHint={copy.gameUploadHint}
 						webglUploadHint={copy.webglUploadHint}
 						limits={limits}
+						materialLimits={materialLimits}
 					/>
 
 					{submitMutation.error && (

@@ -36,6 +36,7 @@ import {
 	PublicYearListResponseSchema,
 	PublicYearProjectsResponseSchema,
 	ProjectAssetUploadResponseSchema,
+	PublicUploadConfigSchema,
 	ProjectVideoSchema,
 	ResponsiveImageSchema,
 	SiteSettingsDataSchema,
@@ -140,7 +141,7 @@ describe('response runtime schemas', () => {
 			},
 		}).items[0]?.status).toBe('PUBLISHED');
 
-		expect(PublicProjectDetailResponseSchema.parse({
+		const legacyProject = PublicProjectDetailResponseSchema.parse({
 			id: 1,
 			year: 2026,
 			slug: 'legacy-link',
@@ -153,7 +154,23 @@ describe('response runtime schemas', () => {
 			members: [],
 			images: [],
 			status: 'PUBLISHED',
-		}).githubUrl).toBe('github.com/legacy/project');
+		});
+		expect(legacyProject.githubUrl).toBe('github.com/legacy/project');
+		expect(legacyProject.attachments).toEqual([]);
+
+		expect(PublicProjectDetailResponseSchema.parse({
+			...legacyProject,
+			attachments: [{
+				assetId: 12,
+				kind: 'DOCUMENT',
+				originalName: 'guide.pdf',
+				mimeType: 'application/pdf',
+				sizeBytes: 1024,
+				downloadUrl: 'https://api.example.test/api/assets/12/download',
+			}],
+		}).attachments).toHaveLength(1);
+		expect(PublicUploadConfigSchema.parse({ materialMaxCount: 5, materialMaxBytes: 52_428_800 }))
+			.toMatchObject({ materialMaxCount: 5 });
 
 		expect(ResponsiveImageSchema.parse({
 			original: { url: 'https://assets.example.test/public/images/asset-2/original/g1.webp' },
@@ -300,11 +317,13 @@ describe('response runtime schemas', () => {
 
 	it('represents original-only video access without inventing a playback URL', () => {
 		expect(ProjectVideoSchema.parse({
+			assetId: 42, sortOrder: 0, role: 'MAIN',
 			mimeType: 'video/quicktime',
 			originalDownloadUrl: 'https://api.example.test/api/assets/42/download?variant=original',
 			playbackStatus: 'FAILED',
 			playbackError: 'encoder failed',
 		})).toEqual({
+			assetId: 42, sortOrder: 0, role: 'MAIN',
 			mimeType: 'video/quicktime',
 			originalDownloadUrl: 'https://api.example.test/api/assets/42/download?variant=original',
 			playbackStatus: 'FAILED',
@@ -312,6 +331,7 @@ describe('response runtime schemas', () => {
 		});
 		expect(ProjectVideoSchema.safeParse({ mimeType: 'video/mp4' }).success).toBe(false);
 		expect(ProjectVideoSchema.safeParse({
+			assetId: 42, sortOrder: 0, role: 'MAIN',
 			mimeType: 'video/mp4',
 			originalDownloadUrl: 'https://api.example.test/api/assets/42/download?variant=original',
 			playbackStatus: 'READY',

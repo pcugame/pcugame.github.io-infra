@@ -13,6 +13,8 @@ import type {
 	VideoWorkerRepository,
 } from './ports.js';
 import { videoPlaybackObjectKey } from './playback-identity.js';
+import { countReservedProjectVideos, getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from '../assets/video-order.js';
+import { conflict } from '../../shared/errors.js';
 
 const SERIALIZABLE = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable } as const;
 const PLAYBACK_PURPOSE = 'direct-video-playback-generation';
@@ -179,6 +181,7 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 
 		commitVideoOriginalReady(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
+				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.session.projectId} FOR UPDATE`);
 				const session = await tx.assetUploadSession.findUnique({ where: { id: input.session.id } });
 				if (!session || session.projectId === null || session.exhibitionId !== null) {
 					throw new Error('VIDEO upload session must be project-owned');
@@ -234,10 +237,30 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 					};
 				}
 
+				// Submission slots are durable order reservations: workers may finish
+				// in any order, so do not compact their temporarily sparse sequence.
+				const videos = session.submissionItemId
+					? await getProjectVideos(tx, session.projectId)
+					: await normalizeProjectVideoOrder(tx, session.projectId);
+				const reserved = await countReservedProjectVideos(tx, session.projectId, session.id);
+				if (videos.length + reserved + 1 > MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
+				let videoSortOrder = videos.length;
+				if (session.submissionItemId) {
+					const item = await tx.projectSubmissionItem.findUnique({
+						where: { id: session.submissionItemId },
+						include: { projectSubmission: { select: { projectId: true, state: true } } },
+					});
+					if (!item || item.kind !== 'VIDEO' || !/^video:[0-4]$/.test(item.slot)
+						|| item.projectSubmission.projectId !== session.projectId || item.projectSubmission.state !== 'PENDING') {
+						throw conflict('VIDEO upload does not match a pending submission slot');
+					}
+					videoSortOrder = Number(item.slot.slice('video:'.length));
+				}
 				const asset = await tx.asset.create({
 					data: {
 						projectId: session.projectId,
 						kind: 'VIDEO',
+						videoSortOrder,
 						status: 'READY',
 						originalName: session.originalName,
 						representations: {

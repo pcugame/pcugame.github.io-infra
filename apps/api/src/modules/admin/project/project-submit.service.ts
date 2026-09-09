@@ -111,11 +111,22 @@ function assertManifestIsUnambiguous(manifest: Array<{ kind: string; slot: strin
 	const slots = new Set<string>();
 	const tokens = new Set<string>();
 	for (const item of manifest) {
+		if ((item.kind === 'VIDEO') !== item.slot.startsWith('video:')) {
+			throw badRequest('VIDEO submission slots must have kind VIDEO');
+		}
 		if (slots.has(item.slot) || tokens.has(item.clientToken)) {
 			throw badRequest('Project submission manifest slots and client tokens must be unique');
 		}
 		slots.add(item.slot);
 		tokens.add(item.clientToken);
+	}
+	if (manifest.filter((item) => item.kind === 'DOCUMENT' || item.kind === 'ATTACHMENT').length > 5) throw badRequest('A project supports at most 5 materials');
+	for (const item of manifest) {
+		if ((item.kind === 'DOCUMENT') !== item.slot.startsWith('document:') || (item.kind === 'ATTACHMENT') !== item.slot.startsWith('attachment:')) throw badRequest('Material kind and slot must match');
+	}
+	const videos = manifest.filter((item) => item.kind === 'VIDEO');
+	if (videos.length > 5 || videos.some((_item, index) => !slots.has(`video:${index}`))) {
+		throw badRequest('VIDEO submission slots must be consecutive video:0 through video:4, with at most 5 videos');
 	}
 }
 

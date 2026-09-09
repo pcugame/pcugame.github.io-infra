@@ -8,6 +8,7 @@ export interface PublicImageRepresentationRecord {
 	objectKey: string;
 	state: string;
 	mimeType?: string;
+	sizeBytes?: bigint | number;
 	error?: string | null;
 	width?: number | null;
 	height?: number | null;

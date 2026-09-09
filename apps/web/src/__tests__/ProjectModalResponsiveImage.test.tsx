@@ -116,4 +116,45 @@ describe('ProjectModal responsive images', () => {
 		expect(lightbox.getAttribute('src')).toBe(screenshot.original.url);
 		expect(lightbox.getAttribute('srcset')).toBeNull();
 	});
+
+	it('labels and navigates main and additional videos without retaining a prior playback error', async () => {
+		mocks.getProjectDetail.mockResolvedValue({
+			...project,
+			video: {
+				assetId: 21,
+				sortOrder: 0,
+				role: 'MAIN',
+				url: 'https://videos.test/main.mp4',
+				mimeType: 'video/mp4',
+			},
+			videos: [
+				{
+					assetId: 21,
+					sortOrder: 0,
+					role: 'MAIN',
+					url: 'https://videos.test/main.mp4',
+					mimeType: 'video/mp4',
+				},
+				{
+					assetId: 22,
+					sortOrder: 1,
+					role: 'ADDITIONAL',
+					url: 'https://videos.test/additional.mp4',
+					mimeType: 'video/mp4',
+				},
+			],
+		});
+		const { container } = renderModal();
+
+		await screen.findByRole('button', { name: '동영상' });
+		fireEvent.click(screen.getByRole('button', { name: '동영상' }));
+		expect(screen.getByText('메인 영상')).toBeTruthy();
+		expect(screen.getByRole('button', { name: '추가 영상 1' })).toBeTruthy();
+
+		fireEvent.error(container.querySelector('video')!);
+		expect(screen.getByText('영상을 불러올 수 없습니다.')).toBeTruthy();
+		fireEvent.click(screen.getByRole('button', { name: '추가 영상 1' }));
+		expect(screen.getByText('추가 영상 1')).toBeTruthy();
+		expect(container.querySelector('video')).not.toBeNull();
+	});
 });

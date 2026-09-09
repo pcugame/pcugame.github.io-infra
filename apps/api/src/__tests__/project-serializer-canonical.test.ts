@@ -56,6 +56,12 @@ describe('Phase 2 admin project serialization', () => {
 					rep('ORIGINAL', 'public', 'public/images/12/original/g1.webp', 'image/webp'),
 					rep('DISPLAY_960', 'public', 'public/images/12/display-960/g1.webp', 'image/webp'),
 				] },
+				{ id: 15, kind: 'DOCUMENT', originalName: 'guide.pdf', representations: [
+					rep('ORIGINAL', 'protected', 'protected/assets/15/original/guide.pdf', 'application/pdf', 1024n),
+				] },
+				{ id: 16, kind: 'ATTACHMENT', originalName: 'source.zip', representations: [
+					rep('ORIGINAL', 'protected', 'protected/assets/16/original/source.zip', 'application/zip', 2048n),
+				] },
 			],
 		};
 		const detail = createProjectSerializer('https://api.example.test', {
@@ -93,6 +99,10 @@ describe('Phase 2 admin project serialization', () => {
 		expect(failedVideo).not.toHaveProperty('url');
 		expect(detail.poster?.original.url).toBe('https://assets.example.test/public/images/13/original/g1.webp');
 		expect(detail.webglUrl).toBe(`https://assets.example.test/public/webgl/7/${deploymentId}/index.html`);
+		expect(detail.attachments).toEqual([
+			{ assetId: 15, kind: 'DOCUMENT', originalName: 'guide.pdf', mimeType: 'application/pdf', sizeBytes: 1024, downloadUrl: 'https://api.example.test/api/assets/15/download?variant=original' },
+			{ assetId: 16, kind: 'ATTACHMENT', originalName: 'source.zip', mimeType: 'application/zip', sizeBytes: 2048, downloadUrl: 'https://api.example.test/api/assets/16/download?variant=original' },
+		]);
 		expect(JSON.stringify(detail)).not.toMatch(/storageKey|webglEntryKey|\/api\/public\/(images|assets|webgl)/);
 	});
 
@@ -109,6 +119,7 @@ describe('Phase 2 admin project serialization', () => {
 		} as SerializableProject;
 		const detail = serialize(malformed);
 		expect(detail.poster).toBeUndefined();
+		expect(detail.attachments).toEqual([]);
 		expect(JSON.stringify(detail)).not.toContain('/api/public/images/');
 	});
 });

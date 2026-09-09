@@ -113,9 +113,12 @@ export default function AdminProjectEditPage() {
 					isSettingPoster={mutations.setPosterMutation.isPending}
 					isRemovingAsset={mutations.removeAssetMutation.isPending}
 					isRemovingWebgl={mutations.removeWebglMutation.isPending}
+					isReorderingVideos={mutations.reorderVideosMutation.isPending}
+					videoOrderError={mutations.reorderVideosMutation.error}
 					onSetPoster={mutations.setPosterMutation.mutate}
 					onRemoveAsset={mutations.removeAssetMutation.mutate}
 					onRemoveWebgl={() => mutations.removeWebglMutation.mutate()}
+					onReorderVideos={(body) => mutations.reorderVideosMutation.mutate(body)}
 				/>
 			</div>
 		</div>

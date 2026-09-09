@@ -42,6 +42,7 @@ export function createScriptedBackendPersistence(
 			deleteProjectReturningAssets: async () => unscripted('project.deleteProjectReturningAssets'),
 			clearWebglDeployment: async () => unscripted('project.clearWebglDeployment'),
 			findAssetById: async () => null,
+			setProjectVideoOrder: async () => ({ order: [] }),
 			setProjectPoster: async () => unscripted('project.setProjectPoster'),
 			bulkDeleteProjectsReturningAssets: async () => unscripted('project.bulkDeleteProjectsReturningAssets'),
 			findExhibitionById: async () => null,

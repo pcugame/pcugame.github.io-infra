@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, ResponsiveImage } from '../components/common';
-import { ProjectActions, ProjectPublicMeta, ProjectVideo } from '../components/project';
+import { ProjectActions, ProjectAttachments, ProjectPublicMeta, ProjectVideo } from '../components/project';
+import { getVideoLabel } from '../lib/video-label';
 
 export default function ProjectDetailPage() {
   const { year: yearParam, slug, projectId } = useParams<{
@@ -59,14 +60,14 @@ export default function ProjectDetailPage() {
       <ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
       {/* 에셋 유실 안내 */}
-      {project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
+      {project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (project.attachments?.length ?? 0) === 0 && (
         <p className="incomplete-notice incomplete-notice--missing">
           이 프로젝트의 파일이 유실되었습니다. 포스터, 실행 파일, 스크린샷 등이 등록되지 않은 상태입니다.
         </p>
       )}
 
       {/* 불완전 안내 (파일은 일부 있지만 불완전 플래그) */}
-      {project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
+      {project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0 || (project.attachments?.length ?? 0) > 0) && (
         <p className="incomplete-notice">
           이 프로젝트는 일부 자료가 누락되었을 수 있습니다.
         </p>
@@ -115,9 +116,9 @@ export default function ProjectDetailPage() {
       {projectVideos.length > 0 && (
         <section className="project-detail__video">
           <h3>영상</h3>
-          {projectVideos.map((video, i) => (
-            <div key={`${video.url ?? video.originalDownloadUrl ?? 'video'}-${i}`} className="project-detail__video-item">
-              <h4>동영상{i + 1}</h4>
+          {projectVideos.map((video) => (
+            <div key={video.assetId} className="project-detail__video-item">
+              <h4>{getVideoLabel(video)}</h4>
               <ProjectVideo
                 video={video}
                 poster={project.poster}
@@ -157,6 +158,8 @@ export default function ProjectDetailPage() {
           />
         </section>
       )}
+
+      <ProjectAttachments attachments={project.attachments} className="project-detail__attachments" />
     </div>
   );
 }

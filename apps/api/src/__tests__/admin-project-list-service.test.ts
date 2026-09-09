@@ -15,6 +15,7 @@ const projectService = createProjectService({
 		deleteProjectReturningAssets: vi.fn(),
 		clearWebglDeployment: vi.fn(),
 		findAssetById: vi.fn(),
+		setProjectVideoOrder: vi.fn(),
 		setProjectPoster: vi.fn(),
 		bulkDeleteProjectsReturningAssets: vi.fn(),
 	},

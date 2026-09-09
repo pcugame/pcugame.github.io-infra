@@ -211,12 +211,14 @@ describe('public exhibition years', () => {
 		expect(result.video).toEqual(result.videos[0]);
 		expect(result.videos).toEqual([
 			{
+				assetId: 1, sortOrder: null, role: 'MAIN',
 				url: 'https://api.example.com/api/assets/1/download?variant=playback',
 				mimeType: 'video/mp4',
 				originalDownloadUrl: 'https://api.example.com/api/assets/1/download?variant=original',
 				playbackStatus: 'READY',
 			},
 			{
+				assetId: 2, sortOrder: null, role: 'ADDITIONAL',
 				url: 'https://api.example.com/api/assets/2/download?variant=playback',
 				mimeType: 'video/mp4',
 				originalDownloadUrl: 'https://api.example.com/api/assets/2/download?variant=original',

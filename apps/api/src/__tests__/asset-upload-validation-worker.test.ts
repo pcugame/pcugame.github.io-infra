@@ -4,7 +4,7 @@ import type { AssetUploadRepository } from '../modules/asset-upload/ports.js';
 import { WorkerSourceObjectMissingError } from '../modules/upload-lifecycle/worker-errors.js';
 
 describe('GAME direct validation worker dispatch', () => {
-	it('claims only GAME VERIFYING rows, leaving VIDEO and WEBGL leases for their workers', async () => {
+	it('claims GAME and material VERIFYING rows, leaving media leases for their workers', async () => {
 		const repository = {
 			claimVerifying: vi.fn(async () => []), renewValidation: vi.fn(),
 		} as unknown as AssetUploadRepository;
@@ -32,7 +32,7 @@ describe('GAME direct validation worker dispatch', () => {
 			resultAssetId: null, resultRepresentationId: null, expiresAt: new Date(Date.now() + 60_000),
 		};
 		const repository = {
-			claimVerifying: vi.fn(async () => [session]), renewValidation: vi.fn(async () => true),
+			claimVerifying: vi.fn(async (kind) => kind === 'GAME' ? [session] : []), renewValidation: vi.fn(async () => true),
 			markRejected: vi.fn(async () => true),
 		} as unknown as AssetUploadRepository;
 		const worker = createGameUploadValidationWorker({

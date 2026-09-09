@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { AdminProjectDetail, ProjectStatus, UpdateMemberRequest } from '@pcu/contracts';
+import type { AdminProjectDetail, ProjectStatus, SetProjectVideoOrderRequest, UpdateMemberRequest } from '@pcu/contracts';
 
 import type { AddMemberInput, UpdateProjectFormInput } from '../../../contracts/schemas';
 import {
@@ -86,6 +86,13 @@ export function useAdminProjectMutations({
 		onSuccess: invalidateProject,
 	});
 
+	const reorderVideosMutation = useMutation({
+		mutationFn: (body: SetProjectVideoOrderRequest) =>
+			adminProjectApi.reorderVideos(projectId, body),
+		onSuccess: invalidateProject,
+		onError: invalidateProject,
+	});
+
 	const toggleStatusMutation = useMutation({
 		mutationFn: (status: Exclude<ProjectStatus, 'DRAFT'>) => adminProjectApi.update(projectId, { status }),
 		onSuccess: () => {
@@ -115,6 +122,7 @@ export function useAdminProjectMutations({
 		setPosterMutation,
 		removeAssetMutation,
 		removeWebglMutation,
+		reorderVideosMutation,
 		toggleStatusMutation,
 		swapMemberOrder,
 	};

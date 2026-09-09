@@ -58,6 +58,15 @@ describe('buildSubmitFormData', () => {
 		expect(fd.getAll('videoFile')).toHaveLength(2);
 	});
 
+	it('appends documents[] and attachments[] using the Phase 1 multipart field names', () => {
+		const fd = buildSubmitFormData(fakePayload(), {
+			documents: [fakeFile('guide.pdf')],
+			attachments: [fakeFile('source.txt'), fakeFile('notes.bin')],
+		});
+		expect(fd.getAll('documents[]')).toHaveLength(1);
+		expect(fd.getAll('attachments[]')).toHaveLength(2);
+	});
+
 	it('contains only payload when no files provided', () => {
 		const fd = buildSubmitFormData(fakePayload(), {});
 		const entries = [...fd.entries()];

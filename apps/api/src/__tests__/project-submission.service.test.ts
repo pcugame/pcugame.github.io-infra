@@ -58,6 +58,37 @@ const payload = {
 };
 
 describe('durable project submission service', () => {
+	it.each([
+		['video:1'], ['video:0', 'video:2'], ['video:00'],
+		['video:0', 'video:1', 'video:2', 'video:3', 'video:4', 'video:5'],
+	])('rejects nonconsecutive or excessive video slots %j', async (...slots) => {
+		const repo = repository();
+		const service = createSubmitProjectService({ webPublicUrl: 'https://example.test', repository: repo });
+		await expect(service.submitProject({ actor, payload: {
+			...payload,
+			manifest: slots.map((slot, index) => ({ kind: 'VIDEO', slot, clientToken: String(index).repeat(32), required: true })),
+		} }, { audience: 'admin' })).rejects.toMatchObject({ statusCode: 400 });
+		expect(repo.createProjectWithAssets).not.toHaveBeenCalled();
+	});
+
+	it('accepts five consecutive video slots independent of manifest array order', async () => {
+		const repo = repository();
+		const service = createSubmitProjectService({ webPublicUrl: 'https://example.test', repository: repo });
+		await service.submitProject({ actor, payload: { ...payload,
+			manifest: [4, 2, 0, 3, 1].map((index) => ({ kind: 'VIDEO', slot: `video:${index}`, clientToken: String(index).repeat(32), required: true })),
+		} }, { audience: 'admin' });
+		expect(repo.createProjectWithAssets).toHaveBeenCalledOnce();
+	});
+
+	it.each([{ kind: 'VIDEO', slot: 'image:0' }, { kind: 'IMAGE', slot: 'video:0' }])('rejects a mismatched video kind/slot $kind $slot', async (item) => {
+		const repo = repository();
+		const service = createSubmitProjectService({ webPublicUrl: 'https://example.test', repository: repo });
+		await expect(service.submitProject({ actor, payload: { ...payload,
+			manifest: [{ ...item, clientToken: 'x'.repeat(32), required: true }],
+		} }, { audience: 'admin' })).rejects.toMatchObject({ statusCode: 400 });
+		expect(repo.createProjectWithAssets).not.toHaveBeenCalled();
+	});
+
 	it('creates DRAFT metadata and its expected upload manifest atomically', async () => {
 		const repo = repository();
 		const service = createSubmitProjectService({ webPublicUrl: 'https://example.test', repository: repo });

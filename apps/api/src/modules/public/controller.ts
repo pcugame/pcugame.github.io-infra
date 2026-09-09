@@ -9,6 +9,9 @@ export interface PublicControllerDependencies {
 /** Create the public read-only route plugin without capturing process state. */
 export function createPublicController(deps: PublicControllerDependencies): FastifyPluginAsync {
 	return async function publicController(app): Promise<void> {
+		app.get('/upload-config', async (_request, reply) => {
+			sendOk(reply, { materialMaxCount: 5, materialMaxBytes: 50 * 1024 * 1024 });
+		});
 		/** GET /api/public/years — list years with published project counts */
 		app.get('/years', async (_request, reply) => {
 			const items = await deps.service.listYears();

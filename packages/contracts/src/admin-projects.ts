@@ -1,6 +1,7 @@
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
 import type { ProjectVideo } from './public.js';
 import type { ResponsiveImage } from './responsive-image.js';
+import type { ProjectAttachment } from './public.js';
 
 export type UpdateProjectRequest = {
 	title?: string;
@@ -96,6 +97,7 @@ export type AdminProjectDetail = {
 	} | {
 		id: number;
 		kind: Extract<AssetKind, 'GAME' | 'VIDEO'>;
+		videoSortOrder?: number | null;
 		url: string;
 		originalDownloadUrl?: string;
 		playbackUrl?: string;
@@ -103,7 +105,16 @@ export type AdminProjectDetail = {
 		playbackError?: string;
 		originalName: string;
 		size: number;
+	} | {
+		id: number;
+		kind: Extract<AssetKind, 'DOCUMENT' | 'ATTACHMENT'>;
+		originalName: string;
+		mimeType: string;
+		size: number;
+		downloadUrl: string;
 	})>;
+	/** Omitted by older API releases; clients treat it as an empty list. */
+	attachments?: ProjectAttachment[];
 };
 
 export type SubmitProjectPayload = {
@@ -116,7 +127,7 @@ export type SubmitProjectPayload = {
 };
 
 export type ProjectSubmissionManifestItem = {
-	kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER';
+	kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT';
 	slot: string;
 	clientToken: string;
 	required: true;
@@ -176,3 +187,5 @@ export type SwapProjectMembersRequest = {
 	memberIdA: number;
 	memberIdB: number;
 };
+
+export type SetProjectVideoOrderRequest = { expectedOrder: number[]; order: number[] };

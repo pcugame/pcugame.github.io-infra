@@ -33,7 +33,7 @@ export function resolveDownloadRepresentation(
 	variant: AssetDownloadVariant,
 ): ResolvedDownloadRepresentation {
 	if (asset.status !== 'READY') throw notFound('Asset is not ready for download');
-	if (asset.kind !== 'GAME' && asset.kind !== 'VIDEO') {
+	if (asset.kind !== 'GAME' && asset.kind !== 'VIDEO' && asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT') {
 		throw notFound('Protected download is not available for this asset kind');
 	}
 	if (variant === 'playback' && asset.kind !== 'VIDEO') {
