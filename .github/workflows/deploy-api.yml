@@ -38,6 +38,7 @@ jobs:
             [[ "$IMAGE" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
             [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
             registry_auth_file="$(mktemp)"
+            printf '{}\n' > "$registry_auth_file"
             trap 'rm -f "$registry_auth_file"' EXIT
             printf '%s' "$GHCR_TOKEN" | podman login --authfile "$registry_auth_file" ghcr.io -u "$GHCR_USERNAME" --password-stdin
             podman pull --authfile "$registry_auth_file" -q "$IMAGE"
