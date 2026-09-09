@@ -1,4 +1,9 @@
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
+import {
+	deriveImageRenditionStorageKey,
+	IMAGE_RENDITION_PROFILES,
+} from '../../shared/responsive-image.js';
+import { parseWebglEntryKey, parseWebglSourceKey } from '../webgl/paths.js';
 
 export type ObjectTargetKind = 'EXACT' | 'PREFIX';
 
@@ -154,39 +159,71 @@ export async function collectObjectReferences(
 	client: Pick<
 		PrismaClient,
 		| 'asset'
+		| 'exhibition'
 		| 'project'
-		| 'assetUploadSession'
+		| 'gameUploadSession'
 		| 'uploadIntent'
-	>,
+	> & Partial<Pick<PrismaClient, '$queryRaw'>>,
 	buckets: ObjectReferenceBuckets,
 	logger: ObjectReferenceLogger,
 ): Promise<ObjectReferenceInventory> {
-	const [assets, projects, activeSessions, intents] = await Promise.all([
+	const [assets, exhibitions, projects, completedSessions, activeSessions, intents] = await Promise.all([
 		client.asset.findMany({
 			where: { status: { not: 'DELETED' } },
 			select: {
 				id: true,
+				storageKey: true,
+				playbackStorageKey: true,
+				isPublic: true,
+				card480Height: true,
+				display960Height: true,
 				representations: {
 					where: { state: { not: 'DELETED' } },
 					select: { id: true, role: true, bucket: true, objectKey: true },
 				},
 			},
 		}),
-		client.project.findMany({
-			where: { currentWebglDeploymentId: { not: null } },
+		client.exhibition.findMany({
+			where: { posterStorageKey: { not: null } },
 			select: {
 				id: true,
+				posterStorageKey: true,
+				posterCard480Height: true,
+				posterDisplay960Height: true,
+			},
+		}),
+		client.project.findMany({
+			where: {
+				OR: [
+					{ currentWebglDeploymentId: { not: null } },
+					{ webglEntryKey: { not: '' } },
+				],
+			},
+			select: {
+				id: true,
+				webglEntryKey: true,
+				currentWebglDeploymentId: true,
 				currentWebglDeployment: {
 					select: {
-						id: true, publicBucket: true, publicPrefix: true, entryObjectKey: true,
-						sourceRepresentation: { select: { role: true, bucket: true, objectKey: true } },
+						id: true,
+						state: true,
+						publicBucket: true,
+						publicPrefix: true,
+						entryObjectKey: true,
+						sourceRepresentation: {
+							select: { id: true, state: true, bucket: true, objectKey: true },
+						},
 					},
 				},
 			},
 		}),
-		client.assetUploadSession.findMany({
-			where: { state: { in: ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'] } },
-			select: { id: true, bucket: true, objectKey: true },
+		client.gameUploadSession.findMany({
+			where: { status: 'COMPLETED', storageKey: { not: null } },
+			select: { id: true, storageKey: true },
+		}),
+		client.gameUploadSession.findMany({
+			where: { status: { in: ['PENDING', 'COMPLETING'] }, s3Key: { not: null } },
+			select: { id: true, s3Key: true, uploadKind: true, projectId: true },
 		}),
 		client.uploadIntent.findMany({
 			where: { state: { in: ['PREPARED', 'UPLOADED'] } },
@@ -196,6 +233,17 @@ export async function collectObjectReferences(
 
 	const references: ObjectReference[] = [];
 	const unsafeBuckets = new Set<string>();
+	// Phase 1 retains historical public URLs through observation. The contract
+	// explicitly schedules the proven relocation sources and drops this ledger.
+	// Intents protect active materialization; the ledger bridges their COMMITTED
+	// transition so a later prefix cleanup cannot delete an old public source.
+	if (client.$queryRaw) {
+		const relocations = await client.$queryRaw<Array<{ id: string; bucket: string; key: string }>>`
+			SELECT id, source_bucket AS bucket, source_object_key AS key FROM canonical_object_relocations
+			WHERE state IN ('PREPARED', 'MATERIALIZED', 'COMMITTED')`;
+		for (const relocation of relocations) references.push({ bucket: relocation.bucket, targetKind: 'EXACT', key: relocation.key,
+			source: `canonical-relocation:${relocation.id}:retained-source` });
+	}
 	for (const asset of assets) {
 		for (const representation of asset.representations ?? []) {
 			references.push({
@@ -205,40 +253,179 @@ export async function collectObjectReferences(
 				source: `asset:${asset.id}:representation:${representation.role}:${representation.id}`,
 			});
 		}
+		const bucket = asset.isPublic ? buckets.publicBucket : buckets.protectedBucket;
+		if (asset.storageKey) {
+			references.push({
+				bucket,
+				targetKind: 'EXACT',
+				key: asset.storageKey,
+				source: `asset:${asset.id}:legacy-original`,
+			});
+		}
+		if (asset.playbackStorageKey) {
+			references.push({
+				bucket,
+				targetKind: 'EXACT',
+				key: asset.playbackStorageKey,
+				source: `asset:${asset.id}:playback`,
+			});
+		}
+		for (const definition of IMAGE_RENDITION_PROFILES) {
+			if (!asset.storageKey) continue;
+			if (asset[definition.heightField] == null) continue;
+			let renditionStorageKey: string;
+			try {
+				renditionStorageKey = deriveImageRenditionStorageKey(
+					asset.storageKey,
+					definition.profile,
+				);
+			} catch (error) {
+				unsafeBuckets.add(buckets.publicBucket);
+				logger.error(
+					{
+						error,
+						assetId: asset.id,
+						storageKey: asset.storageKey,
+						profile: definition.profile,
+					},
+					'Malformed asset rendition readiness encountered; public bucket deletion is disabled',
+				);
+				continue;
+			}
+			references.push({
+				bucket: buckets.publicBucket,
+				targetKind: 'EXACT',
+				key: renditionStorageKey,
+				source: `asset:${asset.id}:rendition:${definition.profile}`,
+			});
+		}
+	}
+	for (const exhibition of exhibitions) {
+		if (!exhibition.posterStorageKey) continue;
+		references.push({
+			bucket: buckets.publicBucket,
+			targetKind: 'EXACT',
+			key: exhibition.posterStorageKey,
+			source: `exhibition:${exhibition.id}:poster`,
+		});
+		for (const definition of IMAGE_RENDITION_PROFILES) {
+			if (exhibition[definition.posterHeightField] == null) continue;
+			let renditionStorageKey: string;
+			try {
+				renditionStorageKey = deriveImageRenditionStorageKey(
+					exhibition.posterStorageKey,
+					definition.profile,
+				);
+			} catch (error) {
+				unsafeBuckets.add(buckets.publicBucket);
+				logger.error(
+					{
+						error,
+						exhibitionId: exhibition.id,
+						storageKey: exhibition.posterStorageKey,
+						profile: definition.profile,
+					},
+					'Malformed exhibition rendition readiness encountered; public bucket deletion is disabled',
+				);
+				continue;
+			}
+			references.push({
+				bucket: buckets.publicBucket,
+				targetKind: 'EXACT',
+				key: renditionStorageKey,
+				source: `exhibition:${exhibition.id}:rendition:${definition.profile}`,
+			});
+		}
 	}
 
 	for (const project of projects) {
-		const deployment = project.currentWebglDeployment;
-		if (!deployment || deployment.sourceRepresentation.role !== 'WEBGL_SOURCE'
-			|| !deployment.publicPrefix.endsWith('/')
-			|| !deployment.entryObjectKey.startsWith(deployment.publicPrefix)) {
+		if (project.currentWebglDeploymentId != null) {
+			const deployment = project.currentWebglDeployment;
+			const source = deployment?.sourceRepresentation;
+			if (!deployment || deployment.id !== project.currentWebglDeploymentId
+				|| deployment.state !== 'READY' || deployment.publicBucket !== buckets.publicBucket
+				|| !deployment.publicPrefix.endsWith('/')
+				|| !deployment.entryObjectKey.startsWith(deployment.publicPrefix)
+				|| !source || source.state !== 'READY' || !source.bucket.trim()
+				|| !source.objectKey.trim()) {
+				unsafeBuckets.add(buckets.publicBucket);
+				unsafeBuckets.add(buckets.protectedBucket);
+				logger.error(
+					{ projectId: project.id, currentWebglDeploymentId: project.currentWebglDeploymentId },
+					'Malformed canonical WebGL pointer encountered; WebGL bucket deletion is disabled',
+				);
+				continue;
+			}
+			references.push({
+				bucket: source.bucket,
+				targetKind: 'EXACT',
+				key: source.objectKey,
+				source: `project:${project.id}:webgl-deployment-source:${source.id}`,
+			});
+			references.push({
+				bucket: deployment.publicBucket,
+				targetKind: 'PREFIX',
+				key: deployment.publicPrefix,
+				source: `project:${project.id}:webgl-deployment:${deployment.id}`,
+			});
+			continue;
+		}
+		const parsed = parseWebglEntryKey(project.id, project.webglEntryKey);
+		if (!parsed) {
 			unsafeBuckets.add(buckets.publicBucket);
 			unsafeBuckets.add(buckets.protectedBucket);
 			logger.error(
-				{ projectId: project.id },
-				'Malformed canonical WebGL deployment encountered; WebGL bucket deletion is disabled',
+				{ projectId: project.id, webglEntryKey: project.webglEntryKey },
+				'Malformed WebGL pointer encountered; WebGL bucket deletion is disabled',
 			);
 			continue;
 		}
 		references.push({
-			bucket: deployment.sourceRepresentation.bucket,
+			bucket: buckets.protectedBucket,
 			targetKind: 'EXACT',
-			key: deployment.sourceRepresentation.objectKey,
-			source: `project:${project.id}:webgl:${deployment.id}:source`,
+			key: parsed.sourceKey,
+			source: `project:${project.id}:webgl-source`,
 		});
 		references.push({
-			bucket: deployment.publicBucket,
+			bucket: buckets.publicBucket,
 			targetKind: 'PREFIX',
-			key: deployment.publicPrefix,
-			source: `project:${project.id}:webgl:${deployment.id}:site`,
+			key: parsed.sitePrefix,
+			source: `project:${project.id}:webgl-site`,
+		});
+	}
+	for (const session of completedSessions) {
+		if (!session.storageKey) continue;
+		references.push({
+			bucket: buckets.protectedBucket,
+			targetKind: 'EXACT',
+			key: session.storageKey,
+			source: `upload-session:${session.id}:completed`,
 		});
 	}
 	for (const session of activeSessions) {
+		if (!session.s3Key) continue;
 		references.push({
-			bucket: session.bucket,
+			bucket: buckets.protectedBucket,
 			targetKind: 'EXACT',
-			key: session.objectKey,
+			key: session.s3Key,
 			source: `upload-session:${session.id}:active`,
+		});
+		if (session.uploadKind !== 'WEBGL') continue;
+		const parsed = parseWebglSourceKey(session.projectId, session.s3Key);
+		if (!parsed) {
+			unsafeBuckets.add(buckets.protectedBucket);
+			unsafeBuckets.add(buckets.publicBucket);
+			logger.error(
+				{ sessionId: session.id, projectId: session.projectId, storageKey: session.s3Key },
+				'Malformed active WebGL upload encountered; WebGL bucket deletion is disabled',
+			);
+			continue;
+		}
+		references.push({
+			bucket: buckets.publicBucket,
+			targetKind: 'PREFIX',
+			key: parsed.sitePrefix,
+			source: `upload-session:${session.id}:webgl-site`,
 		});
 	}
 	for (const intent of intents) {

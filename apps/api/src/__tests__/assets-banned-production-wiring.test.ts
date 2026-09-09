@@ -60,6 +60,7 @@ function storageHarness() {
 	};
 	const storage: ObjectStorage = {
 		upload: vi.fn(),
+		presign: calls.presign,
 		delete: calls.delete,
 		head: vi.fn(async () => null),
 		readRange: vi.fn(async () => Buffer.alloc(0)),
@@ -119,7 +120,9 @@ function portHarness(initialBans: string[] = []) {
 	return {
 		calls,
 		assetsRepository: {
-			findAssetByIdForDownload: calls.assetFindFirst,
+			findAssetByIdForDownload: vi.fn(async () => null),
+			findAssetsByLegacyStorageKey: calls.assetFindFirst,
+			recordMigrationObservations: vi.fn(async () => undefined),
 			upsertBannedIp: calls.bannedUpsert,
 			findAssetByIdWithProject: vi.fn(async () => null),
 			claimAssetForDeletion: vi.fn(async () => null),
@@ -142,12 +145,10 @@ function protectedAsset() {
 		projectId: 7,
 		kind: 'GAME',
 		status: 'READY',
-		representations: [{
-			role: 'ORIGINAL',
-			bucket: 'pcu-protected',
-			objectKey: 'assets/1/original/g1.zip',
-			state: 'READY',
-		}],
+		storageKey: 'game.zip',
+		playbackStorageKey: null,
+		playbackStatus: 'PENDING',
+		representations: [],
 		project: {
 			creatorId: 1,
 			title: 'Context Game',
@@ -241,13 +242,13 @@ describe('assets/banned-IP production vertical slice', () => {
 
 	it('fails closed before warmup and keeps a failed warmup fatal and idempotent', async () => {
 		const harness = graphHarness();
-		harness.calls.assetFindFirst.mockResolvedValue(protectedAsset());
+		harness.calls.assetFindFirst.mockResolvedValue([protectedAsset()]);
 		const app = await routeApp(harness.graph.assetsController, '/api');
 		apps.push(app);
 
 		const beforeWarmup = await app.inject({
 			method: 'GET',
-			url: '/api/assets/1/download?variant=original',
+			url: '/api/assets/protected/game.zip',
 			remoteAddress: '203.0.113.10',
 		});
 		expect(beforeWarmup.statusCode).toBe(503);
@@ -265,14 +266,14 @@ describe('assets/banned-IP production vertical slice', () => {
 
 	it('blocks recovered DB bans, preserves protected redirect, and treats ordinary principal excess as temporary', async () => {
 		const recovered = graphHarness(['203.0.113.10'], 1);
-		recovered.calls.assetFindFirst.mockResolvedValue(protectedAsset());
+		recovered.calls.assetFindFirst.mockResolvedValue([protectedAsset()]);
 		await recovered.graph.warmup.start();
 		const app = await routeApp(recovered.graph.assetsController, '/api');
 		apps.push(app);
 
 		const banned = await app.inject({
 			method: 'GET',
-			url: '/api/assets/1/download?variant=original',
+			url: '/api/assets/protected/game.zip',
 			remoteAddress: '203.0.113.10',
 		});
 		expect(banned.statusCode).toBe(403);
@@ -280,21 +281,21 @@ describe('assets/banned-IP production vertical slice', () => {
 
 		const first = await app.inject({
 			method: 'GET',
-			url: '/api/assets/1/download?variant=original',
+			url: '/api/assets/protected/game.zip',
 			remoteAddress: '203.0.113.20',
 			headers: { range: 'bytes=0-7' },
 		});
 		expect(first.statusCode).toBe(302);
-		expect(first.headers.location).toBe('https://storage.test/pcu-protected/assets/1/original/g1.zip');
+		expect(first.headers.location).toBe('https://storage.test/pcu-protected/game.zip');
 		expect(recovered.calls.presign).toHaveBeenCalledWith(
 			'pcu-protected',
-			'assets/1/original/g1.zip',
+			'game.zip',
 			expect.objectContaining({ responseContentDisposition: expect.any(String) }),
 		);
 
 		const exceeded = await app.inject({
 			method: 'GET',
-			url: '/api/assets/1/download?variant=original',
+			url: '/api/assets/protected/game.zip',
 			remoteAddress: '203.0.113.20',
 		});
 		expect(exceeded.statusCode).toBe(429);
@@ -315,6 +316,7 @@ describe('assets/banned-IP production vertical slice', () => {
 				}),
 				factories: {
 					scheduler: () => scheduler.scheduler,
+					protectedDownloadPresigner: () => ({ presign: storage.calls.presign }),
 					routes: (_config, graph): BackendRoutes => ({
 						auth: emptyRoute,
 						devAuth: emptyRoute,
@@ -372,6 +374,7 @@ describe('assets/banned-IP production vertical slice', () => {
 				}),
 				factories: {
 					scheduler: () => scheduler.scheduler,
+					protectedDownloadPresigner: () => ({ presign: storage.calls.presign }),
 					routes: (_config, graph): BackendRoutes => ({
 						auth: emptyRoute,
 						devAuth: emptyRoute,

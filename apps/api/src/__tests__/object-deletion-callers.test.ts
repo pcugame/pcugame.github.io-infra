@@ -57,17 +57,19 @@ describe('durable object deletion callers', () => {
 		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
 	});
 
-	it('coalesces canonical representation deletion targets into one request-path wake', async () => {
+	it('coalesces original and playback deletion targets into one request-path wake', async () => {
 		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
 
 		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
 			.resolves.toEqual({ projectId: 7 });
 		expect(repository.completeAssetDeletion).toHaveBeenCalledWith(
 			expect.objectContaining({
-				representations: [],
+				storageKey: 'games/current.zip',
+				playbackStorageKey: 'games/current-playback.mp4',
 			}),
 			expect.objectContaining({
 				reason: 'asset-delete',
+				playbackReason: 'asset-delete-playback',
 			}),
 		);
 		expect(wakeDeletionWorker).toHaveBeenCalledOnce();

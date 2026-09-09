@@ -121,7 +121,7 @@ export interface CanonicalObjectMaterializer {
 	}>;
 }
 
-export type LegacyAssetKind = 'THUMBNAIL' | 'IMAGE' | 'POSTER' | 'GAME' | 'VIDEO' | 'WEBGL';
+export type LegacyAssetKind = 'THUMBNAIL' | 'IMAGE' | 'POSTER' | 'GAME' | 'VIDEO' | 'WEBGL' | 'DOCUMENT' | 'ATTACHMENT';
 
 export interface LegacyAssetRow {
 	id: number;

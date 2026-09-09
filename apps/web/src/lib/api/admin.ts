@@ -9,10 +9,10 @@ import type {
   AdminProjectListResponse,
   AdminProjectDetail,
   SubmitProjectResponse,
-  ProjectSubmissionStatusResponse,
   BulkUpdateProjectStatusRequest,
   BulkDeleteProjectsRequest,
   SetProjectPosterRequest,
+  SetProjectVideoOrderRequest,
   AddMemberRequest,
   UpdateMemberRequest,
   SwapProjectMembersRequest,
@@ -43,6 +43,13 @@ export const adminExhibitionApi = {
 
   delete(id: number) {
     return api.delete<void>(`/api/admin/exhibitions/${id}`);
+  },
+
+  uploadPoster(id: number, formData: FormData) {
+    return uploadFormData<AdminExhibitionItem>(`/api/admin/exhibitions/${id}/poster`, formData, {
+      title: '전시회 포스터 업로드',
+      processingMessage: '포스터 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
+    });
   },
 
   deletePoster(id: number) {
@@ -86,6 +93,10 @@ export const adminProjectApi = {
     return api.delete<void>(`/api/admin/projects/${id}/webgl`);
   },
 
+  reorderVideos(id: number, body: SetProjectVideoOrderRequest) {
+    return api.put<void>(`/api/admin/projects/${id}/videos/order`, body);
+  },
+
   /** 작품 + 파일 일괄 등록 (multipart/form-data) */
   submit(input: { formData: FormData; idempotencyKey: string }) {
     return uploadFormData<SubmitProjectResponse>(
@@ -99,16 +110,22 @@ export const adminProjectApi = {
     );
   },
 
-  getSubmission(projectId: number) {
-    return api.get<ProjectSubmissionStatusResponse>(`/api/admin/projects/${projectId}/submission`);
-  },
-
-  finalizeSubmission(projectId: number) {
-    return api.post<ProjectSubmissionStatusResponse>(`/api/admin/projects/${projectId}/submission/finalize`);
-  },
-
-  cancelSubmission(projectId: number) {
-    return api.delete<ProjectSubmissionStatusResponse>(`/api/admin/projects/${projectId}/submission`);
+  /** 기존 프로젝트에 자산 추가 */
+  addAsset(input: {
+    projectId: number;
+    formData: FormData;
+    idempotencyKey: string;
+    title?: string;
+  }) {
+    return uploadFormData<{ assetId: number }>(
+      `/api/admin/projects/${input.projectId}/assets`,
+      input.formData,
+      {
+        title: input.title ?? '자산 업로드',
+        processingMessage: '파일 전송 및 변환이 끝날 때까지 이 창을 닫거나 새로고침하지 마세요.',
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+      },
+    );
   },
 
   /** 포스터 지정 */

@@ -8,9 +8,11 @@ import {
 	CreateExhibitionBaseSchema,
 	DevAuthLoginErrorRequestSchema,
 	DevAuthLoginRequestSchema,
+	GameUploadCreateSessionSchema,
 	GoogleAuthRequestSchema,
 	ProjectStatusSchema,
 	SetProjectPosterSchema,
+	SetProjectVideoOrderSchema,
 	SubmitProjectPayloadBaseSchema,
 	SwapProjectMembersSchema,
 	UpdateExhibitionBaseSchema,
@@ -118,6 +120,12 @@ export const DevAuthLoginBody = DevAuthLoginRequestSchema;
 
 export const DevAuthLoginErrorBody = DevAuthLoginErrorRequestSchema;
 
+// ── Game upload session ──────────────────────────────────────
+
+export const GameUploadCreateSessionBody = GameUploadCreateSessionSchema.extend({
+	totalBytes: CanonicalPositiveIntegerInput,
+});
+
 export const AssetDownloadQuery = z.object({
 	variant: z.enum(['original', 'playback']).optional(),
 }).strict();
@@ -145,3 +153,13 @@ export function parseIntParam(value: string, name = 'ID'): number {
 	}
 	return n;
 }
+
+export function parseNonNegativeIntParam(value: string, name: string): number {
+	const n = Number(value);
+	if (!/^(0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(n)) {
+		throw new AppError(400, `Invalid ${name}`, 'VALIDATION_ERROR');
+	}
+	return n;
+}
+
+export const SetProjectVideoOrderBody = SetProjectVideoOrderSchema;

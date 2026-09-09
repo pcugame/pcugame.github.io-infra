@@ -49,13 +49,13 @@ describe('ResponsiveImage', () => {
 	it('keeps immutable generation URLs exact across rerenders and changes them on replacement', () => {
 		const generationA: ResponsiveImageData = {
 			original: {
-				url: 'https://assets.test/public/images/42/original/generation-a.webp',
+				url: 'https://api.test/api/public/images/projects%2Fgeneration-a.webp',
 				width: 1200,
 				height: 675,
 			},
 			renditions: [{
 				profile: 'CARD_480',
-				url: 'https://assets.test/public/images/42/card-480/generation-a.webp',
+				url: 'https://api.test/api/public/images/projects%2Fgeneration-a.webp%2F__pcu_image_rendition__%2Fv1%2Fcard-480.webp',
 				width: 480,
 				height: 270,
 			}],

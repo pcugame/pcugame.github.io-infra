@@ -1,22 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
 import { collectObjectReferences } from '../modules/orphan/reference-resolver.js';
+import { deriveImageRenditionStorageKey } from '../shared/responsive-image.js';
 
 function delegate(rows: unknown[] = []) {
 	return { findMany: vi.fn(async () => rows) };
 }
 
 describe('image rendition reference inventory', () => {
-	it('takes exact live public image references from READY canonical representations', async () => {
+	it('derives exact live references only from owner readiness markers', async () => {
 		const inventory = await collectObjectReferences({
 			asset: delegate([{
 				id: 4,
-				representations: [
-					{ id: 'original', role: 'ORIGINAL', bucket: 'public', objectKey: 'images/4/original/g1.webp' },
-					{ id: 'card', role: 'CARD_480', bucket: 'public', objectKey: 'images/4/card-480/g1.webp' },
-				],
+				storageKey: 'current.webp',
+				playbackStorageKey: null,
+				isPublic: true,
+				card480Height: 240,
+				display960Height: null,
+			}]),
+			exhibition: delegate([{
+				id: 7,
+				posterStorageKey: 'poster.webp',
+				posterCard480Height: null,
+				posterDisplay960Height: 480,
 			}]),
 			project: delegate(),
-			assetUploadSession: delegate(),
+			gameUploadSession: delegate(),
 			uploadIntent: delegate(),
 		} as never, {
 			publicBucket: 'public',
@@ -27,24 +35,27 @@ describe('image rendition reference inventory', () => {
 		expect(inventory.references).toContainEqual({
 			bucket: 'public',
 			targetKind: 'EXACT',
-			key: 'images/4/card-480/g1.webp',
-			source: 'asset:4:representation:CARD_480:card',
+			key: deriveImageRenditionStorageKey('current.webp', 'CARD_480'),
+			source: 'asset:4:rendition:CARD_480',
 		});
 		expect(inventory.references).toContainEqual({
 			bucket: 'public',
 			targetKind: 'EXACT',
-			key: 'images/4/original/g1.webp',
-			source: 'asset:4:representation:ORIGINAL:original',
+			key: deriveImageRenditionStorageKey('poster.webp', 'DISPLAY_960'),
+			source: 'exhibition:7:rendition:DISPLAY_960',
 		});
-		expect(inventory.references).toHaveLength(2);
+		expect(inventory.references).not.toContainEqual(expect.objectContaining({
+			key: deriveImageRenditionStorageKey('current.webp', 'DISPLAY_960'),
+		}));
 	});
 
 	it('keeps an in-flight deterministic PUT protected through its upload intent', async () => {
-		const key = 'images/4/card-480/pending.webp';
+		const key = deriveImageRenditionStorageKey('source.webp', 'CARD_480');
 		const inventory = await collectObjectReferences({
 			asset: delegate(),
+			exhibition: delegate(),
 			project: delegate(),
-			assetUploadSession: delegate(),
+			gameUploadSession: delegate(),
 			uploadIntent: delegate([{
 				id: 'intent-1',
 				bucket: 'public',
@@ -63,38 +74,54 @@ describe('image rendition reference inventory', () => {
 		});
 	});
 
-	it('uses an opaque representation object key without legacy key derivation', async () => {
+	it('fails the public bucket closed when readiness points to an underivable key', async () => {
 		const logger = { error: vi.fn() };
 		const malformedSource = 'x'.repeat(1_024);
 		const inventory = await collectObjectReferences({
 			asset: delegate([{
 				id: 9,
-				representations: [{
-					id: 'opaque', role: 'ORIGINAL', bucket: 'public', objectKey: malformedSource,
-				}],
+				storageKey: malformedSource,
+				playbackStorageKey: null,
+				isPublic: true,
+				card480Height: 240,
+				display960Height: null,
 			}]),
+			exhibition: delegate(),
 			project: delegate(),
-			assetUploadSession: delegate(),
+			gameUploadSession: delegate(),
 			uploadIntent: delegate(),
 		} as never, {
 			publicBucket: 'public',
 			protectedBucket: 'protected',
 		}, logger);
 
-		expect(inventory.unsafeBuckets).toEqual(new Set());
+		expect(inventory.unsafeBuckets).toEqual(new Set(['public']));
 		expect(inventory.references).toContainEqual({
 			bucket: 'public',
 			targetKind: 'EXACT',
 			key: malformedSource,
-			source: 'asset:9:representation:ORIGINAL:opaque',
+			source: 'asset:9:legacy-original',
 		});
-		expect(logger.error).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				assetId: 9,
+				storageKey: malformedSource,
+				profile: 'CARD_480',
+				error: expect.any(Error),
+			}),
+			expect.stringContaining('public bucket deletion is disabled'),
+		);
 	});
 
 	it('takes canonical representation bucket/key ownership without legacy locators', async () => {
 		const inventory = await collectObjectReferences({
 			asset: delegate([{
 				id: 12,
+				storageKey: null,
+				playbackStorageKey: null,
+				isPublic: false,
+				card480Height: null,
+				display960Height: null,
 				representations: [{
 					id: 'rep-1',
 					role: 'ORIGINAL',
@@ -102,8 +129,9 @@ describe('image rendition reference inventory', () => {
 					objectKey: 'assets/12/original/g1',
 				}],
 			}]),
+			exhibition: delegate(),
 			project: delegate(),
-			assetUploadSession: delegate(),
+			gameUploadSession: delegate(),
 			uploadIntent: delegate(),
 		} as never, {
 			publicBucket: 'legacy-public',

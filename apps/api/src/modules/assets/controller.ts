@@ -29,6 +29,21 @@ export function createAssetsController(deps: AssetsControllerDependencies): Fast
 			},
 		);
 
+		/** Phase-1 compatibility bridge; resolves legacy identity into the same grant path. */
+		app.get<{ Params: { storageKey: string } }>(
+			'/assets/protected/:storageKey',
+			async (request, reply) => {
+				return applyResponseDescriptor(
+					reply,
+					await deps.service.downloadAssetByLegacyStorageKey(
+						request.params.storageKey,
+						request.ip,
+						request.currentUser,
+					),
+				);
+			},
+		);
+
 		/** DELETE /api/admin/assets/:assetId — delete an asset */
 		app.delete<{ Params: { assetId: string } }>(
 			'/admin/assets/:assetId',

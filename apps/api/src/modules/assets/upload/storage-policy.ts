@@ -15,7 +15,7 @@ export function storageOptionsForAsset(
 	kind: AssetKind,
 	role: 'original' | 'playback' | 'rendition' = 'original',
 ): UploadObjectOptions {
-	if (kind === 'GAME') return DOWNLOAD_ONLY_OPTIONS;
+	if (kind === 'GAME' || kind === 'DOCUMENT' || kind === 'ATTACHMENT') return DOWNLOAD_ONLY_OPTIONS;
 	if (kind === 'VIDEO' && role === 'original') return DOWNLOAD_ONLY_OPTIONS;
 	if ((kind === 'IMAGE' || kind === 'POSTER' || kind === 'THUMBNAIL')
 		&& role !== 'playback') {

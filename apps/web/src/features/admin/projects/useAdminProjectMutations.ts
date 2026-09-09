@@ -1,13 +1,20 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { AdminProjectDetail, ProjectStatus, UpdateMemberRequest } from '@pcu/contracts';
+import type { AdminProjectDetail, ProjectStatus, SetProjectVideoOrderRequest, UpdateMemberRequest } from '@pcu/contracts';
 
 import type { AddMemberInput, UpdateProjectFormInput } from '../../../contracts/schemas';
 import {
 	adminAssetApi,
 	adminMemberApi,
 	adminProjectApi,
+	isApiError,
 } from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
+import { buildAssetFormData } from '../../../lib/utils';
+import {
+	createIdempotencyFingerprint,
+	fingerprintFile,
+	useStableIdempotencyOperation,
+} from '../../../lib/idempotency-operation';
 
 interface UseAdminProjectMutationsParams {
 	projectId: number;
@@ -21,6 +28,7 @@ export function useAdminProjectMutations({
 	onMemberAdded,
 }: UseAdminProjectMutationsParams) {
 	const qc = useQueryClient();
+	const assetIdempotencyOperation = useStableIdempotencyOperation();
 
 	const invalidateProject = () => {
 		qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
@@ -68,6 +76,29 @@ export function useAdminProjectMutations({
 		onSuccess: invalidateProject,
 	});
 
+	const addAssetMutation = useMutation({
+		mutationFn: ({ fd, title, idempotencyKey }: {
+			fd: FormData;
+			title: string;
+			idempotencyKey: string;
+			fingerprint: string;
+		}) => adminProjectApi.addAsset({
+			projectId,
+			formData: fd,
+			idempotencyKey,
+			title,
+		}),
+		retry: (failureCount, error) => failureCount < 1
+			&& isApiError(error)
+			&& error.status === 0
+			&& error.statusText === 'Network Error',
+		retryDelay: 0,
+		onSuccess: (_response, operation) => {
+			assetIdempotencyOperation.complete(operation.fingerprint);
+			invalidateProject();
+		},
+	});
+
 	const setPosterMutation = useMutation({
 		mutationFn: (assetId: number) => adminProjectApi.setPoster(projectId, { assetId }),
 		onSuccess: () => {
@@ -86,8 +117,15 @@ export function useAdminProjectMutations({
 		onSuccess: invalidateProject,
 	});
 
+	const reorderVideosMutation = useMutation({
+		mutationFn: (body: SetProjectVideoOrderRequest) =>
+			adminProjectApi.reorderVideos(projectId, body),
+		onSuccess: invalidateProject,
+		onError: invalidateProject,
+	});
+
 	const toggleStatusMutation = useMutation({
-		mutationFn: (status: Exclude<ProjectStatus, 'DRAFT'>) => adminProjectApi.update(projectId, { status }),
+		mutationFn: (status: ProjectStatus) => adminProjectApi.update(projectId, { status }),
 		onSuccess: () => {
 			invalidateProject();
 			invalidateProjectLists();
@@ -106,16 +144,46 @@ export function useAdminProjectMutations({
 		});
 	};
 
+	const addAsset = async (kind: 'POSTER' | 'VIDEO' | 'IMAGE', file: File) => {
+		const fd = buildAssetFormData(kind, file);
+		const fingerprint = createIdempotencyFingerprint({
+			projectId,
+			kind,
+			file: fingerprintFile(file),
+		});
+		const uploadTitle = kind === 'POSTER'
+			? '포스터 업로드'
+			: kind === 'VIDEO'
+				? '동영상 업로드'
+				: '이미지 업로드';
+		const res = await addAssetMutation.mutateAsync({
+			fd,
+			title: uploadTitle,
+			fingerprint,
+			idempotencyKey: assetIdempotencyOperation.keyFor(fingerprint),
+		});
+		if (kind === 'POSTER') {
+			try {
+				await setPosterMutation.mutateAsync(res.assetId);
+			} catch {
+				// setPoster 실패는 기존 에러 표시 체계를 따름
+			}
+		}
+	};
+
 	return {
 		updateMutation,
 		addMemberMutation,
 		updateMemberMutation,
 		removeMemberMutation,
 		swapMemberMutation,
+		addAssetMutation,
 		setPosterMutation,
 		removeAssetMutation,
 		removeWebglMutation,
+		reorderVideosMutation,
 		toggleStatusMutation,
 		swapMemberOrder,
+		addAsset,
 	};
 }

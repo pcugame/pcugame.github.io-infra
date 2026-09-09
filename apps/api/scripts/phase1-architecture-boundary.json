@@ -1,0 +1,223 @@
+{
+  "sourceCommit": "babf7bd1c50db2f514b90dea5c06ac3816550dad",
+  "expiry": "Remove with the deliberate Phase 2 runtime transition and retirement of Phase 1 multipart and legacy byte paths.",
+  "edges": [
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/backend-context.ts",
+      "nodeSha256": "4779102171eb93528c2f9b0b896adaeab9c73927d00b2507447edf227417bc2f",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"./infrastructure/project-upload-processing.js\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/infrastructure/project-upload-processing.ts",
+      "nodeSha256": "a53500926c462e5112ebeda9f6e9867b8f7e62f8848abae2cb6b3e318a93eb65",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../modules/assets/upload/image-processing.js\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/infrastructure/project-upload-processing.ts",
+      "nodeSha256": "4f144bf064311b703b7dbf1763726efd34deabb5e56889a7ae5c27bfaa7798a7",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../modules/assets/upload/pdf-processing.js\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/infrastructure/project-upload-processing.ts",
+      "nodeSha256": "01d9992ffa5b739c0c2bf36a1320006480572bbf8ae46ea97c3203ed577d31ea",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../modules/assets/upload/video-processing.js\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/infrastructure/project-upload-processing.ts",
+      "nodeSha256": "a1422f01fa7bdc341e83a9e5cf9470ed1ad600b512d8e35369209a697616de01",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../modules/assets/upload/video-processing.adapter.js\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/admin/game-upload/composition.ts",
+      "nodeSha256": "b146b991d2006b0a658aa026ecb905a144df6255bf4321e0949d742fc8ad2703",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../../webgl/deployment.js\""
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/admin/game-upload/composition.ts",
+      "nodeSha256": "e88cf5ad744c392127923af4c3d66b2896ed491e742d5a802bb5607f50e69de2",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through deps.storage.readRange"
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/admin/game-upload/composition.ts",
+      "nodeSha256": "3b08cae1a9a6450744b4e04084acdbc7a69dc7bfb241e7ab0205f42228b7c196",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through deps.storage.readRange"
+    },
+    {
+      "rule": "no-api-uploadpart-relay",
+      "file": "src/modules/admin/game-upload/composition.ts",
+      "nodeSha256": "52314781c0c985d521eda2a66c26cfa7083d9a89d616c21324e2b69befac6f51",
+      "count": 1,
+      "authority": "Fastify graph writes client/object bytes through deps.storage.uploadPart"
+    },
+    {
+      "rule": "no-api-uploadpart-relay",
+      "file": "src/modules/admin/game-upload/upload-chunk.service.ts",
+      "nodeSha256": "d779911102662d50c2ea43623987dd6ca2e6d59d70bc7268bddaae3cdf60b7f8",
+      "count": 1,
+      "authority": "Fastify graph writes client/object bytes through deps.storage.uploadPart"
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/admin/project/project-asset-upload.adapter.ts",
+      "nodeSha256": "d8f9bae288b999556a13b5378a9d57d2777c3f0259dc88d4dc272642165a5fd5",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through deps.fileSystem.createWriteStream"
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/admin/project/project-upload.adapter.ts",
+      "nodeSha256": "0765a20d4322f6abf0f351a551b41b0865b48db6eecb3e78f7bda557fae5f958",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../../assets/upload/image-processing.js\""
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/admin/project/project-upload.adapter.ts",
+      "nodeSha256": "d77490db7dbc92de0ebb9dd5247da5cd96815709e0df4317c403d2d15e08517f",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through deps.fileSystem.createReadStream"
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/admin/year/poster-upload.adapter.ts",
+      "nodeSha256": "10aea1f1469eedc923b7e3fca632ffafbbb67bc1d1a2ed32add7f422da731133",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../../assets/upload/image-processing.js\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/admin/year/poster-upload.adapter.ts",
+      "nodeSha256": "4ef549e8a2e840de6974e4e9b2634f5d638cb1a329a6a303aeb7611cddc52015",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../../assets/upload/pdf-processing.js\""
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/admin/year/poster-upload.adapter.ts",
+      "nodeSha256": "5ae9ca9db754af5120cfcd47b22acfa901f8ff85f1cd198612dc90f040c155bf",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through fileSystem.createReadStream"
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/admin/year/poster-upload.adapter.ts",
+      "nodeSha256": "95f4a79490fea09d000397ff47979ee3cb68d9795970de7f50649d7076e608ab",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through deps.fileSystem.createWriteStream"
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/archive/bounded-zip-validator.ts",
+      "nodeSha256": "7cb6b0f5370bf91a29b3a65de3c9cb3cf0343d93c9d79753fbb560618e587ea6",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"node:fs/promises\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/assets/upload/image-processing.ts",
+      "nodeSha256": "58e2f1eedc37f27135bfbb910c150f14d4faf6d2c61533200467a96c0fc9cf60",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"sharp\""
+    },
+    {
+      "rule": "no-api-object-body-write",
+      "file": "src/modules/assets/upload/intent-tracked-object-upload.ts",
+      "nodeSha256": "aff028214f47f21321b93b39433e084aa31bb21f8e05b4ea14ed87ef9f6caf72",
+      "count": 1,
+      "authority": "Fastify graph writes client/object bytes through deps.storage.upload"
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/assets/upload/multipart-collector.ts",
+      "nodeSha256": "d8f9bae288b999556a13b5378a9d57d2777c3f0259dc88d4dc272642165a5fd5",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through deps.fileSystem.createWriteStream"
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/assets/upload/pdf-processing.ts",
+      "nodeSha256": "69acc342e82c5c216205f4b7cfca35cffea10c534986539aa1979e9592dbb1db",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"pdf-to-img\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/assets/upload/pdf-processing.ts",
+      "nodeSha256": "8572bf5c44f2ce3051c19c0e75dbede7134352dab7b549b740014609d34c8efd",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"sharp\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/assets/upload/pdf-processing.ts",
+      "nodeSha256": "317753f241118f747051f2be9ed1dec4ece00013cae9cac76994f53e921c790d",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"./image-processing.js\""
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/assets/upload/video-processing.adapter.ts",
+      "nodeSha256": "29df47c3c78aa8fa131a1ed780abd55cbdfa87c79d6ecb276d2c3db2798c2ec2",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"node:child_process\""
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/upload-intent/temp-scavenger.ts",
+      "nodeSha256": "5ae9ca9db754af5120cfcd47b22acfa901f8ff85f1cd198612dc90f040c155bf",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through fileSystem.createReadStream"
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/upload-intent/temp-scavenger.ts",
+      "nodeSha256": "460beecabdf25b850049c614fee4b2fec20bc230fc8e4615ec6dd4b66694ea34",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through fileSystem.createWriteStream"
+    },
+    {
+      "rule": "no-api-processing-import",
+      "file": "src/modules/webgl/deployment.ts",
+      "nodeSha256": "07bc58fc28b75423a1992cdba77e1a804485f47e669aaf91503d1cf67cb883a8",
+      "count": 1,
+      "authority": "Fastify graph imports byte processing or filesystem authority \"../archive/bounded-zip-validator.js\""
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/webgl/deployment.ts",
+      "nodeSha256": "f9254812ebe1acddab5c0b3a3cc3af06db30fca144f6f7a253c6d3dfbc09fe03",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through deps.storage.stream"
+    },
+    {
+      "rule": "no-api-object-body-read",
+      "file": "src/modules/webgl/deployment.ts",
+      "nodeSha256": "97ced1a9ac522b810eb9053010eb21e5ca36a19e3fffe4c1582db31f67217e9d",
+      "count": 1,
+      "authority": "Fastify graph reads object/file bytes through deps.fileSystem.createWriteStream"
+    },
+    {
+      "rule": "no-api-object-body-write",
+      "file": "src/modules/webgl/deployment.ts",
+      "nodeSha256": "91296a7ae777883d7b24e4928bc1ff2393eb91accd102e77a2e1fb69f2ba87d3",
+      "count": 1,
+      "authority": "Fastify graph writes client/object bytes through deps.storage.upload"
+    }
+  ]
+}

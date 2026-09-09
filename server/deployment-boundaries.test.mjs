@@ -312,7 +312,7 @@ if [ "\${1:-}" = inspect ]; then
   exit 0
 fi
 if [ "\${1:-}" = exec ]; then
-  case " $* " in *wget*) printf '%s\\n' '{"ok":true}' ;; esac
+  case " $* " in *psql*) cat >/dev/null; printf '%s\\n' "\${FAKE_MATERIAL_ROWS:-0}" ;; *wget*) printf '%s\\n' '{"ok":true}' ;; esac
   exit 0
 fi
 if [ "\${1:-}" = run ]; then exit 0; fi

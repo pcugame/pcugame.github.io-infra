@@ -3,7 +3,6 @@ import { chmod, lstat, mkdir, mkdtemp, open, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { detectFileType } from '../../shared/file-signature.js';
-import { AppError } from '../../shared/errors.js';
 import { materializeAndValidateCompletedSource } from '../admin/game-upload/source-identity.js';
 import { ImageInfrastructureError, ImageRejectedError } from './errors.js';
 import type { VerifyingImageSession } from './ports.js';
@@ -12,16 +11,6 @@ function manifest(value: unknown): Uint8Array {
 	if (typeof value === 'string') return Buffer.from(value, 'base64');
 	if (value instanceof Uint8Array) return value;
 	throw new ImageRejectedError('Persisted source identity manifest is malformed', 'SOURCE_IDENTITY_INVALID');
-}
-
-function deterministicSourceFailure(error: unknown): boolean {
-	if (error instanceof AppError) {
-		return error.statusCode === 400 || error.statusCode === 409 || error.code === 'SIZE_MISMATCH';
-	}
-	return error instanceof Error && (
-		error.message === 'Persisted source identity manifest length is invalid'
-		|| error.message === 'Invalid worker materialization size budget'
-	);
 }
 
 export async function materializeImageSource(input: {
@@ -81,11 +70,6 @@ export async function materializeImageSource(input: {
 		if ((error as NodeJS.ErrnoException).code === 'ENOSPC') {
 			throw new ImageInfrastructureError('Image worker temporary disk is full', { cause: error });
 		}
-		if (deterministicSourceFailure(error)) {
-			throw new ImageRejectedError('Completed object failed source identity validation', 'SOURCE_IDENTITY_INVALID', { cause: error });
-		}
-		// GET body disconnects, EIO, and destination stream failures are operational
-		// faults. They must retain retry semantics instead of blaming the source.
-		throw new ImageInfrastructureError('Image source materialization failed transiently', { cause: error });
+		throw new ImageRejectedError('Completed object failed source identity validation', 'SOURCE_IDENTITY_INVALID', { cause: error });
 	}
 }

@@ -25,7 +25,7 @@ export function authorizeAssetDelivery(input: {
 	const { asset, actor } = input;
 	const projectIsPublic = asset.project.status === 'PUBLISHED'
 		|| asset.project.status === 'ARCHIVED';
-	if (projectIsPublic && (asset.kind === 'GAME' || asset.kind === 'VIDEO')) return true;
+	if (projectIsPublic && (asset.kind === 'GAME' || asset.kind === 'VIDEO' || asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT')) return true;
 
 	if (!actor) return false;
 	if (actor.role === 'ADMIN' || actor.role === 'OPERATOR') return true;

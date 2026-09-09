@@ -30,7 +30,7 @@ query() {
 podman run --rm --entrypoint node "$API_IMAGE" -e '
   const fs = require("node:fs");
   const names = fs.readdirSync("prisma/migrations").filter(x => fs.statSync(`prisma/migrations/${x}`).isDirectory()).sort();
-  if (names.at(-1) !== "20260821800000_project_video_order_expand") throw new Error("unexpected Phase 1 migration ceiling");
+  if (names.at(-1) !== "20260821910000_project_material_constraints_expand") throw new Error("unexpected Phase 1 migration ceiling");
 '
 # Fail before maintenance if this is not an already-expanded installation.
 state="$(query <<'SQL'
@@ -121,4 +121,4 @@ podman run --rm -i --entrypoint node "$API_IMAGE" -e '
 ' < "${audit_prefix}.health.json"
 maintenance_started=false
 trap - EXIT INT TERM HUP
-printf '\nPhase 1 video-order update complete: %s\n' "$RELEASE_SOURCE_SHA"
+printf '\nPhase 1 runtime update complete: %s\n' "$RELEASE_SOURCE_SHA"

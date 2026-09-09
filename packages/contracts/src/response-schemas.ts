@@ -3,6 +3,7 @@ import {
 	AssetKindSchema,
 	ProjectStatusSchema,
 	UserRoleSchema,
+	UploadKindSchema,
 } from './schemas.js';
 import type { ResponsiveImage } from './responsive-image.js';
 
@@ -86,6 +87,17 @@ const UrlSchema = z.string().url();
 const StoredProjectLinkSchema = z.string().min(1).max(500);
 const AssetPlaybackStatusSchema = z.enum(['PENDING', 'READY', 'FAILED']);
 const PlatformSchema = z.enum(['PC', 'MOBILE', 'WEB']);
+const GameUploadStatusValueSchema = z.enum([
+	'PENDING',
+	'COMPLETING',
+	'COMPLETED',
+	'CANCELLED',
+	'FAILED',
+]);
+const OpaqueSessionIdSchema = z.string().min(1).max(200).refine(
+	(value) => !value.includes('\0'),
+	'Session ID contains a NUL byte',
+);
 
 export const ResponsiveImageSchema: z.ZodType<ResponsiveImage> = z.object({
 	original: z.object({
@@ -174,6 +186,9 @@ export const PublicExhibitionProjectsResponseSchema = z.object({
 }).strict();
 
 export const ProjectVideoSchema = z.object({
+	assetId: PositiveIntegerSchema,
+	sortOrder: z.number().int().min(0).max(4).nullable(),
+	role: z.enum(['MAIN', 'ADDITIONAL']),
 	url: UrlSchema.optional(),
 	mimeType: z.string().min(1),
 	originalDownloadUrl: UrlSchema.optional(),
@@ -200,6 +215,20 @@ export const PublicProjectMemberSchema = z.object({
 	studentId: z.string(),
 }).strict();
 
+export const ProjectAttachmentSchema = z.object({
+	assetId: PositiveIntegerSchema,
+	kind: z.enum(['DOCUMENT', 'ATTACHMENT']),
+	originalName: z.string().min(1),
+	mimeType: z.string().min(1),
+	sizeBytes: NonNegativeIntegerSchema,
+	downloadUrl: UrlSchema,
+}).strict();
+
+export const PublicUploadConfigSchema = z.object({
+	materialMaxCount: PositiveIntegerSchema.optional(),
+	materialMaxBytes: PositiveIntegerSchema.optional(),
+}).strict();
+
 export const PublicProjectDetailResponseSchema = z.object({
 	id: PositiveIntegerSchema,
 	year: YearSchema,
@@ -214,6 +243,7 @@ export const PublicProjectDetailResponseSchema = z.object({
 	videos: z.array(ProjectVideoSchema),
 	members: z.array(PublicProjectMemberSchema),
 	images: z.array(PublicProjectImageSchema),
+	attachments: z.array(ProjectAttachmentSchema).default([]),
 	poster: ResponsiveImageSchema.optional(),
 	gameDownloadUrl: UrlSchema.optional(),
 	webglUrl: UrlSchema.optional(),
@@ -308,6 +338,7 @@ export const AdminProjectDetailSchema = z.object({
 		z.object({
 			id: PositiveIntegerSchema,
 			kind: z.enum(['GAME', 'VIDEO']),
+			videoSortOrder: z.number().int().min(0).max(4).nullable().optional(),
 			url: UrlSchema,
 			originalDownloadUrl: UrlSchema.optional(),
 			playbackUrl: UrlSchema.optional(),
@@ -316,47 +347,25 @@ export const AdminProjectDetailSchema = z.object({
 			originalName: z.string(),
 			size: NonNegativeIntegerSchema,
 		}).strict(),
+		z.object({
+			id: PositiveIntegerSchema,
+			kind: z.enum(['DOCUMENT', 'ATTACHMENT']),
+			originalName: z.string(),
+			mimeType: z.string().min(1),
+			size: NonNegativeIntegerSchema,
+			downloadUrl: UrlSchema,
+		}).strict(),
 	])),
+	attachments: z.array(ProjectAttachmentSchema).default([]),
 }).strict();
 
 export const SubmitProjectResponseSchema = z.object({
 	id: PositiveIntegerSchema,
 	slug: z.string().min(1),
 	year: YearSchema,
-	status: z.literal('DRAFT'),
-	submissionId: z.string().uuid(),
-	items: z.array(z.object({
-		id: z.string().uuid(),
-		kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER']),
-		slot: z.string(),
-		clientToken: z.string(),
-		required: z.literal(true),
-		state: z.enum(['EXPECTED', 'UPLOADING', 'VERIFYING', 'READY', 'FAILED', 'CANCELLED']),
-		sessionId: z.string().uuid().optional(),
-		generation: PositiveIntegerSchema.optional(),
-		failureReason: z.string().optional(),
-		playbackState: z.enum(['READY', 'FAILED']).optional(),
-		playbackError: z.string().optional(),
-	}).strict()),
+	status: z.literal('PUBLISHED'),
 	adminEditUrl: UrlSchema,
 	publicUrl: UrlSchema.optional(),
-}).strict();
-
-export const ProjectSubmissionStatusResponseSchema = z.object({
-	submissionId: z.string().uuid(),
-	projectId: PositiveIntegerSchema,
-	projectStatus: ProjectStatusSchema,
-	state: z.enum(['PENDING', 'FINALIZING', 'PUBLISHED', 'CANCELLED']),
-	publicationState: z.enum(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional(),
-	publicationError: z.string().optional(),
-	items: SubmitProjectResponseSchema.shape.items,
-}).strict();
-
-export const ProjectSubmissionAuditResponseSchema = z.object({
-	draftProjects: NonNegativeIntegerSchema,
-	pendingSubmissions: NonNegativeIntegerSchema,
-	finalizingSubmissions: NonNegativeIntegerSchema,
-	activePublicationJobs: NonNegativeIntegerSchema,
 }).strict();
 
 export const ProjectAssetUploadResponseSchema = z.object({
@@ -466,4 +475,44 @@ export const ExportResultSchema = z.object({
 export const ExportStartResponseSchema = z.object({
 	jobId: z.string().min(1),
 	state: z.literal('QUEUED'),
+}).strict();
+
+export const GameUploadSessionSchema = z.object({
+	sessionId: OpaqueSessionIdSchema,
+	chunkSizeBytes: PositiveIntegerSchema,
+	totalChunks: PositiveIntegerSchema,
+	expiresAt: IsoDateTimeSchema,
+	uploadKind: UploadKindSchema,
+}).strict();
+
+export const GameUploadStatusSchema = z.object({
+	sessionId: OpaqueSessionIdSchema,
+	projectId: PositiveIntegerSchema,
+	uploadKind: UploadKindSchema,
+	originalName: z.string().min(1),
+	totalBytes: PositiveIntegerSchema,
+	chunkSizeBytes: PositiveIntegerSchema,
+	totalChunks: PositiveIntegerSchema,
+	uploadedChunks: z.array(NonNegativeIntegerSchema),
+	uploadedCount: NonNegativeIntegerSchema,
+	status: GameUploadStatusValueSchema,
+	expiresAt: IsoDateTimeSchema,
+}).strict();
+
+export const GameUploadSessionListResponseSchema = z.object({
+	items: z.array(GameUploadStatusSchema),
+}).strict();
+
+export const GameUploadChunkResponseSchema = z.object({
+	index: NonNegativeIntegerSchema,
+	bytesWritten: PositiveIntegerSchema,
+	uploadedCount: PositiveIntegerSchema,
+	totalChunks: PositiveIntegerSchema,
+}).strict();
+
+export const GameUploadCompleteResponseSchema = z.object({
+	status: z.literal('COMPLETED'),
+	storageKey: z.string().min(1),
+	sizeBytes: PositiveIntegerSchema,
+	webglUrl: UrlSchema.optional(),
 }).strict();

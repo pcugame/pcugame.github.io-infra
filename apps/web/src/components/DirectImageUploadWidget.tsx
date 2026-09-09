@@ -8,7 +8,7 @@ import {
 	uploadDirectAssetFile,
 	waitForDirectAssetReady,
 	type DirectAssetUploadSession,
-	type DirectAssetUploadProgress,
+	type GameUploadProgress,
 } from '../lib/api/game-upload';
 import { queryKeys } from '../lib/query';
 
@@ -33,7 +33,6 @@ interface Props {
 	hideTitle?: boolean;
 	/** Lets an enclosing owner control mutually exclusive mutations such as delete. */
 	onBusyChange?: (busy: boolean) => void;
-	submissionItems?: readonly { id: string; clientToken: string }[];
 }
 
 /** Browser control for IMAGE and POSTER sessions; asset bytes go directly to Garage. */
@@ -45,12 +44,11 @@ export default function DirectImageUploadWidget({
 	onComplete,
 	hideTitle = false,
 	onBusyChange,
-	submissionItems = [],
 }: Props) {
 	const qc = useQueryClient();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
-	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
+	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
 	const [resumable, setResumable] = useState<SavedImageSession | null>(null);
@@ -251,7 +249,6 @@ export default function DirectImageUploadWidget({
 						remember(next, file, index, current || paused || (cancelRequested && mountedRef.current));
 						if (cancelRequested) void cancelLateSession(next.sessionId);
 					},
-					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
 					signal: controller.signal,
 				});
 				if (!isCurrentRun(token)) return;
@@ -277,7 +274,7 @@ export default function DirectImageUploadWidget({
 				submitting.current = false;
 			}
 		}
-	}, [beginRun, cancelLateSession, forget, invalidateOwner, isCurrentRun, kind, onComplete, owner, remember, submissionItems, updateCompleted]);
+	}, [beginRun, cancelLateSession, forget, invalidateOwner, isCurrentRun, kind, onComplete, owner, remember, updateCompleted]);
 
 	const matchesSavedFile = useCallback((chosen: readonly File[], saved: SavedImageSession) => {
 		const current = chosen[saved.completed ?? 0];

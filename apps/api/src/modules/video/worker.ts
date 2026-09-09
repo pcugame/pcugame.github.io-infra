@@ -2,11 +2,6 @@ import { createClaimHeartbeatGuard } from '../upload-lifecycle/claim-heartbeat.j
 import { errorMessage, VideoRejectedError } from './errors.js';
 import type { VideoWorkerRepository } from './ports.js';
 import type { createVideoProcessor } from './processor.js';
-import {
-	isWorkerSourceObjectMissing,
-	MAX_WORKER_VALIDATION_ATTEMPTS,
-	retryBudgetReason,
-} from '../upload-lifecycle/worker-errors.js';
 
 const VIDEO_VALIDATION_LEASE_MS = 120_000;
 
@@ -67,20 +62,12 @@ export function createVideoProcessingWorker(deps: {
 						result.retried++;
 						continue;
 					}
-					if (error instanceof VideoRejectedError
-						|| isWorkerSourceObjectMissing(error)
-						|| (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
+					if (error instanceof VideoRejectedError) {
 						try {
-							await claim.assertOwned();
-							const reason = error instanceof VideoRejectedError
-								? `${error.code}: ${error.message}`
-								: isWorkerSourceObjectMissing(error)
-									? `SOURCE_OBJECT_MISSING: ${error.message}`
-									: retryBudgetReason('VIDEO', error);
 							const rejected = await deps.repository.rejectVideo({
 								session,
 								token,
-								reason,
+								reason: `${error.code}: ${error.message}`,
 							});
 							if (rejected) {
 								result.rejected++;

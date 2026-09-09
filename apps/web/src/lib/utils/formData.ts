@@ -2,13 +2,14 @@
 // Project submit multipart 요청 조립용
 
 import type { SubmitProjectPayloadInput } from '../../contracts/schemas';
-import type { ProjectSubmissionManifestItem } from '../../contracts';
 
 export interface SubmitProjectFiles {
   poster?: File;
   images?: File[];
   gameFile?: File;
-  videoFiles?: File[];
+	videoFiles?: File[];
+	documents?: File[];
+	attachments?: File[];
 }
 
 /**
@@ -21,7 +22,7 @@ export interface SubmitProjectFiles {
  * - `videoFile` 필드: 복수 파일 반복 append
  */
 export function buildSubmitFormData(
-	payload: SubmitProjectPayloadInput & { manifest: ProjectSubmissionManifestItem[] },
+  payload: SubmitProjectPayloadInput,
   files: SubmitProjectFiles,
 ): FormData {
   const fd = new FormData();
@@ -47,11 +48,14 @@ export function buildSubmitFormData(
   }
 
   // 동영상 파일
-  if (files.videoFiles) {
+	if (files.videoFiles) {
     for (const video of files.videoFiles) {
       fd.append('videoFile', video);
-    }
-  }
+	}
+	}
+
+	for (const document of files.documents ?? []) fd.append('documents[]', document);
+	for (const attachment of files.attachments ?? []) fd.append('attachments[]', attachment);
 
   return fd;
 }

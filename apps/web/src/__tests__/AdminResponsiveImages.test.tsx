@@ -111,10 +111,23 @@ describe('admin responsive image previews', () => {
 			<AdminProjectAssetManager
 				project={project}
 				projectId={project.id}
+				limits={{
+					imageMaxMb: 10,
+					imagePdfMaxMb: 100,
+					posterMaxMb: 10,
+					posterPdfMaxMb: 50,
+					gameMaxMb: 5120,
+					videoMaxMb: 200,
+					requestMaxMb: 250,
+					maxFiles: 10,
+				}}
 				canEditContent={false}
+				addAssetError={null}
+				isAddingAsset={false}
 				isSettingPoster={false}
 				isRemovingAsset={false}
 				isRemovingWebgl={false}
+				onAddAsset={vi.fn()}
 				onSetPoster={vi.fn()}
 				onRemoveAsset={vi.fn()}
 				onRemoveWebgl={vi.fn()}
@@ -140,10 +153,14 @@ describe('admin responsive image previews', () => {
 			<AdminProjectAssetManager
 				project={project}
 				projectId={project.id}
+				limits={{ imageMaxMb: 10, imagePdfMaxMb: 100, posterMaxMb: 10, posterPdfMaxMb: 50, gameMaxMb: 5120, videoMaxMb: 200, requestMaxMb: 250, maxFiles: 10 }}
 				canEditContent
+				addAssetError={null}
+				isAddingAsset={false}
 				isSettingPoster={false}
 				isRemovingAsset={false}
 				isRemovingWebgl={false}
+				onAddAsset={vi.fn()}
 				onSetPoster={vi.fn()}
 				onRemoveAsset={vi.fn()}
 				onRemoveWebgl={vi.fn()}
@@ -171,10 +188,14 @@ describe('admin responsive image previews', () => {
 			<AdminProjectAssetManager
 				project={project}
 				projectId={project.id}
+				limits={{ imageMaxMb: 10, imagePdfMaxMb: 100, posterMaxMb: 10, posterPdfMaxMb: 50, gameMaxMb: 5120, videoMaxMb: 200, requestMaxMb: 250, maxFiles: 10 }}
 				canEditContent
+				addAssetError={null}
+				isAddingAsset={false}
 				isSettingPoster={false}
 				isRemovingAsset={false}
 				isRemovingWebgl={false}
+				onAddAsset={vi.fn()}
 				onSetPoster={vi.fn()}
 				onRemoveAsset={vi.fn()}
 				onRemoveWebgl={onRemoveWebgl}

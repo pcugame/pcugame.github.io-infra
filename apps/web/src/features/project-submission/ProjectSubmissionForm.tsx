@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import type { SubmitProjectPayloadInput } from '../../contracts/schemas';
 import { getApiErrorMessage } from '../../lib/api';
 import type { ProjectSubmissionMode } from '../../lib/api/project-submit';
-import { getClientUploadLimits } from '../../lib/upload-limits';
+import { getClientUploadLimits, materialUploadLimitsFromConfig } from '../../lib/upload-limits';
+import { publicApi } from '../../lib/api';
 import GameUploadWidget from '../../components/GameUploadWidget';
 import DirectVideoUploadWidget from '../../components/DirectVideoUploadWidget';
 import DirectImageUploadWidget from '../../components/DirectImageUploadWidget';
@@ -24,15 +26,16 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	const { user } = useMe();
 	const isAdminMode = mode === 'admin';
 	const limits = getClientUploadLimits(isAdminMode ? user?.role ?? 'USER' : 'USER');
-	const files = useSubmissionFiles({ limits });
+	const { data: uploadConfig } = useQuery({ queryKey: ['public-upload-config'], queryFn: publicApi.getUploadConfig });
+	const materialLimits = materialUploadLimitsFromConfig(uploadConfig);
+	const files = useSubmissionFiles({ limits, materialLimits });
 	const submission = useProjectSubmissionForm({ mode, files });
 	const {
 		copy,
-		cancelSubmission,
 		createdProjectId,
-		finalizeIfReady,
 		errors,
 		form,
+		goToEdit,
 		isSubmitting,
 		isUploadLocked,
 		membersFieldArray,
@@ -40,26 +43,25 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 		selectedYearItem,
 		showGameProgress,
 		submitMutation,
-		submissionError,
-		submissionItems,
 		years,
 	} = submission;
 	const { control, getValues, handleSubmit, register } = form;
 	const [previewSnapshot, setPreviewSnapshot] = useState<SubmitProjectPayloadInput | null>(null);
-	const itemsFor = (kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER') => submissionItems
-		.filter((item) => item.kind === kind)
-		.sort((left, right) => left.slot.localeCompare(right.slot, undefined, { numeric: true }));
-	const uploadItemsFor = (kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER') => itemsFor(kind)
-		.filter((item) => item.state !== 'READY');
-	const bindingFor = (kind: 'GAME' | 'WEBGL') => {
-		const item = uploadItemsFor(kind)[0];
-		return item ? { id: item.id, clientToken: item.clientToken } : undefined;
-	};
-	const bindingsFor = (kind: 'VIDEO' | 'IMAGE' | 'POSTER') => uploadItemsFor(kind)
-		.map((item) => ({ id: item.id, clientToken: item.clientToken }));
-	const uploadFinished = () => {
-		if (createdProjectId) void finalizeIfReady(createdProjectId);
-	};
+	const [gameUploadFinished, setGameUploadFinished] = useState(false);
+	const [webglUploadFinished, setWebglUploadFinished] = useState(false);
+	const [videoUploadFinished, setVideoUploadFinished] = useState(false);
+	const [posterUploadFinished, setPosterUploadFinished] = useState(false);
+	const [imageUploadFinished, setImageUploadFinished] = useState(false);
+
+	useEffect(() => {
+		if (!createdProjectId) return;
+		const gameReady = !files.gameFile || gameUploadFinished;
+		const webglReady = !files.webglFile || webglUploadFinished;
+		const videoReady = files.videoFiles.length === 0 || videoUploadFinished;
+		const posterReady = !files.posterFile || posterUploadFinished;
+		const imagesReady = files.imageFiles.length === 0 || imageUploadFinished;
+		if (gameReady && webglReady && videoReady && posterReady && imagesReady) goToEdit();
+	}, [createdProjectId, files.gameFile, files.imageFiles.length, files.posterFile, files.videoFiles.length, files.webglFile, gameUploadFinished, goToEdit, imageUploadFinished, posterUploadFinished, videoUploadFinished, webglUploadFinished]);
 
 	const openPreview = () => setPreviewSnapshot(getValues());
 	const closePreview = () => setPreviewSnapshot(null);
@@ -75,69 +77,54 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 
 			{showGameProgress && (
 				<div className="submission-chunked-uploads">
-					{uploadItemsFor('GAME').length > 0 && (
+					{files.gameFile && (
 						<GameUploadWidget
-							key={uploadItemsFor('GAME').map((item) => item.id).join(':')}
 							projectId={createdProjectId!}
 							initialFile={files.gameFile}
-							autoStart={Boolean(files.gameFile)}
+							autoStart
 							uploadKind="GAME"
-							submissionItem={bindingFor('GAME')}
-							onComplete={uploadFinished}
+							onComplete={() => setGameUploadFinished(true)}
+							onSkip={() => setGameUploadFinished(true)}
 						/>
 					)}
-					{uploadItemsFor('WEBGL').length > 0 && (
+					{files.webglFile && (
 						<GameUploadWidget
-							key={uploadItemsFor('WEBGL').map((item) => item.id).join(':')}
 							projectId={createdProjectId!}
 							initialFile={files.webglFile}
-							autoStart={Boolean(files.webglFile)}
+							autoStart
 							uploadKind="WEBGL"
-							submissionItem={bindingFor('WEBGL')}
-							onComplete={uploadFinished}
+							onComplete={() => setWebglUploadFinished(true)}
+							onSkip={() => setWebglUploadFinished(true)}
 						/>
 					)}
-					{uploadItemsFor('VIDEO').length > 0 && (
+					{files.videoFiles.length > 0 && (
 						<DirectVideoUploadWidget
-							key={uploadItemsFor('VIDEO').map((item) => item.id).join(':')}
 							projectId={createdProjectId!}
 							initialFiles={files.videoFiles}
-							autoStart={files.videoFiles.length > 0}
-							submissionItems={bindingsFor('VIDEO')}
-							onComplete={uploadFinished}
+							autoStart
+							onComplete={() => setVideoUploadFinished(true)}
+							onSkip={() => setVideoUploadFinished(true)}
 						/>
 					)}
-					{uploadItemsFor('POSTER').length > 0 && (
+					{files.posterFile && (
 						<DirectImageUploadWidget
-							key={uploadItemsFor('POSTER').map((item) => item.id).join(':')}
 							owner={{ type: 'PROJECT', id: createdProjectId! }}
 							kind="POSTER"
-							initialFiles={files.posterFile ? [files.posterFile] : []}
-							autoStart={Boolean(files.posterFile)}
-							submissionItems={bindingsFor('POSTER')}
-							onComplete={uploadFinished}
+							initialFiles={[files.posterFile]}
+							autoStart
+							onComplete={() => setPosterUploadFinished(true)}
 						/>
 					)}
-					{uploadItemsFor('IMAGE').length > 0 && (
+					{files.imageFiles.length > 0 && (
 						<DirectImageUploadWidget
-							key={uploadItemsFor('IMAGE').map((item) => item.id).join(':')}
 							owner={{ type: 'PROJECT', id: createdProjectId! }}
 							kind="IMAGE"
 							initialFiles={files.imageFiles}
-							autoStart={files.imageFiles.length > 0}
-							submissionItems={bindingsFor('IMAGE')}
-							onComplete={uploadFinished}
+							autoStart
+							onComplete={() => setImageUploadFinished(true)}
 						/>
 					)}
 				</div>
-			)}
-			{submissionError != null && (
-				<div className="error-box" role="alert"><p>{getApiErrorMessage(submissionError)}</p></div>
-			)}
-			{showGameProgress && (
-				<button type="button" className="btn btn--danger btn--small" onClick={() => void cancelSubmission()}>
-					제출 취소
-				</button>
 			)}
 
 			{!showGameProgress && (
@@ -163,6 +150,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 						gameUploadHint={copy.gameUploadHint}
 						webglUploadHint={copy.webglUploadHint}
 						limits={limits}
+						materialLimits={materialLimits}
 					/>
 
 					{submitMutation.error && (

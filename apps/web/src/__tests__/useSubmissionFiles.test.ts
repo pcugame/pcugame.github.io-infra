@@ -86,6 +86,20 @@ describe('useSubmissionFiles', () => {
 		expect((secondEvent.target as HTMLInputElement).value).toBe('');
 	});
 
+	it('rejects a selection that would exceed the five-video project limit', () => {
+		const { result } = renderHook(() => useSubmissionFiles({ limits }));
+		const selected = Array.from({ length: 6 }, (_, index) =>
+			file(`video-${index}.mp4`, 'video/mp4', 1024),
+		);
+		const event = eventWithFiles(selected);
+
+		act(() => result.current.handleVideoChange(event));
+
+		expect(result.current.videoFiles).toEqual([]);
+		expect(result.current.fileSizeError).toContain('최대 5개');
+		expect((event.target as HTMLInputElement).value).toBe('');
+	});
+
 	it('rejects game files larger than the configured game upload limit', () => {
 		const { result } = renderHook(() => useSubmissionFiles({ limits }));
 		const game = file('game.zip', 'application/zip', 5 * 1024 * 1024 * 1024 + 1);
@@ -111,5 +125,21 @@ describe('useSubmissionFiles', () => {
 		act(() => result.current.clearWebglFile());
 		expect(result.current.webglFile).toBeNull();
 		expect(result.current.gameFile).toBe(game);
+	});
+
+	it('enforces the shared document and attachment count', () => {
+		const { result } = renderHook(() => useSubmissionFiles({
+			limits,
+			materialLimits: { maxCount: 2, maxBytes: 50 * 1024 * 1024 },
+		}));
+		const first = file('guide.pdf', 'application/pdf', 1024);
+		const second = file('notes.txt', 'text/plain', 1024);
+		const third = file('extra.bin', 'application/octet-stream', 1024);
+		act(() => result.current.handleDocumentsChange(eventWithFiles([first])));
+		act(() => result.current.handleAttachmentsChange(eventWithFiles([second])));
+		act(() => result.current.handleAttachmentsChange(eventWithFiles([third])));
+		expect(result.current.documentFiles).toEqual([first]);
+		expect(result.current.attachmentFiles).toEqual([second]);
+		expect(result.current.fileSizeError).toContain('최대 2개');
 	});
 });

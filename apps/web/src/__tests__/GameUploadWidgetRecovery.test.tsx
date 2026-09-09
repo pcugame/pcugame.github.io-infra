@@ -11,7 +11,8 @@ const controls = vi.hoisted(() => ({
 	cancel: vi.fn(),
 }));
 
-vi.mock('../lib/api/game-upload', () => ({
+vi.mock('../lib/api/game-upload', async (importOriginal) => ({
+	...await importOriginal<typeof import('../lib/api/game-upload')>(),
 	getDirectAssetUploadStatus: controls.getStatus,
 	waitForDirectAssetReady: controls.waitReady,
 	uploadDirectAssetFile: controls.upload,
@@ -24,7 +25,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 	afterEach(() => {
 		cleanup();
 		window.sessionStorage.clear();
-		vi.clearAllMocks();
+		vi.resetAllMocks();
 	});
 
 	it('keeps a COMPLETING WebGL session and resumes background status polling after reload', async () => {

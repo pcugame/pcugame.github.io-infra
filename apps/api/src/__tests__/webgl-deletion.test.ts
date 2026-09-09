@@ -21,6 +21,7 @@ const projectService = createProjectService({
 		isMemberOfProject: vi.fn(),
 		updateProject: vi.fn(),
 		findAssetById: vi.fn(),
+		setProjectVideoOrder: vi.fn(),
 		setProjectPoster: vi.fn(),
 	},
 	serializeProjectDetail: vi.fn(),
@@ -36,9 +37,9 @@ const activeSource = 'webgl/7/123e4567-e89b-42d3-b456-426614174111/source.zip';
 const activeWebgl = {
 	id: 'webgl-session',
 	projectId: 7,
-	kind: 'WEBGL',
-	objectKey: activeSource,
-	uploadId: 'webgl-multipart',
+	uploadKind: 'WEBGL',
+	s3Key: activeSource,
+	s3UploadId: 'webgl-multipart',
 };
 
 describe('WebGL deletion cleanup', () => {
@@ -69,13 +70,13 @@ describe('WebGL deletion cleanup', () => {
 		const gameUpload = {
 			id: 'game-session',
 			projectId: 7,
-			kind: 'GAME',
-			objectKey: 'uploads/game.zip',
-			uploadId: 'game-multipart',
+			uploadKind: 'GAME',
+			s3Key: 'uploads/game.zip',
+			s3UploadId: 'game-multipart',
 		};
 		mocks.deleteProjectReturningAssets.mockResolvedValue({
-			assets: [{ id: 5, representations: [] }],
-			currentWebglDeploymentId: '123e4567-e89b-42d3-a456-426614174000',
+			assets: [{ id: 5, storageKey: 'poster.webp' }],
+			webglEntryKey: oldEntry,
 			activeUploads: [gameUpload, activeWebgl],
 		});
 
@@ -96,8 +97,8 @@ describe('WebGL deletion cleanup', () => {
 			result: { count: 2 },
 			assets: [],
 			projects: [
-				{ id: 7, currentWebglDeploymentId: '123e4567-e89b-42d3-a456-426614174000' },
-				{ id: 8, currentWebglDeploymentId: null },
+				{ id: 7, webglEntryKey: oldEntry },
+				{ id: 8, webglEntryKey: '' },
 			],
 			activeUploads: [activeWebgl],
 		});

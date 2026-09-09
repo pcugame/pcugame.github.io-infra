@@ -31,6 +31,7 @@ const settings: SettingsStore = {
 function storage(): ObjectStorage {
 	return {
 		upload: async () => {},
+		presign: async () => 'https://storage.test/object',
 		delete: async () => {},
 		head: headObject,
 		readRange: async () => Buffer.alloc(0),
