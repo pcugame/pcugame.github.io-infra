@@ -182,7 +182,10 @@ function main() {
 
 	for (const entry of entries) {
 		const oldPath = entry.oldPath ?? entry.path;
-		if (protectedPaths.has(oldPath)) {
+		const copiesUnchangedHistory = entry.status.startsWith('C')
+			&& !protectedPaths.has(entry.path)
+			&& gitText(['rev-parse', `${mergeBase}:${oldPath}`]) === gitText(['rev-parse', `HEAD:${oldPath}`]);
+		if (protectedPaths.has(oldPath) && !copiesUnchangedHistory) {
 			violations.push({
 				path: oldPath,
 				message: `status ${entry.status} changes migration history already present at the protected merge base`,

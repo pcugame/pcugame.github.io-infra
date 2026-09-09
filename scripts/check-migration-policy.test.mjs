@@ -152,3 +152,15 @@ test('governs alternate contract SQL history with the same immutability policy',
     assert.match(result.stderr, /changes migration history/);
   });
 });
+
+
+test('allows a copied alternative only when its published source stays byte-identical', async () => {
+  await withFixture(async ({ repository, base }) => {
+    await writeRepositoryFile(repository, 'apps/api/prisma/contract-migration-paths/20260102000000_alternative/migration.sql', 'CREATE TABLE "example" ("id" INTEGER PRIMARY KEY);\n');
+    commitAll(repository, 'copy into explicitly reviewed path');
+    assert.equal(check(repository, base).status, 0);
+    await writeRepositoryFile(repository, `${migrationRoot}/20260101000000_initial/migration.sql`, 'CREATE TABLE "changed" ("id" INTEGER PRIMARY KEY);\n');
+    commitAll(repository, 'change original alongside alternative');
+    assert.equal(check(repository, base).status, 1);
+  });
+});
