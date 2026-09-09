@@ -41,6 +41,23 @@ const SAFE_EXTENSION_BY_MIME = new Map([
 	['video/quicktime', 'mov'],
 	['video/webm', 'webm'],
 	['video/ogg', 'ogv'],
+	['video/x-matroska', 'mkv'],
+	['video/x-msvideo', 'avi'],
+	['video/avi', 'avi'],
+	['text/plain', 'txt'],
+	['text/markdown', 'md'],
+	['application/rtf', 'rtf'],
+	['text/rtf', 'rtf'],
+	['application/msword', 'doc'],
+	['application/vnd.ms-excel', 'xls'],
+	['application/vnd.ms-powerpoint', 'ppt'],
+	['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'docx'],
+	['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx'],
+	['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'pptx'],
+	['application/vnd.oasis.opendocument.text', 'odt'],
+	['application/vnd.oasis.opendocument.spreadsheet', 'ods'],
+	['application/vnd.oasis.opendocument.presentation', 'odp'],
+	['application/octet-stream', 'bin'],
 ]);
 
 class CanonicalPlanError extends Error {

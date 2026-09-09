@@ -6,7 +6,7 @@ import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 
 const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 const migrationRootUrl = new URL('../../prisma/migrations/', import.meta.url);
-const phaseOneMigration = '20260821700000_canonical_object_relocation_expand';
+const phaseOneMigration = '20260821800000_project_video_order_expand';
 const legacyMetricNames = [
 	'asset_download_legacy_fallback',
 	'asset_download_legacy_route',

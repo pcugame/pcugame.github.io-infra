@@ -1,30 +1,26 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, readdir } from 'node:fs/promises';
-import { DeleteObjectsCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import Fastify from 'fastify';
+import { readFile, readdir, rm } from 'node:fs/promises';
+import {
+	DeleteObjectsCommand,
+	GetObjectCommand,
+	ListMultipartUploadsCommand,
+	PutObjectCommand,
+} from '@aws-sdk/client-s3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 import { Prisma, type PrismaClient } from '../generated/prisma/client.js';
+import { createCanonicalObjectMaterializer } from '../infrastructure/canonical-object-migration.s3.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createS3Client } from '../lib/s3.js';
-import { createDirectMultipartControlStorage, createObjectStorage, createProtectedDownloadPresigner } from '../lib/storage.js';
-import { createCanonicalBackfillProgress, runCanonicalBackfill } from '../modules/migration/canonical-backfill.js';
+import { createObjectStorage } from '../lib/storage.js';
 import { createCanonicalBackfillRepository } from '../modules/migration/canonical-backfill.prisma.js';
-import { createCanonicalObjectMaterializer } from '../infrastructure/canonical-object-migration.s3.js';
-import { runContractPreflight } from '../modules/migration/contract-preflight.js';
-import { createContractPreflightRepository } from '../modules/migration/contract-preflight.prisma.js';
-import { createAssetsRepository } from '../modules/assets/repository.js';
-import { createAssetsService } from '../modules/assets/service.js';
-import { createAssetsController } from '../modules/assets/controller.js';
-import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
-import { createAssetUploadService } from '../modules/asset-upload/service.js';
-import { createMultipartAbortRepository } from '../modules/multipart-abort/repository.js';
-import { createMultipartAbortService } from '../modules/multipart-abort/service.js';
 import {
-	SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
-	SOURCE_IDENTITY_ALGORITHM,
-	sourceIdentityRoot,
-} from '../modules/admin/game-upload/source-identity.js';
+	createCanonicalBackfillProgress,
+	parseCanonicalBackfillProgress,
+	runCanonicalBackfill,
+} from '../modules/migration/canonical-backfill.js';
+import { createContractPreflightRepository } from '../modules/migration/contract-preflight.prisma.js';
+import { LEGACY_BRIDGE_METRIC_NAMES, runContractPreflight } from '../modules/migration/contract-preflight.js';
 import {
 	LEGACY_MIGRATION_FIXTURE_NAMESPACE,
 	legacyCanonicalMigrationExpected,
@@ -35,255 +31,112 @@ import {
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true'
 	&& process.env['RUN_GARAGE_INTEGRATION'] === 'true';
 const migrationsUrl = new URL('../../prisma/migrations/', import.meta.url);
-const contractMigration = '20260822000000_canonical_asset_contract';
 const canonicalExpandMigration = '20260821000000_canonical_asset_expand';
-const legacyBridgeMetricNames = [
-	'asset_download_legacy_fallback', 'asset_download_legacy_route', 'public_image_legacy_bridge',
-	'public_image_legacy_fallback', 'public_webgl_legacy_bridge', 'public_webgl_legacy_fallback', 'export_legacy_fallback',
-] as const;
+const phase1MigrationCeiling = '20260821800000_project_video_order_expand';
+const contractMigration = '20260822000000_canonical_asset_contract';
 const buckets = {
 	protectedBucket: process.env['S3_BUCKET_PROTECTED'] ?? 'pcu-protected',
 	publicBucket: process.env['S3_BUCKET_PUBLIC'] ?? 'pcu-public',
 };
 
-function directSourceProof(bytes: Buffer) {
-	const digests = [createHash('sha256').update(bytes).digest('hex')];
+function createRunFixture(runId: string) {
+	const numericSeed = Number.parseInt(runId.slice(0, 7), 16);
+	const baseId = 900_000_000 + numericSeed;
+	const ids = {
+		creator: baseId + 1,
+		exhibition: baseId + 2,
+		publishedProject: baseId + 10,
+		archivedProject: baseId + 11,
+		malformedProject: baseId + 12,
+		game: baseId + 20,
+		video: baseId + 21,
+		poster: baseId + 22,
+		image: baseId + 23,
+		legacyWebglGame: baseId + 24,
+		deleted: baseId + 25,
+		failed: baseId + 26,
+		playbackFailed: baseId + 27,
+	};
+	const idMap = new Map<number, number>([
+		[legacyCanonicalMigrationFixture.users[0]!.id, ids.creator],
+		[legacyCanonicalMigrationFixture.exhibitions[0]!.id, ids.exhibition],
+		[legacyCanonicalMigrationFixture.projects[0]!.id, ids.publishedProject],
+		[legacyCanonicalMigrationFixture.projects[1]!.id, ids.archivedProject],
+		[legacyCanonicalMigrationFixture.projects[2]!.id, ids.malformedProject],
+		...legacyCanonicalMigrationFixture.assets.map((asset, index) => [asset.id, ids.game + index] as const),
+	]);
+	const publicPrefix = `webgl/${ids.archivedProject}/${runId}/site/`;
+	const legacyWebglSourceKey = legacyCanonicalMigrationFixture.assets.find((asset) => (
+		asset.id === legacyCanonicalMigrationExpected.webglDeployment.sourceLegacyGameAssetId
+	))!.storageKey;
+	const rewriteKey = (key: string): string => key === legacyWebglSourceKey
+		? `webgl/${ids.archivedProject}/${runId}/source.zip`
+		: key.startsWith(legacyCanonicalMigrationExpected.webglDeployment.publicPrefix)
+			? `${publicPrefix}${key.slice(legacyCanonicalMigrationExpected.webglDeployment.publicPrefix.length)}`
+			: `migration-runs/${runId}/${key}`;
+	const fixture = {
+		users: legacyCanonicalMigrationFixture.users.map((user) => ({
+			...user,
+			id: ids.creator,
+			googleSub: `${user.googleSub}:${runId}`,
+			email: `${runId}@migration.example.test`,
+			studentId: `MIG-${runId}`,
+		})),
+		exhibitions: legacyCanonicalMigrationFixture.exhibitions.map((exhibition) => ({
+			...exhibition,
+			id: ids.exhibition,
+			posterStorageKey: rewriteKey(exhibition.posterStorageKey),
+		})),
+		projects: legacyCanonicalMigrationFixture.projects.map((project) => ({
+			...project,
+			id: idMap.get(project.id)!,
+			exhibitionId: ids.exhibition,
+			creatorId: ids.creator,
+			posterAssetId: project.posterAssetId === null ? null : idMap.get(project.posterAssetId)!,
+			webglEntryKey: project.webglEntryKey ? rewriteKey(project.webglEntryKey) : '',
+		})),
+		assets: legacyCanonicalMigrationFixture.assets.map((asset) => ({
+			...asset,
+			id: idMap.get(asset.id)!,
+			projectId: idMap.get(asset.projectId)!,
+			storageKey: rewriteKey(asset.storageKey),
+			playbackStorageKey: asset.playbackStorageKey ? rewriteKey(asset.playbackStorageKey) : null,
+		})),
+		gameUploadSessions: legacyCanonicalMigrationFixture.gameUploadSessions.map((session) => ({
+			...session,
+			id: randomUUID(),
+			projectId: ids.archivedProject,
+			userId: ids.creator,
+			storageKey: rewriteKey(session.storageKey),
+			s3Key: rewriteKey(session.s3Key),
+			completionResult: {
+				...session.completionResult,
+				storageKey: rewriteKey(session.completionResult.storageKey),
+			},
+		})),
+	} as const;
 	return {
-		sourceIdentityAlgorithm: SOURCE_IDENTITY_ALGORITHM,
-		sourceIdentity: sourceIdentityRoot(bytes.length, SOURCE_IDENTITY_BLOCK_SIZE_BYTES, digests),
-		sourceIdentityBlockSizeBytes: SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
-		sourceIdentityBlockDigests: digests,
+		runId,
+		ids,
+		fixture,
+		inventory: legacyCanonicalMigrationObjectInventory.map((object) => ({ ...object, key: rewriteKey(object.key) })),
+		expected: {
+			webglSourceKey: `protected/assets/webgl/${ids.archivedProject}/${runId}/source.zip`,
+			publicPrefix,
+		},
 	};
 }
 
-async function exerciseCanonicalHttpAndDataPlane(input: {
-	client: PrismaClient;
-	storage: ReturnType<typeof createObjectStorage>;
-	presigner: ReturnType<typeof createProtectedDownloadPresigner>;
-	assetId: number;
-	expectedBytes: bigint;
-}): Promise<void> {
-	const service = createAssetsService({
-		presignTtlSec: 60,
-		presign: (bucket, key, options) => input.presigner.presign(bucket, key, options),
-		wakeDeletionWorker() {},
-		loadProjectWithAccess: async () => undefined,
-		downloadLimiter: { check: () => 'ok' as const },
-		logger: { info() {}, error() {} },
-		repository: createAssetsRepository(input.client),
-	});
-	const app = Fastify();
-	await app.register(createAssetsController({ service }), { prefix: '/api' });
-	await app.ready();
-	try {
-		const response = await app.inject({
-			method: 'GET', url: `/api/assets/${input.assetId}/download?variant=original`,
-		});
-		expect(response.statusCode).toBe(302);
-		expect(response.body).toBe('');
-		const location = response.headers.location;
-		expect(location).toBeTruthy();
-		const direct = await fetch(location!, { headers: { Range: 'bytes=0-0' } });
-		expect(direct.status).toBe(206);
-		expect(direct.headers.get('content-range')).toBe(`bytes 0-0/${input.expectedBytes}`);
-		expect((await direct.arrayBuffer()).byteLength).toBe(1);
-	} finally {
-		await app.close();
-	}
-}
+type RunFixture = ReturnType<typeof createRunFixture>;
 
-async function exerciseFiveKindDirectControls(input: {
-	client: PrismaClient;
-	s3: ReturnType<typeof createS3Client>;
-}): Promise<void> {
-	const repository = createAssetUploadRepository(input.client);
-	const storage = createDirectMultipartControlStorage(input.s3);
-	const lifecycleStorage = createObjectStorage(input.s3, { defaultPresignTtlSec: 60 });
-	const actor = { id: 41_011, role: 'ADMIN' } as const;
-	const service = createAssetUploadService({
-		repository,
-		storage,
-		partSigner: { presignUploadPart: async () => 'https://unused.example.test/upload-part' },
-		clock: { now: () => new Date() },
-		ids: { next: () => randomUUID() },
-		config: {
-			bucket: buckets.protectedBucket,
-			sessionTtlMs: 60_000,
-			partSizeBytes: 5 * 1024 * 1024,
-			partUrlTtlSeconds: 60,
-			partUrlRefreshMax: 5,
-			maxBytesFor: () => 10 * 1024 * 1024,
-		},
-		authorizeProjectWrite: async () => ({ exhibitionId: 41_001, status: 'PUBLISHED' }),
-		authorizeExhibitionWrite: async () => undefined,
-		wakeMaintenance: () => undefined,
+function createIntegrationS3() {
+	return createS3Client({
+		S3_ENDPOINT: process.env['S3_ENDPOINT'] ?? 'http://127.0.0.1:3900',
+		S3_REGION: 'garage',
+		S3_ACCESS_KEY_ID: 'GK000000000000000000000001',
+		S3_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000001',
+		S3_FORCE_PATH_STYLE: true,
 	});
-	const bytes = Buffer.from('canonical direct control fixture');
-	const proof = directSourceProof(bytes);
-	const requests = [
-		{ kind: 'GAME', create: () => service.createGameSession(actor, 41_021, { originalName: 'game.zip', totalBytes: bytes.length, ...proof }) },
-		{ kind: 'WEBGL', create: () => service.createWebglSession(actor, 41_021, { originalName: 'webgl.zip', totalBytes: bytes.length, ...proof }) },
-		{ kind: 'VIDEO', create: () => service.createVideoSession(actor, 41_021, { originalName: 'video.mov', declaredMimeType: 'video/quicktime', totalBytes: bytes.length, ...proof }) },
-		{ kind: 'IMAGE', create: () => service.createImageSession(actor, 41_021, { originalName: 'image.png', declaredMimeType: 'image/png', totalBytes: bytes.length, ...proof }) },
-		{ kind: 'POSTER', create: () => service.createProjectPosterSession(actor, 41_021, { originalName: 'poster.pdf', declaredMimeType: 'application/pdf', totalBytes: bytes.length, ...proof }) },
-	] as const;
-	const sessionIds: string[] = [];
-	const multipartUploads: Array<{ key: string; uploadId: string }> = [];
-	for (const request of requests) {
-		const created = await request.create();
-		sessionIds.push(created.sessionId);
-		const session = await repository.findById(created.sessionId);
-		expect(session).toMatchObject({ kind: request.kind, state: 'UPLOADING', generation: 1 });
-		expect(session?.objectKey).toMatch(/^protected\/uploads\/[^/]+\/1\/source\.(zip|bin)$/);
-		multipartUploads.push({ key: session!.objectKey, uploadId: session!.uploadId! });
-		await service.cancel(actor, created.sessionId);
-	}
-	for (const upload of multipartUploads) {
-		expect(await lifecycleStorage.listMultipartUploads(buckets.protectedBucket, upload.key))
-			.toEqual([expect.objectContaining(upload)]);
-	}
-	const abortWorker = createMultipartAbortService({
-		repository: createMultipartAbortRepository(input.client),
-		storage: lifecycleStorage,
-		clock: { now: () => new Date() },
-		ids: { next: () => randomUUID() },
-		logger: { error() {} },
-	});
-	await expect(abortWorker.run()).resolves.toEqual({ tried: 5, resolved: 5, failed: 0 });
-	const abortTasks = await input.client.multipartAbortTask.findMany({
-		where: { uploadSessionId: { in: sessionIds } },
-		select: { state: true, storageKey: true, uploadId: true },
-	});
-	expect(abortTasks).toHaveLength(5);
-	expect(abortTasks.every((task) => task.state === 'RESOLVED')).toBe(true);
-	for (const upload of multipartUploads) {
-		expect(abortTasks).toContainEqual(expect.objectContaining({
-			storageKey: upload.key,
-			uploadId: upload.uploadId,
-		}));
-		expect(await lifecycleStorage.listMultipartUploads(buckets.protectedBucket, upload.key)).toHaveLength(0);
-	}
-	const rows = await input.client.$queryRaw<Array<{ kind: string; state: string }>>(Prisma.sql`
-		SELECT "kind"::text AS "kind", "state"::text AS "state"
-		FROM "asset_upload_sessions" WHERE "id" IN (${Prisma.join(sessionIds)})
-		ORDER BY "kind"::text
-	`);
-	expect(rows).toEqual([
-		{ kind: 'GAME', state: 'CANCELLED' },
-		{ kind: 'IMAGE', state: 'CANCELLED' },
-		{ kind: 'POSTER', state: 'CANCELLED' },
-		{ kind: 'VIDEO', state: 'CANCELLED' },
-		{ kind: 'WEBGL', state: 'CANCELLED' },
-	]);
-}
-
-async function exerciseRenditionObjectBeforeDbCrash(input: {
-	client: PrismaClient;
-	s3: ReturnType<typeof createS3Client>;
-	storage: ReturnType<typeof createObjectStorage>;
-	schema: string;
-}): Promise<void> {
-	const assetId = 42_999;
-	const sourceKey = `${LEGACY_MIGRATION_FIXTURE_NAMESPACE}/${input.schema}/crash-repair-source.png`;
-	const canonicalPrefix = `public/images/${assetId}/`;
-	const source = await sharp({
-		create: { width: 1_200, height: 800, channels: 3, background: '#123456' },
-	}).png().toBuffer();
-	await input.s3.send(new PutObjectCommand({
-		Bucket: buckets.publicBucket, Key: sourceKey, Body: source,
-		ContentLength: source.byteLength, ContentType: 'image/png',
-	}));
-	try {
-		await input.client.$executeRaw(Prisma.sql`
-			INSERT INTO "assets" (
-				"id", "project_id", "kind", "status", "storage_key", "original_name", "mime_type",
-				"size_bytes", "is_public", "width", "height", "card_480_height", "display_960_height", "updated_at"
-			) VALUES (
-				${assetId}, 41022, 'IMAGE'::"AssetKind", 'READY'::"AssetStatus", ${sourceKey},
-				'crash-repair-source.png', 'image/png', ${BigInt(source.byteLength)}, true,
-				1200, 800, NULL, NULL, CURRENT_TIMESTAMP
-			)
-		`);
-		const verifier = {
-			async head(bucket: string, key: string) {
-				const value = await input.storage.head(bucket, key);
-				return value ? {
-					size: BigInt(value.size), mimeType: value.contentType,
-					...(value.etag ? { etag: value.etag } : {}),
-					...(value.checksumSha256 ? { checksumSha256: value.checksumSha256 } : {}),
-				} : null;
-			},
-			async listPrefix(bucket: string, prefix: string, afterKey: string | undefined, limit: number) {
-				const page = await input.storage.listKeyPage(bucket, prefix, {
-					...(afterKey ? { startAfter: afterKey } : {}), maxKeys: limit,
-				});
-				return { keys: page.keys, isTruncated: page.isTruncated };
-			},
-		};
-		const repository = createCanonicalBackfillRepository(input.client);
-		let injectFailure = true;
-		const first = await runCanonicalBackfill({
-			repository: {
-				...repository,
-				applyAsset(plan) {
-					if (plan.row.id === assetId && injectFailure) {
-						injectFailure = false;
-						throw new Error('injected object-before-DB crash');
-					}
-					return repository.applyAsset(plan);
-				},
-			},
-			verifier,
-			materializer: createCanonicalObjectMaterializer(input.s3, {
-				tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${input.schema}`,
-			}),
-			...buckets,
-			progress: createCanonicalBackfillProgress('apply'),
-			options: { apply: true, batchSize: 100 },
-		});
-		expect(first.failures).toEqual([
-			expect.objectContaining({ ref: { kind: 'asset', id: assetId }, code: 'CANONICAL_CONFLICT' }),
-		]);
-		const pending = await input.client.$queryRaw<Array<{ storageKey: string; state: string }>>(Prisma.sql`
-			SELECT "storage_key" AS "storageKey", "state"::text AS "state"
-			FROM "orphan_objects" WHERE "bucket" = ${buckets.publicBucket}
-				AND "storage_key" LIKE ${`${canonicalPrefix}%`} ORDER BY "storage_key"
-		`);
-		expect(pending).toHaveLength(3);
-		expect(pending.every((target) => target.state === 'PENDING')).toBe(true);
-
-		const rerun = await runCanonicalBackfill({
-			repository, verifier,
-			materializer: createCanonicalObjectMaterializer(input.s3, {
-				tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${input.schema}`,
-			}),
-			...buckets, progress: first.progress,
-			options: { apply: true, batchSize: 100 },
-		});
-		expect(rerun.failures).toHaveLength(0);
-		expect(rerun.stats).toMatchObject({ imageRepairs: 0, objectsReused: 3 });
-		const cancelled = await input.client.$queryRaw<Array<{ storageKey: string; state: string }>>(Prisma.sql`
-			SELECT "storage_key" AS "storageKey", "state"::text AS "state"
-			FROM "orphan_objects" WHERE "bucket" = ${buckets.publicBucket}
-				AND "storage_key" LIKE ${`${canonicalPrefix}%`} ORDER BY "storage_key"
-		`);
-		expect(cancelled).toHaveLength(3);
-		expect(cancelled.every((target) => target.state === 'CANCELLED')).toBe(true);
-	} finally {
-		await input.client.$executeRaw(Prisma.sql`DELETE FROM "assets" WHERE "id" = ${assetId}`).catch(() => undefined);
-		await input.client.$executeRaw(Prisma.sql`
-			DELETE FROM "orphan_objects" WHERE "bucket" = ${buckets.publicBucket}
-				AND "storage_key" LIKE ${`${canonicalPrefix}%`}
-		`).catch(() => undefined);
-		await input.client.$executeRaw(Prisma.sql`
-			DELETE FROM "canonical_object_relocations" WHERE "work_kind" = 'asset' AND "work_ref" = ${String(assetId)}
-		`).catch(() => undefined);
-		const canonicalKeys = await input.storage.listKeys(buckets.publicBucket, canonicalPrefix).catch(() => []);
-		await input.s3.send(new DeleteObjectsCommand({
-			Bucket: buckets.publicBucket,
-			Delete: { Objects: [sourceKey, ...canonicalKeys].map((Key) => ({ Key })) },
-		})).catch(() => undefined);
-	}
 }
 
 function quoted(identifier: string): string { return `"${identifier.replaceAll('"', '""')}"`; }
@@ -294,11 +147,12 @@ async function applyMigration(databaseUrl: string, schema: string, directory: st
 	try {
 		await connection.$connect();
 		await connection.$executeRawUnsafe(`SET search_path TO ${quoted(schema)};\n${sql}`);
-	} finally { await connection.$disconnect(); }
+	} finally {
+		await connection.$disconnect();
+	}
 }
 
-async function seedLegacy(client: PrismaClient): Promise<void> {
-	const fixture = legacyCanonicalMigrationFixture;
+async function seedLegacy(client: PrismaClient, fixture: RunFixture['fixture']): Promise<void> {
 	for (const user of fixture.users) {
 		await client.$executeRaw(Prisma.sql`
 			INSERT INTO "users" ("id", "google_sub", "email", "student_id", "name", "picture", "role", "updated_at")
@@ -369,218 +223,218 @@ async function seedLegacy(client: PrismaClient): Promise<void> {
 	}
 }
 
-describe.runIf(enabled)('master fixture expand -> backfill -> preflight -> contract', () => {
-	let control: PrismaClient;
-	let migrationClient: PrismaClient;
+function sortedObjects(objects: Iterable<string>): Array<{ bucket: string; key: string }> {
+	return [...objects].map((identity) => {
+		const separator = identity.indexOf('\0');
+		return { bucket: identity.slice(0, separator), key: identity.slice(separator + 1) };
+	}).sort((left, right) => `${left.bucket}/${left.key}`.localeCompare(`${right.bucket}/${right.key}`));
+}
+
+async function cleanupTrackedObjects(
+	s3: ReturnType<typeof createIntegrationS3>,
+	tracked: ReadonlySet<string>,
+): Promise<void> {
+	const objects = sortedObjects(tracked);
+	for (const bucket of [buckets.protectedBucket, buckets.publicBucket]) {
+		const keys = objects.filter((object) => object.bucket === bucket).map(({ key }) => ({ Key: key }));
+		if (keys.length > 0) await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: keys } }));
+	}
+}
+
+async function objectDigest(
+	s3: ReturnType<typeof createIntegrationS3>,
+	bucket: string,
+	key: string,
+): Promise<{ bytes: number; sha256: string }> {
+	const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+	if (!response.Body) throw new Error(`Garage returned no body for ${bucket}/${key}`);
+	const hash = createHash('sha256');
+	let bytes = 0;
+	for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+		bytes += chunk.byteLength;
+		hash.update(chunk);
+	}
+	return { bytes, sha256: hash.digest('hex') };
+}
+
+async function listMultipartUploads(
+	s3: ReturnType<typeof createIntegrationS3>,
+	ownsKey: (bucket: string, key: string) => boolean,
+) {
+	const uploads: Array<{ bucket: string; key: string; uploadId: string }> = [];
+	for (const bucket of [buckets.protectedBucket, buckets.publicBucket]) {
+		let keyMarker: string | undefined;
+		let uploadIdMarker: string | undefined;
+		do {
+			const page = await s3.send(new ListMultipartUploadsCommand({
+				Bucket: bucket,
+				...(keyMarker ? { KeyMarker: keyMarker } : {}),
+				...(uploadIdMarker ? { UploadIdMarker: uploadIdMarker } : {}),
+			}));
+			for (const upload of page.Uploads ?? []) {
+				if (upload.Key && upload.UploadId && ownsKey(bucket, upload.Key)) {
+					uploads.push({ bucket, key: upload.Key, uploadId: upload.UploadId });
+				}
+			}
+			keyMarker = page.IsTruncated ? page.NextKeyMarker : undefined;
+			uploadIdMarker = page.IsTruncated ? page.NextUploadIdMarker : undefined;
+		} while (keyMarker || uploadIdMarker);
+	}
+	return uploads;
+}
+
+function verifier(storage: ReturnType<typeof createObjectStorage>) {
+	return {
+		async head(bucket: string, key: string) {
+			const value = await storage.head(bucket, key);
+			return value ? {
+				size: BigInt(value.size),
+				mimeType: value.contentType,
+				...(value.etag ? { etag: value.etag } : {}),
+				...(value.checksumSha256 ? { checksumSha256: value.checksumSha256 } : {}),
+			} : null;
+		},
+		async listPrefix(bucket: string, prefix: string, afterKey: string | undefined, limit: number) {
+			const page = await storage.listKeyPage(bucket, prefix, {
+				...(afterKey ? { startAfter: afterKey } : {}),
+				maxKeys: limit,
+			});
+			return { keys: page.keys, isTruncated: page.isTruncated };
+		},
+	};
+}
+
+describe.runIf(enabled)('Phase 1 canonical migration chain on PostgreSQL and Garage', () => {
+	let control: PrismaClient | undefined;
+	let migrationClient: PrismaClient | undefined;
+	let s3 = createIntegrationS3();
+	let storage = createObjectStorage(s3, { defaultPresignTtlSec: 60 });
 	let schema = '';
 	let databaseUrl = '';
-	const s3 = createS3Client({
-		S3_ENDPOINT: process.env['S3_ENDPOINT'] ?? 'http://127.0.0.1:3900',
-		S3_REGION: 'garage',
-		S3_ACCESS_KEY_ID: 'GK000000000000000000000001',
-		S3_SECRET_ACCESS_KEY: '0000000000000000000000000000000000000000000000000000000000000001',
-		S3_FORCE_PATH_STYLE: true,
-	});
-	const uploaded: Array<{ bucket: string; key: string }> = [];
-	const presigner = createProtectedDownloadPresigner(s3, { defaultPresignTtlSec: 60 });
+	let schemaDatabaseUrl = '';
+	let runFixture: RunFixture | undefined;
+	const trackedObjects = new Set<string>();
+	const track = (bucket: string, key: string) => trackedObjects.add(`${bucket}\0${key}`);
+
+	async function trackMaterializedObjects(): Promise<void> {
+		if (!migrationClient) return;
+		const objects = await migrationClient.$queryRaw<Array<{ bucket: string; key: string }>>(Prisma.sql`
+			SELECT "destination_bucket" AS "bucket", "destination_object_key" AS "key"
+			FROM "canonical_object_relocations"
+			UNION
+			SELECT "bucket", "storage_key" AS "key" FROM "orphan_objects"
+			UNION
+			SELECT "bucket", "object_key" AS "key" FROM "asset_representations"
+		`);
+		for (const object of objects) track(object.bucket, object.key);
+	}
+
+	async function restartProcess(): Promise<void> {
+		await migrationClient?.$disconnect();
+		s3.destroy();
+		migrationClient = createPrismaClientForDatabase(schemaDatabaseUrl);
+		await migrationClient.$connect();
+		s3 = createIntegrationS3();
+		storage = createObjectStorage(s3, { defaultPresignTtlSec: 60 });
+	}
 
 	beforeAll(async () => {
+		const runId = randomUUID();
+		runFixture = createRunFixture(runId);
 		databaseUrl = process.env['DATABASE_URL'] ?? '';
 		if (!databaseUrl) throw new Error('DATABASE_URL is required');
 		control = createPrismaClientForDatabase(databaseUrl);
 		await control.$connect();
 		schema = `canonical_chain_${randomUUID().replaceAll('-', '')}`;
 		await control.$executeRawUnsafe(`CREATE SCHEMA ${quoted(schema)}`);
-		const directories = (await readdir(migrationsUrl, { withFileTypes: true }))
-			.filter((entry) => entry.isDirectory() && entry.name !== contractMigration)
-			.map((entry) => entry.name).sort();
-		const masterDirectories = directories.filter((directory) => directory < canonicalExpandMigration);
+
+		const allDirectories = (await readdir(migrationsUrl, { withFileTypes: true }))
+			.filter((entry) => entry.isDirectory())
+			.map((entry) => entry.name)
+			.sort();
+		const directories = allDirectories.filter((directory) => directory <= phase1MigrationCeiling);
+		expect(directories.at(-1)).toBe(phase1MigrationCeiling);
+		const baselineDirectories = directories.filter((directory) => directory < canonicalExpandMigration);
 		const expandDirectories = directories.filter((directory) => directory >= canonicalExpandMigration);
-		for (const directory of masterDirectories) await applyMigration(databaseUrl, schema, directory);
+		for (const directory of baselineDirectories) await applyMigration(databaseUrl, schema, directory);
+
 		const url = new URL(databaseUrl);
 		url.searchParams.set('schema', schema);
-		// Raw migration SQL is deliberately model-free; force PostgreSQL's own
-		// search_path because Prisma adapter schema mapping only qualifies ORM SQL.
 		url.searchParams.set('options', `-c search_path=${schema}`);
-		migrationClient = createPrismaClientForDatabase(url.toString());
+		schemaDatabaseUrl = url.toString();
+		migrationClient = createPrismaClientForDatabase(schemaDatabaseUrl);
 		await migrationClient.$connect();
-		await seedLegacy(migrationClient);
+		await seedLegacy(migrationClient, runFixture.fixture);
 		for (const directory of expandDirectories) await applyMigration(databaseUrl, schema, directory);
-		await migrationClient.storageBucket.upsert({
-			where: { bucket: buckets.protectedBucket },
-			update: { visibility: 'PROTECTED' },
-			create: { bucket: buckets.protectedBucket, visibility: 'PROTECTED' },
+		await migrationClient.storageBucket.createMany({
+			data: [
+				{ bucket: buckets.protectedBucket, visibility: 'PROTECTED' },
+				{ bucket: buckets.publicBucket, visibility: 'PUBLIC' },
+			],
+			skipDuplicates: true,
 		});
-		await migrationClient.storageBucket.upsert({
-			where: { bucket: buckets.publicBucket },
-			update: { visibility: 'PUBLIC' },
-			create: { bucket: buckets.publicBucket, visibility: 'PUBLIC' },
-		});
-		// This test deliberately audits the complete inventory. Remove objects
-		// left by the shared integration smoke suite instead of filtering them out.
-		const cleanStorage = createObjectStorage(s3, { defaultPresignTtlSec: 60 });
-		for (const bucket of [buckets.protectedBucket, buckets.publicBucket]) {
-			const keys = await cleanStorage.listKeys(bucket, '');
-			for (let offset = 0; offset < keys.length; offset += 1_000) {
-				await s3.send(new DeleteObjectsCommand({
-					Bucket: bucket,
-					Delete: { Objects: keys.slice(offset, offset + 1_000).map((Key) => ({ Key })) },
-				}));
-			}
-		}
+
 		let marker = 1;
-		for (const object of legacyCanonicalMigrationObjectInventory) {
+		for (const object of runFixture.inventory) {
 			const bucket = object.bucket === 'protected' ? buckets.protectedBucket : buckets.publicBucket;
 			let body = Buffer.alloc(Number(object.size), marker++ % 251);
-			if (object.key === legacyCanonicalMigrationFixture.assets.find((asset) => asset.id === 42_004)!.storageKey) {
+			if (object.key === runFixture.fixture.assets.find((asset) => asset.id === runFixture!.ids.image)!.storageKey) {
 				const validWebp = await sharp({
 					create: { width: 1_200, height: 800, channels: 3, background: '#345678' },
 				}).webp().toBuffer();
 				if (validWebp.byteLength > Number(object.size)) throw new Error('fixture WebP exceeds declared legacy size');
 				body = Buffer.concat([validWebp, Buffer.alloc(Number(object.size) - validWebp.byteLength)]);
 			}
+			const digest = createHash('sha256').update(body).digest();
 			await s3.send(new PutObjectCommand({
-				Bucket: bucket, Key: object.key, Body: body,
-				ContentLength: Number(object.size), ContentType: object.mimeType,
+				Bucket: bucket,
+				Key: object.key,
+				Body: body,
+				ContentLength: body.byteLength,
+				ContentType: object.mimeType,
+				ChecksumSHA256: digest.toString('base64'),
 			}));
-			uploaded.push({ bucket, key: object.key });
+			track(bucket, object.key);
 		}
-	});
+	}, 120_000);
 
 	afterAll(async () => {
-		if (uploaded.length > 0) {
-			for (const bucket of [buckets.protectedBucket, buckets.publicBucket]) {
-				const keys = uploaded.filter((object) => object.bucket === bucket).map((object) => ({ Key: object.key }));
-				if (keys.length) await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: keys } })).catch(() => undefined);
-			}
+		await trackMaterializedObjects().catch(() => undefined);
+		await cleanupTrackedObjects(s3, trackedObjects).catch(() => undefined);
+		if (schema) {
+			await rm(`/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}`, {
+				recursive: true,
+				force: true,
+			}).catch(() => undefined);
 		}
-		if (migrationClient) await migrationClient.$disconnect().catch(() => undefined);
-		if (control && schema) await control.$executeRawUnsafe(`DROP SCHEMA IF EXISTS ${quoted(schema)} CASCADE`).catch(() => undefined);
-		if (control) await control.$disconnect().catch(() => undefined);
+		await migrationClient?.$disconnect().catch(() => undefined);
+		if (control && schema) {
+			await control.$executeRawUnsafe(`DROP SCHEMA IF EXISTS ${quoted(schema)} CASCADE`).catch(() => undefined);
+		}
+		await control?.$disconnect().catch(() => undefined);
 		s3.destroy();
 	});
 
-	it('never overwrites a concurrently installed canonical physical generation during backfill', async () => {
+	it('expands, materializes, crash-resumes, passes preflight, and accepts the Phase 2 contract', async () => {
+		if (!migrationClient || !runFixture) throw new Error('migration client was not initialized');
+		const currentRun = runFixture;
+		let injectRelocationCommitFailure = true;
 		const repository = createCanonicalBackfillRepository(migrationClient);
-		const row = await repository.getAsset(42_001);
-		expect(row).not.toBeNull();
-		await migrationClient.$executeRaw(Prisma.sql`
-			INSERT INTO "asset_representations" (
-				"id", "asset_id", "role", "bucket", "object_key", "mime_type", "size_bytes", "state", "updated_at"
-			) VALUES (
-				${randomUUID()}, 42001, 'ORIGINAL'::"AssetRepresentationRole", ${buckets.protectedBucket},
-				'protected/assets/42001/original/concurrent-generation.zip', 'application/zip', 99,
-				'READY'::"AssetRepresentationState", CURRENT_TIMESTAMP
-			)
-		`);
-		try {
-			await expect(repository.applyAsset({
-				row: row!, imageRepair: null,
-				representations: [{
-					role: 'ORIGINAL', bucket: buckets.protectedBucket,
-					objectKey: row!.storageKey!, mimeType: row!.mimeType, sizeBytes: row!.sizeBytes,
-					checksumAlgorithm: null, checksum: null, etag: 'legacy-etag',
-					sourceIdentityAlgorithm: 'S3_ETAG_SIZE',
-					sourceIdentity: `legacy-etag:${row!.sizeBytes}`,
-					width: null, height: null,
-				}],
-			})).rejects.toThrow('canonical representation conflicts');
-			const persisted = await migrationClient.assetRepresentation.findFirstOrThrow({
-				where: { assetId: 42_001, role: 'ORIGINAL' }, select: { objectKey: true },
-			});
-			expect(persisted.objectKey).toBe('protected/assets/42001/original/concurrent-generation.zip');
-		} finally {
-			await migrationClient.$executeRaw(Prisma.sql`
-				DELETE FROM "asset_representations" WHERE "asset_id" = 42001 AND "role" = 'ORIGINAL'::"AssetRepresentationRole"
-			`);
-		}
-	});
-
-	it('converges with exact counts, preserves failed-playback original, and contracts legacy catalog', async () => {
-		const storage = createObjectStorage(s3, { defaultPresignTtlSec: 60 });
-		const verifier = {
-			async head(bucket: string, key: string) {
-				const value = await storage.head(bucket, key);
-				return value ? { size: BigInt(value.size), mimeType: value.contentType, ...(value.etag ? { etag: value.etag } : {}) } : null;
-			},
-			async listPrefix(bucket: string, prefix: string, afterKey: string | undefined, limit: number) {
-				const page = await storage.listKeyPage(bucket, prefix, { ...(afterKey ? { startAfter: afterKey } : {}), maxKeys: limit });
-				return { keys: page.keys, isTruncated: page.isTruncated };
-			},
-		};
-		const repository = createCanonicalBackfillRepository(migrationClient);
-		let injectWebglCommitFailure = true;
 		const first = await runCanonicalBackfill({
 			repository: {
 				...repository,
-				applyWebgl(plan) {
-					if (plan.row.id === 41_022 && injectWebglCommitFailure) {
-						injectWebglCommitFailure = false;
-						throw new Error('injected copy-before-DB crash');
+				async markObjectRelocationMaterialized(relocation) {
+					await repository.markObjectRelocationMaterialized(relocation);
+					if (relocation.workKind === 'exhibition'
+						&& relocation.workRef === String(runFixture!.ids.exhibition)
+						&& relocation.role === 'DISPLAY_960'
+						&& injectRelocationCommitFailure) {
+						injectRelocationCommitFailure = false;
+						throw new Error('injected relocation materialized-before-representation crash');
 					}
-					return repository.applyWebgl(plan);
 				},
-			}, verifier,
-			materializer: createCanonicalObjectMaterializer(s3, { tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}` }),
-			...buckets, progress: createCanonicalBackfillProgress('apply'), options: { apply: true, batchSize: 2 },
-		});
-		const copiedKey = legacyCanonicalMigrationExpected.webglDeployment.sourceCanonicalKey;
-		uploaded.push({ bucket: buckets.protectedBucket, key: copiedKey });
-		const relocatedKeys = await migrationClient.$queryRaw<Array<{ bucket: string; objectKey: string }>>(Prisma.sql`
-			SELECT "destination_bucket" AS "bucket", "destination_object_key" AS "objectKey"
-			FROM "canonical_object_relocations" ORDER BY "destination_object_key"
-		`);
-		uploaded.push(...relocatedKeys.map((object) => ({ bucket: object.bucket, key: object.objectKey })));
-		const generatedKeys = await migrationClient.$queryRaw<Array<{ bucket: string; objectKey: string }>>(Prisma.sql`
-			SELECT r."bucket", r."object_key" AS "objectKey"
-			FROM "asset_representations" r
-			WHERE r."source_identity_algorithm" = 'MIGRATION_GENERATED_SHA256'
-		`);
-		uploaded.push(...generatedKeys.map((object) => ({ bucket: object.bucket, key: object.objectKey })));
-		expect(first.failures).toEqual([
-			expect.objectContaining({ ref: { kind: 'webgl', id: 41_022 }, code: 'CANONICAL_CONFLICT' }),
-			expect.objectContaining({ ref: { kind: 'webgl', id: 41_023 }, code: 'MALFORMED_LEGACY_ROW' }),
-		]);
-		expect(first.stats).toMatchObject({
-			assetsCreated: 1, representations: 14, deployments: 0,
-			objectCopies: 8, imageRepairs: 2,
-		});
-		expect(await migrationClient.$queryRaw<Array<{ state: string }>>(Prisma.sql`
-			SELECT "state"::text AS "state" FROM "orphan_objects"
-			WHERE "bucket" = ${buckets.protectedBucket} AND "storage_key" = ${copiedKey}
-		`)).toEqual([{ state: 'PENDING' }]);
-
-		const resumedCopy = await runCanonicalBackfill({
-			repository, verifier,
-			materializer: createCanonicalObjectMaterializer(s3, { tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}` }),
-			...buckets, progress: first.progress, options: { apply: true, batchSize: 2 },
-		});
-		expect(resumedCopy.failures).toEqual([
-			expect.objectContaining({ ref: { kind: 'webgl', id: 41_023 }, code: 'MALFORMED_LEGACY_ROW' }),
-		]);
-		expect(resumedCopy.stats).toMatchObject({
-			assetsCreated: 1, representations: 1, deployments: 1, objectsReused: 1,
-		});
-		expect(await migrationClient.$queryRaw<Array<{ state: string }>>(Prisma.sql`
-			SELECT "state"::text AS "state" FROM "orphan_objects"
-			WHERE "bucket" = ${buckets.protectedBucket} AND "storage_key" = ${copiedKey}
-		`)).toEqual([{ state: 'CANCELLED' }]);
-
-		await migrationClient.$executeRaw(Prisma.sql`UPDATE "projects" SET "webgl_entry_key" = '' WHERE "id" = 41023`);
-		const reconciled = await runCanonicalBackfill({
-			repository, verifier,
-			materializer: createCanonicalObjectMaterializer(s3, { tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}` }),
-			...buckets, progress: resumedCopy.progress, options: { apply: true, batchSize: 2 },
-		});
-		expect(reconciled.failures).toHaveLength(0);
-		await exerciseRenditionObjectBeforeDbCrash({
-			client: migrationClient,
-			s3,
-			storage,
-			schema,
-		});
-		const idempotentRerun = await runCanonicalBackfill({
-			repository, verifier,
+			},
+			verifier: verifier(storage),
 			materializer: createCanonicalObjectMaterializer(s3, {
 				tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}`,
 			}),
@@ -588,217 +442,449 @@ describe.runIf(enabled)('master fixture expand -> backfill -> preflight -> contr
 			progress: createCanonicalBackfillProgress('apply'),
 			options: { apply: true, batchSize: 2 },
 		});
-		expect(idempotentRerun.failures).toHaveLength(0);
-		expect(idempotentRerun.stats).toMatchObject({ imageRepairs: 0, objectsReused: 0 });
-
-		// Phase 1 application cutover: the canonical assetId route resolves the
-		// backfilled row, returns only a redirect, and Garage serves the byte range.
-		await exerciseCanonicalHttpAndDataPlane({
-			client: migrationClient,
-			storage,
-			presigner,
-			assetId: 42_001,
-			expectedBytes: 4_194_304n,
+		expect(first.failures).toEqual([
+			expect.objectContaining({ ref: { kind: 'exhibition', id: runFixture.ids.exhibition }, code: 'COPY_FAILED' }),
+			expect.objectContaining({ ref: { kind: 'webgl', id: runFixture.ids.malformedProject }, code: 'MALFORMED_LEGACY_ROW' }),
+		]);
+		const [crashedRelocation] = await migrationClient.$queryRaw<Array<{
+			id: string;
+			destinationBucket: string;
+			destinationObjectKey: string;
+			sizeBytes: bigint;
+			checksumSha256: string;
+			state: string;
+		}>>(Prisma.sql`
+			SELECT "id", "destination_bucket" AS "destinationBucket",
+				"destination_object_key" AS "destinationObjectKey", "size_bytes" AS "sizeBytes",
+				"checksum_sha256" AS "checksumSha256", "state"::text AS "state"
+			FROM "canonical_object_relocations"
+			WHERE "work_kind" = 'exhibition' AND "work_ref" = ${String(runFixture.ids.exhibition)}
+				AND "role" = 'DISPLAY_960'
+		`);
+		expect(crashedRelocation).toMatchObject({ state: 'MATERIALIZED' });
+		if (!crashedRelocation) throw new Error('crashed relocation was not persisted');
+		track(crashedRelocation.destinationBucket, crashedRelocation.destinationObjectKey);
+		const crashedDestinationBeforeRestart = await objectDigest(
+			s3,
+			crashedRelocation.destinationBucket,
+			crashedRelocation.destinationObjectKey,
+		);
+		expect(crashedDestinationBeforeRestart).toEqual({
+			bytes: Number(crashedRelocation.sizeBytes),
+			sha256: crashedRelocation.checksumSha256,
 		});
+		expect(await migrationClient.$queryRaw<Array<{ state: string }>>(Prisma.sql`
+			SELECT "state"::text AS "state" FROM "orphan_objects"
+			WHERE "bucket" = ${crashedRelocation.destinationBucket}
+				AND "storage_key" = ${crashedRelocation.destinationObjectKey}
+		`)).toEqual([{ state: 'PENDING' }]);
+		expect(await migrationClient.exhibition.findUniqueOrThrow({
+			where: { id: runFixture.ids.exhibition },
+			select: { posterAssetId: true },
+		})).toEqual({ posterAssetId: null });
+		await trackMaterializedObjects();
+		const objectsAtCrash = sortedObjects(trackedObjects);
+		for (const object of objectsAtCrash) expect(await storage.head(object.bucket, object.key)).not.toBeNull();
 
-			const [phase1ProjectDefault] = await migrationClient.$queryRaw<Array<{ defaultExpression: string | null }>>(Prisma.sql`
-				SELECT column_default AS "defaultExpression"
-				FROM information_schema.columns
-				WHERE table_schema = current_schema() AND table_name = 'projects' AND column_name = 'status'
-			`);
-			expect(phase1ProjectDefault?.defaultExpression).toContain('PUBLISHED');
+		const persistedProgress = JSON.parse(JSON.stringify(first.progress)) as unknown;
+		await restartProcess();
+		if (!migrationClient) throw new Error('migration client restart failed');
+		const restartedRepository = createCanonicalBackfillRepository(migrationClient);
+		const resumed = await runCanonicalBackfill({
+			repository: restartedRepository,
+			verifier: verifier(storage),
+			materializer: createCanonicalObjectMaterializer(s3, {
+				tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}`,
+			}),
+			...buckets,
+			progress: parseCanonicalBackfillProgress(persistedProgress, 'apply'),
+			options: { apply: true, batchSize: 2 },
+		});
+		expect(resumed.failures).toEqual([
+			expect.objectContaining({ ref: { kind: 'webgl', id: runFixture.ids.malformedProject }, code: 'MALFORMED_LEGACY_ROW' }),
+		]);
+		expect(resumed.stats).toMatchObject({ objectsReused: 3 });
+		expect(await objectDigest(
+			s3,
+			crashedRelocation.destinationBucket,
+			crashedRelocation.destinationObjectKey,
+		)).toEqual(crashedDestinationBeforeRestart);
+		expect(await migrationClient.$queryRaw<Array<{ state: string }>>(Prisma.sql`
+			SELECT "state"::text AS "state" FROM "canonical_object_relocations"
+			WHERE "id" = ${crashedRelocation.id}
+		`)).toEqual([{ state: 'COMMITTED' }]);
+		expect(await migrationClient.$queryRaw<Array<{ state: string }>>(Prisma.sql`
+			SELECT "state"::text AS "state" FROM "orphan_objects"
+			WHERE "bucket" = ${crashedRelocation.destinationBucket}
+				AND "storage_key" = ${crashedRelocation.destinationObjectKey}
+		`)).toEqual([{ state: 'CANCELLED' }]);
+		await trackMaterializedObjects();
+		expect(sortedObjects(trackedObjects)).toEqual(objectsAtCrash);
 
-			for (const name of legacyBridgeMetricNames) {
-				await migrationClient.$executeRaw(Prisma.sql`
-					INSERT INTO "migration_metrics" ("name", "scope", "value", "last_observed_at", "updated_at")
-					VALUES
-						(${name}, '', 9, CURRENT_TIMESTAMP - INTERVAL '25 hours', CURRENT_TIMESTAMP),
-						(${name}, 'legacy-scope', 7, CURRENT_TIMESTAMP - INTERVAL '25 hours', CURRENT_TIMESTAMP)
-				`);
-			}
-			const resetAt = new Date('2026-08-24T01:02:03.456Z');
-			const preflightRepository = createContractPreflightRepository(migrationClient);
-			await preflightRepository.resetLegacyBridgeObservations(resetAt);
-			const resetMetrics = await migrationClient.$queryRaw<Array<{
-				name: string; scope: string; value: bigint; lastObservedAt: Date;
-			}>>(Prisma.sql`
-				SELECT "name", "scope", "value", "last_observed_at" AS "lastObservedAt"
-				FROM "migration_metrics"
-				WHERE "name" IN (${Prisma.join([...legacyBridgeMetricNames])})
-				ORDER BY "name", "scope"
-			`);
-			expect(resetMetrics).toHaveLength(legacyBridgeMetricNames.length * 2);
-			expect(resetMetrics.every((metric) => metric.value === 0n && metric.lastObservedAt.getTime() === resetAt.getTime())).toBe(true);
-			for (const name of legacyBridgeMetricNames) {
-				expect(resetMetrics.some((metric) => metric.name === name && metric.scope === '')).toBe(true);
-			}
-			await migrationClient.$executeRaw(Prisma.sql`
-				UPDATE "migration_metrics" SET "last_observed_at" = CURRENT_TIMESTAMP - INTERVAL '25 hours'
-				WHERE "name" IN (${Prisma.join([...legacyBridgeMetricNames])})
-			`);
-		const objects = [
-			...(await storage.listKeys(buckets.protectedBucket, '')).map((key) => ({ bucket: buckets.protectedBucket, key })),
-			...(await storage.listKeys(buckets.publicBucket, '')).map((key) => ({ bucket: buckets.publicBucket, key })),
-		];
-		const multipartProbeKey = `protected/uploads/${schema}/active-probe.zip`;
-		const multipartProbeId = await storage.createMultipart(buckets.protectedBucket, multipartProbeKey);
-		const activeMultipart = (await storage.listMultipartUploads(buckets.protectedBucket, multipartProbeKey))
-			.map((upload) => ({ bucket: buckets.protectedBucket, key: upload.key, uploadId: upload.uploadId }));
-		const multipartBlocked = await runContractPreflight({
-			repository: createContractPreflightRepository(migrationClient),
-			inventory: { identity: `garage-active-multipart:${schema}`, capturedAt: new Date().toISOString(), objects, multipartUploads: activeMultipart },
-			head: async (bucket, key, signal) => {
-				const metadata = await storage.head(bucket, key, { signal });
-				return metadata ? {
-					sizeBytes: BigInt(metadata.size), mimeType: metadata.contentType,
-					etag: metadata.etag ?? null, checksumSha256: metadata.checksumSha256 ?? null,
-				} : null;
+		await migrationClient.$executeRaw(Prisma.sql`
+			UPDATE "projects" SET "webgl_entry_key" = '' WHERE "id" = ${runFixture.ids.malformedProject}
+		`);
+		const reconciled = await runCanonicalBackfill({
+			repository: restartedRepository,
+			verifier: verifier(storage),
+			materializer: createCanonicalObjectMaterializer(s3, {
+				tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}`,
+			}),
+			...buckets,
+			progress: resumed.progress,
+			options: { apply: true, batchSize: 2 },
+		});
+		expect(reconciled.failures).toHaveLength(0);
+		const copiedKey = runFixture.expected.webglSourceKey;
+		const copiedHead = await storage.head(buckets.protectedBucket, copiedKey);
+		expect(copiedHead).toMatchObject({
+			size: Number(currentRun.fixture.assets.find((asset) => asset.id === currentRun.ids.legacyWebglGame)!.sizeBytes),
+			contentType: 'application/zip',
+			checksumSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+		});
+		const webglSourceKey = currentRun.fixture.assets.find((asset) => asset.id === currentRun.ids.legacyWebglGame)!.storageKey;
+		expect(await objectDigest(s3, buckets.protectedBucket, copiedKey)).toEqual(
+			await objectDigest(s3, buckets.protectedBucket, webglSourceKey),
+		);
+
+		const countsBeforeRestart = await migrationClient.$queryRaw<Array<{
+			assets: bigint; representations: bigint; deployments: bigint; relocations: bigint;
+		}>>(Prisma.sql`
+			SELECT (SELECT count(*) FROM "assets") AS "assets",
+				(SELECT count(*) FROM "asset_representations") AS "representations",
+				(SELECT count(*) FROM "webgl_deployments") AS "deployments",
+				(SELECT count(*) FROM "canonical_object_relocations") AS "relocations"
+		`);
+		expect(countsBeforeRestart).toEqual([{ assets: 10n, representations: 15n, deployments: 1n, relocations: 7n }]);
+		const representationsFor = (assetId: number) => migrationClient!.assetRepresentation.findMany({
+			where: { assetId },
+			orderBy: { role: 'asc' as const },
+			select: {
+				role: true,
+				bucket: true,
+				objectKey: true,
+				sourceIdentityAlgorithm: true,
+				checksumAlgorithm: true,
 			},
-			options: { protectedBucket: buckets.protectedBucket, publicBucket: buckets.publicBucket },
 		});
-		expect(multipartBlocked.blockers.activeGarageMultipartUploads.count).toBe(1);
-		await storage.abortMultipart(buckets.protectedBucket, multipartProbeKey, multipartProbeId);
-		expect(await storage.listMultipartUploads(buckets.protectedBucket, multipartProbeKey)).toHaveLength(0);
+		const gameRepresentations = await representationsFor(runFixture.ids.game);
+		expect(gameRepresentations).toEqual([expect.objectContaining({
+			role: 'ORIGINAL',
+			bucket: buckets.protectedBucket,
+			objectKey: currentRun.fixture.assets.find((asset) => asset.id === currentRun.ids.game)!.storageKey,
+		})]);
+		const videoRepresentations = await representationsFor(runFixture.ids.video);
+		expect(videoRepresentations.map(({ role }) => role)).toEqual(['ORIGINAL', 'PLAYBACK']);
+		const videoFixture = currentRun.fixture.assets.find((asset) => asset.id === currentRun.ids.video)!;
+		expect(videoRepresentations.map(({ bucket, objectKey }) => ({ bucket, objectKey }))).toEqual([
+			{ bucket: buckets.protectedBucket, objectKey: videoFixture.storageKey },
+			{ bucket: buckets.protectedBucket, objectKey: videoFixture.playbackStorageKey },
+		]);
+		const posterRepresentations = await representationsFor(runFixture.ids.poster);
+		expect(posterRepresentations.map(({ role }) => role)).toEqual(['ORIGINAL', 'CARD_480', 'DISPLAY_960']);
+		expect(posterRepresentations.every((representation) => (
+			representation.bucket === buckets.publicBucket
+			&& representation.objectKey.startsWith(`public/images/${runFixture!.ids.poster}/${representation.role.toLowerCase()}/`)
+			&& representation.sourceIdentityAlgorithm === 'MIGRATION_COPY_SHA256'
+		))).toBe(true);
+		const imageRepresentations = await representationsFor(runFixture.ids.image);
+		expect(imageRepresentations.map(({ role }) => role)).toEqual(['ORIGINAL', 'CARD_480', 'DISPLAY_960']);
+		expect(imageRepresentations.map(({ role, sourceIdentityAlgorithm }) => ({ role, sourceIdentityAlgorithm }))).toEqual([
+			{ role: 'ORIGINAL', sourceIdentityAlgorithm: 'MIGRATION_COPY_SHA256' },
+			{ role: 'CARD_480', sourceIdentityAlgorithm: 'MIGRATION_GENERATED_SHA256' },
+			{ role: 'DISPLAY_960', sourceIdentityAlgorithm: 'MIGRATION_GENERATED_SHA256' },
+		]);
+		expect(imageRepresentations.every((representation) => (
+			representation.bucket === buckets.publicBucket
+			&& representation.objectKey.startsWith(`public/images/${runFixture!.ids.image}/${representation.role.toLowerCase()}/`)
+			&& representation.checksumAlgorithm === 'SHA256'
+		))).toBe(true);
+		const legacyWebglGameRepresentations = await representationsFor(runFixture.ids.legacyWebglGame);
+		expect(legacyWebglGameRepresentations).toEqual([expect.objectContaining({
+			role: 'ORIGINAL',
+			bucket: buckets.protectedBucket,
+			objectKey: webglSourceKey,
+		})]);
+		expect(await migrationClient.assetRepresentation.count({
+			where: { assetId: { in: [runFixture.ids.deleted, runFixture.ids.failed] } },
+		})).toBe(0);
+		const playbackFailedRepresentations = await representationsFor(runFixture.ids.playbackFailed);
+		expect(playbackFailedRepresentations).toEqual([expect.objectContaining({
+			role: 'ORIGINAL',
+			bucket: buckets.protectedBucket,
+			objectKey: currentRun.fixture.assets.find((asset) => asset.id === currentRun.ids.playbackFailed)!.storageKey,
+		})]);
+		expect(await migrationClient.webglDeployment.count({
+			where: { projectId: runFixture.ids.malformedProject },
+		})).toBe(0);
+		const webglDeployment = await migrationClient.webglDeployment.findFirstOrThrow({
+			where: { projectId: runFixture.ids.archivedProject },
+			select: {
+				sourceRepresentation: {
+					select: {
+						role: true,
+						bucket: true,
+						objectKey: true,
+						sizeBytes: true,
+						checksum: true,
+						state: true,
+						asset: { select: { id: true, kind: true } },
+					},
+				},
+			},
+		});
+		expect(webglDeployment.sourceRepresentation.asset).toMatchObject({ kind: 'WEBGL' });
+		expect(webglDeployment.sourceRepresentation.asset.id).not.toBe(runFixture.ids.legacyWebglGame);
+		expect(webglDeployment.sourceRepresentation).toEqual({
+			asset: webglDeployment.sourceRepresentation.asset,
+			role: 'WEBGL_SOURCE',
+			bucket: buckets.protectedBucket,
+			objectKey: copiedKey,
+			sizeBytes: BigInt(copiedHead!.size),
+			checksum: copiedHead!.checksumSha256,
+			state: 'READY',
+		});
+		const exhibitionPoster = await migrationClient.exhibition.findUniqueOrThrow({
+			where: { id: runFixture.ids.exhibition },
+			select: {
+				poster: {
+					select: {
+						representations: {
+							orderBy: { role: 'asc' },
+							select: { role: true, bucket: true, objectKey: true, sourceIdentityAlgorithm: true },
+						},
+					},
+				},
+			},
+		});
+		expect(exhibitionPoster.poster?.representations.map(({ role }) => role)).toEqual([
+			'ORIGINAL', 'CARD_480', 'DISPLAY_960',
+		]);
+		expect(exhibitionPoster.poster?.representations.every((representation) => (
+			representation.bucket === buckets.publicBucket
+			&& representation.objectKey.startsWith(`public/images/exhibitions/${runFixture!.ids.exhibition}/${representation.role.toLowerCase()}/`)
+			&& representation.sourceIdentityAlgorithm === 'MIGRATION_COPY_SHA256'
+		))).toBe(true);
+		const relocationRows = await migrationClient.$queryRaw<Array<{
+			sourceBucket: string;
+			sourceObjectKey: string;
+			destinationBucket: string;
+			destinationObjectKey: string;
+			sizeBytes: bigint;
+			checksumSha256: string;
+			state: string;
+		}>>(Prisma.sql`
+			SELECT "source_bucket" AS "sourceBucket", "source_object_key" AS "sourceObjectKey",
+				"destination_bucket" AS "destinationBucket", "destination_object_key" AS "destinationObjectKey",
+				"size_bytes" AS "sizeBytes", "checksum_sha256" AS "checksumSha256", "state"::text AS "state"
+			FROM "canonical_object_relocations"
+		`);
+		expect(relocationRows).toHaveLength(7);
+		for (const relocation of relocationRows) {
+			expect(relocation.state).toBe('COMMITTED');
+			const sourceHead = await storage.head(relocation.sourceBucket, relocation.sourceObjectKey);
+			const destinationHead = await storage.head(relocation.destinationBucket, relocation.destinationObjectKey);
+			expect(destinationHead).toMatchObject({
+				size: Number(relocation.sizeBytes),
+				checksumSha256: relocation.checksumSha256,
+			});
+			expect(sourceHead).toMatchObject({
+				size: Number(relocation.sizeBytes),
+				checksumSha256: relocation.checksumSha256,
+			});
+			expect(await objectDigest(s3, relocation.destinationBucket, relocation.destinationObjectKey)).toEqual(
+				await objectDigest(s3, relocation.sourceBucket, relocation.sourceObjectKey),
+			);
+		}
+		expect(await migrationClient.$queryRaw<Array<{ bucket: string; key: string; copies: bigint }>>(Prisma.sql`
+			SELECT "destination_bucket" AS "bucket", "destination_object_key" AS "key", count(*) AS "copies"
+			FROM "canonical_object_relocations"
+			GROUP BY "destination_bucket", "destination_object_key" HAVING count(*) > 1
+		`)).toEqual([]);
+		await trackMaterializedObjects();
+		const objectsBeforeRestart = sortedObjects(trackedObjects);
+		for (const object of objectsBeforeRestart) expect(await storage.head(object.bucket, object.key)).not.toBeNull();
+
+		await restartProcess();
+		if (!migrationClient) throw new Error('migration client idempotency restart failed');
+		const idempotent = await runCanonicalBackfill({
+			repository: createCanonicalBackfillRepository(migrationClient),
+			verifier: verifier(storage),
+			materializer: createCanonicalObjectMaterializer(s3, {
+				tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}`,
+			}),
+			...buckets,
+			progress: createCanonicalBackfillProgress('apply'),
+			options: { apply: true, batchSize: 2 },
+		});
+		expect(idempotent.failures).toHaveLength(0);
+		expect(idempotent.stats).toMatchObject({ objectCopies: 0, objectsReused: 0, imageRepairs: 0 });
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT (SELECT count(*) FROM "assets") AS "assets",
+				(SELECT count(*) FROM "asset_representations") AS "representations",
+				(SELECT count(*) FROM "webgl_deployments") AS "deployments",
+				(SELECT count(*) FROM "canonical_object_relocations") AS "relocations"
+		`)).toEqual(countsBeforeRestart);
+		await trackMaterializedObjects();
+		expect(sortedObjects(trackedObjects)).toEqual(objectsBeforeRestart);
+		for (const object of objectsBeforeRestart) expect(await storage.head(object.bucket, object.key)).not.toBeNull();
+
+		const preflightNow = new Date('2026-08-25T12:00:00.000Z');
+		const observedAt = new Date(preflightNow.getTime() - 25 * 60 * 60 * 1_000);
+		for (const name of LEGACY_BRIDGE_METRIC_NAMES) {
+			await migrationClient.$executeRaw(Prisma.sql`
+				INSERT INTO "migration_metrics" ("name", "scope", "value", "last_observed_at", "details", "updated_at")
+				VALUES (${name}, '', 0, ${observedAt}, '{"fixture":"explicit-25h-observation"}'::jsonb, CURRENT_TIMESTAMP)
+			`);
+		}
+		const inventory = sortedObjects(trackedObjects);
+		const ownsRunKey = (bucket: string, key: string): boolean => trackedObjects.has(`${bucket}\0${key}`)
+			|| key.startsWith(`migration-runs/${currentRun.runId}/`)
+			|| (bucket === buckets.publicBucket && (
+				key.startsWith(currentRun.expected.publicPrefix)
+				|| key.startsWith(`public/images/${currentRun.ids.poster}/`)
+				|| key.startsWith(`public/images/${currentRun.ids.image}/`)
+				|| key.startsWith(`public/images/exhibitions/${currentRun.ids.exhibition}/`)
+			))
+			|| (bucket === buckets.protectedBucket && (
+				key.startsWith(`webgl/${currentRun.ids.archivedProject}/${currentRun.runId}/`)
+				|| key.startsWith(`protected/assets/webgl/${currentRun.ids.archivedProject}/${currentRun.runId}/`)
+			));
+		const multipartUploads = await listMultipartUploads(s3, ownsRunKey);
+		expect(multipartUploads).toEqual([]);
 		const report = await runContractPreflight({
 			repository: createContractPreflightRepository(migrationClient),
-			inventory: { identity: `garage-fixture:${schema}`, capturedAt: new Date().toISOString(), objects, multipartUploads: [] },
+			inventory: {
+				identity: `phase1-canonical-chain:${schema}`,
+				capturedAt: preflightNow.toISOString(),
+				objects: inventory,
+				multipartUploads,
+			},
 			head: async (bucket, key, signal) => {
 				const metadata = await storage.head(bucket, key, { signal });
 				return metadata ? {
-					sizeBytes: BigInt(metadata.size), mimeType: metadata.contentType,
-					etag: metadata.etag ?? null, checksumSha256: metadata.checksumSha256 ?? null,
+					sizeBytes: BigInt(metadata.size),
+					mimeType: metadata.contentType,
+					etag: metadata.etag ?? null,
+					checksumSha256: metadata.checksumSha256 ?? null,
 				} : null;
 			},
+			now: () => preflightNow,
 			options: { protectedBucket: buckets.protectedBucket, publicBucket: buckets.publicBucket },
 		});
+		expect(report.metricObservationReset).toBe(false);
 		expect(report.clean, JSON.stringify(report.blockers, null, 2)).toBe(true);
-		const [countDefinitions] = await migrationClient.$queryRaw<Array<{
-			legacyRowsTotal: bigint; legacyRowsTerminal: bigint; backfilledCanonicalRows: bigint;
-		}>>(Prisma.sql`
-			SELECT
-				((SELECT count(*) FROM "assets" WHERE "storage_key" IS NOT NULL OR "playback_storage_key" IS NOT NULL)
-				+ (SELECT count(*) FROM "exhibitions" WHERE "poster_storage_key" IS NOT NULL)
-				+ (SELECT count(*) FROM "projects" WHERE "webgl_entry_key" <> '')) AS "legacyRowsTotal",
-				(SELECT count(*) FROM "assets" WHERE "status"::text IN ('DELETED', 'FAILED')
-					AND ("storage_key" IS NOT NULL OR "playback_storage_key" IS NOT NULL)) AS "legacyRowsTerminal",
-				((SELECT count(DISTINCT a."id") FROM "assets" a
-					JOIN "asset_representations" r ON r."asset_id" = a."id")
-				+ (SELECT count(*) FROM "webgl_deployments")) AS "backfilledCanonicalRows"
-		`);
-		expect(countDefinitions).toEqual({
-			legacyRowsTotal: 10n,
-			legacyRowsTerminal: 2n,
-			backfilledCanonicalRows: 9n,
-		});
-			expect(report.counts).toEqual({
-			legacyRowsTotal: 10,
-			legacyRowsTerminal: 2,
+		expect(report.blockers.duplicateCanonicalOwnership.count).toBe(0);
+		expect(report.blockers.activeGarageMultipartUploads.count).toBe(0);
+		expect(report.counts).toMatchObject({
 			backfilledCanonicalRows: 9,
 			verifiedCanonicalObjects: 18,
 			verifiedRelocationSources: 7,
 			physicalCopies: 8,
 			generatedRenditions: 2,
 			unresolvedRows: 0,
-			orphanObjects: 0,
-			duplicateOwnership: 0,
 			legacyFallbackReads: 0,
 		});
-
-		const [failedPlayback] = await migrationClient.$queryRaw<Array<{ originalCount: bigint; playbackCount: bigint }>>(Prisma.sql`
-			SELECT count(*) FILTER (WHERE "role"::text = 'ORIGINAL') AS "originalCount",
-				count(*) FILTER (WHERE "role"::text = 'PLAYBACK') AS "playbackCount"
-			FROM "asset_representations" WHERE "asset_id" = 42008
+		const observations = await migrationClient.$queryRaw<Array<{ value: bigint; lastObservedAt: Date }>>(Prisma.sql`
+			SELECT "value", "last_observed_at" AS "lastObservedAt"
+			FROM "migration_metrics"
+			WHERE "name" IN (${Prisma.join([...LEGACY_BRIDGE_METRIC_NAMES])})
 		`);
-		expect(failedPlayback).toEqual({ originalCount: 1n, playbackCount: 0n });
-		const owners = await migrationClient.$queryRaw<Array<{ kind: string; objectKey: string }>>(Prisma.sql`
-			SELECT a."kind"::text AS "kind", r."object_key" AS "objectKey"
-			FROM "assets" a JOIN "asset_representations" r ON r."asset_id" = a."id"
-			WHERE a."project_id" = 41022 AND r."role"::text IN ('ORIGINAL', 'WEBGL_SOURCE') ORDER BY a."kind"::text
-		`);
-		expect(owners).toEqual([
-			{ kind: 'GAME', objectKey: 'webgl/41022/3f3df944-a7e3-430d-a9c1-915caa2e1d5b/source.zip' },
-			{ kind: 'WEBGL', objectKey: copiedKey },
-		]);
+		expect(observations).toHaveLength(LEGACY_BRIDGE_METRIC_NAMES.length);
+		expect(observations.every((metric) => (
+			metric.value === 0n && metric.lastObservedAt?.getTime() === observedAt.getTime()
+		))).toBe(true);
 
-			const contract = await readFile(new URL(`${contractMigration}/migration.sql`, migrationsUrl), 'utf8');
-			await migrationClient.$executeRawUnsafe(contract);
-			const [phase2ProjectDefault] = await migrationClient.$queryRaw<Array<{ defaultExpression: string | null }>>(Prisma.sql`
-				SELECT column_default AS "defaultExpression"
-				FROM information_schema.columns
-				WHERE table_schema = current_schema() AND table_name = 'projects' AND column_name = 'status'
-			`);
-			expect(phase2ProjectDefault?.defaultExpression).toContain('DRAFT');
-		const relocationCleanup = await migrationClient.$queryRaw<Array<{ id: number; bucket: string; storageKey: string }>>(Prisma.sql`
-			SELECT "id", "bucket", "storage_key" AS "storageKey"
+		const assetsBeforeContract = await migrationClient.$queryRaw<Array<{
+			id: number; projectId: number | null; exhibitionId: number | null; kind: string; status: string;
+		}>>(Prisma.sql`
+			SELECT "id", "project_id" AS "projectId", "exhibition_id" AS "exhibitionId",
+				"kind"::text AS "kind", "status"::text AS "status"
+			FROM "assets" ORDER BY "id"
+		`);
+		const representationsBeforeContract = await migrationClient.$queryRaw<Array<{
+			id: string; assetId: number; role: string; bucket: string; objectKey: string; state: string;
+		}>>(Prisma.sql`
+			SELECT "id", "asset_id" AS "assetId", "role"::text AS "role", "bucket",
+				"object_key" AS "objectKey", "state"::text AS "state"
+			FROM "asset_representations" ORDER BY "id"
+		`);
+		const deploymentsBeforeContract = await migrationClient.$queryRaw<Array<{
+			id: string; projectId: number; sourceRepresentationId: string;
+			publicBucket: string; publicPrefix: string; entryObjectKey: string; state: string;
+		}>>(Prisma.sql`
+			SELECT "id", "project_id" AS "projectId", "source_representation_id" AS "sourceRepresentationId",
+				"public_bucket" AS "publicBucket", "public_prefix" AS "publicPrefix",
+				"entry_object_key" AS "entryObjectKey", "state"::text AS "state"
+			FROM "webgl_deployments" ORDER BY "id"
+		`);
+
+		const videoOrdersBeforeContract = await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "video_sort_order" FROM "assets" WHERE "kind" = 'VIDEO' ORDER BY "id"
+		`);
+		await applyMigration(databaseUrl, schema, contractMigration);
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "video_sort_order" FROM "assets" WHERE "kind" = 'VIDEO' ORDER BY "id"
+		`)).toEqual(videoOrdersBeforeContract);
+
+
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "project_id" AS "projectId", "exhibition_id" AS "exhibitionId",
+				"kind"::text AS "kind", "status"::text AS "status"
+			FROM "assets" ORDER BY "id"
+		`)).toEqual(assetsBeforeContract);
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "asset_id" AS "assetId", "role"::text AS "role", "bucket",
+				"object_key" AS "objectKey", "state"::text AS "state"
+			FROM "asset_representations" ORDER BY "id"
+		`)).toEqual(representationsBeforeContract);
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "project_id" AS "projectId", "source_representation_id" AS "sourceRepresentationId",
+				"public_bucket" AS "publicBucket", "public_prefix" AS "publicPrefix",
+				"entry_object_key" AS "entryObjectKey", "state"::text AS "state"
+			FROM "webgl_deployments" ORDER BY "id"
+		`)).toEqual(deploymentsBeforeContract);
+
+		const [legacyCatalog] = await migrationClient.$queryRaw<Array<{
+			tables: bigint; columns: bigint;
+		}>>(Prisma.sql`
+			SELECT
+				(SELECT count(*) FROM information_schema.tables
+					WHERE table_schema = current_schema() AND table_name IN (
+						'game_upload_active_sessions', 'game_upload_part_claims', 'game_upload_parts',
+						'game_upload_sessions', 'migration_metrics', 'canonical_object_relocations'
+					)) AS "tables",
+				(SELECT count(*) FROM information_schema.columns
+					WHERE table_schema = current_schema() AND (
+						(table_name = 'projects' AND column_name = 'webgl_entry_key')
+						OR (table_name = 'exhibitions' AND column_name IN (
+							'poster_storage_key', 'poster_original_name', 'poster_mime_type', 'poster_size_bytes',
+							'poster_width', 'poster_height', 'poster_card_480_height', 'poster_display_960_height'
+						))
+						OR (table_name = 'assets' AND column_name IN (
+							'storage_key', 'playback_storage_key', 'mime_type', 'playback_mime_type', 'size_bytes',
+							'width', 'height', 'card_480_height', 'display_960_height', 'playback_size_bytes',
+							'playback_status', 'playback_error', 'is_public'
+						))
+					)) AS "columns"
+		`);
+		expect(legacyCatalog).toEqual({ tables: 0n, columns: 0n });
+
+		const relocationCleanup = await migrationClient.$queryRaw<Array<{
+			bucket: string; key: string; state: string;
+		}>>(Prisma.sql`
+			SELECT "bucket", "storage_key" AS "key", "state"::text AS "state"
 			FROM "orphan_objects"
-			WHERE "reason" = 'canonical-contract-relocation-source' AND "state"::text = 'PENDING'
-			ORDER BY "id"
+			WHERE "reason" = 'canonical-contract-relocation-source'
+			ORDER BY "bucket", "storage_key"
 		`);
-		expect(relocationCleanup).toHaveLength(7);
-		for (const bucket of new Set(relocationCleanup.map((cleanup) => cleanup.bucket))) {
-			const keys = relocationCleanup.filter((cleanup) => cleanup.bucket === bucket).map((cleanup) => ({ Key: cleanup.storageKey }));
-			await s3.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: keys } }));
-		}
-		await migrationClient.$executeRaw(Prisma.sql`
-			UPDATE "orphan_objects" SET "state" = 'RESOLVED'::"OrphanState", "resolved_at" = CURRENT_TIMESTAMP
-			WHERE "id" IN (${Prisma.join(relocationCleanup.map((cleanup) => cleanup.id))})
-		`);
-		expect(await Promise.all(relocationCleanup.map((cleanup) => storage.head(cleanup.bucket, cleanup.storageKey)))).toEqual(
-			relocationCleanup.map(() => null),
-		);
-		expect(await migrationClient.orphanObject.count({
-			where: { id: { in: relocationCleanup.map((cleanup) => cleanup.id) }, state: 'RESOLVED' },
-		})).toBe(7);
-		const [catalog] = await migrationClient.$queryRaw<Array<{ assets: bigint; representations: bigint; deployments: bigint; legacyTables: bigint; legacyColumns: bigint }>>(Prisma.sql`
-			SELECT (SELECT count(*) FROM "assets") AS "assets",
-				(SELECT count(*) FROM "asset_representations") AS "representations",
-				(SELECT count(*) FROM "webgl_deployments") AS "deployments",
-				(SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()
-					AND table_name IN ('game_upload_sessions', 'game_upload_parts', 'game_upload_part_claims', 'game_upload_active_sessions', 'migration_metrics')) AS "legacyTables",
-				(SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema()
-					AND table_name = 'assets' AND column_name IN ('storage_key', 'playback_storage_key', 'playback_status')) AS "legacyColumns"
-		`);
-		expect(catalog).toEqual({ assets: 10n, representations: 15n, deployments: 1n, legacyTables: 0n, legacyColumns: 0n });
-
-		// Final Phase 2 runtime uses the same canonical resolver with the legacy
-		// catalog physically absent, then allocates every supported direct-upload
-		// kind through PostgreSQL + Garage control operations only.
-		await exerciseCanonicalHttpAndDataPlane({
-			client: migrationClient,
-			storage,
-			presigner,
-			assetId: 42_001,
-			expectedBytes: 4_194_304n,
-		});
-		await exerciseFiveKindDirectControls({ client: migrationClient, s3 });
-	});
-
-	it('materializes missing responsive bytes under bounded decoding and reuses checksum-identical outputs', async () => {
-		const sourceKey = `${LEGACY_MIGRATION_FIXTURE_NAMESPACE}/${schema}/repair-source.png`;
-		const source = await sharp({ create: { width: 1_200, height: 800, channels: 3, background: '#345678' } }).png().toBuffer();
-		await s3.send(new PutObjectCommand({
-			Bucket: buckets.publicBucket, Key: sourceKey, Body: source,
-			ContentLength: source.byteLength, ContentType: 'image/png',
-		}));
-		const targets = [
-			{ role: 'CARD_480' as const, width: 480 as const, objectKey: `${sourceKey}/__pcu_image_rendition__/v1/card-480.webp` },
-			{ role: 'DISPLAY_960' as const, width: 960 as const, objectKey: `${sourceKey}/__pcu_image_rendition__/v1/display-960.webp` },
-		];
-		uploaded.push({ bucket: buckets.publicBucket, key: sourceKey }, ...targets.map((target) => ({ bucket: buckets.publicBucket, key: target.objectKey })));
-		const materializer = createCanonicalObjectMaterializer(s3, { tempRoot: `/tmp/${LEGACY_MIGRATION_FIXTURE_NAMESPACE}-${schema}` });
-		const repair = {
-			sourceBucket: buckets.publicBucket, sourceKey, sourceMimeType: 'image/png',
-			sourceSizeBytes: BigInt(source.byteLength), missing: targets,
-		};
-		const first = await materializer.ensureImageRenditions(repair);
-		expect(first).toMatchObject({ created: 2, reused: 0 });
-		expect(first.representations.map((representation) => [representation.role, representation.width, representation.height])).toEqual([
-			['CARD_480', 480, 320], ['DISPLAY_960', 960, 640],
-		]);
-		const rerun = await materializer.ensureImageRenditions(repair);
-		expect(rerun).toMatchObject({ created: 0, reused: 2 });
-		expect(rerun.representations.map((representation) => representation.checksum)).toEqual(
-			first.representations.map((representation) => representation.checksum),
-		);
-	});
+		expect(relocationCleanup).toEqual(relocationRows
+			.map((relocation) => ({
+				bucket: relocation.sourceBucket,
+				key: relocation.sourceObjectKey,
+				state: 'PENDING',
+			}))
+			.sort((left, right) => `${left.bucket}/${left.key}`.localeCompare(`${right.bucket}/${right.key}`)));
+		expect(await storage.head(buckets.protectedBucket, copiedKey)).toMatchObject(copiedHead!);
+	}, 120_000);
 });

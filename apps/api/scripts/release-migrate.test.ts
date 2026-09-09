@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	BASELINE_MIGRATION,
+	PROJECT_VIDEO_ORDER_MIGRATION,
 	PROJECT_PUBLICATION_MIGRATION,
 	REQUIRED_EXPAND_MIGRATIONS,
 	assertNoFailedReleaseMigration,
@@ -20,6 +21,19 @@ function completePhase1History(): MigrationRow[] {
 }
 
 describe('Phase 1 release migration history policy', () => {
+	it('requires the additive project video order migration before Phase 1 can run', () => {
+		const missing = completePhase1History().filter(
+			(row) => row.migration_name !== PROJECT_VIDEO_ORDER_MIGRATION,
+		);
+
+		expect(releaseStatus(missing)).toMatchObject({
+			canonicalObjectRelocationExpand: true,
+			projectVideoOrderExpand: false,
+			expand: false,
+		});
+		expect(() => assertRuntime(missing, 'phase1')).toThrow('phase1 runtime requires expand=applied');
+	});
+
 	it('rejects history missing the project publication expand migration', () => {
 		const missing = completePhase1History().filter(
 			(row) => row.migration_name !== PROJECT_PUBLICATION_MIGRATION,

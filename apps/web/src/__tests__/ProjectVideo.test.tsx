@@ -32,7 +32,7 @@ describe('ProjectVideo', () => {
 	it('uses the closest DISPLAY_960 candidate for the video poster attribute', () => {
 		const { container } = render(
 			<ProjectVideo
-				video={{ url: 'https://videos.test/video.mp4', mimeType: 'video/mp4' }}
+				video={{ assetId: 1, sortOrder: 0, role: 'MAIN', url: 'https://videos.test/video.mp4', mimeType: 'video/mp4' }}
 				poster={poster}
 				title="Game"
 			/>,
@@ -55,7 +55,7 @@ describe('ProjectVideo', () => {
 		};
 		const { container } = render(
 			<ProjectVideo
-				video={{ url: 'https://videos.test/video.mp4', mimeType: 'video/mp4' }}
+				video={{ assetId: 1, sortOrder: 0, role: 'MAIN', url: 'https://videos.test/video.mp4', mimeType: 'video/mp4' }}
 				poster={smallPoster}
 				title="Game"
 			/>,
@@ -70,6 +70,9 @@ describe('ProjectVideo', () => {
 		const { container } = render(
 			<ProjectVideo
 				video={{
+					assetId: 42,
+					sortOrder: 0,
+					role: 'MAIN',
 					mimeType: 'video/quicktime',
 					originalDownloadUrl: 'https://api.test/api/assets/42/download?variant=original',
 					playbackStatus: 'FAILED',

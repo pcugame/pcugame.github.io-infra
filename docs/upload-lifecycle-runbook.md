@@ -38,6 +38,87 @@ Backfill progress, failures, and reports live under `cutover-state/`. Do not del
 them between retries. The compiled CLI is idempotent and resumes from its progress
 file; do not use the TypeScript source runner in production.
 
+## Project video order expansion
+
+`20260821800000_project_video_order_expand` is a later additive Phase 1
+migration. It adds nullable `assets.video_sort_order`, backfills each existing
+READY project VIDEO by `created_at, id` into slots `0..4`, and refuses to run if
+any READY VIDEO is not exclusively project-owned or a project has more than five
+READY videos. It also exempts VIDEO from the existing one-active-upload-per-kind
+project fence so that distinct video slots can upload concurrently. It does not
+perform the separately approved IMAGE-to-VIDEO data correction.
+
+For this release, drain VIDEO mutations, take the normal PostgreSQL backup, apply
+the additive migration with the Phase 1 release runtime, and verify every legacy
+READY video has a unique project slot. Confirm the expected inventory before
+maintenance (currently 133 READY videos across 133 projects, at most one per
+project, and no active VIDEO upload). Do not run the Phase 2 contract as part of
+this rollout.
+
+If the new runtime must be rolled back before the contract boundary, leave VIDEO
+mutations drained. The nullable column is safe for the prior runtime to ignore,
+but uploads must remain disabled until the new runtime is restored. Do not revert
+the additive schema or apply the IMAGE-to-VIDEO correction during this rollback.
+
+## Project materials and reviewed canonical correction
+
+`20260821900000_project_material_kind_expand` adds DOCUMENT and ATTACHMENT;
+`20260821910000_project_material_constraints_expand` applies the dependent
+constraints in a separate transaction. Deploy compatible Phase 1 API, validation
+worker, and web before recording either kind. Materials use only a protected
+ORIGINAL and forced attachment downloads. The combined limit is five READY or
+reserved materials per project, each at most 50 MiB. A web client receiving no
+`materialMaxCount` / `materialMaxBytes` upload configuration disables the new upload controls.
+
+The compiled correction CLI keeps preparation online and applies the reviewed
+manifest only during a mutation drain. Use the same immutable, revision-verified
+Phase 1 image for correction, migrations, backfill, and reconciliation. The
+`correction` release command enforces a real 2 GiB container memory limit; poster
+conversion additionally runs one isolated child at a time with a 180-second
+limit, at most 80 million pixels and 320 MiB decoded pixels. Normal upload limits
+are unchanged.
+
+```bash
+./deploy.sh correction investigate --candidates=/release-state/candidates.json --manifest=/release-state/correction.json
+./deploy.sh correction prepare --manifest=/release-state/correction.json
+./deploy.sh correction protect --manifest=/release-state/correction.json
+```
+
+Candidates require exact original SHA-256, owner, kind and video order. Previously
+unregistered sources and byte-identical aliases require an evidence artifact and
+its hash. The prepared manifest fixes newly reserved asset IDs and every output.
+Keep it and its printed canonical JSON SHA-256 immutable for review. The printed
+hash is over canonical JSON, not over the pretty-printed file bytes. Repeat
+`protect` if preparation or review is prolonged; prepared copies and generated
+outputs remain tracked in relocation and cleanup records.
+
+After explicit approval of that prepared manifest, drain writes, take a database
+backup and fresh object inventory, and preserve all prior backfill progress and
+failure files. Apply requires both the actual drain and the CLI attestation:
+
+```bash
+./deploy.sh drain
+./deploy.sh backup before-canonical-correction
+./deploy.sh inventory /release-state/before-correction.json
+./deploy.sh correction apply --manifest=/release-state/correction.json --expected-hash=REVIEWED_CANONICAL_JSON_SHA256 --writes-drained --receipt=/release-state/correction-receipt.json
+```
+
+Apply locks project owners before assets and references, compares complete
+snapshots and upload reservations, verifies original and prepared bytes, and
+commits all items together. A failed transaction leaves original asset state
+unchanged. The separate receipt preserves the approved manifest for idempotent
+retry. Existing public source objects remain intact; duplicate aliases attach to
+the proven existing asset through committed relocation records.
+
+Resume canonical backfill using its existing progress file without reset. Take a
+fresh inventory and require every non-observation reconciliation blocker to be
+zero, including unknown objects, incomplete cleanup/relocation and duplicate
+ownership. Resume the compatible Phase 1 runtime, verify public/admin paths, and
+record the precise image digest, source revision and observation start with
+`mark-read-cutover`. This release does not wait 24 hours or apply the Phase 2
+contract. After material data exists, legacy runtime rollback is refused; keep
+writes drained on failure and repair using a compatible runtime.
+
 ## Canonical asset Phase 2 (contract)
 
 After at least 24 hours with zero fallback telemetry, dispatch `phase2` with the

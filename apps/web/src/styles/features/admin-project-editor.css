@@ -101,6 +101,16 @@
   color: var(--color-primary);
 }
 
+.asset-video-role-badge {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-primary);
+  color: var(--color-primary);
+  font-size: 0.8em;
+}
+
 .edit-meta {
   color: var(--color-text-muted);
   font-size: 0.85rem;

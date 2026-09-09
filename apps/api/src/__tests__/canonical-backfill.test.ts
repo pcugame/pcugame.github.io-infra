@@ -211,6 +211,36 @@ const materializer: CanonicalObjectMaterializer = {
 };
 
 describe('canonical asset backfill', () => {
+	it.each([
+		['DOCUMENT', 'text/plain'],
+		['DOCUMENT', 'application/pdf'],
+		['ATTACHMENT', 'application/octet-stream'],
+		['VIDEO', 'video/x-matroska'],
+		['VIDEO', 'video/x-msvideo'],
+	] as const)('preserves protected %s originals (%s) without image repair', async (kind, mimeType) => {
+		const row: LegacyAssetRow = {
+			...assetRows()[0]!, id: 99001, kind, isPublic: false,
+			storageKey: 'corrected-source', mimeType, sizeBytes: 100n,
+			playbackStorageKey: null, playbackStatus: 'PENDING',
+		};
+		const repository = new FakeRepository([row]);
+		const repair = vi.fn(materializer.ensureImageRenditions);
+		const result = await runCanonicalBackfill({
+			repository, verifier: verifier([{
+				bucket: 'protected', key: 'corrected-source',
+				head: { size: 100n, mimeType, checksumSha256: 'a'.repeat(64) },
+			}]), materializer: { ...materializer, ensureImageRenditions: repair }, ...buckets,
+			progress: createCanonicalBackfillProgress('apply', fixedDate),
+			options: { apply: true, batchSize: 10 }, now: () => fixedDate,
+		});
+		expect(result.failures).toEqual([]);
+		expect(repair).not.toHaveBeenCalled();
+		expect(repository.representations.get('99001:ORIGINAL')).toMatchObject({
+			bucket: 'protected', mimeType, checksum: 'a'.repeat(64),
+		});
+		expect(repository.representations.size).toBe(1);
+	});
+
 	it('migrates the proven WebGL source and isolates the malformed unproven pointer', async () => {
 		const repository = new FakeRepository(assetRows(), exhibitionRows(), webglRows());
 		const result = await runCanonicalBackfill({

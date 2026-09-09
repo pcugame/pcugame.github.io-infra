@@ -1,3 +1,4 @@
+import { normalizeProjectVideoOrder } from './video-order.js';
 import {
 	Prisma,
 	type AssetKind,
@@ -134,6 +135,14 @@ export function createAssetsRepository(
 				`);
 				const asset = rows[0];
 					if (!asset || asset.projectId === null) return null;
+				if (asset.kind === 'VIDEO') {
+					const submission = await tx.projectSubmission.findUnique({
+						where: { projectId: asset.projectId }, select: { state: true },
+					});
+					if (submission && ['PENDING', 'FINALIZING'].includes(submission.state)) {
+						throw conflict('Submission videos must be removed through submission cancellation');
+					}
+				}
 				const representations = await tx.$queryRaw<LockedRepresentationDeletionRow[]>(Prisma.sql`
 					SELECT
 						"id",
@@ -154,6 +163,9 @@ export function createAssetsRepository(
 						data: { status: 'DELETING' },
 						select: { id: true },
 					});
+				}
+				if (asset.kind === 'VIDEO' && asset.status === 'READY') {
+					await normalizeProjectVideoOrder(tx, asset.projectId);
 				}
 				await tx.project.updateMany({
 					where: { id: asset.projectId, posterAssetId: asset.id },

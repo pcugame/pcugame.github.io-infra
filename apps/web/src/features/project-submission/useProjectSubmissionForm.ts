@@ -23,7 +23,7 @@ import type { ProjectSubmissionManifestItem, ProjectSubmissionItemStatus, Submit
 
 interface UseProjectSubmissionFormParams {
 	mode: ProjectSubmissionMode;
-	files: Pick<SubmissionFilesState, 'posterFile' | 'imageFiles' | 'videoFiles' | 'gameFile' | 'webglFile'>;
+	files: Pick<SubmissionFilesState, 'posterFile' | 'imageFiles' | 'videoFiles' | 'documentFiles' | 'attachmentFiles' | 'gameFile' | 'webglFile'>;
 }
 
 export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFormParams) {
@@ -230,6 +230,8 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				poster: files.posterFile ? fingerprintFile(files.posterFile) : null,
 				images: files.imageFiles.map(fingerprintFile),
 				videos: files.videoFiles.map(fingerprintFile),
+				documents: files.documentFiles.map(fingerprintFile),
+				attachments: files.attachmentFiles.map(fingerprintFile),
 				game: files.gameFile ? fingerprintFile(files.gameFile) : null,
 				webgl: files.webglFile ? fingerprintFile(files.webglFile) : null,
 			},
@@ -243,6 +245,8 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				...(files.posterFile ? [{ kind: 'POSTER' as const, slot: 'poster', clientToken: token(), required: true as const }] : []),
 				...files.videoFiles.map((_file, index) => ({ kind: 'VIDEO' as const, slot: `video:${index}`, clientToken: token(), required: true as const })),
 				...files.imageFiles.map((_file, index) => ({ kind: 'IMAGE' as const, slot: `image:${index}`, clientToken: token(), required: true as const })),
+				...files.documentFiles.map((_file, index) => ({ kind: 'DOCUMENT' as const, slot: `document:${index}`, clientToken: token(), required: true as const })),
+				...files.attachmentFiles.map((_file, index) => ({ kind: 'ATTACHMENT' as const, slot: `attachment:${index}`, clientToken: token(), required: true as const })),
 			];
 			manifest = createdManifest;
 			manifestByFingerprint.current.set(fingerprint, manifest);

@@ -22,6 +22,8 @@ describe('release script boundary', () => {
 		expect(preflight).toContain('runContractPreflight');
 		expect(reconcile).toContain('reconcileObjects');
 		expect(releaseMigrate).toContain("const PHASE1_TARGET_MIGRATION = '20260821700000_canonical_object_relocation_expand'");
+		expect(releaseMigrate).toContain("const PHASE1_MIGRATION_CEILING = PROJECT_MATERIAL_CONSTRAINTS_MIGRATION");
+		expect(releaseMigrate).toContain("const PROJECT_VIDEO_ORDER_MIGRATION = '20260821800000_project_video_order_expand'");
 		expect(releaseMigrate).toContain('seedStorageBucketRegistry');
 		expect(releaseMigrate).toContain('verifyStorageBucketRegistry');
 		expect(releaseMigrate).toContain("S3_BUCKET_PROTECTED");

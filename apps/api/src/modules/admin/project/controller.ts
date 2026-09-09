@@ -5,6 +5,7 @@ import {
 	BulkDeleteBody,
 	BulkStatusBody,
 	SetPosterBody,
+	SetProjectVideoOrderBody,
 	UpdateProjectBody,
 	parseBody,
 	parseIntParam,
@@ -102,6 +103,17 @@ export function createProjectController(deps: ProjectControllerDependencies): Fa
 				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
 				const { assetId } = parseBody(SetPosterBody, request.body);
 				sendOk(reply, await deps.service.setPoster(projectId, assetId));
+			},
+		);
+
+		app.put<{ Params: { id: string } }>(
+			'/projects/:id/videos/order',
+			{ preHandler: requireLogin },
+			async (request, reply) => {
+				const projectId = parseIntParam(request.params.id);
+				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
+				const { expectedOrder, order } = parseBody(SetProjectVideoOrderBody, request.body);
+				sendOk(reply, await deps.service.setVideoOrder(projectId, expectedOrder, order));
 			},
 		);
 

@@ -103,7 +103,21 @@ validate_release_source_identity() {
   }
 }
 
+assert_legacy_material_rollback_safe() {
+  local material_rows
+  material_rows=$(podman exec -i "$PG_CONTAINER" sh -c 'exec psql -X -qAt --set ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+SELECT (SELECT count(*) FROM assets WHERE kind::text IN ('DOCUMENT', 'ATTACHMENT'))
+     + (SELECT count(*) FROM asset_upload_sessions WHERE kind::text IN ('DOCUMENT', 'ATTACHMENT'));
+SQL
+  ) || return 1
+  [[ "$material_rows" == 0 ]] || {
+    echo "ERROR: document/attachment data exists; recover with a compatible runtime forward fix"
+    return 1
+  }
+}
+
 assert_phase1_rollback_authorization() {
+  assert_legacy_material_rollback_safe
   [[ "${RELEASE_SCHEMA_PHASE:-}" == phase1 && "${START_DEDICATED_WORKERS:-true}" == false ]] || {
     echo "ERROR: legacy runtime rollback is permitted only for Phase 1"
     return 1
@@ -237,6 +251,9 @@ run_release_entry() {
   mkdir -p "$CUTOVER_STATE_DIR"
   assert_postgres_running
   release_common_args
+  if [[ "$entry" == dist-release/scripts/correct-canonical-assets.js ]]; then
+    RELEASE_CONTAINER_ARGS+=(--memory=2g --memory-swap=2g)
+  fi
   podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" "$entry" "$@"
 }
 
@@ -600,6 +617,15 @@ do_inventory_snapshot() {
 do_backfill() {
   assert_mutation_drained
   run_release_entry dist-release/scripts/backfill-canonical-assets.js "$@"
+}
+
+do_canonical_correction() {
+  case "${1:-}" in
+    investigate|prepare|protect) ;;
+    apply) assert_mutation_drained ;;
+    *) echo "ERROR: correction requires investigate, prepare, protect, or apply"; return 1 ;;
+  esac
+  run_release_entry dist-release/scripts/correct-canonical-assets.js "$@"
 }
 
 do_contract_preflight() {
@@ -1092,6 +1118,7 @@ case "${1:-up}" in
   release-assert) do_release_assert "${2:-}" ;;
   inventory) do_inventory_snapshot "${2:-}" ;;
   backfill) shift; do_backfill "$@" ;;
+  correction) shift; do_canonical_correction "$@" ;;
   contract-preflight) shift; do_contract_preflight "$@" ;;
   capacity-preflight) do_capacity_preflight ;;
   boundary-preflight) load_env; validate_production_boundaries ;;
@@ -1105,7 +1132,7 @@ case "${1:-up}" in
   logs)    do_logs "${2:-api}" ;;
   status)  do_status ;;
   *)
-    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|release-artifact-preflight [phase1|phase2]|authorize-phase1-rollback <nonce>|verify-final-web <git-sha>|verify-observation-window <started-at>|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
+    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|correction <investigate|prepare|protect|apply> [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|release-artifact-preflight [phase1|phase2]|authorize-phase1-rollback <nonce>|verify-final-web <git-sha>|verify-observation-window <started-at>|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
     exit 1
     ;;
 esac

@@ -1,12 +1,13 @@
 // ── Public API 호출 ──────────────────────────────────────────
 
 import type {
+	PublicUploadConfig,
   PublicYearListResponse,
   PublicYearProjectsResponse,
   PublicExhibitionProjectsResponse,
   PublicProjectDetailResponse,
 } from '../../contracts';
-import { api } from './client';
+import { api, isApiError } from './client';
 
 export const publicApi = {
   /** 공개 연도 목록 (전시 목록) */
@@ -29,6 +30,19 @@ export const publicApi = {
     const query = year ? `?year=${year}` : '';
     return api.get<PublicProjectDetailResponse>(
       `/api/public/projects/${encodeURIComponent(String(idOrSlug))}${query}`,
-    );
+    ).then((project) => ({ ...project, attachments: project.attachments ?? [] }));
+  },
+
+  /**
+   * New material uploads are capability-gated so a newer web build can be
+   * deployed before an API release that knows DOCUMENT and ATTACHMENT.
+   */
+  async getUploadConfig(): Promise<PublicUploadConfig | undefined> {
+    try {
+      return await api.get<PublicUploadConfig>('/api/public/upload-config');
+    } catch (error) {
+      if (isApiError(error) && error.status === 404) return undefined;
+      throw error;
+    }
   },
 };

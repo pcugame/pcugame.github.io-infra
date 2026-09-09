@@ -3,7 +3,7 @@ import { MAX_NEW_PROJECT_TITLE_BYTES, utf8ByteLength } from './filename-policy.j
 
 export const ProjectStatusSchema = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
 const MutableProjectStatusSchema = z.enum(['PUBLISHED', 'ARCHIVED']);
-export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO', 'WEBGL']);
+export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO', 'WEBGL', 'DOCUMENT', 'ATTACHMENT']);
 export const UserRoleSchema = z.enum(['USER', 'OPERATOR', 'ADMIN']);
 export const AdminProjectListSortSchema = z.enum(['createdAt', 'title', 'year', 'status']);
 export const SortOrderSchema = z.enum(['asc', 'desc']);
@@ -38,8 +38,8 @@ export const SubmitProjectPayloadBaseSchema = z.object({
 	description: z.string().max(5000).optional(),
 	members: z.array(ProjectMemberInputSchema).min(1),
 	manifest: z.array(z.object({
-		kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER']),
-		slot: z.string().regex(/^(game|webgl|poster|video:[0-9]+|image:[0-9]+)$/),
+		kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER', 'DOCUMENT', 'ATTACHMENT']),
+		slot: z.string().regex(/^(game|webgl|poster|video:[0-9]+|image:[0-9]+|document:[0-9]+|attachment:[0-9]+)$/),
 		clientToken: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/),
 		required: z.literal(true).default(true),
 	}).strict()).max(250).default([]),
@@ -134,3 +134,8 @@ export type SwapProjectMembersSchemaInput = z.infer<typeof SwapProjectMembersSch
 export type GoogleAuthRequestSchemaInput = z.infer<typeof GoogleAuthRequestSchema>;
 export type DevAuthLoginRequestSchemaInput = z.infer<typeof DevAuthLoginRequestSchema>;
 export type DevAuthLoginErrorRequestSchemaInput = z.infer<typeof DevAuthLoginErrorRequestSchema>;
+
+export const SetProjectVideoOrderSchema = z.object({
+	expectedOrder: z.array(z.number().int().positive()),
+	order: z.array(z.number().int().positive()),
+}).strict();

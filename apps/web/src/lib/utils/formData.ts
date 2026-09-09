@@ -8,7 +8,9 @@ export interface SubmitProjectFiles {
   poster?: File;
   images?: File[];
   gameFile?: File;
-  videoFiles?: File[];
+	videoFiles?: File[];
+	documents?: File[];
+	attachments?: File[];
 }
 
 /**
@@ -47,11 +49,14 @@ export function buildSubmitFormData(
   }
 
   // 동영상 파일
-  if (files.videoFiles) {
+	if (files.videoFiles) {
     for (const video of files.videoFiles) {
       fd.append('videoFile', video);
-    }
-  }
+	}
+	}
+
+	for (const document of files.documents ?? []) fd.append('documents[]', document);
+	for (const attachment of files.attachments ?? []) fd.append('attachments[]', attachment);
 
   return fd;
 }

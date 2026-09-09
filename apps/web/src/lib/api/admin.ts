@@ -13,6 +13,7 @@ import type {
   BulkUpdateProjectStatusRequest,
   BulkDeleteProjectsRequest,
   SetProjectPosterRequest,
+  SetProjectVideoOrderRequest,
   AddMemberRequest,
   UpdateMemberRequest,
   SwapProjectMembersRequest,
@@ -84,6 +85,10 @@ export const adminProjectApi = {
 
   deleteWebgl(id: number) {
     return api.delete<void>(`/api/admin/projects/${id}/webgl`);
+  },
+
+  reorderVideos(id: number, body: SetProjectVideoOrderRequest) {
+    return api.put<void>(`/api/admin/projects/${id}/videos/order`, body);
   },
 
   /** 작품 + 파일 일괄 등록 (multipart/form-data) */

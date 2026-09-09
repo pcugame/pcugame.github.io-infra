@@ -1,3 +1,4 @@
+import { compareProjectVideos } from '../../../shared/project-video-order.js';
 import type { AdminProjectDetail, AssetKind, Platform, ProjectStatus } from '@pcu/contracts';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
 import { IMAGE_RENDITION_PROFILES } from '../../../shared/responsive-image.js';
@@ -23,6 +24,8 @@ export type SerializableAsset = {
 	id: number;
 	kind: AssetKind;
 	originalName: string;
+	videoSortOrder?: number | null;
+	createdAt?: Date;
 	representations?: SerializableRepresentation[];
 };
 
@@ -146,9 +149,13 @@ export function createProjectSerializer(
 		const videos = project.assets
 			.filter((a) => a.kind === 'VIDEO')
 			.filter((videoAsset) => representation(videoAsset, 'ORIGINAL')?.state === 'READY')
-			.map((videoAsset) => {
+			.sort(compareProjectVideos)
+			.map((videoAsset, index) => {
 				const playbackStatus = playbackStatusFor(videoAsset);
 				return {
+					assetId: videoAsset.id,
+					sortOrder: videoAsset.videoSortOrder ?? null,
+					role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,
 					...(playbackStatus === 'READY'
 						? { url: canonicalProtectedAssetUrl(base, videoAsset.id, 'playback') }
 						: {}),
@@ -158,7 +165,20 @@ export function createProjectSerializer(
 					playbackError: representation(videoAsset, 'PLAYBACK')?.error || undefined,
 				};
 			});
-		const video = videos.find((candidate) => candidate.playbackStatus === 'READY') ?? videos[0] ?? null;
+		const video = videos[0] ?? null;
+		const attachments = project.assets.flatMap<NonNullable<AdminProjectDetail['attachments']>[number]>((asset) => {
+			if (asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT') return [];
+			const original = representation(asset, 'ORIGINAL');
+			if (original?.state !== 'READY') return [];
+			return [{
+				assetId: asset.id,
+				kind: asset.kind,
+				originalName: asset.originalName,
+				mimeType: original.mimeType || 'application/octet-stream',
+				sizeBytes: Number(original.sizeBytes),
+				downloadUrl: canonicalProtectedAssetUrl(base, asset.id, 'original'),
+			}];
+		});
 
 		return {
 			id: project.id,
@@ -194,6 +214,7 @@ export function createProjectSerializer(
 				sortOrder: m.sortOrder,
 				userId: m.userId,
 			})),
+			attachments,
 			assets: project.assets.flatMap<AdminProjectDetail['assets'][number]>((a) => {
 				if (a.kind === 'IMAGE' || a.kind === 'POSTER' || a.kind === 'THUMBNAIL') {
 					const original = representation(a, 'ORIGINAL');
@@ -212,10 +233,15 @@ export function createProjectSerializer(
 				if (a.kind === 'WEBGL') return [];
 				const original = representation(a, 'ORIGINAL');
 				if (original?.state !== 'READY') return [];
+				if (a.kind === 'DOCUMENT' || a.kind === 'ATTACHMENT') return [{
+					id: a.id, kind: a.kind, originalName: a.originalName, mimeType: original.mimeType,
+					size: Number(original.sizeBytes), downloadUrl: canonicalProtectedAssetUrl(base, a.id, 'original'),
+				}];
 				const playbackStatus = a.kind === 'VIDEO' ? playbackStatusFor(a) : undefined;
 				return [{
 					id: a.id,
 					kind: a.kind,
+					...(a.kind === 'VIDEO' ? { videoSortOrder: a.videoSortOrder ?? null } : {}),
 					url: canonicalProtectedAssetUrl(base, a.id, 'original'),
 					originalDownloadUrl: a.kind === 'VIDEO'
 						? canonicalProtectedAssetUrl(base, a.id, 'original')

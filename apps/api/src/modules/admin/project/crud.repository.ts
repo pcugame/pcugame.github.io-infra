@@ -1,3 +1,5 @@
+import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS } from '../../assets/video-order.js';
+import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
 import type {
 	AssetKind,
 	Prisma,
@@ -62,7 +64,7 @@ export const projectDetailInclude = {
 	assets: {
 		where: { status: 'READY' as const },
 		orderBy: { createdAt: 'asc' as const },
-		include: { representations: { where: { state: 'READY' as const } } },
+		include: { representations: true },
 	},
 	poster: { include: { representations: { where: { state: 'READY' as const } } } },
 	currentWebglDeployment: true,
@@ -398,6 +400,29 @@ export function createProjectCrudRepository(
 				kind: asset.kind,
 				status: asset.status,
 			};
+		},
+		setProjectVideoOrder(projectId, expectedOrder, order) {
+			return withAssetMutationTransaction(client, async (tx) => {
+				const projects = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
+					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
+				`);
+				if (!projects.length) throw notFound('Project not found');
+				const submission = await tx.projectSubmission.findUnique({ where: { projectId }, select: { state: true } });
+				if (submission && ['PENDING', 'FINALIZING'].includes(submission.state)) {
+					throw conflict('Submission videos cannot be reordered before publication');
+				}
+				const videos = await getProjectVideos(tx, projectId);
+				const current = videos.map(({ id }) => id);
+				if (current.length > MAX_PROJECT_VIDEOS) throw conflict('Project exceeds the five video limit');
+				if (expectedOrder.length !== current.length || expectedOrder.some((id, index) => id !== current[index])) {
+					throw conflict('Video order changed; refresh and try again');
+				}
+				if (order.length !== current.length || new Set(order).size !== current.length || order.some((id) => !current.includes(id))) {
+					throw conflict('Order must contain every current video exactly once');
+				}
+				await rewriteProjectVideoOrder(tx, projectId, order);
+				return { order };
+			});
 		},
 		async setProjectPoster(projectId, assetId) {
 			return client.$transaction(async (tx) => {

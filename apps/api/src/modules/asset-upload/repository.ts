@@ -1,3 +1,4 @@
+import { assertMaterialCapacity, isMaterialKind, MATERIAL_MAX_BYTES } from './material-policy.js';
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { createCanonicalAsset } from '../assets/representation-write.js';
 import { withAssetMutationTransaction } from '../assets/mutation-transaction.js';
@@ -5,6 +6,8 @@ import { queueDurableDeletions } from '../orphan/outbox.js';
 import { queueMultipartAbortTask } from '../multipart-abort/repository.js';
 import type { AssetUploadRepository, AssetUploadSessionRecord, DirectAssetUploadOwner } from './ports.js';
 import { WorkerGenerationFencedError } from '../upload-lifecycle/worker-errors.js';
+import { countReservedProjectVideos, getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from '../assets/video-order.js';
+import { conflict } from '../../shared/errors.js';
 
 function asRecord(value: unknown): AssetUploadSessionRecord {
 	return value as AssetUploadSessionRecord;
@@ -97,6 +100,18 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 				} else {
 					await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "exhibitions" WHERE "id" = ${input.exhibitionId!} FOR UPDATE`);
 					if (input.submissionItemId || submissionClientToken) throw new Error('PROJECT_SUBMISSION_ITEM_NOT_ALLOWED');
+				}
+				if (isMaterialKind(input.kind)) {
+					if (input.projectId === null || input.totalBytes < 1n || input.totalBytes > BigInt(MATERIAL_MAX_BYTES)) throw conflict('Invalid material owner or size');
+					await assertMaterialCapacity(tx, input.projectId);
+				}
+				if (input.kind === 'VIDEO') {
+					if (input.projectId === null) throw conflict('VIDEO uploads must be project-owned');
+					const videos = input.submissionItemId
+						? await getProjectVideos(tx, input.projectId)
+						: await normalizeProjectVideoOrder(tx, input.projectId);
+					const reserved = await countReservedProjectVideos(tx, input.projectId);
+					if (videos.length + reserved >= MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
 				}
 				let expected: { id: number; updatedAt: Date | null } | null = null;
 				if (input.kind === 'GAME' && input.projectId !== null) {
@@ -366,14 +381,18 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 		},
 		async commitGameReady(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
+				if (input.session.projectId === null) throw new Error('Validation session must be project-owned');
+				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.session.projectId} FOR UPDATE`);
 				const session = await tx.assetUploadSession.findUnique({ where: { id: input.session.id } });
 				const owned = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 					SELECT "id" FROM "asset_upload_sessions"
 					WHERE "id" = ${input.session.id} AND "state" = 'VERIFYING'::"AssetUploadSessionState"
-						AND "validation_lease_token" = ${input.token} AND "validation_lease_until" > clock_timestamp()
+						AND "validation_lease_token" = ${input.token} AND "validation_lease_until" > clock_timestamp() FOR UPDATE
 				`);
 				if (!session || owned.length !== 1) throw new Error('Validation lease lost');
-				const current = await tx.asset.findFirst({ where: { projectId: session.projectId, kind: 'GAME', status: 'READY' }, include: { representations: true } });
+				if (session.kind !== 'GAME' && !isMaterialKind(session.kind)) throw new Error('Invalid original-only upload kind');
+				if (isMaterialKind(session.kind)) await assertMaterialCapacity(tx, input.session.projectId, session.id);
+				const current = session.kind === 'GAME' ? await tx.asset.findFirst({ where: { projectId: session.projectId, kind: 'GAME', status: 'READY' }, include: { representations: true } }) : null;
 				if ((session.expectedTargetAssetId === null && current)
 					|| (session.expectedTargetAssetId !== null && (!current || current.id !== session.expectedTargetAssetId || current.updatedAt.getTime() !== session.expectedTargetAssetUpdatedAt?.getTime()))) {
 					throw new WorkerGenerationFencedError('GAME');
@@ -385,7 +404,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					if (session.projectId === null) throw new Error('GAME session must be project-owned');
 					const asset = await createCanonicalAsset(tx, {
 						projectId: session.projectId,
-						kind: 'GAME',
+						kind: session.kind,
 						originalName: session.originalName,
 						representations: [{
 							role: 'ORIGINAL',

@@ -7,6 +7,8 @@ import { LoadingSpinner, ResponsiveImage } from '../common';
 import { ProjectPublicMeta } from './ProjectPublicMeta';
 import { ProjectVideo } from './ProjectVideo';
 import { ProjectActions } from './ProjectActions';
+import { ProjectAttachments } from './ProjectAttachments';
+import { getVideoLabel } from '../../lib/video-label';
 
 interface Props {
 	slug: string;
@@ -15,7 +17,7 @@ interface Props {
 }
 
 type MediaItem =
-	| { type: 'video'; url?: string; mimeType: string; originalDownloadUrl?: string; playbackStatus?: 'PENDING' | 'READY' | 'FAILED'; playbackError?: string; label: string }
+	| { type: 'video'; assetId: number; sortOrder: number | null; role: 'MAIN' | 'ADDITIONAL'; url?: string; mimeType: string; originalDownloadUrl?: string; playbackStatus?: 'PENDING' | 'READY' | 'FAILED'; playbackError?: string; label: string }
 	| { type: 'poster'; image: ResponsiveImageData; label: string }
 	| { type: 'image'; id: number; image: ResponsiveImageData; label: string };
 
@@ -71,15 +73,18 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 				label: '포스터',
 			});
 		}
-		projectVideos.forEach((video, i) => {
+		projectVideos.forEach((video) => {
 			mediaItems.push({
 				type: 'video',
+				assetId: video.assetId,
+				sortOrder: video.sortOrder,
+				role: video.role,
 				url: video.url,
 				mimeType: video.mimeType,
 				originalDownloadUrl: video.originalDownloadUrl,
 				playbackStatus: video.playbackStatus,
 				playbackError: video.playbackError,
-				label: `동영상${i + 1}`,
+				label: getVideoLabel(video),
 			});
 		});
 		const galleryImages = project.images.filter((img) => img.kind === 'IMAGE');
@@ -112,6 +117,9 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 		if (videoCount < 2) return;
 		setActiveIndex(videoStartIndex + (currentVideoOffset - 1 + videoCount) % videoCount);
 	};
+	const videoAt = (offset: number) => mediaItems[videoStartIndex + offset] as Extract<MediaItem, { type: 'video' }> | undefined;
+	const previousVideo = videoAt((currentVideoOffset - 1 + videoCount) % videoCount);
+	const nextVideoItem = videoAt((currentVideoOffset + 1) % videoCount);
 	const nextVideo = () => {
 		if (videoCount < 2) return;
 		setActiveIndex(videoStartIndex + (currentVideoOffset + 1) % videoCount);
@@ -141,7 +149,11 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								<div className="modal-visual__frame">
 									{current.type === 'video' ? (
 										<ProjectVideo
+											key={current.assetId}
 										video={{
+											assetId: current.assetId,
+											sortOrder: current.sortOrder,
+											role: current.role,
 											url: current.url,
 											mimeType: current.mimeType,
 											originalDownloadUrl: current.originalDownloadUrl,
@@ -176,25 +188,29 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 										</button>
 									)}
 								</div>
+								{current.type === 'video' && (
+									<p className="modal-video-label">{current.label}</p>
+								)}
 								{/* 동영상 여러 개일 때 dot + 화살표 네비게이션 */}
 								{current.type === 'video' && videoCount > 1 && (
 									<div className="modal-video-nav">
-										<button className="modal-video-nav__arrow" onClick={prevVideo} aria-label="이전 동영상">
+										<button className="modal-video-nav__arrow" onClick={prevVideo} aria-label={`이전 ${previousVideo?.label ?? '영상'}`}>
 											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 												<polyline points="15 18 9 12 15 6" />
 											</svg>
 										</button>
 										<div className="modal-video-dots">
-											{Array.from({ length: videoCount }, (_, i) => (
-												<button
-													key={i}
+											{Array.from({ length: videoCount }, (_, i) => {
+												const video = videoAt(i);
+												return <button
+													key={video?.assetId ?? i}
 													className={`modal-video-dot${i === currentVideoOffset ? ' modal-video-dot--active' : ''}`}
 													onClick={() => setActiveIndex(videoStartIndex + i)}
-													aria-label={`동영상 ${i + 1}`}
+													aria-label={video?.label ?? '영상'}
 												/>
-											))}
+											})}
 										</div>
-										<button className="modal-video-nav__arrow" onClick={nextVideo} aria-label="다음 동영상">
+										<button className="modal-video-nav__arrow" onClick={nextVideo} aria-label={`다음 ${nextVideoItem?.label ?? '영상'}`}>
 											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 												<polyline points="9 18 15 12 9 6" />
 											</svg>
@@ -217,7 +233,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 									return (
 										<button
-											key={item.type === 'image' ? `img-${item.id}` : `${item.type}-${i}`}
+											key={item.type === 'image' ? `img-${item.id}` : item.type === 'video' ? `video-${item.assetId}` : `${item.type}-${i}`}
 											className={`modal-media-tab ${isActive ? 'modal-media-tab--active' : ''}`}
 											onClick={() => setActiveIndex(i)}
 										>
@@ -260,14 +276,14 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 							<ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
 							{/* 에셋 유실 안내 */}
-							{project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
+							{project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (project.attachments?.length ?? 0) === 0 && (
 								<p className="incomplete-notice incomplete-notice--missing">
 									이 프로젝트의 파일이 유실되었습니다.
 								</p>
 							)}
 
 							{/* 불완전 안내 */}
-							{project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
+							{project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0 || (project.attachments?.length ?? 0) > 0) && (
 								<p className="incomplete-notice">
 									일부 자료가 누락되었을 수 있습니다.
 								</p>
@@ -301,6 +317,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								webglUrl={project.webglUrl}
 								className="modal-download"
 							/>
+							<ProjectAttachments attachments={project.attachments} className="modal-attachments" />
 						</div>
 					</>
 				)}

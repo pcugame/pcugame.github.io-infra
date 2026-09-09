@@ -135,12 +135,15 @@ export function createCanonicalObjectMaterializer(
 		if (!source || source.size !== copy.expected.size || mime(source.mimeType) !== mime(copy.expected.mimeType)) {
 			throw new Error('canonical copy source no longer matches its verified snapshot');
 		}
+		let destination = await head(client, copy.destinationBucket, copy.destinationKey);
+		if (!destination && source.size > 5n * 1024n * 1024n * 1024n) {
+			throw new Error('canonical copy source exceeds the 5 GiB CopyObject limit; multipart copy is required');
+		}
 		const sourceChecksum = source.checksumSha256
 			?? await objectSha256(client, copy.sourceBucket, copy.sourceKey, source.size);
 		if (copy.expected.checksumSha256 && sourceChecksum !== copy.expected.checksumSha256.toLowerCase()) {
 			throw new Error('canonical copy source checksum changed');
 		}
-		let destination = await head(client, copy.destinationBucket, copy.destinationKey);
 		let created = false;
 		if (!destination) {
 			await hooks?.beforeCreate({

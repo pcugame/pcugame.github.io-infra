@@ -163,8 +163,9 @@ for (const migration of [
 	'20260821000000_canonical_asset_expand',
 	'20260821400000_project_submission_draft_status',
 	'20260821500000_project_submission_expand',
+	'20260821800000_project_video_order_expand',
 ]) assert.ok(releaseMigration.includes(migration), `Phase 1 bundle omits ${migration}`);
-assert.match(releaseMigration, /stagedMigrate\(PHASE1_TARGET_MIGRATION/);
+assert.match(releaseMigration, /stagedMigrate\(PHASE1_MIGRATION_CEILING/);
 assert.match(deploy, /RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2/);
 assert.match(deploy, /mutation drain marker is absent/);
 assert.match(deploy, /dist\/phase1-release-manifest\.js/);

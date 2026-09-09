@@ -11,6 +11,7 @@ import {
 	GoogleAuthRequestSchema,
 	ProjectStatusSchema,
 	SetProjectPosterSchema,
+	SetProjectVideoOrderSchema,
 	SubmitProjectPayloadBaseSchema,
 	SwapProjectMembersSchema,
 	UpdateExhibitionBaseSchema,
@@ -145,3 +146,5 @@ export function parseIntParam(value: string, name = 'ID'): number {
 	}
 	return n;
 }
+
+export const SetProjectVideoOrderBody = SetProjectVideoOrderSchema;
