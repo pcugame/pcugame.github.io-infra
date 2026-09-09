@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFile, readdir } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
@@ -37,6 +38,8 @@ describe.runIf(runPostgresIntegration)(
 	() => {
 		const testId = randomUUID();
 		const bucket = `lease-clock-${testId}`;
+		const schema = `lease_clock_${testId.replaceAll('-', '')}`;
+		let bootstrap: PrismaClient;
 		let control: PrismaClient;
 		let firstWorker: PrismaClient;
 		let secondWorker: PrismaClient;
@@ -45,9 +48,27 @@ describe.runIf(runPostgresIntegration)(
 		beforeAll(async () => {
 			const databaseUrl = process.env['DATABASE_URL'];
 			if (!databaseUrl) throw new Error('DATABASE_URL is required');
-			control = createPrismaClientForDatabase(databaseUrl);
-			firstWorker = createPrismaClientForDatabase(databaseUrl);
-			secondWorker = createPrismaClientForDatabase(databaseUrl);
+			// Claims and purges intentionally scan entire tables. A private migrated
+			// schema keeps earlier HTTP smoke receipts and live maintenance workers
+			// out of these exact ownership assertions without changing production SQL.
+			bootstrap = createPrismaClientForDatabase(databaseUrl);
+			await bootstrap.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
+			const migrations = new URL('../../prisma/migrations/', import.meta.url);
+			const directories = (await readdir(migrations, { withFileTypes: true }))
+				.filter((entry) => entry.isDirectory()).map(({ name }) => name).sort();
+			for (const directory of directories) {
+				const connection = createPrismaClientForDatabase(databaseUrl);
+				try {
+					const sql = await readFile(new URL(`${directory}/migration.sql`, migrations), 'utf8');
+					await connection.$executeRawUnsafe(`SET search_path TO "${schema}";\n${sql}`);
+				} finally { await connection.$disconnect(); }
+			}
+			const isolatedUrl = new URL(databaseUrl);
+			isolatedUrl.searchParams.set('schema', schema);
+			isolatedUrl.searchParams.set('options', `-c search_path=${schema}`);
+			control = createPrismaClientForDatabase(isolatedUrl.toString());
+			firstWorker = createPrismaClientForDatabase(isolatedUrl.toString());
+			secondWorker = createPrismaClientForDatabase(isolatedUrl.toString());
 			await Promise.all([
 				control.$connect(),
 				firstWorker.$connect(),
@@ -62,20 +83,16 @@ describe.runIf(runPostgresIntegration)(
 				},
 			});
 			actorId = actor.id;
-		});
+		}, 60_000);
 
 		afterAll(async () => {
-			if (!control) return;
-			await control.orphanObject.deleteMany({ where: { bucket } });
-			await control.uploadIntent.deleteMany({ where: { bucket } });
-			await control.multipartAbortTask.deleteMany({ where: { bucket } });
-			await control.idempotencyOperation.deleteMany({ where: { actorId } });
-			await control.user.deleteMany({ where: { id: actorId } });
 			await Promise.all([
-				control.$disconnect(),
-				firstWorker.$disconnect(),
-				secondWorker.$disconnect(),
+				control?.$disconnect(), firstWorker?.$disconnect(), secondWorker?.$disconnect(),
 			]);
+			if (bootstrap) {
+				await bootstrap.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+				await bootstrap.$disconnect();
+			}
 		});
 
 		it('uses PostgreSQL time for upload-intent takeover and fences every stale final mutation', async () => {
