@@ -17,7 +17,6 @@ export interface ClientUploadLimits {
 	maxFiles: number;
 }
 
-/** Server-advertised capability for document and auxiliary-file uploads. */
 export interface MaterialUploadLimits {
 	maxCount: number;
 	maxBytes: number;

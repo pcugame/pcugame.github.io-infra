@@ -66,6 +66,24 @@ describe('Phase 1 release migration history policy', () => {
 });
 
 
+describe('Phase 2 release migration history policy', () => {
+	it('rejects the current Phase 1 database until contract is applied', () => {
+		expect(() => assertRuntime(completePhase1History(), 'phase2')).toThrow('contract migration DB record');
+	});
+
+	it('accepts complete contract history and fences out Phase 1', () => {
+		const history = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION), completedMigration(PROJECT_CHANGE_MIGRATION)];
+		expect(() => assertRuntime(history, 'phase2')).not.toThrow();
+		expect(() => assertRuntime(history, 'phase1')).toThrow('contract=not-applied');
+	});
+
+	it('rejects a contract receipt with missing prerequisite history', () => {
+		const history = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION), completedMigration(PROJECT_CHANGE_MIGRATION)]
+			.filter((row) => row.migration_name !== PROJECT_PUBLICATION_MIGRATION);
+		expect(() => assertRuntime(history, 'phase2')).toThrow('complete expand history');
+	});
+});
+
 describe('project change release schema', () => {
 	it('requires the additive request migration for the new phase2 runtime', () => {
 		const old = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION)];

@@ -1,11 +1,11 @@
 // ── Public API 호출 ──────────────────────────────────────────
 
 import type {
-	PublicUploadConfig,
   PublicYearListResponse,
   PublicYearProjectsResponse,
   PublicExhibitionProjectsResponse,
-  PublicProjectDetailResponse,
+	PublicProjectDetailResponse,
+	PublicUploadConfig,
 } from '../../contracts';
 import { api, isApiError } from './client';
 
@@ -33,10 +33,6 @@ export const publicApi = {
     ).then((project) => ({ ...project, attachments: project.attachments ?? [] }));
   },
 
-  /**
-   * New material uploads are capability-gated so a newer web build can be
-   * deployed before an API release that knows DOCUMENT and ATTACHMENT.
-   */
   async getUploadConfig(): Promise<PublicUploadConfig | undefined> {
     try {
       return await api.get<PublicUploadConfig>('/api/public/upload-config');

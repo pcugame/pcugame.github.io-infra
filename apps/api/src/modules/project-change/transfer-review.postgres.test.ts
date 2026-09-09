@@ -1,8 +1,8 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createPrismaClientForDatabase } from '../../lib/prisma-client.js';
 import type { AssetUploadKind, PrismaClient } from '../../generated/prisma/client.js';
+import { createIsolatedMigratedDatabase } from '../../__tests__/helpers/isolated-migrated-database.js';
 import { createProjectChangeRepository } from './repository.js';
 import { deleteProjectInTransaction } from './transaction.js';
 import { createProjectPublicationRepository } from '../project-publication/repository.js';
@@ -12,6 +12,7 @@ import { createObjectReferenceResolver } from '../orphan/reference-resolver.js';
 
 describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('review: staged asset transfer and publication deletion races', () => {
 	let db: PrismaClient;
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let owner: { id: number; role: 'USER' };
 	let operator: { id: number; role: 'OPERATOR' };
 	let exhibitionId: number;
@@ -21,25 +22,21 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('review: stag
 	const checksum = createHash('sha256').update(bytes).digest('hex');
 
 	beforeAll(async () => {
-		db = createPrismaClientForDatabase(process.env['DATABASE_URL']!);
-		protectedBucket = (await db.storageBucket.findUniqueOrThrow({ where: { visibility: 'PROTECTED' } })).bucket;
-		publicBucket = (await db.storageBucket.findUniqueOrThrow({ where: { visibility: 'PUBLIC' } })).bucket;
+		database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);
+		db = database.createClient();
+		protectedBucket = 'review-protected';
+		publicBucket = 'review-public';
+		await db.storageBucket.createMany({ data: [
+			{ bucket: protectedBucket, visibility: 'PROTECTED' },
+			{ bucket: publicBucket, visibility: 'PUBLIC' },
+		] });
 		const user = await db.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@example.test` } });
 		const op = await db.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@example.test`, role: 'OPERATOR' } });
 		owner = { id: user.id, role: 'USER' };
 		operator = { id: op.id, role: 'OPERATOR' };
 		exhibitionId = (await db.exhibition.create({ data: { year: 2096, title: randomUUID(), isModificationEnabled: false } })).id;
 	});
-	afterAll(async () => {
-		if (!db) return;
-		for (const project of await db.project.findMany({ where: { exhibitionId }, select: { id: true } })) {
-			if (await db.project.findUnique({ where: { id: project.id } })) await db.$transaction(tx => deleteProjectInTransaction(tx, project.id));
-		}
-		await db.projectChangeRequest.deleteMany({ where: { actorId: owner.id } });
-		await db.exhibition.delete({ where: { id: exhibitionId } });
-		await db.user.deleteMany({ where: { id: { in: [owner.id, operator.id] } } });
-		await db.$disconnect();
-	});
+	afterAll(async () => { await database?.close(); });
 
 	async function staged(kinds: AssetUploadKind[]) {
 		const repository = createProjectChangeRepository(db);

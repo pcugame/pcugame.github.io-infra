@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AdminProjectDetailSchema, AdminProjectListResponseSchema } from '@pcu/contracts';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import type { Actor } from '../application/http-input.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { registerAuth } from '../plugins/auth.js';
 import { AppError } from '../shared/errors.js';
 import { registerRouteSchemas } from '../shared/http-route-schemas.js';
@@ -23,13 +23,15 @@ import { createProjectAccessRepository } from '../modules/admin/project-access.r
 
 describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('year policy authenticated HTTP boundary', () => {
 	let db: PrismaClient;
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let app: FastifyInstance;
 	let exhibitionId: number;
 	let owner: Actor, member: Actor, stranger: Actor, operator: Actor, admin: Actor;
 	const users: number[] = [];
 	const cookies = new Map<number, string>();
 	beforeAll(async () => {
-		db = createPrismaClientForDatabase(process.env['DATABASE_URL']!);
+		database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);
+		db = database.createClient();
 		async function user(role: Actor['role']): Promise<Actor> {
 			const row = await db.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@test.invalid`, role } });
 			users.push(row.id);
@@ -64,11 +66,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('year policy 
 	});
 	afterAll(async () => {
 		await app?.close();
-		if (!db) return;
-		await db.projectChangeRequest.deleteMany({ where: { actorId: { in: users } } });
-		await db.exhibition.delete({ where: { id: exhibitionId } });
-		await db.user.deleteMany({ where: { id: { in: users } } });
-		await db.$disconnect();
+		await database?.close();
 	});
 	async function project() {
 		return db.project.create({ data: { exhibitionId, creatorId: owner.id, title: 'Before', slug: randomUUID(), status: 'PUBLISHED', members: { create: { name: 'Member', userId: member.id } } } });

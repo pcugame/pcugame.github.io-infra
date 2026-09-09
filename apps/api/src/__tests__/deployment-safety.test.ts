@@ -41,15 +41,17 @@ describe('production deployment safety', () => {
 		expect(apiWorkflow).not.toContain('SSH deploy to server');
 	});
 
-	it('keeps cutover state and release tooling out of the image-publishing workflow', () => {
+	it('checks release artifacts without executing database migration or cutover', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
 		const apiPaths = pushPaths(repositoryFile('.github/workflows/deploy-api.yml'));
 		const releaseGatePath = '.github/release-gates/web-before-api/**';
 
 		expect(apiPaths).toContain(releaseGatePath);
 		expect(apiPaths).not.toContain('apps/web/**');
-		expect(apiWorkflow).not.toContain('release-migrate');
-		expect(apiWorkflow).not.toContain('contract-migrate');
+		// Artifact verification may inspect release CLI filenames; invoking a
+		// migration command belongs exclusively to the explicit cutover workflow.
+		expect(apiWorkflow).not.toMatch(/(?:node|tsx|npm|pnpm|yarn)\s+[^\n]*(?:release-migrate|contract-migrate|db:migrate)/);
+		expect(apiWorkflow).not.toMatch(/(?:bash|sh)\s+[^\n]*release-cutover/);
 	});
 
 	it('leaves production release authorization to the explicit server cutover procedure', () => {

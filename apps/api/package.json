@@ -14,7 +14,6 @@
     "worker:video": "tsx src/video-worker.ts",
     "worker:image": "tsx src/image-worker.ts",
     "worker:export": "tsx src/export-worker.ts",
-    "worker:project-publication": "tsx src/project-publication-worker.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
@@ -26,6 +25,7 @@
     "release:backfill": "node dist-release/scripts/backfill-canonical-assets.js",
     "release:preflight": "node dist-release/scripts/preflight-canonical-contract.js",
     "release:inventory": "node dist-release/scripts/snapshot-garage-inventory.js",
+    "release:report": "node dist-release/scripts/verify-cutover-report.js",
     "release:migrate": "node dist-release/scripts/release-migrate.js",
     "lint": "eslint src prisma scripts --max-warnings=0 && tsc --noEmit",
     "architecture:guard": "node scripts/architecture-guard.mjs src scripts",
@@ -35,7 +35,8 @@
     "test": "vitest run && npm run test:scripts",
     "test:scripts": "vitest run --config scripts/vitest.config.ts",
     "correction:canonical-assets": "tsx scripts/correct-canonical-assets.ts",
-    "release:correction": "node dist-release/scripts/correct-canonical-assets.js"
+    "release:correction": "node dist-release/scripts/correct-canonical-assets.js",
+    "worker:project-publication": "tsx src/project-publication-worker.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1024.0",
@@ -57,7 +58,7 @@
     "pdf-to-img": "^6.2.0",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
     "yauzl": "^3.4.0",
     "zod": "^4.4.3"
   },

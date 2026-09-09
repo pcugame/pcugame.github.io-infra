@@ -116,9 +116,9 @@ export default function ProjectDetailPage() {
       {projectVideos.length > 0 && (
         <section className="project-detail__video">
           <h3>영상</h3>
-          {projectVideos.map((video) => (
-            <div key={video.assetId} className="project-detail__video-item">
-              <h4>{getVideoLabel(video)}</h4>
+		  {projectVideos.map((video, index) => (
+			<div key={video.assetId ?? video.url ?? index} className="project-detail__video-item">
+			  <h4>{getVideoLabel(video, index)}</h4>
               <ProjectVideo
                 video={video}
                 poster={project.poster}
@@ -158,7 +158,6 @@ export default function ProjectDetailPage() {
           />
         </section>
       )}
-
       <ProjectAttachments attachments={project.attachments} className="project-detail__attachments" />
     </div>
   );

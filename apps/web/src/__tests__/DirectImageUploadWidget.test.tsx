@@ -127,11 +127,6 @@ describe('DirectImageUploadWidget', () => {
 			<QueryClientProvider client={new QueryClient()}>
 				<DirectImageUploadWidget
 					owner={{ type: 'PROJECT', id: 4 }} kind="IMAGE" initialFiles={[first, second, third]} autoStart
-					submissionItems={[
-						{ id: 'item-first', clientToken: 'first' },
-						{ id: 'item-second', clientToken: 'second' },
-						{ id: 'item-third', clientToken: 'third' },
-					]}
 					onComplete={complete}
 				/>
 			</QueryClientProvider>,
@@ -145,11 +140,9 @@ describe('DirectImageUploadWidget', () => {
 		expect(uploadDirectAssetFile.mock.calls.map((call) => call[1].name)).toEqual(['second.png', 'third.png']);
 		expect(uploadDirectAssetFile.mock.calls[0]?.[4]).toMatchObject({
 			resume: session,
-			submissionItem: { id: 'item-second', clientToken: 'second' },
 			signal: expect.any(AbortSignal),
 		});
 		expect(uploadDirectAssetFile.mock.calls[1]?.[4]).toMatchObject({
-			submissionItem: { id: 'item-third', clientToken: 'third' },
 			signal: expect.any(AbortSignal),
 		});
 	});

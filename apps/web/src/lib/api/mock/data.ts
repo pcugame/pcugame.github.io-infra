@@ -317,7 +317,7 @@ export const MOCK_YEAR_PROJECTS: Record<number, MockProjectCard[]> = {
 
 interface MockMyProjectCard extends MockProjectCard {
 	year: number;
-	status: ProjectStatus;
+	status: Exclude<ProjectStatus, 'DRAFT'>;
 	ownerId: number;
 	updatedAgoSec: number;
 }
@@ -352,7 +352,7 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 // ── 프로젝트 상세 빌더 ──────────────────────────────────────
 
 function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): PublicProjectDetailResponse {
-	const status = 'status' in card && card.status === 'ARCHIVED' ? 'ARCHIVED' : 'PUBLISHED';
+	const status = 'status' in card ? card.status : 'PUBLISHED';
 	return {
 		id: card.id,
 		year,

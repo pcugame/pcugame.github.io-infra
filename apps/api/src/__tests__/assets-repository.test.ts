@@ -10,10 +10,11 @@ const original = {
 describe('assets repository', () => {
 	it('claims the canonical representation fence and clears a matching poster atomically', async () => {
 		const updateAsset = vi.fn().mockResolvedValue({ id: 42 });
+		const incrementProjectVersion = vi.fn().mockResolvedValue({ id: 7 });
 		const updateProject = vi.fn().mockResolvedValue({ count: 1 });
 		const tx = {
 			asset: { findUnique: vi.fn().mockResolvedValue({ projectId: 7 }), update: updateAsset },
-			project: { updateMany: updateProject },
+			project: { update: incrementProjectVersion, updateMany: updateProject },
 			$queryRaw: vi.fn()
 				.mockResolvedValueOnce([{ id: 7 }])
 				.mockResolvedValueOnce([{ id: 42, projectId: 7, kind: 'POSTER', status: 'READY' }])
@@ -30,6 +31,9 @@ describe('assets repository', () => {
 		});
 		expect(updateAsset).toHaveBeenCalledWith({
 			where: { id: 42 }, data: { status: 'DELETING' }, select: { id: true },
+		});
+		expect(incrementProjectVersion).toHaveBeenCalledWith({
+			where: { id: 7 }, data: { version: { increment: 1 } },
 		});
 		expect(updateProject).toHaveBeenCalledWith({
 			where: { id: 7, posterAssetId: 42 }, data: { posterAssetId: null },

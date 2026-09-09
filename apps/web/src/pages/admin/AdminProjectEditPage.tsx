@@ -12,6 +12,7 @@ import { useAdminProjectMutations } from '../../features/admin/projects/useAdmin
 import { useMe } from '../../features/auth';
 import { adminProjectApi } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
+import { getClientUploadLimits } from '../../lib/upload-limits';
 
 export default function AdminProjectEditPage() {
 	const { id: idParam } = useParams<{ id: string }>();
@@ -45,6 +46,7 @@ export default function AdminProjectEditPage() {
 
 	// Capability is computed at the API boundary.  Operators retain direct access
 	// even when an exhibition is closed, while contributors must submit a request.
+	const limits = getClientUploadLimits(user?.role ?? 'USER');
 	const isPrivileged = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
 	const canEditContent = isPrivileged || project.canEdit === true;
 
@@ -118,6 +120,7 @@ export default function AdminProjectEditPage() {
 				<AdminProjectAssetManager
 					project={project}
 					projectId={id}
+					limits={limits}
 					canEditContent={canEditContent}
 					isSettingPoster={mutations.setPosterMutation.isPending}
 					isRemovingAsset={mutations.removeAssetMutation.isPending}

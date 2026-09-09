@@ -170,6 +170,7 @@ export function createAssetsRepository(
 				`);
 
 				if (asset.status !== 'DELETED' && asset.status !== 'DELETING') {
+					await tx.project.update({ where: { id: asset.projectId }, data: { version: { increment: 1 } } });
 					await tx.asset.update({
 						where: { id: asset.id },
 						data: { status: 'DELETING' },

@@ -1,3 +1,4 @@
+import { waitForWorkerPoll } from '../../shared/worker-wait.js';
 import type { createVideoProcessingWorker } from './worker.js';
 
 export async function runVideoWorkerLoop(input: {
@@ -8,18 +9,7 @@ export async function runVideoWorkerLoop(input: {
 	onError?(error: unknown): void;
 }): Promise<void> {
 	const idleDelayMs = input.idleDelayMs ?? 2_000;
-	const delay = input.delay ?? ((ms, signal) => new Promise<void>((resolve) => {
-		if (signal.aborted) {
-			resolve();
-			return;
-		}
-		const timer = setTimeout(resolve, ms);
-		timer.unref();
-		signal.addEventListener('abort', () => {
-			clearTimeout(timer);
-			resolve();
-		}, { once: true });
-	}));
+	const delay = input.delay ?? waitForWorkerPoll;
 	while (!input.signal.aborted) {
 		let claimed = 0;
 		try {

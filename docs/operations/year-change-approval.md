@@ -47,6 +47,10 @@ npm exec -w apps/api -- vitest run --no-file-parallelism \
 
 마이그레이션 `20260909100000_project_change_requests`는 버전 필드와 요청 테이블을 추가한다. 기존 Phase 2 `apply-contract` 경로에서 적용하며 새 Phase 2 런타임 검증은 해당 마이그레이션 완료를 요구한다. Phase 1 마이그레이션 범위는 확대하지 않는다.
 
-이번 구현은 작업 시작 시 존재하던 Phase 2 작업 폴더를 기준으로 한다. 확인한 원격 `master`는 `d103504`의 Phase 1 구조이며, 작업 시작 커밋은 `080eda5`이다. 기존 미커밋 변경은 보존하였다. 따라서 선행 Phase 2 변경의 검토·통합과 기존 전환 절차를 완료한 뒤 기능 PR을 `master`에 통합해야 한다. 이 기능만을 이유로 Phase 2 contract 전환을 실행하거나 작업 브랜치에서 배포하지 않는다.
+구현 시작 시 기준 커밋은 `080eda5`, 당시 master는 Phase 1의 `d103504`였다. 선행 Phase 2 변경은 PR #49에서 검토·검증한 뒤 `5ad6bf4`로 master에 병합하였다. 기존 작업 보존 커밋은 `d90be24`이다.
 
-기존 Phase 2 작업은 선행 브랜치 `chore/phase2-prerequisites`로 보존하고, 기능 브랜치 `feat/year-change-approval`는 해당 브랜치를 기준으로 검토한다. 두 PR은 초안으로 작성하며, 선행 변경의 `master` 통합 후 기능 PR의 기준 브랜치를 `master`로 변경하고 CI를 다시 확인해야 한다. PR 병합과 운영 배포는 이번 작업에 포함하지 않는다. 배포 시에는 병합된 `master` 커밋의 검증된 불변 아티팩트를 사용하고 실제 운영 동작, 소스 커밋, 이미지 digest를 별도로 기록한다.
+기능 PR #50은 병합된 master를 기준으로 검토한다. 기존 Phase 2 변경을 다시 추가하지 않고 수정·삭제 승인 기능과 필요한 검증만 포함한다. 운영자의 파일 삭제·일괄 상태 변경도 프로젝트 버전을 증가시켜 이전 승인 요청을 CONFLICT로 처리한다. DB 테스트는 독립 마이그레이션 스키마를 사용해 상시 워커와의 간섭을 방지한다.
+
+master 병합과 운영 배포는 구분한다. 배포 전 관측·DB 전환·Pages 조건은 `docs/operations/phase2-pr49-integration.md`를 참조한다. 이 기능만을 이유로 Phase 2 contract 전환을 실행하거나 작업 브랜치에서 배포하지 않는다. 배포 시에는 병합된 master 커밋의 검증된 불변 아티팩트를 사용하고 실제 운영 동작, 소스 커밋, 이미지 digest를 별도로 기록한다.
+
+EOD

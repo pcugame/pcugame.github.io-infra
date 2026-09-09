@@ -221,6 +221,7 @@ export default function DirectVideoUploadWidget({
 					if (next.percent >= 100) setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
+					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
 					onSession: (next) => {
 						const current = isCurrentRun(token);
 						const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
@@ -233,7 +234,6 @@ export default function DirectVideoUploadWidget({
 						} else if (current || paused) remember(next, file, index, true);
 						else if (resumableRef.current === null) remember(next, file, index, false);
 					},
-					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
 					signal: controller.signal,
 				});
 				if (!isCurrentRun(token)) return;
@@ -499,8 +499,8 @@ export default function DirectVideoUploadWidget({
 						id={fileInputId}
 						type="file"
 						multiple
-						accept={accept ?? (kind === 'VIDEO' ? 'video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv' : undefined)}
-						onChange={(event) => {
+					accept={accept ?? (kind === 'VIDEO' ? 'video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv' : undefined)}
+					onChange={(event) => {
 						const selected = Array.from(event.target.files ?? []);
 
 						if (maxFileBytes !== undefined && selected.some((file) => file.size > maxFileBytes || file.size === 0)) {
@@ -514,9 +514,7 @@ export default function DirectVideoUploadWidget({
 						if (pendingCount > maxFiles) {
 							setFiles([]);
 							updateCompleted(0);
-							setError(kind === 'VIDEO'
-								? `동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다. 현재 ${maxFiles}개까지 추가할 수 있습니다.`
-								: `${label}은 현재 ${maxFiles}개까지 추가할 수 있습니다.`);
+							setError(kind === 'VIDEO' ? `동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다. 현재 ${maxFiles}개까지 추가할 수 있습니다.` : `${label}은 현재 ${maxFiles}개까지 추가할 수 있습니다.`);
 							event.target.value = '';
 							return;
 						}
@@ -528,13 +526,13 @@ export default function DirectVideoUploadWidget({
 						if (saved) updateCompleted(saved.completed ?? 0);
 						else updateCompleted(0);
 						setError(null);
-						}}
-						disabled={maxFiles <= 0}
+					}}
+					disabled={maxFiles <= 0}
 					/>
 				</div>
 			)}
 			{files.length > 0 && <p className="game-upload__file-summary">{files.length}개 {label} 선택됨 ({completed}/{files.length} 완료)</p>}
-			{progress && (
+			{progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
 					<div className="game-upload__progress-track" role="progressbar" aria-label={`${label} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
 						<div className={`game-upload__progress-bar ${phase === 'ready' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />

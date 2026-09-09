@@ -73,7 +73,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 				label: '포스터',
 			});
 		}
-		projectVideos.forEach((video) => {
+		projectVideos.forEach((video, index) => {
 			mediaItems.push({
 				type: 'video',
 				assetId: video.assetId,
@@ -84,7 +84,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 				originalDownloadUrl: video.originalDownloadUrl,
 				playbackStatus: video.playbackStatus,
 				playbackError: video.playbackError,
-				label: getVideoLabel(video),
+				label: getVideoLabel(video, index),
 			});
 		});
 		const galleryImages = project.images.filter((img) => img.kind === 'IMAGE');
@@ -149,17 +149,17 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								<div className="modal-visual__frame">
 									{current.type === 'video' ? (
 										<ProjectVideo
-											key={current.assetId}
-										video={{
-											assetId: current.assetId,
-											sortOrder: current.sortOrder,
-											role: current.role,
-											url: current.url,
-											mimeType: current.mimeType,
-											originalDownloadUrl: current.originalDownloadUrl,
-											playbackStatus: current.playbackStatus,
-											playbackError: current.playbackError,
-										}}
+											key={current.assetId ?? current.url ?? activeIndex}
+											video={{
+												assetId: current.assetId,
+												sortOrder: current.sortOrder,
+												role: current.role,
+												url: current.url,
+												mimeType: current.mimeType,
+												originalDownloadUrl: current.originalDownloadUrl,
+												playbackStatus: current.playbackStatus,
+												playbackError: current.playbackError,
+											}}
 											poster={project.poster}
 											title={project.title}
 										/>
@@ -194,23 +194,23 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								{/* 동영상 여러 개일 때 dot + 화살표 네비게이션 */}
 								{current.type === 'video' && videoCount > 1 && (
 									<div className="modal-video-nav">
-										<button className="modal-video-nav__arrow" onClick={prevVideo} aria-label={`이전 ${previousVideo?.label ?? '영상'}`}>
+									<button className="modal-video-nav__arrow" onClick={prevVideo} aria-label={`이전 ${previousVideo?.label ?? '영상'}`}>
 											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 												<polyline points="15 18 9 12 15 6" />
 											</svg>
 										</button>
 										<div className="modal-video-dots">
-											{Array.from({ length: videoCount }, (_, i) => {
-												const video = videoAt(i);
-												return <button
-													key={video?.assetId ?? i}
+									{Array.from({ length: videoCount }, (_, i) => {
+										const video = videoAt(i);
+										return <button
+											key={video?.assetId ?? video?.url ?? i}
 													className={`modal-video-dot${i === currentVideoOffset ? ' modal-video-dot--active' : ''}`}
 													onClick={() => setActiveIndex(videoStartIndex + i)}
-													aria-label={video?.label ?? '영상'}
-												/>
-											})}
+											aria-label={video?.label ?? '영상'}
+										/>;
+									})}
 										</div>
-										<button className="modal-video-nav__arrow" onClick={nextVideo} aria-label={`다음 ${nextVideoItem?.label ?? '영상'}`}>
+									<button className="modal-video-nav__arrow" onClick={nextVideo} aria-label={`다음 ${nextVideoItem?.label ?? '영상'}`}>
 											<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
 												<polyline points="9 18 15 12 9 6" />
 											</svg>
@@ -233,7 +233,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 									return (
 										<button
-											key={item.type === 'image' ? `img-${item.id}` : item.type === 'video' ? `video-${item.assetId}` : `${item.type}-${i}`}
+										key={item.type === 'image' ? `img-${item.id}` : item.type === 'video' ? `video-${item.assetId ?? item.url ?? i}` : `${item.type}-${i}`}
 											className={`modal-media-tab ${isActive ? 'modal-media-tab--active' : ''}`}
 											onClick={() => setActiveIndex(i)}
 										>

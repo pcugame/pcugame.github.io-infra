@@ -528,7 +528,7 @@ export function createProjectCrudRepository(
 				if (draftCount > 0 && status !== 'DRAFT') {
 					throw conflict('Draft submissions may only be published by submission finalize');
 				}
-				return tx.project.updateMany({ where: { id: { in: ids } }, data: { status } });
+				return tx.project.updateMany({ where: { id: { in: ids } }, data: { status, version: { increment: 1 } } });
 			});
 		},
 		findExhibitionById(id) {

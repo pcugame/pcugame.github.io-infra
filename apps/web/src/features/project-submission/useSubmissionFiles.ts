@@ -102,7 +102,6 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 		setVideoFiles([]);
 		if (videoInputRef.current) videoInputRef.current.value = '';
 	};
-
 	const clearDocuments = () => {
 		setDocumentFiles([]);
 		if (documentsInputRef.current) documentsInputRef.current.value = '';
@@ -212,7 +211,6 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 		}
 		e.target.value = '';
 	};
-
 	const addMaterials = (kind: '문서' | '첨부자료', files: File[], target: 'documents' | 'attachments', input: HTMLInputElement) => {
 		if (!materialLimits) {
 			setFileSizeError('현재 서버는 프로젝트 자료 업로드를 지원하지 않습니다.');

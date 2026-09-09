@@ -6,21 +6,23 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ProjectChangeDetailSchema, ProjectChangeListResponseSchema } from '@pcu/contracts';
-import { createPrismaClientForDatabase } from '../../lib/prisma-client.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
+import { createIsolatedMigratedDatabase } from '../../__tests__/helpers/isolated-migrated-database.js';
 import { registerAuth } from '../../plugins/auth.js';
 import { registerRouteSchemas } from '../../shared/http-route-schemas.js';
 import { createProjectChangeRepository } from './repository.js';
 import { createProjectChangeService } from './service.js';
 import { createProjectChangeController } from './controller.js';
 import { createProjectPublicationRepository } from '../project-publication/repository.js';
+import { createAssetsRepository } from '../assets/repository.js';
+import { createProjectCrudRepository } from '../admin/project/crud.repository.js';
 import type { ChangeActor } from './ports.js';
 
 describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('change request authenticated PostgreSQL boundaries',()=>{
- let db:PrismaClient,app:FastifyInstance,service:ReturnType<typeof createProjectChangeService>,owner:ChangeActor,member:ChangeActor,operator:ChangeActor,stranger:ChangeActor;
+ let db:PrismaClient,database:Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>,app:FastifyInstance,service:ReturnType<typeof createProjectChangeService>,owner:ChangeActor,member:ChangeActor,operator:ChangeActor,stranger:ChangeActor;
  let exhibitionId:number;const userIds:number[]=[];const sessions=new Map<number,string>();let protectedBucket:string;
  beforeAll(async()=>{
-  db=createPrismaClientForDatabase(process.env['DATABASE_URL']!);
+  database=await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);db=database.createClient();
   protectedBucket=(await db.storageBucket.findUnique({where:{visibility:'PROTECTED'}}))?.bucket??'request-protected';
   await db.storageBucket.upsert({where:{visibility:'PROTECTED'},create:{bucket:protectedBucket,visibility:'PROTECTED'},update:{}});
   await db.storageBucket.upsert({where:{visibility:'PUBLIC'},create:{bucket:'request-public',visibility:'PUBLIC'},update:{}});
@@ -32,7 +34,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('change request
   app.setErrorHandler((error,_request,reply)=>{const status=error instanceof AppError?error.statusCode:500;reply.status(status).send({ok:false,error:{code:error instanceof AppError?error.code:'ERROR',message:error instanceof Error?error.message:'Error'}});});
   registerRouteSchemas(app);await app.register(createProjectChangeController(service,'me'),{prefix:'/api/me'});await app.register(createProjectChangeController(service,'admin'),{prefix:'/api/admin'});
  });
- afterAll(async()=>{if(!db)return;await app?.close();const ids=(await db.project.findMany({where:{exhibitionId},select:{id:true}})).map(row=>row.id);await db.assetUploadSession.deleteMany({where:{projectId:{in:ids}}});await db.projectChangeRequest.deleteMany({where:{actorId:{in:userIds}}});await db.exhibition.delete({where:{id:exhibitionId}});await db.user.deleteMany({where:{id:{in:userIds}}});await db.$disconnect();});
+ afterAll(async()=>{if(!db)return;await app?.close();await database?.close();});
  async function project(){return db.project.create({data:{exhibitionId,creatorId:owner.id,slug:randomUUID(),title:'Original',status:'PUBLISHED',members:{create:{userId:member.id,name:'Member'}}}});}
  function request(actor:ChangeActor,method:'GET'|'POST'|'PATCH',url:string,payload?:unknown){return app.inject({method,url,headers:{cookie:`sid=${sessions.get(actor.id)}`,origin:'http://localhost:5173'},...(payload!==undefined?{payload:payload as Record<string,unknown>}:{})});}
  async function draft(projectId:number,actor=owner){return service.create(actor,projectId,{kind:'EDIT',reason:'Correct published data'});}
@@ -51,6 +53,14 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('change request
  it('enforces one active request under concurrent creator/member submission',async()=>{const p=await project();const result=await Promise.allSettled([draft(p.id),draft(p.id,member)]);expect(result.filter(item=>item.status==='fulfilled')).toHaveLength(1);expect(result.find(item=>item.status==='rejected')).toMatchObject({reason:{statusCode:409}});});
  it('keeps closed project intact on reject/cancel and blocks edits after submit',async()=>{const p=await project();const d=await draft(p.id);await service.update(owner,d.id,{changes:{title:'Unapproved'}});await service.submit(owner,d.id);await expect(service.update(owner,d.id,{changes:{title:'Sneak'}})).rejects.toMatchObject({statusCode:409});await service.reject(operator,d.id,'Needs clarification');expect((await service.detail(owner,d.id)).state).toBe('REJECTED');const d2=await draft(p.id);await service.cancel(owner,d2.id);expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).title).toBe('Original');});
  it('detects direct-change conflicts and removed requester membership',async()=>{const p=await project();const d=await draft(p.id,member);await service.update(member,d.id,{changes:{title:'Member draft'}});await service.submit(member,d.id);await db.projectMember.deleteMany({where:{projectId:p.id,userId:member.id}});expect((await service.approve(operator,d.id)).state).toBe('CONFLICT');const d2=await draft(p.id);await service.submit(owner,d2.id);await db.project.update({where:{id:p.id},data:{version:{increment:1},title:'Direct admin change'}});expect((await service.approve(operator,d2.id)).state).toBe('CONFLICT');expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).title).toBe('Direct admin change');});
+ it('fences a pending request after the first production deletion claim without double-bumping a retry',async()=>{const p=await project();const asset=await db.asset.create({data:{projectId:p.id,kind:'DOCUMENT',status:'READY',representations:{create:{role:'ORIGINAL',state:'READY',bucket:protectedBucket,objectKey:`requests-test/${randomUUID()}`,mimeType:'application/pdf',sizeBytes:1n}}}});const d=await service.create(owner,p.id,{kind:'DELETE',reason:'Withdraw after asset claim'});await service.submit(owner,d.id);const assets=createAssetsRepository(db);await assets.claimAssetForDeletion(asset.id);expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).version).toBe(p.version+1);expect((await service.approve(operator,d.id)).state).toBe('CONFLICT');await assets.claimAssetForDeletion(asset.id);expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).version).toBe(p.version+1);});
+ it('fences a pending request after an operator bulk status update',async()=>{
+  const p=await project();const d=await draft(p.id);await service.submit(owner,d.id);
+  await expect(createProjectCrudRepository(db).bulkUpdateStatus([p.id],'ARCHIVED')).resolves.toMatchObject({count:1});
+  const updated=await db.project.findUniqueOrThrow({where:{id:p.id}});
+  expect(updated).toMatchObject({status:'ARCHIVED',version:p.version+1});
+  expect((await service.approve(operator,d.id)).state).toBe('CONFLICT');
+ });
  it('applies simultaneous duplicate approvals once',async()=>{const p=await project();const d=await draft(p.id);await service.update(owner,d.id,{changes:{title:'Once'}});await service.submit(owner,d.id);const results=await Promise.all([service.approve(operator,d.id),service.approve(operator,d.id)]);expect(results.map(row=>row.state)).toEqual(['COMPLETED','COMPLETED']);expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).version).toBe(p.version+1);});
  it('source deletion cancels draft uploads and preserves conflicted request history',async()=>{const p=await project();const d=await draft(p.id);const staged=await service.update(owner,d.id,{manifest:[{kind:'GAME',slot:'game',clientToken:'c'.repeat(32)}]});await db.$transaction(tx=>deleteProjectInTransaction(tx,p.id));expect(await db.project.findUnique({where:{id:staged.stagingProjectId!}})).toBeNull();expect(await service.detail(owner,d.id)).toMatchObject({state:'CONFLICT',projectId:null,stagingProjectId:null});});
  it('permanently deletes only on approval while preserving history and durable cleanup',async()=>{const p=await project();const key=`requests-test/${randomUUID()}`;await db.asset.create({data:{projectId:p.id,kind:'GAME',representations:{create:{role:'ORIGINAL',state:'READY',bucket:protectedBucket,objectKey:key,mimeType:'application/zip',sizeBytes:10n}}}});const d=await service.create(owner,p.id,{kind:'DELETE',reason:'Withdraw submission'});await service.submit(owner,d.id);expect(await db.project.findUnique({where:{id:p.id}})).not.toBeNull();const result=await service.approve(operator,d.id);expect(result).toMatchObject({state:'COMPLETED',projectId:null,originalProjectId:p.id});expect(await db.project.findUnique({where:{id:p.id}})).toBeNull();expect(await db.orphanObject.findUnique({where:{orphan_bucket_storage_key:{bucket:protectedBucket,storageKey:key}}})).not.toBeNull();});

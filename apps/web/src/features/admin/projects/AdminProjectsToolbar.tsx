@@ -2,7 +2,7 @@ import type { ProjectStatus } from '../../../contracts';
 import type { AdminProjectStatusFilter } from './useAdminProjectList';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '제출 중',
+	DRAFT: '초안',
 	PUBLISHED: '공개',
 	ARCHIVED: '보관',
 };

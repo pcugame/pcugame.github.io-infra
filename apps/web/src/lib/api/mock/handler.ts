@@ -50,7 +50,7 @@ const MOCK_BANNED_IPS = [
 type MockDirectAssetSession = {
 	sessionId: string;
 	owner: { type: 'PROJECT' | 'EXHIBITION'; id: number };
-	kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER';
+	kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT';
 	generation: number;
 	partSizeBytes: number;
 	totalParts: number;
@@ -203,11 +203,12 @@ const routes: MockRoute[] = [
 	// These routes mirror the canonical Garage capability protocol.  Mock
 	// UploadPart uses a separate mock://-style path rather than an API body.
 	{
-		pattern: /^\/api\/admin\/(projects|exhibitions)\/(\d+)\/direct-(game|webgl|video|image|poster)-upload-sessions$/,
-			handler: (match, method, options) => {
+		pattern: /^\/api\/admin\/(projects|exhibitions)\/(\d+)\/direct-(game|webgl|video|image|poster|document|attachment)-upload-sessions$/,
+		handler: (match, method, options) => {
 			if (method !== 'POST') return notFound();
 			const ownerType = match[1] === 'projects' ? 'PROJECT' : 'EXHIBITION';
 			const kind = String(match[3]).toUpperCase() as MockDirectAssetSession['kind'];
+			if (ownerType === 'EXHIBITION') requireAdmin();
 			if (ownerType === 'EXHIBITION' && kind !== 'POSTER') return notFound();
 			const body = parseJsonBody(options.body);
 			const totalBytes = Math.max(1, Number(body.totalBytes ?? 1));
@@ -225,17 +226,17 @@ const routes: MockRoute[] = [
 				sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
 				sourceIdentity: String(body.sourceIdentity ?? '0'.repeat(64)),
 				state: 'UPLOADING',
-					parts: new Map(),
-					...(body.submissionItem && typeof body.submissionItem === 'object'
-						? { submissionItemId: String((body.submissionItem as { id?: unknown }).id ?? '') }
-						: {}),
-				};
-				const submissionItem = mockProjectSubmission?.items.find((item) => item.id === session.submissionItemId);
-				if (submissionItem) {
-					submissionItem.state = 'UPLOADING';
-					submissionItem.sessionId = session.sessionId;
-					submissionItem.generation = session.generation;
-				}
+				parts: new Map(),
+				...(body.submissionItem && typeof body.submissionItem === 'object'
+					? { submissionItemId: String((body.submissionItem as { id?: unknown }).id ?? '') }
+					: {}),
+			};
+			const submissionItem = mockProjectSubmission?.items.find((item) => item.id === session.submissionItemId);
+			if (submissionItem) {
+				submissionItem.state = 'UPLOADING';
+				submissionItem.sessionId = session.sessionId;
+				submissionItem.generation = session.generation;
+			}
 			mockDirectAssetSessions.set(session.sessionId, session);
 			return {
 				sessionId: session.sessionId,
@@ -292,9 +293,9 @@ const routes: MockRoute[] = [
 			if (session.state !== 'UPLOADING') return notFound();
 			// The actual worker owns verification.  The mock makes the next status
 			// poll READY while preserving the VERIFYING completion response shape.
-				session.state = 'READY';
-				const submissionItem = mockProjectSubmission?.items.find((item) => item.id === session.submissionItemId);
-				if (submissionItem) submissionItem.state = 'READY';
+			session.state = 'READY';
+			const submissionItem = mockProjectSubmission?.items.find((item) => item.id === session.submissionItemId);
+			if (submissionItem) submissionItem.state = 'READY';
 			return { status: 'VERIFYING', sessionId: session.sessionId, generation: session.generation, sizeBytes: session.totalBytes };
 		},
 	},
@@ -402,57 +403,57 @@ const routes: MockRoute[] = [
 
 	// ── Admin Projects ──
 	{
-			pattern: /^\/api\/(admin|me)\/projects\/submit$/,
-			handler: (match, method, options) => {
-				if (match[1] === 'admin') requireAdmin();
-				if (method !== 'POST') return notFound();
-				const raw = options.body instanceof FormData ? options.body.get('payload') : null;
-				const payload = typeof raw === 'string' ? parseJsonBody(raw) : {};
-				const manifest = Array.isArray(payload.manifest) ? payload.manifest : [];
-				mockProjectSubmission = {
-					submissionId: crypto.randomUUID(),
-					projectId: 999,
-					projectStatus: 'DRAFT',
-					state: 'PENDING',
-					items: manifest.map((entry) => {
-						const item = entry as Record<string, unknown>;
-						return {
-							id: crypto.randomUUID(),
-							kind: String(item.kind) as MockDirectAssetSession['kind'],
-							slot: String(item.slot),
-							clientToken: String(item.clientToken),
-							required: item.required !== false,
-							state: 'EXPECTED' as const,
-						};
-					}),
-				};
-				return {
-					id: 999, slug: 'new-project', year: 2025,
-					status: 'DRAFT', submissionId: mockProjectSubmission.submissionId,
-					items: mockProjectSubmission.items,
-					adminEditUrl: '/admin/projects/999/edit',
-				};
-			},
+		pattern: /^\/api\/(admin|me)\/projects\/submit$/,
+		handler: (match, method, options) => {
+			if (match[1] === 'admin') requireAdmin();
+			if (method !== 'POST') return notFound();
+			const raw = options.body instanceof FormData ? options.body.get('payload') : null;
+			const payload = typeof raw === 'string' ? parseJsonBody(raw) : {};
+			const manifest = Array.isArray(payload.manifest) ? payload.manifest : [];
+			mockProjectSubmission = {
+				submissionId: crypto.randomUUID(),
+				projectId: 999,
+				projectStatus: 'DRAFT',
+				state: 'PENDING',
+				items: manifest.map((entry) => {
+					const item = entry as Record<string, unknown>;
+					return {
+						id: crypto.randomUUID(),
+						kind: String(item.kind) as MockDirectAssetSession['kind'],
+						slot: String(item.slot),
+						clientToken: String(item.clientToken),
+						required: item.required !== false,
+						state: 'EXPECTED' as const,
+					};
+				}),
+			};
+			return {
+				id: 999, slug: 'new-project', year: 2025,
+				status: 'DRAFT', submissionId: mockProjectSubmission.submissionId,
+				items: mockProjectSubmission.items,
+				adminEditUrl: '/admin/projects/999/edit',
+			};
 		},
-		{
-			pattern: /^\/api\/(admin|me)\/projects\/(\d+)\/submission(?:\/(finalize))?$/,
-			handler: (match, method) => {
-				if (match[1] === 'admin') requireAdmin();
-				const submission = mockProjectSubmission;
-				if (!submission || submission.projectId !== Number(match[2])) return notFound();
-				if (method === 'DELETE') {
-					submission.state = 'CANCELLED';
-					submission.items.forEach((item) => { if (item.state !== 'READY') item.state = 'CANCELLED'; });
-					return submission;
-				}
-				if (match[3] === 'finalize' && method === 'POST') {
-					if (!submission.items.every((item) => item.state === 'READY')) throw new Error('Mock: submission not ready');
-					submission.state = 'PUBLISHED';
-					submission.projectStatus = 'PUBLISHED';
-				}
+	},
+	{
+		pattern: /^\/api\/(admin|me)\/projects\/(\d+)\/submission(?:\/(finalize))?$/,
+		handler: (match, method) => {
+			if (match[1] === 'admin') requireAdmin();
+			const submission = mockProjectSubmission;
+			if (!submission || submission.projectId !== Number(match[2])) return notFound();
+			if (method === 'DELETE') {
+				submission.state = 'CANCELLED';
+				submission.items.forEach((item) => { if (item.state !== 'READY') item.state = 'CANCELLED'; });
 				return submission;
-			},
+			}
+			if (match[3] === 'finalize' && method === 'POST') {
+				if (!submission.items.every((item) => item.state === 'READY')) throw new Error('Mock: submission not ready');
+				submission.state = 'PUBLISHED';
+				submission.projectStatus = 'PUBLISHED';
+			}
+			return submission;
 		},
+	},
 	{
 		pattern: /^\/api\/admin\/projects\/bulk\/status$/,
 		handler: () => ({ updated: 1 }),
@@ -460,10 +461,6 @@ const routes: MockRoute[] = [
 	{
 		pattern: /^\/api\/admin\/projects\/bulk\/delete$/,
 		handler: () => ({ deleted: 1, assetsRemoved: 3 }),
-	},
-	{
-		pattern: /^\/api\/admin\/projects\/([^/]+)\/assets$/,
-		handler: () => ({ assetId: 900 }),
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)\/poster$/,

@@ -185,8 +185,8 @@ export function assertRuntime(rows: readonly MigrationRow[], phase: RuntimePhase
 	if (phase === 'phase1' && (!status.expand || status.contract)) {
 		throw new Error('phase1 runtime requires expand=applied and contract=not-applied');
 	}
-	if (phase === 'phase2' && (!status.contract || !status.projectChanges)) {
-		throw new Error('phase2 runtime requires the contract and project change migration DB records');
+	if (phase === 'phase2' && (!status.expand || !status.contract || !status.projectChanges)) {
+		throw new Error('phase2 runtime requires complete expand history, the contract migration DB record and project change migration DB record');
 	}
 }
 
@@ -219,8 +219,8 @@ async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING | typeof PR
 			await cp(join(sourcePrisma, 'migrations', name), join(staging, 'prisma', 'migrations', name), { recursive: true });
 		}
 		await writeFile(join(staging, 'prisma.config.ts'), [
-			"import { defineConfig } from 'prisma/config';",
-			"export default defineConfig({ schema: 'prisma/schema.prisma', migrations: { path: 'prisma/migrations' }, datasource: { url: process.env['DATABASE_URL']! } });",
+			// The temporary tree is outside node_modules ancestry; keep its config dependency-free.
+			"export default { schema: 'prisma/schema.prisma', migrations: { path: 'prisma/migrations' }, datasource: { url: process.env['DATABASE_URL'] } };",
 			'',
 		].join('\n'));
 		const prismaCli = join(root, 'node_modules', 'prisma', 'build', 'index.js');

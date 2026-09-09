@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import {
 	createIdempotencyRepository,
 	succeedIdempotencyOperation,
@@ -37,6 +37,7 @@ describe.runIf(runPostgresIntegration)(
 	() => {
 		const testId = randomUUID();
 		const bucket = `lease-clock-${testId}`;
+		let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 		let control: PrismaClient;
 		let firstWorker: PrismaClient;
 		let secondWorker: PrismaClient;
@@ -45,9 +46,13 @@ describe.runIf(runPostgresIntegration)(
 		beforeAll(async () => {
 			const databaseUrl = process.env['DATABASE_URL'];
 			if (!databaseUrl) throw new Error('DATABASE_URL is required');
-			control = createPrismaClientForDatabase(databaseUrl);
-			firstWorker = createPrismaClientForDatabase(databaseUrl);
-			secondWorker = createPrismaClientForDatabase(databaseUrl);
+			// Claims and purges intentionally scan entire tables. A private migrated
+			// schema keeps earlier HTTP smoke receipts and live maintenance workers
+			// out of these exact ownership assertions without changing production SQL.
+			database = await createIsolatedMigratedDatabase(databaseUrl);
+			control = database.createClient();
+			firstWorker = database.createClient();
+			secondWorker = database.createClient();
 			await Promise.all([
 				control.$connect(),
 				firstWorker.$connect(),
@@ -62,21 +67,9 @@ describe.runIf(runPostgresIntegration)(
 				},
 			});
 			actorId = actor.id;
-		});
+		}, 60_000);
 
-		afterAll(async () => {
-			if (!control) return;
-			await control.orphanObject.deleteMany({ where: { bucket } });
-			await control.uploadIntent.deleteMany({ where: { bucket } });
-			await control.multipartAbortTask.deleteMany({ where: { bucket } });
-			await control.idempotencyOperation.deleteMany({ where: { actorId } });
-			await control.user.deleteMany({ where: { id: actorId } });
-			await Promise.all([
-				control.$disconnect(),
-				firstWorker.$disconnect(),
-				secondWorker.$disconnect(),
-			]);
-		});
+		afterAll(async () => { await database?.close(); });
 
 		it('uses PostgreSQL time for upload-intent takeover and fences every stale final mutation', async () => {
 			const id = randomUUID();

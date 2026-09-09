@@ -89,6 +89,11 @@ const phase1Block = cutover.slice(
 );
 assert.match(phase1Block, /export API_IMAGE="\$\{PHASE1_IMAGE\}"[\s\S]*export MIGRATION_IMAGE="\$\{PHASE1_IMAGE\}"/);
 assert.doesNotMatch(phase1Block, /MIGRATION_IMAGE="\$\{FINAL_IMAGE\}"/);
+assert.match(
+	phase1Block,
+	/podman run --rm --pod graduationproject \\\n\s+--user 0:0 \\\n\s+-v "\$\{CUTOVER_STATE_DIR\}:\/release-state:ro,Z"/,
+	'observation-start verifier must read rootless release-state files as the deploy user mapping',
+);
 assert.ok(
 	phase1Block.indexOf('release-artifact-preflight phase1') < phase1Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain'),
 	'Phase 1 marker/worker validation must precede the first mutation drain',
@@ -156,18 +161,42 @@ assert.doesNotMatch(postContract, /rollback_tag|previous_image|START_DEDICATED_W
 assert.match(postContract, /Automatic old-image rollback is forbidden/);
 assert.match(cutover.slice(0, destructiveBoundary), /pre-contract boundary permits[\s\S]*rollback/);
 
-for (const marker of ['BASELINE_MIGRATION', 'apply-expand', 'apply-contract', 'assert-runtime']) {
+for (const marker of ['BASELINE_MIGRATION', 'apply-expand', 'assert-runtime']) {
 	assert.ok(releaseMigration.includes(marker), `release fence missing ${marker}`);
 }
 for (const migration of [
 	'20260821000000_canonical_asset_expand',
 	'20260821400000_project_submission_draft_status',
 	'20260821500000_project_submission_expand',
-	'20260821800000_project_video_order_expand',
 ]) assert.ok(releaseMigration.includes(migration), `Phase 1 bundle omits ${migration}`);
 assert.match(releaseMigration, /stagedMigrate\(PHASE1_MIGRATION_CEILING/);
+assert.match(releaseMigration, /assert-runtime requires phase1 or phase2/);
+assert.match(releaseMigration, /phase2 runtime requires complete expand history, the contract migration DB record and project change migration DB record/);
+assert.match(releaseMigration, /stagedMigrate\(PROJECT_CHANGE_MIGRATION/);
+assert.doesNotMatch(dockerfile, /rm -rf apps\/api\/prisma\/migrations\/20260822000000_canonical_asset_contract/);
 assert.match(deploy, /RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2/);
 assert.match(deploy, /mutation drain marker is absent/);
+const releaseCommonArgs = deploy.slice(
+	deploy.indexOf('release_common_args() {'),
+	deploy.indexOf('assert_postgres_running() {'),
+);
+assert.match(
+	releaseCommonArgs,
+	/--user 0:0/,
+	'release CLIs must map to the rootless Podman host user when writing release state',
+);
+for (const name of [
+	'SESSION_SECRET',
+	'GOOGLE_CLIENT_IDS',
+	'CORS_ALLOWED_ORIGINS',
+	'API_PUBLIC_URL',
+	'WEB_PUBLIC_URL',
+]) {
+	assert.ok(
+		releaseCommonArgs.includes(`-e "${name}=\${${name}}"`),
+		`release containers must receive ${name}`,
+	);
+}
 assert.match(deploy, /dist\/phase1-release-manifest\.js/);
 assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
 assert.match(deploy, /refusing to record a mixed-image Phase 1 observation/);

@@ -46,6 +46,10 @@ export default function GameUploadWidget({
 	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [session, setSession] = useState<DirectAssetUploadSession | null>(null);
+	const [terminalSessionConfirmation, setTerminalSessionConfirmation] = useState<{
+		sessionId: string;
+		generation: number;
+	} | null>(null);
 	const [sessionRestored, setSessionRestored] = useState(false);
 	const mountedRef = useRef(true);
 	const sessionRef = useRef<DirectAssetUploadSession | null>(null);
@@ -70,9 +74,31 @@ export default function GameUploadWidget({
 		if (expectedSessionId && sessionRef.current?.sessionId !== expectedSessionId) return false;
 		sessionRef.current = null;
 		window.sessionStorage.removeItem(directSessionStorageKey);
-		if (mountedRef.current) setSession(null);
+		if (mountedRef.current) {
+			setSession(null);
+			setTerminalSessionConfirmation((current) => (
+				!expectedSessionId || current?.sessionId === expectedSessionId ? null : current
+			));
+		}
 		return true;
 	}, [directSessionStorageKey]);
+	const markTerminalSession = useCallback((candidate: DirectAssetUploadSession, status: {
+		sessionId: string;
+		generation: number;
+		state: string;
+	}) => {
+		if (!mountedRef.current
+			|| sessionRef.current?.sessionId !== candidate.sessionId
+			|| sessionRef.current.generation !== candidate.generation
+			|| status.sessionId !== candidate.sessionId
+			|| status.generation !== candidate.generation
+			|| !['REJECTED', 'EXPIRED'].includes(status.state)) return false;
+		autoStartedRef.current = true;
+		setTerminalSessionConfirmation({ sessionId: candidate.sessionId, generation: candidate.generation });
+		setError('업로드 세션을 다시 이어올릴 수 없습니다. 원본 ZIP 파일을 선택한 뒤 새 업로드 시작을 눌러 다시 올리세요.');
+		setState('idle');
+		return true;
+	}, []);
 	const isCurrentRun = useCallback((token: number) => (
 		mountedRef.current && runRef.current?.token === token
 	), []);
@@ -109,6 +135,13 @@ export default function GameUploadWidget({
 		let cancelled = false;
 		const polling = new AbortController();
 		restoreControllerRef.current = polling;
+		const isCurrentRestoredSession = (candidate: DirectAssetUploadSession | null) => (
+			!cancelled
+			&& !polling.signal.aborted
+			&& candidate !== null
+			&& sessionRef.current?.sessionId === candidate.sessionId
+			&& sessionRef.current.generation === candidate.generation
+		);
 		async function restoreSession() {
 			const raw = window.sessionStorage.getItem(directSessionStorageKey);
 			if (!raw) return;
@@ -119,16 +152,17 @@ export default function GameUploadWidget({
 				if (candidate.kind !== uploadKind) throw new Error('asset upload kind mismatch');
 				rememberSession(candidate);
 				const status = await getDirectAssetUploadStatus(candidate.sessionId, polling.signal);
-				if (!cancelled && status.state === 'UPLOADING' && status.generation === candidate.generation) {
+				if (!isCurrentRestoredSession(candidate)) return;
+				if (status.state === 'UPLOADING' && status.generation === candidate.generation) {
 					rememberSession(candidate);
 					return;
 				}
-				if (!cancelled && ['COMPLETING', 'VERIFYING'].includes(status.state) && status.generation === candidate.generation) {
+				if (['COMPLETING', 'VERIFYING'].includes(status.state) && status.generation === candidate.generation) {
 					keepForBackgroundVerification = true;
 					rememberSession(candidate);
 					setState('verifying');
 					await waitForDirectAssetReady(candidate.sessionId, { signal: polling.signal });
-					if (!cancelled) {
+					if (isCurrentRestoredSession(candidate)) {
 						forgetSession(candidate.sessionId);
 						setState('completed');
 						qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
@@ -136,14 +170,14 @@ export default function GameUploadWidget({
 					}
 					return;
 				}
-				if (!cancelled && status.state === 'READY' && status.generation === candidate.generation) {
+				if (status.state === 'READY' && status.generation === candidate.generation) {
 					forgetSession();
 					setState('completed');
 					qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
 					onComplete?.();
 					return;
 				}
-				if (!cancelled && status.state === 'CANCELLED') {
+				if (status.state === 'CANCELLED') {
 					forgetSession(candidate.sessionId);
 					autoStartedRef.current = true;
 					setProgress(null);
@@ -151,14 +185,23 @@ export default function GameUploadWidget({
 					setState('idle');
 					return;
 				}
-				if (!cancelled && (status.state === 'REJECTED' || status.state === 'EXPIRED')) {
-					rememberSession(candidate);
-					setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다.`);
-					setState('idle');
+				if (status.state === 'REJECTED' || status.state === 'EXPIRED') {
+					markTerminalSession(candidate, status);
 				}
 			} catch (cause) {
 				if (cancelled || polling.signal.aborted) return;
+				if (!isCurrentRestoredSession(candidate)) return;
 				if (keepForBackgroundVerification) {
+					if (candidate) {
+						try {
+							const status = await getDirectAssetUploadStatus(candidate.sessionId, polling.signal);
+							if (!isCurrentRestoredSession(candidate)) return;
+							if (markTerminalSession(candidate, status)) return;
+						} catch {
+							if (!isCurrentRestoredSession(candidate)) return;
+						}
+					}
+					if (!isCurrentRestoredSession(candidate)) return;
 					setError(getApiErrorMessage(cause));
 					setState('error');
 					return;
@@ -175,12 +218,12 @@ export default function GameUploadWidget({
 			polling.abort();
 			if (restoreControllerRef.current === polling) restoreControllerRef.current = null;
 		};
-	}, [directSessionStorageKey, forgetSession, onComplete, projectId, qc, rememberSession, uploadKind]);
+	}, [directSessionStorageKey, forgetSession, markTerminalSession, onComplete, projectId, qc, rememberSession, uploadKind]);
 
 	const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
 		setFile(event.target.files?.[0] ?? null);
-		setError(null);
-	}, []);
+		if (!terminalSessionConfirmation) setError(null);
+	}, [terminalSessionConfirmation]);
 
 	const waitForSessionReady = useCallback(async (
 		candidate: DirectAssetUploadSession,
@@ -199,6 +242,13 @@ export default function GameUploadWidget({
 			onComplete?.();
 		} catch (cause) {
 			if (!isCurrentRun(token) || controller.signal.aborted) return;
+			try {
+				const status = await getDirectAssetUploadStatus(candidate.sessionId, controller.signal);
+				if (!isCurrentRun(token) || controller.signal.aborted) return;
+				if (markTerminalSession(candidate, status)) return;
+			} catch {
+				if (!isCurrentRun(token) || controller.signal.aborted) return;
+			}
 			setError(getApiErrorMessage(cause));
 			setState('error');
 		} finally {
@@ -207,7 +257,7 @@ export default function GameUploadWidget({
 				submittingRef.current = false;
 			}
 		}
-	}, [beginRun, forgetSession, isCurrentRun, onComplete, projectId, qc]);
+	}, [beginRun, forgetSession, isCurrentRun, markTerminalSession, onComplete, projectId, qc]);
 
 	const cancelLateCreatedSession = useCallback(async (candidate: DirectAssetUploadSession, sourceToken: number) => {
 		if (lateCancelSessionIdRef.current === candidate.sessionId) return;
@@ -241,8 +291,7 @@ export default function GameUploadWidget({
 					verificationCandidate = candidate;
 				} else {
 					rememberSession(candidate);
-					if (status.state === 'REJECTED' || status.state === 'EXPIRED') setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다.`);
-					setState('idle');
+					if (!markTerminalSession(candidate, status)) setState('idle');
 				}
 			} catch {
 				if (mountedRef.current) {
@@ -255,7 +304,7 @@ export default function GameUploadWidget({
 			if (cancelIntentRunTokenRef.current === sourceToken) cancelIntentRunTokenRef.current = null;
 			if (verificationCandidate && mountedRef.current) void waitForSessionReady(verificationCandidate);
 		}
-	}, [forgetSession, onComplete, projectId, qc, rememberSession, waitForSessionReady]);
+	}, [forgetSession, markTerminalSession, onComplete, projectId, qc, rememberSession, waitForSessionReady]);
 
 	const runUpload = useCallback(async (
 		uploadFile: File,
@@ -264,6 +313,7 @@ export default function GameUploadWidget({
 	) => {
 		if (!activeRun) return;
 		const { token, controller } = activeRun;
+		let verificationSession = resume;
 		setState('uploading');
 		setError(null);
 		try {
@@ -273,22 +323,33 @@ export default function GameUploadWidget({
 				if (next.percent >= 100) setState('verifying');
 			}, {
 				...(resume ? { resume } : {}),
+				...(submissionItem ? { submissionItem } : {}),
 				onSession: (next) => {
 					const current = isCurrentRun(token);
 					const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
-					const cancelPending = cancelIntentRunTokenRef.current === token;
-					if (cancelPending) {
-						rememberSession(next, mountedRef.current);
-						void cancelLateCreatedSession(next, token);
-					} else if (current || paused) rememberSession(next, true);
-					else if (sessionRef.current === null) rememberSession(next, false);
-				},
-				...(submissionItem ? { submissionItem } : {}),
-				signal: controller.signal,
+				const cancelPending = cancelIntentRunTokenRef.current === token;
+				if (cancelPending) {
+					verificationSession = next;
+					rememberSession(next, mountedRef.current);
+					void cancelLateCreatedSession(next, token);
+				} else if (current || paused) {
+					verificationSession = next;
+					rememberSession(next, true);
+				} else if (sessionRef.current === null) {
+					verificationSession = next;
+					rememberSession(next, false);
+				}
+			},
+			signal: controller.signal,
 			});
 			if (!isCurrentRun(token)) return;
 			if (completion.status === 'VERIFYING') {
-				await waitForSessionReady({ ...resume, sessionId: completion.sessionId } as DirectAssetUploadSession, activeRun);
+				if (!verificationSession || verificationSession.sessionId !== completion.sessionId) {
+					setError('업로드 세션 정보를 확인할 수 없습니다. 네트워크 연결을 확인한 뒤 다시 시도하세요.');
+					setState('error');
+					return;
+				}
+				await waitForSessionReady(verificationSession, activeRun);
 				return;
 			}
 			if (!isCurrentRun(token)) return;
@@ -330,6 +391,7 @@ export default function GameUploadWidget({
 				onComplete?.();
 				return;
 			}
+			if (markTerminalSession(candidate, status)) return;
 			setError(`업로드 세션을 재개할 수 없습니다 (${status.state}).`);
 			setState('error');
 		} catch (cause) {
@@ -342,7 +404,7 @@ export default function GameUploadWidget({
 				submittingRef.current = false;
 			}
 		}
-	}, [beginRun, forgetSession, isCurrentRun, onComplete, projectId, qc, runUpload, waitForSessionReady]);
+	}, [beginRun, forgetSession, isCurrentRun, markTerminalSession, onComplete, projectId, qc, runUpload, waitForSessionReady]);
 
 	useEffect(() => {
 		if (!autoStart || !initialFile || !sessionRestored || autoStartedRef.current) return;
@@ -358,6 +420,18 @@ export default function GameUploadWidget({
 	const handleStart = useCallback(() => {
 		if (file) void runUpload(file);
 	}, [file, runUpload]);
+	const handleTerminalRetry = useCallback(() => {
+		const candidate = sessionRef.current;
+		const confirmation = terminalSessionConfirmation;
+		if (!file || !candidate || !confirmation
+			|| candidate.sessionId !== confirmation.sessionId
+			|| candidate.generation !== confirmation.generation
+			|| submittingRef.current || cancellingRef.current) return;
+		if (!forgetSession(candidate.sessionId)) return;
+		setProgress(null);
+		setError(null);
+		void runUpload(file);
+	}, [file, forgetSession, runUpload, terminalSessionConfirmation]);
 	const handleResume = useCallback(() => {
 		if (file && session) void resumeUpload(file, session);
 	}, [file, resumeUpload, session]);
@@ -412,8 +486,7 @@ export default function GameUploadWidget({
 					verificationCandidate = candidate;
 				} else {
 					rememberSession(candidate);
-					if (status.state === 'REJECTED' || status.state === 'EXPIRED') setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다.`);
-					setState('idle');
+					if (!markTerminalSession(candidate, status)) setState('idle');
 				}
 			} catch {
 				if (mountedRef.current && runTokenRef.current === cancelToken) {
@@ -427,9 +500,12 @@ export default function GameUploadWidget({
 				void waitForSessionReady(verificationCandidate);
 			}
 		}
-	}, [abortActiveRun, forgetSession, onComplete, projectId, qc, rememberSession, waitForSessionReady]);
+	}, [abortActiveRun, forgetSession, markTerminalSession, onComplete, projectId, qc, rememberSession, waitForSessionReady]);
 
 	const fileSizeMB = file ? (file.size / 1024 / 1024).toFixed(1) : '0';
+	const terminalSession = session !== null
+		&& terminalSessionConfirmation?.sessionId === session.sessionId
+		&& terminalSessionConfirmation.generation === session.generation;
 	return (
 		<div className="game-upload">
 			<h3 className="game-upload__title">{labels.title}</h3>
@@ -461,7 +537,10 @@ export default function GameUploadWidget({
 			{error && <div className="game-upload__error" role="alert">{error}</div>}
 			<div className="game-upload__actions">
 				{state === 'idle' && file && !session && <button className="btn btn--primary" type="button" onClick={handleStart}>업로드 시작</button>}
-				{state === 'idle' && file && session && <>
+				{state === 'idle' && file && terminalSession && (
+					<button className="btn btn--primary" type="button" onClick={handleTerminalRetry}>새 업로드 시작</button>
+				)}
+				{state === 'idle' && file && session && !terminalSession && <>
 					<button className="btn btn--primary" type="button" onClick={handleResume}>이어올리기</button>
 					<button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>
 				</>}

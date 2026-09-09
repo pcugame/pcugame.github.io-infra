@@ -1,3 +1,4 @@
+import { waitForWorkerPoll } from './shared/worker-wait.js';
 import { pathToFileURL } from 'node:url';
 import { loadEnv } from './config/env.js';
 import { createCryptoIdGenerator } from './infrastructure/production-ports.js';
@@ -7,16 +8,6 @@ import { createS3Client } from './lib/s3.js';
 import { createObjectStorage } from './lib/storage.js';
 import { createProjectPublicationGraph } from './modules/project-publication/composition.js';
 import { createProjectPublicationRepository } from './modules/project-publication/repository.js';
-
-function wait(ms: number, signal: AbortSignal): Promise<void> {
-	return new Promise((resolve) => {
-		if (signal.aborted) return resolve();
-		const timer = setTimeout(resolve, ms);
-		const stop = () => { clearTimeout(timer); resolve(); };
-		signal.addEventListener('abort', stop, { once: true });
-		timer.unref();
-	});
-}
 
 /** Dedicated Garage staging-to-public worker. Fastify never imports this graph. */
 export async function runProjectPublicationWorker(): Promise<void> {
@@ -41,7 +32,7 @@ export async function runProjectPublicationWorker(): Promise<void> {
 				logger.error({ error }, 'Project publication pass failed');
 				return { claimed: 0 };
 			});
-			if (result.claimed === 0) await wait(config.DIRECT_UPLOAD_WORKER_POLL_MS, abort.signal);
+			if (result.claimed === 0) await waitForWorkerPoll(config.DIRECT_UPLOAD_WORKER_POLL_MS, abort.signal);
 		}
 	} finally {
 		process.off('SIGTERM', stop);

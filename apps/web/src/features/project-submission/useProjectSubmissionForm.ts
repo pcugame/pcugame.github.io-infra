@@ -220,9 +220,8 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			const linkedMember = data.members.find((member) => member.name === user.name);
 			if (linkedMember) linkedMember.userId = user.id;
 		}
-		// New clients submit metadata first. GAME/WEBGL/VIDEO/POSTER/IMAGE bytes
-		// subsequently use Garage multipart capabilities after project identity
-		// exists; the inline multipart API is a Phase-1 legacy bridge only.
+		// Submit metadata first. GAME/WEBGL/VIDEO/POSTER/IMAGE bytes then use
+		// Garage multipart capabilities after project identity exists.
 		const fingerprint = createIdempotencyFingerprint({
 			mode,
 			payload: data,

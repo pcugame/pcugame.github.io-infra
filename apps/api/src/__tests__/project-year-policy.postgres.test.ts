@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { assertProjectUploadWriteAccessInTransaction } from '../modules/admin/project-access.service.js';
 
@@ -9,6 +9,7 @@ const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 
 describe.runIf(enabled)('project year modification policy PostgreSQL', () => {
 	let db: PrismaClient;
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let exhibitionId: number;
 	let owner: { id: number; role: 'USER' };
 	let member: { id: number; role: 'USER' };
@@ -17,12 +18,13 @@ describe.runIf(enabled)('project year modification policy PostgreSQL', () => {
 	const projectIds: number[] = [];
 	const userIds: number[] = [];
 	beforeAll(async () => {
-		db = createPrismaClientForDatabase(process.env['DATABASE_URL']!);
+		database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);
+		db = database.createClient();
 		async function user<T extends 'USER' | 'OPERATOR'>(role: T): Promise<{ id: number; role: T }> { const row = await db.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@test.invalid`, role } }); userIds.push(row.id); return { id: row.id, role }; }
 		owner = await user('USER'); member = await user('USER'); stranger = await user('USER'); operator = await user('OPERATOR');
 		exhibitionId = (await db.exhibition.create({ data: { year: 28000, title: randomUUID(), isModificationEnabled: false } })).id;
 	});
-	afterAll(async () => { if (!db) return; await db.project.deleteMany({ where: { id: { in: projectIds } } }); await db.exhibition.delete({ where: { id: exhibitionId } }); await db.user.deleteMany({ where: { id: { in: userIds } } }); await db.$disconnect(); });
+	afterAll(async () => { await database?.close(); });
 	async function project() { const row = await db.project.create({ data: { exhibitionId, creatorId: owner.id, slug: randomUUID(), title: 'before', status: 'PUBLISHED', members: { create: { userId: member.id, name: 'member' } } } }); projectIds.push(row.id); return row; }
 	it('rejects closed owner/member/stranger writes, allows operator, then allows owner and member after opening', async () => {
 		const item = await project(); const repo = createProjectCrudRepository(db);

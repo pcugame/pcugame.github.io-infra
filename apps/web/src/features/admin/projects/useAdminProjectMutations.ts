@@ -2,11 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AdminProjectDetail, ProjectStatus, SetProjectVideoOrderRequest, UpdateMemberRequest } from '@pcu/contracts';
 
 import type { AddMemberInput, UpdateProjectFormInput } from '../../../contracts/schemas';
-import {
-	adminAssetApi,
-	adminMemberApi,
-	adminProjectApi,
-} from '../../../lib/api';
+import { adminAssetApi, adminMemberApi, adminProjectApi } from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
 
 interface UseAdminProjectMutationsParams {

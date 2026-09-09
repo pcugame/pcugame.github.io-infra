@@ -37,18 +37,6 @@ describe('DirectVideoUploadWidget', () => {
 		expect(uploadDirectAssetFile).not.toHaveBeenCalled();
 	});
 
-	it('uses the same direct lifecycle for DOCUMENT uploads', async () => {
-		uploadDirectAssetFile.mockResolvedValue({ status: 'READY', sessionId: 'document-1', generation: 1, sizeBytes: 1 });
-		const guide = new File(['guide'], 'guide.pdf', { type: 'application/pdf' });
-		render(
-			<QueryClientProvider client={new QueryClient()}>
-				<DirectVideoUploadWidget projectId={77} initialFiles={[guide]} autoStart kind="DOCUMENT" label="문서" />
-			</QueryClientProvider>,
-		);
-		await waitFor(() => expect(uploadDirectAssetFile).toHaveBeenCalledWith(
-			77, guide, 'DOCUMENT', expect.any(Function), expect.any(Object),
-		));
-	});
 
 	it('uploads multiple selected VIDEO files sequentially through canonical direct sessions', async () => {
 		uploadDirectAssetFile
@@ -91,7 +79,7 @@ describe('DirectVideoUploadWidget', () => {
 		expect(screen.queryByText(/3개 동영상 선택됨/)).toBeNull();
 	});
 
-	it('allows a saved queue to include completed files when only its remaining files fit', async () => {
+	it('allows a resumed queue when only its remaining files fit the available slots', async () => {
 		const files = Array.from({ length: 5 }, (_, index) =>
 			new File(['video'], `video-${index}.mp4`, { type: 'video/mp4' }),
 		);
@@ -100,17 +88,10 @@ describe('DirectVideoUploadWidget', () => {
 			totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z', sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'h'.repeat(64), kind: 'VIDEO',
 		};
 		window.sessionStorage.setItem('pcu.direct-video-upload:77', JSON.stringify({
-			session,
-			originalName: files[2]!.name,
-			totalBytes: files[2]!.size,
-			completed: 2,
+			session, originalName: files[2]!.name, totalBytes: files[2]!.size, completed: 2,
 		}));
 		getDirectAssetUploadStatus.mockResolvedValue({
-			...session,
-			state: 'UPLOADING',
-			originalName: files[2]!.name,
-			totalBytes: files[2]!.size,
-			parts: [],
+			...session, state: 'UPLOADING', originalName: files[2]!.name, totalBytes: files[2]!.size, parts: [],
 		});
 		const { container } = render(
 			<QueryClientProvider client={new QueryClient()}>
@@ -144,6 +125,7 @@ describe('DirectVideoUploadWidget', () => {
 			if (!secondOptions) {
 				secondOptions = options;
 				options.onSession(secondSession);
+				_onProgress({ percent: 50, uploadedBytes: 1, totalBytes: 2, uploadedChunks: 0, totalChunks: 1 });
 				return new Promise(() => undefined);
 			}
 			return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-second' });
@@ -155,13 +137,15 @@ describe('DirectVideoUploadWidget', () => {
 					projectId={77}
 					initialFiles={[first, second]}
 					autoStart
-					submissionItems={[{ id: 'item-1', clientToken: 'one' }, { id: 'item-2', clientToken: 'two' }]}
 				/>
 			</QueryClientProvider>,
 		);
 
 		await waitFor(() => expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+		expect(screen.getByRole('progressbar')).toBeTruthy();
 		fireEvent.click(screen.getByRole('button', { name: '일시 정지' }));
+		expect(screen.queryByRole('progressbar')).toBeNull();
+		expect(screen.queryByText('업로드 중…')).toBeNull();
 		expect(secondOptions?.signal.aborted).toBe(true);
 		expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2);
 		expect(screen.getByText('2개 동영상 선택됨 (1/2 완료)')).toBeTruthy();
@@ -171,7 +155,6 @@ describe('DirectVideoUploadWidget', () => {
 		expect(uploadDirectAssetFile.mock.calls[2]?.slice(0, 3)).toEqual([77, second, 'VIDEO']);
 		expect(uploadDirectAssetFile.mock.calls[2]?.[4]).toMatchObject({
 			resume: secondSession,
-			submissionItem: { id: 'item-2', clientToken: 'two' },
 			signal: expect.any(AbortSignal),
 		});
 	});

@@ -6,6 +6,7 @@ import GameUploadWidget from '../../../components/GameUploadWidget';
 import DirectVideoUploadWidget from '../../../components/DirectVideoUploadWidget';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
 import { ResponsiveImage } from '../../../components/common';
+import type { ClientUploadLimits } from '../../../lib/upload-limits';
 import { getApiErrorMessage } from '../../../lib/api';
 import { getAdminVideoLabel } from '../../../lib/video-label';
 import { publicApi } from '../../../lib/api';
@@ -19,6 +20,7 @@ type VideoAsset = Extract<AdminProjectDetail['assets'][number], { url: string }>
 interface AdminProjectAssetManagerProps {
 	project: AdminProjectDetail;
 	projectId: number;
+	limits: ClientUploadLimits;
 	canEditContent: boolean;
 	isSettingPoster: boolean;
 	isRemovingAsset: boolean;
@@ -45,10 +47,7 @@ export function AdminProjectAssetManager({
 	onRemoveWebgl,
 	onReorderVideos,
 }: AdminProjectAssetManagerProps) {
-	const { data: uploadConfig } = useQuery({
-		queryKey: ['public-upload-config'],
-		queryFn: publicApi.getUploadConfig,
-	});
+	const { data: uploadConfig } = useQuery({ queryKey: ['public-upload-config'], queryFn: publicApi.getUploadConfig });
 	const materialLimits = materialUploadLimitsFromConfig(uploadConfig);
 	const materialAssetIds = new Set([
 		...(project.attachments ?? []).map((attachment) => attachment.assetId),
@@ -63,6 +62,7 @@ export function AdminProjectAssetManager({
 	let nextVideoIndex = 0;
 	const orderedAssets = project.assets.map((asset) => asset.kind === 'VIDEO' ? videoAssets[nextVideoIndex++]! : asset);
 	const videoAssetIds = videoAssets.map((asset) => asset.id);
+	const supportsVideoOrder = videoAssets.every((asset) => Object.hasOwn(asset, 'videoSortOrder'));
 	const moveVideo = (assetId: number, targetIndex: number) => {
 		const currentIndex = videoAssetIds.indexOf(assetId);
 		if (currentIndex < 0 || targetIndex < 0 || targetIndex >= videoAssetIds.length) return;
@@ -148,30 +148,28 @@ export function AdminProjectAssetManager({
 											</a>
 										)}
 										{(asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT') && (
-											<a className="btn btn--secondary btn--small" href={asset.downloadUrl} download>
-												다운로드
-											</a>
+											<a className="btn btn--secondary btn--small" href={asset.downloadUrl} download>다운로드</a>
 										)}
-										{asset.kind === 'VIDEO' && (
+										{asset.kind === 'VIDEO' && supportsVideoOrder && (
 											<>
 												<button
 													className="btn btn--secondary btn--small"
 													onClick={() => moveVideo(asset.id, 0)}
-													disabled={isReorderingVideos || videoAssets.length > 5 || (videoIndex === 0 && asset.videoSortOrder === 0)}
+													disabled={isReorderingVideos || videoIndex === 0 && asset.videoSortOrder === 0}
 												>
 													메인으로 지정
 												</button>
 												<button
 													className="btn btn--secondary btn--small"
 													onClick={() => moveVideo(asset.id, videoIndex - 1)}
-													disabled={isReorderingVideos || videoAssets.length > 5 || videoIndex <= 0}
+													disabled={isReorderingVideos || videoIndex <= 0}
 												>
 													위로
 												</button>
 												<button
 													className="btn btn--secondary btn--small"
 													onClick={() => moveVideo(asset.id, videoIndex + 1)}
-													disabled={isReorderingVideos || videoAssets.length > 5 || videoIndex < 0 || videoIndex >= videoAssetIds.length - 1}
+													disabled={isReorderingVideos || videoIndex < 0 || videoIndex >= videoAssetIds.length - 1}
 												>
 													아래로
 												</button>
@@ -206,21 +204,10 @@ export function AdminProjectAssetManager({
 						)}
 						{materialLimits && availableMaterialSlots > 0 && (
 							<>
-								<DirectVideoUploadWidget
-									projectId={projectId}
-									maxFiles={availableMaterialSlots}
-									maxFileBytes={materialLimits.maxBytes}
-									kind="DOCUMENT"
-									label="문서"
-									accept="text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.ods,.odp,.rtf,.xls,.xlsx,.ppt,.pptx"
-								/>
-								<DirectVideoUploadWidget
-									projectId={projectId}
-									maxFiles={availableMaterialSlots}
-									maxFileBytes={materialLimits.maxBytes}
-									kind="ATTACHMENT"
-									label="첨부자료"
-								/>
+								<DirectVideoUploadWidget projectId={projectId} maxFiles={availableMaterialSlots}
+									maxFileBytes={materialLimits.maxBytes} kind="DOCUMENT" label="문서" accept="text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.ods,.odp,.rtf,.xls,.xlsx,.ppt,.pptx" />
+								<DirectVideoUploadWidget projectId={projectId} maxFiles={availableMaterialSlots}
+									maxFileBytes={materialLimits.maxBytes} kind="ATTACHMENT" label="첨부자료" />
 							</>
 						)}
 						{materialLimits && availableMaterialSlots === 0 && <p className="field-hint">문서와 첨부자료는 프로젝트당 최대 {materialLimits.maxCount}개까지 등록할 수 있습니다.</p>}

@@ -1,8 +1,9 @@
-/** Human-readable video role used consistently in public and admin UI. */
+/** Human-readable video roles used consistently in public and admin UI. */
 export function getVideoLabel(video: {
 	role?: 'MAIN' | 'ADDITIONAL';
 	sortOrder?: number | null;
-}): string {
+}, fallbackIndex = 0): string {
+	if (video.role === undefined && video.sortOrder === undefined) return fallbackIndex === 0 ? '메인 영상' : `추가 영상 ${fallbackIndex}`;
 	if (video.role === 'MAIN' || video.sortOrder === 0) return '메인 영상';
 	if (typeof video.sortOrder === 'number') return `추가 영상 ${video.sortOrder}`;
 	return '추가 영상';

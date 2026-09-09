@@ -195,9 +195,15 @@ release_common_args() {
   db_url="$(database_url_in_pod)"
   RELEASE_CONTAINER_ARGS=(
     --rm --pod "$POD_NAME"
+    --user 0:0
     -e "NODE_ENV=production"
     -e "DATABASE_URL=${db_url}"
     -e "LOG_LEVEL=${LOG_LEVEL:-info}"
+    -e "SESSION_SECRET=${SESSION_SECRET}"
+    -e "GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}"
+    -e "CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}"
+    -e "API_PUBLIC_URL=${API_PUBLIC_URL}"
+    -e "WEB_PUBLIC_URL=${WEB_PUBLIC_URL}"
     -e "S3_ENDPOINT=${S3_ENDPOINT}"
     -e "S3_PUBLIC_SIGNING_ENDPOINT=${S3_PUBLIC_SIGNING_ENDPOINT}"
     -e "S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT=${S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT}"
@@ -930,6 +936,8 @@ do_up() {
   local db_url="${DATABASE_URL//\@postgres:/\@127.0.0.1:}"
   local common_env=(
     -e "NODE_ENV=production"
+    -e "SESSION_SECRET=${SESSION_SECRET}"
+    -e "GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}"
     -e "DATABASE_URL=${db_url}"
     -e "LOG_LEVEL=${LOG_LEVEL:-info}"
     -e "S3_ENDPOINT=${S3_ENDPOINT}"
@@ -969,7 +977,6 @@ do_up() {
     -e "PORT=4000" \
     -e "TRUST_PROXY=${TRUST_PROXY:-1}" \
     -e "DATABASE_URL=${db_url}" \
-    -e "SESSION_SECRET=${SESSION_SECRET}" \
     -e "SESSION_COOKIE_NAME=${SESSION_COOKIE_NAME:-sid}" \
     -e "SESSION_IDLE_MS=${SESSION_IDLE_MS:-7200000}" \
     -e "SESSION_ABSOLUTE_MS=${SESSION_ABSOLUTE_MS:-1209600000}" \
@@ -977,7 +984,6 @@ do_up() {
     -e "SHUTDOWN_DRAIN_MS=${SHUTDOWN_DRAIN_MS:-15000}" \
     -e "COOKIE_SECURE=${COOKIE_SECURE:-true}" \
     -e "COOKIE_SAME_SITE=${COOKIE_SAME_SITE:-none}" \
-    -e "GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}" \
     -e "ALLOWED_GOOGLE_HD=${ALLOWED_GOOGLE_HD:-}" \
     --entrypoint node \
     "$API_IMAGE" dist/server.js
