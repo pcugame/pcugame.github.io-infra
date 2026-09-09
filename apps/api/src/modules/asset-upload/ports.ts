@@ -81,6 +81,8 @@ export interface AssetUploadRepository {
 	createAllocating(input: Omit<AssetUploadSessionRecord, 'state' | 'uploadId' | 'completionLeaseToken' | 'completionLeaseUntil' | 'completionResult' | 'validationLeaseToken' | 'validationLeaseUntil' | 'validationAttemptCount' | 'expectedTargetAssetId' | 'expectedTargetAssetUpdatedAt' | 'resultAssetId' | 'resultRepresentationId' | 'submissionItemId' | 'project' | 'exhibition'> & {
 		submissionItemId?: string | null;
 		submissionClientToken?: string;
+		/** Request actor role for the transaction-local project policy recheck. */
+		actorRole?: string;
 	}): Promise<AssetUploadSessionRecord>;
 	expireStaleAllocations(owner: DirectAssetUploadOwner): Promise<number>;
 	/** Close a persisted ALLOCATING row when CreateMultipart has no known upload ID. */

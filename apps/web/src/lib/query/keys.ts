@@ -23,4 +23,7 @@ export const queryKeys = {
   adminBannedIps: ['adminBannedIps'] as const,
   adminSettings: ['adminSettings'] as const,
   adminExportStatus: ['adminExportStatus'] as const,
+  changeRequests: ['changeRequests'] as const,
+  projectChangeRequests: (projectId: number) => ['changeRequests', 'project', projectId] as const,
+  changeRequest: (id: string) => ['changeRequests', id] as const,
 } as const;

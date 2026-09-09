@@ -8,6 +8,8 @@ import type { AssetUploadRepository, AssetUploadSessionRecord, DirectAssetUpload
 import { WorkerGenerationFencedError } from '../upload-lifecycle/worker-errors.js';
 import { countReservedProjectVideos, getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from '../assets/video-order.js';
 import { conflict } from '../../shared/errors.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
+import type { Actor } from '../../application/http-input.js';
 
 function asRecord(value: unknown): AssetUploadSessionRecord {
 	return value as AssetUploadSessionRecord;
@@ -64,14 +66,17 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 	return {
 		async createAllocating(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
-				const { submissionClientToken, ...sessionInput } = input;
+				const { submissionClientToken, actorRole, ...sessionInput } = input;
 				// The snapshot and active-session insert share a serializable scope so a
 				// later READY replacement cannot silently overwrite a newer GAME.
 				if ((input.projectId === null) === (input.exhibitionId === null)) {
 					throw new Error('Direct upload session requires exactly one owner');
 				}
 				if (input.projectId !== null) {
-					await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.projectId} FOR UPDATE`);
+					await assertProjectUploadWriteAccessInTransaction(tx, {
+						id: input.userId,
+						role: (actorRole ?? 'USER') as Actor['role'],
+					}, input.projectId);
 					const project = await tx.project.findUniqueOrThrow({
 						where: { id: input.projectId },
 						select: { status: true },
@@ -303,6 +308,11 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 				// user-visible GAME asset.
 				const session = await tx.assetUploadSession.findUniqueOrThrow({ where: { id: input.sessionId } });
 				if (session.kind !== 'WEBGL') return true;
+				if (session.projectId === null) throw new Error('WEBGL upload must be project-owned');
+				const actor = await tx.user.findUniqueOrThrow({
+					where: { id: session.userId }, select: { id: true, role: true },
+				});
+				await assertProjectUploadWriteAccessInTransaction(tx, actor, session.projectId);
 				const asset = await tx.asset.create({
 					data: {
 						projectId: session.projectId,
@@ -382,7 +392,13 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 		async commitGameReady(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
 				if (input.session.projectId === null) throw new Error('Validation session must be project-owned');
-				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.session.projectId} FOR UPDATE`);
+				const actor = await tx.user.findUniqueOrThrow({
+					where: { id: input.session.userId }, select: { id: true, role: true },
+				});
+				// This is the final content mutation, potentially long after the
+				// browser started the upload. Recheck the current year/member/request
+				// state here so a closed exhibition cannot receive late worker output.
+				await assertProjectUploadWriteAccessInTransaction(tx, actor, input.session.projectId);
 				const session = await tx.assetUploadSession.findUnique({ where: { id: input.session.id } });
 				const owned = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 					SELECT "id" FROM "asset_upload_sessions"
@@ -431,6 +447,10 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					validationLeaseToken: null, validationLeaseUntil: null,
 					completionResult: { status: 'READY', assetId: asset.id, representationId: representation.id },
 				} });
+				await tx.project.update({
+					where: { id: session.projectId },
+					data: { version: { increment: 1 } },
+				});
 				return { assetId: asset.id, representationId: representation.id };
 			});
 		},

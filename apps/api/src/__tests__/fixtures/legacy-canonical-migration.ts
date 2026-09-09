@@ -90,7 +90,7 @@ export const legacyCanonicalMigrationFixture = {
 		id: exhibitionId,
 		year: 2525,
 		title: 'Legacy canonical migration fixture',
-		isUploadEnabled: true,
+		isModificationEnabled: true,
 		sortOrder: 1,
 		posterStorageKey: exhibitionPosterKey,
 		posterOriginalName: '2025 exhibition poster.jpg',

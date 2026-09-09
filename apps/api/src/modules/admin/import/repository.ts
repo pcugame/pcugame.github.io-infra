@@ -20,7 +20,7 @@ function createTransactionRepository(tx: TransactionClient): ImportTransactionRe
 			create: {
 				year: data.year,
 				title: data.title,
-				isUploadEnabled: data.isUploadEnabled ?? true,
+				isModificationEnabled: data.isModificationEnabled ?? true,
 			},
 		}),
 

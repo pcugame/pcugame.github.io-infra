@@ -34,7 +34,8 @@ async function serializeExhibition(
 		id: e.id,
 		year: e.year,
 		title: e.title || undefined,
-		isUploadEnabled: e.isUploadEnabled,
+		isModificationEnabled: e.isModificationEnabled,
+		isUploadEnabled: e.isModificationEnabled,
 		sortOrder: e.sortOrder,
 		projectCount: e._count.projects,
 		poster: canonicalPoster,
@@ -54,7 +55,8 @@ export async function createExhibition(deps: ExhibitionServiceDependencies, data
 	const existing = await deps.repository.findExhibitionByComposite(data.year, data.title || '');
 	if (existing) throw conflict(`"${data.title || data.year}" 전시회가 이미 존재합니다`);
 
-	const created = await deps.repository.createExhibition(data);
+	const { isUploadEnabled, ...canonical } = data;
+	const created = await deps.repository.createExhibition({ ...canonical, isModificationEnabled: canonical.isModificationEnabled ?? isUploadEnabled });
 	return { id: created.id, year: created.year };
 }
 
@@ -83,7 +85,7 @@ export async function updateExhibition(
 
 	const updated = await deps.repository.updateExhibition(id, {
 		...(patch.title !== undefined ? { title: patch.title } : {}),
-		...(patch.isUploadEnabled !== undefined ? { isUploadEnabled: patch.isUploadEnabled } : {}),
+		...((patch.isModificationEnabled ?? patch.isUploadEnabled) !== undefined ? { isModificationEnabled: patch.isModificationEnabled ?? patch.isUploadEnabled } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	});
 

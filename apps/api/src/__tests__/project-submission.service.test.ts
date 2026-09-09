@@ -29,7 +29,7 @@ function submission(overrides: Partial<ProjectSubmissionRecord> = {}): ProjectSu
 
 function repository(record = submission()) {
 	const repo: SubmitProjectRepository = {
-		findExhibitionById: vi.fn(async () => ({ id: 3, year: 2026, title: '2026', isUploadEnabled: true })),
+		findExhibitionById: vi.fn(async () => ({ id: 3, year: 2026, title: '2026', isModificationEnabled: true })),
 		findProjectByExhibitionAndSlug: vi.fn(async () => null),
 		createProjectWithAssets: vi.fn(async () => ({ id: 41, slug: 'project', submission: record })),
 		findSubmissionForActor: vi.fn(async () => record),

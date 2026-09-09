@@ -4,6 +4,7 @@ import { forbidden, notFound } from '../../../shared/errors.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
 import type { createProjectSerializer } from './serializer.js';
 import type { ActiveUploadCleanup, ProjectCrudRepository } from './ports.js';
+import type { Actor } from '../../../application/http-input.js';
 
 type ProjectSerializer = ReturnType<typeof createProjectSerializer>['serializeProjectDetail'];
 
@@ -24,6 +25,20 @@ export interface ProjectServiceDependencies {
 function wakeCommittedCleanup(deps: ProjectServiceDependencies): void {
 	deps.wakeDeletionWorker();
 	deps.wakeMaintenance();
+}
+
+
+function capabilities(project: { status?: string; creatorId: number; members: Array<{ userId: number | null }>; exhibition: { isModificationEnabled?: boolean } }, userId: number, role: string) {
+	const isModificationEnabled = project.exhibition.isModificationEnabled !== false;
+	const privileged = role === 'ADMIN' || role === 'OPERATOR';
+	const related = project.creatorId === userId || project.members.some((member) => member.userId === userId);
+	const direct = privileged || (isModificationEnabled && related);
+	return {
+		isModificationEnabled,
+		canEdit: direct,
+		canDelete: direct,
+		canRequestChange: !privileged && !isModificationEnabled && related && project.status !== 'DRAFT',
+	};
 }
 
 // ── Business logic ──────────────────────────────────────────
@@ -67,6 +82,7 @@ export async function listProjects(
 		memberNames: p.members.map((m) => m.name),
 		memberStudentIds: p.members.map((m) => m.studentId),
 		updatedAt: p.updatedAt.toISOString(),
+		...capabilities(p, userId, userRole),
 	}));
 
 	return {
@@ -91,12 +107,13 @@ export async function getProjectDetail(
 ) {
 	const project = await deps.repository.findProjectById(projectId);
 	if (!project) throw notFound('Project not found');
+	if (project.changeRequestDraft) throw notFound('Project not found');
 
 	if (userRole !== 'ADMIN' && userRole !== 'OPERATOR' && project.creatorId !== userId) {
 		const isMember = !!(await deps.repository.isMemberOfProject(project.id, userId));
 		if (!isMember) throw forbidden('Not your project');
 	}
-	return deps.serializeProjectDetail(project);
+	return { ...deps.serializeProjectDetail(project), ...capabilities(project, userId, userRole) };
 }
 
 /** Partial-update a project */
@@ -107,6 +124,7 @@ export async function updateProject(
 		title?: string; summary?: string; description?: string;
 		isIncomplete?: boolean; status?: ProjectStatus; sortOrder?: number;
 	},
+	actor: Actor,
 ) {
 	const updated = await deps.repository.updateProject(projectId, {
 		...(patch.title !== undefined ? { title: patch.title } : {}),
@@ -115,17 +133,17 @@ export async function updateProject(
 		...(patch.isIncomplete !== undefined ? { isIncomplete: patch.isIncomplete } : {}),
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
-	});
-	return deps.serializeProjectDetail(updated);
+	}, actor);
+	return { ...deps.serializeProjectDetail(updated), ...capabilities(updated, actor.id, actor.role) };
 }
 
 /** Delete a project and its associated asset files from S3 */
-export async function deleteProject(deps: ProjectServiceDependencies, projectId: number) {
+export async function deleteProject(deps: ProjectServiceDependencies, projectId: number, actor: Actor) {
 	const reason = 'project-delete';
 	const { activeUploads } = await deps.repository.deleteProjectReturningAssets(projectId, {
 		...deps.deletionBuckets,
 		reason,
-	});
+	}, actor);
 	wakeCommittedCleanup(deps);
 	await abortTrackedMultipartUploads(deps, activeUploads, projectId);
 }
@@ -148,19 +166,19 @@ async function abortTrackedMultipartUploads(
 	}));
 }
 
-export async function deleteWebgl(deps: ProjectServiceDependencies, projectId: number): Promise<void> {
+export async function deleteWebgl(deps: ProjectServiceDependencies, projectId: number, actor: Actor): Promise<void> {
 	const reason = 'webgl-delete';
 	const { cancelledSession } = await deps.repository.clearWebglDeployment(projectId, {
 		...deps.deletionBuckets,
 		reason,
-	});
+	}, actor);
 	wakeCommittedCleanup(deps);
 	await abortTrackedMultipartUploads(deps, cancelledSession ? [cancelledSession] : [], projectId);
 }
 
 /** Set a project's poster; repository validation and pointer update share one transaction. */
-export async function setPoster(deps: ProjectServiceDependencies, projectId: number, assetId: number) {
-	await deps.repository.setProjectPoster(projectId, assetId);
+export async function setPoster(deps: ProjectServiceDependencies, projectId: number, assetId: number, actor: Actor) {
+	await deps.repository.setProjectPoster(projectId, assetId, actor);
 	return { posterAssetId: assetId };
 }
 
@@ -199,7 +217,7 @@ export function createProjectService(deps: ProjectServiceDependencies) {
 		updateProject: ((...args) => updateProject(deps, ...args)) as WithoutDependencies<typeof updateProject>,
 		deleteProject: ((...args) => deleteProject(deps, ...args)) as WithoutDependencies<typeof deleteProject>,
 		deleteWebgl: ((...args) => deleteWebgl(deps, ...args)) as WithoutDependencies<typeof deleteWebgl>,
-		setVideoOrder: (projectId: number, expectedOrder: number[], order: number[]) => deps.repository.setProjectVideoOrder(projectId, expectedOrder, order),
+		setVideoOrder: (projectId: number, expectedOrder: number[], order: number[], actor: Actor) => deps.repository.setProjectVideoOrder(projectId, expectedOrder, order, actor),
 		setPoster: ((...args) => setPoster(deps, ...args)) as WithoutDependencies<typeof setPoster>,
 		bulkDeleteProjects: ((...args) => bulkDeleteProjects(deps, ...args)) as WithoutDependencies<typeof bulkDeleteProjects>,
 	};

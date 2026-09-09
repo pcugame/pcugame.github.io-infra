@@ -198,7 +198,7 @@ model Exhibition {
   id              Int      @id @default(autoincrement())
   year            Int
   title           String   @default("")
-  isUploadEnabled Boolean  @default(true) @map("is_upload_enabled")
+  isModificationEnabled Boolean  @default(true) @map("is_upload_enabled")
   sortOrder       Int      @default(0) @map("sort_order")
   posterAssetId   Int?     @unique @map("poster_asset_id")
   createdAt       DateTime @default(now()) @map("created_at")
@@ -215,6 +215,7 @@ model Exhibition {
 }
 
 model Project {
+  version                  Int           @default(1)
   id                       Int           @id @default(autoincrement())
   exhibitionId             Int           @map("exhibition_id")
   slug                     String
@@ -243,6 +244,8 @@ model Project {
   assetUploads     AssetUploadSession[]   @relation("ProjectAssetUploads")
   submission       ProjectSubmission?
   publicationJob   ProjectPublicationJob?
+  changeRequests ProjectChangeRequest[] @relation("ChangeRequestSource")
+  changeRequestDraft ProjectChangeRequest? @relation("ChangeRequestStaging")
 
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
   @@index([exhibitionId, status, sortOrder])
@@ -700,4 +703,49 @@ model SiteSetting {
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@map("site_settings")
+}
+
+// Change requests retain their snapshots after permanent project deletion.
+enum ProjectChangeKind {
+  EDIT
+  DELETE
+}
+enum ProjectChangeState {
+  DRAFT
+  PENDING
+  APPLYING
+  COMPLETED
+  REJECTED
+  CANCELLED
+  CONFLICT
+  FAILED
+}
+model ProjectChangeRequest {
+  id String @id @default(uuid())
+  projectId Int? @map("project_id")
+  originalProjectId Int @map("original_project_id")
+  projectTitle String @map("project_title")
+  actorId Int @map("actor_id")
+  kind ProjectChangeKind
+  state ProjectChangeState @default(DRAFT)
+  baseVersion Int @map("base_version")
+  before Json
+  changes Json
+  reason String
+  reviewReason String? @map("review_reason")
+  reviewerId Int? @map("reviewer_id")
+  error String?
+  fileSnapshot Json @default("[]") @map("file_snapshot")
+  stagingProjectId Int? @unique @map("staging_project_id")
+  submittedAt DateTime? @map("submitted_at")
+  reviewedAt DateTime? @map("reviewed_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  project Project? @relation("ChangeRequestSource", fields: [projectId], references: [id], onDelete: SetNull)
+  stagingProject Project? @relation("ChangeRequestStaging", fields: [stagingProjectId], references: [id], onDelete: SetNull)
+  @@index([state, createdAt])
+  @@index([actorId, createdAt])
+  @@index([originalProjectId, createdAt])
+  @@map("project_change_requests")
 }

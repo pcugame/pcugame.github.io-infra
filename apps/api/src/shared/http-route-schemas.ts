@@ -2,6 +2,12 @@ import type { FastifyInstance, FastifySchema } from 'fastify';
 import { z } from 'zod';
 import { DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX } from '@pcu/contracts';
 import {
+	CreateProjectChangeSchema,
+	UpdateProjectChangeSchema,
+	RejectProjectChangeSchema,
+	ProjectChangeStateSchema,
+	ProjectChangeDetailSchema,
+	ProjectChangeListResponseSchema,
 	AdminExhibitionItemSchema,
 	AdminExhibitionListResponseSchema,
 	AdminProjectDetailSchema,
@@ -214,7 +220,33 @@ function contract(input: RouteRuntimeContract): RouteRuntimeContract {
  * images and WebGL assets declare explicit HEAD routes so streams are never
  * opened to answer metadata-only requests.
  */
+const ChangeIdParamsSchema = z.object({ id: z.string().uuid() }).strict();
+const ChangeListQuerySchema = z.object({
+	projectId: z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+	state: ProjectChangeStateSchema.optional(),
+	offset: z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+	limit: z.coerce.number().int().min(1).max(100).optional(),
+}).strict();
+const changeRouteContracts: RouteRuntimeContract[] = [];
+for (const audience of ['me', 'admin'] as const) {
+	const base = `/api/${audience}/change-requests`;
+	changeRouteContracts.push(
+		contract({ method: 'GET', url: base, family: 'project-change', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: ChangeListQuerySchema, body: NoBodySchema, response: jsonResponse(ProjectChangeListResponseSchema) }),
+		contract({ method: 'GET', url: `${base}/:id`, family: 'project-change', bodyBoundary: 'none', responseBoundary: 'json', params: ChangeIdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectChangeDetailSchema) }),
+	);
+	for (const action of audience === 'me' ? ['submit', 'cancel'] : ['approve', 'retry']) {
+		changeRouteContracts.push(contract({ method: 'POST', url: `${base}/:id/${action}`, family: 'project-change', bodyBoundary: 'none', responseBoundary: 'json', params: ChangeIdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectChangeDetailSchema) }));
+	}
+}
+changeRouteContracts.push(
+	contract({ method: 'POST', url: '/api/me/projects/:id/change-requests', family: 'project-change', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: CreateProjectChangeSchema, response: jsonResponse(ProjectChangeDetailSchema, 201) }),
+	contract({ method: 'GET', url: '/api/me/projects/:id/change-requests', family: 'project-change', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: ChangeListQuerySchema, body: NoBodySchema, response: jsonResponse(ProjectChangeListResponseSchema) }),
+	contract({ method: 'PATCH', url: '/api/me/change-requests/:id', family: 'project-change', bodyBoundary: 'json', responseBoundary: 'json', params: ChangeIdParamsSchema, querystring: EmptyObjectSchema, body: UpdateProjectChangeSchema, response: jsonResponse(ProjectChangeDetailSchema) }),
+	contract({ method: 'POST', url: '/api/admin/change-requests/:id/reject', family: 'project-change', bodyBoundary: 'json', responseBoundary: 'json', params: ChangeIdParamsSchema, querystring: EmptyObjectSchema, body: RejectProjectChangeSchema, response: jsonResponse(ProjectChangeDetailSchema) }),
+);
+
 export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
+	...changeRouteContracts,
 	contract({
 		method: 'OPTIONS',
 		url: '*',

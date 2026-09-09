@@ -11,7 +11,7 @@ describe('canonical representation provenance repositories', () => {
 			originalName: 'game.zip', totalBytes: 1234n,
 			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'source-root',
 			expectedTargetAssetId: null, expectedTargetAssetUpdatedAt: null,
-			completionResult: { status: 'VERIFYING', etag: 'garage-etag' },
+			completionResult: { status: 'VERIFYING', etag: 'garage-etag' }, userId: 1,
 		};
 		const representationUpdate = vi.fn(async () => ({}));
 		const assetCreate = vi.fn(async ({ data }: { data: Record<string, any> }) => ({
@@ -22,6 +22,13 @@ describe('canonical representation provenance repositories', () => {
 			}],
 		}));
 		const tx = {
+			user: { findUniqueOrThrow: vi.fn(async () => ({ id: 1, role: 'USER' })) },
+			project: {
+				findUnique: vi.fn(async () => ({ creatorId: 1, exhibitionId: 1, exhibition: { isModificationEnabled: true }, changeRequestDraft: null })),
+				findUniqueOrThrow: vi.fn(async () => ({ creatorId: 1, exhibitionId: 1, exhibition: { isModificationEnabled: true } })),
+				update: vi.fn(async () => ({})),
+			},
+			exhibition: { findUniqueOrThrow: vi.fn(async () => ({ isModificationEnabled: true })) },
 			assetUploadSession: {
 				findUnique: vi.fn(async () => session),
 				update: vi.fn(async () => ({})),

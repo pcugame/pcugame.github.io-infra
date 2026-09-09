@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	BASELINE_MIGRATION,
+	CONTRACT_MIGRATION,
+	PROJECT_CHANGE_MIGRATION,
 	PROJECT_VIDEO_ORDER_MIGRATION,
 	PROJECT_PUBLICATION_MIGRATION,
 	REQUIRED_EXPAND_MIGRATIONS,
@@ -60,5 +62,21 @@ describe('Phase 1 release migration history policy', () => {
 		expect(() => assertNoFailedReleaseMigration(malformed)).toThrow(
 			`release migration history contains failed/rolled-back rows: ${PROJECT_PUBLICATION_MIGRATION}`,
 		);
+	});
+});
+
+
+describe('project change release schema', () => {
+	it('requires the additive request migration for the new phase2 runtime', () => {
+		const old = [...completePhase1History(), completedMigration(CONTRACT_MIGRATION)];
+		expect(() => assertRuntime(old, 'phase2')).toThrow('project change migration');
+		expect(() => assertRuntime([...old, completedMigration(PROJECT_CHANGE_MIGRATION)], 'phase2')).not.toThrow();
+	});
+	it('does not add the request migration to phase1 or waive its contract prohibition', () => {
+		expect(() => assertRuntime(completePhase1History(), 'phase1')).not.toThrow();
+		expect(() => assertRuntime([...completePhase1History(), completedMigration(CONTRACT_MIGRATION), completedMigration(PROJECT_CHANGE_MIGRATION)], 'phase1')).toThrow();
+	});
+	it('rejects a failed request migration', () => {
+		expect(() => assertNoFailedReleaseMigration([{ migration_name: PROJECT_CHANGE_MIGRATION, finished_at: null, rolled_back_at: null }])).toThrow(PROJECT_CHANGE_MIGRATION);
 	});
 });

@@ -27,7 +27,7 @@ export function createMemberController(deps: MemberControllerDependencies): Fast
 				const projectId = parseIntParam(request.params.id);
 				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
 				const data = parseBody(AddMemberBody, request.body);
-				sendCreated(reply, await deps.service.addMember(projectId, data));
+				sendCreated(reply, await deps.service.addMember(projectId, data, request.currentUser!));
 			},
 		);
 
@@ -41,7 +41,7 @@ export function createMemberController(deps: MemberControllerDependencies): Fast
 				await deps.service.updateMember(
 					projectId,
 					memberId,
-					parseBody(UpdateMemberBody, request.body),
+					parseBody(UpdateMemberBody, request.body), request.currentUser!,
 				);
 				reply.status(204).send();
 			},
@@ -54,7 +54,7 @@ export function createMemberController(deps: MemberControllerDependencies): Fast
 				const projectId = parseIntParam(request.params.id);
 				const memberId = parseIntParam(request.params.memberId, 'Member ID');
 				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
-				await deps.service.deleteMember(projectId, memberId);
+				await deps.service.deleteMember(projectId, memberId, request.currentUser!);
 				reply.status(204).send();
 			},
 		);
@@ -66,7 +66,7 @@ export function createMemberController(deps: MemberControllerDependencies): Fast
 				const projectId = parseIntParam(request.params.id);
 				await deps.access.loadProjectWithAccess(request.currentUser!, projectId);
 				const { memberIdA, memberIdB } = parseBody(SwapMembersBody, request.body);
-				await deps.service.swapMemberOrder(projectId, memberIdA, memberIdB);
+				await deps.service.swapMemberOrder(projectId, memberIdA, memberIdB, request.currentUser!);
 				reply.status(204).send();
 			},
 		);

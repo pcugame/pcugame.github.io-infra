@@ -166,7 +166,7 @@ async function seedLegacy(client: PrismaClient, fixture: RunFixture['fixture']):
 				"poster_original_name", "poster_mime_type", "poster_size_bytes", "poster_width", "poster_height",
 				"poster_card_480_height", "poster_display_960_height", "updated_at"
 			) VALUES (
-				${exhibition.id}, ${exhibition.year}, ${exhibition.title}, ${exhibition.isUploadEnabled}, ${exhibition.sortOrder},
+				${exhibition.id}, ${exhibition.year}, ${exhibition.title}, ${exhibition.isModificationEnabled}, ${exhibition.sortOrder},
 				${exhibition.posterStorageKey}, ${exhibition.posterOriginalName}, ${exhibition.posterMimeType},
 				${exhibition.posterSizeBytes}, ${exhibition.posterWidth}, ${exhibition.posterHeight},
 				${exhibition.posterCard480Height}, ${exhibition.posterDisplay960Height}, CURRENT_TIMESTAMP

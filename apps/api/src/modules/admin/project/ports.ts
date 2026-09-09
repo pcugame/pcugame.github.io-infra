@@ -4,12 +4,13 @@ import type {
 } from '@pcu/contracts';
 import type { PosterCandidate } from '../../../shared/poster-validation.js';
 import type { SerializableProject } from './serializer.js';
+import type { Actor } from '../../../application/http-input.js';
 
 export interface ExhibitionUploadRecord {
 	id: number;
 	year: number;
 	title: string;
-	isUploadEnabled: boolean;
+	isModificationEnabled: boolean;
 }
 
 export interface SubmitProjectWriteData {
@@ -69,11 +70,12 @@ export interface ProjectListRecord {
 	id: number;
 	title: string;
 	slug: string;
-	exhibition: { year: number };
+	exhibition: { year: number; isModificationEnabled?: boolean };
 	isIncomplete: boolean;
 	status: ProjectStatus;
+	creatorId: number;
 	creator: { name: string };
-	members: Array<{ name: string; studentId: string }>;
+	members: Array<{ name: string; studentId: string; userId: number | null }>;
 	updatedAt: Date;
 	assets: Array<{ kind: AssetKind }>;
 	poster: {
@@ -85,6 +87,7 @@ export interface ProjectListRecord {
 
 export interface ProjectDetailRecord extends SerializableProject {
 	creatorId: number;
+	changeRequestDraft?: { id: string } | null;
 }
 
 export interface ActiveUploadCleanup {
@@ -130,17 +133,17 @@ export interface ProjectRepository {
 		isIncomplete?: boolean;
 		status?: ProjectStatus;
 		sortOrder?: number;
-	}): Promise<ProjectDetailRecord>;
-	deleteProjectReturningAssets(id: number, outbox: DeletionOutboxConfig): Promise<{
+	}, actor?: Actor): Promise<ProjectDetailRecord>;
+	deleteProjectReturningAssets(id: number, outbox: DeletionOutboxConfig, actor?: Actor): Promise<{
 		assets: DeletedAssetRecord[];
 		activeUploads: ActiveUploadCleanup[];
 	}>;
-	clearWebglDeployment(projectId: number, outbox: DeletionOutboxConfig): Promise<{
+	clearWebglDeployment(projectId: number, outbox: DeletionOutboxConfig, actor?: Actor): Promise<{
 		cancelledSession: ActiveUploadCleanup | null;
 	}>;
 	findAssetById(id: number): Promise<PosterCandidate | null>;
-	setProjectVideoOrder(projectId: number, expectedOrder: number[], order: number[]): Promise<{ order: number[] }>;
-	setProjectPoster(projectId: number, assetId: number): Promise<unknown>;
+	setProjectVideoOrder(projectId: number, expectedOrder: number[], order: number[], actor?: Actor): Promise<{ order: number[] }>;
+	setProjectPoster(projectId: number, assetId: number, actor?: Actor): Promise<unknown>;
 	bulkDeleteProjectsReturningAssets(ids: number[], outbox: DeletionOutboxConfig): Promise<{
 		result: { count: number };
 		assets: DeletedAssetRecord[];

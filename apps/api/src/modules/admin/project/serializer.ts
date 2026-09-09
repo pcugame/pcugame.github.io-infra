@@ -64,7 +64,7 @@ export type SerializableProject = {
 	id: number;
 	title: string;
 	slug: string;
-	exhibition: { year: number };
+	exhibition: { year: number; isModificationEnabled?: boolean };
 	summary: string;
 	description: string;
 	githubUrl: string;

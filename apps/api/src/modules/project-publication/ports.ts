@@ -25,7 +25,7 @@ export interface ProjectPublicationRepository {
 	complete(job: ValidatedProjectPublicationJob, token: string): Promise<'COMPLETED' | 'CANCELLED'>;
 	release(jobId: string, token: string, error: string, retryDelayMs: number): Promise<boolean>;
 	fail(jobId: string, token: string, error: string): Promise<boolean>;
-	queueCancelledCleanup(jobId: string): Promise<void>;
+	queueCancelledCleanup(jobId: string, validatedPlan?: ProjectPublicationPlan): Promise<void>;
 }
 
 export interface ProjectPublicationStorage {

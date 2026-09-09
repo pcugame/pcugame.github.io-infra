@@ -25,14 +25,28 @@ import {
 import {
 	createProjectPublicationPlan,
 } from '../../project-publication/plan.js';
+import { assertProjectWriteAccessInTransaction } from '../project-access.service.js';
+import { cleanupSourceChangeRequests } from '../../project-change/transaction.js';
+import type { Actor } from '../../../application/http-input.js';
 
 type TxClient = Prisma.TransactionClient;
+
+async function guardMutation(tx: TxClient, actor: Actor | undefined, projectId: number): Promise<void> {
+	if (actor) {
+		await assertProjectWriteAccessInTransaction(tx, actor, projectId);
+		return;
+	}
+	const rows = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
+		SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
+	`);
+	if (!rows.length) throw notFound('Project not found');
+}
 
 const projectListPlayableKinds: AssetKind[] = ['GAME', 'VIDEO'];
 const projectListInclude = {
 	exhibition: true,
 	creator: true,
-	members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true, studentId: true } },
+	members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true, studentId: true, userId: true } },
 	assets: {
 		where: { status: 'READY' as const, kind: { in: projectListPlayableKinds } },
 		select: { kind: true },
@@ -60,6 +74,7 @@ const projectListInclude = {
 
 export const projectDetailInclude = {
 	exhibition: true,
+	changeRequestDraft: { select: { id: true } },
 	members: { orderBy: { sortOrder: 'asc' as const } },
 	assets: {
 		where: { status: 'READY' as const },
@@ -116,7 +131,7 @@ function buildProjectListWhere(
 	isPrivileged: boolean,
 	options: FindProjectsForUserOptions,
 ): Prisma.ProjectWhereInput {
-	const and: Prisma.ProjectWhereInput[] = [];
+	const and: Prisma.ProjectWhereInput[] = [{ changeRequestDraft: null }];
 	if (!isPrivileged) {
 		and.push({
 			OR: [
@@ -243,21 +258,22 @@ export function createProjectCrudRepository(
 		isMemberOfProject(projectId, userId) {
 			return client.projectMember.findFirst({ where: { projectId, userId } });
 		},
-		async updateProject(id, data) {
+		async updateProject(id, data, actor) {
 			return client.$transaction(async (tx) => {
-				await tx.$queryRaw(PrismaRuntime.sql`SELECT "id" FROM "projects" WHERE "id" = ${id} FOR UPDATE`);
+				await guardMutation(tx, actor, id);
 				const current = await tx.project.findUniqueOrThrow({ where: { id }, select: { status: true } });
 				if (current.status === 'DRAFT' && data.status !== undefined && data.status !== 'DRAFT') {
 					throw conflict('Draft submissions may only be published by submission finalize');
 				}
-				return tx.project.update({ where: { id }, data, include: projectDetailInclude });
+				await tx.project.update({ where: { id }, data });
+				await tx.project.update({ where: { id }, data: { version: { increment: 1 } } });
+				return tx.project.findUniqueOrThrow({ where: { id }, include: projectDetailInclude });
 			});
 		},
-		deleteProjectReturningAssets(id, outbox) {
+		deleteProjectReturningAssets(id, outbox, actor) {
 			return client.$transaction(async (tx) => {
-				await tx.$queryRaw(PrismaRuntime.sql`
-					SELECT "id" FROM "projects" WHERE "id" = ${id} FOR UPDATE
-				`);
+				await guardMutation(tx, actor, id);
+				await cleanupSourceChangeRequests(tx, id);
 				const project = await tx.project.findUniqueOrThrow({
 					where: { id },
 					select: {
@@ -305,8 +321,9 @@ export function createProjectCrudRepository(
 				return { assets, activeUploads };
 			});
 		},
-		clearWebglDeployment(projectId, outbox) {
+		clearWebglDeployment(projectId, outbox, actor) {
 			return withSerializableRetry(client, async (tx) => {
+				await guardMutation(tx, actor, projectId);
 				const project = await tx.project.findUniqueOrThrow({
 					where: { id: projectId },
 					select: {
@@ -363,6 +380,7 @@ export function createProjectCrudRepository(
 					data: { currentWebglDeploymentId: null },
 				});
 				if (pointerCleared.count !== 1) throw conflict('WebGL deployment changed concurrently');
+				await tx.project.update({ where: { id: projectId }, data: { version: { increment: 1 } } });
 				const sourceRepresentationIds = project.webglDeployments.map(
 					({ sourceRepresentation }) => sourceRepresentation.id,
 				);
@@ -401,12 +419,9 @@ export function createProjectCrudRepository(
 				status: asset.status,
 			};
 		},
-		setProjectVideoOrder(projectId, expectedOrder, order) {
+		setProjectVideoOrder(projectId, expectedOrder, order, actor) {
 			return withAssetMutationTransaction(client, async (tx) => {
-				const projects = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
-					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
-				`);
-				if (!projects.length) throw notFound('Project not found');
+				await guardMutation(tx, actor, projectId);
 				const submission = await tx.projectSubmission.findUnique({ where: { projectId }, select: { state: true } });
 				if (submission && ['PENDING', 'FINALIZING'].includes(submission.state)) {
 					throw conflict('Submission videos cannot be reordered before publication');
@@ -421,24 +436,24 @@ export function createProjectCrudRepository(
 					throw conflict('Order must contain every current video exactly once');
 				}
 				await rewriteProjectVideoOrder(tx, projectId, order);
+				await tx.project.update({ where: { id: projectId }, data: { version: { increment: 1 } } });
 				return { order };
 			});
 		},
-		async setProjectPoster(projectId, assetId) {
+		async setProjectPoster(projectId, assetId, actor) {
 			return client.$transaction(async (tx) => {
-				const projects = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
-					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
-				`);
-				if (projects.length === 0) throw notFound('Project not found');
+				await guardMutation(tx, actor, projectId);
 				const asset = await tx.asset.findUnique({
 					where: { id: assetId },
 					select: { id: true, projectId: true, kind: true, status: true },
 				});
 				assertValidPosterAsset(asset, projectId);
-				return tx.project.update({
+				const updated = await tx.project.update({
 					where: { id: projectId },
 					data: { posterAssetId: assetId },
 				});
+				await tx.project.update({ where: { id: projectId }, data: { version: { increment: 1 } } });
+				return updated;
 			});
 		},
 		bulkDeleteProjectsReturningAssets(ids, outbox) {
@@ -459,6 +474,7 @@ export function createProjectCrudRepository(
 						webglDeployments: { select: webglDeletionSnapshotSelect },
 					},
 				});
+				for (const project of projects) await cleanupSourceChangeRequests(tx, project.id);
 				const canonicalActiveUploads = await tx.assetUploadSession.findMany({
 					where: {
 						projectId: { in: ids },

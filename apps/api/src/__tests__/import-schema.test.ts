@@ -17,7 +17,7 @@ describe('ImportDataSchema', () => {
 
 	it('parses full input with years and projects', () => {
 		const result = ImportDataSchema.safeParse({
-			years: [{ year: 2025, title: '2025전시', isUploadEnabled: false }],
+			years: [{ year: 2025, title: '2025전시', isModificationEnabled: false }],
 			projects: [{
 				year: 2025,
 				title: 'Game',
@@ -121,7 +121,7 @@ describe('ImportYear', () => {
 	it('parses valid year with defaults', () => {
 		const result = ImportYear.parse({ year: 2025 });
 		expect(result.title).toBe('');
-		expect(result.isUploadEnabled).toBe(true);
+		expect(result.isModificationEnabled).toBe(true);
 	});
 
 	it('rejects year below 2000', () => {

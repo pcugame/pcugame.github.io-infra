@@ -238,13 +238,13 @@ function portHarness() {
 		),
 	};
 	const memberRepository: MemberServiceDependencies['repository'] = {
-		createMember: calls.memberCreate,
+		createMember: (data, _actor) => calls.memberCreate(data),
 		findMemberInProject: async (memberId, projectId) => (
 			calls.projectMemberFindFirst({ id: memberId, projectId })
 		),
-		updateMember: calls.memberUpdate,
-		deleteMember: calls.memberDelete,
-		swapMemberOrder: (a, b, projectId) => calls.memberSwap(a, b, projectId),
+		updateMember: (id, _projectId, data, _actor) => calls.memberUpdate(id, data),
+		deleteMember: (id, _projectId, _actor) => calls.memberDelete(id),
+		swapMemberOrder: (a, b, projectId, _actor) => calls.memberSwap(a, b, projectId),
 	};
 	return {
 		calls,

@@ -39,6 +39,7 @@ export const REQUIRED_EXPAND_MIGRATIONS = [
 	PROJECT_MATERIAL_CONSTRAINTS_MIGRATION,
 ] as const;
 export const CONTRACT_MIGRATION = '20260822000000_canonical_asset_contract';
+export const PROJECT_CHANGE_MIGRATION = '20260909100000_project_change_requests';
 
 type RuntimePhase = 'phase1' | 'phase2';
 type Command = 'status' | 'apply-expand' | 'apply-contract' | 'assert-runtime';
@@ -104,13 +105,14 @@ export function releaseStatus(rows: readonly MigrationRow[]) {
 		projectVideoOrderExpand: applied.has(PROJECT_VIDEO_ORDER_MIGRATION),
 		expand: REQUIRED_EXPAND_MIGRATIONS.every((migration) => applied.has(migration)),
 		contract: applied.has(CONTRACT_MIGRATION),
+		projectChanges: applied.has(PROJECT_CHANGE_MIGRATION),
 		completedMigrations: [...applied].sort(),
 	};
 }
 
 export function assertNoFailedReleaseMigration(rows: readonly MigrationRow[]): void {
 	const failed = rows.filter((row) => (
-		([...REQUIRED_EXPAND_MIGRATIONS, CONTRACT_MIGRATION] as string[]).includes(row.migration_name)
+		([...REQUIRED_EXPAND_MIGRATIONS, CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION] as string[]).includes(row.migration_name)
 		&& (!row.finished_at || row.rolled_back_at)
 	));
 	if (failed.length > 0) {
@@ -183,8 +185,8 @@ export function assertRuntime(rows: readonly MigrationRow[], phase: RuntimePhase
 	if (phase === 'phase1' && (!status.expand || status.contract)) {
 		throw new Error('phase1 runtime requires expand=applied and contract=not-applied');
 	}
-	if (phase === 'phase2' && !status.contract) {
-		throw new Error('phase2 runtime requires the contract migration DB record');
+	if (phase === 'phase2' && (!status.contract || !status.projectChanges)) {
+		throw new Error('phase2 runtime requires the contract and project change migration DB records');
 	}
 }
 
@@ -199,7 +201,7 @@ async function run(command: string, args: readonly string[], cwd: string, env: N
 	});
 }
 
-async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING | typeof CONTRACT_MIGRATION, databaseUrl: string): Promise<void> {
+async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING | typeof PROJECT_CHANGE_MIGRATION, databaseUrl: string): Promise<void> {
 	const root = apiRoot();
 	const sourcePrisma = join(root, 'prisma');
 	const migrationNames = (await readdir(join(sourcePrisma, 'migrations'), { withFileTypes: true }))
@@ -261,7 +263,7 @@ async function main(): Promise<void> {
 		if (!status.expand) throw new Error('contract cannot be applied before the Phase 1 expand release');
 		await seedStorageBucketRegistry(databaseUrl);
 		await verifyStorageBucketRegistry(databaseUrl);
-		if (!status.contract) await stagedMigrate(CONTRACT_MIGRATION, databaseUrl);
+		if (!status.contract || !status.projectChanges) await stagedMigrate(PROJECT_CHANGE_MIGRATION, databaseUrl);
 	}
 
 	rows = await migrationRows(databaseUrl);

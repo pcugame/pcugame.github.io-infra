@@ -1,3 +1,4 @@
+import { cleanupSourceChangeRequests } from '../../project-change/transaction.js';
 import {
 	Prisma,
 	type PrismaClient,
@@ -39,9 +40,9 @@ function isRetryableExhibitionMutationError(error: unknown): boolean {
 	return !!cause
 		&& typeof cause === 'object'
 		&& 'kind' in cause
-		&& cause.kind === 'TransactionWriteConflict'
 		&& 'originalCode' in cause
-		&& cause.originalCode === '40001';
+		&& ((cause.kind === 'TransactionWriteConflict' && cause.originalCode === '40001')
+			|| (cause.kind === 'postgres' && cause.originalCode === '40P01'));
 }
 
 export async function withExhibitionMutationTransaction<T>(
@@ -87,7 +88,7 @@ async function lockExhibition(
 }
 
 const exhibitionPosterInclude = {
-	_count: { select: { projects: true } },
+	_count: { select: { projects: { where: { changeRequestDraft: null } } } },
 	poster: { include: { representations: { where: { state: 'READY' as const } } } },
 } as const;
 
@@ -132,7 +133,7 @@ export function createExhibitionRepository(
 	function createExhibition(data: {
 		year: number;
 		title?: string;
-		isUploadEnabled?: boolean;
+		isModificationEnabled?: boolean;
 		sortOrder?: number;
 	}) {
 		return prisma.exhibition.create({ data });
@@ -143,6 +144,8 @@ export function createExhibitionRepository(
 		return withExhibitionMutationTransaction(prisma, async (tx) => {
 			const existing = await lockExhibition(tx, id);
 			if (!existing) return null;
+			const sources = await tx.project.findMany({ where: { exhibitionId: id, changeRequestDraft: null }, select: { id: true }, orderBy: { id: 'asc' } });
+			for (const source of sources) await cleanupSourceChangeRequests(tx, source.id);
 			const [projects, activeUploads, assets] = await Promise.all([
 				tx.project.findMany({
 					where: { exhibitionId: id },
@@ -216,7 +219,7 @@ export function createExhibitionRepository(
 	/** Partial-update an Exhibition and return the updated record with project count */
 	function updateExhibition(
 		id: number,
-		data: { title?: string; isUploadEnabled?: boolean; sortOrder?: number },
+		data: { title?: string; isModificationEnabled?: boolean; sortOrder?: number },
 	) {
 		return prisma.exhibition.update({
 			where: { id },

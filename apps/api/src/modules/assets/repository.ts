@@ -12,6 +12,8 @@ import {
 	withAssetMutationTransaction,
 } from './mutation-transaction.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
+import type { Actor } from '../../application/http-input.js';
+import { assertProjectWriteAccessInTransaction } from '../admin/project-access.service.js';
 
 export interface AssetDeletionClaim {
 	id: number;
@@ -77,10 +79,20 @@ export function createAssetsRepository(
 								select: { id: true, userId: true, name: true, studentId: true, sortOrder: true },
 								orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
 							},
+							changeRequestDraft: {
+								select: {
+									actorId: true,
+									state: true,
+									project: { select: {
+										creatorId: true,
+										members: { select: { userId: true } },
+									} },
+								},
+							},
 						},
 					},
 					representations: {
-						where: { role: { in: ['ORIGINAL', 'PLAYBACK'] } },
+						where: { role: { in: ['ORIGINAL', 'PLAYBACK', 'WEBGL_SOURCE'] } },
 						select: { role: true, bucket: true, objectKey: true, state: true },
 					},
 				},
@@ -106,7 +118,7 @@ export function createAssetsRepository(
 		 * transition to DELETING, and clear a matching poster pointer atomically.
 		 * Object-storage I/O deliberately happens after this short transaction.
 		 */
-		claimAssetForDeletion(id: number): Promise<AssetDeletionClaim | null> {
+		claimAssetForDeletion(id: number, actor?: Actor): Promise<AssetDeletionClaim | null> {
 			return withAssetMutationTransaction(client, async (tx) => {
 				const candidate = await tx.asset.findUnique({
 					where: { id },
@@ -114,14 +126,14 @@ export function createAssetsRepository(
 				});
 					if (!candidate || candidate.projectId === null) return null;
 
-				// Every asset/poster writer uses project -> asset lock order.
-				const projects = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
-					SELECT "id"
-					FROM "projects"
-					WHERE "id" = ${candidate.projectId}
-					FOR UPDATE
-				`);
-				if (projects.length === 0) return null;
+				if (actor) {
+					await assertProjectWriteAccessInTransaction(tx, actor, candidate.projectId);
+				} else {
+					const projects = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+						SELECT "id" FROM "projects" WHERE "id" = ${candidate.projectId} FOR UPDATE
+					`);
+					if (projects.length === 0) return null;
+				}
 
 				const rows = await tx.$queryRaw<LockedAssetDeletionRow[]>(Prisma.sql`
 					SELECT

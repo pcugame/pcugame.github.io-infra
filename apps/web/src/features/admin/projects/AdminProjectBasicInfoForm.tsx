@@ -13,6 +13,7 @@ interface AdminProjectBasicInfoFormProps {
 	error: unknown;
 	isDirtySubmitting: boolean;
 	isSuccess: boolean;
+	canEditContent?: boolean;
 	onSubmit: (data: UpdateProjectFormInput) => void;
 }
 
@@ -21,6 +22,7 @@ export function AdminProjectBasicInfoForm({
 	error,
 	isDirtySubmitting,
 	isSuccess,
+	canEditContent = true,
 	onSubmit,
 }: AdminProjectBasicInfoFormProps) {
 	const {
@@ -39,7 +41,7 @@ export function AdminProjectBasicInfoForm({
 
 	return (
 		<form onSubmit={handleSubmit(onSubmit)} className="project-form">
-			<fieldset>
+		<fieldset disabled={!canEditContent}>
 				<legend>기본 정보</legend>
 
 				<div className="form-field">
@@ -81,7 +83,7 @@ export function AdminProjectBasicInfoForm({
 				<button
 					type="submit"
 					className="btn btn--primary"
-					disabled={!isDirty || isDirtySubmitting}
+					disabled={!canEditContent || !isDirty || isDirtySubmitting}
 				>
 					{isDirtySubmitting ? '저장 중…' : '변경사항 저장'}
 				</button>

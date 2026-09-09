@@ -110,7 +110,7 @@ export default function AdminYearsPage() {
 		defaultValues: {
 			year: new Date().getFullYear(),
 			title: '',
-			isUploadEnabled: true,
+			isModificationEnabled: true,
 			sortOrder: 0,
 		},
 	});
@@ -120,7 +120,7 @@ export default function AdminYearsPage() {
 			adminExhibitionApi.create({
 				year: data.year,
 				title: data.title || undefined,
-				isUploadEnabled: data.isUploadEnabled,
+				isModificationEnabled: data.isModificationEnabled,
 				sortOrder: data.sortOrder,
 			}),
 		onSuccess: () => {
@@ -161,6 +161,7 @@ export default function AdminYearsPage() {
 			<div className="admin-page-header">
 				<div className="admin-page-header__text">
 					<h1>전시회 추가</h1>
+					<p>수정 허용 시 신규 등록과 등록자·팀원의 수정·삭제가 가능합니다. 닫힌 전시회의 변경은 운영자 승인이 필요합니다.</p>
 				</div>
 			</div>
 
@@ -188,8 +189,8 @@ export default function AdminYearsPage() {
 					</div>
 					<div className="form-field form-field--checkbox">
 						<label>
-							<input type="checkbox" {...regCreate('isUploadEnabled')} />
-							업로드 허용
+							<input type="checkbox" {...regCreate('isModificationEnabled')} />
+							수정 허용
 						</label>
 					</div>
 					<div className="form-field">
@@ -227,7 +228,7 @@ export default function AdminYearsPage() {
 									<th>연도</th>
 									<th>포스터</th>
 									<th>제목</th>
-									<th>업로드</th>
+									<th>수정</th>
 									<th>정렬</th>
 									<th>작품 수</th>
 									<th>관리</th>

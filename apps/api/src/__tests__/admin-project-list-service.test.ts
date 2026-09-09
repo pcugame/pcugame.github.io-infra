@@ -92,6 +92,10 @@ describe('admin project list service', () => {
 				memberNames: ['Kim Student'],
 				memberStudentIds: ['20260001'],
 				updatedAt: '2026-05-01T00:00:00.000Z',
+				isModificationEnabled: true,
+				canEdit: true,
+				canDelete: true,
+				canRequestChange: false,
 			},
 		]);
 		expect(result.pagination).toEqual({

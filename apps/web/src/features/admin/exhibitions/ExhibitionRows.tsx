@@ -43,7 +43,7 @@ export function YearMobileCard({
 		resolver: zodResolver(UpdateExhibitionSchema),
 		defaultValues: {
 			title: year.title ?? '',
-			isUploadEnabled: year.isUploadEnabled,
+			isModificationEnabled: year.isModificationEnabled ?? year.isUploadEnabled,
 			sortOrder: year.sortOrder,
 		},
 	});
@@ -52,7 +52,7 @@ export function YearMobileCard({
 		mutationFn: (data: UpdateExhibitionInput) =>
 			adminExhibitionApi.update(year.id, {
 				title: data.title || undefined,
-				isUploadEnabled: data.isUploadEnabled,
+				isModificationEnabled: data.isModificationEnabled,
 				sortOrder: data.sortOrder,
 			}),
 		onSuccess: () => onSaved(),
@@ -76,8 +76,8 @@ export function YearMobileCard({
 					<div className="admin-ycard__row">
 						<div className="form-field form-field--checkbox" style={{ marginBottom: 0 }}>
 							<label>
-								<input type="checkbox" {...register('isUploadEnabled')} />
-								업로드 허용
+								<input type="checkbox" {...register('isModificationEnabled')} />
+								수정 허용
 							</label>
 						</div>
 						<div className="form-field" style={{ marginBottom: 0, flex: '0 0 auto' }}>
@@ -150,8 +150,8 @@ export function YearMobileCard({
 					</span>
 				)}
 				<span className="admin-ycard__detail">
-					<span className="admin-ycard__label">업로드</span>{' '}
-					{year.isUploadEnabled ? '허용' : '잠금'}
+					<span className="admin-ycard__label">수정</span>{' '}
+					{(year.isModificationEnabled ?? year.isUploadEnabled) ? '허용' : '잠금'}
 				</span>
 				<span className="admin-ycard__detail">
 					<span className="admin-ycard__label">작품</span> {year.projectCount}개
@@ -178,7 +178,7 @@ export function YearRow({
 		resolver: zodResolver(UpdateExhibitionSchema),
 		defaultValues: {
 			title: year.title ?? '',
-			isUploadEnabled: year.isUploadEnabled,
+			isModificationEnabled: year.isModificationEnabled ?? year.isUploadEnabled,
 			sortOrder: year.sortOrder,
 		},
 	});
@@ -187,7 +187,7 @@ export function YearRow({
 		mutationFn: (data: UpdateExhibitionInput) =>
 			adminExhibitionApi.update(year.id, {
 				title: data.title || undefined,
-				isUploadEnabled: data.isUploadEnabled,
+				isModificationEnabled: data.isModificationEnabled,
 				sortOrder: data.sortOrder,
 			}),
 		onSuccess: () => onSaved(),
@@ -201,7 +201,7 @@ export function YearRow({
 					<YearPosterControls year={year} />
 				</td>
 				<td>{year.title ?? '-'}</td>
-				<td>{year.isUploadEnabled ? '허용' : '잠금'}</td>
+				<td>{(year.isModificationEnabled ?? year.isUploadEnabled) ? '허용' : '잠금'}</td>
 				<td>{year.sortOrder}</td>
 				<td>{year.projectCount}</td>
 				<td>
@@ -242,7 +242,7 @@ export function YearRow({
 			</td>
 			<td>
 				<label>
-					<input type="checkbox" aria-label="업로드 허용" {...register('isUploadEnabled')} />
+					<input type="checkbox" aria-label="수정 허용" {...register('isModificationEnabled')} />
 				</label>
 			</td>
 			<td>

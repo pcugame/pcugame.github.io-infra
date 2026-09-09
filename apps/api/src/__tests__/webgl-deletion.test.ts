@@ -54,13 +54,13 @@ describe('WebGL deletion cleanup', () => {
 			cancelledSession: activeWebgl,
 		});
 
-		await projectService.deleteWebgl(7);
+		await projectService.deleteWebgl(7, { id: 1, role: 'ADMIN' });
 
 		expect(mocks.clearWebglDeployment).toHaveBeenCalledWith(7, {
 			publicBucket: 'public',
 			protectedBucket: 'protected',
 			reason: 'webgl-delete',
-		});
+		}, { id: 1, role: 'ADMIN' });
 		expect(mocks.abortMultipart).toHaveBeenCalledWith(activeSource, 'webgl-multipart');
 		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
 		expect(mocks.wakeMaintenance).toHaveBeenCalledOnce();
@@ -80,13 +80,13 @@ describe('WebGL deletion cleanup', () => {
 			activeUploads: [gameUpload, activeWebgl],
 		});
 
-		await projectService.deleteProject(7);
+		await projectService.deleteProject(7, { id: 1, role: 'ADMIN' });
 
 		expect(mocks.deleteProjectReturningAssets).toHaveBeenCalledWith(7, {
 			publicBucket: 'public',
 			protectedBucket: 'protected',
 			reason: 'project-delete',
-		});
+		}, { id: 1, role: 'ADMIN' });
 		expect(mocks.abortMultipart).toHaveBeenCalledTimes(2);
 		expect(mocks.wakeDeletionWorker).toHaveBeenCalledOnce();
 		expect(mocks.wakeMaintenance).toHaveBeenCalledOnce();
