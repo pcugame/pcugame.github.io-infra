@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import type { AdminProjectItem, ProjectStatus } from '../../../contracts';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '제출 중',
+	DRAFT: '초안',
 	PUBLISHED: '공개',
 	ARCHIVED: '보관',
 };

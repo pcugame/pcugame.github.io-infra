@@ -242,6 +242,7 @@ export default function DirectImageUploadWidget({
 					if (next.percent >= 100) setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
+					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
 					onSession: (next) => {
 						const current = isCurrentRun(token);
 						const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
@@ -252,7 +253,6 @@ export default function DirectImageUploadWidget({
 						remember(next, file, index, current || paused || (cancelRequested && mountedRef.current));
 						if (cancelRequested) void cancelLateSession(next.sessionId);
 					},
-					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
 					signal: controller.signal,
 				});
 				if (!isCurrentRun(token)) return;
@@ -471,7 +471,7 @@ export default function DirectImageUploadWidget({
 				</div>
 			)}
 			{files.length > 0 && <p className="game-upload__file-summary">{files.length}개 파일 선택됨 ({completed}/{files.length} 완료)</p>}
-			{progress && (
+			{progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
 					<div className="game-upload__progress-track" role="progressbar" aria-label={`${title} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
 						<div className={`game-upload__progress-bar ${phase === 'ready' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />

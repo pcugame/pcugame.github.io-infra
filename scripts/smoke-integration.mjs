@@ -1,5 +1,5 @@
 import { request as httpRequest } from 'node:http';
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { brotliCompressSync, gzipSync } from 'node:zlib';
 
@@ -275,6 +275,42 @@ if (untrustedMe?.data?.authenticated) {
   throw new Error('API/WebGL-origin request unexpectedly reused the frontend session');
 }
 console.log('ok: API/WebGL-origin requests cannot reuse frontend sessions');
+
+// Exercise the actual Phase 2 API and dedicated publication worker together.
+const submissionHeaders = { Cookie: cookie, Origin: origin, 'Idempotency-Key': randomUUID() };
+const submissionForm = new FormData();
+submissionForm.append('payload', JSON.stringify({
+  exhibitionId: years.data.items.find((item) => item.title === 'Integration Upload Open').id,
+  title: `Publication smoke ${Date.now()}`,
+  members: [{ name: 'Integration', studentId: '20260001' }],
+  manifest: [],
+}));
+const { body: submitted } = await fetchJson(`${apiBase}/api/admin/projects/submit`, {
+  method: 'POST', headers: submissionHeaders, body: submissionForm,
+});
+const publicationId = submitted?.data?.id;
+if (!publicationId || submitted.data.status !== 'DRAFT') throw new Error('submission did not create a private DRAFT');
+try {
+  const hidden = await fetch(`${apiBase}/api/public/projects/${submitted.data.slug}`);
+  if (hidden.status !== 404) throw new Error(`DRAFT was publicly visible (${hidden.status})`);
+  await fetchJson(`${apiBase}/api/admin/projects/${publicationId}/submission/finalize`, {
+    method: 'POST', headers: { Cookie: cookie, Origin: origin },
+  });
+  await waitFor('dedicated publication worker publishes the submission', async () => {
+    const { body: status } = await fetchJson(`${apiBase}/api/admin/projects/${publicationId}/submission`, {
+      headers: { Cookie: cookie, Origin: origin },
+    });
+    if (status?.data?.state !== 'PUBLISHED' || status.data.publicationState !== 'COMPLETED') {
+      throw new Error(`publication state=${status?.data?.state}/${status?.data?.publicationState}`);
+    }
+  });
+  const { body: published } = await fetchJson(`${apiBase}/api/public/projects/${submitted.data.slug}`);
+  if (published?.data?.id !== publicationId) throw new Error('published submission is missing from the public API');
+} finally {
+  await fetchJson(`${apiBase}/api/admin/projects/${publicationId}`, {
+    method: 'DELETE', headers: { Cookie: cookie, Origin: origin },
+  });
+}
 
 const { body: publicProject } = await fetchJson(
   `${apiBase}/api/public/projects/integration-public-asset`,

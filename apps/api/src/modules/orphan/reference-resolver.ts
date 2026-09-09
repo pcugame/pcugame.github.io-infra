@@ -176,10 +176,11 @@ export async function collectObjectReferences(
 			where: { currentWebglDeploymentId: { not: null } },
 			select: {
 				id: true,
+				currentWebglDeploymentId: true,
 				currentWebglDeployment: {
 					select: {
-						id: true, publicBucket: true, publicPrefix: true, entryObjectKey: true,
-						sourceRepresentation: { select: { role: true, bucket: true, objectKey: true } },
+						id: true, state: true, publicBucket: true, publicPrefix: true, entryObjectKey: true,
+						sourceRepresentation: { select: { role: true, state: true, bucket: true, objectKey: true } },
 					},
 				},
 			},
@@ -209,7 +210,11 @@ export async function collectObjectReferences(
 
 	for (const project of projects) {
 		const deployment = project.currentWebglDeployment;
-		if (!deployment || deployment.sourceRepresentation.role !== 'WEBGL_SOURCE'
+		const source = deployment?.sourceRepresentation;
+		if (!deployment || deployment.id !== project.currentWebglDeploymentId
+			|| deployment.state !== 'READY' || deployment.publicBucket !== buckets.publicBucket
+			|| !source || source.role !== 'WEBGL_SOURCE' || source.state !== 'READY'
+			|| !source.bucket.trim() || !source.objectKey.trim()
 			|| !deployment.publicPrefix.endsWith('/')
 			|| !deployment.entryObjectKey.startsWith(deployment.publicPrefix)) {
 			unsafeBuckets.add(buckets.publicBucket);

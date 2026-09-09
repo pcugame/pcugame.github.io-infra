@@ -12,6 +12,7 @@ import { useAdminProjectMutations } from '../../features/admin/projects/useAdmin
 import { useMe } from '../../features/auth';
 import { adminProjectApi } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
+import { getClientUploadLimits } from '../../lib/upload-limits';
 
 export default function AdminProjectEditPage() {
 	const { id: idParam } = useParams<{ id: string }>();
@@ -43,6 +44,7 @@ export default function AdminProjectEditPage() {
 	if (error) return <ErrorMessage error={error} onReset={() => refetch()} />;
 	if (!project) return null;
 
+	const limits = getClientUploadLimits(user?.role ?? 'USER');
 	const canEditContent = true;
 	const isPrivileged = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
 
@@ -109,6 +111,7 @@ export default function AdminProjectEditPage() {
 				<AdminProjectAssetManager
 					project={project}
 					projectId={id}
+					limits={limits}
 					canEditContent={canEditContent}
 					isSettingPoster={mutations.setPosterMutation.isPending}
 					isRemovingAsset={mutations.removeAssetMutation.isPending}

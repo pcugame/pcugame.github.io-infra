@@ -76,13 +76,15 @@ describe('object reference lifecycle ownership', () => {
 			}]) },
 			project: { findMany: vi.fn(async () => [{
 				id: 7,
+				currentWebglDeploymentId: deploymentId,
 				currentWebglDeployment: {
 					id: deploymentId,
+					state: 'READY',
 					publicBucket: 'public',
 					publicPrefix: `webgl/7/${deploymentId}/`,
 					entryObjectKey: `webgl/7/${deploymentId}/index.html`,
 					sourceRepresentation: {
-						role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: 'webgl/source.zip',
+						role: 'WEBGL_SOURCE', state: 'READY', bucket: 'protected', objectKey: 'webgl/source.zip',
 					},
 				},
 			}]) },

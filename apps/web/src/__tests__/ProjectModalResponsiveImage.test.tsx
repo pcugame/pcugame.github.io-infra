@@ -117,31 +117,13 @@ describe('ProjectModal responsive images', () => {
 		expect(lightbox.getAttribute('srcset')).toBeNull();
 	});
 
-	it('labels and navigates main and additional videos without retaining a prior playback error', async () => {
+	it.each([false, true])('labels and navigates videos without retaining a prior playback error (legacy API: %s)', async (legacy) => {
 		mocks.getProjectDetail.mockResolvedValue({
 			...project,
-			video: {
-				assetId: 21,
-				sortOrder: 0,
-				role: 'MAIN',
-				url: 'https://videos.test/main.mp4',
-				mimeType: 'video/mp4',
-			},
+			video: { ...(legacy ? {} : { assetId: 21, sortOrder: 0, role: 'MAIN' }), url: 'https://videos.test/main.mp4', mimeType: 'video/mp4' },
 			videos: [
-				{
-					assetId: 21,
-					sortOrder: 0,
-					role: 'MAIN',
-					url: 'https://videos.test/main.mp4',
-					mimeType: 'video/mp4',
-				},
-				{
-					assetId: 22,
-					sortOrder: 1,
-					role: 'ADDITIONAL',
-					url: 'https://videos.test/additional.mp4',
-					mimeType: 'video/mp4',
-				},
+				{ ...(legacy ? {} : { assetId: 21, sortOrder: 0, role: 'MAIN' }), url: 'https://videos.test/main.mp4', mimeType: 'video/mp4' },
+				{ ...(legacy ? {} : { assetId: 22, sortOrder: 1, role: 'ADDITIONAL' }), url: 'https://videos.test/additional.mp4', mimeType: 'video/mp4' },
 			],
 		});
 		const { container } = renderModal();

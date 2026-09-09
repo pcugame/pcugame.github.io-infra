@@ -58,14 +58,15 @@ function referenceClient(input: { malformedWebgl?: boolean } = {}) {
 		project: {
 			findMany: vi.fn().mockResolvedValue([{
 				id: 7,
-				currentWebglDeployment: input.malformedWebgl ? {
-					id: deploymentId, publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
+				currentWebglDeploymentId: deploymentId,
+			currentWebglDeployment: input.malformedWebgl ? {
+					id: deploymentId, state: 'READY', publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
 					entryObjectKey: 'webgl/not-safe/index.html',
-					sourceRepresentation: { role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
+					sourceRepresentation: { role: 'WEBGL_SOURCE', state: 'READY', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
 				} : {
-					id: deploymentId, publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
+					id: deploymentId, state: 'READY', publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
 					entryObjectKey: `webgl/7/${deploymentId}/site/index.html`,
-					sourceRepresentation: { role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
+					sourceRepresentation: { role: 'WEBGL_SOURCE', state: 'READY', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
 				},
 			}]),
 		},
@@ -265,10 +266,11 @@ describe('conservative orphan reconciliation', () => {
 		const models = emptyReferenceModels();
 		models.project.findMany.mockResolvedValue([{
 			id: 7,
+			currentWebglDeploymentId: deploymentId,
 			currentWebglDeployment: {
-				id: deploymentId, publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
+				id: deploymentId, state: 'READY', publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
 				entryObjectKey: `webgl/7/${deploymentId}/site/index.html`,
-				sourceRepresentation: { role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
+				sourceRepresentation: { role: 'WEBGL_SOURCE', state: 'READY', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
 			},
 		}]);
 		const orphanUpsert = vi.fn().mockResolvedValue({});
@@ -318,10 +320,11 @@ describe('conservative orphan reconciliation', () => {
 		}]);
 		models.project.findMany.mockResolvedValue([{
 			id: 7,
+			currentWebglDeploymentId: deploymentId,
 			currentWebglDeployment: {
-				id: deploymentId, publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
+				id: deploymentId, state: 'READY', publicBucket: 'public', publicPrefix: `webgl/7/${deploymentId}/site/`,
 				entryObjectKey: `webgl/7/${deploymentId}/site/index.html`,
-				sourceRepresentation: { role: 'WEBGL_SOURCE', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
+				sourceRepresentation: { role: 'WEBGL_SOURCE', state: 'READY', bucket: 'protected', objectKey: `webgl/7/${deploymentId}/source.zip` },
 			},
 		}]);
 		const orphanUpsert = vi.fn().mockResolvedValue({});

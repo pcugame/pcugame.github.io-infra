@@ -108,24 +108,27 @@ export function createContractPreflightRepository(client: PrismaClient): Contrac
 			}, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 		},
 		async resetLegacyBridgeObservations(observedAt) {
-			await client.$executeRaw(Prisma.sql`
-				WITH reset_existing AS (
+			await client.$transaction(async (tx) => {
+				// Producers upsert arbitrary scopes. A table write lock makes the reset
+				// one observation boundary: no existing or newly inserted scope can
+				// race between the all-scope reset and the baseline-row seed.
+				await tx.$executeRawUnsafe('LOCK TABLE "migration_metrics" IN SHARE ROW EXCLUSIVE MODE');
+				await tx.$executeRaw(Prisma.sql`
 					UPDATE "migration_metrics"
-					SET "value" = 0,
-						"last_observed_at" = ${observedAt},
+					SET "value" = 0, "last_observed_at" = ${observedAt},
 						"details" = '{"reset":"contract-preflight"}'::jsonb,
 						"updated_at" = CURRENT_TIMESTAMP
 					WHERE "name" IN (${Prisma.join([...LEGACY_BRIDGE_METRIC_NAMES])})
-						AND "scope" <> ''
-					RETURNING "name"
-				)
-				INSERT INTO "migration_metrics" ("name", "scope", "value", "last_observed_at", "details", "updated_at")
-				SELECT "name", '', 0, ${observedAt}, '{"reset":"contract-preflight"}'::jsonb, CURRENT_TIMESTAMP
-				FROM (VALUES ${Prisma.join(LEGACY_BRIDGE_METRIC_NAMES.map((name) => Prisma.sql`(${name})`))}) AS requested("name")
-				ON CONFLICT ("name", "scope") DO UPDATE SET
-					"value" = 0, "last_observed_at" = EXCLUDED."last_observed_at",
-					"details" = EXCLUDED."details", "updated_at" = CURRENT_TIMESTAMP
-			`);
+				`);
+				await tx.$executeRaw(Prisma.sql`
+					INSERT INTO "migration_metrics" ("name", "scope", "value", "last_observed_at", "details", "updated_at")
+					SELECT "name", '', 0, ${observedAt}, '{"reset":"contract-preflight"}'::jsonb, CURRENT_TIMESTAMP
+					FROM (VALUES ${Prisma.join(LEGACY_BRIDGE_METRIC_NAMES.map((name) => Prisma.sql`(${name})`))}) AS requested("name")
+					ON CONFLICT ("name", "scope") DO UPDATE SET
+						"value" = 0, "last_observed_at" = EXCLUDED."last_observed_at",
+						"details" = EXCLUDED."details", "updated_at" = CURRENT_TIMESTAMP
+				`);
+			}, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 		},
 	};
 }

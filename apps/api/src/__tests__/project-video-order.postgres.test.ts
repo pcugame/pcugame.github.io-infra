@@ -11,9 +11,11 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 	let creatorId: number;
 	let exhibitionId: number;
 	const projects: number[] = [];
+	let protectedBucket = 'protected';
 	beforeAll(async () => {
 		db = createPrismaClientForDatabase(process.env['DATABASE_URL']!);
-		await db.storageBucket.upsert({ where: { bucket: 'video-order-test' }, create: { bucket: 'video-order-test', visibility: 'PROTECTED' }, update: {} });
+		protectedBucket = (await db.storageBucket.findUnique({ where: { visibility: 'PROTECTED' } }))?.bucket ?? protectedBucket;
+		await db.storageBucket.upsert({ where: { bucket: protectedBucket }, create: { bucket: protectedBucket, visibility: 'PROTECTED' }, update: {} });
 		const token = randomUUID();
 		creatorId = (await db.user.create({ data: { googleSub: token, email: `${token}@example.test`, name: 'Video order test' } })).id;
 		exhibitionId = (await db.exhibition.create({ data: { year: 2098, title: token } })).id;
@@ -31,7 +33,7 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 		const ids: number[] = [];
 		for (const videoSortOrder of orders) ids.push((await db.asset.create({ data: {
 			projectId: project.id, kind: 'VIDEO', status: 'READY', originalName: 'video.mp4', videoSortOrder,
-			representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: 'video-order-test', objectKey: `videos/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: 10n } },
+			representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: protectedBucket, objectKey: `videos/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: 10n } },
 		} })).id);
 		return { projectId: project.id, ids };
 	}
@@ -55,7 +57,7 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 		const repo = createProjectCrudRepository(db);
 		await repo.setProjectVideoOrder(projectId, ids, ids);
 		expect((await current(projectId)).map((a) => a.videoSortOrder)).toEqual([0, 1, 2]);
-		await db.asset.create({ data: { projectId, kind: 'VIDEO', status: 'READY', originalName: 'old-runtime.mp4', representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: 'video-order-test', objectKey: `videos/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: 10n } } } });
+		await db.asset.create({ data: { projectId, kind: 'VIDEO', status: 'READY', originalName: 'old-runtime.mp4', representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: protectedBucket, objectKey: `videos/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: 10n } } } });
 		await expect(repo.setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
 	});
 	it('allows only one concurrent reorder with the same expected order', async () => {

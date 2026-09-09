@@ -52,10 +52,10 @@ describe('WebGL public frontend', () => {
 	afterEach(cleanup);
 
 	it('renders a credentialless Unity-compatible iframe without navigation permissions', async () => {
-		mocks.getProjectDetail.mockResolvedValueOnce(project('https://assets.example.com/public/webgl/7/deployment-1/index.html'));
+		mocks.getProjectDetail.mockResolvedValueOnce(project('https://api.example.com/api/public/webgl/7/'));
 		renderPlayPage();
 		const iframe = await screen.findByTitle('웹 게임 WebGL 플레이어');
-		expect(iframe.getAttribute('src')).toBe('https://assets.example.com/public/webgl/7/deployment-1/index.html');
+		expect(iframe.getAttribute('src')).toBe('https://api.example.com/api/public/webgl/7/');
 		expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-pointer-lock allow-same-origin');
 		expect(iframe.hasAttribute('credentialless')).toBe(true);
 		expect(iframe.getAttribute('referrerpolicy')).toBe('no-referrer');
@@ -78,7 +78,7 @@ describe('WebGL public frontend', () => {
 	it('shows play independently when there is no downloadable GAME ZIP', () => {
 		render(
 			<MemoryRouter>
-				<ProjectActions projectId={7} webglUrl="https://assets.example.com/public/webgl/7/deployment-1/index.html" />
+				<ProjectActions projectId={7} webglUrl="https://api.example.com/api/public/webgl/7/" />
 			</MemoryRouter>,
 		);
 		expect(screen.getByRole('link', { name: '플레이해보기' }).getAttribute('href')).toBe('/projects/7/play');

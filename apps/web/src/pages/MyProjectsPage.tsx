@@ -6,7 +6,7 @@ import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '제출 중',
+	DRAFT: '초안',
 	PUBLISHED: '공개',
 	ARCHIVED: '보관',
 };

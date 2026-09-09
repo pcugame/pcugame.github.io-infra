@@ -111,6 +111,16 @@ describe('admin responsive image previews', () => {
 			<AdminProjectAssetManager
 				project={project}
 				projectId={project.id}
+				limits={{
+					imageMaxMb: 10,
+					imagePdfMaxMb: 100,
+					posterMaxMb: 10,
+					posterPdfMaxMb: 50,
+					gameMaxMb: 5120,
+					videoMaxMb: 200,
+					requestMaxMb: 250,
+					maxFiles: 10,
+				}}
 				canEditContent={false}
 				isSettingPoster={false}
 				isRemovingAsset={false}
@@ -140,6 +150,7 @@ describe('admin responsive image previews', () => {
 			<AdminProjectAssetManager
 				project={project}
 				projectId={project.id}
+				limits={{ imageMaxMb: 10, imagePdfMaxMb: 100, posterMaxMb: 10, posterPdfMaxMb: 50, gameMaxMb: 5120, videoMaxMb: 200, requestMaxMb: 250, maxFiles: 10 }}
 				canEditContent
 				isSettingPoster={false}
 				isRemovingAsset={false}
@@ -171,6 +182,7 @@ describe('admin responsive image previews', () => {
 			<AdminProjectAssetManager
 				project={project}
 				projectId={project.id}
+				limits={{ imageMaxMb: 10, imagePdfMaxMb: 100, posterMaxMb: 10, posterPdfMaxMb: 50, gameMaxMb: 5120, videoMaxMb: 200, requestMaxMb: 250, maxFiles: 10 }}
 				canEditContent
 				isSettingPoster={false}
 				isRemovingAsset={false}

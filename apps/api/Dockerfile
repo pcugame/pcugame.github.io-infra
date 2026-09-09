@@ -27,8 +27,8 @@ RUN npm ci
 # directly so they land in /app/node_modules/@img/, where the hoisted sharp
 # module will find the matching binary and libvips at runtime.
 RUN npm install --no-save \
-      @img/sharp-linux-x64@0.35.3 \
-      @img/sharp-libvips-linux-x64@1.3.2
+      @img/sharp-linux-x64@0.35.4 \
+      @img/sharp-libvips-linux-x64@1.3.3
 
 # ── Stage 2: Build TypeScript ──
 FROM node:22-bookworm-slim AS builder
@@ -45,6 +45,9 @@ COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 RUN npm run build --workspace=@pcu/contracts && \
     npm run db:generate --workspace=apps/api && \
     npm run build --workspace=apps/api
+
+# Phase 2 includes the existing contract migration. Only the fenced cutover
+# command may apply it; starting the runtime never migrates the database.
 
 # ── Stage 3: Production image ──
 FROM node:22-bookworm-slim AS runner
@@ -81,6 +84,6 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:4000/api/health || exit 1
 
-# Schema changes are an explicit release operation. API/worker processes never
-# apply pending migrations as a startup side effect.
+# Schema transition is an explicit, fenced release operation. Runtime
+# startup never applies pending migrations as a side effect.
 CMD ["node", "dist/server.js"]
