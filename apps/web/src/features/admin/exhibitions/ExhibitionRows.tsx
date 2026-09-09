@@ -238,18 +238,19 @@ export function YearRow({
 				<YearPosterControls year={year} />
 			</td>
 			<td>
-				<input type="text" {...register('title')} style={{ width: '120px' }} />
+				<input type="text" className="exhibition-inline-input" aria-label="전시회 제목" {...register('title')} />
 			</td>
 			<td>
 				<label>
-					<input type="checkbox" {...register('isUploadEnabled')} />
+					<input type="checkbox" aria-label="업로드 허용" {...register('isUploadEnabled')} />
 				</label>
 			</td>
 			<td>
 				<input
 					type="number"
 					{...register('sortOrder', { valueAsNumber: true })}
-					style={{ width: '60px' }}
+					className="exhibition-inline-input exhibition-inline-input--order"
+					aria-label="정렬 순서"
 				/>
 			</td>
 			<td>{year.projectCount}</td>

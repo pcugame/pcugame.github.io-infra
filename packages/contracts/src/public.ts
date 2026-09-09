@@ -68,6 +68,16 @@ export type PublicProjectMember = {
 	studentId: string;
 };
 
+/** A project-owned file that is always delivered as a download. */
+export type ProjectAttachment = {
+	assetId: number;
+	kind: 'DOCUMENT' | 'ATTACHMENT';
+	originalName: string;
+	mimeType: string;
+	sizeBytes: number;
+	downloadUrl: string;
+};
+
 export type PublicProjectDetailResponse = {
 	id: number;
 	year: number;
