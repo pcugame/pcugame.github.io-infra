@@ -68,6 +68,7 @@ describe('DirectVideoUploadWidget', () => {
 			if (!secondOptions) {
 				secondOptions = options;
 				options.onSession(secondSession);
+				_onProgress({ percent: 50, uploadedBytes: 1, totalBytes: 2, uploadedChunks: 0, totalChunks: 1 });
 				return new Promise(() => undefined);
 			}
 			return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-second' });
@@ -85,7 +86,10 @@ describe('DirectVideoUploadWidget', () => {
 		);
 
 		await waitFor(() => expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+		expect(screen.getByRole('progressbar')).toBeTruthy();
 		fireEvent.click(screen.getByRole('button', { name: '일시 정지' }));
+		expect(screen.queryByRole('progressbar')).toBeNull();
+		expect(screen.queryByText('업로드 중…')).toBeNull();
 		expect(secondOptions?.signal.aborted).toBe(true);
 		expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2);
 		expect(screen.getByText('2개 동영상 선택됨 (1/2 완료)')).toBeTruthy();

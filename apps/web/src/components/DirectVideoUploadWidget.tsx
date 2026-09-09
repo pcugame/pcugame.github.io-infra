@@ -502,7 +502,7 @@ export default function DirectVideoUploadWidget({
 				</div>
 			)}
 			{files.length > 0 && <p className="game-upload__file-summary">{files.length}개 동영상 선택됨 ({completed}/{files.length} 완료)</p>}
-			{progress && (
+			{progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
 					<div className="game-upload__progress-track" role="progressbar" aria-label={`동영상 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
 						<div className={`game-upload__progress-bar ${phase === 'ready' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />
