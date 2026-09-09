@@ -54,8 +54,8 @@ export function assertPagesRepositoryBoundary({ repository, authenticatedUser, p
 	}
 }
 
-async function githubJson(path, token) {
-	const response = await fetch(`https://api.github.com${path}`, {
+async function githubJson(path, token, fetchImpl = fetch) {
+	const response = await fetchImpl(`https://api.github.com${path}`, {
 		headers: {
 			Accept: 'application/vnd.github+json',
 			Authorization: `Bearer ${token}`,
@@ -78,6 +78,40 @@ export async function verifyPagesRepositoryBoundary({ token, expectedActor }) {
 		githubJson(`/repos/${PAGES_REPOSITORY}/branches/${PAGES_BRANCH}/protection`, token),
 	]);
 	assertPagesRepositoryBoundary({ repository, authenticatedUser, protection, expectedActor });
+}
+
+function sanitizedActorLogin(value) {
+	return typeof value === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(value) ? value : 'unavailable';
+}
+
+/**
+ * Read-only diagnostic for the token injected into a production workflow.
+ * Emit the safe token identity before querying protection so an unavailable
+ * protection endpoint still leaves enough evidence to repair configuration.
+ */
+export async function inspectPagesDeploymentAccess({ token, expectedActor, output = console.log, fetchImpl = fetch }) {
+	if (!token) throw new Error('PAGES_DEPLOY_TOKEN is required for Pages inspection');
+	const [repository, authenticatedUser] = await Promise.all([
+		githubJson(`/repos/${PAGES_REPOSITORY}`, token, fetchImpl),
+		githubJson('/user', token, fetchImpl),
+	]);
+	output(`pages_deploy_actor=${sanitizedActorLogin(authenticatedUser?.login)}`);
+	output(`pages_repository_push=${repository?.permissions?.push === true}`);
+	output(`pages_repository_admin=${repository?.permissions?.admin === true}`);
+
+	let protection;
+	try {
+		protection = await githubJson(`/repos/${PAGES_REPOSITORY}/branches/${PAGES_BRANCH}/protection`, token, fetchImpl);
+		output('pages_branch_protection=readable');
+	} catch (error) {
+		output('pages_branch_protection=unreadable');
+		throw error;
+	}
+
+	assertPagesWriteAccess(repository);
+	if (!expectedActor) throw new Error('PAGES_DEPLOY_ACTOR is required for Pages inspection; the actual token actor was printed above');
+	assertPagesRepositoryBoundary({ repository, authenticatedUser, protection, expectedActor });
+	output('pages_inspection=valid');
 }
 
 async function main() {
@@ -106,7 +140,14 @@ async function main() {
 		console.log('External Pages repository single-writer boundary verified.');
 		return;
 	}
-	throw new Error('Usage: verify-github-release-boundaries.mjs [control|pages|pages-write]');
+	if (mode === 'pages-inspect') {
+		await inspectPagesDeploymentAccess({
+			token: process.env.PAGES_DEPLOY_TOKEN,
+			expectedActor: process.env.PAGES_DEPLOY_ACTOR,
+		});
+		return;
+	}
+	throw new Error('Usage: verify-github-release-boundaries.mjs [control|pages|pages-write|pages-inspect]');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
