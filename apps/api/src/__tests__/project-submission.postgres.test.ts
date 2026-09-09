@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
 import { createWebglProcessingRepository } from '../modules/asset-upload/webgl-processing-repository.js';
@@ -20,6 +20,7 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 	const publicBucket = 'public';
 	const stagedObjects = new Map<string, Buffer>();
 	let prisma: PrismaClient;
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let actorId: number;
 	let exhibitionId: number;
 	const projectIds: number[] = [];
@@ -27,7 +28,8 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 	beforeAll(async () => {
 		const databaseUrl = process.env['DATABASE_URL'];
 		if (!databaseUrl) throw new Error('DATABASE_URL is required');
-		prisma = createPrismaClientForDatabase(databaseUrl);
+		database = await createIsolatedMigratedDatabase(databaseUrl);
+		prisma = database.createClient();
 		await prisma.$connect();
 		await prisma.storageBucket.upsert({
 			where: { bucket: protectedBucket }, update: {},
@@ -50,19 +52,9 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 			data: { year: 2098, title: testId, isUploadEnabled: true },
 		});
 		exhibitionId = exhibition.id;
-	});
+	}, 60_000);
 
-	afterAll(async () => {
-		if (!prisma) return;
-		const buckets = [protectedBucket, publicBucket];
-		await prisma.multipartAbortTask.deleteMany({ where: { bucket: { in: buckets } } });
-		await prisma.orphanObject.deleteMany({ where: { bucket: { in: buckets } } });
-		await prisma.assetUploadSession.deleteMany({ where: { projectId: { in: projectIds } } });
-		await prisma.project.deleteMany({ where: { id: { in: projectIds } } });
-		await prisma.exhibition.deleteMany({ where: { id: exhibitionId } });
-		await prisma.user.deleteMany({ where: { id: actorId } });
-		await prisma.$disconnect();
-	});
+	afterAll(async () => { await database?.close(); });
 
 	function manifestItem(kind: 'GAME' | 'IMAGE' | 'VIDEO' | 'WEBGL', slot: string, token: string) {
 		return { kind, slot, clientToken: token, required: true as const };

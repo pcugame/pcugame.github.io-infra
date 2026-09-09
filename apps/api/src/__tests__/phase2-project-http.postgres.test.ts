@@ -6,7 +6,7 @@ import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zo
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AdminProjectDetailSchema, PublicProjectDetailResponseSchema } from '@pcu/contracts';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { registerAuth } from '../plugins/auth.js';
 import { AppError } from '../shared/errors.js';
 import { registerRouteSchemas } from '../shared/http-route-schemas.js';
@@ -31,6 +31,7 @@ const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 
 describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 	let db: PrismaClient;
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let app: FastifyInstance;
 	let exhibitionId: number;
 	let adminId: number;
@@ -41,7 +42,8 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 	let publicBucket = 'public';
 
 	beforeAll(async () => {
-		db = createPrismaClientForDatabase(process.env['DATABASE_URL']!);
+		database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);
+		db = database.createClient();
 		adminId = (await db.user.create({ data: {
 			googleSub: randomUUID(), email: `${randomUUID()}@test.invalid`, role: 'ADMIN',
 		} })).id;
@@ -113,14 +115,11 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 			apiPublicUrl: apiOrigin, publicAssetOrigin: publicOrigin, publicBucket,
 			repository: createPublicRepository(db),
 		}) }), { prefix: '/api/public' });
-	});
+	}, 60_000);
 
 	afterAll(async () => {
-		await app?.close();
-		if (!db) return;
-		if (exhibitionId) await db.exhibition.delete({ where: { id: exhibitionId } });
-		if (adminId) await db.user.delete({ where: { id: adminId } });
-		await db.$disconnect();
+		try { await app?.close(); }
+		finally { await database?.close(); }
 	});
 
 	it.each([false, true])('serializes authenticated detail and PATCH with populated materials=%s', async (populated) => {
