@@ -51,6 +51,24 @@ function sqlLiteral(value: string): string {
 	return `'${value.replaceAll("'", "''")}'`;
 }
 
+const CRC32_TABLE = (() => {
+	const table = new Uint32Array(256);
+	for (let index = 0; index < table.length; index += 1) {
+		let value = index;
+		for (let bit = 0; bit < 8; bit += 1) {
+			value = (value & 1) === 1 ? (value >>> 1) ^ 0xedb88320 : value >>> 1;
+		}
+		table[index] = value >>> 0;
+	}
+	return table;
+})();
+
+function crc32(data: Buffer): number {
+	let value = 0xffffffff;
+	for (const byte of data) value = CRC32_TABLE[(value ^ byte) & 0xff]! ^ (value >>> 8);
+	return (value ^ 0xffffffff) >>> 0;
+}
+
 async function runCleanupSteps(
 	steps: Array<() => Promise<unknown>>,
 ): Promise<void> {
@@ -72,9 +90,11 @@ function makeStoredZip(files: Array<{ name: string; body?: Buffer }>): Buffer {
 	for (const file of files) {
 		const name = Buffer.from(file.name);
 		const body = file.body ?? Buffer.alloc(0);
+		const checksum = crc32(body);
 		const local = Buffer.alloc(30 + name.length + body.length);
 		local.writeUInt32LE(0x04034b50, 0);
 		local.writeUInt16LE(20, 4);
+		local.writeUInt32LE(checksum, 14);
 		local.writeUInt32LE(body.length, 18);
 		local.writeUInt32LE(body.length, 22);
 		local.writeUInt16LE(name.length, 26);
@@ -86,6 +106,7 @@ function makeStoredZip(files: Array<{ name: string; body?: Buffer }>): Buffer {
 		central.writeUInt32LE(0x02014b50, 0);
 		central.writeUInt16LE(20, 4);
 		central.writeUInt16LE(20, 6);
+		central.writeUInt32LE(checksum, 16);
 		central.writeUInt32LE(body.length, 20);
 		central.writeUInt32LE(body.length, 24);
 		central.writeUInt16LE(name.length, 28);
@@ -289,9 +310,15 @@ function pointerFaultClient(client: PrismaClient, failure: Error): PrismaClient 
 									: value;
 							}
 							return async (args: {
-								data?: { webglEntryKey?: string };
+								data?: {
+									webglEntryKey?: string;
+									currentWebglDeploymentId?: string;
+								};
 							}) => {
-								if (armed && args.data?.webglEntryKey) {
+								if (armed && (
+									args.data?.webglEntryKey
+									|| args.data?.currentWebglDeploymentId
+								)) {
 									armed = false;
 									throw failure;
 								}
@@ -1409,10 +1436,14 @@ describe.runIf(runPostgresIntegration)(
 		});
 
 		it('preserves source on pointer failure and recovers with a fresh graph/client', async () => {
+			const staleAt = new Date('2098-07-31T00:00:00.000Z');
 			const deployment = createWebglDeploymentKeys(projectId, randomUUID());
 			const archive = makeStoredZip([
 				{ name: 'index.html', body: Buffer.from('<html>ticket 012</html>') },
+				{ name: 'Build/game.loader.js', body: Buffer.from('loader') },
+				{ name: 'Build/game.framework.js', body: Buffer.from('framework') },
 				{ name: 'Build/game.wasm', body: Buffer.from([0, 97, 115, 109]) },
+				{ name: 'Build/game.data', body: Buffer.from('data') },
 			]);
 			storage.put(protectedBucket, deployment.sourceKey, archive);
 			const session = await createSessionFixture({
@@ -1420,15 +1451,23 @@ describe.runIf(runPostgresIntegration)(
 				status: 'COMPLETING',
 				s3Key: deployment.sourceKey,
 				totalBytes: BigInt(archive.length),
-				updatedAt: new Date('2098-07-31T00:00:00.000Z'),
+				updatedAt: staleAt,
 			});
 			const pointerFailure = new Error('forced DB pointer failure');
 			const firstGraph = graph(pointerFaultClient(control, pointerFailure));
 
+			vi.mocked(logger.error).mockClear();
 			await firstGraph.recoverStaleUploads();
 			await expect(control.gameUploadSession.findUniqueOrThrow({
 				where: { id: session.id },
-			})).resolves.toMatchObject({ status: 'COMPLETING' });
+			})).resolves.toMatchObject({
+				status: 'COMPLETING',
+				completionClaimToken: null,
+			});
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({ err: pointerFailure, sessionId: session.id }),
+				'Boot sweep: transient finalization failure; leaving session recoverable',
+			);
 			expect(storage.objects.has(`${protectedBucket}/${deployment.sourceKey}`)).toBe(true);
 			expect(
 				[...storage.objects.keys()]
@@ -1437,16 +1476,32 @@ describe.runIf(runPostgresIntegration)(
 			await firstGraph.close();
 
 			const secondGraph = graph(recoveryClient);
+			vi.mocked(logger.error).mockClear();
 			await secondGraph.recoverStaleUploads();
+			expect(logger.error).not.toHaveBeenCalled();
 			await expect(control.gameUploadSession.findUniqueOrThrow({
 				where: { id: session.id },
 			})).resolves.toMatchObject({
 				status: 'COMPLETED',
-				storageKey: deployment.sourceKey,
+				storageKey: null,
 			});
 			await expect(control.project.findUniqueOrThrow({
 				where: { id: projectId },
-			})).resolves.toMatchObject({ webglEntryKey: deployment.entryKey });
+			})).resolves.toMatchObject({
+				currentWebglDeploymentId: deployment.deploymentId,
+			});
+			await expect(control.webglDeployment.findUniqueOrThrow({
+				where: { id: deployment.deploymentId },
+				include: { sourceRepresentation: true },
+			})).resolves.toMatchObject({
+				state: 'READY',
+				sourceRepresentation: {
+					role: 'WEBGL_SOURCE',
+					bucket: protectedBucket,
+					objectKey: deployment.sourceKey,
+					state: 'READY',
+				},
+			});
 			await expect(control.gameUploadActiveSession.findUnique({
 				where: {
 					projectId_uploadKind: { projectId, uploadKind: 'WEBGL' },
@@ -1458,6 +1513,9 @@ describe.runIf(runPostgresIntegration)(
 					.filter((key) => key.startsWith(`${publicBucket}/${deployment.sitePrefix}`))
 					.sort(),
 			).toEqual([
+				`${publicBucket}/${deployment.sitePrefix}Build/game.data`,
+				`${publicBucket}/${deployment.sitePrefix}Build/game.framework.js`,
+				`${publicBucket}/${deployment.sitePrefix}Build/game.loader.js`,
 				`${publicBucket}/${deployment.sitePrefix}Build/game.wasm`,
 				`${publicBucket}/${deployment.entryKey}`,
 			]);

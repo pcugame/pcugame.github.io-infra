@@ -311,11 +311,14 @@ describe.runIf(runIntegration)('deterministic responsive image durable lifecycle
 				],
 				isPublic: true,
 			}, { bucket: publicBucket, reason: 'replace', playbackReason: 'replace-playback' });
-		await expect(prisma.asset.findUnique({ where: { id: result.assetId } })).resolves.toMatchObject({
-			storageKey: nextSource,
-			card480Height: 240,
-			display960Height: 480,
-		});
+		const updated = await prisma.asset.findUniqueOrThrow({ where: { id: result.assetId }, include: { representations: true } });
+		expect(updated).toMatchObject({ storageKey: null, card480Height: null, display960Height: null });
+		expect(updated.representations).toHaveLength(3);
+		expect(updated.representations).toEqual(expect.arrayContaining([
+			expect.objectContaining({ role: 'ORIGINAL', state: 'READY', objectKey: nextSource, width: 1200, height: 600 }),
+			expect.objectContaining({ role: 'CARD_480', state: 'READY', width: 480, height: 240 }),
+			expect.objectContaining({ role: 'DISPLAY_960', state: 'READY', width: 960, height: 480 }),
+		]));
 		await expectQueued(bundle(oldSource));
 	});
 
@@ -420,18 +423,27 @@ describe.runIf(runIntegration)('deterministic responsive image durable lifecycle
 		}, { bucket: publicBucket, reason: 'poster-replace' });
 		expect(replaced?.updated).toMatchObject({
 			posterCard480Height: null,
-			posterDisplay960Height: 480,
+			posterDisplay960Height: null,
 		});
-		await expectQueued(bundle(first));
+		const currentPoster = await prisma.asset.findUniqueOrThrow({
+			where: { id: replaced!.updated.posterAssetId! }, include: { representations: true },
+		});
+		expect(currentPoster.representations).toHaveLength(2);
+		expect(currentPoster.representations).toEqual(expect.arrayContaining([
+			expect.objectContaining({ role: 'ORIGINAL', state: 'READY', objectKey: second }),
+			expect.objectContaining({ role: 'DISPLAY_960', state: 'READY', width: 960, height: 480 }),
+		]));
+		await expectQueued([first, deriveImageRenditionStorageKey(first, 'CARD_480')]);
 		const cleared = await repository.clearExhibitionPoster(
 			exhibition.id,
 			{ bucket: publicBucket, reason: 'poster-clear' },
 		);
 		expect(cleared?.updated).toMatchObject({
+			posterAssetId: null,
 			posterStorageKey: null,
 			posterCard480Height: null,
 			posterDisplay960Height: null,
 		});
-		await expectQueued(bundle(second));
+		await expectQueued([second, deriveImageRenditionStorageKey(second, 'DISPLAY_960')]);
 	});
 });

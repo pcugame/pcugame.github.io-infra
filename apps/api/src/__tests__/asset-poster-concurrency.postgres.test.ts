@@ -1,3 +1,5 @@
+import { createPhase1TestDatabase } from './helpers/phase1-test-database.js';
+import { batchDeleteStorage } from './helpers/batch-delete-storage.js';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AssetKind, PrismaClient } from '../generated/prisma/client.js';
@@ -144,7 +146,10 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 					objects.delete(key);
 				},
 				listKeyPage: async () => ({ keys: [], isTruncated: false }),
-				deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
+				deleteKeys: batchDeleteStorage(async (_bucket, key) => {
+					if (failStorage) throw new Error('forced storage failure');
+					objects.delete(key);
+				}),
 			},
 			repository: createOrphanRepository(client),
 			references: createObjectReferenceResolver(
@@ -193,7 +198,7 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			storage: {
 				delete: async (_bucket, key) => { input.objects.delete(key); },
 				listKeyPage: async () => ({ keys: [], isTruncated: false }),
-				deleteKeys: async (_bucket, keys) => ({ deleted: [...keys], failures: [] }),
+				deleteKeys: batchDeleteStorage(async (_bucket, key) => { input.objects.delete(key); }),
 			},
 			repository: createOrphanRepository(input.client),
 			references: createObjectReferenceResolver(
@@ -280,9 +285,12 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 		}
 	}
 
+	let fixtureDatabase: Awaited<ReturnType<typeof createPhase1TestDatabase>>;
 	beforeAll(async () => {
-		const databaseUrl = process.env['DATABASE_URL'];
-		if (!databaseUrl) throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
+		const sourceUrl = process.env['DATABASE_URL'];
+		if (!sourceUrl) throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
+		fixtureDatabase = await createPhase1TestDatabase(sourceUrl);
+		const { databaseUrl } = fixtureDatabase;
 		control = createPrismaClientForDatabase(databaseUrlWithApplicationName(databaseUrl, 'ticket005-control'));
 		barrierClient = createPrismaClientForDatabase(databaseUrlWithApplicationName(databaseUrl, 'ticket005-holder'));
 		operationA = createPrismaClientForDatabase(databaseUrlWithApplicationName(databaseUrl, 'ticket005-operation-a'));
@@ -365,6 +373,7 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 			operationA.$disconnect(),
 			operationB.$disconnect(),
 		]);
+		await fixtureDatabase.close();
 	});
 
 	it('repeats delete -> GAME replace with both critical sections inside PostgreSQL barriers', async () => {
@@ -399,9 +408,11 @@ describe.runIf(runPostgresIntegration)('asset/poster concurrency with PostgreSQL
 				.resolves.toMatchObject({ status: 'DELETED', storageKey: oldKey });
 			const ready = await control.asset.findFirstOrThrow({
 				where: { projectId: project.id, kind: 'GAME', status: 'READY' },
+				include: { representations: true },
 			});
 			expect(ready.id).not.toBe(oldAsset.id);
-			expect(ready.storageKey).toBe(newKey);
+			expect(ready.storageKey).toBeNull();
+			expect(ready.representations).toContainEqual(expect.objectContaining({ role: 'ORIGINAL', state: 'READY', objectKey: newKey }));
 			expect(objects).toEqual(new Set([newKey]));
 			await expectProjectInvariants(project.id, objects);
 		}

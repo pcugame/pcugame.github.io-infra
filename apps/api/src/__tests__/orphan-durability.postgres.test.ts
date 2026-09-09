@@ -1,3 +1,5 @@
+import { createPhase1TestDatabase } from './helpers/phase1-test-database.js';
+import { batchDeleteStorage } from './helpers/batch-delete-storage.js';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Prisma, type PrismaClient } from '../generated/prisma/client.js';
@@ -51,9 +53,12 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		});
 	}
 
+	let fixtureDatabase: Awaited<ReturnType<typeof createPhase1TestDatabase>>;
 	beforeAll(async () => {
-		const databaseUrl = process.env['DATABASE_URL'];
-		if (!databaseUrl) throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
+		const sourceUrl = process.env['DATABASE_URL'];
+		if (!sourceUrl) throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
+		fixtureDatabase = await createPhase1TestDatabase(sourceUrl);
+		const { databaseUrl } = fixtureDatabase;
 		client = createPrismaClientForDatabase(databaseUrl);
 		referenceWriterClient = createPrismaClientForDatabase(databaseUrl);
 		await Promise.all([client.$connect(), referenceWriterClient.$connect()]);
@@ -113,6 +118,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 		await client.exhibition.deleteMany({ where: { id: exhibitionId } });
 		await client.user.deleteMany({ where: { id: userId } });
 		await Promise.all([client.$disconnect(), referenceWriterClient.$disconnect()]);
+		await fixtureDatabase.close();
 	});
 
 	it('does not let reconciliation clear a live deletion claim', async () => {
@@ -334,7 +340,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 				storage: {
 					delete: deleteObject,
 					listKeyPage: vi.fn().mockResolvedValue({ keys: [], isTruncated: false }),
-					deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
+					deleteKeys: vi.fn(batchDeleteStorage(deleteObject)),
 				},
 			repository,
 			references: {
@@ -628,7 +634,7 @@ describe.runIf(runPostgresIntegration)('orphan durability with production Postgr
 			storage: {
 				delete: recoveredDelete,
 				listKeyPage: vi.fn().mockResolvedValue({ keys: [], isTruncated: false }),
-				deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
+				deleteKeys: vi.fn(batchDeleteStorage(recoveredDelete)),
 			},
 			repository: productionOrphanRepository,
 			references: createObjectReferenceResolver(

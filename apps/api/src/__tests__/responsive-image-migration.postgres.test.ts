@@ -77,6 +77,7 @@ describe.runIf(runPostgresIntegration)('responsive image migrations with Postgre
 			SELECT column_name
 			FROM information_schema.columns
 			WHERE table_schema = '${schema}'
+				AND table_name IN ('assets', 'exhibitions')
 				AND column_name IN (
 					'width',
 					'height',
@@ -177,7 +178,7 @@ describe.runIf(runPostgresIntegration)('responsive image migrations with Postgre
 			throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
 		}
 		const migrationDirectories = (await readdir(migrationRootUrl, { withFileTypes: true }))
-			.filter((entry) => entry.isDirectory())
+			.filter((entry) => entry.isDirectory() && entry.name < '20260822000000_canonical_asset_contract')
 			.map((entry) => entry.name)
 			.sort();
 		[foundationMigration, deterministicMigration, checkedInMigrations] = await Promise.all([
@@ -202,7 +203,7 @@ describe.runIf(runPostgresIntegration)('responsive image migrations with Postgre
 		await control.$disconnect();
 	});
 
-	it('applies the complete checked-in fresh path without creating a rendition model', async () => {
+	it('applies the complete Phase 1 fresh path without creating a rendition model', async () => {
 		const schema = await createEmptySchema();
 
 		for (const migration of checkedInMigrations) {

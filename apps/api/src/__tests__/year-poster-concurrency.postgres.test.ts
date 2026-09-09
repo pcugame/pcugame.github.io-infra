@@ -1,3 +1,5 @@
+import { createPhase1TestDatabase } from './helpers/phase1-test-database.js';
+import { batchDeleteStorage } from './helpers/batch-delete-storage.js';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
@@ -116,6 +118,17 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 		};
 	}
 
+	async function exhibitionOriginalKey(exhibitionId: number) {
+		const row = await control.exhibition.findUniqueOrThrow({
+			where: { id: exhibitionId }, include: { poster: { include: { representations: true } } },
+		});
+		if (row.poster) {
+			expect(row.poster.status).toBe('READY');
+			return row.poster.representations.find((representation) => representation.role === 'ORIGINAL' && representation.state === 'READY')?.objectKey;
+		}
+		return row.posterStorageKey;
+	}
+
 	function serviceHarness(input: {
 		client: PrismaClient;
 		uploadKey: string;
@@ -132,7 +145,10 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 					input.objects.delete(key);
 				},
 				listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
-				deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
+				deleteKeys: vi.fn(batchDeleteStorage(async (_bucket, key) => {
+					if (input.failDelete?.has(key)) throw new Error(`storage delete failed: ${key}`);
+					input.objects.delete(key);
+				})),
 			},
 			repository: createOrphanRepository(input.client),
 			references: createObjectReferenceResolver(
@@ -152,7 +168,10 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 					input.objects.delete(key);
 				},
 				listKeyPage: vi.fn(async () => ({ keys: [], isTruncated: false })),
-				deleteKeys: vi.fn(async (_bucket, keys) => ({ deleted: [...keys], failures: [] })),
+				deleteKeys: vi.fn(batchDeleteStorage(async (_bucket, key) => {
+					if (input.failDelete?.has(key)) throw new Error(`storage delete failed: ${key}`);
+					input.objects.delete(key);
+				})),
 			},
 			orphans: { record: orphanService.recordOrphan },
 			logger: { error: vi.fn() },
@@ -209,9 +228,12 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 		})).resolves.toBeGreaterThan(0);
 	}
 
+	let fixtureDatabase: Awaited<ReturnType<typeof createPhase1TestDatabase>>;
 	beforeAll(async () => {
-		const databaseUrl = process.env['DATABASE_URL'];
-		if (!databaseUrl) throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
+		const sourceUrl = process.env['DATABASE_URL'];
+		if (!sourceUrl) throw new Error('DATABASE_URL is required for PostgreSQL integration tests');
+		fixtureDatabase = await createPhase1TestDatabase(sourceUrl);
+		const { databaseUrl } = fixtureDatabase;
 		control = createPrismaClientForDatabase(databaseUrlWithApplicationName(databaseUrl, 'ticket009-control'));
 		barrierClient = createPrismaClientForDatabase(databaseUrlWithApplicationName(databaseUrl, 'ticket009-holder'));
 		operationA = createPrismaClientForDatabase(databaseUrlWithApplicationName(databaseUrl, 'ticket009-operation-a'));
@@ -259,10 +281,10 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			LANGUAGE plpgsql
 			AS $function$
 			BEGIN
-				IF NEW."poster_storage_key" LIKE '%force-serialization-exhausted%' THEN
+				IF (SELECT representation.object_key FROM asset_representations representation WHERE representation.asset_id = NEW."poster_asset_id" AND representation.role = 'ORIGINAL') LIKE '%force-serialization-exhausted%' THEN
 					RAISE EXCEPTION 'ticket 009 forced serialization exhaustion' USING ERRCODE = '40001';
 				END IF;
-				IF NEW."poster_storage_key" LIKE '%force-serialization-retry%'
+				IF (SELECT representation.object_key FROM asset_representations representation WHERE representation.asset_id = NEW."poster_asset_id" AND representation.role = 'ORIGINAL') LIKE '%force-serialization-retry%'
 					AND nextval('ticket_009_serialization_retry_sequence') % 2 = 1 THEN
 					RAISE EXCEPTION 'ticket 009 forced serialization retry' USING ERRCODE = '40001';
 				END IF;
@@ -315,6 +337,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			operationA.$disconnect(),
 			operationB.$disconnect(),
 		]);
+		await fixtureDatabase.close();
 	});
 
 	it('repeats replace -> replace with observable overlap and bounded serialization retry', async () => {
@@ -349,8 +372,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 				if (!released) await barrier.release();
 			}
 
-			await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
-				.resolves.toMatchObject({ posterStorageKey: winnerKey });
+			await expect(exhibitionOriginalKey(exhibition.id)).resolves.toBe(winnerKey);
 			expect(objects.has(winnerKey)).toBe(true);
 			expect(await control.orphanObject.count({
 				where: { bucket, storageKey: winnerKey, resolvedAt: null },
@@ -437,8 +459,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 				if (!released) await barrier.release();
 			}
 
-			const row = await control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } });
-			expect(row.posterStorageKey).toBe(newKey);
+			await expect(exhibitionOriginalKey(exhibition.id)).resolves.toBe(newKey);
 			expect(objects.has(newKey)).toBe(true);
 			await expect(control.orphanObject.count({
 				where: { bucket, storageKey: oldKey, resolvedAt: null },
@@ -469,8 +490,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			actor: { id: 1, role: 'ADMIN' },
 			parts: emptyParts(),
 		})).resolves.toMatchObject({ poster: { original: { url: publicImageUrl(newKey) } } });
-		await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
-			.resolves.toMatchObject({ posterStorageKey: newKey });
+		await expect(exhibitionOriginalKey(exhibition.id)).resolves.toBe(newKey);
 		const sequence = await control.$queryRaw<Array<{ lastValue: bigint }>>`
 			SELECT last_value AS "lastValue"
 			FROM "ticket_009_serialization_retry_sequence"
@@ -525,8 +545,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			if (losing) await expect(losing).rejects.toMatchObject({ statusCode: 409 });
 		}
 
-		await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
-			.resolves.toMatchObject({ posterStorageKey: winnerKey });
+		await expect(exhibitionOriginalKey(exhibition.id)).resolves.toBe(winnerKey);
 		expect(objects.has(winnerKey)).toBe(true);
 		await assertDeletedOrDurable(oldKey, objects);
 		await assertDeletedOrDurable(loserKey, objects);
@@ -548,8 +567,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			actor: { id: 1, role: 'ADMIN' },
 			parts: emptyParts(),
 		})).resolves.toMatchObject({ poster: { original: { url: publicImageUrl(newKey) } } });
-		await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
-			.resolves.toMatchObject({ posterStorageKey: newKey });
+		await expect(exhibitionOriginalKey(exhibition.id)).resolves.toBe(newKey);
 		expect(objects.has(newKey)).toBe(true);
 		expect(objects.has(oldKey)).toBe(true);
 		await expect(control.orphanObject.count({
@@ -571,8 +589,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			actor: { id: 1, role: 'ADMIN' },
 			parts: emptyParts(),
 		})).rejects.toThrow(/ticket 009 forced outbox failure/i);
-		await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
-			.resolves.toMatchObject({ posterStorageKey: oldKey });
+		await expect(exhibitionOriginalKey(exhibition.id)).resolves.toBe(oldKey);
 		expect(objects.has(newKey)).toBe(false);
 		expect(rollback.rollback).toHaveBeenCalledOnce();
 
@@ -587,8 +604,7 @@ describe.runIf(runPostgresIntegration)('year poster concurrency with PostgreSQL 
 			actor: { id: 1, role: 'ADMIN' },
 			parts: emptyParts(),
 		})).rejects.toThrow(/deletion and durable orphan recording both failed/i);
-		await expect(control.exhibition.findUniqueOrThrow({ where: { id: exhibition.id } }))
-			.resolves.toMatchObject({ posterStorageKey: oldKey });
+		await expect(exhibitionOriginalKey(exhibition.id)).resolves.toBe(oldKey);
 		expect(objects.has(doubleFailureKey)).toBe(true);
 		expect(doubleFailure.rollback).toHaveBeenCalledOnce();
 	});
