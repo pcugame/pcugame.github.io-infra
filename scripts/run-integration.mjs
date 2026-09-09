@@ -110,6 +110,7 @@ const steps = [
 	[npm, ['run', 'test:integration:lifecycle-schema']],
 	[npm, ['run', 'test:integration:responsive-image-migration']],
 	[npm, ['run', 'test:integration:canonical-migration-chain']],
+	[npm, ['run', 'test:integration:project-assets']],
 	[npm, ['run', 'test:integration:storage-recovery']],
 	[npm, ['run', 'test:integration:responsive-images']],
 	[docker, ['compose', '-f', 'docker-compose.integration.yml', '--profile', 'e2e', 'run', '--rm', 'e2e']],
