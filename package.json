@@ -31,7 +31,7 @@
       "deepmerge-ts": "8.0.1"
     },
     "browserslist": "4.28.7",
-    "js-yaml": "4.3.1",
+    "js-yaml": "4.3.2",
     "prisma@7.9.1": {
       "mysql2": "3.22.0"
     },
