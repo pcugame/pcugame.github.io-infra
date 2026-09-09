@@ -749,3 +749,42 @@ model ProjectChangeRequest {
   @@index([originalProjectId, createdAt])
   @@map("project_change_requests")
 }
+
+/// Release-only provenance. Identifier, image, scope and expiry CHECK constraints
+/// are enforced by the reviewed SQL migration; application routes never write it.
+model ReleaseContractAuthorization {
+  migrationName     String   @id @map("migration_name")
+  exceptionId       String   @map("exception_id")
+  actor             String
+  runId             String   @map("run_id")
+  scope             String
+  sourceSha         String   @map("source_sha")
+  image             String
+  migrationChecksum String   @map("migration_checksum")
+  authorizedAt      DateTime @default(now()) @map("authorized_at") @db.Timestamptz(6)
+  expiresAt         DateTime @default(dbgenerated("(CURRENT_TIMESTAMP + '01:00:00'::interval)")) @map("expires_at") @db.Timestamptz(6)
+  consumedAt        DateTime? @map("consumed_at") @db.Timestamptz(6)
+  receipt           ReleaseContractExceptionReceipt?
+
+  @@map("release_contract_authorizations")
+}
+
+/// Contains private pre-contract metric and object-mapping evidence.
+model ReleaseContractExceptionReceipt {
+  migrationName     String   @id @map("migration_name")
+  exceptionId       String   @map("exception_id")
+  actor             String
+  runId             String   @map("run_id")
+  scope             String
+  sourceSha         String   @map("source_sha")
+  image             String
+  migrationChecksum String   @map("migration_checksum")
+  authorizedAt      DateTime @map("authorized_at") @db.Timestamptz(6)
+  expiresAt         DateTime @map("expires_at") @db.Timestamptz(6)
+  metrics           Json
+  relocationSummary Json   @map("relocation_summary")
+  appliedAt         DateTime? @map("applied_at") @db.Timestamptz(6)
+  authorization     ReleaseContractAuthorization @relation(fields: [migrationName], references: [migrationName], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("release_contract_exception_receipts")
+}
