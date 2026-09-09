@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { DirectAssetUploadKind, DirectAssetUploadOwner } from '../contracts';
 import { getApiErrorMessage } from '../lib/api';
@@ -46,6 +46,7 @@ export default function DirectImageUploadWidget({
 	onBusyChange,
 }: Props) {
 	const qc = useQueryClient();
+	const fileInputId = useId();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
 	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
@@ -453,17 +454,32 @@ export default function DirectImageUploadWidget({
 		<div className="game-upload">
 			{!hideTitle && <h3 className="game-upload__title">{title}</h3>}
 			{resumable && phase === 'idle' && <p className="field-hint">중단된 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>}
-			{canSelect && <input type="file" multiple={kind === 'IMAGE'} accept="image/*,application/pdf,.pdf" onChange={(event) => {
-				const selected = Array.from(event.target.files ?? []);
-				setFiles(selected);
-				const saved = resumableRef.current;
-				if (!saved || !matchesSavedFile(selected, saved)) updateCompleted(0);
-				else updateCompleted(saved.completed ?? 0);
-				setError(null);
-			}} />}
-			{files.length > 0 && <p className="file-info">{files.length}개 파일 선택됨 ({completed}/{files.length} 완료)</p>}
-			{progress && <p className="field-hint">{phase === 'verifying' ? '이미지 검증 및 변환 중…' : `${progress.percent}% 업로드`}</p>}
-			{error && <p className="field-error">{error}</p>}
+			{canSelect && (
+				<div className="game-upload__file-input">
+					<label className="sr-only" htmlFor={fileInputId}>{title} 파일 선택</label>
+					<input id={fileInputId} type="file" multiple={kind === 'IMAGE'} accept="image/*,application/pdf,.pdf" onChange={(event) => {
+						const selected = Array.from(event.target.files ?? []);
+						setFiles(selected);
+						const saved = resumableRef.current;
+						if (!saved || !matchesSavedFile(selected, saved)) updateCompleted(0);
+						else updateCompleted(saved.completed ?? 0);
+						setError(null);
+					}} />
+				</div>
+			)}
+			{files.length > 0 && <p className="game-upload__file-summary">{files.length}개 파일 선택됨 ({completed}/{files.length} 완료)</p>}
+			{progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
+				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
+					<div className="game-upload__progress-track" role="progressbar" aria-label={`${title} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
+						<div className={`game-upload__progress-bar ${phase === 'ready' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />
+						<span className="game-upload__progress-label">{progress.percent}%</span>
+					</div>
+					<p className="game-upload__progress-status">
+						{phase === 'ready' ? '업로드 완료!' : phase === 'verifying' ? '이미지 검증 및 변환 중…' : '업로드 중…'}
+					</p>
+				</div>
+			)}
+			{error && <p className="game-upload__error" role="alert">{error}</p>}
 			<div className="game-upload__actions">
 				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${title} 시작`}</button>}
 				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}

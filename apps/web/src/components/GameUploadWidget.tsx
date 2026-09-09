@@ -1,6 +1,6 @@
 /** Direct Garage multipart uploader for project GAME and WEBGL sources. */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useId, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../lib/query';
 import { getApiErrorMessage } from '../lib/api';
@@ -43,6 +43,7 @@ export default function GameUploadWidget({
 	uploadKind = 'GAME',
 }: Props) {
 	const qc = useQueryClient();
+	const fileInputId = useId();
 	const isWebgl = uploadKind === 'WEBGL';
 	const labels = isWebgl
 		? { title: 'WebGL 빌드 업로드 (ZIP 파일)', uploadTitle: 'WebGL 빌드 업로드', noun: 'WebGL 빌드' }
@@ -565,8 +566,9 @@ export default function GameUploadWidget({
 			)}
 			{(state === 'idle' || state === 'error') && (legacyState === 'idle' || legacyState === 'error' || legacyState === 'cancelled') && (
 				<div className="game-upload__file-input">
-					<input type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={handleFileChange} />
-					{file && <p className="file-info">{file.name} — {fileSizeMB}MB</p>}
+					<label className="sr-only" htmlFor={fileInputId}>{labels.noun} ZIP 파일 선택</label>
+					<input id={fileInputId} type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={handleFileChange} />
+					{file && <p className="game-upload__file-summary">{file.name} — {fileSizeMB}MB</p>}
 				</div>
 			)}
 			{legacyProgress && (legacyState === 'uploading' || legacyState === 'completing' || legacyState === 'completed') && (
@@ -583,8 +585,8 @@ export default function GameUploadWidget({
 				</div>
 			)}
 			{progress && (state === 'uploading' || state === 'verifying' || state === 'completed') && (
-				<div className="game-upload__progress-wrap">
-					<div className="game-upload__progress-track">
+				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
+					<div className="game-upload__progress-track" role="progressbar" aria-label={`${labels.noun} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
 						<div className={`game-upload__progress-bar ${state === 'completed' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />
 						<span className="game-upload__progress-label">{progress.percent}% ({progress.uploadedChunks}/{progress.totalChunks})</span>
 					</div>
@@ -595,31 +597,31 @@ export default function GameUploadWidget({
 					</p>
 				</div>
 			)}
-			{error && <div className="game-upload__error">{error}</div>}
-			{legacyError && <div className="game-upload__error">{legacyError}</div>}
+			{error && <div className="game-upload__error" role="alert">{error}</div>}
+			{legacyError && <div className="game-upload__error" role="alert">{legacyError}</div>}
 			<div className="game-upload__actions">
 				{legacyState === 'idle' && state === 'idle' && !directOwnsUi && file && legacyResumeSession && <>
-					<button className="btn btn--primary" onClick={() => void handleLegacyResume()}>이어올리기</button>
-					<button className="btn btn--secondary" onClick={handleStart}>새로 시작</button>
+					<button className="btn btn--primary" type="button" onClick={() => void handleLegacyResume()}>이어올리기</button>
+					<button className="btn btn--secondary" type="button" onClick={handleStart}>새로 시작</button>
 				</>}
 				{state === 'idle' && !directOwnsUi && legacyState === 'uploading' && <>
-					<button className="btn btn--danger" onClick={handleLegacyPause}>일시 정지</button>
+					<button className="btn btn--danger" type="button" onClick={handleLegacyPause}>일시 정지</button>
 				</>}
 				{state === 'idle' && !directOwnsUi && (legacyState === 'error' || legacyState === 'cancelled') && (legacySession || legacyResumeSession) && <>
-					{file && <button className="btn btn--primary" onClick={() => void handleLegacyResume()}>재시도</button>}
-					<button className="btn btn--danger btn--small" onClick={() => void handleLegacyCancel()}>취소 (세션 삭제)</button>
+					{file && <button className="btn btn--primary" type="button" onClick={() => void handleLegacyResume()}>재시도</button>}
+					<button className="btn btn--danger btn--small" type="button" onClick={() => void handleLegacyCancel()}>취소 (세션 삭제)</button>
 				</>}
 				{legacyState === 'completed' && <span className="game-upload__complete-text">업로드 완료</span>}
-				{directUiAvailable && state === 'idle' && file && !session && <button className="btn btn--primary" onClick={handleStart}>업로드 시작</button>}
+				{directUiAvailable && state === 'idle' && file && !session && <button className="btn btn--primary" type="button" onClick={handleStart}>업로드 시작</button>}
 				{directUiAvailable && state === 'idle' && file && session && <>
-					<button className="btn btn--primary" onClick={handleResume}>이어올리기</button>
-					<button className="btn btn--danger btn--small" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>
+					<button className="btn btn--primary" type="button" onClick={handleResume}>이어올리기</button>
+					<button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>
 				</>}
-				{directUiAvailable && state === 'error' && file && <button className="btn btn--primary" onClick={session ? handleResume : handleStart}>재시도</button>}
-				{directUiAvailable && (state === 'uploading' || state === 'verifying') && <button className="btn btn--secondary btn--small" onClick={handlePause}>일시 정지</button>}
-				{directUiAvailable && (state === 'uploading' || state === 'verifying' || (state === 'error' && session)) && <button className="btn btn--danger btn--small" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>}
+				{directUiAvailable && state === 'error' && file && <button className="btn btn--primary" type="button" onClick={session ? handleResume : handleStart}>재시도</button>}
+				{directUiAvailable && (state === 'uploading' || state === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={handlePause}>일시 정지</button>}
+				{directUiAvailable && (state === 'uploading' || state === 'verifying' || (state === 'error' && session)) && <button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>}
 				{directUiAvailable && state === 'completed' && <span className="game-upload__complete-text">업로드 완료</span>}
-				{onSkip && state !== 'uploading' && state !== 'verifying' && state !== 'completed' && legacyState !== 'uploading' && legacyState !== 'completing' && legacyState !== 'completed' && <button className="btn btn--secondary" onClick={onSkip}>건너뛰기</button>}
+				{onSkip && state !== 'uploading' && state !== 'verifying' && state !== 'completed' && legacyState !== 'uploading' && legacyState !== 'completing' && legacyState !== 'completed' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
 			</div>
 		</div>
 	);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getApiErrorMessage } from '../lib/api';
 import {
@@ -55,6 +55,7 @@ export default function DirectVideoUploadWidget({
 	accept,
 }: Props) {
 	const qc = useQueryClient();
+	const fileInputId = useId();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
 	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
@@ -489,9 +490,12 @@ export default function DirectVideoUploadWidget({
 				<p className="field-hint">중단된 {label} 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>
 			)}
 			{!autoStart && (phase === 'idle' || phase === 'error') && (
-				<input
-					type="file"
-					multiple
+				<div className="game-upload__file-input">
+					<label className="sr-only" htmlFor={fileInputId}>{label} 파일 선택</label>
+					<input
+						id={fileInputId}
+						type="file"
+						multiple
 					accept={accept ?? (kind === 'VIDEO' ? 'video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv' : undefined)}
 					onChange={(event) => {
 						const selected = Array.from(event.target.files ?? []);
@@ -521,15 +525,22 @@ export default function DirectVideoUploadWidget({
 						setError(null);
 					}}
 					disabled={maxFiles <= 0}
-				/>
+					/>
+				</div>
 			)}
-			{files.length > 0 && <p className="file-info">{files.length}개 {label} 선택됨 ({completed}/{files.length} 완료)</p>}
-			{progress && (
-				<p className="field-hint">
-					{phase === 'verifying' ? `${label} 검증 중…` : `${progress.percent}% 업로드`}
-				</p>
+			{files.length > 0 && <p className="game-upload__file-summary">{files.length}개 {label} 선택됨 ({completed}/{files.length} 완료)</p>}
+			{progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
+				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
+					<div className="game-upload__progress-track" role="progressbar" aria-label={`${label} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
+						<div className={`game-upload__progress-bar ${phase === 'ready' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />
+						<span className="game-upload__progress-label">{progress.percent}%</span>
+					</div>
+					<p className="game-upload__progress-status">
+						{phase === 'ready' ? '업로드 완료!' : phase === 'verifying' ? `${label} 검증 중…` : '업로드 중…'}
+					</p>
+				</div>
 			)}
-			{error && <p className="field-error">{error}</p>}
+			{error && <p className="game-upload__error" role="alert">{error}</p>}
 			<div className="game-upload__actions">
 				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${label} 업로드 시작`}</button>}
 				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}

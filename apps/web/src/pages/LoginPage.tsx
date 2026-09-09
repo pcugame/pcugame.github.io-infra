@@ -94,7 +94,7 @@ export default function LoginPage() {
                 <button
                   key={item.role}
                   type="button"
-                  className="btn btn-primary"
+                  className="btn btn--primary"
                   disabled={loginMutation.isPending}
                   onClick={() => loginMutation.mutate({ type: 'dev-role', role: item.role })}
                 >
@@ -107,7 +107,7 @@ export default function LoginPage() {
                 <button
                   key={item.scenario}
                   type="button"
-                  className="btn btn-secondary"
+                  className="btn btn--secondary"
                   disabled={loginMutation.isPending}
                   onClick={() => loginMutation.mutate({ type: 'dev-error', scenario: item.scenario })}
                 >
