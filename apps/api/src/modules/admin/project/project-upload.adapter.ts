@@ -46,6 +46,7 @@ export interface ProjectUploadProcessing {
 	validate(
 		filePath: string,
 		kind: AssetKind,
+		originalName?: string,
 	): Promise<{ mimeType: string; ext: string; sizeBytes: number }>;
 	processImage(input: ImageProcessingInput): Promise<ImageProcessingResult>;
 	processPdf(input: PdfProcessingInput): Promise<ImageProcessingResult>;
@@ -181,7 +182,7 @@ export function createProjectUploadPipeline(
 		},
 
 		async processFile(filePath, kind, originalName): Promise<SavedUpload> {
-			const validated = await deps.processing.validate(filePath, kind);
+			const validated = await deps.processing.validate(filePath, kind, originalName);
 
 			if (kind === 'VIDEO') {
 				const playback = await deps.processing.processVideo({
@@ -237,7 +238,7 @@ export function createProjectUploadPipeline(
 				};
 			}
 
-			if (kind === 'GAME') {
+			if (kind === 'GAME' || kind === 'DOCUMENT' || kind === 'ATTACHMENT') {
 				const uploaded = await upload(
 					filePath,
 					kind,

@@ -38,6 +38,12 @@ export function createAssetUploadController(deps: { service: Service }): Fastify
 			const result = await deps.service.createVideoSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body));
 			sendCreated(reply, result);
 		});
+		app.post<{ Params: { id: string } }>('/projects/:id/direct-document-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
+			sendCreated(reply, await deps.service.createDocumentSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body)));
+		});
+		app.post<{ Params: { id: string } }>('/projects/:id/direct-attachment-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
+			sendCreated(reply, await deps.service.createAttachmentSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body)));
+		});
 		app.post<{ Params: { id: string } }>('/projects/:id/direct-image-upload-sessions', { preHandler: requireLogin }, async (request, reply) => {
 			const result = await deps.service.createImageSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body));
 			sendCreated(reply, result);
@@ -80,6 +86,8 @@ export function createUnavailableAssetUploadController(): FastifyPluginAsync {
 		app.post('/projects/:id/direct-game-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-webgl-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-video-upload-sessions', { preHandler: requireLogin }, unavailable);
+		app.post('/projects/:id/direct-document-upload-sessions', { preHandler: requireLogin }, unavailable);
+		app.post('/projects/:id/direct-attachment-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-image-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/projects/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/exhibitions/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, unavailable);

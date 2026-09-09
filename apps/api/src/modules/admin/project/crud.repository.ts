@@ -1,3 +1,4 @@
+import { assertMaterialCapacity, isMaterialKind } from '../../asset-upload/material-policy.js';
 import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS, nextProjectVideoOrder } from '../../assets/video-order.js';
 import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
 import type {
@@ -215,6 +216,7 @@ export function createProjectCrudRepository(
 		kind: string;
 		objectKey: string;
 		uploadId: string | null;
+		bucket: string;
 	}) {
 		if (upload.projectId === null) {
 			throw new Error(`Canonical WEBGL upload ${upload.id} is not project-owned`);
@@ -224,6 +226,7 @@ export function createProjectCrudRepository(
 			projectId: upload.projectId,
 			uploadKind: upload.kind,
 			s3Key: upload.objectKey,
+			bucket: upload.bucket,
 			s3UploadId: upload.uploadId,
 			canonicalSessionId: upload.id,
 		};
@@ -276,8 +279,8 @@ export function createProjectCrudRepository(
 					select: { id: true, uploadKind: true, s3Key: true, s3UploadId: true },
 				});
 				const canonicalActiveUploads = await tx.assetUploadSession.findMany({
-					where: { projectId: id, kind: 'WEBGL', state: { in: [...canonicalActiveUploadStates] } },
-					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true },
+					where: { projectId: id, state: { in: [...canonicalActiveUploadStates] } },
+					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true, bucket: true },
 				});
 				const activeUploads = [
 					...legacyActiveUploads,
@@ -300,7 +303,7 @@ export function createProjectCrudRepository(
 				for (const upload of activeUploads) {
 					if (!upload.s3Key || !upload.s3UploadId) continue;
 					await queueMultipartAbortTask(tx, {
-						bucket: outbox.protectedBucket,
+						bucket: 'bucket' in upload ? upload.bucket : outbox.protectedBucket,
 						storageKey: upload.s3Key,
 						uploadId: upload.s3UploadId,
 						reason: `${outbox.reason}-active-multipart`,
@@ -340,7 +343,7 @@ export function createProjectCrudRepository(
 						kind: 'WEBGL',
 						state: { in: [...canonicalActiveUploadStates] },
 					},
-					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true },
+					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true, bucket: true },
 				});
 				const activeUploads = [
 					...(legacyActive?.session ? [legacyActive.session] : []),
@@ -481,10 +484,9 @@ export function createProjectCrudRepository(
 				const canonicalActiveUploads = await tx.assetUploadSession.findMany({
 					where: {
 						projectId: { in: ids },
-						kind: 'WEBGL',
 						state: { in: [...canonicalActiveUploadStates] },
 					},
-					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true },
+					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true, bucket: true },
 				});
 				const activeUploads = [
 					...legacyActiveUploads,
@@ -511,7 +513,7 @@ export function createProjectCrudRepository(
 				for (const upload of activeUploads) {
 					if (!upload.s3Key || !upload.s3UploadId) continue;
 					await queueMultipartAbortTask(tx, {
-						bucket: outbox.protectedBucket,
+						bucket: 'bucket' in upload ? upload.bucket : outbox.protectedBucket,
 						storageKey: upload.s3Key,
 						uploadId: upload.s3UploadId,
 						reason: `${outbox.reason}-active-multipart`,
@@ -542,6 +544,7 @@ export function createProjectCrudRepository(
 			});
 		},
 		createProjectWithAssets(data) {
+			if (data.savedFiles.filter((file) => file.kind === 'DOCUMENT' || file.kind === 'ATTACHMENT').length > 5) throw conflict('A project supports at most 5 materials');
 			if (data.savedFiles.filter((file) => file.kind === 'VIDEO').length > MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
 			return client.$transaction(async (tx) => {
 				const project = await tx.project.create({
@@ -572,7 +575,7 @@ export function createProjectCrudRepository(
 						kind: savedFile.kind,
 						...(savedFile.kind === 'VIDEO' ? { videoSortOrder: videoSortOrder++ } : {}),
 						bucket: savedFile.bucket ?? (
-							savedFile.kind === 'GAME' || savedFile.kind === 'VIDEO'
+							savedFile.kind === 'GAME' || savedFile.kind === 'VIDEO' || savedFile.kind === 'DOCUMENT' || savedFile.kind === 'ATTACHMENT'
 								? buckets.protectedBucket
 								: buckets.publicBucket
 						),
@@ -585,7 +588,7 @@ export function createProjectCrudRepository(
 						playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
 						playbackStatus: savedFile.playbackStatus,
 						playbackError: savedFile.playbackError,
-						isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO',
+						isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO' && savedFile.kind !== 'DOCUMENT' && savedFile.kind !== 'ATTACHMENT',
 						width: savedFile.width,
 						height: savedFile.height,
 						renditions: savedFile.renditions,
@@ -622,6 +625,10 @@ export function createProjectCrudRepository(
 					renditions = [],
 					...assetData
 				} = data;
+				if (isMaterialKind(assetData.kind)) {
+					await tx.$queryRaw(PrismaRuntime.sql`SELECT "id" FROM "projects" WHERE "id" = ${assetData.projectId} FOR UPDATE`);
+					await assertMaterialCapacity(tx, assetData.projectId);
+				}
 				const videoSortOrder = assetData.kind === 'VIDEO'
 					? await nextProjectVideoOrder(tx, assetData.projectId) : undefined;
 				const asset = await createCanonicalAsset(tx, {

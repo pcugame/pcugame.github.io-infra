@@ -1,3 +1,5 @@
+import { extname } from 'node:path';
+import { validateMaterialContent } from '../../asset-upload/material-validation.js';
 import { promises as fsp } from 'node:fs';
 import type { AssetKind } from '../../../generated/prisma/client.js';
 import {
@@ -29,9 +31,17 @@ const KIND_SIZE_LIMITS: Record<string, number> = {
 export async function validateFile(
   tmpPath: string,
   kind: AssetKind,
+  originalName?: string,
 ): Promise<ValidatedFile> {
   const stat = await fsp.stat(tmpPath);
   const sizeBytes = stat.size;
+  if (kind === 'DOCUMENT' || kind === 'ATTACHMENT') {
+    if (sizeBytes < 1 || sizeBytes > 50 * 1024 * 1024) throw badRequest('Invalid material size');
+    try {
+      const mimeType = await validateMaterialContent(kind, originalName ?? '', await fsp.readFile(tmpPath));
+      return { mimeType, sizeBytes, ext: kind === 'DOCUMENT' ? extname(originalName ?? '').slice(1).toLowerCase() : 'bin' };
+    } catch (error) { throw badRequest(error instanceof Error ? error.message : 'Invalid material'); }
+  }
 
   const fd = await fsp.open(tmpPath, 'r');
   const headerBuf = Buffer.alloc(16);

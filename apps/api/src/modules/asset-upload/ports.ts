@@ -1,7 +1,7 @@
 import type { AssetUploadKind, AssetUploadSessionState } from '../../generated/prisma/client.js';
 import type { Readable } from 'node:stream';
 
-export type DirectAssetUploadKind = Extract<AssetUploadKind, 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER'>;
+export type DirectAssetUploadKind = Extract<AssetUploadKind, 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT'>;
 export type DirectAssetUploadState = AssetUploadSessionState;
 
 export type DirectAssetUploadOwner =
@@ -33,6 +33,7 @@ export interface AssetUploadSessionRecord {
 	completionResult: unknown;
 	validationLeaseToken: string | null;
 	validationLeaseUntil: Date | null;
+	validationAttemptCount?: number;
 	expectedTargetAssetId: number | null;
 	expectedTargetAssetUpdatedAt: Date | null;
 	resultAssetId: number | null;

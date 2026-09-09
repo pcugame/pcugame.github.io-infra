@@ -21,7 +21,9 @@ export const PROJECT_FINALIZING_MIGRATION = '20260821550000_project_submission_f
 export const PROJECT_PUBLICATION_MIGRATION = '20260821600000_project_publication_expand';
 export const PHASE1_TARGET_MIGRATION = '20260821700000_canonical_object_relocation_expand';
 export const PROJECT_VIDEO_ORDER_MIGRATION = '20260821800000_project_video_order_expand';
-export const PHASE1_MIGRATION_CEILING = PROJECT_VIDEO_ORDER_MIGRATION;
+export const PROJECT_MATERIAL_KIND_MIGRATION = '20260821900000_project_material_kind_expand';
+export const PROJECT_MATERIAL_CONSTRAINTS_MIGRATION = '20260821910000_project_material_constraints_expand';
+export const PHASE1_MIGRATION_CEILING = PROJECT_MATERIAL_CONSTRAINTS_MIGRATION;
 export const REQUIRED_EXPAND_MIGRATIONS = [
 	CANONICAL_EXPAND_MIGRATION,
 	PROJECT_DRAFT_MIGRATION,
@@ -30,6 +32,8 @@ export const REQUIRED_EXPAND_MIGRATIONS = [
 	PROJECT_PUBLICATION_MIGRATION,
 	PHASE1_TARGET_MIGRATION,
 	PROJECT_VIDEO_ORDER_MIGRATION,
+	PROJECT_MATERIAL_KIND_MIGRATION,
+	PROJECT_MATERIAL_CONSTRAINTS_MIGRATION,
 ] as const;
 // Phase 1 deliberately knows the Phase-2 record name only to fail closed if a
 // contract database is paired with this expand-compatible runtime. The

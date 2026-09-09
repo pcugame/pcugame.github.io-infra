@@ -282,7 +282,7 @@ describe('conservative orphan reconciliation', () => {
 				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
 				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
 			},
-			$queryRaw: vi.fn(),
+			$queryRaw: vi.fn().mockResolvedValue([]),
 		};
 		const storage = {
 			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
@@ -335,7 +335,7 @@ describe('conservative orphan reconciliation', () => {
 				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
 				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
 			},
-			$queryRaw: vi.fn(),
+			$queryRaw: vi.fn().mockResolvedValue([]),
 		};
 		const storage = {
 			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
@@ -388,7 +388,7 @@ describe('conservative orphan reconciliation', () => {
 				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
 				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
 			},
-			$queryRaw: vi.fn(),
+			$queryRaw: vi.fn().mockResolvedValue([]),
 		};
 		const storage = {
 			listObjects: vi.fn(async (bucket: string) => bucket === 'public' ? [
@@ -459,7 +459,7 @@ describe('conservative orphan reconciliation', () => {
 				updateMany: vi.fn().mockResolvedValue({ count: 0 }),
 				findUniqueOrThrow: vi.fn().mockResolvedValue({}),
 			},
-			$queryRaw: vi.fn().mockResolvedValue([{ id: 1 }]),
+			$queryRaw: vi.fn().mockResolvedValueOnce([]).mockResolvedValue([{ id: 1 }]),
 		};
 		const storage = {
 			head: vi.fn(async (_bucket: string, key: string) => ({
@@ -496,7 +496,7 @@ describe('conservative orphan reconciliation', () => {
 		expect(storage.delete).not.toHaveBeenCalled();
 		expect(storage.head).toHaveBeenCalledTimes(6);
 		expect(orphanUpsert).not.toHaveBeenCalled();
-		expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+		expect(prisma.$queryRaw).toHaveBeenCalledTimes(3);
 		expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('skipped=live-reference-detected'));
 		expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('skipped=recent'));
 		expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('skipped=unknown-age'));
@@ -517,7 +517,7 @@ describe('conservative orphan reconciliation', () => {
 				}),
 				findUniqueOrThrow: vi.fn(),
 			},
-			$queryRaw: vi.fn(),
+			$queryRaw: vi.fn().mockResolvedValue([]),
 		};
 		const storage = {
 			head: vi.fn().mockResolvedValue({

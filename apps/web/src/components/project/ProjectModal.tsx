@@ -7,6 +7,7 @@ import { LoadingSpinner, ResponsiveImage } from '../common';
 import { ProjectPublicMeta } from './ProjectPublicMeta';
 import { ProjectVideo } from './ProjectVideo';
 import { ProjectActions } from './ProjectActions';
+import { ProjectAttachments } from './ProjectAttachments';
 import { getVideoLabel } from '../../lib/video-label';
 
 interface Props {
@@ -316,6 +317,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								webglUrl={project.webglUrl}
 								className="modal-download"
 							/>
+							<ProjectAttachments attachments={project.attachments} className="modal-attachments" />
 						</div>
 					</>
 				)}

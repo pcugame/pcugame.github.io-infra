@@ -46,6 +46,7 @@ import {
 	PublicYearListResponseSchema,
 	PublicYearProjectsResponseSchema,
 	ProjectAssetUploadResponseSchema,
+	PublicUploadConfigSchema,
 	ResponsiveImageSchema,
 	SiteSettingsDataSchema,
 	SubmitProjectResponseSchema,
@@ -160,7 +161,7 @@ describe('response runtime schemas', () => {
 			sizeBytes: 1,
 		})).toMatchObject({ status: 'COMPLETED' });
 
-		expect(PublicProjectDetailResponseSchema.parse({
+		const legacyProject = PublicProjectDetailResponseSchema.parse({
 			id: 1,
 			year: 2026,
 			slug: 'legacy-link',
@@ -173,7 +174,15 @@ describe('response runtime schemas', () => {
 			members: [],
 			images: [],
 			status: 'PUBLISHED',
-		}).githubUrl).toBe('github.com/legacy/project');
+		});
+		expect(legacyProject.githubUrl).toBe('github.com/legacy/project');
+		expect(legacyProject.attachments).toEqual([]);
+		expect(PublicProjectDetailResponseSchema.parse({
+			...legacyProject,
+			attachments: [{ assetId: 12, kind: 'DOCUMENT', originalName: 'guide.pdf', mimeType: 'application/pdf', sizeBytes: 1024, downloadUrl: 'https://api.example.test/api/assets/12/download' }],
+		}).attachments).toHaveLength(1);
+		expect(PublicUploadConfigSchema.parse({ materialMaxCount: 5, materialMaxBytes: 52_428_800 }))
+			.toMatchObject({ materialMaxCount: 5 });
 
 		expect(ResponsiveImageSchema.parse({
 			original: { url: 'https://api.example.test/api/public/images/legacy.webp' },

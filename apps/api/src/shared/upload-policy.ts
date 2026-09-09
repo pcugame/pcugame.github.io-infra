@@ -79,11 +79,13 @@ export function bucketForAssetKind(
 	kind: AssetKind,
 	buckets: { publicBucket: string; protectedBucket: string },
 ): string {
-	return kind === 'GAME' || kind === 'VIDEO' ? buckets.protectedBucket : buckets.publicBucket;
+	return kind === 'GAME' || kind === 'VIDEO' || kind === 'DOCUMENT' || kind === 'ATTACHMENT' ? buckets.protectedBucket : buckets.publicBucket;
 }
 
 export function kindLimit(limits: UploadLimits, kind: AssetKind): number {
 	switch (kind) {
+		case 'DOCUMENT':
+		case 'ATTACHMENT': return 50 * 1024 * 1024;
 		case 'GAME': return limits.gameMaxBytes;
 		case 'VIDEO': return limits.videoMaxBytes;
 		case 'POSTER':
@@ -95,6 +97,10 @@ export function kindLimit(limits: UploadLimits, kind: AssetKind): number {
 
 const FIELDNAME_MAP: Record<string, AssetKind> = {
 	poster: 'POSTER',
+	'documents[]': 'DOCUMENT',
+	'attachments[]': 'ATTACHMENT',
+	documents: 'DOCUMENT',
+	attachments: 'ATTACHMENT',
 	'images[]': 'IMAGE',
 	gameFile: 'GAME',
 	videoFile: 'VIDEO',

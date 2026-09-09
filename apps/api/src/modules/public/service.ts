@@ -60,6 +60,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 		id: number;
 		videoSortOrder?: number | null;
 		createdAt?: Date;
+		originalName?: string;
 		kind: AssetKind;
 		isPublic: boolean;
 		storageKey: string | null;
@@ -336,6 +337,12 @@ export async function getProjectDetail(
 		isIncomplete: isIncomplete || !validKinds.has('GAME'),
 		video,
 		videos,
+		attachments: project.assets.flatMap((asset) => {
+			if (asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT') return [];
+			const original = asset.representations?.find((rep) => rep.role === 'ORIGINAL' && rep.state === 'READY');
+			return original ? [{ assetId: asset.id, kind: asset.kind, originalName: asset.originalName ?? `material-${asset.id}`, mimeType: original.mimeType ?? 'application/octet-stream', sizeBytes: Number(original.sizeBytes ?? 0), downloadUrl: protectedAssetUrl(deps, asset.id, 'original') }] : [];
+		}),
+
 		members: project.members.map((m) => ({
 			id: m.id,
 			name: m.name,

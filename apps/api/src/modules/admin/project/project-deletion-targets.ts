@@ -15,6 +15,7 @@ export interface ProjectDeletionAsset {
 }
 
 export interface ProjectDeletionUpload {
+	bucket?: string;
 	uploadKind: string;
 	s3Key: string | null;
 }
@@ -91,7 +92,7 @@ export function projectActiveUploadDeletionTargets(
 			);
 		}
 		return [{
-			bucket: config.protectedBucket,
+			bucket: upload.bucket ?? config.protectedBucket,
 			storageKey: upload.s3Key,
 			reason: `${config.reason}-active-upload`,
 		}];

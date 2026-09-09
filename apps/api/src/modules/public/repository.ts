@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient, ProjectStatus } from '../../generated/prisma/client.js';
+import { Prisma, type PrismaClient, type ProjectStatus } from '../../generated/prisma/client.js';
 import {
 	IMAGE_RENDITION_PROFILES,
 	parseImageRenditionStorageKey,
@@ -53,6 +53,27 @@ export function createPublicRepository(prisma: PrismaClient) {
 		});
 		if (exhibition?.posterStorageKey !== storageKey) return null;
 		return { owner: 'exhibition' as const, image: exhibition };
+	}
+
+	/** Compatibility is limited to verified historical PUBLIC originals of corrected videos. */
+	async function findCorrectedVideoOriginal(storageKey: string) {
+		const rows = await prisma.$queryRaw<Array<{ bucket: string; objectKey: string }>>(Prisma.sql`
+			SELECT relocation.source_bucket AS "bucket", relocation.source_object_key AS "objectKey"
+			FROM canonical_object_relocations relocation
+			JOIN storage_buckets source ON source.bucket = relocation.source_bucket AND source.visibility = 'PUBLIC'
+			JOIN asset_representations representation ON representation.bucket = relocation.destination_bucket
+				AND representation.object_key = relocation.destination_object_key
+				AND representation.role = 'ORIGINAL' AND representation.state = 'READY'
+				AND representation.checksum_algorithm = 'SHA256' AND representation.checksum = relocation.checksum_sha256
+				AND representation.size_bytes = relocation.size_bytes
+			JOIN assets asset ON asset.id = representation.asset_id AND asset.id::text = relocation.work_ref
+				AND asset.kind = 'VIDEO' AND asset.status = 'READY'
+			JOIN projects project ON project.id = asset.project_id AND project.status IN ('PUBLISHED', 'ARCHIVED')
+			WHERE relocation.source_object_key = ${storageKey} AND relocation.state = 'COMMITTED'
+				AND relocation.work_kind = 'asset' AND relocation.role = 'ORIGINAL'
+				AND relocation.checksum_sha256 IS NOT NULL AND relocation.committed_at IS NOT NULL
+		`);
+		return rows.length === 1 ? { ...rows[0]!, usedLegacy: true } : null;
 	}
 
 	return {
@@ -134,6 +155,8 @@ export function createPublicRepository(prisma: PrismaClient) {
 
 		/** Resolve a Phase 1 image bridge without reading object bytes. */
 		async resolvePublicImageBridge(storageKey: string) {
+			const corrected = await findCorrectedVideoOriginal(storageKey);
+			if (corrected) return corrected;
 			const canonical = await prisma.assetRepresentation.findFirst({
 				where: {
 					objectKey: storageKey,

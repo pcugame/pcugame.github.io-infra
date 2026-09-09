@@ -26,6 +26,18 @@ afterEach(() => {
 });
 
 describe('DirectVideoUploadWidget', () => {
+	it('allows arbitrary attachment selection and rejects files over the material byte limit before upload', () => {
+		const { container } = render(<QueryClientProvider client={new QueryClient()}>
+			<DirectVideoUploadWidget projectId={77} kind="ATTACHMENT" label="첨부자료" maxFileBytes={3} />
+		</QueryClientProvider>);
+		const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+		expect(input.accept).toBe('');
+		fireEvent.change(input, { target: { files: [new File(['large'], 'data.bin')] } });
+		expect(screen.getByText(/파일당 최대/)).toBeTruthy();
+		expect(uploadDirectAssetFile).not.toHaveBeenCalled();
+	});
+
+
 	it('uploads multiple selected VIDEO files sequentially through canonical direct sessions', async () => {
 		uploadDirectAssetFile
 			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: 'video-1', generation: 1, sizeBytes: 1 })

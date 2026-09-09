@@ -17,6 +17,22 @@ export interface ClientUploadLimits {
 	maxFiles: number;
 }
 
+export interface MaterialUploadLimits {
+	maxCount: number;
+	maxBytes: number;
+}
+
+export function materialUploadLimitsFromConfig(config: {
+	materialMaxCount?: number;
+	materialMaxBytes?: number;
+} | undefined): MaterialUploadLimits | undefined {
+	const maxCount = config?.materialMaxCount;
+	const maxBytes = config?.materialMaxBytes;
+	if (!Number.isSafeInteger(maxCount) || maxCount === undefined || maxCount < 1
+		|| !Number.isSafeInteger(maxBytes) || maxBytes === undefined || maxBytes < 1) return undefined;
+	return { maxCount, maxBytes };
+}
+
 const USER_LIMITS: ClientUploadLimits = {
 	imageMaxMb: 10,
 	imagePdfMaxMb: 100,

@@ -22,7 +22,7 @@ import type { SubmissionFilesState } from './useSubmissionFiles';
 
 interface UseProjectSubmissionFormParams {
 	mode: ProjectSubmissionMode;
-	files: Pick<SubmissionFilesState, 'posterFile' | 'imageFiles' | 'videoFiles' | 'gameFile' | 'webglFile'>;
+	files: Pick<SubmissionFilesState, 'posterFile' | 'imageFiles' | 'videoFiles' | 'documentFiles' | 'attachmentFiles' | 'gameFile' | 'webglFile'>;
 }
 
 export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFormParams) {
@@ -137,7 +137,10 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		// New clients submit metadata first. GAME/WEBGL/VIDEO/POSTER/IMAGE bytes
 		// subsequently use Garage multipart capabilities after project identity
 		// exists; the inline multipart API is a Phase-1 legacy bridge only.
-		const fd = buildSubmitFormData(data, {});
+		const fd = buildSubmitFormData(data, {
+			documents: files.documentFiles,
+			attachments: files.attachmentFiles,
+		});
 		const fingerprint = createIdempotencyFingerprint({
 			mode,
 			payload: data,
@@ -145,6 +148,8 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				poster: files.posterFile ? fingerprintFile(files.posterFile) : null,
 				images: files.imageFiles.map(fingerprintFile),
 				videos: files.videoFiles.map(fingerprintFile),
+				documents: files.documentFiles.map(fingerprintFile),
+				attachments: files.attachmentFiles.map(fingerprintFile),
 				game: files.gameFile ? fingerprintFile(files.gameFile) : null,
 				webgl: files.webglFile ? fingerprintFile(files.webglFile) : null,
 			},

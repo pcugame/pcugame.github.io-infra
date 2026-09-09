@@ -31,6 +31,7 @@ type ProtectedAssetAccessRecord = {
 };
 
 interface ProtectedAssetDownloadRecord extends AssetDownloadIdentity {
+	originalName?: string;
 	projectId: number | null;
 	project: (ProtectedAssetAccessRecord['project'] & {
 		title: string;
@@ -260,7 +261,7 @@ async function grantProtectedAssetDownload(
 				buildGameDownloadFilename(asset.project.title, asset.project.members).filename,
 			),
 		}
-		: { ttlSec: deps.presignTtlSec ?? 60 };
+		: { ttlSec: deps.presignTtlSec ?? 60, ...((asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT') ? { responseContentDisposition: attachmentContentDisposition(asset.originalName ?? `material-${asset.id}`) } : {}) };
 	const url = await deps.presign(
 		representation.bucket,
 		representation.objectKey,

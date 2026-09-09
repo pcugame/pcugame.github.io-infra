@@ -1,5 +1,5 @@
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
-import type { ProjectVideo } from './public.js';
+import type { ProjectAttachment, ProjectVideo } from './public.js';
 import type { ResponsiveImage } from './responsive-image.js';
 
 export type UpdateProjectRequest = {
@@ -104,7 +104,15 @@ export type AdminProjectDetail = {
 		playbackError?: string;
 		originalName: string;
 		size: number;
+	} | {
+		id: number;
+		kind: Extract<AssetKind, 'DOCUMENT' | 'ATTACHMENT'>;
+		originalName: string;
+		mimeType: string;
+		size: number;
+		downloadUrl: string;
 	})>;
+	attachments?: ProjectAttachment[];
 };
 
 export type SubmitProjectPayload = {

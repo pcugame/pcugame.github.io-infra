@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, RefObject } from 'react';
 
-import type { ClientUploadLimits } from '../../lib/upload-limits';
+import type { ClientUploadLimits, MaterialUploadLimits } from '../../lib/upload-limits';
 import {
 	findOversizedAssetFile,
 	formatFileSizeMb,
@@ -11,6 +11,7 @@ import {
 
 interface UseSubmissionFilesParams {
 	limits: ClientUploadLimits;
+	materialLimits?: MaterialUploadLimits;
 }
 
 export interface SubmissionFilesState {
@@ -19,6 +20,8 @@ export interface SubmissionFilesState {
 	gameFile: File | null;
 	webglFile: File | null;
 	videoFiles: File[];
+	documentFiles: File[];
+	attachmentFiles: File[];
 	posterPreview: string | null;
 	fileSizeError: string | null;
 	posterInputRef: RefObject<HTMLInputElement | null>;
@@ -26,27 +29,35 @@ export interface SubmissionFilesState {
 	gameInputRef: RefObject<HTMLInputElement | null>;
 	webglInputRef: RefObject<HTMLInputElement | null>;
 	videoInputRef: RefObject<HTMLInputElement | null>;
+	documentsInputRef: RefObject<HTMLInputElement | null>;
+	attachmentsInputRef: RefObject<HTMLInputElement | null>;
 	clearPoster: () => void;
 	clearImages: () => void;
 	clearGameFile: () => void;
 	clearWebglFile: () => void;
 	clearVideo: () => void;
+	clearDocuments: () => void;
+	clearAttachments: () => void;
 	handlePosterChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleImagesChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleGameChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleWebglChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleVideoChange: (e: ChangeEvent<HTMLInputElement>) => void;
+	handleDocumentsChange: (e: ChangeEvent<HTMLInputElement>) => void;
+	handleAttachmentsChange: (e: ChangeEvent<HTMLInputElement>) => void;
 }
 
 const mb = 1024 * 1024;
 const MAX_PROJECT_VIDEOS = 5;
 
-export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): SubmissionFilesState {
+export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFilesParams): SubmissionFilesState {
 	const [posterFile, setPosterFile] = useState<File | null>(null);
 	const [imageFiles, setImageFiles] = useState<File[]>([]);
 	const [gameFile, setGameFile] = useState<File | null>(null);
 	const [webglFile, setWebglFile] = useState<File | null>(null);
 	const [videoFiles, setVideoFiles] = useState<File[]>([]);
+	const [documentFiles, setDocumentFiles] = useState<File[]>([]);
+	const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
 	const [posterPreview, setPosterPreview] = useState<string | null>(null);
 	const [fileSizeError, setFileSizeError] = useState<string | null>(null);
 	const posterPreviewRef = useRef<string | null>(null);
@@ -55,6 +66,8 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 	const gameInputRef = useRef<HTMLInputElement>(null);
 	const webglInputRef = useRef<HTMLInputElement>(null);
 	const videoInputRef = useRef<HTMLInputElement>(null);
+	const documentsInputRef = useRef<HTMLInputElement>(null);
+	const attachmentsInputRef = useRef<HTMLInputElement>(null);
 
 	const revokePosterPreview = () => {
 		if (posterPreviewRef.current) {
@@ -88,6 +101,14 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 	const clearVideo = () => {
 		setVideoFiles([]);
 		if (videoInputRef.current) videoInputRef.current.value = '';
+	};
+	const clearDocuments = () => {
+		setDocumentFiles([]);
+		if (documentsInputRef.current) documentsInputRef.current.value = '';
+	};
+	const clearAttachments = () => {
+		setAttachmentFiles([]);
+		if (attachmentsInputRef.current) attachmentsInputRef.current.value = '';
 	};
 
 	useEffect(() => revokePosterPreview, []);
@@ -189,6 +210,31 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 		}
 		e.target.value = '';
 	};
+	const addMaterials = (kind: '문서' | '첨부자료', files: File[], target: 'documents' | 'attachments', input: HTMLInputElement) => {
+		if (!materialLimits) {
+			setFileSizeError('현재 서버는 프로젝트 자료 업로드를 지원하지 않습니다.');
+			input.value = '';
+			return;
+		}
+		const current = documentFiles.length + attachmentFiles.length;
+		if (current + files.length > materialLimits.maxCount) {
+			setFileSizeError(`문서와 첨부자료는 합쳐서 프로젝트당 최대 ${materialLimits.maxCount}개까지 선택할 수 있습니다.`);
+			input.value = '';
+			return;
+		}
+		const oversized = files.find((file) => file.size > materialLimits.maxBytes);
+		if (oversized) {
+			setFileSizeError(`${kind} "${oversized.name}": ${formatFileSizeMb(oversized.size)}MB — 파일당 최대 ${formatFileSizeMb(materialLimits.maxBytes)}MB까지 허용됩니다.`);
+			input.value = '';
+			return;
+		}
+		setFileSizeError(null);
+		if (target === 'documents') setDocumentFiles((previous) => [...previous, ...files]);
+		else setAttachmentFiles((previous) => [...previous, ...files]);
+		input.value = '';
+	};
+	const handleDocumentsChange = (e: ChangeEvent<HTMLInputElement>) => addMaterials('문서', Array.from(e.target.files ?? []), 'documents', e.target);
+	const handleAttachmentsChange = (e: ChangeEvent<HTMLInputElement>) => addMaterials('첨부자료', Array.from(e.target.files ?? []), 'attachments', e.target);
 
 	return {
 		posterFile,
@@ -196,6 +242,8 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 		gameFile,
 		webglFile,
 		videoFiles,
+		documentFiles,
+		attachmentFiles,
 		posterPreview,
 		fileSizeError,
 		posterInputRef,
@@ -203,15 +251,21 @@ export function useSubmissionFiles({ limits }: UseSubmissionFilesParams): Submis
 		gameInputRef,
 		webglInputRef,
 		videoInputRef,
+		documentsInputRef,
+		attachmentsInputRef,
 		clearPoster,
 		clearImages,
 		clearGameFile,
 		clearWebglFile,
 		clearVideo,
+		clearDocuments,
+		clearAttachments,
 		handlePosterChange,
 		handleImagesChange,
 		handleGameChange,
 		handleWebglChange,
 		handleVideoChange,
+		handleDocumentsChange,
+		handleAttachmentsChange,
 	};
 }

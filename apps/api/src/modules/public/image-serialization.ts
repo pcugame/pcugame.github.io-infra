@@ -9,6 +9,7 @@ export interface PublicImageRepresentationRecord {
 	role: string;
 	bucket: string;
 	objectKey: string;
+	sizeBytes?: bigint | number;
 	state: string;
 	width?: number | null;
 	height?: number | null;

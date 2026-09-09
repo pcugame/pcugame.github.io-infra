@@ -1,5 +1,6 @@
 import type { AdminProjectDetail, SetProjectVideoOrderRequest } from '@pcu/contracts';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 
 import GameUploadWidget from '../../../components/GameUploadWidget';
 import DirectVideoUploadWidget from '../../../components/DirectVideoUploadWidget';
@@ -8,6 +9,8 @@ import { ResponsiveImage } from '../../../components/common';
 import type { ClientUploadLimits } from '../../../lib/upload-limits';
 import { getApiErrorMessage } from '../../../lib/api';
 import { getAdminVideoLabel } from '../../../lib/video-label';
+import { publicApi } from '../../../lib/api';
+import { materialUploadLimitsFromConfig } from '../../../lib/upload-limits';
 
 type VideoAsset = Extract<AdminProjectDetail['assets'][number], { url: string }> & {
 	kind: 'VIDEO';
@@ -49,6 +52,13 @@ export function AdminProjectAssetManager({
 	onRemoveWebgl,
 	onReorderVideos,
 }: AdminProjectAssetManagerProps) {
+	const { data: uploadConfig } = useQuery({ queryKey: ['public-upload-config'], queryFn: publicApi.getUploadConfig });
+	const materialLimits = materialUploadLimitsFromConfig(uploadConfig);
+	const materialAssetIds = new Set([
+		...(project.attachments ?? []).map((attachment) => attachment.assetId),
+		...project.assets.filter((asset) => asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT').map((asset) => asset.id),
+	]);
+	const availableMaterialSlots = materialLimits ? Math.max(0, materialLimits.maxCount - materialAssetIds.size) : 0;
 	const canonicalVideoIndex = new Map(project.videos.map((video, index) => [video.assetId, index]));
 	const videoAssets = project.assets
 		.filter((asset): asset is VideoAsset => asset.kind === 'VIDEO')
@@ -142,6 +152,9 @@ export function AdminProjectAssetManager({
 												원본 다운로드
 											</a>
 										)}
+										{(asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT') && (
+											<a className="btn btn--secondary btn--small" href={asset.downloadUrl} download>다운로드</a>
+										)}
 										{asset.kind === 'VIDEO' && supportsVideoOrder && (
 											<>
 												<button
@@ -194,6 +207,15 @@ export function AdminProjectAssetManager({
 						) : (
 							<DirectVideoUploadWidget projectId={projectId} maxFiles={5 - videoAssets.length} />
 						)}
+						{materialLimits && availableMaterialSlots > 0 && (
+							<>
+								<DirectVideoUploadWidget projectId={projectId} maxFiles={availableMaterialSlots}
+									maxFileBytes={materialLimits.maxBytes} kind="DOCUMENT" label="문서" accept="text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.ods,.odp,.rtf,.xls,.xlsx,.ppt,.pptx" />
+								<DirectVideoUploadWidget projectId={projectId} maxFiles={availableMaterialSlots}
+									maxFileBytes={materialLimits.maxBytes} kind="ATTACHMENT" label="첨부자료" />
+							</>
+						)}
+						{materialLimits && availableMaterialSlots === 0 && <p className="field-hint">문서와 첨부자료는 프로젝트당 최대 {materialLimits.maxCount}개까지 등록할 수 있습니다.</p>}
 						{addAssetError != null && <p className="field-hint">기존 inline 업로드 오류는 legacy client에만 적용됩니다.</p>}
 					</div>
 

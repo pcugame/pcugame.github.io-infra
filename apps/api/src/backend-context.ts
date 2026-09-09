@@ -783,6 +783,7 @@ export async function createProductionBackendContext(
 				partUrlIssueMax: config.DIRECT_UPLOAD_PART_URL_MAX,
 				maxBytesFor: (actor, kind) => {
 					const limits = resolveRoleUploadLimits(config, actor.role);
+					if (kind === 'DOCUMENT' || kind === 'ATTACHMENT') return 50 * 1024 * 1024;
 					if (kind === 'VIDEO') return limits.videoMaxBytes;
 					if (kind === 'IMAGE') return limits.imageMaxBytes;
 					if (kind === 'POSTER') return limits.posterMaxBytes;

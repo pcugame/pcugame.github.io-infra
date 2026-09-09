@@ -57,6 +57,8 @@ enum StorageVisibility {
 }
 
 enum AssetKind {
+  DOCUMENT
+  ATTACHMENT
   THUMBNAIL
   IMAGE
   POSTER
@@ -119,6 +121,8 @@ enum UploadKind {
 }
 
 enum AssetUploadKind {
+  DOCUMENT
+  ATTACHMENT
   GAME
   WEBGL
   VIDEO

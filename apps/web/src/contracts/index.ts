@@ -18,6 +18,8 @@ export type {
 	LogoutResponse,
 	MeResponse,
 	ProjectVideo,
+	ProjectAttachment,
+	PublicUploadConfig,
 	PublicExhibition,
 	PublicExhibitionProjectsResponse,
 	PublicProjectCard,

@@ -1,3 +1,4 @@
+import { assertMaterialCapacity, isMaterialKind, MATERIAL_MAX_BYTES } from './material-policy.js';
 import { normalizeProjectVideoOrder, countReservedProjectVideos, MAX_PROJECT_VIDEOS } from '../assets/video-order.js';
 import { conflict } from '../../shared/errors.js';
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
@@ -30,6 +31,10 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.projectId} FOR UPDATE`);
 				} else {
 					await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "exhibitions" WHERE "id" = ${input.exhibitionId!} FOR UPDATE`);
+				}
+				if (isMaterialKind(input.kind)) {
+					if (input.projectId === null || input.totalBytes < 1n || input.totalBytes > BigInt(MATERIAL_MAX_BYTES)) throw conflict('Invalid material owner or size');
+					await assertMaterialCapacity(tx, input.projectId);
 				}
 				if (input.kind === 'VIDEO') {
 					if (input.projectId === null) throw conflict('VIDEO uploads must be project-owned');
@@ -250,14 +255,18 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 		},
 		async commitGameReady(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
+				if (input.session.projectId === null) throw new Error('Validation session must be project-owned');
+				await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${input.session.projectId} FOR UPDATE`);
 				const session = await tx.assetUploadSession.findUnique({ where: { id: input.session.id } });
 				const owned = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 					SELECT "id" FROM "asset_upload_sessions"
 					WHERE "id" = ${input.session.id} AND "state" = 'VERIFYING'::"AssetUploadSessionState"
-						AND "validation_lease_token" = ${input.token} AND "validation_lease_until" > clock_timestamp()
+						AND "validation_lease_token" = ${input.token} AND "validation_lease_until" > clock_timestamp() FOR UPDATE
 				`);
 				if (!session || owned.length !== 1) throw new Error('Validation lease lost');
-				const current = await tx.asset.findFirst({ where: { projectId: session.projectId, kind: 'GAME', status: 'READY' }, include: { representations: true } });
+				if (session.kind !== 'GAME' && !isMaterialKind(session.kind)) throw new Error('Invalid original-only upload kind');
+				if (isMaterialKind(session.kind)) await assertMaterialCapacity(tx, input.session.projectId, session.id);
+				const current = session.kind === 'GAME' ? await tx.asset.findFirst({ where: { projectId: session.projectId, kind: session.kind, status: 'READY' }, include: { representations: true } }) : null;
 				if ((session.expectedTargetAssetId === null && current)
 					|| (session.expectedTargetAssetId !== null && (!current || current.id !== session.expectedTargetAssetId || current.updatedAt.getTime() !== session.expectedTargetAssetUpdatedAt?.getTime()))) {
 					throw new Error('GAME_REPLACEMENT_FENCE_LOST');
@@ -268,7 +277,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					}
 					if (session.projectId === null) throw new Error('GAME session must be project-owned');
 					const asset = await createCanonicalAsset(tx, {
-					projectId: session.projectId, kind: 'GAME', originalBucket: session.bucket, storageKey: session.objectKey,
+					projectId: session.projectId, kind: session.kind, originalBucket: session.bucket, storageKey: session.objectKey,
 					originalName: session.originalName, mimeType: input.mimeType, sizeBytes: session.totalBytes, isPublic: false,
 				});
 				const representation = asset.representations.find((item) => item.role === 'ORIGINAL');

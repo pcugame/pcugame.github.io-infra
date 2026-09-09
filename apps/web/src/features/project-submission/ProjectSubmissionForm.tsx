@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import type { SubmitProjectPayloadInput } from '../../contracts/schemas';
 import { getApiErrorMessage } from '../../lib/api';
 import type { ProjectSubmissionMode } from '../../lib/api/project-submit';
-import { getClientUploadLimits } from '../../lib/upload-limits';
+import { getClientUploadLimits, materialUploadLimitsFromConfig } from '../../lib/upload-limits';
+import { publicApi } from '../../lib/api';
 import GameUploadWidget from '../../components/GameUploadWidget';
 import DirectVideoUploadWidget from '../../components/DirectVideoUploadWidget';
 import DirectImageUploadWidget from '../../components/DirectImageUploadWidget';
@@ -24,7 +26,9 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	const { user } = useMe();
 	const isAdminMode = mode === 'admin';
 	const limits = getClientUploadLimits(isAdminMode ? user?.role ?? 'USER' : 'USER');
-	const files = useSubmissionFiles({ limits });
+	const { data: uploadConfig } = useQuery({ queryKey: ['public-upload-config'], queryFn: publicApi.getUploadConfig });
+	const materialLimits = materialUploadLimitsFromConfig(uploadConfig);
+	const files = useSubmissionFiles({ limits, materialLimits });
 	const submission = useProjectSubmissionForm({ mode, files });
 	const {
 		copy,
@@ -146,6 +150,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 						gameUploadHint={copy.gameUploadHint}
 						webglUploadHint={copy.webglUploadHint}
 						limits={limits}
+						materialLimits={materialLimits}
 					/>
 
 					{submitMutation.error && (

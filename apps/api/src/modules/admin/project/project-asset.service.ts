@@ -188,7 +188,7 @@ export async function addAssetToProject(
 				playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
 				playbackStatus: savedFile.playbackStatus,
 				playbackError: savedFile.playbackError,
-				isPublic: savedFile.kind !== 'VIDEO',
+				isPublic: savedFile.kind !== 'VIDEO' && savedFile.kind !== 'DOCUMENT' && savedFile.kind !== 'ATTACHMENT',
 				uploadIntentIds: savedFile.uploadIntentIds,
 				...(operation ? {
 					idempotency: {

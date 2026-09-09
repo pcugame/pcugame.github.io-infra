@@ -56,6 +56,15 @@ describe('buildSubmitFormData', () => {
 		expect(fd.getAll('videoFile')).toHaveLength(2);
 	});
 
+	it('appends documents[] and attachments[] for the legacy Phase 1 submission endpoint', () => {
+		const fd = buildSubmitFormData(fakePayload(), {
+			documents: [fakeFile('guide.pdf')],
+			attachments: [fakeFile('notes.txt'), fakeFile('extra.bin')],
+		});
+		expect(fd.getAll('documents[]')).toHaveLength(1);
+		expect(fd.getAll('attachments[]')).toHaveLength(2);
+	});
+
 	it('contains only payload when no files provided', () => {
 		const fd = buildSubmitFormData(fakePayload(), {});
 		const entries = [...fd.entries()];

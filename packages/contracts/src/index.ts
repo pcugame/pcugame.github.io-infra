@@ -39,6 +39,8 @@ export type {
 	PublicProjectCard,
 	PublicProjectDetailResponse,
 	PublicProjectImage,
+	ProjectAttachment,
+	PublicUploadConfig,
 	PublicProjectMember,
 	PublicYearItem,
 	PublicYearListResponse,

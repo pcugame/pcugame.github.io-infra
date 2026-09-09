@@ -1,7 +1,7 @@
 export type UploadKind = 'GAME' | 'WEBGL';
 
 /** New direct control-plane session kinds; legacy chunk sessions remain GAME/WEBGL only. */
-export type DirectAssetUploadKind = UploadKind | 'VIDEO' | 'IMAGE' | 'POSTER';
+export type DirectAssetUploadKind = UploadKind | 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT';
 
 /** Canonical owner identity for a direct multipart session. */
 export type DirectAssetUploadOwner =

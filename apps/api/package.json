@@ -12,8 +12,8 @@
     "worker:game-validation": "tsx src/game-validation-worker.ts",
     "worker:webgl": "tsx src/webgl-worker.ts",
     "worker:video": "tsx src/video-worker.ts",
-		"worker:image": "tsx src/image-worker.ts",
-		"worker:export": "tsx src/export-worker.ts",
+    "worker:image": "tsx src/image-worker.ts",
+    "worker:export": "tsx src/export-worker.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
@@ -34,7 +34,9 @@
     "architecture": "npm run architecture:guard && npm run architecture:self-test && depcruise --config .dependency-cruiser.cjs src scripts",
     "pretest": "npm --prefix ../.. run build -w @pcu/contracts",
     "test": "vitest run && npm run test:scripts",
-    "test:scripts": "vitest run --config scripts/vitest.config.ts"
+    "test:scripts": "vitest run --config scripts/vitest.config.ts",
+    "correction:canonical-assets": "tsx scripts/correct-canonical-assets.ts",
+    "release:correction": "node dist-release/scripts/correct-canonical-assets.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1024.0",
@@ -57,7 +59,8 @@
     "pino-pretty": "^13.0.0",
     "sharp": "0.35.3",
     "yauzl": "^3.4.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "file-type": "22.0.2"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -22,6 +22,7 @@ type SerializableRepresentation = {
 	state?: string;
 	error?: string | null;
 	objectKey: string;
+	sizeBytes?: bigint | number;
 	mimeType: string;
 	width?: number | null;
 	height?: number | null;
@@ -255,6 +256,11 @@ export function createProjectSerializer(
 				// source asset as a generic downloadable asset would create a second,
 				// independently deletable identity for the same deployment.
 				if (a.kind === 'WEBGL') return [];
+				if (a.kind === 'DOCUMENT' || a.kind === 'ATTACHMENT') {
+					const original = a.representations?.find((rep) => rep.role === 'ORIGINAL' && rep.state === 'READY');
+					if (!original) return [];
+					return [{ id: a.id, kind: a.kind, originalName: a.originalName, mimeType: original.mimeType ?? a.mimeType, size: Number(original.sizeBytes ?? a.sizeBytes), downloadUrl: canonicalProtectedAssetUrl(base, a.id, 'original') }];
+				}
 				return [{
 					id: a.id,
 					kind: a.kind,

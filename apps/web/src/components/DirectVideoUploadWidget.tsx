@@ -10,6 +10,7 @@ import {
 	type GameUploadProgress,
 } from '../lib/api/game-upload';
 import { queryKeys } from '../lib/query';
+import type { DirectAssetUploadKind } from '../contracts';
 
 type Phase = 'idle' | 'uploading' | 'verifying' | 'ready' | 'error';
 
@@ -31,6 +32,10 @@ interface Props {
 	onSkip?: () => void;
 	/** Available VIDEO slots for this upload operation (project maximum is five). */
 	maxFiles?: number;
+	maxFileBytes?: number;
+	kind?: Extract<DirectAssetUploadKind, 'VIDEO' | 'DOCUMENT' | 'ATTACHMENT'>;
+	label?: string;
+	accept?: string;
 }
 
 /**
@@ -44,6 +49,10 @@ export default function DirectVideoUploadWidget({
 	onComplete,
 	onSkip,
 	maxFiles = 5,
+	maxFileBytes,
+	kind = 'VIDEO',
+	label = '동영상',
+	accept,
 }: Props) {
 	const qc = useQueryClient();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
@@ -67,7 +76,7 @@ export default function DirectVideoUploadWidget({
 	const cancelIntentRunTokenRef = useRef<number | null>(null);
 	const lateCancelSessionIdRef = useRef<string | null>(null);
 	const cancelLateCreatedSessionRef = useRef<(saved: SavedVideoSession, sourceToken: number) => void>(() => undefined);
-	const storageKey = `pcu.direct-video-upload:${projectId}`;
+	const storageKey = `pcu.direct-${kind.toLowerCase()}-upload:${projectId}`;
 
 	const updateCompleted = useCallback((next: number) => {
 		completedRef.current = next;
@@ -127,12 +136,12 @@ export default function DirectVideoUploadWidget({
 			if (!raw) return;
 			try {
 				const saved = JSON.parse(raw) as SavedVideoSession;
-				if (saved.session.kind !== 'VIDEO') throw new Error('kind');
+				if (saved.session.kind !== kind) throw new Error('kind');
 				const completedBefore = saved.completed ?? 0;
 				updateCompleted(completedBefore);
 				remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 				const status = await getDirectAssetUploadStatus(saved.session.sessionId, controller.signal);
-				if (disposed || controller.signal.aborted || status.kind !== 'VIDEO') return;
+				if (disposed || controller.signal.aborted || status.kind !== kind) return;
 				if (status.state === 'VERIFYING' || status.state === 'COMPLETING') {
 					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 					setPhase('verifying');
@@ -182,7 +191,7 @@ export default function DirectVideoUploadWidget({
 			controller.abort();
 			if (restoreControllerRef.current === controller) restoreControllerRef.current = null;
 		};
-	}, [forget, initialFiles, onComplete, projectId, qc, remember, storageKey, updateCompleted]);
+	}, [forget, initialFiles, kind, onComplete, projectId, qc, remember, storageKey, updateCompleted]);
 
 	const uploadQueue = useCallback(async (
 		chosen: readonly File[],
@@ -203,7 +212,7 @@ export default function DirectVideoUploadWidget({
 					&& resume.originalName === file.name && resume.totalBytes === file.size
 					? resume.session
 					: undefined;
-				const completion = await uploadDirectAssetFile(projectId, file, 'VIDEO', (next) => {
+				const completion = await uploadDirectAssetFile(projectId, file, kind, (next) => {
 					if (!isCurrentRun(token)) return;
 					setProgress(next);
 					if (next.percent >= 100) setPhase('verifying');
@@ -246,7 +255,7 @@ export default function DirectVideoUploadWidget({
 				submitting.current = false;
 			}
 		}
-	}, [beginRun, forget, isCurrentRun, onComplete, projectId, qc, remember, updateCompleted]);
+	}, [beginRun, forget, isCurrentRun, kind, onComplete, projectId, qc, remember, updateCompleted]);
 
 	const matchesSavedFile = useCallback((chosen: readonly File[], saved: SavedVideoSession) => {
 		const index = saved.completed ?? 0;
@@ -475,23 +484,30 @@ export default function DirectVideoUploadWidget({
 
 	return (
 		<div className="game-upload">
-			<h3 className="game-upload__title">동영상 업로드</h3>
+			<h3 className="game-upload__title">{label} 업로드</h3>
 			{resumable && phase === 'idle' && (
-				<p className="field-hint">중단된 동영상 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>
+				<p className="field-hint">중단된 {label} 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>
 			)}
 			{!autoStart && (phase === 'idle' || phase === 'error') && (
 				<input
 					type="file"
 					multiple
-					accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
+					accept={accept ?? (kind === 'VIDEO' ? 'video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv' : undefined)}
 					onChange={(event) => {
 						const selected = Array.from(event.target.files ?? []);
+
+						if (maxFileBytes !== undefined && selected.some((file) => file.size > maxFileBytes || file.size === 0)) {
+							setFiles([]);
+							setError(`빈 파일은 업로드할 수 없으며 파일당 최대 ${maxFileBytes / 1024 / 1024} MiB까지 허용됩니다.`);
+							event.target.value = '';
+							return;
+						}
 						const saved = resumableRef.current;
 						const pendingCount = Math.max(0, selected.length - (saved?.completed ?? 0));
 						if (pendingCount > maxFiles) {
 							setFiles([]);
 							updateCompleted(0);
-							setError(`동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다. 현재 ${maxFiles}개까지 추가할 수 있습니다.`);
+							setError(kind === 'VIDEO' ? `동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다. 현재 ${maxFiles}개까지 추가할 수 있습니다.` : `${label}은 현재 ${maxFiles}개까지 추가할 수 있습니다.`);
 							event.target.value = '';
 							return;
 						}
@@ -507,19 +523,19 @@ export default function DirectVideoUploadWidget({
 					disabled={maxFiles <= 0}
 				/>
 			)}
-			{files.length > 0 && <p className="file-info">{files.length}개 동영상 선택됨 ({completed}/{files.length} 완료)</p>}
+			{files.length > 0 && <p className="file-info">{files.length}개 {label} 선택됨 ({completed}/{files.length} 완료)</p>}
 			{progress && (
 				<p className="field-hint">
-					{phase === 'verifying' ? '동영상 검증 및 재생본 생성 중…' : `${progress.percent}% 업로드`}
+					{phase === 'verifying' ? `${label} 검증 중…` : `${progress.percent}% 업로드`}
 				</p>
 			)}
 			{error && <p className="field-error">{error}</p>}
 			<div className="game-upload__actions">
-				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : '동영상 업로드 시작'}</button>}
+				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${label} 업로드 시작`}</button>}
 				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}
 				{(phase === 'uploading' || phase === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={pause}>일시 정지</button>}
 				{((phase === 'uploading' || phase === 'verifying') || (resumable && phase !== 'ready')) && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
-				{phase === 'ready' && <span className="game-upload__complete-text">동영상 업로드 완료</span>}
+				{phase === 'ready' && <span className="game-upload__complete-text">{label} 업로드 완료</span>}
 				{onSkip && phase !== 'uploading' && phase !== 'verifying' && phase !== 'ready' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
 			</div>
 		</div>

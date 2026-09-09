@@ -163,7 +163,7 @@ export async function collectObjectReferences(
 		| 'project'
 		| 'gameUploadSession'
 		| 'uploadIntent'
-	>,
+	> & Partial<Pick<PrismaClient, '$queryRaw'>>,
 	buckets: ObjectReferenceBuckets,
 	logger: ObjectReferenceLogger,
 ): Promise<ObjectReferenceInventory> {
@@ -233,6 +233,17 @@ export async function collectObjectReferences(
 
 	const references: ObjectReference[] = [];
 	const unsafeBuckets = new Set<string>();
+	// Phase 1 retains historical public URLs through observation. The contract
+	// explicitly schedules the proven relocation sources and drops this ledger.
+	// Intents protect active materialization; the ledger bridges their COMMITTED
+	// transition so a later prefix cleanup cannot delete an old public source.
+	if (client.$queryRaw) {
+		const relocations = await client.$queryRaw<Array<{ id: string; bucket: string; key: string }>>`
+			SELECT id, source_bucket AS bucket, source_object_key AS key FROM canonical_object_relocations
+			WHERE state IN ('PREPARED', 'MATERIALIZED', 'COMMITTED')`;
+		for (const relocation of relocations) references.push({ bucket: relocation.bucket, targetKind: 'EXACT', key: relocation.key,
+			source: `canonical-relocation:${relocation.id}:retained-source` });
+	}
 	for (const asset of assets) {
 		for (const representation of asset.representations ?? []) {
 			references.push({

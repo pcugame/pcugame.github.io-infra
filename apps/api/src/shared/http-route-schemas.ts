@@ -162,7 +162,7 @@ const DirectOwnerSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('EXHIBITION'), id: z.number().int().positive() }),
 ]);
 const DirectSessionResponseSchema = z.object({ sessionId: z.string(), owner: DirectOwnerSchema, generation: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string(), sourceIdentityBlockSizeBytes: z.literal(1_048_576) });
-const DirectStatusResponseSchema = z.object({ sessionId: z.string(), projectId: z.number().int().positive().optional(), exhibitionId: z.number().int().positive().optional(), owner: DirectOwnerSchema, kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER']), state: z.string(), generation: z.number().int().positive(), originalName: z.string(), totalBytes: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/), parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string(), sizeBytes: z.number().int().positive() })) });
+const DirectStatusResponseSchema = z.object({ sessionId: z.string(), projectId: z.number().int().positive().optional(), exhibitionId: z.number().int().positive().optional(), owner: DirectOwnerSchema, kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER', 'DOCUMENT', 'ATTACHMENT']), state: z.string(), generation: z.number().int().positive(), originalName: z.string(), totalBytes: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/), parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string(), sizeBytes: z.number().int().positive() })) });
 const DirectPartUrlsResponseSchema = z.object({ generation: z.number().int().positive(), expiresAt: z.string(), parts: z.array(z.object({ partNumber: z.number().int().positive(), url: z.string().url(), requiredHeaders: z.record(z.string(), z.string()) })) });
 const DirectCompletionResponseSchema = z.object({ status: z.enum(['VERIFYING', 'READY']), sessionId: z.string(), generation: z.number().int().positive(), sizeBytes: z.number().int().positive() });
 
@@ -259,6 +259,11 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 			400: z.string(),
 			default: ApiErrorResponseSchema,
 		},
+	}),
+	contract({
+		method: 'GET', url: '/api/public/upload-config', family: 'public', params: EmptyObjectSchema, querystring: EmptyObjectSchema,
+		bodyBoundary: 'none', responseBoundary: 'json',
+		response: jsonResponse(z.object({ materialMaxCount: z.number().int(), materialMaxBytes: z.number().int() })),
 	}),
 	contract({
 		method: 'GET',
@@ -817,6 +822,16 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 	}),
 	contract({
 		method: 'POST', url: '/api/admin/projects/:id/direct-video-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
+	}),
+	contract({
+		method: 'POST', url: '/api/admin/projects/:id/direct-document-upload-sessions', family: 'direct-asset-upload',
+		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
+		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
+	}),
+	contract({
+		method: 'POST', url: '/api/admin/projects/:id/direct-attachment-upload-sessions', family: 'direct-asset-upload',
 		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
 		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
 	}),

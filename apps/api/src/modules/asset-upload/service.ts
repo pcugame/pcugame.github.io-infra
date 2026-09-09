@@ -163,6 +163,13 @@ export function createAssetUploadService(deps: {
 			return createSession('VIDEO', actor, { type: 'PROJECT', id: projectId }, body);
 		},
 
+		async createDocumentSession(actor: { id: number; role: string }, projectId: number, body: { originalName: string; totalBytes: number; declaredMimeType?: string } & DirectUploadSourceIdentity) {
+			return createSession('DOCUMENT', actor, { type: 'PROJECT', id: projectId }, body);
+		},
+		async createAttachmentSession(actor: { id: number; role: string }, projectId: number, body: { originalName: string; totalBytes: number; declaredMimeType?: string } & DirectUploadSourceIdentity) {
+			return createSession('ATTACHMENT', actor, { type: 'PROJECT', id: projectId }, body);
+		},
+
 		async createImageSession(actor: { id: number; role: string }, projectId: number, body: { originalName: string; totalBytes: number; declaredMimeType?: string } & DirectUploadSourceIdentity) {
 			return createSession('IMAGE', actor, { type: 'PROJECT', id: projectId }, body);
 		},

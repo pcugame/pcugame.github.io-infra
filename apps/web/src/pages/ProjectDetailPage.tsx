@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, ResponsiveImage } from '../components/common';
-import { ProjectActions, ProjectPublicMeta, ProjectVideo } from '../components/project';
+import { ProjectActions, ProjectAttachments, ProjectPublicMeta, ProjectVideo } from '../components/project';
 import { getVideoLabel } from '../lib/video-label';
 
 export default function ProjectDetailPage() {
@@ -158,6 +158,7 @@ export default function ProjectDetailPage() {
           />
         </section>
       )}
+      <ProjectAttachments attachments={project.attachments} className="project-detail__attachments" />
     </div>
   );
 }

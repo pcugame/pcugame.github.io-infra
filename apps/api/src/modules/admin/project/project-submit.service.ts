@@ -53,6 +53,7 @@ export async function processFileParts(
 	pipeline: UploadPipelinePort,
 ): Promise<SavedUpload[]> {
 	if (fileParts.filter((part) => part.fieldname === 'videoFile').length > 5) throw badRequest('A project supports at most 5 videos');
+	if (fileParts.filter((part) => ['documents[]', 'attachments[]', 'documents', 'attachments'].includes(part.fieldname)).length > 5) throw badRequest('A project supports at most 5 documents and attachments combined');
 	const savedFiles: SavedUpload[] = [];
 	for (const fp of fileParts) {
 		let kind: AssetKind;
@@ -60,6 +61,8 @@ export async function processFileParts(
 		else if (fp.fieldname === 'images[]') kind = 'IMAGE';
 		else if (fp.fieldname === 'gameFile') kind = 'GAME';
 		else if (fp.fieldname === 'videoFile') kind = 'VIDEO';
+		else if (fp.fieldname === 'documents[]' || fp.fieldname === 'documents') kind = 'DOCUMENT';
+		else if (fp.fieldname === 'attachments[]' || fp.fieldname === 'attachments') kind = 'ATTACHMENT';
 		else continue;
 
 		savedFiles.push(await pipeline.processFile(fp.tmpPath, kind, fp.filename));

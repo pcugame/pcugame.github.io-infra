@@ -20,10 +20,11 @@ export function createNodeProjectUploadProcessing(
 ): ProjectUploadProcessing {
 	const videoOperations = createNodeVideoProcessingOperations(fileSystem);
 	return {
-		validate: (filePath, kind) => validateProjectUploadFile(
+		validate: (filePath, kind, originalName) => validateProjectUploadFile(
 			fileSystem,
 			filePath,
 			kind,
+			originalName,
 		),
 		processImage: (input) => processImage(input, fileSystem),
 		processPdf: (input) => processPdf(input, logger, fileSystem),

@@ -151,6 +151,7 @@ export function createExhibitionRepository(
 		return withExhibitionMutationTransaction(prisma, async (tx) => {
 			const existing = await lockExhibition(tx, id);
 			if (!existing) return null;
+			await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "exhibition_id" = ${id} ORDER BY "id" FOR UPDATE`);
 			const [projects, activeUploads, assets] = await Promise.all([
 				tx.project.findMany({
 					where: { exhibitionId: id },
@@ -174,6 +175,10 @@ export function createExhibitionRepository(
 					include: { representations: true },
 				}),
 			]);
+			const canonicalUploads = await tx.assetUploadSession.findMany({ where: {
+				OR: [{ exhibitionId: id }, { project: { exhibitionId: id } }],
+				state: { in: ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'] },
+			}, select: { id: true, bucket: true, objectKey: true, uploadId: true } });
 			const targets = [
 				...(existing.posterStorageKey ? [{
 					bucket: outbox.publicBucket,
@@ -185,6 +190,7 @@ export function createExhibitionRepository(
 					existing.posterStorageKey,
 					`${outbox.reason}-poster-rendition`,
 				),
+				...canonicalUploads.map((upload) => ({ bucket: upload.bucket, storageKey: upload.objectKey, reason: `${outbox.reason}-active-canonical-upload` })),
 				...projectAssetDeletionTargets(assets, outbox),
 				...projects.flatMap((project) => projectWebglDeletionTargets(
 					project.id,
@@ -207,6 +213,10 @@ export function createExhibitionRepository(
 					reason: `${outbox.reason}-active-multipart`,
 				});
 			}
+			for (const upload of canonicalUploads) {
+				if (upload.uploadId) await queueMultipartAbortTask(tx, { bucket: upload.bucket, storageKey: upload.objectKey, uploadId: upload.uploadId, uploadSessionId: upload.id, reason: `${outbox.reason}-active-canonical-multipart` });
+			}
+			await tx.assetUploadSession.deleteMany({ where: { OR: [{ exhibitionId: id }, { project: { exhibitionId: id } }] } });
 			await tx.exhibition.delete({ where: { id } });
 			return { ...existing, cleanupQueued: targets.length > 0 || activeUploads.length > 0 };
 		}, policy);
