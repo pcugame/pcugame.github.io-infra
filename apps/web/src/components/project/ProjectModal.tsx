@@ -72,7 +72,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 				label: '포스터',
 			});
 		}
-		projectVideos.forEach((video) => {
+		projectVideos.forEach((video, index) => {
 			mediaItems.push({
 				type: 'video',
 				assetId: video.assetId,
@@ -83,7 +83,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 				originalDownloadUrl: video.originalDownloadUrl,
 				playbackStatus: video.playbackStatus,
 				playbackError: video.playbackError,
-				label: getVideoLabel(video),
+				label: getVideoLabel(video, index),
 			});
 		});
 		const galleryImages = project.images.filter((img) => img.kind === 'IMAGE');
@@ -148,7 +148,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								<div className="modal-visual__frame">
 									{current.type === 'video' ? (
 										<ProjectVideo
-											key={current.assetId}
+											key={current.assetId ?? current.url ?? activeIndex}
 											video={{
 												assetId: current.assetId,
 												sortOrder: current.sortOrder,
@@ -202,7 +202,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 									{Array.from({ length: videoCount }, (_, i) => {
 										const video = videoAt(i);
 										return <button
-											key={video?.assetId ?? i}
+											key={video?.assetId ?? video?.url ?? i}
 													className={`modal-video-dot${i === currentVideoOffset ? ' modal-video-dot--active' : ''}`}
 													onClick={() => setActiveIndex(videoStartIndex + i)}
 											aria-label={video?.label ?? '영상'}
@@ -232,7 +232,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 									return (
 										<button
-										key={item.type === 'image' ? `img-${item.id}` : item.type === 'video' ? `video-${item.assetId}` : `${item.type}-${i}`}
+										key={item.type === 'image' ? `img-${item.id}` : item.type === 'video' ? `video-${item.assetId ?? item.url ?? i}` : `${item.type}-${i}`}
 											className={`modal-media-tab ${isActive ? 'modal-media-tab--active' : ''}`}
 											onClick={() => setActiveIndex(i)}
 										>

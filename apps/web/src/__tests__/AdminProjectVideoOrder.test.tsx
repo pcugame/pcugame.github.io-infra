@@ -44,6 +44,18 @@ describe('AdminProjectAssetManager video order', () => {
 		expect(onReorderVideos).toHaveBeenCalledWith({ expectedOrder: [11, 12], order: [12, 11] });
 	});
 
+	it('hides reorder controls when the old API omits video order metadata', () => {
+		const oldProject = { ...project, assets: project.assets.map((asset) => {
+			const copy = { ...asset };
+			if ('videoSortOrder' in copy) delete copy.videoSortOrder;
+			return copy;
+		}) };
+		renderManager(oldProject, vi.fn());
+		expect(screen.queryByRole('button', { name: '메인으로 지정' })).toBeNull();
+		expect(screen.queryByRole('button', { name: '위로' })).toBeNull();
+		expect(screen.getAllByRole('button', { name: '삭제' })).toHaveLength(2);
+	});
+
 	it('uses server order for NULL videos and allows first NULL to be designated main', () => {
 		const onReorderVideos = vi.fn();
 		const legacy = {

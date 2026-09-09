@@ -57,6 +57,7 @@ export function AdminProjectAssetManager({
 	let nextVideoIndex = 0;
 	const orderedAssets = project.assets.map((asset) => asset.kind === 'VIDEO' ? videoAssets[nextVideoIndex++]! : asset);
 	const videoAssetIds = videoAssets.map((asset) => asset.id);
+	const supportsVideoOrder = videoAssets.every((asset) => Object.hasOwn(asset, 'videoSortOrder'));
 	const moveVideo = (assetId: number, targetIndex: number) => {
 		const currentIndex = videoAssetIds.indexOf(assetId);
 		if (currentIndex < 0 || targetIndex < 0 || targetIndex >= videoAssetIds.length) return;
@@ -141,7 +142,7 @@ export function AdminProjectAssetManager({
 												원본 다운로드
 											</a>
 										)}
-										{asset.kind === 'VIDEO' && (
+										{asset.kind === 'VIDEO' && supportsVideoOrder && (
 											<>
 												<button
 													className="btn btn--secondary btn--small"
