@@ -138,3 +138,29 @@ test('allows unrelated repository changes', async () => {
 		assert.match(result.stdout, /new-migrations=0 review-signals=0/);
 	});
 });
+
+test('governs alternate contract SQL history with the same immutability policy', async () => {
+  await withFixture(async ({ repository }) => {
+    const alternate = 'apps/api/prisma/contract-migration-paths/20260102000000_alternate/migration.sql';
+    await writeRepositoryFile(repository, alternate, 'CREATE TABLE "receipt" ("id" INTEGER PRIMARY KEY);\n');
+    commitAll(repository, 'publish reviewed alternative');
+    const base = git(repository, 'rev-parse', 'HEAD');
+    await writeRepositoryFile(repository, alternate, 'DROP TABLE "receipt";\n');
+    commitAll(repository, 'mutate alternative');
+    const result = check(repository, base);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /changes migration history/);
+  });
+});
+
+
+test('allows a copied alternative only when its published source stays byte-identical', async () => {
+  await withFixture(async ({ repository, base }) => {
+    await writeRepositoryFile(repository, 'apps/api/prisma/contract-migration-paths/20260102000000_alternative/migration.sql', 'CREATE TABLE "example" ("id" INTEGER PRIMARY KEY);\n');
+    commitAll(repository, 'copy into explicitly reviewed path');
+    assert.equal(check(repository, base).status, 0);
+    await writeRepositoryFile(repository, `${migrationRoot}/20260101000000_initial/migration.sql`, 'CREATE TABLE "changed" ("id" INTEGER PRIMARY KEY);\n');
+    commitAll(repository, 'change original alongside alternative');
+    assert.equal(check(repository, base).status, 1);
+  });
+});

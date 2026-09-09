@@ -4,14 +4,14 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const workflow = readFileSync(new URL('../.github/workflows/release-api-cutover.yml', import.meta.url), 'utf8');
-const snapshot = workflow.slice(workflow.indexOf('\n  snapshot:'), workflow.indexOf('\n  cutover:'));
-const authorization = workflow.slice(workflow.indexOf('          if [ "${RELEASE_PHASE}" = snapshot ]; then'), workflow.indexOf('          elif [ "${RELEASE_PHASE}" = phase1 ]; then'));
+const snapshot = workflow.slice(workflow.indexOf('\n  snapshot:'), workflow.indexOf('\n  preflight:'));
+const authorization = workflow.slice(workflow.indexOf('          if [[ "${RELEASE_PHASE}" = snapshot || "${RELEASE_PHASE}" = preflight ]]; then'), workflow.indexOf('          elif [ "${RELEASE_PHASE}" = phase1 ]; then'));
 
 test('snapshot accepts no deployment or false observation inputs', () => {
   const script = `${authorization}\nfi`;
-  const base = { ...process.env, RELEASE_PHASE: 'snapshot', PHASE1_IMAGE: '', PHASE1_SOURCE_SHA: '', FINAL_IMAGE: '', OBSERVATION_STARTED_AT: '', OBSERVATION_ATTESTATION: '' };
+  const base = { ...process.env, RELEASE_PHASE: 'snapshot', PHASE1_IMAGE: '', PHASE1_SOURCE_SHA: '', FINAL_IMAGE: '', OBSERVATION_STARTED_AT: '', OBSERVATION_ATTESTATION: '', OBSERVATION_EXCEPTION_ID: '' };
   assert.equal(spawnSync('bash', ['-eu', '-c', script], { env: base }).status, 0);
-  for (const key of ['PHASE1_IMAGE', 'PHASE1_SOURCE_SHA', 'FINAL_IMAGE', 'OBSERVATION_STARTED_AT', 'OBSERVATION_ATTESTATION']) {
+  for (const key of ['PHASE1_IMAGE', 'PHASE1_SOURCE_SHA', 'FINAL_IMAGE', 'OBSERVATION_STARTED_AT', 'OBSERVATION_ATTESTATION', 'OBSERVATION_EXCEPTION_ID']) {
     assert.notEqual(spawnSync('bash', ['-eu', '-c', script], { env: { ...base, [key]: 'unexpected' } }).status, 0, key);
   }
 });
@@ -19,7 +19,7 @@ test('snapshot accepts no deployment or false observation inputs', () => {
 test('snapshot and cutover jobs are mutually exclusive under the existing production lock', () => {
   assert.match(workflow, /group: production-object-cutover/);
   assert.match(snapshot, /if: \$\{\{ inputs.phase == 'snapshot' \}\}/);
-  assert.match(workflow.slice(workflow.indexOf('\n  cutover:')), /if: \$\{\{ inputs.phase != 'snapshot' \}\}/);
+  assert.match(workflow.slice(workflow.indexOf('\n  cutover:')), /if: \$\{\{ inputs.phase != 'snapshot' && inputs.phase != 'preflight' \}\}/);
   assert.match(snapshot, /needs: authorize/);
   assert.match(snapshot, /environment: production/);
   assert.match(snapshot, /verify-github-release-boundaries.mjs control/);

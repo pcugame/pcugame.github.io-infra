@@ -179,6 +179,7 @@ export type ContractPreflightOptions = {
 	protectedBucket?: string;
 	publicBucket?: string;
 	observationWindowMs?: number;
+	observationExceptionId?: string;
 };
 
 export type ContractPreflightReport = {
@@ -202,6 +203,7 @@ export type ContractPreflightReport = {
 	blockers: Record<ContractPreflightBlocker, { count: number; samples: string[] }>;
 	clean: boolean;
 	metricObservationReset: boolean;
+	observationExceptionId?: string;
 };
 
 export const CONTRACT_PREFLIGHT_RESET_CONFIRMATION = 'RESET_LEGACY_BRIDGE_OBSERVATION';
@@ -545,11 +547,11 @@ export async function runContractPreflight(input: {
 	const unsafeMetrics: string[] = [];
 	for (const name of LEGACY_BRIDGE_METRIC_NAMES) {
 		const rows = snapshot.metrics.filter((metric) => metric.name === name);
-		if (!businessData) continue;
+		if (!businessData && !options.observationExceptionId) continue;
 		if (rows.length === 0) unsafeMetrics.push(`metric:${name}:missing`);
 		else for (const metric of rows) {
 			if (metric.value !== 0n) unsafeMetrics.push(`metric:${metric.name}:${metric.scope}=${metric.value}`);
-			else if (!metric.lastObservedAt || metric.lastObservedAt.getTime() > observationCutoff) unsafeMetrics.push(`metric:${metric.name}:${metric.scope}:observation-window`);
+			else if (!metric.lastObservedAt || !Number.isFinite(metric.lastObservedAt.getTime()) || metric.lastObservedAt.getTime() > observationCutoff) unsafeMetrics.push(`metric:${metric.name}:${metric.scope}:observation-window`);
 		}
 	}
 	const bridgeMetrics = snapshot.metrics.filter((metric) => LEGACY_BRIDGE_METRIC_NAMES.includes(metric.name as typeof LEGACY_BRIDGE_METRIC_NAMES[number]) && metric.value > 0n);
@@ -848,5 +850,6 @@ export async function runContractPreflight(input: {
 		blockers,
 		clean: blockerCount === 0,
 		metricObservationReset: !!options.resetObservation,
+		...(options.observationExceptionId ? { observationExceptionId: options.observationExceptionId } : {}),
 	};
 }
