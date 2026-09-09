@@ -15,6 +15,15 @@ export function assertControlWorkflowIdentity({ repository, ref, defaultBranch }
 	}
 }
 
+export function assertPagesWriteAccess(repository) {
+	if (repository?.full_name !== PAGES_REPOSITORY || repository?.default_branch !== PAGES_BRANCH || repository?.archived !== false) {
+		throw new Error(`Pages target must be the active ${PAGES_REPOSITORY} repository with default branch ${PAGES_BRANCH}`);
+	}
+	if (repository?.permissions?.push !== true) {
+		throw new Error('Pages deployment token requires write access to the target repository');
+	}
+}
+
 export function assertPagesRepositoryBoundary({ repository, authenticatedUser, protection, expectedActor }) {
 	if (repository?.full_name !== PAGES_REPOSITORY || repository?.default_branch !== PAGES_BRANCH || repository?.archived !== false) {
 		throw new Error(`Pages target must be the active ${PAGES_REPOSITORY} repository with default branch ${PAGES_BRANCH}`);
@@ -82,6 +91,13 @@ async function main() {
 		console.log('Production control repository and default branch verified.');
 		return;
 	}
+	if (mode === 'pages-write') {
+		const token = process.env.PAGES_DEPLOY_TOKEN;
+		if (!token) throw new Error('PAGES_DEPLOY_TOKEN is required');
+		assertPagesWriteAccess(await githubJson(`/repos/${PAGES_REPOSITORY}`, token));
+		console.log('External Pages target and deployment write access verified.');
+		return;
+	}
 	if (mode === 'pages') {
 		await verifyPagesRepositoryBoundary({
 			token: process.env.PAGES_DEPLOY_TOKEN,
@@ -90,7 +106,7 @@ async function main() {
 		console.log('External Pages repository single-writer boundary verified.');
 		return;
 	}
-	throw new Error('Usage: verify-github-release-boundaries.mjs [control|pages]');
+	throw new Error('Usage: verify-github-release-boundaries.mjs [control|pages|pages-write]');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
