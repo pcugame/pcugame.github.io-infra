@@ -1,104 +1,46 @@
-name: Build Phase 1 API Release Image
-
+name: Stage Verified Phase 1 Image
 on:
   workflow_dispatch:
-
+    inputs:
+      image:
+        description: Immutable Phase 1 image
+        required: true
+        type: string
+      source_sha:
+        description: Exact source revision
+        required: true
+        type: string
 permissions:
   contents: read
-  packages: write
-
+  packages: read
 jobs:
-  build-and-push:
+  stage:
     runs-on: ubuntu-latest
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
+    environment: production
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install dependencies
-        run: npm ci --include-workspace-root
-
-      - name: Build shared contracts
-        run: npm run build --workspace=@pcu/contracts
-
-      - name: Generate Prisma client
-        run: npm run db:generate --workspace=apps/api
-
-      - name: Test Phase 1 release tree
-        run: npm run test:scripts --workspace=apps/api
-
-      - name: Test API
-        run: npm exec --workspace=apps/api -- vitest run
-
-      - name: Build API and release CLIs
-        run: npm run build --workspace=apps/api
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push immutable Phase 1 image
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/api/Dockerfile
-          push: true
-          platforms: linux/amd64
-          build-args: |
-            VCS_REF=${{ github.sha }}
-          tags: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api:phase1-sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Verify the pushed image by immutable digest
+      - name: Pull and verify the image without changing running services
+        uses: appleboy/ssh-action@v1.0.3
         env:
-          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          immutable_image="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
-          docker pull "${immutable_image}"
-
-          revision="$(docker image inspect "${immutable_image}" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
-          test "${revision}" = "${SOURCE_SHA}"
-
-          marker="$(docker run --rm --entrypoint node "${immutable_image}" dist/phase1-release-manifest.js)"
-          test "${marker}" = 'PCU_PHASE1_RUNTIME_V1'
-
-          docker run --rm --entrypoint sh "${immutable_image}" -eu -c '
-            test -f dist/server.js
-            for worker in game-validation webgl video image export; do
-              test -f "dist/${worker}-worker.js"
-            done
-            for cli in backfill-canonical-assets preflight-canonical-contract release-migrate snapshot-garage-inventory verify-cutover-report; do
-              test -f "dist-release/scripts/${cli}.js"
-            done
-            for migration in \
-              20260821400000_project_submission_draft_status \
-              20260821500000_project_submission_expand \
-              20260821550000_project_submission_finalizing_status \
-              20260821600000_project_publication_expand \
-              20260821700000_canonical_object_relocation_expand; do
-              test -f "prisma/migrations/${migration}/migration.sql"
-            done
-            test ! -e prisma/migrations/20260822000000_canonical_asset_contract
-          '
-
-          {
-            echo '### Phase 1 API release image'
-            echo "- Image: \`${immutable_image}\`"
-            echo "- Source SHA: \`${SOURCE_SHA}\`"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          IMAGE: ${{ inputs.image }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: IMAGE,SOURCE_SHA,GHCR_USERNAME,GHCR_TOKEN
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            [[ "$IMAGE" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
+            [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            registry_auth_file="$(mktemp)"
+            trap 'rm -f "$registry_auth_file"' EXIT
+            printf '%s' "$GHCR_TOKEN" | podman login --authfile "$registry_auth_file" ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            podman pull --authfile "$registry_auth_file" -q "$IMAGE"
+            [[ "$(podman image inspect "$IMAGE" --format '{{.Digest}}')" == "${IMAGE##*@}" ]]
+            [[ "$(podman image inspect "$IMAGE" --format '{{ index .Labels "org.opencontainers.image.revision" }}')" == "$SOURCE_SHA" ]]
+            [[ "$(podman run --rm --entrypoint node "$IMAGE" dist/phase1-release-manifest.js)" == PCU_PHASE1_RUNTIME_V1 ]]
