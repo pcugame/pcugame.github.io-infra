@@ -53,6 +53,16 @@ SQL
 )"
   [[ "$unavailable" == 0 ]] || {
     echo "Cannot update API alone: $unavailable videos require the new web playback fallback." >&2
+    query <<'SQL'
+SELECT json_build_object('assetId', a.id, 'projectId', a.project_id, 'projectStatus', p.status,
+  'legacyPlaybackStatus', a.playback_status,
+  'representations', (SELECT json_agg(json_build_object('role', r.role, 'state', r.state)) FROM asset_representations r WHERE r.asset_id = a.id))
+FROM assets a LEFT JOIN projects p ON p.id = a.project_id
+WHERE a.kind = 'VIDEO' AND a.status = 'READY'
+AND NOT (CASE WHEN EXISTS (SELECT 1 FROM asset_representations r WHERE r.asset_id = a.id)
+  THEN EXISTS (SELECT 1 FROM asset_representations r WHERE r.asset_id = a.id AND r.role = 'PLAYBACK' AND r.state = 'READY')
+  ELSE a.playback_status = 'READY' AND a.playback_storage_key IS NOT NULL END);
+SQL
     return 1
   }
 }
