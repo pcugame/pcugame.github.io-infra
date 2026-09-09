@@ -55,8 +55,8 @@ export function createPublicRepository(prisma: PrismaClient) {
 		return { owner: 'exhibition' as const, image: exhibition };
 	}
 
-	/** Compatibility is limited to verified historical PUBLIC originals of corrected videos. */
-	async function findCorrectedVideoOriginal(storageKey: string) {
+	/** Preserve verified historical PUBLIC originals after canonical relocation changes the legacy key or kind. */
+	async function findRelocatedPublicOriginal(storageKey: string) {
 		const rows = await prisma.$queryRaw<Array<{ bucket: string; objectKey: string }>>(Prisma.sql`
 			SELECT relocation.source_bucket AS "bucket", relocation.source_object_key AS "objectKey"
 			FROM canonical_object_relocations relocation
@@ -65,9 +65,10 @@ export function createPublicRepository(prisma: PrismaClient) {
 				AND representation.object_key = relocation.destination_object_key
 				AND representation.role = 'ORIGINAL' AND representation.state = 'READY'
 				AND representation.checksum_algorithm = 'SHA256' AND representation.checksum = relocation.checksum_sha256
-				AND representation.size_bytes = relocation.size_bytes
+				AND representation.size_bytes = relocation.size_bytes AND representation.mime_type = relocation.mime_type
 			JOIN assets asset ON asset.id = representation.asset_id AND asset.id::text = relocation.work_ref
-				AND asset.kind = 'VIDEO' AND asset.status = 'READY'
+				AND asset.status = 'READY' AND (asset.kind = 'VIDEO'
+					OR (asset.kind IN ('IMAGE', 'POSTER', 'THUMBNAIL') AND asset.is_public))
 			JOIN projects project ON project.id = asset.project_id AND project.status IN ('PUBLISHED', 'ARCHIVED')
 			WHERE relocation.source_object_key = ${storageKey} AND relocation.state = 'COMMITTED'
 				AND relocation.work_kind = 'asset' AND relocation.role = 'ORIGINAL'
@@ -155,7 +156,7 @@ export function createPublicRepository(prisma: PrismaClient) {
 
 		/** Resolve a Phase 1 image bridge without reading object bytes. */
 		async resolvePublicImageBridge(storageKey: string) {
-			const corrected = await findCorrectedVideoOriginal(storageKey);
+			const corrected = await findRelocatedPublicOriginal(storageKey);
 			if (corrected) return corrected;
 			const canonical = await prisma.assetRepresentation.findFirst({
 				where: {
