@@ -1,5 +1,14 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+	AGE_EXCEPTION_CONTRACT_MIGRATION,
+	EXCEPTION_PREP_MIGRATION,
+	OBSERVATION_EXCEPTION_SCOPE,
+	parseArgs,
+	validateObservationException,
+	stageMigrationNames,
+	type ExceptionReceipt,
 	BASELINE_MIGRATION,
 	CONTRACT_MIGRATION,
 	PROJECT_CHANGE_MIGRATION,
@@ -96,5 +105,118 @@ describe('project change release schema', () => {
 	});
 	it('rejects a failed request migration', () => {
 		expect(() => assertNoFailedReleaseMigration([{ migration_name: PROJECT_CHANGE_MIGRATION, finished_at: null, rolled_back_at: null }])).toThrow(PROJECT_CHANGE_MIGRATION);
+	});
+});
+
+const exception = {
+	exceptionId: 'review-123:age-only', sourceSha: 'a'.repeat(40),
+	image: `ghcr.io/pcugame/pcu-graduationproject-v2-api@sha256:${'b'.repeat(64)}`, actor: 'pcugame-admin', runId: '123456',
+};
+const exceptionFlags = [
+	'--observation-exception-id', exception.exceptionId, '--release-source-sha', exception.sourceSha,
+	'--release-image', exception.image, '--exception-actor', exception.actor, '--exception-run-id', exception.runId,
+];
+const alternateChecksum = createHash('sha256').update(readFileSync(new URL(
+	`../prisma/contract-migration-paths/${AGE_EXCEPTION_CONTRACT_MIGRATION}/migration.sql`, import.meta.url,
+))).digest('hex');
+function alternateHistory(): MigrationRow[] {
+	return [...completePhase1History(), completedMigration(EXCEPTION_PREP_MIGRATION),
+		{ ...completedMigration(AGE_EXCEPTION_CONTRACT_MIGRATION), checksum: alternateChecksum }, completedMigration(PROJECT_CHANGE_MIGRATION)];
+}
+function receipt(): ExceptionReceipt {
+	return {
+		migration_name: AGE_EXCEPTION_CONTRACT_MIGRATION, exception_id: exception.exceptionId,
+		source_sha: exception.sourceSha, image: exception.image, actor: exception.actor, run_id: exception.runId,
+		scope: OBSERVATION_EXCEPTION_SCOPE, migration_checksum: alternateChecksum,
+		authorized_at: new Date('2026-08-23T23:30:00Z'), expires_at: new Date('2026-08-24T00:30:00Z'),
+		applied_at: appliedAt, authorization_matches: true,
+		metrics: ['asset_download_legacy_fallback', 'asset_download_legacy_route', 'public_image_legacy_bridge',
+			'public_image_legacy_fallback', 'public_webgl_legacy_bridge', 'public_webgl_legacy_fallback', 'export_legacy_fallback']
+			.map((name) => ({ name, value: 0, last_observed_at: '2026-08-23T23:00:00Z' })),
+		relocation_summary: { total: 0, by_state: {} },
+	};
+}
+
+describe('explicit observation age authorization arguments', () => {
+	it('keeps normal interfaces and accepts all provenance only on explicit contract exceptions', () => {
+		expect(parseArgs(['apply-contract'])).toEqual({ command: 'apply-contract' });
+		expect(parseArgs(['assert-runtime', 'phase2'])).toEqual({ command: 'assert-runtime', phase: 'phase2' });
+		expect(parseArgs(['apply-contract', ...exceptionFlags])).toEqual({ command: 'apply-contract', exception });
+	});
+	it.each(['status', 'apply-expand', 'assert-runtime'])('rejects exception flags on %s', (command) => {
+		expect(() => parseArgs([command, ...exceptionFlags])).toThrow();
+	});
+	it('rejects partial, unknown, repeated, or value-less flags', () => {
+		for (const invalid of [exceptionFlags.slice(0, -2), [...exceptionFlags, '--unsafe'], [...exceptionFlags, ...exceptionFlags.slice(0, 2)], ['--waive-metrics', 'true']]) {
+			expect(() => parseArgs(['apply-contract', ...invalid])).toThrow();
+		}
+	});
+	it.each([
+		{ sourceSha: 'abc1234' }, { sourceSha: 'A'.repeat(40) }, { image: 'ghcr.io/pcugame/pcu-graduationproject-v2-api:latest' },
+		{ image: `ghcr.io/pcugame/pcu-graduationproject-v2-api@sha256:${'b'.repeat(63)}` }, { exceptionId: 'bad id' },
+		{ actor: 'operator;command' }, { runId: '123/attempts' },
+	])('rejects malformed provenance %#', (override) => {
+		expect(() => validateObservationException({ ...exception, ...override })).toThrow();
+	});
+});
+
+describe('honest alternate contract history', () => {
+	it('accepts a completed alternate with matching receipt and fences Phase 1', () => {
+		expect(() => assertRuntime(alternateHistory(), 'phase2', receipt())).not.toThrow();
+		expect(releaseStatus(alternateHistory(), receipt())).toMatchObject({ contract: true, contractPath: AGE_EXCEPTION_CONTRACT_MIGRATION });
+		expect(() => assertRuntime(alternateHistory(), 'phase1', receipt())).toThrow('contract=not-applied');
+	});
+	it('emits provenance only, preserving metric scopes and object mappings in the database', () => {
+		const output = releaseStatus(alternateHistory(), receipt()).observationExceptionReceipt;
+		expect(output).toMatchObject({ exceptionId: exception.exceptionId, image: exception.image, runId: exception.runId });
+		expect(output).not.toHaveProperty('metrics');
+		expect(output).not.toHaveProperty('relocation_summary');
+	});
+	it.each([
+		{ value: 1 }, { last_observed_at: null }, { last_observed_at: '-infinity' },
+		{ last_observed_at: '2027-01-01T00:00:00Z' },
+	])('rejects malformed receipt metric evidence %#', (override) => {
+		const candidate = receipt();
+		candidate.metrics = (candidate.metrics as Array<Record<string, unknown>>).map((metric, index) => index === 0 ? { ...metric, ...override } : metric);
+		expect(() => assertRuntime(alternateHistory(), 'phase2', candidate)).toThrow();
+	});
+	it('rejects missing receipt, orphan receipt, mixed histories and missing preparation', () => {
+		expect(() => assertRuntime(alternateHistory(), 'phase2')).toThrow('valid matching applied authorization receipt');
+		expect(() => releaseStatus(completePhase1History(), receipt())).toThrow('without its completed Prisma migration');
+		expect(() => releaseStatus([...alternateHistory(), completedMigration(CONTRACT_MIGRATION)], receipt())).toThrow('mixed');
+		expect(() => releaseStatus(alternateHistory().filter((row) => row.migration_name !== EXCEPTION_PREP_MIGRATION), receipt())).toThrow();
+	});
+	it.each([
+		{ applied_at: null }, { authorization_matches: false }, { migration_checksum: 'c'.repeat(64) },
+		{ migration_name: CONTRACT_MIGRATION }, { scope: 'skip-all-metrics' }, { source_sha: 'abcd' },
+		{ image: 'ghcr.io/pcugame/pcu-graduationproject-v2-api:master' }, { authorized_at: new Date('invalid') },
+		{ expires_at: new Date('2026-08-24T04:30:00Z') }, { metrics: null }, { metrics: [] }, { relocation_summary: null },
+	])('rejects invalid receipt %#', (override) => {
+		expect(() => assertRuntime(alternateHistory(), 'phase2', { ...receipt(), ...override })).toThrow();
+	});
+	it.each([{ finished_at: null, rolled_back_at: null }, { finished_at: appliedAt, rolled_back_at: appliedAt }])('rejects failed alternate history %#', (override) => {
+		const history = alternateHistory().map((row) => row.migration_name === AGE_EXCEPTION_CONTRACT_MIGRATION ? { ...row, ...override } : row);
+		expect(() => releaseStatus(history, receipt())).toThrow('failed/rolled-back');
+	});
+	it('retains the normal graph and always replaces the original on a recorded alternate branch', () => {
+		const names = [...completePhase1History().map((row) => row.migration_name), EXCEPTION_PREP_MIGRATION, CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION];
+		expect(stageMigrationNames(names, PROJECT_CHANGE_MIGRATION, false)).toEqual([...names].sort());
+		const selected = stageMigrationNames(names, PROJECT_CHANGE_MIGRATION, true);
+		expect(selected).toContain(AGE_EXCEPTION_CONTRACT_MIGRATION);
+		expect(selected).not.toContain(CONTRACT_MIGRATION);
+		expect(stageMigrationNames(names, EXCEPTION_PREP_MIGRATION, true)).not.toContain(AGE_EXCEPTION_CONTRACT_MIGRATION);
+		const future = '20261001000000_future_additive';
+		const recordedAlternate = releaseStatus(alternateHistory(), receipt()).contractPath === AGE_EXCEPTION_CONTRACT_MIGRATION;
+		expect(stageMigrationNames([...names, future], future, recordedAlternate)).toEqual([...selected, future]);
+	});
+	it('preserves all original SQL beyond receipt metadata and explicit observation changes', () => {
+		const original = readFileSync(new URL(`../prisma/migrations/${CONTRACT_MIGRATION}/migration.sql`, import.meta.url), 'utf8');
+		const alternate = readFileSync(new URL(`../prisma/contract-migration-paths/${AGE_EXCEPTION_CONTRACT_MIGRATION}/migration.sql`, import.meta.url), 'utf8');
+		const stripped = alternate.replace(/-- Explicit alternate history:[\s\S]*?(?=DO \$contract_preflight\$)/, '')
+			.replace(/-- Successful completion is durable[\s\S]*?(?=COMMIT;)/, '')
+			.replace('IF TRUE THEN -- An explicit exception requires all seven observations even on an empty database.', 'IF has_business_data THEN')
+			.replace('        OR bool_or(NOT isfinite(metric."last_observed_at"))\n', '')
+			.replace('OR max(metric."last_observed_at") > CURRENT_TIMESTAMP\n', 'OR max(metric."last_observed_at") > CURRENT_TIMESTAMP - INTERVAL \'24 hours\'\n');
+		expect(stripped).toBe(original);
 	});
 });

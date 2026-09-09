@@ -333,6 +333,32 @@ describe('canonical contract preflight', () => {
 		expect((await audit(recent)).report.blockers.legacyBridgeObservations.samples[0]).toContain('observation-window');
 	});
 
+	it('waives only observation age and records the explicit exception without resetting metrics', async () => {
+		const recent = baseSnapshot();
+		recent.metrics[0]!.lastObservedAt = new Date('2026-08-20T12:00:00.000Z');
+		const options = { observationExceptionId: 'reviewed-20260910', observationWindowMs: 0 };
+		const result = await audit(recent, undefined, undefined, options);
+		expect(result.report.clean).toBe(true);
+		expect(result.report.observationExceptionId).toBe('reviewed-20260910');
+		expect(result.report.metricObservationReset).toBe(false);
+		expect(result.repository.resetLegacyBridgeObservations).not.toHaveBeenCalled();
+		for (const metric of [
+			{ value: 1n, lastObservedAt: now() },
+			{ value: 0n, lastObservedAt: null },
+			{ value: 0n, lastObservedAt: new Date(NaN) },
+			{ value: 0n, lastObservedAt: new Date('2026-08-22T00:00:00Z') },
+		]) {
+			const invalid = baseSnapshot();
+			Object.assign(invalid.metrics[0]!, metric);
+			expect((await audit(invalid, undefined, undefined, options)).report.blockers.legacyBridgeObservations.count).toBeGreaterThan(0);
+		}
+		const missing = baseSnapshot();
+		missing.metrics = [];
+		expect((await audit(missing, undefined, undefined, options)).report.clean).toBe(false);
+		const missingFile = await audit(recent, undefined, async () => null, options);
+		expect(missingFile.report.blockers.missingObjects.count).toBeGreaterThan(0);
+	});
+
 	it('audits every READY historical WebGL generation, not only the current pointer', async () => {
 		const snapshot = baseSnapshot();
 		snapshot.assets.push({

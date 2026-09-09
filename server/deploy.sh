@@ -591,6 +591,7 @@ SQL
 
 do_release_migration() {
   local action="${1:-status}"
+  if (( $# > 0 )); then shift; fi
   [[ "$action" == status || "$action" == apply-expand || "$action" == apply-contract ]] || {
     echo "ERROR: release-migrate action must be status, apply-expand, or apply-contract"
     return 1
@@ -598,7 +599,7 @@ do_release_migration() {
   if [[ "$action" != status ]]; then
     assert_mutation_drained
   fi
-  run_release_entry dist-release/scripts/release-migrate.js "$action"
+  run_release_entry dist-release/scripts/release-migrate.js "$action" "$@"
 }
 
 do_release_assert() {
@@ -1120,7 +1121,7 @@ case "${1:-up}" in
   drain)   do_drain ;;
   backup)  do_backup "${2:-manual}" ;;
   legacy-audit) do_legacy_audit ;;
-  release-migrate) do_release_migration "${2:-status}" ;;
+  release-migrate) shift; do_release_migration "$@" ;;
   release-assert) do_release_assert "${2:-}" ;;
   inventory) do_inventory_snapshot "${2:-}" ;;
   backfill) shift; do_backfill "$@" ;;

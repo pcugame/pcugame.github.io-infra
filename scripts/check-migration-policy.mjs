@@ -4,8 +4,8 @@ import { appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 
-const migrationRoot = 'apps/api/prisma/migrations';
-const migrationPathPattern = /^apps\/api\/prisma\/migrations\/[^/]+\/migration\.sql$/;
+const migrationRoots = ['apps/api/prisma/migrations', 'apps/api/prisma/contract-migration-paths'];
+const migrationPathPattern = /^apps\/api\/prisma\/(?:migrations|contract-migration-paths)\/[^/]+\/migration\.sql$/;
 
 // The protected base is a conservative review proxy, not proof that every file
 // in it was applied to every preserved database. Operators still need to inspect
@@ -60,7 +60,7 @@ function changedEntries(mergeBase) {
 		mergeBase,
 		'HEAD',
 		'--',
-		migrationRoot,
+		...migrationRoots,
 	]).stdout);
 	const entries = [];
 	for (let index = 0; index < fields.length;) {
@@ -89,7 +89,7 @@ function baseMigrationPaths(mergeBase) {
 			'-z',
 			mergeBase,
 			'--',
-			migrationRoot,
+			...migrationRoots,
 		]).stdout).filter((path) => migrationPathPattern.test(path)),
 	);
 }

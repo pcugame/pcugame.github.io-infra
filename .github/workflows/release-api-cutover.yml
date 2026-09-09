@@ -7,7 +7,7 @@ on:
         description: 'Authorized migration phase'
         required: true
         type: choice
-        options: [snapshot, phase1, phase2, phase2-forward-fix]
+        options: [snapshot, preflight, phase1, phase2, phase2-forward-fix]
       phase1_api_image:
         description: 'Immutable @sha256 Phase 1 API/worker image (required for phase1)'
         required: false
@@ -18,6 +18,10 @@ on:
         type: string
       final_api_image:
         description: 'Immutable @sha256 final API/worker image (required for phase2 and forward fix)'
+        required: false
+        type: string
+      observation_exception_id:
+        description: 'Reviewed one-time observation-age exception ID; requires I_ACCEPT_SHORT_OBSERVATION and current Phase 1 image/source inputs'
         required: false
         type: string
       observation_started_at:
@@ -69,6 +73,7 @@ jobs:
           EXPECTED_IMAGE_REPO: ghcr.io/pcugame/pcu-graduationproject-v2-api
           OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
           OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
+          OBSERVATION_EXCEPTION_ID: ${{ inputs.observation_exception_id }}
         run: |
           set -euo pipefail
           is_authorized_digest() {
@@ -78,13 +83,14 @@ jobs:
             local digest="${image#"${prefix}"}"
             [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
           }
-          if [ "${RELEASE_PHASE}" = snapshot ]; then
+          if [[ "${RELEASE_PHASE}" = snapshot || "${RELEASE_PHASE}" = preflight ]]; then
             # Metadata backup only: never attest observation or start cutover.
-            [ -z "${PHASE1_IMAGE}${PHASE1_SOURCE_SHA}${FINAL_IMAGE}${OBSERVATION_STARTED_AT}${OBSERVATION_ATTESTATION}" ] || {
-              echo "snapshot rejects deployment images and observation inputs"
+            [ -z "${PHASE1_IMAGE}${PHASE1_SOURCE_SHA}${FINAL_IMAGE}${OBSERVATION_STARTED_AT}${OBSERVATION_ATTESTATION}${OBSERVATION_EXCEPTION_ID}" ] || {
+              echo "read-only stages reject deployment images and observation inputs"
               exit 1
             }
           elif [ "${RELEASE_PHASE}" = phase1 ]; then
+            [ -z "${OBSERVATION_EXCEPTION_ID}" ] || exit 1
             is_authorized_digest "${PHASE1_IMAGE}" || {
               echo "phase1_api_image must be an immutable @sha256 digest in ${EXPECTED_IMAGE_REPO}"
               exit 1
@@ -98,6 +104,13 @@ jobs:
               echo "final_api_image must be an immutable @sha256 digest in ${EXPECTED_IMAGE_REPO}"
               exit 1
             }
+            if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
+              [[ "${OBSERVATION_EXCEPTION_ID}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]]
+              [ "${OBSERVATION_ATTESTATION}" = I_ACCEPT_SHORT_OBSERVATION ]
+              [ -z "${OBSERVATION_STARTED_AT}" ]
+              is_authorized_digest "${PHASE1_IMAGE}"
+              [[ "${PHASE1_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+            else
             [[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]] || {
               echo "phase2 requires the exact 24-hour zero-fallback attestation"
               exit 1
@@ -109,7 +122,9 @@ jobs:
           if (elapsed < 24 * 60 * 60 * 1000) throw new Error(`observation is only ${Math.floor(elapsed / 3600000)}h old`);
           if (elapsed > 31 * 24 * 60 * 60 * 1000) throw new Error('observation attestation is stale; run a new preflight');
           NODE
+            fi
           else
+            [ -z "${OBSERVATION_EXCEPTION_ID}" ] || exit 1
             is_authorized_digest "${FINAL_IMAGE}" || {
               echo "final_api_image must be an immutable @sha256 digest in ${EXPECTED_IMAGE_REPO}"
               exit 1
@@ -163,8 +178,48 @@ jobs:
             export PATH="$PATH:/usr/local/bin:/usr/bin"
             bash "${DEPLOY_DIR}/release-db-snapshot.sh" "${RELEASE_SOURCE_SHA}"
 
+  preflight:
+    if: ${{ inputs.phase == 'preflight' }}
+    needs: authorize
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify preflight control branch
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node server/verify-github-release-boundaries.mjs control
+      - name: Copy reviewed preflight control
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          source: server/release-online-preflight.sh
+          target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          strip_components: 1
+          overwrite: true
+      - name: Read current DB and Garage readiness
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: DEPLOY_DIR,RELEASE_SOURCE_SHA
+          script_stop: true
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            export PATH="$PATH:/usr/local/bin:/usr/bin"
+            bash "${DEPLOY_DIR}/release-online-preflight.sh" "${RELEASE_SOURCE_SHA}"
+
   cutover:
-    if: ${{ inputs.phase != 'snapshot' }}
+    if: ${{ inputs.phase != 'snapshot' && inputs.phase != 'preflight' }}
     needs: authorize
     runs-on: ubuntu-latest
     environment: production
@@ -198,7 +253,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh,server/smoke-data-plane.mjs
+          source: server/deploy.sh,server/smoke-data-plane.mjs,server/release-db-snapshot.sh
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
           overwrite: true
@@ -350,7 +405,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,OBSERVATION_STARTED_AT,OBSERVATION_ATTESTATION
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,OBSERVATION_STARTED_AT,OBSERVATION_ATTESTATION,OBSERVATION_EXCEPTION_ID,PHASE1_IMAGE,PHASE1_SOURCE_SHA
           script_stop: true
           command_timeout: 60m
           script: |
@@ -363,6 +418,18 @@ jobs:
             chmod +x "${DEPLOY_DIR}/deploy.sh"
             printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
+            if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
+              [ "${OBSERVATION_ATTESTATION}" = I_ACCEPT_SHORT_OBSERVATION ]
+              [[ "${PHASE1_IMAGE}" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
+              [[ "${PHASE1_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+              current_image="$(podman inspect gp-api --format '{{.Image}}')"
+              expected_image="$(podman image inspect "${PHASE1_IMAGE}" --format '{{.Id}}')"
+              [ "${current_image#sha256:}" = "${expected_image#sha256:}" ]
+              [ "$(podman image inspect "${current_image}" --format '{{.Digest}}')" = "${PHASE1_IMAGE##*@}" ]
+              [ "$(podman image inspect "${current_image}" --format '{{ index .Labels "org.opencontainers.image.revision" }}')" = "${PHASE1_SOURCE_SHA}" ]
+              # Record this as an exception, never as completed 24h observation.
+              echo "Reviewed observation-age exception: ${OBSERVATION_EXCEPTION_ID}; current Phase 1 identity verified"
+            else
             [ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]
             [ -f "${CUTOVER_STATE_DIR}/phase1-observation" ] || {
               echo "Server-side Phase 1 observation record is missing"
@@ -419,13 +486,19 @@ jobs:
               exit 1
             }
 
+            fi
+
             # Prove the exact final artifact before downtime. The API and every
             # worker remain stopped from this drain through web publication and DDL.
             "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
             # Environment approval can outlive the browser-side authorization
             # check. Re-read the server record and evaluate its age using the
             # production server clock immediately before mutations are drained.
-            "${DEPLOY_DIR}/deploy.sh" verify-observation-window "${OBSERVATION_STARTED_AT}"
+            if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
+              bash "${DEPLOY_DIR}/release-db-snapshot.sh" "${RELEASE_SOURCE_SHA}"
+            else
+              "${DEPLOY_DIR}/deploy.sh" verify-observation-window "${OBSERVATION_STARTED_AT}"
+            fi
             "${DEPLOY_DIR}/deploy.sh" drain
             "${DEPLOY_DIR}/deploy.sh" backup "phase2-${RELEASE_SOURCE_SHA}"
             "${DEPLOY_DIR}/deploy.sh" inventory "/release-state/garage-before-contract-${RELEASE_SOURCE_SHA}.json"
@@ -437,6 +510,9 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
           OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
+          OBSERVATION_EXCEPTION_ID: ${{ inputs.observation_exception_id }}
+          PHASE1_IMAGE: ${{ inputs.phase1_api_image }}
+          PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
 
       - name: Set up Node for final web
         if: ${{ inputs.phase == 'phase2' }}
@@ -500,7 +576,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,SMOKE_PUBLIC_OBJECT_URL
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,SMOKE_PUBLIC_OBJECT_URL,OBSERVATION_EXCEPTION_ID,EXCEPTION_ACTOR,EXCEPTION_RUN_ID
           script_stop: true
           command_timeout: 60m
           script: |
@@ -528,11 +604,17 @@ jobs:
               echo "Final web did not expose the exact release SHA within five minutes; contract remains unapplied."
               exit 1
             }
-            "${DEPLOY_DIR}/deploy.sh" contract-preflight \
+            preflight_args=()
+            migration_args=()
+            if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
+              preflight_args+=("--observation-exception-id=${OBSERVATION_EXCEPTION_ID}")
+              migration_args+=(--observation-exception-id "${OBSERVATION_EXCEPTION_ID}" --release-source-sha "${RELEASE_SOURCE_SHA}" --release-image "${FINAL_IMAGE}" --exception-actor "${EXCEPTION_ACTOR}" --exception-run-id "${EXCEPTION_RUN_ID}")
+            fi
+            "${DEPLOY_DIR}/deploy.sh" contract-preflight "${preflight_args[@]}" \
               --inventory-input="/release-state/garage-before-contract-${RELEASE_SOURCE_SHA}.json" \
               --report-output=/release-state/phase2-contract-preflight.json
             "${DEPLOY_DIR}/deploy.sh" release-migrate status
-            "${DEPLOY_DIR}/deploy.sh" release-migrate apply-contract
+            "${DEPLOY_DIR}/deploy.sh" release-migrate apply-contract "${migration_args[@]}"
 
             # DESTRUCTIVE DDL BOUNDARY: no old-image rollback exists below.
             # Any failure is a forward fix, or an explicit PostgreSQL restore
@@ -572,3 +654,6 @@ jobs:
           FINAL_IMAGE: ${{ needs.authorize.outputs.final_image }}
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+          OBSERVATION_EXCEPTION_ID: ${{ inputs.observation_exception_id }}
+          EXCEPTION_ACTOR: ${{ github.actor }}
+          EXCEPTION_RUN_ID: ${{ github.run_id }}
