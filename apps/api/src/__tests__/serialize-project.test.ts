@@ -31,7 +31,7 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 			kind: 'POSTER' | 'IMAGE' | 'THUMBNAIL' | 'GAME' | 'VIDEO' | 'WEBGL';
 			status: string;
 			representations?: Array<{
-				role: string; objectKey: string; mimeType: string; width?: number | null; height?: number | null;
+				role: string; state?: string; objectKey: string; mimeType: string; sizeBytes?: bigint | number; width?: number | null; height?: number | null;
 			}>;
 		} | null,
 		members: [] as { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[],
@@ -52,7 +52,7 @@ function fakeProject(overrides: Record<string, unknown> = {}) {
 			playbackStatus: 'PENDING' | 'READY' | 'FAILED';
 			playbackError: string;
 			representations?: Array<{
-				role: string; objectKey: string; mimeType: string; width?: number | null; height?: number | null;
+				role: string; state?: string; objectKey: string; mimeType: string; sizeBytes?: bigint | number; width?: number | null; height?: number | null;
 			}>;
 		}[],
 		...overrides,
