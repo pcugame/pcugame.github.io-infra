@@ -27,8 +27,8 @@ function renderManager(value: AdminProjectDetail, onReorderVideos: (body: SetPro
 		<QueryClientProvider client={new QueryClient()}><MemoryRouter>
 			<AdminProjectAssetManager project={value} projectId={value.id} canEditContent
 				limits={{ imageMaxMb: 1, imagePdfMaxMb: 1, posterMaxMb: 1, posterPdfMaxMb: 1, videoMaxMb: 1, gameMaxMb: 1, requestMaxMb: 1, maxFiles: 1 }}
-				addAssetError={null} isAddingAsset={false} isSettingPoster={false} isRemovingAsset={false} isRemovingWebgl={false}
-				onAddAsset={vi.fn()} onSetPoster={vi.fn()} onRemoveAsset={vi.fn()} onRemoveWebgl={vi.fn()} onReorderVideos={onReorderVideos} />
+			isSettingPoster={false} isRemovingAsset={false} isRemovingWebgl={false}
+			onSetPoster={vi.fn()} onRemoveAsset={vi.fn()} onRemoveWebgl={vi.fn()} onReorderVideos={onReorderVideos} />
 		</MemoryRouter></QueryClientProvider>,
 	);
 }

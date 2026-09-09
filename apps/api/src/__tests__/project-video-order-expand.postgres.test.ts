@@ -8,6 +8,7 @@ const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true
 const migrationRootUrl = new URL('../../prisma/migrations/', import.meta.url);
 const priorPhaseOneCeiling = '20260821700000_canonical_object_relocation_expand';
 const projectVideoOrderMigration = '20260821800000_project_video_order_expand';
+const canonicalContractMigration = '20260822000000_canonical_asset_contract';
 
 function quoted(identifier: string): string {
 	return `"${identifier.replaceAll('"', '""')}"`;
@@ -220,4 +221,24 @@ describe.runIf(runPostgresIntegration)('project video order expand PostgreSQL mi
 		expect(await assetCount(schema)).toBe(6n);
 	});
 
+	it('keeps the video order column and READY-slot index after the existing Phase 2 contract', async () => {
+		const schema = await freshPhaseOneSchema('contract_bridge');
+		await applyMigration(schema, projectVideoOrderMigration);
+		await applyMigration(schema, canonicalContractMigration);
+
+		const [catalog] = await control.$queryRawUnsafe<Array<{
+			columnExists: boolean;
+			readyIndex: string | null;
+		}>>(`
+			SELECT
+				EXISTS (SELECT 1 FROM information_schema.columns
+					WHERE table_schema = '${schema}' AND table_name = 'assets'
+						AND column_name = 'video_sort_order') AS "columnExists",
+				pg_get_indexdef(to_regclass('${schema}.asset_project_video_ready_order_unique')) AS "readyIndex"
+		`);
+		expect(catalog).toMatchObject({
+			columnExists: true,
+			readyIndex: expect.stringContaining('video_sort_order'),
+		});
+	});
 });

@@ -3,6 +3,9 @@ import type { AssetKind } from '@pcu/contracts';
 import { AppError } from './errors.js';
 import { detectFileType, SIZE_LIMITS } from './file-signature.js';
 
+// file-type 22 recommends a 4100-byte sample for broad format detection.
+const FILE_TYPE_SAMPLE_SIZE = 4100;
+
 /**
  * Resolved request limits. Resolution from configuration or settings belongs
  * to a composition root; this module deliberately contains no env/runtime
@@ -147,18 +150,15 @@ export function createKindAwareByteLimiter(
 	kind: AssetKind,
 	label = 'File',
 ): Transform {
-	const headerBytesNeeded = 16;
-	let header = Buffer.alloc(0);
+	let sample = Buffer.alloc(0);
+	let pendingChunks: Buffer[] = [];
 	let total = 0;
 	let effectiveLimit: number | undefined;
 
-	function resolveLimit(): number {
+	async function resolveLimit(): Promise<number> {
 		if (effectiveLimit !== undefined) return effectiveLimit;
-		if (header.length >= headerBytesNeeded) {
-			effectiveLimit = kindLimitForMime(limits, kind, detectFileType(header)?.mime);
-			return effectiveLimit;
-		}
-		return kindLimit(limits, kind);
+		effectiveLimit = kindLimitForMime(limits, kind, (await detectFileType(sample))?.mime);
+		return effectiveLimit;
 	}
 
 	function limitError(limit: number): AppError {
@@ -173,25 +173,45 @@ export function createKindAwareByteLimiter(
 	return new Transform({
 		transform(chunk: Buffer, _encoding, callback) {
 			total += chunk.length;
-			if (header.length < headerBytesNeeded) {
-				const remaining = headerBytesNeeded - header.length;
-				header = Buffer.concat([header, chunk.subarray(0, remaining)]);
-			}
-			const limit = resolveLimit();
-			if (total > limit) {
-				callback(limitError(limit));
+			if (effectiveLimit !== undefined) {
+				if (total > effectiveLimit) {
+					callback(limitError(effectiveLimit));
+					return;
+				}
+				callback(null, chunk);
 				return;
 			}
-			callback(null, chunk);
+
+			pendingChunks.push(chunk);
+			if (sample.length < FILE_TYPE_SAMPLE_SIZE) {
+				const remaining = FILE_TYPE_SAMPLE_SIZE - sample.length;
+				sample = Buffer.concat([sample, chunk.subarray(0, remaining)]);
+			}
+			if (sample.length < FILE_TYPE_SAMPLE_SIZE) {
+				callback();
+				return;
+			}
+
+			void resolveLimit().then((limit) => {
+				if (total > limit) {
+					callback(limitError(limit));
+					return;
+				}
+				for (const pending of pendingChunks) this.push(pending);
+				pendingChunks = [];
+				callback();
+			}, callback);
 		},
 		flush(callback) {
-			const limit = effectiveLimit
-				?? kindLimitForMime(limits, kind, detectFileType(header)?.mime);
-			if (total > limit) {
-				callback(limitError(limit));
-				return;
-			}
-			callback();
+			void resolveLimit().then((limit) => {
+				if (total > limit) {
+					callback(limitError(limit));
+					return;
+				}
+				for (const pending of pendingChunks) this.push(pending);
+				pendingChunks = [];
+				callback();
+			}, callback);
 		},
 	});
 }

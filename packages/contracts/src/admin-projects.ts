@@ -1,13 +1,14 @@
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
-import type { ProjectAttachment, ProjectVideo } from './public.js';
+import type { ProjectVideo } from './public.js';
 import type { ResponsiveImage } from './responsive-image.js';
+import type { ProjectAttachment } from './public.js';
 
 export type UpdateProjectRequest = {
 	title?: string;
 	summary?: string;
 	description?: string;
 	isIncomplete?: boolean;
-	status?: ProjectStatus;
+	status?: Exclude<ProjectStatus, 'DRAFT'>;
 	sortOrder?: number;
 };
 
@@ -39,7 +40,7 @@ export type AdminProjectListQuery = {
 
 export type BulkUpdateProjectStatusRequest = {
 	ids: number[];
-	status: ProjectStatus;
+	status: Exclude<ProjectStatus, 'DRAFT'>;
 };
 
 export type BulkDeleteProjectsRequest = {
@@ -112,6 +113,7 @@ export type AdminProjectDetail = {
 		size: number;
 		downloadUrl: string;
 	})>;
+	/** Omitted by older API releases; clients treat it as an empty list. */
 	attachments?: ProjectAttachment[];
 };
 
@@ -121,13 +123,50 @@ export type SubmitProjectPayload = {
 	summary?: string;
 	description?: string;
 	members: { name: string; studentId: string; sortOrder?: number; userId?: number }[];
+	manifest: ProjectSubmissionManifestItem[];
+};
+
+export type ProjectSubmissionManifestItem = {
+	kind: 'GAME' | 'WEBGL' | 'VIDEO' | 'IMAGE' | 'POSTER' | 'DOCUMENT' | 'ATTACHMENT';
+	slot: string;
+	clientToken: string;
+	required: true;
+};
+
+export type ProjectSubmissionItemStatus = ProjectSubmissionManifestItem & {
+	id: string;
+	state: 'EXPECTED' | 'UPLOADING' | 'VERIFYING' | 'READY' | 'FAILED' | 'CANCELLED';
+	sessionId?: string;
+	generation?: number;
+	failureReason?: string;
+	playbackState?: 'READY' | 'FAILED';
+	playbackError?: string;
+};
+
+export type ProjectSubmissionStatusResponse = {
+	submissionId: string;
+	projectId: number;
+	projectStatus: ProjectStatus;
+	state: 'PENDING' | 'FINALIZING' | 'PUBLISHED' | 'CANCELLED';
+	publicationState?: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+	publicationError?: string;
+	items: ProjectSubmissionItemStatus[];
+};
+
+export type ProjectSubmissionAuditResponse = {
+	draftProjects: number;
+	pendingSubmissions: number;
+	finalizingSubmissions: number;
+	activePublicationJobs: number;
 };
 
 export type SubmitProjectResponse = {
 	id: number;
 	slug: string;
 	year: number;
-	status: 'PUBLISHED';
+	status: 'DRAFT';
+	submissionId: string;
+	items: ProjectSubmissionItemStatus[];
 	adminEditUrl: string;
 	publicUrl?: string;
 };

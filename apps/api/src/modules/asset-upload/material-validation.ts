@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
 import { Writable } from 'node:stream';
 import { fileTypeFromBuffer } from 'file-type';
-import { materializeAndValidateCompletedSource } from '../admin/game-upload/source-identity.js';
+import { materializeAndValidateCompletedSource, decodePersistedSourceIdentityManifest } from '../admin/game-upload/source-identity.js';
 import type { AssetUploadSessionRecord, AssetUploadValidationStorage } from './ports.js';
 
 const DOCUMENT_MIMES: Record<string, string> = {
@@ -54,7 +54,7 @@ export async function validateMaterialSource(input: {
 	const chunks: Buffer[] = [];
 	await materializeAndValidateCompletedSource({
 		...session,
-		sourceIdentityBlockManifest: (typeof session.sourceIdentityBlockManifest === 'string' ? Buffer.from(session.sourceIdentityBlockManifest, 'base64') : Buffer.concat((session.sourceIdentityBlockManifest as string[]).map((digest) => Buffer.from(digest, 'hex')))),
+		sourceIdentityBlockManifest: decodePersistedSourceIdentityManifest(session.sourceIdentityBlockManifest),
 		source: input.source.body,
 		destination: new Writable({ write(chunk, _encoding, done) { chunks.push(Buffer.from(chunk)); done(); } }),
 		physicalByteLimit: MATERIAL_MAX_BYTES, signal: input.signal,

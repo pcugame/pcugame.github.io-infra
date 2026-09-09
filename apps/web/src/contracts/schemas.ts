@@ -6,7 +6,6 @@ import {
 	CreateExhibitionBaseSchema,
 	ProjectMemberInputSchema as SharedProjectMemberInputSchema,
 	ProjectSubmissionTitleSchema,
-	ProjectStatusSchema,
 	SubmitProjectPayloadBaseSchema,
 	UpdateExhibitionBaseSchema,
 	UpdateProjectBaseSchema,
@@ -23,7 +22,7 @@ export type ProjectMemberInput = z.infer<typeof ProjectMemberInputSchema>;
 
 // ── 작품 등록 (submit all-in-one) ────────────────────────────
 
-export const SubmitProjectPayloadSchema = SubmitProjectPayloadBaseSchema.extend({
+export const SubmitProjectPayloadSchema = SubmitProjectPayloadBaseSchema.omit({ manifest: true }).extend({
   exhibitionId: z.number().int().positive('전시회를 선택하세요'),
   title: ProjectSubmissionTitleSchema,
   summary: z.string().max(300).optional().or(z.literal('')),
@@ -47,7 +46,7 @@ export const UpdateProjectFormSchema = UpdateProjectBaseSchema.pick({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),
   description: z.string().max(5000).optional().or(z.literal('')),
-  status: ProjectStatusSchema.optional(),
+  status: UpdateProjectBaseSchema.shape.status,
 });
 
 export type UpdateProjectFormInput = z.infer<typeof UpdateProjectFormSchema>;

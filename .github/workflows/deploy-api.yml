@@ -66,7 +66,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Verify immutable Phase 1 artifact from the merged source
+      - name: Verify immutable Phase 2 artifact from the merged source
         env:
           RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api@${{ steps.release-image.outputs.digest }}
           RELEASE_SOURCE_SHA: ${{ github.sha }}
@@ -74,12 +74,12 @@ jobs:
           set -euo pipefail
           docker pull "$RELEASE_IMAGE"
           test "$(docker image inspect "$RELEASE_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$RELEASE_SOURCE_SHA"
-          test "$(docker run --rm --entrypoint node "$RELEASE_IMAGE" dist/phase1-release-manifest.js)" = PCU_PHASE1_RUNTIME_V1
           docker run --rm --entrypoint node "$RELEASE_IMAGE" -e '
             const fs = require("node:fs");
             const migrations = fs.readdirSync("prisma/migrations").filter(name => fs.statSync(`prisma/migrations/${name}`).isDirectory()).sort();
-            if (migrations.at(-1) !== "20260821910000_project_material_constraints_expand") throw new Error("Unexpected Phase 1 artifact migration ceiling");
-            for (const worker of ["game-validation", "webgl", "video", "image", "export"]) {
+            if (migrations.at(-1) !== "20260822000000_canonical_asset_contract") throw new Error("Unexpected Phase 2 artifact migration ceiling");
+            if (fs.existsSync("dist/phase1-release-manifest.js")) throw new Error("Phase 1 runtime is not a Phase 2 artifact");
+            for (const worker of ["game-validation", "webgl", "video", "image", "export", "project-publication"]) {
               if (!fs.existsSync(`dist/${worker}-worker.js`)) throw new Error(`Missing worker ${worker}`);
             }
             for (const cli of ["backfill-canonical-assets", "preflight-canonical-contract", "release-migrate", "snapshot-garage-inventory", "verify-cutover-report", "correct-canonical-assets", "correct-canonical-poster"]) {

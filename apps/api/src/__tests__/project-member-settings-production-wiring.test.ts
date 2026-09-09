@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
-import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppLogger, ObjectStorage, Scheduler } from '../application/ports.js';
@@ -19,7 +18,6 @@ import {
 } from './helpers/upload-lifecycle.js';
 import { createScriptedBackendPersistence } from './helpers/backend-persistence.js';
 import { notFound } from '../shared/errors.js';
-import { registerRouteSchemas } from '../shared/http-route-schemas.js';
 
 const emptyRoute: FastifyPluginAsync = async () => {};
 const deployment = '123e4567-e89b-42d3-a456-426614174000';
@@ -50,7 +48,7 @@ function projectRecord() {
 		status: 'PUBLISHED' as const,
 		sortOrder: 0,
 		posterAssetId: null as number | null,
-		webglEntryKey: `webgl/7/${deployment}/site/index.html`,
+		currentWebglDeploymentId: deployment as string | null,
 		poster: null as null | { storageKey: string; kind: 'POSTER'; status: string },
 		members: [{
 			id: 11,
@@ -74,6 +72,7 @@ function projectRecord() {
 			playbackSizeBytes: 0n,
 			playbackStatus: 'READY' as const,
 			playbackError: '',
+			representations: [],
 		}],
 		updatedAt: new Date('2026-07-24T00:00:00.000Z'),
 	};
@@ -89,7 +88,6 @@ function storageHarness() {
 	};
 	const storage: ObjectStorage = {
 		upload: vi.fn(),
-		presign: vi.fn(async () => 'https://storage.test/object'),
 		delete: calls.delete,
 		head: vi.fn(async () => null),
 		readRange: vi.fn(async () => Buffer.alloc(0)),
@@ -193,6 +191,7 @@ function portHarness() {
 		}),
 	};
 	const repository: ProjectApplicationRepository = {
+		auditActiveSubmissions: async () => ({ draftProjects: 0, pendingSubmissions: 0, finalizingSubmissions: 0, activePublicationJobs: 0 }),
 		findProjectsForUser: calls.projectList,
 		findProjectById: calls.projectFindUnique,
 		isMemberOfProject: async (projectId, userId) => calls.projectMemberFindFirst({ projectId, userId }),
@@ -202,13 +201,12 @@ function portHarness() {
 			const assets = [...project.assets];
 			await calls.assetDeleteMany();
 			await calls.projectDelete();
-			return { assets, webglEntryKey: project.webglEntryKey, activeUploads: [] };
+			return { assets, activeUploads: [] };
 		},
 		async clearWebglDeployment(_id, outbox) {
 			await calls.orphanUpsert(outbox);
-			const oldEntryKey = project.webglEntryKey;
-			project.webglEntryKey = '';
-			return { oldEntryKey, cancelledSession: null };
+			project.currentWebglDeploymentId = null;
+			return { cancelledSession: null };
 		},
 		findAssetById: calls.findAssetById,
 		setProjectVideoOrder: calls.setProjectVideoOrder,
@@ -221,16 +219,17 @@ function portHarness() {
 			return {
 				result,
 				assets,
-				projects: [{ id: project.id, webglEntryKey: project.webglEntryKey }],
+				projects: [{ id: project.id, currentWebglDeploymentId: project.currentWebglDeploymentId }],
 				activeUploads: [],
 			};
 		},
 		bulkUpdateStatus: async (_ids, status) => calls.projectUpdateMany({ status }),
 		findExhibitionById: vi.fn(async () => null),
+		findSubmissionForActor: vi.fn(async () => null),
+		finalizeSubmission: vi.fn(async () => { throw new Error('not scripted'); }),
+		cancelSubmission: vi.fn(async () => { throw new Error('not scripted'); }),
 		findProjectByExhibitionAndSlug: vi.fn(async () => null),
 		createProjectWithAssets: vi.fn(async () => { throw new Error('not scripted'); }),
-		createAsset: vi.fn(async () => { throw new Error('not scripted'); }),
-		replaceOrCreateReplaceableAsset: vi.fn(async () => { throw new Error('not scripted'); }),
 	};
 	const accessRepository = {
 		findProject: calls.projectFindUnique,
@@ -319,14 +318,8 @@ function graphHarness(
 async function routeApp(
 	harness: ReturnType<typeof graphHarness>,
 	user: { id: number; role: 'ADMIN' | 'OPERATOR' | 'USER' } = { id: 1, role: 'ADMIN' },
-	options: { runtimeContracts?: boolean } = {},
 ): Promise<FastifyInstance> {
 	const app = Fastify({ logger: false });
-	if (options.runtimeContracts) {
-		app.setValidatorCompiler(validatorCompiler);
-		app.setSerializerCompiler(serializerCompiler);
-		registerRouteSchemas(app);
-	}
 	app.addHook('preHandler', async (request) => {
 		request.currentUser = {
 			...user,
@@ -352,7 +345,6 @@ async function routeApp(
 		importController: emptyRoute,
 		exportController: emptyRoute,
 		projectMultipartController: emptyRoute,
-		gameUploadController: emptyRoute,
 	}), { prefix: '/api/admin' });
 	await app.ready();
 	return app;
@@ -438,80 +430,6 @@ describe('project/member/settings production wiring', () => {
 		expect(deniedHarness.ports.calls.projectUpdate).not.toHaveBeenCalled();
 	});
 
-	it('serializes an empty material list through the authenticated GET and PATCH response contracts', async () => {
-		const harness = graphHarness();
-		harness.ports.getProject().assets = [];
-		const app = await routeApp(harness, undefined, { runtimeContracts: true });
-		apps.push(app);
-
-		const detail = await app.inject({ method: 'GET', url: '/api/admin/projects/7' });
-		expect(detail.statusCode, detail.body).toBe(200);
-		expect(detail.json().data.attachments).toEqual([]);
-
-		const updated = await app.inject({
-			method: 'PATCH',
-			url: '/api/admin/projects/7',
-			payload: { title: 'Updated without materials' },
-		});
-		expect(updated.statusCode, updated.body).toBe(200);
-		expect(updated.json().data.attachments).toEqual([]);
-	});
-
-	it('serializes READY document and attachment metadata through the authenticated detail response contract', async () => {
-		const harness = graphHarness();
-		harness.ports.getProject().assets = [
-			{
-				id: 31,
-				projectId: 7,
-				kind: 'DOCUMENT',
-				status: 'READY',
-				storageKey: 'legacy/manual.pdf',
-				playbackStorageKey: null,
-				originalName: 'manual.pdf',
-				mimeType: 'application/pdf',
-				playbackMimeType: '',
-				sizeBytes: 1024n,
-				playbackSizeBytes: 0n,
-				playbackStatus: 'READY',
-				playbackError: '',
-				representations: [{ role: 'ORIGINAL', state: 'READY', objectKey: 'assets/31/original/manual.pdf', mimeType: 'application/pdf', sizeBytes: 1024n },],
-			},
-			{
-				id: 32,
-				projectId: 7,
-				kind: 'ATTACHMENT',
-				status: 'READY',
-				storageKey: 'legacy/source.zip',
-				playbackStorageKey: null,
-				originalName: 'source.zip',
-				mimeType: 'application/zip',
-				playbackMimeType: '',
-				sizeBytes: 2048n,
-				playbackSizeBytes: 0n,
-				playbackStatus: 'READY',
-				playbackError: '',
-				representations: [{ role: 'ORIGINAL', state: 'READY', objectKey: 'assets/32/original/source.zip', mimeType: 'application/zip', sizeBytes: 2048n },],
-			},
-		] as unknown as ReturnType<typeof harness.ports.getProject>['assets'];
-		const app = await routeApp(harness, undefined, { runtimeContracts: true });
-		apps.push(app);
-
-		const detail = await app.inject({ method: 'GET', url: '/api/admin/projects/7' });
-		expect(detail.statusCode, detail.body).toBe(200);
-		expect(detail.json().data.attachments).toEqual([
-			{ assetId: 31, kind: 'DOCUMENT', originalName: 'manual.pdf', mimeType: 'application/pdf', sizeBytes: 1024, downloadUrl: 'https://api-a.test/api/assets/31/download?variant=original' },
-			{ assetId: 32, kind: 'ATTACHMENT', originalName: 'source.zip', mimeType: 'application/zip', sizeBytes: 2048, downloadUrl: 'https://api-a.test/api/assets/32/download?variant=original' },
-		]);
-
-		const updated = await app.inject({
-			method: 'PATCH',
-			url: '/api/admin/projects/7',
-			payload: { title: 'Updated with materials' },
-		});
-		expect(updated.statusCode, updated.body).toBe(200);
-		expect(updated.json().data.attachments).toEqual(detail.json().data.attachments);
-	});
-
 	it('preserves project list/detail/update/poster failures without forbidden mutations', async () => {
 		const listHarness = graphHarness();
 		listHarness.ports.calls.projectList.mockRejectedValueOnce(new Error('list repository failure'));
@@ -586,7 +504,7 @@ describe('project/member/settings production wiring', () => {
 		});
 		expect(durableWebglDelete.statusCode).toBe(204);
 		expect(webglHarness.ports.calls.orphanUpsert).toHaveBeenCalled();
-		expect(webglHarness.ports.getProject().webglEntryKey).toBe('');
+		expect(webglHarness.ports.getProject().currentWebglDeploymentId).toBeNull();
 		expect(webglHarness.storage.calls.delete).not.toHaveBeenCalled();
 		expect(webglHarness.uploadLifecycle.wakeDeletionWorker).toHaveBeenCalledOnce();
 

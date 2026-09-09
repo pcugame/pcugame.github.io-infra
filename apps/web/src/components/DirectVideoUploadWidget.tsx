@@ -7,7 +7,7 @@ import {
 	uploadDirectAssetFile,
 	waitForDirectAssetReady,
 	type DirectAssetUploadSession,
-	type GameUploadProgress,
+	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
 import { queryKeys } from '../lib/query';
 import type { DirectAssetUploadKind } from '../contracts';
@@ -30,6 +30,7 @@ interface Props {
 	autoStart?: boolean;
 	onComplete?: () => void;
 	onSkip?: () => void;
+	submissionItems?: readonly { id: string; clientToken: string }[];
 	/** Available VIDEO slots for this upload operation (project maximum is five). */
 	maxFiles?: number;
 	maxFileBytes?: number;
@@ -48,6 +49,7 @@ export default function DirectVideoUploadWidget({
 	autoStart = false,
 	onComplete,
 	onSkip,
+	submissionItems = [],
 	maxFiles = 5,
 	maxFileBytes,
 	kind = 'VIDEO',
@@ -58,7 +60,7 @@ export default function DirectVideoUploadWidget({
 	const fileInputId = useId();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
-	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
+	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
 	const [resumable, setResumable] = useState<SavedVideoSession | null>(null);
@@ -219,6 +221,7 @@ export default function DirectVideoUploadWidget({
 					if (next.percent >= 100) setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
+					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
 					onSession: (next) => {
 						const current = isCurrentRun(token);
 						const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
@@ -256,7 +259,7 @@ export default function DirectVideoUploadWidget({
 				submitting.current = false;
 			}
 		}
-	}, [beginRun, forget, isCurrentRun, kind, onComplete, projectId, qc, remember, updateCompleted]);
+	}, [beginRun, forget, isCurrentRun, kind, onComplete, projectId, qc, remember, submissionItems, updateCompleted]);
 
 	const matchesSavedFile = useCallback((chosen: readonly File[], saved: SavedVideoSession) => {
 		const index = saved.completed ?? 0;

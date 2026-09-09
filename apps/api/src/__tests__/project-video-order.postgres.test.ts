@@ -1,4 +1,3 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
@@ -8,36 +7,25 @@ import { createAssetsRepository } from '../modules/assets/repository.js';
 
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 describe.runIf(enabled)('project video ordering transactions', () => {
-	const schema = `video_order_${randomUUID().replaceAll('-', '')}`;
-	let control: PrismaClient;
 	let db: PrismaClient;
 	let creatorId: number;
 	let exhibitionId: number;
 	const projects: number[] = [];
+	let protectedBucket = 'protected';
 	beforeAll(async () => {
-		const url = new URL(process.env['DATABASE_URL']!);
-		control = createPrismaClientForDatabase(url.toString());
-		await control.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
-		const root = new URL('../../prisma/migrations/', import.meta.url);
-		for (const migration of (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && entry.name < '20260822000000_canonical_asset_contract').map(({ name }) => name).sort()) {
-			const connection = createPrismaClientForDatabase(url.toString());
-			try { await connection.$executeRawUnsafe(`SET search_path TO "${schema}";\n${await readFile(new URL(`${migration}/migration.sql`, root), 'utf8')}`); }
-			finally { await connection.$disconnect(); }
-		}
-		url.searchParams.set('schema', schema);
-		url.searchParams.set('options', `-c search_path=${schema}`);
-		db = createPrismaClientForDatabase(url.toString());
-		await db.storageBucket.upsert({ where: { bucket: 'video-order-test' }, create: { bucket: 'video-order-test', visibility: 'PROTECTED' }, update: {} });
+		db = createPrismaClientForDatabase(process.env['DATABASE_URL']!);
+		protectedBucket = (await db.storageBucket.findUnique({ where: { visibility: 'PROTECTED' } }))?.bucket ?? protectedBucket;
+		await db.storageBucket.upsert({ where: { bucket: protectedBucket }, create: { bucket: protectedBucket, visibility: 'PROTECTED' }, update: {} });
 		const token = randomUUID();
 		creatorId = (await db.user.create({ data: { googleSub: token, email: `${token}@example.test`, name: 'Video order test' } })).id;
 		exhibitionId = (await db.exhibition.create({ data: { year: 2098, title: token } })).id;
-	}, 60_000);
+	});
 	afterAll(async () => {
-		await db?.$disconnect();
-		if (control) {
-			await control.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-			await control.$disconnect();
-		}
+		if (!db) return;
+		await db.project.deleteMany({ where: { id: { in: projects } } });
+		if (exhibitionId) await db.exhibition.delete({ where: { id: exhibitionId } });
+		if (creatorId) await db.user.delete({ where: { id: creatorId } });
+		await db.$disconnect();
 	});
 	async function fixture(orders: Array<number | null> = [0, 1, 2], status: 'DRAFT' | 'PUBLISHED' = 'PUBLISHED') {
 		const project = await db.project.create({ data: { exhibitionId, creatorId, slug: randomUUID(), title: 'Video test', status } });
@@ -45,7 +33,7 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 		const ids: number[] = [];
 		for (const videoSortOrder of orders) ids.push((await db.asset.create({ data: {
 			projectId: project.id, kind: 'VIDEO', status: 'READY', originalName: 'video.mp4', videoSortOrder,
-			representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: 'video-order-test', objectKey: `videos/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: 10n } },
+			representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: protectedBucket, objectKey: `videos/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: 10n } },
 		} })).id);
 		return { projectId: project.id, ids };
 	}
@@ -69,7 +57,7 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 		const repo = createProjectCrudRepository(db);
 		await repo.setProjectVideoOrder(projectId, ids, ids);
 		expect((await current(projectId)).map((a) => a.videoSortOrder)).toEqual([0, 1, 2]);
-		await db.asset.create({ data: { projectId, kind: 'VIDEO', status: 'READY', originalName: 'old-runtime.mp4', representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: 'video-order-test', objectKey: `videos/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: 10n } } } });
+		await db.asset.create({ data: { projectId, kind: 'VIDEO', status: 'READY', originalName: 'old-runtime.mp4', representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: protectedBucket, objectKey: `videos/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: 10n } } } });
 		await expect(repo.setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
 	});
 	it('allows only one concurrent reorder with the same expected order', async () => {
@@ -91,18 +79,16 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 		expect((await db.asset.findUniqueOrThrow({ where: { id: ids[index]! } })).status).toBe('DELETING');
 		await expect(createProjectCrudRepository(db).setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
 	});
+	it.each(['PENDING', 'FINALIZING'] as const)('blocks ordinary reorder and delete during %s submission', async (state) => {
+		const { projectId, ids } = await fixture([0, 1, 2], 'DRAFT');
+		await db.projectSubmission.create({ data: { projectId, actorId: creatorId, state } });
+		await expect(createProjectCrudRepository(db).setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
+		await expect(createAssetsRepository(db).claimAssetForDeletion(ids[0]!)).rejects.toMatchObject({ statusCode: 409 });
+		expect(await current(projectId)).toHaveLength(3);
+	});
 	it('refuses reorder for an over-limit legacy project without removing videos', async () => {
 		const { projectId, ids } = await fixture([0, 1, 2, 3, 4, null]);
 		await expect(createProjectCrudRepository(db).setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
 		expect(await current(projectId)).toHaveLength(6);
 	});
-	it('allows deleting overflow legacy videos until the remaining five can be normalized', async () => {
-		const { projectId, ids } = await fixture([0, 1, 2, 3, 4, null, null]);
-		const repo = createAssetsRepository(db);
-		await repo.claimAssetForDeletion(ids[6]!);
-		expect(await current(projectId)).toHaveLength(6);
-		await repo.claimAssetForDeletion(ids[0]!);
-		expect((await current(projectId)).map(({ videoSortOrder }) => videoSortOrder)).toEqual([0, 1, 2, 3, 4]);
-	});
-
 });

@@ -7,11 +7,13 @@ import { createRootLogger } from './lib/logger.js';
 import { createCryptoIdGenerator, createSystemClock } from './infrastructure/production-ports.js';
 import { createWebglProcessingRepository } from './modules/asset-upload/webgl-processing-repository.js';
 import { createWebglProcessingGraph } from './modules/webgl/processing.composition.js';
+import { assertDirectArchiveWorkerCapacity } from './shared/worker-capacity.js';
 
 /** Dedicated WebGL validation/publication process; it never constructs an HTTP server. */
 export async function runWebglWorker(): Promise<void> {
 	const { loadEnv } = await import('./config/env.js');
 	const config = loadEnv();
+	const capacity = assertDirectArchiveWorkerCapacity(config, 'WEBGL');
 	const logger = createRootLogger(config);
 	const prisma = createPrismaClientForDatabase(config.DATABASE_URL);
 	const s3 = createS3Client(config);
@@ -23,6 +25,7 @@ export async function runWebglWorker(): Promise<void> {
 	try {
 		const graph = createWebglProcessingGraph({
 			publicBucket: config.S3_BUCKET_PUBLIC,
+			protectedBucket: config.S3_BUCKET_PROTECTED,
 			storage,
 			repository: createWebglProcessingRepository(prisma),
 			ids: createCryptoIdGenerator(),
@@ -30,14 +33,16 @@ export async function runWebglWorker(): Promise<void> {
 			logger,
 			options: {
 				tempRoot: join(config.DIRECT_UPLOAD_WORKER_TEMP_ROOT, 'webgl'),
-				tempDiskBudgetBytes: config.DIRECT_UPLOAD_WORKER_TEMP_MAX_MB * 1024 * 1024,
-				physicalArchiveByteLimit: config.UPLOAD_PRIVILEGED_GAME_MAX_MB * 1024 * 1024,
+				tempDiskBudgetBytes: capacity.tempBudgetBytes,
+				physicalArchiveByteLimit: capacity.acceptedArchiveBytes,
 				concurrency: 1,
 				leaseMs: 120_000,
 				heartbeatMs: 30_000,
 				pollIntervalMs: config.DIRECT_UPLOAD_WORKER_POLL_MS,
 			},
 		});
+		const removed = await graph.cleanupStaleWorkspaces(new Date(Date.now() - 24 * 60 * 60_000));
+		if (removed > 0) logger.warn({ removed }, 'Removed stale WebGL worker temp directories');
 		await graph.loop.start();
 		await new Promise<void>((resolve) => abort.signal.addEventListener('abort', () => resolve(), { once: true }));
 		await graph.loop.close();

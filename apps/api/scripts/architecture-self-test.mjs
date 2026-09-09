@@ -29,10 +29,7 @@ function output(result) {
 	return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
 
-const compatibilityTests = run(process.execPath, ['--test', 'scripts/phase1-architecture-boundary.test.mjs']);
-let failed = compatibilityTests.status !== 0;
-if (failed) console.error(output(compatibilityTests));
-else console.log('[architecture-self-test] PASS exact Phase 1 compatibility boundary regressions');
+let failed = false;
 for (const [name, directory, guardRule, dependencyRule] of forbidden) {
 	const target = `architecture-fixtures/data-plane/forbidden/${directory}`;
 	const result = run(process.execPath, [guard, target]);

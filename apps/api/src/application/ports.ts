@@ -7,6 +7,8 @@ export interface UploadObjectOptions {
 	contentEncoding?: string;
 	cacheControl?: string;
 	contentType?: string;
+	/** Hex SHA-256 persisted as the S3 ChecksumSHA256 object attribute. */
+	checksumSha256?: string;
 }
 
 export interface ObjectStreamResult {
@@ -154,11 +156,6 @@ export interface ObjectStorage {
 		options?: UploadObjectOptions,
 		request?: StorageRequestOptions,
 	): Promise<void>;
-	presign(
-		bucket: string,
-		key: string,
-		options?: { ttlSec?: number; responseContentDisposition?: string },
-	): Promise<string>;
 	delete(bucket: string, key: string, request?: StorageRequestOptions): Promise<void>;
 	head(bucket: string, key: string, request?: StorageRequestOptions): Promise<{
 		size: number;

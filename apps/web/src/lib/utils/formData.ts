@@ -2,6 +2,7 @@
 // Project submit multipart 요청 조립용
 
 import type { SubmitProjectPayloadInput } from '../../contracts/schemas';
+import type { ProjectSubmissionManifestItem } from '../../contracts';
 
 export interface SubmitProjectFiles {
   poster?: File;
@@ -22,7 +23,7 @@ export interface SubmitProjectFiles {
  * - `videoFile` 필드: 복수 파일 반복 append
  */
 export function buildSubmitFormData(
-  payload: SubmitProjectPayloadInput,
+	payload: SubmitProjectPayloadInput & { manifest: ProjectSubmissionManifestItem[] },
   files: SubmitProjectFiles,
 ): FormData {
   const fd = new FormData();

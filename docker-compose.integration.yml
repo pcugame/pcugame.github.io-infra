@@ -256,6 +256,15 @@ services:
       - /tmp:rw,noexec,nosuid,size=512m
     command: ["node", "dist/image-worker.js"]
 
+  project-publication-worker:
+    image: pcu-integration-api:local
+    restart: unless-stopped
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment: *api-env
+    command: ["node", "dist/project-publication-worker.js"]
+
   web:
     image: node:22-bookworm-slim
     restart: unless-stopped

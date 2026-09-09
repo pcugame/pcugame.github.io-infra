@@ -41,18 +41,22 @@ describe('canonical asset Phase 1 expand schema', () => {
 		expect(sql).not.toContain('CREATE UNIQUE INDEX "asset_representations_bucket_object_key_idx"');
 	});
 
-	it('models nullable Phase 1 owners and preserves legacy dual-read fields', async () => {
-		const schema = await readFile(prismaSchemaUrl, 'utf8');
+	it('records nullable Phase 1 owners and legacy dual-read columns in immutable expand SQL', async () => {
+		const sql = await readFile(expandMigrationUrl, 'utf8');
 
-		expect(schema).toMatch(/enum AssetKind \{[\s\S]*\bWEBGL\b[\s\S]*\}/);
-		expect(schema).toMatch(/model Asset \{[\s\S]*projectId\s+Int\?[\s\S]*exhibitionId\s+Int\?/);
-		expect(schema).toMatch(/model Asset \{[\s\S]*storageKey\s+String\?/);
-		expect(schema).toMatch(/model Exhibition \{[\s\S]*posterAssetId\s+Int\?/);
-		expect(schema).toMatch(/model AssetRepresentation \{[\s\S]*etag\s+String\?/);
-		expect(schema).toMatch(/model WebglDeployment \{[\s\S]*objectManifest\s+Json\?/);
-		expect(schema).toContain('playbackStorageKey String?');
-		expect(schema).toContain('webglEntryKey');
-		expect(schema).toContain('posterStorageKey');
+		expect(sql).toContain('ALTER COLUMN "project_id" DROP NOT NULL');
+		expect(sql).toContain('ALTER COLUMN "storage_key" DROP NOT NULL');
+		expect(sql).toContain('ADD COLUMN "exhibition_id" INTEGER');
+		expect(sql).toContain('ADD COLUMN "poster_asset_id" INTEGER');
+		expect(sql).toContain('ADD COLUMN "current_webgl_deployment_id" TEXT');
+		expect(sql).toContain('retaining every legacy column and route dependency for dual-read cutover');
+		// The checked-in Prisma schema describes Phase 2, so it must not retain
+		// these compatibility fields merely to make an expand test pass.
+		const schema = await readFile(prismaSchemaUrl, 'utf8');
+		expect(schema).not.toContain('storageKey String?');
+		expect(schema).not.toContain('playbackStorageKey String?');
+		expect(schema).not.toContain('webglEntryKey');
+		expect(schema).not.toContain('posterStorageKey');
 	});
 
 	it('adds one generic direct multipart session without duplicating Garage part inventory', async () => {
@@ -64,9 +68,9 @@ describe('canonical asset Phase 1 expand schema', () => {
 		expect(schema).toMatch(/enum AssetUploadKind \{[\s\S]*\bGAME\b[\s\S]*\bWEBGL\b[\s\S]*\bVIDEO\b[\s\S]*\bIMAGE\b[\s\S]*\bPOSTER\b[\s\S]*\}/);
 		expect(schema).toMatch(/enum AssetUploadSessionState \{[\s\S]*ALLOCATING[\s\S]*UPLOADING[\s\S]*COMPLETING[\s\S]*VERIFYING[\s\S]*READY[\s\S]*REJECTED[\s\S]*CANCELLED[\s\S]*EXPIRED[\s\S]*\}/);
 		expect(schema).toMatch(/model AssetUploadSession \{[\s\S]*sourceIdentityBlockManifest\s+Json[\s\S]*expectedTargetAssetUpdatedAt\s+DateTime\?[\s\S]*resultRepresentationId\s+String\?\s+@unique[\s\S]*reservedWebglDeploymentId\s+String\?\s+@unique/);
-		expect(schema).toMatch(/partUrlIssueWindowCount\s+Int\s+@default\(0\)/);
-		expect(schema).toMatch(/partUrlIssueWindowStartedAt\s+DateTime\?/);
-		expect(schema).toMatch(/partUrlLastIssuedAt\s+DateTime\?/);
+		expect(schema).toMatch(/partCapabilityIssuedCount\s+Int\s+@default\(0\)\s+@map\("part_capability_issued_count"\)/);
+		expect(schema).toMatch(/partCapabilityFirstIssuedAt\s+DateTime\?\s+@map\("part_capability_first_issued_at"\)/);
+		expect(schema).toMatch(/partCapabilityLastIssuedAt\s+DateTime\?\s+@map\("part_capability_last_issued_at"\)/);
 		expect(sql).toContain('CREATE TABLE "asset_upload_sessions"');
 		expect(sql).toMatch(
 			/CREATE TABLE "asset_upload_sessions" \([\s\S]*?"project_id" INTEGER,\s*"exhibition_id" INTEGER,/,
@@ -93,17 +97,11 @@ describe('canonical asset Phase 1 expand schema', () => {
 		expect(sql).not.toMatch(/ALTER TYPE "UploadKind" ADD VALUE 'VIDEO'/);
 	});
 
-	it('retains every legacy upload model unchanged for Phase 1 dual operation', async () => {
-		const schema = await readFile(prismaSchemaUrl, 'utf8');
-		for (const model of [
-			'GameUploadSession',
-			'GameUploadPart',
-			'GameUploadPartClaim',
-			'GameUploadActiveSession',
-		]) {
-			expect(schema).toContain(`model ${model} {`);
-		}
-		expect(schema).toMatch(/enum UploadKind \{\s*GAME\s*WEBGL\s*\}/);
+	it('leaves legacy upload storage untouched during Phase 1', async () => {
+		const sql = await readFile(expandMigrationUrl, 'utf8');
+		expect(sql).not.toMatch(/DROP\s+TABLE\s+"game_upload_/i);
+		expect(sql).not.toMatch(/DROP\s+TYPE\s+"UploadKind"/i);
+		expect(sql).not.toMatch(/ALTER\s+TABLE\s+"game_upload_/i);
 	});
 
 	it('adds a durable DB-clock leased export job without mutating legacy rows', async () => {

@@ -4,10 +4,21 @@ import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { validateBoundedZipFile, ZipValidationError, type BoundedZipValidationOptions } from '../archive/bounded-zip-validator.js';
 import { AppError } from '../../shared/errors.js';
-import { decodePersistedSourceIdentityManifest, materializeAndValidateCompletedSource } from '../admin/game-upload/source-identity.js';
+import {
+	decodePersistedSourceIdentityManifest,
+	materializeAndValidateCompletedSource,
+} from '../admin/game-upload/source-identity.js';
 import { analyzeWebglArchive, uploadWebglArchive, type WebglPublicObjectUploader } from './archive.js';
 import { webglContentMetadata } from './content.js';
+import {
+	assertWebglPublishedObjectManifest,
+	type WebglPublishedObjectManifest,
+	type WebglPublishedObjectManifestEntry,
+} from './manifest.js';
+export { assertWebglPublishedObjectManifest } from './manifest.js';
+export type { WebglPublishedObjectManifest, WebglPublishedObjectManifestEntry } from './manifest.js';
 import { createCanonicalWebglPublicKeys } from './paths.js';
+import { isWorkerSourceObjectMissing } from '../upload-lifecycle/worker-errors.js';
 
 export interface CanonicalWebglSourceRepresentation {
 	id: string;
@@ -38,6 +49,7 @@ export interface CanonicalWebglUploadSession {
 	resultAssetId: number;
 	resultRepresentationId: string;
 	reservedWebglDeploymentId: string | null;
+	validationAttemptCount?: number;
 	sourceRepresentation: CanonicalWebglSourceRepresentation;
 }
 
@@ -49,44 +61,10 @@ export interface ReservedWebglDeployment {
 	entryObjectKey: string;
 	state: 'PENDING' | 'PROCESSING' | 'READY';
 	expectedCurrentDeploymentId: string | null;
-}
-
-export interface WebglPublishedObjectManifestEntry {
-	objectKey: string;
-	sizeBytes: string;
-	mimeType: string;
-	contentEncoding: string | null;
-	etag: string | null;
-	checksumSha256: string | null;
-}
-
-export interface WebglPublishedObjectManifest {
-	version: 1;
-	objects: WebglPublishedObjectManifestEntry[];
-}
-
-export function assertWebglPublishedObjectManifest(
-	manifest: WebglPublishedObjectManifest,
-	publicPrefix: string,
-	entryObjectKey: string,
-): void {
-	if (manifest.version !== 1 || manifest.objects.length === 0) {
-		throw new Error('WebGL published object manifest is empty or unsupported');
-	}
-	const keys = new Set<string>();
-	for (const object of manifest.objects) {
-		if (!object.objectKey.startsWith(publicPrefix) || object.objectKey === publicPrefix
-			|| keys.has(object.objectKey) || !/^\d+$/.test(object.sizeBytes)
-			|| BigInt(object.sizeBytes) < 0n || !object.mimeType
-			|| !(object.contentEncoding === null || object.contentEncoding === 'br' || object.contentEncoding === 'gzip')
-			|| !(object.etag === null || typeof object.etag === 'string')
-			|| !(object.checksumSha256 === null || /^[a-f0-9]{64}$/i.test(object.checksumSha256))
-			|| (object.etag === null && object.checksumSha256 === null)) {
-			throw new Error('WebGL published object manifest is malformed');
-		}
-		keys.add(object.objectKey);
-	}
-	if (!keys.has(entryObjectKey)) throw new Error('WebGL published object manifest omits index.html');
+	outputBucket: string;
+	outputPrefix: string;
+	outputEntryObjectKey: string;
+	publicationStaged: boolean;
 }
 
 export interface WebglProcessingRepository {
@@ -97,6 +75,7 @@ export interface WebglProcessingRepository {
 		claimToken: string;
 		candidateDeploymentId: string;
 		publicBucket: string;
+		protectedBucket: string;
 		publicPrefix: string;
 		entryObjectKey: string;
 		sourceRepresentationId: string;
@@ -152,24 +131,11 @@ export interface WebglTempDiskBudget {
 	tryReserve(bytes: number): (() => void) | null;
 }
 
-function manifestBytes(value: unknown): Buffer {
-	if (typeof value === 'string') {
-		try { return decodePersistedSourceIdentityManifest(value); }
-		catch (cause) { throw new WebglTerminalValidationError('WebGL source identity manifest is malformed', { cause }); }
-	}
-	const digests = Array.isArray(value)
-		? value
-		: value && typeof value === 'object' && Array.isArray((value as { digests?: unknown }).digests)
-			? (value as { digests: unknown[] }).digests
-			: null;
-	if (!digests || digests.some((digest) => typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest))) {
-		throw new WebglTerminalValidationError('WebGL source identity manifest is malformed');
-	}
-	return Buffer.concat(digests.map((digest) => Buffer.from(digest as string, 'hex')));
-}
-
 function terminalValidationError(error: unknown): WebglTerminalValidationError | null {
 	if (error instanceof WebglTerminalValidationError) return error;
+	if (isWorkerSourceObjectMissing(error)) {
+		return new WebglTerminalValidationError(error.message, { cause: error });
+	}
 	if (error instanceof ZipValidationError
 		|| (error instanceof AppError && error.statusCode >= 400 && error.statusCode < 500)) {
 		return new WebglTerminalValidationError(error.message, { cause: error });
@@ -193,6 +159,7 @@ function assertCanonicalSource(session: CanonicalWebglUploadSession): void {
 
 export function createWebglProcessingProcessor(deps: {
 	publicBucket: string;
+	protectedBucket: string;
 	tempRoot: string;
 	physicalArchiveByteLimit: number;
 	diskBudget: WebglTempDiskBudget;
@@ -239,11 +206,16 @@ export function createWebglProcessingProcessor(deps: {
 				directory = await mkdtemp(join(tempRoot, 'pcu-webgl-processing-'));
 				const archivePath = join(directory, 'source.zip');
 				await context.assertClaimOwned();
-				const source = await deps.storage.openSource({
-					bucket: session.bucket,
-					objectKey: session.objectKey,
-					signal: context.signal,
-				});
+				let source;
+				try {
+					source = await deps.storage.openSource({
+						bucket: session.bucket,
+						objectKey: session.objectKey,
+						signal: context.signal,
+					});
+				} catch (error) {
+					throw terminalValidationError(error) ?? error;
+				}
 				if (source.sizeBytes !== totalBytes) {
 					throw new WebglTerminalValidationError('WebGL protected source size does not match its representation');
 				}
@@ -253,7 +225,7 @@ export function createWebglProcessingProcessor(deps: {
 						sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
 						sourceIdentity: session.sourceIdentity,
 						sourceIdentityBlockSizeBytes: session.sourceIdentityBlockSizeBytes,
-						sourceIdentityBlockManifest: manifestBytes(session.sourceIdentityBlockManifest),
+						sourceIdentityBlockManifest: decodePersistedSourceIdentityManifest(session.sourceIdentityBlockManifest),
 						source: source.body,
 						destination: createWriteStream(archivePath, { flags: 'wx', mode: 0o600 }),
 						physicalByteLimit: deps.physicalArchiveByteLimit,
@@ -286,6 +258,7 @@ export function createWebglProcessingProcessor(deps: {
 					claimToken: context.claimToken,
 					candidateDeploymentId,
 					publicBucket: deps.publicBucket,
+					protectedBucket: deps.protectedBucket,
 					publicPrefix: candidateKeys.publicPrefix,
 					entryObjectKey: candidateKeys.entryObjectKey,
 					sourceRepresentationId: session.sourceRepresentation.id,
@@ -294,32 +267,35 @@ export function createWebglProcessingProcessor(deps: {
 				if (reservation.projectId !== session.projectId
 					|| reservation.publicBucket !== deps.publicBucket
 					|| reservation.publicPrefix !== keys.publicPrefix
-					|| reservation.entryObjectKey !== keys.entryObjectKey) {
+					|| reservation.entryObjectKey !== keys.entryObjectKey
+					|| (reservation.publicationStaged
+						? reservation.outputBucket !== deps.protectedBucket
+						: reservation.outputBucket !== deps.publicBucket)) {
 					throw new Error('Persisted WebGL deployment identity is malformed');
 				}
 				if (reservation.state !== 'READY') {
 					const publishedObjectKeys = await uploadWebglArchive({
 						archivePath,
-						publicBucket: deps.publicBucket,
-						publicPrefix: keys.publicPrefix,
+						publicBucket: reservation.outputBucket,
+						publicPrefix: reservation.outputPrefix,
 						layout,
 						uploader: deps.uploader,
 						signal: context.signal,
 					});
-					if (!publishedObjectKeys.includes(keys.entryObjectKey)) {
+					if (!publishedObjectKeys.includes(reservation.outputEntryObjectKey)) {
 						throw new Error('Validated WebGL publish omitted index.html');
 					}
 					const objects: WebglPublishedObjectManifestEntry[] = [];
 					for (const objectKey of [...publishedObjectKeys].sort()) {
 						const head = await deps.uploader.head({
-							bucket: deps.publicBucket,
+							bucket: reservation.outputBucket,
 							objectKey,
 							signal: context.signal,
 						});
 						if (!head || !Number.isSafeInteger(head.sizeBytes) || head.sizeBytes < 0) {
 							throw new Error('Published WebGL object is unavailable for manifest recovery');
 						}
-						const relativePath = objectKey.slice(keys.publicPrefix.length);
+						const relativePath = objectKey.slice(reservation.outputPrefix.length);
 						const expected = webglContentMetadata(relativePath);
 						if (head.mimeType.split(';', 1)[0]!.trim().toLowerCase()
 							!== expected.contentType.split(';', 1)[0]!.trim().toLowerCase()) {
@@ -335,7 +311,11 @@ export function createWebglProcessingProcessor(deps: {
 						});
 					}
 					const objectManifest: WebglPublishedObjectManifest = { version: 1, objects };
-					assertWebglPublishedObjectManifest(objectManifest, keys.publicPrefix, keys.entryObjectKey);
+					assertWebglPublishedObjectManifest(
+						objectManifest,
+						reservation.outputPrefix,
+						reservation.outputEntryObjectKey,
+					);
 					await context.assertClaimOwned();
 					const committed = await deps.repository.commitReady({
 						sessionId: session.id,
@@ -353,8 +333,8 @@ export function createWebglProcessingProcessor(deps: {
 							sessionId: session.id,
 							generation: session.generation,
 							claimToken: context.claimToken,
-							publicBucket: deps.publicBucket,
-							publicPrefix: keys.publicPrefix,
+							publicBucket: reservation.outputBucket,
+							publicPrefix: reservation.outputPrefix,
 							reason: 'webgl-current-pointer-fenced',
 						});
 						throw new WebglGenerationFencedError();

@@ -106,6 +106,7 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 		setDocumentFiles([]);
 		if (documentsInputRef.current) documentsInputRef.current.value = '';
 	};
+
 	const clearAttachments = () => {
 		setAttachmentFiles([]);
 		if (attachmentsInputRef.current) attachmentsInputRef.current.value = '';
@@ -233,8 +234,14 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 		else setAttachmentFiles((previous) => [...previous, ...files]);
 		input.value = '';
 	};
-	const handleDocumentsChange = (e: ChangeEvent<HTMLInputElement>) => addMaterials('문서', Array.from(e.target.files ?? []), 'documents', e.target);
-	const handleAttachmentsChange = (e: ChangeEvent<HTMLInputElement>) => addMaterials('첨부자료', Array.from(e.target.files ?? []), 'attachments', e.target);
+
+	const handleDocumentsChange = (e: ChangeEvent<HTMLInputElement>) => {
+		addMaterials('문서', Array.from(e.target.files ?? []), 'documents', e.target);
+	};
+
+	const handleAttachmentsChange = (e: ChangeEvent<HTMLInputElement>) => {
+		addMaterials('첨부자료', Array.from(e.target.files ?? []), 'attachments', e.target);
+	};
 
 	return {
 		posterFile,

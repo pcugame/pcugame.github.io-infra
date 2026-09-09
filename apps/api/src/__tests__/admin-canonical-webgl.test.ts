@@ -28,7 +28,7 @@ const outbox = { publicBucket: 'public', protectedBucket: 'protected', reason: '
 
 describe('canonical admin WebGL integration', () => {
 	it('deletes exact manifest keys and never guesses a prefix when a manifest exists', () => {
-		const targets = projectWebglDeletionTargets(7, entry, outbox, [snapshot]);
+		const targets = projectWebglDeletionTargets(7, outbox, [snapshot]);
 		expect(targets.map(({ bucket, storageKey, targetKind }) => ({ bucket, storageKey, targetKind }))).toEqual([
 			{ bucket: 'protected', storageKey: source, targetKind: undefined },
 			{ bucket: 'public', storageKey: entry, targetKind: 'EXACT' },
@@ -38,7 +38,7 @@ describe('canonical admin WebGL integration', () => {
 	});
 
 	it('fails closed on a malformed manifest instead of falling back to prefix deletion', () => {
-		expect(() => projectWebglDeletionTargets(7, entry, outbox, [{
+		expect(() => projectWebglDeletionTargets(7, outbox, [{
 			...snapshot,
 			objectManifest: { version: 1, objects: [{ objectKey: '../outside' }] },
 		}])).toThrow(/manifest escapes/);
@@ -50,13 +50,11 @@ describe('canonical admin WebGL integration', () => {
 		const tx = {
 			project: {
 				findUniqueOrThrow: vi.fn(async () => ({
-					webglEntryKey: entry,
 					currentWebglDeploymentId: deploymentId,
 					webglDeployments: [snapshot],
 				})),
 				updateMany: vi.fn(async () => ({ count: 1 })),
 			},
-			gameUploadActiveSession: { findUnique: vi.fn(async () => null) },
 			assetUploadSession: { findMany: vi.fn(async () => []), updateMany: vi.fn() },
 			orphanObject: { upsert },
 			$queryRaw: vi.fn(async () => []),
@@ -75,7 +73,7 @@ describe('canonical admin WebGL integration', () => {
 		]);
 		expect(tx.project.updateMany).toHaveBeenCalledWith({
 			where: { id: 7, currentWebglDeploymentId: deploymentId },
-			data: { currentWebglDeploymentId: null, webglEntryKey: '' },
+			data: { currentWebglDeploymentId: null },
 		});
 		expect(deleteDeployments).toHaveBeenCalledWith({ where: { projectId: 7 } });
 	});
@@ -85,11 +83,10 @@ describe('canonical admin WebGL integration', () => {
 		const tx = {
 			project: {
 				findUniqueOrThrow: vi.fn(async () => ({
-					webglEntryKey: '', currentWebglDeploymentId: deploymentId, webglDeployments: [],
+					currentWebglDeploymentId: deploymentId, webglDeployments: [],
 				})),
 				updateMany: vi.fn(async () => ({ count: 0 })),
 			},
-			gameUploadActiveSession: { findUnique: vi.fn(async () => null) },
 			assetUploadSession: { findMany: vi.fn(async () => []) },
 			webglDeployment: { deleteMany: deleteDeployments },
 		};
@@ -103,20 +100,4 @@ describe('canonical admin WebGL integration', () => {
 		expect(deleteDeployments).not.toHaveBeenCalled();
 	});
 
-	it('records the explicit Phase 1 fallback metric for a legacy admin response', async () => {
-		const upsert = vi.fn(async () => ({}));
-		const repository = createProjectCrudRepository({
-			project: { findUnique: vi.fn(async () => ({
-				id: 7,
-				webglEntryKey: `webgl/7/${deploymentId}/site/index.html`,
-				currentWebglDeploymentId: null,
-			})) },
-			migrationMetric: { upsert },
-		} as unknown as PrismaClient);
-
-		await repository.findProjectById(7);
-		expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
-			where: { name_scope: { name: 'public_webgl_legacy_fallback', scope: 'admin-project-response' } },
-		}));
-	});
 });

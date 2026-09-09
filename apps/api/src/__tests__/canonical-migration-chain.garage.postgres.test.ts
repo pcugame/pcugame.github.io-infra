@@ -32,7 +32,8 @@ const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true'
 	&& process.env['RUN_GARAGE_INTEGRATION'] === 'true';
 const migrationsUrl = new URL('../../prisma/migrations/', import.meta.url);
 const canonicalExpandMigration = '20260821000000_canonical_asset_expand';
-const phase1MigrationCeiling = '20260821700000_canonical_object_relocation_expand';
+const phase1MigrationCeiling = '20260821800000_project_video_order_expand';
+const contractMigration = '20260822000000_canonical_asset_contract';
 const buckets = {
 	protectedBucket: process.env['S3_BUCKET_PROTECTED'] ?? 'pcu-protected',
 	publicBucket: process.env['S3_BUCKET_PUBLIC'] ?? 'pcu-public',
@@ -414,7 +415,7 @@ describe.runIf(enabled)('Phase 1 canonical migration chain on PostgreSQL and Gar
 		s3.destroy();
 	});
 
-	it('expands, materializes, crash-resumes, restarts idempotently, and passes Phase 1 preflight', async () => {
+	it('expands, materializes, crash-resumes, passes preflight, and accepts the Phase 2 contract', async () => {
 		if (!migrationClient || !runFixture) throw new Error('migration client was not initialized');
 		const currentRun = runFixture;
 		let injectRelocationCommitFailure = true;
@@ -445,9 +446,21 @@ describe.runIf(enabled)('Phase 1 canonical migration chain on PostgreSQL and Gar
 			expect.objectContaining({ ref: { kind: 'exhibition', id: runFixture.ids.exhibition }, code: 'COPY_FAILED' }),
 			expect.objectContaining({ ref: { kind: 'webgl', id: runFixture.ids.malformedProject }, code: 'MALFORMED_LEGACY_ROW' }),
 		]);
-		const [crashedRelocation] = await migrationClient.canonicalObjectRelocation.findMany({
-			where: { workKind: 'exhibition', workRef: String(runFixture.ids.exhibition), role: 'DISPLAY_960' },
-		});
+		const [crashedRelocation] = await migrationClient.$queryRaw<Array<{
+			id: string;
+			destinationBucket: string;
+			destinationObjectKey: string;
+			sizeBytes: bigint;
+			checksumSha256: string;
+			state: string;
+		}>>(Prisma.sql`
+			SELECT "id", "destination_bucket" AS "destinationBucket",
+				"destination_object_key" AS "destinationObjectKey", "size_bytes" AS "sizeBytes",
+				"checksum_sha256" AS "checksumSha256", "state"::text AS "state"
+			FROM "canonical_object_relocations"
+			WHERE "work_kind" = 'exhibition' AND "work_ref" = ${String(runFixture.ids.exhibition)}
+				AND "role" = 'DISPLAY_960'
+		`);
 		expect(crashedRelocation).toMatchObject({ state: 'MATERIALIZED' });
 		if (!crashedRelocation) throw new Error('crashed relocation was not persisted');
 		track(crashedRelocation.destinationBucket, crashedRelocation.destinationObjectKey);
@@ -496,10 +509,10 @@ describe.runIf(enabled)('Phase 1 canonical migration chain on PostgreSQL and Gar
 			crashedRelocation.destinationBucket,
 			crashedRelocation.destinationObjectKey,
 		)).toEqual(crashedDestinationBeforeRestart);
-		expect(await migrationClient.canonicalObjectRelocation.findUniqueOrThrow({
-			where: { id: crashedRelocation.id },
-			select: { state: true },
-		})).toEqual({ state: 'COMMITTED' });
+		expect(await migrationClient.$queryRaw<Array<{ state: string }>>(Prisma.sql`
+			SELECT "state"::text AS "state" FROM "canonical_object_relocations"
+			WHERE "id" = ${crashedRelocation.id}
+		`)).toEqual([{ state: 'COMMITTED' }]);
 		expect(await migrationClient.$queryRaw<Array<{ state: string }>>(Prisma.sql`
 			SELECT "state"::text AS "state" FROM "orphan_objects"
 			WHERE "bucket" = ${crashedRelocation.destinationBucket}
@@ -652,17 +665,20 @@ describe.runIf(enabled)('Phase 1 canonical migration chain on PostgreSQL and Gar
 			&& representation.objectKey.startsWith(`public/images/exhibitions/${runFixture!.ids.exhibition}/${representation.role.toLowerCase()}/`)
 			&& representation.sourceIdentityAlgorithm === 'MIGRATION_COPY_SHA256'
 		))).toBe(true);
-		const relocationRows = await migrationClient.canonicalObjectRelocation.findMany({
-			select: {
-				sourceBucket: true,
-				sourceObjectKey: true,
-				destinationBucket: true,
-				destinationObjectKey: true,
-				sizeBytes: true,
-				checksumSha256: true,
-				state: true,
-			},
-		});
+		const relocationRows = await migrationClient.$queryRaw<Array<{
+			sourceBucket: string;
+			sourceObjectKey: string;
+			destinationBucket: string;
+			destinationObjectKey: string;
+			sizeBytes: bigint;
+			checksumSha256: string;
+			state: string;
+		}>>(Prisma.sql`
+			SELECT "source_bucket" AS "sourceBucket", "source_object_key" AS "sourceObjectKey",
+				"destination_bucket" AS "destinationBucket", "destination_object_key" AS "destinationObjectKey",
+				"size_bytes" AS "sizeBytes", "checksum_sha256" AS "checksumSha256", "state"::text AS "state"
+			FROM "canonical_object_relocations"
+		`);
 		expect(relocationRows).toHaveLength(7);
 		for (const relocation of relocationRows) {
 			expect(relocation.state).toBe('COMMITTED');
@@ -769,13 +785,106 @@ describe.runIf(enabled)('Phase 1 canonical migration chain on PostgreSQL and Gar
 			unresolvedRows: 0,
 			legacyFallbackReads: 0,
 		});
-		const observations = await migrationClient.migrationMetric.findMany({
-			where: { name: { in: [...LEGACY_BRIDGE_METRIC_NAMES] } },
-			select: { value: true, lastObservedAt: true },
-		});
+		const observations = await migrationClient.$queryRaw<Array<{ value: bigint; lastObservedAt: Date }>>(Prisma.sql`
+			SELECT "value", "last_observed_at" AS "lastObservedAt"
+			FROM "migration_metrics"
+			WHERE "name" IN (${Prisma.join([...LEGACY_BRIDGE_METRIC_NAMES])})
+		`);
 		expect(observations).toHaveLength(LEGACY_BRIDGE_METRIC_NAMES.length);
 		expect(observations.every((metric) => (
 			metric.value === 0n && metric.lastObservedAt?.getTime() === observedAt.getTime()
 		))).toBe(true);
+
+		const assetsBeforeContract = await migrationClient.$queryRaw<Array<{
+			id: number; projectId: number | null; exhibitionId: number | null; kind: string; status: string;
+		}>>(Prisma.sql`
+			SELECT "id", "project_id" AS "projectId", "exhibition_id" AS "exhibitionId",
+				"kind"::text AS "kind", "status"::text AS "status"
+			FROM "assets" ORDER BY "id"
+		`);
+		const representationsBeforeContract = await migrationClient.$queryRaw<Array<{
+			id: string; assetId: number; role: string; bucket: string; objectKey: string; state: string;
+		}>>(Prisma.sql`
+			SELECT "id", "asset_id" AS "assetId", "role"::text AS "role", "bucket",
+				"object_key" AS "objectKey", "state"::text AS "state"
+			FROM "asset_representations" ORDER BY "id"
+		`);
+		const deploymentsBeforeContract = await migrationClient.$queryRaw<Array<{
+			id: string; projectId: number; sourceRepresentationId: string;
+			publicBucket: string; publicPrefix: string; entryObjectKey: string; state: string;
+		}>>(Prisma.sql`
+			SELECT "id", "project_id" AS "projectId", "source_representation_id" AS "sourceRepresentationId",
+				"public_bucket" AS "publicBucket", "public_prefix" AS "publicPrefix",
+				"entry_object_key" AS "entryObjectKey", "state"::text AS "state"
+			FROM "webgl_deployments" ORDER BY "id"
+		`);
+
+		const videoOrdersBeforeContract = await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "video_sort_order" FROM "assets" WHERE "kind" = 'VIDEO' ORDER BY "id"
+		`);
+		await applyMigration(databaseUrl, schema, contractMigration);
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "video_sort_order" FROM "assets" WHERE "kind" = 'VIDEO' ORDER BY "id"
+		`)).toEqual(videoOrdersBeforeContract);
+
+
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "project_id" AS "projectId", "exhibition_id" AS "exhibitionId",
+				"kind"::text AS "kind", "status"::text AS "status"
+			FROM "assets" ORDER BY "id"
+		`)).toEqual(assetsBeforeContract);
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "asset_id" AS "assetId", "role"::text AS "role", "bucket",
+				"object_key" AS "objectKey", "state"::text AS "state"
+			FROM "asset_representations" ORDER BY "id"
+		`)).toEqual(representationsBeforeContract);
+		expect(await migrationClient.$queryRaw(Prisma.sql`
+			SELECT "id", "project_id" AS "projectId", "source_representation_id" AS "sourceRepresentationId",
+				"public_bucket" AS "publicBucket", "public_prefix" AS "publicPrefix",
+				"entry_object_key" AS "entryObjectKey", "state"::text AS "state"
+			FROM "webgl_deployments" ORDER BY "id"
+		`)).toEqual(deploymentsBeforeContract);
+
+		const [legacyCatalog] = await migrationClient.$queryRaw<Array<{
+			tables: bigint; columns: bigint;
+		}>>(Prisma.sql`
+			SELECT
+				(SELECT count(*) FROM information_schema.tables
+					WHERE table_schema = current_schema() AND table_name IN (
+						'game_upload_active_sessions', 'game_upload_part_claims', 'game_upload_parts',
+						'game_upload_sessions', 'migration_metrics', 'canonical_object_relocations'
+					)) AS "tables",
+				(SELECT count(*) FROM information_schema.columns
+					WHERE table_schema = current_schema() AND (
+						(table_name = 'projects' AND column_name = 'webgl_entry_key')
+						OR (table_name = 'exhibitions' AND column_name IN (
+							'poster_storage_key', 'poster_original_name', 'poster_mime_type', 'poster_size_bytes',
+							'poster_width', 'poster_height', 'poster_card_480_height', 'poster_display_960_height'
+						))
+						OR (table_name = 'assets' AND column_name IN (
+							'storage_key', 'playback_storage_key', 'mime_type', 'playback_mime_type', 'size_bytes',
+							'width', 'height', 'card_480_height', 'display_960_height', 'playback_size_bytes',
+							'playback_status', 'playback_error', 'is_public'
+						))
+					)) AS "columns"
+		`);
+		expect(legacyCatalog).toEqual({ tables: 0n, columns: 0n });
+
+		const relocationCleanup = await migrationClient.$queryRaw<Array<{
+			bucket: string; key: string; state: string;
+		}>>(Prisma.sql`
+			SELECT "bucket", "storage_key" AS "key", "state"::text AS "state"
+			FROM "orphan_objects"
+			WHERE "reason" = 'canonical-contract-relocation-source'
+			ORDER BY "bucket", "storage_key"
+		`);
+		expect(relocationCleanup).toEqual(relocationRows
+			.map((relocation) => ({
+				bucket: relocation.sourceBucket,
+				key: relocation.sourceObjectKey,
+				state: 'PENDING',
+			}))
+			.sort((left, right) => `${left.bucket}/${left.key}`.localeCompare(`${right.bucket}/${right.key}`)));
+		expect(await storage.head(buckets.protectedBucket, copiedKey)).toMatchObject(copiedHead!);
 	}, 120_000);
 });

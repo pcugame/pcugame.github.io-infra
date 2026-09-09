@@ -10,7 +10,7 @@ const assets = [
 	{ id: 8, videoSortOrder: null, createdAt: new Date(20) },
 	{ id: 7, videoSortOrder: null, createdAt: new Date(10) },
 ].map((asset) => ({
-	...asset, storageKey: null, playbackStorageKey: null, mimeType: 'video/mp4', playbackMimeType: '', sizeBytes: 10n, playbackSizeBytes: 0n, playbackStatus: 'PENDING' as const, playbackError: '', kind: 'VIDEO' as const, originalName: `${asset.id}.mp4`,
+	...asset, kind: 'VIDEO' as const, originalName: `${asset.id}.mp4`,
 	representations: [
 		{ role: 'ORIGINAL', state: 'READY', bucket: 'protected', objectKey: `original/${asset.id}`, mimeType: 'video/mp4', sizeBytes: 10n },
 		{ role: 'PLAYBACK', state: asset.id === 5 ? 'FAILED' : 'READY', error: asset.id === 5 ? 'encoder failed' : null,

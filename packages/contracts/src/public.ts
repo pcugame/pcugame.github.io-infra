@@ -71,6 +71,7 @@ export type PublicProjectMember = {
 	studentId: string;
 };
 
+/** A project-owned file that is always delivered as a download. */
 export type ProjectAttachment = {
 	assetId: number;
 	kind: 'DOCUMENT' | 'ATTACHMENT';
@@ -80,7 +81,7 @@ export type ProjectAttachment = {
 	downloadUrl: string;
 };
 
-/** Optional capability fields keep a web-first deployment compatible with older APIs. */
+/** Capability fields are optional so a web deployment remains compatible with an older API. */
 export type PublicUploadConfig = {
 	materialMaxCount?: number;
 	materialMaxBytes?: number;
@@ -100,6 +101,7 @@ export type PublicProjectDetailResponse = {
 	videos: ProjectVideo[];
 	members: PublicProjectMember[];
 	images: PublicProjectImage[];
+	/** Omitted by older API releases; clients treat it as an empty list. */
 	attachments?: ProjectAttachment[];
 	poster?: ResponsiveImage;
 	gameDownloadUrl?: string;

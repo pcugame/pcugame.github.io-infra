@@ -5,7 +5,6 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { applyPhase1Boundary, isPhase1RuntimeMarker } from './phase1-architecture-boundary.mjs';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const targets = process.argv.length > 2 ? process.argv.slice(2) : ['src', 'scripts'];
@@ -238,7 +237,7 @@ const inventory = {
 	'feature-storage-sdk-imports': 0,
 	'worker-api-imports': 0,
 };
-let violations = [];
+const violations = [];
 const seen = new Set();
 
 function report(rule, module, node, message) {
@@ -246,7 +245,7 @@ function report(rule, module, node, message) {
 	const key = `${rule}\0${module.file}\0${position.line}\0${position.character}`;
 	if (seen.has(key)) return;
 	seen.add(key);
-	violations.push({ rule, file: module.file, line: position.line + 1, column: position.character + 1, message, nodeText: node.getText(module.sourceFile) });
+	violations.push({ rule, file: module.file, line: position.line + 1, column: position.character + 1, message });
 }
 
 for (const module of modules.values()) {
@@ -323,16 +322,6 @@ for (const module of modules.values()) {
 	inspect(module.sourceFile);
 }
 
-const phase1Marker = modules.get('src/phase1-release-manifest.ts')?.sourceFile.text;
-const phase1Boundary = JSON.parse(readFileSync(new URL('./phase1-architecture-boundary.json', import.meta.url), 'utf8'));
-const boundary = applyPhase1Boundary(violations, {
-	phase1: isPhase1RuntimeMarker(phase1Marker),
-	edges: phase1Boundary.edges,
-});
-violations = boundary.violations;
-if (boundary.compatibility.length > 0) {
-	console.log(`[architecture-guard] reviewed-phase1-edges=${boundary.compatibility.length} source=${phase1Boundary.sourceCommit}`);
-}
 violations.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column || a.rule.localeCompare(b.rule));
 for (const [name, count] of Object.entries(inventory)) console.log(`[architecture-guard] inventory ${name}=${count}`);
 for (const violation of violations) {

@@ -20,7 +20,6 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:import": "tsx prisma/seed.ts --import ../db/legacy-import.json",
-    "backfill:image-renditions": "tsx scripts/backfill-image-renditions.ts",
     "backfill:canonical-assets": "tsx scripts/backfill-canonical-assets.ts",
     "preflight:canonical-contract": "tsx scripts/preflight-canonical-contract.ts",
     "release:backfill": "node dist-release/scripts/backfill-canonical-assets.js",
@@ -36,7 +35,8 @@
     "test": "vitest run && npm run test:scripts",
     "test:scripts": "vitest run --config scripts/vitest.config.ts",
     "correction:canonical-assets": "tsx scripts/correct-canonical-assets.ts",
-    "release:correction": "node dist-release/scripts/correct-canonical-assets.js"
+    "release:correction": "node dist-release/scripts/correct-canonical-assets.js",
+    "worker:project-publication": "tsx src/project-publication-worker.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1024.0",

@@ -69,13 +69,19 @@ export function isDirectUploadControl(url: string): boolean {
 		|| /^\/api\/(?:admin\/)?direct-asset-upload-sessions\/[^/]+(?:\/(?:part-urls|complete))?$/.test(path);
 }
 
+/** Canonical asset capability route; excludes the removed storage-key bridge. */
+export function isCanonicalAssetDownload(url: string): boolean {
+	const path = url.split('?', 1)[0] ?? url;
+	return /^\/api\/assets\/[1-9]\d*\/download$/.test(path);
+}
+
 /**
  * IP-based request rate-limiter. Applied globally, but two classes of paths are
  * allowlisted:
  *
  * - `/api/health` and `/api/health/deep` — monitoring probes should never trip
  *   the limiter, and the LB polls the shallow one on a short interval.
- * - `/api/assets/protected/*` — covered by the domain-specific protected download
+ * - `/api/assets/:assetId/download` — covered by the domain-specific protected download
  *   limiter after asset lookup/access checks. Running both on the same path would
  *   double-count and confuse operators.
  *
@@ -98,7 +104,7 @@ export async function registerRateLimit(app: FastifyInstance, cfg: Env): Promise
 		allowList: (req: FastifyRequest) =>
 			req.url === '/api/health'
 			|| req.url === '/api/health/deep'
-			|| req.url.startsWith('/api/assets/protected/'),
+			|| isCanonicalAssetDownload(req.url),
 		skipOnError: true,
 		// The plugin reads `statusCode` from our returned object to set the HTTP status,
 		// then sends the whole object as the JSON body. Including it here lands the

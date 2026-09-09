@@ -8,7 +8,7 @@ import {
 	uploadDirectAssetFile,
 	waitForDirectAssetReady,
 	type DirectAssetUploadSession,
-	type GameUploadProgress,
+	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
 import { queryKeys } from '../lib/query';
 
@@ -33,6 +33,7 @@ interface Props {
 	hideTitle?: boolean;
 	/** Lets an enclosing owner control mutually exclusive mutations such as delete. */
 	onBusyChange?: (busy: boolean) => void;
+	submissionItems?: readonly { id: string; clientToken: string }[];
 }
 
 /** Browser control for IMAGE and POSTER sessions; asset bytes go directly to Garage. */
@@ -44,12 +45,13 @@ export default function DirectImageUploadWidget({
 	onComplete,
 	hideTitle = false,
 	onBusyChange,
+	submissionItems = [],
 }: Props) {
 	const qc = useQueryClient();
 	const fileInputId = useId();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
-	const [progress, setProgress] = useState<GameUploadProgress | null>(null);
+	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
 	const [resumable, setResumable] = useState<SavedImageSession | null>(null);
@@ -240,6 +242,7 @@ export default function DirectImageUploadWidget({
 					if (next.percent >= 100) setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
+					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
 					onSession: (next) => {
 						const current = isCurrentRun(token);
 						const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
@@ -275,7 +278,7 @@ export default function DirectImageUploadWidget({
 				submitting.current = false;
 			}
 		}
-	}, [beginRun, cancelLateSession, forget, invalidateOwner, isCurrentRun, kind, onComplete, owner, remember, updateCompleted]);
+	}, [beginRun, cancelLateSession, forget, invalidateOwner, isCurrentRun, kind, onComplete, owner, remember, submissionItems, updateCompleted]);
 
 	const matchesSavedFile = useCallback((chosen: readonly File[], saved: SavedImageSession) => {
 		const current = chosen[saved.completed ?? 0];

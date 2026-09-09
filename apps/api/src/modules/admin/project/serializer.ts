@@ -1,17 +1,8 @@
 import { compareProjectVideos } from '../../../shared/project-video-order.js';
-import type { AdminProjectDetail, AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from '@pcu/contracts';
-import { isPosterUrlSafe } from '../../../shared/poster-validation.js';
+import type { AdminProjectDetail, AssetKind, Platform, ProjectStatus } from '@pcu/contracts';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
-import {
-	createResponsiveImageSerializer,
-	IMAGE_RENDITION_PROFILES,
-} from '../../../shared/responsive-image.js';
+import { IMAGE_RENDITION_PROFILES } from '../../../shared/responsive-image.js';
 import { publicObjectUrl } from '../../../shared/public-origin.js';
-import { parseWebglEntryKey, webglUrl } from '../../webgl/paths.js';
-
-function protectedAssetUrlFor(base: string, storageKey: string): string {
-	return `${base}/api/assets/protected/${storageKey}`;
-}
 
 function canonicalProtectedAssetUrl(base: string, assetId: number, variant: 'original' | 'playback'): string {
 	return `${base}/api/assets/${assetId}/download?variant=${variant}`;
@@ -19,11 +10,12 @@ function canonicalProtectedAssetUrl(base: string, assetId: number, variant: 'ori
 
 type SerializableRepresentation = {
 	role: string;
-	state?: string;
-	error?: string | null;
+	bucket: string;
 	objectKey: string;
-	sizeBytes?: bigint | number;
 	mimeType: string;
+	state: string;
+	sizeBytes: bigint;
+	error?: string | null;
 	width?: number | null;
 	height?: number | null;
 };
@@ -31,21 +23,9 @@ type SerializableRepresentation = {
 export type SerializableAsset = {
 	id: number;
 	kind: AssetKind;
-	storageKey: string | null;
-	playbackStorageKey: string | null;
 	originalName: string;
 	videoSortOrder?: number | null;
 	createdAt?: Date;
-	mimeType: string;
-	playbackMimeType: string;
-	sizeBytes: bigint;
-	width?: number | null;
-	height?: number | null;
-	card480Height?: number | null;
-	display960Height?: number | null;
-	playbackSizeBytes: bigint;
-	playbackStatus: AssetPlaybackStatus;
-	playbackError: string;
 	representations?: SerializableRepresentation[];
 };
 
@@ -53,42 +33,29 @@ function representation(
 	asset: { representations?: SerializableRepresentation[] },
 	role: string,
 ): SerializableRepresentation | undefined {
-	return asset.representations?.find((candidate) => candidate.role === role && (candidate.state === undefined || candidate.state === 'READY'));
-}
-
-function playbackStatusFor(asset: SerializableAsset): AssetPlaybackStatus {
-	const playback = asset.representations?.find((candidate) => candidate.role === 'PLAYBACK');
-	if (playback) return playback.state === undefined || playback.state === 'READY' ? 'READY' : playback.state === 'FAILED' ? 'FAILED' : 'PENDING';
-	return asset.playbackStatus;
+	return asset.representations?.find((candidate) => candidate.role === role);
 }
 
 function playbackMimeFor(asset: SerializableAsset): string {
-	return representation(asset, 'PLAYBACK')?.mimeType
-		?? (asset.kind === 'VIDEO' && asset.playbackStorageKey
-			? asset.playbackMimeType || 'video/mp4'
-			: asset.mimeType || 'video/mp4');
+	return representation(asset, 'PLAYBACK')?.mimeType || 'video/mp4';
+}
+
+function playbackStatusFor(asset: SerializableAsset): 'PENDING' | 'READY' | 'FAILED' {
+	const state = representation(asset, 'PLAYBACK')?.state;
+	if (state === 'READY' || state === 'FAILED') return state;
+	return 'PENDING';
 }
 
 function imageSourceFor(asset: {
 	id?: number;
-	storageKey: string | null;
-	width?: number | null;
-	height?: number | null;
-	card480Height?: number | null;
-	display960Height?: number | null;
 	representations?: SerializableRepresentation[];
 }) {
 	const original = asset.representations?.find((candidate) => candidate.role === 'ORIGINAL');
-	const originalKey = original?.objectKey ?? asset.storageKey;
-	if (!originalKey) throw new Error(`Asset ${asset.id ?? 'unknown'} has no original representation`);
+	if (!original || original.state !== 'READY') throw new Error(`Asset ${asset.id ?? 'unknown'} has no READY original representation`);
 	return {
-		storageKey: originalKey,
-		width: original?.width ?? asset.width,
-		height: original?.height ?? asset.height,
-		card480Height: asset.representations?.find((candidate) => candidate.role === 'CARD_480')?.height
-			?? asset.card480Height,
-		display960Height: asset.representations?.find((candidate) => candidate.role === 'DISPLAY_960')?.height
-			?? asset.display960Height,
+		storageKey: original.objectKey,
+		width: original.width,
+		height: original.height,
 	};
 }
 
@@ -106,7 +73,6 @@ export type SerializableProject = {
 	status: ProjectStatus;
 	sortOrder: number;
 	posterAssetId: number | null;
-	webglEntryKey?: string;
 	currentWebglDeploymentId?: string | null;
 	currentWebglDeployment?: {
 		id: string;
@@ -119,13 +85,8 @@ export type SerializableProject = {
 	} | null;
 	poster: {
 		id?: number;
-		storageKey: string | null;
 		kind: AssetKind;
 		status: string;
-		width?: number | null;
-		height?: number | null;
-		card480Height?: number | null;
-		display960Height?: number | null;
 		representations?: SerializableRepresentation[];
 	} | null;
 	members: { id: number; name: string; studentId: string; sortOrder: number; userId: number | null }[];
@@ -137,14 +98,14 @@ export function createProjectSerializer(
 	publicDelivery?: { publicAssetOrigin: string; publicBucket: string },
 ) {
 	const base = baseUrl.replace(/\/$/, '');
-	const protectedAssetUrl = (storageKey: string) => protectedAssetUrlFor(base, storageKey);
-	const responsiveImages = createResponsiveImageSerializer(base);
 	function serializeImage(asset: Parameters<typeof imageSourceFor>[0]) {
 		const original = asset.representations?.find((candidate) => candidate.role === 'ORIGINAL');
-		if (!original) return responsiveImages.serializeResponsiveImage(imageSourceFor(asset));
+		if (!publicDelivery || !original || original.state !== 'READY' || original.bucket !== publicDelivery.publicBucket) {
+			throw new Error(`Asset ${asset.id ?? 'unknown'} has no READY public ORIGINAL representation`);
+		}
 		return {
 			original: {
-				url: responsiveImages.publicImageUrl(original.objectKey),
+				url: publicObjectUrl(publicDelivery.publicAssetOrigin, original.objectKey),
 				...(original.width != null ? { width: original.width } : {}),
 				...(original.height != null ? { height: original.height } : {}),
 			},
@@ -152,10 +113,11 @@ export function createProjectSerializer(
 				const rendition = asset.representations?.find(
 					(candidate) => candidate.role === definition.profile,
 				);
-				if (!rendition || rendition.height == null) return [];
+				if (!publicDelivery || !rendition || rendition.state !== 'READY'
+					|| rendition.bucket !== publicDelivery.publicBucket || rendition.height == null) return [];
 				return [{
 					profile: definition.profile,
-					url: responsiveImages.publicImageUrl(rendition.objectKey),
+					url: publicObjectUrl(publicDelivery.publicAssetOrigin, rendition.objectKey),
 					width: rendition.width ?? definition.width,
 					height: rendition.height,
 				}];
@@ -177,46 +139,43 @@ export function createProjectSerializer(
 		const canonicalWebglUrl = deployment
 			? publicObjectUrl(publicDelivery!.publicAssetOrigin, deployment.entryObjectKey)
 			: undefined;
-		const legacyWebglUrl = project.currentWebglDeploymentId == null
-			&& parseWebglEntryKey(project.id, project.webglEntryKey ?? '')
-			? webglUrl(base, project.id)
-			: undefined;
 		const completenessPoster = project.poster
 			? {
 				kind: project.poster.kind,
 				status: project.poster.status,
-				storageKey: representation(project.poster, 'ORIGINAL')?.objectKey
-					?? project.poster.storageKey
-					?? '',
+				hasReadyOriginal: representation(project.poster, 'ORIGINAL')?.state === 'READY',
 			}
 			: null;
 		const videos = project.assets
 			.filter((a) => a.kind === 'VIDEO')
+			.filter((videoAsset) => representation(videoAsset, 'ORIGINAL')?.state === 'READY')
 			.sort(compareProjectVideos)
-			.map((videoAsset, index) => ({
-				assetId: videoAsset.id,
-				sortOrder: videoAsset.videoSortOrder ?? null,
-				role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,
-				...(playbackStatusFor(videoAsset) === 'READY'
-					? { url: canonicalProtectedAssetUrl(base, videoAsset.id, 'playback') } : {}),
-				mimeType: playbackMimeFor(videoAsset),
-				originalDownloadUrl: canonicalProtectedAssetUrl(base, videoAsset.id, 'original'),
-				playbackStatus: playbackStatusFor(videoAsset),
-				playbackError: videoAsset.representations?.find((rep) => rep.role === 'PLAYBACK')?.error || videoAsset.playbackError || undefined,
-			}));
+			.map((videoAsset, index) => {
+				const playbackStatus = playbackStatusFor(videoAsset);
+				return {
+					assetId: videoAsset.id,
+					sortOrder: videoAsset.videoSortOrder ?? null,
+					role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,
+					...(playbackStatus === 'READY'
+						? { url: canonicalProtectedAssetUrl(base, videoAsset.id, 'playback') }
+						: {}),
+					mimeType: playbackMimeFor(videoAsset),
+					originalDownloadUrl: canonicalProtectedAssetUrl(base, videoAsset.id, 'original'),
+					playbackStatus,
+					playbackError: representation(videoAsset, 'PLAYBACK')?.error || undefined,
+				};
+			});
 		const video = videos[0] ?? null;
 		const attachments = project.assets.flatMap<NonNullable<AdminProjectDetail['attachments']>[number]>((asset) => {
 			if (asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT') return [];
-			const original = asset.representations?.find((candidate) => (
-				candidate.role === 'ORIGINAL' && candidate.state === 'READY'
-			));
-			if (!original) return [];
+			const original = representation(asset, 'ORIGINAL');
+			if (original?.state !== 'READY') return [];
 			return [{
 				assetId: asset.id,
 				kind: asset.kind,
 				originalName: asset.originalName,
-				mimeType: original.mimeType || asset.mimeType,
-				sizeBytes: Number(original.sizeBytes ?? asset.sizeBytes),
+				mimeType: original.mimeType || 'application/octet-stream',
+				sizeBytes: Number(original.sizeBytes),
 				downloadUrl: canonicalProtectedAssetUrl(base, asset.id, 'original'),
 			}];
 		});
@@ -236,13 +195,11 @@ export function createProjectSerializer(
 			status: project.status,
 			sortOrder: project.sortOrder,
 			posterAssetId: project.posterAssetId ?? undefined,
-			poster: project.poster && isPosterUrlSafe({
-				...project.poster,
-				storageKey: imageSourceFor(project.poster).storageKey,
-			})
+			poster: project.poster && project.poster.status === 'READY'
+				&& representation(project.poster, 'ORIGINAL')?.state === 'READY'
 				? serializeImage(project.poster)
 				: undefined,
-			webglUrl: canonicalWebglUrl ?? legacyWebglUrl,
+			webglUrl: canonicalWebglUrl,
 			webglDeployment: deployment && canonicalWebglUrl
 				? {
 					id: deployment.id,
@@ -260,23 +217,27 @@ export function createProjectSerializer(
 			attachments,
 			assets: project.assets.flatMap<AdminProjectDetail['assets'][number]>((a) => {
 				if (a.kind === 'IMAGE' || a.kind === 'POSTER' || a.kind === 'THUMBNAIL') {
+					const original = representation(a, 'ORIGINAL');
+					if (original?.state !== 'READY') return [];
 					return [{
 						id: a.id,
 						kind: a.kind,
 						image: serializeImage(a),
 						originalName: a.originalName,
-						size: Number(a.sizeBytes),
+						size: Number(original.sizeBytes),
 					}];
 				}
 				// WEBGL is represented by the immutable deployment above. Exposing its
 				// source asset as a generic downloadable asset would create a second,
 				// independently deletable identity for the same deployment.
 				if (a.kind === 'WEBGL') return [];
-				if (a.kind === 'DOCUMENT' || a.kind === 'ATTACHMENT') {
-					const original = a.representations?.find((rep) => rep.role === 'ORIGINAL' && rep.state === 'READY');
-					if (!original) return [];
-					return [{ id: a.id, kind: a.kind, originalName: a.originalName, mimeType: original.mimeType ?? a.mimeType, size: Number(original.sizeBytes ?? a.sizeBytes), downloadUrl: canonicalProtectedAssetUrl(base, a.id, 'original') }];
-				}
+				const original = representation(a, 'ORIGINAL');
+				if (original?.state !== 'READY') return [];
+				if (a.kind === 'DOCUMENT' || a.kind === 'ATTACHMENT') return [{
+					id: a.id, kind: a.kind, originalName: a.originalName, mimeType: original.mimeType,
+					size: Number(original.sizeBytes), downloadUrl: canonicalProtectedAssetUrl(base, a.id, 'original'),
+				}];
+				const playbackStatus = a.kind === 'VIDEO' ? playbackStatusFor(a) : undefined;
 				return [{
 					id: a.id,
 					kind: a.kind,
@@ -285,17 +246,17 @@ export function createProjectSerializer(
 					originalDownloadUrl: a.kind === 'VIDEO'
 						? canonicalProtectedAssetUrl(base, a.id, 'original')
 						: undefined,
-					playbackUrl: a.kind === 'VIDEO'
+					playbackUrl: a.kind === 'VIDEO' && playbackStatus === 'READY'
 						? canonicalProtectedAssetUrl(base, a.id, 'playback')
 						: undefined,
-					playbackStatus: a.kind === 'VIDEO' ? playbackStatusFor(a) : undefined,
-					playbackError: a.kind === 'VIDEO' ? a.representations?.find((rep) => rep.role === 'PLAYBACK')?.error || a.playbackError || undefined : undefined,
+					playbackStatus,
+					playbackError: a.kind === 'VIDEO' ? representation(a, 'PLAYBACK')?.error || undefined : undefined,
 					originalName: a.originalName,
-					size: Number(a.sizeBytes),
+					size: Number(original.sizeBytes),
 				}];
 			}),
 		};
 	}
 
-	return { protectedAssetUrl, serializeProjectDetail };
+	return { serializeProjectDetail };
 }

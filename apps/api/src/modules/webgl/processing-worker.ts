@@ -4,6 +4,8 @@ import {
 	type CanonicalWebglUploadSession,
 	type WebglProcessingContext,
 } from './processing.js';
+import { createClaimHeartbeatGuard } from '../upload-lifecycle/claim-heartbeat.js';
+import { MAX_WORKER_VALIDATION_ATTEMPTS, retryBudgetReason } from '../upload-lifecycle/worker-errors.js';
 
 export interface WebglProcessingWorkerRepository {
 	claimVerifyingWebglSessions(input: {
@@ -23,6 +25,7 @@ export interface WebglProcessingWorkerRepository {
 		claimToken: string;
 		leaseUntil: Date;
 	}): Promise<boolean>;
+	/** Persist the error but retain the lease-until timestamp as bounded retry backoff. */
 	releaseValidationLease(input: {
 		sessionId: string;
 		generation: number;
@@ -84,48 +87,49 @@ export function createWebglProcessingWorker(deps: {
 		claimToken: string,
 		outerSignal?: AbortSignal,
 	): Promise<'ready' | 'rejected' | 'retried'> {
-		const leaseAbort = new AbortController();
-		const signal = outerSignal
-			? AbortSignal.any([outerSignal, leaseAbort.signal])
-			: leaseAbort.signal;
-		let heartbeatRunning = false;
-		const heartbeat = setInterval(() => {
-			if (heartbeatRunning || signal.aborted) return;
-			heartbeatRunning = true;
-			void deps.repository.renewValidationLease({
+		const claim = createClaimHeartbeatGuard({
+			heartbeatMs: deps.options.heartbeatMs,
+			lostMessage: 'WebGL validation lease was lost',
+			outerSignal,
+			renew: () => deps.repository.renewValidationLease({
 				sessionId: session.id,
 				generation: session.generation,
 				claimToken,
 				leaseUntil: new Date(deps.clock.now().getTime() + deps.options.leaseMs),
-			}).then((owned) => {
-				if (!owned) leaseAbort.abort(new Error('WebGL validation lease was lost'));
-			}).catch((error) => leaseAbort.abort(error)).finally(() => {
-				heartbeatRunning = false;
-			});
-		}, deps.options.heartbeatMs);
+			}).then((owned) => ({ count: owned ? 1 : 0 })),
+			logHeartbeatFailure: (error) => deps.logger.error(
+				{ error, sessionId: session.id }, 'WebGL validation heartbeat failed'),
+		});
 		const context: WebglProcessingContext = {
 			claimToken,
-			signal,
-			assertClaimOwned: () => deps.repository.assertValidationLease({
-				sessionId: session.id,
-				generation: session.generation,
-				claimToken,
-			}),
+			signal: claim.signal,
+			assertClaimOwned: claim.assertOwned,
 		};
 		try {
 			await deps.processor.process(session, context);
 			return 'ready';
 		} catch (error) {
 			if (error instanceof WebglGenerationFencedError) return 'rejected';
-			if (error instanceof WebglTerminalValidationError && !signal.aborted) {
-				await context.assertClaimOwned();
-				await deps.repository.rejectInvalidSource({
-					sessionId: session.id,
-					generation: session.generation,
-					claimToken,
-					error: safeError(error),
-				});
-				return 'rejected';
+			if (claim.isLost() || outerSignal?.aborted) return 'retried';
+			if ((error instanceof WebglTerminalValidationError
+				|| (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS)
+				&& !claim.signal.aborted) {
+				try {
+					await context.assertClaimOwned();
+					await deps.repository.rejectInvalidSource({
+						sessionId: session.id,
+						generation: session.generation,
+						claimToken,
+						error: error instanceof WebglTerminalValidationError
+							? safeError(error)
+							: retryBudgetReason('WEBGL', error),
+					});
+					return 'rejected';
+				} catch (rejectError) {
+					deps.logger.error({ error: rejectError, sessionId: session.id },
+						'WebGL terminal outcome lost its lease; takeover will converge it');
+					return 'retried';
+				}
 			}
 			await deps.repository.releaseValidationLease({
 				sessionId: session.id,
@@ -140,7 +144,7 @@ export function createWebglProcessingWorker(deps: {
 			});
 			return 'retried';
 		} finally {
-			clearInterval(heartbeat);
+			claim.stop();
 		}
 	}
 

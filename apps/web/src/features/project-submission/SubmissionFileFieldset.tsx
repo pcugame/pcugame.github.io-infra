@@ -90,15 +90,17 @@ export function SubmissionFileFieldset({
 			</div>
 
 			<div className="form-field">
-				<label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 파일당 최대 {limits.videoMaxMb}MB, 프로젝트당 최대 5개)</label>
+				<label htmlFor="videoFile">동영상 (MP4 · MKV · WebM · AVI · WMV, 자동 MP4 변환, 파일당 최대 {limits.videoMaxMb}MB · 프로젝트당 최대 5개)</label>
 				<input
 					id="videoFile"
 					type="file"
 					accept="video/mp4,video/x-matroska,video/webm,video/x-msvideo,video/x-ms-wmv,.mp4,.mkv,.webm,.avi,.wmv"
 					multiple
+					disabled={videoFiles.length >= 5}
 					ref={videoInputRef}
 					onChange={handleVideoChange}
 				/>
+				{videoFiles.length >= 5 && <p className="field-hint">동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다.</p>}
 				{videoFiles.length > 0 && (
 					<div className="file-selected-row">
 						<p className="file-info">
@@ -144,12 +146,22 @@ export function SubmissionFileFieldset({
 					<div className="form-field">
 						<label htmlFor="documents">프로젝트 문서 (텍스트 · Markdown · PDF · 오피스 문서, 파일당 최대 {(materialLimits.maxBytes / 1024 / 1024).toFixed(0)}MB)</label>
 						<input id="documents" type="file" accept="text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.ods,.odp,.rtf,.xls,.xlsx,.ppt,.pptx" multiple disabled={documentFiles.length + attachmentFiles.length >= materialLimits.maxCount} ref={documentsInputRef} onChange={handleDocumentsChange} />
-						{documentFiles.length > 0 && <div className="file-selected-row"><p className="file-info">{documentFiles.map((file) => file.name).join(', ')}</p><button type="button" className="btn btn--danger btn--small" onClick={clearDocuments}>제거</button></div>}
+						{documentFiles.length > 0 && (
+							<div className="file-selected-row">
+								<p className="file-info">{documentFiles.map((file) => file.name).join(', ')}</p>
+								<button type="button" className="btn btn--danger btn--small" onClick={clearDocuments}>제거</button>
+							</div>
+						)}
 					</div>
 					<div className="form-field">
 						<label htmlFor="attachments">기타 첨부자료 (문서와 합쳐 프로젝트당 최대 {materialLimits.maxCount}개 · 파일당 최대 {(materialLimits.maxBytes / 1024 / 1024).toFixed(0)}MB)</label>
 						<input id="attachments" type="file" multiple disabled={documentFiles.length + attachmentFiles.length >= materialLimits.maxCount} ref={attachmentsInputRef} onChange={handleAttachmentsChange} />
-						{attachmentFiles.length > 0 && <div className="file-selected-row"><p className="file-info">{attachmentFiles.map((file) => file.name).join(', ')}</p><button type="button" className="btn btn--danger btn--small" onClick={clearAttachments}>제거</button></div>}
+						{attachmentFiles.length > 0 && (
+							<div className="file-selected-row">
+								<p className="file-info">{attachmentFiles.map((file) => file.name).join(', ')}</p>
+								<button type="button" className="btn btn--danger btn--small" onClick={clearAttachments}>제거</button>
+							</div>
+						)}
 					</div>
 				</>
 			)}

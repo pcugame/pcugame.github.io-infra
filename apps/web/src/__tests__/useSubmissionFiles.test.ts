@@ -127,18 +127,21 @@ describe('useSubmissionFiles', () => {
 		expect(result.current.gameFile).toBe(game);
 	});
 
-	it('enforces the shared document and attachment count', () => {
+	it('enforces the combined material count and per-file limit', () => {
 		const { result } = renderHook(() => useSubmissionFiles({
 			limits,
 			materialLimits: { maxCount: 2, maxBytes: 50 * 1024 * 1024 },
 		}));
 		const first = file('guide.pdf', 'application/pdf', 1024);
-		const second = file('notes.txt', 'text/plain', 1024);
+		const second = file('readme.md', 'text/markdown', 1024);
 		const third = file('extra.bin', 'application/octet-stream', 1024);
+
 		act(() => result.current.handleDocumentsChange(eventWithFiles([first])));
 		act(() => result.current.handleAttachmentsChange(eventWithFiles([second])));
-		act(() => result.current.handleAttachmentsChange(eventWithFiles([third])));
 		expect(result.current.documentFiles).toEqual([first]);
+		expect(result.current.attachmentFiles).toEqual([second]);
+
+		act(() => result.current.handleAttachmentsChange(eventWithFiles([third])));
 		expect(result.current.attachmentFiles).toEqual([second]);
 		expect(result.current.fileSizeError).toContain('최대 2개');
 	});

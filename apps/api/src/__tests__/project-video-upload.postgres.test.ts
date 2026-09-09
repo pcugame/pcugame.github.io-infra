@@ -20,7 +20,7 @@ describe.runIf(enabled)('project video upload PostgreSQL transactions', () => {
 		control = createPrismaClientForDatabase(url.toString());
 		await control.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
 		const root = new URL('../../prisma/migrations/', import.meta.url);
-		for (const migration of (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && entry.name < '20260822000000_canonical_asset_contract').map(({ name }) => name).sort()) {
+		for (const migration of (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map(({ name }) => name).sort()) {
 			const connection = createPrismaClientForDatabase(url.toString());
 			try {
 				await connection.$executeRawUnsafe(`SET search_path TO "${schema}";\n${await readFile(new URL(`${migration}/migration.sql`, root), 'utf8')}`);
@@ -44,20 +44,21 @@ describe.runIf(enabled)('project video upload PostgreSQL transactions', () => {
 	async function project() {
 		return prisma.project.create({ data: { exhibitionId, creatorId: actorId, slug: randomUUID(), title: 'Video test', status: 'PUBLISHED' } });
 	}
-	async function allocate(projectId: number) {
+	async function allocate(projectId: number, item?: { id: string; clientToken: string }) {
 		const id = randomUUID();
 		return createAssetUploadRepository(prisma).createAllocating({
 			id, projectId, exhibitionId: null, userId: actorId, kind: 'VIDEO', originalName: 'video.mp4', declaredMimeType: 'video/mp4', totalBytes: 10n,
 			partSizeBytes: 10, totalParts: 1, bucket: 'protected', objectKey: `protected/uploads/${id}/source`, generation: 1,
 			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64), sourceIdentityBlockSizeBytes: 1_048_576,
-			sourceIdentityBlockManifest: 'e30=', expiresAt: new Date(Date.now() + 60_000),
+			sourceIdentityBlockManifest: 'e30=', expiresAt: new Date(Date.now() + 60_000), submissionItemId: item?.id ?? null,
+			...(item ? { submissionClientToken: item.clientToken } : {}),
 		});
 	}
 	async function commit(sessionId: string) {
 		const session = await prisma.assetUploadSession.update({ where: { id: sessionId }, data: { state: 'VERIFYING', validationLeaseToken: 'lease', validationLeaseUntil: new Date(Date.now() + 60_000) } });
-		return createVideoWorkerRepository(prisma).commitVideoReady({
+		return createVideoWorkerRepository(prisma).commitVideoOriginalReady({
 			session: session as VerifyingVideoSession, token: 'lease', originalMimeType: 'video/mp4', originalSizeBytes: 10n,
-			playback: { bucket: 'protected', objectKey: `${session.objectKey}/playback`, mimeType: 'video/mp4', sizeBytes: 10n },
+			playback: { bucket: 'protected', objectKey: `${session.objectKey}/playback`, mimeType: 'video/mp4' },
 		});
 	}
 
@@ -74,26 +75,19 @@ describe.runIf(enabled)('project video upload PostgreSQL transactions', () => {
 		await expect(allocate(p.id)).rejects.toMatchObject({ statusCode: 409 });
 	});
 
-
-	function savedVideo(index: number) {
-		return { kind: 'VIDEO' as const, storageKey: `legacy/${randomUUID()}`, originalName: `${index}.mp4`, mimeType: 'video/mp4', sizeBytes: 10, playbackStatus: 'READY' as const };
-	}
-	it('keeps Phase-1 multipart submission order and rejects a sixth submitted video', async () => {
-		const repo = createProjectCrudRepository(prisma, { publicBucket: 'public', protectedBucket: 'protected' });
-		const data = { exhibitionId, creatorId: actorId, title: 'Multipart videos', slug: randomUUID(), status: 'PUBLISHED' as const, summary: '', description: '', members: [], savedFiles: [0, 1, 2, 3, 4].map(savedVideo) };
-		const created = await repo.createProjectWithAssets(data);
-		const assets = await prisma.asset.findMany({ where: { projectId: created.id }, orderBy: { videoSortOrder: 'asc' } });
-		expect(assets.map(({ originalName, videoSortOrder }) => [originalName, videoSortOrder])).toEqual([0, 1, 2, 3, 4].map((index) => [`${index}.mp4`, index]));
-		await expect(Promise.resolve().then(() => repo.createProjectWithAssets({ ...data, slug: randomUUID(), savedFiles: [...data.savedFiles, savedVideo(5)] }))).rejects.toMatchObject({ statusCode: 409 });
-	});
-	it('serializes competing legacy and direct uploads for the fifth video slot', async () => {
-		const p = await project();
-		const repo = createProjectCrudRepository(prisma, { publicBucket: 'public', protectedBucket: 'protected' });
-		const legacy = () => repo.createAsset({ ...savedVideo(9), projectId: p.id, sizeBytes: 10n, playbackStorageKey: null, playbackSizeBytes: 0n, playbackMimeType: '', isPublic: false });
-		for (let index = 0; index < 4; index++) await legacy();
-		const outcomes = await Promise.allSettled([legacy(), allocate(p.id)]);
-		expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
-		expect(outcomes.find(({ status }) => status === 'rejected')).toMatchObject({ reason: { statusCode: 409 } });
-		await expect(legacy()).rejects.toMatchObject({ statusCode: 409 });
+	it('keeps submission slot order on reverse completion and retries', async () => {
+		const created = await createProjectCrudRepository(prisma, { publicBucket: 'public', protectedBucket: 'protected' }).createProjectWithAssets({
+			exhibitionId, creatorId: actorId, title: 'Submission videos', slug: randomUUID(), status: 'DRAFT', members: [],
+			manifest: [0, 1, 2, 3, 4].map((index) => ({ kind: 'VIDEO', slot: `video:${index}`, clientToken: String(index).repeat(32), required: true })),
+		});
+		const bySlot = new Map<string, string>();
+		for (const item of created.submission.items) bySlot.set(item.slot, (await allocate(created.id, item)).id);
+		for (const slot of [4, 3, 2, 1, 0]) {
+			const sessionId = bySlot.get(`video:${slot}`)!;
+			const result = await commit(sessionId);
+			expect(await prisma.asset.findUnique({ where: { id: result.assetId } })).toMatchObject({ videoSortOrder: slot });
+			expect(await commit(sessionId)).toEqual(result);
+		}
+		expect(await prisma.asset.count({ where: { projectId: created.id } })).toBe(5);
 	});
 });

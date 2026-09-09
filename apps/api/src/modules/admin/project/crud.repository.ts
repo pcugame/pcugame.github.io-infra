@@ -1,42 +1,32 @@
-import { assertMaterialCapacity, isMaterialKind } from '../../asset-upload/material-policy.js';
-import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS, nextProjectVideoOrder } from '../../assets/video-order.js';
+import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS } from '../../assets/video-order.js';
 import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
 import type {
 	AssetKind,
 	Prisma,
 	PrismaClient,
-	ProjectStatus as PrismaProjectStatus,
+	ProjectStatus,
 } from '../../../generated/prisma/client.js';
-import type { ProjectStatus } from '@pcu/contracts';
 import { Prisma as PrismaRuntime } from '../../../generated/prisma/client.js';
 import { queueDurableDeletions } from '../../orphan/outbox.js';
 import type {
 	DeletionOutboxConfig,
-	ProjectAssetRepository,
 	ProjectCrudRepository,
 	SubmitProjectRepository,
 } from './ports.js';
-import { createProjectAssetMutationRepository } from './asset-mutation.repository.js';
-import { commitUploadIntents } from '../../upload-intent/repository.js';
 import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
-import { createCanonicalAsset } from '../../assets/representation-write.js';
-import { parseWebglEntryKey } from '../../webgl/paths.js';
-import { conflict, notFound } from '../../../shared/errors.js';
+import { conflict, forbidden, notFound } from '../../../shared/errors.js';
+import { assertValidPosterAsset } from '../../../shared/poster-validation.js';
 import {
 	projectActiveUploadDeletionTargets,
 	projectAssetDeletionTargets,
 	projectWebglDeletionTargets,
 } from './project-deletion-targets.js';
+import {
+	createProjectPublicationPlan,
+} from '../../project-publication/plan.js';
 
 type TxClient = Prisma.TransactionClient;
-
-function phase1ProjectStatus<T extends { status: PrismaProjectStatus }>(project: T): Omit<T, 'status'> & { status: ProjectStatus } {
-	if (project.status === 'DRAFT') {
-		throw conflict('DRAFT projects require the Phase 2 publication runtime');
-	}
-	return { ...project, status: project.status };
-}
 
 const projectListPlayableKinds: AssetKind[] = ['GAME', 'VIDEO'];
 const projectListInclude = {
@@ -51,14 +41,18 @@ const projectListInclude = {
 		select: {
 			kind: true,
 			status: true,
-			storageKey: true,
-			width: true,
-			height: true,
-			card480Height: true,
-			display960Height: true,
 			representations: {
 				where: { state: 'READY' as const },
-				select: { role: true, objectKey: true, mimeType: true, width: true, height: true },
+				select: {
+					role: true,
+					bucket: true,
+					objectKey: true,
+					mimeType: true,
+					state: true,
+					sizeBytes: true,
+					width: true,
+					height: true,
+				},
 			},
 		},
 	},
@@ -70,11 +64,22 @@ export const projectDetailInclude = {
 	assets: {
 		where: { status: 'READY' as const },
 		orderBy: { createdAt: 'asc' as const },
-		include: { representations: { where: { OR: [{ state: 'READY' }, { role: 'PLAYBACK' }] as Prisma.AssetRepresentationWhereInput[] } } },
+		include: { representations: true },
 	},
 	poster: { include: { representations: { where: { state: 'READY' as const } } } },
 	currentWebglDeployment: true,
 } as const;
+
+const projectSubmissionInclude = {
+	project: { select: { id: true, status: true } },
+	publicationJob: { select: { state: true, lastError: true } },
+	items: {
+		orderBy: { slot: 'asc' as const },
+		include: { uploadSession: { select: {
+			id: true, generation: true, sourceIdentityAlgorithm: true, sourceIdentity: true,
+		} } },
+	},
+} as const satisfies Prisma.ProjectSubmissionInclude;
 
 const webglDeletionSnapshotSelect = {
 	id: true,
@@ -83,6 +88,8 @@ const webglDeletionSnapshotSelect = {
 	publicPrefix: true,
 	entryObjectKey: true,
 	objectManifest: true,
+	stagingBucket: true,
+	stagingPrefix: true,
 	sourceRepresentation: {
 		select: { id: true, assetId: true, role: true, bucket: true, objectKey: true },
 	},
@@ -143,8 +150,13 @@ function buildProjectListOrderBy(
 }
 
 function retryableTransactionError(error: unknown): boolean {
-	return error instanceof PrismaRuntime.PrismaClientKnownRequestError
-		&& (error.code === 'P2034' || error.code === 'P2002');
+	if (!error || typeof error !== 'object') return false;
+	const candidate = error as { code?: unknown; meta?: unknown; message?: unknown };
+	if (candidate.code === 'P2034' || candidate.code === 'P2002') return true;
+	if (candidate.code === 'P2010' && candidate.meta && typeof candidate.meta === 'object'
+		&& (candidate.meta as { code?: unknown }).code === '40001') return true;
+	return typeof candidate.message === 'string'
+		&& candidate.message.includes('Code: `40001`');
 }
 
 async function withSerializableRetry<T>(
@@ -178,37 +190,7 @@ export function createProjectCrudRepository(
 	},
 ): ProjectCrudRepository & {
 	bulkUpdateStatus(ids: number[], status: ProjectStatus): Promise<{ count: number }>;
-} & SubmitProjectRepository & ProjectAssetRepository {
-	const assetMutation = createProjectAssetMutationRepository(client);
-
-	async function recordLegacyWebglFallback(project: {
-		id: number;
-		webglEntryKey: string;
-		currentWebglDeploymentId: string | null;
-	}): Promise<void> {
-		if (project.currentWebglDeploymentId !== null
-			|| !parseWebglEntryKey(project.id, project.webglEntryKey)) return;
-		await client.migrationMetric.upsert({
-			where: {
-				name_scope: {
-					name: 'public_webgl_legacy_fallback',
-					scope: 'admin-project-response',
-				},
-			},
-			create: {
-				name: 'public_webgl_legacy_fallback',
-				scope: 'admin-project-response',
-				value: 1n,
-				lastObservedAt: new Date(),
-				details: { projectId: project.id },
-			},
-			update: {
-				value: { increment: 1n },
-				lastObservedAt: new Date(),
-				details: { projectId: project.id },
-			},
-		});
-	}
+	} & SubmitProjectRepository {
 
 	function canonicalUploadCleanup(upload: {
 		id: string;
@@ -216,7 +198,6 @@ export function createProjectCrudRepository(
 		kind: string;
 		objectKey: string;
 		uploadId: string | null;
-		bucket: string;
 	}) {
 		if (upload.projectId === null) {
 			throw new Error(`Canonical WEBGL upload ${upload.id} is not project-owned`);
@@ -225,11 +206,19 @@ export function createProjectCrudRepository(
 			id: upload.id,
 			projectId: upload.projectId,
 			uploadKind: upload.kind,
-			s3Key: upload.objectKey,
-			bucket: upload.bucket,
-			s3UploadId: upload.uploadId,
+			objectKey: upload.objectKey,
+			uploadId: upload.uploadId,
 			canonicalSessionId: upload.id,
 		};
+	}
+
+	function assertSubmissionActor(
+		submission: { actorId: number },
+		actor: { id: number; role: string },
+	): void {
+		if (actor.role !== 'ADMIN' && actor.role !== 'OPERATOR' && submission.actorId !== actor.id) {
+			throw forbidden('Project submission is owned by another user');
+		}
 	}
 
 	return {
@@ -246,20 +235,23 @@ export function createProjectCrudRepository(
 					include: projectListInclude,
 				}),
 			]);
-			return { totalItems, items: items.map(phase1ProjectStatus) };
+			return { totalItems, items };
 		},
 		async findProjectById(id) {
-			const project = await client.project.findUnique({ where: { id }, include: projectDetailInclude });
-			if (project) await recordLegacyWebglFallback(project);
-			return project ? phase1ProjectStatus(project) : null;
+			return client.project.findUnique({ where: { id }, include: projectDetailInclude });
 		},
 		isMemberOfProject(projectId, userId) {
 			return client.projectMember.findFirst({ where: { projectId, userId } });
 		},
 		async updateProject(id, data) {
-			const project = await client.project.update({ where: { id }, data, include: projectDetailInclude });
-			await recordLegacyWebglFallback(project);
-			return phase1ProjectStatus(project);
+			return client.$transaction(async (tx) => {
+				await tx.$queryRaw(PrismaRuntime.sql`SELECT "id" FROM "projects" WHERE "id" = ${id} FOR UPDATE`);
+				const current = await tx.project.findUniqueOrThrow({ where: { id }, select: { status: true } });
+				if (current.status === 'DRAFT' && data.status !== undefined && data.status !== 'DRAFT') {
+					throw conflict('Draft submissions may only be published by submission finalize');
+				}
+				return tx.project.update({ where: { id }, data, include: projectDetailInclude });
+			});
 		},
 		deleteProjectReturningAssets(id, outbox) {
 			return client.$transaction(async (tx) => {
@@ -269,23 +261,14 @@ export function createProjectCrudRepository(
 				const project = await tx.project.findUniqueOrThrow({
 					where: { id },
 					select: {
-						webglEntryKey: true,
-						currentWebglDeploymentId: true,
 						webglDeployments: { select: webglDeletionSnapshotSelect },
 					},
 				});
-				const legacyActiveUploads = await tx.gameUploadSession.findMany({
-					where: { projectId: id, status: { in: ['PENDING', 'COMPLETING'] } },
-					select: { id: true, uploadKind: true, s3Key: true, s3UploadId: true },
-				});
 				const canonicalActiveUploads = await tx.assetUploadSession.findMany({
 					where: { projectId: id, state: { in: [...canonicalActiveUploadStates] } },
-					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true, bucket: true },
+					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true },
 				});
-				const activeUploads = [
-					...legacyActiveUploads,
-					...canonicalActiveUploads.map(canonicalUploadCleanup),
-				];
+				const activeUploads = canonicalActiveUploads.map(canonicalUploadCleanup);
 				const assets = await tx.asset.findMany({
 					where: { projectId: id },
 					include: { representations: true },
@@ -294,18 +277,17 @@ export function createProjectCrudRepository(
 					...projectAssetDeletionTargets(assets, outbox),
 					...projectWebglDeletionTargets(
 						id,
-						project.webglEntryKey,
 						outbox,
 						project.webglDeployments,
 					),
 					...projectActiveUploadDeletionTargets(id, activeUploads, outbox),
 				]);
 				for (const upload of activeUploads) {
-					if (!upload.s3Key || !upload.s3UploadId) continue;
+					if (!upload.objectKey || !upload.uploadId) continue;
 					await queueMultipartAbortTask(tx, {
-						bucket: 'bucket' in upload ? upload.bucket : outbox.protectedBucket,
-						storageKey: upload.s3Key,
-						uploadId: upload.s3UploadId,
+						bucket: outbox.protectedBucket,
+						storageKey: upload.objectKey,
+						uploadId: upload.uploadId,
 						reason: `${outbox.reason}-active-multipart`,
 						...('canonicalSessionId' in upload
 							? { uploadSessionId: upload.canonicalSessionId }
@@ -320,7 +302,7 @@ export function createProjectCrudRepository(
 				});
 				await tx.asset.deleteMany({ where: { projectId: id } });
 				await tx.project.delete({ where: { id } });
-				return { assets, webglEntryKey: project.webglEntryKey, activeUploads };
+				return { assets, activeUploads };
 			});
 		},
 		clearWebglDeployment(projectId, outbox) {
@@ -328,14 +310,9 @@ export function createProjectCrudRepository(
 				const project = await tx.project.findUniqueOrThrow({
 					where: { id: projectId },
 					select: {
-						webglEntryKey: true,
 						currentWebglDeploymentId: true,
 						webglDeployments: { select: webglDeletionSnapshotSelect },
 					},
-				});
-				const legacyActive = await tx.gameUploadActiveSession.findUnique({
-					where: { projectId_uploadKind: { projectId, uploadKind: 'WEBGL' } },
-					include: { session: true },
 				});
 				const canonicalActive = await tx.assetUploadSession.findMany({
 					where: {
@@ -343,39 +320,28 @@ export function createProjectCrudRepository(
 						kind: 'WEBGL',
 						state: { in: [...canonicalActiveUploadStates] },
 					},
-					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true, bucket: true },
+					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true },
 				});
-				const activeUploads = [
-					...(legacyActive?.session ? [legacyActive.session] : []),
-					...canonicalActive.map(canonicalUploadCleanup),
-				];
+				const activeUploads = canonicalActive.map(canonicalUploadCleanup);
 				await queueDurableDeletions(tx, [
 					...projectWebglDeletionTargets(
 						projectId,
-						project.webglEntryKey,
 						outbox,
 						project.webglDeployments,
 					),
 					...projectActiveUploadDeletionTargets(projectId, activeUploads, outbox),
 				]);
 				for (const upload of activeUploads) {
-					if (!upload.s3Key || !upload.s3UploadId) continue;
+					if (!upload.objectKey || !upload.uploadId) continue;
 					await queueMultipartAbortTask(tx, {
 						bucket: outbox.protectedBucket,
-						storageKey: upload.s3Key,
-						uploadId: upload.s3UploadId,
+						storageKey: upload.objectKey,
+						uploadId: upload.uploadId,
 						reason: `${outbox.reason}-active-multipart`,
 						...('canonicalSessionId' in upload
 							? { uploadSessionId: upload.canonicalSessionId }
 							: {}),
 					});
-				}
-				if (legacyActive) {
-					await tx.gameUploadSession.updateMany({
-						where: { id: legacyActive.sessionId, status: { in: ['PENDING', 'COMPLETING'] } },
-						data: { status: 'CANCELLED' },
-					});
-					await tx.gameUploadActiveSession.deleteMany({ where: { sessionId: legacyActive.sessionId } });
 				}
 				if (canonicalActive.length > 0) {
 					await tx.assetUploadSession.updateMany({
@@ -394,7 +360,7 @@ export function createProjectCrudRepository(
 						id: projectId,
 						currentWebglDeploymentId: project.currentWebglDeploymentId,
 					},
-					data: { currentWebglDeploymentId: null, webglEntryKey: '' },
+					data: { currentWebglDeploymentId: null },
 				});
 				if (pointerCleared.count !== 1) throw conflict('WebGL deployment changed concurrently');
 				const sourceRepresentationIds = project.webglDeployments.map(
@@ -418,7 +384,6 @@ export function createProjectCrudRepository(
 					});
 				}
 				return {
-					oldEntryKey: project.webglEntryKey,
 					cancelledSession: activeUploads[0] ?? null,
 				};
 			});
@@ -442,6 +407,10 @@ export function createProjectCrudRepository(
 					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
 				`);
 				if (!projects.length) throw notFound('Project not found');
+				const submission = await tx.projectSubmission.findUnique({ where: { projectId }, select: { state: true } });
+				if (submission && ['PENDING', 'FINALIZING'].includes(submission.state)) {
+					throw conflict('Submission videos cannot be reordered before publication');
+				}
 				const videos = await getProjectVideos(tx, projectId);
 				const current = videos.map(({ id }) => id);
 				if (current.length > MAX_PROJECT_VIDEOS) throw conflict('Project exceeds the five video limit');
@@ -455,8 +424,22 @@ export function createProjectCrudRepository(
 				return { order };
 			});
 		},
-		setProjectPoster(projectId, assetId) {
-			return assetMutation.setProjectPoster(projectId, assetId);
+		async setProjectPoster(projectId, assetId) {
+			return client.$transaction(async (tx) => {
+				const projects = await tx.$queryRaw<Array<{ id: number }>>(PrismaRuntime.sql`
+					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
+				`);
+				if (projects.length === 0) throw notFound('Project not found');
+				const asset = await tx.asset.findUnique({
+					where: { id: assetId },
+					select: { id: true, projectId: true, kind: true, status: true },
+				});
+				assertValidPosterAsset(asset, projectId);
+				return tx.project.update({
+					where: { id: projectId },
+					data: { posterAssetId: assetId },
+				});
+			});
 		},
 		bulkDeleteProjectsReturningAssets(ids, outbox) {
 			return client.$transaction(async (tx) => {
@@ -472,26 +455,18 @@ export function createProjectCrudRepository(
 					where: { id: { in: ids } },
 					select: {
 						id: true,
-						webglEntryKey: true,
 						currentWebglDeploymentId: true,
 						webglDeployments: { select: webglDeletionSnapshotSelect },
 					},
-				});
-				const legacyActiveUploads = await tx.gameUploadSession.findMany({
-					where: { projectId: { in: ids }, status: { in: ['PENDING', 'COMPLETING'] } },
-					select: { id: true, projectId: true, uploadKind: true, s3Key: true, s3UploadId: true },
 				});
 				const canonicalActiveUploads = await tx.assetUploadSession.findMany({
 					where: {
 						projectId: { in: ids },
 						state: { in: [...canonicalActiveUploadStates] },
 					},
-					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true, bucket: true },
+					select: { id: true, projectId: true, kind: true, objectKey: true, uploadId: true },
 				});
-				const activeUploads = [
-					...legacyActiveUploads,
-					...canonicalActiveUploads.map(canonicalUploadCleanup),
-				];
+				const activeUploads = canonicalActiveUploads.map(canonicalUploadCleanup);
 				const assets = await tx.asset.findMany({
 					where: { projectId: { in: ids } },
 					include: { representations: true },
@@ -500,7 +475,6 @@ export function createProjectCrudRepository(
 					...projectAssetDeletionTargets(assets, outbox),
 					...projects.flatMap((project) => projectWebglDeletionTargets(
 						project.id,
-						project.webglEntryKey,
 						outbox,
 						project.webglDeployments,
 					)),
@@ -511,11 +485,11 @@ export function createProjectCrudRepository(
 					)),
 				]);
 				for (const upload of activeUploads) {
-					if (!upload.s3Key || !upload.s3UploadId) continue;
+					if (!upload.objectKey || !upload.uploadId) continue;
 					await queueMultipartAbortTask(tx, {
-						bucket: 'bucket' in upload ? upload.bucket : outbox.protectedBucket,
-						storageKey: upload.s3Key,
-						uploadId: upload.s3UploadId,
+						bucket: outbox.protectedBucket,
+						storageKey: upload.objectKey,
+						uploadId: upload.uploadId,
 						reason: `${outbox.reason}-active-multipart`,
 						...('canonicalSessionId' in upload
 							? { uploadSessionId: upload.canonicalSessionId }
@@ -533,7 +507,13 @@ export function createProjectCrudRepository(
 			});
 		},
 		bulkUpdateStatus(ids, status) {
-			return client.project.updateMany({ where: { id: { in: ids } }, data: { status } });
+			return client.$transaction(async (tx) => {
+				const draftCount = await tx.project.count({ where: { id: { in: ids }, status: 'DRAFT' } });
+				if (draftCount > 0 && status !== 'DRAFT') {
+					throw conflict('Draft submissions may only be published by submission finalize');
+				}
+				return tx.project.updateMany({ where: { id: { in: ids } }, data: { status } });
+			});
 		},
 		findExhibitionById(id) {
 			return client.exhibition.findUnique({ where: { id } });
@@ -544,8 +524,6 @@ export function createProjectCrudRepository(
 			});
 		},
 		createProjectWithAssets(data) {
-			if (data.savedFiles.filter((file) => file.kind === 'DOCUMENT' || file.kind === 'ATTACHMENT').length > 5) throw conflict('A project supports at most 5 materials');
-			if (data.savedFiles.filter((file) => file.kind === 'VIDEO').length > MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
 			return client.$transaction(async (tx) => {
 				const project = await tx.project.create({
 					data: {
@@ -554,7 +532,7 @@ export function createProjectCrudRepository(
 						title: data.title,
 						summary: data.summary,
 						description: data.description,
-						status: data.status,
+						status: 'DRAFT',
 						creatorId: data.creatorId,
 						members: {
 							create: data.members.map((member, index) => ({
@@ -566,96 +544,254 @@ export function createProjectCrudRepository(
 						},
 					},
 				});
-
-				let posterAssetId: number | null = null;
-				let videoSortOrder = 0;
-				for (const savedFile of data.savedFiles) {
-					const asset = await createCanonicalAsset(tx, {
+				const submission = await tx.projectSubmission.create({
+					data: {
 						projectId: project.id,
-						kind: savedFile.kind,
-						...(savedFile.kind === 'VIDEO' ? { videoSortOrder: videoSortOrder++ } : {}),
-						bucket: savedFile.bucket ?? (
-							savedFile.kind === 'GAME' || savedFile.kind === 'VIDEO' || savedFile.kind === 'DOCUMENT' || savedFile.kind === 'ATTACHMENT'
-								? buckets.protectedBucket
-								: buckets.publicBucket
-						),
-						storageKey: savedFile.storageKey,
-						playbackStorageKey: savedFile.playbackStorageKey,
-						originalName: savedFile.originalName,
-						mimeType: savedFile.mimeType,
-						playbackMimeType: savedFile.playbackMimeType,
-						sizeBytes: BigInt(savedFile.sizeBytes),
-						playbackSizeBytes: BigInt(savedFile.playbackSizeBytes ?? 0),
-						playbackStatus: savedFile.playbackStatus,
-						playbackError: savedFile.playbackError,
-						isPublic: savedFile.kind !== 'GAME' && savedFile.kind !== 'VIDEO' && savedFile.kind !== 'DOCUMENT' && savedFile.kind !== 'ATTACHMENT',
-						width: savedFile.width,
-						height: savedFile.height,
-						renditions: savedFile.renditions,
-					});
-					if (savedFile.kind === 'POSTER' && posterAssetId === null) {
-						posterAssetId = asset.id;
-					}
-				}
-				if (posterAssetId !== null) {
-					await tx.project.update({
-						where: { id: project.id },
-						data: { posterAssetId },
-					});
-				}
-				await commitUploadIntents(
-					tx,
-					data.savedFiles.flatMap((savedFile) => savedFile.uploadIntentIds ?? []),
-				);
+						actorId: data.creatorId,
+						items: { create: data.manifest },
+					},
+					include: projectSubmissionInclude,
+				});
+
 				if (data.idempotency) {
 					await succeedIdempotencyOperation(tx, {
 						operationId: data.idempotency.operationId,
 						ownerToken: data.idempotency.ownerToken,
-						result: data.idempotency.resultForProject(project),
+						result: data.idempotency.resultForProject({ ...project, submission }),
 					});
 				}
-				return project;
+				return { ...project, submission };
 			});
 		},
-		createAsset(data) {
-			return withAssetMutationTransaction(client, async (tx) => {
-				const {
-					uploadIntentIds = [],
-					idempotency,
-					renditions = [],
-					...assetData
-				} = data;
-				if (isMaterialKind(assetData.kind)) {
-					await tx.$queryRaw(PrismaRuntime.sql`SELECT "id" FROM "projects" WHERE "id" = ${assetData.projectId} FOR UPDATE`);
-					await assertMaterialCapacity(tx, assetData.projectId);
-				}
-				const videoSortOrder = assetData.kind === 'VIDEO'
-					? await nextProjectVideoOrder(tx, assetData.projectId) : undefined;
-				const asset = await createCanonicalAsset(tx, {
-					...assetData,
-					videoSortOrder,
-					bucket: assetData.bucket
-						?? (assetData.isPublic ? buckets.publicBucket : buckets.protectedBucket),
-					renditions,
+		async findSubmissionForActor(projectId, actor) {
+			const submission = await client.projectSubmission.findUnique({
+				where: { projectId },
+				include: projectSubmissionInclude,
+			});
+			if (!submission) return null;
+			assertSubmissionActor(submission, actor);
+			return submission;
+		},
+		finalizeSubmission(projectId, actor) {
+			return withSerializableRetry(client, async (tx) => {
+				await tx.$queryRaw(PrismaRuntime.sql`
+					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
+				`);
+				await tx.$queryRaw(PrismaRuntime.sql`
+					SELECT "id" FROM "project_submissions" WHERE "project_id" = ${projectId} FOR UPDATE
+				`);
+				const submission = await tx.projectSubmission.findUnique({
+					where: { projectId },
+					include: projectSubmissionInclude,
 				});
-				await commitUploadIntents(tx, uploadIntentIds);
-				if (idempotency) {
-					await succeedIdempotencyOperation(tx, {
-						operationId: idempotency.operationId,
-						ownerToken: idempotency.ownerToken,
-						result: idempotency.resultForAsset(asset.id),
-					});
+				if (!submission) throw notFound('Project submission not found');
+				assertSubmissionActor(submission, actor);
+				if (submission.state === 'PUBLISHED' && submission.project.status === 'PUBLISHED') return submission;
+				if (submission.state === 'FINALIZING' && submission.project.status === 'DRAFT') return submission;
+				if (submission.state !== 'PENDING' || submission.project.status !== 'DRAFT') {
+					throw conflict('Project submission cannot be finalized');
 				}
-				return asset;
+				const invalid = await tx.$queryRaw<Array<{ count: bigint }>>(PrismaRuntime.sql`
+					SELECT count(*)::bigint AS "count"
+					FROM "project_submission_items" item
+					LEFT JOIN "asset_upload_sessions" session ON session."submission_item_id" = item."id"
+					LEFT JOIN "assets" asset ON asset."id" = item."result_asset_id"
+					LEFT JOIN "asset_representations" representation ON representation."id" = item."result_representation_id"
+					LEFT JOIN "webgl_deployments" deployment ON deployment."id" = item."result_webgl_deployment_id"
+					LEFT JOIN "projects" project ON project."id" = ${projectId}
+					WHERE item."submission_id" = ${submission.id}
+					  AND (
+						item."state" <> 'READY'::"ProjectSubmissionItemState"
+						OR session."state" <> 'READY'::"AssetUploadSessionState"
+						OR session."generation" IS DISTINCT FROM item."bound_generation"
+						OR session."result_asset_id" IS DISTINCT FROM item."result_asset_id"
+						OR session."result_representation_id" IS DISTINCT FROM item."result_representation_id"
+						OR asset."project_id" IS DISTINCT FROM ${projectId}
+						OR asset."kind"::text IS DISTINCT FROM item."kind"::text
+						OR asset."status" <> 'READY'::"AssetStatus"
+						OR representation."asset_id" IS DISTINCT FROM asset."id"
+						OR representation."state" <> 'READY'::"AssetRepresentationState"
+						OR (item."kind" = 'WEBGL'::"AssetUploadKind" AND (
+							deployment."project_id" IS DISTINCT FROM ${projectId}
+						OR deployment."source_representation_id" IS DISTINCT FROM representation."id"
+							OR deployment."state" <> 'READY'::"WebglDeploymentState"
+							OR NOT (
+								(deployment."staging_bucket" IS NOT NULL AND deployment."staging_object_manifest" IS NOT NULL)
+								OR project."current_webgl_deployment_id" IS NOT DISTINCT FROM deployment."id"
+							)
+						))
+					  )
+				`);
+				if ((invalid[0]?.count ?? 0n) !== 0n) {
+					throw conflict('Every selected project file must be READY before publication');
+				}
+				const imageAssetIds = submission.items
+					.filter(({ kind }) => kind === 'IMAGE' || kind === 'POSTER')
+					.map(({ resultAssetId }) => resultAssetId)
+					.filter((id): id is number => id !== null);
+				const representations = imageAssetIds.length === 0 ? [] : await tx.assetRepresentation.findMany({
+					where: { assetId: { in: imageAssetIds }, role: { in: ['ORIGINAL', 'CARD_480', 'DISPLAY_960'] }, state: 'READY' },
+				});
+				if (representations.length !== imageAssetIds.length * 3) {
+					throw conflict('Every DRAFT image representation must be staged before publication');
+				}
+				const imageFences = new Map(submission.items
+					.filter((item) => (item.kind === 'IMAGE' || item.kind === 'POSTER')
+						&& item.resultAssetId !== null && item.uploadSession !== null)
+					.map((item) => [item.resultAssetId!, item.uploadSession!] as const));
+				if (imageFences.size !== imageAssetIds.length) {
+					throw conflict('Every DRAFT image representation must retain its upload source fence');
+				}
+				const publicationRepresentations = representations.map((representation) => {
+					const fence = imageFences.get(representation.assetId);
+					if (!fence) throw conflict('DRAFT image representation lost its submission item fence');
+					if (!['ORIGINAL', 'CARD_480', 'DISPLAY_960'].includes(representation.role)) {
+						throw conflict('DRAFT image representation has an invalid publication role');
+					}
+					return {
+						...representation,
+						role: representation.role as 'ORIGINAL' | 'CARD_480' | 'DISPLAY_960',
+						generation: fence.generation,
+						sourceIdentityAlgorithm: fence.sourceIdentityAlgorithm,
+						sourceIdentity: fence.sourceIdentity,
+					};
+				});
+				const deploymentIds = submission.items
+					.map(({ resultWebglDeploymentId }) => resultWebglDeploymentId)
+					.filter((id): id is string => id !== null);
+				const deployments = deploymentIds.length === 0 ? [] : await tx.webglDeployment.findMany({
+					where: { id: { in: deploymentIds }, projectId, state: 'READY' },
+				});
+				if (deployments.length !== deploymentIds.length) {
+					throw conflict('Every DRAFT WebGL deployment must be staged before publication');
+				}
+				let plan;
+				try {
+					plan = createProjectPublicationPlan({
+						projectId,
+						submissionId: submission.id,
+						protectedBucket: buckets.protectedBucket,
+						publicBucket: buckets.publicBucket,
+						representations: publicationRepresentations,
+						webglDeployments: deployments,
+					});
+				} catch (error) {
+					throw conflict(error instanceof Error ? error.message : 'Publication plan is malformed');
+				}
+				await tx.projectPublicationJob.create({
+					data: {
+						projectId,
+						submissionId: submission.id,
+						plan: plan as unknown as Prisma.InputJsonValue,
+					},
+				});
+				const finalizing = await tx.projectSubmission.updateMany({
+					where: { id: submission.id, state: 'PENDING' },
+					data: { state: 'FINALIZING' },
+				});
+				if (finalizing.count !== 1) throw conflict('Project submission changed concurrently');
+				return tx.projectSubmission.findUniqueOrThrow({
+					where: { id: submission.id },
+					include: projectSubmissionInclude,
+				});
 			});
 		},
-		replaceOrCreateReplaceableAsset(projectId, kind, data, outbox) {
-			return assetMutation.replaceOrCreateReplaceableAsset(
-				projectId,
-				kind,
-				data,
-				outbox,
-			);
+		cancelSubmission(projectId, actor) {
+			return withSerializableRetry(client, async (tx) => {
+				await tx.$queryRaw(PrismaRuntime.sql`
+					SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE
+				`);
+				await tx.$queryRaw(PrismaRuntime.sql`
+					SELECT "id" FROM "project_submissions" WHERE "project_id" = ${projectId} FOR UPDATE
+				`);
+				const submission = await tx.projectSubmission.findUnique({
+					where: { projectId },
+					include: projectSubmissionInclude,
+				});
+				if (!submission) throw notFound('Project submission not found');
+				assertSubmissionActor(submission, actor);
+				if (submission.state === 'CANCELLED') return submission;
+				if (!['PENDING', 'FINALIZING'].includes(submission.state) || submission.project.status !== 'DRAFT') {
+					throw conflict('Published project submission cannot be cancelled');
+				}
+				const [assets, deployments, sessions] = await Promise.all([
+					tx.asset.findMany({ where: { projectId }, include: { representations: true } }),
+					tx.webglDeployment.findMany({ where: { projectId }, select: webglDeletionSnapshotSelect }),
+					tx.assetUploadSession.findMany({
+						where: { submissionItem: { projectSubmission: { id: submission.id } } },
+						select: { id: true, kind: true, bucket: true, objectKey: true, uploadId: true },
+					}),
+				]);
+				await queueDurableDeletions(tx, [
+					...deployments.filter((deployment) => deployment.stagingBucket && deployment.stagingPrefix).map((deployment) => ({
+						bucket: deployment.stagingBucket!,
+						storageKey: deployment.stagingPrefix!,
+						targetKind: 'PREFIX' as const,
+						reason: 'project-submission-cancelled-webgl-staging',
+					})),
+					...projectAssetDeletionTargets(assets, { ...buckets, reason: 'project-submission-cancelled' }),
+					...projectWebglDeletionTargets(projectId, { ...buckets, reason: 'project-submission-cancelled' }, deployments),
+					...sessions.map((session) => ({
+						bucket: session.bucket,
+						storageKey: session.objectKey,
+						reason: 'project-submission-cancelled-source',
+					})),
+				]);
+				for (const session of sessions) {
+					if (!session.uploadId) continue;
+					await queueMultipartAbortTask(tx, {
+						bucket: session.bucket,
+						storageKey: session.objectKey,
+						uploadId: session.uploadId,
+						reason: 'project-submission-cancelled-multipart',
+						uploadSessionId: session.id,
+					});
+				}
+				await tx.assetUploadSession.updateMany({
+					where: { id: { in: sessions.map(({ id }) => id) } },
+					data: {
+						state: 'CANCELLED', uploadId: null,
+						completionLeaseToken: null, completionLeaseUntil: null,
+						validationLeaseToken: null, validationLeaseUntil: null,
+					},
+				});
+				await tx.project.update({
+					where: { id: projectId },
+					data: { posterAssetId: null, currentWebglDeploymentId: null },
+				});
+				await tx.webglDeployment.deleteMany({ where: { projectId } });
+				await tx.asset.deleteMany({ where: { projectId } });
+				await tx.projectSubmissionItem.updateMany({
+					where: { submissionId: submission.id },
+					data: {
+						state: 'CANCELLED', resultAssetId: null,
+						resultRepresentationId: null, resultWebglDeploymentId: null,
+						failureReason: 'submission cancelled',
+						playbackState: 'NONE', playbackError: null,
+					},
+				});
+				if (submission.publicationJob) await tx.projectPublicationJob.update({
+					where: { submissionId: submission.id },
+					data: { state: 'CANCELLED', claimToken: null, claimUntil: null },
+				});
+				await tx.projectSubmission.update({
+					where: { id: submission.id },
+					data: { state: 'CANCELLED', cancelledAt: new Date() },
+				});
+				return tx.projectSubmission.findUniqueOrThrow({
+					where: { id: submission.id },
+					include: projectSubmissionInclude,
+				});
+				});
+		},
+		async auditActiveSubmissions() {
+			const [draftProjects, pendingSubmissions, finalizingSubmissions, activePublicationJobs] = await client.$transaction([
+				client.project.count({ where: { status: 'DRAFT' } }),
+				client.projectSubmission.count({ where: { state: 'PENDING' } }),
+				client.projectSubmission.count({ where: { state: 'FINALIZING' } }),
+				client.projectPublicationJob.count({ where: { state: { in: ['PENDING', 'PROCESSING'] } } }),
+			]);
+			return { draftProjects, pendingSubmissions, finalizingSubmissions, activePublicationJobs };
 		},
 	};
 }

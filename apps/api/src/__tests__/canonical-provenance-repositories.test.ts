@@ -40,7 +40,7 @@ describe('canonical representation provenance repositories', () => {
 
 		const representation = (assetCreate.mock.calls[0]![0].data.representations as { create: Record<string, unknown>[] }).create[0];
 		expect(representation).toMatchObject({
-			role: 'ORIGINAL', bucket: 'protected-source',
+			role: 'ORIGINAL', storageBucket: { connect: { bucket: 'protected-source' } },
 			objectKey: 'protected/uploads/game-session/g1/source', sizeBytes: 1234n,
 		});
 		expect(representationUpdate).toHaveBeenCalledWith({

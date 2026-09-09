@@ -113,14 +113,11 @@ export default function AdminProjectEditPage() {
 					projectId={id}
 					limits={limits}
 					canEditContent={canEditContent}
-					addAssetError={mutations.addAssetMutation.error}
-					isAddingAsset={mutations.addAssetMutation.isPending}
 					isSettingPoster={mutations.setPosterMutation.isPending}
 					isRemovingAsset={mutations.removeAssetMutation.isPending}
 					isRemovingWebgl={mutations.removeWebglMutation.isPending}
 					isReorderingVideos={mutations.reorderVideosMutation.isPending}
 					videoOrderError={mutations.reorderVideosMutation.error}
-					onAddAsset={mutations.addAsset}
 					onSetPoster={mutations.setPosterMutation.mutate}
 					onRemoveAsset={mutations.removeAssetMutation.mutate}
 					onRemoveWebgl={() => mutations.removeWebglMutation.mutate()}

@@ -317,7 +317,7 @@ export const MOCK_YEAR_PROJECTS: Record<number, MockProjectCard[]> = {
 
 interface MockMyProjectCard extends MockProjectCard {
 	year: number;
-	status: ProjectStatus;
+	status: Exclude<ProjectStatus, 'DRAFT'>;
 	ownerId: number;
 	updatedAgoSec: number;
 }

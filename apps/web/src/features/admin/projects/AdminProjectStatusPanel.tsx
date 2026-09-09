@@ -3,6 +3,7 @@ import type { ProjectStatus } from '@pcu/contracts';
 import { getApiErrorMessage } from '../../../lib/api';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
+	DRAFT: '제출 중',
 	PUBLISHED: '공개',
 	ARCHIVED: '보관',
 };
@@ -12,7 +13,7 @@ interface AdminProjectStatusPanelProps {
 	isPrivileged: boolean;
 	isPending: boolean;
 	error: unknown;
-	onToggle: (status: ProjectStatus) => void;
+	onToggle: (status: Exclude<ProjectStatus, 'DRAFT'>) => void;
 }
 
 export function AdminProjectStatusPanel({
@@ -30,7 +31,7 @@ export function AdminProjectStatusPanel({
 				<strong>{STATUS_LABELS[status]}</strong>
 			</p>
 			<div className="form-actions">
-				{isPrivileged && status !== 'PUBLISHED' && (
+				{isPrivileged && status !== 'DRAFT' && status !== 'PUBLISHED' && (
 					<button
 						className="btn btn--primary btn--small"
 						onClick={() => onToggle('PUBLISHED')}
@@ -39,7 +40,7 @@ export function AdminProjectStatusPanel({
 						공개로 전환
 					</button>
 				)}
-				{status !== 'ARCHIVED' && isPrivileged && (
+				{status !== 'DRAFT' && status !== 'ARCHIVED' && isPrivileged && (
 					<button
 						className="btn btn--danger btn--small"
 						onClick={() => onToggle('ARCHIVED')}

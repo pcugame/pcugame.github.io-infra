@@ -14,19 +14,9 @@ import { deletePrefixPages } from '../application/prefix-deletion.js';
 import { createObjectStorage } from '../lib/storage.js';
 import { createOrphanService } from '../modules/orphan/service.js';
 import type { ObjectReferenceInventory } from '../modules/orphan/reference-resolver.js';
-import { createWebglDeployment } from '../modules/webgl/deployment.js';
-import type { WebglDeploymentKeys } from '../modules/webgl/paths.js';
 import { deferred } from './helpers/deferred.js';
 
 const key = (n: number) => `site/${String(n).padStart(4, '0')}.js`;
-const webglDeployment: WebglDeploymentKeys = {
-	projectId: 7,
-	deploymentId: '123e4567-e89b-42d3-a456-426614174000',
-	deploymentPrefix: 'webgl/7/123e4567-e89b-42d3-a456-426614174000/',
-	sourceKey: 'webgl/7/123e4567-e89b-42d3-a456-426614174000/source.zip',
-	sitePrefix: 'webgl/7/123e4567-e89b-42d3-a456-426614174000/site/',
-	entryKey: 'webgl/7/123e4567-e89b-42d3-a456-426614174000/site/index.html',
-};
 
 describe('issue #29 prefix deletion invariants', () => {
 	it('coalesces short, truncated list pages into <=1000-key DeleteObjects batches without DeleteObject fallback', async () => {
@@ -602,37 +592,4 @@ describe('issue #29 prefix deletion invariants', () => {
 		expect(repository.markClaimFailed).toHaveBeenCalledOnce();
 	});
 
-	it('rollback forwards the completion signal and claim guards into every batch boundary, then stops on claim loss', async () => {
-		const controller = new AbortController();
-		const firstBatch = Array.from({ length: 1000 }, (_, index) => key(index));
-		const listKeyPage = vi.fn(async (_bucket: string, _prefix: string, _page: unknown, request?: { signal?: AbortSignal }) => {
-			expect(request?.signal).toBe(controller.signal);
-			return { keys: firstBatch, isTruncated: true };
-		});
-		const deleteKeys = vi.fn(async (_bucket: string, keys: readonly string[], request?: { signal?: AbortSignal }) => {
-			expect(keys).toEqual(firstBatch);
-			expect(request?.signal).toBe(controller.signal);
-			controller.abort(new Error('completion claim lost'));
-			return { deleted: [...keys], failures: [] };
-		});
-		const coordinator = createObjectDeletionCoordinator({
-			storage: { delete: vi.fn(), listKeyPage, deleteKeys },
-			orphans: { record: vi.fn() }, logger: { error: vi.fn() },
-		});
-		const adapter = createWebglDeployment({
-			config: { protectedBucket: 'protected', publicBucket: 'public' },
-			storage: { readRange: vi.fn(), stream: vi.fn(), upload: vi.fn() },
-			fileSystem: { temporaryDirectory: () => '/tmp', createWriteStream: vi.fn(), remove: vi.fn() },
-			ids: { next: () => 'safe-id' }, deletion: coordinator,
-			logger: { warn: vi.fn(), error: vi.fn() },
-		});
-		const assertClaimOwned = vi.fn(async () => undefined);
-
-		await expect(adapter.rollbackPublicDeployment(webglDeployment, 'rollback', {
-			storageRequest: { signal: controller.signal }, assertClaimOwned,
-		})).rejects.toThrow('completion claim lost');
-		expect(assertClaimOwned).toHaveBeenCalledTimes(2); // first list, then first delete
-		expect(listKeyPage).toHaveBeenCalledOnce();
-		expect(deleteKeys).toHaveBeenCalledOnce();
-	});
 });

@@ -60,14 +60,14 @@ export default function ProjectDetailPage() {
       <ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
 
       {/* 에셋 유실 안내 */}
-      {project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (
+      {project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (project.attachments?.length ?? 0) === 0 && (
         <p className="incomplete-notice incomplete-notice--missing">
           이 프로젝트의 파일이 유실되었습니다. 포스터, 실행 파일, 스크린샷 등이 등록되지 않은 상태입니다.
         </p>
       )}
 
       {/* 불완전 안내 (파일은 일부 있지만 불완전 플래그) */}
-      {project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0) && (
+      {project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0 || (project.attachments?.length ?? 0) > 0) && (
         <p className="incomplete-notice">
           이 프로젝트는 일부 자료가 누락되었을 수 있습니다.
         </p>

@@ -1,0 +1,57 @@
+{
+  "sourceSha": "babf7bd1c50db2f514b90dea5c06ac3816550dad",
+  "image": "ghcr.io/pcugame/pcu-graduationproject-v2-api@sha256:051af32a9117ea63b36969f5c12b1b7cc65696f939a92232386968ab96af1266",
+  "buildRun": 34319444639,
+  "stageRun": 34319802630,
+  "phase": "DEPLOYED_VERIFIED",
+  "cause": "Admin project serializer omitted attachments required by the response serialization schema.",
+  "affectedRoute": "GET /api/admin/projects/:id",
+  "alsoVerifiedRoute": "PATCH /api/admin/projects/:id",
+  "beforeProductionRows": 144,
+  "beforeSerializationFailures": 144,
+  "apiTestsPassed": 1125,
+  "releaseScriptTestsPassed": 13,
+  "phase1TargetedTestsPassed": 39,
+  "mainTargetedTestsPassed": 14,
+  "phase1BuildPassed": true,
+  "mainBuildPassed": true,
+  "phase1LintPassed": true,
+  "productionDataMutatedForVerification": false,
+  "afterProductionRows": 144,
+  "afterSerializationFailures": 0,
+  "materialProjectsVerified": [
+    {
+      "projectId": 97,
+      "materialAssetIds": [
+        541
+      ]
+    },
+    {
+      "projectId": 99,
+      "materialAssetIds": [
+        540
+      ]
+    },
+    {
+      "projectId": 101,
+      "materialAssetIds": [
+        542
+      ]
+    },
+    {
+      "projectId": 102,
+      "materialAssetIds": [
+        539
+      ]
+    }
+  ],
+  "apiHealthy": true,
+  "workersRunning": 5,
+  "nonObservationBlockers": 0,
+  "observationStartedAt": "2026-09-09T06:38:04Z",
+  "observationStartedAtKst": "2026-09-09T15:38:04+09:00",
+  "previousObservationStartedAt": "2026-09-09T06:13:20Z",
+  "phase2ContractApplied": false,
+  "evidenceDirectory": "/tmp/pcu-admin-detail-evidence",
+  "remoteEvidenceDirectory": "/srv/graduationproject_v2/cutover-state/admin-detail-babf7bd1c50db2f514b90dea5c06ac3816550dad"
+}

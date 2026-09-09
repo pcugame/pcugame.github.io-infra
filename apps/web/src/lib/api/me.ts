@@ -1,5 +1,5 @@
-import type { SubmitProjectResponse } from '../../contracts';
-import { uploadFormData } from './client';
+import type { ProjectSubmissionStatusResponse, SubmitProjectResponse } from '../../contracts';
+import { api, uploadFormData } from './client';
 
 export const userProjectApi = {
   submit(input: { formData: FormData; idempotencyKey: string }) {
@@ -12,5 +12,14 @@ export const userProjectApi = {
         headers: { 'Idempotency-Key': input.idempotencyKey },
       },
     );
+  },
+  getSubmission(projectId: number) {
+    return api.get<ProjectSubmissionStatusResponse>(`/api/me/projects/${projectId}/submission`);
+  },
+  finalizeSubmission(projectId: number) {
+    return api.post<ProjectSubmissionStatusResponse>(`/api/me/projects/${projectId}/submission/finalize`);
+  },
+  cancelSubmission(projectId: number) {
+    return api.delete<ProjectSubmissionStatusResponse>(`/api/me/projects/${projectId}/submission`);
   },
 };

@@ -26,8 +26,8 @@ export function encodePersistedSourceIdentityManifest(manifest: Uint8Array): str
 
 /**
  * Decode the canonical manifest written by the direct session allocator.
- * This decoder accepts only the canonical padded base64 representation.
- * Phase 1 callers handle historical digest arrays/objects separately.
+ * Historical digest arrays/objects are intentionally not accepted by workers:
+ * Phase 2 direct sessions persist one unambiguous byte representation.
  */
 export function decodePersistedSourceIdentityManifest(value: unknown): Buffer {
 	if (typeof value !== 'string' || value.length === 0 || value.length % 4 !== 0

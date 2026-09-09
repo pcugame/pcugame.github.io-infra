@@ -1,4 +1,4 @@
-import { Prisma } from '../../generated/prisma/client.js';
+import type { Prisma } from '../../generated/prisma/client.js';
 import { conflict } from '../../shared/errors.js';
 
 export const MAX_PROJECT_VIDEOS = 5;
@@ -41,13 +41,4 @@ export async function countReservedProjectVideos(tx: Prisma.TransactionClient, p
 			...(excludeSessionId ? { id: { not: excludeSessionId } } : {}),
 		},
 	});
-}
-
-/** Appends under the same owner lock used by direct allocations, reorders and deletions. */
-export async function nextProjectVideoOrder(tx: Prisma.TransactionClient, projectId: number, excludeSessionId?: string): Promise<number> {
-	await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${projectId} FOR UPDATE`);
-	const videos = await normalizeProjectVideoOrder(tx, projectId);
-	const reserved = await countReservedProjectVideos(tx, projectId, excludeSessionId);
-	if (videos.length + reserved >= MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
-	return videos.length;
 }

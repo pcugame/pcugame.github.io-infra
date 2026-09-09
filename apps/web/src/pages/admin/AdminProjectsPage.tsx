@@ -42,7 +42,7 @@ export default function AdminProjectsPage() {
 	}, [selection.resetSelection]);
 
 	const bulkStatusMutation = useMutation({
-		mutationFn: ({ ids, status }: { ids: number[]; status: ProjectStatus }) =>
+	mutationFn: ({ ids, status }: { ids: number[]; status: Exclude<ProjectStatus, 'DRAFT'> }) =>
 			adminProjectApi.bulkStatus(ids, status),
 		onSuccess: () => {
 			selection.resetSelection();
@@ -62,7 +62,7 @@ export default function AdminProjectsPage() {
 
 	const isBusy = bulkStatusMutation.isPending || bulkDeleteMutation.isPending;
 
-	function handleBulkStatus(status: ProjectStatus) {
+	function handleBulkStatus(status: Exclude<ProjectStatus, 'DRAFT'>) {
 		if (selection.selectedIds.length === 0) return;
 		bulkStatusMutation.mutate({ ids: selection.selectedIds, status });
 	}

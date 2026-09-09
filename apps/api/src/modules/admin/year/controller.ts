@@ -6,7 +6,6 @@ import type { createExhibitionService } from './service.js';
 
 export interface YearControllerDependencies {
 	service: ReturnType<typeof createExhibitionService>;
-	uploadBodyLimit: number;
 }
 
 /** Register admin exhibition CRUD routes from one BackendContext-owned graph. */
@@ -48,24 +47,6 @@ export function createYearController(deps: YearControllerDependencies): FastifyP
 				const id = parseIntParam(request.params.id);
 				const patch = parseBody(UpdateExhibitionBody, request.body);
 				const updated = await deps.service.updateExhibition(id, patch);
-				sendOk(reply, updated);
-			},
-		);
-
-		/** POST /exhibitions/:id/poster — upload or replace exhibition poster */
-		app.post<{ Params: { id: string } }>(
-			'/exhibitions/:id/poster',
-			{
-				preHandler: requireRole('ADMIN', 'OPERATOR'),
-				bodyLimit: deps.uploadBodyLimit,
-				handlerTimeout: 45 * 60 * 1000,
-			},
-			async (request, reply) => {
-				const id = parseIntParam(request.params.id);
-				const updated = await deps.service.replacePoster(id, {
-					actor: request.currentUser!,
-					parts: request.parts(),
-				});
 				sendOk(reply, updated);
 			},
 		);

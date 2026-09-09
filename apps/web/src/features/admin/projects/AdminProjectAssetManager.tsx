@@ -22,15 +22,11 @@ interface AdminProjectAssetManagerProps {
 	projectId: number;
 	limits: ClientUploadLimits;
 	canEditContent: boolean;
-	addAssetError: unknown;
-	isAddingAsset: boolean;
 	isSettingPoster: boolean;
 	isRemovingAsset: boolean;
 	isRemovingWebgl: boolean;
 	isReorderingVideos?: boolean;
 	videoOrderError?: unknown;
-	/** Legacy inline upload bridge; new controls below never invoke it. */
-	onAddAsset: (kind: 'IMAGE' | 'POSTER', file: File) => Promise<void>;
 	onSetPoster: (assetId: number) => void;
 	onRemoveAsset: (assetId: number) => void;
 	onRemoveWebgl: () => void;
@@ -41,7 +37,6 @@ export function AdminProjectAssetManager({
 	project,
 	projectId,
 	canEditContent,
-	addAssetError,
 	isSettingPoster,
 	isRemovingAsset,
 	isRemovingWebgl,
@@ -216,7 +211,6 @@ export function AdminProjectAssetManager({
 							</>
 						)}
 						{materialLimits && availableMaterialSlots === 0 && <p className="field-hint">문서와 첨부자료는 프로젝트당 최대 {materialLimits.maxCount}개까지 등록할 수 있습니다.</p>}
-						{addAssetError != null && <p className="field-hint">기존 inline 업로드 오류는 legacy client에만 적용됩니다.</p>}
 					</div>
 
 					<GameUploadWidget projectId={projectId} uploadKind="GAME" />

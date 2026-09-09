@@ -46,9 +46,8 @@ RUN npm run build --workspace=@pcu/contracts && \
     npm run db:generate --workspace=apps/api && \
     npm run build --workspace=apps/api
 
-# Keep immutable contract history in Git, but ship only the authorized Phase 1
-# migration prefix. Runtime and integration containers cannot apply Phase 2.
-RUN rm -rf apps/api/prisma/migrations/20260822000000_canonical_asset_contract
+# Phase 2 includes the existing contract migration. Only the fenced cutover
+# command may apply it; starting the runtime never migrates the database.
 
 # ── Stage 3: Production image ──
 FROM node:22-bookworm-slim AS runner
@@ -85,6 +84,6 @@ EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:4000/api/health || exit 1
 
-# Phase 1 schema expansion is an explicit, fenced release operation. Runtime
+# Schema transition is an explicit, fenced release operation. Runtime
 # startup never applies pending migrations as a side effect.
 CMD ["node", "dist/server.js"]

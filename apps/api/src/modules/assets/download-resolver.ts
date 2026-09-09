@@ -14,9 +14,6 @@ export interface AssetDownloadIdentity {
 	id: number;
 	kind: string;
 	status: string;
-	storageKey: string | null;
-	playbackStorageKey: string | null;
-	playbackStatus: string;
 	representations: AssetDownloadRepresentation[];
 }
 
@@ -24,18 +21,16 @@ export interface ResolvedDownloadRepresentation {
 	role: DownloadRepresentationRole;
 	bucket: string;
 	objectKey: string;
-	source: 'canonical' | 'legacy';
 }
 
 function roleFor(variant: AssetDownloadVariant): DownloadRepresentationRole {
 	return variant === 'playback' ? 'PLAYBACK' : 'ORIGINAL';
 }
 
-/** Representation-first Phase-1 resolver. Legacy identity is used only on a true row miss. */
+/** Phase-2 resolver: physical identity exists only in canonical representations. */
 export function resolveDownloadRepresentation(
 	asset: AssetDownloadIdentity,
 	variant: AssetDownloadVariant,
-	legacyProtectedBucket: string,
 ): ResolvedDownloadRepresentation {
 	if (asset.status !== 'READY') throw notFound('Asset is not ready for download');
 	if (asset.kind !== 'GAME' && asset.kind !== 'VIDEO' && asset.kind !== 'DOCUMENT' && asset.kind !== 'ATTACHMENT') {
@@ -62,21 +57,7 @@ export function resolveDownloadRepresentation(
 			role,
 			bucket: canonical.bucket,
 			objectKey: canonical.objectKey,
-			source: 'canonical',
 		};
 	}
-
-	const objectKey = variant === 'original'
-		? asset.storageKey
-		: asset.playbackStatus === 'READY' ? asset.playbackStorageKey : null;
-	if (!objectKey?.trim()) throw notFound('Asset representation does not exist');
-	if (!legacyProtectedBucket.trim()) {
-		throw new AppError(500, 'Legacy protected bucket is not configured', 'INTERNAL_ERROR');
-	}
-	return {
-		role,
-		bucket: legacyProtectedBucket,
-		objectKey,
-		source: 'legacy',
-	};
+	throw notFound('Asset representation does not exist');
 }

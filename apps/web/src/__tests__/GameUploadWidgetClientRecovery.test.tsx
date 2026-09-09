@@ -14,7 +14,7 @@ function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
 	});
 }
 
-describe('GAME upload recovery with Phase 1 legacy compatibility', () => {
+describe('GAME direct upload recovery', () => {
 	let installedBlobArrayBuffer = false;
 	afterEach(() => {
 		cleanup();
@@ -51,9 +51,6 @@ describe('GAME upload recovery with Phase 1 legacy compatibility', () => {
 		const deleteStarted = new Promise<void>((resolve) => { markDeleteStarted = resolve; });
 		const fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
 			const url = String(request);
-			if (url.endsWith('/api/admin/projects/7/game-upload-sessions')) {
-				return jsonResponse({ items: [] });
-			}
 			if (url.endsWith('/api/admin/projects/7/direct-game-upload-sessions')) {
 				markCreateStarted();
 				return createResponse;
@@ -91,46 +88,4 @@ describe('GAME upload recovery with Phase 1 legacy compatibility', () => {
 		expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/part-urls'))).toBe(false);
 	});
 
-	it('retains the Phase 1 legacy session banner, resume request, and cancel endpoint', async () => {
-		const legacy = {
-			sessionId: 'legacy-session', originalName: 'legacy.zip', totalBytes: 6,
-			chunkSizeBytes: 3, totalChunks: 2, uploadedChunks: [], uploadedCount: 0,
-			status: 'PENDING', expiresAt: '2026-08-22T00:00:00.000Z', uploadKind: 'GAME',
-		};
-		const fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
-			const url = String(request);
-			if (url.endsWith('/api/admin/projects/7/game-upload-sessions')) {
-				return jsonResponse({ items: [legacy] });
-			}
-			if (url.endsWith('/api/admin/game-upload-sessions/legacy-session') && init?.method === 'DELETE') {
-				return new Response(null, { status: 204 });
-			}
-			if (url.endsWith('/api/admin/game-upload-sessions/legacy-session')) {
-				return new Response(JSON.stringify({ ok: false }), {
-					status: 503,
-					statusText: 'Service Unavailable',
-					headers: { 'content-type': 'application/json' },
-				});
-			}
-			throw new Error(`Unexpected request: ${url}`);
-		});
-		vi.stubGlobal('fetch', fetchMock);
-		const { container } = render(
-			<QueryClientProvider client={new QueryClient()}>
-				<GameUploadWidget projectId={7} />
-			</QueryClientProvider>,
-		);
-
-		expect(await screen.findByText(/미완료 업로드가 있습니다/)).toBeTruthy();
-		fireEvent.change(container.querySelector('input[type="file"]')!, {
-			target: { files: [new File(['legacy'], 'legacy.zip', { type: 'application/zip' })] },
-		});
-		fireEvent.click(screen.getByRole('button', { name: '이어올리기' }));
-		expect(await screen.findByText(/Service Unavailable/)).toBeTruthy();
-		fireEvent.click(screen.getByRole('button', { name: '취소 (세션 삭제)' }));
-
-		await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => (
-			String(url).endsWith('/api/admin/game-upload-sessions/legacy-session') && init?.method === 'DELETE'
-		))).toBe(true));
-	});
 });

@@ -2,11 +2,13 @@ import { Link } from 'react-router-dom';
 import type { AdminProjectItem, ProjectStatus } from '../../../contracts';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
+	DRAFT: '초안',
 	PUBLISHED: '공개',
 	ARCHIVED: '보관',
 };
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
+	DRAFT: 'badge--draft',
 	PUBLISHED: 'badge--published',
 	ARCHIVED: 'badge--archived',
 };

@@ -1,13 +1,24 @@
+import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { chmod, mkdir, mkdtemp, open, readdir, rm, stat } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { detectFileType, isAllowedVideoType } from '../../shared/file-signature.js';
+import { detectFileTypeFromFile, isAllowedVideoType } from '../../shared/file-signature.js';
 import { materializeAndValidateCompletedSource } from '../admin/game-upload/source-identity.js';
 import type { VerifyingVideoSession } from './ports.js';
 import { VideoInfrastructureError, VideoRejectedError } from './errors.js';
+import { cleanupStaleWorkerDirectories } from '../upload-lifecycle/worker-workspace.js';
 
 const WORKSPACE_PREFIX = 'pcu-video-worker-';
+
+export async function sha256VideoFile(filePath: string, signal?: AbortSignal): Promise<string> {
+	const hash = createHash('sha256');
+	for await (const chunk of createReadStream(filePath)) {
+		if (signal?.aborted) throw signal.reason ?? new Error('VIDEO checksum was aborted');
+		hash.update(chunk);
+	}
+	return hash.digest('hex');
+}
 
 export interface VideoWorkspace {
 	directory: string;
@@ -57,16 +68,7 @@ export async function materializeVideoWorkspace(input: {
 			physicalByteLimit: input.maxSourceBytes,
 			signal: input.signal,
 		});
-		const handle = await open(inputPath, 'r');
-		let header: Buffer;
-		try {
-			header = Buffer.alloc(16);
-			const result = await handle.read(header, 0, header.length, 0);
-			header = header.subarray(0, result.bytesRead);
-		} finally {
-			await handle.close();
-		}
-		const detected = detectFileType(header);
+		const detected = await detectFileTypeFromFile(inputPath, { signal: input.signal });
 		if (!detected || !isAllowedVideoType(detected)) {
 			throw new VideoRejectedError('Video magic bytes are unsupported', 'MAGIC_INVALID');
 		}
@@ -100,22 +102,5 @@ export async function cleanupStaleVideoWorkspaces(
 	tempRoot: string,
 	cutoff: Date,
 ): Promise<number> {
-	const root = resolve(tempRoot);
-	let entries;
-	try {
-		entries = await readdir(root, { withFileTypes: true });
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
-		throw error;
-	}
-	let removed = 0;
-	for (const entry of entries) {
-		if (!entry.isDirectory() || !entry.name.startsWith(WORKSPACE_PREFIX)) continue;
-		const directory = join(root, entry.name);
-		const metadata = await stat(directory);
-		if (metadata.mtime >= cutoff) continue;
-		await rm(directory, { recursive: true, force: true });
-		removed++;
-	}
-	return removed;
+	return cleanupStaleWorkerDirectories({ tempRoot, prefix: WORKSPACE_PREFIX, cutoff });
 }

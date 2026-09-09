@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import {
 	createIdempotencyRepository,
 	succeedIdempotencyOperation,
@@ -37,6 +37,7 @@ describe.runIf(runPostgresIntegration)(
 	() => {
 		const testId = randomUUID();
 		const bucket = `lease-clock-${testId}`;
+		let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 		let control: PrismaClient;
 		let firstWorker: PrismaClient;
 		let secondWorker: PrismaClient;
@@ -45,9 +46,13 @@ describe.runIf(runPostgresIntegration)(
 		beforeAll(async () => {
 			const databaseUrl = process.env['DATABASE_URL'];
 			if (!databaseUrl) throw new Error('DATABASE_URL is required');
-			control = createPrismaClientForDatabase(databaseUrl);
-			firstWorker = createPrismaClientForDatabase(databaseUrl);
-			secondWorker = createPrismaClientForDatabase(databaseUrl);
+			// Claims and purges intentionally scan entire tables. A private migrated
+			// schema keeps earlier HTTP smoke receipts and live maintenance workers
+			// out of these exact ownership assertions without changing production SQL.
+			database = await createIsolatedMigratedDatabase(databaseUrl);
+			control = database.createClient();
+			firstWorker = database.createClient();
+			secondWorker = database.createClient();
 			await Promise.all([
 				control.$connect(),
 				firstWorker.$connect(),
@@ -62,21 +67,9 @@ describe.runIf(runPostgresIntegration)(
 				},
 			});
 			actorId = actor.id;
-		});
+		}, 60_000);
 
-		afterAll(async () => {
-			if (!control) return;
-			await control.orphanObject.deleteMany({ where: { bucket } });
-			await control.uploadIntent.deleteMany({ where: { bucket } });
-			await control.multipartAbortTask.deleteMany({ where: { bucket } });
-			await control.idempotencyOperation.deleteMany({ where: { actorId } });
-			await control.user.deleteMany({ where: { id: actorId } });
-			await Promise.all([
-				control.$disconnect(),
-				firstWorker.$disconnect(),
-				secondWorker.$disconnect(),
-			]);
-		});
+		afterAll(async () => { await database?.close(); });
 
 		it('uses PostgreSQL time for upload-intent takeover and fences every stale final mutation', async () => {
 			const id = randomUUID();
@@ -178,7 +171,7 @@ describe.runIf(runPostgresIntegration)(
 				.resolves.toMatchObject({ state: 'RESOLVED', claimToken: null, claimUntil: null });
 		});
 
-		it('allows only one upload-intent claimant on independent database connections', async () => {
+	it('allows only one upload-intent claimant on independent database connections', async () => {
 			const id = randomUUID();
 			await createUploadIntentRepository(control).prepare({
 				id,
@@ -192,67 +185,140 @@ describe.runIf(runPostgresIntegration)(
 				createUploadIntentRepository(secondWorker).claimStale(1, 'intent-second', 60_000),
 			]);
 			expect([...first, ...second].filter((row) => row.id === id)).toHaveLength(1);
-		});
+	});
 
-		it('makes direct multipart cancel durable and idempotent across concurrent connections', async () => {
-			const exhibition = await control.exhibition.create({
-				data: { year: 30_000 + actorId, title: `direct-cancel-${testId}` },
+	it('uses PostgreSQL time and row locks to expire direct multipart sessions and take over COMPLETING leases', async () => {
+		const exhibition = await control.exhibition.create({
+			data: { year: 20_000 + actorId, title: `direct-recovery-${testId}` },
+		});
+		const project = await control.project.create({
+			data: {
+				exhibitionId: exhibition.id,
+				creatorId: actorId,
+				slug: `direct-recovery-${testId}`,
+				title: 'Direct recovery lease clock',
+			},
+		});
+		const expiringId = randomUUID();
+		const completingId = randomUUID();
+		const expiringKey = `protected/uploads/${expiringId}/1/source.zip`;
+		const completingKey = `protected/uploads/${completingId}/1/source.bin`;
+		const first = createAssetUploadRepository(firstWorker);
+		const second = createAssetUploadRepository(secondWorker);
+		try {
+			await control.assetUploadSession.createMany({
+				data: [
+					{
+						id: expiringId, projectId: project.id, userId: actorId, kind: 'GAME', state: 'UPLOADING',
+						originalName: 'expired.zip', declaredMimeType: 'application/zip', totalBytes: 7n,
+						partSizeBytes: 5, totalParts: 2, bucket, objectKey: expiringKey, uploadId: `expired-${testId}`,
+						generation: 1, sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64),
+						sourceIdentityBlockSizeBytes: 1024, sourceIdentityBlockManifest: '', expiresAt: FAR_PAST,
+					},
+					{
+						id: completingId, projectId: project.id, userId: actorId, kind: 'VIDEO', state: 'COMPLETING',
+						originalName: 'recover.bin', declaredMimeType: '', totalBytes: 7n,
+						partSizeBytes: 5, totalParts: 2, bucket, objectKey: completingKey, uploadId: `completing-${testId}`,
+						generation: 1, sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'b'.repeat(64),
+						sourceIdentityBlockSizeBytes: 1024, sourceIdentityBlockManifest: '', expiresAt: FAR_FUTURE,
+						completionLeaseToken: 'dead-worker', completionLeaseUntil: FAR_PAST,
+					},
+				],
 			});
-			const project = await control.project.create({
+
+			const [expiredFirst, expiredSecond] = await Promise.all([
+				first.expireTimedOutSessions(50),
+				second.expireTimedOutSessions(50),
+			]);
+			expect(expiredFirst.expired + expiredSecond.expired).toBe(1);
+			await expect(control.assetUploadSession.findUniqueOrThrow({ where: { id: expiringId } }))
+				.resolves.toMatchObject({ state: 'EXPIRED', uploadId: null });
+			await expect(control.multipartAbortTask.findMany({ where: { bucket, storageKey: expiringKey } }))
+				.resolves.toEqual([expect.objectContaining({ uploadId: `expired-${testId}`, uploadSessionId: expiringId })]);
+
+			const [firstClaim, secondClaim] = await Promise.all([
+				first.claimExpiredCompletions({ limit: 50, token: 'recovery-first', leaseMs: 60_000 }),
+				second.claimExpiredCompletions({ limit: 50, token: 'recovery-second', leaseMs: 60_000 }),
+			]);
+			expect([...firstClaim, ...secondClaim].filter((row) => row.id === completingId)).toHaveLength(1);
+			const ownerToken = firstClaim[0]?.completionLeaseToken ?? secondClaim[0]?.completionLeaseToken;
+			expect(ownerToken).toMatch(/^recovery-(first|second)$/);
+			const claimed = await control.assetUploadSession.findUniqueOrThrow({ where: { id: completingId } });
+			await expectDatabaseLeaseDeadline(control, claimed.completionLeaseUntil!, 30_000, 90_000);
+			await expect(first.markVerifying({
+				sessionId: completingId,
+				generation: 1,
+				token: ownerToken === 'recovery-first' ? 'recovery-second' : 'recovery-first',
+				completedSize: 7,
+				result: { status: 'VERIFYING' },
+			})).resolves.toBe(false);
+		} finally {
+			await control.multipartAbortTask.deleteMany({ where: { bucket } });
+			await control.assetUploadSession.deleteMany({ where: { id: { in: [expiringId, completingId] } } });
+			await control.project.delete({ where: { id: project.id } });
+			await control.exhibition.delete({ where: { id: exhibition.id } });
+		}
+	});
+
+	it('makes direct multipart cancel durable and idempotent across concurrent connections', async () => {
+		const exhibition = await control.exhibition.create({
+			data: { year: 30_000 + actorId, title: `direct-cancel-${testId}` },
+		});
+		const project = await control.project.create({
+			data: {
+				exhibitionId: exhibition.id,
+				creatorId: actorId,
+				slug: `direct-cancel-${testId}`,
+				title: 'Direct cancel concurrency',
+			},
+		});
+		const sessionId = randomUUID();
+		const objectKey = `protected/uploads/${sessionId}/1/source.zip`;
+		const uploadId = `cancel-${testId}`;
+		const first = createAssetUploadRepository(firstWorker);
+		const second = createAssetUploadRepository(secondWorker);
+		try {
+			await control.assetUploadSession.create({
 				data: {
-					exhibitionId: exhibition.id,
-					creatorId: actorId,
-					slug: `direct-cancel-${testId}`,
-					title: 'Direct cancel concurrency',
+					id: sessionId, projectId: project.id, userId: actorId, kind: 'GAME', state: 'UPLOADING',
+					originalName: 'cancel.zip', declaredMimeType: 'application/zip', totalBytes: 7n,
+					partSizeBytes: 5, totalParts: 2, bucket, objectKey, uploadId,
+					generation: 1, sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'c'.repeat(64),
+					sourceIdentityBlockSizeBytes: 1024, sourceIdentityBlockManifest: '', expiresAt: FAR_FUTURE,
 				},
 			});
-			const sessionId = randomUUID();
-			const objectKey = `protected/uploads/${sessionId}/1/source.zip`;
-			const uploadId = `cancel-${testId}`;
-			const first = createAssetUploadRepository(firstWorker);
-			const second = createAssetUploadRepository(secondWorker);
-			try {
-				await control.assetUploadSession.create({
-					data: {
-						id: sessionId, projectId: project.id, userId: actorId, kind: 'GAME', state: 'UPLOADING',
-						originalName: 'cancel.zip', declaredMimeType: 'application/zip', totalBytes: 7n,
-						partSizeBytes: 5, totalParts: 2, bucket, objectKey, uploadId,
-						generation: 1, sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'c'.repeat(64),
-						sourceIdentityBlockSizeBytes: 1024, sourceIdentityBlockManifest: '', expiresAt: FAR_FUTURE,
-					},
-				});
 
-				const outcomes = await Promise.all([
-					first.cancel(sessionId, actorId),
-					second.cancel(sessionId, actorId),
-				]);
-				expect(outcomes).toEqual([
-					expect.objectContaining({ cancelled: true }),
-					expect.objectContaining({ cancelled: true }),
-				]);
-				expect(outcomes.filter((result) => result.abort)).toHaveLength(1);
-				await expect(first.cancel(sessionId, actorId)).resolves.toEqual({ cancelled: true });
+			const outcomes = await Promise.all([
+				first.cancel(sessionId, actorId),
+				second.cancel(sessionId, actorId),
+			]);
+			expect(outcomes).toEqual([
+				expect.objectContaining({ cancelled: true }),
+				expect.objectContaining({ cancelled: true }),
+			]);
+			expect(outcomes.filter((result) => result.abort)).toHaveLength(1);
+			await expect(first.cancel(sessionId, actorId)).resolves.toEqual({ cancelled: true });
 
-				await expect(control.assetUploadSession.findUniqueOrThrow({ where: { id: sessionId } }))
-					.resolves.toMatchObject({ state: 'CANCELLED', uploadId: null });
-				await expect(control.multipartAbortTask.findMany({ where: { bucket, storageKey: objectKey } }))
-					.resolves.toEqual([expect.objectContaining({ uploadId, uploadSessionId: sessionId })]);
+			await expect(control.assetUploadSession.findUniqueOrThrow({ where: { id: sessionId } }))
+				.resolves.toMatchObject({ state: 'CANCELLED', uploadId: null });
+			await expect(control.multipartAbortTask.findMany({ where: { bucket, storageKey: objectKey } }))
+				.resolves.toEqual([expect.objectContaining({ uploadId, uploadSessionId: sessionId })]);
 
-				await expect(first.reservePartCapabilities({
-					sessionId, actorId, generation: 1, partCount: 1, windowMs: 60_000, maxIssues: 1,
-				})).rejects.toThrow('DIRECT_UPLOAD_CAPABILITY_REJECTED');
-				await expect(first.claimCompletion({
-					sessionId, actorId, generation: 1, token: 'cancelled-completion', leaseMs: 60_000,
-				})).resolves.toBe('invalid');
-			} finally {
-				await control.multipartAbortTask.deleteMany({ where: { bucket, storageKey: objectKey } });
-				await control.assetUploadSession.deleteMany({ where: { id: sessionId } });
-				await control.project.delete({ where: { id: project.id } });
-				await control.exhibition.delete({ where: { id: exhibition.id } });
-			}
-		});
+			await expect(first.reservePartCapabilities({
+				sessionId, actorId, generation: 1, partCount: 1, maxRefreshIssues: 1,
+			})).rejects.toThrow('DIRECT_UPLOAD_CAPABILITY_REJECTED');
+			await expect(first.claimCompletion({
+				sessionId, actorId, generation: 1, token: 'cancelled-completion', leaseMs: 60_000,
+			})).resolves.toBe('invalid');
+		} finally {
+			await control.multipartAbortTask.deleteMany({ where: { bucket, storageKey: objectKey } });
+			await control.assetUploadSession.deleteMany({ where: { id: sessionId } });
+			await control.project.delete({ where: { id: project.id } });
+			await control.exhibition.delete({ where: { id: exhibition.id } });
+		}
+	});
 
-		it('uses PostgreSQL time for multipart-abort takeover and fences stale resolve/failure', async () => {
+	it('uses PostgreSQL time for multipart-abort takeover and fences stale resolve/failure', async () => {
 			const target = {
 				bucket,
 				storageKey: `${testId}/multipart-abort.zip`,

@@ -14,7 +14,7 @@ function session(bytes: Buffer): AssetUploadSessionRecord {
 		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentityBlockSizeBytes: 1_048_576,
 		sourceIdentity: sourceIdentityRoot(bytes.length, 1_048_576, [digest]),
 		sourceIdentityBlockManifest: Buffer.from(digest, 'hex').toString('base64'), validationAttemptCount: 1,
-	} as unknown as AssetUploadSessionRecord;
+	} as AssetUploadSessionRecord;
 }
 
 describe('project materials', () => {
@@ -41,33 +41,10 @@ describe('project materials', () => {
 		expect(repository.commitGameReady).toHaveBeenCalledWith(expect.objectContaining({ session: item, token: 'lease', mimeType: 'text/plain', checksum: createHash('sha256').update(bytes).digest('hex') }));
 	});
 	it('permits public project downloads and refuses material playback', () => {
-		const asset = { id: 1, kind: 'DOCUMENT', status: 'READY', storageKey: null, playbackStorageKey: null, playbackStatus: 'PENDING', project: { status: 'PUBLISHED', creatorId: 3, members: [] }, representations: [{ role: 'ORIGINAL', state: 'READY', bucket: 'protected', objectKey: 'manual' }] };
+		const asset = { id: 1, kind: 'DOCUMENT', status: 'READY', project: { status: 'PUBLISHED', creatorId: 3, members: [] }, representations: [{ role: 'ORIGINAL', state: 'READY', bucket: 'protected', objectKey: 'manual' }] };
 		expect(authorizeAssetDelivery({ action: 'DOWNLOAD_ORIGINAL', asset })).toBe(true);
-		expect(resolveDownloadRepresentation(asset, 'original', 'protected')).toMatchObject({ objectKey: 'manual' });
-		expect(() => resolveDownloadRepresentation(asset, 'playback', 'protected')).toThrow();
+		expect(resolveDownloadRepresentation(asset, 'original')).toMatchObject({ objectKey: 'manual' });
+		expect(() => resolveDownloadRepresentation(asset, 'playback')).toThrow();
 		expect(authorizeAssetDelivery({ action: 'DOWNLOAD_ORIGINAL', asset: { ...asset, project: { ...asset.project, status: 'DRAFT' } } })).toBe(false);
-	});
-});
-
-import { processFileParts } from '../modules/admin/project/project-submit.service.js';
-import { validateProjectUploadFile } from '../modules/admin/project/project-file-validation.js';
-import type { UploadPipelinePort } from '../application/upload-ports.js';
-
-describe('Phase 1 material multipart submission', () => {
-	it('routes documents and attachments through original processing and enforces the combined limit', async () => {
-		const processFile = vi.fn(async () => ({}));
-		const pipeline = { processFile } as unknown as UploadPipelinePort;
-		const files = [{ fieldname: 'documents[]', filename: 'manual.txt', tmpPath: '/tmp/manual' }, { fieldname: 'attachments[]', filename: 'source.dat', tmpPath: '/tmp/source' }];
-		await processFileParts(files, pipeline);
-		expect(processFile.mock.calls).toEqual([['/tmp/manual', 'DOCUMENT', 'manual.txt'], ['/tmp/source', 'ATTACHMENT', 'source.dat']]);
-		processFile.mockClear();
-		await expect(processFileParts([...files, ...files, ...files], pipeline)).rejects.toThrow('at most 5');
-		expect(processFile).not.toHaveBeenCalled();
-	});
-	it('validates actual multipart content with the original extension', async () => {
-		const bytes = Buffer.from('project manual');
-		const fs = { stat: vi.fn(async () => ({ size: bytes.length })), readRange: vi.fn(async () => bytes) };
-		await expect(validateProjectUploadFile(fs as never, '/tmp/manual', 'DOCUMENT', '설명서.txt')).resolves.toMatchObject({ mimeType: 'text/plain', ext: 'txt', sizeBytes: bytes.length });
-		await expect(validateProjectUploadFile(fs as never, '/tmp/manual', 'DOCUMENT', 'spoof.pdf')).rejects.toThrow('Invalid');
 	});
 });

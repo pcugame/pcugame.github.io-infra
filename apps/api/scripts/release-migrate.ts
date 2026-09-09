@@ -19,6 +19,9 @@ export const PROJECT_DRAFT_MIGRATION = '20260821400000_project_submission_draft_
 export const PROJECT_SUBMISSION_MIGRATION = '20260821500000_project_submission_expand';
 export const PROJECT_FINALIZING_MIGRATION = '20260821550000_project_submission_finalizing_status';
 export const PROJECT_PUBLICATION_MIGRATION = '20260821600000_project_publication_expand';
+// Keep the relocation target stable as the durable object-migration boundary.
+// Later additive Phase 1 migrations extend the staged Prisma prefix via the
+// explicit ceiling below.
 export const PHASE1_TARGET_MIGRATION = '20260821700000_canonical_object_relocation_expand';
 export const PROJECT_VIDEO_ORDER_MIGRATION = '20260821800000_project_video_order_expand';
 export const PROJECT_MATERIAL_KIND_MIGRATION = '20260821900000_project_material_kind_expand';
@@ -35,12 +38,10 @@ export const REQUIRED_EXPAND_MIGRATIONS = [
 	PROJECT_MATERIAL_KIND_MIGRATION,
 	PROJECT_MATERIAL_CONSTRAINTS_MIGRATION,
 ] as const;
-// Phase 1 deliberately knows the Phase-2 record name only to fail closed if a
-// contract database is paired with this expand-compatible runtime. The
-// destructive migration itself is not shipped in this artifact.
 export const CONTRACT_MIGRATION = '20260822000000_canonical_asset_contract';
 
-type Command = 'status' | 'apply-expand' | 'assert-runtime';
+type RuntimePhase = 'phase1' | 'phase2';
+type Command = 'status' | 'apply-expand' | 'apply-contract' | 'assert-runtime';
 
 export type MigrationRow = {
 	migration_name: string;
@@ -57,14 +58,14 @@ function apiRoot(): string {
 		: resolve(scriptDirectory, '..');
 }
 
-function parseArgs(args: readonly string[]): { command: Command; phase?: 'phase1' } {
+function parseArgs(args: readonly string[]): { command: Command; phase?: RuntimePhase } {
 	const [command, phase, ...rest] = args;
 	if (rest.length > 0) throw new Error(`unexpected arguments: ${rest.join(' ')}`);
-	if (!['status', 'apply-expand', 'assert-runtime'].includes(command ?? '')) {
-		throw new Error('usage: release-migrate <status|apply-expand|assert-runtime phase1>');
+	if (!['status', 'apply-expand', 'apply-contract', 'assert-runtime'].includes(command ?? '')) {
+		throw new Error('usage: release-migrate <status|apply-expand|apply-contract|assert-runtime phase1|phase2>');
 	}
 	if (command === 'assert-runtime') {
-		if (phase !== 'phase1') throw new Error('this Phase 1 artifact only accepts assert-runtime phase1');
+		if (phase !== 'phase1' && phase !== 'phase2') throw new Error('assert-runtime requires phase1 or phase2');
 		return { command, phase };
 	}
 	if (phase !== undefined) throw new Error(`${command} takes no phase argument`);
@@ -175,12 +176,15 @@ async function verifyStorageBucketRegistry(databaseUrl: string): Promise<void> {
 	}
 }
 
-export function assertRuntime(rows: readonly MigrationRow[]): void {
+export function assertRuntime(rows: readonly MigrationRow[], phase: RuntimePhase): void {
 	assertNoFailedReleaseMigration(rows);
 	const status = releaseStatus(rows);
 	if (!status.baseline) throw new Error(`required master baseline ${BASELINE_MIGRATION} is not applied`);
-	if (!status.expand || status.contract) {
+	if (phase === 'phase1' && (!status.expand || status.contract)) {
 		throw new Error('phase1 runtime requires expand=applied and contract=not-applied');
+	}
+	if (phase === 'phase2' && (!status.expand || !status.contract)) {
+		throw new Error('phase2 runtime requires complete expand history and the contract migration DB record');
 	}
 }
 
@@ -195,7 +199,7 @@ async function run(command: string, args: readonly string[], cwd: string, env: N
 	});
 }
 
-async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING, databaseUrl: string): Promise<void> {
+async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING | typeof CONTRACT_MIGRATION, databaseUrl: string): Promise<void> {
 	const root = apiRoot();
 	const sourcePrisma = join(root, 'prisma');
 	const migrationNames = (await readdir(join(sourcePrisma, 'migrations'), { withFileTypes: true }))
@@ -213,9 +217,7 @@ async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING, databaseUr
 			await cp(join(sourcePrisma, 'migrations', name), join(staging, 'prisma', 'migrations', name), { recursive: true });
 		}
 		await writeFile(join(staging, 'prisma.config.ts'), [
-			// The staged tree lives below the OS temp directory, outside the image's
-			// node_modules ancestry. Keep this config dependency-free so Prisma can
-			// load it from both source and compiled release execution.
+			// The temporary tree is outside node_modules ancestry; keep its config dependency-free.
 			"export default { schema: 'prisma/schema.prisma', migrations: { path: 'prisma/migrations' }, datasource: { url: process.env['DATABASE_URL'] } };",
 			'',
 		].join('\n'));
@@ -242,7 +244,7 @@ async function main(): Promise<void> {
 		return;
 	}
 	if (command === 'assert-runtime') {
-		assertRuntime(rows);
+		assertRuntime(rows, phase!);
 		await verifyStorageBucketRegistry(databaseUrl);
 		console.log(JSON.stringify({ event: 'release_runtime_schema_verified', phase, ...status }));
 		return;
@@ -251,13 +253,21 @@ async function main(): Promise<void> {
 		throw new Error(`required master baseline ${BASELINE_MIGRATION} is not applied; fresh/master-to-final direct deploy is forbidden`);
 	}
 
-	if (status.contract) throw new Error('contract is already applied; expand runtime must never be deployed');
-	if (!status.expand) await stagedMigrate(PHASE1_MIGRATION_CEILING, databaseUrl);
-	await seedStorageBucketRegistry(databaseUrl);
+	if (command === 'apply-expand') {
+		if (status.contract) throw new Error('contract is already applied; expand runtime must never be deployed');
+		if (!status.expand) await stagedMigrate(PHASE1_MIGRATION_CEILING, databaseUrl);
+		await seedStorageBucketRegistry(databaseUrl);
+	} else {
+		if (!status.expand) throw new Error('contract cannot be applied before the Phase 1 expand release');
+		await seedStorageBucketRegistry(databaseUrl);
+		await verifyStorageBucketRegistry(databaseUrl);
+		if (!status.contract) await stagedMigrate(CONTRACT_MIGRATION, databaseUrl);
+	}
 
 	rows = await migrationRows(databaseUrl);
 	status = releaseStatus(rows);
-	assertRuntime(rows);
+	if (command === 'apply-expand') assertRuntime(rows, 'phase1');
+	else assertRuntime(rows, 'phase2');
 	console.log(JSON.stringify({ event: 'release_migration_applied_and_recorded', command, ...status }, null, 2));
 }
 

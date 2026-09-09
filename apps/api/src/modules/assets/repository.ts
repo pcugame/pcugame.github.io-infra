@@ -1,4 +1,4 @@
-import { getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from './video-order.js';
+import { normalizeProjectVideoOrder } from './video-order.js';
 import {
 	Prisma,
 	type AssetKind,
@@ -12,15 +12,12 @@ import {
 	withAssetMutationTransaction,
 } from './mutation-transaction.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
-import { imageRenditionDeletionTargets } from './image-rendition-lifecycle.js';
 
 export interface AssetDeletionClaim {
 	id: number;
 	projectId: number;
 	kind: AssetKind;
 	previousStatus: AssetStatus;
-	storageKey: string | null;
-	playbackStorageKey: string | null;
 	/** Present on repository claims; optional keeps the Phase-1 service port structurally compatible. */
 	representations?: AssetRepresentationDeletionFence[];
 	alreadyDeleted: boolean;
@@ -40,8 +37,6 @@ type LockedAssetDeletionRow = {
 	projectId: number | null;
 	kind: AssetKind;
 	status: AssetStatus;
-	storageKey: string | null;
-	playbackStorageKey: string | null;
 };
 
 type LockedRepresentationDeletionRow = AssetRepresentationDeletionFence;
@@ -92,55 +87,6 @@ export function createAssetsRepository(
 			});
 		},
 
-		/** Phase-1 bridge lookup, capped so duplicate cross-column ownership is observable. */
-		findAssetsByLegacyStorageKey(storageKey: string) {
-			return client.asset.findMany({
-				where: { OR: [{ storageKey }, { playbackStorageKey: storageKey }] },
-				include: {
-					project: {
-						select: {
-							creatorId: true,
-							title: true,
-							status: true,
-							members: {
-								select: { id: true, userId: true, name: true, studentId: true, sortOrder: true },
-								orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-							},
-						},
-					},
-					representations: {
-						where: { role: { in: ['ORIGINAL', 'PLAYBACK'] } },
-						select: { role: true, bucket: true, objectKey: true, state: true },
-					},
-				},
-				take: 2,
-			});
-		},
-
-		async recordMigrationObservations(observations: Array<{
-			name: string;
-			scope: string;
-			observedAt: Date;
-			details: { assetId: number; role: string };
-		}>): Promise<void> {
-			if (observations.length === 0) return;
-			await client.$transaction(observations.map((observation) => client.migrationMetric.upsert({
-				where: { name_scope: { name: observation.name, scope: observation.scope } },
-				create: {
-					name: observation.name,
-					scope: observation.scope,
-					value: 1n,
-					lastObservedAt: observation.observedAt,
-					details: observation.details,
-				},
-				update: {
-					value: { increment: 1n },
-					lastObservedAt: observation.observedAt,
-					details: observation.details,
-				},
-			})));
-		},
-
 		/** Find an asset by ID with its project relation */
 		async findAssetByIdWithProject(id: number) {
 			const asset = await client.asset.findUnique({
@@ -182,15 +128,21 @@ export function createAssetsRepository(
 						"id",
 						"project_id" AS "projectId",
 						"kind"::text AS "kind",
-						"status"::text AS "status",
-						"storage_key" AS "storageKey",
-						"playback_storage_key" AS "playbackStorageKey"
+						"status"::text AS "status"
 					FROM "assets"
 					WHERE "id" = ${id}
 					FOR UPDATE
 				`);
 				const asset = rows[0];
 					if (!asset || asset.projectId === null) return null;
+				if (asset.kind === 'VIDEO') {
+					const submission = await tx.projectSubmission.findUnique({
+						where: { projectId: asset.projectId }, select: { state: true },
+					});
+					if (submission && ['PENDING', 'FINALIZING'].includes(submission.state)) {
+						throw conflict('Submission videos must be removed through submission cancellation');
+					}
+				}
 				const representations = await tx.$queryRaw<LockedRepresentationDeletionRow[]>(Prisma.sql`
 					SELECT
 						"id",
@@ -212,8 +164,7 @@ export function createAssetsRepository(
 						select: { id: true },
 					});
 				}
-				if (asset.kind === 'VIDEO' && asset.status === 'READY'
-					&& (await getProjectVideos(tx, asset.projectId)).length <= MAX_PROJECT_VIDEOS) {
+				if (asset.kind === 'VIDEO' && asset.status === 'READY') {
 					await normalizeProjectVideoOrder(tx, asset.projectId);
 				}
 				await tx.project.updateMany({
@@ -226,8 +177,6 @@ export function createAssetsRepository(
 					projectId: asset.projectId,
 					kind: asset.kind,
 					previousStatus: asset.status,
-					storageKey: asset.storageKey,
-					playbackStorageKey: asset.playbackStorageKey,
 					representations,
 					alreadyDeleted: asset.status === 'DELETED',
 				};
@@ -240,7 +189,7 @@ export function createAssetsRepository(
 		 */
 		async completeAssetDeletion(
 			claim: AssetDeletionClaim,
-			outbox: { bucket: string; reason: string; playbackReason: string },
+			outbox: { reason: string },
 		): Promise<void> {
 			await withAssetMutationTransaction(client, async (tx) => {
 				const claimedRepresentations = claim.representations ?? [];
@@ -257,9 +206,7 @@ export function createAssetsRepository(
 						"id",
 						"project_id" AS "projectId",
 						"kind"::text AS "kind",
-						"status"::text AS "status",
-						"storage_key" AS "storageKey",
-						"playback_storage_key" AS "playbackStorageKey"
+						"status"::text AS "status"
 					FROM "assets"
 					WHERE "id" = ${claim.id}
 					FOR UPDATE
@@ -281,8 +228,6 @@ export function createAssetsRepository(
 				`);
 				const sameIdentity = current.projectId === claim.projectId
 					&& current.kind === claim.kind
-					&& current.storageKey === claim.storageKey
-					&& current.playbackStorageKey === claim.playbackStorageKey
 					&& sameRepresentationFence(claimedRepresentations, currentRepresentations);
 				if (!sameIdentity || (current.status !== 'DELETING' && current.status !== 'DELETED')) {
 					throw conflict('Asset identity changed before deletion completed');
@@ -293,36 +238,7 @@ export function createAssetsRepository(
 							storageKey: representation.objectKey,
 							reason: `${outbox.reason}-representation-${representation.role.toLowerCase()}`,
 						})),
-						...(claim.storageKey ? [{
-							bucket: outbox.bucket,
-							storageKey: claim.storageKey,
-							reason: outbox.reason,
-						}] : []),
-					...(claim.playbackStorageKey && claim.playbackStorageKey !== claim.storageKey
-						? [{
-							bucket: outbox.bucket,
-							storageKey: claim.playbackStorageKey,
-							reason: outbox.playbackReason,
-						}]
-						: []),
-						...(claim.storageKey && (claim.kind === 'IMAGE' || claim.kind === 'POSTER')
-						? imageRenditionDeletionTargets(
-							outbox.bucket,
-							claim.storageKey,
-							`${outbox.reason}-rendition`,
-						)
-						: []),
 				]);
-					if (claim.storageKey) {
-						await tx.gameUploadSession.updateMany({
-							where: {
-								projectId: claim.projectId,
-								status: 'COMPLETED',
-								storageKey: claim.storageKey,
-							},
-							data: { storageKey: null },
-						});
-					}
 				if (current.status === 'DELETING') {
 					const result = await tx.asset.updateMany({
 						where: {
@@ -330,8 +246,6 @@ export function createAssetsRepository(
 							projectId: claim.projectId,
 							kind: claim.kind,
 							status: 'DELETING',
-							storageKey: claim.storageKey,
-							playbackStorageKey: claim.playbackStorageKey,
 						},
 						data: { status: 'DELETED' },
 					});
