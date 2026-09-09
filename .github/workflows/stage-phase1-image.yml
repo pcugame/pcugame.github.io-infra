@@ -1,0 +1,46 @@
+name: Stage Verified Phase 1 Image
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Immutable Phase 1 image
+        required: true
+        type: string
+      source_sha:
+        description: Exact source revision
+        required: true
+        type: string
+permissions:
+  contents: read
+  packages: read
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Pull and verify the image without changing running services
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE: ${{ inputs.image }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: IMAGE,SOURCE_SHA,GHCR_USERNAME,GHCR_TOKEN
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            [[ "$IMAGE" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
+            [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            registry_auth_file="$(mktemp)"
+            trap 'rm -f "$registry_auth_file"' EXIT
+            printf '%s' "$GHCR_TOKEN" | podman login --authfile "$registry_auth_file" ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            podman pull --authfile "$registry_auth_file" -q "$IMAGE"
+            [[ "$(podman image inspect "$IMAGE" --format '{{.Digest}}')" == "${IMAGE##*@}" ]]
+            [[ "$(podman image inspect "$IMAGE" --format '{{ index .Labels "org.opencontainers.image.revision" }}')" == "$SOURCE_SHA" ]]
+            [[ "$(podman run --rm --entrypoint node "$IMAGE" dist/phase1-release-manifest.js)" == PCU_PHASE1_RUNTIME_V1 ]]
