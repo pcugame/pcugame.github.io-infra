@@ -24,7 +24,7 @@ type CliOptions = {
 	resetConfirmation?: string;
 	observationExceptionId?: string;
 	observationWindowMs?: number;
-	exceptionProfile?: 'image-bridge-36';
+	exceptionProfile?: 'image-bridge-36' | 'image-bridge-traffic';
 };
 
 function option(args: readonly string[], name: string): string | undefined {
@@ -51,7 +51,7 @@ export function parseContractPreflightCli(args: readonly string[]): CliOptions {
 		throw new Error('observation-exception-id must contain 8-128 safe identifier characters');
 	}
 	const exceptionProfile = option(args, 'exception-profile');
-	if (exceptionProfile !== undefined && (exceptionProfile !== 'image-bridge-36' || !observationExceptionId)) throw new Error('exception-profile requires image-bridge-36 and an observation exception ID');
+	if (exceptionProfile !== undefined && ((exceptionProfile !== 'image-bridge-36' && exceptionProfile !== 'image-bridge-traffic') || !observationExceptionId)) throw new Error('exception-profile requires a supported profile and an observation exception ID');
 	if (observationExceptionId && resetObservation) throw new Error('observation exception must not reset metrics');
 	return {
 		...(exceptionProfile ? { exceptionProfile } : {}),

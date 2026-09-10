@@ -44,6 +44,9 @@ export const AGE_EXCEPTION_CONTRACT_MIGRATION = '20260822000001_canonical_asset_
 export const BRIDGE_EXCEPTION_PREP_MIGRATION = '20260821991000_release_image_bridge_exception';
 export const BRIDGE_EXCEPTION_CONTRACT_MIGRATION = '20260822000002_canonical_asset_contract_image_bridge36';
 export const BRIDGE_EXCEPTION_SCOPE = '24-hour-observation-age-and-image-bridge-36';
+export const TRAFFIC_EXCEPTION_PREP_MIGRATION = '20260821992000_release_image_bridge_traffic';
+export const TRAFFIC_EXCEPTION_CONTRACT_MIGRATION = '20260822000003_canonical_asset_contract_image_bridge_traffic';
+export const TRAFFIC_EXCEPTION_SCOPE = '24-hour-observation-age-and-image-bridge-traffic';
 export const OBSERVATION_EXCEPTION_SCOPE = '24-hour-observation-age-only';
 export const CONTRACT_MIGRATION = '20260822000000_canonical_asset_contract';
 export const PROJECT_CHANGE_MIGRATION = '20260909100000_project_change_requests';
@@ -73,7 +76,7 @@ export type ObservationException = {
 	image: string;
 	actor: string;
 	runId: string;
-	profile?: 'image-bridge-36';
+	profile?: 'image-bridge-36' | 'image-bridge-traffic';
 };
 
 export type ExceptionReceipt = {
@@ -95,7 +98,7 @@ export type ExceptionReceipt = {
 };
 
 export function validateObservationException(value: ObservationException): void {
-	if (value.profile !== undefined && value.profile !== 'image-bridge-36') throw new Error('invalid exception profile');
+	if (value.profile !== undefined && value.profile !== 'image-bridge-36' && value.profile !== 'image-bridge-traffic') throw new Error('invalid exception profile');
 	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.exceptionId)) throw new Error('invalid observation exception ID');
 	if (!/^[0-9a-f]{40}$/.test(value.sourceSha)) throw new Error('release source must be a full lowercase 40-character commit SHA');
 	if (!/^ghcr\.io\/pcugame\/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$/.test(value.image)) throw new Error('release image must be an immutable repository@sha256 digest');
@@ -124,7 +127,7 @@ export function parseArgs(args: readonly string[]): { command: Command; phase?: 
 	}
 	if (!allowed.every((flag) => flags.has(flag))) throw new Error('observation exception requires ID, release source SHA, immutable release image, actor and run ID together');
 	const profile = flags.get('--exception-profile');
-	if (profile !== undefined && profile !== 'image-bridge-36') throw new Error('invalid exception profile');
+	if (profile !== undefined && profile !== 'image-bridge-36' && profile !== 'image-bridge-traffic') throw new Error('invalid exception profile');
 	const exception: ObservationException = {
 		...(profile ? { profile } : {}),
 		exceptionId: flags.get('--observation-exception-id')!,
@@ -172,13 +175,18 @@ function validReceiptEvidence(receipt: ExceptionReceipt): boolean {
 	if (!Array.isArray(receipt.metrics) || !receipt.applied_at || typeof receipt.relocation_summary !== 'object' || !receipt.relocation_summary) return false;
 	const metrics = receipt.metrics as Array<{ name?: unknown; scope?: unknown; value?: unknown; last_observed_at?: unknown; details?: unknown }>;
 	const bridgeProfile = receipt.scope === BRIDGE_EXCEPTION_SCOPE;
+	const trafficProfile = receipt.scope === TRAFFIC_EXCEPTION_SCOPE;
 	const pinned = (metric: typeof metrics[number]) => metric?.name === 'public_image_legacy_bridge' && metric.scope === 'api-route'
 		&& metric.value === 36 && typeof metric.last_observed_at === 'string'
 		&& receiptObservedTime(metric.last_observed_at) === Date.parse('2026-09-09T10:37:52.913Z')
 		&& metric.details !== null && typeof metric.details === 'object' && !Array.isArray(metric.details)
 		&& (metric.details as Record<string, unknown>)['usedLegacyLookup'] === false;
+	const traffic = (metric: typeof metrics[number]) => metric?.name === 'public_image_legacy_bridge' && metric.scope === 'api-route'
+		&& typeof metric.value === 'number' && Number.isSafeInteger(metric.value) && metric.value > 0
+		&& metric.details !== null && typeof metric.details === 'object' && !Array.isArray(metric.details)
+		&& (metric.details as Record<string, unknown>)['usedLegacyLookup'] === false;
 	if (bridgeProfile && metrics.filter(pinned).length !== 1) return false;
-	if (!metrics.every((metric) => metric && (metric.value === 0 || (bridgeProfile && pinned(metric))))) return false;
+	if (!metrics.every((metric) => metric && (metric.value === 0 || (bridgeProfile && pinned(metric)) || (trafficProfile && traffic(metric))))) return false;
 	return REQUIRED_OBSERVATION_METRICS.every((name) => {
 		const observations = metrics.filter((metric) => metric.name === name);
 		return observations.length > 0 && observations.every((metric) => {
@@ -200,6 +208,7 @@ export function assertContractPath(rows: readonly MigrationRow[], receipt: Excep
 	if (alternate.length !== 1 || !receipt || !receipt.applied_at || !receipt.authorization_matches
 		|| receipt.migration_name !== alternate[0]!.migration_name || receipt.scope !== scopeForPath(receipt.migration_name)
 		|| (receipt.migration_name === BRIDGE_EXCEPTION_CONTRACT_MIGRATION && !completed(rows).has(BRIDGE_EXCEPTION_PREP_MIGRATION))
+		|| (receipt.migration_name === TRAFFIC_EXCEPTION_CONTRACT_MIGRATION && (!completed(rows).has(BRIDGE_EXCEPTION_PREP_MIGRATION) || !completed(rows).has(TRAFFIC_EXCEPTION_PREP_MIGRATION)))
 		|| !/^[0-9a-f]{64}$/.test(receipt.migration_checksum) || alternate[0]!.checksum !== receipt.migration_checksum
 		|| !completed(rows).has(EXCEPTION_PREP_MIGRATION)
 		|| !Number.isFinite(receipt.authorized_at.getTime()) || !Number.isFinite(receipt.expires_at.getTime())
@@ -224,7 +233,7 @@ export function releaseStatus(rows: readonly MigrationRow[], receipt: ExceptionR
 		projectVideoOrderExpand: applied.has(PROJECT_VIDEO_ORDER_MIGRATION),
 		expand: REQUIRED_EXPAND_MIGRATIONS.every((migration) => applied.has(migration)),
 		contract: applied.has(CONTRACT_MIGRATION) || [...applied].some(isAlternateContract),
-		contractPath: applied.has(BRIDGE_EXCEPTION_CONTRACT_MIGRATION) ? BRIDGE_EXCEPTION_CONTRACT_MIGRATION : applied.has(AGE_EXCEPTION_CONTRACT_MIGRATION) ? AGE_EXCEPTION_CONTRACT_MIGRATION : applied.has(CONTRACT_MIGRATION) ? CONTRACT_MIGRATION : null,
+		contractPath: applied.has(TRAFFIC_EXCEPTION_CONTRACT_MIGRATION) ? TRAFFIC_EXCEPTION_CONTRACT_MIGRATION : applied.has(BRIDGE_EXCEPTION_CONTRACT_MIGRATION) ? BRIDGE_EXCEPTION_CONTRACT_MIGRATION : applied.has(AGE_EXCEPTION_CONTRACT_MIGRATION) ? AGE_EXCEPTION_CONTRACT_MIGRATION : applied.has(CONTRACT_MIGRATION) ? CONTRACT_MIGRATION : null,
 		observationExceptionReceipt: receipt ? {
 			exceptionId: receipt.exception_id, sourceSha: receipt.source_sha, image: receipt.image,
 			actor: receipt.actor, runId: receipt.run_id, scope: receipt.scope,
@@ -237,7 +246,7 @@ export function releaseStatus(rows: readonly MigrationRow[], receipt: ExceptionR
 
 export function assertNoFailedReleaseMigration(rows: readonly MigrationRow[]): void {
 	const failed = rows.filter((row) => (
-		(([...REQUIRED_EXPAND_MIGRATIONS, EXCEPTION_PREP_MIGRATION, BRIDGE_EXCEPTION_PREP_MIGRATION, CONTRACT_MIGRATION, AGE_EXCEPTION_CONTRACT_MIGRATION, BRIDGE_EXCEPTION_CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION] as string[]).includes(row.migration_name) || row.migration_name > PROJECT_CHANGE_MIGRATION)
+		(([...REQUIRED_EXPAND_MIGRATIONS, EXCEPTION_PREP_MIGRATION, BRIDGE_EXCEPTION_PREP_MIGRATION, TRAFFIC_EXCEPTION_PREP_MIGRATION, TRAFFIC_EXCEPTION_CONTRACT_MIGRATION, CONTRACT_MIGRATION, AGE_EXCEPTION_CONTRACT_MIGRATION, BRIDGE_EXCEPTION_CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION] as string[]).includes(row.migration_name) || row.migration_name > PROJECT_CHANGE_MIGRATION)
 		&& (!row.finished_at || row.rolled_back_at)
 	));
 	if (failed.length > 0) {
@@ -327,12 +336,13 @@ async function run(command: string, args: readonly string[], cwd: string, env: N
 }
 
 function isAlternateContract(name: string): boolean {
-	return name === AGE_EXCEPTION_CONTRACT_MIGRATION || name === BRIDGE_EXCEPTION_CONTRACT_MIGRATION;
+	return name === AGE_EXCEPTION_CONTRACT_MIGRATION || name === BRIDGE_EXCEPTION_CONTRACT_MIGRATION || name === TRAFFIC_EXCEPTION_CONTRACT_MIGRATION;
 }
 function exceptionPath(exception: ObservationException): string {
-	return exception.profile === 'image-bridge-36' ? BRIDGE_EXCEPTION_CONTRACT_MIGRATION : AGE_EXCEPTION_CONTRACT_MIGRATION;
+	return exception.profile === 'image-bridge-traffic' ? TRAFFIC_EXCEPTION_CONTRACT_MIGRATION : exception.profile === 'image-bridge-36' ? BRIDGE_EXCEPTION_CONTRACT_MIGRATION : AGE_EXCEPTION_CONTRACT_MIGRATION;
 }
 function scopeForPath(name: string): string {
+	if (name === TRAFFIC_EXCEPTION_CONTRACT_MIGRATION) return TRAFFIC_EXCEPTION_SCOPE;
 	if (name === BRIDGE_EXCEPTION_CONTRACT_MIGRATION) return BRIDGE_EXCEPTION_SCOPE;
 	if (name === AGE_EXCEPTION_CONTRACT_MIGRATION) return OBSERVATION_EXCEPTION_SCOPE;
 	throw new Error('unknown alternate contract migration');
@@ -464,7 +474,7 @@ async function main(): Promise<void> {
 			throw new Error('provided exception authorization differs from the applied receipt');
 		}
 		if (exception && !status.contract) {
-			await stagedMigrate(exception.profile ? BRIDGE_EXCEPTION_PREP_MIGRATION : EXCEPTION_PREP_MIGRATION, databaseUrl);
+			await stagedMigrate(exception.profile === 'image-bridge-traffic' ? TRAFFIC_EXCEPTION_PREP_MIGRATION : exception.profile ? BRIDGE_EXCEPTION_PREP_MIGRATION : EXCEPTION_PREP_MIGRATION, databaseUrl);
 			await authorizeObservationException(databaseUrl, exception);
 		}
 		const latestMigration = (await readdir(join(apiRoot(), 'prisma', 'migrations'), { withFileTypes: true }))

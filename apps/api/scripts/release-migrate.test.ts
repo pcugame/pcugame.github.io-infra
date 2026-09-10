@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+	TRAFFIC_EXCEPTION_CONTRACT_MIGRATION,
+	TRAFFIC_EXCEPTION_PREP_MIGRATION,
+	TRAFFIC_EXCEPTION_SCOPE,
 	BRIDGE_EXCEPTION_CONTRACT_MIGRATION,
 	BRIDGE_EXCEPTION_PREP_MIGRATION,
 	BRIDGE_EXCEPTION_SCOPE,
@@ -272,4 +275,51 @@ it('preserves age-path DDL and all non-observation guards in the pinned path', (
 
 it('fails closed on a future additive migration that did not finish', () => {
  expect(() => assertNoFailedReleaseMigration([{ migration_name: '20261001000000_next', finished_at: null, rolled_back_at: null }])).toThrow('failed/rolled-back');
+});
+
+
+describe('image bridge traffic release authorization', () => {
+	function evidence(count: number): ExceptionReceipt {
+		const candidate = receipt();
+		return { ...candidate, migration_name: TRAFFIC_EXCEPTION_CONTRACT_MIGRATION, scope: TRAFFIC_EXCEPTION_SCOPE,
+			metrics: [...candidate.metrics as unknown[], { name: 'public_image_legacy_bridge', scope: 'api-route', value: count, last_observed_at: '2026-08-23T23:00:00Z', details: { usedLegacyLookup: false } }],
+		};
+	}
+	function history(): MigrationRow[] {
+		return [...completePhase1History(), completedMigration(EXCEPTION_PREP_MIGRATION), completedMigration(BRIDGE_EXCEPTION_PREP_MIGRATION), completedMigration(TRAFFIC_EXCEPTION_PREP_MIGRATION), { ...completedMigration(TRAFFIC_EXCEPTION_CONTRACT_MIGRATION), checksum: alternateChecksum }, completedMigration(PROJECT_CHANGE_MIGRATION)];
+	}
+	it('requires a named explicit profile with full existing provenance', () => {
+		expect(parseArgs(['apply-contract', ...exceptionFlags, '--exception-profile', 'image-bridge-traffic']).exception?.profile).toBe('image-bridge-traffic');
+		expect(() => parseArgs(['apply-contract', '--exception-profile', 'image-bridge-traffic'])).toThrow();
+	});
+	it.each([0, 1, 37, 1000, Number.MAX_SAFE_INTEGER])('accepts count %s with genuine alternate history', (count) => {
+		expect(() => assertRuntime(history(), 'phase2', evidence(count))).not.toThrow();
+		expect(releaseStatus(history(), evidence(count)).contractPath).toBe(TRAFFIC_EXCEPTION_CONTRACT_MIGRATION);
+	});
+	it.each([{ value: -1 }, { value: Number.MAX_SAFE_INTEGER + 1 }, { value: 1.5 }, { scope: 'other' }, { details: { usedLegacyLookup: true } }, { details: { usedLegacyLookup: 'false' } }, { details: null }, { last_observed_at: null }, { last_observed_at: '2027-01-01T00:00:00Z' }])('rejects invalid bridge evidence %#', (override) => {
+		const candidate = evidence(37);
+		Object.assign((candidate.metrics as Array<Record<string, unknown>>).at(-1)!, override);
+		expect(() => releaseStatus(history(), candidate)).toThrow();
+	});
+	it('rejects other fallback, missing prep, and mixed alternatives', () => {
+		const candidate = evidence(37);
+		(candidate.metrics as Array<Record<string, unknown>>).push({ name: 'public_image_legacy_fallback', value: 1, last_observed_at: '2026-08-23T23:00:00Z' });
+		expect(() => releaseStatus(history(), candidate)).toThrow();
+		expect(() => releaseStatus(history().filter((row) => row.migration_name !== TRAFFIC_EXCEPTION_PREP_MIGRATION), evidence(37))).toThrow();
+		expect(() => releaseStatus([...history(), completedMigration(BRIDGE_EXCEPTION_CONTRACT_MIGRATION)], evidence(37))).toThrow();
+	});
+	it('retains the traffic path while staging future additive migrations', () => {
+		const path = releaseStatus(history(), evidence(37)).contractPath!;
+		expect(stageMigrationNames([CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION, '20261001000000_next'], '20261001000000_next', path)).toEqual([TRAFFIC_EXCEPTION_CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION, '20261001000000_next']);
+	});
+	it('preserves all prior non-metric SQL guards and DDL', () => {
+		const read = (name: string) => readFileSync(new URL(`../prisma/contract-migration-paths/${name}/migration.sql`, import.meta.url), 'utf8');
+		const age = read(AGE_EXCEPTION_CONTRACT_MIGRATION);
+		const traffic = read(TRAFFIC_EXCEPTION_CONTRACT_MIGRATION)
+			.replaceAll(TRAFFIC_EXCEPTION_CONTRACT_MIGRATION, AGE_EXCEPTION_CONTRACT_MIGRATION)
+			.replaceAll(TRAFFIC_EXCEPTION_SCOPE, OBSERVATION_EXCEPTION_SCOPE)
+			.replace('observation age and canonical image bridge traffic counts are waived.', 'only the observation age comparison is waived.');
+		const removeMetricSection = (sql: string) => sql.replace(/  SELECT count\(\*\) INTO violations\n  FROM "migration_metrics"[\s\S]*?(?=  SELECT count\(\*\) INTO violations\n  FROM "game_upload_sessions")/, '<METRIC_GUARDS>');
+		expect(removeMetricSection(traffic)).toBe(removeMetricSection(age));
+	});
 });

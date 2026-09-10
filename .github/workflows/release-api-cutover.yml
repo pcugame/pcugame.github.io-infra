@@ -26,11 +26,11 @@ on:
         required: false
         type: string
       exception_profile:
-        description: 'Reviewed exception scope (requires observation_exception_id for image-bridge-36)'
+        description: 'Reviewed exception scope (requires observation_exception_id for image bridge profiles)'
         required: false
         type: choice
         default: age-only
-        options: [age-only, image-bridge-36]
+        options: [age-only, image-bridge-36, image-bridge-traffic]
       observation_started_at:
         description: 'Phase 1 canonical-read observation start (ISO-8601, required for phase2)'
         required: false
@@ -94,7 +94,7 @@ jobs:
           }
           case "${EXCEPTION_PROFILE:-age-only}" in
             age-only) ;;
-            image-bridge-36)
+            image-bridge-36|image-bridge-traffic)
               [ "${RELEASE_PHASE}" = phase2 ] || exit 1
               [ -n "${OBSERVATION_EXCEPTION_ID}" ] || exit 1
               ;;
@@ -607,8 +607,8 @@ jobs:
             online_preflight_args=()
             if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
               online_preflight_args+=("--observation-exception-id=${OBSERVATION_EXCEPTION_ID}")
-              if [ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 ]; then
-                online_preflight_args+=(--exception-profile=image-bridge-36)
+              if [[ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 || "${EXCEPTION_PROFILE:-age-only}" = image-bridge-traffic ]]; then
+                online_preflight_args+=("--exception-profile=${EXCEPTION_PROFILE}")
               fi
             fi
             "${DEPLOY_DIR}/deploy.sh" online-contract-preflight "${online_preflight_args[@]}"
@@ -702,9 +702,9 @@ jobs:
             migration_args=()
             if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
               preflight_args+=("--observation-exception-id=${OBSERVATION_EXCEPTION_ID}")
-              if [ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 ]; then
-                preflight_args+=(--exception-profile=image-bridge-36)
-                migration_args+=(--exception-profile image-bridge-36)
+              if [[ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 || "${EXCEPTION_PROFILE:-age-only}" = image-bridge-traffic ]]; then
+                preflight_args+=("--exception-profile=${EXCEPTION_PROFILE}")
+                migration_args+=(--exception-profile "${EXCEPTION_PROFILE}")
               fi
               migration_args+=(--observation-exception-id "${OBSERVATION_EXCEPTION_ID}" --release-source-sha "${RELEASE_SOURCE_SHA}" --release-image "${FINAL_IMAGE}" --exception-actor "${EXCEPTION_ACTOR}" --exception-run-id "${EXCEPTION_RUN_ID}")
             fi
@@ -754,9 +754,9 @@ jobs:
             migration_args=()
             if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
               preflight_args+=("--observation-exception-id=${OBSERVATION_EXCEPTION_ID}")
-              if [ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 ]; then
-                preflight_args+=(--exception-profile=image-bridge-36)
-                migration_args+=(--exception-profile image-bridge-36)
+              if [[ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 || "${EXCEPTION_PROFILE:-age-only}" = image-bridge-traffic ]]; then
+                preflight_args+=("--exception-profile=${EXCEPTION_PROFILE}")
+                migration_args+=(--exception-profile "${EXCEPTION_PROFILE}")
               fi
               migration_args+=(--observation-exception-id "${OBSERVATION_EXCEPTION_ID}" --release-source-sha "${RELEASE_SOURCE_SHA}" --release-image "${FINAL_IMAGE}" --exception-actor "${EXCEPTION_ACTOR}" --exception-run-id "${EXCEPTION_RUN_ID}")
             fi

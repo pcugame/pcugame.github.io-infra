@@ -12,21 +12,13 @@ Pages에는 대상 저장소 `pcugame/pcugame.github.io`, master 브랜치, 활�
 
 ## 이번 최초 전환
 
-최초 전환은 `phase=phase2`로 실행하며, 기존 Phase 1 source/image와 새 master의 불변 image를 지정한다. `observation_exception_id`에 실행 식별자를 넣고 `observation_attestation=I_ACCEPT_SHORT_OBSERVATION`, `exception_profile=image-bridge-36`을 사용한다. `observation_started_at`은 비워 둔다.
+최초 전환은 `phase=phase2`로 실행하며, 기존 Phase 1 source/image와 새 master의 불변 image를 지정한다. `observation_exception_id`에 실행 식별자를 넣고 `observation_attestation=I_ACCEPT_SHORT_OBSERVATION`, `exception_profile=image-bridge-traffic`을 사용한다. `observation_started_at`은 비워 둔다.
 
-이번 예외가 허용하는 원본 기록은 다음 한 행이다.
+`public_image_legacy_bridge`의 `api-route` 요청 횟수는 차단 조건에서 제외한다. 기존 웹이 canonical 이미지 키를 이전 API로 요청한 뒤 정상 공개 URL로 이동하는 경우에도 이 값이 증가하기 때문이다. 전환 시점의 실제 횟수·시각·상세 정보는 초기화하지 않고 영수증에 보존한다.
 
-| 항목 | 값 |
-| --- | --- |
-| name | `public_image_legacy_bridge` |
-| scope | `api-route` |
-| value | `36` |
-| last_observed_at (UTC) | `2026-09-09T10:37:52.913Z` |
-| details.usedLegacyLookup | boolean `false` |
+양수인 이미지 브리지 기록은 `details.usedLegacyLookup`이 boolean `false`여야 한다. 다른 양수 지표, 관측 누락·음수·비정상 시각, 파일 누락·참조 불일치는 계속 차단한다. 24시간 관측 기간 생략은 기존 명시적 승인에 따른다. 브리지의 상세 정보는 마지막 요청의 상태이므로 전체 과거 요청의 증명으로 사용하지 않는다. 보존된 API 경고 로그와 객체·DB 정합성 검사 결과도 확인한다.
 
-기존 24시간 관측 기간 생략 승인과 위 행의 허용을 결합한다. 값·시각·상세 정보가 달라지면 중단한다. 다른 양수 지표, 누락·비정상 관측, 파일 누락·참조 불일치는 계속 차단한다. 원래 통계를 0으로 초기화하지 않는다.
-
-기존 normal 및 age-only SQL은 보존한다. 새 준비 migration `20260821991000_release_image_bridge_exception`과 실제 전환 migration `20260822000002_canonical_asset_contract_image_bridge36`을 사용한다. 승인·실행·이미지·SQL checksum과 전체 관측·이관 대응 정보를 DB 영수증에 남긴다. 이후 배포는 이 실제 이력을 검증하여 같은 경로로 새 migration을 적용하며 예외 입력을 다시 요구하지 않는다.
+기존 normal·age-only·36건 고정 SQL은 보존한다. 새 준비 migration `20260821992000_release_image_bridge_traffic`과 실제 전환 migration `20260822000003_canonical_asset_contract_image_bridge_traffic`을 사용한다. 승인·실행·이미지·SQL checksum과 전체 관측·이관 대응 정보를 DB 영수증에 남긴다. 이후 배포는 이 실제 이력을 검증하여 같은 경로로 새 migration을 적용하며 예외 입력을 다시 요구하지 않는다.
 
 ## 실패와 복구
 
