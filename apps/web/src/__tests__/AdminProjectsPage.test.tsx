@@ -154,10 +154,13 @@ describe('AdminProjectsPage pagination query contract', () => {
 		await expectProjectVisible('Alpha Project');
 		fireEvent.click(screen.getByRole('button', { name: '다음' }));
 		await expectProjectVisible('Gamma Project');
+		fireEvent.click(screen.getAllByRole('checkbox')[0]);
+		expect(screen.getByText('2개 선택')).toBeTruthy();
 
-		fireEvent.change(screen.getByPlaceholderText('제목, 요약, 이름, 학번 검색...'), {
+		fireEvent.change(screen.getByPlaceholderText('작품 제목, 요약, 이름, 학번, 전시회명, 연도 검색...'), {
 			target: { value: 'Dragon' },
 		});
+		expect(screen.queryByText('2개 선택')).toBeNull();
 
 		await waitFor(() => {
 			expect(mocks.getProjects).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -168,17 +171,18 @@ describe('AdminProjectsPage pagination query contract', () => {
 		});
 	});
 
-	it('changes API query params when filters and sort change', async () => {
+	it('sends a year entered in the unified search field and combines it with filters and sort', async () => {
 		renderPage();
 
 		await expectProjectVisible('Alpha Project');
-		fireEvent.change(screen.getByLabelText('연도 필터'), {
+		expect(screen.queryByLabelText('연도 필터')).toBeNull();
+		fireEvent.change(screen.getByPlaceholderText('작품 제목, 요약, 이름, 학번, 전시회명, 연도 검색...'), {
 			target: { value: '2024' },
 		});
 
 		await waitFor(() => {
 			expect(mocks.getProjects).toHaveBeenLastCalledWith(expect.objectContaining({
-				year: 2024,
+				search: '2024',
 			}));
 		});
 		await expectProjectVisible('Alpha Project');
@@ -186,7 +190,7 @@ describe('AdminProjectsPage pagination query contract', () => {
 		fireEvent.click(screen.getByRole('button', { name: '보관' }));
 		await waitFor(() => {
 			expect(mocks.getProjects).toHaveBeenLastCalledWith(expect.objectContaining({
-				year: 2024,
+				search: '2024',
 				status: 'ARCHIVED',
 			}));
 		});
@@ -195,7 +199,7 @@ describe('AdminProjectsPage pagination query contract', () => {
 		fireEvent.click(screen.getByText('제목'));
 		await waitFor(() => {
 			expect(mocks.getProjects).toHaveBeenLastCalledWith(expect.objectContaining({
-				year: 2024,
+				search: '2024',
 				status: 'ARCHIVED',
 				sort: 'title',
 				order: 'asc',

@@ -211,6 +211,7 @@ model Exhibition {
 
   @@unique([year, title], name: "year_title")
   @@index([sortOrder, year])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "exhibitions_title_trgm_idx")
   @@map("exhibitions")
 }
 
@@ -250,6 +251,8 @@ model Project {
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
   @@index([exhibitionId, status, sortOrder])
   @@index([status])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "projects_title_trgm_idx")
+  @@index([summary(ops: raw("gin_trgm_ops"))], type: Gin, map: "projects_summary_trgm_idx")
   @@map("projects")
 }
 
@@ -268,6 +271,8 @@ model ProjectMember {
 
   @@index([projectId, sortOrder])
   @@index([userId])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "project_members_name_trgm_idx")
+  @@index([studentId(ops: raw("gin_trgm_ops"))], type: Gin, map: "project_members_student_id_trgm_idx")
   @@map("project_members")
 }
 

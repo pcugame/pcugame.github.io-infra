@@ -36,8 +36,8 @@ export async function createIsolatedMigratedDatabase(baseUrl: string) {
 	isolatedUrl.searchParams.set('schema', schema);
 	isolatedUrl.searchParams.set('options', `-c search_path=${schema}`);
 	return {
-		createClient() {
-			const client = createPrismaClientForDatabase(isolatedUrl.toString());
+		createClient(options?: Parameters<typeof createPrismaClientForDatabase>[1]) {
+			const client = createPrismaClientForDatabase(isolatedUrl.toString(), options);
 			clients.push(client);
 			return client;
 		},

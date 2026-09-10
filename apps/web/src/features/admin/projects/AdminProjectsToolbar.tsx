@@ -10,7 +10,6 @@ const STATUS_LABELS: Record<ProjectStatus, string> = {
 interface AdminProjectsToolbarProps {
 	statusFilter: AdminProjectStatusFilter;
 	search: string;
-	yearFilter: string;
 	selectedCount: number;
 	isPrivileged: boolean;
 	isAdmin: boolean;
@@ -18,7 +17,6 @@ interface AdminProjectsToolbarProps {
 	isDeleting: boolean;
 	onStatusFilter: (status: AdminProjectStatusFilter) => void;
 	onSearchChange: (value: string) => void;
-	onYearFilter: (value: string) => void;
 	onCompositionStart: () => void;
 	onCompositionEnd: (value: string) => void;
 	onBulkStatus: (status: Exclude<ProjectStatus, 'DRAFT'>) => void;
@@ -28,7 +26,6 @@ interface AdminProjectsToolbarProps {
 export function AdminProjectsToolbar({
 	statusFilter,
 	search,
-	yearFilter,
 	selectedCount,
 	isPrivileged,
 	isAdmin,
@@ -36,7 +33,6 @@ export function AdminProjectsToolbar({
 	isDeleting,
 	onStatusFilter,
 	onSearchChange,
-	onYearFilter,
 	onCompositionStart,
 	onCompositionEnd,
 	onBulkStatus,
@@ -60,19 +56,11 @@ export function AdminProjectsToolbar({
 				<input
 					type="text"
 					className="admin-search"
-					placeholder="제목, 요약, 이름, 학번 검색..."
+					placeholder="작품 제목, 요약, 이름, 학번, 전시회명, 연도 검색..."
 					value={search}
 					onChange={(e) => onSearchChange(e.target.value)}
 					onCompositionStart={onCompositionStart}
 					onCompositionEnd={(e) => onCompositionEnd((e.target as HTMLInputElement).value)}
-				/>
-				<input
-					type="number"
-					className="admin-filter-input"
-					aria-label="연도 필터"
-					placeholder="연도"
-					value={yearFilter}
-					onChange={(e) => onYearFilter(e.target.value)}
 				/>
 				{isPrivileged && selectedCount > 0 && (
 					<div className="admin-bulk-actions">
