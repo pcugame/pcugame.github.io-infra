@@ -50,9 +50,8 @@ export function createContractPreflightRepository(client: PrismaClient): Contrac
 						FROM "webgl_deployments" ORDER BY "id"
 					`),
 					tx.$queryRaw<ContractPreflightSnapshot['metrics']>(Prisma.sql`
-						SELECT "name", "scope", "value", "last_observed_at" AS "lastObservedAt"
+						SELECT "name", "scope", "value", "last_observed_at" AS "lastObservedAt", "details"
 						FROM "migration_metrics"
-						WHERE "name" IN (${Prisma.join([...LEGACY_BRIDGE_METRIC_NAMES])})
 						ORDER BY "name", "scope"
 					`),
 					tx.$queryRaw<ContractPreflightSnapshot['uploadSessions']>(Prisma.sql`

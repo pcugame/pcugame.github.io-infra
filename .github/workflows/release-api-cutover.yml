@@ -1,4 +1,4 @@
-name: Authorized API Schema Cutover
+name: Deploy Release
 
 on:
   workflow_dispatch:
@@ -7,7 +7,8 @@ on:
         description: 'Authorized migration phase'
         required: true
         type: choice
-        options: [snapshot, preflight, phase1, phase2, phase2-forward-fix]
+        default: release
+        options: [release, snapshot, preflight, phase1, phase2, phase2-forward-fix]
       phase1_api_image:
         description: 'Immutable @sha256 Phase 1 API/worker image (required for phase1)'
         required: false
@@ -24,6 +25,12 @@ on:
         description: 'Reviewed one-time observation-age exception ID; requires I_ACCEPT_SHORT_OBSERVATION and current Phase 1 image/source inputs'
         required: false
         type: string
+      exception_profile:
+        description: 'Reviewed exception scope (requires observation_exception_id for image-bridge-36)'
+        required: false
+        type: choice
+        default: age-only
+        options: [age-only, image-bridge-36]
       observation_started_at:
         description: 'Phase 1 canonical-read observation start (ISO-8601, required for phase2)'
         required: false
@@ -38,8 +45,9 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
-  packages: read
+  packages: write
 
 jobs:
   authorize:
@@ -74,6 +82,7 @@ jobs:
           OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
           OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
           OBSERVATION_EXCEPTION_ID: ${{ inputs.observation_exception_id }}
+          EXCEPTION_PROFILE: ${{ inputs.exception_profile }}
         run: |
           set -euo pipefail
           is_authorized_digest() {
@@ -83,7 +92,15 @@ jobs:
             local digest="${image#"${prefix}"}"
             [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
           }
-          if [[ "${RELEASE_PHASE}" = snapshot || "${RELEASE_PHASE}" = preflight ]]; then
+          case "${EXCEPTION_PROFILE:-age-only}" in
+            age-only) ;;
+            image-bridge-36)
+              [ "${RELEASE_PHASE}" = phase2 ] || exit 1
+              [ -n "${OBSERVATION_EXCEPTION_ID}" ] || exit 1
+              ;;
+            *) exit 1 ;;
+          esac
+          if [[ "${RELEASE_PHASE}" = release || "${RELEASE_PHASE}" = snapshot || "${RELEASE_PHASE}" = preflight ]]; then
             # Metadata backup only: never attest observation or start cutover.
             [ -z "${PHASE1_IMAGE}${PHASE1_SOURCE_SHA}${FINAL_IMAGE}${OBSERVATION_STARTED_AT}${OBSERVATION_ATTESTATION}${OBSERVATION_EXCEPTION_ID}" ] || {
               echo "read-only stages reject deployment images and observation inputs"
@@ -123,7 +140,7 @@ jobs:
           if (elapsed > 31 * 24 * 60 * 60 * 1000) throw new Error('observation attestation is stale; run a new preflight');
           NODE
             fi
-          else
+          elif [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then
             [ -z "${OBSERVATION_EXCEPTION_ID}" ] || exit 1
             is_authorized_digest "${FINAL_IMAGE}" || {
               echo "final_api_image must be an immutable @sha256 digest in ${EXPECTED_IMAGE_REPO}"
@@ -133,6 +150,8 @@ jobs:
               echo "phase2-forward-fix requires the exact contract acknowledgement"
               exit 1
             }
+          else
+            echo "Unknown release phase"; exit 1
           fi
           echo "final_image=${FINAL_IMAGE}" >> "${GITHUB_OUTPUT}"
           echo "phase1_image=${PHASE1_IMAGE}" >> "${GITHUB_OUTPUT}"
@@ -229,15 +248,33 @@ jobs:
         env:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node server/verify-github-release-boundaries.mjs control
-      - name: Inspect actual Pages deployment identity and protection
+      - name: Inspect actual Pages deployment write access
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
-          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
         run: node server/verify-github-release-boundaries.mjs pages-inspect
 
-  cutover:
-    if: ${{ inputs.phase != 'snapshot' && inputs.phase != 'preflight' }}
+  resolve_image:
+    if: ${{ inputs.phase == 'release' }}
     needs: authorize
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node server/resolve-release-image.mjs
+
+  build_image:
+    if: ${{ inputs.phase == 'release' && needs.resolve_image.outputs.image == '' }}
+    needs: [authorize, resolve_image]
+    uses: ./.github/workflows/deploy-api.yml
+    secrets: inherit
+
+  cutover:
+    if: ${{ always() && needs.authorize.result == 'success' && inputs.phase != 'snapshot' && inputs.phase != 'preflight' && (inputs.phase != 'release' || (needs.resolve_image.result == 'success' && (needs.resolve_image.outputs.image != '' || needs.build_image.result == 'success'))) }}
+    needs: [authorize, resolve_image, build_image]
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -256,11 +293,10 @@ jobs:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node server/verify-github-release-boundaries.mjs control
 
-      - name: Preflight external Pages single-writer boundary before maintenance
-        if: ${{ inputs.phase == 'phase2' }}
+      - name: Preflight external Pages target and write access before maintenance
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
-          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
         run: node server/verify-github-release-boundaries.mjs pages
 
       - name: Copy release controls to server
@@ -270,13 +306,13 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh,server/smoke-data-plane.mjs,server/release-db-snapshot.sh
+          source: server/deploy.sh,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
           overwrite: true
 
       - name: Run Phase 1 or Phase 2 forward fix
-        if: ${{ inputs.phase != 'phase2' }}
+        if: ${{ inputs.phase == 'phase1' || inputs.phase == 'phase2-forward-fix' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -392,6 +428,8 @@ jobs:
             export MIGRATION_IMAGE="${FINAL_IMAGE}"
             if [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then
               "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
+              node "${DEPLOY_DIR}/release-smoke-target.mjs" prepare "$RELEASE_SOURCE_SHA"
+              SMOKE_PUBLIC_OBJECT_URL="$(node "${DEPLOY_DIR}/release-smoke-target.mjs" read "$RELEASE_SOURCE_SHA")"
               "${DEPLOY_DIR}/deploy.sh" drain
               "${DEPLOY_DIR}/deploy.sh" backup "phase2-forward-fix-${RELEASE_SOURCE_SHA}"
               "${DEPLOY_DIR}/deploy.sh" release-assert phase2
@@ -408,21 +446,66 @@ jobs:
           RELEASE_PHASE: ${{ inputs.phase }}
           PHASE1_IMAGE: ${{ needs.authorize.outputs.phase1_image }}
           PHASE1_SOURCE_SHA: ${{ needs.authorize.outputs.phase1_source_sha }}
-          FINAL_IMAGE: ${{ needs.authorize.outputs.final_image }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
           OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
 
+      - name: Set up Node for final web
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install final web dependencies
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
+        run: npm ci --workspace=apps/web --include-workspace-root
+
+      - name: Test final web
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
+        working-directory: apps/web
+        run: npm test
+
+      - name: Lint final web
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: Build final web
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
+        working-directory: apps/web
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/' }}
+        run: npm run build
+
+      - name: Stamp exact cutover commit
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
+        working-directory: apps/web
+        run: printf '%s\n' "${GITHUB_SHA}" > dist/release-sha.txt
+
+      - name: Capture Pages recovery point
+        id: capture-pages
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          RECOVERY_DIR: ${{ runner.temp }}/pages-release-recovery
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: node server/pages-release-recovery.mjs capture "$RECOVERY_DIR" "$GITHUB_SHA" "$RELEASE_RUN_KEY"
+
       - name: Prepare atomic Phase 2 maintenance window
-        if: ${{ inputs.phase == 'phase2' }}
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,OBSERVATION_STARTED_AT,OBSERVATION_ATTESTATION,OBSERVATION_EXCEPTION_ID,PHASE1_IMAGE,PHASE1_SOURCE_SHA
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,OBSERVATION_STARTED_AT,OBSERVATION_ATTESTATION,OBSERVATION_EXCEPTION_ID,PHASE1_IMAGE,PHASE1_SOURCE_SHA,RELEASE_PHASE,EXCEPTION_PROFILE,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
           script_stop: true
           command_timeout: 60m
           script: |
@@ -435,6 +518,18 @@ jobs:
             chmod +x "${DEPLOY_DIR}/deploy.sh"
             printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
 
+            node "${DEPLOY_DIR}/release-smoke-target.mjs" prepare "$RELEASE_SOURCE_SHA"
+
+            if [ "${RELEASE_PHASE}" = release ]; then
+              # Runtime/receipt assertion rejects a Phase 1 DB before downtime.
+              "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
+              "${DEPLOY_DIR}/deploy.sh" release-assert phase2
+              bash "${DEPLOY_DIR}/release-db-snapshot.sh" "${RELEASE_SOURCE_SHA}"
+              node "${DEPLOY_DIR}/release-recovery.mjs" capture "$RELEASE_RUN_KEY"
+              "${DEPLOY_DIR}/deploy.sh" drain
+              "${DEPLOY_DIR}/deploy.sh" backup "release-${RELEASE_SOURCE_SHA}"
+              exit 0
+            fi
             if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
               [ "${OBSERVATION_ATTESTATION}" = I_ACCEPT_SHORT_OBSERVATION ]
               [[ "${PHASE1_IMAGE}" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]]
@@ -508,6 +603,15 @@ jobs:
             # Prove the exact final artifact before downtime. The API and every
             # worker remain stopped from this drain through web publication and DDL.
             "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
+            "${DEPLOY_DIR}/deploy.sh" release-assert phase1
+            online_preflight_args=()
+            if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
+              online_preflight_args+=("--observation-exception-id=${OBSERVATION_EXCEPTION_ID}")
+              if [ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 ]; then
+                online_preflight_args+=(--exception-profile=image-bridge-36)
+              fi
+            fi
+            "${DEPLOY_DIR}/deploy.sh" online-contract-preflight "${online_preflight_args[@]}"
             # Environment approval can outlive the browser-side authorization
             # check. Re-read the server record and evaluate its age using the
             # production server clock immediately before mutations are drained.
@@ -516,84 +620,57 @@ jobs:
             else
               "${DEPLOY_DIR}/deploy.sh" verify-observation-window "${OBSERVATION_STARTED_AT}"
             fi
+            node "${DEPLOY_DIR}/release-recovery.mjs" capture "$RELEASE_RUN_KEY"
             "${DEPLOY_DIR}/deploy.sh" drain
             "${DEPLOY_DIR}/deploy.sh" backup "phase2-${RELEASE_SOURCE_SHA}"
             "${DEPLOY_DIR}/deploy.sh" inventory "/release-state/garage-before-contract-${RELEASE_SOURCE_SHA}.json"
+            # Check the frozen DB/inventory before publishing the new web.
+            "${DEPLOY_DIR}/deploy.sh" contract-preflight "${online_preflight_args[@]}" \
+              --inventory-input="/release-state/garage-before-contract-${RELEASE_SOURCE_SHA}.json" \
+              --report-output=/release-state/phase2-contract-prepublish.json
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
-          FINAL_IMAGE: ${{ needs.authorize.outputs.final_image }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_PHASE: ${{ inputs.phase }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           OBSERVATION_STARTED_AT: ${{ inputs.observation_started_at }}
           OBSERVATION_ATTESTATION: ${{ inputs.observation_attestation }}
           OBSERVATION_EXCEPTION_ID: ${{ inputs.observation_exception_id }}
+          EXCEPTION_PROFILE: ${{ inputs.exception_profile }}
           PHASE1_IMAGE: ${{ inputs.phase1_api_image }}
           PHASE1_SOURCE_SHA: ${{ inputs.phase1_source_sha }}
 
-      - name: Set up Node for final web
-        if: ${{ inputs.phase == 'phase2' }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install final web dependencies
-        if: ${{ inputs.phase == 'phase2' }}
-        run: npm ci --workspace=apps/web --include-workspace-root
-
-      - name: Test final web
-        if: ${{ inputs.phase == 'phase2' }}
-        working-directory: apps/web
-        run: npm test
-
-      - name: Lint final web
-        if: ${{ inputs.phase == 'phase2' }}
-        working-directory: apps/web
-        run: npm run lint
-
-      - name: Build final web
-        if: ${{ inputs.phase == 'phase2' }}
-        working-directory: apps/web
-        env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
-          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
-          VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/' }}
-        run: npm run build
-
-      - name: Stamp exact cutover commit
-        if: ${{ inputs.phase == 'phase2' }}
-        working-directory: apps/web
-        run: printf '%s\n' "${GITHUB_SHA}" > dist/release-sha.txt
-
-      - name: Verify external Pages repository single-writer boundary
-        if: ${{ inputs.phase == 'phase2' }}
+      - name: Verify external Pages repository write access
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
-          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
         run: node server/verify-github-release-boundaries.mjs pages
 
       - name: Publish exact final web while mutations remain drained
-        if: ${{ inputs.phase == 'phase2' }}
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
         uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
           external_repository: pcugame/pcugame.github.io
           publish_branch: master
           publish_dir: apps/web/dist
+          full_commit_message: Deploy ${{ github.sha }} (run ${{ github.run_id }}-${{ github.run_attempt }})
           user_name: bipolarrr
           user_email: challengedbipolar@gmail.com
 
       - name: Verify final web and commit Phase 2 contract
-        if: ${{ inputs.phase == 'phase2' }}
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,SMOKE_PUBLIC_OBJECT_URL,OBSERVATION_EXCEPTION_ID,EXCEPTION_ACTOR,EXCEPTION_RUN_ID
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,SMOKE_PUBLIC_OBJECT_URL,OBSERVATION_EXCEPTION_ID,EXCEPTION_ACTOR,EXCEPTION_RUN_ID,RELEASE_PHASE,EXCEPTION_PROFILE,RELEASE_RUN_KEY
           script_stop: true
           command_timeout: 60m
           script: |
@@ -625,12 +702,65 @@ jobs:
             migration_args=()
             if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
               preflight_args+=("--observation-exception-id=${OBSERVATION_EXCEPTION_ID}")
+              if [ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 ]; then
+                preflight_args+=(--exception-profile=image-bridge-36)
+                migration_args+=(--exception-profile image-bridge-36)
+              fi
               migration_args+=(--observation-exception-id "${OBSERVATION_EXCEPTION_ID}" --release-source-sha "${RELEASE_SOURCE_SHA}" --release-image "${FINAL_IMAGE}" --exception-actor "${EXCEPTION_ACTOR}" --exception-run-id "${EXCEPTION_RUN_ID}")
             fi
+            if [ "${RELEASE_PHASE}" = phase2 ]; then
             "${DEPLOY_DIR}/deploy.sh" contract-preflight "${preflight_args[@]}" \
               --inventory-input="/release-state/garage-before-contract-${RELEASE_SOURCE_SHA}.json" \
               --report-output=/release-state/phase2-contract-preflight.json
+            fi
             "${DEPLOY_DIR}/deploy.sh" release-migrate status
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_PHASE: ${{ inputs.phase }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+          OBSERVATION_EXCEPTION_ID: ${{ inputs.observation_exception_id }}
+          EXCEPTION_PROFILE: ${{ inputs.exception_profile }}
+          EXCEPTION_ACTOR: ${{ github.actor }}
+          EXCEPTION_RUN_ID: ${{ github.run_id }}
+
+      - name: Apply migrations and start verified release
+        id: apply-contract
+        if: ${{ inputs.phase == 'phase2' || inputs.phase == 'release' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,SMOKE_PUBLIC_OBJECT_URL,OBSERVATION_EXCEPTION_ID,EXCEPTION_ACTOR,EXCEPTION_RUN_ID,RELEASE_PHASE,EXCEPTION_PROFILE,RELEASE_RUN_KEY
+          script_stop: true
+          command_timeout: 60m
+          script: |
+            set -euo pipefail
+            export PATH=$PATH:/usr/local/bin:/usr/bin
+            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
+            export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
+            export API_IMAGE="${FINAL_IMAGE}"
+            export MIGRATION_IMAGE="${FINAL_IMAGE}"
+            chmod +x "${DEPLOY_DIR}/deploy.sh"
+            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+
+            preflight_args=()
+            migration_args=()
+            if [ -n "${OBSERVATION_EXCEPTION_ID}" ]; then
+              preflight_args+=("--observation-exception-id=${OBSERVATION_EXCEPTION_ID}")
+              if [ "${EXCEPTION_PROFILE:-age-only}" = image-bridge-36 ]; then
+                preflight_args+=(--exception-profile=image-bridge-36)
+                migration_args+=(--exception-profile image-bridge-36)
+              fi
+              migration_args+=(--observation-exception-id "${OBSERVATION_EXCEPTION_ID}" --release-source-sha "${RELEASE_SOURCE_SHA}" --release-image "${FINAL_IMAGE}" --exception-actor "${EXCEPTION_ACTOR}" --exception-run-id "${EXCEPTION_RUN_ID}")
+            fi
+            node "${DEPLOY_DIR}/release-recovery.mjs" mark-migration "$RELEASE_RUN_KEY"
             "${DEPLOY_DIR}/deploy.sh" release-migrate apply-contract "${migration_args[@]}"
 
             # DESTRUCTIVE DDL BOUNDARY: no old-image rollback exists below.
@@ -642,10 +772,7 @@ jobs:
             fi
             "${DEPLOY_DIR}/deploy.sh" release-migrate status
 
-            [ -n "${SMOKE_PUBLIC_OBJECT_URL}" ] || {
-              echo "SMOKE_PUBLIC_OBJECT_URL is required for final data-plane smoke"
-              exit 1
-            }
+            SMOKE_PUBLIC_OBJECT_URL="$(node "${DEPLOY_DIR}/release-smoke-target.mjs" read "$RELEASE_SOURCE_SHA")"
             node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
             podman stop gp-api --time 30
             trap 'podman start gp-api >/dev/null 2>&1 || true' EXIT
@@ -664,13 +791,50 @@ jobs:
               echo "API did not recover after the API-down data-plane smoke"
               exit 1
             }
+            deployed_id="$(podman inspect gp-api --format '{{.Image}}')"
+            actual_source="$(podman image inspect "$deployed_id" --format '{{ index .Labels "org.opencontainers.image.revision" }}')"
+            actual_digest="$(podman image inspect "$deployed_id" --format '{{.Digest}}')"
+            [ "$actual_source" = "$RELEASE_SOURCE_SHA" ]
+            [ "$actual_digest" = "${FINAL_IMAGE##*@}" ]
+            umask 077
+            printf 'source_sha=%s\nimage=%s\n' "$actual_source" "$FINAL_IMAGE" > "${CUTOVER_STATE_DIR}/deployed-${RELEASE_SOURCE_SHA}.txt"
+            printf 'Deployed source: %s\nDeployed image: %s\n' "$actual_source" "$FINAL_IMAGE"
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
-          FINAL_IMAGE: ${{ needs.authorize.outputs.final_image }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          RELEASE_PHASE: ${{ inputs.phase }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
           OBSERVATION_EXCEPTION_ID: ${{ inputs.observation_exception_id }}
+          EXCEPTION_PROFILE: ${{ inputs.exception_profile }}
           EXCEPTION_ACTOR: ${{ github.actor }}
           EXCEPTION_RUN_ID: ${{ github.run_id }}
+
+      - name: Restore Pages before pre-migration recovery
+        id: restore-pages
+        if: ${{ failure() && steps.capture-pages.outcome == 'success' && steps.apply-contract.outcome == 'skipped' }}
+        env:
+          PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+          RECOVERY_DIR: ${{ runner.temp }}/pages-release-recovery
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: node server/pages-release-recovery.mjs restore "$RECOVERY_DIR" "$GITHUB_SHA" "$RELEASE_RUN_KEY"
+
+      - name: Recover original runtime only before migration attempt
+        if: ${{ failure() && steps.restore-pages.outcome == 'success' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          WEB_RECOVERY_VERIFIED: 'true'
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: DEPLOY_DIR,RELEASE_RUN_KEY,WEB_RECOVERY_VERIFIED
+          script_stop: true
+          command_timeout: 10m
+          script: node "${DEPLOY_DIR}/release-recovery.mjs" recover "$RELEASE_RUN_KEY"

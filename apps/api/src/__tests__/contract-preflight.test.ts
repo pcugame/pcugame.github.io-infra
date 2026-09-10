@@ -454,3 +454,27 @@ describe('canonical contract preflight', () => {
 		expect((await audit(snapshot, inventory, metadataHead)).report.blockers.incompleteObjectRelocations.count).toBe(1);
 	});
 });
+
+describe('pinned image bridge evidence', () => {
+ const options = { observationExceptionId: 'reviewed-bridge36', observationWindowMs: 0, exceptionProfile: 'image-bridge-36' as const };
+ async function run(override = {}, other = false) {
+  const snapshot = baseSnapshot();
+  snapshot.metrics.push({ name: 'public_image_legacy_bridge', scope: 'api-route', value: 36n, lastObservedAt: new Date('2026-09-09T10:37:52.913Z'), details: { usedLegacyLookup: false }, ...override });
+  if (other) snapshot.metrics.push({ name: 'unknown-producer', scope: '', value: 1n, lastObservedAt: new Date('2026-09-09T12:00:00Z') });
+  return runContractPreflight({ repository: { readSnapshot: async () => snapshot, resetLegacyBridgeObservations: async () => { throw new Error('must never reset'); } }, inventory: { identity: 'fixture', capturedAt: '2026-09-10T00:00:00Z', objects: [{ bucket: 'protected', key: 'protected/assets/1/original/g1.zip' }], multipartUploads: [] }, head: headForSnapshot(snapshot), options, now: () => new Date('2026-09-10T00:00:00Z') });
+ }
+ it('retains the true count and profile while accepting exact evidence', async () => {
+  expect(await run()).toMatchObject({ clean: true, counts: { legacyFallbackReads: 36 }, exceptionProfile: 'image-bridge-36', metricObservationReset: false });
+ });
+ it.each([{ value: 35n }, { value: 37n }, { value: 0n }, { scope: 'other' }, { lastObservedAt: new Date('2026-09-09T10:37:52.914Z') }, { details: { usedLegacyLookup: true } }, { details: { usedLegacyLookup: 'false' } }, { details: null }])('rejects pinned evidence drift %#', async (override) => {
+  expect((await run(override)).clean).toBe(false);
+ });
+ it('rejects unrelated nonzero producers just as SQL does', async () => { expect((await run({}, true)).clean).toBe(false); });
+});
+
+it('rejects a bridge profile with reset before any repository mutation', async () => {
+ const repository = { readSnapshot: vi.fn(async () => baseSnapshot()), resetLegacyBridgeObservations: vi.fn(async () => undefined) };
+ await expect(runContractPreflight({ repository, inventory: { identity: 'fixture', capturedAt: now().toISOString(), objects: [], multipartUploads: [] }, head: vi.fn(), options: { observationExceptionId: 'reviewed-bridge36', exceptionProfile: 'image-bridge-36', observationWindowMs: 0, resetObservation: true, resetConfirmation: CONTRACT_PREFLIGHT_RESET_CONFIRMATION } })).rejects.toThrow('without metric reset');
+ expect(repository.resetLegacyBridgeObservations).not.toHaveBeenCalled();
+ expect(repository.readSnapshot).not.toHaveBeenCalled();
+});

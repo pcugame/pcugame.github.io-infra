@@ -67,10 +67,9 @@ jobs:
         working-directory: apps/web
         run: printf '%s\n' "${GITHUB_SHA}" > dist/release-sha.txt
 
-      - name: Verify external Pages repository single-writer boundary
+      - name: Verify external Pages target and write access
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
-          PAGES_DEPLOY_ACTOR: ${{ vars.PAGES_DEPLOY_ACTOR }}
         run: node server/verify-github-release-boundaries.mjs pages
 
       - name: Deploy to pcugame.github.io

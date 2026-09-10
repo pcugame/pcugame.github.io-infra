@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+	BRIDGE_EXCEPTION_CONTRACT_MIGRATION,
+	BRIDGE_EXCEPTION_PREP_MIGRATION,
+	BRIDGE_EXCEPTION_SCOPE,
 	AGE_EXCEPTION_CONTRACT_MIGRATION,
 	EXCEPTION_PREP_MIGRATION,
 	OBSERVATION_EXCEPTION_SCOPE,
@@ -219,4 +222,54 @@ describe('honest alternate contract history', () => {
 			.replace('OR max(metric."last_observed_at") > CURRENT_TIMESTAMP\n', 'OR max(metric."last_observed_at") > CURRENT_TIMESTAMP - INTERVAL \'24 hours\'\n');
 		expect(stripped).toBe(original);
 	});
+});
+
+
+describe('pinned bridge36 release history', () => {
+ function bridgeReceipt(): ExceptionReceipt {
+  const candidate = receipt();
+  return { ...candidate, migration_name: BRIDGE_EXCEPTION_CONTRACT_MIGRATION, scope: BRIDGE_EXCEPTION_SCOPE,
+   authorized_at: new Date('2026-09-10T00:00:00Z'), expires_at: new Date('2026-09-10T01:00:00Z'), applied_at: new Date('2026-09-10T00:01:00Z'),
+   metrics: [...candidate.metrics as unknown[], { name: 'public_image_legacy_bridge', scope: 'api-route', value: 36, last_observed_at: '2026-09-09T10:37:52.913Z', details: { usedLegacyLookup: false } }],
+  };
+ }
+ function history() { return [...completePhase1History(), completedMigration(EXCEPTION_PREP_MIGRATION), completedMigration(BRIDGE_EXCEPTION_PREP_MIGRATION), { ...completedMigration(BRIDGE_EXCEPTION_CONTRACT_MIGRATION), checksum: alternateChecksum }, completedMigration(PROJECT_CHANGE_MIGRATION)]; }
+ it('parses profile without changing the age-only default', () => {
+  expect(parseArgs(['apply-contract', ...exceptionFlags, '--exception-profile', 'image-bridge-36']).exception?.profile).toBe('image-bridge-36');
+  expect(() => parseArgs(['apply-contract', ...exceptionFlags, '--exception-profile', 'anything'])).toThrow();
+ });
+ it('recognizes genuine bridge history and stages future additions on that same path', () => {
+  expect(() => assertRuntime(history(), 'phase2', bridgeReceipt())).not.toThrow();
+  const naive = bridgeReceipt();
+  Object.assign((naive.metrics as Array<Record<string, unknown>>).at(-1)!, { last_observed_at: '2026-09-09T10:37:52.913' });
+  expect(() => assertRuntime(history(), 'phase2', naive)).not.toThrow();
+  const path = releaseStatus(history(), bridgeReceipt()).contractPath!;
+  expect(path).toBe(BRIDGE_EXCEPTION_CONTRACT_MIGRATION);
+  expect(stageMigrationNames([CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION, '20261001000000_next'], '20261001000000_next', path)).toEqual([BRIDGE_EXCEPTION_CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION, '20261001000000_next']);
+ });
+ it('rejects missing prep, mixed alternatives, and altered receipt evidence', () => {
+  expect(() => releaseStatus(history().filter((r) => r.migration_name !== BRIDGE_EXCEPTION_PREP_MIGRATION), bridgeReceipt())).toThrow();
+  expect(() => releaseStatus([...history(), completedMigration(AGE_EXCEPTION_CONTRACT_MIGRATION)], bridgeReceipt())).toThrow();
+  for (const override of [{ value: 37 }, { value: 35 }, { scope: 'other' }, { details: { usedLegacyLookup: true } }, { last_observed_at: '2026-09-09T10:37:52.914Z' }]) {
+   const candidate = bridgeReceipt();
+   Object.assign((candidate.metrics as Array<Record<string, unknown>>).at(-1)!, override);
+   expect(() => releaseStatus(history(), candidate)).toThrow();
+  }
+ });
+});
+
+it('preserves age-path DDL and all non-observation guards in the pinned path', () => {
+ const read = (name: string) => readFileSync(new URL(`../prisma/contract-migration-paths/${name}/migration.sql`, import.meta.url), 'utf8');
+ const age = read(AGE_EXCEPTION_CONTRACT_MIGRATION);
+ const bridge = read(BRIDGE_EXCEPTION_CONTRACT_MIGRATION)
+  .replaceAll(BRIDGE_EXCEPTION_CONTRACT_MIGRATION, AGE_EXCEPTION_CONTRACT_MIGRATION)
+  .replaceAll(BRIDGE_EXCEPTION_SCOPE, OBSERVATION_EXCEPTION_SCOPE)
+  .replace('the observation age and one pinned image bridge record are waived.', 'only the observation age comparison is waived.');
+ const removeMetricSection = (sql: string) => sql.replace(/  SELECT count\(\*\) INTO violations\n  FROM "migration_metrics"[\s\S]*?(?=  SELECT count\(\*\) INTO violations\n  FROM "game_upload_sessions")/, '<METRIC_GUARDS>');
+ expect(removeMetricSection(bridge)).toBe(removeMetricSection(age));
+});
+
+
+it('fails closed on a future additive migration that did not finish', () => {
+ expect(() => assertNoFailedReleaseMigration([{ migration_name: '20261001000000_next', finished_at: null, rolled_back_at: null }])).toThrow('failed/rolled-back');
 });

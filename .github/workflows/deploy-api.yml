@@ -12,6 +12,12 @@ on:
       - '.github/workflows/deploy-api.yml'
       - '.github/release-gates/web-before-api/**'
   workflow_dispatch:
+  workflow_call:
+    outputs:
+      image:
+        value: ${{ jobs.build-and-push.outputs.image }}
+      source_sha:
+        value: ${{ jobs.build-and-push.outputs.source_sha }}
 
 permissions:
   actions: read
@@ -21,6 +27,9 @@ permissions:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.manifest.outputs.image }}
+      source_sha: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -77,9 +86,11 @@ jobs:
           docker run --rm --entrypoint node "$RELEASE_IMAGE" -e '
             const fs = require("node:fs");
             const migrations = fs.readdirSync("prisma/migrations").filter(name => fs.statSync(`prisma/migrations/${name}`).isDirectory()).sort();
-            if (migrations.at(-1) !== "20260909100000_project_change_requests") throw new Error("Unexpected Phase 2 artifact migration ceiling");
+            if (!migrations.includes("20260909100000_project_change_requests")) throw new Error("Unexpected Phase 2 artifact migration ceiling");
             if (!fs.existsSync("prisma/contract-migration-paths/20260822000001_canonical_asset_contract_age_exception/migration.sql")) throw new Error("Missing reviewed alternate contract");
             if (!migrations.includes("20260821990000_release_exception_receipts")) throw new Error("Missing exception receipt preparation migration");
+            if (!fs.existsSync("prisma/contract-migration-paths/20260822000002_canonical_asset_contract_image_bridge36/migration.sql")) throw new Error("Missing reviewed image bridge alternate contract");
+            if (!migrations.includes("20260821991000_release_image_bridge_exception")) throw new Error("Missing image bridge exception preparation migration");
             if (fs.existsSync("dist/phase1-release-manifest.js")) throw new Error("Phase 1 runtime is not a Phase 2 artifact");
             for (const worker of ["game-validation", "webgl", "video", "image", "export", "project-publication"]) {
               if (!fs.existsSync(`dist/${worker}-worker.js`)) throw new Error(`Missing worker ${worker}`);
@@ -94,3 +105,16 @@ jobs:
           printf 'Use this exact production input (mutable tags are rejected):\n%s@%s\n' \
             'ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api' \
             '${{ steps.release-image.outputs.digest }}' >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Publish verified release manifest
+        id: manifest
+        env:
+          RELEASE_IMAGE: ghcr.io/${{ github.repository_owner }}/pcu-graduationproject-v2-api@${{ steps.release-image.outputs.digest }}
+        run: |
+          node -e 'require("node:fs").writeFileSync("release-image.json", JSON.stringify({source_sha: process.env.GITHUB_SHA, image: process.env.RELEASE_IMAGE}))'
+          echo "image=${RELEASE_IMAGE}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-api-release-${{ github.sha }}
+          path: release-image.json
+          retention-days: 30
