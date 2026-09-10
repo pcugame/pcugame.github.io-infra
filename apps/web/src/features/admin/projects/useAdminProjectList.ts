@@ -11,7 +11,6 @@ export type AdminProjectSortDir = SortOrder;
 export function useAdminProjectList(onListStateChange?: () => void) {
 	const [statusFilter, setStatusFilter] = useState<AdminProjectStatusFilter>('ALL');
 	const [search, setSearch] = useState('');
-	const [yearFilter, setYearFilter] = useState('');
 	const [isComposing, setIsComposing] = useState(false);
 	const debouncedSearch = useDebouncedValue(search, 250, isComposing);
 	const [page, setPage] = useState(1);
@@ -21,18 +20,15 @@ export function useAdminProjectList(onListStateChange?: () => void) {
 
 	const listQuery = useMemo(() => {
 		const term = debouncedSearch.trim();
-		const year = yearFilter.trim();
-		const parsedYear = Number(year);
 		return {
 			page,
 			limit,
 			...(term ? { search: term } : {}),
-			...(year && Number.isInteger(parsedYear) ? { year: parsedYear } : {}),
 			...(statusFilter === 'ALL' ? {} : { status: statusFilter }),
 			sort: sortKey,
 			order: sortDir,
 		};
-	}, [debouncedSearch, limit, page, sortDir, sortKey, statusFilter, yearFilter]);
+	}, [debouncedSearch, limit, page, sortDir, sortKey, statusFilter]);
 
 	function resetPageAndSelection() {
 		setPage(1);
@@ -65,11 +61,6 @@ export function useAdminProjectList(onListStateChange?: () => void) {
 		resetPageAndSelection();
 	}
 
-	function handleYearFilter(value: string) {
-		setYearFilter(value);
-		resetPageAndSelection();
-	}
-
 	function handleSearchChange(value: string) {
 		setSearch(value);
 		resetPageAndSelection();
@@ -78,14 +69,12 @@ export function useAdminProjectList(onListStateChange?: () => void) {
 	return {
 		statusFilter,
 		search,
-		yearFilter,
 		isComposing,
 		listQuery,
 		handleSort,
 		sortIndicator,
 		goToPage,
 		handleStatusFilter,
-		handleYearFilter,
 		handleSearchChange,
 		setIsComposing,
 	};

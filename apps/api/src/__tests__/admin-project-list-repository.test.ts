@@ -74,7 +74,7 @@ describe('admin project list repository', () => {
 		});
 	});
 
-	it('adds title, summary, member name, and student id search filters', async () => {
+	it('adds title, summary, member, and exhibition title search filters', async () => {
 		await repository.findProjectsForUser(303, true, {
 			...defaultOptions,
 			search: 'alpha',
@@ -90,10 +90,77 @@ describe('admin project list repository', () => {
 							{ summary: { contains: 'alpha', mode: 'insensitive' } },
 							{ members: { some: { name: { contains: 'alpha', mode: 'insensitive' } } } },
 							{ members: { some: { studentId: { contains: 'alpha', mode: 'insensitive' } } } },
+							{ exhibition: { title: { contains: 'alpha', mode: 'insensitive' } } },
 						],
 					},
 				],
 			},
+		}));
+	});
+
+	it('ANDs distinct whitespace-delimited search tokens while ORing each token fields', async () => {
+		await repository.findProjectsForUser(303, true, {
+			...defaultOptions,
+			search: '  2026  Graduation\t2026  ',
+		});
+
+		expect(mocks.projectFindMany).toHaveBeenCalledWith(expect.objectContaining({
+			where: {
+				AND: [
+					{ changeRequestDraft: null },
+					{
+						OR: [
+							{ title: { contains: '2026', mode: 'insensitive' } },
+							{ summary: { contains: '2026', mode: 'insensitive' } },
+							{ members: { some: { name: { contains: '2026', mode: 'insensitive' } } } },
+							{ members: { some: { studentId: { contains: '2026', mode: 'insensitive' } } } },
+							{ exhibition: { title: { contains: '2026', mode: 'insensitive' } } },
+							{ exhibition: { year: 2026 } },
+						],
+					},
+					{
+						OR: [
+							{ title: { contains: 'Graduation', mode: 'insensitive' } },
+							{ summary: { contains: 'Graduation', mode: 'insensitive' } },
+							{ members: { some: { name: { contains: 'Graduation', mode: 'insensitive' } } } },
+							{ members: { some: { studentId: { contains: 'Graduation', mode: 'insensitive' } } } },
+							{ exhibition: { title: { contains: 'Graduation', mode: 'insensitive' } } },
+						],
+					},
+				],
+			},
+		}));
+	});
+
+	it('combines an explicit year filter with the search token groups', async () => {
+		await repository.findProjectsForUser(303, true, {
+			...defaultOptions,
+			search: '2026 show',
+			year: 2025,
+		});
+
+		expect(mocks.projectFindMany).toHaveBeenCalledWith(expect.objectContaining({
+			where: expect.objectContaining({
+				AND: expect.arrayContaining([
+					{ exhibition: { year: 2025 } },
+					{ OR: expect.arrayContaining([{ exhibition: { year: 2026 } }]) },
+				]),
+			}),
+		}));
+	});
+
+	it('does not treat non-canonical four-character numeric text as an exhibition year', async () => {
+		await repository.findProjectsForUser(303, true, {
+			...defaultOptions,
+			search: '0123',
+		});
+
+		expect(mocks.projectFindMany).toHaveBeenCalledWith(expect.objectContaining({
+			where: expect.objectContaining({
+				AND: expect.arrayContaining([
+					{ OR: expect.not.arrayContaining([{ exhibition: { year: 123 } }]) },
+				]),
+			}),
 		}));
 	});
 

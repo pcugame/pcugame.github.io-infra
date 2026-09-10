@@ -96,7 +96,6 @@ export default function AdminProjectsPage() {
 			<AdminProjectsToolbar
 				statusFilter={projectList.statusFilter}
 				search={projectList.search}
-				yearFilter={projectList.yearFilter}
 				selectedCount={selection.selectedIds.length}
 				isPrivileged={isPrivileged}
 				isAdmin={isAdmin}
@@ -104,7 +103,6 @@ export default function AdminProjectsPage() {
 				isDeleting={bulkDeleteMutation.isPending}
 				onStatusFilter={projectList.handleStatusFilter}
 				onSearchChange={projectList.handleSearchChange}
-				onYearFilter={projectList.handleYearFilter}
 				onCompositionStart={() => projectList.setIsComposing(true)}
 				onCompositionEnd={(value) => {
 					projectList.setIsComposing(false);

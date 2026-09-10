@@ -126,6 +126,30 @@ function containsText(search: string): Prisma.StringFilter {
 	return { contains: search, mode: 'insensitive' };
 }
 
+function searchTokens(search: string): string[] {
+	const tokens = new Map<string, string>();
+	for (const token of search.trim().split(/\s+/)) {
+		if (token) tokens.set(token.toLowerCase(), token);
+	}
+	return [...tokens.values()];
+}
+
+function isCanonicalYearToken(token: string): boolean {
+	return /^[1-9]\d{3}$/.test(token);
+}
+
+function searchTokenWhere(token: string): Prisma.ProjectWhereInput {
+	const or: Prisma.ProjectWhereInput[] = [
+		{ title: containsText(token) },
+		{ summary: containsText(token) },
+		{ members: { some: { name: containsText(token) } } },
+		{ members: { some: { studentId: containsText(token) } } },
+		{ exhibition: { title: containsText(token) } },
+	];
+	if (isCanonicalYearToken(token)) or.push({ exhibition: { year: Number(token) } });
+	return { OR: or };
+}
+
 function buildProjectListWhere(
 	userId: number,
 	isPrivileged: boolean,
@@ -140,16 +164,7 @@ function buildProjectListWhere(
 			],
 		});
 	}
-	if (options.search) {
-		and.push({
-			OR: [
-				{ title: containsText(options.search) },
-				{ summary: containsText(options.search) },
-				{ members: { some: { name: containsText(options.search) } } },
-				{ members: { some: { studentId: containsText(options.search) } } },
-			],
-		});
-	}
+	if (options.search) and.push(...searchTokens(options.search).map(searchTokenWhere));
 	if (options.year !== undefined) and.push({ exhibition: { year: options.year } });
 	if (options.status !== undefined) and.push({ status: options.status });
 	return and.length > 0 ? { AND: and } : {};
