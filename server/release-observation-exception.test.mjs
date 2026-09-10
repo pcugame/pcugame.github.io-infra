@@ -39,7 +39,7 @@ test('preflight stage accepts no deployment inputs', () => {
 });
 
 test('exception retains snapshot, identity, Pages and drained contract checks', () => {
-  const prepare = workflow.slice(workflow.indexOf('      - name: Prepare atomic Phase 2 maintenance window'), workflow.indexOf('      - name: Set up Node for final web'));
+  const prepare = workflow.slice(workflow.indexOf('      - name: Prepare atomic Phase 2 maintenance window'), workflow.indexOf('      - name: Verify external Pages repository'));
   assert.match(prepare, /current_image#sha256:/);
   assert.match(prepare, /PHASE1_IMAGE##@|PHASE1_IMAGE##\*@/);
   assert.match(prepare, /org.opencontainers.image.revision/);
@@ -50,4 +50,49 @@ test('exception retains snapshot, identity, Pages and drained contract checks', 
   assert.ok(final.indexOf('verify-final-web') < final.indexOf('contract-preflight'));
   assert.ok(final.indexOf('contract-preflight') < final.indexOf('release-migrate apply-contract'));
   assert.match(final, /--exception-actor "\$\{EXCEPTION_ACTOR\}" --exception-run-id "\$\{EXCEPTION_RUN_ID\}"/);
+});
+
+test('regular release accepts no manual image or observation inputs', () => {
+  assert.equal(authorize({ RELEASE_PHASE: 'release', FINAL_IMAGE: '' }).status, 0);
+  assert.notEqual(authorize({ RELEASE_PHASE: 'release' }).status, 0);
+  assert.notEqual(authorize({ RELEASE_PHASE: 'release', FINAL_IMAGE: '', EXCEPTION_PROFILE: 'image-bridge-36' }).status, 0);
+});
+test('image bridge profile requires the explicit phase2 exception authorization', () => {
+  assert.equal(authorize({ ...exception, EXCEPTION_PROFILE: 'image-bridge-36' }).status, 0);
+  assert.notEqual(authorize({ ...exception, EXCEPTION_PROFILE: 'unknown' }).status, 0);
+  assert.notEqual(authorize({ ...exception, EXCEPTION_PROFILE: 'image-bridge-36', OBSERVATION_EXCEPTION_ID: '' }).status, 0);
+});
+test('web build and online checks precede drain; frozen checks precede publication', () => {
+  const prepare = workflow.indexOf('      - name: Prepare atomic Phase 2 maintenance window');
+  assert.ok(workflow.indexOf('      - name: Build final web') < prepare);
+  const block = workflow.slice(prepare, workflow.indexOf('      - name: Verify external Pages repository'));
+  assert.ok(block.indexOf('release-assert phase2') < block.indexOf('deploy.sh" drain'));
+  assert.ok(block.indexOf('online-contract-preflight') < block.lastIndexOf('deploy.sh" drain'));
+  assert.match(block, /phase2-contract-prepublish.json/);
+  assert.match(workflow, /needs.build_image.outputs.image/);
+  assert.match(workflow, /actual_source.*RELEASE_SOURCE_SHA/);
+  assert.match(workflow, /actual_digest.*FINAL_IMAGE/);
+});
+
+test('recovery stays before migration and refuses Pages rollback after apply step began', () => {
+  assert.match(workflow, /steps\.apply-contract\.outcome == 'skipped'/);
+  assert.ok(workflow.indexOf('Capture Pages recovery point') < workflow.indexOf('Prepare atomic Phase 2 maintenance window'));
+  const apply = workflow.slice(workflow.indexOf('      - name: Apply migrations and start verified release'));
+  assert.ok(apply.indexOf('mark-migration') < apply.indexOf('release-migrate apply-contract'));
+  assert.match(workflow, /full_commit_message: Deploy \$\{\{ github.sha \}\} \(run \$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}\)/);
+  assert.match(workflow, /steps.restore-pages.outcome == 'success'/);
+});
+
+test('online preflight rejects metric reset and arbitrary CLI inputs before running', () => {
+  const deploy = readFileSync(new URL('./deploy.sh', import.meta.url), 'utf8');
+  const start = deploy.indexOf('do_online_contract_preflight() {');
+  const end = deploy.indexOf('\ndo_contract_preflight()', start);
+  const fn = deploy.slice(start, end);
+  const run = args => spawnSync('bash', ['-eu', '-c', `${fn}\nrun_release_entry() { echo invoked; }\ndo_online_contract_preflight "$@"`, '--', ...args], { encoding: 'utf8' });
+  assert.equal(run(['--observation-exception-id=reviewed-20260910', '--exception-profile=image-bridge-36']).status, 0);
+  for (const args of [['--reset-observation'], ['--apply'], ['--exception-profile=other'], ['--observation-exception-id=../oops']]) {
+    const result = run(args);
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stdout, /invoked/);
+  }
 });

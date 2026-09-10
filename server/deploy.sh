@@ -635,6 +635,20 @@ do_canonical_correction() {
   run_release_entry dist-release/scripts/correct-canonical-assets.js "$@"
 }
 
+# Read-only observation of the candidate artifact before maintenance. Restrict
+# inputs so this entry point cannot reset metrics or run an applying command.
+do_online_contract_preflight() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --observation-exception-id=*) [[ "${arg#*=}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] || return 1 ;;
+      --exception-profile=image-bridge-36) ;;
+      *) echo "ERROR: unsupported online preflight argument"; return 1 ;;
+    esac
+  done
+  run_release_entry dist-release/scripts/preflight-canonical-contract.js "$@"
+}
+
 do_contract_preflight() {
   assert_mutation_drained
   run_release_entry dist-release/scripts/preflight-canonical-contract.js "$@"
@@ -1126,6 +1140,7 @@ case "${1:-up}" in
   inventory) do_inventory_snapshot "${2:-}" ;;
   backfill) shift; do_backfill "$@" ;;
   correction) shift; do_canonical_correction "$@" ;;
+  online-contract-preflight) shift; do_online_contract_preflight "$@" ;;
   contract-preflight) shift; do_contract_preflight "$@" ;;
   capacity-preflight) do_capacity_preflight ;;
   boundary-preflight) load_env; validate_production_boundaries ;;

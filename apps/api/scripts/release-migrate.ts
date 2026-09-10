@@ -41,6 +41,9 @@ export const REQUIRED_EXPAND_MIGRATIONS = [
 ] as const;
 export const EXCEPTION_PREP_MIGRATION = '20260821990000_release_exception_receipts';
 export const AGE_EXCEPTION_CONTRACT_MIGRATION = '20260822000001_canonical_asset_contract_age_exception';
+export const BRIDGE_EXCEPTION_PREP_MIGRATION = '20260821991000_release_image_bridge_exception';
+export const BRIDGE_EXCEPTION_CONTRACT_MIGRATION = '20260822000002_canonical_asset_contract_image_bridge36';
+export const BRIDGE_EXCEPTION_SCOPE = '24-hour-observation-age-and-image-bridge-36';
 export const OBSERVATION_EXCEPTION_SCOPE = '24-hour-observation-age-only';
 export const CONTRACT_MIGRATION = '20260822000000_canonical_asset_contract';
 export const PROJECT_CHANGE_MIGRATION = '20260909100000_project_change_requests';
@@ -70,6 +73,7 @@ export type ObservationException = {
 	image: string;
 	actor: string;
 	runId: string;
+	profile?: 'image-bridge-36';
 };
 
 export type ExceptionReceipt = {
@@ -91,6 +95,7 @@ export type ExceptionReceipt = {
 };
 
 export function validateObservationException(value: ObservationException): void {
+	if (value.profile !== undefined && value.profile !== 'image-bridge-36') throw new Error('invalid exception profile');
 	if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.exceptionId)) throw new Error('invalid observation exception ID');
 	if (!/^[0-9a-f]{40}$/.test(value.sourceSha)) throw new Error('release source must be a full lowercase 40-character commit SHA');
 	if (!/^ghcr\.io\/pcugame\/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$/.test(value.image)) throw new Error('release image must be an immutable repository@sha256 digest');
@@ -114,11 +119,14 @@ export function parseArgs(args: readonly string[]): { command: Command; phase?: 
 	for (let index = 0; index < rest.length; index += 2) {
 		const flag = rest[index]!;
 		const value = rest[index + 1];
-		if (!allowed.includes(flag) || flags.has(flag) || !value || value.startsWith('--')) throw new Error(`invalid or duplicate exception argument: ${flag}`);
+		if (!([...allowed, '--exception-profile'].includes(flag)) || flags.has(flag) || !value || value.startsWith('--')) throw new Error(`invalid or duplicate exception argument: ${flag}`);
 		flags.set(flag, value);
 	}
-	if (flags.size !== allowed.length) throw new Error('observation exception requires ID, release source SHA, immutable release image, actor and run ID together');
-	const exception = {
+	if (!allowed.every((flag) => flags.has(flag))) throw new Error('observation exception requires ID, release source SHA, immutable release image, actor and run ID together');
+	const profile = flags.get('--exception-profile');
+	if (profile !== undefined && profile !== 'image-bridge-36') throw new Error('invalid exception profile');
+	const exception: ObservationException = {
+		...(profile ? { profile } : {}),
 		exceptionId: flags.get('--observation-exception-id')!,
 		sourceSha: flags.get('--release-source-sha')!,
 		image: flags.get('--release-image')!,
@@ -154,14 +162,27 @@ const REQUIRED_OBSERVATION_METRICS = [
 	'public_image_legacy_fallback', 'public_webgl_legacy_bridge', 'public_webgl_legacy_fallback', 'export_legacy_fallback',
 ];
 
+function receiptObservedTime(value: unknown): number {
+	if (typeof value !== 'string') return Number.NaN;
+	// migration_metrics uses PostgreSQL timestamp(3) without a timezone, stored as UTC.
+	return Date.parse(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.]\d+)?$/.test(value) ? `${value}Z` : value);
+}
+
 function validReceiptEvidence(receipt: ExceptionReceipt): boolean {
 	if (!Array.isArray(receipt.metrics) || !receipt.applied_at || typeof receipt.relocation_summary !== 'object' || !receipt.relocation_summary) return false;
-	const metrics = receipt.metrics as Array<{ name?: unknown; value?: unknown; last_observed_at?: unknown }>;
-	if (!metrics.every((metric) => metric && metric.value === 0)) return false;
+	const metrics = receipt.metrics as Array<{ name?: unknown; scope?: unknown; value?: unknown; last_observed_at?: unknown; details?: unknown }>;
+	const bridgeProfile = receipt.scope === BRIDGE_EXCEPTION_SCOPE;
+	const pinned = (metric: typeof metrics[number]) => metric?.name === 'public_image_legacy_bridge' && metric.scope === 'api-route'
+		&& metric.value === 36 && typeof metric.last_observed_at === 'string'
+		&& receiptObservedTime(metric.last_observed_at) === Date.parse('2026-09-09T10:37:52.913Z')
+		&& metric.details !== null && typeof metric.details === 'object' && !Array.isArray(metric.details)
+		&& (metric.details as Record<string, unknown>)['usedLegacyLookup'] === false;
+	if (bridgeProfile && metrics.filter(pinned).length !== 1) return false;
+	if (!metrics.every((metric) => metric && (metric.value === 0 || (bridgeProfile && pinned(metric))))) return false;
 	return REQUIRED_OBSERVATION_METRICS.every((name) => {
 		const observations = metrics.filter((metric) => metric.name === name);
 		return observations.length > 0 && observations.every((metric) => {
-			const observed = typeof metric.last_observed_at === 'string' ? Date.parse(metric.last_observed_at) : Number.NaN;
+			const observed = receiptObservedTime(metric.last_observed_at);
 			return Number.isFinite(observed) && observed <= receipt.applied_at!.getTime();
 		});
 	});
@@ -170,14 +191,15 @@ function validReceiptEvidence(receipt: ExceptionReceipt): boolean {
 export function assertContractPath(rows: readonly MigrationRow[], receipt: ExceptionReceipt | null = null): void {
 	assertNoFailedReleaseMigration(rows);
 	const original = rows.some((row) => row.migration_name === CONTRACT_MIGRATION);
-	const alternate = rows.filter((row) => row.migration_name === AGE_EXCEPTION_CONTRACT_MIGRATION);
+	const alternate = rows.filter((row) => isAlternateContract(row.migration_name));
 	if (original && alternate.length) throw new Error('mixed original and observation exception contract migration history is forbidden');
 	if (!alternate.length) {
 		if (receipt) throw new Error('observation exception receipt exists without its completed Prisma migration');
 		return;
 	}
 	if (alternate.length !== 1 || !receipt || !receipt.applied_at || !receipt.authorization_matches
-		|| receipt.migration_name !== AGE_EXCEPTION_CONTRACT_MIGRATION || receipt.scope !== OBSERVATION_EXCEPTION_SCOPE
+		|| receipt.migration_name !== alternate[0]!.migration_name || receipt.scope !== scopeForPath(receipt.migration_name)
+		|| (receipt.migration_name === BRIDGE_EXCEPTION_CONTRACT_MIGRATION && !completed(rows).has(BRIDGE_EXCEPTION_PREP_MIGRATION))
 		|| !/^[0-9a-f]{64}$/.test(receipt.migration_checksum) || alternate[0]!.checksum !== receipt.migration_checksum
 		|| !completed(rows).has(EXCEPTION_PREP_MIGRATION)
 		|| !Number.isFinite(receipt.authorized_at.getTime()) || !Number.isFinite(receipt.expires_at.getTime())
@@ -201,8 +223,8 @@ export function releaseStatus(rows: readonly MigrationRow[], receipt: ExceptionR
 		canonicalObjectRelocationExpand: applied.has(PHASE1_TARGET_MIGRATION),
 		projectVideoOrderExpand: applied.has(PROJECT_VIDEO_ORDER_MIGRATION),
 		expand: REQUIRED_EXPAND_MIGRATIONS.every((migration) => applied.has(migration)),
-		contract: applied.has(CONTRACT_MIGRATION) || applied.has(AGE_EXCEPTION_CONTRACT_MIGRATION),
-		contractPath: applied.has(AGE_EXCEPTION_CONTRACT_MIGRATION) ? AGE_EXCEPTION_CONTRACT_MIGRATION : applied.has(CONTRACT_MIGRATION) ? CONTRACT_MIGRATION : null,
+		contract: applied.has(CONTRACT_MIGRATION) || [...applied].some(isAlternateContract),
+		contractPath: applied.has(BRIDGE_EXCEPTION_CONTRACT_MIGRATION) ? BRIDGE_EXCEPTION_CONTRACT_MIGRATION : applied.has(AGE_EXCEPTION_CONTRACT_MIGRATION) ? AGE_EXCEPTION_CONTRACT_MIGRATION : applied.has(CONTRACT_MIGRATION) ? CONTRACT_MIGRATION : null,
 		observationExceptionReceipt: receipt ? {
 			exceptionId: receipt.exception_id, sourceSha: receipt.source_sha, image: receipt.image,
 			actor: receipt.actor, runId: receipt.run_id, scope: receipt.scope,
@@ -215,7 +237,7 @@ export function releaseStatus(rows: readonly MigrationRow[], receipt: ExceptionR
 
 export function assertNoFailedReleaseMigration(rows: readonly MigrationRow[]): void {
 	const failed = rows.filter((row) => (
-		([...REQUIRED_EXPAND_MIGRATIONS, EXCEPTION_PREP_MIGRATION, CONTRACT_MIGRATION, AGE_EXCEPTION_CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION] as string[]).includes(row.migration_name)
+		(([...REQUIRED_EXPAND_MIGRATIONS, EXCEPTION_PREP_MIGRATION, BRIDGE_EXCEPTION_PREP_MIGRATION, CONTRACT_MIGRATION, AGE_EXCEPTION_CONTRACT_MIGRATION, BRIDGE_EXCEPTION_CONTRACT_MIGRATION, PROJECT_CHANGE_MIGRATION] as string[]).includes(row.migration_name) || row.migration_name > PROJECT_CHANGE_MIGRATION)
 		&& (!row.finished_at || row.rolled_back_at)
 	));
 	if (failed.length > 0) {
@@ -304,15 +326,29 @@ async function run(command: string, args: readonly string[], cwd: string, env: N
 	});
 }
 
-export function stageMigrationNames(names: readonly string[], target: string, alternate: boolean): string[] {
+function isAlternateContract(name: string): boolean {
+	return name === AGE_EXCEPTION_CONTRACT_MIGRATION || name === BRIDGE_EXCEPTION_CONTRACT_MIGRATION;
+}
+function exceptionPath(exception: ObservationException): string {
+	return exception.profile === 'image-bridge-36' ? BRIDGE_EXCEPTION_CONTRACT_MIGRATION : AGE_EXCEPTION_CONTRACT_MIGRATION;
+}
+function scopeForPath(name: string): string {
+	if (name === BRIDGE_EXCEPTION_CONTRACT_MIGRATION) return BRIDGE_EXCEPTION_SCOPE;
+	if (name === AGE_EXCEPTION_CONTRACT_MIGRATION) return OBSERVATION_EXCEPTION_SCOPE;
+	throw new Error('unknown alternate contract migration');
+}
+
+export function stageMigrationNames(names: readonly string[], target: string, alternate: boolean | string): string[] {
 	const selected = names.filter((name) => name <= target && !(alternate && name === CONTRACT_MIGRATION));
+	if (typeof alternate === 'string' && !isAlternateContract(alternate)) throw new Error('unknown alternate contract migration');
 	if (!selected.includes(target)) throw new Error(`release image does not contain ${target}`);
-	if (alternate && target >= CONTRACT_MIGRATION) selected.push(AGE_EXCEPTION_CONTRACT_MIGRATION);
+	if (alternate && target >= CONTRACT_MIGRATION) selected.push(typeof alternate === 'string' ? alternate : AGE_EXCEPTION_CONTRACT_MIGRATION);
 	return selected.sort();
 }
 
-async function exceptionChecksum(): Promise<string> {
-	return createHash('sha256').update(await readFile(join(apiRoot(), 'prisma', 'contract-migration-paths', AGE_EXCEPTION_CONTRACT_MIGRATION, 'migration.sql'))).digest('hex');
+async function exceptionChecksum(path: string): Promise<string> {
+	scopeForPath(path);
+	return createHash('sha256').update(await readFile(join(apiRoot(), 'prisma', 'contract-migration-paths', path, 'migration.sql'))).digest('hex');
 }
 
 async function exceptionReceipt(databaseUrl: string): Promise<ExceptionReceipt | null> {
@@ -329,7 +365,7 @@ async function exceptionReceipt(databaseUrl: string): Promise<ExceptionReceipt |
 			LEFT JOIN release_contract_authorizations a ON a.migration_name = r.migration_name`);
 		if (receipts.length > 1) throw new Error('multiple contract exception receipts are forbidden');
 		const receipt = receipts[0] ?? null;
-		if (receipt && receipt.migration_checksum !== await exceptionChecksum()) throw new Error('release image alternate SQL differs from the applied exception receipt checksum');
+		if (receipt && receipt.migration_checksum !== await exceptionChecksum(receipt.migration_name)) throw new Error('release image alternate SQL differs from the applied exception receipt checksum');
 		return receipt;
 	} finally {
 		await prisma.$disconnect();
@@ -338,21 +374,22 @@ async function exceptionReceipt(databaseUrl: string): Promise<ExceptionReceipt |
 
 async function authorizeObservationException(databaseUrl: string, exception: ObservationException): Promise<void> {
 	validateObservationException(exception);
-	const checksum = await exceptionChecksum();
+	const path = exceptionPath(exception);
+	const checksum = await exceptionChecksum(path);
 	const prisma = createPrismaClientForDatabase(databaseUrl);
 	try {
 		await prisma.$transaction(async (tx) => {
 			await tx.$executeRawUnsafe(`INSERT INTO release_contract_authorizations
 			  (migration_name, exception_id, scope, source_sha, image, actor, run_id, migration_checksum)
 			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (migration_name) DO NOTHING`,
-			AGE_EXCEPTION_CONTRACT_MIGRATION, exception.exceptionId, OBSERVATION_EXCEPTION_SCOPE,
+			path, exception.exceptionId, scopeForPath(path),
 			exception.sourceSha, exception.image, exception.actor, exception.runId, checksum);
 			const matched = await tx.$queryRawUnsafe<{ valid: boolean }[]>(`SELECT (
 			  exception_id = $2 AND scope = $3 AND source_sha = $4 AND image = $5 AND actor = $6
 			  AND run_id = $7 AND migration_checksum = $8 AND consumed_at IS NULL
 			  AND authorized_at <= CURRENT_TIMESTAMP AND expires_at > CURRENT_TIMESTAMP) AS valid
 			  FROM release_contract_authorizations WHERE migration_name = $1 FOR UPDATE`,
-			AGE_EXCEPTION_CONTRACT_MIGRATION, exception.exceptionId, OBSERVATION_EXCEPTION_SCOPE,
+			path, exception.exceptionId, scopeForPath(path),
 			exception.sourceSha, exception.image, exception.actor, exception.runId, checksum);
 			if (matched.length !== 1 || !matched[0]!.valid) throw new Error('existing exception authorization is expired, consumed or bound to a different release; manual review is required');
 		});
@@ -361,7 +398,7 @@ async function authorizeObservationException(databaseUrl: string, exception: Obs
 	}
 }
 
-async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING | typeof PROJECT_CHANGE_MIGRATION | typeof EXCEPTION_PREP_MIGRATION, databaseUrl: string, alternate = false): Promise<void> {
+async function stagedMigrate(target: string, databaseUrl: string, alternate: boolean | string = false): Promise<void> {
 	const root = apiRoot();
 	const sourcePrisma = join(root, 'prisma');
 	const migrationNames = stageMigrationNames((await readdir(join(sourcePrisma, 'migrations'), { withFileTypes: true }))
@@ -373,7 +410,7 @@ async function stagedMigrate(target: typeof PHASE1_MIGRATION_CEILING | typeof PR
 		await cp(join(sourcePrisma, 'schema.prisma'), join(staging, 'prisma', 'schema.prisma'));
 		await cp(join(sourcePrisma, 'migrations', 'migration_lock.toml'), join(staging, 'prisma', 'migrations', 'migration_lock.toml'));
 		for (const name of migrationNames) {
-			await cp(join(sourcePrisma, name === AGE_EXCEPTION_CONTRACT_MIGRATION ? 'contract-migration-paths' : 'migrations', name), join(staging, 'prisma', 'migrations', name), { recursive: true });
+			await cp(join(sourcePrisma, isAlternateContract(name) ? 'contract-migration-paths' : 'migrations', name), join(staging, 'prisma', 'migrations', name), { recursive: true });
 		}
 		await writeFile(join(staging, 'prisma.config.ts'), [
 			// The temporary tree is outside node_modules ancestry; keep its config dependency-free.
@@ -423,16 +460,18 @@ async function main(): Promise<void> {
 		await verifyStorageBucketRegistry(databaseUrl);
 		if (exception && status.contractPath === CONTRACT_MIGRATION) throw new Error('cannot attach an observation exception to an already applied original contract');
 		if (exception && receipt && (receipt.exception_id !== exception.exceptionId || receipt.source_sha !== exception.sourceSha
-			|| receipt.image !== exception.image || receipt.actor !== exception.actor || receipt.run_id !== exception.runId)) {
+			|| receipt.migration_name !== exceptionPath(exception) || receipt.image !== exception.image || receipt.actor !== exception.actor || receipt.run_id !== exception.runId)) {
 			throw new Error('provided exception authorization differs from the applied receipt');
 		}
 		if (exception && !status.contract) {
-			await stagedMigrate(EXCEPTION_PREP_MIGRATION, databaseUrl);
+			await stagedMigrate(exception.profile ? BRIDGE_EXCEPTION_PREP_MIGRATION : EXCEPTION_PREP_MIGRATION, databaseUrl);
 			await authorizeObservationException(databaseUrl, exception);
 		}
-		if (!status.contract || !status.projectChanges) {
-			await stagedMigrate(PROJECT_CHANGE_MIGRATION, databaseUrl, Boolean(exception) || status.contractPath === AGE_EXCEPTION_CONTRACT_MIGRATION);
-		}
+		const latestMigration = (await readdir(join(apiRoot(), 'prisma', 'migrations'), { withFileTypes: true }))
+			.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort().at(-1);
+		if (!latestMigration || latestMigration < PROJECT_CHANGE_MIGRATION) throw new Error('release image is missing current contract migrations');
+		const recordedPath = status.contractPath && isAlternateContract(status.contractPath) ? status.contractPath : false;
+		await stagedMigrate(latestMigration, databaseUrl, exception ? exceptionPath(exception) : recordedPath);
 	}
 
 	rows = await migrationRows(databaseUrl);

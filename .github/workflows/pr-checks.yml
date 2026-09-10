@@ -27,7 +27,7 @@ jobs:
         run: node --test scripts/check-migration-policy.test.mjs
 
       - name: Test two-phase release boundaries
-        run: node server/deployment-boundaries.test.mjs && node server/release-cutover.test.mjs && node --test server/canonical-correction.test.mjs server/release-phase1-video-update.test.mjs server/pages-write-access.test.mjs server/pages-inspection.test.mjs server/release-db-snapshot.test.mjs server/release-snapshot-workflow.test.mjs server/release-online-preflight.test.mjs server/release-observation-exception.test.mjs
+        run: node server/deployment-boundaries.test.mjs && node server/release-cutover.test.mjs && node --test server/canonical-correction.test.mjs server/release-phase1-video-update.test.mjs server/pages-write-access.test.mjs server/pages-inspection.test.mjs server/release-db-snapshot.test.mjs server/release-snapshot-workflow.test.mjs server/release-online-preflight.test.mjs server/release-observation-exception.test.mjs server/resolve-release-image.test.mjs server/release-recovery.test.mjs server/release-smoke-target.test.mjs
 
       - name: Check migration history and review signals
         env:

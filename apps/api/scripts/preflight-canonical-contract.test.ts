@@ -13,3 +13,9 @@ describe('observation age exception CLI', () => {
 		expect(() => parseContractPreflightCli(['--observation-exception-id=reviewed-20260910', '--reset-observation', `--confirm-reset=${CONTRACT_PREFLIGHT_RESET_CONFIRMATION}`])).toThrow('must not reset');
 	});
 });
+
+it('requires a pinned profile paired with named exception', () => {
+ expect(parseContractPreflightCli(['--observation-exception-id=reviewed-20260910', '--exception-profile=image-bridge-36'])).toMatchObject({ exceptionProfile: 'image-bridge-36', observationWindowMs: 0 });
+ expect(() => parseContractPreflightCli(['--exception-profile=image-bridge-36'])).toThrow();
+ expect(() => parseContractPreflightCli(['--observation-exception-id=reviewed-20260910', '--exception-profile=unknown'])).toThrow();
+});

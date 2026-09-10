@@ -24,6 +24,7 @@ type CliOptions = {
 	resetConfirmation?: string;
 	observationExceptionId?: string;
 	observationWindowMs?: number;
+	exceptionProfile?: 'image-bridge-36';
 };
 
 function option(args: readonly string[], name: string): string | undefined {
@@ -37,7 +38,7 @@ export function parseContractPreflightCli(args: readonly string[]): CliOptions {
 	if (!Number.isInteger(headTimeoutMs) || headTimeoutMs < 100 || headTimeoutMs > 60_000) throw new Error('head-timeout-ms must be between 100 and 60000');
 	const known = new Set(['--reset-observation']);
 	for (const arg of args) {
-		if (known.has(arg) || ['inventory-input', 'inventory-output', 'report-output', 'batch-size', 'head-timeout-ms', 'confirm-reset', 'observation-exception-id'].some((name) => arg.startsWith(`--${name}=`))) continue;
+		if (known.has(arg) || ['inventory-input', 'inventory-output', 'report-output', 'batch-size', 'head-timeout-ms', 'confirm-reset', 'observation-exception-id', 'exception-profile'].some((name) => arg.startsWith(`--${name}=`))) continue;
 		throw new Error(`Unknown preflight option: ${arg}`);
 	}
 	const resetObservation = args.includes('--reset-observation');
@@ -49,8 +50,11 @@ export function parseContractPreflightCli(args: readonly string[]): CliOptions {
 	if (observationExceptionId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$/.test(observationExceptionId)) {
 		throw new Error('observation-exception-id must contain 8-128 safe identifier characters');
 	}
+	const exceptionProfile = option(args, 'exception-profile');
+	if (exceptionProfile !== undefined && (exceptionProfile !== 'image-bridge-36' || !observationExceptionId)) throw new Error('exception-profile requires image-bridge-36 and an observation exception ID');
 	if (observationExceptionId && resetObservation) throw new Error('observation exception must not reset metrics');
 	return {
+		...(exceptionProfile ? { exceptionProfile } : {}),
 		...(observationExceptionId ? { observationExceptionId, observationWindowMs: 0 } : {}),
 		...(option(args, 'inventory-input') ? { inventoryInput: resolve(option(args, 'inventory-input')!) } : {}),
 		...(option(args, 'inventory-output') ? { inventoryOutput: resolve(option(args, 'inventory-output')!) } : {}),

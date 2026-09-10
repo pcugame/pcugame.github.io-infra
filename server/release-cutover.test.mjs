@@ -48,7 +48,7 @@ for (const workflow of [webWorkflow, cutover]) {
 }
 const cutoverJob = cutover.slice(cutover.indexOf('  cutover:'));
 assert.match(cutoverJob, /environment: production[\s\S]*Re-verify production control repository and default branch/);
-assert.match(cutoverJob, /Preflight external Pages single-writer boundary before maintenance/);
+assert.match(cutoverJob, /Preflight external Pages target and write access before maintenance/);
 assert.match(cutover, /EXPECTED_IMAGE_REPO: ghcr\.io\/pcugame\/pcu-graduationproject-v2-api/);
 assert.match(cutover, /final_api_image must be an immutable @sha256 digest/);
 assert.match(cutover, /phase1_api_image must be an immutable @sha256 digest/);
@@ -152,7 +152,7 @@ assert.ok(
 assert.ok(phase2Drain < finalWebPublish && finalWebPublish < finalWebGate, 'same-SHA final web must publish after drain and before its exact marker gate');
 assert.ok(finalWebGate < phase2Preflight && phase2Preflight < phase2Contract, 'final web gate must precede contract preflight and DDL');
 assert.ok(phase2Contract < phase2Runtime, 'final runtime must start only after contract DDL');
-assert.match(phase2Block.slice(phase2Drain, phase2Contract), /Test final web[\s\S]*Build final web[\s\S]*Stamp exact cutover commit[\s\S]*peaceiris\/actions-gh-pages@v4/);
+assert.match(cutover, /Test final web[\s\S]*Build final web[\s\S]*Stamp exact cutover commit[\s\S]*Prepare atomic Phase 2 maintenance window[\s\S]*peaceiris\/actions-gh-pages@v4/);
 
 const destructiveBoundary = cutover.indexOf('# DESTRUCTIVE DDL BOUNDARY');
 assert.ok(destructiveBoundary > cutover.indexOf('release-migrate apply-contract'));
@@ -172,7 +172,7 @@ for (const migration of [
 assert.match(releaseMigration, /stagedMigrate\(PHASE1_MIGRATION_CEILING/);
 assert.match(releaseMigration, /assert-runtime requires phase1 or phase2/);
 assert.match(releaseMigration, /phase2 runtime requires complete expand history, the contract migration DB record and project change migration DB record/);
-assert.match(releaseMigration, /stagedMigrate\(PROJECT_CHANGE_MIGRATION/);
+assert.match(releaseMigration, /stagedMigrate\(latestMigration/);
 assert.doesNotMatch(dockerfile, /rm -rf apps\/api\/prisma\/migrations\/20260822000000_canonical_asset_contract/);
 assert.match(deploy, /RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2/);
 assert.match(deploy, /mutation drain marker is absent/);
@@ -214,7 +214,9 @@ assert.match(deploy, /--entrypoint node \\\n\s+"\$API_IMAGE" dist\/server\.js/);
 
 for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(status), `data-plane smoke missing ${status}`);
 assert.match(cutover, /podman stop gp-api[\s\S]*smoke-data-plane\.mjs[\s\S]*podman start gp-api/);
-const forwardFix = cutover.slice(cutover.indexOf('phase2-forward-fix ]; then'), cutover.indexOf('[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]', cutover.indexOf('phase2-forward-fix ]; then')));
+const forwardFixStart = cutover.indexOf('            if [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then');
+assert.ok(forwardFixStart > 0);
+const forwardFix = cutover.slice(forwardFixStart, cutover.indexOf('        env:', forwardFixStart));
 assert.match(forwardFix, /release-assert phase2/);
 assert.doesNotMatch(forwardFix, /rollback_tag|previous_image/);
 
@@ -230,27 +232,12 @@ for (const context of [
 ]) assert.throws(() => assertControlWorkflowIdentity(context));
 
 const pagesBoundaryFixture = {
-	repository: { full_name: 'pcugame/pcugame.github.io', default_branch: 'master', archived: false },
-	authenticatedUser: { login: 'release-bot' },
-	expectedActor: 'release-bot',
-	protection: {
-		enforce_admins: { enabled: true },
-		allow_deletions: { enabled: false },
-		allow_force_pushes: { enabled: true },
-		restrictions: { users: [{ login: 'release-bot' }], teams: [], apps: [] },
-	},
+	repository: { full_name: 'pcugame/pcugame.github.io', default_branch: 'master', archived: false, permissions: { push: true, admin: false } },
 };
 assert.doesNotThrow(() => assertPagesRepositoryBoundary(pagesBoundaryFixture));
 for (const invalidBoundary of [
-	{ ...pagesBoundaryFixture, repository: { ...pagesBoundaryFixture.repository, full_name: 'attacker/pages' } },
-	{ ...pagesBoundaryFixture, authenticatedUser: { login: 'another-writer' } },
-	{ ...pagesBoundaryFixture, protection: { ...pagesBoundaryFixture.protection, enforce_admins: { enabled: false } } },
-	{ ...pagesBoundaryFixture, protection: { ...pagesBoundaryFixture.protection, allow_force_pushes: { enabled: false } } },
-	{ ...pagesBoundaryFixture, protection: { ...pagesBoundaryFixture.protection, restrictions: undefined } },
-	{ ...pagesBoundaryFixture, protection: {
-		...pagesBoundaryFixture.protection,
-		restrictions: { users: [{ login: 'release-bot' }, { login: 'second-writer' }], teams: [], apps: [] },
-	} },
+	{ repository: { ...pagesBoundaryFixture.repository, full_name: 'attacker/pages' } },
+	{ repository: { ...pagesBoundaryFixture.repository, permissions: { push: false } } },
 ]) assert.throws(() => assertPagesRepositoryBoundary(invalidBoundary));
 
 console.log('Two-phase release ordering, artifacts, and rollback fence: OK');
