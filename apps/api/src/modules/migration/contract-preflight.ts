@@ -181,7 +181,7 @@ export type ContractPreflightOptions = {
 	publicBucket?: string;
 	observationWindowMs?: number;
 	observationExceptionId?: string;
-	exceptionProfile?: 'image-bridge-36';
+	exceptionProfile?: 'image-bridge-36' | 'image-bridge-traffic';
 };
 
 export type ContractPreflightReport = {
@@ -206,7 +206,7 @@ export type ContractPreflightReport = {
 	clean: boolean;
 	metricObservationReset: boolean;
 	observationExceptionId?: string;
-	exceptionProfile?: 'image-bridge-36';
+	exceptionProfile?: 'image-bridge-36' | 'image-bridge-traffic';
 };
 
 export const CONTRACT_PREFLIGHT_RESET_CONFIRMATION = 'RESET_LEGACY_BRIDGE_OBSERVATION';
@@ -430,8 +430,9 @@ export async function runContractPreflight(input: {
 	const started = (input.now ?? (() => new Date()))();
 	const options = input.options ?? {};
 	const bridgeProfile = options.exceptionProfile === 'image-bridge-36';
-	if (bridgeProfile && (!options.observationExceptionId || options.resetObservation || options.observationWindowMs !== 0)) {
-		throw new Error('image-bridge-36 requires an observation exception without metric reset');
+	const trafficProfile = options.exceptionProfile === 'image-bridge-traffic';
+	if ((bridgeProfile || trafficProfile) && (!options.observationExceptionId || options.resetObservation || options.observationWindowMs !== 0)) {
+		throw new Error('image bridge exception requires an observation exception without metric reset');
 	}
 	const protectedBucket = options.protectedBucket ?? 'protected';
 	const publicBucket = options.publicBucket ?? 'public';
@@ -556,16 +557,21 @@ export async function runContractPreflight(input: {
 		&& metric.value === 36n && metric.lastObservedAt?.getTime() === Date.parse('2026-09-09T10:37:52.913Z')
 		&& metric.details !== null && typeof metric.details === 'object' && !Array.isArray(metric.details)
 		&& (metric.details as Record<string, unknown>)['usedLegacyLookup'] === false;
+	const traffic = (metric: ContractMetric) => metric.name === 'public_image_legacy_bridge' && metric.scope === 'api-route'
+		&& metric.value > 0n && metric.value <= BigInt(Number.MAX_SAFE_INTEGER)
+		&& metric.details !== null && typeof metric.details === 'object' && !Array.isArray(metric.details)
+		&& (metric.details as Record<string, unknown>)['usedLegacyLookup'] === false;
+	const allowedTraffic = (metric: ContractMetric) => (bridgeProfile && pinned(metric)) || (trafficProfile && traffic(metric));
 	if (bridgeProfile && snapshot.metrics.filter(pinned).length !== 1) unsafeMetrics.push('metric:image-bridge-36:approved-record-mismatch');
 	for (const metric of snapshot.metrics) {
-		if (metric.value !== 0n && !(bridgeProfile && pinned(metric))) unsafeMetrics.push(`metric:${metric.name}:${metric.scope}=${metric.value}`);
+		if (metric.value !== 0n && !allowedTraffic(metric)) unsafeMetrics.push(`metric:${metric.name}:${metric.scope}=${metric.value}`);
 	}
 	for (const name of LEGACY_BRIDGE_METRIC_NAMES) {
 		const rows = snapshot.metrics.filter((metric) => metric.name === name);
 		if (!businessData && !options.observationExceptionId) continue;
 		if (rows.length === 0) unsafeMetrics.push(`metric:${name}:missing`);
 		else for (const metric of rows) {
-			if ((metric.value === 0n || (bridgeProfile && pinned(metric))) && (!metric.lastObservedAt || !Number.isFinite(metric.lastObservedAt.getTime()) || metric.lastObservedAt.getTime() > observationCutoff)) unsafeMetrics.push(`metric:${metric.name}:${metric.scope}:observation-window`);
+			if ((metric.value === 0n || allowedTraffic(metric)) && (!metric.lastObservedAt || !Number.isFinite(metric.lastObservedAt.getTime()) || metric.lastObservedAt.getTime() > observationCutoff)) unsafeMetrics.push(`metric:${metric.name}:${metric.scope}:observation-window`);
 		}
 	}
 	const bridgeMetrics = snapshot.metrics.filter((metric) => LEGACY_BRIDGE_METRIC_NAMES.includes(metric.name as typeof LEGACY_BRIDGE_METRIC_NAMES[number]) && metric.value > 0n);

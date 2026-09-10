@@ -89,10 +89,32 @@ test('online preflight rejects metric reset and arbitrary CLI inputs before runn
   const end = deploy.indexOf('\ndo_contract_preflight()', start);
   const fn = deploy.slice(start, end);
   const run = args => spawnSync('bash', ['-eu', '-c', `${fn}\nrun_release_entry() { echo invoked; }\ndo_online_contract_preflight "$@"`, '--', ...args], { encoding: 'utf8' });
-  assert.equal(run(['--observation-exception-id=reviewed-20260910', '--exception-profile=image-bridge-36']).status, 0);
+  for (const profile of ['image-bridge-36', 'image-bridge-traffic']) assert.equal(run(['--observation-exception-id=reviewed-20260910', `--exception-profile=${profile}`]).status, 0);
   for (const args of [['--reset-observation'], ['--apply'], ['--exception-profile=other'], ['--observation-exception-id=../oops']]) {
     const result = run(args);
     assert.notEqual(result.status, 0);
     assert.doesNotMatch(result.stdout, /invoked/);
   }
+});
+
+
+test('traffic profile requires phase2 and explicit exception authorization', () => {
+  const profile = { EXCEPTION_PROFILE: 'image-bridge-traffic' };
+  assert.equal(authorize({ ...exception, ...profile }).status, 0);
+  for (const invalid of [
+    { OBSERVATION_EXCEPTION_ID: '' }, { OBSERVATION_ATTESTATION: '' },
+    { RELEASE_PHASE: 'release', FINAL_IMAGE: '' }, { RELEASE_PHASE: 'snapshot', FINAL_IMAGE: '' },
+    { RELEASE_PHASE: 'preflight', FINAL_IMAGE: '' }, { RELEASE_PHASE: 'phase1' },
+    { RELEASE_PHASE: 'phase2-forward-fix' },
+  ]) assert.notEqual(authorize({ ...exception, ...profile, ...invalid }).status, 0);
+});
+
+test('traffic and fixed profiles are forwarded exactly across online, drained and migration gates', () => {
+  assert.match(workflow, /options: \[age-only, image-bridge-36, image-bridge-traffic\]/);
+  assert.equal((workflow.match(/preflight_args\+=\("--exception-profile=\$\{EXCEPTION_PROFILE\}"\)/g) ?? []).length, 3);
+  assert.equal((workflow.match(/migration_args\+=\(--exception-profile "\$\{EXCEPTION_PROFILE\}"\)/g) ?? []).length, 2);
+  assert.equal((workflow.match(/EXCEPTION_PROFILE:-age-only\}" = image-bridge-traffic/g) ?? []).length, 3);
+  const build = readFileSync(new URL('../.github/workflows/deploy-api.yml', import.meta.url), 'utf8');
+  assert.match(build, /20260822000003_canonical_asset_contract_image_bridge_traffic\/migration.sql/);
+  assert.match(build, /20260821992000_release_image_bridge_traffic/);
 });

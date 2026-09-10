@@ -478,3 +478,30 @@ it('rejects a bridge profile with reset before any repository mutation', async (
  expect(repository.resetLegacyBridgeObservations).not.toHaveBeenCalled();
  expect(repository.readSnapshot).not.toHaveBeenCalled();
 });
+
+
+describe('canonical image bridge traffic classification', () => {
+	async function run(override = {}, extraMetric = false) {
+		const snapshot = baseSnapshot();
+		snapshot.metrics.push({ name: 'public_image_legacy_bridge', scope: 'api-route', value: 37n, lastObservedAt: now(), details: { usedLegacyLookup: false }, ...override });
+		if (extraMetric) snapshot.metrics.push({ name: 'public_image_legacy_fallback', scope: 'actual-fallback', value: 1n, lastObservedAt: now() });
+		return audit(snapshot, undefined, undefined, { observationExceptionId: 'traffic-20260910', observationWindowMs: 0, exceptionProfile: 'image-bridge-traffic' });
+	}
+	it.each([0n, 1n, 37n, 1000n, BigInt(Number.MAX_SAFE_INTEGER)])('accepts count %s without rewriting the measured count', async (value) => {
+		const { report, repository } = await run({ value });
+		expect(report).toMatchObject({ clean: true, counts: { legacyFallbackReads: Number(value) }, exceptionProfile: 'image-bridge-traffic' });
+		expect(repository.resetLegacyBridgeObservations).not.toHaveBeenCalled();
+	});
+	it.each([{ value: -1n }, { value: BigInt(Number.MAX_SAFE_INTEGER) + 1n }, { scope: 'other' }, { details: { usedLegacyLookup: true } }, { details: { usedLegacyLookup: 'false' } }, { details: null }, { lastObservedAt: null }, { lastObservedAt: new Date('invalid') }, { lastObservedAt: new Date('2027-01-01T00:00:00Z') }])('rejects unsafe signal %#', async (override) => {
+		expect((await run(override)).report.clean).toBe(false);
+	});
+	it('still rejects actual fallback when the last bridge lookup was canonical', async () => {
+		expect((await run({}, true)).report.clean).toBe(false);
+	});
+	it('rejects missing observations and authorizations', async () => {
+		const missing = baseSnapshot();
+		missing.metrics = [];
+		expect((await audit(missing, undefined, undefined, { observationExceptionId: 'traffic-20260910', observationWindowMs: 0, exceptionProfile: 'image-bridge-traffic' })).report.clean).toBe(false);
+		await expect(audit(baseSnapshot(), undefined, undefined, { observationWindowMs: 0, exceptionProfile: 'image-bridge-traffic' })).rejects.toThrow();
+	});
+});

@@ -19,3 +19,10 @@ it('requires a pinned profile paired with named exception', () => {
  expect(() => parseContractPreflightCli(['--exception-profile=image-bridge-36'])).toThrow();
  expect(() => parseContractPreflightCli(['--observation-exception-id=reviewed-20260910', '--exception-profile=unknown'])).toThrow();
 });
+
+
+it('accepts explicitly authorized traffic profile while preserving reset rejection', () => {
+	expect(parseContractPreflightCli(['--observation-exception-id=traffic-20260910', '--exception-profile=image-bridge-traffic'])).toMatchObject({ exceptionProfile: 'image-bridge-traffic', observationWindowMs: 0 });
+	expect(() => parseContractPreflightCli(['--exception-profile=image-bridge-traffic'])).toThrow();
+	expect(() => parseContractPreflightCli(['--observation-exception-id=traffic-20260910', '--exception-profile=image-bridge-traffic', '--reset-observation', `--confirm-reset=${CONTRACT_PREFLIGHT_RESET_CONFIRMATION}`])).toThrow();
+});
