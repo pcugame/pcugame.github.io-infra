@@ -10,6 +10,7 @@ const mocks = {
 	presign: vi.fn(),
 	limit: vi.fn(),
 	warn: vi.fn(),
+	addBan: vi.fn(),
 };
 
 const service = createAssetsService({
@@ -17,7 +18,7 @@ const service = createAssetsService({
 	presign: mocks.presign,
 	wakeDeletionWorker: vi.fn(),
 	loadProjectWithAccess: vi.fn(),
-	downloadLimiter: { check: mocks.limit },
+	downloadLimiter: { add: mocks.addBan, check: mocks.limit },
 	logger: { info: vi.fn(), warn: mocks.warn, error: vi.fn() },
 	repository: {
 		findAssetByIdForDownload: mocks.findById,
@@ -65,7 +66,7 @@ describe('canonical protected asset capability', () => {
 		vi.clearAllMocks();
 		mocks.presign.mockResolvedValue('https://garage.test/signed');
 		mocks.limit.mockReturnValue({ status: 'ok' });
-		mocks.upsertBan.mockResolvedValue(undefined);
+		mocks.upsertBan.mockResolvedValue({ disabledAt: null });
 	});
 
 	it('prefers canonical ORIGINAL and returns only a short redirect capability', async () => {
@@ -203,6 +204,17 @@ describe('canonical protected asset capability', () => {
 		expect(mocks.upsertBan).toHaveBeenCalledWith(
 			'203.0.113.9', 'Protected download IP abuse ceiling exceeded',
 		);
+	});
+
+	it('never installs a memory ban when automatic persistence fails or returns a disabled record', async () => {
+		mocks.findById.mockResolvedValue(asset());
+		mocks.limit.mockReturnValue({ status: 'abuse_ceiling' });
+		mocks.upsertBan.mockRejectedValueOnce(new Error('database unavailable'));
+		await expect(service.downloadAssetById(42, 'original', '192.0.2.1', { id: 1, role: 'USER' })).rejects.toThrow('database unavailable');
+		expect(mocks.addBan).not.toHaveBeenCalled();
+		mocks.upsertBan.mockResolvedValueOnce({ disabledAt: new Date() });
+		await expect(service.downloadAssetById(42, 'original', '192.0.2.1', { id: 1, role: 'USER' })).rejects.toMatchObject({ statusCode: 429 });
+		expect(mocks.addBan).not.toHaveBeenCalled();
 	});
 
 	it('keeps the Fastify graph free of object-body reads and relays', async () => {

@@ -184,6 +184,7 @@ services:
       EXPORT_WORKER_MAX_JOB_BYTES: "34359738368"
       S3_PUBLIC_SIGNING_ENDPOINT: http://localhost:3905
       S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: http://localhost:3906
+      DOWNLOAD_AUTO_IP_BAN_ENABLED: "false"
       <<: *s3-env
     ports:
       - "4000:4000"

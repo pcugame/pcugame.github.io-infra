@@ -8,6 +8,7 @@ export { changeRequestApi, adminChangeRequestApi } from './change-requests';
 export type { ChangeRequestKind, ChangeRequestChanges } from './change-requests';
 export type {
   BannedIpItem,
+  CreateBannedIpRequest,
   SiteSettingsData,
   ImportPreviewResult,
   ImportPreviewExhibition,

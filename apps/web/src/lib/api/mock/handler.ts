@@ -38,12 +38,25 @@ const MOCK_SETTINGS = {
 	maxChunkSizeMb: 10,
 };
 
-const MOCK_BANNED_IPS = [
+type MockBannedIp = {
+	id: number;
+	ip: string;
+	reason: string;
+	createdAt: string;
+	source: 'AUTO' | 'MANUAL' | 'LEGACY';
+	active: boolean;
+	disabledAt: string | null;
+};
+
+const MOCK_BANNED_IPS: MockBannedIp[] = [
 	{
 		id: 1,
 		ip: '203.0.113.42',
 		reason: 'Mock download rate limit exceeded',
 		createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+		source: 'MANUAL' as const,
+		active: true,
+		disabledAt: null,
 	},
 ];
 
@@ -337,15 +350,38 @@ const routes: MockRoute[] = [
 	// ── Admin Banned IPs ──
 	{
 		pattern: /^\/api\/admin\/banned-ips$/,
-		handler: () => {
+		handler: (_match, method, options) => {
 			requireAdmin();
+			if (method === 'POST') {
+				const body = options.body as { ip?: string; reason?: string } | undefined;
+				const ip = body?.ip?.trim();
+				if (!ip) throw new Error('Mock: IP address is required');
+				const item = {
+					id: Math.max(0, ...MOCK_BANNED_IPS.map((entry) => entry.id)) + 1,
+					ip,
+					reason: body?.reason?.trim() ?? '',
+					createdAt: new Date().toISOString(),
+					source: 'MANUAL' as const,
+					active: true,
+					disabledAt: null,
+				};
+				MOCK_BANNED_IPS.unshift(item);
+				return item;
+			}
 			return { items: MOCK_BANNED_IPS };
 		},
 	},
 	{
 		pattern: /^\/api\/admin\/banned-ips\/([^/]+)$/,
-		handler: () => {
+		handler: (match, method) => {
 			requireAdmin();
+			if (method === 'DELETE') {
+				const item = MOCK_BANNED_IPS.find((entry) => entry.id === Number(match[1]));
+				if (item) {
+					item.active = false;
+					item.disabledAt = new Date().toISOString();
+				}
+			}
 			return undefined;
 		},
 	},

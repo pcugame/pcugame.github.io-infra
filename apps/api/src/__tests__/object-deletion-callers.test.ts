@@ -33,6 +33,7 @@ function assetDeletionHarness() {
 		wakeDeletionWorker,
 		loadProjectWithAccess: vi.fn().mockResolvedValue(undefined),
 		downloadLimiter: {
+		add: vi.fn(),
 			loadBannedIps: vi.fn(),
 			check: vi.fn().mockReturnValue('ok' as const),
 		},

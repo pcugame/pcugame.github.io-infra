@@ -590,13 +590,20 @@ model AuthSession {
   @@map("auth_sessions")
 }
 
-/// IP addresses permanently banned from downloading protected assets.
-/// Auto-banned when download rate limit is exceeded; admins can unban.
+enum BannedIpSource {
+  AUTO
+  MANUAL
+  LEGACY
+}
+
+/// Protected-download IP/CIDR blocks, retaining source and deactivation history.
 model BannedIp {
-  id        Int      @id @default(autoincrement())
-  ip        String   @unique
-  reason    String   @default("")
-  createdAt DateTime @default(now()) @map("created_at")
+  id         Int            @id @default(autoincrement())
+  ip         String         @unique
+  reason     String         @default("")
+  source     BannedIpSource @default(LEGACY)
+  disabledAt DateTime?      @map("disabled_at")
+  createdAt  DateTime       @default(now()) @map("created_at")
 
   @@map("banned_ips")
 }

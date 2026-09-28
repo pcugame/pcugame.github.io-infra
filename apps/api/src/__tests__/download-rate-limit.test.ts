@@ -5,7 +5,7 @@ import { AppError } from '../shared/errors.js';
 describe('DownloadRateLimiter', () => {
 	const limiters: DownloadRateLimiter[] = [];
 	const create = (options?: ConstructorParameters<typeof DownloadRateLimiter>[0]) => {
-		const limiter = new DownloadRateLimiter(options);
+		const limiter = new DownloadRateLimiter({ autoIpBanEnabled: true, ...options });
 		limiters.push(limiter);
 		return limiter;
 	};
@@ -44,16 +44,38 @@ describe('DownloadRateLimiter', () => {
 		expect(limiter.isBanned('203.0.113.3')).toBe(false);
 	});
 
-	it('signals and caches a ban only when the much higher IP abuse ceiling is crossed', () => {
+	it('signals a ban and caches only after persistence when when the much higher IP abuse ceiling is crossed', () => {
 		const limiter = create({ maxHits: 1, maxIpHits: 3, windowMs: 60_000 });
 		expect(limiter.check('203.0.113.4', 'user:1')).toEqual({ status: 'ok' });
 		expect(limiter.check('203.0.113.4', 'user:2')).toEqual({ status: 'ok' });
 		expect(limiter.check('203.0.113.4', 'user:3')).toEqual({ status: 'ok' });
 		expect(limiter.check('203.0.113.4', 'user:4')).toEqual({ status: 'abuse_ceiling' });
-		expect(limiter.isBanned('203.0.113.4')).toBe(true);
+		expect(limiter.isBanned('203.0.113.4')).toBe(false);
+		limiter.addBan('203.0.113.4');
 		expect(() => limiter.check('203.0.113.4', 'user:5')).toThrowError(
 			expect.objectContaining({ statusCode: 403, code: 'IP_BANNED' }),
 		);
+	});
+
+	it('does not count or ban IPs after 3,001 requests with auto bans off', () => {
+		const limiter = create({ autoIpBanEnabled: false });
+		for (let index = 0; index < 3001; index++) {
+			expect(limiter.check('203.0.113.9', 'user:1').status).toBe(index < 30 ? 'ok' : 'rate_limited');
+		}
+		expect(limiter._ipBucketSize()).toBe(0);
+		expect(limiter._bannedSize()).toBe(0);
+		expect(limiter.check('::ffff:203.0.113.9', 'user:2')).toEqual({ status: 'ok' });
+	});
+
+	it('retains equivalent legacy bans and overlapping ranges when one is removed', () => {
+		const limiter = create();
+		limiter.loadBannedIps(['::ffff:192.0.2.1', '192.0.2.1', '192.0.2.0/24']);
+		limiter.removeBan('192.0.2.1');
+		expect(limiter.isBanned('192.0.2.1')).toBe(true);
+		limiter.removeBan('::ffff:192.0.2.1');
+		expect(limiter.isBanned('192.0.2.1')).toBe(true);
+		limiter.removeBan('192.0.2.0/24');
+		expect(limiter.isBanned('192.0.2.1')).toBe(false);
 	});
 
 	it('honors loaded manual bans before creating buckets', () => {

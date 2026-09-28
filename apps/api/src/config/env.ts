@@ -66,6 +66,7 @@ const envSchema = z
     // ── Rate limits (req per window, per client IP) ──────────
     // Global baseline for every route not explicitly allowlisted. Kept permissive
     // so legitimate traffic (page-of-projects listing, thumbnails) never trips it.
+    DOWNLOAD_AUTO_IP_BAN_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
     RATE_LIMIT_GLOBAL_MAX: z.coerce.number().int().positive().default(300),
     RATE_LIMIT_GLOBAL_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
     // Login endpoint — tight because credential stuffing is the common abuse.

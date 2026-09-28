@@ -82,6 +82,7 @@ function portHarness(initialBans: string[] = []) {
 		id: index + 1,
 		ip,
 		reason: 'existing ban',
+		source: 'LEGACY' as const, disabledAt: null,
 		createdAt: new Date('2026-07-22T00:00:00.000Z'),
 	}));
 	const calls = {
@@ -101,6 +102,7 @@ function portHarness(initialBans: string[] = []) {
 				id: bans.length + 1,
 				ip,
 				reason,
+				source: 'LEGACY' as const, disabledAt: null,
 				createdAt: new Date('2026-07-22T00:00:00.000Z'),
 			};
 			bans.push(record);
@@ -130,6 +132,7 @@ function portHarness(initialBans: string[] = []) {
 			findAllBannedIps: calls.bannedList,
 			findBannedIpById: calls.bannedFindById,
 			deleteBannedIp: calls.bannedDelete,
+			createManualBan: vi.fn(),
 		},
 		projectAccessRepository,
 		projectAccess: createProjectAccessService(projectAccessRepository),

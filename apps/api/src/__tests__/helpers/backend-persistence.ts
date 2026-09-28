@@ -73,7 +73,7 @@ export function createScriptedBackendPersistence(
 		},
 		assetsRepository: {
 			findAssetByIdForDownload: async () => null,
-			upsertBannedIp: async () => undefined,
+			upsertBannedIp: async () => ({ disabledAt: null }),
 			findAssetByIdWithProject: async () => null,
 			claimAssetForDeletion: async () => null,
 			completeAssetDeletion: async () => undefined,
@@ -83,6 +83,7 @@ export function createScriptedBackendPersistence(
 			findAllBannedIps: async () => [],
 			findBannedIpById: async () => null,
 			deleteBannedIp: async () => undefined,
+			createManualBan: async () => { throw new Error("Not configured"); },
 		},
 		importRepository: {
 			findExhibitionForPreview: async () => null,

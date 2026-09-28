@@ -1,3 +1,4 @@
+import { createBanMutationQueue } from '../../shared/ban-mutation-queue.js';
 import type { FastifyPluginAsync } from 'fastify';
 import type { AppLogger, Clock } from '../../application/ports.js';
 import type { ProtectedDownloadPresigner } from '../../lib/storage.js';
@@ -23,7 +24,7 @@ export interface AssetsBannedProductionGraph {
 }
 
 export interface AssetsBannedProductionDependencies {
-	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED' | 'S3_PRESIGN_TTL_SEC'>;
+	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED' | 'S3_PRESIGN_TTL_SEC' | 'DOWNLOAD_AUTO_IP_BAN_ENABLED'>;
 	assetsRepository: AssetsServiceDependencies['repository'] & {
 		findAllBannedIps(): Promise<{ ip: string }[]>;
 	};
@@ -45,8 +46,10 @@ export function createAssetsBannedProductionGraph(
 	deps: AssetsBannedProductionDependencies,
 ): AssetsBannedProductionGraph {
 	const gate = createBannedIpStartupGate(deps.downloadLimiter);
+	const mutateBan = createBanMutationQueue();
 
 	const assetsService = createAssetsService({
+		mutateBan,
 		presignTtlSec: deps.config.S3_PRESIGN_TTL_SEC,
 		presign: (bucket, key, options) => deps.protectedDownloadPresigner.presign(bucket, key, options),
 		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
@@ -56,8 +59,10 @@ export function createAssetsBannedProductionGraph(
 		repository: deps.assetsRepository,
 	});
 	const bannedIpService = createBannedIpService({
+		mutateBan,
 		repository: deps.bannedIpRepository,
-		banCache: { remove: gate.remove },
+		autoIpBanEnabled: deps.config.DOWNLOAD_AUTO_IP_BAN_ENABLED,
+		banCache: { add: gate.add, remove: gate.remove },
 	});
 
 	return {
@@ -65,6 +70,7 @@ export function createAssetsBannedProductionGraph(
 		bannedIpController: createBannedIpController({ service: bannedIpService }),
 		warmup: createBannedIpWarmup({
 			repository: deps.assetsRepository,
+			autoIpBanEnabled: deps.config.DOWNLOAD_AUTO_IP_BAN_ENABLED,
 			gate,
 			logger: deps.logger,
 		}),
