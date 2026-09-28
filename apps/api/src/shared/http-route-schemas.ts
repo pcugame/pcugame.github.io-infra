@@ -14,6 +14,7 @@ import {
 	AdminProjectListResponseSchema,
 	ApiErrorResponseSchema,
 	BannedIpListResponseSchema,
+	BannedIpItemSchema,
 	BulkDeleteResponseSchema,
 	BulkStatusResponseSchema,
 	CreateExhibitionResponseSchema,
@@ -707,6 +708,13 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		querystring: EmptyObjectSchema,
 		body: NoBodySchema,
 		response: jsonResponse(BannedIpListResponseSchema),
+	}),
+	contract({
+		method: 'POST', url: '/api/admin/banned-ips', family: 'admin-banned-ips',
+		bodyBoundary: 'json', responseBoundary: 'json', params: EmptyObjectSchema,
+		querystring: EmptyObjectSchema,
+		body: z.object({ ip: z.string().trim().min(1).max(128), reason: z.string().trim().min(1).max(1000) }).strict(),
+		response: jsonResponse(BannedIpItemSchema, 201),
 	}),
 	contract({
 		method: 'DELETE',

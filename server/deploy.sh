@@ -991,6 +991,7 @@ do_up() {
     "${ca_args[@]}" \
     -e "PORT=4000" \
     -e "TRUST_PROXY=${TRUST_PROXY:-1}" \
+    -e "DOWNLOAD_AUTO_IP_BAN_ENABLED=${DOWNLOAD_AUTO_IP_BAN_ENABLED:-false}" \
     -e "DATABASE_URL=${db_url}" \
     -e "SESSION_COOKIE_NAME=${SESSION_COOKIE_NAME:-sid}" \
     -e "SESSION_IDLE_MS=${SESSION_IDLE_MS:-7200000}" \

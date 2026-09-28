@@ -53,6 +53,7 @@ export type {
 	UpdateMemberRequest,
 	UpdateProjectRequest,
 	BannedIpItem,
+	CreateBannedIpRequest,
 	BannedIpListResponse,
 	SiteSettingsData,
 	UpdateSiteSettingsRequest,
@@ -82,6 +83,7 @@ export type {
 export {
 	DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE,
 	DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX,
+	normalizeIpTarget,
 } from '@pcu/contracts';
 export * from './schemas';
 

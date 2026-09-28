@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { BannedIpListResponse } from '@pcu/contracts';
+import type { BannedIpListResponse, CreateBannedIpRequest } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { parseIntParam } from '../../../shared/validation.js';
 import { requireRole } from '../../../plugins/auth.js';
@@ -19,6 +19,14 @@ export function createBannedIpController(deps: BannedIpControllerDependencies): 
 			async (_request, reply) => {
 				const items = await deps.service.listBannedIps();
 				sendOk<BannedIpListResponse>(reply, { items });
+			},
+		);
+
+		app.post<{ Body: CreateBannedIpRequest }>(
+			'/banned-ips',
+			{ preHandler: requireRole('ADMIN', 'OPERATOR') },
+			async (request, reply) => {
+				sendOk(reply, await deps.service.registerBannedIp(request.body), 201);
 			},
 		);
 

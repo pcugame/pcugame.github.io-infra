@@ -306,7 +306,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs
+          source: server/deploy.sh,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs,server/ip-ban-audit.sh
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
           overwrite: true
@@ -524,6 +524,7 @@ jobs:
               # Runtime/receipt assertion rejects a Phase 1 DB before downtime.
               "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
               "${DEPLOY_DIR}/deploy.sh" release-assert phase2
+              bash "${DEPLOY_DIR}/ip-ban-audit.sh" before
               bash "${DEPLOY_DIR}/release-db-snapshot.sh" "${RELEASE_SOURCE_SHA}"
               node "${DEPLOY_DIR}/release-recovery.mjs" capture "$RELEASE_RUN_KEY"
               "${DEPLOY_DIR}/deploy.sh" drain
@@ -773,6 +774,7 @@ jobs:
             "${DEPLOY_DIR}/deploy.sh" release-migrate status
 
             SMOKE_PUBLIC_OBJECT_URL="$(node "${DEPLOY_DIR}/release-smoke-target.mjs" read "$RELEASE_SOURCE_SHA")"
+            bash "${DEPLOY_DIR}/ip-ban-audit.sh" after
             node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
             podman stop gp-api --time 30
             trap 'podman start gp-api >/dev/null 2>&1 || true' EXIT

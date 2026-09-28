@@ -425,6 +425,9 @@ export const SiteSettingsDataSchema = z.object({
 }).strict();
 
 export const BannedIpItemSchema = z.object({
+	source: z.enum(['AUTO', 'MANUAL', 'LEGACY']),
+	active: z.boolean(),
+	disabledAt: IsoDateTimeSchema.nullable(),
 	id: PositiveIntegerSchema,
 	ip: z.string().min(1),
 	reason: z.string(),

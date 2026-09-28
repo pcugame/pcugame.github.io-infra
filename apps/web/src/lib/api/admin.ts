@@ -18,6 +18,8 @@ import type {
   UpdateMemberRequest,
   SwapProjectMembersRequest,
   BannedIpListResponse,
+  BannedIpItem,
+  CreateBannedIpRequest,
   SiteSettingsData,
   UpdateSiteSettingsRequest,
   ImportPreviewResult,
@@ -192,6 +194,10 @@ export const adminSettingsApi = {
 export const adminBannedIpApi = {
   list() {
     return api.get<BannedIpListResponse>('/api/admin/banned-ips');
+  },
+
+  create(body: CreateBannedIpRequest) {
+    return api.post<BannedIpItem>('/api/admin/banned-ips', body);
   },
 
   unban(id: number) {

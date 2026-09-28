@@ -1,3 +1,4 @@
+import { normalizeIpTarget } from '@pcu/contracts';
 import { normalizeProjectVideoOrder } from './video-order.js';
 import {
 	Prisma,
@@ -270,17 +271,23 @@ export function createAssetsRepository(
 		},
 
 		/** Upsert a banned IP record */
-		upsertBannedIp(ip: string, reason: string) {
+		async upsertBannedIp(ip: string, reason: string) {
+			// Historical mapped/expanded addresses may not use canonical storage.
+			// Never recreate an automatic ban for an equivalent deactivated target.
+			const disabled = await client.bannedIp.findMany({ where: { disabledAt: { not: null } } });
+			for (const record of disabled) {
+				try { if (normalizeIpTarget(record.ip) === ip) return record; } catch { /* Unrelated legacy input. */ }
+			}
 			return client.bannedIp.upsert({
 				where: { ip },
-				create: { ip, reason },
+				create: { ip, reason, source: 'AUTO' },
 				update: {},
 			});
 		},
 
 		/** Load all banned IPs (for in-memory cache init) */
 		findAllBannedIps() {
-			return client.bannedIp.findMany({ select: { ip: true } });
+			return client.bannedIp.findMany({ select: { ip: true, source: true, disabledAt: true } });
 		},
 	};
 }

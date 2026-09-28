@@ -1,4 +1,5 @@
-import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/contracts';
+import type { createBanMutationQueue } from '../../shared/ban-mutation-queue.js';
+import { attachmentContentDisposition, buildGameDownloadFilename, normalizeIpTarget } from '@pcu/contracts';
 import type { AssetKind, UserRole } from '@pcu/contracts';
 import type { Actor } from '../../application/http-input.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
@@ -60,6 +61,7 @@ interface AssetDeletionClaim {
 }
 
 export interface AssetsServiceDependencies {
+	mutateBan?: ReturnType<typeof createBanMutationQueue>;
 	presignTtlSec?: number;
 	presign(
 		bucket: string,
@@ -69,6 +71,7 @@ export interface AssetsServiceDependencies {
 	wakeDeletionWorker(): void;
 	loadProjectWithAccess(actor: Actor, projectId: number): Promise<unknown>;
 	downloadLimiter: {
+		add(ip: string): void;
 		check(ip: string, principalScope?: string): DownloadRateLimitResult | 'ok' | 'ban';
 	};
 	logger: {
@@ -78,7 +81,7 @@ export interface AssetsServiceDependencies {
 	};
 	repository: {
 		findAssetByIdForDownload(id: number): Promise<ProtectedAssetDownloadRecord | null>;
-		upsertBannedIp(ip: string, reason: string): Promise<unknown>;
+		upsertBannedIp(ip: string, reason: string): Promise<{ disabledAt: Date | null }>;
 		findAssetByIdWithProject(id: number): Promise<AssetDeletionLookup | null>;
 		claimAssetForDeletion(id: number, actor?: Actor): Promise<AssetDeletionClaim | null>;
 		completeAssetDeletion(
@@ -90,6 +93,7 @@ export interface AssetsServiceDependencies {
 
 export interface BannedIpStartupGate {
 	warm(ips: string[]): void;
+	add(ip: string): void;
 	remove(ip: string): void;
 	check(ip: string, principalScope?: string): DownloadRateLimitResult;
 	isReady(): boolean;
@@ -102,6 +106,7 @@ export interface BannedIpStartupGate {
  */
 export function createBannedIpStartupGate(limiter: {
 	loadBannedIps(ips: string[]): void;
+	addBan(ip: string): void;
 	removeBan(ip: string): void;
 	check(ip: string, principalScope?: string): DownloadRateLimitResult;
 }): BannedIpStartupGate {
@@ -111,6 +116,7 @@ export function createBannedIpStartupGate(limiter: {
 			limiter.loadBannedIps(ips);
 			ready = true;
 		},
+		add: (ip) => limiter.addBan(ip),
 		remove: (ip) => limiter.removeBan(ip),
 		check(ip, principalScope) {
 			if (!ready) {
@@ -128,7 +134,8 @@ export function createBannedIpStartupGate(limiter: {
 
 /** Explicit startup owner. A DB failure is fatal and remains rejected. */
 export function createBannedIpWarmup(deps: {
-	repository: { findAllBannedIps(): Promise<{ ip: string }[]> };
+	repository: { findAllBannedIps(): Promise<{ ip: string; source?: string; disabledAt?: Date | null }[]> };
+	autoIpBanEnabled?: boolean;
 	gate: Pick<BannedIpStartupGate, 'warm'>;
 	logger: { info(value: unknown, message?: string): void; error(value: unknown, message?: string): void };
 }): { start(): Promise<void> } {
@@ -137,7 +144,7 @@ export function createBannedIpWarmup(deps: {
 		start() {
 			startPromise ??= (async () => {
 				try {
-					const banned = await deps.repository.findAllBannedIps();
+					const banned = (await deps.repository.findAllBannedIps()).filter((row) => !row.disabledAt && (row.source !== 'AUTO' || deps.autoIpBanEnabled));
 					deps.gate.warm(banned.map(({ ip }) => ip));
 					deps.logger.info({ count: banned.length }, 'Loaded banned IP cache');
 				} catch (error) {
@@ -178,6 +185,7 @@ async function grantProtectedAssetDownload(
 	}
 	const representation = resolveDownloadRepresentation(asset, variant);
 
+	clientIp = normalizeIpTarget(clientIp);
 	const principalScope = user
 		? `user:${user.id}:${action}:${asset.id}`
 		: `anonymous:${clientIp}:${action}:${asset.id}`;
@@ -191,8 +199,14 @@ async function grantProtectedAssetDownload(
 		);
 	}
 	if (result === 'ban' || (result !== 'ok' && result.status === 'abuse_ceiling')) {
-		await deps.repository.upsertBannedIp(clientIp, 'Protected download IP abuse ceiling exceeded')
-			.catch((err) => deps.logger.error({ err }, 'Failed to persist IP ban'));
+		const persist = async () => {
+			const record = await deps.repository.upsertBannedIp(clientIp, 'Protected download IP abuse ceiling exceeded');
+			if (record.disabledAt !== null) {
+				throw new AppError(429, 'Too many protected download requests. Try again later.', 'RATE_LIMITED');
+			}
+			deps.downloadLimiter.add(clientIp);
+		};
+		await (deps.mutateBan ? deps.mutateBan(persist) : persist());
 		throw forbidden('Your IP has been blocked due to excessive download requests. Contact an administrator.');
 	}
 

@@ -24,6 +24,7 @@ export const defaultTestEnv = {
 	WEB_PUBLIC_URL: 'http://localhost:5173',
 	LOG_LEVEL: 'silent',
 	TRUST_PROXY: 'false',
+	DOWNLOAD_AUTO_IP_BAN_ENABLED: false,
 	RATE_LIMIT_GLOBAL_MAX: 300,
 	RATE_LIMIT_GLOBAL_WINDOW_MS: 60_000,
 	RATE_LIMIT_LOGIN_MAX: 20,

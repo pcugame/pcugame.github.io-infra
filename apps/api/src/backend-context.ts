@@ -376,7 +376,7 @@ const defaultFactories: ProductionResourceFactories = {
 	settings: (client, logger) => createPrismaSettingsStore(client, logger),
 	uploadLimiter: (config) => createUploadLimiterPort(config.UPLOAD_MAX_CONCURRENT),
 	lifecycle: (clock, scheduler) => createLifecyclePort(clock, scheduler),
-	protectedDownloads: (clock, scheduler) => createProtectedDownloadLimiter({ clock, scheduler }),
+	protectedDownloads: (clock, scheduler, config) => createProtectedDownloadLimiter({ clock, scheduler, autoIpBanEnabled: config.DOWNLOAD_AUTO_IP_BAN_ENABLED }),
 	routes: loadProductionRoutes,
 };
 

@@ -5,6 +5,7 @@
  * users share one ordinary download bucket.
  */
 
+import { normalizeIpTarget, compileIpTarget } from '@pcu/contracts';
 import { AppError } from './errors.js';
 
 interface BucketEntry {
@@ -25,6 +26,7 @@ export interface RateLimitScheduler {
 }
 
 export interface DownloadRateLimiterOptions {
+	autoIpBanEnabled?: boolean;
 	windowMs?: number;
 	maxHits?: number;
 	maxIpHits?: number;
@@ -41,7 +43,8 @@ const SWEEP_INTERVAL_MS = 5 * 60 * 1000;   // cleanup every 5 minutes
 export class DownloadRateLimiter {
 	private principalBuckets = new Map<string, BucketEntry>();
 	private ipBuckets = new Map<string, BucketEntry>();
-	private bannedIps = new Set<string>();
+	private bannedIps = new Map<string, (address: string) => boolean>();
+	private readonly autoIpBanEnabled: boolean;
 	private readonly windowMs: number;
 	private readonly maxHits: number;
 	private readonly maxIpHits: number;
@@ -52,6 +55,7 @@ export class DownloadRateLimiter {
 	private closed = false;
 
 	constructor(opts: DownloadRateLimiterOptions = {}) {
+		this.autoIpBanEnabled = opts.autoIpBanEnabled ?? false;
 		this.windowMs = opts.windowMs ?? DEFAULT_WINDOW_MS;
 		this.maxHits = opts.maxHits ?? DEFAULT_MAX_HITS;
 		this.maxIpHits = opts.maxIpHits ?? Math.max(DEFAULT_MAX_IP_HITS, this.maxHits * 100);
@@ -76,13 +80,13 @@ export class DownloadRateLimiter {
 	/** Load banned IPs from DB on startup. */
 	loadBannedIps(ips: string[]): void {
 		this.assertOpen();
-		this.bannedIps = new Set(ips);
+		this.bannedIps = new Map(ips.map((ip) => [ip, compileIpTarget(ip)]));
 	}
 
 	/** Add an IP to the in-memory ban cache (called after DB write). */
 	addBan(ip: string): void {
 		this.assertOpen();
-		this.bannedIps.add(ip);
+		this.bannedIps.set(ip, compileIpTarget(ip));
 		this.ipBuckets.delete(ip);
 	}
 
@@ -95,7 +99,7 @@ export class DownloadRateLimiter {
 	/** Check if IP is banned. */
 	isBanned(ip: string): boolean {
 		this.assertOpen();
-		return this.bannedIps.has(ip);
+		return [...this.bannedIps.values()].some((matches) => matches(ip));
 	}
 
 	/**
@@ -106,12 +110,14 @@ export class DownloadRateLimiter {
 	 * - If the IP abuse ceiling is exceeded → returns a durable-ban signal.
 	 * - Otherwise records the hit and returns 'ok'.
 	 */
-	check(ip: string, principalScope = `anonymous:${ip}`): DownloadRateLimitResult {
+	check(ip: string, principalScope?: string): DownloadRateLimitResult {
 		this.assertOpen();
-		if (this.bannedIps.has(ip)) {
+		ip = normalizeIpTarget(ip);
+		principalScope ??= `anonymous:${ip}`;
+		if (this.isBanned(ip)) {
 			throw new AppError(
 				403,
-				'Your IP has been blocked due to excessive download requests.',
+				'Downloads from your IP address are blocked.',
 				'IP_BANNED',
 			);
 		}
@@ -119,15 +125,14 @@ export class DownloadRateLimiter {
 		const now = this.clock.now().getTime();
 		const cutoff = now - this.windowMs;
 
-		const ipEntry = this.liveBucket(this.ipBuckets, ip, cutoff);
-		if (ipEntry.timestamps.length >= this.maxIpHits) {
-			this.bannedIps.add(ip);
-			this.ipBuckets.delete(ip);
-			return { status: 'abuse_ceiling' };
+		if (this.autoIpBanEnabled) {
+			const ipEntry = this.liveBucket(this.ipBuckets, ip, cutoff);
+			if (ipEntry.timestamps.length >= this.maxIpHits) {
+				// Persistence owner installs the ban only after a successful DB write.
+				return { status: 'abuse_ceiling' };
+			}
+			ipEntry.timestamps.push(now);
 		}
-		// Count authorized attempts, including attempts already throttled at the
-		// principal level, so repeated abuse cannot evade the IP ceiling.
-		ipEntry.timestamps.push(now);
 
 		const principalEntry = this.liveBucket(this.principalBuckets, principalScope, cutoff);
 		if (principalEntry.timestamps.length >= this.maxHits) {

@@ -122,3 +122,6 @@ export * from './response-schemas.js';
 
 export * from './project-changes.js';
 export * from './project-change-schemas.js';
+
+export { normalizeIpTarget, compileIpTarget } from './ip-target.js';
+export type { CreateBannedIpRequest, BannedIpSource } from './admin-settings.js';
