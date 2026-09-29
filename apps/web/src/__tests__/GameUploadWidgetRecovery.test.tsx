@@ -112,7 +112,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 			</QueryClientProvider>,
 		);
 
-		await screen.findByRole('button', { name: '취소 (세션 삭제)' });
+		await screen.findByRole('button', { name: '일시 정지' });
 		fireEvent.click(screen.getByRole('button', { name: '취소 (세션 삭제)' }));
 		await waitFor(() => expect(controls.cancel).toHaveBeenCalledOnce());
 		expect(controls.cancel).toHaveBeenCalledWith('game-cancel');
@@ -304,7 +304,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 			</QueryClientProvider>,
 		);
 
-		await screen.findByRole('button', { name: '취소 (세션 삭제)' });
+		await screen.findByRole('button', { name: '일시 정지' });
 		fireEvent.click(screen.getByRole('button', { name: '취소 (세션 삭제)' }));
 		await waitFor(() => expect(controls.getStatus).toHaveBeenCalledWith('game-cancelled'));
 		await waitFor(() => expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME')).toBeNull());
@@ -330,7 +330,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 			</QueryClientProvider>,
 		);
 
-		await screen.findByRole('button', { name: '취소 (세션 삭제)' });
+		await screen.findByRole('button', { name: '일시 정지' });
 		fireEvent.click(screen.getByRole('button', { name: '취소 (세션 삭제)' }));
 		await waitFor(() => expect(controls.waitReady).toHaveBeenCalledWith('game-cancel-verifying', { signal: expect.any(AbortSignal) }));
 		expect(await screen.findByText('업로드 완료')).toBeTruthy();
@@ -396,7 +396,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 			</QueryClientProvider>,
 		);
 
-		await screen.findByRole('button', { name: '취소 (세션 삭제)' });
+		await screen.findByRole('button', { name: '일시 정지' });
 		fireEvent.click(screen.getByRole('button', { name: '취소 (세션 삭제)' }));
 		expect(options?.signal.aborted).toBe(true);
 		expect(controls.cancel).not.toHaveBeenCalled();

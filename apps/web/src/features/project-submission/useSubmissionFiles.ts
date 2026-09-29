@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, RefObject } from 'react';
 
 import type { ClientUploadLimits, MaterialUploadLimits } from '../../lib/upload-limits';
+import type { ProjectUploadKind } from '../../lib/upload/project-files';
 import {
 	findOversizedAssetFile,
 	formatFileSizeMb,
@@ -45,12 +46,18 @@ export interface SubmissionFilesState {
 	handleVideoChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleDocumentsChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleAttachmentsChange: (e: ChangeEvent<HTMLInputElement>) => void;
+	selectPoster: (file: File | null) => boolean;
+	addFiles: (files: readonly { kind: Exclude<ProjectUploadKind, 'POSTER'>; file: File }[]) => boolean;
+	removeFile: (kind: ProjectUploadKind, file: File) => void;
 }
 
 const mb = 1024 * 1024;
 const MAX_PROJECT_VIDEOS = 5;
 
-export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFilesParams): SubmissionFilesState {
+export function useSubmissionFiles({
+	limits,
+	materialLimits,
+}: UseSubmissionFilesParams): SubmissionFilesState {
 	const [posterFile, setPosterFile] = useState<File | null>(null);
 	const [imageFiles, setImageFiles] = useState<File[]>([]);
 	const [gameFile, setGameFile] = useState<File | null>(null);
@@ -116,25 +123,21 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 
 	const checkFileSize = (file: File, maxMb: number, label: string): boolean => {
 		if (file.size > maxMb * mb) {
-			setFileSizeError(
-				`${label}: ${formatFileSizeMb(file.size)}MB — 최대 ${maxMb}MB까지 허용됩니다.`,
-			);
+			setFileSizeError(`${label}: ${formatFileSizeMb(file.size)}MB — 최대 ${maxMb}MB까지 허용됩니다.`);
 			return false;
 		}
 		setFileSizeError(null);
 		return true;
 	};
 
-	const handlePosterChange = (e: ChangeEvent<HTMLInputElement>) => {
-		const file = e.target.files?.[0] ?? null;
+	const selectPoster = (file: File | null) => {
 		revokePosterPreview();
 		const isPdf = !!file && isPdfFile(file);
 		const limitMb = file ? getAssetLimitMb('POSTER', file, limits) : limits.posterMaxMb;
 		if (file && !checkFileSize(file, limitMb, '포스터')) {
 			setPosterFile(null);
 			setPosterPreview(null);
-			e.target.value = '';
-			return;
+			return false;
 		}
 		setPosterFile(file);
 		if (file && !isPdf) {
@@ -144,6 +147,10 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 		} else {
 			setPosterPreview(null);
 		}
+		return true;
+	};
+	const handlePosterChange = (e: ChangeEvent<HTMLInputElement>) => {
+		if (!selectPoster(e.target.files?.[0] ?? null)) e.target.value = '';
 	};
 
 	const handleImagesChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -211,7 +218,12 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 		}
 		e.target.value = '';
 	};
-	const addMaterials = (kind: '문서' | '첨부자료', files: File[], target: 'documents' | 'attachments', input: HTMLInputElement) => {
+	const addMaterials = (
+		kind: '문서' | '첨부자료',
+		files: File[],
+		target: 'documents' | 'attachments',
+		input: HTMLInputElement,
+	) => {
 		if (!materialLimits) {
 			setFileSizeError('현재 서버는 프로젝트 자료 업로드를 지원하지 않습니다.');
 			input.value = '';
@@ -219,13 +231,17 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 		}
 		const current = documentFiles.length + attachmentFiles.length;
 		if (current + files.length > materialLimits.maxCount) {
-			setFileSizeError(`문서와 첨부자료는 합쳐서 프로젝트당 최대 ${materialLimits.maxCount}개까지 선택할 수 있습니다.`);
+			setFileSizeError(
+				`문서와 첨부자료는 합쳐서 프로젝트당 최대 ${materialLimits.maxCount}개까지 선택할 수 있습니다.`,
+			);
 			input.value = '';
 			return;
 		}
 		const oversized = files.find((file) => file.size > materialLimits.maxBytes);
 		if (oversized) {
-			setFileSizeError(`${kind} "${oversized.name}": ${formatFileSizeMb(oversized.size)}MB — 파일당 최대 ${formatFileSizeMb(materialLimits.maxBytes)}MB까지 허용됩니다.`);
+			setFileSizeError(
+				`${kind} "${oversized.name}": ${formatFileSizeMb(oversized.size)}MB — 파일당 최대 ${formatFileSizeMb(materialLimits.maxBytes)}MB까지 허용됩니다.`,
+			);
 			input.value = '';
 			return;
 		}
@@ -241,6 +257,69 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 
 	const handleAttachmentsChange = (e: ChangeEvent<HTMLInputElement>) => {
 		addMaterials('첨부자료', Array.from(e.target.files ?? []), 'attachments', e.target);
+	};
+	const addFiles: SubmissionFilesState['addFiles'] = (selected) => {
+		const grouped = (kind: ProjectUploadKind) =>
+			selected.filter((item) => item.kind === kind).map((item) => item.file);
+		const videos = grouped('VIDEO');
+		const documents = grouped('DOCUMENT');
+		const attachments = grouped('ATTACHMENT');
+		if (grouped('GAME').length > 1 || grouped('WEBGL').length > 1) {
+			setFileSizeError('게임과 WebGL 빌드는 각각 ZIP 한 개씩 선택할 수 있습니다.');
+			return false;
+		}
+		if (videoFiles.length + videos.length > MAX_PROJECT_VIDEOS) {
+			setFileSizeError(`동영상은 프로젝트당 최대 ${MAX_PROJECT_VIDEOS}개까지 선택할 수 있습니다.`);
+			return false;
+		}
+		if (documents.length + attachments.length > 0) {
+			if (!materialLimits) {
+				setFileSizeError('현재 서버는 프로젝트 자료 업로드를 지원하지 않습니다.');
+				return false;
+			}
+			if (
+				documentFiles.length + attachmentFiles.length + documents.length + attachments.length >
+				materialLimits.maxCount
+			) {
+				setFileSizeError(
+					`문서와 첨부자료는 합쳐서 프로젝트당 최대 ${materialLimits.maxCount}개까지 선택할 수 있습니다.`,
+				);
+				return false;
+			}
+		}
+		for (const { kind, file } of selected) {
+			const material = kind === 'DOCUMENT' || kind === 'ATTACHMENT';
+			const maxBytes = material
+				? materialLimits!.maxBytes
+				: (kind === 'GAME' || kind === 'WEBGL' ? limits.gameMaxMb : getAssetLimitMb(kind, file, limits)) * mb;
+			if (file.size === 0 || file.size > maxBytes) {
+				setFileSizeError(
+					`"${file.name}": 빈 파일은 선택할 수 없으며 파일당 최대 ${formatFileSizeMb(maxBytes)}MB까지 허용됩니다.`,
+				);
+				return false;
+			}
+		}
+		setFileSizeError(null);
+		setImageFiles((previous) => [...previous, ...grouped('IMAGE')]);
+		setVideoFiles((previous) => [...previous, ...videos]);
+		setDocumentFiles((previous) => [...previous, ...documents]);
+		setAttachmentFiles((previous) => [...previous, ...attachments]);
+		if (grouped('GAME')[0]) setGameFile(grouped('GAME')[0]!);
+		if (grouped('WEBGL')[0]) setWebglFile(grouped('WEBGL')[0]!);
+		return true;
+	};
+	const removeFile: SubmissionFilesState['removeFile'] = (kind, file) => {
+		if (kind === 'POSTER') clearPoster();
+		else if (kind === 'GAME') clearGameFile();
+		else if (kind === 'WEBGL') clearWebglFile();
+		else if (kind === 'IMAGE')
+			setImageFiles((previous) => previous.filter((candidate) => candidate !== file));
+		else if (kind === 'VIDEO')
+			setVideoFiles((previous) => previous.filter((candidate) => candidate !== file));
+		else if (kind === 'DOCUMENT')
+			setDocumentFiles((previous) => previous.filter((candidate) => candidate !== file));
+		else setAttachmentFiles((previous) => previous.filter((candidate) => candidate !== file));
+		setFileSizeError(null);
 	};
 
 	return {
@@ -274,5 +353,8 @@ export function useSubmissionFiles({ limits, materialLimits }: UseSubmissionFile
 		handleVideoChange,
 		handleDocumentsChange,
 		handleAttachmentsChange,
+		selectPoster,
+		addFiles,
+		removeFile,
 	};
 }

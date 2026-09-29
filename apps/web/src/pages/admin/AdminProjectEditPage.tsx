@@ -4,7 +4,12 @@ import { useQuery } from '@tanstack/react-query';
 
 import type { AddMemberInput, UpdateProjectFormInput } from '../../contracts/schemas';
 import { LoadingSpinner, ErrorMessage } from '../../components/common';
-import { AdminProjectAssetManager } from '../../features/admin/projects/AdminProjectAssetManager';
+import {
+	AdminProjectAssetManager,
+	AdminProjectPosterUpload,
+	AdminProjectUploadProvider,
+} from '../../features/admin/projects/AdminProjectAssetManager';
+import { ProjectEditorLayout } from '../../components/project/editor';
 import { AdminProjectBasicInfoForm } from '../../features/admin/projects/AdminProjectBasicInfoForm';
 import { AdminProjectMemberEditor } from '../../features/admin/projects/AdminProjectMemberEditor';
 import { AdminProjectStatusPanel } from '../../features/admin/projects/AdminProjectStatusPanel';
@@ -41,7 +46,7 @@ export default function AdminProjectEditPage() {
 	});
 
 	if (isLoading) return <LoadingSpinner />;
-	if (error) return <ErrorMessage error={error} onReset={() => refetch()} />;
+	if (error && !project) return <ErrorMessage error={error} onReset={() => refetch()} />;
 	if (!project) return null;
 
 	// Capability is computed at the API boundary.  Operators retain direct access
@@ -68,28 +73,6 @@ export default function AdminProjectEditPage() {
 						{project.isIncomplete && <span className="incomplete-badge">불완전</span>}
 					</h1>
 				</div>
-			</div>
-			<p className="edit-meta">
-				슬러그: <code>{project.slug}</code> | 연도: <span className="admin-year-badge">{project.year}</span>
-				{project.isIncomplete && ' | 불완전 자료'}
-			</p>
-			{!canEditContent && project.canRequestChange && (
-				<div className="admin-card" style={{ marginBottom: '1rem' }}>
-					<p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p>
-					<Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link>
-				</div>
-			)}
-
-			<AdminProjectBasicInfoForm
-				project={project}
-				error={mutations.updateMutation.error}
-				isDirtySubmitting={mutations.updateMutation.isPending}
-				isSuccess={mutations.updateMutation.isSuccess}
-				canEditContent={canEditContent}
-				onSubmit={onSubmitUpdate}
-			/>
-
-			<div className="project-form">
 				<AdminProjectStatusPanel
 					status={project.status}
 					isPrivileged={isPrivileged}
@@ -97,42 +80,57 @@ export default function AdminProjectEditPage() {
 					error={mutations.toggleStatusMutation.error}
 					onToggle={mutations.toggleStatusMutation.mutate}
 				/>
-
-				<AdminProjectMemberEditor
-					members={project.members}
-					newMember={newMember}
-					setNewMember={setNewMember}
-					canEditContent={canEditContent}
-					isAdding={mutations.addMemberMutation.isPending}
-					isBusy={
-						mutations.updateMemberMutation.isPending ||
-						mutations.removeMemberMutation.isPending ||
-						mutations.swapMemberMutation.isPending
-					}
-					onAdd={mutations.addMemberMutation.mutate}
-					onSwap={mutations.swapMemberOrder}
-					onUpdate={(memberId, body) =>
-						mutations.updateMemberMutation.mutate({ memberId, body })
-					}
-					onRemove={mutations.removeMemberMutation.mutate}
-				/>
-
-				<AdminProjectAssetManager
-					project={project}
-					projectId={id}
-					limits={limits}
-					canEditContent={canEditContent}
-					isSettingPoster={mutations.setPosterMutation.isPending}
-					isRemovingAsset={mutations.removeAssetMutation.isPending}
-					isRemovingWebgl={mutations.removeWebglMutation.isPending}
-					isReorderingVideos={mutations.reorderVideosMutation.isPending}
-					videoOrderError={mutations.reorderVideosMutation.error}
-					onSetPoster={mutations.setPosterMutation.mutate}
-					onRemoveAsset={mutations.removeAssetMutation.mutate}
-					onRemoveWebgl={() => mutations.removeWebglMutation.mutate()}
-					onReorderVideos={(body) => mutations.reorderVideosMutation.mutate(body)}
-				/>
 			</div>
+			{!canEditContent && project.canRequestChange && (
+				<div className="admin-card" style={{ marginBottom: '1rem' }}>
+					<p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p>
+					<Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>
+						수정 요청 작성
+					</Link>
+				</div>
+			)}
+
+			<AdminProjectUploadProvider
+				key={id}
+				project={project}
+				projectId={id}
+				limits={limits}
+				canEditContent={canEditContent}
+			>
+				<ProjectEditorLayout
+					poster={<AdminProjectPosterUpload project={project} canEditContent={canEditContent} />}
+					details={
+						<>
+							<AdminProjectBasicInfoForm
+								project={project}
+								error={mutations.updateMutation.error}
+								isDirtySubmitting={mutations.updateMutation.isPending}
+								isSuccess={mutations.updateMutation.isSuccess}
+								canEditContent={canEditContent}
+								onSubmit={onSubmitUpdate}
+							/>
+
+							<AdminProjectMemberEditor
+								members={project.members}
+								newMember={newMember}
+								setNewMember={setNewMember}
+								canEditContent={canEditContent}
+								isAdding={mutations.addMemberMutation.isPending}
+								isBusy={
+									mutations.updateMemberMutation.isPending ||
+									mutations.removeMemberMutation.isPending ||
+									mutations.swapMemberMutation.isPending
+								}
+								onAdd={mutations.addMemberMutation.mutate}
+								onSwap={mutations.swapMemberOrder}
+								onUpdate={(memberId, body) => mutations.updateMemberMutation.mutate({ memberId, body })}
+								onRemove={mutations.removeMemberMutation.mutate}
+							/>
+						</>
+					}
+					files={<AdminProjectAssetManager canEditContent={canEditContent} />}
+				/>
+			</AdminProjectUploadProvider>
 		</div>
 	);
 }

@@ -2,12 +2,6 @@ import type { ProjectStatus } from '@pcu/contracts';
 
 import { getApiErrorMessage } from '../../../lib/api';
 
-const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '제출 중',
-	PUBLISHED: '공개',
-	ARCHIVED: '보관',
-};
-
 interface AdminProjectStatusPanelProps {
 	status: ProjectStatus;
 	isPrivileged: boolean;
@@ -23,36 +17,39 @@ export function AdminProjectStatusPanel({
 	error,
 	onToggle,
 }: AdminProjectStatusPanelProps) {
+	const published = status === 'PUBLISHED';
 	return (
-		<fieldset className="status-section">
-			<legend>공개 상태</legend>
-			<p>
-				현재 상태:{' '}
-				<strong>{STATUS_LABELS[status]}</strong>
-			</p>
-			<div className="form-actions">
-				{isPrivileged && status !== 'DRAFT' && status !== 'PUBLISHED' && (
-					<button
-						className="btn btn--primary btn--small"
-						onClick={() => onToggle('PUBLISHED')}
-						disabled={isPending}
-					>
-						공개로 전환
-					</button>
+		<div className="project-visibility">
+			<button
+				type="button"
+				role="switch"
+				aria-label="작품 공개"
+				aria-checked={published}
+				aria-busy={isPending}
+				className={`project-visibility__switch${published ? ' is-public' : ''}${status === 'DRAFT' ? ' is-draft' : ''}`}
+				disabled={!isPrivileged || isPending || status === 'DRAFT'}
+				onClick={() => onToggle(published ? 'ARCHIVED' : 'PUBLISHED')}
+			>
+				{status === 'DRAFT' ? (
+					<span className="project-visibility__draft">제출 중</span>
+				) : (
+					<>
+						<span className="project-visibility__thumb" aria-hidden="true" />
+						<span className="project-visibility__label project-visibility__label--public">공개</span>
+						<span className="project-visibility__label project-visibility__label--private">비공개</span>
+					</>
 				)}
-				{status !== 'DRAFT' && status !== 'ARCHIVED' && isPrivileged && (
-					<button
-						className="btn btn--danger btn--small"
-						onClick={() => onToggle('ARCHIVED')}
-						disabled={isPending}
-					>
-						보관
-					</button>
-				)}
-			</div>
-			{error != null && (
-				<p className="field-error">{getApiErrorMessage(error)}</p>
+			</button>
+			{isPending && (
+				<span className="field-hint" role="status">
+					저장 중…
+				</span>
 			)}
-		</fieldset>
+			{error != null && (
+				<p className="field-error" role="alert">
+					{getApiErrorMessage(error)}
+				</p>
+			)}
+		</div>
 	);
 }

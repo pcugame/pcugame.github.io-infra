@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="672" viewBox="0 0 480 672" fill="none">
+  <rect width="480" height="672" fill="#F0F6FF"/>
+  <rect x="156" y="238" width="168" height="132" rx="12" stroke="#8DAEE0" stroke-width="5"/>
+  <circle cx="205" cy="278" r="14" fill="#8DAEE0"/>
+  <path d="m160 347 52-49 37 34 27-25 44 40" stroke="#8DAEE0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="240" y="423" text-anchor="middle" fill="#5276AA" font-family="sans-serif" font-size="19" letter-spacing="3">POSTER</text>
+</svg>

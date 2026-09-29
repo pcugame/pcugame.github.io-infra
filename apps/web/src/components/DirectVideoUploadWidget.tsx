@@ -29,6 +29,10 @@ interface Props {
 	initialFiles?: readonly File[];
 	autoStart?: boolean;
 	onComplete?: () => void;
+	/** Advances an enclosing queue only after cancellation leaves no pending session. */
+	onCancelled?: () => void;
+	/** An enclosing row provides the heading, chooser, and selected file summary. */
+	compact?: boolean;
 	onSkip?: () => void;
 	submissionItems?: readonly { id: string; clientToken: string }[];
 	/** Available VIDEO slots for this upload operation (project maximum is five). */
@@ -48,6 +52,8 @@ export default function DirectVideoUploadWidget({
 	initialFiles = EMPTY_VIDEO_FILES,
 	autoStart = false,
 	onComplete,
+	onCancelled,
+	compact = false,
 	onSkip,
 	submissionItems = [],
 	maxFiles = 5,
@@ -76,7 +82,10 @@ export default function DirectVideoUploadWidget({
 	const restoreControllerRef = useRef<AbortController | null>(null);
 	const pausedRunTokenRef = useRef<number | null>(null);
 	const autoPausedRef = useRef(false);
-	const cancelIntentRunTokenRef = useRef<number | null>(null);
+	const cancelledRunTokensRef = useRef(new Set<number>());
+	const pendingCreateTokensRef = useRef(new Set<number>());
+	const cancellationIntentRef = useRef(false);
+	const cancellationRequestedSessionIdsRef = useRef(new Set<string>());
 	const lateCancelSessionIdRef = useRef<string | null>(null);
 	const cancelLateCreatedSessionRef = useRef<(saved: SavedVideoSession, sourceToken: number) => void>(() => undefined);
 	const storageKey = `pcu.direct-${kind.toLowerCase()}-upload:${projectId}`;
@@ -101,10 +110,20 @@ export default function DirectVideoUploadWidget({
 	const isCurrentRun = useCallback((token: number) => (
 		mountedRef.current && runRef.current?.token === token
 	), []);
+	const finishCancellation = useCallback(() => {
+		// Aborting a create does not prove that no server session was created.
+		cancelling.current = cancelledRunTokensRef.current.size > 0 || cancellationRequestedSessionIdsRef.current.size > 0;
+		if (!cancelling.current && pendingCreateTokensRef.current.size === 0 && !resumableRef.current
+			&& cancellationIntentRef.current && mountedRef.current) {
+			cancellationIntentRef.current = false;
+			onCancelled?.();
+		}
+	}, [onCancelled]);
 	const beginRun = useCallback(() => {
 		if (submitting.current || cancelling.current || !mountedRef.current) return null;
 		const controller = new AbortController();
 		const token = ++runTokenRef.current;
+		cancellationIntentRef.current = false;
 		pausedRunTokenRef.current = null;
 		runRef.current = { token, controller };
 		submitting.current = true;
@@ -140,7 +159,10 @@ export default function DirectVideoUploadWidget({
 			try {
 				const saved = JSON.parse(raw) as SavedVideoSession;
 				if (saved.session.kind !== kind) throw new Error('kind');
-				const completedBefore = saved.completed ?? 0;
+				const completedBefore = compact && initialFiles.length === 1
+					? 0 : saved.completed ?? 0;
+				const matchesChosen = initialFiles.length === 0
+					|| (initialFiles[completedBefore]?.name === saved.originalName && initialFiles[completedBefore]?.size === saved.totalBytes);
 				updateCompleted(completedBefore);
 				remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 				const status = await getDirectAssetUploadStatus(saved.session.sessionId, controller.signal);
@@ -151,6 +173,11 @@ export default function DirectVideoUploadWidget({
 					await waitForDirectAssetReady(status.sessionId, { signal: controller.signal });
 					if (!disposed && !controller.signal.aborted) {
 						forget(saved.session.sessionId);
+						if (!matchesChosen) {
+							updateCompleted(0);
+							setPhase('idle');
+							return;
+						}
 						const nextCompleted = completedBefore + 1;
 						updateCompleted(nextCompleted);
 						if (initialFiles.length === 0 || nextCompleted >= initialFiles.length) {
@@ -167,6 +194,11 @@ export default function DirectVideoUploadWidget({
 				}
 				if (status.state === 'READY') {
 					forget();
+					if (!matchesChosen) {
+						updateCompleted(0);
+						setPhase('idle');
+						return;
+					}
 					const nextCompleted = completedBefore + 1;
 					updateCompleted(nextCompleted);
 					if (initialFiles.length === 0 || nextCompleted >= initialFiles.length) {
@@ -194,7 +226,7 @@ export default function DirectVideoUploadWidget({
 			controller.abort();
 			if (restoreControllerRef.current === controller) restoreControllerRef.current = null;
 		};
-	}, [forget, initialFiles, kind, onComplete, projectId, qc, remember, storageKey, updateCompleted]);
+	}, [compact, forget, initialFiles, kind, onComplete, projectId, qc, remember, storageKey, updateCompleted]);
 
 	const uploadQueue = useCallback(async (
 		chosen: readonly File[],
@@ -215,6 +247,7 @@ export default function DirectVideoUploadWidget({
 					&& resume.originalName === file.name && resume.totalBytes === file.size
 					? resume.session
 					: undefined;
+				if (!matchingResume) pendingCreateTokensRef.current.add(token);
 				const completion = await uploadDirectAssetFile(projectId, file, kind, (next) => {
 					if (!isCurrentRun(token)) return;
 					setProgress(next);
@@ -225,7 +258,8 @@ export default function DirectVideoUploadWidget({
 					onSession: (next) => {
 						const current = isCurrentRun(token);
 						const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
-						const cancelPending = cancelIntentRunTokenRef.current === token;
+						pendingCreateTokensRef.current.delete(token);
+						const cancelPending = cancelledRunTokensRef.current.delete(token);
 						if (cancelPending) {
 							remember(next, file, index, mountedRef.current);
 							cancelLateCreatedSessionRef.current({
@@ -254,12 +288,15 @@ export default function DirectVideoUploadWidget({
 			setError(getApiErrorMessage(uploadError));
 			setPhase('error');
 		} finally {
+			pendingCreateTokensRef.current.delete(token);
+			cancelledRunTokensRef.current.delete(token);
+			finishCancellation();
 			if (runRef.current?.token === token) {
 				runRef.current = null;
 				submitting.current = false;
 			}
 		}
-	}, [beginRun, forget, isCurrentRun, kind, onComplete, projectId, qc, remember, submissionItems, updateCompleted]);
+	}, [beginRun, finishCancellation, forget, isCurrentRun, kind, onComplete, projectId, qc, remember, submissionItems, updateCompleted]);
 
 	const matchesSavedFile = useCallback((chosen: readonly File[], saved: SavedVideoSession) => {
 		const index = saved.completed ?? 0;
@@ -273,6 +310,15 @@ export default function DirectVideoUploadWidget({
 	) => {
 		if (!isCurrentRun(activeRun.token)) return;
 		forget(saved.session.sessionId);
+		if (compact && chosen.length > 0 && !matchesSavedFile(chosen, saved)) {
+			updateCompleted(0);
+			qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
+			runRef.current = null;
+			submitting.current = false;
+			setError('이전 파일의 업로드가 완료되었습니다. 선택한 파일을 재시도해 주세요.');
+			setPhase('error');
+			return;
+		}
 		const nextCompleted = (saved.completed ?? completedRef.current) + 1;
 		updateCompleted(nextCompleted);
 		if (nextCompleted < chosen.length) {
@@ -283,7 +329,7 @@ export default function DirectVideoUploadWidget({
 		setPhase('ready');
 		qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
 		onComplete?.();
-	}, [forget, isCurrentRun, onComplete, projectId, qc, updateCompleted, uploadQueue]);
+	}, [compact, matchesSavedFile, forget, isCurrentRun, onComplete, projectId, qc, updateCompleted, uploadQueue]);
 	const observeSavedReady = useCallback(async (
 		saved: SavedVideoSession,
 		chosen: readonly File[],
@@ -311,6 +357,7 @@ export default function DirectVideoUploadWidget({
 	const cancelLateCreatedSession = useCallback(async (saved: SavedVideoSession, sourceToken: number) => {
 		if (lateCancelSessionIdRef.current === saved.session.sessionId) return;
 		lateCancelSessionIdRef.current = saved.session.sessionId;
+		cancellationRequestedSessionIdsRef.current.add(saved.session.sessionId);
 		cancelling.current = true;
 		let readySaved: SavedVideoSession | null = null;
 		let verificationSaved: SavedVideoSession | null = null;
@@ -332,8 +379,10 @@ export default function DirectVideoUploadWidget({
 					setError(null);
 					setPhase('idle');
 				} else if (status.state === 'READY') {
+					cancellationIntentRef.current = false;
 					readySaved = saved;
 				} else if (status.state === 'COMPLETING' || status.state === 'VERIFYING') {
+					cancellationIntentRef.current = false;
 					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
 					verificationSaved = saved;
 				} else {
@@ -348,8 +397,9 @@ export default function DirectVideoUploadWidget({
 				}
 			}
 		} finally {
-			cancelling.current = false;
-			if (cancelIntentRunTokenRef.current === sourceToken) cancelIntentRunTokenRef.current = null;
+			cancellationRequestedSessionIdsRef.current.delete(saved.session.sessionId);
+			cancelledRunTokensRef.current.delete(sourceToken);
+			finishCancellation();
 			if (mountedRef.current) {
 				if (readySaved) {
 					const activeRun = beginRun();
@@ -357,7 +407,7 @@ export default function DirectVideoUploadWidget({
 				} else if (verificationSaved) void observeSavedReady(verificationSaved, files);
 			}
 		}
-	}, [beginRun, continueAfterReady, files, forget, observeSavedReady, remember]);
+	}, [beginRun, continueAfterReady, files, finishCancellation, forget, observeSavedReady, remember]);
 	cancelLateCreatedSessionRef.current = cancelLateCreatedSession;
 	const resumeQueue = useCallback(async (chosen: readonly File[], saved: SavedVideoSession) => {
 		if (!matchesSavedFile(chosen, saved)) {
@@ -420,16 +470,20 @@ export default function DirectVideoUploadWidget({
 	}, [abortLocalWork]);
 	const cancel = useCallback(async () => {
 		if (cancelling.current) return;
+		cancellationIntentRef.current = true;
+		autoPausedRef.current = true;
 		pausedRunTokenRef.current = null;
-		const activeToken = runRef.current?.token ?? null;
-		if (activeToken !== null && !resumableRef.current) cancelIntentRunTokenRef.current = activeToken;
+		for (const token of pendingCreateTokensRef.current) cancelledRunTokensRef.current.add(token);
 		abortLocalWork();
 		const saved = resumableRef.current;
 		if (!saved) {
 			setPhase('idle');
+			setError(null);
+			finishCancellation();
 			return;
 		}
 		cancelling.current = true;
+		cancellationRequestedSessionIdsRef.current.add(saved.session.sessionId);
 		setPhase('idle');
 		const cancelToken = ++runTokenRef.current;
 		let verificationSaved: SavedVideoSession | null = null;
@@ -453,8 +507,10 @@ export default function DirectVideoUploadWidget({
 					setError(null);
 					setPhase('idle');
 				} else if (status.state === 'READY') {
+					cancellationIntentRef.current = false;
 					readySaved = saved;
 				} else if (status.state === 'COMPLETING' || status.state === 'VERIFYING') {
+					cancellationIntentRef.current = false;
 					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
 					verificationSaved = saved;
 				} else {
@@ -469,7 +525,8 @@ export default function DirectVideoUploadWidget({
 				}
 			}
 		} finally {
-			cancelling.current = false;
+			cancellationRequestedSessionIdsRef.current.delete(saved.session.sessionId);
+			finishCancellation();
 			if (verificationSaved && mountedRef.current && runTokenRef.current === cancelToken) {
 				void observeSavedReady(verificationSaved, files);
 			} else if (readySaved && mountedRef.current && runTokenRef.current === cancelToken) {
@@ -477,7 +534,7 @@ export default function DirectVideoUploadWidget({
 				if (activeRun) void continueAfterReady(readySaved, files, activeRun);
 			}
 		}
-	}, [abortLocalWork, beginRun, continueAfterReady, files, forget, observeSavedReady, remember]);
+	}, [abortLocalWork, beginRun, continueAfterReady, files, finishCancellation, forget, observeSavedReady, remember]);
 
 	const start = () => {
 		const saved = resumableRef.current;
@@ -488,11 +545,11 @@ export default function DirectVideoUploadWidget({
 
 	return (
 		<div className="game-upload">
-			<h3 className="game-upload__title">{label} 업로드</h3>
+			{!compact && <h3 className="game-upload__title">{label} 업로드</h3>}
 			{resumable && phase === 'idle' && (
 				<p className="field-hint">중단된 {label} 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>
 			)}
-			{!autoStart && (phase === 'idle' || phase === 'error') && (
+			{!compact && !autoStart && (phase === 'idle' || phase === 'error') && (
 				<div className="game-upload__file-input">
 					<label className="sr-only" htmlFor={fileInputId}>{label} 파일 선택</label>
 					<input
@@ -531,7 +588,7 @@ export default function DirectVideoUploadWidget({
 					/>
 				</div>
 			)}
-			{files.length > 0 && <p className="game-upload__file-summary">{files.length}개 {label} 선택됨 ({completed}/{files.length} 완료)</p>}
+			{!compact && files.length > 0 && <p className="game-upload__file-summary">{files.length}개 {label} 선택됨 ({completed}/{files.length} 완료)</p>}
 			{progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
 					<div className="game-upload__progress-track" role="progressbar" aria-label={`${label} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
@@ -548,7 +605,7 @@ export default function DirectVideoUploadWidget({
 				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${label} 업로드 시작`}</button>}
 				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}
 				{(phase === 'uploading' || phase === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={pause}>일시 정지</button>}
-				{((phase === 'uploading' || phase === 'verifying') || (resumable && phase !== 'ready')) && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
+				{phase !== 'ready' && (files.length > 0 || resumable || phase === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
 				{phase === 'ready' && <span className="game-upload__complete-text">{label} 업로드 완료</span>}
 				{onSkip && phase !== 'uploading' && phase !== 'verifying' && phase !== 'ready' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
 			</div>

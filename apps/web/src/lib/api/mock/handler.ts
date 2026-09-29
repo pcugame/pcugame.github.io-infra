@@ -108,6 +108,10 @@ function parseJsonBody(body: unknown): Record<string, unknown> {
 }
 
 const routes: MockRoute[] = [
+	{
+		pattern: /^\/api\/public\/upload-config$/,
+		handler: () => ({ materialMaxCount: 5, materialMaxBytes: 50 * 1024 * 1024 }),
+	},
 	// ── Auth ──
 	{
 		pattern: /^\/api\/me$/,
