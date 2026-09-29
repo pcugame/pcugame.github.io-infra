@@ -61,7 +61,7 @@ export function AdminProjectBasicInfoForm({
 				</div>
 
 				<div className="form-field">
-					<label htmlFor="sortOrder">정렬 순서</label>
+					<label htmlFor="sortOrder">오프셋(작을수록 상단에 표시)</label>
 					<input
 						id="sortOrder"
 						type="number"

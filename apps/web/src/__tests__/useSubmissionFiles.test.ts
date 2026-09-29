@@ -145,4 +145,48 @@ describe('useSubmissionFiles', () => {
 		expect(result.current.attachmentFiles).toEqual([second]);
 		expect(result.current.fileSizeError).toContain('최대 2개');
 	});
+
+	it('selects mixed files through typed methods and removes one file independently', () => {
+		const { result } = renderHook(() => useSubmissionFiles({ limits, materialLimits: { maxCount: 4, maxBytes: 1024 } }));
+		const image = file('image.png', 'image/png', 10);
+		const video = file('clip.mp4', 'video/mp4', 10);
+		const document = file('guide.md', 'text/markdown', 10);
+		const game = file('game.zip', 'application/zip', 10);
+		const webgl = file('webgl.zip', 'application/zip', 10);
+		act(() => { result.current.addFiles([
+			{ kind: 'IMAGE', file: image }, { kind: 'VIDEO', file: video }, { kind: 'DOCUMENT', file: document },
+			{ kind: 'GAME', file: game }, { kind: 'WEBGL', file: webgl },
+		]); });
+		expect(result.current.imageFiles).toEqual([image]);
+		expect(result.current.videoFiles).toEqual([video]);
+		expect(result.current.documentFiles).toEqual([document]);
+		expect(result.current.gameFile).toBe(game);
+		expect(result.current.webglFile).toBe(webgl);
+		act(() => result.current.removeFile('VIDEO', video));
+		expect(result.current.videoFiles).toEqual([]);
+		expect(result.current.imageFiles).toEqual([image]);
+		expect(result.current.webglFile).toBe(webgl);
+	});
+
+	it('validates mixed document and attachment counts atomically before changing any selection', () => {
+		const { result } = renderHook(() => useSubmissionFiles({ limits, materialLimits: { maxCount: 1, maxBytes: 1024 } }));
+		act(() => { result.current.addFiles([
+			{ kind: 'IMAGE', file: file('image.png', 'image/png', 10) },
+			{ kind: 'DOCUMENT', file: file('guide.pdf', 'application/pdf', 10) },
+			{ kind: 'ATTACHMENT', file: file('data.bin', '', 10) },
+		]); });
+		expect(result.current.fileSizeError).toContain('최대 1개');
+		expect(result.current.imageFiles).toEqual([]);
+		expect(result.current.documentFiles).toEqual([]);
+		expect(result.current.attachmentFiles).toEqual([]);
+	});
+
+	it('rejects an empty typed file without discarding earlier valid selections', () => {
+		const { result } = renderHook(() => useSubmissionFiles({ limits }));
+		const image = file('image.png', 'image/png', 10);
+		act(() => { result.current.addFiles([{ kind: 'IMAGE', file: image }]); });
+		act(() => { result.current.addFiles([{ kind: 'IMAGE', file: file('empty.png', 'image/png', 0) }]); });
+		expect(result.current.imageFiles).toEqual([image]);
+		expect(result.current.fileSizeError).toContain('빈 파일');
+	});
 });

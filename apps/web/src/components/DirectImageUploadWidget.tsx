@@ -29,6 +29,10 @@ interface Props {
 	initialFiles?: readonly File[];
 	autoStart?: boolean;
 	onComplete?: () => void;
+	/** Advances an enclosing queue only after cancellation leaves no pending session. */
+	onCancelled?: () => void;
+	/** An enclosing row provides the heading, chooser, and selected file summary. */
+	compact?: boolean;
 	/** Suppress the generic heading when embedded in an asset-management row. */
 	hideTitle?: boolean;
 	/** Lets an enclosing owner control mutually exclusive mutations such as delete. */
@@ -43,11 +47,14 @@ export default function DirectImageUploadWidget({
 	initialFiles = [],
 	autoStart = false,
 	onComplete,
+	onCancelled,
+	compact = false,
 	hideTitle = false,
 	onBusyChange,
 	submissionItems = [],
 }: Props) {
 	const qc = useQueryClient();
+	const recoveringManifest = initialFiles.length === 0 && submissionItems.length > 0;
 	const fileInputId = useId();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
@@ -69,7 +76,10 @@ export default function DirectImageUploadWidget({
 	const pausedRunTokenRef = useRef<number | null>(null);
 	const autoPausedRef = useRef(false);
 	const cancelledRunTokensRef = useRef(new Set<number>());
+	const pendingCreateTokensRef = useRef(new Set<number>());
+	const cancellationIntentRef = useRef(false);
 	const cancellationRequestedSessionIdsRef = useRef(new Set<string>());
+	const cancelLateSessionRef = useRef<(saved: SavedImageSession) => void>(() => undefined);
 	const storageKey = `pcu.direct-${kind.toLowerCase()}-upload:${owner.type}:${owner.id}`;
 	const title = kind === 'POSTER' ? '포스터 업로드' : '이미지 업로드';
 
@@ -97,10 +107,20 @@ export default function DirectImageUploadWidget({
 	const isCurrentRun = useCallback((token: number) => (
 		mountedRef.current && runRef.current?.token === token
 	), []);
+	const finishCancellation = useCallback(() => {
+		// Aborting a create does not prove that no server session was created.
+		cancelling.current = cancelledRunTokensRef.current.size > 0 || cancellationRequestedSessionIdsRef.current.size > 0;
+		if (!cancelling.current && pendingCreateTokensRef.current.size === 0 && !resumableRef.current
+			&& cancellationIntentRef.current && mountedRef.current) {
+			cancellationIntentRef.current = false;
+			onCancelled?.();
+		}
+	}, [onCancelled]);
 	const beginRun = useCallback(() => {
 		if (submitting.current || cancelling.current || !mountedRef.current) return null;
 		const controller = new AbortController();
 		const token = ++runTokenRef.current;
+		cancellationIntentRef.current = false;
 		pausedRunTokenRef.current = null;
 		runRef.current = { token, controller };
 		submitting.current = true;
@@ -117,21 +137,6 @@ export default function DirectImageUploadWidget({
 		restoreControllerRef.current?.abort();
 		restoreControllerRef.current = null;
 	}, []);
-	const cancelLateSession = useCallback(async (sessionId: string) => {
-		if (cancellationRequestedSessionIdsRef.current.has(sessionId)) return;
-		cancellationRequestedSessionIdsRef.current.add(sessionId);
-		try {
-			await cancelDirectAssetUploadSession(sessionId);
-			forget(sessionId);
-		} catch {
-			try {
-				const status = await getDirectAssetUploadStatus(sessionId);
-				if (status.state === 'CANCELLED') forget(sessionId);
-			} catch {
-				// The locator remains available when neither DELETE nor status confirms cancellation.
-			}
-		}
-	}, [forget]);
 
 	useEffect(() => {
 		mountedRef.current = true;
@@ -154,7 +159,11 @@ export default function DirectImageUploadWidget({
 			try {
 				const saved = JSON.parse(raw) as SavedImageSession;
 				if (saved.session.kind !== kind || saved.session.owner.type !== owner.type || saved.session.owner.id !== owner.id) throw new Error('owner');
-				const completedBefore = saved.completed ?? 0;
+				const chosen = initialFilesRef.current;
+				const completedBefore = recoveringManifest || (compact && chosen.length === 1)
+					? 0 : saved.completed ?? 0;
+				const matchesChosen = chosen.length === 0
+					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes);
 				// Preserve a valid opaque locator even when status is temporarily unavailable.
 				remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 				updateCompleted(completedBefore);
@@ -167,6 +176,11 @@ export default function DirectImageUploadWidget({
 					await waitForDirectAssetReady(status.sessionId, { signal: controller.signal });
 					if (!disposed && !controller.signal.aborted) {
 						forget(saved.session.sessionId);
+						if (!matchesChosen) {
+							updateCompleted(0);
+							setPhase('idle');
+							return;
+						}
 						const nextCompleted = completedBefore + 1;
 						updateCompleted(nextCompleted);
 						if (initialFilesRef.current.length === 0 || nextCompleted >= initialFilesRef.current.length) {
@@ -182,6 +196,11 @@ export default function DirectImageUploadWidget({
 				}
 				if (status.state === 'READY') {
 					forget(saved.session.sessionId);
+					if (!matchesChosen) {
+						updateCompleted(0);
+						setPhase('idle');
+						return;
+					}
 					const nextCompleted = completedBefore + 1;
 					updateCompleted(nextCompleted);
 					if (initialFilesRef.current.length === 0 || nextCompleted >= initialFilesRef.current.length) {
@@ -211,7 +230,7 @@ export default function DirectImageUploadWidget({
 			controller.abort();
 			if (restoreControllerRef.current === controller) restoreControllerRef.current = null;
 		};
-	}, [forget, invalidateOwner, kind, onComplete, owner, remember, storageKey, updateCompleted]);
+	}, [recoveringManifest, compact, forget, invalidateOwner, kind, onComplete, owner, remember, storageKey, updateCompleted]);
 
 	useEffect(() => {
 		onBusyChange?.(phase === 'uploading' || phase === 'verifying');
@@ -236,6 +255,7 @@ export default function DirectImageUploadWidget({
 					&& resume.originalName === file.name && resume.totalBytes === file.size
 					? resume.session
 					: undefined;
+				if (!matchingResume) pendingCreateTokensRef.current.add(token);
 				const completion = await uploadDirectAssetFile(owner, file, kind, (next) => {
 					if (!isCurrentRun(token)) return;
 					setProgress(next);
@@ -246,12 +266,15 @@ export default function DirectImageUploadWidget({
 					onSession: (next) => {
 						const current = isCurrentRun(token);
 						const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
+						pendingCreateTokensRef.current.delete(token);
 						const cancelRequested = cancelledRunTokensRef.current.delete(token);
 						// A create response can arrive after its caller was aborted. Retain the
 						// opaque locator first; unmounts deliberately stop here, while a
 						// cancellation intent schedules its own authenticated control request.
-						remember(next, file, index, current || paused || (cancelRequested && mountedRef.current));
-						if (cancelRequested) void cancelLateSession(next.sessionId);
+						if (current || paused || cancelRequested || resumableRef.current === null) {
+							remember(next, file, index, current || paused || (cancelRequested && mountedRef.current));
+						}
+						if (cancelRequested) cancelLateSessionRef.current({ session: next, originalName: file.name, totalBytes: file.size, completed: index });
 					},
 					signal: controller.signal,
 				});
@@ -273,12 +296,15 @@ export default function DirectImageUploadWidget({
 			setError(getApiErrorMessage(uploadError));
 			setPhase('error');
 		} finally {
+			pendingCreateTokensRef.current.delete(token);
+			cancelledRunTokensRef.current.delete(token);
+			finishCancellation();
 			if (runRef.current?.token === token) {
 				runRef.current = null;
 				submitting.current = false;
 			}
 		}
-	}, [beginRun, cancelLateSession, forget, invalidateOwner, isCurrentRun, kind, onComplete, owner, remember, submissionItems, updateCompleted]);
+	}, [beginRun, finishCancellation, forget, invalidateOwner, isCurrentRun, kind, onComplete, owner, remember, submissionItems, updateCompleted]);
 
 	const matchesSavedFile = useCallback((chosen: readonly File[], saved: SavedImageSession) => {
 		const current = chosen[saved.completed ?? 0];
@@ -291,6 +317,15 @@ export default function DirectImageUploadWidget({
 	) => {
 		if (!isCurrentRun(activeRun.token)) return;
 		forget(saved.session.sessionId);
+		if (compact && chosen.length > 0 && !matchesSavedFile(chosen, saved)) {
+			updateCompleted(0);
+			invalidateOwner();
+			runRef.current = null;
+			submitting.current = false;
+			setError('이전 파일의 업로드가 완료되었습니다. 선택한 파일을 재시도해 주세요.');
+			setPhase('error');
+			return;
+		}
 		const nextCompleted = (saved.completed ?? completedRef.current) + 1;
 		updateCompleted(nextCompleted);
 		if (nextCompleted < chosen.length) {
@@ -301,7 +336,7 @@ export default function DirectImageUploadWidget({
 		setPhase('ready');
 		invalidateOwner();
 		onComplete?.();
-	}, [forget, invalidateOwner, isCurrentRun, onComplete, updateCompleted, uploadQueue]);
+	}, [compact, matchesSavedFile, forget, invalidateOwner, isCurrentRun, onComplete, updateCompleted, uploadQueue]);
 	const observeSavedReady = useCallback(async (
 		saved: SavedImageSession,
 		chosen: readonly File[],
@@ -326,6 +361,49 @@ export default function DirectImageUploadWidget({
 			}
 		}
 	}, [beginRun, continueAfterReady, isCurrentRun]);
+	const cancelLateSession = useCallback(async (saved: SavedImageSession) => {
+		const sessionId = saved.session.sessionId;
+		if (cancellationRequestedSessionIdsRef.current.has(sessionId)) return;
+		cancellationRequestedSessionIdsRef.current.add(sessionId);
+		cancelling.current = true;
+		let verificationSaved: SavedImageSession | null = null;
+		try {
+			await cancelDirectAssetUploadSession(sessionId);
+			forget(sessionId);
+			if (mountedRef.current) {
+				setProgress(null);
+				setError(null);
+				setPhase('idle');
+			}
+		} catch (cause) {
+			try {
+				const status = await getDirectAssetUploadStatus(sessionId);
+				if (!mountedRef.current) return;
+				if (status.state === 'CANCELLED') {
+					forget(sessionId);
+					setProgress(null);
+					setError(null);
+					setPhase('idle');
+				} else if (status.state === 'READY' || status.state === 'COMPLETING' || status.state === 'VERIFYING') {
+					cancellationIntentRef.current = false;
+					verificationSaved = saved;
+				} else {
+					setError(getApiErrorMessage(cause));
+					setPhase('idle');
+				}
+			} catch {
+				if (mountedRef.current) {
+					setError(getApiErrorMessage(cause));
+					setPhase('idle');
+				}
+			}
+		} finally {
+			cancellationRequestedSessionIdsRef.current.delete(sessionId);
+			finishCancellation();
+			if (verificationSaved && mountedRef.current) void observeSavedReady(verificationSaved, files);
+		}
+	}, [files, finishCancellation, forget, observeSavedReady]);
+	cancelLateSessionRef.current = cancelLateSession;
 	const resumeQueue = useCallback(async (chosen: readonly File[], saved: SavedImageSession) => {
 		if (!matchesSavedFile(chosen, saved)) {
 			setError('중단된 파일과 선택한 파일 순서 또는 크기가 일치하지 않습니다.');
@@ -387,14 +465,16 @@ export default function DirectImageUploadWidget({
 	}, [abortLocalWork]);
 	const cancel = useCallback(async () => {
 		if (cancelling.current) return;
-		const activeToken = runRef.current?.token;
-		if (activeToken !== undefined) cancelledRunTokensRef.current.add(activeToken);
+		cancellationIntentRef.current = true;
+		autoPausedRef.current = true;
+		for (const token of pendingCreateTokensRef.current) cancelledRunTokensRef.current.add(token);
 		pausedRunTokenRef.current = null;
 		abortLocalWork();
 		const saved = resumableRef.current;
 		if (!saved) {
 			setError(null);
 			setPhase('idle');
+			finishCancellation();
 			return;
 		}
 		cancelling.current = true;
@@ -421,8 +501,10 @@ export default function DirectImageUploadWidget({
 					setError(null);
 					setPhase('idle');
 				} else if (status.state === 'READY') {
+					cancellationIntentRef.current = false;
 					verificationSaved = saved;
 				} else if (status.state === 'COMPLETING' || status.state === 'VERIFYING') {
+					cancellationIntentRef.current = false;
 					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
 					verificationSaved = saved;
 				} else {
@@ -437,12 +519,13 @@ export default function DirectImageUploadWidget({
 				}
 			}
 		} finally {
-			cancelling.current = false;
+			cancellationRequestedSessionIdsRef.current.delete(saved.session.sessionId);
+			finishCancellation();
 			if (verificationSaved && mountedRef.current && runTokenRef.current === cancelToken) {
 				void observeSavedReady(verificationSaved, files);
 			}
 		}
-	}, [abortLocalWork, files, forget, observeSavedReady, remember]);
+	}, [abortLocalWork, files, finishCancellation, forget, observeSavedReady, remember]);
 
 	const start = () => {
 		const saved = resumableRef.current;
@@ -451,11 +534,11 @@ export default function DirectImageUploadWidget({
 	};
 	const retry = start;
 
-	const canSelect = !autoStart && (phase === 'idle' || phase === 'error');
+	const canSelect = !compact && !autoStart && (phase === 'idle' || phase === 'error');
 
 	return (
 		<div className="game-upload">
-			{!hideTitle && <h3 className="game-upload__title">{title}</h3>}
+			{!compact && !hideTitle && <h3 className="game-upload__title">{title}</h3>}
 			{resumable && phase === 'idle' && <p className="field-hint">중단된 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>}
 			{canSelect && (
 				<div className="game-upload__file-input">
@@ -470,7 +553,7 @@ export default function DirectImageUploadWidget({
 					}} />
 				</div>
 			)}
-			{files.length > 0 && <p className="game-upload__file-summary">{files.length}개 파일 선택됨 ({completed}/{files.length} 완료)</p>}
+			{!compact && files.length > 0 && <p className="game-upload__file-summary">{files.length}개 파일 선택됨 ({completed}/{files.length} 완료)</p>}
 			{progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
 					<div className="game-upload__progress-track" role="progressbar" aria-label={`${title} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
@@ -487,7 +570,7 @@ export default function DirectImageUploadWidget({
 				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${title} 시작`}</button>}
 				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}
 				{(phase === 'uploading' || phase === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={pause}>일시 정지</button>}
-				{((phase === 'uploading' || phase === 'verifying') || (resumable && phase !== 'ready')) && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
+				{phase !== 'ready' && (files.length > 0 || resumable || phase === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
 				{phase === 'ready' && <span className="game-upload__complete-text">{title} 완료</span>}
 			</div>
 		</div>

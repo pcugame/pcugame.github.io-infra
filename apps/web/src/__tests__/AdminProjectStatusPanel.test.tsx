@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AdminProjectStatusPanel } from '../features/admin/projects/AdminProjectStatusPanel';
@@ -21,6 +21,32 @@ describe('AdminProjectStatusPanel', () => {
 
 		expect(screen.getByText('제출 중')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: '공개로 전환' })).toBeNull();
-		expect(screen.queryByRole('button', { name: '보관' })).toBeNull();
+		expect((screen.getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
+	});
+	it.each(['PUBLISHED', 'ARCHIVED'] as const)('toggles %s using the existing status contract', (status) => {
+		const onToggle = vi.fn();
+		render(
+			<AdminProjectStatusPanel
+				status={status}
+				isPrivileged
+				isPending={false}
+				error={null}
+				onToggle={onToggle}
+			/>,
+		);
+		const toggle = screen.getByRole('switch', { name: '작품 공개' });
+		expect(toggle.getAttribute('aria-checked')).toBe(String(status === 'PUBLISHED'));
+		expect(toggle.textContent).toBe('공개비공개');
+		fireEvent.click(toggle);
+		expect(onToggle).toHaveBeenCalledWith(status === 'PUBLISHED' ? 'ARCHIVED' : 'PUBLISHED');
+	});
+	it.each([
+		{ isPrivileged: false, isPending: false },
+		{ isPrivileged: true, isPending: true },
+	])('prevents changes without permission or during saving: %j', (flags) => {
+		const onToggle = vi.fn();
+		render(<AdminProjectStatusPanel status="PUBLISHED" {...flags} error={null} onToggle={onToggle} />);
+		fireEvent.click(screen.getByRole('switch'));
+		expect(onToggle).not.toHaveBeenCalled();
 	});
 });

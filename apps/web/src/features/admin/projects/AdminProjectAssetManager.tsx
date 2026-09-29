@@ -1,252 +1,194 @@
-import type { AdminProjectDetail, SetProjectVideoOrderRequest } from '@pcu/contracts';
-import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-
-import GameUploadWidget from '../../../components/GameUploadWidget';
-import DirectVideoUploadWidget from '../../../components/DirectVideoUploadWidget';
+import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
+import type { AdminProjectDetail } from '@pcu/contracts';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
-import { ResponsiveImage } from '../../../components/common';
+import DirectVideoUploadWidget from '../../../components/DirectVideoUploadWidget';
+import GameUploadWidget from '../../../components/GameUploadWidget';
 import type { ClientUploadLimits } from '../../../lib/upload-limits';
-import { getApiErrorMessage } from '../../../lib/api';
-import { getAdminVideoLabel } from '../../../lib/video-label';
-import { publicApi } from '../../../lib/api';
-import { materialUploadLimitsFromConfig } from '../../../lib/upload-limits';
+import { ProjectPosterPreview, ProjectUploadDropZone } from '../../../components/project/editor';
+import { useProjectUploadQueue, type ProjectUploadQueue } from './useProjectUploadQueue';
+import { uploadKindLabels, type UploadEntry, type UploadZone } from '../../../lib/upload/project-files';
 
-type VideoAsset = Extract<AdminProjectDetail['assets'][number], { url: string }> & {
-	kind: 'VIDEO';
-	videoSortOrder?: number | null;
-};
-
-interface AdminProjectAssetManagerProps {
+const QueueContext = createContext<ProjectUploadQueue | null>(null);
+export function AdminProjectUploadProvider({
+	project,
+	projectId,
+	limits,
+	canEditContent,
+	children,
+}: {
 	project: AdminProjectDetail;
 	projectId: number;
 	limits: ClientUploadLimits;
 	canEditContent: boolean;
-	isSettingPoster: boolean;
-	isRemovingAsset: boolean;
-	isRemovingWebgl: boolean;
-	isReorderingVideos?: boolean;
-	videoOrderError?: unknown;
-	onSetPoster: (assetId: number) => void;
-	onRemoveAsset: (assetId: number) => void;
-	onRemoveWebgl: () => void;
-	onReorderVideos?: (body: SetProjectVideoOrderRequest) => void;
+	children: ReactNode;
+}) {
+	const queue = useProjectUploadQueue(project, projectId, limits, canEditContent);
+	return <QueueContext.Provider value={queue}>{children}</QueueContext.Provider>;
 }
-
-export function AdminProjectAssetManager({
-	project,
-	projectId,
+function useQueue() {
+	const queue = useContext(QueueContext);
+	if (!queue) throw new Error('Project upload provider is required');
+	return queue;
+}
+function ActiveUpload({ entry, queue }: { entry: UploadEntry; queue: ProjectUploadQueue }) {
+	const files = useMemo(() => [entry.file], [entry.file]);
+	const { complete, cancel } = queue;
+	const onComplete = useCallback(() => {
+		void complete(entry.id);
+	}, [complete, entry.id]);
+	const onCancelled = useCallback(() => cancel(entry.id), [cancel, entry.id]);
+	const common = { autoStart: true, compact: true, onComplete, onCancelled };
+	if (entry.kind === 'POSTER' || entry.kind === 'IMAGE')
+		return <DirectImageUploadWidget {...common} owner={queue.owner} kind={entry.kind} initialFiles={files} />;
+	if (entry.kind === 'GAME' || entry.kind === 'WEBGL')
+		return (
+			<GameUploadWidget
+				{...common}
+				projectId={queue.owner.id}
+				uploadKind={entry.kind}
+				initialFile={entry.file}
+			/>
+		);
+	if (entry.kind === 'ZIP') return null;
+	return (
+		<DirectVideoUploadWidget
+			{...common}
+			projectId={queue.owner.id}
+			kind={entry.kind}
+			label={uploadKindLabels[entry.kind]}
+			initialFiles={files}
+			maxFiles={1}
+			maxFileBytes={entry.kind === 'VIDEO' ? undefined : queue.materialLimits?.maxBytes}
+		/>
+	);
+}
+function UploadDropZone({
+	zone,
 	canEditContent,
-	isSettingPoster,
-	isRemovingAsset,
-	isRemovingWebgl,
-	isReorderingVideos = false,
-	videoOrderError,
-	onSetPoster,
-	onRemoveAsset,
-	onRemoveWebgl,
-	onReorderVideos,
-}: AdminProjectAssetManagerProps) {
-	const { data: uploadConfig } = useQuery({ queryKey: ['public-upload-config'], queryFn: publicApi.getUploadConfig });
-	const materialLimits = materialUploadLimitsFromConfig(uploadConfig);
-	const materialAssetIds = new Set([
-		...(project.attachments ?? []).map((attachment) => attachment.assetId),
-		...project.assets.filter((asset) => asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT').map((asset) => asset.id),
-	]);
-	const availableMaterialSlots = materialLimits ? Math.max(0, materialLimits.maxCount - materialAssetIds.size) : 0;
-	const canonicalVideoIndex = new Map(project.videos.map((video, index) => [video.assetId, index]));
-	const videoAssets = project.assets
-		.filter((asset): asset is VideoAsset => asset.kind === 'VIDEO')
-		.sort((left, right) => (canonicalVideoIndex.get(left.id) ?? Infinity) - (canonicalVideoIndex.get(right.id) ?? Infinity));
-	// Keep other assets in place while presenting videos in the server's canonical order.
-	let nextVideoIndex = 0;
-	const orderedAssets = project.assets.map((asset) => asset.kind === 'VIDEO' ? videoAssets[nextVideoIndex++]! : asset);
-	const videoAssetIds = videoAssets.map((asset) => asset.id);
-	const supportsVideoOrder = videoAssets.every((asset) => Object.hasOwn(asset, 'videoSortOrder'));
-	const moveVideo = (assetId: number, targetIndex: number) => {
-		const currentIndex = videoAssetIds.indexOf(assetId);
-		if (currentIndex < 0 || targetIndex < 0 || targetIndex >= videoAssetIds.length) return;
-		const order = [...videoAssetIds];
-		order.splice(currentIndex, 1);
-		order.splice(targetIndex, 0, assetId);
-		onReorderVideos?.({ expectedOrder: videoAssetIds, order });
-	};
+	children,
+}: {
+	zone: UploadZone;
+	canEditContent: boolean;
+	children?: ReactNode;
+}) {
+	const queue = useQueue();
+	const poster = zone === 'poster';
+	const entries = queue.entries.filter((entry) => entry.zone === zone && entry.status !== 'cancelled');
+	return (
+		<ProjectUploadDropZone
+			zone={zone}
+			enabled={canEditContent}
+			onFiles={(files) => queue.add(files, zone)}
+			hint={!canEditContent ? '파일을 업로드할 권한이 없습니다.' : undefined}
+			footer={
+				<>
+					{poster && queue.posterError && (
+						<p role="alert" className="field-error">
+							{queue.posterError}
+						</p>
+					)}
+					{!poster && canEditContent && queue.configUnavailable && (
+						<p className="field-hint" role="status">
+							자료 업로드 설정을 불러오지 못하면 문서·첨부자료는 대기합니다.{' '}
+							<button
+								type="button"
+								className="btn btn--secondary btn--small"
+								disabled={queue.configLoading}
+								onClick={queue.retryConfig}
+							>
+								{queue.configLoading ? '설정 조회 중…' : '설정 재시도'}
+							</button>
+						</p>
+					)}
+					{entries.length > 0 && (
+						<ul
+							className="project-upload-queue"
+							aria-label={poster ? '포스터 업로드 대기열' : '파일 업로드 대기열'}
+						>
+							{entries.map((entry) => (
+								<li key={entry.id}>
+									<p>
+										<strong>{entry.file.name}</strong> ·{' '}
+										{entry.kind === 'ZIP' ? 'ZIP 용도 선택 대기' : uploadKindLabels[entry.kind]}
+									</p>
+									{entry.status === 'done' ? (
+										<span role="status">업로드 완료</span>
+									) : entry.status === 'active' ? (
+										<>
+											{canEditContent && <ActiveUpload entry={entry} queue={queue} />}
+											{queue.refreshError && (
+												<p role="alert">
+													업로드 후 정보를 갱신하지 못했습니다.{' '}
+													<button
+														type="button"
+														className="btn btn--secondary btn--small"
+														onClick={() => void queue.complete(entry.id)}
+													>
+														조회 재시도
+													</button>
+												</p>
+											)}
+										</>
+									) : (
+										<>
+											{entry.kind === 'ZIP' ? (
+												<div className="project-upload-queue__choices">
+													{(['GAME', 'WEBGL', 'ATTACHMENT'] as const).map((kind) => (
+														<button
+															key={kind}
+															type="button"
+															className="btn btn--secondary btn--small"
+															disabled={!canEditContent}
+															onClick={() => queue.choose(entry.id, kind)}
+														>
+															{uploadKindLabels[kind]}
+														</button>
+													))}
+												</div>
+											) : (
+												<p role="status">{queue.issues.get(entry.id) ?? '업로드 대기 중'}</p>
+											)}
+											<button
+												type="button"
+												className="btn btn--secondary btn--small"
+												onClick={() => queue.cancel(entry.id)}
+											>
+												취소
+											</button>
+										</>
+									)}
+								</li>
+							))}
+						</ul>
+					)}
+				</>
+			}
+		>
+			{children}
+		</ProjectUploadDropZone>
+	);
+}
+export function AdminProjectPosterUpload({
+	project,
+	canEditContent,
+}: {
+	project: AdminProjectDetail;
+	canEditContent: boolean;
+}) {
 	return (
 		<fieldset>
-			<legend>등록된 자산</legend>
-			{!!videoOrderError && <p className="field-error" role="alert">{getApiErrorMessage(videoOrderError)} 최신 목록을 확인한 후 다시 시도해 주세요.</p>}
-
-			{project.posterAssetId && (
-				<p className="asset-current-poster">
-					현재 포스터:{' '}
-					<strong>
-						{project.assets.find((a) => a.id === project.posterAssetId)
-							?.originalName ?? project.posterAssetId}
-					</strong>
-				</p>
-			)}
-
-			{project.assets.length === 0 ? (
-				<p>등록된 자산이 없습니다.</p>
-			) : (
-				<ul className="asset-list">
-					{orderedAssets.map((asset) => {
-						const isCurrentPoster = asset.id === project.posterAssetId;
-						const videoIndex = videoAssetIds.indexOf(asset.id);
-						const canSetAsPoster =
-							canEditContent &&
-							(asset.kind === 'IMAGE' || asset.kind === 'POSTER') &&
-							!isCurrentPoster;
-						return (
-							<li key={asset.id} className="asset-list__item">
-								<span>
-									[{asset.kind}] {asset.originalName} (
-									{(asset.size / 1024).toFixed(0)}KB)
-									{isCurrentPoster && (
-										<strong className="asset-poster-label">
-											[포스터]
-										</strong>
-									)}
-								</span>
-								{asset.kind === 'VIDEO' && asset.playbackStatus && (
-									<p className="field-hint">
-										재생용: {asset.playbackStatus}
-										{asset.playbackError ? ` (${asset.playbackError})` : ''}
-									</p>
-								)}
-								{asset.kind === 'VIDEO' && (
-									<p className="field-hint">영상 역할: <strong className="asset-video-role-badge">{getAdminVideoLabel(asset.videoSortOrder)}</strong></p>
-								)}
-								{asset.kind === 'THUMBNAIL' || asset.kind === 'IMAGE' || asset.kind === 'POSTER' ? (
-									<ResponsiveImage
-										image={asset.image}
-										alt={asset.originalName}
-										className="asset-thumb"
-										sizes="160px"
-										loading="lazy"
-										decoding="async"
-									/>
-								) : null}
-								{canEditContent && (
-									<div className="asset-actions">
-										{canSetAsPoster && (
-											<button
-												className="btn btn--secondary btn--small"
-												onClick={() => onSetPoster(asset.id)}
-												disabled={isSettingPoster}
-											>
-												포스터로 지정
-											</button>
-										)}
-										{asset.kind === 'VIDEO' && asset.originalDownloadUrl && (
-											<a
-												className="btn btn--secondary btn--small"
-												href={asset.originalDownloadUrl}
-												download
-											>
-												원본 다운로드
-											</a>
-										)}
-										{(asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT') && (
-											<a className="btn btn--secondary btn--small" href={asset.downloadUrl} download>다운로드</a>
-										)}
-										{asset.kind === 'VIDEO' && supportsVideoOrder && (
-											<>
-												<button
-													className="btn btn--secondary btn--small"
-													onClick={() => moveVideo(asset.id, 0)}
-													disabled={isReorderingVideos || videoIndex === 0 && asset.videoSortOrder === 0}
-												>
-													메인으로 지정
-												</button>
-												<button
-													className="btn btn--secondary btn--small"
-													onClick={() => moveVideo(asset.id, videoIndex - 1)}
-													disabled={isReorderingVideos || videoIndex <= 0}
-												>
-													위로
-												</button>
-												<button
-													className="btn btn--secondary btn--small"
-													onClick={() => moveVideo(asset.id, videoIndex + 1)}
-													disabled={isReorderingVideos || videoIndex < 0 || videoIndex >= videoAssetIds.length - 1}
-												>
-													아래로
-												</button>
-											</>
-										)}
-										<button
-											className="btn btn--danger btn--small"
-											onClick={() => onRemoveAsset(asset.id)}
-											disabled={isRemovingAsset}
-										>
-											삭제
-										</button>
-									</div>
-								)}
-							</li>
-						);
-					})}
-				</ul>
-			)}
-
-			{canEditContent && (
-				<>
-					<div className="asset-upload-section">
-						<h4>자산 추가</h4>
-						<p className="field-hint">이미지와 포스터는 브라우저에서 Garage로 직접 전송됩니다.</p>
-						<DirectImageUploadWidget owner={{ type: 'PROJECT', id: projectId }} kind="POSTER" />
-						<DirectImageUploadWidget owner={{ type: 'PROJECT', id: projectId }} kind="IMAGE" />
-						{videoAssets.length >= 5 ? (
-							<p className="field-hint">동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다.</p>
-						) : (
-							<DirectVideoUploadWidget projectId={projectId} maxFiles={5 - videoAssets.length} />
-						)}
-						{materialLimits && availableMaterialSlots > 0 && (
-							<>
-								<DirectVideoUploadWidget projectId={projectId} maxFiles={availableMaterialSlots}
-									maxFileBytes={materialLimits.maxBytes} kind="DOCUMENT" label="문서" accept="text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.ods,.odp,.rtf,.xls,.xlsx,.ppt,.pptx" />
-								<DirectVideoUploadWidget projectId={projectId} maxFiles={availableMaterialSlots}
-									maxFileBytes={materialLimits.maxBytes} kind="ATTACHMENT" label="첨부자료" />
-							</>
-						)}
-						{materialLimits && availableMaterialSlots === 0 && <p className="field-hint">문서와 첨부자료는 프로젝트당 최대 {materialLimits.maxCount}개까지 등록할 수 있습니다.</p>}
-					</div>
-
-					<GameUploadWidget projectId={projectId} uploadKind="GAME" />
-					<div className="webgl-asset-manager">
-						{project.webglUrl && (
-							<div className="webgl-asset-manager__current">
-								<p>현재 공개 WebGL 빌드가 배포되어 있습니다.</p>
-								{project.webglDeployment ? (
-									<p className="field-hint">
-										불변 배포 ID: <code>{project.webglDeployment.id}</code>
-									</p>
-								) : (
-									<p className="field-hint">기존 WebGL 배포를 canonical 구조로 승격 중입니다.</p>
-								)}
-								<Link
-									className="btn btn--secondary btn--small"
-									to={`/projects/${projectId}/play`}
-									target="_blank"
-									rel="noopener noreferrer"
-								>
-									플레이 페이지 열기
-								</Link>
-								<button
-									type="button"
-									className="btn btn--danger btn--small"
-									disabled={isRemovingWebgl}
-									onClick={onRemoveWebgl}
-								>
-									{isRemovingWebgl ? '삭제 중…' : 'WebGL 빌드 삭제'}
-								</button>
-							</div>
-						)}
-						<GameUploadWidget projectId={projectId} uploadKind="WEBGL" />
-					</div>
-				</>
-			)}
+			<legend>포스터</legend>
+			<UploadDropZone zone="poster" canEditContent={canEditContent}>
+				<ProjectPosterPreview image={project.poster} title={project.title} />
+			</UploadDropZone>
+		</fieldset>
+	);
+}
+export function AdminProjectAssetManager({ canEditContent }: { canEditContent: boolean }) {
+	return (
+		<fieldset>
+			<legend>기타 파일</legend>
+			<UploadDropZone zone="files" canEditContent={canEditContent} />
 		</fieldset>
 	);
 }
