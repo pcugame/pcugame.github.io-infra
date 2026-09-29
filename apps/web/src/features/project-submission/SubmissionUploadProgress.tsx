@@ -47,7 +47,6 @@ export function SubmissionUploadProgress({
 					{kinds.map((kind) => {
 						const kindItems = ordered.filter((item) => item.kind === kind);
 						if (kindItems.length === 0) return null;
-						const binding = kindItems.map((item) => ({ id: item.id, clientToken: item.clientToken }));
 						const initialFiles =
 							kind === 'POSTER'
 								? posterFiles
@@ -61,8 +60,13 @@ export function SubmissionUploadProgress({
 						const initialFile = kind === 'GAME' ? files.gameFile : files.webglFile;
 						const selected =
 							kind === 'GAME' || kind === 'WEBGL' ? (initialFile ? [initialFile] : []) : initialFiles;
+						// Bound batches retain absolute file indexes. Reloaded batches advance to remaining slots.
+						const pendingItems = selected.length
+							? kindItems
+							: kindItems.filter((item) => item.state !== 'READY');
+						const binding = pendingItems.map((item) => ({ id: item.id, clientToken: item.clientToken }));
 						return (
-							<li key={kindItems.map((item) => item.id).join(':')}>
+							<li key={`${kind}:${pendingItems.map((item) => item.id).join(':')}`}>
 								<p>
 									<strong>
 										{selected.length > 0

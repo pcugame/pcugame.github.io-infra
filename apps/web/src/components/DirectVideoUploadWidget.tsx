@@ -63,6 +63,7 @@ export default function DirectVideoUploadWidget({
 	accept,
 }: Props) {
 	const qc = useQueryClient();
+	const recoveringManifest = initialFiles.length === 0 && submissionItems.length > 0;
 	const fileInputId = useId();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
@@ -159,7 +160,7 @@ export default function DirectVideoUploadWidget({
 			try {
 				const saved = JSON.parse(raw) as SavedVideoSession;
 				if (saved.session.kind !== kind) throw new Error('kind');
-				const completedBefore = compact && initialFiles.length === 1
+				const completedBefore = recoveringManifest || (compact && initialFiles.length === 1)
 					? 0 : saved.completed ?? 0;
 				const matchesChosen = initialFiles.length === 0
 					|| (initialFiles[completedBefore]?.name === saved.originalName && initialFiles[completedBefore]?.size === saved.totalBytes);
@@ -226,7 +227,7 @@ export default function DirectVideoUploadWidget({
 			controller.abort();
 			if (restoreControllerRef.current === controller) restoreControllerRef.current = null;
 		};
-	}, [compact, forget, initialFiles, kind, onComplete, projectId, qc, remember, storageKey, updateCompleted]);
+	}, [recoveringManifest, compact, forget, initialFiles, kind, onComplete, projectId, qc, remember, storageKey, updateCompleted]);
 
 	const uploadQueue = useCallback(async (
 		chosen: readonly File[],

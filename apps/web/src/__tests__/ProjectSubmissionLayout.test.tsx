@@ -9,31 +9,62 @@ import type { DirectAssetUploadSession } from '../lib/api/game-upload';
 import { ProjectSubmissionForm } from '../features/project-submission/ProjectSubmissionForm';
 
 const controls = vi.hoisted(() => ({
-	config: vi.fn(), years: vi.fn(), getApi: vi.fn(), submit: vi.fn(), status: vi.fn(), finalize: vi.fn(), cancel: vi.fn(),
-	upload: vi.fn(), getUploadStatus: vi.fn(), cancelUpload: vi.fn(), waitReady: vi.fn(),
+	config: vi.fn(),
+	years: vi.fn(),
+	getApi: vi.fn(),
+	submit: vi.fn(),
+	status: vi.fn(),
+	finalize: vi.fn(),
+	cancel: vi.fn(),
+	upload: vi.fn(),
+	getUploadStatus: vi.fn(),
+	cancelUpload: vi.fn(),
+	waitReady: vi.fn(),
 }));
-vi.mock('../features/auth', () => ({ useMe: () => ({ user: { id: 9, name: '홍길동', studentId: '20260001', role: 'USER' } }) }));
+vi.mock('../features/auth', () => ({
+	useMe: () => ({ user: { id: 9, name: '홍길동', studentId: '20260001', role: 'USER' } }),
+}));
 vi.mock('../lib/api', async (importOriginal) => ({
-	...await importOriginal<typeof import('../lib/api')>(),
-	publicApi: { getUploadConfig: controls.config }, adminExhibitionApi: { list: controls.years },
+	...(await importOriginal<typeof import('../lib/api')>()),
+	publicApi: { getUploadConfig: controls.config },
+	adminExhibitionApi: { list: controls.years },
 }));
 vi.mock('../lib/api/project-submit', () => ({ getProjectSubmitApi: controls.getApi }));
 vi.mock('../lib/api/game-upload', () => ({
-	uploadDirectAssetFile: controls.upload, getDirectAssetUploadStatus: controls.getUploadStatus,
-	cancelDirectAssetUploadSession: controls.cancelUpload, waitForDirectAssetReady: controls.waitReady,
+	uploadDirectAssetFile: controls.upload,
+	getDirectAssetUploadStatus: controls.getUploadStatus,
+	cancelDirectAssetUploadSession: controls.cancelUpload,
+	waitForDirectAssetReady: controls.waitReady,
 }));
 
 let items: ProjectSubmissionItemStatus[];
-const draft = () => ({ id: 73, slug: 'new-project', year: 2026, status: 'DRAFT', submissionId: 'submission-73', items, adminEditUrl: '/admin/projects/73/edit' });
+const draft = () => ({
+	id: 73,
+	slug: 'new-project',
+	year: 2026,
+	status: 'DRAFT',
+	submissionId: 'submission-73',
+	items,
+	adminEditUrl: '/admin/projects/73/edit',
+});
 beforeEach(() => {
 	items = [];
 	vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:poster'), revokeObjectURL: vi.fn() });
 	Element.prototype.scrollIntoView = vi.fn();
 	controls.config.mockResolvedValue({ materialMaxCount: 10, materialMaxBytes: 50 * 1024 * 1024 });
-	controls.years.mockResolvedValue({ items: [{ id: 26, year: 2026, title: '졸업전시', isUploadEnabled: true, isModificationEnabled: true }] });
-	controls.getApi.mockReturnValue({ submit: controls.submit, getSubmission: controls.status, finalizeSubmission: controls.finalize, cancelSubmission: controls.cancel });
+	controls.years.mockResolvedValue({
+		items: [{ id: 26, year: 2026, title: '졸업전시', isUploadEnabled: true, isModificationEnabled: true }],
+	});
+	controls.getApi.mockReturnValue({
+		submit: controls.submit,
+		getSubmission: controls.status,
+		finalizeSubmission: controls.finalize,
+		cancelSubmission: controls.cancel,
+	});
 	controls.submit.mockImplementation(({ formData }: { formData: FormData }) => {
-		const payload = JSON.parse(String(formData.get('payload'))) as { manifest: ProjectSubmissionManifestItem[] };
+		const payload = JSON.parse(String(formData.get('payload'))) as {
+			manifest: ProjectSubmissionManifestItem[];
+		};
 		items = payload.manifest.map((item, index) => ({ ...item, id: `item-${index}`, state: 'EXPECTED' }));
 		return Promise.resolve(draft());
 	});
@@ -48,9 +79,13 @@ afterEach(() => {
 });
 
 function mount(mode: 'admin' | 'user' = 'user') {
-	return render(<MemoryRouter><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-		<ProjectSubmissionForm mode={mode} />
-	</QueryClientProvider></MemoryRouter>);
+	return render(
+		<MemoryRouter>
+			<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+				<ProjectSubmissionForm mode={mode} />
+			</QueryClientProvider>
+		</MemoryRouter>,
+	);
 }
 async function enterMetadata() {
 	fireEvent.click(await screen.findByRole('combobox'));
@@ -58,7 +93,9 @@ async function enterMetadata() {
 	fireEvent.change(screen.getByLabelText('제목 *'), { target: { value: '선택한 작품' } });
 }
 function select(container: HTMLElement, zone: 'poster' | 'files', files: File[]) {
-	fireEvent.change(container.querySelector(`.project-upload-drop--${zone} input[type="file"]`)!, { target: { files } });
+	fireEvent.change(container.querySelector(`.project-upload-drop--${zone} input[type="file"]`)!, {
+		target: { files },
+	});
 }
 
 describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode) => {
@@ -85,16 +122,27 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		expect(controls.getApi).toHaveBeenCalledWith(mode);
 		const formData = controls.submit.mock.calls[0]![0].formData as FormData;
 		expect(Array.from(formData.keys())).toEqual(['payload']);
-		expect(items.map((item) => item.kind).sort()).toEqual(['DOCUMENT', 'GAME', 'IMAGE', 'POSTER', 'VIDEO', 'WEBGL']);
+		expect(items.map((item) => item.kind).sort()).toEqual([
+			'DOCUMENT',
+			'GAME',
+			'IMAGE',
+			'POSTER',
+			'VIDEO',
+			'WEBGL',
+		]);
 		for (const call of controls.upload.mock.calls) {
 			const kind = call[2];
 			const item = items.find((candidate) => candidate.kind === kind)!;
 			expect(call[4].submissionItem).toEqual({ id: item.id, clientToken: item.clientToken });
 		}
-		expect(within(container.querySelector('.admin-project-edit-poster')!).getByText('poster.png')).toBeTruthy();
+		expect(
+			within(container.querySelector('.admin-project-edit-poster')!).getByText('poster.png'),
+		).toBeTruthy();
 		expect(within(container.querySelector('.admin-project-edit-assets')!).getByText('game.zip')).toBeTruthy();
 		expect(container.querySelector('input[type="file"]')).toBeNull();
-		expect(window.sessionStorage.getItem(`pcu.pending-project-submission:${mode}`)).toContain('submission-73');
+		expect(window.sessionStorage.getItem(`pcu.pending-project-submission:${mode}`)).toContain(
+			'submission-73',
+		);
 	});
 });
 
@@ -106,7 +154,9 @@ describe('submission selection and recovery', () => {
 		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(true);
 		expect(screen.getByRole('button', { name: '첨부자료' })).toBeTruthy();
 		fireEvent.submit(container.querySelector('form')!);
-		await act(async () => { await Promise.resolve(); });
+		await act(async () => {
+			await Promise.resolve();
+		});
 		expect(controls.submit).not.toHaveBeenCalled();
 		fireEvent.click(screen.getByRole('button', { name: '게임' }));
 		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(false);
@@ -119,13 +169,22 @@ describe('submission selection and recovery', () => {
 		let finishPoster!: (value: { status: 'READY'; sessionId: string }) => void;
 		controls.upload.mockImplementation((_owner, file: File, kind, _progress, options) => {
 			const session: DirectAssetUploadSession = {
-				sessionId: file.name, owner: { type: 'PROJECT', id: 73 }, kind, generation: 1,
-				partSizeBytes: 16, totalParts: 1, expiresAt: '2026-10-01T00:00:00.000Z',
-				sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64),
+				sessionId: file.name,
+				owner: { type: 'PROJECT', id: 73 },
+				kind,
+				generation: 1,
+				partSizeBytes: 16,
+				totalParts: 1,
+				expiresAt: '2026-10-01T00:00:00.000Z',
+				sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+				sourceIdentity: 'a'.repeat(64),
 			};
 			options.onSession(session);
 			if (file === first) return Promise.resolve({ status: 'READY', sessionId: file.name });
-			if (file === poster) return new Promise((resolve) => { finishPoster = resolve; });
+			if (file === poster)
+				return new Promise((resolve) => {
+					finishPoster = resolve;
+				});
 			return new Promise(() => undefined);
 		});
 		const { container } = mount();
@@ -134,20 +193,96 @@ describe('submission selection and recovery', () => {
 		select(container, 'files', [first, second]);
 		fireEvent.click(screen.getByRole('button', { name: '작품 제출' }));
 		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(3));
-		items = items.map((item) => item.slot === 'image:0' || item.kind === 'POSTER' ? { ...item, state: 'READY' } : item);
-		await act(async () => { finishPoster({ status: 'READY', sessionId: poster.name }); });
+		items = items.map((item) =>
+			item.slot === 'image:0' || item.kind === 'POSTER' ? { ...item, state: 'READY' } : item,
+		);
+		await act(async () => {
+			finishPoster({ status: 'READY', sessionId: poster.name });
+		});
 		await waitFor(() => expect(controls.status).toHaveBeenCalledTimes(2));
-		expect(controls.upload.mock.calls.map((call) => call[1].name).sort()).toEqual(['first.png', 'poster.png', 'second.png']);
+		expect(controls.upload.mock.calls.map((call) => call[1].name).sort()).toEqual([
+			'first.png',
+			'poster.png',
+			'second.png',
+		]);
 		const secondCall = controls.upload.mock.calls.find((call) => call[1] === second)!;
 		const secondItem = items.find((item) => item.slot === 'image:1')!;
 		expect(secondCall[4].submissionItem).toEqual({ id: secondItem.id, clientToken: secondItem.clientToken });
 		expect(container.querySelector('.admin-project-edit-assets')?.textContent).toContain('일시 정지');
 	});
 
+	it('advances a reloaded three-image batch from a verifying second file to the remaining third slot', async () => {
+		items = ['READY', 'VERIFYING', 'EXPECTED'].map((state, index) => ({
+			id: `image-${index}`,
+			kind: 'IMAGE',
+			slot: `image:${index}`,
+			clientToken: `token-${index}`,
+			required: true,
+			state: state as ProjectSubmissionItemStatus['state'],
+		}));
+		window.sessionStorage.setItem('pcu.pending-project-submission:user', JSON.stringify(draft()));
+		const session = {
+			sessionId: 'second-session',
+			owner: { type: 'PROJECT', id: 73 },
+			kind: 'IMAGE',
+			generation: 1,
+			partSizeBytes: 16,
+			totalParts: 1,
+			expiresAt: '2026-10-01T00:00:00.000Z',
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+			sourceIdentity: 'a'.repeat(64),
+		};
+		window.sessionStorage.setItem(
+			'pcu.direct-image-upload:PROJECT:73',
+			JSON.stringify({ session, originalName: 'second.png', totalBytes: 6, completed: 1 }),
+		);
+		controls.getUploadStatus.mockResolvedValue({ ...session, state: 'VERIFYING' });
+		let finish!: (value: unknown) => void;
+		controls.waitReady.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const { container } = mount();
+		await waitFor(() => expect(controls.waitReady).toHaveBeenCalled());
+		items = items.map((item, index) => (index === 1 ? { ...item, state: 'READY' } : item));
+		await act(async () => {
+			finish({ ...session, state: 'READY' });
+		});
+		await waitFor(() =>
+			expect(container.querySelector('.admin-project-edit-assets input[type="file"]')).toBeTruthy(),
+		);
+		const third = new File(['third'], 'third.png', { type: 'image/png' });
+		fireEvent.change(container.querySelector('.admin-project-edit-assets input[type="file"]')!, {
+			target: { files: [third] },
+		});
+		fireEvent.click(screen.getByRole('button', { name: /업로드 시작/ }));
+		await waitFor(() => expect(controls.upload).toHaveBeenCalled());
+		expect(controls.upload.mock.calls[0]![4].submissionItem).toEqual({
+			id: 'image-2',
+			clientToken: 'token-2',
+		});
+	});
+
 	it('retains existing file recovery inputs after reloading a pending DRAFT without browser files', async () => {
 		items = [
-			{ id: 'poster-item', kind: 'POSTER', slot: 'poster', clientToken: 'poster-token', required: true, state: 'EXPECTED' },
-			{ id: 'game-item', kind: 'GAME', slot: 'game', clientToken: 'game-token', required: true, state: 'EXPECTED' },
+			{
+				id: 'poster-item',
+				kind: 'POSTER',
+				slot: 'poster',
+				clientToken: 'poster-token',
+				required: true,
+				state: 'EXPECTED',
+			},
+			{
+				id: 'game-item',
+				kind: 'GAME',
+				slot: 'game',
+				clientToken: 'game-token',
+				required: true,
+				state: 'EXPECTED',
+			},
 		];
 		window.sessionStorage.setItem('pcu.pending-project-submission:user', JSON.stringify(draft()));
 		const { container } = mount();
@@ -159,6 +294,8 @@ describe('submission selection and recovery', () => {
 		controls.cancel.mockResolvedValue(undefined);
 		fireEvent.click(screen.getByRole('button', { name: '제출 취소' }));
 		await waitFor(() => expect(controls.cancel).toHaveBeenCalledWith(73));
-		await waitFor(() => expect(window.sessionStorage.getItem('pcu.pending-project-submission:user')).toBeNull());
+		await waitFor(() =>
+			expect(window.sessionStorage.getItem('pcu.pending-project-submission:user')).toBeNull(),
+		);
 	});
 });

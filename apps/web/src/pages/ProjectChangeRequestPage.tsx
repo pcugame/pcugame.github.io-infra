@@ -400,7 +400,11 @@ export default function ProjectChangeRequestPage() {
 	const hasUnpreparedSelection = !preparedManifest && (selectedFiles.length > 0 || pendingZips.length > 0);
 	const uploadProgress = (uploadKind: ProjectUploadKind) => {
 		if (!preparedManifest || !active?.stagingProjectId || !editable) return null;
-		const planned = preparedManifest.filter((item) => item.kind === uploadKind);
+		const planned = preparedManifest.filter(
+			(item) =>
+				item.kind === uploadKind &&
+				(uploadFiles[uploadKind].length > 0 || uploadItemsByToken.get(item.clientToken)?.state !== 'READY'),
+		);
 		if (!planned.length) return null;
 		const initialFiles = uploadFiles[uploadKind];
 		const bindings = planned.map((item) => ({

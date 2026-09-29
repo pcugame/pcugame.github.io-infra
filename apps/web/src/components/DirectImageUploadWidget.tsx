@@ -54,6 +54,7 @@ export default function DirectImageUploadWidget({
 	submissionItems = [],
 }: Props) {
 	const qc = useQueryClient();
+	const recoveringManifest = initialFiles.length === 0 && submissionItems.length > 0;
 	const fileInputId = useId();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
@@ -159,7 +160,7 @@ export default function DirectImageUploadWidget({
 				const saved = JSON.parse(raw) as SavedImageSession;
 				if (saved.session.kind !== kind || saved.session.owner.type !== owner.type || saved.session.owner.id !== owner.id) throw new Error('owner');
 				const chosen = initialFilesRef.current;
-				const completedBefore = compact && chosen.length === 1
+				const completedBefore = recoveringManifest || (compact && chosen.length === 1)
 					? 0 : saved.completed ?? 0;
 				const matchesChosen = chosen.length === 0
 					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes);
@@ -229,7 +230,7 @@ export default function DirectImageUploadWidget({
 			controller.abort();
 			if (restoreControllerRef.current === controller) restoreControllerRef.current = null;
 		};
-	}, [compact, forget, invalidateOwner, kind, onComplete, owner, remember, storageKey, updateCompleted]);
+	}, [recoveringManifest, compact, forget, invalidateOwner, kind, onComplete, owner, remember, storageKey, updateCompleted]);
 
 	useEffect(() => {
 		onBusyChange?.(phase === 'uploading' || phase === 'verifying');

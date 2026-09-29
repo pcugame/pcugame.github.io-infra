@@ -219,13 +219,21 @@ describe('ProjectChangeRequestPage', () => {
 		expect(screen.getByRole('button', { name: '운영자에게 제출' })).toBeTruthy();
 		expect(screen.getByRole('button', { name: '요청 취소' })).toBeTruthy();
 		fireEvent.click(screen.getByRole('button', { name: '초안 저장' }));
-		await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(deleteDraft.id, {reason: deleteDraft.reason, changes: undefined}));
+		await waitFor(() =>
+			expect(mocks.update).toHaveBeenCalledWith(deleteDraft.id, {
+				reason: deleteDraft.reason,
+				changes: undefined,
+			}),
+		);
 	});
 
 	it('does not mount uploaders for a submitted request', async () => {
-		const active = { ...draft([{id: 'item-1', clientToken: 'token-1', kind: 'IMAGE', state: 'READY'}]), state: 'PENDING' };
+		const active = {
+			...draft([{ id: 'item-1', clientToken: 'token-1', kind: 'IMAGE', state: 'READY' }]),
+			state: 'PENDING',
+		};
 		mocks.getDetail.mockResolvedValue(project);
-		mocks.listForProject.mockResolvedValue({items: [active], total: 1});
+		mocks.listForProject.mockResolvedValue({ items: [active], total: 1 });
 		mocks.get.mockResolvedValue(active);
 		renderPage();
 		await screen.findByLabelText('제목 *');
