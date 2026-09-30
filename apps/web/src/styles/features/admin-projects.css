@@ -53,8 +53,8 @@
 
 .admin-search {
   flex: 1;
-  min-width: 180px;
-  max-width: 360px;
+  min-width: 11.25rem;
+  max-width: 22.5rem;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -224,7 +224,7 @@
   color: #7cacf8;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 60em) {
   .admin-filter-tabs {
     width: 100%;
     overflow-x: auto;
@@ -239,7 +239,7 @@
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .admin-filter-tabs {
     width: 100%;
     border-radius: 10px;

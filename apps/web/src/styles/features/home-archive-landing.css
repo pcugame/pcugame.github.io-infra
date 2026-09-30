@@ -49,13 +49,14 @@
 .home-hero__eyebrow::before {
   content: '';
   display: inline-block;
-  width: 20px;
+  width: 1.25rem;
   height: 2px;
   background: var(--h-primary);
   flex-shrink: 0;
 }
 
 .home-hero__title {
+  word-break: keep-all;
   font-size: clamp(2.4rem, 5vw, 3.6rem);
   font-weight: 900;
   line-height: 1.1;
@@ -73,7 +74,7 @@
   color: var(--h-text-muted);
   line-height: 1.75;
   margin-bottom: 2rem;
-  max-width: 420px;
+  max-width: 26.25rem;
 }
 
 @keyframes home-fade-up {
@@ -147,12 +148,12 @@
   --home-year-grid-gap: 1rem;
 
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--home-year-card-min), var(--home-year-card-max)));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--home-year-card-min)), var(--home-year-card-max)));
   justify-content: center;
   align-items: start;
   gap: var(--home-year-grid-gap);
   width: 100%;
-  max-width: calc(var(--max-width) * 0.8); /* 960px */
+  max-width: calc(var(--max-width) * 0.8); /* 60rem */
   margin: 0 auto;
 }
 
@@ -265,13 +266,13 @@
   margin-top: 0.2rem;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 70.3125em) {
   .home-year-grid {
     max-width: 100%;
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .home-hero__eyebrow {
     display: none;
   }
@@ -281,15 +282,14 @@
   }
 
   .home-year-grid {
-    --home-year-card-min: 9.5rem;
-    --home-year-card-max: calc((100% - var(--home-year-grid-gap)) / 2);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     --home-year-grid-gap: 0.75rem;
 
     max-width: 100%;
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .home-year-grid {
     border-radius: 10px;
   }
@@ -317,7 +317,7 @@
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 60em) {
   .home-year-grid::-webkit-scrollbar {
     display: none;
   }

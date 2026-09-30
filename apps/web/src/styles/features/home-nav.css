@@ -12,11 +12,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
   padding-top: 1.25rem;
   padding-bottom: 1.25rem;
 }
 
 .home-topnav__logo {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -30,14 +33,14 @@
 }
 
 .home-topnav__logo-sig {
-  height: 60px;
+  height: 3.75rem;
   width: auto;
   flex-shrink: 0;
 }
 
 .home-topnav__logo-divider {
   width: 1px;
-  height: 36px;
+  height: 2.25rem;
   background: var(--h-border);
   flex-shrink: 0;
 }
@@ -56,8 +59,11 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  flex-shrink: 0;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
 }
 
 .home-topnav__link {
@@ -85,6 +91,8 @@
   padding: 0.45rem 1rem;
   border: 1.5px solid var(--h-primary);
   border-radius: 50px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   transition: background 0.15s, color 0.15s;
 }
 
@@ -104,18 +112,18 @@
   color: #ffffff;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .home-topnav__inner {
     padding-top: 0.75rem;
     padding-bottom: 0.75rem;
   }
 
   .home-topnav__logo-sig {
-    height: 32px;
+    height: 2rem;
   }
 
   .home-topnav__logo-divider {
-    height: 22px;
+    height: 1.375rem;
   }
 
   .home-topnav__logo-dept {

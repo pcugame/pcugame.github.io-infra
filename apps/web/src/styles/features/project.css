@@ -91,7 +91,7 @@
 }
 
 .project-detail__poster img {
-  max-width: 500px;
+  max-width: 31.25rem;
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
@@ -103,7 +103,7 @@
 
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15.625rem), 1fr));
   gap: 1rem;
 }
 
@@ -286,7 +286,7 @@
   margin: 0;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .back-link {
     display: inline-flex;
     align-items: center;

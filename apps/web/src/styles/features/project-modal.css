@@ -24,7 +24,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 16px;
-  max-width: 720px;
+  max-width: 45rem;
   width: 100%;
   max-height: calc(100vh - 4rem);
   overflow-y: auto;
@@ -42,8 +42,8 @@
   top: 0.75rem;
   right: 0.75rem;
   z-index: 10;
-  width: 36px;
-  height: 36px;
+  width: 2.25rem;
+  height: 2.25rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -65,7 +65,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 300px;
+  min-height: 18.75rem;
 }
 
 /* 상단 비주얼 — 고정 16:9 비율 */
@@ -99,8 +99,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 2.25rem;
+  height: 2.25rem;
   border-radius: 8px;
   border: none;
   background: rgba(0, 0, 0, 0.55);
@@ -166,8 +166,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 2.5rem;
+  height: 2.5rem;
   border-radius: 50%;
   border: none;
   background: rgba(255, 255, 255, 0.15);
@@ -215,8 +215,8 @@
 }
 
 .modal-media-tab__thumb {
-  width: 56px;
-  height: 40px;
+  width: 3.5rem;
+  height: 2.5rem;
   object-fit: cover;
   border-radius: 4px;
 }
@@ -225,8 +225,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 40px;
+  width: 3.5rem;
+  height: 2.5rem;
   border-radius: 4px;
   background: var(--color-bg);
   color: var(--color-text-muted);
@@ -249,8 +249,8 @@
 }
 
 .modal-video-nav__arrow {
-  width: 28px;
-  height: 28px;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.08);
@@ -275,12 +275,12 @@
 .modal-video-dots {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.375rem;
 }
 
 .modal-video-dot {
-  width: 7px;
-  height: 7px;
+  width: 0.4375rem;
+  height: 0.4375rem;
   border-radius: 50%;
   border: none;
   padding: 0;
@@ -418,8 +418,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 72px;
-  height: 48px;
+  min-width: 4.5rem;
+  height: 3rem;
   padding: 0 1rem;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.12);
@@ -469,4 +469,18 @@
   border-radius: 12px;
   opacity: 0.85;
   cursor: not-allowed;
+}
+
+@media (max-width: 50em) {
+  .modal-overlay {
+    padding: 0.75rem;
+  }
+
+  .modal-panel {
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .modal-body {
+    padding: 1.25rem 1rem;
+  }
 }
