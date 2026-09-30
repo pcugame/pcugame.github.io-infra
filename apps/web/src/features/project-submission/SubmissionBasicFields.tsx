@@ -36,7 +36,7 @@ export function SubmissionBasicFields({
             </div>}
 
 			<div className="form-field">
-				<label htmlFor="exhibitionId">전시회 *</label>
+				<label htmlFor="exhibitionId">전시회 <span className="required-mark">*</span></label>
 				{years.length > 0 ? (
 					<Controller
 						control={control}
@@ -63,7 +63,7 @@ export function SubmissionBasicFields({
 			</div>
 
 			<div className="form-field">
-				<label htmlFor="title">제목 *</label>
+				<label htmlFor="title">제목 <span className="required-mark">*</span></label>
 				<input id="title" type="text" {...register('title')} />
 				{errors.title && <span className="field-error">{errors.title.message}</span>}
 			</div>

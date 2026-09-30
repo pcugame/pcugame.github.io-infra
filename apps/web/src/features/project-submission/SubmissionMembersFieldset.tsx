@@ -25,7 +25,7 @@ export function SubmissionMembersFieldset({
 }: SubmissionMembersFieldsetProps) {
 	return (
 		<fieldset>
-			<legend>참여 학생 *</legend>
+			<legend>참여 학생 <span className="required-mark">*</span></legend>
 			{errors.members?.root && (
 				<span className="field-error">{errors.members.root.message}</span>
 			)}
@@ -80,7 +80,7 @@ export function SubmissionMembersFieldset({
 				className="btn btn--secondary btn--small"
 				onClick={() => append({ name: '', studentId: '' })}
 			>
-				학생 추가
+				＋ 학생 추가
 			</button>
 		</fieldset>
 	);
