@@ -24,8 +24,10 @@ export function SubmissionPosterSelection({
 	const [selectionError, setSelectionError] = useState<string | null>(null);
 	return (
 		<fieldset className="submission-file-fieldset">
-			<legend>포스터</legend>
-			<SubmissionPosterHelp />
+			<legend className="submission-file-heading">
+				<span>포스터</span>
+				<SubmissionPosterHelp />
+			</legend>
 			<ProjectUploadDropZone
 				zone="poster"
 				enabled={enabled}
@@ -101,8 +103,10 @@ export function SubmissionMixedFilesSelection({
 	];
 	return (
 		<fieldset className="submission-file-fieldset">
-			<legend>기타 파일</legend>
-			<SubmissionFilesHelp webglUploadHint={webglUploadHint} />
+			<legend className="submission-file-heading">
+				<span>기타 파일</span>
+				<SubmissionFilesHelp webglUploadHint={webglUploadHint} />
+			</legend>
 			<ProjectUploadDropZone
 				zone="files"
 				enabled={enabled}

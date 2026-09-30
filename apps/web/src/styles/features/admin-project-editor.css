@@ -468,19 +468,17 @@
 .project-upload-queue__choices { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
 .project-upload-queue .game-upload__actions { flex-wrap: wrap; }
 
-.admin-project-edit-grid .submission-file-fieldset {
-  position: relative;
-}
-
-.admin-project-edit-grid .submission-file-fieldset legend {
-  max-width: calc(100% - 5rem);
+.admin-project-edit-grid .submission-file-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
   margin-bottom: 1.25rem;
 }
 
 .submission-upload-help {
-  position: absolute;
-  top: 0;
-  right: 0;
+  flex: 0 0 auto;
   margin: 0;
   padding: 0;
   border: 0;
@@ -488,6 +486,7 @@
   color: var(--color-text-muted);
   font: inherit;
   font-size: 0.8rem;
+  font-weight: 400;
   line-height: 1.5;
   text-align: left;
   text-decoration: underline;
