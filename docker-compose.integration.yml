@@ -89,6 +89,7 @@ services:
         condition: service_completed_successfully
     environment:
       NGINX_LISTEN_PORT: "8080"
+      FILE_GATEWAY_TLS_SERVER_NAME: ""
       FILE_GATEWAY_API_UPSTREAM: http://api:4000
       FILE_GATEWAY_SECRET: integration-file-gateway-secret-32chars
       S3_BUCKET_PROTECTED: pcu-protected
@@ -109,6 +110,7 @@ services:
         condition: service_completed_successfully
     environment:
       NGINX_LISTEN_PORT: "8080"
+      FILE_GATEWAY_TLS_SERVER_NAME: ""
       FILE_GATEWAY_API_UPSTREAM: http://api:4000
       FILE_GATEWAY_SECRET: integration-file-gateway-secret-32chars
       GARAGE_PUBLIC_WEB_UPSTREAM: http://garage:3902

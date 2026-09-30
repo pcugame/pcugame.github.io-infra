@@ -19,6 +19,7 @@ fi
 if [ -n "${PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:-}${GARAGE_PUBLIC_BUCKET_HOST:-}" ]; then
   [ "${#FILE_GATEWAY_SECRET}" -ge 32 ] || fail "FILE_GATEWAY_SECRET must contain at least 32 characters"
   case "$FILE_GATEWAY_SECRET" in *[!a-zA-Z0-9_-]*) fail "FILE_GATEWAY_SECRET must be URL-safe" ;; esac
+  case "${FILE_GATEWAY_TLS_SERVER_NAME:-}" in *[!a-zA-Z0-9.-]*) fail "FILE_GATEWAY_TLS_SERVER_NAME must be a DNS hostname" ;; esac
   case "$FILE_GATEWAY_API_UPSTREAM" in http://*|https://*) ;; *) fail "FILE_GATEWAY_API_UPSTREAM must be HTTP(S)" ;; esac
   case "${FILE_GATEWAY_API_UPSTREAM#*://}" in ''|*/*|*' '*|*\"*|*\'*|*';'*|*'$'*) fail "gateway upstream must be exact origin" ;; esac
 fi

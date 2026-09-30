@@ -118,6 +118,13 @@ for (const proxy of [publicOrigin, protectedDownload]) {
  assert.ok(proxy.includes('auth_request /__pcu_file_auth;'));
  assert.ok(proxy.includes('location = /__pcu_file_auth {\n    internal;'));
  assert.ok(proxy.includes('X-PCU-Gateway-Secret "${FILE_GATEWAY_SECRET}"'));
+ const authLocation = proxy.match(/location = \/__pcu_file_auth \{([\s\S]*?)\n  \}/)?.[1] ?? '';
+ assert.ok(authLocation.includes('proxy_ssl_server_name on;'));
+ assert.ok(authLocation.includes('proxy_ssl_verify on;'));
+ assert.ok(authLocation.includes('proxy_ssl_verify_depth 4;'));
+ assert.ok(authLocation.includes('proxy_ssl_name $pcu_gate_tls_name;'));
+ assert.ok(proxy.includes('map "${FILE_GATEWAY_TLS_SERVER_NAME}" $pcu_gate_tls_name'));
+ assert.ok(authLocation.includes('proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;'));
  assert.ok(proxy.includes('X-PCU-File-Uri $request_uri'));
  assert.ok(proxy.includes('proxy_set_header Cookie ""'));
  assert.ok(proxy.includes('proxy_set_header Authorization ""'));
@@ -136,6 +143,10 @@ const validateGate = overrides => spawnSync('sh', [new URL('./validate-data-plan
 assert.equal(validateGate({}).status,0);
 for(const secret of ['', 'short', 'validlength-but-invalid-gateway-secret;injection']) {
  assert.notEqual(validateGate({FILE_GATEWAY_SECRET:secret}).status,0,'invalid gateway secret was accepted');
+}
+assert.equal(validateGate({FILE_GATEWAY_TLS_SERVER_NAME:'pcu-file-auth.internal'}).status,0);
+for (const name of ['bad;name', '$proxy_host', 'name/path', 'name\nother']) {
+ assert.notEqual(validateGate({FILE_GATEWAY_TLS_SERVER_NAME:name}).status,0,'unsafe TLS name was accepted');
 }
 for(const upstream of ['ftp://api:4000','http://api:4000/path','http://api:4000;injection']) {
  assert.notEqual(validateGate({FILE_GATEWAY_API_UPSTREAM:upstream}).status,0,'invalid gateway origin was accepted');

@@ -213,7 +213,23 @@ assert.match(deploy, /mv "\$ROLLBACK_AUTH_FILE" "\$ROLLBACK_CONSUMED_FILE"/);
 assert.match(deploy, /--entrypoint node \\\n\s+"\$API_IMAGE" dist\/server\.js/);
 
 for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(status), `data-plane smoke missing ${status}`);
-assert.match(cutover, /podman stop gp-api[\s\S]*smoke-data-plane\.mjs[\s\S]*podman start gp-api/);
+// Per-request authorization fails closed when the API is unavailable. Production
+// smoke must keep it healthy; outage injection belongs to isolated integration.
+assert.doesNotMatch(cutover, /podman (?:stop|start) gp-api/);
+assert.doesNotMatch(cutover, /API-down data-plane smoke/);
+assert.match(smoke, /full\.headers\.get\('cache-control'\), 'private, no-store'/);
+const finalSmokeStart = cutover.indexOf('            final_smoke() {');
+assert.ok(finalSmokeStart > 0);
+const finalSmoke = cutover.slice(finalSmokeStart, cutover.indexOf('\n            }', finalSmokeStart));
+const finalApplyStart = cutover.indexOf('            # DESTRUCTIVE DDL BOUNDARY:');
+assert.ok(finalApplyStart > 0);
+const finalApply = cutover.slice(finalApplyStart);
+for (const productionSmoke of [finalSmoke, finalApply]) {
+	assert.match(productionSmoke, /podman exec gp-api wget[^\n]+api\/health[^\n]+ok[^\n]+true[\s\S]*smoke-data-plane\.mjs/);
+	assert.ok(productionSmoke.includes('[ "$actual_source" = "$RELEASE_SOURCE_SHA" ]'));
+	assert.ok(productionSmoke.includes('[ "$actual_digest" = "${FINAL_IMAGE##*@}" ]'));
+	assert.match(productionSmoke, /deployed-\$\{RELEASE_SOURCE_SHA\}\.txt/);
+}
 const forwardFixStart = cutover.indexOf('            if [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then');
 assert.ok(forwardFixStart > 0);
 const forwardFix = cutover.slice(forwardFixStart, cutover.indexOf('        env:', forwardFixStart));

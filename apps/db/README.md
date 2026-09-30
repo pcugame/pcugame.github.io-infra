@@ -154,3 +154,84 @@ Once restricted rows exist, recover with a visibility-aware forward fix. Do not
 restore an older runtime or gateway that lacks these checks. The legacy Phase 1
 rollback command also refuses restricted visibility data. Preserve the schema
 and enforce authorization throughout recovery.
+
+
+## File gateway upstream TLS
+
+The NAS gateway authenticates `https://pcu-file-auth.internal` using a pinned,
+self-signed DNS-SAN server certificate. Nginx 1.27 cannot validate the existing
+public IP-only SAN certificate as an upstream hostname. The dedicated SNI site
+shares port 443; the existing public IP site, certificate, and API release flow
+remain authoritative and unchanged. API `FILE_GATEWAY_SECRET` remains required.
+
+### Prepare and install on the API host
+
+Run the reviewed helper on the API host as root with a new absolute directory,
+for example `/etc/ssl/pcu-file-auth/2026-09-30` (create its parent first):
+
+```sh
+sudo mkdir -p /etc/ssl/pcu-file-auth
+sudo sh server/prepare-file-gateway-tls.sh /etc/ssl/pcu-file-auth/2026-09-30
+```
+
+It refuses existing output, keeps the private key mode 0600, and emits only the
+public fingerprint and expiry. Never copy the private key to the NAS. Copy only
+`trust.pem` over authenticated SSH and compare its SHA-256 fingerprint at both
+ends. The directory is root-only; public certificate transfer may use `sudo cat`
+over SSH. The pinned leaf is valid for 365 days and cannot issue other identities;
+rotation replaces the pin, avoiding a persistent CA signing key.
+
+First confirm `nginx -T` includes sites-enabled in lexical order and the existing
+`api-proxy` site remains the first port-443 server. Install the generated
+`zz-pcu-file-auth` into `/etc/nginx/sites-available/zz-pcu-file-auth`, then symlink
+it as `/etc/nginx/sites-enabled/zz-pcu-file-auth`. Save any prior version for
+rollback; do not overwrite another site's contents. Run `sudo nginx -t` before
+`sudo systemctl reload nginx`. If validation fails, remove the new symlink (or
+restore its previous target), run `nginx -t` again, and do not reload. This is an
+additive host configuration, not an alternative API deployment.
+
+Before enabling NAS traffic, verify TLS locally with no insecure flags:
+
+```sh
+sudo curl --noproxy '*' --cacert /etc/ssl/pcu-file-auth/2026-09-30/trust.pem \
+  --resolve pcu-file-auth.internal:443:127.0.0.1 \
+  -sS -o /dev/null -w '%{http_code}\n' \
+  https://pcu-file-auth.internal/api/internal/file-access
+```
+
+An API denial without a secret is expected; this only proves TLS connectivity.
+Verify `/` returns 404, and verify the public IP endpoint still presents its
+original certificate. The auth path allows only NAS 203.250.133.232 and loopback.
+A request from an unrelated source must return 403. No query-bearing logs are
+written by the dedicated site.
+
+### NAS compose integration
+
+For both `public-origin` and `protected-download-origin`, set
+`FILE_GATEWAY_API_UPSTREAM=https://203.250.133.230` and
+`FILE_GATEWAY_TLS_SERVER_NAME=pcu-file-auth.internal`, and mount the transferred
+`trust.pem` read-only over `/etc/ssl/certs/ca-certificates.crt`. Only these two
+containers receive the private trust anchor. The variable auth `proxy_pass` connects to the numeric origin and verifies the
+explicit TLS name through SNI and certificate validation. No DNS override is
+needed. An empty TLS name defaults to the upstream host for other environments.
+TLS errors fail closed. Recreate these containers after pin updates.
+Run compose config validation and the isolated TLS test before applying.
+
+Verify from the NAS using the same CA file and hostname resolution, then exercise
+an authenticated successful gateway request and a forbidden request against the
+released API. The unauthenticated TLS probe alone does not verify authorization.
+Record API source commit/image digest separately from this host TLS fingerprint.
+
+### Rotation and recovery
+
+Check certificate expiry monthly with `openssl x509 -checkend 2592000 -noout -in
+trust.pem`; renew at least 30 days before expiry. Generate a new versioned identity.
+Temporarily mount a bundle containing old and new public pins on NAS, recreate
+both gateways, install the new vhost and run `nginx -t`, reload, and verify actual
+gateway authorization. Remove the old pin and recreate once verified. On failure,
+restore the old vhost and reload after `nginx -t`; retain the old pin until recovery
+is proven. Never disable TLS verification as rollback. Expired or untrusted pins
+fail closed. Delete retired private keys only after rollback is no longer needed.
+
+The isolated test requires Docker and OpenSSL and never touches existing services:
+`sh server/file-gateway-tls.test.sh`.

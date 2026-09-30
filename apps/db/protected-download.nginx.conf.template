@@ -1,3 +1,8 @@
+map "${FILE_GATEWAY_TLS_SERVER_NAME}" $pcu_gate_tls_name {
+  "" $proxy_host;
+  default "${FILE_GATEWAY_TLS_SERVER_NAME}";
+}
+
 # Protected capability data-plane boundary. Never log the raw target or query:
 # SigV4 query parameters are bearer capabilities until their short expiry.
 log_format pcu_protected_download
@@ -34,6 +39,11 @@ server {
     resolver 127.0.0.11 valid=30s;
     set $pcu_gate_upstream "${FILE_GATEWAY_API_UPSTREAM}";
     proxy_pass $pcu_gate_upstream/api/internal/file-access;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $pcu_gate_tls_name;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 4;
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
     proxy_method GET;
     proxy_pass_request_body off;
     proxy_set_header Content-Length "";
