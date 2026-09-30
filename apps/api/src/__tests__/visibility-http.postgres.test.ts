@@ -1,3 +1,8 @@
+import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
+import type { AssetUploadSessionRecord } from '../modules/asset-upload/ports.js';
+import { createFileAccessController } from '../modules/file-access/controller.js';
+import { createFileAccessRepository } from '../modules/file-access/repository.js';
+import { defaultTestEnv } from './helpers/app-mocks.js';
 import { createProjectChangeController } from '../modules/project-change/controller.js';
 import { createProjectChangeService } from '../modules/project-change/service.js';
 import { createProjectChangeRepository } from '../modules/project-change/repository.js';
@@ -49,6 +54,12 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 		});
 		app.setErrorHandler((error, _request, reply) => { reply.status(error instanceof AppError ? error.statusCode : (typeof error === 'object' && error !== null && 'statusCode' in error ? Number(error.statusCode) : 500)).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error instanceof Error ? error.message : 'Error' } }); });
 		registerRouteSchemas(app);
+		await app.register(createFileAccessController(createFileAccessRepository(db), {
+			...defaultTestEnv, LOG_LEVEL: 'error', GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS], CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS], API_PUBLIC_URL: 'http://localhost:3000', PUBLIC_ASSET_ORIGIN: 'http://localhost:3904',
+			S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: 'http://localhost:3906', S3_BUCKET_PUBLIC: 'pcu-public',
+			S3_BUCKET_PROTECTED: 'pcu-protected', SESSION_COOKIE_NAME: 'sid',
+			FILE_GATEWAY_SECRET: 'visibility-upload-race-secret-32chars',
+		}), { prefix: '/api' });
 		await app.register(createProjectChangeController(createProjectChangeService(createProjectChangeRepository(db)), 'me'), { prefix: '/api/me' });
 		await app.register(createPublicController({ service: createPublicService({ apiPublicUrl: 'http://localhost:3000', repository: createPublicRepository(db) }) }), { prefix: '/api/public' });
 		await app.register(createYearController({ service: createExhibitionService({ posterBucket: 'pcu-public', repository: createExhibitionRepository(db), wakeDeletionWorker() {} }) }), { prefix: '/api/admin' });
@@ -106,6 +117,68 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 		expect((await request(owner, `/api/admin/projects/${draft.id}`)).statusCode).toBe(200);
 		const unrelated = await db.project.create({ data: { exhibitionId: id, creatorId: stranger.id, title: 'Other', slug: randomUUID(), status: 'PUBLISHED', visibility: 'STAFF' } });
 		expect((await request(owner, `/api/public/projects/${unrelated.id}`)).statusCode).toBe(404);
+	});
+	it.each(['project', 'exhibition'] as const)('retains %s restriction when upload READY commit waits for a concurrent visibility change', async (scope) => {
+		await db.storageBucket.upsert({ where: { bucket: 'pcu-protected' }, create: { bucket: 'pcu-protected', visibility: 'PROTECTED' }, update: {} });
+		const exhibition = await db.exhibition.create({ data: { year: 2092, title: randomUUID() } });
+		const project = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Upload race', slug: randomUUID(), status: 'PUBLISHED' } });
+		const uploads = createAssetUploadRepository(db);
+		const id = randomUUID();
+		// Production allocation occurs before policy changes. Exercise the actual
+		// worker READY transaction after validation, without mocking the repository.
+		await uploads.createAllocating({
+			id, projectId: project.id, exhibitionId: null, userId: owner.id, actorRole: owner.role,
+			kind: 'DOCUMENT', originalName: 'race.txt', declaredMimeType: 'text/plain', totalBytes: 10n,
+			partSizeBytes: 10, totalParts: 1, bucket: 'pcu-protected', objectKey: `protected/uploads/${id}/source`, generation: 1,
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64), sourceIdentityBlockSizeBytes: 1_048_576,
+			sourceIdentityBlockManifest: 'e30=', expiresAt: new Date(Date.now() + 60_000), submissionItemId: null,
+		});
+		const session = await db.assetUploadSession.update({ where: { id }, data: { state: 'VERIFYING', validationLeaseToken: 'race-lease', validationLeaseUntil: new Date(Date.now() + 60_000) } });
+		let locked!: (pid: number) => void, release!: () => void;
+		const blockerReady = new Promise<number>((resolve) => { locked = resolve; });
+		const releaseBlocker = new Promise<void>((resolve) => { release = resolve; });
+		const tightening = db.$transaction(async (tx) => {
+			if (scope === 'project') await tx.$queryRaw`SELECT id FROM projects WHERE id = ${project.id} FOR UPDATE`;
+			else await tx.$queryRaw`SELECT id FROM exhibitions WHERE id = ${exhibition.id} FOR UPDATE`;
+			const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+			locked(backend!.pid);
+			await releaseBlocker;
+			if (scope === 'project') await tx.project.update({ where: { id: project.id }, data: { visibility: 'STAFF', version: { increment: 1 } } });
+			else await tx.exhibition.update({ where: { id: exhibition.id }, data: { visibility: 'STAFF' } });
+		}, { timeout: 10_000 });
+		const blockerPid = await blockerReady;
+		const completion = uploads.commitGameReady({ session: session as AssetUploadSessionRecord, token: 'race-lease', mimeType: 'text/plain' });
+		try {
+			let waiting = false;
+			for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+				// This backend must actually block the final upload transaction; merely
+				// starting two promises would not demonstrate the intended interleaving.
+				const [row] = await db.$queryRaw<Array<{ waiting: boolean }>>`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND ${blockerPid} = ANY(pg_blocking_pids(pid))) AS waiting`;
+				waiting = row?.waiting === true;
+				if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+			}
+			expect(waiting).toBe(true);
+		} finally {
+			release();
+			// Drain both transactions even when the lock observation assertion fails.
+			await Promise.allSettled([tightening, completion]);
+		}
+		await tightening;
+		const committed = await completion;
+		const stored = await db.project.findUniqueOrThrow({ where: { id: project.id }, include: { exhibition: true } });
+		expect(scope === 'project' ? stored.visibility : stored.exhibition.visibility).toBe('STAFF');
+		expect((await db.assetUploadSession.findUniqueOrThrow({ where: { id } })).state).toBe('READY');
+		expect(await db.assetRepresentation.findUniqueOrThrow({ where: { id: committed.representationId } })).toMatchObject({ state: 'READY', bucket: 'pcu-protected', objectKey: session.objectKey });
+		for (const actor of [null, stranger]) {
+			expect((await request(actor, `/api/public/projects/${project.id}`)).statusCode).toBe(404);
+			expect((await request(actor, '/api/file-access', 'POST', { url: `http://localhost:3906/pcu-protected/${session.objectKey}` })).statusCode).toBe(403);
+		}
+		const detail = await request(owner, `/api/admin/projects/${project.id}`);
+		expect(detail.statusCode).toBe(200);
+		expect(detail.json().data).toMatchObject({ visibility: stored.visibility, exhibitionVisibility: stored.exhibition.visibility, attachments: [{ assetId: committed.assetId, originalName: 'race.txt' }] });
+		expect((await request(owner, '/api/file-access', 'POST', { url: `http://localhost:3906/pcu-protected/${session.objectKey}` })).statusCode).toBe(200);
+		const rawFile = await app.inject({ url: '/api/internal/file-access', headers: { 'x-pcu-gateway-secret': 'visibility-upload-race-secret-32chars', 'x-pcu-file-kind': 'protected', 'x-pcu-file-uri': `/pcu-protected/${session.objectKey}` } });
+		expect(rawFile.statusCode).toBe(403);
 	});
 	it('rechecks relations and lock for visibility writes; locked requests reject visibility', async () => {
 		const exhibition = await db.exhibition.create({ data: { year: 2095, title: randomUUID() } });
