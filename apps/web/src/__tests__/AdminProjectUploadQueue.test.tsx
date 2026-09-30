@@ -7,10 +7,9 @@ import {
 	AdminProjectAssetManager,
 	AdminProjectPosterUpload,
 	AdminProjectUploadProvider,
+	useAdminProjectUploadQueue,
 } from '../features/admin/projects/AdminProjectAssetManager';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import AdminProjectEditPage from '../pages/admin/AdminProjectEditPage';
-import { adminProjectApi, publicApi } from '../lib/api';
+import { adminAssetApi, adminProjectApi, publicApi } from '../lib/api';
 import { getClientUploadLimits } from '../lib/upload-limits';
 import {
 	classifyProjectFile,
@@ -42,14 +41,21 @@ const project: AdminProjectDetail = {
 	],
 };
 const limits = getClientUploadLimits('ADMIN');
-function setup(enabled = true) {
+function ApplyControl() {
+	const queue = useAdminProjectUploadQueue();
+	return <><button onClick={() => void queue.applyChanges().catch(() => {})}>적용</button>
+		<span data-testid="dirty">{String(queue.hasChanges)}</span><span data-testid="applying">{String(queue.isApplying)}</span></>;
+}
+function apply() { fireEvent.click(screen.getByRole('button', { name: '적용' })); }
+function setup(enabled = true, detail = project) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return {
 		client,
 		...render(
 			<QueryClientProvider client={client}>
-				<AdminProjectUploadProvider project={project} projectId={7} limits={limits} canEditContent={enabled}>
-					<AdminProjectPosterUpload project={project} canEditContent={enabled} />
+				<AdminProjectUploadProvider project={detail} projectId={7} limits={limits} canEditContent={enabled}>
+					<ApplyControl />
+					<AdminProjectPosterUpload project={detail} canEditContent={enabled} />
 					<AdminProjectAssetManager canEditContent={enabled} />
 				</AdminProjectUploadProvider>
 			</QueryClientProvider>,
@@ -119,10 +125,10 @@ it('reserves counts across stored and queued files and enforces bytes', () => {
 		/파일당 최대/,
 	);
 });
-it('removes existing assets and all asset manipulation controls; denies uploads without permission', () => {
+it('shows stored files but denies changes without permission', () => {
 	setup(false);
 	expect(screen.queryByText('등록된 자산')).toBeNull();
-	expect(screen.queryByText('existing.mp4')).toBeNull();
+	expect(screen.getByText('existing.mp4')).toBeTruthy();
 	for (const name of ['삭제', '메인으로 지정', '포스터로 지정', '위로', '아래로'])
 		expect(screen.queryByRole('button', { name })).toBeNull();
 	expect((screen.getByRole('button', { name: '기타 파일 선택' }) as HTMLButtonElement).disabled).toBe(true);
@@ -135,51 +141,82 @@ it('rejects multiple posters and accepts PDF on the whole preview', async () => 
 	expect(screen.getByRole('alert').textContent).toMatch(/한 개/);
 	expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
 	drop([file('a.pdf')], true);
+	expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
+	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
 	expect(api.uploadDirectAssetFile.mock.calls[0]![2]).toBe('POSTER');
 });
-it('runs mixed files sequentially, appends later drops, and skips unselected ZIPs', async () => {
+it('stages mixed files, validates ZIP before any writes, and uploads sequentially on Apply', async () => {
 	const resolvers: Array<(value: unknown) => void> = [];
 	api.uploadDirectAssetFile.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
 	setup();
-	drop([file('game.zip'), file('a.jpg'), file('b.mp4')]);
-	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(1));
-	expect(api.uploadDirectAssetFile.mock.calls[0]![1].name).toBe('a.jpg');
-	drop([file('c.pdf')]);
+	drop([file('a.jpg'), file('game.zip'), file('b.mp4')]);
+	expect(screen.getByTestId('dirty').textContent).toBe('true');
+	apply();
+	expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
 	fireEvent.click(screen.getByRole('button', { name: '게임' }));
-	expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(1);
+	apply();
+	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(1));
 	await act(async () => resolvers[0]!({ status: 'READY', sessionId: 'one' }));
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
 	expect(api.uploadDirectAssetFile.mock.calls[1]![1].name).toBe('game.zip');
 	await act(async () => resolvers[1]!({ status: 'READY', sessionId: 'two' }));
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(3));
-	expect(api.uploadDirectAssetFile.mock.calls[2]![1].name).toBe('b.mp4');
 	await act(async () => resolvers[2]!({ status: 'READY', sessionId: 'three' }));
-	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(4));
-	expect(api.uploadDirectAssetFile.mock.calls[3]![2]).toBe('DOCUMENT');
+	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
 });
-it('holds only materials on config failure and retries their settings', async () => {
+it('blocks all uploads on missing material config and retries settings', async () => {
 	vi.mocked(publicApi.getUploadConfig).mockRejectedValueOnce(new Error('offline'));
 	setup();
 	drop([file('a.pdf'), file('b.mp4')]);
-	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
-	expect(api.uploadDirectAssetFile.mock.calls[0]![2]).toBe('VIDEO');
-	await waitFor(() =>
-		expect((screen.getByRole('button', { name: '설정 재시도' }) as HTMLButtonElement).disabled).toBe(false),
-	);
+	apply();
+	expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
+	await waitFor(() => expect((screen.getByRole('button', { name: '설정 재시도' }) as HTMLButtonElement).disabled).toBe(false));
 	fireEvent.click(screen.getByRole('button', { name: '설정 재시도' }));
 	await waitFor(() => expect(publicApi.getUploadConfig).toHaveBeenCalledTimes(2));
-	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
+	await waitFor(() => expect(screen.queryByText('자료 업로드 설정을 불러오는 중입니다.')).toBeNull());
+	apply();
+	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
 });
-it('keeps failed uploads in place for retry and advances only after cancel', async () => {
-	api.uploadDirectAssetFile.mockRejectedValueOnce(new Error('전송 실패'));
+it('retries failed upload from Apply and does not repeat completed transfers', async () => {
+	api.uploadDirectAssetFile.mockResolvedValueOnce({ status: 'READY', sessionId: 'one' })
+		.mockRejectedValueOnce(new Error('전송 실패'))
+		.mockResolvedValueOnce({ status: 'READY', sessionId: 'two' });
 	setup();
 	drop([file('a.jpg'), file('b.mp4')]);
+	apply();
 	await screen.findByRole('button', { name: '재시도' });
-	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
-	fireEvent.click(screen.getAllByRole('button', { name: '취소' })[0]!);
-	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
-	expect(api.uploadDirectAssetFile.mock.calls[1]![1].name).toBe('b.mp4');
+	expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
+	apply();
+	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
+	expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(3);
+	expect(api.uploadDirectAssetFile.mock.calls[2]![1].name).toBe('b.mp4');
+});
+it('cancellation and deletion undo return to clean without API writes', () => {
+	const remove = vi.spyOn(adminAssetApi, 'remove').mockResolvedValue();
+	setup();
+	drop([file('a.jpg')]);
+	fireEvent.click(screen.getByRole('button', { name: '취소' }));
+	expect(screen.getByTestId('dirty').textContent).toBe('false');
+	fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+	expect(screen.getByTestId('dirty').textContent).toBe('true');
+	expect(remove).not.toHaveBeenCalled();
+	fireEvent.click(screen.getByRole('button', { name: '삭제 취소' }));
+	expect(screen.getByTestId('dirty').textContent).toBe('false');
+});
+it('applies staged deletes before uploads and does not repeat a successful delete on retry', async () => {
+	const remove = vi.spyOn(adminAssetApi, 'remove').mockResolvedValue();
+	api.uploadDirectAssetFile.mockRejectedValueOnce(new Error('실패')).mockResolvedValueOnce({ status: 'READY', sessionId: 'one' });
+	setup();
+	fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+	drop([file('a.jpg')]);
+	expect(remove).not.toHaveBeenCalled();
+	apply();
+	await screen.findByRole('button', { name: '재시도' });
+	expect(remove).toHaveBeenCalledExactlyOnceWith(11);
+	apply();
+	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
+	expect(remove).toHaveBeenCalledOnce();
 });
 it('highlights both drop areas when a file enters the window, emphasizes its target, and resets on leave', () => {
 	const { container } = setup();
@@ -218,47 +255,103 @@ it('does not advance while server cancellation is pending', async () => {
 	});
 	setup();
 	drop([file('a.jpg'), file('b.mp4')]);
+	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
 	fireEvent.click(screen.getAllByRole('button', { name: '취소' })[0]!);
 	await waitFor(() => expect(api.cancelDirectAssetUploadSession).toHaveBeenCalledOnce());
 	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
 	await act(async () => confirm());
+	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
+	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
 });
 
-it('keeps pending files mounted when completion refresh fails, then continues after retry', async () => {
-	let failDetail = false;
-	vi.spyOn(adminProjectApi, 'getDetail').mockImplementation(async () => {
-		if (failDetail) throw new Error('detail unavailable');
-		return project;
-	});
+it('does not repeat a completed upload after canonical refresh fails', async () => {
 	let finishFirst!: (value: unknown) => void;
-	api.uploadDirectAssetFile.mockImplementationOnce(
-		() =>
-			new Promise((resolve) => {
-				finishFirst = resolve;
-			}),
-	);
-	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	render(
-		<QueryClientProvider client={client}>
-			<MemoryRouter initialEntries={['/admin/projects/7/edit']}>
-				<Routes>
-					<Route path="/admin/projects/:id/edit" element={<AdminProjectEditPage />} />
-				</Routes>
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
-	await screen.findByRole('button', { name: '기타 파일 선택' });
+	api.uploadDirectAssetFile.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }));
+	const { client } = setup();
 	drop([file('first.png'), file('second.png')]);
+	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
-	failDetail = true;
+	const refresh = vi.spyOn(client, 'invalidateQueries').mockRejectedValue(new Error('offline'));
 	await act(async () => finishFirst({ status: 'READY', sessionId: 'first' }));
-	await screen.findByRole('button', { name: '조회 재시도' });
-	expect(screen.getByText('second.png')).toBeTruthy();
+	await waitFor(() => expect(screen.getByText('업로드 완료')).toBeTruthy());
 	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
-	failDetail = false;
-	fireEvent.click(screen.getByRole('button', { name: '조회 재시도' }));
+	refresh.mockResolvedValue();
+	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
 	expect(api.uploadDirectAssetFile.mock.calls[1]![1].name).toBe('second.png');
+});
+
+it('counts staged video removals before validating capacity', async () => {
+	const full = { ...project, assets: Array.from({ length: 5 }, (_, index) => ({ ...project.assets[0]!, id: 11 + index, originalName: `stored-${index}.mp4` })) };
+	const remove = vi.spyOn(adminAssetApi, 'remove').mockResolvedValue();
+	setup(true, full);
+	drop([file('replacement.mp4')]);
+	apply();
+	expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
+	fireEvent.click(screen.getAllByRole('button', { name: '삭제' })[0]!);
+	apply();
+	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
+	expect(remove).toHaveBeenCalledExactlyOnceWith(11);
+});
+it('stages stored poster and WebGL deletion until Apply', async () => {
+	const remove = vi.spyOn(adminAssetApi, 'remove').mockResolvedValue();
+	const webgl = vi.spyOn(adminProjectApi, 'deleteWebgl').mockResolvedValue();
+	setup(true, { ...project, posterAssetId: 11, webglDeployment: { id: 'old', url: '/play', createdAt: '2026-01-01' } });
+	for (const button of screen.getAllByRole('button', { name: '삭제' })) fireEvent.click(button);
+	expect(remove).not.toHaveBeenCalled();
+	expect(webgl).not.toHaveBeenCalled();
+	apply();
+	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
+	expect(remove).toHaveBeenCalledExactlyOnceWith(11);
+	expect(webgl).toHaveBeenCalledExactlyOnceWith(7);
+});
+it('keeps Apply dirty for refresh when a failed widget completes through its own retry', async () => {
+	api.uploadDirectAssetFile.mockRejectedValueOnce(new Error('실패')).mockResolvedValueOnce({ status: 'READY', sessionId: 'one' });
+	const { client } = setup();
+	drop([file('a.jpg')]);
+	apply();
+	fireEvent.click(await screen.findByRole('button', { name: '재시도' }));
+	await screen.findByText('업로드 완료');
+	expect(screen.getByTestId('dirty').textContent).toBe('true');
+	const refresh = vi.spyOn(client, 'invalidateQueries');
+	apply();
+	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
+	expect(refresh).toHaveBeenCalled();
+	expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
+});
+
+it.each(['complete', 'cancel', 'fail'] as const)('handles widget %s while Apply awaits a staged deletion', async (outcome) => {
+	let finishUpload!: (value: unknown) => void;
+	let failUpload!: (error: Error) => void;
+	let finishDelete!: () => void;
+	api.uploadDirectAssetFile.mockRejectedValueOnce(new Error('first failure'))
+		.mockImplementationOnce((_owner, _file, _kind, _progress, options) => new Promise((resolve, reject) => {
+			finishUpload = resolve; failUpload = reject;
+			options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+		}));
+	vi.spyOn(adminAssetApi, 'remove').mockImplementation(() => new Promise<void>((resolve) => { finishDelete = resolve; }));
+	setup();
+	drop([file('a.jpg'), file('remaining.mp4')]);
+	apply();
+	fireEvent.click(await screen.findByRole('button', { name: '재시도' }));
+	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+	fireEvent.click(screen.getByRole('button', { name: '삭제' }));
+	apply();
+	await waitFor(() => expect(adminAssetApi.remove).toHaveBeenCalledOnce());
+	if (outcome === 'complete') await act(async () => finishUpload({ status: 'READY', sessionId: 'manual' }));
+	else if (outcome === 'fail') await act(async () => failUpload(new Error('second failure')));
+	else {
+			fireEvent.click(screen.getAllByRole('button', { name: '취소' })[0]!);
+			await waitFor(() => expect(screen.queryByText('a.jpg')).toBeNull());
+		}
+	await act(async () => finishDelete());
+	if (outcome === 'complete') {
+		await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(3));
+		expect(api.uploadDirectAssetFile.mock.calls[2]![1].name).toBe('remaining.mp4');
+	} else {
+		await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
+		expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
+	}
 });

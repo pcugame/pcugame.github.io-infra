@@ -21,6 +21,9 @@ interface Props {
 	initialFile?: File | null;
 	autoStart?: boolean;
 	onComplete?: () => void;
+	onError?: (message: string) => void;
+	/** An enclosing Apply action requests a retry without discarding recovery state. */
+	retryAttempt?: number;
 	/** Advances an enclosing queue only after cancellation leaves no pending session. */
 	onCancelled?: () => void;
 	/** An enclosing row provides the heading, chooser, and selected file summary. */
@@ -35,6 +38,8 @@ export default function GameUploadWidget({
 	initialFile,
 	autoStart,
 	onComplete,
+	onError,
+	retryAttempt = 0,
 	onCancelled,
 	compact = false,
 	onSkip,
@@ -564,6 +569,28 @@ export default function GameUploadWidget({
 			}
 		}
 	}, [checkRestoredFile, file, abortActiveRun, finishCancellation, forgetSession, markTerminalSession, reportCompletion, rememberSession, waitForSessionReady]);
+
+
+	const previousRetryAttempt = useRef(retryAttempt);
+	const reportedError = useRef<string | null>(null);
+	useEffect(() => {
+		if (state !== 'error') reportedError.current = null;
+		else if (error && reportedError.current !== error) {
+			reportedError.current = error;
+			onError?.(error);
+		}
+	}, [state, error, onError]);
+	useEffect(() => {
+		if (previousRetryAttempt.current === retryAttempt) return;
+		previousRetryAttempt.current = retryAttempt;
+		if (state === 'error' || state === 'idle') {
+			if (terminalSessionConfirmation) handleTerminalRetry();
+			else if (session) handleResume();
+			else handleStart();
+		}
+	// The explicit retry counter is the only trigger; handlers retain the latest recovery state.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [retryAttempt]);
 
 	const fileSizeMB = file ? (file.size / 1024 / 1024).toFixed(1) : '0';
 	const terminalSession = session !== null
