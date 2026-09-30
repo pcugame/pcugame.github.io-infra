@@ -52,7 +52,7 @@
   display: none;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .container {
     padding: 0 1rem;
   }
@@ -86,14 +86,14 @@
   }
 
   .mobile-topbar__sig {
-    height: 32px;
+    height: 2rem;
     width: auto;
     flex-shrink: 0;
   }
 
   .mobile-topbar__divider {
     width: 1px;
-    height: 22px;
+    height: 1.375rem;
     background: var(--color-border);
     flex-shrink: 0;
   }
@@ -144,7 +144,7 @@
   display: none;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .mobile-bottom-nav {
     display: flex;
     position: fixed;
@@ -194,6 +194,8 @@
   }
 
   .mobile-bottom-nav__item svg {
+    width: 1.25rem;
+    height: 1.25rem;
     flex-shrink: 0;
   }
 
@@ -210,7 +212,7 @@
 
   /* 하단 바 높이만큼 body에 패딩 추가 */
   .layout {
-    padding-bottom: 60px;
+    padding-bottom: calc(3.75rem + env(safe-area-inset-bottom, 0px));
   }
 
 }

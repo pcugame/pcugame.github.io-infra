@@ -14,7 +14,7 @@ export function SubmissionActions({
 	submittingLabel,
 }: SubmissionActionsProps) {
 	return (
-		<div className="form-actions">
+		<div className="form-actions submission-actions">
 			<button
 				type="submit"
 				className="btn btn--primary btn--large"
