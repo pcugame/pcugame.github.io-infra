@@ -114,20 +114,20 @@ form.admin-card h3 {
   background: #252528;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 85.9375em) {
   .admin-table .admin-table__col--creator {
     display: none;
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 60em) {
   .admin-card {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
 
   .admin-table {
-    min-width: 580px;
+    min-width: 36.25rem;
   }
 
   .admin-table th,
@@ -142,7 +142,7 @@ form.admin-card h3 {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .admin-desktop-only {
     display: none;
   }

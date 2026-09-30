@@ -1,53 +1,26 @@
-import { zodResolver } from '@hookform/resolvers/zod';
+import { useWatch } from 'react-hook-form';
 import type { AdminProjectDetail } from '@pcu/contracts';
-import { useForm, useWatch } from 'react-hook-form';
-
-import {
-	UpdateProjectFormSchema,
-	type UpdateProjectFormInput,
-} from '../../../contracts/schemas';
-import { getApiErrorMessage } from '../../../lib/api';
-
 import { VisibilitySelect, VisibilityNotice } from '../../../components/VisibilitySelect';
 import { env } from '../../../lib/env';
+import type { FormEventHandler } from 'react';
+import type { UseFormReturn } from 'react-hook-form';
+import type { UpdateProjectFormInput } from '../../../contracts/schemas';
 
-interface AdminProjectBasicInfoFormProps {
+interface Props {
 	project: AdminProjectDetail;
-	error: unknown;
-	isDirtySubmitting: boolean;
-	isSuccess: boolean;
-	canEditContent?: boolean;
-	onSubmit: (data: UpdateProjectFormInput) => void;
+	form: UseFormReturn<UpdateProjectFormInput>;
+	formId: string;
+	isPending: boolean;
+	canEditContent: boolean;
+	onSubmit: FormEventHandler<HTMLFormElement>;
 }
+export function AdminProjectBasicInfoForm({ project, form, formId, isPending, canEditContent, onSubmit }: Props) {
+	const { register, formState: { errors } } = form;
+	const visibility = useWatch({ control: form.control, name: 'visibility' });
 
-export function AdminProjectBasicInfoForm({
-	project,
-	error,
-	isDirtySubmitting,
-	isSuccess,
-	canEditContent = true,
-	onSubmit,
-}: AdminProjectBasicInfoFormProps) {
-	const {
-		register,
-		control,
-		handleSubmit,
-		formState: { errors, isDirty },
-	} = useForm<UpdateProjectFormInput>({
-		resolver: zodResolver(UpdateProjectFormSchema),
-		values: {
-			visibility: project.visibility,
-			title: project.title,
-			summary: project.summary ?? '',
-			description: project.description ?? '',
-			sortOrder: project.sortOrder,
-		},
-	});
-
-	const visibility = useWatch({ control, name: 'visibility' });
 	return (
-		<form onSubmit={handleSubmit(onSubmit)} className="project-form">
-		<fieldset disabled={!canEditContent}>
+		<form id={formId} onSubmit={onSubmit} className="project-form">
+			<fieldset disabled={!canEditContent || isPending}>
 				<legend>기본 정보</legend>
                 {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
                  <label htmlFor="edit-visibility">공개 범위</label>
@@ -56,50 +29,28 @@ export function AdminProjectBasicInfoForm({
                  <VisibilityNotice visibility={visibility} exhibitionVisibility={project.exhibitionVisibility} />
                 </div>}
 
+
 				<div className="form-field">
 					<label htmlFor="title">제목 *</label>
 					<input id="title" type="text" {...register('title')} />
 					{errors.title && <span className="field-error">{errors.title.message}</span>}
 				</div>
-
 				<div className="form-field">
 					<label htmlFor="summary">한줄 소개</label>
 					<input id="summary" type="text" {...register('summary')} />
+					{errors.summary && <span className="field-error">{errors.summary.message}</span>}
 				</div>
-
 				<div className="form-field">
 					<label htmlFor="description">상세 설명</label>
 					<textarea id="description" rows={6} {...register('description')} />
+					{errors.description && <span className="field-error">{errors.description.message}</span>}
 				</div>
-
 				<div className="form-field">
 					<label htmlFor="sortOrder">오프셋(작을수록 상단에 표시)</label>
-					<input
-						id="sortOrder"
-						type="number"
-						{...register('sortOrder', { valueAsNumber: true })}
-					/>
+					<input id="sortOrder" type="number" {...register('sortOrder', { valueAsNumber: true })} />
+					{errors.sortOrder && <span className="field-error">{errors.sortOrder.message}</span>}
 				</div>
 			</fieldset>
-
-			{error != null && (
-				<div className="error-box" role="alert">
-					<p>{getApiErrorMessage(error)}</p>
-				</div>
-			)}
-			{isSuccess && (
-				<p className="success-message">저장되었습니다.</p>
-			)}
-
-			<div className="form-actions">
-				<button
-					type="submit"
-					className="btn btn--primary"
-					disabled={!canEditContent || !isDirty || isDirtySubmitting}
-				>
-					{isDirtySubmitting ? '저장 중…' : '변경사항 저장'}
-				</button>
-			</div>
 		</form>
 	);
 }

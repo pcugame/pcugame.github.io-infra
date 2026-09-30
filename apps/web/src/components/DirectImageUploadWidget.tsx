@@ -29,6 +29,9 @@ interface Props {
 	initialFiles?: readonly File[];
 	autoStart?: boolean;
 	onComplete?: () => void;
+	onError?: (message: string) => void;
+	/** An enclosing Apply action requests a retry without discarding recovery state. */
+	retryAttempt?: number;
 	/** Advances an enclosing queue only after cancellation leaves no pending session. */
 	onCancelled?: () => void;
 	/** An enclosing row provides the heading, chooser, and selected file summary. */
@@ -47,6 +50,8 @@ export default function DirectImageUploadWidget({
 	initialFiles = [],
 	autoStart = false,
 	onComplete,
+	onError,
+	retryAttempt = 0,
 	onCancelled,
 	compact = false,
 	hideTitle = false,
@@ -533,6 +538,24 @@ export default function DirectImageUploadWidget({
 		else void uploadQueue(files);
 	};
 	const retry = start;
+
+	const previousRetryAttempt = useRef(retryAttempt);
+	const reportedError = useRef<string | null>(null);
+	useEffect(() => {
+		if (phase !== 'error') reportedError.current = null;
+		else if (error && reportedError.current !== error) {
+			reportedError.current = error;
+			onError?.(error);
+		}
+	}, [phase, error, onError]);
+	useEffect(() => {
+		if (previousRetryAttempt.current === retryAttempt) return;
+		previousRetryAttempt.current = retryAttempt;
+		if (phase === 'error' || phase === 'idle') start();
+	// The explicit retry counter is the only trigger; handlers retain the latest recovery state.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [retryAttempt]);
+
 
 	const canSelect = !compact && !autoStart && (phase === 'idle' || phase === 'error');
 

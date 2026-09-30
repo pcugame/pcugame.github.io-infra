@@ -16,8 +16,8 @@
   --radius: 10px;
   --shadow: 0 2px 16px rgba(26, 81, 175, 0.08);
   --shadow-lg: 0 4px 24px rgba(26, 81, 175, 0.12);
-  --max-width: 1200px;
-  --header-height: 80px;
+  --max-width: 75rem;
+  --header-height: 5rem;
 }
 
 /* ── Dark Theme — 회색조 기반 ────────────────────────────────── */

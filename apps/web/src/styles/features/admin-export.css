@@ -1,7 +1,7 @@
 /* ── NAS Export Progress ────────────────────────────────────── */
 
 .export-progress-modal {
-  max-width: 640px;
+  max-width: 40rem;
 }
 
 .export-progress {
@@ -40,7 +40,7 @@
 
 .export-progress__bar-track {
   position: relative;
-  height: 10px;
+  height: 0.625rem;
   overflow: hidden;
   border-radius: 999px;
   background: var(--color-bg);
@@ -116,7 +116,7 @@
 
 .export-progress__file-list {
   list-style: none;
-  max-height: 220px;
+  max-height: 13.75rem;
   overflow-y: auto;
 }
 
@@ -125,7 +125,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  min-height: 52px;
+  min-height: 3.25rem;
   padding: 0.65rem 1rem;
   border-bottom: 1px solid var(--color-border);
 }
@@ -161,7 +161,7 @@
 
 .export-progress__file-status {
   flex-shrink: 0;
-  min-width: 54px;
+  min-width: 3.375rem;
   padding: 0.22rem 0.45rem;
   border-radius: 999px;
   border: 1px solid transparent;
@@ -221,13 +221,13 @@
   color: #fbbf24;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .export-progress-modal {
     max-width: 100%;
   }
 
   .export-progress__file-list {
-    max-height: 180px;
+    max-height: 11.25rem;
   }
 
   .export-progress__file-item {

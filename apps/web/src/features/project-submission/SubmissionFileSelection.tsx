@@ -8,6 +8,7 @@ import {
 } from '../../lib/upload/project-files';
 import type { ClientUploadLimits, MaterialUploadLimits } from '../../lib/upload-limits';
 import type { SubmissionFilesState } from './useSubmissionFiles';
+import { SubmissionFilesHelp, SubmissionPosterHelp } from './SubmissionUploadHelp';
 
 export function SubmissionPosterSelection({
 	files,
@@ -22,12 +23,13 @@ export function SubmissionPosterSelection({
 }) {
 	const [selectionError, setSelectionError] = useState<string | null>(null);
 	return (
-		<fieldset>
+		<fieldset className="submission-file-fieldset">
 			<legend>포스터</legend>
+			<SubmissionPosterHelp />
 			<ProjectUploadDropZone
 				zone="poster"
 				enabled={enabled}
-				hint={`JPG · PNG · WebP 최대 ${limits.posterMaxMb}MB / PDF 최대 ${limits.posterPdfMaxMb}MB. 등록·제출 후 업로드됩니다.`}
+				hint={`JPG · PNG · WebP 최대 ${limits.posterMaxMb}MB / PDF 최대 ${limits.posterPdfMaxMb}MB.`}
 				onFiles={(selected) => {
 					if (selected.length !== 1 || classifyProjectFile(selected[0]!, 'poster') !== 'POSTER') {
 						setSelectionError('포스터는 JPG · PNG · WebP · PDF 파일 한 개를 선택하세요.');
@@ -98,12 +100,13 @@ export function SubmissionMixedFilesSelection({
 		...files.attachmentFiles.map((file) => ({ kind: 'ATTACHMENT' as const, file })),
 	];
 	return (
-		<fieldset>
+		<fieldset className="submission-file-fieldset">
 			<legend>기타 파일</legend>
+			<SubmissionFilesHelp webglUploadHint={webglUploadHint} />
 			<ProjectUploadDropZone
 				zone="files"
 				enabled={enabled}
-				hint="파일을 선택하면 목록에 보관됩니다. 작품 등록·제출을 눌러야 업로드가 시작됩니다. ZIP은 용도를 선택하세요."
+				hint="이미지·동영상·문서·첨부자료를 선택하세요. ZIP 파일은 게임·WebGL·첨부자료 중 용도를 선택하세요."
 				onFiles={(chosen) => {
 					const typed: { kind: Exclude<ProjectUploadKind, 'POSTER'>; file: File }[] = [];
 					const zips: File[] = [];
@@ -124,7 +127,6 @@ export function SubmissionMixedFilesSelection({
 										<p>
 											<strong>{file.name}</strong> · {uploadKindLabels[kind]}
 										</p>
-										<p role="status">등록·제출 후 업로드 대기</p>
 										<button
 											type="button"
 											className="btn btn--secondary btn--small"
@@ -181,7 +183,6 @@ export function SubmissionMixedFilesSelection({
 								{(materialLimits.maxBytes / 1024 / 1024).toFixed(0)}MB
 							</p>
 						)}
-						<p className="field-hint">{webglUploadHint}</p>
 					</>
 				}
 			/>

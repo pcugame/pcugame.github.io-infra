@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminProjectDetail } from '@pcu/contracts';
-import { publicApi } from '../../../lib/api';
+import { adminAssetApi, adminProjectApi, publicApi } from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
 import { materialUploadLimitsFromConfig, type ClientUploadLimits } from '../../../lib/upload-limits';
 import {
@@ -35,7 +35,19 @@ export function useProjectUploadQueue(
 	const [posterError, setPosterError] = useState<string | null>(null);
 	const [refreshError, setRefreshError] = useState(false);
 	const nextId = useRef(0);
-	const refreshing = useRef(false);
+	const [locked, setLocked] = useState(false);
+	const [isApplying, setIsApplying] = useState(false);
+	const applying = useRef(false);
+	const completedUploads = useRef(new Set<number>());
+	const interruptedApply = useRef<Error | null>(null);
+	const [retryAttempt, setRetryAttempt] = useState(0);
+	const [removals, setRemovals] = useState<number[]>([]);
+	const [removeWebgl, setRemoveWebgl] = useState(false);
+	const deleted = useRef(new Set<number>());
+	const webglDeleted = useRef<string | null>(null);
+	const webglIdentity = project.webglDeployment?.id ?? project.webglUrl ?? null;
+	const refreshNeeded = useRef(false);
+	const waiter = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null);
 	const qc = useQueryClient();
 	const config = useQuery({
 		queryKey: ['public-upload-config'],
@@ -43,16 +55,20 @@ export function useProjectUploadQueue(
 		enabled,
 	});
 	const materialLimits = materialUploadLimitsFromConfig(config.data);
-	const issues = uploadQueueIssues(entries, project, limits, materialLimits);
+	const effectiveProject = {
+		...project,
+		assets: project.assets.filter((asset) => !removals.includes(asset.id) && !deleted.current.has(asset.id)),
+		videos: project.videos.filter((asset) => !removals.includes(asset.assetId) && !deleted.current.has(asset.assetId)),
+		attachments: project.attachments?.filter((asset) => !removals.includes(asset.assetId) && !deleted.current.has(asset.assetId)),
+	};
+	const issues = uploadQueueIssues(entries, effectiveProject, limits, materialLimits);
 	const active = entries.find((entry) => entry.status === 'active');
-	const next = entries.find(
-		(entry) => entry.status === 'pending' && entry.kind !== 'ZIP' && !issues.has(entry.id),
-	);
-	useEffect(() => {
-		if (enabled && !active && next) dispatch({ type: 'status', id: next.id, status: 'active' });
-	}, [enabled, active, next]);
+	const pending = entries.filter((entry) => entry.status === 'pending' || entry.status === 'active');
+	const validationError = pending.some((entry) => entry.kind === 'ZIP')
+		? 'ZIP 파일의 용도를 선택해 주세요.'
+		: issues.values().next().value ?? null;
 	const add = (files: File[], zone: UploadZone) => {
-		if (!enabled || files.length === 0) return;
+		if (!enabled || locked || applying.current || files.length === 0) return;
 		if (zone === 'poster') {
 			if (files.length !== 1 || classifyProjectFile(files[0]!, zone) !== 'POSTER') {
 				setPosterError('포스터는 JPG·PNG·WebP·PDF 파일 한 개만 선택해 주세요.');
@@ -71,27 +87,102 @@ export function useProjectUploadQueue(
 			})),
 		});
 	};
-	const complete = useCallback(
-		async (id: number) => {
-			if (refreshing.current) return;
-			refreshing.current = true;
+	const refresh = useCallback(async () => {
+		try {
+			await qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) }, { throwOnError: true });
+			refreshNeeded.current = false;
 			setRefreshError(false);
-			try {
-				// Do not release reserved capacity until the canonical detail has refreshed.
-				await qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) }, { throwOnError: true });
-				dispatch({ type: 'status', id, status: 'done' });
-			} catch {
-				setRefreshError(true);
-			} finally {
-				refreshing.current = false;
+		} catch (error) {
+			setRefreshError(true);
+			throw error;
+		}
+	}, [projectId, qc]);
+	const complete = useCallback((id: number) => {
+		// Checkpoint the completed transfer before refreshing; a failed read must never repeat it.
+		completedUploads.current.add(id);
+		dispatch({ type: 'status', id, status: 'done' });
+		refreshNeeded.current = true;
+		waiter.current?.resolve();
+		waiter.current = null;
+	}, []);
+	const fail = useCallback((message: string) => {
+		const error = new Error(message);
+		if (applying.current) interruptedApply.current = error;
+		waiter.current?.reject(error);
+		waiter.current = null;
+	}, []);
+	const cancel = useCallback((id: number) => {
+		dispatch({ type: 'status', id, status: 'cancelled' });
+		fail('파일 업로드를 취소했습니다. 남은 변경사항을 확인한 뒤 다시 적용해 주세요.');
+	}, [fail]);
+	const applyChanges = async () => {
+		if (applying.current) throw new Error('파일 변경사항을 적용하고 있습니다.');
+		if (!enabled && (pending.length || removals.length || removeWebgl)) throw new Error('파일을 수정할 권한이 없습니다.');
+		if (validationError) throw new Error(validationError);
+		interruptedApply.current = null;
+		applying.current = true;
+		setIsApplying(true);
+		const checkInterrupted = () => {
+			if (interruptedApply.current) throw interruptedApply.current;
+		};
+		try {
+			if (refreshNeeded.current) await refresh();
+			for (const id of removals) {
+				checkInterrupted();
+				if (deleted.current.has(id)) continue;
+				await adminAssetApi.remove(id);
+				deleted.current.add(id);
+				setRemovals((ids) => ids.filter((value) => value !== id));
+				refreshNeeded.current = true;
 			}
-		},
-		[projectId, qc],
-	);
-	const cancel = useCallback((id: number) => dispatch({ type: 'status', id, status: 'cancelled' }), []);
+			checkInterrupted();
+			if (removeWebgl && webglDeleted.current !== webglIdentity) {
+				await adminProjectApi.deleteWebgl(projectId);
+				webglDeleted.current = webglIdentity;
+				setRemoveWebgl(false);
+				refreshNeeded.current = true;
+			}
+			if (refreshNeeded.current) await refresh();
+			for (const entry of pending) {
+				checkInterrupted();
+				// A widget retry can finish while deletion or canonical refresh is awaited.
+				if (completedUploads.current.has(entry.id)) continue;
+				await new Promise<void>((resolve, reject) => {
+					waiter.current = { resolve, reject };
+					if (entry.status === 'active') setRetryAttempt((attempt) => attempt + 1);
+					else dispatch({ type: 'status', id: entry.id, status: 'active' });
+				});
+				await refresh();
+			}
+			checkInterrupted();
+		} finally {
+			applying.current = false;
+			setIsApplying(false);
+		}
+	};
 	const owner = useMemo(() => ({ type: 'PROJECT' as const, id: projectId }), [projectId]);
 	return {
 		entries,
+		project,
+		locked: locked || isApplying,
+		setLocked,
+		isApplying,
+		hasChanges: pending.length > 0 || removals.length > 0 || removeWebgl || refreshNeeded.current || refreshError,
+		validationError,
+		applyChanges,
+		fail,
+		retryAttempt,
+		removals,
+		removeWebgl,
+		storedAssets: project.assets.filter((asset) => !deleted.current.has(asset.id)),
+		hasWebgl: webglIdentity !== null && webglIdentity !== webglDeleted.current,
+		toggleRemoval: (id: number) => {
+			if (!enabled || locked || applying.current) return;
+			setRemovals((ids) => ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id]);
+		},
+		toggleWebglRemoval: () => {
+			if (enabled && !locked && !applying.current) setRemoveWebgl((value) => !value);
+		},
 		active,
 		issues,
 		add,
@@ -104,7 +195,9 @@ export function useProjectUploadQueue(
 		configUnavailable: !materialLimits,
 		configLoading: config.isFetching,
 		retryConfig: () => void config.refetch(),
-		choose: (id: number, kind: 'GAME' | 'WEBGL' | 'ATTACHMENT') => dispatch({ type: 'choose', id, kind }),
+		choose: (id: number, kind: 'GAME' | 'WEBGL' | 'ATTACHMENT') => {
+			if (enabled && !locked && !applying.current) dispatch({ type: 'choose', id, kind });
+		},
 	};
 }
 export type ProjectUploadQueue = ReturnType<typeof useProjectUploadQueue>;

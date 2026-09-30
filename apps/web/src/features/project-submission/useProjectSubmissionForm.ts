@@ -39,16 +39,16 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				title: '운영자 작품 등록',
 				submitLabel: '작품 등록',
 				submittingLabel: '등록 중…',
-				gameUploadHint: '작품 등록 후 자동으로 청크 업로드가 시작됩니다. 중간에 끊겨도 이어서 올릴 수 있습니다.',
-				webglUploadHint: '게임 ZIP과 별도로 업로드됩니다. ZIP 루트 또는 단일 폴더 아래에 index.html이 있어야 합니다.',
+				gameUploadHint: '게임 실행에 필요한 파일을 ZIP으로 압축해 선택하세요.',
+				webglUploadHint: 'WebGL ZIP의 최상위 폴더 또는 그 아래 단일 폴더에 index.html이 있어야 합니다.',
 			}
 		: {
 				eyebrow: 'My Project',
 				title: '내 작품 제출',
 				submitLabel: '작품 제출',
 				submittingLabel: '제출 중…',
-				gameUploadHint: '작품 제출 후 자동으로 청크 업로드가 시작됩니다. 중간에 끊겨도 이어서 올릴 수 있습니다.',
-				webglUploadHint: '게임 ZIP과 별도로 업로드됩니다. ZIP 루트 또는 단일 폴더 아래에 index.html이 있어야 합니다.',
+				gameUploadHint: '게임 실행에 필요한 파일을 ZIP으로 압축해 선택하세요.',
+				webglUploadHint: 'WebGL ZIP의 최상위 폴더 또는 그 아래 단일 폴더에 index.html이 있어야 합니다.',
 			};
 
 	const { data: yearsData } = useQuery({

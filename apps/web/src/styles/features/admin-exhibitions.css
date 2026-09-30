@@ -63,7 +63,7 @@
   flex-wrap: wrap;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .admin-ycard {
     display: flex;
     flex-direction: column;
@@ -126,7 +126,7 @@
 
   .admin-ycard__form .form-field input[type='text'],
   .admin-ycard__form .form-field input[type='number'] {
-    font-size: 16px;
+    font-size: 1rem;
     padding: 0.55rem 0.65rem;
     border-radius: 8px;
   }
@@ -150,7 +150,7 @@
 
 .exhibition-inline-input {
   width: 100%;
-  min-width: 120px;
+  min-width: 7.5rem;
   padding: 0.6rem 0.75rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -161,8 +161,8 @@
 }
 
 .exhibition-inline-input--order {
-  min-width: 72px;
-  max-width: 90px;
+  min-width: 4.5rem;
+  max-width: 5.625rem;
 }
 
 .exhibition-inline-input:focus {

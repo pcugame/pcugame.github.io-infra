@@ -20,7 +20,7 @@
 }
 
 .poster-preview img {
-  max-width: 200px;
+  max-width: 12.5rem;
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
@@ -42,14 +42,20 @@
   margin-top: 0;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 60em) {
   .member-row {
     flex-direction: column;
     align-items: stretch;
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
+  .submission-actions .btn {
+    flex: 1 1 10rem;
+    min-width: min(100%, 10rem);
+    white-space: nowrap;
+  }
+
   .member-row {
     flex-direction: column;
     align-items: stretch;
@@ -59,7 +65,7 @@
   }
 
   .member-row .form-field input {
-    font-size: 16px;
+    font-size: 1rem;
   }
 
   .member-row .btn {

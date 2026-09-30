@@ -88,22 +88,22 @@
   font-size: 1rem;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 50em) {
   .btn {
-    min-height: 40px;
+    min-height: 2.5rem;
     border-radius: 10px;
     font-size: 0.85rem;
   }
 
   .btn--small {
-    min-height: 34px;
+    min-height: 2.125rem;
     padding: 0.35rem 0.65rem;
     font-size: 0.78rem;
   }
 
   .btn--large {
     width: 100%;
-    min-height: 48px;
+    min-height: 3rem;
     font-size: 0.95rem;
     border-radius: 12px;
   }

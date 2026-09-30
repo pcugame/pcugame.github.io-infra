@@ -148,9 +148,6 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 										<p>{getApiErrorMessage(submitMutation.error)}</p>
 									</div>
 								)}
-								<p className="field-hint">
-									파일은 선택 목록에 보관됩니다. {copy.submitLabel}을 누르면 업로드가 시작됩니다.
-								</p>
 								<SubmissionActions
 									isSubmitting={isSubmitting}
 									isUploadLocked={isUploadLocked || pendingZipCount > 0}

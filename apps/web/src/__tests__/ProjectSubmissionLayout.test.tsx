@@ -99,6 +99,59 @@ function select(container: HTMLElement, zone: 'poster' | 'files', files: File[])
 }
 
 describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode) => {
+	it('opens modal help without choosing files or submitting, and restores focus on dismissal', async () => {
+		const { container } = mount(mode);
+		await enterMetadata();
+		const inputClicks = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="file"]'))
+			.map((input) => vi.spyOn(input, 'click'));
+		for (const label of ['포스터 사용 방법', '파일 업로드 사용 방법']) {
+			const trigger = screen.getByRole('button', { name: label });
+			trigger.focus();
+			fireEvent.click(trigger);
+			const dialog = screen.getByRole('dialog', { name: label });
+			expect(container.contains(dialog)).toBe(false);
+			expect(document.body.style.overflow).toBe('hidden');
+			const close = within(dialog).getByRole('button', { name: '도움말 닫기' });
+			expect(document.activeElement).toBe(close);
+			if (label === '포스터 사용 방법') fireEvent.click(close);
+			else fireEvent.keyDown(document, { key: 'Escape' });
+			expect(screen.queryByRole('dialog')).toBeNull();
+			expect(document.activeElement).toBe(trigger);
+			expect(document.body.style.overflow).toBe('');
+		}
+		expect(inputClicks.every((click) => click.mock.calls.length === 0)).toBe(true);
+		expect(controls.submit).not.toHaveBeenCalled();
+		expect(controls.upload).not.toHaveBeenCalled();
+	});
+
+	it('navigates help steps, traps focus, and preserves selected files when help closes', async () => {
+		const { container } = mount(mode);
+		await enterMetadata();
+		select(container, 'files', [new File(['game'], 'game.zip', { type: 'application/zip' })]);
+		const trigger = screen.getByRole('button', { name: '파일 업로드 사용 방법' });
+		fireEvent.click(trigger);
+		const dialog = screen.getByRole('dialog', { name: '파일 업로드 사용 방법' });
+		const help = within(dialog);
+		expect(help.getByRole('button', { name: '이전' }).hasAttribute('disabled')).toBe(true);
+		const close = help.getByRole('button', { name: '도움말 닫기' });
+		fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+		expect(document.activeElement).toBe(help.getByRole('button', { name: '다음' }));
+		fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+		expect(document.activeElement).toBe(close);
+		fireEvent.click(help.getByRole('button', { name: '다음' }));
+		expect(help.getByRole('button', { name: '이전' }).hasAttribute('disabled')).toBe(false);
+		fireEvent.click(help.getByRole('button', { name: '4단계: 작품 제출' }));
+		fireEvent.click(help.getByRole('button', { name: '확인' }));
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(screen.getByText('game.zip')).toBeTruthy();
+		fireEvent.click(trigger);
+		expect(within(screen.getByRole('dialog')).getByRole('button', { name: '이전' }).hasAttribute('disabled')).toBe(true);
+		fireEvent.click(screen.getByRole('dialog').parentElement!);
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(controls.submit).not.toHaveBeenCalled();
+		expect(controls.upload).not.toHaveBeenCalled();
+	});
+
 	it('keeps mixed selection local until metadata creates a DRAFT, then preserves manifest tokens in side-column uploads', async () => {
 		const { container } = mount(mode);
 		await enterMetadata();
