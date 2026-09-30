@@ -18,6 +18,7 @@ function createTransactionRepository(tx: TransactionClient): ImportTransactionRe
 			where: { year_title: { year: data.year, title: data.title } },
 			update: {},
 			create: {
+				visibility: data.visibility ?? 'PUBLIC',
 				year: data.year,
 				title: data.title,
 				isModificationEnabled: data.isModificationEnabled ?? true,

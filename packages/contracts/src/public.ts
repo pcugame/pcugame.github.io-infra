@@ -1,8 +1,10 @@
+import type { Visibility } from './enums.js';
 import type { AssetPlaybackStatus, Platform } from './enums.js';
 import type { ResponsiveImage } from './responsive-image.js';
 
 /** GET /api/public/years */
 export type PublicYearItem = {
+	visibility: Visibility;
 	id: number;
 	year: number;
 	title?: string;
@@ -16,6 +18,9 @@ export type PublicYearListResponse = {
 
 /** GET /api/public/years/:year/projects */
 export type PublicProjectCard = {
+	canChangeVisibility: boolean;
+	exhibitionVisibility: Visibility;
+	visibility: Visibility;
 	id: number;
 	slug: string;
 	title: string;
@@ -27,6 +32,7 @@ export type PublicProjectCard = {
 };
 
 export type PublicExhibition = {
+	visibility: Visibility;
 	id: number;
 	title: string;
 };
@@ -40,7 +46,7 @@ export type PublicYearProjectsResponse = {
 
 /** GET /api/public/exhibitions/:id/projects */
 export type PublicExhibitionProjectsResponse = {
-	exhibition: { id: number; year: number; title: string };
+	exhibition: { id: number; year: number; title: string; visibility: Visibility };
 	items: PublicProjectCard[];
 	empty: boolean;
 };
@@ -88,6 +94,9 @@ export type PublicUploadConfig = {
 };
 
 export type PublicProjectDetailResponse = {
+	canChangeVisibility: boolean;
+	exhibitionVisibility: Visibility;
+	visibility: Visibility;
 	id: number;
 	year: number;
 	slug: string;

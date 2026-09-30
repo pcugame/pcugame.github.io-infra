@@ -38,25 +38,25 @@ function repositoryHarness(label: string) {
 	const publicPrefix = `public/webgl/7/${deploymentId}/`;
 	const calls = {
 		findExhibitionsWithPublishedCounts: vi.fn(async () => [{
-			id: 1, year: 2026, title: `${label} Show`, posterAssetId: 10,
+			visibility: 'PUBLIC' as const, id: 1, year: 2026, title: `${label} Show`, posterAssetId: 10,
 			poster: {
 				kind: 'POSTER' as const, status: 'READY',
 				representations: [{ role: 'ORIGINAL', state: 'READY', bucket: `${label}-public`, objectKey: `public/images/${label}-poster.webp`, width: 1200, height: 800 }],
 			},
 			_count: { projects: 1 },
 		}]),
-		findExhibitionsByYear: vi.fn(async (year: number) => [{ id: 1, year, title: `${label} Show` }]),
-		findExhibitionById: vi.fn(async (id: number) => ({ id, year: 2026, title: `${label} Show` })),
+		findExhibitionsByYear: vi.fn(async (year: number) => [{ visibility: 'PUBLIC' as const, id: 1, year, title: `${label} Show` }]),
+		findExhibitionById: vi.fn(async (id: number) => ({ visibility: 'PUBLIC' as const, id, year: 2026, title: `${label} Show` })),
 		findPublishedProjectsInExhibitions: vi.fn(async () => []),
 		findPublishedProjectById: vi.fn(async () => ({
-			id: 7, exhibitionId: 1, slug: `${label}-game`, title: `${label} Game`, summary: '', description: '',
+			visibility: 'PUBLIC' as const, creatorId: 1, id: 7, exhibitionId: 1, slug: `${label}-game`, title: `${label} Game`, summary: '', description: '',
 			isIncomplete: false, status: 'PUBLISHED' as const,
 			currentWebglDeploymentId: deploymentId,
 			currentWebglDeployment: {
 				id: deploymentId, publicBucket: `${label}-public`, publicPrefix,
 				entryObjectKey: `${publicPrefix}index.html`, state: 'READY',
 			},
-			exhibition: { year: 2026 }, members: [], poster: null,
+			exhibition: { year: 2026, visibility: 'PUBLIC' as const, isModificationEnabled: true }, members: [], poster: null,
 			assets: [
 				{
 					id: 20, kind: 'GAME' as const,

@@ -96,7 +96,7 @@ describe('public exhibition years', () => {
 				summary: '',
 				poster: null,
 				members: [],
-				exhibitionId: 1,
+				exhibitionId: 1, visibility: 'PUBLIC', creatorId: 1, exhibition: { year: 2026, visibility: 'PUBLIC', isModificationEnabled: true },
 				status: 'ARCHIVED',
 			},
 		]);
@@ -122,7 +122,7 @@ describe('public exhibition years', () => {
 				storageKey: 'private.webp',
 			},
 			members: [],
-			exhibitionId: 1,
+			exhibitionId: 1, visibility: 'PUBLIC', creatorId: 1, exhibition: { year: 2026, visibility: 'PUBLIC', isModificationEnabled: true },
 		}]);
 
 		const result = await listProjectsByYear(dependencies, '2026');
@@ -170,7 +170,7 @@ describe('public exhibition years', () => {
 
 			await expect(getProjectDetail(dependencies, slug)).resolves.toMatchObject({ slug });
 			expect(mocks.findPublishedProjectById).not.toHaveBeenCalled();
-			expect(mocks.findPublishedProjectBySlug).toHaveBeenCalledWith(slug, undefined);
+			expect(mocks.findPublishedProjectBySlug).toHaveBeenCalledWith(slug, undefined, null);
 		},
 	);
 

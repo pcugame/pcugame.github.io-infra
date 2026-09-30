@@ -89,7 +89,7 @@ export function createProjectChangeRepository(client:PrismaClient):ProjectChange
     if(row.stagingProjectId!==null)await discardStage(tx,row);
     if(input.manifest.length){
      const source=await tx.project.findUniqueOrThrow({where:{id:row.projectId!}});
-     const stage=await tx.project.create({data:{exhibitionId:source.exhibitionId,slug:`change-${randomUUID()}`,title:source.title,status:'DRAFT',creatorId:actor.id,submission:{create:{actorId:actor.id,items:{create:input.manifest}}}}});
+     const stage=await tx.project.create({data:{exhibitionId:source.exhibitionId,slug:`change-${randomUUID()}`,title:source.title,visibility:source.visibility,status:'DRAFT',creatorId:actor.id,submission:{create:{actorId:actor.id,items:{create:input.manifest}}}}});
      row=await tx.projectChangeRequest.update({where:{id},data:{stagingProjectId:stage.id}});
     }
    }

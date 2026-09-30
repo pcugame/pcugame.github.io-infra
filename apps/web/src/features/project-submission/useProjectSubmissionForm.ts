@@ -10,7 +10,7 @@ import {
 } from '../../contracts/schemas';
 import { adminExhibitionApi, isApiError } from '../../lib/api';
 import { getProjectSubmitApi, type ProjectSubmissionMode } from '../../lib/api/project-submit';
-import { queryKeys } from '../../lib/query';
+import { queryKeys, useViewerKey, invalidateVisibilityQueries } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
 import {
 	createIdempotencyFingerprint,
@@ -28,6 +28,7 @@ interface UseProjectSubmissionFormParams {
 
 export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFormParams) {
 	const navigate = useNavigate();
+	const viewerKey = useViewerKey();
 	const qc = useQueryClient();
 	const { user } = useMe();
 	const isAdminMode = mode === 'admin';
@@ -51,7 +52,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			};
 
 	const { data: yearsData } = useQuery({
-		queryKey: queryKeys.adminExhibitions,
+		queryKey: viewerKey(queryKeys.adminExhibitions),
 		queryFn: adminExhibitionApi.list,
 	});
 	const years = yearsData?.items ?? [];
@@ -60,6 +61,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		resolver: zodResolver(SubmitProjectPayloadSchema),
 		defaultValues: {
 			exhibitionId: 0,
+			visibility: 'PUBLIC',
 			title: '',
 			summary: '',
 			description: '',
@@ -128,7 +130,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				if (status.state === 'PUBLISHED') {
 					window.sessionStorage.removeItem(pendingStorageKey);
 					qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
-					qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+					void invalidateVisibilityQueries(qc);
 					navigate(isAdminMode ? `/admin/projects/${projectId}/edit` : '/me/projects');
 					return true;
 				}
@@ -204,7 +206,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		onSuccess: (res, operation) => {
 			idempotencyOperation.complete(operation.fingerprint);
 			qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
-			qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+			void invalidateVisibilityQueries(qc);
 			qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
 
 			setCreatedProjectId(res.id);

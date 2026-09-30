@@ -21,10 +21,7 @@ async function acquireProtectedCapability() {
 	if (signed.origin !== 'http://localhost:3906') {
 		throw new Error(`protected capability used unexpected origin ${signed.origin}`);
 	}
-	const ttl = Number(signed.searchParams.get('X-Amz-Expires'));
-	if (!Number.isInteger(ttl) || ttl <= 0 || ttl > 60) {
-		throw new Error(`protected capability used unexpected TTL ${ttl}`);
-	}
+	if (!/^\/file\/[a-f0-9]{64}$/.test(signed.pathname)) throw new Error('protected grant is not an opaque stable file URL');
 	return capability;
 }
 
@@ -95,6 +92,29 @@ async function waitForMappedProtectedResponse(capability, attempts = 10, timeout
 	throw lastError ?? new Error('protected capability retry deadline expired');
 }
 
+async function waitForApiHealth(timeoutMs = 30_000) {
+ const deadline = Date.now() + timeoutMs;
+ while (Date.now() < deadline) {
+  try {
+   const response = await fetch('http://127.0.0.1:4000/api/health', {signal: AbortSignal.timeout(Math.min(2_000, deadline-Date.now()))});
+   if (response.ok && (await response.json()).ok === true) return;
+  } catch { /* API may still be establishing its database/startup gates. */ }
+  await new Promise(resolve => setTimeout(resolve, Math.min(250, Math.max(0,deadline-Date.now()))));
+ }
+ throw new Error('API did not become healthy after restart');
+}
+
+const injectProtectedUpstreamFailure = [
+ 'set -eu',
+ 'conf=/etc/nginx/conf.d/default.conf',
+ "grep -Fq 'proxy_pass http://garage:3900$pcu_validated_object_path;' \"$conf\" || { echo 'expected protected locator upstream missing' >&2; exit 1; }",
+ "sed -i 's#proxy_pass http://garage:3900#proxy_pass http://127.0.0.1:9#' \"$conf\"",
+ "grep -Fq 'proxy_pass http://127.0.0.1:9$pcu_validated_object_path;' \"$conf\" || { echo 'protected locator failure injection did not apply' >&2; exit 1; }",
+ 'nginx -t',
+ 'nginx -s reload',
+ 'sleep 1',
+].join('\n');
+
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const docker = process.platform === 'win32' ? 'docker.exe' : 'docker';
 const steps = [
@@ -112,6 +132,8 @@ const steps = [
 	[npm, ['run', 'test:integration:banned-ips']],
 	[npm, ['run', 'test:integration:phase2-transition']],
 	[npm, ['run', 'test:integration:year-change-approval']],
+	[npm, ['run', 'test:integration:visibility']],
+	[npm, ['run', 'test:integration:visibility-gateway']],
 	[docker, ['compose', '-f', 'docker-compose.integration.yml', '--profile', 'e2e', 'run', '--rm', 'e2e']],
 ];
 
@@ -147,12 +169,13 @@ try {
 			if (result.status !== 0) exitCode = result.status ?? 1;
 		}
 		if (exitCode === 0) {
-			result = smoke();
-			if (result.status !== 0) exitCode = result.status ?? 1;
+			const denied = await fetch(smokeUrl);
+			if (denied.ok) { console.error('API-down public gate served bytes'); exitCode = 1; }
 		}
 		if (exitCode === 0) {
 			try {
-				await smokeProtectedCapability(protectedCapability);
+				const denied = await requestMappedProtected(protectedCapability);
+				if (denied.status < 400) throw new Error('API-down protected gate served bytes');
 			} catch (error) {
 				console.error(error);
 				exitCode = 1;
@@ -162,16 +185,23 @@ try {
 		if (exitCode === 0 && restart.status !== 0) exitCode = restart.status ?? 1;
 		if (exitCode === 0) {
 			const sentinel = 'PCU_SIGV4_QUERY_SENTINEL_260824';
-			const sentinelCapability = new URL(protectedCapability);
-			sentinelCapability.searchParams.set('pcu-sentinel', sentinel);
+			let sentinelCapability;
 			let failureInjected = false;
 			try {
+				await waitForApiHealth();
+				// The pre-outage capability is deliberately retained for the API-down
+				// check above. Reissue after restart so this independent Garage failure
+				// test cannot be rejected merely because the 60-second grant expired.
+				protectedCapability = await acquireProtectedCapability();
+				sentinelCapability = new URL(protectedCapability);
+				sentinelCapability.searchParams.set('pcu-sentinel', sentinel);
+				await smokeProtectedCapability(sentinelCapability.toString());
 				const injected = spawnSync(
 					docker,
 					[
 						'compose', '-f', 'docker-compose.integration.yml', 'exec', '-T',
 						'protected-download-origin', 'sh', '-c',
-						"sed -i 's#proxy_pass http://garage:3900;#proxy_pass http://127.0.0.1:9;#' /etc/nginx/conf.d/default.conf && nginx -t && nginx -s reload && sleep 1",
+						injectProtectedUpstreamFailure,
 					],
 					{ stdio: 'inherit' },
 				);
@@ -242,7 +272,7 @@ try {
 				}
 			}
 		}
-		if (exitCode === 0) console.log('API-down public and pre-issued protected capability smoke: OK');
+		if (exitCode === 0) console.log('API-down public and pre-issued protected capabilities denied: OK');
 	}
 } finally {
 	const cleanup = spawnSync(

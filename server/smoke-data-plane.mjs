@@ -7,6 +7,7 @@ if (!url || (!url.startsWith('https://') && !(process.env.ALLOW_INSECURE_SMOKE =
 
 const full = await fetch(url, { redirect: 'error' });
 assert.equal(full.status, 200, 'public object GET');
+assert.equal(full.headers.get('cache-control'), 'private, no-store', 'public object cache policy');
 const body = Buffer.from(await full.arrayBuffer());
 assert.ok(body.length > 0, 'public object body');
 assert.ok(full.headers.get('content-type'), 'Content-Type');
@@ -31,7 +32,7 @@ assert.deepEqual(Buffer.from(await partial.arrayBuffer()), body.subarray(0, end 
 const unsatisfiable = await fetch(url, { headers: { Range: `bytes=${body.length}-` }, redirect: 'error' });
 assert.equal(unsatisfiable.status, 416, 'public object 416');
 assert.equal(unsatisfiable.headers.get('content-range'), `bytes */${body.length}`, '416 Content-Range');
-assert.equal(unsatisfiable.headers.get('cache-control'), 'no-store', '416 cache policy');
+assert.equal(unsatisfiable.headers.get('cache-control'), 'private, no-store', '416 cache policy');
 await unsatisfiable.arrayBuffer();
 
-console.log(JSON.stringify({ event: 'public_data_plane_smoke_passed', url, size: body.length }));
+console.log(JSON.stringify({ event: 'public_data_plane_smoke_passed', size: body.length }));

@@ -1,3 +1,5 @@
+import { canReadProject } from '../../shared/visibility.js';
+import type { Visibility } from '@pcu/contracts';
 import type { UserRole } from '@pcu/contracts';
 
 export type AssetDeliveryAction = 'DOWNLOAD_ORIGINAL' | 'DOWNLOAD_PLAYBACK';
@@ -11,6 +13,8 @@ export interface AssetDeliveryPolicyRecord {
 	kind: string;
 	project: {
 		creatorId: number;
+		visibility?: Visibility;
+		exhibition?: { visibility: Visibility };
 		status: string;
 		members: { userId: number | null }[];
 		changeRequestDraft?: {
@@ -30,7 +34,7 @@ export function authorizeAssetDelivery(input: {
 	const { asset, actor } = input;
 	const projectIsPublic = asset.project.status === 'PUBLISHED'
 		|| asset.project.status === 'ARCHIVED';
-	if (projectIsPublic && (asset.kind === 'GAME' || asset.kind === 'VIDEO' || asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT')) return true;
+	if (projectIsPublic && canReadProject(actor ?? null, {...asset.project, visibility:asset.project.visibility ?? 'PUBLIC', exhibition:asset.project.exhibition ?? {visibility:'PUBLIC'}})) return true;
 
 	if (!actor) return false;
 	if (actor.role === 'ADMIN' || actor.role === 'OPERATOR') return true;

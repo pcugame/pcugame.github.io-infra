@@ -1,3 +1,4 @@
+import { canReadVisibility, isVisibilityStaff } from '../../../shared/visibility.js';
 import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS } from '../../assets/video-order.js';
 import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
 import type {
@@ -556,9 +557,15 @@ export function createProjectCrudRepository(
 		},
 		createProjectWithAssets(data) {
 			return client.$transaction(async (tx) => {
+				await tx.$queryRaw`SELECT id FROM exhibitions WHERE id = ${data.exhibitionId} FOR UPDATE`;
+				const exhibition = await tx.exhibition.findUnique({ where: { id: data.exhibitionId } });
+				if (!exhibition) throw notFound('Exhibition not found');
+				if (data.actor && (!canReadVisibility(data.actor, exhibition.visibility)
+					|| (!exhibition.isModificationEnabled && !isVisibilityStaff(data.actor)))) throw forbidden('Exhibition is not open for this submission');
 				const project = await tx.project.create({
 					data: {
 						exhibitionId: data.exhibitionId,
+						visibility: data.visibility ?? 'PUBLIC',
 						slug: data.slug,
 						title: data.title,
 						summary: data.summary,

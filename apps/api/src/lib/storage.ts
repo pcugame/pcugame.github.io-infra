@@ -31,7 +31,7 @@ export interface ProtectedDownloadPresigner {
 	presign(
 		bucket: string,
 		key: string,
-		options?: { ttlSec?: number; responseContentDisposition?: string },
+		options?: { ttlSec?: number; responseContentDisposition?: string; method?: 'GET' | 'HEAD' },
 	): Promise<string>;
 }
 
@@ -41,7 +41,7 @@ export function createProtectedDownloadPresigner(
 ): ProtectedDownloadPresigner {
 	return {
 		async presign(bucket, key, presignOptions = {}) {
-			return getSignedUrl(client, new GetObjectCommand({
+			return getSignedUrl(client, presignOptions.method === 'HEAD' ? new HeadObjectCommand({Bucket:bucket,Key:key}) : new GetObjectCommand({
 				Bucket: bucket,
 				Key: key,
 				...(presignOptions.responseContentDisposition && {

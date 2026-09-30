@@ -1,3 +1,4 @@
+import { useViewerKey } from '../lib/query';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorMessage, LoadingSpinner } from '../components/common';
@@ -5,10 +6,11 @@ import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 
 export default function ProjectPlayPage() {
+ const viewerKey = useViewerKey();
 	const { projectId: projectIdParam } = useParams<{ projectId: string }>();
 	const projectId = Number(projectIdParam);
 	const { data: project, isLoading, error, refetch } = useQuery({
-		queryKey: queryKeys.projectDetailById(projectId),
+		queryKey: viewerKey(queryKeys.projectDetailById(projectId)),
 		queryFn: () => publicApi.getProjectDetail(projectId),
 		enabled: Number.isInteger(projectId) && projectId > 0,
 	});

@@ -1,3 +1,6 @@
+import type { Visibility } from '@pcu/contracts';
+import { isVisibilityStaff, type VisibilityActor } from '../../../shared/visibility.js';
+import { exhibitionVisibilityWhere, projectVisibilityWhere } from '../../../shared/visibility-query.js';
 import { cleanupSourceChangeRequests } from '../../project-change/transaction.js';
 import {
 	Prisma,
@@ -102,10 +105,11 @@ export function createExhibitionRepository(
 	policy: ExhibitionMutationTransactionPolicy = EXHIBITION_MUTATION_TRANSACTION_POLICY,
 ) {
 	/** @returns All exhibitions ordered by sortOrder asc, year desc, with project counts */
-	function findAllExhibitions() {
+	function findAllExhibitions(actor: VisibilityActor = null) {
 		return prisma.exhibition.findMany({
+			where: exhibitionVisibilityWhere(actor),
 			orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
-			include: exhibitionPosterInclude,
+			include: { ...exhibitionPosterInclude, _count: { select: { projects: { where: { changeRequestDraft: null, ...(isVisibilityStaff(actor) ? {} : { status: { in: ['PUBLISHED', 'ARCHIVED'] }, ...projectVisibilityWhere(actor) }) } } } } },
 		});
 	}
 
@@ -131,6 +135,7 @@ export function createExhibitionRepository(
 
 	/** Create a new Exhibition record */
 	function createExhibition(data: {
+		visibility?: Visibility;
 		year: number;
 		title?: string;
 		isModificationEnabled?: boolean;
@@ -219,7 +224,7 @@ export function createExhibitionRepository(
 	/** Partial-update an Exhibition and return the updated record with project count */
 	function updateExhibition(
 		id: number,
-		data: { title?: string; isModificationEnabled?: boolean; sortOrder?: number },
+		data: { visibility?: Visibility; title?: string; isModificationEnabled?: boolean; sortOrder?: number },
 	) {
 		return prisma.exhibition.update({
 			where: { id },

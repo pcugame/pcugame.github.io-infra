@@ -1,6 +1,9 @@
+import type { Visibility } from '@pcu/contracts';
+import type { VisibilityActor } from '../../../shared/visibility.js';
 import type { CreateExhibitionRequest } from '@pcu/contracts';
 
 export interface ExhibitionRecord {
+	visibility: Visibility;
 	id: number;
 	year: number;
 	title: string;
@@ -36,16 +39,17 @@ export interface ExhibitionDeletionOutboxConfig {
 }
 
 export interface ExhibitionRepository {
-	findAllExhibitions(): Promise<ExhibitionRecord[]>;
+	findAllExhibitions(actor?: VisibilityActor): Promise<ExhibitionRecord[]>;
 	findExhibitionByComposite(year: number, title: string): Promise<{ id: number } | null>;
 	findExhibitionById(id: number): Promise<{ id: number } | null>;
 	findExhibitionByIdWithCount(id: number): Promise<{ id: number; _count: { projects: number } } | null>;
-	createExhibition(data: CreateExhibitionRequest): Promise<{ id: number; year: number }>;
+	createExhibition(data: CreateExhibitionRequest): Promise<{ id: number; year: number; visibility: Visibility }>;
 	deleteExhibition(
 		id: number,
 		outbox: ExhibitionDeletionOutboxConfig,
 	): Promise<{ cleanupQueued?: boolean } | null>;
 	updateExhibition(id: number, patch: {
+		visibility?: Visibility;
 		title?: string;
 		isModificationEnabled?: boolean;
 		sortOrder?: number;

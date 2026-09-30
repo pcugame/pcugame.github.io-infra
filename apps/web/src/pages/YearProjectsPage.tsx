@@ -1,3 +1,4 @@
+import { useViewerKey } from '../lib/query';
 import { useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -9,6 +10,7 @@ import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
 import { ProjectCard, ProjectModal } from '../components/project';
 
 export default function YearProjectsPage() {
+ const viewerKey = useViewerKey();
   const { year: yearParam } = useParams<{ year: string }>();
   const year = Number(yearParam);
   const [search, setSearch] = useState('');
@@ -23,12 +25,12 @@ export default function YearProjectsPage() {
   const closeModal = useCallback(() => setSelectedSlug(null), []);
 
   const { data: yearsData } = useQuery({
-    queryKey: queryKeys.publicYears,
+    queryKey: viewerKey(queryKeys.publicYears),
     queryFn: publicApi.getYears,
   });
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: queryKeys.yearProjects(year),
+    queryKey: viewerKey(queryKeys.yearProjects(year)),
     queryFn: () => publicApi.getYearProjects(year),
     enabled: !isNaN(year),
   });

@@ -16,7 +16,8 @@ vi.mock('../features/admin/projects/AdminProjectAssetManager', () => ({
 	AdminProjectPosterUpload: () => null,
 	useAdminProjectUploadQueue: () => ({ hasChanges: control.queueDirty, isApplying: false, validationError: control.queueError, applyChanges: control.queueApply, setLocked: control.lock }),
 }));
-const initial = (): AdminProjectDetail => ({ id: 7, title: '기존 제목', summary: '소개', description: '설명', slug: 'project', year: 2026, platforms: [], isIncomplete: false, video: null, videos: [], status: 'PUBLISHED', sortOrder: 0, canEdit: true, members: [{ id: 10, name: '학생', studentId: '20260001', sortOrder: 0, userId: null }], assets: [] });
+vi.mock('../lib/env', () => ({ env: { VISIBILITY_CONTROLS_ENABLED: true } }));
+const initial = (): AdminProjectDetail => ({ visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: true, id: 7, title: '기존 제목', summary: '소개', description: '설명', slug: 'project', year: 2026, platforms: [], isIncomplete: false, video: null, videos: [], status: 'PUBLISHED', sortOrder: 0, canEdit: true, members: [{ id: 10, name: '학생', studentId: '20260001', sortOrder: 0, userId: null }], assets: [] });
 let stored: AdminProjectDetail;
 let client: QueryClient;
 function mount() {
@@ -38,7 +39,43 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client?.clear(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe('global project Apply', () => {
-	it('stages visibility and text, applies one PATCH, and resets clean baseline from the response', async () => {
+ it('stages visibility until Apply, resets its baseline, and treats a reverted selection as clean', async () => {
+  mount(); await ready();
+  const select = screen.getByRole('combobox', { name: '공개 범위' });
+  fireEvent.change(select, { target: { value: 'STAFF' } });
+  expect(adminProjectApi.update).not.toHaveBeenCalled();
+  expect(apply().disabled).toBe(false);
+  fireEvent.change(select, { target: { value: 'PUBLIC' } });
+  await waitFor(() => expect(apply().disabled).toBe(true));
+  fireEvent.change(select, { target: { value: 'AUTHENTICATED' } });
+  fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { visibility: 'AUTHENTICATED' }));
+  await waitFor(() => expect(apply().disabled).toBe(true));
+  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).value).toBe('AUTHENTICATED');
+  expect(screen.getByText('적용되었습니다.')).toBeTruthy();
+ });
+ it('preserves visibility draft across background reads and drops it if capability is revoked before Apply', async () => {
+  mount(); await ready();
+  fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), { target: { value: 'STAFF' } });
+  stored = { ...stored, description: '외부 설명' };
+  await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
+  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).value).toBe('STAFF');
+  stored = { ...stored, canChangeVisibility: false };
+  await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
+  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).disabled).toBe(true);
+  change('제목 *', '제목만 변경'); fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
+  expect(stored.visibility).toBe('PUBLIC');
+  expect(stored.description).toBe('외부 설명');
+ });
+ it('shows a disabled visibility field and blocks Apply in a locked contributor exhibition', async () => {
+  control.role = 'USER'; stored = { ...stored, canChangeVisibility: false, canEdit: false };
+  mount(); await ready();
+  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).disabled).toBe(true);
+  expect(apply().disabled).toBe(true);
+  fireEvent.click(apply()); expect(adminProjectApi.update).not.toHaveBeenCalled();
+ });
+	it('stages publication status and text, applies one PATCH, and resets clean baseline from the response', async () => {
 		const { container } = mount(); await ready(); expect(apply().disabled).toBe(true);
 		fireEvent.click(screen.getByRole('switch')); change('제목 *', '새 제목');
 		expect(adminProjectApi.update).not.toHaveBeenCalled(); expect(apply().disabled).toBe(false);
@@ -83,7 +120,7 @@ describe('global project Apply', () => {
 		fireEvent.click(apply()); await screen.findByText(/참여 학생 1: 이름/);
 		expect(adminMemberApi.update).not.toHaveBeenCalled(); expect(control.queueApply).not.toHaveBeenCalled();
 	});
-	it.each(['USER', 'DRAFT'])('keeps visibility protected for %s and omits unchanged status', async (mode) => {
+	it.each(['USER', 'DRAFT'])('keeps publication status protected for %s and omits unchanged status', async (mode) => {
 		if (mode === 'USER') control.role = 'USER'; else stored.status = 'DRAFT';
 		mount(); await ready(); expect((screen.getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
 		change('제목 *', '제목'); fireEvent.click(apply()); await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledOnce());

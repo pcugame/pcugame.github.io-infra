@@ -1,3 +1,4 @@
+import type { Visibility } from '@pcu/contracts';
 import { compareProjectVideos } from '../../../shared/project-video-order.js';
 import type { AdminProjectDetail, AssetKind, Platform, ProjectStatus } from '@pcu/contracts';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
@@ -61,10 +62,11 @@ function imageSourceFor(asset: {
 
 /** Serialize a project detail record to the API response shape */
 export type SerializableProject = {
+	visibility: Visibility;
 	id: number;
 	title: string;
 	slug: string;
-	exhibition: { year: number; isModificationEnabled?: boolean };
+	exhibition: { visibility: Visibility; year: number; isModificationEnabled?: boolean };
 	summary: string;
 	description: string;
 	githubUrl: string;
@@ -182,6 +184,9 @@ export function createProjectSerializer(
 
 		return {
 			id: project.id,
+			visibility: project.visibility,
+			exhibitionVisibility: project.exhibition.visibility,
+			canChangeVisibility: false,
 			title: project.title,
 			slug: project.slug,
 			year: project.exhibition.year,

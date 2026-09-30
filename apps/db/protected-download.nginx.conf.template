@@ -1,7 +1,12 @@
+map "${FILE_GATEWAY_TLS_SERVER_NAME}" $pcu_gate_tls_name {
+  "" $proxy_host;
+  default "${FILE_GATEWAY_TLS_SERVER_NAME}";
+}
+
 # Protected capability data-plane boundary. Never log the raw target or query:
 # SigV4 query parameters are bearer capabilities until their short expiry.
 log_format pcu_protected_download
-  'method=$request_method uri=$uri status=$status bytes_out=$bytes_sent range=$http_range';
+  'method=$request_method surface=file status=$status bytes_out=$bytes_sent range=$http_range';
 
 limit_conn_zone $binary_remote_addr zone=pcu_protected_download_per_ip:10m;
 limit_conn_zone $server_addr zone=pcu_protected_download_global:10m;
@@ -29,6 +34,30 @@ server {
   add_header Cache-Control "private, no-store" always;
   add_header X-Content-Type-Options "nosniff" always;
 
+  location = /__pcu_file_auth {
+    internal;
+    resolver 127.0.0.11 valid=30s;
+    set $pcu_gate_upstream "${FILE_GATEWAY_API_UPSTREAM}";
+    proxy_pass $pcu_gate_upstream/api/internal/file-access;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $pcu_gate_tls_name;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 4;
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+    proxy_method GET;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-PCU-Gateway-Secret "${FILE_GATEWAY_SECRET}";
+    proxy_set_header X-PCU-File-Kind "protected";
+    proxy_set_header X-PCU-File-Uri $request_uri;
+    proxy_set_header X-PCU-File-Method $pcu_file_method;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 5s;
+    proxy_next_upstream off;
+  }
+
   location = /__pcu_protected_download_health {
     access_log off;
     return 204;
@@ -38,18 +67,26 @@ server {
   location = /${S3_BUCKET_PROTECTED} { return 404; }
   location = /${S3_BUCKET_PROTECTED}/ { return 404; }
 
-  # Path-style access is restricted to object keys in exactly one protected
-  # bucket. With no URI on proxy_pass, nginx preserves the original escaped
-  # path and complete SigV4 query. The signed browser Host is preserved too.
-  location /${S3_BUCKET_PROTECTED}/ {
+  # Legacy paths and opaque file/play capabilities share the live authorization
+  # gate. Only the verified locator and freshly signed Host reach Garage.
+  location ~ "^/(?:${S3_BUCKET_PROTECTED}/.+|file/[a-f0-9]{64}|play/[a-f0-9]{64}/.+)$" {
     if ($request_method !~ ^(GET|HEAD)$) { return 405; }
     if ($http_content_length ~ ^[1-9][0-9]*$) { return 413; }
     if ($http_transfer_encoding != "") { return 400; }
 
-    proxy_pass ${GARAGE_S3_UPSTREAM};
+    set $pcu_file_method $request_method;
+    auth_request /__pcu_file_auth;
+    auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
+    auth_request_set $pcu_validated_upstream_host $upstream_http_x_pcu_upstream_host;
+    resolver 127.0.0.11 valid=30s;
+    proxy_pass ${GARAGE_S3_UPSTREAM}$pcu_validated_object_path;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-PCU-Gateway-Secret "";
+    proxy_set_header X-PCU-File-Uri "";
     proxy_http_version 1.1;
     proxy_pass_request_headers on;
-    proxy_set_header Host $http_host;
+    proxy_set_header Host $pcu_validated_upstream_host;
     proxy_set_header Connection "";
     proxy_set_header Content-Length "";
     proxy_set_header Transfer-Encoding "";

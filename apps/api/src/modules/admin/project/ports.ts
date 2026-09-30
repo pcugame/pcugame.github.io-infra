@@ -1,3 +1,4 @@
+import type { Visibility } from '@pcu/contracts';
 import type {
 	AssetKind,
 	ProjectStatus,
@@ -7,6 +8,7 @@ import type { SerializableProject } from './serializer.js';
 import type { Actor } from '../../../application/http-input.js';
 
 export interface ExhibitionUploadRecord {
+	visibility: Visibility;
 	id: number;
 	year: number;
 	title: string;
@@ -14,6 +16,8 @@ export interface ExhibitionUploadRecord {
 }
 
 export interface SubmitProjectWriteData {
+	actor?: Actor;
+	visibility?: Visibility;
 	exhibitionId: number;
 	slug: string;
 	title: string;
@@ -67,10 +71,11 @@ export interface ProjectSubmissionRecord {
 }
 
 export interface ProjectListRecord {
+	visibility: Visibility;
 	id: number;
 	title: string;
 	slug: string;
-	exhibition: { year: number; isModificationEnabled?: boolean };
+	exhibition: { year: number; visibility: Visibility; isModificationEnabled?: boolean };
 	isIncomplete: boolean;
 	status: ProjectStatus;
 	creatorId: number;
@@ -127,6 +132,7 @@ export interface ProjectRepository {
 	findProjectById(id: number): Promise<ProjectDetailRecord | null>;
 	isMemberOfProject(projectId: number, userId: number): Promise<unknown | null>;
 	updateProject(id: number, patch: {
+		visibility?: Visibility;
 		title?: string;
 		summary?: string;
 		description?: string;

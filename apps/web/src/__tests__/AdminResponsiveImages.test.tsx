@@ -38,6 +38,7 @@ function withQueryClient(ui: React.ReactNode) {
 describe('admin responsive image previews', () => {
 	it('renders an exhibition poster through the shared responsive component', () => {
 		const exhibition: AdminExhibitionItem = {
+	visibility: 'PUBLIC',
 			id: 1,
 			year: 2026,
 			title: '졸업 전시',

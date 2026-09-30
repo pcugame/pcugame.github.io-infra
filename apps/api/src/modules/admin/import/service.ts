@@ -1,3 +1,4 @@
+import { VisibilitySchema, type Visibility } from '@pcu/contracts';
 import { z } from 'zod';
 import { toSlug } from '../../../shared/slug.js';
 import { badRequest } from '../../../shared/errors.js';
@@ -9,6 +10,7 @@ export interface ImportExhibitionRecord {
 }
 
 export interface ImportProjectCreate {
+	visibility: Visibility;
 	exhibitionId: number;
 	slug: string;
 	title: string;
@@ -25,6 +27,7 @@ export interface ImportProjectCreate {
 export interface ImportTransactionRepository {
 	findExhibitionByComposite(year: number, title: string): Promise<ImportExhibitionRecord | null>;
 	upsertExhibition(data: {
+		visibility?: Visibility;
 		year: number;
 		title: string;
 		isModificationEnabled?: boolean;
@@ -51,6 +54,7 @@ export const ImportMember = z.object({
 });
 
 export const ImportProject = z.object({
+	visibility: VisibilitySchema.default('PUBLIC'),
 	year: z.number().int().min(2000).max(2100),
 	title: z.string().min(1).max(120),
 	slug: z.string().max(80).optional(),
@@ -64,6 +68,7 @@ export const ImportProject = z.object({
 });
 
 export const ImportYear = z.object({
+	visibility: VisibilitySchema.default('PUBLIC'),
 	year: z.number().int().min(2000).max(2100),
 	title: z.string().max(100).optional().default(''),
 	isModificationEnabled: z.boolean().optional(),
@@ -186,6 +191,7 @@ export async function executeImport(
 					year: y.year,
 					title,
 					isModificationEnabled: y.isModificationEnabled,
+					visibility: y.visibility,
 				});
 				exhibitionMap.set(`${y.year}::${title}`, created.id);
 				exhibitionsCreated++;
@@ -237,6 +243,7 @@ export async function executeImport(
 				description: p.description,
 				isIncomplete: p.isIncomplete,
 				status: p.status,
+				visibility: p.visibility,
 				githubUrl: p.githubUrl,
 				platforms: p.platforms,
 				creatorId,

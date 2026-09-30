@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
 	getProjectDetail: vi.fn(),
 }));
 
+vi.mock('../features/auth', () => ({ useMe: () => ({ user: null, isPending: false }) }));
+
 vi.mock('../lib/api', () => ({
 	publicApi: {
 		getProjectDetail: mocks.getProjectDetail,
@@ -55,6 +57,7 @@ const screenshot: ResponsiveImage = {
 };
 
 const project: PublicProjectDetailResponse = {
+	visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 	id: 1,
 	year: 2026,
 	slug: 'responsive-game',

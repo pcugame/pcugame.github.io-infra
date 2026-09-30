@@ -1,3 +1,4 @@
+import { useViewerKey } from '../lib/query';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
@@ -7,6 +8,7 @@ import { useMe } from '../features/auth';
 import type { PublicYearItem } from '../contracts';
 
 export default function HomePage() {
+ const viewerKey = useViewerKey();
 	const { isAuthenticated, user } = useMe();
 	const canManageProjects = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
 	const submitRoute = canManageProjects ? '/admin/projects/new' : '/me/projects/new';
@@ -17,7 +19,7 @@ export default function HomePage() {
 		error: yearsError,
 		refetch: yearsRefetch,
 	} = useQuery({
-		queryKey: queryKeys.publicYears,
+		queryKey: viewerKey(queryKeys.publicYears),
 		queryFn: publicApi.getYears,
 	});
 

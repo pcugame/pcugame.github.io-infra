@@ -18,7 +18,7 @@ const assets = [
 	],
 }));
 const project: SerializableProject = {
-	id: 1, title: 'Videos', slug: 'videos', exhibition: { year: 2026 }, summary: '', description: '', githubUrl: '',
+	id: 1, title: 'Videos', slug: 'videos', visibility: 'PUBLIC' as const, exhibition: { visibility: 'PUBLIC' as const, year: 2026 }, summary: '', description: '', githubUrl: '',
 	platforms: [], isIncomplete: false, status: 'PUBLISHED', sortOrder: 0, posterAssetId: null, poster: null,
 	members: [], assets,
 };

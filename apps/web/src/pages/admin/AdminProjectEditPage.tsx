@@ -20,10 +20,11 @@ import { useAdminProjectMutations } from '../../features/admin/projects/useAdmin
 import { useProjectMemberDraft } from '../../features/admin/projects/useProjectMemberDraft';
 import { useMe } from '../../features/auth';
 import { adminProjectApi, getApiErrorMessage } from '../../lib/api';
-import { queryKeys } from '../../lib/query';
+import { queryKeys, invalidateVisibilityQueries } from '../../lib/query';
 import { getClientUploadLimits } from '../../lib/upload-limits';
 
 const metadata = (project: AdminProjectDetail): UpdateProjectFormInput => ({
+	visibility: project.visibility,
 	title: project.title,
 	summary: project.summary ?? '',
 	description: project.description ?? '',
@@ -94,6 +95,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 				const nextStatus = data.status;
 				const response = await mutations.updateMutation.mutateAsync({
 					// Background reads must not turn untouched fields into stale writes.
+					...(project.canChangeVisibility && data.visibility !== defaults?.visibility ? { visibility: data.visibility } : {}),
 					...(data.title !== defaults?.title ? { title: data.title } : {}),
 					...(data.summary !== defaults?.summary ? { summary: data.summary } : {}),
 					...(data.description !== defaults?.description ? { description: data.description } : {}),
@@ -106,7 +108,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			}
 			await qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
 			await qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
-			await qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+			await invalidateVisibilityQueries(qc, { preserveProjectDrafts: true });
 			setIsSuccess(true);
 		} catch (error) {
 			setApplyError(error);
@@ -117,6 +119,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			setIsApplying(false);
 		}
 	});
+
 
 	return (
 		<div className="admin-project-edit-page">
@@ -129,7 +132,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			<ProjectEditorLayout
 				poster={<AdminProjectPosterUpload project={project} canEditContent={canEditContent} />}
 				details={<>
-					<AdminProjectBasicInfoForm form={form} formId={formId} isPending={pending} canEditContent={canEditContent} onSubmit={onApply} />
+					<AdminProjectBasicInfoForm project={project} form={form} formId={formId} isPending={pending} canEditContent={canEditContent} onSubmit={onApply} />
 					<AdminProjectMemberEditor members={members.members} canEditContent={canEditContent} isBusy={pending} errors={showMemberErrors ? members.validationErrors : []} onAdd={members.add} onSwap={members.swap} onUpdate={members.update} onRemove={members.remove} />
 				</>}
 				files={<AdminProjectAssetManager canEditContent={canEditContent} />}

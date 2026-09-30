@@ -56,7 +56,7 @@ describe('DirectImageUploadWidget', () => {
 		const { container } = render(
 			<QueryClientProvider client={new QueryClient()}>
 				<YearMobileCard
-					year={{ id: 45, year: 2026, title: 'Direct poster', isUploadEnabled: true, sortOrder: 0, projectCount: 0 }}
+					year={{ visibility: 'PUBLIC', id: 45, year: 2026, title: 'Direct poster', isUploadEnabled: true, sortOrder: 0, projectCount: 0 }}
 					isEditing={false}
 					onEdit={vi.fn()} onCancel={vi.fn()} onSaved={vi.fn()} onDelete={vi.fn()} isDeleting={false}
 					isAdmin={false} onExport={vi.fn()} isExporting={false} isAnyExporting={false}

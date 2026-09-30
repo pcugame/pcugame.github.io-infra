@@ -42,6 +42,7 @@ load_env() {
   set -a
   # shellcheck disable=SC1090
   source "$ENV_FILE"
+  FILE_GATEWAY_SECRET="${FILE_GATEWAY_SECRET:-}"
   set +a
 }
 
@@ -116,7 +117,25 @@ SQL
   }
 }
 
+assert_visibility_rollback_safe() {
+  podman exec -i "$PG_CONTAINER" sh -c 'exec psql -X -qAt --set ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+DO $$
+DECLARE restricted boolean;
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = current_schema() AND table_name = 'exhibitions' AND column_name = 'visibility') THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM exhibitions WHERE visibility::text <> ''PUBLIC'')
+                 OR EXISTS (SELECT 1 FROM projects WHERE visibility::text <> ''PUBLIC'')' INTO restricted;
+    IF restricted THEN
+      RAISE EXCEPTION 'Restricted visibility data exists; recover with a visibility-aware forward fix';
+    END IF;
+  END IF;
+END $$;
+SQL
+}
+
 assert_phase1_rollback_authorization() {
+  assert_visibility_rollback_safe
   assert_legacy_material_rollback_safe
   [[ "${RELEASE_SCHEMA_PHASE:-}" == phase1 && "${START_DEDICATED_WORKERS:-true}" == false ]] || {
     echo "ERROR: legacy runtime rollback is permitted only for Phase 1"
@@ -200,6 +219,7 @@ release_common_args() {
     -e "DATABASE_URL=${db_url}"
     -e "LOG_LEVEL=${LOG_LEVEL:-info}"
     -e "SESSION_SECRET=${SESSION_SECRET}"
+    -e "FILE_GATEWAY_SECRET=${FILE_GATEWAY_SECRET:-}"
     -e "GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}"
     -e "CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}"
     -e "API_PUBLIC_URL=${API_PUBLIC_URL}"
@@ -264,6 +284,10 @@ run_release_entry() {
 }
 
 validate_production_boundaries() {
+  [[ "${#FILE_GATEWAY_SECRET}" -ge 32 ]] || {
+    echo "ERROR: FILE_GATEWAY_SECRET must contain at least 32 characters and match the NAS file gateways"
+    return 1
+  }
   node - \
     "$S3_ENDPOINT" \
     "$S3_PUBLIC_SIGNING_ENDPOINT" \
@@ -952,6 +976,7 @@ do_up() {
   local common_env=(
     -e "NODE_ENV=production"
     -e "SESSION_SECRET=${SESSION_SECRET}"
+    -e "FILE_GATEWAY_SECRET=${FILE_GATEWAY_SECRET:-}"
     -e "GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}"
     -e "DATABASE_URL=${db_url}"
     -e "LOG_LEVEL=${LOG_LEVEL:-info}"

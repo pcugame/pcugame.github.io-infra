@@ -74,6 +74,8 @@ export function createAssetsRepository(
 					project: {
 						select: {
 							creatorId: true,
+							visibility: true,
+							exhibition: {select:{visibility:true}},
 							title: true,
 							status: true,
 							members: {

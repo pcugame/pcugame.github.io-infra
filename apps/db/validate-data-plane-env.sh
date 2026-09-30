@@ -16,6 +16,14 @@ if [ -n "${UPLOAD_PART_GLOBAL_CONNECTIONS:-}" ]; then
     || fail "global connection limit must be at least the per-IP ceiling"
 fi
 
+if [ -n "${PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:-}${GARAGE_PUBLIC_BUCKET_HOST:-}" ]; then
+  [ "${#FILE_GATEWAY_SECRET}" -ge 32 ] || fail "FILE_GATEWAY_SECRET must contain at least 32 characters"
+  case "$FILE_GATEWAY_SECRET" in *[!a-zA-Z0-9_-]*) fail "FILE_GATEWAY_SECRET must be URL-safe" ;; esac
+  case "${FILE_GATEWAY_TLS_SERVER_NAME:-}" in *[!a-zA-Z0-9.-]*) fail "FILE_GATEWAY_TLS_SERVER_NAME must be a DNS hostname" ;; esac
+  case "$FILE_GATEWAY_API_UPSTREAM" in http://*|https://*) ;; *) fail "FILE_GATEWAY_API_UPSTREAM must be HTTP(S)" ;; esac
+  case "${FILE_GATEWAY_API_UPSTREAM#*://}" in ''|*/*|*' '*|*\"*|*\'*|*';'*|*'$'*) fail "gateway upstream must be exact origin" ;; esac
+fi
+
 if [ -n "${PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:-}" ]; then
   case "$PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:$PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS" in
     *[!0-9:]*|:*|*:) fail "protected download connection limits must be positive integers" ;;

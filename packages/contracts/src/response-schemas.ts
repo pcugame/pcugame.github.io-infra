@@ -1,3 +1,4 @@
+import { VisibilitySchema } from './schemas.js';
 import { z } from 'zod';
 import {
 	AssetKindSchema,
@@ -126,6 +127,7 @@ export const MeResponseSchema = z.discriminatedUnion('authenticated', [
 ]);
 
 export const PublicYearItemSchema = z.object({
+	visibility: VisibilitySchema,
 	id: PositiveIntegerSchema,
 	year: YearSchema,
 	title: z.string().optional(),
@@ -138,6 +140,9 @@ export const PublicYearListResponseSchema = z.object({
 }).strict();
 
 export const PublicProjectCardSchema = z.object({
+	canChangeVisibility: z.boolean(),
+	exhibitionVisibility: VisibilitySchema,
+	visibility: VisibilitySchema,
 	id: PositiveIntegerSchema,
 	slug: z.string().min(1),
 	title: z.string(),
@@ -152,6 +157,7 @@ export const PublicProjectCardSchema = z.object({
 }).strict();
 
 export const PublicExhibitionSchema = z.object({
+	visibility: VisibilitySchema,
 	id: PositiveIntegerSchema,
 	title: z.string(),
 }).strict();
@@ -165,6 +171,7 @@ export const PublicYearProjectsResponseSchema = z.object({
 
 export const PublicExhibitionProjectsResponseSchema = z.object({
 	exhibition: z.object({
+		visibility: VisibilitySchema,
 		id: PositiveIntegerSchema,
 		year: YearSchema,
 		title: z.string(),
@@ -219,6 +226,9 @@ export const PublicUploadConfigSchema = z.object({
 }).strict();
 
 export const PublicProjectDetailResponseSchema = z.object({
+	canChangeVisibility: z.boolean(),
+	exhibitionVisibility: VisibilitySchema,
+	visibility: VisibilitySchema,
 	id: PositiveIntegerSchema,
 	year: YearSchema,
 	slug: z.string().min(1),
@@ -240,6 +250,7 @@ export const PublicProjectDetailResponseSchema = z.object({
 }).strict();
 
 export const AdminExhibitionItemSchema = z.object({
+	visibility: VisibilitySchema,
 	id: PositiveIntegerSchema,
 	year: YearSchema,
 	title: z.string().optional(),
@@ -257,11 +268,15 @@ export const AdminExhibitionListResponseSchema = z.object({
 }).strict();
 
 export const CreateExhibitionResponseSchema = z.object({
+	visibility: VisibilitySchema,
 	id: PositiveIntegerSchema,
 	year: YearSchema,
 }).strict();
 
 export const AdminProjectItemSchema = z.object({
+	canChangeVisibility: z.boolean(),
+	exhibitionVisibility: VisibilitySchema,
+	visibility: VisibilitySchema,
 	isModificationEnabled: z.boolean().optional(),
 	canEdit: z.boolean().optional(),
 	canDelete: z.boolean().optional(),
@@ -293,6 +308,9 @@ export const AdminProjectListResponseSchema = z.object({
 }).strict();
 
 export const AdminProjectDetailSchema = z.object({
+	canChangeVisibility: z.boolean(),
+	exhibitionVisibility: VisibilitySchema,
+	visibility: VisibilitySchema,
 	isModificationEnabled: z.boolean().optional(),
 	canEdit: z.boolean().optional(),
 	canDelete: z.boolean().optional(),

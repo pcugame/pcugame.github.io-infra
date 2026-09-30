@@ -11,9 +11,10 @@ export interface YearControllerDependencies {
 /** Register admin exhibition CRUD routes from one BackendContext-owned graph. */
 export function createYearController(deps: YearControllerDependencies): FastifyPluginAsync {
 	return async function yearController(app): Promise<void> {
+		app.addHook('onSend', async (_request, reply) => { reply.header('Cache-Control', 'private, no-store'); });
 		/** GET /exhibitions — list all exhibitions with project counts */
-		app.get('/exhibitions', { preHandler: requireLogin }, async (_req, reply) => {
-			const items = await deps.service.listExhibitions();
+		app.get('/exhibitions', { preHandler: requireLogin }, async (request, reply) => {
+			const items = await deps.service.listExhibitions(request.currentUser ?? null);
 			sendOk(reply, { items });
 		});
 

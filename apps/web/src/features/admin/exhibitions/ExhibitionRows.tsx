@@ -10,7 +10,11 @@ import type { AdminExhibitionItem } from '../../../contracts';
 import { ResponsiveImage } from '../../../components/common';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
 import { adminExhibitionApi, getApiErrorMessage } from '../../../lib/api';
-import { queryKeys } from '../../../lib/query';
+import { queryKeys, invalidateVisibilityQueries } from '../../../lib/query';
+
+import { VisibilitySelect } from '../../../components/VisibilitySelect';
+import { visibilityLabels } from '../../../lib/visibility';
+import { env } from '../../../lib/env';
 
 type ExhibitionRowProps = {
 	year: AdminExhibitionItem;
@@ -42,6 +46,7 @@ export function YearMobileCard({
 	const { register, handleSubmit } = useForm<UpdateExhibitionInput>({
 		resolver: zodResolver(UpdateExhibitionSchema),
 		defaultValues: {
+			visibility: year.visibility,
 			title: year.title ?? '',
 			isModificationEnabled: year.isModificationEnabled ?? year.isUploadEnabled,
 			sortOrder: year.sortOrder,
@@ -51,6 +56,7 @@ export function YearMobileCard({
 	const updateMutation = useMutation({
 		mutationFn: (data: UpdateExhibitionInput) =>
 			adminExhibitionApi.update(year.id, {
+				visibility: data.visibility,
 				title: data.title || undefined,
 				isModificationEnabled: data.isModificationEnabled,
 				sortOrder: data.sortOrder,
@@ -73,7 +79,8 @@ export function YearMobileCard({
 						<label htmlFor={`m-title-${year.id}`}>제목</label>
 						<input id={`m-title-${year.id}`} type="text" {...register('title')} />
 					</div>
-					<div className="admin-ycard__row">
+					{env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field"><label htmlFor={`m-visibility-${year.id}`}>공개 범위</label><VisibilitySelect id={`m-visibility-${year.id}`} {...register('visibility')} /></div>}
+                    <div className="admin-ycard__row">
 						<div className="form-field form-field--checkbox" style={{ marginBottom: 0 }}>
 							<label>
 								<input type="checkbox" {...register('isModificationEnabled')} />
@@ -177,6 +184,7 @@ export function YearRow({
 	const { register, handleSubmit } = useForm<UpdateExhibitionInput>({
 		resolver: zodResolver(UpdateExhibitionSchema),
 		defaultValues: {
+			visibility: year.visibility,
 			title: year.title ?? '',
 			isModificationEnabled: year.isModificationEnabled ?? year.isUploadEnabled,
 			sortOrder: year.sortOrder,
@@ -186,6 +194,7 @@ export function YearRow({
 	const updateMutation = useMutation({
 		mutationFn: (data: UpdateExhibitionInput) =>
 			adminExhibitionApi.update(year.id, {
+				visibility: data.visibility,
 				title: data.title || undefined,
 				isModificationEnabled: data.isModificationEnabled,
 				sortOrder: data.sortOrder,
@@ -200,7 +209,7 @@ export function YearRow({
 				<td>
 					<YearPosterControls year={year} />
 				</td>
-				<td>{year.title ?? '-'}</td>
+				<td>{year.title ?? '-'}{env.VISIBILITY_CONTROLS_ENABLED && <small> · {visibilityLabels[year.visibility ?? 'PUBLIC']}</small>}</td>
 				<td>{(year.isModificationEnabled ?? year.isUploadEnabled) ? '허용' : '잠금'}</td>
 				<td>{year.sortOrder}</td>
 				<td>{year.projectCount}</td>
@@ -239,6 +248,7 @@ export function YearRow({
 			</td>
 			<td>
 				<input type="text" className="exhibition-inline-input" aria-label="전시회 제목" {...register('title')} />
+                <VisibilitySelect {...register('visibility')} />
 			</td>
 			<td>
 				<label>
@@ -293,7 +303,7 @@ function YearPosterControls({
 
 	const invalidate = () => {
 		qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
-		qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+		void invalidateVisibilityQueries(qc);
 	};
 
 	const deletePosterMutation = useMutation({

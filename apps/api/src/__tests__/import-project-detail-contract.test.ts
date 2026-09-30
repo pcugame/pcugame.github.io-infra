@@ -100,7 +100,7 @@ describe('imported project detail contract fields', () => {
 			id: 101,
 			title: createdProject!.title,
 			slug: createdProject!.slug,
-			exhibition: { year: 2026 },
+			visibility: 'PUBLIC' as const, exhibition: { visibility: 'PUBLIC' as const, year: 2026 },
 			summary: createdProject!.summary,
 			description: createdProject!.description,
 			isIncomplete: createdProject!.isIncomplete,

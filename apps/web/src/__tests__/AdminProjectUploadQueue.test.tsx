@@ -25,6 +25,7 @@ const api = vi.hoisted(() => ({
 vi.mock('../lib/api/game-upload', () => api);
 vi.mock('../features/auth', () => ({ useMe: () => ({ user: { role: 'ADMIN' } }) }));
 const project: AdminProjectDetail = {
+	visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 	id: 7,
 	title: '작품',
 	slug: 'project',

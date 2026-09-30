@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { MAX_NEW_PROJECT_TITLE_BYTES, utf8ByteLength } from './filename-policy.js';
 
+export const VisibilitySchema = z.enum(['PUBLIC', 'AUTHENTICATED', 'STAFF']);
 export const ProjectStatusSchema = z.enum(['DRAFT', 'PUBLISHED', 'ARCHIVED']);
 const MutableProjectStatusSchema = z.enum(['PUBLISHED', 'ARCHIVED']);
 export const AssetKindSchema = z.enum(['THUMBNAIL', 'IMAGE', 'POSTER', 'GAME', 'VIDEO', 'WEBGL', 'DOCUMENT', 'ATTACHMENT']);
@@ -32,6 +33,7 @@ export const ProjectSubmissionTitleSchema = z.string()
 	});
 
 export const SubmitProjectPayloadBaseSchema = z.object({
+	visibility: VisibilitySchema.optional(),
 	exhibitionId: SafePositiveIntegerSchema,
 	title: ProjectSubmissionTitleSchema,
 	summary: z.string().max(300).optional(),
@@ -46,6 +48,7 @@ export const SubmitProjectPayloadBaseSchema = z.object({
 });
 
 export const UpdateProjectBaseSchema = z.object({
+	visibility: VisibilitySchema.optional(),
 	title: z.string().min(1).max(120).optional(),
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
@@ -78,6 +81,7 @@ export const SetProjectPosterSchema = z.object({
 });
 
 export const CreateExhibitionBaseSchema = z.object({
+	visibility: VisibilitySchema.optional(),
 	year: z.number().int().min(2021).max(2100),
 	title: z.string().max(100).optional(),
 	isModificationEnabled: z.boolean().optional(),
@@ -87,6 +91,7 @@ export const CreateExhibitionBaseSchema = z.object({
 	|| value.isModificationEnabled === value.isUploadEnabled, { message: 'Modification flags disagree', path: ['isModificationEnabled'] });
 
 export const UpdateExhibitionBaseSchema = z.object({
+	visibility: VisibilitySchema.optional(),
 	title: z.string().max(100).optional(),
 	isModificationEnabled: z.boolean().optional(),
 	isUploadEnabled: z.boolean().optional(),

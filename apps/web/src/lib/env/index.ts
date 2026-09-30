@@ -2,6 +2,7 @@
 // Vite는 import.meta.env.VITE_* 형태로 환경 변수를 주입한다.
 
 export const env = {
+  VISIBILITY_CONTROLS_ENABLED: import.meta.env.VITE_VISIBILITY_CONTROLS_ENABLED === 'true',
   /** 백엔드 API 기본 URL (예: https://api.gradshow.pcu.ac.kr) */
   API_BASE_URL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000',
 

@@ -1,3 +1,4 @@
+import { useViewerKey } from '../lib/query';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
@@ -6,8 +7,9 @@ import { LoadingSpinner, ErrorMessage, EmptyState, ResponsiveImage } from '../co
 import type { PublicYearItem } from '../contracts';
 
 export default function YearsPage() {
+ const viewerKey = useViewerKey();
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: queryKeys.publicYears,
+    queryKey: viewerKey(queryKeys.publicYears),
     queryFn: publicApi.getYears,
   });
 

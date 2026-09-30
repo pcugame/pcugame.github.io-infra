@@ -338,24 +338,18 @@ jobs:
                 echo "SMOKE_PUBLIC_OBJECT_URL is required for final data-plane smoke"
                 return 1
               }
+              # Production smoke requires a healthy authorization API. Outage
+              # fail-closed behavior is verified only in isolated integration.
+              podman exec gp-api wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
               node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
-              podman stop gp-api --time 30
-              trap 'podman start gp-api >/dev/null 2>&1 || true' EXIT
-              node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
-              podman start gp-api
-              trap - EXIT
-              api_recovered=false
-              for _attempt in $(seq 1 45); do
-                if podman exec gp-api wget -qO- http://localhost:4000/api/health 2>/dev/null | grep -q '"ok":true'; then
-                  api_recovered=true
-                  break
-                fi
-                sleep 2
-              done
-              [ "${api_recovered}" = true ] || {
-                echo "API did not recover after the API-down data-plane smoke"
-                return 1
-              }
+              deployed_id="$(podman inspect gp-api --format '{{.Image}}')"
+              actual_source="$(podman image inspect "$deployed_id" --format '{{ index .Labels "org.opencontainers.image.revision" }}')"
+              actual_digest="$(podman image inspect "$deployed_id" --format '{{.Digest}}')"
+              [ "$actual_source" = "$RELEASE_SOURCE_SHA" ]
+              [ "$actual_digest" = "${FINAL_IMAGE##*@}" ]
+              umask 077
+              printf 'source_sha=%s\nimage=%s\n' "$actual_source" "$FINAL_IMAGE" > "${CUTOVER_STATE_DIR}/deployed-${RELEASE_SOURCE_SHA}.txt"
+              printf 'Deployed source: %s\nDeployed image: %s\n' "$actual_source" "$FINAL_IMAGE"
             }
 
             if [ "${RELEASE_PHASE}" = phase1 ]; then
@@ -481,6 +475,7 @@ jobs:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/' }}
+          VITE_VISIBILITY_CONTROLS_ENABLED: ${{ vars.VITE_VISIBILITY_CONTROLS_ENABLED || 'false' }}
         run: npm run build
 
       - name: Stamp exact cutover commit
@@ -775,24 +770,10 @@ jobs:
 
             SMOKE_PUBLIC_OBJECT_URL="$(node "${DEPLOY_DIR}/release-smoke-target.mjs" read "$RELEASE_SOURCE_SHA")"
             bash "${DEPLOY_DIR}/ip-ban-audit.sh" after
+            # Production smoke requires a healthy authorization API. Outage
+            # fail-closed behavior is verified only in isolated integration.
+            podman exec gp-api wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
             node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
-            podman stop gp-api --time 30
-            trap 'podman start gp-api >/dev/null 2>&1 || true' EXIT
-            node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
-            podman start gp-api
-            trap - EXIT
-            api_recovered=false
-            for _attempt in $(seq 1 45); do
-              if podman exec gp-api wget -qO- http://localhost:4000/api/health 2>/dev/null | grep -q '"ok":true'; then
-                api_recovered=true
-                break
-              fi
-              sleep 2
-            done
-            [ "${api_recovered}" = true ] || {
-              echo "API did not recover after the API-down data-plane smoke"
-              exit 1
-            }
             deployed_id="$(podman inspect gp-api --format '{{.Image}}')"
             actual_source="$(podman image inspect "$deployed_id" --format '{{ index .Labels "org.opencontainers.image.revision" }}')"
             actual_digest="$(podman image inspect "$deployed_id" --format '{{.Digest}}')"

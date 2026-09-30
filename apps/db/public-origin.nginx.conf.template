@@ -1,29 +1,49 @@
+map "${FILE_GATEWAY_TLS_SERVER_NAME}" $pcu_gate_tls_name {
+  "" $proxy_host;
+  default "${FILE_GATEWAY_TLS_SERVER_NAME}";
+}
+
 map $http_origin $pcu_public_cors_origin {
   default "";
   "${PUBLIC_CORS_ORIGIN_PRIMARY}" $http_origin;
   "${PUBLIC_CORS_ORIGIN_SECONDARY}" $http_origin;
 }
 
-# Only responses that actually contain an immutable public representation get
-# a long-lived browser cache. Errors (and a bare revalidation 304) are never
-# immutable cache entries.
-map $status $pcu_public_cache_control {
-  default "no-store";
-  200 "public, max-age=31536000, immutable";
-  206 "public, max-age=31536000, immutable";
-}
-
 log_format pcu_public_origin
-  'method=$request_method uri=$uri status=$status bytes_out=$bytes_sent';
+  'method=$request_method surface=file status=$status bytes_out=$bytes_sent';
 
 server {
   listen ${NGINX_LISTEN_PORT};
   server_name _;
 
   access_log /var/log/nginx/access.log pcu_public_origin;
-  error_log /var/log/nginx/error.log warn;
+  error_log /dev/null crit;
   gzip off;
   client_max_body_size 0;
+
+  location = /__pcu_file_auth {
+    internal;
+    resolver 127.0.0.11 valid=30s;
+    set $pcu_gate_upstream "${FILE_GATEWAY_API_UPSTREAM}";
+    proxy_pass $pcu_gate_upstream/api/internal/file-access;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $pcu_gate_tls_name;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 4;
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+    proxy_method GET;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-PCU-Gateway-Secret "${FILE_GATEWAY_SECRET}";
+    proxy_set_header X-PCU-File-Kind "public";
+    proxy_set_header X-PCU-File-Uri $request_uri;
+    proxy_set_header X-PCU-File-Method $pcu_file_method;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 5s;
+    proxy_next_upstream off;
+  }
 
   location = /__pcu_public_health {
     access_log off;
@@ -37,7 +57,15 @@ server {
     # Nginx does not cache or synthesize object metadata. Range, conditional
     # request headers, MIME, Content-Encoding, ETag and Last-Modified pass
     # through Garage's public website origin unchanged.
-    proxy_pass ${GARAGE_PUBLIC_WEB_UPSTREAM};
+    set $pcu_file_method $request_method;
+    auth_request /__pcu_file_auth;
+    auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
+    resolver 127.0.0.11 valid=30s;
+    proxy_pass ${GARAGE_PUBLIC_WEB_UPSTREAM}$pcu_validated_object_path;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-PCU-Gateway-Secret "";
+    proxy_set_header X-PCU-File-Uri "";
     proxy_http_version 1.1;
     # Garage website routing is bucket-host based. This is deliberately not the
     # browser Host and is validated against S3_BUCKET_PUBLIC by deployment tests.
@@ -62,7 +90,7 @@ server {
     proxy_next_upstream error timeout http_502 http_503 http_504;
     proxy_next_upstream_tries 1;
 
-    add_header Cache-Control $pcu_public_cache_control always;
+    add_header Cache-Control "private, no-store" always;
     add_header Access-Control-Allow-Origin $pcu_public_cors_origin always;
     add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
     add_header Access-Control-Allow-Headers "Range, If-Range, If-None-Match, If-Modified-Since" always;

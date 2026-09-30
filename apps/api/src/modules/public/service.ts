@@ -1,3 +1,5 @@
+import { canChangeProjectVisibility, type VisibilityActor } from '../../shared/visibility.js';
+import type { Visibility } from '@pcu/contracts';
 import { compareProjectVideos } from '../../shared/project-video-order.js';
 import type {
 	AssetKind,
@@ -22,13 +24,16 @@ interface PublicPosterRecord {
 }
 
 interface PublicProjectListRecord {
+	visibility: Visibility;
+	creatorId: number;
+	exhibition: { year: number; visibility: Visibility; isModificationEnabled: boolean };
 	id: number;
 	slug: string;
 	title: string;
 	summary: string;
 	exhibitionId: number;
 	poster: PublicPosterRecord | null;
-	members: { name: string; studentId: string }[];
+	members: { name: string; studentId: string; userId: number | null }[];
 }
 
 interface PublicProjectDetailRecord extends PublicProjectListRecord {
@@ -45,8 +50,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 		entryObjectKey: string;
 		state: string;
 	} | null;
-	exhibition: { year: number };
-	members: { id: number; name: string; studentId: string }[];
+	members: { id: number; name: string; studentId: string; userId: number | null }[];
 	assets: {
 		id: number;
 		videoSortOrder?: number | null;
@@ -62,19 +66,20 @@ export interface PublicServiceDependencies {
 	publicAssetOrigin?: string;
 	publicBucket?: string;
 	repository: {
-		findExhibitionsWithPublishedCounts(): Promise<{
+		findExhibitionsWithPublishedCounts(actor?: VisibilityActor): Promise<{
 			id: number;
+			visibility: Visibility;
 			year: number;
 			title: string;
 			posterAssetId?: number | null;
 			poster?: PublicPosterRecord | null;
 			_count: { projects: number };
 		}[]>;
-		findExhibitionsByYear(year: number): Promise<{ id: number; year: number; title: string }[]>;
-		findPublishedProjectsInExhibitions(ids: number[]): Promise<PublicProjectListRecord[]>;
-		findExhibitionById(id: number): Promise<{ id: number; year: number; title: string } | null>;
-		findPublishedProjectById(id: number): Promise<PublicProjectDetailRecord | null>;
-		findPublishedProjectBySlug(slug: string, exhibitionIds?: number[]): Promise<PublicProjectDetailRecord | null>;
+		findExhibitionsByYear(year: number, actor?: VisibilityActor): Promise<{ id: number; year: number; title: string; visibility: Visibility }[]>;
+		findPublishedProjectsInExhibitions(ids: number[], actor?: VisibilityActor): Promise<PublicProjectListRecord[]>;
+		findExhibitionById(id: number, actor?: VisibilityActor): Promise<{ id: number; year: number; title: string; visibility: Visibility } | null>;
+		findPublishedProjectById(id: number, actor?: VisibilityActor): Promise<PublicProjectDetailRecord | null>;
+		findPublishedProjectBySlug(slug: string, exhibitionIds?: number[], actor?: VisibilityActor): Promise<PublicProjectDetailRecord | null>;
 	};
 }
 
@@ -99,10 +104,11 @@ function imageOptions(deps: PublicServiceDependencies) {
 }
 
 /** List all years with published project counts */
-export async function listYears(deps: PublicServiceDependencies): Promise<PublicYearItem[]> {
-	const exhibitions = await deps.repository.findExhibitionsWithPublishedCounts();
+export async function listYears(deps: PublicServiceDependencies, actor: VisibilityActor = null): Promise<PublicYearItem[]> {
+	const exhibitions = await deps.repository.findExhibitionsWithPublishedCounts(actor);
 	return Promise.all(exhibitions.map(async (e) => ({
 		id: e.id,
+		visibility: e.visibility,
 		year: e.year,
 		title: e.title || undefined,
 		projectCount: e._count.projects,
@@ -116,22 +122,24 @@ export async function listYears(deps: PublicServiceDependencies): Promise<Public
 export async function listProjectsByYear(
 	deps: PublicServiceDependencies,
 	yearParam: string,
+	actor: VisibilityActor = null,
 ): Promise<PublicYearProjectsResponse> {
 	const yearNum = Number(yearParam);
 	if (!/^\d{4}$/.test(yearParam) || !Number.isSafeInteger(yearNum)) {
 		throw notFound('Year not found');
 	}
 
-	const exhibitionRecords = await deps.repository.findExhibitionsByYear(yearNum);
+	const exhibitionRecords = await deps.repository.findExhibitionsByYear(yearNum, actor);
 	if (exhibitionRecords.length === 0) throw notFound('Year not found');
 
 	const exhibitionIds = exhibitionRecords.map((e) => e.id);
 	const exhibitionMap = new Map(exhibitionRecords.map((e) => [e.id, e]));
 
-	const projects = await deps.repository.findPublishedProjectsInExhibitions(exhibitionIds);
+	const projects = await deps.repository.findPublishedProjectsInExhibitions(exhibitionIds, actor);
 
 	const exhibitions = exhibitionRecords.map((e) => ({
 		id: e.id,
+		visibility: e.visibility,
 		title: e.title || `${yearNum} 전시`,
 	}));
 
@@ -140,6 +148,9 @@ export async function listProjectsByYear(
 		const poster = p.poster;
 		return {
 			id: p.id,
+			visibility: p.visibility,
+			exhibitionVisibility: p.exhibition.visibility,
+			canChangeVisibility: canChangeProjectVisibility(actor, p),
 			slug: p.slug,
 			title: p.title,
 			summary: p.summary || undefined,
@@ -159,20 +170,24 @@ export async function listProjectsByYear(
 export async function listProjectsByExhibition(
 	deps: PublicServiceDependencies,
 	idParam: string,
+	actor: VisibilityActor = null,
 ): Promise<PublicExhibitionProjectsResponse> {
 	const id = Number(idParam);
 	if (!/^[1-9]\d*$/.test(idParam) || !Number.isSafeInteger(id)) {
 		throw notFound('Exhibition not found');
 	}
 
-	const exhibition = await deps.repository.findExhibitionById(id);
+	const exhibition = await deps.repository.findExhibitionById(id, actor);
 	if (!exhibition) throw notFound('Exhibition not found');
 
-	const projects = await deps.repository.findPublishedProjectsInExhibitions([id]);
+	const projects = await deps.repository.findPublishedProjectsInExhibitions([id], actor);
 	const items = await Promise.all(projects.map(async (p) => {
 		const poster = p.poster;
 		return {
 			id: p.id,
+			visibility: p.visibility,
+			exhibitionVisibility: p.exhibition.visibility,
+			canChangeVisibility: canChangeProjectVisibility(actor, p),
 			slug: p.slug,
 			title: p.title,
 			summary: p.summary || undefined,
@@ -188,6 +203,7 @@ export async function listProjectsByExhibition(
 	return {
 		exhibition: {
 			id: exhibition.id,
+			visibility: exhibition.visibility,
 			year: exhibition.year,
 			title: exhibition.title || `${exhibition.year} 전시`,
 		},
@@ -201,6 +217,7 @@ export async function getProjectDetail(
 	deps: PublicServiceDependencies,
 	idOrSlug: string,
 	yearParam?: string,
+	actor: VisibilityActor = null,
 ): Promise<PublicProjectDetailResponse> {
 	const yearNum = yearParam === undefined ? undefined : Number(yearParam);
 	if (
@@ -218,16 +235,17 @@ export async function getProjectDetail(
 		/^[1-9]\d*$/.test(idOrSlug)
 		&& Number.isSafeInteger(numericId)
 	) {
-		project = await deps.repository.findPublishedProjectById(numericId);
+		project = await deps.repository.findPublishedProjectById(numericId, actor);
 	}
 
 	if (!project) {
 		let exhibitionIds: number[] | undefined;
 		if (yearNum !== undefined) {
-			const exs = await deps.repository.findExhibitionsByYear(yearNum);
-			if (exs.length > 0) exhibitionIds = exs.map((e) => e.id);
+			const exs = await deps.repository.findExhibitionsByYear(yearNum, actor);
+			if (exs.length === 0) throw notFound('Project not found');
+			exhibitionIds = exs.map((e) => e.id);
 		}
-		project = await deps.repository.findPublishedProjectBySlug(idOrSlug, exhibitionIds);
+		project = await deps.repository.findPublishedProjectBySlug(idOrSlug, exhibitionIds, actor);
 	}
 
 	if (!project) throw notFound('Project not found');
@@ -291,6 +309,9 @@ export async function getProjectDetail(
 	}
 	return {
 		id: project.id,
+		visibility: project.visibility,
+		exhibitionVisibility: project.exhibition.visibility,
+		canChangeVisibility: canChangeProjectVisibility(actor, project),
 		year: project.exhibition.year,
 		slug: project.slug,
 		title: project.title,
@@ -323,9 +344,9 @@ export async function getProjectDetail(
 
 export function createPublicService(deps: PublicServiceDependencies) {
 	return {
-		listYears: () => listYears(deps),
-		listProjectsByYear: (year: string) => listProjectsByYear(deps, year),
-		listProjectsByExhibition: (id: string) => listProjectsByExhibition(deps, id),
-		getProjectDetail: (idOrSlug: string, year?: string) => getProjectDetail(deps, idOrSlug, year),
+		listYears: (actor: VisibilityActor = null) => listYears(deps, actor),
+		listProjectsByYear: (year: string, actor: VisibilityActor = null) => listProjectsByYear(deps, year, actor),
+		listProjectsByExhibition: (id: string, actor: VisibilityActor = null) => listProjectsByExhibition(deps, id, actor),
+		getProjectDetail: (idOrSlug: string, year?: string, actor: VisibilityActor = null) => getProjectDetail(deps, idOrSlug, year, actor),
 	};
 }

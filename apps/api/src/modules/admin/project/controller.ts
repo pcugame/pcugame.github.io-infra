@@ -31,6 +31,7 @@ export interface ProjectControllerDependencies {
 /** Register the project CRUD routes owned by ticket 008. Multipart is separate. */
 export function createProjectController(deps: ProjectControllerDependencies): FastifyPluginAsync {
 	return async function projectController(app): Promise<void> {
+		app.addHook('onSend', async (_request, reply) => { reply.header('Cache-Control', 'private, no-store'); });
 		app.get<{ Querystring: Record<string, unknown> }>(
 			'/projects',
 			{ preHandler: requireLogin },

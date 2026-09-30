@@ -1,3 +1,4 @@
+import type { VisibilityActor } from '../../../shared/visibility.js';
 import type { AdminExhibitionItem, CreateExhibitionRequest, UpdateExhibitionRequest } from '@pcu/contracts';
 import { notFound, conflict } from '../../../shared/errors.js';
 import { serializePublicImage } from '../../public/image-serialization.js';
@@ -32,6 +33,7 @@ async function serializeExhibition(
 	)) : undefined;
 	return {
 		id: e.id,
+		visibility: e.visibility,
 		year: e.year,
 		title: e.title || undefined,
 		isModificationEnabled: e.isModificationEnabled,
@@ -45,8 +47,8 @@ async function serializeExhibition(
 }
 
 /** List all exhibitions with project counts, mapped to API shape */
-export async function listExhibitions(deps: ExhibitionServiceDependencies): Promise<AdminExhibitionItem[]> {
-	const exhibitions = await deps.repository.findAllExhibitions();
+export async function listExhibitions(deps: ExhibitionServiceDependencies, actor: VisibilityActor = null): Promise<AdminExhibitionItem[]> {
+	const exhibitions = await deps.repository.findAllExhibitions(actor);
 	return Promise.all(exhibitions.map((exhibition) => serializeExhibition(deps, exhibition)));
 }
 
@@ -57,7 +59,7 @@ export async function createExhibition(deps: ExhibitionServiceDependencies, data
 
 	const { isUploadEnabled, ...canonical } = data;
 	const created = await deps.repository.createExhibition({ ...canonical, isModificationEnabled: canonical.isModificationEnabled ?? isUploadEnabled });
-	return { id: created.id, year: created.year };
+	return { id: created.id, year: created.year, visibility: created.visibility };
 }
 
 /** Delete an exhibition by ID. Throws 404 if not found. */
@@ -84,6 +86,7 @@ export async function updateExhibition(
 	if (!exhibition) throw notFound('Exhibition not found');
 
 	const updated = await deps.repository.updateExhibition(id, {
+		...(patch.visibility !== undefined ? { visibility: patch.visibility } : {}),
 		...(patch.title !== undefined ? { title: patch.title } : {}),
 		...((patch.isModificationEnabled ?? patch.isUploadEnabled) !== undefined ? { isModificationEnabled: patch.isModificationEnabled ?? patch.isUploadEnabled } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
@@ -106,7 +109,7 @@ export async function deletePoster(deps: ExhibitionServiceDependencies, id: numb
 
 export function createExhibitionService(deps: ExhibitionServiceDependencies) {
 	return {
-		listExhibitions: () => listExhibitions(deps),
+		listExhibitions: (actor: VisibilityActor = null) => listExhibitions(deps, actor),
 		createExhibition: (data: CreateExhibitionRequest) => createExhibition(deps, data),
 		deleteExhibition: (id: number) => deleteExhibition(deps, id),
 		updateExhibition: (id: number, patch: UpdateExhibitionRequest) => (

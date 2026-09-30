@@ -531,7 +531,7 @@ describe('production HTTP runtime contracts', () => {
 						items: [{
 							id: 1,
 							year: 2026,
-							title: '2026',
+							visibility: 'PUBLIC', title: '2026',
 							projectCount: 0,
 						}],
 					},

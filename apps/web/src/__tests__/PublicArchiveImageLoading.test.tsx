@@ -24,7 +24,7 @@ import HomePage from '../pages/HomePage';
 import YearsPage from '../pages/YearsPage';
 
 const response = {
-	items: [{
+	items: [{ visibility: 'PUBLIC',
 		id: 1,
 		year: 2026,
 		title: '2026 전시',

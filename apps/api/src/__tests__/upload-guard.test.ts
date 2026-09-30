@@ -5,7 +5,7 @@ import type { Exhibition } from '../generated/prisma/client.js';
 
 function fakeExhibition(overrides: Partial<Exhibition> = {}): Exhibition {
 	return {
-		id: 1,
+		visibility: 'PUBLIC',		id: 1,
 		year: 2025,
 		title: '',
 		isModificationEnabled: true,

@@ -1,3 +1,5 @@
+import { createFileAccessRepository, createUnavailableFileAccessRepository, type FileAccessRepository } from './modules/file-access/repository.js';
+import { createFileAccessController } from './modules/file-access/controller.js';
 import { createUnavailableProjectChangeService } from './modules/project-change/composition.js';
 import type { ProjectChangeRepository } from './modules/project-change/ports.js';
 import { createProjectChangeRepository } from './modules/project-change/repository.js';
@@ -115,6 +117,7 @@ import type { ExhibitionRepository } from './modules/admin/year/ports.js';
  * scripted domain ports and never need to construct or emulate Prisma delegates.
  */
 export interface BackendPersistencePorts {
+ fileAccessRepository?: FileAccessRepository;
 	databaseHealth: DatabaseHealth;
 	authRepository: AuthProductionRepository;
 	publicRepository: PublicProductionRepository;
@@ -132,6 +135,7 @@ export interface BackendPersistencePorts {
 }
 
 export interface BackendRoutes {
+ fileAccess?: FastifyPluginAsync;
 	auth: FastifyPluginAsync;
 	devAuth: FastifyPluginAsync;
 	public: FastifyPluginAsync;
@@ -792,6 +796,21 @@ export async function createProductionBackendContext(
 		);
 
 		const routes = { ...baseRoutes };
+		if (!options.routes) {
+   const fileAccess = createFileAccessController(persistence.fileAccessRepository ?? (prisma && !options.persistence ? createFileAccessRepository(prisma) : createUnavailableFileAccessRepository()), config, () => clock.now(), (bucket,key,options) => protectedDownloadPresigner.presign(bucket,key,{ttlSec:60,...options}), assetsBanned!.authorizeDownload);
+   routes.fileAccess = fileAccess;
+   routes.assets = async app => {
+    app.addHook('onSend', async (request, reply, payload) => {
+     const location = reply.getHeader('location');
+     if (reply.statusCode === 302 && typeof location === 'string') {
+      const grant = await fileAccess.issue(new URL(request.url, config.API_PUBLIC_URL).toString(), {...request,downloadAlreadyChecked:true});
+      reply.header('location', grant.url).header('Cache-Control', 'private, no-store');
+     }
+     return payload;
+    });
+    await app.register(baseRoutes.assets);
+   };
+  }
 		if (!options.routes) {
 			const changes = persistence.projectChangeRepository
 				? createProjectChangeService(persistence.projectChangeRepository)

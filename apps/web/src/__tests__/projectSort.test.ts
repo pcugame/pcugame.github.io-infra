@@ -4,6 +4,7 @@ import { sortProjectsWithPosterFirst } from '../lib/utils';
 
 function project(id: number, poster?: PublicProjectCard['poster']): PublicProjectCard {
 	return {
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id,
 		slug: `project-${id}`,
 		title: `Project ${id}`,

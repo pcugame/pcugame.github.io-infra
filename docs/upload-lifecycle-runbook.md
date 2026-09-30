@@ -196,19 +196,21 @@ the authorization is atomically consumed before replacement begins and deleted
 after success. A forged or retargeted `rollback-*` tag has no authority, and a
 consumed nonce cannot be retried.
 
-Final smoke tests exercise the NAS public origin with GET, HEAD, 304, 206, and 416,
-then repeat the byte checks while the Fastify API container is stopped. This proves
-public bytes do not depend on the control plane.
+Final production smoke tests require a healthy authorization API and exercise
+the NAS public origin with GET, HEAD, 304, 206, and 416. Isolated integration
+tests stop the API and verify that both read gateways deny access. Do not inject
+API outages into production. Nginx and Garage serve bytes, while the API checks
+current access on every request.
 
 Protected downloads use a distinct browser origin configured by
 `S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT`. The API authorizes the request and
-issues a short-lived GetObject capability, but never relays object bytes. The NAS
-protected-download proxy preserves the escaped path, signed Host, SigV4 query,
-Range, and conditional headers while accepting only GET/HEAD object paths under
-the exact protected bucket. It logs no query parameters and marks successes and
-errors `private, no-store`. A capability issued before an API outage continues to
-work directly through this proxy only until its signed TTL; new capability
-issuance still requires the API. Keep this origin distinct from internal Garage,
+issues a 60-second opaque file grant, but never relays object bytes. The NAS
+protected-download proxy checks the grant and current permissions through an
+authenticated API subrequest, then uses a freshly signed upstream locator. It
+preserves Range and conditional headers and accepts only GET/HEAD. Existing
+signed object URLs also require current authorization. It logs no capabilities
+and marks successes and errors `private, no-store`. API outages deny even
+previously issued grants. Keep this origin distinct from internal Garage,
 UploadPart, the public website origin, Garage admin, and raw NAS filesystems.
 
 Configure the S3-compatible bucket lifecycle to expire incomplete multipart uploads

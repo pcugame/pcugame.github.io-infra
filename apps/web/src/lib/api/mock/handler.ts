@@ -109,6 +109,13 @@ function parseJsonBody(body: unknown): Record<string, unknown> {
 
 const routes: MockRoute[] = [
 	{
+		pattern: /^\/api\/file-access$/,
+		handler: (_match, _method, options) => {
+			const body = options.body as { url: string };
+			return { url: body.url, token: null, expiresAt: null };
+		},
+	},
+	{
 		pattern: /^\/api\/public\/upload-config$/,
 		handler: () => ({ materialMaxCount: 5, materialMaxBytes: 50 * 1024 * 1024 }),
 	},

@@ -84,7 +84,7 @@ assert.match(integrationSmoke, /function integrationPublicAssetUrl\(url\)/);
 assert.match(integrationSmoke, /target\.protocol = internalPublicAssetBase\.protocol/);
 assert.match(integrationSmoke, /target\.host = internalPublicAssetBase\.host/);
 assert.match(integrationSmoke, /const publicImageFetchUrl = integrationPublicAssetUrl\(publicImageUrl\)/);
-assert.match(integrationSmoke, /const hostedWebglUrl = integrationPublicAssetUrl\(webglUrl\)/);
+assert.match(integrationSmoke, /const hostedWebglUrl = integrationPublicAssetUrl\(webglGrant.data.url\)/);
 assert.doesNotMatch(integrationSmoke, /integrationApiUrl\(webglUrl\)/);
 assert.match(integrationSmoke, /headers: \{ \.\.\.capability\.requiredHeaders, Host: signedHost/);
 assert.match(integrationSmoke, /new URL\(gameLocation\)\.origin !== 'http:\/\/localhost:3906'/);
@@ -140,6 +140,14 @@ const runBoundary = async (fixture, command = 'boundary-preflight', extraEnv = {
 };
 const acceptedBoundary = await runBoundary(boundaryFixture);
 assert.equal(acceptedBoundary.status, 0, acceptedBoundary.stderr || acceptedBoundary.stdout);
+for (const replacement of ['', 'FILE_GATEWAY_SECRET=short']) {
+  const missingGatewaySecret = await runBoundary(boundaryFixture.replace(/^FILE_GATEWAY_SECRET=.*$/m, replacement));
+  assert.notEqual(missingGatewaySecret.status, 0);
+  assert.match(missingGatewaySecret.stdout, /FILE_GATEWAY_SECRET must contain at least 32 characters/);
+}
+assert.match(deploy, /-e "FILE_GATEWAY_SECRET=\$\{FILE_GATEWAY_SECRET:-\}"/);
+assert.match(deploy, /assert_phase1_rollback_authorization\(\) \{\s+assert_visibility_rollback_safe/);
+
 
 // Exercise the exact final-web marker contract over HTTPS. The verifier must
 // accept only SHA + one LF and must not follow a redirect to a matching body.
