@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '../../lib/api';
 import type { DevAuthErrorScenario, UserRole } from '../../contracts';
-import { queryKeys } from '../../lib/query';
+import { queryKeys, invalidateVisibilityQueries } from '../../lib/query';
 
 export type LoginInput =
   | string
@@ -20,7 +20,8 @@ export function useLogin() {
       return authApi.simulateDevLoginError(input.scenario);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.me });
+      void qc.invalidateQueries({ queryKey: queryKeys.me });
+      void invalidateVisibilityQueries(qc);
     },
   });
 }

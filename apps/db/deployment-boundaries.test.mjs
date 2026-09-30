@@ -70,12 +70,12 @@ assert.match(upload, /\$uri status=\$status/);
 assert.doesNotMatch(upload, /\$request_uri/);
 
 for (const required of [
-	'location /${S3_BUCKET_PROTECTED}/',
+	'location ~ "^/(?:${S3_BUCKET_PROTECTED}/.+|file/[a-f0-9]{64}|play/[a-f0-9]{64}/.+)$"',
 	'location = /${S3_BUCKET_PROTECTED}',
 	'location = /${S3_BUCKET_PROTECTED}/',
 	'if ($request_method !~ ^(GET|HEAD)$) { return 405; }',
 	'proxy_pass_request_headers on',
-	'proxy_set_header Host $http_host',
+	'proxy_set_header Host $pcu_validated_upstream_host',
 	'proxy_set_header Content-Length ""',
 	'proxy_set_header Transfer-Encoding ""',
 	'proxy_pass_request_body off',
@@ -91,8 +91,9 @@ assert.match(protectedDownload, /error_log \/dev\/null crit/);
 assert.match(protectedDownload, /client_max_body_size 1k/);
 assert.match(protectedDownload, /\$http_content_length ~ \^\[1-9\]\[0-9\]\*\$.*return 413/);
 assert.match(protectedDownload, /\$http_transfer_encoding != "".*return 400/);
-assert.match(protectedDownload, /method=\$request_method uri=\$uri/);
-assert.doesNotMatch(protectedDownload, /\$request_uri|\$args|proxy_cache/);
+assert.match(protectedDownload, /method=\$request_method surface=file/);
+assert.doesNotMatch(protectedDownload, /\$args|proxy_cache/);
+assert.doesNotMatch(protectedDownload.match(/log_format[^;]+;/s)?.[0] ?? '', /\$uri|\$request_uri/);
 assert.match(protectedDownload, /location \/ \{ return 404; \}/);
 assert.doesNotMatch(protectedDownload, /\^\(GET\|HEAD\|PUT|OPTIONS/);
 assert.match(envValidator, /S3_BUCKET_PROTECTED.*DNS-compatible/);
@@ -109,26 +110,43 @@ for (const required of [
 	'Access-Control-Expose-Headers "ETag, Last-Modified, Content-Length, Content-Range, Content-Encoding"',
 	'Cross-Origin-Resource-Policy "cross-origin"',
 	'Content-Security-Policy',
-	'200 "public, max-age=31536000, immutable"',
-	'206 "public, max-age=31536000, immutable"',
-	'default "no-store"',
+	'Cache-Control "private, no-store" always',
 ]) assert.ok(publicOrigin.includes(required), `public origin missing: ${required}`);
 assert.doesNotMatch(publicOrigin, /proxy_cache/);
-assert.doesNotMatch(publicOrigin, /404 "public, max-age=31536000, immutable"/);
-assert.doesNotMatch(publicOrigin, /429 "public, max-age=31536000, immutable"/);
-assert.doesNotMatch(publicOrigin, /50[0-9] "public, max-age=31536000, immutable"/);
+assert.doesNotMatch(publicOrigin, /add_header Cache-Control[^;]*(?:immutable|public, max-age)/);
+for (const proxy of [publicOrigin, protectedDownload]) {
+ assert.ok(proxy.includes('auth_request /__pcu_file_auth;'));
+ assert.ok(proxy.includes('location = /__pcu_file_auth {\n    internal;'));
+ assert.ok(proxy.includes('X-PCU-Gateway-Secret "${FILE_GATEWAY_SECRET}"'));
+ assert.ok(proxy.includes('X-PCU-File-Uri $request_uri'));
+ assert.ok(proxy.includes('proxy_set_header Cookie ""'));
+ assert.ok(proxy.includes('proxy_set_header Authorization ""'));
+ assert.ok(proxy.includes('resolver 127.0.0.11'));
+ assert.doesNotMatch(proxy.match(/log_format[^;]+;/s)?.[0] ?? '', /\$uri|\$request_uri|\$args/);
+}
+assert.match(compose, /FILE_GATEWAY_SECRET: \$\{FILE_GATEWAY_SECRET:-\}/);
+assert.match(envValidator, /FILE_GATEWAY_SECRET must contain at least 32/);
+const gateEnvironment = {
+ ...process.env,
+ PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS:'512', PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS:'128',
+ S3_BUCKET_PROTECTED:'pcu-protected', FILE_GATEWAY_API_UPSTREAM:'http://api:4000',
+ FILE_GATEWAY_SECRET:'test-file-gateway-secret-at-least-32chars',
+};
+const validateGate = overrides => spawnSync('sh', [new URL('./validate-data-plane-env.sh', import.meta.url).pathname], {env:{...gateEnvironment,...overrides},encoding:'utf8'});
+assert.equal(validateGate({}).status,0);
+for(const secret of ['', 'short', 'validlength-but-invalid-gateway-secret;injection']) {
+ assert.notEqual(validateGate({FILE_GATEWAY_SECRET:secret}).status,0,'invalid gateway secret was accepted');
+}
+for(const upstream of ['ftp://api:4000','http://api:4000/path','http://api:4000;injection']) {
+ assert.notEqual(validateGate({FILE_GATEWAY_API_UPSTREAM:upstream}).status,0,'invalid gateway origin was accepted');
+}
 assert.match(compose, /GARAGE_PUBLIC_BUCKET_HOST: \$\{GARAGE_PUBLIC_BUCKET_HOST:-pcu-public\.web\.garage\.localhost\}/);
 assert.match(envValidator, /GARAGE_PUBLIC_BUCKET_HOST.*must equal/);
 assert.match(envValidator, /UPLOAD_PART_PER_IP_CONNECTIONS.*-ge 50/);
-assert.match(liveTest, /Range: bytes=0-8/);
-assert.match(liveTest, /createMultipartPartPresigner/);
-assert.match(liveTest, /x-amz-checksum-sha256/);
-assert.match(liveTest, /complete-multipart-upload/);
-assert.match(liveTest, /If-None-Match/);
-assert.match(liveTest, /416/);
-assert.match(liveTest, /stop garage/);
-assert.match(liveTest, /start garage/);
-assert.match(liveTest, /Garage did not recover through the proxy/);
+assert.match(liveTest, /npm run test:integration/);
+assert.match(liveTest, /COMPOSE_PROJECT_NAME/);
+assert.match(liveTest, /down .*--volumes/);
+assert.doesNotMatch(liveTest, /put-object|immutable-fixture/);
 
 // Garage v1.1 intentionally exposes this through standard S3 Put/GetBucketCors
 // rather than an admin CLI. Test policy generation with a fake aws client so

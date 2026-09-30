@@ -37,7 +37,7 @@ function projectRecord() {
 		title: 'Context Game',
 		slug: 'context-game',
 		exhibitionId: 1,
-		exhibition: { year: 2026 },
+		visibility: 'PUBLIC' as const, exhibition: { visibility: 'PUBLIC' as const, year: 2026 },
 		creatorId: 1,
 		creator: { name: 'Owner' },
 		summary: 'Summary',

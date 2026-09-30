@@ -1,3 +1,4 @@
+import { useViewerKey } from '../lib/query';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { publicApi } from '../lib/api';
@@ -7,6 +8,7 @@ import { ProjectActions, ProjectAttachments, ProjectPublicMeta, ProjectVideo } f
 import { getVideoLabel } from '../lib/video-label';
 
 export default function ProjectDetailPage() {
+ const viewerKey = useViewerKey();
   const { year: yearParam, slug, projectId } = useParams<{
     year?: string;
     slug?: string;
@@ -19,8 +21,8 @@ export default function ProjectDetailPage() {
 
   const { data: project, isLoading, error, refetch } = useQuery({
     queryKey: slug && year
-      ? queryKeys.projectDetail(year, slug)
-      : queryKeys.projectDetailById(numericId),
+      ? viewerKey(queryKeys.projectDetail(year, slug))
+      : viewerKey(queryKeys.projectDetailById(numericId)),
     queryFn: () => publicApi.getProjectDetail(
       !isNaN(numericId) ? numericId : idOrSlug,
       year,

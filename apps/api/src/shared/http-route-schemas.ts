@@ -247,6 +247,10 @@ changeRouteContracts.push(
 );
 
 export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
+ contract({method:'POST',url:'/api/file-access',family:'assets',bodyBoundary:'json',responseBoundary:'json',params:EmptyObjectSchema,querystring:EmptyObjectSchema,body:z.object({url:z.string().url().max(8192)}).strict(),response:jsonResponse(z.object({url:z.string(),token:z.string().nullable(),expiresAt:z.string().nullable()}))}),
+ contract({method:'POST',url:'/api/file-access/:token/renew',family:'assets',bodyBoundary:'none',responseBoundary:'json',params:z.object({token:z.string().regex(/^[a-f0-9]{64}$/)}),querystring:EmptyObjectSchema,body:NoBodySchema,response:jsonResponse(z.object({token:z.string(),expiresAt:z.string()}))}),
+ contract({method:'GET',url:'/api/internal/file-access',family:'assets',bodyBoundary:'none',responseBoundary:'no-content',params:EmptyObjectSchema,querystring:EmptyObjectSchema,body:NoBodySchema,response:NoContentResponse}),
+
 	...changeRouteContracts,
 	contract({
 		method: 'OPTIONS',

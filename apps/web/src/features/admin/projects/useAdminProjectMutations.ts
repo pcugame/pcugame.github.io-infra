@@ -3,7 +3,7 @@ import type { AdminProjectDetail, ProjectStatus, SetProjectVideoOrderRequest, Up
 
 import type { AddMemberInput, UpdateProjectFormInput } from '../../../contracts/schemas';
 import { adminAssetApi, adminMemberApi, adminProjectApi } from '../../../lib/api';
-import { queryKeys } from '../../../lib/query';
+import { queryKeys, invalidateVisibilityQueries } from '../../../lib/query';
 
 interface UseAdminProjectMutationsParams {
 	projectId: number;
@@ -27,7 +27,7 @@ export function useAdminProjectMutations({
 	};
 
 	const invalidatePublicYears = () => {
-		qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+		void invalidateVisibilityQueries(qc);
 	};
 
 	const updateMutation = useMutation({

@@ -9,12 +9,13 @@ export interface PublicControllerDependencies {
 /** Create the public read-only route plugin without capturing process state. */
 export function createPublicController(deps: PublicControllerDependencies): FastifyPluginAsync {
 	return async function publicController(app): Promise<void> {
+		app.addHook('onSend', async (_request, reply) => { reply.header('Cache-Control', 'private, no-store'); });
 		app.get('/upload-config', async (_request, reply) => {
 			sendOk(reply, { materialMaxCount: 5, materialMaxBytes: 50 * 1024 * 1024 });
 		});
 		/** GET /api/public/years — list years with published project counts */
-		app.get('/years', async (_request, reply) => {
-			const items = await deps.service.listYears();
+		app.get('/years', async (request, reply) => {
+			const items = await deps.service.listYears(request.currentUser ?? null);
 			sendOk(reply, { items });
 		});
 
@@ -22,7 +23,7 @@ export function createPublicController(deps: PublicControllerDependencies): Fast
 		app.get<{ Params: { year: string } }>(
 			'/years/:year/projects',
 			async (request, reply) => {
-				const data = await deps.service.listProjectsByYear(request.params.year);
+				const data = await deps.service.listProjectsByYear(request.params.year, request.currentUser ?? null);
 				sendOk(reply, data);
 			},
 		);
@@ -31,7 +32,7 @@ export function createPublicController(deps: PublicControllerDependencies): Fast
 		app.get<{ Params: { id: string } }>(
 			'/exhibitions/:id/projects',
 			async (request, reply) => {
-				const data = await deps.service.listProjectsByExhibition(request.params.id);
+				const data = await deps.service.listProjectsByExhibition(request.params.id, request.currentUser ?? null);
 				sendOk(reply, data);
 			},
 		);
@@ -44,6 +45,7 @@ export function createPublicController(deps: PublicControllerDependencies): Fast
 			const data = await deps.service.getProjectDetail(
 				request.params.idOrSlug,
 				request.query.year,
+				request.currentUser ?? null,
 			);
 			sendOk(reply, data);
 		});

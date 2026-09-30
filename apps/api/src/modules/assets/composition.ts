@@ -19,6 +19,7 @@ import type { UploadLifecycleRuntime } from '../upload-lifecycle/ports.js';
 
 export interface AssetsBannedProductionGraph {
 	assetsController: FastifyPluginAsync;
+ authorizeDownload: ReturnType<typeof createAssetsService>['downloadAssetById'];
 	bannedIpController: FastifyPluginAsync;
 	warmup: { start(): Promise<void> };
 }
@@ -67,6 +68,7 @@ export function createAssetsBannedProductionGraph(
 
 	return {
 		assetsController: createAssetsController({ service: assetsService }),
+  authorizeDownload: assetsService.downloadAssetById,
 		bannedIpController: createBannedIpController({ service: bannedIpService }),
 		warmup: createBannedIpWarmup({
 			repository: deps.assetsRepository,

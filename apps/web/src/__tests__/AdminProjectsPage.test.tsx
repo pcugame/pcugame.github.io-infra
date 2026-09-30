@@ -42,6 +42,7 @@ import AdminProjectsPage from '../pages/admin/AdminProjectsPage';
 
 function project(overrides: Partial<AdminProjectItem> = {}): AdminProjectItem {
 	return {
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 1,
 		title: 'Alpha Project',
 		slug: 'alpha-project',

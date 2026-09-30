@@ -113,7 +113,7 @@ describe('response runtime schemas', () => {
 			items: [{
 				id: 1,
 				year: 2026,
-				title: '2026 전시',
+				visibility: 'PUBLIC', title: '2026 전시',
 				projectCount: 0,
 				poster: responsiveImage,
 			}],
@@ -122,6 +122,7 @@ describe('response runtime schemas', () => {
 		expect(AdminProjectListResponseSchema.parse({
 			items: [{
 				id: 1,
+				visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 				title: 'Game',
 				slug: 'game',
 				year: 2026,
@@ -145,7 +146,7 @@ describe('response runtime schemas', () => {
 			id: 1,
 			year: 2026,
 			slug: 'legacy-link',
-			title: 'Legacy Link',
+			visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false, title: 'Legacy Link',
 			githubUrl: 'github.com/legacy/project',
 			platforms: [],
 			isIncomplete: false,
@@ -263,7 +264,7 @@ describe('response runtime schemas', () => {
 	it('uses one responsive image schema across public and admin image responses', () => {
 		const adminDetail = AdminProjectDetailSchema.parse({
 			id: 1,
-			title: 'Responsive project',
+			visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false, title: 'Responsive project',
 			slug: 'responsive-project',
 			year: 2026,
 			platforms: ['WEB'],

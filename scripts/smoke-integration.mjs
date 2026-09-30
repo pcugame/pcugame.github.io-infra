@@ -327,8 +327,8 @@ if (assetRes.status !== 200) {
 if (!assetRes.headers.get('content-type')?.includes('image/png')) {
   throw new Error('public image stream returned an unexpected Content-Type');
 }
-if (assetRes.headers.get('cache-control') !== 'public, max-age=31536000, immutable') {
-  throw new Error('public image stream did not return the immutable cache policy');
+if (assetRes.headers.get('cache-control') !== 'private, no-store') {
+  throw new Error('public image stream did not return the private no-store cache policy');
 }
 if ((await assetRes.arrayBuffer()).byteLength === 0) {
   throw new Error('public image stream returned an empty body');
@@ -347,7 +347,7 @@ if (imageEtag) {
     throw new Error('public image conditional request did not return a bodyless 304');
   }
 }
-console.log('ok: public image direct origin, HEAD, and immutable cache');
+console.log('ok: public image gated origin, HEAD, and private no-store cache');
 const gameDownloadUrl = publicProject?.data?.gameDownloadUrl;
 if (typeof gameDownloadUrl !== 'string') {
   throw new Error('integration public project did not expose a game download URL');
@@ -362,9 +362,8 @@ if (!gameLocation) throw new Error('game download redirect did not include a pre
 if (new URL(gameLocation).origin !== 'http://localhost:3906') {
   throw new Error(`protected redirect leaked the wrong signing origin: ${new URL(gameLocation).origin}`);
 }
-const capabilityTtl = Number(new URL(gameLocation).searchParams.get('X-Amz-Expires'));
-if (!Number.isInteger(capabilityTtl) || capabilityTtl <= 0 || capabilityTtl > 60) {
-  throw new Error(`protected redirect returned an invalid capability TTL: ${capabilityTtl}`);
+if (!/^\/file\/[a-f0-9]{64}$/.test(new URL(gameLocation).pathname)) {
+  throw new Error('protected redirect did not return an opaque file capability');
 }
 
 const gameObject = await requestPresignedObject(gameLocation, {
@@ -394,19 +393,7 @@ if (
   || !protectedRange.headers['content-range']?.startsWith(`bytes 0-${protectedRangeEnd}/`)
 ) throw new Error(`protected signed Range GET returned ${protectedRange.status}`);
 
-const signedLocation = new URL(gameLocation);
-const protectedPrefix = '/pcu-protected/';
-if (!signedLocation.pathname.startsWith(protectedPrefix)) {
-  throw new Error(`protected capability used an unexpected path: ${signedLocation.pathname}`);
-}
-const protectedKey = decodeURIComponent(signedLocation.pathname.slice(protectedPrefix.length));
-const signedHeadUrl = signIntegrationObject(
-  'HEAD',
-  signedLocation.origin,
-  'pcu-protected',
-  protectedKey,
-);
-const protectedHead = await requestPresignedObject(signedHeadUrl, {
+const protectedHead = await requestPresignedObject(gameLocation, {
   method: 'HEAD',
   internalBase: internalProtectedDownloadBase,
 });
@@ -433,12 +420,13 @@ if (chunkedBodyGet.status !== 400) {
 }
 
 const unsignedObjectUrl = new URL(gameLocation);
+unsignedObjectUrl.pathname = '/pcu-protected/not-a-canonical-object';
 unsignedObjectUrl.search = '';
 const unsignedObject = await requestPresignedObject(unsignedObjectUrl, {
   internalBase: internalProtectedDownloadBase,
 });
 if (unsignedObject.status !== 403) {
-  throw new Error(`protected proxy accepted unsigned object GET (${unsignedObject.status})`);
+  throw new Error(`protected proxy accepted unknown unsigned object GET (${unsignedObject.status})`);
 }
 for (const [label, pathname] of [
   ['protected bucket list', '/pcu-protected/'],
@@ -467,7 +455,7 @@ const uploadProxyGet = await requestPresignedObject(gameLocation, {
 if (uploadProxyGet.status !== 405) {
   throw new Error(`UploadPart proxy accepted protected GET (${uploadProxyGet.status})`);
 }
-console.log('ok: protected delivery origin, TTL, GET/HEAD/Range and closed proxy boundary');
+console.log('ok: protected delivery origin, opaque token, GET/HEAD/Range and closed proxy boundary');
 console.log('ok: game download uses the friendly Content-Disposition filename');
 
 const legacyKey = 'legacy/서울 space/literal % + plus: @ amp& equals=.bin';
@@ -491,7 +479,7 @@ try {
   const legacyGet = await requestPresignedObject(legacyBrowserUrl, {
     internalBase: internalProtectedDownloadBase,
   });
-  if (legacyGet.status !== 200 || !legacyGet.body.equals(legacyBytes)) {
+  if (legacyGet.status !== 403) {
     throw new Error(`escaped legacy protected GET returned ${legacyGet.status}`);
   }
   const legacyHead = await requestPresignedObject(signIntegrationObject(
@@ -500,17 +488,17 @@ try {
     method: 'HEAD',
     internalBase: internalProtectedDownloadBase,
   });
-  if (legacyHead.status !== 200 || legacyHead.body.byteLength !== 0) {
+  if (legacyHead.status !== 403 || legacyHead.body.byteLength !== 0) {
     throw new Error(`escaped legacy protected HEAD returned ${legacyHead.status}`);
   }
   const legacyRange = await requestPresignedObject(legacyBrowserUrl, {
     internalBase: internalProtectedDownloadBase,
     headers: { Range: 'bytes=0-8' },
   });
-  if (legacyRange.status !== 206 || !legacyRange.body.equals(legacyBytes.subarray(0, 9))) {
+  if (legacyRange.status !== 403) {
     throw new Error(`escaped legacy protected Range GET returned ${legacyRange.status}`);
   }
-  console.log('ok: escaped UTF-8/space/percent/reserved legacy key preserves signed path/Host/query');
+  console.log('ok: escaped UTF-8/space/percent/reserved legacy key without canonical ownership is denied');
 } finally {
   const deletedLegacy = await requestPresignedObject(legacyDeleteUrl, {
     method: 'DELETE',
@@ -681,7 +669,11 @@ const webglUrl = projectAfterWebgl?.data?.webglUrl;
 if (typeof webglUrl !== 'string' || new URL(webglUrl).origin === new URL(apiBase).origin) {
   throw new Error('WebGL worker did not publish an immutable public-origin deployment URL');
 }
-const hostedWebglUrl = integrationPublicAssetUrl(webglUrl);
+const { body: webglGrant } = await fetchJson(`${apiBase}/api/file-access`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify({ url: webglUrl }),
+});
+if (!webglGrant?.data?.url?.includes('/play/')) throw new Error('WebGL grant did not preserve a deployment-scoped play path');
+const hostedWebglUrl = integrationPublicAssetUrl(webglGrant.data.url);
 
 const hostedIndex = await fetch(hostedWebglUrl, { headers: { Origin: 'null' } });
 const hostedIndexBody = Buffer.from(await hostedIndex.arrayBuffer());
@@ -696,7 +688,7 @@ const webglEtag = hostedIndex.headers.get('etag');
 const webglLastModified = hostedIndex.headers.get('last-modified');
 const webglCacheControl = hostedIndex.headers.get('cache-control');
 const hostedIndexLength = Number(hostedIndex.headers.get('content-length'));
-if (!webglEtag || !webglLastModified || !webglCacheControl) {
+if (!webglEtag || !webglLastModified || webglCacheControl !== 'private, no-store') {
   throw new Error('WebGL index GET did not expose ETag, Last-Modified, and Cache-Control');
 }
 if (!Number.isSafeInteger(hostedIndexLength) || hostedIndexLength !== hostedIndexBody.byteLength) {
@@ -737,7 +729,7 @@ if (
 // The original 200/HEAD validators are asserted above; the proxy must preserve
 // the bodyless 304 while ensuring that revalidation responses are never cached
 // as a new immutable representation.
-if (webglEtagConditional.headers.get('cache-control') !== 'no-store') {
+if (webglEtagConditional.headers.get('cache-control') !== 'private, no-store') {
   throw new Error('WebGL If-None-Match 304 was cached as immutable');
 }
 
@@ -746,7 +738,7 @@ const webglModifiedConditional = await fetch(hostedWebglUrl, {
 });
 const webglModifiedBody = Buffer.from(await webglModifiedConditional.arrayBuffer());
 if (webglModifiedConditional.status === 304) {
-  if (webglModifiedBody.byteLength !== 0 || webglModifiedConditional.headers.get('cache-control') !== 'no-store') {
+  if (webglModifiedBody.byteLength !== 0 || webglModifiedConditional.headers.get('cache-control') !== 'private, no-store') {
     throw new Error('WebGL If-Modified-Since 304 returned a body or was cached as immutable');
   }
 } else if (
@@ -785,7 +777,7 @@ if (
   || hostedIndexUnsatisfiable.headers.get('content-range') !== (
     `bytes */${hostedIndexBody.byteLength}`
   )
-  || hostedIndexUnsatisfiable.headers.get('cache-control') !== 'no-store'
+  || hostedIndexUnsatisfiable.headers.get('cache-control') !== 'private, no-store'
 ) {
   throw new Error(
     `WebGL unsatisfiable range returned invalid metadata or body (${hostedIndexUnsatisfiable.status})`,
@@ -851,7 +843,7 @@ console.log(
 );
 
 if (keepWebgl) {
-  console.log(`ok: retained WebGL fixture for browser checks at ${hostedWebglUrl}`);
+  console.log('ok: retained WebGL fixture for browser checks (capability omitted)');
 } else {
   await fetchJson(`${apiBase}/api/admin/projects/${projectId}/webgl`, {
     method: 'DELETE',
@@ -859,7 +851,7 @@ if (keepWebgl) {
   });
   await waitFor('deleted WebGL generation cleanup', async () => {
     const deletedWebgl = await fetch(hostedWebglUrl, { headers: { Origin: 'null' } });
-    if (deletedWebgl.status !== 404 || deletedWebgl.headers.get('cache-control') !== 'no-store') {
+    if (![403, 404].includes(deletedWebgl.status) || deletedWebgl.headers.get('cache-control') !== 'private, no-store') {
       throw new Error(`deleted WebGL deployment remained public/cacheable with ${deletedWebgl.status}`);
     }
   });

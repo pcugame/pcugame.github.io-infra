@@ -1,3 +1,4 @@
+import { useViewerKey } from '../lib/query';
 import { useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -9,6 +10,7 @@ import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
 import { ProjectCard, ProjectModal } from '../components/project';
 
 export default function ExhibitionProjectsPage() {
+ const viewerKey = useViewerKey();
   const { id: idParam } = useParams<{ id: string }>();
   const id = Number(idParam);
   const [search, setSearch] = useState('');
@@ -19,7 +21,7 @@ export default function ExhibitionProjectsPage() {
   const closeModal = useCallback(() => setSelectedSlug(null), []);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: queryKeys.exhibitionProjects(id),
+    queryKey: viewerKey(queryKeys.exhibitionProjects(id)),
     queryFn: () => publicApi.getExhibitionProjects(id),
     enabled: !isNaN(id),
   });

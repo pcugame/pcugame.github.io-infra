@@ -89,6 +89,8 @@ services:
         condition: service_completed_successfully
     environment:
       NGINX_LISTEN_PORT: "8080"
+      FILE_GATEWAY_API_UPSTREAM: http://api:4000
+      FILE_GATEWAY_SECRET: integration-file-gateway-secret-32chars
       S3_BUCKET_PROTECTED: pcu-protected
       GARAGE_S3_UPSTREAM: http://garage:3900
       GARAGE_S3_TLS_SERVER_NAME: garage
@@ -107,6 +109,8 @@ services:
         condition: service_completed_successfully
     environment:
       NGINX_LISTEN_PORT: "8080"
+      FILE_GATEWAY_API_UPSTREAM: http://api:4000
+      FILE_GATEWAY_SECRET: integration-file-gateway-secret-32chars
       GARAGE_PUBLIC_WEB_UPSTREAM: http://garage:3902
       GARAGE_PUBLIC_WEB_TLS_SERVER_NAME: garage
       GARAGE_PUBLIC_BUCKET_HOST: pcu-public.web.garage.localhost
@@ -147,6 +151,7 @@ services:
       SHUTDOWN_DRAIN_MS: "15000"
       DATABASE_URL: postgresql://pcu_admin:integration@postgres:5432/pcu_graduationproject_v2?schema=public
       SESSION_SECRET: integration-session-secret-change-me-32chars
+      FILE_GATEWAY_SECRET: integration-file-gateway-secret-32chars
       SESSION_COOKIE_NAME: sid
       SESSION_IDLE_MS: "7200000"
       SESSION_ABSOLUTE_MS: "1209600000"

@@ -481,6 +481,7 @@ jobs:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
           VITE_BASE_PATH: ${{ vars.VITE_BASE_PATH || '/' }}
+          VITE_VISIBILITY_CONTROLS_ENABLED: ${{ vars.VITE_VISIBILITY_CONTROLS_ENABLED || 'false' }}
         run: npm run build
 
       - name: Stamp exact cutover commit

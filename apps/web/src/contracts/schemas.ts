@@ -42,6 +42,7 @@ export const UpdateProjectFormSchema = UpdateProjectBaseSchema.pick({
 	description: true,
 	status: true,
 	sortOrder: true,
+	visibility: true,
 }).extend({
   title: z.string().min(1, '제목을 입력하세요').max(120),
   summary: z.string().max(300).optional().or(z.literal('')),

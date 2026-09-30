@@ -1,9 +1,11 @@
+import type { Visibility } from './enums.js';
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
 import type { ProjectVideo } from './public.js';
 import type { ResponsiveImage } from './responsive-image.js';
 import type { ProjectAttachment } from './public.js';
 
 export type UpdateProjectRequest = {
+	visibility?: Visibility;
 	title?: string;
 	summary?: string;
 	description?: string;
@@ -13,6 +15,9 @@ export type UpdateProjectRequest = {
 };
 
 export type AdminProjectItem = {
+	canChangeVisibility: boolean;
+	exhibitionVisibility: Visibility;
+	visibility: Visibility;
 	isModificationEnabled?: boolean;
 	canEdit?: boolean;
 	canDelete?: boolean;
@@ -70,6 +75,9 @@ export type AdminProjectListResponse = {
 };
 
 export type AdminProjectDetail = {
+	canChangeVisibility: boolean;
+	exhibitionVisibility: Visibility;
+	visibility: Visibility;
 	isModificationEnabled?: boolean;
 	canEdit?: boolean;
 	canDelete?: boolean;
@@ -126,6 +134,7 @@ export type AdminProjectDetail = {
 };
 
 export type SubmitProjectPayload = {
+	visibility?: Visibility;
 	exhibitionId: number;
 	title: string;
 	summary?: string;

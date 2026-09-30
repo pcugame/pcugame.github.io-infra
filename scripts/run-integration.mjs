@@ -21,10 +21,7 @@ async function acquireProtectedCapability() {
 	if (signed.origin !== 'http://localhost:3906') {
 		throw new Error(`protected capability used unexpected origin ${signed.origin}`);
 	}
-	const ttl = Number(signed.searchParams.get('X-Amz-Expires'));
-	if (!Number.isInteger(ttl) || ttl <= 0 || ttl > 60) {
-		throw new Error(`protected capability used unexpected TTL ${ttl}`);
-	}
+	if (!/^\/file\/[a-f0-9]{64}$/.test(signed.pathname)) throw new Error('protected grant is not an opaque stable file URL');
 	return capability;
 }
 
@@ -112,6 +109,8 @@ const steps = [
 	[npm, ['run', 'test:integration:banned-ips']],
 	[npm, ['run', 'test:integration:phase2-transition']],
 	[npm, ['run', 'test:integration:year-change-approval']],
+	[npm, ['run', 'test:integration:visibility']],
+	[npm, ['run', 'test:integration:visibility-gateway']],
 	[docker, ['compose', '-f', 'docker-compose.integration.yml', '--profile', 'e2e', 'run', '--rm', 'e2e']],
 ];
 
@@ -147,12 +146,13 @@ try {
 			if (result.status !== 0) exitCode = result.status ?? 1;
 		}
 		if (exitCode === 0) {
-			result = smoke();
-			if (result.status !== 0) exitCode = result.status ?? 1;
+			const denied = await fetch(smokeUrl);
+			if (denied.ok) { console.error('API-down public gate served bytes'); exitCode = 1; }
 		}
 		if (exitCode === 0) {
 			try {
-				await smokeProtectedCapability(protectedCapability);
+				const denied = await requestMappedProtected(protectedCapability);
+				if (denied.status < 400) throw new Error('API-down protected gate served bytes');
 			} catch (error) {
 				console.error(error);
 				exitCode = 1;
@@ -171,7 +171,7 @@ try {
 					[
 						'compose', '-f', 'docker-compose.integration.yml', 'exec', '-T',
 						'protected-download-origin', 'sh', '-c',
-						"sed -i 's#proxy_pass http://garage:3900;#proxy_pass http://127.0.0.1:9;#' /etc/nginx/conf.d/default.conf && nginx -t && nginx -s reload && sleep 1",
+						"sed -i 's#proxy_pass http://garage:3900#proxy_pass http://127.0.0.1:9#' /etc/nginx/conf.d/default.conf && nginx -t && nginx -s reload && sleep 1",
 					],
 					{ stdio: 'inherit' },
 				);
@@ -242,7 +242,7 @@ try {
 				}
 			}
 		}
-		if (exitCode === 0) console.log('API-down public and pre-issued protected capability smoke: OK');
+		if (exitCode === 0) console.log('API-down public and pre-issued protected capabilities denied: OK');
 	}
 } finally {
 	const cleanup = spawnSync(

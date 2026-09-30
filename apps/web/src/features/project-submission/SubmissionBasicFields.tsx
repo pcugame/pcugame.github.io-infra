@@ -1,9 +1,12 @@
-import { Controller } from 'react-hook-form';
+import { useWatch, Controller } from 'react-hook-form';
 import type { Control, FieldErrors, UseFormRegister } from 'react-hook-form';
 
 import type { AdminExhibitionItem } from '../../contracts';
 import type { SubmitProjectPayloadInput } from '../../contracts/schemas';
 import ExhibitionSelect from '../../components/ExhibitionSelect';
+
+import { VisibilitySelect, VisibilityNotice } from '../../components/VisibilitySelect';
+import { env } from '../../lib/env';
 
 interface SubmissionBasicFieldsProps {
 	control: Control<SubmitProjectPayloadInput>;
@@ -20,9 +23,17 @@ export function SubmissionBasicFields({
 	register,
 	years,
 }: SubmissionBasicFieldsProps) {
+	const exhibitionId = useWatch({ control, name: 'exhibitionId' });
+	const visibility = useWatch({ control, name: 'visibility' });
+	const exhibition = years.find((item) => item.id === exhibitionId);
 	return (
 		<fieldset>
 			<legend>기본 정보</legend>
+            {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
+             <label htmlFor="project-visibility">공개 범위</label>
+             <VisibilitySelect id="project-visibility" {...register('visibility')} />
+             <VisibilityNotice visibility={visibility} exhibitionVisibility={exhibition?.visibility} />
+            </div>}
 
 			<div className="form-field">
 				<label htmlFor="exhibitionId">전시회 *</label>

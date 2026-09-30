@@ -1,3 +1,4 @@
+import { useViewerKey } from '../../lib/query';
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -9,14 +10,20 @@ import {
 import type { AdminExhibitionItem } from '../../contracts';
 import { adminExhibitionApi, adminExportApi, isApiError, getApiErrorMessage } from '../../lib/api';
 import type { ExportResult } from '../../lib/api';
-import { queryKeys } from '../../lib/query';
+import { queryKeys, invalidateVisibilityQueries } from '../../lib/query';
 import { useMe } from '../../features/auth';
 import { YearMobileCard, YearRow } from '../../features/admin/exhibitions/ExhibitionRows';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
 import { ExportProgressModal } from '../../components/admin/ExportProgressModal';
 
+import { VisibilitySelect } from '../../components/VisibilitySelect';
+import { env } from '../../lib/env';
+import type { Visibility } from '@pcu/contracts';
+
 export default function AdminYearsPage() {
+ const viewerKey = useViewerKey();
 	const qc = useQueryClient();
+	const [createVisibility, setCreateVisibility] = useState<Visibility | ''>('');
 	const { user } = useMe();
 	const isAdmin = user?.role === 'ADMIN';
 
@@ -95,7 +102,7 @@ export default function AdminYearsPage() {
 	}, [isAnyExporting]);
 
 	const { data, isLoading, error, refetch } = useQuery({
-		queryKey: queryKeys.adminExhibitions,
+		queryKey: viewerKey(queryKeys.adminExhibitions),
 		queryFn: adminExhibitionApi.list,
 	});
 
@@ -118,6 +125,7 @@ export default function AdminYearsPage() {
 	const createMutation = useMutation({
 		mutationFn: (data: CreateExhibitionInput) =>
 			adminExhibitionApi.create({
+				visibility: env.VISIBILITY_CONTROLS_ENABLED ? createVisibility as Visibility : 'PUBLIC',
 				year: data.year,
 				title: data.title || undefined,
 				isModificationEnabled: data.isModificationEnabled,
@@ -125,8 +133,9 @@ export default function AdminYearsPage() {
 			}),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
-			qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+			void invalidateVisibilityQueries(qc);
 			resetCreate();
+			setCreateVisibility('');
 		},
 	});
 
@@ -135,7 +144,7 @@ export default function AdminYearsPage() {
 		mutationFn: (id: number) => adminExhibitionApi.delete(id),
 		onSuccess: () => {
 			qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
-			qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+			void invalidateVisibilityQueries(qc);
 		},
 	});
 
@@ -167,10 +176,11 @@ export default function AdminYearsPage() {
 
 			{/* ── 새 연도 생성 ────────────────────────────────────── */}
 			<form
-				onSubmit={handleCreate((d) => createMutation.mutate(d))}
+				onSubmit={handleCreate((d) => { if (!env.VISIBILITY_CONTROLS_ENABLED || createVisibility) createMutation.mutate(d); })}
 				className="year-create-form admin-card"
 			>
 				<h3>새 연도 추가</h3>
+                {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field"><label htmlFor="new-visibility">공개 범위 *</label><VisibilitySelect id="new-visibility" value={createVisibility} onChange={(event) => setCreateVisibility(event.target.value as Visibility)} required /></div>}
 				<div className="form-row">
 					<div className="form-field">
 						<label htmlFor="new-year">연도 *</label>
@@ -205,7 +215,7 @@ export default function AdminYearsPage() {
 					<button
 						type="submit"
 						className="btn btn--primary btn--small"
-						disabled={createMutation.isPending}
+						disabled={createMutation.isPending || (env.VISIBILITY_CONTROLS_ENABLED && !createVisibility)}
 					>
 						{createMutation.isPending ? '추가 중…' : '추가'}
 					</button>
@@ -245,7 +255,7 @@ export default function AdminYearsPage() {
 										onSaved={() => {
 											setEditingId(null);
 											qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
-											qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+											void invalidateVisibilityQueries(qc);
 										}}
 										onDelete={() => handleDelete(y)}
 										isDeleting={deleteMutation.isPending}
@@ -271,7 +281,7 @@ export default function AdminYearsPage() {
 								onSaved={() => {
 									setEditingId(null);
 									qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
-									qc.invalidateQueries({ queryKey: queryKeys.publicYears });
+									void invalidateVisibilityQueries(qc);
 								}}
 								onDelete={() => handleDelete(y)}
 								isDeleting={deleteMutation.isPending}

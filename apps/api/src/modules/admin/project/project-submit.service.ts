@@ -1,3 +1,4 @@
+import { canReadVisibility } from '../../../shared/visibility.js';
 import { createHash } from 'node:crypto';
 import type { ProjectSubmissionItemStatus, ProjectSubmissionStatusResponse } from '@pcu/contracts';
 import { AppError, badRequest, conflict, forbidden, isUniqueConstraintError } from '../../../shared/errors.js';
@@ -140,10 +141,11 @@ export async function submitProject(
 		throw forbidden('Admin project submission requires operator or admin role');
 	}
 	if (options.audience === 'user') assertUserSubmitPayloadPolicy(input.payload);
-	const { exhibitionId, title, summary, description, members, manifest } = parseBody(SubmitProjectPayload, input.payload);
+	const { exhibitionId, title, summary, description, members, manifest, visibility } = parseBody(SubmitProjectPayload, input.payload);
 	assertManifestIsUnambiguous(manifest);
 	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
 	assertUploadAllowed(exhibition, exhibitionId, options.audience === 'user' ? 'USER' : input.actor.role as never);
+	if (!canReadVisibility({ id: input.actor.id, role: input.actor.role as 'USER' | 'OPERATOR' | 'ADMIN' }, exhibition.visibility)) throw forbidden('Exhibition is not accessible');
 
 	let operation: { operationId: string; ownerToken: string } | undefined;
 	try {
@@ -168,8 +170,9 @@ export async function submitProject(
 		while (true) {
 			try {
 				project = await deps.repository.createProjectWithAssets({
-					exhibitionId: exhibition.id, slug, title, summary, description, status,
+					exhibitionId: exhibition.id, slug, title, summary, description, status, visibility: visibility ?? 'PUBLIC',
 					creatorId: input.actor.id,
+					actor: { id: input.actor.id, role: input.actor.role as 'USER' | 'OPERATOR' | 'ADMIN' },
 					manifest,
 					members: options.audience === 'user'
 						? members.map((member) => ({ name: member.name, studentId: member.studentId }))

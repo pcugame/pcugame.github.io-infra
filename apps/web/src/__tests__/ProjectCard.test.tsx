@@ -7,6 +7,7 @@ import type { PublicProjectCard } from '../contracts';
 
 function project(overrides: Partial<PublicProjectCard> = {}): PublicProjectCard {
 	return {
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 1,
 		slug: 'test-game',
 		title: 'Test Game',

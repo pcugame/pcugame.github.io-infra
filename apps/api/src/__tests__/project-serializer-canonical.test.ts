@@ -13,7 +13,7 @@ describe('Phase 2 admin project serialization', () => {
 			id: 7,
 			title: 'Canonical game',
 			slug: 'canonical-game',
-			exhibition: { year: 2026 },
+			visibility: 'PUBLIC' as const, exhibition: { visibility: 'PUBLIC' as const, year: 2026 },
 			summary: '',
 			description: '',
 			githubUrl: '',
@@ -112,7 +112,7 @@ describe('Phase 2 admin project serialization', () => {
 			publicBucket: 'public',
 		}).serializeProjectDetail;
 		const malformed = {
-			id: 7, title: 'Missing', slug: 'missing', exhibition: { year: 2026 }, summary: '', description: '',
+			id: 7, title: 'Missing', slug: 'missing', visibility: 'PUBLIC' as const, exhibition: { visibility: 'PUBLIC' as const, year: 2026 }, summary: '', description: '',
 			githubUrl: '', platforms: [], isIncomplete: false, status: 'PUBLISHED', sortOrder: 0,
 			posterAssetId: 13, poster: { id: 13, kind: 'POSTER', status: 'READY', representations: [] },
 			members: [], assets: [],

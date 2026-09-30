@@ -1,6 +1,6 @@
 import type { createBanMutationQueue } from '../../shared/ban-mutation-queue.js';
 import { attachmentContentDisposition, buildGameDownloadFilename, normalizeIpTarget } from '@pcu/contracts';
-import type { AssetKind, UserRole } from '@pcu/contracts';
+import type { AssetKind, UserRole, Visibility } from '@pcu/contracts';
 import type { Actor } from '../../application/http-input.js';
 import type { HttpResponseDescriptor } from '../../shared/response-descriptor.js';
 import { AppError, notFound, forbidden, unauthorized } from '../../shared/errors.js';
@@ -26,6 +26,8 @@ type ProtectedAssetAccessRecord = {
 	kind: string;
 	project: {
 		creatorId: number;
+		visibility?: Visibility;
+		exhibition?: {visibility: Visibility};
 		status: string;
 		members: { userId: number | null }[];
 	};

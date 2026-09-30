@@ -2,6 +2,7 @@
 // 모든 API 호출은 이 계층을 통과한다.
 
 import { env } from '../env';
+import { hydrateFileUrls } from './file-access';
 import { failUpload, finishUpload, startUpload, updateUpload } from '../upload';
 import type { UploadFormDataOptions } from '../upload';
 
@@ -82,7 +83,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     'data' in json &&
     (json as Record<string, unknown>).ok === true
   ) {
-    return (json as { data: T }).data;
+    const data = (json as { data: T }).data;
+    const isMediaRead = /^\/api\/(public\/(years|exhibitions|projects)|admin\/(exhibitions|projects|change-requests)|me\/(projects|change-requests))(\/|\?|$)/.test(path);
+    return isMediaRead ? hydrateFileUrls(data) : data;
   }
 
   return json as T;

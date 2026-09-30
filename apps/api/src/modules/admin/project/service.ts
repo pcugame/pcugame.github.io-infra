@@ -1,3 +1,4 @@
+import type { Visibility } from '@pcu/contracts';
 import type { ProjectStatus } from '@pcu/contracts';
 import type { AdminProjectItem, AdminProjectListQuery, AdminProjectListResponse } from '@pcu/contracts';
 import { forbidden, notFound } from '../../../shared/errors.js';
@@ -36,6 +37,7 @@ function capabilities(project: { status?: string; creatorId: number; members: Ar
 	return {
 		isModificationEnabled,
 		canEdit: direct,
+		canChangeVisibility: direct,
 		canDelete: direct,
 		canRequestChange: !privileged && !isModificationEnabled && related && project.status !== 'DRAFT',
 	};
@@ -64,6 +66,8 @@ export async function listProjects(
 	const totalPages = Math.ceil(totalItems / listOptions.limit);
 	const items: AdminProjectItem[] = projects.map((p) => ({
 		id: p.id,
+		visibility: p.visibility,
+		exhibitionVisibility: p.exhibition.visibility,
 		title: p.title,
 		slug: p.slug,
 		year: p.exhibition.year,
@@ -121,12 +125,14 @@ export async function updateProject(
 	deps: ProjectServiceDependencies,
 	projectId: number,
 	patch: {
+		visibility?: Visibility;
 		title?: string; summary?: string; description?: string;
 		isIncomplete?: boolean; status?: ProjectStatus; sortOrder?: number;
 	},
 	actor: Actor,
 ) {
 	const updated = await deps.repository.updateProject(projectId, {
+		...(patch.visibility !== undefined ? { visibility: patch.visibility } : {}),
 		...(patch.title !== undefined ? { title: patch.title } : {}),
 		...(patch.summary !== undefined ? { summary: patch.summary } : {}),
 		...(patch.description !== undefined ? { description: patch.description } : {}),

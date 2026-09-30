@@ -1,3 +1,4 @@
+import { useViewerKey } from '../../lib/query';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { ResponsiveImage as ResponsiveImageData } from '@pcu/contracts';
@@ -22,12 +23,13 @@ type MediaItem =
 	| { type: 'image'; id: number; image: ResponsiveImageData; label: string };
 
 export function ProjectModal({ slug, year, onClose }: Props) {
+ const viewerKey = useViewerKey();
 	const overlayRef = useRef<HTMLDivElement>(null);
 	const [activeIndex, setActiveIndex] = useState(0);
 	const [lightboxImage, setLightboxImage] = useState<ResponsiveImageData | null>(null);
 
 	const { data: project, isLoading } = useQuery({
-		queryKey: queryKeys.projectDetail(year, slug),
+		queryKey: viewerKey(queryKeys.projectDetail(year, slug)),
 		queryFn: () => publicApi.getProjectDetail(slug, year),
 		enabled: !!slug,
 	});

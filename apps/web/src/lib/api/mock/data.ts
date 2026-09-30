@@ -114,10 +114,10 @@ export const MOCK_USER = MOCK_USERS.ADMIN;
 // 실제 데이터: "졸업작품 전시회" 형식
 
 export const MOCK_YEARS = [
-	{ id: 1, year: 2025, title: '졸업작품 전시회', projectCount: 6, poster: mockLegacyResponsiveImage('https://placehold.co/540x960/0f172a/f8fafc?text=2025') },
-	{ id: 2, year: 2024, title: '졸업작품 전시회', projectCount: 5 },
-	{ id: 3, year: 2023, title: '졸업작품 전시회', projectCount: 4 },
-	{ id: 4, year: 2022, title: '졸업작품 전시회', projectCount: 3 },
+	{ visibility: 'PUBLIC', id: 1, year: 2025, title: '졸업작품 전시회', projectCount: 6, poster: mockLegacyResponsiveImage('https://placehold.co/540x960/0f172a/f8fafc?text=2025') },
+	{ visibility: 'PUBLIC', id: 2, year: 2024, title: '졸업작품 전시회', projectCount: 5 },
+	{ visibility: 'PUBLIC', id: 3, year: 2023, title: '졸업작품 전시회', projectCount: 4 },
+	{ visibility: 'PUBLIC', id: 4, year: 2022, title: '졸업작품 전시회', projectCount: 3 },
 ] satisfies PublicYearItem[];
 
 // ── 프로젝트 카드 ────────────────────────────────────────────
@@ -130,6 +130,7 @@ type MockProjectCard = PublicProjectCard & {
 
 const MOCK_PROJECTS_2025: MockProjectCard[] = [
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 1, slug: 'dragon-slayer', title: 'Dragon Slayer',
 		summary: '판타지 세계관 기반 3D 액션 RPG',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a1a2e/e0e0ff?text=Dragon+Slayer'),
@@ -142,6 +143,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 2, slug: '냥이의-식탁', title: '냥이의 식탁',
 		summary: '고양이 캐릭터 기반 요리 시뮬레이션 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a2e/ffe0ff?text=%EB%83%A5%EC%9D%B4%EC%9D%98+%EC%8B%9D%ED%83%81'),
@@ -151,6 +153,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 99, slug: 'escape-from-wizard-sun-moon', title: 'Escape from Wizard: Sun & Moon',
 		summary: '마법사의 탑을 탈출하는 퍼즐 어드벤처',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e2e1a/ffffe0?text=Escape+from+Wizard'),
@@ -159,6 +162,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 3, slug: 'dungeon-crawl', title: 'Dungeon Crawl',
 		summary: '절차적 생성 던전 탐험 로그라이크',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e2e/e0ffff?text=Dungeon+Crawl'),
@@ -167,6 +171,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 4, slug: 'bpm-beats-per-minute', title: 'BPM: BEATS PER MINUTE',
 		summary: '리듬에 맞춰 전투하는 FPS 리듬 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a1a/ffe0e0?text=BPM'),
@@ -175,6 +180,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 5, slug: 'undead-rush', title: 'UNDEAD RUSH',
 		summary: '좀비 서바이벌 탑다운 슈터',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e1a/e0ffe0?text=UNDEAD+RUSH'),
@@ -183,6 +189,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 6, slug: 'airstrike', title: 'AirStrike',
 		summary: '비행 슈팅 아케이드 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e2e1a/ffffe0?text=AirStrike'),
@@ -195,6 +202,7 @@ const MOCK_PROJECTS_2025: MockProjectCard[] = [
 
 const MOCK_PROJECTS_2024: MockProjectCard[] = [
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 7, slug: 'music-library', title: 'MUSIC LIBRARY',
 		summary: '음악 감상과 연동되는 비주얼 인터랙션 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a1a2e/c0c0ff?text=MUSIC+LIBRARY'),
@@ -203,6 +211,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 8, slug: 'overcome', title: 'OVERCOME',
 		summary: '장애물을 극복하며 진행하는 플랫포머 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a2e/ffc0ff?text=OVERCOME'),
@@ -212,6 +221,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 9, slug: 'gallery', title: 'GALLERY',
 		summary: '미술관을 탐험하는 공포 어드벤처',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e1a/c0ffc0?text=GALLERY'),
@@ -221,6 +231,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 10, slug: 'diver', title: 'DIVER',
 		summary: '심해 탐사 어드벤처 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e2e1a/ffffe0?text=DIVER'),
@@ -230,6 +241,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 11, slug: 'hex-defense', title: 'HEX DEFENSE',
 		summary: '헥스 기반 타워 디펜스 전략 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e2e/a0ffff?text=HEX+DEFENSE'),
@@ -241,6 +253,7 @@ const MOCK_PROJECTS_2024: MockProjectCard[] = [
 
 const MOCK_PROJECTS_2023: MockProjectCard[] = [
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 12, slug: 'lost-bible', title: 'Lost Bible',
 		summary: '고대 유적을 탐험하는 퍼즐 어드벤처',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a1a2e/a0a0ff?text=Lost+Bible'),
@@ -249,6 +262,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 13, slug: 'hospitalrunner', title: 'HospitalRunner',
 		summary: '병원을 배경으로 한 러닝 액션 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a1a/ffa0a0?text=HospitalRunner'),
@@ -257,6 +271,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 14, slug: 'what', title: 'what?!',
 		summary: '비주얼 노벨 기반 추리 어드벤처',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a2e/c0a0ff?text=what%3F!'),
@@ -265,6 +280,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 15, slug: '인마대전', title: '인마대전',
 		summary: '대전 격투 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a2e1a/a0ffa0?text=%EC%9D%B8%EB%A7%88%EB%8C%80%EC%A0%84'),
@@ -277,6 +293,7 @@ const MOCK_PROJECTS_2023: MockProjectCard[] = [
 
 const MOCK_PROJECTS_2022: MockProjectCard[] = [
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 16, slug: 'escapafe', title: "EsC'afe",
 		summary: '카페를 배경으로 한 탈출 퍼즐 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e2e1a/ffffa0?text=EsCafe'),
@@ -286,6 +303,7 @@ const MOCK_PROJECTS_2022: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 17, slug: 'most-puzzle', title: 'MOST PUZZLE',
 		summary: '다양한 퍼즐을 조합하는 두뇌 퍼즐 게임',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1a1a2e/8080ff?text=MOST+PUZZLE'),
@@ -295,6 +313,7 @@ const MOCK_PROJECTS_2022: MockProjectCard[] = [
 		],
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 18, slug: 'v-bunny', title: 'V_BUNNY',
 		summary: '토끼 캐릭터 기반 액션 플랫포머',
 		poster: mockResponsiveImage('https://placehold.co/400x560/2e1a1a/ff8080?text=V_BUNNY'),
@@ -324,6 +343,7 @@ interface MockMyProjectCard extends MockProjectCard {
 
 export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 9001, slug: 'my-rhythm-proto', title: '리듬 게임 프로토타입',
 		summary: '비트 시각화를 실험 중인 프로젝트입니다.',
 		poster: mockResponsiveImage('https://placehold.co/400x560/0f172a/fbbf24?text=Rhythm+Proto'),
@@ -331,6 +351,7 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 		year: 2025, status: 'PUBLISHED', ownerId: 3, updatedAgoSec: 0,
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 9002, slug: 'my-untitled-demo', title: 'Untitled Game Demo',
 		summary: '탑다운 슈터 데모 — 내부 테스트용 공개',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1e293b/38bdf8?text=Untitled+Demo'),
@@ -341,6 +362,7 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 		year: 2025, status: 'PUBLISHED', ownerId: 3, updatedAgoSec: 86400,
 	},
 	{
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: 9003, slug: 'my-puzzle-wip', title: '퍼즐 게임 (작업 중)',
 		summary: '3-매치 기반 퍼즐 프로토타입',
 		poster: mockResponsiveImage('https://placehold.co/400x560/1e1b4b/a78bfa?text=Puzzle+WIP'),
@@ -354,6 +376,7 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): PublicProjectDetailResponse {
 	const status = 'status' in card ? card.status : 'PUBLISHED';
 	return {
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 		id: card.id,
 		year,
 		slug: card.slug,
@@ -424,6 +447,7 @@ export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: 
 	for (const [yearStr, cards] of Object.entries(MOCK_YEAR_PROJECTS)) {
 		for (const card of cards) {
 			items.push({
+			visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 				id: card.id, title: card.title, slug: card.slug,
 				year: Number(yearStr), status: 'PUBLISHED',
 				createdByUserName: '관리자', updatedAt: new Date().toISOString(),
@@ -436,6 +460,7 @@ export function buildAdminProjectItems(opts?: { userId?: number; isPrivileged?: 
 	}
 	for (const d of MOCK_MY_PROJECTS) {
 		items.push({
+			visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 			id: d.id, title: d.title, slug: d.slug,
 			year: d.year, status: d.status,
 			createdByUserName: '학생',
@@ -456,6 +481,7 @@ export function buildAdminProjectDetail(id: string | number): AdminProjectDetail
 	const detail = findProjectDetail(id);
 	if (!detail) return undefined;
 	return {
+		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: getMockRole() === 'ADMIN' || getMockRole() === 'OPERATOR',
 		id: detail.id, title: detail.title, slug: detail.slug, year: detail.year,
 		summary: detail.summary, description: detail.description,
 		githubUrl: detail.githubUrl, platforms: detail.platforms,

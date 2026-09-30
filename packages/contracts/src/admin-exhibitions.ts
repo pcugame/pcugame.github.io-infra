@@ -1,6 +1,8 @@
+import type { Visibility } from './enums.js';
 import type { ResponsiveImage } from './responsive-image.js';
 
 export type CreateExhibitionRequest = {
+	visibility?: Visibility;
 	year: number;
 	title?: string;
 	isModificationEnabled?: boolean;
@@ -10,6 +12,7 @@ export type CreateExhibitionRequest = {
 };
 
 export type UpdateExhibitionRequest = {
+	visibility?: Visibility;
 	title?: string;
 	isModificationEnabled?: boolean;
 	/** @deprecated Use isModificationEnabled. */
@@ -18,6 +21,7 @@ export type UpdateExhibitionRequest = {
 };
 
 export type AdminExhibitionItem = {
+	visibility: Visibility;
 	id: number;
 	year: number;
 	title?: string;

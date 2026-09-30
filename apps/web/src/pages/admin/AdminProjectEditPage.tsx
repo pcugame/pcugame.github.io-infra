@@ -57,6 +57,7 @@ export default function AdminProjectEditPage() {
 
 	const onSubmitUpdate = (data: UpdateProjectFormInput) => {
 		mutations.updateMutation.mutate({
+			...(project.canChangeVisibility ? { visibility: data.visibility } : {}),
 			title: data.title,
 			summary: data.summary,
 			description: data.description,
