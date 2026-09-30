@@ -1,87 +1,35 @@
-import type { Dispatch, SetStateAction } from 'react';
 import type { AdminProjectDetail, UpdateMemberRequest } from '@pcu/contracts';
 
-import { AddMemberSchema, type AddMemberInput } from '../../../contracts/schemas';
-import { MemberRow } from './MemberRow';
-
 type MemberData = AdminProjectDetail['members'][number];
-
-interface AdminProjectMemberEditorProps {
+interface Props {
 	members: MemberData[];
-	newMember: AddMemberInput;
-	setNewMember: Dispatch<SetStateAction<AddMemberInput>>;
 	canEditContent: boolean;
-	isAdding: boolean;
 	isBusy: boolean;
-	onAdd: (member: AddMemberInput) => void;
+	errors: string[];
+	onAdd: () => void;
 	onSwap: (index: number, direction: -1 | 1) => void;
 	onUpdate: (memberId: number, body: UpdateMemberRequest) => void;
 	onRemove: (memberId: number) => void;
 }
-
-export function AdminProjectMemberEditor({
-	members,
-	newMember,
-	setNewMember,
-	canEditContent,
-	isAdding,
-	isBusy,
-	onAdd,
-	onSwap,
-	onUpdate,
-	onRemove,
-}: AdminProjectMemberEditorProps) {
+export function AdminProjectMemberEditor({ members, canEditContent, isBusy, errors, onAdd, onSwap, onUpdate, onRemove }: Props) {
 	return (
-		<fieldset>
+		<fieldset disabled={!canEditContent || isBusy}>
 			<legend>참여 학생</legend>
 			<ul className="member-list">
-				{members.map((m, idx) => (
-					<MemberRow
-						key={m.id}
-						member={m}
-						index={idx}
-						total={members.length}
-						onSwap={onSwap}
-						onUpdate={(body) => onUpdate(m.id, body)}
-						onRemove={() => onRemove(m.id)}
-						isBusy={isBusy}
-						disabled={!canEditContent}
-					/>
+				{members.map((member, index) => (
+					<li className="member-list__item" key={member.id}>
+						<input className="member-edit-input" aria-label={`참여 학생 ${index + 1} 이름`} value={member.name} onChange={(event) => onUpdate(member.id, { name: event.target.value })} />
+						<input className="member-edit-input" aria-label={`참여 학생 ${index + 1} 학번`} value={member.studentId} onChange={(event) => onUpdate(member.id, { studentId: event.target.value })} />
+						{canEditContent && <div className="member-actions">
+							<button type="button" className="btn btn--secondary btn--small" aria-label={`참여 학생 ${index + 1} 위로`} disabled={isBusy || index === 0} onClick={() => onSwap(index, -1)}>▲</button>
+							<button type="button" className="btn btn--secondary btn--small" aria-label={`참여 학생 ${index + 1} 아래로`} disabled={isBusy || index === members.length - 1} onClick={() => onSwap(index, 1)}>▼</button>
+							<button type="button" className="btn btn--danger btn--small" disabled={isBusy} onClick={() => onRemove(member.id)}>삭제</button>
+						</div>}
+					</li>
 				))}
 			</ul>
-
-			{canEditContent && (
-				<div className="member-add-row">
-					<input
-						type="text"
-						placeholder="이름"
-						value={newMember.name}
-						onChange={(e) =>
-							setNewMember((prev) => ({ ...prev, name: e.target.value }))
-						}
-					/>
-					<input
-						type="text"
-						placeholder="학번"
-						value={newMember.studentId}
-						onChange={(e) =>
-							setNewMember((prev) => ({ ...prev, studentId: e.target.value }))
-						}
-					/>
-					<button
-						className="btn btn--secondary btn--small"
-						onClick={() => {
-							const parsed = AddMemberSchema.safeParse(newMember);
-							if (parsed.success) {
-								onAdd(parsed.data);
-							}
-						}}
-						disabled={isAdding}
-					>
-						추가
-					</button>
-				</div>
-			)}
+			{errors.length > 0 && <div className="field-error" role="alert">{errors.map((error) => <p key={error}>{error}</p>)}</div>}
+			{canEditContent && <button type="button" className="btn btn--secondary btn--small" disabled={isBusy} onClick={onAdd}>참여 학생 추가</button>}
 		</fieldset>
 	);
 }

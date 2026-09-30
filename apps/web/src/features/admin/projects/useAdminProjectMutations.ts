@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { AdminProjectDetail, ProjectStatus, SetProjectVideoOrderRequest, UpdateMemberRequest } from '@pcu/contracts';
+import type { AdminProjectDetail, SetProjectVideoOrderRequest, UpdateMemberRequest, UpdateProjectRequest } from '@pcu/contracts';
 
-import type { AddMemberInput, UpdateProjectFormInput } from '../../../contracts/schemas';
+import type { AddMemberInput } from '../../../contracts/schemas';
 import { adminAssetApi, adminMemberApi, adminProjectApi } from '../../../lib/api';
 import { queryKeys } from '../../../lib/query';
 
@@ -31,7 +31,7 @@ export function useAdminProjectMutations({
 	};
 
 	const updateMutation = useMutation({
-		mutationFn: (data: UpdateProjectFormInput) => adminProjectApi.update(projectId, data),
+		mutationFn: (data: UpdateProjectRequest) => adminProjectApi.update(projectId, data),
 		onSuccess: () => {
 			invalidateProject();
 			invalidateProjectLists();
@@ -89,15 +89,6 @@ export function useAdminProjectMutations({
 		onError: invalidateProject,
 	});
 
-	const toggleStatusMutation = useMutation({
-		mutationFn: (status: Exclude<ProjectStatus, 'DRAFT'>) => adminProjectApi.update(projectId, { status }),
-		onSuccess: () => {
-			invalidateProject();
-			invalidateProjectLists();
-			invalidatePublicYears();
-		},
-	});
-
 	const swapMemberOrder = (index: number, direction: -1 | 1) => {
 		if (!project) return;
 		const members = project.members;
@@ -119,7 +110,6 @@ export function useAdminProjectMutations({
 		removeAssetMutation,
 		removeWebglMutation,
 		reorderVideosMutation,
-		toggleStatusMutation,
 		swapMemberOrder,
 	};
 }
