@@ -103,6 +103,14 @@ describe('WebGL public frontend', () => {
 		expect(screen.getByRole('link', { name: '작품으로 돌아가기' }).getAttribute('href')).toBe('/projects/7');
 	});
 
+	it('opens the stable dedicated runtime URL in an isolated new tab', () => {
+		render(<MemoryRouter><ProjectActions projectId={7} webglUrl="https://files.test/play/old/index.html" webglPlayUrl="https://api.test/play/projects/7" /></MemoryRouter>);
+		const link = screen.getByRole('link', { name: '플레이해보기' });
+		expect(link.getAttribute('href')).toBe('https://api.test/play/projects/7');
+		expect(link.getAttribute('target')).toBe('_blank');
+		expect(link.getAttribute('rel')).toContain('noopener');
+	});
+
 	it('shows play independently when there is no downloadable GAME ZIP', () => {
 		render(
 			<MemoryRouter>

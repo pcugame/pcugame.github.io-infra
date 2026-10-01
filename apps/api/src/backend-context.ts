@@ -1,3 +1,6 @@
+import { createWebglPlayRepository, createUnavailableWebglPlayRepository, type WebglPlayRepository } from './modules/webgl-play/repository.js';
+import { createWebglPlayService } from './modules/webgl-play/service.js';
+import { createWebglPlayController } from './modules/webgl-play/controller.js';
 import { createFileAccessRepository, createUnavailableFileAccessRepository, type FileAccessRepository } from './modules/file-access/repository.js';
 import { createFileAccessController } from './modules/file-access/controller.js';
 import { createUnavailableProjectChangeService } from './modules/project-change/composition.js';
@@ -118,6 +121,7 @@ import type { ExhibitionRepository } from './modules/admin/year/ports.js';
  */
 export interface BackendPersistencePorts {
  fileAccessRepository?: FileAccessRepository;
+ webglPlayRepository?: WebglPlayRepository;
 	databaseHealth: DatabaseHealth;
 	authRepository: AuthProductionRepository;
 	publicRepository: PublicProductionRepository;
@@ -136,6 +140,7 @@ export interface BackendPersistencePorts {
 
 export interface BackendRoutes {
  fileAccess?: FastifyPluginAsync;
+ webglPlay?: FastifyPluginAsync;
 	auth: FastifyPluginAsync;
 	devAuth: FastifyPluginAsync;
 	public: FastifyPluginAsync;
@@ -797,7 +802,9 @@ export async function createProductionBackendContext(
 
 		const routes = { ...baseRoutes };
 		if (!options.routes) {
-   const fileAccess = createFileAccessController(persistence.fileAccessRepository ?? (prisma && !options.persistence ? createFileAccessRepository(prisma) : createUnavailableFileAccessRepository()), config, () => clock.now(), (bucket,key,options) => protectedDownloadPresigner.presign(bucket,key,{ttlSec:60,...options}), assetsBanned!.authorizeDownload);
+   const webglPlay = createWebglPlayService(persistence.webglPlayRepository ?? (prisma && !options.persistence ? createWebglPlayRepository(prisma) : createUnavailableWebglPlayRepository()),config,() => clock.now());
+   routes.webglPlay = createWebglPlayController(webglPlay,config,() => clock.now());
+   const fileAccess = createFileAccessController(persistence.fileAccessRepository ?? (prisma && !options.persistence ? createFileAccessRepository(prisma) : createUnavailableFileAccessRepository()), config, () => clock.now(), (bucket,key,options) => protectedDownloadPresigner.presign(bucket,key,{ttlSec:60,...options}), assetsBanned!.authorizeDownload,webglPlay.resolveRuntime);
    routes.fileAccess = fileAccess;
    routes.assets = async app => {
     app.addHook('onSend', async (request, reply, payload) => {

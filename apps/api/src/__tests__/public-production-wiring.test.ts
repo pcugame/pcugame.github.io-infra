@@ -112,11 +112,11 @@ function storageHarness() {
 	return { calls, storage };
 }
 
-async function harness(label: string) {
+async function harness(label: string, webglPlayEnabled = false) {
 	const publicRepository = repositoryHarness(label);
 	const storage = storageHarness();
 	const scheduler: Scheduler = { every: vi.fn(() => ({ cancel: vi.fn() })), delay: vi.fn(async () => undefined) };
-	const context = await createProductionBackendContext(config(label), {
+	const context = await createProductionBackendContext({ ...config(label), WEBGL_PLAY_ENABLED: webglPlayEnabled }, {
 		persistence: createScriptedBackendPersistence({ publicRepository: publicRepository.repository }),
 		factories: {
 			routes: (_config, _assets, _auth, publicGraph): BackendRoutes => ({
@@ -200,6 +200,18 @@ describe('public production direct-delivery wiring', () => {
 		});
 		expect(detail.json().data.webglUrl).not.toContain('/api/public/webgl/');
 		expect(instance.storage.calls.stream).not.toHaveBeenCalled();
+	});
+
+	it('serializes a stable runtime URL only when enabled without removing legacy URLs', async () => {
+		for (const enabled of [false, true]) {
+			const instance = await harness('a', enabled);
+			const app = await buildApp({ context: instance.context });
+			apps.push(app);
+			const response = await app.inject({ method: 'GET', url: '/api/public/projects/7' });
+			expect(response.statusCode).toBe(200);
+			expect(response.json().data.webglPlayUrl).toBe(enabled ? 'https://api-a.test/play/projects/7' : undefined);
+			expect(response.json().data.webglUrl).toBe(`https://assets-a.test/${instance.publicRepository.publicPrefix}index.html`);
+		}
 	});
 
 	it('does not revive removed WebGL bridges for GET, HEAD, or Range', async () => {

@@ -593,6 +593,7 @@ model AuthSession {
 
   user User @relation("UserSessions", fields: [userId], references: [id], onDelete: Cascade)
   fileAccessTokens FileAccessToken[]
+  webglPlaySessions WebglPlaySession[]
 
   @@index([userId])
   @@index([expiresAt])
@@ -821,4 +822,24 @@ model FileAccessToken {
   session AuthSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   @@index([expiresAt])
   @@map("file_access_tokens")
+}
+
+/// Trusted shell controls and untrusted asset capabilities are separate hash-only credentials.
+model WebglPlaySession {
+  id String @id @default(uuid())
+  controlHash String @unique @map("control_hash")
+  assetHash String @unique @map("asset_hash")
+  sessionId String? @map("session_id")
+  projectId Int @map("project_id")
+  deploymentId String @map("deployment_id")
+  expiresAt DateTime @map("expires_at")
+  absoluteExpiresAt DateTime @map("absolute_expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  policyVersion Int @default(0) @map("policy_version")
+  approvedOrigins String[] @default([]) @map("approved_origins")
+  session AuthSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@index([sessionId, expiresAt])
+  @@index([expiresAt])
+  @@map("webgl_play_sessions")
 }

@@ -80,7 +80,7 @@ jobs:
         run: npm run test:integration
 
       - name: File gateway TLS verification
-        run: node apps/db/deployment-boundaries.test.mjs && sh server/file-gateway-tls.test.sh
+        run: node apps/db/deployment-boundaries.test.mjs && node apps/db/runtime-gateway.test.mjs && sh server/file-gateway-tls.test.sh
 
       - name: Tear down integration services
         if: always()

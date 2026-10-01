@@ -3,6 +3,13 @@ map "${FILE_GATEWAY_TLS_SERVER_NAME}" $pcu_gate_tls_name {
   default "${FILE_GATEWAY_TLS_SERVER_NAME}";
 }
 
+# auth_request variables are populated after rewrite processing. An absent CSP
+# must still prevent execution/framing; never inspect it in a rewrite-phase if.
+map $pcu_runtime_csp $pcu_runtime_effective_csp {
+  "" "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+  default $pcu_runtime_csp;
+}
+
 # Protected capability data-plane boundary. Never log the raw target or query:
 # SigV4 query parameters are bearer capabilities until their short expiry.
 log_format pcu_protected_download
@@ -23,6 +30,11 @@ server {
   limit_conn pcu_protected_download_global ${PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS};
   limit_conn pcu_protected_download_per_ip ${PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS};
   limit_conn_status 429;
+
+  # Dedicated Workers remain allowed. Service workers could persist across
+  # capability expiry or claim other runtime paths and are never permitted.
+  if ($http_service_worker != "") { return 403; }
+  if ($http_sec_fetch_dest = "serviceworker") { return 403; }
 
   client_max_body_size 1k;
   client_body_timeout 10s;
@@ -53,6 +65,8 @@ server {
     proxy_set_header X-PCU-File-Kind "protected";
     proxy_set_header X-PCU-File-Uri $request_uri;
     proxy_set_header X-PCU-File-Method $pcu_file_method;
+    proxy_set_header X-PCU-Service-Worker $http_service_worker;
+    proxy_set_header X-PCU-Fetch-Dest $http_sec_fetch_dest;
     proxy_connect_timeout 3s;
     proxy_read_timeout 5s;
     proxy_next_upstream off;
@@ -99,9 +113,52 @@ server {
     proxy_send_timeout 30s;
     proxy_read_timeout 120s;
     proxy_next_upstream off;
+    proxy_hide_header Service-Worker-Allowed;
   }
 
   # Public buckets, S3 service roots, admin paths and all other generic S3
   # surfaces fail locally and are never sent to Garage.
   location / { return 404; }
+
+  location ~ "^/runtime/[a-f0-9]{64}/.+$" {
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+    if ($http_content_length ~ ^[1-9][0-9]*$) { return 413; }
+    if ($http_transfer_encoding != "") { return 400; }
+
+    set $pcu_file_method $request_method;
+    auth_request /__pcu_file_auth;
+    auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
+    auth_request_set $pcu_runtime_csp $upstream_http_x_pcu_runtime_csp;
+    auth_request_set $pcu_validated_upstream_host $upstream_http_x_pcu_upstream_host;
+    resolver 127.0.0.11 valid=30s;
+    proxy_pass ${GARAGE_S3_UPSTREAM}$pcu_validated_object_path;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-PCU-Gateway-Secret "";
+    proxy_set_header X-PCU-File-Uri "";
+    proxy_http_version 1.1;
+    proxy_pass_request_headers on;
+    proxy_set_header Host $pcu_validated_upstream_host;
+    proxy_set_header Connection "";
+    proxy_set_header Content-Length "";
+    proxy_set_header Transfer-Encoding "";
+    proxy_ssl_server_name on;
+    proxy_ssl_name ${GARAGE_S3_TLS_SERVER_NAME};
+    proxy_pass_request_body off;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 30s;
+    proxy_read_timeout 120s;
+    proxy_next_upstream off;
+    proxy_hide_header Content-Security-Policy;
+    proxy_hide_header Service-Worker-Allowed;
+    add_header Cache-Control "private, no-store" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Cross-Origin-Resource-Policy "cross-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy $pcu_runtime_effective_csp always;
+  }
 }

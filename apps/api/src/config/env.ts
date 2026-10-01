@@ -18,6 +18,7 @@ const envSchema = z
     PORT: z.coerce.number().int().positive().default(4000),
     DATABASE_URL: z.string().url(),
     SESSION_SECRET: z.string().min(32),
+    WEBGL_PLAY_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
     FILE_GATEWAY_SECRET: z.string().min(32).optional(),
     SESSION_COOKIE_NAME: z.string().default('sid'),
     // Sliding session: kick idle users after SESSION_IDLE_MS (default 2h),

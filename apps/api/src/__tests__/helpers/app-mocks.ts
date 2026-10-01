@@ -8,6 +8,7 @@ export const defaultTestEnv = {
 	NODE_ENV: 'test',
 	PORT: 4000,
 	DATABASE_URL: 'postgresql://test:test@localhost:5432/test',
+	WEBGL_PLAY_ENABLED: false,
 	SESSION_SECRET: 'x'.repeat(48),
 	SESSION_COOKIE_NAME: 'sid',
 	SESSION_IDLE_MS: 7_200_000,

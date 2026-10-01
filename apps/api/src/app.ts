@@ -305,6 +305,7 @@ async function buildAppWithContext(
 	await app.register(context.routes.me, { prefix: '/api/me' });
 	await app.register(context.routes.admin, { prefix: '/api/admin' });
 	await app.register(context.routes.assets, { prefix: '/api' });
+	if (context.routes.webglPlay) await app.register(context.routes.webglPlay);
 	if (context.routes.fileAccess) await app.register(context.routes.fileAccess, { prefix: '/api' });
 
 	return app;
