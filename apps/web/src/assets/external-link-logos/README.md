@@ -1,0 +1,1 @@
+The bundled service SVGs are from [Simple Icons](https://github.com/simple-icons/simple-icons), distributed under [CC0-1.0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md). Retrieved 2026-10-01. Brand names and logos remain the property of their respective owners.

@@ -1,3 +1,4 @@
+import { enrichExternalLinks } from '../../external-links/resolver.js';
 import { canReadVisibility } from '../../../shared/visibility.js';
 import { createHash } from 'node:crypto';
 import type { ProjectSubmissionItemStatus, ProjectSubmissionStatusResponse } from '@pcu/contracts';
@@ -30,6 +31,7 @@ export interface SubmitProjectResult {
 }
 
 export interface SubmitProjectDependencies {
+	resolveExternalLinks?: typeof enrichExternalLinks;
 	webPublicUrl: string;
 	repository: SubmitProjectRepository;
 	idempotency?: {
@@ -162,6 +164,7 @@ export async function submitProject(
 			operation = claimed;
 		}
 
+		const resolvedExternalLinks = externalLinks === undefined ? undefined : await (deps.resolveExternalLinks ?? enrichExternalLinks)(externalLinks);
 		const baseSlug = toSlug(title);
 		let slug = await generateUniqueSlug(deps.repository, exhibition.id, title);
 		let project: Awaited<ReturnType<SubmitProjectRepository['createProjectWithAssets']>> | undefined;
@@ -170,7 +173,7 @@ export async function submitProject(
 		while (true) {
 			try {
 				project = await deps.repository.createProjectWithAssets({
-					exhibitionId: exhibition.id, slug, title, summary, description, externalLinks, status, visibility: visibility ?? 'PUBLIC',
+					exhibitionId: exhibition.id, slug, title, summary, description, externalLinks: resolvedExternalLinks, status, visibility: visibility ?? 'PUBLIC',
 					creatorId: input.actor.id,
 					actor: { id: input.actor.id, role: input.actor.role as 'USER' | 'OPERATOR' | 'ADMIN' },
 					manifest,

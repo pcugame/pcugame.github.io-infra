@@ -1,5 +1,7 @@
-import { useId } from 'react';
-import { ExternalLinksSchema, type ExternalLink } from '@pcu/contracts';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
+import { ExternalLinksSchema, type ExternalLink, type ExternalLinkService } from '@pcu/contracts';
+import { externalLinkApi } from '../../lib/api/external-links';
+import { ExternalLinkIcon } from './ExternalLinkIcon';
 
 interface Props {
 	value: ExternalLink[];
@@ -10,10 +12,51 @@ interface Props {
 
 export function ExternalLinksFieldset({ value, onChange, disabled = false, showErrors = false }: Props) {
 	const id = useId();
+	const linksRef = useRef(value);
+	const onChangeRef = useRef(onChange);
+	const resolutionsRef = useRef(new Map<string, Promise<{ service: ExternalLinkService | null }>>());
+	const controllerRef = useRef(new AbortController());
+	useEffect(() => {
+		const controller = new AbortController();
+		controllerRef.current = controller;
+		return () => controller.abort();
+	}, []);
+	useLayoutEffect(() => { linksRef.current = value; onChangeRef.current = onChange; });
+	const urls = JSON.stringify(value.map((link) => link.url));
+	useEffect(() => {
+		if (disabled) return;
+		let active = true;
+		const timers = (JSON.parse(urls) as string[]).map((url, index) => {
+			try { if (!['https:', 'http:'].includes(new URL(url).protocol)) return; } catch { return; }
+			return setTimeout(() => {
+				let pending = resolutionsRef.current.get(url);
+				if (!pending) {
+					pending = externalLinkApi.resolve(url, controllerRef.current.signal).catch((error: unknown) => {
+						resolutionsRef.current.delete(url);
+						throw error;
+					});
+					resolutionsRef.current.set(url, pending);
+					if (resolutionsRef.current.size > 100) resolutionsRef.current.delete(resolutionsRef.current.keys().next().value!);
+				}
+				void pending.then(({ service }) => {
+					const current = linksRef.current[index];
+					if (!active || !current || current.url !== url || current.service === (service ?? undefined)) return;
+					const links = linksRef.current.map((link, i) => i === index ? { ...link, service: service ?? undefined } : link);
+					linksRef.current = links;
+					onChangeRef.current(links);
+				}).catch(() => { /* Keep the local URL logo if resolution is unavailable. */ });
+			}, 500);
+		});
+		return () => { active = false; timers.forEach((timer) => clearTimeout(timer)); };
+	}, [urls, disabled]);
 	const result = ExternalLinksSchema.safeParse(value);
 	const issues = showErrors && !result.success ? result.error.issues : [];
+	const change = (links: ExternalLink[]) => {
+		linksRef.current = links;
+		onChange(links);
+	};
 	const update = (index: number, patch: Partial<ExternalLink>) => {
-		onChange(value.map((link, i) => i === index ? { ...link, ...patch } : link));
+		change(value.map((link, i) => i === index ? { ...link, ...('url' in patch ? { service: undefined } : {}), ...patch } : link));
 	};
 
 	return (
@@ -47,8 +90,9 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 						type="button"
 						className="btn btn--danger btn--small"
 						aria-label={`외부 링크 ${index + 1} 삭제`}
-						onClick={() => onChange(value.filter((_, i) => i !== index))}
+						onClick={() => change(value.filter((_, i) => i !== index))}
 					>삭제</button>
+					<div className="external-link-row__preview"><ExternalLinkIcon url={link.url} service={link.service} /><span>{link.label || '링크 미리보기'}</span></div>
 				</div>
 			))}
 			{issues.filter((issue) => issue.path.length === 0).map((issue, index) => (
@@ -58,7 +102,7 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 				type="button"
 				className="btn btn--secondary btn--small"
 				disabled={disabled || value.length >= 20}
-				onClick={() => onChange([...value, { label: '', url: '' }])}
+				onClick={() => change([...value, { label: '', url: '' }])}
 			>링크 추가</button>
 		</fieldset>
 	);

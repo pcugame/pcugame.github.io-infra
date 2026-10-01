@@ -5,12 +5,14 @@ import { forbidden, notFound } from '../../../shared/errors.js';
 import { effectiveIsIncomplete } from '../../../shared/project-completeness.js';
 import type { createProjectSerializer } from './serializer.js';
 import type { ActiveUploadCleanup, ProjectCrudRepository } from './ports.js';
+import { enrichExternalLinks } from '../../external-links/resolver.js';
 import type { Actor } from '../../../application/http-input.js';
 
 type ProjectSerializer = ReturnType<typeof createProjectSerializer>['serializeProjectDetail'];
 
 export interface ProjectServiceDependencies {
 	repository: ProjectCrudRepository;
+	resolveExternalLinks?: typeof enrichExternalLinks;
 	serializeProjectDetail: ProjectSerializer;
 	deletionBuckets: { publicBucket: string; protectedBucket: string };
 	abortMultipart(key: string, uploadId: string): Promise<void>;
@@ -136,7 +138,7 @@ export async function updateProject(
 		...(patch.title !== undefined ? { title: patch.title } : {}),
 		...(patch.summary !== undefined ? { summary: patch.summary } : {}),
 		...(patch.description !== undefined ? { description: patch.description } : {}),
-		...(patch.externalLinks !== undefined ? { externalLinks: patch.externalLinks } : {}),
+		...(patch.externalLinks !== undefined ? { externalLinks: await (deps.resolveExternalLinks ?? enrichExternalLinks)(patch.externalLinks) } : {}),
 		...(patch.isIncomplete !== undefined ? { isIncomplete: patch.isIncomplete } : {}),
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),

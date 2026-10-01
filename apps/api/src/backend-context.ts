@@ -1,3 +1,4 @@
+import { createExternalLinkController } from './modules/external-links/controller.js';
 import { createWebglPlayRepository, createUnavailableWebglPlayRepository, type WebglPlayRepository } from './modules/webgl-play/repository.js';
 import { createWebglPlayService } from './modules/webgl-play/service.js';
 import { createWebglPlayController } from './modules/webgl-play/controller.js';
@@ -837,6 +838,7 @@ export async function createProductionBackendContext(
               ? createWebglNetworkRepository(prisma) : createUnavailableWebglNetworkRepository()), config, () => clock.now());
 			routes.me = async (app) => {
 				await app.register(baseRoutes.me);
+				await app.register(createExternalLinkController());
 				await app.register(createProjectChangeController(changes, 'me'));
                 await app.register(createWebglNetworkController(network, 'me'));
 			};

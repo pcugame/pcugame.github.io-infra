@@ -2,6 +2,7 @@
 // URL 패턴을 매칭하여 mock 데이터를 반환한다.
 // client.ts의 request()에서 VITE_MOCK=true일 때만 호출된다.
 
+import { detectExternalLinkService } from '@pcu/contracts';
 import {
 	getMockUser,
 	getMockRole,
@@ -109,6 +110,14 @@ function parseJsonBody(body: unknown): Record<string, unknown> {
 }
 
 const routes: MockRoute[] = [
+	{
+		pattern: /^\/api\/me\/external-links\/resolve$/,
+		handler: (_match, method, options) => {
+			if (method !== 'POST') throw new Error('Mock: method not allowed');
+			const url = (options.body as { url?: unknown })?.url;
+			return { service: typeof url === 'string' ? detectExternalLinkService(url) : null };
+		},
+	},
 	{
 		pattern: /^\/api\/file-access$/,
 		handler: (_match, _method, options) => {
