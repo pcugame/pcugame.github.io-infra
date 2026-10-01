@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { deflateRawSync } from 'node:zlib';
+import { brotliCompressSync, deflateRawSync, gzipSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
 	encodePersistedSourceIdentityManifest,
@@ -49,7 +49,7 @@ function crc32(bytes: Buffer): number {
 	return (value ^ 0xffffffff) >>> 0;
 }
 
-function storedZip(entries: Array<{ name: string; body: string; deflate?: boolean }>): Buffer {
+function storedZip(entries: Array<{ name: string; body: string | Buffer; deflate?: boolean }>): Buffer {
 	const locals: Buffer[] = [];
 	const centrals: Buffer[] = [];
 	let offset = 0;
@@ -226,6 +226,7 @@ async function harness(bytes = unityZip()) {
 		}),
 	};
 	const ids = [randomUUID(), randomUUID()];
+	const storage = { openSource: vi.fn(async () => ({ body: Readable.from([bytes]), sizeBytes: bytes.length })) };
 	const processor = createWebglProcessingProcessor({
 		publicBucket: 'public',
 		protectedBucket: 'protected',
@@ -233,7 +234,7 @@ async function harness(bytes = unityZip()) {
 		physicalArchiveByteLimit: 1024 * 1024,
 		diskBudget: createWebglTempDiskBudget(2 * 1024 * 1024),
 		repository,
-		storage: { openSource: vi.fn(async () => ({ body: Readable.from([bytes]), sizeBytes: bytes.length })) },
+		storage,
 		uploader,
 		ids: { next: () => ids.shift()! },
 		logger: { warn: vi.fn() },
@@ -243,6 +244,7 @@ async function harness(bytes = unityZip()) {
 		deploymentId,
 		events,
 		processor,
+		storage,
 		repository,
 		uploaded,
 		uploader,
@@ -252,6 +254,91 @@ async function harness(bytes = unityZip()) {
 }
 
 describe('canonical WebGL processing', () => {
+	// Synthetic archives verify processing and stored metadata, not Unity execution.
+	for (const wrapper of ['', 'UnityBuild/']) {
+		for (const configuration of ['plain', 'gzip', 'brotli', 'gzip-fallback', 'brotli-fallback'] as const) {
+			it(`preserves payloads and encoding for ${configuration} at ${wrapper || 'ZIP root'}`, async () => {
+				const fallback = configuration.endsWith('-fallback');
+				const compress = configuration.startsWith('gzip') ? gzipSync
+					: configuration.startsWith('brotli') ? brotliCompressSync : (bytes: Buffer) => bytes;
+				const suffix = fallback ? '.unityweb' : configuration === 'gzip' ? '.gz'
+					: configuration === 'brotli' ? '.br' : '';
+				const payloads = ['framework.js', 'wasm', 'data'].map((extension) => ({
+					name: `Build/game.${extension}${suffix}`,
+					body: compress(Buffer.from(`original ${extension} payload`)),
+				}));
+				const state = await harness(storedZip([
+					{ name: `${wrapper}index.html`, body: '<html>Unity</html>' },
+					{ name: `${wrapper}Build/game.loader.js`, body: 'loader' },
+					...payloads.map((entry) => ({ ...entry, name: `${wrapper}${entry.name}`, deflate: true })),
+				]));
+				await state.processor.process(state.uploadSession, state.context);
+				const manifest = state.repository.commitReady.mock.calls[0]![0].objectManifest;
+				for (const [index, payload] of payloads.entries()) {
+					const object = state.uploaded.find((item) => item.key.endsWith(`/${payload.name}`))!;
+					const encoding = fallback || configuration === 'plain' ? undefined
+						: configuration === 'gzip' ? 'gzip' : 'br';
+					expect(object.bytes).toEqual(payload.body);
+					expect(object.encoding).toBe(encoding);
+					expect(object.type).toBe(fallback || index === 2 ? 'application/octet-stream'
+						: index === 0 ? 'text/javascript; charset=utf-8' : 'application/wasm');
+					expect(manifest.objects.find((entry) => entry.objectKey === object.key))
+						.toMatchObject({ contentEncoding: encoding ?? null });
+				}
+				expect(state.uploaded).toHaveLength(5);
+			});
+		}
+	}
+
+	it.each(['loader.js', 'framework.js', 'wasm', 'data'])('reports a missing %s before replacing an existing deployment', async (missing) => {
+		const entries = [
+			{ name: 'index.html', body: '<html>Unity</html>' },
+			...['loader.js', 'framework.js', 'wasm', 'data'].filter((extension) => extension !== missing)
+				.map((extension) => ({ name: `Build/game.${extension}${extension === 'loader.js' ? '' : '.unityweb'}`, body: 'payload' })),
+		];
+		const state = await harness(storedZip(entries));
+		await expect(state.processor.process(state.uploadSession, state.context))
+			.rejects.toThrow(`missing required Unity Build ${missing} artifact (accepted:`);
+		expect(state.repository.reserveDeployment).not.toHaveBeenCalled();
+		expect(state.uploader.put).not.toHaveBeenCalled();
+		expect(state.repository.commitReady).not.toHaveBeenCalled();
+	});
+
+	it('keeps a successful deployment current when its replacement ZIP fails validation', async () => {
+		const state = await harness();
+		let currentDeploymentId = 'old-deployment';
+		state.repository.commitReady.mockImplementation(async (input) => {
+			currentDeploymentId = input.deploymentId;
+			return 'COMMITTED';
+		});
+		await state.processor.process(state.uploadSession, state.context);
+		expect(currentDeploymentId).toBe(state.deploymentId);
+		const invalid = storedZip([{ name: 'index.html', body: '<html>missing Build</html>' }]);
+		const replacementSession = session(invalid);
+		replacementSession.sourceRepresentation.id = replacementSession.resultRepresentationId;
+		state.storage.openSource.mockImplementation(async () => ({ body: Readable.from([invalid]), sizeBytes: invalid.length }));
+		const puts = state.uploader.put.mock.calls.length;
+		await expect(state.processor.process(replacementSession, state.context))
+			.rejects.toBeInstanceOf(WebglTerminalValidationError);
+		expect(currentDeploymentId).toBe(state.deploymentId);
+		expect(state.repository.commitReady).toHaveBeenCalledTimes(1);
+		expect(state.repository.reserveDeployment).toHaveBeenCalledTimes(1);
+		expect(state.uploader.put).toHaveBeenCalledTimes(puts);
+	});
+
+	it('rejects a fallback loader instead of treating it as executable JavaScript', async () => {
+		const state = await harness(storedZip([
+			{ name: 'index.html', body: '<html>Unity</html>' },
+			...['loader.js', 'framework.js', 'wasm', 'data'].map((extension) => ({
+				name: `Build/game.${extension}.unityweb`, body: 'payload',
+			})),
+		]));
+		await expect(state.processor.process(state.uploadSession, state.context))
+			.rejects.toThrow('missing required Unity Build loader.js artifact');
+		expect(state.repository.commitReady).not.toHaveBeenCalled();
+		expect(state.uploader.put).not.toHaveBeenCalled();
+	});
+
 	it('carries the API-created base64 source manifest through VERIFYING into worker materialization', async () => {
 		const state = await harness();
 		const proof = identity(state.bytes);
@@ -465,6 +552,7 @@ describe('canonical WebGL processing', () => {
 				.rejects.toBeInstanceOf(WebglTerminalValidationError);
 			expect(state.repository.reserveDeployment).not.toHaveBeenCalled();
 			expect(state.uploader.put).not.toHaveBeenCalled();
+			expect(state.repository.commitReady).not.toHaveBeenCalled();
 		}
 	});
 
