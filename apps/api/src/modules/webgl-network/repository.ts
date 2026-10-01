@@ -69,8 +69,8 @@ export function createWebglNetworkRepository(client: PrismaClient) {
      if (await tx.webglNetworkRequest.count({ where: { projectId: row.projectId, state: 'APPROVED' } }) >= 16) throw conflict('A project supports at most sixteen approved connection origins');
     }
     const project = await tx.project.findUniqueOrThrow({ where: { id: row.projectId } });
-    const policyVersion = action === 'reject' ? null : project.webglNetworkPolicyVersion + 1;
-    if (policyVersion !== null) await tx.project.update({ where: { id: project.id }, data: { webglNetworkPolicyVersion: policyVersion } });
+    const policyVersion = project.webglNetworkPolicyVersion + (action === 'reject' ? 0 : 1);
+    if (action !== 'reject') await tx.project.update({ where: { id: project.id }, data: { webglNetworkPolicyVersion: policyVersion } });
     await tx.webglNetworkReviewEvent.create({ data: {
      requestId: id, originalProjectId: row.originalProjectId, origin: row.origin, action: action.toUpperCase(),
      actorId: actor.id, reason, policyVersion, createdAt: at,

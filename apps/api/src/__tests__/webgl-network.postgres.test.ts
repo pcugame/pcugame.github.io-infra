@@ -164,7 +164,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  });
  it('rejects invalid transitions and records rejection without policy changes', async () => {
   const id = (await create()).json().data.id; expect((await review(id, 'revoke')).statusCode).toBe(409);
-  const rejected = await review(id, 'reject'); expect(rejected.statusCode).toBe(200); expect(rejected.json().data.events[0]).toMatchObject({ action: 'REJECT', policyVersion: null });
+  const rejected = await review(id, 'reject'); expect(rejected.statusCode).toBe(200); expect(rejected.json().data.events[0]).toMatchObject({ action: 'REJECT', policyVersion: 0 });
   expect((await review(id, 'approve')).statusCode).toBe(409); expect((await list()).json().data.policyVersion).toBe(0);
   expect((await create()).statusCode).toBe(201);
  });

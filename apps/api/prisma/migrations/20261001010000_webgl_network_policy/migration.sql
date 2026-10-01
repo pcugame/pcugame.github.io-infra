@@ -22,7 +22,7 @@ CREATE TABLE "webgl_network_review_events" (
  "actor_id" INTEGER NOT NULL, "reason" TEXT NOT NULL, "policy_version" INTEGER,
  "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
  CONSTRAINT "webgl_network_review_action" CHECK ("action" IN ('APPROVE', 'REJECT', 'REVOKE')),
- CONSTRAINT "webgl_network_review_version" CHECK (("action" = 'REJECT' AND "policy_version" IS NULL)
+ CONSTRAINT "webgl_network_review_version" CHECK (("action" = 'REJECT' AND "policy_version" IS NOT NULL AND "policy_version" >= 0)
   OR ("action" IN ('APPROVE', 'REVOKE') AND "policy_version" IS NOT NULL AND "policy_version" > 0))
 );
 CREATE INDEX "webgl_network_review_events_original_project_id_action_policy_version_idx"
