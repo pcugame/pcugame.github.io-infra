@@ -128,3 +128,4 @@ export type { CreateBannedIpRequest, BannedIpSource } from './admin-settings.js'
 
 export { VisibilitySchema } from './schemas.js';
 export * from './webgl-play.js';
+export * from './webgl-network.js';

@@ -1,7 +1,14 @@
 import { canReadProject } from "../../shared/visibility.js";
 import { forbidden } from "../../shared/errors.js";
-import type { PrismaClient, Prisma } from "../../generated/prisma/client.js";
+import type { PrismaClient, Prisma, WebglPlaySession } from "../../generated/prisma/client.js";
 const projectInclude = { exhibition: true, members: true } as const;
+async function assertPolicyValid(client: PrismaClient | Prisma.TransactionClient, play: WebglPlaySession, externalEnabled: boolean) {
+ if (play.approvedOrigins.length === 0) return;
+ if (!externalEnabled || await client.webglNetworkReviewEvent.count({ where: {
+  originalProjectId: play.projectId, action: 'REVOKE', policyVersion: { gt: play.policyVersion },
+  origin: { in: play.approvedOrigins },
+ } })) throw forbidden('The external connection policy for this play session was revoked');
+}
 export function createWebglPlayRepository(client: PrismaClient) {
   return {
     session: async (id: string) =>
@@ -23,9 +30,22 @@ export function createWebglPlayRepository(client: PrismaClient) {
     createBounded: async (
       data: Prisma.WebglPlaySessionUncheckedCreateInput,
       at: Date,
+      externalEnabled = false,
     ) =>
       client.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(73489123)`;
+        // Approval/revocation take the conflicting project UPDATE lock. Snapshot
+        // selection and persistence therefore cannot straddle a policy change.
+        await tx.$queryRaw`SELECT id FROM projects WHERE id = ${data.projectId} FOR SHARE`;
+        const project = await tx.project.findUnique({ where: { id: data.projectId }, include: {
+          ...projectInclude, currentWebglDeployment: true,
+        } });
+        const session = data.sessionId ? await tx.authSession.findUnique({ where: { id: data.sessionId }, include: { user: true } }) : null;
+        if (!project || project.currentWebglDeploymentId !== data.deploymentId || project.currentWebglDeployment?.state !== 'READY'
+          || (data.sessionId && (!session || session.expiresAt <= at)) || !canReadProject(session?.user ?? null, project)) throw forbidden();
+        const approvedOrigins = externalEnabled ? (await tx.webglNetworkRequest.findMany({
+          where: { projectId: data.projectId, state: 'APPROVED' }, select: { origin: true }, orderBy: { origin: 'asc' },
+        })).map(grant => grant.origin) : [];
         await tx.webglPlaySession.deleteMany({
           where: { expiresAt: { lte: at } },
         });
@@ -37,9 +57,10 @@ export function createWebglPlayRepository(client: PrismaClient) {
           })) >= (data.sessionId ? 16 : 1024)
         )
           return null;
-        return tx.webglPlaySession.create({ data });
+        return tx.webglPlaySession.create({ data: { ...data, approvedOrigins, policyVersion: project.webglNetworkPolicyVersion } });
       }),
-    renewAuthorized: async (id: string, at: Date, idleMs: number) =>
+    policyValid: async (play: WebglPlaySession, externalEnabled: boolean) => assertPolicyValid(client, play, externalEnabled),
+    renewAuthorized: async (id: string, at: Date, idleMs: number, externalEnabled = false) =>
       client.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT id FROM webgl_play_sessions WHERE id = ${id} FOR UPDATE`;
         const play = await tx.webglPlaySession.findUnique({ where: { id } });
@@ -76,6 +97,7 @@ export function createWebglPlayRepository(client: PrismaClient) {
         });
         if (!dep || !canReadProject(session?.user ?? null, dep.project))
           throw forbidden();
+        await assertPolicyValid(tx, play, externalEnabled);
         const expiresAt = new Date(
           Math.min(
             at.getTime() + 15 * 60_000,
@@ -116,6 +138,7 @@ export function createUnavailableWebglPlayRepository(): WebglPlayRepository {
     find: fail,
     findAsset: fail,
     createBounded: fail,
+    policyValid: fail,
     renewAuthorized: fail,
     close: fail,
   };

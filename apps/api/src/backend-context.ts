@@ -1,6 +1,9 @@
 import { createWebglPlayRepository, createUnavailableWebglPlayRepository, type WebglPlayRepository } from './modules/webgl-play/repository.js';
 import { createWebglPlayService } from './modules/webgl-play/service.js';
 import { createWebglPlayController } from './modules/webgl-play/controller.js';
+import { createWebglNetworkRepository, createUnavailableWebglNetworkRepository, type WebglNetworkRepository } from './modules/webgl-network/repository.js';
+import { createWebglNetworkService } from './modules/webgl-network/service.js';
+import { createWebglNetworkController } from './modules/webgl-network/controller.js';
 import { createFileAccessRepository, createUnavailableFileAccessRepository, type FileAccessRepository } from './modules/file-access/repository.js';
 import { createFileAccessController } from './modules/file-access/controller.js';
 import { createUnavailableProjectChangeService } from './modules/project-change/composition.js';
@@ -122,6 +125,7 @@ import type { ExhibitionRepository } from './modules/admin/year/ports.js';
 export interface BackendPersistencePorts {
  fileAccessRepository?: FileAccessRepository;
  webglPlayRepository?: WebglPlayRepository;
+ webglNetworkRepository?: WebglNetworkRepository;
 	databaseHealth: DatabaseHealth;
 	authRepository: AuthProductionRepository;
 	publicRepository: PublicProductionRepository;
@@ -822,13 +826,17 @@ export async function createProductionBackendContext(
 			const changes = persistence.projectChangeRepository
 				? createProjectChangeService(persistence.projectChangeRepository)
 				: createUnavailableProjectChangeService();
+            const network = createWebglNetworkService(persistence.webglNetworkRepository ?? (prisma && !options.persistence
+              ? createWebglNetworkRepository(prisma) : createUnavailableWebglNetworkRepository()), config, () => clock.now());
 			routes.me = async (app) => {
 				await app.register(baseRoutes.me);
 				await app.register(createProjectChangeController(changes, 'me'));
+                await app.register(createWebglNetworkController(network, 'me'));
 			};
 			routes.admin = async (app) => {
 				await app.register(baseRoutes.admin);
 				await app.register(createProjectChangeController(changes, 'admin'));
+                await app.register(createWebglNetworkController(network, 'admin'));
 			};
 		}
 

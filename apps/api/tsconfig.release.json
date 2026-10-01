@@ -14,7 +14,8 @@
     "scripts/snapshot-garage-inventory.ts",
     "scripts/verify-cutover-report.ts",
     "scripts/correct-canonical-assets.ts",
-    "scripts/correct-canonical-poster.ts"
+    "scripts/correct-canonical-poster.ts",
+    "scripts/revoke-webgl-play-sessions.ts"
   ],
   "exclude": [
     "node_modules",

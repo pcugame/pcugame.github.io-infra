@@ -7,6 +7,7 @@ type NavItem = { to: string; label: string; icon: string; end: boolean; adminOnl
 const ADMIN_NAV: NavItem[] = [
   { to: '/admin/projects', label: '작품 관리', icon: 'grid', end: true },
   { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
+  { to: '/admin/webgl-network', label: '게임 외부 연결', icon: 'clipboard', end: false },
   { to: '/admin/change-requests', label: '변경 요청', icon: 'clipboard', end: false },
   { to: '/admin/years', label: '전시회 추가', icon: 'calendar', end: false },
   { to: '/admin/settings', label: '사이트 설정', icon: 'settings', end: false },

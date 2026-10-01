@@ -284,3 +284,8 @@ for (const script of [initScript, integrationInitScript]) {
 assert.doesNotMatch(initScript, /echo "\$KEY_OUTPUT"/);
 
 console.log('NAS Garage data-plane boundaries: OK');
+
+for (const template of [publicOrigin, protectedDownload]) {
+  assert.match(template, /proxy_buffer_size 16k;/);
+  assert.match(template, /proxy_buffers 4 16k;/);
+}
