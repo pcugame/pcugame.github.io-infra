@@ -1,0 +1,308 @@
+{
+  "version": 1,
+  "scope": "Private evaluation fixtures. Compiled Unity files are not redistributed in this repository.",
+  "fixtures": [
+    {
+      "id": "unity-websocket",
+      "repository": "https://github.com/psygames/psygames.github.io",
+      "commit": "f3842a75a82d5e6ace7c80ce458a4529c0c4bcc0",
+      "basePath": "UnityWebSocket",
+      "unityObserved": "6000.0.15f1c1",
+      "libraryObserved": "UnityWebSocket 2.8.0",
+      "sourceLicenseReference": "https://github.com/psygames/UnityWebSocket/blob/2837ab93f9e297fb33c9e2f20086731aa91b996a/LICENSE",
+      "licenseNote": "Library source is MIT; hosted build repository has no separate license. No compiled assets redistributed. Do not assume current library source commit reproduces the hosted build.",
+      "files": [
+        {
+          "path": "Build/UnityWebSocket.loader.js",
+          "bytes": 39801,
+          "sha256": "880c76448446a19c943662d2393df4a5bd7d4ca0b4ff2e75fca2a3e8711f01d2",
+          "sourceCommit": "f3842a75a82d5e6ace7c80ce458a4529c0c4bcc0",
+          "sourcePath": "UnityWebSocket/Build/UnityWebSocket.loader.js",
+          "gitBlobVerified": true
+        },
+        {
+          "path": "Build/UnityWebSocket.data.unityweb",
+          "bytes": 868689,
+          "sha256": "922d713a489528e78639bd3ff5440a9ee8600bd5e24e670c594b0ddd5487c891",
+          "sourceCommit": "f3842a75a82d5e6ace7c80ce458a4529c0c4bcc0",
+          "sourcePath": "UnityWebSocket/Build/UnityWebSocket.data.unityweb",
+          "gitBlobVerified": true
+        },
+        {
+          "path": "Build/UnityWebSocket.framework.js.unityweb",
+          "bytes": 78663,
+          "sha256": "eba36334a774b8a5794733cb90031cbcea51f31a9741dd49b1fa9dddf72322be",
+          "sourceCommit": "f3842a75a82d5e6ace7c80ce458a4529c0c4bcc0",
+          "sourcePath": "UnityWebSocket/Build/UnityWebSocket.framework.js.unityweb",
+          "gitBlobVerified": true
+        },
+        {
+          "path": "Build/UnityWebSocket.wasm.unityweb",
+          "bytes": 3433842,
+          "sha256": "0eb244a908a14b8b56341d5b02297dc0347c0744c92f7e508879789cb1442f60",
+          "sourceCommit": "f3842a75a82d5e6ace7c80ce458a4529c0c4bcc0",
+          "sourcePath": "UnityWebSocket/Build/UnityWebSocket.wasm.unityweb",
+          "gitBlobVerified": true
+        },
+        {
+          "path": "TemplateData/style.css",
+          "bytes": 1448,
+          "sha256": "80acab5f9147ed15876d638d776c0f9c6b4c273c01c96d82d23b6c53ea96f9cf",
+          "sourceCommit": "f3842a75a82d5e6ace7c80ce458a4529c0c4bcc0",
+          "sourcePath": "UnityWebSocket/TemplateData/style.css",
+          "gitBlobVerified": true
+        }
+      ]
+    },
+    {
+      "id": "unity-addressables",
+      "repository": "https://github.com/eto-a/ItmoBuild",
+      "commit": "615fc6fbc2f53f90d5e786797a72f2eea8570e95",
+      "unityObserved": "6000.0.33f1",
+      "addressables": "2.2.2",
+      "licenseNote": "No repository license identified; private evaluation only. No compiled assets or screenshots redistributed.",
+      "adaptation": "Replace only local StreamingAssets/aa/catalog.hash with32 ASCII zeros to trigger genuine remote catalog refresh. HTML readiness hook observes startup. Original remote URLs and compiled loader/framework/WASM/data remain unchanged.",
+      "files": [
+        {
+          "path": "Build/ItmoBuild.data",
+          "size": 28110848,
+          "sha256": "2f24a2ed38e1484903df982c7f7a08bde407f4411fd1de1ab9964c67fc9704f1"
+        },
+        {
+          "path": "Build/ItmoBuild.framework.js",
+          "size": 470403,
+          "sha256": "90806fd69c6c9805ee11fe85b8d48ab892d3ecbb25f4ef7688931a6f9ceb45c2"
+        },
+        {
+          "path": "Build/ItmoBuild.loader.js",
+          "size": 26416,
+          "sha256": "cc2be9bfc398d6361a09db8cf0aef6f34f5b5de0f4d638d3b2ae9c1464d994bb"
+        },
+        {
+          "path": "Build/ItmoBuild.wasm",
+          "size": 49108058,
+          "sha256": "2e22f4e42578d6de96c98d1f8729c4a0b7041386cb3fcd4304b5da0fcc040a90"
+        },
+        {
+          "path": "StreamingAssets/aa/AddressablesLink/link.xml",
+          "size": 5602,
+          "sha256": "9d4c2e267d611d4601832576d59fe8a23471142ac8c79f3071e6e829cd30c319"
+        },
+        {
+          "path": "StreamingAssets/aa/catalog.hash",
+          "size": 32,
+          "sha256": "76a5025dd01136a508f56ed58931bef76404f1a15714d944cfa063ceb8cd3282"
+        },
+        {
+          "path": "StreamingAssets/aa/catalog.json",
+          "size": 23167,
+          "sha256": "ca2dba38c7cf12ce2ec5d91c4e859893723729af0468d2b85194db1018a40c98"
+        },
+        {
+          "path": "StreamingAssets/aa/settings.json",
+          "size": 4347,
+          "sha256": "a4f64f3cb3131babb6225dc56492a636c157a08b43c0fe30cafd9c916d572422"
+        },
+        {
+          "path": "TemplateData/MemoryProfiler.png",
+          "size": 665,
+          "sha256": "0ce87be20d0c24ab6cb73b57de2004da261cc2a641e69319c6ae3fe11fc85483"
+        },
+        {
+          "path": "TemplateData/favicon.ico",
+          "size": 2305,
+          "sha256": "9c13beb90ee8f70580d52a21d5233970d1c89e71e4a34a462c22610941c3c77f"
+        },
+        {
+          "path": "TemplateData/fullscreen-button.png",
+          "size": 175,
+          "sha256": "21221581673a54b8139d408d4a3f8d2b879e86827d4b6fc53b995ff7a99ee3e9"
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-dark.png",
+          "size": 96,
+          "sha256": "bbee7131afe8a3365906240d89184dc86234c119467f390bc4bc6802328fdb4d"
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-light.png",
+          "size": 109,
+          "sha256": "143696c060ad43d6c30f19ff5f49000927a139a2a1e4c9f45fafaa2b90d7d2be"
+        },
+        {
+          "path": "TemplateData/progress-bar-full-dark.png",
+          "size": 74,
+          "sha256": "3306a6244dcb3926fca38a28e3ced589df8ff1beed955eb17c0bbf01c918bc62"
+        },
+        {
+          "path": "TemplateData/progress-bar-full-light.png",
+          "size": 84,
+          "sha256": "12395ea785480c5cdf12fade6e6cbf49666d5bb1cef7240c113dbcba6bdc5c87"
+        },
+        {
+          "path": "TemplateData/style.css",
+          "size": 1531,
+          "sha256": "17f9c6a142faaf9378f02d70da690c56ccfb31f9abafa5548dff3bfc9317f84f"
+        },
+        {
+          "path": "TemplateData/unity-logo-dark.png",
+          "size": 3042,
+          "sha256": "c1b72d26c096487dabc948b54bc203f8dac7ed4e3f5733918798e858acb4b159"
+        },
+        {
+          "path": "TemplateData/unity-logo-light.png",
+          "size": 3077,
+          "sha256": "002990aea0d946833cadc1519d5b7e50a4570bd537a0517dd79a59d3eec84da7"
+        },
+        {
+          "path": "TemplateData/unity-logo-title-footer.png",
+          "size": 1151,
+          "sha256": "9e8b3bdb67c2446d16362fe59449d892100931dbbadfe6a9d923a4142b57a79f"
+        },
+        {
+          "path": "TemplateData/webmemd-icon.png",
+          "size": 1670,
+          "sha256": "c56f5494640cedda273aad38d58e6ab9da625d5b3f4d875c0ff92c6192a569c2"
+        },
+        {
+          "path": "index.html",
+          "size": 4972,
+          "sha256": "d77bd46001a44a0177e2b67554efdb5a20a453f53f023b6a6327d4da73d4a18e"
+        }
+      ],
+      "remoteFiles": [
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/catalog_0.1.0.hash",
+          "size": 32,
+          "sha256": "76a5025dd01136a508f56ed58931bef76404f1a15714d944cfa063ceb8cd3282",
+          "gitBlobSha": "cc58245bbdc028a0d8d2ac373db3fb7d0a75845a",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/catalog_0.1.0.json",
+          "size": 23167,
+          "sha256": "ca2dba38c7cf12ce2ec5d91c4e859893723729af0468d2b85194db1018a40c98",
+          "gitBlobSha": "ee30cb691b1f62c95af57841b26f65c0c7d595f8",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_vrvian_31f9dac9d6d6dc19e51355198856578f.bundle",
+          "size": 3691189,
+          "sha256": "e0fa49ddc3f107b8ebca19de2fefe047f346315a22aa717cd4166d191e35dbb9",
+          "gitBlobSha": "f71f06e343e90a0f271ac2c830d3f4b162a34eef",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/be874f21cd399460e08b78084e252f54_monoscripts_513637e21e02ab44705012db92e5f9df.bundle",
+          "size": 2025,
+          "sha256": "398b58e59292e5bb04d11006f126e8a69fbadb29c1b67ec5df86cac23ef6e6b1",
+          "gitBlobSha": "a136a13d5dc2574a72579e815a49b9498fca458c",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_dd_8213a47dd5ebaf77241a6075e7fffaeb.bundle",
+          "size": 9988212,
+          "sha256": "e64035d4aaeb3e5fdc8d5d87fad0976a8953b22ed1715cefdc2bcec79e94be31",
+          "gitBlobSha": "57101955ef4b869f10efd4cab229dc7071558ccd",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_bratperegancy_8fb6e3dd2897853b2ddbd6e808cc26ab.bundle",
+          "size": 2518214,
+          "sha256": "387dac31bbcaeabe45acdc8b75c62534af358c7bf5a5cc7d1af71b252f6809a1",
+          "gitBlobSha": "d24ec9219b99df19f7df06f4b3cfba689e31526b",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_twin_67c9e33b630fa4e385c8b9da5abc1d7c.bundle",
+          "size": 16324017,
+          "sha256": "63e855b35d4b44fd2a129c02e566025c8b00c89162166e99420d88c83dd445b4",
+          "gitBlobSha": "7014a676e6450e61d3f70898f3425974a69fc3b5",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_atlas_7d3a8b50acbd197e69d0561b62df5cfa.bundle",
+          "size": 6621025,
+          "sha256": "ef4606f4078e79fa6ac7d4049faaed7481c20901bd59d7cd88bec889c6bb7b46",
+          "gitBlobSha": "6d9d1a65ce4c3404b871f24c8a0cb8d4005d6b91",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_grass_c1933c5e668950380b6c4d79a6e4c829.bundle",
+          "size": 7093891,
+          "sha256": "f498d5f23c819302f119456b23e8e39192075bfd0369a84c4e590e5c397fbda3",
+          "gitBlobSha": "192738b0ab25059bddad02999f086499e5cdd445",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_digitalgarden_490d45311bc213cc2108576aef5954a8.bundle",
+          "size": 11412703,
+          "sha256": "b310818a7296d130324a27f7bdf6b568bcdcd629bdd1fad456edb6eadd2423dc",
+          "gitBlobSha": "93e2bd60fa1fd975d5e95b74c5e6b1e3fd7b742a",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_erbarium_4856bbb02fd40521340f5cef3d9089ff.bundle",
+          "size": 11257014,
+          "sha256": "b633e707b3f619de37e26ec29975f2035740b815c718de80469d8889514c1992",
+          "gitBlobSha": "399fa12261336928e69fed1ccefbd39d93bcda2c",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_sephiroth_10cf705f763720c0f1d757c7fdfcf52c.bundle",
+          "size": 6705423,
+          "sha256": "b530214d4be6b3cecaa52b063d30287eb1bec700d22569de8ea4fb05a63799a3",
+          "gitBlobSha": "95f6cb3b49112ff71c440ea890595dd45db3219a",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_globemoris_6c307d34b9dc897382f9c2c60b34ddf4.bundle",
+          "size": 6415653,
+          "sha256": "cf12b9f2812a022fa875c5ecd0f42818f3a2fa04d269bd500c500488a3dd3399",
+          "gitBlobSha": "64e5a74ab686d771f88cf427780ee49661da70eb",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_cactus_2df23e719fe873f9511cb6e1ca0eabbe.bundle",
+          "size": 5441759,
+          "sha256": "4c0539f8a5242d7e7591c76fb6bab727d39d9a4354ec5bfc58b874a5c6b15a93",
+          "gitBlobSha": "ee601f5528a0b0bfc80f4de83631528c90f0b8ad",
+          "pinnedBlobMatches": true
+        },
+        {
+          "url": "https://eto-a.github.io/ItmoBuild/WebGL/remoteassets_assets_de_sublimation_b1a186f0bb6b1c8995a2905b4128815c.bundle",
+          "size": 1771949,
+          "sha256": "f73fb3b386e9db1e4bcd65e7ae39c01e8225b45a1425246eef39971cf240a612",
+          "gitBlobSha": "9594ff5cfa42c82c8e202f6065248a25120872a5",
+          "pinnedBlobMatches": true
+        }
+      ]
+    },
+    {
+      "id": "unity-https-and-worker",
+      "repository": "https://github.com/atteneder/glTFastWebDemo",
+      "commit": "32e62b0cffc465d65f113c436b2262491853e199",
+      "unityObserved": "6000.0.0b12",
+      "licenseNote": "No repository license identified; private evaluation only. Box model is CC-BY-4.0, donated by Cesium.",
+      "model": {
+        "repo": "KhronosGroupArchives/glTF-Sample-Models",
+        "commit": "d7a3cc8e51d7c573771ae77a57f16b0662a905c6",
+        "path": "2.0/Box/glTF-Binary/Box.glb",
+        "sha256": "ed52f7192b8311d700ac0ce80644e3852cd01537e4d62241b9acba023da3d54e",
+        "size": 1664,
+        "license": "CC-BY-4.0",
+        "attribution": "Box model donated by Cesium for glTF testing",
+        "adaptation": "Additional isolated same-origin model input; compiled Unity artifacts unchanged"
+      },
+      "adaptation": "HTML standalone callbacks configure actual Unity model download. Instrumented variant prepends observation-only code to original worker; original native load/run scheduling, WASM, framework and data remain unchanged. Original-worker baseline is separate.",
+      "workerHashes": {
+        "originalWorkerSHA256": "cc9ef4df6eca2ced3c2ab73c64580de249f09c3c8550258f3b5dfa9cfad3de93",
+        "instrumentedWorkerSHA256": "b90c5cad720859d4f17837d6e06164d4d9482cda4a7af3dbc0d796946c967fd9",
+        "prefixSHA256": "5cbc6ffd59911778450e581ec9383a00733b8aba3a7c6c7a200c7365cd2739cf",
+        "distSHA256": {
+          "runtime-ui.js": "3ad9f07f3a1584afb975e0a9621f434e27623d673f290dd1be5a82df8e4cb4ef",
+          "service.js": "b0547b25090b2d6469592b76741953acafdf91f42f7a81f2181208f05c5c0156"
+        }
+      }
+    }
+  ]
+}

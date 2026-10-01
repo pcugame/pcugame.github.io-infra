@@ -1,6 +1,6 @@
 # Ticket 2: dedicated NAS runtime and play sessions
 
-Status: implementation in progress; depends on compatible API + NAS gateway rollout, defaults disabled.
+Status: implemented and deployed through #67. The feature defaults disabled; release and follow-up browser evidence are recorded below.
 
 ## Scope and interfaces
 
@@ -33,3 +33,11 @@ These shell checks use mock control responses, a synthetic Worker, loopback orig
 Follow-up: renewal now locks the authentication session before the play session, matching logout's foreign-key cascade order. A real PostgreSQL concurrent logout/renewal test reproduced HTTP 500 with the former order and returns 403 with the corrected order; the expanded play suite passes eight tests. This prevents logout and renewal from deadlocking while preserving atomic lease/login updates.
 
 Issuance uses the same parent-first rule before expired-lease cleanup and insertion. Its separate real PostgreSQL logout/issuance regression also reproduced HTTP 500 before the fix and passes with 403 afterward. The final play suite has nine passing cases; API lint/build pass on this follow-up.
+
+## Native Firefox Worker follow-up (2026-10-01)
+
+The original Unity6000.0.0b12 glTFast build runs in Firefox152.0.4 with16 native worker realms and renders the pinned Box model. Firefox BiDi enumerates those realms but cannot evaluate their globals (`no such frame`); this is an observation limitation, not a failed Unity runtime.
+
+A separate diagnostic variant prepends [native-worker-observer.js](../../scripts/unity-fixtures/native-worker-observer.js) to the original worker response. The observer reads values inside the actual DedicatedWorkerGlobalScope and inspects the original native `load`/`run` messages. All16 startup/load reports and14 run reports had crossOriginIsolated, SharedArrayBuffer and secure context; the actual native memory buffer was shared (32MiB or38.4375MiB). The original worker body, WebAssembly, framework and data are preserved; the modified-worker result is explicitly separate from the original baseline. It does not claim that an unmodified production worker was inspected through BiDi.
+
+The final local matrix uses the exact `554b57e` player shell, sandbox, COOP/COEP/CSP and a CA trusted only in isolated test profiles; certificate validation stays enabled. Chrome/Edge use software rendering for repeatability and the normal graphics-warning continue button. Firefox did not show that warning in the worker runs. Session controls in this local harness are synthetic. [The follow-up evidence](../../scripts/unity-fixtures/verification-2026-10-01-external.json) separates these results from authenticated production verification.

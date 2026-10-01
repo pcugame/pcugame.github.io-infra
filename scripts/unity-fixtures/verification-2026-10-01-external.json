@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-01",
+  "localSource": "554b57e47d3299df9192de4d7d9e007bacc0fb8b",
+  "authenticationScope": "Local session controls were mocked. Separate production evidence records real authentication/approval/NAS requests.",
+  "browsers": {
+    "chrome": "154.0.8037.92",
+    "edge": "154.0.4258.48",
+    "firefox": "152.0.4"
+  },
+  "transport": "Strict HTTPS with a test CA trusted only by isolated browser profiles; no certificate-ignore flags. Actual renderPlayShell/playShellHeaders/runtimeCsp and sandbox permissions.",
+  "localCasesPerBrowser": {
+    "websocket": {
+      "approved": "actual Unity GUI text and binary echo, client Receive Count2 and server exact message records",
+      "denied": "connect-src violation and zero server connections"
+    },
+    "httpsBinaryApi": {
+      "approved": "actual UnityWebRequest fetches and decodes Box GLB, red cube rendered",
+      "denied": "connect-src violation, zero server requests, model load failed",
+      "wrongCors": "request reaches external server; wrong Access-Control-Allow-Origin causes model failure without connect-src violation"
+    },
+    "addressables": {
+      "approved": "real remote hash+catalog+13 bundles HTTP200, decoded models rendered",
+      "denied": "27 native connect-src violations/fetch failures, zero successful external responses"
+    }
+  },
+  "firefoxNativeWorker": {
+    "source": "554b57e47d3299df9192de4d7d9e007bacc0fb8b",
+    "browser": "Firefox152.0.4",
+    "localOnly": true,
+    "productionWorkerGlobalsVerified": false,
+    "strictTLS": {
+      "acceptInsecureCerts": false,
+      "trust": "Isolated NSS local CA, valid SAN leaf"
+    },
+    "runtimeUI": "Exact source554b transpiled module /tmp/pcu-unity-followup/runtime-ui.mjs; real renderPlayShell/playShellHeaders, synthetic local session control API",
+    "graphicsGate": "Only normal visible continuebutton click supported; original+instrumented Firefox runs recorded zero continue clicks (gate not shown). No bypass. WSS/HTTPS click count not captured.",
+    "originalWorker": {
+      "ready": true,
+      "modelLoaded": true,
+      "realms": 16,
+      "directGlobals": "BiDi no such frame for enumerated realms"
+    },
+    "instrumentedWorker": {
+      "ready": true,
+      "modelLoaded": true,
+      "workers": 16,
+      "probeStageCounts": {
+        "startup": 16,
+        "native-load": 16,
+        "native-run": 14
+      },
+      "COISABSecureAll": true,
+      "nativeLoadRunMemorySharedAll": true,
+      "memoryBytes": [
+        33554432,
+        40304640
+      ],
+      "modifiedWorker": true,
+      "originalWorkerSHA256": "cc9ef4df6eca2ced3c2ab73c64580de249f09c3c8550258f3b5dfa9cfad3de93",
+      "instrumentedWorkerSHA256": "b90c5cad720859d4f17837d6e06164d4d9482cda4a7af3dbc0d796946c967fd9"
+    },
+    "WSS": {
+      "casesPassed": 2,
+      "approved": "Actual Unity GUI text+binary echo, receiveCount2 screenshot",
+      "denied": "connect-src CSP and zero server events"
+    },
+    "HTTPS": {
+      "casesPassed": 3,
+      "approved": "Actual UnityWebRequest binary API model loaded and rendered",
+      "denied": "modelLoadedfalse, connect-src violation, zero requests",
+      "wrongCORS": "modelLoadedfalse, no connect-src violation, request reached server; explicit BiDi ACAO mismatch",
+      "JSONRestTested": false
+    },
+    "screenshotsVisuallyInspected": 5,
+    "cleanup": "Browser sessions closed; own fixture servers/geckodriver stopped. Root-ownedWSS/HTTPS servers untouched.",
+    "transpileSourceMatchesGit": true
+  },
+  "limitations": [
+    "HTTPS API fixture verifies a binary GET endpoint, not JSON REST serialization or OAuth.",
+    "Firefox original-worker BiDi global evaluation remains unavailable; explicitly instrumented real workers provide direct COI/SAB/native shared-memory evidence.",
+    "Firefox lacks native credentialless; empty document.cookie is not proof of storage isolation.",
+    "Addressables compiled video triggers an expected Firefox external media-src block; connect-src approval does not authorize media/script/worker loading.",
+    "Synthetic shell controls do not prove authentication or production approval behavior."
+  ],
+  "production": {
+    "status": "pending"
+  }
+}

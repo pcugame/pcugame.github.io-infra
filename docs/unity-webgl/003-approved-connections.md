@@ -1,6 +1,6 @@
 # Ticket 3: approved external HTTPS / Addressables / WSS connections
 
-Status: implemented on feat/webgl-network-policy, based on ticket 2; runtime/browser and release evidence tracked below.
+Status: implemented and merged through #69. The feature defaults disabled; release and browser evidence are tracked below.
 
 Project owners submit exact secure origin, purpose, connection mode and required CORS configuration. Administrators approve/reject/revoke with actor, reviewer, reason, timestamps and policy version. States PENDING/APPROVED/REJECTED/REVOKED. Reject wildcard, userinfo, insecure schemes, localhost/private/reserved IP and site authentication/administration origins. No server fetch/proxy validation.
 
@@ -30,3 +30,19 @@ Default execution is read-only. Record the applied count and feature configurati
 Authenticated PostgreSQL/Fastify network and play tests passed (20 cases), plus existing visibility/file-access integration tests (29 total). Shared origin-validation tests, API test/build/lint/architecture and UI submission/review/unavailable-state tests passed. Independent security review verified snapshot/revocation ordering and addressed reserved IPv6 and flag-off revival edge cases. The real Nginx fixture passed with a policy larger than 4 KiB. CLI tests confirm explicit scope, dry-run default and persistent apply. Actual Unity Addressables/API/WSS, final CI and production evidence remain separate acceptance gates.
 
 `node scripts/webgl-network-browser.mjs` passed on Chrome 154.0.8037.92, Edge 154.0.4258.48 and Firefox 141.0 (Playwright engine). Each browser made fourteen allowed HTTP requests and two real WSS echo exchanges from document and dedicated Worker. Unapproved hosts/WSS, redirected targets, another runtime token, external scripts and external Workers produced zero prohibited traffic. The probe uses actual generated runtime CSP, local self-signed TLS and DNS mapped to loopback without interception. Its catalog/hash/bundle payloads are synthetic transport fixtures, not Unity Addressables. It uses the shell harness Playwright options plus optional WS_MODULE_PATH.
+
+## Actual Unity external-connectivity follow-up (2026-10-01)
+
+The earlier synthetic transport test is supplemented by actual Unity builds on Chrome154.0.8037.92, Edge154.0.4258.48 and Firefox152.0.4. The final local tests use the `554b57e` trusted player shell, exact runtime CSP, sandbox/credentialless attributes and separate TLS origins. Test certificates are trusted only in isolated browser profiles; TLS validation is not disabled. Session-control responses are mocked locally and do not substitute for the separate production approval/NAS checks.
+
+| Actual compiled Unity fixture | Approved origin | Denied origin / failure case |
+| --- | --- | --- |
+| UnityWebSocket2.8.0, Unity6000.0.15f1c1 | Native game UI sends text and binary messages; server and game confirm both echoes | `connect-src` violation; no server connection |
+| glTFast, Unity6000.0.0b12 | UnityWebRequest reads a binary HTTPS API response, decodes the GLB and renders the model | CSP denial sends no request; incorrect CORS sends a request but Unity cannot read it |
+| Addressables2.2.2, Unity6000.0.33f1 | Real external hash, catalog and13 UnityFS bundles return200 and decoded models render |27 genuine native fetch failures/connection-policy violations; no successful external responses |
+
+Each row passed in all three browsers. The HTTPS fixture verifies a binary GET endpoint, not JSON REST serialization, OAuth or all possible application protocols. Firefox's expected external MP4 `media-src` violation in the Addressables demo is separate: an approved connection origin does not authorize external media, scripts or Workers.
+
+The Addressables fixture replaces only the local catalog hash with32 ASCII zeros to exercise an actual remote catalog refresh. Remote URLs and all15 remote resources are unchanged and match the pinned Git blobs. The JavaScript readiness hook observes the real game and does not synthesize fetches. The WSS test uses native canvas keyboard/mouse input, not an injected WebSocket.
+
+[external-catalog.json](../../scripts/unity-fixtures/external-catalog.json) pins upstream commits, Unity/package versions, artifact hashes and adaptations. Builds without an identified redistribution license remain private evaluation assets: this repository contains no compiled games, screenshots of those games, credentials or browser profiles. [verification-2026-10-01-external.json](../../scripts/unity-fixtures/verification-2026-10-01-external.json) records the local and production boundaries separately.
