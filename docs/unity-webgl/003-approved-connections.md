@@ -46,3 +46,13 @@ Each row passed in all three browsers. The HTTPS fixture verifies a binary GET e
 The Addressables fixture replaces only the local catalog hash with32 ASCII zeros to exercise an actual remote catalog refresh. Remote URLs and all15 remote resources are unchanged and match the pinned Git blobs. The JavaScript readiness hook observes the real game and does not synthesize fetches. The WSS test uses native canvas keyboard/mouse input, not an injected WebSocket.
 
 [external-catalog.json](../../scripts/unity-fixtures/external-catalog.json) pins upstream commits, Unity/package versions, artifact hashes and adaptations. Builds without an identified redistribution license remain private evaluation assets: this repository contains no compiled games, screenshots of those games, credentials or browser profiles. [verification-2026-10-01-external.json](../../scripts/unity-fixtures/verification-2026-10-01-external.json) records the local and production boundaries separately.
+
+## Production acceptance (2026-10-01)
+
+All nine actual Unity cases passed on Chrome154.0.8037.92, Edge154.0.4258.48 and Firefox152.0.4 over strict public HTTPS: native text/binary WSS echo, HTTPS binary model loading with shared native Worker memory, and Addressables hash/catalog/13 bundles with rendered models. The Worker diagnostic prefix remains explicit; no unmodified Firefox BiDi-global claim is made.
+
+The tested API source is `fca80666767f4fc17bc95fbc154660c6230b147f`, immutable image `sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f`, built by [Build API Release Image 36849244804](https://github.com/pcugame/pcugame.github.io-infra/actions/runs/36849244804) and deployed by [Deploy Release 36849862293](https://github.com/pcugame/pcugame.github.io-infra/actions/runs/36849862293). Both playback and approved external connections are enabled. NAS gateway configuration remains at `cf00f44`; exact template hashes are in the evidence JSON.
+
+Private fixture sessions exercised authenticated public player creation and NAS downloads. Approval/revocation used real HTTP handlers through container loopback with exact Origin; public HTTPS policy reads also passed. Sessions were provisioned for verification, so this does not claim OAuth-login coverage. All three policies were revoked after fresh successful NAS reads: subsequent reads and renewal were denied. An actual visible player removed its iframe on the next check (60.34 seconds).
+
+All three private projects, two fixture users, play sessions, uploaded objects and temporary server artifacts were removed through the canonical deletion/outbox flow. Three policy requests and six append-only audit events remain intentionally. The evidence-only follow-up does not replace the tested production image.
