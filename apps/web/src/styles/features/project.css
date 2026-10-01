@@ -266,6 +266,26 @@
   background: #000;
 }
 
+.project-play-page__help {
+  margin-bottom: 1rem;
+  color: #d4d4d8;
+  font-size: 0.875rem;
+}
+
+.project-play-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.project-play-page__help p {
+  margin: 0.5rem 0;
+}
+
+.project-play-page__help summary {
+  cursor: pointer;
+}
+
 .project-play-page__frame {
   display: block;
   width: 100%;

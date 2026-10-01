@@ -114,6 +114,13 @@ for (const required of [
 ]) assert.ok(publicOrigin.includes(required), `public origin missing: ${required}`);
 assert.doesNotMatch(publicOrigin, /proxy_cache/);
 assert.doesNotMatch(publicOrigin, /add_header Cache-Control[^;]*(?:immutable|public, max-age)/);
+const publicCsp = publicOrigin.match(/add_header Content-Security-Policy "([^"]+)" always;/)?.[1];
+assert.ok(publicCsp, 'public origin must send an enforced CSP');
+const publicScriptSources = publicCsp.split(';').map((directive) => directive.trim().split(/\s+/))
+	.find(([name]) => name === 'script-src')?.slice(1);
+assert.deepEqual(new Set(publicScriptSources), new Set([
+	"'self'", 'blob:', "'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'",
+]), 'Unity framework blob scripts must be allowed without allowing external script origins');
 for (const proxy of [publicOrigin, protectedDownload]) {
  assert.ok(proxy.includes('auth_request /__pcu_file_auth;'));
  assert.ok(proxy.includes('location = /__pcu_file_auth {\n    internal;'));

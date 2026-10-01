@@ -140,6 +140,16 @@ const runBoundary = async (fixture, command = 'boundary-preflight', extraEnv = {
 };
 const acceptedBoundary = await runBoundary(boundaryFixture);
 assert.equal(acceptedBoundary.status, 0, acceptedBoundary.stderr || acceptedBoundary.stdout);
+for (const value of ['1', '0', '-1', '1.5', '1e2', '0x01', 'Infinity']) {
+	// `up` invokes this check before image pulls, volume changes or stopping
+	// the current containers. No valid release settings are needed to reject it.
+	const rejectedProxy = await runBoundary(boundaryFixture.replace(/^TRUST_PROXY=.*$/m, `TRUST_PROXY=${value}`), 'up');
+	assert.notEqual(rejectedProxy.status, 0);
+	assert.match(rejectedProxy.stderr, /TRUST_PROXY numeric hop counts are unsupported/);
+	assert.doesNotMatch(rejectedProxy.stdout, /Starting|Stopping|Pulling|Down complete/);
+}
+const acceptedProxy = await runBoundary(boundaryFixture.replace(/^TRUST_PROXY=.*$/m, 'TRUST_PROXY=203.250.133.230'));
+assert.equal(acceptedProxy.status, 0, acceptedProxy.stderr || acceptedProxy.stdout);
 for (const replacement of ['', 'FILE_GATEWAY_SECRET=short']) {
   const missingGatewaySecret = await runBoundary(boundaryFixture.replace(/^FILE_GATEWAY_SECRET=.*$/m, replacement));
   assert.notEqual(missingGatewaySecret.status, 0);
