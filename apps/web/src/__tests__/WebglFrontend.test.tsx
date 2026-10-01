@@ -48,7 +48,7 @@ function renderPlayPage() {
 }
 
 describe('WebGL public frontend', () => {
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => mocks.getProjectDetail.mockReset());
 	afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 	it('only restarts the game after confirmation and preserves iframe isolation', async () => {
@@ -77,7 +77,7 @@ describe('WebGL public frontend', () => {
 	});
 
 	it('renders a credentialless Unity-compatible iframe without navigation permissions', async () => {
-		mocks.getProjectDetail.mockResolvedValueOnce(project('https://api.example.com/api/public/webgl/7/'));
+		mocks.getProjectDetail.mockResolvedValue(project('https://api.example.com/api/public/webgl/7/'));
 		renderPlayPage();
 		const iframe = await screen.findByTitle('웹 게임 WebGL 플레이어');
 		expect(iframe.getAttribute('src')).toBe('https://api.example.com/api/public/webgl/7/');
@@ -93,7 +93,7 @@ describe('WebGL public frontend', () => {
 	});
 
 	it('shows a no-build state and a way back instead of an iframe', async () => {
-		mocks.getProjectDetail.mockResolvedValueOnce(project());
+		mocks.getProjectDetail.mockResolvedValue(project());
 		renderPlayPage();
 		expect(await screen.findByText('플레이할 WebGL 빌드가 없습니다.')).toBeTruthy();
 		expect(screen.queryByTitle(/WebGL 플레이어/)).toBeNull();
