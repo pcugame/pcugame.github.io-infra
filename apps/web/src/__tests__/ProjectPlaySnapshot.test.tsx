@@ -7,6 +7,7 @@ import ProjectPlayPage from '../pages/ProjectPlayPage';
 import { queryKeys } from '../lib/query';
 
 vi.mock('../lib/query', async (original) => ({ ...await original<object>(), useViewerKey: () => (key: unknown) => key }));
+vi.mock('../lib/graphicsAcceleration', () => ({ detectGraphicsAcceleration: () => 'software' }));
 vi.mock('../lib/api', () => ({ publicApi: { getProjectDetail: vi.fn() } }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -18,7 +19,9 @@ describe('running React player display snapshot', () => {
     const initial = { id: 41, title: 'Fixture', webglUrl: 'https://game.test/index.html', webglDisplayKind: 'fixed', webglDisplayWidth: 800, webglDisplayHeight: 600 };
     qc.setQueryData(key, initial);
     const { container } = render(<QueryClientProvider client={qc}><MemoryRouter initialEntries={['/projects/41/play']}><Routes><Route path="/projects/:projectId/play" element={<ProjectPlayPage />} /></Routes></MemoryRouter></QueryClientProvider>);
-    const frame = screen.getByTitle('Fixture WebGL 플레이어');
+    expect(screen.queryByTitle('Fixture WebGL 플레이어')).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: '그래도 실행' }));
+    const frame = await screen.findByTitle('Fixture WebGL 플레이어');
     expect(container.querySelector<HTMLElement>('.webgl-viewport__surface')!.style.width).toBe('800px');
     await act(async () => {
       qc.setQueryData(key, { ...initial, webglDisplayKind: 'responsive', webglDisplayWidth: null, webglDisplayHeight: null });
