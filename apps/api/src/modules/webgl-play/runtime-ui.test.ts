@@ -15,7 +15,7 @@ function shell(options: { renderer?: string; missing?: boolean; strictMissing?: 
 		style: Record<string, string> = {};
 		clientWidth = 1600; clientHeight = 900;
 		classList = { add: vi.fn() };
-		get firstElementChild() { return this.children[0] ?? null; }
+		get firstElementChild(): Element | null { return this.children[0] ?? null; }
 		textContent = ''; value = ''; hidden = true; open = false; disabled = false;
 		dataset = { projectId: '163', assetOrigin: 'https://assets.test' };
 		href = 'https://web.test/projects/163'; children: Element[] = []; attributes: Record<string, string> = {};
