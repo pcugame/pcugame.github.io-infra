@@ -40,7 +40,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				submitLabel: '작품 등록',
 				submittingLabel: '등록 중…',
 				gameUploadHint: '게임 실행에 필요한 파일을 ZIP으로 압축해 선택하세요.',
-				webglUploadHint: 'WebGL ZIP의 최상위 폴더 또는 그 아래 단일 폴더에 index.html이 있어야 합니다.',
+				webglUploadHint: 'WebGL ZIP의 최상위 또는 단일 폴더에 index.html과 Build 폴더를 포함하세요. Build에는 .loader.js와 .framework.js, .wasm, .data 파일이 필요합니다. 비압축, .gz, .br, Decompression Fallback의 .unityweb 형식을 지원합니다. loader는 .js(.gz/.br 포함) 형식이어야 합니다.',
 			}
 		: {
 				eyebrow: 'My Project',
@@ -48,7 +48,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				submitLabel: '작품 제출',
 				submittingLabel: '제출 중…',
 				gameUploadHint: '게임 실행에 필요한 파일을 ZIP으로 압축해 선택하세요.',
-				webglUploadHint: 'WebGL ZIP의 최상위 폴더 또는 그 아래 단일 폴더에 index.html이 있어야 합니다.',
+				webglUploadHint: 'WebGL ZIP의 최상위 또는 단일 폴더에 index.html과 Build 폴더를 포함하세요. Build에는 .loader.js와 .framework.js, .wasm, .data 파일이 필요합니다. 비압축, .gz, .br, Decompression Fallback의 .unityweb 형식을 지원합니다. loader는 .js(.gz/.br 포함) 형식이어야 합니다.',
 			};
 
 	const { data: yearsData } = useQuery({

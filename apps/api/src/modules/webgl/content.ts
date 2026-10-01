@@ -16,6 +16,8 @@ const MIME_TYPES: Record<string, string> = {
 	'.wasm': 'application/wasm',
 	'.data': 'application/octet-stream',
 	'.symbols': 'application/octet-stream',
+	// Unity's loader decompresses fallback payloads itself. Serve the stored
+	// bytes as binary with no HTTP Content-Encoding for .unityweb.
 	'.unityweb': 'application/octet-stream',
 	'.png': 'image/png',
 	'.jpg': 'image/jpeg',
