@@ -1,0 +1,343 @@
+{
+  "date": "2026-10-01",
+  "localSource": "554b57e47d3299df9192de4d7d9e007bacc0fb8b",
+  "authenticationScope": "Local session controls were mocked. Separate production evidence records real authentication/approval/NAS requests.",
+  "browsers": {
+    "chrome": "154.0.8037.92",
+    "edge": "154.0.4258.48",
+    "firefox": "152.0.4"
+  },
+  "transport": "Strict HTTPS with a test CA trusted only by isolated browser profiles; no certificate-ignore flags. Actual renderPlayShell/playShellHeaders/runtimeCsp and sandbox permissions.",
+  "localCasesPerBrowser": {
+    "websocket": {
+      "approved": "actual Unity GUI text and binary echo, client Receive Count2 and server exact message records",
+      "denied": "connect-src violation and zero server connections"
+    },
+    "httpsBinaryApi": {
+      "approved": "actual UnityWebRequest fetches and decodes Box GLB, red cube rendered",
+      "denied": "connect-src violation, zero server requests, model load failed",
+      "wrongCors": "request reaches external server; wrong Access-Control-Allow-Origin causes model failure without connect-src violation"
+    },
+    "addressables": {
+      "approved": "real remote hash+catalog+13 bundles HTTP200, decoded models rendered",
+      "denied": "27 native connect-src violations/fetch failures, zero successful external responses"
+    }
+  },
+  "firefoxNativeWorker": {
+    "source": "554b57e47d3299df9192de4d7d9e007bacc0fb8b",
+    "browser": "Firefox152.0.4",
+    "localOnly": true,
+    "productionWorkerGlobalsVerified": false,
+    "strictTLS": {
+      "acceptInsecureCerts": false,
+      "trust": "Isolated NSS local CA, valid SAN leaf"
+    },
+    "runtimeUI": "Exact source554b transpiled module /tmp/pcu-unity-followup/runtime-ui.mjs; real renderPlayShell/playShellHeaders, synthetic local session control API",
+    "graphicsGate": "Only normal visible continuebutton click supported; original+instrumented Firefox runs recorded zero continue clicks (gate not shown). No bypass. WSS/HTTPS click count not captured.",
+    "originalWorker": {
+      "ready": true,
+      "modelLoaded": true,
+      "realms": 16,
+      "directGlobals": "BiDi no such frame for enumerated realms"
+    },
+    "instrumentedWorker": {
+      "ready": true,
+      "modelLoaded": true,
+      "workers": 16,
+      "probeStageCounts": {
+        "startup": 16,
+        "native-load": 16,
+        "native-run": 14
+      },
+      "COISABSecureAll": true,
+      "nativeLoadRunMemorySharedAll": true,
+      "memoryBytes": [
+        33554432,
+        40304640
+      ],
+      "modifiedWorker": true,
+      "originalWorkerSHA256": "cc9ef4df6eca2ced3c2ab73c64580de249f09c3c8550258f3b5dfa9cfad3de93",
+      "instrumentedWorkerSHA256": "b90c5cad720859d4f17837d6e06164d4d9482cda4a7af3dbc0d796946c967fd9"
+    },
+    "WSS": {
+      "casesPassed": 2,
+      "approved": "Actual Unity GUI text+binary echo, receiveCount2 screenshot",
+      "denied": "connect-src CSP and zero server events"
+    },
+    "HTTPS": {
+      "casesPassed": 3,
+      "approved": "Actual UnityWebRequest binary API model loaded and rendered",
+      "denied": "modelLoadedfalse, connect-src violation, zero requests",
+      "wrongCORS": "modelLoadedfalse, no connect-src violation, request reached server; explicit BiDi ACAO mismatch",
+      "JSONRestTested": false
+    },
+    "screenshotsVisuallyInspected": 5,
+    "cleanup": "Browser sessions closed; own fixture servers/geckodriver stopped. Root-ownedWSS/HTTPS servers untouched.",
+    "transpileSourceMatchesGit": true
+  },
+  "limitations": [
+    "HTTPS API fixture verifies a binary GET endpoint, not JSON REST serialization or OAuth.",
+    "Firefox original-worker BiDi global evaluation remains unavailable; explicitly instrumented real workers provide direct COI/SAB/native shared-memory evidence.",
+    "Firefox lacks native credentialless; empty document.cookie is not proof of storage isolation.",
+    "Addressables compiled video triggers an expected Firefox external media-src block; connect-src approval does not authorize media/script/worker loading.",
+    "Local synthetic controls do not prove authentication; production evidence separately records real authenticated HTTP boundaries."
+  ],
+  "production": {
+    "status": "PASS",
+    "sourceCommit": "fca80666767f4fc17bc95fbc154660c6230b147f",
+    "imageDigest": "sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f",
+    "imageBuildRun": 36849244804,
+    "deployReleaseRun": 36849862293,
+    "flags": {
+      "WEBGL_PLAY_ENABLED": "true",
+      "WEBGL_EXTERNAL_CONNECTIONS_ENABLED": "true"
+    },
+    "nasConfigurationSource": "cf00f446784b1a28beb16fda0026741bc6579b92",
+    "nasTemplateSha256": {
+      "public": "dedc9aff426a9dd5eeb216e676d71bc13caf267591c533fc8ee7d639ed03cb2f",
+      "protected": "45234b359bbeaa21a525aacacf9e6f9a0950ccf0e07a424e0ba9265c9b24f4cd"
+    },
+    "chromium": {
+      "status": "PASS",
+      "allContextsAndBrowsersClosed": true,
+      "visuallyInspectedScreenshots": 6,
+      "sanitizationPassed": true,
+      "cases": [
+        {
+          "browser": "chrome",
+          "label": "actual-addressables",
+          "version": "154.0.8037.92",
+          "sourceCommit": "fca80666767f4fc17bc95fbc154660c6230b147f",
+          "imageDigest": "sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f",
+          "strictTls": true,
+          "authenticatedCreateCount": 1,
+          "nasBinaryCount": 1,
+          "runtime": {
+            "secure": true,
+            "isolated": true,
+            "sab": true
+          },
+          "remoteHashHttp200": 1,
+          "remoteCatalogHttp200": 1,
+          "remoteBundleHttp200": 13,
+          "providerErrors": 0
+        },
+        {
+          "browser": "chrome",
+          "label": "actual-https-worker",
+          "version": "154.0.8037.92",
+          "sourceCommit": "fca80666767f4fc17bc95fbc154660c6230b147f",
+          "imageDigest": "sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f",
+          "strictTls": true,
+          "authenticatedCreateCount": 1,
+          "nasBinaryCount": 1,
+          "runtime": {
+            "secure": true,
+            "isolated": true,
+            "sab": true
+          },
+          "workers": 16,
+          "boxHttp200Count": 1
+        },
+        {
+          "browser": "chrome",
+          "label": "actual-wss",
+          "version": "154.0.8037.92",
+          "sourceCommit": "fca80666767f4fc17bc95fbc154660c6230b147f",
+          "imageDigest": "sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f",
+          "strictTls": true,
+          "authenticatedCreateCount": 1,
+          "nasBinaryCount": 1,
+          "runtime": {
+            "secure": true,
+            "isolated": true,
+            "sab": true
+          },
+          "receivedFrameCount": 3
+        },
+        {
+          "browser": "edge",
+          "label": "actual-addressables",
+          "version": "154.0.4258.48",
+          "sourceCommit": "fca80666767f4fc17bc95fbc154660c6230b147f",
+          "imageDigest": "sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f",
+          "strictTls": true,
+          "authenticatedCreateCount": 1,
+          "nasBinaryCount": 1,
+          "runtime": {
+            "secure": true,
+            "isolated": true,
+            "sab": true
+          },
+          "remoteHashHttp200": 1,
+          "remoteCatalogHttp200": 1,
+          "remoteBundleHttp200": 13,
+          "providerErrors": 0
+        },
+        {
+          "browser": "edge",
+          "label": "actual-https-worker",
+          "version": "154.0.4258.48",
+          "sourceCommit": "fca80666767f4fc17bc95fbc154660c6230b147f",
+          "imageDigest": "sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f",
+          "strictTls": true,
+          "authenticatedCreateCount": 1,
+          "nasBinaryCount": 1,
+          "runtime": {
+            "secure": true,
+            "isolated": true,
+            "sab": true
+          },
+          "workers": 16,
+          "boxHttp200Count": 1
+        },
+        {
+          "browser": "edge",
+          "label": "actual-wss",
+          "version": "154.0.4258.48",
+          "sourceCommit": "fca80666767f4fc17bc95fbc154660c6230b147f",
+          "imageDigest": "sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f",
+          "strictTls": true,
+          "authenticatedCreateCount": 1,
+          "nasBinaryCount": 1,
+          "runtime": {
+            "secure": true,
+            "isolated": true,
+            "sab": true
+          },
+          "receivedFrameCount": 3
+        }
+      ]
+    },
+    "firefox": {
+      "event": "PASS",
+      "check": "firefox_production_three_actual_fixtures",
+      "browserVersion": "152.0.4",
+      "sourceCommit": "fca80666767f4fc17bc95fbc154660c6230b147f",
+      "imageDigest": "sha256:06274c32d5ba8d338c921bcbe7fc078e8d086010f208a7a5b2604682e6f0a84f",
+      "strictPublicTLS": true,
+      "acceptInsecureCerts": false,
+      "productionHTTPS": true,
+      "authenticatedCreateResponses": 3,
+      "realNasWasmResponses": 3,
+      "screenshotsVisuallyInspected": 3,
+      "cases": [
+        {
+          "label": "actual-wss",
+          "passed": true,
+          "observed": {
+            "creates": 1,
+            "createFailures": 0,
+            "nasBinaryResponses": 1,
+            "box200": 0,
+            "providerErrors": 0,
+            "remoteAddressables": {
+              "hash200": 0,
+              "catalog200": 0,
+              "bundle200": 0
+            }
+          },
+          "visualVerification": {
+            "state": "Open",
+            "sendCount": 2,
+            "receiveCount": 3,
+            "textEcho": "Unity-production-firefox-echo",
+            "binaryEcho": "Unity-production-firefox-echo",
+            "binaryLength": 29,
+            "greetingPresent": true
+          }
+        },
+        {
+          "label": "actual-https-worker",
+          "passed": true,
+          "observed": {
+            "creates": 1,
+            "createFailures": 0,
+            "nasBinaryResponses": 1,
+            "box200": 1,
+            "providerErrors": 0,
+            "remoteAddressables": {
+              "hash200": 0,
+              "catalog200": 0,
+              "bundle200": 0
+            }
+          },
+          "visualVerification": {
+            "redBoxRendered": true,
+            "compiledWasmFrameworkDataUnmodified": true,
+            "workerDiagnosticPrefixExplicit": true
+          }
+        },
+        {
+          "label": "actual-addressables",
+          "passed": true,
+          "observed": {
+            "creates": 1,
+            "createFailures": 0,
+            "nasBinaryResponses": 1,
+            "box200": 0,
+            "providerErrors": 0,
+            "remoteAddressables": {
+              "hash200": 1,
+              "catalog200": 1,
+              "bundle200": 13
+            }
+          },
+          "visualVerification": {
+            "full3DSceneRendered": true,
+            "visibleTerrainModelsAndUi": true
+          }
+        }
+      ],
+      "workerEvidence": "Actual production native Unity workers using explicitly instrumented worker prefix; compiled WASM/framework/data unchanged. No exact-original-worker-global claim.",
+      "HTTPSApiEvidence": "Binary UnityWebRequest model API; no JSON REST acceptance claim.",
+      "cleanup": {
+        "driverStopped": true,
+        "freshProfilesRemoved": true,
+        "webDriverSessionsDeleted": true,
+        "fixturePolicyCleanupOwnedByRoot": true
+      }
+    },
+    "authenticationBoundary": "Private STAFF projects and finite database-provisioned owner/viewer sessions. Real HTTP approval/revocation handlers via container loopback with exact Origin; public HTTPS authenticated policy reads, browser session creation and NAS reads. OAuth login not tested.",
+    "publicHttpsPolicyReads": [
+      {
+        "label": "actual-wss",
+        "status": 200,
+        "approvedCount": 1
+      },
+      {
+        "label": "actual-https-worker",
+        "status": 200,
+        "approvedCount": 1
+      },
+      {
+        "label": "actual-addressables",
+        "status": 200,
+        "approvedCount": 1
+      }
+    ],
+    "revocation": {
+      "casesPassed": 3,
+      "freshGrantNas200ImmediatelyBeforeRevoke": true,
+      "subsequentNasAndRenewDenied": true,
+      "visibleShell": {
+        "source": "fca80666767f4fc17bc95fbc154660c6230b147f",
+        "iframeRemoved": true,
+        "permissionNotice": true,
+        "elapsedMs": 60340,
+        "actualBrowser": "154.0.8037.92"
+      }
+    },
+    "cleanup": {
+      "storageGone": true,
+      "fixtureProjectsRemoved": 3,
+      "fixtureUsersRemoved": 2,
+      "fixtureSessionsRemoved": true,
+      "retainedPolicyRequests": 3,
+      "retainedPolicyEvents": 6,
+      "privateContainerArtifactsRemoved": true,
+      "privateServerTarRemoved": true,
+      "controlStateRemoved": true
+    }
+  }
+}
