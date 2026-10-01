@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ExternalLinksSchema } from './external-links.js';
 import { MAX_NEW_PROJECT_TITLE_BYTES, utf8ByteLength } from './filename-policy.js';
 
 export const VisibilitySchema = z.enum(['PUBLIC', 'AUTHENTICATED', 'STAFF']);
@@ -38,6 +39,7 @@ export const SubmitProjectPayloadBaseSchema = z.object({
 	title: ProjectSubmissionTitleSchema,
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
+	externalLinks: ExternalLinksSchema.optional(),
 	members: z.array(ProjectMemberInputSchema).min(1),
 	manifest: z.array(z.object({
 		kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER', 'DOCUMENT', 'ATTACHMENT']),
@@ -52,6 +54,7 @@ export const UpdateProjectBaseSchema = z.object({
 	title: z.string().min(1).max(120).optional(),
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
+	externalLinks: ExternalLinksSchema.optional(),
 	isIncomplete: z.boolean().optional(),
 	status: MutableProjectStatusSchema.optional(),
 	sortOrder: SafeNonNegativeIntegerSchema.optional(),

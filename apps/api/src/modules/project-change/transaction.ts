@@ -92,7 +92,7 @@ export async function applyProjectChange(tx:Prisma.TransactionClient,request:Pro
    await tx.projectMember.createMany({data:changes.members.map((member,sortOrder)=>({...member,sortOrder,projectId:source.id,userId:users.find(user=>user.studentId===member.studentId)?.id??null}))});
   }
   await tx.project.update({where:{id:source.id},data:{
-   ...(changes.title!==undefined?{title:changes.title}:{}),...(changes.summary!==undefined?{summary:changes.summary}:{}),...(changes.description!==undefined?{description:changes.description}:{}),...(changes.githubUrl!==undefined?{githubUrl:changes.githubUrl}:{}),...(changes.platforms?{platforms:changes.platforms}:{}),posterAssetId:poster,
+   ...(changes.title!==undefined?{title:changes.title}:{}),...(changes.summary!==undefined?{summary:changes.summary}:{}),...(changes.description!==undefined?{description:changes.description}:{}),...(changes.githubUrl!==undefined?{githubUrl:changes.githubUrl}:{}),...(changes.externalLinks!==undefined?{externalLinks:changes.externalLinks}:{}),...(changes.platforms?{platforms:changes.platforms}:{}),posterAssetId:poster,
    ...(stage?.currentWebglDeploymentId?{currentWebglDeploymentId:stage.currentWebglDeploymentId}:{}),version:{increment:1},
   }});
   const videos=await tx.asset.findMany({where:{projectId:source.id,kind:'VIDEO',status:'READY'},orderBy:[{videoSortOrder:{sort:'asc',nulls:'last'}},{id:'asc'}],select:{id:true}});

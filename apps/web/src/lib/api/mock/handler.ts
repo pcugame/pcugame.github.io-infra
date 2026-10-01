@@ -12,6 +12,7 @@ import {
 	buildAdminProjectItems,
 	buildAdminProjectDetail,
 	mockResponsiveImage,
+	mockProjectOverrides,
 } from './data';
 
 type MockRequestOptions = {
@@ -527,8 +528,9 @@ const routes: MockRoute[] = [
 	},
 	{
 		pattern: /^\/api\/admin\/projects\/([^/]+)$/,
-		handler: (match, method) => {
+		handler: (match, method, options) => {
 			if (method === 'DELETE') return undefined;
+			if (method === 'PATCH') mockProjectOverrides.set(Number(match[1]), { ...mockProjectOverrides.get(Number(match[1])), ...parseJsonBody(options.body) });
 			return buildAdminProjectDetail(match[1]) ?? notFound();
 		},
 	},

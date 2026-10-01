@@ -118,6 +118,23 @@ afterEach(() => {
 });
 
 describe('ProjectChangeRequestPage', () => {
+ it('preserves an old GitHub draft, validates edits before saving and allows clearing every link', async () => {
+  const active = { ...draft(), changes: { githubUrl: 'https://github.com/pending' } };
+  mocks.getDetail.mockResolvedValue({ ...project, externalLinks: [{ label: '기존', url: 'https://example.com' }] });
+  mocks.listForProject.mockResolvedValue({ items: [active], total: 1 });
+  mocks.get.mockResolvedValue(active); mocks.update.mockResolvedValue(active);
+  renderPage();
+  const url = await screen.findByLabelText('외부 링크 1 URL');
+  expect((url as HTMLInputElement).value).toBe('https://github.com/pending');
+  fireEvent.change(url, { target: { value: 'javascript:alert(1)' } });
+  fireEvent.click(screen.getByRole('button', { name: '초안 저장' }));
+  await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
+  expect(mocks.update).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '외부 링크 1 삭제' }));
+  fireEvent.click(screen.getByRole('button', { name: '초안 저장' }));
+  await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(active.id, expect.objectContaining({ changes: expect.objectContaining({ externalLinks: [] }) })));
+ });
+
 	it('creates a draft, records a complete manifest before upload, and blocks submission until its item is ready', async () => {
 		let active: ReturnType<typeof draft> | null = null;
 		mocks.getDetail.mockResolvedValue(project);

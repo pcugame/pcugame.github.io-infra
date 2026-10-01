@@ -1,3 +1,4 @@
+import type { ExternalLink } from './external-links.js';
 import type { Visibility } from './enums.js';
 import type { AssetPlaybackStatus, Platform } from './enums.js';
 import type { ResponsiveImage } from './responsive-image.js';
@@ -104,6 +105,7 @@ export type PublicProjectDetailResponse = {
 	summary?: string;
 	description?: string;
 	githubUrl?: string;
+	externalLinks?: ExternalLink[];
 	platforms: Platform[];
 	isIncomplete: boolean;
 	video: ProjectVideo | null;

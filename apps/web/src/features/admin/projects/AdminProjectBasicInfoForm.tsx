@@ -1,4 +1,5 @@
-import { useWatch } from 'react-hook-form';
+import { ExternalLinksFieldset } from '../../../components/project/ExternalLinksFieldset';
+import { Controller, useWatch } from 'react-hook-form';
 import type { AdminProjectDetail } from '@pcu/contracts';
 import { VisibilitySelect, VisibilityNotice } from '../../../components/VisibilitySelect';
 import { env } from '../../../lib/env';
@@ -51,6 +52,18 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
 					{errors.sortOrder && <span className="field-error">{errors.sortOrder.message}</span>}
 				</div>
 			</fieldset>
+			<Controller
+				control={form.control}
+				name="externalLinks"
+				render={({ field }) => (
+					<ExternalLinksFieldset
+						value={field.value ?? []}
+						onChange={field.onChange}
+						disabled={!canEditContent || isPending}
+						showErrors={!!errors.externalLinks}
+					/>
+				)}
+			/>
 		</form>
 	);
 }

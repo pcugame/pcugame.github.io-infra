@@ -37,6 +37,7 @@ export type SubmitProjectPayloadInput = z.infer<typeof SubmitProjectPayloadSchem
 // ── 작품 수정 ────────────────────────────────────────────────
 
 export const UpdateProjectFormSchema = UpdateProjectBaseSchema.pick({
+	externalLinks: true,
 	title: true,
 	summary: true,
 	description: true,

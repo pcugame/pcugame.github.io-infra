@@ -1,9 +1,11 @@
+import type { ExternalLink } from './external-links.js';
 import type { ProjectSubmissionItemStatus } from './admin-projects.js';
 
 export type ProjectChangeKind = 'EDIT' | 'DELETE';
 export type ProjectChangeState = 'DRAFT' | 'PENDING' | 'APPLYING' | 'COMPLETED' | 'REJECTED' | 'CANCELLED' | 'CONFLICT' | 'FAILED';
 export interface ProjectChangeValues {
  title?: string; summary?: string; description?: string; githubUrl?: string;
+ externalLinks?: ExternalLink[];
  platforms?: Array<'PC' | 'MOBILE' | 'WEB'>;
  members?: Array<{ name: string; studentId: string }>;
  removeAssetIds?: number[]; posterAssetId?: number | null; videoAssetIds?: number[];

@@ -1,3 +1,4 @@
+import { effectiveExternalLinks } from '../../components/project/externalLinks';
 import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -25,6 +26,7 @@ import { queryKeys, invalidateVisibilityQueries } from '../../lib/query';
 import { getClientUploadLimits } from '../../lib/upload-limits';
 
 const metadata = (project: AdminProjectDetail): UpdateProjectFormInput => ({
+	externalLinks: effectiveExternalLinks(project.externalLinks, project.githubUrl),
 	visibility: project.visibility,
 	title: project.title,
 	summary: project.summary ?? '',
@@ -96,6 +98,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 				const defaults = form.formState.defaultValues;
 				const nextStatus = data.status;
 				const response = await mutations.updateMutation.mutateAsync({
+					...(JSON.stringify(data.externalLinks) !== JSON.stringify(defaults?.externalLinks) ? { externalLinks: data.externalLinks ?? [] } : {}),
 					// Background reads must not turn untouched fields into stale writes.
 					...(project.canChangeVisibility && data.visibility !== defaults?.visibility ? { visibility: data.visibility } : {}),
 					...(data.title !== defaults?.title ? { title: data.title } : {}),

@@ -39,6 +39,20 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client?.clear(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe('global project Apply', () => {
+ it('edits existing links and explicitly clears all links without reviving legacy GitHub', async () => {
+  stored = { ...stored, githubUrl: 'https://github.com/legacy', externalLinks: [{ label: '게임', url: 'https://example.com/old' }] };
+  mount(); await ready();
+  change('외부 링크 1 URL', 'https://example.com/new'); fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { externalLinks: [{ label: '게임', url: 'https://example.com/new' }] }));
+  await waitFor(() => expect(apply().disabled).toBe(true));
+  await screen.findByText('적용되었습니다.');
+  fireEvent.click(screen.getByRole('button', { name: '외부 링크 1 삭제' }));
+  await waitFor(() => expect(apply().disabled).toBe(false)); fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenLastCalledWith(7, { externalLinks: [] }));
+  await waitFor(() => expect(apply().disabled).toBe(true));
+  expect(screen.queryByLabelText('외부 링크 1 URL')).toBeNull();
+ });
+
  it('stages visibility until Apply, resets its baseline, and treats a reverted selection as clean', async () => {
   mount(); await ready();
   const select = screen.getByRole('combobox', { name: '공개 범위' });

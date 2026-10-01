@@ -1,4 +1,4 @@
-import type { Visibility } from '@pcu/contracts';
+import type { ExternalLink, Visibility } from '@pcu/contracts';
 import type { ProjectStatus } from '@pcu/contracts';
 import type { AdminProjectItem, AdminProjectListQuery, AdminProjectListResponse } from '@pcu/contracts';
 import { forbidden, notFound } from '../../../shared/errors.js';
@@ -126,7 +126,7 @@ export async function updateProject(
 	projectId: number,
 	patch: {
 		visibility?: Visibility;
-		title?: string; summary?: string; description?: string;
+		title?: string; summary?: string; description?: string; externalLinks?: ExternalLink[];
 		isIncomplete?: boolean; status?: ProjectStatus; sortOrder?: number;
 	},
 	actor: Actor,
@@ -136,6 +136,7 @@ export async function updateProject(
 		...(patch.title !== undefined ? { title: patch.title } : {}),
 		...(patch.summary !== undefined ? { summary: patch.summary } : {}),
 		...(patch.description !== undefined ? { description: patch.description } : {}),
+		...(patch.externalLinks !== undefined ? { externalLinks: patch.externalLinks } : {}),
 		...(patch.isIncomplete !== undefined ? { isIncomplete: patch.isIncomplete } : {}),
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),

@@ -1,6 +1,7 @@
 import { WebglDisplayDimensionSchema, WebglDisplayKindSchema, WebglDisplayModeSchema } from './webgl-display.js';
 import { VisibilitySchema } from './schemas.js';
 import { z } from 'zod';
+import { ExternalLinksSchema } from './external-links.js';
 import {
 	AssetKindSchema,
 	ProjectStatusSchema,
@@ -237,6 +238,7 @@ export const PublicProjectDetailResponseSchema = z.object({
 	summary: z.string().optional(),
 	description: z.string().optional(),
 	githubUrl: StoredProjectLinkSchema.optional(),
+	externalLinks: ExternalLinksSchema.optional(),
 	platforms: z.array(PlatformSchema),
 	isIncomplete: z.boolean(),
 	video: ProjectVideoSchema.nullable(),
@@ -327,6 +329,7 @@ export const AdminProjectDetailSchema = z.object({
 	summary: z.string().optional(),
 	description: z.string().optional(),
 	githubUrl: StoredProjectLinkSchema.optional(),
+	externalLinks: ExternalLinksSchema.optional(),
 	platforms: z.array(PlatformSchema),
 	isIncomplete: z.boolean(),
 	video: ProjectVideoSchema.nullable(),

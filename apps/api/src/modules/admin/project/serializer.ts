@@ -1,3 +1,4 @@
+import { effectiveProjectExternalLinks } from '../../../shared/project-external-links.js';
 import type { Visibility } from '@pcu/contracts';
 import { compareProjectVideos } from '../../../shared/project-video-order.js';
 import type { AdminProjectDetail, AssetKind, Platform, ProjectStatus } from '@pcu/contracts';
@@ -70,6 +71,7 @@ export type SerializableProject = {
 	summary: string;
 	description: string;
 	githubUrl: string;
+	externalLinks?: unknown;
 	platforms: Platform[];
 	isIncomplete: boolean;
 	status: ProjectStatus;
@@ -196,6 +198,7 @@ export function createProjectSerializer(
 			summary: project.summary || undefined,
 			description: project.description || undefined,
 			githubUrl: project.githubUrl || undefined,
+			externalLinks: effectiveProjectExternalLinks(project),
 			platforms: project.platforms,
 			isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, completenessPoster),
 			video,

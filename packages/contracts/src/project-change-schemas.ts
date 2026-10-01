@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ExternalLinksSchema } from './external-links.js';
 import { SubmitProjectResponseSchema } from './response-schemas.js';
 
 const Id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -9,6 +10,7 @@ export const ProjectChangeValuesSchema = z.object({
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
 	githubUrl: z.union([z.literal(''), z.url({ protocol: /^https?$/ })]).optional(),
+	externalLinks: ExternalLinksSchema.optional(),
 	platforms: z.array(z.enum(['PC', 'MOBILE', 'WEB'])).max(3).optional(),
 	members: z.array(z.object({ name: z.string().trim().min(1).max(50), studentId: z.string().max(20) }).strict()).max(100).optional(),
 	removeAssetIds: z.array(Id).max(500).optional(),

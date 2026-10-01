@@ -128,6 +128,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 									control={control}
 									errors={errors}
 									isUploadLocked={isUploadLocked}
+									isSubmitting={isSubmitting}
 									register={register}
 									years={years}
 								/>
@@ -198,6 +199,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 			{previewSnapshot && (
 				<ProjectPreviewModal
 					values={{
+						externalLinks: previewSnapshot.externalLinks,
 						title: previewSnapshot.title,
 						summary: previewSnapshot.summary || undefined,
 						description: previewSnapshot.description || undefined,

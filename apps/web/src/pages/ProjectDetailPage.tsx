@@ -59,7 +59,7 @@ export default function ProjectDetailPage() {
         )}
       </h1>
 
-      <ProjectPublicMeta githubUrl={project.githubUrl} platforms={project.platforms} />
+      <ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} />
 
       {/* 에셋 유실 안내 */}
       {project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (project.attachments?.length ?? 0) === 0 && (
