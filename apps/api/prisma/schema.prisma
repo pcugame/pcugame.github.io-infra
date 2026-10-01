@@ -237,6 +237,8 @@ model Project {
   githubUrl                String        @default("") @map("github_url")
   platforms                Platform[]    @default([])
   posterAssetId            Int?          @unique @map("poster_asset_id")
+  webglDisplayWidth       Int?          @map("webgl_display_width")
+  webglDisplayHeight      Int?          @map("webgl_display_height")
   currentWebglDeploymentId String?       @unique @map("current_webgl_deployment_id")
   creatorId                Int           @map("creator_id")
   createdAt                DateTime      @default(now()) @map("created_at")

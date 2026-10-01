@@ -1,6 +1,9 @@
 import { createWebglPlayRepository, createUnavailableWebglPlayRepository, type WebglPlayRepository } from './modules/webgl-play/repository.js';
 import { createWebglPlayService } from './modules/webgl-play/service.js';
 import { createWebglPlayController } from './modules/webgl-play/controller.js';
+import { createWebglDisplayRepository } from './modules/me/project/webgl-display.repository.js';
+import { createWebglDisplayService } from './modules/me/project/webgl-display.service.js';
+import { createWebglDisplayController } from './modules/me/project/webgl-display.controller.js';
 import { createWebglNetworkRepository, createUnavailableWebglNetworkRepository, type WebglNetworkRepository } from './modules/webgl-network/repository.js';
 import { createWebglNetworkService } from './modules/webgl-network/service.js';
 import { createWebglNetworkController } from './modules/webgl-network/controller.js';
@@ -726,6 +729,10 @@ export async function createProductionBackendContext(
 			() => importExport.close(),
 		));
 		const projectMultipart = createProjectMultipartProductionGraph({
+			webglDisplayController: prisma ? createWebglDisplayController(createWebglDisplayService(createWebglDisplayRepository(prisma))) : createWebglDisplayController(createWebglDisplayService({
+				read: async () => { throw new Error('WebGL display persistence is unavailable'); },
+				write: async () => { throw new Error('WebGL display persistence is unavailable'); },
+			})),
 			config,
 			uploadLifecycle,
 			access: projectMemberSettings.projectAccess,

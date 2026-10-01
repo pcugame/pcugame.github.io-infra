@@ -132,6 +132,7 @@ const steps = [
 	[npm, ['run', 'test:integration:banned-ips']],
 	[npm, ['run', 'test:integration:phase2-transition']],
 	[npm, ['run', 'test:integration:year-change-approval']],
+	[npm, ['run', 'test:integration:webgl-display']],
 	[npm, ['run', 'test:integration:visibility']],
 	[npm, ['run', 'test:integration:visibility-gateway']],
 	[docker, ['compose', '-f', 'docker-compose.integration.yml', '--profile', 'e2e', 'run', '--rm', 'e2e']],

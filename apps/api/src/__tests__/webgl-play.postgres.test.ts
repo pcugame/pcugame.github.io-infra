@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { WebglPlayCreateDataSchema } from '@pcu/contracts';
 import { createWebglPlayRepository } from "../modules/webgl-play/repository.js";
 import { createWebglPlayService } from "../modules/webgl-play/service.js";
 import { createWebglPlayController } from "../modules/webgl-play/controller.js";
@@ -200,6 +202,7 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
         COOKIE_SECURE: false,
         COOKIE_SAME_SITE: "lax",
         API_PUBLIC_URL: "http://api.test",
+        WEB_PUBLIC_URL: origin,
         PUBLIC_ASSET_ORIGIN: "http://files.test",
         S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: "http://protected.test",
         S3_BUCKET_PUBLIC: "public",
@@ -315,6 +318,32 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
         },
         payload: action === "close" ? {} : { visible },
       });
+    it("passes configured and cleared display sizes through authenticated session serialization", async () => {
+      for (const settings of [
+        { webglDisplayWidth: 1280, webglDisplayHeight: 720 },
+        { webglDisplayWidth: null, webglDisplayHeight: null },
+      ]) {
+        await db.project.update({ where: { id: projectId }, data: settings });
+        const response = await issue();
+        expect(response.statusCode, response.body).toBe(200);
+        const grant = WebglPlayCreateDataSchema.parse(response.json().data);
+        expect(grant).toMatchObject(settings);
+        expect((await control(grant, "close")).statusCode).toBe(200);
+      }
+    });
+    it("serves the sized shell with matching CSP hashes and isolation headers", async () => {
+      const response = await app.inject({ url: `/play/projects/${projectId}` });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.body).toContain('id="fullscreen"');
+      expect(response.body).toContain('configured-display');
+      for (const tag of ["script", "style"]) {
+        const text = response.body.match(new RegExp("<" + tag + ">([\\s\\S]*)</" + tag + ">"))![1]!;
+        expect(response.headers["content-security-policy"]).toContain("'sha256-" + createHash("sha256").update(text).digest("base64") + "'");
+      }
+      expect(response.headers["content-security-policy"]).not.toContain("unsafe-inline");
+      expect(response.headers["cross-origin-opener-policy"]).toBe("same-origin");
+      expect(response.headers["cross-origin-embedder-policy"]).toBe("require-corp");
+    });
     it("issues separated hash-only credentials through authenticated serialized HTTP", async () => {
       const response = await issue();
       expect(response.statusCode, response.body).toBe(200);
