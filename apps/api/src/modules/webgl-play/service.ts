@@ -1,3 +1,4 @@
+import { resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Env } from "../../config/env.js";
 import { forbidden, notFound, AppError } from "../../shared/errors.js";
@@ -115,13 +116,15 @@ export function createWebglPlayService(
         .split("/")
         .map(encodeURIComponent)
         .join("/");
+      const display = resolveWebglDisplay({ ...dep.project, webglDisplayMode: dep.project.webglDisplayMode as WebglDisplayMode, analysis: dep.displayAnalysis });
       return {
         id: play.id,
         controlSecret,
         iframeUrl: `${config.PUBLIC_ASSET_ORIGIN}/runtime/${assetToken}/${entry}`,
         projectTitle: dep.project.title,
-        webglDisplayWidth: dep.project.webglDisplayWidth,
-        webglDisplayHeight: dep.project.webglDisplayHeight,
+        webglDisplayKind: display.kind,
+        webglDisplayWidth: display.width,
+        webglDisplayHeight: display.height,
         expiresAt: expiresAt.toISOString(),
         absoluteExpiresAt: absoluteExpiresAt.toISOString(),
       };

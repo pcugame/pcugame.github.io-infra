@@ -440,6 +440,13 @@
   }
 }
 
+.webgl-viewport--responsive .webgl-viewport__surface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .graphics-gate {
   width: min(27rem, calc(100vw - 2rem));
   max-width: none;

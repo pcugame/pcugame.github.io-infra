@@ -1,13 +1,13 @@
 import type { ProjectSubmissionStatusResponse, SubmitProjectResponse } from '../../contracts';
-import type { WebglDisplaySettings } from '@pcu/contracts';
+import type { WebglDisplaySettings, WebglDisplaySettingsResponse } from '@pcu/contracts';
 import { api, uploadFormData } from './client';
 
 export const userProjectApi = {
   getWebglDisplay(projectId: number) {
-    return api.get<WebglDisplaySettings>(`/api/me/projects/${projectId}/webgl-display`);
+    return api.get<WebglDisplaySettingsResponse>(`/api/me/projects/${projectId}/webgl-display`);
   },
   setWebglDisplay(projectId: number, settings: WebglDisplaySettings) {
-    return api.put<WebglDisplaySettings>(`/api/me/projects/${projectId}/webgl-display`, settings);
+    return api.put<WebglDisplaySettingsResponse>(`/api/me/projects/${projectId}/webgl-display`, settings);
   },
   submit(input: { formData: FormData; idempotencyKey: string }) {
     return uploadFormData<SubmitProjectResponse>(

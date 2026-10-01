@@ -78,6 +78,20 @@ describe('WebGL display sizing', () => {
 		expect(screen.getByTitle('game')).toBe(iframe);
 	});
 
+	it('keeps a responsive viewport free of fixed dimensions through fullscreen', async () => {
+		const { container } = render(<WebglViewport kind="responsive"><iframe title="game" /></WebglViewport>);
+		const frame = screen.getByTitle('game');
+		const surface = container.querySelector<HTMLElement>('.webgl-viewport__surface')!;
+		expect(container.querySelector('.webgl-viewport--responsive')).toBeTruthy();
+		expect(surface.style.width).toBe('');
+		expect(surface.style.height).toBe('');
+		expect(surface.style.transform).toBe('');
+		await act(async () => fireEvent.click(screen.getByRole('button', { name: '전체화면' })));
+		expect(screen.getByTitle('game')).toBe(frame);
+		await act(async () => fireEvent.click(screen.getByRole('button', { name: '전체화면 종료' })));
+		expect(screen.getByTitle('game')).toBe(frame);
+	});
+
 	it('retains the legacy iframe class behavior when no size is set', () => {
 		const { container } = render(<WebglViewport><iframe className="project-play-page__frame" title="game" /></WebglViewport>);
 		expect(container.querySelector('.webgl-viewport')).toBeNull();
