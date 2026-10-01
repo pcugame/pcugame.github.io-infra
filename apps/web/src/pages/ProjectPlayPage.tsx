@@ -1,4 +1,5 @@
 import { useViewerKey } from '../lib/query';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorMessage, LoadingSpinner } from '../components/common';
@@ -6,6 +7,7 @@ import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 
 export default function ProjectPlayPage() {
+	const [restartCount, setRestartCount] = useState(0);
  const viewerKey = useViewerKey();
 	const { projectId: projectIdParam } = useParams<{ projectId: string }>();
 	const projectId = Number(projectIdParam);
@@ -39,8 +41,24 @@ export default function ProjectPlayPage() {
 			</header>
 
 			{project.webglUrl ? (
+				<>
+				<section className="project-play-page__help" aria-label="게임 실행 안내">
+					<div className="project-play-page__actions">
+						<button type="button" className="btn btn--secondary btn--small" onClick={() => {
+							if (window.confirm('게임을 다시 시작할까요? 저장하지 않은 진행 상황은 사라질 수 있습니다.')) setRestartCount((count) => count + 1);
+						}}>게임 다시 시작</button>
+						{project.gameDownloadUrl && <a className="btn btn--secondary btn--small" href={project.gameDownloadUrl} download>게임 다운로드 (ZIP)</a>}
+					</div>
+					<p>처음 실행할 때는 게임 파일 다운로드에 시간이 걸릴 수 있습니다.</p>
+					<details>
+						<summary>게임이 실행되지 않나요?</summary>
+						<p>브라우저를 최신 버전으로 업데이트하고 그래픽 가속 설정을 확인해 주세요. 실행 여부는 브라우저뿐 아니라 기기의 그래픽 지원과 게임 빌드에 따라 달라집니다.</p>
+						<p>문제가 계속되면 작품명, 브라우저 이름과 버전, 화면에 표시된 오류를 운영자에게 알려 주세요.</p>
+					</details>
+				</section>
 				<div className="project-play-page__frame-wrap">
 					<iframe
+						key={`${project.id}:${project.webglUrl}:${restartCount}`}
 						{...{ credentialless: '' }}
 						className="project-play-page__frame"
 						src={project.webglUrl}
@@ -50,6 +68,7 @@ export default function ProjectPlayPage() {
 						referrerPolicy="no-referrer"
 					/>
 				</div>
+				</>
 			) : (
 				<section className="project-play-page__empty">
 					<h2>플레이할 WebGL 빌드가 없습니다.</h2>

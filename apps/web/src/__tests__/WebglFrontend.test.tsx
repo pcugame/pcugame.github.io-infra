@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectActions } from '../components/project/ProjectActions';
@@ -49,7 +49,32 @@ function renderPlayPage() {
 
 describe('WebGL public frontend', () => {
 	beforeEach(() => vi.clearAllMocks());
-	afterEach(cleanup);
+	afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+	it('only restarts the game after confirmation and preserves iframe isolation', async () => {
+		mocks.getProjectDetail.mockResolvedValue(project('https://assets.example.com/play/game/index.html'));
+		renderPlayPage();
+		const originalFrame = await screen.findByTitle('웹 게임 WebGL 플레이어');
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+		fireEvent.click(screen.getByRole('button', { name: '게임 다시 시작' }));
+		expect(screen.getByTitle('웹 게임 WebGL 플레이어')).toBe(originalFrame);
+		confirm.mockReturnValue(true);
+		fireEvent.click(screen.getByRole('button', { name: '게임 다시 시작' }));
+		const restartedFrame = screen.getByTitle('웹 게임 WebGL 플레이어');
+		expect(restartedFrame).not.toBe(originalFrame);
+		expect(restartedFrame.getAttribute('src')).toBe(originalFrame.getAttribute('src'));
+		expect(restartedFrame.getAttribute('sandbox')).toBe(originalFrame.getAttribute('sandbox'));
+		expect(restartedFrame.hasAttribute('credentialless')).toBe(true);
+	});
+
+	it('offers a downloadable build when available without claiming a browser is unsupported', async () => {
+		mocks.getProjectDetail.mockResolvedValue({ ...project('https://assets.example.com/play/game/index.html'), gameDownloadUrl: 'https://api.example.com/game.zip' });
+		renderPlayPage();
+		const download = await screen.findByRole('link', { name: '게임 다운로드 (ZIP)' });
+		expect(download.getAttribute('href')).toBe('https://api.example.com/game.zip');
+		expect(screen.getByText('게임이 실행되지 않나요?')).toBeTruthy();
+		expect(screen.queryByText(/Chrome.*필수|Firefox.*지원하지/)).toBeNull();
+	});
 
 	it('renders a credentialless Unity-compatible iframe without navigation permissions', async () => {
 		mocks.getProjectDetail.mockResolvedValueOnce(project('https://api.example.com/api/public/webgl/7/'));

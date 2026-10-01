@@ -715,6 +715,15 @@ if (!webglCsp.includes(`frame-ancestors ${new URL(origin).origin}`)) {
 if (!webglCsp.includes("connect-src 'self' blob:") || new URL(webglUrl).origin === new URL(apiBase).origin) {
   throw new Error(`WebGL index did not isolate immutable public-origin asset connections: ${webglCsp}`);
 }
+const scriptSources = webglCsp.split(';').map((directive) => directive.trim().split(/\s+/))
+  .find(([name]) => name === 'script-src')?.slice(1) ?? [];
+const expectedScriptSources = ["'self'", 'blob:', "'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'"];
+if (
+  expectedScriptSources.some((source) => !scriptSources.includes(source))
+  || scriptSources.some((source) => !expectedScriptSources.includes(source))
+) {
+  throw new Error(`WebGL index must allow Unity framework blob scripts while excluding external script origins: ${webglCsp}`);
+}
 
 const webglEtagConditional = await fetch(hostedWebglUrl, {
   headers: { Origin: 'null', 'If-None-Match': webglEtag },
