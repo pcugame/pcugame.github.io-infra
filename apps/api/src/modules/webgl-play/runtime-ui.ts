@@ -76,6 +76,7 @@ const fullscreen = document.getElementById('fullscreen');
 const displayInfo = document.getElementById('display-info');
 let displaySize;
 let session;
+let accelerationStatus = 'unknown';
 let checking = false;
 let stopped = false;
 let lastCheck = 0;
@@ -173,6 +174,7 @@ async function start() {
       stop('이 실행 환경에서는 WebAssembly를 사용할 수 없습니다. HTTPS로 접속하고 데스크톱 Chrome, Edge 또는 Firefox를 확인해 주세요.');
       return;
     }
+    announce('게임 실행을 요청하고 있습니다.');
     session = await post('', { projectId: Number(root.dataset.projectId) });
     const target = new URL(session.iframeUrl);
     if (target.origin !== root.dataset.assetOrigin || !/^\/runtime\/[a-f0-9]{64}\//.test(target.pathname)
@@ -195,7 +197,13 @@ async function start() {
     configureDisplay(session.webglDisplayKind, session.webglDisplayWidth, session.webglDisplayHeight);
     lastCheck = Date.now();
     restart.disabled = false;
-    announce(window.crossOriginIsolated
+    // A successful session/iframe request is not a successful Unity startup.
+    // Without WebGL, Unity's loader rejects before fetching its build and its
+    // stock alert is suppressed by the sandbox. Keep the explicit launch attempt,
+    // but do not leave the parent claiming that the game is still loading.
+    announce(accelerationStatus === 'unavailable'
+      ? '게임 실행을 요청했지만 현재 브라우저에서 WebGL을 사용할 수 없습니다. 그래픽 가속을 켜고 브라우저를 완전히 다시 시작한 뒤 재시도해 주세요.'
+      : window.crossOriginIsolated
       ? '게임 파일을 불러오고 있습니다. 처음 실행할 때는 시간이 걸릴 수 있습니다.'
       : '브라우저 격리가 활성화되지 않았습니다. 멀티스레드 빌드는 실행되지 않을 수 있습니다.');
   } catch (error) { stop(error.message); }
@@ -308,8 +316,11 @@ try {
 } catch { /* Browser detection is optional. */ }
 function inspectAcceleration() {
   if (released) return;
-  const result = detectGraphicsAcceleration();
+  const result = accelerationStatus = detectGraphicsAcceleration();
   if (result === 'available' || result === 'unknown') { release(); return; }
+  document.getElementById('acceleration-description').textContent = result === 'unavailable'
+    ? '현재 브라우저에서 WebGL을 사용할 수 없어요. 그래픽 가속을 켜고 브라우저를 다시 시작해야 게임을 실행할 수 있어요.'
+    : '그래픽카드가 쉬고 있을 수 있어요. 그래픽 가속을 켜면 더 부드럽게 플레이할 수 있어요.';
   announce('게임을 시작하기 전에 그래픽 가속 설정을 확인해 주세요.');
   gate.hidden = false;
   if (!gate.open) {
@@ -323,7 +334,11 @@ retry.addEventListener('click', () => {
   inspectAcceleration();
   if (!released) document.getElementById('acceleration-result').textContent = '아직 그래픽 가속을 확인하지 못했어요. 브라우저를 다시 시작한 후 확인해 주세요.';
 });
-proceed.addEventListener('click', release);
+proceed.addEventListener('click', () => {
+  if (released) return;
+  accelerationStatus = detectGraphicsAcceleration();
+  release();
+});
 document.getElementById('acceleration-close').addEventListener('click', () => location.assign(document.getElementById('back').href));
 gate.addEventListener('cancel', event => {
   event.preventDefault();

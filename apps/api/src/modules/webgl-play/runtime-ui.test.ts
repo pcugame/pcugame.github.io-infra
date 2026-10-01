@@ -79,6 +79,28 @@ describe('runtime shell graphics acceleration gate', () => {
 		expect(run.get('game').children).toHaveLength(1);
 		expect(run.get('game').children[0]?.attributes.sandbox).toBe('allow-scripts allow-pointer-lock allow-same-origin');
 		expect(run.get('acceleration-gate').hidden).toBe(true);
+		expect(run.get('status').textContent).toContain('게임 파일을 불러오고');
+	});
+	it('explicit continuation still requests the game without WebGL but explains why Unity cannot start', async () => {
+		const run = shell({ missing: true });
+		expect(run.get('acceleration-description').textContent).toContain('WebGL을 사용할 수 없어요');
+		run.get('acceleration-continue').click();
+		expect(run.get('status').textContent).toBe('게임 실행을 요청하고 있습니다.');
+		await settle();
+		expect(run.fetch).toHaveBeenCalledTimes(1);
+		expect(run.get('game').children).toHaveLength(1);
+		expect(run.get('acceleration-gate').hidden).toBe(true);
+		expect(run.get('status').textContent).toContain('WebGL을 사용할 수 없습니다');
+		expect(run.get('status').textContent).not.toContain('게임 파일을 불러오고');
+	});
+	it('checks the current capability when continuing after a browser setting change', async () => {
+		const options = { missing: true, renderer: 'NVIDIA GPU' };
+		const run = shell(options);
+		options.missing = false;
+		run.get('acceleration-continue').click();
+		await settle();
+		expect(run.fetch).toHaveBeenCalledTimes(1);
+		expect(run.get('status').textContent).toContain('게임 파일을 불러오고');
 	});
 	it('applies configured sizing only after explicit continuation through the acceleration gate', async () => {
 		const run = shell({ renderer: 'SwiftShader', width: 720, height: 1280 });
@@ -107,6 +129,7 @@ describe('runtime shell graphics acceleration gate', () => {
 		await settle();
 		expect(run.fetch).toHaveBeenCalledTimes(1);
 		expect(run.loseContext).toHaveBeenCalledTimes(2);
+		expect(run.get('status').textContent).toContain('게임 파일을 불러오고');
 	});
 	it('strict performance caveat holds the gate and releases the probe context', () => {
 		const run = shell({ renderer: 'NVIDIA', strictMissing: true });
