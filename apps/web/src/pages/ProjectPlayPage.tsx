@@ -1,3 +1,4 @@
+import { GraphicsAccelerationGate } from '../components/project/GraphicsAccelerationGate';
 import { useViewerKey } from '../lib/query';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -46,7 +47,7 @@ export default function ProjectPlayPage() {
 			</header>
 
 			{project.webglUrl ? (
-				<>
+				<GraphicsAccelerationGate key={project.id} projectId={project.id}>
 				<section className="project-play-page__help" aria-label="게임 실행 안내">
 					<div className="project-play-page__actions">
 						<button type="button" className="btn btn--secondary btn--small" onClick={() => {
@@ -73,7 +74,7 @@ export default function ProjectPlayPage() {
 						referrerPolicy="no-referrer"
 					/>
 				</div>
-				</>
+				</GraphicsAccelerationGate>
 			) : (
 				<section className="project-play-page__empty">
 					<h2>플레이할 WebGL 빌드가 없습니다.</h2>
