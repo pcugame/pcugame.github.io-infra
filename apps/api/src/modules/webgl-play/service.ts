@@ -5,6 +5,8 @@ import { forbidden, notFound, AppError } from "../../shared/errors.js";
 import { canReadProject } from "../../shared/visibility.js";
 import { manifestIncludes } from "../file-access/service.js";
 import type { WebglPlayRepository } from "./repository.js";
+import { validateWebglNetworkOrigin } from '@pcu/contracts';
+import { isPrivilegedNetworkOrigin } from '../webgl-network/service.js';
 const IDLE = 15 * 60_000;
 const MAX = 8 * 60 * 60_000;
 const hash = (secret: string) =>
@@ -13,9 +15,11 @@ export function runtimeCsp(
   origin: string,
   token: string,
   apiUrl: string,
+  approvedOrigins: readonly string[] = [],
 ): string {
   const path = `${origin}/runtime/${token}/`;
-  return `default-src 'none'; script-src ${path} blob: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src ${path} blob:; connect-src ${path} blob:; img-src ${path} data: blob:; media-src ${path} blob:; style-src ${path} 'unsafe-inline'; font-src ${path} data:; frame-ancestors ${new URL(apiUrl).origin}; base-uri 'none'; form-action 'none'; object-src 'none'`;
+  const connections = approvedOrigins.length ? ` ${approvedOrigins.join(' ')}` : '';
+  return `default-src 'none'; script-src ${path} blob: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src ${path} blob:; connect-src ${path} blob:${connections}; img-src ${path} data: blob:; media-src ${path} blob:; style-src ${path} 'unsafe-inline'; font-src ${path} data:; frame-ancestors ${new URL(apiUrl).origin}; base-uri 'none'; form-action 'none'; object-src 'none'`;
 }
 export function createWebglPlayService(
   repository: WebglPlayRepository,
@@ -69,6 +73,15 @@ export function createWebglPlayService(
     await login(play.sessionId);
     return play;
   }
+  async function checkPolicy(play: NonNullable<Awaited<ReturnType<WebglPlayRepository['find']>>>) {
+    if (!config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED && play.approvedOrigins.length) {
+      // Commit revocation separately: throwing inside renewal's transaction would
+      // roll it back and allow the session to revive when the flag is reenabled.
+      await repository.close(play.id, now());
+      throw forbidden('External connections are disabled for this play session');
+    }
+    await repository.policyValid(play, config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED);
+  }
   return {
     async create(projectId: number, sid?: string) {
       enabled();
@@ -94,6 +107,7 @@ export function createWebglPlayService(
           absoluteExpiresAt,
         },
         at,
+        config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED,
       );
       if (!play)
         throw new AppError(429, "Too many play sessions", "RATE_LIMITED");
@@ -125,10 +139,12 @@ export function createWebglPlayService(
         play.absoluteExpiresAt <= at
       )
         throw forbidden();
+      await checkPolicy(play);
       const result = await repository.renewAuthorized(
         id,
         at,
         config.SESSION_IDLE_MS,
+        config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED,
       );
       return {
         data: {
@@ -180,6 +196,9 @@ export function createWebglPlayService(
         throw forbidden();
       const { dep } = await deployment(play.projectId, play.sessionId);
       if (dep.id !== play.deploymentId) throw forbidden();
+      await checkPolicy(play);
+      if (play.approvedOrigins.some(origin => !validateWebglNetworkOrigin(origin, origin.startsWith('wss:') ? 'WSS' : 'HTTPS')
+        || isPrivilegedNetworkOrigin(origin, config))) throw forbidden();
       const key = dep.publicPrefix.replace(/\/$/, "") + "/" + relative;
       if (!manifestIncludes(dep.objectManifest, key)) throw forbidden();
       return {
@@ -189,6 +208,7 @@ export function createWebglPlayService(
           config.PUBLIC_ASSET_ORIGIN!,
           match[1]!,
           config.API_PUBLIC_URL,
+          play.approvedOrigins,
         ),
       };
     },

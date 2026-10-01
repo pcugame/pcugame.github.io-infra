@@ -60,6 +60,12 @@ try{
   await context.addInitScript(()=>{window.cspViolations=[];document.addEventListener('securitypolicyviolation',event=>window.cspViolations.push({directive:event.effectiveDirective,blocked:event.blockedURI}));});
   const page=await context.newPage();await page.clock.install();
   await page.goto(`${apiOrigin}/play/projects/1`);
+  // Headless software rendering may intentionally hold startup. Exercise the real
+  // explicit continuation control instead of bypassing the production probe.
+  await page.locator('#game iframe, #acceleration-gate:not([hidden])').first().waitFor();
+  if (await page.locator('#acceleration-gate').isVisible()) {
+   await page.locator('#acceleration-continue').click();
+  }
   const iframe=page.locator('#game iframe');await iframe.waitFor();
   const game=await (await iframe.elementHandle()).contentFrame();await game.waitForFunction(()=>window.probe?.worker||window.probe?.workerError);
   const first={creates,loads,id:await game.evaluate(()=>probe.id),src:await iframe.getAttribute('src')};

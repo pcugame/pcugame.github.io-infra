@@ -34,11 +34,11 @@ import { randomUUID } from 'node:crypto';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { PrismaClient } from '../src/generated/prisma/client.js';
 
-const prismaClientModule = (process.env.SEED_USE_DIST === 'true'
+const prismaClientModule: {
+  createPrismaClientForDatabase(databaseUrl: string): PrismaClient;
+} = (process.env.SEED_USE_DIST === 'true'
   ? await import('../dist/lib/prisma-client.js')
-  : await import('../src/lib/prisma-client.js')) as unknown as {
-    createPrismaClientForDatabase(databaseUrl: string): PrismaClient;
-  };
+  : await import('../src/lib/prisma-client.js'));
 
 if (process.env.NODE_ENV === 'production') {
   console.error('ERROR: seed must not run in production');

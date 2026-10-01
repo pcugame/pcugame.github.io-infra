@@ -25,17 +25,17 @@ export interface WebglArchiveLayout {
 }
 
 const REQUIRED_UNITY_BUILD_ARTIFACTS = [
-	{ label: 'loader.js', pattern: /^Build\/[^/]+\.loader\.js(?:\.(?:gz|br))?$/i },
-	{ label: 'framework.js', pattern: /^Build\/[^/]+\.framework\.js(?:\.(?:gz|br))?$/i },
-	{ label: 'wasm', pattern: /^Build\/[^/]+\.wasm(?:\.(?:gz|br))?$/i },
-	{ label: 'data', pattern: /^Build\/[^/]+\.data(?:\.(?:gz|br))?$/i },
+	{ label: 'loader.js', formats: '.loader.js, .loader.js.gz, .loader.js.br', pattern: /^Build\/[^/]+\.loader\.js(?:\.(?:gz|br))?$/i },
+	{ label: 'framework.js', formats: '.framework.js, .framework.js.gz, .framework.js.br, .framework.js.unityweb', pattern: /^Build\/[^/]+\.framework\.js(?:\.(?:gz|br|unityweb))?$/i },
+	{ label: 'wasm', formats: '.wasm, .wasm.gz, .wasm.br, .wasm.unityweb', pattern: /^Build\/[^/]+\.wasm(?:\.(?:gz|br|unityweb))?$/i },
+	{ label: 'data', formats: '.data, .data.gz, .data.br, .data.unityweb', pattern: /^Build\/[^/]+\.data(?:\.(?:gz|br|unityweb))?$/i },
 ] as const;
 
 function assertRequiredUnityArtifacts(hostedPaths: Iterable<string>): void {
 	const paths = [...hostedPaths];
 	for (const required of REQUIRED_UNITY_BUILD_ARTIFACTS) {
 		if (!paths.some((path) => required.pattern.test(path))) {
-			throw badRequest(`WebGL ZIP is missing required Unity Build ${required.label} artifact`);
+			throw badRequest(`WebGL ZIP is missing required Unity Build ${required.label} artifact (accepted: ${required.formats}; keep it in the Build folder)`);
 		}
 	}
 }

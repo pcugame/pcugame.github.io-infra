@@ -6,9 +6,66 @@ interface ShellConfig {
 	PUBLIC_ASSET_ORIGIN?: string;
 }
 
+// The probe intentionally mirrors apps/web/src/lib/graphicsAcceleration.ts; executable
+// shell tests cover the same renderer, strict-context, uncertainty and cleanup cases.
 // Static code is hashed by the response CSP; no project-provided text is script or markup.
 const script = String.raw`(() => {
 'use strict';
+const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|software rasterizer|microsoft basic render driver/i;
+
+function probeContext(version, strict) {
+	let context = null;
+	try {
+		// Context attributes are fixed on first creation, so every probe needs its own canvas.
+		const canvas = document.createElement('canvas');
+		canvas.width = 1;
+		canvas.height = 1;
+		context = canvas.getContext(version, { failIfMajorPerformanceCaveat: strict });
+		if (!context) return { supported: false, failed: false, renderer: null };
+		if (context.isContextLost()) return { supported: false, failed: true, renderer: null };
+
+		// Renderer details may be withheld by privacy settings. That is inconclusive,
+		// not evidence that hardware acceleration is disabled.
+		let renderer = null;
+		if (!strict) {
+			const debugInfo = context.getExtension('WEBGL_debug_renderer_info');
+			if (debugInfo) {
+				const value = context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+				if (typeof value === 'string' && value.trim()) renderer = value;
+			}
+		}
+		return { supported: true, failed: false, renderer };
+	} catch {
+		return { supported: context !== null, failed: true, renderer: null };
+	} finally {
+		// Release GPU resources even if reading the renderer or creating another probe fails.
+		try {
+			context?.getExtension('WEBGL_lose_context')?.loseContext();
+		} catch {
+			// Cleanup is best effort and must not turn a usable probe into an error.
+		}
+	}
+}
+
+/** A local hint about WebGL acceleration, not a browser-setting or GPU guarantee. */
+function detectGraphicsAcceleration() {
+	if (typeof document === 'undefined') return 'unknown';
+
+	let failed = false;
+	for (const version of ['webgl2', 'webgl']) {
+		const normal = probeContext(version, false);
+		failed ||= normal.failed;
+		if (!normal.supported) continue;
+		if (normal.renderer && SOFTWARE_RENDERER.test(normal.renderer)) return 'software';
+
+		const strict = probeContext(version, true);
+		if (strict.failed) return 'unknown';
+		if (!strict.supported) return 'performance-caveat';
+		return normal.renderer && !normal.failed ? 'available' : 'unknown';
+	}
+	return failed ? 'unknown' : 'unavailable';
+}
+
 const root = document.querySelector('main');
 const status = document.getElementById('status');
 const title = document.getElementById('title');
@@ -109,7 +166,7 @@ window.addEventListener('pagehide', () => {
     headers: { 'Content-Type': 'application/json', 'X-PCU-Play-Control': session.controlSecret }, body: '{}',
   }).catch(() => {});
 });
-(async () => {
+async function start() {
   try {
     if (!window.isSecureContext || typeof WebAssembly === 'undefined') {
       stop('이 실행 환경에서는 WebAssembly를 사용할 수 없습니다. HTTPS로 접속하고 데스크톱 Chrome, Edge 또는 Firefox를 확인해 주세요.');
@@ -141,10 +198,78 @@ window.addEventListener('pagehide', () => {
       ? '게임 파일을 불러오고 있습니다. 처음 실행할 때는 시간이 걸릴 수 있습니다.'
       : '브라우저 격리가 활성화되지 않았습니다. 멀티스레드 빌드는 실행되지 않을 수 있습니다.');
   } catch (error) { stop(error.message); }
-})();
+}
+const gate = document.getElementById('acceleration-gate');
+const retry = document.getElementById('acceleration-retry');
+const proceed = document.getElementById('acceleration-continue');
+const browser = document.getElementById('guide-browser');
+const guide = document.getElementById('guide-steps');
+const address = document.getElementById('guide-address');
+let released = false;
+function release() {
+  if (released) return;
+  released = true;
+  retry.disabled = true;
+  proceed.disabled = true;
+  if (gate.open && typeof gate.close === 'function') gate.close();
+  gate.hidden = true;
+  void start();
+}
+function updateGuide() {
+  const selected = browser.value;
+  const chromium = ['chrome', 'edge', 'brave', 'whale', 'opera'].includes(selected);
+  address.textContent = chromium ? (selected === 'edge' ? 'edge://settings/systemAndPerformance' : selected === 'opera' ? 'opera://settings' : selected + '://settings/system') : selected === 'firefox' ? 'about:preferences' : '';
+  const steps = selected === 'firefox'
+    ? ['메뉴 → 설정 → 성능 (탭 및 탐색 또는 일반)', '권장 성능 설정 사용을 해제하고 하드웨어 가속을 켜세요.', '작업을 저장한 뒤 브라우저를 다시 시작하고 이 페이지로 돌아오세요.']
+    : chromium
+      ? ['주소창에 위 설정 주소를 입력하거나 메뉴 → 설정 → 시스템을 여세요.', '가능한 경우 그래픽 가속 사용을 켜세요. 하드웨어 가속으로 표시될 수도 있습니다.', '작업을 저장한 뒤 브라우저를 다시 시작하고 이 페이지로 돌아오세요.']
+      : ['브라우저와 운영체제를 업데이트하고 다시 시작하세요.', '계속 실행되지 않으면 최신 데스크톱 브라우저나 다른 컴퓨터를 확인해 주세요.'];
+  guide.replaceChildren(...steps.map(text => { const item = document.createElement('li'); item.textContent = text; return item; }));
+}
+let manualBrowser = false;
+browser.addEventListener('change', () => { manualBrowser = true; updateGuide(); });
+// Browser identification is a guide hint; privacy settings must not block the gate.
+const ua = navigator.userAgent || '';
+const brands = navigator.userAgentData?.brands?.map(item => item.brand).join(' ') || '';
+browser.value = /Brave/i.test(brands + ua) ? 'brave' : /Edg\//i.test(ua) ? 'edge'
+  : /Whale\//i.test(ua) ? 'whale' : /OPR\//i.test(ua) ? 'opera'
+  : /Firefox\//i.test(ua) ? 'firefox' : /Chrome\//i.test(ua) ? 'chrome' : 'other';
+updateGuide();
+try {
+  if (typeof navigator.brave?.isBrave === 'function') {
+    Promise.resolve(navigator.brave.isBrave()).then(isBrave => {
+      if (isBrave && !manualBrowser) { browser.value = 'brave'; updateGuide(); }
+    }).catch(() => {});
+  }
+} catch { /* Browser detection is optional. */ }
+function inspectAcceleration() {
+  if (released) return;
+  const result = detectGraphicsAcceleration();
+  if (result === 'available' || result === 'unknown') { release(); return; }
+  announce('게임을 시작하기 전에 그래픽 가속 설정을 확인해 주세요.');
+  gate.hidden = false;
+  if (!gate.open) {
+    try {
+      if (typeof gate.showModal === 'function') gate.showModal();
+      else gate.setAttribute('open', '');
+    } catch { gate.setAttribute('open', ''); }
+  }
+  retry.focus();
+}
+retry.addEventListener('click', () => {
+  inspectAcceleration();
+  if (!released) document.getElementById('acceleration-result').textContent = '아직 그래픽 가속을 확인하지 못했습니다. 브라우저를 다시 시작한 뒤 확인해 주세요.';
+});
+proceed.addEventListener('click', release);
+gate.addEventListener('cancel', event => {
+  event.preventDefault();
+  location.assign(document.getElementById('back').href);
+});
+if (!window.isSecureContext || typeof WebAssembly === 'undefined') void start();
+else inspectAcceleration();
 })();`;
 
-const style = `:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}a,button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}details{padding-bottom:1rem}.configured-display{height:100dvh;min-height:0;overflow:hidden}.configured-display>header,.configured-display>p,.configured-display>details{flex-shrink:0}.configured-display>details{max-height:30dvh;overflow:auto}.configured-display #game{position:relative;min-height:0;min-width:0;overflow:hidden}.configured-display iframe{position:absolute;left:50%;top:50%;min-height:0;flex:none;transform-origin:center}.configured-display:fullscreen{width:100vw;height:100dvh;background:#101318}.responsive-display iframe{inset:0;width:100%;height:100%;transform:none}[hidden]{display:none!important}#display-info{font-size:.85rem;color:#c3cedc;margin:.25rem 1.5rem}`;
+const style = `dialog[hidden]{display:none}dialog{color:inherit;background:#18212d;border:1px solid #58697c;border-radius:1rem;width:min(36rem,calc(100% - 4rem));max-height:85vh;overflow:auto;padding:1.5rem}dialog::backdrop{background:#000b}dialog h2{margin-top:0}dialog p,dialog li{line-height:1.6}dialog label{display:block;margin-top:1rem}select{font:inherit;padding:.5rem}#acceleration-actions{display:flex;gap:1rem;flex-wrap:wrap}#guide-address{overflow-wrap:anywhere}a:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid #9cc7ff;outline-offset:3px}:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}a,button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}details{padding-bottom:1rem}.configured-display{height:100dvh;min-height:0;overflow:hidden}.configured-display>header,.configured-display>p,.configured-display>details{flex-shrink:0}.configured-display>details{max-height:30dvh;overflow:auto}.configured-display #game{position:relative;min-height:0;min-width:0;overflow:hidden}.configured-display iframe{position:absolute;left:50%;top:50%;min-height:0;flex:none;transform-origin:center}.configured-display:fullscreen{width:100vw;height:100dvh;background:#101318}.responsive-display iframe{inset:0;width:100%;height:100%;transform:none}[hidden]{display:none!important}#display-info{font-size:.85rem;color:#c3cedc;margin:.25rem 1.5rem}`;
 const hash = (text: string) => `'sha256-${createHash('sha256').update(text).digest('base64')}'`;
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 
@@ -166,5 +291,5 @@ export function renderPlayShell(config: ShellConfig, projectId: number): string 
 	if (!Number.isSafeInteger(projectId) || projectId <= 0) throw new Error('Invalid project ID');
 	const back = new URL(`/projects/${projectId}`, config.WEB_PUBLIC_URL).href;
 	const assetOrigin = new URL(config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL).origin;
-	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${style}</style></head><body><main data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="fullscreen" type="button" aria-pressed="false" hidden>전체화면</button><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><p id="display-info" hidden></p><div id="game"></div><details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
+	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${style}</style></head><body><main data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="fullscreen" type="button" aria-pressed="false" hidden>전체화면</button><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><p id="display-info" hidden></p><div id="game"></div><dialog id="acceleration-gate" hidden aria-labelledby="acceleration-title" aria-describedby="acceleration-description"><h2 id="acceleration-title">그래픽 가속 설정을 확인해 주세요</h2><p id="acceleration-description">WebGL 그래픽 가속을 확인하지 못했거나 소프트웨어 렌더링이 감지되었습니다. 게임이 실행되지 않거나 느릴 수 있습니다.</p><label for="guide-browser">사용 중인 브라우저 (직접 선택 가능)</label><select id="guide-browser"><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="brave">Brave</option><option value="firefox">Firefox</option><option value="whale">Whale</option><option value="opera">Opera</option><option value="other">기타 / Safari / 모바일</option></select><p><code id="guide-address"></code></p><ol id="guide-steps"></ol><p>설정이 이미 켜져 있다면 그래픽 드라이버나 기기의 지원 상태를 확인해 주세요. 브라우저를 자동으로 구분하지 못할 때는 위에서 직접 선택해 주세요.</p><p id="acceleration-result" role="status"></p><div id="acceleration-actions"><button id="acceleration-retry" type="button">설정 후 다시 확인</button><button id="acceleration-continue" type="button">그래도 실행</button><a href="${escapeHtml(back)}">작품으로 돌아가기</a></div></dialog><details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
 }

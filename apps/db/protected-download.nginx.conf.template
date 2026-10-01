@@ -48,6 +48,9 @@ server {
 
   location = /__pcu_file_auth {
     internal;
+    # Bounded per-project runtime connection policies may exceed 4 KiB.
+    proxy_buffer_size 16k;
+    proxy_buffers 4 16k;
     resolver 127.0.0.11 valid=30s;
     set $pcu_gate_upstream "${FILE_GATEWAY_API_UPSTREAM}";
     proxy_pass $pcu_gate_upstream/api/internal/file-access;

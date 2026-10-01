@@ -16,6 +16,7 @@ const ProjectDetailPage = lazy(() => import('../pages/ProjectDetailPage'));
 const ProjectPlayPage = lazy(() => import('../pages/ProjectPlayPage'));
 const LoginPage = lazy(() => import('../pages/LoginPage'));
 const MePage = lazy(() => import('../pages/MePage'));
+const WebglNetworkPage = lazy(() => import('../pages/WebglNetworkPage'));
 const MyProjectsPage = lazy(() => import('../pages/MyProjectsPage'));
 const UserProjectSubmitPage = lazy(() => import('../pages/UserProjectSubmitPage'));
 const ProjectChangeRequestPage = lazy(() => import('../pages/ProjectChangeRequestPage'));
@@ -136,6 +137,7 @@ export const routes: RouteObject[] = [
             </RequireAuth>
           ),
         },
+        { path: '/me/projects/:id/network', element: (<RequireAuth><Lazy><WebglNetworkPage /></Lazy></RequireAuth>) },
         { path: '/me/change-requests/:id', element: (<RequireAuth><Lazy><MyChangeRequestPage /></Lazy></RequireAuth>) },
 
         // ── Admin ──────────────────────────────────────────
@@ -147,6 +149,7 @@ export const routes: RouteObject[] = [
             </RequireAuth>
           ),
           children: [
+            { path: 'webgl-network', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><WebglNetworkPage admin /></Lazy></RequireRole>) },
             {
               index: true,
               element: <Navigate to="projects" replace />,

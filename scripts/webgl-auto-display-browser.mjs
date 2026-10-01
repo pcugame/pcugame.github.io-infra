@@ -87,6 +87,12 @@ try {
  });
  page.on('console', message => logs.push({ type: message.type(), text: message.text() }));
  await page.goto(`${apiOrigin}/play/projects/1`);
+  // Headless software rendering may intentionally hold startup. Exercise the real
+  // explicit continuation control instead of bypassing the production probe.
+  await page.locator('#game iframe, #acceleration-gate:not([hidden])').first().waitFor();
+  if (await page.locator('#acceleration-gate').isVisible()) {
+   await page.locator('#acceleration-continue').click();
+  }
  const iframe = page.locator('#game iframe');
  await iframe.waitFor();
  const game = await (await iframe.elementHandle()).contentFrame();
