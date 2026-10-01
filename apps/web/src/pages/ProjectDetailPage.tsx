@@ -157,6 +157,7 @@ export default function ProjectDetailPage() {
             projectId={project.id}
             gameDownloadUrl={project.gameDownloadUrl}
             webglUrl={project.webglUrl}
+            webglPlayUrl={project.webglPlayUrl}
           />
         </section>
       )}

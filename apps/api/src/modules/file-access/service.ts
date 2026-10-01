@@ -20,7 +20,8 @@ export function manifestIncludes(manifest: unknown, key: string): boolean {
  const objects = manifest.objects;
  return Array.isArray(objects) && objects.some(item => item && typeof item === 'object' && 'objectKey' in item && item.objectKey === key);
 }
-export function createFileAccessService(repository: FileAccessRepository, config: Env, now = () => new Date(), presign?: (bucket:string,key:string,options?:{method?:'GET'|'HEAD';responseContentDisposition?:string})=>Promise<string>, checkDownload?: (assetId:number,variant:'original'|'playback',ip:string,actor:NonNullable<Actor>|undefined)=>Promise<unknown>) {
+export type RuntimeResolver = (raw: string, headers: Record<string,string|string[]|undefined>) => Promise<{path:string;host:string;csp:string}>;
+export function createFileAccessService(repository: FileAccessRepository, config: Env, now = () => new Date(), presign?: (bucket:string,key:string,options?:{method?:'GET'|'HEAD';responseContentDisposition?:string})=>Promise<string>, checkDownload?: (assetId:number,variant:'original'|'playback',ip:string,actor:NonNullable<Actor>|undefined)=>Promise<unknown>, runtimeResolver?: RuntimeResolver) {
  const publicOrigin = config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL;
  const protectedOrigin = config.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT ?? config.API_PUBLIC_URL;
  function parseUrl(value: string) {
@@ -117,6 +118,10 @@ export function createFileAccessService(repository: FileAccessRepository, config
    const raw=headers['x-pcu-file-uri'];
    const kind=headers['x-pcu-file-kind'];
    if (typeof raw!=='string' || (kind!=='public' && kind!=='protected')) throw forbidden();
+   if (raw.startsWith('/runtime/')) {
+    if (kind !== 'public' || !runtimeResolver) throw forbidden();
+    return runtimeResolver(raw,headers);
+   }
    const target=parseUrl((kind==='public'?publicOrigin:protectedOrigin)+raw);
    let key=target.objectKey;
    let tokenId=target.url.searchParams.get('pcu_token');

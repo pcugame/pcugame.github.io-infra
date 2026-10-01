@@ -3,6 +3,13 @@ map "${FILE_GATEWAY_TLS_SERVER_NAME}" $pcu_gate_tls_name {
   default "${FILE_GATEWAY_TLS_SERVER_NAME}";
 }
 
+# auth_request variables are populated after rewrite processing. An absent CSP
+# must still prevent execution/framing; never inspect it in a rewrite-phase if.
+map $pcu_runtime_csp $pcu_runtime_effective_csp {
+  "" "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+  default $pcu_runtime_csp;
+}
+
 map $http_origin $pcu_public_cors_origin {
   default "";
   "${PUBLIC_CORS_ORIGIN_PRIMARY}" $http_origin;
@@ -19,6 +26,11 @@ server {
   access_log /var/log/nginx/access.log pcu_public_origin;
   error_log /dev/null crit;
   gzip off;
+  # Dedicated Workers remain allowed. Service workers could persist across
+  # capability expiry or claim other runtime paths and are never permitted.
+  if ($http_service_worker != "") { return 403; }
+  if ($http_sec_fetch_dest = "serviceworker") { return 403; }
+
   client_max_body_size 0;
 
   location = /__pcu_file_auth {
@@ -40,6 +52,8 @@ server {
     proxy_set_header X-PCU-File-Kind "public";
     proxy_set_header X-PCU-File-Uri $request_uri;
     proxy_set_header X-PCU-File-Method $pcu_file_method;
+    proxy_set_header X-PCU-Service-Worker $http_service_worker;
+    proxy_set_header X-PCU-Fetch-Dest $http_sec_fetch_dest;
     proxy_connect_timeout 3s;
     proxy_read_timeout 5s;
     proxy_next_upstream off;
@@ -79,6 +93,7 @@ server {
     # Apply the status-specific policy below instead of allowing an upstream
     # default to mark an error response immutable.
     proxy_hide_header Cache-Control;
+    proxy_hide_header Service-Worker-Allowed;
     proxy_hide_header Access-Control-Allow-Origin;
     proxy_hide_header Access-Control-Allow-Methods;
     proxy_hide_header Access-Control-Allow-Headers;
@@ -104,4 +119,69 @@ server {
     # Unity loaders fetch framework JavaScript and execute it through a blob URL.
     add_header Content-Security-Policy "default-src 'none'; script-src 'self' blob: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors ${WEB_PUBLIC_ORIGIN}" always;
   }
+
+  location ~ "^/runtime/[a-f0-9]{64}/.+$" {
+    if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+    if ($http_content_length ~ ^[1-9][0-9]*$) { return 413; }
+    if ($http_transfer_encoding != "") { return 400; }
+
+    # Nginx does not cache or synthesize object metadata. Range, conditional
+    # request headers, MIME, Content-Encoding, ETag and Last-Modified pass
+    # through Garage's public website origin unchanged.
+    set $pcu_file_method $request_method;
+    auth_request /__pcu_file_auth;
+    auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
+    auth_request_set $pcu_runtime_csp $upstream_http_x_pcu_runtime_csp;
+    resolver 127.0.0.11 valid=30s;
+    proxy_pass ${GARAGE_PUBLIC_WEB_UPSTREAM}$pcu_validated_object_path;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_set_header X-PCU-Gateway-Secret "";
+    proxy_set_header X-PCU-File-Uri "";
+    proxy_http_version 1.1;
+    # Garage website routing is bucket-host based. This is deliberately not the
+    # browser Host and is validated against S3_BUCKET_PUBLIC by deployment tests.
+    proxy_set_header Host ${GARAGE_PUBLIC_BUCKET_HOST};
+    proxy_set_header Connection "";
+    proxy_ssl_server_name on;
+    proxy_ssl_name ${GARAGE_PUBLIC_WEB_TLS_SERVER_NAME};
+    proxy_pass_request_headers on;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Transfer-Encoding "";
+    proxy_request_buffering off;
+    proxy_buffering off;
+    # Apply the status-specific policy below instead of allowing an upstream
+    # default to mark an error response immutable.
+    proxy_hide_header Cache-Control;
+    proxy_hide_header Content-Security-Policy;
+    proxy_hide_header Service-Worker-Allowed;
+    proxy_hide_header Access-Control-Allow-Origin;
+    proxy_hide_header Access-Control-Allow-Methods;
+    proxy_hide_header Access-Control-Allow-Headers;
+    proxy_hide_header Access-Control-Expose-Headers;
+    proxy_hide_header Access-Control-Max-Age;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+    proxy_next_upstream error timeout http_502 http_503 http_504;
+    proxy_next_upstream_tries 1;
+
+    add_header Cache-Control "private, no-store" always;
+    add_header Access-Control-Allow-Origin $pcu_public_cors_origin always;
+    add_header Access-Control-Allow-Methods "GET, HEAD" always;
+    add_header Access-Control-Allow-Headers "Range, If-Range, If-None-Match, If-Modified-Since" always;
+    add_header Access-Control-Expose-Headers "ETag, Last-Modified, Content-Length, Content-Range, Content-Encoding" always;
+    add_header Vary "Origin" always;
+    add_header Cross-Origin-Resource-Policy "cross-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy $pcu_runtime_effective_csp always;
+  }
+
+  location = /runtime { return 404; }
+  location /runtime/ { return 404; }
+
 }

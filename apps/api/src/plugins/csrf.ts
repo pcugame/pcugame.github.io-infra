@@ -1,3 +1,4 @@
+import { isPlayControlPath, isTrustedPlaySource } from '../modules/webgl-play/source.js';
 import type { FastifyInstance } from 'fastify';
 import type { Env } from '../config/env.js';
 import { forbidden } from '../shared/errors.js';
@@ -37,6 +38,7 @@ export async function registerCsrf(app: FastifyInstance, config: Env): Promise<v
 	const allowedOrigins = new Set(config.CORS_ALLOWED_ORIGINS);
 
 	app.addHook('onRequest', async (request) => {
+		if (config.WEBGL_PLAY_ENABLED && isPlayControlPath(request.method,request.url) && isTrustedPlaySource(request.headers,config.API_PUBLIC_URL)) return;
 		validateCsrfOrigin(request.method, request.headers.origin, allowedOrigins);
 	});
 }

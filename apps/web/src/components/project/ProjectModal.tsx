@@ -317,6 +317,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								projectId={project.id}
 								gameDownloadUrl={project.gameDownloadUrl}
 								webglUrl={project.webglUrl}
+            webglPlayUrl={project.webglPlayUrl}
 								className="modal-download"
 							/>
 							<ProjectAttachments attachments={project.attachments} className="modal-attachments" />

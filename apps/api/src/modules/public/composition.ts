@@ -15,6 +15,7 @@ export interface PublicProductionDependencies {
 	config: {
 		NODE_ENV: string;
 		API_PUBLIC_URL: string;
+		WEBGL_PLAY_ENABLED?: boolean;
 		WEB_PUBLIC_URL: string;
 		PUBLIC_ASSET_ORIGIN?: string;
 		S3_BUCKET_PUBLIC: string;
@@ -38,6 +39,7 @@ export function createPublicProductionGraph(
 	}
 	const service = createPublicService({
 		apiPublicUrl: deps.config.API_PUBLIC_URL,
+		webglPlayEnabled: deps.config.WEBGL_PLAY_ENABLED,
 		publicAssetOrigin,
 		publicBucket: deps.config.S3_BUCKET_PUBLIC,
 		repository,

@@ -1,5 +1,5 @@
 import { useViewerKey } from '../lib/query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ErrorMessage, LoadingSpinner } from '../components/common';
@@ -16,6 +16,11 @@ export default function ProjectPlayPage() {
 		queryFn: () => publicApi.getProjectDetail(projectId),
 		enabled: Number.isInteger(projectId) && projectId > 0,
 	});
+
+	useEffect(() => {
+		if (project?.webglPlayUrl) window.location.replace(project.webglPlayUrl);
+	}, [project?.webglPlayUrl]);
+	if (project?.webglPlayUrl) return <main className="project-play-page project-play-page--message"><a href={project.webglPlayUrl} rel="noopener">전용 실행 화면으로 이동</a></main>;
 
 	if (isLoading) return <main className="project-play-page project-play-page--message"><LoadingSpinner /></main>;
 	if (error) {

@@ -115,5 +115,7 @@ export type PublicProjectDetailResponse = {
 	poster?: ResponsiveImage;
 	gameDownloadUrl?: string;
 	webglUrl?: string;
+	/** Stable trusted API player URL; never exchanged for a file capability. */
+	webglPlayUrl?: string;
 	status: 'PUBLISHED' | 'ARCHIVED';
 };

@@ -7,13 +7,14 @@ afterEach(() => vi.restoreAllMocks());
 describe('media access capabilities', () => {
  it('hydrates originals, renditions, video downloads and WebGL without changing external links or inputs', async () => {
   const issue = vi.spyOn(api, 'post').mockImplementation(async (_path, body) => ({ url: `${(body as {url:string}).url}?pcu_token=secret`, token: 'secret', expiresAt: 'soon' }));
-  const input = { githubUrl: 'https://github.com/test', poster: { original: { url: 'https://files.test/a' }, renditions: [{ url: 'https://files.test/a' }] }, videos: [{ originalDownloadUrl: 'https://files.test/video', playbackUrl: 'https://files.test/playback' }], webglUrl: 'https://files.test/webgl' };
+  const input = { githubUrl: 'https://github.com/test', poster: { original: { url: 'https://files.test/a' }, renditions: [{ url: 'https://files.test/a' }] }, videos: [{ originalDownloadUrl: 'https://files.test/video', playbackUrl: 'https://files.test/playback' }], webglUrl: 'https://files.test/webgl', webglPlayUrl: 'https://api.test/play/projects/7' };
   const result = await hydrateFileUrls(input);
   expect(result.poster.original.url).toContain('pcu_token=secret');
   expect(result.videos[0].originalDownloadUrl).toContain('pcu_token=secret');
   expect(result.videos[0].playbackUrl).toContain('pcu_token=secret');
   expect(result.webglUrl).toContain('pcu_token=secret');
   expect(result.githubUrl).toBe(input.githubUrl);
+  expect(result.webglPlayUrl).toBe(input.webglPlayUrl);
   expect(input.poster.original.url).toBe('https://files.test/a');
   expect(issue).toHaveBeenCalledTimes(4);
  });

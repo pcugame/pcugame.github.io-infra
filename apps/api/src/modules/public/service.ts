@@ -63,6 +63,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 
 export interface PublicServiceDependencies {
 	apiPublicUrl: string;
+	webglPlayEnabled?: boolean;
 	publicAssetOrigin?: string;
 	publicBucket?: string;
 	repository: {
@@ -338,6 +339,9 @@ export async function getProjectDetail(
 			? protectedAssetUrl(deps, gameAsset.id, 'original')
 			: undefined,
 		webglUrl: webglEntryUrl,
+		webglPlayUrl: deps.webglPlayEnabled && webglEntryUrl
+			? new URL(`/play/projects/${project.id}`, deps.apiPublicUrl).href
+			: undefined,
 		status: project.status,
 	};
 }

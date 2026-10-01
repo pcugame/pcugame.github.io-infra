@@ -1,3 +1,4 @@
+import { isPlayControlPath, isTrustedPlaySource } from '../modules/webgl-play/source.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { AppError, unauthorized, forbidden } from '../shared/errors.js';
 import { cookieExpiresAt, isIdleExpired } from '../shared/session.js';
@@ -28,6 +29,8 @@ export interface AuthPluginOptions {
 
 export interface AuthPluginConfig {
 	SESSION_COOKIE_NAME: string;
+ API_PUBLIC_URL?: string;
+ WEBGL_PLAY_ENABLED?: boolean;
 	SESSION_IDLE_MS: number;
 	SESSION_TOUCH_MIN_INTERVAL_MS: number;
 	COOKIE_SECURE: boolean;
@@ -50,7 +53,9 @@ async function resolveSession(
   // WebGL files are intentionally executable but untrusted. They are hosted on
   // the API origin for Unity storage compatibility, so never honor an API
   // session cookie unless the browser request came from the configured web UI.
-  if (!isAllowedSessionSource(request.headers, allowedOrigins)) return;
+  const playControl = isPlayControlPath(request.method, request.url);
+  if (/^\/play\/projects\//.test(request.url) || request.url.split('?')[0] === '/api/internal/file-access') return;
+  if (playControl ? (!cfg.WEBGL_PLAY_ENABLED || !cfg.API_PUBLIC_URL || !isTrustedPlaySource(request.headers,cfg.API_PUBLIC_URL)) : !isAllowedSessionSource(request.headers, allowedOrigins)) return;
 
 	let session;
 	try {
@@ -87,7 +92,7 @@ async function resolveSession(
   // Sliding refresh: only touch + re-issue cookie when lastSeenAt is stale enough,
   // so every request doesn't trigger a DB write and a Set-Cookie.
   const sinceTouch = now.getTime() - session.lastSeenAt.getTime();
-  if (sinceTouch >= cfg.SESSION_TOUCH_MIN_INTERVAL_MS) {
+  if (!playControl && sinceTouch >= cfg.SESSION_TOUCH_MIN_INTERVAL_MS) {
 		try {
 			await sessions.touch(sid, now);
 			reply.setCookie(cfg.SESSION_COOKIE_NAME, sid, {

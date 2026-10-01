@@ -4,6 +4,7 @@ interface ProjectActionsProps {
 	projectId: number;
 	gameDownloadUrl?: string;
 	webglUrl?: string;
+	webglPlayUrl?: string;
 	className?: string;
 }
 
@@ -11,9 +12,10 @@ export function ProjectActions({
 	projectId,
 	gameDownloadUrl,
 	webglUrl,
+	webglPlayUrl,
 	className = '',
 }: ProjectActionsProps) {
-	if (!gameDownloadUrl && !webglUrl) return null;
+	if (!gameDownloadUrl && !webglUrl && !webglPlayUrl) return null;
 	return (
 		<div className={`project-actions ${className}`.trim()}>
 			{gameDownloadUrl && (
@@ -21,9 +23,9 @@ export function ProjectActions({
 					게임 다운로드 (ZIP)
 				</a>
 			)}
-			{webglUrl && (
+			{(webglPlayUrl || webglUrl) && (
 				<Link
-					to={`/projects/${projectId}/play`}
+					to={webglPlayUrl ?? `/projects/${projectId}/play`}
 					className="btn btn--secondary"
 					target="_blank"
 					rel="noopener noreferrer"

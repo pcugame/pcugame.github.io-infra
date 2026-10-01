@@ -122,6 +122,28 @@ assert.deepEqual(new Set(publicScriptSources), new Set([
 	"'self'", 'blob:', "'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'",
 ]), 'Unity framework blob scripts must be allowed without allowing external script origins');
 for (const proxy of [publicOrigin, protectedDownload]) {
+ const runtime = proxy.match(/location ~ "\^\/runtime\/\[a-f0-9\]\{64\}\/\.\+\$" \{([\s\S]*?)\n  \}/)?.[1];
+ assert.ok(runtime, 'runtime capabilities require a dedicated location');
+ assert.ok(runtime.includes('if ($request_method !~ ^(GET|HEAD)$) { return 405; }'));
+ assert.doesNotMatch(runtime, /OPTIONS|return 204/);
+ for (const required of [
+  'auth_request /__pcu_file_auth;',
+  'auth_request_set $pcu_runtime_csp $upstream_http_x_pcu_runtime_csp;',
+  'Content-Security-Policy $pcu_runtime_effective_csp always;',
+  'proxy_hide_header Content-Security-Policy;',
+  'proxy_hide_header Service-Worker-Allowed;',
+  'proxy_pass_request_body off;',
+  'Cross-Origin-Resource-Policy "cross-origin" always;',
+  'Cross-Origin-Embedder-Policy "require-corp" always;',
+  'Referrer-Policy "no-referrer" always;',
+  'Cache-Control "private, no-store" always;',
+ ]) assert.ok(runtime.includes(required), `runtime boundary missing: ${required}`);
+ assert.match(proxy, /map \$pcu_runtime_csp \$pcu_runtime_effective_csp \{\s*"" "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";/);
+ assert.doesNotMatch(runtime, /if\s*\([^)]*\$pcu_runtime_csp/, 'auth_request headers do not exist during rewrite');
+ assert.ok(proxy.includes('if ($http_service_worker != "") { return 403; }'));
+ assert.ok(proxy.includes('if ($http_sec_fetch_dest = "serviceworker") { return 403; }'));
+ assert.ok(proxy.includes('X-PCU-Service-Worker $http_service_worker;'));
+ assert.ok(proxy.includes('X-PCU-Fetch-Dest $http_sec_fetch_dest;'));
  assert.ok(proxy.includes('auth_request /__pcu_file_auth;'));
  assert.ok(proxy.includes('location = /__pcu_file_auth {\n    internal;'));
  assert.ok(proxy.includes('X-PCU-Gateway-Secret "${FILE_GATEWAY_SECRET}"'));

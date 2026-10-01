@@ -246,6 +246,7 @@ export const PublicProjectDetailResponseSchema = z.object({
 	poster: ResponsiveImageSchema.optional(),
 	gameDownloadUrl: UrlSchema.optional(),
 	webglUrl: UrlSchema.optional(),
+	webglPlayUrl: UrlSchema.optional(),
 	status: ProjectStatusSchema,
 }).strict();
 
