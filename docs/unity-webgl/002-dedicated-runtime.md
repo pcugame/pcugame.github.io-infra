@@ -20,3 +20,12 @@ COOP/COEP/CSP/Permissions-Policy and sandbox allow-scripts allow-pointer-lock al
 - Exact master commit, immutable image digest, NAS config revision and production authenticated success recorded after approved release.
 
 Synthetic archives and local unit tests do not complete real Unity/browser or production acceptance.
+
+## Local acceptance evidence (2026-10-01)
+
+Source a0a8cb6 plus the reproducible `scripts/webgl-shell-browser.mjs` harness:
+Chrome 154.0.8037.92 and Edge 154.0.4258.48 (official binaries), Firefox 141.0 (Playwright engine), and Chromium 150.0.7871.46 passed shell checks. Parent, separate-origin iframe and dedicated Worker reported crossOriginIsolated and SharedArrayBuffer; project HTML-looking strings remained text. The selected-token CSP blocked another runtime path, a visible renewal preserved iframe URL, simulated hidden state suppressed renewal, and denied renewal removed the iframe.
+
+Chrome/Edge credentialless requests omitted fixture cookies. Firefox reported credentialless unsupported and sent two fixture cookies to the NAS origin; isolation still passed. This is a storage/credential behavior difference, not a reason to reject Firefox threads. API-origin credentials were never forwarded to the game.
+
+These shell checks use mock control responses, a synthetic Worker, loopback origins and simulated visibility. They supplement seven authenticated PostgreSQL/Fastify cases and real Nginx gateway tests; they do not substitute for real threaded Unity or production tests. Set PLAYWRIGHT_MODULE_PATH, PLAYWRIGHT_BROWSER, BROWSER_EXECUTABLE and optional BROWSER_ENV_FILE to reproduce after building API. Actual Unity artifacts are tracked separately in ticket 1 fixture evidence.
