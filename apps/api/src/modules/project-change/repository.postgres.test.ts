@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ProjectChangeDetailSchema, ProjectChangeListResponseSchema } from '@pcu/contracts';
+import { detectExternalLinkService, ProjectChangeDetailSchema, ProjectChangeListResponseSchema } from '@pcu/contracts';
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createIsolatedMigratedDatabase } from '../../__tests__/helpers/isolated-migrated-database.js';
 import { registerAuth } from '../../plugins/auth.js';
@@ -50,15 +50,17 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('change request
   expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).title).toBe('Approved title');
   const list=await request(owner,'GET',`/api/me/projects/${p.id}/change-requests`);expect(list.statusCode).toBe(200);expect(ProjectChangeListResponseSchema.parse(list.json().data).total).toBe(1);
  });
- it.each([[], [{label:'Demo',url:'https://game.example.test/'},{label:'GitHub',url:'https://github.com/pcu/game'}]].map(links=>[links]))('snapshots legacy links and approves external links %j through authenticated HTTP',async(externalLinks)=>{
+ it.each([[], [{label:'Demo',url:'https://game.example.test/'},{label:'GitHub',url:'https://github.com/pcu/game',service:'youtube'}]].map(links=>[links]))('snapshots legacy links and approves external links %j through authenticated HTTP',async(externalLinks)=>{
+  const enrichedLinks=externalLinks.map(({label,url})=>{const service=detectExternalLinkService(url);return {label,url,...(service?{service}:{})};});
   const p=await project();await db.project.update({where:{id:p.id},data:{githubUrl:'https://github.com/legacy/game'}});
   const created=await request(owner,'POST',`/api/me/projects/${p.id}/change-requests`,{kind:'EDIT',reason:'Update external links'});expect(created.statusCode,created.body).toBe(201);
   const d=ProjectChangeDetailSchema.parse(created.json().data);expect(d.before.externalLinks).toEqual([{label:'GitHub',url:'https://github.com/legacy/game'}]);
-  const edited=await request(owner,'PATCH',`/api/me/change-requests/${d.id}`,{changes:{externalLinks}});expect(edited.statusCode,edited.body).toBe(200);expect(ProjectChangeDetailSchema.parse(edited.json().data).changes.externalLinks).toEqual(externalLinks);
+  const edited=await request(owner,'PATCH',`/api/me/change-requests/${d.id}`,{changes:{externalLinks}});expect(edited.statusCode,edited.body).toBe(200);expect(ProjectChangeDetailSchema.parse(edited.json().data).changes.externalLinks).toEqual(enrichedLinks);
   expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).externalLinks).toBeNull();
   expect((await request(owner,'POST',`/api/me/change-requests/${d.id}/submit`)).statusCode).toBe(200);
+  if(externalLinks.length)await db.projectChangeRequest.update({where:{id:d.id},data:{changes:{externalLinks:externalLinks.map(link=>({...link,service:'discord'}))}}});
   const approved=await request(operator,'POST',`/api/admin/change-requests/${d.id}/approve`);expect(approved.statusCode,approved.body).toBe(200);expect(ProjectChangeDetailSchema.parse(approved.json().data).state).toBe('COMPLETED');
-  expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).externalLinks).toEqual(externalLinks);
+  expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).externalLinks).toEqual(enrichedLinks);
  });
  it('enforces one active request under concurrent creator/member submission',async()=>{const p=await project();const result=await Promise.allSettled([draft(p.id),draft(p.id,member)]);expect(result.filter(item=>item.status==='fulfilled')).toHaveLength(1);expect(result.find(item=>item.status==='rejected')).toMatchObject({reason:{statusCode:409}});});
  it('keeps closed project intact on reject/cancel and blocks edits after submit',async()=>{const p=await project();const d=await draft(p.id);await service.update(owner,d.id,{changes:{title:'Unapproved'}});await service.submit(owner,d.id);await expect(service.update(owner,d.id,{changes:{title:'Sneak'}})).rejects.toMatchObject({statusCode:409});await service.reject(operator,d.id,'Needs clarification');expect((await service.detail(owner,d.id)).state).toBe('REJECTED');const d2=await draft(p.id);await service.cancel(owner,d2.id);expect((await db.project.findUniqueOrThrow({where:{id:p.id}})).title).toBe('Original');});

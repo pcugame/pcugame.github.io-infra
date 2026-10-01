@@ -4,7 +4,7 @@ import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AdminProjectDetailSchema, PublicProjectDetailResponseSchema } from '@pcu/contracts';
+import { detectExternalLinkService, AdminProjectDetailSchema, PublicProjectDetailResponseSchema } from '@pcu/contracts';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { registerAuth } from '../plugins/auth.js';
@@ -172,6 +172,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 
 
 	it.each([[], [{ label: 'GitHub', url: 'https://github.com/pcu/game' }, { label: '홈페이지', url: 'https://game.example.test/' }]].map((links) => [links]))('roundtrips external links through authenticated PATCH and both detail serializers: %j', async (externalLinks) => {
+		const enrichedLinks = externalLinks.map(({ label, url }) => { const service = detectExternalLinkService(url); return { label, url, ...(service ? { service } : {}) }; });
 		const project = await db.project.create({ data: { exhibitionId, creatorId: adminId, title: 'External links', slug: randomUUID(), status: 'PUBLISHED', githubUrl: 'https://github.com/legacy/game' } });
 		const url = `/api/admin/projects/${project.id}`;
 		const headers = { cookie: sessionCookie, origin: 'http://localhost:5173' };
@@ -180,11 +181,11 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 		expect(legacy.json().data.externalLinks).toEqual([{ label: 'GitHub', url: 'https://github.com/legacy/game' }]);
 		const patched = await app.inject({ method: 'PATCH', url, headers, payload: { externalLinks } });
 		expect(patched.statusCode, patched.body).toBe(200);
-		expect(AdminProjectDetailSchema.parse(patched.json().data).externalLinks).toEqual(externalLinks);
-		expect((await db.project.findUniqueOrThrow({ where: { id: project.id } })).externalLinks).toEqual(externalLinks);
+		expect(AdminProjectDetailSchema.parse(patched.json().data).externalLinks).toEqual(enrichedLinks);
+		expect((await db.project.findUniqueOrThrow({ where: { id: project.id } })).externalLinks).toEqual(enrichedLinks);
 		for (const response of [await app.inject({ method: 'GET', url, headers }), await app.inject({ method: 'GET', url: `/api/public/projects/${project.id}` })]) {
 			expect(response.statusCode, response.body).toBe(200);
-			expect(response.json().data.externalLinks).toEqual(externalLinks);
+			expect(response.json().data.externalLinks).toEqual(enrichedLinks);
 			expect(response.json().data.githubUrl).toBe('https://github.com/legacy/game');
 		}
 		const invalid = await app.inject({ method: 'PATCH', url, headers, payload: { externalLinks: [{ label: 'Unsafe', url: 'javascript:alert(1)' }] } });
@@ -205,6 +206,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 	});
 
 	it.each([[], [{ label: 'GitHub', url: 'https://github.com/pcu/submitted' }, { label: '홈페이지', url: 'https://submitted.example.test/' }]].map((links) => [links]))('publishes metadata and external links %j with an empty manifest through the actual durable worker', async (externalLinks) => {
+		const enrichedLinks = externalLinks.map(({ label, url }) => { const service = detectExternalLinkService(url); return { label, url, ...(service ? { service } : {}) }; });
 		const boundary = `metadata-${randomUUID()}`;
 		const title = `Metadata only ${randomUUID()}`;
 		const created = await app.inject({
@@ -239,7 +241,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 		expect(status.json().data).toMatchObject({ state: 'PUBLISHED', projectStatus: 'PUBLISHED', publicationState: 'COMPLETED', items: [] });
 		const published = await app.inject({ method: 'GET', url: `/api/public/projects/${projectId}` });
 		expect(published.statusCode, published.body).toBe(200);
-		expect(PublicProjectDetailResponseSchema.parse(published.json().data)).toMatchObject({ title, externalLinks, attachments: [], status: 'PUBLISHED' });
+		expect(PublicProjectDetailResponseSchema.parse(published.json().data)).toMatchObject({ title, externalLinks: enrichedLinks, attachments: [], status: 'PUBLISHED' });
 	});
 
 });

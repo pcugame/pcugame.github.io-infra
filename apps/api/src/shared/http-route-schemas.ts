@@ -1,3 +1,4 @@
+import { ExternalLinkSchema, ExternalLinkServiceSchema } from '@pcu/contracts';
 import { WebglPlayCreateBodySchema, WebglPlayRenewBodySchema, WebglPlaySessionParamsSchema, WebglPlayCreateDataSchema, WebglPlayRenewDataSchema, WebglPlayCloseDataSchema } from '@pcu/contracts';
 import { CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
 import type { FastifyInstance, FastifySchema } from 'fastify';
@@ -265,6 +266,7 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
  contract({method:'POST',url:'/api/file-access/:token/renew',family:'assets',bodyBoundary:'none',responseBoundary:'json',params:z.object({token:z.string().regex(/^[a-f0-9]{64}$/)}),querystring:EmptyObjectSchema,body:NoBodySchema,response:jsonResponse(z.object({token:z.string(),expiresAt:z.string()}))}),
  contract({method:'GET',url:'/api/internal/file-access',family:'assets',bodyBoundary:'none',responseBoundary:'no-content',params:EmptyObjectSchema,querystring:EmptyObjectSchema,body:NoBodySchema,response:NoContentResponse}),
 
+	contract({ method: 'POST', url: '/api/me/external-links/resolve', family: 'external-links', bodyBoundary: 'json', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: ExternalLinkSchema.pick({ url: true }).strict(), response: jsonResponse(z.object({ service: ExternalLinkServiceSchema.nullable() }).strict()) }),
 	...changeRouteContracts,
     ...networkRouteContracts,
 	contract({

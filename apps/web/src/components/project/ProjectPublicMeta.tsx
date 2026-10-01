@@ -1,4 +1,5 @@
 import { safeExternalLinks } from './externalLinks';
+import { ExternalLinkIcon } from './ExternalLinkIcon';
 import type { ExternalLink, Platform } from '@pcu/contracts';
 
 type ProjectPublicMetaProps = {
@@ -39,7 +40,7 @@ export function ProjectPublicMeta({ githubUrl, externalLinks, platforms = [] }: 
 					rel="noopener noreferrer"
 					aria-label={`${link.label} 링크 열기`}
 					title={`${link.label} 링크`}
-				>{link.label}</a>
+				><ExternalLinkIcon url={link.url} service={link.service} /><span>{link.label}</span></a>
 			))}
 		</div>
 	);

@@ -31,14 +31,32 @@ describe('media access capabilities', () => {
   expect([...collectFileTokens(input)]).toEqual([]);
  });
  it('reads a real project response through the API client without requesting file access for external URLs', async () => {
-  const externalLinks = [{ label: 'GitHub', url: 'https://github.com/team/game' }];
+  const externalLinks = [{ label: 'GitHub', url: 'https://github.com/team/game', service: 'github' }, { label: '다운로드', url: 'https://example.com/file/external?pcu_token=external' }, { label: '플레이', url: 'https://example.com/play/external/index.html' }];
   const fetcher = vi.fn(async (url: string) => {
    if (!url.endsWith('/api/public/projects/124')) return new Response('Not found', { status: 404 });
    return Response.json({ ok: true, data: { id: 124, externalLinks } });
   });
   vi.stubGlobal('fetch', fetcher);
-  await expect(api.get('/api/public/projects/124')).resolves.toEqual({ id: 124, externalLinks });
+  const result = await api.get('/api/public/projects/124');
+  expect(result).toEqual({ id: 124, externalLinks });
+  expect([...collectFileTokens(result)]).toEqual([]);
   expect(fetcher).toHaveBeenCalledTimes(1);
+ });
+ it('reads change snapshots through the real API client and hydrates only stored media', async () => {
+  const externalLinks = [{ label: '자유 이름', url: 'https://example.com/play/external/index.html?pcu_token=external', service: 'youtube' }];
+  const input = { before: { externalLinks, githubUrl: 'https://example.com/file/legacy' }, changes: { externalLinks }, stagedAssets: [{ previewUrl: 'https://media.example/image' }] };
+  const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
+   if (url.endsWith('/api/admin/change-requests/123')) return Response.json({ ok: true, data: input });
+   if (url.endsWith('/api/file-access') && JSON.parse(options?.body as string).url === 'https://media.example/image') return Response.json({ ok: true, data: { url: 'https://media.example/image?pcu_token=media', token: 'media', expiresAt: null } });
+   return new Response('unexpected', { status: 500 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const result = await api.get<typeof input>('/api/admin/change-requests/123');
+  expect(result.before).toEqual(input.before);
+  expect(result.changes).toEqual(input.changes);
+  expect(result.stagedAssets[0].previewUrl).toBe('https://media.example/image?pcu_token=media');
+  expect([...collectFileTokens(result)]).toEqual(['media']);
+  expect(fetcher).toHaveBeenCalledTimes(2);
  });
  it('finds and deduplicates file and WebGL tokens for stable renewal', () => {
   expect([...collectFileTokens({ image: 'https://files.test/x?pcu_token=one', play: 'https://files.test/play/two/index.html', same: ['https://files.test/y?pcu_token=one'], download: 'https://files.test/file/three' })].sort()).toEqual(['one', 'three', 'two']);

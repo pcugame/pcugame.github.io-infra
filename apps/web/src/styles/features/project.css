@@ -536,6 +536,11 @@
 .external-link-row > button { margin-bottom: 0.1rem; }
 .external-link-row__error { grid-column: 1 / -1; }
 .project-external-link { overflow-wrap: anywhere; width: auto; height: auto; min-height: 2rem; max-width: 100%; padding: 0.4rem 0.7rem; border-radius: 0.5rem; }
+.project-external-link, .external-link-row__preview { display: inline-flex; align-items: center; gap: 0.45rem; }
+.project-external-link > span, .external-link-row__preview > span { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.external-link-icon { display: block; width: 1.15rem; height: 1.15rem; flex: 0 0 1.15rem; object-fit: contain; }
+img.external-link-icon { padding: 0.12rem; border-radius: 0.2rem; background: #fff; box-sizing: content-box; }
+.external-link-row__preview { grid-column: 1 / -1; min-width: 0; font-size: 0.85rem; }
 @media (max-width: 640px) {
   .external-link-row { grid-template-columns: minmax(0, 1fr) auto; }
   .external-link-row .form-field:first-child { grid-column: 1 / -1; }

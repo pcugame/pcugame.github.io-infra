@@ -1,3 +1,4 @@
+import { enrichExternalLinks } from '../external-links/resolver.js';
 import { effectiveProjectExternalLinks } from '../../shared/project-external-links.js';
 import { withAssetMutationTransaction } from '../assets/mutation-transaction.js';
 import { randomUUID } from 'node:crypto';
@@ -97,8 +98,20 @@ export function createProjectChangeRepository(client:PrismaClient):ProjectChange
    await tx.projectChangeRequest.update({where:{id},data:{...(input.manifest?{fileSnapshot:[]}:{}),...(input.reason!==undefined?{reason:input.reason}:{}),...(input.changes?{changes:input.changes as Prisma.InputJsonValue}:{})}});
    return readDetail(tx,actor,id);
   });},
-  async transition(actor,id,action,reviewReason){return transaction(async tx=>{
-   const row=await lockedRequest(tx,id);
+  async transition(actor,id,action,reviewReason){
+   // Resolve outside the transaction so DNS/network waits never hold project locks.
+   let linkSnapshot: ProjectChangeValues['externalLinks'];
+   let resolvedLinks: ProjectChangeValues['externalLinks'];
+   if (action==='approve'||action==='retry') {
+    if(!isOperator(actor))throw forbidden('Operator approval is required');
+    const initial=await client.projectChangeRequest.findUnique({where:{id}});
+    if(initial && initial.state!=='COMPLETED') {
+     linkSnapshot=(initial.changes as ProjectChangeValues).externalLinks;
+     if(linkSnapshot!==undefined)resolvedLinks=await enrichExternalLinks(linkSnapshot);
+    }
+   }
+   return transaction(async tx=>{
+   let row=await lockedRequest(tx,id);
    if(['approve','reject','retry'].includes(action)){if(!isOperator(actor))throw forbidden('Operator approval is required');}else if(row.actorId!==actor.id)throw forbidden('Only the request author may submit or cancel');
    if(action==='submit'){
     if(row.state!=='DRAFT')throw conflict('Only a draft request can be submitted');
@@ -113,6 +126,10 @@ export function createProjectChangeRepository(client:PrismaClient):ProjectChange
    }else{
     if(action==='approve'&&row.state==='COMPLETED')return readDetail(tx,actor,id);
     if(row.state!==(action==='retry'?'FAILED':'PENDING'))throw conflict('Request is not awaiting this action');
+    if(JSON.stringify((row.changes as ProjectChangeValues).externalLinks)!==JSON.stringify(linkSnapshot))throw conflict('Change request changed during link resolution');
+    if(resolvedLinks!==undefined){
+     row=await tx.projectChangeRequest.update({where:{id},data:{changes:{...(row.changes as ProjectChangeValues),externalLinks:resolvedLinks}}});
+    }
     await startApplication(tx,row,action==='retry'?row.reviewerId??actor.id:actor.id);
    }
    return readDetail(tx,actor,id);
