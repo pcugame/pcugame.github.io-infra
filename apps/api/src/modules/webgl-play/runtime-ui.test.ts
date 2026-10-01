@@ -16,16 +16,17 @@ function shell(options: { renderer?: string; missing?: boolean; strictMissing?: 
 		clientWidth = 1600; clientHeight = 900;
 		classList = { add: vi.fn() };
 		get firstElementChild(): Element | null { return this.children[0] ?? null; }
-		textContent = ''; value = ''; hidden = true; open = false; disabled = false;
-		dataset = { projectId: '163', assetOrigin: 'https://assets.test' };
+		textContent = ''; value = ''; src = ''; alt = ''; width = 0; height = 0; hidden = true; open = false; disabled = false;
+		dataset = { projectId: '163', assetOrigin: 'https://assets.test', graphicsAssets: 'https://web.test/help/graphics-acceleration/' };
 		href = 'https://web.test/projects/163'; children: Element[] = []; attributes: Record<string, string> = {};
-		listeners: Record<string, (() => void)[]> = {};
+		listeners: Record<string, ((event?: unknown) => void)[]> = {};
 		addEventListener(name: string, handler: () => void) { (this.listeners[name] ??= []).push(handler); }
 		click() { this.listeners.click?.forEach(fn => fn()); }
 		change() { this.listeners.change?.forEach(fn => fn()); }
 		replaceChildren(...children: Element[]) { this.children = children; }
 		append(child: Element) { this.children.push(child); }
 		setAttribute(name: string, value: string) { this.attributes[name] = value; }
+		removeAttribute(name: string) { delete this.attributes[name]; }
 		showModal() { if (options.noDialogAPI) throw new Error('unsupported'); this.open = true; }
 		close() { this.open = false; }
 		focus() {}
@@ -131,6 +132,7 @@ describe('runtime shell graphics acceleration gate', () => {
 		expect(run.fetch).not.toHaveBeenCalled();
 		run.get('acceleration-continue').click(); await settle();
 		expect(run.fetch).toHaveBeenCalledTimes(1);
+		expect(run.get('acceleration-gate').attributes.open).toBeUndefined();
 	});
 	it('auto detects Brave, supports hidden-brand manual choice and does not overwrite it later', async () => {
 		const run = shell({ missing: true, brave: true }); await settle();
@@ -140,9 +142,39 @@ describe('runtime shell graphics acceleration gate', () => {
 		const pending = shell({ missing: true, bravePending: new Promise<boolean>(done => { resolve = done; }) });
 		pending.get('guide-browser').value = 'firefox'; pending.get('guide-browser').change();
 		resolve(true); await settle();
-		expect(pending.get('guide-address').textContent).toBe('about:preferences');
+		expect(pending.get('guide-address-row').hidden).toBe(true);
+		expect(pending.get('guide-image').src).toBe('https://web.test/help/graphics-acceleration/firefox-performance.png');
 		pending.get('guide-browser').value = 'brave'; pending.get('guide-browser').change();
 		expect(pending.get('guide-address').textContent).toBe('brave://settings/system');
+	});
+	it('preserves screenshot enlargement, nested Escape, manual guide content and image failure', () => {
+		const run = shell({ missing: true });
+		expect(run.get('guide-image').src).toBe('https://web.test/help/graphics-acceleration/chromium-system.webp');
+		run.get('guide-preview').click();
+		expect(run.get('guide-enlarged').open).toBe(true);
+		const event = { preventDefault: vi.fn(), stopPropagation: vi.fn() };
+		run.get('guide-enlarged').listeners.cancel?.[0]?.(event);
+		expect(event.preventDefault).toHaveBeenCalled();
+		expect(event.stopPropagation).toHaveBeenCalled();
+		expect(run.get('guide-enlarged').hidden).toBe(true);
+		expect(run.get('acceleration-gate').open).toBe(true);
+		expect(run.context.location.assign).not.toHaveBeenCalled();
+		run.get('guide-preview').click(); run.get('guide-enlarged-close').click();
+		expect(run.get('guide-enlarged').open).toBe(false);
+		run.get('guide-browser').value = 'firefox'; run.get('guide-browser').change();
+		expect(run.get('guide-name').textContent).toBe('Firefox · 컴퓨터');
+		expect(run.get('guide-detection').textContent).toBe('직접 선택');
+		expect(run.get('guide-steps').children[0]?.textContent).toContain('탭 및 탐색');
+		expect(run.get('guide-help').href).toBe('https://support.mozilla.org/ko/kb/performance-settings');
+		run.get('guide-image').listeners.error?.[0]?.();
+		expect(run.get('guide-screenshot').hidden).toBe(true);
+		expect(run.get('guide-steps').children).toHaveLength(3);
+		run.get('guide-browser').value = 'mobile'; run.get('guide-browser').change();
+		expect(run.get('guide-screenshot').hidden).toBe(true);
+		expect(run.get('guide-help').hidden).toBe(true);
+		expect(run.fetch).not.toHaveBeenCalled();
+		run.get('acceleration-close').click();
+		expect(run.context.location.assign).toHaveBeenCalledWith('https://web.test/projects/163');
 	});
 	it('handles failed session creation after explicit continue with a usable restart', async () => {
 		const run = shell({ missing: true });
@@ -157,6 +189,8 @@ describe('runtime shell graphics acceleration gate', () => {
 		for (const text of [script, html.match(/<style>([\s\S]*?)<\/style>/)![1]!]) {
 			expect(headers['Content-Security-Policy']).toContain(`'sha256-${createHash('sha256').update(text).digest('base64')}'`);
 		}
+		expect(headers['Content-Security-Policy']).toContain('img-src https://web.test/help/graphics-acceleration/; font-src https://web.test/help/graphics-acceleration/PretendardVariable.woff2;');
+		expect(html.match(/crossorigin="anonymous"/g)).toHaveLength(2);
 		expect(headers['Cross-Origin-Opener-Policy']).toBe('same-origin');
 		expect(headers['Cross-Origin-Embedder-Policy']).toBe('require-corp');
 		expect(script).not.toMatch(/\balert\s*\(/);
@@ -181,13 +215,14 @@ async function sizingShell(width?: number | null, height?: number | null, kind?:
 			attributes: new Map<string, string>(), events: new Map<string, () => Promise<void>>(),
 			replaceChildren() {},
 			setAttribute(name: string, value: string) { this.attributes.set(name, value); },
+			removeAttribute(name: string) { this.attributes.delete(name); },
 			addEventListener(name: string, handler: () => Promise<void>) { this.events.set(name, handler); },
 		};
 	}
 	const extras = new Map<string, ReturnType<typeof element>>();
 	const fullscreen = element(), restart = element(), info = element(), status = element(), title = element();
 	const root = {
-		dataset: { projectId: '42', assetOrigin: 'https://assets.test' },
+		dataset: { projectId: '42', assetOrigin: 'https://assets.test', graphicsAssets: 'https://web.test/help/graphics-acceleration/' },
 		classList: { add: (...names: string[]) => names.forEach(name => classes.add(name)) },
 		async requestFullscreen() { document.fullscreenElement = root; events.get('fullscreenchange')?.(); },
 	};
