@@ -128,8 +128,8 @@ describe.runIf(enabled)('WebGL deletion lifecycle with PostgreSQL and Garage', (
 		await storage.upload(bucket, key, bytes, contentType, bytes.length);
 	}
 
-	async function readyWebglProject(label: string) {
-		const project = await createProject(label);
+	async function readyWebglProject(label: string, targetProject?: Awaited<ReturnType<typeof createProject>>) {
+		const project = targetProject ?? await createProject(label);
 		const deploymentId = randomUUID();
 		const sourceKey = `${marker}/${label}/source.zip`;
 		const prefix = `${marker}/${label}/site/`;
@@ -442,6 +442,29 @@ describe.runIf(enabled)('WebGL deletion lifecycle with PostgreSQL and Garage', (
 		expect(outbox.every(({ state, resolvedAt }) => state === 'RESOLVED' && resolvedAt !== null)).toBe(true);
 	});
 
+	it('fences stale replacement analysis after a newer deployment has been selected', async () => {
+		const stale = await verifyingWebglProject('analysis-stale');
+		await prisma.project.update({ where: { id: stale.project.id }, data: { webglDisplayMode: 'manual', webglDisplayWidth: 800, webglDisplayHeight: 600 } });
+		const selected = await readyWebglProject('analysis-selected', stale.project);
+		const analysis = { version: 1, kind: 'responsive', width: null, height: null, reason: 'unity-full-viewport' } as const;
+		await prisma.webglDeployment.update({ where: { id: selected.deployment.id }, data: { displayAnalysis: analysis } });
+		const input = {
+			sessionId: stale.session.id, generation: 1, claimToken: stale.token,
+			deploymentId: stale.deployment.id, expectedCurrentDeploymentId: null,
+			assetId: stale.asset.id, representationId: stale.representation.id,
+			representationUpdatedAt: stale.representation.updatedAt, objectManifest: stale.manifest,
+			displayAnalysis: { version: 1, kind: 'fixed', width: 960, height: 642, reason: 'unity-default-desktop' } as const,
+		};
+		const repository = createWebglProcessingRepository(prisma);
+		await expect(repository.commitReady(input)).resolves.toBe('FENCED');
+		await expect(repository.commitReady(input)).resolves.toBe('FENCED');
+		expect(await prisma.project.findUniqueOrThrow({ where: { id: stale.project.id }, include: { currentWebglDeployment: true } })).toMatchObject({
+			webglDisplayMode: 'manual', webglDisplayWidth: 800, webglDisplayHeight: 600,
+			currentWebglDeploymentId: selected.deployment.id, currentWebglDeployment: { displayAnalysis: analysis },
+		});
+		expect(await prisma.webglDeployment.findUniqueOrThrow({ where: { id: stale.deployment.id } })).toMatchObject({ state: 'PROCESSING', displayAnalysis: null });
+	});
+
 	it('fences a validation commit after WebGL deletion wins first', async () => {
 		const target = await verifyingWebglProject('delete-first');
 		await projectRepository().clearWebglDeployment(target.project.id, {
@@ -459,6 +482,7 @@ describe.runIf(enabled)('WebGL deletion lifecycle with PostgreSQL and Garage', (
 			representationId: target.representation.id,
 			representationUpdatedAt: target.representation.updatedAt,
 			objectManifest: target.manifest,
+			displayAnalysis: { version: 1, kind: 'fixed', width: 960, height: 642, reason: 'unity-default-desktop' },
 		})).rejects.toThrow(/validation lease was lost|not found/i);
 		await expect(prisma.assetUploadSession.findUniqueOrThrow({ where: { id: target.session.id } }))
 			.resolves.toMatchObject({

@@ -114,6 +114,7 @@ export type PublicProjectDetailResponse = {
 	attachments?: ProjectAttachment[];
 	poster?: ResponsiveImage;
 	gameDownloadUrl?: string;
+	webglDisplayKind?: 'fixed' | 'responsive' | 'legacy';
 	webglDisplayWidth?: number | null;
 	webglDisplayHeight?: number | null;
 	webglUrl?: string;

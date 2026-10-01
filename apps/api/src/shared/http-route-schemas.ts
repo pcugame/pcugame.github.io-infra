@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX } from '@pcu/contracts';
 import {
 	WebglDisplaySettingsSchema,
+	WebglDisplaySettingsResponseSchema,
 	CreateProjectChangeSchema,
 	UpdateProjectChangeSchema,
 	RejectProjectChangeSchema,
@@ -440,8 +441,8 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		headers: IdempotencyHeadersSchema,
 		response: jsonResponse(SubmitProjectResponseSchema, 201),
 	}),
-	contract({ method: 'GET', url: '/api/me/projects/:id/webgl-display', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglDisplaySettingsSchema) }),
-	contract({ method: 'PUT', url: '/api/me/projects/:id/webgl-display', family: 'me-project-submission', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: WebglDisplaySettingsSchema, response: jsonResponse(WebglDisplaySettingsSchema) }),
+	contract({ method: 'GET', url: '/api/me/projects/:id/webgl-display', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglDisplaySettingsResponseSchema) }),
+	contract({ method: 'PUT', url: '/api/me/projects/:id/webgl-display', family: 'me-project-submission', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: WebglDisplaySettingsSchema, response: jsonResponse(WebglDisplaySettingsResponseSchema) }),
 	contract({ method: 'GET', url: '/api/me/projects/:id/submission', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
 	contract({ method: 'POST', url: '/api/me/projects/:id/submission/finalize', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),
 	contract({ method: 'DELETE', url: '/api/me/projects/:id/submission', family: 'me-project-submission', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(ProjectSubmissionStatusResponseSchema) }),

@@ -1,3 +1,5 @@
+import type { WebglDisplayAnalysis } from '@pcu/contracts';
+import { analyzeWebglDisplayArchive } from './display-analysis.js';
 import { createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -95,6 +97,7 @@ export interface WebglProcessingRepository {
 		representationId: string;
 		representationUpdatedAt: Date;
 		objectManifest: WebglPublishedObjectManifest;
+		displayAnalysis?: WebglDisplayAnalysis;
 	}): Promise<'COMMITTED' | 'ALREADY_READY' | 'FENCED'>;
 	/** Atomically terminalize the fenced session and enqueue exact-prefix cleanup. */
 	rejectFencedAndQueueCleanup(input: {
@@ -179,7 +182,7 @@ export function createWebglProcessingProcessor(deps: {
 		} | null>;
 	};
 	ids: { next(): string };
-	logger: { warn(context: Record<string, unknown>, message: string): void };
+	logger: { info?(context: Record<string, unknown>, message: string): void; warn(context: Record<string, unknown>, message: string): void };
 	zipPolicy?: Omit<BoundedZipValidationOptions, 'profile' | 'signal' | 'maxArchiveBytes'>;
 }) {
 	const tempRoot = resolve(deps.tempRoot);
@@ -248,6 +251,11 @@ export function createWebglProcessingProcessor(deps: {
 				} catch (error) {
 					throw terminalValidationError(error) ?? error;
 				}
+				await context.assertClaimOwned();
+
+				const analysisStarted = performance.now();
+				const displayAnalysis = await analyzeWebglDisplayArchive({ archivePath, layout, signal: context.signal });
+				deps.logger.info?.({ sessionId: session.id, kind: displayAnalysis.kind, reason: displayAnalysis.reason, elapsedMs: Math.round(performance.now() - analysisStarted) }, 'Analyzed WebGL display');
 				await context.assertClaimOwned();
 
 				const candidateDeploymentId = deps.ids.next();
@@ -327,6 +335,7 @@ export function createWebglProcessingProcessor(deps: {
 						representationId: session.sourceRepresentation.id,
 						representationUpdatedAt: session.sourceRepresentation.updatedAt,
 						objectManifest,
+						displayAnalysis,
 					});
 					if (committed === 'FENCED') {
 						await deps.repository.rejectFencedAndQueueCleanup({

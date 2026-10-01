@@ -1,4 +1,4 @@
-import { WebglDisplayDimensionSchema } from './webgl-display.js';
+import { WebglDisplayDimensionSchema, WebglDisplayKindSchema, WebglDisplayModeSchema } from './webgl-display.js';
 import { VisibilitySchema } from './schemas.js';
 import { z } from 'zod';
 import {
@@ -246,6 +246,7 @@ export const PublicProjectDetailResponseSchema = z.object({
 	attachments: z.array(ProjectAttachmentSchema).default([]),
 	poster: ResponsiveImageSchema.optional(),
 	gameDownloadUrl: UrlSchema.optional(),
+	webglDisplayKind: WebglDisplayKindSchema.optional(),
 	webglDisplayWidth: WebglDisplayDimensionSchema.nullable().optional(),
 	webglDisplayHeight: WebglDisplayDimensionSchema.nullable().optional(),
 	webglUrl: UrlSchema.optional(),
@@ -334,6 +335,7 @@ export const AdminProjectDetailSchema = z.object({
 	sortOrder: NonNegativeIntegerSchema,
 	posterAssetId: PositiveIntegerSchema.optional(),
 	poster: ResponsiveImageSchema.optional(),
+	webglDisplayMode: WebglDisplayModeSchema.optional(),
 	webglDisplayWidth: WebglDisplayDimensionSchema.nullable().optional(),
 	webglDisplayHeight: WebglDisplayDimensionSchema.nullable().optional(),
 	webglUrl: UrlSchema.optional(),

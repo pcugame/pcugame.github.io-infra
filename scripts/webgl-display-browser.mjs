@@ -14,7 +14,7 @@ const playwright = process.env.PLAYWRIGHT_MODULE_PATH ? await import(pathToFileU
 const engine = process.env.PLAYWRIGHT_BROWSER || 'chromium';
 const token = 'a'.repeat(64), otherToken = 'b'.repeat(64), controlSecret = 'c'.repeat(64);
 const title = '<img src=x onerror="window.titleInjected=true"> & display fixture';
-let dimensions = [1280,720], config, apiOrigin, assetOrigin;
+let dimensions = [1280,720], displayKind = 'fixed', config, apiOrigin, assetOrigin;
 let creates = 0, loads = 0, renewals = 0, closes = 0, denyRenew = false, otherRequests = 0;
 const assetRequests = [];
 const baselineFaviconViolations = [];
@@ -26,7 +26,7 @@ const api = await serve((req,res) => {
  if(req.method==='POST'&&req.url.startsWith('/api/webgl-play/sessions')) {
   if(req.url.endsWith('/renew')) { renewals++;assert.equal(req.headers['x-pcu-play-control'],controlSecret);return json(res,denyRenew?403:200,{expiresAt:new Date(Date.now()+900000).toISOString(),absoluteExpiresAt:new Date(Date.now()+28800000).toISOString()}); }
   if(req.url.endsWith('/close')) { closes++;assert.equal(req.headers['x-pcu-play-control'],controlSecret);return json(res,200,{closed:true}); }
-  creates++;return json(res,200,{id:'11111111-1111-4111-8111-111111111111',controlSecret,iframeUrl:`${assetOrigin}/runtime/${token}/index.html`,projectTitle:title,webglDisplayWidth:dimensions[0],webglDisplayHeight:dimensions[1],expiresAt:new Date(Date.now()+900000).toISOString(),absoluteExpiresAt:new Date(Date.now()+28800000).toISOString()});
+  creates++;return json(res,200,{id:'11111111-1111-4111-8111-111111111111',controlSecret,iframeUrl:`${assetOrigin}/runtime/${token}/index.html`,projectTitle:title,webglDisplayKind:displayKind,webglDisplayWidth:dimensions[0],webglDisplayHeight:dimensions[1],expiresAt:new Date(Date.now()+900000).toISOString(),absoluteExpiresAt:new Date(Date.now()+28800000).toISOString()});
  }
  res.writeHead(404);res.end();
 });
@@ -52,13 +52,20 @@ let browser;
 const matrix=[];
 try{
  browser=await playwright[engine].launch({headless:true,timeout:20000,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{}),...(engine==='chromium'?{args:['--no-sandbox']}: {})});
- for(const [width,height] of [[1280,720],[720,1280],[800,600]]){
+ for(const [width,height] of [[1280,720],[720,1280],[800,600],[null,null]]){
+  displayKind=width===null?'responsive':'fixed';
   dimensions=[width,height];denyRenew=false;
   const context=await browser.newContext({viewport:{width:1800,height:1200},deviceScaleFactor:2});
   await context.addCookies([{name:'fixture_cookie',value:'present',url:assetOrigin}]);
   await context.addInitScript(()=>{window.cspViolations=[];document.addEventListener('securitypolicyviolation',event=>window.cspViolations.push({directive:event.effectiveDirective,blocked:event.blockedURI}));});
   const page=await context.newPage();await page.clock.install();
   await page.goto(`${apiOrigin}/play/projects/1`);
+  // Headless software rendering may intentionally hold startup. Exercise the real
+  // explicit continuation control instead of bypassing the production probe.
+  await page.locator('#game iframe, #acceleration-gate:not([hidden])').first().waitFor();
+  if (await page.locator('#acceleration-gate').isVisible()) {
+   await page.locator('#acceleration-continue').click();
+  }
   const iframe=page.locator('#game iframe');await iframe.waitFor();
   const game=await (await iframe.elementHandle()).contentFrame();await game.waitForFunction(()=>window.probe?.worker||window.probe?.workerError);
   const first={creates,loads,id:await game.evaluate(()=>probe.id),src:await iframe.getAttribute('src')};
@@ -72,20 +79,27 @@ try{
    await new Promise(resolve=>setTimeout(resolve,150));
    const stage=await page.locator('#game').boundingBox(),box=await iframe.boundingBox();
    assert(box.width<=stage.width+1.5&&box.height<=stage.height+1.5,JSON.stringify({name,stage,box}));
-   if(!fullscreen)assert(box.width<=width+1.5&&box.height<=height+1.5);
-   assert(Math.abs(box.width/box.height-width/height)<.01);
+   if(displayKind==='fixed'){
+    if(!fullscreen)assert(box.width<=width+1.5&&box.height<=height+1.5);
+    assert(Math.abs(box.width/box.height-width/height)<.01);
+   }else{
+    assert(Math.abs(box.width-stage.width)<1.5&&Math.abs(box.height-stage.height)<1.5);
+   }
    assert(Math.abs(box.x+box.width/2-stage.x-stage.width/2)<1.5);assert(Math.abs(box.y+box.height/2-stage.y-stage.height/2)<1.5);
-   assert.deepEqual(await game.evaluate(()=>[innerWidth,innerHeight]),[width,height]);
-   const scale=box.width/width;
+   const inner=await game.evaluate(()=>[innerWidth,innerHeight]);
+   if(displayKind==='fixed')assert.deepEqual(inner,[width,height]);
+   else assert(Math.abs(inner[0]-stage.width)<=1&&Math.abs(inner[1]-stage.height)<=1);
+   const [inputWidth,inputHeight]=inner;
+   const scale=box.width/inputWidth;
    for(const [fx,fy] of [[.02,.02],[.98,.02],[.02,.98],[.98,.98],[.5,.5]]){
     await page.mouse.click(box.x+box.width*fx,box.y+box.height*fy);const p=await game.evaluate(()=>probe.clicks.at(-1));
-    assert(Math.abs(p[0]-width*fx)*scale<=1.5&&Math.abs(p[1]-height*fy)*scale<=1.5,JSON.stringify({name,box,p,fx,fy,width,height}));
+    assert(Math.abs(p[0]-inputWidth*fx)*scale<=1.5&&Math.abs(p[1]-inputHeight*fy)*scale<=1.5,JSON.stringify({name,box,p,fx,fy,width,height}));
    }
    await page.mouse.move(box.x+box.width*.25,box.y+box.height*.25);await page.mouse.down();await page.mouse.move(box.x+box.width*.75,box.y+box.height*.75,{steps:5});await page.mouse.up();
-   const last=await game.evaluate(()=>probe.moves.at(-1));assert(Math.abs(last[0]-width*.75)*scale<=1.5&&Math.abs(last[1]-height*.75)*scale<=1.5);
+   const last=await game.evaluate(()=>probe.moves.at(-1));assert(Math.abs(last[0]-inputWidth*.75)*scale<=1.5&&Math.abs(last[1]-inputHeight*.75)*scale<=1.5);
    await page.keyboard.press('a');assert((await game.evaluate(()=>probe.keys)).includes('a'));
    assert.equal(creates,first.creates);assert.equal(loads,first.loads);assert.equal(await game.evaluate(()=>probe.id),first.id);assert.equal(await iframe.getAttribute('src'),first.src);
-   matrix.push({width,height,name,iframe:{width:box.width,height:box.height},stage:{width:stage.width,height:stage.height}});
+   matrix.push({kind:displayKind,width,height,name,iframe:{width:box.width,height:box.height},stage:{width:stage.width,height:stage.height}});
   }
   for(const viewport of [{width:1800,height:1200},{width:900,height:650},{width:600,height:450}]){await page.setViewportSize(viewport);await measure(`${viewport.width}x${viewport.height}`)}
   await page.setViewportSize({width:1800,height:1200});await page.locator('#fullscreen').click();await page.waitForFunction(()=>!!document.fullscreenElement);await measure('host-fullscreen',true);

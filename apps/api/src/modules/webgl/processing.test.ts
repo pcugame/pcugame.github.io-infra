@@ -423,6 +423,7 @@ describe('canonical WebGL processing', () => {
 		expect(state.uploaded.find((item) => item.key.endsWith('.data.gz')))
 			.toMatchObject({ type: 'application/octet-stream', encoding: 'gzip' });
 		expect(state.repository.commitReady).toHaveBeenCalledWith(expect.objectContaining({
+			displayAnalysis: { version: 1, kind: 'unknown', width: null, height: null, reason: 'unsupported-document-mode' },
 			expectedCurrentDeploymentId: 'old-deployment',
 			objectManifest: expect.objectContaining({
 				version: 1,

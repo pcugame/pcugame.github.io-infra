@@ -16,3 +16,26 @@ describe('WebGL CSS display pair', () => {
 		expect(WebglDisplaySettingsSchema.safeParse({ webglDisplayWidth: 800, webglDisplayHeight: null }).success).toBe(false);
 	});
 });
+
+import { inferWebglDisplayMode, resolveWebglDisplay, WebglDisplayAnalysisSchema } from './webgl-display.js';
+describe('WebGL display resolution', () => {
+	const fixed = { version: 1, kind: 'fixed', width: 960, height: 600, reason: null };
+	const settings = { webglDisplayWidth: 1280, webglDisplayHeight: 720 };
+	it('keeps old payload behavior and resolves manual before automatic analysis', () => {
+		expect(inferWebglDisplayMode(settings)).toBe('manual');
+		expect(inferWebglDisplayMode({ webglDisplayWidth: null, webglDisplayHeight: null })).toBe('legacy');
+		expect(resolveWebglDisplay({ ...settings, webglDisplayMode: 'manual', analysis: fixed })).toEqual({ kind: 'fixed', width: 1280, height: 720 });
+		expect(resolveWebglDisplay({ ...settings, webglDisplayMode: 'auto', analysis: fixed })).toEqual({ kind: 'fixed', width: 960, height: 600 });
+	});
+	it('resolves responsive, unknown, missing and invalid analyses conservatively', () => {
+		expect(resolveWebglDisplay({ webglDisplayMode: 'auto', analysis: { version: 1, kind: 'responsive', width: null, height: null, reason: null } })).toEqual({ kind: 'responsive', width: null, height: null });
+		for (const analysis of [null, { version: 1, kind: 'unknown', width: null, height: null, reason: 'Ambiguous template' }, { ...fixed, width: 9000 }])
+			expect(resolveWebglDisplay({ webglDisplayMode: 'auto', analysis })).toEqual({ kind: 'legacy', width: null, height: null });
+		expect(resolveWebglDisplay({ ...settings, webglDisplayMode: 'legacy', analysis: fixed })).toEqual({ kind: 'legacy', width: null, height: null });
+		expect(WebglDisplayAnalysisSchema.safeParse({ ...fixed, height: null }).success).toBe(false);
+	});
+	it('requires manual dimensions while allowing retained dimensions in auto and legacy', () => {
+		expect(WebglDisplaySettingsSchema.safeParse({ webglDisplayMode: 'manual', webglDisplayWidth: null, webglDisplayHeight: null }).success).toBe(false);
+		for (const webglDisplayMode of ['auto', 'legacy']) expect(WebglDisplaySettingsSchema.safeParse({ ...settings, webglDisplayMode }).success).toBe(true);
+	});
+});
