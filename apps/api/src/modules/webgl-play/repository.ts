@@ -41,6 +41,12 @@ export function createWebglPlayRepository(client: PrismaClient) {
       }),
     renewAuthorized: async (id: string, at: Date, idleMs: number) =>
       client.$transaction(async (tx) => {
+        // Logout locks the parent auth session before cascading to play leases.
+        // Use the same order to avoid a renewal/logout deadlock.
+        const identity = await tx.webglPlaySession.findUnique({ where: { id }, select: { sessionId: true } });
+        if (!identity) throw forbidden();
+        if (identity.sessionId)
+          await tx.$executeRaw`SELECT id FROM auth_sessions WHERE id = ${identity.sessionId} FOR UPDATE`;
         await tx.$executeRaw`SELECT id FROM webgl_play_sessions WHERE id = ${id} FOR UPDATE`;
         const play = await tx.webglPlaySession.findUnique({ where: { id } });
         if (
@@ -50,8 +56,6 @@ export function createWebglPlayRepository(client: PrismaClient) {
           play.absoluteExpiresAt <= at
         )
           throw forbidden();
-        if (play.sessionId)
-          await tx.$executeRaw`SELECT id FROM auth_sessions WHERE id = ${play.sessionId} FOR UPDATE`;
         const session = play.sessionId
           ? await tx.authSession.findUnique({
               where: { id: play.sessionId },
