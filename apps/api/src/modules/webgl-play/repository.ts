@@ -34,6 +34,12 @@ export function createWebglPlayRepository(client: PrismaClient) {
     ) =>
       client.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(73489123)`;
+        // Lock the FK parent before deleting expired children. Otherwise logout
+        // can wait on a deleted child while issuance waits on its parent at INSERT.
+        if (data.sessionId) {
+          const sessions = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM auth_sessions WHERE id = ${data.sessionId} AND expires_at > ${at} FOR UPDATE`;
+          if (!sessions.length) throw forbidden();
+        }
         // Approval/revocation take the conflicting project UPDATE lock. Snapshot
         // selection and persistence therefore cannot straddle a policy change.
         await tx.$queryRaw`SELECT id FROM projects WHERE id = ${data.projectId} FOR SHARE`;
