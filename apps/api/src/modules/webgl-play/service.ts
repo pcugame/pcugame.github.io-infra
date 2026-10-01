@@ -106,6 +106,8 @@ export function createWebglPlayService(
         controlSecret,
         iframeUrl: `${config.PUBLIC_ASSET_ORIGIN}/runtime/${assetToken}/${entry}`,
         projectTitle: dep.project.title,
+        webglDisplayWidth: dep.project.webglDisplayWidth,
+        webglDisplayHeight: dep.project.webglDisplayHeight,
         expiresAt: expiresAt.toISOString(),
         absoluteExpiresAt: absoluteExpiresAt.toISOString(),
       };
