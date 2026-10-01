@@ -20,13 +20,13 @@ function pushPaths(workflow: string): string[] {
 }
 
 describe('production deployment safety', () => {
-	it('passes the single-hop proxy trust setting into the production API container', () => {
+	it('defaults to ignoring forwarded headers until an explicit proxy peer is configured', () => {
 		const deployScript = repositoryFile('server/deploy.sh');
 		const productionEnvExample = repositoryFile('server/.env.example');
 
 		expect(deployScript).toContain('API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"');
-		expect(deployScript).toContain('-e "TRUST_PROXY=${TRUST_PROXY:-1}" \\');
-		expect(productionEnvExample).toMatch(/^TRUST_PROXY=1$/m);
+		expect(deployScript).toContain('-e "TRUST_PROXY=${TRUST_PROXY:-false}" \\');
+		expect(productionEnvExample).toMatch(/^TRUST_PROXY=false$/m);
 	});
 
 	it('publishes a tested API image and records its immutable digest without an implicit production cutover', () => {

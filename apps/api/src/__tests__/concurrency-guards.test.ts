@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { parseTrustProxy } from '../shared/trust-proxy.js';
 
 /**
  * Regression tests for concurrency guard logic used in the codebase.
@@ -128,14 +129,6 @@ describe('Concurrency guard patterns', () => {
 	// ── E: trustProxy parsing ───────────────────────────────
 
 	describe('trustProxy parsing', () => {
-		function parseTrustProxy(val: string): boolean | number | string {
-			if (val === 'true') return true;
-			if (val === 'false' || val === '') return false;
-			const num = Number(val);
-			if (!isNaN(num) && Number.isInteger(num) && num > 0) return num;
-			return val;
-		}
-
 		it('parses "true" as boolean true', () => {
 			expect(parseTrustProxy('true')).toBe(true);
 		});
@@ -148,9 +141,8 @@ describe('Concurrency guard patterns', () => {
 			expect(parseTrustProxy('')).toBe(false);
 		});
 
-		it('parses numeric string as number', () => {
-			expect(parseTrustProxy('1')).toBe(1);
-			expect(parseTrustProxy('2')).toBe(2);
+		it.each(['1', '2', '0', '-1', '1.5', ' 1 ', '1e2', '0x01', 'Infinity'])('rejects numeric hop counts: %s', (value) => {
+			expect(() => parseTrustProxy(value)).toThrow('exact trusted proxy peer IP/CIDR');
 		});
 
 		it('parses IP address as string passthrough', () => {

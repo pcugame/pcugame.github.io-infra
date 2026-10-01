@@ -59,8 +59,8 @@ const envSchema = z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
       .default('info'),
 
-    // Reverse proxy trust — set to 'true' if behind a single proxy (nginx, etc.),
-    // or a number for the hop count, or a comma-separated list of trusted IPs.
+    // Reverse proxy trust — use the exact proxy peer IP/CIDR observed by the API,
+    // or a comma-separated list of trusted addresses. Numeric hop counts are unsupported.
     // Leave empty or 'false' when the API is directly exposed (no proxy).
     TRUST_PROXY: z.string().default('false'),
 

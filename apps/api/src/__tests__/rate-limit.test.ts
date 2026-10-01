@@ -18,7 +18,7 @@ import {
 // Use very tight limits so the test doesn't need to send 300+ requests.
 const testEnv = {
 	...defaultTestEnv,
-	TRUST_PROXY: '1',
+	TRUST_PROXY: '127.0.0.1',
 	RATE_LIMIT_GLOBAL_MAX: 5,
 	RATE_LIMIT_GLOBAL_WINDOW_MS: 60_000,
 	RATE_LIMIT_LOGIN_MAX: 3,
@@ -119,6 +119,10 @@ describe('rate-limit plugin', () => {
 	beforeAll(async () => {
 		const { buildApp } = await import('../app.js');
 		app = await buildApp({ context });
+		app.addHook('onSend', async (request, reply, payload) => {
+			reply.header('x-test-client-ip', request.ip);
+			return payload;
+		});
 		await app.ready();
 	});
 
@@ -157,7 +161,7 @@ describe('rate-limit plugin', () => {
 		expect(codes.slice(3).some((c) => c === 429)).toBe(true);
 	});
 
-	it('accepts the forwarded client IP behind the single trusted nginx hop without making NAT the normal quota', async () => {
+	it('honors forwarded client IPs only from the explicit trusted proxy peer', async () => {
 		const proxyAddress = '127.0.0.1';
 		const firstClientCodes: number[] = [];
 		for (let i = 0; i < 7; i++) {
@@ -168,6 +172,7 @@ describe('rate-limit plugin', () => {
 				headers: { 'x-forwarded-for': '198.51.100.10' },
 			});
 			firstClientCodes.push(response.statusCode);
+			expect(response.headers['x-test-client-ip']).toBe('198.51.100.10');
 		}
 
 		expect(firstClientCodes).not.toContain(429);
@@ -178,6 +183,28 @@ describe('rate-limit plugin', () => {
 			headers: { 'x-forwarded-for': '198.51.100.11' },
 		});
 		expect(independentClient.statusCode).toBe(200);
+		expect(independentClient.headers['x-test-client-ip']).toBe('198.51.100.11');
+	});
+
+	it('ignores spoofed forwarding headers from an untrusted peer', async () => {
+		const response = await app.inject({
+			method: 'GET', url: '/api/me', remoteAddress: '203.0.113.44',
+			headers: { 'x-forwarded-for': '198.51.100.44' },
+		});
+		expect(response.headers['x-test-client-ip']).toBe('203.0.113.44');
+	});
+
+	it('uses independent login buckets for forwarded clients and resists header rotation from untrusted peers', async () => {
+		const login = (peer: string, client: string) => app.inject({
+			method: 'POST', url: '/api/auth/google', remoteAddress: peer,
+			payload: { credential: 'fake' },
+			headers: { origin: 'http://localhost:5173', 'x-forwarded-for': client },
+		});
+		for (let i = 0; i < 3; i++) expect((await login('127.0.0.1', '198.51.100.60')).statusCode).not.toBe(429);
+		expect((await login('127.0.0.1', '198.51.100.60')).statusCode).toBe(429);
+		expect((await login('127.0.0.1', '198.51.100.61')).statusCode).not.toBe(429);
+		for (let i = 0; i < 3; i++) expect((await login('203.0.113.60', `198.51.100.${70 + i}`)).statusCode).not.toBe(429);
+		expect((await login('203.0.113.60', '198.51.100.73')).statusCode).toBe(429);
 	});
 
 	it('allows 50 authenticated principals behind one NAT and isolates actor/session abuse', () => {

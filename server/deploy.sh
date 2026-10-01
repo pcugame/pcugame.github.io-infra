@@ -284,6 +284,13 @@ run_release_entry() {
 }
 
 validate_production_boundaries() {
+  node - "${TRUST_PROXY:-false}" <<'NODE' || return 1
+const value = process.argv[2].trim();
+if (value !== '' && value !== 'true' && value !== 'false' && !Number.isNaN(Number(value))) {
+  console.error('ERROR: TRUST_PROXY numeric hop counts are unsupported; use false or the exact trusted proxy peer IP/CIDR (as observed by the API).');
+  process.exit(1);
+}
+NODE
   [[ "${#FILE_GATEWAY_SECRET}" -ge 32 ]] || {
     echo "ERROR: FILE_GATEWAY_SECRET must contain at least 32 characters and match the NAS file gateways"
     return 1
@@ -1015,7 +1022,7 @@ do_up() {
     "${common_env[@]}" \
     "${ca_args[@]}" \
     -e "PORT=4000" \
-    -e "TRUST_PROXY=${TRUST_PROXY:-1}" \
+    -e "TRUST_PROXY=${TRUST_PROXY:-false}" \
     -e "DOWNLOAD_AUTO_IP_BAN_ENABLED=${DOWNLOAD_AUTO_IP_BAN_ENABLED:-false}" \
     -e "DATABASE_URL=${db_url}" \
     -e "SESSION_COOKIE_NAME=${SESSION_COOKIE_NAME:-sid}" \

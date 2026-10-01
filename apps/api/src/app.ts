@@ -13,14 +13,7 @@ import { AppError } from './shared/errors.js';
 import type { ApiError } from './shared/http.js';
 import type { BackendContext } from './backend-context.js';
 import { registerRouteSchemas } from './shared/http-route-schemas.js';
-
-function parseTrustProxy(val: string): boolean | number | string {
-	if (val === 'true') return true;
-	if (val === 'false' || val === '') return false;
-	const num = Number(val);
-	if (!isNaN(num) && Number.isInteger(num) && num > 0) return num;
-	return val; // comma-separated IPs or subnet
-}
+import { parseTrustProxy } from './shared/trust-proxy.js';
 
 export function shouldRegisterDevAuth(cfg: { DEV_AUTH_ENABLED: boolean; NODE_ENV: string }): boolean {
 	return cfg.DEV_AUTH_ENABLED && cfg.NODE_ENV !== 'production';
