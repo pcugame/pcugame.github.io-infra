@@ -28,6 +28,7 @@ export interface ProjectMultipartProductionDependencies {
 	access: ReturnType<typeof createProjectAccessService>;
 	repository: ProjectApplicationRepository;
 	uploadLifecycle: UploadLifecycleRuntime;
+	webglDisplayController?: FastifyPluginAsync;
 }
 
 /** Compose metadata-only project creation; object bytes use direct sessions. */
@@ -56,7 +57,7 @@ export function createProjectMultipartProductionGraph(
 
 	return {
 		projectMultipartController: adminSubmit,
-		meController: createMeRoutes({ projectController: meSubmit }),
+		meController: createMeRoutes({ projectController: meSubmit, webglDisplayController: deps.webglDisplayController }),
 		projectAccess: deps.access,
 		projectRepository: deps.repository,
 	};

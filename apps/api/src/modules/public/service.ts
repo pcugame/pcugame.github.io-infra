@@ -42,6 +42,8 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	platforms?: Platform[];
 	isIncomplete: boolean;
 	status: ProjectStatus;
+	webglDisplayWidth?: number | null;
+	webglDisplayHeight?: number | null;
 	currentWebglDeploymentId?: string | null;
 	currentWebglDeployment?: {
 		id: string;
@@ -338,6 +340,8 @@ export async function getProjectDetail(
 		gameDownloadUrl: gameAsset
 			? protectedAssetUrl(deps, gameAsset.id, 'original')
 			: undefined,
+		webglDisplayWidth: project.webglDisplayWidth ?? null,
+		webglDisplayHeight: project.webglDisplayHeight ?? null,
 		webglUrl: webglEntryUrl,
 		webglPlayUrl: deps.webglPlayEnabled && webglEntryUrl
 			? new URL(`/play/projects/${project.id}`, deps.apiPublicUrl).href

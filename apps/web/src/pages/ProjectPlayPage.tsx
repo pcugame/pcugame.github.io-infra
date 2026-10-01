@@ -1,3 +1,4 @@
+import { WebglViewport } from '../components/project/WebglViewport';
 import { useViewerKey } from '../lib/query';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -34,7 +35,7 @@ export default function ProjectPlayPage() {
 	if (!project) return null;
 
 	return (
-		<main className="project-play-page">
+		<main className={`project-play-page${project.webglUrl && project.webglDisplayWidth && project.webglDisplayHeight ? ' project-play-page--sized' : ''}`}>
 			<header className="project-play-page__header">
 				<div>
 					<span>WebGL Player</span>
@@ -61,7 +62,7 @@ export default function ProjectPlayPage() {
 						<p>문제가 계속되면 작품명, 브라우저 이름과 버전, 화면에 표시된 오류를 운영자에게 알려 주세요.</p>
 					</details>
 				</section>
-				<div className="project-play-page__frame-wrap">
+				<WebglViewport width={project.webglDisplayWidth} height={project.webglDisplayHeight}>
 					<iframe
 						key={`${project.id}:${project.webglUrl}:${restartCount}`}
 						{...{ credentialless: '' }}
@@ -72,7 +73,7 @@ export default function ProjectPlayPage() {
 						allow="fullscreen; autoplay"
 						referrerPolicy="no-referrer"
 					/>
-				</div>
+				</WebglViewport>
 				</>
 			) : (
 				<section className="project-play-page__empty">

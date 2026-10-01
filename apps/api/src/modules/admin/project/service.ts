@@ -117,7 +117,7 @@ export async function getProjectDetail(
 		const isMember = !!(await deps.repository.isMemberOfProject(project.id, userId));
 		if (!isMember) throw forbidden('Not your project');
 	}
-	return { ...deps.serializeProjectDetail(project), ...capabilities(project, userId, userRole) };
+	return { ...deps.serializeProjectDetail(project), ...capabilities(project, userId, userRole), canEditWebglDisplay: (userRole === 'ADMIN' || userRole === 'OPERATOR') || (project.creatorId === userId && project.exhibition.isModificationEnabled !== false) };
 }
 
 /** Partial-update a project */
@@ -140,7 +140,7 @@ export async function updateProject(
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	}, actor);
-	return { ...deps.serializeProjectDetail(updated), ...capabilities(updated, actor.id, actor.role) };
+	return { ...deps.serializeProjectDetail(updated), ...capabilities(updated, actor.id, actor.role), canEditWebglDisplay: (actor.role === 'ADMIN' || actor.role === 'OPERATOR') || (updated.creatorId === actor.id && updated.exhibition.isModificationEnabled !== false) };
 }
 
 /** Delete a project and its associated asset files from S3 */
