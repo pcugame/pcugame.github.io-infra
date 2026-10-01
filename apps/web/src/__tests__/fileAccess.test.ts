@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectFileTokens, hydrateFileUrls } from '../lib/api/file-access';
 import { api } from '../lib/api/client';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('media access capabilities', () => {
  it('hydrates originals, renditions, video downloads and WebGL without changing external links or inputs', async () => {
@@ -21,6 +21,24 @@ describe('media access capabilities', () => {
  it('fails closed if a capability cannot be issued', async () => {
   vi.spyOn(api, 'post').mockRejectedValue(new Error('forbidden'));
   await expect(hydrateFileUrls({ url: 'https://files.test/secret' })).rejects.toThrow('forbidden');
+ });
+ it('keeps named external links out of capability issuance and renewal, including change snapshots', async () => {
+  const issue = vi.spyOn(api, 'post').mockRejectedValue(new Error('not a stored file'));
+  const externalLinks = [{ label: 'GitHub', url: 'https://github.com/team/game' }, { label: 'Demo', url: 'https://example.com/play/external/index.html?pcu_token=external' }];
+  const input = { externalLinks, before: { externalLinks }, changes: { externalLinks }, githubUrl: 'https://example.com/file/legacy' };
+  await expect(hydrateFileUrls(input)).resolves.toEqual(input);
+  expect(issue).not.toHaveBeenCalled();
+  expect([...collectFileTokens(input)]).toEqual([]);
+ });
+ it('reads a real project response through the API client without requesting file access for external URLs', async () => {
+  const externalLinks = [{ label: 'GitHub', url: 'https://github.com/team/game' }];
+  const fetcher = vi.fn(async (url: string) => {
+   if (!url.endsWith('/api/public/projects/124')) return new Response('Not found', { status: 404 });
+   return Response.json({ ok: true, data: { id: 124, externalLinks } });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  await expect(api.get('/api/public/projects/124')).resolves.toEqual({ id: 124, externalLinks });
+  expect(fetcher).toHaveBeenCalledTimes(1);
  });
  it('finds and deduplicates file and WebGL tokens for stable renewal', () => {
   expect([...collectFileTokens({ image: 'https://files.test/x?pcu_token=one', play: 'https://files.test/play/two/index.html', same: ['https://files.test/y?pcu_token=one'], download: 'https://files.test/file/three' })].sort()).toEqual(['one', 'three', 'two']);
