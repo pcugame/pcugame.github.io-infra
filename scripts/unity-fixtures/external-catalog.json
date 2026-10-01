@@ -291,17 +291,13 @@
         "size": 1664,
         "license": "CC-BY-4.0",
         "attribution": "Box model donated by Cesium for glTF testing",
-        "adaptation": "Additional isolated same-origin model input; compiled Unity artifacts unchanged"
+        "adaptation": "Original-worker local baseline uses same-origin Box input. External-connectivity local tests use a separate controlled HTTPS origin; production loads the pinned raw.githubusercontent.com HTTPS Box URL. Compiled Unity artifacts unchanged."
       },
       "adaptation": "HTML standalone callbacks configure actual Unity model download. Instrumented variant prepends observation-only code to original worker; original native load/run scheduling, WASM, framework and data remain unchanged. Original-worker baseline is separate.",
       "workerHashes": {
         "originalWorkerSHA256": "cc9ef4df6eca2ced3c2ab73c64580de249f09c3c8550258f3b5dfa9cfad3de93",
         "instrumentedWorkerSHA256": "b90c5cad720859d4f17837d6e06164d4d9482cda4a7af3dbc0d796946c967fd9",
-        "prefixSHA256": "5cbc6ffd59911778450e581ec9383a00733b8aba3a7c6c7a200c7365cd2739cf",
-        "distSHA256": {
-          "runtime-ui.js": "3ad9f07f3a1584afb975e0a9621f434e27623d673f290dd1be5a82df8e4cb4ef",
-          "service.js": "b0547b25090b2d6469592b76741953acafdf91f42f7a81f2181208f05c5c0156"
-        }
+        "prefixSHA256": "5cbc6ffd59911778450e581ec9383a00733b8aba3a7c6c7a200c7365cd2739cf"
       }
     }
   ]
