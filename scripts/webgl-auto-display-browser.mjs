@@ -114,7 +114,18 @@ try {
  });
  const identity = await game.evaluate(() => acceptanceIdentity);
  async function measure(name, gameFullscreen = false) {
-  await page.waitForTimeout(250);
+  const fitStarted = Date.now();
+  // Unity can occupy the renderer beyond one short delay after a viewport change.
+  // Wait for the resize observer's fitted geometry, with a bounded failure timeout.
+  if (!gameFullscreen) await page.waitForFunction(display => {
+   const frame = document.querySelector('#game iframe').getBoundingClientRect();
+   const stage = document.querySelector('#game').getBoundingClientRect();
+   if (display.kind === 'responsive') return Math.abs(frame.width - stage.width) <= 1 && Math.abs(frame.height - stage.height) <= 1;
+   const full = document.fullscreenElement === document.querySelector('main');
+   const scale = Math.min(stage.width / display.width, stage.height / display.height, full ? Infinity : 1);
+   return Math.abs(frame.width - display.width * scale) <= 1 && Math.abs(frame.height - display.height * scale) <= 1;
+  }, analysis, { timeout: 5000 });
+  const fitWaitMs = Date.now() - fitStarted;
   const box = await iframe.boundingBox(), stage = await page.locator('#game').boundingBox();
   const inner = await game.evaluate(() => ({ viewport: [innerWidth, innerHeight],
    scroll: [document.documentElement.scrollWidth, document.documentElement.scrollHeight],
@@ -123,7 +134,7 @@ try {
   assert.deepEqual({ creates, loads, src: await iframe.getAttribute('src') }, start);
   assert.equal(await game.evaluate(() => acceptanceIdentity), identity);
   if (!gameFullscreen) {
-   assert(box.width <= stage.width + 1 && box.height <= stage.height + 1);
+   assert(box.width <= stage.width + 1 && box.height <= stage.height + 1, JSON.stringify({ name, box, stage, inner }));
    if (analysis.kind === 'fixed') assert.deepEqual(inner.viewport, [analysis.width, analysis.height]);
    else assert(Math.abs(box.width - stage.width) < 1 && Math.abs(box.height - stage.height) < 1);
    assert(inner.scroll[0] <= inner.viewport[0] && inner.scroll[1] <= inner.viewport[1], JSON.stringify(inner));
@@ -136,7 +147,7 @@ try {
    const click = await game.evaluate(() => acceptanceClicks.at(-1));
    assert(click && Math.abs(click[0] - expected[0]) <= 2 && Math.abs(click[1] - expected[1]) <= 2);
   }
-  measurements.push({ name, box, stage, inner, creates, loads });
+  measurements.push({ name, fitWaitMs, box, stage, inner, creates, loads });
   if (process.env.BROWSER_ARTIFACT_DIR) {
    await mkdir(process.env.BROWSER_ARTIFACT_DIR, { recursive: true });
    await page.screenshot({ path: path.join(process.env.BROWSER_ARTIFACT_DIR, `${name}.png`) });
