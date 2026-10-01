@@ -6,10 +6,10 @@ import { useQuery } from '@tanstack/react-query';
 import { ErrorMessage, LoadingSpinner } from '../components/common';
 import { publicApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
+import type { PublicProjectDetailResponse } from '@pcu/contracts';
 
 export default function ProjectPlayPage() {
-	const [restartCount, setRestartCount] = useState(0);
- const viewerKey = useViewerKey();
+	const viewerKey = useViewerKey();
 	const { projectId: projectIdParam } = useParams<{ projectId: string }>();
 	const projectId = Number(projectIdParam);
 	const { data: project, isLoading, error, refetch } = useQuery({
@@ -24,7 +24,7 @@ export default function ProjectPlayPage() {
 	if (project?.webglPlayUrl) return <main className="project-play-page project-play-page--message"><a href={project.webglPlayUrl} rel="noopener">전용 실행 화면으로 이동</a></main>;
 
 	if (isLoading) return <main className="project-play-page project-play-page--message"><LoadingSpinner /></main>;
-	if (error) {
+	if (error && !project) {
 		return (
 			<main className="project-play-page project-play-page--message">
 				<ErrorMessage error={error} onReset={() => refetch()} />
@@ -34,8 +34,16 @@ export default function ProjectPlayPage() {
 	}
 	if (!project) return null;
 
+	return <RunningPlayer key={project.id} initialProject={project} />;
+}
+
+function RunningPlayer({ initialProject }: { initialProject: PublicProjectDetailResponse }) {
+	// Refetches and settings saves must not alter an already running game's viewport or URL.
+	const [project, setProject] = useState(initialProject);
+	const [restartCount, setRestartCount] = useState(0);
+
 	return (
-		<main className={`project-play-page${project.webglUrl && project.webglDisplayWidth && project.webglDisplayHeight ? ' project-play-page--sized' : ''}`}>
+		<main className={`project-play-page${project.webglUrl && (project.webglDisplayKind === 'responsive' || (project.webglDisplayWidth && project.webglDisplayHeight)) ? ' project-play-page--sized' : ''}`}>
 			<header className="project-play-page__header">
 				<div>
 					<span>WebGL Player</span>
@@ -51,7 +59,10 @@ export default function ProjectPlayPage() {
 				<section className="project-play-page__help" aria-label="게임 실행 안내">
 					<div className="project-play-page__actions">
 						<button type="button" className="btn btn--secondary btn--small" onClick={() => {
-							if (window.confirm('게임을 다시 시작할까요? 저장하지 않은 진행 상황은 사라질 수 있습니다.')) setRestartCount((count) => count + 1);
+							if (window.confirm('게임을 다시 시작할까요? 저장하지 않은 진행 상황은 사라질 수 있습니다.')) {
+								setProject(initialProject);
+								setRestartCount((count) => count + 1);
+							}
 						}}>게임 다시 시작</button>
 						{project.gameDownloadUrl && <a className="btn btn--secondary btn--small" href={project.gameDownloadUrl} download>게임 다운로드 (ZIP)</a>}
 					</div>
@@ -62,7 +73,7 @@ export default function ProjectPlayPage() {
 						<p>문제가 계속되면 작품명, 브라우저 이름과 버전, 화면에 표시된 오류를 운영자에게 알려 주세요.</p>
 					</details>
 				</section>
-				<WebglViewport width={project.webglDisplayWidth} height={project.webglDisplayHeight}>
+				<WebglViewport kind={project.webglDisplayKind} width={project.webglDisplayWidth} height={project.webglDisplayHeight}>
 					<iframe
 						key={`${project.id}:${project.webglUrl}:${restartCount}`}
 						{...{ credentialless: '' }}

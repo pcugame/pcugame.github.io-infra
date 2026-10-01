@@ -323,13 +323,32 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
         { webglDisplayWidth: 1280, webglDisplayHeight: 720 },
         { webglDisplayWidth: null, webglDisplayHeight: null },
       ]) {
-        await db.project.update({ where: { id: projectId }, data: settings });
+        await db.project.update({ where: { id: projectId }, data: { ...settings, webglDisplayMode: settings.webglDisplayWidth === null ? "legacy" : "manual" } });
         const response = await issue();
         expect(response.statusCode, response.body).toBe(200);
         const grant = WebglPlayCreateDataSchema.parse(response.json().data);
         expect(grant).toMatchObject(settings);
         expect((await control(grant, "close")).statusCode).toBe(200);
       }
+    });
+    it("resolves only selected deployment analysis and keeps issued display snapshots stable", async () => {
+      await db.project.update({ where: { id: projectId }, data: { webglDisplayMode: "auto", webglDisplayWidth: null, webglDisplayHeight: null } });
+      const fixed = { version: 1, kind: "fixed", width: 960, height: 600, reason: null };
+      await db.webglDeployment.update({ where: { id: deploymentId }, data: { displayAnalysis: fixed } });
+      const grant = WebglPlayCreateDataSchema.parse((await issue()).json().data);
+      expect(grant).toMatchObject({ webglDisplayKind: "fixed", webglDisplayWidth: 960, webglDisplayHeight: 600 });
+      await db.webglDeployment.update({ where: { id: deploymentId }, data: { displayAnalysis: { version: 1, kind: "responsive", width: null, height: null, reason: null } } });
+      expect(WebglPlayCreateDataSchema.parse((await issue()).json().data)).toMatchObject({ webglDisplayKind: "responsive", webglDisplayWidth: null, webglDisplayHeight: null });
+      const renewal = await control(grant);
+      expect(renewal.statusCode, renewal.body).toBe(200);
+      expect(renewal.json().data).not.toHaveProperty("webglDisplayKind");
+      expect(grant).toMatchObject({ webglDisplayKind: "fixed", webglDisplayWidth: 960, webglDisplayHeight: 600 });
+      await db.project.update({ where: { id: projectId }, data: { currentWebglDeploymentId: null } });
+      await db.webglDeployment.update({ where: { id: deploymentId }, data: { state: "PENDING" } });
+      expect((await issue()).statusCode).toBe(403);
+      await db.webglDeployment.update({ where: { id: deploymentId }, data: { state: "READY", displayAnalysis: { version: 1, kind: "unknown", width: null, height: null, reason: "No fixed template" } } });
+      await db.project.update({ where: { id: projectId }, data: { currentWebglDeploymentId: deploymentId } });
+      expect(WebglPlayCreateDataSchema.parse((await issue()).json().data)).toMatchObject({ webglDisplayKind: "legacy", webglDisplayWidth: null, webglDisplayHeight: null });
     });
     it("serves the sized shell with matching CSP hashes and isolation headers", async () => {
       const response = await app.inject({ url: `/play/projects/${projectId}` });
@@ -508,6 +527,7 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
           objectManifest:
             dep.objectManifest as import("../generated/prisma/client.js").Prisma.InputJsonValue,
           stagingObjectManifest: undefined,
+          displayAnalysis: undefined,
         },
       });
       await db.project.update({

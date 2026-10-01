@@ -1,3 +1,4 @@
+import { resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
 import { canChangeProjectVisibility, type VisibilityActor } from '../../shared/visibility.js';
 import type { Visibility } from '@pcu/contracts';
 import { compareProjectVideos } from '../../shared/project-video-order.js';
@@ -42,6 +43,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	platforms?: Platform[];
 	isIncomplete: boolean;
 	status: ProjectStatus;
+	webglDisplayMode?: string;
 	webglDisplayWidth?: number | null;
 	webglDisplayHeight?: number | null;
 	currentWebglDeploymentId?: string | null;
@@ -51,6 +53,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 		publicPrefix: string;
 		entryObjectKey: string;
 		state: string;
+		displayAnalysis?: unknown;
 	} | null;
 	members: { id: number; name: string; studentId: string; userId: number | null }[];
 	assets: {
@@ -307,6 +310,7 @@ export async function getProjectDetail(
 		}
 	}
 
+	const display = resolveWebglDisplay({ ...project, webglDisplayMode: project.webglDisplayMode as WebglDisplayMode | undefined, analysis: webglEntryUrl ? project.currentWebglDeployment?.displayAnalysis : null });
 	if (project.status === 'DRAFT') {
 		throw new Error('DRAFT project escaped the public repository boundary');
 	}
@@ -340,8 +344,9 @@ export async function getProjectDetail(
 		gameDownloadUrl: gameAsset
 			? protectedAssetUrl(deps, gameAsset.id, 'original')
 			: undefined,
-		webglDisplayWidth: project.webglDisplayWidth ?? null,
-		webglDisplayHeight: project.webglDisplayHeight ?? null,
+		webglDisplayKind: display.kind,
+		webglDisplayWidth: display.width,
+		webglDisplayHeight: display.height,
 		webglUrl: webglEntryUrl,
 		webglPlayUrl: deps.webglPlayEnabled && webglEntryUrl
 			? new URL(`/play/projects/${project.id}`, deps.apiPublicUrl).href

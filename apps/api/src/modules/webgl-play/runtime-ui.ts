@@ -23,19 +23,29 @@ let stopped = false;
 let lastCheck = 0;
 const announce = message => { status.textContent = message; };
 function fitDisplay() {
-  if (!displaySize) return;
   const frame = frameHost.firstElementChild;
   if (!frame) return;
   const inFullscreen = document.fullscreenElement === root;
+  fullscreen.textContent = inFullscreen ? '전체화면 나가기' : '전체화면';
+  fullscreen.setAttribute('aria-pressed', String(inFullscreen));
+  if (!displaySize) return;
   const scale = Math.max(0, Math.min(frameHost.clientWidth / displaySize.width,
     frameHost.clientHeight / displaySize.height, inFullscreen ? Infinity : 1));
   frame.style.width = displaySize.width + 'px';
   frame.style.height = displaySize.height + 'px';
   frame.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
-  fullscreen.textContent = inFullscreen ? '전체화면 나가기' : '전체화면';
-  fullscreen.setAttribute('aria-pressed', String(inFullscreen));
 }
-function configureDisplay(width, height) {
+function configureDisplay(kind, width, height) {
+  if (kind === 'responsive') {
+    root.classList.add('configured-display', 'responsive-display');
+    displayInfo.hidden = false;
+    displayInfo.textContent = '반응형 · 사용 가능한 화면 영역에 맞춤';
+    fullscreen.hidden = typeof root.requestFullscreen !== 'function';
+    document.addEventListener('fullscreenchange', fitDisplay);
+    fitDisplay();
+    return;
+  }
+  if (kind === 'legacy') return;
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
       || width > 8192 || height > 8192) return;
   displaySize = { width, height };
@@ -124,7 +134,7 @@ window.addEventListener('pagehide', () => {
     frame.title = session.projectTitle + ' WebGL 플레이어';
     frame.src = target.href;
     frameHost.replaceChildren(frame);
-    configureDisplay(session.webglDisplayWidth, session.webglDisplayHeight);
+    configureDisplay(session.webglDisplayKind, session.webglDisplayWidth, session.webglDisplayHeight);
     lastCheck = Date.now();
     restart.disabled = false;
     announce(window.crossOriginIsolated
@@ -134,7 +144,7 @@ window.addEventListener('pagehide', () => {
 })();
 })();`;
 
-const style = `:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}a,button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}details{padding-bottom:1rem}.configured-display{height:100dvh;min-height:0;overflow:hidden}.configured-display>header,.configured-display>p,.configured-display>details{flex-shrink:0}.configured-display>details{max-height:30dvh;overflow:auto}.configured-display #game{position:relative;min-height:0;min-width:0;overflow:hidden}.configured-display iframe{position:absolute;left:50%;top:50%;min-height:0;flex:none;transform-origin:center}.configured-display:fullscreen{width:100vw;height:100dvh;background:#101318}[hidden]{display:none!important}#display-info{font-size:.85rem;color:#c3cedc;margin:.25rem 1.5rem}`;
+const style = `:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}a,button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}details{padding-bottom:1rem}.configured-display{height:100dvh;min-height:0;overflow:hidden}.configured-display>header,.configured-display>p,.configured-display>details{flex-shrink:0}.configured-display>details{max-height:30dvh;overflow:auto}.configured-display #game{position:relative;min-height:0;min-width:0;overflow:hidden}.configured-display iframe{position:absolute;left:50%;top:50%;min-height:0;flex:none;transform-origin:center}.configured-display:fullscreen{width:100vw;height:100dvh;background:#101318}.responsive-display iframe{inset:0;width:100%;height:100%;transform:none}[hidden]{display:none!important}#display-info{font-size:.85rem;color:#c3cedc;margin:.25rem 1.5rem}`;
 const hash = (text: string) => `'sha256-${createHash('sha256').update(text).digest('base64')}'`;
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 

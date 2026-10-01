@@ -1,3 +1,4 @@
+import { createWebglDisplayRepository } from '../me/project/webgl-display.repository.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -20,6 +21,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('review: stag
 	let publicBucket: string;
 	const bytes = Buffer.from('review fixture');
 	const checksum = createHash('sha256').update(bytes).digest('hex');
+	const displayAnalysis = { version: 1, kind: 'fixed', width: 960, height: 642, reason: 'unity-default-desktop' } as const;
 
 	beforeAll(async () => {
 		database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);
@@ -60,7 +62,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('review: stag
 			if (item.kind === 'WEBGL') {
 				const stagingPrefix = `review/webgl-private/${randomUUID()}/`;
 				const publicPrefix = `review/webgl-public/${randomUUID()}/`;
-				deploymentId = (await db.webglDeployment.create({ data: { projectId: stage.stagingProjectId!, sourceRepresentationId: representation.id, state: 'READY', publicBucket, publicPrefix, entryObjectKey: `${publicPrefix}index.html`, stagingBucket: protectedBucket, stagingPrefix, stagingEntryObjectKey: `${stagingPrefix}index.html`, stagingObjectManifest: { version: 1, objects: [{ objectKey: `${stagingPrefix}index.html`, sizeBytes: String(bytes.length), mimeType: 'text/html', contentEncoding: null, etag: null, checksumSha256: checksum }] } } })).id;
+				deploymentId = (await db.webglDeployment.create({ data: { projectId: stage.stagingProjectId!, sourceRepresentationId: representation.id, displayAnalysis, state: 'READY', publicBucket, publicPrefix, entryObjectKey: `${publicPrefix}index.html`, stagingBucket: protectedBucket, stagingPrefix, stagingEntryObjectKey: `${stagingPrefix}index.html`, stagingObjectManifest: { version: 1, objects: [{ objectKey: `${stagingPrefix}index.html`, sizeBytes: String(bytes.length), mimeType: 'text/html', contentEncoding: null, etag: null, checksumSha256: checksum }] } } })).id;
 			}
 			if (item.kind === 'VIDEO') await db.assetRepresentation.create({ data: { assetId: asset.id, role: 'PLAYBACK', state: 'READY', bucket: protectedBucket, objectKey: `review/playback/${randomUUID()}`, mimeType: 'video/mp4', sizeBytes: BigInt(bytes.length) } });
 			await db.assetUploadSession.create({ data: { projectId: stage.stagingProjectId!, userId: owner.id, kind: item.kind, state: 'READY', originalName: asset.originalName, totalBytes: BigInt(bytes.length), partSizeBytes: bytes.length, totalParts: 1, bucket: protectedBucket, objectKey: representation.objectKey, sourceIdentityAlgorithm: 'SHA256', sourceIdentity: checksum, sourceIdentityBlockSizeBytes: bytes.length, sourceIdentityBlockManifest: [], expiresAt: new Date(Date.now() + 3600000), resultAssetId: asset.id, resultRepresentationId: representation.id, submissionItemId: item.id, ...(deploymentId ? { reservedWebglDeploymentId: deploymentId } : {}) } });
@@ -72,6 +74,9 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('review: stag
 
 	it('commits POSTER, IMAGE, WEBGL, VIDEO, DOCUMENT and ATTACHMENT atomically; later stage cleanup preserves transferred assets', async () => {
 		const fixture = await staged(['POSTER', 'IMAGE', 'WEBGL', 'VIDEO', 'DOCUMENT', 'ATTACHMENT']);
+		await db.project.update({ where: { id: fixture.source.id }, data: { webglDisplayMode: 'manual', webglDisplayWidth: 800, webglDisplayHeight: 600 } });
+		const displayRepository = createWebglDisplayRepository(db);
+		expect(await displayRepository.read(owner, fixture.source.id)).toMatchObject({ analysis: null, effective: { kind: 'fixed', width: 800, height: 600 } });
 		await fixture.repository.transition(owner, fixture.request.id, 'submit');
 		await fixture.repository.transition(operator, fixture.request.id, 'approve');
 		const publication = createProjectPublicationRepository(db);
@@ -82,13 +87,15 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('review: stag
 		expect(validated.status).toBe('VALID');
 		if (validated.status !== 'VALID') throw new Error('Invalid fixture');
 		expect(validated.job.plan.objects).toHaveLength(7);
+		expect(await displayRepository.read(owner, fixture.source.id)).toMatchObject({ analysis: null });
 		await publication.complete(validated.job, token);
 		await publication.queueCancelledCleanup(job!.id, validated.job.plan);
 		for (const object of validated.job.plan.objects) expect(await db.orphanObject.findUnique({ where: { orphan_bucket_storage_key: { bucket: object.targetBucket, storageKey: object.targetObjectKey } } })).toBeNull();
 		const updated = await db.project.findUniqueOrThrow({ where: { id: fixture.source.id }, include: { assets: { include: { representations: true } }, currentWebglDeployment: true } });
 		expect(updated.assets).toHaveLength(6);
 		expect(updated.posterAssetId).toBe(fixture.assets.find(asset => asset.kind === 'POSTER')?.id);
-		expect(updated.currentWebglDeployment).toMatchObject({ projectId: updated.id, stagingBucket: null, state: 'READY' });
+		expect(updated.currentWebglDeployment).toMatchObject({ projectId: updated.id, stagingBucket: null, state: 'READY', displayAnalysis });
+		expect(await displayRepository.read(owner, fixture.source.id)).toMatchObject({ webglDisplayMode: 'manual', analysis: displayAnalysis, effective: { kind: 'fixed', width: 800, height: 600 } });
 		expect(updated.assets.find(asset => asset.kind === 'VIDEO')?.videoSortOrder).toBe(0);
 		for (const asset of updated.assets.filter(asset => ['IMAGE', 'POSTER'].includes(asset.kind))) expect(asset.representations.every(rep => rep.bucket === publicBucket && rep.publicationBucket === null)).toBe(true);
 		await db.$transaction(tx => deleteProjectInTransaction(tx, fixture.stage.stagingProjectId!));

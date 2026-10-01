@@ -397,6 +397,7 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 						where: { id: deployment.id },
 						data: {
 							state: 'READY', error: null,
+							...(input.displayAnalysis ? { displayAnalysis: input.displayAnalysis as unknown as Prisma.InputJsonValue } : {}),
 							...(deployment.stagingBucket === null
 								? { objectManifest: input.objectManifest as unknown as Prisma.InputJsonValue }
 								: { stagingObjectManifest: input.objectManifest as unknown as Prisma.InputJsonValue }),

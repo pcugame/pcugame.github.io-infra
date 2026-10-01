@@ -40,7 +40,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				submitLabel: '작품 등록',
 				submittingLabel: '등록 중…',
 				gameUploadHint: '게임 실행에 필요한 파일을 ZIP으로 압축해 선택하세요.',
-				webglUploadHint: 'WebGL ZIP의 최상위 폴더 또는 그 아래 단일 폴더에 index.html이 있어야 합니다.',
+				webglUploadHint: 'WebGL ZIP의 최상위 폴더 또는 그 아래 단일 폴더에 index.html이 있어야 합니다. 표시 크기는 업로드 후 자동으로 감지하며, 작품 수정 화면에서 확인·변경할 수 있습니다.',
 			}
 		: {
 				eyebrow: 'My Project',
@@ -48,7 +48,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				submitLabel: '작품 제출',
 				submittingLabel: '제출 중…',
 				gameUploadHint: '게임 실행에 필요한 파일을 ZIP으로 압축해 선택하세요.',
-				webglUploadHint: 'WebGL ZIP의 최상위 폴더 또는 그 아래 단일 폴더에 index.html이 있어야 합니다.',
+				webglUploadHint: 'WebGL ZIP의 최상위 폴더 또는 그 아래 단일 폴더에 index.html이 있어야 합니다. 표시 크기는 업로드 후 자동으로 감지하며, 작품 수정 화면에서 확인·변경할 수 있습니다.',
 			};
 
 	const { data: yearsData } = useQuery({
@@ -131,7 +131,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 					window.sessionStorage.removeItem(pendingStorageKey);
 					qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 					void invalidateVisibilityQueries(qc);
-					navigate(isAdminMode ? `/admin/projects/${projectId}/edit` : '/me/projects');
+					navigate(`/admin/projects/${projectId}/edit`);
 					return true;
 				}
 				if (status.publicationState === 'FAILED') {
@@ -161,7 +161,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		} finally {
 			publicationPollActive.current = false;
 		}
-	}, [isAdminMode, mode, navigate, pendingStorageKey, qc]);
+	}, [mode, navigate, pendingStorageKey, qc]);
 
 	const cancelSubmission = useCallback(async () => {
 		if (createdProjectId === null) return;
@@ -262,8 +262,8 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	const goToEdit = useCallback(() => {
 		if (!createdProjectId) return;
-		navigate(isAdminMode ? `/admin/projects/${createdProjectId}/edit` : '/me/projects');
-	}, [createdProjectId, isAdminMode, navigate]);
+		navigate(`/admin/projects/${createdProjectId}/edit`);
+	}, [createdProjectId, navigate]);
 
 	return {
 		copy,

@@ -98,6 +98,7 @@ export type AdminProjectDetail = {
 	posterAssetId?: number;
 	poster?: ResponsiveImage;
 	canEditWebglDisplay?: boolean;
+	webglDisplayMode?: 'auto' | 'manual' | 'legacy';
 	webglDisplayWidth?: number | null;
 	webglDisplayHeight?: number | null;
 	webglUrl?: string;

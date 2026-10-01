@@ -1,4 +1,4 @@
-import { WebglDisplayDimensionSchema } from './webgl-display.js';
+import { WebglDisplayDimensionSchema, WebglDisplayKindSchema } from './webgl-display.js';
 import { z } from "zod";
 export const WebglPlayCreateBodySchema = z
   .object({ projectId: z.number().int().positive() })
@@ -13,6 +13,7 @@ export const WebglPlayCreateDataSchema = z.object({
   controlSecret: z.string(),
   iframeUrl: z.string().url(),
   projectTitle: z.string(),
+  webglDisplayKind: WebglDisplayKindSchema.optional(),
   webglDisplayWidth: WebglDisplayDimensionSchema.nullable().optional(),
   webglDisplayHeight: WebglDisplayDimensionSchema.nullable().optional(),
   expiresAt: z.string(),

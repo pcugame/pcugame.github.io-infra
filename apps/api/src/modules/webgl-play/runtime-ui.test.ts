@@ -6,7 +6,7 @@ import { playShellHeaders, renderPlayShell } from './runtime-ui.js';
 
 const config = { API_PUBLIC_URL: 'https://api.test', WEB_PUBLIC_URL: 'https://web.test', PUBLIC_ASSET_ORIGIN: 'https://assets.test' };
 
-async function shell(width?: number | null, height?: number | null) {
+async function shell(width?: number | null, height?: number | null, kind?: 'fixed' | 'responsive' | 'legacy') {
 	const events = new Map<string, () => void>();
 	const windowEvents = new Map<string, () => void>();
 	const classes = new Set<string>();
@@ -29,7 +29,7 @@ async function shell(width?: number | null, height?: number | null) {
 	const fullscreen = element(), restart = element(), info = element(), status = element(), title = element();
 	const root = {
 		dataset: { projectId: '42', assetOrigin: 'https://assets.test' },
-		classList: { add: (name: string) => classes.add(name) },
+		classList: { add: (...names: string[]) => names.forEach(name => classes.add(name)) },
 		async requestFullscreen() { document.fullscreenElement = root; events.get('fullscreenchange')?.(); },
 	};
 	const document = {
@@ -48,7 +48,7 @@ async function shell(width?: number | null, height?: number | null) {
 		ResizeObserver: class { constructor(callback: () => void) { observer = callback; } observe() {} },
 		fetch: async () => { requests++; return { ok: true, json: async () => ({ ok: true, data: {
 			id: 'play', controlSecret: 'secret', iframeUrl: 'https://assets.test/runtime/' + 'a'.repeat(64) + '/index.html',
-			projectTitle: 'Fixture', webglDisplayWidth: width, webglDisplayHeight: height,
+			projectTitle: 'Fixture', webglDisplayKind: kind, webglDisplayWidth: width, webglDisplayHeight: height,
 		} }) }; },
 	});
 	await setImmediate();
@@ -79,6 +79,25 @@ describe('trusted shell display sizing', () => {
 		expect(page.classes.size).toBe(0);
 		expect(page.fullscreen.hidden).toBe(true);
 		expect(page.info.hidden).toBe(true);
+		expect(page.game.firstElementChild!.style).toEqual({});
+	});
+
+	it('fills the available area for responsive builds without recreating the iframe or session', async () => {
+		const page = await shell(null, null, 'responsive');
+		const frame = page.game.firstElementChild;
+		expect(page.classes.has('responsive-display')).toBe(true);
+		expect(page.fullscreen.hidden).toBe(false);
+		expect(page.info.textContent).toContain('반응형');
+		page.game.clientWidth = 420; page.game.clientHeight = 800; page.windowResize();
+		await page.fullscreen.events.get('click')!();
+		expect(page.fullscreen.textContent).toBe('전체화면 나가기');
+		await page.fullscreen.events.get('click')!();
+		expect(page.game.firstElementChild).toBe(frame);
+		expect(page.counts()).toEqual({ frames: 1, replacements: 1, requests: 1 });
+	});
+	it('honors explicit legacy mode even when stale stored dimensions are present', async () => {
+		const page = await shell(800, 600, 'legacy');
+		expect(page.classes.size).toBe(0);
 		expect(page.game.firstElementChild!.style).toEqual({});
 	});
 	it('hashes the exact shell script/style and preserves strict isolation headers', () => {

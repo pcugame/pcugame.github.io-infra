@@ -578,12 +578,13 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 			publicPrefix: keys.publicPrefix, entryObjectKey: keys.entryObjectKey,
 			sourceRepresentationId: source.id,
 		});
+		const displayAnalysis = { version: 1, kind: 'responsive', width: null, height: null, reason: 'unity-full-viewport' } as const;
 		const bytes = Buffer.from('<html>ready</html>');
 		const checksum = createHash('sha256').update(bytes).digest('hex');
 		stagedObjects.set(`${protectedBucket}\0${reservation.outputEntryObjectKey}`, bytes);
 		await expect(persistence.commitReady({
 			sessionId: session.id, generation: 1, claimToken: 'webgl-publication-claim',
-			deploymentId, expectedCurrentDeploymentId: null,
+			deploymentId, expectedCurrentDeploymentId: null, displayAnalysis,
 			assetId: asset.id, representationId: source.id, representationUpdatedAt: source.updatedAt,
 			objectManifest: { version: 1, objects: [{
 				objectKey: reservation.outputEntryObjectKey, sizeBytes: String(bytes.length),
@@ -593,6 +594,7 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 		})).resolves.toBe('COMMITTED');
 		await expect(prisma.project.findUniqueOrThrow({ where: { id: created.id } }))
 			.resolves.toMatchObject({ status: 'DRAFT', currentWebglDeploymentId: null });
+		await expect(prisma.webglDeployment.findUniqueOrThrow({ where: { id: deploymentId } })).resolves.toMatchObject({ state: 'READY', displayAnalysis });
 		await expect(repository.finalizeSubmission(created.id, { id: actorId, role: 'ADMIN' }))
 			.resolves.toMatchObject({ state: 'FINALIZING' });
 
@@ -624,7 +626,7 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 			.resolves.toMatchObject({ status: 'PUBLISHED', currentWebglDeploymentId: deploymentId });
 		await expect(prisma.webglDeployment.findUniqueOrThrow({ where: { id: deploymentId } }))
 			.resolves.toMatchObject({
-				state: 'READY', stagingBucket: null, stagingPrefix: null,
+				state: 'READY', stagingBucket: null, stagingPrefix: null, displayAnalysis,
 				entryObjectKey: keys.entryObjectKey,
 			});
 		expect(publicObjects.get(`${publicBucket}\0${keys.entryObjectKey}`)?.equals(bytes)).toBe(true);
