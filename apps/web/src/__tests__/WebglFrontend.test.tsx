@@ -8,6 +8,9 @@ import { ProjectActions } from '../components/project/ProjectActions';
 import ProjectPlayPage from '../pages/ProjectPlayPage';
 
 const mocks = vi.hoisted(() => ({ getProjectDetail: vi.fn() }));
+// Exercise player controls with a settled viewer; auth transitions have their
+// own tests and must not replace the iframe midway through these assertions.
+vi.mock('../features/auth', () => ({ useMe: () => ({ user: null, isPending: false }) }));
 vi.mock('../lib/api', async (importOriginal) => {
 	const original = await importOriginal<typeof import('../lib/api')>();
 	return {
