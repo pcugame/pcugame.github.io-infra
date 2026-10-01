@@ -72,11 +72,47 @@ const status = document.getElementById('status');
 const title = document.getElementById('title');
 const frameHost = document.getElementById('game');
 const restart = document.getElementById('restart');
+const fullscreen = document.getElementById('fullscreen');
+const displayInfo = document.getElementById('display-info');
+let displaySize;
 let session;
 let checking = false;
 let stopped = false;
 let lastCheck = 0;
 const announce = message => { status.textContent = message; };
+function fitDisplay() {
+  if (!displaySize) return;
+  const frame = frameHost.firstElementChild;
+  if (!frame) return;
+  const inFullscreen = document.fullscreenElement === root;
+  const scale = Math.max(0, Math.min(frameHost.clientWidth / displaySize.width,
+    frameHost.clientHeight / displaySize.height, inFullscreen ? Infinity : 1));
+  frame.style.width = displaySize.width + 'px';
+  frame.style.height = displaySize.height + 'px';
+  frame.style.transform = 'translate(-50%, -50%) scale(' + scale + ')';
+  fullscreen.textContent = inFullscreen ? '전체화면 나가기' : '전체화면';
+  fullscreen.setAttribute('aria-pressed', String(inFullscreen));
+}
+function configureDisplay(width, height) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
+      || width > 8192 || height > 8192) return;
+  displaySize = { width, height };
+  root.classList.add('configured-display');
+  displayInfo.hidden = false;
+  displayInfo.textContent = '기준 표시 크기 ' + width + ' × ' + height
+    + ' CSS 픽셀 · 표시 배율은 Unity 렌더링 해상도와 다릅니다.';
+  fullscreen.hidden = typeof root.requestFullscreen !== 'function';
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(fitDisplay).observe(frameHost);
+  window.addEventListener('resize', fitDisplay);
+  document.addEventListener('fullscreenchange', fitDisplay);
+  fitDisplay();
+}
+fullscreen.addEventListener('click', async () => {
+  try {
+    if (document.fullscreenElement === root) await document.exitFullscreen();
+    else await root.requestFullscreen();
+  } catch { announce('전체화면을 열지 못했습니다. 브라우저의 전체화면 권한을 확인해 주세요.'); }
+});
 function stop(message) {
   stopped = true;
   frameHost.replaceChildren();
@@ -146,6 +182,7 @@ async function start() {
     frame.title = session.projectTitle + ' WebGL 플레이어';
     frame.src = target.href;
     frameHost.replaceChildren(frame);
+    configureDisplay(session.webglDisplayWidth, session.webglDisplayHeight);
     lastCheck = Date.now();
     restart.disabled = false;
     announce(window.crossOriginIsolated
@@ -286,7 +323,7 @@ if (!window.isSecureContext || typeof WebAssembly === 'undefined') void start();
 else inspectAcceleration();
 })();`;
 
-const shellStyle = `:root{background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}main>header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}main>header a,main>header button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,main>details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}main>details{padding-bottom:1rem}`;
+const shellStyle = `:root{background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}main>header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}main>header a,main>header button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,main>details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}main>details{padding-bottom:1rem}.configured-display{height:100dvh;min-height:0;overflow:hidden}.configured-display>header,.configured-display>p,.configured-display>details{flex-shrink:0}.configured-display>details{max-height:30dvh;overflow:auto}.configured-display #game{position:relative;min-height:0;min-width:0;overflow:hidden}.configured-display iframe{position:absolute;left:50%;top:50%;min-height:0;flex:none;transform-origin:center}.configured-display:fullscreen{width:100vw;height:100dvh;background:#101318}[hidden]{display:none!important}#display-info{font-size:.85rem;color:#c3cedc;margin:.25rem 1.5rem}`;
 const graphicsAssets = (config: ShellConfig) => new URL('/help/graphics-acceleration/', config.WEB_PUBLIC_URL).href;
 const shellStyles = (config: ShellConfig) => shellStyle + accelerationStyle + `@font-face{font-family:'Pretendard Variable';font-style:normal;font-weight:45 920;font-display:swap;src:url(${JSON.stringify(graphicsAssets(config) + 'PretendardVariable.woff2')}) format('woff2');}`;
 
@@ -311,5 +348,5 @@ export function renderPlayShell(config: ShellConfig, projectId: number): string 
 	if (!Number.isSafeInteger(projectId) || projectId <= 0) throw new Error('Invalid project ID');
 	const back = new URL(`/projects/${projectId}`, config.WEB_PUBLIC_URL).href;
 	const assetOrigin = new URL(config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL).origin;
-	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${shellStyles(config)}</style></head><body><main data-graphics-assets="${escapeHtml(graphicsAssets(config))}" data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><div id="game"></div>${accelerationMarkup}<details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
+	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${shellStyles(config)}</style></head><body><main data-graphics-assets="${escapeHtml(graphicsAssets(config))}" data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="fullscreen" type="button" aria-pressed="false" hidden>전체화면</button><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><p id="display-info" hidden></p><div id="game"></div>${accelerationMarkup}<details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
 }

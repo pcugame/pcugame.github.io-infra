@@ -14,6 +14,7 @@ import {
 } from '../../features/admin/projects/AdminProjectAssetManager';
 import { ProjectEditorLayout } from '../../components/project/editor';
 import { AdminProjectBasicInfoForm } from '../../features/admin/projects/AdminProjectBasicInfoForm';
+import { WebglDisplaySettingsForm } from '../../features/admin/projects/WebglDisplaySettingsForm';
 import { AdminProjectMemberEditor } from '../../features/admin/projects/AdminProjectMemberEditor';
 import { AdminProjectStatusPanel } from '../../features/admin/projects/AdminProjectStatusPanel';
 import { useAdminProjectMutations } from '../../features/admin/projects/useAdminProjectMutations';
@@ -60,6 +61,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	const members = useProjectMemberDraft(id, project.members);
 	const [baselineStatus, setBaselineStatus] = useState(project.status);
 	const [isApplying, setIsApplying] = useState(false);
+	const [isSavingDisplay, setIsSavingDisplay] = useState(false);
 	const applyingRef = useRef(false);
 	const [applyError, setApplyError] = useState<unknown>(null);
 	const [partialFailure, setPartialFailure] = useState(false);
@@ -70,11 +72,11 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	const status = baselineStatus === 'DRAFT' ? 'DRAFT' : draftStatus ?? baselineStatus;
 	const mutations = useAdminProjectMutations({ projectId: id, project });
 	const hasChanges = form.formState.isDirty || members.hasChanges || queue.hasChanges;
-	const pending = isApplying || queue.isApplying;
+	const pending = isApplying || queue.isApplying || isSavingDisplay;
 	const formId = `project-edit-${id}`;
 
 	const onApply = form.handleSubmit(async (data) => {
-		if (applyingRef.current || !canEditContent || !hasChanges) return;
+		if (applyingRef.current || pending || !canEditContent || !hasChanges) return;
 		setShowMemberErrors(true);
 		setIsSuccess(false);
 		setApplyError(null);
@@ -133,6 +135,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 				poster={<AdminProjectPosterUpload project={project} canEditContent={canEditContent} />}
 				details={<>
 					<AdminProjectBasicInfoForm project={project} form={form} formId={formId} isPending={pending} canEditContent={canEditContent} onSubmit={onApply} />
+					<WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} />
 					<AdminProjectMemberEditor members={members.members} canEditContent={canEditContent} isBusy={pending} errors={showMemberErrors ? members.validationErrors : []} onAdd={members.add} onSwap={members.swap} onUpdate={members.update} onRemove={members.remove} />
 				</>}
 				files={<AdminProjectAssetManager canEditContent={canEditContent} />}

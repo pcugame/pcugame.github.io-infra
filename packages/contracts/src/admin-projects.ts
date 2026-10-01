@@ -97,6 +97,9 @@ export type AdminProjectDetail = {
 	sortOrder: number;
 	posterAssetId?: number;
 	poster?: ResponsiveImage;
+	canEditWebglDisplay?: boolean;
+	webglDisplayWidth?: number | null;
+	webglDisplayHeight?: number | null;
 	webglUrl?: string;
 	webglDeployment?: {
 		id: string;

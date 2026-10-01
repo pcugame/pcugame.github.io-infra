@@ -75,6 +75,8 @@ export type SerializableProject = {
 	status: ProjectStatus;
 	sortOrder: number;
 	posterAssetId: number | null;
+	webglDisplayWidth?: number | null;
+	webglDisplayHeight?: number | null;
 	currentWebglDeploymentId?: string | null;
 	currentWebglDeployment?: {
 		id: string;
@@ -204,6 +206,8 @@ export function createProjectSerializer(
 				&& representation(project.poster, 'ORIGINAL')?.state === 'READY'
 				? serializeImage(project.poster)
 				: undefined,
+			webglDisplayWidth: project.webglDisplayWidth ?? null,
+			webglDisplayHeight: project.webglDisplayHeight ?? null,
 			webglUrl: canonicalWebglUrl,
 			webglDeployment: deployment && canonicalWebglUrl
 				? {
