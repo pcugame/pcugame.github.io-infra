@@ -1,4 +1,5 @@
 import { WebglPlayCreateBodySchema, WebglPlayRenewBodySchema, WebglPlaySessionParamsSchema, WebglPlayCreateDataSchema, WebglPlayRenewDataSchema, WebglPlayCloseDataSchema } from '@pcu/contracts';
+import { CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
 import type { FastifyInstance, FastifySchema } from 'fastify';
 import { z } from 'zod';
 import { DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX } from '@pcu/contracts';
@@ -231,6 +232,12 @@ const ChangeListQuerySchema = z.object({
 	limit: z.coerce.number().int().min(1).max(100).optional(),
 }).strict();
 const changeRouteContracts: RouteRuntimeContract[] = [];
+const networkRouteContracts: RouteRuntimeContract[] = [
+ contract({ method: 'GET', url: '/api/me/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
+ contract({ method: 'POST', url: '/api/me/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: CreateWebglNetworkRequestSchema, response: jsonResponse(WebglNetworkRequestSchema, 201) }),
+ contract({ method: 'GET', url: '/api/admin/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
+ ...(['approve', 'reject', 'revoke'] as const).map(action => contract({ method: 'POST', url: `/api/admin/webgl-network-requests/:id/${action}`, family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: ChangeIdParamsSchema, querystring: EmptyObjectSchema, body: ReviewWebglNetworkRequestSchema, response: jsonResponse(WebglNetworkRequestSchema) })),
+];
 for (const audience of ['me', 'admin'] as const) {
 	const base = `/api/${audience}/change-requests`;
 	changeRouteContracts.push(
@@ -258,6 +265,7 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
  contract({method:'GET',url:'/api/internal/file-access',family:'assets',bodyBoundary:'none',responseBoundary:'no-content',params:EmptyObjectSchema,querystring:EmptyObjectSchema,body:NoBodySchema,response:NoContentResponse}),
 
 	...changeRouteContracts,
+    ...networkRouteContracts,
 	contract({
 		method: 'OPTIONS',
 		url: '*',

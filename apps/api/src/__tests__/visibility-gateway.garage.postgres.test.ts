@@ -71,8 +71,8 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 		await db.exhibition.update({ where: { id: exhibitionId }, data: { posterAssetId: poster.id } });
 		gameId = (await db.asset.create({ data: { projectId, kind: 'GAME', originalName: 'fixture.zip', representations: { create: { role: 'ORIGINAL', bucket: protectedBucket, objectKey: gameKey, state: 'READY', mimeType: 'application/zip', sizeBytes: 16 } } } })).id;
 		const source = await db.asset.create({ data: { projectId, kind: 'WEBGL', representations: { create: { role: 'WEBGL_SOURCE', bucket: protectedBucket, objectKey: `${gameKey}-webgl`, state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
-		const paths = ['index.html', 'worker.js', 'Build/game.wasm.gz'];
-		await db.webglDeployment.create({ data: { id: deploymentId, projectId, sourceRepresentationId: source.representations[0]!.id, publicBucket, publicPrefix: prefix, entryObjectKey: prefix + 'index.html', state: 'READY', objectManifest: { version: 1, objects: paths.map(path => ({ objectKey: prefix + path, sizeBytes: String(path.endsWith('.html') ? Buffer.byteLength('<script>new Worker("worker.js")</script>') : path.endsWith('.gz') ? gzipSync(bytes).length : Buffer.byteLength('self.postMessage("ready")')), mimeType: path.endsWith('.html') ? 'text/html' : path.endsWith('.gz') ? 'application/wasm' : 'application/javascript' })) } } });
+		const paths = ['index.html', 'worker.js', 'Build/game.wasm.gz', 'Build/game.wasm.unityweb'];
+		await db.webglDeployment.create({ data: { id: deploymentId, projectId, sourceRepresentationId: source.representations[0]!.id, publicBucket, publicPrefix: prefix, entryObjectKey: prefix + 'index.html', state: 'READY', objectManifest: { version: 1, objects: paths.map(path => ({ objectKey: prefix + path, sizeBytes: String(path.endsWith('.html') ? Buffer.byteLength('<script>new Worker("worker.js")</script>') : (path.endsWith('.gz') || path.endsWith('.unityweb')) ? gzipSync(bytes).length : Buffer.byteLength('self.postMessage("ready")')), mimeType: path.endsWith('.html') ? 'text/html' : path.endsWith('.gz') ? 'application/wasm' : path.endsWith('.unityweb') ? 'application/octet-stream' : 'application/javascript' })) } } });
 		await db.project.update({ where: { id: projectId }, data: { currentWebglDeploymentId: deploymentId } });
 		const other = await db.project.create({ data: { exhibitionId, creatorId: owner.id, title: marker + '-other', slug: marker + '-other', status: 'PUBLISHED', visibility: 'STAFF' } });
 		const otherSource = await db.asset.create({ data: { projectId: other.id, kind: 'WEBGL', representations: { create: { role: 'WEBGL_SOURCE', bucket: protectedBucket, objectKey: `${gameKey}-other`, state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
@@ -85,6 +85,7 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 		await upload(publicBucket, prefix + 'index.html', Buffer.from('<script>new Worker("worker.js")</script>'), 'text/html');
 		await upload(publicBucket, prefix + 'worker.js', Buffer.from('self.postMessage("ready")'), 'application/javascript');
 		await upload(publicBucket, prefix + 'Build/game.wasm.gz', gzipSync(bytes), 'application/wasm', 'gzip');
+		await upload(publicBucket, prefix + 'Build/game.wasm.unityweb', gzipSync(bytes), 'application/octet-stream');
 	}, 30_000);
 	afterAll(async () => {
 		if (db) {
@@ -121,6 +122,11 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 		const entry = await get(access.url); expect(entry.status).toBe(200); expect(await entry.text()).toContain('worker.js'); expect(entry.headers.get('cross-origin-opener-policy')).toBe('same-origin'); expect(entry.headers.get('cross-origin-embedder-policy')).toBe('require-corp');
 		const worker = await get(new URL('worker.js', access.url).href); expect(worker.status).toBe(200); expect(worker.headers.get('content-type')).toContain('javascript');
 		const wasm = await get(new URL('Build/game.wasm.gz', access.url).href); expect(wasm.status).toBe(200); expect(wasm.headers.get('content-type')).toContain('application/wasm'); expect(wasm.headers.get('content-encoding')).toBe('gzip'); expect(Buffer.from(await wasm.arrayBuffer())).toEqual(bytes);
+		const fallback = await get(new URL('Build/game.wasm.unityweb', access.url).href);
+		expect(fallback.status).toBe(200);
+		expect(fallback.headers.get('content-type')).toContain('application/octet-stream');
+		expect(fallback.headers.get('content-encoding')).toBeNull();
+		expect(Buffer.from(await fallback.arrayBuffer())).toEqual(gzipSync(bytes));
 		for (const path of ['unknown.js', '../index.html', `%252e%252e/index.html`, `${randomUUID()}/index.html`]) await denied(new URL(path, access.url).href);
 		await denied(`${publicOrigin}/${imageKey}?pcu_token=${access.token}`);
 		await denied(`${publicOrigin}/${otherPrefix}index.html?pcu_token=${access.token}`);

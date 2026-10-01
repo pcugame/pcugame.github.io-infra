@@ -257,6 +257,8 @@ model Project {
   publicationJob   ProjectPublicationJob?
   changeRequests ProjectChangeRequest[] @relation("ChangeRequestSource")
   changeRequestDraft ProjectChangeRequest? @relation("ChangeRequestStaging")
+  webglNetworkPolicyVersion Int @default(0) @map("webgl_network_policy_version")
+  webglNetworkRequests WebglNetworkRequest[]
 
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
   @@index([exhibitionId, status, sortOrder])
@@ -844,4 +846,56 @@ model WebglPlaySession {
   @@index([sessionId, expiresAt])
   @@index([expiresAt])
   @@map("webgl_play_sessions")
+}
+
+enum WebglNetworkRequestState {
+  PENDING
+  APPROVED
+  REJECTED
+  REVOKED
+}
+
+enum WebglNetworkMode {
+  HTTPS
+  WSS
+}
+
+model WebglNetworkRequest {
+  id String @id @default(uuid())
+  projectId Int? @map("project_id")
+  originalProjectId Int @map("original_project_id")
+  projectTitle String @map("project_title")
+  requesterId Int @map("requester_id")
+  origin String
+  purpose String
+  mode WebglNetworkMode
+  cors String
+  state WebglNetworkRequestState @default(PENDING)
+  reviewerId Int? @map("reviewer_id")
+  reviewReason String? @map("review_reason")
+  policyVersion Int? @map("policy_version")
+  createdAt DateTime @default(now()) @map("created_at")
+  reviewedAt DateTime? @map("reviewed_at")
+  revokedAt DateTime? @map("revoked_at")
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  events WebglNetworkReviewEvent[]
+  @@index([state, createdAt])
+  @@index([originalProjectId, createdAt])
+  @@map("webgl_network_requests")
+}
+
+/// Reviews are append-only: revocation permanently invalidates older snapshots.
+model WebglNetworkReviewEvent {
+  id String @id @default(uuid())
+  requestId String @map("request_id")
+  originalProjectId Int @map("original_project_id")
+  origin String
+  action String
+  actorId Int @map("actor_id")
+  reason String
+  policyVersion Int? @map("policy_version")
+  createdAt DateTime @default(now()) @map("created_at")
+  request WebglNetworkRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  @@index([originalProjectId, action, policyVersion])
+  @@map("webgl_network_review_events")
 }

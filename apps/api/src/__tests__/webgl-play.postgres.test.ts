@@ -555,6 +555,64 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
           .lastSeenAt,
       ).toEqual(before);
     });
+    it("serializes logout cascade before renewal without a lock inversion", async () => {
+      const logoutSid = (await db.authSession.create({ data: { userId: owner, expiresAt: new Date(time.getTime() + 3600000), lastSeenAt: time } })).id;
+      const response = await app.inject({ method: 'POST', url: '/api/webgl-play/sessions', headers: { ...headers, cookie: 'sid=' + logoutSid }, payload: { projectId } });
+      expect(response.statusCode).toBe(200);
+      const grant = response.json().data;
+      let locked!: () => void, release!: () => void;
+      const ready = new Promise<void>(resolve => { locked = resolve; });
+      const barrier = new Promise<void>(resolve => { release = resolve; });
+      const logout = db.$transaction(async tx => {
+        await tx.$executeRaw`SELECT id FROM auth_sessions WHERE id = ${logoutSid} FOR UPDATE`;
+        locked(); await barrier;
+        await tx.authSession.delete({ where: { id: logoutSid } });
+      }, { timeout: 10000 });
+      await ready;
+      const renewal = app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${grant.id}/renew`, headers: { ...headers, cookie: 'sid=' + logoutSid, 'x-pcu-play-control': grant.controlSecret }, payload: { visible: true } });
+      try {
+        const deadline = Date.now() + 5000;
+        let waiting = false;
+        while (Date.now() < deadline) {
+          const rows = await db.$queryRaw<Array<{ waiting: boolean }>>`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND query LIKE '%auth_sessions%' AND query LIKE '%FOR UPDATE%') AS waiting`;
+          if (rows[0]?.waiting) { waiting = true; break; }
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        expect(waiting).toBe(true);
+      } finally { release(); }
+      await logout;
+      expect((await renewal).statusCode).toBe(403);
+      expect(await db.webglPlaySession.findUnique({ where: { id: grant.id } })).toBeNull();
+    });
+    it("serializes issuance cleanup with logout before inserting a new FK child", async () => {
+      const logoutSid = (await db.authSession.create({ data: { userId: owner, expiresAt: new Date(time.getTime() + 3600000), lastSeenAt: time } })).id;
+      const create = () => app.inject({ method: 'POST', url: '/api/webgl-play/sessions', headers: { ...headers, cookie: 'sid=' + logoutSid }, payload: { projectId } });
+      const existing = await create(); expect(existing.statusCode).toBe(200);
+      await db.webglPlaySession.update({ where: { id: existing.json().data.id }, data: { expiresAt: new Date(time.getTime() - 1) } });
+      let locked!: () => void, release!: () => void;
+      const ready = new Promise<void>(resolve => { locked = resolve; });
+      const barrier = new Promise<void>(resolve => { release = resolve; });
+      const logout = db.$transaction(async tx => {
+        await tx.$executeRaw`SELECT id FROM auth_sessions WHERE id = ${logoutSid} FOR UPDATE`;
+        locked(); await barrier;
+        await tx.authSession.delete({ where: { id: logoutSid } });
+      }, { timeout: 10000 });
+      await ready;
+      const issuance = create();
+      try {
+        const deadline = Date.now() + 5000;
+        let waiting = false;
+        while (Date.now() < deadline) {
+          const rows = await db.$queryRaw<Array<{ waiting: boolean }>>`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND wait_event_type = 'Lock' AND (query LIKE '%auth_sessions%' OR query LIKE '%webgl_play_sessions%')) AS waiting`;
+          if (rows[0]?.waiting) { waiting = true; break; }
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        expect(waiting).toBe(true);
+      } finally { release(); }
+      await logout;
+      expect((await issuance).statusCode).toBe(403);
+      expect(await db.webglPlaySession.count({ where: { sessionId: logoutSid } })).toBe(0);
+    });
     it("allows staff for staff-visible projects and rejects unrelated users", async () => {
       const otherSid = (
         await db.authSession.create({

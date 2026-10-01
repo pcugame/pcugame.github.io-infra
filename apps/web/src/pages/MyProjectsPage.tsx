@@ -89,6 +89,7 @@ export default function MyProjectsPage() {
 										<td>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
 										<td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
 										<td>
+											<Link to={`/me/projects/${p.id}/network`} className="btn btn--small btn--secondary">외부 연결</Link>
 											{p.canEdit || p.canDelete ? (
 												<>
 													{p.canEdit && <Link to={`/admin/projects/${p.id}/edit`} className="btn btn--small btn--secondary">수정</Link>}
@@ -123,6 +124,7 @@ export default function MyProjectsPage() {
 										<span>{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</span>
 									</div>
 								</Link>
+								<Link to={`/me/projects/${p.id}/network`} className="btn btn--small btn--secondary">외부 연결</Link>
 								{p.canDelete && <button type="button" className="btn btn--danger btn--small" disabled={deleteMutation.isPending} onClick={() => deleteProject(p.id, p.title)}>삭제</button>}
 							</div>
 						))}

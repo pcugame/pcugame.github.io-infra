@@ -130,3 +130,4 @@ export { VisibilitySchema } from './schemas.js';
 export * from './webgl-play.js';
 
 export * from './webgl-display.js';
+export * from './webgl-network.js';
