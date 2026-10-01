@@ -1,3 +1,6 @@
+import { ExternalLinksSchema } from '@pcu/contracts';
+import { ExternalLinksFieldset } from '../components/project/ExternalLinksFieldset';
+import { effectiveExternalLinks } from '../components/project/externalLinks';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -153,14 +156,21 @@ export default function ProjectChangeRequestPage() {
 					title: project.title,
 					summary: project.summary ?? '',
 					description: project.description ?? '',
-					githubUrl: project.githubUrl ?? '',
+					externalLinks: effectiveExternalLinks(project.externalLinks, project.githubUrl),
 					platforms: [...project.platforms],
 					posterAssetId: project.posterAssetId ?? null,
 				}
 			: {}),
 		...(active?.changes ?? {}),
+		...(active?.changes.externalLinks === undefined && active?.changes.githubUrl !== undefined ? { externalLinks: effectiveExternalLinks(undefined, active.changes.githubUrl) } : {}),
 	};
 	const formChanges = { ...initialChanges, ...changes };
+	const formLinks = effectiveExternalLinks(formChanges.externalLinks, formChanges.githubUrl);
+	const validateLinks = () => {
+		const result = ExternalLinksSchema.safeParse(formLinks);
+		if (!result.success) throw new Error(result.error.issues.map((issue) => issue.message).join(' · '));
+		return result.data;
+	};
 	const formMembers = membersTouched
 		? members
 		: (initialChanges.members ?? project?.members.map(({ name, studentId }) => ({ name, studentId })) ?? []);
@@ -192,6 +202,7 @@ export default function ProjectChangeRequestPage() {
 							active.kind === 'EDIT'
 								? {
 										...formChanges,
+										externalLinks: validateLinks(),
 										members: formMembers,
 										posterAssetId: effectivePosterId,
 										videoAssetIds: effectiveVideoAssetIds,
@@ -220,6 +231,7 @@ export default function ProjectChangeRequestPage() {
 					reason: formReason,
 					changes: {
 						...formChanges,
+						externalLinks: validateLinks(),
 						members: formMembers,
 						posterAssetId: effectivePosterId,
 						videoAssetIds: effectiveVideoAssetIds,
@@ -811,14 +823,7 @@ export default function ProjectChangeRequestPage() {
 												}
 											/>
 										</div>
-										<div className="form-field">
-											<label htmlFor="change-github">GitHub 주소</label>
-											<input
-												id="change-github"
-												value={formChanges.githubUrl ?? ''}
-												onChange={(e) => setChanges({ ...changes, githubUrl: e.target.value })}
-											/>
-										</div>
+
 										<div className="form-field">
 											<label>플랫폼</label>
 											{(['PC', 'MOBILE', 'WEB'] as const).map((platform) => (
@@ -841,6 +846,7 @@ export default function ProjectChangeRequestPage() {
 											))}
 										</div>
 									</fieldset>
+									<ExternalLinksFieldset value={formLinks} onChange={(externalLinks) => setChanges({ ...changes, externalLinks })} disabled={!editable || busy} showErrors />
 									<fieldset disabled={!editable || busy}>
 										<legend>참여 학생</legend>
 										{formMembers.map((member, index) => (

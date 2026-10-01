@@ -65,6 +65,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			title: '',
 			summary: '',
 			description: '',
+			externalLinks: [],
 			members: [
 				{
 					name: user?.name ?? '',

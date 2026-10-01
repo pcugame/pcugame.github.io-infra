@@ -1,3 +1,4 @@
+import type { ExternalLink } from './external-links.js';
 import type { Visibility } from './enums.js';
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
 import type { ProjectVideo } from './public.js';
@@ -9,6 +10,7 @@ export type UpdateProjectRequest = {
 	title?: string;
 	summary?: string;
 	description?: string;
+	externalLinks?: ExternalLink[];
 	isIncomplete?: boolean;
 	status?: Exclude<ProjectStatus, 'DRAFT'>;
 	sortOrder?: number;
@@ -88,6 +90,7 @@ export type AdminProjectDetail = {
 	year: number;
 	summary?: string;
 	description?: string;
+	externalLinks?: ExternalLink[];
 	githubUrl?: string;
 	platforms: Platform[];
 	isIncomplete: boolean;
@@ -143,6 +146,7 @@ export type SubmitProjectPayload = {
 	title: string;
 	summary?: string;
 	description?: string;
+	externalLinks?: ExternalLink[];
 	members: { name: string; studentId: string; sortOrder?: number; userId?: number }[];
 	manifest: ProjectSubmissionManifestItem[];
 };

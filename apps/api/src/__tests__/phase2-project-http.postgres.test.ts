@@ -10,6 +10,7 @@ import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-data
 import { registerAuth } from '../plugins/auth.js';
 import { AppError } from '../shared/errors.js';
 import { registerRouteSchemas } from '../shared/http-route-schemas.js';
+import { createMeProjectController } from '../modules/me/project/controller.js';
 import { createProjectController } from '../modules/admin/project/controller.js';
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { createProjectService } from '../modules/admin/project/service.js';
@@ -78,7 +79,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 			},
 		});
 		app.setErrorHandler((error, _request, reply) => {
-			reply.status(error instanceof AppError ? error.statusCode : 500).send({
+			reply.status(error instanceof AppError ? error.statusCode : error instanceof Error && 'validation' in error ? 400 : 500).send({
 				ok: false, error: {
 					code: error instanceof AppError ? error.code : 'ERROR',
 					message: error instanceof Error ? error.message : 'Error',
@@ -95,7 +96,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 			abortMultipart: async () => {}, wakeDeletionWorker() {}, wakeMaintenance() {}, logger: app.log,
 		});
 		registerRouteSchemas(app);
-		await app.register(createAdminProjectMetadataController({
+		const metadataDependencies = {
 			service: createSubmitProjectService({
 				webPublicUrl: 'http://localhost:5173', repository,
 				idempotency: createIdempotencyService({
@@ -103,7 +104,9 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 				}),
 			}),
 			route: { rateLimit: { max: 30, timeWindow: 3600000 } },
-		}), { prefix: '/api/admin' });
+		};
+		await app.register(createAdminProjectMetadataController(metadataDependencies), { prefix: '/api/admin' });
+		await app.register(createMeProjectController(metadataDependencies), { prefix: '/api/me' });
 		await app.register(createProjectController({
 			service, access: createProjectAccessService(createProjectAccessRepository(db)),
 			status: {
@@ -167,7 +170,41 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 		expect((await app.inject({ method: 'GET', url: `/api/admin/projects/${project.id}` })).statusCode).toBe(401);
 	});
 
-	it('publishes metadata with an empty manifest through the actual durable worker', async () => {
+
+	it.each([[], [{ label: 'GitHub', url: 'https://github.com/pcu/game' }, { label: '홈페이지', url: 'https://game.example.test/' }]].map((links) => [links]))('roundtrips external links through authenticated PATCH and both detail serializers: %j', async (externalLinks) => {
+		const project = await db.project.create({ data: { exhibitionId, creatorId: adminId, title: 'External links', slug: randomUUID(), status: 'PUBLISHED', githubUrl: 'https://github.com/legacy/game' } });
+		const url = `/api/admin/projects/${project.id}`;
+		const headers = { cookie: sessionCookie, origin: 'http://localhost:5173' };
+		const legacy = await app.inject({ method: 'GET', url, headers });
+		expect(legacy.statusCode, legacy.body).toBe(200);
+		expect(legacy.json().data.externalLinks).toEqual([{ label: 'GitHub', url: 'https://github.com/legacy/game' }]);
+		const patched = await app.inject({ method: 'PATCH', url, headers, payload: { externalLinks } });
+		expect(patched.statusCode, patched.body).toBe(200);
+		expect(AdminProjectDetailSchema.parse(patched.json().data).externalLinks).toEqual(externalLinks);
+		expect((await db.project.findUniqueOrThrow({ where: { id: project.id } })).externalLinks).toEqual(externalLinks);
+		for (const response of [await app.inject({ method: 'GET', url, headers }), await app.inject({ method: 'GET', url: `/api/public/projects/${project.id}` })]) {
+			expect(response.statusCode, response.body).toBe(200);
+			expect(response.json().data.externalLinks).toEqual(externalLinks);
+			expect(response.json().data.githubUrl).toBe('https://github.com/legacy/game');
+		}
+		const invalid = await app.inject({ method: 'PATCH', url, headers, payload: { externalLinks: [{ label: 'Unsafe', url: 'javascript:alert(1)' }] } });
+		expect(invalid.statusCode, invalid.body).toBe(400);
+	});
+	it('stores normalized links on an authenticated USER submission and preserves omitted links on later PATCH', async () => {
+		const author = await db.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@test.invalid`, role: 'USER' } });
+		const session = await db.authSession.create({ data: { userId: author.id, expiresAt: new Date(Date.now() + 3600000) } });
+		const boundary = `user-links-${randomUUID()}`;
+		const externalLinks = [{ label: '홈페이지', url: 'https://game.example.test/' }];
+		const created = await app.inject({ method: 'POST', url: '/api/me/projects/submit', headers: { cookie: `sid=${session.id}`, origin: 'http://localhost:5173', 'idempotency-key': randomUUID(), 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: `--${boundary}\r\nContent-Disposition: form-data; name="payload"\r\n\r\n${JSON.stringify({ exhibitionId, title: 'User links', members: [{ name: 'Author', studentId: '20980002' }], externalLinks: [{ label: ' 홈페이지 ', url: ' https://game.example.test/ ' }], manifest: [] })}\r\n--${boundary}--\r\n` });
+		expect(created.statusCode, created.body).toBe(201);
+		const projectId = created.json().data.id as number;
+		expect((await db.project.findUniqueOrThrow({ where: { id: projectId } })).externalLinks).toEqual(externalLinks);
+		const patched = await app.inject({ method: 'PATCH', url: `/api/admin/projects/${projectId}`, headers: { cookie: `sid=${session.id}`, origin: 'http://localhost:5173' }, payload: { summary: 'Other metadata' } });
+		expect(patched.statusCode, patched.body).toBe(200);
+		expect(AdminProjectDetailSchema.parse(patched.json().data).externalLinks).toEqual(externalLinks);
+	});
+
+	it.each([[], [{ label: 'GitHub', url: 'https://github.com/pcu/submitted' }, { label: '홈페이지', url: 'https://submitted.example.test/' }]].map((links) => [links]))('publishes metadata and external links %j with an empty manifest through the actual durable worker', async (externalLinks) => {
 		const boundary = `metadata-${randomUUID()}`;
 		const title = `Metadata only ${randomUUID()}`;
 		const created = await app.inject({
@@ -177,7 +214,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 				'idempotency-key': randomUUID(), 'content-type': `multipart/form-data; boundary=${boundary}`,
 			},
 			payload: `--${boundary}\r\nContent-Disposition: form-data; name="payload"\r\n\r\n${JSON.stringify({
-				exhibitionId, title, members: [{ name: 'Metadata author', studentId: '20980001' }], manifest: [],
+				exhibitionId, title, externalLinks, members: [{ name: 'Metadata author', studentId: '20980001' }], manifest: [],
 			})}\r\n--${boundary}--\r\n`,
 		});
 		expect(created.statusCode, created.body).toBe(201);
@@ -202,7 +239,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 		expect(status.json().data).toMatchObject({ state: 'PUBLISHED', projectStatus: 'PUBLISHED', publicationState: 'COMPLETED', items: [] });
 		const published = await app.inject({ method: 'GET', url: `/api/public/projects/${projectId}` });
 		expect(published.statusCode, published.body).toBe(200);
-		expect(PublicProjectDetailResponseSchema.parse(published.json().data)).toMatchObject({ title, attachments: [], status: 'PUBLISHED' });
+		expect(PublicProjectDetailResponseSchema.parse(published.json().data)).toMatchObject({ title, externalLinks, attachments: [], status: 'PUBLISHED' });
 	});
 
 });

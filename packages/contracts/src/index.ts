@@ -117,6 +117,7 @@ export {
 	DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX,
 } from './game-upload.js';
 
+export * from './external-links.js';
 export * from './schemas.js';
 export * from './response-schemas.js';
 

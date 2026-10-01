@@ -1,3 +1,4 @@
+import { effectiveProjectExternalLinks } from '../../shared/project-external-links.js';
 import { resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
 import { canChangeProjectVisibility, type VisibilityActor } from '../../shared/visibility.js';
 import type { Visibility } from '@pcu/contracts';
@@ -40,6 +41,7 @@ interface PublicProjectListRecord {
 interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	description: string;
 	githubUrl?: string;
+	externalLinks?: unknown;
 	platforms?: Platform[];
 	isIncomplete: boolean;
 	status: ProjectStatus;
@@ -325,6 +327,7 @@ export async function getProjectDetail(
 		summary: project.summary || undefined,
 		description: project.description || undefined,
 		githubUrl: project.githubUrl || undefined,
+		externalLinks: effectiveProjectExternalLinks(project),
 		platforms: project.platforms ?? [],
 		isIncomplete: isIncomplete || !validKinds.has('GAME'),
 		video,

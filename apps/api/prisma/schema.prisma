@@ -235,6 +235,7 @@ model Project {
   status                   ProjectStatus @default(DRAFT)
   sortOrder                Int           @default(0) @map("sort_order")
   githubUrl                String        @default("") @map("github_url")
+  externalLinks            Json?         @map("external_links")
   platforms                Platform[]    @default([])
   posterAssetId            Int?          @unique @map("poster_asset_id")
   webglDisplayMode        String        @default("auto") @map("webgl_display_mode")

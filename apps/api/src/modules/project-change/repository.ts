@@ -1,3 +1,4 @@
+import { effectiveProjectExternalLinks } from '../../shared/project-external-links.js';
 import { withAssetMutationTransaction } from '../assets/mutation-transaction.js';
 import { randomUUID } from 'node:crypto';
 import { Prisma, type PrismaClient, type ProjectChangeRequest } from '../../generated/prisma/client.js';
@@ -75,7 +76,7 @@ export function createProjectChangeRepository(client:PrismaClient):ProjectChange
     if(project.status==='DRAFT')throw conflict('Initial submissions cannot request changes');
     if(await tx.projectChangeRequest.findFirst({where:{projectId,state:{in:[...activeStates]}}}))throw conflict('This project already has an active change request');
     const assets=await tx.asset.findMany({where:{projectId,status:'READY'},select:{id:true,kind:true,originalName:true}});
-    const before={title:project.title,summary:project.summary,description:project.description,githubUrl:project.githubUrl,platforms:project.platforms,members:project.members.map(member=>({name:member.name,studentId:member.studentId})),posterAssetId:project.posterAssetId,assets,currentWebglDeploymentId:project.currentWebglDeploymentId};
+    const before={title:project.title,summary:project.summary,description:project.description,githubUrl:project.githubUrl,externalLinks:effectiveProjectExternalLinks(project),platforms:project.platforms,members:project.members.map(member=>({name:member.name,studentId:member.studentId})),posterAssetId:project.posterAssetId,assets,currentWebglDeploymentId:project.currentWebglDeploymentId};
     const row=await tx.projectChangeRequest.create({data:{projectId,originalProjectId:projectId,projectTitle:project.title,actorId:actor.id,kind:input.kind,baseVersion:project.version,before:before,changes:{},reason:input.reason}});
     return readDetail(tx,actor,row.id);
    });

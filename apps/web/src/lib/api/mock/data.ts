@@ -373,6 +373,8 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 
 // ── 프로젝트 상세 빌더 ──────────────────────────────────────
 
+export const mockProjectOverrides = new Map<number, Partial<AdminProjectDetail>>();
+
 function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): PublicProjectDetailResponse {
 	const status = 'status' in card ? card.status : 'PUBLISHED';
 	return {
@@ -384,6 +386,7 @@ function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): P
 		summary: card.summary,
 		description: `${card.title}은(는) 배재대학교 게임공학과 ${year}년 졸업작품으로 제작된 프로젝트입니다.\n\n${card.summary ?? ''}\n\nPC 플랫폼 대상으로 개발되었습니다.`,
 		githubUrl: card.githubUrl,
+		externalLinks: mockProjectOverrides.get(card.id)?.externalLinks,
 		platforms: card.platforms ?? ['PC'],
 		isIncomplete: year <= 2024,
 		video: null,
@@ -484,11 +487,12 @@ export function buildAdminProjectDetail(id: string | number): AdminProjectDetail
 		visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: getMockRole() === 'ADMIN' || getMockRole() === 'OPERATOR',
 		id: detail.id, title: detail.title, slug: detail.slug, year: detail.year,
 		summary: detail.summary, description: detail.description,
-		githubUrl: detail.githubUrl, platforms: detail.platforms,
+		githubUrl: detail.githubUrl, externalLinks: detail.externalLinks, platforms: detail.platforms,
 		isIncomplete: detail.isIncomplete, video: detail.video, videos: detail.videos,
 		status: detail.status, sortOrder: 0,
 		posterAssetId: detail.images[0]?.id, poster: detail.poster,
 		members: detail.members.map((m, i) => ({ ...m, sortOrder: i, userId: null })),
+		...mockProjectOverrides.get(detail.id),
 		assets: detail.images.map((img) => ({
 			id: img.id, kind: img.kind, image: img.image, originalName: `asset-${img.id}.webp`, size: 102400,
 		})),

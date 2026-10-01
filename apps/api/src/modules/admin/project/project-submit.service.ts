@@ -141,7 +141,7 @@ export async function submitProject(
 		throw forbidden('Admin project submission requires operator or admin role');
 	}
 	if (options.audience === 'user') assertUserSubmitPayloadPolicy(input.payload);
-	const { exhibitionId, title, summary, description, members, manifest, visibility } = parseBody(SubmitProjectPayload, input.payload);
+	const { exhibitionId, title, summary, description, externalLinks, members, manifest, visibility } = parseBody(SubmitProjectPayload, input.payload);
 	assertManifestIsUnambiguous(manifest);
 	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
 	assertUploadAllowed(exhibition, exhibitionId, options.audience === 'user' ? 'USER' : input.actor.role as never);
@@ -170,7 +170,7 @@ export async function submitProject(
 		while (true) {
 			try {
 				project = await deps.repository.createProjectWithAssets({
-					exhibitionId: exhibition.id, slug, title, summary, description, status, visibility: visibility ?? 'PUBLIC',
+					exhibitionId: exhibition.id, slug, title, summary, description, externalLinks, status, visibility: visibility ?? 'PUBLIC',
 					creatorId: input.actor.id,
 					actor: { id: input.actor.id, role: input.actor.role as 'USER' | 'OPERATOR' | 'ADMIN' },
 					manifest,

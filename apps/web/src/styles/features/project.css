@@ -524,3 +524,19 @@
   .graphics-gate__footer { padding: 0.8rem 1rem; }
   .graphics-gate h2 { font-size: 1.1rem; }
 }
+
+.external-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.external-link-row .form-field { margin-bottom: 0; min-width: 0; }
+.external-link-row > button { margin-bottom: 0.1rem; }
+.external-link-row__error { grid-column: 1 / -1; }
+.project-external-link { overflow-wrap: anywhere; width: auto; height: auto; min-height: 2rem; max-width: 100%; padding: 0.4rem 0.7rem; border-radius: 0.5rem; }
+@media (max-width: 640px) {
+  .external-link-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .external-link-row .form-field:first-child { grid-column: 1 / -1; }
+}

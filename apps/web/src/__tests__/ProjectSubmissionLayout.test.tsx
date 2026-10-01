@@ -49,7 +49,10 @@ const draft = () => ({
 });
 beforeEach(() => {
 	items = [];
-	vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:poster'), revokeObjectURL: vi.fn() });
+	class TestURL extends URL {}
+	TestURL.createObjectURL = vi.fn(() => 'blob:poster');
+	TestURL.revokeObjectURL = vi.fn();
+	vi.stubGlobal('URL', TestURL);
 	Element.prototype.scrollIntoView = vi.fn();
 	controls.config.mockResolvedValue({ materialMaxCount: 10, materialMaxBytes: 50 * 1024 * 1024 });
 	controls.years.mockResolvedValue({
@@ -157,6 +160,9 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		await enterMetadata();
 		const poster = new File(['poster'], 'poster.png', { type: 'image/png' });
 		const image = new File(['image'], 'image.png', { type: 'image/png' });
+		fireEvent.click(screen.getByRole('button', { name: '링크 추가' }));
+		fireEvent.change(screen.getByLabelText('외부 링크 1 이름'), { target: { value: '다운로드' } });
+		fireEvent.change(screen.getByLabelText('외부 링크 1 URL'), { target: { value: 'https://example.com/game' } });
 		const video = new File(['video'], 'clip.mp4', { type: 'video/mp4' });
 		const document = new File(['doc'], 'guide.md', { type: 'text/markdown' });
 		const game = new File(['game'], 'game.zip', { type: 'application/zip' });
@@ -175,6 +181,7 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		expect(controls.getApi).toHaveBeenCalledWith(mode);
 		const formData = controls.submit.mock.calls[0]![0].formData as FormData;
 		expect(Array.from(formData.keys())).toEqual(['payload']);
+		expect(JSON.parse(formData.get('payload') as string).externalLinks).toEqual([{ label: '다운로드', url: 'https://example.com/game' }]);
 		expect(items.map((item) => item.kind).sort()).toEqual([
 			'DOCUMENT',
 			'GAME',
