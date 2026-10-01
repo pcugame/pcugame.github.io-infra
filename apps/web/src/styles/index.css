@@ -10,6 +10,7 @@
 @import './features/admin-layout.css';
 @import './features/admin-collections.css';
 @import './features/admin-projects.css';
+@import './features/webgl-network.css';
 @import './features/admin-exhibitions.css';
 @import './features/admin-import.css';
 @import './features/admin-project-editor.css';
