@@ -57,24 +57,3 @@ export function webglContentMetadata(pathname: string): WebglContentMetadata {
 		cacheControl: 'public, max-age=31536000, immutable',
 	};
 }
-
-export function webglContentSecurityPolicy(frontendUrl: string, publicAssetBaseUrl: string): string {
-	const frontendOrigin = new URL(frontendUrl).origin;
-	const webglAssetSource = new URL(publicAssetBaseUrl).origin;
-	return [
-		"default-src 'none'",
-		`script-src ${webglAssetSource} 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'`,
-		`style-src ${webglAssetSource} 'unsafe-inline'`,
-		`img-src ${webglAssetSource} data: blob:`,
-		`media-src ${webglAssetSource} data: blob:`,
-		`font-src ${webglAssetSource} data:`,
-		`connect-src ${webglAssetSource} data: blob:`,
-		`worker-src ${webglAssetSource} blob:`,
-		`child-src ${webglAssetSource} blob:`,
-		"frame-src 'none'",
-		"object-src 'none'",
-		"base-uri 'none'",
-		"form-action 'none'",
-		`frame-ancestors ${frontendOrigin}`,
-	].join('; ');
-}

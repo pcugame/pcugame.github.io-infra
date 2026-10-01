@@ -23,23 +23,27 @@ No database or public API changes are required. The bounded ZIP validator remain
 
 The gateway integration test extends the existing authenticated file-access fixture to assert binary fallback response bytes and absence of `Content-Encoding`. It requires the existing loopback PostgreSQL/Garage/API/Nginx integration environment. It does not execute a Unity player.
 
-## Real export and browser acceptance (pending)
+## Real public export and browser evidence
 
-Export the same playable Unity scene, retaining its actual generated loader, HTML and build artifacts, with these five Player publishing configurations:
+On 2026-10-01, the five actual configurations below passed initialization and scene-render inspection in literal Google Chrome `154.0.8037.92`, Microsoft Edge `154.0.4258.48`, and system Firefox `152.0.4`, on Linux/NixOS with headless software rendering. Each export passed ZIP-root and one-wrapper layouts: 30 primary browser cases. Input was dispatched, but complete gameplay was not assessed.
 
-| Compression Format | Decompression Fallback | Root ZIP | Single wrapper ZIP |
+| Configuration | Source | Unity version | Root / wrapper, three browsers |
 | --- | --- | --- | --- |
-| Disabled | Off | Pending | Pending |
-| Gzip | Off | Pending | Pending |
-| Brotli | Off | Pending | Pending |
-| Gzip | On | Pending | Pending |
-| Brotli | On | Pending | Pending |
+| Uncompressed | synboxdev/AspNetCore-Unity-WebGL | 6000.0.25f1 | Passed |
+| Gzip, fallback on | same repository | 6000.0.25f1 | Passed |
+| Brotli, fallback on | same repository | 6000.0.25f1 | Passed |
+| Gzip, fallback off | kc3hack/2022_e | 2020.3.5f1 | Passed |
+| Brotli, fallback off | eldNach/docker-nginx-unity | 2021.3.16f1 (WASM version string) | Passed |
 
-For each of the ten archives, upload through the authenticated application flow, await READY/publication, and open the actual player in current Chrome, Edge and Firefox. Confirm initialization, scene rendering, and basic input/gameplay. Inspect the loader/framework/WASM/data HTTP statuses and headers; compare fallback response bytes to the exported bytes and confirm no fallback `Content-Encoding`. Confirm gzip/Brotli response encoding remains correct. Record Unity version, browser/OS versions, ZIP checksums, deployment ID, source commit, observed headers, and console/network failures.
+Sources are pinned in [catalog.json](../scripts/unity-fixtures/catalog.json): [synboxdev export](https://github.com/synboxdev/AspNetCore-Unity-WebGL/tree/b0fada0780244878b9b7e174408ffc89baa0233f), [kc3hack export](https://github.com/kc3hack/2022_e/tree/9fdaf08a062de70c96c92377488053f8d6cacd99), and [eldNach export](https://github.com/eldnach/docker-nginx-unity/tree/260d314bebb14aac060dd83b7f47e85ab6336b70). Repository MIT declarations are recorded; Unity Microgame asset rights are not independently audited. These exports reproduce artifact downloads, not necessarily editor rebuilds. The five configurations use different scenes/Unity versions; a same-scene five-export comparison remains outstanding.
 
-After one known-good deployment, submit missing-artifact, corrupt, unsafe-path and over-limit archives through the same authenticated flow. Confirm their failed status/error identifies the issue, the current deployment ID is unchanged, and the previous game remains playable in all three browsers. Synthetic unit assertions do not replace this check.
+All twelve primary/threaded root/wrapper ZIPs passed the actual bounded validator, archive analyzer and publisher against an isolated disk storage port; published bytes matched source checksums. A fresh pinned download reproduced all 113 source files and all twelve publications. Original downloaded exports remain untouched. Raw HTTP checks verified 64 Build payloads byte-for-byte with exact MIME/encoding metadata in the initial fixture set. Browser responses independently show native gzip/br encoding and no fallback encoding. A supplementary older JohannesDeml Unity 2021.3.0f1 Brotli release initialized but produced shader errors; it is excluded from the primary five-format rendering result.
 
-Local fixture inventory on 2026-10-01: searching Desktop and Downloads found no generated `.loader.js`, `.unityweb`, or WASM build files. `/home/song/Desktop/26_2_capstone.zip` contains 14 entries and no Unity build artifacts; the other discovered ZIP is a homepage maintenance package. Real Unity five-configuration fixtures and Chrome/Edge/Firefox acceptance are unavailable and remain pending. This document records no browser execution or production verification claim.
+The actual [atteneder/glTFastWebDemo](https://github.com/atteneder/glTFastWebDemo/tree/32e62b0cffc465d65f113c436b2262491853e199) Unity `6000.0.0b12` native threaded export also passed both layouts in all three browsers through the actual compiled trusted shell and runtime CSP (six cases). WASM imports shared memory (flags 3, minimum 512 and maximum 32767 pages); its generated worker initializes native Emscripten threads against that unchanged WASM. Each case observed 16 workers with `loaded` messages, isolated parent/child and SharedArrayBuffer, denied child access to the cross-origin parent DOM, and a rendered red cube after same-origin model loading. The actual viewer's external model request was blocked by runtime `connect-src`; no network allowlist was relaxed. A separately pinned [Cesium Box model](https://github.com/KhronosGroupArchives/glTF-Sample-Models/tree/d7a3cc8e51d7c573771ae77a57f16b0662a905c6/2.0/Box) carries a CC-BY-4.0 notice.
+
+The threaded HTML requires its source demo's `parent.globals` callbacks and parent SVG. The harness substitutes local callbacks/SVG only; compiled loader/framework/WASM/worker/data bytes remain unchanged. That export has no explicit repository license and stays in temporary local storage. The shell's session-control responses are synthetic; these tests do not establish authenticated API behavior. Cookie/control-header absence was audited on the actual fixture asset requests. Reproduction instructions and exact observation limitations are in [the harness README](../scripts/unity-fixtures/README.md).
+
+Authenticated upload/READY/publication acceptance is still required. After one known-good deployment, submit missing-artifact, corrupt, unsafe-path and over-limit archives through that flow; verify the current deployment ID remains unchanged and the previous game still opens. Record deployment IDs, commit/digest, browser observations and console/network failures. Local publisher tests and mock controls do not replace this check or production verification.
 
 ## Local verification record
 
@@ -52,4 +56,6 @@ On 2026-10-01, branch `feat/unity-fallback` based on `origin/master` `f4174cb`, 
 - `npm run build`: passed (contracts, API TypeScript/release build, web TypeScript/Vite build).
 - `npm run lint`: passed (API lint/type checks and web lint).
 
-Required GitHub CI/integration, real authenticated upload replacement checks, browser acceptance, and production verification are not established by these local results.
+Required GitHub CI/integration, real authenticated upload replacement checks, hardware-GPU/full-gameplay acceptance, and production verification remain separate gates.
+
+The unused `webglContentSecurityPolicy` helper was removed: it had no production callers and duplicated a stale policy. Fixture serving reads the active Nginx policy, which already permits blob scripts; no production CSP relaxation was made.

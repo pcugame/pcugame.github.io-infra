@@ -1,0 +1,567 @@
+{
+  "date": "2026-10-01",
+  "os": "Linux/NixOS",
+  "node": "22.23.1",
+  "npm": "10.9.8",
+  "fixtureImplementationCommit": "ab23d7d90e3acda460e87bf7cb1885e06a2fb5ca",
+  "runtimeRepository": {
+    "head": "1c6f2341071240609212873c39641ac739ee0dce",
+    "runtimeUICompiledSHA256": "3ad9f07f3a1584afb975e0a9621f434e27623d673f290dd1be5a82df8e4cb4ef",
+    "runtimeServiceCompiledSHA256": "e8316d881da3f38de86caf37d0ecb776ddabcdf3ed171cf43457602684528c1e"
+  },
+  "primary": [
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "BrotliCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "BrotliCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "GzipCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "GzipCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "NoCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "NoCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "native-gzip-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "native-gzip-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "native-brotli-nginx-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "native-brotli-nginx-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "BrotliCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "BrotliCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "GzipCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "GzipCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "NoCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "NoCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "native-gzip-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "native-gzip-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "native-brotli-nginx-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "native-brotli-nginx-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "width": 960,
+          "height": 600,
+          "clientWidth": 960,
+          "clientHeight": 600
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "BrotliCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "BrotliCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "GzipCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "GzipCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "NoCompression-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "NoCompression-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "native-gzip-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "native-gzip-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "native-brotli-nginx-root",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "native-brotli-nginx-wrapper",
+      "status": "loaded",
+      "unityReady": true,
+      "canvas": [
+        {
+          "clientHeight": 600,
+          "clientWidth": 960,
+          "height": 600,
+          "width": 960
+        }
+      ]
+    }
+  ],
+  "trustedNativeThreads": [
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "threaded-gltf-root",
+      "status": "loaded",
+      "parentIsolated": true,
+      "parentSAB": true,
+      "childIsolated": true,
+      "childSAB": true,
+      "parentDOMBlocked": true,
+      "loadedWorkers": 16,
+      "externalBlocked": true,
+      "localModelLoaded": true
+    },
+    {
+      "browser": "chrome",
+      "version": "154.0.8037.92",
+      "fixture": "threaded-gltf-wrapper",
+      "status": "loaded",
+      "parentIsolated": true,
+      "parentSAB": true,
+      "childIsolated": true,
+      "childSAB": true,
+      "parentDOMBlocked": true,
+      "loadedWorkers": 16,
+      "externalBlocked": true,
+      "localModelLoaded": true
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "threaded-gltf-root",
+      "status": "loaded",
+      "parentIsolated": true,
+      "parentSAB": true,
+      "childIsolated": true,
+      "childSAB": true,
+      "parentDOMBlocked": true,
+      "loadedWorkers": 16,
+      "externalBlocked": true,
+      "localModelLoaded": true
+    },
+    {
+      "browser": "edge",
+      "version": "154.0.4258.48",
+      "fixture": "threaded-gltf-wrapper",
+      "status": "loaded",
+      "parentIsolated": true,
+      "parentSAB": true,
+      "childIsolated": true,
+      "childSAB": true,
+      "parentDOMBlocked": true,
+      "loadedWorkers": 16,
+      "externalBlocked": true,
+      "localModelLoaded": true
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "threaded-gltf-root",
+      "status": "loaded",
+      "parentIsolated": true,
+      "parentSAB": true,
+      "childIsolated": true,
+      "childSAB": true,
+      "parentDOMBlocked": true,
+      "loadedWorkers": 16,
+      "externalBlocked": true,
+      "localModelLoaded": true
+    },
+    {
+      "browser": "firefox",
+      "version": "152.0.4",
+      "fixture": "threaded-gltf-wrapper",
+      "status": "loaded",
+      "parentIsolated": true,
+      "parentSAB": true,
+      "childIsolated": true,
+      "childSAB": true,
+      "parentDOMBlocked": true,
+      "loadedWorkers": 16,
+      "externalBlocked": true,
+      "localModelLoaded": true
+    }
+  ],
+  "limitations": [
+    "Synthetic local session controls; no authenticated upload or deployment assertion",
+    "Different scenes and Unity versions across primary five configurations",
+    "Headless software GPU; input dispatched, no exhaustive gameplay",
+    "Threaded HTML parent callbacks/SVG adapted, compiled artifacts unchanged",
+    "No production hosting or third-party binary redistribution"
+  ],
+  "assetAudit": {
+    "requests": 494,
+    "cookies": 0,
+    "controlHeaders": 0
+  },
+  "browserPackageSHA256": {
+    "chrome": "69e3f6ac0a4811f4689ca23f1fd5cc5b2c01550881928b3e196a97131165c4a2",
+    "edge": "b9a0ba47f0233b4e3266e61630b25114067fa25361df63182c88aaa8a422b98e",
+    "geckodriver": "e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e"
+  }
+}

@@ -1,0 +1,745 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "name": "NoCompression",
+      "configuration": "uncompressed",
+      "repository": "synboxdev/AspNetCore-Unity-WebGL",
+      "commit": "b0fada0780244878b9b7e174408ffc89baa0233f",
+      "unityVersion": "6000.0.25f1",
+      "license": "MIT (repository declaration; Unity Microgame assets not independently audited)",
+      "files": [
+        {
+          "path": "Build/Build.data",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/Build/Build.data",
+          "sha256": "42b60c7407b71496929174431edd9c3407f2f385786897d1cc4b726fe5d59999",
+          "size": 14893366
+        },
+        {
+          "path": "Build/Build.framework.js",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/Build/Build.framework.js",
+          "sha256": "bac54c65fdf493a3f156587cd265ff239d8dcf7e2f0c3dfcde5b682f16991693",
+          "size": 439203
+        },
+        {
+          "path": "Build/Build.loader.js",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/Build/Build.loader.js",
+          "sha256": "26d9a2086983f11583760cd67f187d0aca06988c251cc31a475979182c75c291",
+          "size": 25317
+        },
+        {
+          "path": "Build/Build.wasm",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/Build/Build.wasm",
+          "sha256": "19d5cd33f72e47906be3b74a00e7470a80189298186cde52a00e76a91b3f5f06",
+          "size": 42713656
+        },
+        {
+          "path": "GUID.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/GUID.txt",
+          "sha256": "bd5b57bd72f8000efbe940d0fddfdd738f1195f064fc9bb7589ac34290a53b8e",
+          "size": 32
+        },
+        {
+          "path": "ProjectVersion.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/ProjectVersion.txt",
+          "sha256": "9f170ba8f6573c5cf8f806b5204a2ac0b3e7e767b3b99db28d5bc3ec39e9cc0d",
+          "size": 85
+        },
+        {
+          "path": "TemplateData/MemoryProfiler.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/MemoryProfiler.png",
+          "sha256": "0ce87be20d0c24ab6cb73b57de2004da261cc2a641e69319c6ae3fe11fc85483",
+          "size": 665
+        },
+        {
+          "path": "TemplateData/favicon.ico",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/favicon.ico",
+          "sha256": "9c13beb90ee8f70580d52a21d5233970d1c89e71e4a34a462c22610941c3c77f",
+          "size": 2305
+        },
+        {
+          "path": "TemplateData/fullscreen-button.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/fullscreen-button.png",
+          "sha256": "21221581673a54b8139d408d4a3f8d2b879e86827d4b6fc53b995ff7a99ee3e9",
+          "size": 175
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/progress-bar-empty-dark.png",
+          "sha256": "bbee7131afe8a3365906240d89184dc86234c119467f390bc4bc6802328fdb4d",
+          "size": 96
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/progress-bar-empty-light.png",
+          "sha256": "143696c060ad43d6c30f19ff5f49000927a139a2a1e4c9f45fafaa2b90d7d2be",
+          "size": 109
+        },
+        {
+          "path": "TemplateData/progress-bar-full-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/progress-bar-full-dark.png",
+          "sha256": "3306a6244dcb3926fca38a28e3ced589df8ff1beed955eb17c0bbf01c918bc62",
+          "size": 74
+        },
+        {
+          "path": "TemplateData/progress-bar-full-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/progress-bar-full-light.png",
+          "sha256": "12395ea785480c5cdf12fade6e6cbf49666d5bb1cef7240c113dbcba6bdc5c87",
+          "size": 84
+        },
+        {
+          "path": "TemplateData/style.css",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/style.css",
+          "sha256": "80acab5f9147ed15876d638d776c0f9c6b4c273c01c96d82d23b6c53ea96f9cf",
+          "size": 1448
+        },
+        {
+          "path": "TemplateData/unity-logo-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/unity-logo-dark.png",
+          "sha256": "c1b72d26c096487dabc948b54bc203f8dac7ed4e3f5733918798e858acb4b159",
+          "size": 3042
+        },
+        {
+          "path": "TemplateData/unity-logo-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/unity-logo-light.png",
+          "sha256": "002990aea0d946833cadc1519d5b7e50a4570bd537a0517dd79a59d3eec84da7",
+          "size": 3077
+        },
+        {
+          "path": "TemplateData/unity-logo-title-footer.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/unity-logo-title-footer.png",
+          "sha256": "9e8b3bdb67c2446d16362fe59449d892100931dbbadfe6a9d923a4142b57a79f",
+          "size": 1151
+        },
+        {
+          "path": "TemplateData/webmemd-icon.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/TemplateData/webmemd-icon.png",
+          "sha256": "c56f5494640cedda273aad38d58e6ab9da625d5b3f4d875c0ff92c6192a569c2",
+          "size": 1670
+        },
+        {
+          "path": "dependencies.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/dependencies.txt",
+          "sha256": "e5722aff1d479af09b391761c6a79541feef23607531311c12fae363f27b097b",
+          "size": 1530
+        },
+        {
+          "path": "index.html",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/NoCompression/index.html",
+          "sha256": "6413fdd86d9341d0865b158efe2e9891dbbf49fa76372eef8011ed78033e7291",
+          "size": 5275
+        },
+        {
+          "path": "FIXTURE-LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/LICENSE",
+          "sha256": "f518a061332e17546cf0bd9c805f63c010fd282998e23483b4c37f533bfca1a4",
+          "size": 1063
+        }
+      ]
+    },
+    {
+      "name": "GzipCompression",
+      "configuration": "gzip-fallback",
+      "repository": "synboxdev/AspNetCore-Unity-WebGL",
+      "commit": "b0fada0780244878b9b7e174408ffc89baa0233f",
+      "unityVersion": "6000.0.25f1",
+      "license": "MIT (repository declaration; Unity Microgame assets not independently audited)",
+      "files": [
+        {
+          "path": "Build/Build.data.unityweb",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/Build/Build.data.unityweb",
+          "sha256": "f86f631ed5b79c0d46006149ee6050e790de1b5ac14d9146a50bb099a0cc7e58",
+          "size": 7574893
+        },
+        {
+          "path": "Build/Build.framework.js.unityweb",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/Build/Build.framework.js.unityweb",
+          "sha256": "3bbe364a0dc5deb918af1f5c05e4eb71e8b2b8ee6938729eb0add530724a3591",
+          "size": 86712
+        },
+        {
+          "path": "Build/Build.loader.js",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/Build/Build.loader.js",
+          "sha256": "595186e29128572048b733547be068b9b518e5ae9b6f4dccd4533ade0af588e9",
+          "size": 47405
+        },
+        {
+          "path": "Build/Build.wasm.unityweb",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/Build/Build.wasm.unityweb",
+          "sha256": "da64ecebd442fe6ef553bbe6aeafc732a545b3eecee1f28914f5799f2217c437",
+          "size": 10762429
+        },
+        {
+          "path": "GUID.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/GUID.txt",
+          "sha256": "67bf0eb3d47303bde7e9e12ba0c36f94b3813bf79c7adf6d5aaf4ec9942887a2",
+          "size": 32
+        },
+        {
+          "path": "ProjectVersion.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/ProjectVersion.txt",
+          "sha256": "9f170ba8f6573c5cf8f806b5204a2ac0b3e7e767b3b99db28d5bc3ec39e9cc0d",
+          "size": 85
+        },
+        {
+          "path": "TemplateData/MemoryProfiler.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/MemoryProfiler.png",
+          "sha256": "0ce87be20d0c24ab6cb73b57de2004da261cc2a641e69319c6ae3fe11fc85483",
+          "size": 665
+        },
+        {
+          "path": "TemplateData/favicon.ico",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/favicon.ico",
+          "sha256": "9c13beb90ee8f70580d52a21d5233970d1c89e71e4a34a462c22610941c3c77f",
+          "size": 2305
+        },
+        {
+          "path": "TemplateData/fullscreen-button.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/fullscreen-button.png",
+          "sha256": "21221581673a54b8139d408d4a3f8d2b879e86827d4b6fc53b995ff7a99ee3e9",
+          "size": 175
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/progress-bar-empty-dark.png",
+          "sha256": "bbee7131afe8a3365906240d89184dc86234c119467f390bc4bc6802328fdb4d",
+          "size": 96
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/progress-bar-empty-light.png",
+          "sha256": "143696c060ad43d6c30f19ff5f49000927a139a2a1e4c9f45fafaa2b90d7d2be",
+          "size": 109
+        },
+        {
+          "path": "TemplateData/progress-bar-full-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/progress-bar-full-dark.png",
+          "sha256": "3306a6244dcb3926fca38a28e3ced589df8ff1beed955eb17c0bbf01c918bc62",
+          "size": 74
+        },
+        {
+          "path": "TemplateData/progress-bar-full-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/progress-bar-full-light.png",
+          "sha256": "12395ea785480c5cdf12fade6e6cbf49666d5bb1cef7240c113dbcba6bdc5c87",
+          "size": 84
+        },
+        {
+          "path": "TemplateData/style.css",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/style.css",
+          "sha256": "80acab5f9147ed15876d638d776c0f9c6b4c273c01c96d82d23b6c53ea96f9cf",
+          "size": 1448
+        },
+        {
+          "path": "TemplateData/unity-logo-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/unity-logo-dark.png",
+          "sha256": "c1b72d26c096487dabc948b54bc203f8dac7ed4e3f5733918798e858acb4b159",
+          "size": 3042
+        },
+        {
+          "path": "TemplateData/unity-logo-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/unity-logo-light.png",
+          "sha256": "002990aea0d946833cadc1519d5b7e50a4570bd537a0517dd79a59d3eec84da7",
+          "size": 3077
+        },
+        {
+          "path": "TemplateData/unity-logo-title-footer.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/unity-logo-title-footer.png",
+          "sha256": "9e8b3bdb67c2446d16362fe59449d892100931dbbadfe6a9d923a4142b57a79f",
+          "size": 1151
+        },
+        {
+          "path": "TemplateData/webmemd-icon.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/TemplateData/webmemd-icon.png",
+          "sha256": "c56f5494640cedda273aad38d58e6ab9da625d5b3f4d875c0ff92c6192a569c2",
+          "size": 1670
+        },
+        {
+          "path": "dependencies.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/dependencies.txt",
+          "sha256": "e5722aff1d479af09b391761c6a79541feef23607531311c12fae363f27b097b",
+          "size": 1530
+        },
+        {
+          "path": "index.html",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/GzipCompression/index.html",
+          "sha256": "2d8e4dcf9a69ea149aca9bfdbf41fe2dd20248c8c10aff030f4de508bb6c10a4",
+          "size": 5302
+        },
+        {
+          "path": "FIXTURE-LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/LICENSE",
+          "sha256": "f518a061332e17546cf0bd9c805f63c010fd282998e23483b4c37f533bfca1a4",
+          "size": 1063
+        }
+      ]
+    },
+    {
+      "name": "BrotliCompression",
+      "configuration": "brotli-fallback",
+      "repository": "synboxdev/AspNetCore-Unity-WebGL",
+      "commit": "b0fada0780244878b9b7e174408ffc89baa0233f",
+      "unityVersion": "6000.0.25f1",
+      "license": "MIT (repository declaration; Unity Microgame assets not independently audited)",
+      "files": [
+        {
+          "path": "Build/Build.data.unityweb",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/Build/Build.data.unityweb",
+          "sha256": "73a467fee3f4744586ab75dfbf1269bce95a25668ff89411fa2ac17ae5374cde",
+          "size": 6844855
+        },
+        {
+          "path": "Build/Build.framework.js.unityweb",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/Build/Build.framework.js.unityweb",
+          "sha256": "d7951e41c9c4ed70b9c928804ba44efe0612aab9755a055684becb17104291e6",
+          "size": 74619
+        },
+        {
+          "path": "Build/Build.loader.js",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/Build/Build.loader.js",
+          "sha256": "d274e7dcd4171c59ea8b4f56f3a629a346cdaeb10ead6375ee8e405181bb8ad3",
+          "size": 117432
+        },
+        {
+          "path": "Build/Build.wasm.unityweb",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/Build/Build.wasm.unityweb",
+          "sha256": "ac06e7b1260c7ae4c1b26a829c0db8c9d16d2ea339951c6d38c41d4da7b60581",
+          "size": 7708468
+        },
+        {
+          "path": "GUID.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/GUID.txt",
+          "sha256": "48e40eb04161d6de8489199f2934060fa172cd8360d33a424bcfeef529bb9403",
+          "size": 32
+        },
+        {
+          "path": "ProjectVersion.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/ProjectVersion.txt",
+          "sha256": "9f170ba8f6573c5cf8f806b5204a2ac0b3e7e767b3b99db28d5bc3ec39e9cc0d",
+          "size": 85
+        },
+        {
+          "path": "TemplateData/MemoryProfiler.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/MemoryProfiler.png",
+          "sha256": "0ce87be20d0c24ab6cb73b57de2004da261cc2a641e69319c6ae3fe11fc85483",
+          "size": 665
+        },
+        {
+          "path": "TemplateData/favicon.ico",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/favicon.ico",
+          "sha256": "9c13beb90ee8f70580d52a21d5233970d1c89e71e4a34a462c22610941c3c77f",
+          "size": 2305
+        },
+        {
+          "path": "TemplateData/fullscreen-button.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/fullscreen-button.png",
+          "sha256": "21221581673a54b8139d408d4a3f8d2b879e86827d4b6fc53b995ff7a99ee3e9",
+          "size": 175
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/progress-bar-empty-dark.png",
+          "sha256": "bbee7131afe8a3365906240d89184dc86234c119467f390bc4bc6802328fdb4d",
+          "size": 96
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/progress-bar-empty-light.png",
+          "sha256": "143696c060ad43d6c30f19ff5f49000927a139a2a1e4c9f45fafaa2b90d7d2be",
+          "size": 109
+        },
+        {
+          "path": "TemplateData/progress-bar-full-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/progress-bar-full-dark.png",
+          "sha256": "3306a6244dcb3926fca38a28e3ced589df8ff1beed955eb17c0bbf01c918bc62",
+          "size": 74
+        },
+        {
+          "path": "TemplateData/progress-bar-full-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/progress-bar-full-light.png",
+          "sha256": "12395ea785480c5cdf12fade6e6cbf49666d5bb1cef7240c113dbcba6bdc5c87",
+          "size": 84
+        },
+        {
+          "path": "TemplateData/style.css",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/style.css",
+          "sha256": "80acab5f9147ed15876d638d776c0f9c6b4c273c01c96d82d23b6c53ea96f9cf",
+          "size": 1448
+        },
+        {
+          "path": "TemplateData/unity-logo-dark.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/unity-logo-dark.png",
+          "sha256": "c1b72d26c096487dabc948b54bc203f8dac7ed4e3f5733918798e858acb4b159",
+          "size": 3042
+        },
+        {
+          "path": "TemplateData/unity-logo-light.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/unity-logo-light.png",
+          "sha256": "002990aea0d946833cadc1519d5b7e50a4570bd537a0517dd79a59d3eec84da7",
+          "size": 3077
+        },
+        {
+          "path": "TemplateData/unity-logo-title-footer.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/unity-logo-title-footer.png",
+          "sha256": "9e8b3bdb67c2446d16362fe59449d892100931dbbadfe6a9d923a4142b57a79f",
+          "size": 1151
+        },
+        {
+          "path": "TemplateData/webmemd-icon.png",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/TemplateData/webmemd-icon.png",
+          "sha256": "c56f5494640cedda273aad38d58e6ab9da625d5b3f4d875c0ff92c6192a569c2",
+          "size": 1670
+        },
+        {
+          "path": "dependencies.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/dependencies.txt",
+          "sha256": "e5722aff1d479af09b391761c6a79541feef23607531311c12fae363f27b097b",
+          "size": 1530
+        },
+        {
+          "path": "index.html",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/Bacchus/Assets/BrotliCompression/index.html",
+          "sha256": "2d8e4dcf9a69ea149aca9bfdbf41fe2dd20248c8c10aff030f4de508bb6c10a4",
+          "size": 5302
+        },
+        {
+          "path": "FIXTURE-LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/synboxdev/AspNetCore-Unity-WebGL/b0fada0780244878b9b7e174408ffc89baa0233f/LICENSE",
+          "sha256": "f518a061332e17546cf0bd9c805f63c010fd282998e23483b4c37f533bfca1a4",
+          "size": 1063
+        }
+      ]
+    },
+    {
+      "name": "native-gzip",
+      "configuration": "gzip-native",
+      "repository": "kc3hack/2022_e",
+      "commit": "9fdaf08a062de70c96c92377488053f8d6cacd99",
+      "unityVersion": "2020.3.5f1",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/LICENSE",
+          "sha256": "99db95682b619898f1ba46ce7acecc8eb30ac7e0950315c334641dbb2e7bc34d",
+          "size": 1078
+        },
+        {
+          "path": "Survivor/ProjectSettings/ProjectVersion.txt",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/Survivor/ProjectSettings/ProjectVersion.txt",
+          "sha256": "3bbdb0fc067f43f68518a8be97190631e0005abb783ebd2c85f4c8c5b6076a30",
+          "size": 83
+        },
+        {
+          "path": "Build/WebGL.data.gz",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/Build/WebGL.data.gz",
+          "sha256": "dec2f00ca681708e19506a0a9fdaac1a88b267f9c564af05ba522e6e97eaffa7",
+          "size": 8545860
+        },
+        {
+          "path": "Build/WebGL.framework.js.gz",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/Build/WebGL.framework.js.gz",
+          "sha256": "edfacbd8718f17ab2189bef50dd7289b7ae87076d643b7f8f96a5c995dbf2cdb",
+          "size": 79059
+        },
+        {
+          "path": "Build/WebGL.loader.js",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/Build/WebGL.loader.js",
+          "sha256": "345f84ddb4d1a1c0ad0729b1f28763c763d0a52ec7d7577c63a48b998dabbc8a",
+          "size": 13438
+        },
+        {
+          "path": "Build/WebGL.wasm.gz",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/Build/WebGL.wasm.gz",
+          "sha256": "907c90d1cb66b45095d6a248aca7759a23ed442f355a530b4e34f26cfd745b34",
+          "size": 3290677
+        },
+        {
+          "path": "TemplateData/favicon.ico",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/favicon.ico",
+          "sha256": "03bc9b4583617dbe8d17c64ea51c7942c0e396011d6e0b820c247626b30e76ee",
+          "size": 13275
+        },
+        {
+          "path": "TemplateData/fullscreen-button.png",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/fullscreen-button.png",
+          "sha256": "21221581673a54b8139d408d4a3f8d2b879e86827d4b6fc53b995ff7a99ee3e9",
+          "size": 175
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-dark.png",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/progress-bar-empty-dark.png",
+          "sha256": "bbee7131afe8a3365906240d89184dc86234c119467f390bc4bc6802328fdb4d",
+          "size": 96
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-light.png",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/progress-bar-empty-light.png",
+          "sha256": "143696c060ad43d6c30f19ff5f49000927a139a2a1e4c9f45fafaa2b90d7d2be",
+          "size": 109
+        },
+        {
+          "path": "TemplateData/progress-bar-full-dark.png",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/progress-bar-full-dark.png",
+          "sha256": "3306a6244dcb3926fca38a28e3ced589df8ff1beed955eb17c0bbf01c918bc62",
+          "size": 74
+        },
+        {
+          "path": "TemplateData/progress-bar-full-light.png",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/progress-bar-full-light.png",
+          "sha256": "12395ea785480c5cdf12fade6e6cbf49666d5bb1cef7240c113dbcba6bdc5c87",
+          "size": 84
+        },
+        {
+          "path": "TemplateData/style.css",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/style.css",
+          "sha256": "f1bbb17138dc97d69c3c51e81d5aba9becae8f00430784b7a634036f30a31756",
+          "size": 1382
+        },
+        {
+          "path": "TemplateData/unity-logo-dark.png",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/unity-logo-dark.png",
+          "sha256": "4e105c5e3e467c0d20a83e445d18f55b966065bd1a1b05c4648733bf656ac43d",
+          "size": 1108
+        },
+        {
+          "path": "TemplateData/unity-logo-light.png",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/unity-logo-light.png",
+          "sha256": "4c5d8f2b641c51b9f85402aa951aee1b9d899a4dd50d1a511b08f07955fd722f",
+          "size": 1108
+        },
+        {
+          "path": "TemplateData/webgl-logo.png",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/TemplateData/webgl-logo.png",
+          "sha256": "d8cb599074964a456d3804a23ad53c8c16b4e6ba74f3c226b5570354dc8285af",
+          "size": 2031
+        },
+        {
+          "path": "index.html",
+          "url": "https://raw.githubusercontent.com/kc3hack/2022_e/9fdaf08a062de70c96c92377488053f8d6cacd99/WebGL/index.html",
+          "sha256": "475626cfe5ff3ea320b7993ab2aae7ca5068659593ee032be149f554eba4d6fe",
+          "size": 3460
+        }
+      ]
+    },
+    {
+      "name": "native-brotli-nginx",
+      "configuration": "brotli-native",
+      "repository": "eldnach/docker-nginx-unity",
+      "commit": "260d314bebb14aac060dd83b7f47e85ab6336b70",
+      "unityVersion": "2021.3.16f1",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "LICENSE",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/LICENSE",
+          "sha256": "bd0e76036a4d8cd1ebaa511a43d7a6d2bebc5152ee656891135379d05d6ec16e",
+          "size": 1064
+        },
+        {
+          "path": "Build/Build.data.br",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/Build/Build.data.br",
+          "sha256": "a13830476faec948deb59e108091254d916049518fe69acf6eee32811c437cd3",
+          "size": 2860864
+        },
+        {
+          "path": "Build/Build.framework.js.br",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/Build/Build.framework.js.br",
+          "sha256": "3d47556fda439b762d73d93835836355879a6bec1a3d5c01b5a3941fde2664fd",
+          "size": 67323
+        },
+        {
+          "path": "Build/Build.loader.js",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/Build/Build.loader.js",
+          "sha256": "e0c8526d105cf611bee980d9c9cb6db096d7fb2eb8fcc39aaf34a4f6da92e687",
+          "size": 19150
+        },
+        {
+          "path": "Build/Build.wasm.br",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/Build/Build.wasm.br",
+          "sha256": "2976f222a70464100ee1fd45ba5822b7750bccf810f2c9b02e63081a7f986423",
+          "size": 4770011
+        },
+        {
+          "path": "StreamingAssets/UnityServicesProjectConfiguration.json",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/StreamingAssets/UnityServicesProjectConfiguration.json",
+          "sha256": "13c3da078a40a34da7cedbaa1fb6d9844cfc6366e50254dd75659443e5cc4c61",
+          "size": 530
+        },
+        {
+          "path": "TemplateData/favicon.ico",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/favicon.ico",
+          "sha256": "9c13beb90ee8f70580d52a21d5233970d1c89e71e4a34a462c22610941c3c77f",
+          "size": 2305
+        },
+        {
+          "path": "TemplateData/fullscreen-button.png",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/fullscreen-button.png",
+          "sha256": "21221581673a54b8139d408d4a3f8d2b879e86827d4b6fc53b995ff7a99ee3e9",
+          "size": 175
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-dark.png",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/progress-bar-empty-dark.png",
+          "sha256": "bbee7131afe8a3365906240d89184dc86234c119467f390bc4bc6802328fdb4d",
+          "size": 96
+        },
+        {
+          "path": "TemplateData/progress-bar-empty-light.png",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/progress-bar-empty-light.png",
+          "sha256": "143696c060ad43d6c30f19ff5f49000927a139a2a1e4c9f45fafaa2b90d7d2be",
+          "size": 109
+        },
+        {
+          "path": "TemplateData/progress-bar-full-dark.png",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/progress-bar-full-dark.png",
+          "sha256": "3306a6244dcb3926fca38a28e3ced589df8ff1beed955eb17c0bbf01c918bc62",
+          "size": 74
+        },
+        {
+          "path": "TemplateData/progress-bar-full-light.png",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/progress-bar-full-light.png",
+          "sha256": "12395ea785480c5cdf12fade6e6cbf49666d5bb1cef7240c113dbcba6bdc5c87",
+          "size": 84
+        },
+        {
+          "path": "TemplateData/style.css",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/style.css",
+          "sha256": "f5d62e10cd6a52b888c2d490b4f21409ee55868bd8763cd2fcb35d4427be868f",
+          "size": 1395
+        },
+        {
+          "path": "TemplateData/unity-logo-dark.png",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/unity-logo-dark.png",
+          "sha256": "c1b72d26c096487dabc948b54bc203f8dac7ed4e3f5733918798e858acb4b159",
+          "size": 3042
+        },
+        {
+          "path": "TemplateData/unity-logo-light.png",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/unity-logo-light.png",
+          "sha256": "002990aea0d946833cadc1519d5b7e50a4570bd537a0517dd79a59d3eec84da7",
+          "size": 3077
+        },
+        {
+          "path": "TemplateData/webgl-logo.png",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/TemplateData/webgl-logo.png",
+          "sha256": "b30c3af2a4538c6edf5f2411953760641dfa257f2a4cc5b88d671aa243b1f12f",
+          "size": 2947
+        },
+        {
+          "path": "index.html",
+          "url": "https://raw.githubusercontent.com/eldnach/docker-nginx-unity/260d314bebb14aac060dd83b7f47e85ab6336b70/webplayer/index.html",
+          "sha256": "815f6b39197558e5958b0de72d9dbb7f7f15fef94955c84c63ed5bfaa4486f51",
+          "size": 4825
+        }
+      ]
+    },
+    {
+      "name": "threaded-gltf",
+      "configuration": "native-wasm-threads",
+      "repository": "atteneder/glTFastWebDemo",
+      "commit": "32e62b0cffc465d65f113c436b2262491853e199",
+      "unityVersion": "6000.0.0b12",
+      "license": "No explicit license in demo repository; local testing only",
+      "files": [
+        {
+          "path": "Build/2307430ec943b165a5ea5f5631faff74.worker.js",
+          "url": "https://raw.githubusercontent.com/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/2307430ec943b165a5ea5f5631faff74.worker.js",
+          "sha256": "cc9ef4df6eca2ced3c2ab73c64580de249f09c3c8550258f3b5dfa9cfad3de93",
+          "size": 2211
+        },
+        {
+          "path": "Build/2307430ec943b165a5ea5f5631faff74.worker.js.br",
+          "url": "https://media.githubusercontent.com/media/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/2307430ec943b165a5ea5f5631faff74.worker.js.br",
+          "sha256": "cf939f5569f6ad51c832d9c878c08c0cbdeea94851ac99eb3ba3d391c13a9f88",
+          "size": 801
+        },
+        {
+          "path": "Build/ab30eaa80d40a93a6ee089e12a814055.wasm",
+          "url": "https://media.githubusercontent.com/media/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/ab30eaa80d40a93a6ee089e12a814055.wasm",
+          "sha256": "bf495ddde99320ed4e7afb84a8779173a66b5e1651669e077078613107b1ba52",
+          "size": 8966821
+        },
+        {
+          "path": "Build/ab30eaa80d40a93a6ee089e12a814055.wasm.br",
+          "url": "https://media.githubusercontent.com/media/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/ab30eaa80d40a93a6ee089e12a814055.wasm.br",
+          "sha256": "368ddfabe6651093dc54ba78e1a4ba9680413db110e510b43a04a6ab9388729d",
+          "size": 2423095
+        },
+        {
+          "path": "Build/c3d07a57d5dd02438d5b104fd88acda8.loader.js",
+          "url": "https://raw.githubusercontent.com/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/c3d07a57d5dd02438d5b104fd88acda8.loader.js",
+          "sha256": "f1c3a755f76c2bf830193fffa5470980338e929f7f57cc68dfa2f106470324d2",
+          "size": 27808
+        },
+        {
+          "path": "Build/c3d07a57d5dd02438d5b104fd88acda8.loader.js.br",
+          "url": "https://media.githubusercontent.com/media/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/c3d07a57d5dd02438d5b104fd88acda8.loader.js.br",
+          "sha256": "7cd2a32d605d4bd912d30ecfff70b1dba97eac95667282a9474c39a664fa75a3",
+          "size": 8387
+        },
+        {
+          "path": "Build/e72e4c5cb9b5d34468f39eaccea53a59.framework.js",
+          "url": "https://raw.githubusercontent.com/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/e72e4c5cb9b5d34468f39eaccea53a59.framework.js",
+          "sha256": "cf78fe51c30409bfd33f6f9a5b0c86dcc94bfee2fb86cbc7a6780476082f9580",
+          "size": 331400
+        },
+        {
+          "path": "Build/e72e4c5cb9b5d34468f39eaccea53a59.framework.js.br",
+          "url": "https://media.githubusercontent.com/media/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/e72e4c5cb9b5d34468f39eaccea53a59.framework.js.br",
+          "sha256": "187924e34cee4bdbd3d472376452b2156d552595a86888dafaf959323d043c03",
+          "size": 65549
+        },
+        {
+          "path": "Build/f0bf0378ccb16549226a8e1c3c9aca2d.symbols.json",
+          "url": "https://raw.githubusercontent.com/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/f0bf0378ccb16549226a8e1c3c9aca2d.symbols.json",
+          "sha256": "3e4af8a7f00552d780c6ad01e7b252da71624b05bec3a417f1b5bb81806d7b38",
+          "size": 4707049
+        },
+        {
+          "path": "Build/f0bf0378ccb16549226a8e1c3c9aca2d.symbols.json.br",
+          "url": "https://media.githubusercontent.com/media/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/f0bf0378ccb16549226a8e1c3c9aca2d.symbols.json.br",
+          "sha256": "9c1f7481ed62d274d8b318a07ad78693356b5e3eabfd0f995cf64ff76dbc6c59",
+          "size": 638784
+        },
+        {
+          "path": "Build/fdc73d46368d331fb37b4e81643e0619.data",
+          "url": "https://media.githubusercontent.com/media/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/fdc73d46368d331fb37b4e81643e0619.data",
+          "sha256": "d197e97a9cd5e23832b784ad119c386486ac93c9b49cd54eb3ac2c2ad8b9510a",
+          "size": 4166010
+        },
+        {
+          "path": "Build/fdc73d46368d331fb37b4e81643e0619.data.br",
+          "url": "https://media.githubusercontent.com/media/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/Build/fdc73d46368d331fb37b4e81643e0619.data.br",
+          "sha256": "55e61be5132fea7c3de23cba70906391d666046cbd9318af6b6fd990c017d32a",
+          "size": 1191805
+        },
+        {
+          "path": "StreamingAssets/glTF.txt",
+          "url": "https://raw.githubusercontent.com/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/StreamingAssets/glTF.txt",
+          "sha256": "45e406d2e23fa85e8568e841236419b502bda7b3d201c89368945ce9b3c99c0f",
+          "size": 8541
+        },
+        {
+          "path": "index.html",
+          "url": "https://raw.githubusercontent.com/atteneder/glTFastWebDemo/32e62b0cffc465d65f113c436b2262491853e199/glTFast/index.html",
+          "sha256": "49b0a5feb02f2c7c6cd7d2731d27cf0df5d6b82e163eac8a4c394d29b313230b",
+          "size": 4326
+        },
+        {
+          "path": "StreamingAssets/Box.glb",
+          "url": "https://raw.githubusercontent.com/KhronosGroupArchives/glTF-Sample-Models/d7a3cc8e51d7c573771ae77a57f16b0662a905c6/2.0/Box/glTF-Binary/Box.glb",
+          "sha256": "ed52f7192b8311d700ac0ce80644e3852cd01537e4d62241b9acba023da3d54e",
+          "size": 1664,
+          "adaptation": "additional model input; original compiled Unity bytes retained"
+        },
+        {
+          "path": "StreamingAssets/FIXTURE-BOX-LICENSE.md",
+          "url": "https://raw.githubusercontent.com/KhronosGroupArchives/glTF-Sample-Models/d7a3cc8e51d7c573771ae77a57f16b0662a905c6/2.0/Box/README.md",
+          "sha256": "ffd945e892c3002317006bd821af2fdded214374a2513c7fba325a67e7e91614",
+          "size": 282,
+          "attribution": "Box model donated by Cesium, CC-BY-4.0"
+        }
+      ]
+    }
+  ]
+}
