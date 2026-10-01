@@ -1,3 +1,4 @@
+import { accelerationMarkup, accelerationStyle } from './runtime-acceleration-presentation.js';
 import { createHash } from 'node:crypto';
 
 interface ShellConfig {
@@ -165,33 +166,96 @@ function release() {
   retry.disabled = true;
   proceed.disabled = true;
   if (gate.open && typeof gate.close === 'function') gate.close();
+  gate.removeAttribute('open');
   gate.hidden = true;
   void start();
 }
+const browserNames = { chrome: 'Chrome', edge: 'Edge', brave: 'Brave', firefox: 'Firefox', whale: 'Whale', opera: 'Opera', safari: 'Safari', other: '기타 브라우저', mobile: '모바일 브라우저' };
+const help = {
+  chrome: 'https://support.google.com/meet/answer/9302964?hl=ko',
+  edge: 'https://learn.microsoft.com/en-us/troubleshoot/microsoft-edge/performance/edge-high-cpu-memory',
+  brave: 'https://support.brave.app/hc/en-us/sections/360002510351-Settings-management',
+  firefox: 'https://support.mozilla.org/ko/kb/performance-settings',
+  whale: 'https://help.whale.naver.com/ko/desktop/', opera: 'https://help.opera.com/en/faq/', safari: 'https://support.apple.com/ko-kr/102564',
+};
+const chromiumExample = { file:'chromium-system.webp', width:1408, height:310, caption:'Chromium 설정 예시 · 브라우저와 버전에 따라 화면이 다를 수 있어요.', alt:'Chromium 시스템 설정의 그래픽 가속 사용 옵션' };
+const screenshots = {
+  chrome:chromiumExample, edge:chromiumExample, opera:chromiumExample, whale:chromiumExample,
+  brave:{ file:'brave-system.webp', width:1408, height:422, caption:'Brave 설정 화면 · 그래픽 가속 옵션을 확인해 주세요.', alt:'Brave 시스템 설정의 그래픽 가속 사용 옵션' },
+  firefox:{ file:'firefox-performance.png', width:600, height:147, caption:'Firefox 설정 화면 · 하드웨어 가속을 켠 상태예요.', alt:'Firefox 성능 설정에서 권장 성능 설정 사용은 해제되고 하드웨어 가속 사용은 선택된 화면' },
+};
+const figure = document.getElementById('guide-screenshot');
+const preview = document.getElementById('guide-preview');
+const enlarged = document.getElementById('guide-enlarged');
+const image = document.getElementById('guide-image');
+const enlargedImage = document.getElementById('guide-enlarged-image');
+function showDialog(dialog) {
+  dialog.hidden = false;
+  try { if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', ''); }
+  catch { dialog.setAttribute('open', ''); }
+}
+function closeEnlarged() {
+  if (typeof enlarged.close === 'function') enlarged.close();
+  else enlarged.removeAttribute('open');
+  enlarged.hidden = true;
+  preview.focus();
+}
+preview.addEventListener('click', () => { if (!figure.hidden) showDialog(enlarged); });
+document.getElementById('guide-enlarged-close').addEventListener('click', closeEnlarged);
+enlarged.addEventListener('cancel', event => { event.preventDefault(); event.stopPropagation(); closeEnlarged(); });
+image.addEventListener('error', () => { figure.hidden = true; });
+let manualBrowser = false;
+let detectedBrowser = 'other';
+let mobile = false;
 function updateGuide() {
   const selected = browser.value;
   const chromium = ['chrome', 'edge', 'brave', 'whale', 'opera'].includes(selected);
-  address.textContent = chromium ? (selected === 'edge' ? 'edge://settings/systemAndPerformance' : selected === 'opera' ? 'opera://settings' : selected + '://settings/system') : selected === 'firefox' ? 'about:preferences' : '';
+  const generic = ['mobile', 'safari', 'other'].includes(selected);
+  document.getElementById('guide-name').textContent = (manualBrowser ? browserNames[selected] : browserNames[detectedBrowser]) + ' · ' + (selected === 'mobile' ? '모바일' : '컴퓨터');
+  document.getElementById('guide-detection').textContent = manualBrowser ? '직접 선택' : detectedBrowser === 'other' ? '브라우저 확인 필요' : '자동 감지';
+  address.textContent = chromium ? (selected === 'edge' ? 'edge://settings/systemAndPerformance' : selected === 'opera' ? 'opera://settings' : selected + '://settings/system') : '';
+  document.getElementById('guide-address-row').hidden = !chromium;
+  const path = selected === 'edge' ? '메뉴 ⋯ → 설정 → 시스템 및 성능 → 시스템' : selected === 'whale' ? '메뉴 ⋮ → 설정 → 성능 및 기타 → 시스템' : selected === 'opera' ? 'Opera 메뉴 → 설정 → 브라우저 → 시스템' : '메뉴 → 설정 → 시스템';
   const steps = selected === 'firefox'
-    ? ['메뉴 → 설정 → 성능 (탭 및 탐색 또는 일반)', '권장 성능 설정 사용을 해제하고 하드웨어 가속을 켜세요.', '작업을 저장한 뒤 브라우저를 다시 시작하고 이 페이지로 돌아오세요.']
-    : chromium
-      ? ['주소창에 위 설정 주소를 입력하거나 메뉴 → 설정 → 시스템을 여세요.', '가능한 경우 그래픽 가속 사용을 켜세요. 하드웨어 가속으로 표시될 수도 있습니다.', '작업을 저장한 뒤 브라우저를 다시 시작하고 이 페이지로 돌아오세요.']
-      : ['브라우저와 운영체제를 업데이트하고 다시 시작하세요.', '계속 실행되지 않으면 최신 데스크톱 브라우저나 다른 컴퓨터를 확인해 주세요.'];
+    ? ['메뉴 ☰ → 설정 → 탭 및 탐색 → 성능 (이전 버전은 일반 → 성능)', '‘권장 성능 설정 사용’을 해제하고 하드웨어 가속을 켜세요.', '작업을 저장한 뒤 브라우저를 다시 시작하세요.']
+    : generic ? ['브라우저와 운영체제를 최신 버전으로 업데이트하세요.', '브라우저를 다시 시작하고 이 게임 페이지로 돌아오세요.', '계속 실행되지 않으면 다른 최신 브라우저나 컴퓨터를 이용하세요.']
+    : [path, '‘가능한 경우 그래픽 가속 사용’을 켜세요. ‘하드웨어 가속’으로 표시될 수도 있어요.', '작업을 저장한 뒤 브라우저를 다시 시작하세요.'];
   guide.replaceChildren(...steps.map(text => { const item = document.createElement('li'); item.textContent = text; return item; }));
+  document.getElementById('guide-note').textContent = generic ? '이 환경에서는 그래픽 가속 설정을 직접 바꾸지 못할 수 있어요.' : '설정을 바꾼 뒤 이 페이지로 돌아와 다시 확인해 주세요.';
+  const link = document.getElementById('guide-help');
+  link.hidden = !help[selected];
+  if (help[selected]) link.href = help[selected];
+  const screenshot = screenshots[selected];
+  figure.hidden = !screenshot;
+  if (screenshot) {
+    for (const target of [image, enlargedImage]) {
+      target.alt = screenshot.alt; target.width = screenshot.width; target.height = screenshot.height;
+      target.src = root.dataset.graphicsAssets + screenshot.file;
+    }
+    document.getElementById('guide-caption').textContent = screenshot.caption;
+    document.getElementById('guide-enlarged-caption').textContent = screenshot.caption;
+  }
 }
-let manualBrowser = false;
 browser.addEventListener('change', () => { manualBrowser = true; updateGuide(); });
-// Browser identification is a guide hint; privacy settings must not block the gate.
-const ua = navigator.userAgent || '';
-const brands = navigator.userAgentData?.brands?.map(item => item.brand).join(' ') || '';
-browser.value = /Brave/i.test(brands + ua) ? 'brave' : /Edg\//i.test(ua) ? 'edge'
-  : /Whale\//i.test(ua) ? 'whale' : /OPR\//i.test(ua) ? 'opera'
-  : /Firefox\//i.test(ua) ? 'firefox' : /Chrome\//i.test(ua) ? 'chrome' : 'other';
+// Local low-entropy hints match the original frontend; failure never blocks the gate.
+try {
+  const ua = navigator.userAgent || '';
+  const brands = navigator.userAgentData?.brands?.map(item => item.brand).join(' ') || '';
+  mobile = navigator.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  detectedBrowser = /Microsoft Edge/i.test(brands) || /Edg(?:A|iOS)?\//i.test(ua) ? 'edge'
+    : /Brave/i.test(brands) || /Brave\//i.test(ua) ? 'brave'
+    : /Whale/i.test(brands) || /Whale\//i.test(ua) ? 'whale'
+    : /Opera/i.test(brands) || /(?:OPR|Opera|OPT)\//i.test(ua) ? 'opera'
+    : /Firefox/i.test(brands) || /(?:Firefox|FxiOS)\//i.test(ua) ? 'firefox'
+    : /Google Chrome/i.test(brands) || /(?:Chrome|CriOS)\//i.test(ua) ? 'chrome'
+    : /Version\/[^ ]+.*Safari\//i.test(ua) ? 'safari' : 'other';
+} catch { /* Browser detection is optional. */ }
+browser.value = mobile ? 'mobile' : detectedBrowser;
 updateGuide();
 try {
   if (typeof navigator.brave?.isBrave === 'function') {
     Promise.resolve(navigator.brave.isBrave()).then(isBrave => {
-      if (isBrave && !manualBrowser) { browser.value = 'brave'; updateGuide(); }
+      if (isBrave && !manualBrowser) { detectedBrowser = 'brave'; browser.value = mobile ? 'mobile' : detectedBrowser; updateGuide(); }
     }).catch(() => {});
   }
 } catch { /* Browser detection is optional. */ }
@@ -207,13 +271,13 @@ function inspectAcceleration() {
       else gate.setAttribute('open', '');
     } catch { gate.setAttribute('open', ''); }
   }
-  retry.focus();
 }
 retry.addEventListener('click', () => {
   inspectAcceleration();
-  if (!released) document.getElementById('acceleration-result').textContent = '아직 그래픽 가속을 확인하지 못했습니다. 브라우저를 다시 시작한 뒤 확인해 주세요.';
+  if (!released) document.getElementById('acceleration-result').textContent = '아직 그래픽 가속을 확인하지 못했어요. 브라우저를 다시 시작한 후 확인해 주세요.';
 });
 proceed.addEventListener('click', release);
+document.getElementById('acceleration-close').addEventListener('click', () => location.assign(document.getElementById('back').href));
 gate.addEventListener('cancel', event => {
   event.preventDefault();
   location.assign(document.getElementById('back').href);
@@ -222,7 +286,10 @@ if (!window.isSecureContext || typeof WebAssembly === 'undefined') void start();
 else inspectAcceleration();
 })();`;
 
-const style = `dialog[hidden]{display:none}dialog{color:inherit;background:#18212d;border:1px solid #58697c;border-radius:1rem;width:min(36rem,calc(100% - 4rem));max-height:85vh;overflow:auto;padding:1.5rem}dialog::backdrop{background:#000b}dialog h2{margin-top:0}dialog p,dialog li{line-height:1.6}dialog label{display:block;margin-top:1rem}select{font:inherit;padding:.5rem}#acceleration-actions{display:flex;gap:1rem;flex-wrap:wrap}#guide-address{overflow-wrap:anywhere}a:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid #9cc7ff;outline-offset:3px}:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}a,button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}details{padding-bottom:1rem}`;
+const shellStyle = `:root{background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}main>header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}main>header a,main>header button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,main>details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}main>details{padding-bottom:1rem}`;
+const graphicsAssets = (config: ShellConfig) => new URL('/help/graphics-acceleration/', config.WEB_PUBLIC_URL).href;
+const shellStyles = (config: ShellConfig) => shellStyle + accelerationStyle + `@font-face{font-family:'Pretendard Variable';font-style:normal;font-weight:45 920;font-display:swap;src:url(${JSON.stringify(graphicsAssets(config) + 'PretendardVariable.woff2')}) format('woff2');}`;
+
 const hash = (text: string) => `'sha256-${createHash('sha256').update(text).digest('base64')}'`;
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 
@@ -234,7 +301,7 @@ export function playShellHeaders(config: ShellConfig): Record<string, string> {
 		'Cross-Origin-Embedder-Policy': 'require-corp',
 		'Cross-Origin-Resource-Policy': 'same-origin',
 		'Permissions-Policy': `cross-origin-isolated=(self "${assetOrigin}"), fullscreen=(self "${assetOrigin}"), autoplay=(self "${assetOrigin}"), camera=(), microphone=(), geolocation=()`,
-		'Content-Security-Policy': `default-src 'none'; script-src ${hash(script)}; style-src ${hash(style)}; connect-src 'self'; frame-src ${assetOrigin}/runtime/; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+		'Content-Security-Policy': `default-src 'none'; script-src ${hash(script)}; style-src ${hash(shellStyles(config))}; connect-src 'self'; img-src ${graphicsAssets(config)}; font-src ${graphicsAssets(config)}PretendardVariable.woff2; frame-src ${assetOrigin}/runtime/; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
 		'Referrer-Policy': 'no-referrer',
 		'X-Content-Type-Options': 'nosniff',
 	};
@@ -244,5 +311,5 @@ export function renderPlayShell(config: ShellConfig, projectId: number): string 
 	if (!Number.isSafeInteger(projectId) || projectId <= 0) throw new Error('Invalid project ID');
 	const back = new URL(`/projects/${projectId}`, config.WEB_PUBLIC_URL).href;
 	const assetOrigin = new URL(config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL).origin;
-	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${style}</style></head><body><main data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><div id="game"></div><dialog id="acceleration-gate" hidden aria-labelledby="acceleration-title" aria-describedby="acceleration-description"><h2 id="acceleration-title">그래픽 가속 설정을 확인해 주세요</h2><p id="acceleration-description">WebGL 그래픽 가속을 확인하지 못했거나 소프트웨어 렌더링이 감지되었습니다. 게임이 실행되지 않거나 느릴 수 있습니다.</p><label for="guide-browser">사용 중인 브라우저 (직접 선택 가능)</label><select id="guide-browser"><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="brave">Brave</option><option value="firefox">Firefox</option><option value="whale">Whale</option><option value="opera">Opera</option><option value="other">기타 / Safari / 모바일</option></select><p><code id="guide-address"></code></p><ol id="guide-steps"></ol><p>설정이 이미 켜져 있다면 그래픽 드라이버나 기기의 지원 상태를 확인해 주세요. 브라우저를 자동으로 구분하지 못할 때는 위에서 직접 선택해 주세요.</p><p id="acceleration-result" role="status"></p><div id="acceleration-actions"><button id="acceleration-retry" type="button">설정 후 다시 확인</button><button id="acceleration-continue" type="button">그래도 실행</button><a href="${escapeHtml(back)}">작품으로 돌아가기</a></div></dialog><details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
+	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${shellStyles(config)}</style></head><body><main data-graphics-assets="${escapeHtml(graphicsAssets(config))}" data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><div id="game"></div>${accelerationMarkup}<details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
 }
