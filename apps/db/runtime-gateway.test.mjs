@@ -14,7 +14,10 @@ function docker(...args) {
  assert.equal(result.status, 0, result.stderr || result.stdout);
  return result.stdout.trim();
 }
-const policy = "default-src 'none'; script-src 'self' blob:; worker-src 'self' blob:; frame-ancestors https://api.fixture.invalid";
+// Exercise a valid bounded policy larger than Nginx's default 4 KiB auth header buffer.
+const external = Array.from({ length: 16 }, (_, i) => `https://${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${String(i).padStart(48, 'd')}.invalid`).join(' ');
+const policy = "default-src 'none'; script-src 'self' blob:; worker-src 'self' blob:; frame-ancestors https://api.fixture.invalid; connect-src "+external;
+assert.ok(Buffer.byteLength(policy) > 4096);
 const fallback = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 const token = 'a'.repeat(64);
 const bytes = Buffer.from('0123456789abcdef');
@@ -33,7 +36,9 @@ try {
  };
  let config = `events {} http {
  access_log off; error_log /dev/null crit;
- map $http_x_pcu_file_uri $fixture_csp { ~missing\\.bin$ ""; default "${policy}"; }
+ map "" $policy_head { default "${policy.slice(0, 3000)}"; }
+ map "" $policy_tail { default "${policy.slice(3000)}"; }
+ map $http_x_pcu_file_uri $fixture_csp { ~missing\\.bin$ ""; default "$policy_head$policy_tail"; }
  map $http_x_pcu_file_uri $fixture_path { ~\\.gz$ /fixture.gz; default /fixture.bin; }
  map "$http_x_pcu_file_uri:$http_x_pcu_fetch_dest" $fixture_dest_ok { ~worker\\.bin:worker$ 1; ~worker\\.bin: 0; default 1; }
  map "$http_x_pcu_file_uri:$http_x_pcu_file_method" $fixture_method_ok { ~head\\.bin:HEAD$ 1; ~head\\.bin: 0; default 1; }
