@@ -40,7 +40,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				submitLabel: '작품 등록',
 				submittingLabel: '등록 중…',
 				gameUploadHint: '게임 실행에 필요한 파일을 ZIP으로 압축해 선택하세요.',
-				webglUploadHint: 'WebGL ZIP의 최상위 또는 단일 폴더에 index.html과 Build 폴더를 포함하세요. Build에는 .loader.js와 .framework.js, .wasm, .data 파일이 필요합니다. 비압축, .gz, .br, Decompression Fallback의 .unityweb 형식을 지원합니다. loader는 .js(.gz/.br 포함) 형식이어야 합니다. 표시 크기는 업로드 후 자동으로 감지하며, 작품 수정 화면에서 확인·변경할 수 있습니다.',
+				webglUploadHint: 'WebGL ZIP의 최상위 또는 단일 폴더에 시작 페이지 index.html을 포함하세요. 하위 폴더의 플레이어·도움말 페이지도 함께 넣을 수 있습니다. 플레이어의 같은 Build 폴더에 .loader.js와 .framework.js, .wasm, .data 파일이 필요합니다. 비압축, .gz, .br, Decompression Fallback의 .unityweb 형식을 지원합니다. loader는 .js(.gz/.br 포함) 형식이어야 합니다. 표시 크기는 업로드 후 자동으로 감지하며, 작품 수정 화면에서 확인·변경할 수 있습니다.',
 			}
 		: {
 				eyebrow: 'My Project',
@@ -48,7 +48,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				submitLabel: '작품 제출',
 				submittingLabel: '제출 중…',
 				gameUploadHint: '게임 실행에 필요한 파일을 ZIP으로 압축해 선택하세요.',
-				webglUploadHint: 'WebGL ZIP의 최상위 또는 단일 폴더에 index.html과 Build 폴더를 포함하세요. Build에는 .loader.js와 .framework.js, .wasm, .data 파일이 필요합니다. 비압축, .gz, .br, Decompression Fallback의 .unityweb 형식을 지원합니다. loader는 .js(.gz/.br 포함) 형식이어야 합니다. 표시 크기는 업로드 후 자동으로 감지하며, 작품 수정 화면에서 확인·변경할 수 있습니다.',
+				webglUploadHint: 'WebGL ZIP의 최상위 또는 단일 폴더에 시작 페이지 index.html을 포함하세요. 하위 폴더의 플레이어·도움말 페이지도 함께 넣을 수 있습니다. 플레이어의 같은 Build 폴더에 .loader.js와 .framework.js, .wasm, .data 파일이 필요합니다. 비압축, .gz, .br, Decompression Fallback의 .unityweb 형식을 지원합니다. loader는 .js(.gz/.br 포함) 형식이어야 합니다. 표시 크기는 업로드 후 자동으로 감지하며, 작품 수정 화면에서 확인·변경할 수 있습니다.',
 			};
 
 	const { data: yearsData } = useQuery({

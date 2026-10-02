@@ -35,6 +35,10 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 	const otherDeploymentId = randomUUID(), otherPrefix = `public/webgl/${marker}/${otherDeploymentId}/`;
 	const deploymentId = randomUUID(), prefix = `public/webgl/${marker}/${deploymentId}/`;
 	const bytes = Buffer.from('0123456789abcdef');
+	const html: Record<string, string> = {
+		'index.html': '<iframe src="player/index.html"></iframe><script>new Worker("worker.js")</script>',
+		'player/index.html': '<canvas id="unity-canvas"></canvas>',
+	};
 	async function upload(Bucket: string, Key: string, Body: Buffer, ContentType: string, ContentEncoding?: string) {
 		objects.push({ Bucket, Key });
 		await s3.send(new PutObjectCommand({ Bucket, Key, Body, ContentType, ContentEncoding }));
@@ -71,8 +75,8 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 		await db.exhibition.update({ where: { id: exhibitionId }, data: { posterAssetId: poster.id } });
 		gameId = (await db.asset.create({ data: { projectId, kind: 'GAME', originalName: 'fixture.zip', representations: { create: { role: 'ORIGINAL', bucket: protectedBucket, objectKey: gameKey, state: 'READY', mimeType: 'application/zip', sizeBytes: 16 } } } })).id;
 		const source = await db.asset.create({ data: { projectId, kind: 'WEBGL', representations: { create: { role: 'WEBGL_SOURCE', bucket: protectedBucket, objectKey: `${gameKey}-webgl`, state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
-		const paths = ['index.html', 'worker.js', 'Build/game.wasm.gz', 'Build/game.wasm.unityweb'];
-		await db.webglDeployment.create({ data: { id: deploymentId, projectId, sourceRepresentationId: source.representations[0]!.id, publicBucket, publicPrefix: prefix, entryObjectKey: prefix + 'index.html', state: 'READY', objectManifest: { version: 1, objects: paths.map(path => ({ objectKey: prefix + path, sizeBytes: String(path.endsWith('.html') ? Buffer.byteLength('<script>new Worker("worker.js")</script>') : (path.endsWith('.gz') || path.endsWith('.unityweb')) ? gzipSync(bytes).length : Buffer.byteLength('self.postMessage("ready")')), mimeType: path.endsWith('.html') ? 'text/html' : path.endsWith('.gz') ? 'application/wasm' : path.endsWith('.unityweb') ? 'application/octet-stream' : 'application/javascript' })) } } });
+		const paths = ['index.html', 'player/index.html', 'worker.js', 'Build/game.wasm.gz', 'Build/game.wasm.unityweb'];
+		await db.webglDeployment.create({ data: { id: deploymentId, projectId, sourceRepresentationId: source.representations[0]!.id, publicBucket, publicPrefix: prefix, entryObjectKey: prefix + 'index.html', state: 'READY', objectManifest: { version: 1, objects: paths.map(path => ({ objectKey: prefix + path, sizeBytes: String(path.endsWith('.html') ? Buffer.byteLength(html[path]!) : (path.endsWith('.gz') || path.endsWith('.unityweb')) ? gzipSync(bytes).length : Buffer.byteLength('self.postMessage("ready")')), mimeType: path.endsWith('.html') ? 'text/html' : path.endsWith('.gz') ? 'application/wasm' : path.endsWith('.unityweb') ? 'application/octet-stream' : 'application/javascript' })) } } });
 		await db.project.update({ where: { id: projectId }, data: { currentWebglDeploymentId: deploymentId } });
 		const other = await db.project.create({ data: { exhibitionId, creatorId: owner.id, title: marker + '-other', slug: marker + '-other', status: 'PUBLISHED', visibility: 'STAFF' } });
 		const otherSource = await db.asset.create({ data: { projectId: other.id, kind: 'WEBGL', representations: { create: { role: 'WEBGL_SOURCE', bucket: protectedBucket, objectKey: `${gameKey}-other`, state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
@@ -82,7 +86,7 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 
 		for (const key of [imageKey, renditionKey, posterKey]) await upload(publicBucket, key, bytes, 'image/webp');
 		await upload(protectedBucket, gameKey, bytes, 'application/zip');
-		await upload(publicBucket, prefix + 'index.html', Buffer.from('<script>new Worker("worker.js")</script>'), 'text/html');
+		for (const [path, body] of Object.entries(html)) await upload(publicBucket, prefix + path, Buffer.from(body), 'text/html');
 		await upload(publicBucket, prefix + 'worker.js', Buffer.from('self.postMessage("ready")'), 'application/javascript');
 		await upload(publicBucket, prefix + 'Build/game.wasm.gz', gzipSync(bytes), 'application/wasm', 'gzip');
 		await upload(publicBucket, prefix + 'Build/game.wasm.unityweb', gzipSync(bytes), 'application/octet-stream');
@@ -134,6 +138,29 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 		const image = await grant(`${publicOrigin}/${imageKey}`, owner); await denied(`${publicOrigin}/${renditionKey}?pcu_token=${image.token}`); await denied(`${publicOrigin}/play/${image.token}/index.html`);
 		await denied(`${publicOrigin}/${imageKey}?pcu_token=${'a'.repeat(64)}`);
 		await db.fileAccessToken.update({ where: { id: image.token! }, data: { expiresAt: new Date(0) } }); await denied(image.url);
+	});
+	it('serves nested runtime HTML through authenticated session and actual gateway CSP without broadening the capability', async () => {
+		const headers = { origin: new URL(api).origin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', 'content-type': 'application/json', cookie: `sid=${owner.sid}` };
+		const response = await fetch(api + '/api/webgl-play/sessions', { method: 'POST', headers, body: JSON.stringify({ projectId }), signal: AbortSignal.timeout(10_000) });
+		expect(response.status, await response.clone().text()).toBe(200);
+		const play = (await response.json() as { data: { id: string; controlSecret: string; iframeUrl: string } }).data;
+		const base = new URL('./', play.iframeUrl).href;
+		try {
+			for (const [path, body] of Object.entries(html)) {
+				const page = await get(base + path);
+				expect(page.status).toBe(200);
+				expect(await page.text()).toBe(body);
+				expect(page.headers.get('content-security-policy')).toContain(`frame-src ${base};`);
+				expect(page.headers.get('content-security-policy')).toContain(`frame-ancestors ${new URL(api).origin} ${publicOrigin};`);
+				expect(page.headers.get('cross-origin-embedder-policy')).toBe('require-corp');
+			}
+			await denied(base + 'missing/index.html');
+			const worker = await get(base + 'worker.js', { headers: { 'Service-Worker': 'script' } });
+			expect(worker.status).toBe(403); await worker.arrayBuffer();
+			const closed = await fetch(`${api}/api/webgl-play/sessions/${play.id}/close`, { method: 'POST', headers: { ...headers, 'x-pcu-play-control': play.controlSecret }, body: '{}', signal: AbortSignal.timeout(10_000) });
+			expect(closed.status).toBe(200); await closed.arrayBuffer();
+			await denied(base + 'player/index.html');
+		} finally { await db.webglPlaySession.deleteMany({ where: { id: play.id } }); }
 	});
 	it('renews WebGL and protected file URLs twice beyond their original TTL', async () => {
 		const access = await grant(`${publicOrigin}/${prefix}index.html`, owner);

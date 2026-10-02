@@ -19,7 +19,9 @@ export function runtimeCsp(
 ): string {
   const path = `${origin}/runtime/${token}/`;
   const connections = approvedOrigins.length ? ` ${approvedOrigins.join(' ')}` : '';
-  return `default-src 'none'; script-src ${path} blob: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src ${path} blob:; connect-src ${path} blob:${connections}; img-src ${path} data: blob:; media-src ${path} blob:; style-src ${path} 'unsafe-inline'; font-src ${path} data:; frame-ancestors ${new URL(apiUrl).origin}; base-uri 'none'; form-action 'none'; object-src 'none'`;
+  // Nested pages stay within this runtime capability. Their asset-origin parent
+  // is untrusted; the outer player shell remains on the separate API origin.
+  return `default-src 'none'; script-src ${path} blob: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src ${path} blob:; connect-src ${path} blob:${connections}; img-src ${path} data: blob:; media-src ${path} blob:; style-src ${path} 'unsafe-inline'; font-src ${path} data:; frame-src ${path}; frame-ancestors ${new URL(apiUrl).origin} ${origin}; base-uri 'none'; form-action 'none'; object-src 'none'`;
 }
 export function createWebglPlayService(
   repository: WebglPlayRepository,

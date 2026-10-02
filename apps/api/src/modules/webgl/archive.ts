@@ -32,12 +32,26 @@ const REQUIRED_UNITY_BUILD_ARTIFACTS = [
 ] as const;
 
 function assertRequiredUnityArtifacts(hostedPaths: Iterable<string>): void {
-	const paths = [...hostedPaths];
+	// A parent app may keep its Unity player in a nested directory. Require a
+	// complete player in one Build directory; never merge unrelated fragments.
+	const builds = new Map<string, string[]>();
+	for (const hostedPath of hostedPaths) {
+		const match = /^(?:(.*)\/)?(Build\/[^/]+)$/i.exec(hostedPath);
+		if (!match) continue;
+		const directory = hostedPath.slice(0, hostedPath.lastIndexOf('/'));
+		const entries = builds.get(directory) ?? [];
+		entries.push(match[2]!);
+		builds.set(directory, entries);
+	}
+	if ([...builds.values()].some((entries) => REQUIRED_UNITY_BUILD_ARTIFACTS.every(
+		(required) => entries.some((entry) => required.pattern.test(entry)),
+	))) return;
 	for (const required of REQUIRED_UNITY_BUILD_ARTIFACTS) {
-		if (!paths.some((path) => required.pattern.test(path))) {
-			throw badRequest(`WebGL ZIP is missing required Unity Build ${required.label} artifact (accepted: ${required.formats}; keep it in the Build folder)`);
+		if (![...builds.values()].some((entries) => entries.some((entry) => required.pattern.test(entry)))) {
+			throw badRequest(`WebGL ZIP is missing required Unity Build ${required.label} artifact (accepted: ${required.formats}; keep it in one Build folder)`);
 		}
 	}
+	throw badRequest('WebGL ZIP must contain all required Unity artifacts together in one Build folder');
 }
 
 /** Apply Unity layout rules after the common validator fully decoded every entry. */
@@ -50,16 +64,13 @@ export function analyzeWebglArchive(summary: BoundedZipValidationSummary): Webgl
 		.map((entry) => ({ path: entry.path }));
 	const indexes = files.filter(({ path }) => path === 'index.html' || path.endsWith('/index.html'));
 	if (indexes.length === 0) throw badRequest('WebGL ZIP must contain index.html');
-	if (indexes.length > 1) throw badRequest('WebGL ZIP must contain exactly one index.html');
-
-	const indexName = indexes[0]!.path;
 	let wrapperPrefix = '';
-	if (indexName !== 'index.html') {
-		const segments = indexName.split('/');
-		if (segments.length !== 2 || !segments[0]) {
+	if (!indexes.some(({ path }) => path === 'index.html')) {
+		const wrapperEntries = indexes.filter(({ path }) => path.split('/').length === 2);
+		if (wrapperEntries.length !== 1) {
 			throw badRequest('index.html must be at ZIP root or inside one wrapper folder');
 		}
-		wrapperPrefix = `${segments[0]}/`;
+		wrapperPrefix = `${wrapperEntries[0]!.path.split('/')[0]}/`;
 		if (files.some(({ path }) => !path.startsWith(wrapperPrefix))) {
 			throw badRequest('All WebGL files must be inside the single wrapper folder');
 		}

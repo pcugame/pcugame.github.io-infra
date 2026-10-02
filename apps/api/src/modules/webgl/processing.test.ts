@@ -254,6 +254,55 @@ async function harness(bytes = unityZip()) {
 }
 
 describe('canonical WebGL processing', () => {
+	it.each(['', 'Export/'])('publishes an original parent and nested Unity player unchanged at %s', async (wrapper) => {
+		const entries = [
+			{ name: 'index.html', body: '<iframe src="player/index.html"></iframe>' },
+			{ name: 'player/index.html', body: '<script>parent.globals.ready()</script>' },
+			{ name: 'help/index.html', body: '<html>Help</html>' },
+			...['loader.js', 'framework.js', 'wasm', 'data', 'worker.js'].map((extension) => ({
+				name: `player/Build/game.${extension}`, body: `original ${extension}`,
+			})),
+		];
+		const state = await harness(storedZip(entries.map((entry) => ({ ...entry, name: `${wrapper}${entry.name}` }))));
+		await state.processor.process(state.uploadSession, state.context);
+		expect(state.uploaded).toHaveLength(entries.length);
+		for (const entry of entries) {
+			const uploaded = state.uploaded.find((object) => object.key === `public/webgl/7/${state.deploymentId}/${entry.name}`);
+			expect(uploaded?.bytes).toEqual(Buffer.from(entry.body));
+			if (entry.name.endsWith('.wasm')) expect(uploaded?.type).toBe('application/wasm');
+			if (entry.name.endsWith('.worker.js')) expect(uploaded?.type).toBe('text/javascript; charset=utf-8');
+		}
+		expect(state.repository.commitReady).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		['one/index.html', 'two/index.html'],
+		['wrapper/deep/index.html'],
+		['wrapper/index.html', 'outside.txt'],
+	])('rejects an ambiguous or incomplete root layout: %j', async (...names) => {
+		const state = await harness(storedZip([
+			...names.map((name) => ({ name, body: 'page' })),
+			...['loader.js', 'framework.js', 'wasm', 'data'].map((extension) => ({
+				name: `wrapper/Build/game.${extension}`, body: 'payload',
+			})),
+		]));
+		await expect(state.processor.process(state.uploadSession, state.context)).rejects.toBeInstanceOf(WebglTerminalValidationError);
+		expect(state.repository.reserveDeployment).not.toHaveBeenCalled();
+		expect(state.uploader.put).not.toHaveBeenCalled();
+	});
+
+	it.each([['one/Build', 'two/Build'], ['player/Build', 'player/build']])('does not assemble a valid player from incomplete Build directories %s and %s', async (first, second) => {
+		const state = await harness(storedZip([
+			{ name: 'index.html', body: 'parent' },
+			...['loader.js', 'framework.js', 'wasm', 'data'].map((extension, index) => ({
+				name: `${index < 2 ? first : second}/game.${extension}`, body: 'payload',
+			})),
+		]));
+		await expect(state.processor.process(state.uploadSession, state.context))
+			.rejects.toThrow('all required Unity artifacts together in one Build folder');
+		expect(state.uploader.put).not.toHaveBeenCalled();
+	});
+
 	// Synthetic archives verify processing and stored metadata, not Unity execution.
 	for (const wrapper of ['', 'UnityBuild/']) {
 		for (const configuration of ['plain', 'gzip', 'brotli', 'gzip-fallback', 'brotli-fallback'] as const) {

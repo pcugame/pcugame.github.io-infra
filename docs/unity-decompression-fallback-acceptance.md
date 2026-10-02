@@ -2,7 +2,7 @@
 
 ## Scope and required behavior
 
-A Unity WebGL ZIP contains exactly one `index.html`, at ZIP root or inside one wrapper directory. All files must be inside that wrapper when present; keep the `Build` directory relative to `index.html`.
+A Unity WebGL ZIP has one explicit entry page: `index.html` at ZIP root, or `index.html` directly inside one wrapper directory. Nested player/help pages may also contain `index.html`. All files must stay inside the wrapper when present. At least one Unity player must contain the loader, framework, WASM and data artifacts together in the same `Build` directory; incomplete directories cannot be combined into a valid player. Original parent/child files and payloads are preserved.
 
 Required artifacts in `Build`:
 
