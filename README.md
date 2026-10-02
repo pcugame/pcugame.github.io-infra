@@ -245,9 +245,11 @@ Web은 `apps/web/dist`를 `pcugame/pcugame.github.io`의 `master`에 게시하�
 ## 관련 문서
 
 - [production 배포 절차](docs/operations/deployment.md)
-- [production release 구조 조사와 정리 기준](docs/production-release-audit.md)
+- [production release 구조 조사와 정리 기준](docs/history/2026-backend-audit/production-release-audit.md)
 - [database migration policy](docs/database-migration-policy.md)
 - [업로드 lifecycle 전환 기록과 runbook](docs/upload-lifecycle-runbook.md)
-- [backend 검토 기록](docs/backend-audit.md)
-- [route 계약 소유권 후속 기록](docs/backend-audit-tickets/route-contract-ownership-follow-up.md)
+- [backend architecture](docs/architecture/README.md)
+- [architecture decision records](docs/adr/README.md)
+- [backend 감사·수정 이력](docs/history/2026-backend-audit/README.md)
+- [route 계약 소유권 후속 제안](docs/architecture/route-contract-ownership.md)
 - [추가 test 기록](docs/new_tests/README.md)

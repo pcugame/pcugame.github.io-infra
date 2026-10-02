@@ -51,6 +51,6 @@ npm exec -w apps/api -- vitest run --no-file-parallelism \
 
 기능 PR #50은 병합된 master를 기준으로 검토한다. 기존 Phase 2 변경을 다시 추가하지 않고 수정·삭제 승인 기능과 필요한 검증만 포함한다. 운영자의 파일 삭제·일괄 상태 변경도 프로젝트 버전을 증가시켜 이전 승인 요청을 CONFLICT로 처리한다. DB 테스트는 독립 마이그레이션 스키마를 사용해 상시 워커와의 간섭을 방지한다.
 
-master 병합과 운영 배포는 구분한다. 배포 조건은 [production 배포 절차](deployment.md)를 따르고, 과거 PR #49의 전환 조건과 확인 근거는 [production release 조사 기록](../production-release-audit.md#pr-49-통합-기록)을 참조한다. 이 기능만을 이유로 Phase 2 contract 전환을 실행하거나 작업 브랜치에서 배포하지 않는다. 배포 시에는 병합된 master 커밋의 검증된 불변 아티팩트를 사용하고 실제 운영 동작, 소스 커밋, 이미지 digest를 별도로 기록한다.
+master 병합과 운영 배포는 구분한다. 배포 조건은 [production 배포 절차](deployment.md)를 따르고, 과거 PR #49의 전환 조건과 확인 근거는 [production release 조사 기록](../history/2026-backend-audit/production-release-audit.md#pr-49-통합-기록)을 참조한다. 이 기능만을 이유로 Phase 2 contract 전환을 실행하거나 작업 브랜치에서 배포하지 않는다. 배포 시에는 병합된 master 커밋의 검증된 불변 아티팩트를 사용하고 실제 운영 동작, 소스 커밋, 이미지 digest를 별도로 기록한다.
 
 EOD

@@ -108,7 +108,7 @@ API의 `/api/health` 응답에서 `ok:true`를 최대 90초 동안 확인하고 
 
 ## 관련 자료
 
-- [production release 구조 조사](../production-release-audit.md): 조사 기준 구현, 정리 후보와 과거 전환 증빙
+- [production release 구조 조사](../history/2026-backend-audit/production-release-audit.md): 조사 기준 구현, 정리 후보와 과거 전환 증빙
 - [기존 최초 DB 전환 기록](manual-release.md): 특정 migration의 입력·예외·보존 자료
 - [과거 master 통합 기록](README.md): 보존 branch와 migration checksum 예외
 - [database migration policy](../database-migration-policy.md): migration 이력과 변경 검증 기준

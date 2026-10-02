@@ -38,7 +38,10 @@ apps/web/src/pages/admin/AdminPreview.tsx
 !**/README.md
 !**/Readme.md
 !**/readme.md
-!docs/backend-audit.md
 !docs/database-migration-policy.md
 !docs/upload-lifecycle-runbook.md
-!docs/backend-audit-tickets/route-contract-ownership-follow-up.md
+
+# Shared architecture decisions and audit history
+!docs/architecture/**/*.md
+!docs/adr/**/*.md
+!docs/history/2026-backend-audit/**/*.md

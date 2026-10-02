@@ -1,5 +1,7 @@
 # Production release 구조 조사와 정리 기준
 
+> 분류: 특정 시점의 구조 조사와 과거 전환 기록. 본문의 현재 구조·정리 권고는 아래 조사 기준 커밋의 기록이다. 후속 release 정리를 반영한 운영 절차는 [production 배포 절차](../../operations/deployment.md), 현재 원칙은 [architecture](../../architecture/README.md)를 참조한다.
+
 일반 release 기능과 과거 Phase 1 → Phase 2 전환 기능이 같은 배포 경로에 결합되어 있다. 전환 명령은 정리 대상이지만, 현재 일반 배포에서도 사용하는 migration 실행·이력 검증·백업·복구 기능은 유지해야 한다.
 
 - 조사일: 2026-10-02
@@ -7,17 +9,17 @@
 - 조사 범위: README, 전체 GitHub workflow, `server/deploy.sh`와 release 보조 도구, deployment 문서, Prisma migration 코드
 - 검증 범위: 저장소 정적 조사. 운영 서버·DB·GitHub 설정과 실제 배포 revision은 조회하지 않았다. 조사 중 배포·migration·테스트를 실행하지 않았다.
 
-이 문서의 현재 구조는 조사 기준 커밋의 구현을 의미한다. 과거 배포 기록은 현재 운영 상태의 증거로 사용하지 않는다. 일반 실행 절차는 [production 배포 절차](operations/deployment.md), 최초 전환 기록은 [기존 migration 기록](operations/manual-release.md), migration 변경 기준은 [database migration policy](database-migration-policy.md)를 따른다.
+이 문서의 현재 구조는 조사 기준 커밋의 구현을 의미한다. 과거 배포 기록은 현재 운영 상태의 증거로 사용하지 않는다. 일반 실행 절차는 [production 배포 절차](../../operations/deployment.md), 최초 전환 기록은 [기존 migration 기록](../../operations/manual-release.md), migration 변경 기준은 [database migration policy](../../database-migration-policy.md)를 따른다.
 
 ## 현재 release 흐름
 
 | 구성 | 구현된 역할 |
 | --- | --- |
-| [PR Checks](../.github/workflows/pr-checks.yml) | migration 정책·배포 경계·test·lint·architecture·build와 PostgreSQL/Garage 통합 검증 |
-| [Build API Release Image](../.github/workflows/deploy-api.yml) | master의 대상 경로 변경 시 이미지 빌드·게시. source SHA와 구성을 검증한 digest manifest 보관. 운영 적용은 수행하지 않음 |
-| [Deploy Release](../.github/workflows/release-api-cutover.yml) | 수동 production 배포 진입점. 기본 `phase=release`와 `snapshot`, `preflight`, `phase1`, `phase2`, `phase2-forward-fix` 제공 |
-| [Deploy Web to GitHub Pages](../.github/workflows/deploy-web-pages.yml) | 수동 Web 단독 게시. production 환경과 release 동시 실행 잠금 공유 |
-| [Update Phase 1 Runtime](../.github/workflows/release-phase1-video-update.yml) | 기존 Phase 1 runtime 추가 업데이트. 정확한 dispatched master SHA와 Phase 1 marker 요구 |
+| [PR Checks](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/.github/workflows/pr-checks.yml) | migration 정책·배포 경계·test·lint·architecture·build와 PostgreSQL/Garage 통합 검증 |
+| [Build API Release Image](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/.github/workflows/deploy-api.yml) | master의 대상 경로 변경 시 이미지 빌드·게시. source SHA와 구성을 검증한 digest manifest 보관. 운영 적용은 수행하지 않음 |
+| [Deploy Release](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/.github/workflows/release-api-cutover.yml) | 수동 production 배포 진입점. 기본 `phase=release`와 `snapshot`, `preflight`, `phase1`, `phase2`, `phase2-forward-fix` 제공 |
+| [Deploy Web to GitHub Pages](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/.github/workflows/deploy-web-pages.yml) | 수동 Web 단독 게시. production 환경과 release 동시 실행 잠금 공유 |
+| [Update Phase 1 Runtime](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/.github/workflows/release-phase1-video-update.yml) | 기존 Phase 1 runtime 추가 업데이트. 정확한 dispatched master SHA와 Phase 1 marker 요구 |
 
 일반 `phase=release`는 다음 순서로 수행된다.
 
@@ -29,7 +31,7 @@
 6. migration을 적용하고 API·worker를 기동한다.
 7. smoke test와 실행 이미지의 source SHA·digest 확인 결과를 기록한다.
 
-주요 구현은 `release-api-cutover.yml`의 `resolve_image`, `build_image`, `cutover` job과 [이미지 resolver](../server/resolve-release-image.mjs)에 있다. Web 대상은 `pcugame/pcugame.github.io`의 `master`이다. 일반 release도 Web과 API를 함께 배포하며 서비스 중지 구간을 포함한다.
+주요 구현은 `release-api-cutover.yml`의 `resolve_image`, `build_image`, `cutover` job과 [이미지 resolver](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/server/resolve-release-image.mjs)에 있다. Web 대상은 `pcugame/pcugame.github.io`의 `master`이다. 일반 release도 Web과 API를 함께 배포하며 서비스 중지 구간을 포함한다.
 
 ## 일반 release 기능
 
@@ -45,15 +47,15 @@
 | 배포 후 smoke와 source/digest 기록 | 유지. 실제 적용 결과 확인 |
 | migration history 보호·실제 DB 테스트 | 유지. 특정 Phase와 무관한 정책 |
 
-[release-db-snapshot.sh](../server/release-db-snapshot.sh)는 설명에 Phase 2 observation이 남아 있지만 일반 release에서도 호출한다. 온라인 dump·격리 복원 시험과 쓰기 중지 후 dump는 목적이 다르다. 온라인 snapshot만으로 이후 DB 쓰기나 Garage 객체 변경까지 동결하지는 않는다. DB dump와 Garage inventory에는 객체 파일 내용이 포함되지 않는다.
+[release-db-snapshot.sh](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/server/release-db-snapshot.sh)는 설명에 Phase 2 observation이 남아 있지만 일반 release에서도 호출한다. 온라인 dump·격리 복원 시험과 쓰기 중지 후 dump는 목적이 다르다. 온라인 snapshot만으로 이후 DB 쓰기나 Garage 객체 변경까지 동결하지는 않는다. DB dump와 Garage inventory에는 객체 파일 내용이 포함되지 않는다.
 
-[release-recovery.mjs](../server/release-recovery.mjs)와 [pages-release-recovery.mjs](../server/pages-release-recovery.mjs)는 일반 배포의 migration 시도 전 복구 기능이다. 기존 Pages 제공 상태를 검증한 후 보관된 컨테이너 ID를 복구한다. migration 시도 표시 이후에는 자동으로 구형 runtime을 시작하지 않는다.
+[release-recovery.mjs](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/server/release-recovery.mjs)와 [pages-release-recovery.mjs](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/server/pages-release-recovery.mjs)는 일반 배포의 migration 시도 전 복구 기능이다. 기존 Pages 제공 상태를 검증한 후 보관된 컨테이너 ID를 복구한다. migration 시도 표시 이후에는 자동으로 구형 runtime을 시작하지 않는다.
 
 ## systemd와 Podman 책임
 
 컨테이너 실행, 프로세스 재시작, 부팅 시 기동, 종료 순서, 네트워크·volume·tmpfs·NAS mount와 자원 제한은 호스트 runtime 관리 영역이다. 이미지 선택·배포 승인·Web 게시·DB 전환 여부 판단은 release 제어 영역이다.
 
-[deploy.sh](../server/deploy.sh)의 `do_up`은 PostgreSQL·API·6개 worker를 같은 pod에 구성한다. 기존 PostgreSQL을 포함한 pod를 재생성하되 `gp_pg_data` volume은 보존한다. API port는 기본 loopback에 bind한다. worker는 같은 API 이미지를 사용하고, 작업별 tmpfs와 export용 NAS mount를 구분한다. startup은 schema를 검사하지만 migration을 적용하지 않는다.
+[deploy.sh](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/server/deploy.sh)의 `do_up`은 PostgreSQL·API·6개 worker를 같은 pod에 구성한다. 기존 PostgreSQL을 포함한 pod를 재생성하되 `gp_pg_data` volume은 보존한다. API port는 기본 loopback에 bind한다. worker는 같은 API 이미지를 사용하고, 작업별 tmpfs와 export용 NAS mount를 구분한다. startup은 schema를 검사하지만 migration을 적용하지 않는다.
 
 현재 스크립트는 `--restart unless-stopped`로 컨테이너를 실행한 뒤 `podman generate systemd --new`로 user unit을 생성하고 restart 제한을 추가하여 enable한다. 저장소에는 고정된 서비스 unit이 없다.
 
@@ -71,7 +73,7 @@ Actions는 PR 검증, artifact 빌드·게시, master와 배포 대상 확인, p
 
 현재 workflow의 긴 SSH shell에는 최초 전환 정책과 일반 release 정책이 혼재한다. 호출 순서를 보존하면서 전환 전용 분기를 분리할 수 있다. 단순히 중복된 검사처럼 보인다는 이유로 사전 검사와 쓰기 중지 후 재검사를 합치지 않는다.
 
-YAML의 `environment: production`은 확인하였지만 실제 승인자·required checks·branch protection 설정은 미확인이다. [verify-github-release-boundaries.mjs](../server/verify-github-release-boundaries.mjs)의 `control` 검사는 저장소·default branch·ref 확인이며 PR 승인 상태 검사가 아니다. Pages 검사는 대상 저장소의 활성 상태·default branch·토큰 쓰기 권한을 확인한다.
+YAML의 `environment: production`은 확인하였지만 실제 승인자·required checks·branch protection 설정은 미확인이다. [verify-github-release-boundaries.mjs](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/server/verify-github-release-boundaries.mjs)의 `control` 검사는 저장소·default branch·ref 확인이며 PR 승인 상태 검사가 아니다. Pages 검사는 대상 저장소의 활성 상태·default branch·토큰 쓰기 권한을 확인한다.
 
 ## Phase 전환 전용 기능과 잔여 의존성
 
@@ -89,7 +91,7 @@ YAML의 `environment: production`은 확인하였지만 실제 승인자·requir
 
 ### 일반 migration과 전환 명령의 결합
 
-[release-migrate.ts](../apps/api/scripts/release-migrate.ts)의 `apply-contract`는 최초 전환뿐 아니라 이후 이미지에 포함된 최신 migration까지 적용한다. 일반 release도 이 명령을 사용한다. 파일 전체를 제거하려면 후속 migration 실행과 호환성 검사를 대체해야 한다.
+[release-migrate.ts](../../../apps/api/scripts/release-migrate.ts)의 `apply-contract`는 최초 전환뿐 아니라 이후 이미지에 포함된 최신 migration까지 적용한다. 일반 release도 이 명령을 사용한다. 파일 전체를 제거하려면 후속 migration 실행과 호환성 검사를 대체해야 한다.
 
 예외 경로를 사용한 DB는 `exceptionReceipt`에서 해당 SQL checksum과 승인·실행 기록을 검증한다. 이후 `stagedMigrate`는 원래 contract 대신 DB에 기록된 alternate 경로를 구성한다. 전환이 완료되었다는 이유로 `contract-migration-paths`나 receipt 검증을 삭제하면 후속 release가 실패할 수 있다.
 
@@ -103,7 +105,7 @@ YAML의 `environment: production`은 확인하였지만 실제 승인자·requir
 
 ## README와 구현의 불일치
 
-다음은 조사 기준 커밋의 README 배포 설명과 실제 구현을 비교한 결과이다. 후속 문서 정리에서 [README 배포 설명](../README.md#배포-구조)을 수정하고 [production 배포 절차](operations/deployment.md)를 분리하였다. 아래 표는 수정 전 조사 기록이다.
+다음은 조사 기준 커밋의 README 배포 설명과 실제 구현을 비교한 결과이다. 후속 문서 정리에서 [README 배포 설명](../../../README.md#배포-구조)을 수정하고 [production 배포 절차](../../operations/deployment.md)를 분리하였다. 아래 표는 수정 전 조사 기록이다.
 
 | README 설명 | 실제 구현 |
 | --- | --- |
@@ -114,7 +116,7 @@ YAML의 `environment: production`은 확인하였지만 실제 승인자·requir
 | API health 실패 시 이전 이미지 자동 rollback | 일반 release는 migration 시도 이후 자동 구형 runtime 복귀 금지 |
 | Web/API 독립 배포 순서와 rollback 유지 | 기본 release는 Web/API 동시 배포. 복구 가능 시점도 제한 |
 
-[operations README](operations/README.md)의 Phase 1 설명은 2026-09-09 통합 당시 기록이다. 현재 Dockerfile과 build workflow는 Phase 2 artifact를 요구한다. 과거 checksum 예외와 배포 증거는 보존하되 현행 실행 절차와 구분해야 한다.
+[operations README](../../operations/README.md)의 Phase 1 설명은 2026-09-09 통합 당시 기록이다. 현재 Dockerfile과 build workflow는 Phase 2 artifact를 요구한다. 과거 checksum 예외와 배포 증거는 보존하되 현행 실행 절차와 구분해야 한다.
 
 ## 유지
 
@@ -151,7 +153,7 @@ YAML의 `environment: production`은 확인하였지만 실제 승인자·requir
 - 기준 master는 `d103504`, 보존 커밋은 `d90be24`였다. 이미 반영된 영상 순서·자료 migration을 보존하고 Phase 2 runtime·단일 자산 표현·DRAFT·게시 worker를 통합하였다. 승인 기능은 PR #50의 별도 범위였다.
 - 2026-09-10 문서에 기록된 CD `34327945210`의 source는 `d103504a004b9b04e174a7483810c4d0568ff32f`, digest는 `sha256:6e00b4adfda6ac51095b7d91ce60e8d842fe6f9a89bf8242b3e21c0c398904c0`, 상태는 `expand=true`, `contract=false`였다. 현재 상태의 직접 조회 결과는 아니다.
 - 당시 Pages도 같은 source를 반환하였다. API health 확인 시각은 `2026-09-09T15:39:12Z`였으나 TLS 검증을 생략하여 인증서 정상 여부는 입증하지 않았다. 관측 시작 기록은 `2026-09-09T06:38:04Z`였다.
-- 당시 `PAGES_DEPLOY_ACTOR`는 미확인, 보호 설정 조회는 404였다. 현재 일반 배포 정책은 [production 배포 절차](operations/deployment.md), 후속 전환 예외는 [최초 전환 기록](operations/manual-release.md)을 참조한다.
+- 당시 `PAGES_DEPLOY_ACTOR`는 미확인, 보호 설정 조회는 404였다. 현재 일반 배포 정책은 [production 배포 절차](../../operations/deployment.md), 후속 전환 예외는 [최초 전환 기록](../../operations/manual-release.md)을 참조한다.
 
 ### PR 51 준비 기록
 
