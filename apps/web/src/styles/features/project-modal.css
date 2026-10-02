@@ -484,3 +484,5 @@
     padding: 1.25rem 1rem;
   }
 }
+
+.modal-video-label { margin: .5rem 0; font-size: .8rem; color: var(--color-text-muted); text-align: center; }

@@ -468,11 +468,12 @@
 .project-upload-queue__choices { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
 .project-upload-queue .game-upload__actions { flex-wrap: wrap; }
 
-.admin-project-edit-grid .submission-file-heading {
+.submission-file-heading {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 1rem;
+  gap: .5rem 1rem;
+  flex-wrap: wrap;
   width: 100%;
   margin-bottom: 1.25rem;
 }

@@ -173,3 +173,7 @@ form.admin-card h3 {
     font-size: 0.78rem;
   }
 }
+
+.admin-filter-card { padding: 1rem 1.25rem; margin-bottom: 1rem; }
+.admin-filter-card .form-field { max-width: 20rem; margin-bottom: 0; }
+.admin-card:has(> .admin-table) { overflow-x: auto; }

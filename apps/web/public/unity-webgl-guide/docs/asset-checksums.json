@@ -1,0 +1,58 @@
+[
+  {
+    "file": "assets/fonts/OFL.txt",
+    "sha256": "4a8e3f92a51de4ca7b18ac2f462abf5fa22c76ec9a2685dda6a0ed95c8715479"
+  },
+  {
+    "file": "assets/fonts/pretendard-variable.woff2",
+    "sha256": "9599f12fd42fc0bce1cd50b47a0c022e108d7aa64dd0d1bb0ed44f3282d900b4"
+  },
+  {
+    "file": "assets/images/build-settings-2022.png",
+    "sha256": "c2e07fcfa4bb178c5a6f21e1848de095f7cf607cbdfd226b27d7a0899cb342ea"
+  },
+  {
+    "file": "assets/images/diagnostics-overlay.png",
+    "sha256": "3d4026603a2e8255565e0f515a0bed0de9f0cc6428560b99059b339d873011c0"
+  },
+  {
+    "file": "assets/images/player-settings-web.png",
+    "sha256": "da3d2fde951b92480aa4dc5120761d910bea28e5e9ce984f3a5c4ae60842fec0"
+  },
+  {
+    "file": "assets/images/publishing-settings-unity6.png",
+    "sha256": "3c596e833d75435f35331e1d1d98707f7dfb623f0a91bbb9911405736ef3d1db"
+  },
+  {
+    "file": "assets/images/texture-compression.png",
+    "sha256": "abedc7526e5f2ef3b520d82d07d1b0ced96d2036a237b046c318dd63e139ef47"
+  },
+  {
+    "file": "assets/images/unity6-hub-web-module.png",
+    "sha256": "6c481329bcf014f0ed9f8326deacd5f833e0e75bed32380f9f817771917c7530"
+  },
+  {
+    "file": "assets/images/unity6-overlay-button.png",
+    "sha256": "b5d2cb35ada6a5ad187016abf5e95cebdd5b8655484e4a20922564a1ad077f98"
+  },
+  {
+    "file": "assets/images/unity6-quality-settings.png",
+    "sha256": "c3576d596d3cd316b030cbe23909c223d67bba1781261908aac61e23785f6eef"
+  },
+  {
+    "file": "assets/images/unity6-scene-list.png",
+    "sha256": "1148653bfbb6b6bbec562a7a791772a9688d5c5961ee0963dafca1512e2d8f3d"
+  },
+  {
+    "file": "assets/images/unity6-web-build.png",
+    "sha256": "f7490fe0e8ee4a418b05f71ba52ba50825d75d0b5234a9a031b1353c63cc7b6e"
+  },
+  {
+    "file": "assets/images/unity6-web-profiler.png",
+    "sha256": "2e7d449443847e82f6310f6bc66b71f73a5d6db0ebd7692634ecb46d69187dcb"
+  },
+  {
+    "file": "assets/images/web-template.png",
+    "sha256": "89b97098505663e505df04908a1c9328e14c94ba720e4886684f663159effc81"
+  }
+]

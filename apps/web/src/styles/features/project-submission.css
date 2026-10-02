@@ -79,3 +79,10 @@
     border-radius: 10px;
   }
 }
+.submission-guide-links { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.webgl-guide-link-mark { margin-left: .2em; color: var(--color-danger); font-weight: 700; }
+
+.project-change-existing-files { margin: 1rem 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); }
+.project-change-existing-files summary { cursor: pointer; font-weight: 700; }
+.project-change-upload-progress { display: grid; gap: 1rem; margin: 1rem 0; }
+.project-change-upload-progress h2 { font-size: 1rem; }

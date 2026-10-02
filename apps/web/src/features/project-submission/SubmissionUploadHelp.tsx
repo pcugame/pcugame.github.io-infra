@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { env } from '../../lib/env';
+import { WebglBuildGuideLink } from '../../components/project/WebglBuildGuideLink';
 
 interface HelpStep {
 	title: string;
@@ -176,5 +177,8 @@ export function SubmissionPosterHelp() {
 }
 
 export function SubmissionFilesHelp({ webglUploadHint }: { webglUploadHint: string }) {
-	return <SubmissionHelpButton title="파일 업로드 사용 방법" steps={fileSteps} webglUploadHint={webglUploadHint} />;
+	return <span className="submission-guide-links">
+		<SubmissionHelpButton title="파일 업로드 사용 방법" steps={fileSteps} webglUploadHint={webglUploadHint} />
+		<WebglBuildGuideLink />
+	</span>;
 }

@@ -24,6 +24,15 @@ body {
   word-break: break-word;
 }
 
+:where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+:where(input[type='checkbox'], input[type='radio']) {
+  accent-color: var(--color-primary-btn);
+}
+
 img {
   max-width: 100%;
   height: auto;

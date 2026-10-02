@@ -1,5 +1,6 @@
 import { ExternalLinksSchema } from '@pcu/contracts';
 import { ExternalLinksFieldset } from '../components/project/ExternalLinksFieldset';
+import { WebglBuildGuideLink } from '../components/project/WebglBuildGuideLink';
 import { effectiveExternalLinks } from '../components/project/externalLinks';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -616,7 +617,7 @@ export default function ProjectChangeRequestPage() {
 	);
 	const filesPanel = (
 		<fieldset disabled={!editable || busy}>
-			<legend>파일</legend>
+			<legend className="submission-file-heading"><span>파일</span><WebglBuildGuideLink /></legend>
 			{preparedManifest ? (
 				<>
 					<p className="field-hint">

@@ -74,6 +74,13 @@ fieldset.status-section legend {
   text-transform: uppercase;
 }
 
+.form-control,
+.form-field input:not([type]),
+.form-field input[type='search'],
+.form-field input[type='email'],
+.form-field input[type='password'],
+.form-field input[type='date'],
+.form-field input[type='datetime-local'],
 .form-field input[type='text'],
 .form-field input[type='number'],
 .form-field input[type='url'],
@@ -87,8 +94,13 @@ fieldset.status-section legend {
   font-family: inherit;
   transition: border-color 0.15s, box-shadow 0.15s;
   background: var(--color-surface);
+  color: var(--color-text);
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.5;
 }
 
+.form-control:focus,
 .form-field input:focus,
 .form-field textarea:focus,
 .form-field select:focus {
@@ -406,6 +418,7 @@ fieldset.status-section legend {
 @media (max-width: 60em) {
   .form-row {
     flex-direction: column;
+    align-items: stretch;
   }
 
   .project-form fieldset,
@@ -479,4 +492,38 @@ fieldset.status-section legend {
     min-width: 0;
     justify-content: center;
   }
+}
+
+/* Native selects keep keyboard/mobile behavior while matching the shared fields. */
+.form-field select,
+select.form-control {
+  appearance: none;
+  padding-right: 2.5rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right .85rem center;
+  background-repeat: no-repeat;
+  background-size: 1rem;
+  cursor: pointer;
+}
+select.form-control:invalid { color: var(--color-text-muted); }
+select.form-control option { color: var(--color-text); background: var(--color-surface); }
+.form-control:disabled,
+.form-field :is(input, select, textarea):disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+.form-control[aria-invalid='true'],
+.form-field :is(input, select, textarea)[aria-invalid='true'] { border-color: var(--color-danger); }
+.form-field textarea { resize: vertical; }
+@media (max-width: 50em) {
+  .form-control,
+  .form-field input:not([type]),
+  .form-field input[type='search'],
+  .form-field input[type='email'],
+  .form-field input[type='password'],
+  .form-field input[type='date'],
+  .form-field input[type='datetime-local'] { font-size: 1rem; }
+}
+@media (forced-colors: active) {
+  .form-field select, select.form-control { appearance: auto; background-image: none; }
 }
