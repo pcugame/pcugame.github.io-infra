@@ -11,6 +11,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      integration: ${{ steps.changes.outputs.integration }}
 
     steps:
       - uses: actions/checkout@v4
@@ -20,21 +22,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
+
+      - name: Test CI classification and required check wiring
+        run: node --test scripts/classify-ci-changes.test.mjs scripts/pr-checks-workflow.test.mjs
+
+      - name: Select verification from complete Git diff
+        id: changes
+        run: node scripts/classify-ci-changes.mjs
 
       - name: Test integration runner
         run: node --test scripts/run-integration.test.mjs
 
       - uses: actions/setup-go@v5
+        if: steps.changes.outputs.release == 'true'
         with:
           go-version: '1.24'
           cache: false
 
       - name: Build offline production-version Quadlet generator
+        if: steps.changes.outputs.release == 'true'
         run: bash server/quadlet/build-compat-generator.sh "${RUNNER_TEMP}/quadlet-5.4.2"
 
       - name: Test release controls and deployment fixtures
+        if: steps.changes.outputs.release == 'true'
         env:
           QUADLET_GENERATOR: ${{ runner.temp }}/quadlet-5.4.2/quadlet
           QUADLET_EXPECT_VERSION: '5.4.2'
@@ -45,51 +55,120 @@ jobs:
           MIGRATION_POLICY_BASE: ${{ github.event.pull_request.base.sha || 'origin/master' }}
         run: node scripts/check-migration-policy.mjs "${MIGRATION_POLICY_BASE}"
 
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.install == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
       - name: Install dependencies
+        if: steps.changes.outputs.install == 'true'
         run: npm ci --include-workspace-root
 
+      - name: Build shared contracts prerequisite
+        if: steps.changes.outputs.contracts == 'true'
+        run: npm run build --workspace=@pcu/contracts
+
+      - name: Test shared contracts
+        if: steps.changes.outputs.contracts == 'true' && steps.changes.outputs.full != 'true'
+        run: npm test --workspace=@pcu/contracts
+
       - name: Generate Prisma client
+        if: steps.changes.outputs.api == 'true'
         run: npm run db:generate --workspace=apps/api
 
-      - name: Test
+      - name: Test all workspaces
+        if: steps.changes.outputs.full == 'true'
         run: npm test
 
-      - name: Lint
+      - name: Test API
+        if: steps.changes.outputs.api == 'true' && steps.changes.outputs.full != 'true'
+        run: npm test --workspace=apps/api
+
+      - name: Test Web
+        if: steps.changes.outputs.web == 'true' && steps.changes.outputs.full != 'true'
+        run: npm test --workspace=apps/web
+
+      - name: Lint all workspaces
+        if: steps.changes.outputs.full == 'true'
         run: npm run lint
 
+      - name: Lint API
+        if: steps.changes.outputs.api == 'true' && steps.changes.outputs.full != 'true'
+        run: npm run lint --workspace=apps/api
+
+      - name: Lint Web
+        if: steps.changes.outputs.web == 'true' && steps.changes.outputs.full != 'true'
+        run: npm run lint --workspace=apps/web
+
       - name: Architecture boundaries
+        if: steps.changes.outputs.api == 'true'
         run: npm run architecture
 
       - name: Workspace dependency audit
+        if: steps.changes.outputs.install == 'true'
         run: npm audit --audit-level=high
 
-      - name: Build
+      - name: Build all workspaces
+        if: steps.changes.outputs.full == 'true'
         run: npm run build
+
+      - name: Build API
+        if: steps.changes.outputs.api == 'true' && steps.changes.outputs.full != 'true'
+        run: npm run build --workspace=apps/api
+
+      - name: Build Web
+        if: steps.changes.outputs.web == 'true' && steps.changes.outputs.full != 'true'
+        run: npm run build --workspace=apps/web
 
   integration:
     needs: verify
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
     steps:
+      - name: Validate required verification and integration selection
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          INTEGRATION_REQUIRED: ${{ needs.verify.outputs.integration }}
+        run: |
+          set -eu
+          if [ "$VERIFY_RESULT" != success ]; then
+            echo "Required verify job did not succeed: $VERIFY_RESULT" >&2
+            exit 1
+          fi
+          case "$INTEGRATION_REQUIRED" in
+            true) echo "Service integration selected." ;;
+            false) echo "Service integration intentionally skipped for this change." ;;
+            *) echo "Missing or invalid integration selection." >&2; exit 1 ;;
+          esac
+
       - uses: actions/checkout@v4
+        if: needs.verify.outputs.integration == 'true'
 
       - uses: actions/setup-node@v4
+        if: needs.verify.outputs.integration == 'true'
         with:
           node-version: 22
 
       - name: Install dependencies
+        if: needs.verify.outputs.integration == 'true'
         run: npm ci --include-workspace-root
 
       - name: Generate Prisma client
+        if: needs.verify.outputs.integration == 'true'
         run: npm run db:generate --workspace=apps/api
 
       - name: PostgreSQL + Garage integration smoke
+        if: needs.verify.outputs.integration == 'true'
         run: npm run test:integration
 
       - name: File gateway TLS verification
+        if: needs.verify.outputs.integration == 'true'
         run: npm run test:file-gateway
 
       - name: Tear down integration services
-        if: always()
+        if: always() && needs.verify.result == 'success' && needs.verify.outputs.integration == 'true'
         run: docker compose -f docker-compose.integration.yml down -v --remove-orphans
