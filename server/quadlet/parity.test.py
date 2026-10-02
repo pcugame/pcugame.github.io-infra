@@ -6,10 +6,13 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
 from unittest.mock import patch
+sys.dont_write_bytecode = True
+from generator_checks import select_generator, generate, assert_graph
 
 HERE = Path(__file__).resolve().parent
 DEPLOY = HERE.parent / 'deploy.sh'
@@ -101,7 +104,8 @@ class Parity(unittest.TestCase):
             }
             pod_def = directives(output / 'graduationproject.pod')
             self.assertEqual(decoded(pod_def['PublishPort'][0]), f"{settings.get('API_BIND_HOST', '127.0.0.1')}:{settings.get('API_PORT', '4000')}:4000")
-            self.assertEqual(pod_def['ExitPolicy'], ['continue'])
+            self.assertNotIn('ExitPolicy', pod_def)
+            self.assertEqual(pod_def['PodmanArgs'], ['--exit-policy=continue'])
             self.assertEqual(pod_def['AddHost'], ['postgres:127.0.0.1'])
             self.assertEqual(pod_def['Restart'], ['on-failure'])
             self.assertEqual(pod_def['RestartSec'], ['15'])
@@ -146,8 +150,48 @@ class Parity(unittest.TestCase):
             self.assertEqual(len(list(output.iterdir())), 10)
             self.assertEqual(output.stat().st_mode & 0o777, 0o700)
             for path in output.iterdir(): self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            generator = select_generator()
+            if generator:
+                generated = root / 'generated-parity'
+                generated.mkdir()
+                result = generate(generator, output, generated, clean_env() | {'HOME': str(root)})
+                self.assertEqual(result.returncode, 0, 'offline Quadlet generation failed')
+                assert_graph(self, generated)
 
     def test_defaults(self): self.scenario({})
+
+    def test_explicit_generator_cannot_silently_skip(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.dict(os.environ, {'QUADLET_GENERATOR': str(Path(temporary) / 'absent'),
+                                         'QUADLET_EXPECT_VERSION': '5.4.2'}):
+                with self.assertRaises(AssertionError):
+                    select_generator()
+        generator = select_generator()
+        if generator:
+            with patch.dict(os.environ, {'QUADLET_GENERATOR': generator,
+                                         'QUADLET_EXPECT_VERSION': '0.0.0-invalid'}):
+                with self.assertRaises(AssertionError):
+                    select_generator()
+
+    def test_542_rejects_native_exit_policy_key(self):
+        generator = select_generator()
+        if not generator:
+            self.skipTest('native generator unavailable; CI requires explicit 5.4.2 verification')
+        version = subprocess.run([generator, '--version'], capture_output=True, text=True, timeout=30)
+        if version.stdout.strip() != '5.4.2':
+            self.skipTest('unsupported-key regression is specific to Podman 5.4.2')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / 'rendered'
+            self.assertEqual(self.render(root, output).returncode, 0)
+            pod = output / 'graduationproject.pod'
+            pod.write_text(pod.read_text().replace('PodmanArgs=--exit-policy=continue', 'ExitPolicy=continue'))
+            generated = root / 'generated'
+            generated.mkdir()
+            result = generate(generator, output, generated, clean_env() | {'HOME': str(root)})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("unsupported key 'ExitPolicy'", result.stderr)
+            self.assertFalse((generated / 'graduationproject-pod.service').exists())
 
     def test_overrides_ca_and_paths(self):
         self.scenario({'API_BIND_HOST': '0.0.0.0', 'API_PORT': '4567',
@@ -180,25 +224,17 @@ class Parity(unittest.TestCase):
                 self.assertTrue(path.read_bytes() == (root / 'second' / path.name).read_bytes(),
                                 'render depends on inherited private configuration')
             # Inspect the native generator with a clean env too; never launch containers/services.
-            explicit = os.environ.get('QUADLET_GENERATOR')
-            candidates = [explicit] if explicit else [shutil.which('quadlet'),
-                '/usr/libexec/podman/quadlet', '/usr/lib/podman/quadlet',
-                '/usr/lib/systemd/system-generators/podman-system-generator',
-                '/run/current-system/sw/libexec/podman/quadlet']
-            generator = next((path for path in candidates if path and Path(path).is_file()), None)
+            generator = select_generator()
             results = [first, second]
-            if explicit:
-                self.assertTrue(generator is not None, 'configured Quadlet generator unavailable')
             if generator:
                 generated = root / 'generated'
                 generated.mkdir()
-                environment = clean_env() | {'HOME': str(root), 'QUADLET_UNIT_DIRS': str(root / 'first')}
-                result = subprocess.run([generator, '--user', str(generated)], env=environment,
-                                        capture_output=True, text=True)
+                result = generate(generator, root / 'first', generated, clean_env() | {'HOME': str(root)})
                 results.append(result)
                 self.assert_private_absent(root, [secret], results)
                 self.assertEqual(result.returncode, 0, 'offline Quadlet generation failed')
                 self.assertEqual(len(list(generated.glob('*.service'))), 10)
+                assert_graph(self, generated)
             self.assert_private_absent(root, [secret], results)
             self.assertTrue(artifact_bytes(unreadable) == b'innocuous fixture content\n', 'operator file changed')
             self.assertEqual(unreadable.stat().st_mode & 0o777, 0, 'operator file permissions changed')

@@ -6,7 +6,9 @@ StartLimitIntervalSec=300
 [Pod]
 PodName=graduationproject
 PublishPort=@API_PUBLISH@
-ExitPolicy=continue
+# Podman 5.4.2 lacks the Quadlet ExitPolicy key. Its generator emits stop
+# before PodmanArgs; the CLI's last scalar flag wins. See COMPATIBILITY.md.
+PodmanArgs=--exit-policy=continue
 AddHost=postgres:127.0.0.1
 
 [Service]

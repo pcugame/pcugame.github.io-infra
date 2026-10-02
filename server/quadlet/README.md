@@ -6,6 +6,10 @@ systemd operations on an already adopted host. It does not install Quadlet for
 the first time or migrate legacy units. Production adoption and operation have
 not been verified; repository edits do not activate these definitions.
 
+For first installation, use the separately gated [first-adoption runbook](ADOPTION.md)
+and [Podman compatibility policy](COMPATIBILITY.md). Normal releases cannot adopt
+a legacy host.
+
 ## Responsibilities and rendering
 
 The renderer owns topology: image references, fixed names, pod networking,
@@ -71,7 +75,9 @@ Each file uses Podman's plain `KEY=value` syntax. Values are literal: do not use
 default expressions. A Bash deployment `.env` is not interchangeable with these
 files. For example, write a complete literal database URL rather than
 `${POSTGRES_PASSWORD}` inside a URL. No conversion helper or secret generation
-framework is provided. Supply every key below, including the documented
+framework is provided. The read-only `runtime-env-check.py` comparison described
+in [first adoption](ADOPTION.md#runtime-env-mapping-and-comparison) reports key
+status without printing values; it does not create or convert env files. Supply every key below, including the documented
 legacy `deploy.sh` fallback values where appropriate; the renderer does not fill runtime
 defaults. An empty value is written as `KEY=`.
 
@@ -157,11 +163,12 @@ container services. No separate runtime target or orchestration service is
 introduced. All eight long-running containers use `Restart=always`, covering
 clean unexpected workload exits as well as failures. An explicit systemd stop
 suppresses this restart policy. The pod uses `Restart=on-failure`, retaining
-`RestartSec=15`, burst 10 per 300 seconds, and `ExitPolicy=continue`; each
+`RestartSec=15`, burst 10 per 300 seconds, and explicit `continue` semantics
+via `PodmanArgs=--exit-policy=continue` (Podman 5.4.2 compatibility); each
 container retains `StopTimeout=10`. Podman Quadlet 5.8.2 generates the pod with
 `Restart=on-failure` regardless of a source `Restart=always` setting. A clean
-infra-process exit is therefore not a workload restart guarantee. No installer
-patch or runtime workaround is introduced.
+infra-process exit is therefore not a workload restart guarantee. The compatibility
+policy verifies the final effective Podman CLI flag without patching generated units.
 
 Peer dependencies are ordering-only `After`: PostgreSQL → API → workers.
 Stopping API does not stop workers or PostgreSQL. Generated containers bind to

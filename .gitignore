@@ -45,3 +45,7 @@ apps/web/src/pages/admin/AdminPreview.tsx
 !docs/architecture/**/*.md
 !docs/adr/**/*.md
 !docs/history/2026-backend-audit/**/*.md
+
+# Reviewed Quadlet adoption policy
+!server/quadlet/ADOPTION.md
+!server/quadlet/COMPATIBILITY.md

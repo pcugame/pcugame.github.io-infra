@@ -68,3 +68,7 @@ from the authorized API repository for the exact workflow source, and
 `forward_fix_acknowledgement=I_ACKNOWLEDGE_CONTRACT_FORWARD_FIX`. Normal release and
 snapshot reject both manual-image and acknowledgement inputs. The retired initial
 schema transition operations remain unavailable.
+
+First Quadlet installation is a separate [host adoption procedure](../quadlet/ADOPTION.md).
+Legacy hosts must complete its PostgreSQL/pod ownership and readiness gates
+before entering this app-only release path.

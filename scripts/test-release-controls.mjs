@@ -15,6 +15,7 @@ const checks = [
   [process.execPath, ['--test', 'scripts/check-migration-policy.test.mjs', ...serverTests]],
   ['python3', ['server/quadlet/parity.test.py']],
   ['python3', ['server/quadlet/deploy.test.py']],
+  ['python3', ['server/quadlet/runtime-env-check.test.py']],
 ];
 
 for (const [command, args] of checks) {

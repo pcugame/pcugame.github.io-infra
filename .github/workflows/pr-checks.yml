@@ -26,7 +26,18 @@ jobs:
       - name: Test integration runner
         run: node --test scripts/run-integration.test.mjs
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: false
+
+      - name: Build offline production-version Quadlet generator
+        run: bash server/quadlet/build-compat-generator.sh "${RUNNER_TEMP}/quadlet-5.4.2"
+
       - name: Test release controls and deployment fixtures
+        env:
+          QUADLET_GENERATOR: ${{ runner.temp }}/quadlet-5.4.2/quadlet
+          QUADLET_EXPECT_VERSION: '5.4.2'
         run: npm run test:release-controls
 
       - name: Check migration history and review signals

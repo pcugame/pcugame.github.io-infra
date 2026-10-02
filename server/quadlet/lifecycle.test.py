@@ -17,6 +17,8 @@ import tempfile
 import time
 import unittest
 import uuid
+sys.dont_write_bytecode = True
+from generator_checks import select_generator, assert_graph
 
 HERE = Path(__file__).resolve().parent
 POD = 'graduationproject-pod.service'
@@ -101,13 +103,7 @@ class Lifecycle(unittest.TestCase):
                 self.environment[key] = os.environ[key]
         self.systemctl = shutil.which('systemctl')
         systemd_run = shutil.which('systemd-run')
-        generator = os.environ.get('QUADLET_GENERATOR') or shutil.which('quadlet')
-        if not generator:
-            podman = shutil.which('podman')
-            if podman:
-                candidate = Path(podman).resolve().parent.parent / 'libexec/podman/quadlet'
-                if candidate.is_file():
-                    generator = str(candidate)
+        generator = select_generator()
         analyze = shutil.which('systemd-analyze')
         self.assertTrue(self.systemctl and systemd_run and generator and analyze,
                         'systemctl, systemd-run, systemd-analyze and QUADLET_GENERATOR are required')
@@ -125,8 +121,13 @@ class Lifecycle(unittest.TestCase):
             rendered, generated = root / 'quadlet', root / 'generated'
             self.command([shutil.which('bash'), str(HERE / 'render.sh'), str(rendered)],
                          env=render_environment)
-            generator_environment = dict(self.environment, QUADLET_UNIT_DIRS=str(rendered))
-            self.command([generator, '--user', str(generated)], env=generator_environment)
+            # Verify service syntax without requiring Podman on this test machine.
+            # Only the command's executable path is substituted; no generated
+            # command is executed, and all flags/dependencies remain native.
+            generator_environment = dict(self.environment, QUADLET_UNIT_DIRS=str(rendered),
+                                         PODMAN=shutil.which('true'))
+            self.command([generator, '--user', '--no-kmsg-log', str(generated)], env=generator_environment)
+            assert_graph(self, generated)
             graph = {path.name: settings(path) for path in generated.glob('*.service')}
             self.command([analyze, '--user', 'verify',
                           *[str(generated / name) for name in sorted(graph)]],
@@ -137,8 +138,8 @@ class Lifecycle(unittest.TestCase):
             self.assertEqual(links, ['default.target.wants/' + POD])
             self.assertEqual(set(words(graph[POD], 'Unit', 'Wants')) & set(graph),
                              {POSTGRES, *APPLICATION})
-            self.assertEqual(settings(rendered / 'graduationproject.pod').get(('Pod', 'ExitPolicy')),
-                             ['continue'])
+            self.assertEqual(settings(rendered / 'graduationproject.pod').get(('Pod', 'PodmanArgs')),
+                             ['--exit-policy=continue'])
             self.assertEqual(graph[POD].get(('Service', 'Restart')), ['on-failure'])
             for unit in WORKLOADS:
                 self.assertEqual(graph[unit].get(('Service', 'Restart')), ['always'], unit)
@@ -182,6 +183,12 @@ while True:
                     # Register cleanup before creation: a timeout may still create a unit.
                     created.append(unit)
                     self.command(arguments)
+                    if unit == POD:
+                        # Wants failures from unavailable children must not
+                        # prevent initial pod startup. Real adoption masks app
+                        # children until PG readiness and API health are checked.
+                        self.wait_for(lambda: self.state(POD)['ActiveState'] == 'active',
+                                      'pod active with unavailable workload Wants')
                 self.wait_for(lambda: all(self.state(unit)['ActiveState'] == 'active'
                                            and self.invocation_count(unit) >= 1
                                            for unit in LONG_RUNNING), 'all fixture services active')
