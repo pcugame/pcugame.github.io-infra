@@ -1,6 +1,10 @@
 /* ── Theme tokens ─────────────────────────────────────────────── */
 
 :root {
+  /* Global rem-based UI scale; keep device policies here, not in components. */
+  --ui-scale-mobile: 100%;
+  --ui-scale-desktop: 125%;
+  --ui-scale: var(--ui-scale-desktop);
   --color-primary: #1a51af;
   --color-primary-hover: #143d8a;
   --color-primary-btn: #2461d4;
@@ -18,6 +22,14 @@
   --shadow-lg: 0 4px 24px rgba(26, 81, 175, 0.12);
   --max-width: 75rem;
   --header-height: 5rem;
+}
+
+/* Match the shared compact layout boundary (800px at the default browser font).
+   Media-query em uses the browser's initial font size, not the scaled root. */
+@media (max-width: 50em) {
+  :root {
+    --ui-scale: var(--ui-scale-mobile);
+  }
 }
 
 /* ── Dark Theme — 회색조 기반 ────────────────────────────────── */
