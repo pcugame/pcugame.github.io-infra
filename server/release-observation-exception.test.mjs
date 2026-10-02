@@ -49,9 +49,13 @@ test('ordinary release preserves snapshots, identity, Pages, drain and migration
   assert.match(workflow, /actual_digest.*FINAL_IMAGE/);
   assert.match(workflow, /full_commit_message: Deploy \$\{\{ github.sha \}\} \(run \$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}\)/);
 });
-test('historical alternate SQL and receipt migrations remain required artifacts', () => {
+test('build verifies checkout migration inventory and production entries before publishing', () => {
   const build = readFileSync(new URL('../.github/workflows/deploy-api.yml', import.meta.url), 'utf8');
-  for (const marker of ['20260822000001_canonical_asset_contract_age_exception', '20260822000002_canonical_asset_contract_image_bridge36', '20260822000003_canonical_asset_contract_image_bridge_traffic', '20260821990000_release_exception_receipts', '20260821991000_release_image_bridge_exception', '20260821992000_release_image_bridge_traffic']) assert.ok(build.includes(marker), marker);
-  for (const cli of ['backfill-canonical-assets', 'preflight-canonical-contract', 'verify-cutover-report', 'correct-canonical-assets', 'correct-canonical-poster']) assert.ok(!build.includes(cli), cli);
-  for (const cli of ['release-migrate', 'snapshot-garage-inventory']) assert.ok(build.includes(cli), cli);
+  const verifier = readFileSync(new URL('../apps/api/scripts/verify-release-artifact.mjs', import.meta.url), 'utf8');
+  assert.ok(build.includes('run: node apps/api/scripts/verify-release-artifact.mjs'));
+  assert.ok(build.indexOf('run: node apps/api/scripts/verify-release-artifact.mjs') < build.indexOf('Publish verified release manifest'));
+  assert.ok(!/202\d{11}_/.test(build), 'workflow must not pin historical migrations');
+  for (const path of ['prisma/migrations', 'prisma/contract-migration-paths', 'dist/server.js']) assert.ok(verifier.includes(path), path);
+  for (const cli of ['backfill-canonical-assets', 'preflight-canonical-contract', 'verify-cutover-report', 'correct-canonical-assets', 'correct-canonical-poster']) assert.ok(!verifier.includes(cli), cli);
+  for (const cli of ['release-migrate', 'snapshot-garage-inventory']) assert.ok(verifier.includes(cli), cli);
 });
