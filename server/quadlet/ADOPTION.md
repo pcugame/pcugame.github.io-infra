@@ -92,8 +92,15 @@ podman inspect gp-api gp-worker-game-validation gp-worker-webgl \
 
 Use the actual reviewed export path and add `--garage-ca` only when the rendered
 CA bind is selected. The checker reads files/stdin only and reports fixed
-container/key names and comparison status. Unknown or malformed input gets a
-value-free diagnostic. Missing/different values block adoption. A separately
+container/key names and comparison status. Malformed inspect input and unknown
+runtime-file keys get a value-free diagnostic. Comparison covers the documented
+runtime-file inventory, renderer-owned keys, and all schema-supported or directly
+read application env keys. A live application key that cannot be preserved by
+the reviewed runtime files is reported as `unexpected` and blocks adoption;
+resolve it explicitly rather than dropping the override or expanding the allowed
+file keys automatically. Other image-inherited settings such as `PATH` are
+outside this comparison scope and are neither printed nor certified equivalent.
+Missing/different/unexpected values block adoption. A separately
 reported `postgres-loopback-equivalent` URL is only a structural equivalence:
 credentials, port, DB and query must be identical; only the reviewed legacy
 `postgres` versus loopback host differs. It does not prove authentication,

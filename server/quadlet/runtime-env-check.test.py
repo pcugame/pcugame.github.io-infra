@@ -4,6 +4,7 @@ import copy
 import json
 from pathlib import Path
 import runpy
+import re
 import subprocess
 import sys
 import tempfile
@@ -78,6 +79,46 @@ class RuntimeCheck(unittest.TestCase):
         deployment = RUNTIME['deployment_values'](self.paths)
         self.assertEqual(deployment['LOG_LEVEL'], 'info')
         self.assertEqual(self.run_check().returncode, 2)
+
+    def test_application_key_inventory_tracks_schema_and_direct_reads(self):
+        source = HERE.parents[1] / 'apps' / 'api' / 'src'
+        schema = (source / 'config' / 'env.ts').read_text()
+        fields = schema.split('.object({', 1)[1].split('.superRefine', 1)[0]
+        keys = set(re.findall(r'^\s+([A-Z][A-Z0-9_]*)\s*:', fields, re.MULTILINE))
+        self.assertTrue(keys, 'schema inventory extraction found no keys')
+        self.assertEqual(CHECK['APP_SCHEMA_KEYS'], keys)
+        direct = set()
+        for path in source.rglob('*.ts'):
+            if ('generated' in path.parts or '__tests__' in path.parts
+                    or path.name.endswith('.test.ts')):
+                continue
+            text = path.read_text()
+            direct.update(re.findall(r'process\.env\.([A-Z][A-Z0-9_]*)', text))
+            direct.update(re.findall(r"process\.env\[\s*['\"]([A-Z][A-Z0-9_]*)['\"]\s*\]", text))
+        self.assertEqual(CHECK['APP_PROCESS_ENV_KEYS'], direct - keys)
+
+    def test_unpreserved_application_overrides_block_comparison(self):
+        for index, key, value in ((0, 'RATE_LIMIT_LOGIN_MAX', '3'),
+                                  (5, 'EXPORT_WORKER_FILE_CONCURRENCY', '1')):
+            original = copy.deepcopy(self.document)
+            self.change(index, key, value)
+            result = self.run_check()
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(f"{CHECK['NAMES'][index]} {key} unexpected", result.stdout)
+            # Detection must not silently expand the runtime-file contract.
+            self.paths[0].write_text(self.paths[0].read_text() + key + '=' + value + '\n')
+            self.assertEqual(self.run_check().returncode, 2)
+            self.write_files()
+            self.document = original
+        # Every schema-supported unpreserved key fails closed, even if its
+        # explicit value happens to equal an application's current default.
+        preserved = set().union(*RUNTIME['SCOPES'], CHECK['RESERVED'])
+        for key in sorted(CHECK['APP_SCHEMA_KEYS'] - preserved):
+            self.change(0, key, SENTINEL)
+            result = self.run_check()
+            self.assertEqual(result.returncode, 1, key)
+            self.assertIn(f'gp-api {key} unexpected', result.stdout)
+            self.change(0, key)
 
     def test_expected_values_on_every_container(self):
         for index, name in enumerate(CHECK['NAMES']):
