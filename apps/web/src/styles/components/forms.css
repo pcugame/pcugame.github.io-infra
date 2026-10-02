@@ -527,3 +527,43 @@ select.form-control option { color: var(--color-text); background: var(--color-s
 @media (forced-colors: active) {
   .form-field select, select.form-control { appearance: auto; background-image: none; }
 }
+
+@supports (appearance: base-select) {
+  .visibility-select,
+  .visibility-select::picker(select) {
+    appearance: base-select;
+  }
+
+  .visibility-select::picker-icon {
+    display: none;
+  }
+
+  .visibility-select::picker(select) {
+    margin-top: 0.25rem;
+    padding: 0.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-surface);
+    box-shadow: 0 10px 32px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(15, 23, 42, 0.06);
+  }
+
+  .visibility-select option {
+    padding: 0.55rem 0.7rem;
+    border-radius: 7px;
+  }
+
+  .visibility-select option:hover,
+  .visibility-select option:focus {
+    background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  }
+
+  .visibility-select option:checked {
+    color: var(--color-primary);
+    font-weight: 600;
+    background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+  }
+
+  .visibility-select option::checkmark {
+    color: var(--color-primary);
+  }
+}
