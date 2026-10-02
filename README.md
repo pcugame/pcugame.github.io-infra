@@ -176,8 +176,10 @@ Web은 <http://localhost:5173>, API는 <http://localhost:4000>에서 실행된�
 | `npm run architecture` | API 계층 경계, 자체 test, dependency-cruiser 규칙 |
 | `npm run build` | 공용 계약, API, Web 순차 build |
 | `npm run test:integration` | PostgreSQL·Garage 기반 concurrency·transaction·upload·복구 test와 E2E smoke test |
+| `npm run test:integration:suite -- <name>` | 지정한 통합 test suite 실행 |
+| `npm run test:integration:list` | 통합 test suite 목록 조회 |
 
-PR 검증과 동일한 기본 순서는 다음과 같다.
+[PR Checks](.github/workflows/pr-checks.yml)의 기본 npm 검증 순서는 다음과 같다. 전체 CI는 아래 명령 외에 migration 정책·배포 경계 검사와 별도 integration job을 포함한다.
 
 ```bash
 npm ci --include-workspace-root
@@ -191,6 +193,17 @@ npm run build
 
 전체 통합 test는 Docker image build와 서비스 기동을 포함한다. 고정 포트 `15432`, `3900`, `3902`, `3903`, `4000`, `5173`을 사용하므로 기존 process와의 충돌 여부를 먼저 확인한다.
 
+단일 suite 실행 전에는 `npm run testenv:up`으로 통합 test 환경을 준비한다. 단일 suite는 서비스를 기동하거나 종료하지 않으므로 반복 실행할 수 있다.
+
+```bash
+npm run testenv:up
+npm run test:integration:suite -- visibility
+npm run test:integration:suite -- lease-clock
+npm run testenv:down
+```
+
+기존 `test:integration:<name>` 명령은 `test:integration:suite -- <name>`으로 대체한다. Suite별 파일 목록, PostgreSQL·Garage 환경 설정, 실행 순서는 `scripts/run-integration.mjs`에서 관리한다. `lease-clock`, `phase2-transition`, `year-change-approval`은 기존 `--no-file-parallelism` 설정을 유지하며, 다른 suite는 기존 Vitest 병렬 실행 설정을 사용한다.
+
 ## 데이터와 자산 경계
 
 - PostgreSQL은 자산의 `storageKey`, 공개 여부, 크기, MIME type, 처리 상태를 저장한다.
@@ -200,26 +213,27 @@ npm run build
 - Unity WebGL ZIP은 archive 경로와 content encoding을 검증한 뒤 공개 실행 경로로 제공한다.
 - multipart 업로드의 중단·만료·완료 실패는 background maintenance와 durable task table로 복구한다.
 
-업로드 lifecycle 관련 schema 변경이나 운영 정리 작업 전에는 [업로드 lifecycle 배포 runbook](docs/upload-lifecycle-runbook.md)을 확인한다. `reconcile-orphans.ts --apply`는 신규 API 전환 후 최소 60분을 대기하고 dry run 결과를 검토한 뒤 실행하도록 규정되어 있다.
+schema 변경과 운영 배포는 [database migration policy](docs/database-migration-policy.md)와 [production 배포 절차](docs/operations/deployment.md)를 따른다.
 
 ## 배포 구조
 
-### Web
+운영 배포는 `master` 기준의 수동 release이다. master의 API 관련 대상 경로 변경 시 이미지를 자동 빌드하지만, push나 이미지 빌드 성공만으로 운영 서비스를 갱신하지 않는다.
 
-`master` branch의 `apps/web`, 공용 계약 또는 workspace 설정 변경은 `deploy-web-pages.yml`을 실행한다. test·lint·build를 통과한 `apps/web/dist`를 `pcugame/pcugame.github.io` 저장소의 `master` branch에 게시한다. build 후 생성되는 `404.html`은 GitHub Pages에서 SPA deep link를 처리한다.
+| Workflow | 역할 |
+| --- | --- |
+| [PR Checks](.github/workflows/pr-checks.yml) | PR의 기본 검사와 PostgreSQL·Garage 통합 검증 |
+| [Build API Release Image](.github/workflows/deploy-api.yml) | API 이미지 빌드·GHCR 게시, source SHA·artifact 검증, 불변 digest 기록 |
+| [Deploy Release](.github/workflows/release-api-cutover.yml) | 수동 실행으로 같은 master SHA의 Web·API와 필요한 DB migration 적용 |
 
-Web과 API가 같은 commit에서 변경되면 API workflow는 같은 SHA의 Web 배포 성공을 확인한 뒤 배포한다. breaking 계약 배포 중에는 새 Web과 기존 API가 잠시 불일치할 수 있으며, 최종적으로 같은 SHA pair가 배포되어야 한다.
+일반 배포는 `Deploy Release`에서 `master`와 `operation=release`를 선택한다. 해당 SHA의 검증된 이미지를 재사용하며, 보관된 결과가 없으면 build workflow를 호출한다. 일반 release에서는 `final_api_image`와 `forward_fix_acknowledgement`를 비워 두며, 선택된 이미지는 `@sha256` 불변 digest로 전달한다. GHCR의 `latest` tag는 운영 이미지 선택에 사용하지 않는다.
 
-### API
+일반 release 순서는 preflight → backup/drain → migration → API·worker activation → complete runtime health → Web publication → final smoke이다. Backup 단계에는 온라인 DB snapshot·격리 복원 검증, API·worker 중지와 추가 DB 백업이 포함된다. 컨테이너 시작 자체는 migration을 실행하지 않는다. Web 게시 전 API·모든 worker의 상태와 image source SHA·digest를 확인하고, 최종 smoke에서 Web SHA·runtime health·공개 파일 응답을 검증한다.
 
-`deploy-api.yml`은 API test와 build를 수행하고 image를 다음 두 tag로 GHCR에 게시한다.
+자동 복구의 기준은 서버에 영속 기록한 `migration-attempted` marker의 부재이다. Workflow migration step의 outcome만으로 SQL 미실행을 판단하지 않는다. Marker가 없고 복구 capture가 확인된 경우에만 Pages 복구를 진행하며, 이전 Pages 제공 상태 검증 후 runtime 복구를 시도한다. Marker가 있거나 상태를 확인할 수 없으면 자동 복구를 중단한다.
 
-- `latest`
-- `sha-<commit SHA>`
+Web은 `apps/web/dist`를 `pcugame/pcugame.github.io`의 `master`에 게시하며, build에서 생성한 `404.html`로 SPA deep link를 처리한다. API·PostgreSQL·worker는 운영 호스트의 Podman pod에서 실행한다. API port는 기본 `127.0.0.1:4000`에 bind하고 외부 요청은 reverse proxy를 통과한다.
 
-배포 단계는 SSH로 `server/deploy.sh`를 전달하고 SHA tag image를 Podman pod에 반영한다. 기존 PostgreSQL container가 있으면 배포 전에 `pg_dump -Fc` backup을 생성한다. 신규 API의 상태 확인이 실패하면 직전 image에 부여한 local rollback tag로 복구하고 workflow를 실패 처리한다.
-
-운영 API port는 기본적으로 `127.0.0.1:4000`에만 bind된다. 외부 요청은 reverse proxy를 통과해야 하며, 운영 `.env`의 origin, cookie, proxy trust, Google hosted domain, S3와 NAS 경로를 실제 환경에 맞게 설정한다.
+사전 조건, 실행 순서, snapshot·forward-fix와 실패 복구는 [production 배포 절차](docs/operations/deployment.md)를 따른다.
 
 ## 변경 기준
 
@@ -227,12 +241,16 @@ Web과 API가 같은 commit에서 변경되면 API workflow는 같은 SHA의 Web
 - database 구조를 변경할 때 `apps/api/prisma/schema.prisma`와 migration을 함께 commit하고 [database migration policy](docs/database-migration-policy.md)를 따른다.
 - 새 API module은 application·infrastructure 경계를 유지하고 `npm run architecture`를 통과해야 한다.
 - 업로드 변경은 파일 signature, 권한, 용량 제한, idempotency, orphan 정리와 동시성 test를 함께 검토한다.
-- 배포 관련 변경은 Web과 API의 독립 배포 순서 및 rollback 가능성을 유지한다.
+- 배포 관련 변경은 불변 이미지 검증, Web/API 호환성, DB 백업과 migration 시도 전후의 복구 경계를 유지한다.
 
 ## 관련 문서
 
+- [production 배포 절차](docs/operations/deployment.md)
+- [production release 구조 조사와 정리 기준](docs/history/2026-backend-audit/production-release-audit.md)
 - [database migration policy](docs/database-migration-policy.md)
-- [업로드 lifecycle 배포 runbook](docs/upload-lifecycle-runbook.md)
-- [backend 검토 기록](docs/backend-audit.md)
-- [route 계약 소유권 후속 기록](docs/backend-audit-tickets/route-contract-ownership-follow-up.md)
+- [업로드 lifecycle 전환 기록과 runbook](docs/upload-lifecycle-runbook.md)
+- [backend architecture](docs/architecture/README.md)
+- [architecture decision records](docs/adr/README.md)
+- [backend 감사·수정 이력](docs/history/2026-backend-audit/README.md)
+- [route 계약 소유권 후속 제안](docs/architecture/route-contract-ownership.md)
 - [추가 test 기록](docs/new_tests/README.md)

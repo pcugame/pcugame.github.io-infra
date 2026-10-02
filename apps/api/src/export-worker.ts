@@ -63,19 +63,30 @@ export async function runExportWorker(): Promise<void> {
 		logger,
 		config: workerConfig,
 	});
-	const abort = new AbortController();
-	const stop = () => abort.abort(new Error('Export worker shutdown requested'));
+	let closePromise: Promise<void> | undefined;
+	const closeLoop = () => closePromise ??= Promise.resolve().then(() => graph.loop.close());
+	let resolveStopped!: () => void;
+	const stopped = new Promise<void>((resolve) => { resolveStopped = resolve; });
+	const stop = () => {
+		// start() waits for the initial pass. Abort that pass immediately rather
+		// than waiting for startup to finish before requesting loop shutdown.
+		void closeLoop().catch(() => undefined);
+		resolveStopped();
+	};
 	process.once('SIGTERM', stop);
 	process.once('SIGINT', stop);
 	try {
 		await graph.loop.start();
-		await new Promise<void>((resolve) => abort.signal.addEventListener('abort', () => resolve(), { once: true }));
-		await graph.loop.close();
+		await stopped;
 	} finally {
 		process.off('SIGTERM', stop);
 		process.off('SIGINT', stop);
-		s3.destroy();
-		await prisma.$disconnect();
+		try {
+			await closeLoop();
+		} finally {
+			s3.destroy();
+			await prisma.$disconnect();
+		}
 	}
 }
 

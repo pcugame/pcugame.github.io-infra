@@ -1,0 +1,19 @@
+[Unit]
+Description=Graduation project runtime pod (offline migration candidate)
+StartLimitBurst=10
+StartLimitIntervalSec=300
+
+[Pod]
+PodName=graduationproject
+PublishPort=@API_PUBLISH@
+# Podman 5.4.2 lacks the Quadlet ExitPolicy key. Its generator emits stop
+# before PodmanArgs; the CLI's last scalar flag wins. See COMPATIBILITY.md.
+PodmanArgs=--exit-policy=continue
+AddHost=postgres:127.0.0.1
+
+[Service]
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

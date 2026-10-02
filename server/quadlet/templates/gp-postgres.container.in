@@ -1,0 +1,14 @@
+[Unit]
+Description=Graduation project PostgreSQL
+
+[Container]
+Image=docker.io/library/postgres:16-alpine
+ContainerName=gp-postgres
+Pod=graduationproject.pod
+StartWithPod=true
+EnvironmentFile=@POSTGRES_ENV@
+Volume=gp-pg-data.volume:/var/lib/postgresql/data:Z
+StopTimeout=10
+
+[Service]
+Restart=always

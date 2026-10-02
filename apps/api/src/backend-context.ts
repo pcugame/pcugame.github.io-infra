@@ -1,29 +1,8 @@
-import { createExternalLinkController } from './modules/external-links/controller.js';
-import { createWebglPlayRepository, createUnavailableWebglPlayRepository, type WebglPlayRepository } from './modules/webgl-play/repository.js';
-import { createWebglPlayService } from './modules/webgl-play/service.js';
-import { createWebglPlayController } from './modules/webgl-play/controller.js';
-import { createWebglDisplayRepository } from './modules/me/project/webgl-display.repository.js';
-import { createWebglDisplayService } from './modules/me/project/webgl-display.service.js';
-import { createWebglDisplayController } from './modules/me/project/webgl-display.controller.js';
-import { createWebglNetworkRepository, createUnavailableWebglNetworkRepository, type WebglNetworkRepository } from './modules/webgl-network/repository.js';
-import { createWebglNetworkService } from './modules/webgl-network/service.js';
-import { createWebglNetworkController } from './modules/webgl-network/controller.js';
-import { createFileAccessRepository, createUnavailableFileAccessRepository, type FileAccessRepository } from './modules/file-access/repository.js';
-import { createFileAccessController } from './modules/file-access/controller.js';
-import { createUnavailableProjectChangeService } from './modules/project-change/composition.js';
-import type { ProjectChangeRepository } from './modules/project-change/ports.js';
-import { createProjectChangeRepository } from './modules/project-change/repository.js';
-import { createProjectChangeService } from './modules/project-change/service.js';
-import { createProjectChangeController } from './modules/project-change/controller.js';
-import type { FastifyPluginAsync } from 'fastify';
-import type { S3Client } from '@aws-sdk/client-s3';
-import type { PrismaClient } from './generated/prisma/client.js';
-import type { Env } from './config/env.js';
 import type {
-	Clock,
-	AuthSessionStore,
 	AppLogger,
+	AuthSessionStore,
 	BackgroundMaintenance,
+	Clock,
 	DatabaseHealth,
 	FileSystem,
 	GoogleTokenVerifier,
@@ -34,241 +13,53 @@ import type {
 	SettingsStore,
 	UploadLimiter,
 } from './application/ports.js';
-import {
-	createCryptoIdGenerator,
-	createGoogleTokenVerifier,
-	createLifecyclePort,
-	createNodeFileSystem,
-	createNodeScheduler,
-	createPrismaHealth,
-	createPrismaSettingsStore,
-	createSystemClock,
-	createUploadLimiterPort,
-} from './infrastructure/production-ports.js';
-import { createPrismaClientForDatabase } from './lib/prisma-client.js';
-import { createS3Client } from './lib/s3.js';
-import {
-	createDirectMultipartControlStorage,
-	createMultipartPartPresigner,
-	createMultipartRecoveryStorage,
-	createObjectStorage,
-	createProtectedDownloadPresigner,
-	type ProtectedDownloadPresigner,
-} from './lib/storage.js';
-import { createRootLogger } from './lib/logger.js';
-import { createProtectedDownloadLimiter } from './shared/protected-download-limiter.js';
-import { forbidden, notFound } from './shared/errors.js';
-import type { DownloadRateLimiter } from './shared/download-rate-limit.js';
-import { resolveRoleUploadLimits } from './shared/upload-policy.js';
-import {
-	createAssetsBannedProductionGraph,
-	type AssetsBannedProductionGraph,
-} from './modules/assets/composition.js';
-import {
-	createAuthProductionGraph,
-	type AuthProductionRepository,
-	type AuthProductionGraph,
-} from './modules/auth/composition.js';
-import { createAuthRepository } from './modules/auth/repository.js';
-import {
-	createPublicProductionGraph,
-	type PublicProductionRepository,
-	type PublicProductionGraph,
-} from './modules/public/composition.js';
-import { createPublicRepository } from './modules/public/repository.js';
-import {
-	createProjectMemberSettingsProductionGraph,
-	type ProjectMemberSettingsProductionGraph,
-} from './modules/admin/project-member-settings.composition.js';
-import {
-	createYearProductionGraph,
-	type YearProductionGraph,
-} from './modules/admin/year/composition.js';
-import {
-	createImportExportProductionGraph,
-	type ExportRepository,
-	type ImportExportProductionGraph,
-} from './modules/admin/import-export.composition.js';
-import { createImportRepository } from './modules/admin/import/repository.js';
-import type { ImportRepository } from './modules/admin/import/service.js';
-import { createExportRepository } from './modules/admin/export/repository.js';
-import {
-	createProjectMultipartProductionGraph,
-	type ProjectMultipartProductionGraph,
-} from './modules/admin/project-multipart.composition.js';
-import { createAssetUploadControlGraph, createUnavailableAssetUploadControlGraph } from './modules/asset-upload/composition.js';
-import { createAssetUploadRepository } from './modules/asset-upload/repository.js';
-import { createAssetUploadRecoveryService } from './modules/asset-upload/recovery.service.js';
+import type { Env } from './config/env.js';
 import {
 	createUploadLifecycleMetrics,
 	type UploadLifecycleMetrics,
 } from './lib/upload-lifecycle-metrics.js';
+import { createImportExportProductionGraph } from './modules/admin/import-export.composition.js';
+import { createProjectAccessService } from './modules/admin/project-access.service.js';
+import { createProjectMemberSettingsProductionGraph } from './modules/admin/project-member-settings.composition.js';
+import { createYearProductionGraph } from './modules/admin/year/composition.js';
+import { createAssetUploadRepository } from './modules/asset-upload/repository.js';
+import {
+	createAssetsBannedProductionGraph,
+	type AssetsBannedProductionGraph,
+} from './modules/assets/composition.js';
+import { createAuthProductionGraph } from './modules/auth/composition.js';
+import { createPublicProductionGraph } from './modules/public/composition.js';
 import {
 	createProductionUploadLifecycleRuntime,
 	type UploadLifecycleRuntime,
 } from './modules/upload-lifecycle/runtime.js';
-import { createAssetsRepository } from './modules/assets/repository.js';
-import { createBannedIpRepository } from './modules/admin/banned-ip/repository.js';
-import { createProjectAccessRepository } from './modules/admin/project-access.repository.js';
-import { createProjectAccessService } from './modules/admin/project-access.service.js';
-import { createProjectCrudRepository } from './modules/admin/project/crud.repository.js';
-import { createMemberRepository } from './modules/admin/member/repository.js';
-import { createExhibitionRepository } from './modules/admin/year/repository.js';
-import type { AssetsServiceDependencies } from './modules/assets/service.js';
-import type { BannedIpServiceDependencies } from './modules/admin/banned-ip/service.js';
-import type { ProjectAccessRepository } from './modules/admin/project-access.service.js';
-import type { ProjectApplicationRepository } from './modules/admin/project/ports.js';
-import type { MemberServiceDependencies } from './modules/admin/member/service.js';
-import type { ExhibitionRepository } from './modules/admin/year/ports.js';
+import type { DownloadRateLimiter } from './shared/download-rate-limit.js';
+import {
+	defaultFactories,
+	type MaybePromise,
+	type ProductionResourceFactories,
+	type ProductionResourceOverrides,
+} from './backend-context/infrastructure.js';
+import { createBackendMaintenance, createMaintenanceSchedule } from './backend-context/maintenance.js';
+import { createBackendPersistence, type BackendPersistencePorts } from './backend-context/persistence.js';
+import {
+	BackendResourceOwner,
+	owned,
+	type BackendResourceOwnership,
+	type ResourceLease,
+} from './backend-context/resource-owner.js';
+import {
+	composeBackendRoutes,
+	createBackendDirectAssetUpload,
+	createBackendProjectMultipart,
+	type BackendRoutes,
+} from './backend-context/routes.js';
 
-/**
- * Complete persistence boundary consumed by the production composition graph.
- * Production builds it from one Prisma client; composition/lifecycle tests inject
- * scripted domain ports and never need to construct or emulate Prisma delegates.
- */
-export interface BackendPersistencePorts {
- fileAccessRepository?: FileAccessRepository;
- webglPlayRepository?: WebglPlayRepository;
- webglNetworkRepository?: WebglNetworkRepository;
-	databaseHealth: DatabaseHealth;
-	authRepository: AuthProductionRepository;
-	publicRepository: PublicProductionRepository;
-	projectAccessRepository: ProjectAccessRepository;
-	projectChangeRepository?: ProjectChangeRepository;
-	projectRepository: ProjectApplicationRepository;
-	memberRepository: MemberServiceDependencies['repository'];
-	exhibitionRepository: ExhibitionRepository;
-	assetsRepository: AssetsServiceDependencies['repository'] & {
-		findAllBannedIps(): Promise<{ ip: string }[]>;
-	};
-	bannedIpRepository: BannedIpServiceDependencies['repository'];
-	importRepository: ImportRepository;
-	exportRepository: ExportRepository;
-}
-
-export interface BackendRoutes {
- fileAccess?: FastifyPluginAsync;
- webglPlay?: FastifyPluginAsync;
-	auth: FastifyPluginAsync;
-	devAuth: FastifyPluginAsync;
-	public: FastifyPluginAsync;
-	admin: FastifyPluginAsync;
-	me: FastifyPluginAsync;
-	assets: FastifyPluginAsync;
-}
-
-export type ResourceOwnership = 'owned' | 'borrowed';
-
-/**
- * An externally supplied resource must declare who owns its lifetime. Borrowed
- * resources are observable through the context but are never started or closed
- * by it; owned resources join the same reverse-order lifecycle as factory output.
- */
-export type ResourceLease<T> =
-	| {
-		value: T;
-		ownership: 'borrowed';
-	}
-	| {
-		value: T;
-		ownership: 'owned';
-		start?: () => void | Promise<void>;
-		close: () => void | Promise<void>;
-	};
-
-export interface BackendResourceOwnership {
-	name: string;
-	ownership: ResourceOwnership;
-}
-
-interface RegisteredResource extends BackendResourceOwnership {
-	start?: () => void | Promise<void>;
-	close?: () => void | Promise<void>;
-}
-
-class BackendResourceOwner {
-	private readonly registered: RegisteredResource[] = [];
-	private closingRequested = false;
-	private startWork: Promise<void> | undefined;
-	private startPromise: Promise<void> | undefined;
-	private closePromise: Promise<void> | undefined;
-
-	register<T>(name: string, lease: ResourceLease<T>): T {
-		if (this.startPromise || this.closePromise) {
-			throw new Error(`Cannot register ${name} after the BackendContext lifecycle began`);
-		}
-		this.registered.push({
-			name,
-			ownership: lease.ownership,
-			start: lease.ownership === 'owned' ? lease.start : undefined,
-			close: lease.ownership === 'owned' ? lease.close : undefined,
-		});
-		return lease.value;
-	}
-
-	ownership(): readonly BackendResourceOwnership[] {
-		return this.registered.map(({ name, ownership }) => ({ name, ownership }));
-	}
-
-	start(): Promise<void> {
-		if (this.closePromise) return Promise.reject(new Error('BackendContext is closed'));
-		this.startWork ??= (async () => {
-			for (const resource of this.registered) {
-				if (this.closingRequested) throw new Error('BackendContext start aborted by close');
-				if (resource.ownership === 'owned') await resource.start?.();
-				if (this.closingRequested) throw new Error('BackendContext start aborted by close');
-			}
-		})();
-		this.startPromise ??= this.startWork.catch(async (error) => {
-			await this.close().catch(() => undefined);
-			throw error;
-		});
-		return this.startPromise;
-	}
-
-	close(): Promise<void> {
-		this.closingRequested = true;
-		this.closePromise ??= (async () => {
-			const closeTimeoutMs = 5_000;
-			async function settleWithin(work: Promise<unknown>, label: string): Promise<void> {
-				let timer: NodeJS.Timeout | undefined;
-				try {
-					await Promise.race([
-						work,
-						new Promise<never>((_resolve, reject) => {
-							timer = setTimeout(
-								() => reject(new Error(`Timed out closing ${label}`)),
-								closeTimeoutMs,
-							);
-							timer.unref();
-						}),
-					]);
-				} finally {
-					if (timer) clearTimeout(timer);
-				}
-			}
-
-			let firstError: unknown;
-			if (this.startWork) {
-				try {
-					await settleWithin(this.startWork.catch(() => undefined), 'context startup');
-				} catch (error) {
-					firstError ??= error;
-				}
-			}
-			for (const resource of [...this.registered].reverse()) {
-				if (resource.ownership !== 'owned') continue;
-				try {
-					await settleWithin(Promise.resolve().then(() => resource.close?.()), resource.name);
-				} catch (error) {
-					firstError ??= error;
-				}
-			}
-			if (firstError !== undefined) throw firstError;
-		})();
-		return this.closePromise;
-	}
-}
+export type { ProductionResourceFactories, ProductionResourceOverrides } from './backend-context/infrastructure.js';
+export { createMaintenanceSchedule, createSingleFlightUploadRecovery } from './backend-context/maintenance.js';
+export type { BackendPersistencePorts } from './backend-context/persistence.js';
+export type { BackendResourceOwnership, ResourceLease, ResourceOwnership } from './backend-context/resource-owner.js';
+export type { BackendRoutes } from './backend-context/routes.js';
 
 /** Explicit application composition and resource lifetime boundary. */
 export interface BackendContext {
@@ -295,61 +86,6 @@ export interface BackendContext {
 	close(): Promise<void>;
 }
 
-type MaybePromise<T> = T | Promise<T>;
-
-export interface ProductionResourceFactories {
-	logger(config: Env): MaybePromise<AppLogger>;
-	clock(config: Env): MaybePromise<Clock>;
-	ids(config: Env): MaybePromise<IdGenerator>;
-	scheduler(config: Env): MaybePromise<Scheduler>;
-	fileSystem(config: Env): MaybePromise<FileSystem>;
-	googleTokens(config: Env): MaybePromise<GoogleTokenVerifier>;
-	prisma(config: Env): MaybePromise<PrismaClient>;
-	s3(config: Env): MaybePromise<S3Client>;
-	uploadSigningS3(config: Env): MaybePromise<S3Client>;
-	protectedDownloadSigningS3(config: Env): MaybePromise<S3Client>;
-	storage(client: S3Client, config: Env): MaybePromise<ObjectStorage>;
-	protectedDownloadPresigner(client: S3Client, config: Env): MaybePromise<ProtectedDownloadPresigner>;
-	settings(
-		client: PrismaClient,
-		logger: AppLogger,
-		config: Env,
-	): MaybePromise<SettingsStore & { warmup?(): Promise<unknown>; close(): void }>;
-	uploadLimiter(config: Env): MaybePromise<UploadLimiter & { close(): void }>;
-	lifecycle(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<Lifecycle & { close(): void }>;
-	protectedDownloads(clock: Clock, scheduler: Scheduler, config: Env): MaybePromise<DownloadRateLimiter>;
-	routes(
-		config: Env,
-		assetsBanned: AssetsBannedProductionGraph,
-		auth: AuthProductionGraph,
-		publicGraph: PublicProductionGraph,
-		projectMemberSettings: ProjectMemberSettingsProductionGraph,
-		year: YearProductionGraph,
-		importExport: ImportExportProductionGraph,
-		projectMultipart: ProjectMultipartProductionGraph,
-		directAssetUpload: ReturnType<typeof createAssetUploadControlGraph> | ReturnType<typeof createUnavailableAssetUploadControlGraph>,
-	): MaybePromise<BackendRoutes>;
-}
-
-export interface ProductionResourceOverrides {
-	logger: ResourceLease<AppLogger>;
-	clock: ResourceLease<Clock>;
-	ids: ResourceLease<IdGenerator>;
-	scheduler: ResourceLease<Scheduler>;
-	fileSystem: ResourceLease<FileSystem>;
-	googleTokens: ResourceLease<GoogleTokenVerifier>;
-	prisma: ResourceLease<PrismaClient>;
-	s3: ResourceLease<S3Client>;
-	uploadSigningS3: ResourceLease<S3Client>;
-	protectedDownloadSigningS3: ResourceLease<S3Client>;
-	storage: ResourceLease<ObjectStorage>;
-	settings: ResourceLease<SettingsStore>;
-	uploadLimiter: ResourceLease<UploadLimiter>;
-	lifecycle: ResourceLease<Lifecycle>;
-	protectedDownloads: ResourceLease<DownloadRateLimiter>;
-	uploadLifecycle: ResourceLease<UploadLifecycleRuntime>;
-}
-
 export interface CreateProductionBackendContextOptions {
 	/** Construction hooks are test seams; their output is owned by the context. */
 	factories?: Partial<ProductionResourceFactories>;
@@ -358,177 +94,6 @@ export interface CreateProductionBackendContextOptions {
 	/** Complete non-Prisma persistence seam for composition and lifecycle tests. */
 	persistence?: BackendPersistencePorts;
 	routes?: BackendRoutes;
-}
-
-const defaultFactories: ProductionResourceFactories = {
-	logger: (config) => createRootLogger(config),
-	clock: () => createSystemClock(),
-	ids: () => createCryptoIdGenerator(),
-	scheduler: () => createNodeScheduler(),
-	fileSystem: () => createNodeFileSystem(),
-	googleTokens: () => createGoogleTokenVerifier(),
-	prisma: (config) => createPrismaClientForDatabase(config.DATABASE_URL, {
-		log: config.NODE_ENV === 'development'
-			? [
-				{ emit: 'event', level: 'query' },
-				{ emit: 'stdout', level: 'error' },
-			]
-			: [{ emit: 'stdout', level: 'error' }],
-	}),
-	s3: (config) => createS3Client(config),
-	uploadSigningS3: (config) => createS3Client({
-		...config,
-		S3_ENDPOINT: config.S3_PUBLIC_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
-	}),
-	protectedDownloadSigningS3: (config) => createS3Client({
-		...config,
-		S3_ENDPOINT: config.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT ?? config.S3_ENDPOINT,
-	}),
-	storage: (client, config) => createObjectStorage(client, {
-		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
-	}),
-	protectedDownloadPresigner: (client, config) => createProtectedDownloadPresigner(client, {
-		defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC,
-	}),
-	settings: (client, logger) => createPrismaSettingsStore(client, logger),
-	uploadLimiter: (config) => createUploadLimiterPort(config.UPLOAD_MAX_CONCURRENT),
-	lifecycle: (clock, scheduler) => createLifecyclePort(clock, scheduler),
-	protectedDownloads: (clock, scheduler, config) => createProtectedDownloadLimiter({ clock, scheduler, autoIpBanEnabled: config.DOWNLOAD_AUTO_IP_BAN_ENABLED }),
-	routes: loadProductionRoutes,
-};
-
-async function loadProductionRoutes(
-	_config: Env,
-	assetsBanned: AssetsBannedProductionGraph,
-	auth: AuthProductionGraph,
-	publicGraph: PublicProductionGraph,
-	projectMemberSettings: ProjectMemberSettingsProductionGraph,
-	year: YearProductionGraph,
-	importExport: ImportExportProductionGraph,
-	projectMultipart: ProjectMultipartProductionGraph,
-	directAssetUpload: ReturnType<typeof createAssetUploadControlGraph> | ReturnType<typeof createUnavailableAssetUploadControlGraph>,
-): Promise<BackendRoutes> {
-	const admin = await import('./modules/admin/admin.routes.js');
-	return {
-		auth: auth.authController,
-		devAuth: auth.devAuthController,
-		public: publicGraph.controller,
-		admin: admin.createAdminRoutes({
-			...projectMemberSettings,
-			...year,
-			...importExport,
-			bannedIpController: assetsBanned.bannedIpController,
-			projectMultipartController: projectMultipart.projectMultipartController,
-			directAssetUploadController: directAssetUpload.controller,
-		}),
-		me: projectMultipart.meController,
-		assets: assetsBanned.assetsController,
-	};
-}
-
-function owned<T>(value: T, close?: () => void | Promise<void>, start?: () => void | Promise<void>): ResourceLease<T> {
-	return { value, ownership: 'owned', close: close ?? (() => {}), start };
-}
-
-export function createMaintenanceSchedule(
-	scheduler: Scheduler,
-	clock: Clock,
-	maintenance: BackgroundMaintenance,
-	logger: AppLogger,
-): { start(): void; close(): Promise<void> } {
-	const tasks: Array<{ cancel(): void }> = [];
-	const inFlight = new Set<Promise<void>>();
-	let started = false;
-	let closed = false;
-	let closePromise: Promise<void> | undefined;
-	const abortController = new AbortController();
-
-	async function runTracked(work: () => Promise<void>): Promise<void> {
-		const operation = work();
-		inFlight.add(operation);
-		try {
-			await operation;
-		} finally {
-			inFlight.delete(operation);
-		}
-	}
-
-	return {
-		start() {
-			if (started) return;
-			if (closed) throw new Error('Maintenance schedule is closed');
-			started = true;
-			tasks.push(scheduler.every(60 * 60 * 1000, () => runTracked(async () => {
-				try {
-					const count = await maintenance.purgeExpiredSessions(
-						clock.now(),
-						abortController.signal,
-					);
-					if (count > 0) logger.info({ count }, 'Purged expired sessions');
-				} catch (error) {
-					logger.error(error, 'Failed to purge expired sessions');
-				}
-			})));
-			tasks.push(scheduler.every(60 * 1000, () => runTracked(async () => {
-				try {
-					await maintenance.reapOrphans(abortController.signal);
-				} catch (error) {
-					logger.error(error, 'Orphan reaper iteration crashed');
-				}
-			})));
-			tasks.push(scheduler.every(60 * 1000, () => runTracked(async () => {
-				try {
-					await maintenance.recoverStaleUploads(abortController.signal);
-				} catch (error) {
-					logger.error(error, 'Upload lifecycle maintenance iteration crashed');
-				}
-			})));
-			// Do not wait a full interval after a process restart: a crashed
-			// completion lease and an unrecorded Garage multipart must be reclaimed
-			// before they hold an active upload slot indefinitely.
-			void runTracked(async () => {
-				try {
-					await maintenance.recoverStaleUploads(abortController.signal);
-				} catch (error) {
-					logger.error(error, 'Startup direct upload recovery crashed');
-				}
-			});
-		},
-		close() {
-			closePromise ??= (async () => {
-				closed = true;
-				abortController.abort(new Error('Maintenance schedule is closing'));
-				for (const task of [...tasks].reverse()) task.cancel();
-				tasks.length = 0;
-				await Promise.allSettled([...inFlight]);
-			})();
-			return closePromise;
-		},
-	};
-}
-
-/** Coalesce the complete game-recovery + temp-sweep sequence, not just either half. */
-export function createSingleFlightUploadRecovery(
-	recoverGame: (signal?: AbortSignal) => Promise<void>,
-	sweepTemps: (signal?: AbortSignal) => Promise<unknown>,
-): (signal?: AbortSignal) => Promise<void> {
-	let inFlight: Promise<void> | undefined;
-	return (signal?: AbortSignal) => {
-		// Maintenance callers normally share one context signal. Reject a
-		// pre-aborted invocation before it can become the shared operation.
-		if (signal?.aborted) return Promise.resolve();
-		if (inFlight) return inFlight;
-		const operation = (async () => {
-			try {
-				await recoverGame(signal);
-				if (!signal?.aborted) await sweepTemps(signal);
-			} finally {
-				inFlight = undefined;
-			}
-		})();
-		inFlight = operation;
-		return operation;
-	};
 }
 
 /**
@@ -644,26 +209,7 @@ export async function createProductionBackendContext(
 			(limiter) => limiter.close(),
 			(limiter) => limiter.start(),
 		);
-		const persistence: BackendPersistencePorts = options.persistence ?? (() => {
-			if (!prisma) throw new Error('Prisma persistence was not initialized');
-			return {
-				databaseHealth: createPrismaHealth(prisma),
-				authRepository: createAuthRepository(prisma),
-				publicRepository: createPublicRepository(prisma),
-				projectAccessRepository: createProjectAccessRepository(prisma),
-				projectChangeRepository: createProjectChangeRepository(prisma),
-				projectRepository: createProjectCrudRepository(prisma, {
-					publicBucket: config.S3_BUCKET_PUBLIC,
-					protectedBucket: config.S3_BUCKET_PROTECTED,
-				}),
-				memberRepository: createMemberRepository(prisma),
-				exhibitionRepository: createExhibitionRepository(prisma),
-				assetsRepository: createAssetsRepository(prisma),
-				bannedIpRepository: createBannedIpRepository(prisma),
-				importRepository: createImportRepository(prisma),
-				exportRepository: createExportRepository(prisma),
-			};
-		})();
+		const persistence = options.persistence ?? createBackendPersistence(prisma, config);
 		const databaseHealth = persistence.databaseHealth;
 		const auth = createAuthProductionGraph({
 			config,
@@ -729,71 +275,30 @@ export async function createProductionBackendContext(
 			importExport,
 			() => importExport.close(),
 		));
-		const projectMultipart = createProjectMultipartProductionGraph({
-			webglDisplayController: prisma ? createWebglDisplayController(createWebglDisplayService(createWebglDisplayRepository(prisma))) : createWebglDisplayController(createWebglDisplayService({
-				read: async () => { throw new Error('WebGL display persistence is unavailable'); },
-				write: async () => { throw new Error('WebGL display persistence is unavailable'); },
-			})),
-			config,
-			uploadLifecycle,
-			access: projectMemberSettings.projectAccess,
-			repository: projectMemberSettings.projectRepository,
-		});
+		const projectMultipart = createBackendProjectMultipart({ prisma, config, uploadLifecycle, projectMemberSettings });
 		const directAssetUploadRepository = prisma ? createAssetUploadRepository(prisma) : undefined;
-		const directAssetUpload = prisma && directAssetUploadRepository ? createAssetUploadControlGraph({
-			repository: directAssetUploadRepository,
-			storage: createDirectMultipartControlStorage(s3),
-			partSigner: createMultipartPartPresigner(directSigningS3),
+		const directAssetUpload = createBackendDirectAssetUpload({
+			prisma,
+			directAssetUploadRepository,
+			s3,
+			directSigningS3,
 			clock,
 			ids,
-			config: {
-				bucket: config.S3_BUCKET_PROTECTED,
-				sessionTtlMs: config.UPLOAD_SESSION_TTL_MINUTES * 60_000,
-				partSizeBytes: config.DIRECT_UPLOAD_PART_SIZE_MB * 1024 * 1024,
-				partUrlTtlSeconds: config.DIRECT_UPLOAD_PART_URL_TTL_SEC,
-				partUrlRefreshMax: config.DIRECT_UPLOAD_PART_URL_REFRESH_MAX,
-				maxBytesFor: (actor, kind) => {
-					const limits = resolveRoleUploadLimits(config, actor.role);
-					if (kind === 'DOCUMENT' || kind === 'ATTACHMENT') return 50 * 1024 * 1024;
-					if (kind === 'VIDEO') return limits.videoMaxBytes;
-					if (kind === 'IMAGE') return limits.imageMaxBytes;
-					if (kind === 'POSTER') return limits.posterMaxBytes;
-					return limits.gameMaxBytes;
-				},
-			},
-			authorizeProjectWrite: async (actor, projectId) => projectAccess.loadProjectForUpload(actor as Parameters<typeof projectAccess.loadProjectForUpload>[0], projectId),
-			authorizeExhibitionWrite: async (actor, exhibitionId) => {
-				if (actor.role !== 'ADMIN' && actor.role !== 'OPERATOR') {
-					throw forbidden('Only operators can modify exhibition assets');
-				}
-				const exhibition = await prisma.exhibition.findUnique({ where: { id: exhibitionId }, select: { id: true } });
-				if (!exhibition) throw notFound('Exhibition not found');
-			},
-			wakeMaintenance: () => uploadLifecycle.wakeMaintenance(),
-		}) : createUnavailableAssetUploadControlGraph();
-		const directAssetUploadRecovery = directAssetUploadRepository
-			? createAssetUploadRecoveryService({
-				repository: directAssetUploadRepository,
-				storage: createMultipartRecoveryStorage(s3),
-				clock,
-				ids,
-				logger,
-				wakeMaintenance: () => uploadLifecycle.wakeMaintenance(),
-				bucket: config.S3_BUCKET_PROTECTED,
-			})
-			: undefined;
+			config,
+			projectAccess,
+			uploadLifecycle,
+		});
+		const maintenance = createBackendMaintenance({
+			config,
+			directAssetUploadRepository,
+			s3,
+			clock,
+			ids,
+			logger,
+			uploadLifecycle,
+			persistence,
+		});
 		const authSessions = auth.repository;
-		const maintenance: BackgroundMaintenance = {
-			recoverStaleUploads: async (signal) => {
-				if (!directAssetUploadRecovery || signal?.aborted) return;
-				await directAssetUploadRecovery.recover(signal);
-			},
-			async purgeExpiredSessions(before, signal) {
-				if (signal?.aborted) return 0;
-				return persistence.authRepository.purgeExpired(before);
-			},
-			reapOrphans: (signal) => uploadLifecycle.recover(signal),
-		};
 		const maintenanceSchedule = createMaintenanceSchedule(scheduler, clock, maintenance, logger);
 		owner.register('maintenanceSchedule', owned(
 			maintenanceSchedule,
@@ -812,42 +317,17 @@ export async function createProductionBackendContext(
 			directAssetUpload,
 		);
 
-		const routes = { ...baseRoutes };
-		if (!options.routes) {
-   const webglPlay = createWebglPlayService(persistence.webglPlayRepository ?? (prisma && !options.persistence ? createWebglPlayRepository(prisma) : createUnavailableWebglPlayRepository()),config,() => clock.now());
-   routes.webglPlay = createWebglPlayController(webglPlay,config,() => clock.now());
-   const fileAccess = createFileAccessController(persistence.fileAccessRepository ?? (prisma && !options.persistence ? createFileAccessRepository(prisma) : createUnavailableFileAccessRepository()), config, () => clock.now(), (bucket,key,options) => protectedDownloadPresigner.presign(bucket,key,{ttlSec:60,...options}), assetsBanned!.authorizeDownload,webglPlay.resolveRuntime);
-   routes.fileAccess = fileAccess;
-   routes.assets = async app => {
-    app.addHook('onSend', async (request, reply, payload) => {
-     const location = reply.getHeader('location');
-     if (reply.statusCode === 302 && typeof location === 'string') {
-      const grant = await fileAccess.issue(new URL(request.url, config.API_PUBLIC_URL).toString(), {...request,downloadAlreadyChecked:true});
-      reply.header('location', grant.url).header('Cache-Control', 'private, no-store');
-     }
-     return payload;
-    });
-    await app.register(baseRoutes.assets);
-   };
-  }
-		if (!options.routes) {
-			const changes = persistence.projectChangeRepository
-				? createProjectChangeService(persistence.projectChangeRepository)
-				: createUnavailableProjectChangeService();
-            const network = createWebglNetworkService(persistence.webglNetworkRepository ?? (prisma && !options.persistence
-              ? createWebglNetworkRepository(prisma) : createUnavailableWebglNetworkRepository()), config, () => clock.now());
-			routes.me = async (app) => {
-				await app.register(baseRoutes.me);
-				await app.register(createExternalLinkController());
-				await app.register(createProjectChangeController(changes, 'me'));
-                await app.register(createWebglNetworkController(network, 'me'));
-			};
-			routes.admin = async (app) => {
-				await app.register(baseRoutes.admin);
-				await app.register(createProjectChangeController(changes, 'admin'));
-                await app.register(createWebglNetworkController(network, 'admin'));
-			};
-		}
+		const routes = composeBackendRoutes({
+			baseRoutes,
+			hasSuppliedRoutes: Boolean(options.routes),
+			hasSuppliedPersistence: Boolean(options.persistence),
+			persistence,
+			prisma,
+			config,
+			clock,
+			protectedDownloadPresigner,
+			assetsBanned,
+		});
 
 		return {
 			config,

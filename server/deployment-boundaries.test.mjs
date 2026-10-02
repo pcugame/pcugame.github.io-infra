@@ -1,3 +1,4 @@
+import { deploySource } from './deploy-source.test-helper.mjs';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const deploy = await readFile(new URL('./deploy.sh', import.meta.url), 'utf8');
+const deploy = deploySource();
 const env = await readFile(new URL('./.env.example', import.meta.url), 'utf8');
 const integrationCompose = await readFile(new URL('../docker-compose.integration.yml', import.meta.url), 'utf8');
 const integrationSmoke = await readFile(new URL('../scripts/smoke-integration.mjs', import.meta.url), 'utf8');
@@ -34,33 +35,29 @@ for (const entry of [
 	'dist/image-worker.js', 'dist/export-worker.js', 'dist/project-publication-worker.js',
 ]) assert.ok(deploy.includes(entry), `missing dedicated process: ${entry}`);
 
-const apiRun = deploy.slice(deploy.indexOf('echo "Starting API..."'), deploy.indexOf('# Verify API container'));
-assert.doesNotMatch(apiRun, /NAS_EXPORT|nas_export|\/app\/storage/);
-const commonRuntimeEnv = deploy.slice(
-	deploy.indexOf('local common_env=('),
-	deploy.indexOf('local ca_args=()'),
-);
-for (const name of ['SESSION_SECRET', 'GOOGLE_CLIENT_IDS']) {
-	assert.ok(
-		commonRuntimeEnv.includes(`-e "${name}=\${${name}}"`),
-		`dedicated workers must receive ${name} required by loadEnv`,
-	);
-}
-const exportStart = deploy.slice(deploy.indexOf('start_worker "$EXPORT_WORKER_CONTAINER"'));
-assert.match(exportStart, /NAS_EXPORT_ROOT/);
-assert.match(exportStart, /nas_export_host_path/);
-assert.match(deploy, /Forward-only deploy complete/);
+const quadletTemplate = (name) => readFile(new URL(`./quadlet/templates/${name}.container.in`, import.meta.url), 'utf8');
+const apiUnit = await quadletTemplate('gp-api');
+assert.doesNotMatch(apiUnit, /NAS_EXPORT|nas_export|\/app\/storage/);
+assert.match(apiUnit, /EnvironmentFile=@COMMON_ENV@[\s\S]*EnvironmentFile=@API_ENV@/);
+const runtimeParser = await readFile(new URL('./quadlet/runtime-env.py', import.meta.url), 'utf8');
+for (const name of ['SESSION_SECRET', 'GOOGLE_CLIENT_IDS']) assert.ok(runtimeParser.includes(name));
+const exportUnit = await quadletTemplate('gp-worker-export');
+assert.match(exportUnit, /@EXPORT_ENV@/);
+assert.match(exportUnit, /Volume=@NAS_VOLUME@/);
+assert.match(deploy, /Forward-only Quadlet deploy complete/);
+assert.doesNotMatch(deploy, /podman run -d|podman pod (?:create|rm|stop)|podman (?:generate systemd|stop|rm)|--restart/);
 assert.doesNotMatch(deploy, /do_rollback|API_IMAGE_PREVIOUS|podman\s+tag[^\n]+previous/i);
-assert.match(deploy, /dist\/phase1-release-manifest\.js/);
-assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
+assert.doesNotMatch(deploy, /dist\/phase1-release-manifest\.js/);
+assert.doesNotMatch(deploy, /PCU_PHASE1_RUNTIME_V1/);
 assert.match(deploy, /release-artifact-preflight\) do_release_artifact_preflight/);
-assert.match(deploy, /PCU_RELEASE_SCHEMA_PHASE === "phase2"[\s\S]*project-publication-worker\.js/);
-assert.match(deploy, /release_schema_phase" == phase2[\s\S]*PROJECT_PUBLICATION_WORKER_CONTAINER/);
-assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == false[\s\S]*assert_phase1_rollback_authorization/);
+assert.match(deploy, /const entries = \[[\s\S]*"dist\/project-publication-worker\.js"[\s\S]*\];/);
+assert.doesNotMatch(deploy, /PCU_RELEASE_SCHEMA_PHASE/);
+assert.match(deploy, /release_schema_phase" == phase2/);
+assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == true[\s\S]*legacy runtime bypass is retired/);
 assert.match(deploy, /must use an immutable @sha256 release digest/);
 assert.match(deploy, /ghcr\\\.io\/pcugame\/pcu-graduationproject-v2-api@sha256/);
 assert.match(deploy, /image source revision label does not match RELEASE_SOURCE_SHA/);
-assert.match(deploy, /rollback image tag no longer resolves to the authorized image ID/);
+assert.doesNotMatch(deploy, /ROLLBACK_AUTH|ROLLBACK_CONSUMED|assert_phase1_rollback_authorization/);
 assert.doesNotMatch(deploy, /\*:\s*sha-|localhost\/\*:rollback-/);
 
 for (const [name, value] of [
@@ -103,19 +100,11 @@ assert.match(integrationRunner, /SigV4 sentinel query leaked to protected proxy 
 assert.match(integrationRunner, /fixed GET body reached unavailable upstream/);
 assert.match(integrationRunner, /chunked GET body reached unavailable upstream/);
 
-const gameStart = deploy.slice(
-	deploy.indexOf('start_worker "$GAME_WORKER_CONTAINER"'),
-	deploy.indexOf('start_worker "$WEBGL_WORKER_CONTAINER"'),
-);
-const webglStart = deploy.slice(
-	deploy.indexOf('start_worker "$WEBGL_WORKER_CONTAINER"'),
-	deploy.indexOf('start_worker "$VIDEO_WORKER_CONTAINER"'),
-);
-for (const isolatedWorker of [gameStart, webglStart]) {
-	assert.match(isolatedWorker, /--tmpfs \/tmp:rw,noexec,nosuid,size=6g/);
-	assert.doesNotMatch(isolatedWorker, /-v [^\n]*:\/tmp/);
+for (const name of ['gp-worker-game-validation', 'gp-worker-webgl']) {
+    const isolatedWorker = await quadletTemplate(name);
+    assert.match(isolatedWorker, /Tmpfs=\/tmp:rw,noexec,nosuid,size=6g/);
+    assert.doesNotMatch(isolatedWorker, /Volume=[^\n]*:\/tmp/);
 }
-assert.match(deploy, /independent, container-owned tmpfs mounts/);
 assert.match(deploy, /EXPORT_WORKER_MAX_JOB_BYTES \+ NAS_EXPORT_STAGING_HEADROOM_BYTES/);
 assert.match(deploy, /15 \* gib \+ GARAGE_DEPLOYMENT_HEADROOM_BYTES/);
 
@@ -131,11 +120,28 @@ const boundaryFixture = exactFixture.replace(
 	/^S3_PRIVATE_NETWORK_CONFIRMED=.*$/m,
 	'S3_PRIVATE_NETWORK_CONFIRMED=true',
 );
+const runtimeCommonKeys = new Set('DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_IDS CORS_ALLOWED_ORIGINS API_PUBLIC_URL WEB_PUBLIC_URL S3_ENDPOINT S3_PUBLIC_SIGNING_ENDPOINT S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT PUBLIC_ASSET_ORIGIN S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY FILE_GATEWAY_SECRET DIRECT_UPLOAD_PART_URL_REFRESH_MAX UPLOAD_USER_GAME_MAX_MB UPLOAD_PRIVILEGED_GAME_MAX_MB DIRECT_UPLOAD_WORKER_TEMP_MAX_MB EXPORT_WORKER_MAX_OBJECT_BYTES EXPORT_WORKER_MAX_JOB_BYTES LOG_LEVEL S3_REGION S3_BUCKET_PUBLIC S3_BUCKET_PROTECTED S3_FORCE_PATH_STYLE WEBGL_EXTERNAL_CONNECTIONS_ENABLED WEBGL_PLAY_ENABLED'.split(' '));
+const runtimeApiKeys = new Set('TRUST_PROXY DOWNLOAD_AUTO_IP_BAN_ENABLED SESSION_COOKIE_NAME SESSION_IDLE_MS SESSION_ABSOLUTE_MS SESSION_TOUCH_MIN_INTERVAL_MS SHUTDOWN_DRAIN_MS COOKIE_SECURE COOKIE_SAME_SITE ALLOWED_GOOGLE_HD'.split(' '));
+const runtimePgKeys = new Set('POSTGRES_USER POSTGRES_DB POSTGRES_PASSWORD'.split(' '));
+const writeRuntimeFixture = async (fixture) => {
+    await mkdir(join(fixtureDir, 'runtime-env'), { recursive: true });
+    const values = fixture.split('\n').filter(line => /^[A-Z][A-Z0-9_]*=/.test(line)).map(line => {
+        const equal = line.indexOf('=');
+        let value = line.slice(equal + 1);
+        if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) value = value.slice(1, -1);
+        return [line.slice(0, equal), value];
+    });
+    for (const [file, keys] of [['common', runtimeCommonKeys], ['api', runtimeApiKeys], ['postgres', runtimePgKeys]]) {
+        await writeFile(join(fixtureDir, 'runtime-env', `${file}.env`), values.filter(([key]) => keys.has(key)).map(([key,value]) => `${key}=${value}`).join('\n') + '\n');
+    }
+};
+const fixtureReleaseEnv = { API_IMAGE: 'ghcr.io/pcugame/pcu-graduationproject-v2-api@sha256:' + 'a'.repeat(64), RELEASE_SCHEMA_PHASE: 'phase2' };
 const runBoundary = async (fixture, command = 'boundary-preflight', extraEnv = {}, commandArgs = []) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);
+	await writeRuntimeFixture(fixture);
 	return spawnSync('bash', [deployPath, command, ...commandArgs], {
 		encoding: 'utf8',
-		env: { ...process.env, DEPLOY_DIR: fixtureDir, ...extraEnv },
+		env: { ...process.env, ...fixtureReleaseEnv, DEPLOY_DIR: fixtureDir, ...extraEnv },
 	});
 };
 const acceptedBoundary = await runBoundary(boundaryFixture);
@@ -156,7 +162,7 @@ for (const replacement of ['', 'FILE_GATEWAY_SECRET=short']) {
   assert.match(missingGatewaySecret.stdout, /FILE_GATEWAY_SECRET must contain at least 32 characters/);
 }
 assert.match(deploy, /-e "FILE_GATEWAY_SECRET=\$\{FILE_GATEWAY_SECRET:-\}"/);
-assert.match(deploy, /assert_phase1_rollback_authorization\(\) \{\s+assert_visibility_rollback_safe/);
+assert.doesNotMatch(deploy, /assert_visibility_rollback_safe|assert_phase1_rollback_authorization/);
 
 
 // Exercise the exact final-web marker contract over HTTPS. The verifier must
@@ -269,15 +275,23 @@ assert.notEqual(destructiveGuard.status, 0);
 assert.equal(spawnSync('test', ['!', '-e', podmanMarker]).status, 0, 'Podman ran before origin preflight failed');
 
 assert.match(deploy, /restart\) do_up ;;/);
-const upFunction = deploy.slice(deploy.indexOf('do_up() {'), deploy.indexOf('# ── Logs'));
-assert.ok(
-	upFunction.indexOf('validate_production_boundaries') < upFunction.indexOf('do_down'),
-	'do_up must validate production boundaries before its down/up replacement phase',
-);
-assert.ok(
-	upFunction.indexOf('validate_release_artifacts "$release_schema_phase"') < upFunction.indexOf('do_down'),
-	'do_up must validate the phase marker and worker set before replacing the deployment',
-);
+const definition = name => {
+	const match = deploy.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'));
+	assert.ok(match, `missing ${name}`);
+	return match[0];
+};
+const upFunction = definition('do_up');
+assert.match(upFunction, /do_up\(\) \{\n  do_activation_preflight\n  do_activate\n\}/);
+const activationPreflight = definition('do_activation_preflight');
+assert.ok(activationPreflight.includes('validate_production_boundaries'));
+assert.ok(activationPreflight.includes('validate_release_artifacts "$release_schema_phase"'));
+assert.doesNotMatch(activationPreflight, /stop_application_units|systemctl --user start/);
+const activation = definition('do_activate');
+assert.ok(activation.includes('stop_application_units'));
+assert.ok(activation.includes('do_api_smoke'));
+assert.ok(activation.includes('RUNTIME_CONTAINERS[@]:1'));
+assert.ok(activation.indexOf('stop_application_units') < activation.indexOf('do_api_smoke'));
+assert.ok(activation.indexOf('do_api_smoke') < activation.indexOf('RUNTIME_CONTAINERS[@]:1'));
 assert.match(deploy, /redirect: 'manual'/);
 assert.match(deploy, /AbortSignal\.timeout\(5000\)/);
 assert.match(deploy, /response\.status !== 200/);
@@ -311,6 +325,7 @@ for (const [label, fixture] of [
 // from another commit all fail before the current deployment is stopped.
 await writeFile(fakePodman, `#!/bin/sh
 set -eu
+[ -z "\${PODMAN_MARKER:-}" ] || : > "$PODMAN_MARKER"
 if [ "\${1:-}" = pull ]; then exit 0; fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   case " $* " in
@@ -340,15 +355,34 @@ await chmod(fakePodman, 0o755);
 const releaseDigest = `sha256:${'1'.repeat(64)}`;
 const releaseImage = `ghcr.io/pcugame/pcu-graduationproject-v2-api@${releaseDigest}`;
 const releaseSourceSha = '2'.repeat(40);
-const releaseImageId = '3'.repeat(64);
 const releaseEnv = {
 	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
 	API_IMAGE: releaseImage,
 	MIGRATION_IMAGE: releaseImage,
 	RELEASE_SOURCE_SHA: releaseSourceSha,
+	RELEASE_SCHEMA_PHASE: 'phase2',
 	FAKE_IMAGE_DIGEST: releaseDigest,
 	FAKE_IMAGE_REVISION: releaseSourceSha,
 };
+const quadletDir = join(fixtureDir, 'units');
+const renderedFixture = spawnSync('bash', [new URL('./quadlet/render.sh', import.meta.url).pathname, quadletDir], {
+    encoding: 'utf8', env: { ...process.env, ...releaseEnv, DEPLOY_DIR: fixtureDir, NAS_EXPORT_HOST_PATH: fixtureDir, NAS_EXPORT_PATH: '/nas-export' },
+});
+assert.equal(renderedFixture.status, 0, renderedFixture.stderr);
+releaseEnv.QUADLET_DIR = quadletDir;
+await writeFile(join(fakeBin, 'systemctl'), `#!/bin/sh
+case "$2" in
+show)
+case "$4" in
+--property=SourcePath)
+if [ "$3" = gp-pg-data-volume.service ]; then echo "$QUADLET_DIR/gp-pg-data.volume"; elif [ "$3" = graduationproject-pod.service ]; then echo "$QUADLET_DIR/graduationproject.pod"; else echo "$QUADLET_DIR/\${3%.service}.container"; fi ;;
+--property=NeedDaemonReload) echo no ;;
+--property=DropInPaths) : ;;
+--property=FragmentPath) echo "/run/user/999/systemd/generator/$3" ;;
+esac ;;
+esac
+`);
+await chmod(join(fakeBin, 'systemctl'), 0o755);
 const exactRelease = await runBoundary(boundaryFixture, 'release-artifact-preflight', releaseEnv, ['phase2']);
 assert.equal(exactRelease.status, 0, exactRelease.stderr || exactRelease.stdout);
 
@@ -388,111 +422,43 @@ const labelMismatch = await runBoundary(boundaryFixture, 'release-artifact-prefl
 assert.notEqual(labelMismatch.status, 0, 'wrong OCI source revision unexpectedly passed');
 assert.match(`${labelMismatch.stdout}\n${labelMismatch.stderr}`, /source revision label does not match/);
 
-// A local rollback tag is never authority. The server records the exact
-// current image ID plus a nonce, and a later tag retarget is rejected.
-const rollbackNonce = '6'.repeat(64);
-const rollbackImage = 'localhost/pcu-api:rollback-test';
-const authorizeRollback = await runBoundary(boundaryFixture, 'authorize-phase1-rollback', {
-	...releaseEnv,
-}, [rollbackNonce]);
-assert.equal(authorizeRollback.status, 0, authorizeRollback.stderr || authorizeRollback.stdout);
-assert.equal(spawnSync('stat', ['-c', '%a', join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization')], { encoding: 'utf8' }).stdout.trim(), '600');
-assert.match(
-	await readFile(join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization'), 'utf8'),
-	new RegExp(`^${releaseImageId} ${rollbackNonce}\\n$`),
-	'bare Podman image ID was not persisted canonically',
-);
-const prefixedAuthorizeRollback = await runBoundary(boundaryFixture, 'authorize-phase1-rollback', {
-	...releaseEnv,
-	FAKE_CONTAINER_IMAGE_ID: `sha256:${releaseImageId}`,
-}, [rollbackNonce]);
-assert.equal(prefixedAuthorizeRollback.status, 0, prefixedAuthorizeRollback.stderr || prefixedAuthorizeRollback.stdout);
-assert.match(
-	await readFile(join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization'), 'utf8'),
-	new RegExp(`^${releaseImageId} ${rollbackNonce}\\n$`),
-	'prefixed Podman image ID was not normalized to the canonical bare ID',
-);
-
-const rollbackEnv = {
-	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
-	API_IMAGE: rollbackImage,
-	MIGRATION_IMAGE: rollbackImage,
-	RELEASE_SCHEMA_PHASE: 'phase1',
-	START_DEDICATED_WORKERS: 'false',
-	PULL_API_IMAGE: 'false',
-	ROLLBACK_AUTH_NONCE: rollbackNonce,
-};
-const retargetedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
-	...rollbackEnv,
-	FAKE_IMAGE_ID: `sha256:${'7'.repeat(64)}`,
-}, ['phase1']);
-assert.notEqual(retargetedRollback.status, 0, 'forged rollback tag unexpectedly passed');
-assert.match(`${retargetedRollback.stdout}\n${retargetedRollback.stderr}`, /no longer resolves to the authorized image ID/);
-const exactRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
-	...rollbackEnv,
-	FAKE_IMAGE_ID: `sha256:${releaseImageId}`,
-}, ['phase1']);
-assert.equal(exactRollback.status, 0, exactRollback.stderr || exactRollback.stdout);
-const malformedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
-	...rollbackEnv,
-	FAKE_IMAGE_ID: `sha512:${releaseImageId}`,
-}, ['phase1']);
-assert.notEqual(malformedRollback.status, 0, 'malformed local image ID unexpectedly passed');
-assert.match(`${malformedRollback.stdout}\n${malformedRollback.stderr}`, /malformed local image ID/);
-const fakeSystemctl = join(fakeBin, 'systemctl');
-await writeFile(fakeSystemctl, '#!/bin/sh\nexit 0\n');
-await chmod(fakeSystemctl, 0o755);
-const consumedRollback = await runBoundary(boundaryFixture, 'up', {
-	...rollbackEnv,
-});
-assert.equal(consumedRollback.status, 0, consumedRollback.stderr || consumedRollback.stdout);
-assert.equal(spawnSync('test', ['!', '-e', join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization')]).status, 0);
-assert.equal(spawnSync('test', ['!', '-e', join(fixtureDir, 'cutover-state', 'phase1-rollback.consumed')]).status, 0);
-const replayedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
-	...rollbackEnv,
-	FAKE_IMAGE_ID: releaseImageId,
-}, ['phase1']);
-assert.notEqual(replayedRollback.status, 0, 'consumed rollback authorization unexpectedly replayed');
-assert.match(`${replayedRollback.stdout}\n${replayedRollback.stderr}`, /authorization is absent or already consumed/);
-
-// A browser-side authorization check can become stale while an environment
-// approval waits. The production server re-reads its own observation record
-// and evaluates the 24-hour/31-day window immediately before drain.
-const observationDir = join(fixtureDir, 'cutover-state');
-await mkdir(observationDir, { recursive: true });
-const canonicalUtc = (date) => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
-const runObservationWindow = async (ageMs, expectedOverride) => {
-	const startedAt = canonicalUtc(new Date(Date.now() - ageMs));
-	await writeFile(join(observationDir, 'phase1-observation'), [
-		`read_cutover_at=${startedAt}`,
-		`phase1_api_image=${releaseImage}`,
-		'',
-	].join('\n'));
-	const result = await runBoundary(
-		boundaryFixture,
-		'verify-observation-window',
-		{},
-		[expectedOverride ?? startedAt],
-	);
-	return { result, startedAt };
-};
-const currentObservation = await runObservationWindow(25 * 60 * 60 * 1000);
-assert.equal(currentObservation.result.status, 0, currentObservation.result.stderr || currentObservation.result.stdout);
-const delayedTooLittle = await runObservationWindow(23 * 60 * 60 * 1000);
-assert.notEqual(delayedTooLittle.result.status, 0, 'observation younger than 24h unexpectedly passed');
-assert.match(`${delayedTooLittle.result.stdout}\n${delayedTooLittle.result.stderr}`, /only 23h old/);
-const delayedTooLong = await runObservationWindow(32 * 24 * 60 * 60 * 1000);
-assert.notEqual(delayedTooLong.result.status, 0, 'approval-delayed observation older than 31d unexpectedly passed');
-assert.match(`${delayedTooLong.result.stdout}\n${delayedTooLong.result.stderr}`, /older than 31 days/);
-const mismatchedObservation = await runObservationWindow(
-	25 * 60 * 60 * 1000,
-	canonicalUtc(new Date(Date.now() - 26 * 60 * 60 * 1000)),
-);
-assert.notEqual(mismatchedObservation.result.status, 0, 'mismatched observation attestation unexpectedly passed');
-assert.match(`${mismatchedObservation.result.stdout}\n${mismatchedObservation.result.stderr}`, /does not match the server-side record/);
+// Retired transition commands fail before any container or database operation.
+for (const command of [
+	'authorize-phase1-rollback', 'legacy-audit', 'backfill', 'correction',
+	'online-contract-preflight', 'contract-preflight', 'verify-observation-window', 'mark-read-cutover',
+]) {
+	await rm(podmanMarker, { force: true });
+	const removed = await runBoundary(boundaryFixture, command, {
+		...releaseEnv, PODMAN_MARKER: podmanMarker,
+	});
+	assert.notEqual(removed.status, 0, `${command} unexpectedly remained available`);
+	assert.match(`${removed.stdout}\n${removed.stderr}`, /Usage:/);
+	assert.equal(spawnSync('test', ['!', '-e', podmanMarker]).status, 0, `${command} invoked Podman`);
+}
+for (const [command, overrides, args, error] of [
+	['release-artifact-preflight', {}, ['phase1'], /requires phase2/],
+	['release-assert', {}, ['phase1'], /requires phase2/],
+	['up', { RELEASE_SCHEMA_PHASE: 'phase1' }, [], /must explicitly be phase2/],
+	['restart', { RELEASE_SCHEMA_PHASE: 'phase1' }, [], /must explicitly be phase2/],
+	['release-artifact-preflight', { START_DEDICATED_WORKERS: 'false' }, ['phase2'], /must be true/],
+	['up', { START_DEDICATED_WORKERS: 'false' }, [], /must be true/],
+	['restart', { START_DEDICATED_WORKERS: 'false' }, [], /must be true/],
+	['release-migrate', {}, ['apply-expand'], /must be status or apply-contract/],
+	['release-migrate', {}, ['apply-contract', '--observation-exception-id=retired'], /does not accept transition/],
+	['release-migrate', {}, ['status', '--exception-profile=image-bridge-traffic'], /does not accept transition/],
+]) {
+	await rm(podmanMarker, { force: true });
+	const rejected = await runBoundary(boundaryFixture, command, {
+		...releaseEnv, ...overrides, PODMAN_MARKER: podmanMarker,
+	}, args);
+	assert.notEqual(rejected.status, 0, `${command} ${args.join(' ')} bypass unexpectedly passed`);
+	assert.match(`${rejected.stdout}\n${rejected.stderr}`, error);
+	assert.equal(spawnSync('test', ['!', '-e', podmanMarker]).status, 0, `${command} invoked Podman before rejecting a retired path`);
+}
 
 const runCapacity = async (fixture) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);
+	await writeRuntimeFixture(fixture);
 	return spawnSync('bash', [deployPath, 'capacity-preflight'], {
 		encoding: 'utf8',
 		env: { ...process.env, DEPLOY_DIR: fixtureDir },

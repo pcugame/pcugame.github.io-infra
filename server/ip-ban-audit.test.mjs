@@ -1,3 +1,4 @@
+import { deploySource } from './deploy-source.test-helper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -133,26 +134,22 @@ test('rejects PostgreSQL failures and malformed aggregate output without exposin
 });
 
 test('release audits bans before drain and verifies disabled AUTO rows after startup', () => {
+  const script = readFileSync(new URL('./release-orchestrate.sh', import.meta.url), 'utf8');
+  const preflight = script.slice(script.indexOf('  preflight)'), script.indexOf('  migrate)'));
+  assert.ok(preflight.indexOf('ip-ban-audit.sh" before') >= 0);
+  assert.ok(preflight.indexOf('ip-ban-audit.sh" before') < preflight.indexOf('deploy drain'));
+  const activate = script.slice(script.indexOf('  activate)'), script.indexOf('  health)'));
+  assert.ok(activate.indexOf('deploy up') >= 0);
+  assert.ok(activate.indexOf('ip-ban-audit.sh" after') > activate.indexOf('deploy up'));
   const workflow = readFileSync(new URL('../.github/workflows/release-api-cutover.yml', import.meta.url), 'utf8');
-  const releaseBlockStart = workflow.indexOf('if [ "${RELEASE_PHASE}" = release ]; then');
-  assert.notEqual(releaseBlockStart, -1, 'release preflight block exists');
-  const releaseBlockEnd = workflow.indexOf('exit 0', releaseBlockStart);
-  assert.notEqual(releaseBlockEnd, -1, 'release preflight block has an exit boundary');
-  const releaseBlock = workflow.slice(releaseBlockStart, releaseBlockEnd);
-  const beforeAudit = releaseBlock.indexOf('ip-ban-audit.sh" before');
-  const drain = releaseBlock.indexOf('deploy.sh" drain');
-  assert.notEqual(beforeAudit, -1, 'release runs the pre-migration IP audit');
-  assert.notEqual(drain, -1, 'release drains mutations');
-  assert(beforeAudit < drain, 'pre-migration audit runs before mutation drain');
+  assert.ok(workflow.indexOf('release-orchestrate.sh" activate') < workflow.indexOf('release-orchestrate.sh" smoke'));
 
-  const startApi = workflow.indexOf('if ! RELEASE_SCHEMA_PHASE=phase2 "${DEPLOY_DIR}/deploy.sh" up; then');
-  const afterAudit = workflow.indexOf('ip-ban-audit.sh" after', startApi);
-  const writeReleaseRecord = workflow.indexOf('deployed-${RELEASE_SOURCE_SHA}.txt', startApi);
-  assert(startApi !== -1 && afterAudit > startApi, 'post-migration audit follows API startup');
-  assert(writeReleaseRecord > afterAudit, 'post-migration audit precedes deployed source recording');
-
-  const deployScript = readFileSync(new URL('./deploy.sh', import.meta.url), 'utf8');
-  assert.match(deployScript, /DOWNLOAD_AUTO_IP_BAN_ENABLED=\$\{DOWNLOAD_AUTO_IP_BAN_ENABLED:-false\}/);
+  const deployScript = deploySource();
+  assert.match(deployScript, /load_runtime_env/);
+  const apiUnit = readFileSync(new URL('./quadlet/templates/gp-api.container.in', import.meta.url), 'utf8');
+  assert.match(apiUnit, /EnvironmentFile=@API_ENV@/);
+  const runtimeEnv = readFileSync(new URL('./quadlet/runtime-env.py', import.meta.url), 'utf8');
+  assert.match(runtimeEnv, /DOWNLOAD_AUTO_IP_BAN_ENABLED='false'/);
   const exampleEnv = readFileSync(new URL('./.env.example', import.meta.url), 'utf8');
   assert.match(exampleEnv, /^DOWNLOAD_AUTO_IP_BAN_ENABLED=false$/m);
 });

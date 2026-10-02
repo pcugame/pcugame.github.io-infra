@@ -1,0 +1,21 @@
+[Unit]
+Description=Graduation project gp-api
+After=gp-postgres.service
+
+[Container]
+Image=@API_IMAGE@
+ContainerName=gp-api
+Pod=graduationproject.pod
+StartWithPod=true
+EnvironmentFile=@COMMON_ENV@
+Environment=NODE_ENV=production
+@CA_ENV@
+@CA_VOLUME@
+EnvironmentFile=@API_ENV@
+Environment=PORT=4000
+Entrypoint=node
+Exec=dist/server.js
+StopTimeout=10
+
+[Service]
+Restart=always

@@ -9,6 +9,13 @@ function repositoryFile(relativePath: string): string {
 	return readFileSync(resolve(repositoryRoot, relativePath), 'utf8');
 }
 
+function deploymentSource(): string {
+	const wrapper = repositoryFile('server/deploy.sh');
+	const modules = wrapper.match(/^for module in ([a-z ]+); do$/m);
+	expect(modules).not.toBeNull();
+	return [wrapper, ...modules![1]!.split(' ').map(name => repositoryFile(`server/deploy/${name}.sh`))].join('\n');
+}
+
 function pushPaths(workflow: string): string[] {
 	const pushStart = workflow.indexOf('  push:\n');
 	const dispatchStart = workflow.indexOf('  workflow_dispatch:', pushStart);
@@ -20,20 +27,23 @@ function pushPaths(workflow: string): string[] {
 }
 
 describe('production deployment safety', () => {
-	it('defaults to ignoring forwarded headers until an explicit proxy peer is configured', () => {
-		const deployScript = repositoryFile('server/deploy.sh');
+	it('uses operator API env with an explicit proxy trust setting and loopback publishing', () => {
+		const deployScript = deploymentSource();
 		const productionEnvExample = repositoryFile('server/.env.example');
 
 		expect(deployScript).toContain('API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"');
-		expect(deployScript).toContain('-e "TRUST_PROXY=${TRUST_PROXY:-false}" \\');
+		expect(repositoryFile('server/quadlet/templates/gp-api.container.in')).toContain('EnvironmentFile=@API_ENV@');
+		expect(repositoryFile('server/quadlet/runtime-env.py')).toContain('TRUST_PROXY');
+		expect(deployScript).toContain('load_runtime_env');
 		expect(productionEnvExample).toMatch(/^TRUST_PROXY=false$/m);
 	});
 
 	it('publishes a tested API image and records its immutable digest without an implicit production cutover', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
 		expect(apiWorkflow).toContain('actions: read');
-		expect(apiWorkflow).toContain('npm test --workspace=apps/api');
-		expect(apiWorkflow).toContain('npm run build --workspace=apps/api');
+		expect(apiWorkflow).toContain('npm run verify:api-release');
+		expect(JSON.parse(repositoryFile('package.json')).scripts['verify:api-release']).toContain('npm test --workspace=apps/api');
+		expect(JSON.parse(repositoryFile('package.json')).scripts['verify:api-release']).toContain('npm run build --workspace=apps/api');
 		expect(apiWorkflow).toContain('id: release-image');
 		expect(apiWorkflow).toContain('RELEASE_SOURCE_SHA=${{ github.sha }}');
 		expect(apiWorkflow).toContain('${{ steps.release-image.outputs.digest }}');
@@ -44,9 +54,11 @@ describe('production deployment safety', () => {
 	it('checks release artifacts without executing database migration or cutover', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
 		const apiPaths = pushPaths(repositoryFile('.github/workflows/deploy-api.yml'));
-		const releaseGatePath = '.github/release-gates/web-before-api/**';
+		const sourceVerifierPath = 'server/verify-release-source.mjs';
 
-		expect(apiPaths).toContain(releaseGatePath);
+		expect(apiPaths).toContain(sourceVerifierPath);
+		expect(apiPaths).toContain('.github/release-gates/web-before-api/**');
+		expect(apiPaths).toContain('server/deploy/**');
 		expect(apiPaths).not.toContain('apps/web/**');
 		// Artifact verification may inspect release CLI filenames; invoking a
 		// migration command belongs exclusively to the explicit cutover workflow.
@@ -56,7 +68,7 @@ describe('production deployment safety', () => {
 
 	it('leaves production release authorization to the explicit server cutover procedure', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
-		const deployScript = repositoryFile('server/deploy.sh');
+		const deployScript = deploymentSource();
 
 		expect(apiWorkflow).toContain('workflow_dispatch:');
 		expect(deployScript).toContain('assert_mutation_drained');

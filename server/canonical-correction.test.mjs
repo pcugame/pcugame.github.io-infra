@@ -1,9 +1,9 @@
+import { deploySource } from './deploy-source.test-helper.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
-const source = readFileSync(new URL('./deploy.sh', import.meta.url), 'utf8');
+const source = deploySource();
 function definition(name) {
   const match = source.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'));
   assert.ok(match, `missing ${name}`);
@@ -11,41 +11,78 @@ function definition(name) {
 }
 function run(script) { return spawnSync('bash', ['-euc', script], { encoding: 'utf8' }); }
 
-test('preparation runs online but apply fails before invoking the CLI unless drained', () => {
-  for (const stage of ['investigate', 'prepare', 'protect', 'apply']) {
-    const result = run(`${definition('do_canonical_correction')}
+test('correction and rollback commands are retired without invoking the release CLI', () => {
+  assert.doesNotMatch(source, /do_canonical_correction|correct-canonical-assets|assert_legacy_material_rollback_safe|ROLLBACK_AUTH_NONCE/);
+  for (const command of ['correction', 'authorize-phase1-rollback']) {
+    const result = spawnSync('bash', [new URL('./deploy.sh', import.meta.url).pathname, command], {
+      encoding: 'utf8', env: { ...process.env, DEPLOY_DIR: '/nonexistent-retired-command-fixture' },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stdout, /Usage:/);
+    assert.doesNotMatch(result.stdout, /\.env file not found/);
+  }
+});
+
+test('routine artifact preflight requires migration and inventory CLIs only', () => {
+  const result = run(`${definition('validate_release_entries')}
+MIGRATION_IMAGE=fixture
+podman() { printf '%s\\n' "$@"; }
+validate_release_entries`);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /dist-release\/scripts\/release-migrate\.js/);
+  assert.match(result.stdout, /dist-release\/scripts\/snapshot-garage-inventory\.js/);
+  assert.doesNotMatch(result.stdout, /backfill-canonical-assets|preflight-canonical-contract|verify-cutover-report|correct-canonical-assets/);
+});
+
+test('routine migration rejects expand and exception arguments before drain or CLI', () => {
+  for (const args of ['apply-expand', 'apply-contract --observation-exception-id=retired', 'status --exception-profile=image-bridge-36']) {
+    const result = run(`${definition('do_release_migration')}
+assert_mutation_drained() { echo drained; }
+run_release_entry() { echo invoked; }
+do_release_migration ${args}`);
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stdout, /drained|invoked/);
+  }
+});
+
+test('routine contract migration still fails before CLI unless mutations are drained', () => {
+  const result = run(`${definition('do_release_migration')}
 assert_mutation_drained() { return 19; }
 run_release_entry() { echo invoked; }
-do_canonical_correction ${stage}`);
-    assert.equal(result.status, stage === 'apply' ? 19 : 0);
-    assert.equal(result.stdout.includes('invoked'), stage !== 'apply');
+do_release_migration apply-contract`);
+  assert.equal(result.status, 19);
+  assert.doesNotMatch(result.stdout, /invoked/);
+});
+
+test('routine migration status is read-only and contract apply preserves the release entry', () => {
+  for (const action of ['status', 'apply-contract']) {
+    const result = run(`${definition('do_release_migration')}
+assert_mutation_drained() { echo drained; }
+run_release_entry() { printf '%s\\n' "$@"; }
+do_release_migration ${action}`);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.includes('drained'), action === 'apply-contract');
+    assert.match(result.stdout, new RegExp(`dist-release/scripts/release-migrate\\.js\\n${action}\\n$`));
+    if (action === 'apply-contract') {
+      assert.match(result.stdout, /drained\ndist-release\/scripts\/release-migrate\.js\nassert-runtime\nphase2\ndist-release\/scripts\/release-migrate\.js\napply-contract\n$/);
+    } else {
+      assert.doesNotMatch(result.stdout, /assert-runtime/);
+    }
   }
 });
 
-test('correction release process receives actual 2 GiB memory and swap limits', () => {
-  const result = run(`${definition('run_release_entry')}
-load_env() { :; }
-validate_production_boundaries() { :; }
-require_immutable_release_images() { :; }
-validate_release_source_identity() { :; }
-assert_postgres_running() { :; }
-release_common_args() { RELEASE_CONTAINER_ARGS=(--rm); }
-podman() { printf '%s\\n' "$@"; }
-CUTOVER_STATE_DIR=/tmp
-MIGRATION_IMAGE=fixture
-run_release_entry dist-release/scripts/correct-canonical-assets.js prepare --manifest=/release-state/review.json`);
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /--memory=2g\n--memory-swap=2g/);
-  assert.match(result.stdout, /prepare\n--manifest=\/release-state\/review.json/);
-});
-
-test('legacy rollback rejects material rows and database failures', () => {
-  for (const [value, exit] of [['0', 0], ['1', 0], ['', 3], ['invalid', 0]]) {
-    const result = run(`${definition('assert_legacy_material_rollback_safe')}
-PG_CONTAINER=fixture
-podman() { cat >/dev/null; echo '${value}'; return ${exit}; }
-assert_legacy_material_rollback_safe`);
-    assert.equal(result.status === 0, value === '0' && exit === 0);
-  }
-  assert.match(definition('assert_phase1_rollback_authorization'), /assert_legacy_material_rollback_safe/);
+test('direct migration command refuses an uncontracted or invalid-receipt DB before applying SQL', () => {
+  const result = run(`${definition('do_release_migration')}
+assert_mutation_drained() { echo drained; }
+run_release_entry() {
+  if [[ "$2" == assert-runtime && "$3" == phase2 ]]; then
+    echo schema-rejected
+    return 23
+  fi
+  echo migration-invoked
+}
+do_release_migration apply-contract`);
+  assert.equal(result.status, 23);
+  assert.match(result.stdout, /schema-rejected/);
+  assert.doesNotMatch(result.stdout, /migration-invoked/);
 });
