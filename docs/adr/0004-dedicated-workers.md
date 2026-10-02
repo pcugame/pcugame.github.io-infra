@@ -42,5 +42,3 @@ API와 worker 변경은 durable 상태와 job 계약의 호환성을 함께 검�
 - [Architecture guard](../../apps/api/scripts/architecture-guard.mjs), [dependency rules](../../apps/api/.dependency-cruiser.cjs)
 - [Processing fences tests](../../apps/api/src/__tests__/processing-worker-fences.test.ts)
 - [Publication tests](../../apps/api/src/modules/project-publication/worker.test.ts), [API maintenance tests](../../apps/api/src/__tests__/upload-lifecycle-runtime.test.ts)
-
-EOD

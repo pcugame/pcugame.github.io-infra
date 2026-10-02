@@ -45,5 +45,3 @@ Image build 성공은 production deployment 완료 증거가 아니다.
 - [Migration fence](../../apps/api/scripts/release-migrate.ts), [recovery boundary](../../server/release-recovery.mjs)
 - [Release cutover tests](../../server/release-cutover.test.mjs), [migration fence tests](../../apps/api/scripts/release-migrate.test.ts)
 - [Policy checker tests](../../scripts/check-migration-policy.test.mjs)
-
-EOD

@@ -14,5 +14,3 @@
 현재 구성은 [Backend architecture](../architecture/README.md),
 감사 수행 과정과 당시 증거는 [감사 이력](../history/2026-backend-audit/README.md)에 명시한다.
 [Route contract 소유권 후속안](../architecture/route-contract-ownership.md)은 **PROPOSED** 상태이며 기존 결정 목록에 포함하지 않는다.
-
-EOD

@@ -42,5 +42,3 @@ Queue 기록과 즉시 삭제가 모두 실패한 상태를 성공으로 취급�
 - [Deletion failure tests](../../apps/api/src/__tests__/object-deletion.test.ts), [claim lease tests](../../apps/api/src/__tests__/orphan-claim-lease.test.ts)
 - [Reference ownership tests](../../apps/api/src/__tests__/object-reference-ownership.test.ts)
 - [Database migration policy](../database-migration-policy.md)
-
-EOD

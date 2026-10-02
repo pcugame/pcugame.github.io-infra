@@ -44,5 +44,3 @@ Gateway 구성과 API 권한 구현을 함께 검증한다.
 - [Signing client 구성](../../apps/api/src/backend-context.ts), [multipart composition](../../apps/api/src/backend-context/routes.ts)
 - [File access tests](../../apps/api/src/__tests__/file-access.postgres.test.ts)
 - [Visibility gateway tests](../../apps/api/src/__tests__/visibility-gateway.garage.postgres.test.ts), [gateway boundaries tests](../../apps/db/deployment-boundaries.test.mjs)
-
-EOD

@@ -39,5 +39,3 @@ Context 분리는 모든 service에 동일한 port 구조가 적용되었다는 
 - [HTTP app](../../apps/api/src/app.ts), [server runtime](../../apps/api/src/server.ts)
 - [Composition·ownership tests](../../apps/api/src/__tests__/backend-context.test.ts)
 - [Startup·shutdown tests](../../apps/api/src/__tests__/server-runtime.test.ts)
-
-EOD

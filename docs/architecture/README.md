@@ -141,5 +141,3 @@ production gate, preflight, backup, migration, API·worker activation, health, W
 [Migration entry](../../server/deploy/migrate.sh)는 runtime schema 조건을 확인하고
 [release-migrate](../../apps/api/scripts/release-migrate.ts)를 실행한다.
 이 구조의 기록은 [ADR 0003](../adr/0003-forward-only-database-migrations.md)에 명시한다.
-
-EOD

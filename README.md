@@ -224,15 +224,16 @@ schema 변경과 운영 배포는 [database migration policy](docs/database-migr
 | [PR Checks](.github/workflows/pr-checks.yml) | PR의 기본 검사와 PostgreSQL·Garage 통합 검증 |
 | [Build API Release Image](.github/workflows/deploy-api.yml) | API 이미지 빌드·GHCR 게시, source SHA·artifact 검증, 불변 digest 기록 |
 | [Deploy Release](.github/workflows/release-api-cutover.yml) | 수동 실행으로 같은 master SHA의 Web·API와 필요한 DB migration 적용 |
-| [Deploy Web to GitHub Pages](.github/workflows/deploy-web-pages.yml) | Web만 수동 검증·빌드·게시 |
 
-일반 배포는 `Deploy Release`에서 `master`와 `phase=release`를 선택한다. 해당 SHA의 검증된 이미지를 재사용하며, 보관된 결과가 없으면 build workflow를 호출한다. 배포 입력은 `@sha256` 불변 digest이고, GHCR의 `latest` tag는 운영 이미지 선택에 사용하지 않는다.
+일반 배포는 `Deploy Release`에서 `master`와 `operation=release`를 선택한다. 해당 SHA의 검증된 이미지를 재사용하며, 보관된 결과가 없으면 build workflow를 호출한다. 일반 release에서는 `final_api_image`와 `forward_fix_acknowledgement`를 비워 두며, 선택된 이미지는 `@sha256` 불변 digest로 전달한다. GHCR의 `latest` tag는 운영 이미지 선택에 사용하지 않는다.
 
-배포는 DB 백업·격리 복원 검증, API·worker 중지, 추가 DB 백업, Web 게시·SHA 확인, migration, API·worker 기동 순서로 진행한다. 컨테이너 시작 자체는 migration을 실행하지 않는다. 완료 시 API health check, 공개 파일 smoke test, 실제 image source SHA·digest를 확인한다. migration 시도 이후에는 이전 이미지로 자동 rollback하지 않는다.
+일반 release 순서는 preflight → backup/drain → migration → API·worker activation → complete runtime health → Web publication → final smoke이다. Backup 단계에는 온라인 DB snapshot·격리 복원 검증, API·worker 중지와 추가 DB 백업이 포함된다. 컨테이너 시작 자체는 migration을 실행하지 않는다. Web 게시 전 API·모든 worker의 상태와 image source SHA·digest를 확인하고, 최종 smoke에서 Web SHA·runtime health·공개 파일 응답을 검증한다.
+
+자동 복구의 기준은 서버에 영속 기록한 `migration-attempted` marker의 부재이다. Workflow migration step의 outcome만으로 SQL 미실행을 판단하지 않는다. Marker가 없고 복구 capture가 확인된 경우에만 Pages 복구를 진행하며, 이전 Pages 제공 상태 검증 후 runtime 복구를 시도한다. Marker가 있거나 상태를 확인할 수 없으면 자동 복구를 중단한다.
 
 Web은 `apps/web/dist`를 `pcugame/pcugame.github.io`의 `master`에 게시하며, build에서 생성한 `404.html`로 SPA deep link를 처리한다. API·PostgreSQL·worker는 운영 호스트의 Podman pod에서 실행한다. API port는 기본 `127.0.0.1:4000`에 bind하고 외부 요청은 reverse proxy를 통과한다.
 
-사전 조건, 실행 순서, Web 단독 게시와 실패 복구는 [production 배포 절차](docs/operations/deployment.md)를 따른다.
+사전 조건, 실행 순서, snapshot·forward-fix와 실패 복구는 [production 배포 절차](docs/operations/deployment.md)를 따른다.
 
 ## 변경 기준
 
