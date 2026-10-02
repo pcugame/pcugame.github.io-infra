@@ -9,5 +9,5 @@ test('retired transition controls cannot be invoked through production workflow'
   assert.ok(!workflow.includes('release-phase1-video-update'));
   assert.ok(!workflow.includes('phase1_api_image'));
   assert.ok(!workflow.includes('apply-expand'));
-  assert.match(workflow, /options: \[release, snapshot, phase2-forward-fix\]/);
+  assert.match(workflow, /options: \[release, snapshot, forward-fix\]/);
 });

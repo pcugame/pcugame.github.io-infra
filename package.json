@@ -3,6 +3,9 @@
   "private": true,
   "scripts": {
     "test": "npm test --workspaces --if-present",
+    "test:release-controls": "node scripts/test-release-controls.mjs",
+    "verify:api-release": "npm run db:generate --workspace=apps/api && npm test --workspace=apps/api && npm run build --workspace=apps/api",
+    "test:file-gateway": "node apps/db/deployment-boundaries.test.mjs && node apps/db/runtime-gateway.test.mjs && sh server/file-gateway-tls.test.sh",
     "lint": "npm run lint --workspaces --if-present",
     "architecture": "npm run architecture -w apps/api",
     "build": "npm run build -w @pcu/contracts && npm run build -w apps/api && npm run build -w apps/web",

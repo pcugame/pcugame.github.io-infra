@@ -41,8 +41,9 @@ describe('production deployment safety', () => {
 	it('publishes a tested API image and records its immutable digest without an implicit production cutover', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
 		expect(apiWorkflow).toContain('actions: read');
-		expect(apiWorkflow).toContain('npm test --workspace=apps/api');
-		expect(apiWorkflow).toContain('npm run build --workspace=apps/api');
+		expect(apiWorkflow).toContain('npm run verify:api-release');
+		expect(JSON.parse(repositoryFile('package.json')).scripts['verify:api-release']).toContain('npm test --workspace=apps/api');
+		expect(JSON.parse(repositoryFile('package.json')).scripts['verify:api-release']).toContain('npm run build --workspace=apps/api');
 		expect(apiWorkflow).toContain('id: release-image');
 		expect(apiWorkflow).toContain('RELEASE_SOURCE_SHA=${{ github.sha }}');
 		expect(apiWorkflow).toContain('${{ steps.release-image.outputs.digest }}');
@@ -53,9 +54,10 @@ describe('production deployment safety', () => {
 	it('checks release artifacts without executing database migration or cutover', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
 		const apiPaths = pushPaths(repositoryFile('.github/workflows/deploy-api.yml'));
-		const releaseGatePath = '.github/release-gates/web-before-api/**';
+		const sourceVerifierPath = 'server/verify-release-source.mjs';
 
-		expect(apiPaths).toContain(releaseGatePath);
+		expect(apiPaths).toContain(sourceVerifierPath);
+		expect(apiPaths).toContain('.github/release-gates/web-before-api/**');
 		expect(apiPaths).toContain('server/deploy/**');
 		expect(apiPaths).not.toContain('apps/web/**');
 		// Artifact verification may inspect release CLI filenames; invoking a

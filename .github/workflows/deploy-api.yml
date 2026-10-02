@@ -12,6 +12,8 @@ on:
       - 'server/deploy/**'
       - '.github/workflows/deploy-api.yml'
       - '.github/release-gates/web-before-api/**'
+      - 'server/verify-release-source.mjs'
+      - 'server/verify-github-release-boundaries.mjs'
   workflow_dispatch:
   workflow_call:
     outputs:
@@ -33,6 +35,10 @@ jobs:
       source_sha: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
+      - name: Verify exact merged source
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node server/verify-release-source.mjs
 
       - uses: actions/setup-node@v4
         with:
@@ -43,14 +49,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --include-workspace-root
 
-      - name: Generate Prisma client
-        run: npm run db:generate --workspace=apps/api
-
-      - name: Test API
-        run: npm test --workspace=apps/api
-
-      - name: Build API
-        run: npm run build --workspace=apps/api
+      - name: Verify API build
+        run: npm run verify:api-release
 
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3

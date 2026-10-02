@@ -3,18 +3,18 @@ name: Deploy Release
 on:
   workflow_dispatch:
     inputs:
-      phase:
+      operation:
         description: 'Production release operation'
         required: true
         type: choice
         default: release
-        options: [release, snapshot, phase2-forward-fix]
+        options: [release, snapshot, forward-fix]
       final_api_image:
         description: 'Immutable @sha256 API/worker image (required for forward fix)'
         required: false
         type: string
       forward_fix_acknowledgement:
-        description: 'For forward fix enter I_ACKNOWLEDGE_CONTRACT_FORWARD_FIX'
+        description: 'Required acknowledgement for forward fix (see release runbook)'
         required: false
         type: string
 
@@ -46,44 +46,17 @@ jobs:
       - name: Verify production control repository and default branch
         env:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: node server/verify-github-release-boundaries.mjs control
+        run: node server/verify-release-source.mjs
 
       - id: release
         env:
-          RELEASE_PHASE: ${{ inputs.phase }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
           FINAL_IMAGE: ${{ inputs.final_api_image }}
           FORWARD_FIX_ACKNOWLEDGEMENT: ${{ inputs.forward_fix_acknowledgement }}
-          EXPECTED_IMAGE_REPO: ghcr.io/pcugame/pcu-graduationproject-v2-api
-        run: |
-          set -euo pipefail
-          is_authorized_digest() {
-            local image="$1"
-            local prefix="${EXPECTED_IMAGE_REPO}@sha256:"
-            [[ "$image" == "${prefix}"* ]] || return 1
-            local digest="${image#"${prefix}"}"
-            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
-          }
-          if [[ "${RELEASE_PHASE}" = release || "${RELEASE_PHASE}" = snapshot ]]; then
-            [ -z "${FINAL_IMAGE}${FORWARD_FIX_ACKNOWLEDGEMENT}" ] || {
-              echo "release and snapshot reject manual image and forward-fix inputs"
-              exit 1
-            }
-          elif [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then
-            is_authorized_digest "${FINAL_IMAGE}" || {
-              echo "final_api_image must be an immutable @sha256 digest in ${EXPECTED_IMAGE_REPO}"
-              exit 1
-            }
-            [[ "${FORWARD_FIX_ACKNOWLEDGEMENT}" = I_ACKNOWLEDGE_CONTRACT_FORWARD_FIX ]] || {
-              echo "phase2-forward-fix requires the exact contract acknowledgement"
-              exit 1
-            }
-          else
-            echo "Unknown release phase"; exit 1
-          fi
-          echo "final_image=${FINAL_IMAGE}" >> "${GITHUB_OUTPUT}"
+        run: bash server/release-inputs.sh
 
   snapshot:
-    if: ${{ inputs.phase == 'snapshot' }}
+    if: ${{ inputs.operation == 'snapshot' }}
     needs: authorize
     runs-on: ubuntu-latest
     environment: production
@@ -92,7 +65,7 @@ jobs:
       - name: Verify snapshot control branch
         env:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: node server/verify-github-release-boundaries.mjs control
+        run: node server/verify-release-source.mjs
       - name: Copy reviewed snapshot control
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -123,7 +96,7 @@ jobs:
             bash "${DEPLOY_DIR}/release-db-snapshot.sh" "${RELEASE_SOURCE_SHA}"
 
   resolve_image:
-    if: ${{ inputs.phase == 'release' }}
+    if: ${{ inputs.operation == 'release' }}
     needs: authorize
     runs-on: ubuntu-latest
     outputs:
@@ -136,13 +109,13 @@ jobs:
         run: node server/resolve-release-image.mjs
 
   build_image:
-    if: ${{ inputs.phase == 'release' && needs.resolve_image.outputs.image == '' }}
+    if: ${{ inputs.operation == 'release' && needs.resolve_image.outputs.image == '' }}
     needs: [authorize, resolve_image]
     uses: ./.github/workflows/deploy-api.yml
     secrets: inherit
 
   cutover:
-    if: ${{ always() && needs.authorize.result == 'success' && inputs.phase != 'snapshot' && (inputs.phase != 'release' || (needs.resolve_image.result == 'success' && (needs.resolve_image.outputs.image != '' || needs.build_image.result == 'success'))) }}
+    if: ${{ always() && needs.authorize.result == 'success' && inputs.operation != 'snapshot' && (inputs.operation != 'release' || (needs.resolve_image.result == 'success' && (needs.resolve_image.outputs.image != '' || needs.build_image.result == 'success'))) }}
     needs: [authorize, resolve_image, build_image]
     runs-on: ubuntu-latest
     environment: production
@@ -160,10 +133,10 @@ jobs:
       - name: Re-verify production control repository and default branch
         env:
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: node server/verify-github-release-boundaries.mjs control
+        run: node server/verify-release-source.mjs
 
       - name: Preflight external Pages target and write access before maintenance
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         run: node server/verify-github-release-boundaries.mjs pages
@@ -175,75 +148,13 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh,server/deploy,server/quadlet,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs,server/ip-ban-audit.sh
+          source: server/deploy.sh,server/deploy,server/quadlet,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs,server/ip-ban-audit.sh,server/release-orchestrate.sh
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
           overwrite: true
 
-      - name: Run Phase 2 forward fix
-        if: ${{ inputs.phase == 'phase2-forward-fix' }}
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          script_stop: true
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_PHASE,SMOKE_PUBLIC_OBJECT_URL
-          command_timeout: 60m
-          script: |
-            set -euo pipefail
-            export PATH=$PATH:/usr/local/bin:/usr/bin
-            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
-            export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
-            chmod +x "${DEPLOY_DIR}/deploy.sh"
-            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-
-            final_smoke() {
-              [ -n "${SMOKE_PUBLIC_OBJECT_URL}" ] || {
-                echo "SMOKE_PUBLIC_OBJECT_URL is required for final data-plane smoke"
-                return 1
-              }
-              # Production smoke requires a healthy authorization API. Outage
-              # fail-closed behavior is verified only in isolated integration.
-              podman exec gp-api wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
-              node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
-              deployed_id="$(podman inspect gp-api --format '{{.Image}}')"
-              actual_source="$(podman image inspect "$deployed_id" --format '{{ index .Labels "org.opencontainers.image.revision" }}')"
-              actual_digest="$(podman image inspect "$deployed_id" --format '{{.Digest}}')"
-              [ "$actual_source" = "$RELEASE_SOURCE_SHA" ]
-              [ "$actual_digest" = "${FINAL_IMAGE##*@}" ]
-              umask 077
-              printf 'source_sha=%s\nimage=%s\n' "$actual_source" "$FINAL_IMAGE" > "${CUTOVER_STATE_DIR}/deployed-${RELEASE_SOURCE_SHA}.txt"
-              printf 'Deployed source: %s\nDeployed image: %s\n' "$actual_source" "$FINAL_IMAGE"
-            }
-
-            export API_IMAGE="${FINAL_IMAGE}"
-            export MIGRATION_IMAGE="${FINAL_IMAGE}"
-            if [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then
-              "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
-              node "${DEPLOY_DIR}/release-smoke-target.mjs" prepare "$RELEASE_SOURCE_SHA"
-              SMOKE_PUBLIC_OBJECT_URL="$(node "${DEPLOY_DIR}/release-smoke-target.mjs" read "$RELEASE_SOURCE_SHA")"
-              "${DEPLOY_DIR}/deploy.sh" drain
-              "${DEPLOY_DIR}/deploy.sh" backup "phase2-forward-fix-${RELEASE_SOURCE_SHA}"
-              "${DEPLOY_DIR}/deploy.sh" release-assert phase2
-              # Contract is already recorded: this path is forward-only and
-              # deliberately contains no previous-image rollback.
-              RELEASE_SCHEMA_PHASE=phase2 "${DEPLOY_DIR}/deploy.sh" up
-              final_smoke
-              exit 0
-            fi
-        env:
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
-          RELEASE_PHASE: ${{ inputs.phase }}
-          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
-          RELEASE_SOURCE_SHA: ${{ github.sha }}
-          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
-
       - name: Set up Node for final web
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -251,21 +162,21 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install final web dependencies
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         run: npm ci --workspace=apps/web --include-workspace-root
 
       - name: Test final web
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         working-directory: apps/web
         run: npm test
 
       - name: Lint final web
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         working-directory: apps/web
         run: npm run lint
 
       - name: Build final web
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         working-directory: apps/web
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
@@ -275,67 +186,133 @@ jobs:
         run: npm run build
 
       - name: Stamp exact release commit
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         working-directory: apps/web
         run: printf '%s\n' "${GITHUB_SHA}" > dist/release-sha.txt
 
       - name: Capture Pages recovery point
         id: capture-pages
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
           RECOVERY_DIR: ${{ runner.temp }}/pages-release-recovery
           RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
         run: node server/pages-release-recovery.mjs capture "$RECOVERY_DIR" "$GITHUB_SHA" "$RELEASE_RUN_KEY"
 
-      - name: Prepare release maintenance window
-        if: ${{ inputs.phase == 'release' }}
+      - name: Preflight verified release
+        if: ${{ inputs.operation == 'release' }}
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
           script_stop: true
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_PHASE,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
           command_timeout: 60m
-          script: |
-            set -euo pipefail
-            export PATH=$PATH:/usr/local/bin:/usr/bin
-            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
-            export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
-            export API_IMAGE="${FINAL_IMAGE}"
-            export MIGRATION_IMAGE="${FINAL_IMAGE}"
-            chmod +x "${DEPLOY_DIR}/deploy.sh"
-            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" preflight
 
-            node "${DEPLOY_DIR}/release-smoke-target.mjs" prepare "$RELEASE_SOURCE_SHA"
-
-            "${DEPLOY_DIR}/deploy.sh" release-artifact-preflight phase2
-            "${DEPLOY_DIR}/deploy.sh" release-assert phase2
-            bash "${DEPLOY_DIR}/ip-ban-audit.sh" before
-            bash "${DEPLOY_DIR}/release-db-snapshot.sh" "${RELEASE_SOURCE_SHA}"
-            node "${DEPLOY_DIR}/release-recovery.mjs" capture "$RELEASE_RUN_KEY"
-            "${DEPLOY_DIR}/deploy.sh" drain
-            "${DEPLOY_DIR}/deploy.sh" backup "release-${RELEASE_SOURCE_SHA}"
+      - name: Back up and drain production
+        if: ${{ inputs.operation == 'release' }}
+        uses: appleboy/ssh-action@v1.0.3
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
-          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
-          RELEASE_PHASE: ${{ inputs.phase }}
           FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
           RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          command_timeout: 60m
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" backup
+
+      - name: Apply release migrations
+        id: migrate
+        if: ${{ inputs.operation == 'release' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          command_timeout: 60m
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" migrate
+
+      - name: Activate API and workers
+        if: ${{ inputs.operation == 'release' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          command_timeout: 60m
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" activate
+
+      - name: Verify complete runtime health
+        if: ${{ inputs.operation == 'release' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          command_timeout: 60m
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" health
 
       - name: Verify external Pages repository write access
-        if: ${{ inputs.phase == 'release' }}
+        if: ${{ inputs.operation == 'release' }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         run: node server/verify-github-release-boundaries.mjs pages
 
-      - name: Publish exact final web while mutations remain drained
-        if: ${{ inputs.phase == 'release' }}
+      - name: Publish exact release web after runtime health
+        if: ${{ inputs.operation == 'release' }}
         uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
@@ -346,114 +323,51 @@ jobs:
           user_name: bipolarrr
           user_email: challengedbipolar@gmail.com
 
-      - name: Verify final web before migrations
-        if: ${{ inputs.phase == 'release' }}
+      - name: Run final release smoke and record evidence
+        if: ${{ inputs.operation == 'release' }}
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
           script_stop: true
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_PHASE,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
           command_timeout: 60m
-          script: |
-            set -euo pipefail
-            export PATH=$PATH:/usr/local/bin:/usr/bin
-            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
-            export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
-            export API_IMAGE="${FINAL_IMAGE}"
-            export MIGRATION_IMAGE="${FINAL_IMAGE}"
-            chmod +x "${DEPLOY_DIR}/deploy.sh"
-            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" smoke
 
-            # This re-check asserts the drained marker and stopped processes;
-            # the shared workflow lock prevents any repository web publisher
-            # from replacing the marker between this gate and contract DDL.
-            web_verified=false
-            for _attempt in $(seq 1 60); do
-              if "${DEPLOY_DIR}/deploy.sh" verify-final-web "${RELEASE_SOURCE_SHA}"; then
-                web_verified=true
-                break
-              fi
-              sleep 5
-            done
-            [ "${web_verified}" = true ] || {
-              echo "Final web did not expose the exact release SHA within five minutes; release migrations were not attempted."
-              exit 1
-            }
-            "${DEPLOY_DIR}/deploy.sh" release-migrate status
+      - name: Run forward fix
+        if: ${{ inputs.operation == 'forward-fix' }}
+        uses: appleboy/ssh-action@v1.0.3
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
-          RELEASE_PHASE: ${{ inputs.phase }}
           FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
-
-      - name: Apply migrations and start verified release
-        id: apply-contract
-        if: ${{ inputs.phase == 'release' }}
-        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
           script_stop: true
-          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_PHASE,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
           command_timeout: 60m
-          script: |
-            set -euo pipefail
-            export PATH=$PATH:/usr/local/bin:/usr/bin
-            export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
-            export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
-            export API_IMAGE="${FINAL_IMAGE}"
-            export MIGRATION_IMAGE="${FINAL_IMAGE}"
-            chmod +x "${DEPLOY_DIR}/deploy.sh"
-            printf '%s' "${GHCR_TOKEN}" | podman login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-
-            node "${DEPLOY_DIR}/release-recovery.mjs" mark-migration "$RELEASE_RUN_KEY"
-            "${DEPLOY_DIR}/deploy.sh" release-migrate apply-contract
-
-            # DESTRUCTIVE DDL BOUNDARY: no old-image rollback exists below.
-            # Any failure is a forward fix, or an explicit PostgreSQL restore
-            # plus Garage inventory reconciliation authorized by an operator.
-            if ! RELEASE_SCHEMA_PHASE=phase2 "${DEPLOY_DIR}/deploy.sh" up; then
-              echo "Contract is recorded in DB. Automatic old-image rollback is forbidden. Forward-fix, or explicitly restore DB backup and reconcile Garage."
-              exit 1
-            fi
-            "${DEPLOY_DIR}/deploy.sh" release-migrate status
-
-            SMOKE_PUBLIC_OBJECT_URL="$(node "${DEPLOY_DIR}/release-smoke-target.mjs" read "$RELEASE_SOURCE_SHA")"
-            bash "${DEPLOY_DIR}/ip-ban-audit.sh" after
-            # Production smoke requires a healthy authorization API. Outage
-            # fail-closed behavior is verified only in isolated integration.
-            podman exec gp-api wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
-            node "${DEPLOY_DIR}/smoke-data-plane.mjs" "${SMOKE_PUBLIC_OBJECT_URL}"
-            deployed_id="$(podman inspect gp-api --format '{{.Image}}')"
-            actual_source="$(podman image inspect "$deployed_id" --format '{{ index .Labels "org.opencontainers.image.revision" }}')"
-            actual_digest="$(podman image inspect "$deployed_id" --format '{{.Digest}}')"
-            [ "$actual_source" = "$RELEASE_SOURCE_SHA" ]
-            [ "$actual_digest" = "${FINAL_IMAGE##*@}" ]
-            umask 077
-            printf 'source_sha=%s\nimage=%s\n' "$actual_source" "$FINAL_IMAGE" > "${CUTOVER_STATE_DIR}/deployed-${RELEASE_SOURCE_SHA}.txt"
-            printf 'Deployed source: %s\nDeployed image: %s\n' "$actual_source" "$FINAL_IMAGE"
-        env:
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH }}
-          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
-          RELEASE_PHASE: ${{ inputs.phase }}
-          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
-          RELEASE_SOURCE_SHA: ${{ github.sha }}
-          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" forward-fix
 
       - name: Restore Pages before pre-migration recovery
         id: restore-pages
-        if: ${{ failure() && steps.capture-pages.outcome == 'success' && steps.apply-contract.outcome == 'skipped' }}
+        if: ${{ failure() && steps.capture-pages.outcome == 'success' && steps.migrate.outcome == 'skipped' }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
           RECOVERY_DIR: ${{ runner.temp }}/pages-release-recovery
@@ -475,4 +389,4 @@ jobs:
           envs: DEPLOY_DIR,RELEASE_RUN_KEY,WEB_RECOVERY_VERIFIED
           script_stop: true
           command_timeout: 10m
-          script: node "${DEPLOY_DIR}/release-recovery.mjs" recover "$RELEASE_RUN_KEY"
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" recover

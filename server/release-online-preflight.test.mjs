@@ -8,5 +8,5 @@ test('retired transition controls cannot be invoked through production workflow'
   assert.ok(!workflow.includes('release-online-preflight'));
   assert.ok(!workflow.includes('phase1-observation'));
   assert.ok(!workflow.includes('online-contract-preflight'));
-  assert.match(workflow, /options: \[release, snapshot, phase2-forward-fix\]/);
+  assert.match(workflow, /options: \[release, snapshot, forward-fix\]/);
 });

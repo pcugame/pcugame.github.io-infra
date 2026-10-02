@@ -27,16 +27,14 @@ test('stored selection binds exact source and public origin', () => {
   assert.throws(() => validateStoredTarget(record, source, 'https://other.example.test'));
 });
 
-test('workflow prepares and probes a persisted selection before drain, then reuses it after start', async () => {
+test('orchestrator prepares and probes a persisted selection before drain, then reuses it after start', async () => {
   const { readFileSync } = await import('node:fs');
+  const script = readFileSync(new URL('./release-orchestrate.sh', import.meta.url), 'utf8');
   const workflow = readFileSync(new URL('../.github/workflows/release-api-cutover.yml', import.meta.url), 'utf8');
-  const prepare = workflow.slice(workflow.indexOf('      - name: Prepare release maintenance window'), workflow.indexOf('      - name: Verify external Pages repository'));
-  const target = prepare.indexOf('release-smoke-target.mjs" prepare');
-  assert.ok(target >= 0 && target < prepare.indexOf('deploy.sh" drain'));
-  assert.match(prepare, /SMOKE_PUBLIC_OBJECT_URL: \$\{\{ secrets.SMOKE_PUBLIC_OBJECT_URL \}\}/);
-  const apply = workflow.slice(workflow.indexOf('      - name: Apply migrations and start verified release'), workflow.indexOf('      - name: Restore Pages before pre-migration recovery'));
-  const start = apply.indexOf('deploy.sh" up');
-  assert.ok(start >= 0 && start < apply.indexOf('release-smoke-target.mjs" read'));
-  assert.doesNotMatch(apply, /SMOKE_PUBLIC_OBJECT_URL is required/);
+  const prepare = script.slice(script.indexOf('  preflight)'), script.indexOf('  migrate)'));
+  assert.ok(prepare.indexOf('release-smoke-target.mjs" prepare') < prepare.indexOf('deploy drain'));
+  assert.match(script, /release-smoke-target.mjs" read/);
+  assert.match(workflow, /SMOKE_PUBLIC_OBJECT_URL: \$\{\{ secrets.SMOKE_PUBLIC_OBJECT_URL \}\}/);
   assert.match(workflow, /source: .*server\/release-smoke-target.mjs/);
+  assert.ok(workflow.indexOf('release-orchestrate.sh" activate') < workflow.indexOf('release-orchestrate.sh" smoke'));
 });

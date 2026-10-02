@@ -8,12 +8,12 @@ import {
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
-const [dockerfile, packageJson, deploy, buildWorkflow, webWorkflow, cutover, smoke, releaseMigration] = await Promise.all([
+const [dockerfile, packageJson, deploy, buildWorkflow, orchestration, cutover, smoke, releaseMigration] = await Promise.all([
 	read('apps/api/Dockerfile'),
 	read('apps/api/package.json'),
 	deploySource(),
 	read('.github/workflows/deploy-api.yml'),
-	read('.github/workflows/deploy-web-pages.yml'),
+	read('server/release-orchestrate.sh'),
 	read('.github/workflows/release-api-cutover.yml'),
 	read('server/smoke-data-plane.mjs'),
 	read('apps/api/scripts/release-migrate.ts'),
@@ -31,51 +31,28 @@ assert.doesNotMatch(buildWorkflow, /^  deploy:/m, 'push/build workflow must neve
 assert.match(dockerfile, /LABEL org\.opencontainers\.image\.revision="\$\{RELEASE_SOURCE_SHA\}"/);
 assert.match(buildWorkflow, /RELEASE_SOURCE_SHA=\$\{\{ github\.sha \}\}/);
 assert.doesNotMatch(buildWorkflow, /:sha-\$\{\{ github\.sha \}\}/);
-assert.doesNotMatch(webWorkflow, /^  push:/m, 'web publication must remain an explicit production release action');
-assert.match(webWorkflow, /^  workflow_dispatch:/m);
-assert.match(webWorkflow, /^    environment: production$/m);
-assert.match(webWorkflow, /printf '%s\\n' "\$\{GITHUB_SHA\}" > dist\/release-sha\.txt/);
-for (const workflow of [webWorkflow, cutover]) {
-	assert.match(workflow, /group: production-object-cutover/);
-	assert.match(workflow, /cancel-in-progress: false/);
-	assert.match(workflow, /node server\/verify-github-release-boundaries\.mjs control/);
-	assert.match(workflow, /GITHUB_DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/);
-	assert.match(workflow, /\[ "\$\{GITHUB_REPOSITORY\}" = pcugame\/pcugame\.github\.io-infra \]/);
-	assert.match(workflow, /\[ "\$\{GITHUB_DEFAULT_BRANCH\}" = master \]/);
-	assert.match(workflow, /\[ "\$\{GITHUB_REF\}" = refs\/heads\/master \]/);
-	assert.match(workflow, /node server\/verify-github-release-boundaries\.mjs pages/);
-	const pagesPublish = workflow.indexOf('peaceiris/actions-gh-pages@v4');
-	const pagesBoundary = workflow.lastIndexOf('node server/verify-github-release-boundaries.mjs pages', pagesPublish);
-	assert.ok(pagesBoundary >= 0 && pagesPublish > pagesBoundary, 'Pages repository boundary must be re-verified immediately before publication');
-}
-const cutoverJob = cutover.slice(cutover.indexOf('  cutover:'));
-assert.match(cutoverJob, /environment: production[\s\S]*Re-verify production control repository and default branch/);
-assert.match(cutoverJob, /Preflight external Pages target and write access before maintenance/);
-assert.match(cutover, /EXPECTED_IMAGE_REPO: ghcr\.io\/pcugame\/pcu-graduationproject-v2-api/);
-assert.match(cutover, /final_api_image must be an immutable @sha256 digest/);
+assert.match(cutover, /^  workflow_dispatch:/m);
+assert.match(cutover, /^    environment: production$/m);
+assert.match(cutover, /group: production-object-cutover/);
+assert.match(cutover, /cancel-in-progress: false/);
+assert.match(cutover, /node server\/verify-release-source\.mjs/);
+assert.match(cutover, /GITHUB_DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/);
+assert.match(cutover, /Preflight external Pages target and write access before maintenance/);
 for (const retired of ['phase1_api_image', 'observation_exception_id', 'exception_profile', 'observation_started_at', 'observation_attestation', 'legacy-audit', 'apply-expand', 'mark-read-cutover', 'contract-preflight', 'authorize-phase1-rollback']) {
   assert.ok(!cutover.includes(retired), `retired transition entrypoint remains: ${retired}`);
 }
-const releaseBlock = cutover.slice(cutover.indexOf('- name: Prepare release maintenance window'));
-assert.match(releaseBlock, /export API_IMAGE="\$\{FINAL_IMAGE\}"[\s\S]*export MIGRATION_IMAGE="\$\{FINAL_IMAGE\}"/);
-const ordered = ['release-artifact-preflight phase2', 'release-assert phase2', 'release-db-snapshot.sh', 'release-recovery.mjs" capture', 'deploy.sh" drain', 'backup "release-', 'Publish exact final web', 'verify-final-web', 'release-migrate status', 'mark-migration', 'release-migrate apply-contract', 'RELEASE_SCHEMA_PHASE=phase2'];
+const ordered = ['Build final web', 'Capture Pages recovery point', 'release-orchestrate.sh" preflight', 'release-orchestrate.sh" backup', 'release-orchestrate.sh" migrate', 'release-orchestrate.sh" activate', 'release-orchestrate.sh" health', 'peaceiris/actions-gh-pages', 'release-orchestrate.sh" smoke'];
 let cursor = -1;
 for (const marker of ordered) {
-  const next = releaseBlock.indexOf(marker, cursor + 1);
+  const next = cutover.indexOf(marker, cursor + 1);
   assert.ok(next > cursor, `ordinary release order violation: ${marker}`);
   cursor = next;
 }
-assert.match(cutover, /Test final web[\s\S]*Build final web[\s\S]*Stamp exact release commit[\s\S]*Prepare release maintenance window[\s\S]*peaceiris\/actions-gh-pages@v4/);
-assert.match(cutover, /steps\.apply-contract\.outcome == 'skipped'/);
+assert.match(cutover, /steps\.migrate\.outcome == 'skipped'/);
 assert.match(cutover, /steps\.restore-pages\.outcome == 'success'/);
-assert.match(cutover, /release-recovery\.mjs" recover/);
-
-const destructiveBoundary = cutover.indexOf('# DESTRUCTIVE DDL BOUNDARY');
-assert.ok(destructiveBoundary > cutover.indexOf('release-migrate apply-contract'));
-const postContract = cutover.slice(destructiveBoundary);
-assert.doesNotMatch(postContract, /rollback_tag|previous_image|START_DEDICATED_WORKERS=false/);
-assert.match(postContract, /Automatic old-image rollback is forbidden/);
-assert.doesNotMatch(cutover, /rollback_tag|previous_image|ROLLBACK_AUTH_NONCE/);
+assert.match(orchestration, /release-recovery\.mjs" recover/);
+assert.doesNotMatch(orchestration, /rollback_tag|previous_image|START_DEDICATED_WORKERS=false/);
+assert.ok(orchestration.indexOf('mark-migration') < orchestration.indexOf('release-migrate apply-contract'));
 
 for (const marker of ['BASELINE_MIGRATION', 'apply-expand', 'assert-runtime']) {
 	assert.ok(releaseMigration.includes(marker), `release fence missing ${marker}`);
@@ -124,21 +101,12 @@ for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(sta
 assert.doesNotMatch(cutover, /podman (?:stop|start) gp-api/);
 assert.doesNotMatch(cutover, /API-down data-plane smoke/);
 assert.match(smoke, /full\.headers\.get\('cache-control'\), 'private, no-store'/);
-const finalSmokeStart = cutover.indexOf('            final_smoke() {');
-assert.ok(finalSmokeStart > 0);
-const finalSmoke = cutover.slice(finalSmokeStart, cutover.indexOf('\n            }', finalSmokeStart));
-const finalApplyStart = cutover.indexOf('            # DESTRUCTIVE DDL BOUNDARY:');
-assert.ok(finalApplyStart > 0);
-const finalApply = cutover.slice(finalApplyStart);
-for (const productionSmoke of [finalSmoke, finalApply]) {
-	assert.match(productionSmoke, /podman exec gp-api wget[^\n]+api\/health[^\n]+ok[^\n]+true[\s\S]*smoke-data-plane\.mjs/);
-	assert.ok(productionSmoke.includes('[ "$actual_source" = "$RELEASE_SOURCE_SHA" ]'));
-	assert.ok(productionSmoke.includes('[ "$actual_digest" = "${FINAL_IMAGE##*@}" ]'));
-	assert.match(productionSmoke, /deployed-\$\{RELEASE_SOURCE_SHA\}\.txt/);
-}
-const forwardFixStart = cutover.indexOf('            if [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then');
-assert.ok(forwardFixStart > 0);
-const forwardFix = cutover.slice(forwardFixStart, cutover.indexOf('        env:', forwardFixStart));
+assert.match(orchestration, /podman exec gp-api wget[^\n]+api\/health[^\n]+ok[^\n]+true/);
+assert.match(orchestration, /smoke-data-plane\.mjs/);
+assert.ok(orchestration.includes('[ "$actual_source" = "$RELEASE_SOURCE_SHA" ]'));
+assert.ok(orchestration.includes('[ "$actual_digest" = "${FINAL_IMAGE##*@}" ]'));
+assert.match(orchestration, /deployed-\$\{RELEASE_SOURCE_SHA\}\.txt/);
+const forwardFix = orchestration.slice(orchestration.indexOf('  forward-fix)'));
 assert.match(forwardFix, /release-assert phase2/);
 assert.doesNotMatch(forwardFix, /rollback_tag|previous_image/);
 
