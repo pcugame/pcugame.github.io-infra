@@ -147,7 +147,11 @@ DB volume. Do not rely on `--replace` to displace a live legacy container.
      gp-worker-project-publication.service
    ```
 
-   Verify all seven masks. Install only the ten reviewed rendered definitions
+   Verify all seven masks. First install the reviewed executable
+   `server/quadlet/wait-network-ready.py` at
+   `${DEPLOY_DIR}/runtime-helpers/wait-network-ready.py`, verify its source bytes and
+   executable permission, and confirm Python 3, `ip` and `tailscale` are available
+   in the user manager. Then install only the ten reviewed rendered definitions
    into the selected Quadlet directory and perform the authorized user
    daemon-reload. Verify foundation SourcePath/FragmentPath and inspect the generated graph
    files before starting anything. Masked app units resolve to `/dev/null` in
@@ -261,3 +265,32 @@ image digest independently of GitHub CI success. Until then, the production
 compatibility, env provisioning, NAS role, live hostname connection and lifecycle
 checks remain blockers. A subsequent app-only release uses the existing
 `Deploy Release` workflow unchanged.
+
+## Cold-boot local network prerequisite
+
+The pod runs `${DEPLOY_DIR}/runtime-helpers/wait-network-ready.py` before native pod
+creation. Install this executable from the selected reviewed repository revision
+before installing or reloading the ten rendered definitions. This separately
+installed runtime helper is outside the ordinary release copy of `server/quadlet`
+to `${DEPLOY_DIR}/quadlet`. That copy is only the candidate source: during a
+reviewed topology update, copy its helper to `runtime-helpers` and independently
+verify bytes, ownership and executable permission. App-only releases compare the
+installed runtime helper against the newly copied candidate, without modifying
+the installed helper. A helper change requires a reviewed topology update. Python 3,
+`ip` and `tailscale` must be available to the user manager. The normal app-only
+release guard rejects absent, changed, non-executable or symlinked helpers and
+changed topology; it never installs new pod definitions. An existing adopted host
+therefore needs a separately reviewed topology update for this new prerequisite.
+
+`network-online.target` and Podman's native user wait can complete while IPv4
+routing and Tailscale are still changing during cold boot. This gate requires a
+nonempty IPv4 default route, successful local `ip -4 route get 1.1.1.1` (no packets
+sent), Tailscale `BackendState=Running`, and three identical route observations two
+seconds apart, followed by five seconds of settling and a fresh readiness check.
+Its fixed 90-second deadline fails closed, with value-free diagnostics; the pod's
+`TimeoutStartSec=120` leaves room for the helper and native Podman startup. This
+retains native generated dependencies, start limiting and `RestartSec=15`; changing
+only restart delay does not certify readiness. Offline mocked readiness tests
+cover delayed/changing routes, command errors, timeout and settling transitions.
+A generated-graph local surrogate remains distinct from an authorized production
+reboot with real Podman/pasta, routing, Tailscale and authenticated API checks.

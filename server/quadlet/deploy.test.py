@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 
@@ -114,6 +115,15 @@ class Deploy(unittest.TestCase):
             (runtime / 'postgres.env').write_text('POSTGRES_USER=fixture\nPOSTGRES_DB=fixture\nPOSTGRES_PASSWORD=fixture\n')
             (root / '.env').write_text('RELEASE_SCHEMA_PHASE=phase2\nS3_PRIVATE_NETWORK_CONFIRMED=true\nAPI_IMAGE=stale:latest\nFILE_GATEWAY_SECRET=stale\n')
             if failure == 'runtime': (runtime / 'api.env').unlink()
+            helpers = root / 'runtime-helpers'
+            helpers.mkdir()
+            shutil.copy2(HERE / 'wait-network-ready.py', helpers / 'wait-network-ready.py')
+            if failure == 'missinghelper': (helpers / 'wait-network-ready.py').unlink()
+            if failure == 'changedhelper': (helpers / 'wait-network-ready.py').write_text('wrong fixture content')
+            if failure == 'nonexecutablehelper': (helpers / 'wait-network-ready.py').chmod(0o600)
+            if failure == 'symlinkhelper':
+                (helpers / 'wait-network-ready.py').unlink()
+                (helpers / 'wait-network-ready.py').symlink_to(HERE / 'wait-network-ready.py')
             units = root / 'units'
             environment = dict(PATH=os.environ['PATH'], HOME=str(root), DEPLOY_DIR=str(root), API_IMAGE=OLD,
                 MIGRATION_IMAGE=IMAGE, RELEASE_SOURCE_SHA='c'*40, FIXTURE=str(root), ACTION=action,
@@ -221,7 +231,7 @@ class Deploy(unittest.TestCase):
                 self.assertEqual(stops[-2:], ['systemctl --user stop gp-postgres.service', 'systemctl --user stop graduationproject-pod.service'])
 
     def test_pre_mutation_failures(self):
-        for kwargs in ({'failure':'immutable'}, {'failure':'runtime'}, {'failure':'show'}, {'overrides':{'PULL_API_IMAGE':'false'}}, {'overrides':{'NODE_ENV':'development'}}, {'overrides':{'IFS':'danger'}}, {'failure':'generated'}, {'failure':'pending'}, {'failure':'dropin'}, {'failure':'quadletdropin'}, {'failure':'externaldropin'}, {'failure':'managerdropin'}, {'failure':'managerenv'}, {'failure':'inactive'}, {'failure':'podinactive'}, {'failure':'pginactive'}, {'failure':'artifact'}, {'drift':True}, {'missing':True}, {'overrides':{'S3_ENDPOINT':'http://invalid.example'}}):
+        for kwargs in ({'failure':'missinghelper'}, {'failure':'changedhelper'}, {'failure':'nonexecutablehelper'}, {'failure':'symlinkhelper'}, {'failure':'immutable'}, {'failure':'runtime'}, {'failure':'show'}, {'overrides':{'PULL_API_IMAGE':'false'}}, {'overrides':{'NODE_ENV':'development'}}, {'overrides':{'IFS':'danger'}}, {'failure':'generated'}, {'failure':'pending'}, {'failure':'dropin'}, {'failure':'quadletdropin'}, {'failure':'externaldropin'}, {'failure':'managerdropin'}, {'failure':'managerenv'}, {'failure':'inactive'}, {'failure':'podinactive'}, {'failure':'pginactive'}, {'failure':'artifact'}, {'drift':True}, {'missing':True}, {'overrides':{'S3_ENDPOINT':'http://invalid.example'}}):
             with self.subTest(kwargs=kwargs):
                 result,log,marker,images = self.run_fixture(**kwargs)
                 self.assertNotEqual(result.returncode,0)

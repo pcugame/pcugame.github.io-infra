@@ -13,6 +13,8 @@ if (serverTests.length === 0) throw new Error('No release control tests found');
 // Quadlet lifecycle test and database/service integration belong to other gates.
 const checks = [
   [process.execPath, ['--test', 'scripts/check-migration-policy.test.mjs', ...serverTests]],
+  ['python3', ['server/quadlet/wait-network-ready.test.py']],
+  ['python3', ['server/quadlet/check-installed.test.py']],
   ['python3', ['server/quadlet/parity.test.py']],
   ['python3', ['server/quadlet/deploy.test.py']],
   ['python3', ['server/quadlet/runtime-env-check.test.py']],

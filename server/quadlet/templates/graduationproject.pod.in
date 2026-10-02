@@ -12,6 +12,8 @@ PodmanArgs=--exit-policy=continue
 AddHost=postgres:127.0.0.1
 
 [Service]
+ExecStartPre=@NETWORK_READY@
+TimeoutStartSec=120
 Restart=on-failure
 RestartSec=15
 

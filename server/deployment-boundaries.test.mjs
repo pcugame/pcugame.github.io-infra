@@ -364,6 +364,11 @@ const releaseEnv = {
 	FAKE_IMAGE_DIGEST: releaseDigest,
 	FAKE_IMAGE_REVISION: releaseSourceSha,
 };
+const helperDir = join(fixtureDir, 'runtime-helpers');
+await mkdir(helperDir);
+const networkHelper = join(helperDir, 'wait-network-ready.py');
+await writeFile(networkHelper, await readFile(new URL('./quadlet/wait-network-ready.py', import.meta.url)));
+await chmod(networkHelper, 0o755);
 const quadletDir = join(fixtureDir, 'units');
 const renderedFixture = spawnSync('bash', [new URL('./quadlet/render.sh', import.meta.url).pathname, quadletDir], {
     encoding: 'utf8', env: { ...process.env, ...releaseEnv, DEPLOY_DIR: fixtureDir, NAS_EXPORT_HOST_PATH: fixtureDir, NAS_EXPORT_PATH: '/nas-export' },

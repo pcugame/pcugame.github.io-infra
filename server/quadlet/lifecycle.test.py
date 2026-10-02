@@ -118,6 +118,9 @@ class Lifecycle(unittest.TestCase):
             render_environment = dict(self.environment, API_IMAGE=
                 'ghcr.io/pcugame/pcu-graduationproject-v2-api@sha256:' + 'a' * 64,
                 DEPLOY_DIR=str(root / 'deployment'))
+            helper_dir = root / 'deployment/runtime-helpers'
+            helper_dir.mkdir(parents=True)
+            shutil.copy2(HERE / 'wait-network-ready.py', helper_dir / 'wait-network-ready.py')
             rendered, generated = root / 'quadlet', root / 'generated'
             self.command([shutil.which('bash'), str(HERE / 'render.sh'), str(rendered)],
                          env=render_environment)

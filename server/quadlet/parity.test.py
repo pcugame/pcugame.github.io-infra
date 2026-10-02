@@ -109,6 +109,8 @@ class Parity(unittest.TestCase):
             self.assertEqual(pod_def['AddHost'], ['postgres:127.0.0.1'])
             self.assertEqual(pod_def['Restart'], ['on-failure'])
             self.assertEqual(pod_def['RestartSec'], ['15'])
+            self.assertEqual(pod_def['TimeoutStartSec'], ['120'])
+            self.assertEqual(decoded(shlex.split(pod_def['ExecStartPre'][0])[0]), str(root / 'runtime-helpers/wait-network-ready.py'))
             self.assertEqual(pod_def['StartLimitBurst'], ['10'])
             self.assertEqual(pod_def['StartLimitIntervalSec'], ['300'])
             self.assertEqual(pod_def['WantedBy'], ['default.target'])
