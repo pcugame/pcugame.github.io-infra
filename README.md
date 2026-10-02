@@ -176,6 +176,8 @@ Web은 <http://localhost:5173>, API는 <http://localhost:4000>에서 실행된�
 | `npm run architecture` | API 계층 경계, 자체 test, dependency-cruiser 규칙 |
 | `npm run build` | 공용 계약, API, Web 순차 build |
 | `npm run test:integration` | PostgreSQL·Garage 기반 concurrency·transaction·upload·복구 test와 E2E smoke test |
+| `npm run test:integration:suite -- <name>` | 지정한 통합 test suite 실행 |
+| `npm run test:integration:list` | 통합 test suite 목록 조회 |
 
 [PR Checks](.github/workflows/pr-checks.yml)의 기본 npm 검증 순서는 다음과 같다. 전체 CI는 아래 명령 외에 migration 정책·배포 경계 검사와 별도 integration job을 포함한다.
 
@@ -190,6 +192,17 @@ npm run build
 ```
 
 전체 통합 test는 Docker image build와 서비스 기동을 포함한다. 고정 포트 `15432`, `3900`, `3902`, `3903`, `4000`, `5173`을 사용하므로 기존 process와의 충돌 여부를 먼저 확인한다.
+
+단일 suite 실행 전에는 `npm run testenv:up`으로 통합 test 환경을 준비한다. 단일 suite는 서비스를 기동하거나 종료하지 않으므로 반복 실행할 수 있다.
+
+```bash
+npm run testenv:up
+npm run test:integration:suite -- visibility
+npm run test:integration:suite -- lease-clock
+npm run testenv:down
+```
+
+기존 `test:integration:<name>` 명령은 `test:integration:suite -- <name>`으로 대체한다. Suite별 파일 목록, PostgreSQL·Garage 환경 설정, 실행 순서는 `scripts/run-integration.mjs`에서 관리한다. `lease-clock`, `phase2-transition`, `year-change-approval`은 기존 `--no-file-parallelism` 설정을 유지하며, 다른 suite는 기존 Vitest 병렬 실행 설정을 사용한다.
 
 ## 데이터와 자산 경계
 

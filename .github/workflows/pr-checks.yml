@@ -23,6 +23,9 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Test integration runner
+        run: node --test scripts/run-integration.test.mjs
+
       - name: Test release controls and deployment fixtures
         run: npm run test:release-controls
 
