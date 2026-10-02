@@ -10,7 +10,7 @@
 .webgl-guide .wrap { max-width: 82.5rem; margin: auto; padding: 0 2rem; }
 .webgl-guide h1 { font-size: clamp(2.125rem, 4.7vw, 3.625rem); line-height: 1.15; letter-spacing: -0.125rem; margin: 1.25rem 0; }
 .webgl-guide h1 em { font-style: normal; color: var(--color-primary); }
-.webgl-guide h2 { font-size: 1.6875rem; line-height: 1.35; letter-spacing: -.0.5rem; margin: 0.875rem 0; }
+.webgl-guide h2 { font-size: 1.6875rem; line-height: 1.35; letter-spacing: -0.05rem; margin: 0.875rem 0; }
 .webgl-guide h3 { font-size: 1.1875rem; line-height: 1.45; margin: 1.5rem 0 0.75rem; }
 .webgl-guide p { margin: 0.75rem 0; }
 .webgl-guide :is(ul, ol) { padding-left: 1.4375rem; }
@@ -30,7 +30,7 @@
 .webgl-guide .version-picker-heading p { margin: 0; font-size: 0.8125rem; color: var(--color-text-muted); }
 .webgl-guide .version-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 0.875rem; }
 .webgl-guide .version-card.btn { position: relative; flex-direction: column; align-items: flex-start; gap: 0.5625rem; min-width: 0; padding: 1.375rem 1.625rem; text-align: left; color: var(--color-text); }
-.webgl-guide .version-card strong { padding-right: 1.625rem; font-size: 1.875rem; font-weight: 850; letter-spacing: -.0.5625rem; line-height: 1.2; }
+.webgl-guide .version-card strong { padding-right: 1.625rem; font-size: 1.875rem; font-weight: 850; letter-spacing: -0.05625rem; line-height: 1.2; }
 .webgl-guide .version-card[aria-pressed='true'] { background: var(--color-bg); border-color: var(--color-primary); color: var(--color-primary); }
 .webgl-guide .version-card-state { font-size: 0.75rem; color: var(--color-text-muted); }
 .webgl-guide .version-card-check { position: absolute; right: 1.375rem; top: 1.4375rem; display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border: 0.0625rem solid var(--color-border); border-radius: 50%; color: transparent; }
@@ -88,7 +88,9 @@
 .webgl-guide .detail p { font-size: 0.875rem; }
 .webgl-guide .detail .note { font-size: 0.8125rem; color: var(--color-text-muted); }
 .webgl-guide .table-scroll { overflow-x: auto; }
-.webgl-guide table { border-collapse: collapse; width: 100%; font-size: 0.875rem; line-height: 1.6; margin: 1.25rem 0; }
+.webgl-guide .table-scroll:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.webgl-guide .comparison-table { min-width: 36rem; }
+.webgl-guide table { overflow-wrap: normal; border-collapse: collapse; width: 100%; font-size: 0.875rem; line-height: 1.6; margin: 1.25rem 0; }
 .webgl-guide th { text-align: left; font-size: 0.75rem; color: var(--color-text-muted); background: var(--color-bg); }
 .webgl-guide th, .webgl-guide td { padding: 0.8125rem 0.875rem; border-bottom: 0.0625rem solid var(--color-border); vertical-align: top; }
 .webgl-guide td:first-child { font-weight: 700; }
@@ -141,7 +143,7 @@
   .webgl-guide .version-picker-heading p { margin-top: 0.3125rem; font-size: 0.75rem; }
   .webgl-guide .version-choices { gap: 0.5625rem; }
   .webgl-guide .version-card.btn { padding: 1rem 0.75rem; }
-  .webgl-guide .version-card strong { font-size: 1.4375rem; letter-spacing: -.0.4375rem; padding-right: 0.75rem; }
+  .webgl-guide .version-card strong { font-size: 1.4375rem; letter-spacing: -0.04375rem; padding-right: 0.75rem; }
   .webgl-guide .version-card-check { width: 1.125rem; height: 1.125rem; top: 0.8125rem; right: 0.625rem; font-size: 0.6875rem; }
   .webgl-guide .version-card-state { font-size: 0.6875rem; }
 }
