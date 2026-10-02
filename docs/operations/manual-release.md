@@ -1,16 +1,8 @@
-# 수동 배포와 최초 DB 전환
+# 최초 DB 전환과 관측 예외 기록
 
-## 평상시 배포
+일반 production 배포 절차는 [deployment.md](deployment.md)를 따른다. 아래 내용은 특정 canonical schema의 최초 전환을 위해 마련한 입력·예외 조건과 보존 자료이다. 전환 완료 여부와 현재 운영 상태는 별도로 확인해야 하며, 과거 승인 기록은 새로운 예외 실행의 승인이 아니다.
 
-GitHub Actions의 `Deploy Release`에서 master를 선택하고 기본값 `phase=release`로 실행한다. 나머지 입력은 비워 둔다. master 변경의 작성자나 배포 토큰 소유자에 대한 별도 허용 목록은 사용하지 않는다.
-
-배포는 해당 master 커밋의 성공한 이미지 빌드 기록을 찾는다. 보관된 이미지 기록이 없으면 기존 빌드를 재사용하여 생성한다. 실제 이미지 라벨과 digest를 검사하며 mutable tag를 배포 입력으로 사용하지 않는다. Phase 1 DB가 남아 있으면 서비스 중지 전에 거부한다.
-
-웹 검증·빌드와 운영 DB 단계 확인은 서비스 중지 전에 수행한다. 이후 백업, 필요한 migration, 웹·API 적용, 실제 배포 소스·digest·동작 확인을 한 실행에서 처리한다. master push는 이미지를 빌드하며 운영 적용은 수동 실행으로 유지한다.
-
-Pages에는 대상 저장소 `pcugame/pcugame.github.io`, master 브랜치, 활성 상태, 토큰의 쓰기 권한만 요구한다. 관리자 권한·특정 배포 계정·조직 전용 push 제한·보호 설정 조회는 요구하지 않는다. 기존 협업자 권한은 변경하지 않는다.
-
-## 이번 최초 전환
+## 최초 전환 입력과 조건
 
 최초 전환은 `phase=phase2`로 실행하며, 기존 Phase 1 source/image와 새 master의 불변 image를 지정한다. `observation_exception_id`에 실행 식별자를 넣고 `observation_attestation=I_ACCEPT_SHORT_OBSERVATION`, `exception_profile=image-bridge-traffic`을 사용한다. `observation_started_at`은 비워 둔다.
 
@@ -22,9 +14,7 @@ Pages에는 대상 저장소 `pcugame/pcugame.github.io`, master 브랜치, 활�
 
 ## 실패와 복구
 
-서비스 중지 전 웹 소스와 실제 실행 중인 컨테이너 ID를 보관한다. migration을 시도하기 전 실패하면 이번 실행이 게시한 Pages만 이전 커밋으로 복원한다. 비교 후 갱신 방식으로 다른 작성자의 후속 변경을 덮지 않는다. 이전 웹 소스가 실제 제공되는 것을 확인한 후 기존 컨테이너 ID를 재시작한다.
-
-migration 호출 직전에 영속 시도 표시를 기록한다. 호출 후 실패는 SQL COMMIT 이후 오류일 수도 있으므로 이전 웹·API를 자동 복원하지 않는다. DB 이력과 영수증을 확인해 전진 수정하거나 보존한 백업을 이용한 복구를 결정한다. 실패한 실행 로그에는 실제 중지·migration·복구 결과가 남는다.
+현재 일반 release의 복구 경계는 [배포 절차의 실패와 복구](deployment.md#실패와-복구)를 따른다. 최초 전환에서도 contract 적용 후에는 이전 Phase 1 이미지만 재시작하지 않는다. DB 이력·실제 schema·예외 영수증을 확인하고 전진 수정 또는 DB·Garage 복구 범위를 판단한다.
 
 ## 보존된 운영 자료
 

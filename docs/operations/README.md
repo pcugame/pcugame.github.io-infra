@@ -1,4 +1,11 @@
-# Master and production source alignment
+# Historical master and production alignment
+
+This is the 2026-09-09 integration record, not the current deployment runbook.
+Runtime versions, branch dispositions and checksums below describe that recorded
+point in time; their current production state has not been reverified here.
+Use [production deployment](deployment.md) for deployment procedures and
+[production release audit](../production-release-audit.md) for the current
+repository structure, retirement criteria and consolidated Phase 2 records.
 
 `master` is the source for the currently supported Phase 1 runtime. Changes go
 through a task PR, review and the existing PR checks before merging. The existing
