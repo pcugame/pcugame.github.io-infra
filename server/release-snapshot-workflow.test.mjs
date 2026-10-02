@@ -4,22 +4,19 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 const workflow = readFileSync(new URL('../.github/workflows/release-api-cutover.yml', import.meta.url), 'utf8');
-const snapshot = workflow.slice(workflow.indexOf('\n  snapshot:'), workflow.indexOf('\n  preflight:'));
-const authorization = workflow.slice(workflow.indexOf('          if [[ "${RELEASE_PHASE}" = release || "${RELEASE_PHASE}" = snapshot || "${RELEASE_PHASE}" = preflight ]]; then'), workflow.indexOf('          elif [ "${RELEASE_PHASE}" = phase1 ]; then'));
-
-test('snapshot accepts no deployment or false observation inputs', () => {
-  const script = `${authorization}\nfi`;
-  const base = { ...process.env, RELEASE_PHASE: 'snapshot', PHASE1_IMAGE: '', PHASE1_SOURCE_SHA: '', FINAL_IMAGE: '', OBSERVATION_STARTED_AT: '', OBSERVATION_ATTESTATION: '', OBSERVATION_EXCEPTION_ID: '' };
-  assert.equal(spawnSync('bash', ['-eu', '-c', script], { env: base }).status, 0);
-  for (const key of ['PHASE1_IMAGE', 'PHASE1_SOURCE_SHA', 'FINAL_IMAGE', 'OBSERVATION_STARTED_AT', 'OBSERVATION_ATTESTATION', 'OBSERVATION_EXCEPTION_ID']) {
-    assert.notEqual(spawnSync('bash', ['-eu', '-c', script], { env: { ...base, [key]: 'unexpected' } }).status, 0, key);
-  }
+const snapshot = workflow.slice(workflow.indexOf('\n  snapshot:'), workflow.indexOf('\n  resolve_image:'));
+const block = workflow.slice(workflow.indexOf('      - id: release'), workflow.indexOf('\n  snapshot:'));
+const authorization = block.slice(block.indexOf('        run: |\n') + '        run: |\n'.length).split('\n').map(line => line.replace(/^          /, '')).join('\n');
+test('snapshot rejects deployment and forward-fix inputs', () => {
+ const base = { ...process.env, RELEASE_PHASE: 'snapshot', FINAL_IMAGE: '', FORWARD_FIX_ACKNOWLEDGEMENT: '', EXPECTED_IMAGE_REPO: 'ghcr.io/pcugame/pcu-graduationproject-v2-api', GITHUB_OUTPUT: '/dev/null' };
+ assert.equal(spawnSync('bash', ['-eu', '-c', authorization], { env: base }).status, 0);
+ for (const key of ['FINAL_IMAGE', 'FORWARD_FIX_ACKNOWLEDGEMENT']) assert.notEqual(spawnSync('bash', ['-eu', '-c', authorization], { env: { ...base, [key]: 'unexpected' } }).status, 0, key);
 });
 
 test('snapshot and cutover jobs are mutually exclusive under the existing production lock', () => {
   assert.match(workflow, /group: production-object-cutover/);
   assert.match(snapshot, /if: \$\{\{ inputs.phase == 'snapshot' \}\}/);
-  assert.match(workflow.slice(workflow.indexOf('\n  cutover:')), /inputs.phase != 'snapshot' && inputs.phase != 'preflight'/);
+  assert.match(workflow.slice(workflow.indexOf('\n  cutover:')), /inputs.phase != 'snapshot'/);
   assert.match(snapshot, /needs: authorize/);
   assert.match(snapshot, /environment: production/);
   assert.match(snapshot, /verify-github-release-boundaries.mjs control/);

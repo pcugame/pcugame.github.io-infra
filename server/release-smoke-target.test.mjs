@@ -30,11 +30,13 @@ test('stored selection binds exact source and public origin', () => {
 test('workflow prepares and probes a persisted selection before drain, then reuses it after start', async () => {
   const { readFileSync } = await import('node:fs');
   const workflow = readFileSync(new URL('../.github/workflows/release-api-cutover.yml', import.meta.url), 'utf8');
-  const prepare = workflow.slice(workflow.indexOf('      - name: Prepare atomic Phase 2 maintenance window'), workflow.indexOf('      - name: Verify external Pages repository'));
-  assert.ok(prepare.indexOf('release-smoke-target.mjs" prepare') < prepare.indexOf('deploy.sh" drain'));
+  const prepare = workflow.slice(workflow.indexOf('      - name: Prepare release maintenance window'), workflow.indexOf('      - name: Verify external Pages repository'));
+  const target = prepare.indexOf('release-smoke-target.mjs" prepare');
+  assert.ok(target >= 0 && target < prepare.indexOf('deploy.sh" drain'));
   assert.match(prepare, /SMOKE_PUBLIC_OBJECT_URL: \$\{\{ secrets.SMOKE_PUBLIC_OBJECT_URL \}\}/);
   const apply = workflow.slice(workflow.indexOf('      - name: Apply migrations and start verified release'), workflow.indexOf('      - name: Restore Pages before pre-migration recovery'));
-  assert.ok(apply.indexOf('deploy.sh" up') < apply.indexOf('release-smoke-target.mjs" read'));
+  const start = apply.indexOf('deploy.sh" up');
+  assert.ok(start >= 0 && start < apply.indexOf('release-smoke-target.mjs" read'));
   assert.doesNotMatch(apply, /SMOKE_PUBLIC_OBJECT_URL is required/);
   assert.match(workflow, /source: .*server\/release-smoke-target.mjs/);
 });

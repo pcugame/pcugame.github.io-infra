@@ -97,7 +97,7 @@ jobs:
             for (const worker of ["game-validation", "webgl", "video", "image", "export", "project-publication"]) {
               if (!fs.existsSync(`dist/${worker}-worker.js`)) throw new Error(`Missing worker ${worker}`);
             }
-            for (const cli of ["backfill-canonical-assets", "preflight-canonical-contract", "release-migrate", "snapshot-garage-inventory", "verify-cutover-report", "correct-canonical-assets", "correct-canonical-poster"]) {
+            for (const cli of ["release-migrate", "snapshot-garage-inventory"]) {
               if (!fs.existsSync(`dist-release/scripts/${cli}.js`)) throw new Error(`Missing release CLI ${cli}`);
             }
           '

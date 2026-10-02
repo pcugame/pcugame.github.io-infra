@@ -25,8 +25,6 @@ PG_VOLUME="gp_pg_data"
 API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"
 HEALTHCHECK_TIMEOUT=90  # seconds
 CUTOVER_STATE_DIR="${CUTOVER_STATE_DIR:-${DEPLOY_DIR}/cutover-state}"
-ROLLBACK_AUTH_FILE="${CUTOVER_STATE_DIR}/phase1-rollback.authorization"
-ROLLBACK_CONSUMED_FILE="${CUTOVER_STATE_DIR}/phase1-rollback.consumed"
 RUNTIME_CONTAINERS=(
   "$API_CONTAINER" "$GAME_WORKER_CONTAINER" "$WEBGL_WORKER_CONTAINER"
   "$VIDEO_WORKER_CONTAINER" "$IMAGE_WORKER_CONTAINER" "$EXPORT_WORKER_CONTAINER"
@@ -47,10 +45,10 @@ load_env() {
 }
 
 require_immutable_release_images() {
-  if [[ "${START_DEDICATED_WORKERS:-true}" == false ]]; then
-    assert_phase1_rollback_authorization
-    return
-  fi
+  [[ "${START_DEDICATED_WORKERS:-true}" == true ]] || {
+    echo "ERROR: START_DEDICATED_WORKERS must be true; legacy runtime bypass is retired"
+    return 1
+  }
   for pair in "API_IMAGE=${API_IMAGE}" "MIGRATION_IMAGE=${MIGRATION_IMAGE}"; do
     local name="${pair%%=*}"
     local image="${pair#*=}"
@@ -59,24 +57,6 @@ require_immutable_release_images() {
       return 1
     }
   done
-}
-
-release_image_id() {
-  local raw_image_id
-  raw_image_id="$(podman image inspect "$1" --format '{{.Id}}')" || return 1
-  normalize_local_image_id "$raw_image_id"
-}
-
-normalize_local_image_id() {
-  local raw_image_id="${1:-}"
-  local image_id="${raw_image_id#sha256:}"
-  [[ "$image_id" =~ ^[0-9a-f]{64}$ && ( "$raw_image_id" == "$image_id" || "$raw_image_id" == "sha256:${image_id}" ) ]] || {
-    echo "ERROR: Podman returned a malformed local image ID" >&2
-    return 1
-  }
-  # Podman versions differ between a bare hex ID and sha256:<hex>. Persist
-  # and compare the bare 64-hex form so both representations converge.
-  printf '%s\n' "$image_id"
 }
 
 release_image_digest() {
@@ -102,107 +82,6 @@ validate_release_source_identity() {
     echo "ERROR: image source revision label does not match RELEASE_SOURCE_SHA"
     return 1
   }
-}
-
-assert_legacy_material_rollback_safe() {
-  local material_rows
-  material_rows=$(podman exec -i "$PG_CONTAINER" sh -c 'exec psql -X -qAt --set ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
-SELECT (SELECT count(*) FROM assets WHERE kind::text IN ('DOCUMENT', 'ATTACHMENT'))
-     + (SELECT count(*) FROM asset_upload_sessions WHERE kind::text IN ('DOCUMENT', 'ATTACHMENT'));
-SQL
-  ) || return 1
-  [[ "$material_rows" == 0 ]] || {
-    echo "ERROR: document/attachment data exists; recover with a compatible runtime forward fix"
-    return 1
-  }
-}
-
-assert_visibility_rollback_safe() {
-  podman exec -i "$PG_CONTAINER" sh -c 'exec psql -X -qAt --set ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
-DO $$
-DECLARE restricted boolean;
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-             WHERE table_schema = current_schema() AND table_name = 'exhibitions' AND column_name = 'visibility') THEN
-    EXECUTE 'SELECT EXISTS (SELECT 1 FROM exhibitions WHERE visibility::text <> ''PUBLIC'')
-                 OR EXISTS (SELECT 1 FROM projects WHERE visibility::text <> ''PUBLIC'')' INTO restricted;
-    IF restricted THEN
-      RAISE EXCEPTION 'Restricted visibility data exists; recover with a visibility-aware forward fix';
-    END IF;
-  END IF;
-END $$;
-SQL
-}
-
-assert_phase1_rollback_authorization() {
-  assert_visibility_rollback_safe
-  assert_legacy_material_rollback_safe
-  [[ "${RELEASE_SCHEMA_PHASE:-}" == phase1 && "${START_DEDICATED_WORKERS:-true}" == false ]] || {
-    echo "ERROR: legacy runtime rollback is permitted only for Phase 1"
-    return 1
-  }
-  [[ "${PULL_API_IMAGE:-true}" == false && "$API_IMAGE" == "$MIGRATION_IMAGE" ]] || {
-    echo "ERROR: Phase 1 rollback must use one already-local API/migration image"
-    return 1
-  }
-  [[ "${ROLLBACK_AUTH_NONCE:-}" =~ ^[0-9a-f]{64}$ ]] || {
-    echo "ERROR: Phase 1 rollback requires its one-time authorization nonce"
-    return 1
-  }
-  [[ -f "$ROLLBACK_AUTH_FILE" && ! -e "$ROLLBACK_CONSUMED_FILE" ]] || {
-    echo "ERROR: Phase 1 rollback authorization is absent or already consumed"
-    return 1
-  }
-  local authorized_image_id authorized_nonce extra
-  read -r authorized_image_id authorized_nonce extra < "$ROLLBACK_AUTH_FILE"
-  [[ -z "${extra:-}" && "$authorized_nonce" == "$ROLLBACK_AUTH_NONCE" ]] || {
-    echo "ERROR: Phase 1 rollback authorization is malformed or nonce-mismatched"
-    return 1
-  }
-  authorized_image_id="$(normalize_local_image_id "$authorized_image_id")" || {
-    echo "ERROR: Phase 1 rollback authorization contains a malformed image ID"
-    return 1
-  }
-  local actual_image_id
-  actual_image_id="$(release_image_id "$API_IMAGE")"
-  [[ "$actual_image_id" == "$authorized_image_id" ]] || {
-    echo "ERROR: rollback image tag no longer resolves to the authorized image ID"
-    return 1
-  }
-  AUTHORIZED_ROLLBACK_IMAGE_ID="$authorized_image_id"
-}
-
-consume_phase1_rollback_authorization() {
-  assert_phase1_rollback_authorization
-  mv "$ROLLBACK_AUTH_FILE" "$ROLLBACK_CONSUMED_FILE"
-  chmod 600 "$ROLLBACK_CONSUMED_FILE"
-  # Stop resolving the mutable local tag after authorization is consumed.
-  API_IMAGE="$AUTHORIZED_ROLLBACK_IMAGE_ID"
-  MIGRATION_IMAGE="$AUTHORIZED_ROLLBACK_IMAGE_ID"
-}
-
-do_authorize_phase1_rollback() {
-  local nonce="${1:-}"
-  load_env
-  [[ "$nonce" =~ ^[0-9a-f]{64}$ ]] || {
-    echo "ERROR: authorize-phase1-rollback requires a 64-character lowercase hex nonce"
-    return 1
-  }
-  local current_image_id raw_current_image_id
-  raw_current_image_id="$(podman inspect "$API_CONTAINER" --format '{{.Image}}' 2>/dev/null)" || {
-    echo "ERROR: current API container is unavailable for rollback authorization"
-    return 1
-  }
-  current_image_id="$(normalize_local_image_id "$raw_current_image_id")" || {
-    echo "ERROR: current API container returned a malformed image ID"
-    return 1
-  }
-  mkdir -p "$CUTOVER_STATE_DIR"
-  umask 077
-  rm -f "$ROLLBACK_CONSUMED_FILE"
-  printf '%s %s\n' "$current_image_id" "$nonce" > "$ROLLBACK_AUTH_FILE"
-  chmod 600 "$ROLLBACK_AUTH_FILE"
-  echo "One-time Phase 1 rollback authorization recorded for the current image ID."
 }
 
 database_url_in_pod() {
@@ -279,9 +158,6 @@ run_release_entry() {
   mkdir -p "$CUTOVER_STATE_DIR"
   assert_postgres_running
   release_common_args
-  if [[ "$entry" == dist-release/scripts/correct-canonical-assets.js ]]; then
-    RELEASE_CONTAINER_ARGS+=(--memory=2g --memory-swap=2g)
-  fi
   podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" "$entry" "$@"
 }
 
@@ -451,17 +327,13 @@ do_capacity_preflight() {
 # In particular, a library-only image-worker module must not masquerade as a
 # runnable worker and leave IMAGE/POSTER jobs permanently unprocessed.
 validate_worker_entries() {
-  local release_schema_phase="$1"
-  podman run --rm --entrypoint node \
-    -e "PCU_RELEASE_SCHEMA_PHASE=${release_schema_phase}" "$API_IMAGE" -e '
+  podman run --rm --entrypoint node "$API_IMAGE" -e '
     const fs = require("node:fs");
     const entries = [
       "dist/game-validation-worker.js", "dist/webgl-worker.js",
       "dist/video-worker.js", "dist/image-worker.js", "dist/export-worker.js",
+      "dist/project-publication-worker.js",
     ];
-    if (process.env.PCU_RELEASE_SCHEMA_PHASE === "phase2") {
-      entries.push("dist/project-publication-worker.js");
-    }
     for (const entry of entries) {
       if (!fs.existsSync(entry)) throw new Error(`missing worker entry: ${entry}`);
       const source = fs.readFileSync(entry, "utf8");
@@ -470,25 +342,8 @@ validate_worker_entries() {
   '
 }
 
-validate_phase1_runtime_marker() {
-  local marker
-  marker="$(podman run --rm --entrypoint node "$API_IMAGE" dist/phase1-release-manifest.js)" || {
-    echo "ERROR: Phase 1 image is missing the dedicated runtime manifest"
-    return 1
-  }
-  [[ "$marker" == "PCU_PHASE1_RUNTIME_V1" ]] || {
-    echo "ERROR: Phase 1 runtime manifest returned an unexpected marker"
-    return 1
-  }
-}
-
 validate_release_image_pair() {
   local release_schema_phase="$1"
-  if [[ "${START_DEDICATED_WORKERS:-true}" == false ]]; then
-    [[ "$release_schema_phase" == phase1 ]] || return 1
-    assert_phase1_rollback_authorization
-    return 0
-  fi
   [[ "$API_IMAGE" == "$MIGRATION_IMAGE" ]] || {
     echo "ERROR: $release_schema_phase requires API_IMAGE and MIGRATION_IMAGE to be the same immutable release artifact"
     return 1
@@ -510,22 +365,15 @@ pull_release_images() {
 
 validate_release_artifacts() {
   local release_schema_phase="$1"
-  [[ "$release_schema_phase" == phase1 || "$release_schema_phase" == phase2 ]] || {
-    echo "ERROR: release artifact preflight requires phase1 or phase2"
+  [[ "$release_schema_phase" == phase2 ]] || {
+    echo "ERROR: release artifact preflight requires phase2"
     return 1
   }
   validate_release_image_pair "$release_schema_phase"
   pull_release_images
-  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
-    validate_release_source_identity "$API_IMAGE"
-    if [[ "$release_schema_phase" == phase1 ]]; then
-      validate_phase1_runtime_marker
-    fi
-    validate_worker_entries "$release_schema_phase"
-    validate_release_entries
-  else
-    echo "WARNING: Phase 1 runtime marker and dedicated workers are bypassed for explicitly authorized pre-contract legacy rollback"
-  fi
+  validate_release_source_identity "$API_IMAGE"
+  validate_worker_entries
+  validate_release_entries
 }
 
 do_release_artifact_preflight() {
@@ -541,11 +389,8 @@ validate_release_entries() {
   podman run --rm --entrypoint node "$MIGRATION_IMAGE" -e '
     const fs = require("node:fs");
     const entries = [
-      "dist-release/scripts/backfill-canonical-assets.js",
-      "dist-release/scripts/preflight-canonical-contract.js",
       "dist-release/scripts/release-migrate.js",
       "dist-release/scripts/snapshot-garage-inventory.js",
-      "dist-release/scripts/verify-cutover-report.js",
     ];
     for (const entry of entries) {
       if (!fs.existsSync(entry)) throw new Error(`missing compiled release CLI: ${entry}`);
@@ -602,43 +447,30 @@ do_backup() {
   echo "PostgreSQL backup: $backup_file"
 }
 
-do_legacy_audit() {
-  load_env
-  assert_postgres_running
-  assert_mutation_drained
-  mkdir -p "$CUTOVER_STATE_DIR"
-  local report="${CUTOVER_STATE_DIR}/legacy-audit-$(date -u +%Y%m%dT%H%M%SZ).tsv"
-  podman exec -i "$PG_CONTAINER" psql \
-    -X --set ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    --csv > "$report" <<'SQL'
-SELECT 'assets_total' AS metric, count(*)::text AS value FROM assets
-UNION ALL SELECT 'assets_with_storage_key', count(*)::text FROM assets WHERE storage_key IS NOT NULL
-UNION ALL SELECT 'videos_with_playback_key', count(*)::text FROM assets WHERE playback_storage_key IS NOT NULL
-UNION ALL SELECT 'projects_with_webgl_entry', count(*)::text FROM projects WHERE webgl_entry_key <> ''
-UNION ALL SELECT 'active_legacy_upload_sessions', count(*)::text FROM game_upload_sessions
-  WHERE status NOT IN ('COMPLETED', 'CANCELLED', 'FAILED', 'RESOLVED');
-SQL
-  chmod 600 "$report"
-  echo "Legacy audit: $report"
-}
-
 do_release_migration() {
   local action="${1:-status}"
   if (( $# > 0 )); then shift; fi
-  [[ "$action" == status || "$action" == apply-expand || "$action" == apply-contract ]] || {
-    echo "ERROR: release-migrate action must be status, apply-expand, or apply-contract"
+  [[ "$action" == status || "$action" == apply-contract ]] || {
+    echo "ERROR: release-migrate action must be status or apply-contract"
+    return 1
+  }
+  (( $# == 0 )) || {
+    echo "ERROR: release-migrate does not accept transition exception arguments"
     return 1
   }
   if [[ "$action" != status ]]; then
     assert_mutation_drained
+    # Only subsequent migrations are supported; the initial contract transition
+    # is retired. Keep the applied receipt/schema assertion before any SQL deploy.
+    run_release_entry dist-release/scripts/release-migrate.js assert-runtime phase2
   fi
   run_release_entry dist-release/scripts/release-migrate.js "$action" "$@"
 }
 
 do_release_assert() {
   local phase="${1:-}"
-  [[ "$phase" == phase1 || "$phase" == phase2 ]] || {
-    echo "ERROR: release-assert requires phase1 or phase2"
+  [[ "$phase" == phase2 ]] || {
+    echo "ERROR: release-assert requires phase2"
     return 1
   }
   run_release_entry dist-release/scripts/release-migrate.js assert-runtime "$phase"
@@ -652,113 +484,6 @@ do_inventory_snapshot() {
     return 1
   }
   run_release_entry dist-release/scripts/snapshot-garage-inventory.js "--output=$output"
-}
-
-do_backfill() {
-  assert_mutation_drained
-  run_release_entry dist-release/scripts/backfill-canonical-assets.js "$@"
-}
-
-do_canonical_correction() {
-  case "${1:-}" in
-    investigate|prepare|protect) ;;
-    apply) assert_mutation_drained ;;
-    *) echo "ERROR: correction requires investigate, prepare, protect, or apply"; return 1 ;;
-  esac
-  run_release_entry dist-release/scripts/correct-canonical-assets.js "$@"
-}
-
-# Read-only observation of the candidate artifact before maintenance. Restrict
-# inputs so this entry point cannot reset metrics or run an applying command.
-do_online_contract_preflight() {
-  local arg
-  for arg in "$@"; do
-    case "$arg" in
-      --observation-exception-id=*) [[ "${arg#*=}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$ ]] || return 1 ;;
-      --exception-profile=image-bridge-36|--exception-profile=image-bridge-traffic) ;;
-      *) echo "ERROR: unsupported online preflight argument"; return 1 ;;
-    esac
-  done
-  run_release_entry dist-release/scripts/preflight-canonical-contract.js "$@"
-}
-
-do_contract_preflight() {
-  assert_mutation_drained
-  run_release_entry dist-release/scripts/preflight-canonical-contract.js "$@"
-}
-
-do_mark_read_cutover() {
-  load_env
-  mkdir -p "$CUTOVER_STATE_DIR"
-  [[ "$(podman inspect --format '{{.State.Status}}' "$API_CONTAINER" 2>/dev/null || echo missing)" == running ]] || {
-    echo "ERROR: phase1 API is not running"
-    return 1
-  }
-  [[ "$API_IMAGE" == "$MIGRATION_IMAGE" ]] || {
-    echo "ERROR: refusing to record a mixed-image Phase 1 observation"
-    return 1
-  }
-  validate_phase1_runtime_marker
-  validate_release_source_identity "$API_IMAGE"
-  run_release_entry dist-release/scripts/release-migrate.js assert-runtime phase1
-  podman exec "$API_CONTAINER" wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
-  {
-    echo "read_cutover_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "phase1_api_image=${API_IMAGE}"
-    echo "migration_image=${MIGRATION_IMAGE}"
-    echo "phase1_image_digest=$(release_image_digest "$API_IMAGE")"
-    echo "migration_image_digest=$(release_image_digest "$MIGRATION_IMAGE")"
-    echo "phase1_image_id=$(release_image_id "$API_IMAGE")"
-    echo "phase1_source_sha=${RELEASE_SOURCE_SHA}"
-  } > "${CUTOVER_STATE_DIR}/phase1-observation"
-  chmod 600 "${CUTOVER_STATE_DIR}/phase1-observation"
-  echo "Canonical-first read cutover recorded. Observe zero fallback reads for at least 24 hours."
-}
-
-do_verify_phase1_observation_window() {
-  local expected_started_at="${1:-}"
-  local observation_file="${CUTOVER_STATE_DIR}/phase1-observation"
-  [[ -f "$observation_file" ]] || {
-    echo "ERROR: server-side Phase 1 observation record is missing"
-    return 1
-  }
-  [[ "$expected_started_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || {
-    echo "ERROR: expected observation start must be a canonical UTC timestamp"
-    return 1
-  }
-  OBSERVATION_RECORD="$observation_file" EXPECTED_OBSERVATION_START="$expected_started_at" \
-    node --input-type=module <<'NODE'
-import { readFile } from 'node:fs/promises';
-
-const record = await readFile(process.env.OBSERVATION_RECORD, 'utf8');
-const fields = new Map();
-for (const line of record.split('\n')) {
-  if (!line) continue;
-  const separator = line.indexOf('=');
-  if (separator <= 0) throw new Error('Phase 1 observation record is malformed');
-  const key = line.slice(0, separator);
-  const value = line.slice(separator + 1);
-  if (!/^[a-z0-9_]+$/.test(key) || fields.has(key)) {
-    throw new Error('Phase 1 observation record contains an invalid or duplicate field');
-  }
-  fields.set(key, value);
-}
-const startedAt = fields.get('read_cutover_at');
-if (startedAt !== process.env.EXPECTED_OBSERVATION_START) {
-  throw new Error('attested observation start does not match the server-side record');
-}
-const started = Date.parse(startedAt);
-if (!Number.isFinite(started)) throw new Error('server-side observation start is invalid');
-const elapsed = Date.now() - started;
-const hour = 60 * 60 * 1000;
-if (elapsed < 24 * hour) {
-  throw new Error(`server-side observation is only ${Math.floor(elapsed / hour)}h old`);
-}
-if (elapsed > 31 * 24 * hour) {
-  throw new Error('server-side observation is older than 31 days; run a new preflight');
-}
-console.log('Server-side Phase 1 observation window is current.');
-NODE
 }
 
 do_verify_final_web() {
@@ -912,17 +637,15 @@ do_up() {
   mkdir -p "$CUTOVER_STATE_DIR"
 
   local release_schema_phase="${RELEASE_SCHEMA_PHASE:-}"
-  [[ "$release_schema_phase" == phase1 || "$release_schema_phase" == phase2 ]] || {
-    echo "ERROR: RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2"
+  [[ "$release_schema_phase" == phase2 ]] || {
+    echo "ERROR: RELEASE_SCHEMA_PHASE must explicitly be phase2"
     return 1
   }
 
   local nas_export_host_path="${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
   local nas_export_container_path="${NAS_EXPORT_PATH:-/nas}"
 
-  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
-    validate_capacity_boundaries "$nas_export_host_path"
-  fi
+  validate_capacity_boundaries "$nas_export_host_path"
 
   # Ensure volume exists
   podman volume inspect "$PG_VOLUME" &>/dev/null || podman volume create "$PG_VOLUME"
@@ -933,10 +656,6 @@ do_up() {
   echo "Pulling images..."
   podman pull -q "$PG_IMAGE"
   validate_release_artifacts "$release_schema_phase"
-
-  if [[ "${START_DEDICATED_WORKERS:-true}" == false ]]; then
-    consume_phase1_rollback_authorization
-  fi
 
   # Remove old containers/pod if they exist
   do_down
@@ -972,12 +691,8 @@ do_up() {
   # Refuse to start application processes against the wrong schema phase.
   # This is intentionally separate from migration application.
   release_common_args
-  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
-    podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" \
-      dist-release/scripts/release-migrate.js assert-runtime "$release_schema_phase"
-  else
-    echo "Skipping new release CLI schema assertion for the one-time pre-contract legacy rollback."
-  fi
+  podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" \
+    dist-release/scripts/release-migrate.js assert-runtime "$release_schema_phase"
 
   # Fix DATABASE_URL: in a pod, containers share localhost
   # Replace the hostname 'postgres' with '127.0.0.1' since they're in the same pod
@@ -1082,25 +797,21 @@ do_up() {
     verify_running "$container" "$label"
   }
 
-  if [[ "${START_DEDICATED_WORKERS:-true}" == true ]]; then
-    # These are independent, container-owned tmpfs mounts. They are neither a
-    # shared host mount nor a shared 4 GiB pool between GAME and WebGL.
-    start_worker "$GAME_WORKER_CONTAINER" "GAME validation worker" dist/game-validation-worker.js \
-      --tmpfs /tmp:rw,noexec,nosuid,size=6g
-    start_worker "$WEBGL_WORKER_CONTAINER" "WebGL worker" dist/webgl-worker.js \
-      --tmpfs /tmp:rw,noexec,nosuid,size=6g
-    start_worker "$VIDEO_WORKER_CONTAINER" "VIDEO worker" dist/video-worker.js \
-      --tmpfs /tmp:rw,noexec,nosuid,size=2g
-    start_worker "$IMAGE_WORKER_CONTAINER" "IMAGE/PDF worker" dist/image-worker.js \
-      --tmpfs /tmp:rw,noexec,nosuid,size=512m
-    start_worker "$EXPORT_WORKER_CONTAINER" "export worker" dist/export-worker.js \
-      -e "NAS_EXPORT_ROOT=${nas_export_container_path}" \
-      -v "${nas_export_host_path}:${nas_export_container_path}:rw,Z"
-    if [[ "$release_schema_phase" == phase2 ]]; then
-      start_worker "$PROJECT_PUBLICATION_WORKER_CONTAINER" "project publication worker" \
-        dist/project-publication-worker.js
-    fi
-  fi
+  # These are independent, container-owned tmpfs mounts. They are neither a
+  # shared host mount nor a shared 4 GiB pool between GAME and WebGL.
+  start_worker "$GAME_WORKER_CONTAINER" "GAME validation worker" dist/game-validation-worker.js \
+    --tmpfs /tmp:rw,noexec,nosuid,size=6g
+  start_worker "$WEBGL_WORKER_CONTAINER" "WebGL worker" dist/webgl-worker.js \
+    --tmpfs /tmp:rw,noexec,nosuid,size=6g
+  start_worker "$VIDEO_WORKER_CONTAINER" "VIDEO worker" dist/video-worker.js \
+    --tmpfs /tmp:rw,noexec,nosuid,size=2g
+  start_worker "$IMAGE_WORKER_CONTAINER" "IMAGE/PDF worker" dist/image-worker.js \
+    --tmpfs /tmp:rw,noexec,nosuid,size=512m
+  start_worker "$EXPORT_WORKER_CONTAINER" "export worker" dist/export-worker.js \
+    -e "NAS_EXPORT_ROOT=${nas_export_container_path}" \
+    -v "${nas_export_host_path}:${nas_export_container_path}:rw,Z"
+  start_worker "$PROJECT_PUBLICATION_WORKER_CONTAINER" "project publication worker" \
+    dist/project-publication-worker.js
 
   # ── Generate systemd service with restart delay ──
   echo "Generating systemd service for pod..."
@@ -1137,7 +848,6 @@ do_up() {
   echo ""
   podman ps --pod --filter "pod=$POD_NAME"
   rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
-  rm -f "$ROLLBACK_AUTH_FILE" "$ROLLBACK_CONSUMED_FILE"
 }
 
 # ── Logs ───────────────────────────────────────────────────────
@@ -1173,27 +883,19 @@ case "${1:-up}" in
   down)    do_down ;;
   drain)   do_drain ;;
   backup)  do_backup "${2:-manual}" ;;
-  legacy-audit) do_legacy_audit ;;
   release-migrate) shift; do_release_migration "$@" ;;
   release-assert) do_release_assert "${2:-}" ;;
   inventory) do_inventory_snapshot "${2:-}" ;;
-  backfill) shift; do_backfill "$@" ;;
-  correction) shift; do_canonical_correction "$@" ;;
-  online-contract-preflight) shift; do_online_contract_preflight "$@" ;;
-  contract-preflight) shift; do_contract_preflight "$@" ;;
   capacity-preflight) do_capacity_preflight ;;
   boundary-preflight) load_env; validate_production_boundaries ;;
   release-artifact-preflight) do_release_artifact_preflight "${2:-}" ;;
-  authorize-phase1-rollback) do_authorize_phase1_rollback "${2:-}" ;;
   verify-final-web) do_verify_final_web "${2:-}" ;;
-  verify-observation-window) do_verify_phase1_observation_window "${2:-}" ;;
-  mark-read-cutover) do_mark_read_cutover ;;
   # do_up validates every boundary before its own down/up replacement phase.
   restart) do_up ;;
   logs)    do_logs "${2:-api}" ;;
   status)  do_status ;;
   *)
-    echo "Usage: $0 {up|down|drain|backup [label]|legacy-audit|release-migrate [status|apply-expand|apply-contract]|release-assert [phase1|phase2]|inventory [/release-state/file]|backfill [args...]|correction <investigate|prepare|protect|apply> [args...]|contract-preflight [args...]|capacity-preflight|boundary-preflight|release-artifact-preflight [phase1|phase2]|authorize-phase1-rollback <nonce>|verify-final-web <git-sha>|verify-observation-window <started-at>|mark-read-cutover|restart|logs [api|pg|game|webgl|video|image|export]|status}"
+    echo "Usage: $0 {up|down|drain|backup [label]|release-migrate [status|apply-contract]|release-assert phase2|inventory [/release-state/file]|capacity-preflight|boundary-preflight|release-artifact-preflight phase2|verify-final-web <git-sha>|restart|logs [api|pg|game|webgl|video|image|export]|status}"
     exit 1
     ;;
 esac

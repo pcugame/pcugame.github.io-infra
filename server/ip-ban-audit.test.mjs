@@ -134,10 +134,10 @@ test('rejects PostgreSQL failures and malformed aggregate output without exposin
 
 test('release audits bans before drain and verifies disabled AUTO rows after startup', () => {
   const workflow = readFileSync(new URL('../.github/workflows/release-api-cutover.yml', import.meta.url), 'utf8');
-  const releaseBlockStart = workflow.indexOf('if [ "${RELEASE_PHASE}" = release ]; then');
+  const releaseBlockStart = workflow.indexOf('- name: Prepare release maintenance window');
   assert.notEqual(releaseBlockStart, -1, 'release preflight block exists');
-  const releaseBlockEnd = workflow.indexOf('exit 0', releaseBlockStart);
-  assert.notEqual(releaseBlockEnd, -1, 'release preflight block has an exit boundary');
+  const releaseBlockEnd = workflow.indexOf('- name: Verify external Pages repository', releaseBlockStart);
+  assert.notEqual(releaseBlockEnd, -1, 'release preflight block has a step boundary');
   const releaseBlock = workflow.slice(releaseBlockStart, releaseBlockEnd);
   const beforeAudit = releaseBlock.indexOf('ip-ban-audit.sh" before');
   const drain = releaseBlock.indexOf('deploy.sh" drain');

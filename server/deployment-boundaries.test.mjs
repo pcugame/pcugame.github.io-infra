@@ -51,16 +51,17 @@ assert.match(exportStart, /NAS_EXPORT_ROOT/);
 assert.match(exportStart, /nas_export_host_path/);
 assert.match(deploy, /Forward-only deploy complete/);
 assert.doesNotMatch(deploy, /do_rollback|API_IMAGE_PREVIOUS|podman\s+tag[^\n]+previous/i);
-assert.match(deploy, /dist\/phase1-release-manifest\.js/);
-assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
+assert.doesNotMatch(deploy, /dist\/phase1-release-manifest\.js/);
+assert.doesNotMatch(deploy, /PCU_PHASE1_RUNTIME_V1/);
 assert.match(deploy, /release-artifact-preflight\) do_release_artifact_preflight/);
-assert.match(deploy, /PCU_RELEASE_SCHEMA_PHASE === "phase2"[\s\S]*project-publication-worker\.js/);
+assert.match(deploy, /const entries = \[[\s\S]*"dist\/project-publication-worker\.js"[\s\S]*\];/);
+assert.doesNotMatch(deploy, /PCU_RELEASE_SCHEMA_PHASE/);
 assert.match(deploy, /release_schema_phase" == phase2[\s\S]*PROJECT_PUBLICATION_WORKER_CONTAINER/);
-assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == false[\s\S]*assert_phase1_rollback_authorization/);
+assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == true[\s\S]*legacy runtime bypass is retired/);
 assert.match(deploy, /must use an immutable @sha256 release digest/);
 assert.match(deploy, /ghcr\\\.io\/pcugame\/pcu-graduationproject-v2-api@sha256/);
 assert.match(deploy, /image source revision label does not match RELEASE_SOURCE_SHA/);
-assert.match(deploy, /rollback image tag no longer resolves to the authorized image ID/);
+assert.doesNotMatch(deploy, /ROLLBACK_AUTH|ROLLBACK_CONSUMED|assert_phase1_rollback_authorization/);
 assert.doesNotMatch(deploy, /\*:\s*sha-|localhost\/\*:rollback-/);
 
 for (const [name, value] of [
@@ -156,7 +157,7 @@ for (const replacement of ['', 'FILE_GATEWAY_SECRET=short']) {
   assert.match(missingGatewaySecret.stdout, /FILE_GATEWAY_SECRET must contain at least 32 characters/);
 }
 assert.match(deploy, /-e "FILE_GATEWAY_SECRET=\$\{FILE_GATEWAY_SECRET:-\}"/);
-assert.match(deploy, /assert_phase1_rollback_authorization\(\) \{\s+assert_visibility_rollback_safe/);
+assert.doesNotMatch(deploy, /assert_visibility_rollback_safe|assert_phase1_rollback_authorization/);
 
 
 // Exercise the exact final-web marker contract over HTTPS. The verifier must
@@ -276,7 +277,7 @@ assert.ok(
 );
 assert.ok(
 	upFunction.indexOf('validate_release_artifacts "$release_schema_phase"') < upFunction.indexOf('do_down'),
-	'do_up must validate the phase marker and worker set before replacing the deployment',
+	'do_up must validate the artifact identity and worker set before replacing the deployment',
 );
 assert.match(deploy, /redirect: 'manual'/);
 assert.match(deploy, /AbortSignal\.timeout\(5000\)/);
@@ -311,6 +312,7 @@ for (const [label, fixture] of [
 // from another commit all fail before the current deployment is stopped.
 await writeFile(fakePodman, `#!/bin/sh
 set -eu
+[ -z "\${PODMAN_MARKER:-}" ] || : > "$PODMAN_MARKER"
 if [ "\${1:-}" = pull ]; then exit 0; fi
 if [ "\${1:-}" = image ] && [ "\${2:-}" = inspect ]; then
   case " $* " in
@@ -340,12 +342,12 @@ await chmod(fakePodman, 0o755);
 const releaseDigest = `sha256:${'1'.repeat(64)}`;
 const releaseImage = `ghcr.io/pcugame/pcu-graduationproject-v2-api@${releaseDigest}`;
 const releaseSourceSha = '2'.repeat(40);
-const releaseImageId = '3'.repeat(64);
 const releaseEnv = {
 	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
 	API_IMAGE: releaseImage,
 	MIGRATION_IMAGE: releaseImage,
 	RELEASE_SOURCE_SHA: releaseSourceSha,
+	RELEASE_SCHEMA_PHASE: 'phase2',
 	FAKE_IMAGE_DIGEST: releaseDigest,
 	FAKE_IMAGE_REVISION: releaseSourceSha,
 };
@@ -388,108 +390,39 @@ const labelMismatch = await runBoundary(boundaryFixture, 'release-artifact-prefl
 assert.notEqual(labelMismatch.status, 0, 'wrong OCI source revision unexpectedly passed');
 assert.match(`${labelMismatch.stdout}\n${labelMismatch.stderr}`, /source revision label does not match/);
 
-// A local rollback tag is never authority. The server records the exact
-// current image ID plus a nonce, and a later tag retarget is rejected.
-const rollbackNonce = '6'.repeat(64);
-const rollbackImage = 'localhost/pcu-api:rollback-test';
-const authorizeRollback = await runBoundary(boundaryFixture, 'authorize-phase1-rollback', {
-	...releaseEnv,
-}, [rollbackNonce]);
-assert.equal(authorizeRollback.status, 0, authorizeRollback.stderr || authorizeRollback.stdout);
-assert.equal(spawnSync('stat', ['-c', '%a', join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization')], { encoding: 'utf8' }).stdout.trim(), '600');
-assert.match(
-	await readFile(join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization'), 'utf8'),
-	new RegExp(`^${releaseImageId} ${rollbackNonce}\\n$`),
-	'bare Podman image ID was not persisted canonically',
-);
-const prefixedAuthorizeRollback = await runBoundary(boundaryFixture, 'authorize-phase1-rollback', {
-	...releaseEnv,
-	FAKE_CONTAINER_IMAGE_ID: `sha256:${releaseImageId}`,
-}, [rollbackNonce]);
-assert.equal(prefixedAuthorizeRollback.status, 0, prefixedAuthorizeRollback.stderr || prefixedAuthorizeRollback.stdout);
-assert.match(
-	await readFile(join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization'), 'utf8'),
-	new RegExp(`^${releaseImageId} ${rollbackNonce}\\n$`),
-	'prefixed Podman image ID was not normalized to the canonical bare ID',
-);
-
-const rollbackEnv = {
-	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
-	API_IMAGE: rollbackImage,
-	MIGRATION_IMAGE: rollbackImage,
-	RELEASE_SCHEMA_PHASE: 'phase1',
-	START_DEDICATED_WORKERS: 'false',
-	PULL_API_IMAGE: 'false',
-	ROLLBACK_AUTH_NONCE: rollbackNonce,
-};
-const retargetedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
-	...rollbackEnv,
-	FAKE_IMAGE_ID: `sha256:${'7'.repeat(64)}`,
-}, ['phase1']);
-assert.notEqual(retargetedRollback.status, 0, 'forged rollback tag unexpectedly passed');
-assert.match(`${retargetedRollback.stdout}\n${retargetedRollback.stderr}`, /no longer resolves to the authorized image ID/);
-const exactRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
-	...rollbackEnv,
-	FAKE_IMAGE_ID: `sha256:${releaseImageId}`,
-}, ['phase1']);
-assert.equal(exactRollback.status, 0, exactRollback.stderr || exactRollback.stdout);
-const malformedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
-	...rollbackEnv,
-	FAKE_IMAGE_ID: `sha512:${releaseImageId}`,
-}, ['phase1']);
-assert.notEqual(malformedRollback.status, 0, 'malformed local image ID unexpectedly passed');
-assert.match(`${malformedRollback.stdout}\n${malformedRollback.stderr}`, /malformed local image ID/);
-const fakeSystemctl = join(fakeBin, 'systemctl');
-await writeFile(fakeSystemctl, '#!/bin/sh\nexit 0\n');
-await chmod(fakeSystemctl, 0o755);
-const consumedRollback = await runBoundary(boundaryFixture, 'up', {
-	...rollbackEnv,
-});
-assert.equal(consumedRollback.status, 0, consumedRollback.stderr || consumedRollback.stdout);
-assert.equal(spawnSync('test', ['!', '-e', join(fixtureDir, 'cutover-state', 'phase1-rollback.authorization')]).status, 0);
-assert.equal(spawnSync('test', ['!', '-e', join(fixtureDir, 'cutover-state', 'phase1-rollback.consumed')]).status, 0);
-const replayedRollback = await runBoundary(boundaryFixture, 'release-artifact-preflight', {
-	...rollbackEnv,
-	FAKE_IMAGE_ID: releaseImageId,
-}, ['phase1']);
-assert.notEqual(replayedRollback.status, 0, 'consumed rollback authorization unexpectedly replayed');
-assert.match(`${replayedRollback.stdout}\n${replayedRollback.stderr}`, /authorization is absent or already consumed/);
-
-// A browser-side authorization check can become stale while an environment
-// approval waits. The production server re-reads its own observation record
-// and evaluates the 24-hour/31-day window immediately before drain.
-const observationDir = join(fixtureDir, 'cutover-state');
-await mkdir(observationDir, { recursive: true });
-const canonicalUtc = (date) => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
-const runObservationWindow = async (ageMs, expectedOverride) => {
-	const startedAt = canonicalUtc(new Date(Date.now() - ageMs));
-	await writeFile(join(observationDir, 'phase1-observation'), [
-		`read_cutover_at=${startedAt}`,
-		`phase1_api_image=${releaseImage}`,
-		'',
-	].join('\n'));
-	const result = await runBoundary(
-		boundaryFixture,
-		'verify-observation-window',
-		{},
-		[expectedOverride ?? startedAt],
-	);
-	return { result, startedAt };
-};
-const currentObservation = await runObservationWindow(25 * 60 * 60 * 1000);
-assert.equal(currentObservation.result.status, 0, currentObservation.result.stderr || currentObservation.result.stdout);
-const delayedTooLittle = await runObservationWindow(23 * 60 * 60 * 1000);
-assert.notEqual(delayedTooLittle.result.status, 0, 'observation younger than 24h unexpectedly passed');
-assert.match(`${delayedTooLittle.result.stdout}\n${delayedTooLittle.result.stderr}`, /only 23h old/);
-const delayedTooLong = await runObservationWindow(32 * 24 * 60 * 60 * 1000);
-assert.notEqual(delayedTooLong.result.status, 0, 'approval-delayed observation older than 31d unexpectedly passed');
-assert.match(`${delayedTooLong.result.stdout}\n${delayedTooLong.result.stderr}`, /older than 31 days/);
-const mismatchedObservation = await runObservationWindow(
-	25 * 60 * 60 * 1000,
-	canonicalUtc(new Date(Date.now() - 26 * 60 * 60 * 1000)),
-);
-assert.notEqual(mismatchedObservation.result.status, 0, 'mismatched observation attestation unexpectedly passed');
-assert.match(`${mismatchedObservation.result.stdout}\n${mismatchedObservation.result.stderr}`, /does not match the server-side record/);
+// Retired transition commands fail before any container or database operation.
+for (const command of [
+	'authorize-phase1-rollback', 'legacy-audit', 'backfill', 'correction',
+	'online-contract-preflight', 'contract-preflight', 'verify-observation-window', 'mark-read-cutover',
+]) {
+	await rm(podmanMarker, { force: true });
+	const removed = await runBoundary(boundaryFixture, command, {
+		...releaseEnv, PODMAN_MARKER: podmanMarker,
+	});
+	assert.notEqual(removed.status, 0, `${command} unexpectedly remained available`);
+	assert.match(`${removed.stdout}\n${removed.stderr}`, /Usage:/);
+	assert.equal(spawnSync('test', ['!', '-e', podmanMarker]).status, 0, `${command} invoked Podman`);
+}
+for (const [command, overrides, args, error] of [
+	['release-artifact-preflight', {}, ['phase1'], /requires phase2/],
+	['release-assert', {}, ['phase1'], /requires phase2/],
+	['up', { RELEASE_SCHEMA_PHASE: 'phase1' }, [], /must explicitly be phase2/],
+	['restart', { RELEASE_SCHEMA_PHASE: 'phase1' }, [], /must explicitly be phase2/],
+	['release-artifact-preflight', { START_DEDICATED_WORKERS: 'false' }, ['phase2'], /must be true/],
+	['up', { START_DEDICATED_WORKERS: 'false' }, [], /must be true/],
+	['restart', { START_DEDICATED_WORKERS: 'false' }, [], /must be true/],
+	['release-migrate', {}, ['apply-expand'], /must be status or apply-contract/],
+	['release-migrate', {}, ['apply-contract', '--observation-exception-id=retired'], /does not accept transition/],
+	['release-migrate', {}, ['status', '--exception-profile=image-bridge-traffic'], /does not accept transition/],
+]) {
+	await rm(podmanMarker, { force: true });
+	const rejected = await runBoundary(boundaryFixture, command, {
+		...releaseEnv, ...overrides, PODMAN_MARKER: podmanMarker,
+	}, args);
+	assert.notEqual(rejected.status, 0, `${command} ${args.join(' ')} bypass unexpectedly passed`);
+	assert.match(`${rejected.stdout}\n${rejected.stderr}`, error);
+	assert.equal(spawnSync('test', ['!', '-e', podmanMarker]).status, 0, `${command} invoked Podman before rejecting a retired path`);
+}
 
 const runCapacity = async (fixture) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);
