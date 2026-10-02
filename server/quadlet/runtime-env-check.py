@@ -79,10 +79,15 @@ def inspect_envs(document):
             raise ValueError()
         values = {}
         for entry in entries:
-            if not isinstance(entry, str) or any(ord(char) < 32 for char in entry):
+            if not isinstance(entry, str) or '\0' in entry:
                 raise ValueError()
             key, separator, value = entry.partition('=')
             if not separator or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key) or key in values:
+                raise ValueError()
+            # Image-inherited values (e.g. PostgreSQL's DOCKER_PG_LLVM_DEPS)
+            # may be multiline. Only the compared runtime inventory must fit
+            # literal one-line env files; do not certify unrelated image values.
+            if key in KNOWN and any(ord(char) < 32 for char in value):
                 raise ValueError()
             values[key] = value
         result[name] = values

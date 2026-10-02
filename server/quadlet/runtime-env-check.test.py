@@ -97,6 +97,28 @@ class RuntimeCheck(unittest.TestCase):
             direct.update(re.findall(r"process\.env\[\s*['\"]([A-Z][A-Z0-9_]*)['\"]\s*\]", text))
         self.assertEqual(CHECK['APP_PROCESS_ENV_KEYS'], direct - keys)
 
+    def test_multiline_image_defaults_do_not_block_runtime_comparison(self):
+        self.change(7, 'DOCKER_PG_LLVM_DEPS', '\n\tllvm19-dev\n\tclang19\n' + SENTINEL)
+        result = self.run_check()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('DOCKER_PG_LLVM_DEPS', result.stdout)
+        self.change(7, 'POSTGRES_PASSWORD', 'changed')
+        result = self.run_check()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('gp-postgres POSTGRES_PASSWORD different', result.stdout)
+
+    def test_control_characters_in_runtime_inventory_still_fail_closed(self):
+        for key in sorted(CHECK['KNOWN']):
+            with self.subTest(key=key):
+                original = copy.deepcopy(self.document)
+                self.change(0, key, SENTINEL + '\nsecond-line')
+                result = self.run_check()
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.document = original
+        self.change(7, 'DOCKER_PG_LLVM_DEPS', SENTINEL + '\0')
+        self.assertEqual(self.run_check().returncode, 2)
+
     def test_unpreserved_application_overrides_block_comparison(self):
         for index, key, value in ((0, 'RATE_LIMIT_LOGIN_MAX', '3'),
                                   (5, 'EXPORT_WORKER_FILE_CONCURRENCY', '1')):
