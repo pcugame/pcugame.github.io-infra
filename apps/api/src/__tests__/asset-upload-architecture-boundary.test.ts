@@ -24,13 +24,16 @@ describe('canonical direct GAME architecture boundary', () => {
 	});
 
 	it('registers direct controls without importing GAME/WebGL/VIDEO processors into Fastify', async () => {
-		const [backend, webglWorker, videoWorker] = await Promise.all([
+		const [backend, routeComposition, webglWorker, videoWorker] = await Promise.all([
 			readFile(resolve(root, 'backend-context.ts'), 'utf8'),
+			readFile(resolve(root, 'backend-context/routes.ts'), 'utf8'),
 			readFile(resolve(root, 'webgl-worker.ts'), 'utf8'),
 			readFile(resolve(root, 'video-worker.ts'), 'utf8'),
 		]);
-		expect(backend).toContain('createAssetUploadControlGraph');
-		expect(backend).not.toMatch(/validation-worker\.composition|webgl\/processing|modules\/video/);
+		expect(routeComposition).toContain('createAssetUploadControlGraph');
+		for (const source of [backend, routeComposition]) {
+			expect(source).not.toMatch(/validation-worker\.composition|webgl\/processing|modules\/video/);
+		}
 		expect(webglWorker).toContain('createWebglProcessingGraph');
 		expect(webglWorker).not.toMatch(/fastify|Fastify/i);
 		expect(videoWorker).toContain('createVideoWorkerGraph');

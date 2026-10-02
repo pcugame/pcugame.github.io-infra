@@ -1,5 +1,7 @@
 # 016 - 현재 dependency high advisory 해소
 
+> 분류: 과거 defect/fix 기록. 완료 상태와 검증 수치는 2026-08-11 기록이며 현재 dependency 안전성이나 CI 결과를 보장하지 않는다. [감사 이력](../README.md)을 참조한다.
+
 상태: `completed` (2026-08-11)
 
 ## 목적

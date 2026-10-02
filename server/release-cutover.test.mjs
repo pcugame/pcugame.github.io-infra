@@ -1,5 +1,5 @@
+import { deploySource } from './deploy-source.test-helper.mjs';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import {
 	assertControlWorkflowIdentity,
@@ -8,12 +8,12 @@ import {
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
-const [dockerfile, packageJson, deploy, buildWorkflow, webWorkflow, cutover, smoke, releaseMigration] = await Promise.all([
+const [dockerfile, packageJson, deploy, buildWorkflow, orchestration, cutover, smoke, releaseMigration] = await Promise.all([
 	read('apps/api/Dockerfile'),
 	read('apps/api/package.json'),
-	read('server/deploy.sh'),
+	deploySource(),
 	read('.github/workflows/deploy-api.yml'),
-	read('.github/workflows/deploy-web-pages.yml'),
+	read('server/release-orchestrate.sh'),
 	read('.github/workflows/release-api-cutover.yml'),
 	read('server/smoke-data-plane.mjs'),
 	read('apps/api/scripts/release-migrate.ts'),
@@ -25,141 +25,34 @@ for (const cli of ['release:backfill', 'release:preflight', 'release:inventory',
 	assert.ok(JSON.parse(packageJson).scripts[cli]?.startsWith('node dist-release/'), `missing compiled ${cli}`);
 }
 
+assert.match(buildWorkflow, /- 'server\/deploy\/\*\*'/);
+assert.match(cutover, /source: server\/deploy\.sh,server\/deploy,server\/quadlet/);
 assert.doesNotMatch(buildWorkflow, /^  deploy:/m, 'push/build workflow must never deploy');
 assert.match(dockerfile, /LABEL org\.opencontainers\.image\.revision="\$\{RELEASE_SOURCE_SHA\}"/);
 assert.match(buildWorkflow, /RELEASE_SOURCE_SHA=\$\{\{ github\.sha \}\}/);
 assert.doesNotMatch(buildWorkflow, /:sha-\$\{\{ github\.sha \}\}/);
-assert.doesNotMatch(webWorkflow, /^  push:/m, 'master pushes must not publish the Phase 2 web during Phase 1 observation');
-assert.match(webWorkflow, /^  workflow_dispatch:/m);
-assert.match(webWorkflow, /^    environment: production$/m);
-assert.match(webWorkflow, /printf '%s\\n' "\$\{GITHUB_SHA\}" > dist\/release-sha\.txt/);
-for (const workflow of [webWorkflow, cutover]) {
-	assert.match(workflow, /group: production-object-cutover/);
-	assert.match(workflow, /cancel-in-progress: false/);
-	assert.match(workflow, /node server\/verify-github-release-boundaries\.mjs control/);
-	assert.match(workflow, /GITHUB_DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/);
-	assert.match(workflow, /\[ "\$\{GITHUB_REPOSITORY\}" = pcugame\/pcugame\.github\.io-infra \]/);
-	assert.match(workflow, /\[ "\$\{GITHUB_DEFAULT_BRANCH\}" = master \]/);
-	assert.match(workflow, /\[ "\$\{GITHUB_REF\}" = refs\/heads\/master \]/);
-	assert.match(workflow, /node server\/verify-github-release-boundaries\.mjs pages/);
-	const pagesPublish = workflow.indexOf('peaceiris/actions-gh-pages@v4');
-	const pagesBoundary = workflow.lastIndexOf('node server/verify-github-release-boundaries.mjs pages', pagesPublish);
-	assert.ok(pagesBoundary >= 0 && pagesPublish > pagesBoundary, 'Pages repository boundary must be re-verified immediately before publication');
+assert.match(cutover, /^  workflow_dispatch:/m);
+assert.match(cutover, /^    environment: production$/m);
+assert.match(cutover, /group: production-object-cutover/);
+assert.match(cutover, /cancel-in-progress: false/);
+assert.match(cutover, /node server\/verify-release-source\.mjs/);
+assert.match(cutover, /GITHUB_DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/);
+assert.match(cutover, /Preflight external Pages target and write access before maintenance/);
+for (const retired of ['phase1_api_image', 'observation_exception_id', 'exception_profile', 'observation_started_at', 'observation_attestation', 'legacy-audit', 'apply-expand', 'mark-read-cutover', 'contract-preflight', 'authorize-phase1-rollback']) {
+  assert.ok(!cutover.includes(retired), `retired transition entrypoint remains: ${retired}`);
 }
-const cutoverJob = cutover.slice(cutover.indexOf('  cutover:'));
-assert.match(cutoverJob, /environment: production[\s\S]*Re-verify production control repository and default branch/);
-assert.match(cutoverJob, /Preflight external Pages target and write access before maintenance/);
-assert.match(cutover, /EXPECTED_IMAGE_REPO: ghcr\.io\/pcugame\/pcu-graduationproject-v2-api/);
-assert.match(cutover, /final_api_image must be an immutable @sha256 digest/);
-assert.match(cutover, /phase1_api_image must be an immutable @sha256 digest/);
-for (const marker of [
-	'drain', 'legacy-audit', 'backup "phase1-', 'garage-before-expand-',
-	'apply-expand', 'backfill --apply', 'phase1-reconciliation', 'mark-read-cutover',
-	'I_ATTEST_24H_ZERO_FALLBACK', 'garage-before-contract-', 'contract-preflight',
-	'apply-contract', 'RELEASE_SCHEMA_PHASE=phase2',
-]) assert.ok(cutover.includes(marker), `cutover workflow missing ${marker}`);
-
-const ordered = [
-	'export API_IMAGE="${PHASE1_IMAGE}"',
-	'export MIGRATION_IMAGE="${PHASE1_IMAGE}"',
-	'export RELEASE_SOURCE_SHA="${PHASE1_SOURCE_SHA}"',
-	'release-artifact-preflight phase1',
-	'authorize-phase1-rollback "${rollback_nonce}"',
-	'"${DEPLOY_DIR}/deploy.sh" drain',
-	'"${DEPLOY_DIR}/deploy.sh" legacy-audit',
-	'"${DEPLOY_DIR}/deploy.sh" backup "phase1-',
-	'garage-before-expand-',
-	'release-migrate apply-expand',
-	'RELEASE_SCHEMA_PHASE=phase1 "${DEPLOY_DIR}/deploy.sh" up',
-	'"${DEPLOY_DIR}/deploy.sh" backfill --apply',
-	'garage-after-backfill-',
-	'phase1-reconciliation.json',
-	'"${DEPLOY_DIR}/deploy.sh" mark-read-cutover',
-];
+const ordered = ['Build final web', 'Capture Pages recovery point', 'release-orchestrate.sh" preflight', 'release-orchestrate.sh" backup', 'release-orchestrate.sh" migrate', 'release-orchestrate.sh" activate', 'release-orchestrate.sh" health', 'peaceiris/actions-gh-pages', 'release-orchestrate.sh" smoke'];
 let cursor = -1;
 for (const marker of ordered) {
-	const next = cutover.indexOf(marker, cursor + 1);
-	assert.ok(next > cursor, `Phase 1 order violation at ${marker}`);
-	cursor = next;
+  const next = cutover.indexOf(marker, cursor + 1);
+  assert.ok(next > cursor, `ordinary release order violation: ${marker}`);
+  cursor = next;
 }
-
-const phase1Block = cutover.slice(
-	cutover.indexOf('if [ "${RELEASE_PHASE}" = phase1 ]; then'),
-	cutover.indexOf('export API_IMAGE="${FINAL_IMAGE}"'),
-);
-assert.match(phase1Block, /export API_IMAGE="\$\{PHASE1_IMAGE\}"[\s\S]*export MIGRATION_IMAGE="\$\{PHASE1_IMAGE\}"/);
-assert.doesNotMatch(phase1Block, /MIGRATION_IMAGE="\$\{FINAL_IMAGE\}"/);
-assert.match(
-	phase1Block,
-	/podman run --rm --pod graduationproject \\\n\s+--user 0:0 \\\n\s+-v "\$\{CUTOVER_STATE_DIR\}:\/release-state:ro,Z"/,
-	'observation-start verifier must read rootless release-state files as the deploy user mapping',
-);
-assert.ok(
-	phase1Block.indexOf('release-artifact-preflight phase1') < phase1Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain'),
-	'Phase 1 marker/worker validation must precede the first mutation drain',
-);
-const phase2Block = cutover.slice(cutover.indexOf('- name: Prepare atomic Phase 2 maintenance window'));
-assert.match(phase2Block, /export API_IMAGE="\$\{FINAL_IMAGE\}"[\s\S]*export MIGRATION_IMAGE="\$\{FINAL_IMAGE\}"/);
-assert.match(phase2Block, /\[ "\$\{phase1_api_image\}" = "\$\{migration_image\}" \]/);
-assert.match(phase2Block, /\[ "\$\{phase1_image_digest\}" = "\$\{migration_image_digest\}" \]/);
-assert.match(phase2Block, /current_phase1_image_id[\s\S]*phase1_image_id/);
-assert.match(phase2Block, /raw_current_phase1_image_id[\s\S]*normalize_podman_image_id[\s\S]*current_phase1_image_id/);
-assert.match(phase2Block, /current_phase1_source_sha[\s\S]*phase1_source_sha/);
-
-const normalizerStartMarker = '# BEGIN PHASE1_IMAGE_ID_NORMALIZER (exercised from the release test)';
-const normalizerEndMarker = '# END PHASE1_IMAGE_ID_NORMALIZER';
-const normalizerStart = cutover.indexOf(normalizerStartMarker);
-const normalizerEnd = cutover.indexOf(normalizerEndMarker, normalizerStart);
-assert.ok(normalizerStart >= 0 && normalizerEnd > normalizerStart, 'workflow image ID normalizer markers are missing');
-const workflowNormalizer = cutover
-	.slice(normalizerStart + normalizerStartMarker.length, normalizerEnd)
-	.split('\n')
-	.map((line) => line.replace(/^ {12}/, ''))
-	.join('\n');
-const imageIdHex = 'a'.repeat(64);
-for (const acceptedImageId of [imageIdHex, `sha256:${imageIdHex}`]) {
-	const accepted = spawnSync('bash', ['-c', [
-		'set -euo pipefail',
-		workflowNormalizer,
-		`[ "$(normalize_podman_image_id '${acceptedImageId}')" = '${imageIdHex}' ]`,
-	].join('\n')], { encoding: 'utf8' });
-	assert.equal(accepted.status, 0, accepted.stderr || accepted.stdout);
-}
-for (const malformedImageId of [`sha512:${imageIdHex}`, `sha256:${imageIdHex}0`, imageIdHex.toUpperCase()]) {
-	const rejected = spawnSync('bash', ['-c', [
-		'set -euo pipefail',
-		workflowNormalizer,
-		`normalize_podman_image_id '${malformedImageId}'`,
-	].join('\n')], { encoding: 'utf8' });
-	assert.notEqual(rejected.status, 0, `${malformedImageId} unexpectedly passed workflow normalization`);
-	assert.match(`${rejected.stdout}\n${rejected.stderr}`, /malformed image ID/);
-}
-
-const attestedPhase2 = phase2Block.indexOf('[ "${OBSERVATION_ATTESTATION}" = I_ATTEST_24H_ZERO_FALLBACK ]');
-const phase2Drain = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" drain', attestedPhase2);
-const finalArtifactPreflight = phase2Block.indexOf('release-artifact-preflight phase2', attestedPhase2);
-const serverObservationWindow = phase2Block.indexOf('verify-observation-window "${OBSERVATION_STARTED_AT}"', finalArtifactPreflight);
-const finalWebPublish = phase2Block.indexOf('- name: Publish exact final web while mutations remain drained');
-const finalWebGate = phase2Block.indexOf('verify-final-web "${RELEASE_SOURCE_SHA}"');
-const phase2Preflight = phase2Block.indexOf('"${DEPLOY_DIR}/deploy.sh" contract-preflight', finalWebGate);
-const phase2Contract = phase2Block.indexOf('release-migrate apply-contract');
-const phase2Runtime = phase2Block.indexOf('RELEASE_SCHEMA_PHASE=phase2 "${DEPLOY_DIR}/deploy.sh" up', phase2Contract);
-assert.ok(finalArtifactPreflight >= 0 && finalArtifactPreflight < phase2Drain, 'final artifact preflight must precede downtime');
-assert.ok(
-	finalArtifactPreflight < serverObservationWindow && serverObservationWindow < phase2Drain,
-	'server observation age must be re-read and checked after approval, immediately before drain',
-);
-assert.ok(phase2Drain < finalWebPublish && finalWebPublish < finalWebGate, 'same-SHA final web must publish after drain and before its exact marker gate');
-assert.ok(finalWebGate < phase2Preflight && phase2Preflight < phase2Contract, 'final web gate must precede contract preflight and DDL');
-assert.ok(phase2Contract < phase2Runtime, 'final runtime must start only after contract DDL');
-assert.match(cutover, /Test final web[\s\S]*Build final web[\s\S]*Stamp exact cutover commit[\s\S]*Prepare atomic Phase 2 maintenance window[\s\S]*peaceiris\/actions-gh-pages@v4/);
-
-const destructiveBoundary = cutover.indexOf('# DESTRUCTIVE DDL BOUNDARY');
-assert.ok(destructiveBoundary > cutover.indexOf('release-migrate apply-contract'));
-const postContract = cutover.slice(destructiveBoundary);
-assert.doesNotMatch(postContract, /rollback_tag|previous_image|START_DEDICATED_WORKERS=false/);
-assert.match(postContract, /Automatic old-image rollback is forbidden/);
-assert.match(cutover.slice(0, destructiveBoundary), /pre-contract boundary permits[\s\S]*rollback/);
+assert.match(cutover, /steps\.recovery-boundary\.outcome == 'success'/);
+assert.match(cutover, /steps\.restore-pages\.outcome == 'success'/);
+assert.match(orchestration, /release-recovery\.mjs" "\$command"/);
+assert.doesNotMatch(orchestration, /rollback_tag|previous_image|START_DEDICATED_WORKERS=false/);
+assert.ok(orchestration.indexOf('mark-migration') < orchestration.indexOf('release-migrate apply-contract'));
 
 for (const marker of ['BASELINE_MIGRATION', 'apply-expand', 'assert-runtime']) {
 	assert.ok(releaseMigration.includes(marker), `release fence missing ${marker}`);
@@ -174,7 +67,7 @@ assert.match(releaseMigration, /assert-runtime requires phase1 or phase2/);
 assert.match(releaseMigration, /phase2 runtime requires complete expand history, the contract migration DB record and project change migration DB record/);
 assert.match(releaseMigration, /stagedMigrate\(latestMigration/);
 assert.doesNotMatch(dockerfile, /rm -rf apps\/api\/prisma\/migrations\/20260822000000_canonical_asset_contract/);
-assert.match(deploy, /RELEASE_SCHEMA_PHASE must explicitly be phase1 or phase2/);
+assert.match(deploy, /RELEASE_SCHEMA_PHASE must explicitly be phase2/);
 assert.match(deploy, /mutation drain marker is absent/);
 const releaseCommonArgs = deploy.slice(
 	deploy.indexOf('release_common_args() {'),
@@ -197,20 +90,10 @@ for (const name of [
 		`release containers must receive ${name}`,
 	);
 }
-assert.match(deploy, /dist\/phase1-release-manifest\.js/);
-assert.match(deploy, /PCU_PHASE1_RUNTIME_V1/);
-assert.match(deploy, /refusing to record a mixed-image Phase 1 observation/);
-assert.match(deploy, /phase1_api_image=\$\{API_IMAGE\}[\s\S]*migration_image=\$\{MIGRATION_IMAGE\}/);
-assert.match(deploy, /phase1_image_digest=\$\(release_image_digest "\$API_IMAGE"\)/);
-assert.match(deploy, /phase1_image_id=\$\(release_image_id "\$API_IMAGE"\)/);
-assert.match(deploy, /phase1_source_sha=\$\{RELEASE_SOURCE_SHA\}/);
+assert.doesNotMatch(deploy, /PCU_PHASE1_RUNTIME_V1|ROLLBACK_AUTH_NONCE|authorize-phase1-rollback\) do_authorize_phase1_rollback/);
 assert.match(deploy, /must use an immutable @sha256 release digest/);
 assert.match(deploy, /org\.opencontainers\.image\.revision/);
-assert.match(deploy, /authorize-phase1-rollback\) do_authorize_phase1_rollback/);
-assert.match(deploy, /ROLLBACK_AUTH_NONCE/);
-assert.match(deploy, /rollback image tag no longer resolves to the authorized image ID/);
-assert.match(deploy, /mv "\$ROLLBACK_AUTH_FILE" "\$ROLLBACK_CONSUMED_FILE"/);
-assert.match(deploy, /--entrypoint node \\\n\s+"\$API_IMAGE" dist\/server\.js/);
+assert.match(await read('server/quadlet/templates/gp-api.container.in'), /Entrypoint=node\nExec=dist\/server\.js/);
 
 for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(status), `data-plane smoke missing ${status}`);
 // Per-request authorization fails closed when the API is unavailable. Production
@@ -218,21 +101,12 @@ for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(sta
 assert.doesNotMatch(cutover, /podman (?:stop|start) gp-api/);
 assert.doesNotMatch(cutover, /API-down data-plane smoke/);
 assert.match(smoke, /full\.headers\.get\('cache-control'\), 'private, no-store'/);
-const finalSmokeStart = cutover.indexOf('            final_smoke() {');
-assert.ok(finalSmokeStart > 0);
-const finalSmoke = cutover.slice(finalSmokeStart, cutover.indexOf('\n            }', finalSmokeStart));
-const finalApplyStart = cutover.indexOf('            # DESTRUCTIVE DDL BOUNDARY:');
-assert.ok(finalApplyStart > 0);
-const finalApply = cutover.slice(finalApplyStart);
-for (const productionSmoke of [finalSmoke, finalApply]) {
-	assert.match(productionSmoke, /podman exec gp-api wget[^\n]+api\/health[^\n]+ok[^\n]+true[\s\S]*smoke-data-plane\.mjs/);
-	assert.ok(productionSmoke.includes('[ "$actual_source" = "$RELEASE_SOURCE_SHA" ]'));
-	assert.ok(productionSmoke.includes('[ "$actual_digest" = "${FINAL_IMAGE##*@}" ]'));
-	assert.match(productionSmoke, /deployed-\$\{RELEASE_SOURCE_SHA\}\.txt/);
-}
-const forwardFixStart = cutover.indexOf('            if [ "${RELEASE_PHASE}" = phase2-forward-fix ]; then');
-assert.ok(forwardFixStart > 0);
-const forwardFix = cutover.slice(forwardFixStart, cutover.indexOf('        env:', forwardFixStart));
+assert.match(orchestration, /podman exec gp-api wget[^\n]+api\/health[^\n]+ok[^\n]+true/);
+assert.match(orchestration, /smoke-data-plane\.mjs/);
+assert.ok(orchestration.includes('[ "$actual_source" = "$RELEASE_SOURCE_SHA" ]'));
+assert.ok(orchestration.includes('[ "$actual_digest" = "${FINAL_IMAGE##*@}" ]'));
+assert.match(orchestration, /deployed-\$\{RELEASE_SOURCE_SHA\}\.txt/);
+const forwardFix = orchestration.slice(orchestration.indexOf('  forward-fix)'));
 assert.match(forwardFix, /release-assert phase2/);
 assert.doesNotMatch(forwardFix, /rollback_tag|previous_image/);
 
@@ -256,4 +130,4 @@ for (const invalidBoundary of [
 	{ repository: { ...pagesBoundaryFixture.repository, permissions: { push: false } } },
 ]) assert.throws(() => assertPagesRepositoryBoundary(invalidBoundary));
 
-console.log('Two-phase release ordering, artifacts, and rollback fence: OK');
+console.log('Production release ordering, artifacts, and recovery fence: OK');

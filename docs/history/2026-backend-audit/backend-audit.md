@@ -1,5 +1,7 @@
 # 백엔드 전수 감사 최종 검증 보고서
 
+> 분류: 특정 시점의 감사 결과. 본문의 현재·최종·완료 판정, 수치와 버전은 2026-08-11 검증 기준이다. 현재 구현·의존성 안전성·운영 상태의 재검증 결과가 아니다. [현재 architecture](../../architecture/README.md)와 [이력 분류](README.md)를 참조한다.
+
 > 이전 판본의 최초 종결 선언은 production composition 증거가 부족해 무효 처리됐다. 이 판본은 티켓 000~014의 현재 코드, 티켓 015의 전체 production graph 재검증과 티켓 016의 dependency advisory 해소 결과만을 근거로 다시 판정한다.
 
 ## 1. 기준과 판정 규칙
@@ -201,7 +203,7 @@ ticket 016에서 다음 경로를 안전 버전으로 갱신했다.
 
 `npm audit fix --force`의 PDF converter downgrade나 검증 없는 major 변경은 사용하지 않았다. PDF.js override는 정상 PDF, embedded JavaScript action 비실행, 손상 PDF 거부를 실제 raster processor에서 검증했고 Sharp는 정상/손상 image decode 경계와 Debian image에서 함께 검증했다.
 
-재현, 버전 선택과 완료 증거는 backend-audit-tickets/016-current-dependency-advisories.md에 고정했다.
+재현, 버전 선택과 완료 증거는 [dependency 수정 기록](tickets/016-current-dependency-advisories.md)에 고정했다.
 
 ## 9. 최종 검증 기준선
 
