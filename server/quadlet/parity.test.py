@@ -89,51 +89,18 @@ class Parity(unittest.TestCase):
             settings.update(API_IMAGE=IMAGE, DATABASE_URL='postgresql://fixture:fixture@postgres:5432/fixture', RELEASE_SCHEMA_PHASE='phase2')
             settings.update(overrides)
             (root / '.env').write_text(''.join(f'{name}={shlex.quote(setting)}\n' for name, setting in settings.items()))
-            fixture_home = root / 'home'
-            fixture_home.mkdir()
-            environment = clean_env() | {'HOME': str(fixture_home), 'CUTOVER_STATE_DIR': str(root / 'cutover-state'),
-                                         'DEPLOY_DIR': str(root), 'QUADLET_TEST_LOG': str(root / 'commands.jsonl')}
-            prefix = DEPLOY.read_text().split('# ── Main ')[0]
-            harness = root / 'capture.sh'
-            harness.write_text(prefix + '''
-validate_production_boundaries() { :; }
-validate_capacity_boundaries() { :; }
-validate_release_artifacts() { :; }
-require_immutable_release_images() { :; }
-verify_running() { :; }
-wait_for_pg() { :; }
-sleep() { :; }
-mkdir() { :; }
-mv() { :; }
-sed() { :; }
-rm() { :; }
-systemctl() { :; }
-podman() {
-  python3 - "$@" <<'PY'
-import json, os, sys
-with open(os.environ['QUADLET_TEST_LOG'], 'a') as log:
-    log.write(json.dumps(sys.argv[1:]) + '\\n')
-PY
-  case "$1 $2" in
-    'exec gp-api') echo '{"ok":true}' ;;
-    'pod exists') return 1 ;;
-  esac
-}
-do_up
-''')
-            captured = subprocess.run(['bash', str(harness)], cwd=root, env=environment, capture_output=True, text=True)
-            self.assert_private_absent(root, sentinels, [captured])
-            self.assertEqual(captured.returncode, 0, 'fixture deployment harness failed')
             output = root / 'rendered %$ units'
             result = self.render(root, output, {key: value for key, value in settings.items() if key in TOPOLOGY})
-            self.assert_private_absent(root, sentinels, [captured, result])
+            self.assert_private_absent(root, sentinels, [result])
             self.assertEqual(result.returncode, 0, 'fixture topology render failed')
-            commands = [json.loads(line) for line in (root / 'commands.jsonl').read_text().splitlines()]
-            runs = [command for command in commands if command[:2] == ['run', '-d']]
-            self.assertEqual(len(runs), 8)
-            pod = next(command for command in commands if command[:2] == ['pod', 'create'])
+            entries = {
+                'gp-api': 'dist/server.js', 'gp-worker-game-validation': 'dist/game-validation-worker.js',
+                'gp-worker-webgl': 'dist/webgl-worker.js', 'gp-worker-video': 'dist/video-worker.js',
+                'gp-worker-image': 'dist/image-worker.js', 'gp-worker-export': 'dist/export-worker.js',
+                'gp-worker-project-publication': 'dist/project-publication-worker.js',
+            }
             pod_def = directives(output / 'graduationproject.pod')
-            self.assertEqual(decoded(pod_def['PublishPort'][0]), pod[pod.index('-p') + 1])
+            self.assertEqual(decoded(pod_def['PublishPort'][0]), f"{settings.get('API_BIND_HOST', '127.0.0.1')}:{settings.get('API_PORT', '4000')}:4000")
             self.assertEqual(pod_def['ExitPolicy'], ['continue'])
             self.assertEqual(pod_def['AddHost'], ['postgres:127.0.0.1'])
             self.assertEqual(pod_def['Restart'], ['on-failure'])
@@ -142,44 +109,35 @@ do_up
             self.assertEqual(pod_def['StartLimitIntervalSec'], ['300'])
             self.assertEqual(pod_def['WantedBy'], ['default.target'])
             self.assertEqual(directives(output / 'gp-pg-data.volume')['VolumeName'], ['gp_pg_data'])
-            common = {name: settings[name] for name in COMMON_REQUIRED}
-            common.update({name: settings.get(name) or default for name, default in COMMON_DEFAULTS.items()})
-            # deploy.sh rewrites this innocent fixture URL; Quadlet preserves it and uses the pod hosts alias.
-            common['DATABASE_URL'] = common['DATABASE_URL'].replace('@postgres:', '@127.0.0.1:')
-            api = {name: settings.get(name) or default for name, default in API_DEFAULTS.items()}
-            file_contracts = {str(root / 'runtime-env/common.env'): common,
-                              str(root / 'runtime-env/api.env'): api,
-                              str(root / 'runtime-env/postgres.env'): {name: settings[name] for name in PG_KEYS}}
-            for run in runs:
-                name = run[run.index('--name') + 1]
+            for name in ['gp-postgres', *entries]:
                 unit = directives(output / f'{name}.container')
-                expected_env, expected_volumes, expected_tmpfs = {}, [], []
-                for index, argument in enumerate(run):
-                    if argument == '-e':
-                        key, setting = run[index + 1].split('=', 1)
-                        expected_env[key] = setting
-                    elif argument == '-v': expected_volumes.append(run[index + 1])
-                    elif argument == '--tmpfs': expected_tmpfs.append(run[index + 1])
-                actual_env = {}
                 files = [decoded(shlex.split(item)[0]) for item in unit['EnvironmentFile']]
                 expected_files = [str(root / 'runtime-env/postgres.env')] if name == 'gp-postgres' else [str(root / 'runtime-env/common.env')]
                 if name == 'gp-api': expected_files.append(str(root / 'runtime-env/api.env'))
                 self.assertEqual(files, expected_files)
-                for file in files: actual_env.update(file_contracts[file])
-                for item in unit.get('Environment', []):
-                    key, setting = decoded(shlex.split(item)[0]).split('=', 1)
-                    actual_env[key] = setting
+                actual_env = dict(decoded(shlex.split(item)[0]).split('=', 1) for item in unit.get('Environment', []))
+                expected_env = {} if name == 'gp-postgres' else {'NODE_ENV': 'production'}
+                if name == 'gp-api': expected_env['PORT'] = '4000'
+                if name == 'gp-worker-export': expected_env['NAS_EXPORT_ROOT'] = settings.get('NAS_EXPORT_PATH', '/nas')
+                if name != 'gp-postgres' and settings.get('S3_TLS_CA_HOST_PATH'):
+                    expected_env['NODE_EXTRA_CA_CERTS'] = '/run/secrets/garage-ca.pem'
                 self.assertEqual(actual_env, expected_env, name)
-                volumes = [decoded(setting).replace('gp-pg-data.volume:', 'gp_pg_data:') for setting in unit.get('Volume', [])]
-                self.assertEqual(volumes, expected_volumes, name)
-                self.assertEqual(unit.get('Tmpfs', []), expected_tmpfs, name)
+                volumes = [decoded(setting) for setting in unit.get('Volume', [])]
+                expected_volumes = ['gp-pg-data.volume:/var/lib/postgresql/data:Z'] if name == 'gp-postgres' else []
+                if name == 'gp-worker-export':
+                    expected_volumes.append(settings.get('NAS_EXPORT_HOST_PATH', '/mnt/nas/pcu_storage/GraduationGame') + ':' + settings.get('NAS_EXPORT_PATH', '/nas') + ':rw,Z')
+                if name != 'gp-postgres' and settings.get('S3_TLS_CA_HOST_PATH'):
+                    expected_volumes.append(settings['S3_TLS_CA_HOST_PATH'] + ':/run/secrets/garage-ca.pem:ro,Z')
+                self.assertCountEqual(volumes, expected_volumes, name)
+                tmpfs = {'gp-worker-game-validation': '6g', 'gp-worker-webgl': '6g', 'gp-worker-video': '2g', 'gp-worker-image': '512m'}
+                self.assertEqual(unit.get('Tmpfs', []), ['/tmp:rw,noexec,nosuid,size=' + tmpfs[name]] if name in tmpfs else [])
                 self.assertEqual(unit['ContainerName'], [name])
                 self.assertEqual(unit['Pod'], ['graduationproject.pod'])
                 self.assertEqual(unit['StartWithPod'], ['true'])
-                self.assertEqual(unit['Image'], [run[-1] if name == 'gp-postgres' else run[-2]])
+                self.assertEqual(unit['Image'], ['docker.io/library/postgres:16-alpine' if name == 'gp-postgres' else IMAGE])
                 if name != 'gp-postgres':
-                    self.assertEqual(unit['Entrypoint'], [run[run.index('--entrypoint') + 1]])
-                    self.assertEqual(unit['Exec'], [run[-1]])
+                    self.assertEqual(unit['Entrypoint'], ['node'])
+                    self.assertEqual(unit['Exec'], [entries[name]])
                     self.assertEqual(unit['After'], ['gp-postgres.service' if name == 'gp-api' else 'gp-api.service'])
                 for dependency in ('Wants', 'Requires', 'BindsTo', 'PartOf', 'WantedBy'):
                     self.assertNotIn(dependency, unit)

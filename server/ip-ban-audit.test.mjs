@@ -152,7 +152,11 @@ test('release audits bans before drain and verifies disabled AUTO rows after sta
   assert(writeReleaseRecord > afterAudit, 'post-migration audit precedes deployed source recording');
 
   const deployScript = readFileSync(new URL('./deploy.sh', import.meta.url), 'utf8');
-  assert.match(deployScript, /DOWNLOAD_AUTO_IP_BAN_ENABLED=\$\{DOWNLOAD_AUTO_IP_BAN_ENABLED:-false\}/);
+  assert.match(deployScript, /load_runtime_env/);
+  const apiUnit = readFileSync(new URL('./quadlet/templates/gp-api.container.in', import.meta.url), 'utf8');
+  assert.match(apiUnit, /EnvironmentFile=@API_ENV@/);
+  const runtimeEnv = readFileSync(new URL('./quadlet/runtime-env.py', import.meta.url), 'utf8');
+  assert.match(runtimeEnv, /DOWNLOAD_AUTO_IP_BAN_ENABLED='false'/);
   const exampleEnv = readFileSync(new URL('./.env.example', import.meta.url), 'utf8');
   assert.match(exampleEnv, /^DOWNLOAD_AUTO_IP_BAN_ENABLED=false$/m);
 });

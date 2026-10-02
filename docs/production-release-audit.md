@@ -186,5 +186,3 @@ PR #52는 24시간 관측 기간만 생략하는 age-only 예외를 구현하였
 | `operations/phase2-reviewed-cutover.md` | [PR 52 구현과 복원 기록](https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/docs/operations/phase2-reviewed-cutover.md) |
 
 `operations/README.md`는 보존 branch·과거 runtime 식별자·checksum 예외의 고유 기록이 있어 역사 자료로 유지한다. `manual-release.md`, 업로드 lifecycle runbook, database migration policy와 JSON 운영 증빙도 유지한다. 이번 정리는 문서에 한정하며 실행 코드·workflow·SQL·운영 환경은 변경하지 않는다.
-
-EOD

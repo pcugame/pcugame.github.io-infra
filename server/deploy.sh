@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy.sh — podman-native deployment script (no docker-compose needed)
+# deploy.sh — release gates and systemd/Quadlet lifecycle orchestration
 # Usage: ./deploy.sh [up|down|drain|backup|release-*|logs|status]
 # Requires: podman, .env file in the same directory as this script or DEPLOY_DIR env var
 set -euo pipefail
@@ -16,8 +16,7 @@ VIDEO_WORKER_CONTAINER="gp-worker-video"
 IMAGE_WORKER_CONTAINER="gp-worker-image"
 EXPORT_WORKER_CONTAINER="gp-worker-export"
 PROJECT_PUBLICATION_WORKER_CONTAINER="gp-worker-project-publication"
-PG_IMAGE="docker.io/library/postgres:16-alpine"
-API_IMAGE="${API_IMAGE:-ghcr.io/pcugame/pcu-graduationproject-v2-api:latest}"
+API_IMAGE="${API_IMAGE:-}"
 MIGRATION_IMAGE="${MIGRATION_IMAGE:-$API_IMAGE}"
 RELEASE_IMAGE_REPOSITORY="ghcr.io/pcugame/pcu-graduationproject-v2-api"
 PULL_API_IMAGE="${PULL_API_IMAGE:-true}"
@@ -31,15 +30,108 @@ RUNTIME_CONTAINERS=(
   "$PROJECT_PUBLICATION_WORKER_CONTAINER"
 )
 
+QUADLET_HELPERS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/quadlet"
+POD_UNIT=graduationproject-pod.service
+PG_UNIT=gp-postgres.service
+APP_UNITS=()
+for ctr in "${RUNTIME_CONTAINERS[@]}"; do APP_UNITS+=("${ctr}.service"); done
+
+load_runtime_env() {
+  APP_RUNTIME_ENV_FILE="${APP_RUNTIME_ENV_FILE:-${DEPLOY_DIR}/runtime-env/common.env}"
+  API_RUNTIME_ENV_FILE="${API_RUNTIME_ENV_FILE:-${DEPLOY_DIR}/runtime-env/api.env}"
+  POSTGRES_RUNTIME_ENV_FILE="${POSTGRES_RUNTIME_ENV_FILE:-${DEPLOY_DIR}/runtime-env/postgres.env}"
+  local assignments
+  assignments="$(python3 "$QUADLET_HELPERS/runtime-env.py" "$APP_RUNTIME_ENV_FILE" "$API_RUNTIME_ENV_FILE" "$POSTGRES_RUNTIME_ENV_FILE")" || return 1
+  eval "$assignments"
+}
+
+assert_quadlet_adopted() {
+  QUADLET_DIR="${QUADLET_DIR:-${HOME}/.config/containers/systemd}"
+  export API_IMAGE DEPLOY_DIR API_BIND_HOST APP_RUNTIME_ENV_FILE API_RUNTIME_ENV_FILE POSTGRES_RUNTIME_ENV_FILE
+  local staging
+  staging="$(mktemp -d)"
+  if ! bash "$QUADLET_HELPERS/render.sh" "$staging/expected" || ! systemctl --user show-environment | python3 "$QUADLET_HELPERS/check-installed.py" "$staging/expected" "$QUADLET_DIR" --manager-env; then
+    rm -rf "$staging"
+    return 1
+  fi
+  rm -rf "$staging"
+  local unit definition source fragment pending dropins
+  for unit in "$POD_UNIT" "$PG_UNIT" "${APP_UNITS[@]}" gp-pg-data-volume.service; do
+    definition="${unit%.service}.container"
+    [[ "$unit" != "$POD_UNIT" ]] || definition=graduationproject.pod
+    [[ "$unit" != gp-pg-data-volume.service ]] || definition=gp-pg-data.volume
+    pending="$(systemctl --user show "$unit" --property=NeedDaemonReload --value)" || return 1
+    dropins="$(systemctl --user show "$unit" --property=DropInPaths --value)" || return 1
+    [[ "$pending" == no && -z "$dropins" ]] || {
+      echo "ERROR: $unit has pending reload or unsupported service drop-ins"
+      return 1
+    }
+    source="$(systemctl --user show "$unit" --property=SourcePath --value)" || return 1
+    fragment="$(systemctl --user show "$unit" --property=FragmentPath --value)" || return 1
+    [[ "$source" == "$QUADLET_DIR/$definition" && "$fragment" == */generator*/"$unit" ]] || {
+      echo "ERROR: $unit must be the installed Quadlet-generated service (legacy generated units are unsupported)"
+      return 1
+    }
+  done
+  assert_foundation_active
+  assert_postgres_running
+}
+
+assert_foundation_active() {
+  local unit
+  for unit in "$POD_UNIT" "$PG_UNIT"; do
+    systemctl --user is-active --quiet "$unit" || {
+      echo "ERROR: adopted pod and PostgreSQL must already be active; automatic first installation/cutover is unsupported"
+      return 1
+    }
+  done
+}
+
+stop_application_units() {
+  systemctl --user stop "${APP_UNITS[@]}" || return 1
+  assert_application_stopped
+}
+
+runtime_container_state() {
+  local state exists_status=0
+  if state="$(podman inspect --format '{{.State.Status}}' "$1" 2>/dev/null)"; then
+    echo "$state"
+    return 0
+  fi
+  podman container exists "$1" 2>/dev/null || exists_status=$?
+  [[ "$exists_status" == 1 ]] || { echo "ERROR: cannot verify container state: $1" >&2; return 1; }
+  echo missing
+}
+
+assert_application_stopped() {
+  local unit state ctr
+  for unit in "${APP_UNITS[@]}"; do
+    state="$(systemctl --user show "$unit" --property=ActiveState --value)" || return 1
+    [[ "$state" == inactive ]] || { echo "ERROR: application service is not inactive: $unit"; return 1; }
+  done
+  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
+    state="$(runtime_container_state "$ctr")" || return 1
+    [[ "$state" == missing || "$state" == exited || "$state" == dead ]] || {
+      echo "ERROR: failed to drain mutation process $ctr (state: $state)"
+      return 1
+    }
+  done
+}
+
 # ── Load .env ──────────────────────────────────────────────────
 load_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
     echo "ERROR: .env file not found at $ENV_FILE"
     exit 1
   fi
+  # The caller owns the selected source/artifact; a stale host .env cannot change it.
+  local selected_api="$API_IMAGE" selected_migration="$MIGRATION_IMAGE" selected_source="${RELEASE_SOURCE_SHA:-}"
   set -a
   # shellcheck disable=SC1090
   source "$ENV_FILE"
+  API_IMAGE="$selected_api"
+  MIGRATION_IMAGE="$selected_migration"
+  RELEASE_SOURCE_SHA="$selected_source"
   FILE_GATEWAY_SECRET="${FILE_GATEWAY_SECRET:-}"
   set +a
 }
@@ -85,7 +177,8 @@ validate_release_source_identity() {
 }
 
 database_url_in_pod() {
-  echo "${DATABASE_URL//@postgres:/@127.0.0.1:}"
+  # Quadlet pod AddHost resolves postgres; preserve the exact runtime URL.
+  echo "$DATABASE_URL"
 }
 
 release_common_args() {
@@ -140,20 +233,17 @@ assert_mutation_drained() {
     echo "ERROR: mutation drain marker is absent; run '$0 drain' first"
     return 1
   }
-  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
-    [[ "$(podman inspect --format '{{.State.Status}}' "$ctr" 2>/dev/null || echo missing)" != running ]] || {
-      echo "ERROR: mutation-capable process is still running: $ctr"
-      return 1
-    }
-  done
+  assert_application_stopped
 }
 
 run_release_entry() {
   local entry="$1"
   shift
   load_env
-  validate_production_boundaries
   require_immutable_release_images
+  load_runtime_env
+  validate_production_boundaries
+  assert_quadlet_adopted
   validate_release_source_identity "$MIGRATION_IMAGE"
   mkdir -p "$CUTOVER_STATE_DIR"
   assert_postgres_running
@@ -319,6 +409,7 @@ validate_capacity_boundaries() {
 
 do_capacity_preflight() {
   load_env
+  load_runtime_env
   local nas_export_host_path="${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
   validate_capacity_boundaries "$nas_export_host_path"
 }
@@ -379,8 +470,12 @@ validate_release_artifacts() {
 do_release_artifact_preflight() {
   local release_schema_phase="${1:-}"
   load_env
-  validate_production_boundaries
   require_immutable_release_images
+  [[ "$release_schema_phase" == phase2 ]] || { echo "ERROR: release artifact preflight requires phase2"; return 1; }
+  load_runtime_env
+  validate_production_boundaries
+  validate_capacity_boundaries "${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
+  assert_quadlet_adopted
   validate_release_artifacts "$release_schema_phase"
   echo "$release_schema_phase release artifacts passed preflight without stopping the current deployment."
 }
@@ -402,16 +497,13 @@ validate_release_entries() {
 # PostgreSQL container and pod for backups, audits, and explicit migrations.
 do_drain() {
   load_env
+  require_immutable_release_images
+  load_runtime_env
+  assert_quadlet_adopted
   mkdir -p "$CUTOVER_STATE_DIR"
-  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
-    podman stop "$ctr" --time 30 2>/dev/null || true
-  done
-  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
-    [[ "$(podman inspect --format '{{.State.Status}}' "$ctr" 2>/dev/null || echo missing)" != running ]] || {
-      echo "ERROR: failed to drain mutation process $ctr"
-      return 1
-    }
-  done
+  rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
+  stop_application_units
+  assert_postgres_running
   {
     echo "drained_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "api_image=${API_IMAGE}"
@@ -423,6 +515,7 @@ do_drain() {
 do_backup() {
   local label="${1:-manual}"
   load_env
+  load_runtime_env
   assert_postgres_running
   assert_mutation_drained
   [[ "$label" =~ ^[A-Za-z0-9._-]+$ ]] || {
@@ -582,36 +675,15 @@ wait_for_pg() {
 
 # ── Tear down ──────────────────────────────────────────────────
 do_down() {
-  echo "Stopping and removing containers..."
-
-  # 1) Stop containers gracefully first, then force-remove
-  for ctr in "${RUNTIME_CONTAINERS[@]}" "$PG_CONTAINER"; do
-    podman stop "$ctr" --time 10 2>/dev/null || true
-    podman rm -f "$ctr" 2>/dev/null || true
-  done
-
-  # 2) Stop and remove the pod (also removes its infra container)
-  podman pod stop "$POD_NAME" --time 10 2>/dev/null || true
-  podman pod rm -f "$POD_NAME" 2>/dev/null || true
-
-  # 3) Verify nothing remains — if a container with our names still
-  #    exists in any state (created/exited/dead), remove it by ID
-  for ctr in "${RUNTIME_CONTAINERS[@]}" "$PG_CONTAINER"; do
-    local cid
-    cid=$(podman ps -a --filter "name=^${ctr}$" --format '{{.ID}}' 2>/dev/null || true)
-    if [[ -n "$cid" ]]; then
-      echo "WARNING: orphaned container $ctr ($cid) found, force-removing..."
-      podman rm -f -t 0 "$cid" 2>/dev/null || true
-    fi
-  done
-
-  # 4) Final pod cleanup
-  if podman pod exists "$POD_NAME" 2>/dev/null; then
-    echo "WARNING: orphaned pod '$POD_NAME' found, force-removing..."
-    podman pod rm -f "$POD_NAME" 2>/dev/null || true
-  fi
-
-  echo "Down complete. (Volume '$PG_VOLUME' preserved)"
+  load_env
+  require_immutable_release_images
+  load_runtime_env
+  assert_quadlet_adopted
+  rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
+  stop_application_units
+  systemctl --user stop "$PG_UNIT"
+  systemctl --user stop "$POD_UNIT"
+  echo "Down complete. Quadlet volume '$PG_VOLUME' preserved."
 }
 
 # ── Verify container is running ───────────────────────────────
@@ -632,141 +704,42 @@ verify_running() {
 # ── Bring up ───────────────────────────────────────────────────
 do_up() {
   load_env
-  validate_production_boundaries
   require_immutable_release_images
-  mkdir -p "$CUTOVER_STATE_DIR"
-
   local release_schema_phase="${RELEASE_SCHEMA_PHASE:-}"
   [[ "$release_schema_phase" == phase2 ]] || {
     echo "ERROR: RELEASE_SCHEMA_PHASE must explicitly be phase2"
     return 1
   }
-
-  local nas_export_host_path="${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
-  local nas_export_container_path="${NAS_EXPORT_PATH:-/nas}"
-
-  validate_capacity_boundaries "$nas_export_host_path"
-
-  # Ensure volume exists
-  podman volume inspect "$PG_VOLUME" &>/dev/null || podman volume create "$PG_VOLUME"
-
-  # Pull latest images (-q: suppress per-layer progress — it lands on
-  # stderr and pollutes CI logs with noisy "err:" lines via ssh-action.
-  # Real pull errors still surface via exit code and set -e.)
-  echo "Pulling images..."
-  podman pull -q "$PG_IMAGE"
+  load_runtime_env
+  validate_production_boundaries
+  validate_capacity_boundaries "${NAS_EXPORT_HOST_PATH:-/mnt/nas/pcu_storage/GraduationGame}"
+  assert_quadlet_adopted
   validate_release_artifacts "$release_schema_phase"
-
-  # Remove old containers/pod if they exist
-  do_down
-
-  # Small pause to let podman fully release resources
-  sleep 2
-
-  # Create pod with API port published only on loopback by default.
-  # Public traffic should reach the API through the reverse proxy, not :4000.
-  echo "Creating pod '$POD_NAME'..."
-  podman pod create \
-    --name "$POD_NAME" \
-    -p "${API_BIND_HOST}:${API_PORT:-4000}:4000"
-
-  # Start PostgreSQL (no --replace: we just ensured a clean state)
-  echo "Starting PostgreSQL..."
-  podman run -d \
-    --pod "$POD_NAME" \
-    --name "$PG_CONTAINER" \
-    --restart unless-stopped \
-    -e "POSTGRES_DB=${POSTGRES_DB}" \
-    -e "POSTGRES_USER=${POSTGRES_USER}" \
-    -e "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" \
-    -v "${PG_VOLUME}:/var/lib/postgresql/data:Z" \
-    "$PG_IMAGE"
-
-  # Verify PostgreSQL container is actually running
-  verify_running "$PG_CONTAINER" "PostgreSQL"
-
-  # Wait for PostgreSQL to accept connections
-  wait_for_pg
-
-  # Refuse to start application processes against the wrong schema phase.
-  # This is intentionally separate from migration application.
+  mkdir -p "$CUTOVER_STATE_DIR"
+  # Installed topology was checked byte-for-byte except immutable app Image lines.
+  # Render again into a private staging directory and replace only app definitions.
+  local staging ctr
+  staging="$(mktemp -d)"
+  if ! bash "$QUADLET_HELPERS/render.sh" "$staging/next"; then rm -rf "$staging"; return 1; fi
+  rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
+  if ! stop_application_units; then rm -rf "$staging"; return 1; fi
+  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
+    if ! install -m 600 "$staging/next/$ctr.container" "$QUADLET_DIR/$ctr.container"; then rm -rf "$staging"; return 1; fi
+  done
+  rm -rf "$staging"
+  systemctl --user daemon-reload
+  # Never start/restart the pod or PostgreSQL: StartWithPod could bypass this gate.
+  assert_foundation_active
+  assert_postgres_running
   release_common_args
   podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" \
     dist-release/scripts/release-migrate.js assert-runtime "$release_schema_phase"
-
-  # Fix DATABASE_URL: in a pod, containers share localhost
-  # Replace the hostname 'postgres' with '127.0.0.1' since they're in the same pod
-  local db_url="${DATABASE_URL//\@postgres:/\@127.0.0.1:}"
-  local common_env=(
-    -e "NODE_ENV=production"
-    -e "SESSION_SECRET=${SESSION_SECRET}"
-    -e "FILE_GATEWAY_SECRET=${FILE_GATEWAY_SECRET:-}"
-    -e "GOOGLE_CLIENT_IDS=${GOOGLE_CLIENT_IDS}"
-    -e "DATABASE_URL=${db_url}"
-    -e "LOG_LEVEL=${LOG_LEVEL:-info}"
-    -e "S3_ENDPOINT=${S3_ENDPOINT}"
-    -e "S3_PUBLIC_SIGNING_ENDPOINT=${S3_PUBLIC_SIGNING_ENDPOINT}"
-    -e "S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT=${S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT}"
-    -e "PUBLIC_ASSET_ORIGIN=${PUBLIC_ASSET_ORIGIN}"
-    -e "S3_REGION=${S3_REGION:-garage}"
-    -e "S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}"
-    -e "S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}"
-    -e "S3_BUCKET_PUBLIC=${S3_BUCKET_PUBLIC:-pcu-public}"
-    -e "S3_BUCKET_PROTECTED=${S3_BUCKET_PROTECTED:-pcu-protected}"
-    -e "S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}"
-    -e "API_PUBLIC_URL=${API_PUBLIC_URL}"
-    -e "WEBGL_EXTERNAL_CONNECTIONS_ENABLED=${WEBGL_EXTERNAL_CONNECTIONS_ENABLED:-false}"
-    -e "WEBGL_PLAY_ENABLED=${WEBGL_PLAY_ENABLED:-false}"
-    -e "WEB_PUBLIC_URL=${WEB_PUBLIC_URL}"
-    -e "CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}"
-    -e "DIRECT_UPLOAD_PART_URL_REFRESH_MAX=${DIRECT_UPLOAD_PART_URL_REFRESH_MAX}"
-    -e "UPLOAD_USER_GAME_MAX_MB=${UPLOAD_USER_GAME_MAX_MB}"
-    -e "UPLOAD_PRIVILEGED_GAME_MAX_MB=${UPLOAD_PRIVILEGED_GAME_MAX_MB}"
-    -e "DIRECT_UPLOAD_WORKER_TEMP_MAX_MB=${DIRECT_UPLOAD_WORKER_TEMP_MAX_MB}"
-    -e "EXPORT_WORKER_MAX_OBJECT_BYTES=${EXPORT_WORKER_MAX_OBJECT_BYTES}"
-    -e "EXPORT_WORKER_MAX_JOB_BYTES=${EXPORT_WORKER_MAX_JOB_BYTES}"
-  )
-  local ca_args=()
-  if [[ -n "${S3_TLS_CA_HOST_PATH:-}" ]]; then
-    common_env+=( -e "NODE_EXTRA_CA_CERTS=/run/secrets/garage-ca.pem" )
-    ca_args=( -v "${S3_TLS_CA_HOST_PATH}:/run/secrets/garage-ca.pem:ro,Z" )
-  fi
-
-  # Start API (no --replace: we just ensured a clean state)
-  echo "Starting API..."
-  podman run -d \
-    --pod "$POD_NAME" \
-    --name "$API_CONTAINER" \
-    --restart unless-stopped \
-    "${common_env[@]}" \
-    "${ca_args[@]}" \
-    -e "PORT=4000" \
-    -e "TRUST_PROXY=${TRUST_PROXY:-false}" \
-    -e "DOWNLOAD_AUTO_IP_BAN_ENABLED=${DOWNLOAD_AUTO_IP_BAN_ENABLED:-false}" \
-    -e "DATABASE_URL=${db_url}" \
-    -e "WEBGL_EXTERNAL_CONNECTIONS_ENABLED=${WEBGL_EXTERNAL_CONNECTIONS_ENABLED:-false}" \
-    -e "WEBGL_PLAY_ENABLED=${WEBGL_PLAY_ENABLED:-false}" \
-    -e "SESSION_COOKIE_NAME=${SESSION_COOKIE_NAME:-sid}" \
-    -e "SESSION_IDLE_MS=${SESSION_IDLE_MS:-7200000}" \
-    -e "SESSION_ABSOLUTE_MS=${SESSION_ABSOLUTE_MS:-1209600000}" \
-    -e "SESSION_TOUCH_MIN_INTERVAL_MS=${SESSION_TOUCH_MIN_INTERVAL_MS:-300000}" \
-    -e "SHUTDOWN_DRAIN_MS=${SHUTDOWN_DRAIN_MS:-15000}" \
-    -e "COOKIE_SECURE=${COOKIE_SECURE:-true}" \
-    -e "COOKIE_SAME_SITE=${COOKIE_SAME_SITE:-none}" \
-    -e "ALLOWED_GOOGLE_HD=${ALLOWED_GOOGLE_HD:-}" \
-    --entrypoint node \
-    "$API_IMAGE" dist/server.js
-
-  # Verify API container is actually running
+  assert_foundation_active
+  systemctl --user start "${API_CONTAINER}.service"
   verify_running "$API_CONTAINER" "API"
-
-  # Wait for API health check (DB + storage)
-  echo "Waiting for API health check..."
-  local api_elapsed=0
-  local api_healthy=0
+  local api_elapsed=0 api_healthy=0
   while (( api_elapsed < HEALTHCHECK_TIMEOUT )); do
     if podman exec "$API_CONTAINER" wget -qO- http://localhost:4000/api/health 2>/dev/null | grep -q '"ok":true'; then
-      echo "API health check passed! (${api_elapsed}s)"
       api_healthy=1
       break
     fi
@@ -778,76 +751,12 @@ do_up() {
     podman logs "$API_CONTAINER" --tail 30 2>/dev/null || true
     return 1
   fi
-
-  start_worker() {
-    local container="$1"
-    local label="$2"
-    local entry="$3"
-    shift 3
-    echo "Starting $label..."
-    podman run -d \
-      --pod "$POD_NAME" \
-      --name "$container" \
-      --restart unless-stopped \
-      "${common_env[@]}" \
-      "${ca_args[@]}" \
-      "$@" \
-      --entrypoint node \
-      "$API_IMAGE" "$entry"
-    verify_running "$container" "$label"
-  }
-
-  # These are independent, container-owned tmpfs mounts. They are neither a
-  # shared host mount nor a shared 4 GiB pool between GAME and WebGL.
-  start_worker "$GAME_WORKER_CONTAINER" "GAME validation worker" dist/game-validation-worker.js \
-    --tmpfs /tmp:rw,noexec,nosuid,size=6g
-  start_worker "$WEBGL_WORKER_CONTAINER" "WebGL worker" dist/webgl-worker.js \
-    --tmpfs /tmp:rw,noexec,nosuid,size=6g
-  start_worker "$VIDEO_WORKER_CONTAINER" "VIDEO worker" dist/video-worker.js \
-    --tmpfs /tmp:rw,noexec,nosuid,size=2g
-  start_worker "$IMAGE_WORKER_CONTAINER" "IMAGE/PDF worker" dist/image-worker.js \
-    --tmpfs /tmp:rw,noexec,nosuid,size=512m
-  start_worker "$EXPORT_WORKER_CONTAINER" "export worker" dist/export-worker.js \
-    -e "NAS_EXPORT_ROOT=${nas_export_container_path}" \
-    -v "${nas_export_host_path}:${nas_export_container_path}:rw,Z"
-  start_worker "$PROJECT_PUBLICATION_WORKER_CONTAINER" "project publication worker" \
-    dist/project-publication-worker.js
-
-  # ── Generate systemd service with restart delay ──
-  echo "Generating systemd service for pod..."
-  local systemd_dir="$HOME/.config/systemd/user"
-  mkdir -p "$systemd_dir"
-  podman generate systemd --name "$POD_NAME" --files --new \
-    --restart-policy=on-failure \
-    -t 10 > /dev/null 2>&1 || true
-
-  # Move generated files into systemd user directory
-  for f in pod-${POD_NAME}.service container-*.service; do
-    [[ -f "$f" ]] && mv -f "$f" "$systemd_dir/"
+  for ctr in "${RUNTIME_CONTAINERS[@]:1}"; do
+    assert_foundation_active
+    systemctl --user start "${ctr}.service"
+    verify_running "$ctr" "$ctr"
   done
-
-  # Patch pod service with restart delay and burst limits
-  local pod_service="$systemd_dir/pod-${POD_NAME}.service"
-  if [[ -f "$pod_service" ]]; then
-    sed -i '/^\[Service\]/a RestartSec=15' "$pod_service"
-    sed -i '/^\[Unit\]/a StartLimitBurst=10\nStartLimitIntervalSec=300' "$pod_service"
-    echo "Patched $pod_service with RestartSec=15, StartLimitBurst=10, StartLimitIntervalSec=300"
-  else
-    echo "WARNING: $pod_service not found, skipping restart-delay patch"
-  fi
-
-  # Reload and enable
-  systemctl --user daemon-reload
-  systemctl --user enable "pod-${POD_NAME}.service" 2>/dev/null || true
-  echo "Systemd service enabled for pod '$POD_NAME'."
-
-  echo ""
-  echo "=== Forward-only deploy complete ==="
-  echo "After a contract migration, failures require a forward fix or an explicit DB backup restore plus Garage reconciliation; this script never starts an old API automatically."
-  podman pod ps --filter "name=$POD_NAME"
-  echo ""
-  podman ps --pod --filter "pod=$POD_NAME"
-  rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
+  echo "Forward-only Quadlet deploy complete; PostgreSQL and pod were retained."
 }
 
 # ── Logs ───────────────────────────────────────────────────────
@@ -887,10 +796,10 @@ case "${1:-up}" in
   release-assert) do_release_assert "${2:-}" ;;
   inventory) do_inventory_snapshot "${2:-}" ;;
   capacity-preflight) do_capacity_preflight ;;
-  boundary-preflight) load_env; validate_production_boundaries ;;
+  boundary-preflight) load_env; load_runtime_env; validate_production_boundaries ;;
   release-artifact-preflight) do_release_artifact_preflight "${2:-}" ;;
   verify-final-web) do_verify_final_web "${2:-}" ;;
-  # do_up validates every boundary before its own down/up replacement phase.
+  # Restart uses the same gated application-only release transaction.
   restart) do_up ;;
   logs)    do_logs "${2:-api}" ;;
   status)  do_status ;;

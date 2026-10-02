@@ -1,8 +1,10 @@
-# Offline Quadlet runtime definitions
+# Quadlet runtime definitions and release integration
 
-These definitions are a reviewable migration candidate. The existing release
-workflow and `../deploy.sh` remain authoritative; this change does not install,
-activate, or deploy Quadlet units. Production operation has not been verified.
+Quadlet owns the runtime topology and systemd owns process lifecycle and
+restart. `../deploy.sh` updates the immutable application digest and requests
+systemd operations on an already adopted host. It does not install Quadlet for
+the first time or migrate legacy units. Production adoption and operation have
+not been verified; repository edits do not activate these definitions.
 
 ## Responsibilities and rendering
 
@@ -70,12 +72,12 @@ default expressions. A Bash deployment `.env` is not interchangeable with these
 files. For example, write a complete literal database URL rather than
 `${POSTGRES_PASSWORD}` inside a URL. No conversion helper or secret generation
 framework is provided. Supply every key below, including the documented
-`deploy.sh` fallback values where appropriate; the renderer does not fill runtime
+legacy `deploy.sh` fallback values where appropriate; the renderer does not fill runtime
 defaults. An empty value is written as `KEY=`.
 
 `common.env` is shared by API and all six workers, never PostgreSQL:
 
-| Key(s) | Existing `deploy.sh` default |
+| Key(s) | Legacy `deploy.sh` default |
 | --- | --- |
 | `SESSION_SECRET`, `GOOGLE_CLIENT_IDS`, `DATABASE_URL` | Required |
 | `S3_ENDPOINT`, `S3_PUBLIC_SIGNING_ENDPOINT`, `S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT`, `PUBLIC_ASSET_ORIGIN` | Required |
@@ -93,7 +95,7 @@ defaults. An empty value is written as `KEY=`.
 
 `api.env` is API-only and loaded after `common.env`:
 
-| Key | Existing `deploy.sh` default |
+| Key | Legacy `deploy.sh` default |
 | --- | --- |
 | `TRUST_PROXY` | `false` |
 | `DOWNLOAD_AUTO_IP_BAN_ENABLED` | `false` |
@@ -147,7 +149,7 @@ own an independent 6 GiB tmpfs. All fixed pod/container names remain identical
 to `deploy.sh`. The `.volume` explicitly reuses `gp_pg_data`. The optional CA
 mount is `${S3_TLS_CA_HOST_PATH}:/run/secrets/garage-ca.pem:ro,Z`.
 
-## Lifecycle ownership and future operational groups
+## Lifecycle ownership and operational groups
 
 The pod is the sole boot owner with `[Install] WantedBy=default.target`.
 Containers use `StartWithPod=true`; the generator makes the pod want all eight
@@ -170,7 +172,7 @@ Host reboot autostart also depends on the host's existing user-manager/linger
 configuration, which this change does not inspect or modify.
 
 The runtime group is API plus six workers. The database group is PostgreSQL;
-the pod owns both. Future commands below document intended unit operations;
+the pod owns both. Commands below describe the unit groups;
 they have not been executed against production and do not replace release drain
 markers, backups, schema checks, migration, or deployment gates:
 
@@ -198,10 +200,50 @@ not production containers. `After`
 does not establish readiness. Do not install alongside the existing generated
 services or containers with the same names.
 
+## Release integration on an adopted host
+
+`QUADLET_DIR` defaults to `$HOME/.config/containers/systemd`. The installed ten
+source definitions must match the repository topology, except for the seven
+application `Image=` digests. The pod and PostgreSQL must already be active and
+the services must come from the Quadlet generator. Non-image topology changes
+and legacy generated services require a separately planned host change. The
+adoption guard conservatively rejects Quadlet drop-in directories across the
+user-manager and release process search roots, including shared roots; hosts
+using such overrides need a separate topology review before this release path.
+
+The release path keeps existing source/digest, artifact, boundary and capacity
+validation. It checks adoption before maintenance, stops the app group, updates
+the seven immutable application image references, requests
+`systemctl --user daemon-reload`, checks PostgreSQL readiness and schema, starts API, waits for API
+health, then starts workers. It never restarts the pod or PostgreSQL during an
+application release. One-shot release/migration containers remain release tasks.
+There is no `latest` fallback for production API images.
+
+`drain` stops all seven app units and writes the drain marker only after success.
+`down` asks systemd to stop the runtime; the named database volume is retained.
+Stopping the full runtime requires separate host startup before another release;
+`up` intentionally requires the pod and PostgreSQL to be running. Neither command
+uses direct Podman lifecycle operations or silently ignores systemd failures.
+
+Operator env files provide runtime values used by the deployment gates; the
+shell `.env` continues to provide release controls, topology and capacity
+attestations. The deploy-side reader uses literal assignments without shell
+execution. The renderer remains separate: it sees only its topology allowlist
+and never reads, copies or rewrites credentials. Keep operator files consistent
+with the installed runtime before a release.
+
+Pre-migration recovery also uses systemd. It discovers the adopted source
+directory from the API unit when no `QUADLET_DIR` is explicitly provided. It verifies the captured unit/config
+and immutable image identities, then starts API and checks health before
+resuming captured workers. Container IDs may change because Quadlet removes
+containers on stop. The existing previous-Pages and no-migration-attempt gates
+remain required; drift or a startup failure leaves recovery incomplete.
+
 ## Offline verification and remaining differences
 
-Parity tests run the real `do_up` definitions with fake Podman/systemctl and
-innocuous fixtures, skipping release/readiness gates. Renderer subprocesses use
+Parity tests compare rendered units against an explicit runtime topology
+contract. Deployment tests exercise `do_up`, drain and down with command
+doubles and innocuous fixtures. Renderer subprocesses use
 an explicit clean environment. Inherited secret sentinels exist only in test
 memory/process environments and are checked against the entire temporary tree
 and captured diagnostics. Tests cover image/port/mount/process/tmpfs parity,
@@ -245,6 +287,6 @@ Residual differences and blockers include:
   API success path before production adoption. Plain env-file content must be
   reviewed by operators; rendering proves no runtime values or credentials.
 
-No image activation, migration, backup, readiness, or production cutover logic
-is added here. Adoption still requires the existing master/PR/CI/CD release
-process and production verification.
+Initial adoption still requires the existing master/PR/CI/CD release process
+and production verification. No production installation, activation, enablement
+or cutover was performed as part of this repository change.

@@ -34,29 +34,24 @@ for (const entry of [
 	'dist/image-worker.js', 'dist/export-worker.js', 'dist/project-publication-worker.js',
 ]) assert.ok(deploy.includes(entry), `missing dedicated process: ${entry}`);
 
-const apiRun = deploy.slice(deploy.indexOf('echo "Starting API..."'), deploy.indexOf('# Verify API container'));
-assert.doesNotMatch(apiRun, /NAS_EXPORT|nas_export|\/app\/storage/);
-const commonRuntimeEnv = deploy.slice(
-	deploy.indexOf('local common_env=('),
-	deploy.indexOf('local ca_args=()'),
-);
-for (const name of ['SESSION_SECRET', 'GOOGLE_CLIENT_IDS']) {
-	assert.ok(
-		commonRuntimeEnv.includes(`-e "${name}=\${${name}}"`),
-		`dedicated workers must receive ${name} required by loadEnv`,
-	);
-}
-const exportStart = deploy.slice(deploy.indexOf('start_worker "$EXPORT_WORKER_CONTAINER"'));
-assert.match(exportStart, /NAS_EXPORT_ROOT/);
-assert.match(exportStart, /nas_export_host_path/);
-assert.match(deploy, /Forward-only deploy complete/);
+const quadletTemplate = (name) => readFile(new URL(`./quadlet/templates/${name}.container.in`, import.meta.url), 'utf8');
+const apiUnit = await quadletTemplate('gp-api');
+assert.doesNotMatch(apiUnit, /NAS_EXPORT|nas_export|\/app\/storage/);
+assert.match(apiUnit, /EnvironmentFile=@COMMON_ENV@[\s\S]*EnvironmentFile=@API_ENV@/);
+const runtimeParser = await readFile(new URL('./quadlet/runtime-env.py', import.meta.url), 'utf8');
+for (const name of ['SESSION_SECRET', 'GOOGLE_CLIENT_IDS']) assert.ok(runtimeParser.includes(name));
+const exportUnit = await quadletTemplate('gp-worker-export');
+assert.match(exportUnit, /@EXPORT_ENV@/);
+assert.match(exportUnit, /Volume=@NAS_VOLUME@/);
+assert.match(deploy, /Forward-only Quadlet deploy complete/);
+assert.doesNotMatch(deploy, /podman run -d|podman pod (?:create|rm|stop)|podman (?:generate systemd|stop|rm)|--restart/);
 assert.doesNotMatch(deploy, /do_rollback|API_IMAGE_PREVIOUS|podman\s+tag[^\n]+previous/i);
 assert.doesNotMatch(deploy, /dist\/phase1-release-manifest\.js/);
 assert.doesNotMatch(deploy, /PCU_PHASE1_RUNTIME_V1/);
 assert.match(deploy, /release-artifact-preflight\) do_release_artifact_preflight/);
 assert.match(deploy, /const entries = \[[\s\S]*"dist\/project-publication-worker\.js"[\s\S]*\];/);
 assert.doesNotMatch(deploy, /PCU_RELEASE_SCHEMA_PHASE/);
-assert.match(deploy, /release_schema_phase" == phase2[\s\S]*PROJECT_PUBLICATION_WORKER_CONTAINER/);
+assert.match(deploy, /release_schema_phase" == phase2/);
 assert.match(deploy, /START_DEDICATED_WORKERS:-true}" == true[\s\S]*legacy runtime bypass is retired/);
 assert.match(deploy, /must use an immutable @sha256 release digest/);
 assert.match(deploy, /ghcr\\\.io\/pcugame\/pcu-graduationproject-v2-api@sha256/);
@@ -104,19 +99,11 @@ assert.match(integrationRunner, /SigV4 sentinel query leaked to protected proxy 
 assert.match(integrationRunner, /fixed GET body reached unavailable upstream/);
 assert.match(integrationRunner, /chunked GET body reached unavailable upstream/);
 
-const gameStart = deploy.slice(
-	deploy.indexOf('start_worker "$GAME_WORKER_CONTAINER"'),
-	deploy.indexOf('start_worker "$WEBGL_WORKER_CONTAINER"'),
-);
-const webglStart = deploy.slice(
-	deploy.indexOf('start_worker "$WEBGL_WORKER_CONTAINER"'),
-	deploy.indexOf('start_worker "$VIDEO_WORKER_CONTAINER"'),
-);
-for (const isolatedWorker of [gameStart, webglStart]) {
-	assert.match(isolatedWorker, /--tmpfs \/tmp:rw,noexec,nosuid,size=6g/);
-	assert.doesNotMatch(isolatedWorker, /-v [^\n]*:\/tmp/);
+for (const name of ['gp-worker-game-validation', 'gp-worker-webgl']) {
+    const isolatedWorker = await quadletTemplate(name);
+    assert.match(isolatedWorker, /Tmpfs=\/tmp:rw,noexec,nosuid,size=6g/);
+    assert.doesNotMatch(isolatedWorker, /Volume=[^\n]*:\/tmp/);
 }
-assert.match(deploy, /independent, container-owned tmpfs mounts/);
 assert.match(deploy, /EXPORT_WORKER_MAX_JOB_BYTES \+ NAS_EXPORT_STAGING_HEADROOM_BYTES/);
 assert.match(deploy, /15 \* gib \+ GARAGE_DEPLOYMENT_HEADROOM_BYTES/);
 
@@ -132,11 +119,28 @@ const boundaryFixture = exactFixture.replace(
 	/^S3_PRIVATE_NETWORK_CONFIRMED=.*$/m,
 	'S3_PRIVATE_NETWORK_CONFIRMED=true',
 );
+const runtimeCommonKeys = new Set('DATABASE_URL SESSION_SECRET GOOGLE_CLIENT_IDS CORS_ALLOWED_ORIGINS API_PUBLIC_URL WEB_PUBLIC_URL S3_ENDPOINT S3_PUBLIC_SIGNING_ENDPOINT S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT PUBLIC_ASSET_ORIGIN S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY FILE_GATEWAY_SECRET DIRECT_UPLOAD_PART_URL_REFRESH_MAX UPLOAD_USER_GAME_MAX_MB UPLOAD_PRIVILEGED_GAME_MAX_MB DIRECT_UPLOAD_WORKER_TEMP_MAX_MB EXPORT_WORKER_MAX_OBJECT_BYTES EXPORT_WORKER_MAX_JOB_BYTES LOG_LEVEL S3_REGION S3_BUCKET_PUBLIC S3_BUCKET_PROTECTED S3_FORCE_PATH_STYLE WEBGL_EXTERNAL_CONNECTIONS_ENABLED WEBGL_PLAY_ENABLED'.split(' '));
+const runtimeApiKeys = new Set('TRUST_PROXY DOWNLOAD_AUTO_IP_BAN_ENABLED SESSION_COOKIE_NAME SESSION_IDLE_MS SESSION_ABSOLUTE_MS SESSION_TOUCH_MIN_INTERVAL_MS SHUTDOWN_DRAIN_MS COOKIE_SECURE COOKIE_SAME_SITE ALLOWED_GOOGLE_HD'.split(' '));
+const runtimePgKeys = new Set('POSTGRES_USER POSTGRES_DB POSTGRES_PASSWORD'.split(' '));
+const writeRuntimeFixture = async (fixture) => {
+    await mkdir(join(fixtureDir, 'runtime-env'), { recursive: true });
+    const values = fixture.split('\n').filter(line => /^[A-Z][A-Z0-9_]*=/.test(line)).map(line => {
+        const equal = line.indexOf('=');
+        let value = line.slice(equal + 1);
+        if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) value = value.slice(1, -1);
+        return [line.slice(0, equal), value];
+    });
+    for (const [file, keys] of [['common', runtimeCommonKeys], ['api', runtimeApiKeys], ['postgres', runtimePgKeys]]) {
+        await writeFile(join(fixtureDir, 'runtime-env', `${file}.env`), values.filter(([key]) => keys.has(key)).map(([key,value]) => `${key}=${value}`).join('\n') + '\n');
+    }
+};
+const fixtureReleaseEnv = { API_IMAGE: 'ghcr.io/pcugame/pcu-graduationproject-v2-api@sha256:' + 'a'.repeat(64), RELEASE_SCHEMA_PHASE: 'phase2' };
 const runBoundary = async (fixture, command = 'boundary-preflight', extraEnv = {}, commandArgs = []) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);
+	await writeRuntimeFixture(fixture);
 	return spawnSync('bash', [deployPath, command, ...commandArgs], {
 		encoding: 'utf8',
-		env: { ...process.env, DEPLOY_DIR: fixtureDir, ...extraEnv },
+		env: { ...process.env, ...fixtureReleaseEnv, DEPLOY_DIR: fixtureDir, ...extraEnv },
 	});
 };
 const acceptedBoundary = await runBoundary(boundaryFixture);
@@ -272,11 +276,11 @@ assert.equal(spawnSync('test', ['!', '-e', podmanMarker]).status, 0, 'Podman ran
 assert.match(deploy, /restart\) do_up ;;/);
 const upFunction = deploy.slice(deploy.indexOf('do_up() {'), deploy.indexOf('# ── Logs'));
 assert.ok(
-	upFunction.indexOf('validate_production_boundaries') < upFunction.indexOf('do_down'),
-	'do_up must validate production boundaries before its down/up replacement phase',
+	upFunction.indexOf('validate_production_boundaries') < upFunction.indexOf('stop_application_units'),
+	'do_up must validate production boundaries before its application stop phase',
 );
 assert.ok(
-	upFunction.indexOf('validate_release_artifacts "$release_schema_phase"') < upFunction.indexOf('do_down'),
+	upFunction.indexOf('validate_release_artifacts "$release_schema_phase"') < upFunction.indexOf('stop_application_units'),
 	'do_up must validate the artifact identity and worker set before replacing the deployment',
 );
 assert.match(deploy, /redirect: 'manual'/);
@@ -351,6 +355,25 @@ const releaseEnv = {
 	FAKE_IMAGE_DIGEST: releaseDigest,
 	FAKE_IMAGE_REVISION: releaseSourceSha,
 };
+const quadletDir = join(fixtureDir, 'units');
+const renderedFixture = spawnSync('bash', [new URL('./quadlet/render.sh', import.meta.url).pathname, quadletDir], {
+    encoding: 'utf8', env: { ...process.env, ...releaseEnv, DEPLOY_DIR: fixtureDir, NAS_EXPORT_HOST_PATH: fixtureDir, NAS_EXPORT_PATH: '/nas-export' },
+});
+assert.equal(renderedFixture.status, 0, renderedFixture.stderr);
+releaseEnv.QUADLET_DIR = quadletDir;
+await writeFile(join(fakeBin, 'systemctl'), `#!/bin/sh
+case "$2" in
+show)
+case "$4" in
+--property=SourcePath)
+if [ "$3" = gp-pg-data-volume.service ]; then echo "$QUADLET_DIR/gp-pg-data.volume"; elif [ "$3" = graduationproject-pod.service ]; then echo "$QUADLET_DIR/graduationproject.pod"; else echo "$QUADLET_DIR/\${3%.service}.container"; fi ;;
+--property=NeedDaemonReload) echo no ;;
+--property=DropInPaths) : ;;
+--property=FragmentPath) echo "/run/user/999/systemd/generator/$3" ;;
+esac ;;
+esac
+`);
+await chmod(join(fakeBin, 'systemctl'), 0o755);
 const exactRelease = await runBoundary(boundaryFixture, 'release-artifact-preflight', releaseEnv, ['phase2']);
 assert.equal(exactRelease.status, 0, exactRelease.stderr || exactRelease.stdout);
 
@@ -426,6 +449,7 @@ for (const [command, overrides, args, error] of [
 
 const runCapacity = async (fixture) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);
+	await writeRuntimeFixture(fixture);
 	return spawnSync('bash', [deployPath, 'capacity-preflight'], {
 		encoding: 'utf8',
 		env: { ...process.env, DEPLOY_DIR: fixtureDir },

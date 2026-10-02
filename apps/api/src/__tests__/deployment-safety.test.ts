@@ -20,12 +20,14 @@ function pushPaths(workflow: string): string[] {
 }
 
 describe('production deployment safety', () => {
-	it('defaults to ignoring forwarded headers until an explicit proxy peer is configured', () => {
+	it('uses operator API env with an explicit proxy trust setting and loopback publishing', () => {
 		const deployScript = repositoryFile('server/deploy.sh');
 		const productionEnvExample = repositoryFile('server/.env.example');
 
 		expect(deployScript).toContain('API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"');
-		expect(deployScript).toContain('-e "TRUST_PROXY=${TRUST_PROXY:-false}" \\');
+		expect(repositoryFile('server/quadlet/templates/gp-api.container.in')).toContain('EnvironmentFile=@API_ENV@');
+		expect(repositoryFile('server/quadlet/runtime-env.py')).toContain('TRUST_PROXY');
+		expect(deployScript).toContain('load_runtime_env');
 		expect(productionEnvExample).toMatch(/^TRUST_PROXY=false$/m);
 	});
 

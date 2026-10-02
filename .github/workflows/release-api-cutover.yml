@@ -175,7 +175,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs,server/ip-ban-audit.sh
+          source: server/deploy.sh,server/quadlet,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs,server/ip-ban-audit.sh
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
           overwrite: true

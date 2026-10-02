@@ -113,7 +113,7 @@ for (const name of [
 assert.doesNotMatch(deploy, /PCU_PHASE1_RUNTIME_V1|ROLLBACK_AUTH_NONCE|authorize-phase1-rollback\) do_authorize_phase1_rollback/);
 assert.match(deploy, /must use an immutable @sha256 release digest/);
 assert.match(deploy, /org\.opencontainers\.image\.revision/);
-assert.match(deploy, /--entrypoint node \\\n\s+"\$API_IMAGE" dist\/server\.js/);
+assert.match(await read('server/quadlet/templates/gp-api.container.in'), /Entrypoint=node\nExec=dist\/server\.js/);
 
 for (const status of ['HEAD', '304', '206', '416']) assert.ok(smoke.includes(status), `data-plane smoke missing ${status}`);
 // Per-request authorization fails closed when the API is unavailable. Production
