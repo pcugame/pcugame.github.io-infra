@@ -63,7 +63,7 @@
   flex-wrap: wrap;
 }
 
-@media (max-width: 50em) {
+@media (max-width: 70em) {
   .admin-ycard {
     display: flex;
     flex-direction: column;
@@ -169,4 +169,20 @@
   outline: none;
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+}
+
+.admin-exhibition-poster__body { flex: 1; min-width: 12rem; }
+.admin-exhibition-poster .game-upload { margin: 0; padding: .65rem; }
+.admin-exhibition-poster .game-upload__file-input { margin-bottom: .5rem; }
+.admin-exhibition-poster .game-upload__file-input input { min-width: 0; }
+.admin-exhibition-poster .game-upload__actions { flex-wrap: wrap; }
+.exhibition-inline-input + .visibility-select { margin-top: .5rem; }
+@media (max-width: 70em) {
+  .admin-years-page .admin-desktop-only { display: none; }
+  .admin-years-page .admin-mobile-cards { display: grid; gap: .75rem; }
+  .admin-years-page .admin-exhibition-poster { align-items: flex-start; }
+}
+@media (max-width: 25em) {
+  .admin-years-page .admin-exhibition-poster { flex-wrap: wrap; }
+  .admin-years-page .admin-exhibition-poster__body { flex-basis: 100%; min-width: 0; }
 }

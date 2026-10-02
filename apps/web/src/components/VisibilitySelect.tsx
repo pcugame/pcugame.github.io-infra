@@ -4,9 +4,9 @@ import { env } from '../lib/env';
 
 import { visibilityLabels, visibilityRank } from '../lib/visibility';
 
-export function VisibilitySelect(props: SelectHTMLAttributes<HTMLSelectElement>) {
+export function VisibilitySelect({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
  if (!env.VISIBILITY_CONTROLS_ENABLED) return null;
- return <select aria-label="공개 범위" {...props}>
+ return <select aria-label="공개 범위" {...props} className={['form-control', 'visibility-select', className].filter(Boolean).join(' ')}>
   <option value="" disabled>공개 범위를 선택하세요</option>
   {Object.entries(visibilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
  </select>;

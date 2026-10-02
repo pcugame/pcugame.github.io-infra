@@ -7,7 +7,7 @@ type NavItem = { to: string; label: string; icon: string; end: boolean; adminOnl
 const ADMIN_NAV: NavItem[] = [
   { to: '/admin/projects', label: '작품 관리', icon: 'grid', end: true },
   { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
-  { to: '/admin/webgl-network', label: '게임 외부 연결', icon: 'clipboard', end: false },
+  { to: '/admin/webgl-network', label: '게임 외부 연결', icon: 'globe', end: false },
   { to: '/admin/change-requests', label: '변경 요청', icon: 'clipboard', end: false },
   { to: '/admin/years', label: '전시회 추가', icon: 'calendar', end: false },
   { to: '/admin/settings', label: '사이트 설정', icon: 'settings', end: false },
@@ -20,6 +20,11 @@ const USER_NAV: NavItem[] = [
 ];
 
 const ICONS: Record<string, ReactElement> = {
+  globe: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18" />
+    </svg>
+  ),
   grid: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />

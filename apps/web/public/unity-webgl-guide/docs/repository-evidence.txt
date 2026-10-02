@@ -1,0 +1,141 @@
+PCU GAME 안내 문구의 근거 — 2026-10-02
+=====================================
+
+기준과 확인 범위
+----------------
+저장소: https://github.com/pcugame/pcugame.github.io-infra
+origin/master: 29e360d3152d505d0ae2d7f1e39ca950fcea0df8
+git ls-remote로 원격 master와 같은 SHA임을 확인했다.
+작업 디렉터리에 진행 중인 변경이 있으므로 판단 기준은 git show origin/master:경로로 읽은 커밋이다.
+진행 중인 호환성 변경을 배포된 기능으로 문서화하지 않았다.
+
+이번 문서 개정은 소스·설정·기존 기록의 읽기 전용 조사다.
+운영 서버 접속, 신규 업로드, 현재 운영 응답 헤더 측정, Unity FPS 측정은 수행하지 않았다.
+따라서 아래는 master 구현에 맞춘 설정 안내이지 모든 export의 실행 보증이나 현재 배포 상태의 실측 보고서가 아니다.
+사용자 본문에는 호스팅 판단을 떠넘기지 않고, 목적별 설정과 실제 게임 확인 절차를 안내한다.
+
+1. Brotli/Gzip + Fallback OFF를 새 빌드의 기본 안내로 정한 이유
+-----------------------------------------------------------
+archive.ts: .framework.js/.wasm/.data의 비압축, .gz, .br, .unityweb 조합을 인식한다.
+https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/apps/api/src/modules/webgl/archive.ts
+
+content.ts: .gz에는 gzip, .br에는 br Content-Encoding을 정한다.
+접미사를 제외한 이름으로 MIME을 정하므로 .wasm.br/.wasm.gz의 MIME은 application/wasm이다.
+.unityweb은 application/octet-stream이며 HTTP Content-Encoding을 붙이지 않는다.
+https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/apps/api/src/modules/webgl/content.ts
+
+processing.composition.ts: 저장소 업로드에 contentType/contentEncoding을 전달한다.
+project-publication/worker.ts: 게시 대상 업로드에도 mimeType/contentEncoding을 전달한다.
+lib/storage.ts: S3 업로드의 ContentType/ContentEncoding에 반영한다.
+https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/apps/api/src/modules/webgl/processing.composition.ts
+https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/apps/api/src/modules/project-publication/worker.ts
+https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/apps/api/src/lib/storage.ts
+
+public-origin.nginx.conf.template: gzip off; 저장소의 MIME/Content-Encoding을 통과시킨다.
+일반 파일 및 /runtime/ 경로에서 Content-Encoding을 제거하거나 재압축하지 않는다.
+https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/apps/db/public-origin.nginx.conf.template
+
+따라서 사용자에게 서버 설정을 확인하라고 요구할 이유 없이,
+새 공개용은 Brotli + OFF, 빠른 반복은 Gzip + OFF로 안내한다.
+이는 필수 업로드 포맷을 뜻하지 않는다. 비압축·Fallback ON의 경로도 존재한다.
+ZIP 안전성 제한과 실제 게임 호환성은 별도의 조건이다.
+압축 포맷 사이에 동일 게임의 FPS 우열을 실측했다고 주장하지 않는다.
+
+2. Profiler 연결과 Deep Profiling
+--------------------------------
+Unity의 Web Profiler는 플레이어가 에디터에 연결하는 방식이다.
+Autoconnect Profiler는 업로드 성공 또는 FPS 표시를 위한 필수 옵션이 아니다.
+runtimeCsp는 실행 경로와 승인된 외부 연결만 connect-src에 포함한다.
+업로드했다고 임의의 개발 PC Profiler 연결이 열리는 구조가 아니다.
+https://github.com/pcugame/pcugame.github.io-infra/blob/29e360d3152d505d0ae2d7f1e39ca950fcea0df8/apps/api/src/modules/webgl-play/service.ts
+
+그래서 일반 업로드 플레이/FPS 확인은 Development/Deep Profiling OFF,
+문제 분석용 Development ON, 함수 단위 추가 분석 때만 Deep Profiling ON으로 구분한다.
+진단용 빌드를 업로드할 수 있다는 것과 원격 Profiler 연결 성공은 별개다.
+연결 정책을 바꾸라는 안내는 하지 않는다.
+
+3. 네이티브 스레드·템플릿·데이터 캐시
+-----------------------------------
+기준 gateway 설정에는 COOP same-origin, COEP require-corp, CORP cross-origin이 있다.
+runtimeCsp의 worker-src에는 runtime 경로와 blob:가 허용된다.
+따라서 스레드 옵션을 설명하면서 사용자에게 헤더 설정을 요구하지 않는다.
+Unity 6.0 실험적 옵션이므로 기본 OFF, 효과를 측정할 이유가 있을 때만 비교하도록 안내한다.
+특정 게임의 성능 이득, 모든 스레드 빌드의 실행 성공은 이 조사에서 검증하지 않았다.
+
+기준 master의 gateway는 Service Worker 등록 요청을 차단한다.
+PWA 오프라인·설치 기능을 안내용 기본 경로로 제시하지 않고 Default 템플릿을 추천한다.
+Data Caching은 Unity 데이터 캐시다. PWA 지원이나 재방문마다 동일 캐시 적중을 뜻하지 않는다.
+실행 URL에 세션 토큰이 포함되고 브라우저 저장 조건도 달라질 수 있어 효과를 보장하지 않는다.
+
+4. 기존 실행 기록의 한계
+-----------------------
+docs/unity-decompression-fallback-acceptance.md의 압축 5종 기록은 2026-10-01의 이전 브랜치 기반이다.
+문서는 당시 기준 f4174cb 및 소프트웨어 렌더링/모의 세션 등의 범위를 명시한다.
+docs/unity-webgl/002-dedicated-runtime.md의 운영 기록은 API fca80666767f4fc17bc95fbc154660c6230b147f,
+gateway cf00f44 등 당시 배포를 대상으로 한다.
+이를 현재 master 전체의 신규 업로드·실제 게임 플레이 검증으로 간주하지 않았다.
+
+5. Unity 공식 자료
+------------------
+빌드 옵션: https://docs.unity3d.com/6000.0/Documentation/Manual/web-build-settings.html
+프로파일링: https://docs.unity3d.com/6000.0/Documentation/Manual/ProfilerWindow.html
+Unity Web 튜토리얼: https://learn.unity.com/tutorial/getting-started-with-unity-web
+Player 옵션: https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html
+최적화 옵션: https://docs.unity3d.com/6000.0/Documentation/Manual/web-optimization-player.html
+배포·압축: https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-deploying.html
+메모리: https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-memory.html
+
+화면 출처는 sources.json에, 원본 파일 SHA256은 asset-checksums.json에 기록했다.
+Unity 6 / 2022 LTS 화면을 모두 유지한다. 설치 화면에 보이는 Unity 6.1 버전도 별도 표기했다.
+
+
+6. 제출 절차 개편의 서비스 UI 근거 (2026-10-02)
+---------------------------------------------
+가이드 위치는 Desktop/unity-webgl-guide이며 서비스 레포의 파일은 변경하지 않았다.
+검토한 서비스 소스는 기존 origin/master 29e360d3152d505d0ae2d7f1e39ca950fcea0df8 기준이다.
+아래 UI 파일은 작업공간 git 상태에서 수정된 파일이 아니며, 문구·분기·이동 경로를 읽어 확인했다.
+운영 화면을 로그인해서 실제 조작한 검증은 아니다.
+
+- apps/web/src/components/layout/Header.tsx: 로그인, 작품 제출, 내 작품, 전시 목록.
+- apps/web/src/app/router.tsx, features/auth/RequireAuth.tsx: /me/projects/new 로그인 필요.
+- pages/MyProjectsPage.tsx: 내 작품 → 새 작품 제출.
+- features/project-submission/SubmissionBasicFields.tsx: 전시회·제목 필수 입력, 잠금/전시 없음 문의 안내.
+- features/project-submission/SubmissionFileSelection.tsx, lib/upload/project-files.ts:
+  기타 파일에서 ZIP 선택 후 WebGL 용도 지정.
+- features/project-submission/SubmissionUploadHelp.tsx: 파일 선택 → ZIP 용도 → 작품 제출.
+- features/project-submission/SubmissionUploadProgress.tsx: 파일 READY일 때 업로드 완료 표시.
+- features/project-submission/useProjectSubmissionForm.ts: 전체 PUBLISHED 후 /admin/projects/{id}/edit 이동.
+- pages/admin/AdminProjectEditPage.tsx: 이동한 화면 제목은 작품 수정.
+- pages/ExhibitionProjectsPage.tsx, components/project/ProjectModal.tsx, ProjectActions.tsx:
+  전시 작품 카드에서 플레이해보기 링크 제공.
+- pages/ProjectPlayPage.tsx: 오류 지속 시 운영자에게 작품·브라우저·오류를 알리라는 안내.
+모든 파일의 업로드 완료와 게시 완료, 게임의 실제 실행 성공을 별개로 설명했다.
+수업·기관의 별도 제출 완료는 이 가이드가 보장하지 않는다.
+
+7. 문의 경로 확인 및 사용자 제공 정보
+------------------------------------
+GitHub 공개 API https://api.github.com/users/bipolarrr 에서 login=bipolarrr, name=Song Jihan 확인.
+공개 email/blog는 비어 있었다. git 커밋의 users.noreply.github.com 주소는 연락처로 사용하지 않았다.
+공개 프로필: https://github.com/bipolarrr
+레포 API에서 has_issues=true, archived=false 확인.
+공개 기술 문의: https://github.com/pcugame/pcugame.github.io-infra/issues
+아무 메시지도 보내거나 이슈를 등록하지 않았다.
+운영자 프로필과 Issues는 실제 확인한 공개 주소이며 응답 시한/지원 범위를 보장하지 않는다.
+
+8. Unity 2022 명칭 근거와 필수/참고 분리
+--------------------------------------
+https://docs.unity3d.com/2022.3/Documentation/Manual/web-build-settings.html
+현재 공식 표에는 Runtime Speed with LTO, Runtime Speed가 있다.
+보존한 공식 WebGLBuilding-BuildPlayerOptions.png에는 Speed가 표시되어 있다.
+첫 제출은 실제 드롭다운에 Runtime Speed with LTO가 있으면 선택, 없고 Runtime Speed가 있으면 선택,
+Speed로 표시되면 Speed를 선택하도록 결정적인 순서를 안내했다. 학생에게 성능 실험을 요구하지 않는다.
+진단 체크가 회색/숨김일 때 이를 바꾸려고 Development Build를 다시 켜지 않도록 명시했다.
+기본 제출값은 정적 HTML에도 포함되어 JavaScript 없이 읽을 수 있다.
+원래의 Profiler·압축 대안·그래픽·FPS·메모리 설명은 C 참고 구역에 보존했다.
+체크리스트만 submission-checklist-v2 키로 분리하고 테마·버전 설정의 키는 유지했다.
+
+문의 경로 최종 지정 (사용자 후속 지시)
+-----------------------------------
+학생용 문의 경로를 카카오톡 ID Bipolar_로 통일했다.
+카카오톡 ID는 사용자가 직접 제공했다. 실제 계정 검색·메시지 전송은 하지 않았다.
+앞서 조사한 GitHub 주소는 근거 기록으로 보존하며 학생용 문의 안내에서는 제외했다.

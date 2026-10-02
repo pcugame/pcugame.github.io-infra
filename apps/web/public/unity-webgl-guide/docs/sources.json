@@ -1,0 +1,105 @@
+{
+  "sources": {
+    "build": "https://docs.unity3d.com/6000.0/Documentation/Manual/web-build-settings.html",
+    "player": "https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html",
+    "deploy": "https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-deploying.html",
+    "texture": "https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-texture-compression.html",
+    "memory": "https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-memory.html",
+    "urp": "https://docs.unity3d.com/6000.0/Documentation/Manual/urp/configure-for-better-performance.html",
+    "render": "https://docs.unity3d.com/6000.0/Documentation/Manual/urp/universalrp-asset.html",
+    "legacy": "https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html",
+    "unityLearnWeb": "https://learn.unity.com/tutorial/getting-started-with-unity-web",
+    "unityLearnPublish": "https://learn.unity.com/tutorial/publish-on-unity-play",
+    "profiler": "https://docs.unity3d.com/6000.0/Documentation/Manual/ProfilerWindow.html",
+    "optimizationPlayer": "https://docs.unity3d.com/6000.0/Documentation/Manual/web-optimization-player.html",
+    "quality": "https://docs.unity3d.com/6000.0/Documentation/Manual/class-QualitySettings.html",
+    "legacyBuildSettings": "https://docs.unity3d.com/2022.3/Documentation/Manual/web-build-settings.html"
+  },
+  "images": [
+    {
+      "file": "assets/images/build-settings-2022.png",
+      "originalFilename": "build-2022.png",
+      "url": "https://docs.unity3d.com/2022.3/Documentation/uploads/Main/WebGLBuilding-BuildPlayerOptions.png"
+    },
+    {
+      "file": "assets/images/player-settings-web.png",
+      "originalFilename": "class-PlayerSettingsWebGL.png",
+      "url": "https://docs.unity3d.com/6000.0/Documentation/uploads/Main/class-PlayerSettingsWebGL.png"
+    },
+    {
+      "file": "assets/images/publishing-settings-unity6.png",
+      "originalFilename": "WebGLBuilding-PublishingSettings.png",
+      "url": "https://docs.unity3d.com/6000.0/Documentation/uploads/Main/WebGLBuilding-PublishingSettings.png"
+    },
+    {
+      "file": "assets/images/texture-compression.png",
+      "originalFilename": "PlayerSetWebGLOther-Rendering.png",
+      "url": "https://docs.unity3d.com/6000.0/Documentation/uploads/Main/PlayerSetWebGLOther-Rendering.png"
+    },
+    {
+      "file": "assets/images/web-template.png",
+      "originalFilename": "WebGLResolutionandPresentationWindow.png",
+      "url": "https://docs.unity3d.com/6000.0/Documentation/uploads/Main/WebGLResolutionandPresentationWindow.png"
+    },
+    {
+      "file": "assets/images/diagnostics-overlay.png",
+      "originalFilename": "webgl-diagnostic-overlay.png",
+      "url": "https://docs.unity3d.com/6000.0/Documentation/uploads/Main/webgl-diagnostic-overlay.png"
+    },
+    {
+      "file": "assets/images/unity6-web-build.png",
+      "url": "https://connect-mediagw.unity.com/h1/20241015/learn/images/6c978404-0c61-4c77-b980-9e183f0c25b4_image5.png",
+      "sourcePage": "https://learn.unity.com/tutorial/getting-started-with-unity-web",
+      "unityVersion": "6.0",
+      "note": "Official Unity Learn screenshot, unchanged bytes."
+    },
+    {
+      "file": "assets/images/unity6-web-profiler.png",
+      "url": "https://connect-mediagw.unity.com/h1/20241015/learn/images/1e2b584c-eb06-46ae-a699-55e1465d65d8_image9.png",
+      "sourcePage": "https://learn.unity.com/tutorial/getting-started-with-unity-web",
+      "unityVersion": "6.0",
+      "note": "Official Unity Learn screenshot, unchanged bytes."
+    },
+    {
+      "file": "assets/images/unity6-overlay-button.png",
+      "url": "https://connect-mediagw.unity.com/h1/20241015/learn/images/e4a3ab68-c388-439e-a9b0-899977ffc895_image4.png",
+      "sourcePage": "https://learn.unity.com/tutorial/getting-started-with-unity-web",
+      "unityVersion": "6.0",
+      "note": "Official Unity Learn screenshot, unchanged bytes."
+    },
+    {
+      "file": "assets/images/unity6-hub-web-module.png",
+      "url": "https://connect-mediagw.unity.com/h1/20250731/learn/images/6961b789-5293-4b2d-adcf-bc2bb0ea60a7_3.2.3_-_Install_the_Web_Build_Support_module_in_the_Unity_Hub.png",
+      "sourcePage": "https://learn.unity.com/tutorial/publish-on-unity-play",
+      "unityVersion": "6.1 (6000.1.11f1) shown in original screenshot; tutorial labelled 6.0",
+      "note": "Official Unity Learn screenshot, unchanged bytes."
+    },
+    {
+      "file": "assets/images/unity6-scene-list.png",
+      "url": "https://connect-mediagw.unity.com/h1/20250731/learn/images/e94aa75c-cfe4-4402-bdba-32479c8d20aa_3.3_-_Edit_Scene_List_elements.png",
+      "sourcePage": "https://learn.unity.com/tutorial/publish-on-unity-play",
+      "unityVersion": "Unity 6 family; tutorial labelled 6.0, patch version not visible",
+      "note": "Official Unity Learn screenshot, unchanged bytes."
+    },
+    {
+      "file": "assets/images/unity6-quality-settings.png",
+      "url": "https://docs.unity3d.com/6000.0/Documentation/uploads/Main/quality-settings-panel.png",
+      "sourcePage": "https://docs.unity3d.com/6000.0/Documentation/Manual/class-QualitySettings.html",
+      "unityVersion": "6.0 documentation"
+    }
+  ],
+  "repoStyle": [
+    "apps/web/src/styles/foundation/tokens.css",
+    "apps/web/src/styles/features/home-archive-landing.css",
+    "apps/web/src/styles/components/buttons.css"
+  ],
+  "note": "Official screenshots unchanged. Unity 2022 screenshot is retained alongside Unity 6. Original red/A-D annotations are from Unity; cyan overlays are local CSS/JS. Hub image visibly shows Unity 6.1. Repository recommendations use origin/master, not uncommitted workspace changes.",
+  "repositoryRevision": "29e360d3152d505d0ae2d7f1e39ca950fcea0df8",
+  "support": {
+    "operatorProfile": "https://github.com/bipolarrr",
+    "publicIssues": "https://github.com/pcugame/pcugame.github.io-infra/issues",
+    "operatorPublicEmail": null,
+    "contactRoutes": ["카카오톡 ID Bipolar_"],
+    "contactSource": "User explicitly supplied these contact routes; KakaoTalk ID was not independently tested."
+  }
+}

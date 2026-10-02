@@ -3,6 +3,7 @@ import type { AdminProjectDetail } from '@pcu/contracts';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
 import DirectVideoUploadWidget from '../../../components/DirectVideoUploadWidget';
 import GameUploadWidget from '../../../components/GameUploadWidget';
+import { WebglBuildGuideLink } from '../../../components/project/WebglBuildGuideLink';
 import type { ClientUploadLimits } from '../../../lib/upload-limits';
 import { ProjectPosterPreview, ProjectUploadDropZone } from '../../../components/project/editor';
 import { useProjectUploadQueue, type ProjectUploadQueue } from './useProjectUploadQueue';
@@ -202,7 +203,7 @@ export function AdminProjectPosterUpload({
 export function AdminProjectAssetManager({ canEditContent }: { canEditContent: boolean }) {
 	return (
 		<fieldset>
-			<legend>기타 파일</legend>
+			<legend className="submission-file-heading"><span>기타 파일</span><WebglBuildGuideLink /></legend>
 			<StoredFiles poster={false} canEditContent={canEditContent} />
 			<UploadDropZone zone="files" canEditContent={canEditContent} />
 		</fieldset>
