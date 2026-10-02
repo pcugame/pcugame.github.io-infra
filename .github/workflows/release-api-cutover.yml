@@ -27,6 +27,8 @@ permissions:
   contents: read
   packages: write
 
+# Remote actions allow 120s for SSH connection establishment; stateful commands
+# are never automatically retried. Their existing command timeouts remain separate.
 jobs:
   authorize:
     runs-on: ubuntu-latest
@@ -69,6 +71,7 @@ jobs:
       - name: Copy reviewed snapshot control
         uses: appleboy/scp-action@v0.1.7
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -83,6 +86,7 @@ jobs:
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           RELEASE_SOURCE_SHA: ${{ github.sha }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -144,6 +148,7 @@ jobs:
       - name: Copy release controls to server
         uses: appleboy/scp-action@v0.1.7
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -211,6 +216,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -232,6 +238,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -254,6 +261,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -275,6 +283,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -296,6 +305,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -335,6 +345,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -356,6 +367,7 @@ jobs:
           RELEASE_SOURCE_SHA: ${{ github.sha }}
           SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -373,6 +385,7 @@ jobs:
           DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -399,6 +412,7 @@ jobs:
           RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
           WEB_RECOVERY_VERIFIED: 'true'
         with:
+          timeout: 120s
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
