@@ -7,9 +7,8 @@
 }
 
 html {
-  /* Scale rem-based UI while respecting the browser font preference.
-     Media-query em uses the initial font size: 50em = 640px × 1.25 at 16px. */
-  font-size: 125%;
+  /* Apply the shared responsive scale while respecting browser font preferences. */
+  font-size: var(--ui-scale);
   font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
     'Segoe UI', Roboto, sans-serif;
   color: var(--color-text);

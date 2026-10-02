@@ -34,6 +34,14 @@ Copy `.env.example` to `.env.local` for local development.
 
 ## Project Notes
 
+- UI scale is managed centrally in `src/styles/foundation/tokens.css`:
+  `--ui-scale-mobile` defaults to `100%`, and `--ui-scale-desktop` to `125%`.
+  The existing compact layout boundary (`max-width: 50em`, normally 800px)
+  selects the mobile scale by viewport width, including narrow desktop windows.
+  `foundation/base.css` applies the selected scale to the root font size so
+  rem-based text, spacing, and layout sizes change together across all pages.
+  Adjust these tokens instead of adding per-page scale overrides; fixed pixel
+  sizes and media-query boundaries are independent of the root scale.
 - API calls live under `src/lib/api`.
 - TanStack Query keys live in `src/lib/query/keys.ts`.
 - Shared API transport types come from `@pcu/contracts` through
