@@ -1,0 +1,21 @@
+[Unit]
+Description=Graduation project gp-worker-export
+After=gp-api.service
+
+[Container]
+Image=@API_IMAGE@
+ContainerName=gp-worker-export
+Pod=graduationproject.pod
+StartWithPod=true
+EnvironmentFile=@COMMON_ENV@
+Environment=NODE_ENV=production
+@CA_ENV@
+@CA_VOLUME@
+@EXPORT_ENV@
+Volume=@NAS_VOLUME@
+Entrypoint=node
+Exec=dist/export-worker.js
+StopTimeout=10
+
+[Service]
+Restart=always

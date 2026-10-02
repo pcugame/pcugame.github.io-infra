@@ -1,0 +1,20 @@
+[Unit]
+Description=Graduation project gp-worker-video
+After=gp-api.service
+
+[Container]
+Image=@API_IMAGE@
+ContainerName=gp-worker-video
+Pod=graduationproject.pod
+StartWithPod=true
+EnvironmentFile=@COMMON_ENV@
+Environment=NODE_ENV=production
+@CA_ENV@
+@CA_VOLUME@
+Tmpfs=/tmp:rw,noexec,nosuid,size=2g
+Entrypoint=node
+Exec=dist/video-worker.js
+StopTimeout=10
+
+[Service]
+Restart=always

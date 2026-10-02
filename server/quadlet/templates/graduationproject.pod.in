@@ -1,0 +1,17 @@
+[Unit]
+Description=Graduation project runtime pod (offline migration candidate)
+StartLimitBurst=10
+StartLimitIntervalSec=300
+
+[Pod]
+PodName=graduationproject
+PublishPort=@API_PUBLISH@
+ExitPolicy=continue
+AddHost=postgres:127.0.0.1
+
+[Service]
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target
