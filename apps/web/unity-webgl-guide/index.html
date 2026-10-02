@@ -131,11 +131,9 @@
                   <b>File → Build Profiles → Platforms → Web</b>
                 </div>
                 <p>
-                  <b>Web → Switch Platform</b>
-                  을 누릅니다. 이미 Active면 그대로 둡니다. 별도로 만든 Web
+                  <b>Web → Switch Platform</b>을 누릅니다. 이미 Active면 그대로 둡니다. 별도로 만든 Web
                   프로필을 쓰고 있다면 그 프로필을 선택해
-                  <b>Switch Profile</b>
-                  을 누르세요.
+                  <b>Switch Profile</b>을 누르세요.
                 </p>
                 <figure>
                   <div class="image-wrap">
@@ -168,8 +166,7 @@
                 </div>
                 <p>
                   WebGL을 선택하고
-                  <b>Switch Platform</b>
-                  을 누릅니다. 이미 WebGL이 활성 플랫폼이면 그대로 둡니다.
+                  <b>Switch Platform</b>을 누릅니다. 이미 WebGL이 활성 플랫폼이면 그대로 둡니다.
                 </p>
                 <figure>
                   <div class="image-wrap">
@@ -262,8 +259,7 @@
               <div data-version-content="6">
                 <p>
                   Build Profiles에서
-                  <b>Scene List / Open Scene List</b>
-                  를 엽니다. 별도 빌드 프로필을 사용한다면 그 프로필이 실제로
+                  <b>Scene List / Open Scene List</b>를 엽니다. 별도 빌드 프로필을 사용한다면 그 프로필이 실제로
                   사용하는 씬 목록을 확인하세요.
                 </p>
               </div>
@@ -278,15 +274,12 @@
                 <li>
                   게임에서 사용하는 씬이 목록에 있는지 확인합니다. 빠진 씬은
                   Project 창에서 목록으로 드래그하거나, 씬을 열고
-                  <b>Add Open Scenes</b>
-                  를 누릅니다.
+                  <b>Add Open Scenes</b>를 누릅니다.
                 </li>
                 <li>빌드에 포함할 씬의 체크박스를 켭니다.</li>
                 <li>
-                  <b>게임을 켰을 때 처음 보여줄 화면의 씬</b>
-                  을 활성 목록의 첫 번째인
-                  <b>0번</b>
-                  으로 둡니다. 필요한 경우 드래그해 순서를 바꾸세요.
+                  <b>게임을 켰을 때 처음 보여줄 화면의 씬</b>을 활성 목록의 첫 번째인
+                  <b>0번</b>으로 둡니다. 필요한 경우 드래그해 순서를 바꾸세요.
                 </li>
                 <li>
                   시작 화면만 넣지 말고, 게임을 진행하면서 불러올 다른 필요한
@@ -420,25 +413,20 @@
                       <td>Code Optimization</td>
                       <td>
                         <span data-version-content="6">
-                          <b>Runtime Speed with LTO</b>
-                          를 선택합니다.
+                          <b>Runtime Speed with LTO</b>를 선택합니다.
                         </span>
                         <span data-version-content="2022">
                           드롭다운에
-                          <b>Runtime Speed with LTO</b>
-                          가 있으면 그것을 선택합니다. 없고
-                          <b>Runtime Speed</b>
-                          가 있으면 Runtime Speed, 이미지처럼
-                          <b>Speed</b>
-                          로 표시되면 Speed를 선택합니다.
+                          <b>Runtime Speed with LTO</b>가 있으면 그것을 선택합니다. 없고
+                          <b>Runtime Speed</b>가 있으면 Runtime Speed, 이미지처럼
+                          <b>Speed</b>로 표시되면 Speed를 선택합니다.
                         </span>
                       </td>
                     </tr>
                     <tr>
                       <td>Texture Compression</td>
                       <td>
-                        <b>Use Player Settings</b>
-                        로 두고, 5단계의 Player 설정에서 DXT를 선택합니다.
+                        <b>Use Player Settings</b>로 두고, 5단계의 Player 설정에서 DXT를 선택합니다.
                       </td>
                     </tr>
                   </tbody>
@@ -528,8 +516,8 @@
               그냥 플레이해 보거나 FPS를 비교할 때는 일반 빌드, 문제가 생겨
               원인을 조사할 때는 진단용 빌드를 만드세요.
             </p>
-            <div class="table-scroll">
-              <table>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="목적별 빌드 설정 비교">
+              <table class="comparison-table">
                 <thead>
                   <tr>
                     <th>지금 할 일</th>
@@ -698,8 +686,7 @@
               <p></p>
               <p>
                 첫 제출 값은
-                <a href="#release">3단계</a>
-                의 메뉴명 순서를 따릅니다. 아래 설명은 반복 개발·진단을 위한
+                <a href="#release">3단계</a>의 메뉴명 순서를 따릅니다. 아래 설명은 반복 개발·진단을 위한
                 추가 정보입니다.
               </p>
               <p>
@@ -757,8 +744,7 @@
                 >
               </div>
               <p>
-                <b>Publishing Settings</b>
-                를 펼쳐 다음 값을 적용합니다.
+                <b>Publishing Settings</b>를 펼쳐 다음 값을 적용합니다.
               </p>
               <div class="table-scroll">
                 <table>
@@ -784,8 +770,7 @@
                       <td>Enable Native C/C++ Multithreading</td>
                       <td>
                         항목이 있으면
-                        <b>OFF</b>
-                        . 없는 버전에서는 찾느라 진행을 멈추지 마세요.
+                        <b>OFF</b>. 없는 버전에서는 찾느라 진행을 멈추지 마세요.
                       </td>
                     </tr>
                   </tbody>
@@ -828,10 +813,8 @@
               </figure>
               <p>
                 같은 Player 화면에서
-                <b>Resolution and Presentation → WebGL Template</b>
-                을 열고
-                <b>Default</b>
-                를 선택합니다.
+                <b>Resolution and Presentation → WebGL Template</b>을 열고
+                <b>Default</b>를 선택합니다.
               </p>
               <figure>
                 <div class="image-wrap">
@@ -874,8 +857,8 @@
               </b>
               설정은 Unity에서 바꾼 뒤 다시 빌드해야 적용됩니다.
             </p>
-            <div class="table-scroll">
-              <table>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="압축 설정 비교">
+              <table class="comparison-table">
                 <thead>
                   <tr>
                     <th>내 상황</th>
@@ -964,8 +947,7 @@
             </section>
             <p class="micro">
               공통 설정의 위치를 확인하는 화면입니다.
-              <b>화면 속 예시 값을 모두 복사하지 말고</b>
-              , 항목별 안내 값을 적용하세요. 여기서 버튼을 눌러도 Unity 프로젝트
+              <b>화면 속 예시 값을 모두 복사하지 말고</b>, 항목별 안내 값을 적용하세요. 여기서 버튼을 눌러도 Unity 프로젝트
               설정은 바뀌지 않습니다.
             </p>
 
@@ -1029,9 +1011,7 @@
                 <a
                   href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
                 >
-                  Unity 공식 Player 설정 문서
-                </a>
-                에서 확인할 수 있습니다.
+                  Unity 공식 Player 설정 문서</a>에서 확인할 수 있습니다.
               </p>
             </noscript>
             <div class="callout">
@@ -1147,8 +1127,7 @@
               <br />
               빌드 창의 Texture Compression이 Player Settings보다 우선할 수
               있습니다. 이 가이드를 따라 Player에서 설정했다면 빌드 창은
-              <b>Use Player Settings</b>
-              인지 확인하세요. 개별 텍스처의 플랫폼 오버라이드도 확인합니다.
+              <b>Use Player Settings</b>인지 확인하세요. 개별 텍스처의 플랫폼 오버라이드도 확인합니다.
             </div>
             <h3>URP 그래픽 설정 비교 순서</h3>
             <section class="screenshot-panel">
@@ -1156,8 +1135,7 @@
               <p>
                 Edit → Project Settings → Quality를 엽니다. Web에 적용할 품질
                 단계를 선택하고 Rendering의
-                <b>Render Pipeline Asset</b>
-                을 누르세요. 에셋이 없으면 Graphics의 기본 에셋을 확인합니다.
+                <b>Render Pipeline Asset</b>을 누르세요. 에셋이 없으면 Graphics의 기본 에셋을 확인합니다.
                 아래 공식 화면은 위치를 보여주는 Windows 예시이므로 PC라는
                 이름을 그대로 따라 만들 필요는 없습니다.
               </p>
@@ -1193,15 +1171,13 @@
             </section>
             <p>
               Project Settings →
-              <b>Quality</b>
-              에서 Web에 사용할 품질 단계와 연결된
-              <b>Render Pipeline Asset</b>
-              을 확인합니다. 해당 에셋을 Project 창에서 선택해 Inspector에서
+              <b>Quality</b>에서 Web에 사용할 품질 단계와 연결된
+              <b>Render Pipeline Asset</b>을 확인합니다. 해당 에셋을 Project 창에서 선택해 Inspector에서
               아래 항목을 찾으세요. Quality에 별도 에셋이 없으면 Graphics의 기본
               Render Pipeline Asset을 확인합니다.
             </p>
-            <div class="table-scroll">
-              <table>
+            <div class="table-scroll" tabindex="0" role="region" aria-label="그래픽 설정 비교">
+              <table class="comparison-table">
                 <thead>
                   <tr>
                     <th>Inspector에서 찾을 항목</th>
@@ -1291,21 +1267,17 @@
                   <span data-version-content="2022">
                     File → Build Settings에서 WebGL을 선택합니다.
                   </span>
-                  <b>Build</b>
-                  를 누릅니다.
+                  <b>Build</b>를 누릅니다.
                 </li>
                 <li>
                   저장 위치 창에서
-                  <b>새 빈 폴더</b>
-                  를 만듭니다. 예를 들어 바탕화면에
-                  <code>MyGame-Web-01</code>
-                  을 만들고, 이 폴더를 결과 저장 위치로 선택하세요. 폴더 이름은
+                  <b>새 빈 폴더</b>를 만듭니다. 예를 들어 바탕화면에
+                  <code>MyGame-Web-01</code>을 만들고, 이 폴더를 결과 저장 위치로 선택하세요. 폴더 이름은
                   예시입니다.
                 </li>
                 <li>
                   Unity의 빌드가 끝날 때까지 기다립니다. 오류로 중단되면
-                  <a href="#help-build">빌드 도움말</a>
-                  로 이동하세요.
+                  <a href="#help-build">빌드 도움말</a>로 이동하세요.
                 </li>
                 <li>
                   방금 선택한 결과 폴더를 엽니다.
@@ -1346,13 +1318,11 @@
               <ol class="steps">
                 <li>
                   방금 만든
-                  <b>빌드 결과 폴더를 열어 index.html이 보이는 위치</b>
-                  로 이동합니다.
+                  <b>빌드 결과 폴더를 열어 index.html이 보이는 위치</b>로 이동합니다.
                 </li>
                 <li>
                   그 위치의 파일과 폴더를
-                  <b>전부 선택</b>
-                  합니다. Windows는 Ctrl+A, macOS는 Command+A를 사용합니다.
+                  <b>전부 선택</b>합니다. Windows는 Ctrl+A, macOS는 Command+A를 사용합니다.
                 </li>
                 <li>
                   선택한 항목을 우클릭하고 운영체제의 ZIP 압축 명령을
@@ -1362,8 +1332,7 @@
                 <li>
                   완성된 ZIP에 이름을 붙이고 파일명과 저장 위치를 기억하세요.
                   예:
-                  <code>MyGame-Web-01.zip</code>
-                  . 압축 파일 안에서 index.html과 Build 등 모든 결과물이 함께
+                  <code>MyGame-Web-01.zip</code>. 압축 파일 안에서 index.html과 Build 등 모든 결과물이 함께
                   있는지 확인합니다.
                 </li>
               </ol>
@@ -1387,8 +1356,7 @@ MyGame-Web-01.zip
 └─ StreamingAssets/      ← 생성되었다면 함께 포함</pre>
               <p>
                 위 구조와 이름은
-                <b>예시</b>
-                입니다. 없는 파일을 새로 만들거나 실제 출력 파일을 지우지
+                <b>예시</b>입니다. 없는 파일을 새로 만들거나 실제 출력 파일을 지우지
                 마세요.
                 <b>확장자, loader, 생성된 JavaScript는 직접 고치지 않습니다.</b>
               </p>
@@ -1434,23 +1402,18 @@ MyGame-Web-01.zip
               <ol class="steps">
                 <li>
                   로그인한 상태에서 사이트의
-                  <b>전시 목록</b>
-                  으로 이동합니다. 제출할 때 선택한 전시회를 열고 내 작품 카드를
+                  <b>전시 목록</b>으로 이동합니다. 제출할 때 선택한 전시회를 열고 내 작품 카드를
                   누릅니다.
                 </li>
                 <li>
                   작품 화면의
-                  <b>플레이해보기</b>
-                  를 누릅니다. 새 실행 화면에서 파일이 로드될 때까지 기다리세요.
+                  <b>플레이해보기</b>를 누릅니다. 새 실행 화면에서 파일이 로드될 때까지 기다리세요.
                   내 작품이나 버튼이 보이지 않으면 완료한 것으로 처리하지 말고
-                  <a href="#help-load">실행 도움말</a>
-                  로 이동합니다.
+                  <a href="#help-load">실행 도움말</a>로 이동합니다.
                 </li>
                 <li>
                   <b>
-                    게임을 시작하고, 내 게임에 있는 주요 조작·기능을 직접 확인
-                  </b>
-                  합니다. 예: 메뉴 선택, 이동, 점프, 공격, 장면 전환. 게임에
+                    게임을 시작하고, 내 게임에 있는 주요 조작·기능을 직접 확인</b>합니다. 예: 메뉴 선택, 이동, 점프, 공격, 장면 전환. 게임에
                   없는 기능을 추가하거나 시험할 필요는 없습니다.
                 </li>
                 <li>
@@ -1461,18 +1424,15 @@ MyGame-Web-01.zip
                 <li>
                   이번 ZIP의 파일명과 확인한 작품·실행 주소를 함께 기록합니다.
                   게임이나 설정을 수정했다면
-                  <a href="#build">6단계</a>
-                  로 돌아가
-                  <b>새로 빌드 → ZIP → 업로드 → 업로드본 실행</b>
-                  까지 다시 진행합니다. 이전 업로드본을 확인한 기록을 새 ZIP의
+                  <a href="#build">6단계</a>로 돌아가
+                  <b>새로 빌드 → ZIP → 업로드 → 업로드본 실행</b>까지 다시 진행합니다. 이전 업로드본을 확인한 기록을 새 ZIP의
                   확인으로 대신하지 마세요.
                 </li>
               </ol>
               <p>
                 에디터에서 실행된 것만으로 끝내지 않습니다. 이 단계에서는
                 사이트에 올라간 바로 그 빌드를 확인합니다. FPS 측정은 뒤의
-                <a href="#measure">성능 측정 안내</a>
-                이며, 이 문서가 별도의 FPS 합격선을 만들지는 않습니다.
+                <a href="#measure">성능 측정 안내</a>이며, 이 문서가 별도의 FPS 합격선을 만들지는 않습니다.
               </p>
               <div class="step-done">
                 <b>한줄요약</b>
@@ -1504,8 +1464,7 @@ MyGame-Web-01.zip
               <h3>FPS·메모리 진단 표시 위치</h3>
               <p>
                 Publishing Settings에서
-                <b>Show Diagnostics Overlay</b>
-                를 켜고 다시 빌드합니다. 기본 템플릿에서 진단 버튼을 눌러
+                <b>Show Diagnostics Overlay</b>를 켜고 다시 빌드합니다. 기본 템플릿에서 진단 버튼을 눌러
                 표시합니다. 커스텀 템플릿은 버튼이 없을 수 있습니다.
                 <b>
                   FPS 확인만으로 Development Build나 Deep Profiling을 켤 필요는
@@ -1520,8 +1479,7 @@ MyGame-Web-01.zip
                   height="56"
                 />
                 <p>
-                  <b>게임 아래의 이 파형 버튼</b>
-                  을 클릭하면 진단 표시를 열 수 있습니다. Unity 6 공식
+                  <b>게임 아래의 이 파형 버튼</b>을 클릭하면 진단 표시를 열 수 있습니다. Unity 6 공식
                   튜토리얼의 실제 버튼 이미지입니다.
                   <a
                     class="source"
@@ -1559,10 +1517,8 @@ MyGame-Web-01.zip
               </figure>
               <p>
                 60 FPS는 한 프레임 약
-                <b>16.7ms</b>
-                , 30 FPS는 약
-                <b>33.3ms</b>
-                에 해당합니다. 평균값뿐 아니라 입력 시 끊김도 보세요. 메모리
+                <b>16.7ms</b>, 30 FPS는 약
+                <b>33.3ms</b>에 해당합니다. 평균값뿐 아니라 입력 시 끊김도 보세요. 메모리
                 항목 일부가 N/A인 것은 브라우저가 해당 값을 제공하지 않아서일 수
                 있습니다.
               </p>
@@ -1652,8 +1608,7 @@ MyGame-Web-01.zip
               <p>
                 <b>계속 안 되면:</b>
                 Unity 버전, 오류 화면, Build를 누르기 전후의 행동을
-                <a href="#request-info">문의 정보</a>
-                와 함께 정리해 카카오톡 <code>Bipolar_</code>로
+                <a href="#request-info">문의 정보</a>와 함께 정리해 카카오톡 <code>Bipolar_</code>로
                 문의하세요.
               </p>
             </details>
@@ -1671,8 +1626,7 @@ MyGame-Web-01.zip
                 ZIP 파일명·크기, 막힌 화면, 표시된 오류와 직전 행동을 정리해
                 카카오톡 <code>Bipolar_</code>로 문의하세요.
                 전시회가 없거나 잠긴 경우에도 같은 경로로 문의하세요.
-                <a href="#request-info">기록할 정보와 문의 경로</a>
-                를 확인하세요. 실행 주소는 아직 없으면 쓰지 않아도 됩니다.
+                <a href="#request-info">기록할 정보와 문의 경로</a>를 확인하세요. 실행 주소는 아직 없으면 쓰지 않아도 됩니다.
               </p>
             </details>
             <details id="help-load">
@@ -1691,8 +1645,7 @@ MyGame-Web-01.zip
                 주소가 있다면 그 주소, 브라우저 이름·버전, 오류 문구 또는 멈춘
                 화면을 전달합니다. 실행 버튼이 없는 경우에는 그 작품 화면을
                 기록합니다. 원인을 추측하지 않고
-                <a href="#request-info">진행한 순서</a>
-                를 알려주세요.
+                <a href="#request-info">진행한 순서</a>를 알려주세요.
               </p>
             </details>
             <details id="help-action">
@@ -1708,8 +1661,7 @@ MyGame-Web-01.zip
               <p>
                 <b>계속 안 되면:</b>
                 멈춘 화면과 재현 순서를
-                <a href="#request-info">문의 정보</a>
-                에 포함해 카카오톡 <code>Bipolar_</code>로
+                <a href="#request-info">문의 정보</a>에 포함해 카카오톡 <code>Bipolar_</code>로
                 문의하세요. 코드·서버 문제를 미리 판정할 필요는 없습니다.
               </p>
             </details>
@@ -1724,13 +1676,10 @@ MyGame-Web-01.zip
               <p>
                 <b>계속 안 되면:</b>
                 브라우저·사용 기기, 느려지는 장면, 재현 순서를
-                <a href="#request-info">문의 정보</a>
-                와 함께 카카오톡 <code>Bipolar_</code>로
+                <a href="#request-info">문의 정보</a>와 함께 카카오톡 <code>Bipolar_</code>로
                 전달하세요. 직접 개선하려면
-                <a href="#measure">FPS·메모리 참고</a>
-                와
-                <a href="#graphics">그래픽 참고</a>
-                를 읽습니다. 측정부터 마쳐야 문의할 수 있는 것은 아닙니다.
+                <a href="#measure">FPS·메모리 참고</a>와
+                <a href="#graphics">그래픽 참고</a>를 읽습니다. 측정부터 마쳐야 문의할 수 있는 것은 아닙니다.
               </p>
             </details>
             <div class="callout" id="request-info">
