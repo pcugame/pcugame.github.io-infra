@@ -63,7 +63,12 @@ def assert_graph(test, generated):
     # Wants permits an initial start while application children are masked.
     for key in ('Requires', 'BindsTo', 'PartOf'):
         test.assertFalse(set(words(graph[POD], 'Unit', key)) & set(graph), key)
-    create = words(graph[POD], 'Service', 'ExecStartPre')
+    pre = [shlex.split(value) for value in graph[POD][('Service', 'ExecStartPre')]]
+    test.assertEqual(len(pre), 2)
+    test.assertEqual(len(pre[0]), 1)
+    test.assertTrue(pre[0][0].endswith('/runtime-helpers/wait-network-ready.py'))
+    test.assertEqual(graph[POD][('Service', 'TimeoutStartSec')], ['120'])
+    create = pre[1]
     test.assertEqual(create[1:3], ['pod', 'create'])
     policies = [value.split('=', 1)[1] for value in create if value.startswith('--exit-policy=')]
     test.assertTrue(policies, 'explicit pod exit policy missing')

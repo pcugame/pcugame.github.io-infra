@@ -46,6 +46,7 @@ def render(output):
     if not port.isascii() or not port.isdecimal() or not 1 <= int(port) <= 65535:
         raise ValueError('API_PORT must be between 1 and 65535')
     tokens = {
+        'NETWORK_READY': quote(deploy + '/runtime-helpers/wait-network-ready.py'),
         'API_IMAGE': image, 'API_PUBLISH': escape(f'{host}:{port}:4000'),
         'COMMON_ENV': quote(common), 'API_ENV': quote(api), 'POSTGRES_ENV': quote(postgres),
         'EXPORT_ENV': 'Environment=' + quote('NAS_EXPORT_ROOT=' + nas_path),

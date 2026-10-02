@@ -8,6 +8,18 @@ import sys
 
 try:
     expected, installed = map(Path, sys.argv[1:3])
+    # Definitions alone cannot certify the executable startup prerequisite.
+    pod = (expected / 'graduationproject.pod').read_text()
+    guards = re.findall(r'^ExecStartPre=(.+)$', pod, flags=re.M)
+    if len(guards) != 1:
+        raise ValueError()
+    arguments = shlex.split(guards[0])
+    if len(arguments) != 1:
+        raise ValueError()
+    helper = Path(arguments[0].replace('%%', '%').replace('$$', '$'))
+    source = Path(__file__).resolve().parent / 'wait-network-ready.py'
+    if helper.is_symlink() or not helper.is_file() or not os.access(helper, os.X_OK) or helper.samefile(source) or helper.read_bytes() != source.read_bytes():
+        raise ValueError()
     roots = {installed, Path('/etc/containers/systemd/users'),
              Path('/etc/containers/systemd/users') / str(os.getuid())}
     environments = [os.environ]

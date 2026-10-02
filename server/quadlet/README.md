@@ -38,6 +38,8 @@ API_IMAGE='ghcr.io/pcugame/pcu-graduationproject-v2-api@sha256:<64-lowercase-hex
 python3 server/quadlet/parity.test.py
 RUN_QUADLET_LIFECYCLE_TESTS=1 QUADLET_GENERATOR=/absolute/path/to/quadlet \
   python3 server/quadlet/lifecycle.test.py
+RUN_QUADLET_LIFECYCLE_TESTS=1 QUADLET_GENERATOR=/absolute/path/to/quadlet \
+  python3 server/quadlet/cold-start.test.py
 ```
 
 The digest placeholder must be replaced with the actual authorized image
@@ -297,3 +299,37 @@ Residual differences and blockers include:
 Initial adoption still requires the existing master/PR/CI/CD release process
 and production verification. No production installation, activation, enablement
 or cutover was performed as part of this repository change.
+
+## Cold-boot local network prerequisite
+
+The pod runs `${DEPLOY_DIR}/runtime-helpers/wait-network-ready.py` before native pod
+creation. Install this executable from the selected reviewed repository revision
+before installing or reloading the ten rendered definitions. This separately
+installed runtime helper is outside the ordinary release copy of `server/quadlet`
+to `${DEPLOY_DIR}/quadlet`. That copy is only the candidate source: during a
+reviewed topology update, copy its helper to `runtime-helpers` and independently
+verify bytes, ownership and executable permission. App-only releases compare the
+installed runtime helper against the newly copied candidate, without modifying
+the installed helper. A helper change requires a reviewed topology update. Python 3,
+`ip` and `tailscale` must be available to the user manager. The normal app-only
+release guard rejects absent, changed, non-executable or symlinked helpers and
+changed topology; it never installs new pod definitions. An existing adopted host
+therefore needs a separately reviewed topology update for this new prerequisite.
+
+`network-online.target` and Podman's native user wait can complete while IPv4
+routing and Tailscale are still changing during cold boot. This gate requires a
+nonempty IPv4 default route, successful local `ip -4 route get 1.1.1.1` (no packets
+sent), Tailscale `BackendState=Running`, and three identical route observations two
+seconds apart, followed by five seconds of settling and a fresh readiness check.
+Its fixed 90-second deadline fails closed, with value-free diagnostics; the pod's
+`TimeoutStartSec=120` leaves room for the helper and native Podman startup. This
+retains native generated dependencies, start limiting and `RestartSec=15`; changing
+only restart delay does not certify readiness. Offline mocked readiness tests
+cover delayed/changing routes, command errors, timeout and settling transitions.
+The opt-in `cold-start.test.py` registers the complete native dependency graph
+in one transient systemd transaction, substitutes harmless processes for Podman,
+and delays mocked routing/Tailscale readiness. It retains native start limiting
+and restart timing and verifies no pod/workload starts before the guard succeeds
+and no automatic restart is needed. The existing faster `lifecycle.test.py`
+surrogate only certifies post-start restart/drain policy. Both remain distinct
+from an authorized production reboot with real Podman/pasta, routing, Tailscale and authenticated API checks.
