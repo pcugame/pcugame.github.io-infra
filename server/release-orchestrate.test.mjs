@@ -26,7 +26,7 @@ printf '${file} %s\\n' "$*" >> "$EVENTS"
 import { appendFileSync, writeFileSync, existsSync } from 'node:fs';
 appendFileSync(process.env.EVENTS, '${name} ' + process.argv.slice(2).join(' ') + '\\n');
 if (process.argv[2] === 'mark-migration') writeFileSync(process.env.ATTEMPT, 'attempted');
-if (process.argv[2] === 'recover' && existsSync(process.env.ATTEMPT)) process.exit(1);
+if (['recover', 'assert-pre-migration'].includes(process.argv[2]) && existsSync(process.env.ATTEMPT)) process.exit(1);
 if ('${name}' === process.env.FAIL_STAGE || process.argv[2] === process.env.FAIL_STAGE) process.exit(1);
 if (process.argv[2] === 'read') console.log('https://example.test/object');
 `);
@@ -81,6 +81,7 @@ for (const stage of ['release-artifact-preflight phase2', 'release-assert phase2
     if (stage === 'mark-migration') assert.doesNotMatch(f.events(), /apply-contract/);
     if (['release-migrate apply-contract', 'up', 'health', 'worker', 'worker-source', 'worker-digest', 'mark-migration'].includes(stage)) {
       assert.equal(existsSync(f.env.ATTEMPT), true);
+      assert.notEqual(f.run('assert-pre-migration').status, 0, 'marker blocks Pages recovery gate');
       assert.notEqual(f.run('recover').status, 0, 'persistent migration attempt forbids recovery');
     }
   });
@@ -133,8 +134,24 @@ test('workflow DAG resolves immutable image before production gate and publishes
   assert.doesNotMatch(publish, /continue-on-error|always\(\)|failure\(\)/);
   assert.match(publish, /full_commit_message: Deploy \$\{\{ github.sha \}\} \(run \$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}\)/);
   assert.match(publish, /if: \$\{\{ inputs.operation == 'release' \}\}/);
-  assert.match(job('cutover'), /failure\(\) && steps.capture-pages.outcome == 'success' && steps.migrate.outcome == 'skipped'/);
+  const boundary = job('cutover').split(/\n      - /).find(s => s.includes('id: recovery-boundary'));
+  assert.match(boundary, /failure\(\) && steps.capture-pages.outcome == 'success'/);
+  assert.doesNotMatch(boundary, /steps\.migrate\.outcome/);
+  assert.match(boundary, /script: bash "\$\{DEPLOY_DIR\}\/release-orchestrate.sh" assert-pre-migration/);
+  const restore = job('cutover').split(/\n      - /).find(s => s.includes('id: restore-pages'));
+  assert.match(restore, /failure\(\) && steps.recovery-boundary.outcome == 'success'/);
+  assert.ok(job('cutover').indexOf('id: recovery-boundary') < job('cutover').indexOf('id: restore-pages'));
   assert.match(job('cutover'), /WEB_RECOVERY_VERIFIED: 'true'/);
+});
+
+test('status failure after backup/drain permits the pre-migration recovery gate', t => {
+  const f = fixture(t, { FAIL_STAGE: 'release-migrate status' });
+  assert.notEqual(f.release().status, 0);
+  assert.match(f.events(), /deploy drain[\s\S]*deploy backup[\s\S]*deploy release-migrate status/);
+  assert.doesNotMatch(f.events(), /mark-migration|apply-contract|deploy up|publish/);
+  assert.equal(existsSync(f.env.ATTEMPT), false);
+  assert.equal(f.run('assert-pre-migration').status, 0);
+  assert.equal(f.run('recover').status, 0);
 });
 
 test('exact source verifier rejects foreign repository, branch, malformed SHA and checkout mismatch', t => {

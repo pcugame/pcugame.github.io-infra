@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, copyFileSync, symlinkSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { recoveryDecision, runRecovery } from './release-recovery.mjs';
 import { pagesRestoreDecision, runPagesRecovery } from './pages-release-recovery.mjs';
 
@@ -52,9 +53,57 @@ test('SQL attempt, missing previous web, and absent API fail before runtime star
  assert.equal(recoveryDecision(state, false, true), 'restart');
  assert.equal(recoveryDecision(null, false, false), 'nothing');
  assert.throws(() => recoveryDecision(state, true, true), /Migration was attempted/);
+ assert.throws(() => recoveryDecision(null, true, true), /Migration was attempted/);
  assert.throws(() => recoveryDecision(state, false, false), /Pages/);
  assert.throws(() => recoveryDecision({ ...state, containers: [] }, false, true), /API/);
  assert.throws(() => recoveryDecision({ ...state, containers: [{ ...state.containers[0], imageName: 'latest' }] }, false, true), /Invalid captured/);
+});
+
+for (const failure of ['status', 'apply-contract']) test(`persisted boundary after migrate ${failure} failure`, async () => {
+ const f = fixture();
+ try {
+  await runRecovery('capture', runKey, f.options);
+  f.containers.clear(); f.calls.length = 0;
+  const drained = join(f.deployDir, 'cutover-state', 'mutation-drained');
+  writeFileSync(drained, 'yes');
+  copyFileSync(new URL('./release-recovery.mjs', import.meta.url), join(f.deployDir, 'release-recovery.mjs'));
+  writeFileSync(join(f.deployDir, 'deploy.sh'), `#!/usr/bin/env bash\nset -eu\n[[ "$1" == release-migrate ]]\n[[ "$2" != "$FAIL_ACTION" ]]\n`);
+  const result = spawnSync('bash', [resolve('server/release-orchestrate.sh'), 'migrate'], {
+   encoding: 'utf8', env: { ...process.env, DEPLOY_DIR: f.deployDir, RELEASE_RUN_KEY: runKey,
+    RELEASE_SOURCE_SHA: source, FINAL_IMAGE: `ghcr.io/pcugame/pcu-graduationproject-v2-api@sha256:${'a'.repeat(64)}`, FAIL_ACTION: failure },
+  });
+  assert.notEqual(result.status, 0);
+  const attempted = existsSync(join(f.deployDir, 'cutover-state', `recovery-${runKey}`, 'migration-attempted'));
+  assert.equal(attempted, failure === 'apply-contract');
+  if (attempted) {
+   await assert.rejects(runRecovery('assert-pre-migration', runKey, f.options), /Migration was attempted/);
+   await assert.rejects(runRecovery('recover', runKey, f.options), /Migration was attempted/);
+   assert.equal(f.calls.length, 0);
+   assert.ok(existsSync(drained));
+  } else {
+   await runRecovery('assert-pre-migration', runKey, f.options);
+   assert.equal(f.calls.length, 0, 'eligibility is read-only');
+   await assert.rejects(runRecovery('recover', runKey, { ...f.options, webVerified: false }), /Pages/);
+   await runRecovery('recover', runKey, f.options);
+   assert.ok(f.containers.has('gp-api'));
+   assert.equal(existsSync(drained), false);
+  }
+ } finally { f.cleanup(); }
+});
+
+test('pre-migration gate fails closed on missing capture and any persisted marker entry', async () => {
+ const f = fixture();
+ try {
+  await assert.rejects(runRecovery('assert-pre-migration', runKey, f.options), /ENOENT/);
+  await runRecovery('capture', runKey, f.options);
+  await runRecovery('assert-pre-migration', runKey, f.options);
+  const marker = join(f.deployDir, 'cutover-state', `recovery-${runKey}`, 'migration-attempted');
+  symlinkSync(join(f.deployDir, 'missing-target'), marker);
+  f.calls.length = 0;
+  await assert.rejects(runRecovery('assert-pre-migration', runKey, f.options), /Migration was attempted/);
+  await assert.rejects(runRecovery('recover', runKey, f.options), /Migration was attempted/);
+  assert.equal(f.calls.length, 0);
+ } finally { f.cleanup(); }
 });
 test('recovery recreates removed containers through systemd, API health precedes captured workers', async () => {
  const f = fixture();

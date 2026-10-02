@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync, fsyncSync, unlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync, fsyncSync, unlinkSync } from 'node:fs';
 import { join, isAbsolute, dirname, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -10,8 +10,8 @@ const sourceFiles = [...names.map(name => `${name}.container`), 'gp-postgres.con
 const immutable = /^\S+@sha256:[a-f0-9]{64}$/;
 const hash = value => createHash('sha256').update(value).digest('hex');
 export function recoveryDecision(state, attempted, webVerified) {
- if (!state) return 'nothing';
  if (attempted) throw new Error('Migration was attempted: automatic previous-runtime recovery is forbidden; inspect DB history and forward-fix.');
+ if (!state) return 'nothing';
  if (!webVerified) throw new Error('Previous Pages content has not been verified; refusing mixed web/API recovery.');
  if (!state.containers?.some(c => c.name === 'gp-api')) throw new Error('Missing captured API');
  if (state.version !== 2 || !state.definitionHash || !state.quadletDir) throw new Error('Invalid captured runtime definitions');
@@ -21,6 +21,14 @@ export function recoveryDecision(state, attempted, webVerified) {
   seen.add(c.name);
  }
  return 'restart';
+}
+function migrationAttempted(file) {
+ try { lstatSync(file); return true; }
+ catch (error) {
+  // Only confirmed absence permits recovery; unreadable state fails closed.
+  if (error.code === 'ENOENT') return false;
+  throw error;
+ }
 }
 function save(file, content) {
  writeFileSync(file, content, { mode: 0o600, flag: 'wx' });
@@ -115,9 +123,16 @@ export async function runRecovery(mode, key, {
   const fd = openSync(dir, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
   return;
  }
- if (mode !== 'recover') throw new Error('Expected capture, mark-migration or recover');
+ if (mode === 'assert-pre-migration') {
+  if (migrationAttempted(attemptFile)) recoveryDecision(null, true, false);
+  // A completed capture is required before authorizing Pages recovery.
+  JSON.parse(readFileSync(stateFile, 'utf8'));
+  console.log('pre_migration_recovery_allowed=true');
+  return;
+ }
+ if (mode !== 'recover') throw new Error('Expected capture, mark-migration, assert-pre-migration or recover');
  const state = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : null;
- if (recoveryDecision(state, existsSync(attemptFile), webVerified) === 'nothing') { console.log('recovery_not_needed=true'); return; }
+ if (recoveryDecision(state, migrationAttempted(attemptFile), webVerified) === 'nothing') { console.log('recovery_not_needed=true'); return; }
  quadletDir = resolveQuadletDir();
  if (state.quadletDir !== quadletDir || state.definitionHash !== definitions(quadletDir, systemctl)) throw new Error('Runtime definitions changed since capture; refusing recovery');
  for (const c of state.containers) {

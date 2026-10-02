@@ -5,8 +5,8 @@ export PATH="$PATH:/usr/local/bin:/usr/bin"
 export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
 export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
 command="${1:-}"
-if [[ "$command" == recover ]]; then
-  exec node "${DEPLOY_DIR}/release-recovery.mjs" recover "${RELEASE_RUN_KEY:?}"
+if [[ "$command" == recover || "$command" == assert-pre-migration ]]; then
+  exec node "${DEPLOY_DIR}/release-recovery.mjs" "$command" "${RELEASE_RUN_KEY:?}"
 fi
 [[ "${RELEASE_SOURCE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid release source SHA' >&2; exit 1; }
 [[ "${FINAL_IMAGE:-}" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]] || { echo 'Invalid immutable release image' >&2; exit 1; }
@@ -82,5 +82,5 @@ case "$command" in
     deploy up
     final_smoke
     ;;
-  *) echo 'Expected preflight, backup, migrate, activate, health, smoke, forward-fix or recover' >&2; exit 1 ;;
+  *) echo 'Expected preflight, backup, migrate, activate, health, smoke, forward-fix, assert-pre-migration or recover' >&2; exit 1 ;;
 esac

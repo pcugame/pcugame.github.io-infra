@@ -51,7 +51,10 @@ scripts. `deploy.sh` still gates worker startup on API health. The release healt
 step additionally verifies all application services and their source/digest.
 
 Before migration, failure recovery retains the captured Pages verification and
-runtime identity checks. A persistent, fsynced migration-attempt marker is written
+runtime identity checks. A read-only host check gates Pages recovery on the absence
+of the persisted migration-attempt marker, even if the migration step's initial
+status check failed. Runtime recovery rechecks that marker after Pages verification.
+A persistent, fsynced migration-attempt marker is written
 before applying SQL. Once migration is attempted, failures never automatically
 restore Pages or the previous runtime. Investigate and forward-fix; explicit DB
 restoration and object inventory reconciliation require their existing procedure.

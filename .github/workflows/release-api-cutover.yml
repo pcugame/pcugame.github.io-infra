@@ -365,9 +365,26 @@ jobs:
           command_timeout: 60m
           script: bash "${DEPLOY_DIR}/release-orchestrate.sh" forward-fix
 
+      - name: Check persisted pre-migration recovery boundary
+        id: recovery-boundary
+        if: ${{ failure() && steps.capture-pages.outcome == 'success' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          envs: DEPLOY_DIR,RELEASE_RUN_KEY
+          script_stop: true
+          command_timeout: 10m
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" assert-pre-migration
+
       - name: Restore Pages before pre-migration recovery
         id: restore-pages
-        if: ${{ failure() && steps.capture-pages.outcome == 'success' && steps.migrate.outcome == 'skipped' }}
+        if: ${{ failure() && steps.recovery-boundary.outcome == 'success' }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
           RECOVERY_DIR: ${{ runner.temp }}/pages-release-recovery

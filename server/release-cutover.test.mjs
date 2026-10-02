@@ -48,9 +48,9 @@ for (const marker of ordered) {
   assert.ok(next > cursor, `ordinary release order violation: ${marker}`);
   cursor = next;
 }
-assert.match(cutover, /steps\.migrate\.outcome == 'skipped'/);
+assert.match(cutover, /steps\.recovery-boundary\.outcome == 'success'/);
 assert.match(cutover, /steps\.restore-pages\.outcome == 'success'/);
-assert.match(orchestration, /release-recovery\.mjs" recover/);
+assert.match(orchestration, /release-recovery\.mjs" "\$command"/);
 assert.doesNotMatch(orchestration, /rollback_tag|previous_image|START_DEDICATED_WORKERS=false/);
 assert.ok(orchestration.indexOf('mark-migration') < orchestration.indexOf('release-migrate apply-contract'));
 
