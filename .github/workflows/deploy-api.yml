@@ -9,6 +9,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'server/deploy.sh'
+      - 'server/deploy/**'
       - '.github/workflows/deploy-api.yml'
       - '.github/release-gates/web-before-api/**'
   workflow_dispatch:

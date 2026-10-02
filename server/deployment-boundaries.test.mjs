@@ -1,3 +1,4 @@
+import { deploySource } from './deploy-source.test-helper.mjs';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { readFile } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const deploy = await readFile(new URL('./deploy.sh', import.meta.url), 'utf8');
+const deploy = deploySource();
 const env = await readFile(new URL('./.env.example', import.meta.url), 'utf8');
 const integrationCompose = await readFile(new URL('../docker-compose.integration.yml', import.meta.url), 'utf8');
 const integrationSmoke = await readFile(new URL('../scripts/smoke-integration.mjs', import.meta.url), 'utf8');
@@ -274,15 +275,23 @@ assert.notEqual(destructiveGuard.status, 0);
 assert.equal(spawnSync('test', ['!', '-e', podmanMarker]).status, 0, 'Podman ran before origin preflight failed');
 
 assert.match(deploy, /restart\) do_up ;;/);
-const upFunction = deploy.slice(deploy.indexOf('do_up() {'), deploy.indexOf('# ── Logs'));
-assert.ok(
-	upFunction.indexOf('validate_production_boundaries') < upFunction.indexOf('stop_application_units'),
-	'do_up must validate production boundaries before its application stop phase',
-);
-assert.ok(
-	upFunction.indexOf('validate_release_artifacts "$release_schema_phase"') < upFunction.indexOf('stop_application_units'),
-	'do_up must validate the artifact identity and worker set before replacing the deployment',
-);
+const definition = name => {
+	const match = deploy.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'));
+	assert.ok(match, `missing ${name}`);
+	return match[0];
+};
+const upFunction = definition('do_up');
+assert.match(upFunction, /do_up\(\) \{\n  do_activation_preflight\n  do_activate\n\}/);
+const activationPreflight = definition('do_activation_preflight');
+assert.ok(activationPreflight.includes('validate_production_boundaries'));
+assert.ok(activationPreflight.includes('validate_release_artifacts "$release_schema_phase"'));
+assert.doesNotMatch(activationPreflight, /stop_application_units|systemctl --user start/);
+const activation = definition('do_activate');
+assert.ok(activation.includes('stop_application_units'));
+assert.ok(activation.includes('do_api_smoke'));
+assert.ok(activation.includes('RUNTIME_CONTAINERS[@]:1'));
+assert.ok(activation.indexOf('stop_application_units') < activation.indexOf('do_api_smoke'));
+assert.ok(activation.indexOf('do_api_smoke') < activation.indexOf('RUNTIME_CONTAINERS[@]:1'));
 assert.match(deploy, /redirect: 'manual'/);
 assert.match(deploy, /AbortSignal\.timeout\(5000\)/);
 assert.match(deploy, /response\.status !== 200/);

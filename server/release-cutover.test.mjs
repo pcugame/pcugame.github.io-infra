@@ -1,3 +1,4 @@
+import { deploySource } from './deploy-source.test-helper.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
@@ -10,7 +11,7 @@ const read = (path) => readFile(new URL(path, root), 'utf8');
 const [dockerfile, packageJson, deploy, buildWorkflow, webWorkflow, cutover, smoke, releaseMigration] = await Promise.all([
 	read('apps/api/Dockerfile'),
 	read('apps/api/package.json'),
-	read('server/deploy.sh'),
+	deploySource(),
 	read('.github/workflows/deploy-api.yml'),
 	read('.github/workflows/deploy-web-pages.yml'),
 	read('.github/workflows/release-api-cutover.yml'),
@@ -24,6 +25,8 @@ for (const cli of ['release:backfill', 'release:preflight', 'release:inventory',
 	assert.ok(JSON.parse(packageJson).scripts[cli]?.startsWith('node dist-release/'), `missing compiled ${cli}`);
 }
 
+assert.match(buildWorkflow, /- 'server\/deploy\/\*\*'/);
+assert.match(cutover, /source: server\/deploy\.sh,server\/deploy,server\/quadlet/);
 assert.doesNotMatch(buildWorkflow, /^  deploy:/m, 'push/build workflow must never deploy');
 assert.match(dockerfile, /LABEL org\.opencontainers\.image\.revision="\$\{RELEASE_SOURCE_SHA\}"/);
 assert.match(buildWorkflow, /RELEASE_SOURCE_SHA=\$\{\{ github\.sha \}\}/);

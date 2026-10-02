@@ -9,6 +9,13 @@ function repositoryFile(relativePath: string): string {
 	return readFileSync(resolve(repositoryRoot, relativePath), 'utf8');
 }
 
+function deploymentSource(): string {
+	const wrapper = repositoryFile('server/deploy.sh');
+	const modules = wrapper.match(/^for module in ([a-z ]+); do$/m);
+	expect(modules).not.toBeNull();
+	return [wrapper, ...modules![1]!.split(' ').map(name => repositoryFile(`server/deploy/${name}.sh`))].join('\n');
+}
+
 function pushPaths(workflow: string): string[] {
 	const pushStart = workflow.indexOf('  push:\n');
 	const dispatchStart = workflow.indexOf('  workflow_dispatch:', pushStart);
@@ -21,7 +28,7 @@ function pushPaths(workflow: string): string[] {
 
 describe('production deployment safety', () => {
 	it('uses operator API env with an explicit proxy trust setting and loopback publishing', () => {
-		const deployScript = repositoryFile('server/deploy.sh');
+		const deployScript = deploymentSource();
 		const productionEnvExample = repositoryFile('server/.env.example');
 
 		expect(deployScript).toContain('API_BIND_HOST="${API_BIND_HOST:-127.0.0.1}"');
@@ -49,6 +56,7 @@ describe('production deployment safety', () => {
 		const releaseGatePath = '.github/release-gates/web-before-api/**';
 
 		expect(apiPaths).toContain(releaseGatePath);
+		expect(apiPaths).toContain('server/deploy/**');
 		expect(apiPaths).not.toContain('apps/web/**');
 		// Artifact verification may inspect release CLI filenames; invoking a
 		// migration command belongs exclusively to the explicit cutover workflow.
@@ -58,7 +66,7 @@ describe('production deployment safety', () => {
 
 	it('leaves production release authorization to the explicit server cutover procedure', () => {
 		const apiWorkflow = repositoryFile('.github/workflows/deploy-api.yml');
-		const deployScript = repositoryFile('server/deploy.sh');
+		const deployScript = deploymentSource();
 
 		expect(apiWorkflow).toContain('workflow_dispatch:');
 		expect(deployScript).toContain('assert_mutation_drained');

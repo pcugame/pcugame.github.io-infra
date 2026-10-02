@@ -1,3 +1,4 @@
+import { deploySource } from './deploy-source.test-helper.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -151,7 +152,7 @@ test('release audits bans before drain and verifies disabled AUTO rows after sta
   assert(startApi !== -1 && afterAudit > startApi, 'post-migration audit follows API startup');
   assert(writeReleaseRecord > afterAudit, 'post-migration audit precedes deployed source recording');
 
-  const deployScript = readFileSync(new URL('./deploy.sh', import.meta.url), 'utf8');
+  const deployScript = deploySource();
   assert.match(deployScript, /load_runtime_env/);
   const apiUnit = readFileSync(new URL('./quadlet/templates/gp-api.container.in', import.meta.url), 'utf8');
   assert.match(apiUnit, /EnvironmentFile=@API_ENV@/);

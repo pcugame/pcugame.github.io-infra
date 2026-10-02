@@ -1,9 +1,9 @@
+import { deploySource } from './deploy-source.test-helper.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
-const source = readFileSync(new URL('./deploy.sh', import.meta.url), 'utf8');
+const source = deploySource();
 function definition(name) {
   const match = source.match(new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?^\\}`, 'm'));
   assert.ok(match, `missing ${name}`);

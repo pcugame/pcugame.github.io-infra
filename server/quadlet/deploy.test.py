@@ -25,9 +25,24 @@ podman() {
       elif [[ "${FAIL:-}" == inspect ]]; then echo paused
       else cat "$FIXTURE/${@: -1}"; fi ;;
     container) [[ "${FAIL:-}" != inspecterror ]] || return 125; [[ -f "$FIXTURE/$3" ]] ;;
+    image)
+      case "$*" in
+        *'{{.Digest}}'*) echo "${API_IMAGE##*@}" ;;
+        *org.opencontainers.image.revision*) echo "$RELEASE_SOURCE_SHA" ;;
+      esac ;;
     exec)
+      if [[ "${3:-}" == sh ]]; then
+        [[ "${FAIL:-}" != backup ]] || return 31
+        [[ "${FAIL:-}" == emptybackup ]] || echo fixture-dump
+        return 0
+      fi
       if [[ "$2" == gp-api ]]; then [[ "${FAIL:-}" != health ]] && echo '{"ok":true}'; fi ;;
-    run) [[ "${FAIL:-}" != schema ]] ;;
+    run)
+      [[ "${FAIL:-}" != schema ]] || return 32
+      if [[ "${@: -1}" == apply-contract ]]; then
+        [[ "${FAIL:-}" != migration ]] || return 33
+        echo contract-applied >> "$FIXTURE/log"
+      fi ;;
     logs) : ;;
     *) echo 'forbidden podman mutation' >&2; return 90 ;;
   esac
@@ -73,6 +88,9 @@ up) do_up ;;
 drain) do_drain ;;
 down) do_down ;;
 artifact) do_release_artifact_preflight phase2 ;;
+backup) do_backup fixture ;;
+assert) do_release_assert phase2 ;;
+migrate) do_release_migration apply-contract ;;
 esac
 '''
 
@@ -113,17 +131,69 @@ class Deploy(unittest.TestCase):
             for name in APPS: (root / name).write_text('running\n')
             (root / 'log').touch()
             prefix = (HERE.parent / 'deploy.sh').read_text().split('# ── Main ')[0]
-            # The harness lives in a temp tree; redirect only helper lookup to repository.
-            prefix = prefix.replace('QUADLET_HELPERS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/quadlet"', 'QUADLET_HELPERS=' + str(HERE))
+            # Source modules from the repository, never operator deployment files.
+            prefix = prefix.replace('DEPLOY_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"',
+                'DEPLOY_SCRIPT_DIR=' + str(HERE.parent))
             harness = root / 'harness.sh'
             harness.write_text(prefix + MOCKS)
             environment['API_IMAGE'] = IMAGE
             if failure == 'immutable': environment['API_IMAGE']='repo:latest'
-            result = subprocess.run(['bash', str(harness)], env=environment, capture_output=True, text=True)
+            if action == 'release':
+                # Execute the same external-process gates as Deploy Release. The
+                # workflow's web/approval/audit steps remain covered by its tests.
+                environment['HARNESS'] = str(harness)
+                command = ['bash', '-ec', '\n'.join(
+                    f'ACTION={stage} bash "$HARNESS"' for stage in
+                    ('artifact', 'assert', 'drain', 'backup', 'migrate', 'up'))]
+            else:
+                command = ['bash', str(harness)]
+            result = subprocess.run(command, env=environment, capture_output=True, text=True)
             log = (root / 'log').read_text().splitlines()
             marker = (root / 'cutover-state/mutation-drained').exists()
             images = [(units / f'{name}.container').read_text().split('Image=')[1].splitlines()[0] for name in APPS if (units / f'{name}.container').exists()]
             return result, log, marker, images
+
+    def test_release_success_orders_dump_contract_and_activation(self):
+        result, log, marker, images = self.run_fixture('release')
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        dump = next(i for i, line in enumerate(log) if 'pg_dump' in line)
+        contract = log.index('contract-applied')
+        activation = log.index('systemctl --user daemon-reload')
+        self.assertTrue(dump < contract < activation)
+        self.assertEqual(images, [IMAGE] * 7)
+        self.assertFalse(marker)
+
+    def test_release_failure_gates(self):
+        for failure in ('artifact', 'backup', 'emptybackup', 'migration'):
+            with self.subTest(failure=failure):
+                result, log, marker, images = self.run_fixture('release', failure)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('contract-applied', log)
+                self.assertFalse(any(line.startswith('systemctl --user start') for line in log))
+                self.assertTrue(all(image == OLD for image in images))
+                dump = [line for line in log if 'pg_dump' in line]
+                migration = [line for line in log if line.endswith(' apply-contract')]
+                if failure == 'artifact':
+                    self.assertFalse(marker)
+                    self.assertFalse(dump)
+                    self.assertFalse(any(line.startswith('systemctl --user stop') for line in log))
+                elif failure in ('backup', 'emptybackup'):
+                    self.assertTrue(marker)
+                    self.assertEqual(len(dump), 1)
+                    self.assertFalse(migration)
+                else:
+                    self.assertEqual(len(migration), 1)
+
+    def test_contract_activation_failure_never_restores_old_image(self):
+        for failure in ('reload', 'start', 'health'):
+            with self.subTest(failure=failure):
+                result, log, marker, images = self.run_fixture('release', failure)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('contract-applied', log)
+                self.assertEqual(images, [IMAGE] * 7)
+                self.assertFalse(marker)
+                self.assertFalse(any(line.startswith('systemctl --user start gp-worker') for line in log))
+                self.assertFalse(any(OLD in line for line in log))
 
     def test_up_order_and_retained_pg(self):
         result, log, marker, images = self.run_fixture()
