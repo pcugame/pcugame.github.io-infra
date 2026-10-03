@@ -1,6 +1,6 @@
 /* Original guide proportions, with the site's shared typography, palette and buttons. */
 .webgl-guide { font-size: 1rem; line-height: 1.75; word-break: keep-all; }
-.webgl-guide [hidden], .webgl-guide .print-only { display: none !important; }
+.webgl-guide [hidden] { display: none !important; }
 .webgl-guide .skip { position: absolute; top: -6.25rem; }
 .webgl-guide .skip:focus { top: 0.625rem; z-index: 99; padding: 0.75rem; background: var(--color-surface); }
 .webgl-guide :is(section.step, .zone-heading, .version-picker) { scroll-margin-top: 7.5rem; }
@@ -56,7 +56,6 @@
 .webgl-guide .step-done { margin-top: 1.5rem; padding: 1.125rem 1.25rem; border-left: 0.1875rem solid var(--color-primary); border-radius: 0 0.5rem 0.5rem 0; background: var(--color-bg); }
 .webgl-guide .step-done p { margin: 0.375rem 0 0.625rem; }
 .webgl-guide .step-done a { font-weight: 700; font-size: 0.875rem; }
-.webgl-guide .next-reading { padding: 0.75rem 0.25rem 1.5rem; }
 .webgl-guide figure { margin: 1.25rem 0; border: 0.0625rem solid var(--color-border); border-radius: var(--radius); overflow: hidden; }
 .webgl-guide .image-wrap { position: relative; line-height: 0; max-width: 100%; }
 .webgl-guide .image-wrap img { width: 100%; height: auto; }
@@ -65,39 +64,9 @@
 .webgl-guide .zoom.btn { position: absolute; top: 0.75rem; right: 0.75rem; z-index: 1; margin: 0; padding: 0.375rem 0.625rem; font-size: 0.75rem; background: var(--color-surface); color: var(--color-primary); border-color: var(--color-border); box-shadow: var(--shadow); }
 .webgl-guide .spot { position: absolute; border: 0.1875rem solid var(--color-primary); border-radius: 0.3125rem; box-shadow: 0 0 0 0.0625rem var(--color-surface), inset 0 0 0 0.0625rem var(--color-surface); pointer-events: none; }
 .webgl-guide .spot::before { content: '선택할 항목'; position: absolute; right: 0.1875rem; bottom: 100%; padding: 0.0625rem 0.3125rem; border-radius: 0.1875rem 0.1875rem 0 0; background: var(--color-primary-btn); color: white; font-size: 0.625rem; font-weight: 800; line-height: 1.5; }
-.webgl-guide .pub-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-top: 1rem; max-height: 20rem; overflow-y: auto; scrollbar-gutter: stable; padding: 0.1875rem; }
-.webgl-guide .option.btn { justify-content: flex-start; gap: 0.625rem; padding: 0.6875rem; text-align: left; }
-.webgl-guide .num { flex-shrink: 0; white-space: nowrap; font-size: 0.75rem; color: var(--color-text-muted); }
-.webgl-guide .option > span:last-child { min-width: 0; }
-.webgl-guide .option b, .webgl-guide .option small { display: block; font-size: 0.75rem; line-height: 1.4; overflow-wrap: anywhere; }
-.webgl-guide .option small { margin-top: 0.1875rem; font-weight: 400; color: var(--color-text-muted); }
-.webgl-guide .option.selected { background: var(--color-bg); border-color: var(--color-primary); }
-.webgl-guide .option.selected .num { color: var(--color-primary); font-weight: 900; }
-.webgl-guide .option-selection-hint { font-size: .8125rem; font-weight: 600; color: var(--color-primary); }
-.webgl-guide .option-image-arrow.btn { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; width: 2.25rem; height: 2.5rem; padding: 0; font-size: 1.75rem; background: var(--color-surface); color: var(--color-primary); border-color: var(--color-border); box-shadow: var(--shadow); }
-.webgl-guide .option-image-arrow--previous { left: .5rem; }
-.webgl-guide .option-image-arrow--next { right: .5rem; }
-.webgl-guide .option-image-pagination { position: absolute; bottom: .5rem; left: 50%; transform: translateX(-50%); z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; width: max-content; max-width: calc(100% - 1rem); padding: .125rem .375rem; border: 1px solid var(--color-border); border-radius: 1rem; background: var(--color-surface); box-shadow: var(--shadow); }
-.webgl-guide .option-image-dot.btn { flex-shrink: 0; width: 1.5rem; height: 1.75rem; padding: 0; border: 0; border-radius: 50%; }
-.webgl-guide .option-image-dot::before { content: ''; width: .375rem; height: .375rem; border-radius: 50%; background: var(--color-text-muted); }
-.webgl-guide .option-image-dot[aria-pressed='true']::before { width: .625rem; height: .625rem; background: var(--color-primary); }
-.webgl-guide .option-image-position { padding: 0 .375rem; font-size: .6875rem; line-height: 1.5; white-space: nowrap; color: var(--color-text-muted); }
-.webgl-guide .detail { padding: 1.25rem; margin: 1.125rem 0; border: 0.0625rem solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); }
-.webgl-guide .detail h3 { margin: 0.5rem 0; font-size: 1.3125rem; }
-.webgl-guide .detail .tag { color: var(--color-primary); font-size: 0.75rem; font-weight: 800; }
-.webgl-guide .detail p { font-size: 0.875rem; }
-.webgl-guide .detail .note { font-size: 0.8125rem; color: var(--color-text-muted); }
-.webgl-guide .table-scroll { overflow-x: auto; }
-.webgl-guide .table-scroll:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
-.webgl-guide .comparison-table { min-width: 36rem; }
-.webgl-guide table { overflow-wrap: normal; border-collapse: collapse; width: 100%; font-size: 0.875rem; line-height: 1.6; margin: 1.25rem 0; }
-.webgl-guide th { text-align: left; font-size: 0.75rem; color: var(--color-text-muted); background: var(--color-bg); }
-.webgl-guide th, .webgl-guide td { padding: 0.8125rem 0.875rem; border-bottom: 0.0625rem solid var(--color-border); vertical-align: top; }
-.webgl-guide td:first-child { font-weight: 700; }
 .webgl-guide details { border-top: 0.0625rem solid var(--color-border); padding: 0.875rem 0; }
 .webgl-guide summary { font-weight: 700; cursor: pointer; font-size: 0.875rem; }
 .webgl-guide details p, .webgl-guide details li { font-size: 0.875rem; }
-.webgl-guide .status { font-size: 0.8125rem; color: var(--color-primary); }
 .webgl-guide footer { padding: 1.5rem 0 2.625rem; color: var(--color-text-muted); font-size: 0.75rem; }
 .webgl-guide dialog { margin: auto; width: min(100rem, 96vw); max-height: 94vh; padding: 0; border: 0.0625rem solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-lg); }
 .webgl-guide dialog::backdrop { background: rgb(15 23 42 / 80%); }
@@ -106,17 +75,11 @@
 .webgl-guide .dialog-body { overflow: auto; max-height: 75vh; padding: 1rem; }
 .webgl-guide .dialog-body .image-wrap { width: 100%; min-width: 50rem; }
 .webgl-guide .dialog-hint { padding: 0 1.25rem; }
-.webgl-guide .overlay-button-guide { display: flex; align-items: center; gap: 1rem; padding: 0.75rem 1rem; border: 0.0625rem solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); }
-.webgl-guide .overlay-button-guide img { width: 3.5rem; height: 3.5rem; flex: 0 0 3.5rem; }
-.webgl-guide .overlay-button-guide p { margin: 0; }
-.webgl-guide .screenshot-panel { margin: 1.25rem 0; padding: 1.125rem; border: 0.0625rem solid var(--color-border); border-radius: var(--radius); }
-.webgl-guide .screenshot-panel > h3 { margin-top: 0; }
 @media (min-width: 87.5em) { .webgl-guide { font-size: 1.0625rem; } }
 @media (max-width: 59.375em) {
   .webgl-guide .layout { grid-template-columns: 9.6875rem minmax(0, 1fr); gap: 1.25rem; }
   .webgl-guide .wrap, .webgl-guide .header-inner { padding-left: 1.25rem; padding-right: 1.25rem; }
   .webgl-guide .step { padding: 1.5rem; }
-  .webgl-guide .pub-controls { grid-template-columns: 1fr; }
 }
 @media (max-width: 42.5em) {
   .webgl-guide { font-size: 0.9375rem; }
@@ -136,7 +99,6 @@
   .webgl-guide .spot { border-width: 0.125rem; }
   .webgl-guide .spot::before { font-size: 0.5rem; }
   .webgl-guide .zoom.btn { top: 0.5rem; right: 0.5rem; }
-  .webgl-guide td, .webgl-guide th { padding: 0.625rem; font-size: 0.75rem; }
   .webgl-guide .version-picker { margin-top: 1.25rem; padding: 1rem; }
   .webgl-guide .version-picker-heading { display: block; margin-bottom: 0.875rem; }
   .webgl-guide .version-picker h2 { font-size: 1.125rem; }
