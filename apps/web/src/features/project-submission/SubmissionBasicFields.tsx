@@ -35,7 +35,7 @@ export function SubmissionBasicFields({
 				<legend>기본 정보</legend>
 	            {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
 	             <label htmlFor="project-visibility">공개 범위</label>
-	             <VisibilitySelect id="project-visibility" {...register('visibility')} />
+	             <VisibilitySelect id="project-visibility" value={visibility ?? ''} {...register('visibility')} />
 	             <VisibilityNotice visibility={visibility} exhibitionVisibility={exhibition?.visibility} />
 	            </div>}
 

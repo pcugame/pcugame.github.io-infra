@@ -25,7 +25,7 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
 				<legend>기본 정보</legend>
                 {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
                  <label htmlFor="edit-visibility">공개 범위</label>
-                 <VisibilitySelect id="edit-visibility" disabled={!project.canChangeVisibility} {...register('visibility')} />
+                 <VisibilitySelect id="edit-visibility" disabled={!project.canChangeVisibility} value={visibility ?? ''} {...register('visibility')} />
                  {!project.canChangeVisibility && <p className="field-hint">현재 공개 범위를 변경할 권한이 없습니다. 수정이 잠긴 전시회에서는 운영자·관리자만 변경할 수 있습니다.</p>}
                  <VisibilityNotice visibility={visibility} exhibitionVisibility={project.exhibitionVisibility} />
                 </div>}

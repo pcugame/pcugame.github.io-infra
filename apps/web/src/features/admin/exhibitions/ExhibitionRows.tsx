@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -43,7 +43,7 @@ export function YearMobileCard({
 	isExporting,
 	isAnyExporting,
 }: ExhibitionRowProps) {
-	const { register, handleSubmit } = useForm<UpdateExhibitionInput>({
+	const { register, handleSubmit, control } = useForm<UpdateExhibitionInput>({
 		resolver: zodResolver(UpdateExhibitionSchema),
 		defaultValues: {
 			visibility: year.visibility,
@@ -52,6 +52,8 @@ export function YearMobileCard({
 			sortOrder: year.sortOrder,
 		},
 	});
+
+	const visibility = useWatch({ control, name: 'visibility' });
 
 	const updateMutation = useMutation({
 		mutationFn: (data: UpdateExhibitionInput) =>
@@ -79,7 +81,7 @@ export function YearMobileCard({
 						<label htmlFor={`m-title-${year.id}`}>제목</label>
 						<input id={`m-title-${year.id}`} type="text" {...register('title')} />
 					</div>
-					{env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field"><label htmlFor={`m-visibility-${year.id}`}>공개 범위</label><VisibilitySelect id={`m-visibility-${year.id}`} {...register('visibility')} /></div>}
+					{env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field"><label htmlFor={`m-visibility-${year.id}`}>공개 범위</label><VisibilitySelect id={`m-visibility-${year.id}`} value={visibility ?? ''} {...register('visibility')} /></div>}
                     <div className="admin-ycard__row">
 						<div className="form-field form-field--checkbox" style={{ marginBottom: 0 }}>
 							<label>
@@ -181,7 +183,7 @@ export function YearRow({
 	isExporting,
 	isAnyExporting,
 }: ExhibitionRowProps) {
-	const { register, handleSubmit } = useForm<UpdateExhibitionInput>({
+	const { register, handleSubmit, control } = useForm<UpdateExhibitionInput>({
 		resolver: zodResolver(UpdateExhibitionSchema),
 		defaultValues: {
 			visibility: year.visibility,
@@ -190,6 +192,8 @@ export function YearRow({
 			sortOrder: year.sortOrder,
 		},
 	});
+
+	const visibility = useWatch({ control, name: 'visibility' });
 
 	const updateMutation = useMutation({
 		mutationFn: (data: UpdateExhibitionInput) =>
@@ -248,7 +252,7 @@ export function YearRow({
 			</td>
 			<td>
 				<input type="text" className="exhibition-inline-input" aria-label="전시회 제목" {...register('title')} />
-                <VisibilitySelect {...register('visibility')} />
+                <VisibilitySelect value={visibility ?? ''} {...register('visibility')} />
 			</td>
 			<td>
 				<label>

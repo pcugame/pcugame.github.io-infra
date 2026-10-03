@@ -237,8 +237,9 @@ fieldset.status-section legend {
   animation: exhibition-select-in 120ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.exhibition-select__panel:focus {
+.exhibition-select .exhibition-select__panel:focus {
   outline: none;
+  border-radius: 10px;
 }
 
 @keyframes exhibition-select-in {
@@ -528,42 +529,17 @@ select.form-control option { color: var(--color-text); background: var(--color-s
   .form-field select, select.form-control { appearance: auto; background-image: none; }
 }
 
-@supports (appearance: base-select) {
-  .visibility-select,
-  .visibility-select::picker(select) {
-    appearance: base-select;
-  }
+.visibility-select .exhibition-select__trigger-label,
+.visibility-select .exhibition-select__option {
+  display: block;
+}
 
-  .visibility-select::picker-icon {
-    display: none;
-  }
-
-  .visibility-select::picker(select) {
-    margin-top: 0.25rem;
-    padding: 0.25rem;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    background: var(--color-surface);
-    box-shadow: 0 10px 32px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(15, 23, 42, 0.06);
-  }
-
-  .visibility-select option {
-    padding: 0.55rem 0.7rem;
-    border-radius: 7px;
-  }
-
-  .visibility-select option:hover,
-  .visibility-select option:focus {
-    background: color-mix(in srgb, var(--color-primary) 10%, transparent);
-  }
-
-  .visibility-select option:checked {
-    color: var(--color-primary);
-    font-weight: 600;
-    background: color-mix(in srgb, var(--color-primary) 6%, transparent);
-  }
-
-  .visibility-select option::checkmark {
-    color: var(--color-primary);
-  }
+select.visibility-select__native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
