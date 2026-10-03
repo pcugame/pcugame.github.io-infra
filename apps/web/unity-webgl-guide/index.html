@@ -119,137 +119,30 @@
                 <span class="step-no">01</span>
                 <span class="category">프로젝트 준비</span>
               </div>
-              <h2>Unity 버전·빌드 플랫폼 설정</h2>
-              <p>
-                Unity Hub의 Projects 목록에서 내 프로젝트의 Editor Version을
-                확인한 뒤, 이 문서 상단에서
-                <a href="#version-picker">내 프로젝트의 버전</a>을 선택하세요.
-                선택한 버전에 맞는 메뉴와 화면을 아래에서 확인하세요.
-              </p>
+              <h2><span data-version-content="6">Web Build Support</span><span data-version-content="2022">WebGL Build Support</span> 설치</h2>
+              <p class="micro">Unity Hub → Installs → 사용하는 에디터의 메뉴 → Add modules를 엽니다.</p>
               <div data-version-content="6">
-                <div class="path">
-                  <b>File → Build Profiles → Platforms → Web</b>
+              <figure>
+                <div class="image-wrap">
+                  <img
+                    src="%BASE_URL%unity-webgl-guide/assets/images/unity6-web-module-guide-v3.webp"
+                    alt="Unity Hub에서 Web Build Support를 체크하고 Install을 누르는 순서."
+                    loading="eager"
+                  />
+                  <button type="button" class="zoom" data-zoom>사진 확대</button>
                 </div>
-                <p>
-                  <b>Web → Switch Platform</b>을 누릅니다. 이미 Active면 그대로 둡니다. 별도로 만든 Web
-                  프로필을 쓰고 있다면 그 프로필을 선택해
-                  <b>Switch Profile</b>을 누르세요.
-                </p>
-                <figure>
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/unity6-web-build.png"
-                      alt="Unity 6 공식 위치 예시. Web과 Switch Platform을 찾으세요. 이 단계에서는 화면 아래의 다른 설정을 복사하지 않습니다."
-                    />
-                  
-                    <button type="button" class="zoom" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    Unity 6 공식 위치 예시. Web과 Switch Platform을 찾으세요. 이
-                    단계에서는 화면 아래의 다른 설정을 복사하지 않습니다.
-                    <a
-                      class="source"
-                      href="https://learn.unity.com/tutorial/getting-started-with-unity-web"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      공식 출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
+                <figcaption>Web Build Support 설치
+                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처 ↗</a>
+                </figcaption>
+              </figure>
               </div>
-              <div data-version-content="2022">
-                <div class="path">
-                  <b>File → Build Settings → WebGL → Switch Platform</b>
-                </div>
-                <p>
-                  WebGL을 선택하고
-                  <b>Switch Platform</b>을 누릅니다. 이미 WebGL이 활성 플랫폼이면 그대로 둡니다.
-                </p>
-                <figure>
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/build-settings-2022.png"
-                      alt="Unity 2022.3 공식 위치 예시. 왼쪽 WebGL을 선택합니다. 프로젝트명과 씬 이름은 예시이며 그대로 만들 필요가 없습니다."
-                    />
-                    <span
-                      class="spot" style="left: 1.5%; top: 54%; width: 40%; height: 6.5%;"
-                      aria-hidden="true"
-                    ></span>
-                  
-                    <button type="button" class="zoom" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    Unity 2022.3 공식 위치 예시. 왼쪽 WebGL을 선택합니다.
-                    프로젝트명과 씬 이름은 예시이며 그대로 만들 필요가 없습니다.
-                    <a
-                      class="source"
-                      href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      공식 출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
-              </div>
-              <p>
-                <b>
-                  Web 플랫폼이 없거나 모듈이 필요하다는 메시지가 나오면 건너뛰지
-                  마세요.
-                </b>
-                Unity Hub → Installs → 현재 사용하는 에디터의 메뉴 → Add
-                modules에서
-                <b
-                  ><span data-version-content="6">Web Build Support</span
-                  ><span data-version-content="2022"
-                    >WebGL Build Support</span
-                  ></b
-                >
-                를 설치한 뒤 다시 전환하세요.
-              </p>
-              <section class="screenshot-panel">
-                <h3>Unity Hub의 모듈 설치 위치 보기</h3>
-                <figure>
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/unity6-hub-web-module.png"
-                      alt="공통 설치 위치 참고 · 원본은 Unity Hub의 Unity 6.1 설치 화면입니다. 내 프로젝트에 사용하는 에디터 버전에 Web Build Support를 설치하세요."
-                    />
-                    <span
-                      class="spot" style="left: 1.5%; top: 71%; width: 96%; height: 7.2%;"
-                      aria-hidden="true"
-                    ></span>
-                  
-                    <button type="button" class="zoom" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    공통 설치 위치 참고 · 원본은 Unity Hub의 Unity 6.1
-                    화면입니다. 내 프로젝트에 사용하는 에디터 버전에 Web Build
-                    Support를 설치하세요.
-                    <a
-                      class="source"
-                      href="https://learn.unity.com/tutorial/publish-on-unity-play"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      공식 출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
-              </section>
+              <p class="micro" data-version-content="2022">WebGL Build Support를 체크하고 Install을 누르세요.</p>
               <div class="step-done">
                 <b>한줄요약</b>
-                <p>선택한 플랫폼이 Web 또는 WebGL로 활성화되어 있습니다.</p>
-              <a href="#scenes">다음: 씬 포함·순서 →</a>
-</div>
-            </section>
+                <p>사용하는 Unity 에디터에 Web 빌드 모듈을 설치했습니다.</p>
+                <a href="#scenes">다음: 씬 포함·순서 →</a>
+              </div>
+</section>
 <section class="step" id="scenes">
               <div class="step-top">
                 <span class="step-no">02</span>
@@ -257,477 +150,88 @@
               </div>
               <h2>빌드 씬·시작 순서 설정</h2>
               <div data-version-content="6">
-                <p>
-                  Build Profiles에서
-                  <b>Scene List / Open Scene List</b>를 엽니다. 별도 빌드 프로필을 사용한다면 그 프로필이 실제로
-                  사용하는 씬 목록을 확인하세요.
-                </p>
+              <figure>
+                <div class="image-wrap">
+                  <img
+                    src="%BASE_URL%unity-webgl-guide/assets/images/unity6-scenes-guide-v3.webp"
+                    alt="Unity 6 Scene List에서 필요한 씬을 Add Open Scenes로 추가하고 체크합니다. 첫 화면의 씬을 0번에 둡니다."
+                    loading="lazy"
+                  />
+                  <button type="button" class="zoom" data-zoom>사진 확대</button>
+                </div>
+                <figcaption>Build Profiles → Scene List
+                  <a class="source" href="https://learn.unity.com/tutorial/publish-on-unity-play" target="_blank" rel="noopener">출처 ↗</a>
+                </figcaption>
+              </figure>
               </div>
               <div data-version-content="2022">
-                <p>
-                  Build Settings 창 위쪽의
-                  <b>Scenes In Build</b>
-                  목록을 확인하세요.
-                </p>
+              <figure>
+                <div class="image-wrap">
+                  <img
+                    src="%BASE_URL%unity-webgl-guide/assets/images/unity2022-build-setup-guide-v3.webp"
+                    alt="Unity 2022 Scenes In Build와 Add Open Scenes 위치. 필요한 씬을 추가하고 체크하세요."
+                    loading="lazy"
+                  />
+                  <button type="button" class="zoom" data-zoom>사진 확대</button>
+                </div>
+                <figcaption>Scenes In Build · 시작 씬은 0번
+                  <a class="source" href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
+                </figcaption>
+              </figure>
               </div>
-              <ol class="steps">
-                <li>
-                  게임에서 사용하는 씬이 목록에 있는지 확인합니다. 빠진 씬은
-                  Project 창에서 목록으로 드래그하거나, 씬을 열고
-                  <b>Add Open Scenes</b>를 누릅니다.
-                </li>
-                <li>빌드에 포함할 씬의 체크박스를 켭니다.</li>
-                <li>
-                  <b>게임을 켰을 때 처음 보여줄 화면의 씬</b>을 활성 목록의 첫 번째인
-                  <b>0번</b>으로 둡니다. 필요한 경우 드래그해 순서를 바꾸세요.
-                </li>
-                <li>
-                  시작 화면만 넣지 말고, 게임을 진행하면서 불러올 다른 필요한
-                  씬도 포함하고 체크합니다.
-                </li>
-              </ol>
-              <div data-version-content="6">
-                <figure>
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/unity6-scene-list.png"
-                      alt="Unity 6 계열 공식 Scene List 예시. 필요한 씬의 체크와 0번 시작 씬을 확인합니다. SampleScene이라는 이름을 따라 만들 필요는 없습니다."
-                    />
-                    <span
-                      class="spot" style="left: 36.5%; top: 28.8%; width: 60.5%; height: 4%;"
-                      aria-hidden="true"
-                    ></span>
-                  
-                    <button type="button" class="zoom" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    Unity 6 계열 공식 Scene List 예시. 필요한 씬의 체크와 0번
-                    시작 씬을 확인합니다. SampleScene이라는 이름을 따라 만들
-                    필요는 없습니다.
-                    <a
-                      class="source"
-                      href="https://learn.unity.com/tutorial/publish-on-unity-play"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      공식 출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
-              </div>
-              <div data-version-content="2022">
-                <figure>
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/build-settings-2022.png"
-                      alt="Unity 2022.3 공식 예시는 Scenes In Build가 비어 있습니다. 실제 프로젝트에서는 위 목록에 필요한 씬을 넣고 체크하세요."
-                    />
-                    <span
-                      class="spot" style="left: 1%; top: 9%; width: 97%; height: 25%;"
-                      aria-hidden="true"
-                    ></span>
-                  
-                    <button type="button" class="zoom" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    Unity 2022.3 공식 예시는 Scenes In Build가 비어 있습니다.
-                    실제 프로젝트에서는 위 목록에 필요한 씬을 넣고 체크하세요.
-                    <a
-                      class="source"
-                      href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      공식 출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
-              </div>
-              <p class="micro">
-                이 설명은 일반적인 씬 목록 기반 프로젝트의 절차입니다.
-                Addressables 등 별도 로딩 구조로 관리하는 씬까지 무조건 이
-                목록에 넣으라는 뜻은 아닙니다. 그런 프로젝트는 기존 로딩 구성을
-                유지하세요.
-              </p>
+              <p class="micro">씬 이름과 내용은 내 프로젝트에 맞게 정하세요. Addressables·커스텀 로더를 쓰면 기존 로딩 구성을 유지하세요.</p>
               <div class="step-done">
                 <b>한줄요약</b>
-                <p>필요한 씬이 체크되어 있고, 처음 보여줄 씬이 0번입니다.</p>
-              <a href="#release">다음: 빌드 옵션 설정 →</a>
-</div>
-            </section>
+                <p>필요한 씬이 체크되어 있고, 시작 씬이 0번입니다.</p>
+                <a href="#release">다음: 빌드 옵션 설정 →</a>
+              </div>
+</section>
 <section class="step" id="release">
               <div class="step-top">
                 <span class="step-no">03</span>
                 <span class="category">빌드 전 설정</span>
               </div>
               <h2>빌드 옵션 설정</h2>
-              <p>
-                <b>
-                  아래 표에 있는 항목만 맞추고, 나머지는 현재 값을 유지하세요.
-                </b>
-                스크린샷은 메뉴 위치를 보여줍니다. 이미지 속 모든 체크와 숫자를
-                그대로 복사하지 마세요.
-              </p>
-              <h3>빌드 창에서 설정</h3>
-              <p data-version-content="6">
-                File → Build Profiles → Web의 Web Settings를 엽니다.
-              </p>
-              <p data-version-content="2022">
-                File → Build Settings → WebGL을 엽니다.
-              </p>
-              <div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>항목</th>
-                      <th>첫 제출에서 할 일</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Development Build</td>
-                      <td>
-                        <b>OFF</b>
-                        · 체크를 해제합니다.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Deep Profiling / Deep Profiling Support</td>
-                      <td>
-                        <b>OFF</b>
-                        · 회색이거나 숨겨지면 그대로 둡니다.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Autoconnect Profiler</td>
-                      <td>
-                        <b>OFF</b>
-                        · 회색이거나 숨겨지면 그대로 둡니다.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Code Optimization</td>
-                      <td>
-                        <span data-version-content="6">
-                          <b>Runtime Speed with LTO</b>를 선택합니다.
-                        </span>
-                        <span data-version-content="2022">
-                          드롭다운에
-                          <b>Runtime Speed with LTO</b>가 있으면 그것을 선택합니다. 없고
-                          <b>Runtime Speed</b>가 있으면 Runtime Speed, 이미지처럼
-                          <b>Speed</b>로 표시되면 Speed를 선택합니다.
-                        </span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Texture Compression</td>
-                      <td>
-                        <b>Use Player Settings</b>로 두고, 5단계의 Player 설정에서 DXT를 선택합니다.
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <p>
-                <b>진단 옵션을 끄려고 Development Build를 다시 켜지 마세요.</b>
-                Development Build를 끈 상태에서 진단 항목을 조작할 수 없으면
-                그대로 진행합니다.
-              </p>
               <div data-version-content="6">
-                <figure>
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/unity6-web-build.png"
-                      alt="Unity 6 빌드 옵션 위치. Development Build는 OFF, Code Optimization은 Runtime Speed with LTO로 설정하세요. 화면의 Shorter Build Time은 위치 예시입니다."
-                    />
-                    <span
-                      class="spot" style="left: 36.5%; top: 71.3%; width: 62%; height: 7%;"
-                      aria-hidden="true"
-                    ></span>
-                  
-                    <button type="button" class="zoom" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    Unity 6 빌드 옵션 위치. Development Build는 OFF, Code
-                    Optimization은 Runtime Speed with LTO로 설정하세요. 화면의
-                    Shorter Build Time은 위치 예시입니다.
-                    <a
-                      class="source"
-                      href="https://learn.unity.com/tutorial/getting-started-with-unity-web"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      공식 출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
+              <figure>
+                <div class="image-wrap">
+                  <img
+                    src="%BASE_URL%unity-webgl-guide/assets/images/unity6-build-setup-guide-v3.webp"
+                    alt="Unity 6 빌드 설정: Texture Compression은 Use Player Settings, Development Build는 OFF, Code Optimization은 Runtime Speed with LTO."
+                    loading="lazy"
+                  />
+                  <button type="button" class="zoom" data-zoom>사진 확대</button>
+                </div>
+                <figcaption>Web Settings
+                  <a class="source" href="https://learn.unity.com/tutorial/getting-started-with-unity-web" target="_blank" rel="noopener">출처 ↗</a>
+                </figcaption>
+              </figure>
               </div>
               <div data-version-content="2022">
-                <figure>
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/build-settings-2022.png"
-                      alt="Unity 2022.3 공식 이미지에는 Speed가 보입니다. 메뉴에 Runtime Speed with LTO가 있으면 그 항목을 우선 선택하고, 없으면 본문의 이름 순서를 따르세요."
-                    />
-                    <span
-                      class="spot" style="left: 43%; top: 41.5%; width: 55%; height: 7%;"
-                      aria-hidden="true"
-                    ></span>
-                  
-                    <button type="button" class="zoom" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    Unity 2022.3 공식 이미지에는 Speed가 보입니다. 메뉴에
-                    Runtime Speed with LTO가 있으면 그 항목을 우선 선택하고,
-                    없으면 본문의 이름 순서를 따르세요.
-                    <a
-                      class="source"
-                      href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      공식 출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
+              <figure>
+                <div class="image-wrap">
+                  <img
+                    src="%BASE_URL%unity-webgl-guide/assets/images/unity2022-build-setup-guide-v3.webp"
+                    alt="Unity 2022 빌드 설정: Texture Compression은 Use Player Settings, Development Build는 OFF, Code Optimization은 Speed로 표시된 예시입니다."
+                    loading="lazy"
+                  />
+                  <button type="button" class="zoom" data-zoom>사진 확대</button>
+                </div>
+                <figcaption>Build Settings
+                  <a class="source" href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html" target="_blank" rel="noopener">출처 ↗</a>
+                </figcaption>
+              </figure>
               </div>
-              <h3 id="build-reference">반복 빌드와 문제 분석 옵션</h3>
-            <p>
-              기능을 자주 수정할 때는 Gzip + Fallback OFF와 빠른 빌드 모드를
-              사용할 수 있습니다. 최종 확인은 제출할 설정으로 다시 빌드한
-              업로드본에서 진행하세요.
-            </p>
-            <p>
-              <b>로컬 확인:</b>
-              Build And Run은 Unity가 제공하는 로컬 실행을 사용합니다. 별도 서버
-              설치는 필요하지 않습니다. 로컬에서 정상이어도 최종 업로드본 확인은
-              따로 해야 합니다.
-            </p>
-            <p>
-              <b>사이트에 업로드하는 빌드도 목적에 따라 설정이 다릅니다.</b>
-              그냥 플레이해 보거나 FPS를 비교할 때는 일반 빌드, 문제가 생겨
-              원인을 조사할 때는 진단용 빌드를 만드세요.
-            </p>
-            <div class="table-scroll" tabindex="0" role="region" aria-label="목적별 빌드 설정 비교">
-              <table class="comparison-table">
-                <thead>
-                  <tr>
-                    <th>지금 할 일</th>
-                    <th>Development Build</th>
-                    <th>Deep Profiling</th>
-                    <th>Code Optimization</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>기능을 자주 고쳐 업로드·실행 확인</td>
-                    <td>OFF</td>
-                    <td>OFF</td>
-                    <td>Shorter Build Time 가능</td>
-                  </tr>
-                  <tr>
-                    <td>실제 FPS 비교 / 최종 공개</td>
-                    <td>OFF</td>
-                    <td>OFF</td>
-                    <td>
-                      <span data-version-content="6">
-                        Runtime Speed with LTO
-                      </span>
-                      <span data-version-content="2022">
-                        Runtime Speed with LTO → Runtime Speed → Speed 순으로,
-                        표시되는 첫 항목
-                      </span>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>오류·버벅임 원인 조사</td>
-                    <td>ON</td>
-                    <td>우선 OFF</td>
-                    <td>개발 빌드에서는 숨겨질 수 있음</td>
-                  </tr>
-                  <tr>
-                    <td>문제 함수의 호출까지 상세 조사</td>
-                    <td>ON</td>
-                    <td>필요할 때만 ON</td>
-                    <td>진단 후 일반 빌드로 재확인</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p class="micro">
-              빠른 반복용 빌드의 FPS를 최종 성능으로 기록하지 마세요. 최종 성능
-              비교는 공개용과 같은 최적화 설정으로 진행합니다.
-            </p>
-            <div data-version-content="6">
-              <h3>빌드 옵션별 위치·사용 시점</h3>
-              <div class="path">
-                <b>File</b>
-                <i>›</i>
-                <b>Build Profiles</b>
-                <i>›</i>
-                <b>Web</b>
-                <i>›</i>
-                <b>Web Settings</b>
+              <p class="micro" data-version-content="2022">Code Optimization: Runtime Speed with LTO → Runtime Speed → Speed 순으로, 있는 항목을 선택하세요.</p>
+              <details id="build-reference">
+                <summary>문제 분석용 옵션이 필요할 때</summary>
+                <p class="micro">Profiler로 분석할 때만 Development Build와 Autoconnect Profiler를 켭니다. Deep Profiling은 상세 진단이 필요할 때만 사용하세요. 제출 전에는 일반 빌드로 되돌리고, 숨겨지거나 회색인 진단 옵션은 그대로 둡니다.</p>
+              </details>
+              <div class="step-done">
+                <b>한줄요약</b>
+                <p>Development Build는 OFF, Code Optimization은 실행 속도 설정입니다.</p>
+                <a href="#publishing-reference">다음: Player·압축·메모리 →</a>
               </div>
-              <div data-option-guide="buildOptions" id="build-guide">
-                <figure id="build-figure">
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/unity6-web-build.png"
-                      alt="Unity 6 Web Settings. 브라우저, 텍스처 압축, Development Build, Code Optimization, Profiler 옵션."
-                    />
-                    <span class="spot" data-spot aria-hidden="true"></span>
-                  
-                    <button class="zoom" type="button" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    Unity 6 공식 화면. 분석 옵션을 선택하면 Development Build를
-                    켠 예시로 전환됩니다. 하늘색 테두리의 항목을 찾고, 아래
-                    설명에 따라 선택하세요.
-                    <a
-                      class="source"
-                      href="https://learn.unity.com/tutorial/getting-started-with-unity-web"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      공식 출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
-                <p class="micro">
-                  목록을 스크롤해 항목을 선택하세요. 사진 우측 상단의 사진 확대 버튼으로
-                  선택한 위치를 크게 볼 수 있습니다.
-                </p>
-                <div
-                  class="pub-controls"
-                  data-controls
-                  aria-label="Unity 6 빌드 옵션 선택"
-                ></div>
-                <div class="detail" data-detail aria-live="polite"></div>
-                <ol class="print-only" data-print-options></ol>
-              </div>
-              <div class="callout">
-                <strong>
-                  Deep Profiling은 문제가 발생해 상세 확인이 필요할 때만 켭니다.
-                </strong>
-                <br />
-                일반 Profiler로도 원인을 찾기 어려울 때 사용하는 분석
-                옵션입니다. 기록 자체가 게임을 느리게 만들 수 있으므로, 조사 후
-                끄고 다시 빌드해서 같은 구간을 확인하세요.
-              </div>
-            </div>
-            <div data-version-content="2022">
-              <h3>빌드 옵션별 위치·사용 시점</h3>
-              <div class="path">
-                <b>File</b>
-                <i>›</i>
-                <b>Build Settings</b>
-                <i>›</i>
-                <b>WebGL</b>
-              </div>
-              <div
-                data-option-guide="legacyBuildOptions"
-                id="legacy-build-guide"
-              >
-                <figure id="legacy-build-figure">
-                  <div class="image-wrap">
-                    <img
-                      src="%BASE_URL%unity-webgl-guide/assets/images/build-settings-2022.png"
-                      alt="Unity 2022.3 Build Settings. 일반 플레이·최종 공개는 Development Build OFF, 문제 분석은 필요할 때 ON으로 선택합니다. Code Optimization의 Speed는 이 버전의 속도 우선 예시입니다."
-                    />
-                    <span
-                      class="spot" style="left: 43%; top: 41.5%; width: 55%; height: 7%;"
-                      data-spot
-                      aria-hidden="true"
-                    ></span>
-                  
-                    <button class="zoom" type="button" data-zoom>
-                      사진 확대
-                    </button>
-                  </div>
-                  <figcaption>
-                    Unity 2022.3 Build Settings. 일반 플레이·최종 공개는
-                    Development Build OFF, 문제 분석은 필요할 때 ON으로
-                    선택합니다. Code Optimization의 Speed는 이 버전의 속도 우선
-                    예시입니다.
-                    <a
-                      class="source"
-                      href="https://docs.unity3d.com/2022.3/Documentation/Manual/webgl-building.html"
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      출처 ↗
-                    </a>
-                  </figcaption>
-                </figure>
-                <p class="micro">
-                  원본 화면에서 일부 체크가 회색이어도 위치는 같습니다. 분석에
-                  필요할 때 Development Build를 켜면 Profiler 항목을 선택할 수
-                  있습니다.
-                </p>
-                <div
-                  class="pub-controls"
-                  data-controls
-                  aria-label="Unity 2022 빌드 옵션 선택"
-                ></div>
-                <div class="detail" data-detail aria-live="polite"></div>
-                <ol class="print-only" data-print-options></ol>
-              </div>
-              <p></p>
-              <p>
-                첫 제출 값은
-                <a href="#release">3단계</a>의 메뉴명 순서를 따릅니다. 아래 설명은 반복 개발·진단을 위한
-                추가 정보입니다.
-              </p>
-              <p>
-                <b>
-                  Development Build, Autoconnect Profiler, Deep Profiling
-                  Support의 사용 목적은 선택한 항목의 설명에서 확인하세요.
-                </b>
-                Profiler 관련 체크가 회색이면 먼저 분석이 필요한지 판단한 뒤
-                Development Build를 켭니다. 단순 업로드 테스트를 위해 전부 켤
-                필요는 없습니다.
-              </p>
-            </div>
-            <p class="micro">
-              빌드 옵션 근거:
-              <a
-                class="source"
-                href="https://docs.unity3d.com/6000.0/Documentation/Manual/web-build-settings.html"
-                data-version-content="6"
-                target="_blank"
-                rel="noopener"
-              >
-                Unity 6 빌드 설정 ↗ </a
-              ><a
-                class="source"
-                data-version-content="2022"
-                href="https://docs.unity3d.com/2022.3/Documentation/Manual/web-build-settings.html"
-                target="_blank"
-                rel="noopener"
-                >선택 버전 빌드 설정 ↗</a
-              >
-              ·
-              <a
-                class="source"
-                href="https://docs.unity3d.com/6000.0/Documentation/Manual/ProfilerWindow.html"
-                target="_blank"
-                rel="noopener"
-              >
-                Profiler와 Deep Profiling ↗
-              </a>
-            </p>
-          <div class="step-done"><b>한줄요약</b><p>빌드 목적에 맞게 Development Build와 Code Optimization을 설정했습니다.</p><a href="#publishing-reference">다음: Player·압축·메모리 →</a></div>
 </section>
 <section class="step reference-step" id="publishing-reference">
             <div class="step-top">
@@ -735,523 +239,103 @@
               <span class="category">빌드 전 설정</span>
             </div>
             <h2>Player 설정: 압축·템플릿·메모리</h2>
-<h3 id="publishing">Player에서 압축과 템플릿 설정</h3>
-              <div class="path">
-                <b
-                  >Edit → Project Settings → Player →
-                  <span data-version-content="6">Web</span
-                  ><span data-version-content="2022">WebGL</span> 탭</b
-                >
-              </div>
-              <p>
-                <b>Publishing Settings</b>를 펼쳐 다음 값을 적용합니다.
-              </p>
-              <div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>항목</th>
-                      <th>첫 제출 값</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Compression Format</td>
-                      <td><b>Brotli</b></td>
-                    </tr>
-                    <tr>
-                      <td>Decompression Fallback</td>
-                      <td>
-                        <b>OFF</b>
-                        · 체크 해제
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Enable Native C/C++ Multithreading</td>
-                      <td>
-                        항목이 있으면
-                        <b>OFF</b>. 없는 버전에서는 찾느라 진행을 멈추지 마세요.
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <p>
-                Power Preference, 예외, 메모리, WebAssembly 기능 등 별도 안내가
-                없는 설정은 바꾸지 않아도 됩니다. 서버 설정을 조사할 필요도
-                없습니다.
-              </p>
-              <figure>
-                <div class="image-wrap">
-                  <img
-                    src="%BASE_URL%unity-webgl-guide/assets/images/publishing-settings-unity6.png"
-                    alt="Unity 6.0 공식 Publishing Settings 위치 참고. 위쪽 Compression Format을 Brotli로, Decompression Fallback과 네이티브 스레드를 OFF로 설정합니다. 이미지의 Gzip과 메모리 숫자는 복사하지 마세요. "
-                  />
-                  <span
-                    class="spot" style="left: 1.2%; top: 6.9%; width: 97.6%; height: 5.1%;"
-                    aria-hidden="true"
-                  ></span>
-                
-                  <button type="button" class="zoom" data-zoom>
-                    사진 확대
-                  </button>
-                  </div>
-                <figcaption>
-                  Unity 6.0 공식 Publishing Settings 위치 참고. 위쪽 Compression
-                  Format을 Brotli로, Decompression Fallback과 네이티브 스레드를
-                  OFF로 설정합니다. 이미지의 Gzip과 메모리 숫자는 복사하지
-                  마세요.
-                  <a
-                    class="source"
-                    href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    공식 출처 ↗
-                  </a>
-                </figcaption>
-              </figure>
-              <p>
-                같은 Player 화면에서
-                <b>Resolution and Presentation → WebGL Template</b>을 열고
-                <b>Default</b>를 선택합니다.
-              </p>
-              <figure>
-                <div class="image-wrap">
-                  <img
-                    src="%BASE_URL%unity-webgl-guide/assets/images/web-template.png"
-                    alt="Default 템플릿 위치입니다. 첫 제출에서는 Default를 선택하세요."
-                  />
-                  <span
-                    class="spot" style="left: 2%; top: 61.5%; width: 27%; height: 30%;"
-                    aria-hidden="true"
-                  ></span>
-                
-                  <button type="button" class="zoom" data-zoom>
-                    사진 확대
-                  </button>
-                  </div>
-                <figcaption>
-                  Default 템플릿 위치입니다. 첫 제출에서는 Default를 선택하세요.
-                  <a
-                    class="source"
-                    href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    공식 출처 ↗
-                  </a>
-                </figcaption>
-              </figure>
-              <p class="micro">
-                Brotli + Fallback OFF는 이 절차의 기본 조합이며 제출 허용 형식
-                전체를 뜻하지 않습니다. 템플릿·압축의 다른 조합과 사용 시점은
-                아래 옵션 설명에서 확인하세요.
-              </p>
-              
-<h3>압축·메모리·고급 옵션의 의미</h3>
-            <p>
-              <b>
-                첫 제출 기본은 Brotli + OFF입니다. 아래는 반복 개발·진단을 위한
-                대안 설명입니다.
+            <div class="path">
+              <b>Edit → Project Settings → Player →
+                <span data-version-content="6">Web</span><span data-version-content="2022">WebGL</span>
               </b>
-              설정은 Unity에서 바꾼 뒤 다시 빌드해야 적용됩니다.
-            </p>
-            <div class="table-scroll" tabindex="0" role="region" aria-label="압축 설정 비교">
-              <table class="comparison-table">
-                <thead>
-                  <tr>
-                    <th>내 상황</th>
-                    <th>Compression Format</th>
-                    <th>Decompression Fallback</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><b>첫 제출 기본 / 다운로드 크기 줄이기</b></td>
-                    <td><b>Brotli</b></td>
-                    <td><b>OFF</b></td>
-                  </tr>
-                  <tr>
-                    <td><b>자주 빌드해서 업로드·플레이 확인</b></td>
-                    <td><b>Gzip</b></td>
-                    <td><b>OFF</b></td>
-                  </tr>
-                  <tr>
-                    <td>압축이 원인인지 비교하는 진단용</td>
-                    <td>Disabled</td>
-                    <td>OFF / 선택 불필요</td>
-                  </tr>
-                  <tr>
-                    <td>이미 Fallback ON으로 만들어 정상 실행 중</td>
-                    <td>현재 Gzip 또는 Brotli 유지 가능</td>
-                    <td>ON 유지 가능</td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
-            <p>
-              특정 압축 형식을 제출 조건으로 강제하지 않습니다. 새로 만든다면
-              위의 첫 두 조합을 사용하세요.
-              <b>Brotli/Gzip은 주로 다운로드 크기와 로딩에 영향을 줍니다.</b>
-              플레이 중 FPS가 낮다고 Fallback을 켜지는 마세요.
-            </p>
-            <div class="path">
-              <b>Edit</b>
-              <i>›</i>
-              <b>Project Settings</b>
-              <i>›</i>
-              <b>Player</b>
-              <i>›</i>
-              <b
-                ><span data-version-content="6">Web</span
-                ><span data-version-content="2022">WebGL</span> 탭</b
-              >
-              <i>›</i>
-              <b>Publishing Settings</b>
-            </div>
-            <section class="screenshot-panel">
-              <h3>Publishing Settings 위치</h3>
-              <p>
-                Player에서 Web 아이콘을 선택한 뒤 아래로 스크롤합니다. 접혀 있는
-                Publishing Settings 제목을 클릭해 펼치세요.
-              </p>
-              <figure>
-                <div class="image-wrap">
-                  <img
-                    src="%BASE_URL%unity-webgl-guide/assets/images/player-settings-web.png"
-                    alt="Web 플랫폼의 Player 설정. 맨 아래 Publishing Settings를 펼칩니다."
-                  />
-                  <span
-                    class="spot" style="left: 1.5%; top: 83%; width: 97%; height: 13%;"
-                    aria-hidden="true"
-                  ></span>
-                
-                  <button class="zoom" type="button" data-zoom>
-                    사진 확대
-                  </button>
-                  </div>
-                <figcaption>
-                  Web 플랫폼의 Player 설정. 맨 아래 Publishing Settings를
-                  펼칩니다.
-                  <a
-                    class="source"
-                    href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    출처 ↗
-                  </a>
-                </figcaption>
-              </figure>
-            </section>
-            <p class="micro">
-              공통 설정의 위치를 확인하는 화면입니다.
-              <b>화면 속 예시 값을 모두 복사하지 말고</b>, 항목별 안내 값을 적용하세요. 여기서 버튼을 눌러도 Unity 프로젝트
-              설정은 바뀌지 않습니다.
-            </p>
-
-            <div data-option-guide="publishingOptions" id="publishing-guide">
-              <figure id="pub-figure">
-                <div class="image-wrap">
-                  <img
-                    src="%BASE_URL%unity-webgl-guide/assets/images/publishing-settings-unity6.png"
-                    alt="Unity Publishing Settings. Compression Format, Decompression Fallback, Power Preference, 예외, 네이티브 스레드와 메모리 옵션의 위치."
-                  />
-                  <span
-                    class="spot" style="left: 1.2%; top: 6.9%; width: 97.5%; height: 5.1%;"
-                    id="pub-spot"
-                    data-spot
-                    aria-hidden="true"
-                  ></span>
-                
-                  <button class="zoom" type="button" data-zoom>
-                    사진 확대
-                  </button>
-                  </div>
-                <figcaption>
-                  Unity 6.0 문서의 Publishing Settings · 하늘색 테두리가 설명
-                  중인 항목입니다.
-                  <a
-                    class="source"
-                    href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    Player 설정 ↗
-                  </a>
-                </figcaption>
-              </figure>
-              <p class="micro">
-                목록을 스크롤해 항목을 선택하세요. 사진 우측 상단의 사진 확대 버튼으로
-                선택한 위치를 크게 볼 수 있습니다.
-              </p>
-              <div
-                class="pub-controls"
-                id="publishing-controls"
-                data-controls
-                aria-label="설명할 설정 선택"
-              ></div>
-              <div
-                class="detail"
-                id="pub-detail"
-                data-detail
-                aria-live="polite"
-              ></div>
-              <ol
-                class="print-only"
-                id="publishing-print"
-                data-print-options
-              ></ol>
-            </div>
-            <noscript>
-              <p>
-                옵션별 위치 안내는 JavaScript를 켜면 표시됩니다. 설정의 기본
-                방향은 위 요약과
-                <a
-                  href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
-                >
-                  Unity 공식 Player 설정 문서</a>에서 확인할 수 있습니다.
-              </p>
-            </noscript>
-            <div class="callout">
-              <strong>
-                설정한 뒤에는 실제 업로드 페이지에서 플레이하세요.
-              </strong>
-              <br />
-              로딩 완료, 조작, 장면 전환을 확인합니다. 이 확인은 내 게임의
-              동작을 검증하는 단계입니다. 사용자가 압축 전송 방식이나 호스팅
-              설정을 조사할 필요는 없습니다.
-            </div>
-            <p class="micro">
-              압축은 다운로드·시작 시간, Power Preference는 GPU 선택 힌트에
-              관련됩니다. 예외·메모리는 기본값을 출발점으로 삼고 문제가 있을 때
-              측정하며 조정하세요.
-              <a
-                class="source"
-                href="https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-deploying.html"
-                target="_blank"
-                rel="noopener"
-              >
-                배포·압축 ↗
-              </a>
-              <a
-                class="source"
-                href="https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-memory.html"
-                target="_blank"
-                rel="noopener"
-              >
-                메모리 ↗
-              </a>
-            </p>
-            <h3>Default, Minimal, PWA의 차이</h3>
-            <p>
-              Default는 처음 제출할 때 사용할 기본 템플릿입니다. Minimal은 기본
-              버튼 없이 게임 화면을 배치하려는 경우의 선택입니다. PWA는
-              설치·오프라인 기능을 위한 출력 구조입니다. 확인한 사이트
-              소스에서는 PWA의 설치·오프라인 기능을 지원하지 않습니다.
-              이것만으로 PWA 출력물의 기본 Unity 게임도 모두 실행 불가능하다는
-              뜻은 아닙니다. 기본 플레이어의 실행과 추가 PWA 기능은 별도로
-              확인해야 합니다.
-            </p>
-            <p>
-              Default Canvas Width / Height는 시작 크기입니다. 실제 렌더링
-              해상도는 브라우저 창과 기기의 픽셀 비율에 따라 달라질 수 있습니다.
-            </p>
-          <div class="step-done"><b>한줄요약</b><p>압축·Fallback·템플릿을 정하고 필요한 메모리·진단 옵션을 확인했습니다.</p><a href="#graphics">다음: 텍스처·그래픽 설정 →</a></div>
-</section>
-<section class="step reference-step" id="graphics">
-            <div class="step-top">
-              <span class="step-no">05</span>
-              <span class="category">빌드 전 설정</span>
-            </div>
-            <h2>텍스처와 그래픽 부담 줄이기</h2>
-            <div class="callout">
-              <strong>현재는 PC 브라우저를 대상으로 설정합니다.</strong>
-              <br />
-              텍스처 압축은 DXT를 선택하세요. 아래 URP 품질 설정은 실행 후
-              게임이 느리거나 표현에 문제가 있을 때 조정하면 됩니다.
-            </div>
-            <h3>PC용 텍스처 압축: DXT 선택</h3>
-            <div class="path">
-              <b>Player</b>
-              <i>›</i>
-              <b>Other Settings</b>
-              <i>›</i>
-              <b>Rendering</b>
-              <i>›</i>
-              <b>Texture compression format</b>
-            </div>
+            <p><b>아래 세 장과 똑같이 설정하면 됩니다.</b> 이미지를 눌러 크게 보세요.</p>
             <figure>
               <div class="image-wrap">
                 <img
-                  src="%BASE_URL%unity-webgl-guide/assets/images/texture-compression.png"
-                  alt="Other Settings → Rendering의 Texture compression format 위치. PC 대상이므로 DXT를 선택하세요."
+                  src="%BASE_URL%unity-webgl-guide/assets/images/publishing-settings-basics-guide-v3.webp"
+                  alt="Publishing Settings 상단 권장값. Compression Format은 Brotli, Name Files As Hashes는 기본값 유지, Data Caching은 ON, Debug Symbols는 Off, Show Diagnostics Overlay와 Decompression Fallback은 OFF, Power Preference는 High Performance입니다."
+                  loading="lazy"
                 />
-                <span
-                  class="spot" style="left: 1%; top: 41%; width: 98%; height: 7%;"
-                  aria-hidden="true"
-                ></span>
-              
-                <button class="zoom" type="button" data-zoom>
-                  사진 확대
-                </button>
-                  </div>
-              <figcaption>
-                Other Settings → Rendering의 Texture compression format 위치.
-                PC 대상이므로 DXT를 선택하세요.
-                <a
-                  class="source"
-                  href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
-                  target="_blank"
-                  rel="noopener"
-                >
-                  출처 ↗
-                </a>
-              </figcaption>
+                <button type="button" class="zoom" data-zoom>사진 확대</button>
+              </div>
+              <figcaption>1/3 · 압축·캐시·진단·GPU 설정</figcaption>
             </figure>
-            <p>
-              <b>Texture compression format을 DXT로 선택하세요.</b>
-              이 가이드는 현재 PC 브라우저만 대상으로 합니다.
-              <a
-                class="source"
-                href="https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-texture-compression.html"
-                target="_blank"
-                rel="noopener"
-              >
-                텍스처 압축 ↗
-              </a>
-            </p>
+            <figure>
+              <div class="image-wrap">
+                <img
+                  src="%BASE_URL%unity-webgl-guide/assets/images/publishing-settings-advanced-guide-v3.webp"
+                  alt="Publishing Settings 하단 권장값. Enable Exceptions는 Explicitly Thrown Exceptions Only, Native Multithreading은 OFF, WebAssembly 2023과 Table 및 BigInt는 ON, Memory Growth Mode는 Geometric이며 나머지 메모리 값은 Unity 기본값을 유지합니다."
+                  loading="lazy"
+                />
+                <button type="button" class="zoom" data-zoom>사진 확대</button>
+              </div>
+              <figcaption>2/3 · WebAssembly·메모리 설정</figcaption>
+            </figure>
+            <figure>
+              <div class="image-wrap">
+                <img
+                  src="%BASE_URL%unity-webgl-guide/assets/images/web-template-guide-v3.webp"
+                  alt="Resolution and Presentation 권장값. Canvas Width와 Height는 프로젝트 값을 유지하고 Run In Background는 ON, WebGL Template은 Default를 선택합니다."
+                  loading="lazy"
+                />
+                <button type="button" class="zoom" data-zoom>사진 확대</button>
+              </div>
+              <figcaption>3/3 · 화면 크기·실행·템플릿 설정</figcaption>
+            </figure>
             <div class="callout">
-              <strong>설정이 적용되지 않는 것 같다면</strong>
-              <br />
-              빌드 창의 Texture Compression이 Player Settings보다 우선할 수
-              있습니다. 이 가이드를 따라 Player에서 설정했다면 빌드 창은
-              <b>Use Player Settings</b>인지 확인하세요. 개별 텍스처의 플랫폼 오버라이드도 확인합니다.
+              Web Build의 동작 방식과 각 옵션의 의미를 알고 있다면 프로젝트에 맞게
+              설정해도 됩니다. PWA 다운로드 기능과 중첩 Unity 앱 구조를 제외하면
+              대부분 지원됩니다.
             </div>
-            <h3>URP 그래픽 설정 비교 순서</h3>
-            <section class="screenshot-panel">
-              <h3>Quality에서 Render Pipeline Asset 찾기</h3>
-              <p>
-                Edit → Project Settings → Quality를 엽니다. Web에 적용할 품질
-                단계를 선택하고 Rendering의
-                <b>Render Pipeline Asset</b>을 누르세요. 에셋이 없으면 Graphics의 기본 에셋을 확인합니다.
-                아래 공식 화면은 위치를 보여주는 Windows 예시이므로 PC라는
-                이름을 그대로 따라 만들 필요는 없습니다.
-              </p>
+          <div class="step-done"><b>한줄요약</b><p>압축·Fallback·템플릿을 정하고 필요한 메모리·진단 옵션을 확인했습니다.</p><a href="#graphics">다음: 텍스처·그래픽 설정 →</a></div>
+</section>
+<section class="step reference-step" id="graphics">
+              <div class="step-top">
+                <span class="step-no">05</span>
+                <span class="category">빌드 전 설정</span>
+              </div>
+              <h2>텍스처와 그래픽 설정</h2>
+              <p class="micro">PC 브라우저용: Player의 Texture compression format은 <b>DXT</b>, 빌드 창은 <b>Use Player Settings</b>로 둡니다.</p>
               <figure>
                 <div class="image-wrap">
                   <img
-                    src="%BASE_URL%unity-webgl-guide/assets/images/unity6-quality-settings.png"
-                    alt="Unity 6.0 문서의 Quality 창. D 영역 첫 줄 Render Pipeline Asset에서 사용할 URP 에셋을 찾습니다. 원본은 Windows 대상 예시입니다."
+                    src="%BASE_URL%unity-webgl-guide/assets/images/texture-compression-guide-v3.webp"
+                    alt="Player → Other Settings → Rendering에서 Texture compression format을 DXT로 선택하는 안내."
+                    loading="lazy"
                   />
-                  <span
-                    class="spot" style="left: 52%; top: 48.2%; width: 46%; height: 4%;"
-                    aria-hidden="true"
-                  ></span>
-                
-                  <button class="zoom" type="button" data-zoom>
-                    사진 확대
-                  </button>
-                  </div>
-                <figcaption>
-                  Unity 6.0 문서의 Quality 창. D 영역 첫 줄 Render Pipeline
-                  Asset에서 사용할 URP 에셋을 찾습니다. 원본은 Windows 대상
-                  예시입니다.
-                  <a
-                    class="source"
-                    href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-QualitySettings.html"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    공식 출처 ↗
-                  </a>
+                  <button type="button" class="zoom" data-zoom>사진 확대</button>
+                </div>
+                <figcaption>Player → Other Settings → Rendering
+                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/webgl-texture-compression.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
-            </section>
-            <p>
-              Project Settings →
-              <b>Quality</b>에서 Web에 사용할 품질 단계와 연결된
-              <b>Render Pipeline Asset</b>을 확인합니다. 해당 에셋을 Project 창에서 선택해 Inspector에서
-              아래 항목을 찾으세요. Quality에 별도 에셋이 없으면 Graphics의 기본
-              Render Pipeline Asset을 확인합니다.
-            </p>
-            <div class="table-scroll" tabindex="0" role="region" aria-label="그래픽 설정 비교">
-              <table class="comparison-table">
-                <thead>
-                  <tr>
-                    <th>Inspector에서 찾을 항목</th>
-                    <th>비교할 변경</th>
-                    <th>확인할 점</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Quality → Render Scale</td>
-                    <td>1.0 → 0.75 예시</td>
-                    <td>화면 선명도와 FPS. GPU 병목일 때 유효한 후보입니다.</td>
-                  </tr>
-                  <tr>
-                    <td>Quality → Anti Aliasing (MSAA)</td>
-                    <td>4×/8× → 2× 또는 Disabled</td>
-                    <td>모서리의 계단 현상이 허용되는지 확인합니다.</td>
-                  </tr>
-                  <tr>
-                    <td>Shadows → Max Distance / Cascade Count</td>
-                    <td>거리·단계 축소</td>
-                    <td>그림자가 사라지는 거리와 화질을 확인합니다.</td>
-                  </tr>
-                  <tr>
-                    <td>Additional Lights → Cast Shadows</td>
-                    <td>필요 없으면 OFF</td>
-                    <td>게임 표현에 필요한 그림자는 남깁니다.</td>
-                  </tr>
-                  <tr>
-                    <td>HDR / Opaque Texture</td>
-                    <td>해당 기능이 불필요할 때만 OFF</td>
-                    <td>
-                      블룸·굴절 등 의존하는 효과가 깨지지 않는지 확인합니다.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p class="micro">
-              위 숫자는 측정을 위한 비교 예시입니다. 모든 프로젝트의 권장
-              최종값은 아닙니다. Built-in Render Pipeline 프로젝트라면 URP
-              에셋이 없는 것이 정상이며, Project Settings → Quality에서 해당
-              그래픽 품질을 조절합니다.
-              <a
-                class="source"
-                href="https://docs.unity3d.com/6000.0/Documentation/Manual/urp/configure-for-better-performance.html"
-                target="_blank"
-                rel="noopener"
-              >
-                URP 성능 ↗
-              </a>
-              <a
-                class="source"
-                href="https://docs.unity3d.com/6000.0/Documentation/Manual/urp/universalrp-asset.html"
-                target="_blank"
-                rel="noopener"
-              >
-                URP 에셋 ↗
-              </a>
-            </p>
-            <div class="callout">
-              <strong>바꾸기 전 값을 기록하고, 한 번에 하나만 바꾸세요.</strong>
-              <br />
-              같은 카메라·같은 장면에서 비교해야 어떤 옵션이 효과가 있었는지 알
-              수 있습니다. Render Scale을 낮춰도 차이가 없다면 CPU 처리나 프레임
-              제한 등 다른 원인을 살펴야 합니다.
-            </div>
-            <p>
-              같은 장면·같은 창 크기에서 변경 전후를 비교하세요.
-              <b>효과가 없거나 화면 표현이 깨지면 원래 값으로 되돌립니다.</b>
-              변경을 유지해 제출한다면 새로 빌드·압축·업로드·실행 확인을
-              마치세요.
-            </p>
-          <div class="step-done"><b>한줄요약</b><p>Player의 텍스처 압축을 DXT로 설정하고, 빌드 창은 Use Player Settings로 뒀습니다. 품질 설정은 성능을 측정한 뒤 조정하세요.</p><a href="#build">다음: 빌드 실행 →</a></div>
+              <details>
+                <summary>선택 사항 · 그래픽 품질과 성능 조정</summary>
+              <figure>
+                <div class="image-wrap">
+                  <img
+                    src="%BASE_URL%unity-webgl-guide/assets/images/unity6-quality-guide-v3.webp"
+                    alt="Unity 6 Quality 창의 품질 단계와 Render Pipeline Asset 선택 위치. 원본은 Windows 대상 예시입니다."
+                    loading="lazy"
+                  />
+                  <button type="button" class="zoom" data-zoom>사진 확대</button>
+                </div>
+                <figcaption>Quality · 품질 단계 이름은 프로젝트마다 다릅니다.
+                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-QualitySettings.html" target="_blank" rel="noopener">출처 ↗</a>
+                </figcaption>
+              </figure>
+                <p class="micro">Web에 사용할 품질 단계의 Render Pipeline Asset을 선택하세요. 없으면 Graphics의 기본 에셋을 확인합니다. Built-in 프로젝트는 Quality의 설정을 사용합니다.</p>
+                <ul class="micro">
+                  <li>Render Scale을 낮추면 처리량이 줄지만 화면이 덜 선명해집니다.</li>
+                  <li>AA/MSAA를 높이면 가장자리가 매끄러워지고 처리 비용이 늘어납니다.</li>
+                  <li>그림자 거리·캐스케이드는 표현과 성능을 함께 비교하세요.</li>
+                  <li>HDR·Opaque Texture는 필요한 효과가 없을 때만 끕니다.</li>
+                </ul>
+                <p class="micro">한 번에 하나씩 바꾸고 같은 장면에서 비교하세요. 효과가 없거나 표현이 깨지면 되돌립니다.
+                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/urp/configure-for-better-performance.html" target="_blank" rel="noopener">URP 성능 ↗</a>
+                </p>
+              </details>
+              <div class="step-done">
+                <b>한줄요약</b>
+                <p>텍스처 압축은 DXT입니다. 품질은 필요할 때 측정하며 조정하세요.</p>
+                <a href="#build">다음: 빌드 실행 →</a>
+              </div>
 </section>
 <section class="step" id="build">
               <div class="step-top">
@@ -1260,55 +344,17 @@
               </div>
               <h2>빌드 실행·결과 폴더 확인</h2>
               <ol class="steps">
-                <li>
-                  <span data-version-content="6">
-                    File → Build Profiles에서 활성 Web 프로필을 선택합니다.
-                  </span>
-                  <span data-version-content="2022">
-                    File → Build Settings에서 WebGL을 선택합니다.
-                  </span>
-                  <b>Build</b>를 누릅니다.
-                </li>
-                <li>
-                  저장 위치 창에서
-                  <b>새 빈 폴더</b>를 만듭니다. 예를 들어 바탕화면에
-                  <code>MyGame-Web-01</code>을 만들고, 이 폴더를 결과 저장 위치로 선택하세요. 폴더 이름은
-                  예시입니다.
-                </li>
-                <li>
-                  Unity의 빌드가 끝날 때까지 기다립니다. 오류로 중단되면
-                  <a href="#help-build">빌드 도움말</a>로 이동하세요.
-                </li>
-                <li>
-                  방금 선택한 결과 폴더를 엽니다.
-                  <b>index.html과 Build 폴더</b>
-                  등 생성된 결과물이 있는지 확인합니다.
-                </li>
+                <li><span data-version-content="6">Build Profiles의 활성 Web 프로필에서</span><span data-version-content="2022">Build Settings의 WebGL에서</span> <b>Build</b>를 누릅니다.</li>
+                <li><b>새 빈 폴더</b>를 만들어 저장 위치로 선택합니다. 예: <code>MyGame-Web-01</code>.</li>
+                <li>완료 후 결과 폴더의 <b>index.html과 Build 폴더</b>를 확인합니다. 중단되면 <a href="#help-build">빌드 도움말</a>로 이동하세요.</li>
               </ol>
-              <div class="callout">
-                <strong>다음에 압축할 것은 방금 생성한 결과물입니다.</strong>
-                <br />
-                편집하던 Assets·Packages·ProjectSettings가 들어 있는 Unity
-                프로젝트 원본 폴더와 구분하세요. 지금 연 빌드 결과 폴더를 그대로
-                열어두고 다음 단계로 갑니다.
-              </div>
-              <p>
-                <b>
-                  index.html을 더블클릭한 결과만으로 웹 실행 성공·실패를
-                  판단하지 마세요.
-                </b>
-                이 절차에서는 로컬 서버를 설치하지 않고, ZIP 업로드 후
-                사이트에서 실행을 확인합니다.
-              </p>
+              <p class="micro">다음 단계에서는 Assets·Packages가 있는 프로젝트 원본이 아닌 <b>빌드 결과물</b>을 압축합니다. index.html을 더블클릭하지 말고 업로드 후 실행을 확인하세요.</p>
               <div class="step-done">
                 <b>한줄요약</b>
-                <p>
-                  빌드가 완료됐고, 새 결과 폴더 안에 index.html과 Build 등이
-                  보입니다.
-                </p>
-              <a href="#zip">다음: ZIP 만들기 →</a>
-</div>
-            </section>
+                <p>빌드가 완료됐고, 결과 폴더에 index.html과 Build가 있습니다.</p>
+                <a href="#zip">다음: ZIP 만들기 →</a>
+              </div>
+</section>
 <section class="step" id="zip">
               <div class="step-top">
                 <span class="step-no">07</span>
@@ -1316,35 +362,12 @@
               </div>
               <h2>빌드 결과물 ZIP 압축</h2>
               <ol class="steps">
-                <li>
-                  방금 만든
-                  <b>빌드 결과 폴더를 열어 index.html이 보이는 위치</b>로 이동합니다.
-                </li>
-                <li>
-                  그 위치의 파일과 폴더를
-                  <b>전부 선택</b>합니다. Windows는 Ctrl+A, macOS는 Command+A를 사용합니다.
-                </li>
-                <li>
-                  선택한 항목을 우클릭하고 운영체제의 ZIP 압축 명령을
-                  사용합니다. Windows는 ‘ZIP 파일로 압축’ 또는 ‘보내기 →
-                  압축(ZIP) 폴더’, macOS는 ‘압축’을 선택합니다.
-                </li>
-                <li>
-                  완성된 ZIP에 이름을 붙이고 파일명과 저장 위치를 기억하세요.
-                  예:
-                  <code>MyGame-Web-01.zip</code>. 압축 파일 안에서 index.html과 Build 등 모든 결과물이 함께
-                  있는지 확인합니다.
-                </li>
+                <li>결과 폴더에서 <b>index.html이 보이는 위치</b>를 엽니다.</li>
+                <li><b>파일·폴더 전부</b>를 선택합니다. Windows: Ctrl+A / macOS: Command+A.</li>
+                <li>우클릭 → ZIP 압축을 선택합니다. Windows: ‘ZIP 파일로 압축’ 또는 ‘보내기 → 압축(ZIP) 폴더’ / macOS: ‘압축’.</li>
+                <li>ZIP 안에 index.html·Build와 <b>생성된 모든 결과물</b>이 함께 있는지 확인합니다.</li>
               </ol>
-              <p>
-                <b>
-                  Unity 프로젝트 원본 전체, index.html 하나, Build 폴더 하나만
-                  올리는 것이 아닙니다.
-                </b>
-                빌드 결과물 전체를 함께 압축합니다. StreamingAssets나 예시에
-                없는 추가 파일·폴더도 생성되었다면 모두 포함하세요.
-              </p>
-              <pre aria-label="ZIP 내부 구조 예시">
+              <pre>
 MyGame-Web-01.zip
 ├─ index.html
 ├─ Build/
@@ -1354,31 +377,17 @@ MyGame-Web-01.zip
 │  └─ ….data.br
 ├─ TemplateData/         ← 생성되었다면 함께 포함
 └─ StreamingAssets/      ← 생성되었다면 함께 포함</pre>
-              <p>
-                위 구조와 이름은
-                <b>예시</b>입니다. 없는 파일을 새로 만들거나 실제 출력 파일을 지우지
-                마세요.
-                <b>확장자, loader, 생성된 JavaScript는 직접 고치지 않습니다.</b>
-              </p>
+              <p class="micro">구조와 이름은 예시입니다. 파일 일부만 압축하거나 프로젝트 원본을 올리지 마세요. 생성된 파일·확장자·JavaScript는 수정하지 않습니다.</p>
               <details>
-                <summary>이미 다른 압축 방식으로 ZIP을 만든 경우</summary>
-                <p>
-                  위 방법은 ZIP을 열자마자 index.html이 보이게 만듭니다. 업로드
-                  안내에는 바깥 폴더 하나 안에 전체 결과물이 들어 있는 구조도
-                  제시되어 있습니다. 여러 폴더를 임의로 더 감싸거나 파일 일부를
-                  바깥에 두지 마세요. 다른 정상 압축 조합의 허용 여부는 이 기본
-                  절차로 바뀌지 않습니다.
-                </p>
+                <summary>이미 바깥 폴더를 포함해 압축했다면</summary>
+                <p class="micro">바깥 폴더 하나 안에 결과물 전체가 있는 구조도 업로드 안내에 포함되어 있습니다. 여러 겹으로 감싸거나 일부 파일을 바깥에 두지 마세요.</p>
               </details>
               <div class="step-done">
                 <b>한줄요약</b>
-                <p>
-                  업로드할 ZIP 하나가 준비되었고, 그 안에 빌드 결과물 전체가
-                  들어 있습니다.
-                </p>
-              <a href="#upload">다음: 사이트 업로드 →</a>
-</div>
-            </section>
+                <p>빌드 결과물 전체가 담긴 ZIP 하나가 준비되었습니다.</p>
+                <a href="#upload">다음: 사이트 업로드 →</a>
+              </div>
+</section>
 <section class="step" id="upload">
               <div class="step-top">
                 <span class="step-no">08</span>
@@ -1400,142 +409,44 @@ MyGame-Web-01.zip
               </div>
               <h2>업로드본 실행·기능 확인</h2>
               <ol class="steps">
-                <li>
-                  로그인한 상태에서 사이트의
-                  <b>전시 목록</b>으로 이동합니다. 제출할 때 선택한 전시회를 열고 내 작품 카드를
-                  누릅니다.
-                </li>
-                <li>
-                  작품 화면의
-                  <b>플레이해보기</b>를 누릅니다. 새 실행 화면에서 파일이 로드될 때까지 기다리세요.
-                  내 작품이나 버튼이 보이지 않으면 완료한 것으로 처리하지 말고
-                  <a href="#help-load">실행 도움말</a>로 이동합니다.
-                </li>
-                <li>
-                  <b>
-                    게임을 시작하고, 내 게임에 있는 주요 조작·기능을 직접 확인</b>합니다. 예: 메뉴 선택, 이동, 점프, 공격, 장면 전환. 게임에
-                  없는 기능을 추가하거나 시험할 필요는 없습니다.
-                </li>
-                <li>
-                  시작 화면만 보지 말고 실제 플레이 구간을 진행합니다. 멈추면
-                  <b>어느 화면에서 어떤 행동 직후 멈췄는지</b>
-                  기록하세요.
-                </li>
-                <li>
-                  이번 ZIP의 파일명과 확인한 작품·실행 주소를 함께 기록합니다.
-                  게임이나 설정을 수정했다면
-                  <a href="#build">6단계</a>로 돌아가
-                  <b>새로 빌드 → ZIP → 업로드 → 업로드본 실행</b>까지 다시 진행합니다. 이전 업로드본을 확인한 기록을 새 ZIP의
-                  확인으로 대신하지 마세요.
-                </li>
+                <li>로그인 → <b>전시 목록</b> → 제출한 전시회 → 내 작품을 엽니다.</li>
+                <li><b>플레이해보기</b>를 누르고 로딩을 기다립니다. 버튼이 없거나 실행이 멈추면 <a href="#help-load">실행 도움말</a>로 이동하세요.</li>
+                <li><b>이번 업로드본</b>에서 게임 시작·주요 조작·장면 전환을 확인합니다. 실제 플레이 구간까지 진행하세요.</li>
+                <li>ZIP 파일명·실행 주소를 기록합니다. 멈추면 화면과 직전 행동을 함께 적으세요.</li>
+                <li>수정했다면 <a href="#build">새로 빌드 → ZIP → 업로드 → 실행 확인</a>을 반복합니다.</li>
               </ol>
-              <p>
-                에디터에서 실행된 것만으로 끝내지 않습니다. 이 단계에서는
-                사이트에 올라간 바로 그 빌드를 확인합니다. FPS 측정은 뒤의
-                <a href="#measure">성능 측정 안내</a>이며, 이 문서가 별도의 FPS 합격선을 만들지는 않습니다.
-              </p>
               <div class="step-done">
                 <b>한줄요약</b>
-                <p>
-                  이번에 제출한 ZIP의 업로드본에서 게임 시작과 주요 기능을
-                  확인했습니다. 해결되지 않은 오류가 있으면 도움말로 진행합니다.
-                </p>
-              <a href="#measure">다음: FPS·메모리 측정 →</a>
-</div>
-            </section>
-<section class="step reference-step" id="measure">
-            <div class="step-top">
-              <span class="step-no">10</span>
-              <span class="category">실행·성능 확인</span>
-            </div>
-            <h2>실행 후 FPS·메모리 측정</h2>
-            <p>
-              성능 측정은 개선을 위한 선택 사항입니다. 이 문서는 특정 FPS를 제출
-              요건으로 정하지 않습니다.
-              <b>30 FPS라고 무조건 실패는 아닙니다.</b>
-              게임의 조작 안정성과 사용 기기를 함께 보세요.
-            </p>
-            <p>
-              같은 창 크기·같은 장면에서 30~60초 정도 관찰하고 복잡한 장면과
-              로딩 직후의 끊김을 기록하세요. 모든 게임에 동일한 합격선을
-              적용하지 않습니다.
-            </p>
-            <section class="screenshot-panel">
-              <h3>FPS·메모리 진단 표시 위치</h3>
-              <p>
-                Publishing Settings에서
-                <b>Show Diagnostics Overlay</b>를 켜고 다시 빌드합니다. 기본 템플릿에서 진단 버튼을 눌러
-                표시합니다. 커스텀 템플릿은 버튼이 없을 수 있습니다.
-                <b>
-                  FPS 확인만으로 Development Build나 Deep Profiling을 켤 필요는
-                  없습니다.
-                </b>
-              </p>
-              <div class="overlay-button-guide">
-                <img
-                  src="%BASE_URL%unity-webgl-guide/assets/images/unity6-overlay-button.png"
-                  alt="Unity 6 기본 템플릿의 하늘색 파형 모양 Show overlay 버튼"
-                  width="56"
-                  height="56"
-                />
-                <p>
-                  <b>게임 아래의 이 파형 버튼</b>을 클릭하면 진단 표시를 열 수 있습니다. Unity 6 공식
-                  튜토리얼의 실제 버튼 이미지입니다.
-                  <a
-                    class="source"
-                    href="https://learn.unity.com/tutorial/getting-started-with-unity-web"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    공식 출처 ↗
-                  </a>
-                </p>
+                <p>이번 ZIP의 업로드본에서 시작과 주요 기능을 확인했습니다.</p>
+                <a href="#measure">다음: FPS·메모리 측정 →</a>
               </div>
+</section>
+<section class="step reference-step" id="measure">
+              <div class="step-top">
+                <span class="step-no">10</span>
+                <span class="category">실행·성능 확인</span>
+              </div>
+              <h2>실행 후 FPS·메모리 측정</h2>
               <figure>
                 <div class="image-wrap">
                   <img
-                    src="%BASE_URL%unity-webgl-guide/assets/images/diagnostics-overlay.png"
-                    alt="Unity 공식 Diagnostics Overlay 예시. 화면 하단에서 FPS와 메모리를 확인합니다."
+                    src="%BASE_URL%unity-webgl-guide/assets/images/diagnostics-guide-v3.webp"
+                    alt="Show Diagnostics Overlay를 켜고 다시 빌드·업로드한 뒤 파형 버튼으로 FPS와 메모리를 확인합니다. Development Build는 OFF를 유지합니다."
+                    loading="lazy"
                   />
-                
-                  <button class="zoom" type="button" data-zoom>
-                    사진 확대
-                  </button>
-                  </div>
-                <figcaption>
-                  Unity 공식 Diagnostics Overlay 예시. 화면 하단에서 FPS와
-                  메모리를 확인합니다.
-                  <a
-                    class="source"
-                    href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    출처 ↗
-                  </a>
+                  <button type="button" class="zoom" data-zoom>사진 확대</button>
+                </div>
+                <figcaption>진단 표시 순서
+                  <a class="source" href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html" target="_blank" rel="noopener">출처 ↗</a>
                 </figcaption>
               </figure>
-              <p>
-                60 FPS는 한 프레임 약
-                <b>16.7ms</b>, 30 FPS는 약
-                <b>33.3ms</b>에 해당합니다. 평균값뿐 아니라 입력 시 끊김도 보세요. 메모리
-                항목 일부가 N/A인 것은 브라우저가 해당 값을 제공하지 않아서일 수
-                있습니다.
-              </p>
-              <p class="micro">
-                위 화면의 숫자는 Unity 공식 문서의 예시이며, 여러분의 게임
-                측정값이나 권장 성능이 아닙니다.
-                <a
-                  class="source"
-                  href="https://docs.unity3d.com/6000.0/Documentation/Manual/class-PlayerSettingsWebGL.html"
-                  target="_blank"
-                  rel="noopener"
-                >
-                  Player 설정 ↗
-                </a>
-              </p>
-            </section>
-          <div class="step-done"><b>한줄요약</b><p>같은 장면에서 FPS와 메모리를 확인하고 끊김이 생기는 구간을 기록했습니다.</p><a href="#performance-help">다음: 성능 분석·개선 →</a></div>
+              <p class="micro">측정은 선택 사항이며 공통 FPS 합격선은 없습니다. 커스텀 템플릿에는 진단 버튼이 없을 수 있습니다.</p>
+              <p class="micro">같은 장면·창 크기에서 30~60초 비교하세요. 화면 속 숫자는 측정값 예시입니다.</p>
+              <div class="step-done">
+                <b>한줄요약</b>
+                <p>FPS·메모리와 끊기는 구간을 같은 조건에서 비교합니다.</p>
+                <a href="#performance-help">다음: 성능 분석·개선 →</a>
+              </div>
 </section>
 <section class="step reference-step" id="performance-help">
             <div class="step-top">
@@ -1543,7 +454,7 @@ MyGame-Web-01.zip
               <span class="category">실행·성능 확인</span>
             </div>
             <h2>초기 로딩·플레이 성능·메모리 구분</h2>
-            <details open>
+            <details>
               <summary>처음 게임이 뜨기까지 오래 걸려요</summary>
               <p>
                 기본 경로의 Brotli + Fallback OFF로 빌드하고, 초기 씬에 넣은
@@ -1597,7 +508,7 @@ MyGame-Web-01.zip
               <span class="category">트러블슈팅</span>
             </div>
             <h2>문제 발생 단계별 도움말</h2>
-            <details open id="help-build">
+            <details id="help-build">
               <summary>Unity에서 빌드가 완료되지 않습니다</summary>
               <p>
                 <b>먼저 확인:</b>
@@ -1729,6 +640,7 @@ MyGame-Web-01.zip
       </div>
       <div class="dialog-body">
         <div class="image-wrap">
+          <!-- html-validate-disable-next element-required-attributes: lightbox.js sets src before opening the dialog -->
           <img id="dialog-image" alt="선택한 Unity 설정 화면 확대" />
           <span id="dialog-spot" class="spot" hidden aria-hidden="true"></span>
         </div>

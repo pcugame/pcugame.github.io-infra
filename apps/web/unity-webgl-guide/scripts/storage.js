@@ -1,4 +1,5 @@
 /** Storage restrictions must not break reading or interaction. */
+window.PcuWebglGuide ??= {};
 (() => {
   "use strict";
   const namespace = "pcu-webgl-guide-v1-";

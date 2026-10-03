@@ -10,7 +10,8 @@
     "dev:mock": "vite --mode mock",
     "prebuild": "npm --prefix ../.. run build -w @pcu/contracts",
     "build": "tsc -b && vite build && node scripts/post-build.mjs",
-    "lint": "eslint .",
+    "lint": "eslint . && npm run lint:html",
+    "lint:html": "html-validate unity-webgl-guide/index.html",
     "preview": "vite preview",
     "pretest": "npm --prefix ../.. run build -w @pcu/contracts",
     "test": "vitest run"
@@ -37,6 +38,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "html-validate": "11.16.1",
     "jsdom": "^25.0.1",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.0",
