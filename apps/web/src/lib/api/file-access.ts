@@ -38,7 +38,8 @@ export function collectFileTokens(value: unknown): Set<string> {
   if (typeof node === 'string' && /^https?:\/\//.test(node)) {
    const url = new URL(node);
    const token = url.searchParams.get('pcu_token') ?? url.pathname.match(/^\/(?:play|file)\/([^/]+)(?:\/|$)/)?.[1];
-   if (token) tokens.add(token);
+   // Match the renewal API contract; /play/projects/:id is a route, not a capability.
+   if (token && /^[a-f0-9]{64}$/.test(token)) tokens.add(token);
   } else if (Array.isArray(node)) node.forEach((item) => walk(item));
   else if (node && typeof node === 'object') Object.entries(node).forEach(([name, item]) => walk(item, name));
  }

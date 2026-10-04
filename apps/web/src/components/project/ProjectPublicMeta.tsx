@@ -34,7 +34,7 @@ export function ProjectPublicMeta({ githubUrl, externalLinks, platforms = [] }: 
 			{links.map((link, index) => (
 				<a
 					key={index}
-					className="project-github-link project-external-link"
+					className="project-external-link"
 					href={link.url}
 					target="_blank"
 					rel="noopener noreferrer"
