@@ -47,18 +47,21 @@ describe('media access capabilities', () => {
   const input = { before: { externalLinks, githubUrl: 'https://example.com/file/legacy' }, changes: { externalLinks }, stagedAssets: [{ previewUrl: 'https://media.example/image' }] };
   const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
    if (url.endsWith('/api/admin/change-requests/123')) return Response.json({ ok: true, data: input });
-   if (url.endsWith('/api/file-access') && JSON.parse(options?.body as string).url === 'https://media.example/image') return Response.json({ ok: true, data: { url: 'https://media.example/image?pcu_token=media', token: 'media', expiresAt: null } });
+   if (url.endsWith('/api/file-access') && JSON.parse(options?.body as string).url === 'https://media.example/image') return Response.json({ ok: true, data: { url: 'https://media.example/image?pcu_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', token: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', expiresAt: null } });
    return new Response('unexpected', { status: 500 });
   });
   vi.stubGlobal('fetch', fetcher);
   const result = await api.get<typeof input>('/api/admin/change-requests/123');
   expect(result.before).toEqual(input.before);
   expect(result.changes).toEqual(input.changes);
-  expect(result.stagedAssets[0].previewUrl).toBe('https://media.example/image?pcu_token=media');
-  expect([...collectFileTokens(result)]).toEqual(['media']);
+  expect(result.stagedAssets[0].previewUrl).toBe('https://media.example/image?pcu_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  expect([...collectFileTokens(result)]).toEqual(['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']);
   expect(fetcher).toHaveBeenCalledTimes(2);
  });
+ it('ignores project play routes and malformed capability tokens', () => {
+  expect([...collectFileTokens({ webglPlayUrl: 'https://api.test/play/projects/7', file: 'https://files.test/file/projects', image: 'https://files.test/x?pcu_token=invalid', short: 'https://files.test/file/abc', long: `https://files.test/file/${'a'.repeat(65)}` })]).toEqual([]);
+ });
  it('finds and deduplicates file and WebGL tokens for stable renewal', () => {
-  expect([...collectFileTokens({ image: 'https://files.test/x?pcu_token=one', play: 'https://files.test/play/two/index.html', same: ['https://files.test/y?pcu_token=one'], download: 'https://files.test/file/three' })].sort()).toEqual(['one', 'three', 'two']);
+  expect([...collectFileTokens({ image: 'https://files.test/x?pcu_token=1111111111111111111111111111111111111111111111111111111111111111', play: 'https://files.test/play/2222222222222222222222222222222222222222222222222222222222222222/index.html', same: ['https://files.test/y?pcu_token=1111111111111111111111111111111111111111111111111111111111111111'], download: 'https://files.test/file/3333333333333333333333333333333333333333333333333333333333333333' })].sort()).toEqual(['1111111111111111111111111111111111111111111111111111111111111111', '2222222222222222222222222222222222222222222222222222222222222222', '3333333333333333333333333333333333333333333333333333333333333333']);
  });
 });

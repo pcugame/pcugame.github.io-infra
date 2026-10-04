@@ -361,6 +361,39 @@
   white-space: pre-wrap;
 }
 
+/* Keep actions visible while only the project content scrolls. */
+.modal-panel--project {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 4rem);
+  overflow: hidden;
+}
+
+.modal-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.project-actions.modal-action-bar {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 0.75rem;
+  padding: 1rem 2rem max(1rem, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.04);
+  z-index: 1;
+}
+
+.modal-action-bar .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 2.75rem;
+  padding-inline: 0.5rem;
+  text-align: center;
+}
+
 /* 다운로드 */
 .modal-download {
   padding-top: 1rem;
@@ -482,6 +515,15 @@
 
   .modal-body {
     padding: 1.25rem 1rem;
+  }
+
+  .project-actions.modal-action-bar {
+    gap: 0.5rem;
+    padding: 0.75rem 1rem max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .modal-action-bar .btn {
+    font-size: 0.75rem;
   }
 }
 

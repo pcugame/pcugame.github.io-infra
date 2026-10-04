@@ -129,7 +129,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 	return (
 		<div className="modal-overlay" ref={overlayRef} onClick={handleOverlayClick}>
-			<div className="modal-panel" role="dialog" aria-modal="true">
+			<div className="modal-panel modal-panel--project" role="dialog" aria-modal="true">
 				{/* 닫기 버튼 */}
 				<button className="modal-close" onClick={onClose} aria-label="닫기">
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -145,6 +145,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 				{project && (
 					<>
+						<div className="modal-content">
 						{/* 메인 미디어 표시 — 16:9 고정 비율 */}
 						{current && (
 							<div className="modal-visual">
@@ -313,15 +314,16 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								</div>
 							)}
 
-							<ProjectActions
-								projectId={project.id}
-								gameDownloadUrl={project.gameDownloadUrl}
-								webglUrl={project.webglUrl}
-            webglPlayUrl={project.webglPlayUrl}
-								className="modal-download"
-							/>
 							<ProjectAttachments attachments={project.attachments} className="modal-attachments" />
 						</div>
+						</div>
+						<ProjectActions
+							projectId={project.id}
+							gameDownloadUrl={project.gameDownloadUrl}
+							webglUrl={project.webglUrl}
+							webglPlayUrl={project.webglPlayUrl}
+							className="modal-action-bar"
+						/>
 					</>
 				)}
 			</div>
