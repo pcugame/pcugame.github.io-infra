@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Prisma, type PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { createS3Client } from '../lib/s3.js';
 import { createObjectStorage } from '../lib/storage.js';
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
@@ -33,6 +33,7 @@ function checksum(bytes: Buffer): string {
 
 describe.runIf(enabled)('WebGL deletion lifecycle with PostgreSQL and Garage', () => {
 	let prisma: PrismaClient;
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let actorId = 0;
 	let exhibitionId = 0;
 	const marker = `project-delete-${randomUUID()}`;
@@ -51,7 +52,10 @@ describe.runIf(enabled)('WebGL deletion lifecycle with PostgreSQL and Garage', (
 	beforeAll(async () => {
 		const databaseUrl = process.env['DATABASE_URL'];
 		if (!databaseUrl) throw new Error('DATABASE_URL is required');
-		prisma = createPrismaClientForDatabase(databaseUrl);
+		// The running integration API also reaps public-schema orphan rows. Keep
+		// this worker's claims private so assertions cannot race that background job.
+		database = await createIsolatedMigratedDatabase(databaseUrl);
+		prisma = database.createClient();
 		await prisma.$connect();
 		await prisma.storageBucket.upsert({
 			where: { bucket: buckets.publicBucket },
@@ -79,7 +83,7 @@ describe.runIf(enabled)('WebGL deletion lifecycle with PostgreSQL and Garage', (
 			},
 		});
 		exhibitionId = exhibition.id;
-	});
+	}, 60_000);
 
 	afterAll(async () => {
 		if (!prisma) return;
@@ -106,7 +110,7 @@ describe.runIf(enabled)('WebGL deletion lifecycle with PostgreSQL and Garage', (
 			const keys = await storage.listKeys(bucket, marker).catch(() => []);
 			if (keys.length > 0) await storage.deleteKeys(bucket, keys).catch(() => undefined);
 		}
-		await prisma.$disconnect();
+		await database.close();
 		s3.destroy();
 	});
 
