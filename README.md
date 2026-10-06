@@ -167,6 +167,43 @@ npm run dev --workspace=apps/web
 
 Web은 <http://localhost:5173>, API는 <http://localhost:4000>에서 실행된다. API의 `/api/health`는 process lifecycle과 database를 확인하고, `/api/health/deep`은 객체 저장소까지 추가로 확인한다.
 
+### 6. Mock 개발 환경
+
+API·DB 없이 현재 Web의 조회·수정·제출·검토 흐름을 확인하려면 다음 명령을 실행한다.
+
+```bash
+npm run dev:mock --workspace=apps/web
+```
+
+화면 하단의 **Mock 개발 패널**에서 익명, 소유 학생, 공동 참여자, 다른 학생, `OPERATOR`, `ADMIN`을 선택한다. 최초 실행은 기존 `mock-role`을 반영하며, 설정이 없으면 `ADMIN`을 사용한다. 사용자 전환은 작품과 작업을 보존하고 조회 캐시를 갱신한다. 로그아웃·세션 만료 이후에는 보호된 요청의 인증 결과도 변경된다.
+
+| 제어 | 재현 범위 |
+|---|---|
+| 기본 전시 | 같은 연도 복수 전시, 20개 초과 목록, 상태·공개 범위·수정 허용 조합 |
+| 빈 데이터 | 전시·작품 목록의 빈 상태 |
+| 권한·수정 종료 | 소유·참여 관계별 capability, 직접 수정 제한 |
+| 미디어 처리 | 영상 처리 상태와 작업 일시 정지 |
+| 변경 요청 검토 | 수정 종료 작품의 `PENDING` 요청과 관리자 검토 |
+| 실패·재시도 | 일회성 요청 실패, 작업 실패와 재시도 |
+| 지연·다음 요청 429 | 지정 경로의 지연, `Retry-After`를 통한 직접 업로드 재시도 |
+| 전체 초기화 | 저장 데이터·작업의 삭제와 기본 fixture 복원 |
+
+데이터와 예정된 작업 상태는 IndexedDB `pcu-development-mock-v1`에 저장한다. 성공 응답은 저장 완료 후 반환한다. 새로고침·사용자 전환·처리 중 재접속 이후에도 상태가 유지된다. 탭 간 변경은 revision 검사와 변경 알림으로 반영하며, 충돌 시 요청을 다시 실행한다. 시나리오 변경과 전체 초기화에는 데이터 삭제 확인이 표시된다. 저장을 사용할 수 없거나 저장에 실패하면 오류를 표시하며 성공으로 처리하지 않는다. 이전 저장 형식은 migration을 적용하고, 지원하지 않는 버전은 전체 초기화로 복구한다.
+
+직접 업로드 재개 시 원본 파일을 다시 선택한다. 파일의 source identity, part 크기·checksum·ETag와 generation을 검증한다. `UPLOADING` 이후 검증·처리·`READY` 상태를 거치며, 작업 일시 정지·실패·취소도 재현한다. 초기 제출과 변경 요청은 프로젝트별로 구분하고, 제출의 `Idempotency-Key`를 보존한다. 변경 요청의 파일은 임시 프로젝트에 저장하며 승인 완료 시 원본에 반영한다.
+
+미디어는 `apps/web/public/mock`의 합성 이미지, 짧은 영상, 첨부파일, 고정 크기·반응형 WebGL 미리보기를 사용한다. Mock 기본 동작에는 운영 API·스토리지와 외부 이미지 서비스가 필요하지 않다. 대용량 파일은 메타데이터와 처리 상태를 재현한다. 실제 압축 해제·영상 변환·Unity 실행은 통합 환경에서 검증한다. Export는 서버 작업 상태와 결과 경로를 재현하며 브라우저 다운로드 기능은 추가하지 않는다.
+
+API 대응표는 [Mock API inventory](apps/web/src/lib/api/mock/inventory.json)에 기록한다. 일반 요청과 직접 업로드는 운영 모드와 동일한 응답 해석·`ApiError`·재시도 경로를 사용한다. 미등록 method/path는 오류와 개발 진단을 반환한다. production build에는 Mock transport·handler 코드가 포함되지 않는다.
+
+```bash
+npm test --workspace=apps/web -- mock
+npm run lint --workspace=apps/web
+npm run build --workspace=apps/web
+```
+
+응답 계약·실제 client·IndexedDB 저장/충돌/실패와 인증된 격리 API의 controller·service·serializer 비교는 자동 테스트로 확인한다. 격리 API 비교에는 테스트용 저장소를 사용하며, 운영의 인증된 응답을 검증한 것으로 간주하지 않는다. 서버·DB·공용 계약·release workflow는 이번 Mock 구현의 변경 범위에 포함하지 않는다.
+
 ## 주요 명령
 
 | 명령 | 검증 범위 |
