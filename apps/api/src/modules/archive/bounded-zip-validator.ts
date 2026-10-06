@@ -36,7 +36,6 @@ export interface BoundedZipValidationOptions {
 	maxCentralDirectoryBytes?: number;
 	maxEntryUncompressedBytes?: number;
 	maxTotalUncompressedBytes?: number;
-	maxCompressionRatio?: number;
 	/** Additional nested-looking paths that a specific worker knows are inert resources. */
 	allowNestedArchivePath?: (path: string) => boolean;
 }
@@ -81,7 +80,6 @@ interface EffectivePolicy {
 	maxCentralDirectoryBytes: number;
 	maxEntryUncompressedBytes: number;
 	maxTotalUncompressedBytes: number;
-	maxCompressionRatio: number;
 	allowNestedArchivePath(path: string): boolean;
 }
 
@@ -119,7 +117,6 @@ const DEFAULTS = {
 	maxCentralDirectoryBytes: 64 * 1024 * 1024,
 	maxEntryUncompressedBytes: 4 * 1024 * 1024 * 1024,
 	maxTotalUncompressedBytes: 10 * 1024 * 1024 * 1024,
-	maxCompressionRatio: 100,
 } as const;
 
 function positiveSafeInteger(value: number, name: string): number {
@@ -151,10 +148,6 @@ function policyFrom(options: BoundedZipValidationOptions): EffectivePolicy {
 		maxTotalUncompressedBytes: positiveSafeInteger(
 			options.maxTotalUncompressedBytes ?? DEFAULTS.maxTotalUncompressedBytes,
 			'maxTotalUncompressedBytes',
-		),
-		maxCompressionRatio: positiveSafeInteger(
-			options.maxCompressionRatio ?? DEFAULTS.maxCompressionRatio,
-			'maxCompressionRatio',
 		),
 		allowNestedArchivePath: (path) => (
 			allowProfileResource(path) || options.allowNestedArchivePath?.(path) === true
@@ -268,12 +261,8 @@ function assertDeclaredBounds(entry: StructuralEntry, policy: EffectivePolicy): 
 	if (entry.uncompressedSize > policy.maxEntryUncompressedBytes) {
 		throw new ZipValidationError('ZIP entry expands beyond the per-entry byte limit');
 	}
-	if (!entry.isDirectory && (
-		(entry.compressedSize === 0 && entry.uncompressedSize > 0)
-		|| (entry.compressedSize > 0
-			&& entry.uncompressedSize / entry.compressedSize > policy.maxCompressionRatio)
-	)) {
-		throw new ZipValidationError('ZIP entry declared compression ratio is too high');
+	if (entry.compressedSize === 0 && entry.uncompressedSize > 0) {
+		throw new ZipValidationError('ZIP entry declares expanded bytes without compressed data');
 	}
 }
 
@@ -554,11 +543,6 @@ async function decodeEntry(
 				|| decodedBytes > expected.uncompressedSize) {
 				throw new ZipValidationError(`ZIP entry actual expansion exceeds its bound: ${expected.path}`);
 			}
-			if (expected.compressedSize === 0
-				? decodedBytes > 0
-				: decodedBytes / expected.compressedSize > policy.maxCompressionRatio) {
-				throw new ZipValidationError(`ZIP entry actual compression ratio is too high: ${expected.path}`);
-			}
 			crcState = updateCrc32(crcState, chunk);
 		}
 	} catch (error) {
@@ -639,6 +623,8 @@ async function fullyDecode(
  * bounded before allocation, then every file is decoded sequentially into a
  * counting/CRC sink. The single archive descriptor is always closed by the
  * caller-visible promise, including deterministic rejection and cancellation.
+ * Expansion is bounded by absolute byte limits, not compression ratio: highly
+ * repetitive game resources can legitimately compress by more than 100:1.
  */
 export async function validateBoundedZipFile(
 	archivePath: string,

@@ -41,6 +41,7 @@ export function useProjectUploadQueue(
 	const completedUploads = useRef(new Set<number>());
 	const interruptedApply = useRef<Error | null>(null);
 	const [retryAttempt, setRetryAttempt] = useState(0);
+	const [submissionItem, setSubmissionItem] = useState<{ id: string; clientToken: string }>();
 	const [removals, setRemovals] = useState<number[]>([]);
 	const [removeWebgl, setRemoveWebgl] = useState(false);
 	const deleted = useRef(new Set<number>());
@@ -147,6 +148,17 @@ export function useProjectUploadQueue(
 				checkInterrupted();
 				// A widget retry can finish while deletion or canonical refresh is awaited.
 				if (completedUploads.current.has(entry.id)) continue;
+				if (project.status === 'DRAFT') {
+					const submission = await adminProjectApi.getSubmission(projectId);
+					if (submission.state !== 'PENDING') throw new Error('제출 처리 중이거나 종료된 작품입니다. 페이지를 새로고침해 주세요.');
+					const item = [...submission.items]
+						.sort((a, b) => a.slot.localeCompare(b.slot, undefined, { numeric: true }))
+						.find((item) => item.kind === entry.kind && item.state !== 'READY');
+					if (!item) throw new Error('이 종류의 제출 파일은 이미 업로드되었거나 제출 목록에 없습니다. 제출 완료 후 파일을 추가·교체해 주세요.');
+					setSubmissionItem({ id: item.id, clientToken: item.clientToken });
+				} else {
+					setSubmissionItem(undefined);
+				}
 				await new Promise<void>((resolve, reject) => {
 					waiter.current = { resolve, reject };
 					if (entry.status === 'active') setRetryAttempt((attempt) => attempt + 1);
@@ -184,6 +196,7 @@ export function useProjectUploadQueue(
 			if (enabled && !locked && !applying.current) setRemoveWebgl((value) => !value);
 		},
 		active,
+		submissionItem,
 		issues,
 		add,
 		complete,

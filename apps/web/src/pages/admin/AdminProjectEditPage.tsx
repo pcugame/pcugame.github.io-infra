@@ -1,5 +1,5 @@
 import { effectiveExternalLinks } from '../../components/project/externalLinks';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, useWatch } from 'react-hook-form';
@@ -18,6 +18,7 @@ import { AdminProjectBasicInfoForm } from '../../features/admin/projects/AdminPr
 import { WebglDisplaySettingsForm } from '../../features/admin/projects/WebglDisplaySettingsForm';
 import { AdminProjectMemberEditor } from '../../features/admin/projects/AdminProjectMemberEditor';
 import { AdminProjectStatusPanel } from '../../features/admin/projects/AdminProjectStatusPanel';
+import { DraftSubmissionStatus } from '../../features/admin/projects/DraftSubmissionStatus';
 import { useAdminProjectMutations } from '../../features/admin/projects/useAdminProjectMutations';
 import { useProjectMemberDraft } from '../../features/admin/projects/useProjectMemberDraft';
 import { useMe } from '../../features/auth';
@@ -76,6 +77,12 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	const hasChanges = form.formState.isDirty || members.hasChanges || queue.hasChanges;
 	const pending = isApplying || queue.isApplying || isSavingDisplay;
 	const formId = `project-edit-${id}`;
+	useEffect(() => {
+		if (baselineStatus === 'DRAFT' && project.status !== 'DRAFT') {
+			setBaselineStatus(project.status);
+			form.resetField('status', { defaultValue: project.status });
+		}
+	}, [baselineStatus, project.status, form]);
 
 	const onApply = form.handleSubmit(async (data) => {
 		if (applyingRef.current || pending || !canEditContent || !hasChanges) return;
@@ -133,6 +140,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 				<AdminProjectStatusPanel status={status} isPrivileged={isPrivileged} isPending={pending} error={null} onToggle={(next) => form.setValue('status', next, { shouldDirty: true, shouldValidate: true })} />
 			</div>
 			{form.formState.errors.status && <p className="field-error" role="alert">{form.formState.errors.status.message}</p>}
+			{project.status === 'DRAFT' && canEditContent && <DraftSubmissionStatus projectId={id} disabled={pending || hasChanges} />}
 			{!canEditContent && project.canRequestChange && <div className="admin-card" style={{ marginBottom: '1rem' }}><p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p><Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link></div>}
 			<ProjectEditorLayout
 				poster={<AdminProjectPosterUpload project={project} canEditContent={canEditContent} />}

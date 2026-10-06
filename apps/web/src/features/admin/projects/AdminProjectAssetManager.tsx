@@ -42,7 +42,7 @@ function ActiveUpload({ entry, queue }: { entry: UploadEntry; queue: ProjectUplo
 	const onCancelled = useCallback(() => cancel(entry.id), [cancel, entry.id]);
 	const common = { autoStart: true, compact: true, onComplete, onCancelled, onError: queue.fail, retryAttempt: queue.retryAttempt };
 	if (entry.kind === 'POSTER' || entry.kind === 'IMAGE')
-		return <DirectImageUploadWidget {...common} owner={queue.owner} kind={entry.kind} initialFiles={files} />;
+		return <DirectImageUploadWidget {...common} owner={queue.owner} kind={entry.kind} initialFiles={files} submissionItems={queue.submissionItem ? [queue.submissionItem] : undefined} />;
 	if (entry.kind === 'GAME' || entry.kind === 'WEBGL')
 		return (
 			<GameUploadWidget
@@ -50,6 +50,7 @@ function ActiveUpload({ entry, queue }: { entry: UploadEntry; queue: ProjectUplo
 				projectId={queue.owner.id}
 				uploadKind={entry.kind}
 				initialFile={entry.file}
+				submissionItem={queue.submissionItem}
 			/>
 		);
 	if (entry.kind === 'ZIP') return null;
@@ -60,6 +61,7 @@ function ActiveUpload({ entry, queue }: { entry: UploadEntry; queue: ProjectUplo
 			kind={entry.kind}
 			label={uploadKindLabels[entry.kind]}
 			initialFiles={files}
+			submissionItems={queue.submissionItem ? [queue.submissionItem] : undefined}
 			maxFiles={1}
 			maxFileBytes={entry.kind === 'VIDEO' ? undefined : queue.materialLimits?.maxBytes}
 		/>
