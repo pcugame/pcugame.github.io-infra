@@ -123,7 +123,9 @@ function successStatus(pathname: string, method: string): number {
     ? 201 : 200;
 }
 function responseError(error: MockHttpError, headers?: HeadersInit): Response {
-  return Response.json({ ok: false, error: { code: error.code, message: error.message } }, {
+  const synthetic = error.code.startsWith('MOCK_');
+  const code = synthetic ? error.status === 409 ? 'CONFLICT' : 'INTERNAL_ERROR' : error.code;
+  return Response.json({ ok: false, error: { code, message: error.message, ...(synthetic ? { details: { mockCode: error.code } } : {}) } }, {
     status: error.status, statusText: ({400:'Bad Request',401:'Unauthorized',403:'Forbidden',404:'Not Found',405:'Method Not Allowed',409:'Conflict',429:'Too Many Requests',500:'Internal Server Error',503:'Service Unavailable'} as Record<number,string>)[error.status] ?? 'Mock Error', headers,
   });
 }

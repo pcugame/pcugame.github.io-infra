@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { AdminProjectDetailSchema, type ProjectChangeDetail } from '@pcu/contracts';
+import { AdminProjectDetailSchema, ProjectSubmissionStatusResponseSchema, SubmitProjectResponseSchema, type ProjectChangeDetail } from '@pcu/contracts';
 import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,8 +24,8 @@ async function submit(title?: string, items?: ReturnType<typeof manifest>, key?:
 }
 const file = (name = 'game.zip') => new File(['demo'], name, { type: 'application/zip' });
 const binding = (created: SubmitProjectResponse) => ({ submissionItem: { id: created.items[0]!.id, clientToken: created.items[0]!.clientToken } });
-const status = (id: number) => request<ProjectSubmissionStatusResponse>(`/api/me/projects/${id}/submission`);
-const finalize = (id: number) => request<ProjectSubmissionStatusResponse>(`/api/me/projects/${id}/submission/finalize`, 'POST');
+const status = (id: number) => request<ProjectSubmissionStatusResponse>(`/api/me/projects/${id}/submission`).then(response => ProjectSubmissionStatusResponseSchema.parse(response));
+const finalize = (id: number) => request<ProjectSubmissionStatusResponse>(`/api/me/projects/${id}/submission/finalize`, 'POST').then(response => ProjectSubmissionStatusResponseSchema.parse(response));
 
 beforeEach(async () => {
   vi.stubEnv('VITE_MOCK', 'true'); vi.stubGlobal('Blob', NodeBlob); vi.stubGlobal('File', NodeFile); vi.stubGlobal('crypto', webcrypto);
@@ -36,6 +36,18 @@ beforeEach(async () => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('persisted project direct upload mock through the actual client', () => {
+  it('serializes strict submission contracts without internal scheduling or ownership fields', async () => {
+    const created = await submit('Strict responses', []); expect(SubmitProjectResponseSchema.safeParse(created).success).toBe(true);
+    const pending = await status(created.id); expect(ProjectSubmissionStatusResponseSchema.parse(pending).state).toBe('PENDING');
+    const finalizing = await finalize(created.id); expect(ProjectSubmissionStatusResponseSchema.parse(finalizing).state).toBe('FINALIZING');
+    await vi.advanceTimersByTimeAsync(650); expect(ProjectSubmissionStatusResponseSchema.parse(await status(created.id)).state).toBe('PUBLISHED');
+    const cancelledProject = await submit('Cancelled strict responses');
+    const cancelled = await request(`/api/me/projects/${cancelledProject.id}/submission`, 'DELETE');
+    expect(ProjectSubmissionStatusResponseSchema.parse(cancelled).state).toBe('CANCELLED');
+    expect(ProjectSubmissionStatusResponseSchema.parse(await status(cancelledProject.id)).state).toBe('CANCELLED');
+    await selectMockUser('ADMIN');
+    expect(ProjectSubmissionStatusResponseSchema.parse(await request(`/api/admin/projects/${created.id}/submission`)).state).toBe('PUBLISHED');
+  });
   it('uses real unique projects and scopes idempotency replay and conflicts', async () => {
     const first = await submit('first', undefined, 'submission-key-1');
     const replay = await submit('first', undefined, 'submission-key-1');
@@ -58,9 +70,10 @@ describe('persisted project direct upload mock through the actual client', () =>
     const created = await submit(); const progress: number[] = [];
     const completion = await uploadDirectAssetFile(created.id, file(), 'GAME', event => progress.push(event.percent), binding(created));
     expect(completion.status).toBe('VERIFYING'); expect(progress).toEqual([100]);
-    await expect(finalize(created.id)).rejects.toMatchObject({ status: 409, code: 'SUBMISSION_NOT_READY' });
+    await expect(finalize(created.id)).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
     await vi.advanceTimersByTimeAsync(400); await forgetMockCacheForTests();
-    expect(await getDirectAssetUploadStatus(completion.sessionId)).toMatchObject({ state: 'VERIFYING', processingState: 'PROCESSING' });
+    expect(await getDirectAssetUploadStatus(completion.sessionId)).toMatchObject({ state: 'VERIFYING' });
+    expect((await getMockSnapshot()).sessions[completion.sessionId]).toMatchObject({ processingState: 'PROCESSING' });
     await vi.advanceTimersByTimeAsync(600); expect((await status(created.id)).items[0]!.state).toBe('READY');
     expect(await finalize(created.id)).toMatchObject({ state: 'FINALIZING', publicationState: 'PROCESSING' });
     await forgetMockCacheForTests(); expect((await status(created.id)).state).toBe('FINALIZING');

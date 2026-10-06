@@ -42,7 +42,7 @@ describe('IndexedDB mock snapshots', () => {
       return { saved: true };
     });
     const response = await mockFetch('/api/settings', { method: 'PATCH' });
-    expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ error: { code: 'MOCK_REVISION_CONFLICT' } });
+    expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ error: { code: 'CONFLICT', details: { mockCode: 'MOCK_REVISION_CONFLICT' } } });
     expect((await reloadMockState()).settings.maxGameFileMb).toBe(222);
   });
   it('does not acknowledge or retain mutations when storage fails', async () => {

@@ -16,6 +16,7 @@ export function MockRoleSwitcher() {
     if(import.meta.env.VITE_MOCK!=='true') return;
     let disposed=false, unsubscribe=()=>{}, external=()=>{};
     void import('../../lib/api/mock/transport').then(async transport=>{
+      if(disposed)return;
       const refresh=()=>{ if(!disposed) setState(transport.getMockState()); };
       unsubscribe=transport.subscribeMockState(refresh);
       external=transport.subscribeMockExternalChanges(()=>{void queryClient.cancelQueries().then(()=>queryClient.resetQueries());});

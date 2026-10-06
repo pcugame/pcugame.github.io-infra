@@ -57,7 +57,7 @@ export function createSubmission(ctx: MockContext, payload: SubmitProjectPayload
   const submission: MockSubmissionRecord = { submissionId: crypto.randomUUID(), projectId: project.id, projectStatus: 'DRAFT', state: 'PENDING', actorId, createdAt: ctx.now(),
     items: payload.manifest.map(item => ({ ...item, id: crypto.randomUUID(), state: 'EXPECTED' })) };
   submissions(ctx)[project.id] = submission;
-  return { id: project.id, slug: project.slug, year: project.year, status: 'DRAFT', submissionId: submission.submissionId, items: submission.items, adminEditUrl: `/admin/projects/${project.id}/edit` };
+  return { id: project.id, slug: project.slug, year: project.year, status: 'DRAFT', submissionId: submission.submissionId, items: submission.items, adminEditUrl: mockFixtureUrl(`/admin/projects/${project.id}/edit`) };
 }
 function boundItem(ctx: MockContext, session: MockUploadSession) { return session.owner.type === 'PROJECT' ? submissions(ctx)[session.owner.id]?.items.find(item => item.id === session.submissionItemId && item.sessionId === session.sessionId) : undefined; }
 function ownedUrl(url: string, owner: MockUploadSession['owner']): string { const target = new URL(url); target.searchParams.set(owner.type === 'PROJECT' ? 'mock_project' : 'mock_exhibition', String(owner.id)); return target.href; }
@@ -118,10 +118,23 @@ function authorizeOwner(ctx: MockContext, owner: MockUploadSession['owner']): vo
   if (owner.type === 'EXHIBITION') { ctx.requireAdmin(); if (!ctx.state.exhibitions.some(item => item.id === owner.id)) fail(404, 'NOT_FOUND', 'Exhibition not found'); }
   else { const project = ctx.state.projects[owner.id] ?? fail(404, 'NOT_FOUND', 'Project not found'); assertProjectUpload(ctx, project); }
 }
-function sessionStatus(session: MockUploadSession) {
-  const { actorId: _actor, submissionItemId: _item, completedAt: _completed, sourceIdentityBlockDigests: _digests, capabilities: _caps, resultAssetId: _asset, previewBlob: _blob, ...status } = session;
-  void [_actor, _item, _completed, _digests, _caps, _asset, _blob];
-  return { ...status, parts: session.parts.map(({ blockDigests: _blocks, ...part }) => { void _blocks; return part; }) };
+function submissionStatus(submission: MockSubmissionRecord): ProjectSubmissionStatusResponse {
+  return { submissionId: submission.submissionId, projectId: submission.projectId, projectStatus: submission.projectStatus,
+    state: submission.state, items: submission.items,
+    ...(submission.publicationState ? { publicationState: submission.publicationState } : {}),
+    ...(submission.publicationError ? { publicationError: submission.publicationError } : {}) };
+}
+function sessionStatus(session: MockUploadSession): DirectAssetUploadStatus {
+  return { sessionId: session.sessionId, owner: session.owner, kind: session.kind, state: session.state, generation: session.generation,
+    ...(session.owner.type === 'PROJECT' ? { projectId: session.owner.id } : { exhibitionId: session.owner.id }),
+    originalName: session.originalName, totalBytes: session.totalBytes, partSizeBytes: session.partSizeBytes, totalParts: session.totalParts,
+    expiresAt: session.expiresAt, sourceIdentityAlgorithm: session.sourceIdentityAlgorithm, sourceIdentity: session.sourceIdentity,
+    parts: session.parts.map(({ partNumber, etag, sizeBytes }) => ({ partNumber, etag, sizeBytes })) };
+}
+function createdSession(session: MockUploadSession) {
+  return { sessionId: session.sessionId, owner: session.owner, generation: session.generation, partSizeBytes: session.partSizeBytes,
+    totalParts: session.totalParts, expiresAt: session.expiresAt, sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
+    sourceIdentity: session.sourceIdentity, sourceIdentityBlockSizeBytes: 1048576 as const };
 }
 function assertUploading(ctx: MockContext, session: MockUploadSession, generation?: unknown): void {
   if (generation !== undefined && generation !== session.generation) fail(409, 'CONFLICT', 'Stale upload generation');
@@ -131,7 +144,7 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
   advanceUploadJobs(ctx);
   let match = pathname.match(/^\/api\/(admin|me)\/projects\/submit$/);
   if (match) {
-    const actor = match[1] === 'admin' ? ctx.requireAdmin() : ctx.requireUser(); if (method !== 'POST') return fail(405, 'METHOD_NOT_ALLOWED', 'Use POST');
+    const actor = match[1] === 'admin' ? ctx.requireAdmin() : ctx.requireUser(); if (method !== 'POST') return fail(404, 'NOT_FOUND', 'Use POST');
     if (!(options.body instanceof FormData)) return fail(400, 'VALIDATION_ERROR', 'Multipart payload is required');
     for (const [field, value] of options.body.entries()) if (field !== 'payload' || typeof value !== 'string') fail(400, 'VALIDATION_ERROR', 'File fields must use direct upload sessions');
     const raw = json(options.body.get('payload'));
@@ -143,7 +156,7 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
     const payload = parsed.data as SubmitProjectPayload;
     const exhibition = ctx.state.exhibitions.find(item => item.id === payload.exhibitionId) ?? fail(404, 'NOT_FOUND', 'Exhibition not found');
     if (exhibition.visibility === 'STAFF' && actor.role === 'USER') fail(403, 'FORBIDDEN', 'Exhibition is private');
-    if (match[1] === 'me' && !(exhibition.isModificationEnabled ?? exhibition.isUploadEnabled)) fail(403, 'UPLOAD_DISABLED', 'Submissions are closed');
+    if (match[1] === 'me' && !(exhibition.isModificationEnabled ?? exhibition.isUploadEnabled)) fail(403, 'FORBIDDEN', 'Submissions are closed');
     const key = new Headers(options.headers).get('idempotency-key'); const identity = `${actor.id}:project-submit:${match[1]}:${key}`;
     if (key && !/^[A-Za-z0-9_-]{8,128}$/.test(key)) fail(400, 'VALIDATION_ERROR', 'Invalid idempotency key');
     const requestHash = JSON.stringify(raw); const previous = ctx.state.idempotency[identity] as { hash: string; result: SubmitProjectResponse } | undefined;
@@ -159,21 +172,21 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
       if (submission.state === 'PUBLISHED') fail(409, 'CONFLICT', 'Published submission cannot be cancelled');
       submission.state = 'CANCELLED'; submission.publicationState = 'CANCELLED';
       for (const item of submission.items) { item.state = 'CANCELLED'; const session = item.sessionId && sessions(ctx)[item.sessionId]; if (session) session.state = 'CANCELLED'; }
-      return submission;
+      return submissionStatus(submission);
     }
     if (match[3] && method === 'POST') {
       if (submission.state === 'CANCELLED') fail(409, 'CONFLICT', 'Submission is cancelled');
-      if (submission.state === 'PUBLISHED') return submission;
-      if (!submission.items.every(item => item.state === 'READY')) fail(409, 'SUBMISSION_NOT_READY', 'Submission assets are not ready');
+      if (submission.state === 'PUBLISHED') return submissionStatus(submission);
+      if (!submission.items.every(item => item.state === 'READY')) fail(409, 'CONFLICT', 'Submission assets are not ready');
       if (submission.state !== 'FINALIZING' || submission.publicationState === 'FAILED') { submission.state = 'FINALIZING'; submission.publicationState = 'PROCESSING'; submission.finalizedAt = ctx.now(); delete submission.publicationError; }
-      return submission;
+      return submissionStatus(submission);
     }
-    if (!match[3] && method === 'GET') return submission;
-    return fail(405, 'METHOD_NOT_ALLOWED', 'Unsupported submission method');
+    if (!match[3] && method === 'GET') return submissionStatus(submission);
+    return fail(404, 'NOT_FOUND', 'Unsupported submission method');
   }
   match = pathname.match(/^\/api\/admin\/(projects|exhibitions)\/(\d+)\/direct-(game|webgl|video|image|poster|document|attachment)-upload-sessions$/);
   if (match) {
-    if (method !== 'POST') return fail(405, 'METHOD_NOT_ALLOWED', 'Use POST');
+    if (method !== 'POST') return fail(404, 'NOT_FOUND', 'Use POST');
     const owner = { type: match[1] === 'projects' ? 'PROJECT' as const : 'EXHIBITION' as const, id: Number(match[2]) }; const kind = match[3]!.toUpperCase() as DirectAssetUploadKind;
     authorizeOwner(ctx, owner); if (owner.type === 'EXHIBITION' && kind !== 'POSTER') fail(404, 'NOT_FOUND', 'Only exhibition posters are supported');
     const body = json(options.body); const total = Number(body.totalBytes);
@@ -197,19 +210,19 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
     const session: MockUploadSession = { sessionId: crypto.randomUUID(), owner, kind, actorId: ctx.requireUser().id, generation: 1, state: 'UPLOADING', originalName: body.originalName as string, totalBytes: total, partSizeBytes: 5 * 1024 * 1024, totalParts: Math.ceil(total / (5 * 1024 * 1024)), expiresAt: new Date(ms(ctx) + 3600000).toISOString(), sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: body.sourceIdentity as string, sourceIdentityBlockDigests: digests as string[], capabilities: {}, parts: [], ...(item ? { submissionItemId: item.id } : {}) };
     sessions(ctx)[session.sessionId] = session;
     if (item) { if (item.sessionId) { const old = sessions(ctx)[item.sessionId]; if (old) { delete old.submissionItemId; if (old.resultAssetId && owner.type === 'PROJECT') { const project = ctx.state.projects[owner.id]!; project.assets = project.assets.filter(asset => asset.id !== old.resultAssetId); project.videos = project.videos.filter(video => video.assetId !== old.resultAssetId); project.video = project.videos[0] ?? null; } } } item.state = 'UPLOADING'; item.sessionId = session.sessionId; item.generation = session.generation; delete item.failureReason; delete item.playbackState; delete item.playbackError; }
-    return sessionStatus(session);
+    return Response.json({ ok: true, data: createdSession(session) }, { status: 201 });
   }
   match = pathname.match(/^\/mock\/garage-upload\/([^/]+)\/(\d+)\/([^/]+)$/);
   if (match) {
-    if (method !== 'PUT') return fail(405, 'METHOD_NOT_ALLOWED', 'Use PUT');
+    if (method !== 'PUT') return fail(404, 'NOT_FOUND', 'Use PUT');
     const session = sessions(ctx)[match[1]!] ?? fail(404, 'NOT_FOUND', 'Session not found'); assertUploading(ctx, session);
     const number = Number(match[2]); const capability = session.capabilities[number];
-    if (!capability || capability.token !== match[3] || Date.parse(capability.expiresAt) <= ms(ctx)) fail(403, 'CAPABILITY_EXPIRED', 'Upload capability is invalid or expired');
+    if (!capability || capability.token !== match[3] || Date.parse(capability.expiresAt) <= ms(ctx)) fail(403, 'FORBIDDEN', 'Upload capability is invalid or expired');
     if (!(options.body instanceof Blob)) fail(400, 'VALIDATION_ERROR', 'Upload body must be a Blob');
     const body = options.body as Blob; const expectedSize = Math.min(session.partSizeBytes, session.totalBytes - (number - 1) * session.partSizeBytes);
     if (body.size !== expectedSize) fail(400, 'SIZE_MISMATCH', 'Part size does not match');
     const bytes = await body.arrayBuffer(); const actualDigest = await digest(bytes); const checksum = btoa(String.fromCharCode(...actualDigest.match(/../g)!.map(value => parseInt(value, 16))));
-    if (checksum !== capability.checksum || new Headers(options.headers).get('x-amz-checksum-sha256') !== capability.checksum) fail(400, 'CHECKSUM_MISMATCH', 'Part checksum does not match');
+    if (checksum !== capability.checksum || new Headers(options.headers).get('x-amz-checksum-sha256') !== capability.checksum) fail(400, 'VALIDATION_ERROR', 'Part checksum does not match');
     const blockDigests: string[] = []; for (let offset = 0; offset < bytes.byteLength; offset += 1048576) blockDigests.push(await digest(bytes.slice(offset, offset + 1048576)));
     if (session.totalBytes <= 1024 * 1024 && ['IMAGE','POSTER','VIDEO','DOCUMENT','ATTACHMENT'].includes(session.kind)) session.previewBlob = body;
     const etag = `"mock-${actualDigest.slice(0, 32)}"`; session.parts = session.parts.filter(part => part.partNumber !== number); session.parts.push({ partNumber: number, etag, sizeBytes: body.size, blockDigests }); session.parts.sort((a, b) => a.partNumber - b.partNumber);
@@ -220,12 +233,12 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
     const session = sessions(ctx)[match[1]!] ?? fail(404, 'NOT_FOUND', 'Upload session not found'); authorizeOwner(ctx, session.owner);
     if (!match[2] && method === 'GET') return sessionStatus(session);
     if (!match[2] && method === 'DELETE') { if (session.state === 'READY') fail(409, 'CONFLICT', 'Ready upload cannot be cancelled'); session.state = 'CANCELLED'; const item = boundItem(ctx, session); if (item) item.state = 'CANCELLED'; return undefined; }
-    if (method !== 'POST') fail(405, 'METHOD_NOT_ALLOWED', 'Unsupported upload method'); const body = json(options.body);
+    if (method !== 'POST') fail(404, 'NOT_FOUND', 'Unsupported upload method'); const body = json(options.body);
     if (match[2] === 'part-urls') {
       assertUploading(ctx, session, body.generation); const parts = body.parts as Array<{ partNumber: number; checksumSha256: string }>;
       if (!Array.isArray(parts) || parts.length < 1 || parts.length > 32 || new Set(parts.map(part => part?.partNumber)).size !== parts.length || parts.some(part => !part || !Number.isInteger(part.partNumber) || part.partNumber < 1 || part.partNumber > session.totalParts || !/^[A-Za-z0-9+/]{43}=$/.test(part.checksumSha256))) fail(400, 'VALIDATION_ERROR', 'Invalid part capability manifest');
       const expiresAt = new Date(Math.min(ms(ctx) + 300000, Date.parse(session.expiresAt))).toISOString();
-      return { generation: session.generation, expiresAt, parts: parts.map(part => { const token = crypto.randomUUID(); session.capabilities[part.partNumber] = { token, checksum: part.checksumSha256, expiresAt }; return { partNumber: part.partNumber, url: `/mock/garage-upload/${session.sessionId}/${part.partNumber}/${token}`, requiredHeaders: { 'x-amz-checksum-sha256': part.checksumSha256 } }; }) };
+      return { generation: session.generation, expiresAt, parts: parts.map(part => { const token = crypto.randomUUID(); session.capabilities[part.partNumber] = { token, checksum: part.checksumSha256, expiresAt }; return { partNumber: part.partNumber, url: mockFixtureUrl(`/mock/garage-upload/${session.sessionId}/${part.partNumber}/${token}`), requiredHeaders: { 'x-amz-checksum-sha256': part.checksumSha256 } }; }) };
     }
     if (match[2] === 'complete') {
       if (body.generation !== session.generation) fail(409, 'CONFLICT', 'Stale upload generation');

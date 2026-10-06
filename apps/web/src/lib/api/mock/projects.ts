@@ -39,9 +39,9 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
   methodAllowed(method,['GET']);
   return {items:ctx.state.exhibitions.filter(e=>canReadVisibility(ctx,e.visibility)).sort((a,b)=>a.sortOrder-b.sortOrder||b.year-a.year).map(e=>({id:e.id,year:e.year,title:e.title,visibility:e.visibility,poster:e.poster,projectCount:Object.values(ctx.state.projects).filter(p=>p.exhibitionId===e.id&&canReadPublicProject(ctx,p)).length}))};
  }
- let match=pathname.match(/^\/api\/public\/years\/(\d+)\/projects$/);
+ let match=pathname.match(/^\/api\/public\/years\/([^/]+)\/projects$/);
  if(match) {
-  methodAllowed(method,['GET']); const year=Number(match[1]); const exhibitions=ctx.state.exhibitions.filter(e=>e.year===year&&canReadVisibility(ctx,e.visibility));
+  methodAllowed(method,['GET']); if(!/^[1-9]\d{3}$/.test(match[1]))throw new MockHttpError(400,'VALIDATION_ERROR','Year must have four digits'); const year=Number(match[1]); const exhibitions=ctx.state.exhibitions.filter(e=>e.year===year&&canReadVisibility(ctx,e.visibility));
   if(!exhibitions.length) throw new MockHttpError(404,'NOT_FOUND','Year not found');
   const items=orderedProjects(ctx).filter(p=>exhibitions.some(e=>e.id===p.exhibitionId)&&canReadPublicProject(ctx,p)).map(p=>publicCard(ctx,p));
   return {year,exhibitions:exhibitions.map(e=>({id:e.id,title:e.title||`${year} 전시`,visibility:e.visibility})),items,empty:items.length===0};
@@ -55,7 +55,7 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
  }
  match=pathname.match(/^\/api\/public\/projects\/([^/]+)$/);
  if(match) {
-  methodAllowed(method,['GET']); const idOrSlug=decodeURIComponent(match[1]);
+  methodAllowed(method,['GET']); if(query.has('year')&&!/^[1-9]\d{3}$/.test(query.get('year')!))throw new MockHttpError(400,'VALIDATION_ERROR','Year must have four digits'); let idOrSlug:string;try{idOrSlug=decodeURIComponent(match[1]);}catch{throw new MockHttpError(400,'VALIDATION_ERROR','Invalid project identifier');}
   const p=orderedProjects(ctx).find(p=>(p.id===Number(idOrSlug)||p.slug===idOrSlug)&&(!query.has('year')||p.year===Number(query.get('year')))&&canReadPublicProject(ctx,p));
   if(!p) throw new MockHttpError(404,'NOT_FOUND','Project not found');
   return publicProjectDetail(ctx,p);
