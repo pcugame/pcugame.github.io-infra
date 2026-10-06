@@ -8,7 +8,9 @@ import { sourceIdentityRoot } from '../modules/admin/game-upload/source-identity
 import { VideoRejectedError } from '../modules/video/errors.js';
 import { DEFAULT_VIDEO_LIMITS } from '../modules/video/policy.js';
 import { createVideoProcessor } from '../modules/video/processor.js';
-import type { VerifyingVideoSession, VideoProbe } from '../modules/video/ports.js';
+import type { VerifyingVideoSession, VideoProbe, VideoOperations } from '../modules/video/ports.js';
+import { createBoundedCommandRunner } from '../modules/video/command-runner.js';
+import { createFfmpegVideoOperations } from '../modules/video/ffmpeg-operations.js';
 import { createVideoProcessingWorker } from '../modules/video/worker.js';
 import { WorkerSourceObjectMissingError } from '../modules/upload-lifecycle/worker-errors.js';
 
@@ -24,7 +26,10 @@ const generatedPlayback = Buffer.alloc(128);
 const generatedPlaybackChecksum = createHash('sha256').update(generatedPlayback).digest('hex');
 
 function videoSession(source = sourceBytes()): VerifyingVideoSession {
-	const digest = createHash('sha256').update(source).digest();
+	const digests: Buffer[] = [];
+	for (let offset = 0; offset < source.length; offset += 1_048_576) {
+		digests.push(createHash('sha256').update(source.subarray(offset, offset + 1_048_576)).digest());
+	}
 	return {
 		id: 'session-video-1',
 		projectId: 7,
@@ -38,9 +43,9 @@ function videoSession(source = sourceBytes()): VerifyingVideoSession {
 		objectKey: 'protected/uploads/session-video-1/1/source.bin',
 		generation: 1,
 		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
-		sourceIdentity: sourceIdentityRoot(source.length, 1_048_576, [digest.toString('hex')]),
+		sourceIdentity: sourceIdentityRoot(source.length, 1_048_576, digests.map((digest) => digest.toString('hex'))),
 		sourceIdentityBlockSizeBytes: 1_048_576,
-		sourceIdentityBlockManifest: digest.toString('base64'),
+		sourceIdentityBlockManifest: Buffer.concat(digests).toString('base64'),
 		validationLeaseToken: 'lease',
 		validationLeaseUntil: new Date(Date.now() + 60_000),
 		resultAssetId: null,
@@ -69,13 +74,15 @@ function probe(overrides: Partial<VideoProbe> = {}): VideoProbe {
 }
 
 async function processorHarness(input: {
+	source?: Buffer;
+	realOperations?: VideoOperations;
 	inputProbe?: VideoProbe;
 	outputProbe?: VideoProbe;
 	playbackCommitError?: Error;
 	existingPlayback?: { size: number; checksumSha256?: string };
 } = {}) {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'video-processor-test-'));
-	const source = sourceBytes();
+	const source = input.source ?? sourceBytes();
 	const upload = vi.fn(async ({ body }: { body: Readable }) => {
 		for await (const _chunk of body) { /* drain */ }
 	});
@@ -124,11 +131,11 @@ async function processorHarness(input: {
 		processor: createVideoProcessor({
 			repository: repository as never,
 			storage,
-			operations,
+			operations: input.realOperations ?? operations,
 			tempRoot: root,
-			tempDiskBudgetBytes: 4 * 1024 * 1024,
+			tempDiskBudgetBytes: input.realOperations ? 2 * 1024 * 1024 * 1024 : 4 * 1024 * 1024,
 			protectedBucket: 'protected',
-			limits: { ...DEFAULT_VIDEO_LIMITS, maxSourceBytes: 1024 * 1024, maxPlaybackBytes: 1024 * 1024 },
+			limits: input.realOperations ? DEFAULT_VIDEO_LIMITS : { ...DEFAULT_VIDEO_LIMITS, maxSourceBytes: 1024 * 1024, maxPlaybackBytes: 1024 * 1024 },
 			clock: { now: () => new Date(0) },
 			logger,
 		}),
@@ -136,6 +143,25 @@ async function processorHarness(input: {
 }
 
 describe('direct VIDEO processor', () => {
+	// Opt-in: use a local file and real ffmpeg; storage and database remain test doubles.
+	it.runIf(Boolean(process.env['VIDEO_DIAGNOSTIC_FILE']))('processes the supplied local video with real ffprobe and ffmpeg', async () => {
+		const source = await fs.readFile(process.env['VIDEO_DIAGNOSTIC_FILE']!);
+		const operations = createFfmpegVideoOperations(createBoundedCommandRunner(), DEFAULT_VIDEO_LIMITS);
+		const harness = await processorHarness({ source, realOperations: operations });
+		try {
+			const session = videoSession(source);
+			session.originalName = path.basename(process.env['VIDEO_DIAGNOSTIC_FILE']!);
+			session.declaredMimeType = 'video/mp4';
+			const result = await harness.processor.process(session, 'token');
+			expect(harness.repository.commitVideoPlaybackFailed.mock.calls).toEqual([]);
+			expect(result.playbackState).toBe('READY');
+			expect(harness.repository.commitVideoPlaybackReady).toHaveBeenCalledOnce();
+			expect(await fs.readdir(harness.root)).toEqual([]);
+		} finally {
+			await fs.rm(harness.root, { recursive: true, force: true });
+		}
+	}, 180_000);
+
 	it('distrusts declared MIME, fully decodes, and commits browser-safe original as playback', async () => {
 		const harness = await processorHarness();
 		try {

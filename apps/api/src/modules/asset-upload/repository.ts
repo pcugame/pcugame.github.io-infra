@@ -89,14 +89,33 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 							where: { id: input.submissionItemId },
 							include: {
 								projectSubmission: { select: { projectId: true, actorId: true, state: true } },
-								uploadSession: { select: { id: true } },
+								uploadSession: { select: { id: true, state: true } },
 							},
 						});
 						if (!item || item.projectSubmission.projectId !== input.projectId
 							|| item.projectSubmission.actorId !== input.userId
 							|| item.projectSubmission.state !== 'PENDING'
-							|| item.kind !== input.kind || item.clientToken !== submissionClientToken
-							|| item.state !== 'EXPECTED' || item.uploadSession) {
+							|| item.kind !== input.kind || item.clientToken !== submissionClientToken) {
+							throw new Error('PROJECT_SUBMISSION_ITEM_MISMATCH');
+						}
+						if (['FAILED', 'CANCELLED'].includes(item.state)
+							&& item.uploadSession
+							&& ['REJECTED', 'CANCELLED', 'EXPIRED'].includes(item.uploadSession.state)) {
+							// Keep the terminal session and its cleanup work, but fence it off
+							// from the item before atomically binding the replacement session.
+							await tx.assetUploadSession.update({
+								where: { id: item.uploadSession.id },
+								data: { submissionItemId: null },
+							});
+							await tx.projectSubmissionItem.update({
+								where: { id: item.id },
+								data: {
+									state: 'EXPECTED', boundGeneration: null, failureReason: null,
+									resultAssetId: null, resultRepresentationId: null, resultWebglDeploymentId: null,
+									playbackState: 'NONE', playbackError: null,
+								},
+							});
+						} else if (item.state !== 'EXPECTED' || item.uploadSession) {
 							throw new Error('PROJECT_SUBMISSION_ITEM_MISMATCH');
 						}
 					} else if (input.submissionItemId || submissionClientToken) {

@@ -188,6 +188,35 @@ afterEach(async () => {
 });
 
 describe('bounded ZIP validator', () => {
+	it.each(['GAME', 'WEBGL'] as const)('accepts a low-ratio %s archive containing a highly compressible resource', async (profile) => {
+		const { path } = await writeArchive(makeZip([
+			{ name: 'game.exe', data: deterministicBytes(768 * 1024) },
+			{ name: 'data.bin', data: Buffer.alloc(256 * 1024) },
+		]));
+		const result = await validateBoundedZipFile(path, { profile });
+		expect(result.decodedBytes).toBe(1024 * 1024);
+		expect(result.entries[1]!.decodedBytes / result.entries[1]!.compressedBytes).toBeGreaterThan(100);
+		await expect(validateBoundedZipFile(path, { profile, maxEntryUncompressedBytes: 128 * 1024 }))
+			.rejects.toThrow('per-entry byte limit');
+		await expect(validateBoundedZipFile(path, { profile, maxTotalUncompressedBytes: 900 * 1024 }))
+			.rejects.toThrow('total byte limit');
+	});
+
+	it.each(['GAME', 'WEBGL'] as const)('accepts a %s archive above 100:1 within absolute byte bounds', async (profile) => {
+		const entryBytes = 1024 * 1024;
+		const { path } = await writeArchive(makeZip([
+			{ name: 'first.data', data: Buffer.alloc(entryBytes) },
+			{ name: 'second.data', data: Buffer.alloc(entryBytes) },
+		]));
+		const bounds = { profile, maxEntryUncompressedBytes: entryBytes, maxTotalUncompressedBytes: 2 * entryBytes };
+		const result = await validateBoundedZipFile(path, bounds);
+		expect(result.decodedBytes).toBe(2 * entryBytes);
+		expect(result.decodedBytes / result.archiveBytes).toBeGreaterThan(100);
+		await expect(validateBoundedZipFile(path, { ...bounds, maxTotalUncompressedBytes: 2 * entryBytes - 1 }))
+			.rejects.toThrow('total byte limit');
+		await expect(validateBoundedZipFile(path, { ...bounds, maxEntryUncompressedBytes: entryBytes - 1 }))
+			.rejects.toThrow('per-entry byte limit');
+	});
 	it('fully decodes normal stored/deflated entries into a counting sink', async () => {
 		const { path } = await writeArchive(makeZip([
 			{ name: 'game.exe', data: 'executable', method: 0 },
@@ -237,15 +266,15 @@ describe('bounded ZIP validator', () => {
 			.rejects.toThrow(/corrupt|decoded size|fully decoded/i);
 	});
 
-	it('enforces declared and actual expansion/ratio limits', async () => {
+	it('enforces declared byte limits and rejects understated decoded sizes', async () => {
 		const declared = await writeArchive(makeZip([{
 			name: 'bomb.bin',
 			data: Buffer.alloc(8_192),
 		}]), 'declared-bomb.zip');
 		await expect(validateBoundedZipFile(declared.path, {
 			profile: 'GAME',
-			maxCompressionRatio: 2,
-		})).rejects.toThrow('declared compression ratio');
+			maxEntryUncompressedBytes: 8_191,
+		})).rejects.toThrow('per-entry byte limit');
 
 		const dishonest = await writeArchive(makeZip([{
 			name: 'dishonest.bin',
@@ -254,8 +283,7 @@ describe('bounded ZIP validator', () => {
 		}]), 'actual-bomb.zip');
 		await expect(validateBoundedZipFile(dishonest.path, {
 			profile: 'GAME',
-			maxCompressionRatio: 2,
-		})).rejects.toThrow(/actual expansion|actual compression ratio/);
+		})).rejects.toThrow('actual expansion');
 	});
 
 	it.each([

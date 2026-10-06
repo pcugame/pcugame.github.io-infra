@@ -696,6 +696,36 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 		await other.repository.cancelSubmission(other.created.id, { id: actorId, role: 'ADMIN' });
 	});
 
+	it.each(['REJECTED', 'CANCELLED', 'EXPIRED'] as const)('rebinds a %s upload without allowing stale sessions to mutate the submission item', async (state) => {
+		const token = 'r'.repeat(32);
+		const { created } = await createDraft([manifestItem('GAME', 'game', token)]);
+		const item = created.submission.items[0]!;
+		const uploads = createAssetUploadRepository(prisma);
+		const input = {
+			id: randomUUID(), projectId: created.id, exhibitionId: null, userId: actorId,
+			kind: 'GAME' as const, originalName: 'game.zip', declaredMimeType: 'application/zip',
+			totalBytes: 10n, partSizeBytes: 10, totalParts: 1, bucket: protectedBucket,
+			objectKey: `protected/uploads/${randomUUID()}/source.zip`, generation: 1,
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'b'.repeat(64),
+			sourceIdentityBlockSizeBytes: 1_048_576, sourceIdentityBlockManifest: 'e30=',
+			expiresAt: new Date(Date.now() + 60_000), submissionItemId: item.id, submissionClientToken: token,
+		};
+		const old = await uploads.createAllocating(input);
+		await prisma.assetUploadSession.update({ where: { id: old.id }, data: { state, validationError: 'test failure' } });
+		await expect(uploads.createAllocating({ ...input, id: randomUUID(), submissionClientToken: 'x'.repeat(32) }))
+			.rejects.toThrow('PROJECT_SUBMISSION_ITEM_MISMATCH');
+		const outcomes = await Promise.allSettled([0, 1].map(() => uploads.createAllocating({
+			...input, id: randomUUID(), objectKey: `protected/uploads/${randomUUID()}/source.zip`,
+		})));
+		expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+		expect(outcomes.filter((result) => result.status === 'rejected')).toHaveLength(1);
+		expect(await prisma.assetUploadSession.findUniqueOrThrow({ where: { id: old.id } }))
+			.toMatchObject({ state, submissionItemId: null });
+		await prisma.assetUploadSession.update({ where: { id: old.id }, data: { validationError: 'late cleanup' } });
+		expect(await prisma.projectSubmissionItem.findUniqueOrThrow({ where: { id: item.id }, include: { uploadSession: true } }))
+			.toMatchObject({ state: 'UPLOADING', failureReason: null, uploadSession: { state: 'ALLOCATING' } });
+	});
+
 	it('rejects token spoofing and cancellation durably queues protected staging bytes', async () => {
 		const token = 'k'.repeat(32);
 		const { repository, created } = await createDraft([manifestItem('GAME', 'game', token)]);

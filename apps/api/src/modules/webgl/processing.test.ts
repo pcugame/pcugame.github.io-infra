@@ -533,19 +533,24 @@ describe('canonical WebGL processing', () => {
 		expect(state.repository.rejectFencedAndQueueCleanup).toHaveBeenCalledTimes(2);
 	});
 
-	it('rejects CRC corruption and Unity layout errors before reservation or public PUT', async () => {
-		const corrupt = unityZip();
-		corrupt[40] = corrupt[40]! ^ 0xff;
-		for (const bytes of [
-			corrupt,
-			storedZip([
+	it('publishes a valid Unity build containing highly compressible resources', async () => {
+		const state = await harness(storedZip([
 				{ name: 'index.html', body: '<html>Unity</html>' },
 				{ name: 'Build/game.loader.js', body: 'loader' },
 				{ name: 'Build/game.framework.js', body: 'framework' },
 				{ name: 'Build/game.wasm', body: 'wasm' },
 				{ name: 'Build/game.data', body: 'data' },
-				{ name: 'Build/bomb.unityweb', body: 'x'.repeat(10_000), deflate: true },
-			]),
+				{ name: 'Build/repetitive.unityweb', body: 'x'.repeat(10_000), deflate: true },
+		]));
+		await state.processor.process(state.uploadSession, state.context);
+		expect(state.repository.commitReady).toHaveBeenCalledOnce();
+	});
+
+	it('rejects CRC corruption and Unity layout errors before reservation or public PUT', async () => {
+		const corrupt = unityZip();
+		corrupt[40] = corrupt[40]! ^ 0xff;
+		for (const bytes of [
+			corrupt,
 			storedZip([{ name: 'index.html', body: 'not a Unity build' }]),
 		]) {
 			const state = await harness(bytes);

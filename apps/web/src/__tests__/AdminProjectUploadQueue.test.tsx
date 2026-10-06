@@ -84,6 +84,60 @@ afterEach(() => {
 	sessionStorage.clear();
 });
 it.each([
+	['GAME', 'game.zip', false],
+	['VIDEO', 'video.mp4', false],
+	['POSTER', 'poster.png', true],
+] as const)('binds a draft %s retry to its submission item', async (kind, name, poster) => {
+	const binding = { id: 'submission-item', clientToken: 'a'.repeat(32) };
+	vi.spyOn(adminProjectApi, 'getSubmission').mockResolvedValue({
+		submissionId: 'submission', projectId: 7, projectStatus: 'DRAFT', state: 'PENDING',
+		items: [{ ...binding, kind, slot: kind.toLowerCase(), required: true, state: 'FAILED' }],
+	});
+	api.uploadDirectAssetFile.mockResolvedValue({ status: 'READY', sessionId: 'retry' });
+	setup(true, { ...project, status: 'DRAFT' });
+	drop([file(name)], poster);
+	if (kind === 'GAME') fireEvent.click(screen.getByRole('button', { name: '게임' }));
+	apply();
+	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
+	expect(api.uploadDirectAssetFile.mock.calls[0]![4]).toMatchObject({ submissionItem: binding });
+	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
+});
+
+it('does not send an unbound upload when draft status cannot be loaded', async () => {
+	vi.spyOn(adminProjectApi, 'getSubmission').mockRejectedValue(new Error('offline'));
+	setup(true, { ...project, status: 'DRAFT' });
+	drop([file('poster.png')], true);
+	apply();
+	await waitFor(() => expect(adminProjectApi.getSubmission).toHaveBeenCalledOnce());
+	await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
+	expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
+	expect(screen.getByTestId('dirty').textContent).toBe('true');
+});
+it('clears the draft binding when uploading again after publication', async () => {
+	vi.spyOn(adminProjectApi, 'getSubmission').mockResolvedValue({
+		submissionId: 'submission', projectId: 7, projectStatus: 'DRAFT', state: 'PENDING',
+		items: [{ id: 'item', clientToken: 'a'.repeat(32), kind: 'IMAGE', slot: 'image:0', required: true, state: 'EXPECTED' }],
+	});
+	api.uploadDirectAssetFile.mockResolvedValue({ status: 'READY', sessionId: 'ready' });
+	const { client, rerender } = setup(true, { ...project, status: 'DRAFT' });
+	drop([file('first.png')]);
+	apply();
+	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
+	rerender(<QueryClientProvider client={client}>
+		<AdminProjectUploadProvider project={project} projectId={7} limits={limits} canEditContent>
+			<ApplyControl />
+			<AdminProjectPosterUpload project={project} canEditContent />
+			<AdminProjectAssetManager canEditContent />
+		</AdminProjectUploadProvider>
+	</QueryClientProvider>);
+	drop([file('second.png')]);
+	apply();
+	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+	expect(api.uploadDirectAssetFile.mock.calls[0]![4].submissionItem).toBeDefined();
+	expect(api.uploadDirectAssetFile.mock.calls[1]![4].submissionItem).toBeUndefined();
+	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
+});
+it.each([
 	['A.JPG', '', 'IMAGE'],
 	['A.WebP', '', 'IMAGE'],
 	['blob', 'image/png', 'IMAGE'],
