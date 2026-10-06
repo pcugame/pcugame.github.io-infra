@@ -129,7 +129,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	return (
 		<div className="admin-project-edit-page">
 			<div className="admin-page-header">
-				<div className="admin-page-header__text"><h1>작품 수정{project.isIncomplete && <span className="incomplete-badge">불완전</span>}</h1></div>
+				<div className="admin-page-header__text"><h1>작품 수정{isPrivileged && project.isIncomplete && <span className="incomplete-badge">불완전</span>}</h1></div>
 				<AdminProjectStatusPanel status={status} isPrivileged={isPrivileged} isPending={pending} error={null} onToggle={(next) => form.setValue('status', next, { shouldDirty: true, shouldValidate: true })} />
 			</div>
 			{form.formState.errors.status && <p className="field-error" role="alert">{form.formState.errors.status.message}</p>}

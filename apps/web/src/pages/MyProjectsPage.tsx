@@ -69,7 +69,6 @@ export default function MyProjectsPage() {
 									<th>제목</th>
 									<th>연도</th>
 									<th>상태</th>
-									<th>누락</th>
 									<th>참여 학생</th>
 									<th>수정일</th>
 									<th>관리</th>
@@ -85,7 +84,6 @@ export default function MyProjectsPage() {
 												{STATUS_LABELS[p.status]}
 											</span>
 										</td>
-										<td>{p.isIncomplete && <span className="incomplete-badge">불완전</span>}</td>
 										<td>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
 										<td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
 										<td>
@@ -111,7 +109,6 @@ export default function MyProjectsPage() {
 								<Link to={p.canEdit ? `/admin/projects/${p.id}/edit` : `/me/projects/${p.id}/change-request`} className="admin-pcard__link">
 									<div className="admin-pcard__top">
 										<h3 className="admin-pcard__title">{p.title}</h3>
-										{p.isIncomplete && <span className="incomplete-badge">불완전</span>}
 										<span className={`badge ${STATUS_COLORS[p.status]}`}>
 											{STATUS_LABELS[p.status]}
 										</span>
