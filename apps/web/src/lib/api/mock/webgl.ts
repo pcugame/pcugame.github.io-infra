@@ -3,7 +3,7 @@ import {
   inferWebglDisplayMode, resolveWebglDisplay, type WebglNetworkRequest,
 } from '@pcu/contracts';
 import { UNHANDLED, MockHttpError, type MockContext, type MockRequestOptions } from './context';
-import { getProject, isRelated, projectCapabilities, projectExhibition, isStaff, bumpProjectVersion } from './policy';
+import { getProject, isRelated, projectCapabilities, projectExhibition, isStaff, bumpProjectVersion, mockWebglAnalysis } from './policy';
 import { allowMethod, bodyObject, conflict, forbidden, missing, parseInput } from './common';
 
 export function handleWebgl(ctx: MockContext, pathname: string, method: string, options: MockRequestOptions): unknown {
@@ -19,7 +19,7 @@ export function handleWebgl(ctx: MockContext, pathname: string, method: string, 
       Object.assign(project, input, { webglDisplayMode: inferWebglDisplayMode(input) });
       bumpProjectVersion(ctx, project);
     }
-    const analysis = project.webglUrl ? { version: 1 as const, kind: 'responsive' as const, width: null, height: null, reason: null } : null;
+    const analysis = mockWebglAnalysis(project);
     return { webglDisplayMode: project.webglDisplayMode ?? 'legacy', webglDisplayWidth: project.webglDisplayWidth ?? null,
       webglDisplayHeight: project.webglDisplayHeight ?? null, analysis, effective: resolveWebglDisplay({ ...project, analysis }) };
   }

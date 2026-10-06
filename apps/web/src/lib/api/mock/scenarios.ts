@@ -23,10 +23,25 @@ export function chooseMockScenario(scenario: MockScenario) {
       }
     }
     if (scenario === 'media') {
-      for (const project of Object.values(state.projects).slice(0,3)) {
-        const asset = project.assets.find(a=>a.kind==='VIDEO');
-        if (asset && asset.kind==='VIDEO') { asset.playbackStatus='PENDING'; delete asset.playbackUrl; }
-        for (const video of project.videos) { video.playbackStatus='PENDING'; delete video.url; }
+      // Seed completed uploads into the same persisted validation lifecycle as
+      // real mock uploads. Pausing and resuming therefore affects both fixtures
+      // and newly submitted videos through advanceUploadJobs.
+      for (const project of Object.values(state.projects).filter(p=>p.videos.length>0).slice(0,3)) {
+        const items = project.videos.map((video,index)=>{
+          const asset=project.assets.find(a=>a.id===video.assetId&&a.kind==='VIDEO');
+          if(!asset || asset.kind!=='VIDEO') throw new Error('Media fixture video must have a matching asset');
+          asset.playbackStatus='PENDING';delete asset.playbackUrl;delete asset.playbackError;
+          video.playbackStatus='PENDING';delete video.url;delete video.playbackError;
+          const sessionId=crypto.randomUUID(),itemId=crypto.randomUUID(),clientToken=crypto.randomUUID();
+          state.sessions[sessionId]={sessionId,owner:{type:'PROJECT',id:project.id},kind:'VIDEO',actorId:project.createdByUserId,
+            generation:1,state:'VERIFYING',originalName:asset.originalName,totalBytes:asset.size,partSizeBytes:5*1024*1024,totalParts:1,
+            expiresAt:new Date(Date.now()+3600000).toISOString(),sourceIdentityAlgorithm:'SHA256_BLOCK_MANIFEST_V1',
+            sourceIdentity:'0'.repeat(64),sourceIdentityBlockDigests:['0'.repeat(64)],capabilities:{},parts:[],
+            submissionItemId:itemId,resultAssetId:asset.id,completedAt:new Date(Date.now()-1000).toISOString(),processingState:'PROCESSING'};
+          return {id:itemId,kind:'VIDEO' as const,slot:`video:${index}`,clientToken,required:true as const,state:'VERIFYING' as const,sessionId,generation:1};
+        });
+        state.submissions[project.id]={submissionId:crypto.randomUUID(),projectId:project.id,projectStatus:project.status,state:'PUBLISHED',
+          actorId:project.createdByUserId,createdAt:new Date().toISOString(),items};
         project.video=project.videos[0]??null;
       }
       state.controls.worker='paused';

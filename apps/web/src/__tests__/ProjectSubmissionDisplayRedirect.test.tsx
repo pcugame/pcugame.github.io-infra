@@ -17,10 +17,10 @@ function Submission() {
 
 describe('registration completion display review', () => {
   it('takes a normal owner to the shared edit page after publication', async () => {
-    window.sessionStorage.setItem('pcu.pending-project-submission:user', JSON.stringify({ id: 41, submissionId: 'submission', status: 'DRAFT', items: [] }));
+    window.sessionStorage.setItem('pcu.pending-project-submission:user:1', JSON.stringify({ id: 41, submissionId: 'submission', status: 'DRAFT', items: [] }));
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={qc}><MemoryRouter initialEntries={['/submit']}><Routes><Route path="/submit" element={<Submission />} /><Route path="/admin/projects/41/edit" element={<p>Review display settings</p>} /></Routes></MemoryRouter></QueryClientProvider>);
     await waitFor(() => expect(screen.getByText('Review display settings')).toBeTruthy());
-    expect(window.sessionStorage.getItem('pcu.pending-project-submission:user')).toBeNull();
+    expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:1')).toBeNull();
   });
 });

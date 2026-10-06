@@ -1,3 +1,4 @@
+import type { WebglDisplayAnalysis } from '@pcu/contracts';
 import type { MockContext, MockProject } from './context';
 import { MockHttpError } from './context';
 
@@ -64,4 +65,13 @@ export function removeAsset(project: MockProject, assetId: number) {
  project.video = project.videos[0] ?? null;
  project.attachments = project.attachments?.filter(a => a.assetId !== assetId);
  if (project.posterAssetId === assetId) { delete project.posterAssetId; delete project.poster; }
+}
+
+/** The local preview fixtures carry the same analysis categories as processed builds. */
+export function mockWebglAnalysis(project: MockProject): WebglDisplayAnalysis | null {
+ if (!project.webglUrl) return null;
+ if (new URL(project.webglUrl).pathname.endsWith('/fixed.html')) {
+  return {version:1,kind:'fixed',width:800,height:600,reason:null};
+ }
+ return {version:1,kind:'responsive',width:null,height:null,reason:null};
 }

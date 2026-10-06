@@ -200,7 +200,7 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		).toBeTruthy();
 		expect(within(container.querySelector('.admin-project-edit-assets')!).getByText('game.zip')).toBeTruthy();
 		expect(container.querySelector('input[type="file"]')).toBeNull();
-		expect(window.sessionStorage.getItem(`pcu.pending-project-submission:${mode}`)).toContain(
+		expect(window.sessionStorage.getItem(`pcu.pending-project-submission:${mode}:9`)).toContain(
 			'submission-73',
 		);
 	});
@@ -280,7 +280,7 @@ describe('submission selection and recovery', () => {
 			required: true,
 			state: state as ProjectSubmissionItemStatus['state'],
 		}));
-		window.sessionStorage.setItem('pcu.pending-project-submission:user', JSON.stringify(draft()));
+		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
 		const session = {
 			sessionId: 'second-session',
 			owner: { type: 'PROJECT', id: 73 },
@@ -344,7 +344,7 @@ describe('submission selection and recovery', () => {
 				state: 'EXPECTED',
 			},
 		];
-		window.sessionStorage.setItem('pcu.pending-project-submission:user', JSON.stringify(draft()));
+		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
 		const { container } = mount();
 		await screen.findByText('제출 취소');
 		expect(container.querySelector('.admin-project-edit-poster input[type="file"]')).toBeTruthy();
@@ -355,7 +355,7 @@ describe('submission selection and recovery', () => {
 		fireEvent.click(screen.getByRole('button', { name: '제출 취소' }));
 		await waitFor(() => expect(controls.cancel).toHaveBeenCalledWith(73));
 		await waitFor(() =>
-			expect(window.sessionStorage.getItem('pcu.pending-project-submission:user')).toBeNull(),
+			expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:9')).toBeNull(),
 		);
 	});
 });

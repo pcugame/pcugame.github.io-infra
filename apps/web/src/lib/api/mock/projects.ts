@@ -4,9 +4,9 @@ import {
  BulkDeleteProjectsSchema, SetProjectPosterSchema, SetProjectVideoOrderSchema, AdminProjectListQueryBaseSchema,
 } from '@pcu/contracts';
 import type { AdminProjectDetail, PublicProjectDetailResponse } from '../../../contracts';
-import { MockHttpError, UNHANDLED } from './context';
+import { MOCK_USERS, MockHttpError, UNHANDLED } from './context';
 import type { MockContext, MockProject, MockRequestOptions } from './context';
-import { assertProjectRead, assertProjectWrite, bumpProjectVersion, canReadPublicProject, canReadVisibility, getProject, isRelated, isStaff, projectCapabilities, projectExhibition, removeAsset, removeProject } from './policy';
+import { assertProjectRead, assertProjectWrite, bumpProjectVersion, canReadPublicProject, canReadVisibility, getProject, isRelated, isStaff, projectCapabilities, projectExhibition, removeAsset, removeProject, mockWebglAnalysis } from './policy';
 import type { z } from 'zod';
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
@@ -30,8 +30,9 @@ function publicCard(ctx:MockContext,p:MockProject) {
  return {id:p.id,slug:p.slug,title:p.title,summary:p.summary,poster:p.poster,visibility:p.visibility,exhibitionVisibility:e.visibility,canChangeVisibility:projectCapabilities(ctx,p).canChangeVisibility,members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder).map(m=>({name:m.name,studentId:m.studentId})),exhibitionId:e.id,exhibitionTitle:e.title||`${e.year} 전시`};
 }
 export function publicProjectDetail(ctx:MockContext,p:MockProject):PublicProjectDetailResponse {
+ const display = resolveWebglDisplay({...p,analysis:mockWebglAnalysis(p)});
  const { exhibitionId: _id, exhibitionTitle: _title, ...card } = publicCard(ctx,p); void [_id,_title];
- return {...card,year:projectExhibition(ctx,p).year,description:p.description,externalLinks:p.externalLinks,githubUrl:p.githubUrl,platforms:p.platforms,isIncomplete:p.isIncomplete,status:p.status as 'PUBLISHED'|'ARCHIVED',video:p.video,videos:p.videos,members:p.members.map(m=>({id:m.id,name:m.name,studentId:m.studentId})),images:p.assets.flatMap(a=>(a.kind==='IMAGE'||a.kind==='POSTER')?[{id:a.id,kind:a.kind,image:a.image}]:[]),attachments:p.attachments??[],gameDownloadUrl:p.assets.flatMap(a=>a.kind==='GAME'&&'url' in a?[a.url]:[])[0],webglUrl:p.webglUrl,webglPlayUrl:p.webglUrl,webglDisplayKind:resolveWebglDisplay({...p,analysis:p.webglUrl?{version:1,kind:'responsive',width:null,height:null,reason:null}:null}).kind,webglDisplayWidth:resolveWebglDisplay({...p}).width,webglDisplayHeight:resolveWebglDisplay({...p}).height};
+ return {...card,year:projectExhibition(ctx,p).year,description:p.description,externalLinks:p.externalLinks,githubUrl:p.githubUrl,platforms:p.platforms,isIncomplete:p.isIncomplete,status:p.status as 'PUBLISHED'|'ARCHIVED',video:p.video,videos:p.videos,members:p.members.map(m=>({id:m.id,name:m.name,studentId:m.studentId})),images:p.assets.flatMap(a=>(a.kind==='IMAGE'||a.kind==='POSTER')?[{id:a.id,kind:a.kind,image:a.image}]:[]),attachments:p.attachments??[],gameDownloadUrl:p.assets.flatMap(a=>a.kind==='GAME'&&'url' in a?[a.url]:[])[0],webglUrl:p.webglUrl,webglDisplayKind:display.kind,webglDisplayWidth:display.width,webglDisplayHeight:display.height};
 }
 export function handleProjects(ctx:MockContext,pathname:string,method:string,options:MockRequestOptions,originalPath:string):unknown {
  const query=new URLSearchParams(originalPath.split('?')[1]??'');
@@ -81,11 +82,11 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
  if(pathname==='/api/admin/projects') {
   ctx.requireUser(); methodAllowed(method,['GET']); const params: Record<string, unknown>=Object.fromEntries(query); for(const key of ['page','limit','year'])if(params[key]!==undefined){if(!/^[1-9]\d*$/.test(String(params[key])))throw new MockHttpError(400,'VALIDATION_ERROR','Expected canonical positive integer');params[key]=Number(params[key]);} if(params.year!==undefined&&(Number(params.year)<1000||Number(params.year)>9999))throw new MockHttpError(400,'VALIDATION_ERROR','Year must have four digits'); const validated=parse(AdminProjectListQueryBaseSchema,params);
   const page=validated.page??1,limit=Math.min(validated.limit??20,100),search=(validated.search??'').trim().toLowerCase();
-  const items=Object.values(ctx.state.projects).filter(p=>!p.isChangeRequestDraft&&(isStaff(ctx)||isRelated(ctx,p))&&(!validated.status||p.status===validated.status)&&(!validated.year||p.year===validated.year)&&(!search||[p.title,p.year,...p.members.flatMap(m=>[m.name,m.studentId])].some(v=>String(v).toLowerCase().includes(search))));
+  const items=Object.values(ctx.state.projects).filter(p=>!p.isChangeRequestDraft&&(isStaff(ctx)||isRelated(ctx,p))&&(!validated.status||p.status===validated.status)&&(!validated.year||p.year===validated.year)&&(!search||[p.title,p.summary,projectExhibition(ctx,p).title,p.year,...p.members.flatMap(m=>[m.name,m.studentId])].some(v=>String(v).toLowerCase().includes(search))));
   const sort=validated.sort??'createdAt',direction=validated.order==='asc'?1:-1;
   items.sort((a,b)=> direction*(sort==='year'?a.year-b.year:sort==='title'?a.title.localeCompare(b.title,'ko'):sort==='status'?a.status.localeCompare(b.status):a.createdAt.localeCompare(b.createdAt))||a.id-b.id);
   const totalItems=items.length,totalPages=Math.ceil(totalItems/limit);
-  return {items:items.slice((page-1)*limit,page*limit).map(p=>({id:p.id,title:p.title,slug:p.slug,year:p.year,status:p.status,visibility:p.visibility,exhibitionVisibility:projectExhibition(ctx,p).visibility,isIncomplete:p.isIncomplete,memberNames:p.members.map(m=>m.name),memberStudentIds:p.members.map(m=>m.studentId),updatedAt:p.updatedAt,...listCapabilities(ctx,p)})),pagination:{page,limit,totalItems,totalPages,hasNextPage:page<totalPages,hasPreviousPage:page>1&&totalItems>0}};
+  return {items:items.slice((page-1)*limit,page*limit).map(p=>({id:p.id,title:p.title,slug:p.slug,year:p.year,status:p.status,visibility:p.visibility,exhibitionVisibility:projectExhibition(ctx,p).visibility,isIncomplete:p.isIncomplete,memberNames:p.members.map(m=>m.name),memberStudentIds:p.members.map(m=>m.studentId),updatedAt:p.updatedAt,createdByUserName:Object.values(MOCK_USERS).find(user=>user.id===p.createdByUserId)?.name,...listCapabilities(ctx,p)})),pagination:{page,limit,totalItems,totalPages,hasNextPage:page<totalPages,hasPreviousPage:page>1&&totalItems>0}};
  }
  if(pathname==='/api/admin/projects/bulk/status') {
   ctx.requireAdmin();methodAllowed(method,['PATCH']);const body=parse(BulkUpdateProjectStatusSchema,options.body);let updated=0;

@@ -102,6 +102,15 @@ describe('persisted project direct upload mock through the actual client', () =>
     await vi.advanceTimersByTimeAsync(950); expect((await status(created.id)).items[0]).toMatchObject({ state: 'READY', playbackState: 'READY' });
     expect((await getMockSnapshot()).projects[created.id]!.videos).toHaveLength(1);
   });
+  it('keeps a failed publication terminal until an explicit finalize retry', async () => {
+    const created = await submit('Failed publication', []);
+    await setMockControls({ worker: 'fail' }); await finalize(created.id); await vi.advanceTimersByTimeAsync(650);
+    expect(await status(created.id)).toMatchObject({ state: 'FINALIZING', publicationState: 'FAILED' });
+    await setMockControls({ worker: 'auto' }); await forgetMockCacheForTests(); await vi.advanceTimersByTimeAsync(1000);
+    expect(await status(created.id)).toMatchObject({ state: 'FINALIZING', publicationState: 'FAILED' });
+    expect(await finalize(created.id)).toMatchObject({ state: 'FINALIZING', publicationState: 'PROCESSING' });
+    await vi.advanceTimersByTimeAsync(650); expect(await status(created.id)).toMatchObject({ state: 'PUBLISHED', publicationState: 'COMPLETED' });
+  });
   it('cancels pending processing and prevents publication and old capabilities', async () => {
     const created = await submit(); const completion = await uploadDirectAssetFile(created.id, file(), 'GAME', undefined, binding(created));
     await request(`/api/me/projects/${created.id}/submission`, 'DELETE'); await vi.advanceTimersByTimeAsync(2000);

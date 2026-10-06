@@ -8,7 +8,7 @@ import {
 	SubmitProjectPayloadSchema,
 	type SubmitProjectPayloadInput,
 } from '../../contracts/schemas';
-import { adminExhibitionApi, isApiError } from '../../lib/api';
+import { adminExhibitionApi, isApiError, getApiErrorCode, getApiErrorMessage } from '../../lib/api';
 import { getProjectSubmitApi, type ProjectSubmissionMode } from '../../lib/api/project-submit';
 import { queryKeys, useViewerKey, invalidateVisibilityQueries } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
@@ -110,19 +110,37 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 	const [submissionItems, setSubmissionItems] = useState<ProjectSubmissionItemStatus[]>([]);
 	const [submissionError, setSubmissionError] = useState<unknown>(null);
 	const manifestByFingerprint = useRef(new Map<string, ProjectSubmissionManifestItem[]>());
-	const publicationPollActive = useRef(false);
-	const pendingStorageKey = `pcu.pending-project-submission:${mode}`;
+	const publicationPoll = useRef<AbortController | null>(null);
+	const mounted = useRef(true);
+	const cancellationPending = useRef(false);
+	const pendingStorageKey = user ? `pcu.pending-project-submission:${mode}:${user.id}` : null;
+	const viewerIdentity = `${mode}:${user?.id ?? 'anonymous'}:${user?.role ?? ''}`;
+	const currentViewer = useRef(viewerIdentity); currentViewer.current = viewerIdentity;
+	const lifetime = useRef(0);
+	useEffect(() => {
+		mounted.current = true; cancellationPending.current = false; lifetime.current += 1;
+		return () => { mounted.current = false; lifetime.current += 1; publicationPoll.current?.abort(); publicationPoll.current = null; };
+	}, [viewerIdentity]);
+	const [canRetryStatus, setCanRetryStatus] = useState(false);
+	const [canRetryPublication, setCanRetryPublication] = useState(false);
+	const [isFinalizing, setIsFinalizing] = useState(false);
 	const idempotencyOperation = useStableIdempotencyOperation();
 
-	const finalizeIfReady = useCallback(async (projectId: number) => {
-		if (publicationPollActive.current) return false;
-		publicationPollActive.current = true;
+	const finalizeIfReady = useCallback(async (projectId: number, options: { retryPublication?: boolean } = {}) => {
+		if (!mounted.current || currentViewer.current !== viewerIdentity || cancellationPending.current || !pendingStorageKey || publicationPoll.current) return false;
+		const controller = new AbortController(); publicationPoll.current = controller;
+		const operationLifetime = lifetime.current;
+		const current = () => mounted.current && lifetime.current === operationLifetime && !controller.signal.aborted && currentViewer.current === viewerIdentity;
+		setIsFinalizing(true); setSubmissionError(null); setCanRetryStatus(false);
 		try {
 			const api = getProjectSubmitApi(mode);
 			const deadline = Date.now() + 10 * 60_000;
+			let retryPublication = import.meta.env.VITE_MOCK === 'true' && options.retryPublication === true;
 			for (;;) {
 				const status = await api.getSubmission(projectId);
+				if (!current()) return false;
 				setSubmissionItems(status.items);
+				if (status.publicationState !== 'FAILED') setCanRetryPublication(false);
 				if (status.state === 'CANCELLED') {
 					window.sessionStorage.removeItem(pendingStorageKey);
 					setSubmissionError(new Error('Project submission was cancelled'));
@@ -136,68 +154,88 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 					return true;
 				}
 				if (status.publicationState === 'FAILED') {
-					setSubmissionError(new Error(status.publicationError ?? 'Project publication failed'));
-					return false;
-				}
-				const failed = status.items.find((item) => item.state === 'FAILED' || item.state === 'CANCELLED');
-				if (failed) {
-					setSubmissionError(new Error(failed.failureReason ?? `${failed.slot} upload failed`));
-					return false;
-				}
-				if (status.state === 'PENDING') {
-					if (!status.items.every((item) => item.state === 'READY')) return false;
+					if (!retryPublication || !status.items.every(item => item.state === 'READY')) {
+						setCanRetryPublication(import.meta.env.VITE_MOCK === 'true' && status.items.every(item => item.state === 'READY'));
+						setSubmissionError(new Error(status.publicationError ?? 'Project publication failed'));
+						return false;
+					}
+					retryPublication = false;
 					await api.finalizeSubmission(projectId);
-				} else if (status.state !== 'FINALIZING') {
-					return false;
+					if (!current()) return false;
+					setCanRetryPublication(false);
+				} else {
+					const failed = status.items.find(item => item.state === 'FAILED' || item.state === 'CANCELLED');
+					if (failed) { setSubmissionError(new Error(failed.failureReason ?? `${failed.slot} upload failed`)); return false; }
+					if (status.state === 'PENDING') {
+						if (!status.items.every(item => item.state === 'READY')) return false;
+						await api.finalizeSubmission(projectId);
+						if (!current()) return false;
+					} else if (status.state !== 'FINALIZING') return false;
 				}
-				if (Date.now() >= deadline) {
-					setSubmissionError(new Error('Project publication is taking longer than expected'));
-					return false;
-				}
-				await new Promise((resolve) => setTimeout(resolve, 1_500));
+				if (Date.now() >= deadline) { setCanRetryStatus(true); setSubmissionError(new Error('Project publication is taking longer than expected')); return false; }
+				await new Promise<void>(resolve => {
+					const finish = () => { clearTimeout(timer); controller.signal.removeEventListener('abort', finish); resolve(); };
+					const timer = setTimeout(finish, 1_500);
+					controller.signal.addEventListener('abort', finish, { once: true });
+				});
+				if (!current()) return false;
 			}
 		} catch (error) {
-			setSubmissionError(error);
+			if (!current()) return false;
+			if (isApiError(error) && (error.status === 404 || (error.status === 400 && getApiErrorCode(error) === 'ERROR' && getApiErrorMessage(error) === 'Project submission not found'))) {
+				window.sessionStorage.removeItem(pendingStorageKey);
+				setCreatedProjectId(null); setCreatedSubmission(null); setSubmissionItems([]); setSubmissionError(null);
+			} else { setCanRetryStatus(isApiError(error) && (error.status === 0 || error.status === 429 || error.status >= 500)); setSubmissionError(error); }
 			return false;
 		} finally {
-			publicationPollActive.current = false;
+			if (publicationPoll.current === controller) publicationPoll.current = null;
+			if (current()) setIsFinalizing(false);
 		}
-	}, [mode, navigate, pendingStorageKey, qc]);
+	}, [mode, navigate, pendingStorageKey, qc, viewerIdentity]);
 
 	const cancelSubmission = useCallback(async () => {
-		if (createdProjectId === null) return;
+		if (!mounted.current || currentViewer.current !== viewerIdentity || cancellationPending.current || createdProjectId === null) return;
+		cancellationPending.current = true;
+		const operationLifetime = lifetime.current; const operationPoll = publicationPoll.current;
+		operationPoll?.abort(); if (publicationPoll.current === operationPoll) publicationPoll.current = null; setIsFinalizing(false);
+		const current = () => mounted.current && lifetime.current === operationLifetime && currentViewer.current === viewerIdentity;
 		try {
 			await getProjectSubmitApi(mode).cancelSubmission(createdProjectId);
-			window.sessionStorage.removeItem(pendingStorageKey);
+			if (pendingStorageKey) { const saved = window.sessionStorage.getItem(pendingStorageKey); try { if (saved && JSON.parse(saved).id === createdProjectId) window.sessionStorage.removeItem(pendingStorageKey); } catch { /* Unrelated malformed pointer is handled by restoration. */ } }
+			if (!current()) return;
+			operationPoll?.abort(); if (publicationPoll.current === operationPoll) publicationPoll.current = null;
 			setCreatedProjectId(null);
 			setCreatedSubmission(null);
 			setSubmissionItems([]);
 			navigate(isAdminMode ? '/admin/projects' : '/me/projects');
 		} catch (error) {
-			setSubmissionError(error);
-		}
-	}, [createdProjectId, isAdminMode, mode, navigate, pendingStorageKey]);
+			if (current()) setSubmissionError(error);
+		} finally { if (current()) cancellationPending.current = false; }
+	}, [createdProjectId, isAdminMode, mode, navigate, pendingStorageKey, viewerIdentity]);
 
 	useEffect(() => {
+		setCreatedProjectId(null); setCreatedSubmission(null); setSubmissionItems([]); setSubmissionError(null); setCanRetryPublication(false); setCanRetryStatus(false); setIsFinalizing(false);
+		if (!pendingStorageKey) return;
 		const raw = window.sessionStorage.getItem(pendingStorageKey);
-		if (!raw) return;
-		try {
-			const restored = JSON.parse(raw) as SubmitProjectResponse;
-			if (!restored.id || !restored.submissionId || restored.status !== 'DRAFT') throw new Error('invalid');
-			setCreatedSubmission(restored);
-			setCreatedProjectId(restored.id);
-			setSubmissionItems(restored.items);
-			void finalizeIfReady(restored.id);
-		} catch {
-			window.sessionStorage.removeItem(pendingStorageKey);
+		if (raw) {
+			try {
+				const restored = JSON.parse(raw) as SubmitProjectResponse;
+				if (!restored.id || !restored.submissionId || restored.status !== 'DRAFT') throw new Error('invalid');
+				setCreatedSubmission(restored); setCreatedProjectId(restored.id); setSubmissionItems(restored.items);
+				void finalizeIfReady(restored.id);
+			} catch { window.sessionStorage.removeItem(pendingStorageKey); }
 		}
-	}, [finalizeIfReady, pendingStorageKey]);
+		return () => { publicationPoll.current?.abort(); publicationPoll.current = null; };
+	}, [finalizeIfReady, pendingStorageKey, viewerIdentity]);
 
 	const submitMutation = useMutation({
 		mutationFn: ({ formData, idempotencyKey }: {
 			formData: FormData;
 			idempotencyKey: string;
 			fingerprint: string;
+			viewerIdentity: string;
+			storageKey: string;
+			lifetime: number;
 		}) => getProjectSubmitApi(mode).submit({ formData, idempotencyKey }),
 		retry: (failureCount, error) => failureCount < 1
 			&& isApiError(error)
@@ -205,6 +243,9 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			&& error.statusText === 'Network Error',
 		retryDelay: 0,
 		onSuccess: (res, operation) => {
+			const active = mounted.current && lifetime.current === operation.lifetime && currentViewer.current === operation.viewerIdentity;
+			if (active || window.sessionStorage.getItem(operation.storageKey) === null) window.sessionStorage.setItem(operation.storageKey, JSON.stringify(res));
+			if (!active) return;
 			idempotencyOperation.complete(operation.fingerprint);
 			qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 			void invalidateVisibilityQueries(qc);
@@ -213,12 +254,12 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			setCreatedProjectId(res.id);
 			setCreatedSubmission(res);
 			setSubmissionItems(res.items);
-			window.sessionStorage.setItem(pendingStorageKey, JSON.stringify(res));
 			void finalizeIfReady(res.id);
 		},
 	});
 
 	const onSubmit = (data: SubmitProjectPayloadInput) => {
+		if (!mounted.current || currentViewer.current !== viewerIdentity || !pendingStorageKey) return;
 		if (isAdminMode && user) {
 			const linkedMember = data.members.find((member) => member.name === user.name);
 			if (linkedMember) linkedMember.userId = user.id;
@@ -227,6 +268,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		// Garage multipart capabilities after project identity exists.
 		const fingerprint = createIdempotencyFingerprint({
 			mode,
+			viewerIdentity,
 			payload: data,
 			files: {
 				poster: files.posterFile ? fingerprintFile(files.posterFile) : null,
@@ -256,6 +298,9 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		const fd = buildSubmitFormData({ ...data, manifest }, {});
 		submitMutation.mutate({
 			formData: fd,
+			viewerIdentity,
+			storageKey: pendingStorageKey,
+			lifetime: lifetime.current,
 			fingerprint,
 			idempotencyKey: idempotencyOperation.keyFor(fingerprint),
 		});
@@ -268,6 +313,11 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	return {
 		copy,
+		canRetryPublication,
+		canRetryStatus,
+		retryStatus: () => createdProjectId !== null && finalizeIfReady(createdProjectId),
+		isFinalizing,
+		retryPublication: () => createdProjectId !== null && finalizeIfReady(createdProjectId, { retryPublication: true }),
 		cancelSubmission,
 		createdProjectId,
 		createdSubmission,

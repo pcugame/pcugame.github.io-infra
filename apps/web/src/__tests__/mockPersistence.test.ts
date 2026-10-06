@@ -54,11 +54,30 @@ describe('IndexedDB mock snapshots', () => {
     expect(response.status).toBe(500); spy.mockRestore();
     expect((await reloadMockState()).settings).toEqual(before.settings);
   });
+  it('repairs version-one download fixtures while preserving edits, roles and jobs', async () => {
+    await externalSnapshot(state => {
+      (state as unknown as {version:number}).version = 1;
+      state.projects[1].assets = state.projects[1].assets.filter(asset => asset.kind !== 'GAME');
+      state.projects[1].title = 'Preserved title';
+      state.submissions = {};
+      state.authUser = 'owner'; state.exportJobs.keep = { state: 'RUNNING' };
+      state.projects[2].assets = state.projects[2].assets.filter(asset => asset.kind !== 'GAME');
+      state.projects[2].version = 2;
+    });
+    const state = await reloadMockState();
+    expect(state.version).toBe(2); expect(state.authUser).toBe('owner');
+    expect(state.projects[1].title).toBe('Preserved title');
+    expect(state.projects[1].assets.find(asset => asset.kind === 'GAME')).toMatchObject({originalName:'game.zip'});
+    expect(state.projects[2].assets.some(asset => asset.kind === 'GAME')).toBe(false);
+    expect(state.exportJobs.keep).toEqual({state:'RUNNING'});
+    expect(state.submissions[9106]).toMatchObject({state:'PENDING',projectStatus:'DRAFT',actorId:3});
+    expect((await reloadMockState()).revision).toBe(state.revision);
+  });
   it('migrates version zero and allows reset recovery for a future snapshot', async () => {
     await externalSnapshot(state => { (state as unknown as {version:number}).version = 0; state.authUser = 'other'; });
-    expect((await reloadMockState()).version).toBe(1); expect((await reloadMockState()).authUser).toBe('other');
+    expect((await reloadMockState()).version).toBe(2); expect((await reloadMockState()).authUser).toBe('other');
     await externalSnapshot(state => { (state as unknown as {version:number}).version = 999; });
     await expect(reloadMockState()).rejects.toMatchObject({ code: 'MOCK_STORAGE_VERSION' });
-    expect((await resetMockState()).version).toBe(1); expect((await reloadMockState()).version).toBe(1);
+    expect((await resetMockState()).version).toBe(2); expect((await reloadMockState()).version).toBe(2);
   });
 });

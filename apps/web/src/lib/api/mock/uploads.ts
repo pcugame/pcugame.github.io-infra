@@ -79,7 +79,7 @@ function attachAsset(ctx: MockContext, session: MockUploadSession, ready: boolea
   } else {
     project.assets.push({ id, kind: session.kind, originalName: session.originalName, size: session.totalBytes, url, ...(session.kind === 'VIDEO' ? { videoSortOrder: Number(boundItem(ctx, session)?.slot.split(':')[1] ?? project.assets.filter(asset => asset.kind === 'VIDEO').length), playbackStatus: ready ? 'READY' as const : 'PENDING' as const, ...(ready ? { playbackUrl: url } : {}) } : {}) });
   }
-  project.videos = project.assets.flatMap((asset) => asset.kind === 'VIDEO' && 'url' in asset ? [{ assetId: asset.id, sortOrder: asset.videoSortOrder ?? 0, role: 'MAIN' as const, mimeType: 'video/webm', ...(asset.playbackStatus === 'READY' ? { url: asset.playbackUrl ?? asset.url } : {}), originalDownloadUrl: asset.url, playbackStatus: asset.playbackStatus ?? 'PENDING', originalName: asset.originalName }] : []).sort((a, b) => a.sortOrder - b.sortOrder).map((video, index) => ({ ...video, sortOrder: index, role: index === 0 ? 'MAIN' : 'ADDITIONAL' }));
+  project.videos = project.assets.flatMap((asset) => asset.kind === 'VIDEO' && 'url' in asset ? [{ assetId: asset.id, sortOrder: asset.videoSortOrder ?? 0, role: 'MAIN' as const, mimeType: 'video/webm', ...(asset.playbackStatus === 'READY' ? { url: asset.playbackUrl ?? asset.url } : {}), originalDownloadUrl: asset.url, playbackStatus: asset.playbackStatus ?? 'PENDING' }] : []).sort((a, b) => a.sortOrder - b.sortOrder).map((video, index) => ({ ...video, sortOrder: index, role: index === 0 ? 'MAIN' : 'ADDITIONAL' }));
   project.video = project.videos[0] ?? null;
   project.attachments = project.assets.flatMap(asset => (asset.kind === 'DOCUMENT' || asset.kind === 'ATTACHMENT') && 'downloadUrl' in asset ? [{ assetId: asset.id, kind: asset.kind, originalName: asset.originalName, sizeBytes: asset.size, mimeType: asset.mimeType, downloadUrl: asset.downloadUrl }] : []);
   project.updatedAt = ctx.now();
@@ -100,7 +100,7 @@ export function advanceUploadJobs(ctx: MockContext): void {
     session.state = 'READY'; delete session.processingState; attachAsset(ctx, session, true); if (item) { item.state = 'READY'; delete item.failureReason; if (session.kind === 'VIDEO') item.playbackState = 'READY'; }
   }
   for (const submission of Object.values(submissions(ctx))) {
-    if (submission.state !== 'FINALIZING' || !submission.finalizedAt || ctx.state.controls.worker === 'paused' || ms(ctx) - Date.parse(submission.finalizedAt) < 600) continue;
+    if (submission.state !== 'FINALIZING' || submission.publicationState === 'FAILED' || !submission.finalizedAt || ctx.state.controls.worker === 'paused' || ms(ctx) - Date.parse(submission.finalizedAt) < 600) continue;
     if (ctx.state.controls.worker === 'fail') { submission.publicationState = 'FAILED'; submission.publicationError = 'Mock publication failed'; continue; }
     submission.state = 'PUBLISHED'; submission.publicationState = 'COMPLETED'; delete submission.publicationError;
     const project = ctx.state.projects[submission.projectId]; if (project && !project.isChangeRequestDraft) { project.status = 'PUBLISHED'; project.updatedAt = ctx.now(); submission.projectStatus = 'PUBLISHED'; }
@@ -166,7 +166,7 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
   match = pathname.match(/^\/api\/(admin|me)\/projects\/(\d+)\/submission(?:\/(finalize))?$/);
   if (match) {
     const actor = match[1] === 'admin' ? ctx.requireAdmin() : ctx.requireUser();
-    const submission = submissions(ctx)[match[2]!] ?? fail(404, 'NOT_FOUND', 'Submission not found');
+    const submission = submissions(ctx)[match[2]!] ?? fail(method === 'GET' ? 400 : 404, method === 'GET' ? 'ERROR' : 'NOT_FOUND', 'Project submission not found');
     if (actor.role === 'USER' && submission.actorId !== actor.id) fail(403, 'FORBIDDEN', 'Submission belongs to another user');
     if (!match[3] && method === 'DELETE') {
       if (submission.state === 'PUBLISHED') fail(409, 'CONFLICT', 'Published submission cannot be cancelled');

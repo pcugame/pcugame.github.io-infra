@@ -45,6 +45,17 @@ describe('change request workflow through actual client',()=>{
 });
 
 describe('WebGL display/network and file access',()=>{
+  it('uses fixed build analysis and publishes resolved settings for the local frontend player',async()=>{
+    await selectMockUser('ADMIN');
+    const settings=WebglDisplaySettingsResponseSchema.parse(await api.get('/api/me/projects/2/webgl-display'));
+    expect(settings.analysis).toMatchObject({kind:'fixed',width:800,height:600});
+    await api.put('/api/me/projects/2/webgl-display',{webglDisplayMode:'auto',webglDisplayWidth:null,webglDisplayHeight:null});
+    const fixed=await api.get<{webglPlayUrl?:string;webglDisplayKind:string;webglDisplayWidth:number;webglDisplayHeight:number}>('/api/public/projects/2');
+    expect(fixed).toMatchObject({webglDisplayKind:'fixed',webglDisplayWidth:800,webglDisplayHeight:600});
+    expect(fixed.webglPlayUrl).toBeUndefined();
+    await api.put('/api/me/projects/1/webgl-display',{webglDisplayMode:'manual',webglDisplayWidth:1024,webglDisplayHeight:768});
+    expect(await api.get('/api/public/projects/1')).toMatchObject({webglDisplayKind:'fixed',webglDisplayWidth:1024,webglDisplayHeight:768});
+  });
   it('checks creator display capability and publishes settings; reviews connection policy history',async()=>{
     await selectMockUser('owner');const p=Object.values((await getMockSnapshot()).projects).find(p=>p.createdByUserId===3&&p.isModificationEnabled!==false)!;
     const result=await api.put(`/api/me/projects/${p.id}/webgl-display`,{webglDisplayMode:'manual',webglDisplayWidth:800,webglDisplayHeight:600});expect(WebglDisplaySettingsResponseSchema.safeParse(result).success).toBe(true);

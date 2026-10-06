@@ -1,6 +1,7 @@
 import { cloneMockValue, createMockContext, createMockState, MockHttpError, UNHANDLED } from './context';
 import type { MockControls, MockRequestOptions, MockState, MockUserSelection } from './context';
 import { dispatchMockRequest } from './handler';
+import { createSeedSubmissions } from './submission-fixtures';
 
 const DATABASE = 'pcu-development-mock-v1';
 const STORE = 'snapshots';
@@ -91,11 +92,24 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
 async function load(): Promise<MockState> {
   const saved = await read();
   if (saved) {
-    if (Number(saved.version) === 0) {
-      const migrated: MockState = { ...createMockState(), ...saved, version: 1, revision: saved.revision + 1 };
+    if ([0, 1].includes(Number(saved.version))) {
+      const seeded = createMockState();
+      const migrated: MockState = { ...seeded, ...saved, version: 2, revision: saved.revision + 1 };
+      // Repair the missing game asset in old seed snapshots without replacing user edits or jobs.
+      for (const project of Object.values(migrated.projects)) {
+        const fixture = seeded.projects[project.id];
+        const game = fixture?.assets.find(asset => asset.kind === 'GAME');
+        if (game && project.version === 1 && project.slug === fixture.slug && !project.isChangeRequestDraft
+          && !project.assets.some(asset => asset.kind === 'GAME') && !project.assets.some(asset => asset.id === game.id)) {
+          project.assets.push(cloneMockValue(game));
+        }
+      }
+      for (const [id, submission] of Object.entries(createSeedSubmissions(migrated.projects))) {
+        if (!migrated.submissions[id]) migrated.submissions[id] = submission;
+      }
       await write(migrated, saved.revision); cached = migrated; return migrated;
     }
-    if (saved.version !== 1) throw new MockHttpError(500, 'MOCK_STORAGE_VERSION', 'Unsupported mock snapshot version. Reset local mock data to recover.');
+    if (saved.version !== 2) throw new MockHttpError(500, 'MOCK_STORAGE_VERSION', 'Unsupported mock snapshot version. Reset local mock data to recover.');
     cached = saved; return saved;
   }
   const seeded = createMockState();

@@ -29,6 +29,15 @@ export function createProjectFixtures(): Record<number, MockProject> {
  const fixed=projects[2];
  fixed.webglUrl=mockFixtureUrl('/mock/webgl/fixed.html');fixed.webglDeployment={id:'00000000-0000-4000-8000-000000000002',url:fixed.webglUrl,createdAt:fixed.createdAt};
  fixed.webglDisplayMode='manual';fixed.webglDisplayWidth=800;fixed.webglDisplayHeight=600;
+ // Visible edge cases are reachable in the default exhibition, without preparing uploads.
+ const edge = projects[3];
+ edge.description = Array.from({length:12},(_,i)=>`개발 기록 ${i+1}: 화면 크기와 입력 장치에 따른 게임 조작 및 UI 배치 확인.`).join('\n\n');
+ edge.members = Array.from({length:8},(_,i)=>({id:300+i,name:`참여 학생 ${i+1}`,studentId:`20882${String(i).padStart(2,'0')}`,sortOrder:i,userId:null}));
+ edge.assets.push({id:393,kind:'ATTACHMENT',originalName:'game-resources.zip',mimeType:'application/zip',size:150,downloadUrl:mockFixtureUrl('/mock/files/game.zip')});
+ edge.attachments=[{assetId:393,kind:'ATTACHMENT',originalName:'game-resources.zip',mimeType:'application/zip',sizeBytes:150,downloadUrl:mockFixtureUrl('/mock/files/game.zip')}];
+ const noPoster=projects[4];
+ delete noPoster.poster; delete noPoster.posterAssetId;
+ noPoster.assets=noPoster.assets.filter(asset=>asset.kind!=='POSTER');
  for (const project of Object.values(projects)) {
   const localUrl = (value: unknown): unknown => {
    if (typeof value === 'string' && value.includes('/mock/')) { const url=new URL(value);url.searchParams.set('mock_project',String(project.id));return url.href; }

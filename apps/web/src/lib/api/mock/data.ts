@@ -496,9 +496,12 @@ export function buildAdminProjectDetail(id: string | number): AdminProjectDetail
 		posterAssetId: detail.images[0]?.id, poster: detail.poster,
 		members: detail.members.map((m, i) => ({ ...m, sortOrder: i, userId: null })),
 		...mockProjectOverrides.get(detail.id),
-		assets: detail.images.map((img) => ({
-			id: img.id, kind: img.kind, image: img.image, originalName: `asset-${img.id}.webp`, size: 102400,
-		})),
+		assets: [
+			...detail.images.map((img) => ({
+				id: img.id, kind: img.kind, image: img.image, originalName: `asset-${img.id}.webp`, size: 102400,
+			})),
+			...(detail.gameDownloadUrl ? [{ id: detail.id * 100 + 53, kind: 'GAME' as const, url: detail.gameDownloadUrl, originalName: 'game.zip', size: 150 }] : []),
+		],
 	};
 }
 

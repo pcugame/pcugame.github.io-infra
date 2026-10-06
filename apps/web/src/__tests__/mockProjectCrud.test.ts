@@ -8,6 +8,16 @@ import { resetMockState, selectMockUser, updateMockState } from '../lib/api/mock
 describe('mock project canonical CRUD through API client',()=>{
  beforeEach(async()=>{vi.stubEnv('VITE_MOCK','true');await resetMockState();await selectMockUser('ADMIN');});
  afterEach(()=>vi.unstubAllEnvs());
+ it('serves seeded game downloads through public detail and removes the button after deleting the asset',async()=>{
+  const detail=PublicProjectDetailResponseSchema.parse(await publicApi.getProjectDetail(1));
+  expect(detail.gameDownloadUrl).toContain('/mock/files/game.zip');
+  expect(detail.attachments?.[0].downloadUrl).toContain('/mock/files/readme.txt');
+  const admin=await adminProjectApi.getDetail(1);
+  const game=admin.assets.find(asset=>asset.kind==='GAME')!;
+  expect(game).toBeDefined();
+  await adminAssetApi.remove(game.id);
+  expect((await publicApi.getProjectDetail(1)).gameDownloadUrl).toBeUndefined();
+ });
  it('seeds pagination, draft filters, search and deterministic sort',async()=>{
   const first=AdminProjectListResponseSchema.parse(await adminProjectApi.list());
   expect(first.items).toHaveLength(20);expect(first.pagination.totalItems).toBeGreaterThan(20);
