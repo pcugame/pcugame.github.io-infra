@@ -269,28 +269,9 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 						<div className="modal-body">
 							<h1 className="modal-title">
 								{project.title}
-								{project.isIncomplete && (
-									<span className="incomplete-badge" title="일부 자료가 누락되었을 수 있습니다">
-										불완전
-									</span>
-								)}
 							</h1>
 
 							<ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} />
-
-							{/* 에셋 유실 안내 */}
-							{project.isIncomplete && !project.poster && !project.gameDownloadUrl && !project.webglUrl && projectVideos.length === 0 && project.images.length === 0 && (project.attachments?.length ?? 0) === 0 && (
-								<p className="incomplete-notice incomplete-notice--missing">
-									이 프로젝트의 파일이 유실되었습니다.
-								</p>
-							)}
-
-							{/* 불완전 안내 */}
-							{project.isIncomplete && (project.poster || project.gameDownloadUrl || project.webglUrl || projectVideos.length > 0 || project.images.length > 0 || (project.attachments?.length ?? 0) > 0) && (
-								<p className="incomplete-notice">
-									일부 자료가 누락되었을 수 있습니다.
-								</p>
-							)}
 
 							{/* 참여 학생 */}
 							<div className="modal-members">
