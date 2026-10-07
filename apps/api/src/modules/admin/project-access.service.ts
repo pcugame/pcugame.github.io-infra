@@ -1,7 +1,15 @@
 import type { UserRole } from '@pcu/contracts';
 import type { Prisma } from '../../generated/prisma/client.js';
 import type { Actor } from '../../application/http-input.js';
-import { forbidden, notFound } from '../../shared/errors.js';
+import { AppError, forbidden, notFound } from '../../shared/errors.js';
+
+/** Authoritative upload policy rejection; retains the existing HTTP contract. */
+export class ProjectUploadPolicyRejectedError extends AppError {
+	constructor(message: string) {
+		super(403, message, 'FORBIDDEN');
+		this.name = 'ProjectUploadPolicyRejectedError';
+	}
+}
 
 export interface ProjectAccessRecord {
 	id: number;
@@ -37,7 +45,7 @@ export function assertWriteAccess(
 		throw forbidden('Not project owner or member');
 	}
 	if (opts.isModificationEnabled === false) {
-		throw forbidden('Project modifications are closed for this exhibition');
+		throw new ProjectUploadPolicyRejectedError('Project modifications are closed for this exhibition');
 	}
 }
 
@@ -121,7 +129,7 @@ export async function assertProjectUploadWriteAccessInTransaction(
 		const sourceMember = source?.members.some((member) => member.userId === actor.id) ?? false;
 		if (!request || request.state !== 'DRAFT' || request.actorId !== actor.id || !source
 			|| (source.creatorId !== actor.id && !sourceMember)) {
-			throw forbidden('Only the active change-request owner may upload to this staging project');
+			throw new ProjectUploadPolicyRejectedError('Only the active change-request owner may upload to this staging project');
 		}
 		return;
 	}
@@ -175,7 +183,7 @@ export function createProjectAccessService(repository: ProjectAccessRepository) 
 				if (project.changeRequestState !== 'DRAFT' || project.changeRequestActorId !== actor.id
 					|| project.changeRequestSourceCreatorId === undefined
 					|| (project.changeRequestSourceCreatorId !== actor.id && !remainsSourceMember)) {
-					throw forbidden('Only the active change-request owner may upload to this staging project');
+					throw new ProjectUploadPolicyRejectedError('Only the active change-request owner may upload to this staging project');
 				}
 				return project;
 			}

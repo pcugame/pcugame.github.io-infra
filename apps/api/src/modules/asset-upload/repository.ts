@@ -473,7 +473,8 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 				return { assetId: asset.id, representationId: representation.id };
 			});
 		},
-		async markRejected(sessionId, generation, token, reason) {
+		async markRejected(sessionId, generation, token, rejection) {
+			const { reason, sourceDisposition } = rejection;
 			return client.$transaction(async (tx) => {
 				const session = await tx.assetUploadSession.findUnique({ where: { id: sessionId } });
 				if (!session) return false;
@@ -491,7 +492,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					RETURNING "id"
 				`);
 				if (rejected.length !== 1) return false;
-				if (!reason.startsWith('OPERATOR_REQUIRED:')) {
+				if (sourceDisposition === 'DELETE') {
 					await queueDurableDeletions(tx, [{ bucket: session.bucket, storageKey: session.objectKey, reason: 'direct-game-validation-rejected' }]);
 				}
 				return true;

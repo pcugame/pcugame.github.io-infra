@@ -1,3 +1,6 @@
+import type { Readable } from 'node:stream';
+import { ZipValidationError } from '../../shared/archive-errors.js';
+import { ProjectUploadPolicyRejectedError } from '../admin/project-access.service.js';
 import { isMaterialKind } from './material-policy.js';
 import { validateMaterialSource } from './material-validation.js';
 import { createClaimHeartbeatGuard } from '../upload-lifecycle/claim-heartbeat.js';
@@ -6,6 +9,9 @@ import { decodePersistedSourceIdentityManifest } from '../admin/game-upload/sour
 import type { AssetUploadRepository, AssetUploadValidationStorage } from './ports.js';
 import {
 	isWorkerSourceObjectMissing,
+	isWorkerOperationAborted,
+	WorkerInputRejectedError,
+	WorkerOperatorRequiredError,
 	MAX_WORKER_VALIDATION_ATTEMPTS,
 	retryBudgetReason,
 	WorkerGenerationFencedError,
@@ -44,10 +50,12 @@ export function createGameUploadValidationWorker(deps: {
 					renew: () => deps.repository.renewValidation(session.id, token, VALIDATION_LEASE_MS).then((owned) => ({ count: owned ? 1 : 0 })),
 					logHeartbeatFailure: (error) => deps.logger.error({ error, sessionId: session.id }, 'Asset upload validation heartbeat failed'),
 				});
+				let sourceBody: Readable | undefined;
 				try {
 					if (session.kind !== 'GAME' && !isMaterialKind(session.kind)) continue;
 					const source = await deps.storage.stream(session.bucket, session.objectKey, { signal: claim.signal });
-					if (source.size !== Number(session.totalBytes)) throw new Error('Completed direct GAME object size mismatch');
+					sourceBody = source.body;
+					if (source.size !== Number(session.totalBytes)) throw new WorkerInputRejectedError('Completed direct GAME object size mismatch');
 					let validated: { mimeType: string; checksum?: string } = { mimeType: 'application/zip' };
 					if (isMaterialKind(session.kind)) validated = await validateMaterialSource({ session, source, signal: claim.signal });
 					else await materializeAndValidateGameSource({
@@ -64,22 +72,27 @@ export function createGameUploadValidationWorker(deps: {
 						signal: claim.signal,
 					});
 					await claim.assertOwned();
+					claim.signal.throwIfAborted();
 					await deps.repository.commitGameReady({ session, token, ...validated });
 					deps.wakeDeletionWorker();
 					ready++;
 				} catch (error) {
-					if (claim.isLost()) {
+					if (claim.isLost() || claim.signal.aborted || isWorkerOperationAborted(error)) {
 						retried++;
 						continue;
 					}
-					// ZIP, source-identity, declared-size, and authoritative 404 failures are deterministic.
+					// Only explicit content/policy failures authorize source cleanup.
 					const message = String(error instanceof Error ? error.message : error);
 					const terminal = isWorkerSourceObjectMissing(error)
 						|| error instanceof WorkerGenerationFencedError
-						|| /ZIP|source identity|size mismatch|invalid|corrupt|CRC|GAME_REPLACEMENT_FENCE_LOST|Project modifications are closed|staging project/i.test(message);
-					if (terminal || (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
-						const reason = terminal ? message : retryBudgetReason('GAME', error);
-						if (await deps.repository.markRejected(session.id, session.generation, token, reason)) rejected++;
+						|| error instanceof ZipValidationError
+						|| error instanceof WorkerInputRejectedError
+						|| error instanceof ProjectUploadPolicyRejectedError;
+					if (terminal || error instanceof WorkerOperatorRequiredError || (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
+						const reason = terminal ? message : error instanceof WorkerOperatorRequiredError
+							? `OPERATOR_REQUIRED: ${message}` : retryBudgetReason('GAME', error);
+						const rejection = { reason, sourceDisposition: terminal ? 'DELETE' as const : 'RETAIN' as const };
+						if (await deps.repository.markRejected(session.id, session.generation, token, rejection)) rejected++;
 						else retried++;
 					} else {
 						deps.logger.error({ error, sessionId: session.id }, 'Direct GAME validation will retry');
@@ -87,6 +100,7 @@ export function createGameUploadValidationWorker(deps: {
 					}
 				} finally {
 					claim.stop();
+					if (sourceBody && !sourceBody.destroyed) sourceBody.destroy();
 				}
 			}
 			return { claimed: sessions.length, ready, rejected, retried };

@@ -348,7 +348,7 @@ describe('immutable WebGL history and production image identity', () => {
 		expect(repository).toContain("throw new WorkerGenerationFencedError('GAME')");
 		expect(repository).toMatch(/AND "validation_lease_until" > clock_timestamp\(\)[\s\S]*RETURNING "id"/);
 		expect(workerSource).toContain('error instanceof WorkerGenerationFencedError');
-		expect(workerSource).toContain('markRejected(session.id, session.generation, token, reason)');
+		expect(workerSource).toContain('markRejected(session.id, session.generation, token, rejection)');
 	});
 
 	it('persists SHA-256 on PUT and reads authoritative checksum/ETag on HEAD', async () => {

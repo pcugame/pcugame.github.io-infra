@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { AppError, badRequest, conflict } from '../../../shared/errors.js';
+import { badRequest } from '../../../shared/errors.js';
+import { WorkerInputRejectedError, WorkerOperatorRequiredError } from '../../upload-lifecycle/worker-errors.js';
 
 export const SOURCE_IDENTITY_ALGORITHM = 'SHA256_BLOCK_MANIFEST_V1' as const;
 export const SOURCE_IDENTITY_BLOCK_SIZE_BYTES = 1_048_576 as const;
@@ -32,11 +33,11 @@ export function encodePersistedSourceIdentityManifest(manifest: Uint8Array): str
 export function decodePersistedSourceIdentityManifest(value: unknown): Buffer {
 	if (typeof value !== 'string' || value.length === 0 || value.length % 4 !== 0
 		|| !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
-		throw new Error('Persisted source identity manifest is malformed');
+		throw new WorkerOperatorRequiredError('Persisted source identity manifest is malformed');
 	}
 	const decoded = Buffer.from(value, 'base64');
 	if (decoded.length === 0 || decoded.toString('base64') !== value) {
-		throw new Error('Persisted source identity manifest is malformed');
+		throw new WorkerOperatorRequiredError('Persisted source identity manifest is malformed');
 	}
 	return decoded;
 }
@@ -88,7 +89,7 @@ export function assertSessionHasSourceIdentity(session: PersistedSourceIdentity)
 		|| !SHA256_HEX.test(session.sourceIdentity ?? '')
 		|| session.sourceIdentityBlockSizeBytes !== SOURCE_IDENTITY_BLOCK_SIZE_BYTES
 		|| !session.sourceIdentityBlockManifest?.length) {
-		throw conflict('This upload session has no valid source identity; start a new upload');
+		throw new WorkerOperatorRequiredError('This upload session has no valid source identity; start a new upload', 409, 'CONFLICT');
 	}
 }
 
@@ -104,11 +105,11 @@ export async function materializeAndValidateCompletedSource(input: PersistedSour
 	assertSessionHasSourceIdentity(input);
 	const totalBytes = Number(input.totalBytes);
 	if (!Number.isSafeInteger(totalBytes) || totalBytes < 1 || !Number.isSafeInteger(input.physicalByteLimit) || input.physicalByteLimit < totalBytes) {
-		throw new Error('Invalid worker materialization size budget');
+		throw new WorkerOperatorRequiredError('Invalid worker materialization size budget');
 	}
 	const blocks = Math.ceil(totalBytes / SOURCE_IDENTITY_BLOCK_SIZE_BYTES);
 	const expectedManifest = Buffer.from(input.sourceIdentityBlockManifest);
-	if (expectedManifest.length !== blocks * 32) throw new Error('Persisted source identity manifest length is invalid');
+	if (expectedManifest.length !== blocks * 32) throw new WorkerOperatorRequiredError('Persisted source identity manifest length is invalid');
 	let bytesWritten = 0;
 	let blockBytes = 0;
 	let blockHash = createHash('sha256');
@@ -116,7 +117,7 @@ export async function materializeAndValidateCompletedSource(input: PersistedSour
 	function finishBlock(): void {
 		const digest = blockHash.digest();
 		if (!digest.equals(expectedManifest.subarray(actual.length * 32, actual.length * 32 + 32))) {
-			throw badRequest('Completed object does not match the upload source identity');
+			throw new WorkerInputRejectedError('Completed object does not match the upload source identity');
 		}
 		actual.push(digest.toString('hex'));
 		blockHash = createHash('sha256');
@@ -127,7 +128,7 @@ export async function materializeAndValidateCompletedSource(input: PersistedSour
 			if (input.signal?.aborted) throw input.signal.reason ?? new Error('Validation source was aborted');
 			const chunk = Buffer.from(raw as Buffer | Uint8Array | string);
 			bytesWritten += chunk.length;
-			if (bytesWritten > totalBytes || bytesWritten > input.physicalByteLimit) throw new AppError(500, 'Completed source exceeds declared size', 'SIZE_MISMATCH');
+			if (bytesWritten > totalBytes || bytesWritten > input.physicalByteLimit) throw new WorkerInputRejectedError('Completed source exceeds declared size', 500, 'SIZE_MISMATCH');
 			for (let offset = 0; offset < chunk.length;) {
 				const take = Math.min(SOURCE_IDENTITY_BLOCK_SIZE_BYTES - blockBytes, chunk.length - offset);
 				blockHash.update(chunk.subarray(offset, offset + take));
@@ -139,10 +140,10 @@ export async function materializeAndValidateCompletedSource(input: PersistedSour
 			yield chunk;
 		}
 	}, input.destination, ...(input.signal ? [{ signal: input.signal }] : []));
-	if (bytesWritten !== totalBytes) throw new AppError(500, `Completed source size mismatch: expected ${totalBytes}, got ${bytesWritten}`, 'SIZE_MISMATCH');
+	if (bytesWritten !== totalBytes) throw new WorkerInputRejectedError(`Completed source size mismatch: expected ${totalBytes}, got ${bytesWritten}`, 500, 'SIZE_MISMATCH');
 	if (blockBytes > 0) finishBlock();
 	if (actual.length !== blocks || sourceIdentityRoot(totalBytes, SOURCE_IDENTITY_BLOCK_SIZE_BYTES, actual) !== input.sourceIdentity) {
-		throw badRequest('Completed object source identity root mismatch');
+		throw new WorkerInputRejectedError('Completed object source identity root mismatch');
 	}
 	return { bytesWritten };
 }
