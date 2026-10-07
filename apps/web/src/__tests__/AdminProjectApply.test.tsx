@@ -59,6 +59,18 @@ describe('global project Apply', () => {
   await waitFor(() => expect(apply().disabled).toBe(true));
   expect(stored.visibility).toBe('PUBLIC');
  });
+ it('does not claim an untouched audience will be saved after a background restriction', async () => {
+  mount(); await ready();
+  stored = { ...stored, visibility: 'STAFF' };
+  await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
+  await waitFor(() => expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 운영자·관리자'));
+  expect(screen.queryByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeNull();
+  expect(apply().disabled).toBe(true);
+  change('제목 *', '제목만 변경'); fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
+  await screen.findByText('적용되었습니다.');
+  expect(stored.visibility).toBe('STAFF');
+ });
  it('keeps saved access visible after a failed visibility save and refreshes it after retry and remount', async () => {
   stored.exhibitionVisibility = 'AUTHENTICATED';
   vi.mocked(adminProjectApi.update).mockRejectedValueOnce(new Error('저장 실패'));
@@ -148,6 +160,7 @@ describe('global project Apply', () => {
   stored = { ...stored, canChangeVisibility: false };
   await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
   expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).disabled).toBe(true);
+  expect(screen.queryByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeNull();
   change('제목 *', '제목만 변경'); fireEvent.click(apply());
   await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
   expect(stored.visibility).toBe('PUBLIC');

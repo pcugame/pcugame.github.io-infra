@@ -41,7 +41,7 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
                  {!project.canChangeVisibility && <p className="field-hint">현재 공개 범위를 변경할 권한이 없습니다. 수정이 잠긴 전시회에서는 운영자·관리자만 변경할 수 있습니다.</p>}
                  <VisibilityNotice visibility={visibility} exhibitionVisibility={project.exhibitionVisibility} />
                  <p className="field-hint">작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.</p>
-                 {visibility !== project.visibility && <p className="field-hint">선택한 공개 범위는 아직 저장되지 않았습니다. 적용 후 반영됩니다.</p>}
+                 {project.canChangeVisibility && visibility !== form.formState.defaultValues?.visibility && visibility !== project.visibility && <p className="field-hint">선택한 공개 범위는 아직 저장되지 않았습니다. 적용 후 반영됩니다.</p>}
                 </div>}
 
 
