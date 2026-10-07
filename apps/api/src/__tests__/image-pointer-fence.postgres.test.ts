@@ -1,5 +1,13 @@
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import yauzl from 'yauzl';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
+import { gameZip, validationSession } from './helpers/game-validation-fixture.js';
+import { createGameUploadValidationWorker } from '../modules/asset-upload/validation-worker.service.js';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createPrismaImageWorkerRepository } from '../modules/image/prisma.repository.js';
@@ -145,7 +153,7 @@ describe.runIf(runPostgresIntegration)('canonical processing persistence fences'
 		} });
 
 		await expect(repository.markRejected(
-			sessionId, 1, token, 'GAME_REPLACEMENT_FENCE_LOST',
+			sessionId, 1, token, { reason: 'GAME_REPLACEMENT_FENCE_LOST', sourceDisposition: 'DELETE' },
 		)).resolves.toBe(true);
 		await expect(client.assetUploadSession.findUniqueOrThrow({ where: { id: sessionId } }))
 			.resolves.toMatchObject({
@@ -198,5 +206,131 @@ describe.runIf(runPostgresIntegration)('canonical processing persistence fences'
 		await expect(client.assetRepresentation.count({ where: { assetId: resultAsset.id } })).resolves.toBe(0);
 		await expect(client.asset.findUniqueOrThrow({ where: { id: resultAsset.id } }))
 			.resolves.toMatchObject({ status: 'PROCESSING' });
+	});
+});
+
+describe.runIf(runPostgresIntegration)('GAME validation source retention', () => {
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
+	let client: PrismaClient;
+	let userId: number;
+	let projectId: number;
+	let tempRoot: string;
+	const bucket = 'validation-protected';
+
+	beforeAll(async () => {
+		database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);
+		client = database.createClient();
+		await client.storageBucket.create({ data: { bucket, visibility: 'PROTECTED' } });
+		const user = await client.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@test.invalid`, role: 'ADMIN' } });
+		userId = user.id;
+		const exhibition = await client.exhibition.create({ data: { year: 2081, title: 'Validation retention' } });
+		const project = await client.project.create({ data: { exhibitionId: exhibition.id, creatorId: userId, slug: randomUUID(), title: 'Validation', status: 'PUBLISHED' } });
+		projectId = project.id;
+		tempRoot = await mkdtemp(join(tmpdir(), 'validation-postgres-'));
+	});
+	afterEach(async () => {
+		vi.restoreAllMocks();
+		if (client) await client.assetUploadSession.deleteMany();
+	});
+	afterAll(async () => {
+		if (tempRoot) await rm(tempRoot, { recursive: true, force: true });
+		if (database) await database.close();
+	});
+
+	async function sourceSession() {
+		const fixture = validationSession(gameZip(), { id: randomUUID() });
+		return client.assetUploadSession.create({ data: {
+			id: fixture.id, projectId, userId, kind: 'GAME', state: 'VERIFYING',
+			originalName: fixture.originalName, declaredMimeType: fixture.declaredMimeType,
+			totalBytes: fixture.totalBytes, partSizeBytes: fixture.partSizeBytes, totalParts: 1,
+			bucket, objectKey: `protected/uploads/${fixture.id}/source`, generation: 1,
+			sourceIdentityAlgorithm: fixture.sourceIdentityAlgorithm, sourceIdentity: fixture.sourceIdentity,
+			sourceIdentityBlockSizeBytes: fixture.sourceIdentityBlockSizeBytes,
+			sourceIdentityBlockManifest: fixture.sourceIdentityBlockManifest as string,
+			validationAttemptCount: 4, expiresAt: new Date(Date.now() + 60_000),
+		} });
+	}
+	function worker(stream: () => Promise<{ body: Readable; size: number }>) {
+		return createGameUploadValidationWorker({ repository: createAssetUploadRepository(client), storage: { stream },
+			ids: { next: () => randomUUID() }, tempRoot, tempDiskBudgetBytes: 1024,
+			logger: { error: vi.fn() }, wakeDeletionWorker: vi.fn(),
+		});
+	}
+
+	it('creates no deletion on shutdown at attempt five and becomes READY after DB-clock takeover', async () => {
+		const session = await sourceSession();
+		const abort = new AbortController();
+		const open = yauzl.openPromise;
+		vi.spyOn(yauzl, 'openPromise').mockImplementationOnce(async (...args) => {
+			const zip = await open(...args); abort.abort(new Error('worker stopping')); return zip;
+		});
+		const bytes = gameZip();
+		const validation = worker(async () => ({ body: Readable.from(bytes), size: bytes.length }));
+		await expect(validation.runPass(abort.signal)).resolves.toEqual({ claimed: 1, ready: 0, rejected: 0, retried: 1 });
+		const interrupted = await client.assetUploadSession.findUniqueOrThrow({ where: { id: session.id } });
+		expect(interrupted).toMatchObject({ state: 'VERIFYING', validationError: null, validationAttemptCount: 5 });
+		expect(interrupted.validationLeaseToken).not.toBeNull();
+		await expect(client.orphanObject.count({ where: { storageKey: session.objectKey } })).resolves.toBe(0);
+		expect(await readdir(tempRoot)).toEqual([]);
+		// Expire this test row using the DB clock; production recovery uses expiry naturally.
+		await client.$executeRaw`UPDATE asset_upload_sessions SET validation_lease_until = clock_timestamp() - INTERVAL '1 second' WHERE id = ${session.id}`;
+		await expect(validation.runPass()).resolves.toEqual({ claimed: 1, ready: 1, rejected: 0, retried: 0 });
+		await expect(client.assetUploadSession.findUniqueOrThrow({ where: { id: session.id } })).resolves.toMatchObject({ state: 'READY', validationLeaseToken: null });
+		await expect(client.orphanObject.count({ where: { storageKey: session.objectKey } })).resolves.toBe(0);
+	});
+
+	it('terminalizes exhausted infrastructure failures while retaining the original', async () => {
+		const session = await sourceSession();
+		await expect(worker(async () => { throw new Error('ZIP invalid storage connection'); }).runPass()).resolves.toEqual({ claimed: 1, ready: 0, rejected: 1, retried: 0 });
+		await expect(client.assetUploadSession.findUniqueOrThrow({ where: { id: session.id } })).resolves.toMatchObject({ state: 'REJECTED', validationError: expect.stringContaining('OPERATOR_REQUIRED:') });
+		await expect(client.orphanObject.count({ where: { storageKey: session.objectKey } })).resolves.toBe(0);
+	});
+
+	it('rejects a verified upload when the exhibition closes before commit', async () => {
+		const session = await sourceSession();
+		const project = await client.project.findUniqueOrThrow({ where: { id: projectId } });
+		await client.user.update({ where: { id: userId }, data: { role: 'USER' } });
+		await client.exhibition.update({ where: { id: project.exhibitionId }, data: { isModificationEnabled: false } });
+		try {
+			const bytes = gameZip();
+			await expect(worker(async () => ({ body: Readable.from(bytes), size: bytes.length })).runPass()).resolves.toEqual({ claimed: 1, ready: 0, rejected: 1, retried: 0 });
+			await expect(client.assetUploadSession.findUniqueOrThrow({ where: { id: session.id } })).resolves.toMatchObject({ state: 'REJECTED', validationError: 'Project modifications are closed for this exhibition' });
+			await expect(client.orphanObject.count({ where: { storageKey: session.objectKey } })).resolves.toBe(1);
+		} finally {
+			await client.user.update({ where: { id: userId }, data: { role: 'ADMIN' } });
+			await client.exhibition.update({ where: { id: project.exhibitionId }, data: { isModificationEnabled: true } });
+		}
+	});
+
+	it.each(['DELETE', 'RETAIN'] as const)('uses explicit %s disposition independently of reason wording', async (sourceDisposition) => {
+		const session = await sourceSession(); const repository = createAssetUploadRepository(client);
+		await repository.claimVerifying('GAME', 1, 'claim', 120_000);
+		await expect(repository.markRejected(session.id, 1, 'claim', { reason: 'OPERATOR_REQUIRED: identical wording', sourceDisposition })).resolves.toBe(true);
+		await expect(client.assetUploadSession.findUniqueOrThrow({ where: { id: session.id } })).resolves.toMatchObject({ state: 'REJECTED', validationLeaseToken: null, validationLeaseUntil: null });
+		await expect(client.orphanObject.count({ where: { storageKey: session.objectKey } })).resolves.toBe(sourceDisposition === 'DELETE' ? 1 : 0);
+	});
+
+	it.each(['generation', 'token', 'expiry'] as const)('does not reject or queue deletion with a stale %s', async (fence) => {
+		const session = await sourceSession(); const repository = createAssetUploadRepository(client);
+		await repository.claimVerifying('GAME', 1, 'claim', 120_000);
+		if (fence === 'expiry') await client.$executeRaw`UPDATE asset_upload_sessions SET validation_lease_until = clock_timestamp() - INTERVAL '1 second' WHERE id = ${session.id}`;
+		await expect(repository.markRejected(session.id, fence === 'generation' ? 2 : 1, fence === 'token' ? 'stale' : 'claim', { reason: 'content rejected', sourceDisposition: 'DELETE' })).resolves.toBe(false);
+		await expect(client.assetUploadSession.findUniqueOrThrow({ where: { id: session.id } })).resolves.toMatchObject({ state: 'VERIFYING' });
+		await expect(client.orphanObject.count({ where: { storageKey: session.objectKey } })).resolves.toBe(0);
+	});
+
+	it('rolls back rejection when deletion outbox persistence fails', async () => {
+		const session = await sourceSession(); const repository = createAssetUploadRepository(client);
+		await repository.claimVerifying('GAME', 1, 'claim', 120_000);
+		await client.$executeRawUnsafe(`CREATE FUNCTION reject_test_orphan() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test outbox unavailable'; END; $$`);
+		await client.$executeRawUnsafe(`CREATE TRIGGER fail_test_orphan BEFORE INSERT ON orphan_objects FOR EACH ROW EXECUTE FUNCTION reject_test_orphan()`);
+		try {
+			await expect(repository.markRejected(session.id, 1, 'claim', { reason: 'content rejected', sourceDisposition: 'DELETE' })).rejects.toThrow();
+			await expect(client.assetUploadSession.findUniqueOrThrow({ where: { id: session.id } })).resolves.toMatchObject({ state: 'VERIFYING', validationLeaseToken: 'claim' });
+			await expect(client.orphanObject.count({ where: { storageKey: session.objectKey } })).resolves.toBe(0);
+		} finally {
+			await client.$executeRawUnsafe('DROP TRIGGER fail_test_orphan ON orphan_objects');
+			await client.$executeRawUnsafe('DROP FUNCTION reject_test_orphan()');
+		}
 	});
 });

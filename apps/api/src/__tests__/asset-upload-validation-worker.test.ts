@@ -45,7 +45,7 @@ describe('GAME direct validation worker dispatch', () => {
 		});
 		await expect(worker.runPass()).resolves.toEqual({ claimed: 1, ready: 0, rejected: 1, retried: 0 });
 		expect(repository.markRejected).toHaveBeenCalledWith(
-			'game-missing', 1, 'claim', expect.stringContaining('does not exist'),
+			'game-missing', 1, 'claim', { reason: expect.stringContaining('does not exist'), sourceDisposition: 'DELETE' },
 		);
 	});
 });

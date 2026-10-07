@@ -92,7 +92,11 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('year policy 
 		for (const actor of [owner, member]) {
 			const detail = await request(actor, 'GET', `/${p.id}`);
 			expect(AdminProjectDetailSchema.parse(detail.json().data)).toMatchObject({ canEdit: false, canDelete: false, canRequestChange: true });
-			expect((await request(actor, 'PATCH', `/${p.id}`, { title: 'Closed' })).statusCode).toBe(403);
+			const denied = await request(actor, 'PATCH', `/${p.id}`, { title: 'Closed' });
+			expect(denied.statusCode).toBe(403);
+			expect(denied.json()).toEqual({ ok: false, error: {
+				code: 'FORBIDDEN', message: 'Project modifications are closed for this exhibition',
+			} });
 			expect((await request(actor, 'DELETE', `/${p.id}`)).statusCode).toBe(403);
 		}
 		for (const actor of [operator, admin]) {

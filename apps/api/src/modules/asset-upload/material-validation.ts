@@ -1,3 +1,4 @@
+import { WorkerInputRejectedError, WorkerOperatorRequiredError } from '../upload-lifecycle/worker-errors.js';
 import { isMaterialKind, MATERIAL_MAX_BYTES } from './material-policy.js';
 import { createHash } from 'node:crypto';
 import { extname } from 'node:path';
@@ -19,29 +20,29 @@ const OLE_DOCUMENTS: Record<string, { marker: string; mime: string }> = {
 };
 
 export async function validateMaterialContent(kind: 'DOCUMENT' | 'ATTACHMENT', originalName: string, bytes: Buffer): Promise<string> {
-	if (bytes.length === 0 || bytes.length > MATERIAL_MAX_BYTES) throw new Error('Invalid material size');
+	if (bytes.length === 0 || bytes.length > MATERIAL_MAX_BYTES) throw new WorkerInputRejectedError('Invalid material size');
 	if (kind === 'ATTACHMENT') return 'application/octet-stream';
 	const extension = extname(originalName).slice(1).toLowerCase();
 	if (extension === 'txt' || extension === 'md' || extension === 'markdown') {
-		if (await fileTypeFromBuffer(bytes)) throw new Error('Invalid text document content: binary format does not match extension');
+		if (await fileTypeFromBuffer(bytes)) throw new WorkerInputRejectedError('Invalid text document content: binary format does not match extension');
 		const encodings = bytes[0] === 0xff && bytes[1] === 0xfe ? ['utf-16le']
 			: bytes[0] === 0xfe && bytes[1] === 0xff ? ['utf-16be'] : ['utf-8', 'euc-kr'];
 		const isText = encodings.some((encoding) => {
 			try { return !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(new TextDecoder(encoding, { fatal: true }).decode(bytes)); }
 			catch { return false; }
 		});
-		if (!isText) throw new Error('Invalid text document content');
+		if (!isText) throw new WorkerInputRejectedError('Invalid text document content');
 		return extension === 'txt' ? 'text/plain' : 'text/markdown';
 	}
 	const ole = OLE_DOCUMENTS[extension];
 	if (ole) {
-		if (!bytes.subarray(0, 8).equals(Buffer.from('d0cf11e0a1b11ae1', 'hex')) || !bytes.includes(Buffer.from(ole.marker + '\0', 'utf16le'))) throw new Error('Invalid Office document content for extension');
+		if (!bytes.subarray(0, 8).equals(Buffer.from('d0cf11e0a1b11ae1', 'hex')) || !bytes.includes(Buffer.from(ole.marker + '\0', 'utf16le'))) throw new WorkerInputRejectedError('Invalid Office document content for extension');
 		return ole.mime;
 	}
 	const expected = DOCUMENT_MIMES[extension];
-	if (!expected) throw new Error('Invalid document extension; use ATTACHMENT for supplementary files');
+	if (!expected) throw new WorkerInputRejectedError('Invalid document extension; use ATTACHMENT for supplementary files');
 	const actual = await fileTypeFromBuffer(bytes);
-	if (actual?.ext !== extension || (actual.mime !== expected && !(extension === 'rtf' && actual.mime === 'text/rtf')) ) throw new Error('Invalid document content for extension');
+	if (actual?.ext !== extension || (actual.mime !== expected && !(extension === 'rtf' && actual.mime === 'text/rtf')) ) throw new WorkerInputRejectedError('Invalid document content for extension');
 	return expected;
 }
 
@@ -50,7 +51,7 @@ export async function validateMaterialSource(input: {
 	session: AssetUploadSessionRecord; source: Awaited<ReturnType<AssetUploadValidationStorage['stream']>>; signal?: AbortSignal;
 }) {
 	const { session } = input;
-	if (!isMaterialKind(session.kind)) throw new Error('Invalid material kind');
+	if (!isMaterialKind(session.kind)) throw new WorkerOperatorRequiredError('Invalid material kind');
 	const chunks: Buffer[] = [];
 	await materializeAndValidateCompletedSource({
 		...session,

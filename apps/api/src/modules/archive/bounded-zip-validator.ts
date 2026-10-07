@@ -1,3 +1,5 @@
+import { ZipValidationError, ZipValidationAbortedError } from '../../shared/archive-errors.js';
+export { ZipValidationError, ZipValidationAbortedError } from '../../shared/archive-errors.js';
 import { open, type FileHandle } from 'node:fs/promises';
 import { posix as pathPosix, win32 as pathWin32 } from 'node:path';
 import yauzl, {
@@ -57,20 +59,6 @@ export interface BoundedZipValidationSummary {
 	declaredUncompressedBytes: number;
 	decodedBytes: number;
 	entries: ValidatedZipEntry[];
-}
-
-export class ZipValidationError extends Error {
-	constructor(message: string, options?: { cause?: unknown }) {
-		super(message, options);
-		this.name = 'ZipValidationError';
-	}
-}
-
-export class ZipValidationAbortedError extends Error {
-	constructor(options?: { cause?: unknown }) {
-		super('ZIP validation was aborted', options);
-		this.name = 'AbortError';
-	}
 }
 
 interface EffectivePolicy {
@@ -519,18 +507,16 @@ async function decodeEntry(
 ): Promise<number> {
 	if (expected.isDirectory) return 0;
 	throwIfAborted(signal);
-	let stream: Awaited<ReturnType<ZipFile['openReadStreamPromise']>>;
-	try {
-		stream = await zip.openReadStreamPromise(entry);
-	} catch (error) {
-		throw new ZipValidationError(`ZIP entry cannot be opened: ${expected.path}`, { cause: error });
-	}
+	// Structure was checked above. An open/read failure here may be local I/O;
+	// it is not evidence that the uploaded source is corrupt.
+	const stream = await zip.openReadStreamPromise(entry);
 	let abortFailure: ZipValidationAbortedError | undefined;
 	const onAbort = () => {
 		abortFailure = abortError(signal);
 		stream.destroy(abortFailure);
 	};
 	signal?.addEventListener('abort', onAbort, { once: true });
+	if (signal?.aborted) onAbort();
 	let decodedBytes = 0;
 	let crcState = 0xffffffff;
 	try {
@@ -548,6 +534,10 @@ async function decodeEntry(
 	} catch (error) {
 		if (signal?.aborted) throw abortFailure ?? abortError(signal);
 		if (error instanceof ZipValidationError) throw error;
+		// zlib identifies malformed/truncated deflate data with stable codes.
+		// Preserve filesystem, cancellation, and unknown library errors for retry.
+		if (!(error instanceof Error && 'code' in error
+			&& (error.code === 'Z_DATA_ERROR' || error.code === 'Z_BUF_ERROR'))) throw error;
 		throw new ZipValidationError(`ZIP entry is corrupt or cannot be fully decoded: ${expected.path}`, {
 			cause: error,
 		});
@@ -611,8 +601,7 @@ async function fullyDecode(
 		return { decodedBytes, entries: validated };
 	} catch (error) {
 		if (signal?.aborted) throw abortError(signal);
-		if (error instanceof ZipValidationError || error instanceof ZipValidationAbortedError) throw error;
-		throw new ZipValidationError('ZIP archive is corrupt or cannot be decoded', { cause: error });
+		throw error;
 	} finally {
 		zip?.close();
 	}

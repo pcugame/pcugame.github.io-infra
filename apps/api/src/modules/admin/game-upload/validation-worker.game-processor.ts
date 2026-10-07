@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
+import { finished } from 'node:stream/promises';
 import { validateBoundedZipFile, type BoundedZipValidationOptions } from '../../archive/bounded-zip-validator.js';
 import { materializeAndValidateCompletedSource } from './source-identity.js';
 import { cleanupStaleWorkerDirectories } from '../../upload-lifecycle/worker-workspace.js';
@@ -38,11 +39,12 @@ export async function materializeAndValidateGameSource(input: {
 	const directory = await mkdtemp(join(root, GAME_WORKSPACE_PREFIX));
 	await chmod(directory, 0o700);
 	const archivePath = join(directory, 'source.zip');
+	const destination = createWriteStream(archivePath, { flags: 'wx', mode: 0o600 });
 	try {
 		await materializeAndValidateCompletedSource({
 			...input.session,
 			source: input.source,
-			destination: createWriteStream(archivePath, { flags: 'wx', mode: 0o600 }),
+			destination,
 			physicalByteLimit: input.physicalByteLimit,
 			signal: input.signal,
 			onBytes: input.onBytes,
@@ -54,6 +56,9 @@ export async function materializeAndValidateGameSource(input: {
 			...input.zipPolicy,
 		});
 	} finally {
+		// Metadata checks can fail before pipeline takes ownership of this stream.
+		destination.destroy();
+		await finished(destination).catch(() => undefined);
 		// A retry uses a new worker temp directory; source durability remains in Garage.
 		await rm(directory, { recursive: true, force: true });
 	}

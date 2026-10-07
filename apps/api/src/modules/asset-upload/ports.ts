@@ -110,7 +110,8 @@ export interface AssetUploadRepository {
 	claimVerifying(kind: DirectAssetUploadKind, limit: number, token: string, leaseMs: number): Promise<AssetUploadSessionRecord[]>;
 	renewValidation(sessionId: string, token: string, leaseMs: number): Promise<boolean>;
 	commitGameReady(input: { session: AssetUploadSessionRecord; token: string; mimeType: string; checksum?: string; }): Promise<{ assetId: number; representationId: string }>;
-	markRejected(sessionId: string, generation: number, token: string, reason: string): Promise<boolean>;
+	/** Atomically terminalize under the validation fence; cleanup requires explicit DELETE disposition. */
+	markRejected(sessionId: string, generation: number, token: string, rejection: { reason: string; sourceDisposition: 'DELETE' | 'RETAIN' }): Promise<boolean>;
 
 	/** DB-clock, row-locked expiry.  UPLOADING rows enqueue abort work atomically. */
 	expireTimedOutSessions(limit: number): Promise<{ expired: number; aborts: number }>;
