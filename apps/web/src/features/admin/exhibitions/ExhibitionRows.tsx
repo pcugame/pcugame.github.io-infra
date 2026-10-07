@@ -251,11 +251,11 @@ export function YearRow({
 				<YearPosterControls year={year} />
 			</td>
 			<td>
-				<input type="text" className="exhibition-inline-input" aria-label="전시회 제목" {...register('title')} />
+				<input type="text" className="form-control exhibition-inline-input" aria-label="전시회 제목" {...register('title')} />
                 <VisibilitySelect value={visibility ?? ''} {...register('visibility')} />
 			</td>
 			<td>
-				<label>
+				<label className="form-choice">
 					<input type="checkbox" aria-label="수정 허용" {...register('isModificationEnabled')} />
 				</label>
 			</td>
@@ -263,7 +263,7 @@ export function YearRow({
 				<input
 					type="number"
 					{...register('sortOrder', { valueAsNumber: true })}
-					className="exhibition-inline-input exhibition-inline-input--order"
+					className="form-control exhibition-inline-input exhibition-inline-input--order"
 					aria-label="정렬 순서"
 				/>
 			</td>

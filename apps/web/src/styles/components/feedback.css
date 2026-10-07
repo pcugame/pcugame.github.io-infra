@@ -120,6 +120,10 @@
 /* ── Mock role switcher ──────────────────────────────────────── */
 
 .mock-switcher {
+  flex-wrap: wrap;
+  max-width: min(42rem, calc(100vw - 2rem));
+  max-height: calc(100svh - 2rem);
+  overflow-y: auto;
   position: fixed;
   bottom: 1rem;
   right: 1rem;
@@ -128,7 +132,7 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.4rem 0.6rem;
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--color-surface);
   backdrop-filter: blur(8px);
   border: 1px solid var(--color-border);
   border-radius: 10px;
@@ -136,37 +140,18 @@
   font-size: 0.72rem;
 }
 
-.mock-switcher__label {
-  font-weight: 700;
-  color: var(--color-text-muted);
-  white-space: nowrap;
+.mock-switcher .form-control {
+  flex: 1 1 9rem;
+  width: auto;
+  min-width: 0;
 }
 
-.mock-switcher__btns {
-  display: flex;
-  gap: 0.25rem;
+.mock-switcher .form-field__label {
+  margin: 0;
 }
 
-.mock-switcher__btn {
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: transparent;
-  font-size: 0.68rem;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  color: var(--color-text-muted);
-  transition: all 0.15s;
-}
-
-.mock-switcher__btn:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-
-.mock-switcher__btn--active {
-  border-color: transparent;
+.mock-switcher input[type='number'] {
+  width: 6rem;
 }
 
 @media (max-width: 50em) {

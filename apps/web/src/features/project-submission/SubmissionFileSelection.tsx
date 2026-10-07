@@ -23,7 +23,7 @@ export function SubmissionPosterSelection({
 }) {
 	const [selectionError, setSelectionError] = useState<string | null>(null);
 	return (
-		<fieldset className="submission-file-fieldset">
+		<fieldset className="form-section submission-file-fieldset">
 			<legend className="submission-file-heading">
 				<span>포스터</span>
 				<SubmissionPosterHelp />
@@ -102,7 +102,7 @@ export function SubmissionMixedFilesSelection({
 		...files.attachmentFiles.map((file) => ({ kind: 'ATTACHMENT' as const, file })),
 	];
 	return (
-		<fieldset className="submission-file-fieldset">
+		<fieldset className="form-section submission-file-fieldset">
 			<legend className="submission-file-heading">
 				<span>기타 파일</span>
 				<SubmissionFilesHelp webglUploadHint={webglUploadHint} />

@@ -1,3 +1,4 @@
+import { FormSection } from '../../components/ui';
 import type { ClientUploadLimits, MaterialUploadLimits } from '../../lib/upload-limits';
 import type { SubmissionFilesState } from './useSubmissionFiles';
 
@@ -50,8 +51,7 @@ export function SubmissionFileFieldset({
 	} = files;
 
 	return (
-		<fieldset>
-			<legend>파일 업로드</legend>
+		<FormSection legend="파일 업로드">
 
 			{fileSizeError && (
 				<div className="error-box" role="alert">
@@ -219,6 +219,6 @@ export function SubmissionFileFieldset({
 				)}
 				<p className="field-hint">{webglUploadHint}</p>
 			</div>
-		</fieldset>
+		</FormSection>
 	);
 }

@@ -1,3 +1,4 @@
+import { FormSection } from '../../components/ui';
 import { ProjectRequirementsFieldset } from '../../components/project/ProjectRequirementsFieldset';
 import { ExternalLinksFieldset } from '../../components/project/ExternalLinksFieldset';
 import { useWatch, Controller } from 'react-hook-form';
@@ -32,8 +33,7 @@ export function SubmissionBasicFields({
 	const exhibition = years.find((item) => item.id === exhibitionId);
 	return (
 		<>
-			<fieldset>
-				<legend>기본 정보</legend>
+			<FormSection legend="기본 정보">
 	            {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
 	             <label htmlFor="project-visibility">공개 범위</label>
 	             <VisibilitySelect id="project-visibility" value={visibility ?? ''} {...register('visibility')} />
@@ -86,7 +86,7 @@ export function SubmissionBasicFields({
 						<span className="field-error">{errors.description.message}</span>
 					)}
 				</div>
-			</fieldset>
+			</FormSection>
 			<Controller control={control} name="platforms" render={({ field: platforms }) => (
 				<Controller control={control} name="hardwareRequirements" render={({ field: hardware }) => (
 					<ProjectRequirementsFieldset platforms={platforms.value ?? []} hardwareRequirements={hardware.value ?? ''} onPlatformsChange={platforms.onChange} onHardwareRequirementsChange={hardware.onChange} disabled={isUploadLocked || isSubmitting} error={errors.hardwareRequirements?.message} />

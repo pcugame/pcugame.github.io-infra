@@ -55,32 +55,10 @@
   flex: 1;
   min-width: 11.25rem;
   max-width: 22.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: 0.85rem;
-}
-
-.admin-search:focus {
-  outline: none;
-  border-color: var(--color-primary);
 }
 
 .admin-filter-input {
   width: 7.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: 0.85rem;
-}
-
-.admin-filter-input:focus {
-  outline: none;
-  border-color: var(--color-primary);
 }
 
 .admin-bulk-actions {

@@ -1,3 +1,4 @@
+import { FormSection } from '../../../components/ui';
 import { ProjectRequirementsFieldset } from '../../../components/project/ProjectRequirementsFieldset';
 import { ExternalLinksFieldset } from '../../../components/project/ExternalLinksFieldset';
 import { Controller, useWatch } from 'react-hook-form';
@@ -24,8 +25,7 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
 
 	return (
 		<form id={formId} onSubmit={onSubmit} className="project-form">
-			<fieldset disabled={!canEditContent || isPending}>
-				<legend>기본 정보</legend>
+			<FormSection disabled={!canEditContent || isPending} legend="기본 정보">
                 {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
                  <label htmlFor="edit-visibility">공개 범위</label>
                  <VisibilitySelect id="edit-visibility" disabled={!project.canChangeVisibility} value={visibility ?? ''} {...register('visibility')} />
@@ -54,7 +54,7 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
 					<input id="sortOrder" type="number" {...register('sortOrder', { valueAsNumber: true })} />
 					{errors.sortOrder && <span className="field-error">{errors.sortOrder.message}</span>}
 				</div>
-			</fieldset>
+			</FormSection>
 			<ProjectRequirementsFieldset platforms={platforms ?? []} hardwareRequirements={hardwareRequirements ?? ''} onPlatformsChange={(value) => form.setValue('platforms', value, { shouldDirty: true, shouldValidate: true })} onHardwareRequirementsChange={(value) => form.setValue('hardwareRequirements', value, { shouldDirty: true, shouldValidate: true })} disabled={!canEditContent || isPending} error={errors.hardwareRequirements?.message} />
 			<Controller
 				control={form.control}
