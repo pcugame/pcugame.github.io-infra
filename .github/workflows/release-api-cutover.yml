@@ -168,7 +168,8 @@ jobs:
 
       - name: Install final web dependencies
         if: ${{ inputs.operation == 'release' }}
-        run: npm ci --workspace=apps/web --include-workspace-root
+        # The HTTP parity suite imports real API controllers and their dependencies.
+        run: npm ci --workspace=apps/web --workspace=apps/api --include-workspace-root
 
       - name: Test final web
         if: ${{ inputs.operation == 'release' }}
