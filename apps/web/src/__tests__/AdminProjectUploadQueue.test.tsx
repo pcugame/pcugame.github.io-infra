@@ -244,6 +244,7 @@ it('retries failed upload from Apply and does not repeat completed transfers', a
 	drop([file('a.jpg'), file('b.mp4')]);
 	apply();
 	await screen.findByRole('button', { name: '재시도' });
+	await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
 	expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
 	apply();
 	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
@@ -271,10 +272,14 @@ it('applies staged deletes before uploads and does not repeat a successful delet
 	expect(remove).not.toHaveBeenCalled();
 	apply();
 	await screen.findByRole('button', { name: '재시도' });
+	// The widget error renders before the parent Apply promise finishes.
+	// Production disables Apply until that promise settles; wait for the same boundary.
+	await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
 	expect(remove).toHaveBeenCalledExactlyOnceWith(11);
 	apply();
 	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
 	expect(remove).toHaveBeenCalledOnce();
+	expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
 });
 it('highlights both drop areas when a file enters the window, emphasizes its target, and resets on leave', () => {
 	const { container } = setup();
