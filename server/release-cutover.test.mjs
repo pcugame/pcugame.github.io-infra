@@ -38,6 +38,8 @@ assert.match(cutover, /cancel-in-progress: false/);
 assert.match(cutover, /node server\/verify-release-source\.mjs/);
 assert.match(cutover, /GITHUB_DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}/);
 assert.match(cutover, /Preflight external Pages target and write access before maintenance/);
+assert.match(cutover, /npm ci --workspace=apps\/web --workspace=apps\/api --include-workspace-root/,
+  'final Web verification must install both workspaces used by the real API/mock HTTP parity suite');
 for (const retired of ['phase1_api_image', 'observation_exception_id', 'exception_profile', 'observation_started_at', 'observation_attestation', 'legacy-audit', 'apply-expand', 'mark-read-cutover', 'contract-preflight', 'authorize-phase1-rollback']) {
   assert.ok(!cutover.includes(retired), `retired transition entrypoint remains: ${retired}`);
 }
