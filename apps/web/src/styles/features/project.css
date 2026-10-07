@@ -26,6 +26,16 @@
   margin: -0.25rem 0 1.1rem;
 }
 
+.project-meta__hardware {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.project-meta__hardware p {
+  margin: 0.35rem 0 0;
+}
+
 .project-meta__platforms {
   display: inline-flex;
   align-items: center;

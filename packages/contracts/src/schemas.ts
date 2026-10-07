@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PlatformsSchema, HardwareRequirementsSchema } from './project-requirements.js';
 import { ExternalLinksSchema } from './external-links.js';
 import { MAX_NEW_PROJECT_TITLE_BYTES, utf8ByteLength } from './filename-policy.js';
 
@@ -40,6 +41,8 @@ export const SubmitProjectPayloadBaseSchema = z.object({
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
 	externalLinks: ExternalLinksSchema.optional(),
+	platforms: PlatformsSchema.optional(),
+	hardwareRequirements: HardwareRequirementsSchema.optional(),
 	members: z.array(ProjectMemberInputSchema).min(1),
 	manifest: z.array(z.object({
 		kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER', 'DOCUMENT', 'ATTACHMENT']),
@@ -55,6 +58,8 @@ export const UpdateProjectBaseSchema = z.object({
 	summary: z.string().max(300).optional(),
 	description: z.string().max(5000).optional(),
 	externalLinks: ExternalLinksSchema.optional(),
+	platforms: PlatformsSchema.optional(),
+	hardwareRequirements: HardwareRequirementsSchema.optional(),
 	isIncomplete: z.boolean().optional(),
 	status: MutableProjectStatusSchema.optional(),
 	sortOrder: SafeNonNegativeIntegerSchema.optional(),

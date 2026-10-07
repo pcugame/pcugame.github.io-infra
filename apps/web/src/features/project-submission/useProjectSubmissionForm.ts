@@ -66,6 +66,8 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			summary: '',
 			description: '',
 			externalLinks: [],
+			platforms: [],
+			hardwareRequirements: '',
 			members: [
 				{
 					name: user?.name ?? '',

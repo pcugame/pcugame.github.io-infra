@@ -1,4 +1,4 @@
-import type { ExternalLink } from '@pcu/contracts';
+import type { ExternalLink, Platform } from '@pcu/contracts';
 import { ProjectPublicMeta } from './ProjectPublicMeta';
 import { useEffect, useRef, useState, useCallback } from 'react';
 
@@ -9,6 +9,8 @@ interface PreviewMember {
 
 interface PreviewValues {
 	externalLinks?: ExternalLink[];
+	platforms?: Platform[];
+	hardwareRequirements?: string;
 	title: string;
 	summary?: string;
 	description?: string;
@@ -215,7 +217,7 @@ export function ProjectPreviewModal({
 
 				<div className="modal-body">
 					<h1 className="modal-title">{values.title || '(제목 없음)'}</h1>
-					<ProjectPublicMeta externalLinks={values.externalLinks} />
+					<ProjectPublicMeta externalLinks={values.externalLinks} platforms={values.platforms} hardwareRequirements={values.hardwareRequirements} />
 
 					{exhibitionLabel && (
 						<p className="preview-exhibition">{exhibitionLabel}</p>

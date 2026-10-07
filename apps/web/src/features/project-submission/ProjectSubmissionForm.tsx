@@ -200,6 +200,8 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 				<ProjectPreviewModal
 					values={{
 						externalLinks: previewSnapshot.externalLinks,
+						platforms: previewSnapshot.platforms,
+						hardwareRequirements: previewSnapshot.hardwareRequirements,
 						title: previewSnapshot.title,
 						summary: previewSnapshot.summary || undefined,
 						description: previewSnapshot.description || undefined,

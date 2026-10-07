@@ -1,4 +1,5 @@
-import { ExternalLinksSchema } from '@pcu/contracts';
+import { ProjectRequirementsFieldset } from '../components/project/ProjectRequirementsFieldset';
+import { ExternalLinksSchema, HardwareRequirementsSchema, PlatformsSchema } from '@pcu/contracts';
 import { ExternalLinksFieldset } from '../components/project/ExternalLinksFieldset';
 import { WebglBuildGuideLink } from '../components/project/WebglBuildGuideLink';
 import { effectiveExternalLinks } from '../components/project/externalLinks';
@@ -159,6 +160,7 @@ export default function ProjectChangeRequestPage() {
 					description: project.description ?? '',
 					externalLinks: effectiveExternalLinks(project.externalLinks, project.githubUrl),
 					platforms: [...project.platforms],
+					hardwareRequirements: project.hardwareRequirements ?? '',
 					posterAssetId: project.posterAssetId ?? null,
 				}
 			: {}),
@@ -167,6 +169,10 @@ export default function ProjectChangeRequestPage() {
 	};
 	const formChanges = { ...initialChanges, ...changes };
 	const formLinks = effectiveExternalLinks(formChanges.externalLinks, formChanges.githubUrl);
+	const validateRequirements = () => ({
+		platforms: PlatformsSchema.parse(formChanges.platforms ?? []),
+		hardwareRequirements: HardwareRequirementsSchema.parse(formChanges.hardwareRequirements ?? ''),
+	});
 	const validateLinks = () => {
 		const result = ExternalLinksSchema.safeParse(formLinks);
 		if (!result.success) throw new Error(result.error.issues.map((issue) => issue.message).join(' · '));
@@ -203,6 +209,7 @@ export default function ProjectChangeRequestPage() {
 							active.kind === 'EDIT'
 								? {
 										...formChanges,
+										...validateRequirements(),
 										externalLinks: validateLinks(),
 										members: formMembers,
 										posterAssetId: effectivePosterId,
@@ -232,6 +239,7 @@ export default function ProjectChangeRequestPage() {
 					reason: formReason,
 					changes: {
 						...formChanges,
+						...validateRequirements(),
 						externalLinks: validateLinks(),
 						members: formMembers,
 						posterAssetId: effectivePosterId,
@@ -825,28 +833,8 @@ export default function ProjectChangeRequestPage() {
 											/>
 										</div>
 
-										<div className="form-field">
-											<label>플랫폼</label>
-											{(['PC', 'MOBILE', 'WEB'] as const).map((platform) => (
-												<label key={platform} className="form-field--checkbox">
-													<input
-														type="checkbox"
-														checked={(formChanges.platforms ?? []).includes(platform)}
-														onChange={() => {
-															const platforms = new Set(formChanges.platforms ?? []);
-															if (platforms.has(platform)) platforms.delete(platform);
-															else platforms.add(platform);
-															setChanges({
-																...changes,
-																platforms: [...platforms],
-															});
-														}}
-													/>{' '}
-													{platform}
-												</label>
-											))}
-										</div>
 									</fieldset>
+									<ProjectRequirementsFieldset platforms={formChanges.platforms ?? []} hardwareRequirements={formChanges.hardwareRequirements ?? ''} onPlatformsChange={(platforms) => setChanges({ ...changes, platforms })} onHardwareRequirementsChange={(hardwareRequirements) => setChanges({ ...changes, hardwareRequirements })} disabled={!editable || busy} />
 									<ExternalLinksFieldset value={formLinks} onChange={(externalLinks) => setChanges({ ...changes, externalLinks })} disabled={!editable || busy} showErrors />
 									<fieldset disabled={!editable || busy}>
 										<legend>참여 학생</legend>

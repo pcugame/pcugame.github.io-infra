@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PlatformsSchema, HardwareRequirementsSchema } from './project-requirements.js';
 import { ExternalLinksSchema } from './external-links.js';
 import { SubmitProjectResponseSchema } from './response-schemas.js';
 
@@ -11,7 +12,8 @@ export const ProjectChangeValuesSchema = z.object({
 	description: z.string().max(5000).optional(),
 	githubUrl: z.union([z.literal(''), z.url({ protocol: /^https?$/ })]).optional(),
 	externalLinks: ExternalLinksSchema.optional(),
-	platforms: z.array(z.enum(['PC', 'MOBILE', 'WEB'])).max(3).optional(),
+	platforms: PlatformsSchema.optional(),
+	hardwareRequirements: HardwareRequirementsSchema.optional(),
 	members: z.array(z.object({ name: z.string().trim().min(1).max(50), studentId: z.string().max(20) }).strict()).max(100).optional(),
 	removeAssetIds: z.array(Id).max(500).optional(),
 	posterAssetId: Id.nullable().optional(),

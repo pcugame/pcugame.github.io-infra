@@ -2,12 +2,13 @@
 // URL 패턴을 매칭하여 mock 데이터를 반환한다.
 // client.ts의 request()에서 VITE_MOCK=true일 때만 호출된다.
 
-import { detectExternalLinkService } from '@pcu/contracts';
+import { detectExternalLinkService, SubmitProjectPayloadBaseSchema } from '@pcu/contracts';
 import {
 	getMockUser,
 	getMockRole,
 	MOCK_YEARS,
 	MOCK_YEAR_PROJECTS,
+	MOCK_MY_PROJECTS,
 	MOCK_ADMIN_YEARS,
 	findProjectDetail,
 	buildAdminProjectItems,
@@ -467,6 +468,12 @@ const routes: MockRoute[] = [
 			const raw = options.body instanceof FormData ? options.body.get('payload') : null;
 			const payload = typeof raw === 'string' ? parseJsonBody(raw) : {};
 			const manifest = Array.isArray(payload.manifest) ? payload.manifest : [];
+			const metadata = SubmitProjectPayloadBaseSchema.parse(payload);
+			const year = MOCK_ADMIN_YEARS.find((item) => item.id === metadata.exhibitionId)?.year ?? 2025;
+			const previous = MOCK_MY_PROJECTS.findIndex((item) => item.id === 999);
+			if (previous >= 0) MOCK_MY_PROJECTS.splice(previous, 1);
+			MOCK_MY_PROJECTS.push({ visibility: metadata.visibility ?? 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: true, id: 999, slug: 'new-project', title: metadata.title, summary: metadata.summary, members: metadata.members, platforms: metadata.platforms ?? [], year, status: 'PUBLISHED', ownerId: getMockUser().id, updatedAgoSec: 0 });
+			mockProjectOverrides.set(999, { title: metadata.title, summary: metadata.summary ?? '', description: metadata.description ?? '', externalLinks: metadata.externalLinks ?? [], platforms: metadata.platforms ?? [], hardwareRequirements: metadata.hardwareRequirements ?? '', status: 'DRAFT', canEdit: true });
 			mockProjectSubmission = {
 				submissionId: crypto.randomUUID(),
 				projectId: 999,
@@ -485,7 +492,7 @@ const routes: MockRoute[] = [
 				}),
 			};
 			return {
-				id: 999, slug: 'new-project', year: 2025,
+				id: 999, slug: 'new-project', year,
 				status: 'DRAFT', submissionId: mockProjectSubmission.submissionId,
 				items: mockProjectSubmission.items,
 				adminEditUrl: '/admin/projects/999/edit',
@@ -507,6 +514,7 @@ const routes: MockRoute[] = [
 				if (!submission.items.every((item) => item.state === 'READY')) throw new Error('Mock: submission not ready');
 				submission.state = 'PUBLISHED';
 				submission.projectStatus = 'PUBLISHED';
+				mockProjectOverrides.set(submission.projectId, { ...mockProjectOverrides.get(submission.projectId), status: 'PUBLISHED' });
 			}
 			return submission;
 		},

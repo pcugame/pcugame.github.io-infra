@@ -1,3 +1,4 @@
+import type { Platform } from './enums.js';
 import type { ExternalLink } from './external-links.js';
 import type { ProjectSubmissionItemStatus } from './admin-projects.js';
 
@@ -6,7 +7,8 @@ export type ProjectChangeState = 'DRAFT' | 'PENDING' | 'APPLYING' | 'COMPLETED' 
 export interface ProjectChangeValues {
  title?: string; summary?: string; description?: string; githubUrl?: string;
  externalLinks?: ExternalLink[];
- platforms?: Array<'PC' | 'MOBILE' | 'WEB'>;
+ platforms?: Platform[];
+ hardwareRequirements?: string;
  members?: Array<{ name: string; studentId: string }>;
  removeAssetIds?: number[]; posterAssetId?: number | null; videoAssetIds?: number[];
  removeWebgl?: boolean;

@@ -132,3 +132,6 @@ export * from './webgl-play.js';
 
 export * from './webgl-display.js';
 export * from './webgl-network.js';
+
+export { PROJECT_PLATFORMS } from './enums.js';
+export * from './project-requirements.js';

@@ -237,6 +237,7 @@ model Project {
   githubUrl                String        @default("") @map("github_url")
   externalLinks            Json?         @map("external_links")
   platforms                Platform[]    @default([])
+  hardwareRequirements     String        @default("") @map("hardware_requirements")
   posterAssetId            Int?          @unique @map("poster_asset_id")
   webglDisplayMode        String        @default("auto") @map("webgl_display_mode")
   webglDisplayWidth       Int?          @map("webgl_display_width")

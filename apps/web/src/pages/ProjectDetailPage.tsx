@@ -54,7 +54,7 @@ export default function ProjectDetailPage() {
         {project.title}
       </h1>
 
-      <ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} />
+      <ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} hardwareRequirements={project.hardwareRequirements} />
 
       {/* 참여 학생 */}
       <section className="project-detail__members">
