@@ -1,3 +1,4 @@
+import { ProjectRequirementsFieldset } from '../../components/project/ProjectRequirementsFieldset';
 import { ExternalLinksFieldset } from '../../components/project/ExternalLinksFieldset';
 import { useWatch, Controller } from 'react-hook-form';
 import type { Control, FieldErrors, UseFormRegister } from 'react-hook-form';
@@ -86,6 +87,11 @@ export function SubmissionBasicFields({
 					)}
 				</div>
 			</fieldset>
+			<Controller control={control} name="platforms" render={({ field: platforms }) => (
+				<Controller control={control} name="hardwareRequirements" render={({ field: hardware }) => (
+					<ProjectRequirementsFieldset platforms={platforms.value ?? []} hardwareRequirements={hardware.value ?? ''} onPlatformsChange={platforms.onChange} onHardwareRequirementsChange={hardware.onChange} disabled={isUploadLocked || isSubmitting} error={errors.hardwareRequirements?.message} />
+				)} />
+			)} />
 			<Controller
 				control={control}
 				name="externalLinks"

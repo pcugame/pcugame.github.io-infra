@@ -1,3 +1,7 @@
+import { createProjectPublicationRepository } from '../modules/project-publication/repository.js';
+import multipart from '@fastify/multipart';
+import { createAdminProjectMetadataController } from '../modules/admin/project/metadata.controller.js';
+import { createSubmitProjectService } from '../modules/admin/project/project-submit.service.js';
 import { createWebglDisplayRepository } from '../modules/me/project/webgl-display.repository.js';
 import { createWebglDisplayService } from '../modules/me/project/webgl-display.service.js';
 import { createWebglDisplayController } from '../modules/me/project/webgl-display.controller.js';
@@ -36,6 +40,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('WebGL displa
 	beforeAll(async () => {
 		database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);
 		db = database.createClient();
+		await db.storageBucket.createMany({ data: [{ bucket: 'pcu-public', visibility: 'PUBLIC' }, { bucket: 'pcu-protected', visibility: 'PROTECTED' }] });
 		async function user(role: Actor['role']): Promise<Actor> {
 			const row = await db.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@test.invalid`, role } });
 			users.push(row.id);
@@ -47,6 +52,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('WebGL displa
 		exhibitionId = (await db.exhibition.create({ data: { year: 2098, title: randomUUID() } })).id;
 		app = Fastify(); app.setValidatorCompiler(validatorCompiler); app.setSerializerCompiler(serializerCompiler);
 		await app.register(cookie);
+		await app.register(multipart);
 		await registerAuth(app, {
 			config: { SESSION_COOKIE_NAME: 'sid', SESSION_IDLE_MS: 3600000, SESSION_TOUCH_MIN_INTERVAL_MS: 3600000, COOKIE_SECURE: false, COOKIE_SAME_SITE: 'lax', CORS_ALLOWED_ORIGINS: ['http://localhost:5173'] },
 			clock: { now: () => new Date() }, logger: app.log,
@@ -66,6 +72,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('WebGL displa
 			abortMultipart: async () => {}, wakeDeletionWorker() {}, wakeMaintenance() {}, logger: app.log,
 		});
 		registerRouteSchemas(app);
+		await app.register(createAdminProjectMetadataController({ service: createSubmitProjectService({ repository, webPublicUrl: 'http://localhost:5173' }), route: { rateLimit: { max: 100, timeWindow: 60000 } } }), { prefix: '/api/admin' });
 		await app.register(createWebglDisplayController(createWebglDisplayService(createWebglDisplayRepository(db))), { prefix: '/api/me' });
 		await app.register(createPublicController({ service: createPublicService({ repository: createPublicRepository(db), apiPublicUrl: 'http://localhost:3000' }) }), { prefix: '/api/public' });
 		await app.register(createProjectController({ service, access: createProjectAccessService(createProjectAccessRepository(db)), status: { assertTransition: assertStatusTransition, bulkUpdate: async (ids, status) => ({ updated: (await repository.bulkUpdateStatus(ids, status)).count }) } }), { prefix: '/api/admin' });
@@ -81,6 +88,47 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('WebGL displa
 		return app.inject({ method, url: `/api/me/projects${path}`, headers: { cookie: cookies.get(actor.id)!, origin: 'http://localhost:5173' }, ...(payload ? { payload } : {}) });
 	}
 
+	it.each([
+		{ platforms: ['PC', 'WEB'], hardwareRequirements: '  VR headset required  ' },
+		{ platforms: [], hardwareRequirements: '' },
+	])('creates, edits and serializes hardware/platform metadata through authenticated HTTP: %j', async (metadata) => {
+		const boundary = 'metadata-test-boundary';
+		const payload = { exhibitionId, title: `Hardware ${randomUUID()}`, members: [{ name: 'Student', studentId: '20260001' }], manifest: [], ...metadata };
+		const created = await app.inject({ method: 'POST', url: '/api/admin/projects/submit', headers: { cookie: cookies.get(admin.id)!, origin: 'http://localhost:5173', 'idempotency-key': randomUUID(), 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: `--${boundary}\r\nContent-Disposition: form-data; name="payload"\r\n\r\n${JSON.stringify(payload)}\r\n--${boundary}--\r\n` });
+		expect(created.statusCode, created.body).toBe(201);
+		const id = created.json().data.id as number;
+		const expected = { platforms: metadata.platforms, hardwareRequirements: metadata.hardwareRequirements.trim() };
+		const headers = { cookie: cookies.get(admin.id)!, origin: 'http://localhost:5173' };
+		const detail = await app.inject({ url: `/api/admin/projects/${id}`, headers });
+		expect(detail.statusCode, detail.body).toBe(200);
+		expect(AdminProjectDetailSchema.parse(detail.json().data)).toMatchObject(expected);
+		const finalized = await app.inject({ method: 'POST', url: `/api/admin/projects/${id}/submission/finalize`, headers });
+		expect(finalized.statusCode, finalized.body).toBe(200);
+		const publication = createProjectPublicationRepository(db);
+		const token = randomUUID();
+		const job = await publication.claim({ token, leaseMs: 60000 });
+		expect(job?.projectId).toBe(id);
+		const validated = await publication.validatePlan(job!, token);
+		expect(validated.status, JSON.stringify(validated)).toBe('VALID');
+		if (validated.status !== 'VALID') throw new Error('Metadata publication validation failed');
+		expect(await publication.complete(validated.job, token)).toBe('COMPLETED');
+		const readPublic = async () => {
+			const response = await app.inject({ url: `/api/public/projects/${id}`, headers });
+			expect(response.statusCode, response.body).toBe(200);
+			return PublicProjectDetailResponseSchema.parse(response.json().data);
+		};
+		expect(await readPublic()).toMatchObject(expected);
+		const preserved = await app.inject({ method: 'PATCH', url: `/api/admin/projects/${id}`, headers, payload: { summary: 'Other metadata edit' } });
+		expect(preserved.statusCode, preserved.body).toBe(200);
+		expect(AdminProjectDetailSchema.parse(preserved.json().data)).toMatchObject(expected);
+		for (const update of [{ platforms: ['MOBILE'], hardwareRequirements: '  Controller required  ' }, { platforms: [], hardwareRequirements: '' }]) {
+			const edited = await app.inject({ method: 'PATCH', url: `/api/admin/projects/${id}`, headers, payload: update });
+			expect(edited.statusCode, edited.body).toBe(200);
+			const normalized = { ...update, hardwareRequirements: update.hardwareRequirements.trim() };
+			expect(AdminProjectDetailSchema.parse(edited.json().data)).toMatchObject(normalized);
+			expect(await readPublic()).toMatchObject(normalized);
+		}
+	});
 	it('serializes both empty and populated authenticated admin project lists', async () => {
 		const empty = await app.inject({ url: '/api/admin/projects', headers: { cookie: cookies.get(stranger.id)!, origin: 'http://localhost:5173' } });
 		expect(empty.statusCode).toBe(200);

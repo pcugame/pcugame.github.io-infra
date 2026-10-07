@@ -1,6 +1,7 @@
 import { WebglDisplayDimensionSchema, WebglDisplayKindSchema, WebglDisplayModeSchema } from './webgl-display.js';
 import { VisibilitySchema } from './schemas.js';
 import { z } from 'zod';
+import { PlatformSchema, HardwareRequirementsSchema } from './project-requirements.js';
 import { ExternalLinksSchema } from './external-links.js';
 import {
 	AssetKindSchema,
@@ -88,7 +89,6 @@ const UrlSchema = z.string().url();
 // URL syntax would turn already-valid stored records into HTTP 500 responses.
 const StoredProjectLinkSchema = z.string().min(1).max(500);
 const AssetPlaybackStatusSchema = z.enum(['PENDING', 'READY', 'FAILED']);
-const PlatformSchema = z.enum(['PC', 'MOBILE', 'WEB']);
 
 export const ResponsiveImageSchema: z.ZodType<ResponsiveImage> = z.object({
 	original: z.object({
@@ -240,6 +240,7 @@ export const PublicProjectDetailResponseSchema = z.object({
 	githubUrl: StoredProjectLinkSchema.optional(),
 	externalLinks: ExternalLinksSchema.optional(),
 	platforms: z.array(PlatformSchema),
+	hardwareRequirements: HardwareRequirementsSchema.default(''),
 	isIncomplete: z.boolean(),
 	video: ProjectVideoSchema.nullable(),
 	videos: z.array(ProjectVideoSchema),
@@ -331,6 +332,7 @@ export const AdminProjectDetailSchema = z.object({
 	githubUrl: StoredProjectLinkSchema.optional(),
 	externalLinks: ExternalLinksSchema.optional(),
 	platforms: z.array(PlatformSchema),
+	hardwareRequirements: HardwareRequirementsSchema.default(''),
 	isIncomplete: z.boolean(),
 	video: ProjectVideoSchema.nullable(),
 	videos: z.array(ProjectVideoSchema),

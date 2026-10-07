@@ -57,6 +57,40 @@ describe('global project Apply', () => {
   expect(screen.queryByLabelText('외부 링크 1 URL')).toBeNull();
  });
 
+ it('initializes, changes, and explicitly clears execution requirements', async () => {
+  stored = { ...stored, platforms: ['PC'], hardwareRequirements: 'VR 헤드셋' };
+  mount(); await ready();
+  expect((screen.getByLabelText('PC') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText('필수 하드웨어') as HTMLTextAreaElement).value).toBe('VR 헤드셋');
+  fireEvent.click(screen.getByLabelText('PC')); fireEvent.click(screen.getByLabelText('PC'));
+  await waitFor(() => expect(apply().disabled).toBe(true));
+  fireEvent.click(screen.getByLabelText('웹')); change('필수 하드웨어', '컨트롤러'); fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenLastCalledWith(7, { platforms: ['PC', 'WEB'], hardwareRequirements: '컨트롤러' }));
+  await screen.findByText('적용되었습니다.');
+  await waitFor(() => expect(apply().disabled).toBe(true));
+  fireEvent.click(screen.getByLabelText('PC')); fireEvent.click(screen.getByLabelText('웹')); change('필수 하드웨어', '');
+  await waitFor(() => expect(apply().disabled).toBe(false)); fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenLastCalledWith(7, { platforms: [], hardwareRequirements: '' }));
+ });
+ it('normalizes whitespace hardware without sending an empty metadata patch', async () => {
+  mount(); await ready(); change('필수 하드웨어', '   '); fireEvent.click(apply());
+  await screen.findByText('적용되었습니다.');
+  expect(adminProjectApi.update).not.toHaveBeenCalled();
+  expect((screen.getByLabelText('필수 하드웨어') as HTMLTextAreaElement).value).toBe('');
+  expect(apply().disabled).toBe(true);
+ });
+ it('preserves untouched execution requirements refreshed in the background', async () => {
+  stored = { ...stored, platforms: ['WEB', 'PC'] };
+  mount(); await ready();
+  fireEvent.click(screen.getByLabelText('PC')); fireEvent.click(screen.getByLabelText('PC'));
+  await waitFor(() => expect(apply().disabled).toBe(true));
+  change('제목 *', '제목만 변경');
+  stored = { ...stored, platforms: ['WEB'], hardwareRequirements: '새 하드웨어' };
+  await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
+  fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
+  expect(stored.platforms).toEqual(['WEB']); expect(stored.hardwareRequirements).toBe('새 하드웨어');
+ });
  it('stages visibility until Apply, resets its baseline, and treats a reverted selection as clean', async () => {
   mount(); await ready();
   chooseVisibility('운영자·관리자');
@@ -90,6 +124,8 @@ describe('global project Apply', () => {
   mount(); await ready();
   expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLButtonElement).disabled).toBe(true);
   expect(apply().disabled).toBe(true);
+  expect(screen.getByLabelText('필수 하드웨어').closest('fieldset')?.disabled).toBe(true);
+  expect(screen.getByLabelText('PC').closest('fieldset')?.disabled).toBe(true);
   fireEvent.click(apply()); expect(adminProjectApi.update).not.toHaveBeenCalled();
  });
 	it('stages publication status and text, applies one PATCH, and resets clean baseline from the response', async () => {
@@ -149,6 +185,7 @@ describe('global project Apply', () => {
 		await screen.findByRole('button', { name: '적용 중…' });
 		expect((screen.getByRole('switch') as HTMLButtonElement).disabled).toBe(true);
 		expect(screen.getByLabelText('제목 *').closest('fieldset')?.disabled).toBe(true);
+		expect(screen.getByLabelText('필수 하드웨어').closest('fieldset')?.disabled).toBe(true);
 		expect(screen.getByLabelText('참여 학생 1 이름').closest('fieldset')?.disabled).toBe(true);
 		expect(control.lock).toHaveBeenCalledWith(true); expect(adminProjectApi.update).not.toHaveBeenCalled();
 		await act(async () => finish()); await waitFor(() => expect(apply().disabled).toBe(true)); expect(control.lock).toHaveBeenLastCalledWith(false);

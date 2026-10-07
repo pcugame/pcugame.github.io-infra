@@ -118,6 +118,23 @@ afterEach(() => {
 });
 
 describe('ProjectChangeRequestPage', () => {
+ it('initializes legacy requirements, clears values, and rejects overlength hardware before saving', async () => {
+  const active = draft();
+  mocks.getDetail.mockResolvedValue(project);
+  mocks.listForProject.mockResolvedValue({ items: [active], total: 1 });
+  mocks.get.mockResolvedValue(active); mocks.update.mockResolvedValue(active);
+  renderPage();
+  const hardware = await screen.findByLabelText('필수 하드웨어');
+  expect((hardware as HTMLTextAreaElement).value).toBe('');
+  expect((screen.getByLabelText('PC') as HTMLInputElement).checked).toBe(true);
+  fireEvent.change(hardware, { target: { value: 'x'.repeat(1001) } });
+  fireEvent.click(screen.getByRole('button', { name: '초안 저장' }));
+  await screen.findByText(/1000/);
+  expect(mocks.update).not.toHaveBeenCalled();
+  fireEvent.change(hardware, { target: { value: '' } }); fireEvent.click(screen.getByLabelText('PC'));
+  fireEvent.click(screen.getByRole('button', { name: '초안 저장' }));
+  await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(active.id, expect.objectContaining({ changes: expect.objectContaining({ platforms: [], hardwareRequirements: '' }) })));
+ });
  it('preserves an old GitHub draft, validates edits before saving and allows clearing every link', async () => {
   const active = { ...draft(), changes: { githubUrl: 'https://github.com/pending' } };
   mocks.getDetail.mockResolvedValue({ ...project, externalLinks: [{ label: '기존', url: 'https://example.com' }] });

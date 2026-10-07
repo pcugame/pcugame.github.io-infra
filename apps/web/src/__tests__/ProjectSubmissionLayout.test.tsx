@@ -158,6 +158,15 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 	it('keeps mixed selection local until metadata creates a DRAFT, then preserves manifest tokens in side-column uploads', async () => {
 		const { container } = mount(mode);
 		await enterMetadata();
+		fireEvent.click(screen.getByLabelText('PC'));
+		fireEvent.click(screen.getByLabelText('웹'));
+		fireEvent.change(screen.getByLabelText('필수 하드웨어'), { target: { value: 'VR 헤드셋\n컨트롤러' } });
+		fireEvent.click(screen.getByRole('button', { name: '미리보기' }));
+		const preview = screen.getByRole('dialog');
+		expect(within(preview).getByText('PC')).toBeTruthy();
+		expect(within(preview).getByText('웹')).toBeTruthy();
+		expect(within(preview).getByText(/VR 헤드셋/).textContent).toBe('VR 헤드셋\n컨트롤러');
+		fireEvent.keyDown(globalThis.document, { key: 'Escape' });
 		const poster = new File(['poster'], 'poster.png', { type: 'image/png' });
 		const image = new File(['image'], 'image.png', { type: 'image/png' });
 		fireEvent.click(screen.getByRole('button', { name: '링크 추가' }));
@@ -181,6 +190,7 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		expect(controls.getApi).toHaveBeenCalledWith(mode);
 		const formData = controls.submit.mock.calls[0]![0].formData as FormData;
 		expect(Array.from(formData.keys())).toEqual(['payload']);
+		expect(JSON.parse(formData.get('payload') as string)).toMatchObject({ platforms: ['PC', 'WEB'], hardwareRequirements: 'VR 헤드셋\n컨트롤러' });
 		expect(JSON.parse(formData.get('payload') as string).externalLinks).toEqual([{ label: '다운로드', url: 'https://example.com/game' }]);
 		expect(items.map((item) => item.kind).sort()).toEqual([
 			'DOCUMENT',
@@ -200,7 +210,7 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		).toBeTruthy();
 		expect(within(container.querySelector('.admin-project-edit-assets')!).getByText('game.zip')).toBeTruthy();
 		expect(container.querySelector('input[type="file"]')).toBeNull();
-		expect(window.sessionStorage.getItem(`pcu.pending-project-submission:${mode}`)).toContain(
+		expect(window.sessionStorage.getItem(`pcu.pending-project-submission:${mode}:9`)).toContain(
 			'submission-73',
 		);
 	});
@@ -280,7 +290,7 @@ describe('submission selection and recovery', () => {
 			required: true,
 			state: state as ProjectSubmissionItemStatus['state'],
 		}));
-		window.sessionStorage.setItem('pcu.pending-project-submission:user', JSON.stringify(draft()));
+		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
 		const session = {
 			sessionId: 'second-session',
 			owner: { type: 'PROJECT', id: 73 },
@@ -344,7 +354,7 @@ describe('submission selection and recovery', () => {
 				state: 'EXPECTED',
 			},
 		];
-		window.sessionStorage.setItem('pcu.pending-project-submission:user', JSON.stringify(draft()));
+		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
 		const { container } = mount();
 		await screen.findByText('제출 취소');
 		expect(container.querySelector('.admin-project-edit-poster input[type="file"]')).toBeTruthy();
@@ -355,7 +365,7 @@ describe('submission selection and recovery', () => {
 		fireEvent.click(screen.getByRole('button', { name: '제출 취소' }));
 		await waitFor(() => expect(controls.cancel).toHaveBeenCalledWith(73));
 		await waitFor(() =>
-			expect(window.sessionStorage.getItem('pcu.pending-project-submission:user')).toBeNull(),
+			expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:9')).toBeNull(),
 		);
 	});
 });

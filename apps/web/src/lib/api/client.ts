@@ -29,13 +29,6 @@ type RequestOptions = Omit<RequestInit, 'body'> & {
 };
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  // Mock 모드: VITE_MOCK=true이면 실제 API를 호출하지 않고 mock 데이터를 반환한다.
-  // 프로덕션 빌드에서는 이 분기가 dead code로 제거된다.
-  if (import.meta.env.VITE_MOCK === 'true') {
-    const { handleMockRequest } = await import('./mock/handler');
-    return handleMockRequest<T>(path, options);
-  }
-
   const url = `${env.API_BASE_URL}${path}`;
   const { body, headers: customHeaders, ...rest } = options;
 
@@ -43,7 +36,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   let resolvedBody: BodyInit | undefined;
 
-  if (body instanceof FormData) {
+  if (body instanceof FormData || body instanceof Blob) {
     // FormData → 브라우저가 Content-Type + boundary 자동 설정
     resolvedBody = body;
   } else if (body !== undefined) {
@@ -51,7 +44,9 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     resolvedBody = JSON.stringify(body);
   }
 
-  const response = await fetch(url, {
+  const transport = import.meta.env.VITE_MOCK === 'true'
+    ? (await import('./mock/transport')).mockFetch : fetch;
+  const response = await transport(import.meta.env.VITE_MOCK === 'true' ? path : url, {
     ...rest,
     headers,
     body: resolvedBody,

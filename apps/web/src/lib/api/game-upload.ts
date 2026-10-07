@@ -68,20 +68,13 @@ async function apiRequest<T>(
 ): Promise<T> {
 	const effectiveRetrySignal = retrySignal ?? init.signal;
 	throwIfAborted(effectiveRetrySignal);
-	if (import.meta.env.VITE_MOCK === 'true') {
-		const { handleMockRequest } = await import('./mock/handler');
-		const result = await handleMockRequest<T>(path, {
-			method: init.method ?? 'GET',
-			body: init.body,
-		});
-		throwIfAborted(init.signal);
-		return result;
-	}
 
-	const url = `${env.API_BASE_URL}${path}`;
+	const transport = import.meta.env.VITE_MOCK === 'true'
+		? (await import('./mock/transport')).mockFetch : fetch;
+	const url = import.meta.env.VITE_MOCK === 'true' ? path : `${env.API_BASE_URL}${path}`;
 	for (let attempt = 0; ; attempt += 1) {
 		throwIfAborted(effectiveRetrySignal);
-		const res = await fetch(url, { ...init, credentials: 'include' });
+		const res = await transport(url, { ...init, credentials: 'include' });
 		if (res.ok) {
 			if (res.status === 204) {
 				throwIfAborted(init.signal);
@@ -209,18 +202,12 @@ async function putDirectUploadPart(
 	signal?: AbortSignal,
 ): Promise<string> {
 	throwIfAborted(signal);
-	if (import.meta.env.VITE_MOCK === 'true') {
-		const { handleMockRequest } = await import('./mock/handler');
-		const result = await handleMockRequest<{ etag?: string }>(capability.url, {
-			method: 'PUT', body,
-		});
-		throwIfAborted(signal);
-		if (!result.etag) throw new Error('Mock UploadPart response omitted ETag');
-		return result.etag;
-	}
+
 	let response: Response;
 	try {
-		response = await fetch(capability.url, {
+		const transport = import.meta.env.VITE_MOCK === 'true'
+			? (await import('./mock/transport')).mockFetch : fetch;
+		response = await transport(capability.url, {
 			method: 'PUT', headers: capability.requiredHeaders, body, signal,
 		});
 	} catch (error) {

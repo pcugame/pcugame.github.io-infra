@@ -1,4 +1,4 @@
-import type { ExternalLink, Visibility } from '@pcu/contracts';
+import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
 import type {
 	AssetKind,
 	ProjectStatus,
@@ -24,6 +24,8 @@ export interface SubmitProjectWriteData {
 	summary?: string;
 	description?: string;
 	externalLinks?: ExternalLink[];
+	platforms?: Platform[];
+	hardwareRequirements?: string;
 	status: ProjectStatus;
 	creatorId: number;
 	members: Array<{
@@ -138,6 +140,8 @@ export interface ProjectRepository {
 		summary?: string;
 		description?: string;
 		externalLinks?: ExternalLink[];
+		platforms?: Platform[];
+		hardwareRequirements?: string;
 		isIncomplete?: boolean;
 		status?: ProjectStatus;
 		sortOrder?: number;

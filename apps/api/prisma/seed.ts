@@ -29,6 +29,7 @@
  * }
  */
 
+import { HardwareRequirementsSchema, PlatformsSchema, type Platform } from '@pcu/contracts';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -633,7 +634,8 @@ interface ImportProject {
   isIncomplete?: boolean;
   status?: 'PUBLISHED' | 'ARCHIVED';
   githubUrl?: string;
-  platforms?: ('PC' | 'MOBILE' | 'WEB')[];
+  platforms?: Platform[];
+  hardwareRequirements?: string;
   members?: ImportMember[];
 }
 
@@ -716,7 +718,8 @@ async function importFromJson(filePath: string, creatorId: number) {
           isIncomplete: p.isIncomplete ?? false,
           status: p.status ?? 'PUBLISHED',
           githubUrl: p.githubUrl ?? '',
-          platforms: p.platforms ?? [],
+          platforms: PlatformsSchema.parse(p.platforms ?? []),
+          hardwareRequirements: HardwareRequirementsSchema.parse(p.hardwareRequirements ?? ''),
           creatorId,
           members: {
             create: (p.members ?? []).map((m, i) => ({

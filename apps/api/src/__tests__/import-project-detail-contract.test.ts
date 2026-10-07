@@ -52,9 +52,10 @@ describe('imported project detail contract fields', () => {
 		mocks.findProjectBySlug.mockResolvedValue(null);
 	});
 
-	it('roundtrips githubUrl and platforms from import into admin and public detail responses', async () => {
+	it('roundtrips githubUrl, platforms and hardware requirements from import into admin and public detail responses', async () => {
 		const githubUrl = 'https://github.com/pcu/example-game';
 		const platforms = ['PC', 'WEB'] as const;
+		const hardwareRequirements = 'VR headset required';
 		let createdProject: {
 			exhibitionId: number;
 			slug: string;
@@ -65,6 +66,7 @@ describe('imported project detail contract fields', () => {
 			status: 'PUBLISHED' | 'ARCHIVED';
 			githubUrl: string;
 			platforms: ('PC' | 'MOBILE' | 'WEB')[];
+			hardwareRequirements: string;
 			creatorId: number;
 			members: { name: string; studentId: string; sortOrder: number }[];
 		} | undefined;
@@ -84,6 +86,7 @@ describe('imported project detail contract fields', () => {
 				description: 'Imported fields must remain visible in detail APIs.',
 				githubUrl,
 				platforms: [...platforms],
+				hardwareRequirements,
 				members: [{ name: 'Student One', studentId: '20260001' }],
 			}],
 		}), 9)).resolves.toEqual({
@@ -94,6 +97,7 @@ describe('imported project detail contract fields', () => {
 		expect(createdProject).toMatchObject({
 			githubUrl,
 			platforms: [...platforms],
+			hardwareRequirements,
 		});
 
 		const detailRecord = {
@@ -108,6 +112,7 @@ describe('imported project detail contract fields', () => {
 			sortOrder: 0,
 			githubUrl: createdProject!.githubUrl,
 			platforms: createdProject!.platforms,
+			hardwareRequirements: createdProject!.hardwareRequirements,
 			posterAssetId: null,
 			poster: null,
 			members: createdProject!.members.map((member, index) => ({
@@ -124,6 +129,7 @@ describe('imported project detail contract fields', () => {
 		expect(adminDetail).toMatchObject({
 			githubUrl,
 			platforms: [...platforms],
+			hardwareRequirements,
 		});
 
 		mocks.findPublishedProjectById.mockResolvedValue(detailRecord);
@@ -131,6 +137,7 @@ describe('imported project detail contract fields', () => {
 		expect(publicDetail).toMatchObject({
 			githubUrl,
 			platforms: [...platforms],
+			hardwareRequirements,
 		});
 	});
 });

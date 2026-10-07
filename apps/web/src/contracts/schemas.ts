@@ -38,6 +38,8 @@ export type SubmitProjectPayloadInput = z.infer<typeof SubmitProjectPayloadSchem
 
 export const UpdateProjectFormSchema = UpdateProjectBaseSchema.pick({
 	externalLinks: true,
+	platforms: true,
+	hardwareRequirements: true,
 	title: true,
 	summary: true,
 	description: true,

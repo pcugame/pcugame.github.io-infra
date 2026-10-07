@@ -1,4 +1,4 @@
-import { VisibilitySchema, type Visibility } from '@pcu/contracts';
+import { HardwareRequirementsSchema, PlatformsSchema, VisibilitySchema, type Platform, type Visibility } from '@pcu/contracts';
 import { z } from 'zod';
 import { toSlug } from '../../../shared/slug.js';
 import { badRequest } from '../../../shared/errors.js';
@@ -19,7 +19,8 @@ export interface ImportProjectCreate {
 	isIncomplete: boolean;
 	status: 'PUBLISHED' | 'ARCHIVED';
 	githubUrl: string;
-	platforms: ('PC' | 'MOBILE' | 'WEB')[];
+	platforms: Platform[];
+	hardwareRequirements: string;
 	creatorId: number;
 	members: Array<{ name: string; studentId: string; sortOrder: number }>;
 }
@@ -63,7 +64,8 @@ export const ImportProject = z.object({
 	isIncomplete: z.boolean().optional().default(false),
 	status: z.enum(['PUBLISHED', 'ARCHIVED']).optional().default('PUBLISHED'),
 	githubUrl: z.string().max(500).optional().default(''),
-	platforms: z.array(z.enum(['PC', 'MOBILE', 'WEB'])).optional().default([]),
+	platforms: PlatformsSchema.optional().default([]),
+	hardwareRequirements: HardwareRequirementsSchema.optional().default(''),
 	members: z.array(ImportMember).optional().default([]),
 });
 
@@ -246,6 +248,7 @@ export async function executeImport(
 				visibility: p.visibility,
 				githubUrl: p.githubUrl,
 				platforms: p.platforms,
+				hardwareRequirements: p.hardwareRequirements,
 				creatorId,
 				members: p.members.map((m, i) => ({
 					name: m.name,

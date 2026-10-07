@@ -73,6 +73,7 @@ export type SerializableProject = {
 	githubUrl: string;
 	externalLinks?: unknown;
 	platforms: Platform[];
+	hardwareRequirements?: string;
 	isIncomplete: boolean;
 	status: ProjectStatus;
 	sortOrder: number;
@@ -200,6 +201,7 @@ export function createProjectSerializer(
 			githubUrl: project.githubUrl || undefined,
 			externalLinks: effectiveProjectExternalLinks(project),
 			platforms: project.platforms,
+			hardwareRequirements: project.hardwareRequirements ?? '',
 			isIncomplete: effectiveIsIncomplete(project.isIncomplete, project.assets, completenessPoster),
 			video,
 			videos,
