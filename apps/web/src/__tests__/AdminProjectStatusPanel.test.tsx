@@ -34,9 +34,9 @@ describe('AdminProjectStatusPanel', () => {
 				onToggle={onToggle}
 			/>,
 		);
-		const toggle = screen.getByRole('switch', { name: '작품 공개' });
-		expect(toggle.getAttribute('aria-checked')).toBe(String(status === 'PUBLISHED'));
-		expect(toggle.textContent).toBe('공개비공개');
+		const toggle = screen.getByRole('switch', { name: '작품 보관' });
+		expect(toggle.getAttribute('aria-checked')).toBe(String(status === 'ARCHIVED'));
+		expect(toggle.textContent).toBe('일반보관');
 		fireEvent.click(toggle);
 		expect(onToggle).toHaveBeenCalledWith(status === 'PUBLISHED' ? 'ARCHIVED' : 'PUBLISHED');
 	});

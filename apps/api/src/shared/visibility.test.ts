@@ -7,8 +7,8 @@ describe('shared visibility policy', () => {
 	it('combines both audiences and never grants draft browsing or unrelated ownership', () => {
 		const levels: Visibility[] = ['PUBLIC', 'AUTHENTICATED', 'STAFF'];
 		const actors: VisibilityActor[] = [null, { id: 1, role: 'USER' }, { id: 2, role: 'USER' }, { id: 3, role: 'USER' }, { id: 4, role: 'OPERATOR' }, { id: 5, role: 'ADMIN' }];
-		for (const actor of actors) for (const exhibition of levels) for (const visibility of levels) {
-			const project = { creatorId: 1, members: [{ userId: 2 }], status: 'PUBLISHED', visibility, exhibition: { visibility: exhibition, isModificationEnabled: true } };
+		for (const status of ['PUBLISHED', 'ARCHIVED']) for (const actor of actors) for (const exhibition of levels) for (const visibility of levels) {
+			const project = { creatorId: 1, members: [{ userId: 2 }], status, visibility, exhibition: { visibility: exhibition, isModificationEnabled: true } };
 			const related = actor?.id === 1 || actor?.id === 2;
 			expect(canReadProject(actor, project)).toBe(related || (canReadVisibility(actor, visibility) && canReadVisibility(actor, exhibition)));
 			expect(canReadProject(actor, { ...project, status: 'DRAFT' })).toBe(false);

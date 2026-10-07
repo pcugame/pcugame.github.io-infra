@@ -17,29 +17,31 @@ export function AdminProjectStatusPanel({
 	error,
 	onToggle,
 }: AdminProjectStatusPanelProps) {
-	const published = status === 'PUBLISHED';
+	const archived = status === 'ARCHIVED';
 	return (
-		<div className="project-visibility">
+		<div className="project-archive">
 			<button
 				type="button"
 				role="switch"
-				aria-label="작품 공개"
-				aria-checked={published}
+				aria-label="작품 보관"
+				aria-describedby="project-archive-help"
+				aria-checked={archived}
 				aria-busy={isPending}
-				className={`project-visibility__switch${published ? ' is-public' : ''}${status === 'DRAFT' ? ' is-draft' : ''}`}
+				className={`project-archive__switch${!archived ? ' is-active' : ''}${status === 'DRAFT' ? ' is-draft' : ''}`}
 				disabled={!isPrivileged || isPending || status === 'DRAFT'}
-				onClick={() => onToggle(published ? 'ARCHIVED' : 'PUBLISHED')}
+				onClick={() => onToggle(archived ? 'PUBLISHED' : 'ARCHIVED')}
 			>
 				{status === 'DRAFT' ? (
-					<span className="project-visibility__draft">제출 중</span>
+					<span className="project-archive__draft">제출 중</span>
 				) : (
 					<>
-						<span className="project-visibility__thumb" aria-hidden="true" />
-						<span className="project-visibility__label project-visibility__label--public">공개</span>
-						<span className="project-visibility__label project-visibility__label--private">비공개</span>
+						<span className="project-archive__thumb" aria-hidden="true" />
+						<span className="project-archive__label project-archive__label--active">일반</span>
+						<span className="project-archive__label project-archive__label--archived">보관</span>
 					</>
 				)}
 			</button>
+			<p id="project-archive-help" className="field-hint">보관해도 공개 범위는 유지됩니다. 변경사항은 적용 후 반영됩니다.</p>
 			{isPending && (
 				<span className="field-hint" role="status">
 					저장 중…

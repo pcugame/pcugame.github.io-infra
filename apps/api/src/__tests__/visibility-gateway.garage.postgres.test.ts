@@ -103,6 +103,8 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 		const signed = await getSignedUrl(signer, new GetObjectCommand({ Bucket: protectedBucket, Key: gameKey }), { expiresIn: 60 });
 		expect((await get(signed)).status).toBe(200);
 		const anonymousAccess = await grant(`${api}/api/assets/${gameId}/download?variant=original`, null);
+		await db.project.update({ where: { id: projectId }, data: { status: 'ARCHIVED' } });
+		for (const url of [`${publicOrigin}/${imageKey}`, signed, anonymousAccess.url]) expect((await get(url)).status).toBe(200);
 		await db.project.update({ where: { id: projectId }, data: { visibility: 'STAFF' } });
 		await denied(`${publicOrigin}/${imageKey}`); await denied(`${publicOrigin}/${renditionKey}`); await denied(signed); await denied(anonymousAccess.url);
 		expect((await request('/api/file-access', outsider, { url: `${publicOrigin}/${imageKey}` })).status).toBe(403);

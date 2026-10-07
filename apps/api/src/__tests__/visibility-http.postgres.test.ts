@@ -94,6 +94,51 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 			}
 		}
 	});
+	it('keeps archival independent from audience through authenticated PATCH and anonymous GET', async () => {
+		const exhibition = await db.exhibition.create({ data: { year: 2091, title: randomUUID(), visibility: 'PUBLIC' } });
+		const project = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Archive audience', slug: randomUUID(), status: 'PUBLISHED', visibility: 'PUBLIC', members: { create: { name: 'Member', userId: member.id } } } });
+		const adminUrl = `/api/admin/projects/${project.id}`;
+		const publicUrl = `/api/public/projects/${project.id}`;
+		async function anonymousRead(visible: boolean, status: 'PUBLISHED' | 'ARCHIVED') {
+			const detail = await request(null, publicUrl);
+			expect(detail.statusCode, detail.body).toBe(visible ? 200 : 404);
+			if (visible) expect(PublicProjectDetailResponseSchema.parse(detail.json().data)).toMatchObject({ status, visibility: 'PUBLIC' });
+			for (const url of [`/api/public/exhibitions/${exhibition.id}/projects`, '/api/public/years/2091/projects']) {
+				const list = await request(null, url);
+				expect(list.statusCode, list.body).toBe(200);
+				expect(list.json().data.items.map((p: { id: number }) => p.id)).toEqual(visible ? [project.id] : []);
+			}
+			const years = await request(null, '/api/public/years');
+			expect(PublicYearListResponseSchema.parse(years.json().data).items.find((e) => e.id === exhibition.id)?.projectCount).toBe(visible ? 1 : 0);
+		}
+		await anonymousRead(true, 'PUBLISHED');
+		const archived = await request(operator, adminUrl, 'PATCH', { status: 'ARCHIVED' });
+		expect(archived.statusCode, archived.body).toBe(200);
+		expect(archived.json().data).toMatchObject({ status: 'ARCHIVED', visibility: 'PUBLIC' });
+		await anonymousRead(true, 'ARCHIVED');
+		for (const status of ['ARCHIVED', 'PUBLISHED'] as const) {
+			const statusWrite = await request(operator, adminUrl, 'PATCH', { status });
+			expect(statusWrite.statusCode, statusWrite.body).toBe(200);
+			for (const visibility of ['STAFF', 'AUTHENTICATED', 'PUBLIC'] as const) {
+				const saved = await request(operator, adminUrl, 'PATCH', { visibility });
+				expect(saved.statusCode, saved.body).toBe(200);
+				expect(saved.json().data).toMatchObject({ status, visibility });
+				expect((await request(operator, adminUrl)).json().data).toMatchObject({ status, visibility });
+				await anonymousRead(visibility === 'PUBLIC', status);
+				for (const actor of [owner, member, operator, admin, stranger]) {
+					expect((await request(actor, publicUrl)).statusCode).toBe(actor === stranger && visibility === 'STAFF' ? 404 : 200);
+				}
+			}
+		}
+		const denied = await request(stranger, adminUrl, 'PATCH', { visibility: 'STAFF' });
+		expect(denied.statusCode).toBe(403);
+		await anonymousRead(true, 'PUBLISHED');
+		const restricted = await request(admin, `/api/admin/exhibitions/${exhibition.id}`, 'PATCH', { visibility: 'STAFF' });
+		expect(restricted.statusCode, restricted.body).toBe(200);
+		expect((await request(operator, adminUrl, 'PATCH', { visibility: 'PUBLIC' })).statusCode).toBe(200);
+		expect((await request(null, publicUrl)).statusCode).toBe(404);
+		expect((await request(null, `/api/public/exhibitions/${exhibition.id}/projects`)).statusCode).toBe(404);
+	});
 	it('keeps inaccessible exhibitions out of admin selectors; year slug cannot fall through', async () => {
 		const exhibition = await db.exhibition.create({ data: { year: 2096, title: 'Hidden', visibility: 'STAFF' } });
 		const p = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Own hidden', slug: randomUUID(), status: 'ARCHIVED' } });
