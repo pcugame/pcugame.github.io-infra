@@ -34,6 +34,9 @@ Copy `.env.example` to `.env.local` for local development.
 
 ## Project Notes
 
+- Frontend implementation conventions and a shared form example are in
+  [UI conventions](./src/components/ui/README.md). New forms should use `src/components/ui`.
+
 - UI scale is managed centrally in `src/styles/foundation/tokens.css`:
   `--ui-scale-mobile` defaults to `100%`, and `--ui-scale-desktop` to `125%`.
   The existing compact layout boundary (`max-width: 50em`, normally 800px)
