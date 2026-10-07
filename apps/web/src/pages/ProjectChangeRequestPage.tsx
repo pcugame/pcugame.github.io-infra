@@ -505,7 +505,7 @@ export default function ProjectChangeRequestPage() {
 				</select>
 			</div>
 			{project.assets.map((asset) => (
-				<label key={asset.id} className="form-field--checkbox">
+				<label key={asset.id} className="form-choice">
 					<input
 						type="checkbox"
 						disabled={!editable}
@@ -545,7 +545,7 @@ export default function ProjectChangeRequestPage() {
 				</div>
 			)}
 			{project.webglUrl && (
-				<label className="form-field--checkbox">
+				<label className="form-choice">
 					<input
 						type="checkbox"
 						disabled={!editable}
@@ -687,11 +687,11 @@ export default function ProjectChangeRequestPage() {
 				<section className="project-form">
 					<fieldset>
 						<legend>요청 종류</legend>
-						<label>
-							<input type="radio" checked={kind === 'EDIT'} onChange={() => setKind('EDIT')} /> 수정 요청
+						<label className="form-choice">
+							<input name="change-kind" type="radio" checked={kind === 'EDIT'} onChange={() => setKind('EDIT')} /> 수정 요청
 						</label>{' '}
-						<label>
-							<input type="radio" checked={kind === 'DELETE'} onChange={() => setKind('DELETE')} /> 삭제 요청
+						<label className="form-choice">
+							<input name="change-kind" type="radio" checked={kind === 'DELETE'} onChange={() => setKind('DELETE')} /> 삭제 요청
 						</label>
 						<div className="form-field">
 							<label htmlFor="change-reason">요청 사유 *</label>
@@ -841,6 +841,7 @@ export default function ProjectChangeRequestPage() {
 										{formMembers.map((member, index) => (
 											<div className="member-add-row" key={`${index}-${member.studentId}`}>
 												<input
+													className="form-control"
 													aria-label={`참여 학생 ${index + 1} 이름`}
 													value={member.name}
 													onChange={(e) => {
@@ -853,6 +854,7 @@ export default function ProjectChangeRequestPage() {
 													}}
 												/>
 												<input
+													className="form-control"
 													aria-label={`참여 학생 ${index + 1} 학번`}
 													value={member.studentId}
 													onChange={(e) => {

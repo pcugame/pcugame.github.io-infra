@@ -65,8 +65,8 @@ export function GraphicsAccelerationGuide() {
 			{help[browser] && <a className="graphics-guide__link" href={help[browser]}>설정 방법 보기</a>}
 			<details className="graphics-guide__override">
 				<summary>다른 브라우저 안내</summary>
-				<label htmlFor={id}>사용 중인 브라우저</label>
-				<select id={id} value={browser} onChange={(event) => setOverride(event.target.value as GuideBrowser)}>
+				<label className="form-field__label" htmlFor={id}>사용 중인 브라우저</label>
+				<select className="form-control" id={id} value={browser} onChange={(event) => setOverride(event.target.value as GuideBrowser)}>
 					{Object.entries(browserNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
 				</select>
 			</details>

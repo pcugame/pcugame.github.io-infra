@@ -4,6 +4,7 @@ import { adminSettingsApi, getApiErrorMessage } from '../../lib/api';
 import type { SiteSettingsData } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { LoadingSpinner, ErrorMessage } from '../../components/common';
+import { Button, FormSection, TextField } from '../../components/ui';
 
 export default function AdminSettingsPage() {
   const qc = useQueryClient();
@@ -63,44 +64,29 @@ export default function AdminSettingsPage() {
         서버 재시작 없이 즉시 적용됩니다. 새로 만드는 업로드 세션부터 적용됩니다.
       </p>
 
-      <div className="project-form">
-        <fieldset>
-          <legend>업로드 제한</legend>
-
-          <div className="form-field">
-            <label htmlFor="maxGameFileMb">
-              최대 게임 파일 크기 (MB)
-            </label>
-            <input
-              id="maxGameFileMb"
-              type="number"
-              min={1}
-              step={1024}
-              value={form.maxGameFileMb}
-              onChange={(e) => handleChange('maxGameFileMb', e.target.value)}
-            />
-            <p className="field-hint">
-              현재: {form.maxGameFileMb} MB ({maxGameGb} GB)
-            </p>
-          </div>
-
-          <div className="form-field">
-            <label htmlFor="maxChunkSizeMb">
-              청크 크기 (MB)
-            </label>
-            <input
-              id="maxChunkSizeMb"
-              type="number"
-              min={5}
-              max={100}
-              value={form.maxChunkSizeMb}
-              onChange={(e) => handleChange('maxChunkSizeMb', e.target.value)}
-            />
-            <p className="field-hint">
-              큰 값 = 적은 요청 수, 작은 값 = 불안정한 네트워크에 유리
-            </p>
-          </div>
-        </fieldset>
+      <div>
+        <FormSection legend="업로드 제한">
+          <TextField
+            id="maxGameFileMb"
+            label="최대 게임 파일 크기 (MB)"
+            type="number"
+            min={1}
+            step={1024}
+            value={form.maxGameFileMb}
+            onChange={(e) => handleChange('maxGameFileMb', e.target.value)}
+            hint={<>현재: {form.maxGameFileMb} MB ({maxGameGb} GB)</>}
+          />
+          <TextField
+            id="maxChunkSizeMb"
+            label="청크 크기 (MB)"
+            type="number"
+            min={5}
+            max={100}
+            value={form.maxChunkSizeMb}
+            onChange={(e) => handleChange('maxChunkSizeMb', e.target.value)}
+            hint="큰 값 = 적은 요청 수, 작은 값 = 불안정한 네트워크에 유리"
+          />
+        </FormSection>
 
         {updateMutation.error && (
           <div className="error-box" role="alert">
@@ -112,13 +98,12 @@ export default function AdminSettingsPage() {
         )}
 
         <div className="form-actions">
-          <button
-            className="btn btn--primary"
+          <Button
             onClick={handleSave}
             disabled={!dirty || updateMutation.isPending}
           >
             {updateMutation.isPending ? '저장 중…' : '설정 저장'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

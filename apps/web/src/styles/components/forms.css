@@ -1,8 +1,7 @@
 /* ── Shared forms ────────────────────────────────────────────── */
 
-[data-theme='dark'] input,
-[data-theme='dark'] textarea,
-[data-theme='dark'] select {
+/* Native theme fallback must allow explicit component classes to override it. */
+[data-theme='dark'] :where(input, textarea, select) {
   background: #131315;
   color: var(--color-text);
   border-color: var(--color-border);
@@ -23,6 +22,7 @@ form.project-form {
   margin-bottom: 2.5rem;
 }
 
+fieldset.form-section,
 .project-form fieldset,
 .year-create-form fieldset,
 fieldset.status-section {
@@ -34,6 +34,7 @@ fieldset.status-section {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
+.form-section > legend,
 .project-form legend,
 .year-create-form h3,
 fieldset.status-section legend {
@@ -47,6 +48,7 @@ fieldset.status-section legend {
   margin-bottom: 0;
 }
 
+.form-section + .form-section,
 .project-form fieldset + fieldset,
 .project-form .form-actions + fieldset,
 .project-form fieldset + .status-section {
@@ -110,7 +112,11 @@ fieldset.status-section legend {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-.form-field--checkbox label {
+/* Accept both legacy wrapper and label modifiers; choices have their own label style. */
+.form-field--checkbox label,
+label.form-field--checkbox,
+.form-choice,
+.form-field .form-choice {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -133,7 +139,8 @@ fieldset.status-section legend {
   font-weight: 500;
 }
 
-.form-field--checkbox input[type='checkbox'] {
+.form-field--checkbox input[type='checkbox'],
+.form-choice input[type='checkbox'] {
   width: auto;
 }
 
@@ -439,6 +446,7 @@ fieldset.status-section legend {
     align-items: stretch;
   }
 
+  fieldset.form-section,
   .project-form fieldset,
   .year-create-form fieldset,
   fieldset.status-section {
@@ -451,6 +459,7 @@ fieldset.status-section legend {
 }
 
 @media (max-width: 50em) {
+  fieldset.form-section,
   .project-form fieldset,
   .year-create-form fieldset,
   fieldset.status-section {
@@ -460,6 +469,7 @@ fieldset.status-section legend {
     border-width: 0.5px;
   }
 
+  .form-section > legend,
   .project-form legend,
   .year-create-form h3,
   fieldset.status-section legend {
@@ -470,10 +480,18 @@ fieldset.status-section legend {
     margin-bottom: 0.85rem;
   }
 
-  .form-field label {
+  .form-field label,
+  .form-field__label {
     font-size: 0.72rem;
   }
 
+  .form-control,
+  .form-field input:not([type]),
+  .form-field input[type='search'],
+  .form-field input[type='email'],
+  .form-field input[type='password'],
+  .form-field input[type='date'],
+  .form-field input[type='datetime-local'],
   .form-field input[type='text'],
   .form-field input[type='number'],
   .form-field input[type='url'],
@@ -533,15 +551,6 @@ select.form-control option { color: var(--color-text); background: var(--color-s
 .form-control[aria-invalid='true'],
 .form-field :is(input, select, textarea)[aria-invalid='true'] { border-color: var(--color-danger); }
 .form-field textarea { resize: vertical; }
-@media (max-width: 50em) {
-  .form-control,
-  .form-field input:not([type]),
-  .form-field input[type='search'],
-  .form-field input[type='email'],
-  .form-field input[type='password'],
-  .form-field input[type='date'],
-  .form-field input[type='datetime-local'] { font-size: 1rem; }
-}
 @media (forced-colors: active) {
   .form-field select, select.form-control { appearance: auto; background-image: none; }
 }
@@ -559,4 +568,31 @@ select.visibility-select__native {
   border: 0;
   opacity: 0;
   pointer-events: none;
+}
+
+/* Explicit primitive labels work without page-specific ancestors. */
+.form-choice,
+.form-field .form-choice,
+label.form-field--checkbox {
+  margin-bottom: 0;
+  min-height: 2rem;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.form-choice input[type='checkbox'] {
+  flex: 0 0 auto;
+}
+
+textarea.form-control {
+  resize: vertical;
+}
+
+@media (max-width: 50em) {
+  textarea.form-control {
+    min-height: 7.5rem;
+  }
 }

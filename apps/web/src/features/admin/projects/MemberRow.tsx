@@ -47,13 +47,13 @@ export function MemberRow({
 					type="text"
 					value={name}
 					onChange={(e) => setName(e.target.value)}
-					className="member-edit-input"
+					className="form-control member-edit-input"
 				/>
 				<input
 					type="text"
 					value={studentId}
 					onChange={(e) => setStudentId(e.target.value)}
-					className="member-edit-input"
+					className="form-control member-edit-input"
 				/>
 				<button
 					className="btn btn--primary btn--small"

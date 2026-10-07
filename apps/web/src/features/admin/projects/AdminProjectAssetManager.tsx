@@ -1,3 +1,4 @@
+import { FormSection } from '../../../components/ui';
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 import type { AdminProjectDetail } from '@pcu/contracts';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
@@ -193,18 +194,17 @@ export function AdminProjectPosterUpload({
 	canEditContent: boolean;
 }) {
 	return (
-		<fieldset>
-			<legend>포스터</legend>
+		<FormSection legend="포스터">
 			<StoredFiles poster canEditContent={canEditContent} />
 			<UploadDropZone zone="poster" canEditContent={canEditContent}>
 				<ProjectPosterPreview image={project.poster} title={project.title} />
 			</UploadDropZone>
-		</fieldset>
+		</FormSection>
 	);
 }
 export function AdminProjectAssetManager({ canEditContent }: { canEditContent: boolean }) {
 	return (
-		<fieldset>
+		<fieldset className="form-section">
 			<legend className="submission-file-heading"><span>기타 파일</span><WebglBuildGuideLink /></legend>
 			<StoredFiles poster={false} canEditContent={canEditContent} />
 			<UploadDropZone zone="files" canEditContent={canEditContent} />
