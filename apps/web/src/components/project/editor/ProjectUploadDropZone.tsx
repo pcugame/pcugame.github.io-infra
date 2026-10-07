@@ -5,7 +5,7 @@ interface Props {
 	zone: UploadZone;
 	enabled: boolean;
 	onFiles: (files: File[]) => void;
-	/** Preview content inside the file-selection button. */
+	/** Preview and enlargement controls, separate from the file-selection button. */
 	children?: ReactNode;
 	/** Queue and controls outside the button, within the drop area. */
 	footer?: ReactNode;
@@ -61,7 +61,7 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 		};
 	}, []);
 	const poster = zone === 'poster';
-	const label = poster ? '포스터 파일 선택' : '기타 파일 선택';
+	const label = poster ? '포스터 파일 선택' : '게임·미디어·자료 선택';
 	const highlighted = enabled && draggingFiles;
 	const hovered = highlighted && dragOver;
 	return (
@@ -85,6 +85,7 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 				if (enabled) onFiles(Array.from(event.dataTransfer.files));
 			}}
 		>
+			{children}
 			<button
 				type="button"
 				className="project-upload-drop__select"
@@ -92,7 +93,6 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 				aria-label={label}
 				onClick={() => input.current?.click()}
 			>
-				{children}
 				{!poster && (
 					<svg
 						className="project-upload-drop__icon"
@@ -116,7 +116,7 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 				</span>
 				{enabled && (
 					<span className="project-upload-drop__browse">
-						{hovered ? '놓아서 파일 선택' : '또는 클릭하여 파일 선택'}
+						{hovered ? '놓아서 파일 선택' : poster ? '포스터 선택·교체' : '파일 선택'}
 					</span>
 				)}
 				<span className="field-hint">

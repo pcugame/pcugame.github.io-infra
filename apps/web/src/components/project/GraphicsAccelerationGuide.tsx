@@ -1,3 +1,4 @@
+import { SelectControl } from '../ui';
 import { useEffect, useId, useState } from 'react';
 import { detectBrowser, detectBrowserWithBrave, type BrowserName } from '../../lib/browserDetection';
 import { GraphicsSettingsScreenshot } from './GraphicsSettingsScreenshot';
@@ -66,9 +67,9 @@ export function GraphicsAccelerationGuide() {
 			<details className="graphics-guide__override">
 				<summary>다른 브라우저 안내</summary>
 				<label className="form-field__label" htmlFor={id}>사용 중인 브라우저</label>
-				<select className="form-control" id={id} value={browser} onChange={(event) => setOverride(event.target.value as GuideBrowser)}>
+				<SelectControl id={id} value={browser} onChange={(event) => setOverride(event.target.value as GuideBrowser)}>
 					{Object.entries(browserNames).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-				</select>
+				</SelectControl>
 			</details>
 		</div>
 	);

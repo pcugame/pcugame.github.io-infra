@@ -59,13 +59,13 @@ export type UpdateProjectFormInput = z.infer<typeof UpdateProjectFormSchema>;
 
 export const CreateExhibitionSchema = CreateExhibitionBaseSchema.safeExtend({
   year: z.number().int().min(2021).max(2100),
-  title: z.string().max(100).optional().or(z.literal('')),
+  title: z.string().max(100, '제목은 100자 이내로 입력하세요.').optional().or(z.literal('')),
 });
 
 export type CreateExhibitionInput = z.infer<typeof CreateExhibitionSchema>;
 
 export const UpdateExhibitionSchema = UpdateExhibitionBaseSchema.safeExtend({
-  title: z.string().max(100).optional().or(z.literal('')),
+  title: z.string().max(100, '제목은 100자 이내로 입력하세요.').optional().or(z.literal('')),
 });
 
 export type UpdateExhibitionInput = z.infer<typeof UpdateExhibitionSchema>;

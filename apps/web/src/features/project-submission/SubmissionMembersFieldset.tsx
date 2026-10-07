@@ -39,11 +39,14 @@ export function SubmissionMembersFieldset({
 						<label htmlFor={`members.${index}.name`}>이름</label>
 						<input
 							id={`members.${index}.name`}
+							aria-required="true"
+							aria-invalid={!!errors.members?.[index]?.name}
+							aria-describedby={errors.members?.[index]?.name ? `members.${index}.name-error` : undefined}
 							type="text"
 							{...register(`members.${index}.name`)}
 						/>
 						{errors.members?.[index]?.name && (
-							<span className="field-error">
+							<span id={`members.${index}.name-error`} className="field-error">
 								{errors.members[index].name?.message}
 							</span>
 						)}
@@ -53,11 +56,14 @@ export function SubmissionMembersFieldset({
 						<label htmlFor={`members.${index}.studentId`}>학번</label>
 						<input
 							id={`members.${index}.studentId`}
+							aria-required="true"
+							aria-invalid={!!errors.members?.[index]?.studentId}
+							aria-describedby={errors.members?.[index]?.studentId ? `members.${index}.studentId-error` : undefined}
 							type="text"
 							{...register(`members.${index}.studentId`)}
 						/>
 						{errors.members?.[index]?.studentId && (
-							<span className="field-error">
+							<span id={`members.${index}.studentId-error`} className="field-error">
 								{errors.members[index].studentId?.message}
 							</span>
 						)}

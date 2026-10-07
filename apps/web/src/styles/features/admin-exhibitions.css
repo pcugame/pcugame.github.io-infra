@@ -1,168 +1,448 @@
-/* ── Admin exhibition poster ─────────────────────────────────── */
+/* One responsive list and one settings form per selected exhibition. */
+.exhibition-list {
+	display: grid;
+	gap: 0.75rem;
+}
+.exhibition-list__count {
+	margin: 0;
+	color: var(--color-text-muted);
+}
+.exhibition-summary {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 6rem;
+	align-items: center;
+	gap: 1rem;
+	padding: 1rem 1.25rem;
+}
+.exhibition-summary--new {
+	box-shadow: inset 4px 0 var(--color-primary);
+}
+.exhibition-summary__identity {
+	display: flex;
+	align-items: center;
+	gap: 0.85rem;
+	min-width: 0;
+}
+.exhibition-summary__title {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.exhibition-summary__title strong {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	font-size: 1rem;
+}
+.exhibition-summary small {
+	display: block;
+	color: var(--color-text-muted);
+	font-size: 0.82rem;
+	font-weight: 400;
+	margin-top: 0.2rem;
+}
+.exhibition-summary__states {
+	display: grid;
+	grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.1fr) minmax(0, 0.7fr);
+	gap: 0.75rem;
+	grid-column: 1 / -1;
+	grid-row: 2;
+	font-size: 0.92rem;
+}
+.exhibition-summary__states > span {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.exhibition-summary > button {
+	padding-inline: 0.6rem;
+	grid-column: 2;
+	grid-row: 1;
+	width: 100%;
+}
+.exhibition-summary .badge {
+	font-size: 0.82rem;
+}
 
+.exhibition-summary__states small {
+	margin: 0 0 0.25rem;
+}
+.exhibition-panel {
+	border-top: 1px solid var(--color-border);
+	padding: 1.25rem;
+}
+.exhibition-panel[hidden] {
+	display: none;
+}
+.exhibition-settings h3,
+.exhibition-poster-section h3,
+.year-create-form h2 {
+	margin: 0 0 1rem;
+	font-size: 1.15rem;
+}
+.exhibition-settings h3 small {
+	display: block;
+	margin-top: 0.35rem;
+	font-size: 0.85rem;
+	font-weight: 400;
+	color: var(--color-text-muted);
+}
+.exhibition-settings__fields {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 9rem;
+	gap: 1rem;
+}
+.exhibition-create-fields {
+	display: grid;
+	grid-template-columns: 8rem minmax(0, 1fr) 9rem;
+	gap: 1rem;
+}
+.exhibition-actions,
+.exhibition-danger {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+}
+.exhibition-actions .form-field {
+	margin: 0;
+}
+.exhibition-settings > .form-field,
+.year-create-form > .form-field {
+	margin-top: 1rem;
+}
+.exhibition-poster-section {
+	margin-top: 1.5rem;
+	padding: 1.25rem 0;
+	border-top: 1px solid var(--color-border);
+}
+.exhibition-danger {
+	border-top: 1px solid var(--color-border);
+	padding-top: 1rem;
+}
+.exhibition-export {
+	padding: 0.75rem 1rem;
+	margin-bottom: 1rem;
+}
+.exhibition-export summary {
+	cursor: pointer;
+	font-weight: 600;
+	min-height: 1.75rem;
+}
+.exhibition-export .exhibition-actions {
+	margin-top: 0.75rem;
+	align-items: end;
+}
+.exhibition-notice {
+	padding: 0.75rem 1rem;
+	border-left: 3px solid var(--color-primary);
+	background: var(--color-surface);
+	margin-bottom: 1rem;
+}
 .admin-exhibition-poster {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  min-width: 12rem;
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	min-width: 0;
 }
-
-.admin-exhibition-poster--compact {
-  width: 100%;
-  min-width: 0;
-}
-
 .admin-exhibition-poster__preview {
-  width: 2.75rem;
-  aspect-ratio: 210 / 297;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: #ffffff;
-  color: var(--color-primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  flex-shrink: 0;
-  font-size: 0.75rem;
-  font-weight: 800;
+	width: 2.75rem;
+	aspect-ratio: 210 / 297;
+	border: 1px solid var(--color-border);
+	border-radius: 4px;
+	background: var(--color-bg);
+	color: var(--color-text-muted);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	flex-shrink: 0;
+	font-size: 0.7rem;
+	text-align: center;
 }
-
 .admin-exhibition-poster__preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	display: block;
 }
-
+.exhibition-poster-section .admin-exhibition-poster__preview {
+	width: 4.5rem;
+}
 .admin-exhibition-poster__body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-width: 0;
+	flex: 1;
+	min-width: 0;
 }
-
 .admin-exhibition-poster__name {
-  max-width: 9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.78rem;
-  color: var(--color-text-muted);
+	display: block;
+	overflow-wrap: anywhere;
 }
-
 .admin-exhibition-poster__size {
-  font-size: 0.72rem;
-  color: var(--color-text-muted);
+	font-size: 0.85rem;
+	color: var(--color-text-muted);
+}
+.admin-exhibition-poster .game-upload {
+	margin: 0.5rem 0;
+	padding: 0.75rem;
+}
+.admin-exhibition-poster input[type='file'] {
+	max-width: 100%;
+	min-width: 0;
+}
+.admin-years-page .admin-card {
+	overflow: visible;
+}
+@media (max-width: 40em) {
+	.exhibition-summary,
+	.exhibition-panel {
+		padding: 1rem;
+	}
+	.exhibition-create-fields {
+		grid-template-columns: 1fr 1fr;
+	}
+	.exhibition-create-fields > :nth-child(2) {
+		grid-column: 1 / -1;
+		grid-row: 2;
+	}
+	.exhibition-settings__fields {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.exhibition-settings__fields > :last-child {
+		max-width: 10rem;
+	}
+	.admin-exhibition-poster {
+		flex-wrap: wrap;
+	}
+	.admin-exhibition-poster__body {
+		flex-basis: 100%;
+	}
+}
+.exhibition-toolbar {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 0.75rem 1.5rem;
+	margin-bottom: 1rem;
+}
+.exhibition-toolbar .exhibition-export {
+	margin: 0;
+	flex: 1;
+}
+.exhibition-item {
+	container-type: inline-size;
+}
+/* The same proportional tracks apply to every row, regardless of content length. */
+@container (min-width: 34rem) {
+	.exhibition-summary {
+		grid-template-columns: minmax(0, 44fr) minmax(0, 44fr) minmax(0, 12fr);
+	}
+	.exhibition-summary__states {
+		grid-row: 1;
+		grid-column: 2;
+	}
+	.exhibition-summary > button {
+		grid-row: 1;
+		grid-column: 3;
+	}
+}
+.admin-years-page > .admin-page-header {
+	margin-bottom: 1rem;
+}
+@media (min-width: 40em) {
+	.admin-years-page > .admin-page-header {
+		flex-direction: row;
+	}
+	.admin-years-page > .admin-page-header > button {
+		flex-shrink: 0;
+	}
 }
 
-.admin-exhibition-poster__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex-wrap: wrap;
+.exhibition-poster-trigger.btn {
+	padding: 0;
+	min-height: 0;
+	display: block;
+	cursor: zoom-in;
+}
+.admin-exhibition-poster .game-upload {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 0.5rem;
+	min-height: 7rem;
+}
+.admin-exhibition-poster .game-upload__file-input {
+	margin-bottom: 0;
+}
+.admin-exhibition-poster .game-upload__actions:empty {
+	display: none;
+}
+.admin-years-page .project-poster-preview {
+	margin: 0;
+	flex-shrink: 0;
+}
+@media (min-width: 40em) {
+	.admin-years-page > .admin-page-header > button {
+		width: auto;
+	}
 }
 
-@media (max-width: 70em) {
-  .admin-ycard {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.85rem 1rem;
-    background: var(--color-surface);
-    border: 0.5px solid var(--color-border);
-    border-radius: 12px;
-    transition: border-color 0.15s;
-  }
-
-  .admin-ycard--editing {
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px rgba(26, 81, 175, 0.08);
-  }
-
-  .admin-ycard__header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .admin-ycard__year {
-    font-size: 1.1rem;
-    font-weight: 800;
-    color: var(--color-text);
-    letter-spacing: -0.02em;
-  }
-
-  .admin-ycard__details {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem 0.85rem;
-    font-size: 0.78rem;
-    color: var(--color-text-muted);
-  }
-
-  .admin-ycard .admin-exhibition-poster__preview {
-    width: 2.5rem;
-  }
-
-  .admin-ycard .admin-exhibition-poster__name {
-    max-width: 12rem;
-  }
-
-  .admin-ycard__label {
-    font-weight: 600;
-    color: var(--color-text-muted);
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-right: 0.2rem;
-  }
-
-  .admin-ycard__form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
-
-  .admin-ycard__row {
-    display: flex;
-    align-items: flex-end;
-    gap: 0.75rem;
-  }
-
-  .admin-ycard__actions {
-    display: flex;
-    gap: 0.35rem;
-  }
-
-  .admin-ycard__actions .btn {
-    flex: 1;
-    justify-content: center;
-  }
+/* Settings follow the earlier editor: large poster on the left, fields on the right. */
+.exhibition-dialog {
+	margin: auto;
+	padding: 0;
+	width: min(58rem, calc(100vw - 2rem));
+	max-height: calc(100dvh - 2rem);
+	border: 1px solid var(--color-border);
+	border-top: 3px solid var(--color-primary);
+	border-radius: 12px;
+	background: var(--color-surface);
+	color: var(--color-text);
+	overflow: auto;
+	box-shadow: 0 20px 70px rgb(0 0 0 / 25%);
 }
-
-.exhibition-inline-input {
-  width: 100%;
-  min-width: 7.5rem;
+.exhibition-dialog::backdrop {
+	background: rgb(0 0 0 / 55%);
 }
-
-.exhibition-inline-input--order {
-  min-width: 4.5rem;
-  max-width: 5.625rem;
+.exhibition-dialog__header {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 1rem 1.5rem;
+	border-bottom: 1px solid var(--color-border);
+	background: var(--color-surface);
 }
-
-.admin-exhibition-poster__body { flex: 1; min-width: 12rem; }
-.admin-exhibition-poster .game-upload { margin: 0; padding: .65rem; }
-.admin-exhibition-poster .game-upload__file-input { margin-bottom: .5rem; }
-.admin-exhibition-poster .game-upload__file-input input { min-width: 0; }
-.admin-exhibition-poster .game-upload__actions { flex-wrap: wrap; }
-.exhibition-inline-input + .visibility-select { margin-top: .5rem; }
-@media (max-width: 70em) {
-  .admin-years-page .admin-desktop-only { display: none; }
-  .admin-years-page .admin-mobile-cards { display: grid; gap: .75rem; }
-  .admin-years-page .admin-exhibition-poster { align-items: flex-start; }
+.exhibition-dialog__header h2 {
+	margin: 0;
+	font-size: 1.25rem;
 }
-@media (max-width: 25em) {
-  .admin-years-page .admin-exhibition-poster { flex-wrap: wrap; }
-  .admin-years-page .admin-exhibition-poster__body { flex-basis: 100%; min-width: 0; }
+.exhibition-dialog__header p {
+	margin: 0.25rem 0 0;
+	font-size: 0.85rem;
+	color: var(--color-text-muted);
+}
+.exhibition-dialog__body {
+	display: grid;
+	grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+}
+.exhibition-dialog .exhibition-settings {
+	grid-column: 2;
+	grid-row: 1;
+	min-width: 0;
+	padding: 1.5rem;
+	border-left: 1px solid var(--color-border);
+}
+.exhibition-dialog .exhibition-poster-section {
+	grid-column: 1;
+	grid-row: 1;
+	min-width: 0;
+	margin: 0;
+	padding: 1.5rem;
+	border: 0;
+}
+.exhibition-dialog .exhibition-poster-section > .field-hint {
+	margin-bottom: 1rem;
+}
+.exhibition-dialog .exhibition-danger {
+	grid-column: 1 / -1;
+	padding: 1rem 1.5rem;
+}
+.exhibition-dialog__body > .field-error {
+	grid-column: 1 / -1;
+	padding: 0 1.5rem 1rem;
+}
+.exhibition-settings__primary {
+	display: grid;
+	grid-template-columns: 7rem minmax(0, 1fr);
+	gap: 1rem;
+}
+.exhibition-settings__options {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 8rem;
+	gap: 1rem;
+	margin-top: 1rem;
+}
+.exhibition-dialog .exhibition-actions {
+	margin-top: 1.5rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--color-border);
+}
+.exhibition-dialog .exhibition-actions .field-hint {
+	flex-basis: 100%;
+}
+.exhibition-dialog .admin-exhibition-poster {
+	flex-direction: column;
+	align-items: center;
+}
+.exhibition-dialog .project-poster-preview {
+	margin: 0;
+	width: 100%;
+}
+.exhibition-dialog .admin-exhibition-poster__preview {
+	width: 100%;
+	max-width: 15rem;
+	margin: auto;
+	font-size: 1rem;
+}
+.exhibition-dialog .admin-exhibition-poster__body {
+	width: 100%;
+	flex-basis: auto;
+}
+.exhibition-dialog .admin-exhibition-poster .game-upload {
+	min-height: 0;
+	border: 0;
+	box-shadow: none;
+	padding: 0;
+	background: transparent;
+}
+.exhibition-dialog .admin-exhibition-poster__name {
+	margin-top: 0.5rem;
+	font-size: 0.85rem;
+}
+.exhibition-dialog .field-hint {
+	line-height: 1.6;
+}
+@media (max-width: 45em) {
+	.exhibition-dialog {
+		width: calc(100vw - 1rem);
+		max-height: calc(100dvh - 1rem);
+	}
+	.exhibition-dialog__header {
+		padding: 0.85rem 1rem;
+	}
+	.exhibition-dialog__header > button {
+		flex-shrink: 0;
+	}
+	.exhibition-dialog__body {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.exhibition-dialog .exhibition-poster-section {
+		grid-column: 1;
+		grid-row: 1;
+		padding: 1rem;
+	}
+	.exhibition-dialog .exhibition-settings {
+		grid-column: 1;
+		grid-row: 2;
+		border-left: 0;
+		border-top: 1px solid var(--color-border);
+		padding: 1rem;
+	}
+	.exhibition-dialog .admin-exhibition-poster__preview {
+		max-width: 13rem;
+	}
+	.exhibition-dialog .exhibition-danger {
+		padding: 1rem;
+	}
+	.exhibition-settings__primary {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.exhibition-settings__primary > :first-child {
+		max-width: 8rem;
+	}
+	.exhibition-settings__options {
+		grid-template-columns: minmax(0, 1fr) 7rem;
+	}
 }

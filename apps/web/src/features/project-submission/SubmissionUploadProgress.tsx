@@ -33,7 +33,7 @@ export function SubmissionUploadProgress({
 			? (['POSTER'] as const)
 			: (['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'DOCUMENT', 'ATTACHMENT'] as const);
 	return (
-		<FormSection legend={zone === 'poster' ? '포스터' : '기타 파일'}>
+		<FormSection legend={zone === 'poster' ? '포스터' : '게임·미디어·자료'}>
 			{zone === 'poster' && <ProjectPosterPreview title={title} localFile={files.posterFile} />}
 			{!ordered.some((item) => (zone === 'poster' ? item.kind === 'POSTER' : item.kind !== 'POSTER')) ? (
 				<p className="field-hint">

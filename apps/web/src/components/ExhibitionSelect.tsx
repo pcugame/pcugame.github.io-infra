@@ -1,5 +1,5 @@
 import type { AdminExhibitionItem } from '../contracts';
-import CustomSelect from './CustomSelect';
+import { SelectControl } from './ui/SelectControl';
 
 interface Props {
 	id?: string;
@@ -10,25 +10,11 @@ interface Props {
 	'aria-invalid'?: boolean;
 }
 
-export default function ExhibitionSelect({ items, onChange, ...props }: Props) {
-	const renderLabel = (it: AdminExhibitionItem) => (
-		<>
-			<span className="exhibition-select__year">{it.year}</span>
-			<span
-				className={
-					'exhibition-select__title' +
-					((it.isModificationEnabled ?? it.isUploadEnabled) ? ' exhibition-select__title--active' : '')
-				}
-			>
-				{it.title ?? ''}
-			</span>
-			{!(it.isModificationEnabled ?? it.isUploadEnabled) && (
-				<span className="exhibition-select__lock-pill">업로드 잠김</span>
-			)}
-		</>
-	);
-
-	return <CustomSelect {...props} placeholder="전시회를 선택하세요"
-		onChange={(value) => onChange(Number(value))}
-		items={items.map((item) => ({ value: item.id, label: renderLabel(item), searchText: `${item.year} ${item.title ?? ''}` }))} />;
+export default function ExhibitionSelect({ items, onChange, value, ...props }: Props) {
+  return <SelectControl {...props} value={value ?? ''} onChange={event => onChange(Number(event.target.value))}>
+    <option value="" disabled>전시회를 선택하세요</option>
+    {items.map(item => <option key={item.id} value={item.id}>
+      {item.year} · {item.title ?? ''}{!(item.isModificationEnabled ?? item.isUploadEnabled) ? ' · 업로드 잠김' : ''}
+    </option>)}
+  </SelectControl>;
 }

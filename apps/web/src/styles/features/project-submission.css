@@ -50,11 +50,6 @@
 }
 
 @media (max-width: 50em) {
-  .submission-actions .btn {
-    flex: 1 1 10rem;
-    min-width: min(100%, 10rem);
-    white-space: nowrap;
-  }
 
   .member-row {
     flex-direction: column;

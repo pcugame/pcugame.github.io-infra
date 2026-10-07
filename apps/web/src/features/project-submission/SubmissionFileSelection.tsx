@@ -1,3 +1,4 @@
+import { ProjectFileLimits } from '../../components/project/editor/ProjectFileLimits';
 import { useEffect, useRef, useState } from 'react';
 import { ProjectPosterPreview } from '../../components/project/editor/ProjectPosterPreview';
 import { ProjectUploadDropZone } from '../../components/project/editor/ProjectUploadDropZone';
@@ -104,7 +105,7 @@ export function SubmissionMixedFilesSelection({
 	return (
 		<fieldset className="form-section submission-file-fieldset">
 			<legend className="submission-file-heading">
-				<span>기타 파일</span>
+				<span>게임·미디어·자료</span>
 				<SubmissionFilesHelp webglUploadHint={webglUploadHint} />
 			</legend>
 			<ProjectUploadDropZone
@@ -177,16 +178,7 @@ export function SubmissionMixedFilesSelection({
 						{zipFiles.length > 0 && (
 							<p className="field-hint">ZIP 용도를 선택하거나 선택을 취소한 뒤 등록·제출하세요.</p>
 						)}
-						<p className="field-hint">
-							이미지 파일당 {limits.imageMaxMb}MB · 동영상 파일당 {limits.videoMaxMb}MB, 최대 5개 · 게임·WebGL
-							ZIP {limits.gameMaxMb}MB
-						</p>
-						{materialLimits && (
-							<p className="field-hint">
-								문서·첨부자료는 합쳐 최대 {materialLimits.maxCount}개, 파일당{' '}
-								{(materialLimits.maxBytes / 1024 / 1024).toFixed(0)}MB
-							</p>
-						)}
+						<ProjectFileLimits limits={limits} materialLimits={materialLimits} />
 					</>
 				}
 			/>

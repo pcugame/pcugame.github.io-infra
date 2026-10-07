@@ -104,13 +104,12 @@ export default function AdminImportPage() {
 				<div className="admin-page-header__text">
 					<span className="admin-page-header__eyebrow">Data Import</span>
 					<h1>JSON 데이터 임포트</h1>
+					<p>
+						JSON 파일을 업로드하여 전시회와 프로젝트 데이터를 일괄 등록합니다.
+						모든 데이터는 하나의 트랜잭션으로 처리되어, 하나라도 실패하면 전체가 롤백됩니다.
+					</p>
 				</div>
 			</div>
-
-			<p className="admin-import-page__desc">
-				JSON 파일을 업로드하여 전시회와 프로젝트 데이터를 일괄 등록합니다.
-				모든 데이터는 하나의 트랜잭션으로 처리되어, 하나라도 실패하면 전체가 롤백됩니다.
-			</p>
 
 			{/* 파일 선택 영역 */}
 			{step !== 'done' && (

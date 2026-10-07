@@ -10,27 +10,22 @@ const items: AdminExhibitionItem[] = [
 ];
 afterEach(cleanup);
 describe('exhibition select shared control', () => {
-	it('preserves year, title and lock labels and returns numeric IDs from keyboard selection', () => {
-		const changed = vi.fn();
-		render(<ExhibitionSelect value={1} onChange={changed} items={items} />);
-		const trigger = screen.getByRole('combobox');
-		expect(trigger.textContent).toContain('2026현재 전시');
-		fireEvent.click(trigger);
-		expect(screen.getByRole('option', { name: /2025 이전 전시 업로드 잠김/ })).toBeTruthy();
-		fireEvent.keyDown(screen.getByRole('listbox'), { key: 'End' });
-		fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Enter' });
-		expect(changed).toHaveBeenCalledWith(2);
-		expect(screen.queryByRole('listbox')).toBeNull();
-		expect(document.activeElement).toBe(trigger);
-	});
-	it('handles options removed while the panel is open without an invalid active descendant', () => {
-		const changed = vi.fn();
-		const { rerender } = render(<ExhibitionSelect value={1} onChange={changed} items={items} />);
-		fireEvent.click(screen.getByRole('combobox'));
-		fireEvent.keyDown(screen.getByRole('listbox'), { key: 'End' });
-		rerender(<ExhibitionSelect value={null} onChange={changed} items={[]} />);
-		expect(screen.getByRole('listbox').getAttribute('aria-activedescendant')).toBeNull();
-		fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Enter' });
-		expect(changed).not.toHaveBeenCalled();
-	});
+ it('keeps readable year/title/lock labels in native options and returns numeric IDs', () => {
+  const changed = vi.fn();
+  render(<ExhibitionSelect value={1} onChange={changed} items={items} />);
+  const select = screen.getByRole('combobox') as HTMLSelectElement;
+  expect(select.value).toBe('1');
+  expect(select.selectedOptions[0].textContent).toContain('2026 · 현재 전시');
+  expect(screen.getByRole('option', { name: '2025 · 이전 전시 · 업로드 잠김' })).toBeTruthy();
+  fireEvent.change(select, { target: { value: '2' } });
+  expect(changed).toHaveBeenCalledWith(2);
+ });
+ it('shows the placeholder for an empty list without selecting an invalid ID', () => {
+  const changed = vi.fn();
+  const { rerender } = render(<ExhibitionSelect value={1} onChange={changed} items={items} />);
+  rerender(<ExhibitionSelect value={null} onChange={changed} items={[]} />);
+  expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('');
+  expect(screen.getByRole('option', { name: '전시회를 선택하세요' })).toBeTruthy();
+  expect(changed).not.toHaveBeenCalled();
+ });
 });

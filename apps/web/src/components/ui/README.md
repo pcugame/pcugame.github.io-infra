@@ -11,8 +11,18 @@ Use these conventions alongside the root repository instructions.
 - `Button` defaults to `type="button"`; specify `type="submit"` for form submission.
   Navigation remains a router `Link` or an anchor using `btn btn--secondary`
   (or the appropriate existing button variant).
-- Keep native props, validation, refs, and events on the controls. Do not replace
-  selects/checkboxes with custom interactive elements just to style them.
+- Keep native props, validation, refs, and events on form controls. Do not replace
+  registered selects or checkboxes with custom elements that lose those behaviors.
+- All dropdowns use native `SelectControl` (or labeled `SelectField`). Exhibition
+  and visibility wrappers use the same primitive. Do not build another button/listbox
+  or add a raw `<select>` in feature code; lint enforces the shared entry point.
+- `forms.css` progressively styles the native picker inside
+  `@supports (appearance: base-select) and selector(::picker(select))`.
+  Unsupported browsers and forced-colors mode retain the native picker. Keep option
+  text meaningful without rich markup. Native refs, events, validation, form reset,
+  keyboard navigation, and mobile selection remain browser-owned.
+- Multiple/size listboxes retain native rendering. Picker styling does not extend
+  support to browsers that cannot run the Vite/React application itself.
 - For specialized controls, reuse `.form-control`, `.form-field__label`,
   `.field-hint`, `.field-error`, and `.form-choice` explicitly. Check their CSS
   before changing markup. Legacy selectors remain for existing consumers.
@@ -55,10 +65,16 @@ import { Button, FormSection, TextField } from '../../components/ui';
   font size is 125% (normally 20px/rem); at `max-width: 50em` it is 100% (normally
   16px/rem). Media-query em boundaries use the browser's initial font size.
   Do not compensate with per-page root/font-size/zoom overrides.
+- Admin tabs use `admin-page-header` with the title and any explanation together
+  in `admin-page-header__text`. Use the shell’s `--admin-panel-padding` and
+  `--admin-section-title-size` for admin panels; preserve smaller metadata and
+  secondary button roles instead of scaling every text element alike.
 - Preserve intentional page layouts. `ProjectEditorLayout` currently uses
   `admin-project-edit-*` classes on both student and admin screens; its stylesheet
   overrides descendant fieldsets. Check those overrides when changing its
-  wrappers. Shared editor extraction is separate from introducing UI primitives.
+  wrappers. Details and members precede the poster/files column in DOM order;
+  actions belong after the grid. Keep optional content mounted when collapsed
+  and keep WebGL display settings in their own form and save action.
 - Do not delete CSS based only on literal class searches: some classes are
   constructed dynamically. Verify consumers and responsive/theme states first.
 
@@ -72,3 +88,10 @@ import { Button, FormSection, TextField } from '../../components/ui';
   without an API. Run against the local Vite mock server using external Playwright
   tooling, as described in that script. Do not add a production preview route or
   perform production writes for visual verification.
+
+- `scripts/check-select-controls.mjs` verifies picker rendering, native keyboard
+  selection, required validation, FormData, reset, disabled fieldsets, listboxes,
+  and forced-colors mode. Use `EXPECT_ENHANCEMENT=1` for a supporting browser and
+  `EXPECT_ENHANCEMENT=0` for an actually unsupported engine (for example Firefox 141).
+  It accepts the same external Playwright and browser-path settings as the CSS probe.
+  See [customizable select progressive enhancement](https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Forms/Customizable_select).

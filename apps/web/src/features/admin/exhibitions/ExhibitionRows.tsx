@@ -8,284 +8,204 @@ import {
 } from '../../../contracts/schemas';
 import type { AdminExhibitionItem } from '../../../contracts';
 import { ResponsiveImage } from '../../../components/common';
+import { Button, CheckboxField, TextField } from '../../../components/ui';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
 import { adminExhibitionApi, getApiErrorMessage } from '../../../lib/api';
-import { queryKeys, invalidateVisibilityQueries } from '../../../lib/query';
-
 import { VisibilitySelect } from '../../../components/VisibilitySelect';
 import { visibilityLabels } from '../../../lib/visibility';
+import { ProjectPosterPreview } from '../../../components/project/editor/ProjectPosterPreview';
 import { env } from '../../../lib/env';
 
-type ExhibitionRowProps = {
-	year: AdminExhibitionItem;
-	isEditing: boolean;
-	onEdit: () => void;
-	onCancel: () => void;
-	onSaved: () => void;
-	onDelete: () => void;
-	isDeleting: boolean;
-	isAdmin: boolean;
-	onExport: () => void;
-	isExporting: boolean;
-	isAnyExporting: boolean;
-};
+export const modificationHint =
+	'공개 범위와 별개로, 일반 사용자의 신규 작품 등록과 등록자·팀원의 직접 수정·삭제를 허용합니다. 허용하지 않으면 기존 작품의 변경은 운영자 승인이 필요합니다.';
+export const orderHint =
+	'숫자가 작을수록 먼저 표시됩니다. 같은 값이면 최신 연도가 먼저 표시됩니다.';
 
-export function YearMobileCard({
+export function ExhibitionSummary({
 	year,
-	isEditing,
+	expanded,
 	onEdit,
-	onCancel,
-	onSaved,
-	onDelete,
-	isDeleting,
-	isAdmin,
-	onExport,
-	isExporting,
-	isAnyExporting,
-}: ExhibitionRowProps) {
-	const { register, handleSubmit, control } = useForm<UpdateExhibitionInput>({
-		resolver: zodResolver(UpdateExhibitionSchema),
-		defaultValues: {
-			visibility: year.visibility,
-			title: year.title ?? '',
-			isModificationEnabled: year.isModificationEnabled ?? year.isUploadEnabled,
-			sortOrder: year.sortOrder,
-		},
-	});
-
-	const visibility = useWatch({ control, name: 'visibility' });
-
-	const updateMutation = useMutation({
-		mutationFn: (data: UpdateExhibitionInput) =>
-			adminExhibitionApi.update(year.id, {
-				visibility: data.visibility,
-				title: data.title || undefined,
-				isModificationEnabled: data.isModificationEnabled,
-				sortOrder: data.sortOrder,
-			}),
-		onSuccess: () => onSaved(),
-	});
-
-	if (isEditing) {
-		return (
-			<div className="admin-ycard admin-ycard--editing">
-				<div className="admin-ycard__header">
-					<span className="admin-ycard__year">{year.year}</span>
-				</div>
-				<YearPosterControls year={year} compact />
-				<form
-					className="admin-ycard__form"
-					onSubmit={handleSubmit((d) => updateMutation.mutate(d))}
-				>
-					<div className="form-field" style={{ marginBottom: 0 }}>
-						<label htmlFor={`m-title-${year.id}`}>제목</label>
-						<input id={`m-title-${year.id}`} type="text" {...register('title')} />
-					</div>
-					{env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field"><label htmlFor={`m-visibility-${year.id}`}>공개 범위</label><VisibilitySelect id={`m-visibility-${year.id}`} value={visibility ?? ''} {...register('visibility')} /></div>}
-                    <div className="admin-ycard__row">
-						<div className="form-field form-field--checkbox" style={{ marginBottom: 0 }}>
-							<label>
-								<input type="checkbox" {...register('isModificationEnabled')} />
-								수정 허용
-							</label>
-						</div>
-						<div className="form-field" style={{ marginBottom: 0, flex: '0 0 auto' }}>
-							<label htmlFor={`m-sort-${year.id}`}>정렬</label>
-							<input
-								id={`m-sort-${year.id}`}
-								type="number"
-								{...register('sortOrder', { valueAsNumber: true })}
-								style={{ width: '70px' }}
-							/>
-						</div>
-					</div>
-					<div className="admin-ycard__actions">
-						<button
-							type="submit"
-							className="btn btn--primary btn--small"
-							disabled={updateMutation.isPending}
-						>
-							{updateMutation.isPending ? '저장 중…' : '저장'}
-						</button>
-						<button
-							type="button"
-							className="btn btn--secondary btn--small"
-							onClick={onCancel}
-						>
-							취소
-						</button>
-					</div>
-					{updateMutation.error && (
-						<span className="field-error">
-							{getApiErrorMessage(updateMutation.error)}
-						</span>
-					)}
-				</form>
-			</div>
-		);
-	}
-
+	disabled,
+	highlighted,
+}: {
+	year: AdminExhibitionItem;
+	expanded: boolean;
+	onEdit: () => void;
+	disabled: boolean;
+	highlighted: boolean;
+}) {
 	return (
-		<div className="admin-ycard">
-			<div className="admin-ycard__header">
-				<span className="admin-ycard__year">{year.year}</span>
-				<div style={{ display: 'flex', gap: '0.25rem' }}>
-					{isAdmin && (
-						<button
-							className="btn btn--secondary btn--small"
-							onClick={onExport}
-							disabled={isAnyExporting}
-						>
-							{isExporting ? 'NAS 내보내는 중…' : 'NAS 내보내기'}
-						</button>
-					)}
-					<button className="btn btn--secondary btn--small" onClick={onEdit}>
-						수정
-					</button>
-					<button
-						className="btn btn--danger btn--small"
-						onClick={onDelete}
-						disabled={isDeleting || isAnyExporting}
-					>
-						삭제
-					</button>
+		<div
+			className={`exhibition-summary${highlighted ? ' exhibition-summary--new' : ''}`}
+		>
+			<div className="exhibition-summary__identity">
+				<ExhibitionPoster year={year} sizes="44px" />
+				<div className="exhibition-summary__title">
+					<strong title={year.title || '제목 없는 전시회'}>
+						{year.title || '제목 없는 전시회'}
+					</strong>
+					<small>
+						{year.year}년 · 노출 순서 {year.sortOrder}
+						{highlighted && ' · 추가됨'}
+					</small>
 				</div>
 			</div>
-			<YearPosterControls year={year} compact />
-			<div className="admin-ycard__details">
-				{year.title && (
-					<span className="admin-ycard__detail">
-						<span className="admin-ycard__label">제목</span> {year.title}
+			<div className="exhibition-summary__states">
+				{env.VISIBILITY_CONTROLS_ENABLED && (
+					<span>
+						<small>공개 범위</small>
+						{visibilityLabels[year.visibility]}
 					</span>
 				)}
-				<span className="admin-ycard__detail">
-					<span className="admin-ycard__label">수정</span>{' '}
-					{(year.isModificationEnabled ?? year.isUploadEnabled) ? '허용' : '잠금'}
+				<span>
+					<small>작품 등록·변경</small>
+					<span
+						className={`badge ${(year.isModificationEnabled ?? year.isUploadEnabled) ? 'badge--published' : 'badge--archived'}`}
+					>
+						{(year.isModificationEnabled ?? year.isUploadEnabled)
+							? '허용'
+							: '비허용'}
+					</span>
 				</span>
-				<span className="admin-ycard__detail">
-					<span className="admin-ycard__label">작품</span> {year.projectCount}개
+				<span>
+					<small>등록 작품</small>
+					{year.projectCount}개
 				</span>
 			</div>
+			<Button
+				variant="secondary"
+				onClick={onEdit}
+				disabled={disabled}
+				aria-label={expanded ? '닫기' : '설정'}
+				aria-haspopup="dialog"
+				aria-expanded={expanded}
+				aria-controls={`exhibition-panel-${year.id}`}
+			>
+				{expanded ? '닫기' : '설정'}
+			</Button>
 		</div>
 	);
 }
 
-export function YearRow({
+// Mounted only while selected: reopening always starts with the latest saved settings.
+// Poster controls live separately so cancelling settings never interrupts an upload.
+export function ExhibitionSettings({
 	year,
-	isEditing,
-	onEdit,
 	onCancel,
 	onSaved,
-	onDelete,
-	isDeleting,
-	isAdmin,
-	onExport,
-	isExporting,
-	isAnyExporting,
-}: ExhibitionRowProps) {
-	const { register, handleSubmit, control } = useForm<UpdateExhibitionInput>({
+	onPendingChange,
+}: {
+	year: AdminExhibitionItem;
+	onCancel: () => void;
+	onSaved: (updated: AdminExhibitionItem) => void;
+	onPendingChange: (pending: boolean) => void;
+}) {
+	const {
+		register,
+		handleSubmit,
+		control,
+		formState: { errors, isDirty },
+	} = useForm<UpdateExhibitionInput>({
 		resolver: zodResolver(UpdateExhibitionSchema),
 		defaultValues: {
-			visibility: year.visibility,
 			title: year.title ?? '',
+			visibility: year.visibility,
 			isModificationEnabled: year.isModificationEnabled ?? year.isUploadEnabled,
 			sortOrder: year.sortOrder,
 		},
 	});
-
 	const visibility = useWatch({ control, name: 'visibility' });
-
-	const updateMutation = useMutation({
-		mutationFn: (data: UpdateExhibitionInput) =>
+	const mutation = useMutation({
+		mutationFn: (values: UpdateExhibitionInput) =>
 			adminExhibitionApi.update(year.id, {
-				visibility: data.visibility,
-				title: data.title || undefined,
-				isModificationEnabled: data.isModificationEnabled,
-				sortOrder: data.sortOrder,
+				title: values.title ?? '',
+				sortOrder: values.sortOrder,
+				isModificationEnabled: values.isModificationEnabled,
+				...(env.VISIBILITY_CONTROLS_ENABLED
+					? { visibility: values.visibility }
+					: {}),
 			}),
-		onSuccess: () => onSaved(),
+		onSuccess: onSaved,
+		onSettled: () => onPendingChange(false),
 	});
-
-	if (!isEditing) {
-		return (
-			<tr>
-				<td>{year.year}</td>
-				<td>
-					<YearPosterControls year={year} />
-				</td>
-				<td>{year.title ?? '-'}{env.VISIBILITY_CONTROLS_ENABLED && <small> · {visibilityLabels[year.visibility ?? 'PUBLIC']}</small>}</td>
-				<td>{(year.isModificationEnabled ?? year.isUploadEnabled) ? '허용' : '잠금'}</td>
-				<td>{year.sortOrder}</td>
-				<td>{year.projectCount}</td>
-				<td>
-					{isAdmin && (
-						<button
-							className="btn btn--secondary btn--small"
-							onClick={onExport}
-							disabled={isAnyExporting}
-							style={{ marginRight: '0.25rem' }}
-						>
-							{isExporting ? '내보내는 중…' : 'NAS 내보내기'}
-						</button>
-					)}
-					<button className="btn btn--secondary btn--small" onClick={onEdit}>
-						수정
-					</button>
-					<button
-						className="btn btn--danger btn--small"
-						onClick={onDelete}
-						disabled={isDeleting || isAnyExporting}
-						style={{ marginLeft: '0.25rem' }}
-					>
-						삭제
-					</button>
-				</td>
-			</tr>
-		);
-	}
-
 	return (
-		<tr>
-			<td>{year.year}</td>
-			<td>
-				<YearPosterControls year={year} />
-			</td>
-			<td>
-				<input type="text" className="form-control exhibition-inline-input" aria-label="전시회 제목" {...register('title')} />
-                <VisibilitySelect value={visibility ?? ''} {...register('visibility')} />
-			</td>
-			<td>
-				<label className="form-choice">
-					<input type="checkbox" aria-label="수정 허용" {...register('isModificationEnabled')} />
-				</label>
-			</td>
-			<td>
-				<input
+		<form
+			noValidate
+			onSubmit={handleSubmit((values) => {
+				if (!isDirty || mutation.isPending) return;
+				onPendingChange(true);
+				mutation.mutate(values);
+			})}
+			className="exhibition-settings"
+		>
+			<h3>기본 정보</h3>
+			<div className="exhibition-settings__primary">
+				<TextField
+					label="연도"
+					value={year.year}
+					readOnly
+					hint="변경할 수 없습니다."
+				/>
+				<TextField
+					label="제목"
+					{...register('title')}
+					error={errors.title?.message}
+					hint="100자 이내 · 비우면 제목 없이 저장됩니다."
+					autoFocus
+				/>
+			</div>
+			<div className="exhibition-settings__options">
+				{env.VISIBILITY_CONTROLS_ENABLED && (
+					<div className="form-field">
+						<label htmlFor={`visibility-${year.id}`}>공개 범위 *</label>
+						<VisibilitySelect
+							id={`visibility-${year.id}`}
+							value={visibility ?? ''}
+							{...register('visibility')}
+							required
+						/>
+						<p className="field-hint">전시회와 작품을 볼 수 있는 대상입니다.</p>
+					</div>
+				)}
+				<TextField
+					label="노출 순서"
 					type="number"
 					{...register('sortOrder', { valueAsNumber: true })}
-					className="form-control exhibition-inline-input exhibition-inline-input--order"
-					aria-label="정렬 순서"
+					error={
+						errors.sortOrder
+							? '노출 순서는 0 이상의 안전한 정수를 입력하세요.'
+							: undefined
+					}
 				/>
-			</td>
-			<td>{year.projectCount}</td>
-			<td>
-				<button
-					className="btn btn--primary btn--small"
-					onClick={handleSubmit((d) => updateMutation.mutate(d))}
-					disabled={updateMutation.isPending}
+			</div>
+			<p className="field-hint">{orderHint}</p>
+
+			<CheckboxField
+				label="작품 등록·변경 허용"
+				{...register('isModificationEnabled')}
+				hint={modificationHint}
+			/>
+			{mutation.error && (
+				<p className="field-error" role="alert">
+					설정을 저장하지 못했습니다. {getApiErrorMessage(mutation.error)}
+				</p>
+			)}
+			<div className="exhibition-actions">
+				<Button type="submit" disabled={!isDirty || mutation.isPending}>
+					{mutation.isPending ? '저장 중…' : '설정 저장'}
+				</Button>
+				<Button
+					variant="secondary"
+					onClick={onCancel}
+					disabled={mutation.isPending}
 				>
-					저장
-				</button>
-				<button className="btn btn--secondary btn--small" onClick={onCancel}>
-					취소
-				</button>
-				{updateMutation.error && (
-					<span className="field-error">
-						{getApiErrorMessage(updateMutation.error)}
-					</span>
-				)}
-			</td>
-		</tr>
+					설정 취소
+				</Button>
+				<span className="field-hint">
+					위 설정은 저장 버튼을 눌러야 반영됩니다.
+				</span>
+			</div>
+		</form>
 	);
 }
 
@@ -295,29 +215,39 @@ function formatPosterSize(size?: number): string {
 	return `${Math.max(1, Math.round(size / 1024))}KB`;
 }
 
-function YearPosterControls({
+export function YearPosterControls({
 	year,
 	compact = false,
+	large = false,
 }: {
 	year: AdminExhibitionItem;
 	compact?: boolean;
+	large?: boolean;
 }) {
 	const qc = useQueryClient();
+	const [notice, setNotice] = useState('');
 	const [directUploadBusy, setDirectUploadBusy] = useState(false);
 
 	const invalidate = () => {
-		qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
-		void invalidateVisibilityQueries(qc);
+		// Keep cached data and mounted uploads while refreshing visibility-dependent views.
+		void qc.invalidateQueries();
 	};
 
 	const deletePosterMutation = useMutation({
 		mutationFn: () => adminExhibitionApi.deletePoster(year.id),
-		onSuccess: invalidate,
+		onSuccess: () => {
+			invalidate();
+			setNotice('포스터가 삭제되었습니다.');
+		},
 	});
 
 	const handleDelete = () => {
 		if (!year.poster) return;
-		if (window.confirm(`${year.title || year.year} 전시회 포스터를 삭제하시겠습니까?`)) {
+		if (
+			window.confirm(
+				`${year.title || year.year} 전시회 포스터를 삭제하시겠습니까?`,
+			)
+		) {
 			deletePosterMutation.mutate();
 		}
 	};
@@ -326,23 +256,21 @@ function YearPosterControls({
 	const sizeLabel = formatPosterSize(year.posterSize);
 
 	return (
-		<div className={`admin-exhibition-poster${compact ? ' admin-exhibition-poster--compact' : ''}`}>
-			<div className="admin-exhibition-poster__preview">
-				{year.poster ? (
-					<ResponsiveImage
-						image={year.poster}
-						alt={`${year.title || year.year} 전시회 포스터`}
-						sizes={compact ? '72px' : '120px'}
-						loading="lazy"
-						decoding="async"
-					/>
-				) : (
-					<span>{year.year}</span>
-				)}
-			</div>
+		<div
+			className={`admin-exhibition-poster${compact ? ' admin-exhibition-poster--compact' : ''}`}
+		>
+			<ExhibitionPoster
+				year={year}
+				sizes={
+					large ? '(max-width: 700px) 240px, 300px' : compact ? '72px' : '120px'
+				}
+			/>
 			<div className="admin-exhibition-poster__body">
 				{year.posterOriginalName && (
-					<span className="admin-exhibition-poster__name" title={year.posterOriginalName}>
+					<span
+						className="admin-exhibition-poster__name"
+						title={year.posterOriginalName}
+					>
 						{year.posterOriginalName}
 					</span>
 				)}
@@ -354,7 +282,10 @@ function YearPosterControls({
 						owner={{ type: 'EXHIBITION', id: year.id }}
 						kind="POSTER"
 						hideTitle
-						onComplete={invalidate}
+						onComplete={() => {
+							invalidate();
+							setNotice('포스터가 변경되었습니다.');
+						}}
 						onBusyChange={setDirectUploadBusy}
 					/>
 					{year.poster && (
@@ -364,10 +295,11 @@ function YearPosterControls({
 							onClick={handleDelete}
 							disabled={isBusy}
 						>
-							삭제
+							포스터 삭제
 						</button>
 					)}
 				</div>
+				{notice && <p role="status">{notice}</p>}
 				{deletePosterMutation.error && (
 					<span className="field-error">
 						{getApiErrorMessage(deletePosterMutation.error)}
@@ -375,5 +307,41 @@ function YearPosterControls({
 				)}
 			</div>
 		</div>
+	);
+}
+
+function ExhibitionPoster({
+	year,
+	sizes,
+}: {
+	year: AdminExhibitionItem;
+	sizes: string;
+}) {
+	const title = `${year.title || year.year} 전시회`;
+	if (!year.poster)
+		return (
+			<div className="admin-exhibition-poster__preview">
+				<span>
+					포스터
+					<br />
+					없음
+				</span>
+			</div>
+		);
+	return (
+		<ProjectPosterPreview
+			image={year.poster}
+			title={title}
+			triggerClassName="admin-exhibition-poster__preview exhibition-poster-trigger"
+			trigger={
+				<ResponsiveImage
+					image={year.poster}
+					alt={`${title} 포스터`}
+					sizes={sizes}
+					loading="lazy"
+					decoding="async"
+				/>
+			}
+		/>
 	);
 }

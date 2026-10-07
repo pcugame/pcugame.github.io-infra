@@ -9,7 +9,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/projects/new', label: '작품 등록', icon: 'plus', end: false },
   { to: '/admin/webgl-network', label: '게임 외부 연결', icon: 'globe', end: false },
   { to: '/admin/change-requests', label: '변경 요청', icon: 'clipboard', end: false },
-  { to: '/admin/years', label: '전시회 추가', icon: 'calendar', end: false },
+  { to: '/admin/years', label: '전시회 관리', icon: 'calendar', end: false },
   { to: '/admin/settings', label: '사이트 설정', icon: 'settings', end: false },
   { to: '/admin/banned-ips', label: 'IP 차단 관리', icon: 'shield', end: false },
   { to: '/admin/import', label: 'JSON 임포트', icon: 'upload', end: false, adminOnly: true },

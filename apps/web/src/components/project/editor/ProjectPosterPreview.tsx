@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { Button } from '../../ui';
 import type { ResponsiveImage as ImageData } from '@pcu/contracts';
 import { ResponsiveImage } from '../../common';
 import { isPdf } from '../../../lib/upload/project-files';
@@ -39,7 +41,7 @@ function LocalPosterPreview({ file, title }: { file: File; title: string }) {
 	);
 }
 
-export function ProjectPosterPreview({
+function PosterImage({
 	image,
 	title,
 	localFile,
@@ -68,6 +70,59 @@ export function ProjectPosterPreview({
 					onError={() => setLoadedImage(null)}
 				/>
 			)}
+		</div>
+	);
+}
+
+/** Native modal provides focus containment, Escape and focus restoration. */
+export function ProjectPosterPreview(props: { image?: ImageData; title: string; localFile?: File | null; trigger?: ReactNode; triggerClassName?: string }) {
+	const [expanded, setExpanded] = useState(false);
+	const dialog = useRef<HTMLDialogElement>(null);
+	const canExpand = props.localFile ? !isPdf(props.localFile) : !!props.image;
+	useEffect(() => {
+		if (!expanded) return;
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = 'hidden';
+		dialog.current?.showModal();
+		return () => {
+			document.body.style.overflow = previousOverflow;
+		};
+	}, [expanded]);
+	return (
+		<div className="project-poster-preview">
+			{!props.trigger && <PosterImage {...props} />}
+			{canExpand && (
+				<Button variant="secondary" size="small" className={props.triggerClassName} onClick={() => setExpanded(true)} aria-haspopup="dialog" aria-label={props.trigger ? `${props.title} 포스터 확대` : undefined}>
+					{props.trigger ?? '포스터 확대'}
+				</Button>
+			)}
+			{props.localFile && isPdf(props.localFile) && (
+				<p className="field-hint">PDF 포스터 · 업로드 처리 후 미리보기가 표시됩니다.</p>
+			)}
+			{expanded &&
+				createPortal(
+					<dialog
+						ref={dialog}
+						className="project-poster-dialog"
+						aria-label={`${props.title} 포스터 확대`}
+						onClose={() => setExpanded(false)}
+						onKeyDown={(event) => {
+							if (event.key === 'Tab') {
+								event.preventDefault();
+								event.currentTarget.querySelector('button')?.focus();
+							}
+						}}
+						onClick={(event) => {
+							if (event.target === event.currentTarget) dialog.current?.close();
+						}}
+					>
+						<Button variant="secondary" onClick={() => dialog.current?.close()} autoFocus>
+							닫기
+						</Button>
+						<PosterImage {...props} />
+					</dialog>,
+					document.body,
+				)}
 		</div>
 	);
 }

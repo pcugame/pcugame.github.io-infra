@@ -10,7 +10,7 @@
 
 .admin-project-edit-grid {
   display: grid;
-  grid-template-columns: minmax(15rem, 0.8fr) minmax(20rem, 1fr) minmax(20rem, 1.2fr);
+  grid-template-columns: minmax(0, 1.65fr) minmax(17rem, 1fr);
   align-items: stretch;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -19,7 +19,7 @@
 }
 
 .admin-project-edit-grid > * {
-  padding: 1.5rem;
+  padding: 1.25rem;
 }
 
 .admin-project-edit-grid > * + * {
@@ -41,7 +41,7 @@
 
 .admin-project-edit-grid legend {
   padding: 0;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.75rem;
   color: var(--color-text);
 }
 
@@ -55,10 +55,9 @@
 
 .admin-project-edit-poster__preview {
   position: relative;
-  width: 100%;
-  aspect-ratio: 5 / 7;
-  max-height: 32rem;
-  margin-bottom: 1rem;
+  width: 5.5rem;
+  height: 7.7rem;
+  flex-shrink: 0;
 }
 
 .admin-project-edit-poster__image,
@@ -97,34 +96,12 @@
   min-width: 0;
 }
 
-@container (max-width: 57.5rem) {
-  .admin-project-edit-grid {
-    grid-template-columns: minmax(15rem, 0.8fr) minmax(0, 1.2fr);
-  }
-
-  .admin-project-edit-assets {
-    grid-column: 1 / -1;
-  }
-
-  .admin-project-edit-grid > .admin-project-edit-assets {
-    border-left: 0;
-    border-top: 1px solid var(--color-border);
-  }
-}
-
-@container (max-width: 37.5rem) {
-  .admin-project-edit-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
+/* Use the available editor width, including the admin navigation. */
+@container (max-width: 46rem) {
+  .admin-project-edit-grid { grid-template-columns: minmax(0, 1fr); }
   .admin-project-edit-grid > * + * {
     border-left: 0;
     border-top: 1px solid var(--color-border);
-  }
-
-  .admin-project-edit-grid .member-add-row input {
-    flex-basis: auto;
-    width: 100%;
   }
 }
 
@@ -397,7 +374,7 @@
 .project-upload-drop--files {
   display: flex;
   flex-direction: column;
-  min-height: 32rem;
+  min-height: 0;
 }
 
 .project-upload-drop__select {
@@ -417,7 +394,7 @@
 
 .project-upload-drop--files > .project-upload-drop__select {
   flex: 1;
-  min-height: 8rem;
+  min-height: 0;
 }
 
 .project-upload-drop__select:focus-visible {
@@ -539,9 +516,6 @@
   .submission-help-zip dl > div { display: grid; grid-template-columns: 4.5rem 1fr; gap: 0.5rem; }
 }
 
-@container (max-width: 37.5rem) {
-  .project-upload-drop--files { min-height: 16rem; }
-}
 
 .project-upload-drop {
   transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
@@ -686,4 +660,172 @@
     gap: 0.75rem;
     padding: 0.75rem;
   }
+}
+
+/* Editor content follows the same reading, visual and keyboard order. */
+.admin-project-edit-media { min-width: 0; }
+.admin-project-edit-media > * + * { margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid var(--color-border); }
+.admin-project-edit-grid fieldset { margin: 0 0 1.25rem; }
+.admin-project-edit-grid fieldset + fieldset { margin-top: 1.25rem; }
+.admin-project-edit-grid form.project-form { margin-bottom: 0; }
+.admin-project-edit-grid .project-basic-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem 1rem; }
+.project-basic-fields > .form-field:has(textarea) { grid-column: 1 / -1; }
+.admin-project-edit-grid .form-field { min-width: 0; margin-bottom: 0.75rem; }
+.admin-project-edit-grid textarea { min-height: 0; }
+.admin-project-edit-grid .project-requirements .form-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0;
+}
+.project-requirements [id$='-hardware'] { margin-top: 0.75rem; }
+.project-poster-preview { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.project-upload-drop--poster { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; }
+.project-upload-drop--poster > .project-poster-preview { flex-direction: column; margin: 0; }
+.project-upload-drop--poster > :is(.project-upload-queue, .field-hint, .field-error, .file-info) { grid-column: 1 / -1; }
+.project-upload-drop__icon { width: 1.5rem; height: 1.5rem; margin-bottom: 0.5rem; }
+.project-upload-drop__select { align-items: flex-start; text-align: left; }
+.project-upload-drop__browse { margin: 0.5rem 0; }
+.admin-project-edit-grid .project-upload-queue > li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.admin-project-edit-grid .project-upload-queue > li > :is(p, span) { flex: 1 1 10rem; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.admin-project-edit-grid .project-upload-queue > li > :is(.game-upload, .project-upload-queue__choices) { flex-basis: 100%; }
+.admin-project-edit-grid .member-row,
+.admin-project-edit-grid .member-list__item,
+.admin-project-edit-grid .member-add-row:has(input) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 0.5rem; align-items: end; padding: 0.5rem 0; margin-bottom: 0.5rem; background: transparent; }
+.admin-project-edit-grid .member-row .btn { width: auto; margin: 0; }
+.admin-project-edit-grid .member-edit-input,
+.admin-project-edit-grid .member-add-row input { width: 100%; min-width: 0; }
+.admin-project-edit-grid .member-actions { width: auto; }
+.project-optional-settings { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+.project-optional-settings > summary { cursor: pointer; font-weight: 700; overflow-wrap: anywhere; padding: 0.5rem 0; }
+.project-optional-settings > summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.project-optional-settings .form-section { margin-top: 1rem; }
+.project-dimension-fields:not([hidden]) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.project-poster-dialog { margin: auto; padding: 1rem; width: min(90vw, 42rem); max-height: 90dvh; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); }
+.project-poster-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.project-poster-dialog .admin-project-edit-poster__preview { width: 100%; height: 72dvh; margin-top: 0.75rem; }
+.project-edit-apply { flex-wrap: wrap; }
+.project-edit-apply__feedback { flex: 1 1 14rem; }
+.project-edit-apply :is(p, .field-error, .success-message) { margin: 0; }
+.admin-project-edit-page { scroll-margin-bottom: 9rem; }
+.admin-project-edit-page :is(input, textarea, select, button, summary) { scroll-margin-block: 5rem 16rem; }
+@container (max-width: 28rem) {
+  .admin-project-edit-grid > * { padding: 1rem; }
+  .admin-project-edit-grid .project-basic-fields { grid-template-columns: minmax(0, 1fr); }
+  .admin-project-edit-grid .member-list__item { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .admin-project-edit-grid .member-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .admin-project-edit-grid .member-actions .btn { flex: 0 0 auto; }
+}
+@media (max-width: 50em) {
+  .admin-project-edit-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-project-edit-grid > * + * { border-left: 0; border-top: 1px solid var(--color-border); }
+  .project-edit-apply__feedback { flex-basis: 100%; }
+  .project-edit-apply { gap: 0.5rem; }
+  .project-edit-apply > .btn { flex: 1 1 auto; min-width: 0; }
+  .project-change-actions > .btn { padding-inline: 0.6rem; }
+  .submission-actions .btn { min-width: 0; }
+}
+
+.project-file-limits { margin-top: 0.75rem; }
+.project-file-limits > summary { padding-block: 0.5rem; cursor: pointer; font-size: 0.85rem; color: var(--color-text-muted); }
+.project-file-limits > summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+.project-upload-drop--poster > .project-file-limits { grid-column: 1 / -1; }
+
+html:has(.admin-project-edit-page) { scroll-padding-block: 5rem 16rem; }
+
+@media (max-width: 50em) {
+  .layout:has(.admin-project-edit-page) .mobile-bottom-nav {
+    background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+  }
+}
+
+/* Keep environment and links adjacent when each section has usable input width. */
+.project-environment-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  align-items: start;
+  gap: 1.25rem;
+}
+.admin-project-edit-grid .project-environment-links > fieldset { min-width: 0; margin: 0; }
+.project-environment-links .external-link-row { grid-template-columns: minmax(0, 1fr) auto; }
+.project-environment-links .external-link-row .form-field:first-child { grid-column: 1 / -1; }
+
+/* One spacing rhythm for fields, with separators between the main sections. */
+.admin-project-edit-grid .admin-project-edit-details fieldset { margin: 0; }
+.admin-project-edit-grid .admin-project-edit-details fieldset + fieldset { margin-top: 1rem; }
+.admin-project-edit-grid .project-basic-fields > .form-field,
+.admin-project-edit-grid .member-row > .form-field,
+.admin-project-edit-grid .external-link-row > .form-field,
+.admin-project-edit-grid fieldset > .form-field:last-child { margin-bottom: 0; }
+.admin-project-edit-details :is(fieldset + fieldset, .project-environment-links + fieldset):not(.project-external-links) > legend {
+  width: 100%;
+  border-top: 1px solid var(--color-border);
+  padding-top: 1rem;
+}
+.admin-project-edit-details .project-environment-links {
+  margin-top: 1rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 1rem;
+}
+.admin-project-edit-grid .project-environment-links > fieldset + fieldset { margin-top: 0; }
+.admin-project-edit-details .project-environment-links + fieldset { margin-top: 1rem; }
+.admin-project-edit-grid .member-row + .member-row { border-top: 1px solid var(--color-border); }
+
+.admin-project-edit-grid .project-external-links > legend { margin-bottom: 0.35rem; }
+.admin-project-edit-grid .project-external-links > .field-hint { margin: 0 0 0.75rem; }
+
+/* Compact platform choices retain native checkbox semantics and keyboard input. */
+.admin-project-edit-grid .project-requirements .form-choice {
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  gap: 0.4rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.admin-project-edit-grid .project-requirements .form-choice:has(input:checked) {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+}
+.admin-project-edit-grid .project-requirements .form-choice:has(input:enabled):hover {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+}
+.admin-project-edit-grid .project-requirements .form-choice:has(input:focus-visible) {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.admin-project-edit-grid .project-requirements .form-choice:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.admin-project-edit-grid .project-requirements input[type='checkbox'] {
+  appearance: none;
+  display: grid;
+  place-content: center;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
+  border: 1.5px solid var(--color-text-muted);
+  border-radius: 0.2rem;
+  background: var(--color-surface);
+  cursor: inherit;
+}
+.admin-project-edit-grid .project-requirements input[type='checkbox']:checked {
+  border-color: var(--color-primary-btn, var(--color-primary));
+  background: var(--color-primary-btn, var(--color-primary));
+}
+.admin-project-edit-grid .project-requirements input[type='checkbox']:checked::after {
+  content: '';
+  width: 0.25rem;
+  height: 0.5rem;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: translateY(-0.08rem) rotate(45deg);
+}
+@media (forced-colors: active) {
+  .admin-project-edit-grid .project-requirements input[type='checkbox'] { appearance: auto; }
+  .admin-project-edit-grid .project-requirements input[type='checkbox']::after { content: none; }
 }

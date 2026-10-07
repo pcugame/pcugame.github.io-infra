@@ -21,6 +21,7 @@ function setup(overrides: Partial<AdminProjectDetail> = {}, isPending = false) {
   qc.setQueryData(queryKeys.adminProject(project.id), data);
   const onPendingChange = vi.fn();
   const view = render(<QueryClientProvider client={qc}><WebglDisplaySettingsForm project={data} isPending={isPending} onPendingChange={onPendingChange} /></QueryClientProvider>);
+  fireEvent.click(screen.getByText(/WebGL 표시 크기 ·/));
   return { qc, onPendingChange, ...view, rerenderProject: (next: AdminProjectDetail) => view.rerender(<QueryClientProvider client={qc}><WebglDisplaySettingsForm project={next} isPending={isPending} onPendingChange={onPendingChange} /></QueryClientProvider>) };
 }
 const width = () => screen.getByLabelText('가로 (CSS px)') as HTMLInputElement;
@@ -35,6 +36,22 @@ describe('WebglDisplaySettingsForm', () => {
     getWebglDisplay.mockReset();
     getWebglDisplay.mockResolvedValue({ analysis: null });
     setWebglDisplay.mockImplementation((_id: number, settings: WebglDisplaySettings) => Promise.resolve(settings));
+  });
+  it('retains manual input through disclosure toggles and keeps a save error visible when closed', () => {
+    const { container } = setup();
+    fireEvent.change(width(), { target: { value: '0' } });
+    const details = container.querySelector('details')!;
+    const summary = details.querySelector('summary')!;
+    fireEvent.click(summary);
+    expect(details.open).toBe(false);
+    expect(width().value).toBe('0');
+    expect(setWebglDisplay).not.toHaveBeenCalled();
+    fireEvent.click(summary);
+    submit();
+    fireEvent.click(summary);
+    expect(details.open).toBe(false);
+    expect(screen.getByRole('alert').closest('details')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('1~8192');
   });
   it('hydrates saved dimensions and saves only display settings, preserving metadata cache', async () => {
     const { qc, onPendingChange } = setup();

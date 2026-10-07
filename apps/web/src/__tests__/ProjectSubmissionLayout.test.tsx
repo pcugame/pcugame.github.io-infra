@@ -91,8 +91,8 @@ function mount(mode: 'admin' | 'user' = 'user') {
 	);
 }
 async function enterMetadata() {
-	fireEvent.click(await screen.findByRole('combobox'));
-	fireEvent.click(screen.getByRole('option', { name: /2026/ }));
+	const exhibition = await screen.findByRole('combobox');
+	fireEvent.change(exhibition, { target: { value: (screen.getByRole('option', { name: /2026/ }) as HTMLOptionElement).value } });
 	fireEvent.change(screen.getByLabelText('제목 *'), { target: { value: '선택한 작품' } });
 }
 function select(container: HTMLElement, zone: 'poster' | 'files', files: File[]) {
@@ -102,6 +102,38 @@ function select(container: HTMLElement, zone: 'poster' | 'files', files: File[])
 }
 
 describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode) => {
+	it('keeps required metadata and members before optional files and submits without a poster or game', async () => {
+		const { container } = mount(mode);
+		await enterMetadata();
+		const grid = container.querySelector('.admin-project-edit-grid')!;
+		expect(grid.firstElementChild?.classList.contains('admin-project-edit-details')).toBe(true);
+		const members = screen.getByLabelText('학번');
+		const poster = screen.getByRole('button', { name: '포스터 파일 선택' });
+		expect(members.compareDocumentPosition(poster) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		const submit = screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' }) as HTMLButtonElement;
+		expect(grid.contains(submit)).toBe(false);
+		expect(submit.form).toBe(container.querySelector('form'));
+		fireEvent.click(submit);
+		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
+		const payload = JSON.parse(String(controls.submit.mock.calls[0][0].formData.get('payload')));
+		expect(payload.manifest).toEqual([]);
+		expect(controls.upload).not.toHaveBeenCalled();
+	});
+
+	it('keeps hardware visible and selected ZIP while editing optional settings', async () => {
+		const { container } = mount(mode);
+		await enterMetadata();
+		select(container, 'files', [new File(['zip'], 'keep.zip', { type: 'application/zip' })]);
+		const hardware = screen.getByLabelText('필수 하드웨어');
+		fireEvent.change(hardware, { target: { value: 'VR 헤드셋' } });
+		expect(hardware.closest('[hidden]')).toBeNull();
+		fireEvent.change(hardware, { target: { value: '' } });
+		expect(screen.getByLabelText('필수 하드웨어')).toBe(hardware);
+		expect(screen.getByText('keep.zip')).toBeTruthy();
+		expect(container.querySelector('.project-edit-apply')?.textContent).toContain('ZIP 용도');
+		expect(controls.upload).not.toHaveBeenCalled();
+	});
+
 	it('opens modal help without choosing files or submitting, and restores focus on dismissal', async () => {
 		const { container } = mount(mode);
 		await enterMetadata();
@@ -169,7 +201,6 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		fireEvent.keyDown(globalThis.document, { key: 'Escape' });
 		const poster = new File(['poster'], 'poster.png', { type: 'image/png' });
 		const image = new File(['image'], 'image.png', { type: 'image/png' });
-		fireEvent.click(screen.getByRole('button', { name: '링크 추가' }));
 		fireEvent.change(screen.getByLabelText('외부 링크 1 이름'), { target: { value: '다운로드' } });
 		fireEvent.change(screen.getByLabelText('외부 링크 1 URL'), { target: { value: 'https://example.com/game' } });
 		const video = new File(['video'], 'clip.mp4', { type: 'video/mp4' });

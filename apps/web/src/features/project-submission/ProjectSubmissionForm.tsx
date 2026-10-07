@@ -87,6 +87,20 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 				className="project-form"
 			>
 				<ProjectEditorLayout
+					actions={!showGameProgress && (
+						<SubmissionActions
+							isSubmitting={isSubmitting}
+							blockedReason={pendingZipCount > 0
+								? '파일 목록에서 ZIP 용도를 선택하세요.'
+								: isUploadLocked
+									? '전시회 업로드가 잠겨 있습니다. 운영자에게 문의하세요.'
+									: Object.keys(errors).length > 0 ? '표시된 입력 오류를 확인하세요.' : undefined}
+							isUploadLocked={isUploadLocked || pendingZipCount > 0}
+							onPreview={openPreview}
+							submitLabel={copy.submitLabel}
+							submittingLabel={copy.submittingLabel}
+						/>
+					)}
 					poster={
 						showGameProgress ? (
 							<SubmissionUploadProgress
@@ -138,14 +152,17 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 									isSubmitting={isSubmitting}
 									register={register}
 									years={years}
+									members={
+										<SubmissionMembersFieldset
+											append={membersFieldArray.append}
+											errors={errors}
+											fields={membersFieldArray.fields}
+											register={register}
+											remove={membersFieldArray.remove}
+										/>
+									}
 								/>
-								<SubmissionMembersFieldset
-									append={membersFieldArray.append}
-									errors={errors}
-									fields={membersFieldArray.fields}
-									register={register}
-									remove={membersFieldArray.remove}
-								/>
+
 								{files.fileSizeError && (
 									<div className="error-box" role="alert">
 										<p>{files.fileSizeError}</p>
@@ -156,13 +173,6 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 										<p>{getApiErrorMessage(submitMutation.error)}</p>
 									</div>
 								)}
-								<SubmissionActions
-									isSubmitting={isSubmitting}
-									isUploadLocked={isUploadLocked || pendingZipCount > 0}
-									onPreview={openPreview}
-									submitLabel={copy.submitLabel}
-									submittingLabel={copy.submittingLabel}
-								/>
 							</>
 						)
 					}

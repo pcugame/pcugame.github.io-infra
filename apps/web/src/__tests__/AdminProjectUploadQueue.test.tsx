@@ -67,7 +67,7 @@ function setup(enabled = true, detail = project) {
 }
 function drop(files: File[], poster = false) {
 	fireEvent.drop(
-		screen.getByRole('button', { name: poster ? '포스터 파일 선택' : '기타 파일 선택' }).parentElement!,
+		screen.getByRole('button', { name: poster ? '포스터 파일 선택' : '게임·미디어·자료 선택' }).parentElement!,
 		{ dataTransfer: { files, types: ['Files'] } },
 	);
 }
@@ -189,7 +189,7 @@ it('shows stored files but denies changes without permission', () => {
 	expect(screen.getByText('existing.mp4')).toBeTruthy();
 	for (const name of ['삭제', '메인으로 지정', '포스터로 지정', '위로', '아래로'])
 		expect(screen.queryByRole('button', { name })).toBeNull();
-	expect((screen.getByRole('button', { name: '기타 파일 선택' }) as HTMLButtonElement).disabled).toBe(true);
+	expect((screen.getByRole('button', { name: '게임·미디어·자료 선택' }) as HTMLButtonElement).disabled).toBe(true);
 	drop([file('a.jpg')]);
 	expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
 });

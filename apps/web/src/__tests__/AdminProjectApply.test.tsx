@@ -27,8 +27,7 @@ function mount() {
 async function ready() { await screen.findByLabelText('제목 *'); }
 function change(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
 function chooseVisibility(label: string) {
- fireEvent.click(screen.getByRole('combobox', { name: '공개 범위' }));
- fireEvent.click(screen.getByRole('option', { name: label }));
+ fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), { target: { value: (screen.getByRole('option', { name: label }) as HTMLOptionElement).value } });
 }
 const apply = () => screen.getByRole('button', { name: '적용' }) as HTMLButtonElement;
 beforeEach(() => {
@@ -54,7 +53,7 @@ describe('global project Apply', () => {
   await waitFor(() => expect(apply().disabled).toBe(false)); fireEvent.click(apply());
   await waitFor(() => expect(adminProjectApi.update).toHaveBeenLastCalledWith(7, { externalLinks: [] }));
   await waitFor(() => expect(apply().disabled).toBe(true));
-  expect(screen.queryByLabelText('외부 링크 1 URL')).toBeNull();
+  expect((screen.getByLabelText('외부 링크 1 URL') as HTMLInputElement).value).toBe('');
  });
 
  it('initializes, changes, and explicitly clears execution requirements', async () => {
@@ -102,7 +101,7 @@ describe('global project Apply', () => {
   fireEvent.click(apply());
   await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { visibility: 'AUTHENTICATED' }));
   await waitFor(() => expect(apply().disabled).toBe(true));
-  expect(screen.getByRole('combobox', { name: '공개 범위' }).textContent).toContain('로그인 사용자');
+  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).selectedOptions[0].textContent).toContain('로그인 사용자');
   expect(screen.getByText('적용되었습니다.')).toBeTruthy();
  });
  it('preserves visibility draft across background reads and drops it if capability is revoked before Apply', async () => {
@@ -110,10 +109,10 @@ describe('global project Apply', () => {
   chooseVisibility('운영자·관리자');
   stored = { ...stored, description: '외부 설명' };
   await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
-  expect(screen.getByRole('combobox', { name: '공개 범위' }).textContent).toContain('운영자·관리자');
+  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).selectedOptions[0].textContent).toContain('운영자·관리자');
   stored = { ...stored, canChangeVisibility: false };
   await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
-  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).disabled).toBe(true);
   change('제목 *', '제목만 변경'); fireEvent.click(apply());
   await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
   expect(stored.visibility).toBe('PUBLIC');
@@ -122,7 +121,7 @@ describe('global project Apply', () => {
  it('shows a disabled visibility field and blocks Apply in a locked contributor exhibition', async () => {
   control.role = 'USER'; stored = { ...stored, canChangeVisibility: false, canEdit: false };
   mount(); await ready();
-  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('combobox', { name: '공개 범위' }) as HTMLSelectElement).disabled).toBe(true);
   expect(apply().disabled).toBe(true);
   expect(screen.getByLabelText('필수 하드웨어').closest('fieldset')?.disabled).toBe(true);
   expect(screen.getByLabelText('PC').closest('fieldset')?.disabled).toBe(true);
