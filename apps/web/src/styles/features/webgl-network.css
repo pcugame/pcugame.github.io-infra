@@ -4,7 +4,7 @@
 .webgl-network-page h2 { font-size: 1.1rem; font-weight: 800; }
 .webgl-network-page h3 { font-size: 1rem; font-weight: 700; }
 .webgl-network-page code { overflow-wrap: anywhere; }
-.network-guide, .network-request, .network-empty, .network-unavailable { padding: 1.5rem; }
+.network-guide, .network-request, .network-empty, .network-unavailable { padding: var(--admin-panel-padding, 1.5rem); }
 .network-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .network-section-heading .field-hint { margin: 0; }
 .network-role { font-size: .75rem; color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 9%, transparent); padding: .35rem .65rem; border-radius: 6px; white-space: nowrap; }
@@ -48,7 +48,7 @@
 .network-review { border-top: 1px solid var(--color-border); margin-top: 1rem; padding-top: 1rem; }
 .network-review h4 { font-size: .9rem; font-weight: 800; }
 .network-review > .field-hint { margin-bottom: 1rem; }
-.webgl-network-page .network-form { margin: 0; padding: 1.5rem; }
+.webgl-network-page .network-form { margin: 0; padding: var(--admin-panel-padding, 1.5rem); }
 .network-header-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 #network-new-request { scroll-margin-top: calc(var(--header-height) + 1rem); }
 .network-form > .field-hint { margin-bottom: 1.25rem; }

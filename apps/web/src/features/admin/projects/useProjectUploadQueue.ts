@@ -178,6 +178,7 @@ export function useProjectUploadQueue(
 	};
 	const owner = useMemo(() => ({ type: 'PROJECT' as const, id: projectId }), [projectId]);
 	return {
+		limits,
 		entries,
 		project,
 		locked: locked || isApplying,

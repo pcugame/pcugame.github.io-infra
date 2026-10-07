@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { SelectControl } from './SelectControl';
 import type { ComponentPropsWithRef, ReactNode } from 'react';
 
 type FieldContent = {
@@ -69,7 +70,7 @@ export function SelectField({ label, hint, error, id, className, 'aria-described
   const field = useField(id, hint, error, describedBy);
   return (
     <FieldLayout {...field} label={label} hint={hint} error={error}>
-      <select {...props} id={field.controlId} className={['form-control', className].filter(Boolean).join(' ')} aria-describedby={field.describedBy} aria-invalid={field.errorId ? true : invalid} />
+      <SelectControl {...props} id={field.controlId} className={className} aria-describedby={field.describedBy} aria-invalid={field.errorId ? true : invalid} />
     </FieldLayout>
   );
 }

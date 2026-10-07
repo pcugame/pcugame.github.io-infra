@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import DirectImageUploadWidget from '../components/DirectImageUploadWidget';
-import { YearMobileCard } from '../features/admin/exhibitions/ExhibitionRows';
+import { YearPosterControls } from '../features/admin/exhibitions/ExhibitionRows';
 
 const { uploadDirectAssetFile, waitForDirectAssetReady, getDirectAssetUploadStatus, cancelDirectAssetUploadSession } = vi.hoisted(() => ({
 	uploadDirectAssetFile: vi.fn(),
@@ -55,11 +55,8 @@ describe('DirectImageUploadWidget', () => {
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		const { container } = render(
 			<QueryClientProvider client={new QueryClient()}>
-				<YearMobileCard
+				<YearPosterControls
 					year={{ visibility: 'PUBLIC', id: 45, year: 2026, title: 'Direct poster', isUploadEnabled: true, sortOrder: 0, projectCount: 0 }}
-					isEditing={false}
-					onEdit={vi.fn()} onCancel={vi.fn()} onSaved={vi.fn()} onDelete={vi.fn()} isDeleting={false}
-					isAdmin={false} onExport={vi.fn()} isExporting={false} isAnyExporting={false}
 				/>
 			</QueryClientProvider>,
 		);

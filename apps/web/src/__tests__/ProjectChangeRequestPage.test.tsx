@@ -135,6 +135,19 @@ describe('ProjectChangeRequestPage', () => {
   fireEvent.click(screen.getByRole('button', { name: '초안 저장' }));
   await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(active.id, expect.objectContaining({ changes: expect.objectContaining({ platforms: [], hardwareRequirements: '' }) })));
  });
+ it('allows clearing an existing reason and explains why submission is disabled', async () => {
+  const active = draft();
+  mocks.listForProject.mockResolvedValue({ items: [active], total: 1 });
+  mocks.get.mockResolvedValue(active);
+  renderPage();
+  const reason = await screen.findByLabelText('요청 사유 *');
+  fireEvent.change(reason, { target: { value: '' } });
+  expect((reason as HTMLTextAreaElement).value).toBe('');
+  expect((screen.getByRole('button', { name: '운영자에게 제출' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText('요청 사유를 입력하세요.')).toBeTruthy();
+  expect(mocks.submit).not.toHaveBeenCalled();
+ });
+
  it('preserves an old GitHub draft, validates edits before saving and allows clearing every link', async () => {
   const active = { ...draft(), changes: { githubUrl: 'https://github.com/pending' } };
   mocks.getDetail.mockResolvedValue({ ...project, externalLinks: [{ label: '기존', url: 'https://example.com' }] });
@@ -193,7 +206,7 @@ describe('ProjectChangeRequestPage', () => {
 		fireEvent.click(screen.getByRole('button', { name: '요청 작성 시작' }));
 		await screen.findByText('기본 정보');
 		const imageInput = screen
-			.getAllByLabelText('기타 파일 선택')
+			.getAllByLabelText('게임·미디어·자료 선택')
 			.find((element) => element.tagName === 'INPUT')!;
 		fireEvent.change(imageInput, {
 			target: {

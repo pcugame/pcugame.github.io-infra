@@ -55,15 +55,18 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 		linksRef.current = links;
 		onChange(links);
 	};
+	// Show an empty first row without adding invalid data or marking the form dirty.
+	const displayedLinks = value.length ? value : [{ label: '', url: '' }];
 	const update = (index: number, patch: Partial<ExternalLink>) => {
-		change(value.map((link, i) => i === index ? { ...link, ...('url' in patch ? { service: undefined } : {}), ...patch } : link));
+		const next = displayedLinks.map((link, i) => i === index ? { ...link, ...('url' in patch ? { service: undefined } : {}), ...patch } : link);
+		change(next.length === 1 && !next[0].label && !next[0].url ? [] : next);
 	};
 
 	return (
-		<fieldset disabled={disabled}>
+		<fieldset disabled={disabled} className="project-external-links">
 			<legend>외부 링크</legend>
 			<p className="field-hint">GitHub, 게임 소개, 다운로드 등 원하는 링크를 최대 20개 추가하세요.</p>
-			{value.map((link, index) => (
+			{displayedLinks.map((link, index) => (
 				<div className="external-link-row" key={`${id}-${index}`}>
 					{(['label', 'url'] as const).map((field) => {
 						const errors = issues.filter((issue) => issue.path[0] === index && issue.path[1] === field);
@@ -86,13 +89,13 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 							</div>
 						);
 					})}
-					<button
+					{value.length > 0 && <button
 						type="button"
 						className="btn btn--danger btn--small"
 						aria-label={`외부 링크 ${index + 1} 삭제`}
 						onClick={() => change(value.filter((_, i) => i !== index))}
-					>삭제</button>
-					<div className="external-link-row__preview"><ExternalLinkIcon url={link.url} service={link.service} /><span>{link.label || '링크 미리보기'}</span></div>
+					>삭제</button>}
+					{(link.label || link.url) && <div className="external-link-row__preview"><ExternalLinkIcon url={link.url} service={link.service} /><span>{link.label || '링크 미리보기'}</span></div>}
 				</div>
 			))}
 			{issues.filter((issue) => issue.path.length === 0).map((issue, index) => (
@@ -102,7 +105,7 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 				type="button"
 				className="btn btn--secondary btn--small"
 				disabled={disabled || value.length >= 20}
-				onClick={() => change([...value, { label: '', url: '' }])}
+				onClick={() => change([...displayedLinks, { label: '', url: '' }])}
 			>링크 추가</button>
 		</fieldset>
 	);

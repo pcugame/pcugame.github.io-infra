@@ -18,8 +18,7 @@ describe('visibility controls', () => {
   expect((button as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(button);
   expect(mocks.create).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('combobox', { name: '공개 범위' }));
-  fireEvent.click(screen.getByRole('option', { name: '운영자·관리자' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), { target: { value: (screen.getByRole('option', { name: '운영자·관리자' }) as HTMLOptionElement).value } });
   expect((button as HTMLButtonElement).disabled).toBe(false);
   fireEvent.click(button);
   await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ visibility: 'STAFF' })));
@@ -33,7 +32,7 @@ describe('visibility controls', () => {
   expect(screen.getByRole('option', { name: '로그인 사용자' })).toBeTruthy();
   expect(screen.getByRole('option', { name: '운영자·관리자' })).toBeTruthy();
  });
- it('submits custom choices through React Hook Form and reflects resets and setValue', async () => {
+ it('submits native choices through React Hook Form and reflects resets and setValue', async () => {
   const submitted = vi.fn();
   function Form() {
    const { register, handleSubmit, control, reset, setValue, formState: { touchedFields } } = useForm<{ visibility: string }>({ defaultValues: { visibility: 'PUBLIC' } });
@@ -48,21 +47,19 @@ describe('visibility controls', () => {
    </form>;
   }
   const { container } = render(<Form />);
-  const trigger = screen.getByRole('combobox');
-  expect(trigger.textContent).toContain('전체 공개');
-  fireEvent.click(trigger);
-  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'End' });
-  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Enter' });
-  expect(trigger.textContent).toContain('운영자·관리자');
+  const trigger = screen.getByRole('combobox') as HTMLSelectElement;
+  expect(trigger.selectedOptions[0].textContent).toContain('전체 공개');
+  fireEvent.change(trigger, { target: { value: 'STAFF' } });
+  expect(trigger.selectedOptions[0].textContent).toContain('운영자·관리자');
   expect(new FormData(container.querySelector('form')!).get('visibility')).toBe('STAFF');
   fireEvent.blur(trigger, { relatedTarget: screen.getByRole('button', { name: '저장' }) });
   await waitFor(() => expect(screen.getByText('touched')).toBeTruthy());
   fireEvent.click(screen.getByRole('button', { name: '저장' }));
   await waitFor(() => expect(submitted).toHaveBeenCalledWith({ visibility: 'STAFF' }, expect.anything()));
   fireEvent.click(screen.getByRole('button', { name: '초기화' }));
-  expect(trigger.textContent).toContain('로그인 사용자');
+  expect(trigger.selectedOptions[0].textContent).toContain('로그인 사용자');
   fireEvent.click(screen.getByRole('button', { name: '전체로 변경' }));
-  expect(trigger.textContent).toContain('전체 공개');
+  expect(trigger.selectedOptions[0].textContent).toContain('전체 공개');
  });
  it('initializes its display from the forwarded register ref', async () => {
   function Form() {
@@ -70,46 +67,24 @@ describe('visibility controls', () => {
    return <form><VisibilitySelect {...register('visibility')} /><button type="button" onClick={() => reset({ visibility: 'PUBLIC' })}>reset</button></form>;
   }
   render(<Form />);
-  expect(screen.getByRole('combobox').textContent).toContain('운영자·관리자');
+  expect((screen.getByRole('combobox') as HTMLSelectElement).selectedOptions[0].textContent).toContain('운영자·관리자');
   fireEvent.click(screen.getByRole('button', { name: 'reset' }));
-  await waitFor(() => expect(screen.getByRole('combobox').textContent).toContain('전체 공개'));
+  await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('PUBLIC'));
  });
  it('restores uncontrolled values on native form reset', async () => {
   const { container } = render(<form><VisibilitySelect name="visibility" defaultValue="PUBLIC" /><button type="reset">reset</button></form>);
-  fireEvent.click(screen.getByRole('combobox'));
-  fireEvent.click(screen.getByRole('option', { name: '로그인 사용자' }));
-  expect(screen.getByRole('combobox').textContent).toContain('로그인 사용자');
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'AUTHENTICATED' } });
+  expect((screen.getByRole('combobox') as HTMLSelectElement).selectedOptions[0].textContent).toContain('로그인 사용자');
   fireEvent.click(screen.getByRole('button', { name: 'reset' }));
-  await waitFor(() => expect(screen.getByRole('combobox').textContent).toContain('전체 공개'));
+  await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('PUBLIC'));
   expect(new FormData(container.querySelector('form')!).get('visibility')).toBe('PUBLIC');
  });
- it('closes with Escape, outside pointers and blur while preserving the selection', () => {
-  render(<><VisibilitySelect defaultValue="PUBLIC" /><button>next</button></>);
-  const trigger = screen.getByRole('combobox');
-  fireEvent.keyDown(trigger, { key: 'ArrowDown' });
-  const panel = screen.getByRole('listbox');
-  fireEvent.keyDown(panel, { key: 'ArrowDown' });
-  fireEvent.keyDown(panel, { key: 'Escape' });
-  expect(screen.queryByRole('listbox')).toBeNull();
-  expect(document.activeElement).toBe(trigger);
-  fireEvent.click(trigger);
-  fireEvent.pointerDown(document.body);
-  expect(screen.queryByRole('listbox')).toBeNull();
-  fireEvent.click(trigger);
-  fireEvent.blur(screen.getByRole('listbox'), { relatedTarget: screen.getByRole('button', { name: 'next' }) });
-  expect(screen.queryByRole('listbox')).toBeNull();
-  expect(trigger.textContent).toContain('전체 공개');
- });
- it('blocks choices in a disabled fieldset even when a panel was already open', () => {
-  const changed = vi.fn();
-  const { rerender } = render(<fieldset><VisibilitySelect defaultValue="PUBLIC" onChange={changed} /></fieldset>);
-  fireEvent.click(screen.getByRole('combobox'));
-  rerender(<fieldset disabled><VisibilitySelect defaultValue="PUBLIC" onChange={changed} /></fieldset>);
-  fireEvent.click(screen.getByRole('option', { name: '운영자·관리자' }));
-  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'End' });
-  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Enter' });
-  expect(changed).not.toHaveBeenCalled();
-  expect(screen.getByRole('combobox').textContent).toContain('전체 공개');
+ it('preserves disabled fieldset semantics and omits disabled controls from FormData', () => {
+  const { container } = render(<form><fieldset disabled><VisibilitySelect name="visibility" defaultValue="PUBLIC" /></fieldset></form>);
+  const select = screen.getByRole('combobox') as HTMLSelectElement;
+  expect(select.matches(':disabled')).toBe(true);
+  expect(select.value).toBe('PUBLIC');
+  expect(new FormData(container.querySelector('form')!).has('visibility')).toBe(false);
  });
  it('explains the effective exhibition restriction only when it is stricter', () => {
   const { rerender } = render(<VisibilityNotice visibility="PUBLIC" exhibitionVisibility="STAFF" />);

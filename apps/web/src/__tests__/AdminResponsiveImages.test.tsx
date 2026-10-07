@@ -3,13 +3,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type {
 	AdminExhibitionItem,
 	ResponsiveImage,
 } from '@pcu/contracts';
 
-import { YearMobileCard } from '../features/admin/exhibitions/ExhibitionRows';
+import { YearPosterControls } from '../features/admin/exhibitions/ExhibitionRows';
 
 const image: ResponsiveImage = {
 	original: {
@@ -48,18 +48,9 @@ describe('admin responsive image previews', () => {
 			poster: image,
 		};
 		withQueryClient(
-			<YearMobileCard
+			<YearPosterControls
 				year={exhibition}
-				isEditing={false}
-				onEdit={vi.fn()}
-				onCancel={vi.fn()}
-				onSaved={vi.fn()}
-				onDelete={vi.fn()}
-				isDeleting={false}
-				isAdmin={false}
-				onExport={vi.fn()}
-				isExporting={false}
-				isAnyExporting={false}
+				compact
 			/>,
 		);
 

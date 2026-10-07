@@ -9,13 +9,13 @@
 }
 
 form.admin-card {
-  padding: 1.75rem;
+  padding: var(--admin-panel-padding, 1.75rem);
   margin-bottom: 1.5rem;
 }
 
 form.admin-card h3 {
   font-weight: 800;
-  font-size: 1rem;
+  font-size: var(--admin-section-title-size, 1rem);
   margin-bottom: 1rem;
   letter-spacing: -0.01em;
 }
@@ -164,7 +164,7 @@ form.admin-card h3 {
   }
 
   form.admin-card h3 {
-    font-size: 0.92rem;
+    font-size: var(--admin-section-title-size, 0.92rem);
   }
 
   .admin-table th,

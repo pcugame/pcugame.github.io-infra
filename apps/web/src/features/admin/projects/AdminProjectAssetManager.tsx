@@ -1,3 +1,4 @@
+import { ProjectFileLimits } from '../../../components/project/editor/ProjectFileLimits';
 import { FormSection } from '../../../components/ui';
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
 import type { AdminProjectDetail } from '@pcu/contracts';
@@ -85,7 +86,7 @@ function UploadDropZone({
 			zone={zone}
 			enabled={canEditContent && !queue.locked}
 			onFiles={(files) => queue.add(files, zone)}
-			hint={!canEditContent ? '파일을 업로드할 권한이 없습니다.' : undefined}
+			hint={!canEditContent ? '파일을 업로드할 권한이 없습니다.' : poster ? `JPG · PNG · WebP 최대 ${queue.limits.posterMaxMb}MB / PDF 최대 ${queue.limits.posterPdfMaxMb}MB` : undefined}
 			footer={
 				<>
 					{poster && queue.posterError && (
@@ -172,7 +173,7 @@ function StoredFiles({ poster, canEditContent }: { poster: boolean; canEditConte
 	if (!assets.length && (poster || !queue.hasWebgl)) return null;
 	return <ul className="project-upload-queue" aria-label={poster ? '등록된 포스터' : '등록된 파일'}>
 		{assets.map((asset) => <li key={asset.id}>
-			<span>{asset.originalName}{queue.removals.includes(asset.id) && ' · 삭제 예정'}</span>{' '}
+			<span><strong>{asset.originalName}</strong> · {asset.kind === 'THUMBNAIL' ? '썸네일' : uploadKindLabels[asset.kind]}{queue.removals.includes(asset.id) && ' · 삭제 예정'}</span>{' '}
 			{canEditContent && <button type="button" className="btn btn--secondary btn--small"
 				disabled={queue.locked} onClick={() => queue.toggleRemoval(asset.id)}>
 				{queue.removals.includes(asset.id) ? '삭제 취소' : '삭제'}
@@ -193,21 +194,25 @@ export function AdminProjectPosterUpload({
 	project: AdminProjectDetail;
 	canEditContent: boolean;
 }) {
+	const queue = useAdminProjectUploadQueue();
+	const selected = queue.entries.filter(entry => entry.kind === 'POSTER' && (entry.status === 'pending' || entry.status === 'active')).at(-1)?.file;
 	return (
 		<FormSection legend="포스터">
 			<StoredFiles poster canEditContent={canEditContent} />
 			<UploadDropZone zone="poster" canEditContent={canEditContent}>
-				<ProjectPosterPreview image={project.poster} title={project.title} />
+				<ProjectPosterPreview image={project.poster} title={project.title} localFile={selected} />
 			</UploadDropZone>
 		</FormSection>
 	);
 }
 export function AdminProjectAssetManager({ canEditContent }: { canEditContent: boolean }) {
+	const queue = useAdminProjectUploadQueue();
 	return (
 		<fieldset className="form-section">
-			<legend className="submission-file-heading"><span>기타 파일</span><WebglBuildGuideLink /></legend>
+			<legend className="submission-file-heading"><span>게임·미디어·자료</span><WebglBuildGuideLink /></legend>
 			<StoredFiles poster={false} canEditContent={canEditContent} />
 			<UploadDropZone zone="files" canEditContent={canEditContent} />
+			<ProjectFileLimits limits={queue.limits} materialLimits={queue.materialLimits} />
 		</fieldset>
 	);
 }

@@ -114,21 +114,22 @@ describe('external links', () => {
  });
  it('adds, edits and removes arbitrary links', () => {
   render(<Editor />);
-  fireEvent.click(screen.getByRole('button', { name: '링크 추가' }));
+  expect(screen.queryByRole('alert')).toBeNull();
   fireEvent.change(screen.getByLabelText('외부 링크 1 이름'), { target: { value: '게임 다운로드' } });
   fireEvent.change(screen.getByLabelText('외부 링크 1 URL'), { target: { value: 'https://example.com/game' } });
   expect(screen.queryByRole('alert')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '링크 추가' }));
+  fireEvent.click(screen.getByRole('button', { name: /링크 추가/ }));
   expect(screen.getByLabelText('외부 링크 2 URL')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: '외부 링크 1 삭제' }));
   fireEvent.click(screen.getByRole('button', { name: '외부 링크 1 삭제' }));
-  expect(screen.queryByRole('textbox')).toBeNull();
+  expect((screen.getByLabelText('외부 링크 1 URL') as HTMLInputElement).value).toBe('');
+  expect(screen.queryByRole('alert')).toBeNull();
  });
  it('enforces safe URL validation and the row limit', () => {
   const { rerender } = render(<Editor initial={[{ label: '링크', url: 'javascript:alert(1)' }]} />);
   expect(screen.getByLabelText('외부 링크 1 URL').getAttribute('aria-invalid')).toBe('true');
   rerender(<Editor key="limit" initial={Array.from({ length: 20 }, () => ({ label: '링크', url: 'https://example.com' }))} />);
-  expect((screen.getByRole('button', { name: '링크 추가' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: /링크 추가/ }) as HTMLButtonElement).disabled).toBe(true);
  });
  it('shows named safe links, suppresses unsafe links and never revives a cleared legacy link', () => {
   const { rerender } = render(<ProjectPublicMeta externalLinks={[{ label: '게임', url: 'https://example.com' }, { label: '위험', url: 'data:text/html,test' }]} githubUrl="https://github.com/old" />);

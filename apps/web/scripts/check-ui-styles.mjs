@@ -2,16 +2,18 @@
  * Shared form CSS browser checks. No API calls or production writes.
  * Start: npm exec --workspace apps/web vite -- --mode mock --host 127.0.0.1 --port 15185
  * Run: PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node apps/web/scripts/check-ui-styles.mjs
- * Optional UI_BASE_URL (default http://127.0.0.1:15185), CHROMIUM_PATH.
+ * Optional UI_BASE_URL (default http://127.0.0.1:15185), CHROMIUM_PATH,
+ * BROWSER_ENGINE (chromium/firefox/webkit), BROWSER_PATH.
  * Playwright is external verification tooling, not an application dependency.
  */
 import assert from 'node:assert/strict';
-const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const playwright = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const engine = process.env.BROWSER_ENGINE || 'chromium';
 
 const base = process.env.UI_BASE_URL || 'http://127.0.0.1:15185';
-const browser = await chromium.launch({
-  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
-  args: ['--no-sandbox'],
+const browser = await playwright[engine].launch({
+  ...(process.env.BROWSER_PATH || process.env.CHROMIUM_PATH ? { executablePath: process.env.BROWSER_PATH || process.env.CHROMIUM_PATH } : {}),
+  args: engine === 'chromium' ? ['--no-sandbox'] : [],
 });
 
 try {
@@ -57,6 +59,7 @@ try {
           controlFonts: controlIds.map(id => getComputedStyle(document.getElementById(id)).fontSize),
           backgrounds: controlIds.map(id => getComputedStyle(document.getElementById(id)).backgroundColor),
           selectArrow: getComputedStyle(document.querySelector('#select')).backgroundImage,
+          selectAppearance: getComputedStyle(document.querySelector('#select')).appearance,
           choiceDisplays: [...document.querySelectorAll('.form-choice, label.form-field--checkbox, .form-field--checkbox > label')].map(el => getComputedStyle(el).display),
           sectionBorder: sectionStyle.borderTopStyle,
           fieldBorder: titleStyle.borderTopStyle,
@@ -66,7 +69,7 @@ try {
       assert.equal(styles.rootFont, width === 390 ? '16px' : '20px');
       assert.ok(styles.controlFonts.every(value => value === (width === 390 ? '16px' : '18px')), JSON.stringify(styles));
       assert.ok(styles.backgrounds.every(value => value === styles.backgrounds[0]), JSON.stringify(styles));
-      assert.notEqual(styles.selectArrow, 'none');
+      if (styles.selectAppearance !== 'base-select') assert.notEqual(styles.selectArrow, 'none');
       assert.deepEqual(styles.choiceDisplays, ['flex', 'flex', 'flex']);
       assert.equal(styles.sectionBorder, 'solid');
       assert.equal(styles.fieldBorder, 'solid');

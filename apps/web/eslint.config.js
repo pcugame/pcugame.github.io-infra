@@ -21,6 +21,16 @@ export default defineConfig([
     },
   },
   {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/components/ui/SelectControl.tsx', 'src/__tests__/**'],
+    rules: {
+      'no-restricted-syntax': ['error', {
+        selector: "JSXOpeningElement[name.name='select']",
+        message: 'Use SelectControl or SelectField from components/ui so picker styles and native fallback stay shared.',
+      }],
+    },
+  },
+  {
     files: ['src/app/router.tsx'],
     rules: {
       'react-refresh/only-export-components': 'off',

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { FormSection } from '../../components/ui';
 import { ProjectRequirementsFieldset } from '../../components/project/ProjectRequirementsFieldset';
 import { ExternalLinksFieldset } from '../../components/project/ExternalLinksFieldset';
@@ -12,6 +13,7 @@ import { VisibilitySelect, VisibilityNotice } from '../../components/VisibilityS
 import { env } from '../../lib/env';
 
 interface SubmissionBasicFieldsProps {
+	members?: ReactNode;
 	control: Control<SubmitProjectPayloadInput>;
 	errors: FieldErrors<SubmitProjectPayloadInput>;
 	isUploadLocked: boolean;
@@ -27,13 +29,14 @@ export function SubmissionBasicFields({
 	isSubmitting,
 	register,
 	years,
+	members,
 }: SubmissionBasicFieldsProps) {
 	const exhibitionId = useWatch({ control, name: 'exhibitionId' });
 	const visibility = useWatch({ control, name: 'visibility' });
 	const exhibition = years.find((item) => item.id === exhibitionId);
 	return (
 		<>
-			<FormSection legend="기본 정보">
+			<FormSection legend="기본 정보" className="project-basic-fields">
 	            {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
 	             <label htmlFor="project-visibility">공개 범위</label>
 	             <VisibilitySelect id="project-visibility" value={visibility ?? ''} {...register('visibility')} />
@@ -69,41 +72,44 @@ export function SubmissionBasicFields({
 
 				<div className="form-field">
 					<label htmlFor="title">제목 <span className="required-mark">*</span></label>
-					<input id="title" type="text" {...register('title')} />
-					{errors.title && <span className="field-error">{errors.title.message}</span>}
+					<input id="title" aria-required="true" aria-invalid={!!errors.title} aria-describedby={errors.title ? "title-error" : undefined} type="text" {...register('title')} />
+					{errors.title && <span id="title-error" className="field-error">{errors.title.message}</span>}
 				</div>
 
 				<div className="form-field">
 					<label htmlFor="summary">한줄 소개</label>
-					<input id="summary" type="text" {...register('summary')} />
-					{errors.summary && <span className="field-error">{errors.summary.message}</span>}
+					<input id="summary" aria-invalid={!!errors.summary} aria-describedby={errors.summary ? "summary-error" : undefined} type="text" {...register('summary')} />
+					{errors.summary && <span id="summary-error" className="field-error">{errors.summary.message}</span>}
 				</div>
 
 				<div className="form-field">
 					<label htmlFor="description">상세 설명</label>
-					<textarea id="description" rows={6} {...register('description')} />
+					<textarea id="description" aria-invalid={!!errors.description} aria-describedby={errors.description ? "description-error" : undefined} rows={3} {...register('description')} />
 					{errors.description && (
-						<span className="field-error">{errors.description.message}</span>
+						<span id="description-error" className="field-error">{errors.description.message}</span>
 					)}
 				</div>
 			</FormSection>
-			<Controller control={control} name="platforms" render={({ field: platforms }) => (
-				<Controller control={control} name="hardwareRequirements" render={({ field: hardware }) => (
-					<ProjectRequirementsFieldset platforms={platforms.value ?? []} hardwareRequirements={hardware.value ?? ''} onPlatformsChange={platforms.onChange} onHardwareRequirementsChange={hardware.onChange} disabled={isUploadLocked || isSubmitting} error={errors.hardwareRequirements?.message} />
+			{members}
+			<div className="project-environment-links">
+				<Controller control={control} name="platforms" render={({ field: platforms }) => (
+					<Controller control={control} name="hardwareRequirements" render={({ field: hardware }) => (
+						<ProjectRequirementsFieldset platforms={platforms.value ?? []} hardwareRequirements={hardware.value ?? ''} onPlatformsChange={platforms.onChange} onHardwareRequirementsChange={hardware.onChange} disabled={isUploadLocked || isSubmitting} error={errors.hardwareRequirements?.message} />
+					)} />
 				)} />
-			)} />
-			<Controller
-				control={control}
-				name="externalLinks"
-				render={({ field }) => (
-					<ExternalLinksFieldset
-						value={field.value ?? []}
-						onChange={field.onChange}
-						disabled={isUploadLocked || isSubmitting}
-						showErrors={!!errors.externalLinks}
-					/>
-				)}
-			/>
+				<Controller
+					control={control}
+					name="externalLinks"
+					render={({ field }) => (
+						<ExternalLinksFieldset
+							value={field.value ?? []}
+							onChange={field.onChange}
+							disabled={isUploadLocked || isSubmitting}
+							showErrors={!!errors.externalLinks}
+						/>
+					)}
+				/>
+			</div>
 		</>
 	);
 }

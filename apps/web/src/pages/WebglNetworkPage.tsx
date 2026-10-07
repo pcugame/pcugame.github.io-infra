@@ -1,3 +1,4 @@
+import { SelectControl } from '../components/ui';
 import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -112,7 +113,7 @@ export default function WebglNetworkPage({ admin = false }: { admin?: boolean })
 		</section>
 		{!admin && <form id="network-new-request" className="admin-card project-form network-form" onSubmit={send}>
 			<h2>새 연결 신청</h2><p className="field-hint">주소마다 신청해 주세요. 관리자가 검토한 후 결과를 연결 현황에서 확인할 수 있습니다.</p>
-			<div className="form-field"><label htmlFor="network-mode">연결 방식</label><select id="network-mode" value={mode} onChange={event => setMode(event.target.value as 'HTTPS' | 'WSS')}><option value="HTTPS">HTTPS API / Addressables</option><option value="WSS">WSS</option></select></div>
+			<div className="form-field"><label htmlFor="network-mode">연결 방식</label><SelectControl id="network-mode" value={mode} onChange={event => setMode(event.target.value as 'HTTPS' | 'WSS')}><option value="HTTPS">HTTPS API / Addressables</option><option value="WSS">WSS</option></SelectControl></div>
 			<div className="form-field"><label htmlFor="network-origin">정확한 origin</label><input type="url" id="network-origin" value={origin} onChange={event => setOrigin(event.target.value)} placeholder={mode === 'WSS' ? 'wss://socket.example.com' : 'https://assets.example.com'} maxLength={500} autoComplete="off" spellCheck={false} aria-describedby="network-origin-hint" required /><p className="field-hint" id="network-origin-hint">경로·쿼리·와일드카드 없이 입력하세요. 포트가 필요하면 포함하세요.</p></div>
 			<div className="form-field"><label htmlFor="network-purpose">사용 목적</label><textarea id="network-purpose" value={purpose} onChange={event => setPurpose(event.target.value)} maxLength={2000} rows={3} placeholder="예: 게임 실행 중 원격 에셋 번들 다운로드" required /></div>
 			<div className="form-field"><label htmlFor="network-cors">CORS / 인증 설정 계획</label><textarea id="network-cors" value={cors} onChange={event => setCors(event.target.value)} maxLength={2000} rows={3} aria-describedby="network-cors-hint" placeholder={mode === 'HTTPS' ? '예: 외부 서버에서 아래 게임 origin을 허용' : '서버의 Origin 검사 및 인증 방식'} required /><p className="field-hint" id="network-cors-hint">{mode === 'HTTPS' ? '외부 서버에서 허용할 게임 origin' : '서버의 Origin 검사 시 확인할 게임 origin'}: <code>{query.data.gameOrigin}</code></p></div>

@@ -57,12 +57,11 @@ export default function AdminSettingsPage() {
       <div className="admin-page-header">
         <div className="admin-page-header__text">
           <h1>사이트 설정</h1>
+          <p>
+            서버 재시작 없이 즉시 적용됩니다. 새로 만드는 업로드 세션부터 적용됩니다.
+          </p>
         </div>
       </div>
-
-      <p className="field-hint" style={{ marginBottom: '1.5rem' }}>
-        서버 재시작 없이 즉시 적용됩니다. 새로 만드는 업로드 세션부터 적용됩니다.
-      </p>
 
       <div>
         <FormSection legend="업로드 제한">

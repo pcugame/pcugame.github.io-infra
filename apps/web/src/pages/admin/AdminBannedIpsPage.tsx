@@ -60,14 +60,13 @@ export default function AdminBannedIpsPage() {
         <div className="admin-page-header__text">
           <span className="admin-page-header__eyebrow">IP Management</span>
           <h1>차단된 IP 관리</h1>
+          <p>
+            수동 차단은 보호된 게임 파일 등 자산 다운로드에만 적용됩니다. 일반 조회, 로그인, 관리 API에는 적용되지 않습니다.
+            자동 IP 차단은 현재 중단되어 있으며, 사용자·파일별 일시 제한과 다운로드 서버의 동시 연결 제한은 계속 적용됩니다.
+            이미 발급된 서명 URL은 만료 전까지 사용할 수 있습니다.
+          </p>
         </div>
       </div>
-
-      <p className="field-hint" style={{ marginBottom: '1rem' }}>
-        수동 차단은 보호된 게임 파일 등 자산 다운로드에만 적용됩니다. 일반 조회, 로그인, 관리 API에는 적용되지 않습니다.
-        자동 IP 차단은 현재 중단되어 있으며, 사용자·파일별 일시 제한과 다운로드 서버의 동시 연결 제한은 계속 적용됩니다.
-        이미 발급된 서명 URL은 만료 전까지 사용할 수 있습니다.
-      </p>
 
       <div className="admin-card" style={{ marginBottom: '1.5rem' }}>
         <FormSection legend="수동 IP/CIDR 차단 등록">

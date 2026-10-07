@@ -149,17 +149,29 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			{!canEditContent && project.canRequestChange && <div className="admin-card" style={{ marginBottom: '1rem' }}><p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p><Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link></div>}
 			<ProjectEditorLayout
 				poster={<AdminProjectPosterUpload project={project} canEditContent={canEditContent} />}
-				details={<>
-					<AdminProjectBasicInfoForm project={project} form={form} formId={formId} isPending={pending} canEditContent={canEditContent} onSubmit={onApply} />
+				details={
+					<AdminProjectBasicInfoForm
+						project={project} form={form} formId={formId} isPending={pending}
+						canEditContent={canEditContent} onSubmit={onApply}
+						members={
+							<AdminProjectMemberEditor
+								members={members.members} canEditContent={canEditContent} isBusy={pending}
+								errors={showMemberErrors ? members.validationErrors : []}
+								onAdd={members.add} onSwap={members.swap} onUpdate={members.update} onRemove={members.remove}
+							/>
+						}
+					/>
+				}
+				files={<>
+					<AdminProjectAssetManager canEditContent={canEditContent} />
 					<WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} />
-					<AdminProjectMemberEditor members={members.members} canEditContent={canEditContent} isBusy={pending} errors={showMemberErrors ? members.validationErrors : []} onAdd={members.add} onSwap={members.swap} onUpdate={members.update} onRemove={members.remove} />
 				</>}
-				files={<AdminProjectAssetManager canEditContent={canEditContent} />}
 			/>
 			<div className="project-edit-apply" aria-label="작품 변경사항 적용">
 				<div className="project-edit-apply__feedback" aria-live="polite">
 					{applyError != null && <p className="field-error" role="alert">{getApiErrorMessage(applyError)}{partialFailure && ' 일부 변경이 반영되었을 수 있습니다. 남은 변경사항은 다시 적용하세요.'}</p>}
 					{isSuccess && !hasChanges && <p className="success-message">적용되었습니다.</p>}
+					{!pending && !applyError && (!canEditContent ? <p>현재 작품을 직접 수정할 권한이 없습니다.</p> : !hasChanges && !isSuccess ? <p>변경사항이 없습니다.</p> : hasChanges ? <p>{queue.validationError ?? '작품 정보·학생·파일은 적용 후 반영됩니다.'}</p> : null)}
 					{pending && <p role="status">변경사항을 적용하고 있습니다…</p>}
 				</div>
 				<button type="submit" form={formId} className="btn btn--primary" disabled={!canEditContent || !hasChanges || pending}>{pending ? '적용 중…' : '적용'}</button>

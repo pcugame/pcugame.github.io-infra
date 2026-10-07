@@ -1,3 +1,5 @@
+import { SelectControl } from '../components/ui';
+import { ProjectFileLimits } from '../components/project/editor/ProjectFileLimits';
 import { ProjectRequirementsFieldset } from '../components/project/ProjectRequirementsFieldset';
 import { ExternalLinksSchema, HardwareRequirementsSchema, PlatformsSchema } from '@pcu/contracts';
 import { ExternalLinksFieldset } from '../components/project/ExternalLinksFieldset';
@@ -132,7 +134,7 @@ export default function ProjectChangeRequestPage() {
 	});
 	const active = activeDetailQuery.data;
 	const [kind, setKind] = useState<ChangeRequestKind>('EDIT');
-	const [reason, setReason] = useState('');
+	const [reason, setReason] = useState<string | null>(null);
 	const [changes, setChanges] = useState<ChangeRequestChanges>({});
 	const [members, setMembers] = useState<ChangeRequestMember[]>([]);
 	const [membersTouched, setMembersTouched] = useState(false);
@@ -148,7 +150,7 @@ export default function ProjectChangeRequestPage() {
 		void queryClient.invalidateQueries({ queryKey: queryKeys.changeRequests });
 	};
 	const create = useMutation({
-		mutationFn: () => changeRequestApi.create(projectId, { kind, reason }),
+		mutationFn: () => changeRequestApi.create(projectId, { kind, reason: reason ?? '' }),
 		onSuccess: invalidate,
 	});
 	const project = projectQuery.data;
@@ -181,7 +183,7 @@ export default function ProjectChangeRequestPage() {
 	const formMembers = membersTouched
 		? members
 		: (initialChanges.members ?? project?.members.map(({ name, studentId }) => ({ name, studentId })) ?? []);
-	const formReason = reason || active?.reason || '';
+	const formReason = reason ?? active?.reason ?? '';
 	const videoAssetIds = formChanges.videoAssetIds ?? project?.videos.map((video) => video.assetId) ?? [];
 	const stagedPoster = active?.stagedAssets.find((asset) => asset.kind === 'POSTER');
 	const selectedPosterId = formChanges.posterAssetId ?? null;
@@ -474,13 +476,13 @@ export default function ProjectChangeRequestPage() {
 	};
 	const existingFileControls = (
 		<details className="project-change-existing-files">
-			<summary>현재 파일 관리</summary>
+			<summary>현재 파일 관리 · {project.assets.length}개{removedAssetIds.size > 0 && ` · 삭제 예정 ${removedAssetIds.size}개`}</summary>
 			<p className="field-hint">
 				체크한 파일은 승인될 때 제거됩니다. 새 파일은 이 요청의 임시 공간에만 업로드됩니다.
 			</p>
 			<div className="form-field">
 				<label htmlFor="change-poster">대표 포스터</label>
-				<select
+				<SelectControl
 					id="change-poster"
 					disabled={!editable}
 					value={effectivePosterId ?? ''}
@@ -502,7 +504,7 @@ export default function ProjectChangeRequestPage() {
 								{asset.originalName}
 							</option>
 						))}
-				</select>
+				</SelectControl>
 			</div>
 			{project.assets.map((asset) => (
 				<label key={asset.id} className="form-choice">
@@ -512,7 +514,7 @@ export default function ProjectChangeRequestPage() {
 						checked={removedAssetIds.has(asset.id)}
 						onChange={() => toggleAssetRemoval(asset.id)}
 					/>{' '}
-					{asset.originalName} ({asset.kind})
+					{asset.originalName} · {asset.kind === 'THUMBNAIL' ? '썸네일' : uploadKindLabels[asset.kind]}{removedAssetIds.has(asset.id) && ' · 승인 시 삭제'}
 				</label>
 			))}
 			{videoAssetIds.length > 0 && (
@@ -625,7 +627,7 @@ export default function ProjectChangeRequestPage() {
 	);
 	const filesPanel = (
 		<fieldset disabled={!editable || busy}>
-			<legend className="submission-file-heading"><span>파일</span><WebglBuildGuideLink /></legend>
+			<legend className="submission-file-heading"><span>게임·미디어·자료</span><WebglBuildGuideLink /></legend>
 			{preparedManifest ? (
 				<>
 					<p className="field-hint">
@@ -669,6 +671,7 @@ export default function ProjectChangeRequestPage() {
 					</button>
 				</>
 			)}
+			<ProjectFileLimits limits={limits} materialLimits={materialLimits} />
 			{existingFileControls}
 		</fieldset>
 	);
@@ -698,14 +701,14 @@ export default function ProjectChangeRequestPage() {
 							<textarea
 								id="change-reason"
 								rows={4}
-								value={reason}
+								value={reason ?? ''}
 								onChange={(e) => setReason(e.target.value)}
 							/>
 						</div>
 						<button
 							type="button"
 							className="btn btn--primary"
-							disabled={!reason.trim() || busy}
+							disabled={!reason?.trim() || busy}
 							onClick={() => create.mutate()}
 						>
 							{create.isPending ? '생성 중…' : '요청 작성 시작'}
@@ -765,6 +768,36 @@ export default function ProjectChangeRequestPage() {
 						</section>
 					) : (
 						<ProjectEditorLayout
+							actions={editable && <div className="project-edit-apply project-change-actions" aria-label="수정 요청 저장·제출">
+								<div className="project-edit-apply__feedback" aria-live="polite">
+									<p>초안은 저장 후에도 편집할 수 있으며, 공개 작품에는 운영자 승인 후 반영됩니다.</p>
+									{busy ? <p>요청을 처리하고 있습니다…</p> : !formReason.trim() ? <p>요청 사유를 입력하세요.</p> : hasUnpreparedSelection ? <p>파일 목록에서 ZIP 용도 선택과 업로드 준비를 완료하세요.</p> : !uploadsReady ? <p>파일 업로드·검증을 완료하세요. 실패한 파일은 파일 목록에서 다시 시도하세요.</p> : null}
+								</div>
+								<button
+									type="button"
+									className="btn btn--secondary"
+									disabled={busy}
+									onClick={() => save.mutate()}
+								>
+									{save.isPending ? '저장 중…' : '초안 저장'}
+								</button>{' '}
+								<button
+									type="button"
+									className="btn btn--primary"
+									disabled={busy || !formReason.trim() || !uploadsReady || hasUnpreparedSelection}
+									onClick={() => submit.mutate()}
+								>
+									운영자에게 제출
+								</button>{' '}
+								<button
+									type="button"
+									className="btn btn--danger"
+									disabled={busy}
+									onClick={() => cancel.mutate()}
+								>
+									요청 취소
+								</button>
+							</div>}
 							poster={
 								<fieldset disabled={!editable || busy}>
 									<legend>포스터</legend>
@@ -800,7 +833,7 @@ export default function ProjectChangeRequestPage() {
 							}
 							details={
 								<>
-									<fieldset disabled={!editable || busy}>
+									<fieldset className="project-basic-fields" disabled={!editable || busy}>
 										<legend>기본 정보</legend>
 										<div className="form-field">
 											<label htmlFor="change-title">제목 *</label>
@@ -822,7 +855,7 @@ export default function ProjectChangeRequestPage() {
 											<label htmlFor="change-description">상세 설명</label>
 											<textarea
 												id="change-description"
-												rows={6}
+												rows={3}
 												value={formChanges.description ?? ''}
 												onChange={(e) =>
 													setChanges({
@@ -834,12 +867,11 @@ export default function ProjectChangeRequestPage() {
 										</div>
 
 									</fieldset>
-									<ProjectRequirementsFieldset platforms={formChanges.platforms ?? []} hardwareRequirements={formChanges.hardwareRequirements ?? ''} onPlatformsChange={(platforms) => setChanges({ ...changes, platforms })} onHardwareRequirementsChange={(hardwareRequirements) => setChanges({ ...changes, hardwareRequirements })} disabled={!editable || busy} />
-									<ExternalLinksFieldset value={formLinks} onChange={(externalLinks) => setChanges({ ...changes, externalLinks })} disabled={!editable || busy} showErrors />
+
 									<fieldset disabled={!editable || busy}>
 										<legend>참여 학생</legend>
 										{formMembers.map((member, index) => (
-											<div className="member-add-row" key={`${index}-${member.studentId}`}>
+											<div className="member-add-row" key={index}>
 												<input
 													className="form-control"
 													aria-label={`참여 학생 ${index + 1} 이름`}
@@ -889,6 +921,10 @@ export default function ProjectChangeRequestPage() {
 											참여 학생 추가
 										</button>
 									</fieldset>
+									<div className="project-environment-links">
+										<ProjectRequirementsFieldset platforms={formChanges.platforms ?? []} hardwareRequirements={formChanges.hardwareRequirements ?? ''} onPlatformsChange={(platforms) => setChanges({ ...changes, platforms })} onHardwareRequirementsChange={(hardwareRequirements) => setChanges({ ...changes, hardwareRequirements })} disabled={!editable || busy} />
+										<ExternalLinksFieldset value={formLinks} onChange={(externalLinks) => setChanges({ ...changes, externalLinks })} disabled={!editable || busy} showErrors />
+									</div>
 									{editable && (
 										<fieldset>
 											<legend>제출</legend>
@@ -901,30 +937,7 @@ export default function ProjectChangeRequestPage() {
 													onChange={(e) => setReason(e.target.value)}
 												/>
 											</div>
-											<button
-												type="button"
-												className="btn btn--secondary"
-												disabled={busy}
-												onClick={() => save.mutate()}
-											>
-												{save.isPending ? '저장 중…' : '초안 저장'}
-											</button>{' '}
-											<button
-												type="button"
-												className="btn btn--primary"
-												disabled={busy || !formReason.trim() || !uploadsReady || hasUnpreparedSelection}
-												onClick={() => submit.mutate()}
-											>
-												운영자에게 제출
-											</button>{' '}
-											<button
-												type="button"
-												className="btn btn--danger"
-												disabled={busy}
-												onClick={() => cancel.mutate()}
-											>
-												요청 취소
-											</button>
+
 										</fieldset>
 									)}
 								</>
