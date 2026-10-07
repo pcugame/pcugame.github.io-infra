@@ -26,6 +26,16 @@
   margin: -0.25rem 0 1.1rem;
 }
 
+.project-meta__hardware {
+  flex-basis: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.project-meta__hardware p {
+  margin: 0.35rem 0 0;
+}
+
 .project-meta__platforms {
   display: inline-flex;
   align-items: center;
@@ -487,7 +497,7 @@
 .graphics-gate .graphics-gate__note { margin-top: 1rem; color: #64748b; font-size: 0.65rem; }
 .graphics-gate__result:not(:empty) { margin-top: 0.7rem; color: #9a5b0b; font-size: 0.7rem; }
 .graphics-gate__footer { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.9rem 1.5rem; border-top: 1px solid #e8edf4; background: #f8fafc; }
-.graphics-gate__footer .btn { padding: 0.65rem 0.8rem; font-size: 0.7rem; white-space: nowrap; }
+.graphics-gate__footer .btn { white-space: nowrap; }
 .graphics-gate__continue { background: none; border: none; padding: 0.5rem 0; color: #64748b; font: inherit; font-size: 0.7rem; cursor: pointer; text-decoration: underline; text-underline-offset: 4px; }
 .graphics-gate__stage { flex: 1; min-height: 65vh; display: grid; place-items: center; border: 1px solid #253049; border-radius: 12px; background: radial-gradient(ellipse at center, #17243c, #0d1320 70%); color: #8494af; font-size: 0.8rem; }
 .graphics-guide { margin-top: 1.1rem; font-size: 0.75rem; }
@@ -500,9 +510,8 @@
 .graphics-guide__link { display: inline-flex; margin-top: 0.35rem; color: #2563eb; font-size: 0.7rem; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; }
 .graphics-guide__override { margin-top: 0.75rem; color: #64748b; font-size: 0.65rem; }
 .graphics-guide__override summary { cursor: pointer; }
-.graphics-guide__override label { display: block; margin: 0.5rem 0 0.3rem; }
-.graphics-guide select { width: 100%; padding: 0.5rem; background: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 7px; font: inherit; }
-.graphics-guide :is(select, a):focus-visible, .graphics-gate button:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.graphics-guide__override label { margin: 0.5rem 0 0.3rem; }
+.graphics-guide a:focus-visible, .graphics-gate button:not(.btn):focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
 .project-play-page__help .graphics-guide__link { color: #93c5fd; }
 .graphics-screenshot { margin: 0.8rem 0; }
 .graphics-screenshot__preview { display: block; overflow: hidden; width: 100%; padding: 0; border: 1px solid #dce4f0; border-radius: 10px; background: #f8fafc; color: #2563eb; cursor: zoom-in; text-align: left; }

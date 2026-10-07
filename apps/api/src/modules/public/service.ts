@@ -43,6 +43,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	githubUrl?: string;
 	externalLinks?: unknown;
 	platforms?: Platform[];
+	hardwareRequirements?: string;
 	isIncomplete: boolean;
 	status: ProjectStatus;
 	webglDisplayMode?: string;
@@ -329,6 +330,7 @@ export async function getProjectDetail(
 		githubUrl: project.githubUrl || undefined,
 		externalLinks: effectiveProjectExternalLinks(project),
 		platforms: project.platforms ?? [],
+		hardwareRequirements: project.hardwareRequirements ?? '',
 		isIncomplete: isIncomplete || !validKinds.has('GAME'),
 		video,
 		videos,

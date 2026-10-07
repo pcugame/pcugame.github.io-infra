@@ -2,6 +2,8 @@ import { useCallback, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminProjectDetail } from '@pcu/contracts';
 import { adminAssetApi, adminProjectApi, publicApi } from '../../../lib/api';
+import { getProjectSubmitApi } from '../../../lib/api/project-submit';
+import { useMe } from '../../auth';
 import { queryKeys } from '../../../lib/query';
 import { materialUploadLimitsFromConfig, type ClientUploadLimits } from '../../../lib/upload-limits';
 import {
@@ -50,6 +52,8 @@ export function useProjectUploadQueue(
 	const refreshNeeded = useRef(false);
 	const waiter = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null);
 	const qc = useQueryClient();
+	const { user } = useMe();
+	const submissionApi = getProjectSubmitApi(user?.role === 'USER' ? 'user' : 'admin');
 	const config = useQuery({
 		queryKey: ['public-upload-config'],
 		queryFn: publicApi.getUploadConfig,
@@ -149,7 +153,7 @@ export function useProjectUploadQueue(
 				// A widget retry can finish while deletion or canonical refresh is awaited.
 				if (completedUploads.current.has(entry.id)) continue;
 				if (project.status === 'DRAFT') {
-					const submission = await adminProjectApi.getSubmission(projectId);
+					const submission = await submissionApi.getSubmission(projectId);
 					if (submission.state !== 'PENDING') throw new Error('제출 처리 중이거나 종료된 작품입니다. 페이지를 새로고침해 주세요.');
 					const item = [...submission.items]
 						.sort((a, b) => a.slot.localeCompare(b.slot, undefined, { numeric: true }))

@@ -1,3 +1,4 @@
+import { FormSection } from '../../components/ui';
 import type {
 	FieldArrayWithId,
 	FieldErrors,
@@ -24,8 +25,7 @@ export function SubmissionMembersFieldset({
 	remove,
 }: SubmissionMembersFieldsetProps) {
 	return (
-		<fieldset>
-			<legend>참여 학생 <span className="required-mark">*</span></legend>
+		<FormSection legend={<>참여 학생 <span className="required-mark">*</span></>}>
 			{errors.members?.root && (
 				<span className="field-error">{errors.members.root.message}</span>
 			)}
@@ -82,6 +82,6 @@ export function SubmissionMembersFieldset({
 			>
 				＋ 학생 추가
 			</button>
-		</fieldset>
+		</FormSection>
 	);
 }

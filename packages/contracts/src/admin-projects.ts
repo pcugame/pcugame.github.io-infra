@@ -6,11 +6,13 @@ import type { ResponsiveImage } from './responsive-image.js';
 import type { ProjectAttachment } from './public.js';
 
 export type UpdateProjectRequest = {
+	platforms?: Platform[];
 	visibility?: Visibility;
 	title?: string;
 	summary?: string;
 	description?: string;
 	externalLinks?: ExternalLink[];
+	hardwareRequirements?: string;
 	isIncomplete?: boolean;
 	status?: Exclude<ProjectStatus, 'DRAFT'>;
 	sortOrder?: number;
@@ -91,6 +93,7 @@ export type AdminProjectDetail = {
 	summary?: string;
 	description?: string;
 	externalLinks?: ExternalLink[];
+	hardwareRequirements?: string;
 	githubUrl?: string;
 	platforms: Platform[];
 	isIncomplete: boolean;
@@ -141,12 +144,14 @@ export type AdminProjectDetail = {
 };
 
 export type SubmitProjectPayload = {
+	platforms?: Platform[];
 	visibility?: Visibility;
 	exhibitionId: number;
 	title: string;
 	summary?: string;
 	description?: string;
 	externalLinks?: ExternalLink[];
+	hardwareRequirements?: string;
 	members: { name: string; studentId: string; sortOrder?: number; userId?: number }[];
 	manifest: ProjectSubmissionManifestItem[];
 };

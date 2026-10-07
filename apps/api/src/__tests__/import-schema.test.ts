@@ -50,7 +50,14 @@ describe('ImportDataSchema', () => {
 		expect(p.description).toBe('');
 		expect(p.githubUrl).toBe('');
 		expect(p.platforms).toEqual([]);
+		expect(p.hardwareRequirements).toBe('');
 		expect(p.members).toEqual([]);
+	});
+
+	it('normalizes hardware requirements and enforces shared metadata limits', () => {
+		expect(ImportProject.parse({ year: 2026, title: 'Hardware', hardwareRequirements: '  VR headset  ' }).hardwareRequirements).toBe('VR headset');
+		expect(ImportProject.safeParse({ year: 2026, title: 'Hardware', hardwareRequirements: 'a'.repeat(1001) }).success).toBe(false);
+		expect(ImportProject.safeParse({ year: 2026, title: 'Hardware', platforms: ['PC', 'PC', 'PC', 'PC'] }).success).toBe(false);
 	});
 
 	it('returns a documented validation error code and JSON details for invalid execution data', async () => {

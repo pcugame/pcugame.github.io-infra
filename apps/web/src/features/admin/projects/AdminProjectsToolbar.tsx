@@ -55,7 +55,7 @@ export function AdminProjectsToolbar({
 			<div className="admin-toolbar">
 				<input
 					type="text"
-					className="admin-search"
+					className="form-control admin-search"
 					placeholder="작품 제목, 요약, 이름, 학번, 전시회명, 연도 검색..."
 					value={search}
 					onChange={(e) => onSearchChange(e.target.value)}

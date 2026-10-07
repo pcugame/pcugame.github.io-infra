@@ -570,6 +570,8 @@ export function createProjectCrudRepository(
 						title: data.title,
 						summary: data.summary,
 						description: data.description,
+						platforms: data.platforms,
+						hardwareRequirements: data.hardwareRequirements,
 						...(data.externalLinks !== undefined ? { externalLinks: data.externalLinks } : {}),
 						status: 'DRAFT',
 						creatorId: data.creatorId,

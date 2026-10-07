@@ -107,6 +107,7 @@ export type PublicProjectDetailResponse = {
 	githubUrl?: string;
 	externalLinks?: ExternalLink[];
 	platforms: Platform[];
+	hardwareRequirements?: string;
 	isIncomplete: boolean;
 	video: ProjectVideo | null;
 	videos: ProjectVideo[];

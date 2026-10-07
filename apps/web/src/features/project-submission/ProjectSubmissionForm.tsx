@@ -38,6 +38,11 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 		cancelSubmission,
 		createdProjectId,
 		finalizeIfReady,
+		canRetryPublication,
+		canRetryStatus,
+		retryStatus,
+		isFinalizing,
+		retryPublication,
 		errors,
 		form,
 		isSubmitting,
@@ -114,6 +119,8 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 										<p>{getApiErrorMessage(submissionError)}</p>
 									</div>
 								)}
+								{canRetryStatus && <button type="button" className="btn btn--primary btn--small" disabled={isFinalizing} onClick={() => void retryStatus()}>제출 상태 다시 확인</button>}
+								{import.meta.env.VITE_MOCK === 'true' && canRetryPublication && <button type="button" className="btn btn--primary btn--small" disabled={isFinalizing} onClick={() => void retryPublication()}>Mock 발행 다시 시도</button>}
 								<button
 									type="button"
 									className="btn btn--danger btn--small"
@@ -200,6 +207,8 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 				<ProjectPreviewModal
 					values={{
 						externalLinks: previewSnapshot.externalLinks,
+						platforms: previewSnapshot.platforms,
+						hardwareRequirements: previewSnapshot.hardwareRequirements,
 						title: previewSnapshot.title,
 						summary: previewSnapshot.summary || undefined,
 						description: previewSnapshot.description || undefined,

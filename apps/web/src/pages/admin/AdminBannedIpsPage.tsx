@@ -5,6 +5,7 @@ import type { BannedIpItem } from '../../lib/api';
 import { normalizeIpTarget } from '../../contracts';
 import { queryKeys } from '../../lib/query';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../../components/common';
+import { Button, FormSection, TextField } from '../../components/ui';
 
 export default function AdminBannedIpsPage() {
   const qc = useQueryClient();
@@ -68,27 +69,35 @@ export default function AdminBannedIpsPage() {
         이미 발급된 서명 URL은 만료 전까지 사용할 수 있습니다.
       </p>
 
-      <div className="admin-card project-form" style={{ marginBottom: '1.5rem' }}>
-        <fieldset>
-          <legend>수동 IP/CIDR 차단 등록</legend>
-          <div className="form-field">
-            <label htmlFor="banned-ip">IP 주소 또는 CIDR</label>
-            <input id="banned-ip" value={ip} onChange={(event) => setIp(event.target.value)} placeholder="203.0.113.42 또는 2001:db8::/32" autoComplete="off" />
-            {normalizedIp.value && <p className="field-hint">등록될 차단 대역: <code>{normalizedIp.value}</code></p>}
-            {normalizedIp.error && <p className="field-error" role="alert">{normalizedIp.error}</p>}
-          </div>
-          <div className="form-field">
-            <label htmlFor="banned-ip-reason">사유</label>
-            <input id="banned-ip-reason" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={1000} required placeholder="차단 사유를 입력하세요" />
-          </div>
+      <div className="admin-card" style={{ marginBottom: '1.5rem' }}>
+        <FormSection legend="수동 IP/CIDR 차단 등록">
+          <TextField
+            id="banned-ip"
+            label="IP 주소 또는 CIDR"
+            value={ip}
+            onChange={(event) => setIp(event.target.value)}
+            placeholder="203.0.113.42 또는 2001:db8::/32"
+            autoComplete="off"
+            hint={normalizedIp.value ? <>등록될 차단 대역: <code>{normalizedIp.value}</code></> : undefined}
+            error={normalizedIp.error}
+          />
+          <TextField
+            id="banned-ip-reason"
+            label="사유"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            maxLength={1000}
+            required
+            placeholder="차단 사유를 입력하세요"
+          />
           {createMutation.error && <div className="error-box" role="alert"><p>{getApiErrorMessage(createMutation.error)}</p></div>}
           {createMutation.isSuccess && <p className="success-message">수동 차단을 등록했습니다.</p>}
           <div className="form-actions">
-            <button className="btn btn--primary" type="button" onClick={handleCreate} disabled={!normalizedIp.value || !reason.trim() || createMutation.isPending}>
+            <Button onClick={handleCreate} disabled={!normalizedIp.value || !reason.trim() || createMutation.isPending}>
               {createMutation.isPending ? '등록 중…' : '차단 등록'}
-            </button>
+            </Button>
           </div>
-        </fieldset>
+        </FormSection>
       </div>
 
       {items.length === 0 ? (
@@ -118,8 +127,8 @@ export default function AdminBannedIpsPage() {
                     <td className="text-muted">
                       {new Date(item.createdAt).toLocaleString('ko-KR')}
                     </td>
-                    <td>{item.active && <button
-                        className="btn btn--small btn--secondary"
+                    <td>{item.active && <Button
+                        size="small" variant="secondary"
                         onClick={() => {
                           if (confirm(`${item.ip} 차단을 해제하시겠습니까?`)) {
                             unbanMutation.mutate(item.id);
@@ -128,7 +137,7 @@ export default function AdminBannedIpsPage() {
                         disabled={unbanMutation.isPending}
                       >
                         차단 해제
-                      </button>}</td>
+                      </Button>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -152,8 +161,8 @@ export default function AdminBannedIpsPage() {
                   <span>{new Date(item.createdAt).toLocaleString('ko-KR')}</span>
                 </div>
                 {item.active && <div style={{ marginTop: '0.5rem' }}>
-                  <button
-                    className="btn btn--small btn--secondary"
+                  <Button
+                    size="small" variant="secondary"
                     onClick={() => {
                       if (confirm(`${item.ip} 차단을 해제하시겠습니까?`)) {
                         unbanMutation.mutate(item.id);
@@ -162,7 +171,7 @@ export default function AdminBannedIpsPage() {
                     disabled={unbanMutation.isPending}
                   >
                     차단 해제
-                  </button>
+                  </Button>
                 </div>}
               </div>
             ))}

@@ -1,3 +1,4 @@
+import { FormSection } from '../../components/ui';
 import { useMemo } from 'react';
 import type { ProjectSubmissionItemStatus } from '../../contracts';
 import GameUploadWidget from '../../components/GameUploadWidget';
@@ -32,8 +33,7 @@ export function SubmissionUploadProgress({
 			? (['POSTER'] as const)
 			: (['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'DOCUMENT', 'ATTACHMENT'] as const);
 	return (
-		<fieldset>
-			<legend>{zone === 'poster' ? '포스터' : '기타 파일'}</legend>
+		<FormSection legend={zone === 'poster' ? '포스터' : '기타 파일'}>
 			{zone === 'poster' && <ProjectPosterPreview title={title} localFile={files.posterFile} />}
 			{!ordered.some((item) => (zone === 'poster' ? item.kind === 'POSTER' : item.kind !== 'POSTER')) ? (
 				<p className="field-hint">
@@ -120,6 +120,6 @@ export function SubmissionUploadProgress({
 					})}
 				</ul>
 			)}
-		</fieldset>
+		</FormSection>
 	);
 }

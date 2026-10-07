@@ -1,3 +1,4 @@
+import { Button, CheckboxField, TextField } from '../../components/ui';
 import { useViewerKey } from '../../lib/query';
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
@@ -182,43 +183,13 @@ export default function AdminYearsPage() {
 				<h3>새 연도 추가</h3>
                 {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field"><label htmlFor="new-visibility">공개 범위 *</label><VisibilitySelect id="new-visibility" value={createVisibility} onChange={(event) => setCreateVisibility(event.target.value as Visibility)} required /></div>}
 				<div className="form-row">
-					<div className="form-field">
-						<label htmlFor="new-year">연도 *</label>
-						<input
-							id="new-year"
-							type="number"
-							{...regCreate('year', { valueAsNumber: true })}
-						/>
-						{createErrors.year && (
-							<span className="field-error">{createErrors.year.message}</span>
-						)}
-					</div>
-					<div className="form-field">
-						<label htmlFor="new-title">제목</label>
-						<input id="new-title" type="text" {...regCreate('title')} />
-					</div>
-					<div className="form-field form-field--checkbox">
-						<label>
-							<input type="checkbox" {...regCreate('isModificationEnabled')} />
-							수정 허용
-						</label>
-					</div>
-					<div className="form-field">
-						<label htmlFor="new-sort">정렬</label>
-						<input
-							id="new-sort"
-							type="number"
-							{...regCreate('sortOrder', { valueAsNumber: true })}
-							style={{ width: '80px' }}
-						/>
-					</div>
-					<button
-						type="submit"
-						className="btn btn--primary btn--small"
-						disabled={createMutation.isPending || (env.VISIBILITY_CONTROLS_ENABLED && !createVisibility)}
-					>
+					<TextField id="new-year" label="연도 *" type="number" {...regCreate('year', { valueAsNumber: true })} error={createErrors.year?.message} />
+					<TextField id="new-title" label="제목" {...regCreate('title')} />
+					<CheckboxField label="수정 허용" {...regCreate('isModificationEnabled')} />
+					<TextField id="new-sort" label="정렬" type="number" {...regCreate('sortOrder', { valueAsNumber: true })} style={{ width: '80px' }} />
+					<Button type="submit" size="small" disabled={createMutation.isPending || (env.VISIBILITY_CONTROLS_ENABLED && !createVisibility)}>
 						{createMutation.isPending ? '추가 중…' : '추가'}
-					</button>
+					</Button>
 				</div>
 				{createMutation.error && (
 					<p className="field-error">{getApiErrorMessage(createMutation.error)}</p>

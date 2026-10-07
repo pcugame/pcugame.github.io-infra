@@ -110,7 +110,7 @@ export default function YearProjectsPage() {
               <div className="archive-search">
                 <span className="archive-search__icon" aria-hidden="true">&#x1F50D;</span>
                 <input
-                  className="archive-search__input"
+                  className="form-control archive-search__input"
                   type="search"
                   placeholder="작품명, 팀원 이름, 학번으로 검색"
                   value={search}

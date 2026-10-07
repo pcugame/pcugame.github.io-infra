@@ -271,7 +271,7 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 								{project.title}
 							</h1>
 
-							<ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} />
+							<ProjectPublicMeta githubUrl={project.githubUrl} externalLinks={project.externalLinks} platforms={project.platforms} hardwareRequirements={project.hardwareRequirements} />
 
 							{/* 참여 학생 */}
 							<div className="modal-members">

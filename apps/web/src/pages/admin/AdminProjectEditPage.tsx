@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import type { AdminProjectDetail } from '@pcu/contracts';
+import { PROJECT_PLATFORMS, type AdminProjectDetail } from '@pcu/contracts';
 import { UpdateProjectFormSchema, type UpdateProjectFormInput } from '../../contracts/schemas';
 import { LoadingSpinner, ErrorMessage } from '../../components/common';
 import {
@@ -32,6 +32,8 @@ const metadata = (project: AdminProjectDetail): UpdateProjectFormInput => ({
 	title: project.title,
 	summary: project.summary ?? '',
 	description: project.description ?? '',
+	platforms: PROJECT_PLATFORMS.filter((platform) => project.platforms.includes(platform)),
+	hardwareRequirements: project.hardwareRequirements ?? '',
 	sortOrder: project.sortOrder,
 	status: project.status === 'DRAFT' ? undefined : project.status,
 });
@@ -104,8 +106,10 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			if (form.formState.isDirty) {
 				const defaults = form.formState.defaultValues;
 				const nextStatus = data.status;
-				const response = await mutations.updateMutation.mutateAsync({
+				const patch = {
 					...(JSON.stringify(data.externalLinks) !== JSON.stringify(defaults?.externalLinks) ? { externalLinks: data.externalLinks ?? [] } : {}),
+					...(JSON.stringify(data.platforms) !== JSON.stringify(defaults?.platforms) ? { platforms: data.platforms ?? [] } : {}),
+					...(data.hardwareRequirements !== defaults?.hardwareRequirements ? { hardwareRequirements: data.hardwareRequirements ?? '' } : {}),
 					// Background reads must not turn untouched fields into stale writes.
 					...(project.canChangeVisibility && data.visibility !== defaults?.visibility ? { visibility: data.visibility } : {}),
 					...(data.title !== defaults?.title ? { title: data.title } : {}),
@@ -113,7 +117,8 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 					...(data.description !== defaults?.description ? { description: data.description } : {}),
 					...(data.sortOrder !== defaults?.sortOrder ? { sortOrder: data.sortOrder } : {}),
 					...(isPrivileged && baselineStatus !== 'DRAFT' && nextStatus !== baselineStatus ? { status: nextStatus } : {}),
-				});
+				};
+				const response = Object.keys(patch).length > 0 ? await mutations.updateMutation.mutateAsync(patch) : project;
 				form.reset(metadata(response));
 				setBaselineStatus(response.status);
 				qc.setQueryData(queryKeys.adminProject(id), response);

@@ -159,27 +159,8 @@
   align-items: center;
 }
 
-.member-add-row input {
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.85rem;
-}
-
 .member-edit-input {
   width: 6.25rem;
-  padding: 0.35rem 0.55rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.85rem;
-  font-family: inherit;
-  background: var(--color-surface);
-}
-
-.member-edit-input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .member-sort-order {
@@ -280,16 +261,6 @@
   font-size: 0.85rem;
 }
 
-[data-theme='dark'] .member-edit-input {
-  background: #131315;
-  color: var(--color-text);
-  border-color: var(--color-border);
-}
-
-[data-theme='dark'] .member-edit-input:focus {
-  box-shadow: 0 0 0 3px rgba(124, 172, 248, 0.15);
-}
-
 @media (max-width: 60em) {
   .member-list__item,
   .asset-list__item {
@@ -334,10 +305,6 @@
 
   .member-list__item .member-edit-input {
     width: 100%;
-    font-size: 1rem;
-    padding: 0.5rem 0.65rem;
-    border-radius: 8px;
-    border: 1px solid var(--color-border);
   }
 
   .member-actions,
@@ -360,9 +327,6 @@
 
   .member-add-row input {
     width: 100%;
-    font-size: 1rem;
-    padding: 0.55rem 0.65rem;
-    border-radius: 8px;
   }
 
   .member-add-row .btn {
