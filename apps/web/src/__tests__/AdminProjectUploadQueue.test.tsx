@@ -10,6 +10,7 @@ import {
 	useAdminProjectUploadQueue,
 } from '../features/admin/projects/AdminProjectAssetManager';
 import { adminAssetApi, adminProjectApi, publicApi } from '../lib/api';
+import { userProjectApi } from '../lib/api/me';
 import { getClientUploadLimits } from '../lib/upload-limits';
 import {
 	classifyProjectFile,
@@ -23,7 +24,8 @@ const api = vi.hoisted(() => ({
 	cancelDirectAssetUploadSession: vi.fn(),
 }));
 vi.mock('../lib/api/game-upload', () => api);
-vi.mock('../features/auth', () => ({ useMe: () => ({ user: { role: 'ADMIN' } }) }));
+const viewer = vi.hoisted(() => ({ role: 'ADMIN' }));
+vi.mock('../features/auth', () => ({ useMe: () => ({ user: { id: 3, role: viewer.role } }) }));
 const project: AdminProjectDetail = {
 	visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: false,
 	id: 7,
@@ -71,6 +73,7 @@ function drop(files: File[], poster = false) {
 }
 const file = (name: string, type = '') => new File(['x'], name, { type });
 beforeEach(() => {
+	viewer.role = 'ADMIN';
 	vi.spyOn(publicApi, 'getUploadConfig').mockResolvedValue({
 		materialMaxCount: 3,
 		materialMaxBytes: 1024,
@@ -409,4 +412,15 @@ it.each(['complete', 'cancel', 'fail'] as const)('handles widget %s while Apply 
 		await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
 		expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
 	}
+});
+
+it('binds student draft retries through the user submission endpoint', async () => {
+  viewer.role = 'USER';
+  const binding = { id: 'student-item', clientToken: 'b'.repeat(32) };
+  const read = vi.spyOn(userProjectApi, 'getSubmission').mockResolvedValue({ submissionId: 'submission', projectId: 7, projectStatus: 'DRAFT', state: 'PENDING', items: [{ ...binding, kind: 'POSTER', slot: 'poster', required: true, state: 'FAILED' }] });
+  const admin = vi.spyOn(adminProjectApi, 'getSubmission');
+  api.uploadDirectAssetFile.mockResolvedValue({ status: 'READY', sessionId: 'student-retry' });
+  setup(true, { ...project, status: 'DRAFT' }); drop([file('poster.png')], true); apply();
+  await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
+  expect(read).toHaveBeenCalledWith(7); expect(admin).not.toHaveBeenCalled(); expect(api.uploadDirectAssetFile.mock.calls[0]![4]).toMatchObject({ submissionItem: binding });
 });

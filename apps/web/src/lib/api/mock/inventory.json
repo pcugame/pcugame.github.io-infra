@@ -1,0 +1,1031 @@
+{
+  "version": 1,
+  "scope": "Web UI API calls and server-issued direct upload capability; development mock only",
+  "priorities": {
+    "P0": "Authentication, project list/detail/update, initial uploads/submissions, change requests and WebGL display",
+    "P1": "Public browsing, metadata CRUD and WebGL network policy",
+    "P2": "Administrative settings, bans and import/export"
+  },
+  "verification": "mockInventory.test.ts checks registration and source coverage; testFiles identify behavioral suites, not proof that every row has an authenticated success test. Query strings are excluded from path patterns.",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/me",
+      "priority": "P0",
+      "domain": "handler.ts",
+      "testFiles": [
+        "mockTransport.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/auth.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/google",
+      "priority": "P0",
+      "domain": "handler.ts",
+      "testFiles": [
+        "mockTransport.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/auth.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "priority": "P0",
+      "domain": "handler.ts",
+      "testFiles": [
+        "mockTransport.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/auth.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/dev/auth/login",
+      "priority": "P0",
+      "domain": "handler.ts",
+      "testFiles": [
+        "mockTransport.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/auth.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/dev/auth/login-error",
+      "priority": "P0",
+      "domain": "handler.ts",
+      "testFiles": [
+        "mockTransport.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/auth.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/years",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/public.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/years/:year/projects",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/public.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/exhibitions/:exhibitionId/projects",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/public.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/projects/:idOrSlug",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/public.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/upload-config",
+      "priority": "P1",
+      "domain": "handler.ts",
+      "testFiles": [
+        "mockTransport.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/public.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/exhibitions",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/exhibitions",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/exhibitions/:exhibitionId",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/exhibitions/:exhibitionId",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/exhibitions/:exhibitionId/poster",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/projects",
+      "priority": "P0",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/projects/:projectId",
+      "priority": "P0",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/projects/:projectId",
+      "priority": "P0",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/projects/:projectId",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/projects/:projectId/webgl",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/projects/:projectId/videos/order",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/projects/:projectId/poster",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/projects/bulk/status",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/bulk/delete",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/members",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/projects/:projectId/members/:memberId",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/projects/:projectId/members/:memberId",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/projects/:projectId/members/swap",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/assets/:assetId",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockProjectCrud.test.ts",
+        "mockResponsiveImages.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/submit",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/projects/:projectId/submission",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/projects/:projectId/submission",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/submission/finalize",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/projects/submit",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/me.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/projects/:projectId/submission",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/me.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/me/projects/:projectId/submission",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/me.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/projects/:projectId/submission/finalize",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/me.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/direct-game-upload-sessions",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/direct-webgl-upload-sessions",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/direct-video-upload-sessions",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/direct-image-upload-sessions",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/direct-poster-upload-sessions",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/direct-document-upload-sessions",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/direct-attachment-upload-sessions",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/exhibitions/:exhibitionId/direct-poster-upload-sessions",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/direct-asset-upload-sessions/:sessionId",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/direct-asset-upload-sessions/:sessionId",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/direct-asset-upload-sessions/:sessionId/part-urls",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/direct-asset-upload-sessions/:sessionId/complete",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/mock/garage-upload/:sessionId/:partNumber/:capability",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts (server-issued capability URL)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/change-requests",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/projects/:projectId/change-requests",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/projects/:projectId/change-requests",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/change-requests/:requestId",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/me/change-requests/:requestId",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/change-requests/:requestId/submit",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/change-requests/:requestId/cancel",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/change-requests",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/change-requests/:requestId",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/change-requests/:requestId/approve",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/change-requests/:requestId/reject",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/change-requests/:requestId/retry",
+      "priority": "P0",
+      "domain": "changes.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts",
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/change-requests.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/projects/:projectId/webgl-display",
+      "priority": "P0",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/me.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/me/projects/:projectId/webgl-display",
+      "priority": "P0",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/me.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/me/projects/:projectId/webgl-network-requests",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/projects/:projectId/webgl-network-requests",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/webgl-network-requests",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/webgl-network-requests/:requestId/approve",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/webgl-network-requests/:requestId/reject",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/webgl-network-requests/:requestId/revoke",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/me/external-links/resolve",
+      "priority": "P0",
+      "domain": "access.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/external-links.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/file-access",
+      "priority": "P0",
+      "domain": "access.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/file-access.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/file-access/:token/renew",
+      "priority": "P0",
+      "domain": "access.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/query/FileAccessRenewal.tsx"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/settings",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/admin/settings",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/banned-ips",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/banned-ips",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/admin/banned-ips/:ipId",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/export",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/export/status",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/import/preview",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/import/execute",
+      "priority": "P2",
+      "domain": "management.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    }
+  ]
+}

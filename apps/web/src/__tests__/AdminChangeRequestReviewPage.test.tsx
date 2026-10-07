@@ -46,4 +46,26 @@ describe('AdminChangeRequestReviewPage', () => {
     expect(screen.getAllByText('없음').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: '반영 재시도' })).toBeNull();
   });
+  it('preserves absolute mock image and document preview URLs', async () => {
+    const imageUrl = 'http://localhost:5173/mock/images/1200x675.png?mock_project=10&pcu_token=token';
+    const documentUrl = 'http://localhost:5173/mock/files/readme.txt?mock_project=10&pcu_token=token';
+    mocks.get.mockResolvedValue({ ...request, stagedAssets: [
+      { id:8, kind:'POSTER', originalName:'poster.png', previewUrl:imageUrl },
+      { id:9, kind:'DOCUMENT', originalName:'readme.txt', previewUrl:documentUrl },
+    ] });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry:false } } })}><MemoryRouter initialEntries={['/admin/change-requests/123e4567-e89b-42d3-a456-426614174000']}><Routes><Route path="/admin/change-requests/:id" element={<AdminChangeRequestReviewPage />} /></Routes></MemoryRouter></QueryClientProvider>);
+    const image = await screen.findByRole('img',{name:'poster.png'});
+    expect(image.getAttribute('src')).toBe(imageUrl);
+    expect(screen.getByRole('link',{name:/poster\.png.*미리보기/}).getAttribute('href')).toBe(imageUrl);
+    expect(screen.getByRole('link',{name:/readme\.txt.*미리보기/}).getAttribute('href')).toBe(documentUrl);
+  });
+
+  it.each(['REJECTED','CANCELLED','CONFLICT'])('keeps terminal %s file names without empty preview links or images', async state => {
+    mocks.get.mockResolvedValue({ ...request, state, stagedAssets:[{id:8,kind:'IMAGE',originalName:'unavailable.png',previewUrl:''}] });
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry:false } } })}><MemoryRouter initialEntries={['/admin/change-requests/123e4567-e89b-42d3-a456-426614174000']}><Routes><Route path="/admin/change-requests/:id" element={<AdminChangeRequestReviewPage />} /></Routes></MemoryRouter></QueryClientProvider>);
+    await screen.findByText('unavailable.png (IMAGE)');
+    expect(screen.queryByRole('link',{name:/unavailable\.png/})).toBeNull();
+    expect(screen.queryByRole('img',{name:'unavailable.png'})).toBeNull();
+  });
+
 });

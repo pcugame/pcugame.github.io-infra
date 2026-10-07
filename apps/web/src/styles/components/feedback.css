@@ -226,3 +226,17 @@
     padding: 0.3rem 0.5rem;
   }
 }
+
+/* Keep mock tools above the editor's sticky apply bar. */
+body:has(.project-edit-apply) .mock-switcher {
+  bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+  max-height: calc(100svh - 12rem);
+  overflow-y: auto;
+}
+
+@media (max-width: 50em) {
+  body:has(.project-edit-apply) .mock-switcher {
+    bottom: calc(11rem + env(safe-area-inset-bottom, 0px));
+    max-height: calc(100svh - 16rem);
+  }
+}

@@ -13,16 +13,18 @@ import type {
 	ResponsiveImage,
 } from '../../../contracts';
 
-const PLACEHOLDER_SIZE_PATTERN = /^(https:\/\/placehold\.co\/)(\d+)x(\d+)(?=\/|\?|$)/;
+const PLACEHOLDER_SIZE_PATTERN = /^(?:https:\/\/placehold\.co\/|\/mock\/images\/)(\d+)x(\d+)(?=\/|\?|\.|$)/;
 
 function placeholderSize(url: string): { width: number; height: number } {
 	const match = PLACEHOLDER_SIZE_PATTERN.exec(url);
 	if (!match) throw new Error(`Mock responsive image must use a sized placehold.co URL: ${url}`);
-	return { width: Number(match[2]), height: Number(match[3]) };
+	return { width: Number(match[1]), height: Number(match[2]) };
 }
 
-function placeholderUrlAtSize(url: string, width: number, height: number): string {
-	return url.replace(PLACEHOLDER_SIZE_PATTERN, `$1${width}x${height}`);
+export function mockFixtureUrl(path: string): string { return new URL(path, typeof location !== 'undefined' && location.origin !== 'null' ? location.origin : 'http://localhost:5173').href; }
+
+function placeholderUrlAtSize(_url: string, width: number, height: number): string {
+	return mockFixtureUrl(`/mock/images/${width}x${height}.png`);
 }
 
 export function mockResponsiveImage(url: string): ResponsiveImage {
@@ -49,14 +51,14 @@ export function mockResponsiveImage(url: string): ResponsiveImage {
 	}
 
 	return {
-		original: { url, width, height },
+		original: { url: placeholderUrlAtSize(url, width, height), width, height },
 		renditions,
 	};
 }
 
 function mockLegacyResponsiveImage(url: string): ResponsiveImage {
 	return {
-		original: { url, ...placeholderSize(url) },
+		original: { url: placeholderUrlAtSize(url, placeholderSize(url).width, placeholderSize(url).height), ...placeholderSize(url) },
 		renditions: [],
 	};
 }
@@ -373,8 +375,6 @@ export const MOCK_MY_PROJECTS: MockMyProjectCard[] = [
 
 // ── 프로젝트 상세 빌더 ──────────────────────────────────────
 
-export const mockProjectOverrides = new Map<number, Partial<AdminProjectDetail>>();
-
 function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): PublicProjectDetailResponse {
 	const status = 'status' in card ? card.status : 'PUBLISHED';
 	return {
@@ -386,9 +386,8 @@ function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): P
 		summary: card.summary,
 		description: `${card.title}은(는) 배재대학교 게임공학과 ${year}년 졸업작품으로 제작된 프로젝트입니다.\n\n${card.summary ?? ''}\n\nPC 플랫폼 대상으로 개발되었습니다.`,
 		githubUrl: card.githubUrl,
-		externalLinks: mockProjectOverrides.get(card.id)?.externalLinks,
-		platforms: mockProjectOverrides.get(card.id)?.platforms ?? card.platforms ?? ['PC'],
-		hardwareRequirements: mockProjectOverrides.get(card.id)?.hardwareRequirements ?? '',
+		platforms: card.platforms ?? ['PC'],
+		hardwareRequirements: '',
 		isIncomplete: year <= 2024,
 		video: null,
 		videos: [],
@@ -411,7 +410,7 @@ function buildDetail(card: MockProjectCard | MockMyProjectCard, year: number): P
 			},
 		],
 		poster: card.poster,
-		gameDownloadUrl: year <= 2024 ? undefined : '#mock-download',
+		gameDownloadUrl: year <= 2024 ? undefined : mockFixtureUrl('/mock/files/game.zip'),
 		status,
 	};
 }
@@ -436,6 +435,7 @@ export function findProjectDetail(idOrSlug: string | number, year?: number): Pub
 export const MOCK_ADMIN_YEARS: AdminExhibitionItem[] = MOCK_YEARS.map((y, i) => ({
 	...y,
 	isUploadEnabled: i === 0,
+	isModificationEnabled: i === 0,
 	sortOrder: i,
 	projectCount: y.projectCount,
 }));
@@ -493,9 +493,24 @@ export function buildAdminProjectDetail(id: string | number): AdminProjectDetail
 		status: detail.status, sortOrder: 0,
 		posterAssetId: detail.images[0]?.id, poster: detail.poster,
 		members: detail.members.map((m, i) => ({ ...m, sortOrder: i, userId: null })),
-		...mockProjectOverrides.get(detail.id),
-		assets: detail.images.map((img) => ({
-			id: img.id, kind: img.kind, image: img.image, originalName: `asset-${img.id}.webp`, size: 102400,
-		})),
+		assets: [
+			...detail.images.map((img) => ({
+				id: img.id, kind: img.kind, image: img.image, originalName: `asset-${img.id}.webp`, size: 102400,
+			})),
+			...(detail.gameDownloadUrl ? [{ id: detail.id * 100 + 53, kind: 'GAME' as const, url: detail.gameDownloadUrl, originalName: 'game.zip', size: 150 }] : []),
+		],
 	};
+}
+
+// Same-year exhibitions exercise audience and edit-policy boundaries.
+MOCK_ADMIN_YEARS.push(
+ { id: 5, year: 2025, title: '학생 개발 쇼케이스', visibility: 'AUTHENTICATED', isUploadEnabled: true, isModificationEnabled: true, sortOrder: 4, projectCount: 0 },
+ { id: 6, year: 2025, title: '비공개 심사 전시', visibility: 'STAFF', isUploadEnabled: false, isModificationEnabled: false, sortOrder: 5, projectCount: 0 },
+);
+
+for (const exhibition of MOCK_ADMIN_YEARS) if (exhibition.poster) {
+ const owned=(value:string)=>{const url=new URL(value);url.searchParams.set('mock_exhibition',String(exhibition.id));return url.href;};
+ exhibition.poster=structuredClone(exhibition.poster);
+ exhibition.poster.original.url=owned(exhibition.poster.original.url);
+ exhibition.poster.renditions=exhibition.poster.renditions.map(r=>({...r,url:owned(r.url)}));
 }

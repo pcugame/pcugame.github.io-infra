@@ -64,7 +64,8 @@ fieldset.status-section legend {
   margin-bottom: 1.1rem;
 }
 
-.form-field label {
+.form-field label,
+.form-field__label {
   display: block;
   font-size: 0.8rem;
   font-weight: 700;
@@ -114,6 +115,22 @@ fieldset.status-section legend {
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
+}
+
+.form-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1.25rem;
+  padding: 0.35rem 0;
+}
+
+.form-checkbox-group label {
+  margin: 0;
+  min-height: 2rem;
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 500;
 }
 
 .form-field--checkbox input[type='checkbox'] {
