@@ -21,7 +21,7 @@
 .network-list { min-width: 0; }
 .network-filters { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
 .network-filter span { margin-left: .3rem; font-weight: 700; }
-.network-filter:hover, .network-filter.is-active { border-color: var(--color-primary); color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface)); }
+.network-filter:hover:not(:disabled), .network-filter.is-active { border-color: var(--color-primary); color: var(--color-primary); background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface)); }
 .webgl-network-page summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
 .network-request + .network-request { margin-top: 1rem; }
 .network-request__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
