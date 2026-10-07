@@ -121,3 +121,12 @@
     font-size: 0.88rem;
   }
 }
+
+.login-session-help {
+  text-align: left;
+  line-height: 1.6;
+}
+
+.login-session-help a {
+  text-decoration: underline;
+}

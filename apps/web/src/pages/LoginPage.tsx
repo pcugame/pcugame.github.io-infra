@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useMe, useLogin } from '../features/auth';
+import { SessionNotEstablishedError } from '../features/auth/session-errors';
+import { SessionLoginHelp } from '../features/auth/SessionLoginHelp';
 import type { ApiErrorCode, DevAuthErrorScenario, UserRole } from '../contracts';
 import { initializeGoogleSignIn } from '../lib/auth';
 import { getApiErrorCode, getApiErrorMessage, isApiError } from '../lib/api';
@@ -50,8 +52,10 @@ export default function LoginPage() {
 
   const googleBtnRef = useRef<HTMLDivElement>(null);
   const mutateRef = useRef(loginMutation.mutate);
+  const loginPendingRef = useRef(false);
   useEffect(() => {
     mutateRef.current = loginMutation.mutate;
+    loginPendingRef.current = loginMutation.isPending;
   });
 
   // 이미 로그인 상태이면 이전 페이지 또는 홈으로 이동
@@ -69,6 +73,8 @@ export default function LoginPage() {
     if (devAuthMode) return;
     if (googleBtnRef.current && !isAuthenticated) {
       initializeGoogleSignIn(googleBtnRef.current, (credential: string) => {
+        if (loginPendingRef.current) return;
+        loginPendingRef.current = true;
         mutateRef.current(credential);
       });
     }
@@ -118,7 +124,7 @@ export default function LoginPage() {
           </div>
         ) : (
           <>
-            <div ref={googleBtnRef} className="google-btn-container" />
+            <div ref={googleBtnRef} className="google-btn-container" inert={loginMutation.isPending} aria-busy={loginMutation.isPending} />
 
             <a
               href="https://www.pcu.ac.kr/kor/contents/130"
@@ -140,6 +146,7 @@ export default function LoginPage() {
         {errorMessage && (
           <div className="error-box" role="alert">
             <p>{errorMessage}</p>
+            {loginMutation.error instanceof SessionNotEstablishedError && <SessionLoginHelp />}
           </div>
         )}
       </div>
