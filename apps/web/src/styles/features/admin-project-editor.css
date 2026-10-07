@@ -560,7 +560,7 @@
   flex-wrap: wrap;
 }
 
-.project-visibility {
+.project-archive {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -569,8 +569,8 @@
   max-width: 20rem;
 }
 
-.project-visibility__switch {
-  --visibility-accent: #b91c1c;
+.project-archive__switch {
+  --archive-accent: #b91c1c;
   position: relative;
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
@@ -578,10 +578,10 @@
   width: 9.5rem;
   min-height: 2.75rem;
   padding: 3px;
-  border: 1px solid color-mix(in srgb, var(--visibility-accent) 45%, var(--color-border));
+  border: 1px solid color-mix(in srgb, var(--archive-accent) 45%, var(--color-border));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--visibility-accent) 7%, var(--color-surface));
-  color: var(--visibility-accent);
+  background: color-mix(in srgb, var(--archive-accent) 7%, var(--color-surface));
+  color: var(--archive-accent);
   font: inherit;
   font-size: 0.85rem;
   font-weight: 700;
@@ -589,41 +589,41 @@
   transition: border-color 220ms ease, background-color 220ms ease;
 }
 
-.project-visibility__switch.is-public { --visibility-accent: #15803d; }
-.project-visibility__switch.is-draft { --visibility-accent: var(--color-text-muted); }
-.project-visibility__switch:disabled { cursor: default; }
-.project-visibility__switch[aria-busy='true'] { opacity: 0.65; }
-.project-visibility__switch:focus-visible {
-  outline: 2px solid var(--visibility-accent);
+.project-archive__switch.is-active { --archive-accent: #15803d; }
+.project-archive__switch.is-draft { --archive-accent: var(--color-text-muted); }
+.project-archive__switch:disabled { cursor: default; }
+.project-archive__switch[aria-busy='true'] { opacity: 0.65; }
+.project-archive__switch:focus-visible {
+  outline: 2px solid var(--archive-accent);
   outline-offset: 4px;
 }
 
-.project-visibility__thumb {
+.project-archive__thumb {
   position: absolute;
   inset: 3px auto 3px 3px;
   width: calc((100% - 6px) / 2);
   border-radius: 5px;
-  background: var(--visibility-accent);
+  background: var(--archive-accent);
   box-shadow: 0 1px 3px rgb(0 0 0 / 15%);
   transform: translateX(100%);
   transition: transform 220ms ease, background-color 220ms ease;
 }
 
-.project-visibility__switch.is-public .project-visibility__thumb { transform: translateX(0); }
-.project-visibility__label {
+.project-archive__switch.is-active .project-archive__thumb { transform: translateX(0); }
+.project-archive__label {
   position: relative;
   z-index: 1;
   color: var(--color-text-muted);
   transition: color 220ms ease;
 }
-.project-visibility__switch.is-public .project-visibility__label--public,
-.project-visibility__switch:not(.is-public) .project-visibility__label--private { color: #fff; }
-.project-visibility__draft { grid-column: 1 / -1; }
-.project-visibility .field-error { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.project-archive__switch.is-active .project-archive__label--active,
+.project-archive__switch:not(.is-active) .project-archive__label--archived { color: #fff; }
+.project-archive__draft { grid-column: 1 / -1; }
+.project-archive .field-error { margin: 0; text-align: right; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) {
-  .project-visibility__switch,
-  .project-visibility__thumb,
-  .project-visibility__label { transition: none; }
+  .project-archive__switch,
+  .project-archive__thumb,
+  .project-archive__label { transition: none; }
 }
 
 /* Shared apply action stays clear of mobile navigation and occupies layout space. */

@@ -8,7 +8,7 @@ import AdminProjectEditPage from '../pages/admin/AdminProjectEditPage';
 import { adminMemberApi, adminProjectApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 
-const control = vi.hoisted(() => ({ role: 'ADMIN', queueApply: vi.fn(), lock: vi.fn(), queueDirty: false, queueError: null as string | null }));
+const control = vi.hoisted(() => ({ role: 'ADMIN', visibilityEnabled: true, queueApply: vi.fn(), lock: vi.fn(), queueDirty: false, queueError: null as string | null }));
 vi.mock('../features/auth', () => ({ useMe: () => ({ user: { role: control.role } }) }));
 vi.mock('../features/admin/projects/AdminProjectAssetManager', () => ({
 	AdminProjectUploadProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -16,7 +16,7 @@ vi.mock('../features/admin/projects/AdminProjectAssetManager', () => ({
 	AdminProjectPosterUpload: () => null,
 	useAdminProjectUploadQueue: () => ({ hasChanges: control.queueDirty, isApplying: false, validationError: control.queueError, applyChanges: control.queueApply, setLocked: control.lock }),
 }));
-vi.mock('../lib/env', () => ({ env: { VISIBILITY_CONTROLS_ENABLED: true } }));
+vi.mock('../lib/env', () => ({ env: { get VISIBILITY_CONTROLS_ENABLED() { return control.visibilityEnabled; } } }));
 const initial = (): AdminProjectDetail => ({ visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: true, id: 7, title: '기존 제목', summary: '소개', description: '설명', slug: 'project', year: 2026, platforms: [], isIncomplete: false, video: null, videos: [], status: 'PUBLISHED', sortOrder: 0, canEdit: true, members: [{ id: 10, name: '학생', studentId: '20260001', sortOrder: 0, userId: null }], assets: [] });
 let stored: AdminProjectDetail;
 let client: QueryClient;
@@ -31,7 +31,7 @@ function chooseVisibility(label: string) {
 }
 const apply = () => screen.getByRole('button', { name: '적용' }) as HTMLButtonElement;
 beforeEach(() => {
-	stored = initial(); control.role = 'ADMIN'; control.queueDirty = false; control.queueError = null;
+	stored = initial(); control.visibilityEnabled = true; control.role = 'ADMIN'; control.queueDirty = false; control.queueError = null;
 	control.queueApply.mockResolvedValue(undefined);
 	vi.spyOn(adminProjectApi, 'getDetail').mockImplementation(async () => stored);
 	vi.spyOn(adminProjectApi, 'update').mockImplementation(async (_id, body) => { stored = { ...stored, ...body }; return stored; });
@@ -42,6 +42,41 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client?.clear(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe('global project Apply', () => {
+ it.each([true, false])('separates archive from saved access with visibility controls %s', async (enabled) => {
+  control.visibilityEnabled = enabled;
+  mount(); await ready();
+  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 전체 공개');
+  fireEvent.click(screen.getByRole('switch', { name: '작품 보관' }));
+  expect(screen.queryByText('비공개')).toBeNull();
+  expect(screen.getByText(/보관해도 공개 범위는 유지됩니다/)).toBeTruthy();
+  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 전체 공개');
+  if (!enabled) {
+   expect(screen.queryByRole('combobox', { name: '공개 범위' })).toBeNull();
+   expect(screen.getByText(/공개 범위 변경 기능이 비활성화/)).toBeTruthy();
+  }
+  fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { status: 'ARCHIVED' }));
+  await waitFor(() => expect(apply().disabled).toBe(true));
+  expect(stored.visibility).toBe('PUBLIC');
+ });
+ it('keeps saved access visible after a failed visibility save and refreshes it after retry and remount', async () => {
+  stored.exhibitionVisibility = 'AUTHENTICATED';
+  vi.mocked(adminProjectApi.update).mockRejectedValueOnce(new Error('저장 실패'));
+  const view = mount(); await ready();
+  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 로그인 사용자');
+  chooseVisibility('운영자·관리자'); fireEvent.click(apply());
+  await screen.findByRole('alert');
+  expect(screen.getByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeTruthy();
+  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 로그인 사용자');
+  fireEvent.click(apply());
+  await screen.findByText('적용되었습니다.');
+  expect(adminProjectApi.update).toHaveBeenLastCalledWith(7, { visibility: 'STAFF' });
+  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 운영자·관리자');
+  expect(screen.queryByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeNull();
+  expect(stored.status).toBe('PUBLISHED');
+  view.unmount(); client.clear(); mount(); await ready();
+  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 운영자·관리자');
+ });
  it('edits existing links and explicitly clears all links without reviving legacy GitHub', async () => {
   stored = { ...stored, githubUrl: 'https://github.com/legacy', externalLinks: [{ label: '게임', url: 'https://example.com/old' }] };
   mount(); await ready();
