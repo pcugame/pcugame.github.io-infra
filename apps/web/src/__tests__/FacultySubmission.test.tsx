@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { PropsWithChildren } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthUser } from '../contracts';
 import { adminExhibitionApi, adminProjectApi, publicApi } from '../lib/api';
@@ -12,10 +13,10 @@ import { ProjectSubmissionForm } from '../features/project-submission/ProjectSub
 
 const mocks = vi.hoisted(() => ({ user: undefined as AuthUser | undefined, navigate: vi.fn() }));
 vi.mock('../features/auth', () => ({ useMe: () => ({ user: mocks.user }) }));
-vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
+vi.mock('react-router-dom', async importOriginal => ({ ...(await importOriginal<typeof import('react-router-dom')>()), useNavigate: () => mocks.navigate }));
 const faculty: AuthUser = { id: 9, email: 'A00000@pcu.ac.kr', name: '김교원', role: 'ADMIN' };
 const files = { posterFile: null, imageFiles: [], videoFiles: [], documentFiles: [], attachmentFiles: [], gameFile: null, webglFile: null };
-function wrapper({ children }: PropsWithChildren) { return <QueryClientProvider client={client}>{children}</QueryClientProvider>; }
+function wrapper({ children }: PropsWithChildren) { return <MemoryRouter><QueryClientProvider client={client}>{children}</QueryClientProvider></MemoryRouter>; }
 let client: QueryClient;
 beforeEach(() => {
   mocks.user = { ...faculty };

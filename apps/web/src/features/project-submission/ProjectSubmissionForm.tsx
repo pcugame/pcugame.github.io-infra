@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useWatch } from 'react-hook-form';
 import { useQuery } from '@tanstack/react-query';
 
@@ -10,10 +10,11 @@ import { publicApi } from '../../lib/api';
 import { ProjectEditorLayout } from '../../components/project/editor/ProjectEditorLayout';
 import { ProjectPreviewModal } from '../../components/project/ProjectPreviewModal';
 import { useMe } from '../auth';
+import { SubmissionBackButton } from './SubmissionBackButton';
 import { SubmissionActions } from './SubmissionActions';
 import { SubmissionBasicFields } from './SubmissionBasicFields';
 import { SubmissionMixedFilesSelection, SubmissionPosterSelection } from './SubmissionFileSelection';
-import { SubmissionUploadProgress } from './SubmissionUploadProgress';
+import { SubmissionUploadDialog } from './SubmissionUploadDialog';
 import { SubmissionMembersFieldset } from './SubmissionMembersFieldset';
 import { useProjectSubmissionForm } from './useProjectSubmissionForm';
 import { useSubmissionFiles } from './useSubmissionFiles';
@@ -40,14 +41,6 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	const submission = useProjectSubmissionForm({ mode, files });
 	const {
 		copy,
-		cancelSubmission,
-		createdProjectId,
-		finalizeIfReady,
-		canRetryPublication,
-		canRetryStatus,
-		retryStatus,
-		isFinalizing,
-		retryPublication,
 		errors,
 		form,
 		isSubmitting,
@@ -57,28 +50,24 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 		selectedYearItem,
 		showGameProgress,
 		submitMutation,
-		submissionError,
-		submissionItems,
 		years,
 	} = submission;
 	const { control, getValues, handleSubmit, register } = form;
 	const [previewSnapshot, setPreviewSnapshot] = useState<SubmitProjectPayloadInput | null>(null);
 	const [pendingZipCount, setPendingZipCount] = useState(0);
 	const title = useWatch({ control, name: 'title' });
-	const uploadFinished = useCallback(() => {
-		if (createdProjectId) void finalizeIfReady(createdProjectId);
-	}, [createdProjectId, finalizeIfReady]);
 
 	const openPreview = () => setPreviewSnapshot(getValues());
 	const closePreview = () => setPreviewSnapshot(null);
 
 	return (
-		<div className="admin-project-new-page admin-project-edit-page">
+		<div className="admin-project-new-page admin-project-edit-page" inert={isSubmitting || showGameProgress} aria-hidden={isSubmitting || showGameProgress}>
 			<div className="admin-page-header">
 				<div className="admin-page-header__text">
 					<span className="admin-page-header__eyebrow">{copy.eyebrow}</span>
 					<h1>{copy.title}</h1>
 				</div>
+				<SubmissionBackButton mode={mode} isDirty={form.formState.isDirty} files={files} disabled={isSubmitting || showGameProgress} pendingZipCount={pendingZipCount} />
 			</div>
 
 			<form
@@ -89,7 +78,8 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 					}
 					void handleSubmit(onSubmit)(event);
 				}}
-				className="project-form"
+				inert={isSubmitting || showGameProgress}
+                className="project-form"
 			>
 				<ProjectEditorLayout
 					actions={!showGameProgress && (
@@ -99,7 +89,7 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 								? '파일 목록에서 ZIP 용도를 선택하세요.'
 								: isUploadLocked
 									? '전시회 업로드가 잠겨 있습니다. 운영자에게 문의하세요.'
-									: Object.keys(errors).length > 0 ? '표시된 입력 오류를 확인하세요.' : undefined}
+									: (Object.keys(errors).length > 0 ? '표시된 입력 오류를 확인하세요.' : undefined)}
 							isUploadLocked={isUploadLocked || pendingZipCount > 0}
 							onPreview={openPreview}
 							submitLabel={copy.submitLabel}
@@ -107,49 +97,15 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 						/>
 					)}
 					poster={
-						showGameProgress ? (
-							<SubmissionUploadProgress
-								zone="poster"
-								title={title || '작품'}
-								projectId={createdProjectId!}
-								files={files}
-								items={submissionItems}
-								onComplete={uploadFinished}
-							/>
-						) : (
-							<SubmissionPosterSelection
+						<SubmissionPosterSelection
 								files={files}
 								title={title || '작품'}
 								limits={limits}
 								enabled={!isSubmitting && !isUploadLocked}
 							/>
-						)
 					}
 					details={
-						showGameProgress ? (
-							<section className="project-form-card" aria-label="제출 진행 상태">
-								<h2>파일 업로드 및 작품 {isAdminMode ? '등록' : '제출'}</h2>
-								<p>선택한 파일을 업로드하고 있습니다. 모든 파일의 검증이 끝나면 작품을 공개합니다.</p>
-								<p className="field-hint">
-									중간에 끊긴 파일은 동일한 원본 파일을 선택해 이어올릴 수 있습니다.
-								</p>
-								{submissionError != null && (
-									<div className="error-box" role="alert">
-										<p>{getApiErrorMessage(submissionError)}</p>
-									</div>
-								)}
-								{canRetryStatus && <button type="button" className="btn btn--primary btn--small" disabled={isFinalizing} onClick={() => void retryStatus()}>제출 상태 다시 확인</button>}
-								{import.meta.env.VITE_MOCK === 'true' && canRetryPublication && <button type="button" className="btn btn--primary btn--small" disabled={isFinalizing} onClick={() => void retryPublication()}>Mock 발행 다시 시도</button>}
-								<button
-									type="button"
-									className="btn btn--danger btn--small"
-									onClick={() => void cancelSubmission()}
-								>
-									제출 취소
-								</button>
-							</section>
-						) : (
-							<>
+						<>
 								<SubmissionBasicFields
 									control={control}
 									errors={errors}
@@ -163,7 +119,7 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 											errors={errors}
 											fields={membersFieldArray.fields}
 											register={register}
-											remove={membersFieldArray.remove}
+											swap={membersFieldArray.swap} remove={membersFieldArray.remove}
 										/>
 									}
 								/>
@@ -179,19 +135,9 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 									</div>
 								)}
 							</>
-						)
 					}
 					files={
-						showGameProgress ? (
-							<SubmissionUploadProgress
-								zone="files"
-								projectId={createdProjectId!}
-								files={files}
-								items={submissionItems}
-								onComplete={uploadFinished}
-							/>
-						) : (
-							<>
+						<>
 								{uploadConfigQuery.isError && (
 									<p role="alert">
 										자료 업로드 설정을 불러오지 못했습니다.{' '}
@@ -213,11 +159,11 @@ function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
 									webglUploadHint={copy.webglUploadHint}
 								/>
 							</>
-						)
 					}
 				/>
 			</form>
 
+            <SubmissionUploadDialog submission={submission} files={files} title={title || '작품'} />
 			{previewSnapshot && (
 				<ProjectPreviewModal
 					values={{

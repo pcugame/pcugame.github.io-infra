@@ -1,13 +1,25 @@
+import { useEffect, useRef } from 'react';
 import type { PublicProjectCard } from '../../contracts';
 import { ResponsiveImage } from '../common';
 
 interface Props {
-  project: PublicProjectCard;
+  project: Pick<PublicProjectCard, 'slug' | 'title' | 'summary' | 'poster' | 'members'>;
+  localPoster?: File | null;
   year: number;
   onSelect?: (slug: string) => void;
 }
 
-export function ProjectCard({ project, onSelect }: Props) {
+function LocalCardPoster({ file, title }: { file: File; title: string }) {
+  const image = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const url = URL.createObjectURL(file);
+    if (image.current) image.current.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  return <img ref={image} alt={`${title} 포스터`} decoding="async" />;
+}
+
+export function ProjectCard({ project, onSelect, localPoster }: Props) {
   return (
     <button
       type="button"
@@ -15,7 +27,9 @@ export function ProjectCard({ project, onSelect }: Props) {
       onClick={() => onSelect?.(project.slug)}
     >
       <div className="archive-card__image">
-        {project.poster ? (
+        {localPoster ? (
+          <LocalCardPoster file={localPoster} title={project.title} />
+        ) : project.poster ? (
           <ResponsiveImage
             image={project.poster}
             alt={`${project.title} 포스터`}

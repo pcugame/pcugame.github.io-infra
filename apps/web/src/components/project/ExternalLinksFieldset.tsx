@@ -66,6 +66,7 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 		<fieldset disabled={disabled} className="project-external-links">
 			<legend>외부 링크</legend>
 			<p className="field-hint">GitHub, 게임 소개, 다운로드 등 원하는 링크를 최대 20개 추가하세요.</p>
+			<div className="external-links__list">
 			{displayedLinks.map((link, index) => (
 				<div className="external-link-row" key={`${id}-${index}`}>
 					{(['label', 'url'] as const).map((field) => {
@@ -106,7 +107,8 @@ export function ExternalLinksFieldset({ value, onChange, disabled = false, showE
 				className="btn btn--secondary btn--small"
 				disabled={disabled || value.length >= 20}
 				onClick={() => change([...displayedLinks, { label: '', url: '' }])}
-			>링크 추가</button>
+			>＋ 링크 추가</button>
+			</div>
 		</fieldset>
 	);
 }

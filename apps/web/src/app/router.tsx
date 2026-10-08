@@ -19,6 +19,8 @@ const MePage = lazy(() => import('../pages/MePage'));
 const WebglNetworkPage = lazy(() => import('../pages/WebglNetworkPage'));
 const MyProjectsPage = lazy(() => import('../pages/MyProjectsPage'));
 const UserProjectSubmitPage = lazy(() => import('../pages/UserProjectSubmitPage'));
+const ProjectSubmissionStudioPage = lazy(() => import('../pages/ProjectSubmissionStudioPage'));
+const AdminProjectSubmissionStudioPage = lazy(() => import('../pages/ProjectSubmissionStudioPage').then(module => ({ default: module.AdminProjectSubmissionStudioPage })));
 const ProjectChangeRequestPage = lazy(() => import('../pages/ProjectChangeRequestPage'));
 const MyChangeRequestPage = lazy(() => import('../pages/MyChangeRequestPage'));
 const AdminProjectsPage = lazy(() => import('../pages/admin/AdminProjectsPage'));
@@ -129,6 +131,7 @@ export const routes: RouteObject[] = [
             </RequireAuth>
           ),
         },
+        { path: '/me/projects/new/studio', element: (<RequireAuth><Lazy><ProjectSubmissionStudioPage /></Lazy></RequireAuth>) },
         {
           path: '/me/projects/:id/change-request',
           element: (
@@ -149,6 +152,7 @@ export const routes: RouteObject[] = [
             </RequireAuth>
           ),
           children: [
+            { path: 'projects/new/studio', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminProjectSubmissionStudioPage /></Lazy></RequireRole>) },
             { path: 'webgl-network', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><WebglNetworkPage admin /></Lazy></RequireRole>) },
             {
               index: true,

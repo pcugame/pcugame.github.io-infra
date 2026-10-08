@@ -9,6 +9,7 @@ import { queryKeys, useViewerKey } from '../../../lib/query';
 interface Props {
 	project: AdminProjectDetail;
 	isPending: boolean;
+	horizontal?: boolean;
 	onPendingChange?: (pending: boolean) => void;
 }
 
@@ -18,7 +19,7 @@ const draftFrom = (settings: WebglDisplaySettings) => ({
 	height: settings.webglDisplayHeight?.toString() ?? '',
 });
 
-export function WebglDisplaySettingsForm({ project, isPending, onPendingChange }: Props) {
+export function WebglDisplaySettingsForm({ project, isPending, onPendingChange, horizontal = false }: Props) {
 	const qc = useQueryClient();
 	const viewerKey = useViewerKey();
 	const settingsKey = viewerKey(['webgl-display', project.id, project.webglDeployment?.id] as const);
@@ -86,8 +87,8 @@ export function WebglDisplaySettingsForm({ project, isPending, onPendingChange }
 	}
 
 	return (
-		<form className="project-form" aria-label="WebGL 표시 크기 설정" onSubmit={submit} noValidate>
-			<details className="project-optional-settings">
+		<form className={`project-form${horizontal ? ' webgl-display-settings--horizontal' : ''}`} aria-label="WebGL 표시 크기 설정" onSubmit={submit} noValidate>
+			<details className="project-optional-settings" open={horizontal || undefined}>
 				<summary>WebGL 표시 크기 · {baseline.mode === "manual" ? `${baseline.width} × ${baseline.height}` : baseline.mode === "auto" ? "자동 감지" : "기존 표시 방식"}{dirty && " · 저장 전 변경 있음"} · 별도 저장</summary>
 				<p className="field-hint">이 설정은 변경사항 적용과 별도로 저장됩니다.</p>
 			<FormSection disabled={disabled} legend="표시 크기 설정">

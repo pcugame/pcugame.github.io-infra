@@ -1,5 +1,5 @@
-import { ProjectSubmissionForm } from '../components/project';
+import { Navigate } from 'react-router-dom';
 
 export default function UserProjectSubmitPage() {
-  return <ProjectSubmissionForm mode="user" />;
+  return <Navigate to="/me/projects/new/studio" replace />;
 }

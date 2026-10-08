@@ -19,13 +19,17 @@
   to { opacity: 1; }
 }
 
+.modal-panel, .project-preview-inline__content {
+  --project-panel-radius: 16px;
+  max-width: 45rem;
+  width: 100%;
+}
+
 .modal-panel {
   position: relative;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 16px;
-  max-width: 45rem;
-  width: 100%;
+  border-radius: var(--project-panel-radius);
   max-height: calc(100vh - 4rem);
   overflow-y: auto;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
@@ -70,7 +74,7 @@
 
 /* 상단 비주얼 — 고정 16:9 비율 */
 .modal-visual {
-  border-radius: 16px 16px 0 0;
+  border-radius: calc(var(--project-panel-radius) - 1px) calc(var(--project-panel-radius) - 1px) 0 0;
   overflow: hidden;
   background: #0f172a;
 }
@@ -426,7 +430,7 @@
   font-weight: 700;
   letter-spacing: -0.01em;
   text-align: center;
-  border-radius: 16px 16px 0 0;
+  border-radius: calc(var(--project-panel-radius) - 1px) calc(var(--project-panel-radius) - 1px) 0 0;
 }
 
 .preview-mock {

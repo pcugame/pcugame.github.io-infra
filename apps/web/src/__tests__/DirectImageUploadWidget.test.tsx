@@ -313,3 +313,21 @@ describe('DirectImageUploadWidget', () => {
 		});
 	});
 });
+
+it.each(['REJECTED', 'EXPIRED', 'CANCELLED'])('starts a replacement after an explicit retry confirms %s', async state => {
+ const session = { sessionId: 'terminal-retry', owner: { type: 'PROJECT', id: 77 }, kind: 'IMAGE', generation: 1 };
+ const file = new File(['file'], 'retry.png', { type: 'image/png' });
+ const complete = vi.fn();
+ uploadDirectAssetFile.mockReset().mockImplementationOnce(async (_owner, _file, _kind, _progress, options) => {
+  options.onSession(session);
+  throw new Error('transfer failed');
+ }).mockResolvedValueOnce({ status: 'READY', sessionId: 'replacement', generation: 1 });
+ getDirectAssetUploadStatus.mockReset().mockResolvedValue({ ...session, state });
+ render(<QueryClientProvider client={new QueryClient()}><DirectImageUploadWidget owner={{ type: 'PROJECT', id: 77 }} kind="IMAGE" initialFiles={[file]} autoStart onComplete={complete} /></QueryClientProvider>);
+ const retry = await screen.findByRole('button', { name: '재시도' });
+ expect(uploadDirectAssetFile).toHaveBeenCalledOnce();
+ fireEvent.click(retry);
+ await waitFor(() => expect(complete).toHaveBeenCalledOnce());
+ expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2);
+ expect(uploadDirectAssetFile.mock.calls[1]![4].resume).toBeUndefined();
+});

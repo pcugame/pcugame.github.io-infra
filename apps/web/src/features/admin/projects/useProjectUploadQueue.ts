@@ -11,6 +11,7 @@ import {
 	uploadQueueIssues,
 	type UploadEntry,
 	type UploadZone,
+	type ProjectUploadKind,
 } from '../../../lib/upload/project-files';
 
 type Action =
@@ -43,6 +44,7 @@ export function useProjectUploadQueue(
 	const completedUploads = useRef(new Set<number>());
 	const interruptedApply = useRef<Error | null>(null);
 	const [retryAttempt, setRetryAttempt] = useState(0);
+	const [cancelAttempt, setCancelAttempt] = useState(0);
 	const [submissionItem, setSubmissionItem] = useState<{ id: string; clientToken: string }>();
 	const [removals, setRemovals] = useState<number[]>([]);
 	const [removeWebgl, setRemoveWebgl] = useState(false);
@@ -72,25 +74,30 @@ export function useProjectUploadQueue(
 	const validationError = pending.some((entry) => entry.kind === 'ZIP')
 		? 'ZIP 파일의 용도를 선택해 주세요.'
 		: issues.values().next().value ?? null;
-	const add = (files: File[], zone: UploadZone) => {
-		if (!enabled || locked || applying.current || files.length === 0) return;
+	const add = (files: File[], zone: UploadZone, kinds?: ProjectUploadKind[]): string | null => {
+		if (!enabled || locked || applying.current || files.length === 0) return null;
 		if (zone === 'poster') {
 			if (files.length !== 1 || classifyProjectFile(files[0]!, zone) !== 'POSTER') {
 				setPosterError('포스터는 JPG·PNG·WebP·PDF 파일 한 개만 선택해 주세요.');
-				return;
+				return '포스터는 JPG·PNG·WebP·PDF 파일 한 개만 선택해 주세요.';
 			}
 			setPosterError(null);
 		}
+		const chosen = files.map((file, index) => ({ id: ++nextId.current, file, zone, kind: kinds?.[index] ?? classifyProjectFile(file, zone)!, status: 'pending' as const }));
+		if (kinds) {
+			if (chosen.some(entry => entry.file.size === 0)) return '빈 파일은 선택할 수 없습니다.';
+			const replacements = chosen.filter(entry => entry.kind === 'GAME' || entry.kind === 'WEBGL' || entry.kind === 'POSTER').map(entry => entry.kind);
+			const kept = entries.filter(entry => entry.status !== 'pending' || !replacements.includes(entry.kind));
+			const errors = uploadQueueIssues([...kept, ...chosen], effectiveProject, limits, materialLimits);
+			const error = chosen.map(entry => errors.get(entry.id)).find(Boolean);
+			if (error) return error;
+			for (const entry of entries) if (entry.status === 'pending' && replacements.includes(entry.kind)) dispatch({ type: 'status', id: entry.id, status: 'cancelled' });
+		}
 		dispatch({
 			type: 'add',
-			entries: files.map((file) => ({
-				id: ++nextId.current,
-				file,
-				zone,
-				kind: classifyProjectFile(file, zone)!,
-				status: 'pending',
-			})),
+			entries: chosen,
 		});
+		return null;
 	};
 	const refresh = useCallback(async () => {
 		try {
@@ -188,6 +195,13 @@ export function useProjectUploadQueue(
 		validationError,
 		applyChanges,
 		fail,
+        cancelAttempt,
+        cancelAll: () => {
+            interruptedApply.current = new Error('파일 업로드를 취소했습니다. 남은 변경사항을 확인한 뒤 다시 적용해 주세요.');
+            for (const entry of entries) if (entry.status === 'pending') dispatch({ type: 'status', id: entry.id, status: 'cancelled' });
+            if (active) setCancelAttempt(attempt => attempt + 1);
+            else fail('파일 업로드를 취소했습니다.');
+        },
 		retryAttempt,
 		removals,
 		removeWebgl,

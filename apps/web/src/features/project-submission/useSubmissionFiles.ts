@@ -47,7 +47,7 @@ export interface SubmissionFilesState {
 	handleDocumentsChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	handleAttachmentsChange: (e: ChangeEvent<HTMLInputElement>) => void;
 	selectPoster: (file: File | null) => boolean;
-	addFiles: (files: readonly { kind: Exclude<ProjectUploadKind, 'POSTER'>; file: File }[]) => boolean;
+	addFiles: (files: readonly { kind: Exclude<ProjectUploadKind, 'POSTER'>; file: File }[], onError?: (message: string | null) => void) => boolean;
 	removeFile: (kind: ProjectUploadKind, file: File) => void;
 }
 
@@ -258,30 +258,30 @@ export function useSubmissionFiles({
 	const handleAttachmentsChange = (e: ChangeEvent<HTMLInputElement>) => {
 		addMaterials('첨부자료', Array.from(e.target.files ?? []), 'attachments', e.target);
 	};
-	const addFiles: SubmissionFilesState['addFiles'] = (selected) => {
+	const addFiles: SubmissionFilesState['addFiles'] = (selected, onError = setFileSizeError) => {
 		const grouped = (kind: ProjectUploadKind) =>
 			selected.filter((item) => item.kind === kind).map((item) => item.file);
 		const videos = grouped('VIDEO');
 		const documents = grouped('DOCUMENT');
 		const attachments = grouped('ATTACHMENT');
 		if (grouped('GAME').length > 1 || grouped('WEBGL').length > 1) {
-			setFileSizeError('게임과 WebGL 빌드는 각각 ZIP 한 개씩 선택할 수 있습니다.');
+			onError('게임과 WebGL 빌드는 각각 ZIP 한 개씩 선택할 수 있습니다.');
 			return false;
 		}
 		if (videoFiles.length + videos.length > MAX_PROJECT_VIDEOS) {
-			setFileSizeError(`동영상은 프로젝트당 최대 ${MAX_PROJECT_VIDEOS}개까지 선택할 수 있습니다.`);
+			onError(`동영상은 프로젝트당 최대 ${MAX_PROJECT_VIDEOS}개까지 선택할 수 있습니다.`);
 			return false;
 		}
 		if (documents.length + attachments.length > 0) {
 			if (!materialLimits) {
-				setFileSizeError('현재 서버는 프로젝트 자료 업로드를 지원하지 않습니다.');
+				onError('현재 서버는 프로젝트 자료 업로드를 지원하지 않습니다.');
 				return false;
 			}
 			if (
 				documentFiles.length + attachmentFiles.length + documents.length + attachments.length >
 				materialLimits.maxCount
 			) {
-				setFileSizeError(
+				onError(
 					`문서와 첨부자료는 합쳐서 프로젝트당 최대 ${materialLimits.maxCount}개까지 선택할 수 있습니다.`,
 				);
 				return false;
@@ -293,13 +293,13 @@ export function useSubmissionFiles({
 				? materialLimits!.maxBytes
 				: (kind === 'GAME' || kind === 'WEBGL' ? limits.gameMaxMb : getAssetLimitMb(kind, file, limits)) * mb;
 			if (file.size === 0 || file.size > maxBytes) {
-				setFileSizeError(
+				onError(
 					`"${file.name}": 빈 파일은 선택할 수 없으며 파일당 최대 ${formatFileSizeMb(maxBytes)}MB까지 허용됩니다.`,
 				);
 				return false;
 			}
 		}
-		setFileSizeError(null);
+		onError(null);
 		setImageFiles((previous) => [...previous, ...grouped('IMAGE')]);
 		setVideoFiles((previous) => [...previous, ...videos]);
 		setDocumentFiles((previous) => [...previous, ...documents]);

@@ -44,6 +44,13 @@ describe('route guards', () => {
     expect(props.allowed).toEqual(['OPERATOR', 'ADMIN']);
   });
 
+  it('studio routes preserve user authentication and admin-only creation', () => {
+    expectRouteElement(topLevelRoute('/me/projects/new/studio'), RequireAuth);
+    const props = expectRouteElement<{ allowed: string[] }>(adminChildRoute('projects/new/studio'), RequireRole);
+    expect(props.allowed).toEqual(['OPERATOR', 'ADMIN']);
+    expect(topLevelRoute('/admin/projects/new/studio')).toBeUndefined();
+  });
+
   it('/admin/projects/:id/edit keeps the existing role policy', () => {
     const props = expectRouteElement<{ allowed: string[] }>(
       adminChildRoute('projects/:id/edit'),

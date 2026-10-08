@@ -1,5 +1,5 @@
-import { ProjectSubmissionForm } from '../../components/project';
+import { Navigate } from 'react-router-dom';
 
 export default function AdminProjectNewPage() {
-  return <ProjectSubmissionForm mode="admin" />;
+  return <Navigate to="/admin/projects/new/studio" replace />;
 }

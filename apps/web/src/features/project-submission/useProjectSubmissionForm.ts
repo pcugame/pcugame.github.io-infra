@@ -53,11 +53,11 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				webglUploadHint: 'WebGL ZIP의 최상위 또는 단일 폴더에 index.html과 Build 폴더를 포함하세요. Build에는 .loader.js와 .framework.js, .wasm, .data 파일이 필요합니다. 비압축, .gz, .br, Decompression Fallback의 .unityweb 형식을 지원합니다. loader는 .js(.gz/.br 포함) 형식이어야 합니다. 표시 크기는 업로드 후 자동으로 감지하며, 작품 수정 화면에서 확인·변경할 수 있습니다.',
 			};
 
-	const { data: yearsData } = useQuery({
+	const exhibitionsQuery = useQuery({
 		queryKey: viewerKey(queryKeys.adminExhibitions),
 		queryFn: adminExhibitionApi.list,
 	});
-	const years = yearsData?.items ?? [];
+	const years = exhibitionsQuery.data?.items ?? [];
 
 	const form = useForm<SubmitProjectPayloadInput>({
 		resolver: zodResolver(SubmitProjectPayloadSchema),
@@ -91,26 +91,29 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		name: 'members',
 	});
 
+	// Follow the original row through swaps; never autofill a replacement after deletion.
+	const initialMemberId = useRef(membersFieldArray.fields[0]?.id);
 	useEffect(() => {
-		if (!canPrefillParticipant || !user || membersFieldArray.fields.length === 0) return;
-
-		const firstMember = getValues('members.0');
-		if (!firstMember?.name) {
-			setValue('members.0.name', user.name, { shouldValidate: true });
+		if (!canPrefillParticipant || !user) return;
+		const index = membersFieldArray.fields.findIndex(field => field.id === initialMemberId.current);
+		if (index < 0) return;
+		const member = getValues(`members.${index}`);
+		if (!member?.name) {
+			setValue(`members.${index}.name`, user.name, { shouldValidate: true });
 		}
-		if (!firstMember?.studentId && user.studentId) {
-			setValue('members.0.studentId', user.studentId, { shouldValidate: true });
+		if (!member?.studentId && user.studentId) {
+			setValue(`members.${index}.studentId`, user.studentId, { shouldValidate: true });
 		}
-		if (isAdminMode && !firstMember?.userId) {
-			setValue('members.0.userId', user.id);
+		if (isAdminMode && !member?.userId) {
+			setValue(`members.${index}.userId`, user.id);
 		}
-	}, [canPrefillParticipant, membersFieldArray.fields.length, getValues, isAdminMode, setValue, user]);
+	}, [canPrefillParticipant, membersFieldArray.fields, getValues, isAdminMode, setValue, user]);
 
 	const selectedExhibitionId = useWatch({ control, name: 'exhibitionId' });
 	const selectedYearItem = years.find((year) => year.id === Number(selectedExhibitionId));
 	const isUploadLocked = selectedYearItem != null && !(selectedYearItem.isModificationEnabled ?? selectedYearItem.isUploadEnabled) && !isPrivileged;
 	const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
-	const [createdSubmission, setCreatedSubmission] = useState<SubmitProjectResponse | null>(null);
+	const [createdSubmission, setCreatedSubmission] = useState<(SubmitProjectResponse & { fileNames?: Record<string, string> }) | null>(null);
 	const [submissionItems, setSubmissionItems] = useState<ProjectSubmissionItemStatus[]>([]);
 	const [submissionError, setSubmissionError] = useState<unknown>(null);
 	const manifestByFingerprint = useRef(new Map<string, ProjectSubmissionManifestItem[]>());
@@ -211,11 +214,11 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			setCreatedProjectId(null);
 			setCreatedSubmission(null);
 			setSubmissionItems([]);
-			navigate(isAdminMode ? '/admin/projects' : '/me/projects');
+			setSubmissionError(null);
 		} catch (error) {
 			if (current()) setSubmissionError(error);
 		} finally { if (current()) cancellationPending.current = false; }
-	}, [createdProjectId, isAdminMode, mode, navigate, pendingStorageKey, viewerIdentity]);
+	}, [createdProjectId, mode, pendingStorageKey, viewerIdentity]);
 
 	useEffect(() => {
 		setCreatedProjectId(null); setCreatedSubmission(null); setSubmissionItems([]); setSubmissionError(null); setCanRetryPublication(false); setCanRetryStatus(false); setIsFinalizing(false);
@@ -234,6 +237,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	const submitMutation = useMutation({
 		mutationFn: ({ formData, idempotencyKey }: {
+			fileNames: Record<string, string>;
 			formData: FormData;
 			idempotencyKey: string;
 			fingerprint: string;
@@ -248,7 +252,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		retryDelay: 0,
 		onSuccess: (res, operation) => {
 			const active = mounted.current && lifetime.current === operation.lifetime && currentViewer.current === operation.viewerIdentity;
-			if (active || window.sessionStorage.getItem(operation.storageKey) === null) window.sessionStorage.setItem(operation.storageKey, JSON.stringify(res));
+			if (active || window.sessionStorage.getItem(operation.storageKey) === null) window.sessionStorage.setItem(operation.storageKey, JSON.stringify({ ...res, fileNames: operation.fileNames }));
 			if (!active) return;
 			idempotencyOperation.complete(operation.fingerprint);
 			qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
@@ -256,7 +260,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
 
 			setCreatedProjectId(res.id);
-			setCreatedSubmission(res);
+			setCreatedSubmission({ ...res, fileNames: operation.fileNames });
 			setSubmissionItems(res.items);
 			void finalizeIfReady(res.id);
 		},
@@ -301,6 +305,15 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		}
 		const fd = buildSubmitFormData({ ...data, manifest }, {});
 		submitMutation.mutate({
+			fileNames: Object.fromEntries([
+                ...(files.posterFile ? [['poster', files.posterFile.name]] : []),
+                ...(files.gameFile ? [['game', files.gameFile.name]] : []),
+                ...(files.webglFile ? [['webgl', files.webglFile.name]] : []),
+                ...files.imageFiles.map((file, index) => [`image:${index}`, file.name]),
+                ...files.videoFiles.map((file, index) => [`video:${index}`, file.name]),
+                ...files.documentFiles.map((file, index) => [`document:${index}`, file.name]),
+                ...files.attachmentFiles.map((file, index) => [`attachment:${index}`, file.name]),
+            ]),
 			formData: fd,
 			viewerIdentity,
 			storageKey: pendingStorageKey,
@@ -317,6 +330,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	return {
 		copy,
+		exhibitionsQuery,
 		canRetryPublication,
 		canRetryStatus,
 		retryStatus: () => createdProjectId !== null && finalizeIfReady(createdProjectId),

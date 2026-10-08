@@ -1,10 +1,11 @@
 /* @vitest-environment jsdom */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { within, act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AdminProjectDetail } from '@pcu/contracts';
 import {
 	AdminProjectAssetManager,
+	AdminProjectUploadProgress,
 	AdminProjectPosterUpload,
 	AdminProjectUploadProvider,
 	useAdminProjectUploadQueue,
@@ -47,10 +48,10 @@ const limits = getClientUploadLimits('ADMIN');
 function ApplyControl() {
 	const queue = useAdminProjectUploadQueue();
 	return <><button onClick={() => void queue.applyChanges().catch(() => {})}>적용</button>
-		<span data-testid="dirty">{String(queue.hasChanges)}</span><span data-testid="applying">{String(queue.isApplying)}</span></>;
+		<button onClick={queue.cancelAll}>전체 취소</button><span data-testid="dirty">{String(queue.hasChanges)}</span><span data-testid="applying">{String(queue.isApplying)}</span></>;
 }
 function apply() { fireEvent.click(screen.getByRole('button', { name: '적용' })); }
-function setup(enabled = true, detail = project) {
+function setup(enabled = true, detail = project, studio = false) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 	return {
 		client,
@@ -58,8 +59,8 @@ function setup(enabled = true, detail = project) {
 			<QueryClientProvider client={client}>
 				<AdminProjectUploadProvider project={detail} projectId={7} limits={limits} canEditContent={enabled}>
 					<ApplyControl />
-					<AdminProjectPosterUpload project={detail} canEditContent={enabled} />
-					<AdminProjectAssetManager canEditContent={enabled} />
+					<AdminProjectPosterUpload project={detail} canEditContent={enabled} studio={studio} />
+					<AdminProjectAssetManager canEditContent={enabled} studio={studio} /><AdminProjectUploadProgress />
 				</AdminProjectUploadProvider>
 			</QueryClientProvider>,
 		),
@@ -130,7 +131,7 @@ it('clears the draft binding when uploading again after publication', async () =
 		<AdminProjectUploadProvider project={project} projectId={7} limits={limits} canEditContent>
 			<ApplyControl />
 			<AdminProjectPosterUpload project={project} canEditContent />
-			<AdminProjectAssetManager canEditContent />
+			<AdminProjectAssetManager canEditContent /><AdminProjectUploadProgress />
 		</AdminProjectUploadProvider>
 	</QueryClientProvider>);
 	drop([file('second.png')]);
@@ -320,7 +321,7 @@ it('does not advance while server cancellation is pending', async () => {
 	drop([file('a.jpg'), file('b.mp4')]);
 	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
-	fireEvent.click(screen.getAllByRole('button', { name: '취소' })[0]!);
+	fireEvent.click(within(screen.getByRole('list', { name: '변경 파일 업로드 진행' })).getByRole('button', { name: '취소' }));
 	await waitFor(() => expect(api.cancelDirectAssetUploadSession).toHaveBeenCalledOnce());
 	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
 	await act(async () => confirm());
@@ -406,7 +407,7 @@ it.each(['complete', 'cancel', 'fail'] as const)('handles widget %s while Apply 
 	if (outcome === 'complete') await act(async () => finishUpload({ status: 'READY', sessionId: 'manual' }));
 	else if (outcome === 'fail') await act(async () => failUpload(new Error('second failure')));
 	else {
-			fireEvent.click(screen.getAllByRole('button', { name: '취소' })[0]!);
+			fireEvent.click(within(screen.getByRole('list', { name: '변경 파일 업로드 진행' })).getByRole('button', { name: '취소' }));
 			await waitFor(() => expect(screen.queryByText('a.jpg')).toBeNull());
 		}
 	await act(async () => finishDelete());
@@ -428,4 +429,47 @@ it('binds student draft retries through the user submission endpoint', async () 
   setup(true, { ...project, status: 'DRAFT' }); drop([file('poster.png')], true); apply();
   await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
   expect(read).toHaveBeenCalledWith(7); expect(admin).not.toHaveBeenCalled(); expect(api.uploadDirectAssetFile.mock.calls[0]![4]).toMatchObject({ submissionItem: binding });
+});
+
+
+it('stages the same ZIP as native, WebGL and attachment in separate studio areas, preserving a build on invalid replacement', async () => {
+ setup(true, project, true);
+ await waitFor(() => expect(publicApi.getUploadConfig).toHaveBeenCalled());
+ const choose = (label: string, files: File[]) => fireEvent.change(screen.getByLabelText(label, { selector: 'input' }), { target: { files } });
+ const zip = file('same.zip');
+ choose('네이티브 빌드 파일 선택', [zip]);
+ choose('웹 빌드 파일 선택', [zip]);
+ choose('스크린샷 / 기타 자료 파일 선택', [zip]);
+ expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
+ choose('네이티브 빌드 파일 선택', [file('invalid.png')]);
+ expect(screen.getByRole('alert').textContent).toContain('ZIP');
+ expect(within(document.querySelector('.studio-files-container') as HTMLElement).getAllByText('same.zip')).toHaveLength(3);
+ choose('네이티브 빌드 파일 선택', [file('a.zip'), file('b.zip')]);
+ expect(within(document.querySelector('.studio-files-container') as HTMLElement).getAllByText('same.zip')).toHaveLength(3);
+ choose('네이티브 빌드 파일 선택', [file('replacement.zip')]);
+ expect(within(document.querySelector('.studio-files-container') as HTMLElement).getAllByText('same.zip')).toHaveLength(2);
+ expect(api.uploadDirectAssetFile).not.toHaveBeenCalled();
+ api.uploadDirectAssetFile.mockResolvedValue({ status: 'READY', sessionId: 'ready' });
+ apply();
+ await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(3));
+ expect(api.uploadDirectAssetFile.mock.calls.map(call => call[2])).toEqual(expect.arrayContaining(['GAME', 'WEBGL', 'ATTACHMENT']));
+});
+
+it('cancels the entire queue only after the active server cancellation is confirmed', async () => {
+ let confirm!: () => void;
+ api.cancelDirectAssetUploadSession.mockImplementation(() => new Promise<void>(resolve => { confirm = resolve; }));
+ api.uploadDirectAssetFile.mockImplementation((_owner, _file, _kind, _progress, options) => {
+  options.onSession({ sessionId: 'cancel-all-session', owner: { type: 'PROJECT', id: 7 }, kind: 'IMAGE', generation: 1 });
+  return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
+ });
+ setup(); drop([file('first.jpg'), file('pending.mp4')]); apply();
+ await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
+ fireEvent.click(screen.getByRole('button', { name: '전체 취소' }));
+ await waitFor(() => expect(api.cancelDirectAssetUploadSession).toHaveBeenCalledOnce());
+ expect(screen.getByTestId('applying').textContent).toBe('true');
+ expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
+ await act(async () => confirm());
+ await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
+ expect(screen.getByTestId('dirty').textContent).toBe('false');
+ expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
 });

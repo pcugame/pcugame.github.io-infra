@@ -427,6 +427,7 @@ select.form-control {
       border-bottom: 1.6px solid currentColor;
       color: var(--color-text-muted);
       transform: rotate(45deg);
+      transition: transform 180ms ease, color 180ms ease;
     }
     select.form-control:not([multiple]):not([size]):open::picker-icon {
       transform: rotate(225deg);
@@ -445,6 +446,22 @@ select.form-control {
       max-width: calc(100vw - 1rem);
       overflow: auto;
       font: inherit;
+      opacity: 0;
+      translate: 0 -0.25rem;
+      transition: opacity 180ms ease, translate 180ms ease,
+        display 180ms allow-discrete, overlay 180ms allow-discrete;
+    }
+
+    select.form-control:not([multiple]):not([size]):open::picker(select) {
+      opacity: 1;
+      translate: 0 0;
+    }
+
+    @starting-style {
+      select.form-control:not([multiple]):not([size]):open::picker(select) {
+        opacity: 0;
+        translate: 0 -0.25rem;
+      }
     }
 
     select.form-control:not([multiple]):not([size]) option {
@@ -455,8 +472,12 @@ select.form-control {
       white-space: normal;
       overflow-wrap: anywhere;
       cursor: pointer;
+      gap: 0.6rem;
+      transition: background-color 120ms ease, color 120ms ease;
     }
-    select.form-control:not([multiple]):not([size]) option::checkmark { display: none; }
+    select.form-control:not([multiple]):not([size]) option::checkmark {
+      color: var(--color-primary);
+    }
     select.form-control:not([multiple]):not([size]) option:checked {
       color: var(--color-primary);
       font-weight: 600;
@@ -470,6 +491,38 @@ select.form-control {
       color: var(--color-text-muted);
       cursor: not-allowed;
     }
+    .exhibition-select__content {
+      display: flex;
+      align-items: center;
+      column-gap: 0.65rem;
+      flex: 1;
+      min-width: 0;
+      line-height: 1.6;
+    }
+    .exhibition-select__year {
+      flex: 0 0 auto;
+      color: var(--color-text-muted);
+      font-weight: 600;
+    }
+    .exhibition-select__title {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .exhibition-select__title--active { font-weight: 700; }
+    .exhibition-select__lock-pill {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      padding: 0.1rem 0.55rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--color-danger) 14%, var(--color-surface));
+      color: var(--color-danger);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
     [data-theme='dark'] select.form-control:not([multiple]):not([size])::picker(select) {
       background: #1e1e21;
       box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
@@ -480,6 +533,14 @@ select.form-control {
     }
     [data-theme='dark'] select.form-control:not([multiple]):not([size]) option:not(:disabled):is(:hover, :focus-visible) {
       background: color-mix(in srgb, var(--color-primary) 20%, #1e1e21);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      select.form-control:not([multiple]):not([size])::picker-icon,
+      select.form-control:not([multiple]):not([size])::picker(select),
+      select.form-control:not([multiple]):not([size]) option {
+        transition: none;
+      }
     }
   }
 }

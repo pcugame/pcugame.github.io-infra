@@ -678,13 +678,14 @@ export default function ProjectChangeRequestPage() {
 
 	return (
 		<div className="admin-project-edit-page">
-			<div className="admin-page-header">
+			<div className="admin-page-header project-edit-header">
 				<div className="admin-page-header__text">
 					<h1>작품 변경 요청</h1>
 					<p>
 						{project.title} · {project.year}년
 					</p>
 				</div>
+				<Link className="btn btn--secondary project-edit-header__back" to="/me/projects" aria-disabled={busy} onClick={event => { if (busy) event.preventDefault(); }}>내 작품으로 돌아가기</Link>
 			</div>
 			{!active ? (
 				<section className="project-form">
@@ -952,9 +953,6 @@ export default function ProjectChangeRequestPage() {
 					{getApiErrorMessage(mutationError)}
 				</p>
 			)}
-			<Link className="btn btn--secondary" to="/me/projects">
-				내 작품으로 돌아가기
-			</Link>
 		</div>
 	);
 }
