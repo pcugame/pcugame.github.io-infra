@@ -113,6 +113,30 @@ async function goTo(step: number) {
 }
 
 describe('submission studio', () => {
+	it('validates side-arrow navigation, preserves files, and never submits from the final arrow', async () => {
+		const { container } = mount();
+		const previous = screen.getByRole('button', { name: '이전 작성 단계' }) as HTMLButtonElement;
+		const next = screen.getByRole('button', { name: '다음 작성 단계' }) as HTMLButtonElement;
+		expect(previous.disabled).toBe(true);
+		fireEvent.click(next);
+		await screen.findByText('제목을 입력하세요.');
+		expect(screen.getByRole('heading', { name: '작품 소개' })).toBeTruthy();
+		await enterMetadata();
+		fireEvent.click(next);
+		await screen.findByRole('heading', { name: '팀과 자료' });
+		select(container, 'native', [new File(['zip'], 'retained.zip', { type: 'application/zip' })]);
+		fireEvent.click(next);
+		await screen.findByRole('region', { name: '전시 화면 미리보기' });
+		expect(next.disabled).toBe(true);
+		fireEvent.click(next);
+		expect(controls.submit).not.toHaveBeenCalled();
+		fireEvent.click(previous);
+		await screen.findByRole('heading', { name: '팀과 자료' });
+		expect(screen.getByText('retained.zip')).toBeTruthy();
+		expect(container.querySelector('[data-step-direction="backward"]')).toBeTruthy();
+		expect(controls.upload).not.toHaveBeenCalled();
+	});
+
 	it('updates the live preview and routes invalid hidden fields back to the right step', async () => {
 		mount();
 		await enterMetadata();
@@ -136,6 +160,11 @@ describe('submission studio', () => {
 		fireEvent.click(within(card).getByRole('button'));
 		expect(screen.getByRole('region', { name: '전시 화면 미리보기' })).toBeTruthy();
 		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(screen.getByRole('button', { name: '카드형' }).getAttribute('aria-pressed')).toBe('true');
+		fireEvent.click(screen.getByRole('button', { name: '포스터형' }));
+		expect(screen.getByRole('article', { name: '전시 카드 미리보기' }).classList.contains('archive-grid--poster')).toBe(true);
+		await goTo(0);
+		expect(screen.getByRole('button', { name: '포스터형' }).getAttribute('aria-pressed')).toBe('true');
 	});
 
 	it('does not create a submission when Enter submits an earlier step', async () => {
