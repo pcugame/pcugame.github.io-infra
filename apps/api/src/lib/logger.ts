@@ -9,6 +9,7 @@ export interface LoggerConfig {
 /** Create an isolated root logger for a BackendContext from explicit config. */
 export function createRootLogger(config: LoggerConfig): AppLogger {
 	return pino({
+		redact: ['req.headers["x-vote-participant"]', 'headers["x-vote-participant"]'],
 		level: config.LOG_LEVEL,
 		...(config.NODE_ENV === 'development'
 			? { transport: { target: 'pino-pretty', options: { colorize: true } } }

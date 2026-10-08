@@ -1,3 +1,4 @@
+import { handleVoting } from './voting';
 import { MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockRequestOptions, type MockUserSelection } from './context';
 import { allowMethod, bodyObject } from './common';
 import { handleProjects } from './projects';
@@ -34,7 +35,7 @@ export async function dispatchMockRequest(ctx: MockContext, pathname: string, me
     const error = errors[String(scenario)] ?? [400, 'VALIDATION_ERROR', 'Unknown login failure'];
     throw new MockHttpError(...error);
   }
-  for (const handler of [handleUploads, handleProjects, handleChanges, handleWebgl, handleAccess, handleManagement]) {
+  for (const handler of [handleVoting, handleUploads, handleProjects, handleChanges, handleWebgl, handleAccess, handleManagement]) {
     const result = await handler(ctx, pathname, method, options, path);
     if (result !== UNHANDLED) return result;
   }

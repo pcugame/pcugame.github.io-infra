@@ -135,3 +135,5 @@ export * from './webgl-network.js';
 
 export { PROJECT_PLATFORMS } from './enums.js';
 export * from './project-requirements.js';
+
+export * from './voting.js';

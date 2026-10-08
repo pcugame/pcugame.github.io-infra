@@ -6,6 +6,7 @@ import { runIntegration } from './run-integration.mjs';
 
 // File selections and parallelism captured from the previous root commands.
 const expectedSuites = {
+ voting: ['src/__tests__/voting.postgres.test.ts'],
 	'orphan-renewal-timeout': [
 		'src/__tests__/orphan-renewal-timeout.postgres.test.ts'
 	],
@@ -109,7 +110,7 @@ const inheritedEnv = {
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const docker = process.platform === 'win32' ? 'docker.exe' : 'docker';
 const fullOrder = [
-	'orphan-renewal-timeout', 'canonical-processing-fences', 'import-transaction',
+	'voting', 'orphan-renewal-timeout', 'canonical-processing-fences', 'import-transaction',
 	'idempotency', 'lease-clock-core', 'lifecycle-schema', 'responsive-image-migration',
 	'canonical-migration-chain', 'project-assets', 'admin-project-search', 'banned-ips',
 	'phase2-transition', 'year-change-approval', 'webgl-display', 'visibility', 'visibility-gateway',
@@ -162,7 +163,7 @@ test('list and help are read-only and expose all suites and entry points', async
 	}
 });
 
-test('full run preserves startup, all 16 ordered suites, E2E, smokes, and cleanup', async () => {
+test('full run preserves startup, all 17 ordered suites, E2E, smokes, and cleanup', async () => {
 	const calls = [];
 	const spawn = (...args) => { calls.push(args); return { status: 0 }; };
 	const status = await runIntegration([], {

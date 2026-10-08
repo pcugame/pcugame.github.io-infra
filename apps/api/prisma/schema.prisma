@@ -410,6 +410,7 @@ model WebglDeployment {
 /// Canonical direct-to-Garage multipart session for all bulk asset kinds.
 /// Garage ListParts is authoritative; no part/chunk rows are persisted here.
 model AssetUploadSession {
+  voteId String? @map("vote_id")
   id                           String                  @id @default(uuid())
   projectId                    Int?                    @map("project_id")
   exhibitionId                 Int?                    @map("exhibition_id")
@@ -902,4 +903,171 @@ model WebglNetworkReviewEvent {
   request WebglNetworkRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
   @@index([originalProjectId, action, policyVersion])
   @@map("webgl_network_review_events")
+}
+
+// Exhibition voting records intentionally have no cascading source ownership.
+model ExhibitionVote {
+  id String @id @default(uuid())
+  exhibitionId Int
+  title String
+  guidance String
+  maxSelections Int
+  version Int @default(1)
+  state String @default("PREPARING")
+  startsAt DateTime?
+  endsAt DateTime?
+  closedAt DateTime?
+  eventId String?
+  event VotingDrawEvent? @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  candidates VoteCandidate[]
+  posters VotePoster[]
+  ballots VoteBallot[]
+  changes VoteChange[]
+  createdAt DateTime @default(now())
+  @@index([exhibitionId])
+  @@map("exhibition_votes")
+}
+model VotePoster {
+  voteId String?
+  vote ExhibitionVote? @relation(fields: [voteId], references: [id], onDelete: Restrict)
+  id String @id @default(uuid())
+  bucket String
+  objectKey String
+  createdAt DateTime @default(now())
+  candidates VoteCandidate[]
+  selections VoteSelection[]
+  @@index([bucket, objectKey])
+  @@index([voteId])
+  @@map("vote_posters")
+}
+model VoteCandidate {
+  id String @id @default(uuid())
+  voteId String
+  vote ExhibitionVote @relation(fields: [voteId], references: [id], onDelete: Restrict)
+  sourceProjectId Int?
+  title String
+  posterId String
+  poster VotePoster @relation(fields: [posterId], references: [id], onDelete: Restrict)
+  active Boolean @default(true)
+  version Int @default(1)
+  selections VoteSelection[]
+  @@index([voteId])
+  @@map("vote_candidates")
+}
+model VoteParticipant {
+  hash String @id
+  ballots VoteBallot[]
+  draws VoteDraw[]
+  @@map("vote_participants")
+}
+model VoteBallot {
+  id String @id @default(uuid())
+  voteId String
+  vote ExhibitionVote @relation(fields: [voteId], references: [id], onDelete: Restrict)
+  participantHash String
+  participant VoteParticipant @relation(fields: [participantHash], references: [hash], onDelete: Restrict)
+  version Int
+  createdAt DateTime @default(now())
+  flagged Boolean @default(false)
+  note String @default("")
+  selections VoteSelection[]
+  investigation VoteInvestigation?
+  @@unique([voteId, participantHash])
+  @@index([voteId, createdAt, id])
+  @@map("vote_ballots")
+}
+model VoteSelection {
+  ballotId String
+  ballot VoteBallot @relation(fields: [ballotId], references: [id], onDelete: Restrict)
+  candidateId String
+  candidate VoteCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  title String
+  posterId String
+  poster VotePoster @relation(fields: [posterId], references: [id], onDelete: Restrict)
+  version Int
+  @@id([ballotId, candidateId])
+  @@map("vote_selections")
+}
+model VoteInvestigation {
+  ballotId String @id
+  ballot VoteBallot @relation(fields: [ballotId], references: [id], onDelete: Restrict)
+  ipHash String
+  browser String
+  os String
+  mobile Boolean
+  expiresAt DateTime
+  @@index([expiresAt])
+  @@map("vote_investigations")
+}
+model VoteChange {
+  id String @id @default(uuid())
+  voteId String
+  vote ExhibitionVote @relation(fields: [voteId], references: [id], onDelete: Restrict)
+  version Int
+  kind String
+  reason String
+  actorId Int?
+  detail Json
+  createdAt DateTime @default(now())
+  @@index([voteId, createdAt])
+  @@map("vote_changes")
+}
+model VotingDrawEvent {
+  id String @id @default(uuid())
+  title String
+  mode String
+  paused Boolean @default(false)
+  version Int @default(1)
+  votes ExhibitionVote[]
+  items VotingDrawItem[]
+  changes VotingDrawChange[]
+  draws VoteDraw[]
+  @@map("voting_draw_events")
+}
+model VotingDrawItem {
+  id String @id @default(uuid())
+  eventId String
+  event VotingDrawEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  title String
+  prize Boolean
+  remaining Int?
+  weight Int
+  active Boolean @default(true)
+  @@index([eventId])
+  @@map("voting_draw_items")
+}
+model VotingDrawChange {
+  id String @id @default(uuid())
+  eventId String
+  event VotingDrawEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  version Int
+  actorId Int?
+  reason String
+  configuration Json
+  createdAt DateTime @default(now())
+  @@unique([eventId, version])
+  @@map("voting_draw_changes")
+}
+model VoteDraw {
+  id String @id @default(uuid())
+  eventId String
+  event VotingDrawEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  participantHash String
+  participant VoteParticipant @relation(fields: [participantHash], references: [hash], onDelete: Restrict)
+  title String
+  prize Boolean
+  itemId String
+  version Int
+  calculation Json
+  createdAt DateTime @default(now())
+  receipt VoteReceipt?
+  @@unique([eventId, participantHash])
+  @@map("vote_draws")
+}
+model VoteReceipt {
+  id String @id @default(uuid())
+  drawId String @unique
+  draw VoteDraw @relation(fields: [drawId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  @@map("vote_receipts")
 }

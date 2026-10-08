@@ -68,7 +68,7 @@ describe('cors', () => {
 			expect(res.headers['access-control-allow-credentials']).toBe('true');
 			expect(res.headers.vary).toBe('Origin');
 			expect(String(res.headers['access-control-allow-methods'])).toContain('POST');
-			expect(allowedHeaders).toEqual(['authorization', 'content-type', 'idempotency-key']);
+			expect(allowedHeaders).toEqual(['authorization', 'content-type', 'idempotency-key', 'x-vote-participant']);
 			expect(allowedHeaders).not.toContain('cookie');
 			expect(allowedHeaders).not.toContain('*');
 		});

@@ -8,6 +8,7 @@ export type ImageOwner =
 
 /** String identities deliberately decouple the processor from Prisma numeric IDs. */
 export interface VerifyingImageSession {
+	voteId?: string | null;
 	id: string;
 	kind: ImageUploadKind;
 	state: 'VERIFYING';
