@@ -560,14 +560,19 @@ button.archive-card {
   }
 
   .archive-page__toolbar {
-    flex-direction: column;
-    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr auto;
     gap: 0.5rem;
     margin-bottom: 1.25rem;
   }
 
   .archive-search {
+    grid-column: 1 / -1;
     width: 100%;
+  }
+
+  .archive-view-toggle {
+    justify-self: start;
   }
 
   .archive-count {
