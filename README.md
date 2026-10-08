@@ -317,3 +317,4 @@ Web은 `apps/web/dist`를 `pcugame/pcugame.github.io`의 `master`에 게시하�
 - [backend 감사·수정 이력](docs/history/2026-backend-audit/README.md)
 - [route 계약 소유권 후속 제안](docs/architecture/route-contract-ownership.md)
 - [추가 test 기록](docs/new_tests/README.md)
+- [교원 계정·관리자 지정 운영 절차](docs/operations/faculty-accounts.md)
