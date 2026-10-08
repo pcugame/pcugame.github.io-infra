@@ -12,7 +12,7 @@ export function StudioIntroduction({ submission }: { submission: ReturnType<type
 	const summary = useWatch({ control, name: 'summary' }) ?? '';
 	const visibility = useWatch({ control, name: 'visibility' });
 	return <>
-		<FormSection legend="작품 기본 정보">
+		<FormSection legend="기본 정보">
 			<div className="form-field">
 				<label htmlFor="studio-exhibition">전시회 <span className="required-mark">*</span></label>
 				<Controller control={control} name="exhibitionId" render={({ field }) => <ExhibitionSelect

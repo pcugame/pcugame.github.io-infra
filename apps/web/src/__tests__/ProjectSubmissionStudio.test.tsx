@@ -2,6 +2,8 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { ProjectPreviewPanel } from '../components/project/ProjectPreviewModal';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectSubmissionItemStatus, ProjectSubmissionManifestItem } from '../contracts';
@@ -132,7 +134,8 @@ describe('submission studio', () => {
 		fireEvent.click(screen.getByRole('button', { name: '카드형' }));
 		expect(card.classList.contains('archive-grid--poster')).toBe(false);
 		fireEvent.click(within(card).getByRole('button'));
-		expect(screen.getByRole('dialog', { name: '작품 미리보기' })).toBeTruthy();
+		expect(screen.getByRole('region', { name: '전시 화면 미리보기' })).toBeTruthy();
+		expect(screen.queryByRole('dialog')).toBeNull();
 	});
 
 	it('does not create a submission when Enter submits an earlier step', async () => {
@@ -394,4 +397,67 @@ describe.each(['user', 'admin'] as const)('%s public asset requirements', mode =
 		fireEvent.click(screen.getByRole('button', { name }));
 		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
 	});
+});
+
+
+it('shows the large third-step preview with local media and refreshes it after editing', async () => {
+	vi.mocked(URL.createObjectURL).mockImplementation(blob => `blob:${(blob as File).name}`);
+	const { container } = mount();
+	await enterMetadata('PUBLIC');
+	fireEvent.change(screen.getByLabelText(/^한 줄 소개/), { target: { value: '미리보기 소개문' } });
+	fireEvent.change(screen.getByLabelText(/^상세 설명/), { target: { value: '미리보기 상세 내용' } });
+	await goTo(1);
+	select(container, 'native', [new File(['zip'], 'game.zip')]);
+	select(container, 'web', [new File(['zip'], 'web.zip')]);
+	select(container, 'video', [new File(['video'], 'clip.mp4')]);
+	select(container, 'materials', [new File(['image'], 'first.png')]);
+	await goTo(2);
+	const preview = screen.getByRole('region', { name: '전시 화면 미리보기' });
+	expect(within(preview).getByRole('heading', { name: '선택한 작품' })).toBeTruthy();
+	expect(within(preview).getByText('미리보기 소개문')).toBeTruthy();
+	expect(within(preview).getByText('미리보기 상세 내용')).toBeTruthy();
+	expect(preview.querySelector('video')?.getAttribute('src')).toBe('blob:clip.mp4');
+	expect(preview.querySelector('video')?.hasAttribute('controls')).toBe(true);
+	expect(screen.queryByText('제출 전 확인')).toBeNull();
+	expect(screen.queryByRole('button', { name: /^(전체 )?미리보기/ })).toBeNull();
+	expect(document.body.style.overflow).not.toBe('hidden');
+	expect((within(preview).getByRole('button', { name: '게임 실행' }) as HTMLButtonElement).disabled).toBe(true);
+	fireEvent.click(within(preview).getByRole('button', { name: /사진 1/ }));
+	expect(preview.querySelector('.modal-visual__img')?.getAttribute('src')).toBe('blob:first.png');
+	fireEvent.click(within(preview).getByRole('button', { name: '확대해서 보기' }));
+	expect(screen.getByAltText('확대 이미지')).toBeTruthy();
+	fireEvent.keyDown(document, { key: 'Escape' });
+	expect(screen.queryByAltText('확대 이미지')).toBeNull();
+	expect(screen.getByRole('region', { name: '전시 화면 미리보기' })).toBe(preview);
+	expect(controls.submit).not.toHaveBeenCalled();
+	expect(controls.upload).not.toHaveBeenCalled();
+	await goTo(1);
+	expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first.png');
+	expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:clip.mp4');
+	fireEvent.click(screen.getByRole('button', { name: 'first.png 선택 취소' }));
+	select(container, 'materials', [new File(['image'], 'replacement.png')]);
+	await goTo(0);
+	fireEvent.change(screen.getByLabelText('작품명 *'), { target: { value: '변경한 작품' } });
+	await goTo(2);
+	const updated = screen.getByRole('region', { name: '전시 화면 미리보기' });
+	expect(within(updated).getByRole('heading', { name: '변경한 작품' })).toBeTruthy();
+	fireEvent.click(within(updated).getByRole('button', { name: /사진 1/ }));
+	expect(updated.querySelector('.modal-visual__img')?.getAttribute('src')).toBe('blob:replacement.png');
+	expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+
+it('keeps preview media URLs live through StrictMode and releases them on unmount', () => {
+	const live = new Set<string>();
+	let serial = 0;
+	vi.mocked(URL.createObjectURL).mockImplementation(() => { const url = `blob:preview-${++serial}`; live.add(url); return url; });
+	vi.mocked(URL.revokeObjectURL).mockImplementation(url => { live.delete(url); });
+	const { container, unmount } = render(<StrictMode><ProjectPreviewPanel values={{ title: 'Media preview', members: [] }} poster={null} images={[new File(['image'], 'photo.png')]} videos={[new File(['video'], 'clip.mp4')]} game={null} /></StrictMode>);
+	expect(live.has(container.querySelector('video')!.getAttribute('src')!)).toBe(true);
+	fireEvent.error(container.querySelector('video')!);
+	expect(screen.getByText(/이 브라우저에서 미리 재생할 수 없는 영상/)).toBeTruthy();
+	fireEvent.click(screen.getByRole('button', { name: /사진 1/ }));
+	expect(live.has(container.querySelector('.modal-visual__img')!.getAttribute('src')!)).toBe(true);
+	unmount();
+	expect(live.size).toBe(0);
 });

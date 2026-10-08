@@ -1,4 +1,5 @@
 import type { ExternalLink, Platform } from '@pcu/contracts';
+import { createPortal } from 'react-dom';
 import { ProjectPublicMeta } from './ProjectPublicMeta';
 import { useEffect, useRef, useState, useCallback } from 'react';
 
@@ -23,6 +24,7 @@ interface Props {
 	images: File[];
 	videos: File[];
 	game: File | null;
+	webgl?: File | null;
 	exhibitionLabel?: string;
 	onClose: () => void;
 }
@@ -31,6 +33,7 @@ type MediaItem =
 	| { kind: 'poster-img'; url: string; label: string }
 	| { kind: 'poster-pdf'; name: string; label: string }
 	| { kind: 'video-mock'; name: string; label: string }
+	| { kind: 'video'; url: string; name: string; label: string }
 	| { kind: 'image'; url: string; label: string }
 	| { kind: 'image-pdf'; name: string; label: string };
 
@@ -41,21 +44,40 @@ const isPdfFile = (f: File): boolean =>
  * 업로드 전 "작품이 어떻게 보일지" 미리 확인하는 모달.
  * 포스터·사진은 ObjectURL로 실제 렌더링하고, 영상·게임 파일은 파일명만 목업으로 표시한다.
  */
-export function ProjectPreviewModal({
+export function ProjectPreviewModal(props: Props) {
+	return <ProjectPreview {...props} />;
+}
+
+/** Embedded preview mounts when the preview step opens, refreshing local file URLs on return. */
+export function ProjectPreviewPanel(props: Omit<Props, 'onClose'>) {
+	return <ProjectPreview {...props} inline />;
+}
+
+function LocalPreviewVideo({ url, name }: { url: string; name: string }) {
+	const [failed, setFailed] = useState(false);
+	return failed ? <div className="preview-mock"><p>{name}</p><p>이 브라우저에서 미리 재생할 수 없는 영상입니다. 업로드 후 재생용 영상으로 변환됩니다.</p></div>
+		: <video className="modal-visual__img" src={url} controls preload="metadata" aria-label={name} onError={() => setFailed(true)} />;
+}
+
+function ProjectPreview({
 	values,
 	poster,
 	images,
 	videos,
 	game,
+	webgl,
 	exhibitionLabel,
 	onClose,
-}: Props) {
+	inline = false,
+}: Omit<Props, 'onClose'> & { onClose?: () => void; inline?: boolean }) {
 	const overlayRef = useRef<HTMLDivElement>(null);
 	const [activeIndex, setActiveIndex] = useState(0);
 	const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
-	// ObjectURL은 모달이 떠 있는 동안만 유효하면 되므로 마운트 시 1회 생성·언마운트 시 해제한다.
-	const [mediaItems] = useState<MediaItem[]>(() => {
+	const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+	// Blob URLs are external resources: create and release them in the same effect,
+	// including React StrictMode's setup/cleanup/setup cycle.
+	useEffect(() => {
 		const items: MediaItem[] = [];
 		if (poster) {
 			if (isPdfFile(poster)) {
@@ -65,7 +87,7 @@ export function ProjectPreviewModal({
 			}
 		}
 		videos.forEach((video, i) => {
-			items.push({ kind: 'video-mock', name: video.name, label: `동영상${i + 1}` });
+			items.push(inline ? { kind: 'video', url: URL.createObjectURL(video), name: video.name, label: `동영상${i + 1}` } : { kind: 'video-mock', name: video.name, label: `동영상${i + 1}` });
 		});
 		images.forEach((f, i) => {
 			if (isPdfFile(f)) {
@@ -74,35 +96,35 @@ export function ProjectPreviewModal({
 				items.push({ kind: 'image', url: URL.createObjectURL(f), label: `사진 ${i + 1}` });
 			}
 		});
-		return items;
-	});
-
-	useEffect(() => {
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- Publish effect-owned blob URLs; render-time allocation leaks under StrictMode.
+		setMediaItems(items);
 		return () => {
-			for (const item of mediaItems) {
-				if (item.kind === 'poster-img' || item.kind === 'image') {
+			for (const item of items) {
+				if ('url' in item) {
 					URL.revokeObjectURL(item.url);
 				}
 			}
 		};
-	}, [mediaItems]);
+	}, [poster, images, videos, inline]);
 
 	useEffect(() => {
+		if (inline && !lightboxUrl) return;
+		const previousOverflow = document.body.style.overflow;
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key !== 'Escape') return;
 			if (lightboxUrl) setLightboxUrl(null);
-			else onClose();
+			else onClose?.();
 		};
 		document.addEventListener('keydown', onKey);
 		document.body.style.overflow = 'hidden';
 		return () => {
 			document.removeEventListener('keydown', onKey);
-			document.body.style.overflow = '';
+			document.body.style.overflow = previousOverflow;
 		};
-	}, [onClose, lightboxUrl]);
+	}, [onClose, lightboxUrl, inline]);
 
 	const handleOverlayClick = (e: React.MouseEvent) => {
-		if (e.target === overlayRef.current) onClose();
+		if (!inline && e.target === overlayRef.current) onClose?.();
 	};
 
 	const closeLightbox = useCallback((e: React.MouseEvent) => {
@@ -116,13 +138,13 @@ export function ProjectPreviewModal({
 	const visibleMembers = values.members.filter((m) => m.name || m.studentId);
 
 	return (
-		<div className="modal-overlay" ref={overlayRef} onClick={handleOverlayClick}>
-			<div className="modal-panel" role="dialog" aria-modal="true" aria-label="작품 미리보기">
-				<button className="modal-close" onClick={onClose} aria-label="닫기">
+		<div className={inline ? "project-preview-inline" : "modal-overlay"} ref={overlayRef} onClick={handleOverlayClick}>
+			<div className={inline ? "project-preview-inline__content" : "modal-panel"} role={inline ? "region" : "dialog"} aria-modal={inline ? undefined : true} aria-label={inline ? "전시 화면 미리보기" : "작품 미리보기"}>
+				{!inline && <button type="button" className="modal-close" onClick={onClose} aria-label="닫기">
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
 					</svg>
-				</button>
+				</button>}
 
 				<div className="preview-banner" role="note">
 					미리보기 — 아직 등록되지 않았습니다
@@ -135,6 +157,7 @@ export function ProjectPreviewModal({
 								<>
 									<img src={current.url} alt={current.label} className="modal-visual__img" />
 									<button
+										type="button"
 										className="modal-visual__zoom"
 										onClick={() => setLightboxUrl(current.url)}
 										aria-label="확대해서 보기"
@@ -147,7 +170,7 @@ export function ProjectPreviewModal({
 										</svg>
 									</button>
 								</>
-							) : current.kind === 'poster-pdf' || current.kind === 'image-pdf' ? (
+							) : current.kind === 'video' ? (<LocalPreviewVideo key={current.url} url={current.url} name={current.name} />) : current.kind === 'poster-pdf' || current.kind === 'image-pdf' ? (
 								<div className="preview-mock">
 									<div className="preview-mock__tag">PDF</div>
 									<div className="preview-mock__name">{current.name}</div>
@@ -200,7 +223,7 @@ export function ProjectPreviewModal({
 									/>
 								) : (
 									<span className="modal-media-tab__icon">
-										{item.kind === 'video-mock' ? (
+										{item.kind === 'video-mock' || item.kind === 'video' ? (
 											<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
 												<polygon points="5 3 19 12 5 21 5 3" />
 											</svg>
@@ -216,7 +239,7 @@ export function ProjectPreviewModal({
 				)}
 
 				<div className="modal-body">
-					<h1 className="modal-title">{values.title || '(제목 없음)'}</h1>
+					{inline ? <h2 className="modal-title">{values.title || '(제목 없음)'}</h2> : <h1 className="modal-title">{values.title || '(제목 없음)'}</h1>}
 					<ProjectPublicMeta externalLinks={values.externalLinks} platforms={values.platforms} hardwareRequirements={values.hardwareRequirements} />
 
 					{exhibitionLabel && (
@@ -242,6 +265,7 @@ export function ProjectPreviewModal({
 						</div>
 					)}
 
+					{webgl && <div className="modal-download"><button type="button" className="btn btn--primary btn--large" disabled>게임 실행</button><p className="modal-download__note">{webgl.name} — 웹 빌드는 업로드 후 실행할 수 있습니다.</p></div>}
 					{game && (
 						<div className="modal-download">
 							<button
@@ -265,9 +289,10 @@ export function ProjectPreviewModal({
 				</div>
 			</div>
 
-			{lightboxUrl && (
+			{lightboxUrl && createPortal(
 				<div className="modal-lightbox" onClick={closeLightbox}>
 					<button
+						type="button"
 						className="modal-lightbox__close"
 						onClick={() => setLightboxUrl(null)}
 						aria-label="닫기"
@@ -277,7 +302,7 @@ export function ProjectPreviewModal({
 						</svg>
 					</button>
 					<img src={lightboxUrl} alt="확대 이미지" className="modal-lightbox__img" />
-				</div>
+				</div>, document.body
 			)}
 		</div>
 	);

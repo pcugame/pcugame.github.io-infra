@@ -4,13 +4,11 @@ import { Link, useBeforeUnload } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useMe } from '../../auth';
 import { Button } from '../../../components/ui';
-import { ProjectPreviewModal } from '../../../components/project/ProjectPreviewModal';
+import { ProjectPreviewPanel } from '../../../components/project/ProjectPreviewModal';
 import { ExternalLinksFieldset } from '../../../components/project/ExternalLinksFieldset';
 import { publicApi, getApiErrorMessage } from '../../../lib/api';
 import type { ProjectSubmissionMode } from '../../../lib/api/project-submit';
 import { getClientUploadLimits, materialUploadLimitsFromConfig } from '../../../lib/upload-limits';
-import { visibilityLabels } from '../../../lib/visibility';
-import { env } from '../../../lib/env';
 import type { SubmitProjectPayloadInput } from '../../../contracts/schemas';
 import { useSubmissionFiles } from '../useSubmissionFiles';
 import { useProjectSubmissionForm } from '../useProjectSubmissionForm';
@@ -20,12 +18,12 @@ import { SubmissionUploadProgress } from '../SubmissionUploadProgress';
 import { StudioFileSelection } from './StudioFileSelection';
 import { studioFileGroups } from './fileGroups';
 import { StudioIntroduction } from './StudioIntroduction';
-import { StudioPreview, StudioReview } from './StudioPreview';
+import { StudioPreview } from './StudioPreview';
 
 const steps = [
 	{ title: '작품 소개', description: '전시 페이지에 표시할 기본 정보를 작성하세요.' },
 	{ title: '팀과 자료', description: '함께 만든 사람들과 게임의 모습을 소개하세요.' },
-	{ title: '제출 전 확인', description: '관람객에게 보여줄 내용을 한 번 더 확인하세요.' },
+	{ title: '작품 미리보기', description: '전시 화면을 확인하고 작품을 제출하세요.' },
 ];
 const introductionFields = ['exhibitionId', 'title', 'summary', 'description', 'visibility', 'platforms', 'hardwareRequirements'] as const;
 
@@ -46,7 +44,6 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 		createdProjectId, submissionItems, finalizeIfReady, submissionError, copy, exhibitionsQuery } = submission;
 	const values = useWatch({ control: form.control }) as SubmitProjectPayloadInput;
 	const [step, setStep] = useState(0);
-	const [preview, setPreview] = useState<SubmitProjectPayloadInput | null>(null);
 	const [validationNotice, setValidationNotice] = useState('');
 	const [checking, setChecking] = useState(false);
 	const panel = useRef<HTMLDivElement>(null);
@@ -91,10 +88,9 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 		: !selectedYearItem || !exhibitionsQuery.isSuccess ? '작품 소개에서 제출할 전시회를 선택해주세요.' : submission.assetRequirementError ?? '';
 	const disabled = isSubmitting || checking;
 	const error = submissionError ?? submission.submitMutation.error;
-	return <div className="submission-studio">
+	return <div className={`submission-studio${step === 2 && !showGameProgress ? ' submission-studio--preview-step' : ''}`}>
 		<header className="admin-page-header submission-studio__header">
 			<div className="admin-page-header__text"><h1>{mode === 'admin' ? '새 작품 등록하기' : '새 작품 만들기'}</h1></div>
-			{!showGameProgress && <Button variant="secondary" onClick={() => setPreview(form.getValues())} disabled={isSubmitting}>미리보기 ↗</Button>}
 		</header>
 		<div className="submission-studio__layout">
 			<nav className="submission-studio__rail" aria-label="작품 작성 단계">
@@ -132,7 +128,7 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 									{files.fileSizeError && <p className="field-error" role="alert">{files.fileSizeError}</p>}
 									<Controller control={form.control} name="externalLinks" render={({ field }) => <ExternalLinksFieldset value={field.value ?? []} onChange={field.onChange} disabled={disabled} showErrors={!!errors.externalLinks} />} />
 								</>}
-								{index === 2 && <StudioReview values={values} files={files} exhibitionLabel={exhibitionLabel} visibilityLabel={env.VISIBILITY_CONTROLS_ENABLED ? visibilityLabels[values.visibility ?? 'PUBLIC'] : undefined} onEdit={changeStep} />}
+								{index === 2 && step === 2 && <ProjectPreviewPanel values={values} poster={files.posterFile} images={files.imageFiles} videos={files.videoFiles} game={files.gameFile} webgl={files.webglFile} exhibitionLabel={exhibitionLabel} />}
 							</div>
 						</section>)}
 						<div className="submission-studio__feedback" aria-live="polite">
@@ -148,10 +144,9 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 				</form>}
 			</div>
 			<aside className="submission-studio__preview" aria-label={showGameProgress ? '업로드 현황' : '실시간 미리보기'}>
-				{showGameProgress ? <div className="submission-studio__upload-summary"><h2>업로드 현황</h2><strong>{submissionItems.filter(item => item.state === 'READY').length}<span> / {submissionItems.length}</span></strong><p>파일 검증 완료</p><p className="field-hint">{submission.isFinalizing ? '작품의 제출 상태를 확인하고 있습니다.' : '파일별 진행 상태는 왼쪽에서 확인할 수 있습니다.'}</p></div> : <StudioPreview values={values} files={files} exhibitionLabel={exhibitionLabel} onPreview={() => setPreview(form.getValues())} />}
+				{showGameProgress ? <div className="submission-studio__upload-summary"><h2>업로드 현황</h2><strong>{submissionItems.filter(item => item.state === 'READY').length}<span> / {submissionItems.length}</span></strong><p>파일 검증 완료</p><p className="field-hint">{submission.isFinalizing ? '작품의 제출 상태를 확인하고 있습니다.' : '파일별 진행 상태는 왼쪽에서 확인할 수 있습니다.'}</p></div> : <StudioPreview values={values} files={files} exhibitionLabel={exhibitionLabel} showCard={step !== 2} onPreview={() => changeStep(2)} />}
 			</aside>
 		</div>
 		<footer className="submission-studio__footer"><Link to={basePath} onClick={event => { if ((hasUnsavedInput || showGameProgress) && !window.confirm('이 화면을 나가시겠어요? 제출 전 입력 내용과 파일 선택은 저장되지 않습니다. 진행 중인 업로드는 원본 파일을 다시 선택해 이어올릴 수 있습니다.')) event.preventDefault(); }}>{mode === 'admin' ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>{!showGameProgress && !isSubmitting && <Link to={`${basePath}/new`} onClick={event => { if (hasUnsavedInput && !window.confirm('기존 화면으로 이동하면 작성한 내용과 파일 선택이 초기화됩니다. 이동하시겠어요?')) event.preventDefault(); }}>기존 업로드 화면으로 이동 ↗</Link>}</footer>
-		{preview && <ProjectPreviewModal values={preview} poster={files.posterFile} images={files.imageFiles} videos={files.videoFiles} game={files.gameFile} exhibitionLabel={exhibitionLabel} onClose={() => setPreview(null)} />}
 	</div>;
 }
