@@ -1,3 +1,4 @@
+import { studioFileGroups, selectedStudioFiles } from './fileGroups';
 import { useState } from 'react';
 import type { SubmitProjectPayloadInput } from '../../../contracts/schemas';
 import { SubmitProjectPayloadSchema } from '../../../contracts/schemas';
@@ -43,14 +44,9 @@ export function StudioPreview({ values, files, exhibitionLabel, onPreview }: {
 export function StudioReview({ values, files, exhibitionLabel, visibilityLabel, onEdit }: {
 	values: SubmitProjectPayloadInput; files: SubmissionFilesState; exhibitionLabel?: string; visibilityLabel?: string; onEdit: (step: number) => void;
 }) {
-	const selected = [
-		...files.posterFile ? [{ file: files.posterFile, kind: '포스터' }] : [],
-		...files.gameFile ? [{ file: files.gameFile, kind: '게임' }] : [],
-		...files.webglFile ? [{ file: files.webglFile, kind: 'WebGL' }] : [],
-		...files.imageFiles.map(file => ({ file, kind: '이미지' })),
-		...files.videoFiles.map(file => ({ file, kind: '동영상' })),
-		...files.documentFiles.map(file => ({ file, kind: '문서' })),
-		...files.attachmentFiles.map(file => ({ file, kind: '첨부자료' })),
+	const groups = [
+		{ label: '포스터', files: files.posterFile ? [files.posterFile] : [] },
+		...studioFileGroups.map(group => ({ label: group.label, files: selectedStudioFiles(files).filter(item => (group.kinds as readonly string[]).includes(item.kind)).map(item => item.file) })),
 	];
 	return <div className="submission-studio__review">
 		<div className="submission-studio__review-heading"><h3>작품 소개</h3><Button size="small" variant="secondary" onClick={() => onEdit(0)}>소개 수정</Button></div>
@@ -64,7 +60,9 @@ export function StudioReview({ values, files, exhibitionLabel, visibilityLabel, 
 		<ProjectPublicMeta platforms={values.platforms} hardwareRequirements={values.hardwareRequirements} externalLinks={values.externalLinks} />
 		<div className="submission-studio__review-heading"><h3>팀과 자료</h3><Button size="small" variant="secondary" onClick={() => onEdit(1)}>팀·자료 수정</Button></div>
 		<ul className="submission-studio__review-members">{values.members.map((member, i) => <li key={i}><strong>{member.name || '이름 미입력'}</strong><span>{member.studentId || '학번 미입력'}</span></li>)}</ul>
-		{selected.length ? <ul className="submission-studio__review-files">{selected.map(({ file, kind }, i) => <li key={`${kind}:${i}`}><span>{kind}</span><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(1)} MB</small></li>)}</ul> : <p className="field-hint">선택한 파일이 없습니다. 기본 정보만 제출할 수 있습니다.</p>}
+		{groups.map(group => <section key={group.label} aria-label={`${group.label} 확인`}><h4>{group.label}</h4>
+			{group.files.length ? <ul className="submission-studio__review-files">{group.files.map((file, i) => <li key={i}><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(1)} MB</small></li>)}</ul> : <p className="field-hint">선택한 파일이 없습니다.</p>}
+		</section>)}
 		<p className="submission-studio__notice">제출하면 선택한 파일의 업로드가 시작됩니다. 모든 파일의 검증이 끝나면 설정된 공개 범위에 따라 작품이 공개됩니다.</p>
 	</div>;
 }

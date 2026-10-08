@@ -10,9 +10,13 @@ interface Props {
 	/** Queue and controls outside the button, within the drop area. */
 	footer?: ReactNode;
 	hint?: string;
+	label?: string;
+	accept?: string;
+	multiple?: boolean;
+	compact?: boolean;
 }
 
-export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer, hint }: Props) {
+export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer, hint, label: customLabel, accept, multiple, compact = false }: Props) {
 	const input = useRef<HTMLInputElement>(null);
 	const dragDepth = useRef(0);
 	const [draggingFiles, setDraggingFiles] = useState(false);
@@ -61,12 +65,12 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 		};
 	}, []);
 	const poster = zone === 'poster';
-	const label = poster ? '포스터 파일 선택' : '게임·미디어·자료 선택';
+	const label = customLabel ?? (poster ? '포스터 파일 선택' : '게임·미디어·자료 선택');
 	const highlighted = enabled && draggingFiles;
 	const hovered = highlighted && dragOver;
 	return (
 		<div
-			className={`project-upload-drop project-upload-drop--${zone}${highlighted ? ' is-file-dragging' : ''}${hovered ? ' is-drag-over' : ''}`}
+			className={`project-upload-drop project-upload-drop--${zone}${compact ? ' project-upload-drop--compact' : ''}${highlighted ? ' is-file-dragging' : ''}${hovered ? ' is-drag-over' : ''}`}
 			onDragEnter={(event) => {
 				if (!event.dataTransfer.types.includes('Files')) return;
 				dragDepth.current++;
@@ -93,7 +97,7 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 				aria-label={label}
 				onClick={() => input.current?.click()}
 			>
-				{!poster && (
+				{!poster && !compact && (
 					<svg
 						className="project-upload-drop__icon"
 						width="48"
@@ -111,9 +115,9 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 						<path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
 					</svg>
 				)}
-				<span className="project-upload-drop__prompt">
+				{!compact && <span className="project-upload-drop__prompt">
 					{hovered ? '여기에 놓으세요' : poster ? '포스터를 드래그 앤 드롭' : '파일을 드래그 앤 드롭'}
-				</span>
+				</span>}
 				{enabled && (
 					<span className="project-upload-drop__browse">
 						{hovered ? '놓아서 파일 선택' : poster ? '포스터 선택·교체' : '파일 선택'}
@@ -132,9 +136,9 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 				hidden
 				disabled={!enabled}
 				aria-label={label}
-				multiple={!poster}
+				multiple={multiple ?? !poster}
 				accept={
-					poster ? '.jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf' : undefined
+					accept ?? (poster ? '.jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf' : undefined)
 				}
 				onChange={(event) => {
 					if (enabled) onFiles(Array.from(event.target.files ?? []));

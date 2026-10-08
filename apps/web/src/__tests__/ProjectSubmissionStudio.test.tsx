@@ -8,6 +8,7 @@ import type { ProjectSubmissionItemStatus, ProjectSubmissionManifestItem } from 
 import { ProjectSubmissionStudio } from '../features/project-submission/studio/ProjectSubmissionStudio';
 
 const controls = vi.hoisted(() => ({
+	role: 'USER',
 	config: vi.fn(),
 	years: vi.fn(),
 	getApi: vi.fn(),
@@ -21,7 +22,7 @@ const controls = vi.hoisted(() => ({
 	waitReady: vi.fn(),
 }));
 vi.mock('../features/auth', () => ({
-	useMe: () => ({ user: { id: 9, name: '홍길동', studentId: '20260001', role: 'USER' } }),
+	useMe: () => ({ user: { id: 9, name: '홍길동', studentId: '20260001', role: controls.role } }),
 }));
 vi.mock('../lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../lib/api')>()),
@@ -48,6 +49,7 @@ const draft = () => ({
 });
 beforeEach(() => {
 	items = [];
+	controls.role = 'USER';
 	class TestURL extends URL {}
 	TestURL.createObjectURL = vi.fn(() => 'blob:poster');
 	TestURL.revokeObjectURL = vi.fn();
@@ -81,6 +83,7 @@ afterEach(() => {
 });
 
 function mount(mode: 'admin' | 'user' = 'user') {
+	controls.role = mode === 'admin' ? 'ADMIN' : 'USER';
 	return render(
 		<MemoryRouter>
 			<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -94,8 +97,8 @@ async function enterMetadata() {
 	fireEvent.change(exhibition, { target: { value: (await screen.findByRole('option', { name: /2026/ }) as HTMLOptionElement).value } });
 	fireEvent.change(screen.getByLabelText('작품명 *'), { target: { value: '선택한 작품' } });
 }
-function select(container: HTMLElement, zone: 'poster' | 'files', files: File[]) {
-	fireEvent.change(container.querySelector(`.project-upload-drop--${zone} input[type="file"]`)!, {
+function select(container: HTMLElement, zone: 'poster' | 'native' | 'web' | 'video' | 'materials', files: File[]) {
+	fireEvent.change(container.querySelector(zone === 'poster' ? '.project-upload-drop--poster input[type="file"]' : `[data-file-group="${zone}"] input[type="file"]`)!, {
 		target: { files },
 	});
 }
@@ -138,22 +141,18 @@ describe('submission studio', () => {
 		expect(controls.submit).not.toHaveBeenCalled();
 	});
 
-	it('retains unclassified ZIPs and blocks direct submission until a purpose is selected', async () => {
+	it('assigns identical ZIPs by area and retains them across steps without uploading', async () => {
 		const { container } = mount();
 		await enterMetadata();
 		await goTo(1);
-		select(container, 'files', [new File(['zip'], 'pending.zip', { type: 'application/zip' })]);
+		const zip = new File(['zip'], 'same.zip', { type: 'application/zip' });
+		for (const zone of ['native', 'web', 'materials'] as const) select(container, zone, [zip]);
 		await goTo(0);
 		await goTo(2);
-		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(true);
-		fireEvent.submit(container.querySelector('form')!);
-		expect(controls.submit).not.toHaveBeenCalled();
-		await goTo(1);
-		expect(screen.getByText('pending.zip')).toBeTruthy();
-		fireEvent.click(screen.getByRole('button', { name: '게임' }));
-		await goTo(2);
+		expect(controls.upload).not.toHaveBeenCalled();
 		fireEvent.click(screen.getByRole('button', { name: '작품 제출' }));
-		await waitFor(() => expect(controls.upload).toHaveBeenCalledOnce());
+		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(3));
+		expect(items.map(item => item.kind)).toEqual(['GAME', 'WEBGL', 'ATTACHMENT']);
 	});
 
 	it.each(['user', 'admin'] as const)('%s sends metadata and all selected file kinds through the existing staged upload flow', async mode => {
@@ -163,15 +162,10 @@ describe('submission studio', () => {
 		await goTo(1);
 		await waitFor(() => expect(controls.config).toHaveBeenCalled());
 		select(container, 'poster', [new File(['poster'], 'cover.png', { type: 'image/png' })]);
-		select(container, 'files', [
-			new File(['zip'], 'game.zip', { type: 'application/zip' }),
-			new File(['zip'], 'webgl.zip', { type: 'application/zip' }),
-			new File(['image'], 'image.png', { type: 'image/png' }),
-			new File(['video'], 'video.mp4', { type: 'video/mp4' }),
-			new File(['doc'], 'readme.md', { type: 'text/markdown' }),
-		]);
-		fireEvent.click(within(screen.getByText('game.zip').closest('li')!).getByRole('button', { name: '게임' }));
-		fireEvent.click(within(screen.getByText('webgl.zip').closest('li')!).getByRole('button', { name: 'WebGL' }));
+		select(container, 'native', [new File(['zip'], 'game.zip', { type: 'application/zip' })]);
+		select(container, 'web', [new File(['zip'], 'webgl.zip', { type: 'application/zip' })]);
+		select(container, 'video', [new File(['video'], 'video.mp4', { type: 'video/mp4' })]);
+		select(container, 'materials', [new File(['image'], 'image.png', { type: 'image/png' }), new File(['doc'], 'readme.md', { type: 'text/markdown' })]);
 		await goTo(0);
 		await goTo(2);
 		expect(controls.upload).not.toHaveBeenCalled();
@@ -210,4 +204,132 @@ describe('submission studio', () => {
 		fireEvent.click(screen.getByRole('button', { name: '제출 취소' }));
 		await waitFor(() => expect(controls.cancel).toHaveBeenCalledWith(73));
 	});
+	it('preserves an in-flight second image when a status refresh marks the first image READY', async () => {
+		const first = new File(['first'], 'first.png', { type: 'image/png' });
+		const second = new File(['second'], 'second.png', { type: 'image/png' });
+		const poster = new File(['poster'], 'poster.png', { type: 'image/png' });
+		let finishPoster!: (value: { status: 'READY'; sessionId: string }) => void;
+		controls.upload.mockImplementation((_owner, file: File, kind, _progress, options) => {
+			const session = {
+				sessionId: file.name,
+				owner: { type: 'PROJECT', id: 73 },
+				kind,
+				generation: 1,
+				partSizeBytes: 16,
+				totalParts: 1,
+				expiresAt: '2026-10-01T00:00:00.000Z',
+				sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+				sourceIdentity: 'a'.repeat(64),
+			};
+			options.onSession(session);
+			if (file === first) return Promise.resolve({ status: 'READY', sessionId: file.name });
+			if (file === poster)
+				return new Promise((resolve) => {
+					finishPoster = resolve;
+				});
+			return new Promise(() => undefined);
+		});
+		const { container } = mount();
+		await enterMetadata();
+		await goTo(1);
+		select(container, 'poster', [poster]);
+		select(container, 'materials', [first, second]);
+		await goTo(2);
+		fireEvent.click(screen.getByRole('button', { name: '작품 제출' }));
+		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(3));
+		items = items.map((item) =>
+			item.slot === 'image:0' || item.kind === 'POSTER' ? { ...item, state: 'READY' } : item,
+		);
+		await act(async () => {
+			finishPoster({ status: 'READY', sessionId: poster.name });
+		});
+		await waitFor(() => expect(controls.status).toHaveBeenCalledTimes(2));
+		expect(controls.upload.mock.calls.map((call) => call[1].name).sort()).toEqual([
+			'first.png',
+			'poster.png',
+			'second.png',
+		]);
+		const secondCall = controls.upload.mock.calls.find((call) => call[1] === second)!;
+		const secondItem = items.find((item) => item.slot === 'image:1')!;
+		expect(secondCall[4].submissionItem).toEqual({ id: secondItem.id, clientToken: secondItem.clientToken });
+		expect(container.querySelector('[aria-label="사진·설명문·기타 업로드 진행"]')?.textContent).toContain('일시 정지');
+	});
+
+	it('advances a reloaded three-image batch from a verifying second file to the remaining third slot', async () => {
+		items = ['READY', 'VERIFYING', 'EXPECTED'].map((state, index) => ({
+			id: `image-${index}`,
+			kind: 'IMAGE',
+			slot: `image:${index}`,
+			clientToken: `token-${index}`,
+			required: true,
+			state: state as ProjectSubmissionItemStatus['state'],
+		}));
+		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
+		const session = {
+			sessionId: 'second-session',
+			owner: { type: 'PROJECT', id: 73 },
+			kind: 'IMAGE',
+			generation: 1,
+			partSizeBytes: 16,
+			totalParts: 1,
+			expiresAt: '2026-10-01T00:00:00.000Z',
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
+			sourceIdentity: 'a'.repeat(64),
+		};
+		window.sessionStorage.setItem(
+			'pcu.direct-image-upload:PROJECT:73',
+			JSON.stringify({ session, originalName: 'second.png', totalBytes: 6, completed: 1 }),
+		);
+		controls.getUploadStatus.mockResolvedValue({ ...session, state: 'VERIFYING' });
+		let finish!: (value: unknown) => void;
+		controls.waitReady.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const { container } = mount();
+		await waitFor(() => expect(controls.waitReady).toHaveBeenCalled());
+		items = items.map((item, index) => (index === 1 ? { ...item, state: 'READY' } : item));
+		await act(async () => {
+			finish({ ...session, state: 'READY' });
+		});
+		await waitFor(() =>
+			expect(container.querySelector('[aria-label="사진·설명문·기타 업로드 진행"] input[type="file"]')).toBeTruthy(),
+		);
+		const third = new File(['third'], 'third.png', { type: 'image/png' });
+		fireEvent.change(container.querySelector('[aria-label="사진·설명문·기타 업로드 진행"] input[type="file"]')!, {
+			target: { files: [third] },
+		});
+		fireEvent.click(screen.getByRole('button', { name: /업로드 시작/ }));
+		await waitFor(() => expect(controls.upload).toHaveBeenCalled());
+		expect(controls.upload.mock.calls[0]![4].submissionItem).toEqual({
+			id: 'image-2',
+			clientToken: 'token-2',
+		});
+	});
+
+	it('retries a failed native build with its original manifest binding', async () => {
+		controls.upload.mockRejectedValueOnce(new Error('network failure'));
+		const { container } = mount();
+		await enterMetadata();
+		await goTo(1);
+		select(container, 'native', [new File(['zip'], 'retry.zip')]);
+		await goTo(2);
+		fireEvent.click(screen.getByRole('button', { name: '작품 제출' }));
+		fireEvent.click(await screen.findByRole('button', { name: '재시도' }));
+		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(2));
+		expect(controls.upload.mock.calls[1]![4].submissionItem).toEqual(controls.upload.mock.calls[0]![4].submissionItem);
+	});
+	it('retains the administrator override for a locked exhibition', async () => {
+		controls.years.mockResolvedValue({ items: [{ id: 26, year: 2026, title: '잠긴 전시', isUploadEnabled: false }] });
+		mount('admin');
+		await enterMetadata();
+		await goTo(1);
+		expect((screen.getByRole('button', { name: '네이티브 빌드 파일 선택' }) as HTMLButtonElement).disabled).toBe(false);
+		await goTo(2);
+		fireEvent.click(screen.getByRole('button', { name: '작품 등록' }));
+		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
+	});
+
 });

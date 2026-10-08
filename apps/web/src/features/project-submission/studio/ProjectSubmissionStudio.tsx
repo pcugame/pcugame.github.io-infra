@@ -15,8 +15,10 @@ import type { SubmitProjectPayloadInput } from '../../../contracts/schemas';
 import { useSubmissionFiles } from '../useSubmissionFiles';
 import { useProjectSubmissionForm } from '../useProjectSubmissionForm';
 import { SubmissionMembersFieldset } from '../SubmissionMembersFieldset';
-import { SubmissionPosterSelection, SubmissionMixedFilesSelection } from '../SubmissionFileSelection';
+import { SubmissionPosterSelection } from '../SubmissionFileSelection';
 import { SubmissionUploadProgress } from '../SubmissionUploadProgress';
+import { StudioFileSelection } from './StudioFileSelection';
+import { studioFileGroups } from './fileGroups';
 import { StudioIntroduction } from './StudioIntroduction';
 import { StudioPreview, StudioReview } from './StudioPreview';
 
@@ -44,7 +46,6 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 		createdProjectId, submissionItems, finalizeIfReady, submissionError, copy, exhibitionsQuery } = submission;
 	const values = useWatch({ control: form.control }) as SubmitProjectPayloadInput;
 	const [step, setStep] = useState(0);
-	const [pendingZipCount, setPendingZipCount] = useState(0);
 	const [preview, setPreview] = useState<SubmitProjectPayloadInput | null>(null);
 	const [validationNotice, setValidationNotice] = useState('');
 	const [checking, setChecking] = useState(false);
@@ -53,7 +54,7 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 	const basePath = mode === 'admin' ? '/admin/projects' : '/me/projects';
 	const fileCount = Number(!!files.posterFile) + Number(!!files.gameFile) + Number(!!files.webglFile)
 		+ files.imageFiles.length + files.videoFiles.length + files.documentFiles.length + files.attachmentFiles.length;
-	const hasUnsavedInput = form.formState.isDirty || fileCount > 0 || pendingZipCount > 0;
+	const hasUnsavedInput = form.formState.isDirty || fileCount > 0;
 	useBeforeUnload(useCallback((event: BeforeUnloadEvent) => {
 		if (hasUnsavedInput || showGameProgress || isSubmitting) { event.preventDefault(); event.returnValue = ''; }
 	}, [hasUnsavedInput, showGameProgress, isSubmitting]));
@@ -82,14 +83,12 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 				revealErrors(invalid);
 				return;
 			}
-			if (step === 1 && pendingZipCount > 0) { setValidationNotice('ZIP 파일의 용도를 선택하거나 선택을 취소해주세요.'); return; }
 			setValidationNotice('');
 			changeStep(Math.min(2, step + 1));
 		} finally { setChecking(false); }
 	};
 	const blockedReason = isUploadLocked ? '전시회 업로드가 잠겨 있습니다.'
-		: !selectedYearItem || !exhibitionsQuery.isSuccess ? '작품 소개에서 제출할 전시회를 선택해주세요.'
-			: pendingZipCount > 0 ? '팀과 자료에서 ZIP 파일의 용도를 선택해주세요.' : '';
+		: !selectedYearItem || !exhibitionsQuery.isSuccess ? '작품 소개에서 제출할 전시회를 선택해주세요.' : '';
 	const disabled = isSubmitting || checking;
 	const error = submissionError ?? submission.submitMutation.error;
 	return <div className="submission-studio">
@@ -110,7 +109,7 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 						{submission.canRetryStatus && <Button disabled={submission.isFinalizing} onClick={() => void submission.retryStatus()}>제출 상태 다시 확인</Button>}
 						{import.meta.env.VITE_MOCK === 'true' && submission.canRetryPublication && <Button disabled={submission.isFinalizing} onClick={() => void submission.retryPublication()}>Mock 발행 다시 시도</Button>}
 						<SubmissionUploadProgress zone="poster" title={values.title || '작품'} projectId={createdProjectId!} files={files} items={submissionItems} onComplete={uploadFinished} />
-						<SubmissionUploadProgress zone="files" projectId={createdProjectId!} files={files} items={submissionItems} onComplete={uploadFinished} />
+						{studioFileGroups.map(group => <SubmissionUploadProgress key={group.id} zone="files" group={group} projectId={createdProjectId!} files={files} items={submissionItems} onComplete={uploadFinished} />)}
 						<Button variant="danger" size="small" onClick={() => void submission.cancelSubmission()}>제출 취소</Button>
 					</div>
 				</section> : <form noValidate onSubmit={event => {
@@ -129,8 +128,7 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 								{index === 1 && <>
 									<SubmissionMembersFieldset append={membersFieldArray.append} remove={membersFieldArray.remove} fields={membersFieldArray.fields} register={form.register} errors={errors} />
 									<SubmissionPosterSelection files={files} title={values.title || '새 작품'} limits={limits} enabled={!disabled && !isUploadLocked} />
-									{uploadConfig.isError && <p className="field-error" role="alert">자료 업로드 설정을 불러오지 못했습니다. <Button variant="secondary" size="small" onClick={() => void uploadConfig.refetch()}>설정 다시 불러오기</Button></p>}
-									<SubmissionMixedFilesSelection files={files} limits={limits} materialLimits={materialLimits} enabled={!disabled && !isUploadLocked} onPendingZipChange={setPendingZipCount} webglUploadHint={copy.webglUploadHint} />
+									<StudioFileSelection files={files} limits={limits} materialLimits={materialLimits} enabled={!disabled && !isUploadLocked} retryConfig={() => void uploadConfig.refetch()} />
 									{files.fileSizeError && <p className="field-error" role="alert">{files.fileSizeError}</p>}
 									<Controller control={form.control} name="externalLinks" render={({ field }) => <ExternalLinksFieldset value={field.value ?? []} onChange={field.onChange} disabled={disabled} showErrors={!!errors.externalLinks} />} />
 								</>}

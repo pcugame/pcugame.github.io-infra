@@ -154,3 +154,13 @@
   .submission-studio *, .submission-studio *::before, .submission-studio *::after { animation: none !important; transition: none !important; }
   .submission-studio__step:hover:not(:disabled), .submission-studio .archive-card:hover, .submission-studio .archive-card:hover img { transform: none; }
 }
+
+.studio-files-container { container: studio-files / inline-size; min-width: 0; }
+.studio-files-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+.submission-studio .studio-files-grid > fieldset.form-section { min-width: 0; margin: 0; }
+.submission-studio .project-upload-drop--compact { min-height: 7rem; }
+.submission-studio .project-upload-drop--compact > .project-upload-drop__select { min-height: 0; padding: 0; }
+.studio-files-grid .field-hint, .studio-files-grid .field-error { overflow-wrap: anywhere; }
+@container studio-files (min-width: 32rem) {
+  .studio-files-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

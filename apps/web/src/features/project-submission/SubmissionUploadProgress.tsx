@@ -1,3 +1,4 @@
+import type { StudioFileGroup } from './studio/fileGroups';
 import { FormSection } from '../../components/ui';
 import { useMemo } from 'react';
 import type { ProjectSubmissionItemStatus } from '../../contracts';
@@ -10,6 +11,7 @@ import type { SubmissionFilesState } from './useSubmissionFiles';
 
 export function SubmissionUploadProgress({
 	zone,
+	group,
 	projectId,
 	files,
 	items,
@@ -17,6 +19,7 @@ export function SubmissionUploadProgress({
 	title = '작품',
 }: {
 	zone: 'poster' | 'files';
+	group?: StudioFileGroup;
 	projectId: number;
 	files: SubmissionFilesState;
 	items: ProjectSubmissionItemStatus[];
@@ -28,21 +31,21 @@ export function SubmissionUploadProgress({
 	const ordered = [...items].sort((left, right) =>
 		left.slot.localeCompare(right.slot, undefined, { numeric: true }),
 	);
-	const kinds =
+	const kinds = group?.kinds ?? (
 		zone === 'poster'
 			? (['POSTER'] as const)
-			: (['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'DOCUMENT', 'ATTACHMENT'] as const);
+			: (['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'DOCUMENT', 'ATTACHMENT'] as const));
 	return (
-		<FormSection legend={zone === 'poster' ? '포스터' : '게임·미디어·자료'}>
+		<FormSection legend={group?.label ?? (zone === 'poster' ? '포스터' : '게임·미디어·자료')}>
 			{zone === 'poster' && <ProjectPosterPreview title={title} localFile={files.posterFile} />}
-			{!ordered.some((item) => (zone === 'poster' ? item.kind === 'POSTER' : item.kind !== 'POSTER')) ? (
+			{!ordered.some((item) => (kinds as readonly string[]).includes(item.kind)) ? (
 				<p className="field-hint">
 					{zone === 'poster' ? '포스터' : '파일'} 업로드가 완료되었거나 선택한 파일이 없습니다.
 				</p>
 			) : (
 				<ul
 					className="project-upload-queue"
-					aria-label={zone === 'poster' ? '포스터 업로드 진행' : '파일 업로드 진행'}
+					aria-label={group ? `${group.label} 업로드 진행` : zone === 'poster' ? '포스터 업로드 진행' : '파일 업로드 진행'}
 				>
 					{kinds.map((kind) => {
 						const kindItems = ordered.filter((item) => item.kind === kind);
