@@ -161,7 +161,7 @@
 .submission-studio [data-studio-step]:not([hidden]) { animation: studio-step-enter 220ms ease-out; }
 @keyframes studio-step-enter { from { opacity: 0; transform: translateX(var(--studio-enter-offset)); } to { opacity: 1; transform: translateX(0); } }
 @media (max-width: 50em) {
-  .submission-studio__stage { padding-inline: 2.25rem; }
+  .submission-studio__stage, .submission-studio__preview, .submission-studio__footer { padding-inline: 2.25rem; }
   .submission-studio__arrow { width: 2.75rem; min-height: 3.5rem; }
   .submission-studio__arrow--previous { left: calc(var(--studio-stage-left) - .6rem); }
   .submission-studio__arrow--next { right: calc(var(--studio-stage-right) - .6rem); }
