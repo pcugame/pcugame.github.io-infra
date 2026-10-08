@@ -28,7 +28,7 @@ const introductionFields = ['exhibitionId', 'title', 'summary', 'description', '
 /** A distinct UI with the same submission, manifest and resumable-upload owners as the original form. */
 export function ProjectSubmissionStudio({ mode }: { mode: ProjectSubmissionMode }) {
 	const { user } = useMe();
-	return <StudioForm key={`${mode}:${user?.id}:${user?.role}`} mode={mode} />;
+	return <StudioForm key={`${mode}:${user?.id ?? 'anonymous'}:${user?.role ?? ''}:${user?.email ?? ''}`} mode={mode} />;
 }
 
 function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {

@@ -18,6 +18,7 @@ import {
 	useStableIdempotencyOperation,
 } from '../../lib/idempotency-operation';
 import { useMe } from '../auth';
+import { isFacultyAccount } from './faculty-account';
 import type { SubmissionFilesState } from './useSubmissionFiles';
 import type { ProjectSubmissionManifestItem, ProjectSubmissionItemStatus, SubmitProjectResponse } from '../../contracts';
 
@@ -32,6 +33,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 	const qc = useQueryClient();
 	const { user } = useMe();
 	const isAdminMode = mode === 'admin';
+	const canPrefillParticipant = !isFacultyAccount(user?.email);
 	const isPrivileged = isAdminMode && (user?.role === 'ADMIN' || user?.role === 'OPERATOR');
 	const copy = isAdminMode
 		? {
@@ -70,9 +72,9 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			hardwareRequirements: '',
 			members: [
 				{
-					name: user?.name ?? '',
-					studentId: user?.studentId ?? '',
-					...(isAdminMode && user?.id ? { userId: user.id } : {}),
+					name: canPrefillParticipant ? user?.name ?? '' : '',
+					studentId: canPrefillParticipant ? user?.studentId ?? '' : '',
+					...(canPrefillParticipant && isAdminMode && user?.id ? { userId: user.id } : {}),
 				},
 			],
 		},
@@ -92,7 +94,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 	// Follow the original row through swaps; never autofill a replacement after deletion.
 	const initialMemberId = useRef(membersFieldArray.fields[0]?.id);
 	useEffect(() => {
-		if (!user) return;
+		if (!canPrefillParticipant || !user) return;
 		const index = membersFieldArray.fields.findIndex(field => field.id === initialMemberId.current);
 		if (index < 0) return;
 		const member = getValues(`members.${index}`);
@@ -105,7 +107,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		if (isAdminMode && !member?.userId) {
 			setValue(`members.${index}.userId`, user.id);
 		}
-	}, [membersFieldArray.fields, getValues, isAdminMode, setValue, user]);
+	}, [canPrefillParticipant, membersFieldArray.fields, getValues, isAdminMode, setValue, user]);
 
 	const selectedExhibitionId = useWatch({ control, name: 'exhibitionId' });
 	const selectedYearItem = years.find((year) => year.id === Number(selectedExhibitionId));
@@ -266,7 +268,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	const onSubmit = (data: SubmitProjectPayloadInput) => {
 		if (!mounted.current || currentViewer.current !== viewerIdentity || !pendingStorageKey) return;
-		if (isAdminMode && user) {
+		if (canPrefillParticipant && isAdminMode && user) {
 			const linkedMember = data.members.find((member) => member.name === user.name);
 			if (linkedMember) linkedMember.userId = user.id;
 		}

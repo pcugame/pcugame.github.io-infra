@@ -12,6 +12,8 @@ import { ProjectSubmissionStudio } from '../features/project-submission/studio/P
 
 const controls = vi.hoisted(() => ({
 	role: 'USER',
+	email: '20260001@pcu.ac.kr',
+	studentId: '20260001' as string | undefined,
 	visibilityEnabled: true,
 	config: vi.fn(),
 	years: vi.fn(),
@@ -27,7 +29,7 @@ const controls = vi.hoisted(() => ({
 }));
 vi.mock('../lib/env', () => ({ env: { get VISIBILITY_CONTROLS_ENABLED() { return controls.visibilityEnabled; }, BASE_PATH: '/' } }));
 vi.mock('../features/auth', () => ({
-	useMe: () => ({ user: { id: 9, name: '홍길동', studentId: '20260001', role: controls.role } }),
+	useMe: () => ({ user: { id: 9, name: '홍길동', studentId: controls.studentId, email: controls.email, role: controls.role } }),
 }));
 vi.mock('../lib/api', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../lib/api')>()),
@@ -56,6 +58,8 @@ beforeEach(() => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 	items = [];
 	controls.role = 'USER';
+	controls.email = '20260001@pcu.ac.kr';
+	controls.studentId = '20260001';
 	controls.visibilityEnabled = true;
 	class TestURL extends URL {}
 	TestURL.createObjectURL = vi.fn(() => 'blob:poster');
@@ -637,4 +641,26 @@ describe.each(['user', 'admin'] as const)('%s registration enhancements', mode =
 		mount(mode);
 		expect(!!screen.queryByText('작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.')).toBe(enabled);
 	});
+});
+
+
+it.each(['user', 'admin'] as const)('keeps faculty participants blank and unlinked in the %s studio', async mode => {
+ controls.email = 'A00000@pcu.ac.kr';
+ controls.studentId = undefined;
+ mount(mode);
+ await enterMetadata();
+ await goTo(1);
+ expect((screen.getByLabelText('이름') as HTMLInputElement).value).toBe('');
+ expect((screen.getByLabelText('학번') as HTMLInputElement).value).toBe('');
+ // A same-name student must not inherit the signed-in faculty account's hidden userId.
+ fireEvent.change(screen.getByLabelText('이름'), { target: { value: '홍길동' } });
+ fireEvent.change(screen.getByLabelText('학번'), { target: { value: '20269999' } });
+ await goTo(2);
+ await goTo(1);
+ expect((screen.getByLabelText('이름') as HTMLInputElement).value).toBe('홍길동');
+ await goTo(3);
+ fireEvent.click(screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' }));
+ await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
+ const payload = JSON.parse(String(controls.submit.mock.calls[0][0].formData.get('payload')));
+ expect(payload.members).toEqual([{ name: '홍길동', studentId: '20269999' }]);
 });

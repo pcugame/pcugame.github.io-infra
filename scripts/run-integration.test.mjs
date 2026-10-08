@@ -56,6 +56,7 @@ const expectedSuites = {
 		'--no-file-parallelism',
 		'src/__tests__/canonical-asset-contract-schema.postgres.test.ts',
 		'src/__tests__/project-submission.postgres.test.ts',
+		'src/__tests__/faculty-management-http.postgres.test.ts',
 		'src/__tests__/phase2-project-http.postgres.test.ts',
 		'src/__tests__/contract-age-exception.postgres.test.ts',
 		'src/__tests__/contract-image-bridge36.postgres.test.ts',
