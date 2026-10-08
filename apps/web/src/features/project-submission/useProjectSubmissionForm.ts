@@ -51,11 +51,11 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				webglUploadHint: 'WebGL ZIP의 최상위 또는 단일 폴더에 index.html과 Build 폴더를 포함하세요. Build에는 .loader.js와 .framework.js, .wasm, .data 파일이 필요합니다. 비압축, .gz, .br, Decompression Fallback의 .unityweb 형식을 지원합니다. loader는 .js(.gz/.br 포함) 형식이어야 합니다. 표시 크기는 업로드 후 자동으로 감지하며, 작품 수정 화면에서 확인·변경할 수 있습니다.',
 			};
 
-	const { data: yearsData } = useQuery({
+	const exhibitionsQuery = useQuery({
 		queryKey: viewerKey(queryKeys.adminExhibitions),
 		queryFn: adminExhibitionApi.list,
 	});
-	const years = yearsData?.items ?? [];
+	const years = exhibitionsQuery.data?.items ?? [];
 
 	const form = useForm<SubmitProjectPayloadInput>({
 		resolver: zodResolver(SubmitProjectPayloadSchema),
@@ -315,6 +315,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	return {
 		copy,
+		exhibitionsQuery,
 		canRetryPublication,
 		canRetryStatus,
 		retryStatus: () => createdProjectId !== null && finalizeIfReady(createdProjectId),
