@@ -143,8 +143,9 @@
   .studio-files-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.submission-studio [data-studio-step='2'] > .submission-studio__fields { padding: 0; }
+.submission-studio [data-studio-step='3'] > .submission-studio__fields { padding: 0; }
 .project-preview-inline { min-width: 0; }
+.project-preview-inline__content { margin-inline: auto; }
 .project-preview-inline .modal-visual { border-radius: 0; }
 .project-preview-inline .modal-title, .project-preview-inline .modal-download__note { overflow-wrap: anywhere; }
 .project-preview-inline .modal-visual__zoom { opacity: 1; }

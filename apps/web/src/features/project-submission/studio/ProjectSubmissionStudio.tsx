@@ -23,9 +23,12 @@ import { StudioPreview } from './StudioPreview';
 
 const steps = [
 	{ title: '작품 소개', description: '전시 페이지에 표시할 기본 정보를 작성하세요.' },
-	{ title: '팀과 자료', description: '함께 만든 사람들과 게임의 모습을 소개하세요.' },
-	{ title: '작품 미리보기', description: '전시 화면을 확인하고 작품을 제출하세요.' },
+	{ title: '게임 정보', description: '실행 환경과 참여 학생, 외부 링크를 작성하세요.' },
+	{ title: '파일 업로드', description: '포스터와 게임 빌드, 영상·사진을 선택하세요.' },
+	{ title: '미리보기', description: '전시 화면을 확인하고 작품을 제출하세요.' },
 ];
+const lastStep = steps.length - 1;
+const gameInformationFields = ['platforms', 'hardwareRequirements', 'members', 'externalLinks'] as const;
 const introductionFields = ['exhibitionId', 'title', 'summary', 'description', 'visibility'] as const;
 
 /** A distinct UI with the same submission, manifest and resumable-upload owners as the original form. */
@@ -100,14 +103,14 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 	const nextStep = async () => {
 		setChecking(true);
 		try {
-			const keys = step === 0 ? [...introductionFields] : undefined;
+			const keys = step === 0 ? [...introductionFields] : step === 1 ? [...gameInformationFields] : undefined;
 			if (!await form.trigger(keys)) {
-				const invalid = Object.fromEntries([...introductionFields, 'platforms', 'hardwareRequirements', 'members', 'externalLinks'].map(key => [key, form.getFieldState(key as keyof SubmitProjectPayloadInput).error]));
+				const invalid = Object.fromEntries([...introductionFields, ...gameInformationFields].map(key => [key, form.getFieldState(key as keyof SubmitProjectPayloadInput).error]));
 				revealErrors(invalid);
 				return;
 			}
 			setValidationNotice('');
-			changeStep(Math.min(2, step + 1));
+			changeStep(Math.min(lastStep, step + 1));
 		} finally { setChecking(false); }
 	};
 	const blockedReason = isUploadLocked ? '전시회 업로드가 잠겨 있습니다.'
@@ -125,7 +128,7 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 			</nav>
 			<div className="submission-studio__stage" ref={stage} data-step-direction={direction}>
 				<button type="button" className="submission-studio__arrow submission-studio__arrow--previous" aria-label="이전 작성 단계" disabled={step === 0 || disabled || showGameProgress} onClick={() => changeStep(step - 1)}><span aria-hidden="true">‹</span></button>
-				<button type="button" className="submission-studio__arrow submission-studio__arrow--next" aria-label="다음 작성 단계" disabled={step === 2 || disabled || showGameProgress} onClick={() => void nextStep()}><span aria-hidden="true">›</span></button>
+				<button type="button" className="submission-studio__arrow submission-studio__arrow--next" aria-label="다음 작성 단계" disabled={step === lastStep || disabled || showGameProgress} onClick={() => void nextStep()}><span aria-hidden="true">›</span></button>
 				<div className="submission-studio__sheet" ref={panel}>
 					{showGameProgress ? <section className="submission-studio__progress" aria-label="제출 진행 상태">
 						<div className="submission-studio__sheet-heading"><h2>작품을 준비하고 있어요.</h2><p>파일 업로드와 검증이 끝나면 작품이 공개됩니다.</p></div>
@@ -140,14 +143,14 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 					</section> : <form noValidate onSubmit={event => {
 						event.preventDefault();
 						if (disabled || isUploadLocked) return;
-						if (step < 2) { void nextStep(); return; }
+						if (step < lastStep) { void nextStep(); return; }
 						if (blockedReason) { setValidationNotice(blockedReason); return; }
 						void form.handleSubmit(submission.onSubmit, revealErrors)(event);
 					}}>
 						<fieldset className="submission-studio__form-guard" disabled={disabled}>
 							<legend className="submission-studio__sr-only">작품 작성</legend>
 							{steps.map((item, index) => <section key={item.title} data-studio-step={index} hidden={step !== index} aria-labelledby={`studio-step-title-${index}`}>
-								<div className="submission-studio__sheet-heading"><div><h2 id={`studio-step-title-${index}`} tabIndex={-1}>{item.title}</h2><p>{item.description}</p></div><span>0{index + 1} / 03</span></div>
+								<div className="submission-studio__sheet-heading"><div><h2 id={`studio-step-title-${index}`} tabIndex={-1}>{item.title}</h2><p>{item.description}</p></div><span>0{index + 1} / 0{steps.length}</span></div>
 								<div className="submission-studio__fields">
 									{index === 0 && <StudioIntroduction submission={submission} />}
 									{index === 1 && <>
@@ -157,29 +160,31 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 											error={errors.hardwareRequirements?.message}
 										/>} />} />
 										<SubmissionMembersFieldset append={membersFieldArray.append} remove={membersFieldArray.remove} fields={membersFieldArray.fields} register={form.register} errors={errors} />
+										<Controller control={form.control} name="externalLinks" render={({ field }) => <ExternalLinksFieldset value={field.value ?? []} onChange={field.onChange} disabled={disabled} showErrors={!!errors.externalLinks} />} />
+									</>}
+									{index === 2 && <>
 										<SubmissionPosterSelection files={files} title={values.title || '새 작품'} limits={limits} enabled={!disabled && !isUploadLocked} />
 										<StudioFileSelection files={files} limits={limits} materialLimits={materialLimits} enabled={!disabled && !isUploadLocked} retryConfig={() => void uploadConfig.refetch()} />
 										{files.fileSizeError && <p className="field-error" role="alert">{files.fileSizeError}</p>}
-										<Controller control={form.control} name="externalLinks" render={({ field }) => <ExternalLinksFieldset value={field.value ?? []} onChange={field.onChange} disabled={disabled} showErrors={!!errors.externalLinks} />} />
 									</>}
-									{index === 2 && step === 2 && <ProjectPreviewPanel values={values} poster={files.posterFile} images={files.imageFiles} videos={files.videoFiles} game={files.gameFile} webgl={files.webglFile} exhibitionLabel={exhibitionLabel} />}
+									{index === lastStep && step === lastStep && <ProjectPreviewPanel values={values} poster={files.posterFile} images={files.imageFiles} videos={files.videoFiles} game={files.gameFile} webgl={files.webglFile} exhibitionLabel={exhibitionLabel} />}
 								</div>
 							</section>)}
 							<div className="submission-studio__feedback" aria-live="polite">
 								{validationNotice && <p className="field-error">{validationNotice}</p>}
-								{step === 2 && blockedReason && <p className="field-error">{blockedReason}</p>}
+								{step === lastStep && blockedReason && <p className="field-error">{blockedReason}</p>}
 								{error != null && <p className="field-error" role="alert">{getApiErrorMessage(error)}</p>}
 							</div>
 							<footer className="submission-studio__actions">
-								{step === 0 ? <span>다음으로 팀과 자료를 추가해요.</span> : <Button variant="secondary" onClick={() => changeStep(step - 1)}>← 이전 단계</Button>}
-								{step < 2 ? <Button key="next" onClick={() => void nextStep()}>다음 단계 →</Button> : <Button key="submit" type="submit" disabled={!!blockedReason}>{isSubmitting ? copy.submittingLabel : copy.submitLabel}</Button>}
+								{step === 0 ? <span>다음으로 게임 정보를 작성해요.</span> : <Button variant="secondary" onClick={() => changeStep(step - 1)}>← 이전 단계</Button>}
+								{step < lastStep ? <Button key="next" onClick={() => void nextStep()}>다음 단계 →</Button> : <Button key="submit" type="submit" disabled={!!blockedReason}>{isSubmitting ? copy.submittingLabel : copy.submitLabel}</Button>}
 							</footer>
 						</fieldset>
 					</form>}
 				</div>
 			</div>
 			<aside className="submission-studio__preview" aria-label={showGameProgress ? '업로드 현황' : '실시간 미리보기'}>
-				{showGameProgress ? <div className="submission-studio__upload-summary"><h2>업로드 현황</h2><strong>{submissionItems.filter(item => item.state === 'READY').length}<span> / {submissionItems.length}</span></strong><p>파일 검증 완료</p><p className="field-hint">{submission.isFinalizing ? '작품의 제출 상태를 확인하고 있습니다.' : '파일별 진행 상태는 왼쪽에서 확인할 수 있습니다.'}</p></div> : <StudioPreview values={values} files={files} exhibitionLabel={exhibitionLabel} onPreview={() => changeStep(2)} />}
+				{showGameProgress ? <div className="submission-studio__upload-summary"><h2>업로드 현황</h2><strong>{submissionItems.filter(item => item.state === 'READY').length}<span> / {submissionItems.length}</span></strong><p>파일 검증 완료</p><p className="field-hint">{submission.isFinalizing ? '작품의 제출 상태를 확인하고 있습니다.' : '파일별 진행 상태는 왼쪽에서 확인할 수 있습니다.'}</p></div> : <StudioPreview values={values} files={files} exhibitionLabel={exhibitionLabel} onPreview={() => changeStep(lastStep)} />}
 			</aside>
 		</div>
 		<footer className="submission-studio__footer"><Link to={basePath} onClick={event => { if ((hasUnsavedInput || showGameProgress) && !window.confirm('이 화면을 나가시겠어요? 제출 전 입력 내용과 파일 선택은 저장되지 않습니다. 진행 중인 업로드는 원본 파일을 다시 선택해 이어올릴 수 있습니다.')) event.preventDefault(); }}>{mode === 'admin' ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>{!showGameProgress && !isSubmitting && <Link to={`${basePath}/new`} onClick={event => { if (hasUnsavedInput && !window.confirm('기존 화면으로 이동하면 작성한 내용과 파일 선택이 초기화됩니다. 이동하시겠어요?')) event.preventDefault(); }}>기존 업로드 화면으로 이동 ↗</Link>}</footer>

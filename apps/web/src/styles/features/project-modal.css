@@ -19,13 +19,16 @@
   to { opacity: 1; }
 }
 
+.modal-panel, .project-preview-inline__content {
+  max-width: 45rem;
+  width: 100%;
+}
+
 .modal-panel {
   position: relative;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 16px;
-  max-width: 45rem;
-  width: 100%;
   max-height: calc(100vh - 4rem);
   overflow-y: auto;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
