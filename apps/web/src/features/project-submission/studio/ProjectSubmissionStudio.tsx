@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Controller, useWatch, type FieldErrors } from 'react-hook-form';
 import { Link, useBeforeUnload } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -17,6 +17,7 @@ import { SubmissionPosterSelection } from '../SubmissionFileSelection';
 import { SubmissionUploadProgress } from '../SubmissionUploadProgress';
 import { StudioFileSelection } from './StudioFileSelection';
 import { studioFileGroups } from './fileGroups';
+import { ProjectRequirementsFieldset } from '../../../components/project/ProjectRequirementsFieldset';
 import { StudioIntroduction } from './StudioIntroduction';
 import { StudioPreview } from './StudioPreview';
 
@@ -25,7 +26,7 @@ const steps = [
 	{ title: '팀과 자료', description: '함께 만든 사람들과 게임의 모습을 소개하세요.' },
 	{ title: '작품 미리보기', description: '전시 화면을 확인하고 작품을 제출하세요.' },
 ];
-const introductionFields = ['exhibitionId', 'title', 'summary', 'description', 'visibility', 'platforms', 'hardwareRequirements'] as const;
+const introductionFields = ['exhibitionId', 'title', 'summary', 'description', 'visibility'] as const;
 
 /** A distinct UI with the same submission, manifest and resumable-upload owners as the original form. */
 export function ProjectSubmissionStudio({ mode }: { mode: ProjectSubmissionMode }) {
@@ -48,6 +49,26 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 	const [validationNotice, setValidationNotice] = useState('');
 	const [checking, setChecking] = useState(false);
 	const panel = useRef<HTMLDivElement>(null);
+	const stage = useRef<HTMLDivElement>(null);
+	useLayoutEffect(() => {
+		const element = stage.current;
+		if (!element) return;
+		const alignArrows = () => {
+			const rect = element.getBoundingClientRect();
+			element.style.setProperty('--studio-stage-left', `${rect.left}px`);
+			element.style.setProperty('--studio-stage-right', `${window.innerWidth - rect.right}px`);
+		};
+		alignArrows();
+		const observer = new ResizeObserver(alignArrows);
+		observer.observe(element);
+		window.addEventListener('resize', alignArrows);
+		window.addEventListener('scroll', alignArrows, true);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener('resize', alignArrows);
+			window.removeEventListener('scroll', alignArrows, true);
+		};
+	}, []);
 	const exhibitionLabel = selectedYearItem ? `${selectedYearItem.year} ${selectedYearItem.title ?? '작품 전시'}` : undefined;
 	const basePath = mode === 'admin' ? '/admin/projects' : '/me/projects';
 	const fileCount = Number(!!files.posterFile) + Number(!!files.gameFile) + Number(!!files.webglFile)
@@ -81,7 +102,7 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 		try {
 			const keys = step === 0 ? [...introductionFields] : undefined;
 			if (!await form.trigger(keys)) {
-				const invalid = Object.fromEntries([...introductionFields, 'members', 'externalLinks'].map(key => [key, form.getFieldState(key as keyof SubmitProjectPayloadInput).error]));
+				const invalid = Object.fromEntries([...introductionFields, 'platforms', 'hardwareRequirements', 'members', 'externalLinks'].map(key => [key, form.getFieldState(key as keyof SubmitProjectPayloadInput).error]));
 				revealErrors(invalid);
 				return;
 			}
@@ -102,7 +123,7 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 				{steps.map((item, index) => <button key={item.title} type="button" className={`submission-studio__step${step === index && !showGameProgress ? ' is-active' : ''}`} aria-current={step === index && !showGameProgress ? 'step' : undefined} disabled={disabled || showGameProgress} onClick={() => changeStep(index)}><span>{index + 1}</span>{item.title}</button>)}
 				<div className="submission-studio__guide"><a href={`${import.meta.env.BASE_URL}unity-webgl-guide/`} target="_blank" rel="noopener noreferrer">Unity WebGL 업로드 가이드 ↗</a></div>
 			</nav>
-			<div className="submission-studio__stage" data-step-direction={direction}>
+			<div className="submission-studio__stage" ref={stage} data-step-direction={direction}>
 				<button type="button" className="submission-studio__arrow submission-studio__arrow--previous" aria-label="이전 작성 단계" disabled={step === 0 || disabled || showGameProgress} onClick={() => changeStep(step - 1)}><span aria-hidden="true">‹</span></button>
 				<button type="button" className="submission-studio__arrow submission-studio__arrow--next" aria-label="다음 작성 단계" disabled={step === 2 || disabled || showGameProgress} onClick={() => void nextStep()}><span aria-hidden="true">›</span></button>
 				<div className="submission-studio__sheet" ref={panel}>
@@ -130,6 +151,11 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 								<div className="submission-studio__fields">
 									{index === 0 && <StudioIntroduction submission={submission} />}
 									{index === 1 && <>
+										<Controller control={form.control} name="platforms" render={({ field: platforms }) => <Controller control={form.control} name="hardwareRequirements" render={({ field: hardware }) => <ProjectRequirementsFieldset
+											platforms={platforms.value ?? []} hardwareRequirements={hardware.value ?? ''}
+											onPlatformsChange={platforms.onChange} onHardwareRequirementsChange={hardware.onChange}
+											error={errors.hardwareRequirements?.message}
+										/>} />} />
 										<SubmissionMembersFieldset append={membersFieldArray.append} remove={membersFieldArray.remove} fields={membersFieldArray.fields} register={form.register} errors={errors} />
 										<SubmissionPosterSelection files={files} title={values.title || '새 작품'} limits={limits} enabled={!disabled && !isUploadLocked} />
 										<StudioFileSelection files={files} limits={limits} materialLimits={materialLimits} enabled={!disabled && !isUploadLocked} retryConfig={() => void uploadConfig.refetch()} />

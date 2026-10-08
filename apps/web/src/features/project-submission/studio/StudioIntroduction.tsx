@@ -2,7 +2,6 @@ import { Controller, useWatch } from 'react-hook-form';
 import { Button, FormSection, TextField, TextareaField } from '../../../components/ui';
 import ExhibitionSelect from '../../../components/ExhibitionSelect';
 import { VisibilityNotice, VisibilitySelect } from '../../../components/VisibilitySelect';
-import { ProjectRequirementsFieldset } from '../../../components/project/ProjectRequirementsFieldset';
 import { env } from '../../../lib/env';
 import type { useProjectSubmissionForm } from '../useProjectSubmissionForm';
 
@@ -34,10 +33,5 @@ export function StudioIntroduction({ submission }: { submission: ReturnType<type
 				<VisibilityNotice visibility={visibility} exhibitionVisibility={selectedYearItem?.visibility} />
 			</div>}
 		</FormSection>
-		<Controller control={control} name="platforms" render={({ field: platforms }) => <Controller control={control} name="hardwareRequirements" render={({ field: hardware }) => <ProjectRequirementsFieldset
-			platforms={platforms.value ?? []} hardwareRequirements={hardware.value ?? ''}
-			onPlatformsChange={platforms.onChange} onHardwareRequirementsChange={hardware.onChange}
-			error={errors.hardwareRequirements?.message}
-		/>} />} />
 	</>;
 }

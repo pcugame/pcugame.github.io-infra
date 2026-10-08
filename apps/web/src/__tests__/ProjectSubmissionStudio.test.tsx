@@ -51,6 +51,7 @@ const draft = () => ({
 	adminEditUrl: '/admin/projects/73/edit',
 });
 beforeEach(() => {
+	vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
 	items = [];
 	controls.role = 'USER';
 	class TestURL extends URL {}
@@ -115,6 +116,7 @@ async function goTo(step: number) {
 describe('submission studio', () => {
 	it('validates side-arrow navigation, preserves files, and never submits from the final arrow', async () => {
 		const { container } = mount();
+		expect(screen.queryByRole('group', { name: '실행 환경' })).toBeNull();
 		const previous = screen.getByRole('button', { name: '이전 작성 단계' }) as HTMLButtonElement;
 		const next = screen.getByRole('button', { name: '다음 작성 단계' }) as HTMLButtonElement;
 		expect(previous.disabled).toBe(true);
@@ -124,6 +126,7 @@ describe('submission studio', () => {
 		await enterMetadata();
 		fireEvent.click(next);
 		await screen.findByRole('heading', { name: '팀과 자료' });
+		expect(screen.getByRole('group', { name: '실행 환경' })).toBeTruthy();
 		select(container, 'native', [new File(['zip'], 'retained.zip', { type: 'application/zip' })]);
 		fireEvent.click(next);
 		await screen.findByRole('region', { name: '전시 화면 미리보기' });
@@ -135,6 +138,19 @@ describe('submission studio', () => {
 		expect(screen.getByText('retained.zip')).toBeTruthy();
 		expect(container.querySelector('[data-step-direction="backward"]')).toBeTruthy();
 		expect(controls.upload).not.toHaveBeenCalled();
+	});
+
+	it('returns invalid runtime requirements to the second step and retains their values', async () => {
+		mount();
+		await enterMetadata();
+		await goTo(1);
+		fireEvent.change(screen.getByLabelText('필수 하드웨어'), { target: { value: 'x'.repeat(1001) } });
+		await goTo(2);
+		fireEvent.click(screen.getByRole('button', { name: '작품 제출' }));
+		await screen.findByRole('group', { name: '실행 환경' });
+		expect((screen.getByLabelText('필수 하드웨어') as HTMLTextAreaElement).value).toHaveLength(1001);
+		expect(screen.getByLabelText('필수 하드웨어').getAttribute('aria-invalid')).toBe('true');
+		expect(controls.submit).not.toHaveBeenCalled();
 	});
 
 	it('updates the live preview and routes invalid hidden fields back to the right step', async () => {
@@ -192,8 +208,8 @@ describe('submission studio', () => {
 	it.each(['user', 'admin'] as const)('%s sends metadata and all selected file kinds through the existing staged upload flow', async mode => {
 		const { container } = mount(mode);
 		await enterMetadata('PUBLIC');
-		fireEvent.click(screen.getByLabelText('PC'));
 		await goTo(1);
+		fireEvent.click(screen.getByLabelText('PC'));
 		await waitFor(() => expect(controls.config).toHaveBeenCalled());
 		select(container, 'poster', [new File(['poster'], 'cover.png', { type: 'image/png' })]);
 		select(container, 'native', [new File(['zip'], 'game.zip', { type: 'application/zip' })]);
