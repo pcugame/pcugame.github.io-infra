@@ -24,6 +24,11 @@ interface ProjectSubmissionFormProps {
 
 export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	const { user } = useMe();
+	return <SubmissionForm key={`${mode}:${user?.id ?? 'anonymous'}:${user?.role ?? ''}:${user?.email ?? ''}`} mode={mode} />;
+}
+
+function SubmissionForm({ mode }: ProjectSubmissionFormProps) {
+	const { user } = useMe();
 	const isAdminMode = mode === 'admin';
 	const limits = getClientUploadLimits(isAdminMode ? (user?.role ?? 'USER') : 'USER');
 	const uploadConfigQuery = useQuery({
