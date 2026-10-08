@@ -35,6 +35,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 	const submission = useProjectSubmissionForm({ mode, files });
 	const {
 		copy,
+		assetRequirementError,
 		cancelSubmission,
 		createdProjectId,
 		finalizeIfReady,
@@ -78,7 +79,7 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 
 			<form
 				onSubmit={(event) => {
-					if (showGameProgress || pendingZipCount > 0) {
+					if (showGameProgress || pendingZipCount > 0 || assetRequirementError) {
 						event.preventDefault();
 						return;
 					}
@@ -94,8 +95,8 @@ export function ProjectSubmissionForm({ mode }: ProjectSubmissionFormProps) {
 								? '파일 목록에서 ZIP 용도를 선택하세요.'
 								: isUploadLocked
 									? '전시회 업로드가 잠겨 있습니다. 운영자에게 문의하세요.'
-									: Object.keys(errors).length > 0 ? '표시된 입력 오류를 확인하세요.' : undefined}
-							isUploadLocked={isUploadLocked || pendingZipCount > 0}
+									: assetRequirementError ?? (Object.keys(errors).length > 0 ? '표시된 입력 오류를 확인하세요.' : undefined)}
+							isUploadLocked={isUploadLocked || pendingZipCount > 0 || !!assetRequirementError}
 							onPreview={openPreview}
 							submitLabel={copy.submitLabel}
 							submittingLabel={copy.submittingLabel}

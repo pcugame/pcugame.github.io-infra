@@ -18,6 +18,7 @@ import {
 	useStableIdempotencyOperation,
 } from '../../lib/idempotency-operation';
 import { useMe } from '../auth';
+import { publicAssetRequirementError } from './publicAssetRequirements';
 import type { SubmissionFilesState } from './useSubmissionFiles';
 import type { ProjectSubmissionManifestItem, ProjectSubmissionItemStatus, SubmitProjectResponse } from '../../contracts';
 
@@ -104,6 +105,8 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		}
 	}, [membersFieldArray.fields.length, getValues, isAdminMode, setValue, user]);
 
+	const visibility = useWatch({ control, name: 'visibility' });
+	const assetRequirementError = publicAssetRequirementError(visibility, files);
 	const selectedExhibitionId = useWatch({ control, name: 'exhibitionId' });
 	const selectedYearItem = years.find((year) => year.id === Number(selectedExhibitionId));
 	const isUploadLocked = selectedYearItem != null && !(selectedYearItem.isModificationEnabled ?? selectedYearItem.isUploadEnabled) && !isPrivileged;
@@ -262,6 +265,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	const onSubmit = (data: SubmitProjectPayloadInput) => {
 		if (!mounted.current || currentViewer.current !== viewerIdentity || !pendingStorageKey) return;
+		if (publicAssetRequirementError(data.visibility, files)) return;
 		if (isAdminMode && user) {
 			const linkedMember = data.members.find((member) => member.name === user.name);
 			if (linkedMember) linkedMember.userId = user.id;
@@ -315,6 +319,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	return {
 		copy,
+		assetRequirementError,
 		exhibitionsQuery,
 		canRetryPublication,
 		canRetryStatus,

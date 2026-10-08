@@ -119,7 +119,6 @@
 @container (max-width: 37rem) {
   .submission-studio__layout { grid-template-columns: minmax(0, 1fr); }
   .submission-studio__preview { position: static; }
-  .submission-studio__checklist, .submission-studio__aside-note { display: none; }
   .submission-studio__sheet-heading, .submission-studio__fields { padding: 1.2rem; }
   .submission-studio__actions { padding: 1rem 1.2rem; }
   .submission-studio__step { font-size: .7rem; padding: .6rem .3rem; gap: .35rem; }

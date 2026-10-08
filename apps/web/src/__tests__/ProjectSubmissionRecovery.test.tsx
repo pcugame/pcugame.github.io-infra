@@ -68,7 +68,7 @@ it('keeps an unmounted late metadata success from polling or navigating', async 
   const submit = vi.spyOn(userProjectApi, 'submit').mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   const get = vi.spyOn(userProjectApi, 'getSubmission').mockResolvedValue(pending);
   const { result, unmount } = setup();
-  act(() => result.current.onSubmit({ exhibitionId: 1, title: 'Late submission', members: [{ name: 'Student', studentId: '2088099' }] }));
+  act(() => result.current.onSubmit({ visibility: 'STAFF', exhibitionId: 1, title: 'Late submission', members: [{ name: 'Student', studentId: '2088099' }] }));
   await waitFor(() => expect(submit).toHaveBeenCalledTimes(1)); unmount();
   await act(async () => resolve(saved));
   expect(get).not.toHaveBeenCalled(); expect(mocks.navigate).not.toHaveBeenCalled();
@@ -131,7 +131,7 @@ it('rejects an old metadata callback after switching away and returning to the s
   let resolve!: (value: SubmitProjectResponse) => void;
   const submit = vi.spyOn(userProjectApi, 'submit').mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   const get = vi.spyOn(userProjectApi, 'getSubmission').mockResolvedValue(pending); const { result, rerender } = setup();
-  act(() => result.current.onSubmit({ exhibitionId: 1, title: 'Old lifetime', members: [{ name: 'Student', studentId: '2088099' }] }));
+  act(() => result.current.onSubmit({ visibility: 'STAFF', exhibitionId: 1, title: 'Old lifetime', members: [{ name: 'Student', studentId: '2088099' }] }));
   await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
   mocks.user = { ...mocks.user, role: 'ADMIN' }; rerender(); mocks.user = { ...mocks.user, role: 'USER' }; rerender();
   await act(async () => resolve(saved)); expect(result.current.createdProjectId).toBeNull(); expect(get).not.toHaveBeenCalled(); expect(mocks.navigate).not.toHaveBeenCalled();
@@ -143,11 +143,21 @@ it('preserves a newer recovery pointer when an old page metadata response arrive
   const submit = vi.spyOn(userProjectApi, 'submit').mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   const get = vi.spyOn(userProjectApi, 'getSubmission').mockResolvedValue({ ...pending, projectId: 8 });
   const old = setup();
-  act(() => old.result.current.onSubmit({ exhibitionId: 1, title: 'Old page', members: [{ name: 'Student', studentId: '2088099' }] }));
+  act(() => old.result.current.onSubmit({ visibility: 'STAFF', exhibitionId: 1, title: 'Old page', members: [{ name: 'Student', studentId: '2088099' }] }));
   await waitFor(() => expect(submit).toHaveBeenCalledTimes(1)); old.unmount();
   window.sessionStorage.setItem(key(), JSON.stringify({ ...saved, id: 8 }));
   const next = setup(); await waitFor(() => expect(next.result.current.createdProjectId).toBe(8));
   await act(async () => resolve(saved));
   expect(JSON.parse(window.sessionStorage.getItem(key())!).id).toBe(8);
   expect(next.result.current.createdProjectId).toBe(8);expect(get).toHaveBeenCalledTimes(1);expect(mocks.navigate).not.toHaveBeenCalled();
+});
+
+it('guards the shared submit callback against missing public assets, including omitted visibility', async () => {
+  const submit = vi.spyOn(userProjectApi, 'submit');
+  const { result } = setup();
+  for (const visibility of [undefined, 'PUBLIC'] as const) {
+    act(() => result.current.onSubmit({ visibility, exhibitionId: 1, title: 'Incomplete public project', members: [{ name: 'Student', studentId: '2088099' }] }));
+  }
+  expect(submit).not.toHaveBeenCalled();
+  expect(result.current.assetRequirementError).toContain('네이티브 빌드 · 웹 빌드 · 동영상 · 사진');
 });

@@ -21,6 +21,7 @@ const controls = vi.hoisted(() => ({
 	cancelUpload: vi.fn(),
 	waitReady: vi.fn(),
 }));
+vi.mock('../lib/env', () => ({ env: { VISIBILITY_CONTROLS_ENABLED: true, BASE_PATH: '/' } }));
 vi.mock('../features/auth', () => ({
 	useMe: () => ({ user: { id: 9, name: '홍길동', studentId: '20260001', role: 'USER' } }),
 }));
@@ -90,10 +91,11 @@ function mount(mode: 'admin' | 'user' = 'user') {
 		</MemoryRouter>,
 	);
 }
-async function enterMetadata() {
-	const exhibition = await screen.findByRole('combobox');
+async function enterMetadata(visibility: 'PUBLIC' | 'STAFF' | 'AUTHENTICATED' = 'STAFF') {
+	const exhibition = await screen.findByLabelText(/전시회/);
 	fireEvent.change(exhibition, { target: { value: (screen.getByRole('option', { name: /2026/ }) as HTMLOptionElement).value } });
 	fireEvent.change(screen.getByLabelText('제목 *'), { target: { value: '선택한 작품' } });
+	fireEvent.change(screen.getByLabelText('공개 범위'), { target: { value: visibility } });
 }
 function select(container: HTMLElement, zone: 'poster' | 'files', files: File[]) {
 	fireEvent.change(container.querySelector(`.project-upload-drop--${zone} input[type="file"]`)!, {
@@ -102,7 +104,7 @@ function select(container: HTMLElement, zone: 'poster' | 'files', files: File[])
 }
 
 describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode) => {
-	it('keeps required metadata and members before optional files and submits without a poster or game', async () => {
+	it('keeps metadata first and permits restricted-visibility submission without files', async () => {
 		const { container } = mount(mode);
 		await enterMetadata();
 		const grid = container.querySelector('.admin-project-edit-grid')!;
@@ -117,6 +119,18 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
 		const payload = JSON.parse(String(controls.submit.mock.calls[0][0].formData.get('payload')));
 		expect(payload.manifest).toEqual([]);
+		expect(controls.upload).not.toHaveBeenCalled();
+	});
+
+	it('blocks public submission without required assets in the existing mixed form too', async () => {
+		const { container } = mount(mode);
+		await enterMetadata('PUBLIC');
+		const button = screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' });
+		expect((button as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.getByText(/공개 작품 제출에는 네이티브 빌드/)).toBeTruthy();
+		fireEvent.submit(container.querySelector('form')!);
+		await act(async () => { await Promise.resolve(); });
+		expect(controls.submit).not.toHaveBeenCalled();
 		expect(controls.upload).not.toHaveBeenCalled();
 	});
 
@@ -189,7 +203,7 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 
 	it('keeps mixed selection local until metadata creates a DRAFT, then preserves manifest tokens in side-column uploads', async () => {
 		const { container } = mount(mode);
-		await enterMetadata();
+		await enterMetadata('PUBLIC');
 		fireEvent.click(screen.getByLabelText('PC'));
 		fireEvent.click(screen.getByLabelText('웹'));
 		fireEvent.change(screen.getByLabelText('필수 하드웨어'), { target: { value: 'VR 헤드셋\n컨트롤러' } });

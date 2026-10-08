@@ -88,7 +88,7 @@ function StudioForm({ mode }: { mode: ProjectSubmissionMode }) {
 		} finally { setChecking(false); }
 	};
 	const blockedReason = isUploadLocked ? '전시회 업로드가 잠겨 있습니다.'
-		: !selectedYearItem || !exhibitionsQuery.isSuccess ? '작품 소개에서 제출할 전시회를 선택해주세요.' : '';
+		: !selectedYearItem || !exhibitionsQuery.isSuccess ? '작품 소개에서 제출할 전시회를 선택해주세요.' : submission.assetRequirementError ?? '';
 	const disabled = isSubmitting || checking;
 	const error = submissionError ?? submission.submitMutation.error;
 	return <div className="submission-studio">
