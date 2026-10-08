@@ -5,7 +5,7 @@ export const studioFileGroups = [
 	{ id: 'native', label: '네이티브 빌드', kinds: ['GAME'] },
 	{ id: 'web', label: '웹 빌드', kinds: ['WEBGL'] },
 	{ id: 'video', label: '동영상', kinds: ['VIDEO'] },
-	{ id: 'materials', label: '사진·설명문·기타', kinds: ['IMAGE', 'DOCUMENT', 'ATTACHMENT'] },
+	{ id: 'materials', label: '스크린샷 / 기타 자료', kinds: ['IMAGE', 'DOCUMENT', 'ATTACHMENT'] },
 ] as const;
 export type StudioFileGroup = (typeof studioFileGroups)[number];
 export function selectedStudioFiles(files: SubmissionFilesState): { kind: ProjectUploadKind; file: File }[] {

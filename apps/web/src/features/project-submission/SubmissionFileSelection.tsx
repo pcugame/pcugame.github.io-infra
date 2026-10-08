@@ -1,5 +1,7 @@
+import { StudioFileHeading } from '../../components/project/editor/StudioFileHeading';
+import { studioFileHint } from '../../components/project/editor/studioFileHint';
 import { ProjectFileLimits } from '../../components/project/editor/ProjectFileLimits';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ProjectPosterPreview } from '../../components/project/editor/ProjectPosterPreview';
 import { ProjectUploadDropZone } from '../../components/project/editor/ProjectUploadDropZone';
 import {
@@ -16,21 +18,45 @@ export function SubmissionPosterSelection({
 	enabled,
 	title,
 	limits,
+	inlineErrors = false,
 }: {
 	files: SubmissionFilesState;
 	enabled: boolean;
 	title: string;
 	limits: ClientUploadLimits;
+	inlineErrors?: boolean;
 }) {
+	const id = useId();
 	const [selectionError, setSelectionError] = useState<string | null>(null);
+	const inlineError = inlineErrors ? selectionError ?? files.fileSizeError : null;
+	const selectedPoster = files.posterFile && (
+		<ul className="project-upload-queue" aria-label="선택한 포스터">
+			<li>
+				<p title={files.posterFile.name}>
+					<strong>{files.posterFile.name}</strong> · 포스터
+				</p>
+				<button
+					type="button"
+					className="btn btn--secondary btn--small"
+					disabled={!enabled}
+					onClick={files.clearPoster}
+				>
+					선택 취소
+				</button>
+			</li>
+		</ul>
+	);
 	return (
-		<fieldset className="form-section submission-file-fieldset">
-			<legend className="submission-file-heading">
-				<span>포스터</span>
+		<fieldset className="form-section submission-file-fieldset" aria-labelledby={`${id}-title`} aria-describedby={inlineError ? `${id}-error` : undefined}>
+			{inlineErrors ? <StudioFileHeading id={id} label="포스터" poster hint={studioFileHint('POSTER', limits)} error={inlineError} /> : <legend className="submission-file-heading">
+				<span id={`${id}-title`}>포스터</span>
 				<SubmissionPosterHelp />
-			</legend>
+				{inlineErrors && <span className="field-hint">JPG · PNG · WebP 최대 {limits.posterMaxMb}MB / PDF 최대 {limits.posterPdfMaxMb}MB</span>}
+				{inlineError && <span id={`${id}-error`} className="field-error" role="alert">{inlineError}</span>}
+			</legend>}
 			<ProjectUploadDropZone
 				zone="poster"
+				compact={inlineErrors}
 				enabled={enabled}
 				hint={`JPG · PNG · WebP 최대 ${limits.posterMaxMb}MB / PDF 최대 ${limits.posterPdfMaxMb}MB.`}
 				onFiles={(selected) => {
@@ -41,34 +67,12 @@ export function SubmissionPosterSelection({
 					setSelectionError(null);
 					files.selectPoster(selected[0]!);
 				}}
-				footer={
-					<>
-						{selectionError && (
-							<p className="field-error" role="alert">
-								{selectionError}
-							</p>
-						)}
-						{files.posterFile && (
-							<ul className="project-upload-queue" aria-label="선택한 포스터">
-								<li>
-									<p>
-										<strong>{files.posterFile.name}</strong> · 포스터
-									</p>
-									<button
-										type="button"
-										className="btn btn--secondary btn--small"
-										disabled={!enabled}
-										onClick={files.clearPoster}
-									>
-										선택 취소
-									</button>
-								</li>
-							</ul>
-						)}
-					</>
-				}
+				footer={inlineErrors ? <div className="studio-files-scroll" tabIndex={files.posterFile ? 0 : undefined} aria-label="포스터 파일 목록">{selectedPoster}</div> : <>
+					{selectionError && <p className="field-error" role="alert">{selectionError}</p>}
+					{selectedPoster}
+				</>}
 			>
-				<ProjectPosterPreview title={title} localFile={files.posterFile} />
+				{!inlineErrors && <ProjectPosterPreview title={title} localFile={files.posterFile} />}
 			</ProjectUploadDropZone>
 		</fieldset>
 	);

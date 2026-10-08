@@ -1,30 +1,29 @@
 import type { StudioFileGroup } from './studio/fileGroups';
-import { FormSection } from '../../components/ui';
+import { UploadFileRows } from '../../components/common/UploadFileRows';
 import { useMemo } from 'react';
 import type { ProjectSubmissionItemStatus } from '../../contracts';
 import GameUploadWidget from '../../components/GameUploadWidget';
 import DirectVideoUploadWidget from '../../components/DirectVideoUploadWidget';
 import DirectImageUploadWidget from '../../components/DirectImageUploadWidget';
-import { ProjectPosterPreview } from '../../components/project/editor/ProjectPosterPreview';
 import { uploadKindLabels } from '../../lib/upload/project-files';
 import type { SubmissionFilesState } from './useSubmissionFiles';
 
 export function SubmissionUploadProgress({
 	zone,
 	group,
+	fileNames = {},
 	projectId,
 	files,
 	items,
 	onComplete,
-	title = '작품',
 }: {
 	zone: 'poster' | 'files';
 	group?: StudioFileGroup;
+	fileNames?: Record<string, string>;
 	projectId: number;
 	files: SubmissionFilesState;
 	items: ProjectSubmissionItemStatus[];
 	onComplete: () => void;
-	title?: string;
 }) {
 	const owner = useMemo(() => ({ type: 'PROJECT' as const, id: projectId }), [projectId]);
 	const posterFiles = useMemo(() => (files.posterFile ? [files.posterFile] : []), [files.posterFile]);
@@ -35,14 +34,8 @@ export function SubmissionUploadProgress({
 		zone === 'poster'
 			? (['POSTER'] as const)
 			: (['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'DOCUMENT', 'ATTACHMENT'] as const));
+	if (!ordered.some(item => (kinds as readonly string[]).includes(item.kind))) return null;
 	return (
-		<FormSection legend={group?.label ?? (zone === 'poster' ? '포스터' : '게임·미디어·자료')}>
-			{zone === 'poster' && <ProjectPosterPreview title={title} localFile={files.posterFile} />}
-			{!ordered.some((item) => (kinds as readonly string[]).includes(item.kind)) ? (
-				<p className="field-hint">
-					{zone === 'poster' ? '포스터' : '파일'} 업로드가 완료되었거나 선택한 파일이 없습니다.
-				</p>
-			) : (
 				<ul
 					className="project-upload-queue"
 					aria-label={group ? `${group.label} 업로드 진행` : zone === 'poster' ? '포스터 업로드 진행' : '파일 업로드 진행'}
@@ -70,19 +63,13 @@ export function SubmissionUploadProgress({
 						const binding = pendingItems.map((item) => ({ id: item.id, clientToken: item.clientToken }));
 						return (
 							<li key={`${kind}:${pendingItems.map((item) => item.id).join(':')}`}>
-								<p>
-									<strong>
-										{selected.length > 0
-											? selected.map((file) => file.name).join(', ')
-											: uploadKindLabels[kind]}
-									</strong>{' '}
-									· {uploadKindLabels[kind]}
-								</p>
+                                {selected.length === 0 && !kindItems.every(item => item.state === 'READY') && <UploadFileRows names={kindItems.filter(item => item.state === 'READY').map((item, index) => fileNames[item.slot] ?? `${uploadKindLabels[kind]} ${index + 1}`)} phase="ready" />}
 								{/* Keep one batch owner and its absolute manifest indexes throughout status refreshes. */}
 								{kindItems.every((item) => item.state === 'READY') ? (
-									<p role="status">업로드 완료</p>
+									<UploadFileRows names={selected.length ? selected.map(file => file.name) : kindItems.map((item, index) => fileNames[item.slot] ?? `${uploadKindLabels[kind]} ${index + 1}`)} phase="ready" />
 								) : kind === 'GAME' || kind === 'WEBGL' ? (
 									<GameUploadWidget
+                                        displayNames={pendingItems.map(item => fileNames[item.slot] ?? uploadKindLabels[kind])}
 										projectId={projectId}
 										uploadKind={kind}
 										initialFile={initialFile}
@@ -93,6 +80,7 @@ export function SubmissionUploadProgress({
 									/>
 								) : kind === 'POSTER' || kind === 'IMAGE' ? (
 									<DirectImageUploadWidget
+                                        displayNames={pendingItems.map(item => fileNames[item.slot] ?? uploadKindLabels[kind])}
 										owner={owner}
 										kind={kind}
 										initialFiles={initialFiles}
@@ -103,6 +91,7 @@ export function SubmissionUploadProgress({
 									/>
 								) : (
 									<DirectVideoUploadWidget
+                                        displayNames={pendingItems.map(item => fileNames[item.slot] ?? uploadKindLabels[kind])}
 										projectId={projectId}
 										kind={kind}
 										label={uploadKindLabels[kind]}
@@ -122,7 +111,5 @@ export function SubmissionUploadProgress({
 						);
 					})}
 				</ul>
-			)}
-		</FormSection>
 	);
 }

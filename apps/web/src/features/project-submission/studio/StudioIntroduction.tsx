@@ -1,5 +1,6 @@
+import { ProjectIntroductionFields } from '../../../components/project/editor/ProjectIntroductionFields';
 import { Controller, useWatch } from 'react-hook-form';
-import { Button, FormSection, TextField, TextareaField } from '../../../components/ui';
+import { Button, FormSection } from '../../../components/ui';
 import ExhibitionSelect from '../../../components/ExhibitionSelect';
 import { VisibilityNotice, VisibilitySelect } from '../../../components/VisibilitySelect';
 import { env } from '../../../lib/env';
@@ -24,13 +25,12 @@ export function StudioIntroduction({ submission }: { submission: ReturnType<type
 				{errors.exhibitionId && <p className="field-error" role="alert">{errors.exhibitionId.message}</p>}
 				{isUploadLocked && <p className="field-error" role="alert">이 전시회는 업로드가 잠겨 있습니다. 다른 전시회를 선택하거나 운영자에게 문의하세요.</p>}
 			</div>
-			<TextField id="studio-title" label={<>작품명 <span className="required-mark">*</span></>} aria-required="true" placeholder="작품의 이름을 입력하세요" {...register('title')} error={errors.title?.message} />
-			<TextField label={<>한 줄 소개 <span className="submission-studio__optional">선택</span></>} placeholder="어떤 게임인지 한 문장으로 소개해주세요" maxLength={300} {...register('summary')} error={errors.summary?.message} hint={<><span>장르와 플레이 경험이 드러나면 좋아요.</span><span className="submission-studio__counter">{summary.length} / 300</span></>} />
-			<TextareaField label={<>상세 설명 <span className="submission-studio__optional">선택</span></>} rows={5} maxLength={5000} placeholder="게임의 세계관, 핵심 플레이, 조작 방법을 소개하세요." {...register('description')} error={errors.description?.message} />
+			<ProjectIntroductionFields title={register('title')} summary={register('summary')} description={register('description')} summaryLength={summary.length} errors={{ title: errors.title?.message, summary: errors.summary?.message, description: errors.description?.message }} />
 			{env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
 				<label htmlFor="studio-visibility">공개 범위</label>
 				<VisibilitySelect id="studio-visibility" {...register('visibility')} />
 				<VisibilityNotice visibility={visibility} exhibitionVisibility={selectedYearItem?.visibility} />
+				<p className="field-hint">작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.</p>
 			</div>}
 		</FormSection>
 	</>;

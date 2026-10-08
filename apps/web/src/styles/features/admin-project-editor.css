@@ -560,6 +560,17 @@
   flex-wrap: wrap;
 }
 
+.admin-project-edit-page > .project-edit-header {
+  position: sticky;
+  top: 0;
+  z-index: 21;
+  gap: .75rem;
+  padding-block: .75rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid #cbd7e8;
+}
+.project-edit-header__back { margin-left: auto; flex-shrink: 0; }
+
 .project-archive {
   display: flex;
   flex-direction: column;
@@ -670,6 +681,7 @@
 .admin-project-edit-grid form.project-form { margin-bottom: 0; }
 .admin-project-edit-grid .project-basic-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem 1rem; }
 .project-basic-fields > .form-field:has(textarea) { grid-column: 1 / -1; }
+.project-basic-fields textarea[name='description'] { resize: none; }
 .admin-project-edit-grid .form-field { min-width: 0; margin-bottom: 0.75rem; }
 .admin-project-edit-grid textarea { min-height: 0; }
 .admin-project-edit-grid .project-requirements .form-checkbox-group {
@@ -679,6 +691,7 @@
   padding: 0;
 }
 .project-requirements [id$='-hardware'] { margin-top: 0.75rem; }
+.project-requirements textarea { resize: none; }
 .project-poster-preview { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem; }
 .project-upload-drop--poster { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.75rem; }
 .project-upload-drop--poster > .project-poster-preview { flex-direction: column; margin: 0; }

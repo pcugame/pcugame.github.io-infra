@@ -247,3 +247,21 @@ describe('DirectVideoUploadWidget', () => {
 		expect(await screen.findByText('동영상 업로드 완료')).toBeTruthy();
 	});
 });
+
+it.each(['REJECTED', 'EXPIRED', 'CANCELLED'])('starts a replacement after an explicit retry confirms %s', async state => {
+ const session = { sessionId: 'terminal-retry', owner: { type: 'PROJECT', id: 77 }, kind: 'VIDEO', generation: 1 };
+ const file = new File(['file'], 'retry.mp4', { type: 'video/mp4' });
+ const complete = vi.fn();
+ uploadDirectAssetFile.mockReset().mockImplementationOnce(async (_owner, _file, _kind, _progress, options) => {
+  options.onSession(session);
+  throw new Error('transfer failed');
+ }).mockResolvedValueOnce({ status: 'READY', sessionId: 'replacement', generation: 1 });
+ getDirectAssetUploadStatus.mockReset().mockResolvedValue({ ...session, state });
+ render(<QueryClientProvider client={new QueryClient()}><DirectVideoUploadWidget projectId={77} initialFiles={[file]} autoStart onComplete={complete} /></QueryClientProvider>);
+ const retry = await screen.findByRole('button', { name: '재시도' });
+ expect(uploadDirectAssetFile).toHaveBeenCalledOnce();
+ fireEvent.click(retry);
+ await waitFor(() => expect(complete).toHaveBeenCalledOnce());
+ expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2);
+ expect(uploadDirectAssetFile.mock.calls[1]![4].resume).toBeUndefined();
+});

@@ -1,9 +1,11 @@
+import { ProjectMemberRow } from '../../components/project/editor/ProjectMemberRow';
 import { FormSection } from '../../components/ui';
 import type {
 	FieldArrayWithId,
 	FieldErrors,
 	UseFieldArrayAppend,
 	UseFieldArrayRemove,
+	UseFieldArraySwap,
 	UseFormRegister,
 } from 'react-hook-form';
 
@@ -15,6 +17,7 @@ interface SubmissionMembersFieldsetProps {
 	fields: FieldArrayWithId<SubmitProjectPayloadInput, 'members', 'id'>[];
 	register: UseFormRegister<SubmitProjectPayloadInput>;
 	remove: UseFieldArrayRemove;
+	swap: UseFieldArraySwap;
 }
 
 export function SubmissionMembersFieldset({
@@ -23,6 +26,7 @@ export function SubmissionMembersFieldset({
 	fields,
 	register,
 	remove,
+	swap,
 }: SubmissionMembersFieldsetProps) {
 	return (
 		<FormSection legend={<>참여 학생 <span className="required-mark">*</span></>}>
@@ -33,53 +37,16 @@ export function SubmissionMembersFieldset({
 				<span className="field-error">{errors.members.message}</span>
 			)}
 
-			{fields.map((field, index) => (
-				<div key={field.id} className="member-row">
-					<div className="form-field">
-						<label htmlFor={`members.${index}.name`}>이름</label>
-						<input
-							id={`members.${index}.name`}
-							aria-required="true"
-							aria-invalid={!!errors.members?.[index]?.name}
-							aria-describedby={errors.members?.[index]?.name ? `members.${index}.name-error` : undefined}
-							type="text"
-							{...register(`members.${index}.name`)}
-						/>
-						{errors.members?.[index]?.name && (
-							<span id={`members.${index}.name-error`} className="field-error">
-								{errors.members[index].name?.message}
-							</span>
-						)}
-					</div>
-
-					<div className="form-field">
-						<label htmlFor={`members.${index}.studentId`}>학번</label>
-						<input
-							id={`members.${index}.studentId`}
-							aria-required="true"
-							aria-invalid={!!errors.members?.[index]?.studentId}
-							aria-describedby={errors.members?.[index]?.studentId ? `members.${index}.studentId-error` : undefined}
-							type="text"
-							{...register(`members.${index}.studentId`)}
-						/>
-						{errors.members?.[index]?.studentId && (
-							<span id={`members.${index}.studentId-error`} className="field-error">
-								{errors.members[index].studentId?.message}
-							</span>
-						)}
-					</div>
-
-					{fields.length > 1 && (
-						<button
-							type="button"
-							className="btn btn--danger btn--small"
-							onClick={() => remove(index)}
-						>
-							삭제
-						</button>
-					)}
-				</div>
-			))}
+			<div className="submission-members__list">
+			{fields.map((field, index) => <ProjectMemberRow key={field.id} index={index}
+				name={register(`members.${index}.name`)} studentId={register(`members.${index}.studentId`)}
+				nameError={errors.members?.[index]?.name?.message} studentIdError={errors.members?.[index]?.studentId?.message}
+				actions={<div className="member-actions">
+					<button type="button" className="btn btn--secondary btn--small" aria-label={`참여 학생 ${index + 1} 위로`} disabled={index === 0} onClick={() => swap(index, index - 1)}>▲</button>
+					<button type="button" className="btn btn--secondary btn--small" aria-label={`참여 학생 ${index + 1} 아래로`} disabled={index === fields.length - 1} onClick={() => swap(index, index + 1)}>▼</button>
+					{fields.length > 1 && <button type="button" className="btn btn--danger btn--small" onClick={() => remove(index)}>삭제</button>}
+				</div>}
+			/>)}
 
 			<button
 				type="button"
@@ -88,6 +55,7 @@ export function SubmissionMembersFieldset({
 			>
 				＋ 학생 추가
 			</button>
+			</div>
 		</FormSection>
 	);
 }

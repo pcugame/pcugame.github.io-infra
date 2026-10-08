@@ -5,7 +5,7 @@ import { WebglBuildGuideLink } from '../../components/project/WebglBuildGuideLin
 
 interface HelpStep {
 	title: string;
-	image: string;
+	image?: string;
 	alt: string;
 	description: string;
 }
@@ -127,7 +127,7 @@ function SubmissionHelpModal({ title, steps, webglUploadHint, onClose }: {
 					)}
 					<section className="submission-help-step" aria-live="polite" aria-atomic="true">
 						<h3>{stepIndex + 1}. {step.title}</h3>
-						<HelpScreenshot key={step.image} step={step} />
+						{step.image ? <HelpScreenshot key={step.image} step={step} /> : <p>{step.description}</p>}
 						{stepIndex === 1 && webglUploadHint && (
 							<div className="submission-help-zip">
 								<dl>
@@ -172,8 +172,8 @@ function SubmissionHelpButton({ title, steps, webglUploadHint }: {
 	);
 }
 
-export function SubmissionPosterHelp() {
-	return <SubmissionHelpButton title="포스터 사용 방법" steps={posterSteps} />;
+export function SubmissionPosterHelp({ studio = false }: { studio?: boolean }) {
+	return <SubmissionHelpButton title="포스터 사용 방법" steps={studio ? [{ title: '포스터 선택', alt: '', description: '포스터 영역의 ‘파일 선택’을 누르거나 파일을 끌어다 놓으세요. JPG·PNG·WebP·PDF 한 개를 선택할 수 있습니다. 선택한 이미지 포스터는 전시 카드와 마지막 미리보기 단계에서 확인할 수 있습니다. PDF 포스터는 업로드 처리 후 첫 페이지가 표시됩니다. 기존 포스터를 삭제해도 ‘삭제 취소’로 되돌릴 수 있으며, 변경사항은 최종 제출·적용 후 반영됩니다.' }] : posterSteps} />;
 }
 
 export function SubmissionFilesHelp({ webglUploadHint }: { webglUploadHint: string }) {

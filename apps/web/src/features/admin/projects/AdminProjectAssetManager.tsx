@@ -1,15 +1,20 @@
+import { WebglBuildGuideLink } from '../../../components/project/WebglBuildGuideLink';
+import { StudioFileHeading } from '../../../components/project/editor/StudioFileHeading';
+import { studioFileHint } from '../../../components/project/editor/studioFileHint';
+import { UploadFileRows } from '../../../components/common/UploadFileRows';
 import { ProjectFileLimits } from '../../../components/project/editor/ProjectFileLimits';
 import { FormSection } from '../../../components/ui';
-import { createContext, useCallback, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useId, useMemo, useState, type ReactNode } from 'react';
 import type { AdminProjectDetail } from '@pcu/contracts';
 import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
 import DirectVideoUploadWidget from '../../../components/DirectVideoUploadWidget';
 import GameUploadWidget from '../../../components/GameUploadWidget';
-import { WebglBuildGuideLink } from '../../../components/project/WebglBuildGuideLink';
 import type { ClientUploadLimits } from '../../../lib/upload-limits';
 import { ProjectPosterPreview, ProjectUploadDropZone } from '../../../components/project/editor';
 import { useProjectUploadQueue, type ProjectUploadQueue } from './useProjectUploadQueue';
-import { uploadKindLabels, type UploadEntry, type UploadZone } from '../../../lib/upload/project-files';
+import { classifyProjectFile, uploadKindLabels, type ProjectUploadKind, type UploadEntry, type UploadZone } from '../../../lib/upload/project-files';
+import { studioFileGroups } from '../../project-submission/studio/fileGroups';
+import { formatFileSizeMb } from '../../../lib/upload/fileValidation';
 
 const QueueContext = createContext<ProjectUploadQueue | null>(null);
 export function AdminProjectUploadProvider({
@@ -42,7 +47,7 @@ function ActiveUpload({ entry, queue }: { entry: UploadEntry; queue: ProjectUplo
 		void complete(entry.id);
 	}, [complete, entry.id]);
 	const onCancelled = useCallback(() => cancel(entry.id), [cancel, entry.id]);
-	const common = { autoStart: true, compact: true, onComplete, onCancelled, onError: queue.fail, retryAttempt: queue.retryAttempt };
+	const common = { autoStart: true, compact: true, onComplete, onCancelled, onError: queue.fail, retryAttempt: queue.retryAttempt, cancelAttempt: queue.cancelAttempt };
 	if (entry.kind === 'POSTER' || entry.kind === 'IMAGE')
 		return <DirectImageUploadWidget {...common} owner={queue.owner} kind={entry.kind} initialFiles={files} submissionItems={queue.submissionItem ? [queue.submissionItem] : undefined} />;
 	if (entry.kind === 'GAME' || entry.kind === 'WEBGL')
@@ -122,7 +127,7 @@ function UploadDropZone({
 										<span role="status">업로드 완료</span>
 									) : entry.status === 'active' ? (
 										<>
-											{canEditContent && <ActiveUpload entry={entry} queue={queue} />}
+											<span role="status">업로드 진행 중</span>
 
 										</>
 									) : (
@@ -190,11 +195,14 @@ function StoredFiles({ poster, canEditContent }: { poster: boolean; canEditConte
 export function AdminProjectPosterUpload({
 	project,
 	canEditContent,
+	studio = false,
 }: {
 	project: AdminProjectDetail;
 	canEditContent: boolean;
+	studio?: boolean;
 }) {
 	const queue = useAdminProjectUploadQueue();
+	if (studio) return <StudioEditFileArea label="포스터" kinds={['POSTER']} canEditContent={canEditContent} />;
 	const selected = queue.entries.filter(entry => entry.kind === 'POSTER' && (entry.status === 'pending' || entry.status === 'active')).at(-1)?.file;
 	return (
 		<FormSection legend="포스터">
@@ -205,14 +213,59 @@ export function AdminProjectPosterUpload({
 		</FormSection>
 	);
 }
-export function AdminProjectAssetManager({ canEditContent }: { canEditContent: boolean }) {
+export function AdminProjectAssetManager({ canEditContent, studio = false }: { canEditContent: boolean; studio?: boolean }) {
 	const queue = useAdminProjectUploadQueue();
 	return (
-		<fieldset className="form-section">
+		studio ? <div className="studio-files-container"><div className="studio-files-grid">{studioFileGroups.map(group => <StudioEditFileArea key={group.id} label={group.label} kinds={[...group.kinds]} canEditContent={canEditContent} />)}</div></div> : <fieldset className="form-section">
 			<legend className="submission-file-heading"><span>게임·미디어·자료</span><WebglBuildGuideLink /></legend>
 			<StoredFiles poster={false} canEditContent={canEditContent} />
 			<UploadDropZone zone="files" canEditContent={canEditContent} />
 			<ProjectFileLimits limits={queue.limits} materialLimits={queue.materialLimits} />
 		</fieldset>
 	);
+}
+
+function StudioEditFileArea({ label, kinds, canEditContent }: { label: string; kinds: ProjectUploadKind[]; canEditContent: boolean }) {
+ const queue = useAdminProjectUploadQueue();
+ const id = useId();
+ const [error, setError] = useState<string | null>(null);
+ const poster = kinds.includes('POSTER'), build = kinds.includes('GAME') || kinds.includes('WEBGL'), video = kinds.includes('VIDEO');
+ const entries = queue.entries.filter(entry => entry.kind !== 'ZIP' && kinds.includes(entry.kind) && entry.status !== 'cancelled');
+ const stored = queue.storedAssets.filter(asset => poster ? asset.id === queue.project.posterAssetId : asset.id !== queue.project.posterAssetId && kinds.includes(asset.kind as ProjectUploadKind));
+ const hint = studioFileHint(poster ? 'POSTER' : kinds.includes('WEBGL') ? 'WEBGL' : build ? 'GAME' : video ? 'VIDEO' : 'IMAGE', queue.limits, queue.materialLimits);
+ const select = (files: File[]) => {
+  if (!files.length) return;
+  if ((poster || build) && files.length !== 1) { setError('파일 한 개만 선택하세요.'); return; }
+  const typed: ProjectUploadKind[] = [];
+  for (const file of files) {
+   const type = classifyProjectFile(file, poster ? 'poster' : 'files');
+   if (poster && type !== 'POSTER') { setError('포스터는 JPG·PNG·WebP·PDF 파일만 선택하세요.'); return; }
+   if (build && type !== 'ZIP') { setError('빌드는 ZIP 파일만 선택하세요.'); return; }
+   if (video && type !== 'VIDEO') { setError('지원하는 동영상 파일만 선택하세요.'); return; }
+   if (!poster && !build && !video && (type === 'VIDEO' || file.type.startsWith('video/'))) { setError('영상은 동영상 영역에서 선택하세요.'); return; }
+   typed.push(poster ? 'POSTER' : build ? kinds[0] : type === 'IMAGE' || type === 'DOCUMENT' || type === 'VIDEO' ? type : 'ATTACHMENT');
+  }
+  setError(queue.add(files, poster ? 'poster' : 'files', typed));
+ };
+ return <fieldset className="form-section submission-file-fieldset" aria-labelledby={`${id}-title`}>
+  <StudioFileHeading id={id} label={label} hint={hint} error={error} poster={poster} webgl={kinds.includes('WEBGL')} />
+  <ProjectUploadDropZone zone={poster ? 'poster' : 'files'} compact label={`${label} 파일 선택`} enabled={canEditContent && !queue.locked} multiple={!poster && !build} accept={build ? '.zip,application/zip' : poster ? undefined : video ? 'video/*' : undefined} onFiles={select} footer={<div className="studio-files-scroll" tabIndex={0} aria-label={`${label} 파일 목록`}>
+   {!poster && !build && !video && queue.configUnavailable && <p className="field-hint">자료 설정을 불러오지 못했습니다. <button type="button" className="btn btn--secondary btn--small" disabled={queue.configLoading || queue.locked} onClick={queue.retryConfig}>설정 재시도</button></p>}
+   <ul className="project-upload-queue">
+    {stored.map(asset => <li key={`stored-${asset.id}`}><p title={asset.originalName}><strong>{asset.originalName}</strong>{queue.removals.includes(asset.id) && ' · 삭제 예정'}</p>{canEditContent && <button type="button" className="btn btn--secondary btn--small" disabled={queue.locked} onClick={() => queue.toggleRemoval(asset.id)}>{queue.removals.includes(asset.id) ? '삭제 취소' : '삭제'}</button>}</li>)}
+    {kinds.includes('WEBGL') && queue.hasWebgl && <li><p>WebGL 배포{queue.removeWebgl && ' · 삭제 예정'}</p>{canEditContent && <button type="button" className="btn btn--secondary btn--small" disabled={queue.locked} onClick={queue.toggleWebglRemoval}>{queue.removeWebgl ? '삭제 취소' : '삭제'}</button>}</li>}
+    {entries.map(entry => <li key={entry.id}><p title={entry.file.name}><strong>{entry.file.name}</strong> · {formatFileSizeMb(entry.file.size)}MB{entry.status === 'done' && ' · 업로드 완료'}</p>{entry.status === 'active' ? <span role="status">업로드 진행 중</span> : entry.status === 'pending' && <button type="button" className="btn btn--secondary btn--small" disabled={queue.locked} onClick={() => queue.cancel(entry.id)}>선택 취소</button>}</li>)}
+   </ul>
+  </div>} />
+ </fieldset>;
+}
+
+/** Mounted once for the whole editor, including retries after partial failure. */
+export function AdminProjectUploadProgress() {
+ const queue = useAdminProjectUploadQueue();
+ return <ul className="project-upload-queue" aria-label="변경 파일 업로드 진행">
+  {queue.entries.filter(entry => entry.status !== 'cancelled').map(entry => <li key={entry.id}>
+   {entry.status === 'active' ? <ActiveUpload entry={entry} queue={queue} /> : <UploadFileRows names={[entry.file.name]} phase={entry.status === 'done' ? 'ready' : 'idle'} />}
+  </li>)}
+ </ul>;
 }

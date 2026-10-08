@@ -198,3 +198,47 @@
   }
 
 }
+
+/* Upload progress uses the studio palette with a single linear file list. */
+.project-upload-dialog {
+ width: min(32rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem);
+ margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--color-border);
+ border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-lg);
+}
+.project-upload-dialog[open] { display: flex; flex-direction: column; }
+.project-upload-dialog::backdrop { background: rgb(15 23 42 / 42%); backdrop-filter: blur(3px); }
+.project-upload-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--color-border); }
+.project-upload-dialog h2 { margin: 0; font-size: 1rem; outline: none; }
+.project-upload-dialog__count { color: var(--color-text-muted); font-size: .85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.project-upload-dialog__body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .5rem 1.5rem; }
+.project-upload-dialog .project-upload-queue { margin: 0; padding: 0; list-style: none; }
+.project-upload-dialog .project-upload-queue > li { padding: 0; border: 0; }
+.upload-file-row { display: flex; align-items: center; gap: .65rem; min-height: 2.4rem; padding: .35rem 0; border-bottom: 1px solid var(--color-border); font-size: .8rem; }
+.upload-file-row__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-file-row__state { flex-shrink: 0; color: var(--color-text-muted); font-size: .7rem; }
+.upload-file-row .game-upload__actions { flex-shrink: 0; margin: 0; gap: .3rem; }
+.upload-file-row .btn { font-size: .65rem; padding: .25rem .45rem; min-height: 0; }
+.project-upload-dialog__header { flex-wrap: wrap; }
+.project-upload-dialog__progress { display: block; flex-basis: 100%; width: 100%; height: .35rem; border: 0; border-radius: 99px; overflow: hidden; background: var(--color-border); accent-color: var(--color-primary-btn); }
+.project-upload-dialog__progress::-webkit-progress-bar { background: var(--color-border); }
+.project-upload-dialog__progress::-webkit-progress-value { background: var(--color-primary-btn); }
+.project-upload-dialog__progress::-moz-progress-bar { background: var(--color-primary-btn); }
+.project-upload-dialog__body { max-height: 50dvh; }
+.project-upload-dialog .game-upload__error { font-size: .7rem; padding: .35rem .5rem; margin: .25rem 0; }
+.project-upload-dialog .game-upload--linear { padding: 0; margin: 0; border: 0; background: none; box-shadow: none; }
+.game-upload--linear[data-phase=uploading] .game-upload__actions,
+.game-upload--linear[data-phase=verifying] .game-upload__actions,
+.game-upload--linear .game-upload__complete-text { display: none; }
+
+.project-upload-dialog .field-hint, .project-upload-dialog .game-upload__resume-text { font-size: .75rem; }
+.project-upload-dialog input[type=file] { max-width: 100%; font-size: .8rem; }
+.project-upload-dialog__footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; padding: .85rem 1.5rem; border-top: 1px solid var(--color-border); }
+@media (max-width: 50em) {
+ .project-upload-dialog { width: calc(100vw - 1.25rem); max-height: calc(100dvh - 1.25rem); }
+ .project-upload-dialog__header, .project-upload-dialog__footer { padding: 1rem; }
+ .upload-file-row { flex-wrap: wrap; }
+ .upload-file-row .game-upload__actions { margin-left: auto; }
+ .project-upload-dialog__body { padding: .4rem 1rem; }
+}
+
+.project-upload-dialog__recovery { margin: .5rem 0; color: var(--color-text-muted); font-size: .7rem; line-height: 1.5; }

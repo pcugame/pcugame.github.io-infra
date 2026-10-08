@@ -86,7 +86,7 @@ it('stops an in-flight publication read as soon as cancel begins', async () => {
   await act(async () => read({ ...pending, items: [], state: 'PUBLISHED', projectStatus: 'PUBLISHED' }));
   expect(finalize).not.toHaveBeenCalled(); expect(mocks.navigate).not.toHaveBeenCalled();
   await act(async () => { cancel({ ...pending, state: 'CANCELLED' }); await deletion; });
-  expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/me/projects');
+  expect(mocks.navigate).not.toHaveBeenCalled(); expect(result.current.createdProjectId).toBeNull();
 });
 it.each(['success', 'failure'] as const)('ignores old cancellation %s after a viewer change and preserves the new poll', async outcome => {
   window.sessionStorage.setItem(key(), JSON.stringify(saved)); window.sessionStorage.setItem(key(5), JSON.stringify({ ...saved, id: 8 }));
@@ -152,12 +152,11 @@ it('preserves a newer recovery pointer when an old page metadata response arrive
   expect(next.result.current.createdProjectId).toBe(8);expect(get).toHaveBeenCalledTimes(1);expect(mocks.navigate).not.toHaveBeenCalled();
 });
 
-it('guards the shared submit callback against missing public assets, including omitted visibility', async () => {
-  const submit = vi.spyOn(userProjectApi, 'submit');
+it.each([undefined, 'PUBLIC'] as const)('allows the shared submit callback without files with visibility %s', async visibility => {
+  const submit = vi.spyOn(userProjectApi, 'submit').mockResolvedValue(saved);
+  vi.spyOn(userProjectApi, 'getSubmission').mockResolvedValue({ ...pending, items: [], state: 'PUBLISHED', projectStatus: 'PUBLISHED' });
+  vi.spyOn(userProjectApi, 'finalizeSubmission').mockResolvedValue({ ...pending, items: [], state: 'PUBLISHED', projectStatus: 'PUBLISHED' });
   const { result } = setup();
-  for (const visibility of [undefined, 'PUBLIC'] as const) {
-    act(() => result.current.onSubmit({ visibility, exhibitionId: 1, title: 'Incomplete public project', members: [{ name: 'Student', studentId: '2088099' }] }));
-  }
-  expect(submit).not.toHaveBeenCalled();
-  expect(result.current.assetRequirementError).toContain('네이티브 빌드 · 웹 빌드 · 동영상 · 사진');
+  act(() => result.current.onSubmit({ visibility, exhibitionId: 1, title: 'Public project without files', members: [{ name: 'Student', studentId: '2088099' }] }));
+  await waitFor(() => expect(submit).toHaveBeenCalledOnce());
 });

@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import './helpers/dialog';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -122,15 +123,13 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 		expect(controls.upload).not.toHaveBeenCalled();
 	});
 
-	it('blocks public submission without required assets in the existing mixed form too', async () => {
+	it('allows public submission without optional assets through the shared form', async () => {
 		const { container } = mount(mode);
 		await enterMetadata('PUBLIC');
 		const button = screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' });
-		expect((button as HTMLButtonElement).disabled).toBe(true);
-		expect(screen.getByText(/공개 작품 제출에는 네이티브 빌드/)).toBeTruthy();
+		expect((button as HTMLButtonElement).disabled).toBe(false);
 		fireEvent.submit(container.querySelector('form')!);
-		await act(async () => { await Promise.resolve(); });
-		expect(controls.submit).not.toHaveBeenCalled();
+		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
 		expect(controls.upload).not.toHaveBeenCalled();
 	});
 
@@ -254,7 +253,8 @@ describe.each(['admin', 'user'] as const)('%s registration shared layout', (mode
 			within(container.querySelector('.admin-project-edit-poster')!).getByText('poster.png'),
 		).toBeTruthy();
 		expect(within(container.querySelector('.admin-project-edit-assets')!).getByText('game.zip')).toBeTruthy();
-		expect(container.querySelector('input[type="file"]')).toBeNull();
+		expect(screen.getByRole('dialog', { name: '파일 업로드' })).toBeTruthy();
+        expect(container.querySelector('form')?.hasAttribute('inert')).toBe(true);
 		expect(window.sessionStorage.getItem(`pcu.pending-project-submission:${mode}:9`)).toContain(
 			'submission-73',
 		);
@@ -323,7 +323,7 @@ describe('submission selection and recovery', () => {
 		const secondCall = controls.upload.mock.calls.find((call) => call[1] === second)!;
 		const secondItem = items.find((item) => item.slot === 'image:1')!;
 		expect(secondCall[4].submissionItem).toEqual({ id: secondItem.id, clientToken: secondItem.clientToken });
-		expect(container.querySelector('.admin-project-edit-assets')?.textContent).toContain('일시 정지');
+		expect(screen.getByRole('dialog').querySelector('.upload-file-row')).toBeTruthy();
 	});
 
 	it('advances a reloaded three-image batch from a verifying second file to the remaining third slot', async () => {
@@ -359,17 +359,17 @@ describe('submission selection and recovery', () => {
 					finish = resolve;
 				}),
 		);
-		const { container } = mount();
+		mount();
 		await waitFor(() => expect(controls.waitReady).toHaveBeenCalled());
 		items = items.map((item, index) => (index === 1 ? { ...item, state: 'READY' } : item));
 		await act(async () => {
 			finish({ ...session, state: 'READY' });
 		});
 		await waitFor(() =>
-			expect(container.querySelector('.admin-project-edit-assets input[type="file"]')).toBeTruthy(),
+			expect(screen.getByRole('dialog').querySelector('[aria-label="스크린샷 / 기타 자료 업로드 진행"] input[type="file"]')).toBeTruthy(),
 		);
 		const third = new File(['third'], 'third.png', { type: 'image/png' });
-		fireEvent.change(container.querySelector('.admin-project-edit-assets input[type="file"]')!, {
+		fireEvent.change(screen.getByRole('dialog').querySelector('[aria-label="스크린샷 / 기타 자료 업로드 진행"] input[type="file"]')!, {
 			target: { files: [third] },
 		});
 		fireEvent.click(screen.getByRole('button', { name: /업로드 시작/ }));
@@ -400,14 +400,14 @@ describe('submission selection and recovery', () => {
 			},
 		];
 		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
-		const { container } = mount();
-		await screen.findByText('제출 취소');
-		expect(container.querySelector('.admin-project-edit-poster input[type="file"]')).toBeTruthy();
-		expect(container.querySelector('.admin-project-edit-assets input[type="file"]')).toBeTruthy();
+		mount();
+		await screen.findByText('전체 취소');
+		expect(screen.getByRole('dialog').querySelector('[aria-label="포스터 업로드 진행"] input[type="file"]')).toBeTruthy();
+		expect(screen.getByRole('dialog').querySelector('[aria-label="네이티브 빌드 업로드 진행"] input[type="file"]')).toBeTruthy();
 		expect(controls.submit).not.toHaveBeenCalled();
 		expect(controls.upload).not.toHaveBeenCalled();
 		controls.cancel.mockResolvedValue(undefined);
-		fireEvent.click(screen.getByRole('button', { name: '제출 취소' }));
+		fireEvent.click(screen.getByRole('button', { name: '전체 취소' }));
 		await waitFor(() => expect(controls.cancel).toHaveBeenCalledWith(73));
 		await waitFor(() =>
 			expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:9')).toBeNull(),

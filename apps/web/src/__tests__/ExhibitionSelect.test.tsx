@@ -15,8 +15,8 @@ describe('exhibition select shared control', () => {
   render(<ExhibitionSelect value={1} onChange={changed} items={items} />);
   const select = screen.getByRole('combobox') as HTMLSelectElement;
   expect(select.value).toBe('1');
-  expect(select.selectedOptions[0].textContent).toContain('2026 · 현재 전시');
-  expect(screen.getByRole('option', { name: '2025 · 이전 전시 · 업로드 잠김' })).toBeTruthy();
+  expect(select.selectedOptions[0].textContent).toContain('2026 현재 전시');
+  expect(screen.getByRole('option', { name: '2025 이전 전시 업로드 잠김' })).toBeTruthy();
   fireEvent.change(select, { target: { value: '2' } });
   expect(changed).toHaveBeenCalledWith(2);
  });

@@ -120,7 +120,7 @@ export function ProjectUploadDropZone({ zone, enabled, onFiles, children, footer
 				</span>}
 				{enabled && (
 					<span className="project-upload-drop__browse">
-						{hovered ? '놓아서 파일 선택' : poster ? '포스터 선택·교체' : '파일 선택'}
+						{hovered ? '놓아서 파일 선택' : poster && !compact ? '포스터 선택·교체' : '파일 선택'}
 					</span>
 				)}
 				<span className="field-hint">

@@ -41,6 +41,7 @@ export function SubmissionBasicFields({
 	             <label htmlFor="project-visibility">공개 범위</label>
 	             <VisibilitySelect id="project-visibility" value={visibility ?? ''} {...register('visibility')} />
 	             <VisibilityNotice visibility={visibility} exhibitionVisibility={exhibition?.visibility} />
+				<p className="field-hint">작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.</p>
 	            </div>}
 
 				<div className="form-field">

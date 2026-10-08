@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { usePreventWindowClose } from './common/usePreventWindowClose';
+import { LinearUploadContext } from '../lib/upload/linearPresentation';
+import { UploadFileRows } from './common/UploadFileRows';
+import { useContext, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getApiErrorMessage } from '../lib/api';
 import {
@@ -31,10 +34,12 @@ interface Props {
 	onComplete?: () => void;
 	onError?: (message: string) => void;
 	/** An enclosing Apply action requests a retry without discarding recovery state. */
+	cancelAttempt?: number;
 	retryAttempt?: number;
 	/** Advances an enclosing queue only after cancellation leaves no pending session. */
 	onCancelled?: () => void;
 	/** An enclosing row provides the heading, chooser, and selected file summary. */
+	displayNames?: string[];
 	compact?: boolean;
 	onSkip?: () => void;
 	submissionItems?: readonly { id: string; clientToken: string }[];
@@ -56,8 +61,10 @@ export default function DirectVideoUploadWidget({
 	autoStart = false,
 	onComplete,
 	onError,
+	cancelAttempt = 0,
 	retryAttempt = 0,
 	onCancelled,
+	displayNames,
 	compact = false,
 	onSkip,
 	submissionItems = [],
@@ -67,11 +74,13 @@ export default function DirectVideoUploadWidget({
 	label = '동영상',
 	accept,
 }: Props) {
+	const linear = useContext(LinearUploadContext);
 	const qc = useQueryClient();
 	const recoveringManifest = initialFiles.length === 0 && submissionItems.length > 0;
 	const fileInputId = useId();
 	const [files, setFiles] = useState<File[]>([...initialFiles]);
 	const [phase, setPhase] = useState<Phase>('idle');
+	usePreventWindowClose(linear && (phase === 'uploading' || phase === 'verifying'));
 	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
@@ -415,7 +424,7 @@ export default function DirectVideoUploadWidget({
 		}
 	}, [beginRun, continueAfterReady, files, finishCancellation, forget, observeSavedReady, remember]);
 	cancelLateCreatedSessionRef.current = cancelLateCreatedSession;
-	const resumeQueue = useCallback(async (chosen: readonly File[], saved: SavedVideoSession) => {
+	const resumeQueue = useCallback(async (chosen: readonly File[], saved: SavedVideoSession, restartTerminal = false) => {
 		if (!matchesSavedFile(chosen, saved)) {
 			setError('중단된 파일과 선택한 파일 순서 또는 크기가 일치하지 않습니다.');
 			setPhase('idle');
@@ -439,6 +448,12 @@ export default function DirectVideoUploadWidget({
 				await continueAfterReady(saved, chosen, activeRun);
 				return;
 			}
+            // A user's retry may start a new transfer only after the server confirms termination.
+            if (restartTerminal && status.generation === saved.session.generation && ['REJECTED', 'EXPIRED', 'CANCELLED'].includes(status.state)) {
+                forget(saved.session.sessionId);
+                await uploadQueue(chosen, undefined, activeRun);
+                return;
+            }
 			if (status.state === 'CANCELLED') forget(saved.session.sessionId);
 			else {
 				setError(`업로드 세션을 재개할 수 없습니다 (${status.state}).`);
@@ -544,7 +559,7 @@ export default function DirectVideoUploadWidget({
 
 	const start = () => {
 		const saved = resumableRef.current;
-		if (saved) void resumeQueue(files, saved);
+		if (saved) void resumeQueue(files, saved, true);
 		else void uploadQueue(files);
 	};
 	const retry = start;
@@ -567,14 +582,32 @@ export default function DirectVideoUploadWidget({
 	}, [retryAttempt]);
 
 
+    const lastCancelAttempt = useRef(cancelAttempt);
+    useEffect(() => {
+        if (lastCancelAttempt.current === cancelAttempt) return;
+        lastCancelAttempt.current = cancelAttempt;
+        void cancel();
+    }, [cancelAttempt, cancel]);
+
+	const uploadActions = (<div className="game-upload__actions">
+                {linear && phase === 'idle' && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
+				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${label} 업로드 시작`}</button>}
+				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}
+				{(phase === 'uploading' || phase === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={pause}>일시 정지</button>}
+				{phase !== 'ready' && (files.length > 0 || resumable || phase === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
+				{phase === 'ready' && <span className="game-upload__complete-text">{label} 업로드 완료</span>}
+				{onSkip && phase !== 'uploading' && phase !== 'verifying' && phase !== 'ready' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
+			</div>);
+
 	return (
-		<div className="game-upload">
-			{!compact && <h3 className="game-upload__title">{label} 업로드</h3>}
-			{resumable && phase === 'idle' && (
+		<div className={`game-upload${linear ? ' game-upload--linear' : ''}`} data-phase={phase}>
+            {linear && <UploadFileRows actions={uploadActions} names={files.length ? files.map(file => file.name) : (displayNames?.length ? displayNames : [resumable?.originalName ?? label])} completed={files.length ? completed : 0} phase={phase} percent={progress?.percent} />}
+			{!linear && !compact && <h3 className="game-upload__title">{label} 업로드</h3>}
+			{!linear && resumable && phase === 'idle' && (
 				<p className="field-hint">중단된 {label} 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>
 			)}
-			{!compact && !autoStart && (phase === 'idle' || phase === 'error') && (
-				<div className="game-upload__file-input">
+			{((!compact && !autoStart) || linear) && (phase === 'idle' || phase === 'error') && (
+				<div className="game-upload__file-input" hidden={linear}>
 					<label className="sr-only" htmlFor={fileInputId}>{label} 파일 선택</label>
 					<input
 						id={fileInputId}
@@ -612,8 +645,8 @@ export default function DirectVideoUploadWidget({
 					/>
 				</div>
 			)}
-			{!compact && files.length > 0 && <p className="game-upload__file-summary">{files.length}개 {label} 선택됨 ({completed}/{files.length} 완료)</p>}
-			{progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
+			{!linear && !compact && files.length > 0 && <p className="game-upload__file-summary">{files.length}개 {label} 선택됨 ({completed}/{files.length} 완료)</p>}
+			{!linear && progress && (phase === 'uploading' || phase === 'verifying' || phase === 'ready') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
 					<div className="game-upload__progress-track" role="progressbar" aria-label={`${label} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
 						<div className={`game-upload__progress-bar ${phase === 'ready' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />
@@ -625,14 +658,7 @@ export default function DirectVideoUploadWidget({
 				</div>
 			)}
 			{error && <p className="game-upload__error" role="alert">{error}</p>}
-			<div className="game-upload__actions">
-				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${label} 업로드 시작`}</button>}
-				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}
-				{(phase === 'uploading' || phase === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={pause}>일시 정지</button>}
-				{phase !== 'ready' && (files.length > 0 || resumable || phase === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
-				{phase === 'ready' && <span className="game-upload__complete-text">{label} 업로드 완료</span>}
-				{onSkip && phase !== 'uploading' && phase !== 'verifying' && phase !== 'ready' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
-			</div>
+			{!linear && uploadActions}
 		</div>
 	);
 }

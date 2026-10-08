@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useMe } from '../../features/auth';
 
 type NavItem = { to: string; label: string; icon: string; end: boolean; adminOnly?: boolean };
@@ -64,12 +64,15 @@ const ICONS: Record<string, ReactElement> = {
 
 export function AdminLayout() {
   const { user } = useMe();
+  const { pathname } = useLocation();
   const isAdmin = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
   const isSuperAdmin = user?.role === 'ADMIN';
   const navItems = isAdmin
     ? (isSuperAdmin ? ADMIN_NAV : ADMIN_NAV.filter(n => !n.adminOnly))
     : USER_NAV;
   const title = isAdmin ? '관리자 패널' : '작품 등록';
+
+  if (!isAdmin && /^\/admin\/projects\/[^/]+\/edit\/?$/.test(pathname)) return <Outlet />;
 
   return (
     <div className="admin-layout">

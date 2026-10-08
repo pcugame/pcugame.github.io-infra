@@ -23,19 +23,22 @@ interface Props {
 	poster: File | null;
 	images: File[];
 	videos: File[];
-	game: File | null;
-	webgl?: File | null;
+	game: Pick<File, 'name'> | null;
+	webgl?: Pick<File, 'name'> | null;
+	existingMedia?: PreviewMediaItem[];
+	active?: boolean;
 	exhibitionLabel?: string;
 	onClose: () => void;
 }
 
-type MediaItem =
+export type PreviewMediaItem =
 	| { kind: 'poster-img'; url: string; label: string }
 	| { kind: 'poster-pdf'; name: string; label: string }
 	| { kind: 'video-mock'; name: string; label: string }
 	| { kind: 'video'; url: string; name: string; label: string }
 	| { kind: 'image'; url: string; label: string }
 	| { kind: 'image-pdf'; name: string; label: string };
+type MediaItem = PreviewMediaItem;
 
 const isPdfFile = (f: File): boolean =>
 	f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
@@ -48,7 +51,7 @@ export function ProjectPreviewModal(props: Props) {
 	return <ProjectPreview {...props} />;
 }
 
-/** Embedded preview mounts when the preview step opens, refreshing local file URLs on return. */
+/** Embedded preview retains local media while navigating between studio steps. */
 export function ProjectPreviewPanel(props: Omit<Props, 'onClose'>) {
 	return <ProjectPreview {...props} inline />;
 }
@@ -66,11 +69,16 @@ function ProjectPreview({
 	videos,
 	game,
 	webgl,
+	existingMedia,
+	active = true,
 	exhibitionLabel,
 	onClose,
 	inline = false,
 }: Omit<Props, 'onClose'> & { onClose?: () => void; inline?: boolean }) {
 	const overlayRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (!active) overlayRef.current?.querySelectorAll('video').forEach(video => video.pause());
+	}, [active]);
 	const [activeIndex, setActiveIndex] = useState(0);
 	const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
@@ -97,7 +105,7 @@ function ProjectPreview({
 			}
 		});
 		// eslint-disable-next-line react-hooks/set-state-in-effect -- Publish effect-owned blob URLs; render-time allocation leaks under StrictMode.
-		setMediaItems(items);
+		setMediaItems([...items, ...(existingMedia ?? []).filter(item => !poster || item.kind !== 'poster-img')]);
 		return () => {
 			for (const item of items) {
 				if ('url' in item) {
@@ -105,7 +113,7 @@ function ProjectPreview({
 				}
 			}
 		};
-	}, [poster, images, videos, inline]);
+	}, [poster, images, videos, inline, existingMedia]);
 
 	useEffect(() => {
 		if (inline && !lightboxUrl) return;
@@ -139,7 +147,7 @@ function ProjectPreview({
 
 	return (
 		<div className={inline ? "project-preview-inline" : "modal-overlay"} ref={overlayRef} onClick={handleOverlayClick}>
-			<div className={inline ? "project-preview-inline__content" : "modal-panel"} role={inline ? "region" : "dialog"} aria-modal={inline ? undefined : true} aria-label={inline ? "전시 화면 미리보기" : "작품 미리보기"}>
+			<div className={inline ? "project-preview-inline__content" : "modal-panel"} role={inline ? "region" : "dialog"} tabIndex={inline ? 0 : undefined} aria-modal={inline ? undefined : true} aria-label={inline ? "전시 화면 미리보기" : "작품 미리보기"}>
 				{!inline && <button type="button" className="modal-close" onClick={onClose} aria-label="닫기">
 					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />

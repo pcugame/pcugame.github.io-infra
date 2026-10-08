@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import { StudioFileHeading } from '../../../components/project/editor/StudioFileHeading';
+import { studioFileHint } from '../../../components/project/editor/studioFileHint';
 import { ProjectUploadDropZone } from '../../../components/project/editor/ProjectUploadDropZone';
 import { classifyProjectFile, type ProjectUploadKind } from '../../../lib/upload/project-files';
 import { formatFileSizeMb } from '../../../lib/upload/fileValidation';
@@ -18,11 +20,10 @@ export function StudioFileSelection({ files, enabled, limits, materialLimits, re
 	</div></div>;
 }
 function FileGroup({ group, files, enabled, limits, materialLimits, retryConfig }: Parameters<typeof StudioFileSelection>[0] & { group: StudioFileGroup }) {
+	const id = useId();
 	const [error, setError] = useState<string | null>(null);
 	const build = group.id === 'native' || group.id === 'web';
-	const hint = build ? `${group.id === 'web' ? 'Unity WebGL' : '다운로드용'} ZIP 1개 · 최대 ${limits.gameMaxMb}MB`
-		: group.id === 'video' ? `영상 최대 5개 · 파일당 ${limits.videoMaxMb}MB`
-			: `JPG · PNG · WebP ${limits.imageMaxMb}MB / 설명문·기타${materialLimits ? ` 합계 ${materialLimits.maxCount}개 · 파일당 ${formatFileSizeMb(materialLimits.maxBytes)}MB` : ''}`;
+	const hint = studioFileHint(group.kinds[0], limits, materialLimits);
 	const select = (chosen: File[]) => {
 		if (!enabled || !chosen.length) return;
 		const typed: { kind: Exclude<ProjectUploadKind, 'POSTER'>; file: File }[] = [];
@@ -45,17 +46,16 @@ function FileGroup({ group, files, enabled, limits, materialLimits, retryConfig 
 		files.addFiles(typed, setError);
 	};
 	const selected = selectedStudioFiles(files).filter(item => (group.kinds as readonly string[]).includes(item.kind));
-	return <fieldset className="form-section submission-file-fieldset" data-file-group={group.id}>
-		<legend className="submission-file-heading">{group.label}</legend>
+	return <fieldset className="form-section submission-file-fieldset" data-file-group={group.id} aria-labelledby={`${id}-title`} aria-describedby={[`${id}-hint`, error ? `${id}-error` : ''].filter(Boolean).join(' ')}>
+		<StudioFileHeading id={id} label={group.label} hint={hint} error={error} webgl={group.id === 'web'} />
 		<ProjectUploadDropZone zone="files" compact label={`${group.label} 파일 선택`} enabled={enabled} hint={hint}
 			accept={build ? '.zip,application/zip,application/x-zip-compressed' : group.id === 'video' ? '.mp4,.mov,.m4v,.3gp,.3g2,.mkv,.webm,.avi,.wmv,.asf' : undefined}
-			multiple={!build} onFiles={select} footer={<>
-				{error && <p className="field-error" role="alert">{error}</p>}
+			multiple={!build} onFiles={select} footer={<div className="studio-files-scroll" tabIndex={selected.length > 0 ? 0 : undefined} aria-label={`${group.label} 파일 목록`}>
 				{group.id === 'materials' && !materialLimits && <p className="field-hint">문서·첨부자료는 설정 조회 후 선택할 수 있습니다. <button type="button" className="btn btn--secondary btn--small" disabled={!enabled} onClick={retryConfig}>설정 다시 불러오기</button></p>}
 				{selected.length > 0 && <ul className="project-upload-queue" aria-label={`선택한 ${group.label}`}>
-					{selected.map(({ kind, file }, index) => <li key={`${kind}:${index}`}><p><strong>{file.name}</strong> · {formatFileSizeMb(file.size)} MB</p>
+					{selected.map(({ kind, file }, index) => <li key={`${kind}:${index}`}><p title={`${file.name} · ${formatFileSizeMb(file.size)} MB`}><strong>{file.name}</strong> · {formatFileSizeMb(file.size)} MB</p>
 						<button type="button" className="btn btn--secondary btn--small" disabled={!enabled} aria-label={`${file.name} 선택 취소`} onClick={() => { files.removeFile(kind, file); setError(null); }}>선택 취소</button></li>)}
 				</ul>}
-			</>} />
+			</div>} />
 	</fieldset>;
 }

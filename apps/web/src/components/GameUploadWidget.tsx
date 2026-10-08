@@ -1,3 +1,7 @@
+import { usePreventWindowClose } from './common/usePreventWindowClose';
+import { useContext } from 'react';
+import { LinearUploadContext } from '../lib/upload/linearPresentation';
+import { UploadFileRows } from './common/UploadFileRows';
 /** Direct Garage multipart uploader for project GAME and WEBGL sources. */
 
 import { useState, useCallback, useEffect, useId, useRef } from 'react';
@@ -23,10 +27,12 @@ interface Props {
 	onComplete?: () => void;
 	onError?: (message: string) => void;
 	/** An enclosing Apply action requests a retry without discarding recovery state. */
+	cancelAttempt?: number;
 	retryAttempt?: number;
 	/** Advances an enclosing queue only after cancellation leaves no pending session. */
 	onCancelled?: () => void;
 	/** An enclosing row provides the heading, chooser, and selected file summary. */
+	displayNames?: string[];
 	compact?: boolean;
 	onSkip?: () => void;
 	uploadKind?: UploadKind;
@@ -39,13 +45,16 @@ export default function GameUploadWidget({
 	autoStart,
 	onComplete,
 	onError,
+	cancelAttempt = 0,
 	retryAttempt = 0,
 	onCancelled,
+	displayNames,
 	compact = false,
 	onSkip,
 	uploadKind = 'GAME',
 	submissionItem,
 }: Props) {
+	const linear = useContext(LinearUploadContext);
 	const qc = useQueryClient();
 	const fileInputId = useId();
 	const isWebgl = uploadKind === 'WEBGL';
@@ -54,6 +63,7 @@ export default function GameUploadWidget({
 		: { title: '게임 파일 업로드 (ZIP 파일)', noun: '게임 파일' };
 	const [file, setFile] = useState<File | null>(initialFile ?? null);
 	const [state, setState] = useState<UploadState>('idle');
+	usePreventWindowClose(linear && (state === 'uploading' || state === 'verifying'));
 	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [session, setSession] = useState<DirectAssetUploadSession | null>(null);
@@ -596,22 +606,46 @@ export default function GameUploadWidget({
 	const terminalSession = session !== null
 		&& terminalSessionConfirmation?.sessionId === session.sessionId
 		&& terminalSessionConfirmation.generation === session.generation;
+    const lastCancelAttempt = useRef(cancelAttempt);
+    useEffect(() => {
+        if (lastCancelAttempt.current === cancelAttempt) return;
+        lastCancelAttempt.current = cancelAttempt;
+        void handleCancel();
+    }, [cancelAttempt, handleCancel]);
+
+	const uploadActions = (<div className="game-upload__actions">
+                {linear && state === 'idle' && (!file || !terminalSession) && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
+				{state === 'idle' && file && !session && <button className="btn btn--primary" type="button" onClick={handleStart}>업로드 시작</button>}
+				{state === 'idle' && file && terminalSession && (
+					<button className="btn btn--primary" type="button" onClick={handleTerminalRetry}>{linear ? '재시도' : '새 업로드 시작'}</button>
+				)}
+				{state === 'idle' && file && session && !terminalSession && <>
+					<button className="btn btn--primary" type="button" onClick={handleResume}>이어올리기</button>
+				</>}
+				{state === 'error' && file && <button className="btn btn--primary" type="button" onClick={session ? handleResume : handleStart}>재시도</button>}
+				{(state === 'uploading' || state === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={handlePause}>일시 정지</button>}
+				{state !== 'completed' && (file || session || state === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>{linear ? '취소' : '취소 (세션 삭제)'}</button>}
+				{state === 'completed' && <span className="game-upload__complete-text">업로드 완료</span>}
+				{onSkip && state !== 'uploading' && state !== 'verifying' && state !== 'completed' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
+			</div>);
+
 	return (
-		<div className="game-upload">
-			{!compact && <h3 className="game-upload__title">{labels.title}</h3>}
-			{session && state === 'idle' && (
+		<div className={`game-upload${linear ? ' game-upload--linear' : ''}`} data-phase={state}>
+            {linear && <UploadFileRows actions={uploadActions} names={[file?.name ?? displayNames?.[0] ?? labels.noun]} phase={state === 'idle' && error && file ? 'error' : state} percent={progress?.percent} />}
+			{!linear && !compact && <h3 className="game-upload__title">{labels.title}</h3>}
+			{!linear && session && state === 'idle' && (
 				<div className="game-upload__resume-banner">
 					<p className="game-upload__resume-text">직접 업로드가 중단되었습니다. 동일한 {labels.noun}을 선택해 재개하세요.</p>
 				</div>
 			)}
-			{!compact && (state === 'idle' || state === 'error') && (
-				<div className="game-upload__file-input">
+			{(!compact || linear) && (state === 'idle' || state === 'error') && (
+				<div className="game-upload__file-input" hidden={linear}>
 					<label className="sr-only" htmlFor={fileInputId}>{labels.noun} ZIP 파일 선택</label>
 					<input id={fileInputId} type="file" accept=".zip,application/zip,application/x-zip-compressed" onChange={handleFileChange} />
 					{file && <p className="game-upload__file-summary">{file.name} — {fileSizeMB}MB</p>}
 				</div>
 			)}
-			{progress && (state === 'uploading' || state === 'verifying' || state === 'completed') && (
+			{!linear && progress && (state === 'uploading' || state === 'verifying' || state === 'completed') && (
 				<div className="game-upload__progress-wrap" role="status" aria-live="polite">
 					<div className="game-upload__progress-track" role="progressbar" aria-label={`${labels.noun} 업로드 진행률`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}>
 						<div className={`game-upload__progress-bar ${state === 'completed' ? 'game-upload__progress-bar--done' : ''}`} style={{ width: `${progress.percent}%` }} />
@@ -625,20 +659,7 @@ export default function GameUploadWidget({
 				</div>
 			)}
 			{error && <div className="game-upload__error" role="alert">{error}</div>}
-			<div className="game-upload__actions">
-				{state === 'idle' && file && !session && <button className="btn btn--primary" type="button" onClick={handleStart}>업로드 시작</button>}
-				{state === 'idle' && file && terminalSession && (
-					<button className="btn btn--primary" type="button" onClick={handleTerminalRetry}>새 업로드 시작</button>
-				)}
-				{state === 'idle' && file && session && !terminalSession && <>
-					<button className="btn btn--primary" type="button" onClick={handleResume}>이어올리기</button>
-				</>}
-				{state === 'error' && file && <button className="btn btn--primary" type="button" onClick={session ? handleResume : handleStart}>재시도</button>}
-				{(state === 'uploading' || state === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={handlePause}>일시 정지</button>}
-				{state !== 'completed' && (file || session || state === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>취소 (세션 삭제)</button>}
-				{state === 'completed' && <span className="game-upload__complete-text">업로드 완료</span>}
-				{onSkip && state !== 'uploading' && state !== 'verifying' && state !== 'completed' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
-			</div>
+			{!linear && uploadActions}
 		</div>
 	);
 }

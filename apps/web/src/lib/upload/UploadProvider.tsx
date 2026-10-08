@@ -1,3 +1,4 @@
+import { hasUploadDialog, subscribeUploadPresentation } from './presentation';
 import { useMemo, useSyncExternalStore } from 'react';
 import { usePreventWindowClose } from '../../components/common';
 import {
@@ -53,12 +54,13 @@ function statusMessage(task: UploadTask): string {
 
 function UploadOverlay() {
 	useSyncExternalStore(subscribeToUploads, getUploadSnapshot, getUploadSnapshot);
+	const covered = useSyncExternalStore(subscribeUploadPresentation, hasUploadDialog, hasUploadDialog);
 	const task = getVisibleUploadTask();
 	const open = task !== null;
 
 	usePreventWindowClose(open);
 
-	if (!task) return null;
+	if (!task || covered) return null;
 
 	const hasKnownTotal = task.totalBytes > 0;
 	const barPercent = hasKnownTotal ? task.percent : 32;
