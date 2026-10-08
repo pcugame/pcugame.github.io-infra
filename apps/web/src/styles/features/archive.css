@@ -388,10 +388,9 @@
 .archive-card__summary {
   font-size: 0.82rem;
   color: var(--color-text-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   line-height: 1.5;
   flex: 1;
 }
@@ -612,7 +611,6 @@ button.archive-card {
 
   .archive-card__summary {
     font-size: 0.72rem;
-    -webkit-line-clamp: 1;
   }
 
   .archive-card__members {
