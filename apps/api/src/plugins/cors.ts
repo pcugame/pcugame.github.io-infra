@@ -13,7 +13,7 @@ export async function registerCors(app: FastifyInstance, config: Env): Promise<v
 		origin: config.CORS_ALLOWED_ORIGINS,
 		credentials: true,
 		methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-		allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+		allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'X-Vote-Participant'],
 		exposedHeaders: [
 			'X-Request-Id',
 			'X-RateLimit-Limit',

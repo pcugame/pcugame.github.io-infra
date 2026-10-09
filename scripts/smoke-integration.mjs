@@ -1,3 +1,4 @@
+import { runVotingSmoke } from './smoke-voting.mjs';
 import { request as httpRequest } from 'node:http';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -875,5 +876,7 @@ if (keepWebgl) {
   }
   console.log('ok: deleting WebGL preserves the independent GAME download');
 }
+
+await runVotingSmoke({ apiBase, origin, cookie, fetchJson, uploadAndComplete, requestPresignedObject, internalPublicAssetBase });
 
 console.log('integration smoke passed');

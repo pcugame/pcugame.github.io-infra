@@ -333,3 +333,8 @@ and restart timing and verifies no pod/workload starts before the guard succeeds
 and no automatic restart is needed. The existing faster `lifecycle.test.py`
 surrogate only certifies post-start restart/drain policy. Both remain distinct
 from an authorized production reboot with real Podman/pasta, routing, Tailscale and authenticated API checks.
+
+Voting investigation collection is disabled when both `VOTE_INVESTIGATION_SECRET` and
+`VOTE_PRIVACY_NOTICE` are omitted. These optional keys belong only in `api.env`;
+no empty defaults are inserted. To enable collection after approving its basis and
+notice, set both keys together. The application rejects a secret without a notice.

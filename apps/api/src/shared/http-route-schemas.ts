@@ -1,3 +1,4 @@
+import * as Voting from '@pcu/contracts';
 import { ExternalLinkSchema, ExternalLinkServiceSchema } from '@pcu/contracts';
 import { WebglPlayCreateBodySchema, WebglPlayRenewBodySchema, WebglPlaySessionParamsSchema, WebglPlayCreateDataSchema, WebglPlayRenewDataSchema, WebglPlayCloseDataSchema } from '@pcu/contracts';
 import { CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
@@ -128,6 +129,7 @@ const IdempotencyHeadersSchema = z.object({
 	'idempotency-key': z.string().min(1).max(200),
 }).passthrough();
 const DirectSourceIdentityBody = z.object({
+ voteId: z.string().uuid().optional(),
 	originalName: z.string().min(1).max(255), totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
 	sourceIdentityBlockSizeBytes: z.literal(1_048_576), sourceIdentityBlockDigests: z.array(z.string().regex(/^[a-f0-9]{64}$/)),
@@ -258,6 +260,23 @@ changeRouteContracts.push(
 );
 
 export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
+ contract({ method: 'GET', url: '/api/admin/votes/:id/posters', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({ id: Voting.VoteIdSchema }), querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(z.array(Voting.VotePosterSchema)) }),
+ contract({ method: 'GET', url: '/api/votes/:id', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(Voting.VotePublicSchema) }),
+ contract({ method: 'POST', url: '/api/votes/:id/ballots', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: Voting.VoteSubmitSchema, response: jsonResponse(Voting.VoteBallotSchema) }),
+ contract({ method: 'GET', url: '/api/votes/:id/records', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: Voting.VotePageSchema, body: NoBodySchema, response: jsonResponse(Voting.VoteRecordsSchema) }),
+ contract({ method: 'POST', url: '/api/votes/:id/draw', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(Voting.VoteDrawSchema) }),
+ contract({ method: 'POST', url: '/api/votes/:id/receive', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(Voting.VoteDrawSchema) }),
+ contract({ method: 'GET', url: '/api/admin/votes', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(z.array(Voting.VoteAdminSchema)) }),
+ contract({ method: 'POST', url: '/api/admin/votes', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: Voting.VoteSettingsSchema, response: jsonResponse(Voting.VoteAdminSchema) }),
+ contract({ method: 'PUT', url: '/api/admin/votes/:id', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: Voting.VoteUpdateSchema, response: jsonResponse(Voting.VoteAdminSchema) }),
+ contract({ method: 'GET', url: '/api/admin/votes/:id/sources', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(z.array(Voting.VoteSourceSchema)) }),
+ contract({ method: 'GET', url: '/api/admin/votes/:id/records', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: Voting.VotePageSchema, body: NoBodySchema, response: jsonResponse(Voting.VoteAdminRecordsSchema) }),
+ contract({ method: 'POST', url: '/api/admin/votes/:id/candidates', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: Voting.VoteCandidateInputSchema, response: jsonResponse(Voting.VoteAdminSchema) }),
+ contract({ method: 'PUT', url: '/api/admin/votes/:id/candidates/:candidateId', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema,candidateId: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: Voting.VoteCandidateInputSchema, response: jsonResponse(Voting.VoteAdminSchema) }),
+ contract({ method: 'PUT', url: '/api/admin/votes/:id/records/:ballotId', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema,ballotId: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: Voting.VoteFlagSchema, response: jsonResponse(z.object({ saved: z.boolean() })) }),
+ contract({ method: 'GET', url: '/api/admin/draw-events', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(z.array(Voting.DrawAdminSchema)) }),
+ contract({ method: 'POST', url: '/api/admin/draw-events', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: Voting.DrawUpdateSchema, response: jsonResponse(Voting.DrawAdminSchema) }),
+ contract({ method: 'PUT', url: '/api/admin/draw-events/:id', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: Voting.DrawUpdateSchema, response: jsonResponse(Voting.DrawAdminSchema) }),
  contract({method:'GET',url:'/play/projects/:projectId',family:'webgl-play',bodyBoundary:'none',responseBoundary:'stream',params:z.object({projectId:z.coerce.number().int().positive()}),querystring:EmptyObjectSchema,body:NoBodySchema,response:{200:z.string()}}),
  contract({method:'POST',url:'/api/webgl-play/sessions',family:'webgl-play',bodyBoundary:'json',responseBoundary:'json',params:EmptyObjectSchema,querystring:EmptyObjectSchema,body:WebglPlayCreateBodySchema,response:jsonResponse(WebglPlayCreateDataSchema)}),
  contract({method:'POST',url:'/api/webgl-play/sessions/:id/renew',family:'webgl-play',bodyBoundary:'json',responseBoundary:'json',params:WebglPlaySessionParamsSchema,querystring:EmptyObjectSchema,body:WebglPlayRenewBodySchema,response:jsonResponse(WebglPlayRenewDataSchema)}),

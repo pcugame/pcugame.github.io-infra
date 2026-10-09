@@ -131,6 +131,7 @@ export function createAssetUploadService(deps: {
 		body: DirectCreateBody,
 	) {
 		await authorizeOwnerWrite(actor, owner);
+		if (body.voteId && (kind !== 'POSTER' || owner.type !== 'EXHIBITION' || !['ADMIN', 'OPERATOR'].includes(actor.role))) throw badRequest('Invalid voting poster upload');
 		await deps.repository.expireStaleAllocations(owner);
 		const maxBytes = deps.config.maxBytesFor(actor, kind);
 		if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new Error(`Direct ${kind} upload policy is invalid`);
@@ -144,6 +145,7 @@ export function createAssetUploadService(deps: {
 		try {
 			session = await deps.repository.createAllocating({
 			id,
+			voteId: body.voteId ?? null,
 			projectId: owner.type === 'PROJECT' ? owner.id : null,
 			exhibitionId: owner.type === 'EXHIBITION' ? owner.id : null,
 			userId: actor.id, kind, originalName: body.originalName,

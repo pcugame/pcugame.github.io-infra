@@ -124,7 +124,7 @@ export function createBackendMaintenance({
 	ids: IdGenerator;
 	logger: AppLogger;
 	uploadLifecycle: UploadLifecycleRuntime;
-	persistence: Pick<BackendPersistencePorts, 'authRepository'>;
+	persistence: Pick<BackendPersistencePorts, 'authRepository' | 'purgeVoteInvestigations'>;
 }): BackgroundMaintenance {
 	const directAssetUploadRecovery = directAssetUploadRepository
 		? createAssetUploadRecoveryService({
@@ -139,7 +139,9 @@ export function createBackendMaintenance({
 		: undefined;
 	return {
 		recoverStaleUploads: async (signal) => {
-			if (!directAssetUploadRecovery || signal?.aborted) return;
+			if (signal?.aborted) return;
+			await persistence.purgeVoteInvestigations?.();
+			if (!directAssetUploadRecovery) return;
 			await directAssetUploadRecovery.recover(signal);
 		},
 		async purgeExpiredSessions(before, signal) {

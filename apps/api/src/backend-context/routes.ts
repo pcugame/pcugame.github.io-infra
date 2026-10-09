@@ -1,3 +1,6 @@
+import { createVotingController } from '../modules/voting/controller.js';
+import { createVotingService } from '../modules/voting/service.js';
+import { createVotingRepository } from '../modules/voting/repository.js';
 import type { S3Client } from '@aws-sdk/client-s3';
 import type { FastifyPluginAsync } from 'fastify';
 import type {
@@ -45,6 +48,7 @@ import { resolveRoleUploadLimits } from '../shared/upload-policy.js';
 import type { BackendPersistencePorts } from './persistence.js';
 
 export interface BackendRoutes {
+	voting?: FastifyPluginAsync;
 	fileAccess?: FastifyPluginAsync;
 	webglPlay?: FastifyPluginAsync;
 	auth: FastifyPluginAsync;
@@ -178,6 +182,20 @@ export function composeBackendRoutes({
 	assetsBanned: AssetsBannedProductionGraph | undefined;
 }): BackendRoutes {
 	const routes = { ...baseRoutes };
+	if (!hasSuppliedRoutes) {
+		const votingRepository = prisma && !hasSuppliedPersistence
+			? createVotingRepository(prisma)
+			: {
+				transaction: async () => { throw new Error('Voting persistence unavailable'); },
+				purge: async () => 0,
+			};
+		routes.voting = createVotingController(createVotingService(votingRepository, {
+			publicBucket: config.S3_BUCKET_PUBLIC,
+			publicOrigin: config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL,
+			investigationSecret: config.VOTE_INVESTIGATION_SECRET,
+			privacyNotice: config.VOTE_PRIVACY_NOTICE,
+		}));
+	}
 	if (!hasSuppliedRoutes) {
 		const webglPlay = createWebglPlayService(
 			persistence.webglPlayRepository ?? (prisma && !hasSuppliedPersistence

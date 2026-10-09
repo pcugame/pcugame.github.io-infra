@@ -9,6 +9,7 @@ export type DirectAssetUploadOwner =
 	| { type: 'EXHIBITION'; id: number };
 
 export interface AssetUploadSessionRecord {
+	voteId?: string | null;
 	id: string;
 	projectId: number | null;
 	exhibitionId: number | null;

@@ -143,7 +143,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 						where: { projectId: input.projectId, kind: 'GAME', status: 'READY' },
 						select: { id: true, updatedAt: true },
 					});
-				} else if (input.kind === 'POSTER') {
+				} else if (input.kind === 'POSTER' && !input.voteId) {
 					const posterAssetId = input.projectId !== null
 						? (await tx.project.findUniqueOrThrow({ where: { id: input.projectId }, select: { posterAssetId: true } })).posterAssetId
 						: (await tx.exhibition.findUniqueOrThrow({ where: { id: input.exhibitionId! }, select: { posterAssetId: true } })).posterAssetId;
@@ -151,6 +151,10 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 						const asset = await tx.asset.findUniqueOrThrow({ where: { id: posterAssetId }, select: { updatedAt: true } });
 						expected = { id: posterAssetId, updatedAt: asset.updatedAt };
 					}
+				}
+				if (input.voteId) {
+					const vote = await tx.exhibitionVote.findUnique({ where: { id: input.voteId } });
+					if (!vote || vote.exhibitionId !== input.exhibitionId || input.projectId !== null || input.kind !== 'POSTER' || !['ADMIN', 'OPERATOR'].includes(actorRole ?? '')) throw new Error('Invalid voting poster owner');
 				}
 				const created = await tx.assetUploadSession.create({
 					data: {

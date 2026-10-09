@@ -157,7 +157,7 @@ export async function collectObjectReferences(
 		| 'project'
 		| 'assetUploadSession'
 		| 'uploadIntent'
-	>,
+	> & Partial<Pick<PrismaClient, 'votePoster'>>,
 	buckets: ObjectReferenceBuckets,
 	logger: ObjectReferenceLogger,
 ): Promise<ObjectReferenceInventory> {
@@ -196,6 +196,7 @@ export async function collectObjectReferences(
 	]);
 
 	const references: ObjectReference[] = [];
+	if (client.votePoster) for (const p of await client.votePoster.findMany()) references.push({ bucket: p.bucket, targetKind: 'EXACT', key: p.objectKey, source: `vote-poster:${p.id}` });
 	const unsafeBuckets = new Set<string>();
 	for (const asset of assets) {
 		for (const representation of asset.representations ?? []) {

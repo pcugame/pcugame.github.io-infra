@@ -304,6 +304,7 @@ export async function uploadDirectAssetFile(
 		resume?: DirectAssetUploadSession;
 		onSession?: (session: DirectAssetUploadSession) => void;
 		submissionItem?: { id: string; clientToken: string };
+		voteId?: string;
 		signal?: AbortSignal;
 	} = {},
 ): Promise<DirectGameUploadCompletionResponse> {
@@ -342,6 +343,7 @@ export async function uploadDirectAssetFile(
 					declaredMimeType: file.type || undefined,
 					...source,
 					...(options.submissionItem ? { submissionItem: options.submissionItem } : {}),
+					...(options.voteId ? { voteId: options.voteId } : {}),
 				} satisfies DirectGameUploadCreateSessionRequest),
 			},
 			options.signal,

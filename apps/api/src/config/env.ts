@@ -18,6 +18,9 @@ const envSchema = z
     PORT: z.coerce.number().int().positive().default(4000),
     DATABASE_URL: z.string().url(),
     SESSION_SECRET: z.string().min(32),
+    // Enable only after the collection basis and notice are approved.
+    VOTE_INVESTIGATION_SECRET: z.string().min(32).optional(),
+    VOTE_PRIVACY_NOTICE: z.string().trim().min(1).max(4000).optional(),
     WEBGL_PLAY_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
     WEBGL_EXTERNAL_CONNECTIONS_ENABLED: z.enum(['true', 'false']).default('false').transform(v => v === 'true'),
     FILE_GATEWAY_SECRET: z.string().min(32).optional(),
@@ -142,6 +145,7 @@ const envSchema = z
     EXPORT_WORKER_RETRY_BASE_MS: z.coerce.number().int().positive().default(5_000),
   })
   .superRefine((value, context) => {
+    if (value.VOTE_INVESTIGATION_SECRET && !value.VOTE_PRIVACY_NOTICE) context.addIssue({ code: 'custom', path: ['VOTE_PRIVACY_NOTICE'], message: 'An approved privacy notice is required before voting investigation collection is enabled' });
     if (value.NODE_ENV !== 'production') return;
     if (!value.PUBLIC_ASSET_ORIGIN) {
       context.addIssue({

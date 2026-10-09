@@ -8,6 +8,8 @@ import { RequireAuth, RequireRole } from '../features/auth';
 import { lazy, Suspense } from 'react';
 import { LoadingSpinner } from '../components/common';
 
+const VotePage = lazy(() => import('../pages/VotePage'));
+const AdminVotesPage = lazy(() => import('../pages/admin/AdminVotesPage'));
 const HomePage = lazy(() => import('../pages/HomePage'));
 const YearsPage = lazy(() => import('../pages/YearsPage'));
 const YearProjectsPage = lazy(() => import('../pages/YearProjectsPage'));
@@ -152,6 +154,7 @@ export const routes: RouteObject[] = [
             </RequireAuth>
           ),
           children: [
+            { path: 'votes', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminVotesPage /></Lazy></RequireRole>) },
             { path: 'projects/new/studio', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminProjectSubmissionStudioPage /></Lazy></RequireRole>) },
             { path: 'webgl-network', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><WebglNetworkPage admin /></Lazy></RequireRole>) },
             {
@@ -248,6 +251,7 @@ export const routes: RouteObject[] = [
         },
       ],
     },
+    ...['/votes/:publicId', '/votes/:publicId/records', '/votes/:publicId/draw'].map(path => ({ path, element: <Lazy><VotePage key={path}/></Lazy> })),
     {
       path: '/projects/:projectId/play',
       element: (

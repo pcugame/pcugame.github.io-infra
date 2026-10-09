@@ -1026,6 +1026,210 @@
       "uiSources": [
         "lib/api/admin.ts"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/votes/:id",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/votes/:id/ballots",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/votes/:id/records",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/votes/:id/draw",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/votes/:id/receive",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/votes",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/votes",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/votes/:id",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/votes/:id/sources",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/votes/:id/records",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/votes/:id/candidates",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/votes/:id/candidates/:candidateId",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/votes/:id/records/:ballotId",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/draw-events",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/draw-events",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/admin/draw-events/:id",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/votes/:id/posters",
+      "priority": "P1",
+      "domain": "voting.ts",
+      "testFiles": [
+        "voting.test.tsx"
+      ],
+      "uiSources": [
+        "features/voting/api.ts"
+      ]
     }
   ]
 }

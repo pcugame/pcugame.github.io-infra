@@ -37,6 +37,7 @@ export interface BackendPersistencePorts {
 	fileAccessRepository?: FileAccessRepository;
 	webglPlayRepository?: WebglPlayRepository;
 	webglNetworkRepository?: WebglNetworkRepository;
+	purgeVoteInvestigations?: () => Promise<unknown>;
 	databaseHealth: DatabaseHealth;
 	authRepository: AuthProductionRepository;
 	publicRepository: PublicProductionRepository;
@@ -56,6 +57,7 @@ export interface BackendPersistencePorts {
 export function createBackendPersistence(prisma: PrismaClient | undefined, config: Env): BackendPersistencePorts {
 	if (!prisma) throw new Error('Prisma persistence was not initialized');
 	return {
+		purgeVoteInvestigations: () => prisma.$executeRaw`DELETE FROM vote_investigations WHERE "expiresAt" <= clock_timestamp()`,
 		databaseHealth: createPrismaHealth(prisma),
 		authRepository: createAuthRepository(prisma),
 		publicRepository: createPublicRepository(prisma),

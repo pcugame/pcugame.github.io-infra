@@ -7,7 +7,7 @@ import { mockFixtureUrl, mockResponsiveImage } from './data';
 export type MockSubmissionRecord = ProjectSubmissionStatusResponse & { actorId: number; createdAt: string; finalizedAt?: string };
 type UploadedPart = { partNumber: number; etag: string; sizeBytes: number; blockDigests: string[] };
 export type MockUploadSession = Omit<DirectAssetUploadStatus, 'parts'> & {
-  actorId: number; submissionItemId?: string; completedAt?: string; processingState?: 'PROCESSING' | 'FAILED';
+  voteId?: string; actorId: number; submissionItemId?: string; completedAt?: string; processingState?: 'PROCESSING' | 'FAILED';
   sourceIdentityBlockDigests: string[]; capabilities: Record<number, { token: string; checksum: string; expiresAt: string }>;
   parts: UploadedPart[]; resultAssetId?: number; previewBlob?: Blob;
 };
@@ -64,6 +64,7 @@ function boundItem(ctx: MockContext, session: MockUploadSession) { return sessio
 function ownedUrl(url: string, owner: MockUploadSession['owner']): string { const target = new URL(url); target.searchParams.set(owner.type === 'PROJECT' ? 'mock_project' : 'mock_exhibition', String(owner.id)); return target.href; }
 function ownedImage(owner: MockUploadSession['owner']) { const image = mockResponsiveImage('/mock/images/1200x675.png'); image.original.url = ownedUrl(image.original.url, owner); image.renditions = image.renditions.map(rendition => ({ ...rendition, url: ownedUrl(rendition.url, owner) })); return image; }
 function attachAsset(ctx: MockContext, session: MockUploadSession, ready: boolean): void {
+  if (session.voteId) return;
   if (session.owner.type === 'EXHIBITION') {
     if (ready) { const exhibition = ctx.state.exhibitions.find(item => item.id === session.owner.id); if (exhibition) Object.assign(exhibition, { poster: ownedImage(session.owner), posterOriginalName: session.originalName, posterSize: session.totalBytes }); }
     return;
@@ -208,7 +209,8 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
         if (['DOCUMENT', 'ATTACHMENT'].includes(kind) && project.assets.filter(asset => ['DOCUMENT', 'ATTACHMENT'].includes(asset.kind)).length >= 5) fail(409, 'CONFLICT', 'A project supports at most five materials');
       }
     } else if (body.submissionItem) fail(409, 'CONFLICT', 'Exhibition uploads cannot bind a submission item');
-    const session: MockUploadSession = { sessionId: crypto.randomUUID(), owner, kind, actorId: ctx.requireUser().id, generation: 1, state: 'UPLOADING', originalName: body.originalName as string, totalBytes: total, partSizeBytes: 5 * 1024 * 1024, totalParts: Math.ceil(total / (5 * 1024 * 1024)), expiresAt: new Date(ms(ctx) + 3600000).toISOString(), sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: body.sourceIdentity as string, sourceIdentityBlockDigests: digests as string[], capabilities: {}, parts: [], ...(item ? { submissionItemId: item.id } : {}) };
+    if (body.voteId && (owner.type !== 'EXHIBITION' || kind !== 'POSTER' || !ctx.state.voting?.votes.some(v => v.id === body.voteId && v.settings.exhibitionId === owner.id))) fail(400, 'VALIDATION_ERROR', 'Invalid voting poster owner');
+    const session: MockUploadSession = { ...(typeof body.voteId === 'string' ? { voteId: body.voteId } : {}), sessionId: crypto.randomUUID(), owner, kind, actorId: ctx.requireUser().id, generation: 1, state: 'UPLOADING', originalName: body.originalName as string, totalBytes: total, partSizeBytes: 5 * 1024 * 1024, totalParts: Math.ceil(total / (5 * 1024 * 1024)), expiresAt: new Date(ms(ctx) + 3600000).toISOString(), sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: body.sourceIdentity as string, sourceIdentityBlockDigests: digests as string[], capabilities: {}, parts: [], ...(item ? { submissionItemId: item.id } : {}) };
     sessions(ctx)[session.sessionId] = session;
     if (item) { if (item.sessionId) { const old = sessions(ctx)[item.sessionId]; if (old) { delete old.submissionItemId; if (old.resultAssetId && owner.type === 'PROJECT') { const project = ctx.state.projects[owner.id]!; project.assets = project.assets.filter(asset => asset.id !== old.resultAssetId); project.videos = project.videos.filter(video => video.assetId !== old.resultAssetId); project.video = project.videos[0] ?? null; } } } item.state = 'UPLOADING'; item.sessionId = session.sessionId; item.generation = session.generation; delete item.failureReason; delete item.playbackState; delete item.playbackError; }
     return Response.json({ ok: true, data: createdSession(session) }, { status: 201 });

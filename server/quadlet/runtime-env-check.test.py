@@ -80,6 +80,23 @@ class RuntimeCheck(unittest.TestCase):
         self.assertEqual(deployment['LOG_LEVEL'], 'info')
         self.assertEqual(self.run_check().returncode, 2)
 
+    def test_voting_collection_keys_are_optional_and_api_only(self):
+        for key in RUNTIME['API_OPTIONAL_KEYS']:
+            self.scopes[1].pop(key)
+            self.change(0, key)
+        self.write_files()
+        self.assertEqual(self.run_check().returncode, 0)
+        values = RUNTIME['deployment_values'](self.paths)
+        self.assertTrue(RUNTIME['API_OPTIONAL_KEYS'].isdisjoint(values))
+        self.scopes[1].update(VOTE_INVESTIGATION_SECRET=SENTINEL, VOTE_PRIVACY_NOTICE='Approved notice')
+        self.change(0, 'VOTE_INVESTIGATION_SECRET', SENTINEL)
+        self.change(0, 'VOTE_PRIVACY_NOTICE', 'Approved notice')
+        self.write_files()
+        self.assertEqual(self.run_check().returncode, 0)
+        self.scopes[0]['VOTE_INVESTIGATION_SECRET'] = SENTINEL
+        self.write_files()
+        self.assertEqual(self.run_check().returncode, 2)
+
     def test_application_key_inventory_tracks_schema_and_direct_reads(self):
         source = HERE.parents[1] / 'apps' / 'api' / 'src'
         schema = (source / 'config' / 'env.ts').read_text()

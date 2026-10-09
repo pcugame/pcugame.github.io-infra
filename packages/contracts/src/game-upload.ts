@@ -17,6 +17,7 @@ export type DirectUploadSourceIdentity = {
 };
 
 export type DirectGameUploadCreateSessionRequest = {
+	voteId?: string;
 	originalName: string;
 	totalBytes: number;
 	uploadKind?: UploadKind;

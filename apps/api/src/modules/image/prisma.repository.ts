@@ -1,3 +1,4 @@
+import { assertNoDeletionClaim } from '../orphan/reference-resolver.js';
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 import { WorkerGenerationFencedError } from '../upload-lifecycle/worker-errors.js';
@@ -16,6 +17,7 @@ function sessionRecord(value: {
 	state: string;
 	projectId: number | null;
 	exhibitionId: number | null;
+	voteId?: string | null;
 	userId: number;
 	originalName: string;
 	declaredMimeType: string;
@@ -39,6 +41,7 @@ function sessionRecord(value: {
 	}
 	return {
 		id: value.id,
+		voteId: value.voteId,
 		kind: value.kind as ImageUploadKind,
 		state: 'VERIFYING',
 		owner: value.projectId === null
@@ -259,7 +262,7 @@ export function createPrismaImageWorkerRepository(
 					status: 'READY', originalName: session.originalName,
 				} });
 				await commitUploadIntents(tx, outputs.map((output) => output.intentId));
-				if (session.kind === 'POSTER') {
+				if (session.kind === 'POSTER' && !session.voteId) {
 					if (session.owner.type === 'PROJECT') {
 						const ownerId = Number(session.owner.id);
 						await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${ownerId} FOR UPDATE`);
@@ -289,6 +292,18 @@ export function createPrismaImageWorkerRepository(
 							}
 						}
 					}
+				}
+				if (session.voteId) {
+					const display = outputs.find(o => o.role === 'DISPLAY_960');
+					if (!display || display.bucket !== input.publicBucket) {
+						throw new Error('Voting poster has no public display');
+					}
+					await assertNoDeletionClaim(tx, { bucket: display.bucket, key: display.objectKey });
+					await tx.votePoster.upsert({
+						where: { id: session.id },
+						create: { id: session.id, voteId: session.voteId, bucket: display.bucket, objectKey: display.objectKey },
+						update: {},
+					});
 				}
 				await tx.assetUploadSession.update({ where: { id: session.id }, data: {
 					state: 'READY', resultAssetId: assetId,

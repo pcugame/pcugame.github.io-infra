@@ -8,6 +8,7 @@ import { requireLogin } from '../../plugins/auth.js';
 import type { createAssetUploadService } from './service.js';
 
 const SourceIdentityBody = z.object({
+	voteId: z.string().uuid().optional(),
 	originalName: z.string().min(1).max(255),
 	totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'),

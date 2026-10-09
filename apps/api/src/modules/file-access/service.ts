@@ -49,6 +49,7 @@ export function createFileAccessService(repository: FileAccessRepository, config
    if(deploymentId) throw forbidden();
   }
   if (deploymentId) throw forbidden();
+  if (bucket === config.S3_BUCKET_PUBLIC && await repository.votePoster?.(bucket, key)) return null;
   const representation = await repository.findRepresentation(bucket,key);
   const asset = representation?.asset;
   if (!asset || asset.status !== 'READY') throw forbidden();

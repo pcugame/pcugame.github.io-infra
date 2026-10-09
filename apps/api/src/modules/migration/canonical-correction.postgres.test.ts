@@ -117,7 +117,9 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('atomic Phase
 			release(); await blocker; await protecting;
 			const claimed = await claiming;
 			expect(claimed.some((row) => row.storageKey === item.source.key || row.storageKey === 'protected/' || row.storageKey === item.outputs[0]!.objectKey)).toBe(false);
-			const inventory = await collectObjectReferences(db, { publicBucket: 'public', protectedBucket: 'protected' }, { error() {} });
+			// This fixture intentionally predates the voting expansion. Its reference
+            // inventory contains only the domain tables present in Phase 1.
+            const inventory = await collectObjectReferences({ asset: db.asset, project: db.project, assetUploadSession: db.assetUploadSession, uploadIntent: db.uploadIntent }, { publicBucket: 'public', protectedBucket: 'protected' }, { error() {} });
 			const index = createObjectReferenceIndex(inventory);
 			expect(index.referencesTarget({ bucket: 'public', key: item.source.key, targetKind: 'EXACT' })).toBe(true);
 			expect(index.referencesTarget({ bucket: 'protected', key: 'protected/', targetKind: 'PREFIX' })).toBe(true);
