@@ -5,7 +5,6 @@ import type { VotePublic, VoteRecords } from '@pcu/contracts';
 import { votingApi } from '../features/voting/api';
 import { stableCandidateOrder } from '../features/voting/participant';
 import { getApiErrorMessage } from '../lib/api';
-import '../styles/features/voting.css';
 
 export default function VotePage() {
 	const { pathname } = useLocation();
@@ -90,9 +89,10 @@ function VoteScreen() {
 		}
 	}
 	const feedback = error && (
-		<p role="alert">
+		<p role="alert" className="error-box error-box__message">
 			{error}{' '}
 			<button
+				className="btn btn--secondary"
 				onClick={() => {
 					setError('');
 					void refresh().catch((e) => setError(getApiErrorMessage(e)));
@@ -136,6 +136,7 @@ function VoteScreen() {
 							))}
 						</ul>
 						<button
+							className="btn btn--secondary"
 							disabled={page <= 1}
 							onClick={() => {
 								setRecords(null);
@@ -146,6 +147,7 @@ function VoteScreen() {
 						</button>{' '}
 						{page}{' '}
 						<button
+							className="btn btn--secondary"
 							disabled={page * 50 >= Math.max(records.total, records.changesTotal)}
 							onClick={() => {
 								setRecords(null);
@@ -181,7 +183,7 @@ function VoteScreen() {
 						) : d.prize ? (
 							<>
 								<p>직원 앞에서 수령을 확인해 주세요.</p>
-								<button disabled={busy} onClick={() => setConfirm('receive')}>
+								<button className="btn btn--primary" disabled={busy} onClick={() => setConfirm('receive')}>
 									경품 수령
 								</button>
 							</>
@@ -190,7 +192,7 @@ function VoteScreen() {
 						)}
 					</>
 				) : view.drawEligible ? (
-					<button disabled={busy} onClick={() => void act('draw')}>
+					<button className="btn btn--primary" disabled={busy} onClick={() => void act('draw')}>
 						{busy ? '확인 중…' : '추첨하기'}
 					</button>
 				) : (
@@ -200,16 +202,16 @@ function VoteScreen() {
 					<ConfirmVoteDialog titleId="receive-title" busy={busy} onClose={() => setConfirm(null)}>
 						<h2 id="receive-title">직원 앞에서 수령하시겠습니까?</h2>
 						<p>확인하면 수령 완료로 저장됩니다.</p>
-						<button autoFocus disabled={busy} onClick={() => void act('receive')}>
+						<button className="btn btn--primary" autoFocus disabled={busy} onClick={() => void act('receive')}>
 							수령 완료
 						</button>
-						<button disabled={busy} onClick={() => setConfirm(null)}>
+						<button className="btn btn--secondary" disabled={busy} onClick={() => setConfirm(null)}>
 							취소
 						</button>
 					</ConfirmVoteDialog>
 				)}
 				<p>
-					<Link to={`/votes/${publicId}`}>투표 참여 확인</Link>
+					<Link className="btn btn--secondary" to={`/votes/${publicId}`}>투표 참여 확인</Link>
 				</p>
 			</main>
 		);
@@ -227,7 +229,7 @@ function VoteScreen() {
 					))}
 				</ul>
 				{(view.drawEligible || d) && (
-					<Link to={`/votes/${publicId}/draw`}>{d ? '추첨 결과 확인' : '추첨 참여'}</Link>
+					<Link className="btn btn--primary" to={`/votes/${publicId}/draw`}>{d ? '추첨 결과 확인' : '추첨 참여'}</Link>
 				)}
 			</main>
 		);
@@ -288,7 +290,7 @@ function VoteScreen() {
 					<span>
 						{selected.length} / {view.maxSelections}
 					</span>
-					<button disabled={busy} onClick={() => setConfirm('vote')}>
+					<button className="btn btn--primary" disabled={busy} onClick={() => setConfirm('vote')}>
 						투표 완료
 					</button>
 				</footer>
@@ -302,10 +304,10 @@ function VoteScreen() {
 						))}
 					</ul>
 					<p>제출 후 선택을 변경할 수 없습니다.</p>
-					<button autoFocus disabled={busy} onClick={() => void act('vote')}>
+					<button className="btn btn--primary" autoFocus disabled={busy} onClick={() => void act('vote')}>
 						{busy ? '접수 확인 중…' : '최종 제출'}
 					</button>
-					<button disabled={busy} onClick={() => setConfirm(null)}>
+					<button className="btn btn--secondary" disabled={busy} onClick={() => setConfirm(null)}>
 						돌아가기
 					</button>
 				</ConfirmVoteDialog>

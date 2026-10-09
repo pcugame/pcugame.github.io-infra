@@ -6,7 +6,6 @@ import type { DrawAdmin, DrawSettings, VoteAdmin, VoteSettings } from '@pcu/cont
 import { votingApi } from '../../features/voting/api';
 import { getApiErrorMessage } from '../../lib/api';
 import { api } from '../../lib/api/client';
-import '../../styles/features/voting.css';
 const initial: VoteSettings = {
 	exhibitionId: 1,
 	title: '',
@@ -122,16 +121,18 @@ export default function AdminVotesPage() {
 	};
 	return (
 		<div className="vote-admin">
-			<h1>전시회 투표·추첨</h1>
-			{error && <p role="alert">{error}</p>}
-			{message && <p role="status">{message}</p>}
-			<label>
+			<div className="admin-page-header">
+				<div className="admin-page-header__text"><h1>전시회 투표·추첨</h1></div>
+			</div>
+			{error && <p role="alert" className="error-box error-box__message">{error}</p>}
+			{message && <p role="status" className="success-message">{message}</p>}
+			<label className="form-field form-field__label">
 				변경 사유 (후보 변경 시 공개)
-				<input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
+				<input className="form-control" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
 			</label>
-			<section>
+			<section className="admin-card">
 				<h2>투표 관리</h2>
-				<label>
+				<label className="form-field form-field__label">
 					투표 선택
 					<SelectControl
 						aria-label="투표 선택"
@@ -156,7 +157,7 @@ export default function AdminVotesPage() {
 						);
 					}}
 				>
-					<label>
+					<label className="form-field form-field__label">
 						전시회
 						<SelectControl
 							aria-label="전시회"
@@ -172,25 +173,28 @@ export default function AdminVotesPage() {
 							))}
 						</SelectControl>
 					</label>
-					<label>
+					<label className="form-field form-field__label">
 						제목
 						<input
+							className="form-control"
 							required
 							value={settings.title}
 							maxLength={200}
 							onChange={(e) => setSettings((s) => ({ ...s, title: e.target.value }))}
 						/>
 					</label>
-					<label>
+					<label className="form-field form-field__label">
 						상단 안내
 						<textarea
+							className="form-control"
 							value={settings.guidance}
 							onChange={(e) => setSettings((s) => ({ ...s, guidance: e.target.value }))}
 						/>
 					</label>
-					<label>
+					<label className="form-field form-field__label">
 						최대 선택 수
 						<input
+							className="form-control"
 							type="number"
 							min={1}
 							max={100}
@@ -198,7 +202,7 @@ export default function AdminVotesPage() {
 							onChange={(e) => setSettings((s) => ({ ...s, maxSelections: Number(e.target.value) }))}
 						/>
 					</label>
-					<label>
+					<label className="form-field form-field__label">
 						운영 상태
 						<SelectControl
 							aria-label="운영 상태"
@@ -217,9 +221,10 @@ export default function AdminVotesPage() {
 						회수할 수 없습니다.
 					</p>
 					{(['startsAt', 'endsAt'] as const).map((k) => (
-						<label key={k}>
+						<label className="form-field form-field__label" key={k}>
 							{k === 'startsAt' ? '예약 시작' : '예약 마감'}
 							<input
+								className="form-control"
 								type="datetime-local"
 								value={localTime(settings[k])}
 								onChange={(e) =>
@@ -231,7 +236,7 @@ export default function AdminVotesPage() {
 							/>
 						</label>
 					))}
-					<label>
+					<label className="form-field form-field__label">
 						추첨 행사
 						<SelectControl
 							aria-label="추첨 행사"
@@ -247,7 +252,7 @@ export default function AdminVotesPage() {
 							))}
 						</SelectControl>
 					</label>
-					<button disabled={busy || !reason.trim()} type="submit">
+					<button className="btn btn--primary" disabled={busy || !reason.trim()} type="submit">
 						{vote ? '투표 설정 저장' : '투표 개설'}
 					</button>
 				</form>
@@ -274,10 +279,11 @@ export default function AdminVotesPage() {
 				)}
 			</section>
 			{vote && (
-				<section>
+				<section className="admin-card">
 					<h2>후보 · 버전 {vote.version}</h2>
 					<p>후보 카드에는 포스터만 표시됩니다. 제목은 접근성 설명과 제출 확인에 사용됩니다.</p>
 					<button
+						className="btn btn--secondary"
 						disabled={busy}
 						onClick={() => void run(async () => setSources(await votingApi.sources(vote.id)))}
 					>
@@ -288,6 +294,7 @@ export default function AdminVotesPage() {
 							<img src={s.posterUrl} alt="" />
 							{s.title}
 							<button
+								className="btn btn--secondary"
 								disabled={busy}
 								onClick={() =>
 									void run(async () =>
@@ -315,11 +322,11 @@ export default function AdminVotesPage() {
 						onReady={onPosterReady}
 					/>
 					{posterId && <p>업로드한 포스터를 후보 추가·교체에 사용할 수 있습니다.</p>}
-					<label>
+					<label className="form-field form-field__label">
 						후보 제목
-						<input value={title} onChange={(e) => setTitle(e.target.value)} />
+						<input className="form-control" value={title} onChange={(e) => setTitle(e.target.value)} />
 					</label>
-					<label>
+					<label className="form-field form-field__label">
 						준비된 포스터
 						<SelectControl
 							aria-label="준비된 포스터"
@@ -342,6 +349,7 @@ export default function AdminVotesPage() {
 						/>
 					)}
 					<button
+						className="btn btn--secondary"
 						disabled={busy || !title || !posterId}
 						onClick={() =>
 							void run(async () =>
@@ -366,6 +374,7 @@ export default function AdminVotesPage() {
 								{c.title} · {c.active ? '활성' : '제외'}
 							</span>
 							<button
+								className="btn btn--secondary"
 								disabled={busy}
 								onClick={() =>
 									void run(async () =>
@@ -383,6 +392,7 @@ export default function AdminVotesPage() {
 								{c.active ? '제외' : '다시 활성화'}
 							</button>
 							<button
+								className="btn btn--secondary"
 								disabled={busy || !posterId}
 								onClick={() =>
 									void run(async () =>
@@ -405,17 +415,18 @@ export default function AdminVotesPage() {
 				</section>
 			)}
 			{vote && (
-				<section>
+				<section className="admin-card">
 					<h2>접수 조사</h2>
 					<p>의심 표시는 득표에 영향을 주지 않습니다. 환경 정보만으로 동일인을 확정할 수 없습니다.</p>
 					<button
+						className="btn btn--secondary"
 						disabled={busy}
 						onClick={() => void run(async () => setRecords(await votingApi.adminRecords(vote.id, page)))}
 					>
 						접수 기록 조회
 					</button>
 					{records?.ballots.map((b) => (
-						<fieldset key={b.id}>
+						<fieldset className="form-section" key={b.id}>
 							<legend>{b.id}</legend>
 							<p>
 								{new Date(b.createdAt).toLocaleString()} · {b.selections.map((s) => s.title).join(', ')}
@@ -441,19 +452,20 @@ export default function AdminVotesPage() {
 									});
 								}}
 							>
-								<label>
+								<label className="form-choice">
 									<input name="flagged" type="checkbox" defaultChecked={b.flagged} />
 									의심 표시
 								</label>
-								<label>
+								<label className="form-field form-field__label">
 									메모
-									<textarea name="note" defaultValue={b.note} />
+									<textarea className="form-control" name="note" defaultValue={b.note} />
 								</label>
-								<button disabled={busy}>메모 저장</button>
+								<button className="btn btn--secondary" disabled={busy}>메모 저장</button>
 							</form>
 						</fieldset>
 					))}
 					<button
+						className="btn btn--secondary"
 						disabled={busy || page === 1}
 						onClick={() =>
 							void run(async () => {
@@ -466,6 +478,7 @@ export default function AdminVotesPage() {
 					</button>
 					{page}
 					<button
+						className="btn btn--secondary"
 						disabled={busy || !records || page * 50 >= records.total}
 						onClick={() =>
 							void run(async () => {
@@ -478,13 +491,13 @@ export default function AdminVotesPage() {
 					</button>
 				</section>
 			)}
-			<section>
+			<section className="admin-card">
 				<h2>추첨 행사</h2>
 				<p>
 					연결된 모든 투표가 재고와 브라우저당 1회 제한을 공유합니다. 당첨 시 재고를 확보하며 미수령분은 자동
 					반환하지 않습니다.
 				</p>
-				<label>
+				<label className="form-field form-field__label">
 					행사 선택
 					<SelectControl
 						aria-label="행사 선택"
@@ -522,15 +535,16 @@ export default function AdminVotesPage() {
 						});
 					}}
 				>
-					<label>
+					<label className="form-field form-field__label">
 						행사명
 						<input
+							className="form-control"
 							required
 							value={drawSettings.title}
 							onChange={(e) => setDrawSettings((s) => ({ ...s, title: e.target.value }))}
 						/>
 					</label>
-					<label>
+					<label className="form-field form-field__label">
 						방식
 						<SelectControl
 							aria-label="방식"
@@ -543,7 +557,7 @@ export default function AdminVotesPage() {
 							<option value="WEIGHTED">가중치 추첨함</option>
 						</SelectControl>
 					</label>
-					<label>
+					<label className="form-choice">
 						<input
 							type="checkbox"
 							checked={drawSettings.paused}
@@ -558,13 +572,13 @@ export default function AdminVotesPage() {
 								items: s.items.map((v, i) => (i === index ? { ...v, ...data } : v)),
 							}));
 						return (
-							<fieldset key={item.id ?? index}>
+							<fieldset className="form-section" key={item.id ?? index}>
 								<legend>결과 {index + 1}</legend>
-								<label>
+								<label className="form-field form-field__label">
 									표시명
-									<input required value={item.title} onChange={(e) => patch({ title: e.target.value })} />
+									<input className="form-control" required value={item.title} onChange={(e) => patch({ title: e.target.value })} />
 								</label>
-								<label>
+								<label className="form-choice">
 									<input
 										type="checkbox"
 										checked={item.prize}
@@ -572,7 +586,7 @@ export default function AdminVotesPage() {
 									/>
 									경품 (해제하면 꽝)
 								</label>
-								<label>
+								<label className="form-choice">
 									<input
 										type="checkbox"
 										checked={item.active}
@@ -580,7 +594,7 @@ export default function AdminVotesPage() {
 									/>
 									활성
 								</label>
-								<label>
+								<label className="form-choice">
 									<input
 										type="checkbox"
 										checked={item.remaining === null}
@@ -590,9 +604,10 @@ export default function AdminVotesPage() {
 									무제한 재고
 								</label>
 								{item.remaining !== null && (
-									<label>
+									<label className="form-field form-field__label">
 										현재 남은 수량
 										<input
+											className="form-control"
 											type="number"
 											min={0}
 											max={1000000000}
@@ -602,9 +617,10 @@ export default function AdminVotesPage() {
 									</label>
 								)}
 								{drawSettings.mode === 'WEIGHTED' && (
-									<label>
+									<label className="form-field form-field__label">
 										가중치
 										<input
+											className="form-control"
 											type="number"
 											min={1}
 											max={1000000}
@@ -617,6 +633,7 @@ export default function AdminVotesPage() {
 						);
 					})}
 					<button
+						className="btn btn--secondary"
 						type="button"
 						onClick={() =>
 							setDrawSettings((s) => ({
@@ -627,7 +644,7 @@ export default function AdminVotesPage() {
 					>
 						결과 항목 추가
 					</button>
-					<button disabled={busy || !reason.trim()}>행사 설정 저장</button>
+					<button className="btn btn--primary" disabled={busy || !reason.trim()}>행사 설정 저장</button>
 				</form>
 			</section>
 		</div>
