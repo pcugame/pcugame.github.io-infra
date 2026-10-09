@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -145,7 +145,60 @@ describe('AdminProjectsPage pagination query contract', () => {
 
 	afterEach(() => {
 		cleanup();
+		vi.useRealTimers();
 		vi.clearAllMocks();
+	});
+
+	it('shows all four asset states in desktop and mobile lists without detail requests', async () => {
+		mocks.getProjects.mockResolvedValue(response([project({ requiredAssets: {
+			nativeBuild: { ready: true, processing: true }, webBuild: { ready: false, processing: true },
+			video: { ready: false, processing: false }, poster: { ready: true, processing: false },
+			readyCount: 2, totalCount: 4, complete: false,
+		} })]));
+		renderPage();
+		await expectProjectVisible('Alpha Project');
+		for (const name of ['네이티브 빌드', '웹빌드', '동영상', '포스터']) {
+			expect(screen.getByRole('columnheader', { name })).toBeTruthy();
+		}
+		for (const name of ['네이티브 빌드: 완료 · 처리 중', '웹빌드: 처리 중', '동영상: 미완료', '포스터: 완료']) {
+			expect(screen.getAllByRole('img', { name })).toHaveLength(2);
+		}
+		expect(mocks.getProjects).toHaveBeenCalledTimes(1);
+	});
+
+	it('distinguishes failures from missing assets and prioritizes the retry spinner', async () => {
+		mocks.getProjects.mockResolvedValue(response([project({ requiredAssets: {
+			nativeBuild: { ready: true, processing: false, failed: true }, webBuild: { ready: false, processing: true, failed: true },
+			video: { ready: false, processing: false, failed: true }, poster: { ready: false, processing: false, failed: false },
+			readyCount: 1, totalCount: 4, complete: false,
+		} })]));
+		renderPage();
+		await expectProjectVisible('Alpha Project');
+		for (const name of ['네이티브 빌드: 오류 · 기존 파일 사용 가능', '웹빌드: 처리 중', '동영상: 오류', '포스터: 미완료']) {
+			expect(screen.getAllByRole('img', { name })).toHaveLength(2);
+		}
+	});
+
+	it('refreshes processing assets and stops polling after completion', async () => {
+		vi.useFakeTimers();
+		const complete = { nativeBuild: { ready: true, processing: false }, webBuild: { ready: true, processing: false }, video: { ready: true, processing: false }, poster: { ready: true, processing: false }, readyCount: 4, totalCount: 4 as const, complete: true };
+		mocks.getProjects.mockResolvedValueOnce(response([project({ requiredAssets: { ...complete, webBuild: { ready: false, processing: true }, readyCount: 3, complete: false } })]))
+			.mockResolvedValue(response([project({ requiredAssets: complete })]));
+		await act(async () => { renderPage(); await vi.advanceTimersByTimeAsync(10); });
+		expect(mocks.getProjects).toHaveBeenCalledTimes(1);
+		await act(async () => { await vi.advanceTimersByTimeAsync(5010); });
+		expect(mocks.getProjects).toHaveBeenCalledTimes(2);
+		expect(screen.getAllByRole('img', { name: '웹빌드: 완료' })).toHaveLength(2);
+		expect(screen.queryByRole('img', { name: '웹빌드: 처리 중' })).toBeNull();
+		await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+		expect(mocks.getProjects).toHaveBeenCalledTimes(2);
+	});
+
+	it('does not mislabel old API responses as missing assets', async () => {
+		renderPage();
+		await expectProjectVisible('Alpha Project');
+		expect(screen.getAllByRole('img', { name: /확인 불가/ })).toHaveLength(8);
+		expect(screen.queryByText('미완료')).toBeNull();
 	});
 
 	it('changes API query params and resets page when search changes', async () => {

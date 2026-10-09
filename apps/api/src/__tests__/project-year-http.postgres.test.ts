@@ -57,7 +57,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('year policy 
 		});
 		const repository = createProjectCrudRepository(db);
 		const service = createProjectService({
-			repository, serializeProjectDetail: createProjectSerializer('http://localhost:3000').serializeProjectDetail,
+			repository, serializeProjectDetail: createProjectSerializer('http://localhost:3000', { publicAssetOrigin: 'http://assets.test', publicBucket: 'pcu-public' }).serializeProjectDetail,
 			deletionBuckets: { publicBucket: 'pcu-public', protectedBucket: 'pcu-protected' },
 			abortMultipart: async () => {}, wakeDeletionWorker() {}, wakeMaintenance() {}, logger: app.log,
 		});
@@ -111,6 +111,51 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('year policy 
 			const removable = await project();
 			expect((await request(actor, 'DELETE', `/${removable.id}`)).statusCode).toBe(204);
 		}
+	});
+	it('returns required assets through authenticated list, detail and update serialization', async () => {
+		const p = await project();
+		const none = { nativeBuild: { ready: false, processing: false, failed: false }, webBuild: { ready: false, processing: false, failed: false }, video: { ready: false, processing: false, failed: false }, poster: { ready: false, processing: false, failed: false }, readyCount: 0, totalCount: 4, complete: false };
+		async function summary() {
+			const list = await request(owner, 'GET', '');
+			expect(list.statusCode).toBe(200);
+			const item = list.json().data.items.find((item: { id: number }) => item.id === p.id);
+			const detail = await request(owner, 'GET', `/${p.id}`);
+			expect(detail.statusCode).toBe(200);
+			expect(detail.json().data.requiredAssets).toEqual(item.requiredAssets);
+			const updated = await request(owner, 'PATCH', `/${p.id}`, { title: 'Asset summary' });
+			expect(updated.statusCode).toBe(200);
+			expect(updated.json().data.requiredAssets).toEqual(item.requiredAssets);
+			return item.requiredAssets;
+		}
+		expect(await summary()).toEqual(none);
+		await db.storageBucket.createMany({ data: [{ bucket: 'pcu-public', visibility: 'PUBLIC' }, { bucket: 'pcu-protected', visibility: 'PROTECTED' }], skipDuplicates: true });
+		await db.asset.create({ data: { projectId: p.id, kind: 'GAME', status: 'READY', representations: { create: { role: 'ORIGINAL', state: 'READY', bucket: 'pcu-protected', objectKey: `protected/${p.id}/game.zip`, mimeType: 'application/zip' } } } });
+		const poster = await db.asset.create({ data: { projectId: p.id, kind: 'POSTER', status: 'READY', representations: { create: (['ORIGINAL', 'CARD_480', 'DISPLAY_960'] as const).map(role => ({ role, state: 'READY', bucket: 'pcu-public', objectKey: `public/images/${p.id}/${role}.webp`, mimeType: 'image/webp', width: 1200, height: 800 })) } } });
+		await db.project.update({ where: { id: p.id }, data: { posterAssetId: poster.id } });
+		const video = await db.asset.create({ data: { projectId: p.id, kind: 'VIDEO', status: 'READY', videoSortOrder: 0, representations: { create: [
+			{ role: 'ORIGINAL', state: 'READY', bucket: 'pcu-protected', objectKey: `protected/${p.id}/video.mp4`, mimeType: 'video/mp4' },
+			{ role: 'PLAYBACK', state: 'VERIFYING', bucket: 'pcu-protected', objectKey: `protected/${p.id}/playback.mp4`, mimeType: 'video/mp4' },
+		] } } });
+		const upload = await db.assetUploadSession.create({ data: {
+			projectId: p.id, userId: owner.id, kind: 'WEBGL', state: 'UPLOADING', originalName: 'web.zip', totalBytes: 100n,
+			partSizeBytes: 100, totalParts: 1, bucket: 'pcu-protected', objectKey: `protected/${p.id}/upload.zip`,
+			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64), sourceIdentityBlockSizeBytes: 1048576,
+			sourceIdentityBlockManifest: ['a'.repeat(64)], expiresAt: new Date(Date.now() + 3600000),
+		} });
+		expect(await summary()).toEqual({ ...none, nativeBuild: { ready: true, processing: false, failed: false }, poster: { ready: true, processing: false, failed: false }, video: { ready: false, processing: true, failed: false }, webBuild: { ready: false, processing: true, failed: false }, readyCount: 2 });
+		await db.assetUploadSession.update({ where: { id: upload.id }, data: { state: 'REJECTED' } });
+		await db.assetRepresentation.updateMany({ where: { assetId: video.id, role: 'PLAYBACK' }, data: { state: 'FAILED' } });
+		expect(await summary()).toMatchObject({ webBuild: { ready: false, processing: false, failed: true }, video: { ready: false, processing: false, failed: true } });
+		await db.assetRepresentation.updateMany({ where: { assetId: video.id, role: 'PLAYBACK' }, data: { state: 'READY' } });
+		const source = await db.asset.create({ data: { projectId: p.id, kind: 'WEBGL', status: 'READY', representations: { create: { role: 'WEBGL_SOURCE', state: 'READY', bucket: 'pcu-protected', objectKey: `protected/${p.id}/source.zip`, mimeType: 'application/zip' } } }, include: { representations: true } });
+		const deployment = await db.webglDeployment.create({ data: { projectId: p.id, sourceRepresentationId: source.representations[0]!.id, state: 'READY', publicBucket: 'pcu-public', publicPrefix: `public/${p.id}/webgl/`, entryObjectKey: `public/${p.id}/webgl/index.html`, objectManifest: { version: 1, objects: [{ objectKey: `public/${p.id}/webgl/index.html`, sizeBytes: 10, mimeType: 'text/html', checksumSha256: 'a'.repeat(64) }] } } });
+		await db.project.update({ where: { id: p.id }, data: { currentWebglDeploymentId: deployment.id } });
+		await db.assetUploadSession.create({ data: { ...upload, sourceIdentityBlockManifest: ['a'.repeat(64)], completionResult: undefined, id: randomUUID(), objectKey: `protected/${p.id}/retry.zip`, state: 'READY', createdAt: new Date(Date.now() + 1000) } });
+		expect(await summary()).toMatchObject({ readyCount: 4, complete: true, webBuild: { ready: true, processing: false, failed: false } });
+		const strangerList = await request(stranger, 'GET', '');
+		expect(strangerList.statusCode).toBe(200);
+		expect(strangerList.json().data.items).toEqual([]);
+		expect((await request(stranger, 'GET', `/${p.id}`)).statusCode).toBe(403);
 	});
 	it('rejects a write whose route check passed before concurrent year closure', async () => {
 		const p = await project();

@@ -15,13 +15,14 @@ export class MockHttpError extends Error {
   }
 }
 export type MockRequestOptions = Omit<RequestInit, 'body'> & { body?: unknown };
-export type MockUserSelection = 'anonymous' | 'owner' | 'participant' | 'other' | 'OPERATOR' | 'ADMIN';
+export type MockUserSelection = 'anonymous' | 'owner' | 'participant' | 'other' | 'newStudent' | 'OPERATOR' | 'ADMIN';
 export type MockUser = { id: number; name: string; email: string; role: 'ADMIN' | 'OPERATOR' | 'USER'; studentId?: string };
 export const MOCK_USERS: Record<Exclude<MockUserSelection, 'anonymous'>, MockUser> = {
   ADMIN: { id: 1, name: '관리자', email: 'admin@test.pcu.ac.kr', role: 'ADMIN' },
   OPERATOR: { id: 2, name: '운영자', email: 'operator@test.pcu.ac.kr', role: 'OPERATOR' },
   owner: { id: 3, name: '학생', email: '2088099@test.pcu.ac.kr', studentId: '2088099', role: 'USER' },
   participant: { id: 4, name: '테스트파트너', email: '2088100@test.pcu.ac.kr', studentId: '2088100', role: 'USER' },
+  newStudent: { id: 6, name: '작품 없는 학생', email: '2088102@test.pcu.ac.kr', studentId: '2088102', role: 'USER' },
   other: { id: 5, name: '다른 학생', email: '2088101@test.pcu.ac.kr', studentId: '2088101', role: 'USER' },
 };
 export type MockProject = AdminProjectDetail & {

@@ -1,3 +1,4 @@
+import type { RequiredAssetsSource } from '../../../shared/project-required-assets.js';
 import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
 import type {
 	AssetKind,
@@ -73,7 +74,7 @@ export interface ProjectSubmissionRecord {
 	publicationJob: { state: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'; lastError: string | null } | null;
 }
 
-export interface ProjectListRecord {
+export interface ProjectListRecord extends RequiredAssetsSource {
 	visibility: Visibility;
 	id: number;
 	title: string;
@@ -85,11 +86,11 @@ export interface ProjectListRecord {
 	creator: { name: string };
 	members: Array<{ name: string; studentId: string; userId: number | null }>;
 	updatedAt: Date;
-	assets: Array<{ kind: AssetKind }>;
+	assets: RequiredAssetsSource['assets'];
 	poster: {
 		kind: AssetKind;
 		status: string;
-		representations?: Array<{ role: string; objectKey: string }>;
+		representations?: Array<{ role: string; objectKey: string; state: string }>;
 	} | null;
 }
 

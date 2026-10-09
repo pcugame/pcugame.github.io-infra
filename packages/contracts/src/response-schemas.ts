@@ -281,7 +281,19 @@ export const CreateExhibitionResponseSchema = z.object({
 	year: YearSchema,
 }).strict();
 
+const RequiredAssetStatusSchema = z.object({ ready: z.boolean(), processing: z.boolean(), failed: z.boolean().optional() }).strict();
+export const ProjectRequiredAssetsSchema = z.object({
+	nativeBuild: RequiredAssetStatusSchema,
+	webBuild: RequiredAssetStatusSchema,
+	video: RequiredAssetStatusSchema,
+	poster: RequiredAssetStatusSchema,
+	readyCount: z.number().int().min(0).max(4),
+	totalCount: z.literal(4),
+	complete: z.boolean(),
+}).strict();
+
 export const AdminProjectItemSchema = z.object({
+	requiredAssets: ProjectRequiredAssetsSchema.optional(),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
 	visibility: VisibilitySchema,
@@ -316,6 +328,7 @@ export const AdminProjectListResponseSchema = z.object({
 }).strict();
 
 export const AdminProjectDetailSchema = z.object({
+	requiredAssets: ProjectRequiredAssetsSchema.optional(),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
 	visibility: VisibilitySchema,

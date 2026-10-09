@@ -314,3 +314,81 @@
     font-size: 0.78rem;
   }
 }
+
+/* Four aligned asset columns; processing remains independent of readiness. */
+.admin-required-assets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin-block: 0.65rem;
+}
+
+.admin-required-assets__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.admin-required-assets__label {
+  font-size: 0.65rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.required-asset-mark {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.required-asset-mark svg { width: 1.2rem; height: 1.2rem; }
+.required-asset-mark--ready {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 9%, transparent);
+}
+.required-asset-mark--failed {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 9%, transparent);
+}
+.required-asset-mark--missing { color: var(--color-text-muted); opacity: 0.7; }
+.required-asset-mark--unknown { color: var(--color-text-muted); }
+.required-asset-mark--processing {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
+.required-asset-mark__spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.admin-projects-table .admin-projects-table__asset { text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  .required-asset-mark__spinner { animation: none; }
+}
+
+.admin-projects-table th,
+.admin-projects-table td { padding-inline: 0.65rem; }
+
+.admin-projects-table .admin-table__title-cell {
+  min-width: 9rem;
+  width: auto;
+}
+
+.admin-projects-table .admin-projects-table__members {
+  min-width: 7rem;
+  max-width: 12rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
