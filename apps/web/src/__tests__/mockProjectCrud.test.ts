@@ -8,6 +8,23 @@ import { resetMockState, selectMockUser, updateMockState } from '../lib/api/mock
 describe('mock project canonical CRUD through API client',()=>{
  beforeEach(async()=>{vi.stubEnv('VITE_MOCK','true');await resetMockState();await selectMockUser('ADMIN');});
  afterEach(()=>vi.unstubAllEnvs());
+ it('switches between a student with projects and a student without projects without deleting fixtures',async()=>{
+  await selectMockUser('owner');
+  const owned=await adminProjectApi.list();expect(owned.items.length).toBeGreaterThan(0);
+  await selectMockUser('newStudent');
+  expect((await adminProjectApi.list()).items).toEqual([]);
+  await expect(adminProjectApi.getDetail(owned.items[0].id)).rejects.toMatchObject({status:403});
+  await selectMockUser('owner');expect((await adminProjectApi.list()).items).toEqual(owned.items);
+ });
+ it('returns the same required asset summary in lists and detail, including pending video',async()=>{
+  await updateMockState(s=>{s.projects[1].videos=s.projects[1].videos.map(video=>({...video,playbackStatus:'PENDING'}));});
+  const detail=AdminProjectDetailSchema.parse(await adminProjectApi.getDetail(1));
+  const list=AdminProjectListResponseSchema.parse(await adminProjectApi.list());
+  expect(list.items.find(item=>item.id===1)?.requiredAssets).toEqual(detail.requiredAssets);
+  expect(detail.requiredAssets?.video).toEqual({ready:false,processing:true,failed:false});
+  await updateMockState(s=>{s.projects[1].videos=s.projects[1].videos.map(video=>({...video,playbackStatus:'FAILED'}));});
+  expect((await adminProjectApi.getDetail(1)).requiredAssets?.video).toEqual({ready:false,processing:false,failed:true});
+ });
  it('serves seeded game downloads through public detail and removes the button after deleting the asset',async()=>{
   const detail=PublicProjectDetailResponseSchema.parse(await publicApi.getProjectDetail(1));
   expect(detail.gameDownloadUrl).toContain('/mock/files/game.zip');

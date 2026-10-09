@@ -18,7 +18,21 @@ export type UpdateProjectRequest = {
 	sortOrder?: number;
 };
 
+/** Readiness and active upload/processing are independent during replacement uploads. */
+export type RequiredAssetStatus = { ready: boolean; processing: boolean; failed?: boolean };
+export type ProjectRequiredAssets = {
+	nativeBuild: RequiredAssetStatus;
+	webBuild: RequiredAssetStatus;
+	video: RequiredAssetStatus;
+	poster: RequiredAssetStatus;
+	readyCount: number;
+	totalCount: 4;
+	complete: boolean;
+};
+
 export type AdminProjectItem = {
+	/** Older API releases omit this summary. Video readiness requires playable output. */
+	requiredAssets?: ProjectRequiredAssets;
 	canChangeVisibility: boolean;
 	exhibitionVisibility: Visibility;
 	visibility: Visibility;
@@ -79,6 +93,8 @@ export type AdminProjectListResponse = {
 };
 
 export type AdminProjectDetail = {
+	/** Older API releases omit this summary. Video readiness requires playable output. */
+	requiredAssets?: ProjectRequiredAssets;
 	canChangeVisibility: boolean;
 	exhibitionVisibility: Visibility;
 	visibility: Visibility;

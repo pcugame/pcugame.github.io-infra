@@ -1,3 +1,4 @@
+import { projectRequiredAssets } from '../../../shared/project-required-assets.js';
 import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
 import type { ProjectStatus } from '@pcu/contracts';
 import type { AdminProjectItem, AdminProjectListQuery, AdminProjectListResponse } from '@pcu/contracts';
@@ -67,6 +68,7 @@ export async function listProjects(
 	const { items: projects, totalItems } = await deps.repository.findProjectsForUser(userId, isPrivileged, listOptions);
 	const totalPages = Math.ceil(totalItems / listOptions.limit);
 	const items: AdminProjectItem[] = projects.map((p) => ({
+		requiredAssets: projectRequiredAssets(p, deps.deletionBuckets.publicBucket),
 		id: p.id,
 		visibility: p.visibility,
 		exhibitionVisibility: p.exhibition.visibility,

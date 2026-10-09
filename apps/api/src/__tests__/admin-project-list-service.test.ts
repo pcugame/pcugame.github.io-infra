@@ -86,6 +86,11 @@ describe('admin project list service', () => {
 				title: 'Alpha Project',
 				slug: 'alpha-project',
 				year: 2026,
+				requiredAssets: {
+					nativeBuild: { ready: false, processing: false, failed: false }, webBuild: { ready: false, processing: false, failed: false },
+					video: { ready: false, processing: false, failed: false }, poster: { ready: false, processing: false, failed: false },
+					readyCount: 0, totalCount: 4, complete: false,
+				},
 				isIncomplete: false,
 				status: 'PUBLISHED',
 				createdByUserName: 'Admin Writer',

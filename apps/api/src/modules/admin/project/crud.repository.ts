@@ -44,13 +44,31 @@ async function guardMutation(tx: TxClient, actor: Actor | undefined, projectId: 
 }
 
 const projectListPlayableKinds: AssetKind[] = ['GAME', 'VIDEO'];
+const projectAssetActivityInclude = {
+	assetUploads: {
+		where: { kind: { in: ['GAME', 'WEBGL', 'VIDEO', 'POSTER'] } },
+		// Keep active sessions and the newest terminal attempt without returning upload history.
+		distinct: ['kind', 'state'],
+		orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+		select: { kind: true, state: true },
+	},
+	publicationJob: { select: {
+		state: true,
+		submission: { select: { items: { select: { kind: true, state: true } } } },
+	} },
+} satisfies Prisma.ProjectInclude;
 const projectListInclude = {
+	...projectAssetActivityInclude,
+	currentWebglDeployment: { select: {
+		id: true, projectId: true, state: true,
+		publicBucket: true, publicPrefix: true, entryObjectKey: true,
+	} },
 	exhibition: true,
 	creator: true,
 	members: { orderBy: { sortOrder: 'asc' as const }, select: { name: true, studentId: true, userId: true } },
 	assets: {
 		where: { status: 'READY' as const, kind: { in: projectListPlayableKinds } },
-		select: { kind: true },
+		select: { kind: true, representations: { select: { role: true, state: true } } },
 	},
 	poster: {
 		select: {
@@ -74,6 +92,7 @@ const projectListInclude = {
 } as const satisfies Prisma.ProjectInclude;
 
 export const projectDetailInclude = {
+	...projectAssetActivityInclude,
 	exhibition: true,
 	changeRequestDraft: { select: { id: true } },
 	members: { orderBy: { sortOrder: 'asc' as const } },

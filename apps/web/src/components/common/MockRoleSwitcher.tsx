@@ -7,7 +7,7 @@ import type { MockScenario } from '../../lib/api/mock/scenarios';
 
 const USERS: Array<{key:MockUserSelection;label:string}> = [
   {key:'anonymous',label:'익명'}, {key:'owner',label:'소유 학생'}, {key:'participant',label:'공동 참여자'},
-  {key:'other',label:'다른 학생'}, {key:'OPERATOR',label:'운영자'}, {key:'ADMIN',label:'관리자'},
+  {key:'other',label:'다른 학생'}, {key:'newStudent',label:'작품 없는 학생'}, {key:'OPERATOR',label:'운영자'}, {key:'ADMIN',label:'관리자'},
 ];
 export function MockRoleSwitcher() {
   const [state,setState]=useState<MockState>();

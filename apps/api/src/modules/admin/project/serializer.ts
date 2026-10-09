@@ -1,3 +1,4 @@
+import { projectRequiredAssets, type RequiredAssetsSource } from '../../../shared/project-required-assets.js';
 import { effectiveProjectExternalLinks } from '../../../shared/project-external-links.js';
 import type { Visibility } from '@pcu/contracts';
 import { compareProjectVideos } from '../../../shared/project-video-order.js';
@@ -63,6 +64,8 @@ function imageSourceFor(asset: {
 
 /** Serialize a project detail record to the API response shape */
 export type SerializableProject = {
+	assetUploads?: RequiredAssetsSource['assetUploads'];
+	publicationJob?: RequiredAssetsSource['publicationJob'];
 	visibility: Visibility;
 	id: number;
 	title: string;
@@ -189,6 +192,7 @@ export function createProjectSerializer(
 		});
 
 		return {
+			requiredAssets: projectRequiredAssets(project, publicDelivery?.publicBucket),
 			id: project.id,
 			visibility: project.visibility,
 			exhibitionVisibility: project.exhibition.visibility,

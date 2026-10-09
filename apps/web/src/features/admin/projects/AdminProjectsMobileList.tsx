@@ -1,3 +1,4 @@
+import { ProjectRequiredAssets } from './ProjectRequiredAssets';
 import { Link } from 'react-router-dom';
 import type { AdminProjectItem, ProjectStatus } from '../../../contracts';
 
@@ -79,13 +80,11 @@ export function AdminProjectsMobileList({
 					>
 						<div className="admin-pcard__top">
 							<h3 className="admin-pcard__title">{p.title}</h3>
-							{p.isIncomplete && (
-								<span className="incomplete-badge">불완전</span>
-							)}
 							<span className={`badge ${STATUS_COLORS[p.status]}`}>
 								{STATUS_LABELS[p.status]}
 							</span>
 						</div>
+						<ProjectRequiredAssets summary={p.requiredAssets} />
 						<div className="admin-pcard__meta">
 							<span className="admin-year-badge">{p.year}</span>
 							<span className="admin-pcard__dot">&middot;</span>

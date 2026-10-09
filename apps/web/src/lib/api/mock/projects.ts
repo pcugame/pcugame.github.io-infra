@@ -3,6 +3,7 @@ import {
  CreateExhibitionBaseSchema, UpdateExhibitionBaseSchema, BulkUpdateProjectStatusSchema,
  BulkDeleteProjectsSchema, SetProjectPosterSchema, SetProjectVideoOrderSchema, AdminProjectListQueryBaseSchema,
 } from '@pcu/contracts';
+import type { ProjectRequiredAssets } from '@pcu/contracts';
 import type { AdminProjectDetail, PublicProjectDetailResponse } from '../../../contracts';
 import { MOCK_USERS, MockHttpError, UNHANDLED } from './context';
 import type { MockContext, MockProject, MockRequestOptions } from './context';
@@ -18,11 +19,37 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 }
 function methodAllowed(method:string, allowed:string[]) { if(!allowed.includes(method)) throw new MockHttpError(404,'NOT_FOUND','Method not allowed'); }
 function orderedProjects(ctx:MockContext) { return Object.values(ctx.state.projects).sort((a,b)=>a.sortOrder-b.sortOrder||a.id-b.id); }
+function requiredAssets(ctx: MockContext, p: MockProject): ProjectRequiredAssets {
+ const sessions = Object.values(ctx.state.sessions).filter(session => session.owner.type === 'PROJECT' && session.owner.id === p.id).reverse();
+ const activeKinds = new Set(sessions.filter(session => ['ALLOCATING', 'UPLOADING', 'COMPLETING', 'VERIFYING'].includes(session.state)).map(session => session.kind));
+ const latest = new Map<string, string>();
+ for (const session of sessions) if (!latest.has(session.kind)) latest.set(session.kind, session.state);
+ const failedKinds = new Set([...latest].filter(([, state]) => state === 'REJECTED').map(([kind]) => kind));
+ const submission = Object.values(ctx.state.submissions).find(item => item.projectId === p.id);
+ if (submission && ['PENDING', 'PROCESSING'].includes(submission.publicationState ?? '')) {
+  for (const item of submission.items) if (item.state === 'READY') activeKinds.add(item.kind);
+ }
+ if (submission?.publicationState === 'FAILED') for (const item of submission.items) if (item.state === 'READY') failedKinds.add(item.kind);
+ const nativeBuild = { ready: p.assets.some(asset => asset.kind === 'GAME'), processing: activeKinds.has('GAME'), failed: failedKinds.has('GAME') };
+ const webBuild = { ready: !!p.webglDeployment, processing: activeKinds.has('WEBGL'), failed: failedKinds.has('WEBGL') };
+ const video = { ready: p.videos.some(video => video.playbackStatus === 'READY'), processing: activeKinds.has('VIDEO') || p.videos.some(video => video.playbackStatus === 'PENDING'), failed: failedKinds.has('VIDEO') || p.videos.some(video => video.playbackStatus === 'FAILED') };
+ const poster = { ready: !!p.poster, processing: activeKinds.has('POSTER'), failed: failedKinds.has('POSTER') };
+ // URL-only preview: no fixture, upload session, or persisted data is changed.
+ if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('mockAssetStates') === '1') {
+  const newest = Object.values(ctx.state.projects).filter(project => !project.isChangeRequestDraft).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)[0];
+  if (p.id === newest?.id) {
+   Object.assign(webBuild, { ready: false, processing: true, failed: false });
+   Object.assign(video, { ready: false, processing: false, failed: true });
+  }
+ }
+ const readyCount = [nativeBuild, webBuild, video, poster].filter(item => item.ready).length;
+ return { nativeBuild, webBuild, video, poster, readyCount, totalCount: 4, complete: readyCount === 4 };
+}
 export function adminProjectDetail(ctx:MockContext,p:MockProject): AdminProjectDetail {
  const exhibition=projectExhibition(ctx,p);
  const {createdByUserId: _owner, participantUserIds: _participants, exhibitionId: _exhibition, createdAt: _created, updatedAt: _updated, version: _version,webglNetworkPolicyVersion:_network,isChangeRequestDraft:_stage,...detail}=p;
  void [_owner,_participants,_exhibition,_created,_updated,_version,_network,_stage];
- return {...detail,hardwareRequirements: detail.hardwareRequirements ?? '',year:exhibition.year,exhibitionVisibility:exhibition.visibility,...projectCapabilities(ctx,p),members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder||a.id-b.id)};
+ return {...detail,requiredAssets:requiredAssets(ctx,p),hardwareRequirements: detail.hardwareRequirements ?? '',year:exhibition.year,exhibitionVisibility:exhibition.visibility,...projectCapabilities(ctx,p),members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder||a.id-b.id)};
 }
 function listCapabilities(ctx:MockContext,p:MockProject) { const {canEditWebglDisplay:_display,...capabilities}=projectCapabilities(ctx,p);void _display;return capabilities; }
 function publicCard(ctx:MockContext,p:MockProject) {
@@ -86,7 +113,7 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
   const sort=validated.sort??'createdAt',direction=validated.order==='asc'?1:-1;
   items.sort((a,b)=> direction*(sort==='year'?a.year-b.year:sort==='title'?a.title.localeCompare(b.title,'ko'):sort==='status'?a.status.localeCompare(b.status):a.createdAt.localeCompare(b.createdAt))||a.id-b.id);
   const totalItems=items.length,totalPages=Math.ceil(totalItems/limit);
-  return {items:items.slice((page-1)*limit,page*limit).map(p=>({id:p.id,title:p.title,slug:p.slug,year:p.year,status:p.status,visibility:p.visibility,exhibitionVisibility:projectExhibition(ctx,p).visibility,isIncomplete:p.isIncomplete,memberNames:p.members.map(m=>m.name),memberStudentIds:p.members.map(m=>m.studentId),updatedAt:p.updatedAt,createdByUserName:Object.values(MOCK_USERS).find(user=>user.id===p.createdByUserId)?.name,...listCapabilities(ctx,p)})),pagination:{page,limit,totalItems,totalPages,hasNextPage:page<totalPages,hasPreviousPage:page>1&&totalItems>0}};
+  return {items:items.slice((page-1)*limit,page*limit).map(p=>({requiredAssets:requiredAssets(ctx,p),id:p.id,title:p.title,slug:p.slug,year:p.year,status:p.status,visibility:p.visibility,exhibitionVisibility:projectExhibition(ctx,p).visibility,isIncomplete:p.isIncomplete,memberNames:p.members.map(m=>m.name),memberStudentIds:p.members.map(m=>m.studentId),updatedAt:p.updatedAt,createdByUserName:Object.values(MOCK_USERS).find(user=>user.id===p.createdByUserId)?.name,...listCapabilities(ctx,p)})),pagination:{page,limit,totalItems,totalPages,hasNextPage:page<totalPages,hasPreviousPage:page>1&&totalItems>0}};
  }
  if(pathname==='/api/admin/projects/bulk/status') {
   ctx.requireAdmin();methodAllowed(method,['PATCH']);const body=parse(BulkUpdateProjectStatusSchema,options.body);let updated=0;

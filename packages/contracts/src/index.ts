@@ -57,6 +57,8 @@ export type {
 	AddMemberRequest,
 	AdminProjectDetail,
 	AdminProjectItem,
+	ProjectRequiredAssets,
+	RequiredAssetStatus,
 	AdminProjectListQuery,
 	AdminProjectListResponse,
 	AdminProjectListSort,

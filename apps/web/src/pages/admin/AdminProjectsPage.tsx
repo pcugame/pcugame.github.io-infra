@@ -26,6 +26,9 @@ export default function AdminProjectsPage() {
 	const { data, isLoading, error, refetch } = useQuery({
 		queryKey: queryKeys.adminProjectsList(projectList.listQuery),
 		queryFn: () => adminProjectApi.getProjects(projectList.listQuery),
+		refetchInterval: (query) => query.state.data?.items.some(({ requiredAssets: assets }) =>
+			assets && [assets.nativeBuild, assets.webBuild, assets.video, assets.poster].some((asset) => asset.processing),
+		) ? 5000 : false,
 	});
 
 	const projects = useMemo(() => data?.items ?? [], [data?.items]);
@@ -92,6 +95,10 @@ export default function AdminProjectsPage() {
 					새 작품 등록
 				</Link>
 			</div>
+
+			{import.meta.env.VITE_MOCK === 'true' && new URLSearchParams(window.location.search).get('mockAssetStates') === '1' && (
+				<p className="text-muted">임시 상태 예시: 웹빌드 로딩 · 동영상 오류 <a href="/admin/projects">예시 끄기</a></p>
+			)}
 
 			<AdminProjectsToolbar
 				statusFilter={projectList.statusFilter}

@@ -1,3 +1,4 @@
+import { RequiredAssetMark } from './ProjectRequiredAssets';
 import type React from 'react';
 import { Link } from 'react-router-dom';
 import type { AdminProjectItem, AdminProjectListSort, ProjectStatus } from '../../../contracts';
@@ -45,7 +46,7 @@ export function AdminProjectsTable({
 }: AdminProjectsTableProps) {
 	return (
 		<div className="admin-card admin-desktop-only">
-			<table className="admin-table">
+			<table className="admin-table admin-projects-table">
 				<thead>
 					<tr>
 						{isPrivileged && (
@@ -66,7 +67,10 @@ export function AdminProjectsTable({
 						<th className="admin-table__sortable" onClick={() => onSort('status')}>
 							상태{sortIndicator('status')}
 						</th>
-						<th>누락</th>
+						<th scope="col" className="admin-projects-table__asset">네이티브<br />빌드</th>
+						<th scope="col" className="admin-projects-table__asset">웹빌드</th>
+						<th scope="col" className="admin-projects-table__asset">동영상</th>
+						<th scope="col" className="admin-projects-table__asset">포스터</th>
 						<th>제작자</th>
 						<th className="admin-table__col--creator">작성자</th>
 						<th>수정일</th>
@@ -92,12 +96,11 @@ export function AdminProjectsTable({
 									{STATUS_LABELS[p.status]}
 								</span>
 							</td>
-							<td>
-								{p.isIncomplete && (
-									<span className="incomplete-badge">불완전</span>
-								)}
-							</td>
-							<td>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
+							<td className="admin-projects-table__asset"><RequiredAssetMark label="네이티브 빌드" status={p.requiredAssets?.nativeBuild} /></td>
+							<td className="admin-projects-table__asset"><RequiredAssetMark label="웹빌드" status={p.requiredAssets?.webBuild} /></td>
+							<td className="admin-projects-table__asset"><RequiredAssetMark label="동영상" status={p.requiredAssets?.video} /></td>
+							<td className="admin-projects-table__asset"><RequiredAssetMark label="포스터" status={p.requiredAssets?.poster} /></td>
+							<td className="admin-projects-table__members">{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
 							<td className="admin-table__col--creator">{p.createdByUserName ?? '-'}</td>
 							<td className="text-muted">{new Date(p.updatedAt).toLocaleDateString('ko-KR')}</td>
 							<td>
