@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import {
 	createIdempotencyRepository,
 	succeedIdempotencyOperation,
@@ -13,6 +13,7 @@ const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true
 describe.runIf(runPostgresIntegration)('idempotency operations with PostgreSQL', () => {
 	const testId = randomUUID();
 	let prisma: PrismaClient;
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let userId: number;
 	let exhibitionId: number;
 	let assetProjectId: number;
@@ -30,8 +31,10 @@ describe.runIf(runPostgresIntegration)('idempotency operations with PostgreSQL',
 	beforeAll(async () => {
 		const databaseUrl = process.env['DATABASE_URL'];
 		if (!databaseUrl) throw new Error('DATABASE_URL is required');
-		prisma = createPrismaClientForDatabase(databaseUrl);
-		await prisma.$connect();
+		// The CI API purges expired operations in its shared schema. Keep the
+		// fixed-clock fixtures private so cleanup cannot erase replay evidence.
+		database = await createIsolatedMigratedDatabase(databaseUrl);
+		prisma = database.createClient();
 		await prisma.storageBucket.upsert({
 			where: { bucket: publicBucket },
 			update: { visibility: 'PUBLIC' },
@@ -63,12 +66,7 @@ describe.runIf(runPostgresIntegration)('idempotency operations with PostgreSQL',
 	});
 
 	afterAll(async () => {
-		if (!prisma) return;
-		await prisma.idempotencyOperation.deleteMany({ where: { actorId: userId } });
-		await prisma.project.deleteMany({ where: { exhibitionId } });
-		await prisma.exhibition.deleteMany({ where: { id: exhibitionId } });
-		await prisma.user.deleteMany({ where: { id: userId } });
-		await prisma.$disconnect();
+		await database?.close();
 	});
 
 	it('replays one committed project and rejects a different payload for the same key', async () => {
