@@ -1,6 +1,6 @@
 import type { Actor } from '../../application/http-input.js';
-import { forbidden, notFound } from '../../shared/errors.js';
-import { assertWriteAccess, assertStagingUploadAccess } from './project-access.policy.js';
+import { notFound } from '../../shared/errors.js';
+import { assertWriteAccess, assertStagingUploadAccess, assertOrdinaryProjectMutationAllowed } from './project-access.policy.js';
 import type { ProjectAccessRepository, ProjectAccessRecord } from './project-access.ports.js';
 export function createProjectAccessService(repository: ProjectAccessRepository) {
 	return {
@@ -16,9 +16,7 @@ export function createProjectAccessService(repository: ProjectAccessRepository) 
 				isMember,
 			isModificationEnabled: project.isModificationEnabled !== false,
 			});
-			if (project.isChangeRequestDraft === true) {
-				throw forbidden('Staged change-request projects cannot be modified through project routes');
-			}
+			assertOrdinaryProjectMutationAllowed(project);
 			return project;
 		},
 		async loadProjectForUpload(actor: Actor, projectId: number): Promise<ProjectAccessRecord> {

@@ -1,7 +1,7 @@
 import type { Prisma } from '../../generated/prisma/client.js';
 import type { Actor } from '../../application/http-input.js';
-import { forbidden, notFound } from '../../shared/errors.js';
-import { assertWriteAccess, assertStagingUploadAccess } from './project-access.policy.js';
+import { notFound } from '../../shared/errors.js';
+import { assertWriteAccess, assertStagingUploadAccess, assertOrdinaryProjectMutationAllowed } from './project-access.policy.js';
 import type { ProjectAccessRecord } from './project-access.ports.js';
 /**
  * Recheck the policy inside the transaction that performs a mutation.  Route
@@ -31,9 +31,7 @@ export async function assertProjectWriteAccessInTransaction(
 	const exhibition = await tx.exhibition.findUniqueOrThrow({
 		where: { id: project.exhibitionId }, select: { isModificationEnabled: true },
 	});
-	if (project.changeRequestDraft) {
-		throw forbidden('Staged change-request projects cannot be modified through project routes');
-	}
+	assertOrdinaryProjectMutationAllowed({ isChangeRequestDraft: project.changeRequestDraft !== null });
 	const memberRows = actor.role === 'ADMIN' || actor.role === 'OPERATOR'
 		? []
 		: await tx.$queryRaw<Array<{ id: number }>>`

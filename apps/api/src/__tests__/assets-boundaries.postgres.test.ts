@@ -8,6 +8,12 @@ import { createAssetDeletionUnitOfWork } from '../modules/assets/deletion.reposi
 import { createAssetsRepository } from '../modules/assets/repository.js';
 import { createAssetsService } from '../modules/assets/service.js';
 import { planAssetDeletion } from '../modules/assets/deletion.policy.js';
+import { createProjectAccessService } from '../modules/admin/project-access.service.js';
+import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
+import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
+import { createProjectChangeService } from '../modules/project-change/service.js';
+import { createProjectChangeRepository } from '../modules/project-change/repository.js';
+import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
 import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { defaultTestEnv } from './helpers/app-mocks.js';
 import { createTestUploadLifecycleRuntime } from './helpers/upload-lifecycle.js';
@@ -59,6 +65,62 @@ describe.runIf(enabled)('assets atomic deletion and full app HTTP boundaries', (
   return { project: await db.project.findUniqueOrThrow({ where: { id: projectId }, select: { posterAssetId: true, version: true } }),
    assets: await db.asset.findMany({ where: { projectId }, orderBy: { id: 'asc' }, select: { id: true, status: true, videoSortOrder: true } }) };
  }
+ async function stagingFixture() {
+  const f = await fixture('GAME', 1);
+  await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: false } });
+  const changes = createProjectChangeService(createProjectChangeRepository(db));
+  const request = await changes.create(actor(), f.project.id, { kind: 'EDIT', reason: 'Replace game' });
+  const clientToken = 's'.repeat(32);
+  const stage = await changes.update(actor(), request.id, { manifest: [{ kind: 'GAME', slot: 'game', clientToken }] });
+  return { stageId: stage.stagingProjectId!, itemId: stage.items[0]!.id, clientToken };
+ }
+ it('rejects staging mutations at HTTP access, transaction recheck and atomic deletion for owner and staff', async () => {
+  const f = await stagingFixture();
+  // Opening the exhibition lets the owner pass the ordinary ownership policy.
+  await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: true } });
+  const asset = await db.asset.create({ data: { projectId: f.stageId, kind: 'GAME', status: 'READY',
+   representations: { create: { role: 'ORIGINAL', bucket: 'pcu-protected', objectKey: `staging/${randomUUID()}`, state: 'READY', mimeType: 'application/zip' } },
+  }, include: { representations: true } });
+  const before = await state(f.stageId);
+  const message = 'Staged change-request projects cannot be modified through project routes';
+  for (const id of [owner, admin, operator]) {
+   const currentActor = { id, role: id === admin ? 'ADMIN' as const : id === operator ? 'OPERATOR' as const : 'USER' as const };
+   const response = await app.inject({ method: 'PATCH', url: `/api/admin/projects/${f.stageId}`, headers: headers(id), payload: { title: 'Blocked' } });
+   expect(response.statusCode).toBe(403); expect(response.json().error).toMatchObject({ code: 'FORBIDDEN', message });
+   // Bypass the route check to exercise the locked transaction's own decision.
+   await expect(createProjectCrudRepository(db).updateProject(f.stageId, { title: 'Blocked' }, currentActor)).rejects.toMatchObject({ statusCode: 403, message });
+   const deletion = await app.inject({ method: 'DELETE', url: `/api/admin/assets/${asset.id}`, headers: headers(id) });
+   expect(deletion.statusCode).toBe(403); expect(deletion.json().error).toMatchObject({ code: 'FORBIDDEN', message });
+  }
+  expect(await state(f.stageId)).toEqual(before);
+  expect(await db.orphanObject.count({ where: { storageKey: asset.representations[0]!.objectKey } })).toBe(0);
+ });
+ it('allows the active staging owner through upload access and allocation while the source exhibition is closed', async () => {
+  try {
+   const f = await stagingFixture();
+   const access = createProjectAccessService(createProjectAccessRepository(db));
+   await expect(access.loadProjectForUpload(actor(), f.stageId)).resolves.toMatchObject({ isChangeRequestDraft: true, isModificationEnabled: false });
+   for (const id of [stranger, admin, operator]) {
+    await expect(access.loadProjectForUpload({ id, role: id === admin ? 'ADMIN' : id === operator ? 'OPERATOR' : 'USER' }, f.stageId)).rejects.toMatchObject({ statusCode: 403 });
+   }
+   const uploads = createAssetUploadRepository(db);
+   const input = { id: randomUUID(), projectId: f.stageId, exhibitionId: null, userId: owner, kind: 'GAME' as const,
+    originalName: 'game.zip', declaredMimeType: 'application/zip', totalBytes: 10n, partSizeBytes: 10, totalParts: 1,
+    bucket: 'pcu-protected', objectKey: `staging/${randomUUID()}`, generation: 1,
+    sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64), sourceIdentityBlockSizeBytes: 1_048_576, sourceIdentityBlockManifest: 'e30=',
+    expiresAt: new Date(Date.now() + 60_000), submissionItemId: f.itemId, submissionClientToken: f.clientToken,
+   };
+   // Allocation invokes the upload policy again against locked source/stage rows.
+   await expect(uploads.createAllocating({ ...input, userId: admin, actorRole: 'ADMIN' })).rejects.toMatchObject({ statusCode: 403 });
+   await expect(uploads.createAllocating(input)).resolves.toMatchObject({ projectId: f.stageId, userId: owner, state: 'ALLOCATING' });
+   const request = await db.projectChangeRequest.findUniqueOrThrow({ where: { stagingProjectId: f.stageId } });
+   await db.projectChangeRequest.update({ where: { id: request.id }, data: { state: 'PENDING' } });
+   await expect(access.loadProjectForUpload(actor(), f.stageId)).rejects.toMatchObject({ statusCode: 403 });
+   await expect(uploads.createAllocating({ ...input, id: randomUUID() })).rejects.toMatchObject({ statusCode: 403 });
+  } finally {
+   await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: true } });
+  }
+ });
  it.each(['VIDEO', 'IMAGE'] as const)('rolls back %s status, poster, order and version when an outbox write fails', async kind => {
   const f = await fixture(kind); const before = await state(f.project.id);
   await db.$executeRawUnsafe(`CREATE FUNCTION fail_asset_outbox() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected outbox failure' USING ERRCODE='23514'; END $$`);
