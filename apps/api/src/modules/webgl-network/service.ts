@@ -1,4 +1,4 @@
-import { CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema } from '@pcu/contracts';
+import { ConnectionRule, CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema } from '@pcu/contracts';
 import type { Actor } from '../../application/http-input.js';
 import type { Env } from '../../config/env.js';
 import { badRequest, notFound } from '../../shared/errors.js';
@@ -7,8 +7,8 @@ import type { WebglNetworkRepository } from './repository.js';
 
 /** Same host is privileged even when a request changes transport or port. */
 export function isPrivilegedNetworkOrigin(value: string, config: Env): boolean {
- const host = new URL(value).hostname;
- return privilegedHosts(config).includes(host);
+ const rule = ConnectionRule.parse(value);
+ return privilegedHosts(config).some(host => rule.includesHostname(host));
 }
 function privilegedHosts(config: Env): string[] {
  return [config.API_PUBLIC_URL, config.WEB_PUBLIC_URL, ...config.CORS_ALLOWED_ORIGINS, config.PUBLIC_ASSET_ORIGIN,
@@ -26,6 +26,10 @@ export function createWebglNetworkService(repository: WebglNetworkRepository, co
    const input = parseBody(CreateWebglNetworkRequestSchema, body);
    if (isPrivilegedNetworkOrigin(input.origin, config)) throw badRequest('Site and storage origins cannot be approved as external connections', 'VALIDATION_ERROR');
    return repository.create(actor, projectId, input);
+  },
+  async createBatch(actor: Actor, projectId: number, body: unknown) {
+   enabled();
+   return { items: await repository.createBatch(actor, projectId, body, privilegedHosts(config)) };
   },
   async review(actor: Actor, id: string, action: 'approve' | 'reject' | 'revoke', body: unknown) {
    // Revocation remains usable while disabled so administrators can remove grants.

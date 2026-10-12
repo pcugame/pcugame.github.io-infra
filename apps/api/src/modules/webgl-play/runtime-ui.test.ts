@@ -10,7 +10,7 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
 
 // Execute the actual hashed shell, including events/session creation/iframe insertion.
 // A small DOM keeps API tests independent of the frontend's jsdom dependency.
-function shell(options: { renderer?: string; missing?: boolean; strictMissing?: boolean; strictFail?: boolean; rendererFail?: boolean; noDialogAPI?: boolean; fail?: boolean; lost?: boolean; brave?: boolean; bravePending?: Promise<boolean>; width?: number; height?: number } = {}) {
+function shell(options: { renderer?: string; missing?: boolean; strictMissing?: boolean; strictFail?: boolean; rendererFail?: boolean; noDialogAPI?: boolean; fail?: boolean; lost?: boolean; brave?: boolean; bravePending?: Promise<boolean>; diagnostics?: boolean; width?: number; height?: number } = {}) {
 	class Element {
 		style: Record<string, string> = {};
 		clientWidth = 1600; clientHeight = 900;
@@ -51,6 +51,7 @@ function shell(options: { renderer?: string; missing?: boolean; strictMissing?: 
 		addEventListener: vi.fn(), createElement: (tag: string) => tag === 'canvas' ? { getContext } : new Element(),
 	};
 	const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, data: {
+		gameOrigin: config.PUBLIC_ASSET_ORIGIN, policyVersion: 3, approvedOrigins: ['wss://*.example.com:8443'], items: [],
 		webglDisplayWidth: options.width, webglDisplayHeight: options.height,
 		id: 'session', controlSecret: 'secret', projectTitle: 'Game', iframeUrl: `https://assets.test/runtime/${'a'.repeat(64)}/index.html`,
 	} }) });
@@ -58,7 +59,7 @@ function shell(options: { renderer?: string; missing?: boolean; strictMissing?: 
 		document, fetch, URL, Date, WebAssembly: {}, setInterval: vi.fn(),
 		window: { isSecureContext: true, crossOriginIsolated: true, addEventListener: vi.fn() },
 		navigator: { userAgent: 'Chrome/150.0', brave: { isBrave: () => options.bravePending ?? Promise.resolve(options.brave ?? false) } },
-		location: { reload: vi.fn(), assign: vi.fn() }, confirm: vi.fn(),
+		location: { hash: options.diagnostics ? '#diagnostics' : '', reload: vi.fn(), assign: vi.fn() }, confirm: vi.fn(),
 	};
 	runInNewContext(script, context);
 	return { get, fetch, loseContext, probes, options, context };
@@ -333,4 +334,14 @@ describe('trusted shell display sizing', () => {
 		expect(headers['Cross-Origin-Embedder-Policy']).toBe('require-corp');
 		expect(headers['Cross-Origin-Opener-Policy']).toBe('same-origin');
 	});
+});
+
+it('requests a diagnostic session and shows no-report uncertainty without reading iframe errors', async () => {
+ const ui = shell({ diagnostics: true });
+ await setImmediate(); await setImmediate();
+ expect(JSON.parse(ui.fetch.mock.calls[0]![1].body)).toMatchObject({ diagnostics: true });
+ expect(ui.get('diagnostics').hidden).toBe(false);
+ expect(ui.get('diagnostic-output').textContent).toContain('정책 버전: 3');
+ expect(ui.get('diagnostic-output').textContent).toContain('wss://*.example.com:8443');
+ expect(ui.get('diagnostic-output').textContent).toContain('연결 성공을 의미하지 않습니다');
 });

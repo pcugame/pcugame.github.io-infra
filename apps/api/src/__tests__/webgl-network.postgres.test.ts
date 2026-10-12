@@ -1,9 +1,13 @@
+import { createAuthController } from '../modules/auth/controller.js';
+import { browserWebOrigin, verifyNetworkFormBrowser } from './helpers/webgl-network-form-browser.js';
+import { createDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
+import { createDiagnosticService } from '../modules/webgl-play/diagnostic-service.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
 import cookie from '@fastify/cookie';
 import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
+import { WebglNetworkBatchResponseSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import type { Env } from '../config/env.js';
 import { AppError } from '../shared/errors.js';
@@ -23,7 +27,8 @@ import { createFileAccessController } from '../modules/file-access/controller.js
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary', () => {
  let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>, db: PrismaClient, app: FastifyInstance;
- let projectId: number, exhibitionId: number, sid: string, adminSid: string, outsiderSid: string, memberSid: string;
+ let logs = '';
+ let projectId: number, exhibitionId: number, sid: string, adminSid: string, outsiderSid: string, memberSid: string, operatorSid: string;
  let owner: number, admin: number, member: number;
  let playRepository: ReturnType<typeof createWebglPlayRepository>;
  const webOrigin = 'https://web.fixture.example', apiOrigin = 'https://api.fixture.example', gameOrigin = 'https://games.fixture.example';
@@ -31,7 +36,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  const external = 'https://scores.example.com';
  const body = (origin = external) => ({ origin, purpose: 'Read and write game scores', mode: origin.startsWith('wss:') ? 'WSS' : 'HTTPS', cors: `Allow ${gameOrigin}; use a per-game account, never a site session` });
  const config = {
-  WEBGL_PLAY_ENABLED: true, WEBGL_EXTERNAL_CONNECTIONS_ENABLED: true, CORS_ALLOWED_ORIGINS: [webOrigin],
+  SESSION_SECRET: 'diagnostic-test-secret-at-least-32-characters', WEBGL_PLAY_ENABLED: true, WEBGL_EXTERNAL_CONNECTIONS_ENABLED: true, CORS_ALLOWED_ORIGINS: [webOrigin, browserWebOrigin],
   API_PUBLIC_URL: apiOrigin, WEB_PUBLIC_URL: webOrigin, PUBLIC_ASSET_ORIGIN: gameOrigin,
   S3_ENDPOINT: 'https://garage.fixture.example', S3_PUBLIC_SIGNING_ENDPOINT: 'https://uploads.fixture.example',
   S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: 'https://downloads.fixture.example', S3_BUCKET_PUBLIC: 'public', S3_BUCKET_PROTECTED: 'protected',
@@ -44,9 +49,9 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  const list = (session = sid) => request('GET', `/api/me/projects/${projectId}/webgl-network-requests`, session);
  const create = (origin = external, session = sid) => request('POST', `/api/me/projects/${projectId}/webgl-network-requests`, session, body(origin));
  const review = (id: string, action: string, session = adminSid) => request('POST', `/api/admin/webgl-network-requests/${id}/${action}`, session, { reason: `Reviewed ${action}: configured service and origin verified` });
- const issue = () => app.inject({ method: 'POST', url: '/api/webgl-play/sessions', headers: {
+ const issue = (diagnostics = false) => app.inject({ method: 'POST', url: '/api/webgl-play/sessions', headers: {
   origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`,
- }, payload: { projectId } });
+ }, payload: { projectId, diagnostics } });
  type Grant = { id: string; controlSecret: string; iframeUrl: string };
  const renew = (grant: Grant) => app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${grant.id}/renew`, headers: {
   origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`, 'x-pcu-play-control': grant.controlSecret,
@@ -58,15 +63,16 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  async function approved(origin = external) { const result = await create(origin); expect(result.statusCode, result.body).toBe(201); const id = result.json().data.id; expect((await review(id, 'approve')).statusCode).toBe(200); return id as string; }
  beforeAll(async () => {
   database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!); db = database.createClient();
-  async function user(role: 'USER' | 'ADMIN') {
+  async function user(role: 'USER' | 'ADMIN' | 'OPERATOR') {
    const row = await db.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@fixture.invalid`, role } });
    const session = await db.authSession.create({ data: { userId: row.id, expiresAt: new Date(Date.now() + 3600000) } });
    return { id: row.id, sid: session.id };
   }
   const a = await user('USER'), b = await user('ADMIN'), c = await user('USER'), d = await user('USER');
+  operatorSid = (await user('OPERATOR')).sid;
   owner = a.id; sid = a.sid; admin = b.id; adminSid = b.sid; outsiderSid = c.sid; member = d.id; memberSid = d.sid;
   await db.storageBucket.createMany({ data: [{ bucket: 'public', visibility: 'PUBLIC' }, { bucket: 'protected', visibility: 'PROTECTED' }] });
-  app = Fastify(); app.setValidatorCompiler(validatorCompiler); app.setSerializerCompiler(serializerCompiler); registerRouteSchemas(app);
+  app = Fastify({ logger: { level: 'trace', stream: { write: (line: string) => { logs += line; } } } }); app.setValidatorCompiler(validatorCompiler); app.setSerializerCompiler(serializerCompiler); registerRouteSchemas(app);
   await app.register(cookie);
   await registerAuth(app, { config, clock: { now: () => new Date() }, logger: app.log, sessions: {
    find: id => db.authSession.findUnique({ where: { id }, include: { user: true } }),
@@ -74,17 +80,20 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
    delete: id => db.authSession.deleteMany({ where: { id } }),
   } });
   await registerCsrf(app, config);
-  app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message } }));
+  app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : error.statusCode ?? 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message, ...(error instanceof AppError ? { details: error.details } : {}) } }));
+  await app.register(createAuthController({ config, clock: { now: () => new Date() }, service: { loginWithGoogle: async () => { throw new Error('OAuth is outside this fixture'); }, logout: async () => {} } }), { prefix: '/api' });
   const network = createWebglNetworkService(createWebglNetworkRepository(db), config);
   await app.register(createWebglNetworkController(network, 'me'), { prefix: '/api/me' });
   await app.register(createWebglNetworkController(network, 'admin'), { prefix: '/api/admin' });
   playRepository = createWebglPlayRepository(db);
-  const play = createWebglPlayService(playRepository, config);
+  const play = createWebglPlayService(playRepository, config, createDiagnosticService(createDiagnosticRepository(db)));
   await app.register(createWebglPlayController(play, config));
   await app.register(createFileAccessController(createFileAccessRepository(db), config, undefined, undefined, undefined, play.resolveRuntime), { prefix: '/api' });
  });
  beforeEach(async () => {
   config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED = true;
+  // Each case owns its play leases; do not exhaust the per-login budget across cases.
+  await db.webglPlaySession.deleteMany();
   const exhibition = await db.exhibition.create({ data: { year: 2000 + Math.floor(Math.random() * 10000), title: randomUUID() } }); exhibitionId = exhibition.id;
   const project = await db.project.create({ data: { creatorId: owner, exhibitionId, title: 'Network fixture', slug: randomUUID(), status: 'PUBLISHED', members: { create: { userId: member, name: 'Member' } } } }); projectId = project.id;
   const asset = await db.asset.create({ data: { projectId, kind: 'WEBGL', representations: { create: { bucket: 'protected', objectKey: `${randomUUID()}.zip`, role: 'WEBGL_SOURCE', state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
@@ -94,6 +103,8 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  });
  afterAll(async () => { await app?.close(); await database?.close(); });
  it('serializes empty and populated owner/admin lists and audited review responses', async () => {
+  const emptyAdmin = await request('GET', '/api/admin/webgl-network-requests', adminSid);
+  expect(WebglNetworkRequestListSchema.parse(emptyAdmin.json().data).items).toEqual([]);
   const empty = await list(); expect(empty.statusCode).toBe(200); expect(WebglNetworkRequestListSchema.parse(empty.json().data)).toEqual({ items: [], gameOrigin, policyVersion: 0 });
   const created = await create(); expect(created.statusCode, created.body).toBe(201); expect(WebglNetworkRequestSchema.parse(created.json().data).events).toEqual([]);
   const id = created.json().data.id;
@@ -101,6 +112,62 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   const reviewed = WebglNetworkRequestSchema.parse(response.json().data); expect(reviewed.state).toBe('APPROVED'); expect(reviewed.events[0]).toMatchObject({ action: 'APPROVE', actorId: admin, policyVersion: 1 });
   const ownerList = WebglNetworkRequestListSchema.parse((await list()).json().data); expect(ownerList.policyVersion).toBe(1); expect(ownerList.items[0]).toEqual(reviewed);
   const adminList = await request('GET', '/api/admin/webgl-network-requests', adminSid); expect(adminList.statusCode).toBe(200); expect(WebglNetworkRequestListSchema.parse(adminList.json().data).policyVersion).toBeNull();
+ });
+ const batch = (items = [body('https://first.example.com:*'), body('wss://second.example.com:*')], session = sid) => request('POST', `/api/me/projects/${projectId}/webgl-network-requests/batch`, session, { items });
+ it('creates an ordered batch and independently approves/revokes its runtime policy', async () => {
+  const response = await batch(); expect(response.statusCode, response.body).toBe(201);
+  const rows = WebglNetworkBatchResponseSchema.parse(response.json().data).items;
+  expect(rows.map(row => row.origin)).toEqual(['https://first.example.com:*', 'wss://second.example.com:*']);
+  expect(WebglNetworkRequestListSchema.parse((await list()).json().data).items).toHaveLength(2);
+  for (const row of rows) expect((await review(row.id, 'approve')).statusCode).toBe(200);
+  const session = await grant();
+  expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: session.id } })).approvedOrigins.sort()).toEqual(rows.map(row => row.origin).sort());
+  expect((await review(rows[0]!.id, 'revoke')).statusCode).toBe(200);
+  const fresh = await grant();
+  expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: fresh.id } })).approvedOrigins).toEqual([rows[1]!.origin]);
+  expect((await gate(session)).statusCode).toBe(403);
+  expect((await gate(fresh)).statusCode).toBe(204);
+ });
+ it('rejects every invalid/protected/overlapping batch without saving its valid prefix', async () => {
+  for (const invalid of [body('https://localhost'), body(gameOrigin), { ...body('https://next.example.com'), purpose: '' }]) {
+   const result = await batch([body(), invalid]); expect(result.statusCode).toBe(400);
+   expect(result.json().error.details).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1 })]));
+   expect((await list()).json().data.items).toHaveLength(0);
+  }
+  expect((await batch([body('https://*.example.com:*'), body()])).statusCode).toBe(400);
+  expect((await batch([])).statusCode).toBe(400);
+  expect((await batch(Array.from({ length: 17 }, (_, i) => body(`https://host${i}.example.com`)))).statusCode).toBe(400);
+  expect((await list()).json().data.items).toHaveLength(0);
+ });
+ it('checks batch authentication, relationship and modification closure', async () => {
+  expect((await batch(undefined, '')).statusCode).toBe(401);
+  expect((await batch(undefined, outsiderSid)).statusCode).toBe(403);
+  expect((await batch(undefined, adminSid)).statusCode).toBe(403);
+  expect((await batch(undefined, memberSid)).statusCode).toBe(201);
+  await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: false } });
+  expect((await batch([body()])).statusCode).toBe(403);
+  expect((await list()).json().data.items).toHaveLength(2);
+ });
+ it('rolls back a saved prefix when a later database write fails', async () => {
+  await db.$executeRawUnsafe("ALTER TABLE webgl_network_requests ADD CONSTRAINT batch_fixture_failure CHECK (purpose <> 'batch-storage-failure')");
+  try {
+   expect((await batch([body(), { ...body('https://next.example.com'), purpose: 'batch-storage-failure' }])).statusCode).toBe(500);
+   expect((await list()).json().data.items).toHaveLength(0);
+  } finally { await db.$executeRawUnsafe('ALTER TABLE webgl_network_requests DROP CONSTRAINT batch_fixture_failure'); }
+ });
+ it('serializes concurrent batches and rejects active duplicates without a partial write', async () => {
+  const responses = await Promise.all([batch(), batch()]);
+  expect(responses.map(result => result.statusCode).sort()).toEqual([201, 409]);
+  const conflict = await batch([body(), body('https://first.example.com:*')]);
+  expect(conflict.statusCode).toBe(409);
+  expect(conflict.json().error.details).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, field: 'origin' })]));
+  expect((await list()).json().data.items).toHaveLength(2);
+ });
+ it('permits overlap with existing approvals at submission and enforces the batch size boundary', async () => {
+  await approved();
+  expect((await batch([body(external + ':*')])).statusCode).toBe(201);
+  const result = await batch(Array.from({ length: 16 }, (_, i) => body(`https://batch${i}.example.com`)));
+  expect(result.statusCode).toBe(201); expect(result.json().data.items).toHaveLength(16);
  });
  it('checks ownership, linked membership, exhibition closure, authentication and review role', async () => {
   expect((await list(outsiderSid)).statusCode).toBe(403); expect((await create(external, outsiderSid)).statusCode).toBe(403);
@@ -124,7 +191,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect((await list()).statusCode).toBe(200);
  });
  it('rejects privileged origins including changed ports and secure socket variants', async () => {
-  for (const origin of [apiOrigin, gameOrigin, webOrigin, 'https://api.fixture.example:8443', 'wss://downloads.fixture.example', 'https://garage.fixture.example']) expect((await create(origin)).statusCode, origin).toBe(400);
+  for (const origin of [apiOrigin, gameOrigin, webOrigin, 'https://api.fixture.example:8443', 'wss://downloads.fixture.example', 'https://garage.fixture.example', 'https://api.fixture.example:*', 'wss://*.fixture.example:*', 'https://uploads.fixture.example:*', 'wss://downloads.fixture.example:*']) expect((await create(origin)).statusCode, origin).toBe(400);
   expect((await request('POST', `/api/me/projects/${projectId}/webgl-network-requests`, sid, { ...body(), cors: '' })).statusCode).toBe(400);
  });
  it('serializes concurrent duplicate requests and enforces partial uniqueness independently', async () => {
@@ -193,4 +260,166 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect([{ policyVersion: 1, approvedOrigins: [external] }, { policyVersion: 2, approvedOrigins: [] }]).toContainEqual({ policyVersion: revokedSnapshot.policyVersion, approvedOrigins: revokedSnapshot.approvedOrigins });
   expect((await gate(raced.json().data)).statusCode).toBe(revokedSnapshot.approvedOrigins.length ? 403 : 204);
  });
+
+ it('keeps another project local and permits operator review', async () => {
+  const pending = (await create('wss://*.example.com:*')).json().data;
+  expect((await review(pending.id, 'approve', operatorSid)).statusCode).toBe(200);
+  const source = await db.project.create({ data: { creatorId: owner, exhibitionId, title: 'Separate game', slug: randomUUID(), status: 'PUBLISHED' } });
+  const asset = await db.asset.create({ data: { projectId: source.id, kind: 'WEBGL', representations: { create: { bucket: 'protected', objectKey: `${randomUUID()}.zip`, role: 'WEBGL_SOURCE', state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
+  const id = randomUUID(), prefix = `public/webgl/${source.id}/${id}/`;
+  await db.webglDeployment.create({ data: { id, projectId: source.id, sourceRepresentationId: asset.representations[0]!.id, publicBucket: 'public', publicPrefix: prefix, entryObjectKey: prefix + 'index.html', state: 'READY', objectManifest: { version: 1, objects: [{ objectKey: prefix + 'index.html', sizeBytes: '0', mimeType: 'text/html', contentEncoding: null, etag: 'fixture', checksumSha256: null }] } } });
+  await db.project.update({ where: { id: source.id }, data: { currentWebglDeploymentId: id } });
+  const issued = await request('POST', '/api/webgl-play/sessions', sid, { projectId: source.id }, apiOrigin);
+  // The shell's fetch metadata is mandatory even with an otherwise valid session cookie.
+  expect(issued.statusCode).toBe(403);
+  const grant = await app.inject({ method: 'POST', url: '/api/webgl-play/sessions', headers: { origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}` }, payload: { projectId: source.id } });
+  expect(grant.statusCode).toBe(200);
+  expect(String((await gate(grant.json().data)).headers['x-pcu-runtime-csp'])).not.toContain('*.example.com');
+ });
+ it('approves wildcard rules without port expansion and rejects overlaps', async () => {
+  expect((await create('wss://*.fixture.example')).statusCode).toBe(400);
+  expect((await create('wss://*.github.io')).statusCode).toBe(400);
+  await approved('wss://*.example.com:8443');
+  const overlap = (await create('wss://a.example.com:8443')).json().data.id;
+  expect((await review(overlap, 'approve')).statusCode).toBe(409);
+  await approved('wss://example.com:8443');
+  const session = await grant();
+  const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
+  expect(csp).toContain('wss://*.example.com:8443');
+  expect(csp).not.toContain('19090');
+ });
+ it.each(['https', 'wss'])('transitions %s from fixed ports to explicit all ports only through revoke and approval', async protocol => {
+  const external = `${protocol}://scores.example.com`;
+  const local = await grant();
+  const legacy = await approved(external), numeric = await approved(external + ':8443');
+  const old = await grant();
+  const oldWorker = { ...old, iframeUrl: old.iframeUrl.replace('index.html', 'worker.js') };
+  const before = await db.webglPlaySession.findUniqueOrThrow({ where: { id: old.id } });
+  expect(before.approvedOrigins).toEqual([external, external + ':8443']);
+  const created = await create(external + ':*'); expect(created.statusCode, created.body).toBe(201);
+  const pending = WebglNetworkRequestSchema.parse(created.json().data);
+  expect(pending).toMatchObject({ origin: external + ':*', state: 'PENDING', events: [] });
+  expect((await create(external + ':*')).statusCode).toBe(409);
+  expect((await review(pending.id, 'approve')).statusCode).toBe(409);
+  expect((await gate(old)).statusCode).toBe(204);
+  const connect = String((await gate(old)).headers['x-pcu-runtime-csp']).split(';').find(s => s.trim().startsWith('connect-src '));
+  expect(connect).toContain(external + ':8443'); expect(connect).not.toContain(':*');
+  expect((await gate(oldWorker)).headers['x-pcu-runtime-csp']).toBe((await gate(old)).headers['x-pcu-runtime-csp']);
+  expect((await review(legacy, 'revoke')).statusCode).toBe(200);
+  expect((await review(pending.id, 'approve')).statusCode).toBe(409);
+  expect((await review(numeric, 'revoke')).statusCode).toBe(200);
+  const response = await review(pending.id, 'approve'); expect(response.statusCode, response.body).toBe(200);
+  expect(WebglNetworkRequestSchema.parse(response.json().data)).toMatchObject({ origin: external + ':*', state: 'APPROVED', policyVersion: 5 });
+  expect((await gate(old)).statusCode).toBe(403); expect((await renew(old)).statusCode).toBe(403);
+  const unchanged = await db.webglPlaySession.findUniqueOrThrow({ where: { id: old.id } });
+  expect(unchanged.approvedOrigins).toEqual(before.approvedOrigins); expect(unchanged.policyVersion).toBe(before.policyVersion);
+  expect((await gate(oldWorker)).statusCode).toBe(403);
+  expect((await renew(local)).statusCode).toBe(200);
+  expect((await gate(local)).headers['x-pcu-runtime-csp']).not.toContain(external);
+  const fresh = await grant();
+  expect(await db.webglPlaySession.findUniqueOrThrow({ where: { id: fresh.id } })).toMatchObject({ approvedOrigins: [external + ':*'], policyVersion: 5 });
+  const runtime = await gate(fresh); expect(runtime.statusCode).toBe(204);
+  const directives = String(runtime.headers['x-pcu-runtime-csp']).split(';');
+  expect(directives.find(s => s.trim().startsWith('connect-src '))).toContain(external + ':*');
+  expect(directives.filter(s => !s.trim().startsWith('connect-src ')).join(';')).not.toContain(external);
+  const rows = WebglNetworkRequestListSchema.parse((await list()).json().data).items;
+  expect(rows.find(r => r.id === legacy)).toMatchObject({ origin: external, state: 'REVOKED', events: [{ action: 'APPROVE', policyVersion: 1 }, { action: 'REVOKE', policyVersion: 3 }] });
+  expect(rows.find(r => r.id === numeric)).toMatchObject({ origin: external + ':8443', state: 'REVOKED' });
+  const audit = await db.webglNetworkReviewEvent.findMany({ where: { requestId: legacy } });
+  expect(audit.map(event => event.origin)).toEqual([external, external]);
+  const adminList = WebglNetworkRequestListSchema.parse((await request('GET', '/api/admin/webgl-network-requests', adminSid)).json().data);
+  expect(adminList.items.find(r => r.id === pending.id)?.origin).toBe(external + ':*');
+  expect((await review(pending.id, 'revoke')).statusCode).toBe(200);
+  await approved(external + ':*');
+  expect((await gate(fresh)).statusCode).toBe(403); expect((await renew(fresh)).statusCode).toBe(403);
+  expect((await gate({ ...fresh, iframeUrl: fresh.iframeUrl.replace('index.html', 'worker.js') })).statusCode).toBe(403);
+  expect((await gate(oldWorker)).statusCode).toBe(403);
+  expect((await gate(await grant())).statusCode).toBe(204);
+ });
+ it('serializes overlapping all-port approvals and preserves root/transport separation', async () => {
+  const wildcard = (await create('wss://*.example.com:*')).json().data.id;
+  const exact = (await create('wss://a.example.com:8443')).json().data.id;
+  expect((await Promise.all([review(wildcard, 'approve'), review(exact, 'approve')])).map(r => r.statusCode).sort()).toEqual([200, 409]);
+  await approved('wss://example.com:*');
+  await approved('https://*.example.com:*');
+  const session = await grant();
+  expect((await gate(session)).statusCode).toBe(204);
+ });
+ it('rechecks protected hosts at approval and runtime for all-port rules', async () => {
+  const origin = 'wss://new-protected.example.com:*';
+  const pending = (await create(origin)).json().data.id;
+  const previous = config.S3_PUBLIC_SIGNING_ENDPOINT;
+  try {
+   config.S3_PUBLIC_SIGNING_ENDPOINT = 'https://new-protected.example.com:9443';
+   expect((await review(pending, 'approve')).statusCode).toBe(409);
+   config.S3_PUBLIC_SIGNING_ENDPOINT = previous;
+   expect((await review(pending, 'approve')).statusCode).toBe(200);
+   const session = await grant(); expect((await gate(session)).statusCode).toBe(204);
+   config.S3_PUBLIC_SIGNING_ENDPOINT = 'https://new-protected.example.com:9443';
+   expect((await gate(session)).statusCode).toBe(403);
+  } finally { config.S3_PUBLIC_SIGNING_ENDPOINT = previous; }
+ });
+ it('serializes concurrent report budgets and rejects revoked snapshots after reapproval', async () => {
+  const approvedId = await approved(external + ':*');
+  const session = (await issue(true)).json().data as Grant;
+  const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
+  const url = new URL(csp.split('report-uri ')[1]!).pathname;
+  const report = () => app.inject({ method: 'POST', url, headers: { 'content-type': 'application/csp-report' },
+   payload: JSON.stringify({ 'csp-report': { 'blocked-uri': 'https://blocked.example.com/private', 'effective-directive': 'connect-src' } }) });
+  const results = await Promise.all(Array.from({ length: 40 }, report));
+  expect(results.filter(result => result.statusCode === 204)).toHaveLength(30);
+  expect(results.filter(result => result.statusCode === 429)).toHaveLength(10);
+  expect(await db.webglPlaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ reportCount: 30 });
+  expect(await db.webglConnectionDiagnostic.findMany({ where: { sessionId: session.id } })).toMatchObject([{ count: 30 }]);
+  await db.webglPlaySession.update({ where: { id: session.id }, data: { reportWindowAt: new Date(0) } });
+  expect((await review(approvedId, 'revoke')).statusCode).toBe(200);
+  await approved(external + ':*');
+  expect((await report()).statusCode).toBe(403);
+  const read = await app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${session.id}/diagnostics`, headers: {
+   origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`, 'x-pcu-play-control': session.controlSecret,
+  }, payload: {} });
+  expect(read.statusCode).toBe(403);
+  expect(await db.webglPlaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ reportCount: 30 });
+ });
+ it('isolates diagnostic tokens, strips secrets, limits reports and cascades cleanup', async () => {
+  await approved('wss://*.example.com:*');
+  const session = (await issue(true)).json().data as Grant;
+  const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
+  const reportUrl = new URL(csp.split('report-uri ')[1]!).pathname;
+  const report = (url = reportUrl, origin = 'https://user:password@blocked.example.com/private?token=secret') => app.inject({ method: 'POST', url, headers: { 'content-type': 'application/csp-report' }, payload: JSON.stringify({ 'csp-report': { 'blocked-uri': origin, 'effective-directive': 'connect-src', 'document-uri': 'https://secret.invalid/path', 'script-sample': 'secret-code' } }) });
+  const read = (id = session.id, controlSecret = session.controlSecret) => app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${id}/diagnostics`, headers: { origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`, 'x-pcu-play-control': controlSecret }, payload: {} });
+  expect((await read()).json().data.items).toEqual([]);
+  logs = '';
+  const malformed = await app.inject({ method: 'POST', url: reportUrl, headers: { 'content-type': 'application/json' }, payload: '{"private-report-credential":' });
+  expect(malformed.statusCode).toBe(400);
+  expect(malformed.body).not.toContain('private-report-credential');
+  expect((await Promise.all([report(), report()])).map(result => result.statusCode)).toEqual([204, 204]);
+  const data = (await read()).json().data;
+  expect(data).toMatchObject({ gameOrigin, policyVersion: 1, approvedOrigins: ['wss://*.example.com:*'], items: [{ origin: 'https://blocked.example.com', directive: 'connect-src', count: 2 }] });
+  expect(JSON.stringify(data)).not.toMatch(/password|private|secret-code|token=/);
+  expect((await report('/api/webgl-play/reports/' + 'f'.repeat(64))).statusCode).toBe(403);
+  expect((await report('/api/webgl-play/reports/' + session.controlSecret)).statusCode).toBe(403);
+  expect((await request('POST', `/api/webgl-play/sessions/${session.id}/diagnostics`, sid, {}, gameOrigin)).statusCode).toBe(403);
+  const other = (await issue(true)).json().data as Grant;
+  expect((await read(other.id)).statusCode).toBe(403);
+  expect((await read(session.id, 'f'.repeat(64))).statusCode).toBe(403);
+  expect((await app.inject({ method: 'POST', url: reportUrl, headers: { 'content-type': 'application/csp-report' }, payload: 'x'.repeat(16385) })).statusCode).toBe(413);
+  for (let i = 0; i < 28; i++) expect((await report(reportUrl, `https://blocked${i}.example.com/path`)).statusCode).toBe(204);
+  expect((await read()).json().data.items).toHaveLength(20);
+  expect((await report()).statusCode).toBe(429);
+  await db.webglPlaySession.update({ where: { id: session.id }, data: { reportWindowAt: new Date(Date.now() - 61000) } });
+  expect((await report()).statusCode).toBe(204);
+  expect(logs).not.toContain(reportUrl.split('/').at(-1));
+  expect(logs).not.toMatch(/password|secret-code|private-report-credential/);
+  await db.webglPlaySession.update({ where: { id: session.id }, data: { expiresAt: new Date(0) } });
+  expect((await report()).statusCode).toBe(403);
+  expect((await read()).statusCode).toBe(403);
+  await grant();
+  expect(await db.webglConnectionDiagnostic.count({ where: { sessionId: session.id } })).toBe(0);
+ });
+
+ it.runIf(process.env['RUN_WEBGL_FORM_BROWSER'] === 'true')('preserves the real browser form scope through approval, persistence and runtime CSP', async () => {
+  await verifyNetworkFormBrowser(app, db, config, projectId, sid, adminSid);
+ }, 90_000);
+
 });

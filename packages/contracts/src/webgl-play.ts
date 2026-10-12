@@ -1,7 +1,7 @@
 import { WebglDisplayDimensionSchema, WebglDisplayKindSchema } from './webgl-display.js';
 import { z } from "zod";
 export const WebglPlayCreateBodySchema = z
-  .object({ projectId: z.number().int().positive() })
+  .object({ projectId: z.number().int().positive(), diagnostics: z.boolean().optional() })
   .strict();
 export const WebglPlayRenewBodySchema = z
   .object({ visible: z.boolean().optional() })
@@ -25,3 +25,9 @@ export const WebglPlayRenewDataSchema = z.object({
 });
 export const WebglPlayCloseDataSchema = z.object({ closed: z.boolean() });
 export type WebglPlaySession = z.infer<typeof WebglPlayCreateDataSchema>;
+
+export const WebglDiagnosticDataSchema = z.object({
+  gameOrigin: z.string(), policyVersion: z.number().int().nonnegative(), approvedOrigins: z.array(z.string()),
+  items: z.array(z.object({ origin: z.string(), directive: z.string(), count: z.number().int().positive(), firstSeenAt: z.string().datetime(), lastSeenAt: z.string().datetime() }).strict()),
+}).strict();
+export type WebglDiagnosticData = z.infer<typeof WebglDiagnosticDataSchema>;

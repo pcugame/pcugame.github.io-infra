@@ -1,23 +1,10 @@
-import ipaddr from 'ipaddr.js';
 import { z } from 'zod';
 
-/** Exact browser connection origin; this validator never resolves DNS or fetches. */
+export { ConnectionRule, ProjectConnectionPolicy } from './connection-rule.js';
+import { ConnectionRule } from './connection-rule.js';
+
 export function validateWebglNetworkOrigin(value: string, mode: 'HTTPS' | 'WSS'): boolean {
- try {
-  const url = new URL(value);
-  if (value.length > 512 || url.origin !== value || url.protocol !== (mode === 'HTTPS' ? 'https:' : 'wss:')
-   || url.username || url.password || url.pathname !== '/' || url.search || url.hash) return false;
-  const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (ipaddr.isValid(host)) {
-   const address = ipaddr.parse(host);
-   return address.range() === 'unicast' && (!(address instanceof ipaddr.IPv6)
-    || (address.match(ipaddr.IPv6.parse('2000::'), 3) && !address.match(ipaddr.IPv6.parse('3fff::'), 20)));
-  }
-  return host.length <= 253 && host.split('.').every(label => label.length <= 63)
-   && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(host)
-   && !/(?:^|\.)(?:localhost|local|internal|lan|home)$/.test(host)
-   && !host.endsWith('.home.arpa');
- } catch { return false; }
+ try { ConnectionRule.parse(value, mode); return true; } catch { return false; }
 }
 
 export const WebglNetworkStateSchema = z.enum(['PENDING', 'APPROVED', 'REJECTED', 'REVOKED']);
@@ -28,7 +15,7 @@ export const CreateWebglNetworkRequestSchema = z.object({
  mode: WebglNetworkModeSchema,
  cors: z.string().trim().min(1).max(2000),
 }).strict().refine(value => validateWebglNetworkOrigin(value.origin, value.mode), {
- path: ['origin'], message: 'An exact public HTTPS/WSS origin matching the connection mode is required',
+ path: ['origin'], message: 'A canonical public HTTPS/WSS origin or subdomain rule matching the connection mode is required',
 });
 export const ReviewWebglNetworkRequestSchema = z.object({ reason: z.string().trim().min(1).max(2000) }).strict();
 const Id = z.number().int().positive();
@@ -52,3 +39,17 @@ export type WebglNetworkRequest = z.infer<typeof WebglNetworkRequestSchema>;
 export type WebglNetworkRequestList = z.infer<typeof WebglNetworkRequestListSchema>;
 export type WebglNetworkList = WebglNetworkRequestList;
 export type WebglNetworkCreateBody = CreateWebglNetworkRequest;
+
+export const CreateWebglNetworkBatchSchema = z.object({
+ items: z.array(CreateWebglNetworkRequestSchema).min(1).max(16),
+}).strict().superRefine(({ items }, ctx) => {
+ const rules = items.map(item => { try { return ConnectionRule.parse(item.origin, item.mode); } catch { return null; } });
+ rules.forEach((rule, index) => {
+  if (rule && rules.some((other, i) => i !== index && other?.overlaps(rule))) {
+   ctx.addIssue({ code: 'custom', path: ['items', index, 'origin'], message: '같은 신청 목록의 다른 연결과 주소 또는 범위가 겹칩니다.' });
+  }
+ });
+});
+export const WebglNetworkBatchResponseSchema = z.object({ items: z.array(WebglNetworkRequestSchema).min(1).max(16) }).strict();
+export type CreateWebglNetworkBatch = z.infer<typeof CreateWebglNetworkBatchSchema>;
+export type WebglNetworkBatchResponse = z.infer<typeof WebglNetworkBatchResponseSchema>;

@@ -1,3 +1,5 @@
+import { createDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
+import { createDiagnosticService } from '../modules/webgl-play/diagnostic-service.js';
 import { createHash } from 'node:crypto';
 import { WebglPlayCreateDataSchema } from '@pcu/contracts';
 import { createWebglPlayRepository } from "../modules/webgl-play/repository.js";
@@ -256,6 +258,7 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
       const service = createWebglPlayService(
         createWebglPlayRepository(db),
         config,
+        createDiagnosticService(createDiagnosticRepository(db), () => time),
         () => time,
       );
       await app.register(

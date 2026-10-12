@@ -1,5 +1,6 @@
-import { resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { DiagnosticService } from './diagnostic-ports.js';
+import { ProjectConnectionPolicy, resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import type { Env } from "../../config/env.js";
 import { forbidden, notFound, AppError } from "../../shared/errors.js";
 import { canReadProject } from "../../shared/visibility.js";
@@ -16,16 +17,20 @@ export function runtimeCsp(
   token: string,
   apiUrl: string,
   approvedOrigins: readonly string[] = [],
+  reportUrl?: string,
 ): string {
   const path = `${origin}/runtime/${token}/`;
-  const connections = approvedOrigins.length ? ` ${approvedOrigins.join(' ')}` : '';
-  return `default-src 'none'; script-src ${path} blob: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src ${path} blob:; connect-src ${path} blob:${connections}; img-src ${path} data: blob:; media-src ${path} blob:; style-src ${path} 'unsafe-inline'; font-src ${path} data:; frame-ancestors ${new URL(apiUrl).origin}; base-uri 'none'; form-action 'none'; object-src 'none'`;
+  const sources = new ProjectConnectionPolicy(approvedOrigins).connectSources();
+  const connections = sources.length ? ` ${sources.join(' ')}` : '';
+  return `default-src 'none'; script-src ${path} blob: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; worker-src ${path} blob:; connect-src ${path} blob:${connections}; img-src ${path} data: blob:; media-src ${path} blob:; style-src ${path} 'unsafe-inline'; font-src ${path} data:; frame-ancestors ${new URL(apiUrl).origin}; base-uri 'none'; form-action 'none'; object-src 'none'${reportUrl ? `; report-uri ${reportUrl}` : ''}`;
 }
 export function createWebglPlayService(
   repository: WebglPlayRepository,
   config: Env,
+  diagnostics: DiagnosticService,
   now = () => new Date(),
 ) {
+  const reportToken = (id: string) => createHmac('sha256', config.SESSION_SECRET).update('webgl-csp-report:' + id).digest('hex');
   function enabled() {
     if (
       !config.WEBGL_PLAY_ENABLED ||
@@ -83,7 +88,7 @@ export function createWebglPlayService(
     await repository.policyValid(play, config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED);
   }
   return {
-    async create(projectId: number, sid?: string) {
+    async create(projectId: number, sid?: string, diagnostics = false) {
       enabled();
       const { dep, session } = await deployment(projectId, sid);
       const at = now();
@@ -95,9 +100,11 @@ export function createWebglPlayService(
       );
       const controlSecret = randomBytes(32).toString("hex"),
         assetToken = randomBytes(32).toString("hex");
+      const id = randomUUID();
       const play = await repository.createBounded(
         {
-          id: randomUUID(),
+          id,
+          reportHash: diagnostics ? hash(reportToken(id)) : null,
           controlHash: hash(controlSecret),
           assetHash: hash(assetToken),
           sessionId: sid ?? null,
@@ -128,6 +135,19 @@ export function createWebglPlayService(
         expiresAt: expiresAt.toISOString(),
         absoluteExpiresAt: absoluteExpiresAt.toISOString(),
       };
+    },
+    async report(token: string, body: unknown) {
+      enabled();
+      await diagnostics.report(token, body);
+    },
+    async diagnostics(id: string, secret: unknown, sid?: string) {
+      const play = await control(id, secret, sid), at = now();
+      if (!play.reportHash || play.revokedAt || play.expiresAt <= at || play.absoluteExpiresAt <= at) throw forbidden();
+      const { dep } = await deployment(play.projectId, play.sessionId);
+      if (dep.id !== play.deploymentId) throw forbidden();
+      await checkPolicy(play);
+      return { gameOrigin: config.PUBLIC_ASSET_ORIGIN!, policyVersion: play.policyVersion, approvedOrigins: play.approvedOrigins,
+        items: await diagnostics.list(id) };
     },
     async renew(id: string, secret: unknown, sid?: string, visible = true) {
       const play = await control(id, secret, sid),
@@ -209,6 +229,7 @@ export function createWebglPlayService(
           match[1]!,
           config.API_PUBLIC_URL,
           play.approvedOrigins,
+          play.reportHash ? `${config.PUBLIC_ASSET_ORIGIN}/api/webgl-play/reports/${reportToken(play.id)}` : undefined,
         ),
       };
     },

@@ -1,3 +1,5 @@
+import { CreateWebglNetworkBatchSchema, WebglNetworkBatchResponseSchema } from '@pcu/contracts';
+import { WebglDiagnosticDataSchema } from '@pcu/contracts';
 import * as Voting from '@pcu/contracts';
 import { ExternalLinkSchema, ExternalLinkServiceSchema } from '@pcu/contracts';
 import { WebglPlayCreateBodySchema, WebglPlayRenewBodySchema, WebglPlaySessionParamsSchema, WebglPlayCreateDataSchema, WebglPlayRenewDataSchema, WebglPlayCloseDataSchema } from '@pcu/contracts';
@@ -239,6 +241,7 @@ const changeRouteContracts: RouteRuntimeContract[] = [];
 const networkRouteContracts: RouteRuntimeContract[] = [
  contract({ method: 'GET', url: '/api/me/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
  contract({ method: 'POST', url: '/api/me/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: CreateWebglNetworkRequestSchema, response: jsonResponse(WebglNetworkRequestSchema, 201) }),
+ contract({ method: 'POST', url: '/api/me/projects/:id/webgl-network-requests/batch', family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: CreateWebglNetworkBatchSchema, response: jsonResponse(WebglNetworkBatchResponseSchema, 201) }),
  contract({ method: 'GET', url: '/api/admin/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
  ...(['approve', 'reject', 'revoke'] as const).map(action => contract({ method: 'POST', url: `/api/admin/webgl-network-requests/:id/${action}`, family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: ChangeIdParamsSchema, querystring: EmptyObjectSchema, body: ReviewWebglNetworkRequestSchema, response: jsonResponse(WebglNetworkRequestSchema) })),
 ];
@@ -280,6 +283,8 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
  contract({method:'GET',url:'/play/projects/:projectId',family:'webgl-play',bodyBoundary:'none',responseBoundary:'stream',params:z.object({projectId:z.coerce.number().int().positive()}),querystring:EmptyObjectSchema,body:NoBodySchema,response:{200:z.string()}}),
  contract({method:'POST',url:'/api/webgl-play/sessions',family:'webgl-play',bodyBoundary:'json',responseBoundary:'json',params:EmptyObjectSchema,querystring:EmptyObjectSchema,body:WebglPlayCreateBodySchema,response:jsonResponse(WebglPlayCreateDataSchema)}),
  contract({method:'POST',url:'/api/webgl-play/sessions/:id/renew',family:'webgl-play',bodyBoundary:'json',responseBoundary:'json',params:WebglPlaySessionParamsSchema,querystring:EmptyObjectSchema,body:WebglPlayRenewBodySchema,response:jsonResponse(WebglPlayRenewDataSchema)}),
+ contract({method:'POST',url:'/api/webgl-play/reports/:token',family:'webgl-play',bodyBoundary:'json',responseBoundary:'no-content',params:z.object({token:z.string().regex(/^[a-f0-9]{64}$/)}),querystring:EmptyObjectSchema,body:z.unknown(),response:{204:z.undefined()}}),
+ contract({method:'POST',url:'/api/webgl-play/sessions/:id/diagnostics',family:'webgl-play',bodyBoundary:'json',responseBoundary:'json',params:WebglPlaySessionParamsSchema,querystring:EmptyObjectSchema,body:z.object({}).strict(),response:jsonResponse(WebglDiagnosticDataSchema)}),
  contract({method:'POST',url:'/api/webgl-play/sessions/:id/close',family:'webgl-play',bodyBoundary:'json',responseBoundary:'json',params:WebglPlaySessionParamsSchema,querystring:EmptyObjectSchema,body:z.object({}).strict().nullish(),response:jsonResponse(WebglPlayCloseDataSchema)}),
  contract({method:'POST',url:'/api/file-access',family:'assets',bodyBoundary:'json',responseBoundary:'json',params:EmptyObjectSchema,querystring:EmptyObjectSchema,body:z.object({url:z.string().url().max(8192)}).strict(),response:jsonResponse(z.object({url:z.string(),token:z.string().nullable(),expiresAt:z.string().nullable()}))}),
  contract({method:'POST',url:'/api/file-access/:token/renew',family:'assets',bodyBoundary:'none',responseBoundary:'json',params:z.object({token:z.string().regex(/^[a-f0-9]{64}$/)}),querystring:EmptyObjectSchema,body:NoBodySchema,response:jsonResponse(z.object({token:z.string(),expiresAt:z.string()}))}),

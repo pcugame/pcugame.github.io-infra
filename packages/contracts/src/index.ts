@@ -139,3 +139,6 @@ export { PROJECT_PLATFORMS } from './enums.js';
 export * from './project-requirements.js';
 
 export * from './voting.js';
+
+export * from './connection-profiles.js';
+export * from './connection-draft.js';

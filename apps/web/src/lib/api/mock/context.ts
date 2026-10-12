@@ -10,8 +10,9 @@ export const UNHANDLED = Symbol('unhandled mock route');
 export class MockHttpError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
-    super(message); this.name = 'MockHttpError'; this.status = status; this.code = code;
+  readonly details?: unknown;
+  constructor(status: number, code: string, message: string, details?: unknown) {
+    super(message); this.name = 'MockHttpError'; this.status = status; this.code = code; this.details = details;
   }
 }
 export type MockRequestOptions = Omit<RequestInit, 'body'> & { body?: unknown };

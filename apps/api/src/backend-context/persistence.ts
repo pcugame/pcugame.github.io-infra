@@ -1,3 +1,4 @@
+import type { DiagnosticRepository } from '../modules/webgl-play/diagnostic-ports.js';
 import type { DatabaseHealth } from '../application/ports.js';
 import type { Env } from '../config/env.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
@@ -36,6 +37,7 @@ import type { WebglPlayRepository } from '../modules/webgl-play/repository.js';
 export interface BackendPersistencePorts {
 	fileAccessRepository?: FileAccessRepository;
 	webglPlayRepository?: WebglPlayRepository;
+	webglDiagnosticRepository?: DiagnosticRepository;
 	webglNetworkRepository?: WebglNetworkRepository;
 	purgeVoteInvestigations?: () => Promise<unknown>;
 	databaseHealth: DatabaseHealth;

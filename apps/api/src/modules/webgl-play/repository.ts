@@ -1,13 +1,14 @@
+import { connectionRevocationFilter, isConnectionPolicyValid } from './policy.js';
 import { canReadProject } from "../../shared/visibility.js";
 import { forbidden } from "../../shared/errors.js";
 import type { PrismaClient, Prisma, WebglPlaySession } from "../../generated/prisma/client.js";
 const projectInclude = { exhibition: true, members: true } as const;
 async function assertPolicyValid(client: PrismaClient | Prisma.TransactionClient, play: WebglPlaySession, externalEnabled: boolean) {
  if (play.approvedOrigins.length === 0) return;
- if (!externalEnabled || await client.webglNetworkReviewEvent.count({ where: {
-  originalProjectId: play.projectId, action: 'REVOKE', policyVersion: { gt: play.policyVersion },
-  origin: { in: play.approvedOrigins },
- } })) throw forbidden('The external connection policy for this play session was revoked');
+ const revocationCount = externalEnabled
+  ? await client.webglNetworkReviewEvent.count({ where: connectionRevocationFilter(play) }) : 0;
+ if (!isConnectionPolicyValid(play, externalEnabled, revocationCount))
+  throw forbidden('The external connection policy for this play session was revoked');
 }
 export function createWebglPlayRepository(client: PrismaClient) {
   return {

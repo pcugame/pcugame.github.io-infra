@@ -1,9 +1,10 @@
+import { createDiagnosticController } from './diagnostic-controller.js';
 import type { FastifyPluginAsync } from "fastify";
 import type { Env } from "../../config/env.js";
 import { forbidden, notFound } from "../../shared/errors.js";
 import { cookieExpiresAt } from "../../shared/session.js";
 import type { WebglPlayService } from "./service.js";
-import { isTrustedPlaySource } from "./source.js";
+import { isPlayReportPath, isTrustedPlaySource } from "./source.js";
 import { renderPlayShell, playShellHeaders } from "./runtime-ui.js";
 export function createWebglPlayController(
   service: WebglPlayService,
@@ -17,11 +18,15 @@ export function createWebglPlayController(
         .header("Referrer-Policy", "no-referrer");
       if (!config.WEBGL_PLAY_ENABLED) throw notFound();
       if (
-        request.method === "POST" &&
+        request.method === "POST" && !isPlayReportPath(request.method, request.url) &&
         !isTrustedPlaySource(request.headers, config.API_PUBLIC_URL)
       )
         throw forbidden();
     });
+    await app.register(createDiagnosticController(service));
+    app.post<{ Params: { id: string } }>('/api/webgl-play/sessions/:id/diagnostics', async request => ({
+      ok: true, data: await service.diagnostics(request.params.id, request.headers['x-pcu-play-control'], request.cookies[config.SESSION_COOKIE_NAME]),
+    }));
     app.get<{ Params: { projectId: number } }>(
       "/play/projects/:projectId",
       async (request, reply) => {
@@ -32,7 +37,7 @@ export function createWebglPlayController(
           .send(renderPlayShell(config, request.params.projectId));
       },
     );
-    app.post<{ Body: { projectId: number } }>(
+    app.post<{ Body: { projectId: number; diagnostics?: boolean } }>(
       "/api/webgl-play/sessions",
       { config: { rateLimit: { max: 10, timeWindow: 60_000 } } },
       async (request) => ({
@@ -40,6 +45,7 @@ export function createWebglPlayController(
         data: await service.create(
           request.body.projectId,
           request.cookies[config.SESSION_COOKIE_NAME],
+          request.body.diagnostics,
         ),
       }),
     );
