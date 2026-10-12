@@ -1,4 +1,4 @@
-import { assertProjectWriteAccessInTransaction } from '../admin/project-access.service.js';
+import { assertProjectWriteAccessInTransaction } from '../admin/project-access.transaction.repository.js';
 import { forbidden } from '../../shared/errors.js';
 import { applyProjectChange, deleteProjectInTransaction, lockProject, validateSource } from '../project-change/transaction.js';
 import { rebuildProjectPublicationPlan } from './plan-builder.js';

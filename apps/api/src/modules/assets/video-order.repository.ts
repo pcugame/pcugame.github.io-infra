@@ -1,7 +1,7 @@
 import type { Prisma } from '../../generated/prisma/client.js';
-import { conflict } from '../../shared/errors.js';
+import { assertVideoCount, normalizedVideoOrder, videoOrderNeedsRewrite } from './video-order.policy.js';
 
-export const MAX_PROJECT_VIDEOS = 5;
+
 
 /** Callers hold the project row lock throughout every read/write operation. */
 export async function getProjectVideos(tx: Prisma.TransactionClient, projectId: number) {
@@ -13,7 +13,7 @@ export async function getProjectVideos(tx: Prisma.TransactionClient, projectId: 
 }
 
 export async function rewriteProjectVideoOrder(tx: Prisma.TransactionClient, projectId: number, ids: readonly number[]): Promise<void> {
-	if (ids.length > MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
+	assertVideoCount(ids.length);
 	await tx.asset.updateMany({
 		where: { projectId, kind: 'VIDEO', status: 'READY' },
 		data: { videoSortOrder: null },
@@ -25,11 +25,11 @@ export async function rewriteProjectVideoOrder(tx: Prisma.TransactionClient, pro
 
 export async function normalizeProjectVideoOrder(tx: Prisma.TransactionClient, projectId: number) {
 	const videos = await getProjectVideos(tx, projectId);
-	if (videos.length > MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
-	if (videos.some((video, index) => video.videoSortOrder !== index)) {
+	assertVideoCount(videos.length);
+	if (videoOrderNeedsRewrite(videos)) {
 		await rewriteProjectVideoOrder(tx, projectId, videos.map(({ id }) => id));
 	}
-	return videos.map((video, videoSortOrder) => ({ ...video, videoSortOrder }));
+	return normalizedVideoOrder(videos);
 }
 
 /** Result pointers already count as READY assets and must not reserve twice. */

@@ -1,6 +1,6 @@
 import type { Readable } from 'node:stream';
 import { ZipValidationError } from '../../shared/archive-errors.js';
-import { ProjectUploadPolicyRejectedError } from '../admin/project-access.service.js';
+import { ProjectUploadPolicyRejectedError } from '../admin/project-access.policy.js';
 import { isMaterialKind } from './material-policy.js';
 import { validateMaterialSource } from './material-validation.js';
 import { createClaimHeartbeatGuard } from '../upload-lifecycle/claim-heartbeat.js';

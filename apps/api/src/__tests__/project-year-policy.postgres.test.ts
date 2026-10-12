@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
-import { assertProjectUploadWriteAccessInTransaction } from '../modules/admin/project-access.service.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../modules/admin/project-access.transaction.repository.js';
 
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 

@@ -11,7 +11,7 @@ import type { ImportRepository } from '../modules/admin/import/service.js';
 import { createMemberRepository } from '../modules/admin/member/repository.js';
 import type { MemberServiceDependencies } from '../modules/admin/member/service.js';
 import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
-import type { ProjectAccessRepository } from '../modules/admin/project-access.service.js';
+import type { ProjectAccessRepository } from '../modules/admin/project-access.ports.js';
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import type { ProjectApplicationRepository } from '../modules/admin/project/ports.js';
 import type { ExhibitionRepository } from '../modules/admin/year/ports.js';

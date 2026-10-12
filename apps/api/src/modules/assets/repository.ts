@@ -1,5 +1,5 @@
 import { normalizeIpTarget } from '@pcu/contracts';
-import { normalizeProjectVideoOrder } from './video-order.js';
+import { normalizeProjectVideoOrder } from './video-order.repository.js';
 import {
 	Prisma,
 	type AssetKind,
@@ -14,7 +14,7 @@ import {
 } from './mutation-transaction.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 import type { Actor } from '../../application/http-input.js';
-import { assertProjectWriteAccessInTransaction } from '../admin/project-access.service.js';
+import { assertProjectWriteAccessInTransaction } from '../admin/project-access.transaction.repository.js';
 
 export interface AssetDeletionClaim {
 	id: number;

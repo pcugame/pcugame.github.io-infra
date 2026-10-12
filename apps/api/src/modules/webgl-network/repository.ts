@@ -2,7 +2,7 @@ import { validateWebglNetworkOrigin, type CreateWebglNetworkRequest, type WebglN
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type { Actor } from '../../application/http-input.js';
 import { conflict, forbidden, notFound, isUniqueConstraintError } from '../../shared/errors.js';
-import { assertProjectWriteAccessInTransaction } from '../admin/project-access.service.js';
+import { assertProjectWriteAccessInTransaction } from '../admin/project-access.transaction.repository.js';
 
 const eventsInclude = { events: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } satisfies Prisma.WebglNetworkRequestInclude;
 type RequestRow = Prisma.WebglNetworkRequestGetPayload<{ include: typeof eventsInclude }>;

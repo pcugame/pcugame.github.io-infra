@@ -3,7 +3,7 @@ import type { ProjectChangeValues } from '@pcu/contracts';
 import { conflict, forbidden } from '../../shared/errors.js';
 import { queueDurableDeletions, type DurableDeletionTarget } from '../orphan/outbox.js';
 import { queueMultipartAbortTask } from '../multipart-abort/repository.js';
-import { rewriteProjectVideoOrder } from '../assets/video-order.js';
+import { rewriteProjectVideoOrder } from '../assets/video-order.repository.js';
 
 export async function lockProject(tx: Prisma.TransactionClient, id: number) {
  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "projects" WHERE "id" = ${id} FOR UPDATE`);

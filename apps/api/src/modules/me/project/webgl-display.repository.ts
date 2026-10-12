@@ -2,7 +2,7 @@ import { inferWebglDisplayMode, parseWebglDisplayAnalysis, resolveWebglDisplay, 
 import type { Actor } from '../../../application/http-input.js';
 import type { PrismaClient } from '../../../generated/prisma/client.js';
 import { forbidden, notFound } from '../../../shared/errors.js';
-import { assertProjectWriteAccessInTransaction } from '../../admin/project-access.service.js';
+import { assertProjectWriteAccessInTransaction } from '../../admin/project-access.transaction.repository.js';
 
 export interface WebglDisplayRepository {
 	read(actor: Actor, projectId: number): Promise<WebglDisplaySettingsResponse>;

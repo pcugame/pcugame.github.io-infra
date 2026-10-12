@@ -1,5 +1,6 @@
 import { canReadVisibility, isVisibilityStaff } from '../../../shared/visibility.js';
-import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS } from '../../assets/video-order.js';
+import { MAX_PROJECT_VIDEOS } from '../../assets/video-order.policy.js';
+import { getProjectVideos, rewriteProjectVideoOrder } from '../../assets/video-order.repository.js';
 import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
 import type {
 	AssetKind,
@@ -26,7 +27,7 @@ import {
 import {
 	createProjectPublicationPlan,
 } from '../../project-publication/plan.js';
-import { assertProjectWriteAccessInTransaction } from '../project-access.service.js';
+import { assertProjectWriteAccessInTransaction } from '../project-access.transaction.repository.js';
 import { cleanupSourceChangeRequests } from '../../project-change/transaction.js';
 import type { Actor } from '../../../application/http-input.js';
 

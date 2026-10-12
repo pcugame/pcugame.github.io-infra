@@ -1,6 +1,6 @@
 import type { PrismaClient } from '../../../generated/prisma/client.js';
 import type { Actor } from '../../../application/http-input.js';
-import { assertProjectWriteAccessInTransaction } from '../project-access.service.js';
+import { assertProjectWriteAccessInTransaction } from '../project-access.transaction.repository.js';
 
 export function createMemberRepository(client: PrismaClient) {
 	return {
