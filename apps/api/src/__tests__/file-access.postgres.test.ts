@@ -59,24 +59,25 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('live file capa
   const url = 'http://files.test/public/images/public-image-ORIGINAL.png';
   const deploymentLookup = vi.spyOn(repository,'findDeployment');
   const representationLookup = vi.spyOn(repository,'findRepresentation');
+  const votePosterLookup = vi.spyOn(repository,'votePoster');
   checkDownloadLimit.mockClear();
   try {
    for (const session of [undefined,sid]) {
-    deploymentLookup.mockClear();representationLookup.mockClear();
+    deploymentLookup.mockClear();representationLookup.mockClear();votePosterLookup.mockClear();
     const response = await app.inject({method:'POST',url:'/api/file-access',headers:{origin,...(session?{cookie:'sid='+session}:{})},payload:{url}});
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ok:true,data:{url,token:null,expiresAt:null}});
     expect(response.headers['cache-control']).toBe('private, no-store');
     // Two independent checks: requesting actor and anonymous accessibility.
     // Count repository lookups, without fixing their internal call order or SQL.
-    expect(deploymentLookup.mock.calls.length+representationLookup.mock.calls.length).toBe(4);
+    expect(deploymentLookup.mock.calls.length+representationLookup.mock.calls.length+votePosterLookup.mock.calls.length).toBe(6);
    }
    expect(checkDownloadLimit).not.toHaveBeenCalled();
    expect((await gate(url)).statusCode).toBe(204);
    await db.exhibition.update({where:{id:exhibition.id},data:{visibility:'STAFF'}});
    expect((await gate(url)).statusCode).toBe(403);
   } finally {
-   deploymentLookup.mockRestore();representationLookup.mockRestore();
+   deploymentLookup.mockRestore();representationLookup.mockRestore();votePosterLookup.mockRestore();
    await db.asset.delete({where:{id:asset.id}});
    await db.project.delete({where:{id:project.id}});
    await db.exhibition.delete({where:{id:exhibition.id}});
