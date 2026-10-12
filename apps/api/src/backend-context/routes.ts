@@ -27,6 +27,8 @@ import type { createAssetUploadRepository } from '../modules/asset-upload/reposi
 import type { AssetsBannedProductionGraph } from '../modules/assets/composition.js';
 import type { AuthProductionGraph } from '../modules/auth/composition.js';
 import { createExternalLinkController } from '../modules/external-links/controller.js';
+import { createAssetsController } from '../modules/assets/controller.js';
+import { createFileAccessService } from '../modules/file-access/service.js';
 import { createFileAccessController } from '../modules/file-access/controller.js';
 import { createFileAccessRepository, createUnavailableFileAccessRepository } from '../modules/file-access/repository.js';
 import { createWebglDisplayController } from '../modules/me/project/webgl-display.controller.js';
@@ -84,7 +86,7 @@ export async function loadProductionRoutes(
 			directAssetUploadController: directAssetUpload.controller,
 		}),
 		me: projectMultipart.meController,
-		assets: assetsBanned.assetsController,
+		assets: async () => { /* Connected after file-access composition. */ },
 	};
 }
 
@@ -204,27 +206,17 @@ export function composeBackendRoutes({
 			() => clock.now(),
 		);
 		routes.webglPlay = createWebglPlayController(webglPlay, config, () => clock.now());
-		const fileAccess = createFileAccessController(
+		const fileAccess = createFileAccessService(
 			persistence.fileAccessRepository ?? (prisma && !hasSuppliedPersistence
 				? createFileAccessRepository(prisma) : createUnavailableFileAccessRepository()),
 			config,
 			() => clock.now(),
 			(bucket, key, options) => protectedDownloadPresigner.presign(bucket, key, { ttlSec: 60, ...options }),
-			assetsBanned!.authorizeDownload,
+			assetsBanned!.assetsService.prepareAssetDownload,
 			webglPlay.resolveRuntime,
 		);
-		routes.fileAccess = fileAccess;
-		routes.assets = async app => {
-			app.addHook('onSend', async (request, reply, payload) => {
-				const location = reply.getHeader('location');
-				if (reply.statusCode === 302 && typeof location === 'string') {
-					const grant = await fileAccess.issue(new URL(request.url, config.API_PUBLIC_URL).toString(), { ...request, downloadAlreadyChecked: true });
-					reply.header('location', grant.url).header('Cache-Control', 'private, no-store');
-				}
-				return payload;
-			});
-			await app.register(baseRoutes.assets);
-		};
+  routes.fileAccess = createFileAccessController(fileAccess);
+  routes.assets = createAssetsController({ service: assetsBanned!.assetsService, issueAssetDownload: fileAccess.issueAssetDownload });
 	}
 	if (!hasSuppliedRoutes) {
 		const changes = persistence.projectChangeRepository

@@ -1,3 +1,5 @@
+import { createDownloadRestriction } from '../modules/admin/banned-ip/runtime.js';
+import { createBanMutationQueue } from '../shared/ban-mutation-queue.js';
 import { readFile } from 'node:fs/promises';
 import Fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,20 +15,14 @@ const mocks = {
 	addBan: vi.fn(),
 };
 
-const service = createAssetsService({
-	presignTtlSec: 45,
-	presign: mocks.presign,
-	wakeDeletionWorker: vi.fn(),
-	loadProjectWithAccess: vi.fn(),
-	downloadLimiter: { add: mocks.addBan, check: mocks.limit },
-	logger: { info: vi.fn(), warn: mocks.warn, error: vi.fn() },
-	repository: {
-		findAssetByIdForDownload: mocks.findById,
-		upsertBannedIp: mocks.upsertBan,
-		findAssetByIdWithProject: vi.fn(),
-		claimAssetForDeletion: vi.fn(),
-		completeAssetDeletion: vi.fn(),
-	},
+const service = createAssetsService({ protectedBucket: 'canonical-protected',
+ repository: { findAssetByIdForDownload: mocks.findById },
+ deletion: { run: vi.fn() },
+ checkDownloadLimit: createDownloadRestriction({
+  gate: { check: mocks.limit, add: mocks.addBan, remove: vi.fn(), warm: vi.fn(), isReady: () => true },
+  repository: { upsertBannedIp: mocks.upsertBan }, mutateBan: createBanMutationQueue(),
+ }),
+ wakeDeletionWorker: vi.fn(), logger: { error: vi.fn() },
 });
 
 function asset(options: {
@@ -46,7 +42,7 @@ function asset(options: {
 		representations: options.representations ?? [{
 			role: 'ORIGINAL', bucket: 'canonical-protected', objectKey: 'assets/42/original/g1', state: 'READY',
 		}],
-		project: options.project === null ? null : {
+		project: options.project === null ? null : { visibility: 'PUBLIC', exhibition: { visibility: 'PUBLIC' }, changeRequestDraft: null,
 			creatorId: options.creatorId ?? 1,
 			title: '별빛 게임',
 			status: options.projectStatus ?? 'PUBLISHED',
@@ -71,19 +67,9 @@ describe('canonical protected asset capability', () => {
 
 	it('prefers canonical ORIGINAL and returns only a short redirect capability', async () => {
 		mocks.findById.mockResolvedValue(asset());
-		const response = await service.downloadAssetById(42, 'original', '203.0.113.1', undefined);
+		const response = await service.prepareAssetDownload(42, 'original', '203.0.113.1', undefined);
 
-		expect(mocks.presign).toHaveBeenCalledWith(
-			'canonical-protected',
-			'assets/42/original/g1',
-			expect.objectContaining({ ttlSec: 45, responseContentDisposition: expect.any(String) }),
-		);
-		expect(response).toEqual({
-			status: 302,
-			headers: { 'Referrer-Policy': 'no-referrer' },
-			location: 'https://garage.test/signed',
-		});
-		expect(response.body).toBeUndefined();
+		expect(response).toEqual({ assetId: 42, representation: { role: 'ORIGINAL', bucket: 'canonical-protected', objectKey: 'assets/42/original/g1' } });
 		expect(mocks.limit).toHaveBeenCalledWith(
 			'203.0.113.1',
 			'anonymous:203.0.113.1:DOWNLOAD_ORIGINAL:42',
@@ -93,7 +79,7 @@ describe('canonical protected asset capability', () => {
 	it('registers only the canonical assetId+variant route', async () => {
 		mocks.findById.mockResolvedValue(asset());
 		const app = Fastify();
-		await app.register(createAssetsController({ service }), { prefix: '/api' });
+		await app.register(createAssetsController({ service, issueAssetDownload: async () => ({ url: 'https://garage.test/signed', token: null, expiresAt: null }) }), { prefix: '/api' });
 		await app.ready();
 		try {
 			const canonical = await app.inject({
@@ -119,8 +105,7 @@ describe('canonical protected asset capability', () => {
 				{ role: 'PLAYBACK', bucket: 'private', objectKey: 'video/playback', state: 'READY' },
 			],
 		}));
-		await service.downloadAssetById(42, 'playback', '203.0.113.2', undefined);
-		expect(mocks.presign).toHaveBeenCalledWith('private', 'video/playback', { ttlSec: 45 });
+		await expect(service.prepareAssetDownload(42, 'playback', '203.0.113.2', undefined)).resolves.toMatchObject({ representation: { objectKey: 'video/playback' } });
 	});
 
 	it('fails closed for a missing/non-READY canonical row and never maps playback to original', async () => {
@@ -128,11 +113,11 @@ describe('canonical protected asset capability', () => {
 			kind: 'VIDEO',
 			representations: [{ role: 'PLAYBACK', bucket: 'private', objectKey: 'pending', state: 'VERIFYING' }],
 		}));
-		await expect(service.downloadAssetById(42, 'playback', '203.0.113.4', undefined))
+		await expect(service.prepareAssetDownload(42, 'playback', '203.0.113.4', undefined))
 			.rejects.toMatchObject({ statusCode: 404 });
 
 		mocks.findById.mockResolvedValue(asset({ kind: 'VIDEO', representations: [] }));
-		await expect(service.downloadAssetById(42, 'playback', '203.0.113.4', undefined))
+		await expect(service.prepareAssetDownload(42, 'playback', '203.0.113.4', undefined))
 			.rejects.toMatchObject({ statusCode: 404 });
 		expect(mocks.presign).not.toHaveBeenCalled();
 	});
@@ -146,44 +131,41 @@ describe('canonical protected asset capability', () => {
 			],
 		}));
 
-		await expect(service.downloadAssetById(42, 'original', '203.0.113.5', undefined))
-			.resolves.toMatchObject({ status: 302, location: 'https://garage.test/signed' });
-		expect(mocks.presign).toHaveBeenCalledWith(
-			'private', 'video/original.mov', { ttlSec: 45 },
-		);
-		await expect(service.downloadAssetById(42, 'playback', '203.0.113.5', undefined))
+		await expect(service.prepareAssetDownload(42, 'original', '203.0.113.5', undefined))
+			.resolves.toMatchObject({ assetId: 42 });
+		await expect(service.prepareAssetDownload(42, 'playback', '203.0.113.5', undefined))
 			.rejects.toMatchObject({ statusCode: 404 });
 	});
 
 	it('preserves public and admin/creator/member authorization semantics', async () => {
 		for (const projectStatus of ['PUBLISHED', 'ARCHIVED']) {
 			mocks.findById.mockResolvedValue(asset({ kind: 'VIDEO', projectStatus }));
-			await expect(service.downloadAssetById(42, 'original', '203.0.113.7', undefined))
-				.resolves.toMatchObject({ status: 302 });
+			await expect(service.prepareAssetDownload(42, 'original', '203.0.113.7', undefined))
+				.resolves.toMatchObject({ assetId: 42 });
 		}
 
 		mocks.findById.mockResolvedValue(asset({ projectStatus: 'PRIVATE', creatorId: 10, memberIds: [11] }));
-		await expect(service.downloadAssetById(42, 'original', '203.0.113.7', undefined))
+		await expect(service.prepareAssetDownload(42, 'original', '203.0.113.7', undefined))
 			.rejects.toMatchObject({ statusCode: 401 });
 		for (const actor of [
 			{ id: 10, role: 'USER' as const },
 			{ id: 11, role: 'USER' as const },
 			{ id: 99, role: 'ADMIN' as const },
 		]) {
-			await expect(service.downloadAssetById(42, 'original', '203.0.113.7', actor))
-				.resolves.toMatchObject({ status: 302 });
+			await expect(service.prepareAssetDownload(42, 'original', '203.0.113.7', actor))
+				.resolves.toMatchObject({ assetId: 42 });
 		}
 	});
 
 	it('authorizes and checks READY before limiting or signing', async () => {
 		mocks.findById.mockResolvedValue(asset({ projectStatus: 'PRIVATE', creatorId: 1, assetStatus: 'VERIFYING' }));
-		await expect(service.downloadAssetById(
+		await expect(service.prepareAssetDownload(
 			42, 'original', '203.0.113.8', { id: 2, role: 'USER' },
 		)).rejects.toMatchObject({ statusCode: 403 });
 		expect(mocks.limit).not.toHaveBeenCalled();
 
 		mocks.findById.mockResolvedValue(asset({ assetStatus: 'VERIFYING' }));
-		await expect(service.downloadAssetById(42, 'original', '203.0.113.8', undefined))
+		await expect(service.prepareAssetDownload(42, 'original', '203.0.113.8', undefined))
 			.rejects.toMatchObject({ statusCode: 404 });
 		expect(mocks.limit).not.toHaveBeenCalled();
 		expect(mocks.presign).not.toHaveBeenCalled();
@@ -192,13 +174,13 @@ describe('canonical protected asset capability', () => {
 	it('throttles a principal but persists a ban only at the IP abuse ceiling', async () => {
 		mocks.findById.mockResolvedValue(asset());
 		mocks.limit.mockReturnValueOnce({ status: 'rate_limited', retryAfterSec: 9 });
-		await expect(service.downloadAssetById(
+		await expect(service.prepareAssetDownload(
 			42, 'original', '203.0.113.9', { id: 50, role: 'USER' },
 		)).rejects.toMatchObject({ statusCode: 429, code: 'RATE_LIMITED', details: { retryAfterSec: 9 } });
 		expect(mocks.upsertBan).not.toHaveBeenCalled();
 
 		mocks.limit.mockReturnValueOnce({ status: 'abuse_ceiling' });
-		await expect(service.downloadAssetById(
+		await expect(service.prepareAssetDownload(
 			42, 'original', '203.0.113.9', { id: 50, role: 'USER' },
 		)).rejects.toMatchObject({ statusCode: 403 });
 		expect(mocks.upsertBan).toHaveBeenCalledWith(
@@ -210,10 +192,10 @@ describe('canonical protected asset capability', () => {
 		mocks.findById.mockResolvedValue(asset());
 		mocks.limit.mockReturnValue({ status: 'abuse_ceiling' });
 		mocks.upsertBan.mockRejectedValueOnce(new Error('database unavailable'));
-		await expect(service.downloadAssetById(42, 'original', '192.0.2.1', { id: 1, role: 'USER' })).rejects.toThrow('database unavailable');
+		await expect(service.prepareAssetDownload(42, 'original', '192.0.2.1', { id: 1, role: 'USER' })).rejects.toThrow('database unavailable');
 		expect(mocks.addBan).not.toHaveBeenCalled();
 		mocks.upsertBan.mockResolvedValueOnce({ disabledAt: new Date() });
-		await expect(service.downloadAssetById(42, 'original', '192.0.2.1', { id: 1, role: 'USER' })).rejects.toMatchObject({ statusCode: 429 });
+		await expect(service.prepareAssetDownload(42, 'original', '192.0.2.1', { id: 1, role: 'USER' })).rejects.toMatchObject({ statusCode: 429 });
 		expect(mocks.addBan).not.toHaveBeenCalled();
 	});
 
@@ -223,6 +205,6 @@ describe('canonical protected asset capability', () => {
 			readFile(new URL('../modules/assets/service.ts', import.meta.url), 'utf8'),
 		])).join('\n');
 		expect(graph).not.toMatch(/storage\.stream|GetObjectCommand|createReadStream|reply\.send\([^)]*body/);
-		expect(graph).toContain('deps.presign');
+		expect(graph).toContain('deps.issueAssetDownload');
 	});
 });

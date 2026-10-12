@@ -25,9 +25,9 @@ describe('protected download signing origin', () => {
 	});
 
 	it('wires protected routes to the narrow signer without object-body relay', async () => {
-		const source = await readFile(new URL('../modules/assets/composition.ts', import.meta.url), 'utf8');
+		const source = await readFile(new URL('../backend-context/routes.ts', import.meta.url), 'utf8');
 		expect(source).toContain('ProtectedDownloadPresigner');
-		expect(source).toContain('deps.protectedDownloadPresigner.presign');
+		expect(source).toContain('protectedDownloadPresigner.presign');
 		expect(source).not.toMatch(/deps\.storage\.(?:stream|readRange|presign)/);
 	});
 });

@@ -13,11 +13,11 @@ export interface AssetDeliveryPolicyRecord {
 	kind: string;
 	project: {
 		creatorId: number;
-		visibility?: Visibility;
-		exhibition?: { visibility: Visibility };
+		visibility: Visibility;
+		exhibition: { visibility: Visibility };
 		status: string;
 		members: { userId: number | null }[];
-		changeRequestDraft?: {
+		changeRequestDraft: {
 			actorId: number;
 			state: string;
 			project: { creatorId: number; members: { userId: number | null }[] } | null;
@@ -34,7 +34,7 @@ export function authorizeAssetDelivery(input: {
 	const { asset, actor } = input;
 	const projectIsPublic = asset.project.status === 'PUBLISHED'
 		|| asset.project.status === 'ARCHIVED';
-	if (projectIsPublic && canReadProject(actor ?? null, {...asset.project, visibility:asset.project.visibility ?? 'PUBLIC', exhibition:asset.project.exhibition ?? {visibility:'PUBLIC'}})) return true;
+	if (projectIsPublic && canReadProject(actor ?? null, asset.project)) return true;
 
 	if (!actor) return false;
 	if (actor.role === 'ADMIN' || actor.role === 'OPERATOR') return true;

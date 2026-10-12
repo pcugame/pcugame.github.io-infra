@@ -1,40 +1,30 @@
 import { createBanMutationQueue } from '../../shared/ban-mutation-queue.js';
 import type { FastifyPluginAsync } from 'fastify';
-import type { AppLogger, Clock } from '../../application/ports.js';
-import type { ProtectedDownloadPresigner } from '../../lib/storage.js';
+import type { AppLogger } from '../../application/ports.js';
 import type { DownloadRateLimiter } from '../../shared/download-rate-limit.js';
 import type { Env } from '../../config/env.js';
-import type { createProjectAccessService } from '../admin/project-access.service.js';
-import type { BannedIpServiceDependencies } from '../admin/banned-ip/service.js';
+import type { BannedIpServiceDependencies } from '../admin/banned-ip/ports.js';
 import { createBannedIpService } from '../admin/banned-ip/service.js';
 import { createBannedIpController } from '../admin/banned-ip/controller.js';
-import {
-	createAssetsService,
-	createBannedIpStartupGate,
-	createBannedIpWarmup,
-	type AssetsServiceDependencies,
-} from './service.js';
-import { createAssetsController } from './controller.js';
+import { createAssetsService } from './service.js';
+import type { AssetsServiceDependencies, AssetsService, AssetDeletionUnitOfWork } from './ports.js';
+import type { AutomaticBanRepository } from '../admin/banned-ip/ports.js';
+import { createBannedIpStartupGate, createBannedIpWarmup, createDownloadRestriction } from '../admin/banned-ip/runtime.js';
 import type { UploadLifecycleRuntime } from '../upload-lifecycle/ports.js';
 
 export interface AssetsBannedProductionGraph {
-	assetsController: FastifyPluginAsync;
- authorizeDownload: ReturnType<typeof createAssetsService>['downloadAssetById'];
+	assetsService: AssetsService;
 	bannedIpController: FastifyPluginAsync;
 	warmup: { start(): Promise<void> };
 }
 
 export interface AssetsBannedProductionDependencies {
-	config: Pick<Env, 'S3_BUCKET_PUBLIC' | 'S3_BUCKET_PROTECTED' | 'S3_PRESIGN_TTL_SEC' | 'DOWNLOAD_AUTO_IP_BAN_ENABLED'>;
-	assetsRepository: AssetsServiceDependencies['repository'] & {
-		findAllBannedIps(): Promise<{ ip: string }[]>;
-	};
-	bannedIpRepository: BannedIpServiceDependencies['repository'];
-	projectAccess: ReturnType<typeof createProjectAccessService>;
-	protectedDownloadPresigner: ProtectedDownloadPresigner;
+	config: Pick<Env, 'DOWNLOAD_AUTO_IP_BAN_ENABLED' | 'S3_BUCKET_PROTECTED'>;
+	assetsRepository: AssetsServiceDependencies['repository'];
+ deletion: AssetDeletionUnitOfWork;
+	bannedIpRepository: BannedIpServiceDependencies['repository'] & AutomaticBanRepository;
 	downloadLimiter: DownloadRateLimiter;
 	logger: AppLogger;
-	clock: Clock;
 	uploadLifecycle: UploadLifecycleRuntime;
 }
 
@@ -49,16 +39,14 @@ export function createAssetsBannedProductionGraph(
 	const gate = createBannedIpStartupGate(deps.downloadLimiter);
 	const mutateBan = createBanMutationQueue();
 
-	const assetsService = createAssetsService({
-		mutateBan,
-		presignTtlSec: deps.config.S3_PRESIGN_TTL_SEC,
-		presign: (bucket, key, options) => deps.protectedDownloadPresigner.presign(bucket, key, options),
-		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
-		loadProjectWithAccess: deps.projectAccess.loadProjectWithAccess,
-		downloadLimiter: gate,
-		logger: deps.logger,
-		repository: deps.assetsRepository,
-	});
+ const assetsService = createAssetsService({
+  protectedBucket: deps.config.S3_BUCKET_PROTECTED,
+  deletion: deps.deletion,
+  checkDownloadLimit: createDownloadRestriction({ gate, repository: deps.bannedIpRepository, mutateBan }),
+  wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
+  logger: deps.logger,
+  repository: deps.assetsRepository,
+ });
 	const bannedIpService = createBannedIpService({
 		mutateBan,
 		repository: deps.bannedIpRepository,
@@ -67,11 +55,10 @@ export function createAssetsBannedProductionGraph(
 	});
 
 	return {
-		assetsController: createAssetsController({ service: assetsService }),
-  authorizeDownload: assetsService.downloadAssetById,
+		assetsService,
 		bannedIpController: createBannedIpController({ service: bannedIpService }),
 		warmup: createBannedIpWarmup({
-			repository: deps.assetsRepository,
+			repository: deps.bannedIpRepository,
 			autoIpBanEnabled: deps.config.DOWNLOAD_AUTO_IP_BAN_ENABLED,
 			gate,
 			logger: deps.logger,

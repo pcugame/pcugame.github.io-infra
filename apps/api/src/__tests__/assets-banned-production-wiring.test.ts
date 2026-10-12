@@ -1,3 +1,4 @@
+import { createAssetsController } from '../modules/assets/controller.js';
 import Fastify, { type FastifyInstance, type FastifyPluginAsync } from 'fastify';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -87,7 +88,7 @@ function portHarness(initialBans: string[] = []) {
 	}));
 	const calls = {
 		assetFindFirst: vi.fn(),
-		bannedFindMany: vi.fn(async () => bans.map(({ ip }) => ({ ip }))),
+		bannedFindMany: vi.fn(async () => [...bans]),
 		bannedList: vi.fn(async () => [...bans]),
 		bannedFindById: vi.fn(async (id: number) => bans.find((row) => row.id === id) ?? null),
 		bannedDelete: vi.fn(async (id: number) => {
@@ -120,18 +121,12 @@ function portHarness(initialBans: string[] = []) {
 	};
 	return {
 		calls,
-		assetsRepository: {
-			findAssetByIdForDownload: calls.assetFindFirst,
-			upsertBannedIp: calls.bannedUpsert,
-			findAssetByIdWithProject: vi.fn(async () => null),
-			claimAssetForDeletion: vi.fn(async () => null),
-			completeAssetDeletion: vi.fn(async () => undefined),
-			findAllBannedIps: calls.bannedFindMany,
-		},
+  assetsRepository: { findAssetByIdForDownload: calls.assetFindFirst },
 		bannedIpRepository: {
-			findAllBannedIps: calls.bannedList,
+			findAllBannedIps: calls.bannedFindMany,
+   upsertBannedIp: calls.bannedUpsert,
 			findBannedIpById: calls.bannedFindById,
-			deleteBannedIp: calls.bannedDelete,
+			deactivateBan: calls.bannedDelete,
 			createManualBan: vi.fn(),
 		},
 		projectAccessRepository,
@@ -151,7 +146,7 @@ function protectedAsset() {
 			objectKey: 'assets/1/original/g1.zip',
 			state: 'READY',
 		}],
-		project: {
+		project: { visibility: 'PUBLIC', exhibition: { visibility: 'PUBLIC' }, changeRequestDraft: null,
 			creatorId: 1,
 			title: 'Context Game',
 			status: 'PUBLISHED',
@@ -195,20 +190,22 @@ function graphHarness(initialBans: string[] = [], maxHits = 30) {
 	const graph = createAssetsBannedProductionGraph({
 		config: testConfig,
 		assetsRepository: ports.assetsRepository,
+  deletion: { run: vi.fn() },
 		bannedIpRepository: ports.bannedIpRepository,
-		projectAccess: ports.projectAccess,
-		protectedDownloadPresigner: { presign: storage.calls.presign },
 		downloadLimiter: limiter,
 		logger: testLogger,
-		clock: { now: () => new Date('2026-07-22T00:00:00.000Z') },
 		uploadLifecycle,
 	});
-	return {
-		storage: storage.storage,
+ const assetsController = createAssetsController({ service: graph.assetsService, issueAssetDownload: async (id, variant, request) => {
+  const prepared = await graph.assetsService.prepareAssetDownload(id, variant, request.ip ?? '', request.currentUser);
+  return { url: `https://storage.test/${prepared.representation.bucket}/${prepared.representation.objectKey}`, token: null, expiresAt: null };
+ } });
+ return {
+  storage: storage.storage,
 		calls: { ...ports.calls, ...storage.calls },
 		scheduler,
 		limiter,
-		graph,
+		graph: { ...graph, assetsController },
 		uploadLifecycle,
 	};
 }
@@ -260,7 +257,7 @@ describe('assets/banned-IP production vertical slice', () => {
 		const failure = new Error('database unavailable');
 		harness.calls.bannedFindMany.mockRejectedValue(failure);
 		await expect(harness.graph.warmup.start()).rejects.toBe(failure);
-		harness.calls.bannedFindMany.mockResolvedValue([{ ip: '203.0.113.10' }]);
+		harness.calls.bannedFindMany.mockResolvedValue([]);
 		await expect(harness.graph.warmup.start()).rejects.toBe(failure);
 		expect(harness.calls.bannedFindMany).toHaveBeenCalledOnce();
 		expect(harness.limiter._bannedSize()).toBe(0);
@@ -289,11 +286,7 @@ describe('assets/banned-IP production vertical slice', () => {
 		});
 		expect(first.statusCode).toBe(302);
 		expect(first.headers.location).toBe('https://storage.test/pcu-protected/assets/1/original/g1.zip');
-		expect(recovered.calls.presign).toHaveBeenCalledWith(
-			'pcu-protected',
-			'assets/1/original/g1.zip',
-			expect.objectContaining({ responseContentDisposition: expect.any(String) }),
-		);
+		expect(recovered.calls.presign).not.toHaveBeenCalled();
 
 		const exceeded = await app.inject({
 			method: 'GET',
@@ -324,7 +317,7 @@ describe('assets/banned-IP production vertical slice', () => {
 						public: emptyRoute,
 						admin: graph.bannedIpController,
 						me: emptyRoute,
-						assets: graph.assetsController,
+						assets: emptyRoute,
 					}),
 				},
 				resources: {
@@ -381,7 +374,7 @@ describe('assets/banned-IP production vertical slice', () => {
 						public: emptyRoute,
 						admin: graph.bannedIpController,
 						me: emptyRoute,
-						assets: graph.assetsController,
+						assets: emptyRoute,
 					}),
 				},
 				resources: {

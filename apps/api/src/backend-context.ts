@@ -251,12 +251,10 @@ export async function createProductionBackendContext(
 			const graph = createAssetsBannedProductionGraph({
 				config,
 				assetsRepository: persistence.assetsRepository,
+  deletion: persistence.assetDeletion,
 				bannedIpRepository: persistence.bannedIpRepository,
-				projectAccess,
-				protectedDownloadPresigner,
 				downloadLimiter: protectedDownloads,
 				logger,
-				clock,
 				uploadLifecycle,
 			});
 			assetsBanned = graph;

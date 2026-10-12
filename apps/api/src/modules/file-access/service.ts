@@ -1,12 +1,11 @@
+import type { AssetDownloadSource } from '../assets/ports.js';
 import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/contracts';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { VisibilityActor as Actor } from '../../shared/visibility.js';
-export interface FileAccessRequest {currentUser?: NonNullable<Actor>; cookies: Record<string,string|undefined>; ip?:string; downloadAlreadyChecked?:boolean}
+import type { FileAccessRepository, FileAccessRequest, FileAccessService, PrepareAssetDownload, RuntimeResolver } from './ports.js';
 import type { Env } from '../../config/env.js';
 import { canReadProject, canReadVisibility, type VisibilityActor } from '../../shared/visibility.js';
 import { authorizeAssetDelivery } from '../assets/delivery-policy.js';
 import { forbidden, notFound } from '../../shared/errors.js';
-import type { FileAccessRepository } from './repository.js';
 
 export function safeObjectPath(value: string): string {
  if (!value || /[\\\u0000-\u001f]/.test(value)) throw notFound();
@@ -20,8 +19,7 @@ export function manifestIncludes(manifest: unknown, key: string): boolean {
  const objects = manifest.objects;
  return Array.isArray(objects) && objects.some(item => item && typeof item === 'object' && 'objectKey' in item && item.objectKey === key);
 }
-export type RuntimeResolver = (raw: string, headers: Record<string,string|string[]|undefined>) => Promise<{path:string;host:string;csp:string}>;
-export function createFileAccessService(repository: FileAccessRepository, config: Env, now = () => new Date(), presign?: (bucket:string,key:string,options?:{method?:'GET'|'HEAD';responseContentDisposition?:string})=>Promise<string>, checkDownload?: (assetId:number,variant:'original'|'playback',ip:string,actor:NonNullable<Actor>|undefined)=>Promise<unknown>, runtimeResolver?: RuntimeResolver) {
+export function createFileAccessService(repository: FileAccessRepository, config: Env, now = () => new Date(), presign?: (bucket:string,key:string,options?:{method?:'GET'|'HEAD';responseContentDisposition?:string})=>Promise<string>, prepareDownload?: PrepareAssetDownload, runtimeResolver?: RuntimeResolver): FileAccessService {
  const publicOrigin = config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL;
  const protectedOrigin = config.S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT ?? config.API_PUBLIC_URL;
  function parseUrl(value: string) {
@@ -61,29 +59,41 @@ export function createFileAccessService(repository: FileAccessRepository, config
   } else if (!asset.exhibition || !canReadVisibility(actor,asset.exhibition.visibility)) throw forbidden();
   return null;
  }
+ async function sessionActor(request: FileAccessRequest) {
+  const sid = request.currentUser ? request.cookies[config.SESSION_COOKIE_NAME] : undefined;
+  return sid ? actorForSession(sid) : null;
+ }
+ function objectUrl(bucket: string, key: string) {
+  const path = key.split('/').map(encodeURIComponent).join('/');
+  return bucket === config.S3_BUCKET_PUBLIC ? publicOrigin + '/' + path : protectedOrigin + '/' + bucket + '/' + path;
+ }
+ async function issueAssetDownload(assetId: number, variant: 'original' | 'playback', request: FileAccessRequest, source: AssetDownloadSource = 'download-route') {
+  if (!prepareDownload) throw notFound();
+  const actor = await sessionActor(request);
+  const { representation } = await prepareDownload(assetId, variant, request.ip ?? '', actor ?? undefined, source);
+  return issueTarget(parseUrl(objectUrl(representation.bucket, representation.objectKey)), request, actor);
+ }
  async function issue(value: string, request: FileAccessRequest) {
-  let input=value;
-  let parsed:URL;try{parsed=new URL(value);}catch{throw notFound();}
-  if(parsed.origin===new URL(config.API_PUBLIC_URL).origin){
-   const match=/^\/api\/assets\/(\d+)\/download$/.exec(parsed.pathname);
-   if(!match || !presign) throw notFound();
-   const asset=await repository.asset(Number(match[1]));
-   const role=asset?.kind==='WEBGL'?'WEBGL_SOURCE':parsed.searchParams.get('variant')==='playback'?'PLAYBACK':'ORIGINAL';
-   const representation=asset?.representations.find(r=>r.role===role && r.state==='READY');
-   if(!representation || asset?.status!=='READY') throw notFound();
-   input=representation.bucket===config.S3_BUCKET_PUBLIC ? publicOrigin+'/'+representation.objectKey.split('/').map(encodeURIComponent).join('/') : await presign(representation.bucket,representation.objectKey);
+  let parsed: URL; try { parsed = new URL(value); } catch { throw notFound(); }
+  if (parsed.origin === new URL(config.API_PUBLIC_URL).origin) {
+   const match = /^\/api\/assets\/(\d+)\/download$/.exec(parsed.pathname);
+   if (!match) throw notFound();
+   return issueAssetDownload(Number(match[1]), parsed.searchParams.get('variant') === 'playback' ? 'playback' : 'original', request, 'canonical-url');
   }
-  const target = parseUrl(input);
-  const sid=request.currentUser?request.cookies[config.SESSION_COOKIE_NAME]:undefined;
-  const actor = sid ? await actorForSession(sid) : null;
-  const deployment = await authorize(target.bucket,target.objectKey,actor);
-  if(target.bucket===config.S3_BUCKET_PROTECTED && checkDownload && !request.downloadAlreadyChecked){
-   const representation=await repository.findRepresentation(target.bucket,target.objectKey);
-   if(!representation && !deployment) throw forbidden();
-   const assetId=representation?.asset.id??deployment?.sourceRepresentation.assetId;
-   if(!assetId) throw forbidden();
-   await checkDownload(assetId,representation?.role==='PLAYBACK'?'playback':'original',request.ip??'',actor??undefined);
+  const target = parseUrl(value);
+  const actor = await sessionActor(request);
+  await authorize(target.bucket, target.objectKey, actor);
+  if (target.bucket === config.S3_BUCKET_PROTECTED && prepareDownload) {
+   const representation = await repository.findRepresentation(target.bucket, target.objectKey);
+   const deployment = representation ? null : await repository.findDeployment(target.bucket, target.objectKey);
+   const assetId = representation?.asset.id ?? deployment?.sourceRepresentation.assetId;
+   if (!assetId) throw forbidden();
+   await prepareDownload(assetId, representation?.role === 'PLAYBACK' ? 'playback' : 'original', request.ip ?? '', actor ?? undefined, 'object-url');
   }
+  return issueTarget(target, request, actor);
+ }
+ async function issueTarget(target: ReturnType<typeof parseUrl>, request: FileAccessRequest, actor: VisibilityActor) {
+  const deployment = await authorize(target.bucket, target.objectKey, actor);
   let publicAccess = false;
   try {await authorize(target.bucket,target.objectKey,null);publicAccess=true;} catch { /* a session-bound capability is required */ }
   if (publicAccess && !deployment && target.bucket !== config.S3_BUCKET_PROTECTED) return {url:target.url.toString(),token:null,expiresAt:null};
@@ -102,7 +112,7 @@ export function createFileAccessService(repository: FileAccessRepository, config
   else target.url.searchParams.set('pcu_token',token);
   return {url:target.url.toString(),token,expiresAt:expiresAt.toISOString()};
  }
- return {issue, async renew(tokenId: string, request: FileAccessRequest) {
+ return {issue, issueAssetDownload, async renew(tokenId: string, request: FileAccessRequest) {
    const token = await repository.token(tokenId);
    if (!token || token.expiresAt <= now()) throw forbidden();
    const sessionId = request.cookies[config.SESSION_COOKIE_NAME];

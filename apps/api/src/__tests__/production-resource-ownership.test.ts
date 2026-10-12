@@ -482,9 +482,9 @@ describe('production BackendContext resource ownership', () => {
 			persistence: (() => {
 				const base = createScriptedBackendPersistence();
 				return createScriptedBackendPersistence({
-					assetsRepository: {
-						...base.assetsRepository,
-						findAllBannedIps: findBannedIps,
+					bannedIpRepository: {
+						...base.bannedIpRepository,
+						findAllBannedIps: async () => (await findBannedIps()).map(({ ip }, id) => ({ id, ip, reason: '', source: 'LEGACY' as const, disabledAt: null, createdAt: new Date() })),
 					},
 				});
 			})(),

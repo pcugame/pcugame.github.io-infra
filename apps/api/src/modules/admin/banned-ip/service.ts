@@ -1,37 +1,16 @@
 import { createBanMutationQueue } from '../../../shared/ban-mutation-queue.js';
 import { badRequest, conflict, isUniqueConstraintError, notFound } from '../../../shared/errors.js';
-import { normalizeIpTarget, type BannedIpItem, type BannedIpSource, type CreateBannedIpRequest } from '@pcu/contracts';
+import { normalizeIpTarget, type BannedIpItem, type CreateBannedIpRequest } from '@pcu/contracts';
 
-export interface BannedIpRecord {
-	id: number;
-	ip: string;
-	reason: string;
-	createdAt: Date;
-	source: BannedIpSource;
-	disabledAt: Date | null;
-}
-
-export interface BannedIpServiceDependencies {
-	autoIpBanEnabled?: boolean;
-	mutateBan?: ReturnType<typeof createBanMutationQueue>;
-	repository: {
-		findAllBannedIps(): Promise<BannedIpRecord[]>;
-		findBannedIpById(id: number): Promise<{ id: number; ip: string } | null>;
-		createManualBan(ip: string, reason: string, autoIpBanEnabled?: boolean): Promise<BannedIpRecord>;
-		deleteBannedIp(id: number): Promise<unknown>;
-	};
-	banCache: {
-		add(ip: string): void;
-		remove(ip: string): void;
-	};
-}
+import type { BannedIpRecord, BannedIpServiceDependencies } from './ports.js';
+import { isBanActive } from './policy.js';
 
 function serialize(record: BannedIpRecord, autoEnabled: boolean): BannedIpItem {
 	return {
 		id: record.id, ip: record.ip, reason: record.reason,
 		createdAt: record.createdAt.toISOString(), source: record.source,
 		disabledAt: record.disabledAt?.toISOString() ?? null,
-		active: record.disabledAt === null && (record.source !== 'AUTO' || autoEnabled),
+		active: isBanActive(record, autoEnabled),
 	};
 }
 
@@ -59,7 +38,7 @@ export async function registerBannedIp(deps: BannedIpServiceDependencies, input:
 export async function unbanIp(deps: BannedIpServiceDependencies, id: number): Promise<void> {
 	const record = await deps.repository.findBannedIpById(id);
 	if (!record) throw notFound('Banned IP record not found');
-	await deps.repository.deleteBannedIp(record.id);
+	await deps.repository.deactivateBan(record.id);
 	deps.banCache.remove(record.ip);
 }
 

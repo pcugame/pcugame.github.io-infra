@@ -1,3 +1,4 @@
+import { createFileAccessService } from '../modules/file-access/service.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
 import cookie from '@fastify/cookie';
@@ -81,7 +82,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   playRepository = createWebglPlayRepository(db);
   const play = createWebglPlayService(playRepository, config);
   await app.register(createWebglPlayController(play, config));
-  await app.register(createFileAccessController(createFileAccessRepository(db), config, undefined, undefined, undefined, play.resolveRuntime), { prefix: '/api' });
+  await app.register(createFileAccessController(createFileAccessService(createFileAccessRepository(db), config, undefined, undefined, undefined, play.resolveRuntime)), { prefix: '/api' });
  });
  beforeEach(async () => {
   config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED = true;
