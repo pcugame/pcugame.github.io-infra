@@ -7,7 +7,7 @@ import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
 import cookie from '@fastify/cookie';
 import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
+import { WebglNetworkBatchResponseSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema } from '@pcu/contracts';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import type { Env } from '../config/env.js';
 import { AppError } from '../shared/errors.js';
@@ -80,7 +80,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
    delete: id => db.authSession.deleteMany({ where: { id } }),
   } });
   await registerCsrf(app, config);
-  app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : error.statusCode ?? 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message } }));
+  app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : error.statusCode ?? 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message, ...(error instanceof AppError ? { details: error.details } : {}) } }));
   await app.register(createAuthController({ config, clock: { now: () => new Date() }, service: { loginWithGoogle: async () => { throw new Error('OAuth is outside this fixture'); }, logout: async () => {} } }), { prefix: '/api' });
   const network = createWebglNetworkService(createWebglNetworkRepository(db), config);
   await app.register(createWebglNetworkController(network, 'me'), { prefix: '/api/me' });
@@ -112,6 +112,62 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   const reviewed = WebglNetworkRequestSchema.parse(response.json().data); expect(reviewed.state).toBe('APPROVED'); expect(reviewed.events[0]).toMatchObject({ action: 'APPROVE', actorId: admin, policyVersion: 1 });
   const ownerList = WebglNetworkRequestListSchema.parse((await list()).json().data); expect(ownerList.policyVersion).toBe(1); expect(ownerList.items[0]).toEqual(reviewed);
   const adminList = await request('GET', '/api/admin/webgl-network-requests', adminSid); expect(adminList.statusCode).toBe(200); expect(WebglNetworkRequestListSchema.parse(adminList.json().data).policyVersion).toBeNull();
+ });
+ const batch = (items = [body('https://first.example.com:*'), body('wss://second.example.com:*')], session = sid) => request('POST', `/api/me/projects/${projectId}/webgl-network-requests/batch`, session, { items });
+ it('creates an ordered batch and independently approves/revokes its runtime policy', async () => {
+  const response = await batch(); expect(response.statusCode, response.body).toBe(201);
+  const rows = WebglNetworkBatchResponseSchema.parse(response.json().data).items;
+  expect(rows.map(row => row.origin)).toEqual(['https://first.example.com:*', 'wss://second.example.com:*']);
+  expect(WebglNetworkRequestListSchema.parse((await list()).json().data).items).toHaveLength(2);
+  for (const row of rows) expect((await review(row.id, 'approve')).statusCode).toBe(200);
+  const session = await grant();
+  expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: session.id } })).approvedOrigins.sort()).toEqual(rows.map(row => row.origin).sort());
+  expect((await review(rows[0]!.id, 'revoke')).statusCode).toBe(200);
+  const fresh = await grant();
+  expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: fresh.id } })).approvedOrigins).toEqual([rows[1]!.origin]);
+  expect((await gate(session)).statusCode).toBe(403);
+  expect((await gate(fresh)).statusCode).toBe(204);
+ });
+ it('rejects every invalid/protected/overlapping batch without saving its valid prefix', async () => {
+  for (const invalid of [body('https://localhost'), body(gameOrigin), { ...body('https://next.example.com'), purpose: '' }]) {
+   const result = await batch([body(), invalid]); expect(result.statusCode).toBe(400);
+   expect(result.json().error.details).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1 })]));
+   expect((await list()).json().data.items).toHaveLength(0);
+  }
+  expect((await batch([body('https://*.example.com:*'), body()])).statusCode).toBe(400);
+  expect((await batch([])).statusCode).toBe(400);
+  expect((await batch(Array.from({ length: 17 }, (_, i) => body(`https://host${i}.example.com`)))).statusCode).toBe(400);
+  expect((await list()).json().data.items).toHaveLength(0);
+ });
+ it('checks batch authentication, relationship and modification closure', async () => {
+  expect((await batch(undefined, '')).statusCode).toBe(401);
+  expect((await batch(undefined, outsiderSid)).statusCode).toBe(403);
+  expect((await batch(undefined, adminSid)).statusCode).toBe(403);
+  expect((await batch(undefined, memberSid)).statusCode).toBe(201);
+  await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: false } });
+  expect((await batch([body()])).statusCode).toBe(403);
+  expect((await list()).json().data.items).toHaveLength(2);
+ });
+ it('rolls back a saved prefix when a later database write fails', async () => {
+  await db.$executeRawUnsafe("ALTER TABLE webgl_network_requests ADD CONSTRAINT batch_fixture_failure CHECK (purpose <> 'batch-storage-failure')");
+  try {
+   expect((await batch([body(), { ...body('https://next.example.com'), purpose: 'batch-storage-failure' }])).statusCode).toBe(500);
+   expect((await list()).json().data.items).toHaveLength(0);
+  } finally { await db.$executeRawUnsafe('ALTER TABLE webgl_network_requests DROP CONSTRAINT batch_fixture_failure'); }
+ });
+ it('serializes concurrent batches and rejects active duplicates without a partial write', async () => {
+  const responses = await Promise.all([batch(), batch()]);
+  expect(responses.map(result => result.statusCode).sort()).toEqual([201, 409]);
+  const conflict = await batch([body(), body('https://first.example.com:*')]);
+  expect(conflict.statusCode).toBe(409);
+  expect(conflict.json().error.details).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, field: 'origin' })]));
+  expect((await list()).json().data.items).toHaveLength(2);
+ });
+ it('permits overlap with existing approvals at submission and enforces the batch size boundary', async () => {
+  await approved();
+  expect((await batch([body(external + ':*')])).statusCode).toBe(201);
+  const result = await batch(Array.from({ length: 16 }, (_, i) => body(`https://batch${i}.example.com`)));
+  expect(result.statusCode).toBe(201); expect(result.json().data.items).toHaveLength(16);
  });
  it('checks ownership, linked membership, exhibition closure, authentication and review role', async () => {
   expect((await list(outsiderSid)).statusCode).toBe(403); expect((await create(external, outsiderSid)).statusCode).toBe(403);

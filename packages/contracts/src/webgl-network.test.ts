@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ConnectionRule, ProjectConnectionPolicy, CreateWebglNetworkRequestSchema, validateWebglNetworkOrigin } from './webgl-network.js';
+import { CreateWebglNetworkBatchSchema, ConnectionRule, ProjectConnectionPolicy, CreateWebglNetworkRequestSchema, validateWebglNetworkOrigin } from './webgl-network.js';
 
 describe('exact browser connection origins', () => {
  it('accepts canonical public secure origins and transport-specific ports', () => {
@@ -90,5 +90,21 @@ describe('explicit all-port policies', () => {
   }
   expect(() => new ProjectConnectionPolicy(['https://*.example.com:*'], ['api.example.com'])).toThrow(/storage/);
   expect(() => new ProjectConnectionPolicy(['wss://api.example.com:*'], ['api.example.com'])).toThrow(/storage/);
+ });
+});
+
+describe('connection batches', () => {
+ const item = (origin: string) => ({ origin, mode: 'HTTPS', purpose: 'Bundles', cors: 'Configured' });
+ it('requires one to sixteen complete entries', () => {
+  expect(CreateWebglNetworkBatchSchema.safeParse({ items: [] }).success).toBe(false);
+  const items = Array.from({ length: 16 }, (_, i) => item(`https://host${i}.example.com:*`));
+  expect(CreateWebglNetworkBatchSchema.parse({ items }).items).toHaveLength(16);
+  expect(CreateWebglNetworkBatchSchema.safeParse({ items: [...items, item('https://extra.example.com')] }).success).toBe(false);
+  expect(CreateWebglNetworkBatchSchema.safeParse({ items: [items[0], { ...items[1], cors: '' }] }).success).toBe(false);
+ });
+ it.each([['https://same.example.com', 'https://same.example.com'], ['https://*.example.com:*', 'https://game.example.com:8443']])('identifies both overlapping items: %s and %s', (a, b) => {
+  const result = CreateWebglNetworkBatchSchema.safeParse({ items: [item(a), item(b)] });
+  expect(result.success).toBe(false);
+  if (!result.success) expect(result.error.issues.map(issue => issue.path)).toEqual([['items', 0, 'origin'], ['items', 1, 'origin']]);
  });
 });

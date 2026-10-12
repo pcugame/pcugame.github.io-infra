@@ -27,6 +27,10 @@ export function createWebglNetworkService(repository: WebglNetworkRepository, co
    if (isPrivilegedNetworkOrigin(input.origin, config)) throw badRequest('Site and storage origins cannot be approved as external connections', 'VALIDATION_ERROR');
    return repository.create(actor, projectId, input);
   },
+  async createBatch(actor: Actor, projectId: number, body: unknown) {
+   enabled();
+   return { items: await repository.createBatch(actor, projectId, body, privilegedHosts(config)) };
+  },
   async review(actor: Actor, id: string, action: 'approve' | 'reject' | 'revoke', body: unknown) {
    // Revocation remains usable while disabled so administrators can remove grants.
    if (action !== 'revoke') enabled();

@@ -39,3 +39,17 @@ export type WebglNetworkRequest = z.infer<typeof WebglNetworkRequestSchema>;
 export type WebglNetworkRequestList = z.infer<typeof WebglNetworkRequestListSchema>;
 export type WebglNetworkList = WebglNetworkRequestList;
 export type WebglNetworkCreateBody = CreateWebglNetworkRequest;
+
+export const CreateWebglNetworkBatchSchema = z.object({
+ items: z.array(CreateWebglNetworkRequestSchema).min(1).max(16),
+}).strict().superRefine(({ items }, ctx) => {
+ const rules = items.map(item => { try { return ConnectionRule.parse(item.origin, item.mode); } catch { return null; } });
+ rules.forEach((rule, index) => {
+  if (rule && rules.some((other, i) => i !== index && other?.overlaps(rule))) {
+   ctx.addIssue({ code: 'custom', path: ['items', index, 'origin'], message: '같은 신청 목록의 다른 연결과 주소 또는 범위가 겹칩니다.' });
+  }
+ });
+});
+export const WebglNetworkBatchResponseSchema = z.object({ items: z.array(WebglNetworkRequestSchema).min(1).max(16) }).strict();
+export type CreateWebglNetworkBatch = z.infer<typeof CreateWebglNetworkBatchSchema>;
+export type WebglNetworkBatchResponse = z.infer<typeof WebglNetworkBatchResponseSchema>;

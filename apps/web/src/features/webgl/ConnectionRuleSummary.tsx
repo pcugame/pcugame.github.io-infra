@@ -1,4 +1,4 @@
-import { ConnectionRule, describeConnectionRule, type WebglNetworkRequest } from '@pcu/contracts';
+import { ConnectionRule, type WebglNetworkRequest } from '@pcu/contracts';
 
 export function ConnectionConflicts({ rule, items }: { rule: ConnectionRule; items: WebglNetworkRequest[] }) {
  const conflicts = items.filter(item => {
@@ -13,5 +13,17 @@ export function ConnectionConflicts({ rule, items }: { rule: ConnectionRule; ite
 }
 
 export function ConnectionRuleSummary({ rule, items }: { rule: ConnectionRule; items: WebglNetworkRequest[] }) {
- return <div aria-label="신청 미리보기"><p>신청 미리보기: <code>{rule.origin}</code></p><p>{describeConnectionRule(rule)}</p><ConnectionConflicts rule={rule} items={items} /></div>;
+ return <section className="network-rule-summary" aria-label="신청 미리보기">
+  <div className="network-rule-summary__header">
+   <p className="network-rule-summary__title">신청 미리보기</p>
+   <span className="network-rule-summary__protocol">{rule.mode}</span>
+  </div>
+  <p className="network-rule-summary__host">{rule.hostname}</p>
+  <dl className="network-rule-summary__facts">
+   <div><dt>호스트 범위</dt><dd>{rule.subdomains ? '하위 도메인만' : '이 호스트만'}<small>{rule.subdomains ? '입력 호스트 제외' : '하위 도메인 제외'}</small></dd></div>
+   <div><dt>허용 포트</dt><dd>{rule.port === '*' ? '모든 포트' : rule.port}<small>{rule.port === '*' ? '1–65535' : rule.port === 443 ? '기본 포트' : '지정한 포트만'}</small></dd></div>
+  </dl>
+  <details className="network-rule-summary__technical"><summary>CSP 문자열 상세 (읽기 전용)</summary><code>{rule.toCsp()}</code></details>
+  <ConnectionConflicts rule={rule} items={items} />
+ </section>;
 }

@@ -1,3 +1,4 @@
+import { CreateWebglNetworkBatchSchema, WebglNetworkBatchResponseSchema } from '@pcu/contracts';
 import { WebglDiagnosticDataSchema } from '@pcu/contracts';
 import * as Voting from '@pcu/contracts';
 import { ExternalLinkSchema, ExternalLinkServiceSchema } from '@pcu/contracts';
@@ -240,6 +241,7 @@ const changeRouteContracts: RouteRuntimeContract[] = [];
 const networkRouteContracts: RouteRuntimeContract[] = [
  contract({ method: 'GET', url: '/api/me/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
  contract({ method: 'POST', url: '/api/me/projects/:id/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: CreateWebglNetworkRequestSchema, response: jsonResponse(WebglNetworkRequestSchema, 201) }),
+ contract({ method: 'POST', url: '/api/me/projects/:id/webgl-network-requests/batch', family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema, body: CreateWebglNetworkBatchSchema, response: jsonResponse(WebglNetworkBatchResponseSchema, 201) }),
  contract({ method: 'GET', url: '/api/admin/webgl-network-requests', family: 'webgl-network', bodyBoundary: 'none', responseBoundary: 'json', params: EmptyObjectSchema, querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(WebglNetworkRequestListSchema) }),
  ...(['approve', 'reject', 'revoke'] as const).map(action => contract({ method: 'POST', url: `/api/admin/webgl-network-requests/:id/${action}`, family: 'webgl-network', bodyBoundary: 'json', responseBoundary: 'json', params: ChangeIdParamsSchema, querystring: EmptyObjectSchema, body: ReviewWebglNetworkRequestSchema, response: jsonResponse(WebglNetworkRequestSchema) })),
 ];

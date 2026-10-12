@@ -52,18 +52,22 @@ export async function verifyNetworkFormBrowser(app: FastifyInstance, db: PrismaC
   await page.goto(`${browserWebOrigin}/me/projects/${projectId}/network`);
   const form = page.locator('#network-new-request');
   await form.waitFor();
-  for (const [host, mode, scope, origin] of [
+  let rowIndex = 0;
+  for (const [host, mode, scope] of [
    ['scores.example.com', 'HTTPS', 'exact', 'https://scores.example.com:*'],
-   ['wss://*.game.example.com:*', 'WSS', 'subdomains', 'wss://*.game.example.com:*'],
+   ['game.example.com', 'WSS', 'subdomains', 'wss://*.game.example.com:*'],
   ]) {
-   await form.getByLabel('호스트명', { exact: true }).fill(host);
-   await form.getByLabel('연결 방식', { exact: true }).selectOption(mode);
-   await form.getByLabel('호스트 범위', { exact: true }).selectOption(scope);
+   if (rowIndex) await form.getByRole('button', { name: '＋ 연결 추가', exact: true }).click();
+   const entry = form.getByRole('group', { name: `연결 ${rowIndex + 1}`, exact: true });
+   await entry.getByLabel('도메인 (호스트명)', { exact: true }).fill(host);
+   await entry.getByLabel('연결 방식', { exact: true }).selectOption(mode);
+   await entry.getByLabel('호스트 범위', { exact: true }).selectOption(scope);
    await form.getByLabel('사용 목적', { exact: true }).fill('Browser to PostgreSQL policy boundary');
    await form.getByLabel('CORS / 인증 설정 계획', { exact: true }).fill('CORS and external authentication owned by fixture team');
-   await form.getByRole('button', { name: '검토 신청', exact: true }).click();
-   await page.getByRole('heading', { name: origin, exact: true }).waitFor();
+   rowIndex++;
   }
+  await form.getByRole('button', { name: '연결 2개 신청', exact: true }).click();
+  await page.locator('.network-request').filter({ has: page.getByText('https://scores.example.com:*', { exact: true }) }).waitFor();
   const origins = ['https://scores.example.com:*', 'wss://*.game.example.com:*'];
   const saved = await db.webglNetworkRequest.findMany({ where: { projectId } });
   expect(saved.map(row => row.origin).sort()).toEqual([...origins].sort());
@@ -78,7 +82,8 @@ export async function verifyNetworkFormBrowser(app: FastifyInstance, db: PrismaC
   await identity(adminSession);
   await page.goto(`${browserWebOrigin}/admin/webgl-network`);
   for (const origin of origins) {
-   const card = page.locator('article').filter({ has: page.getByRole('heading', { name: origin, exact: true }) });
+   const requestId = saved.find(row => row.origin === origin)!.id;
+   const card = page.locator('article').filter({ has: page.locator(`#reason-${requestId}`) });
    await card.getByLabel('검토 사유').fill('Reviewed actual host, scheme and all-port policy');
    await card.getByRole('button', { name: '승인', exact: true }).click();
    await card.waitFor({ state: 'detached' });

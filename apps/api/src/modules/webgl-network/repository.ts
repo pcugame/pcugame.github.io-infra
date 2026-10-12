@@ -1,7 +1,7 @@
-import { ProjectConnectionPolicy, validateWebglNetworkOrigin, type CreateWebglNetworkRequest, type WebglNetworkRequest } from '@pcu/contracts';
+import { ConnectionRule, CreateWebglNetworkBatchSchema, ProjectConnectionPolicy, validateWebglNetworkOrigin, type CreateWebglNetworkRequest, type WebglNetworkRequest } from '@pcu/contracts';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type { Actor } from '../../application/http-input.js';
-import { conflict, forbidden, notFound, isUniqueConstraintError } from '../../shared/errors.js';
+import { AppError, badRequest, conflict, forbidden, notFound, isUniqueConstraintError } from '../../shared/errors.js';
 import { assertProjectWriteAccessInTransaction } from '../admin/project-access.service.js';
 
 const eventsInclude = { events: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } satisfies Prisma.WebglNetworkRequestInclude;
@@ -20,6 +20,40 @@ function staff(actor: Actor) {
  if (!['ADMIN', 'OPERATOR'].includes(actor.role)) throw forbidden('Administrator review is required');
 }
 export function createWebglNetworkRepository(client: PrismaClient) {
+ async function createBatch(actor: Actor, projectId: number, body: unknown, blockedHosts: readonly string[] = []) {
+  let writingIndex = 0;
+  try {
+   return await client.$transaction(async tx => {
+    const project = await assertProjectWriteAccessInTransaction(tx, actor, projectId);
+    const related = project.creatorId === actor.id || await tx.projectMember.findFirst({ where: { projectId, userId: actor.id } });
+    if (!related) throw forbidden('Only the creator or linked members may request connections');
+    if (project.isModificationEnabled === false) throw forbidden('Project modifications are closed for this exhibition');
+    const parsed = CreateWebglNetworkBatchSchema.safeParse(body);
+    if (!parsed.success) throw badRequest('연결 입력을 확인하세요.', 'VALIDATION_ERROR', parsed.error.issues.map(issue => ({
+     index: typeof issue.path[1] === 'number' ? issue.path[1] : null, field: String(issue.path[2] ?? 'items'), message: issue.message,
+    })));
+    const active = await tx.webglNetworkRequest.findMany({ where: { projectId, state: { in: ['PENDING', 'APPROVED'] } }, select: { origin: true } });
+    const errors = parsed.data.items.flatMap((input, index) => {
+     if (blockedHosts.some(host => ConnectionRule.parse(input.origin).includesHostname(host))) return [{ index, field: 'origin', message: '사이트·스토리지 보호 호스트는 신청할 수 없습니다.', conflict: false }];
+     if (active.some(row => row.origin === input.origin)) return [{ index, field: 'origin', message: '이미 대기 중이거나 승인된 주소입니다.', conflict: true }];
+     return [];
+    });
+    if (errors.length) throw new AppError(errors.some(error => !error.conflict) ? 400 : 409, '연결 입력을 확인하세요.', errors.some(error => !error.conflict) ? 'VALIDATION_ERROR' : 'CONFLICT', errors);
+    const source = await tx.project.findUniqueOrThrow({ where: { id: projectId }, select: { title: true } });
+    const rows: WebglNetworkRequest[] = [];
+    for (const [index, input] of parsed.data.items.entries()) {
+     writingIndex = index;
+     rows.push(present(await tx.webglNetworkRequest.create({ data: {
+      ...input, projectId, originalProjectId: projectId, projectTitle: source.title, requesterId: actor.id,
+     }, include: eventsInclude })));
+    }
+    return rows;
+   });
+  } catch (error) {
+   if (isUniqueConstraintError(error)) throw new AppError(409, 'An active request already exists for this origin', 'CONFLICT', [{ index: writingIndex, field: 'origin', message: '이미 대기 중이거나 승인된 주소입니다.' }]);
+   throw error;
+  }
+ }
  return {
   listOwner: async (actor: Actor, projectId: number) => client.$transaction(async tx => {
    const project = await tx.project.findUnique({ where: { id: projectId }, include: { members: true, changeRequestDraft: true } });
@@ -32,25 +66,8 @@ export function createWebglNetworkRepository(client: PrismaClient) {
    staff(actor);
    return { items: (await client.webglNetworkRequest.findMany({ include: eventsInclude, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }] })).map(present), policyVersion: null };
   },
-  create: async (actor: Actor, projectId: number, input: CreateWebglNetworkRequest) => {
-   try {
-    return await client.$transaction(async tx => {
-     const project = await assertProjectWriteAccessInTransaction(tx, actor, projectId);
-     // Staff privileges do not turn an unrelated administrator into the owner.
-     const related = project.creatorId === actor.id || await tx.projectMember.findFirst({ where: { projectId, userId: actor.id } });
-     if (!related) throw forbidden('Only the creator or linked members may request connections');
-     if (project.isModificationEnabled === false) throw forbidden('Project modifications are closed for this exhibition');
-     if (await tx.webglNetworkRequest.findFirst({ where: { projectId, origin: input.origin, state: { in: ['PENDING', 'APPROVED'] } } })) throw conflict('An active request already exists for this origin');
-     const source = await tx.project.findUniqueOrThrow({ where: { id: projectId }, select: { title: true } });
-     return present(await tx.webglNetworkRequest.create({ data: {
-      ...input, projectId, originalProjectId: projectId, projectTitle: source.title, requesterId: actor.id,
-     }, include: eventsInclude }));
-    });
-   } catch (error) {
-    if (isUniqueConstraintError(error)) throw conflict('An active request already exists for this origin');
-    throw error;
-   }
-  },
+  create: async (actor: Actor, projectId: number, input: CreateWebglNetworkRequest) => (await createBatch(actor, projectId, { items: [input] }))[0]!,
+  createBatch,
   review: async (actor: Actor, id: string, action: 'approve' | 'reject' | 'revoke', reason: string, at: Date, blockedHosts: readonly string[] = []) => {
    staff(actor);
    return client.$transaction(async tx => {
@@ -89,5 +106,5 @@ export function createWebglNetworkRepository(client: PrismaClient) {
 export type WebglNetworkRepository = ReturnType<typeof createWebglNetworkRepository>;
 export function createUnavailableWebglNetworkRepository(): WebglNetworkRepository {
  const fail = async (): Promise<never> => { throw new Error('WebGL network policy persistence unavailable'); };
- return { listOwner: fail, listAdmin: fail, create: fail, review: fail };
+ return { listOwner: fail, listAdmin: fail, create: fail, createBatch: fail, review: fail };
 }

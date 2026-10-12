@@ -836,6 +836,18 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/api/me/projects/:projectId/webgl-network-requests/batch",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/admin/webgl-network-requests",
       "priority": "P1",

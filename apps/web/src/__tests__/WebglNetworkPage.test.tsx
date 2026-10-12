@@ -20,11 +20,11 @@ describe('WebGL external connection workflow', () => {
 		const post = vi.spyOn(api, 'post').mockResolvedValue(item);
 		mount();
 		await screen.findByText('등록된 신청이 없습니다.');
-		fireEvent.change(form().getByLabelText('호스트명'), { target: { value: 'assets.example.com' } });
+		fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: 'assets.example.com' } });
 		fireEvent.change(screen.getByLabelText('사용 목적'), { target: { value: 'Remote bundles' } });
 		fireEvent.change(screen.getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'Allow NAS origin' } });
-		fireEvent.click(screen.getByRole('button', { name: '검토 신청' }));
-		await waitFor(() => expect(post).toHaveBeenCalledWith('/api/me/projects/7/webgl-network-requests', { origin: 'https://assets.example.com:*', mode: 'HTTPS', purpose: 'Remote bundles', cors: 'Allow NAS origin' }));
+		fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
+		await waitFor(() => expect(post).toHaveBeenCalledWith('/api/me/projects/7/webgl-network-requests/batch', { items: [{ origin: 'https://assets.example.com:*', mode: 'HTTPS', purpose: 'Remote bundles', cors: 'Allow NAS origin' }] }));
 		expect(screen.getAllByText('https://nas.example.com').length).toBeGreaterThan(0);
 	});
 
@@ -35,70 +35,70 @@ describe('WebGL external connection workflow', () => {
   fireEvent.change(form().getByLabelText('포트 정책'), { target: { value: 'specific' } });
   fireEvent.change(form().getByLabelText('특정 포트'), { target: { value: port } });
   fireEvent.change(form().getByLabelText('호스트 범위'), { target: { value: 'subdomains' } });
-  fireEvent.change(form().getByLabelText('호스트명'), { target: { value: 'example.com' } });
+  fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: 'example.com' } });
   fireEvent.change(screen.getByLabelText('사용 목적'), { target: { value: 'Bundles' } });
   fireEvent.change(screen.getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'CORS enabled' } });
-  fireEvent.click(screen.getByRole('button', { name: '검토 신청' }));
-  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/me/projects/7/webgl-network-requests', expect.objectContaining({ origin: `https://*.example.com${suffix}` })));
- });
- it('retries only failed profile requests after partial success', async () => {
-  vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
-  const post = vi.spyOn(api, 'post').mockResolvedValueOnce(item).mockRejectedValueOnce(new Error('Temporary failure')).mockResolvedValue(item);
-  mount(); await screen.findByText('등록된 신청이 없습니다.');
-  fireEvent.change(screen.getByLabelText('서비스'), { target: { value: 'relay' } });
-  fireEvent.click(screen.getByLabelText('예시 1 선택')); fireEvent.click(screen.getByLabelText('예시 2 선택'));
-  fireEvent.change(screen.getByLabelText('예시 사용 목적'), { target: { value: 'Multiplayer' } });
-  fireEvent.change(screen.getByLabelText('예시 서버 설정 계획'), { target: { value: 'Origin and account configured' } });
-  const button = screen.getByRole('button', { name: '선택한 예시 신청 / 실패 항목 재시도' });
-  fireEvent.click(button);
-  await screen.findByText('이미 등록됨 · 재신청하지 않습니다.');
-  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(button);
-  await waitFor(() => expect(post).toHaveBeenCalledTimes(3));
-  expect(post.mock.calls.map(call => (call[1] as { origin: string }).origin)).toEqual(['https://authentication.example.com:*', 'https://allocation.example.com:*', 'https://allocation.example.com:*']);
+  fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/me/projects/7/webgl-network-requests/batch', { items: [expect.objectContaining({ origin: `https://*.example.com${suffix}` })] }));
  });
  it.each(['example.com:8443', 'example.com:443', 'https://example.com:8443', 'example.com/path', '*.example.com', 'localhost'])('rejects host input %s without discarding its port or scope', async host => {
   vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
   const post = vi.spyOn(api, 'post');
   mount(); await screen.findByText('등록된 신청이 없습니다.');
-  fireEvent.change(form().getByLabelText('호스트명'), { target: { value: host } });
+  fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: host } });
   fireEvent.change(screen.getByLabelText('사용 목적'), { target: { value: 'Bundles' } });
   fireEvent.change(screen.getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'CORS enabled' } });
-  fireEvent.click(screen.getByRole('button', { name: '검토 신청' }));
-  expect(await screen.findByRole('alert')).toBeTruthy();
-  expect((form().getByLabelText('호스트명') as HTMLInputElement).value).toBe(host);
+  fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
+  expect(await screen.findAllByRole('alert')).toBeTruthy();
+  expect((form().getByLabelText('도메인 (호스트명)') as HTMLInputElement).value).toBe(host);
   expect(post).not.toHaveBeenCalled();
+ });
+ it.each(['0', '65536', '443abc'])('associates invalid port %s with its field and prevents submission', async port => {
+  vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
+  const post = vi.spyOn(api, 'post');
+  mount(); await screen.findByText('등록된 신청이 없습니다.');
+  expect(form().queryByLabelText('특정 포트')).toBeNull();
+  fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: 'example.com' } });
+  fireEvent.change(form().getByLabelText('포트 정책'), { target: { value: 'specific' } });
+  fireEvent.change(form().getByLabelText('특정 포트'), { target: { value: port } });
+  expect(form().getByLabelText('특정 포트').getAttribute('aria-invalid')).toBe('true');
+  expect(form().queryByLabelText('신청 미리보기')).toBeNull();
+  fireEvent.change(screen.getByLabelText('사용 목적'), { target: { value: 'Bundles' } });
+  fireEvent.change(screen.getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'CORS enabled' } });
+  fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
+  expect(post).not.toHaveBeenCalled();
+  expect((form().getByLabelText('특정 포트') as HTMLInputElement).value).toBe(port);
  });
  it('submits subdomains with all ports without adding the root', async () => {
   vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
   const post = vi.spyOn(api, 'post').mockResolvedValue(item);
   mount(); await screen.findByText('등록된 신청이 없습니다.');
-  fireEvent.change(form().getByLabelText('호스트명'), { target: { value: 'example.com' } });
+  fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: 'example.com' } });
   fireEvent.change(form().getByLabelText('호스트 범위'), { target: { value: 'subdomains' } });
   fireEvent.change(screen.getByLabelText('사용 목적'), { target: { value: 'Bundles' } });
   fireEvent.change(screen.getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'CORS enabled' } });
-  fireEvent.click(screen.getByRole('button', { name: '검토 신청' }));
-  await waitFor(() => expect(post).toHaveBeenCalledExactlyOnceWith('/api/me/projects/7/webgl-network-requests', expect.objectContaining({ origin: 'https://*.example.com:*' })));
+  fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
+  await waitFor(() => expect(post).toHaveBeenCalledExactlyOnceWith('/api/me/projects/7/webgl-network-requests/batch', { items: [expect.objectContaining({ origin: 'https://*.example.com:*' })] }));
  });
- it('offers one Photon rule and preserves an edited numeric port in advanced settings', async () => {
+ it('uses the same strict host and numeric port fields for Photon', async () => {
   vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
   const post = vi.spyOn(api, 'post').mockResolvedValue(item);
   mount(); await screen.findByText('등록된 신청이 없습니다.');
   const profile = within(screen.getByRole('region', { name: '서비스별 신청 예시' }));
   expect(profile.getAllByRole('checkbox')).toHaveLength(1);
   fireEvent.click(profile.getByLabelText('예시 1 선택'));
-  fireEvent.change(profile.getByLabelText('호스트명'), { target: { value: 'game.example.com:19090' } });
-  fireEvent.change(profile.getByLabelText('예시 사용 목적'), { target: { value: 'Multiplayer' } });
-  fireEvent.change(profile.getByLabelText('예시 서버 설정 계획'), { target: { value: 'Origin configured' } });
+  fireEvent.change(profile.getByLabelText('도메인 (호스트명)'), { target: { value: 'game.example.com:19090' } });
   fireEvent.click(profile.getByRole('button'));
-  await profile.findByText(/숫자 포트는 고급 설정에/);
+  expect((await profile.findAllByRole('alert'))[0]!.textContent).toContain('호스트명만 입력하세요');
   expect(post).not.toHaveBeenCalled();
-  fireEvent.change(profile.getByLabelText('호스트명'), { target: { value: 'game.example.com' } });
+  fireEvent.change(profile.getByLabelText('도메인 (호스트명)'), { target: { value: 'game.example.com' } });
   fireEvent.change(profile.getByLabelText('호스트 범위'), { target: { value: 'exact' } });
   fireEvent.change(profile.getByLabelText('포트 정책'), { target: { value: 'specific' } });
   fireEvent.change(profile.getByLabelText('특정 포트'), { target: { value: '19090' } });
   fireEvent.click(profile.getByRole('button'));
-  await waitFor(() => expect(post).toHaveBeenCalledExactlyOnceWith('/api/me/projects/7/webgl-network-requests', expect.objectContaining({ origin: 'wss://game.example.com:19090' })));
+  expect(form().getAllByLabelText('도메인 (호스트명)')).toHaveLength(2);
+  expect(post).not.toHaveBeenCalled();
+  expect((form().getAllByLabelText('도메인 (호스트명)')[1] as HTMLInputElement).value).toBe('game.example.com');
  });
  it('shows actual all-port and legacy port scopes to reviewers without converting records', async () => {
   vi.spyOn(api, 'get').mockResolvedValue({ items: [item, { ...item, id: 'all', origin: 'wss://*.example.com:*', mode: 'WSS' }, { ...item, id: 'numeric', origin: 'https://other.example.com:8443' }], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
@@ -122,7 +122,7 @@ describe('WebGL external connection workflow', () => {
 		vi.spyOn(api, 'get').mockRejectedValue(new ApiError(404, 'Not Found', {}));
 		mount();
 		await screen.findByText(/아직 활성화되지/);
-		expect(screen.queryByRole('button', { name: '검토 신청' })).toBeNull();
+		expect(screen.queryByRole('button', { name: '연결 1개 신청' })).toBeNull();
 	});
 	it('explains the owner and administrator steps with the next launch timing', async () => {
 		vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
@@ -134,7 +134,7 @@ describe('WebGL external connection workflow', () => {
 		expect(screen.getByText('작품 참여자 신청 화면')).toBeTruthy();
 		expect(screen.getByRole('link', { name: '새 연결 신청' }).getAttribute('href')).toBe('#network-new-request');
 		expect(document.getElementById('network-new-request')?.tagName).toBe('FORM');
-		expect(form().getByRole('textbox', { name: '호스트명' }).getAttribute('placeholder')).toBe('assets.example.com');
+		expect(form().getByRole('textbox', { name: '도메인 (호스트명)' }).getAttribute('placeholder')).toBe('assets.example.com');
 	});
 	it('defaults administrator to pending review and filters with counts', async () => {
 		vi.spyOn(api, 'get').mockResolvedValue({ items: [item, { ...item, id: 'approved-1', origin: 'https://approved.example.com', state: 'APPROVED' }], gameOrigin: 'https://nas.example.com', policyVersion: null });
@@ -142,7 +142,7 @@ describe('WebGL external connection workflow', () => {
 		await screen.findByRole('button', { name: '승인' });
 		expect(screen.getByText('관리자 검토 화면')).toBeTruthy();
 		expect(screen.queryByText('https://approved.example.com')).toBeNull();
-		expect(screen.queryByRole('button', { name: '검토 신청' })).toBeNull();
+		expect(screen.queryByRole('button', { name: '연결 1개 신청' })).toBeNull();
 		fireEvent.click(screen.getByRole('button', { name: '승인 1' }));
 		expect(screen.getByText('https://approved.example.com')).toBeTruthy();
 		expect(screen.queryByRole('button', { name: '승인' })).toBeNull();
@@ -198,27 +198,34 @@ describe('WebGL external connection workflow', () => {
 		mount();
 		await screen.findByText('등록된 신청이 없습니다.');
 		fireEvent.change(form().getByLabelText('연결 방식'), { target: { value: 'WSS' } });
-		expect(screen.getByText(/서버의 Origin 검사 시 확인할 게임 origin/)).toBeTruthy();
-		fireEvent.change(form().getByLabelText('호스트명'), { target: { value: 'socket.example.com' } });
+		expect(screen.getByText(/CORS·WebSocket Origin 허용 대상/)).toBeTruthy();
+		fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: 'socket.example.com' } });
 		fireEvent.change(screen.getByLabelText('사용 목적'), { target: { value: '실시간 연결' } });
 		fireEvent.change(screen.getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'Origin 검사와 인증 토큰' } });
-		fireEvent.click(screen.getByRole('button', { name: '검토 신청' }));
-		await waitFor(() => expect(post).toHaveBeenCalledWith('/api/me/projects/7/webgl-network-requests', { origin: 'wss://socket.example.com:*', mode: 'WSS', purpose: '실시간 연결', cors: 'Origin 검사와 인증 토큰' }));
+		fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
+		await waitFor(() => expect(post).toHaveBeenCalledWith('/api/me/projects/7/webgl-network-requests/batch', { items: [{ origin: 'wss://socket.example.com:*', mode: 'WSS', purpose: '실시간 연결', cors: 'Origin 검사와 인증 토큰' }] }));
 	});
 
- it('previews a pasted explicit 443 and submits only after matching the port setting', async () => {
+ it('rejects pasted URLs even with a matching port and submits after correcting the host', async () => {
   vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
   const post = vi.spyOn(api, 'post').mockResolvedValue(item);
   mount(); await screen.findByText('등록된 신청이 없습니다.');
-  fireEvent.change(form().getByLabelText('호스트명'), { target: { value: 'https://ASSETS.example.com:443/' } });
+  fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: 'https://ASSETS.example.com:443/' } });
   fireEvent.change(screen.getByLabelText('사용 목적'), { target: { value: 'Bundles' } });
   fireEvent.change(screen.getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'CORS enabled' } });
-  fireEvent.click(screen.getByRole('button', { name: '검토 신청' }));
+  fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
   expect(post).not.toHaveBeenCalled();
   fireEvent.change(form().getByLabelText('포트 정책'), { target: { value: 'specific' } });
-  expect(form().getByText('https://assets.example.com')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: '검토 신청' }));
-  await waitFor(() => expect(post).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ origin: 'https://assets.example.com' })));
+  fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
+  expect(post).not.toHaveBeenCalled();
+  expect((form().getByLabelText('도메인 (호스트명)') as HTMLInputElement).value).toBe('https://ASSETS.example.com:443/');
+  fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: 'ASSETS.example.com' } });
+  const details = form().getByText('https://assets.example.com').closest('details')!;
+  expect(details.open).toBe(false);
+  expect(form().getByLabelText('신청 미리보기').textContent).toContain('assets.example.com');
+  expect(form().getByLabelText('신청 미리보기').textContent).toContain('443기본 포트');
+  fireEvent.click(screen.getByRole('button', { name: '연결 1개 신청' }));
+  await waitFor(() => expect(post).toHaveBeenCalledWith(expect.any(String), { items: [expect.objectContaining({ origin: 'https://assets.example.com' })] }));
  });
  it.each([false, true])('shows overlapping approvals across filters but only for the same project (admin=%s)', async admin => {
   const approved = { ...item, id: 'old-443', state: 'APPROVED' };
@@ -229,4 +236,94 @@ describe('WebGL external connection workflow', () => {
   expect(screen.getByText(/새 승인 → 새 실행/)).toBeTruthy();
  });
 
+});
+
+describe('batch editor', () => {
+ async function setup() {
+  vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
+  mount(); await screen.findByText('등록된 신청이 없습니다.');
+ }
+ const row = (n: number) => within(form().getByRole('group', { name: `연결 ${n}` }));
+ function fill(n: number, host: string) {
+  fireEvent.change(row(n).getByLabelText('도메인 (호스트명)'), { target: { value: host } });
+  fireEvent.change(form().getByLabelText('사용 목적'), { target: { value: 'Shared purpose' } });
+  fireEvent.change(form().getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'Shared config' } });
+ }
+ it('preserves stable controls and shared descriptions when removing the middle item; sends once', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({ items: [] }); await setup();
+  fireEvent.click(form().getByText('＋ 연결 추가')); fireEvent.click(form().getByText('＋ 연결 추가'));
+  fill(1, 'one.example.com'); fill(2, 'two.example.com'); fill(3, 'three.example.com');
+  const third = row(3).getByLabelText('도메인 (호스트명)');
+  fireEvent.click(row(2).getByText('삭제'));
+  expect(row(2).getByLabelText('도메인 (호스트명)')).toBe(third);
+  expect((third as HTMLInputElement).value).toBe('three.example.com');
+  expect(form().getAllByLabelText('사용 목적')).toHaveLength(1);
+  fireEvent.click(form().getByText('연결 2개 신청'));
+  await waitFor(() => expect(post).toHaveBeenCalledExactlyOnceWith('/api/me/projects/7/webgl-network-requests/batch', { items: [
+   { origin: 'https://one.example.com:*', mode: 'HTTPS', purpose: 'Shared purpose', cors: 'Shared config' },
+   { origin: 'https://three.example.com:*', mode: 'HTTPS', purpose: 'Shared purpose', cors: 'Shared config' },
+  ] }));
+  await waitFor(() => expect(form().getAllByLabelText('도메인 (호스트명)')).toHaveLength(1));
+ });
+ it('shows every empty-field error, focuses the first and rejects duplicates/overlap', async () => {
+  const post = vi.spyOn(api, 'post'); await setup();
+  fireEvent.click(form().getByText('＋ 연결 추가'));
+  fireEvent.click(form().getByText('연결 2개 신청'));
+  expect(form().getAllByRole('alert')).toHaveLength(4);
+  expect(document.activeElement).toBe(row(1).getByLabelText('도메인 (호스트명)'));
+  fill(1, 'same.example.com'); fill(2, 'same.example.com');
+  fireEvent.click(form().getByText('연결 2개 신청'));
+  expect(form().getAllByRole('alert')).toHaveLength(2);
+  fill(1, 'example.com'); fireEvent.change(row(1).getByLabelText('호스트 범위'), { target: { value: 'subdomains' } });
+  fireEvent.click(form().getByText('연결 2개 신청')); expect(form().getAllByRole('alert')).toHaveLength(2);
+  expect(post).not.toHaveBeenCalled();
+ });
+ it('retains all inputs and maps server errors; uncertain outcomes refresh history without retry', async () => {
+  const post = vi.spyOn(api, 'post').mockRejectedValueOnce(new ApiError(409, 'Conflict', { error: { details: [{ index: 1, field: 'origin', message: '이미 등록됨' }] } })).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+  await setup(); fireEvent.click(form().getByText('＋ 연결 추가')); fill(1, 'one.example.com'); fill(2, 'two.example.com');
+  fireEvent.click(form().getByText('연결 2개 신청'));
+  await screen.findByText('이미 등록됨');
+  await waitFor(() => expect(document.activeElement).toBe(row(2).getByLabelText('도메인 (호스트명)')));
+  expect((form().getByLabelText('사용 목적') as HTMLTextAreaElement).value).toBe('Shared purpose');
+  fireEvent.click(form().getByText('연결 2개 신청'));
+  await screen.findByText(/신청 결과를 확인할 수 없습니다/);
+  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2)); expect(post).toHaveBeenCalledTimes(2);
+  expect(form().getAllByLabelText('도메인 (호스트명)')).toHaveLength(2);
+ });
+ it('preserves drafts when refreshing history also fails after a lost response', async () => {
+  vi.spyOn(api, 'post').mockRejectedValue(new TypeError('Lost response'));
+  await setup();
+  vi.mocked(api.get).mockRejectedValue(new TypeError('History unavailable'));
+  fill(1, 'one.example.com'); fireEvent.click(form().getByText('연결 1개 신청'));
+  await screen.findByText(/신청 이력을 새로 조회하지 못했습니다/);
+  expect((form().getByLabelText('사용 목적') as HTMLTextAreaElement).value).toBe('Shared purpose');
+ });
+ it('locks every input and example action while a request is pending', async () => {
+  let resolve!: (value: unknown) => void;
+  const post = vi.spyOn(api, 'post').mockImplementation(() => new Promise(r => { resolve = r; }));
+  await setup(); fill(1, 'one.example.com'); fireEvent.click(form().getByText('연결 1개 신청'));
+  await waitFor(() => expect((form().getByText('＋ 연결 추가') as HTMLButtonElement).disabled).toBe(true));
+  expect((form().getByLabelText('사용 목적') as HTMLTextAreaElement).disabled).toBe(true);
+  expect((screen.getByLabelText('서비스') as HTMLSelectElement).disabled).toBe(true);
+  fireEvent.submit(document.getElementById('network-new-request')!); expect(post).toHaveBeenCalledTimes(1);
+  resolve({ items: [] }); await screen.findByText(/신청이 모두 등록되었습니다/);
+ });
+ it('adds mixed service examples, skips duplicates and refuses additions past sixteen', async () => {
+  await setup();
+  fireEvent.click(screen.getByLabelText('예시 1 선택')); fireEvent.click(screen.getByText('선택한 예시 목록에 추가'));
+  fireEvent.click(screen.getByText('선택한 예시 목록에 추가')); expect(screen.getByText(/중복 1개/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('서비스'), { target: { value: 'https' } });
+  fireEvent.click(screen.getByLabelText('예시 1 선택')); fireEvent.click(screen.getByText('선택한 예시 목록에 추가'));
+  expect(form().getAllByLabelText('도메인 (호스트명)')).toHaveLength(3);
+  for (let i = 3; i < 16; i++) fireEvent.click(form().getByText('＋ 연결 추가'));
+  expect((form().getByText('＋ 연결 추가') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('서비스'), { target: { value: 'relay' } });
+  fireEvent.click(screen.getByLabelText('예시 1 선택')); fireEvent.click(screen.getByText('선택한 예시 목록에 추가'));
+  expect(screen.getByText(/예시를 추가하지 않았습니다/)).toBeTruthy();
+  expect(form().getAllByLabelText('도메인 (호스트명)')).toHaveLength(16);
+ });
+ it('resets the last deleted row to a fresh empty row', async () => {
+  await setup(); fill(1, 'one.example.com'); fireEvent.click(row(1).getByText('삭제'));
+  expect((row(1).getByLabelText('도메인 (호스트명)') as HTMLInputElement).value).toBe('');
+ });
 });

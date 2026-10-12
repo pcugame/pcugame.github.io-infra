@@ -12,6 +12,13 @@ export function createWebglNetworkController(service: ReturnType<typeof createWe
    app.post<{ Params: { id: string } }>('/projects/:id/webgl-network-requests', {
     preHandler: requireLogin, config: { rateLimit: { max: 10, timeWindow: 60_000 } },
    }, async (request, reply) => sendCreated(reply, await service.create(request.currentUser!, parseIntParam(request.params.id), request.body)));
+   app.post<{ Params: { id: string } }>('/projects/:id/webgl-network-requests/batch', {
+    // Keep item paths when returning validation errors from the transaction.
+    attachValidation: true, preHandler: requireLogin, config: { rateLimit: { max: 10, timeWindow: 60_000 } },
+   }, async (request, reply) => {
+    if (request.validationError && request.validationError.validationContext !== 'body') throw request.validationError;
+    return sendCreated(reply, await service.createBatch(request.currentUser!, parseIntParam(request.params.id), request.body));
+   });
   } else {
    const guard = requireRole('ADMIN', 'OPERATOR');
    app.get('/webgl-network-requests', { preHandler: guard }, async (request, reply) => sendOk(reply, await service.listAdmin(request.currentUser!)));
