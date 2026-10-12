@@ -89,6 +89,8 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  });
  beforeEach(async () => {
   config.WEBGL_EXTERNAL_CONNECTIONS_ENABLED = true;
+  // Each case owns its play leases; do not exhaust the per-login budget across cases.
+  await db.webglPlaySession.deleteMany();
   const exhibition = await db.exhibition.create({ data: { year: 2000 + Math.floor(Math.random() * 10000), title: randomUUID() } }); exhibitionId = exhibition.id;
   const project = await db.project.create({ data: { creatorId: owner, exhibitionId, title: 'Network fixture', slug: randomUUID(), status: 'PUBLISHED', members: { create: { userId: member, name: 'Member' } } } }); projectId = project.id;
   const asset = await db.asset.create({ data: { projectId, kind: 'WEBGL', representations: { create: { bucket: 'protected', objectKey: `${randomUUID()}.zip`, role: 'WEBGL_SOURCE', state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
@@ -130,7 +132,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect((await list()).statusCode).toBe(200);
  });
  it('rejects privileged origins including changed ports and secure socket variants', async () => {
-  for (const origin of [apiOrigin, gameOrigin, webOrigin, 'https://api.fixture.example:8443', 'wss://downloads.fixture.example', 'https://garage.fixture.example']) expect((await create(origin)).statusCode, origin).toBe(400);
+  for (const origin of [apiOrigin, gameOrigin, webOrigin, 'https://api.fixture.example:8443', 'wss://downloads.fixture.example', 'https://garage.fixture.example', 'https://api.fixture.example:*', 'wss://*.fixture.example:*', 'https://uploads.fixture.example:*', 'wss://downloads.fixture.example:*']) expect((await create(origin)).statusCode, origin).toBe(400);
   expect((await request('POST', `/api/me/projects/${projectId}/webgl-network-requests`, sid, { ...body(), cors: '' })).statusCode).toBe(400);
  });
  it('serializes concurrent duplicate requests and enforces partial uniqueness independently', async () => {
@@ -201,7 +203,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  });
 
  it('keeps another project local and permits operator review', async () => {
-  const pending = (await create('wss://*.example.com')).json().data;
+  const pending = (await create('wss://*.example.com:*')).json().data;
   expect((await review(pending.id, 'approve', operatorSid)).statusCode).toBe(200);
   const source = await db.project.create({ data: { creatorId: owner, exhibitionId, title: 'Separate game', slug: randomUUID(), status: 'PUBLISHED' } });
   const asset = await db.asset.create({ data: { projectId: source.id, kind: 'WEBGL', representations: { create: { bucket: 'protected', objectKey: `${randomUUID()}.zip`, role: 'WEBGL_SOURCE', state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
@@ -227,8 +229,69 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect(csp).toContain('wss://*.example.com:8443');
   expect(csp).not.toContain('19090');
  });
+ it('transitions from fixed ports to explicit all ports only through revoke and approval', async () => {
+  const legacy = await approved(), numeric = await approved(external + ':8443');
+  const old = await grant();
+  const before = await db.webglPlaySession.findUniqueOrThrow({ where: { id: old.id } });
+  expect(before.approvedOrigins).toEqual([external, external + ':8443']);
+  const created = await create(external + ':*'); expect(created.statusCode, created.body).toBe(201);
+  const pending = WebglNetworkRequestSchema.parse(created.json().data);
+  expect(pending).toMatchObject({ origin: external + ':*', state: 'PENDING', events: [] });
+  expect((await create(external + ':*')).statusCode).toBe(409);
+  expect((await review(pending.id, 'approve')).statusCode).toBe(409);
+  expect((await gate(old)).statusCode).toBe(204);
+  const connect = String((await gate(old)).headers['x-pcu-runtime-csp']).split(';').find(s => s.trim().startsWith('connect-src '));
+  expect(connect).toContain(external + ':8443'); expect(connect).not.toContain(':*');
+  expect((await review(legacy, 'revoke')).statusCode).toBe(200);
+  expect((await review(pending.id, 'approve')).statusCode).toBe(409);
+  expect((await review(numeric, 'revoke')).statusCode).toBe(200);
+  const response = await review(pending.id, 'approve'); expect(response.statusCode, response.body).toBe(200);
+  expect(WebglNetworkRequestSchema.parse(response.json().data)).toMatchObject({ origin: external + ':*', state: 'APPROVED', policyVersion: 5 });
+  expect((await gate(old)).statusCode).toBe(403); expect((await renew(old)).statusCode).toBe(403);
+  const unchanged = await db.webglPlaySession.findUniqueOrThrow({ where: { id: old.id } });
+  expect(unchanged.approvedOrigins).toEqual(before.approvedOrigins); expect(unchanged.policyVersion).toBe(before.policyVersion);
+  const fresh = await grant();
+  expect(await db.webglPlaySession.findUniqueOrThrow({ where: { id: fresh.id } })).toMatchObject({ approvedOrigins: [external + ':*'], policyVersion: 5 });
+  const runtime = await gate(fresh); expect(runtime.statusCode).toBe(204);
+  const directives = String(runtime.headers['x-pcu-runtime-csp']).split(';');
+  expect(directives.find(s => s.trim().startsWith('connect-src '))).toContain(external + ':*');
+  expect(directives.filter(s => !s.trim().startsWith('connect-src ')).join(';')).not.toContain(external);
+  const rows = WebglNetworkRequestListSchema.parse((await list()).json().data).items;
+  expect(rows.find(r => r.id === legacy)).toMatchObject({ origin: external, state: 'REVOKED', events: [{ action: 'APPROVE', policyVersion: 1 }, { action: 'REVOKE', policyVersion: 3 }] });
+  expect(rows.find(r => r.id === numeric)).toMatchObject({ origin: external + ':8443', state: 'REVOKED' });
+  const audit = await db.webglNetworkReviewEvent.findMany({ where: { requestId: legacy } });
+  expect(audit.map(event => event.origin)).toEqual([external, external]);
+  const adminList = WebglNetworkRequestListSchema.parse((await request('GET', '/api/admin/webgl-network-requests', adminSid)).json().data);
+  expect(adminList.items.find(r => r.id === pending.id)?.origin).toBe(external + ':*');
+  expect((await review(pending.id, 'revoke')).statusCode).toBe(200);
+  await approved(external + ':*');
+  expect((await gate(fresh)).statusCode).toBe(403); expect((await renew(fresh)).statusCode).toBe(403);
+ });
+ it('serializes overlapping all-port approvals and preserves root/transport separation', async () => {
+  const wildcard = (await create('wss://*.example.com:*')).json().data.id;
+  const exact = (await create('wss://a.example.com:8443')).json().data.id;
+  expect((await Promise.all([review(wildcard, 'approve'), review(exact, 'approve')])).map(r => r.statusCode).sort()).toEqual([200, 409]);
+  await approved('wss://example.com:*');
+  await approved('https://*.example.com:*');
+  const session = await grant();
+  expect((await gate(session)).statusCode).toBe(204);
+ });
+ it('rechecks protected hosts at approval and runtime for all-port rules', async () => {
+  const origin = 'wss://new-protected.example.com:*';
+  const pending = (await create(origin)).json().data.id;
+  const previous = config.S3_PUBLIC_SIGNING_ENDPOINT;
+  try {
+   config.S3_PUBLIC_SIGNING_ENDPOINT = 'https://new-protected.example.com:9443';
+   expect((await review(pending, 'approve')).statusCode).toBe(409);
+   config.S3_PUBLIC_SIGNING_ENDPOINT = previous;
+   expect((await review(pending, 'approve')).statusCode).toBe(200);
+   const session = await grant(); expect((await gate(session)).statusCode).toBe(204);
+   config.S3_PUBLIC_SIGNING_ENDPOINT = 'https://new-protected.example.com:9443';
+   expect((await gate(session)).statusCode).toBe(403);
+  } finally { config.S3_PUBLIC_SIGNING_ENDPOINT = previous; }
+ });
  it('serializes concurrent report budgets and rejects revoked snapshots after reapproval', async () => {
-  const approvedId = await approved();
+  const approvedId = await approved(external + ':*');
   const session = (await issue(true)).json().data as Grant;
   const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
   const url = new URL(csp.split('report-uri ')[1]!).pathname;
@@ -241,7 +304,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect(await db.webglConnectionDiagnostic.findMany({ where: { sessionId: session.id } })).toMatchObject([{ count: 30 }]);
   await db.webglPlaySession.update({ where: { id: session.id }, data: { reportWindowAt: new Date(0) } });
   expect((await review(approvedId, 'revoke')).statusCode).toBe(200);
-  await approved();
+  await approved(external + ':*');
   expect((await report()).statusCode).toBe(403);
   const read = await app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${session.id}/diagnostics`, headers: {
    origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`, 'x-pcu-play-control': session.controlSecret,
@@ -250,6 +313,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect(await db.webglPlaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ reportCount: 30 });
  });
  it('isolates diagnostic tokens, strips secrets, limits reports and cascades cleanup', async () => {
+  await approved('wss://*.example.com:*');
   const session = (await issue(true)).json().data as Grant;
   const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
   const reportUrl = new URL(csp.split('report-uri ')[1]!).pathname;
@@ -262,7 +326,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect(malformed.body).not.toContain('private-report-credential');
   expect((await Promise.all([report(), report()])).map(result => result.statusCode)).toEqual([204, 204]);
   const data = (await read()).json().data;
-  expect(data).toMatchObject({ gameOrigin, policyVersion: 0, approvedOrigins: [], items: [{ origin: 'https://blocked.example.com', directive: 'connect-src', count: 2 }] });
+  expect(data).toMatchObject({ gameOrigin, policyVersion: 1, approvedOrigins: ['wss://*.example.com:*'], items: [{ origin: 'https://blocked.example.com', directive: 'connect-src', count: 2 }] });
   expect(JSON.stringify(data)).not.toMatch(/password|private|secret-code|token=/);
   expect((await report('/api/webgl-play/reports/' + 'f'.repeat(64))).statusCode).toBe(403);
   expect((await report('/api/webgl-play/reports/' + session.controlSecret)).statusCode).toBe(403);

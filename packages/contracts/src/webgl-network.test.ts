@@ -40,7 +40,55 @@ describe('subdomain policies', () => {
   expect(() => new ProjectConnectionPolicy(['wss://*.example.com'], ['api.example.com'])).toThrow(/storage/);
  });
  it('rejects public and private suffixes, invalid ports and arbitrary CSP syntax', () => {
-  for (const origin of ['wss://*.com', 'wss://*.co.uk', 'wss://*.github.io', 'wss://*.appspot.com', 'wss://*.unknownsuffix', 'wss://*', 'wss://example.com:*', 'wss://example.com:0', 'wss://example.com/*', 'wss://*.127.0.0.1', 'wss://foo.*.example.com', "wss://*.example.com; report-uri https://evil.com"]) expect(() => ConnectionRule.parse(origin), origin).toThrow();
+  for (const origin of ['wss://*.com', 'wss://*.co.uk', 'wss://*.github.io', 'wss://*.appspot.com', 'wss://*.unknownsuffix', 'wss://*', 'wss://example.com:0', 'wss://example.com/*', 'wss://*.127.0.0.1', 'wss://foo.*.example.com', "wss://*.example.com; report-uri https://evil.com"]) expect(() => ConnectionRule.parse(origin), origin).toThrow();
   expect(ConnectionRule.parse('https://*.tenant.github.io').toCsp()).toBe('https://*.tenant.github.io');
+ });
+});
+
+
+describe('explicit all-port policies', () => {
+ it('preserves canonical input, transport and default/numeric port meanings', () => {
+  for (const mode of ['HTTPS', 'WSS'] as const) {
+   for (const host of ['example.com', '*.example.com', '8.8.8.8', '[2606:4700:4700::1111]']) {
+    const origin = `${mode.toLowerCase()}://${host}:*`;
+    const rule = ConnectionRule.parse(origin, mode);
+    expect(rule.port).toBe('*'); expect(rule.toCsp()).toBe(origin);
+    expect(CreateWebglNetworkRequestSchema.parse({ origin, mode, purpose: 'Game', cors: 'Configured' }).origin).toBe(origin);
+   }
+  }
+  expect(ConnectionRule.parse('https://example.com').port).toBe(443);
+  expect(ConnectionRule.parse('https://example.com:8443').port).toBe(8443);
+ });
+ it('rejects malformed all-port sources through the existing canonical/public-host boundary', () => {
+  for (const origin of [
+   'https://example.com:443:*', 'https://example.com:8443:*', 'https://example.com:**',
+   'https://example.com:*/', 'https://example.com:*?x=1', 'https://example.com:*#x',
+   'https://example.com/path:*', 'https://user@example.com:*', 'https://EXAMPLE.com:*',
+   'https://example.com:*\n', 'https://example.com:*; script-src *', 'http://example.com:*',
+   'https://127.0.0.1:*', 'https://[::1]:*', 'https://*.github.io:*', 'https://*.com:*',
+   'https://foo.*.example.com:*', 'https://localhost:*', 'https://example.com:65536',
+  ]) expect(validateWebglNetworkOrigin(origin, 'HTTPS'), origin).toBe(false);
+  expect(validateWebglNetworkOrigin('wss://example.com:*', 'HTTPS')).toBe(false);
+ });
+ it('detects overlap symmetrically while preserving transport, root exclusion and disjoint ports', () => {
+  for (const [a, b, overlaps] of [
+   ['wss://example.com:*', 'wss://example.com', true],
+   ['wss://example.com:*', 'wss://example.com:8443', true],
+   ['wss://example.com:*', 'wss://example.com:*', true],
+   ['wss://*.example.com:*', 'wss://a.example.com:8443', true],
+   ['wss://*.example.com:*', 'wss://*.a.example.com', true],
+   ['wss://*.example.com:8443', 'wss://*.example.com:*', true],
+   ['wss://*.example.com:*', 'wss://example.com:*', false],
+   ['wss://example.com:*', 'https://example.com:*', false],
+   ['wss://example.com:*', 'wss://other.example.com:*', false],
+   ['wss://example.com', 'wss://example.com:8443', false],
+  ] as const) {
+   expect(ConnectionRule.parse(a).overlaps(ConnectionRule.parse(b))).toBe(overlaps);
+   expect(ConnectionRule.parse(b).overlaps(ConnectionRule.parse(a))).toBe(overlaps);
+   if (overlaps) expect(() => new ProjectConnectionPolicy([a, b])).toThrow(/overlap/);
+   else expect(() => new ProjectConnectionPolicy([a, b])).not.toThrow();
+  }
+  expect(() => new ProjectConnectionPolicy(['https://*.example.com:*'], ['api.example.com'])).toThrow(/storage/);
+  expect(() => new ProjectConnectionPolicy(['wss://api.example.com:*'], ['api.example.com'])).toThrow(/storage/);
  });
 });

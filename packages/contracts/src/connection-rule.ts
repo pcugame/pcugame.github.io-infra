@@ -5,12 +5,17 @@ import { parse } from 'tldts';
 export class ConnectionRule {
  private constructor(
   readonly origin: string, readonly mode: 'HTTPS' | 'WSS',
-  readonly hostname: string, readonly subdomains: boolean, readonly port: number,
+  readonly hostname: string, readonly subdomains: boolean, readonly port: number | '*',
  ) { Object.freeze(this); }
  static parse(value: string, mode?: 'HTTPS' | 'WSS'): ConnectionRule {
-  const url = new URL(value);
+  // URL cannot parse CSP's wildcard port. Remove only a terminal :*, then
+  // apply the same canonical URL and public-host checks as numeric rules.
+  const allPorts = value.endsWith(':*');
+  const canonicalOrigin = allPorts ? value.slice(0, -2) : value;
+  const url = new URL(canonicalOrigin);
   const actualMode = url.protocol === 'https:' ? 'HTTPS' : url.protocol === 'wss:' ? 'WSS' : null;
-  if (!actualMode || (mode && actualMode !== mode) || value.length > 512 || url.origin !== value
+  if (!actualMode || (mode && actualMode !== mode) || value.length > 512 || url.origin !== canonicalOrigin
+   || (allPorts && url.port !== '')
    || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.port === '0') throw new Error('Invalid connection rule');
   const subdomains = url.hostname.startsWith('*.');
   const hostname = subdomains ? url.hostname.slice(2) : url.hostname;
@@ -28,14 +33,14 @@ export class ConnectionRule {
     if (!suffix.domain || (!suffix.isIcann && !suffix.isPrivate)) throw new Error('Wildcard must be below a public/private suffix');
    }
   }
-  return new ConnectionRule(value, actualMode, hostname, subdomains, Number(url.port || 443));
+  return new ConnectionRule(value, actualMode, hostname, subdomains, allPorts ? '*' : Number(url.port || 443));
  }
  includesHostname(host: string): boolean {
   const normalized = host.toLowerCase().replace(/\.$/, '');
   return this.subdomains ? normalized.endsWith('.' + this.hostname) : normalized === this.hostname;
  }
  overlaps(other: ConnectionRule): boolean {
-  if (this.mode !== other.mode || this.port !== other.port) return false;
+  if (this.mode !== other.mode || (this.port !== '*' && other.port !== '*' && this.port !== other.port)) return false;
   if (this.subdomains && other.subdomains) return this.hostname === other.hostname
    || this.includesHostname(other.hostname) || other.includesHostname(this.hostname);
   if (this.subdomains) return this.includesHostname(other.hostname);
