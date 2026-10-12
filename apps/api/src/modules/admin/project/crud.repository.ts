@@ -1,5 +1,5 @@
 import { canReadVisibility, isVisibilityStaff } from '../../../shared/visibility.js';
-import { MAX_PROJECT_VIDEOS } from '../../assets/video-order.policy.js';
+import { assertVideoCount } from '../../assets/video-order.policy.js';
 import { getProjectVideos, rewriteProjectVideoOrder } from '../../assets/video-order.repository.js';
 import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
 import type {
@@ -464,7 +464,7 @@ export function createProjectCrudRepository(
 				}
 				const videos = await getProjectVideos(tx, projectId);
 				const current = videos.map(({ id }) => id);
-				if (current.length > MAX_PROJECT_VIDEOS) throw conflict('Project exceeds the five video limit');
+				assertVideoCount(current.length, 'Project exceeds the five video limit');
 				if (expectedOrder.length !== current.length || expectedOrder.some((id, index) => id !== current[index])) {
 					throw conflict('Video order changed; refresh and try again');
 				}

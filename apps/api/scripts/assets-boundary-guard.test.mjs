@@ -26,6 +26,7 @@ for (const [name, content, rule, extra] of [
 });
 test('real ports, policies, services and composition resolve and pass', () => {
  const result = fixture('test.composition.ts', `
+ import { createAssetsBannedProductionGraph } from '../../src/modules/assets/composition.js';
  import { createAssetsService } from '../../src/modules/assets/service.js';
  import { createAssetsRepository } from '../../src/modules/assets/repository.js';
  import { createAssetDeletionUnitOfWork } from '../../src/modules/assets/deletion.repository.js';

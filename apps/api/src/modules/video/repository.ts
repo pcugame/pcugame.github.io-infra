@@ -14,8 +14,8 @@ import type {
 	VideoWorkerRepository,
 } from './ports.js';
 import { videoPlaybackObjectKey } from './playback-identity.js';
-import { MAX_PROJECT_VIDEOS } from '../assets/video-order.policy.js';
-import { countReservedProjectVideos, getProjectVideos,  normalizeProjectVideoOrder } from '../assets/video-order.repository.js';
+import { assertVideoCapacity } from '../assets/video-order.policy.js';
+import { countReservedProjectVideos, getProjectVideos, normalizeProjectVideoOrder } from '../assets/video-order.repository.js';
 import { conflict } from '../../shared/errors.js';
 
 const SERIALIZABLE = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable } as const;
@@ -246,7 +246,7 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 					? await getProjectVideos(tx, session.projectId)
 					: await normalizeProjectVideoOrder(tx, session.projectId);
 				const reserved = await countReservedProjectVideos(tx, session.projectId, session.id);
-				if (videos.length + reserved + 1 > MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
+				assertVideoCapacity(videos.length, reserved);
 				let videoSortOrder = videos.length;
 				if (session.submissionItemId) {
 					const item = await tx.projectSubmissionItem.findUnique({

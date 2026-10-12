@@ -1,35 +1,32 @@
 import type { Prisma } from '../../generated/prisma/client.js';
-import { assertVideoCount, normalizedVideoOrder, videoOrderNeedsRewrite } from './video-order.policy.js';
-
-
+import { normalizedVideoOrder, videoOrderNeedsRewrite, orderedProjectVideos, videoOrderAssignments } from './video-order.policy.js';
 
 /** Callers hold the project row lock throughout every read/write operation. */
 export async function getProjectVideos(tx: Prisma.TransactionClient, projectId: number) {
-	return tx.asset.findMany({
+	return orderedProjectVideos(await tx.asset.findMany({
 		where: { projectId, kind: 'VIDEO', status: 'READY' },
 		select: { id: true, videoSortOrder: true, createdAt: true },
-		orderBy: [{ videoSortOrder: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }, { id: 'asc' }],
-	});
+	}));
 }
 
 export async function rewriteProjectVideoOrder(tx: Prisma.TransactionClient, projectId: number, ids: readonly number[]): Promise<void> {
-	assertVideoCount(ids.length);
+	const assignments = videoOrderAssignments(ids);
 	await tx.asset.updateMany({
 		where: { projectId, kind: 'VIDEO', status: 'READY' },
 		data: { videoSortOrder: null },
 	});
-	for (const [videoSortOrder, id] of ids.entries()) {
+	for (const { videoSortOrder, id } of assignments) {
 		await tx.asset.update({ where: { id }, data: { videoSortOrder } });
 	}
 }
 
 export async function normalizeProjectVideoOrder(tx: Prisma.TransactionClient, projectId: number) {
 	const videos = await getProjectVideos(tx, projectId);
-	assertVideoCount(videos.length);
+	const normalized = normalizedVideoOrder(videos);
 	if (videoOrderNeedsRewrite(videos)) {
 		await rewriteProjectVideoOrder(tx, projectId, videos.map(({ id }) => id));
 	}
-	return normalizedVideoOrder(videos);
+	return normalized;
 }
 
 /** Result pointers already count as READY assets and must not reserve twice. */

@@ -6,8 +6,8 @@ import { queueDurableDeletions } from '../orphan/outbox.js';
 import { queueMultipartAbortTask } from '../multipart-abort/repository.js';
 import type { AssetUploadRepository, AssetUploadSessionRecord, DirectAssetUploadOwner } from './ports.js';
 import { WorkerGenerationFencedError } from '../upload-lifecycle/worker-errors.js';
-import { MAX_PROJECT_VIDEOS } from '../assets/video-order.policy.js';
-import { countReservedProjectVideos, getProjectVideos,  normalizeProjectVideoOrder } from '../assets/video-order.repository.js';
+import { assertVideoCapacity } from '../assets/video-order.policy.js';
+import { countReservedProjectVideos, getProjectVideos, normalizeProjectVideoOrder } from '../assets/video-order.repository.js';
 import { conflict } from '../../shared/errors.js';
 import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.transaction.repository.js';
 import type { Actor } from '../../application/http-input.js';
@@ -136,7 +136,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 						? await getProjectVideos(tx, input.projectId)
 						: await normalizeProjectVideoOrder(tx, input.projectId);
 					const reserved = await countReservedProjectVideos(tx, input.projectId);
-					if (videos.length + reserved >= MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
+					assertVideoCapacity(videos.length, reserved);
 				}
 				let expected: { id: number; updatedAt: Date | null } | null = null;
 				if (input.kind === 'GAME' && input.projectId !== null) {
