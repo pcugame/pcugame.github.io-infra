@@ -157,6 +157,7 @@ export const routes: RouteObject[] = [
             { path: 'votes', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminVotesPage /></Lazy></RequireRole>) },
             { path: 'projects/new/studio', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><AdminProjectSubmissionStudioPage /></Lazy></RequireRole>) },
             { path: 'webgl-network', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><WebglNetworkPage admin /></Lazy></RequireRole>) },
+            { path: 'projects/:id/network', element: (<RequireRole allowed={['OPERATOR', 'ADMIN']}><Lazy><WebglNetworkPage admin projectAdmin /></Lazy></RequireRole>) },
             {
               index: true,
               element: <Navigate to="projects" replace />,

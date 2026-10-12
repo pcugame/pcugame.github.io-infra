@@ -50,6 +50,8 @@ export const CreateWebglNetworkBatchSchema = z.object({
   }
  });
 });
+export const AllowWebglNetworkBatchSchema = CreateWebglNetworkBatchSchema.safeExtend({ reason: ReviewWebglNetworkRequestSchema.shape.reason });
+export type AllowWebglNetworkBatch = z.infer<typeof AllowWebglNetworkBatchSchema>;
 export const WebglNetworkBatchResponseSchema = z.object({ items: z.array(WebglNetworkRequestSchema).min(1).max(16) }).strict();
 export type CreateWebglNetworkBatch = z.infer<typeof CreateWebglNetworkBatchSchema>;
 export type WebglNetworkBatchResponse = z.infer<typeof WebglNetworkBatchResponseSchema>;

@@ -114,6 +114,50 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   const adminList = await request('GET', '/api/admin/webgl-network-requests', adminSid); expect(adminList.statusCode).toBe(200); expect(WebglNetworkRequestListSchema.parse(adminList.json().data).policyVersion).toBeNull();
  });
  const batch = (items = [body('https://first.example.com:*'), body('wss://second.example.com:*')], session = sid) => request('POST', `/api/me/projects/${projectId}/webgl-network-requests/batch`, session, { items });
+ const direct = (items = [body('https://direct.example.com:*'), body('wss://direct.example.com:*')], session = adminSid, id = projectId) => request('POST', `/api/admin/projects/${id}/webgl-network-requests/allow`, session, { items, reason: 'Operator configured and verified these game services' });
+ it('lets unrelated staff directly allow a closed project with atomic audit and new-play policy', async () => {
+  await db.exhibition.update({ where: { id: exhibitionId }, data: { isModificationEnabled: false } });
+  const empty = await request('GET', `/api/admin/projects/${projectId}/webgl-network-requests`, adminSid);
+  expect(WebglNetworkRequestListSchema.parse(empty.json().data).items).toEqual([]);
+  const old = await grant();
+  const response = await direct(undefined, operatorSid); expect(response.statusCode, response.body).toBe(201);
+  const rows = WebglNetworkBatchResponseSchema.parse(response.json().data).items;
+  expect(rows.map(row => row.state)).toEqual(['APPROVED', 'APPROVED']);
+  expect(rows.map(row => row.policyVersion)).toEqual([1, 2]);
+  for (const row of rows) { expect(row.reviewerId).toBe(row.requesterId); expect(row.events).toHaveLength(1); expect(row.events[0]).toMatchObject({ action: 'APPROVE', actorId: row.requesterId }); }
+  const populated = WebglNetworkRequestListSchema.parse((await request('GET', `/api/admin/projects/${projectId}/webgl-network-requests`, adminSid)).json().data);
+  expect(populated.items).toHaveLength(2); expect(populated.policyVersion).toBe(2);
+  expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: old.id } })).approvedOrigins).toEqual([]);
+  const fresh = await grant(); expect((await db.webglPlaySession.findUniqueOrThrow({ where: { id: fresh.id } })).approvedOrigins.sort()).toEqual(rows.map(row => row.origin).sort());
+  expect((await review(rows[0]!.id, 'revoke')).statusCode).toBe(200);
+  expect((await db.webglNetworkRequest.findUniqueOrThrow({ where: { id: rows[1]!.id } })).state).toBe('APPROVED');
+ });
+ it('denies direct grants and project policy reads to owners and unauthenticated users', async () => {
+  expect((await direct(undefined, sid)).statusCode).toBe(403);
+  expect((await direct(undefined, '')).statusCode).toBe(401);
+  expect((await request('GET', `/api/admin/projects/${projectId}/webgl-network-requests`, sid)).statusCode).toBe(403);
+  expect((await direct(undefined, adminSid, 2147483647)).statusCode).toBe(404);
+  expect((await list()).json().data.items).toHaveLength(0);
+ });
+ it('rolls back all direct approvals on protected host, overlap, pending duplicate or invalid reason', async () => {
+  const denied = await direct([body('https://direct.example.com'), body('https://games.fixture.example')]);
+  expect(denied.statusCode).toBe(400); expect(denied.json().error.details).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, field: 'origin' })]));
+  expect((await direct([body('https://*.example.com:*'), body('https://inside.example.com')])).statusCode).toBe(400);
+  expect((await request('POST', `/api/admin/projects/${projectId}/webgl-network-requests/allow`, adminSid, { items: [body()], reason: '' })).statusCode).toBe(400);
+  expect((await list()).json().data.items).toHaveLength(0);
+  await create(); expect((await direct([body('https://new.example.com'), body()])).statusCode).toBe(409);
+  expect((await list()).json().data.items).toHaveLength(1);
+  expect((await list()).json().data.policyVersion).toBe(0);
+  await approved('https://*.example.net:*');
+  expect((await direct([body('https://new.example.com'), body('https://overlap.example.net')])).statusCode).toBe(409);
+  expect((await list()).json().data.items).toHaveLength(2);
+ });
+ it('serializes simultaneous direct approvals at the sixteen-rule limit', async () => {
+  expect((await direct(Array.from({ length: 15 }, (_, i) => body(`https://direct${i}.example.com`)))).statusCode).toBe(201);
+  const results = await Promise.all([direct([body('https://race1.example.com')]), direct([body('https://race2.example.com')])]);
+  expect(results.map(r => r.statusCode).sort()).toEqual([201, 409]);
+  expect((await list()).json().data.items).toHaveLength(16); expect((await list()).json().data.policyVersion).toBe(16);
+ });
  it('creates an ordered batch and independently approves/revokes its runtime policy', async () => {
   const response = await batch(); expect(response.statusCode, response.body).toBe(201);
   const rows = WebglNetworkBatchResponseSchema.parse(response.json().data).items;
@@ -148,10 +192,12 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect((await batch([body()])).statusCode).toBe(403);
   expect((await list()).json().data.items).toHaveLength(2);
  });
- it('rolls back a saved prefix when a later database write fails', async () => {
+ it.each(['request', 'direct grant'])('rolls back saved rows, events and policy when a later %s write fails', async mode => {
   await db.$executeRawUnsafe("ALTER TABLE webgl_network_requests ADD CONSTRAINT batch_fixture_failure CHECK (purpose <> 'batch-storage-failure')");
   try {
-   expect((await batch([body(), { ...body('https://next.example.com'), purpose: 'batch-storage-failure' }])).statusCode).toBe(500);
+   expect((await (mode === 'request' ? batch : direct)([body(), { ...body('https://next.example.com'), purpose: 'batch-storage-failure' }])).statusCode).toBe(500);
+   expect((await list()).json().data.policyVersion).toBe(0);
+   expect(await db.webglNetworkReviewEvent.count({ where: { originalProjectId: projectId } })).toBe(0);
    expect((await list()).json().data.items).toHaveLength(0);
   } finally { await db.$executeRawUnsafe('ALTER TABLE webgl_network_requests DROP CONSTRAINT batch_fixture_failure'); }
  });

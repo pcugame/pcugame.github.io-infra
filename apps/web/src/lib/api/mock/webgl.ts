@@ -1,5 +1,5 @@
 import {
-  ConnectionRule, CreateWebglNetworkBatchSchema, ProjectConnectionPolicy, CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema, WebglDisplaySettingsSchema,
+  AllowWebglNetworkBatchSchema, ConnectionRule, CreateWebglNetworkBatchSchema, ProjectConnectionPolicy, CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema, WebglDisplaySettingsSchema,
   inferWebglDisplayMode, resolveWebglDisplay, type WebglNetworkRequest,
 } from '@pcu/contracts';
 import { UNHANDLED, MockHttpError, type MockContext, type MockRequestOptions } from './context';
@@ -24,6 +24,9 @@ export function handleWebgl(ctx: MockContext, pathname: string, method: string, 
       webglDisplayHeight: project.webglDisplayHeight ?? null, analysis, effective: resolveWebglDisplay({ ...project, analysis }) };
   }
   match = /^\/api\/me\/projects\/(\d+)\/webgl-network-requests(\/batch)?$/.exec(pathname);
+  const directMatch = /^\/api\/admin\/projects\/(\d+)\/webgl-network-requests(\/allow)?$/.exec(pathname);
+  const direct = Boolean(directMatch);
+  if (directMatch) match = directMatch;
   const admin = /^\/api\/admin\/webgl-network-requests(?:\/([^/]+)\/(approve|reject|revoke))?$/.exec(pathname);
   if (!match && !admin) return UNHANDLED;
   const actor = ctx.requireUser();
@@ -51,24 +54,38 @@ export function handleWebgl(ctx: MockContext, pathname: string, method: string, 
       policyVersion: row.policyVersion, createdAt: ctx.now() });
     return row;
   }
+  if (direct) ctx.requireAdmin();
   const batch = Boolean(match![2]);
-  allowMethod(method, ...(batch ? ['POST'] : ['GET', 'POST']));
+  allowMethod(method, ...(batch ? ['POST'] : direct ? ['GET'] : ['GET', 'POST']));
   const project = getProject(ctx, Number(match![1]));
   if (project.isChangeRequestDraft) missing();
-  if (!isRelated(ctx, project)) forbidden('Only the creator or linked members may request connections');
+  if (!direct && !isRelated(ctx, project)) forbidden('Only the creator or linked members may request connections');
   if (method === 'GET') return { items: Object.values(records).filter(r => r.projectId === project.id), gameOrigin: windowOrigin(), policyVersion: project.webglNetworkPolicyVersion ?? 0 };
-  if (projectExhibition(ctx, project).isModificationEnabled === false) forbidden('Project modifications are closed for this exhibition');
-  const parsed = batch ? CreateWebglNetworkBatchSchema.safeParse(bodyObject(options)) : CreateWebglNetworkBatchSchema.safeParse({ items: [parseInput(CreateWebglNetworkRequestSchema, bodyObject(options))] });
-  if (!parsed.success) throw new MockHttpError(400, 'VALIDATION_ERROR', '연결 입력을 확인하세요.', parsed.error.issues.map(issue => ({ index: issue.path[1] ?? null, field: issue.path[2] ?? 'items', message: issue.message })));
+  if (!direct && projectExhibition(ctx, project).isModificationEnabled === false) forbidden('Project modifications are closed for this exhibition');
+  const parsed = batch ? (direct ? AllowWebglNetworkBatchSchema : CreateWebglNetworkBatchSchema).safeParse(bodyObject(options)) : CreateWebglNetworkBatchSchema.safeParse({ items: [parseInput(CreateWebglNetworkRequestSchema, bodyObject(options))] });
+  if (!parsed.success) throw new MockHttpError(400, 'VALIDATION_ERROR', '연결 입력을 확인하세요.', parsed.error.issues.map(issue => ({ index: issue.path[1] ?? null, field: issue.path[2] ?? issue.path[0] ?? 'items', message: issue.message })));
   const errors = parsed.data.items.flatMap((input, index) => {
     if (ConnectionRule.parse(input.origin).includesHostname(new URL(windowOrigin()).hostname)) return [{ index, field: 'origin', message: '사이트·스토리지 보호 호스트는 신청할 수 없습니다.', conflict: false }];
     if (Object.values(records).some(r => r.projectId === project.id && r.origin === input.origin && ['PENDING', 'APPROVED'].includes(r.state))) return [{ index, field: 'origin', message: '이미 대기 중이거나 승인된 주소입니다.', conflict: true }];
     return [];
   });
   if (errors.length) throw new MockHttpError(errors.some(error => !error.conflict) ? 400 : 409, errors.some(error => !error.conflict) ? 'VALIDATION_ERROR' : 'CONFLICT', '연결 입력을 확인하세요.', errors);
-  const rows: WebglNetworkRequest[] = parsed.data.items.map(input => ({ ...input, id: crypto.randomUUID(), projectId: project.id, originalProjectId: project.id, projectTitle: project.title,
+  const reason = direct ? parseInput(AllowWebglNetworkBatchSchema, bodyObject(options)).reason : null;
+  const version = project.webglNetworkPolicyVersion ?? 0;
+  if (direct) {
+    const approved = Object.values(records).filter(r => r.projectId === project.id && r.state === 'APPROVED');
+    const overlaps = parsed.data.items.flatMap((input, index) => approved.some(row => ConnectionRule.parse(row.origin).overlaps(ConnectionRule.parse(input.origin))) ? [{ index, field: 'origin', message: '이미 승인된 연결 범위와 겹칩니다. 기존 승인을 확인하세요.' }] : []);
+    if (overlaps.length) throw new MockHttpError(409, 'CONFLICT', '이미 승인된 연결 범위와 겹칩니다.', overlaps);
+    if (approved.length + parsed.data.items.length > 16) conflict('작품당 최대 16개 연결을 허용할 수 있습니다.');
+    new ProjectConnectionPolicy([...approved.map(row => row.origin), ...parsed.data.items.map(row => row.origin)], [new URL(windowOrigin()).hostname]);
+  }
+  const rows: WebglNetworkRequest[] = parsed.data.items.map((input, index) => ({ ...input, id: crypto.randomUUID(), projectId: project.id, originalProjectId: project.id, projectTitle: project.title,
     requesterId: actor.id, state: 'PENDING', reviewerId: null, reviewReason: null, createdAt: ctx.now(), reviewedAt: null,
-    revokedAt: null, policyVersion: null, events: [] }));
+    revokedAt: null, policyVersion: null, events: [],
+    ...(direct ? { state: 'APPROVED' as const, reviewerId: actor.id, reviewReason: reason, reviewedAt: ctx.now(), policyVersion: version + index + 1,
+      events: [{ id: crypto.randomUUID(), action: 'APPROVE' as const, actorId: actor.id, reason: reason!, policyVersion: version + index + 1, createdAt: ctx.now() }] } : {}),
+  }));
+  if (direct) project.webglNetworkPolicyVersion = version + rows.length;
   rows.forEach(row => { records[row.id] = row; });
   return batch ? { items: rows } : rows[0];
 }

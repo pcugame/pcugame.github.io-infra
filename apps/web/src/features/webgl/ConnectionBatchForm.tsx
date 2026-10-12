@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { ConnectionDraftError, CreateWebglNetworkBatchSchema, type CreateWebglNetworkBatch, type WebglNetworkRequest, type WebglNetworkBatchResponse } from '@pcu/contracts';
+import { AllowWebglNetworkBatchSchema, ConnectionDraftError, CreateWebglNetworkBatchSchema, type CreateWebglNetworkBatch, type AllowWebglNetworkBatch, type WebglNetworkRequest, type WebglNetworkBatchResponse } from '@pcu/contracts';
 import { api, ApiError } from '../../lib/api/client';
 import { getApiErrorMessage } from '../../lib/api';
 import { ConnectionRuleFields } from './ConnectionRuleFields';
@@ -11,11 +11,12 @@ type Row = { id: string; draft: ConnectionDraft };
 type Issue = { index: number; field: string; message: string };
 const newRow = (draft = emptyConnectionDraft): Row => ({ id: crypto.randomUUID(), draft });
 const fieldName = (field: string) => field === 'origin' ? 'host' : field;
-export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted }: {
- path: string; items: WebglNetworkRequest[]; gameOrigin: string; onSubmitted: () => Promise<void>;
+export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted, direct = false }: {
+ direct?: boolean; path: string; items: WebglNetworkRequest[]; gameOrigin: string; onSubmitted: () => Promise<void>;
 }) {
  const [rows, setRows] = useState<Row[]>(() => [newRow()]);
  const [errors, setErrors] = useState<Record<string, Issue[]>>({});
+ const [reason, setReason] = useState('');
  const [description, setDescription] = useState({ purpose: '', cors: '' });
  const [descriptionErrors, setDescriptionErrors] = useState<Record<string, string>>({});
  const [notice, setNotice] = useState('');
@@ -24,18 +25,18 @@ export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted }: {
  function showErrors(issues: Issue[]) {
   const next: Record<string, Issue[]> = {};
   const shared: Record<string, string> = {};
-  for (const issue of issues) { if (issue.field === 'purpose' || issue.field === 'cors') { shared[issue.field] = issue.message; continue; } const row = rows[issue.index]; if (row) (next[row.id] ??= []).push(issue); }
+  for (const issue of issues) { if (['purpose', 'cors', 'reason'].includes(issue.field)) { shared[issue.field] = issue.message; continue; } const row = rows[issue.index]; if (row) (next[row.id] ??= []).push(issue); }
   setErrors(next); setDescriptionErrors(shared);
   const first = issues[0];
-  focusTarget.current = first && (first.field === 'purpose' || first.field === 'cors') ? `network-${first.field}` : first && rows[first.index] ? `network-${rows[first.index]!.id}-${fieldName(first.field)}` : null;
+  focusTarget.current = first && (['purpose', 'cors', 'reason'].includes(first.field)) ? `network-${first.field}` : first && rows[first.index] ? `network-${rows[first.index]!.id}-${fieldName(first.field)}` : null;
  }
  const submit = useMutation({
-  mutationFn: (body: CreateWebglNetworkBatch) => api.post<WebglNetworkBatchResponse>(`${path}/batch`, body),
+  mutationFn: (body: CreateWebglNetworkBatch | AllowWebglNetworkBatch) => api.post<WebglNetworkBatchResponse>(`${path}/${direct ? 'allow' : 'batch'}`, body),
   retry: false,
-  onSuccess: async () => { setRows([newRow()]); setDescription({ purpose: '', cors: '' }); setDescriptionErrors({}); setErrors({}); setNotice('신청이 모두 등록되었습니다. 관리자 검토 결과를 기다려 주세요.'); await onSubmitted(); },
+  onSuccess: async () => { setReason(''); setRows([newRow()]); setDescription({ purpose: '', cors: '' }); setDescriptionErrors({}); setErrors({}); setNotice(direct ? '연결을 모두 허용했습니다. 게임을 새로 실행하면 적용됩니다.' : '신청이 모두 등록되었습니다. 관리자 검토 결과를 기다려 주세요.'); await onSubmitted(); },
   onError: async error => {
    const details = error instanceof ApiError ? (error.body as { error?: { details?: unknown } })?.error?.details : null;
-   if (Array.isArray(details)) showErrors(details.filter((value): value is Issue => typeof value?.index === 'number' && typeof value?.field === 'string').map(value => ({ ...value, message: value.message || '입력을 확인하세요.' })));
+   if (Array.isArray(details)) showErrors(details.filter((value): value is Issue => (typeof value?.index === 'number' || value?.field === 'reason') && typeof value?.field === 'string').map(value => ({ ...value, index: value.index ?? 0, message: value.message || '입력을 확인하세요.' })));
    if (!(error instanceof ApiError) || error.status >= 500) {
     setNotice('신청 결과를 확인할 수 없습니다. 신청 이력을 새로 조회하여 등록 여부를 확인한 뒤 다시 신청하세요. 입력은 유지됩니다.');
     await onSubmitted();
@@ -62,14 +63,14 @@ export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted }: {
    try { origin = draftOrigin(row.draft); } catch (error) { issues.push({ index, field: error instanceof ConnectionDraftError ? error.field : 'host', message: error instanceof Error ? error.message : '빈 항목을 작성하거나 삭제하세요.' }); }
    return { origin, mode: row.draft.mode, ...description };
   });
-  const parsed = CreateWebglNetworkBatchSchema.safeParse({ items: inputs });
+  const parsed = (direct ? AllowWebglNetworkBatchSchema : CreateWebglNetworkBatchSchema).safeParse({ items: inputs, ...(direct ? { reason } : {}) });
   if (!parsed.success) for (const issue of parsed.error.issues) {
-   const index = Number(issue.path[1]); const field = String(issue.path[2] ?? 'host');
+   const index = Number(issue.path[1]); const field = String(issue.path[2] ?? (issue.path[0] === 'reason' ? 'reason' : 'host'));
    if (field === 'origin' && issues.some(value => value.index === index)) continue;
-   issues.push({ index, field, message: field === 'purpose' ? '사용 목적을 입력하세요.' : field === 'cors' ? 'CORS / 인증 설정 계획을 입력하세요.' : issue.message });
+   issues.push({ index, field, message: field === 'reason' ? '허용 사유를 입력하세요.' : field === 'purpose' ? '사용 목적을 입력하세요.' : field === 'cors' ? 'CORS / 인증 설정 계획을 입력하세요.' : issue.message });
   }
   inputs.forEach((input, index) => { if (items.some(item => item.origin === input.origin && ['PENDING', 'APPROVED'].includes(item.state))) issues.push({ index, field: 'origin', message: '이미 대기 중이거나 승인된 주소입니다.' }); });
-  issues.sort((a, b) => Number(['purpose', 'cors'].includes(a.field)) - Number(['purpose', 'cors'].includes(b.field)) || a.index - b.index);
+  issues.sort((a, b) => Number(['purpose', 'cors', 'reason'].includes(a.field)) - Number(['purpose', 'cors', 'reason'].includes(b.field)) || a.index - b.index);
   showErrors(issues); setNotice('');
   if (issues.length || !parsed.success) return;
   locked.current = true; submit.mutate(parsed.data);
@@ -92,7 +93,8 @@ export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted }: {
  }
  return <div className="network-editor">
   <form id="network-new-request" className="admin-card project-form network-form" onSubmit={send} noValidate>
-   <h2>새 연결 신청</h2>
+   <h2>{direct ? '연결 직접 허용' : '새 연결 신청'}</h2>
+   {direct && <p className="field-hint">학생 신청 없이 이 작품에 바로 적용합니다. 입력한 모든 연결이 함께 승인되며 허용 사유가 이력에 남습니다.</p>}
    <p className="field-hint">주소를 추가하고 사용 목적과 설정 계획은 아래에 한 번만 작성하세요. 최대 16개 · 현재 승인 {items.filter(item => item.state === 'APPROVED').length} / 16개. 새 신청은 모든 포트가 기본입니다.</p>
    {rows.map((row, index) => {
     const prefix = `network-${row.id}`;
@@ -111,7 +113,7 @@ export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted }: {
    })}
    <button type="button" className="btn btn--secondary btn--small" disabled={submit.isPending || rows.length >= 16} onClick={() => { if (!locked.current) setRows(previous => [...previous, newRow()]); }}>＋ 연결 추가</button>
    <div className="network-batch-description">
-    <h3>신청 설명</h3>
+    <h3>{direct ? '연결 설명' : '신청 설명'}</h3>
     <p className="field-hint">주소별 용도와 설정이 다르면 주소 이름과 함께 이곳에 모아 적어 주세요.</p>
     {(['purpose', 'cors'] as const).map(field => <div className="form-field" key={field}>
      <label htmlFor={`network-${field}`}>{field === 'purpose' ? '사용 목적' : 'CORS / 인증 설정 계획'}</label>
@@ -124,8 +126,15 @@ export function ConnectionBatchForm({ path, items, gameOrigin, onSubmitted }: {
     </div>)}
     <p className="field-hint">CORS·WebSocket Origin 허용 대상: <code>{gameOrigin}</code></p>
    </div>
+   {direct && <div className="form-field">
+    <label htmlFor="network-reason">허용 사유</label>
+    <textarea id="network-reason" value={reason} disabled={submit.isPending} maxLength={2000} rows={2} required
+     aria-invalid={!!descriptionErrors.reason} aria-describedby={descriptionErrors.reason ? 'network-reason-error' : undefined}
+     onChange={event => { if (!locked.current) { setReason(event.target.value); setDescriptionErrors(previous => ({ ...previous, reason: '' })); } }} />
+    {descriptionErrors.reason && <p id="network-reason-error" className="field-error" role="alert">{descriptionErrors.reason}</p>}
+   </div>}
    <div className="form-actions">
-    <button className="btn btn--primary" type="submit" disabled={submit.isPending}>{submit.isPending ? '신청 중…' : `연결 ${rows.length}개 신청`}</button>
+    <button className="btn btn--primary" type="submit" disabled={submit.isPending}>{submit.isPending ? '처리 중…' : `연결 ${rows.length}개 ${direct ? '직접 허용' : '신청'}`} </button>
    </div>
    {submit.error && <p className="field-error" role="alert">{getApiErrorMessage(submit.error)}</p>}
    {notice && <p role="status">{notice}</p>}

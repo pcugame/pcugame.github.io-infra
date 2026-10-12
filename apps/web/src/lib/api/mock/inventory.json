@@ -1242,6 +1242,30 @@
       "uiSources": [
         "features/voting/api.ts"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/projects/:projectId/webgl-network-requests",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/admin/projects/:projectId/webgl-network-requests/allow",
+      "priority": "P1",
+      "domain": "webgl.ts",
+      "testFiles": [
+        "mockWorkflows.test.ts"
+      ],
+      "uiSources": [
+        "pages/WebglNetworkPage.tsx"
+      ]
     }
   ]
 }

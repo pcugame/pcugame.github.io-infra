@@ -1,3 +1,4 @@
+import { AllowWebglNetworkBatchSchema } from './webgl-network.js';
 import { describe, expect, it } from 'vitest';
 import { CreateWebglNetworkBatchSchema, ConnectionRule, ProjectConnectionPolicy, CreateWebglNetworkRequestSchema, validateWebglNetworkOrigin } from './webgl-network.js';
 
@@ -107,4 +108,11 @@ describe('connection batches', () => {
   expect(result.success).toBe(false);
   if (!result.success) expect(result.error.issues.map(issue => issue.path)).toEqual([['items', 0, 'origin'], ['items', 1, 'origin']]);
  });
+});
+
+it('requires a direct-allow reason and retains batch overlap validation', () => {
+ const item = { origin: 'https://game.example.com:*', mode: 'HTTPS', purpose: 'Game service', cors: 'Configured' };
+ expect(AllowWebglNetworkBatchSchema.safeParse({ items: [item], reason: 'Verified service' }).success).toBe(true);
+ for (const reason of ['', '   ', undefined]) expect(AllowWebglNetworkBatchSchema.safeParse({ items: [item], reason }).success).toBe(false);
+ expect(AllowWebglNetworkBatchSchema.safeParse({ items: [item, item], reason: 'Reviewed' }).success).toBe(false);
 });

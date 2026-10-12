@@ -47,7 +47,7 @@ function RequestCard({ item, admin, items, onReviewed }: { item: WebglNetworkReq
 	try { rule = ConnectionRule.parse(item.origin); } catch { /* Keep historical requests reviewable after validator updates. */ }
 	return <article className="admin-card network-request">
 		<div className="network-request__header">
-			<div><p className="network-request__project">{item.projectTitle}{item.projectId === null && ' · 삭제된 작품'}</p><h3>{rule ? rule.hostname : '기존 연결 신청'}</h3></div>
+			<div><p className="network-request__project">{admin && item.projectId !== null ? <Link to={`/admin/projects/${item.projectId}/network`}>{item.projectTitle}</Link> : item.projectTitle}{item.projectId === null && ' · 삭제된 작품'}</p><h3>{rule ? rule.hostname : '기존 연결 신청'}</h3></div>
 			<span className={`network-status network-status--${item.state.toLowerCase()}`}>{stateLabels[item.state]}</span>
 		</div>
 		<p className="network-request__meta">{item.mode === 'HTTPS' ? 'HTTPS API / Addressables' : 'WSS'} · 신청자 #{item.requesterId} · 신청 {dateLabel(item.createdAt)}</p>
@@ -68,15 +68,16 @@ function RequestCard({ item, admin, items, onReviewed }: { item: WebglNetworkReq
 	</article>;
 }
 
-export default function WebglNetworkPage({ admin = false }: { admin?: boolean }) {
+export default function WebglNetworkPage({ admin = false, projectAdmin = false }: { admin?: boolean; projectAdmin?: boolean }) {
 	const { id } = useParams();
 	const projectId = Number(id);
 	const viewerKey = useViewerKey();
 	const client = useQueryClient();
-	const path = admin ? '/api/admin/webgl-network-requests' : `/api/me/projects/${projectId}/webgl-network-requests`;
+	const path = projectAdmin ? `/api/admin/projects/${projectId}/webgl-network-requests` : admin ? '/api/admin/webgl-network-requests' : `/api/me/projects/${projectId}/webgl-network-requests`;
 	const queryKey = viewerKey(['webgl-network', path]);
 	const query = useQuery({ queryKey, queryFn: () => api.get<WebglNetworkList>(path), enabled: admin || Number.isSafeInteger(projectId) && projectId > 0, retry: false });
-	const [filter, setFilter] = useState<StateFilter>(admin ? 'PENDING' : 'ALL');
+	const projectQuery = useQuery({ queryKey: viewerKey(['admin-project-network-title', projectId]), queryFn: () => api.get<{ title: string }>(`/api/admin/projects/${projectId}`), enabled: projectAdmin && Number.isSafeInteger(projectId) && projectId > 0 });
+	const [filter, setFilter] = useState<StateFilter>(admin && !projectAdmin ? 'PENDING' : 'ALL');
 	const refresh = () => { void client.invalidateQueries({ queryKey }); };
 	if (query.isLoading) return <LoadingSpinner />;
 	if (!query.data && query.error instanceof ApiError && query.error.status === 404) return <div className="webgl-network-page"><section className="admin-card network-unavailable"><h1>게임 외부 연결</h1><p>외부 연결 신청 기능이 아직 활성화되지 않았거나 접근 가능한 작품이 없습니다.</p><Link className="btn btn--secondary" to={admin ? '/admin/projects' : '/me/projects'}>{admin ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link></section></div>;
@@ -90,25 +91,25 @@ export default function WebglNetworkPage({ admin = false }: { admin?: boolean })
 	return <div className="webgl-network-page">
 		{query.error && <p role="alert">신청 이력을 새로 조회하지 못했습니다. 입력은 유지됩니다. <button type="button" className="btn btn--secondary" onClick={() => void query.refetch()}>이력 새로 조회</button></p>}
 		<header className="admin-page-header">
-			<div className="admin-page-header__text"><span className="admin-page-header__eyebrow">Game Connections</span><h1>{admin ? '게임 외부 연결 검토' : '게임 외부 연결 신청'}</h1><p className="field-hint">{admin ? '작품별 외부 서버 연결 신청을 확인하고 처리합니다.' : '게임에서 사용할 외부 API, 에셋 서버 또는 WebSocket 주소를 신청합니다.'}</p></div>
-			<div className="network-header-actions">{!admin && <a className="btn btn--primary btn--small" href="#network-new-request">새 연결 신청</a>}<Link className="btn btn--secondary btn--small" to={admin ? '/admin/projects' : '/me/projects'}>{admin ? '작품 관리' : '내 작품'}</Link></div>
+			<div className="admin-page-header__text"><span className="admin-page-header__eyebrow">Game Connections</span><h1>{projectAdmin ? `${projectQuery.data?.title ?? `작품 #${projectId}`} · 외부 연결` : admin ? '게임 외부 연결 검토' : '게임 외부 연결 신청'}</h1><p className="field-hint">{projectAdmin ? '이 작품의 연결을 직접 허용하거나 기존 승인을 관리합니다.' : admin ? '작품별 신청을 검토합니다. 사전 신청 없이 허용하려면 작품 관리에서 해당 작품의 외부 연결을 선택하세요.' : '게임에서 사용할 외부 API, 에셋 서버 또는 WebSocket 주소를 신청합니다.'}</p></div>
+			<div className="network-header-actions">{(!admin || projectAdmin) && <a className="btn btn--primary btn--small" href="#network-new-request">{projectAdmin ? '연결 직접 허용' : '새 연결 신청'}</a>}<Link className="btn btn--secondary btn--small" to={admin ? '/admin/projects' : '/me/projects'}>{admin && !projectAdmin ? '게임 선택 · 직접 허용' : admin ? '작품 관리' : '내 작품'}</Link></div>
 		</header>
 		<section className="admin-card network-guide" aria-labelledby="network-guide-title">
-			<div className="network-section-heading"><h2 id="network-guide-title">외부 연결은 이렇게 진행됩니다</h2><span className="network-role">{admin ? '관리자 검토 화면' : '작품 참여자 신청 화면'}</span></div>
+			<div className="network-section-heading"><h2 id="network-guide-title">외부 연결은 이렇게 진행됩니다</h2><span className="network-role">{projectAdmin ? '작품별 연결 관리' : admin ? '관리자 검토 화면' : '작품 참여자 신청 화면'}</span></div>
 			<ol className="network-steps">
-				<li><span className="network-step-number">1</span><div><h3>연결 주소 신청</h3><p>내 작품 → 외부 연결에서 주소와 사용 목적, 서버 설정 계획을 제출합니다.</p></div></li>
-				<li><span className="network-step-number">2</span><div><h3>관리자가 검토</h3><p>관리 메뉴 → 게임 외부 연결에서 사유를 남기고 승인 또는 반려합니다.</p></div></li>
+				<li><span className="network-step-number">1</span><div><h3>{projectAdmin ? '연결 주소 입력' : '연결 주소 신청'}</h3><p>{projectAdmin ? '게임이 실제 사용하는 HTTPS / WSS 호스트를 아래 목록에 추가하세요.' : '내 작품 → 외부 연결에서 주소와 사용 목적, 서버 설정 계획을 제출합니다.'}</p></div></li>
+				<li><span className="network-step-number">2</span><div><h3>{projectAdmin ? '관리자가 직접 허용' : '관리자가 검토'}</h3><p>{projectAdmin ? '설정 계획과 허용 사유를 작성하고 직접 허용을 누릅니다. 학생 신청은 필요하지 않습니다.' : '관리 메뉴 → 게임 외부 연결에서 사유를 남기고 승인 또는 반려합니다.'}</p></div></li>
 				<li><span className="network-step-number">3</span><div><h3>다음 게임 실행에 적용</h3><p>승인 후 게임을 다시 실행하면 연결이 허용됩니다. 다음 배포에도 승인이 유지됩니다.</p></div></li>
 			</ol>
-			<div className="network-guide__footer"><p>{admin ? <>검토 대기 <strong>{pendingCount}건</strong>을 먼저 확인해 주세요.</> : <>현재 연결 가능한 주소 <strong>{approvedCount}개</strong> · 검토 대기 <strong>{pendingCount}건</strong></>}</p><p className="field-hint">외부 서버의 CORS / 인증 설정은 신청자가 직접 준비해야 합니다.</p></div>
+			<div className="network-guide__footer"><p>{admin && !projectAdmin ? <>검토 대기 <strong>{pendingCount}건</strong>을 먼저 확인해 주세요.</> : <>현재 연결 가능한 주소 <strong>{approvedCount}개</strong> · 검토 대기 <strong>{pendingCount}건</strong></>}</p><p className="field-hint">외부 서버의 CORS / 인증 설정은 신청자가 직접 준비해야 합니다.</p></div>
 		</section>
 		<div className={`network-workspace${admin ? ' network-workspace--admin' : ''}`}>
 		<section className="network-list" aria-label="외부 연결 신청 이력">
-			<div className="network-section-heading"><h2>{admin ? '신청 검토 목록' : '연결 현황'}</h2><span className="field-hint">전체 {items.length}건</span></div>
+			<div className="network-section-heading"><h2>{admin && !projectAdmin ? '신청 검토 목록' : '연결 현황'}</h2><span className="field-hint">전체 {items.length}건</span></div>
 			<div className="network-filters" aria-label="신청 상태 필터">{filters.map(value => <button key={value} type="button" className={`btn btn--secondary btn--small network-filter${filter === value ? ' is-active' : ''}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === 'ALL' ? '전체' : stateLabels[value]} <span>{value === 'ALL' ? items.length : items.filter(item => item.state === value).length}</span></button>)}</div>
-			{visibleItems.length === 0 ? <div className="admin-card network-empty"><h3>{items.length === 0 ? '등록된 신청이 없습니다.' : `${filter === 'ALL' ? '전체' : stateLabels[filter]} 신청이 없습니다.`}</h3><p>{items.length === 0 ? admin ? '작품 담당자가 연결 주소를 신청하면 이곳에서 검토할 수 있습니다.' : '새 연결 신청에 필요한 정보를 입력해 첫 주소를 등록하세요.' : '다른 상태를 선택하면 이전 신청과 처리 결과를 확인할 수 있습니다.'}</p></div> : visibleItems.map(item => <RequestCard key={item.id} item={item} admin={admin} items={items} onReviewed={refresh} />)}
+			{visibleItems.length === 0 ? <div className="admin-card network-empty"><h3>{items.length === 0 ? '등록된 신청이 없습니다.' : `${filter === 'ALL' ? '전체' : stateLabels[filter]} 신청이 없습니다.`}</h3><p>{items.length === 0 ? projectAdmin ? '아래에서 이 작품의 연결을 직접 허용할 수 있습니다.' : admin ? '작품 담당자의 신청을 검토하거나, 작품 관리에서 해당 게임에 연결을 직접 허용하세요.' : '새 연결 신청에 필요한 정보를 입력해 첫 주소를 등록하세요.' : '다른 상태를 선택하면 이전 신청과 처리 결과를 확인할 수 있습니다.'}</p></div> : visibleItems.map(item => <RequestCard key={item.id} item={item} admin={admin} items={items} onReviewed={refresh} />)}
 		</section>
-        {!admin && <ConnectionBatchForm key={path} path={path} items={items} gameOrigin={query.data.gameOrigin} onSubmitted={async () => { setFilter('ALL'); await client.invalidateQueries({ queryKey }); }} />}
+        {(!admin || projectAdmin) && <ConnectionBatchForm direct={projectAdmin} key={path} path={path} items={items} gameOrigin={query.data.gameOrigin} onSubmitted={async () => { setFilter('ALL'); await client.invalidateQueries({ queryKey }); }} />}
         </div>
 		<details className="admin-card network-help"><summary>서버 설정과 연결 실패 확인 방법</summary><div className="network-help__content">
 			<div><h3>신청 준비</h3><p>사용 목적과 서버 설정 계획에 SDK·버전·게임 모드, 외부 목적지별 용도, 인증 방식(비밀정보 제외), 외부 서비스 운영 담당자, 실제 2인 플레이 확인 절차를 함께 적어 주세요. 승인 후 새 실행에서 두 계정이 같은 방에 접속해 양방향 게임 상태와 재접속을 확인하세요.</p></div>
