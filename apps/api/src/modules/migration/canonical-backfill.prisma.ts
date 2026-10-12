@@ -261,7 +261,9 @@ async function upsertRepresentations(tx: Prisma.TransactionClient, assetId: numb
 	return ids;
 }
 
-async function createReadyAssetWithOriginal(tx: Prisma.TransactionClient, input: {
+// Legacy backfill creates the asset row here; callers insert the planned
+// representations separately (including WEBGL_SOURCE for WebGL).
+async function createLegacyReadyAssetRow(tx: Prisma.TransactionClient, input: {
 	projectId: number | null; exhibitionId: number | null; kind: 'POSTER' | 'WEBGL';
 	originalName: string; mimeType: string; sizeBytes: bigint; isPublic: boolean;
 	width?: number | null; height?: number | null; card480Height?: number | null; display960Height?: number | null;
@@ -416,7 +418,7 @@ export function createCanonicalBackfillRepository(client: PrismaClient): Canonic
 				let assetId = current.posterAssetId;
 				let assetsCreated = 0;
 				if (assetId === null) {
-					assetId = await createReadyAssetWithOriginal(tx, {
+					assetId = await createLegacyReadyAssetRow(tx, {
 						projectId: null, exhibitionId: plan.row.id, kind: 'POSTER', originalName: plan.row.posterOriginalName,
 						mimeType: plan.row.posterMimeType, sizeBytes: plan.row.posterSizeBytes, isPublic: true,
 						width: plan.row.posterWidth, height: plan.row.posterHeight,
@@ -461,7 +463,7 @@ export function createCanonicalBackfillRepository(client: PrismaClient): Canonic
 					if (!source || source.projectId !== plan.row.id || source.storageKey !== proof.storageKey || source.status !== 'READY' || source.kind !== 'WEBGL') throw new Error(`webgl ${plan.row.id} legacy source asset changed concurrently`);
 					assetId = source.id;
 				} else {
-					assetId = await createReadyAssetWithOriginal(tx, { projectId: plan.row.id, exhibitionId: null, kind: 'WEBGL', originalName: proof.originalName, mimeType: plan.source.mimeType, sizeBytes: plan.source.sizeBytes, isPublic: false });
+					assetId = await createLegacyReadyAssetRow(tx, { projectId: plan.row.id, exhibitionId: null, kind: 'WEBGL', originalName: proof.originalName, mimeType: plan.source.mimeType, sizeBytes: plan.source.sizeBytes, isPublic: false });
 					assetsCreated = 1;
 				}
 				const representationIds = await upsertRepresentations(tx, assetId, [plan.source]);
