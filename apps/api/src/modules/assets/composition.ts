@@ -9,7 +9,11 @@ import { createBannedIpController } from '../admin/banned-ip/controller.js';
 import { createAssetsService } from './service.js';
 import type { AssetsServiceDependencies, AssetsService, AssetDeletionUnitOfWork } from './ports.js';
 import type { AutomaticBanRepository } from '../admin/banned-ip/ports.js';
-import { createBannedIpStartupGate, createBannedIpWarmup, createDownloadRestriction } from '../admin/banned-ip/runtime.js';
+import {
+	createBannedIpStartupGate,
+	createBannedIpWarmup,
+	createDownloadRestriction,
+} from '../admin/banned-ip/runtime.js';
 import type { UploadLifecycleRuntime } from '../upload-lifecycle/ports.js';
 
 export interface AssetsBannedProductionGraph {
@@ -21,7 +25,7 @@ export interface AssetsBannedProductionGraph {
 export interface AssetsBannedProductionDependencies {
 	config: Pick<Env, 'DOWNLOAD_AUTO_IP_BAN_ENABLED' | 'S3_BUCKET_PROTECTED'>;
 	assetsRepository: AssetsServiceDependencies['repository'];
- deletion: AssetDeletionUnitOfWork;
+	deletion: AssetDeletionUnitOfWork;
 	bannedIpRepository: BannedIpServiceDependencies['repository'] & AutomaticBanRepository;
 	downloadLimiter: DownloadRateLimiter;
 	logger: AppLogger;
@@ -39,14 +43,14 @@ export function createAssetsBannedProductionGraph(
 	const gate = createBannedIpStartupGate(deps.downloadLimiter);
 	const mutateBan = createBanMutationQueue();
 
- const assetsService = createAssetsService({
-  protectedBucket: deps.config.S3_BUCKET_PROTECTED,
-  deletion: deps.deletion,
-  checkDownloadLimit: createDownloadRestriction({ gate, repository: deps.bannedIpRepository, mutateBan }),
-  wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
-  logger: deps.logger,
-  repository: deps.assetsRepository,
- });
+	const assetsService = createAssetsService({
+		protectedBucket: deps.config.S3_BUCKET_PROTECTED,
+		deletion: deps.deletion,
+		checkDownloadLimit: createDownloadRestriction({ gate, repository: deps.bannedIpRepository, mutateBan }),
+		wakeDeletionWorker: deps.uploadLifecycle.wakeDeletionWorker,
+		logger: deps.logger,
+		repository: deps.assetsRepository,
+	});
 	const bannedIpService = createBannedIpService({
 		mutateBan,
 		repository: deps.bannedIpRepository,

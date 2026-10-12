@@ -6,7 +6,7 @@ import type { FileAccessService } from '../file-access/ports.js';
 
 export interface AssetsControllerDependencies {
 	service: Pick<AssetsService, 'deleteAsset'>;
- issueAssetDownload: FileAccessService['issueAssetDownload'];
+	issueAssetDownload: FileAccessService['issueAssetDownload'];
 }
 
 /** Create a pure asset route plugin. Registration performs no warmup or I/O. */
@@ -18,9 +18,11 @@ export function createAssetsController(deps: AssetsControllerDependencies): Fast
 			async (request, reply) => {
 				const assetId = parseIntParam(request.params.assetId, 'Asset ID');
 				const query = parseBody(AssetDownloadQuery, request.query);
-                const grant = await deps.issueAssetDownload(assetId, query.variant ?? 'original', request);
-                return reply.header('Referrer-Policy', 'no-referrer').header('Cache-Control', 'private, no-store').redirect(grant.url);
-
+				const grant = await deps.issueAssetDownload(assetId, query.variant ?? 'original', request);
+				return reply
+					.header('Referrer-Policy', 'no-referrer')
+					.header('Cache-Control', 'private, no-store')
+					.redirect(grant.url);
 			},
 		);
 

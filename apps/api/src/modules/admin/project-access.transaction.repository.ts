@@ -1,7 +1,11 @@
 import type { Prisma } from '../../generated/prisma/client.js';
 import type { Actor } from '../../application/http-input.js';
 import { notFound } from '../../shared/errors.js';
-import { assertWriteAccess, assertStagingUploadAccess, assertOrdinaryProjectMutationAllowed } from './project-access.policy.js';
+import {
+	assertWriteAccess,
+	assertStagingUploadAccess,
+	assertOrdinaryProjectMutationAllowed,
+} from './project-access.policy.js';
 import type { ProjectAccessRecord } from './project-access.ports.js';
 /**
  * Recheck the policy inside the transaction that performs a mutation.  Route
@@ -20,7 +24,10 @@ export async function assertProjectWriteAccessInTransaction(
 	const project = await tx.project.findUniqueOrThrow({
 		where: { id: projectId },
 		select: {
-			id: true, exhibitionId: true, creatorId: true, status: true,
+			id: true,
+			exhibitionId: true,
+			creatorId: true,
+			status: true,
 			exhibition: { select: { isModificationEnabled: true } },
 			changeRequestDraft: { select: { id: true } },
 		},
@@ -29,12 +36,14 @@ export async function assertProjectWriteAccessInTransaction(
 	// therefore serialized instead of being a time-of-check/time-of-use race.
 	await tx.$queryRaw`SELECT id FROM exhibitions WHERE id = ${project.exhibitionId} FOR UPDATE`;
 	const exhibition = await tx.exhibition.findUniqueOrThrow({
-		where: { id: project.exhibitionId }, select: { isModificationEnabled: true },
+		where: { id: project.exhibitionId },
+		select: { isModificationEnabled: true },
 	});
 	assertOrdinaryProjectMutationAllowed({ isChangeRequestDraft: project.changeRequestDraft !== null });
-	const memberRows = actor.role === 'ADMIN' || actor.role === 'OPERATOR'
-		? []
-		: await tx.$queryRaw<Array<{ id: number }>>`
+	const memberRows =
+		actor.role === 'ADMIN' || actor.role === 'OPERATOR'
+			? []
+			: await tx.$queryRaw<Array<{ id: number }>>`
 			SELECT id FROM project_members WHERE project_id = ${projectId} AND user_id = ${actor.id} FOR SHARE
 		`;
 	assertWriteAccess(actor.role, project.creatorId, actor.id, {
@@ -66,23 +75,28 @@ export async function assertProjectUploadWriteAccessInTransaction(
 		select: { changeRequestDraft: { select: { projectId: true } } },
 	});
 	if (!stagedProbe) throw notFound('Project not found');
-	if (stagedProbe.changeRequestDraft?.projectId !== null && stagedProbe.changeRequestDraft?.projectId !== undefined) {
+	if (
+		stagedProbe.changeRequestDraft?.projectId !== null &&
+		stagedProbe.changeRequestDraft?.projectId !== undefined
+	) {
 		const sourceId = stagedProbe.changeRequestDraft.projectId;
 		await tx.$queryRaw`SELECT id FROM projects WHERE id = ${sourceId} FOR UPDATE`;
 		await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`;
 		const request = await tx.projectChangeRequest.findUnique({
 			where: { stagingProjectId: projectId },
 			select: {
-				actorId: true, state: true,
+				actorId: true,
+				state: true,
 				project: { select: { creatorId: true, members: { select: { userId: true } } } },
 			},
 		});
 		const source = request?.project;
-  assertStagingUploadAccess(actor, {
-   changeRequestState: request?.state, changeRequestActorId: request?.actorId,
-   changeRequestSourceCreatorId: source?.creatorId,
-   changeRequestSourceMemberIds: source?.members.map(member => member.userId) ?? [],
-  });
+		assertStagingUploadAccess(actor, {
+			changeRequestState: request?.state,
+			changeRequestActorId: request?.actorId,
+			changeRequestSourceCreatorId: source?.creatorId,
+			changeRequestSourceMemberIds: source?.members.map((member) => member.userId) ?? [],
+		});
 		return;
 	}
 	await tx.$queryRaw`SELECT id FROM projects WHERE id = ${projectId} FOR UPDATE`;
@@ -96,10 +110,13 @@ export async function assertProjectUploadWriteAccessInTransaction(
 	});
 	await tx.$queryRaw`SELECT id FROM exhibitions WHERE id = ${project.exhibitionId} FOR UPDATE`;
 	const exhibition = await tx.exhibition.findUniqueOrThrow({
-		where: { id: project.exhibitionId }, select: { isModificationEnabled: true },
+		where: { id: project.exhibitionId },
+		select: { isModificationEnabled: true },
 	});
-	const memberRows = actor.role === 'ADMIN' || actor.role === 'OPERATOR' ? []
-		: await tx.$queryRaw<Array<{ id: number }>>`
+	const memberRows =
+		actor.role === 'ADMIN' || actor.role === 'OPERATOR'
+			? []
+			: await tx.$queryRaw<Array<{ id: number }>>`
 			SELECT id FROM project_members WHERE project_id = ${projectId} AND user_id = ${actor.id} FOR SHARE
 		`;
 	assertWriteAccess(actor.role, project.creatorId, actor.id, {
