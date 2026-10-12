@@ -1,3 +1,5 @@
+import { createDiagnosticRepository, createUnavailableDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
+import { createDiagnosticService } from '../modules/webgl-play/diagnostic-service.js';
 import { createVotingController } from '../modules/voting/controller.js';
 import { createVotingService } from '../modules/voting/service.js';
 import { createVotingRepository } from '../modules/voting/repository.js';
@@ -201,6 +203,8 @@ export function composeBackendRoutes({
 			persistence.webglPlayRepository ?? (prisma && !hasSuppliedPersistence
 				? createWebglPlayRepository(prisma) : createUnavailableWebglPlayRepository()),
 			config,
+			createDiagnosticService(persistence.webglDiagnosticRepository ?? (prisma && !hasSuppliedPersistence
+				? createDiagnosticRepository(prisma) : createUnavailableDiagnosticRepository()), () => clock.now()),
 			() => clock.now(),
 		);
 		routes.webglPlay = createWebglPlayController(webglPlay, config, () => clock.now());

@@ -1,3 +1,5 @@
+import { createDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
+import { createDiagnosticService } from '../modules/webgl-play/diagnostic-service.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyError } from 'fastify';
 import cookie from '@fastify/cookie';
@@ -23,6 +25,7 @@ import { createFileAccessController } from '../modules/file-access/controller.js
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary', () => {
  let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>, db: PrismaClient, app: FastifyInstance;
+ let logs = '';
  let projectId: number, exhibitionId: number, sid: string, adminSid: string, outsiderSid: string, memberSid: string, operatorSid: string;
  let owner: number, admin: number, member: number;
  let playRepository: ReturnType<typeof createWebglPlayRepository>;
@@ -67,7 +70,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   operatorSid = (await user('OPERATOR')).sid;
   owner = a.id; sid = a.sid; admin = b.id; adminSid = b.sid; outsiderSid = c.sid; member = d.id; memberSid = d.sid;
   await db.storageBucket.createMany({ data: [{ bucket: 'public', visibility: 'PUBLIC' }, { bucket: 'protected', visibility: 'PROTECTED' }] });
-  app = Fastify(); app.setValidatorCompiler(validatorCompiler); app.setSerializerCompiler(serializerCompiler); registerRouteSchemas(app);
+  app = Fastify({ logger: { level: 'trace', stream: { write: (line: string) => { logs += line; } } } }); app.setValidatorCompiler(validatorCompiler); app.setSerializerCompiler(serializerCompiler); registerRouteSchemas(app);
   await app.register(cookie);
   await registerAuth(app, { config, clock: { now: () => new Date() }, logger: app.log, sessions: {
    find: id => db.authSession.findUnique({ where: { id }, include: { user: true } }),
@@ -80,7 +83,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   await app.register(createWebglNetworkController(network, 'me'), { prefix: '/api/me' });
   await app.register(createWebglNetworkController(network, 'admin'), { prefix: '/api/admin' });
   playRepository = createWebglPlayRepository(db);
-  const play = createWebglPlayService(playRepository, config);
+  const play = createWebglPlayService(playRepository, config, createDiagnosticService(createDiagnosticRepository(db)));
   await app.register(createWebglPlayController(play, config));
   await app.register(createFileAccessController(createFileAccessRepository(db), config, undefined, undefined, undefined, play.resolveRuntime), { prefix: '/api' });
  });
@@ -224,6 +227,28 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect(csp).toContain('wss://*.example.com:8443');
   expect(csp).not.toContain('19090');
  });
+ it('serializes concurrent report budgets and rejects revoked snapshots after reapproval', async () => {
+  const approvedId = await approved();
+  const session = (await issue(true)).json().data as Grant;
+  const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
+  const url = new URL(csp.split('report-uri ')[1]!).pathname;
+  const report = () => app.inject({ method: 'POST', url, headers: { 'content-type': 'application/csp-report' },
+   payload: JSON.stringify({ 'csp-report': { 'blocked-uri': 'https://blocked.example.com/private', 'effective-directive': 'connect-src' } }) });
+  const results = await Promise.all(Array.from({ length: 40 }, report));
+  expect(results.filter(result => result.statusCode === 204)).toHaveLength(30);
+  expect(results.filter(result => result.statusCode === 429)).toHaveLength(10);
+  expect(await db.webglPlaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ reportCount: 30 });
+  expect(await db.webglConnectionDiagnostic.findMany({ where: { sessionId: session.id } })).toMatchObject([{ count: 30 }]);
+  await db.webglPlaySession.update({ where: { id: session.id }, data: { reportWindowAt: new Date(0) } });
+  expect((await review(approvedId, 'revoke')).statusCode).toBe(200);
+  await approved();
+  expect((await report()).statusCode).toBe(403);
+  const read = await app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${session.id}/diagnostics`, headers: {
+   origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`, 'x-pcu-play-control': session.controlSecret,
+  }, payload: {} });
+  expect(read.statusCode).toBe(403);
+  expect(await db.webglPlaySession.findUniqueOrThrow({ where: { id: session.id } })).toMatchObject({ reportCount: 30 });
+ });
  it('isolates diagnostic tokens, strips secrets, limits reports and cascades cleanup', async () => {
   const session = (await issue(true)).json().data as Grant;
   const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
@@ -231,6 +256,10 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   const report = (url = reportUrl, origin = 'https://user:password@blocked.example.com/private?token=secret') => app.inject({ method: 'POST', url, headers: { 'content-type': 'application/csp-report' }, payload: JSON.stringify({ 'csp-report': { 'blocked-uri': origin, 'effective-directive': 'connect-src', 'document-uri': 'https://secret.invalid/path', 'script-sample': 'secret-code' } }) });
   const read = (id = session.id, controlSecret = session.controlSecret) => app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${id}/diagnostics`, headers: { origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`, 'x-pcu-play-control': controlSecret }, payload: {} });
   expect((await read()).json().data.items).toEqual([]);
+  logs = '';
+  const malformed = await app.inject({ method: 'POST', url: reportUrl, headers: { 'content-type': 'application/json' }, payload: '{"private-report-credential":' });
+  expect(malformed.statusCode).toBe(400);
+  expect(malformed.body).not.toContain('private-report-credential');
   expect((await Promise.all([report(), report()])).map(result => result.statusCode)).toEqual([204, 204]);
   const data = (await read()).json().data;
   expect(data).toMatchObject({ gameOrigin, policyVersion: 0, approvedOrigins: [], items: [{ origin: 'https://blocked.example.com', directive: 'connect-src', count: 2 }] });
@@ -247,6 +276,8 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect((await report()).statusCode).toBe(429);
   await db.webglPlaySession.update({ where: { id: session.id }, data: { reportWindowAt: new Date(Date.now() - 61000) } });
   expect((await report()).statusCode).toBe(204);
+  expect(logs).not.toContain(reportUrl.split('/').at(-1));
+  expect(logs).not.toMatch(/password|secret-code|private-report-credential/);
   await db.webglPlaySession.update({ where: { id: session.id }, data: { expiresAt: new Date(0) } });
   expect((await report()).statusCode).toBe(403);
   expect((await read()).statusCode).toBe(403);

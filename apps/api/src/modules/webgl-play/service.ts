@@ -1,4 +1,4 @@
-import { sanitizeConnectionReport } from './diagnostics.js';
+import type { DiagnosticService } from './diagnostic-ports.js';
 import { ProjectConnectionPolicy, resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import type { Env } from "../../config/env.js";
@@ -27,6 +27,7 @@ export function runtimeCsp(
 export function createWebglPlayService(
   repository: WebglPlayRepository,
   config: Env,
+  diagnostics: DiagnosticService,
   now = () => new Date(),
 ) {
   const reportToken = (id: string) => createHmac('sha256', config.SESSION_SECRET).update('webgl-csp-report:' + id).digest('hex');
@@ -137,8 +138,7 @@ export function createWebglPlayService(
     },
     async report(token: string, body: unknown) {
       enabled();
-      if (!/^[a-f0-9]{64}$/.test(token)) throw forbidden();
-      await repository.diagnostics.record(hash(token), sanitizeConnectionReport(body), now());
+      await diagnostics.report(token, body);
     },
     async diagnostics(id: string, secret: unknown, sid?: string) {
       const play = await control(id, secret, sid), at = now();
@@ -147,7 +147,7 @@ export function createWebglPlayService(
       if (dep.id !== play.deploymentId) throw forbidden();
       await checkPolicy(play);
       return { gameOrigin: config.PUBLIC_ASSET_ORIGIN!, policyVersion: play.policyVersion, approvedOrigins: play.approvedOrigins,
-        items: await repository.diagnostics.list(id) };
+        items: await diagnostics.list(id) };
     },
     async renew(id: string, secret: unknown, sid?: string, visible = true) {
       const play = await control(id, secret, sid),

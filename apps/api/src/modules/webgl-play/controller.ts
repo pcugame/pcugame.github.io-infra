@@ -1,3 +1,4 @@
+import { createDiagnosticController } from './diagnostic-controller.js';
 import type { FastifyPluginAsync } from "fastify";
 import type { Env } from "../../config/env.js";
 import { forbidden, notFound } from "../../shared/errors.js";
@@ -11,9 +12,6 @@ export function createWebglPlayController(
   now = () => new Date(),
 ): FastifyPluginAsync {
   return async (app) => {
-    app.addContentTypeParser('application/csp-report', { parseAs: 'string', bodyLimit: 16 * 1024 }, (_request, body, done) => {
-      try { done(null, JSON.parse(String(body))); } catch { done(null, null); }
-    });
     app.addHook("onRequest", async (request, reply) => {
       reply
         .header("Cache-Control", "private, no-store")
@@ -25,11 +23,7 @@ export function createWebglPlayController(
       )
         throw forbidden();
     });
-    app.post<{ Params: { token: string }; Body: unknown }>('/api/webgl-play/reports/:token',
-      { bodyLimit: 16 * 1024, logLevel: 'silent' }, async (request, reply) => {
-        await service.report(request.params.token, request.body);
-        return reply.status(204).send();
-      });
+    await app.register(createDiagnosticController(service));
     app.post<{ Params: { id: string } }>('/api/webgl-play/sessions/:id/diagnostics', async request => ({
       ok: true, data: await service.diagnostics(request.params.id, request.headers['x-pcu-play-control'], request.cookies[config.SESSION_COOKIE_NAME]),
     }));
