@@ -9,7 +9,7 @@ import type {
 import { assertWebglPublishedObjectManifest } from '../webgl/manifest.js';
 import type { WebglProcessingWorkerRepository } from '../webgl/processing-worker.js';
 import { createCanonicalWebglStagingKeys } from '../webgl/paths.js';
-import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.transaction.repository.js';
 
 type WebglProcessingPersistence = WebglProcessingRepository & WebglProcessingWorkerRepository;
 

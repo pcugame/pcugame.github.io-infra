@@ -1,98 +1,40 @@
 import { describe, expect, it, vi } from 'vitest';
-import { deleteAsset } from '../modules/assets/service.js';
-
-function assetDeletionHarness() {
-	const repository = {
-		findAllBannedIps: vi.fn(),
-		findAssetByIdForDownload: vi.fn(),
-		findAssetsByLegacyStorageKey: vi.fn(),
-		recordMigrationObservations: vi.fn(),
-		upsertBannedIp: vi.fn(),
-		findAssetByIdWithProject: vi.fn().mockResolvedValue({
-			id: 41,
-			projectId: 7,
-			project: { posterAssetId: 41 },
-		}),
-		claimAssetForDeletion: vi.fn().mockResolvedValue({
-			id: 41,
-			projectId: 7,
-			kind: 'GAME' as const,
-			previousStatus: 'READY' as const,
-			storageKey: 'games/current.zip',
-			playbackStorageKey: 'games/current-playback.mp4',
-			representations: [],
-			alreadyDeleted: false,
-		}),
-		completeAssetDeletion: vi.fn().mockResolvedValue(undefined),
-	};
-	const wakeDeletionWorker = vi.fn();
-	const deps = {
-		protectedBucket: 'protected',
-		presign: vi.fn(),
-		bucketForKind: () => 'protected',
-		wakeDeletionWorker,
-		loadProjectWithAccess: vi.fn().mockResolvedValue(undefined),
-		downloadLimiter: {
-		add: vi.fn(),
-			loadBannedIps: vi.fn(),
-			check: vi.fn().mockReturnValue('ok' as const),
-		},
-		logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-		repository,
-	};
-	return { deps, repository, wakeDeletionWorker };
+import { createAssetsService } from '../modules/assets/service.js';
+import type { AssetDeletionSnapshot, AssetDeletionUnitOfWork } from '../modules/assets/ports.js';
+const snapshot: AssetDeletionSnapshot = {
+ id: 41, projectId: 7, kind: 'GAME', status: 'READY', representations: [], submissionState: null, videos: [],
+ project: { id: 7, exhibitionId: 1, creatorId: 1, status: 'PUBLISHED', isMember: false, posterAssetId: 41, version: 1 },
+};
+function harness() {
+ const apply = vi.fn(async () => {});
+ const committed = vi.fn();
+ const deletion: AssetDeletionUnitOfWork = { async run(_id, _actor, operation) {
+  const result = await operation({ snapshot, applyDeletion: apply }); committed(); return result;
+ } };
+ const wake = vi.fn(); const error = vi.fn();
+ const service = createAssetsService({ protectedBucket: 'pcu-protected', repository: { findAssetByIdForDownload: vi.fn() }, deletion, checkDownloadLimit: vi.fn(), wakeDeletionWorker: wake, logger: { error } });
+ return { service, apply, committed, wake, error };
 }
-
-describe('durable object deletion callers', () => {
-	it('returns after the durable asset outbox commit and wakes one worker', async () => {
-		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
-		repository.claimAssetForDeletion.mockResolvedValueOnce({
-			id: 41, projectId: 7, kind: 'GAME', previousStatus: 'READY',
-			storageKey: 'games/current.zip', playbackStorageKey: null, alreadyDeleted: false,
-			representations: [],
-		});
-
-		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
-			.resolves.toEqual({ projectId: 7 });
-		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
-		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
-	});
-
-	it('coalesces canonical representation deletion targets into one request-path wake', async () => {
-		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
-
-		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
-			.resolves.toEqual({ projectId: 7 });
-		expect(repository.completeAssetDeletion).toHaveBeenCalledWith(
-			expect.objectContaining({
-				representations: [],
-			}),
-			expect.objectContaining({
-				reason: 'asset-delete',
-			}),
-		);
-		expect(wakeDeletionWorker).toHaveBeenCalledOnce();
-	});
-
-	it('commits the asset delete outbox before waking background deletion', async () => {
-		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
-
-		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
-			.resolves.toEqual({ projectId: 7 });
-		expect(repository.claimAssetForDeletion.mock.invocationCallOrder[0])
-			.toBeLessThan(repository.completeAssetDeletion.mock.invocationCallOrder[0]!);
-		expect(repository.completeAssetDeletion.mock.invocationCallOrder[0])
-			.toBeLessThan(wakeDeletionWorker.mock.invocationCallOrder[0]!);
-	});
-
-	it('does not report success when the transaction cannot commit its deletion outbox', async () => {
-		const { deps, repository, wakeDeletionWorker } = assetDeletionHarness();
-		repository.completeAssetDeletion.mockRejectedValueOnce(new Error('database unavailable'));
-
-		await expect(deleteAsset(deps, 41, { id: 1, role: 'ADMIN' }))
-			.rejects.toThrow('database unavailable');
-		expect(repository.claimAssetForDeletion).toHaveBeenCalledWith(41, { id: 1, role: 'ADMIN' });
-		expect(repository.completeAssetDeletion).toHaveBeenCalledOnce();
-		expect(wakeDeletionWorker).not.toHaveBeenCalled();
-	});
+describe('durable asset deletion callers', () => {
+ it('wakes only after commit and returns the project identity', async () => {
+  const h = harness();
+  await expect(h.service.deleteAsset(41, { id: 1, role: 'USER' })).resolves.toEqual({ projectId: 7 });
+  expect(h.apply).toHaveBeenCalledWith({ incrementVersion: true, clearPoster: true, videoIds: null, reason: 'asset-delete' });
+  expect(h.committed.mock.invocationCallOrder[0]).toBeLessThan(h.wake.mock.invocationCallOrder[0]!);
+ });
+ it('does not wake or report success when outbox transaction fails', async () => {
+  const h = harness(); h.apply.mockRejectedValueOnce(new Error('outbox failed'));
+  await expect(h.service.deleteAsset(41, { id: 1, role: 'USER' })).rejects.toThrow('outbox failed');
+  expect(h.wake).not.toHaveBeenCalled(); expect(h.committed).not.toHaveBeenCalled();
+ });
+ it('logs a failed wake after commit without losing the successful deletion', async () => {
+  const h = harness(); h.wake.mockImplementationOnce(() => { throw new Error('wake failed'); });
+  await expect(h.service.deleteAsset(41, { id: 1, role: 'USER' })).resolves.toEqual({ projectId: 7 });
+  expect(h.committed).toHaveBeenCalledOnce(); expect(h.error).toHaveBeenCalledOnce();
+ });
+ it('denies an unrelated actor before applying any mutation', async () => {
+  const h = harness();
+  await expect(h.service.deleteAsset(41, { id: 2, role: 'USER' })).rejects.toMatchObject({ statusCode: 403 });
+  expect(h.apply).not.toHaveBeenCalled();
+ });
 });

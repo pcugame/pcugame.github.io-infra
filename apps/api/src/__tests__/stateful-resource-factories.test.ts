@@ -238,8 +238,8 @@ describe('stateful resource factories', () => {
 			const basePersistence = createScriptedBackendPersistence();
 			const context = await createProductionBackendContext(config, {
 				persistence: createScriptedBackendPersistence({
-					assetsRepository: {
-						...basePersistence.assetsRepository,
+					bannedIpRepository: {
+						...basePersistence.bannedIpRepository,
 						findAllBannedIps: findBannedIps,
 					},
 				}),

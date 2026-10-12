@@ -1,9 +1,13 @@
+import { createAssetsService } from '../modules/assets/service.js';
+import { createAssetsRepository } from '../modules/assets/repository.js';
+import { createAssetDeletionUnitOfWork } from '../modules/assets/deletion.repository.js';
+import { createFileAccessService } from '../modules/file-access/service.js';
 import { randomUUID } from 'node:crypto';
 import Fastify, {type FastifyInstance} from 'fastify';
 import cookie from '@fastify/cookie';
 import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
 import { registerRouteSchemas } from '../shared/http-route-schemas.js';
-import {beforeAll,afterAll,it,expect,describe} from 'vitest';
+import {beforeAll,afterAll,it,expect,describe,vi} from 'vitest';
 import type {PrismaClient} from '../generated/prisma/client.js';
 import {createIsolatedMigratedDatabase} from './helpers/isolated-migrated-database.js';
 import {createFileAccessController} from '../modules/file-access/controller.js';
@@ -16,6 +20,8 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('live file capa
  let db:PrismaClient, app:FastifyInstance, database:Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
  let owner:number, stranger:number, sid:string, otherSid:string, projectId:number, deploymentId:string;
  let time=new Date();
+ let repository: ReturnType<typeof createFileAccessRepository>;
+ const checkDownloadLimit = vi.fn(async () => {});
  const secret='file-access-integration-secret-32chars';
  const origin='http://localhost:5173';
  const key='public/images/test/image %.png';
@@ -40,11 +46,55 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('live file capa
   await registerAuth(app,{config:{...config,SESSION_TOUCH_MIN_INTERVAL_MS:3600000,COOKIE_SECURE:false,COOKIE_SAME_SITE:'lax',CORS_ALLOWED_ORIGINS:[origin]},clock:{now:()=>time},logger:app.log,sessions:{find:id=>db.authSession.findUnique({where:{id},include:{user:true}}),touch:async()=>{},delete:async id=>{await db.authSession.delete({where:{id}});}}});
   app.setErrorHandler((error,_request,reply)=>reply.status(error instanceof AppError?error.statusCode:500).send({ok:false,error:{code:error instanceof AppError?error.code:'INTERNAL_ERROR',message:error instanceof Error?error.message:'Unknown error'}}));
   registerRouteSchemas(app);
-  await app.register(createFileAccessController(createFileAccessRepository(db),config,()=>time,async(bucket,key)=>`http://protected.test/${bucket}/${key}?signedAt=${time.getTime()}`),{prefix:'/api'});
+  repository = createFileAccessRepository(db);
+  await app.register(createFileAccessController(createFileAccessService(repository,config,()=>time,async(bucket,key)=>`http://protected.test/${bucket}/${key}?signedAt=${time.getTime()}`,createAssetsService({ protectedBucket: 'protected',repository:createAssetsRepository(db),deletion:createAssetDeletionUnitOfWork(db),checkDownloadLimit,wakeDeletionWorker:()=>{},logger:app.log}).prepareAssetDownload)),{prefix:'/api'});
  });
  afterAll(async()=>{await app?.close();await database?.close();});
  const issue=(url:string,session=sid)=>app.inject({method:'POST',url:'/api/file-access',headers:{origin,cookie:'sid='+session},payload:{url}});
  const gate=(url:string,kind='public')=>{const u=new URL(url);return app.inject({url:'/api/internal/file-access',headers:{'x-pcu-gateway-secret':secret,'x-pcu-file-kind':kind,'x-pcu-file-uri':u.pathname+u.search}});};
+ it('issues public image URLs without duplicate actor lookup and rechecks current visibility at the gateway',async()=>{
+  const exhibition = await db.exhibition.create({data:{year:2097,title:randomUUID(),visibility:'PUBLIC'}});
+  const project = await db.project.create({data:{exhibitionId:exhibition.id,creatorId:owner,slug:randomUUID(),title:'Public image',status:'PUBLISHED',visibility:'PUBLIC'}});
+  const asset = await db.asset.create({data:{projectId:project.id,kind:'IMAGE',status:'READY',representations:{create:(['ORIGINAL','CARD_480','DISPLAY_960'] as const).map(role=>({role,bucket:'public',objectKey:'public/images/public-image-'+role+'.png',state:'READY',mimeType:'image/png'}))}}});
+  const url = 'http://files.test/public/images/public-image-ORIGINAL.png';
+  const deploymentLookup = vi.spyOn(repository,'findDeployment');
+  const representationLookup = vi.spyOn(repository,'findRepresentation');
+  const votePosterLookup = vi.spyOn(repository,'votePoster');
+  checkDownloadLimit.mockClear();
+  try {
+   for (const session of [undefined,sid]) {
+    deploymentLookup.mockClear();representationLookup.mockClear();votePosterLookup.mockClear();
+    const response = await app.inject({method:'POST',url:'/api/file-access',headers:{origin,...(session?{cookie:'sid='+session}:{})},payload:{url}});
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ok:true,data:{url,token:null,expiresAt:null}});
+    expect(response.headers['cache-control']).toBe('private, no-store');
+    // Two independent checks: requesting actor and anonymous accessibility.
+    // Count repository lookups, without fixing their internal call order or SQL.
+    expect(deploymentLookup.mock.calls.length+representationLookup.mock.calls.length+votePosterLookup.mock.calls.length).toBe(6);
+   }
+   expect(checkDownloadLimit).not.toHaveBeenCalled();
+   expect((await gate(url)).statusCode).toBe(204);
+   await db.exhibition.update({where:{id:exhibition.id},data:{visibility:'STAFF'}});
+   expect((await gate(url)).statusCode).toBe(403);
+  } finally {
+   deploymentLookup.mockRestore();representationLookup.mockRestore();votePosterLookup.mockRestore();
+   await db.asset.delete({where:{id:asset.id}});
+   await db.project.delete({where:{id:project.id}});
+   await db.exhibition.delete({where:{id:exhibition.id}});
+  }
+ });
+ it('authorizes protected object issuance before applying the limiter',async()=>{
+  const url = 'http://protected.test/protected/video-original.mp4';
+  checkDownloadLimit.mockClear();
+  expect((await issue(url,otherSid)).statusCode).toBe(403);
+  expect(checkDownloadLimit).not.toHaveBeenCalled();
+  const response = await issue(url);
+  expect(response.statusCode).toBe(200);
+  const grant = response.json().data;
+  expect(grant.url).toBe('http://protected.test/file/'+grant.token);
+  expect(checkDownloadLimit).toHaveBeenCalledTimes(1);
+  expect((await gate(grant.url,'protected')).statusCode).toBe(204);
+ });
  it('blocks raw known paths and unrelated sessions, allows session-bound owner token and revokes on visibility/relationship changes',async()=>{
   expect((await gate(image)).statusCode).toBe(403);
   expect((await issue(image,otherSid)).statusCode).toBe(403);

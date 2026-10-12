@@ -1,3 +1,4 @@
+import { createFileAccessService } from '../modules/file-access/service.js';
 import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
 import type { AssetUploadSessionRecord } from '../modules/asset-upload/ports.js';
 import { createFileAccessController } from '../modules/file-access/controller.js';
@@ -54,12 +55,12 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 		});
 		app.setErrorHandler((error, _request, reply) => { reply.status(error instanceof AppError ? error.statusCode : (typeof error === 'object' && error !== null && 'statusCode' in error ? Number(error.statusCode) : 500)).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error instanceof Error ? error.message : 'Error' } }); });
 		registerRouteSchemas(app);
-		await app.register(createFileAccessController(createFileAccessRepository(db), {
+		await app.register(createFileAccessController(createFileAccessService(createFileAccessRepository(db), {
 			...defaultTestEnv, LOG_LEVEL: 'error', GOOGLE_CLIENT_IDS: [...defaultTestEnv.GOOGLE_CLIENT_IDS], CORS_ALLOWED_ORIGINS: [...defaultTestEnv.CORS_ALLOWED_ORIGINS], API_PUBLIC_URL: 'http://localhost:3000', PUBLIC_ASSET_ORIGIN: 'http://localhost:3904',
 			S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: 'http://localhost:3906', S3_BUCKET_PUBLIC: 'pcu-public',
 			S3_BUCKET_PROTECTED: 'pcu-protected', SESSION_COOKIE_NAME: 'sid',
 			FILE_GATEWAY_SECRET: 'visibility-upload-race-secret-32chars',
-		}), { prefix: '/api' });
+		})), { prefix: '/api' });
 		await app.register(createProjectChangeController(createProjectChangeService(createProjectChangeRepository(db)), 'me'), { prefix: '/api/me' });
 		await app.register(createPublicController({ service: createPublicService({ apiPublicUrl: 'http://localhost:3000', repository: createPublicRepository(db) }) }), { prefix: '/api/public' });
 		await app.register(createYearController({ service: createExhibitionService({ posterBucket: 'pcu-public', repository: createExhibitionRepository(db), wakeDeletionWorker() {} }) }), { prefix: '/api/admin' });

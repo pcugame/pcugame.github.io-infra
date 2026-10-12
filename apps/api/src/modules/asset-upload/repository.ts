@@ -1,14 +1,15 @@
 import { assertMaterialCapacity, isMaterialKind, MATERIAL_MAX_BYTES } from './material-policy.js';
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
-import { createCanonicalAsset } from '../assets/representation-write.js';
+import { createReadyAssetWithOriginal } from '../assets/representation-write.repository.js';
 import { withAssetMutationTransaction } from '../assets/mutation-transaction.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 import { queueMultipartAbortTask } from '../multipart-abort/repository.js';
 import type { AssetUploadRepository, AssetUploadSessionRecord, DirectAssetUploadOwner } from './ports.js';
 import { WorkerGenerationFencedError } from '../upload-lifecycle/worker-errors.js';
-import { countReservedProjectVideos, getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from '../assets/video-order.js';
+import { assertVideoCapacity } from '../assets/video-order.policy.js';
+import { countReservedProjectVideos, getProjectVideos, normalizeProjectVideoOrder } from '../assets/video-order.repository.js';
 import { conflict } from '../../shared/errors.js';
-import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.transaction.repository.js';
 import type { Actor } from '../../application/http-input.js';
 
 function asRecord(value: unknown): AssetUploadSessionRecord {
@@ -135,7 +136,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 						? await getProjectVideos(tx, input.projectId)
 						: await normalizeProjectVideoOrder(tx, input.projectId);
 					const reserved = await countReservedProjectVideos(tx, input.projectId);
-					if (videos.length + reserved >= MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
+					assertVideoCapacity(videos.length, reserved);
 				}
 				let expected: { id: number; updatedAt: Date | null } | null = null;
 				if (input.kind === 'GAME' && input.projectId !== null) {
@@ -441,7 +442,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					await queueDurableDeletions(tx, current.representations.map((representation) => ({ bucket: representation.bucket, storageKey: representation.objectKey, reason: 'direct-game-replaced' })));
 					}
 					if (session.projectId === null) throw new Error('GAME session must be project-owned');
-					const asset = await createCanonicalAsset(tx, {
+					const asset = await createReadyAssetWithOriginal(tx, {
 						projectId: session.projectId,
 						kind: session.kind,
 						originalName: session.originalName,

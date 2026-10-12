@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGameUploadValidationWorker } from '../modules/asset-upload/validation-worker.service.js';
 import type { AssetUploadRepository, AssetUploadValidationStorage } from '../modules/asset-upload/ports.js';
 import { ZipValidationAbortedError, ZipValidationError } from '../modules/archive/bounded-zip-validator.js';
-import { ProjectUploadPolicyRejectedError } from '../modules/admin/project-access.service.js';
+import { ProjectUploadPolicyRejectedError } from '../modules/admin/project-access.policy.js';
 import { WorkerGenerationFencedError, WorkerInputRejectedError } from '../modules/upload-lifecycle/worker-errors.js';
 import { gameZip, validationSession } from './helpers/game-validation-fixture.js';
 

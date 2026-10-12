@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assertWriteAccess } from '../modules/admin/project-access.js';
+import { assertWriteAccess } from '../modules/admin/project-access.policy.js';
 import { AppError } from '../shared/errors.js';
 
 describe('assertWriteAccess', () => {

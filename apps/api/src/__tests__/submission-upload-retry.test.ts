@@ -3,7 +3,7 @@ import type { Prisma, PrismaClient } from '../generated/prisma/client.js';
 import type { AssetUploadRepository } from '../modules/asset-upload/ports.js';
 import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
 
-vi.mock('../modules/admin/project-access.service.js', () => ({
+vi.mock('../modules/admin/project-access.transaction.repository.js', () => ({
 	assertProjectUploadWriteAccessInTransaction: vi.fn(async () => undefined),
 }));
 

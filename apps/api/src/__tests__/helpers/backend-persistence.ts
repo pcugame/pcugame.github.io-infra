@@ -71,20 +71,13 @@ export function createScriptedBackendPersistence(
 			updateExhibition: async () => unscripted('exhibition.updateExhibition'),
 			clearExhibitionPoster: async () => null,
 		},
-		assetsRepository: {
-			findAssetByIdForDownload: async () => null,
-			upsertBannedIp: async () => ({ disabledAt: null }),
-			findAssetByIdWithProject: async () => null,
-			claimAssetForDeletion: async () => null,
-			completeAssetDeletion: async () => undefined,
-			findAllBannedIps: async () => [],
-		},
-		bannedIpRepository: {
-			findAllBannedIps: async () => [],
-			findBannedIpById: async () => null,
-			deleteBannedIp: async () => undefined,
-			createManualBan: async () => { throw new Error("Not configured"); },
-		},
+  assetsRepository: { findAssetByIdForDownload: async () => null },
+  assetDeletion: { run: async () => unscripted('assetDeletion.run') },
+  bannedIpRepository: {
+   findAllBannedIps: async () => [], findBannedIpById: async () => null,
+   deactivateBan: async () => undefined, createManualBan: async () => unscripted('ban.create'),
+   upsertBannedIp: async () => ({ disabledAt: null }),
+  },
 		importRepository: {
 			findExhibitionForPreview: async () => null,
 			runTransaction: async () => unscripted('import.runTransaction'),

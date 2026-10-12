@@ -5,7 +5,7 @@ import { createBannedIpService } from '../modules/admin/banned-ip/service.js';
 const mocks = {
 	findAllBannedIps: vi.fn(),
 	findBannedIpById: vi.fn(),
-	deleteBannedIp: vi.fn(),
+	deactivateBan: vi.fn(),
 	createManualBan: vi.fn(),
 	removeBan: vi.fn(),
 };
@@ -14,7 +14,7 @@ const service = createBannedIpService({
 	repository: {
 		findAllBannedIps: mocks.findAllBannedIps,
 		findBannedIpById: mocks.findBannedIpById,
-		deleteBannedIp: mocks.deleteBannedIp,
+		deactivateBan: mocks.deactivateBan,
 		createManualBan: mocks.createManualBan,
 	},
 	banCache: { add: vi.fn(), remove: mocks.removeBan },
@@ -58,7 +58,7 @@ describe('banned IP service', () => {
 
 		await service.unbanIp(7);
 
-		expect(mocks.deleteBannedIp).toHaveBeenCalledWith(7);
+		expect(mocks.deactivateBan).toHaveBeenCalledWith(7);
 		expect(mocks.removeBan).toHaveBeenCalledWith('203.0.113.20');
 	});
 
@@ -75,7 +75,7 @@ describe('banned IP service', () => {
 			repository: {
 				findAllBannedIps: async () => [row], findBannedIpById: async () => row,
 				createManualBan: create,
-				deleteBannedIp: async () => { row.disabledAt = new Date(); signalDelete(); await deleteResponse; },
+				deactivateBan: async () => { row.disabledAt = new Date(); signalDelete(); await deleteResponse; },
 			}, banCache: { add: (ip) => limiter.addBan(ip), remove: (ip) => limiter.removeBan(ip) },
 		});
 		try {
@@ -98,7 +98,7 @@ describe('banned IP service', () => {
 			statusCode: 404,
 			code: 'NOT_FOUND',
 		});
-		expect(mocks.deleteBannedIp).not.toHaveBeenCalled();
+		expect(mocks.deactivateBan).not.toHaveBeenCalled();
 		expect(mocks.removeBan).not.toHaveBeenCalled();
 	});
 });

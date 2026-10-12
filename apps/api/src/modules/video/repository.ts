@@ -7,14 +7,15 @@ import { withAssetMutationTransaction } from '../assets/mutation-transaction.js'
 import { assertNoDeletionClaim } from '../orphan/reference-resolver.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 import { commitUploadIntents } from '../upload-intent/repository.js';
-import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.transaction.repository.js';
 import type {
 	GeneratedPlaybackIntent,
 	VerifyingVideoSession,
 	VideoWorkerRepository,
 } from './ports.js';
 import { videoPlaybackObjectKey } from './playback-identity.js';
-import { countReservedProjectVideos, getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from '../assets/video-order.js';
+import { assertVideoCapacity } from '../assets/video-order.policy.js';
+import { countReservedProjectVideos, getProjectVideos, normalizeProjectVideoOrder } from '../assets/video-order.repository.js';
 import { conflict } from '../../shared/errors.js';
 
 const SERIALIZABLE = { isolationLevel: Prisma.TransactionIsolationLevel.Serializable } as const;
@@ -245,7 +246,7 @@ export function createVideoWorkerRepository(client: PrismaClient): VideoWorkerRe
 					? await getProjectVideos(tx, session.projectId)
 					: await normalizeProjectVideoOrder(tx, session.projectId);
 				const reserved = await countReservedProjectVideos(tx, session.projectId, session.id);
-				if (videos.length + reserved + 1 > MAX_PROJECT_VIDEOS) throw conflict('A project supports at most 5 videos');
+				assertVideoCapacity(videos.length, reserved);
 				let videoSortOrder = videos.length;
 				if (session.submissionItemId) {
 					const item = await tx.projectSubmissionItem.findUnique({

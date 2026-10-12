@@ -1,11 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { AssetDownloadQuery, parseBody, parseIntParam } from '../../shared/validation.js';
 import { requireLogin } from '../../plugins/auth.js';
-import { applyResponseDescriptor } from '../../shared/response-descriptor.js';
-import type { createAssetsService } from './service.js';
+import type { AssetsService } from './ports.js';
+import type { FileAccessService } from '../file-access/ports.js';
 
 export interface AssetsControllerDependencies {
-	service: ReturnType<typeof createAssetsService>;
+	service: Pick<AssetsService, 'deleteAsset'>;
+	issueAssetDownload: FileAccessService['issueAssetDownload'];
 }
 
 /** Create a pure asset route plugin. Registration performs no warmup or I/O. */
@@ -17,15 +18,11 @@ export function createAssetsController(deps: AssetsControllerDependencies): Fast
 			async (request, reply) => {
 				const assetId = parseIntParam(request.params.assetId, 'Asset ID');
 				const query = parseBody(AssetDownloadQuery, request.query);
-				return applyResponseDescriptor(
-					reply,
-					await deps.service.downloadAssetById(
-						assetId,
-						query.variant ?? 'original',
-						request.ip,
-						request.currentUser,
-					),
-				);
+				const grant = await deps.issueAssetDownload(assetId, query.variant ?? 'original', request);
+				return reply
+					.header('Referrer-Policy', 'no-referrer')
+					.header('Cache-Control', 'private, no-store')
+					.redirect(grant.url);
 			},
 		);
 

@@ -1,3 +1,4 @@
+import { createFileAccessService } from '../modules/file-access/service.js';
 import { createHash } from 'node:crypto';
 import { WebglPlayCreateDataSchema } from '@pcu/contracts';
 import { createWebglPlayRepository } from "../modules/webgl-play/repository.js";
@@ -262,7 +263,7 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
         createWebglPlayController(service, config, () => time),
       );
       await app.register(
-        createFileAccessController(
+        createFileAccessController(createFileAccessService(
           createFileAccessRepository(db),
           config,
           () => time,
@@ -270,7 +271,7 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
             `http://protected.test/${bucket}/${key}?signedAt=${time.getTime()}`,
           undefined,
           service.resolveRuntime,
-        ),
+        )),
         { prefix: "/api" },
       );
     });

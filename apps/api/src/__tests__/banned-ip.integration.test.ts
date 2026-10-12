@@ -1,3 +1,4 @@
+import { createAssetsController } from '../modules/assets/controller.js';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -23,9 +24,9 @@ const logger: AppLogger = {
 const now = new Date('2026-09-28T01:00:00Z');
 const headers = (session = 'admin') => ({ cookie: `sid=${session}`, origin: 'http://localhost:5173' });
 const asset = {
-	id: 42, projectId: 1, kind: 'GAME', status: 'READY',
+	id: 42, exhibition: null, originalName: 'game.zip', projectId: 1, kind: 'GAME', status: 'READY',
 	representations: [{ role: 'ORIGINAL', bucket: 'protected', objectKey: 'game.zip', state: 'READY' }],
-	project: { creatorId: 1, title: 'Game', status: 'PUBLISHED', members: [] },
+	project: { visibility: 'PUBLIC' as const, exhibition: { visibility: 'PUBLIC' as const }, changeRequestDraft: null, creatorId: 1, title: 'Game', status: 'PUBLISHED', members: [] },
 };
 
 describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('IP bans: PostgreSQL migration and authenticated HTTP contracts', () => {
@@ -69,9 +70,8 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('IP bans: Pos
 			config: { ...defaultTestEnv, DOWNLOAD_AUTO_IP_BAN_ENABLED: autoEnabled },
 			assetsRepository: { ...assetsRepository, findAssetByIdForDownload: vi.fn(async () => asset) },
 			bannedIpRepository: banRepository,
-			projectAccess: createProjectAccessService({ findProject: vi.fn(), isLinkedMember: vi.fn() }),
-			protectedDownloadPresigner: { presign: vi.fn(async () => 'https://download.test/signed') },
-			downloadLimiter: limiter, logger, clock: { now: () => now },
+   deletion: { run: vi.fn() },
+			downloadLimiter: limiter, logger,
 			uploadLifecycle: createTestUploadLifecycleRuntime(),
 		});
 		await graph.warmup.start();
@@ -100,7 +100,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('IP bans: Pos
 			},
 		});
 		await app.register(graph.bannedIpController, { prefix: '/api/admin' });
-		await app.register(graph.assetsController, { prefix: '/api' });
+		await app.register(createAssetsController({ service: graph.assetsService, issueAssetDownload: async (id, variant, request) => { await graph.assetsService.prepareAssetDownload(id, variant, request.ip ?? '', request.currentUser); return { url: 'https://download.test/signed', token: null, expiresAt: null }; } }), { prefix: '/api' });
 		await app.ready();
 		const download = (session = 'user', ip = '192.0.2.9') => app.inject({ url: '/api/assets/42/download?variant=original', headers: headers(session), remoteAddress: ip });
 		const post = (ip: string, session = 'admin') => app.inject({ method: 'POST', url: '/api/admin/banned-ips', headers: headers(session), payload: { ip, reason: 'Manual test block' } });
@@ -229,7 +229,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('IP bans: Pos
 		expect(h.limiter._bannedSize()).toBe(0);
 		spy.mockRestore();
 		const row = (await h.post('192.0.2.9')).json().data;
-		vi.spyOn(h.banRepository, 'deleteBannedIp').mockRejectedValueOnce(new Error('DB unavailable'));
+		vi.spyOn(h.banRepository, 'deactivateBan').mockRejectedValueOnce(new Error('DB unavailable'));
 		expect((await h.app.inject({ method: 'DELETE', url: `/api/admin/banned-ips/${row.id}`, headers: headers() })).statusCode).toBe(500);
 		expect((await h.download()).statusCode).toBe(403);
 	});

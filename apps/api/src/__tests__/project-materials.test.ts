@@ -41,7 +41,7 @@ describe('project materials', () => {
 		expect(repository.commitGameReady).toHaveBeenCalledWith(expect.objectContaining({ session: item, token: 'lease', mimeType: 'text/plain', checksum: createHash('sha256').update(bytes).digest('hex') }));
 	});
 	it('permits public project downloads and refuses material playback', () => {
-		const asset = { id: 1, kind: 'DOCUMENT', status: 'READY', project: { status: 'PUBLISHED', creatorId: 3, members: [] }, representations: [{ role: 'ORIGINAL', state: 'READY', bucket: 'protected', objectKey: 'manual' }] };
+		const asset = { id: 1, kind: 'DOCUMENT', status: 'READY', project: { visibility: 'PUBLIC' as const, exhibition: { visibility: 'PUBLIC' as const }, changeRequestDraft: null, status: 'PUBLISHED', creatorId: 3, members: [] }, representations: [{ role: 'ORIGINAL', state: 'READY', bucket: 'protected', objectKey: 'manual' }] };
 		expect(authorizeAssetDelivery({ action: 'DOWNLOAD_ORIGINAL', asset })).toBe(true);
 		expect(resolveDownloadRepresentation(asset, 'original')).toMatchObject({ objectKey: 'manual' });
 		expect(() => resolveDownloadRepresentation(asset, 'playback')).toThrow();
@@ -50,7 +50,7 @@ describe('project materials', () => {
 	it('limits draft change-request previews to the active requester or an operator', () => {
 		const asset = {
 			kind: 'IMAGE',
-			project: {
+			project: { visibility: 'PUBLIC' as const, exhibition: { visibility: 'PUBLIC' as const },
 				status: 'DRAFT', creatorId: 99, members: [],
 				changeRequestDraft: {
 					actorId: 7, state: 'DRAFT',

@@ -3,7 +3,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
-import { createAssetsRepository } from '../modules/assets/repository.js';
+import { createAssetDeletionUnitOfWork } from '../modules/assets/deletion.repository.js';
+import { planAssetDeletion } from '../modules/assets/deletion.policy.js';
+const actor = { id: 0, role: 'ADMIN' as const };
+const deletion = (db: PrismaClient, id: number) => createAssetDeletionUnitOfWork(db).run(id, actor, tx => tx.applyDeletion(planAssetDeletion(tx.snapshot, actor)));
 
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 describe.runIf(enabled)('project video ordering transactions', () => {
@@ -72,18 +75,17 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 	});
 	it.each([0, 1, 2])('deletes index %i and promotes/compacts remaining video order', async (index) => {
 		const { projectId, ids } = await fixture();
-		const repo = createAssetsRepository(db);
-		await repo.claimAssetForDeletion(ids[index]!);
+		await deletion(db, ids[index]!);
 		const remaining = ids.filter((_, i) => i !== index);
 		expect(await current(projectId)).toEqual(remaining.map((id, videoSortOrder) => ({ id, videoSortOrder })));
-		expect((await db.asset.findUniqueOrThrow({ where: { id: ids[index]! } })).status).toBe('DELETING');
+		expect((await db.asset.findUniqueOrThrow({ where: { id: ids[index]! } })).status).toBe('DELETED');
 		await expect(createProjectCrudRepository(db).setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
 	});
 	it.each(['PENDING', 'FINALIZING'] as const)('blocks ordinary reorder and delete during %s submission', async (state) => {
 		const { projectId, ids } = await fixture([0, 1, 2], 'DRAFT');
 		await db.projectSubmission.create({ data: { projectId, actorId: creatorId, state } });
 		await expect(createProjectCrudRepository(db).setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
-		await expect(createAssetsRepository(db).claimAssetForDeletion(ids[0]!)).rejects.toMatchObject({ statusCode: 409 });
+		await expect(deletion(db, ids[0]!)).rejects.toMatchObject({ statusCode: 409 });
 		expect(await current(projectId)).toHaveLength(3);
 	});
 	it('refuses reorder for an over-limit legacy project without removing videos', async () => {

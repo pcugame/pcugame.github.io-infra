@@ -134,6 +134,7 @@ const garageEnv = {
 
 const suites = {
 	voting: { files: ['src/__tests__/voting.postgres.test.ts'], env: { RUN_POSTGRES_INTEGRATION: 'true' } },
+ 'assets-boundaries': { files: ['src/__tests__/assets-boundaries.postgres.test.ts'] },
 	'orphan-renewal-timeout': {
 		files: ['src/__tests__/orphan-renewal-timeout.postgres.test.ts'],
 	},
@@ -229,6 +230,7 @@ const suites = {
 
 const fullSuiteOrder = [
 	'voting',
+ 'assets-boundaries',
 	'orphan-renewal-timeout',
 	'canonical-processing-fences',
 	'import-transaction',

@@ -3,7 +3,7 @@ import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { queueDurableDeletions } from '../orphan/outbox.js';
 import { WorkerGenerationFencedError } from '../upload-lifecycle/worker-errors.js';
 import { commitUploadIntents } from '../upload-intent/repository.js';
-import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
+import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.transaction.repository.js';
 import type {
 	ImageUploadKind,
 	ImageWorkerRepository,
