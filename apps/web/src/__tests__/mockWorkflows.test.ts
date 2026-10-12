@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProjectChangeDetailSchema, ProjectChangeListResponseSchema, WebglDisplaySettingsResponseSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema, type ProjectChangeDetail, type WebglNetworkRequest } from '@pcu/contracts';
+import { CONNECTION_PROFILES, ConnectionRule, draftOrigin, ProjectChangeDetailSchema, ProjectChangeListResponseSchema, WebglDisplaySettingsResponseSchema, WebglNetworkRequestSchema, WebglNetworkRequestListSchema, type ProjectChangeDetail, type WebglNetworkRequest } from '@pcu/contracts';
 import { api } from '../lib/api/client';
 import { adminImportApi, adminExportApi, adminSettingsApi, adminBannedIpApi } from '../lib/api/admin';
 import { getMockSnapshot, resetMockState, selectMockUser, setMockControls, updateMockState, forgetMockCacheForTests } from '../lib/api/mock/transport';
@@ -82,6 +82,37 @@ describe('WebGL display/network and file access',()=>{
     const revoked=await api.post<WebglNetworkRequest>(`/api/admin/webgl-network-requests/${row.id}/revoke`,{reason:'Access ended'});expect(revoked.events).toHaveLength(2);expect(revoked.policyVersion).toBe(p.webglNetworkPolicyVersion+2);
     expect(WebglNetworkRequestSchema.safeParse(revoked).success).toBe(true);
   });
+  it('persists all-port scopes and legacy ports, and rejects overlapping approvals without widening them', async () => {
+    await selectMockUser('owner');
+    const p=Object.values((await getMockSnapshot()).projects).find(p=>p.createdByUserId===3&&p.isModificationEnabled!==false)!;
+    const path=`/api/me/projects/${p.id}/webgl-network-requests`;
+    const create=(origin:string)=>api.post<WebglNetworkRequest>(path,{origin,mode:'HTTPS',purpose:'Bundles',cors:'Allow game origin'});
+    const legacy=await create('https://example.com');
+    const numeric=await create('https://numeric.example.net:8443');
+    const all=await create('https://*.example.com:*');
+    const overlap=await create('https://child.example.com:8443');
+    const widening=await create('https://example.com:*');
+    await expect(create('https://*.example.com:*')).rejects.toMatchObject({status:409});
+    for(const origin of ['https://127.0.0.1:*','https://*.com:*','https://example.net:8443:*','https://example.net:*/path']) {
+      await expect(create(origin)).rejects.toMatchObject({status:400});
+    }
+    await selectMockUser('ADMIN');
+    for(const row of [legacy,numeric,all]) {
+      const approved=WebglNetworkRequestSchema.parse(await api.post(`/api/admin/webgl-network-requests/${row.id}/approve`,{reason:'Scope reviewed'}));
+      expect(approved).toMatchObject({origin:row.origin,state:'APPROVED'});
+    }
+    await expect(api.post(`/api/admin/webgl-network-requests/${overlap.id}/approve`,{reason:'Overlap'})).rejects.toMatchObject({status:409});
+    await expect(api.post(`/api/admin/webgl-network-requests/${widening.id}/approve`,{reason:'Would overlap legacy rule'})).rejects.toMatchObject({status:409});
+    await forgetMockCacheForTests();
+    await selectMockUser('owner');
+    const list=WebglNetworkRequestListSchema.parse(await api.get(path));
+    expect(list.items.map(row=>[row.origin,row.state])).toEqual(expect.arrayContaining([
+      ['https://example.com','APPROVED'],['https://numeric.example.net:8443','APPROVED'],['https://*.example.com:*','APPROVED'],['https://child.example.com:8443','PENDING'],
+    ]));
+    await selectMockUser('ADMIN');
+    const revoked=await api.post<WebglNetworkRequest>(`/api/admin/webgl-network-requests/${all.id}/revoke`,{reason:'No longer needed'});
+    expect(revoked).toMatchObject({origin:'https://*.example.com:*',state:'REVOKED'});
+  });
   it('distinguishes protected media, expiration, role change and permission changes on renew',async()=>{
     const p=Object.values((await getMockSnapshot()).projects).find(p=>p.poster)!;await api.patch(`/api/admin/projects/${p.id}`,{visibility:'AUTHENTICATED'});
     const media=p.poster!.original.url;
@@ -136,4 +167,22 @@ describe('persistent mock authentication',()=>{
   ])('uses API failure codes for %s',async(scenario,status,code)=>{
     await expect(api.post('/api/dev/auth/login-error',{scenario})).rejects.toMatchObject({status,body:{error:{code}}});
   });
+});
+
+
+describe('shared service example contract', () => {
+ it('submits and reviews each canonical profile through the persistent Mock', async () => {
+  for (const profile of CONNECTION_PROFILES) {
+   for (const example of profile.examples) {
+    const rule = ConnectionRule.parse(example);
+    const origin = draftOrigin({ host: rule.hostname, mode: rule.mode, scope: rule.subdomains ? 'subdomains' : 'exact', ports: 'all', port: '443' });
+    await selectMockUser('owner');
+    const row = await api.post<WebglNetworkRequest>('/api/me/projects/1/webgl-network-requests', { origin, mode: rule.mode, purpose: 'Service example', cors: 'Configured' });
+    expect(WebglNetworkRequestSchema.parse(row).origin).toBe(example);
+    await selectMockUser('ADMIN');
+    const approved = await api.post<WebglNetworkRequest>(`/api/admin/webgl-network-requests/${row.id}/approve`, { reason: 'Reviewed' });
+    expect(WebglNetworkRequestSchema.parse(approved).state).toBe('APPROVED');
+   }
+  }
+ });
 });

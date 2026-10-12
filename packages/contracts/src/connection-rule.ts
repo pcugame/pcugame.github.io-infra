@@ -12,13 +12,16 @@ export class ConnectionRule {
   // apply the same canonical URL and public-host checks as numeric rules.
   const allPorts = value.endsWith(':*');
   const canonicalOrigin = allPorts ? value.slice(0, -2) : value;
-  const url = new URL(canonicalOrigin);
+  // CSP host wildcards are not URL hostnames. Some browsers encode * as
+  // %2A while Node retains it; parse only the concrete host in both runtimes.
+  const subdomains = /^(?:https|wss):\/\/\*\./.test(canonicalOrigin);
+  const urlOrigin = subdomains ? canonicalOrigin.replace('://*.', '://') : canonicalOrigin;
+  const url = new URL(urlOrigin);
   const actualMode = url.protocol === 'https:' ? 'HTTPS' : url.protocol === 'wss:' ? 'WSS' : null;
-  if (!actualMode || (mode && actualMode !== mode) || value.length > 512 || url.origin !== canonicalOrigin
+  if (!actualMode || (mode && actualMode !== mode) || value.length > 512 || url.origin !== urlOrigin
    || (allPorts && url.port !== '')
    || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.port === '0') throw new Error('Invalid connection rule');
-  const subdomains = url.hostname.startsWith('*.');
-  const hostname = subdomains ? url.hostname.slice(2) : url.hostname;
+  const hostname = url.hostname;
   const host = hostname.replace(/^\[|\]$/g, '');
   if (ipaddr.isValid(host)) {
    const address = ipaddr.parse(host);

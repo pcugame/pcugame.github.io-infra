@@ -310,6 +310,71 @@ Web은 `apps/web/dist`를 `pcugame/pcugame.github.io`의 `master`에 게시하�
 - 업로드 변경은 파일 signature, 권한, 용량 제한, idempotency, orphan 정리와 동시성 test를 함께 검토한다.
 - 배포 관련 변경은 불변 이미지 검증, Web/API 호환성, DB 백업과 migration 시도 전후의 복구 경계를 유지한다.
 
+## 외부 연결 정책 — PR #114, 2026-10-12
+
+이 절의 앞 단계 기록은 PR #114의 `80ef535`와 당시 로컬 회귀 검증 변경을 기준으로 한다. 현재 계약과 최종 검증 범위는 [승인 연결 정책](docs/unity-webgl/003-approved-connections.md)을 참조한다. 운영 적용 상태를 의미하지 않는다. 과거 WebGL 검증 이력은 그대로 보존하며, 현재 배포는 [배포 런북](docs/operations/deployment.md)을 따른다.
+
+### 승인 범위와 세션
+
+| 규칙 예시 | 허용 범위 |
+|---|---|
+| `https://assets.example.com` | 해당 호스트의 HTTPS 443 |
+| `wss://game.example.com:8443` | 해당 호스트의 WSS 8443 |
+| `https://assets.example.com:*` | 해당 호스트의 HTTPS 전체 포트 |
+| `wss://*.example.com:*` | `example.com` 아래 하위 도메인의 WSS 전체 포트. 루트 제외 |
+
+전체 포트는 명시적인 `:*` 규칙으로 신청·승인한다. 포트 생략은 계속 443이며 기존 신청·승인·세션을 전체 포트로 자동 변환하지 않는다. HTTPS와 WSS는 별도 규칙이다. 하위 도메인 허용과 포트 허용은 독립적이며, 같은 방식에서 범위가 중첩되는 승인은 거부한다. 프로젝트당 승인 한도는 16개이다.
+
+규칙은 `connect-src`에만 적용한다. 외부 script·Worker 실행 권한, 다른 runtime 디렉터리 접근 권한, 사이트 인증 권한을 추가하지 않는다. API·Web·허용 Web origin·게임 자산·스토리지·업로드·보호 다운로드 호스트는 포트와 방식이 달라도 승인할 수 없다. 보호 호스트를 포함하는 하위 도메인 규칙도 거부하며 신청·승인·runtime 접근 시 재검사한다. 공개·사설 suffix 전체 wildcard와 사설 IP 등 기존 입력 제한을 유지한다. 서버의 CORS, WebSocket Origin 검사 및 서비스 인증은 별도로 충족해야 한다.
+
+세션은 발급 시 승인 문자열과 정책 버전을 보존한다. 이후 추가 승인은 새 세션에만 적용한다. 철회 이력은 해당 규칙이 포함된 구세션의 runtime 접근·갱신·진단을 거부하며, 같은 규칙을 다시 승인해도 구세션은 유효해지지 않는다. 이미 로드된 문서나 이미 열린 외부 소켓을 원격으로 즉시 종료한다는 의미는 아니다. 정책 전환 시 기존 게임 탭을 종료하고 새 세션으로 실행한다.
+
+### 특정 포트에서 전체 포트로의 수동 전환
+
+1. 작품의 현재 승인 목록, 방식, 호스트 범위와 정책 버전을 확인한다. 실제 서비스가 요구하는 포트 범위와 CORS·Origin·인증 설정을 확인한다.
+2. 소유자 또는 연결된 참여자가 `/me/projects/{projectId}/network`에서 정확한 `:*` 규칙을 새로 신청한다. 기존 기록을 수정하거나 DB 값을 직접 치환하지 않는다. 루트 호스트와 하위 도메인, HTTPS와 WSS가 각각 필요한지 확인한다.
+3. `OPERATOR` 또는 `ADMIN`이 `/admin/webgl-network`에서 신청을 검토한다. 기존 443·숫자 포트 승인과 중첩하면 새 승인은 `409`로 거부된다. 검토 사유를 기록하고 중첩하는 기존 승인을 모두 철회한 뒤 새 규칙을 승인한다. 이 사이에는 해당 연결의 승인 공백이 발생한다.
+4. 기존 게임 탭을 종료하고 새로 실행한다. 새 세션의 승인 목록에 `:*`가 포함되는지, 같은 호스트의 필요한 포트에서 연결되는지 확인한다. 구세션은 문서·Worker 접근과 갱신이 계속 거부되어야 한다.
+5. 진단 실행이 필요한 경우 전용 shell에서 진단을 활성화하여 새 세션을 발급한다. 차단 origin과 `connect-src` 기록을 확인한다. 진단 기록 부재는 연결 성공의 증거가 아니며, 진단은 규칙을 자동 승인하지 않는다.
+6. 특정 포트로 복귀할 때도 전체 포트 승인을 철회하고 필요한 규칙을 새로 신청·승인한 뒤 새 세션을 발급한다. 과거 승인·철회 이력을 보존한다.
+
+진단 report는 세션별 HMAC capability를 사용하며 DB에는 hash만 저장한다. 정확한 report POST만 CSRF 예외이며 사이트 session cookie를 해석하지 않는다. 조회는 신뢰된 shell 출처와 play-control 권한을 요구한다. 저장 항목은 차단 origin·directive·횟수·시각으로 제한하고 경로·쿼리·사용자정보·코드 표본을 폐기한다. 세션당 20개 항목, 분당 30개 요청, 요청당 16 KiB 한도를 유지한다. 게이트웨이는 report 경로의 access/error logging을 비활성화하고 전달 자격증명을 제거한다. 외부 proxy에도 capability가 기록되지 않도록 구성해야 한다.
+
+### 앞 단계 회귀 검증 기록
+
+이번 변경은 브라우저 fixture와 통합 테스트 보강 및 이 절의 문서 추가이다. 제품 코드 수정이 필요한 회귀 결함은 검출되지 않았다. 작업 시작 전의 별도 미커밋 Web 변경은 보존하였으며 workspace 검증에는 포함하였다.
+
+- 브라우저 fixture: `scripts/webgl-network-browser.mjs`. 같은 승인 호스트에 서로 다른 두 임시 TLS 포트를 열어 HTTPS 응답과 WSS echo를 확인한다. `fixed-port`, `exact-all-ports`, `subdomain-all-ports` 각각에 대해 문서와 dedicated Worker를 실행한다. 특정 포트의 다른 포트 차단은 브라우저 실패 결과와 서버의 HTTP/upgrade 수신 0건을 함께 확인한다. 미승인 호스트·루트 제외·다른 runtime·외부 script/Worker·redirect 차단 및 CORS·Origin·인증 실패를 함께 확인한다.
+- 브라우저 실행 결과: Chromium `153.0.8010.12`, Firefox `141.0`, WebKit `26.0`에서 세 정책 × 문서·Worker 모두 통과하였다. WebKit은 Playwright `1.58.2` Docker 환경에서 실행하였다. Worker violation event가 누락되는 경우에도 실제 연결 차단과 문서 report-uri 수신을 별도로 확인하였다. 초기 Firefox 실행의 driver/browser 버전 불일치와 WebKit 컨테이너의 module 경로·network-none DNS 실패는 환경 구성 후 해소하였으며, 이 실패를 제품 결함으로 분류하지 않았다.
+- 인증된 실제 PostgreSQL 경계: `npm run test:integration:suite -- visibility`, 5개 파일 43개 테스트 통과. HTTPS·WSS의 고정 포트 → 전체 포트 전환, 기존 승인·세션 불변, 철회·재승인 뒤 구문서·Worker·갱신 거부, 새 세션 성공을 확인하였다. 보호 호스트 변경 재검사, 다른 프로젝트 격리, 승인 동시성, 빈/유효 응답 직렬화, 진단 토큰 위조·만료·수집 한도·비밀정보 제거·정리도 포함한다. 격리 schema를 사용하며 운영 데이터는 변경하지 않았다.
+- `npm run test:file-gateway` 통과. 양쪽 nginx template의 실제 CSP 전달·fallback 차단·service worker 거부·report 제한과 신뢰 TLS 성공·잘못된 인증서 차단을 확인하였다.
+- 최종 `npm test` 통과: API 1,208개, API script 75개, Web 816개, contracts 130개로 총 2,229개이다. 환경 조건부 247개는 건너뛰었으며 통과 수에 포함하지 않았다. 위 PostgreSQL suite 43개는 별도 실행 결과이다. 최종 `npm run lint`, `npm run build`, `git diff --check` 통과. Web build의 기존 500 kB 초과 chunk 경고는 유지된다.
+- `npm run architecture`, CI 분류·workflow·integration runner 회귀 테스트, migration-policy guard 통과. 기존 진단 migration의 unique index에 대한 검토 경고 1건은 유지된다. 이번 작업에는 migration 변경이 없다.
+
+현재 브라우저 실행에는 build된 API/contracts와 Docker가 필요하다. 아래 runner는 격리 컨테이너에 테스트 CA와 서명된 서버 인증서를 구성하며 인증서 검증을 유지한다. fixture의 6개 호스트만 로컬 loopback으로 해석한다.
+
+```bash
+npm run build
+sh scripts/run-webgl-network-browser.sh chromium firefox webkit
+npm run test:integration:suite -- visibility
+npm run test:file-gateway
+npm test
+npm run lint
+npm run build
+```
+
+실제 Photon 인증·매치메이킹·두 사용자 멀티플레이, Relay allocation, Unity Addressables 빌드는 이번 작업에서 실행하지 않았다. 브라우저 fixture는 자체 서명 TLS를 신뢰하고 테스트 DNS를 loopback에 매핑한 합성 통신 시험이다. 실제 게임 서비스·운영 DNS·인증서·멀티플레이 검증으로 간주하지 않는다. 전체 Docker/Garage 통합 suite는 이번 작업에서 실행하지 않았으며, 관련 PostgreSQL suite와 nginx/TLS fixture를 실행하였다. 변경은 로컬 미커밋 상태이며 push·CI 실행·merge·배포·운영 승인 변경은 수행하지 않았다.
+
+### 최종 로컬 검증 — 전체 포트 신청 후속 작업
+
+일반 폼·서비스 예시·Mock이 공통 계약을 사용하며 새 신청은 모든 포트가 기본이다. 숫자 포트 충돌, 안전한 443 정규화, 루트 제외, 미리보기·승인 충돌 대상 표시를 확인하였다. Chromium의 호스트 와일드카드 URL 인코딩 차이는 공통 파서에서 CSP 구문을 분리하여 수정하였다. 기존 기록과 세션은 자동 확대하지 않는다.
+
+실제 React 신청 → 인증 HTTP API → PostgreSQL 저장 → 관리자 화면 승인 → 새 세션 → 문서·Worker 응답 CSP를 포함한 PostgreSQL suite 44개가 통과하였다. 격리 테스트 계정을 사용하였으며 OAuth 로그인과 실제 서비스 멀티플레이는 검증하지 않았다. Chromium 145.0.7632.6·Firefox 146.0.1·WebKit 26.0의 합성 통신은 인증서 검증을 유지한 상태에서 세 정책 × 문서·Worker를 통과하였다. 두 포트의 HTTPS/WSS 성공·차단은 실제 서버 수신·echo와 대조하였다.
+
+최종 `npm test`는 API 1,208개, API script 75개, release-artifact 31개, Web 820개, contracts 153개 통과이며, 환경 조건부 248개는 별도 skip이다. 게이트웨이·lint·architecture·build·release controls·CI 실행 스크립트·migration guard도 통과하였다. 기존 chunk 경고, 진단 migration unique-index 검토 신호, audit의 moderate 7건은 유지된다. 전체 Docker/Garage 통합 및 최종 원격 판정은 PR 필수 CI 결과로 확인한다. 앞 단계의 로컬 미커밋 상태 문장은 당시 기록이며 이후 커밋·push·CI 결과는 PR #114에 기록한다.
+
+접수 자료에는 SDK/버전·게임 모드, 목적지와 용도, 인증 방식, 외부 서비스 운영 담당자, 실제 2인 플레이 절차를 포함한다. 마감 후 신청 제한과 갱신 실패 시 게임 종료는 유지하며 권한 정책·일시적 오류 재시도는 후속 과제이다. [현재 계약·수동 전환·공개 전 수용 검사](docs/unity-webgl/003-approved-connections.md)를 참조한다.
+
 ## 관련 문서
 
 - [production 배포 절차](docs/operations/deployment.md)

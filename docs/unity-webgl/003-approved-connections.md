@@ -1,4 +1,68 @@
-# Ticket 3: approved external HTTPS / Addressables / WSS connections
+# Approved external HTTPS / Addressables / WSS connections
+
+## Current contract — PR #114 (2026-10-12)
+
+This section describes the PR source, not a production rollout. The dated records below remain evidence for their recorded revisions only.
+
+| Rule | Host scope | Transport | Ports |
+| --- | --- | --- | --- |
+| `https://assets.example.com` | Exact host | HTTPS | 443 (unchanged legacy meaning) |
+| `wss://game.example.com:8443` | Exact host | WSS | 8443 |
+| `https://assets.example.com:*` | Exact host | HTTPS | All ports |
+| `wss://*.example.com:*` | Subdomains only, excluding `example.com` | WSS | All ports |
+
+New request forms default to a hostname, selected HTTPS/WSS transport and all ports. Specific ports remain in advanced settings. Host wildcard `*.` and port wildcard `:*` are independent. HTTPS and WSS require separate rules. A pasted numeric port must agree with the selected specific port; it is never silently removed or expanded to all ports. Matching `:443` and a bare root slash can normalize to the canonical origin. Credentials, non-root paths, queries and fragments are rejected before normalization. Service examples use the same contracts and preserve selected submission, partial success and failed-item retry. They are editable guidance, not integration guarantees. The Photon domain example is supported by [Photon documentation](https://doc.photonengine.com/pun/current/connection-and-authentication/discord-activities); Unity/example.com placeholders must be replaced with the SDK's actual destinations.
+
+Request preview and administrator review show the host scope, transport and port policy, plus overlapping approved requests. Same-project overlapping approvals are rejected; the 16-rule approval limit remains. Public/private suffix, IP and protected-host checks apply at request, approval and runtime. No proxy or service-specific policy expansion is introduced. Approvals extend only the project's `connect-src`; runtime-local executable sources, project isolation and diagnostic authorization remain unchanged.
+
+Persisted requests, append-only history and issued session snapshots are not rewritten. New approvals apply only to new executions. Revocation denies subsequent runtime document/Worker reads, renewal and diagnostics for affected old sessions; reapproval does not revive them. Already loaded documents or connected WSS are not remotely terminated.
+
+## Manual transition from a specific port to all ports
+
+1. Record current approved rules, host scopes, transports and policy version. Confirm the actual remote service's destinations, CORS/Origin checks and authentication with its operator.
+2. Submit the required `:*` rules through the owner's/linked participant's network page. Request the root and subdomains separately when both are required; do not edit stored rows or old session snapshots.
+3. Review the displayed overlap targets. An operator/administrator records a reason and revokes every overlapping approval, then approves the new request. This creates an approval gap and interrupts subsequent reads/renewal for existing plays using the revoked policy.
+4. Close old game tabs and start a new execution. Verify the new session snapshot and document/Worker response CSP; then test the actual required remote ports. Old sessions remain invalid even after reapproval.
+5. Use opt-in connection diagnostics to investigate blocked origins. Reports contain only bounded origin/directive/count/time data, use session-scoped HMAC capabilities and do not prove success or auto-approve rules. Gateway and outer-proxy logs must not retain report capabilities.
+6. Reverting to specific ports also requires revocation, a new approval and a new execution. Retain the review history.
+
+## Submission notes and public acceptance
+
+Use the existing purpose and server-configuration fields or accompanying project notes; no new mandatory fields are required. Record SDK and version, Unity version and game mode; each HTTPS/WSS destination and purpose; authentication method without secrets; the remote-service operator/contact; and the planned two-player acceptance procedure. The developer/operator owns remote CORS, WebSocket Origin checks, accounts, certificates and service availability.
+
+Before public multiplayer use, two independent clients/accounts must join the same intended region/room through the published build, complete authentication and matchmaking/allocation, exchange bidirectional game state, and exercise disconnect/rejoin and failure reporting. Record browser/SDK/build versions and results. Repeat after relevant build or service changes. Actual Photon authentication/matchmaking/two-player play, Relay allocations/two-player play and the current project's Addressables build remain unverified by the synthetic transport fixture.
+
+Current limitations, unchanged in this PR:
+
+- Submission remains subject to the existing exhibition modification/closure policy. Owners can still read history after closure; post-deadline submission authority is a follow-up policy decision.
+- Any failed API renewal stops the player and removes its iframe, including transient network/server failures. Revisit bounded retry and the distinction between transient failure and authorization denial separately; this PR preserves fail-closed behavior.
+
+## Current verification boundary
+
+The repeatable checks are `npm run test:integration:suite -- visibility`, `npm run test:file-gateway`, `sh scripts/run-webgl-network-browser.sh chromium firefox webkit`, and the optional real-form PostgreSQL browser case below. The transport runner uses an isolated container trust store and keeps certificate verification enabled. It opens two real TLS listeners for one approved hostname; documents and dedicated Workers must both fetch HTTPS bodies and receive WSS echoes on both ports for `:*`, and must send no traffic to the second port for a fixed-port rule. It also checks unapproved hosts, wildcard root exclusion, redirect targets, external executable sources, other runtime paths, CORS failures and Origin/auth failures.
+
+```sh
+npm run build
+RUN_WEBGL_FORM_BROWSER=true \
+  PLAYWRIGHT_MODULE_PATH=/absolute/path/node_modules/playwright/index.mjs \
+  BROWSER_EXECUTABLE=/absolute/path/to/chromium \
+  npm run test:integration:suite -- visibility
+npm run test:file-gateway
+sh scripts/run-webgl-network-browser.sh chromium firefox webkit
+```
+
+The real-form case uses actual React forms, HTTP, authentication cookies, CSRF checks, production controllers/serializers and migrated isolated PostgreSQL. It checks owner submission, administrator approval, unchanged old sessions and new-session document/Worker response CSP. Local fixture identities replace OAuth sign-in, and tiny object responses replace Garage bytes; the separate real nginx fixtures verify gateway behavior. This does not claim production OAuth, DNS, proxy topology, live service accounts or actual multiplayer acceptance. Default unit/CI runs without the optional browser flag report this case as skipped, not passed.
+
+### Local results for the current PR revision
+
+- Real-form PostgreSQL visibility suite: 44 passed, including actual Chromium 150.0.7871.46 form submission and admin review, approved snapshots and document/Worker response CSP. Isolated migrated schemas were removed after the run. OAuth was not exercised.
+- Strict-TLS transport fixture: Chromium 145.0.7632.6, Firefox 146.0.1 and WebKit 26.0 each passed fixed-port, exact-host/all-port and subdomain/all-port policies in both document and dedicated Worker. TLS uses a test CA and signed leaf in a disposable trust store, with no certificate-error bypass. Initial self-signed-leaf Firefox trust failure was resolved by using this CA/leaf chain. WebKit Worker violation-event omissions are separate from verified traffic blocking and report-uri receipt.
+- Both nginx gateway templates passed live auth-CSP propagation, missing-policy denial, executable isolation and report constraints; trusted upstream TLS passed and wrong hostname/untrusted certificates failed closed.
+- `npm test`: API 1,208, API script Vitest 75, release-artifact Node tests 31, Web 820 and contracts 153 passed. The default run skipped 248 environment-dependent API cases; these are not counted as passed. The separately enabled PostgreSQL/browser suite is reported above.
+- `npm run lint`, `npm run architecture`, `npm run build`, release-control tests, CI classifier/workflow/integration-runner tests, migration-history guard and diff whitespace checks passed. The existing diagnostic migration's unique-index review signal remains; no migration was added in this follow-up. Audit passed the high-severity threshold with seven moderate findings; Web retains its existing large-chunk warning.
+- The full Docker/Garage integration baseline is delegated to the PR's required `integration` CI job. Final PR CI status is recorded on the PR rather than presumed by this local evidence. No real project approvals, operational data or deployment were changed.
+
+## Historical implementation baseline — PR #69
 
 Status: implemented and merged through #69. The feature defaults disabled; release and browser evidence are tracked below.
 

@@ -1,3 +1,5 @@
+import { createAuthController } from '../modules/auth/controller.js';
+import { browserWebOrigin, verifyNetworkFormBrowser } from './helpers/webgl-network-form-browser.js';
 import { createDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
 import { createDiagnosticService } from '../modules/webgl-play/diagnostic-service.js';
 import { randomUUID } from 'node:crypto';
@@ -34,7 +36,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  const external = 'https://scores.example.com';
  const body = (origin = external) => ({ origin, purpose: 'Read and write game scores', mode: origin.startsWith('wss:') ? 'WSS' : 'HTTPS', cors: `Allow ${gameOrigin}; use a per-game account, never a site session` });
  const config = {
-  SESSION_SECRET: 'diagnostic-test-secret-at-least-32-characters', WEBGL_PLAY_ENABLED: true, WEBGL_EXTERNAL_CONNECTIONS_ENABLED: true, CORS_ALLOWED_ORIGINS: [webOrigin],
+  SESSION_SECRET: 'diagnostic-test-secret-at-least-32-characters', WEBGL_PLAY_ENABLED: true, WEBGL_EXTERNAL_CONNECTIONS_ENABLED: true, CORS_ALLOWED_ORIGINS: [webOrigin, browserWebOrigin],
   API_PUBLIC_URL: apiOrigin, WEB_PUBLIC_URL: webOrigin, PUBLIC_ASSET_ORIGIN: gameOrigin,
   S3_ENDPOINT: 'https://garage.fixture.example', S3_PUBLIC_SIGNING_ENDPOINT: 'https://uploads.fixture.example',
   S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: 'https://downloads.fixture.example', S3_BUCKET_PUBLIC: 'public', S3_BUCKET_PROTECTED: 'protected',
@@ -79,6 +81,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   } });
   await registerCsrf(app, config);
   app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : error.statusCode ?? 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message } }));
+  await app.register(createAuthController({ config, clock: { now: () => new Date() }, service: { loginWithGoogle: async () => { throw new Error('OAuth is outside this fixture'); }, logout: async () => {} } }), { prefix: '/api' });
   const network = createWebglNetworkService(createWebglNetworkRepository(db), config);
   await app.register(createWebglNetworkController(network, 'me'), { prefix: '/api/me' });
   await app.register(createWebglNetworkController(network, 'admin'), { prefix: '/api/admin' });
@@ -229,9 +232,12 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect(csp).toContain('wss://*.example.com:8443');
   expect(csp).not.toContain('19090');
  });
- it('transitions from fixed ports to explicit all ports only through revoke and approval', async () => {
-  const legacy = await approved(), numeric = await approved(external + ':8443');
+ it.each(['https', 'wss'])('transitions %s from fixed ports to explicit all ports only through revoke and approval', async protocol => {
+  const external = `${protocol}://scores.example.com`;
+  const local = await grant();
+  const legacy = await approved(external), numeric = await approved(external + ':8443');
   const old = await grant();
+  const oldWorker = { ...old, iframeUrl: old.iframeUrl.replace('index.html', 'worker.js') };
   const before = await db.webglPlaySession.findUniqueOrThrow({ where: { id: old.id } });
   expect(before.approvedOrigins).toEqual([external, external + ':8443']);
   const created = await create(external + ':*'); expect(created.statusCode, created.body).toBe(201);
@@ -242,6 +248,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect((await gate(old)).statusCode).toBe(204);
   const connect = String((await gate(old)).headers['x-pcu-runtime-csp']).split(';').find(s => s.trim().startsWith('connect-src '));
   expect(connect).toContain(external + ':8443'); expect(connect).not.toContain(':*');
+  expect((await gate(oldWorker)).headers['x-pcu-runtime-csp']).toBe((await gate(old)).headers['x-pcu-runtime-csp']);
   expect((await review(legacy, 'revoke')).statusCode).toBe(200);
   expect((await review(pending.id, 'approve')).statusCode).toBe(409);
   expect((await review(numeric, 'revoke')).statusCode).toBe(200);
@@ -250,6 +257,9 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect((await gate(old)).statusCode).toBe(403); expect((await renew(old)).statusCode).toBe(403);
   const unchanged = await db.webglPlaySession.findUniqueOrThrow({ where: { id: old.id } });
   expect(unchanged.approvedOrigins).toEqual(before.approvedOrigins); expect(unchanged.policyVersion).toBe(before.policyVersion);
+  expect((await gate(oldWorker)).statusCode).toBe(403);
+  expect((await renew(local)).statusCode).toBe(200);
+  expect((await gate(local)).headers['x-pcu-runtime-csp']).not.toContain(external);
   const fresh = await grant();
   expect(await db.webglPlaySession.findUniqueOrThrow({ where: { id: fresh.id } })).toMatchObject({ approvedOrigins: [external + ':*'], policyVersion: 5 });
   const runtime = await gate(fresh); expect(runtime.statusCode).toBe(204);
@@ -266,6 +276,9 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect((await review(pending.id, 'revoke')).statusCode).toBe(200);
   await approved(external + ':*');
   expect((await gate(fresh)).statusCode).toBe(403); expect((await renew(fresh)).statusCode).toBe(403);
+  expect((await gate({ ...fresh, iframeUrl: fresh.iframeUrl.replace('index.html', 'worker.js') })).statusCode).toBe(403);
+  expect((await gate(oldWorker)).statusCode).toBe(403);
+  expect((await gate(await grant())).statusCode).toBe(204);
  });
  it('serializes overlapping all-port approvals and preserves root/transport separation', async () => {
   const wildcard = (await create('wss://*.example.com:*')).json().data.id;
@@ -348,5 +361,9 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   await grant();
   expect(await db.webglConnectionDiagnostic.count({ where: { sessionId: session.id } })).toBe(0);
  });
+
+ it.runIf(process.env['RUN_WEBGL_FORM_BROWSER'] === 'true')('preserves the real browser form scope through approval, persistence and runtime CSP', async () => {
+  await verifyNetworkFormBrowser(app, db, config, projectId, sid, adminSid);
+ }, 90_000);
 
 });

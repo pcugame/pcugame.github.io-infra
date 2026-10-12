@@ -1,6 +1,8 @@
-import { ConnectionRule, CreateWebglNetworkRequestSchema } from '@pcu/contracts';
+import { ConnectionConflicts } from '../features/webgl/ConnectionRuleSummary';
+import { ConnectionRule, describeConnectionRule, CreateWebglNetworkRequestSchema } from '@pcu/contracts';
 import { ConnectionProfileForm } from '../features/webgl/ConnectionProfileForm';
-import { SelectControl } from '../components/ui';
+import { ConnectionRuleFields } from '../features/webgl/ConnectionRuleFields';
+import { draftOrigin, emptyConnectionDraft } from '../features/webgl/connectionDraft';
 import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -42,7 +44,7 @@ function ReviewActions({ item, onReviewed }: { item: WebglNetworkRequest; onRevi
 	</div>;
 }
 
-function RequestCard({ item, admin, onReviewed }: { item: WebglNetworkRequest; admin: boolean; onReviewed: () => void }) {
+function RequestCard({ item, admin, items, onReviewed }: { item: WebglNetworkRequest; admin: boolean; items: WebglNetworkRequest[]; onReviewed: () => void }) {
 	let rule: ConnectionRule | null = null;
 	try { rule = ConnectionRule.parse(item.origin); } catch { /* Keep historical requests reviewable after validator updates. */ }
 	return <article className="admin-card network-request">
@@ -52,7 +54,7 @@ function RequestCard({ item, admin, onReviewed }: { item: WebglNetworkRequest; a
 		</div>
 		<p className="network-request__meta">{item.mode === 'HTTPS' ? 'HTTPS API / Addressables' : 'WSS'} · 신청자 #{item.requesterId} · 신청 {dateLabel(item.createdAt)}</p>
 		<dl className="network-request__details">
-			<div><dt>연결 범위</dt><dd>{rule ? <>{rule.mode} · {rule.subdomains ? `${rule.hostname}의 하위 도메인만 (루트 제외)` : rule.hostname} · 포트 {rule.port}</> : '현재 규칙 형식으로 해석할 수 없는 기존 신청입니다.'}</dd></div>
+			<div><dt>연결 범위</dt><dd>{rule ? describeConnectionRule(rule) : '현재 규칙 형식으로 해석할 수 없는 기존 신청입니다.'}</dd></div>
 			<div><dt>사용 목적</dt><dd>{item.purpose}</dd></div>
 			<div><dt>CORS / 인증 설정 계획</dt><dd>{item.cors}</dd></div>
 			{item.reviewReason && <div><dt>최근 검토 사유</dt><dd>{item.reviewReason}</dd></div>}
@@ -62,6 +64,7 @@ function RequestCard({ item, admin, onReviewed }: { item: WebglNetworkRequest; a
 			<summary>처리 이력 <span>{item.events.length}건</span></summary>
 			{item.events.length === 0 ? <p className="field-hint">아직 검토 기록이 없습니다.</p> : <ol>{item.events.map(event => <li key={event.id}><div><strong>{eventLabels[event.action]}</strong><span>검토자 #{event.actorId} · {dateLabel(event.createdAt)}</span></div><p>{event.reason}</p></li>)}</ol>}
 		</details>
+		{item.state === 'PENDING' && rule && <ConnectionConflicts rule={rule} items={items.filter(other => other.projectId === item.projectId && other.id !== item.id)} />}
 		{admin && <ReviewActions item={item} onReviewed={onReviewed} />}
 	</article>;
 }
@@ -75,24 +78,23 @@ export default function WebglNetworkPage({ admin = false }: { admin?: boolean })
 	const queryKey = viewerKey(['webgl-network', path]);
 	const query = useQuery({ queryKey, queryFn: () => api.get<WebglNetworkList>(path), enabled: admin || Number.isSafeInteger(projectId) && projectId > 0, retry: false });
 	const [filter, setFilter] = useState<StateFilter>(admin ? 'PENDING' : 'ALL');
-	const [origin, setOrigin] = useState('');
-	const [scope, setScope] = useState('exact');
+	const [draft, setDraft] = useState(emptyConnectionDraft);
+	const mode = draft.mode;
 	const [inputError, setInputError] = useState('');
-	const [mode, setMode] = useState<'HTTPS' | 'WSS'>('HTTPS');
 	const [purpose, setPurpose] = useState('');
 	const [cors, setCors] = useState('');
 	const refresh = () => { void client.invalidateQueries({ queryKey }); };
 	const submit = useMutation({
 		mutationFn: (body: WebglNetworkCreateBody) => api.post<WebglNetworkRequest>(path, body),
-		onSuccess: () => { setOrigin(''); setPurpose(''); setCors(''); setFilter('ALL'); refresh(); },
+		onSuccess: () => { setDraft(emptyConnectionDraft); setPurpose(''); setCors(''); setFilter('ALL'); refresh(); },
 	});
 	function send(event: FormEvent) {
 		event.preventDefault();
-        let value = origin.trim();
-        if (scope === 'subdomains') value = value.replace('://', '://*.');
-        const parsed = CreateWebglNetworkRequestSchema.safeParse({ origin: value, mode, purpose: purpose.trim(), cors: cors.trim() });
-        if (!parsed.success || scope === 'exact' && value.includes('*')) { setInputError('HTTPS/WSS 주소와 연결 방식, 목적, 서버 설정을 확인하세요. 경로·쿼리·/*는 사용할 수 없습니다.'); return; }
-        setInputError(''); submit.mutate(parsed.data);
+        try {
+            const parsed = CreateWebglNetworkRequestSchema.safeParse({ origin: draftOrigin(draft), mode, purpose: purpose.trim(), cors: cors.trim() });
+            if (!parsed.success) throw new Error('사용 목적과 서버 설정 계획을 확인하세요.');
+            setInputError(''); submit.mutate(parsed.data);
+        } catch (error) { setInputError(error instanceof Error ? error.message : '공개 HTTPS/WSS 호스트와 연결 범위를 확인하세요.'); }
 	}
 	if (query.isLoading) return <LoadingSpinner />;
 	if (query.error instanceof ApiError && query.error.status === 404) return <div className="webgl-network-page"><section className="admin-card network-unavailable"><h1>게임 외부 연결</h1><p>외부 연결 신청 기능이 아직 활성화되지 않았거나 접근 가능한 작품이 없습니다.</p><Link className="btn btn--secondary" to={admin ? '/admin/projects' : '/me/projects'}>{admin ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link></section></div>;
@@ -121,13 +123,11 @@ export default function WebglNetworkPage({ admin = false }: { admin?: boolean })
 		<section className="network-list" aria-label="외부 연결 신청 이력">
 			<div className="network-section-heading"><h2>{admin ? '신청 검토 목록' : '연결 현황'}</h2><span className="field-hint">전체 {items.length}건</span></div>
 			<div className="network-filters" aria-label="신청 상태 필터">{filters.map(value => <button key={value} type="button" className={`btn btn--secondary btn--small network-filter${filter === value ? ' is-active' : ''}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === 'ALL' ? '전체' : stateLabels[value]} <span>{value === 'ALL' ? items.length : items.filter(item => item.state === value).length}</span></button>)}</div>
-			{visibleItems.length === 0 ? <div className="admin-card network-empty"><h3>{items.length === 0 ? '등록된 신청이 없습니다.' : `${filter === 'ALL' ? '전체' : stateLabels[filter]} 신청이 없습니다.`}</h3><p>{items.length === 0 ? admin ? '작품 담당자가 연결 주소를 신청하면 이곳에서 검토할 수 있습니다.' : '새 연결 신청에 필요한 정보를 입력해 첫 주소를 등록하세요.' : '다른 상태를 선택하면 이전 신청과 처리 결과를 확인할 수 있습니다.'}</p></div> : visibleItems.map(item => <RequestCard key={item.id} item={item} admin={admin} onReviewed={refresh} />)}
+			{visibleItems.length === 0 ? <div className="admin-card network-empty"><h3>{items.length === 0 ? '등록된 신청이 없습니다.' : `${filter === 'ALL' ? '전체' : stateLabels[filter]} 신청이 없습니다.`}</h3><p>{items.length === 0 ? admin ? '작품 담당자가 연결 주소를 신청하면 이곳에서 검토할 수 있습니다.' : '새 연결 신청에 필요한 정보를 입력해 첫 주소를 등록하세요.' : '다른 상태를 선택하면 이전 신청과 처리 결과를 확인할 수 있습니다.'}</p></div> : visibleItems.map(item => <RequestCard key={item.id} item={item} admin={admin} items={items} onReviewed={refresh} />)}
 		</section>
 		{!admin && <form id="network-new-request" className="admin-card project-form network-form" onSubmit={send}>
-			<h2>새 연결 신청</h2><p className="field-hint">주소마다 신청해 주세요. 관리자가 검토한 후 결과를 연결 현황에서 확인할 수 있습니다.</p>
-			<div className="form-field"><label htmlFor="network-mode">연결 방식</label><SelectControl id="network-mode" value={mode} onChange={event => setMode(event.target.value as 'HTTPS' | 'WSS')}><option value="HTTPS">HTTPS API / Addressables</option><option value="WSS">WSS</option></SelectControl></div>
-			<div className="form-field"><label htmlFor="network-scope">호스트 범위</label><SelectControl id="network-scope" value={scope} onChange={event => setScope(event.target.value)}><option value="exact">정확한 호스트</option><option value="subdomains">하위 도메인만 (루트 제외)</option></SelectControl></div>
-			<div className="form-field"><label htmlFor="network-origin">정확한 origin</label><input type="url" id="network-origin" value={origin} onChange={event => setOrigin(event.target.value)} placeholder={mode === 'WSS' ? 'wss://socket.example.com' : 'https://assets.example.com'} maxLength={500} autoComplete="off" spellCheck={false} aria-describedby="network-origin-hint" required /><p className="field-hint" id="network-origin-hint">경로·쿼리·/* 없이 입력하세요. 하위 도메인은 기준 주소를 입력하면 *. 규칙으로 신청됩니다. 포트 생략은 443이며 다른 포트는 각각 신청하세요.</p></div>
+			<h2>새 연결 신청</h2><p className="field-hint">새 신청은 모든 포트가 기본입니다. 기존 신청·승인의 포트 정책은 변경되지 않습니다. 호스트와 방식마다 신청해 주세요. 관리자가 검토한 후 결과를 연결 현황에서 확인할 수 있습니다.</p>
+			<ConnectionRuleFields value={draft} items={items} onChange={value => { setDraft(value); setInputError(''); }} prefix="network" disabled={submit.isPending} />
 			<div className="form-field"><label htmlFor="network-purpose">사용 목적</label><textarea id="network-purpose" value={purpose} onChange={event => setPurpose(event.target.value)} maxLength={2000} rows={3} placeholder="예: 게임 실행 중 원격 에셋 번들 다운로드" required /></div>
 			<div className="form-field"><label htmlFor="network-cors">CORS / 인증 설정 계획</label><textarea id="network-cors" value={cors} onChange={event => setCors(event.target.value)} maxLength={2000} rows={3} aria-describedby="network-cors-hint" placeholder={mode === 'HTTPS' ? '예: 외부 서버에서 아래 게임 origin을 허용' : '서버의 Origin 검사 및 인증 방식'} required /><p className="field-hint" id="network-cors-hint">{mode === 'HTTPS' ? '외부 서버에서 허용할 게임 origin' : '서버의 Origin 검사 시 확인할 게임 origin'}: <code>{query.data.gameOrigin}</code></p></div>
 			<div className="form-actions"><button className="btn btn--primary" type="submit" disabled={submit.isPending}>{submit.isPending ? '신청 중…' : '검토 신청'}</button></div>
@@ -138,8 +138,9 @@ export default function WebglNetworkPage({ admin = false }: { admin?: boolean })
 		</div>
         {!admin && <ConnectionProfileForm key={path} path={path} items={items} onSubmitted={refresh} />}
 		<details className="admin-card network-help"><summary>서버 설정과 연결 실패 확인 방법</summary><div className="network-help__content">
+			<div><h3>신청 준비</h3><p>사용 목적과 서버 설정 계획에 SDK·버전·게임 모드, 외부 목적지별 용도, 인증 방식(비밀정보 제외), 외부 서비스 운영 담당자, 실제 2인 플레이 확인 절차를 함께 적어 주세요. 승인 후 새 실행에서 두 계정이 같은 방에 접속해 양방향 게임 상태와 재접속을 확인하세요.</p></div>
 			<div><h3>외부 서버 설정</h3><p>게임 파일 origin: <code>{query.data.gameOrigin}</code></p><p>HTTPS 서버는 이 origin을 CORS 허용 대상으로 설정하세요. Addressables의 카탈로그·해시·번들과 WSS 인증은 해당 서비스에서 직접 설정해야 합니다.</p></div>
-			<div><h3>연결이 차단된다면</h3><p>개발자 도구에 Content Security Policy 차단이 표시되면 승인 상태와 정확한 origin을 확인하세요. CORS 오류라면 외부 서버의 허용 설정을 확인하세요. 승인만으로 CORS 설정이 변경되지는 않습니다.</p></div>
+			<div><h3>연결이 차단된다면</h3><p>개발자 도구에 Content Security Policy 차단이 표시되면 승인 상태와 호스트 범위·연결 방식·포트 정책을 확인하세요. CORS 오류라면 외부 서버의 허용 설정을 확인하세요. 승인만으로 CORS 설정이 변경되지는 않습니다.</p></div>
 			<div><h3>지원 범위와 승인 철회</h3><p>HTTPS·WSS를 지원합니다. 직접 TCP·UDP와 WebRTC의 STUN/TURN·피어 연결은 이 승인 기능의 지원 범위가 아닙니다. 모든 브라우저 통신을 차단하는 방화벽은 아닙니다. 외부 스크립트 직접 로딩과 OAuth 팝업·리디렉션 로그인은 지원하지 않습니다. 철회 후에는 해당 주소를 사용하는 이후 파일 요청과 갱신이 거절됩니다. 이미 로딩된 코드나 연결된 WSS를 즉시 종료하지는 못합니다.</p></div>
 			{query.data.policyVersion !== null && <p className="field-hint">현재 작품 정책 버전 {query.data.policyVersion}</p>}
 		</div></details>
