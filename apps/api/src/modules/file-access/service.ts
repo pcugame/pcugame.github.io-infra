@@ -82,8 +82,8 @@ export function createFileAccessService(repository: FileAccessRepository, config
   }
   const target = parseUrl(value);
   const actor = await sessionActor(request);
-  await authorize(target.bucket, target.objectKey, actor);
   if (target.bucket === config.S3_BUCKET_PROTECTED && prepareDownload) {
+   await authorize(target.bucket, target.objectKey, actor);
    const representation = await repository.findRepresentation(target.bucket, target.objectKey);
    const deployment = representation ? null : await repository.findDeployment(target.bucket, target.objectKey);
    const assetId = representation?.asset.id ?? deployment?.sourceRepresentation.assetId;
