@@ -20,6 +20,10 @@ export function createWebglNetworkService(repository: WebglNetworkRepository, co
  const gameOrigin = config.PUBLIC_ASSET_ORIGIN ?? '';
  return {
   async listOwner(actor: Actor, projectId: number) { enabled(); return { ...await repository.listOwner(actor, projectId), gameOrigin }; },
+  async listProjectAdmin(actor: Actor, projectId: number) { enabled(); return { ...await repository.listProjectAdmin(actor, projectId), gameOrigin }; },
+  async allowBatch(actor: Actor, projectId: number, body: unknown) {
+   enabled(); return { items: await repository.allowBatch(actor, projectId, body, privilegedHosts(config), now()) };
+  },
   async listAdmin(actor: Actor) { enabled(); return { ...await repository.listAdmin(actor), gameOrigin }; },
   async create(actor: Actor, projectId: number, body: unknown) {
    enabled();

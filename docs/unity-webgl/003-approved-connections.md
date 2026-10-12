@@ -1,6 +1,6 @@
 # Approved external HTTPS / Addressables / WSS connections
 
-## Current contract — PR #114 (2026-10-12)
+## Current contract
 
 This section describes the PR source, not a production rollout. The dated records below remain evidence for their recorded revisions only.
 
@@ -14,6 +14,8 @@ This section describes the PR source, not a production rollout. The dated record
 New request forms default to a hostname, selected HTTPS/WSS transport and all ports. Specific ports are selected explicitly. Host wildcard `*.` and port wildcard `:*` are independent. HTTPS and WSS require separate rules. The host field accepts hostnames only; URLs, pasted ports, wildcard syntax, credentials, paths, queries and fragments are rejected. A selected specific port of 443 serializes without a port suffix.
 
 Owners and linked participants can compose one to sixteen connections and submit them atomically through `POST /api/me/projects/:id/webgl-network-requests/batch`. Purpose and CORS/authentication plans are written once for the list and copied into each independently reviewable request. Empty rows must be completed or removed. In-batch duplicates/overlap, protected hosts, active exact duplicates, permission/closure failures and storage errors leave no partial batch; item errors identify the array index and field. Existing approved overlaps remain warnings until approval. A batch consumes one of ten allowed HTTP requests per minute. The legacy single-create route remains compatible.
+
+Administrators and operators can also select a game under Project Management → External Connections and grant one to sixteen connections without a student request. The project-scoped admin endpoint `POST /api/admin/projects/:id/webgl-network-requests/allow` requires `{ items, reason }` and atomically writes approved requests, one review event per address and policy versions. Staff can manage closed exhibitions, while staged change-request projects remain excluded. Active exact duplicates, approved overlaps, protected hosts and the sixteen-approved-rule total reject the whole operation. Ordinary users cannot use the admin read or grant endpoints. Existing pending requests are reviewed through the existing approve action. Direct grants apply to new executions and remain independently revocable.
 
 Editable Photon/Relay/Mirror/HTTPS examples add drafts to this same list, skip duplicates and enforce the sixteen-item limit. They do not submit separately or retry automatically. Failed submissions retain inputs; uncertain outcomes refresh history for confirmation. History appears above the full-width editor; per-connection previews and examples are collapsible. Examples are guidance rather than integration guarantees; Unity/example.com placeholders must be replaced with actual SDK destinations.
 

@@ -199,3 +199,15 @@ it('atomically creates network batches through the mock HTTP transport', async (
  await expect(api.post(path + '/batch', { items: [item('https://third.example.com'), item('https://second.example.com')] })).rejects.toMatchObject({ status: 409, body: { error: { details: [expect.objectContaining({ index: 1, field: 'origin' })] } } });
  expect((await api.get<{ items: unknown[] }>(path)).items).toHaveLength(2);
 });
+
+it('allows staff to grant a closed game directly, preserving atomicity and review history', async () => {
+ const project = await closedProject(); await selectMockUser('OPERATOR');
+ const path = `/api/admin/projects/${project.id}/webgl-network-requests`;
+ const items = [{ origin: 'https://game.example.com:*', mode: 'HTTPS', purpose: 'Game server', cors: 'Configured' }];
+ const initial = WebglNetworkRequestListSchema.parse(await api.get(path)); expect(initial.items).toHaveLength(0);
+ const created = WebglNetworkBatchResponseSchema.parse(await api.post(path + '/allow', { items, reason: 'Verified game server' }));
+ expect(created.items[0]).toMatchObject({ state: 'APPROVED', policyVersion: initial.policyVersion! + 1, events: [{ action: 'APPROVE', reason: 'Verified game server' }] });
+ await expect(api.post(path + '/allow', { items: [items[0], { ...items[0], origin: 'https://other.example.com' }], reason: 'Duplicate' })).rejects.toMatchObject({ status: 409 });
+ expect(WebglNetworkRequestListSchema.parse(await api.get(path)).items).toHaveLength(1);
+ await selectMockUser('owner'); await expect(api.post(path + '/allow', { items, reason: 'Denied' })).rejects.toMatchObject({ status: 403 });
+});

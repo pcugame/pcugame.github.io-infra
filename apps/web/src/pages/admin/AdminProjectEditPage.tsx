@@ -194,7 +194,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 					<AdminProjectPosterUpload project={project} canEditContent={canEditContent} studio />
 					<AdminProjectAssetManager canEditContent={canEditContent} studio />
 				</>}
-				settings={<WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} horizontal />}
+				settings={<><WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} horizontal />{isPrivileged && <Link className="btn btn--secondary" to={`/admin/projects/${id}/network`} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 외부 연결 관리로 이동할까요?'))) event.preventDefault(); }}>게임 외부 연결 관리</Link>}</>}
 				preview={<StudioPreview exhibitionSelected values={{ title: values.title ?? '', summary: values.summary, members: members.members }} poster={selected('POSTER').at(-1) ?? null} savedPoster={savedPoster} assetChecks={[
 					{ label: '네이티브 빌드', ready: selected('GAME').length > 0 || !!savedGame },
 					{ label: '웹 빌드', ready: selected('WEBGL').length > 0 || !!queue.hasWebgl && !queue.removeWebgl },

@@ -10,9 +10,9 @@ vi.mock('../features/auth', () => ({ useMe: () => ({ user: { id: 1 }, isPending:
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const item: WebglNetworkRequest = { id: 'request-1', projectId: 7, originalProjectId: 7, projectTitle: '<img src=x onerror=alert(1)>', requesterId: 1, origin: 'https://assets.example.com', purpose: 'Remote bundles', mode: 'HTTPS', cors: 'Allow NAS origin', state: 'PENDING', reviewerId: null, reviewReason: null, createdAt: '2026-10-01T00:00:00.000Z', reviewedAt: null, revokedAt: null, policyVersion: null, events: [] };
 const form = () => within(document.getElementById('network-new-request')!);
-function mount(admin = false) {
+function mount(admin = false, projectAdmin = false) {
 	const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-	return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/me/projects/7/network']}><Routes><Route path="/me/projects/:id/network" element={<WebglNetworkPage admin={admin} />} /></Routes></MemoryRouter></QueryClientProvider>);
+	return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/me/projects/7/network']}><Routes><Route path="/me/projects/:id/network" element={<WebglNetworkPage admin={admin} projectAdmin={projectAdmin} />} /></Routes></MemoryRouter></QueryClientProvider>);
 }
 describe('WebGL external connection workflow', () => {
 	it('submits an exact host with all ports, purpose and remote CORS plan', async () => {
@@ -326,4 +326,19 @@ describe('batch editor', () => {
   await setup(); fill(1, 'one.example.com'); fireEvent.click(row(1).getByText('삭제'));
   expect((row(1).getByLabelText('도메인 (호스트명)') as HTMLInputElement).value).toBe('');
  });
+});
+
+it('allows staff to directly approve connections for the selected game with a required audit reason', async () => {
+ vi.spyOn(api, 'get').mockImplementation(async path => path === '/api/admin/projects/7' ? { title: 'Selected game' } : { items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
+ const post = vi.spyOn(api, 'post').mockResolvedValue({ items: [] });
+ mount(true, true); await screen.findByRole('heading', { name: 'Selected game · 외부 연결' });
+ fireEvent.change(form().getByLabelText('도메인 (호스트명)'), { target: { value: 'game.example.com' } });
+ fireEvent.change(form().getByLabelText('사용 목적'), { target: { value: 'Game scores' } });
+ fireEvent.change(form().getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'Allow NAS origin' } });
+ fireEvent.click(form().getByRole('button', { name: '연결 1개 직접 허용' }));
+ expect(post).not.toHaveBeenCalled(); expect(form().getByLabelText('허용 사유')).toBe(document.activeElement);
+ fireEvent.change(form().getByLabelText('허용 사유'), { target: { value: 'Verified game server' } });
+ fireEvent.click(form().getByRole('button', { name: '연결 1개 직접 허용' }));
+ await waitFor(() => expect(post).toHaveBeenCalledWith('/api/admin/projects/7/webgl-network-requests/allow', { reason: 'Verified game server', items: [{ origin: 'https://game.example.com:*', mode: 'HTTPS', purpose: 'Game scores', cors: 'Allow NAS origin' }] }));
+ await screen.findByText('연결을 모두 허용했습니다. 게임을 새로 실행하면 적용됩니다.');
 });

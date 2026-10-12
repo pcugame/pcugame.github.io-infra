@@ -110,6 +110,7 @@ export function AdminProjectsTable({
 								>
 									수정
 								</Link>
+                                {isPrivileged && <Link className="btn btn--small btn--secondary" to={`/admin/projects/${p.id}/network`}>외부 연결</Link>}
 							</td>
 						</tr>
 					))}
