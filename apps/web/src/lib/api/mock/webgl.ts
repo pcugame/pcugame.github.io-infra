@@ -1,5 +1,5 @@
 import {
-  CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema, WebglDisplaySettingsSchema,
+  ConnectionRule, ProjectConnectionPolicy, CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema, WebglDisplaySettingsSchema,
   inferWebglDisplayMode, resolveWebglDisplay, type WebglNetworkRequest,
 } from '@pcu/contracts';
 import { UNHANDLED, MockHttpError, type MockContext, type MockRequestOptions } from './context';
@@ -39,7 +39,10 @@ export function handleWebgl(ctx: MockContext, pathname: string, method: string, 
     const action = admin[2];
     const expected = action === 'revoke' ? 'APPROVED' : 'PENDING';
     if (row.state !== expected) conflict(`Only ${expected.toLowerCase()} requests can be ${action}d`);
-    if (action === 'approve' && Object.values(records).filter(r => r.projectId === project.id && r.state === 'APPROVED').length >= 16) conflict('At most sixteen approved connection origins');
+    if (action === 'approve') {
+      try { new ProjectConnectionPolicy([...Object.values(records).filter(r => r.projectId === project.id && r.state === 'APPROVED').map(r => r.origin), row.origin], [new URL(windowOrigin()).hostname]); }
+      catch { conflict('Connection rules overlap, exceed sixteen rules, or include a protected host'); }
+    }
     if (action !== 'reject') project.webglNetworkPolicyVersion = (project.webglNetworkPolicyVersion ?? 0) + 1;
     Object.assign(row, { state: action === 'approve' ? 'APPROVED' : action === 'reject' ? 'REJECTED' : 'REVOKED',
       reviewerId: actor.id, reviewReason: reason, reviewedAt: ctx.now(), policyVersion: project.webglNetworkPolicyVersion ?? 0,
@@ -55,7 +58,7 @@ export function handleWebgl(ctx: MockContext, pathname: string, method: string, 
   if (method === 'GET') return { items: Object.values(records).filter(r => r.projectId === project.id), gameOrigin: windowOrigin(), policyVersion: project.webglNetworkPolicyVersion ?? 0 };
   if (projectExhibition(ctx, project).isModificationEnabled === false) forbidden('Project modifications are closed for this exhibition');
   const input = parseInput(CreateWebglNetworkRequestSchema, bodyObject(options));
-  if (new URL(input.origin).hostname === new URL(windowOrigin()).hostname) throw new MockHttpError(400, 'VALIDATION_ERROR', 'Site and storage origins cannot be approved as external connections');
+  if (ConnectionRule.parse(input.origin).includesHostname(new URL(windowOrigin()).hostname)) throw new MockHttpError(400, 'VALIDATION_ERROR', 'Site and storage origins cannot be approved as external connections');
   if (Object.values(records).some(r => r.projectId === project.id && r.origin === input.origin && ['PENDING','APPROVED'].includes(r.state))) conflict('An active request already exists for this origin');
   const row: WebglNetworkRequest = { ...input, id: crypto.randomUUID(), projectId: project.id, originalProjectId: project.id, projectTitle: project.title,
     requesterId: actor.id, state: 'PENDING', reviewerId: null, reviewReason: null, createdAt: ctx.now(), reviewedAt: null,

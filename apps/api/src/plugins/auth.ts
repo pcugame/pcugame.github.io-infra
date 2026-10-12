@@ -1,4 +1,4 @@
-import { isPlayControlPath, isTrustedPlaySource } from '../modules/webgl-play/source.js';
+import { isPlayReportPath, isPlayControlPath, isTrustedPlaySource } from '../modules/webgl-play/source.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { AppError, unauthorized, forbidden } from '../shared/errors.js';
 import { cookieExpiresAt, isIdleExpired } from '../shared/session.js';
@@ -47,6 +47,7 @@ async function resolveSession(
 	appLogger: AppLogger,
 	allowedOrigins: ReadonlySet<string>,
 ): Promise<void> {
+  if (isPlayReportPath(request.method, request.url)) return;
   const sid = request.cookies[cfg.SESSION_COOKIE_NAME];
   if (!sid) return;
 

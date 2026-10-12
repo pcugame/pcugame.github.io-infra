@@ -1,3 +1,4 @@
+import { createDiagnosticRepository } from './diagnostic-repository.js';
 import { canReadProject } from "../../shared/visibility.js";
 import { forbidden } from "../../shared/errors.js";
 import type { PrismaClient, Prisma, WebglPlaySession } from "../../generated/prisma/client.js";
@@ -11,6 +12,7 @@ async function assertPolicyValid(client: PrismaClient | Prisma.TransactionClient
 }
 export function createWebglPlayRepository(client: PrismaClient) {
   return {
+    diagnostics: createDiagnosticRepository(client),
     session: async (id: string) =>
       client.authSession.findUnique({ where: { id }, include: { user: true } }),
     deployment: async (projectId: number) =>
@@ -143,6 +145,7 @@ export function createUnavailableWebglPlayRepository(): WebglPlayRepository {
     throw new Error("WebGL play persistence unavailable");
   };
   return {
+    diagnostics: { record: fail, list: fail },
     session: fail,
     deployment: fail,
     find: fail,

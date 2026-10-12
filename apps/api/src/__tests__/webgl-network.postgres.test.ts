@@ -23,7 +23,7 @@ import { createFileAccessController } from '../modules/file-access/controller.js
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary', () => {
  let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>, db: PrismaClient, app: FastifyInstance;
- let projectId: number, exhibitionId: number, sid: string, adminSid: string, outsiderSid: string, memberSid: string;
+ let projectId: number, exhibitionId: number, sid: string, adminSid: string, outsiderSid: string, memberSid: string, operatorSid: string;
  let owner: number, admin: number, member: number;
  let playRepository: ReturnType<typeof createWebglPlayRepository>;
  const webOrigin = 'https://web.fixture.example', apiOrigin = 'https://api.fixture.example', gameOrigin = 'https://games.fixture.example';
@@ -31,7 +31,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  const external = 'https://scores.example.com';
  const body = (origin = external) => ({ origin, purpose: 'Read and write game scores', mode: origin.startsWith('wss:') ? 'WSS' : 'HTTPS', cors: `Allow ${gameOrigin}; use a per-game account, never a site session` });
  const config = {
-  WEBGL_PLAY_ENABLED: true, WEBGL_EXTERNAL_CONNECTIONS_ENABLED: true, CORS_ALLOWED_ORIGINS: [webOrigin],
+  SESSION_SECRET: 'diagnostic-test-secret-at-least-32-characters', WEBGL_PLAY_ENABLED: true, WEBGL_EXTERNAL_CONNECTIONS_ENABLED: true, CORS_ALLOWED_ORIGINS: [webOrigin],
   API_PUBLIC_URL: apiOrigin, WEB_PUBLIC_URL: webOrigin, PUBLIC_ASSET_ORIGIN: gameOrigin,
   S3_ENDPOINT: 'https://garage.fixture.example', S3_PUBLIC_SIGNING_ENDPOINT: 'https://uploads.fixture.example',
   S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT: 'https://downloads.fixture.example', S3_BUCKET_PUBLIC: 'public', S3_BUCKET_PROTECTED: 'protected',
@@ -44,9 +44,9 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  const list = (session = sid) => request('GET', `/api/me/projects/${projectId}/webgl-network-requests`, session);
  const create = (origin = external, session = sid) => request('POST', `/api/me/projects/${projectId}/webgl-network-requests`, session, body(origin));
  const review = (id: string, action: string, session = adminSid) => request('POST', `/api/admin/webgl-network-requests/${id}/${action}`, session, { reason: `Reviewed ${action}: configured service and origin verified` });
- const issue = () => app.inject({ method: 'POST', url: '/api/webgl-play/sessions', headers: {
+ const issue = (diagnostics = false) => app.inject({ method: 'POST', url: '/api/webgl-play/sessions', headers: {
   origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`,
- }, payload: { projectId } });
+ }, payload: { projectId, diagnostics } });
  type Grant = { id: string; controlSecret: string; iframeUrl: string };
  const renew = (grant: Grant) => app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${grant.id}/renew`, headers: {
   origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`, 'x-pcu-play-control': grant.controlSecret,
@@ -58,12 +58,13 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  async function approved(origin = external) { const result = await create(origin); expect(result.statusCode, result.body).toBe(201); const id = result.json().data.id; expect((await review(id, 'approve')).statusCode).toBe(200); return id as string; }
  beforeAll(async () => {
   database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!); db = database.createClient();
-  async function user(role: 'USER' | 'ADMIN') {
+  async function user(role: 'USER' | 'ADMIN' | 'OPERATOR') {
    const row = await db.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@fixture.invalid`, role } });
    const session = await db.authSession.create({ data: { userId: row.id, expiresAt: new Date(Date.now() + 3600000) } });
    return { id: row.id, sid: session.id };
   }
   const a = await user('USER'), b = await user('ADMIN'), c = await user('USER'), d = await user('USER');
+  operatorSid = (await user('OPERATOR')).sid;
   owner = a.id; sid = a.sid; admin = b.id; adminSid = b.sid; outsiderSid = c.sid; member = d.id; memberSid = d.sid;
   await db.storageBucket.createMany({ data: [{ bucket: 'public', visibility: 'PUBLIC' }, { bucket: 'protected', visibility: 'PROTECTED' }] });
   app = Fastify(); app.setValidatorCompiler(validatorCompiler); app.setSerializerCompiler(serializerCompiler); registerRouteSchemas(app);
@@ -74,7 +75,7 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
    delete: id => db.authSession.deleteMany({ where: { id } }),
   } });
   await registerCsrf(app, config);
-  app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message } }));
+  app.setErrorHandler((error: FastifyError, _request, reply) => reply.status(error instanceof AppError ? error.statusCode : error.validation ? 400 : error.statusCode ?? 500).send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error.message } }));
   const network = createWebglNetworkService(createWebglNetworkRepository(db), config);
   await app.register(createWebglNetworkController(network, 'me'), { prefix: '/api/me' });
   await app.register(createWebglNetworkController(network, 'admin'), { prefix: '/api/admin' });
@@ -94,6 +95,8 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
  });
  afterAll(async () => { await app?.close(); await database?.close(); });
  it('serializes empty and populated owner/admin lists and audited review responses', async () => {
+  const emptyAdmin = await request('GET', '/api/admin/webgl-network-requests', adminSid);
+  expect(WebglNetworkRequestListSchema.parse(emptyAdmin.json().data).items).toEqual([]);
   const empty = await list(); expect(empty.statusCode).toBe(200); expect(WebglNetworkRequestListSchema.parse(empty.json().data)).toEqual({ items: [], gameOrigin, policyVersion: 0 });
   const created = await create(); expect(created.statusCode, created.body).toBe(201); expect(WebglNetworkRequestSchema.parse(created.json().data).events).toEqual([]);
   const id = created.json().data.id;
@@ -193,4 +196,62 @@ describe.runIf(enabled)('WebGL external policy authenticated PostgreSQL boundary
   expect([{ policyVersion: 1, approvedOrigins: [external] }, { policyVersion: 2, approvedOrigins: [] }]).toContainEqual({ policyVersion: revokedSnapshot.policyVersion, approvedOrigins: revokedSnapshot.approvedOrigins });
   expect((await gate(raced.json().data)).statusCode).toBe(revokedSnapshot.approvedOrigins.length ? 403 : 204);
  });
+
+ it('keeps another project local and permits operator review', async () => {
+  const pending = (await create('wss://*.example.com')).json().data;
+  expect((await review(pending.id, 'approve', operatorSid)).statusCode).toBe(200);
+  const source = await db.project.create({ data: { creatorId: owner, exhibitionId, title: 'Separate game', slug: randomUUID(), status: 'PUBLISHED' } });
+  const asset = await db.asset.create({ data: { projectId: source.id, kind: 'WEBGL', representations: { create: { bucket: 'protected', objectKey: `${randomUUID()}.zip`, role: 'WEBGL_SOURCE', state: 'READY', mimeType: 'application/zip' } } }, include: { representations: true } });
+  const id = randomUUID(), prefix = `public/webgl/${source.id}/${id}/`;
+  await db.webglDeployment.create({ data: { id, projectId: source.id, sourceRepresentationId: asset.representations[0]!.id, publicBucket: 'public', publicPrefix: prefix, entryObjectKey: prefix + 'index.html', state: 'READY', objectManifest: { version: 1, objects: [{ objectKey: prefix + 'index.html', sizeBytes: '0', mimeType: 'text/html', contentEncoding: null, etag: 'fixture', checksumSha256: null }] } } });
+  await db.project.update({ where: { id: source.id }, data: { currentWebglDeploymentId: id } });
+  const issued = await request('POST', '/api/webgl-play/sessions', sid, { projectId: source.id }, apiOrigin);
+  // The shell's fetch metadata is mandatory even with an otherwise valid session cookie.
+  expect(issued.statusCode).toBe(403);
+  const grant = await app.inject({ method: 'POST', url: '/api/webgl-play/sessions', headers: { origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}` }, payload: { projectId: source.id } });
+  expect(grant.statusCode).toBe(200);
+  expect(String((await gate(grant.json().data)).headers['x-pcu-runtime-csp'])).not.toContain('*.example.com');
+ });
+ it('approves wildcard rules without port expansion and rejects overlaps', async () => {
+  expect((await create('wss://*.fixture.example')).statusCode).toBe(400);
+  expect((await create('wss://*.github.io')).statusCode).toBe(400);
+  await approved('wss://*.example.com:8443');
+  const overlap = (await create('wss://a.example.com:8443')).json().data.id;
+  expect((await review(overlap, 'approve')).statusCode).toBe(409);
+  await approved('wss://example.com:8443');
+  const session = await grant();
+  const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
+  expect(csp).toContain('wss://*.example.com:8443');
+  expect(csp).not.toContain('19090');
+ });
+ it('isolates diagnostic tokens, strips secrets, limits reports and cascades cleanup', async () => {
+  const session = (await issue(true)).json().data as Grant;
+  const csp = String((await gate(session)).headers['x-pcu-runtime-csp']);
+  const reportUrl = new URL(csp.split('report-uri ')[1]!).pathname;
+  const report = (url = reportUrl, origin = 'https://user:password@blocked.example.com/private?token=secret') => app.inject({ method: 'POST', url, headers: { 'content-type': 'application/csp-report' }, payload: JSON.stringify({ 'csp-report': { 'blocked-uri': origin, 'effective-directive': 'connect-src', 'document-uri': 'https://secret.invalid/path', 'script-sample': 'secret-code' } }) });
+  const read = (id = session.id, controlSecret = session.controlSecret) => app.inject({ method: 'POST', url: `/api/webgl-play/sessions/${id}/diagnostics`, headers: { origin: apiOrigin, 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors', cookie: `sid=${sid}`, 'x-pcu-play-control': controlSecret }, payload: {} });
+  expect((await read()).json().data.items).toEqual([]);
+  expect((await Promise.all([report(), report()])).map(result => result.statusCode)).toEqual([204, 204]);
+  const data = (await read()).json().data;
+  expect(data).toMatchObject({ gameOrigin, policyVersion: 0, approvedOrigins: [], items: [{ origin: 'https://blocked.example.com', directive: 'connect-src', count: 2 }] });
+  expect(JSON.stringify(data)).not.toMatch(/password|private|secret-code|token=/);
+  expect((await report('/api/webgl-play/reports/' + 'f'.repeat(64))).statusCode).toBe(403);
+  expect((await report('/api/webgl-play/reports/' + session.controlSecret)).statusCode).toBe(403);
+  expect((await request('POST', `/api/webgl-play/sessions/${session.id}/diagnostics`, sid, {}, gameOrigin)).statusCode).toBe(403);
+  const other = (await issue(true)).json().data as Grant;
+  expect((await read(other.id)).statusCode).toBe(403);
+  expect((await read(session.id, 'f'.repeat(64))).statusCode).toBe(403);
+  expect((await app.inject({ method: 'POST', url: reportUrl, headers: { 'content-type': 'application/csp-report' }, payload: 'x'.repeat(16385) })).statusCode).toBe(413);
+  for (let i = 0; i < 28; i++) expect((await report(reportUrl, `https://blocked${i}.example.com/path`)).statusCode).toBe(204);
+  expect((await read()).json().data.items).toHaveLength(20);
+  expect((await report()).statusCode).toBe(429);
+  await db.webglPlaySession.update({ where: { id: session.id }, data: { reportWindowAt: new Date(Date.now() - 61000) } });
+  expect((await report()).statusCode).toBe(204);
+  await db.webglPlaySession.update({ where: { id: session.id }, data: { expiresAt: new Date(0) } });
+  expect((await report()).statusCode).toBe(403);
+  expect((await read()).statusCode).toBe(403);
+  await grant();
+  expect(await db.webglConnectionDiagnostic.count({ where: { sessionId: session.id } })).toBe(0);
+ });
+
 });

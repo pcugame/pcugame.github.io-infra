@@ -21,6 +21,11 @@ export function shouldRegisterDevAuth(cfg: { DEV_AUTH_ENABLED: boolean; NODE_ENV
 
 function registerGlobalErrorHandler(app: FastifyInstance, appLogger: BackendContext['logger']): void {
 	app.setErrorHandler((error: FastifyError, _request, reply) => {
+        if (_request.url.startsWith('/api/webgl-play/reports/')) {
+            const status = error instanceof AppError ? error.statusCode : error.statusCode ?? 500;
+            reply.status(status).send({ ok: false, error: { code: 'REPORT_REJECTED', message: 'Report rejected' } });
+            return;
+        }
 		if (error instanceof AppError) {
 			// Some AppErrors carry a backoff hint in `details.retryAfterSec` (e.g. the
 			// upload-semaphore 429). Promote it to a real `Retry-After` header so clients

@@ -33,6 +33,30 @@ server {
 
   client_max_body_size 0;
 
+  # Browser CSP reports contain capability URLs and possibly sensitive payloads.
+  # No ordinary file access or cookie auth is used; the API verifies a report-only token.
+  location ~ "^/api/webgl-play/reports/[a-f0-9]{64}$" {
+    if ($request_method != POST) { return 405; }
+    client_max_body_size 16k;
+    client_body_buffer_size 16k;
+    access_log off;
+    error_log /dev/null crit;
+    resolver 127.0.0.11 valid=30s;
+    set $pcu_report_upstream "${FILE_GATEWAY_API_UPSTREAM}";
+    proxy_pass $pcu_report_upstream$request_uri;
+    proxy_ssl_server_name on;
+    proxy_ssl_name $pcu_gate_tls_name;
+    proxy_ssl_verify on;
+    proxy_ssl_verify_depth 4;
+    proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+    proxy_set_header Cookie "";
+    proxy_set_header Authorization "";
+    proxy_hide_header Set-Cookie;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 5s;
+    proxy_next_upstream off;
+  }
+
   location = /__pcu_file_auth {
     internal;
     # Bounded per-project runtime connection policies may exceed 4 KiB.

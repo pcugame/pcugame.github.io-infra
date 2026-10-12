@@ -72,6 +72,31 @@ const status = document.getElementById('status');
 const title = document.getElementById('title');
 const frameHost = document.getElementById('game');
 const restart = document.getElementById('restart');
+const diagnose = document.getElementById('diagnose');
+const diagnosticPanel = document.getElementById('diagnostics');
+const diagnosticOutput = document.getElementById('diagnostic-output');
+const diagnosticMode = location.hash === '#diagnostics';
+let readingDiagnostics = false;
+async function readDiagnostics() {
+  if (!diagnosticMode || !session || stopped || readingDiagnostics || document.visibilityState !== 'visible') return;
+  readingDiagnostics = true;
+  try {
+    const data = await post('/' + session.id + '/diagnostics', {}, session.controlSecret);
+    diagnosticOutput.textContent = '게임 origin: ' + data.gameOrigin + '\n정책 버전: ' + data.policyVersion
+      + '\n적용 규칙: ' + (data.approvedOrigins.join(', ') || '외부 승인 없음') + '\n'
+      + (data.items.length ? data.items.map(item => item.directive + ' · ' + item.origin + ' · ' + item.count + '회 · ' + item.firstSeenAt + ' ~ ' + item.lastSeenAt).join('\n')
+        : '수신한 CSP 연결 차단 보고가 없습니다. 보고 지연·브라우저 미지원일 수 있으며 연결 성공을 의미하지 않습니다.');
+  } catch { diagnosticOutput.textContent = '진단을 조회하지 못했습니다. 실행 권한·만료 여부와 서버 연결을 확인하세요.'; }
+  finally { readingDiagnostics = false; }
+}
+diagnose.addEventListener('click', async () => {
+  if (session && !stopped && !confirm('진단을 위해 게임을 다시 실행할까요? 저장하지 않은 진행 상황은 사라질 수 있습니다.')) return;
+  diagnose.disabled = true;
+  frameHost.replaceChildren();
+  if (session) await post('/' + session.id + '/close', {}, session.controlSecret).catch(() => {});
+  location.hash = 'diagnostics'; location.reload();
+});
+setInterval(() => { void readDiagnostics(); }, 5000);
 const fullscreen = document.getElementById('fullscreen');
 const displayInfo = document.getElementById('display-info');
 let displaySize;
@@ -175,7 +200,9 @@ async function start() {
       return;
     }
     announce('게임 실행을 요청하고 있습니다.');
-    session = await post('', { projectId: Number(root.dataset.projectId) });
+    session = await post('', { projectId: Number(root.dataset.projectId), ...(diagnosticMode ? { diagnostics: true } : {}) });
+    diagnosticPanel.hidden = !diagnosticMode;
+    if (diagnosticMode) { diagnosticPanel.open = true; void readDiagnostics(); }
     const target = new URL(session.iframeUrl);
     if (target.origin !== root.dataset.assetOrigin || !/^\/runtime\/[a-f0-9]{64}\//.test(target.pathname)
         || target.username || target.password || target.search || target.hash) throw new Error('올바르지 않은 게임 실행 주소입니다.');
@@ -348,7 +375,7 @@ if (!window.isSecureContext || typeof WebAssembly === 'undefined') void start();
 else inspectAcceleration();
 })();`;
 
-const shellStyle = `:root{background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}main>header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}main>header a,main>header button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,main>details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}main>details{padding-bottom:1rem}.configured-display{height:100dvh;min-height:0;overflow:hidden}.configured-display>header,.configured-display>p,.configured-display>details{flex-shrink:0}.configured-display>details{max-height:30dvh;overflow:auto}.configured-display #game{position:relative;min-height:0;min-width:0;overflow:hidden}.configured-display iframe{position:absolute;left:50%;top:50%;min-height:0;flex:none;transform-origin:center}.configured-display:fullscreen{width:100vw;height:100dvh;background:#101318}.responsive-display iframe{inset:0;width:100%;height:100%;transform:none}[hidden]{display:none!important}#display-info{font-size:.85rem;color:#c3cedc;margin:.25rem 1.5rem}`;
+const shellStyle = `#diagnostic-output{white-space:pre-wrap;overflow-wrap:anywhere}:root{background:#101318;color:#edf1f6}body{margin:0}main{min-height:100vh;display:flex;flex-direction:column}main>header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.5rem}h1{font-size:1.25rem;margin:0;flex:1}main>header a,main>header button{color:inherit;background:#273342;border:1px solid #58697c;border-radius:.4rem;padding:.6rem .8rem;font:inherit}button:disabled{opacity:.5}#status,main>details{margin:.5rem 1.5rem;line-height:1.6}#game{flex:1;min-height:65vh;display:flex}iframe{border:0;width:100%;min-height:65vh;flex:1}main>details{padding-bottom:1rem}.configured-display{height:100dvh;min-height:0;overflow:hidden}.configured-display>header,.configured-display>p,.configured-display>details{flex-shrink:0}.configured-display>details{max-height:30dvh;overflow:auto}.configured-display #game{position:relative;min-height:0;min-width:0;overflow:hidden}.configured-display iframe{position:absolute;left:50%;top:50%;min-height:0;flex:none;transform-origin:center}.configured-display:fullscreen{width:100vw;height:100dvh;background:#101318}.responsive-display iframe{inset:0;width:100%;height:100%;transform:none}[hidden]{display:none!important}#display-info{font-size:.85rem;color:#c3cedc;margin:.25rem 1.5rem}`;
 const graphicsAssets = (config: ShellConfig) => new URL('/help/graphics-acceleration/', config.WEB_PUBLIC_URL).href;
 const shellStyles = (config: ShellConfig) => shellStyle + accelerationStyle + `@font-face{font-family:'Pretendard Variable';font-style:normal;font-weight:45 920;font-display:swap;src:url(${JSON.stringify(graphicsAssets(config) + 'PretendardVariable.woff2')}) format('woff2');}`;
 
@@ -373,5 +400,5 @@ export function renderPlayShell(config: ShellConfig, projectId: number): string 
 	if (!Number.isSafeInteger(projectId) || projectId <= 0) throw new Error('Invalid project ID');
 	const back = new URL(`/projects/${projectId}`, config.WEB_PUBLIC_URL).href;
 	const assetOrigin = new URL(config.PUBLIC_ASSET_ORIGIN ?? config.API_PUBLIC_URL).origin;
-	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${shellStyles(config)}</style></head><body><main data-graphics-assets="${escapeHtml(graphicsAssets(config))}" data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="fullscreen" type="button" aria-pressed="false" hidden>전체화면</button><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><p id="display-info" hidden></p><div id="game"></div>${accelerationMarkup}<details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
+	return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WebGL Player</title><style>${shellStyles(config)}</style></head><body><main data-graphics-assets="${escapeHtml(graphicsAssets(config))}" data-project-id="${projectId}" data-asset-origin="${escapeHtml(assetOrigin)}"><header><h1 id="title">WebGL Player</h1><a id="back" href="${escapeHtml(back)}" rel="noopener">작품으로 돌아가기</a><button id="fullscreen" type="button" aria-pressed="false" hidden>전체화면</button><button id="diagnose" type="button">연결 진단으로 다시 실행</button><button id="restart" type="button" disabled>게임 다시 시작</button></header><p id="status" role="status">실행 권한을 확인하고 있습니다.</p><p id="display-info" hidden></p><details id="diagnostics" hidden><summary>연결 진단</summary><pre id="diagnostic-output"></pre><p>CSP 보고는 신뢰할 수 없는 참고 정보이며 자동 승인에 사용하지 않습니다. CORS·TLS·DNS·WebSocket Origin 검사·서비스 인증·게임 설정은 개발자 도구에서 확인하세요. 승인으로 외부 서버 설정이 변경되지는 않습니다.</p></details><div id="game"></div>${accelerationMarkup}<details><summary>게임이 실행되지 않나요?</summary><p>데스크톱 Chrome·Edge·Firefox에서 실행해 주세요. 브라우저를 업데이트하고 그래픽 가속을 확인해 주세요. Safari와 모바일은 지원 보장 대상이 아닙니다.</p><p>다른 탭으로 이동한 상태에서 권한이 만료되면 돌아왔을 때 다시 시작해야 합니다. 게임별 저장소 분리와 방문 간 저장 데이터 유지는 보장하지 않습니다. Firefox는 credentialless 지원과 저장소 동작이 다를 수 있으며 실제 게임과 Worker의 격리 결과에 따라 스레드 지원이 결정됩니다.</p><p>외부 연결 실패 시 개발자 도구에서 CSP 차단과 외부 서버 CORS 오류를 구분할 수 있습니다. 승인된 외부 서버도 실제 NAS 게임 origin에 대한 CORS 설정이 필요합니다. 작품명, 브라우저 버전과 오류 내용을 운영자에게 전달해 주세요.</p></details></main><script>${script}</script></body></html>`;
 }

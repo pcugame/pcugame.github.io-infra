@@ -1,4 +1,4 @@
-import { validateWebglNetworkOrigin, type CreateWebglNetworkRequest, type WebglNetworkRequest } from '@pcu/contracts';
+import { ProjectConnectionPolicy, validateWebglNetworkOrigin, type CreateWebglNetworkRequest, type WebglNetworkRequest } from '@pcu/contracts';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type { Actor } from '../../application/http-input.js';
 import { conflict, forbidden, notFound, isUniqueConstraintError } from '../../shared/errors.js';
@@ -65,8 +65,10 @@ export function createWebglNetworkRepository(client: PrismaClient) {
     const expected = action === 'revoke' ? 'APPROVED' : 'PENDING';
     if (row.state !== expected) throw conflict(`Only ${expected.toLowerCase()} requests can be ${action}d`);
     if (action === 'approve') {
-     if (!validateWebglNetworkOrigin(row.origin, row.mode) || blockedHosts.includes(new URL(row.origin).hostname)) throw forbidden('This origin cannot be approved');
-     if (await tx.webglNetworkRequest.count({ where: { projectId: row.projectId, state: 'APPROVED' } }) >= 16) throw conflict('A project supports at most sixteen approved connection origins');
+     if (!validateWebglNetworkOrigin(row.origin, row.mode)) throw forbidden('This origin cannot be approved');
+     const approved = await tx.webglNetworkRequest.findMany({ where: { projectId: row.projectId, state: 'APPROVED' }, select: { origin: true } });
+     try { new ProjectConnectionPolicy([...approved.map(item => item.origin), row.origin], blockedHosts); }
+     catch { throw conflict('Connection rules overlap, exceed sixteen rules, or include a protected host'); }
     }
     const project = await tx.project.findUniqueOrThrow({ where: { id: row.projectId } });
     const policyVersion = project.webglNetworkPolicyVersion + (action === 'reject' ? 0 : 1);

@@ -43,6 +43,14 @@ try {
  map "$http_x_pcu_file_uri:$http_x_pcu_fetch_dest" $fixture_dest_ok { ~worker\\.bin:worker$ 1; ~worker\\.bin: 0; default 1; }
  map "$http_x_pcu_file_uri:$http_x_pcu_file_method" $fixture_method_ok { ~head\\.bin:HEAD$ 1; ~head\\.bin: 0; default 1; }
  server { listen 8443;
+  location /api/webgl-play/reports/ {
+   if ($request_method != POST) { return 405; }
+   if ($http_cookie != "") { return 403; }
+   if ($http_authorization != "") { return 403; }
+   if ($http_content_type != "application/csp-report") { return 415; }
+   add_header Set-Cookie "must-not-leak=1";
+   return 204;
+  }
   location / {
    if ($http_x_pcu_gateway_secret != "${values.FILE_GATEWAY_SECRET}") { return 403; }
    if ($http_cookie != "") { return 403; }
@@ -88,6 +96,12 @@ try {
  }
  for (const port of [8080, 8081]) {
   const origin = 'http://' + docker('port', name, `${port}/tcp`);
+  const reportUrl = `${origin}/api/webgl-play/reports/${token}`;
+  const report = await fetch(reportUrl, { method: 'POST', headers: { 'Content-Type': 'application/csp-report', Cookie: 'sid=private', Authorization: 'Bearer private' }, body: '{"csp-report":{}}' });
+  assert.equal(report.status, 204, 'report reaches the dedicated API path without cookies');
+  assert.equal(report.headers.get('set-cookie'), null);
+  assert.equal((await fetch(reportUrl)).status, 405);
+  assert.equal((await fetch(reportUrl, { method: 'POST', body: 'x'.repeat(16385) })).status, 413);
   const path = `${origin}/runtime/${token}/`;
   const request = (suffix, init = {}) => fetch(path + suffix, { ...init, signal: AbortSignal.timeout(5000) });
   const response = await request('fixture.bin', { headers: { Cookie: 'sid=fixture', Authorization: 'Bearer fixture' } });

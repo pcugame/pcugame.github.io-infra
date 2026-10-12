@@ -847,6 +847,10 @@ model WebglPlaySession {
   createdAt DateTime @default(now()) @map("created_at")
   policyVersion Int @default(0) @map("policy_version")
   approvedOrigins String[] @default([]) @map("approved_origins")
+  reportHash String? @unique @map("report_hash")
+  reportWindowAt DateTime? @map("report_window_at")
+  reportCount Int @default(0) @map("report_count")
+  diagnostics WebglConnectionDiagnostic[]
   session AuthSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   @@index([sessionId, expiresAt])
   @@index([expiresAt])
@@ -1070,4 +1074,16 @@ model VoteReceipt {
   draw VoteDraw @relation(fields: [drawId], references: [id], onDelete: Restrict)
   createdAt DateTime @default(now())
   @@map("vote_receipts")
+}
+
+model WebglConnectionDiagnostic {
+  sessionId String @map("session_id")
+  origin String
+  directive String
+  count Int @default(1)
+  firstSeenAt DateTime @map("first_seen_at")
+  lastSeenAt DateTime @map("last_seen_at")
+  session WebglPlaySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  @@id([sessionId, origin, directive])
+  @@map("webgl_connection_diagnostics")
 }

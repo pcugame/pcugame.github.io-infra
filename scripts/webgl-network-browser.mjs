@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import { sanitizeConnectionReport } from '../apps/api/dist/modules/webgl-play/diagnostics.js';
 import { runtimeCsp } from "../apps/api/dist/modules/webgl-play/service.js";
 const require = createRequire(import.meta.url);
 const { WebSocketServer } = require(process.env.WS_MODULE_PATH || "ws");
@@ -32,14 +33,15 @@ execFileSync(
     "-days",
     "1",
     "-subj",
-    "/CN=*.pcu.test",
+    "/CN=*.pcu.example.com",
     "-addext",
-    "subjectAltName=DNS:runtime.pcu.test,DNS:approved.pcu.test,DNS:blocked.pcu.test,DNS:api.pcu.test",
+    "subjectAltName=DNS:runtime.pcu.example.com,DNS:region.approved.pcu.example.com,DNS:blocked.pcu.example.com,DNS:api.pcu.example.com,DNS:game.approved.pcu.example.com,DNS:approved.pcu.example.com",
   ],
   { stdio: "ignore" },
 );
 const token = "a".repeat(64),
   other = "b".repeat(64);
+const reports = [];
 const traffic = [],
   sockets = [];
 let base, approved, blocked, api, csp, program;
@@ -51,13 +53,19 @@ const server = https.createServer(
   (req, res) => {
     const host = req.headers.host.split(":")[0],
       path = req.url;
-    traffic.push({ host, path, csp: host === "runtime.pcu.test" ? csp : null });
+    if (host === 'api.pcu.example.com' && path === '/report' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => { const item = sanitizeConnectionReport(JSON.parse(body)); if (item) reports.push(item); res.writeHead(204); res.end(); });
+      return;
+    }
+    traffic.push({ host, path, csp: host === "runtime.pcu.example.com" ? csp : null });
     const common = {
       "Access-Control-Allow-Origin": base,
       "Cross-Origin-Resource-Policy": "cross-origin",
       "Cache-Control": "no-store",
     };
-    if (host === "runtime.pcu.test") {
+    if (host === "runtime.pcu.example.com") {
       res.writeHead(200, {
         ...common,
         "Content-Security-Policy": csp,
@@ -77,6 +85,8 @@ const server = https.createServer(
       res.writeHead(302, { ...common, Location: blocked + "/redirect-target" });
       return res.end();
     }
+    if (path === '/cors-denied') { res.writeHead(200, { 'Cross-Origin-Resource-Policy': 'cross-origin' }); return res.end('cors-denied'); }
+    if (path === '/auth-denied') { res.writeHead(401, common); return res.end('authentication-denied'); }
     res.writeHead(200, {
       ...common,
       "Content-Type": path.endsWith(".js")
@@ -103,6 +113,8 @@ server.on("upgrade", (req, socket, head) => {
   const host = req.headers.host.split(":")[0];
   sockets.push({ host, path: req.url, received: false });
   const record = sockets.at(-1);
+  if (req.url === '/origin-denied' || req.headers.origin !== base) { socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n'); return; }
+  if (req.url === '/auth-denied') { socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n'); return; }
   wss.handleUpgrade(req, socket, head, (ws) =>
     ws.on("message", (bytes) => {
       record.received = true;
@@ -112,17 +124,17 @@ server.on("upgrade", (req, socket, head) => {
 });
 await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const port = server.address().port;
-base = `https://runtime.pcu.test:${port}`;
-approved = `https://approved.pcu.test:${port}`;
-blocked = `https://blocked.pcu.test:${port}`;
-api = `https://api.pcu.test:${port}`;
+base = `https://runtime.pcu.example.com:${port}`;
+approved = `https://region.approved.pcu.example.com:${port}`;
+blocked = `https://blocked.pcu.example.com:${port}`;
+api = `https://api.pcu.example.com:${port}`;
 csp = runtimeCsp(base, token, api, [
   approved,
-  approved.replace("https:", "wss:"),
-]);
+  approved.replace("https:", "wss:").replace("region.approved", "*.approved"),
+], api + '/report');
 assert.ok(
   csp.includes(
-    `connect-src ${base}/runtime/${token}/ blob: ${approved} ${approved.replace("https:", "wss:")};`,
+    `connect-src ${base}/runtime/${token}/ blob: ${approved} ${approved.replace("https:", "wss:").replace("region.approved", "*.approved")};`,
   ),
 );
 const config = { base, approved, blocked, token, other };
@@ -133,11 +145,17 @@ async function probe(){
  const wsEcho=url=>new Promise(resolve=>{try{const ws=new WebSocket(url);let done=false;const finish=value=>{if(done)return;done=true;resolve(value);ws.close();};ws.onopen=()=>ws.send('echo-probe');ws.onmessage=event=>finish(event.data);ws.onerror=()=>finish('BLOCKED');setTimeout(()=>finish('TIMEOUT'),5000);}catch{resolve('BLOCKED');}});
  const output={};
  for(const path of ['api','catalog.json','hash','bundle']) output[path]=await fetchText(config.approved+'/'+path);
+ output.corsDenied=await fetchText(config.approved+'/cors-denied');
+ output.authDenied=await fetchText(config.approved+'/auth-denied');
+ output.originDenied=await wsEcho(config.approved.replace('https:','wss:')+'/origin-denied');
+ output.socketAuthDenied=await wsEcho(config.approved.replace('https:','wss:')+'/auth-denied');
  output.same=await fetchText(config.base+'/runtime/'+config.token+'/payload');
  output.otherRuntime=await fetchText(config.base+'/runtime/'+config.other+'/payload');
  output.unapproved=await fetchText(config.blocked+'/fetch');
  output.redirect=await fetchText(config.approved+'/redirect');
  output.wss=await wsEcho(config.approved.replace('https:','wss:')+'/echo');
+ output.serverMove=await wsEcho(config.approved.replace('https:','wss:').replace('region.approved','game.approved')+'/echo');
+ output.wildcardRoot=await wsEcho(config.approved.replace('https:','wss:').replace('region.approved','approved')+'/echo');
  output.unapprovedWss=await wsEcho(config.blocked.replace('https:','wss:')+'/echo');
  if(typeof document==='undefined') {try{importScripts(config.approved+'/external.js');output.externalScript='LOADED';}catch{output.externalScript='BLOCKED';}}
  else output.externalScript=await new Promise(resolve=>{const script=document.createElement('script');script.src=config.approved+'/external.js';script.onload=()=>resolve('LOADED');script.onerror=()=>resolve('BLOCKED');document.head.append(script);});
@@ -166,13 +184,13 @@ try {
             "--no-sandbox",
             "--no-proxy-server",
             "--ignore-certificate-errors",
-            "--host-resolver-rules=MAP *.pcu.test 127.0.0.1",
+            "--host-resolver-rules=MAP *.pcu.example.com 127.0.0.1",
           ],
         }
       : {
           firefoxUserPrefs: {
             "network.dns.localDomains":
-              "runtime.pcu.test,approved.pcu.test,blocked.pcu.test,api.pcu.test",
+              "runtime.pcu.example.com,region.approved.pcu.example.com,game.approved.pcu.example.com,approved.pcu.example.com,blocked.pcu.example.com,api.pcu.example.com",
             "network.proxy.type": 0,
           },
         }),
@@ -188,23 +206,30 @@ try {
       "catalog.json": "catalog-ok",
       hash: "hash-ok",
       bundle: "bundle-bytes",
+      corsDenied: "BLOCKED",
+      authDenied: "authentication-denied",
+      originDenied: "BLOCKED",
+      socketAuthDenied: "BLOCKED",
       same: "same-runtime",
       otherRuntime: "BLOCKED",
       unapproved: "BLOCKED",
       redirect: "BLOCKED",
       wss: "echo-probe",
+      serverMove: "echo-probe",
+      wildcardRoot: "BLOCKED",
       unapprovedWss: "BLOCKED",
       externalScript: "BLOCKED",
       externalWorker: "BLOCKED",
     }))
       assert.equal(result[field], value, `${scope}.${field}`);
-    assert.ok(
+    // WebKit enforces Worker CSP but may omit Worker violation events.
+    if (!(engine === 'webkit' && scope === 'worker')) assert.ok(
       result.violations.some((v) => v.directive === "connect-src"),
       `${scope} connect-src violation recorded`,
     );
   }
   assert.equal(
-    traffic.filter((r) => r.host === "blocked.pcu.test").length,
+    traffic.filter((r) => r.host === "blocked.pcu.example.com").length,
     0,
     "blocked endpoints never receive HTTP",
   );
@@ -219,20 +244,23 @@ try {
     "external executable files never fetched",
   );
   assert.equal(
-    sockets.filter((r) => r.host === "blocked.pcu.test").length,
+    sockets.filter((r) => r.host === "blocked.pcu.example.com").length,
     0,
     "unapproved WSS upgrade never sent",
   );
   assert.equal(
     sockets.filter((r) => r.received).length,
-    2,
-    "document and Worker send real WSS bytes",
+    4,
+    "document and Worker connect to initial and migrated WSS servers",
   );
   assert.ok(
     traffic
-      .filter((r) => r.host === "runtime.pcu.test")
+      .filter((r) => r.host === "runtime.pcu.example.com")
       .every((r) => r.csp === csp),
   );
+  await page.waitForTimeout(1500);
+  assert.ok(reports.some(report => report.origin === blocked && report.directive === 'connect-src'), 'CSP report-uri received blocked connection');
+  assert.ok(reports.every(report => !report.origin.includes('/fetch')), 'only origins retained');
   console.log(
     JSON.stringify(
       {
@@ -241,6 +269,7 @@ try {
         passed: true,
         document: results.document,
         worker: results.worker,
+        receivedDiagnostics: reports,
         httpRequests: traffic.length,
         wssEchoes: sockets.filter((r) => r.received).length,
         limits: [
@@ -248,6 +277,7 @@ try {
           "Synthetic catalog/hash/bundle transport, not Unity Addressables",
           "Generated CSP with approved origin snapshot; approval persistence/auth tested separately",
           "No request interception or socket mocking",
+          ...(engine === "webkit" ? ["WebKit Worker CSP violation events may be absent; transport enforcement and report-uri delivery checked separately"] : []),
         ],
       },
       null,

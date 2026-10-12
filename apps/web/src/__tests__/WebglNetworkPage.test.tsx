@@ -26,6 +26,33 @@ describe('WebGL external connection workflow', () => {
 		await waitFor(() => expect(post).toHaveBeenCalledWith('/api/me/projects/7/webgl-network-requests', { origin: 'https://assets.example.com', mode: 'HTTPS', purpose: 'Remote bundles', cors: 'Allow NAS origin' }));
 		expect(screen.getAllByText('https://nas.example.com').length).toBeGreaterThan(0);
 	});
+
+ it('serializes a subdomain scope as one explicit port rule', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
+  const post = vi.spyOn(api, 'post').mockResolvedValue(item);
+  mount(); await screen.findByText('등록된 신청이 없습니다.');
+  fireEvent.change(screen.getByLabelText('호스트 범위'), { target: { value: 'subdomains' } });
+  fireEvent.change(screen.getByLabelText('정확한 origin'), { target: { value: 'https://example.com:8443' } });
+  fireEvent.change(screen.getByLabelText('사용 목적'), { target: { value: 'Bundles' } });
+  fireEvent.change(screen.getByLabelText('CORS / 인증 설정 계획'), { target: { value: 'CORS enabled' } });
+  fireEvent.click(screen.getByRole('button', { name: '검토 신청' }));
+  await waitFor(() => expect(post).toHaveBeenCalledWith('/api/me/projects/7/webgl-network-requests', expect.objectContaining({ origin: 'https://*.example.com:8443' })));
+ });
+ it('retries only failed profile requests after partial success', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({ items: [], gameOrigin: 'https://nas.example.com', policyVersion: 0 });
+  const post = vi.spyOn(api, 'post').mockResolvedValueOnce(item).mockRejectedValueOnce(new Error('Temporary failure')).mockResolvedValue(item);
+  mount(); await screen.findByText('등록된 신청이 없습니다.');
+  fireEvent.click(screen.getByLabelText('예시 1 선택')); fireEvent.click(screen.getByLabelText('예시 2 선택'));
+  fireEvent.change(screen.getByLabelText('예시 사용 목적'), { target: { value: 'Multiplayer' } });
+  fireEvent.change(screen.getByLabelText('예시 서버 설정 계획'), { target: { value: 'Origin and account configured' } });
+  const button = screen.getByRole('button', { name: '선택한 예시 신청 / 실패 항목 재시도' });
+  fireEvent.click(button);
+  await screen.findByText('이미 등록됨 · 재신청하지 않습니다.');
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(button);
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(3));
+  expect(post.mock.calls.map(call => (call[1] as { origin: string }).origin)).toEqual(['wss://*.photonengine.io', 'wss://*.photonengine.io:19090', 'wss://*.photonengine.io:19090']);
+ });
 	it('requires a review reason and escapes project strings', async () => {
 		vi.spyOn(api, 'get').mockResolvedValue({ items: [item], gameOrigin: 'https://nas.example.com', policyVersion: null });
 		const post = vi.spyOn(api, 'post').mockResolvedValue(item);

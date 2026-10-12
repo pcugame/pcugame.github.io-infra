@@ -1,4 +1,4 @@
-import { CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema } from '@pcu/contracts';
+import { ConnectionRule, CreateWebglNetworkRequestSchema, ReviewWebglNetworkRequestSchema } from '@pcu/contracts';
 import type { Actor } from '../../application/http-input.js';
 import type { Env } from '../../config/env.js';
 import { badRequest, notFound } from '../../shared/errors.js';
@@ -7,8 +7,8 @@ import type { WebglNetworkRepository } from './repository.js';
 
 /** Same host is privileged even when a request changes transport or port. */
 export function isPrivilegedNetworkOrigin(value: string, config: Env): boolean {
- const host = new URL(value).hostname;
- return privilegedHosts(config).includes(host);
+ const rule = ConnectionRule.parse(value);
+ return privilegedHosts(config).some(host => rule.includesHostname(host));
 }
 function privilegedHosts(config: Env): string[] {
  return [config.API_PUBLIC_URL, config.WEB_PUBLIC_URL, ...config.CORS_ALLOWED_ORIGINS, config.PUBLIC_ASSET_ORIGIN,
