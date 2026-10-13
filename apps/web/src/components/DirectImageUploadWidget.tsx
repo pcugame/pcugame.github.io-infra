@@ -1,18 +1,17 @@
 import { usePreventWindowClose } from './common/usePreventWindowClose';
 import { LinearUploadContext } from '../lib/upload/linearPresentation';
 import { UploadFileRows } from './common/UploadFileRows';
-import { useContext, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useContext, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { DirectAssetUploadKind, DirectAssetUploadOwner } from '../contracts';
 import { getApiErrorMessage } from '../lib/api';
 import {
-	cancelDirectAssetUploadSession,
 	getDirectAssetUploadStatus,
-	uploadDirectAssetFile,
 	waitForDirectAssetReady,
 	type DirectAssetUploadSession,
 	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
+import { useDirectUploadSession, type UploadRun } from '../lib/upload/useDirectUploadSession';
 import { queryKeys } from '../lib/query';
 
 type Phase = 'idle' | 'uploading' | 'verifying' | 'ready' | 'error';
@@ -49,8 +48,13 @@ interface Props {
 }
 
 /** Browser control for IMAGE and POSTER sessions; asset bytes go directly to Garage. */
-export default function DirectImageUploadWidget({
-	owner,
+export default function DirectImageUploadWidget(props: Props) {
+	// A different owner/kind is a different local lifetime, including queue state.
+	return <ImageUploadSession key={`${props.owner.type}:${props.owner.id}:${props.kind}`} {...props} />;
+}
+
+function ImageUploadSession({
+	owner: ownerProp,
 	kind,
 	initialFiles = [],
 	autoStart = false,
@@ -65,6 +69,7 @@ export default function DirectImageUploadWidget({
 	onBusyChange,
 	submissionItems = [],
 }: Props) {
+	const owner = useMemo(() => ({ type: ownerProp.type, id: ownerProp.id } as DirectAssetUploadOwner), [ownerProp.type, ownerProp.id]);
 	const linear = useContext(LinearUploadContext);
 	const qc = useQueryClient();
 	const recoveringManifest = initialFiles.length === 0 && submissionItems.length > 0;
@@ -75,25 +80,14 @@ export default function DirectImageUploadWidget({
 	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
-	const [resumable, setResumable] = useState<SavedImageSession | null>(null);
 	const [restoreDone, setRestoreDone] = useState(false);
-	const mountedRef = useRef(true);
 	const initialFilesRef = useRef(initialFiles);
-	const resumableRef = useRef<SavedImageSession | null>(null);
 	const completedRef = useRef(0);
 	const autoStarted = useRef(false);
-	const submitting = useRef(false);
-	const cancelling = useRef(false);
-	const runTokenRef = useRef(0);
-	const runRef = useRef<{ token: number; controller: AbortController } | null>(null);
-	const restoreControllerRef = useRef<AbortController | null>(null);
-	const pausedRunTokenRef = useRef<number | null>(null);
 	const autoPausedRef = useRef(false);
-	const cancelledRunTokensRef = useRef(new Set<number>());
-	const pendingCreateTokensRef = useRef(new Set<number>());
-	const cancellationIntentRef = useRef(false);
-	const cancellationRequestedSessionIdsRef = useRef(new Set<string>());
-	const cancelLateSessionRef = useRef<(saved: SavedImageSession) => void>(() => undefined);
+	const completionReported = useRef(false);
+	const onCompleteRef = useRef(onComplete);
+	useEffect(() => { onCompleteRef.current = onComplete; }, [onComplete]);
 	const storageKey = `pcu.direct-${kind.toLowerCase()}-upload:${owner.type}:${owner.id}`;
 	const title = kind === 'POSTER' ? '포스터 업로드' : '이미지 업로드';
 
@@ -101,75 +95,46 @@ export default function DirectImageUploadWidget({
 		if (owner.type === 'PROJECT') qc.invalidateQueries({ queryKey: queryKeys.adminProject(owner.id) });
 		else qc.invalidateQueries({ queryKey: queryKeys.adminExhibitions });
 	}, [owner, qc]);
+	const reportCompletion = useCallback(() => {
+		if (completionReported.current) return;
+		completionReported.current = true;
+		setPhase('ready');
+		invalidateOwner();
+		onCompleteRef.current?.();
+	}, [invalidateOwner]);
+	const {
+		saved: resumable, getSaved, remember: rememberLocator, forget, isMounted,
+		beginRun, isCurrentRun, finishRun, pause: pauseSession, cancel: cancelSession,
+		transfer, acceptReady,
+	} = useDirectUploadSession<SavedImageSession>({
+		storageKey, onCancelled,
+		onCancelReady: (saved) => { void observeSavedReady(saved, files); },
+		onCancelError: (cause, terminalState) => {
+			setError(terminalState ? `업로드 세션이 ${terminalState.toLowerCase()} 상태입니다.` : getApiErrorMessage(cause));
+			setPhase('idle');
+		},
+		onCancelSettled: () => { setProgress(null); setError(null); setPhase('idle'); },
+	});
 	const updateCompleted = useCallback((next: number) => {
 		completedRef.current = next;
-		if (mountedRef.current) setCompleted(next);
-	}, []);
-	const remember = useCallback((session: DirectAssetUploadSession, file: Pick<File, 'name' | 'size'>, completedBefore: number, updateUi = true) => {
-		const value: SavedImageSession = { session, originalName: file.name, totalBytes: file.size, completed: completedBefore };
-		resumableRef.current = value;
-		window.sessionStorage.setItem(storageKey, JSON.stringify(value));
-		if (updateUi && mountedRef.current) setResumable(value);
-	}, [storageKey]);
-	const forget = useCallback((expectedSessionId?: string) => {
-		if (expectedSessionId && resumableRef.current?.session.sessionId !== expectedSessionId) return false;
-		resumableRef.current = null;
-		window.sessionStorage.removeItem(storageKey);
-		if (mountedRef.current) setResumable(null);
-		return true;
-	}, [storageKey]);
-	const isCurrentRun = useCallback((token: number) => (
-		mountedRef.current && runRef.current?.token === token
-	), []);
-	const finishCancellation = useCallback(() => {
-		// Aborting a create does not prove that no server session was created.
-		cancelling.current = cancelledRunTokensRef.current.size > 0 || cancellationRequestedSessionIdsRef.current.size > 0;
-		if (!cancelling.current && pendingCreateTokensRef.current.size === 0 && !resumableRef.current
-			&& cancellationIntentRef.current && mountedRef.current) {
-			cancellationIntentRef.current = false;
-			onCancelled?.();
-		}
-	}, [onCancelled]);
-	const beginRun = useCallback(() => {
-		if (submitting.current || cancelling.current || !mountedRef.current) return null;
-		const controller = new AbortController();
-		const token = ++runTokenRef.current;
-		cancellationIntentRef.current = false;
-		pausedRunTokenRef.current = null;
-		runRef.current = { token, controller };
-		submitting.current = true;
-		return { token, controller };
-	}, []);
-	const abortLocalWork = useCallback(() => {
-		const active = runRef.current;
-		if (active) {
-			runTokenRef.current += 1;
-			runRef.current = null;
-			submitting.current = false;
-			active.controller.abort();
-		}
-		restoreControllerRef.current?.abort();
-		restoreControllerRef.current = null;
-	}, []);
+		if (isMounted()) setCompleted(next);
+	}, [isMounted]);
+	const remember = useCallback((session: DirectAssetUploadSession, file: Pick<File, 'name' | 'size'>, completedBefore: number) => {
+		rememberLocator({ session, originalName: file.name, totalBytes: file.size, completed: completedBefore });
+	}, [rememberLocator]);
 
-	useEffect(() => {
-		mountedRef.current = true;
-		return () => {
-			mountedRef.current = false;
-			abortLocalWork();
-		};
-	}, [abortLocalWork]);
 	useEffect(() => {
 		initialFilesRef.current = initialFiles;
 	}, [initialFiles]);
 
 	useEffect(() => {
 		let disposed = false;
-		const controller = new AbortController();
-		restoreControllerRef.current = controller;
-		async function restore() {
-			const raw = window.sessionStorage.getItem(storageKey);
-			if (!raw) return;
+		const raw = window.sessionStorage.getItem(storageKey);
+		if (!raw) { setRestoreDone(true); return; }
+		const activeRun = beginRun();
+		if (!activeRun) return;
+		const { controller, token } = activeRun;
+		const restore = async () => {
 			try {
 				const saved = JSON.parse(raw) as SavedImageSession;
 				if (saved.session.kind !== kind || saved.session.owner.type !== owner.type || saved.session.owner.id !== owner.id) throw new Error('owner');
@@ -182,14 +147,14 @@ export default function DirectImageUploadWidget({
 				remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 				updateCompleted(completedBefore);
 				const status = await getDirectAssetUploadStatus(saved.session.sessionId, controller.signal);
-				if (disposed || controller.signal.aborted
+				if (disposed || !isCurrentRun(token) || controller.signal.aborted
 					|| status.kind !== kind || status.owner.type !== owner.type || status.owner.id !== owner.id
 					|| status.generation !== saved.session.generation) return;
 				if (status.state === 'VERIFYING' || status.state === 'COMPLETING') {
 					setPhase('verifying');
 					await waitForDirectAssetReady(status.sessionId, { signal: controller.signal });
-					if (!disposed && !controller.signal.aborted) {
-						forget(saved.session.sessionId);
+					if (!disposed && isCurrentRun(token) && !controller.signal.aborted) {
+						if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 						if (!matchesChosen) {
 							updateCompleted(0);
 							setPhase('idle');
@@ -198,9 +163,7 @@ export default function DirectImageUploadWidget({
 						const nextCompleted = completedBefore + 1;
 						updateCompleted(nextCompleted);
 						if (initialFilesRef.current.length === 0 || nextCompleted >= initialFilesRef.current.length) {
-							setPhase('ready');
-							invalidateOwner();
-							onComplete?.();
+							reportCompletion();
 						} else setPhase('idle');
 					}
 					return;
@@ -209,7 +172,7 @@ export default function DirectImageUploadWidget({
 					return;
 				}
 				if (status.state === 'READY') {
-					forget(saved.session.sessionId);
+					if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 					if (!matchesChosen) {
 						updateCompleted(0);
 						setPhase('idle');
@@ -218,9 +181,7 @@ export default function DirectImageUploadWidget({
 					const nextCompleted = completedBefore + 1;
 					updateCompleted(nextCompleted);
 					if (initialFilesRef.current.length === 0 || nextCompleted >= initialFilesRef.current.length) {
-						setPhase('ready');
-						invalidateOwner();
-						onComplete?.();
+						reportCompletion();
 					} else setPhase('idle');
 					return;
 				}
@@ -230,21 +191,22 @@ export default function DirectImageUploadWidget({
 					setPhase('idle');
 				}
 			} catch (cause) {
-				if (!disposed && !controller.signal.aborted) {
+				if (!disposed && isCurrentRun(token) && !controller.signal.aborted) {
 					setError(getApiErrorMessage(cause));
 					setPhase('idle');
 				}
 			}
-		}
+		};
 		void restore().finally(() => {
+			finishRun(token);
 			if (!disposed) setRestoreDone(true);
 		});
 		return () => {
 			disposed = true;
 			controller.abort();
-			if (restoreControllerRef.current === controller) restoreControllerRef.current = null;
+			finishRun(token);
 		};
-	}, [recoveringManifest, compact, forget, invalidateOwner, kind, onComplete, owner, remember, storageKey, updateCompleted]);
+	}, [recoveringManifest, compact, forget, reportCompletion, kind, owner, remember, storageKey, updateCompleted, beginRun, finishRun, isCurrentRun, acceptReady]);
 
 	useEffect(() => {
 		onBusyChange?.(phase === 'uploading' || phase === 'verifying');
@@ -269,56 +231,33 @@ export default function DirectImageUploadWidget({
 					&& resume.originalName === file.name && resume.totalBytes === file.size
 					? resume.session
 					: undefined;
-				if (!matchingResume) pendingCreateTokensRef.current.add(token);
-				const completion = await uploadDirectAssetFile(owner, file, kind, (next) => {
+				const completion = await transfer(activeRun, [owner, file, kind, (next) => {
 					if (!isCurrentRun(token)) return;
 					setProgress(next);
 					if (next.percent >= 100) setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
 					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
-					onSession: (next) => {
-						const current = isCurrentRun(token);
-						const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
-						pendingCreateTokensRef.current.delete(token);
-						const cancelRequested = cancelledRunTokensRef.current.delete(token);
-						// A create response can arrive after its caller was aborted. Retain the
-						// opaque locator first; unmounts deliberately stop here, while a
-						// cancellation intent schedules its own authenticated control request.
-						if (current || paused || cancelRequested || resumableRef.current === null) {
-							remember(next, file, index, current || paused || (cancelRequested && mountedRef.current));
-						}
-						if (cancelRequested) cancelLateSessionRef.current({ session: next, originalName: file.name, totalBytes: file.size, completed: index });
-					},
-					signal: controller.signal,
-				});
+				}], (session) => ({ session, originalName: file.name, totalBytes: file.size, completed: index }));
 				if (!isCurrentRun(token)) return;
 				if (completion.status === 'VERIFYING') {
 					setPhase('verifying');
 					await waitForDirectAssetReady(completion.sessionId, { signal: controller.signal });
 				}
 				if (!isCurrentRun(token)) return;
-				forget(completion.sessionId);
+				if (!acceptReady(activeRun, completion.sessionId, completion.generation)) return;
 				updateCompleted(index + 1);
 			}
 			if (!isCurrentRun(token)) return;
-			setPhase('ready');
-			invalidateOwner();
-			onComplete?.();
+			reportCompletion();
 		} catch (uploadError) {
 			if (!isCurrentRun(token) || controller.signal.aborted) return;
 			setError(getApiErrorMessage(uploadError));
 			setPhase('error');
 		} finally {
-			pendingCreateTokensRef.current.delete(token);
-			cancelledRunTokensRef.current.delete(token);
-			finishCancellation();
-			if (runRef.current?.token === token) {
-				runRef.current = null;
-				submitting.current = false;
-			}
+			finishRun(token);
 		}
-	}, [beginRun, finishCancellation, forget, invalidateOwner, isCurrentRun, kind, onComplete, owner, remember, submissionItems, updateCompleted]);
+	}, [beginRun, finishRun, acceptReady, reportCompletion, isCurrentRun, kind, owner, transfer, submissionItems, updateCompleted]);
 
 	const matchesSavedFile = useCallback((chosen: readonly File[], saved: SavedImageSession) => {
 		const current = chosen[saved.completed ?? 0];
@@ -327,15 +266,14 @@ export default function DirectImageUploadWidget({
 	const continueAfterReady = useCallback(async (
 		saved: SavedImageSession,
 		chosen: readonly File[],
-		activeRun: { token: number; controller: AbortController },
+		activeRun: UploadRun,
 	) => {
 		if (!isCurrentRun(activeRun.token)) return;
-		forget(saved.session.sessionId);
+		if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 		if (compact && chosen.length > 0 && !matchesSavedFile(chosen, saved)) {
 			updateCompleted(0);
 			invalidateOwner();
-			runRef.current = null;
-			submitting.current = false;
+			finishRun(activeRun.token);
 			setError('이전 파일의 업로드가 완료되었습니다. 선택한 파일을 재시도해 주세요.');
 			setPhase('error');
 			return;
@@ -347,10 +285,8 @@ export default function DirectImageUploadWidget({
 			return;
 		}
 		if (!isCurrentRun(activeRun.token)) return;
-		setPhase('ready');
-		invalidateOwner();
-		onComplete?.();
-	}, [compact, matchesSavedFile, forget, invalidateOwner, isCurrentRun, onComplete, updateCompleted, uploadQueue]);
+		reportCompletion();
+	}, [compact, matchesSavedFile, acceptReady, invalidateOwner, isCurrentRun, reportCompletion, finishRun, updateCompleted, uploadQueue]);
 	const observeSavedReady = useCallback(async (
 		saved: SavedImageSession,
 		chosen: readonly File[],
@@ -369,55 +305,9 @@ export default function DirectImageUploadWidget({
 			setError(getApiErrorMessage(cause));
 			setPhase('error');
 		} finally {
-			if (runRef.current?.token === token) {
-				runRef.current = null;
-				submitting.current = false;
-			}
+			finishRun(token);
 		}
-	}, [beginRun, continueAfterReady, isCurrentRun]);
-	const cancelLateSession = useCallback(async (saved: SavedImageSession) => {
-		const sessionId = saved.session.sessionId;
-		if (cancellationRequestedSessionIdsRef.current.has(sessionId)) return;
-		cancellationRequestedSessionIdsRef.current.add(sessionId);
-		cancelling.current = true;
-		let verificationSaved: SavedImageSession | null = null;
-		try {
-			await cancelDirectAssetUploadSession(sessionId);
-			forget(sessionId);
-			if (mountedRef.current) {
-				setProgress(null);
-				setError(null);
-				setPhase('idle');
-			}
-		} catch (cause) {
-			try {
-				const status = await getDirectAssetUploadStatus(sessionId);
-				if (!mountedRef.current) return;
-				if (status.state === 'CANCELLED') {
-					forget(sessionId);
-					setProgress(null);
-					setError(null);
-					setPhase('idle');
-				} else if (status.state === 'READY' || status.state === 'COMPLETING' || status.state === 'VERIFYING') {
-					cancellationIntentRef.current = false;
-					verificationSaved = saved;
-				} else {
-					setError(getApiErrorMessage(cause));
-					setPhase('idle');
-				}
-			} catch {
-				if (mountedRef.current) {
-					setError(getApiErrorMessage(cause));
-					setPhase('idle');
-				}
-			}
-		} finally {
-			cancellationRequestedSessionIdsRef.current.delete(sessionId);
-			finishCancellation();
-			if (verificationSaved && mountedRef.current) void observeSavedReady(verificationSaved, files);
-		}
-	}, [files, finishCancellation, forget, observeSavedReady]);
-	cancelLateSessionRef.current = cancelLateSession;
+	}, [beginRun, continueAfterReady, isCurrentRun, finishRun]);
 	const resumeQueue = useCallback(async (chosen: readonly File[], saved: SavedImageSession, restartTerminal = false) => {
 		if (!matchesSavedFile(chosen, saved)) {
 			setError('중단된 파일과 선택한 파일 순서 또는 크기가 일치하지 않습니다.');
@@ -458,99 +348,37 @@ export default function DirectImageUploadWidget({
 			setError(getApiErrorMessage(cause));
 			setPhase('idle');
 		} finally {
-			if (runRef.current?.token === token) {
-				runRef.current = null;
-				submitting.current = false;
-			}
+			finishRun(token);
 		}
-	}, [beginRun, continueAfterReady, forget, isCurrentRun, matchesSavedFile, observeSavedReady, uploadQueue]);
+	}, [beginRun, continueAfterReady, forget, isCurrentRun, matchesSavedFile, observeSavedReady, uploadQueue, finishRun]);
 
 	useEffect(() => {
 		if (!autoStart || !restoreDone || autoStarted.current || initialFiles.length === 0) return;
 		autoStarted.current = true;
-		if (!autoPausedRef.current) {
-			const saved = resumableRef.current;
+		if (!autoPausedRef.current && phase !== 'ready') {
+			const saved = getSaved();
 			if (saved) void resumeQueue(initialFiles, saved);
 			else void uploadQueue(initialFiles);
 		}
-	}, [autoStart, initialFiles, restoreDone, resumeQueue, uploadQueue]);
+	}, [autoStart, initialFiles, restoreDone, resumeQueue, uploadQueue, getSaved, phase]);
 
 	const pause = useCallback(() => {
-		if (!runRef.current && !restoreControllerRef.current) return;
 		autoPausedRef.current = true;
-		pausedRunTokenRef.current = runRef.current?.token ?? null;
-		abortLocalWork();
+		pauseSession();
 		setError(null);
 		setPhase('idle');
-	}, [abortLocalWork]);
+	}, [pauseSession]);
 	const cancel = useCallback(async () => {
-		if (cancelling.current) return;
-		cancellationIntentRef.current = true;
 		autoPausedRef.current = true;
-		for (const token of pendingCreateTokensRef.current) cancelledRunTokensRef.current.add(token);
-		pausedRunTokenRef.current = null;
-		abortLocalWork();
-		const saved = resumableRef.current;
-		if (!saved) {
-			setError(null);
-			setPhase('idle');
-			finishCancellation();
-			return;
-		}
-		cancelling.current = true;
-		cancellationRequestedSessionIdsRef.current.add(saved.session.sessionId);
+		setError(null);
 		setPhase('idle');
-		const cancelToken = ++runTokenRef.current;
-		let verificationSaved: SavedImageSession | null = null;
-		try {
-			await cancelDirectAssetUploadSession(saved.session.sessionId);
-			forget(saved.session.sessionId);
-			if (mountedRef.current && runTokenRef.current === cancelToken) {
-				setPhase('idle');
-				setProgress(null);
-				setError(null);
-			}
-		} catch (cancelError) {
-			if (!mountedRef.current || runTokenRef.current !== cancelToken) return;
-			try {
-				const status = await getDirectAssetUploadStatus(saved.session.sessionId);
-				if (!mountedRef.current || runTokenRef.current !== cancelToken) return;
-				if (status.state === 'CANCELLED') {
-					forget(saved.session.sessionId);
-					setProgress(null);
-					setError(null);
-					setPhase('idle');
-				} else if (status.state === 'READY') {
-					cancellationIntentRef.current = false;
-					verificationSaved = saved;
-				} else if (status.state === 'COMPLETING' || status.state === 'VERIFYING') {
-					cancellationIntentRef.current = false;
-					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
-					verificationSaved = saved;
-				} else {
-					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
-					if (status.state === 'REJECTED' || status.state === 'EXPIRED') setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다.`);
-					setPhase('idle');
-				}
-			} catch {
-				if (mountedRef.current && runTokenRef.current === cancelToken) {
-					setError(getApiErrorMessage(cancelError));
-					setPhase('idle');
-				}
-			}
-		} finally {
-			cancellationRequestedSessionIdsRef.current.delete(saved.session.sessionId);
-			finishCancellation();
-			if (verificationSaved && mountedRef.current && runTokenRef.current === cancelToken) {
-				void observeSavedReady(verificationSaved, files);
-			}
-		}
-	}, [abortLocalWork, files, finishCancellation, forget, observeSavedReady, remember]);
+		await cancelSession();
+	}, [cancelSession]);
 
 	const start = () => {
-		const saved = resumableRef.current;
+		const saved = getSaved();
 		if (saved) void resumeQueue(files, saved, true);
-		else void uploadQueue(files);
+		else { completionReported.current = false; void uploadQueue(files); }
 	};
 	const retry = start;
 
@@ -601,7 +429,8 @@ export default function DirectImageUploadWidget({
 					<input id={fileInputId} type="file" multiple={kind === 'IMAGE'} accept="image/*,application/pdf,.pdf" onChange={(event) => {
 						const selected = Array.from(event.target.files ?? []);
 						setFiles(selected);
-						const saved = resumableRef.current;
+						completionReported.current = false;
+						const saved = getSaved();
 						if (!saved || !matchesSavedFile(selected, saved)) updateCompleted(0);
 						else updateCompleted(saved.completed ?? 0);
 						setError(null);
