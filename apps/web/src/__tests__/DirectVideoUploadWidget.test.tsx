@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import type { DirectGameUploadCompletionResponse } from '../contracts';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -40,8 +41,8 @@ describe('DirectVideoUploadWidget', () => {
 
 	it('uploads multiple selected VIDEO files sequentially through canonical direct sessions', async () => {
 		uploadDirectAssetFile
-			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: 'video-1', generation: 1, sizeBytes: 1 })
-			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: 'video-2', generation: 1, sizeBytes: 1 });
+			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: 'video-1', generation: 1, sizeBytes: 1 } satisfies DirectGameUploadCompletionResponse)
+			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: 'video-2', generation: 1, sizeBytes: 1 } satisfies DirectGameUploadCompletionResponse);
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		getDirectAssetUploadStatus.mockResolvedValue({ state: 'READY' });
 		const done = vi.fn();
@@ -120,7 +121,7 @@ describe('DirectVideoUploadWidget', () => {
 		uploadDirectAssetFile.mockImplementation((_projectId, file, _kind, _onProgress, options) => {
 			if (file === first) {
 				options.onSession(firstSession);
-				return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-first', generation: 1 });
+				return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-first', generation: 1, sizeBytes: first.size } satisfies DirectGameUploadCompletionResponse);
 			}
 			if (!secondOptions) {
 				secondOptions = options;
@@ -128,7 +129,7 @@ describe('DirectVideoUploadWidget', () => {
 				_onProgress({ percent: 50, uploadedBytes: 1, totalBytes: 2, uploadedChunks: 0, totalChunks: 1 });
 				return new Promise(() => undefined);
 			}
-			return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-second', generation: 1 });
+			return Promise.resolve({ status: 'VERIFYING', sessionId: 'video-second', generation: 1, sizeBytes: second.size } satisfies DirectGameUploadCompletionResponse);
 		});
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		render(
@@ -222,14 +223,14 @@ describe('DirectVideoUploadWidget', () => {
 		uploadDirectAssetFile.mockImplementation((_projectId, file, _kind, _onProgress, options) => {
 			if (file === first) {
 				options.onSession(firstSession);
-				return Promise.resolve({ status: 'VERIFYING', sessionId: firstSession.sessionId, generation: 1 });
+				return Promise.resolve({ status: 'VERIFYING', sessionId: firstSession.sessionId, generation: 1, sizeBytes: first.size } satisfies DirectGameUploadCompletionResponse);
 			}
 			if (file === current) {
 				options.onSession(currentSession);
 				return new Promise(() => undefined);
 			}
 			options.onSession(remainingSession);
-			return Promise.resolve({ status: 'VERIFYING', sessionId: remainingSession.sessionId, generation: 1 });
+			return Promise.resolve({ status: 'VERIFYING', sessionId: remainingSession.sessionId, generation: 1, sizeBytes: remaining.size } satisfies DirectGameUploadCompletionResponse);
 		});
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		cancelDirectAssetUploadSession.mockRejectedValue(new Error('conflict'));
@@ -255,7 +256,7 @@ it.each(['REJECTED', 'EXPIRED', 'CANCELLED'])('starts a replacement after an exp
  uploadDirectAssetFile.mockReset().mockImplementationOnce(async (_owner, _file, _kind, _progress, options) => {
   options.onSession(session);
   throw new Error('transfer failed');
- }).mockResolvedValueOnce({ status: 'READY', sessionId: 'replacement', generation: 1 });
+ }).mockResolvedValueOnce({ status: 'READY', sessionId: 'replacement', generation: 1, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse);
  getDirectAssetUploadStatus.mockReset().mockResolvedValue({ ...session, state });
  render(<QueryClientProvider client={new QueryClient()}><DirectVideoUploadWidget projectId={77} initialFiles={[file]} autoStart onComplete={complete} /></QueryClientProvider>);
  const retry = await screen.findByRole('button', { name: '재시도' });

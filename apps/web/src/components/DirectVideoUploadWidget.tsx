@@ -51,8 +51,8 @@ interface Props {
 }
 
 /**
- * Sequential canonical VIDEO uploader. The server permits one live VIDEO
- * multipart session, so selected files deliberately run one at a time.
+ * This widget uploads its selected files sequentially. The database permits
+ * concurrent VIDEO sessions in distinct reserved slots (up to five per project).
  */
 export default function DirectVideoUploadWidget(props: Props) {
 	return <VideoUploadSession key={`${props.projectId}:${props.kind ?? 'VIDEO'}`} {...props} />;

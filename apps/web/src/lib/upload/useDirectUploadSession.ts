@@ -4,6 +4,11 @@ import {
 	type DirectAssetUploadSession,
 } from '../api/game-upload';
 
+// Retain an unmounted owner's lease only while its server requests can return.
+// A replacement mount revokes it, even if the replacement later clears storage.
+type RecoveryOwner = { superseded: boolean };
+const recoveryOwners = new Map<string, RecoveryOwner>();
+
 export type UploadRun = { token: number; controller: AbortController };
 // Existing callers persist either the bare session or a session plus queue metadata.
 type Locator = DirectAssetUploadSession | { session: DirectAssetUploadSession };
@@ -34,6 +39,7 @@ export function useDirectUploadSession<Saved extends Locator>({
 	const [saved, setSaved] = useState<Saved | null>(null);
 	const locator = useRef<Saved | null>(null);
 	const mounted = useRef(false);
+	const recoveryOwner = useRef<RecoveryOwner>({ superseded: false });
 	const serial = useRef(0);
 	const active = useRef<UploadRun | null>(null);
 	const paused = useRef<number | null>(null);
@@ -47,9 +53,14 @@ export function useDirectUploadSession<Saved extends Locator>({
 		callbacks.current = { onCancelled, onCancelReady, onCancelError, onCancelSettled };
 	}, [onCancelled, onCancelReady, onCancelError, onCancelSettled]);
 
-	const isMounted = useCallback(() => mounted.current, []);
+	const releaseRecoveryOwner = useCallback(() => {
+		if (!mounted.current && !pendingCreates.current.size && !deleting.current.size
+			&& recoveryOwners.get(storageKey) === recoveryOwner.current) recoveryOwners.delete(storageKey);
+	}, [storageKey]);
+	const isMounted = useCallback(() => mounted.current && !recoveryOwner.current.superseded, []);
 	const getSaved = useCallback(() => locator.current, []);
 	const remember = useCallback((value: Saved, updateUi = true) => {
+		if (recoveryOwner.current.superseded) return;
 		locator.current = value;
 		window.sessionStorage.setItem(storageKey, JSON.stringify(value));
 		if (updateUi && mounted.current) setSaved(value);
@@ -60,22 +71,22 @@ export function useDirectUploadSession<Saved extends Locator>({
 		locator.current = null;
 		// An old mounted instance must not delete a newer instance's locator.
 		const raw = window.sessionStorage.getItem(storageKey);
-		if (raw === JSON.stringify(previous)) {
+		if (!recoveryOwner.current.superseded && raw === JSON.stringify(previous)) {
 			window.sessionStorage.removeItem(storageKey);
 		}
-		if (mounted.current) setSaved(null);
+		if (mounted.current && !recoveryOwner.current.superseded) setSaved(null);
 		return true;
 	}, [storageKey]);
-	const isCurrentRun = useCallback((token: number) => mounted.current && active.current?.token === token, []);
+	const isCurrentRun = useCallback((token: number) => isMounted() && active.current?.token === token, [isMounted]);
 	const finishCancellation = useCallback(() => {
 		if (pendingCreates.current.size || cancelledCreates.current.size || deleting.current.size || locator.current) return;
-		if (cancellationIntent.current && mounted.current) {
+		if (cancellationIntent.current && mounted.current && !recoveryOwner.current.superseded) {
 			cancellationIntent.current = false;
 			callbacks.current.onCancelled?.();
 		}
 	}, []);
 	const beginRun = useCallback(() => {
-		if (!mounted.current || active.current || cancelledCreates.current.size || deleting.current.size) return null;
+		if (!mounted.current || recoveryOwner.current.superseded || active.current || cancelledCreates.current.size || deleting.current.size) return null;
 		cancellationIntent.current = false;
 		paused.current = null;
 		const run = { token: ++serial.current, controller: new AbortController() };
@@ -96,12 +107,17 @@ export function useDirectUploadSession<Saved extends Locator>({
 		abort();
 	}, [abort]);
 	useEffect(() => {
+		const previous = recoveryOwners.get(storageKey);
+		if (previous && previous !== recoveryOwner.current) previous.superseded = true;
+		recoveryOwner.current.superseded = false;
+		recoveryOwners.set(storageKey, recoveryOwner.current);
 		mounted.current = true;
 		return () => {
 			mounted.current = false;
 			abort();
+			releaseRecoveryOwner();
 		};
-	}, [abort, storageKey]);
+	}, [abort, releaseRecoveryOwner, storageKey]);
 
 	// A READY result may be observed by upload, restore, polling and DELETE recovery.
 	// Claim it before invoking queue callbacks, even when those callbacks re-render.
@@ -120,7 +136,7 @@ export function useDirectUploadSession<Saved extends Locator>({
 		if (deleting.current.has(sessionId)) return;
 		deleting.current.add(sessionId);
 		const cancelSerial = serial.current;
-		const current = () => mounted.current && serial.current === cancelSerial
+		const current = () => isMounted() && serial.current === cancelSerial
 			&& locator.current !== null && sessionOf(locator.current).sessionId === sessionId;
 		let ready: { state: 'READY' | 'COMPLETING' | 'VERIFYING'; status: SessionStatus } | null = null;
 		try {
@@ -149,10 +165,11 @@ export function useDirectUploadSession<Saved extends Locator>({
 			}
 		} finally {
 			deleting.current.delete(sessionId);
+			releaseRecoveryOwner();
 			finishCancellation();
 			if (ready && current()) callbacks.current.onCancelReady(candidate, ready.state, ready.status);
 		}
-	}, [finishCancellation, forget]);
+	}, [finishCancellation, forget, isMounted, releaseRecoveryOwner]);
 	const cancel = useCallback(async () => {
 		if (deleting.current.size || cancelledCreates.current.size) return;
 		cancellationIntent.current = true;
@@ -186,8 +203,9 @@ export function useDirectUploadSession<Saved extends Locator>({
 					const current = isCurrentRun(run.token);
 					const isPaused = paused.current === run.token && !active.current && mounted.current;
 					const candidate = toSaved(session);
-					if (current || isPaused || cancelRequested) remember(candidate);
+					if (current || isPaused || (cancelRequested && isMounted())) remember(candidate);
 					else if (!locator.current && !window.sessionStorage.getItem(storageKey)) remember(candidate, false);
+					// Server cleanup is required even when a replacement owns recovery.
 					if (cancelRequested) void cancelSession(candidate);
 				},
 			});
@@ -195,8 +213,9 @@ export function useDirectUploadSession<Saved extends Locator>({
 			pendingCreates.current.delete(run.token);
 			cancelledCreates.current.delete(run.token);
 			finishCancellation();
+			releaseRecoveryOwner();
 		}
-	}, [cancelSession, finishCancellation, isCurrentRun, remember, storageKey]);
+	}, [cancelSession, finishCancellation, isCurrentRun, isMounted, remember, releaseRecoveryOwner, storageKey]);
 
 	return { saved, getSaved, remember, forget, isMounted, beginRun, isCurrentRun, finishRun, pause, cancel, transfer, acceptReady };
 }

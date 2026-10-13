@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import type { DirectGameUploadCompletionResponse } from '../contracts';
 import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -40,7 +41,7 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); window.sessionStorage.clear(); 
 
 describe('video shared session lifetime', () => {
 	it('waits for a late create and one DELETE before notifying cancellation', async () => {
-		const upload = deferred<unknown>();
+		const upload = deferred<DirectGameUploadCompletionResponse>();
 		const deletion = deferred<void>();
 		let options!: Options;
 		api.upload.mockImplementation((_owner, _file, _kind, _progress, next) => { options = next; return upload.promise; });
@@ -53,7 +54,7 @@ describe('video shared session lifetime', () => {
 		expect(options.signal?.aborted).toBe(true);
 		expect(api.upload).toHaveBeenCalledOnce();
 		expect(cancelled).not.toHaveBeenCalled();
-		await act(async () => { options.onSession?.(session); upload.resolve({ ...session, status: 'READY' }); });
+		await act(async () => { options.onSession?.(session); upload.resolve({ ...session, status: 'READY', sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse); });
 		expect(api.cancel).toHaveBeenCalledExactlyOnceWith(session.sessionId);
 		expect(cancelled).not.toHaveBeenCalled();
 		expect(completed).not.toHaveBeenCalled();
@@ -65,7 +66,7 @@ describe('video shared session lifetime', () => {
 	});
 
 	it.each(['READY', 'VERIFYING'] as const)('settles late cancellation against %s with no duplicate polling or completion', async state => {
-		const upload = deferred<unknown>();
+		const upload = deferred<DirectGameUploadCompletionResponse>();
 		let options!: Options;
 		api.upload.mockImplementation((_owner, _file, _kind, _progress, next) => { options = next; return upload.promise; });
 		api.cancel.mockRejectedValue(new Error('already completing'));
@@ -79,7 +80,7 @@ describe('video shared session lifetime', () => {
 		await waitFor(() => expect(completed).toHaveBeenCalledOnce());
 		const nextComplete = vi.fn();
 		view.changeCallback(nextComplete);
-		await act(async () => { upload.resolve({ ...session, status: 'READY' }); });
+		await act(async () => { upload.resolve({ ...session, status: 'READY', sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse); });
 		expect(api.cancel).toHaveBeenCalledOnce();
 		expect(api.ready).toHaveBeenCalledTimes(state === 'READY' ? 0 : 1);
 		expect(completed).toHaveBeenCalledOnce();
@@ -122,7 +123,7 @@ describe('video shared session lifetime', () => {
 	});
 
 	it('preserves a newer locator when a paused transfer returns its old session and failure', async () => {
-		const old = deferred<unknown>();
+		const old = deferred<DirectGameUploadCompletionResponse>();
 		let oldOptions!: Options;
 		const newer = { ...session, sessionId: 'new-video' };
 		api.upload.mockImplementationOnce((_owner, _file, _kind, _progress, options) => { oldOptions = options; return old.promise; })

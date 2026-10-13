@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import type { DirectGameUploadCompletionResponse } from '../contracts';
 import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -38,7 +39,7 @@ describe.each(['GAME', 'WEBGL'] as const)('%s shared session ownership', kind =>
 	}
 
 	it('waits for late creation and DELETE, preserving the bare locator and suppressing late completion', async () => {
-		const upload = deferred<unknown>();
+		const upload = deferred<DirectGameUploadCompletionResponse>();
 		const deletion = deferred<void>();
 		let options!: Options;
 		api.upload.mockImplementation((_owner, _file, _kind, _progress, next) => { options = next; return upload.promise; });
@@ -51,7 +52,7 @@ describe.each(['GAME', 'WEBGL'] as const)('%s shared session ownership', kind =>
 		fireEvent.click(screen.getByRole('button', { name: '업로드 시작' }));
 		expect(api.upload).toHaveBeenCalledOnce();
 		expect(cancelled).not.toHaveBeenCalled();
-		await act(async () => { options.onSession?.(session); upload.resolve({ ...session, status: 'READY' }); });
+		await act(async () => { options.onSession?.(session); upload.resolve({ ...session, status: 'READY', sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse); });
 		expect(JSON.parse(window.sessionStorage.getItem(storageKey)!)).toEqual(session);
 		expect(api.cancel).toHaveBeenCalledExactlyOnceWith(session.sessionId);
 		expect(cancelled).not.toHaveBeenCalled();
@@ -63,14 +64,14 @@ describe.each(['GAME', 'WEBGL'] as const)('%s shared session ownership', kind =>
 	});
 
 	it('retains a late create after unmount without deleting or notifying', async () => {
-		const upload = deferred<unknown>();
+		const upload = deferred<DirectGameUploadCompletionResponse>();
 		let options!: Options;
 		api.upload.mockImplementation((_owner, _file, _kind, _progress, next) => { options = next; return upload.promise; });
 		const completed = vi.fn();
 		const view = mount(completed);
 		await screen.findByRole('button', { name: '일시 정지' });
 		view.unmount();
-		await act(async () => { options.onSession?.(session); upload.resolve({ ...session, status: 'READY' }); });
+		await act(async () => { options.onSession?.(session); upload.resolve({ ...session, status: 'READY', sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse); });
 		expect(options.signal?.aborted).toBe(true);
 		expect(JSON.parse(window.sessionStorage.getItem(storageKey)!)).toEqual(session);
 		expect(api.cancel).not.toHaveBeenCalled();
@@ -85,7 +86,7 @@ describe.each(['GAME', 'WEBGL'] as const)('%s shared session ownership', kind =>
 			expect(nextKind).toBe(kind);
 			expect(options.resume).toBeUndefined();
 			options.onSession?.(replacement);
-			return { ...replacement, status: 'READY' };
+			return { ...replacement, status: 'READY', sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse;
 		});
 		api.cancel.mockRejectedValue(new Error('cannot delete'));
 		api.status.mockResolvedValue(status(state));
@@ -132,7 +133,7 @@ describe.each(['GAME', 'WEBGL'] as const)('%s shared session ownership', kind =>
 	});
 
 	it('reports READY from cancellation once without polling or accepting a late upload completion', async () => {
-		const upload = deferred<unknown>();
+		const upload = deferred<DirectGameUploadCompletionResponse>();
 		api.upload.mockImplementation((_owner, _file, _kind, _progress, options: Options) => {
 			options.onSession?.(session); return upload.promise;
 		});
@@ -143,7 +144,7 @@ describe.each(['GAME', 'WEBGL'] as const)('%s shared session ownership', kind =>
 		mount(completed, cancelled);
 		fireEvent.click(await screen.findByRole('button', { name: '취소 (세션 삭제)' }));
 		await waitFor(() => expect(completed).toHaveBeenCalledOnce());
-		await act(async () => { upload.resolve({ ...session, status: 'READY' }); });
+		await act(async () => { upload.resolve({ ...session, status: 'READY', sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse); });
 		expect(completed).toHaveBeenCalledOnce();
 		expect(cancelled).not.toHaveBeenCalled();
 		expect(api.ready).not.toHaveBeenCalled();

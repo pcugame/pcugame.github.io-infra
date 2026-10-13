@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import type { DirectGameUploadCompletionResponse } from '../contracts';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -64,7 +65,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 		};
 		let progress: ((next: { percent: number; uploadedChunks: number; totalChunks: number; uploadedBytes: number; totalBytes: number }) => void) | undefined;
 		let options: { signal: AbortSignal; onSession: (session: typeof saved) => void } | undefined;
-		let resolveUpload: ((value: { status: 'VERIFYING'; sessionId: string }) => void) | undefined;
+		let resolveUpload: ((value: DirectGameUploadCompletionResponse) => void) | undefined;
 		controls.upload.mockImplementation((_projectId, _file, _kind, onProgress, uploadOptions) => {
 			progress = onProgress;
 			options = uploadOptions;
@@ -86,7 +87,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 
 		await act(async () => {
 			progress?.({ percent: 100, uploadedChunks: 2, totalChunks: 2, uploadedBytes: 2, totalBytes: 2 });
-			resolveUpload?.({ status: 'VERIFYING', sessionId: 'game-pause' });
+			resolveUpload?.({ status: 'VERIFYING', sessionId: 'game-pause', generation: 1, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse);
 		});
 		expect(controls.waitReady).not.toHaveBeenCalled();
 		expect(screen.queryByText('업로드 완료')).toBeNull();
@@ -243,7 +244,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 		};
 		controls.upload.mockImplementation((_projectId, _file, _kind, _onProgress, options) => {
 			options.onSession(saved);
-			return Promise.resolve({ status: 'VERIFYING', sessionId: saved.sessionId });
+			return Promise.resolve({ status: 'VERIFYING', sessionId: saved.sessionId, generation: 1, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse);
 		});
 		controls.waitReady.mockRejectedValue(new Error('rejected'));
 		controls.getStatus.mockResolvedValue({ ...saved, state: 'REJECTED', originalName: 'game.zip', totalBytes: 4, parts: [] });

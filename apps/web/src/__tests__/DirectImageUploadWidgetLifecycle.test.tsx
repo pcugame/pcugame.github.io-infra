@@ -1,4 +1,5 @@
 /* @vitest-environment jsdom */
+import type { DirectGameUploadCompletionResponse } from '../contracts';
 import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -41,7 +42,7 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); window.sessionStorage.clear(); 
 
 describe('image session ownership', () => {
 	it('settles a late create and DELETE before cancellation notification, ignoring late progress and completion', async () => {
-		const upload = deferred<{ status: 'READY'; sessionId: string; generation: number }>();
+		const upload = deferred<DirectGameUploadCompletionResponse>();
 		const deletion = deferred<void>();
 		let options!: Options;
 		let progress!: NonNullable<Parameters<typeof uploadDirectAssetFile>[3]>;
@@ -60,7 +61,7 @@ describe('image session ownership', () => {
 		await act(async () => {
 			options.onSession?.(session);
 			progress({ percent: 100, uploadedBytes: 5, totalBytes: 5, uploadedChunks: 1, totalChunks: 1 });
-			upload.resolve({ status: 'READY', sessionId: session.sessionId, generation: 1 });
+			upload.resolve({ status: 'READY', sessionId: session.sessionId, generation: 1, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse);
 		});
 		expect(api.cancel).toHaveBeenCalledExactlyOnceWith(session.sessionId);
 		expect(cancelled).not.toHaveBeenCalled();
@@ -90,7 +91,7 @@ describe('image session ownership', () => {
 	});
 
 	it('converges cancellation to READY once even when the aborted transfer later completes', async () => {
-		const upload = deferred<{ status: 'READY'; sessionId: string; generation: number }>();
+		const upload = deferred<DirectGameUploadCompletionResponse>();
 		api.upload.mockImplementation((_owner, _file, _kind, _progress, options: Options) => {
 			options.onSession?.(session); return upload.promise;
 		});
@@ -103,7 +104,7 @@ describe('image session ownership', () => {
 		fireEvent.click(await screen.findByRole('button', { name: '일시 정지' }));
 		fireEvent.click(screen.getByRole('button', { name: '취소' }));
 		await waitFor(() => expect(completed).toHaveBeenCalledOnce());
-		await act(async () => { upload.resolve({ status: 'READY', sessionId: session.sessionId, generation: 1 }); });
+		await act(async () => { upload.resolve({ status: 'READY', sessionId: session.sessionId, generation: 1, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse); });
 		expect(completed).toHaveBeenCalledOnce();
 		expect(cancelled).not.toHaveBeenCalled();
 	});
@@ -117,7 +118,7 @@ describe('image session ownership', () => {
 		expect(window.sessionStorage.getItem(storageKey)).toContain(session.sessionId);
 		expect(api.upload).not.toHaveBeenCalled();
 		api.status.mockResolvedValue({ ...session, state: 'UPLOADING' });
-		api.upload.mockResolvedValue({ status: 'READY', sessionId: session.sessionId, generation: 1 });
+		api.upload.mockResolvedValue({ status: 'READY', sessionId: session.sessionId, generation: 1, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse);
 		fireEvent.click(screen.getByRole('button', { name: '이어올리기' }));
 		await waitFor(() => expect(completed).toHaveBeenCalledOnce());
 		expect(api.upload.mock.calls[0][4].resume).toEqual(session);
@@ -141,7 +142,7 @@ describe('image session ownership', () => {
 	});
 
 	it('does not let a paused request overwrite a newer locator or report its late failure', async () => {
-		const oldUpload = deferred<unknown>();
+		const oldUpload = deferred<DirectGameUploadCompletionResponse>();
 		let oldOptions!: Options;
 		const newer = { ...session, sessionId: 'newer-image' };
 		api.upload.mockImplementationOnce((_owner, _file, _kind, _progress, options: Options) => {
@@ -161,7 +162,7 @@ describe('image session ownership', () => {
 		api.upload.mockRejectedValueOnce(new Error('create failed'))
 			.mockImplementationOnce(async (_owner, _file, _kind, _progress, options: Options) => {
 				options.onSession?.(session);
-				return { status: 'READY', sessionId: session.sessionId, generation: session.generation };
+				return { status: 'READY', sessionId: session.sessionId, generation: session.generation, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse;
 			});
 		const completed = vi.fn();
 		mount(completed);
@@ -173,7 +174,7 @@ describe('image session ownership', () => {
 	});
 
 	it('isolates an owner change from the old pending create and its late completion', async () => {
-		const old = deferred<unknown>();
+		const old = deferred<DirectGameUploadCompletionResponse>();
 		let oldOptions!: Options;
 		const nextSession = { ...session, sessionId: 'other-owner', owner: { type: 'PROJECT', id: 5 } };
 		api.upload.mockImplementationOnce((_owner, _file, _kind, _progress, options: Options) => {
@@ -187,7 +188,7 @@ describe('image session ownership', () => {
 		view.changeOwner(5);
 		await waitFor(() => expect(api.upload).toHaveBeenCalledTimes(2));
 		expect(oldOptions.signal?.aborted).toBe(true);
-		await act(async () => { oldOptions.onSession?.(session); old.resolve({ status: 'READY', ...session }); });
+		await act(async () => { oldOptions.onSession?.(session); old.resolve({ status: 'READY', ...session, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse); });
 		expect(window.sessionStorage.getItem('pcu.direct-image-upload:PROJECT:5')).toContain('other-owner');
 		expect(window.sessionStorage.getItem(storageKey)).toContain(session.sessionId);
 		expect(completed).not.toHaveBeenCalled();

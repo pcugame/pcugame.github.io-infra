@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectSubmissionItemStatus, ProjectSubmissionManifestItem } from '../contracts';
+import type { DirectGameUploadCompletionResponse, ProjectSubmissionItemStatus, ProjectSubmissionManifestItem } from '../contracts';
 import type { DirectAssetUploadSession } from '../lib/api/game-upload';
 import { ProjectSubmissionForm } from '../features/project-submission/ProjectSubmissionForm';
 
@@ -281,8 +281,8 @@ describe('submission selection and recovery', () => {
 		const first = new File(['first'], 'first.png', { type: 'image/png' });
 		const second = new File(['second'], 'second.png', { type: 'image/png' });
 		const poster = new File(['poster'], 'poster.png', { type: 'image/png' });
-		let finishPoster!: (value: { status: 'READY'; sessionId: string }) => void;
-		controls.upload.mockImplementation((_owner, file: File, kind, _progress, options) => {
+		let finishPoster!: (value: DirectGameUploadCompletionResponse) => void;
+		controls.upload.mockImplementation((_owner, file: File, kind, _progress, options): Promise<DirectGameUploadCompletionResponse> => {
 			const session: DirectAssetUploadSession = {
 				sessionId: file.name,
 				owner: { type: 'PROJECT', id: 73 },
@@ -295,7 +295,7 @@ describe('submission selection and recovery', () => {
 				sourceIdentity: 'a'.repeat(64),
 			};
 			options.onSession(session);
-			if (file === first) return Promise.resolve({ status: 'READY', sessionId: file.name });
+			if (file === first) return Promise.resolve({ status: 'READY', sessionId: file.name, generation: 1, sizeBytes: file.size });
 			if (file === poster)
 				return new Promise((resolve) => {
 					finishPoster = resolve;
@@ -312,7 +312,7 @@ describe('submission selection and recovery', () => {
 			item.slot === 'image:0' || item.kind === 'POSTER' ? { ...item, state: 'READY' } : item,
 		);
 		await act(async () => {
-			finishPoster({ status: 'READY', sessionId: poster.name });
+			finishPoster({ status: 'READY', sessionId: poster.name, generation: 1, sizeBytes: poster.size });
 		});
 		await waitFor(() => expect(controls.status).toHaveBeenCalledTimes(2));
 		expect(controls.upload.mock.calls.map((call) => call[1].name).sort()).toEqual([
