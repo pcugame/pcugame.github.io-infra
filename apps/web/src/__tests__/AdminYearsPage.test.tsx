@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 import {
 	cleanup,
 	fireEvent,

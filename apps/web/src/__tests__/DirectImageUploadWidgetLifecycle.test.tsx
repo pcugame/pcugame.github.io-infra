@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 import type { DirectGameUploadCompletionResponse } from '../contracts';
 import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -141,22 +144,21 @@ describe('image session ownership', () => {
 		expect(window.sessionStorage.getItem(storageKey)).toContain(session.sessionId);
 	});
 
-	it('does not let a paused request overwrite a newer locator or report its late failure', async () => {
+	it('blocks another create while a paused create is unresolved and hands its late session to the view', async () => {
 		const oldUpload = deferred<DirectGameUploadCompletionResponse>();
 		let oldOptions!: Options;
-		const newer = { ...session, sessionId: 'newer-image' };
 		api.upload.mockImplementationOnce((_owner, _file, _kind, _progress, options: Options) => {
 			oldOptions = options; return oldUpload.promise;
-		}).mockImplementationOnce((_owner, _file, _kind, _progress, options: Options) => {
-			options.onSession?.(newer); return new Promise(() => undefined);
 		});
+		api.status.mockResolvedValue({ ...session, state: 'UPLOADING', originalName: file.name, totalBytes: file.size });
 		mount();
 		fireEvent.click(await screen.findByRole('button', { name: '일시 정지' }));
 		fireEvent.click(screen.getByRole('button', { name: '이미지 업로드 시작' }));
 		await act(async () => { oldOptions.onSession?.(session); oldUpload.reject(new Error('old failure')); });
-		expect(window.sessionStorage.getItem(storageKey)).toContain(newer.sessionId);
+		expect(api.upload).toHaveBeenCalledOnce();
+		expect(window.sessionStorage.getItem(storageKey)).toContain(session.sessionId);
 		expect(screen.queryByRole('alert')).toBeNull();
-		expect(screen.getByRole('button', { name: '일시 정지' })).toBeTruthy();
+		expect(screen.getByRole('button', { name: '이어올리기' })).toBeTruthy();
 	});
 	it('retries a failure before creation without losing the chosen file', async () => {
 		api.upload.mockRejectedValueOnce(new Error('create failed'))

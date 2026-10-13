@@ -44,10 +44,10 @@ describe.runIf(enabled)('project video upload PostgreSQL transactions', () => {
 	async function project() {
 		return prisma.project.create({ data: { exhibitionId, creatorId: actorId, slug: randomUUID(), title: 'Video test', status: 'PUBLISHED' } });
 	}
-	async function allocate(projectId: number, item?: { id: string; clientToken: string }) {
+	async function allocate(projectId: number, item?: { id: string; clientToken: string }, kind: 'VIDEO' | 'GAME' | 'IMAGE' | 'POSTER' = 'VIDEO') {
 		const id = randomUUID();
 		return createAssetUploadRepository(prisma).createAllocating({
-			id, projectId, exhibitionId: null, userId: actorId, kind: 'VIDEO', originalName: 'video.mp4', declaredMimeType: 'video/mp4', totalBytes: 10n,
+			id, projectId, exhibitionId: null, userId: actorId, kind, originalName: 'video.mp4', declaredMimeType: 'video/mp4', totalBytes: 10n,
 			partSizeBytes: 10, totalParts: 1, bucket: 'protected', objectKey: `protected/uploads/${id}/source`, generation: 1,
 			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64), sourceIdentityBlockSizeBytes: 1_048_576,
 			sourceIdentityBlockManifest: 'e30=', expiresAt: new Date(Date.now() + 60_000), submissionItemId: item?.id ?? null,
@@ -61,6 +61,28 @@ describe.runIf(enabled)('project video upload PostgreSQL transactions', () => {
 			playback: { bucket: 'protected', objectKey: `${session.objectKey}/playback`, mimeType: 'video/mp4' },
 		});
 	}
+
+
+    it.each(['GAME', 'IMAGE', 'POSTER'] as const)('%s holds its single active slot through an unresolved create and releases it only on termination', async kind => {
+        const p = await project();
+        const repository = createAssetUploadRepository(prisma);
+        const results = await Promise.allSettled([allocate(p.id, undefined, kind), allocate(p.id, undefined, kind)]);
+        const winners = results.filter(result => result.status === 'fulfilled');
+        expect(winners).toHaveLength(1);
+        expect(results.filter(result => result.status === 'rejected')).toHaveLength(1);
+        const first = winners[0]!.value;
+        expect(await repository.findById(first.id)).toMatchObject({ state: 'ALLOCATING' });
+        await expect(allocate(p.id, undefined, kind)).rejects.toThrow();
+        expect(await repository.cancel(first.id, actorId)).toMatchObject({ cancelled: true });
+        expect(await repository.cancel(first.id, actorId)).toMatchObject({ cancelled: true });
+        const second = await allocate(p.id, undefined, kind);
+        await prisma.assetUploadSession.update({ where: { id: second.id }, data: { state: 'COMPLETING' } });
+        expect(await repository.cancel(second.id, actorId)).toMatchObject({ cancelled: false });
+        await expect(allocate(p.id, undefined, kind)).rejects.toThrow();
+        await prisma.assetUploadSession.update({ where: { id: second.id }, data: { state: 'READY' } });
+        expect(await repository.cancel(second.id, actorId)).toMatchObject({ cancelled: false });
+        await expect(allocate(p.id, undefined, kind)).resolves.toMatchObject({ state: 'ALLOCATING' });
+    });
 
 	it('serializes racing fifth allocations and counts committed playback assets only once', async () => {
 		const p = await project();

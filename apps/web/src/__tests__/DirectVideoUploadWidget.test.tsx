@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 import type { DirectGameUploadCompletionResponse } from '../contracts';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

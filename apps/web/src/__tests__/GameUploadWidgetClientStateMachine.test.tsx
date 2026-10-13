@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 
 import { webcrypto } from 'node:crypto';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -112,7 +115,7 @@ describe('GAME upload real-client state machine', () => {
 		expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/direct-game-upload-sessions'))).toBe(false);
 	});
 
-	it('does not let paused upload A overwrite the newer upload B locator', async () => {
+	it('prevents upload B while paused create A is unresolved and exposes the late A locator', async () => {
 		installBrowserCrypto();
 		let createCount = 0;
 		let markFirstCreateStarted!: () => void;
@@ -145,11 +148,10 @@ describe('GAME upload real-client state machine', () => {
 		await firstCreateStarted;
 		fireEvent.click(await screen.findByRole('button', { name: '일시 정지' }));
 		fireEvent.click(await screen.findByRole('button', { name: '업로드 시작' }));
-		await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME') ?? '{}'))
-			.toMatchObject({ sessionId: 'session-b' }));
+		expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/direct-game-upload-sessions'))).toHaveLength(1);
 		await act(async () => { finishFirstCreate(jsonResponse(directSession('session-a'))); });
 		expect(JSON.parse(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME') ?? '{}'))
-			.toMatchObject({ sessionId: 'session-b' });
+			.toMatchObject({ sessionId: 'session-a' });
 	});
 
 	it('converges a late cancellation to completed when DELETE loses to READY', async () => {

@@ -11,6 +11,7 @@ import {
 	type DirectAssetUploadSession,
 	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
+import type { SubmissionBinding } from '../lib/upload/directUploadTask';
 import { useDirectUploadSession, type UploadRun } from '../lib/upload/useDirectUploadSession';
 import { queryKeys } from '../lib/query';
 
@@ -26,6 +27,7 @@ interface SavedImageSession {
 }
 
 interface Props {
+	operationKey?: string;
 	owner: DirectAssetUploadOwner;
 	kind: ImageKind;
 	initialFiles?: readonly File[];
@@ -44,7 +46,7 @@ interface Props {
 	hideTitle?: boolean;
 	/** Lets an enclosing owner control mutually exclusive mutations such as delete. */
 	onBusyChange?: (busy: boolean) => void;
-	submissionItems?: readonly { id: string; clientToken: string }[];
+	submissionItems?: readonly SubmissionBinding[];
 }
 
 /** Browser control for IMAGE and POSTER sessions; asset bytes go directly to Garage. */
@@ -54,6 +56,7 @@ export default function DirectImageUploadWidget(props: Props) {
 }
 
 function ImageUploadSession({
+	operationKey,
 	owner: ownerProp,
 	kind,
 	initialFiles = [],
@@ -105,15 +108,17 @@ function ImageUploadSession({
 	const {
 		saved: resumable, getSaved, remember: rememberLocator, forget, isMounted,
 		beginRun, isCurrentRun, finishRun, pause: pauseSession, cancel: cancelSession,
-		transfer, acceptReady,
+		transfer, acceptReady, restore: restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, taskMessage,
 	} = useDirectUploadSession<SavedImageSession>({
-		storageKey, onCancelled,
+		storageKey, operationKey, onCancelled,
+		recovery: { owner: owner, kind, items: submissionItems, files: initialFiles,
+			toSaved: (session, status, index) => ({ session, originalName: status.originalName, totalBytes: status.totalBytes, completed: index }) },
 		onCancelReady: (saved) => { void observeSavedReady(saved, files); },
 		onCancelError: (cause, terminalState) => {
 			setError(terminalState ? `업로드 세션이 ${terminalState.toLowerCase()} 상태입니다.` : getApiErrorMessage(cause));
 			setPhase('idle');
 		},
-		onCancelSettled: () => { setProgress(null); setError(null); setPhase('idle'); },
+		onCancelSettled: () => { autoPausedRef.current = true; setProgress(null); setError(null); setPhase('idle'); },
 	});
 	const updateCompleted = useCallback((next: number) => {
 		completedRef.current = next;
@@ -129,26 +134,30 @@ function ImageUploadSession({
 
 	useEffect(() => {
 		let disposed = false;
-		const raw = window.sessionStorage.getItem(storageKey);
-		if (!raw) { setRestoreDone(true); return; }
-		const activeRun = beginRun();
-		if (!activeRun) return;
-		const { controller, token } = activeRun;
+		if (!restoreRequired()) { setRestoreDone(true); return; }
+		const controller = new AbortController();
+		let activeRun: ReturnType<typeof beginRun> = null;
+		let token = -1;
 		const restore = async () => {
 			try {
-				const saved = JSON.parse(raw) as SavedImageSession;
+				const saved = await restoreTask();
+				if (disposed || !saved) return;
+				activeRun = beginRun();
+				if (!activeRun) return;
+				token = activeRun.token;
+				activeRun.controller.signal.addEventListener('abort', () => controller.abort(), { once: true });
 				if (saved.session.kind !== kind || saved.session.owner.type !== owner.type || saved.session.owner.id !== owner.id) throw new Error('owner');
 				const chosen = initialFilesRef.current;
 				const completedBefore = recoveringManifest || (compact && chosen.length === 1)
 					? 0 : saved.completed ?? 0;
 				const matchesChosen = chosen.length === 0
-					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes);
+					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes && await matchesFile(chosen[completedBefore]!));
 				// Preserve a valid opaque locator even when status is temporarily unavailable.
 				remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 				updateCompleted(completedBefore);
 				const status = await getDirectAssetUploadStatus(saved.session.sessionId, controller.signal);
 				if (disposed || !isCurrentRun(token) || controller.signal.aborted
-					|| status.kind !== kind || status.owner.type !== owner.type || status.owner.id !== owner.id
+					|| status.sessionId !== saved.session.sessionId || status.kind !== kind || status.owner.type !== owner.type || status.owner.id !== owner.id
 					|| status.generation !== saved.session.generation) return;
 				if (status.state === 'VERIFYING' || status.state === 'COMPLETING') {
 					setPhase('verifying');
@@ -169,6 +178,7 @@ function ImageUploadSession({
 					return;
 				}
 				if (status.state === 'UPLOADING') {
+					setPhase('idle'); setError(null);
 					return;
 				}
 				if (status.state === 'READY') {
@@ -206,7 +216,7 @@ function ImageUploadSession({
 			controller.abort();
 			finishRun(token);
 		};
-	}, [recoveringManifest, compact, forget, reportCompletion, kind, owner, remember, storageKey, updateCompleted, beginRun, finishRun, isCurrentRun, acceptReady]);
+	}, [restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, recoveringManifest, compact, forget, reportCompletion, kind, owner, remember, storageKey, updateCompleted, beginRun, finishRun, isCurrentRun, acceptReady]);
 
 	useEffect(() => {
 		onBusyChange?.(phase === 'uploading' || phase === 'verifying');
@@ -237,7 +247,7 @@ function ImageUploadSession({
 					if (next.percent >= 100) setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
-					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
+					...(submissionItems[index] ? { submissionItem: { id: submissionItems[index].id, clientToken: submissionItems[index].clientToken } } : {}),
 				}], (session) => ({ session, originalName: file.name, totalBytes: file.size, completed: index }));
 				if (!isCurrentRun(token)) return;
 				if (completion.status === 'VERIFYING') {
@@ -269,8 +279,9 @@ function ImageUploadSession({
 		activeRun: UploadRun,
 	) => {
 		if (!isCurrentRun(activeRun.token)) return;
+		const matches = chosen.length === 0 || (matchesSavedFile(chosen, saved) && await matchesFile(chosen[saved.completed ?? 0]!));
 		if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
-		if (compact && chosen.length > 0 && !matchesSavedFile(chosen, saved)) {
+		if (!matches) {
 			updateCompleted(0);
 			invalidateOwner();
 			finishRun(activeRun.token);
@@ -286,7 +297,7 @@ function ImageUploadSession({
 		}
 		if (!isCurrentRun(activeRun.token)) return;
 		reportCompletion();
-	}, [compact, matchesSavedFile, acceptReady, invalidateOwner, isCurrentRun, reportCompletion, finishRun, updateCompleted, uploadQueue]);
+	}, [matchesSavedFile, matchesFile, acceptReady, invalidateOwner, isCurrentRun, reportCompletion, finishRun, updateCompleted, uploadQueue]);
 	const observeSavedReady = useCallback(async (
 		saved: SavedImageSession,
 		chosen: readonly File[],
@@ -332,12 +343,12 @@ function ImageUploadSession({
 				await continueAfterReady(saved, chosen, activeRun);
 				return;
 			}
-            // A user's retry may start a new transfer only after the server confirms termination.
-            if (restartTerminal && status.generation === saved.session.generation && ['REJECTED', 'EXPIRED', 'CANCELLED'].includes(status.state)) {
-                forget(saved.session.sessionId);
-                await uploadQueue(chosen, undefined, activeRun);
-                return;
-            }
+			// A user's retry may start a new transfer only after the server confirms termination.
+			if (restartTerminal && status.generation === saved.session.generation && ['REJECTED', 'EXPIRED', 'CANCELLED'].includes(status.state)) {
+				forget(saved.session.sessionId);
+				await uploadQueue(chosen, undefined, activeRun);
+				return;
+			}
 			if (status.state === 'CANCELLED') forget(saved.session.sessionId);
 			else {
 				setError(`업로드 세션을 재개할 수 없습니다 (${status.state}).`);
@@ -376,9 +387,12 @@ function ImageUploadSession({
 	}, [cancelSession]);
 
 	const start = () => {
-		const saved = getSaved();
-		if (saved) void resumeQueue(files, saved, true);
-		else { completionReported.current = false; void uploadQueue(files); }
+		if (isPendingCreate()) { void restoreTask(); return; }
+		void restoreTask().then(saved => {
+			if (!isMounted()) return;
+			if (saved) void resumeQueue(files, saved, true);
+			else { completionReported.current = false; void uploadQueue(files); }
+		}).catch(cause => { if (isMounted()) { setError(getApiErrorMessage(cause)); setPhase('error'); } });
 	};
 	const retry = start;
 
@@ -402,15 +416,15 @@ function ImageUploadSession({
 
 	const canSelect = ((!compact && !autoStart) || linear) && (phase === 'idle' || phase === 'error');
 
-    const lastCancelAttempt = useRef(cancelAttempt);
-    useEffect(() => {
-        if (lastCancelAttempt.current === cancelAttempt) return;
-        lastCancelAttempt.current = cancelAttempt;
-        void cancel();
-    }, [cancelAttempt, cancel]);
+	const lastCancelAttempt = useRef(cancelAttempt);
+	useEffect(() => {
+		if (lastCancelAttempt.current === cancelAttempt) return;
+		lastCancelAttempt.current = cancelAttempt;
+		void cancel();
+	}, [cancelAttempt, cancel]);
 
 	const uploadActions = (<div className="game-upload__actions">
-                {linear && phase === 'idle' && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
+				{linear && phase === 'idle' && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
 				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${title} 시작`}</button>}
 				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}
 				{(phase === 'uploading' || phase === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={pause}>일시 정지</button>}
@@ -420,7 +434,7 @@ function ImageUploadSession({
 
 	return (
 		<div className={`game-upload${linear ? ' game-upload--linear' : ''}`} data-phase={phase}>
-            {linear && <UploadFileRows actions={uploadActions} names={files.length ? files.map(file => file.name) : (displayNames?.length ? displayNames : [resumable?.originalName ?? title])} completed={files.length ? completed : 0} phase={phase} percent={progress?.percent} />}
+			{linear && <UploadFileRows actions={uploadActions} names={files.length ? files.map(file => file.name) : (displayNames?.length ? displayNames : [resumable?.originalName ?? title])} completed={files.length ? completed : 0} phase={phase} percent={progress?.percent} />}
 			{!linear && !compact && !hideTitle && <h3 className="game-upload__title">{title}</h3>}
 			{!linear && resumable && phase === 'idle' && <p className="field-hint">중단된 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>}
 			{canSelect && (
@@ -449,7 +463,8 @@ function ImageUploadSession({
 					</p>
 				</div>
 			)}
-			{error && <p className="game-upload__error" role="alert">{error}</p>}
+			{(error || taskMessage) && <p className="game-upload__error" role="alert">{error || taskMessage}</p>}
+			{error && taskMessage && error !== taskMessage && <p role="status">{taskMessage}</p>}
 			{!linear && uploadActions}
 		</div>
 	);

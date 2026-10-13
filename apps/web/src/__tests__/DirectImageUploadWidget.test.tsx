@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 import type { DirectGameUploadCompletionResponse } from '../contracts';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -23,7 +26,7 @@ vi.mock('../lib/api/game-upload', () => ({
 
 afterEach(() => {
 	cleanup();
-	vi.clearAllMocks();
+	vi.resetAllMocks();
 	window.sessionStorage.clear();
 });
 
@@ -131,6 +134,7 @@ describe('DirectImageUploadWidget', () => {
 		);
 
 		expect(uploadDirectAssetFile).not.toHaveBeenCalled();
+        await waitFor(() => expect(resolveRestore).toBeDefined());
 		await act(async () => {
 			resolveRestore?.({ ...session, state: 'UPLOADING' });
 		});

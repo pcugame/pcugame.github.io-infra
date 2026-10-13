@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 import './helpers/dialog';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -392,6 +395,7 @@ describe('submission studio', () => {
 			clientToken: `token-${index}`,
 			required: true,
 			state: state as ProjectSubmissionItemStatus['state'],
+            ...(state === 'VERIFYING' ? { sessionId: 'second-session', generation: 1 } : {}),
 		}));
 		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
 		const session = {

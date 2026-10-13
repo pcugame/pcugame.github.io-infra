@@ -14,12 +14,14 @@ import {
 	type DirectAssetUploadProgress,
 	type DirectAssetUploadSession,
 } from '../lib/api/game-upload';
+import type { SubmissionBinding } from '../lib/upload/directUploadTask';
 import { useDirectUploadSession } from '../lib/upload/useDirectUploadSession';
 import type { UploadKind } from '../contracts';
 
 type UploadState = 'idle' | 'uploading' | 'verifying' | 'completed' | 'error';
 
 interface Props {
+	operationKey?: string;
 	projectId: number;
 	initialFile?: File | null;
 	autoStart?: boolean;
@@ -35,7 +37,7 @@ interface Props {
 	compact?: boolean;
 	onSkip?: () => void;
 	uploadKind?: UploadKind;
-	submissionItem?: { id: string; clientToken: string };
+	submissionItem?: SubmissionBinding;
 }
 
 export default function GameUploadWidget(props: Props) {
@@ -43,6 +45,7 @@ export default function GameUploadWidget(props: Props) {
 }
 
 function GameUploadSession({
+	operationKey,
 	projectId,
 	initialFile,
 	autoStart,
@@ -85,12 +88,16 @@ function GameUploadSession({
 	const {
 		saved: session, getSaved, remember: rememberSession, forget, isMounted,
 		beginRun, isCurrentRun, finishRun, pause: pauseSession, cancel: cancelSession,
-		transfer, acceptReady,
+		transfer, acceptReady, restore: restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, taskMessage,
 	} = useDirectUploadSession<DirectAssetUploadSession>({
-		storageKey: directSessionStorageKey, onCancelled,
-		onCancelReady: (candidate, serverState, status) => {
+		storageKey: directSessionStorageKey, operationKey, onCancelled,
+		recovery: { owner: { type: 'PROJECT', id: projectId }, kind: uploadKind,
+			items: submissionItem ? [submissionItem] : [], files: initialFile ? [initialFile] : [],
+			toSaved: (session) => session },
+		onCancelReady: async (candidate, serverState, status) => {
 			// A restored ZIP must match the selection before reporting its completion.
 			checkRestoredFile(candidate, status, file);
+			if (file && !await matchesFile(file)) restoredFileMatchesRef.current = false;
 			if (serverState === 'READY') {
 				const run = beginRun();
 				if (!run) return;
@@ -105,6 +112,7 @@ function GameUploadSession({
 			setState('idle');
 		},
 		onCancelSettled: () => {
+            autoPausedRef.current = true;
 			setTerminalSessionConfirmation(null);
 			setProgress(null);
 			setError(null);
@@ -147,22 +155,21 @@ function GameUploadSession({
 
 	const reportCompletion = useCallback(() => {
 		qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
-		if (compact && !restoredFileMatchesRef.current) {
+		if (!restoredFileMatchesRef.current) {
 			setError('이전 파일의 업로드가 완료되었습니다. 선택한 파일을 재시도해 주세요.');
 			setState('error');
 			return;
 		}
 		setState('completed');
 		onCompleteRef.current?.();
-	}, [compact, projectId, qc]);
+	}, [projectId, qc]);
 
 	useEffect(() => {
 		let cancelled = false;
-		const raw = window.sessionStorage.getItem(directSessionStorageKey);
-		if (!raw) { setSessionRestored(true); return; }
-		const activeRun = beginRun();
-		if (!activeRun) return;
-		const { controller: polling, token } = activeRun;
+		if (!restoreRequired()) { setSessionRestored(true); return; }
+		const polling = new AbortController();
+		let activeRun: ReturnType<typeof beginRun> = null;
+		let token = -1;
 		const isCurrentRestoredSession = (candidate: DirectAssetUploadSession | null) => (
 			!cancelled
 			&& isCurrentRun(token)
@@ -175,16 +182,22 @@ function GameUploadSession({
 			let keepForBackgroundVerification = false;
 			let candidate: DirectAssetUploadSession | null = null;
 			try {
-				candidate = JSON.parse(raw) as DirectAssetUploadSession;
-				if (candidate.kind !== uploadKind) throw new Error('asset upload kind mismatch');
+				candidate = await restoreTask();
+				if (cancelled || !candidate) return;
+				activeRun = beginRun();
+				if (!activeRun) return;
+				token = activeRun.token;
+				activeRun.controller.signal.addEventListener('abort', () => polling.abort(), { once: true });
+				if (candidate.kind !== uploadKind || candidate.owner.type !== 'PROJECT' || candidate.owner.id !== projectId) throw new Error('asset upload owner/kind mismatch');
 				restoredSessionIdRef.current = candidate.sessionId;
 				restoredFileMatchesRef.current = !initialFile;
 				rememberSession(candidate);
 				const status = await getDirectAssetUploadStatus(candidate.sessionId, polling.signal);
-				if (!isCurrentRestoredSession(candidate)) return;
-				const matchesChosen = !initialFile || (initialFile.name === status.originalName && initialFile.size === status.totalBytes);
+				if (!isCurrentRestoredSession(candidate) || status.sessionId !== candidate.sessionId || status.generation !== candidate.generation || status.kind !== uploadKind || status.owner.type !== 'PROJECT' || status.owner.id !== projectId) return;
+				const matchesChosen = !initialFile || (initialFile.name === status.originalName && initialFile.size === status.totalBytes && await matchesFile(initialFile));
 				restoredFileMatchesRef.current = matchesChosen;
 				if (status.state === 'UPLOADING' && status.generation === candidate.generation) {
+					setState('idle'); setError(null);
 					rememberSession(candidate);
 					return;
 				}
@@ -254,7 +267,7 @@ function GameUploadSession({
 			polling.abort();
 			finishRun(token);
 		};
-	}, [directSessionStorageKey, forgetSession, initialFile, markTerminalSession, reportCompletion, projectId, qc, rememberSession, uploadKind, getSaved, beginRun, isCurrentRun, finishRun, acceptReady]);
+	}, [restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, directSessionStorageKey, forgetSession, initialFile, markTerminalSession, reportCompletion, projectId, qc, rememberSession, uploadKind, getSaved, beginRun, isCurrentRun, finishRun, acceptReady]);
 
 	const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
 		setFile(event.target.files?.[0] ?? null);
@@ -309,7 +322,7 @@ function GameUploadSession({
 				if (next.percent >= 100) setState('verifying');
 			}, {
 				...(resume ? { resume } : {}),
-				...(submissionItem ? { submissionItem } : {}),
+				...(submissionItem ? { submissionItem: { id: submissionItem.id, clientToken: submissionItem.clientToken } } : {}),
 			}], (next) => next);
 			if (!isCurrentRun(token)) return;
 			restoredFileMatchesRef.current = true;
@@ -342,6 +355,7 @@ function GameUploadSession({
 			const status = await getDirectAssetUploadStatus(candidate.sessionId, controller.signal);
 			if (!isCurrentRun(token)) return;
 			checkRestoredFile(candidate, status, uploadFile);
+			if (!await matchesFile(uploadFile)) restoredFileMatchesRef.current = false;
 			if (status.state === 'UPLOADING' && status.generation === candidate.generation) {
 				await runUpload(uploadFile, candidate, activeRun);
 				return;
@@ -364,7 +378,7 @@ function GameUploadSession({
 		} finally {
 			finishRun(token);
 		}
-	}, [checkRestoredFile, beginRun, acceptReady, finishRun, isCurrentRun, markTerminalSession, reportCompletion, runUpload, waitForSessionReady]);
+	}, [checkRestoredFile, matchesFile, beginRun, acceptReady, finishRun, isCurrentRun, markTerminalSession, reportCompletion, runUpload, waitForSessionReady]);
 
 	useEffect(() => {
 		if (!autoStart || !initialFile || !sessionRestored || autoStartedRef.current) return;
@@ -378,8 +392,14 @@ function GameUploadSession({
 	}, [autoStart, initialFile, sessionRestored, state]);
 
 	const handleStart = useCallback(() => {
-		if (file) void runUpload(file);
-	}, [file, runUpload]);
+		if (isPendingCreate()) { void restoreTask(); return; }
+		if (!file) return;
+		void restoreTask().then(saved => {
+			if (!isMounted()) return;
+			if (saved) void resumeUpload(file, saved);
+			else void runUpload(file);
+		}).catch(cause => { if (isMounted()) { setError(getApiErrorMessage(cause)); setState('error'); } });
+	}, [file, runUpload, resumeUpload, restoreTask, isMounted, isPendingCreate]);
 	const handleTerminalRetry = useCallback(() => {
 		const candidate = getSaved();
 		const confirmation = terminalSessionConfirmation;
@@ -435,15 +455,15 @@ function GameUploadSession({
 	const terminalSession = session !== null
 		&& terminalSessionConfirmation?.sessionId === session.sessionId
 		&& terminalSessionConfirmation.generation === session.generation;
-    const lastCancelAttempt = useRef(cancelAttempt);
-    useEffect(() => {
-        if (lastCancelAttempt.current === cancelAttempt) return;
-        lastCancelAttempt.current = cancelAttempt;
-        void handleCancel();
-    }, [cancelAttempt, handleCancel]);
+	const lastCancelAttempt = useRef(cancelAttempt);
+	useEffect(() => {
+		if (lastCancelAttempt.current === cancelAttempt) return;
+		lastCancelAttempt.current = cancelAttempt;
+		void handleCancel();
+	}, [cancelAttempt, handleCancel]);
 
 	const uploadActions = (<div className="game-upload__actions">
-                {linear && state === 'idle' && (!file || !terminalSession) && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
+				{linear && state === 'idle' && (!file || !terminalSession) && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
 				{state === 'idle' && file && !session && <button className="btn btn--primary" type="button" onClick={handleStart}>업로드 시작</button>}
 				{state === 'idle' && file && terminalSession && (
 					<button className="btn btn--primary" type="button" onClick={handleTerminalRetry}>{linear ? '재시도' : '새 업로드 시작'}</button>
@@ -460,7 +480,7 @@ function GameUploadSession({
 
 	return (
 		<div className={`game-upload${linear ? ' game-upload--linear' : ''}`} data-phase={state}>
-            {linear && <UploadFileRows actions={uploadActions} names={[file?.name ?? displayNames?.[0] ?? labels.noun]} phase={state === 'idle' && error && file ? 'error' : state} percent={progress?.percent} />}
+			{linear && <UploadFileRows actions={uploadActions} names={[file?.name ?? displayNames?.[0] ?? labels.noun]} phase={state === 'idle' && error && file ? 'error' : state} percent={progress?.percent} />}
 			{!linear && !compact && <h3 className="game-upload__title">{labels.title}</h3>}
 			{!linear && session && state === 'idle' && (
 				<div className="game-upload__resume-banner">
@@ -487,7 +507,8 @@ function GameUploadSession({
 					</p>
 				</div>
 			)}
-			{error && <div className="game-upload__error" role="alert">{error}</div>}
+			{(error || taskMessage) && <div className="game-upload__error" role="alert">{error || taskMessage}</div>}
+			{error && taskMessage && error !== taskMessage && <p role="status">{taskMessage}</p>}
 			{!linear && uploadActions}
 		</div>
 	);

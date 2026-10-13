@@ -22,6 +22,16 @@ export interface DirectAssetUploadProgress {
 	totalBytes: number;
 	percent: number;
 }
+/** A create may have committed even when its response could not be read. */
+export class DirectUploadCreateError extends Error {
+	readonly uncertain: boolean;
+	constructor(uncertain: boolean, cause: unknown) {
+		super(uncertain
+			? '업로드 생성 결과를 확인할 수 없습니다. 제출 상태를 다시 확인하거나 연결이 복구된 뒤 재시도해 주세요.'
+			: '업로드 세션을 생성하지 못했습니다. 다시 시도해 주세요.', { cause });
+		this.uncertain = uncertain;
+	}
+}
 const CONTROL_RETRY_ATTEMPTS = 4;
 const UPLOAD_PART_RETRY_ATTEMPTS = 4;
 
@@ -334,7 +344,9 @@ export async function uploadDirectAssetFile(
 		};
 		uploaded = new Map(status.parts.map((part) => [part.partNumber, { etag: part.etag, sizeBytes: part.sizeBytes }]));
 	} else {
-		const created = await apiRequest<DirectAssetUploadSession>(
+		let created: DirectAssetUploadSession;
+		try {
+		created = await apiRequest<DirectAssetUploadSession>(
 			`/api/admin/${owner.type === 'PROJECT' ? 'projects' : 'exhibitions'}/${owner.id}/direct-${kind.toLowerCase()}-upload-sessions`, {
 				method: 'POST', headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -348,6 +360,15 @@ export async function uploadDirectAssetFile(
 			},
 			options.signal,
 		);
+		} catch (cause) {
+			// A conflict can refer to an existing allocation; 5xx/network/parse
+			// errors also cannot establish that no server session exists.
+			if (cause instanceof ApiError) {
+                if (cause.status === 409 || cause.status >= 500) Object.assign(cause, { uncertain: true });
+                throw cause;
+            }
+            throw new DirectUploadCreateError(true, cause);
+		}
 		session = { ...created, kind };
 	}
 	options.onSession?.(session);

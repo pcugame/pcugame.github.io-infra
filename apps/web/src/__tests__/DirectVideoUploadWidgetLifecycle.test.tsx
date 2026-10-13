@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 import type { DirectGameUploadCompletionResponse } from '../contracts';
 import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -122,19 +125,17 @@ describe('video shared session lifetime', () => {
 		expect(window.sessionStorage.getItem(storageKey)).toContain(session.sessionId);
 	});
 
-	it('preserves a newer locator when a paused transfer returns its old session and failure', async () => {
+	it('blocks another create while a paused create is unresolved and hands its late session to the view', async () => {
 		const old = deferred<DirectGameUploadCompletionResponse>();
 		let oldOptions!: Options;
-		const newer = { ...session, sessionId: 'new-video' };
-		api.upload.mockImplementationOnce((_owner, _file, _kind, _progress, options) => { oldOptions = options; return old.promise; })
-			.mockImplementationOnce((_owner, _file, _kind, _progress, options: Options) => {
-				options.onSession?.(newer); return new Promise(() => undefined);
-			});
+		api.upload.mockImplementationOnce((_owner, _file, _kind, _progress, options) => { oldOptions = options; return old.promise; });
+		api.status.mockResolvedValue({ ...session, state: 'UPLOADING', originalName: file.name, totalBytes: file.size });
 		mount();
 		fireEvent.click(await screen.findByRole('button', { name: '일시 정지' }));
 		fireEvent.click(screen.getByRole('button', { name: '동영상 업로드 시작' }));
 		await act(async () => { oldOptions.onSession?.(session); old.reject(new Error('old failure')); });
-		expect(window.sessionStorage.getItem(storageKey)).toContain(newer.sessionId);
+		expect(api.upload).toHaveBeenCalledOnce();
+		expect(window.sessionStorage.getItem(storageKey)).toContain(session.sessionId);
 		expect(screen.queryByRole('alert')).toBeNull();
 	});
 });
