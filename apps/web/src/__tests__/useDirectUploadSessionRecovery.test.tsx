@@ -40,6 +40,60 @@ function mount() {
 afterEach(() => { cleanup(); sessionStorage.clear(); vi.resetAllMocks(); });
 
 describe('recovery ownership across real hook mounts', () => {
+	it.each((['mount only', 'pending replacement', 'owned replacement', 'completed', 'cancelled', 'cleared', 'discarded while empty'] as const)
+		.flatMap(action => [false, true].map(unmountBeforeResponse => ({ action, unmountBeforeResponse }))))(
+		'handles an uncancelled late create after B: $action (B unmounted: $unmountBeforeResponse)', async ({ action, unmountBeforeResponse }) => {
+			const upload = deferred<DirectGameUploadCompletionResponse>();
+			const replacement = deferred<DirectGameUploadCompletionResponse>();
+			const options: Options[] = [];
+			api.upload.mockImplementation((_owner, _file, _kind, _progress, next: Options) => {
+				options.push(next);
+				return options.length === 1 ? upload.promise : replacement.promise;
+			});
+			api.cancel.mockResolvedValue(undefined);
+			const a = mount();
+			let transfer!: Promise<DirectGameUploadCompletionResponse>;
+			act(() => {
+				const run = a.result.current.beginRun()!;
+				transfer = a.result.current.transfer(run, [77, file, 'VIDEO'], value => value);
+			});
+			a.unmount();
+			const b = mount();
+			const newer = { ...session, sessionId: 'B' };
+			let nextTransfer: Promise<DirectGameUploadCompletionResponse> | undefined;
+			if (action !== 'mount only' && action !== 'discarded while empty') {
+				act(() => {
+					const run = b.result.current.beginRun()!;
+					nextTransfer = b.result.current.transfer(run, [77, file, 'VIDEO'], value => value);
+					if (action !== 'pending replacement') options[1].onSession?.(newer);
+					if (action === 'completed') expect(b.result.current.acceptReady(run, 'B', 1)).toBe(true);
+					if (action === 'cleared') expect(b.result.current.forget('B')).toBe(true);
+				});
+			}
+			if (action === 'cancelled' || action === 'discarded while empty') {
+				await act(async () => { await b.result.current.cancel(); });
+			}
+			const stored = sessionStorage.getItem(storageKey);
+			const ui = b.result.current.saved;
+			if (unmountBeforeResponse) b.unmount();
+			await act(async () => {
+				options[0].onSession?.(session);
+				upload.resolve({ status: 'READY', sessionId: 'A', generation: 1, sizeBytes: file.size });
+				await transfer;
+			});
+			expect(sessionStorage.getItem(storageKey)).toBe(action === 'mount only' ? JSON.stringify(session) : stored);
+			expect(b.result.current.saved).toEqual(ui);
+			for (const callback of Object.values(a.callbacks)) expect(callback).not.toHaveBeenCalled();
+			expect(api.cancel.mock.calls).toEqual(action === 'cancelled' ? [['B']] : []);
+			if (!unmountBeforeResponse) b.unmount();
+			expect(mount().result.current.saved).toEqual(action === 'mount only' ? session : action === 'owned replacement' ? newer : null);
+			await act(async () => {
+				replacement.resolve({ status: 'READY', sessionId: 'B', generation: 1, sizeBytes: file.size });
+				await nextTransfer;
+			});
+		},
+	);
+
 	it.each([
 		['late create', false, false], ['late create', true, false],
 		['late DELETE', false, false], ['late DELETE', true, false],

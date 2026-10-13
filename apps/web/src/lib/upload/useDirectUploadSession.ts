@@ -5,9 +5,10 @@ import {
 } from '../api/game-upload';
 
 // Retain an unmounted owner's lease only while its server requests can return.
-// A replacement mount revokes it, even if the replacement later clears storage.
+// Mounting alone preserves pending recovery. Taking ownership revokes older leases,
+// even if the replacement subsequently clears storage or unmounts.
 type RecoveryOwner = { superseded: boolean };
-const recoveryOwners = new Map<string, RecoveryOwner>();
+const recoveryOwners = new Map<string, Set<RecoveryOwner>>();
 
 export type UploadRun = { token: number; controller: AbortController };
 // Existing callers persist either the bare session or a session plus queue metadata.
@@ -54,17 +55,27 @@ export function useDirectUploadSession<Saved extends Locator>({
 	}, [onCancelled, onCancelReady, onCancelError, onCancelSettled]);
 
 	const releaseRecoveryOwner = useCallback(() => {
-		if (!mounted.current && !pendingCreates.current.size && !deleting.current.size
-			&& recoveryOwners.get(storageKey) === recoveryOwner.current) recoveryOwners.delete(storageKey);
+		if (mounted.current || pendingCreates.current.size || deleting.current.size) return;
+		const owners = recoveryOwners.get(storageKey);
+		owners?.delete(recoveryOwner.current);
+		if (!owners?.size) recoveryOwners.delete(storageKey);
+	}, [storageKey]);
+	const claimRecoveryOwner = useCallback(() => {
+		if (recoveryOwner.current.superseded) return;
+		for (const owner of recoveryOwners.get(storageKey) ?? []) {
+			if (owner !== recoveryOwner.current) owner.superseded = true;
+		}
 	}, [storageKey]);
 	const isMounted = useCallback(() => mounted.current && !recoveryOwner.current.superseded, []);
 	const getSaved = useCallback(() => locator.current, []);
 	const remember = useCallback((value: Saved, updateUi = true) => {
 		if (recoveryOwner.current.superseded) return;
+		// An unmounted request may preserve a candidate without displacing an idle mount.
+		if (updateUi && mounted.current) claimRecoveryOwner();
 		locator.current = value;
 		window.sessionStorage.setItem(storageKey, JSON.stringify(value));
 		if (updateUi && mounted.current) setSaved(value);
-	}, [storageKey]);
+	}, [claimRecoveryOwner, storageKey]);
 	const forget = useCallback((expectedSessionId: string) => {
 		if (!locator.current || sessionOf(locator.current).sessionId !== expectedSessionId) return false;
 		const previous = locator.current;
@@ -107,10 +118,10 @@ export function useDirectUploadSession<Saved extends Locator>({
 		abort();
 	}, [abort]);
 	useEffect(() => {
-		const previous = recoveryOwners.get(storageKey);
-		if (previous && previous !== recoveryOwner.current) previous.superseded = true;
+		const owners = recoveryOwners.get(storageKey) ?? new Set<RecoveryOwner>();
 		recoveryOwner.current.superseded = false;
-		recoveryOwners.set(storageKey, recoveryOwner.current);
+		owners.add(recoveryOwner.current);
+		recoveryOwners.set(storageKey, owners);
 		mounted.current = true;
 		return () => {
 			mounted.current = false;
@@ -172,6 +183,7 @@ export function useDirectUploadSession<Saved extends Locator>({
 	}, [finishCancellation, forget, isMounted, releaseRecoveryOwner]);
 	const cancel = useCallback(async () => {
 		if (deleting.current.size || cancelledCreates.current.size) return;
+		claimRecoveryOwner();
 		cancellationIntent.current = true;
 		for (const token of pendingCreates.current) cancelledCreates.current.add(token);
 		paused.current = null;
@@ -179,7 +191,7 @@ export function useDirectUploadSession<Saved extends Locator>({
 		const candidate = locator.current;
 		if (candidate) await cancelSession(candidate);
 		else finishCancellation();
-	}, [abort, cancelSession, finishCancellation]);
+	}, [abort, cancelSession, claimRecoveryOwner, finishCancellation]);
 
 	/** Client owns transport/retries; this hook owns callbacks and late-create cleanup. */
 	const transfer = useCallback(async (
@@ -188,7 +200,11 @@ export function useDirectUploadSession<Saved extends Locator>({
 		toSaved: (session: DirectAssetUploadSession) => Saved,
 	) => {
 		const [owner, file, kind, onProgress, options = {}] = args;
-		if (!options.resume) pendingCreates.current.add(run.token);
+		if (!options.resume) {
+			// Starting a replacement is decisive before its create response arrives.
+			if (isCurrentRun(run.token)) claimRecoveryOwner();
+			pendingCreates.current.add(run.token);
+		}
 		let received = false;
 		try {
 			return await uploadDirectAssetFile(owner, file, kind, (progress) => {
@@ -215,7 +231,7 @@ export function useDirectUploadSession<Saved extends Locator>({
 			finishCancellation();
 			releaseRecoveryOwner();
 		}
-	}, [cancelSession, finishCancellation, isCurrentRun, isMounted, remember, releaseRecoveryOwner, storageKey]);
+	}, [cancelSession, claimRecoveryOwner, finishCancellation, isCurrentRun, isMounted, remember, releaseRecoveryOwner, storageKey]);
 
 	return { saved, getSaved, remember, forget, isMounted, beginRun, isCurrentRun, finishRun, pause, cancel, transfer, acceptReady };
 }
