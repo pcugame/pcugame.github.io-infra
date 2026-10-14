@@ -167,6 +167,7 @@ export class DirectUploadTask {
 	};
 	matchesOperation = (operationKey?: string) => this.operationKey === operationKey;
 	matchesFile = async (file: File) => {
+		const epoch = this.epoch;
 		const saved = this.snapshot.saved;
 		const metadata = this.creation?.request ?? (saved && 'session' in saved ? saved : null);
 		if (metadata && ((metadata.originalName !== undefined && file.name !== metadata.originalName)
@@ -180,7 +181,8 @@ export class DirectUploadTask {
 		if (!expected?.sourceIdentity || expected.sourceIdentityAlgorithm !== 'SHA256_BLOCK_MANIFEST_V1') return false;
 		try {
 			const source = await createFileSourceIdentity(file);
-			return source.sourceIdentityAlgorithm === expected.sourceIdentityAlgorithm && source.sourceIdentity === expected.sourceIdentity;
+			return epoch === this.epoch && this.snapshot.saved === saved
+				&& source.sourceIdentityAlgorithm === expected.sourceIdentityAlgorithm && source.sourceIdentity === expected.sourceIdentity;
 		} catch { return false; }
 	};
 	getSaved = () => this.snapshot.saved;

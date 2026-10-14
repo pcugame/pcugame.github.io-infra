@@ -122,7 +122,7 @@ describe.each(['GAME', 'WEBGL'] as const)('%s shared session ownership', kind =>
 		expect(api.ready.mock.calls[0][1].signal.aborted).toBe(false);
 		await act(async () => { ready.resolve(status('READY')); });
 		expect(api.ready).toHaveBeenCalledOnce();
-		expect(latest).toHaveBeenCalledOnce();
+		await waitFor(() => expect(latest).toHaveBeenCalledOnce());
 		expect(completed).not.toHaveBeenCalled();
 		expect(api.upload).not.toHaveBeenCalled();
 	});

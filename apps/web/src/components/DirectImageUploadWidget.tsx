@@ -11,7 +11,7 @@ import {
 	type DirectAssetUploadSession,
 	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
-import { fileVerificationMessage, type SubmissionBinding } from '../lib/upload/directUploadTask';
+import type { SubmissionBinding } from '../lib/upload/directUploadTask';
 import { useDirectUploadSession, type UploadRun } from '../lib/upload/useDirectUploadSession';
 import { queryKeys } from '../lib/query';
 
@@ -85,7 +85,6 @@ function ImageUploadSession({
 	const [error, setError] = useState<string | null>(null);
 	const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
 	const [restoreDone, setRestoreDone] = useState(false);
-	const initialFilesRef = useRef(initialFiles);
 	const completedRef = useRef(0);
 	const autoStarted = useRef(false);
 	const autoPausedRef = useRef(false);
@@ -109,10 +108,10 @@ function ImageUploadSession({
 	const {
 		saved: resumable, getSaved, remember: rememberLocator, forget, isMounted,
 		beginRun, isCurrentRun, finishRun, pause: pauseSession, cancel: cancelSession,
-		transfer, acceptReady, restore: restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, taskMessage, canContinue, cancelPending,
+		transfer, acceptReady, acceptRestoredReady, selectFiles, getSelectedFiles, restore: restoreTask, restoreRequired, isPendingCreate, handoff, taskMessage, canContinue, cancelPending,
 	} = useDirectUploadSession<SavedImageSession>({
-		storageKey, operationKey, onCancelled,
-		recovery: { owner: owner, kind, items: submissionItems, files: initialFiles,
+		storageKey, operationKey, onCancelled, initialSelection: files,
+		recovery: { owner: owner, kind, items: submissionItems, files,
 			toSaved: (session, status, index) => ({ session, originalName: status.originalName, totalBytes: status.totalBytes, completed: index }) },
 		onCancelReady: (saved) => { void observeSavedReady(saved, files); },
 		onCancelError: (cause, terminalState) => {
@@ -131,10 +130,6 @@ function ImageUploadSession({
 	}, [rememberLocator]);
 
 	useEffect(() => {
-		initialFilesRef.current = initialFiles;
-	}, [initialFiles]);
-
-	useEffect(() => {
 		let disposed = false;
 		if (!restoreRequired()) { setRestoreDone(true); return; }
 		const controller = new AbortController();
@@ -149,11 +144,11 @@ function ImageUploadSession({
 				token = activeRun.token;
 				activeRun.controller.signal.addEventListener('abort', () => controller.abort(), { once: true });
 				if (saved.session.kind !== kind || saved.session.owner.type !== owner.type || saved.session.owner.id !== owner.id) throw new Error('owner');
-				const chosen = initialFilesRef.current;
+				const chosen = getSelectedFiles();
 				const completedBefore = recoveringManifest || (compact && chosen.length === 1)
 					? 0 : saved.completed ?? 0;
-				const matchesChosen = chosen.length === 0
-					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes && await matchesFile(chosen[completedBefore]!));
+				const sameQueuePosition = chosen.length === 0
+					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes);
 				// Preserve a valid opaque locator even when status is temporarily unavailable.
 				remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 				updateCompleted(completedBefore);
@@ -165,16 +160,11 @@ function ImageUploadSession({
 					setPhase('verifying');
 					await waitForDirectAssetReady(status.sessionId, { signal: controller.signal });
 					if (!disposed && isCurrentRun(token) && !controller.signal.aborted) {
-						if (!matchesChosen) {
-							updateCompleted(0);
-							setError(fileVerificationMessage);
-							setPhase('idle');
-							return;
-						}
-						if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
+						if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, completedBefore)
+							|| !isCurrentRun(token)) return;
 						const nextCompleted = completedBefore + 1;
 						updateCompleted(nextCompleted);
-						if (initialFilesRef.current.length === 0 || nextCompleted >= initialFilesRef.current.length) {
+						if (chosen.length === 0 || nextCompleted >= chosen.length) {
 							reportCompletion();
 						} else setPhase('idle');
 					}
@@ -185,22 +175,17 @@ function ImageUploadSession({
 					return;
 				}
 				if (status.state === 'READY') {
-					if (!matchesChosen) {
-						updateCompleted(0);
-						setError(fileVerificationMessage);
-						setPhase('idle');
-						return;
-					}
-					if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
+					if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, completedBefore)
+						|| !isCurrentRun(token)) return;
 					const nextCompleted = completedBefore + 1;
 					updateCompleted(nextCompleted);
-					if (initialFilesRef.current.length === 0 || nextCompleted >= initialFilesRef.current.length) {
+					if (chosen.length === 0 || nextCompleted >= chosen.length) {
 						reportCompletion();
 					} else setPhase('idle');
 					return;
 				}
 				if (status.state === 'CANCELLED') {
-					if (matchesChosen) { autoPausedRef.current = true; autoStarted.current = true; }
+					if (sameQueuePosition) { autoPausedRef.current = true; autoStarted.current = true; }
 					else updateCompleted(0);
 					forget(saved.session.sessionId);
 				}
@@ -225,7 +210,7 @@ function ImageUploadSession({
 			controller.abort();
 			finishRun(token);
 		};
-	}, [restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, recoveringManifest, compact, forget, reportCompletion, kind, owner, remember, storageKey, updateCompleted, beginRun, finishRun, isCurrentRun, acceptReady]);
+	}, [restoreTask, restoreRequired, getSelectedFiles, acceptRestoredReady, isPendingCreate, handoff, recoveringManifest, compact, forget, reportCompletion, kind, owner, remember, storageKey, updateCompleted, beginRun, finishRun, isCurrentRun, acceptReady]);
 
 	useEffect(() => {
 		onBusyChange?.(phase === 'uploading' || phase === 'verifying');
@@ -289,16 +274,16 @@ function ImageUploadSession({
 		activeRun: UploadRun,
 	) => {
 		if (!isCurrentRun(activeRun.token)) return;
-		const matches = chosen.length === 0 || (matchesSavedFile(chosen, saved) && await matchesFile(chosen[saved.completed ?? 0]!));
-		if (!matches) {
+		try {
+			if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, saved.completed ?? 0)
+				|| !isCurrentRun(activeRun.token)) return;
+		} catch (cause) {
+			if (!isCurrentRun(activeRun.token)) return;
 			updateCompleted(0);
-			invalidateOwner();
-			finishRun(activeRun.token);
-			setError(fileVerificationMessage);
+			setError(getApiErrorMessage(cause));
 			setPhase('error');
 			return;
 		}
-		if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 		const nextCompleted = (saved.completed ?? completedRef.current) + 1;
 		updateCompleted(nextCompleted);
 		if (nextCompleted < chosen.length) {
@@ -307,7 +292,7 @@ function ImageUploadSession({
 		}
 		if (!isCurrentRun(activeRun.token)) return;
 		reportCompletion();
-	}, [matchesSavedFile, matchesFile, acceptReady, invalidateOwner, isCurrentRun, reportCompletion, finishRun, updateCompleted, uploadQueue]);
+	}, [acceptRestoredReady, isCurrentRun, reportCompletion, updateCompleted, uploadQueue]);
 	const observeSavedReady = useCallback(async (
 		saved: SavedImageSession,
 		chosen: readonly File[],
@@ -399,11 +384,12 @@ function ImageUploadSession({
 	}, [cancelSession]);
 
 	const start = () => {
+		const selected = getSelectedFiles();
 		void restoreTask().then(saved => {
-			if (!isMounted() || saved === undefined) return;
-			if (saved) void resumeQueue(files, saved, terminalSessionId === saved.session.sessionId);
-			else { completionReported.current = false; void uploadQueue(files); }
-		}).catch(cause => { if (isMounted()) { setError(getApiErrorMessage(cause)); setPhase('error'); } });
+			if (!isMounted() || getSelectedFiles() !== selected || saved === undefined) return;
+			if (saved) void resumeQueue(selected, saved, terminalSessionId === saved.session.sessionId);
+			else { completionReported.current = false; void uploadQueue(selected); }
+		}).catch(cause => { if (isMounted() && getSelectedFiles() === selected) { setError(getApiErrorMessage(cause)); setPhase('error'); } });
 	};
 	const retry = start;
 
@@ -453,6 +439,7 @@ function ImageUploadSession({
 					<label className="sr-only" htmlFor={fileInputId}>{title} 파일 선택</label>
 					<input id={fileInputId} type="file" multiple={kind === 'IMAGE'} accept="image/*,application/pdf,.pdf" onChange={(event) => {
 						const selected = Array.from(event.target.files ?? []);
+						selectFiles(selected);
 						setFiles(selected);
 						completionReported.current = false;
 						const saved = getSaved();

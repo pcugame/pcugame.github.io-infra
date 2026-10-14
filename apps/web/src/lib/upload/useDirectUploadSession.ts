@@ -1,14 +1,17 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useContext, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { QueryClientContext } from '@tanstack/react-query';
 import type { DirectAssetUploadSession } from '../api/game-upload';
-import { getDirectUploadTask, type DirectUploadTask, type Locator, type Recovery, type TaskCallbacks, type UploadRun } from './directUploadTask';
+import { fileVerificationMessage, sessionOf, getDirectUploadTask, type DirectUploadTask, type Locator, type Recovery, type TaskCallbacks, type UploadRun } from './directUploadTask';
 type TransferArgs = Parameters<DirectUploadTask['transfer']>[1];
 export type { UploadRun } from './directUploadTask';
 
-/** React owns a view lease; the job retains unresolved requests across views. */
+/**
+ * React owns the view and selection lease; the job retains server responsibility.
+ * Call selectFiles synchronously for every selection change, alongside local state.
+ */
 export function useDirectUploadSession<Saved extends Locator>({
-	storageKey, recovery, operationKey, ...callbacks
-}: { storageKey: string; operationKey?: string; recovery?: Omit<Recovery, 'mode'> } & TaskCallbacks<Saved>) {
+	storageKey, recovery, operationKey, initialSelection, ...callbacks
+}: { storageKey: string; operationKey?: string; initialSelection: readonly File[]; recovery?: Omit<Recovery, 'mode'> } & TaskCallbacks<Saved>) {
 	const identity = operationKey ?? (recovery?.items.length ? `submission:${recovery.items.map(item => item.id).join(':')}` : undefined);
 	const client = useContext(QueryClientContext);
 	const me = client?.getQueryData<{ user?: { id: number; role: string } }>(['me']);
@@ -16,12 +19,14 @@ export function useDirectUploadSession<Saved extends Locator>({
 	const task = useMemo(() => getDirectUploadTask(scope, storageKey), [scope, storageKey]);
 	const snapshot = useSyncExternalStore(task.subscribe, task.getSnapshot);
 	const mounted = useRef(false);
+	const selection = useRef({ files: initialSelection, generation: 0 });
+	const runs = useRef(new Map<number, { files: readonly File[]; generation: number }>());
 	const currentView = useRef({ task, identity });
 	const id = useRef({});
 	const latest = useRef(callbacks);
 	const recoveryRef = useRef(recovery);
-	useEffect(() => { latest.current = callbacks; recoveryRef.current = recovery; currentView.current = { task, identity }; });
-	useEffect(() => {
+	useLayoutEffect(() => { latest.current = callbacks; recoveryRef.current = recovery; currentView.current = { task, identity }; });
+	useLayoutEffect(() => {
 		mounted.current = true;
 		task.identify(identity);
 		const detach = task.attach(id.current, {
@@ -36,7 +41,21 @@ export function useDirectUploadSession<Saved extends Locator>({
 		return () => { mounted.current = false; detach(); };
 	}, [task, identity]);
 	const isMounted = useCallback(() => mounted.current && currentView.current.task === task && currentView.current.identity === identity, [task, identity]);
-	const isCurrentRun = useCallback((token: number) => isMounted() && task.isCurrentRun(token), [task, isMounted]);
+	// Selecting a file revokes local execution ownership, not the saved server job.
+	// Update synchronously in input handlers, before React commits the new state.
+	const selectFiles = useCallback((files: readonly File[]) => {
+		selection.current = { files, generation: selection.current.generation + 1 };
+		task.pause();
+	}, [task]);
+	const getSelectedFiles = useCallback(() => selection.current.files, []);
+	const beginRun = useCallback(() => {
+		if (!isMounted()) return null;
+		const run = task.beginRun();
+		if (run) { runs.current.clear(); runs.current.set(run.token, selection.current); }
+		return run;
+	}, [task, isMounted]);
+	const isCurrentRun = useCallback((token: number) => isMounted() && task.isCurrentRun(token)
+		&& runs.current.get(token)?.generation === selection.current.generation, [task, isMounted]);
 	const restoreRequired = useCallback(() => Boolean(task.getSaved() || task.hasUnresolved() || recoveryRef.current?.items.length), [task]);
 	const restore = useCallback(async () => {
 		const spec = recoveryRef.current;
@@ -45,12 +64,29 @@ export function useDirectUploadSession<Saved extends Locator>({
 		return saved && task.getSaved() === saved ? saved as Saved : null;
 	}, [task, me?.user?.role]);
 	const acceptReady = useCallback((run: UploadRun, sessionId: string, generation: number) => {
-		if (!task.acceptReady(run, sessionId, generation)) return false;
-		if (task.matchesOperation(identity)) return true;
+		if (run.controller.signal.aborted || !isCurrentRun(run.token) || !task.acceptReady(run, sessionId, generation)) return false;
+		if (task.matchesOperation(identity)) return isCurrentRun(run.token);
 		latest.current.onCancelError(new Error('이전 파일의 업로드가 완료되었습니다. 선택한 파일을 재시도해 주세요.'));
 		return false;
-	}, [task, identity]);
-	const transfer = useCallback((run: UploadRun, args: TransferArgs, toSaved: (session: DirectAssetUploadSession) => Saved) => task.transfer(run, args, toSaved, identity), [task, identity]);
+	}, [task, identity, isCurrentRun]);
+	// READY recovers the old job. It satisfies the selection only with source proof.
+	// Claim and cleanup happen after every asynchronous check, while all owners hold.
+	const acceptRestoredReady = useCallback(async (run: UploadRun, sessionId: string, generation: number, index = 0) => {
+		if (!isCurrentRun(run.token)) return false;
+		const chosen = runs.current.get(run.token)!;
+		const saved = task.getSaved();
+		if (!saved || sessionOf(saved).sessionId !== sessionId || sessionOf(saved).generation !== generation) return false;
+		const file = chosen.files[index];
+		const matches = file ? await task.matchesFile(file)
+			: chosen.files.length === 0 && chosen.generation === 0;
+		if (!isCurrentRun(run.token) || task.getSaved() !== saved) return false;
+		if (!matches) throw new Error(fileVerificationMessage);
+		return acceptReady(run, sessionId, generation);
+	}, [task, acceptReady, isCurrentRun]);
+	const transfer = useCallback(async (run: UploadRun, args: TransferArgs, toSaved: (session: DirectAssetUploadSession) => Saved) => {
+		if (!isCurrentRun(run.token) || !runs.current.get(run.token)?.files.includes(args[1])) throw new Error(fileVerificationMessage);
+		return task.transfer(run, args, toSaved, identity);
+	}, [task, identity, isCurrentRun]);
 	const cancel = useCallback(async () => {
 		const spec = recoveryRef.current;
 		await task.cancel(spec ? { ...spec, mode: me?.user?.role === 'USER' ? 'user' : 'admin' } : undefined);
@@ -59,9 +95,9 @@ export function useDirectUploadSession<Saved extends Locator>({
 	return {
 		saved: snapshot.saved as Saved | null, taskMessage: snapshot.message, handoff: snapshot.handoff,
 		canContinue: snapshot.control === 'open', cancelPending: snapshot.control === 'cancelling' || snapshot.control === 'completion',
-		restore, restoreRequired, matchesFile: task.matchesFile, isPendingCreate: task.isPendingCreate, getSaved: task.getSaved as () => Saved | null,
+		selectFiles, getSelectedFiles, acceptRestoredReady, restore, restoreRequired, matchesFile: task.matchesFile, isPendingCreate: task.isPendingCreate, getSaved: task.getSaved as () => Saved | null,
 		remember: task.remember as (saved: Saved, updateUi?: boolean) => void,
-		forget: task.forget, beginRun: task.beginRun, finishRun: task.finishRun,
+		forget: task.forget, beginRun, finishRun: task.finishRun,
 		pause: task.pause, cancel,
 		transfer,
 		acceptReady, isMounted, isCurrentRun,

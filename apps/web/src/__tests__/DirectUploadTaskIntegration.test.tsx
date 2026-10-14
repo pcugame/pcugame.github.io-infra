@@ -12,6 +12,7 @@ import GameUploadWidget from '../components/GameUploadWidget';
 import { VotePosterUpload } from '../features/voting/VotePosterUpload';
 import { getDirectUploadTask, resetDirectUploadTasksForTests, sessionOf, type SubmissionBinding } from '../lib/upload/directUploadTask';
 import { createFileSourceIdentity } from '../lib/file-identity';
+import { LinearUploadContext } from '../lib/upload/linearPresentation';
 import * as fileIdentity from '../lib/file-identity';
 import { getClientUploadLimits } from '../lib/upload-limits';
 import * as uploadApi from '../lib/api/game-upload';
@@ -36,11 +37,12 @@ function network(kind: DirectAssetUploadKind, owner: DirectAssetUploadOwner = { 
 	const createRequests: { clientUploadId: string; originalName: string }[] = [];
 	const dispatchedRecords: unknown[] = [];
 	const creates: { session: DirectAssetUploadStatus; response: ReturnType<typeof deferred<Response>> }[] = [];
+	const statuses: { id: string; response: ReturnType<typeof deferred<Response>> }[] = [];
 	const lookups: ReturnType<typeof deferred<Response>>[] = [];
 	const rejections: { response: ReturnType<typeof deferred<Response>>; rejection: Response }[] = [];
 	const completes: { id: string; response: ReturnType<typeof deferred<Response>> }[] = [];
 	const deletes: { id: string; response: ReturnType<typeof deferred<Response>> }[] = [];
-	const controls = { holdCreate: true, holdComplete: false, holdDelete: false, loseDelete: false, loseCreate: false, rejectCreate: false, rejectName: '', rejectCode: 'ERROR', holdRejection: false, failStatus: false, cancelConflict: false, linked: true, wrongToken: false, failLookup: false, holdLookup: false, missCreate: false, allocating: false, hideCreation: false };
+	const controls = { holdStatus: false, holdCreate: true, holdComplete: false, holdDelete: false, loseDelete: false, loseCreate: false, rejectCreate: false, rejectName: '', rejectCode: 'ERROR', holdRejection: false, failStatus: false, cancelConflict: false, linked: true, wrongToken: false, failLookup: false, holdLookup: false, missCreate: false, allocating: false, hideCreation: false };
 	const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
 		const path = new URL(String(input), 'https://test.invalid').pathname;
 		if (/\/direct-\w+-upload-sessions$/.test(path) && init?.method === 'POST') {
@@ -96,14 +98,15 @@ function network(kind: DirectAssetUploadKind, owner: DirectAssetUploadOwner = { 
 			if (controls.cancelConflict) return json({}, 409);
 			session.state = 'CANCELLED'; return new Response(null, { status: 204 });
 		}
+		if (controls.holdStatus) { const response = deferred<Response>(); statuses.push({ id: id!, response }); return response.promise; }
 		if (controls.failStatus) return json({}, 503);
 		return json(session);
 	});
 	vi.stubGlobal('fetch', fetcher);
-	return { controls, sessions, creates, rejections, lookups, createRequests, dispatchedRecords, completes, deletes, fetcher,
+	return { controls, sessions, creates, rejections, lookups, statuses, createRequests, dispatchedRecords, completes, deletes, fetcher,
 		async seed(file: File, state: DirectAssetUploadStatus['state'] = 'UPLOADING') {
 			const source = await createFileSourceIdentity(file);
-			const session: DirectAssetUploadStatus = { ...source, sessionId: 'recovered', owner: { type: 'PROJECT', id: 7 }, kind, generation: 1,
+			const session: DirectAssetUploadStatus = { ...source, sessionId: 'recovered', owner, kind, generation: 1,
 				partSizeBytes: 16, totalParts: 1, expiresAt: '2027-01-01T00:00:00.000Z', state, originalName: file.name, totalBytes: file.size, parts: [] };
 			sessions.set(session.sessionId, session); return session;
 		},
@@ -114,13 +117,13 @@ function client(role = 'ADMIN') {
 	value.setQueryData(['me'], { authenticated: true, user: { id: 9, role, name: 'Admin' } });
 	return value;
 }
-function widget(kind: 'IMAGE' | 'VIDEO' | 'GAME', file: File | undefined, onComplete: () => void, onCancelled: () => void, item?: SubmissionBinding, operationKey?: string) {
-	const props = { operationKey, autoStart: Boolean(file), onComplete, onCancelled };
-	if (kind === 'GAME') return <GameUploadWidget {...props} projectId={7} initialFile={file} submissionItem={item} />;
+function widget(kind: 'IMAGE' | 'VIDEO' | 'GAME' | 'WEBGL', file: File | undefined, onComplete: () => void, onCancelled: () => void, item?: SubmissionBinding, operationKey?: string, autoStart = Boolean(file)) {
+	const props = { operationKey, autoStart, onComplete, onCancelled };
+	if (kind === 'GAME' || kind === 'WEBGL') return <GameUploadWidget {...props} uploadKind={kind} projectId={7} initialFile={file} submissionItem={item} />;
 	if (kind === 'VIDEO') return <DirectVideoUploadWidget {...props} projectId={7} initialFiles={file ? [file] : []} submissionItems={item ? [item] : []} />;
 	return <DirectImageUploadWidget {...props} owner={{ type: 'PROJECT', id: 7 }} kind="IMAGE" initialFiles={file ? [file] : []} submissionItems={item ? [item] : []} />;
 }
-function mount(kind: 'IMAGE' | 'VIDEO' | 'GAME', file?: File, complete = vi.fn(), cancelled = vi.fn(), item?: SubmissionBinding, operationKey?: string, role = 'ADMIN') {
+function mount(kind: 'IMAGE' | 'VIDEO' | 'GAME' | 'WEBGL', file?: File, complete = vi.fn(), cancelled = vi.fn(), item?: SubmissionBinding, operationKey?: string, role = 'ADMIN') {
 	return { complete, cancelled, ...render(<StrictMode><QueryClientProvider client={client(role)}>{widget(kind, file, complete, cancelled, item, operationKey)}</QueryClientProvider></StrictMode>) };
 }
 const cancel = () => fireEvent.click(screen.getByRole('button', { name: /^취소/ }));
@@ -409,11 +412,8 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s job handoff through React
 		expect(net.createRequests).toHaveLength(1);
 		net.controls.hideCreation = false; net.creates[0]!.session.state = 'READY'; retry();
 		const key = kind === 'GAME' ? 'pcu.direct-asset-upload:7:GAME' : kind === 'IMAGE' ? 'pcu.direct-image-upload:PROJECT:7' : 'pcu.direct-video-upload:7';
-		if (kind === 'GAME') await waitFor(() => expect(sessionStorage.getItem(`${key}:creation`)).toBeNull());
-		else {
-			await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('원본과 일치'));
-			expect(sessionStorage.getItem(`${key}:creation`)).toContain(net.createRequests[0]!.clientUploadId);
-		}
+		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('원본과 일치'));
+		expect(sessionStorage.getItem(`${key}:creation`)).toContain(net.createRequests[0]!.clientUploadId);
 		expect(view.complete).not.toHaveBeenCalled(); expect(view.cancelled).not.toHaveBeenCalled();
 	});
 
@@ -532,11 +532,8 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s job handoff through React
 		const view = mount(kind, replacement); await screen.findByRole('button', { name: /시작/ });
 		net.creates[0]!.session.state = 'READY';
 		await act(async () => net.creates[0]!.response.resolve(json(net.creates[0]!.session)));
-		if (kind === 'GAME') await waitFor(() => expect(sessionStorage.getItem(storageKey())).toBeNull());
-		else {
-			await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('원본과 일치'));
-			expect(sessionStorage.getItem(storageKey())).toContain(net.creates[0]!.session.sessionId);
-		}
+		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('원본과 일치'));
+		expect(sessionStorage.getItem(storageKey())).toContain(net.creates[0]!.session.sessionId);
 		expect(view.complete).not.toHaveBeenCalled(); expect(view.cancelled).not.toHaveBeenCalled();
 	});
 	it('does not deliver the previous queue item completion to a new item with the same file', async () => {
@@ -559,7 +556,6 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s job handoff through React
 		await waitFor(() => expect(view.complete).toHaveBeenCalledOnce()); expect(view.cancelled).toHaveBeenCalledOnce();
 	});
 });
-
 
 it('blocks voting poster retry and file selection while cancellation is unconfirmed', async () => {
 	const net = network('POSTER', { type: 'EXHIBITION', id: 7 });
@@ -680,7 +676,6 @@ it.each(['READY', 'CANCELLED'] as const)('real parent queue reconciles %s once a
 	}
 	expect(net.deletes).toHaveLength(1);
 });
-
 
 describe.each(['IMAGE', 'VIDEO'] as const)('%s saved-only file verification', kind => {
 	const storageKey = () => kind === 'IMAGE' ? 'pcu.direct-image-upload:PROJECT:7' : 'pcu.direct-video-upload:7';
@@ -842,4 +837,177 @@ describe.each(['IMAGE', 'VIDEO'] as const)('%s real parent queue with a saved RE
 		if (selection !== 'legacy') expect(identity).toHaveBeenCalledWith(selected);
 		expect(net.creates).toHaveLength(0); expect(net.completes).toHaveLength(0);
 	});
+});
+
+describe.each(['IMAGE', 'VIDEO', 'GAME', 'WEBGL'] as const)('%s selection during saved session restoration', kind => {
+	const storageKey = () => kind === 'IMAGE' ? 'pcu.direct-image-upload:PROJECT:7'
+		: kind === 'VIDEO' ? 'pcu.direct-video-upload:7' : `pcu.direct-asset-upload:7:${kind}`;
+	const file = (contents = 'same-file', name?: string) => new File([contents], name ?? (kind === 'IMAGE' ? 'cover.png' : kind === 'VIDEO' ? 'video.mp4' : 'game.zip'));
+	async function storedSession(original = file()) {
+		const net = network(kind); const session = await net.seed(original, 'READY');
+		sessionStorage.setItem(storageKey(), JSON.stringify(kind === 'IMAGE' || kind === 'VIDEO'
+			? { session, originalName: original.name, totalBytes: original.size, completed: 0 } : session));
+		resetDirectUploadTasksForTests();
+		return { net, original, session };
+	}
+	it.each(['other-name', 'same-name-size'] as const)('does not complete B when A returns READY after an actual input selection (%s)', async variant => {
+		const { net, session } = await storedSession(); net.controls.holdStatus = true;
+		const view = mount(kind);
+		await waitFor(() => expect(net.statuses.length).toBeGreaterThan(0));
+		const identity = vi.spyOn(fileIdentity, 'createFileSourceIdentity');
+		const selected = file('diff-file', variant === 'other-name' ? 'other-file.zip' : undefined);
+		fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [selected] } });
+		net.controls.holdStatus = false;
+		await act(async () => { for (const request of net.statuses) request.response.resolve(json(session)); });
+		expect(view.complete).not.toHaveBeenCalled(); expect(view.cancelled).not.toHaveBeenCalled();
+		expect(sessionStorage.getItem(storageKey())).toContain('recovered');
+		expect(net.creates).toHaveLength(0); expect(net.completes).toHaveLength(0);
+		retry(); await screen.findByRole('alert');
+		if (variant === 'same-name-size') expect(identity).toHaveBeenCalledWith(selected);
+		expect(view.complete).not.toHaveBeenCalled(); expect(sessionStorage.getItem(storageKey())).toContain('recovered');
+		fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [file()] } }); retry();
+		await waitFor(() => expect(view.complete).toHaveBeenCalledOnce());
+		expect(sessionStorage.getItem(storageKey())).toBeNull();
+		expect(net.creates).toHaveLength(0); expect(net.completes).toHaveLength(0);
+	});
+	it.each(['none', 'identical'] as const)('recovers the original READY result with selection=%s exactly once', async selection => {
+		const { net } = await storedSession();
+		const view = mount(kind, selection === 'none' ? undefined : file());
+		await waitFor(() => expect(view.complete).toHaveBeenCalledOnce());
+		expect(sessionStorage.getItem(storageKey())).toBeNull();
+		expect(net.creates).toHaveLength(0); expect(net.completes).toHaveLength(0);
+	});
+	it.each(['selection', 'unmount'] as const)('revokes a real in-progress file hash on %s without consuming the original result', async change => {
+		// Real FileReader/WebCrypto work yields between blocks; no hash result or
+		// production client is mocked. Wait for an observed, still-pending hash.
+		const original = new File(['x'.repeat(2 * 1024 * 1024)], file().name);
+		const { net } = await storedSession(original);
+		const task = getDirectUploadTask('9', storageKey()); const matches = vi.spyOn(task, 'matchesFile');
+		const complete = vi.fn(); const cancelled = vi.fn();
+		const view = render(<QueryClientProvider client={client()}>{widget(kind, original, complete, cancelled, undefined, undefined, false)}</QueryClientProvider>);
+		await waitFor(() => expect(matches).toHaveBeenCalledWith(original), { interval: 1 });
+		const checking = matches.mock.results[0]!.value as Promise<boolean>;
+		let finished = false; void checking.then(() => { finished = true; });
+		await Promise.resolve(); expect(finished).toBe(false);
+		if (change === 'unmount') view.unmount();
+		else fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [file('diff-file')] } });
+		await act(async () => { await checking; });
+		expect(complete).not.toHaveBeenCalled(); expect(cancelled).not.toHaveBeenCalled();
+		expect(sessionStorage.getItem(storageKey())).toContain('recovered');
+		if (change === 'selection') {
+			expect(screen.queryByRole('alert')?.textContent ?? '').not.toContain('원본과 일치');
+			fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [original] } }); retry();
+			await waitFor(() => expect(complete).toHaveBeenCalledOnce());
+		} else {
+			const restored = mount(kind);
+			await waitFor(() => expect(restored.complete).toHaveBeenCalledOnce());
+		}
+		expect(net.creates).toHaveLength(0); expect(net.completes).toHaveLength(0);
+	});
+
+	it('does not treat an explicitly cleared selection as file-less original recovery', async () => {
+		const { net, session } = await storedSession(); net.controls.holdStatus = true;
+		const view = mount(kind); await waitFor(() => expect(net.statuses.length).toBeGreaterThan(0));
+		fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [file('diff-file')] } });
+		fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [] } });
+		net.controls.holdStatus = false;
+		await act(async () => { for (const request of net.statuses) request.response.resolve(json(session)); });
+		net.controls.cancelConflict = true; cancel();
+		await screen.findByRole('alert'); expect(view.complete).not.toHaveBeenCalled(); expect(view.cancelled).not.toHaveBeenCalled();
+		expect(sessionStorage.getItem(storageKey())).toContain('recovered');
+		view.unmount(); const original = mount(kind);
+		await waitFor(() => expect(original.complete).toHaveBeenCalledOnce());
+		expect(sessionStorage.getItem(storageKey())).toBeNull(); expect(net.creates).toHaveLength(0);
+	});
+
+	it('validates the current selection when task recovery finishes before a view run exists', async () => {
+		const net = network(kind); net.controls.loseCreate = true; net.controls.failLookup = true;
+		const old = mount(kind, file()); await screen.findByRole('alert'); old.unmount(); resetDirectUploadTasksForTests();
+		net.creates[0]!.session.state = 'READY'; net.controls.failLookup = false; net.controls.holdStatus = true;
+		const view = mount(kind); await waitFor(() => expect(net.statuses.length).toBeGreaterThan(0));
+		const selected = file('diff-file');
+		const identity = vi.spyOn(fileIdentity, 'createFileSourceIdentity');
+		fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [selected] } });
+		net.controls.holdStatus = false;
+		await act(async () => { for (const request of net.statuses) request.response.resolve(json(net.creates[0]!.session)); });
+		await screen.findByRole('alert'); expect(identity).toHaveBeenCalledWith(selected);
+		expect(view.complete).not.toHaveBeenCalled(); expect(sessionStorage.getItem(storageKey())).toContain('session-1');
+		expect(sessionStorage.getItem(`${storageKey()}:creation`)).toContain(net.createRequests[0]!.clientUploadId);
+		fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [file()] } }); retry();
+		await waitFor(() => expect(view.complete).toHaveBeenCalledOnce()); expect(net.creates).toHaveLength(1);
+	});
+
+});
+
+it.each(['IMAGE', 'VIDEO'] as const)('keeps the real %s parent queue pending after selection invalidates restored READY', async kind => {
+	const net = network(kind); const type = kind === 'IMAGE' ? 'image/png' : 'video/mp4';
+	const original = new File(['same-file'], kind === 'IMAGE' ? 'cover.png' : 'video.mp4', { type });
+	const next = new File(['next-file'], kind === 'IMAGE' ? 'next.png' : 'next.mp4', { type });
+	const session = await net.seed(original, 'READY');
+	const key = kind === 'IMAGE' ? 'pcu.direct-image-upload:PROJECT:7' : 'pcu.direct-video-upload:7';
+	sessionStorage.setItem(key, JSON.stringify({ session, originalName: original.name, totalBytes: original.size, completed: 0 }));
+	resetDirectUploadTasksForTests(); net.controls.holdStatus = true; net.controls.holdCreate = false; net.controls.holdComplete = true;
+	render(<QueryClientProvider client={client()}><LinearUploadContext.Provider value><AdminProjectUploadProvider project={project} projectId={7} limits={getClientUploadLimits('ADMIN')} canEditContent>
+		<AdminProjectAssetManager canEditContent /><QueueControls />
+	</AdminProjectUploadProvider></LinearUploadContext.Provider></QueryClientProvider>);
+	fireEvent.drop(screen.getByRole('button', { name: '게임·미디어·자료 선택' }).parentElement!, { dataTransfer: { files: [original, next], types: ['Files'] } });
+	fireEvent.click(screen.getByRole('button', { name: '적용' })); await waitFor(() => expect(net.statuses.length).toBeGreaterThan(0));
+	const list = screen.getByRole('list', { name: '변경 파일 업로드 진행' });
+	fireEvent.change(within(list).getByLabelText(/파일 선택/), { target: { files: [new File(['diff-file'], original.name, { type })] } });
+	net.controls.holdStatus = false;
+	await act(async () => { for (const request of net.statuses) request.response.resolve(json(session)); });
+	expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:active,${next.name}:pending`);
+	expect(net.creates).toHaveLength(0); expect(sessionStorage.getItem(key)).toContain('recovered');
+	fireEvent.change(within(list).getByLabelText(/파일 선택/), { target: { files: [original] } });
+	fireEvent.click(within(list).getByRole('button', { name: /재시도|이어올리기/ }));
+	await waitFor(() => expect(net.completes).toHaveLength(1));
+	expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:active`);
+	expect(net.createRequests.map(request => request.originalName)).toEqual([next.name]);
+	await act(async () => net.completes[0]!.response.resolve(json({ status: 'READY', sessionId: net.completes[0]!.id, generation: 1, sizeBytes: next.size })));
+	await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:done`));
+	expect(net.createRequests).toHaveLength(1);
+});
+
+it('voting poster does not credit a new input selection with a delayed original READY', async () => {
+	const net = network('POSTER', { type: 'EXHIBITION', id: 3 });
+	const original = new File(['same-file'], 'poster.png', { type: 'image/png' });
+	const session = await net.seed(original, 'READY');
+	sessionStorage.setItem('pcu.vote-poster:vote-1', JSON.stringify(session)); resetDirectUploadTasksForTests();
+	net.controls.holdStatus = true; const onReady = vi.fn();
+	render(<QueryClientProvider client={client()}><VotePosterUpload voteId="vote-1" exhibitionId={3} onReady={onReady} /></QueryClientProvider>);
+	await waitFor(() => expect(net.statuses.length).toBeGreaterThan(0));
+	fireEvent.change(screen.getByLabelText('투표 전용 포스터 업로드'), { target: { files: [new File(['diff-file'], original.name, { type: 'image/png' })] } });
+	net.controls.holdStatus = false;
+	await act(async () => { for (const request of net.statuses) request.response.resolve(json(session)); });
+	await screen.findByRole('alert'); expect(onReady).not.toHaveBeenCalled();
+	expect(sessionStorage.getItem('pcu.vote-poster:vote-1')).toContain('recovered');
+	fireEvent.change(screen.getByLabelText('투표 전용 포스터 업로드'), { target: { files: [original] } });
+	await waitFor(() => expect(onReady).toHaveBeenCalledExactlyOnceWith(session.sessionId));
+	expect(sessionStorage.getItem('pcu.vote-poster:vote-1')).toBeNull();
+	expect(net.creates).toHaveLength(0); expect(net.completes).toHaveLength(0);
+});
+
+
+it.each(['IMAGE', 'VIDEO'] as const)('ignores the real %s client late complete response while the parent queue uploads its next file', async kind => {
+	const net = network(kind); net.controls.holdCreate = false; net.controls.holdComplete = true;
+	const type = kind === 'IMAGE' ? 'image/png' : 'video/mp4';
+	const original = new File(['same-file'], kind === 'IMAGE' ? 'cover.png' : 'video.mp4', { type });
+	const next = new File(['next-file'], kind === 'IMAGE' ? 'next.png' : 'next.mp4', { type });
+	render(<QueryClientProvider client={client()}><AdminProjectUploadProvider project={project} projectId={7} limits={getClientUploadLimits('ADMIN')} canEditContent>
+		<AdminProjectAssetManager canEditContent /><QueueControls />
+	</AdminProjectUploadProvider></QueryClientProvider>);
+	fireEvent.drop(screen.getByRole('button', { name: '게임·미디어·자료 선택' }).parentElement!, { dataTransfer: { files: [original, next], types: ['Files'] } });
+	fireEvent.click(screen.getByRole('button', { name: '적용' })); await waitFor(() => expect(net.completes).toHaveLength(1));
+	// The server committed A, but its complete response is still in transit.
+	net.creates[0]!.session.state = 'READY'; net.controls.cancelConflict = true;
+	const list = screen.getByRole('list', { name: '변경 파일 업로드 진행' });
+	fireEvent.click(within(list).getByRole('button', { name: /^취소/ }));
+	await waitFor(() => expect(net.completes).toHaveLength(2));
+	expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:active`);
+	await act(async () => net.completes[0]!.response.resolve(json({ status: 'READY', sessionId: net.completes[0]!.id, generation: 1, sizeBytes: original.size })));
+	expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:active`);
+	expect(net.createRequests.map(request => request.originalName)).toEqual([original.name, next.name]);
+	await act(async () => net.completes[1]!.response.resolve(json({ status: 'READY', sessionId: net.completes[1]!.id, generation: 1, sizeBytes: next.size })));
+	await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:done`));
+	expect(net.creates).toHaveLength(2); expect(net.deletes).toHaveLength(1);
 });

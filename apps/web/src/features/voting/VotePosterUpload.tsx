@@ -11,16 +11,15 @@ export function VotePosterUpload({ voteId, exhibitionId, onReady }: {
 	const [error, setError] = useState('');
 	const [status, setStatus] = useState('');
 	const [terminal, setTerminal] = useState(false);
-	const fileRef = useRef(file);
 	const onReadyRef = useRef(onReady);
-	useEffect(() => { fileRef.current = file; onReadyRef.current = onReady; }, [file, onReady]);
+	useEffect(() => { onReadyRef.current = onReady; }, [onReady]);
 	const {
-		getSaved, restore, beginRun, finishRun, isCurrentRun, isMounted, transfer, acceptReady,
-		matchesFile, forget, cancel, taskMessage, handoff, saved, canContinue, cancelPending,
+		getSaved, restore, beginRun, finishRun, isCurrentRun, isMounted, transfer, acceptRestoredReady, selectFiles, getSelectedFiles,
+		forget, cancel, taskMessage, handoff, saved, canContinue, cancelPending,
 	} = useDirectUploadSession<DirectAssetUploadSession>({
-		storageKey: `pcu.vote-poster:${voteId}`, operationKey: `vote:${voteId}`,
+		storageKey: `pcu.vote-poster:${voteId}`, operationKey: `vote:${voteId}`, initialSelection: file ? [file] : [],
 		recovery: { owner: { type: 'EXHIBITION', id: exhibitionId }, kind: 'POSTER', items: [], files: file ? [file] : [], toSaved: session => session },
-		onCancelled: () => { setFile(null); setStatus('업로드가 취소되었습니다.'); },
+		onCancelled: () => { selectFiles([]); setFile(null); setStatus('업로드가 취소되었습니다.'); },
 		onCancelReady: candidate => { void observe(candidate); },
 		onCancelError: cause => { setError(getApiErrorMessage(cause)); setBusy(false); },
 		onCancelSettled: () => { setBusy(false); setError(''); setTerminal(false); },
@@ -40,13 +39,13 @@ export function VotePosterUpload({ voteId, exhibitionId, onReady }: {
 			setBusy(true); setStatus('포스터 처리 중…');
 			await waitForDirectAssetReady(candidate.sessionId, { signal: controller.signal });
 			if (!isCurrentRun(token)) return;
-			if (fileRef.current && !await matchesFile(fileRef.current)) throw new Error('이전 포스터와 선택한 파일이 다릅니다. 기존 업로드를 먼저 확인해 주세요.');
-			if (!isCurrentRun(token) || !acceptReady(activeRun, candidate.sessionId, candidate.generation)) return;
-			onReadyRef.current(candidate.sessionId); setFile(null); setStatus('포스터가 준비되었습니다.');
+			if (!await acceptRestoredReady(activeRun, candidate.sessionId, candidate.generation) || !isCurrentRun(token)) return;
+			setBusy(false); selectFiles([]); setFile(null); setStatus('포스터가 준비되었습니다.');
+			onReadyRef.current(candidate.sessionId);
 		} catch (cause) {
 			if (isCurrentRun(token)) setError(getApiErrorMessage(cause));
 		} finally { if (isCurrentRun(token)) setBusy(false); finishRun(token); }
-	}, [beginRun, isCurrentRun, acceptReady, finishRun, matchesFile]);
+	}, [beginRun, isCurrentRun, acceptRestoredReady, finishRun, selectFiles]);
 	useEffect(() => {
 		let disposed = false;
 		void restore().then(candidate => { if (!disposed && candidate) void observe(candidate); })
@@ -55,10 +54,11 @@ export function VotePosterUpload({ voteId, exhibitionId, onReady }: {
 	}, [restore, observe, handoff]);
 
 	async function upload(chosen: File) {
+		const selected = getSelectedFiles();
 		let run: UploadRun | null = null;
 		try {
 			const candidate = await restore();
-			if (!isMounted() || candidate === undefined) return;
+			if (!isMounted() || getSelectedFiles() !== selected || selected[0] !== chosen || candidate === undefined) return;
 			run = beginRun(); if (!run) return;
 			setBusy(true); setError(''); setTerminal(false);
 			if (candidate) {
@@ -72,8 +72,8 @@ export function VotePosterUpload({ voteId, exhibitionId, onReady }: {
 			if (!isCurrentRun(run.token)) return;
 			const confirmed = getSaved();
 			if (confirmed && confirmed.sessionId === result.sessionId) await observe(confirmed, run);
-		} catch (cause) { if (isMounted() && (!run || isCurrentRun(run.token))) setError(getApiErrorMessage(cause)); }
-		finally { if (!run || isCurrentRun(run.token)) setBusy(false); if (run) finishRun(run.token); }
+		} catch (cause) { if (isMounted() && getSelectedFiles() === selected && (!run || isCurrentRun(run.token))) setError(getApiErrorMessage(cause)); }
+		finally { if (getSelectedFiles() === selected && (!run || isCurrentRun(run.token))) setBusy(false); if (run) finishRun(run.token); }
 	}
 	function startNew() {
 		const candidate = getSaved();
@@ -83,7 +83,7 @@ export function VotePosterUpload({ voteId, exhibitionId, onReady }: {
 	return <div className="vote-upload form-field">
 		<label className="form-field form-field__label">투표 전용 포스터 업로드
 			<input className="form-control" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={busy || !canContinue}
-				onChange={event => { const chosen = event.target.files?.[0]; if (chosen) { fileRef.current = chosen; setFile(chosen); void upload(chosen); } }} />
+				onChange={event => { const chosen = event.target.files?.[0]; if (chosen) { selectFiles([chosen]); setFile(chosen); void upload(chosen); } }} />
 		</label>
 		<p className="field-hint">이 이미지를 투표 화면에 공개합니다. 작품·전시회 원본 포스터는 변경하지 않습니다.</p>
 		<p role="status" className="field-hint">{status}</p>

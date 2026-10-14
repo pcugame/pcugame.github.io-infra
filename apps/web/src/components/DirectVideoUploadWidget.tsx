@@ -10,7 +10,7 @@ import {
 	type DirectAssetUploadSession,
 	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
-import { fileVerificationMessage, type SubmissionBinding } from '../lib/upload/directUploadTask';
+import type { SubmissionBinding } from '../lib/upload/directUploadTask';
 import { useDirectUploadSession, type UploadRun } from '../lib/upload/useDirectUploadSession';
 import { queryKeys } from '../lib/query';
 import type { DirectAssetUploadKind } from '../contracts';
@@ -93,15 +93,13 @@ function VideoUploadSession({
 	const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
 	const [restoreDone, setRestoreDone] = useState(false);
 	const completedRef = useRef(0);
-	const initialFilesRef = useRef(initialFiles);
 	const autoStarted = useRef(false);
 	const autoPausedRef = useRef(false);
 	const completionReported = useRef(false);
 	const onCompleteRef = useRef(onComplete);
 	useEffect(() => {
-		initialFilesRef.current = initialFiles;
 		onCompleteRef.current = onComplete;
-	}, [initialFiles, onComplete]);
+	}, [onComplete]);
 	const storageKey = `pcu.direct-${kind.toLowerCase()}-upload:${projectId}`;
 
 	const reportCompletion = useCallback(() => {
@@ -114,10 +112,10 @@ function VideoUploadSession({
 	const {
 		saved: resumable, getSaved, remember: rememberLocator, forget, isMounted,
 		beginRun, isCurrentRun, finishRun, pause: pauseSession, cancel: cancelSession,
-		transfer, acceptReady, restore: restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, taskMessage, canContinue, cancelPending,
+		transfer, acceptReady, acceptRestoredReady, selectFiles, getSelectedFiles, restore: restoreTask, restoreRequired, isPendingCreate, handoff, taskMessage, canContinue, cancelPending,
 	} = useDirectUploadSession<SavedVideoSession>({
-		storageKey, operationKey, onCancelled,
-		recovery: { owner: { type: 'PROJECT', id: projectId }, kind, items: submissionItems, files: initialFiles,
+		storageKey, operationKey, onCancelled, initialSelection: files,
+		recovery: { owner: { type: 'PROJECT', id: projectId }, kind, items: submissionItems, files,
 			toSaved: (session, status, index) => ({ session, originalName: status.originalName, totalBytes: status.totalBytes, completed: index }) },
 		onCancelReady: (saved, state) => {
 			// READY is already confirmed: continue the video queue without another poll.
@@ -156,11 +154,11 @@ function VideoUploadSession({
 				token = activeRun.token;
 				activeRun.controller.signal.addEventListener('abort', () => controller.abort(), { once: true });
 				if (saved.session.kind !== kind || saved.session.owner.type !== 'PROJECT' || saved.session.owner.id !== projectId) throw new Error('owner');
-				const chosen = initialFilesRef.current;
+				const chosen = getSelectedFiles();
 				const completedBefore = recoveringManifest || (compact && chosen.length === 1)
 					? 0 : saved.completed ?? 0;
-				const matchesChosen = chosen.length === 0
-					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes && await matchesFile(chosen[completedBefore]!));
+				const sameQueuePosition = chosen.length === 0
+					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes);
 				updateCompleted(completedBefore);
 				remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 				const status = await getDirectAssetUploadStatus(saved.session.sessionId, controller.signal);
@@ -172,13 +170,8 @@ function VideoUploadSession({
 					setPhase('verifying');
 					await waitForDirectAssetReady(status.sessionId, { signal: controller.signal });
 					if (!disposed && isCurrentRun(token) && !controller.signal.aborted) {
-						if (!matchesChosen) {
-							updateCompleted(0);
-							setError(fileVerificationMessage);
-							setPhase('idle');
-							return;
-						}
-						if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
+						if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, completedBefore)
+							|| !isCurrentRun(token)) return;
 						const nextCompleted = completedBefore + 1;
 						updateCompleted(nextCompleted);
 						if (chosen.length === 0 || nextCompleted >= chosen.length) {
@@ -193,13 +186,8 @@ function VideoUploadSession({
 					return;
 				}
 				if (status.state === 'READY') {
-					if (!matchesChosen) {
-						updateCompleted(0);
-						setError(fileVerificationMessage);
-						setPhase('idle');
-						return;
-					}
-					if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
+					if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, completedBefore)
+						|| !isCurrentRun(token)) return;
 					const nextCompleted = completedBefore + 1;
 					updateCompleted(nextCompleted);
 					if (chosen.length === 0 || nextCompleted >= chosen.length) {
@@ -208,7 +196,7 @@ function VideoUploadSession({
 					return;
 				}
 				if (status.state === 'CANCELLED') {
-					if (matchesChosen) { autoPausedRef.current = true; autoStarted.current = true; }
+					if (sameQueuePosition) { autoPausedRef.current = true; autoStarted.current = true; }
 					else updateCompleted(0);
 					forget(saved.session.sessionId);
 				}
@@ -218,8 +206,12 @@ function VideoUploadSession({
 					setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다. 종료된 업로드는 새 업로드 시작을 선택해 주세요.`);
 					setPhase('idle');
 				}
-			} catch {
-				// An unavailable status must not discard a resumable locator.
+			} catch (cause) {
+				// Preserve the original locator on mismatch or unavailable status.
+				if (!disposed && isCurrentRun(token)) {
+					setError(getApiErrorMessage(cause));
+					setPhase('idle');
+				}
 			}
 		};
 		void restore().finally(() => {
@@ -231,7 +223,7 @@ function VideoUploadSession({
 			controller.abort();
 			finishRun(token);
 		};
-	}, [restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, recoveringManifest, compact, forget, kind, projectId, remember, storageKey, updateCompleted, beginRun, finishRun, isCurrentRun, acceptReady, reportCompletion]);
+	}, [restoreTask, restoreRequired, getSelectedFiles, acceptRestoredReady, isPendingCreate, handoff, recoveringManifest, compact, forget, kind, projectId, remember, storageKey, updateCompleted, beginRun, finishRun, isCurrentRun, acceptReady, reportCompletion]);
 
 	const uploadQueue = useCallback(async (
 		chosen: readonly File[],
@@ -292,16 +284,16 @@ function VideoUploadSession({
 		activeRun: UploadRun,
 	) => {
 		if (!isCurrentRun(activeRun.token)) return;
-		const matches = chosen.length === 0 || (matchesSavedFile(chosen, saved) && await matchesFile(chosen[saved.completed ?? 0]!));
-		if (!matches) {
+		try {
+			if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, saved.completed ?? 0)
+				|| !isCurrentRun(activeRun.token)) return;
+		} catch (cause) {
+			if (!isCurrentRun(activeRun.token)) return;
 			updateCompleted(0);
-			qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
-			finishRun(activeRun.token);
-			setError(fileVerificationMessage);
+			setError(getApiErrorMessage(cause));
 			setPhase('error');
 			return;
 		}
-		if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 		const nextCompleted = (saved.completed ?? completedRef.current) + 1;
 		updateCompleted(nextCompleted);
 		if (nextCompleted < chosen.length) {
@@ -310,7 +302,7 @@ function VideoUploadSession({
 		}
 		if (!isCurrentRun(activeRun.token)) return;
 		reportCompletion();
-	}, [matchesSavedFile, matchesFile, acceptReady, isCurrentRun, reportCompletion, finishRun, projectId, qc, updateCompleted, uploadQueue]);
+	}, [acceptRestoredReady, isCurrentRun, reportCompletion, updateCompleted, uploadQueue]);
 	const observeSavedReady = useCallback(async (
 		saved: SavedVideoSession,
 		chosen: readonly File[],
@@ -402,11 +394,12 @@ function VideoUploadSession({
 	}, [cancelSession]);
 
 	const start = () => {
+		const selected = getSelectedFiles();
 		void restoreTask().then(saved => {
-			if (!isMounted() || saved === undefined) return;
-			if (saved) void resumeQueue(files, saved, terminalSessionId === saved.session.sessionId);
-			else { completionReported.current = false; void uploadQueue(files); }
-		}).catch(cause => { if (isMounted()) { setError(getApiErrorMessage(cause)); setPhase('error'); } });
+			if (!isMounted() || getSelectedFiles() !== selected || saved === undefined) return;
+			if (saved) void resumeQueue(selected, saved, terminalSessionId === saved.session.sessionId);
+			else { completionReported.current = false; void uploadQueue(selected); }
+		}).catch(cause => { if (isMounted() && getSelectedFiles() === selected) { setError(getApiErrorMessage(cause)); setPhase('error'); } });
 	};
 	const retry = start;
 
@@ -464,6 +457,7 @@ function VideoUploadSession({
 						const selected = Array.from(event.target.files ?? []);
 
 						if (maxFileBytes !== undefined && selected.some((file) => file.size > maxFileBytes || file.size === 0)) {
+							selectFiles([]);
 							setFiles([]);
 							setError(`빈 파일은 업로드할 수 없으며 파일당 최대 ${maxFileBytes / 1024 / 1024} MiB까지 허용됩니다.`);
 							event.target.value = '';
@@ -472,12 +466,14 @@ function VideoUploadSession({
 						const saved = getSaved();
 						const pendingCount = Math.max(0, selected.length - (saved?.completed ?? 0));
 						if (pendingCount > maxFiles) {
+							selectFiles([]);
 							setFiles([]);
 							updateCompleted(0);
 							setError(kind === 'VIDEO' ? `동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다. 현재 ${maxFiles}개까지 추가할 수 있습니다.` : `${label}은 현재 ${maxFiles}개까지 추가할 수 있습니다.`);
 							event.target.value = '';
 							return;
 						}
+						selectFiles(selected);
 						setFiles(selected);
 						completionReported.current = false;
 						if (saved && !matchesSavedFile(selected, saved)) {

@@ -107,7 +107,7 @@ describe('video shared session lifetime', () => {
 		expect(api.ready).toHaveBeenCalledOnce();
 		expect(api.ready.mock.calls[0][1].signal.aborted).toBe(false);
 		await act(async () => { ready.resolve({ ...session, state: 'READY' }); });
-		expect(latest).toHaveBeenCalledOnce();
+		await waitFor(() => expect(latest).toHaveBeenCalledOnce());
 		expect(completed).not.toHaveBeenCalled();
 		expect(api.upload).not.toHaveBeenCalled();
 	});
