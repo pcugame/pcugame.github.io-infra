@@ -60,7 +60,7 @@ export function SubmissionUploadProgress({
 						const pendingItems = selected.length
 							? kindItems
 							: kindItems.filter((item) => item.state !== 'READY');
-						const binding = pendingItems.map((item) => ({ id: item.id, clientToken: item.clientToken }));
+						const binding = pendingItems;
 						return (
 							<li key={`${kind}:${pendingItems.map((item) => item.id).join(':')}`}>
                                 {selected.length === 0 && !kindItems.every(item => item.state === 'READY') && <UploadFileRows names={kindItems.filter(item => item.state === 'READY').map((item, index) => fileNames[item.slot] ?? `${uploadKindLabels[kind]} ${index + 1}`)} phase="ready" />}

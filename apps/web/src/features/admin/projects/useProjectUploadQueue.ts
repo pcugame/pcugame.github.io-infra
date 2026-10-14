@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useReducer, useRef, useState } from 'react';
+import type { SubmissionBinding } from '../../../lib/upload/directUploadTask';
+import { useCallback, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminProjectDetail } from '@pcu/contracts';
 import { adminAssetApi, adminProjectApi, publicApi } from '../../../lib/api';
@@ -34,6 +35,7 @@ export function useProjectUploadQueue(
 	limits: ClientUploadLimits,
 	enabled: boolean,
 ) {
+	const queueId = useId();
 	const [entries, dispatch] = useReducer(reducer, []);
 	const [posterError, setPosterError] = useState<string | null>(null);
 	const [refreshError, setRefreshError] = useState(false);
@@ -42,10 +44,11 @@ export function useProjectUploadQueue(
 	const [isApplying, setIsApplying] = useState(false);
 	const applying = useRef(false);
 	const completedUploads = useRef(new Set<number>());
+	const activeEntry = useRef<number | null>(null);
 	const interruptedApply = useRef<Error | null>(null);
 	const [retryAttempt, setRetryAttempt] = useState(0);
 	const [cancelAttempt, setCancelAttempt] = useState(0);
-	const [submissionItem, setSubmissionItem] = useState<{ id: string; clientToken: string }>();
+	const [submissionItem, setSubmissionItem] = useState<SubmissionBinding>();
 	const [removals, setRemovals] = useState<number[]>([]);
 	const [removeWebgl, setRemoveWebgl] = useState(false);
 	const deleted = useRef(new Set<number>());
@@ -110,6 +113,8 @@ export function useProjectUploadQueue(
 		}
 	}, [projectId, qc]);
 	const complete = useCallback((id: number) => {
+		if (activeEntry.current !== id || completedUploads.current.has(id)) return;
+		activeEntry.current = null;
 		// Checkpoint the completed transfer before refreshing; a failed read must never repeat it.
 		completedUploads.current.add(id);
 		dispatch({ type: 'status', id, status: 'done' });
@@ -124,6 +129,8 @@ export function useProjectUploadQueue(
 		waiter.current = null;
 	}, []);
 	const cancel = useCallback((id: number) => {
+		if (completedUploads.current.has(id)) return;
+		if (activeEntry.current === id) activeEntry.current = null;
 		dispatch({ type: 'status', id, status: 'cancelled' });
 		fail('파일 업로드를 취소했습니다. 남은 변경사항을 확인한 뒤 다시 적용해 주세요.');
 	}, [fail]);
@@ -166,12 +173,13 @@ export function useProjectUploadQueue(
 						.sort((a, b) => a.slot.localeCompare(b.slot, undefined, { numeric: true }))
 						.find((item) => item.kind === entry.kind && item.state !== 'READY');
 					if (!item) throw new Error('이 종류의 제출 파일은 이미 업로드되었거나 제출 목록에 없습니다. 제출 완료 후 파일을 추가·교체해 주세요.');
-					setSubmissionItem({ id: item.id, clientToken: item.clientToken });
+					setSubmissionItem(item);
 				} else {
 					setSubmissionItem(undefined);
 				}
 				await new Promise<void>((resolve, reject) => {
 					waiter.current = { resolve, reject };
+					activeEntry.current = entry.id;
 					if (entry.status === 'active') setRetryAttempt((attempt) => attempt + 1);
 					else dispatch({ type: 'status', id: entry.id, status: 'active' });
 				});
@@ -186,6 +194,7 @@ export function useProjectUploadQueue(
 	const owner = useMemo(() => ({ type: 'PROJECT' as const, id: projectId }), [projectId]);
 	return {
 		limits,
+		queueId,
 		entries,
 		project,
 		locked: locked || isApplying,

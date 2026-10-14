@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 import './helpers/dialog';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -7,7 +10,7 @@ import { StrictMode } from 'react';
 import { ProjectPreviewPanel } from '../components/project/ProjectPreviewModal';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectSubmissionItemStatus, ProjectSubmissionManifestItem } from '../contracts';
+import type { DirectGameUploadCompletionResponse, ProjectSubmissionItemStatus, ProjectSubmissionManifestItem } from '../contracts';
 import { ProjectSubmissionStudio } from '../features/project-submission/studio/ProjectSubmissionStudio';
 
 const controls = vi.hoisted(() => ({
@@ -337,8 +340,8 @@ describe('submission studio', () => {
 		const first = new File(['first'], 'first.png', { type: 'image/png' });
 		const second = new File(['second'], 'second.png', { type: 'image/png' });
 		const poster = new File(['poster'], 'poster.png', { type: 'image/png' });
-		let finishPoster!: (value: { status: 'READY'; sessionId: string }) => void;
-		controls.upload.mockImplementation((_owner, file: File, kind, _progress, options) => {
+		let finishPoster!: (value: DirectGameUploadCompletionResponse) => void;
+		controls.upload.mockImplementation((_owner, file: File, kind, _progress, options): Promise<DirectGameUploadCompletionResponse> => {
 			const session = {
 				sessionId: file.name,
 				owner: { type: 'PROJECT', id: 73 },
@@ -351,7 +354,7 @@ describe('submission studio', () => {
 				sourceIdentity: 'a'.repeat(64),
 			};
 			options.onSession(session);
-			if (file === first) return Promise.resolve({ status: 'READY', sessionId: file.name });
+			if (file === first) return Promise.resolve({ status: 'READY', sessionId: file.name, generation: 1, sizeBytes: file.size });
 			if (file === poster)
 				return new Promise((resolve) => {
 					finishPoster = resolve;
@@ -370,7 +373,7 @@ describe('submission studio', () => {
 			item.slot === 'image:0' || item.kind === 'POSTER' ? { ...item, state: 'READY' } : item,
 		);
 		await act(async () => {
-			finishPoster({ status: 'READY', sessionId: poster.name });
+			finishPoster({ status: 'READY', sessionId: poster.name, generation: 1, sizeBytes: poster.size });
 		});
 		await waitFor(() => expect(controls.status).toHaveBeenCalledTimes(2));
 		expect(controls.upload.mock.calls.map((call) => call[1].name).sort()).toEqual([
@@ -392,6 +395,7 @@ describe('submission studio', () => {
 			clientToken: `token-${index}`,
 			required: true,
 			state: state as ProjectSubmissionItemStatus['state'],
+            ...(state === 'VERIFYING' ? { sessionId: 'second-session', generation: 1 } : {}),
 		}));
 		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
 		const session = {

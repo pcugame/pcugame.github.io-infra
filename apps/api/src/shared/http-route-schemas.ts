@@ -1,3 +1,4 @@
+import { DirectAssetUploadCreationSchema, DirectAssetUploadCreationLookupSchema } from '@pcu/contracts';
 import { AllowWebglNetworkBatchSchema, CreateWebglNetworkBatchSchema, WebglNetworkBatchResponseSchema } from '@pcu/contracts';
 import { WebglDiagnosticDataSchema } from '@pcu/contracts';
 import * as Voting from '@pcu/contracts';
@@ -131,6 +132,7 @@ const IdempotencyHeadersSchema = z.object({
 	'idempotency-key': z.string().min(1).max(200),
 }).passthrough();
 const DirectSourceIdentityBody = z.object({
+	clientUploadId: z.string().uuid().optional(),
  voteId: z.string().uuid().optional(),
 	originalName: z.string().min(1).max(255), totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 	sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/),
@@ -147,7 +149,7 @@ const DirectOwnerSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('PROJECT'), id: z.number().int().positive() }),
 	z.object({ type: z.literal('EXHIBITION'), id: z.number().int().positive() }),
 ]);
-const DirectSessionResponseSchema = z.object({ sessionId: z.string(), owner: DirectOwnerSchema, generation: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string(), sourceIdentityBlockSizeBytes: z.literal(1_048_576) });
+const DirectSessionResponseSchema = DirectAssetUploadCreationSchema;
 const DirectStatusResponseSchema = z.object({ sessionId: z.string(), projectId: z.number().int().positive().optional(), exhibitionId: z.number().int().positive().optional(), owner: DirectOwnerSchema, kind: z.enum(['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'POSTER', 'DOCUMENT', 'ATTACHMENT']), state: z.string(), generation: z.number().int().positive(), originalName: z.string(), totalBytes: z.number().int().positive(), partSizeBytes: z.number().int().positive(), totalParts: z.number().int().positive(), expiresAt: z.string(), sourceIdentityAlgorithm: z.literal('SHA256_BLOCK_MANIFEST_V1'), sourceIdentity: z.string().regex(/^[a-f0-9]{64}$/), parts: z.array(z.object({ partNumber: z.number().int().positive(), etag: z.string(), sizeBytes: z.number().int().positive() })) });
 const DirectPartUrlsResponseSchema = z.object({ generation: z.number().int().positive(), expiresAt: z.string(), parts: z.array(z.object({ partNumber: z.number().int().positive(), url: z.string().url(), requiredHeaders: z.record(z.string(), z.string()) })) });
 const DirectCompletionResponseSchema = z.object({ status: z.enum(['VERIFYING', 'READY']), sessionId: z.string(), generation: z.number().int().positive(), sizeBytes: z.number().int().positive() });
@@ -726,6 +728,12 @@ export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
 		method: 'POST', url: '/api/admin/exhibitions/:id/direct-poster-upload-sessions', family: 'direct-asset-upload',
 		bodyBoundary: 'json', responseBoundary: 'json', params: IdParamsSchema, querystring: EmptyObjectSchema,
 		body: DirectSourceIdentityBody, response: jsonResponse(DirectSessionResponseSchema, 201),
+	}),
+	contract({
+		method: 'GET', url: '/api/admin/direct-asset-upload-creations/:clientUploadId', family: 'direct-asset-upload',
+		bodyBoundary: 'none', responseBoundary: 'json', querystring: EmptyObjectSchema,
+		params: z.object({ clientUploadId: z.string().uuid() }).strict(), body: NoBodySchema,
+		response: jsonResponse(DirectAssetUploadCreationLookupSchema),
 	}),
 	contract({
 		method: 'POST', url: '/api/admin/direct-asset-upload-sessions/:sessionId/part-urls', family: 'direct-asset-upload',

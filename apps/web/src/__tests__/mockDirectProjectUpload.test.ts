@@ -1,5 +1,5 @@
 /* @vitest-environment jsdom */
-import { AdminProjectDetailSchema, ProjectSubmissionStatusResponseSchema, SubmitProjectResponseSchema, type ProjectChangeDetail } from '@pcu/contracts';
+import { DirectAssetUploadCreationLookupSchema, AdminProjectDetailSchema, ProjectSubmissionStatusResponseSchema, SubmitProjectResponseSchema, type ProjectChangeDetail } from '@pcu/contracts';
 import { Blob as NodeBlob, File as NodeFile } from 'node:buffer';
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,6 +36,22 @@ beforeEach(async () => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('persisted project direct upload mock through the actual client', () => {
+  it('persists creation identities across cache loss, isolates users, and rejects a different replay body', async () => {
+    await selectMockUser('ADMIN');
+    const source = file(); const proof = await createFileSourceIdentity(source);
+    const clientUploadId = crypto.randomUUID();
+    const body = { clientUploadId, originalName: source.name, totalBytes: source.size, ...proof };
+    const path = '/api/admin/projects/1/direct-game-upload-sessions';
+    const first = await request<{sessionId:string}>(path, 'POST', body);
+    forgetMockCacheForTests();
+    const observed = DirectAssetUploadCreationLookupSchema.parse(await request(`/api/admin/direct-asset-upload-creations/${clientUploadId}`));
+    expect(observed).toMatchObject({ status: 'OBSERVED', session: { clientUploadId, sessionId: first.sessionId, state: 'UPLOADING' } });
+    expect(await request(path, 'POST', body)).toMatchObject({ sessionId: first.sessionId });
+    await expect(request(path, 'POST', { ...body, originalName: 'different.zip' })).rejects.toMatchObject({ status: 409, code: 'IDEMPOTENCY_CONFLICT' });
+    await selectMockUser('owner');
+    expect(await request(`/api/admin/direct-asset-upload-creations/${clientUploadId}`)).toEqual({ status: 'NOT_OBSERVED', clientUploadId });
+  });
+
   it('serializes strict submission contracts without internal scheduling or ownership fields', async () => {
     const created = await submit('Strict responses', []); expect(SubmitProjectResponseSchema.safeParse(created).success).toBe(true);
     const pending = await status(created.id); expect(ProjectSubmissionStatusResponseSchema.parse(pending).state).toBe('PENDING');

@@ -1266,6 +1266,18 @@
       "uiSources": [
         "pages/WebglNetworkPage.tsx"
       ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/admin/direct-asset-upload-creations/:clientUploadId",
+      "priority": "P0",
+      "domain": "uploads.ts",
+      "testFiles": [
+        "mockDirectProjectUpload.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/game-upload.ts"
+      ]
     }
   ]
 }

@@ -410,6 +410,9 @@ model WebglDeployment {
 /// Canonical direct-to-Garage multipart session for all bulk asset kinds.
 /// Garage ListParts is authoritative; no part/chunk rows are persisted here.
 model AssetUploadSession {
+  // Nullable for old writers; never inferred from a file hash or UI operation key.
+  clientUploadId String? @map("client_upload_id")
+  createRequestHash String? @map("create_request_hash")
   voteId String? @map("vote_id")
   id                           String                  @id @default(uuid())
   projectId                    Int?                    @map("project_id")
@@ -477,6 +480,7 @@ model AssetUploadSession {
   @@index([state, validationLeaseUntil], map: "asset_upload_sessions_validation_recovery_idx")
   @@index([bucket, objectKey], map: "asset_upload_sessions_bucket_object_key_idx")
   @@index([expectedTargetAssetId, expectedTargetAssetUpdatedAt], map: "asset_upload_sessions_expected_target_fence_idx")
+  @@unique([userId, clientUploadId], map: "asset_upload_sessions_user_client_upload_key")
   @@map("asset_upload_sessions")
 }
 

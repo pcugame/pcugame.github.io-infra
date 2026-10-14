@@ -142,3 +142,6 @@ export * from './voting.js';
 
 export * from './connection-profiles.js';
 export * from './connection-draft.js';
+
+export { DirectAssetUploadCreationSchema, DirectAssetUploadCreationLookupSchema } from './game-upload.js';
+export type { DirectAssetUploadCreation, DirectAssetUploadCreationLookup } from './game-upload.js';

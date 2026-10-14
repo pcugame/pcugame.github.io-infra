@@ -5,13 +5,13 @@ import { useContext, useCallback, useEffect, useId, useRef, useState } from 'rea
 import { useQueryClient } from '@tanstack/react-query';
 import { getApiErrorMessage } from '../lib/api';
 import {
-	cancelDirectAssetUploadSession,
 	getDirectAssetUploadStatus,
-	uploadDirectAssetFile,
 	waitForDirectAssetReady,
 	type DirectAssetUploadSession,
 	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
+import type { SubmissionBinding } from '../lib/upload/directUploadTask';
+import { useDirectUploadSession, type UploadRun } from '../lib/upload/useDirectUploadSession';
 import { queryKeys } from '../lib/query';
 import type { DirectAssetUploadKind } from '../contracts';
 
@@ -28,6 +28,7 @@ interface SavedVideoSession {
 }
 
 interface Props {
+	operationKey?: string;
 	projectId: number;
 	initialFiles?: readonly File[];
 	autoStart?: boolean;
@@ -42,7 +43,7 @@ interface Props {
 	displayNames?: string[];
 	compact?: boolean;
 	onSkip?: () => void;
-	submissionItems?: readonly { id: string; clientToken: string }[];
+	submissionItems?: readonly SubmissionBinding[];
 	/** Available VIDEO slots for this upload operation (project maximum is five). */
 	maxFiles?: number;
 	maxFileBytes?: number;
@@ -52,10 +53,15 @@ interface Props {
 }
 
 /**
- * Sequential canonical VIDEO uploader. The server permits one live VIDEO
- * multipart session, so selected files deliberately run one at a time.
+ * This widget uploads its selected files sequentially. The database permits
+ * concurrent VIDEO sessions in distinct reserved slots (up to five per project).
  */
-export default function DirectVideoUploadWidget({
+export default function DirectVideoUploadWidget(props: Props) {
+	return <VideoUploadSession key={`${props.projectId}:${props.kind ?? 'VIDEO'}`} {...props} />;
+}
+
+function VideoUploadSession({
+	operationKey,
 	projectId,
 	initialFiles = EMPTY_VIDEO_FILES,
 	autoStart = false,
@@ -84,164 +90,140 @@ export default function DirectVideoUploadWidget({
 	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
-	const [resumable, setResumable] = useState<SavedVideoSession | null>(null);
+	const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
 	const [restoreDone, setRestoreDone] = useState(false);
-	const mountedRef = useRef(true);
-	const resumableRef = useRef<SavedVideoSession | null>(null);
 	const completedRef = useRef(0);
 	const autoStarted = useRef(false);
-	const submitting = useRef(false);
-	const cancelling = useRef(false);
-	const runTokenRef = useRef(0);
-	const runRef = useRef<{ token: number; controller: AbortController } | null>(null);
-	const restoreControllerRef = useRef<AbortController | null>(null);
-	const pausedRunTokenRef = useRef<number | null>(null);
 	const autoPausedRef = useRef(false);
-	const cancelledRunTokensRef = useRef(new Set<number>());
-	const pendingCreateTokensRef = useRef(new Set<number>());
-	const cancellationIntentRef = useRef(false);
-	const cancellationRequestedSessionIdsRef = useRef(new Set<string>());
-	const lateCancelSessionIdRef = useRef<string | null>(null);
-	const cancelLateCreatedSessionRef = useRef<(saved: SavedVideoSession, sourceToken: number) => void>(() => undefined);
+	const completionReported = useRef(false);
+	const onCompleteRef = useRef(onComplete);
+	useEffect(() => {
+		onCompleteRef.current = onComplete;
+	}, [onComplete]);
 	const storageKey = `pcu.direct-${kind.toLowerCase()}-upload:${projectId}`;
 
+	const reportCompletion = useCallback(() => {
+		if (completionReported.current) return;
+		completionReported.current = true;
+		setPhase('ready');
+		qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
+		onCompleteRef.current?.();
+	}, [projectId, qc]);
+	const {
+		saved: resumable, getSaved, remember: rememberLocator, forget, isMounted,
+		beginRun, isCurrentRun, finishRun, pause: pauseSession, cancel: cancelSession,
+		transfer, acceptReady, acceptRestoredReady, selectFiles, getSelectedFiles, restore: restoreTask, restoreRequired, isPendingCreate, handoff, taskMessage, canContinue, cancelPending,
+	} = useDirectUploadSession<SavedVideoSession>({
+		storageKey, operationKey, onCancelled, initialSelection: files,
+		recovery: { owner: { type: 'PROJECT', id: projectId }, kind, items: submissionItems, files,
+			toSaved: (session, status, index) => ({ session, originalName: status.originalName, totalBytes: status.totalBytes, completed: index }) },
+		onCancelReady: (saved, state) => {
+			// READY is already confirmed: continue the video queue without another poll.
+			if (state === 'READY') {
+				const run = beginRun();
+				if (run) void continueAfterReady(saved, files, run).finally(() => finishRun(run.token));
+			} else void observeSavedReady(saved, files);
+		},
+		onCancelError: (cause, terminalState) => {
+			if (terminalState) setTerminalSessionId(getSaved()?.session.sessionId ?? null);
+			setError(terminalState ? `업로드 세션이 ${terminalState.toLowerCase()} 상태입니다.` : getApiErrorMessage(cause));
+			setPhase('idle');
+		},
+		onCancelSettled: () => { setTerminalSessionId(null); autoPausedRef.current = true; setProgress(null); setError(null); setPhase('idle'); },
+	});
 	const updateCompleted = useCallback((next: number) => {
 		completedRef.current = next;
-		if (mountedRef.current) setCompleted(next);
-	}, []);
-	const remember = useCallback((session: DirectAssetUploadSession, file: Pick<File, 'name' | 'size'>, completedBefore: number, updateUi = true) => {
-		const value: SavedVideoSession = { session, originalName: file.name, totalBytes: file.size, completed: completedBefore };
-		resumableRef.current = value;
-		window.sessionStorage.setItem(storageKey, JSON.stringify(value));
-		if (updateUi && mountedRef.current) setResumable(value);
-	}, [storageKey]);
-	const forget = useCallback((expectedSessionId?: string) => {
-		if (expectedSessionId && resumableRef.current?.session.sessionId !== expectedSessionId) return false;
-		resumableRef.current = null;
-		window.sessionStorage.removeItem(storageKey);
-		if (mountedRef.current) setResumable(null);
-		return true;
-	}, [storageKey]);
-	const isCurrentRun = useCallback((token: number) => (
-		mountedRef.current && runRef.current?.token === token
-	), []);
-	const finishCancellation = useCallback(() => {
-		// Aborting a create does not prove that no server session was created.
-		cancelling.current = cancelledRunTokensRef.current.size > 0 || cancellationRequestedSessionIdsRef.current.size > 0;
-		if (!cancelling.current && pendingCreateTokensRef.current.size === 0 && !resumableRef.current
-			&& cancellationIntentRef.current && mountedRef.current) {
-			cancellationIntentRef.current = false;
-			onCancelled?.();
-		}
-	}, [onCancelled]);
-	const beginRun = useCallback(() => {
-		if (submitting.current || cancelling.current || !mountedRef.current) return null;
-		const controller = new AbortController();
-		const token = ++runTokenRef.current;
-		cancellationIntentRef.current = false;
-		pausedRunTokenRef.current = null;
-		runRef.current = { token, controller };
-		submitting.current = true;
-		return { token, controller };
-	}, []);
-	const abortLocalWork = useCallback(() => {
-		const active = runRef.current;
-		if (active) {
-			runTokenRef.current += 1;
-			runRef.current = null;
-			submitting.current = false;
-			active.controller.abort();
-		}
-		restoreControllerRef.current?.abort();
-		restoreControllerRef.current = null;
-	}, []);
-
-	useEffect(() => {
-		mountedRef.current = true;
-		return () => {
-			mountedRef.current = false;
-			abortLocalWork();
-		};
-	}, [abortLocalWork]);
+		if (isMounted()) setCompleted(next);
+	}, [isMounted]);
+	const remember = useCallback((session: DirectAssetUploadSession, file: Pick<File, 'name' | 'size'>, completedBefore: number) => {
+		rememberLocator({ session, originalName: file.name, totalBytes: file.size, completed: completedBefore });
+	}, [rememberLocator]);
 
 	useEffect(() => {
 		let disposed = false;
+		if (!restoreRequired()) { setRestoreDone(true); return; }
 		const controller = new AbortController();
-		restoreControllerRef.current = controller;
-		async function restore() {
-			const raw = window.sessionStorage.getItem(storageKey);
-			if (!raw) return;
+		let activeRun: ReturnType<typeof beginRun> = null;
+		let token = -1;
+		const restore = async () => {
 			try {
-				const saved = JSON.parse(raw) as SavedVideoSession;
-				if (saved.session.kind !== kind) throw new Error('kind');
-				const completedBefore = recoveringManifest || (compact && initialFiles.length === 1)
+				const saved = await restoreTask();
+				if (disposed || !saved) return;
+				activeRun = beginRun();
+				if (!activeRun) return;
+				token = activeRun.token;
+				activeRun.controller.signal.addEventListener('abort', () => controller.abort(), { once: true });
+				if (saved.session.kind !== kind || saved.session.owner.type !== 'PROJECT' || saved.session.owner.id !== projectId) throw new Error('owner');
+				const chosen = getSelectedFiles();
+				const completedBefore = recoveringManifest || (compact && chosen.length === 1)
 					? 0 : saved.completed ?? 0;
-				const matchesChosen = initialFiles.length === 0
-					|| (initialFiles[completedBefore]?.name === saved.originalName && initialFiles[completedBefore]?.size === saved.totalBytes);
+				const sameQueuePosition = chosen.length === 0
+					|| (chosen[completedBefore]?.name === saved.originalName && chosen[completedBefore]?.size === saved.totalBytes);
 				updateCompleted(completedBefore);
 				remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 				const status = await getDirectAssetUploadStatus(saved.session.sessionId, controller.signal);
-				if (disposed || controller.signal.aborted || status.kind !== kind) return;
+				if (disposed || !isCurrentRun(token) || controller.signal.aborted || status.kind !== kind
+					|| status.sessionId !== saved.session.sessionId || status.generation !== saved.session.generation
+					|| status.owner.type !== 'PROJECT' || status.owner.id !== projectId) return;
 				if (status.state === 'VERIFYING' || status.state === 'COMPLETING') {
 					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 					setPhase('verifying');
 					await waitForDirectAssetReady(status.sessionId, { signal: controller.signal });
-					if (!disposed && !controller.signal.aborted) {
-						forget(saved.session.sessionId);
-						if (!matchesChosen) {
-							updateCompleted(0);
-							setPhase('idle');
-							return;
-						}
+					if (!disposed && isCurrentRun(token) && !controller.signal.aborted) {
+						if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, completedBefore)
+							|| !isCurrentRun(token)) return;
 						const nextCompleted = completedBefore + 1;
 						updateCompleted(nextCompleted);
-						if (initialFiles.length === 0 || nextCompleted >= initialFiles.length) {
-							setPhase('ready');
-							qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
-							onComplete?.();
+						if (chosen.length === 0 || nextCompleted >= chosen.length) {
+							reportCompletion();
 						} else setPhase('idle');
 					}
 					return;
 				}
 				if (status.state === 'UPLOADING') {
+					setPhase('idle'); setError(null);
 					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
 					return;
 				}
 				if (status.state === 'READY') {
-					forget();
-					if (!matchesChosen) {
-						updateCompleted(0);
-						setPhase('idle');
-						return;
-					}
+					if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, completedBefore)
+						|| !isCurrentRun(token)) return;
 					const nextCompleted = completedBefore + 1;
 					updateCompleted(nextCompleted);
-					if (initialFiles.length === 0 || nextCompleted >= initialFiles.length) {
-						setPhase('ready');
-						qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
-						onComplete?.();
+					if (chosen.length === 0 || nextCompleted >= chosen.length) {
+						reportCompletion();
 					} else setPhase('idle');
 					return;
 				}
-				if (status.state === 'CANCELLED') forget();
+				if (status.state === 'CANCELLED') {
+					if (sameQueuePosition) { autoPausedRef.current = true; autoStarted.current = true; }
+					else updateCompleted(0);
+					forget(saved.session.sessionId);
+				}
 				else {
 					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, completedBefore);
-					setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다.`);
+					if (status.state === 'REJECTED' || status.state === 'EXPIRED') setTerminalSessionId(saved.session.sessionId);
+					setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다. 종료된 업로드는 새 업로드 시작을 선택해 주세요.`);
 					setPhase('idle');
 				}
-			} catch {
-				// An unavailable status must not discard a resumable locator.
+			} catch (cause) {
+				// Preserve the original locator on mismatch or unavailable status.
+				if (!disposed && isCurrentRun(token)) {
+					setError(getApiErrorMessage(cause));
+					setPhase('idle');
+				}
 			}
-		}
+		};
 		void restore().finally(() => {
+			finishRun(token);
 			if (!disposed) setRestoreDone(true);
 		});
 		return () => {
 			disposed = true;
 			controller.abort();
-			if (restoreControllerRef.current === controller) restoreControllerRef.current = null;
+			finishRun(token);
 		};
-	}, [recoveringManifest, compact, forget, initialFiles, kind, onComplete, projectId, qc, remember, storageKey, updateCompleted]);
+	}, [restoreTask, restoreRequired, getSelectedFiles, acceptRestoredReady, isPendingCreate, handoff, recoveringManifest, compact, forget, kind, projectId, remember, storageKey, updateCompleted, beginRun, finishRun, isCurrentRun, acceptReady, reportCompletion]);
 
 	const uploadQueue = useCallback(async (
 		chosen: readonly File[],
@@ -262,56 +244,34 @@ export default function DirectVideoUploadWidget({
 					&& resume.originalName === file.name && resume.totalBytes === file.size
 					? resume.session
 					: undefined;
-				if (!matchingResume) pendingCreateTokensRef.current.add(token);
-				const completion = await uploadDirectAssetFile(projectId, file, kind, (next) => {
+				const completion = await transfer(activeRun, [projectId, file, kind, (next) => {
 					if (!isCurrentRun(token)) return;
 					setProgress(next);
 					if (next.percent >= 100) setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
-					...(submissionItems[index] ? { submissionItem: submissionItems[index] } : {}),
-					onSession: (next) => {
-						const current = isCurrentRun(token);
-						const paused = pausedRunTokenRef.current === token && !runRef.current && mountedRef.current;
-						pendingCreateTokensRef.current.delete(token);
-						const cancelPending = cancelledRunTokensRef.current.delete(token);
-						if (cancelPending) {
-							remember(next, file, index, mountedRef.current);
-							cancelLateCreatedSessionRef.current({
-								session: next, originalName: file.name, totalBytes: file.size, completed: index,
-							}, token);
-						} else if (current || paused) remember(next, file, index, true);
-						else if (resumableRef.current === null) remember(next, file, index, false);
-					},
-					signal: controller.signal,
-				});
+					recoveryIndex: index,
+					...(submissionItems[index] ? { submissionItem: { id: submissionItems[index].id, clientToken: submissionItems[index].clientToken } } : {}),
+				}], (session) => ({ session, originalName: file.name, totalBytes: file.size, completed: index }));
 				if (!isCurrentRun(token)) return;
 				if (completion.status === 'VERIFYING') {
 					setPhase('verifying');
 					await waitForDirectAssetReady(completion.sessionId, { signal: controller.signal });
 				}
 				if (!isCurrentRun(token)) return;
-				forget(completion.sessionId);
+				if (!acceptReady(activeRun, completion.sessionId, completion.generation)) return;
 				updateCompleted(index + 1);
 			}
 			if (!isCurrentRun(token)) return;
-			setPhase('ready');
-			qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
-			onComplete?.();
+			reportCompletion();
 		} catch (uploadError) {
 			if (!isCurrentRun(token) || controller.signal.aborted) return;
 			setError(getApiErrorMessage(uploadError));
 			setPhase('error');
 		} finally {
-			pendingCreateTokensRef.current.delete(token);
-			cancelledRunTokensRef.current.delete(token);
-			finishCancellation();
-			if (runRef.current?.token === token) {
-				runRef.current = null;
-				submitting.current = false;
-			}
+			finishRun(token);
 		}
-	}, [beginRun, finishCancellation, forget, isCurrentRun, kind, onComplete, projectId, qc, remember, submissionItems, updateCompleted]);
+	}, [beginRun, finishRun, acceptReady, isCurrentRun, kind, reportCompletion, projectId, transfer, submissionItems, updateCompleted]);
 
 	const matchesSavedFile = useCallback((chosen: readonly File[], saved: SavedVideoSession) => {
 		const index = saved.completed ?? 0;
@@ -321,16 +281,16 @@ export default function DirectVideoUploadWidget({
 	const continueAfterReady = useCallback(async (
 		saved: SavedVideoSession,
 		chosen: readonly File[],
-		activeRun: { token: number; controller: AbortController },
+		activeRun: UploadRun,
 	) => {
 		if (!isCurrentRun(activeRun.token)) return;
-		forget(saved.session.sessionId);
-		if (compact && chosen.length > 0 && !matchesSavedFile(chosen, saved)) {
+		try {
+			if (!await acceptRestoredReady(activeRun, saved.session.sessionId, saved.session.generation, saved.completed ?? 0)
+				|| !isCurrentRun(activeRun.token)) return;
+		} catch (cause) {
+			if (!isCurrentRun(activeRun.token)) return;
 			updateCompleted(0);
-			qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
-			runRef.current = null;
-			submitting.current = false;
-			setError('이전 파일의 업로드가 완료되었습니다. 선택한 파일을 재시도해 주세요.');
+			setError(getApiErrorMessage(cause));
 			setPhase('error');
 			return;
 		}
@@ -341,10 +301,8 @@ export default function DirectVideoUploadWidget({
 			return;
 		}
 		if (!isCurrentRun(activeRun.token)) return;
-		setPhase('ready');
-		qc.invalidateQueries({ queryKey: queryKeys.adminProject(projectId) });
-		onComplete?.();
-	}, [compact, matchesSavedFile, forget, isCurrentRun, onComplete, projectId, qc, updateCompleted, uploadQueue]);
+		reportCompletion();
+	}, [acceptRestoredReady, isCurrentRun, reportCompletion, updateCompleted, uploadQueue]);
 	const observeSavedReady = useCallback(async (
 		saved: SavedVideoSession,
 		chosen: readonly File[],
@@ -363,67 +321,9 @@ export default function DirectVideoUploadWidget({
 			setError(getApiErrorMessage(cause));
 			setPhase('error');
 		} finally {
-			if (runRef.current?.token === token) {
-				runRef.current = null;
-				submitting.current = false;
-			}
+			finishRun(token);
 		}
-	}, [beginRun, continueAfterReady, isCurrentRun]);
-	const cancelLateCreatedSession = useCallback(async (saved: SavedVideoSession, sourceToken: number) => {
-		if (lateCancelSessionIdRef.current === saved.session.sessionId) return;
-		lateCancelSessionIdRef.current = saved.session.sessionId;
-		cancellationRequestedSessionIdsRef.current.add(saved.session.sessionId);
-		cancelling.current = true;
-		let readySaved: SavedVideoSession | null = null;
-		let verificationSaved: SavedVideoSession | null = null;
-		try {
-			await cancelDirectAssetUploadSession(saved.session.sessionId);
-			forget(saved.session.sessionId);
-			if (mountedRef.current) {
-				setProgress(null);
-				setError(null);
-				setPhase('idle');
-			}
-		} catch (cancelError) {
-			try {
-				const status = await getDirectAssetUploadStatus(saved.session.sessionId);
-				if (!mountedRef.current) return;
-				if (status.state === 'CANCELLED') {
-					forget(saved.session.sessionId);
-					setProgress(null);
-					setError(null);
-					setPhase('idle');
-				} else if (status.state === 'READY') {
-					cancellationIntentRef.current = false;
-					readySaved = saved;
-				} else if (status.state === 'COMPLETING' || status.state === 'VERIFYING') {
-					cancellationIntentRef.current = false;
-					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
-					verificationSaved = saved;
-				} else {
-					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
-					if (status.state === 'REJECTED' || status.state === 'EXPIRED') setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다.`);
-					setPhase('idle');
-				}
-			} catch {
-				if (mountedRef.current) {
-					setError(getApiErrorMessage(cancelError));
-					setPhase('idle');
-				}
-			}
-		} finally {
-			cancellationRequestedSessionIdsRef.current.delete(saved.session.sessionId);
-			cancelledRunTokensRef.current.delete(sourceToken);
-			finishCancellation();
-			if (mountedRef.current) {
-				if (readySaved) {
-					const activeRun = beginRun();
-					if (activeRun) void continueAfterReady(readySaved, files, activeRun);
-				} else if (verificationSaved) void observeSavedReady(verificationSaved, files);
-			}
-		}
-	}, [beginRun, continueAfterReady, files, finishCancellation, forget, observeSavedReady, remember]);
-	cancelLateCreatedSessionRef.current = cancelLateCreatedSession;
+	}, [beginRun, continueAfterReady, isCurrentRun, finishRun]);
 	const resumeQueue = useCallback(async (chosen: readonly File[], saved: SavedVideoSession, restartTerminal = false) => {
 		if (!matchesSavedFile(chosen, saved)) {
 			setError('중단된 파일과 선택한 파일 순서 또는 크기가 일치하지 않습니다.');
@@ -448,15 +348,17 @@ export default function DirectVideoUploadWidget({
 				await continueAfterReady(saved, chosen, activeRun);
 				return;
 			}
-            // A user's retry may start a new transfer only after the server confirms termination.
-            if (restartTerminal && status.generation === saved.session.generation && ['REJECTED', 'EXPIRED', 'CANCELLED'].includes(status.state)) {
-                forget(saved.session.sessionId);
-                await uploadQueue(chosen, undefined, activeRun);
-                return;
-            }
-			if (status.state === 'CANCELLED') forget(saved.session.sessionId);
+			// A user's retry may start a new transfer only after the server confirms termination.
+			if (restartTerminal && status.generation === saved.session.generation && ['REJECTED', 'EXPIRED', 'CANCELLED'].includes(status.state)) {
+				forget(saved.session.sessionId);
+				setTerminalSessionId(null);
+				await uploadQueue(chosen, undefined, activeRun);
+				return;
+			}
+			if (status.state === 'CANCELLED') { forget(saved.session.sessionId); setTerminalSessionId(null); setError(null); setPhase('idle'); }
 			else {
-				setError(`업로드 세션을 재개할 수 없습니다 (${status.state}).`);
+				if (status.state === 'REJECTED' || status.state === 'EXPIRED') setTerminalSessionId(saved.session.sessionId);
+				setError(`업로드 세션을 재개할 수 없습니다 (${status.state}). 종료된 업로드는 새 업로드 시작을 선택해 주세요.`);
 				setPhase('idle');
 			}
 		} catch (cause) {
@@ -464,103 +366,40 @@ export default function DirectVideoUploadWidget({
 			setError(getApiErrorMessage(cause));
 			setPhase('idle');
 		} finally {
-			if (runRef.current?.token === token) {
-				runRef.current = null;
-				submitting.current = false;
-			}
+			finishRun(token);
 		}
-	}, [beginRun, continueAfterReady, forget, isCurrentRun, matchesSavedFile, observeSavedReady, uploadQueue]);
+	}, [beginRun, continueAfterReady, forget, isCurrentRun, matchesSavedFile, observeSavedReady, uploadQueue, finishRun]);
 
 	useEffect(() => {
 		if (!autoStart || !restoreDone || autoStarted.current || initialFiles.length === 0) return;
 		autoStarted.current = true;
-		if (!autoPausedRef.current) {
-			const saved = resumableRef.current;
+		if (!autoPausedRef.current && phase !== 'ready') {
+			const saved = getSaved();
 			if (saved) void resumeQueue(initialFiles, saved);
 			else void uploadQueue(initialFiles);
 		}
-	}, [autoStart, initialFiles, restoreDone, resumeQueue, uploadQueue]);
+	}, [autoStart, initialFiles, restoreDone, resumeQueue, uploadQueue, getSaved, phase]);
 
 	const pause = useCallback(() => {
-		if (!runRef.current && !restoreControllerRef.current) return;
 		autoPausedRef.current = true;
-		pausedRunTokenRef.current = runRef.current?.token ?? null;
-		abortLocalWork();
+		pauseSession();
 		setError(null);
 		setPhase('idle');
-	}, [abortLocalWork]);
+	}, [pauseSession]);
 	const cancel = useCallback(async () => {
-		if (cancelling.current) return;
-		cancellationIntentRef.current = true;
 		autoPausedRef.current = true;
-		pausedRunTokenRef.current = null;
-		for (const token of pendingCreateTokensRef.current) cancelledRunTokensRef.current.add(token);
-		abortLocalWork();
-		const saved = resumableRef.current;
-		if (!saved) {
-			setPhase('idle');
-			setError(null);
-			finishCancellation();
-			return;
-		}
-		cancelling.current = true;
-		cancellationRequestedSessionIdsRef.current.add(saved.session.sessionId);
+		setError(null);
 		setPhase('idle');
-		const cancelToken = ++runTokenRef.current;
-		let verificationSaved: SavedVideoSession | null = null;
-		let readySaved: SavedVideoSession | null = null;
-		try {
-			await cancelDirectAssetUploadSession(saved.session.sessionId);
-			forget(saved.session.sessionId);
-			if (mountedRef.current && runTokenRef.current === cancelToken) {
-				setPhase('idle');
-				setProgress(null);
-				setError(null);
-			}
-		} catch (cancelError) {
-			if (!mountedRef.current || runTokenRef.current !== cancelToken) return;
-			try {
-				const status = await getDirectAssetUploadStatus(saved.session.sessionId);
-				if (!mountedRef.current || runTokenRef.current !== cancelToken) return;
-				if (status.state === 'CANCELLED') {
-					forget(saved.session.sessionId);
-					setProgress(null);
-					setError(null);
-					setPhase('idle');
-				} else if (status.state === 'READY') {
-					cancellationIntentRef.current = false;
-					readySaved = saved;
-				} else if (status.state === 'COMPLETING' || status.state === 'VERIFYING') {
-					cancellationIntentRef.current = false;
-					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
-					verificationSaved = saved;
-				} else {
-					remember(saved.session, { name: saved.originalName, size: saved.totalBytes }, saved.completed ?? completedRef.current);
-					if (status.state === 'REJECTED' || status.state === 'EXPIRED') setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다.`);
-					setPhase('idle');
-				}
-			} catch {
-				if (mountedRef.current && runTokenRef.current === cancelToken) {
-					setError(getApiErrorMessage(cancelError));
-					setPhase('idle');
-				}
-			}
-		} finally {
-			cancellationRequestedSessionIdsRef.current.delete(saved.session.sessionId);
-			finishCancellation();
-			if (verificationSaved && mountedRef.current && runTokenRef.current === cancelToken) {
-				void observeSavedReady(verificationSaved, files);
-			} else if (readySaved && mountedRef.current && runTokenRef.current === cancelToken) {
-				const activeRun = beginRun();
-				if (activeRun) void continueAfterReady(readySaved, files, activeRun);
-			}
-		}
-	}, [abortLocalWork, beginRun, continueAfterReady, files, finishCancellation, forget, observeSavedReady, remember]);
+		await cancelSession();
+	}, [cancelSession]);
 
 	const start = () => {
-		const saved = resumableRef.current;
-		if (saved) void resumeQueue(files, saved, true);
-		else void uploadQueue(files);
+		const selected = getSelectedFiles();
+		void restoreTask().then(saved => {
+			if (!isMounted() || getSelectedFiles() !== selected || saved === undefined) return;
+			if (saved) void resumeQueue(selected, saved, terminalSessionId === saved.session.sessionId);
+			else { completionReported.current = false; void uploadQueue(selected); }
+		}).catch(cause => { if (isMounted() && getSelectedFiles() === selected) { setError(getApiErrorMessage(cause)); setPhase('error'); } });
 	};
 	const retry = start;
 
@@ -582,26 +421,26 @@ export default function DirectVideoUploadWidget({
 	}, [retryAttempt]);
 
 
-    const lastCancelAttempt = useRef(cancelAttempt);
-    useEffect(() => {
-        if (lastCancelAttempt.current === cancelAttempt) return;
-        lastCancelAttempt.current = cancelAttempt;
-        void cancel();
-    }, [cancelAttempt, cancel]);
+	const lastCancelAttempt = useRef(cancelAttempt);
+	useEffect(() => {
+		if (lastCancelAttempt.current === cancelAttempt) return;
+		lastCancelAttempt.current = cancelAttempt;
+		void cancel();
+	}, [cancelAttempt, cancel]);
 
 	const uploadActions = (<div className="game-upload__actions">
-                {linear && phase === 'idle' && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
-				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${label} 업로드 시작`}</button>}
-				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}
+				{linear && phase === 'idle' && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
+				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" disabled={!canContinue} onClick={start}>{terminalSessionId && terminalSessionId === resumable?.session.sessionId ? '새 업로드 시작' : resumable ? '이어올리기' : `${label} 업로드 시작`}</button>}
+				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" disabled={!canContinue} onClick={retry}>{terminalSessionId && terminalSessionId === resumable?.session.sessionId ? '새 업로드 시작' : '재시도'}</button>}
 				{(phase === 'uploading' || phase === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={pause}>일시 정지</button>}
-				{phase !== 'ready' && (files.length > 0 || resumable || phase === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
+				{phase !== 'ready' && (files.length > 0 || resumable || taskMessage || phase === 'verifying') && <button className="btn btn--danger btn--small" type="button" disabled={cancelPending} onClick={() => void cancel()}>취소</button>}
 				{phase === 'ready' && <span className="game-upload__complete-text">{label} 업로드 완료</span>}
 				{onSkip && phase !== 'uploading' && phase !== 'verifying' && phase !== 'ready' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
 			</div>);
 
 	return (
 		<div className={`game-upload${linear ? ' game-upload--linear' : ''}`} data-phase={phase}>
-            {linear && <UploadFileRows actions={uploadActions} names={files.length ? files.map(file => file.name) : (displayNames?.length ? displayNames : [resumable?.originalName ?? label])} completed={files.length ? completed : 0} phase={phase} percent={progress?.percent} />}
+			{linear && <UploadFileRows actions={uploadActions} names={files.length ? files.map(file => file.name) : (displayNames?.length ? displayNames : [resumable?.originalName ?? label])} completed={files.length ? completed : 0} phase={phase} percent={progress?.percent} />}
 			{!linear && !compact && <h3 className="game-upload__title">{label} 업로드</h3>}
 			{!linear && resumable && phase === 'idle' && (
 				<p className="field-hint">중단된 {label} 업로드가 있습니다. 동일한 파일을 다시 선택해 재개하세요.</p>
@@ -618,21 +457,25 @@ export default function DirectVideoUploadWidget({
 						const selected = Array.from(event.target.files ?? []);
 
 						if (maxFileBytes !== undefined && selected.some((file) => file.size > maxFileBytes || file.size === 0)) {
+							selectFiles([]);
 							setFiles([]);
 							setError(`빈 파일은 업로드할 수 없으며 파일당 최대 ${maxFileBytes / 1024 / 1024} MiB까지 허용됩니다.`);
 							event.target.value = '';
 							return;
 						}
-						const saved = resumableRef.current;
+						const saved = getSaved();
 						const pendingCount = Math.max(0, selected.length - (saved?.completed ?? 0));
 						if (pendingCount > maxFiles) {
+							selectFiles([]);
 							setFiles([]);
 							updateCompleted(0);
 							setError(kind === 'VIDEO' ? `동영상은 프로젝트당 최대 5개까지 등록할 수 있습니다. 현재 ${maxFiles}개까지 추가할 수 있습니다.` : `${label}은 현재 ${maxFiles}개까지 추가할 수 있습니다.`);
 							event.target.value = '';
 							return;
 						}
+						selectFiles(selected);
 						setFiles(selected);
+						completionReported.current = false;
 						if (saved && !matchesSavedFile(selected, saved)) {
 							setError('중단된 파일과 선택한 파일 순서 또는 크기가 일치하지 않습니다.');
 							return;
@@ -657,7 +500,8 @@ export default function DirectVideoUploadWidget({
 					</p>
 				</div>
 			)}
-			{error && <p className="game-upload__error" role="alert">{error}</p>}
+			{(error || taskMessage) && <p className="game-upload__error" role="alert">{error || taskMessage}</p>}
+			{error && taskMessage && error !== taskMessage && <p role="status">{taskMessage}</p>}
 			{!linear && uploadActions}
 		</div>
 	);

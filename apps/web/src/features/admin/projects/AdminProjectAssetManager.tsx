@@ -47,7 +47,7 @@ function ActiveUpload({ entry, queue }: { entry: UploadEntry; queue: ProjectUplo
 		void complete(entry.id);
 	}, [complete, entry.id]);
 	const onCancelled = useCallback(() => cancel(entry.id), [cancel, entry.id]);
-	const common = { autoStart: true, compact: true, onComplete, onCancelled, onError: queue.fail, retryAttempt: queue.retryAttempt, cancelAttempt: queue.cancelAttempt };
+	const common = { operationKey: `${queue.queueId}:${entry.id}`, autoStart: true, compact: true, onComplete, onCancelled, onError: queue.fail, retryAttempt: queue.retryAttempt, cancelAttempt: queue.cancelAttempt };
 	if (entry.kind === 'POSTER' || entry.kind === 'IMAGE')
 		return <DirectImageUploadWidget {...common} owner={queue.owner} kind={entry.kind} initialFiles={files} submissionItems={queue.submissionItem ? [queue.submissionItem] : undefined} />;
 	if (entry.kind === 'GAME' || entry.kind === 'WEBGL')

@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -62,7 +65,7 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s external queue integratio
 		controls.ready.mockResolvedValue({ ...session, state: 'READY' });
 		const completed = vi.fn();
 		mount(vi.fn(), true, completed);
-		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('선택한 파일을 재시도'));
+		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('원본과 일치'));
 		expect(completed).not.toHaveBeenCalled();
 	});
 	if (kind === 'GAME') it.each(['READY', 'VERIFYING'])('checks identity when cancellation finds %s after an unavailable initial status', async state => {
@@ -75,7 +78,7 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s external queue integratio
 		mount(vi.fn(), false, completed);
 		await screen.findByRole('button', { name: '이어올리기' });
 		fireEvent.click(screen.getByRole('button', { name: /^취소/ }));
-		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('선택한 파일을 재시도'));
+		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('원본과 일치'));
 		expect(completed).not.toHaveBeenCalled();
 	});
 
@@ -90,10 +93,13 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s external queue integratio
 		mount(vi.fn(), false, completed);
 		await screen.findByRole('button', { name: '이어올리기' });
 		fireEvent.click(screen.getByRole('button', { name: /^취소/ }));
-		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('선택한 파일을 재시도'));
+		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('원본과 일치'));
 		expect(completed).not.toHaveBeenCalled();
 		fireEvent.click(screen.getByRole('button', { name: '재시도' }));
-		await waitFor(() => expect(controls.upload).toHaveBeenCalledOnce());
+		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain(kind === 'GAME' ? '원본과 일치' : '일치하지 않습니다'));
+		expect(controls.upload).not.toHaveBeenCalled();
+		const key = kind === 'GAME' ? 'pcu.direct-asset-upload:73:GAME' : kind === 'IMAGE' ? 'pcu.direct-image-upload:PROJECT:73' : 'pcu.direct-video-upload:73';
+		expect(sessionStorage.getItem(key)).toContain(session.sessionId);
 	});
 	if (kind === 'GAME') it.each(['READY', 'VERIFYING'])('does not complete a new file when automatic resume observes unrelated %s', async state => {
 		save('old-asset');
@@ -102,25 +108,21 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s external queue integratio
 		controls.ready.mockResolvedValue({ ...session, state: 'READY' });
 		const completed = vi.fn();
 		mount(vi.fn(), true, completed);
-		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('선택한 파일을 재시도'));
+		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('원본과 일치'));
 		expect(completed).not.toHaveBeenCalled();
 		expect(controls.upload).not.toHaveBeenCalled();
 	});
 
-	it.each(['READY', 'VERIFYING'])('uploads the chosen file after reconciling an unrelated saved %s file', async (state) => {
+	it.each(['READY', 'VERIFYING'])('reconciles an unrelated saved %s without crediting the chosen file', async (state) => {
 		save('old-asset');
 		controls.status.mockResolvedValue({ ...session, state, originalName: 'old-asset', totalBytes: file.size });
 		controls.ready.mockResolvedValue({ ...session, state: 'READY' });
-		let resolveUpload!: (value: { status: 'READY'; sessionId: string }) => void;
-		controls.upload.mockImplementation(() => new Promise((resolve) => { resolveUpload = resolve; }));
 		const completed = vi.fn();
 		mount(vi.fn(), true, completed);
-		await waitFor(() => expect(controls.upload).toHaveBeenCalledOnce());
-		expect(controls.upload.mock.calls[0]?.[1]).toBe(file);
-		expect(controls.upload.mock.calls[0]?.[4].resume).toBeUndefined();
-		expect(completed).not.toHaveBeenCalled();
-		await act(async () => { resolveUpload({ status: 'READY', sessionId: 'new-asset' }); });
-		expect(completed).toHaveBeenCalledOnce();
+		await screen.findByRole('alert');
+		expect(controls.upload).not.toHaveBeenCalled(); expect(completed).not.toHaveBeenCalled();
+		const key = kind === 'GAME' ? 'pcu.direct-asset-upload:73:GAME' : kind === 'IMAGE' ? 'pcu.direct-image-upload:PROJECT:73' : 'pcu.direct-video-upload:73';
+		expect(sessionStorage.getItem(key)).toContain(session.sessionId);
 	});
 
 	if (kind !== 'GAME') it('normalizes an old batch offset when a compact row resumes its matching file', async () => {

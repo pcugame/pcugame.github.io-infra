@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
 
 import { webcrypto } from 'node:crypto';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -14,12 +17,13 @@ function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
 	});
 }
 
-function directSession(sessionId: string) {
+function directSession(sessionId: string, body: Record<string, unknown> = {}) {
 	return {
 		sessionId, owner: { type: 'PROJECT', id: 7 }, generation: 1,
 		partSizeBytes: 4, totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z',
 		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64),
 		kind: 'GAME', originalName: 'game.zip', totalBytes: 4, parts: [],
+		sourceIdentityBlockSizeBytes: 1048576, state: 'UPLOADING', ...body,
 	};
 }
 
@@ -112,23 +116,24 @@ describe('GAME upload real-client state machine', () => {
 		expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/direct-game-upload-sessions'))).toBe(false);
 	});
 
-	it('does not let paused upload A overwrite the newer upload B locator', async () => {
+	it('prevents upload B while paused create A is unresolved and exposes the late A locator', async () => {
 		installBrowserCrypto();
 		let createCount = 0;
+		let createBody: Record<string, unknown> = {};
 		let markFirstCreateStarted!: () => void;
 		const firstCreateStarted = new Promise<void>((resolve) => { markFirstCreateStarted = resolve; });
 		let finishFirstCreate!: (response: Response) => void;
 		const firstCreateResponse = new Promise<Response>((resolve) => { finishFirstCreate = resolve; });
 		const pendingCapability = new Promise<Response>(() => undefined);
-		const fetchMock = vi.fn(async (request: string | URL | Request) => {
+		const fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
 			const url = String(request);
 			if (url.endsWith('/api/admin/projects/7/direct-game-upload-sessions')) {
-				createCount += 1;
+				createCount += 1; createBody = JSON.parse(String(init?.body));
 				if (createCount === 1) {
 					markFirstCreateStarted();
 					return firstCreateResponse;
 				}
-				return jsonResponse(directSession('session-b'));
+				return jsonResponse(directSession('session-b', createBody));
 			}
 			if (url.endsWith('/part-urls')) return pendingCapability;
 			throw new Error(`Unexpected request: ${url}`);
@@ -145,11 +150,10 @@ describe('GAME upload real-client state machine', () => {
 		await firstCreateStarted;
 		fireEvent.click(await screen.findByRole('button', { name: '일시 정지' }));
 		fireEvent.click(await screen.findByRole('button', { name: '업로드 시작' }));
-		await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME') ?? '{}'))
-			.toMatchObject({ sessionId: 'session-b' }));
-		await act(async () => { finishFirstCreate(jsonResponse(directSession('session-a'))); });
+		expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/direct-game-upload-sessions'))).toHaveLength(1);
+		await act(async () => { finishFirstCreate(jsonResponse(directSession('session-a', createBody))); });
 		expect(JSON.parse(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME') ?? '{}'))
-			.toMatchObject({ sessionId: 'session-b' });
+			.toMatchObject({ sessionId: 'session-a' });
 	});
 
 	it('converges a late cancellation to completed when DELETE loses to READY', async () => {
@@ -162,6 +166,7 @@ describe('GAME upload real-client state machine', () => {
 		const fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
 			const url = String(request);
 			if (url.endsWith('/api/admin/projects/7/direct-game-upload-sessions')) {
+				Object.assign(saved, JSON.parse(String(init?.body)));
 				markCreateStarted();
 				return createResponse;
 			}

@@ -9,6 +9,8 @@ export type DirectAssetUploadOwner =
 	| { type: 'EXHIBITION'; id: number };
 
 export interface AssetUploadSessionRecord {
+	clientUploadId?: string | null;
+	createRequestHash?: string | null;
 	voteId?: string | null;
 	id: string;
 	projectId: number | null;
@@ -91,6 +93,7 @@ export interface AssetUploadRepository {
 	setAllocated(sessionId: string, generation: number, uploadId: string): Promise<boolean>;
 	cancel(sessionId: string, actorId: number): Promise<{ cancelled: boolean; abort?: { bucket: string; objectKey: string; uploadId: string } }>;
 	findById(sessionId: string): Promise<AssetUploadSessionRecord | null>;
+	findByClientUploadId(actorId: number, clientUploadId: string): Promise<AssetUploadSessionRecord | null>;
 	/**
 	 * Atomically reserve from the session-lifetime capability budget.  The
 	 * persisted counter never resets, so API restarts cannot mint unbounded

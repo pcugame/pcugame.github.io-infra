@@ -1,4 +1,11 @@
 /* @vitest-environment jsdom */
+import { createFileSourceIdentity } from '../lib/file-identity';
+import { setupFileIdentityEnvironment } from './helpers/file-identity';
+setupFileIdentityEnvironment();
+import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+afterEach(resetDirectUploadTasksForTests);
+
+import type { DirectGameUploadCompletionResponse } from '../contracts';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -22,13 +29,13 @@ vi.mock('../lib/api/game-upload', () => ({
 
 afterEach(() => {
 	cleanup();
-	vi.clearAllMocks();
+	vi.resetAllMocks();
 	window.sessionStorage.clear();
 });
 
 describe('DirectImageUploadWidget', () => {
 	it('uses an exhibition-owned POSTER direct multipart session and waits for worker readiness', async () => {
-		uploadDirectAssetFile.mockResolvedValue({ status: 'VERIFYING', sessionId: 'poster-1', generation: 1, sizeBytes: 1 });
+		uploadDirectAssetFile.mockResolvedValue({ status: 'VERIFYING', sessionId: 'poster-1', generation: 1, sizeBytes: 1 } satisfies DirectGameUploadCompletionResponse);
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		const complete = vi.fn();
 		const { container } = render(
@@ -51,7 +58,7 @@ describe('DirectImageUploadWidget', () => {
 	});
 
 	it('wires exhibition poster management to the direct widget rather than the legacy FormData route', async () => {
-		uploadDirectAssetFile.mockResolvedValue({ status: 'VERIFYING', sessionId: 'poster-2', generation: 1, sizeBytes: 1 });
+		uploadDirectAssetFile.mockResolvedValue({ status: 'VERIFYING', sessionId: 'poster-2', generation: 1, sizeBytes: 1 } satisfies DirectGameUploadCompletionResponse);
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		const { container } = render(
 			<QueryClientProvider client={new QueryClient()}>
@@ -115,8 +122,8 @@ describe('DirectImageUploadWidget', () => {
 			.mockImplementationOnce(() => new Promise((resolve) => { resolveRestore = resolve; }))
 			.mockResolvedValueOnce({ ...session, state: 'UPLOADING', originalName: second.name, totalBytes: second.size, parts: [] });
 		uploadDirectAssetFile
-			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: session.sessionId })
-			.mockResolvedValueOnce({ status: 'READY', sessionId: 'image-third' });
+			.mockResolvedValueOnce({ status: 'VERIFYING', sessionId: session.sessionId, generation: session.generation, sizeBytes: second.size } satisfies DirectGameUploadCompletionResponse)
+			.mockResolvedValueOnce({ status: 'READY', sessionId: 'image-third', generation: 1, sizeBytes: third.size } satisfies DirectGameUploadCompletionResponse);
 		waitForDirectAssetReady.mockResolvedValue({ state: 'READY' });
 		const complete = vi.fn();
 
@@ -130,6 +137,7 @@ describe('DirectImageUploadWidget', () => {
 		);
 
 		expect(uploadDirectAssetFile).not.toHaveBeenCalled();
+        await waitFor(() => expect(resolveRestore).toBeDefined());
 		await act(async () => {
 			resolveRestore?.({ ...session, state: 'UPLOADING' });
 		});
@@ -149,13 +157,13 @@ describe('DirectImageUploadWidget', () => {
 		const second = new File(['second'], 'second.png', { type: 'image/png' });
 		const session = {
 			sessionId: 'image-ready', owner: { type: 'PROJECT', id: 4 }, generation: 1, partSizeBytes: 16,
-			totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z', sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'f'.repeat(64), kind: 'IMAGE',
+			totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z', kind: 'IMAGE', ...await createFileSourceIdentity(first),
 		};
 		window.sessionStorage.setItem('pcu.direct-image-upload:PROJECT:4', JSON.stringify({
 			session, originalName: first.name, totalBytes: first.size, completed: 0,
 		}));
 		getDirectAssetUploadStatus.mockResolvedValue({ ...session, state: 'READY', originalName: first.name, totalBytes: first.size, parts: [] });
-		let resolveSecond: ((completion: { status: 'READY'; sessionId: string }) => void) | undefined;
+		let resolveSecond: ((completion: DirectGameUploadCompletionResponse) => void) | undefined;
 		uploadDirectAssetFile.mockImplementation(() => new Promise((resolve) => { resolveSecond = resolve; }));
 		const complete = vi.fn();
 
@@ -169,7 +177,7 @@ describe('DirectImageUploadWidget', () => {
 		expect(uploadDirectAssetFile.mock.calls[0]?.[1]).toBe(second);
 		expect(complete).not.toHaveBeenCalled();
 		await act(async () => {
-			resolveSecond?.({ status: 'READY', sessionId: 'image-second-ready' });
+			resolveSecond?.({ status: 'READY', sessionId: 'image-second-ready', generation: 1, sizeBytes: second.size } satisfies DirectGameUploadCompletionResponse);
 		});
 		await waitFor(() => expect(complete).toHaveBeenCalledOnce());
 	});
@@ -321,12 +329,15 @@ it.each(['REJECTED', 'EXPIRED', 'CANCELLED'])('starts a replacement after an exp
  uploadDirectAssetFile.mockReset().mockImplementationOnce(async (_owner, _file, _kind, _progress, options) => {
   options.onSession(session);
   throw new Error('transfer failed');
- }).mockResolvedValueOnce({ status: 'READY', sessionId: 'replacement', generation: 1 });
+ }).mockResolvedValueOnce({ status: 'READY', sessionId: 'replacement', generation: 1, sizeBytes: file.size } satisfies DirectGameUploadCompletionResponse);
  getDirectAssetUploadStatus.mockReset().mockResolvedValue({ ...session, state });
  render(<QueryClientProvider client={new QueryClient()}><DirectImageUploadWidget owner={{ type: 'PROJECT', id: 77 }} kind="IMAGE" initialFiles={[file]} autoStart onComplete={complete} /></QueryClientProvider>);
  const retry = await screen.findByRole('button', { name: '재시도' });
  expect(uploadDirectAssetFile).toHaveBeenCalledOnce();
  fireEvent.click(retry);
+ const startNew = await screen.findByRole('button', { name: state === 'CANCELLED' ? /업로드 시작/ : '새 업로드 시작' });
+ expect(uploadDirectAssetFile).toHaveBeenCalledOnce();
+ fireEvent.click(startNew);
  await waitFor(() => expect(complete).toHaveBeenCalledOnce());
  expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2);
  expect(uploadDirectAssetFile.mock.calls[1]![4].resume).toBeUndefined();

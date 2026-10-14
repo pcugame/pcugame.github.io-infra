@@ -3,6 +3,8 @@
 import { env } from '../env';
 import { ApiError } from './client';
 import type {
+	DirectAssetUploadCreation,
+	DirectAssetUploadCreationLookup,
 	DirectGameUploadCompletionResponse,
 	DirectGameUploadCompleteRequest,
 	DirectGameUploadCreateSessionRequest,
@@ -12,7 +14,7 @@ import type {
 	DirectAssetUploadKind,
 	DirectAssetUploadOwner,
 } from '../../contracts';
-import { DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE } from '../../contracts';
+import { DirectAssetUploadCreationSchema, DirectAssetUploadCreationLookupSchema, DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE } from '../../contracts';
 import { createFileSourceIdentity } from '../file-identity';
 
 export interface DirectAssetUploadProgress {
@@ -21,6 +23,59 @@ export interface DirectAssetUploadProgress {
 	uploadedBytes: number;
 	totalBytes: number;
 	percent: number;
+}
+/** A create may have committed even when its response could not be read. */
+export class DirectUploadCreateError extends Error {
+	readonly uncertain: boolean;
+	constructor(uncertain: boolean, cause: unknown) {
+		super(uncertain
+			? '업로드 생성 결과를 확인할 수 없습니다. 연결이 복구되면 같은 업로드를 다시 확인하거나 취소해 주세요.'
+			: '업로드 세션을 생성하지 못했습니다. 다시 시도해 주세요.', { cause });
+		this.uncertain = uncertain;
+	}
+}
+export class DirectUploadAllocationPendingError extends DirectUploadCreateError {
+	constructor() { super(true, undefined); this.message = '서버에서 업로드를 생성 중입니다. 잠시 후 재시도하거나 취소해 주세요.'; }
+}
+/** Only the create endpoint may attest that this attempt rejected before allocation. */
+export function isDirectUploadPreCreationRejection(cause: unknown): boolean {
+	return cause instanceof ApiError && 'rejectedBeforeCreation' in cause && cause.rejectedBeforeCreation === true;
+}
+
+export type DirectUploadCreateRequest = DirectGameUploadCreateSessionRequest & { clientUploadId: string };
+
+export async function getDirectAssetUploadCreation(clientUploadId: string): Promise<DirectAssetUploadCreationLookup> {
+	return DirectAssetUploadCreationLookupSchema.parse(await apiRequest(`/api/admin/direct-asset-upload-creations/${encodeURIComponent(clientUploadId)}`, { signal: AbortSignal.timeout(15_000) }));
+}
+export async function createDirectAssetUploadSession(owner: DirectAssetUploadOwner, kind: DirectAssetUploadKind, request: DirectUploadCreateRequest, retrySignal?: AbortSignal): Promise<DirectAssetUploadCreation> {
+	try {
+		const deadline = AbortSignal.timeout(30_000);
+		const result = DirectAssetUploadCreationSchema.parse(await apiRequest(
+			`/api/admin/${owner.type === 'PROJECT' ? 'projects' : 'exhibitions'}/${owner.id}/direct-${kind.toLowerCase()}-upload-sessions`,
+			{ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal: deadline },
+			retrySignal ? AbortSignal.any([retrySignal, deadline]) : deadline,
+		));
+		if (result.clientUploadId !== request.clientUploadId || result.owner.type !== owner.type || result.owner.id !== owner.id
+			|| result.kind !== kind || result.sourceIdentity !== request.sourceIdentity) throw new Error('업로드 생성 응답이 요청과 일치하지 않습니다.');
+		return result;
+	} catch (cause) {
+		if (cause instanceof ApiError) {
+			const code = (cause.body as { error?: { code?: string } } | null)?.error?.code;
+			// In the canonical create route these validation/auth errors precede
+			// createAllocating. Generic CONFLICT can follow allocation; neither it,
+			// IDEMPOTENCY_CONFLICT nor an unknown 4xx proves absence of a session.
+			// This attests only to this attempt, never to an earlier lost response.
+			const rejectedBeforeCreation = (cause.status === 400 && ['ERROR', 'VALIDATION_ERROR', 'INVALID_FILENAME'].includes(code ?? ''))
+				|| (cause.status === 401 && code === 'UNAUTHORIZED')
+				|| (cause.status === 403 && code === 'FORBIDDEN')
+				|| (cause.status === 404 && code === 'NOT_FOUND')
+				|| (cause.status === 413 && code === 'PAYLOAD_TOO_LARGE')
+				|| (cause.status === 415 && code === 'UNSUPPORTED_MEDIA_TYPE');
+			Object.assign(cause, { rejectedBeforeCreation, uncertain: !rejectedBeforeCreation });
+			throw cause;
+		}
+		throw new DirectUploadCreateError(true, cause);
+	}
 }
 const CONTROL_RETRY_ATTEMPTS = 4;
 const UPLOAD_PART_RETRY_ATTEMPTS = 4;
@@ -86,10 +141,12 @@ async function apiRequest<T>(
 			return json as T;
 		}
 
-		throwIfAborted(effectiveRetrySignal);
+		// Create keeps its transport alive after a local pause/cancel. Preserve
+		// a late rejection as well as a late success, while still stopping retries.
+		throwIfAborted(init.signal ?? effectiveRetrySignal);
 		let body: unknown;
 		try { body = await res.json(); } catch { body = null; }
-		throwIfAborted(effectiveRetrySignal);
+		throwIfAborted(init.signal ?? effectiveRetrySignal);
 		if (res.status !== 429 || attempt >= CONTROL_RETRY_ATTEMPTS) {
 			throw new ApiError(res.status, res.statusText, body);
 		}
@@ -137,7 +194,7 @@ export async function getDirectAssetUploadStatus(
 }
 
 export async function cancelDirectAssetUploadSession(sessionId: string): Promise<void> {
-	await apiRequest<void>(`/api/admin/direct-asset-upload-sessions/${sessionId}`, { method: 'DELETE' });
+	await apiRequest<void>(`/api/admin/direct-asset-upload-sessions/${sessionId}`, { method: 'DELETE', signal: AbortSignal.timeout(15_000) });
 }
 
 /** Poll JSON control state only; Garage never passes archive bytes through the API. */
@@ -302,6 +359,11 @@ export async function uploadDirectAssetFile(
 	onProgress?: (progress: DirectAssetUploadProgress) => void,
 	options: {
 		resume?: DirectAssetUploadSession;
+		clientUploadId?: string;
+		createRequest?: DirectUploadCreateRequest;
+		onCreateRequest?: (request: DirectUploadCreateRequest) => void;
+		/** Position in the widget's sequential file list, persisted for restoration. */
+		recoveryIndex?: number;
 		onSession?: (session: DirectAssetUploadSession) => void;
 		submissionItem?: { id: string; clientToken: string };
 		voteId?: string;
@@ -334,23 +396,30 @@ export async function uploadDirectAssetFile(
 		};
 		uploaded = new Map(status.parts.map((part) => [part.partNumber, { etag: part.etag, sizeBytes: part.sizeBytes }]));
 	} else {
-		const created = await apiRequest<DirectAssetUploadSession>(
-			`/api/admin/${owner.type === 'PROJECT' ? 'projects' : 'exhibitions'}/${owner.id}/direct-${kind.toLowerCase()}-upload-sessions`, {
-				method: 'POST', headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					originalName: file.name,
-					totalBytes: file.size,
-					declaredMimeType: file.type || undefined,
-					...source,
-					...(options.submissionItem ? { submissionItem: options.submissionItem } : {}),
-					...(options.voteId ? { voteId: options.voteId } : {}),
-				} satisfies DirectGameUploadCreateSessionRequest),
-			},
-			options.signal,
-		);
+		const request: DirectUploadCreateRequest = options.createRequest ?? {
+			clientUploadId: options.clientUploadId ?? crypto.randomUUID(),
+			originalName: file.name, totalBytes: file.size, declaredMimeType: file.type || undefined,
+			...source,
+			...(options.submissionItem ? { submissionItem: options.submissionItem } : {}),
+			...(options.voteId ? { voteId: options.voteId } : {}),
+		};
+		if (request.originalName !== file.name || request.totalBytes !== file.size || request.sourceIdentity !== source.sourceIdentity) {
+			throw new Error('중단된 업로드와 선택한 파일이 다릅니다. 기존 업로드를 먼저 취소해 주세요.');
+		}
+		// Persistence failures stop here, before any server-side allocation.
+		options.onCreateRequest?.(request);
+		const created = await createDirectAssetUploadSession(owner, kind, request, options.signal);
+		if (created.state === 'ALLOCATING') throw new DirectUploadAllocationPendingError();
 		session = { ...created, kind };
+		options.onSession?.(session);
+		throwIfAborted(options.signal);
+		if (created.state === 'READY' || created.state === 'VERIFYING' || created.state === 'COMPLETING') {
+			return { status: created.state === 'READY' ? 'READY' : 'VERIFYING', sessionId: session.sessionId, generation: session.generation, sizeBytes: file.size };
+		}
+		if (['REJECTED', 'CANCELLED', 'EXPIRED'].includes(created.state)) throw new Error(`업로드가 종료되었습니다 (${created.state}). 새 업로드 시작 전에 상태를 확인해 주세요.`);
+
 	}
-	options.onSession?.(session);
+	if (options.resume) options.onSession?.(session);
 	throwIfAborted(options.signal);
 	const parts: DirectGameUploadCompleteRequest['parts'] = [...uploaded.entries()]
 		.map(([partNumber, part]) => ({ partNumber, ...part }))

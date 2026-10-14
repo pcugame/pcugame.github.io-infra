@@ -7,7 +7,7 @@ import { queueMultipartAbortTask } from '../multipart-abort/repository.js';
 import type { AssetUploadRepository, AssetUploadSessionRecord, DirectAssetUploadOwner } from './ports.js';
 import { WorkerGenerationFencedError } from '../upload-lifecycle/worker-errors.js';
 import { countReservedProjectVideos, getProjectVideos, MAX_PROJECT_VIDEOS, normalizeProjectVideoOrder } from '../assets/video-order.js';
-import { conflict } from '../../shared/errors.js';
+import { conflict, idempotencyConflict } from '../../shared/errors.js';
 import { assertProjectUploadWriteAccessInTransaction } from '../admin/project-access.service.js';
 import type { Actor } from '../../application/http-input.js';
 
@@ -67,6 +67,14 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 		async createAllocating(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
 				const { submissionClientToken, actorRole, ...sessionInput } = input;
+				async function existingCreation() {
+					if (!input.clientUploadId) return null;
+					const existing = await tx.assetUploadSession.findUnique({
+						where: { userId_clientUploadId: { userId: input.userId, clientUploadId: input.clientUploadId } },
+					});
+					if (existing && existing.createRequestHash !== input.createRequestHash) throw idempotencyConflict('clientUploadId was already used for another upload request');
+					return existing ? asRecord(existing) : null;
+				}
 				// The snapshot and active-session insert share a serializable scope so a
 				// later READY replacement cannot silently overwrite a newer GAME.
 				if ((input.projectId === null) === (input.exhibitionId === null)) {
@@ -77,6 +85,8 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 						id: input.userId,
 						role: (actorRole ?? 'USER') as Actor['role'],
 					}, input.projectId);
+					const existing = await existingCreation();
+					if (existing) return existing;
 					const project = await tx.project.findUniqueOrThrow({
 						where: { id: input.projectId },
 						select: { status: true },
@@ -123,6 +133,8 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					}
 				} else {
 					await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "exhibitions" WHERE "id" = ${input.exhibitionId!} FOR UPDATE`);
+					const existing = await existingCreation();
+					if (existing) return existing;
 					if (input.submissionItemId || submissionClientToken) throw new Error('PROJECT_SUBMISSION_ITEM_NOT_ALLOWED');
 				}
 				if (isMaterialKind(input.kind)) {
@@ -183,7 +195,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 		async failAllocation(input) {
 			const rows = await client.$queryRaw<Array<{ id: string }>>(Prisma.sql`
 				UPDATE "asset_upload_sessions"
-				SET "state" = 'EXPIRED'::"AssetUploadSessionState",
+				SET "state" = 'REJECTED'::"AssetUploadSessionState",
 					"completion_error" = ${input.reason.slice(0, 500)},
 					"completion_lease_token" = NULL,
 					"completion_lease_until" = NULL,
@@ -233,6 +245,12 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 		},
 		async findById(sessionId) {
 			const value = await client.assetUploadSession.findUnique({ where: { id: sessionId } });
+			return value ? asRecord(value) : null;
+		},
+		async findByClientUploadId(actorId, clientUploadId) {
+			const value = await client.assetUploadSession.findUnique({
+				where: { userId_clientUploadId: { userId: actorId, clientUploadId } },
+			});
 			return value ? asRecord(value) : null;
 		},
 		async reservePartCapabilities(input) {

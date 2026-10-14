@@ -8,6 +8,7 @@ import { requireLogin } from '../../plugins/auth.js';
 import type { createAssetUploadService } from './service.js';
 
 const SourceIdentityBody = z.object({
+	clientUploadId: z.string().uuid().optional(),
 	voteId: z.string().uuid().optional(),
 	originalName: z.string().min(1).max(255),
 	totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -68,6 +69,9 @@ export function createAssetUploadController(deps: { service: Service }): Fastify
 			const result = await deps.service.createExhibitionPosterSession(request.currentUser!, parseIntParam(request.params.id), parseBody(SourceIdentityBody, request.body));
 			sendCreated(reply, result);
 		});
+		app.get<{ Params: { clientUploadId: string } }>('/direct-asset-upload-creations/:clientUploadId', { preHandler: requireLogin }, async (request, reply) => {
+			sendOk(reply, await deps.service.creationStatus(request.currentUser!, request.params.clientUploadId));
+		});
 		app.post<{ Params: { sessionId: string } }>('/direct-asset-upload-sessions/:sessionId/part-urls', { preHandler: requireLogin }, async (request, reply) => {
 			sendOk(reply, await deps.service.signParts(request.currentUser!, request.params.sessionId, parseBody(PartUrlsBody, request.body)));
 		});
@@ -104,6 +108,7 @@ export function createUnavailableAssetUploadController(): FastifyPluginAsync {
 		app.post('/projects/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/exhibitions/:id/direct-poster-upload-sessions', { preHandler: requireLogin }, unavailable);
 		app.post('/direct-asset-upload-sessions/:sessionId/part-urls', { preHandler: requireLogin }, unavailable);
+		app.get('/direct-asset-upload-creations/:clientUploadId', { preHandler: requireLogin }, unavailable);
 		app.get('/direct-asset-upload-sessions/:sessionId', { preHandler: requireLogin }, unavailable);
 		app.post('/direct-asset-upload-sessions/:sessionId/complete', { preHandler: requireLogin }, unavailable);
 		app.delete('/direct-asset-upload-sessions/:sessionId', { preHandler: requireLogin }, unavailable);

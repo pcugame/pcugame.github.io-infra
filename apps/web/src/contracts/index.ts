@@ -69,6 +69,8 @@ export type {
 	ImportExecuteResult,
 	ImportPreviewExhibition,
 	ImportPreviewResult,
+	DirectAssetUploadCreation,
+	DirectAssetUploadCreationLookup,
 	DirectGameUploadCompletionResponse,
 	DirectGameUploadCompleteRequest,
 	DirectGameUploadCreateSessionRequest,
@@ -81,6 +83,8 @@ export type {
 	UploadKind,
 } from '@pcu/contracts';
 export {
+	DirectAssetUploadCreationSchema,
+	DirectAssetUploadCreationLookupSchema,
 	DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE,
 	DIRECT_UPLOAD_PART_CAPABILITY_BATCH_MAX,
 	normalizeIpTarget,

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { SubmitProjectPayloadBaseSchema } from '@pcu/contracts';
 import type { DirectAssetUploadKind, DirectAssetUploadStatus, ProjectSubmissionStatusResponse, SubmitProjectPayload, SubmitProjectResponse } from '../../../contracts';
 import { MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockProject, type MockRequestOptions } from './context';
@@ -7,10 +8,11 @@ import { mockFixtureUrl, mockResponsiveImage } from './data';
 export type MockSubmissionRecord = ProjectSubmissionStatusResponse & { actorId: number; createdAt: string; finalizedAt?: string };
 type UploadedPart = { partNumber: number; etag: string; sizeBytes: number; blockDigests: string[] };
 export type MockUploadSession = Omit<DirectAssetUploadStatus, 'parts'> & {
-  voteId?: string; actorId: number; submissionItemId?: string; completedAt?: string; processingState?: 'PROCESSING' | 'FAILED';
+  clientUploadId?: string; createRequestHash?: string; voteId?: string; actorId: number; submissionItemId?: string; completedAt?: string; processingState?: 'PROCESSING' | 'FAILED';
   sourceIdentityBlockDigests: string[]; capabilities: Record<number, { token: string; checksum: string; expiresAt: string }>;
   parts: UploadedPart[]; resultAssetId?: number; previewBlob?: Blob;
 };
+const ClientUploadIdSchema = z.string().uuid();
 const fail = (status: number, code: string, message: string): never => { throw new MockHttpError(status, code, message); };
 const submissions = (ctx: MockContext) => ctx.state.submissions as Record<string, MockSubmissionRecord>;
 const sessions = (ctx: MockContext) => ctx.state.sessions as Record<string, MockUploadSession>;
@@ -134,7 +136,7 @@ function sessionStatus(session: MockUploadSession): DirectAssetUploadStatus {
     parts: session.parts.map(({ partNumber, etag, sizeBytes }) => ({ partNumber, etag, sizeBytes })) };
 }
 function createdSession(session: MockUploadSession) {
-  return { sessionId: session.sessionId, owner: session.owner, generation: session.generation, partSizeBytes: session.partSizeBytes,
+  return { ...(session.clientUploadId ? { clientUploadId: session.clientUploadId } : {}), kind: session.kind, state: session.state, sessionId: session.sessionId, owner: session.owner, generation: session.generation, partSizeBytes: session.partSizeBytes,
     totalParts: session.totalParts, expiresAt: session.expiresAt, sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
     sourceIdentity: session.sourceIdentity, sourceIdentityBlockSizeBytes: 1048576 as const };
 }
@@ -186,6 +188,17 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
     if (!match[3] && method === 'GET') return submissionStatus(submission);
     return fail(404, 'NOT_FOUND', 'Unsupported submission method');
   }
+  match = pathname.match(/^\/api\/admin\/direct-asset-upload-creations\/([^/]+)$/);
+  if (match) {
+    if (method !== 'GET') return fail(404, 'NOT_FOUND', 'Use GET');
+    const clientUploadId = match[1]!;
+    if (!ClientUploadIdSchema.safeParse(clientUploadId).success) fail(400, 'VALIDATION_ERROR', 'Invalid client upload ID');
+    const actorId = ctx.requireUser().id;
+    const session = Object.values(sessions(ctx)).find(session => session.actorId === actorId && session.clientUploadId === clientUploadId);
+    if (!session) return { status: 'NOT_OBSERVED', clientUploadId };
+    authorizeOwner(ctx, session.owner);
+    return { status: 'OBSERVED', session: createdSession(session) };
+  }
   match = pathname.match(/^\/api\/admin\/(projects|exhibitions)\/(\d+)\/direct-(game|webgl|video|image|poster|document|attachment)-upload-sessions$/);
   if (match) {
     if (method !== 'POST') return fail(404, 'NOT_FOUND', 'Use POST');
@@ -196,6 +209,21 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
     if (!Number.isSafeInteger(total) || total < 1 || total > maxBytes || typeof body.originalName !== 'string' || !body.originalName || Array.from(body.originalName).some(character => character === '/' || character === '\\' || character.charCodeAt(0) < 32)) fail(400, 'VALIDATION_ERROR', 'Invalid file name or size');
     const digests = body.sourceIdentityBlockDigests;
     if (body.sourceIdentityAlgorithm !== 'SHA256_BLOCK_MANIFEST_V1' || body.sourceIdentityBlockSizeBytes !== 1048576 || !Array.isArray(digests) || digests.length !== Math.ceil(total / 1048576) || digests.some(value => typeof value !== 'string' || !/^[a-f0-9]{64}$/.test(value)) || await identityRoot(total, digests) !== body.sourceIdentity) fail(400, 'VALIDATION_ERROR', 'Invalid source identity');
+    const clientUploadId = body.clientUploadId;
+    if (clientUploadId !== undefined && !ClientUploadIdSchema.safeParse(clientUploadId).success) fail(400, 'VALIDATION_ERROR', 'Invalid client upload ID');
+    const createRequestHash = await digest(new TextEncoder().encode(JSON.stringify({
+      owner, kind, voteId: body.voteId ?? null, originalName: body.originalName, totalBytes: total,
+      declaredMimeType: body.declaredMimeType ?? (['GAME', 'WEBGL'].includes(kind) ? 'application/zip' : ''),
+      sourceIdentity: body.sourceIdentity, sourceIdentityBlockDigests: digests,
+      submissionItem: body.submissionItem ? { id: (body.submissionItem as { id: string }).id, clientToken: (body.submissionItem as { clientToken: string }).clientToken } : null,
+    })).buffer);
+    if (typeof clientUploadId === 'string') {
+      const existing = Object.values(sessions(ctx)).find(session => session.actorId === ctx.requireUser().id && session.clientUploadId === clientUploadId);
+      if (existing) {
+        if (existing.createRequestHash !== createRequestHash) fail(409, 'IDEMPOTENCY_CONFLICT', 'clientUploadId was already used for another upload request');
+        return Response.json({ ok: true, data: createdSession(existing) }, { status: 201 });
+      }
+    }
     let item: MockSubmissionRecord['items'][number] | undefined;
     if (owner.type === 'PROJECT') {
       const project = ctx.state.projects[owner.id]!; const submission = submissions(ctx)[owner.id];
@@ -210,7 +238,7 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
       }
     } else if (body.submissionItem) fail(409, 'CONFLICT', 'Exhibition uploads cannot bind a submission item');
     if (body.voteId && (owner.type !== 'EXHIBITION' || kind !== 'POSTER' || !ctx.state.voting?.votes.some(v => v.id === body.voteId && v.settings.exhibitionId === owner.id))) fail(400, 'VALIDATION_ERROR', 'Invalid voting poster owner');
-    const session: MockUploadSession = { ...(typeof body.voteId === 'string' ? { voteId: body.voteId } : {}), sessionId: crypto.randomUUID(), owner, kind, actorId: ctx.requireUser().id, generation: 1, state: 'UPLOADING', originalName: body.originalName as string, totalBytes: total, partSizeBytes: 5 * 1024 * 1024, totalParts: Math.ceil(total / (5 * 1024 * 1024)), expiresAt: new Date(ms(ctx) + 3600000).toISOString(), sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: body.sourceIdentity as string, sourceIdentityBlockDigests: digests as string[], capabilities: {}, parts: [], ...(item ? { submissionItemId: item.id } : {}) };
+    const session: MockUploadSession = { ...(typeof clientUploadId === 'string' ? { clientUploadId, createRequestHash } : {}), ...(typeof body.voteId === 'string' ? { voteId: body.voteId } : {}), sessionId: crypto.randomUUID(), owner, kind, actorId: ctx.requireUser().id, generation: 1, state: 'UPLOADING', originalName: body.originalName as string, totalBytes: total, partSizeBytes: 5 * 1024 * 1024, totalParts: Math.ceil(total / (5 * 1024 * 1024)), expiresAt: new Date(ms(ctx) + 3600000).toISOString(), sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: body.sourceIdentity as string, sourceIdentityBlockDigests: digests as string[], capabilities: {}, parts: [], ...(item ? { submissionItemId: item.id } : {}) };
     sessions(ctx)[session.sessionId] = session;
     if (item) { if (item.sessionId) { const old = sessions(ctx)[item.sessionId]; if (old) { delete old.submissionItemId; if (old.resultAssetId && owner.type === 'PROJECT') { const project = ctx.state.projects[owner.id]!; project.assets = project.assets.filter(asset => asset.id !== old.resultAssetId); project.videos = project.videos.filter(video => video.assetId !== old.resultAssetId); project.video = project.videos[0] ?? null; } } } item.state = 'UPLOADING'; item.sessionId = session.sessionId; item.generation = session.generation; delete item.failureReason; delete item.playbackState; delete item.playbackError; }
     return Response.json({ ok: true, data: createdSession(session) }, { status: 201 });
