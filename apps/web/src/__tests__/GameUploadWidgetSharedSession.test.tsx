@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { createFileSourceIdentity } from '../lib/file-identity';
+import { setupFileIdentityEnvironment } from './helpers/file-identity';
+setupFileIdentityEnvironment();
 import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
 afterEach(resetDirectUploadTasksForTests);
 
@@ -107,7 +110,7 @@ describe.each(['GAME', 'WEBGL'] as const)('%s shared session ownership', kind =>
 	});
 
 	it('keeps one restored COMPLETING poll across callback changes and reports completion once', async () => {
-		window.sessionStorage.setItem(storageKey, JSON.stringify(session));
+		window.sessionStorage.setItem(storageKey, JSON.stringify({ ...session, ...await createFileSourceIdentity(file) }));
 		const ready = deferred<unknown>();
 		api.status.mockResolvedValue(status('COMPLETING'));
 		api.ready.mockReturnValue(ready.promise);

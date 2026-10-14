@@ -265,6 +265,9 @@ it.each(['REJECTED', 'EXPIRED', 'CANCELLED'])('starts a replacement after an exp
  const retry = await screen.findByRole('button', { name: '재시도' });
  expect(uploadDirectAssetFile).toHaveBeenCalledOnce();
  fireEvent.click(retry);
+ const startNew = await screen.findByRole('button', { name: state === 'CANCELLED' ? /업로드 시작/ : '새 업로드 시작' });
+ expect(uploadDirectAssetFile).toHaveBeenCalledOnce();
+ fireEvent.click(startNew);
  await waitFor(() => expect(complete).toHaveBeenCalledOnce());
  expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2);
  expect(uploadDirectAssetFile.mock.calls[1]![4].resume).toBeUndefined();

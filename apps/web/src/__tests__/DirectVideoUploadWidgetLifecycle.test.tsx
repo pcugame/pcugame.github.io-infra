@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { createFileSourceIdentity } from '../lib/file-identity';
+import { setupFileIdentityEnvironment } from './helpers/file-identity';
+setupFileIdentityEnvironment();
 import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
 afterEach(resetDirectUploadTasksForTests);
 
@@ -29,8 +32,8 @@ function deferred<T>() {
 	const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
 	return { promise, resolve, reject };
 }
-function save() {
-	window.sessionStorage.setItem(storageKey, JSON.stringify({ session, originalName: file.name, totalBytes: file.size, completed: 0 }));
+async function save() {
+	window.sessionStorage.setItem(storageKey, JSON.stringify({ session: { ...session, ...await createFileSourceIdentity(file) }, originalName: file.name, totalBytes: file.size, completed: 0 }));
 }
 function mount(onComplete = vi.fn(), onCancelled = vi.fn()) {
 	const client = new QueryClient();
@@ -92,7 +95,7 @@ describe('video shared session lifetime', () => {
 	});
 
 	it('keeps one restored poll across new file-array and callback references, then completes once', async () => {
-		save();
+		await save();
 		const ready = deferred<unknown>();
 		api.status.mockResolvedValue({ ...session, state: 'VERIFYING' });
 		api.ready.mockReturnValue(ready.promise);
@@ -110,7 +113,7 @@ describe('video shared session lifetime', () => {
 	});
 
 	it('aborts restored polling on unmount and preserves recovery state after late readiness', async () => {
-		save();
+		await save();
 		const ready = deferred<unknown>();
 		api.status.mockResolvedValue({ ...session, state: 'VERIFYING' });
 		api.ready.mockReturnValue(ready.promise);

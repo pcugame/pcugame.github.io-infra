@@ -93,10 +93,15 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s external queue integratio
 		mount(vi.fn(), false, completed);
 		await screen.findByRole('button', { name: '이어올리기' });
 		fireEvent.click(screen.getByRole('button', { name: /^취소/ }));
-		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('선택한 파일을 재시도'));
+		await waitFor(() => expect(screen.getByRole('alert').textContent).toContain(kind === 'GAME' ? '선택한 파일을 재시도' : '원본과 일치'));
 		expect(completed).not.toHaveBeenCalled();
 		fireEvent.click(screen.getByRole('button', { name: '재시도' }));
-		await waitFor(() => expect(controls.upload).toHaveBeenCalledOnce());
+		if (kind === 'GAME') await waitFor(() => expect(controls.upload).toHaveBeenCalledOnce());
+		else {
+			await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('일치하지 않습니다'));
+			expect(controls.upload).not.toHaveBeenCalled();
+			expect(sessionStorage.getItem(kind === 'IMAGE' ? 'pcu.direct-image-upload:PROJECT:73' : 'pcu.direct-video-upload:73')).toContain(session.sessionId);
+		}
 	});
 	if (kind === 'GAME') it.each(['READY', 'VERIFYING'])('does not complete a new file when automatic resume observes unrelated %s', async state => {
 		save('old-asset');
@@ -110,7 +115,7 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s external queue integratio
 		expect(controls.upload).not.toHaveBeenCalled();
 	});
 
-	it.each(['READY', 'VERIFYING'])('uploads the chosen file after reconciling an unrelated saved %s file', async (state) => {
+	it.each(['READY', 'VERIFYING'])('reconciles an unrelated saved %s without crediting the chosen file', async (state) => {
 		save('old-asset');
 		controls.status.mockResolvedValue({ ...session, state, originalName: 'old-asset', totalBytes: file.size });
 		controls.ready.mockResolvedValue({ ...session, state: 'READY' });
@@ -118,6 +123,12 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s external queue integratio
 		controls.upload.mockImplementation(() => new Promise((resolve) => { resolveUpload = resolve; }));
 		const completed = vi.fn();
 		mount(vi.fn(), true, completed);
+		if (kind !== 'GAME') {
+			await screen.findByRole('alert');
+			expect(controls.upload).not.toHaveBeenCalled(); expect(completed).not.toHaveBeenCalled();
+			expect(sessionStorage.getItem(kind === 'IMAGE' ? 'pcu.direct-image-upload:PROJECT:73' : 'pcu.direct-video-upload:73')).toContain(session.sessionId);
+			return;
+		}
 		await waitFor(() => expect(controls.upload).toHaveBeenCalledOnce());
 		expect(controls.upload.mock.calls[0]?.[1]).toBe(file);
 		expect(controls.upload.mock.calls[0]?.[4].resume).toBeUndefined();

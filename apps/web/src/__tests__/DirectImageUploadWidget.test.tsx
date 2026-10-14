@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { createFileSourceIdentity } from '../lib/file-identity';
+import { setupFileIdentityEnvironment } from './helpers/file-identity';
+setupFileIdentityEnvironment();
 import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
 afterEach(resetDirectUploadTasksForTests);
 
@@ -154,7 +157,7 @@ describe('DirectImageUploadWidget', () => {
 		const second = new File(['second'], 'second.png', { type: 'image/png' });
 		const session = {
 			sessionId: 'image-ready', owner: { type: 'PROJECT', id: 4 }, generation: 1, partSizeBytes: 16,
-			totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z', sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'f'.repeat(64), kind: 'IMAGE',
+			totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z', kind: 'IMAGE', ...await createFileSourceIdentity(first),
 		};
 		window.sessionStorage.setItem('pcu.direct-image-upload:PROJECT:4', JSON.stringify({
 			session, originalName: first.name, totalBytes: first.size, completed: 0,
@@ -332,6 +335,9 @@ it.each(['REJECTED', 'EXPIRED', 'CANCELLED'])('starts a replacement after an exp
  const retry = await screen.findByRole('button', { name: '재시도' });
  expect(uploadDirectAssetFile).toHaveBeenCalledOnce();
  fireEvent.click(retry);
+ const startNew = await screen.findByRole('button', { name: state === 'CANCELLED' ? /업로드 시작/ : '새 업로드 시작' });
+ expect(uploadDirectAssetFile).toHaveBeenCalledOnce();
+ fireEvent.click(startNew);
  await waitFor(() => expect(complete).toHaveBeenCalledOnce());
  expect(uploadDirectAssetFile).toHaveBeenCalledTimes(2);
  expect(uploadDirectAssetFile.mock.calls[1]![4].resume).toBeUndefined();

@@ -16,10 +16,11 @@ export function useDirectUploadSession<Saved extends Locator>({
 	const task = useMemo(() => getDirectUploadTask(scope, storageKey), [scope, storageKey]);
 	const snapshot = useSyncExternalStore(task.subscribe, task.getSnapshot);
 	const mounted = useRef(false);
+	const currentView = useRef({ task, identity });
 	const id = useRef({});
 	const latest = useRef(callbacks);
 	const recoveryRef = useRef(recovery);
-	useEffect(() => { latest.current = callbacks; recoveryRef.current = recovery; });
+	useEffect(() => { latest.current = callbacks; recoveryRef.current = recovery; currentView.current = { task, identity }; });
 	useEffect(() => {
 		mounted.current = true;
 		task.identify(identity);
@@ -34,12 +35,13 @@ export function useDirectUploadSession<Saved extends Locator>({
 		});
 		return () => { mounted.current = false; detach(); };
 	}, [task, identity]);
-	const isMounted = useCallback(() => mounted.current, []);
-	const isCurrentRun = useCallback((token: number) => mounted.current && task.isCurrentRun(token), [task]);
+	const isMounted = useCallback(() => mounted.current && currentView.current.task === task && currentView.current.identity === identity, [task, identity]);
+	const isCurrentRun = useCallback((token: number) => isMounted() && task.isCurrentRun(token), [task, isMounted]);
 	const restoreRequired = useCallback(() => Boolean(task.getSaved() || task.hasUnresolved() || recoveryRef.current?.items.length), [task]);
 	const restore = useCallback(async () => {
 		const spec = recoveryRef.current;
 		const saved = await task.restore(spec ? { ...spec, mode: me?.user?.role === 'USER' ? 'user' : 'admin' } : undefined);
+		if (saved === undefined) return undefined;
 		return saved && task.getSaved() === saved ? saved as Saved : null;
 	}, [task, me?.user?.role]);
 	const acceptReady = useCallback((run: UploadRun, sessionId: string, generation: number) => {
@@ -50,11 +52,13 @@ export function useDirectUploadSession<Saved extends Locator>({
 	}, [task, identity]);
 	const transfer = useCallback((run: UploadRun, args: TransferArgs, toSaved: (session: DirectAssetUploadSession) => Saved) => task.transfer(run, args, toSaved, identity), [task, identity]);
 	const cancel = useCallback(async () => {
-		await task.cancel();
-		if (task.hasUnresolved()) await restore().catch(() => undefined);
-	}, [task, restore]);
+		const spec = recoveryRef.current;
+		await task.cancel(spec ? { ...spec, mode: me?.user?.role === 'USER' ? 'user' : 'admin' } : undefined);
+		if (task.hasUnresolved() && !task.isPendingCreate()) await restore().catch(() => undefined);
+	}, [task, restore, me?.user?.role]);
 	return {
 		saved: snapshot.saved as Saved | null, taskMessage: snapshot.message, handoff: snapshot.handoff,
+		canContinue: snapshot.control === 'open', cancelPending: snapshot.control === 'cancelling' || snapshot.control === 'completion',
 		restore, restoreRequired, matchesFile: task.matchesFile, isPendingCreate: task.isPendingCreate, getSaved: task.getSaved as () => Saved | null,
 		remember: task.remember as (saved: Saved, updateUi?: boolean) => void,
 		forget: task.forget, beginRun: task.beginRun, finishRun: task.finishRun,

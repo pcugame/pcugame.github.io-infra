@@ -11,7 +11,7 @@ import {
 	type DirectAssetUploadSession,
 	type DirectAssetUploadProgress,
 } from '../lib/api/game-upload';
-import type { SubmissionBinding } from '../lib/upload/directUploadTask';
+import { fileVerificationMessage, type SubmissionBinding } from '../lib/upload/directUploadTask';
 import { useDirectUploadSession, type UploadRun } from '../lib/upload/useDirectUploadSession';
 import { queryKeys } from '../lib/query';
 
@@ -83,6 +83,7 @@ function ImageUploadSession({
 	const [progress, setProgress] = useState<DirectAssetUploadProgress | null>(null);
 	const [completed, setCompleted] = useState(0);
 	const [error, setError] = useState<string | null>(null);
+	const [terminalSessionId, setTerminalSessionId] = useState<string | null>(null);
 	const [restoreDone, setRestoreDone] = useState(false);
 	const initialFilesRef = useRef(initialFiles);
 	const completedRef = useRef(0);
@@ -108,17 +109,18 @@ function ImageUploadSession({
 	const {
 		saved: resumable, getSaved, remember: rememberLocator, forget, isMounted,
 		beginRun, isCurrentRun, finishRun, pause: pauseSession, cancel: cancelSession,
-		transfer, acceptReady, restore: restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, taskMessage,
+		transfer, acceptReady, restore: restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, taskMessage, canContinue, cancelPending,
 	} = useDirectUploadSession<SavedImageSession>({
 		storageKey, operationKey, onCancelled,
 		recovery: { owner: owner, kind, items: submissionItems, files: initialFiles,
 			toSaved: (session, status, index) => ({ session, originalName: status.originalName, totalBytes: status.totalBytes, completed: index }) },
 		onCancelReady: (saved) => { void observeSavedReady(saved, files); },
 		onCancelError: (cause, terminalState) => {
+			if (terminalState) setTerminalSessionId(getSaved()?.session.sessionId ?? null);
 			setError(terminalState ? `업로드 세션이 ${terminalState.toLowerCase()} 상태입니다.` : getApiErrorMessage(cause));
 			setPhase('idle');
 		},
-		onCancelSettled: () => { autoPausedRef.current = true; setProgress(null); setError(null); setPhase('idle'); },
+		onCancelSettled: () => { setTerminalSessionId(null); autoPausedRef.current = true; setProgress(null); setError(null); setPhase('idle'); },
 	});
 	const updateCompleted = useCallback((next: number) => {
 		completedRef.current = next;
@@ -163,12 +165,13 @@ function ImageUploadSession({
 					setPhase('verifying');
 					await waitForDirectAssetReady(status.sessionId, { signal: controller.signal });
 					if (!disposed && isCurrentRun(token) && !controller.signal.aborted) {
-						if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 						if (!matchesChosen) {
 							updateCompleted(0);
+							setError(fileVerificationMessage);
 							setPhase('idle');
 							return;
 						}
+						if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 						const nextCompleted = completedBefore + 1;
 						updateCompleted(nextCompleted);
 						if (initialFilesRef.current.length === 0 || nextCompleted >= initialFilesRef.current.length) {
@@ -182,12 +185,13 @@ function ImageUploadSession({
 					return;
 				}
 				if (status.state === 'READY') {
-					if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 					if (!matchesChosen) {
 						updateCompleted(0);
+						setError(fileVerificationMessage);
 						setPhase('idle');
 						return;
 					}
+					if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 					const nextCompleted = completedBefore + 1;
 					updateCompleted(nextCompleted);
 					if (initialFilesRef.current.length === 0 || nextCompleted >= initialFilesRef.current.length) {
@@ -195,9 +199,14 @@ function ImageUploadSession({
 					} else setPhase('idle');
 					return;
 				}
-				if (status.state === 'CANCELLED') forget(saved.session.sessionId);
+				if (status.state === 'CANCELLED') {
+					if (matchesChosen) { autoPausedRef.current = true; autoStarted.current = true; }
+					else updateCompleted(0);
+					forget(saved.session.sessionId);
+				}
 				else {
-					setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다.`);
+					if (status.state === 'REJECTED' || status.state === 'EXPIRED') setTerminalSessionId(saved.session.sessionId);
+					setError(`업로드 세션이 ${status.state.toLowerCase()} 상태입니다. 종료된 업로드는 새 업로드 시작을 선택해 주세요.`);
 					setPhase('idle');
 				}
 			} catch (cause) {
@@ -247,6 +256,7 @@ function ImageUploadSession({
 					if (next.percent >= 100) setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
+					recoveryIndex: index,
 					...(submissionItems[index] ? { submissionItem: { id: submissionItems[index].id, clientToken: submissionItems[index].clientToken } } : {}),
 				}], (session) => ({ session, originalName: file.name, totalBytes: file.size, completed: index }));
 				if (!isCurrentRun(token)) return;
@@ -280,15 +290,15 @@ function ImageUploadSession({
 	) => {
 		if (!isCurrentRun(activeRun.token)) return;
 		const matches = chosen.length === 0 || (matchesSavedFile(chosen, saved) && await matchesFile(chosen[saved.completed ?? 0]!));
-		if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 		if (!matches) {
 			updateCompleted(0);
 			invalidateOwner();
 			finishRun(activeRun.token);
-			setError('이전 파일의 업로드가 완료되었습니다. 선택한 파일을 재시도해 주세요.');
+			setError(fileVerificationMessage);
 			setPhase('error');
 			return;
 		}
+		if (!acceptReady(activeRun, saved.session.sessionId, saved.session.generation)) return;
 		const nextCompleted = (saved.completed ?? completedRef.current) + 1;
 		updateCompleted(nextCompleted);
 		if (nextCompleted < chosen.length) {
@@ -346,12 +356,14 @@ function ImageUploadSession({
 			// A user's retry may start a new transfer only after the server confirms termination.
 			if (restartTerminal && status.generation === saved.session.generation && ['REJECTED', 'EXPIRED', 'CANCELLED'].includes(status.state)) {
 				forget(saved.session.sessionId);
+				setTerminalSessionId(null);
 				await uploadQueue(chosen, undefined, activeRun);
 				return;
 			}
-			if (status.state === 'CANCELLED') forget(saved.session.sessionId);
+			if (status.state === 'CANCELLED') { forget(saved.session.sessionId); setTerminalSessionId(null); setError(null); setPhase('idle'); }
 			else {
-				setError(`업로드 세션을 재개할 수 없습니다 (${status.state}).`);
+				if (status.state === 'REJECTED' || status.state === 'EXPIRED') setTerminalSessionId(saved.session.sessionId);
+				setError(`업로드 세션을 재개할 수 없습니다 (${status.state}). 종료된 업로드는 새 업로드 시작을 선택해 주세요.`);
 				setPhase('idle');
 			}
 		} catch (cause) {
@@ -387,10 +399,9 @@ function ImageUploadSession({
 	}, [cancelSession]);
 
 	const start = () => {
-		if (isPendingCreate()) { void restoreTask(); return; }
 		void restoreTask().then(saved => {
-			if (!isMounted()) return;
-			if (saved) void resumeQueue(files, saved, true);
+			if (!isMounted() || saved === undefined) return;
+			if (saved) void resumeQueue(files, saved, terminalSessionId === saved.session.sessionId);
 			else { completionReported.current = false; void uploadQueue(files); }
 		}).catch(cause => { if (isMounted()) { setError(getApiErrorMessage(cause)); setPhase('error'); } });
 	};
@@ -425,10 +436,10 @@ function ImageUploadSession({
 
 	const uploadActions = (<div className="game-upload__actions">
 				{linear && phase === 'idle' && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
-				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={start}>{resumable ? '이어올리기' : `${title} 시작`}</button>}
-				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" onClick={retry}>재시도</button>}
+				{phase === 'idle' && files.length > 0 && <button className="btn btn--primary" type="button" disabled={!canContinue} onClick={start}>{terminalSessionId && terminalSessionId === resumable?.session.sessionId ? '새 업로드 시작' : resumable ? '이어올리기' : `${title} 시작`}</button>}
+				{phase === 'error' && files.length > 0 && <button className="btn btn--primary" type="button" disabled={!canContinue} onClick={retry}>{terminalSessionId && terminalSessionId === resumable?.session.sessionId ? '새 업로드 시작' : '재시도'}</button>}
 				{(phase === 'uploading' || phase === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={pause}>일시 정지</button>}
-				{phase !== 'ready' && (files.length > 0 || resumable || phase === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void cancel()}>취소</button>}
+				{phase !== 'ready' && (files.length > 0 || resumable || taskMessage || phase === 'verifying') && <button className="btn btn--danger btn--small" type="button" disabled={cancelPending} onClick={() => void cancel()}>취소</button>}
 				{phase === 'ready' && <span className="game-upload__complete-text">{title} 완료</span>}
 			</div>);
 

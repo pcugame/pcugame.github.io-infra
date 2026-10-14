@@ -46,6 +46,7 @@ describe('GAME direct upload recovery', () => {
 				},
 			});
 		}
+		let createBody: Record<string, unknown> = {};
 		let markCreateStarted!: () => void;
 		const createStarted = new Promise<void>((resolve) => { markCreateStarted = resolve; });
 		let finishCreate!: (response: Response) => void;
@@ -55,6 +56,7 @@ describe('GAME direct upload recovery', () => {
 		const fetchMock = vi.fn(async (request: string | URL | Request, init?: RequestInit) => {
 			const url = String(request);
 			if (url.endsWith('/api/admin/projects/7/direct-game-upload-sessions')) {
+				createBody = JSON.parse(String(init?.body));
 				markCreateStarted();
 				return createResponse;
 			}
@@ -82,6 +84,7 @@ describe('GAME direct upload recovery', () => {
 				sessionId: 'session-widget-late', owner: { type: 'PROJECT', id: 7 }, generation: 1,
 				partSizeBytes: 4, totalParts: 1, expiresAt: '2026-08-22T00:00:00.000Z',
 				sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'a'.repeat(64),
+				...createBody, kind: 'GAME', state: 'UPLOADING',
 			}));
 			await deleteStarted;
 		});

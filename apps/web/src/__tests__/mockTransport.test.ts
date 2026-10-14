@@ -80,7 +80,7 @@ describe('mock HTTP response boundary', () => {
     route.mockImplementation((_ctx: MockContext, path: string, method: string, opts: MockRequestOptions) => {
       if (path.endsWith('/direct-game-upload-sessions')) {
         const input = JSON.parse(opts.body as string);
-        return { sessionId: 'parts', owner: { type: 'PROJECT', id: 1 }, generation: 1, partSizeBytes: 1024,
+        return { clientUploadId: input.clientUploadId, kind: 'GAME', state: 'UPLOADING', sourceIdentityBlockSizeBytes: 1048576, sessionId: 'parts', owner: { type: 'PROJECT', id: 1 }, generation: 1, partSizeBytes: 1024,
           totalParts: 1, expiresAt: new Date(Date.now() + 60000).toISOString(), sourceIdentityAlgorithm: input.sourceIdentityAlgorithm, sourceIdentity: input.sourceIdentity };
       }
       if (path.endsWith('/part-urls')) {

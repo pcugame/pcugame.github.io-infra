@@ -1,5 +1,8 @@
 /* @vitest-environment jsdom */
-import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
+import { createFileSourceIdentity } from '../lib/file-identity';
+import { setupFileIdentityEnvironment } from './helpers/file-identity';
+setupFileIdentityEnvironment();
+import { getDirectUploadTask, resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
 afterEach(resetDirectUploadTasksForTests);
 
 import type { DirectGameUploadCompletionResponse } from '../contracts';
@@ -125,29 +128,31 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 	});
 
 	it('checks a resumed session status and observes VERIFYING without restarting multipart upload', async () => {
+		const file = new File(['game'], 'game.zip', { type: 'application/zip' });
 		const saved = {
 			sessionId: 'game-verifying', owner: { type: 'PROJECT', id: 7 }, generation: 1,
 			partSizeBytes: 16, totalParts: 2, expiresAt: '2026-08-22T00:00:00.000Z',
-			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: 'e'.repeat(64), kind: 'GAME',
+			kind: 'GAME', ...await createFileSourceIdentity(file),
 		};
 		window.sessionStorage.setItem('pcu.direct-asset-upload:7:GAME', JSON.stringify(saved));
 		controls.getStatus
 			.mockResolvedValueOnce({ ...saved, state: 'UPLOADING', originalName: 'game.zip', totalBytes: 4, parts: [] })
 			.mockResolvedValueOnce({ ...saved, state: 'VERIFYING', originalName: 'game.zip', totalBytes: 4, parts: [] });
 		controls.waitReady.mockResolvedValue({ ...saved, state: 'READY', originalName: 'game.zip', totalBytes: 4, parts: [] });
-		const file = new File(['game'], 'game.zip', { type: 'application/zip' });
+		const finishRestore = vi.spyOn(getDirectUploadTask('current-user', 'pcu.direct-asset-upload:7:GAME'), 'finishRun');
 		render(
 			<QueryClientProvider client={new QueryClient()}>
 				<GameUploadWidget projectId={7} initialFile={file} />
 			</QueryClientProvider>,
 		);
 
+		await waitFor(() => expect(finishRestore).toHaveBeenCalled());
 		await screen.findByRole('button', { name: '이어올리기' });
 		fireEvent.click(screen.getByRole('button', { name: '이어올리기' }));
 		await waitFor(() => expect(controls.getStatus).toHaveBeenCalledTimes(2));
 		expect(controls.upload).not.toHaveBeenCalled();
-		expect(controls.waitReady).toHaveBeenCalledWith('game-verifying', { signal: expect.any(AbortSignal) });
 		expect(await screen.findByText('업로드 완료')).toBeTruthy();
+		expect(controls.waitReady).toHaveBeenCalledWith('game-verifying', { signal: expect.any(AbortSignal) });
 	});
 
 	it('keeps a restored terminal locator until the user explicitly starts a new upload', async () => {
@@ -275,12 +280,14 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 			.mockResolvedValueOnce({ ...saved, state: 'UPLOADING', originalName: 'game.zip', totalBytes: 4, parts: [] })
 			.mockResolvedValueOnce({ ...saved, state: 'EXPIRED', originalName: 'game.zip', totalBytes: 4, parts: [] });
 		const file = new File(['game'], 'game.zip', { type: 'application/zip' });
+		const finishRestore = vi.spyOn(getDirectUploadTask('current-user', 'pcu.direct-asset-upload:7:GAME'), 'finishRun');
 		render(
 			<QueryClientProvider client={new QueryClient()}>
 				<GameUploadWidget projectId={7} initialFile={file} />
 			</QueryClientProvider>,
 		);
 
+		await waitFor(() => expect(finishRestore).toHaveBeenCalled());
 		fireEvent.click(await screen.findByRole('button', { name: '이어올리기' }));
 		expect(await screen.findByRole('button', { name: '새 업로드 시작' })).toBeTruthy();
 		expect(screen.queryByRole('button', { name: '이어올리기' })).toBeNull();
@@ -310,7 +317,7 @@ describe('GAME/WebGL direct upload reload recovery', () => {
 
 		await screen.findByRole('button', { name: '일시 정지' });
 		fireEvent.click(screen.getByRole('button', { name: '취소 (세션 삭제)' }));
-		await waitFor(() => expect(controls.getStatus).toHaveBeenCalledWith('game-cancelled'));
+		await waitFor(() => expect(controls.getStatus).toHaveBeenCalledWith('game-cancelled', expect.objectContaining({ aborted: false })));
 		await waitFor(() => expect(window.sessionStorage.getItem('pcu.direct-asset-upload:7:GAME')).toBeNull());
 	});
 

@@ -281,3 +281,68 @@ Prompt abort failures logged with
 already committed the exact durable abort task. Verify the task remains queued and
 the worker is progressing; those failures do not by themselves invalidate the
 already committed business response.
+
+## Recovering a lost direct-upload creation response
+
+Canonical direct-upload POST requests accept an optional `clientUploadId` UUID.
+A client adopting recovery must generate and persist this ID with the complete
+request **before** sending it. Retries of the same logical upload reuse the ID
+and request; an intentional new upload uses a new ID, even for identical bytes.
+Neither a screen registry `operationKey` nor the source identity/file hash is
+this ID. Requests without it retain their previous behavior during rollout and
+cannot recover an unknown session ID.
+
+The durable identity is `(authenticated user, clientUploadId)` across all direct
+upload kinds and owners, including exhibition/voting posters and submissions.
+A replay returns the reserved session with its current `state` and never issues
+another CreateMultipart request. A different normalized request under that ID
+returns `409 IDEMPOTENCY_CONFLICT`. Owner, kind, name, size, MIME, source proof,
+vote and submission item/token are bound to the ID. Current owner write policy
+is checked on lookup and replay; the final reservation still checks project
+policy under the existing transaction locks. Another user's ID does not expose
+that user's operation, even to an administrator with access to the same owner.
+
+`GET /api/admin/direct-asset-upload-creations/:clientUploadId` returns either
+`{status: "NOT_OBSERVED", clientUploadId}` or
+`{status: "OBSERVED", session: <creation result>}`. Creation/replay results include
+`clientUploadId`, `sessionId`, `owner`, `kind`, `state` and multipart configuration.
+This lookup reads only the DB, so an S3 ListParts outage cannot hide a committed
+creation result. Use the existing session status route for the current part list.
+
+- `ALLOCATING`: reservation committed; external allocation is unresolved.
+- `UPLOADING`, `COMPLETING`, `VERIFYING`, `READY`: session confirmed; follow the
+  existing session lifecycle (`READY` is terminal success).
+- `REJECTED`: allocation or later processing failed; the same ID keeps that result.
+- `CANCELLED`, `EXPIRED`: operation closed; the same ID cannot reopen it.
+
+`NOT_OBSERVED` is a point-in-time observation, including a POST transaction that
+has not committed yet. A lookup/transport error carries no final operation
+outcome. Retry the original POST with the same ID and body, or repeat lookup;
+do not silently generate a new ID on absence, timeout, or connection failure.
+Keep terminal identities for the life of their session rows. Existing owner
+removal may remove these rows; IDs must never be recycled after owner removal.
+
+The inserting request alone calls S3 after the reservation commits. An ambiguous
+S3 create error closes the row as `REJECTED`; unknown multipart uploads are
+reaped through the existing age-fenced inventory and durable abort queue. A
+process stop after reservation, or a DB failure after S3 creation, can leave
+`ALLOCATING`. Replays observe it without repeating S3 creation. Existing DB-clock
+expiry eventually closes it as `EXPIRED`, then inventory recovery queues any
+untracked multipart. A lost DB acknowledgement may instead leave `UPLOADING`;
+lookup/replay returns that committed state. Cancellation and a late allocator
+remain fenced by the existing conditional setAllocated and abort-task path.
+No atomicity between PostgreSQL and S3 is claimed. If inventory is temporarily
+unavailable, its later maintenance pass retries cleanup; bucket multipart expiry
+remains the documented defense in depth. For a draft submission, preserve the
+existing item/token and retry/rebind procedure when starting an intentional new
+upload after termination.
+
+Apply additive migration `20261014000000_upload_creation_identity` before the new
+API runtime, through the established reviewed release and migration gates.
+Both new columns are nullable, existing rows retain NULL, and old writers can
+coexist without backfill or external-resource migration. The paired-field CHECK
+and user/ID unique index are installed in one SQL transaction. The index applies
+only to new identities because PostgreSQL permits multiple NULLs; there is no
+legacy identity reconciliation. Do not modify historical migrations or bypass
+forward recovery after a migration attempt. This contract does not change worker,
+submission, or deployment ownership.

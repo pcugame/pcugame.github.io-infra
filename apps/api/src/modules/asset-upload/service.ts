@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
 import type {
+	DirectAssetUploadCreation,
+	DirectAssetUploadCreationLookup,
 	DirectGameUploadCompleteRequest,
 	DirectGameUploadCreateSessionRequest,
 	DirectGameUploadPartUrlsRequest,
@@ -57,6 +60,19 @@ function sessionResult(session: AssetUploadSessionRecord, parts: Awaited<ReturnT
 		sourceIdentityAlgorithm: session.sourceIdentityAlgorithm,
 		sourceIdentity: session.sourceIdentity,
 		parts,
+	};
+}
+
+function creationResult(session: AssetUploadSessionRecord): DirectAssetUploadCreation {
+	return {
+		...(session.clientUploadId ? { clientUploadId: session.clientUploadId } : {}),
+		sessionId: session.id,
+		owner: session.projectId !== null ? { type: 'PROJECT', id: session.projectId } : { type: 'EXHIBITION', id: session.exhibitionId! },
+		kind: session.kind, state: session.state, generation: session.generation,
+		partSizeBytes: session.partSizeBytes, totalParts: session.totalParts,
+		expiresAt: session.expiresAt.toISOString(),
+		sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1', sourceIdentity: session.sourceIdentity,
+		sourceIdentityBlockSizeBytes: 1048576,
 	};
 }
 
@@ -145,6 +161,16 @@ export function createAssetUploadService(deps: {
 		try {
 			session = await deps.repository.createAllocating({
 			id,
+			clientUploadId: body.clientUploadId ?? null,
+			createRequestHash: body.clientUploadId ? createHash('sha256').update(JSON.stringify({
+				owner, kind, voteId: body.voteId ?? null,
+				originalName: body.originalName, totalBytes: body.totalBytes,
+				declaredMimeType: body.declaredMimeType ?? (kind === 'GAME' || kind === 'WEBGL' ? 'application/zip' : ''),
+				sourceIdentityAlgorithm: identity.algorithm, sourceIdentity: identity.identity,
+				sourceIdentityBlockSizeBytes: identity.blockSizeBytes,
+				sourceIdentityBlockDigests: body.sourceIdentityBlockDigests,
+				submissionItem: body.submissionItem ? { id: body.submissionItem.id, clientToken: body.submissionItem.clientToken } : null,
+			})).digest('hex') : null,
 			voteId: body.voteId ?? null,
 			projectId: owner.type === 'PROJECT' ? owner.id : null,
 			exhibitionId: owner.type === 'EXHIBITION' ? owner.id : null,
@@ -168,6 +194,9 @@ export function createAssetUploadService(deps: {
 			}
 			throw error;
 		}
+		// Only the request that inserted this row may call CreateMultipart. Replays
+		// observe durable state, including an allocation still running or terminal.
+		if (session.id !== id) return creationResult(session);
 		let uploadId: string;
 		try {
 			uploadId = await deps.storage.createMultipart(session.bucket, session.objectKey, kind === 'GAME' || kind === 'WEBGL' ? 'application/zip' : 'application/octet-stream');
@@ -187,19 +216,15 @@ export function createAssetUploadService(deps: {
 			await deps.repository.queueAbort({ sessionId: session.id, bucket: session.bucket, objectKey: session.objectKey, uploadId, reason: 'allocation-race-loser' });
 			throw conflict('Upload allocation was superseded; retry status');
 		}
-		return {
-			sessionId: session.id,
-			owner,
-			generation: 1,
-			partSizeBytes: session.partSizeBytes,
-			totalParts,
-			expiresAt: session.expiresAt.toISOString(),
-			sourceIdentityAlgorithm: identity.algorithm,
-			sourceIdentity: identity.identity,
-			sourceIdentityBlockSizeBytes: identity.blockSizeBytes,
-		};
+		return creationResult({ ...session, state: 'UPLOADING', uploadId });
 	}
 	return {
+		async creationStatus(actor: { id: number; role: string }, clientUploadId: string): Promise<DirectAssetUploadCreationLookup> {
+			const session = await deps.repository.findByClientUploadId(actor.id, clientUploadId);
+			if (!session) return { status: 'NOT_OBSERVED', clientUploadId };
+			await authorizeOwnerWrite(actor, ownerForSession(session));
+			return { status: 'OBSERVED', session: creationResult(session) };
+		},
 		async createGameSession(actor: { id: number; role: string }, projectId: number, body: DirectCreateBody) {
 			return createSession('GAME', actor, { type: 'PROJECT', id: projectId }, body);
 		},

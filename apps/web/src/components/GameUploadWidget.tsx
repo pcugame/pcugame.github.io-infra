@@ -88,7 +88,7 @@ function GameUploadSession({
 	const {
 		saved: session, getSaved, remember: rememberSession, forget, isMounted,
 		beginRun, isCurrentRun, finishRun, pause: pauseSession, cancel: cancelSession,
-		transfer, acceptReady, restore: restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, taskMessage,
+		transfer, acceptReady, restore: restoreTask, restoreRequired, matchesFile, isPendingCreate, handoff, taskMessage, canContinue, cancelPending,
 	} = useDirectUploadSession<DirectAssetUploadSession>({
 		storageKey: directSessionStorageKey, operationKey, onCancelled,
 		recovery: { owner: { type: 'PROJECT', id: projectId }, kind: uploadKind,
@@ -182,7 +182,7 @@ function GameUploadSession({
 			let keepForBackgroundVerification = false;
 			let candidate: DirectAssetUploadSession | null = null;
 			try {
-				candidate = await restoreTask();
+				candidate = await restoreTask() ?? null;
 				if (cancelled || !candidate) return;
 				activeRun = beginRun();
 				if (!activeRun) return;
@@ -392,14 +392,13 @@ function GameUploadSession({
 	}, [autoStart, initialFile, sessionRestored, state]);
 
 	const handleStart = useCallback(() => {
-		if (isPendingCreate()) { void restoreTask(); return; }
 		if (!file) return;
 		void restoreTask().then(saved => {
-			if (!isMounted()) return;
+			if (!isMounted() || saved === undefined) return;
 			if (saved) void resumeUpload(file, saved);
 			else void runUpload(file);
 		}).catch(cause => { if (isMounted()) { setError(getApiErrorMessage(cause)); setState('error'); } });
-	}, [file, runUpload, resumeUpload, restoreTask, isMounted, isPendingCreate]);
+	}, [file, runUpload, resumeUpload, restoreTask, isMounted]);
 	const handleTerminalRetry = useCallback(() => {
 		const candidate = getSaved();
 		const confirmation = terminalSessionConfirmation;
@@ -464,16 +463,16 @@ function GameUploadSession({
 
 	const uploadActions = (<div className="game-upload__actions">
 				{linear && state === 'idle' && (!file || !terminalSession) && <button className="btn btn--secondary btn--small" type="button" onClick={() => document.getElementById(fileInputId)?.click()}>파일 선택</button>}
-				{state === 'idle' && file && !session && <button className="btn btn--primary" type="button" onClick={handleStart}>업로드 시작</button>}
+				{state === 'idle' && file && !session && <button className="btn btn--primary" type="button" disabled={!canContinue} onClick={handleStart}>업로드 시작</button>}
 				{state === 'idle' && file && terminalSession && (
-					<button className="btn btn--primary" type="button" onClick={handleTerminalRetry}>{linear ? '재시도' : '새 업로드 시작'}</button>
+					<button className="btn btn--primary" type="button" disabled={!canContinue} onClick={handleTerminalRetry}>{linear ? '재시도' : '새 업로드 시작'}</button>
 				)}
 				{state === 'idle' && file && session && !terminalSession && <>
-					<button className="btn btn--primary" type="button" onClick={handleResume}>이어올리기</button>
+					<button className="btn btn--primary" type="button" disabled={!canContinue} onClick={handleResume}>이어올리기</button>
 				</>}
-				{state === 'error' && file && <button className="btn btn--primary" type="button" onClick={session ? handleResume : handleStart}>재시도</button>}
+				{state === 'error' && file && <button className="btn btn--primary" type="button" disabled={!canContinue} onClick={session ? handleResume : handleStart}>재시도</button>}
 				{(state === 'uploading' || state === 'verifying') && <button className="btn btn--secondary btn--small" type="button" onClick={handlePause}>일시 정지</button>}
-				{state !== 'completed' && (file || session || state === 'verifying') && <button className="btn btn--danger btn--small" type="button" onClick={() => void handleCancel()}>{linear ? '취소' : '취소 (세션 삭제)'}</button>}
+				{state !== 'completed' && (file || session || taskMessage || state === 'verifying') && <button className="btn btn--danger btn--small" type="button" disabled={cancelPending} onClick={() => void handleCancel()}>{linear ? '취소' : '취소 (세션 삭제)'}</button>}
 				{state === 'completed' && <span className="game-upload__complete-text">업로드 완료</span>}
 				{onSkip && state !== 'uploading' && state !== 'verifying' && state !== 'completed' && <button className="btn btn--secondary" type="button" onClick={onSkip}>건너뛰기</button>}
 			</div>);

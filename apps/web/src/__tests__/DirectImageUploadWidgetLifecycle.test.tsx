@@ -1,4 +1,7 @@
 /* @vitest-environment jsdom */
+import { createFileSourceIdentity } from '../lib/file-identity';
+import { setupFileIdentityEnvironment } from './helpers/file-identity';
+setupFileIdentityEnvironment();
 import { resetDirectUploadTasksForTests } from '../lib/upload/directUploadTask';
 afterEach(resetDirectUploadTasksForTests);
 
@@ -29,7 +32,8 @@ function deferred<T>() {
 	const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
 	return { promise, resolve, reject };
 }
-function save() {
+async function save() {
+	session.sourceIdentity = (await createFileSourceIdentity(file)).sourceIdentity;
 	window.sessionStorage.setItem(storageKey, JSON.stringify({ session, originalName: file.name, totalBytes: file.size, completed: 0 }));
 }
 function mount(onComplete = vi.fn(), onCancelled = vi.fn()) {
@@ -79,7 +83,7 @@ describe('image session ownership', () => {
 	});
 
 	it('reports restored readiness only once with autoStart and a replaced completion callback', async () => {
-		save();
+		await save();
 		api.status.mockResolvedValue({ ...session, state: 'READY' });
 		const completed = vi.fn();
 		const nextCompleted = vi.fn();
@@ -113,7 +117,7 @@ describe('image session ownership', () => {
 	});
 
 	it('keeps a restored locator on lookup failure and resumes it on explicit retry', async () => {
-		save();
+		await save();
 		api.status.mockRejectedValue(new Error('offline'));
 		const completed = vi.fn();
 		mount(completed);
@@ -128,7 +132,7 @@ describe('image session ownership', () => {
 	});
 
 	it('aborts restored polling on unmount and ignores its late readiness', async () => {
-		save();
+		await save();
 		const ready = deferred<unknown>();
 		api.status.mockResolvedValue({ ...session, state: 'VERIFYING' });
 		api.ready.mockReturnValue(ready.promise);
