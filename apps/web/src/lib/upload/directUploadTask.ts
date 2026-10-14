@@ -1,6 +1,6 @@
 import {
 	cancelDirectAssetUploadSession, getDirectAssetUploadStatus, uploadDirectAssetFile,
-	getDirectAssetUploadCreation, createDirectAssetUploadSession, DirectUploadAllocationPendingError,
+	getDirectAssetUploadCreation, createDirectAssetUploadSession, DirectUploadAllocationPendingError, isDirectUploadPreCreationRejection,
 	type DirectAssetUploadSession, type DirectAssetUploadProgress, type DirectUploadCreateRequest,
 } from '../api/game-upload';
 import { ApiError } from '../api/client';
@@ -56,6 +56,7 @@ export class DirectUploadTask {
 	private uncertain = false;
 	private recoveryBlocked = false;
 	private deleting = false;
+	private cancellationSettled = false;
 	private get cancellation() { return this.snapshot.control !== 'open'; }
 	private cancellationRaw: string | null = null;
 	private cancelObservation: AbortController | null = null;
@@ -215,6 +216,7 @@ export class DirectUploadTask {
 	remember = (saved: Locator) => {
 		const session = sessionOf(saved);
 		if (this.closed.has(`${session.sessionId}:${session.generation}`)) return;
+		this.cancellationSettled = false;
 		this.uncertain = false;
 		this.recoveryBlocked = false;
 		window.sessionStorage.setItem(this.storageKey, JSON.stringify(saved));
@@ -240,6 +242,7 @@ export class DirectUploadTask {
 	beginRun = (): UploadRun | null => {
 		if (this.snapshot.control !== 'open' || this.active || this.pending || this.deleting || (this.legacyUnresolved || ((this.uncertain || this.recoveryBlocked) && !this.snapshot.saved && !this.creation)) || !this.observers.size) return null;
 		this.epoch++;
+		this.cancellationSettled = false;
 		const run = { token: ++this.serial, controller: new AbortController() };
 		this.active = run;
 		return run;
@@ -265,6 +268,7 @@ export class DirectUploadTask {
 	private finishCancellation = () => {
 		if (!this.cancellation || this.pending || this.deleting || this.uncertain || this.recoveryBlocked || this.legacyUnresolved || this.creation || this.snapshot.saved) return;
 		this.epoch++;
+		this.cancellationSettled = true;
 		this.publish({ control: 'open', message: null, progress: null });
 		this.outcome = 'cancelled';
 		this.deliver();
@@ -324,7 +328,7 @@ export class DirectUploadTask {
 		}
 	};
 	cancel = async (recovery?: Recovery) => {
-		if (this.deleting || this.outcome === 'cancelled') return;
+		if (this.deleting || this.cancellationSettled || this.outcome === 'cancelled') return;
 		this.publish({ control: 'cancelling', message: cancellingMessage });
 		this.pause();
 		if (this.creation) this.persistCreation({ ...this.creation, cancelRequested: true });
@@ -346,6 +350,10 @@ export class DirectUploadTask {
 		if (this.snapshot.control !== 'open') throw new Error(this.snapshot.message ?? cancelUnconfirmedMessage);
 		if (!options.resume && (this.pending || (this.uncertain && !this.creation) || this.legacyUnresolved || this.snapshot.saved)) throw new Error('기존 업로드 결과를 먼저 확인해 주세요.');
 		if (!options.resume && this.creation && !this.matchesOperation(operationKey)) throw new Error('이전 업로드를 먼저 확인하거나 취소해 주세요.');
+		// Snapshot earlier ambiguity before persisting this attempt. The current
+		// request record alone is not evidence of an uncertain result, and the
+		// guards above prevent overlapping transfers while a create is pending.
+		const earlierCreateUnresolved = this.uncertain || this.recoveryBlocked;
 		if (!options.resume) { this.clientUploadId ??= crypto.randomUUID(); this.pending = true; if (!this.creation) this.sourceFile = file; this.operationKey = operationKey; this.identityAssigned = true; }
 		let received = false;
 		try {
@@ -357,7 +365,7 @@ export class DirectUploadTask {
 				...(this.creation ? { createRequest: this.creation.request } : {}),
 				onCreateRequest: request => {
 					if (epoch !== this.epoch) throw new DOMException('Aborted', 'AbortError');
-					this.persistCreation({ version: 1, scope: this.scope, owner: typeof owner === 'number' ? { type: 'PROJECT', id: owner } : owner,
+					this.persistCreation({ ...this.creation, version: 1, scope: this.scope, owner: typeof owner === 'number' ? { type: 'PROJECT', id: owner } : owner,
 						kind, request, fileIndex: options.recoveryIndex ?? 0, operationKey,
 						...(this.cancellation ? { cancelRequested: true } : {}) });
 					this.sourceFile = file;
@@ -375,10 +383,19 @@ export class DirectUploadTask {
 			if (epoch === this.epoch && cause instanceof ApiError && (cause.body as { error?: { code?: string } } | null)?.error?.code === 'IDEMPOTENCY_CONFLICT' && this.creation) {
 				this.persistCreation({ ...this.creation, conflict: true });
 			}
-			if (epoch === this.epoch && !received && typeof cause === 'object' && cause !== null && 'uncertain' in cause && cause.uncertain) {
-				this.uncertain = true;
-				this.publish({ message: this.cancellation ? cancelUnconfirmedMessage : recoveryMessage, handoff: this.snapshot.handoff + 1,
-					...(this.cancellation ? { control: 'cancel-unconfirmed' } : {}) });
+			if (epoch === this.epoch && !received && !options.resume && this.creation) {
+				if (!earlierCreateUnresolved && !this.snapshot.saved && isDirectUploadPreCreationRejection(cause)) {
+					// No prior ambiguous/in-flight attempt exists for this logical job.
+					// Remove durable recovery data before allowing another identity.
+					this.clearCreation();
+					this.sourceFile = null;
+					this.uncertain = false; this.recoveryBlocked = false;
+					this.publish({ message: null, progress: null });
+				} else {
+					this.uncertain = true;
+					this.publish({ message: this.cancellation ? cancelUnconfirmedMessage : recoveryMessage, handoff: this.snapshot.handoff + 1,
+						...(this.cancellation ? { control: 'cancel-unconfirmed' } : {}) });
+				}
 			}
 			throw cause;
 		} finally {
@@ -403,7 +420,9 @@ export class DirectUploadTask {
 			let observed = result.status === 'OBSERVED' ? result.session : null;
 			// A missing observation is not failure. For cancellation, replay the exact
 			// durable body to acquire a cancellable session, even without the File.
-			if (!observed && this.cancellation) observed = await createDirectAssetUploadSession(record.owner, record.kind, record.request);
+			// Let an original in-flight request settle first. Replaying it here
+			// would make even its later definite rejection ambiguous.
+			if (!observed && this.cancellation && !this.pending) observed = await createDirectAssetUploadSession(record.owner, record.kind, record.request);
 			if (!current()) return undefined;
 			if (!observed) { this.publish({ message: recoveryMessage }); return null; }
 			if (observed.clientUploadId !== record.request.clientUploadId || observed.owner.type !== record.owner.type

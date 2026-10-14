@@ -2,7 +2,7 @@
 
 import { webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { uploadDirectAssetFile, createDirectAssetUploadSession, getDirectAssetUploadCreation } from '../lib/api/game-upload';
+import { uploadDirectAssetFile, createDirectAssetUploadSession, getDirectAssetUploadCreation, isDirectUploadPreCreationRejection } from '../lib/api/game-upload';
 import {
 	createFileSourceIdentity,
 	SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
@@ -32,15 +32,21 @@ describe('direct asset upload browser client', () => {
 	});
 
 	it.each([
-		[409, 'CONFLICT', false], [409, 'IDEMPOTENCY_CONFLICT', false],
+		[400, 'ERROR', false], [400, 'VALIDATION_ERROR', false], [400, 'INVALID_FILENAME', false],
+		[401, 'UNAUTHORIZED', false], [403, 'FORBIDDEN', false], [404, 'NOT_FOUND', false],
+		[413, 'PAYLOAD_TOO_LARGE', false], [415, 'UNSUPPORTED_MEDIA_TYPE', false],
+		[400, undefined, true], [400, 'UNKNOWN', true], [408, 'ERROR', true], [422, 'ERROR', true],
+		[409, 'CONFLICT', true], [409, 'IDEMPOTENCY_CONFLICT', true],
 		[409, 'OPERATION_IN_PROGRESS', true], [503, 'INTERNAL_ERROR', true],
-	] as const)('distinguishes create HTTP %s %s instead of treating every conflict as uncertain', async (status, code, uncertain) => {
+	] as const)('distinguishes create HTTP %s %s by its pre-allocation contract', async (status, code, uncertain) => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: false, error: { code, message: code } }), { status })));
 		const request = { clientUploadId: '11111111-1111-4111-8111-111111111111', originalName: 'game.zip', totalBytes: 3,
 			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1' as const, sourceIdentity: 'a'.repeat(64), sourceIdentityBlockSizeBytes: SOURCE_IDENTITY_BLOCK_SIZE_BYTES, sourceIdentityBlockDigests: ['a'.repeat(64)] };
 		const error = await createDirectAssetUploadSession({ type: 'PROJECT', id: 7 }, 'GAME', request).catch(error => error);
-		expect(error).toMatchObject({ status, body: { error: { code } } });
+		expect(error).toMatchObject({ status });
+		expect(error.body.error.code).toBe(code);
 		expect(Boolean(error.uncertain)).toBe(uncertain);
+		expect(isDirectUploadPreCreationRejection(error)).toBe(!uncertain);
 	});
 	it('rejects a malformed creation observation rather than interpreting it as absence', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: 'unknown' })));

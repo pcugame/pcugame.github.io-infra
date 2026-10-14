@@ -36,9 +36,11 @@ function network(kind: DirectAssetUploadKind, owner: DirectAssetUploadOwner = { 
 	const createRequests: { clientUploadId: string; originalName: string }[] = [];
 	const dispatchedRecords: unknown[] = [];
 	const creates: { session: DirectAssetUploadStatus; response: ReturnType<typeof deferred<Response>> }[] = [];
+	const lookups: ReturnType<typeof deferred<Response>>[] = [];
+	const rejections: { response: ReturnType<typeof deferred<Response>>; rejection: Response }[] = [];
 	const completes: { id: string; response: ReturnType<typeof deferred<Response>> }[] = [];
 	const deletes: { id: string; response: ReturnType<typeof deferred<Response>> }[] = [];
-	const controls = { holdCreate: true, holdComplete: false, holdDelete: false, loseDelete: false, loseCreate: false, rejectCreate: false, failStatus: false, cancelConflict: false, linked: true, wrongToken: false, failLookup: false, missCreate: false, allocating: false, hideCreation: false };
+	const controls = { holdCreate: true, holdComplete: false, holdDelete: false, loseDelete: false, loseCreate: false, rejectCreate: false, rejectName: '', rejectCode: 'ERROR', holdRejection: false, failStatus: false, cancelConflict: false, linked: true, wrongToken: false, failLookup: false, holdLookup: false, missCreate: false, allocating: false, hideCreation: false };
 	const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
 		const path = new URL(String(input), 'https://test.invalid').pathname;
 		if (/\/direct-\w+-upload-sessions$/.test(path) && init?.method === 'POST') {
@@ -46,18 +48,24 @@ function network(kind: DirectAssetUploadKind, owner: DirectAssetUploadOwner = { 
 			createRequests.push(body);
 			dispatchedRecords.push(Object.keys(sessionStorage).filter(key => key.endsWith(':creation'))
 				.map(key => JSON.parse(sessionStorage.getItem(key)!)).find(record => record.request?.clientUploadId === body.clientUploadId));
+			if (controls.rejectCreate || controls.rejectName === body.originalName) {
+				const response = deferred<Response>();
+				const rejection = new Response(JSON.stringify({ ok: false, error: { code: controls.rejectCode, message: 'Invalid upload size' } }), { status: controls.rejectCode === 'ERROR' ? 400 : 409 });
+				if (controls.holdRejection) { rejections.push({ response, rejection }); return response.promise; }
+				return rejection;
+			}
 			const existing = identities.get(body.clientUploadId);
 			if (existing) return json(existing);
 			if (controls.missCreate) throw new TypeError('request did not reach server');
 			const session: DirectAssetUploadStatus = { ...body, sessionId: `session-${creates.length + 1}`, owner, kind,
 				generation: 1, partSizeBytes: 16, totalParts: 1, expiresAt: '2027-01-01T00:00:00.000Z', state: controls.allocating ? 'ALLOCATING' : 'UPLOADING', parts: [] };
 			const response = deferred<Response>(); creates.push({ session, response });
-			if (controls.rejectCreate) return json({}, 400);
 			sessions.set(session.sessionId, session); identities.set(body.clientUploadId, session);
 			if (controls.loseCreate) throw new TypeError('response lost after server allocation');
 			return controls.holdCreate ? response.promise : json(session);
 		}
 		if (path.includes('/direct-asset-upload-creations/')) {
+			if (controls.holdLookup) { const response = deferred<Response>(); lookups.push(response); return response.promise; }
 			if (controls.failLookup) return json({}, 503);
 			const clientUploadId = path.split('/').at(-1)!;
 			const session = controls.hideCreation ? undefined : identities.get(clientUploadId);
@@ -92,7 +100,7 @@ function network(kind: DirectAssetUploadKind, owner: DirectAssetUploadOwner = { 
 		return json(session);
 	});
 	vi.stubGlobal('fetch', fetcher);
-	return { controls, sessions, creates, createRequests, dispatchedRecords, completes, deletes, fetcher,
+	return { controls, sessions, creates, rejections, lookups, createRequests, dispatchedRecords, completes, deletes, fetcher,
 		async seed(file: File, state: DirectAssetUploadStatus['state'] = 'UPLOADING') {
 			const source = await createFileSourceIdentity(file);
 			const session: DirectAssetUploadStatus = { ...source, sessionId: 'recovered', owner: { type: 'PROJECT', id: 7 }, kind, generation: 1,
@@ -263,10 +271,93 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s job handoff through React
   await act(async () => { await Promise.resolve(); });
   expect(view.complete).not.toHaveBeenCalled(); expect(old.cancelled).not.toHaveBeenCalled(); expect(net.creates).toHaveLength(1);
  });
-	it('allows retry after a definite create rejection', async () => {
+	it('finishes cancellation after a persistent pre-creation rejection without replaying the rejected create', async () => {
 		const net = network(kind); net.controls.rejectCreate = true; const view = mount(kind, file());
-		await screen.findByRole('alert'); net.controls.rejectCreate = false; net.controls.holdCreate = false; retry();
-		await waitFor(() => expect(view.complete).toHaveBeenCalledOnce()); expect(net.creates).toHaveLength(2);
+		await screen.findByRole('alert');
+		expect(view.cancelled).not.toHaveBeenCalled(); expect(view.complete).not.toHaveBeenCalled();
+		cancel(); await waitFor(() => expect(view.cancelled).toHaveBeenCalledOnce());
+		cancel(); await act(async () => { await Promise.resolve(); });
+		expect(view.cancelled).toHaveBeenCalledOnce();
+		expect(net.createRequests).toHaveLength(1); expect(net.deletes).toHaveLength(0);
+		expect(sessionStorage.getItem(`${storageKey()}:creation`)).toBeNull();
+		view.unmount(); resetDirectUploadTasksForTests(); const reentry = mount(kind);
+		await act(async () => { await Promise.resolve(); });
+		expect(getDirectUploadTask('9', storageKey()).hasUnresolved()).toBe(false);
+		expect(reentry.cancelled).not.toHaveBeenCalled(); expect(reentry.complete).not.toHaveBeenCalled();
+		expect(net.createRequests).toHaveLength(1);
+	});
+	it.each([false, true])('uploads replacement B with a new identity while A remains rejected (reload=%s)', async reload => {
+		const net = network(kind); net.controls.rejectName = file().name; net.controls.holdCreate = false;
+		const old = mount(kind, file()); await screen.findByRole('alert');
+		expect(sessionStorage.getItem(`${storageKey()}:creation`)).toBeNull();
+		expect(old.cancelled).not.toHaveBeenCalled();
+		old.unmount(); if (reload) resetDirectUploadTasksForTests();
+		const replacement = new File(['B'], `small.${kind === 'GAME' ? 'zip' : kind === 'VIDEO' ? 'mp4' : 'png'}`);
+		const view = mount(kind, replacement, vi.fn(), vi.fn(), undefined, 'replacement');
+		await waitFor(() => expect(view.complete).toHaveBeenCalledOnce());
+		expect(net.createRequests).toHaveLength(2);
+		expect(net.createRequests[1]!.originalName).toBe(replacement.name);
+		expect(net.createRequests[1]!.clientUploadId).not.toBe(net.createRequests[0]!.clientUploadId);
+		expect(net.deletes).toHaveLength(0); expect(view.cancelled).not.toHaveBeenCalled();
+	});
+	it('uses a fresh identity for every explicit retry while the server keeps rejecting', async () => {
+		const net = network(kind); net.controls.rejectCreate = true; const view = mount(kind, file());
+		await screen.findByRole('alert'); retry(); await waitFor(() => expect(net.createRequests).toHaveLength(2));
+		await screen.findByRole('alert');
+		expect(net.createRequests[1]!.clientUploadId).not.toBe(net.createRequests[0]!.clientUploadId);
+		expect(sessionStorage.getItem(`${storageKey()}:creation`)).toBeNull();
+		expect(view.cancelled).not.toHaveBeenCalled(); expect(view.complete).not.toHaveBeenCalled();
+	});
+	it('lets the actual file picker replace a persistently rejected A with B', async () => {
+		const net = network(kind); net.controls.rejectName = file().name; net.controls.holdCreate = false;
+		const completed = vi.fn(); const cancelled = vi.fn(); const props = { onComplete: completed, onCancelled: cancelled };
+		render(<QueryClientProvider client={client()}>{kind === 'GAME' ? <GameUploadWidget {...props} projectId={7} />
+			: kind === 'VIDEO' ? <DirectVideoUploadWidget {...props} projectId={7} />
+			: <DirectImageUploadWidget {...props} owner={{ type: 'PROJECT', id: 7 }} kind="IMAGE" />}</QueryClientProvider>);
+		fireEvent.change(await screen.findByLabelText(/파일 선택/), { target: { files: [file()] } }); retry();
+		await screen.findByRole('alert'); expect(cancelled).not.toHaveBeenCalled();
+		const replacement = new File(['B'], `small.${kind === 'GAME' ? 'zip' : kind === 'VIDEO' ? 'mp4' : 'png'}`);
+		fireEvent.change(screen.getByLabelText(/파일 선택/), { target: { files: [replacement] } }); retry();
+		await waitFor(() => expect(completed).toHaveBeenCalledOnce());
+		expect(net.createRequests).toHaveLength(2); expect(net.createRequests[1]!.originalName).toBe(replacement.name);
+		expect(net.createRequests[1]!.clientUploadId).not.toBe(net.createRequests[0]!.clientUploadId);
+		expect(cancelled).not.toHaveBeenCalled(); expect(net.deletes).toHaveLength(0);
+	});
+	it.each(['reentry', 'cancel'] as const)('settles a late first-attempt rejection across %s without replay or a false completion', async action => {
+		const net = network(kind); net.controls.rejectCreate = true; net.controls.holdRejection = true;
+		const chosen = file(); const old = mount(kind, chosen, vi.fn(), vi.fn(), undefined, 'first');
+		await waitFor(() => expect(net.rejections).toHaveLength(1));
+		if (action === 'cancel') {
+			cancel(); await waitFor(() => expect(net.fetcher.mock.calls.some(([url]) => String(url).includes('/direct-asset-upload-creations/'))).toBe(true));
+		}
+		old.unmount(); const view = mount(kind, chosen, vi.fn(), vi.fn(), undefined, 'first');
+		await act(async () => net.rejections[0]!.response.resolve(net.rejections[0]!.rejection));
+		expect(sessionStorage.getItem(`${storageKey()}:creation`)).toBeNull();
+		expect(net.createRequests).toHaveLength(1); expect(view.complete).not.toHaveBeenCalled();
+		expect(view.cancelled).toHaveBeenCalledTimes(action === 'cancel' ? 1 : 0);
+		expect(old.cancelled).not.toHaveBeenCalled(); expect(old.complete).not.toHaveBeenCalled();
+	});
+	it.each(['ERROR', 'CONFLICT', 'IDEMPOTENCY_CONFLICT', 'OPERATION_IN_PROGRESS'] as const)('preserves an earlier lost creation after NOT_OBSERVED and a later %s', async code => {
+		const net = network(kind); net.controls.loseCreate = true; net.controls.failLookup = true; net.controls.hideCreation = true;
+		const chosen = file(); const old = mount(kind, chosen); await screen.findByRole('alert');
+		const request = net.createRequests[0]!;
+		net.controls.failLookup = false; net.controls.rejectCreate = true; net.controls.rejectCode = code;
+		retry(); await waitFor(() => expect(net.createRequests).toHaveLength(2));
+		await screen.findByRole('alert');
+		expect(net.createRequests[1]).toEqual(request);
+		expect(sessionStorage.getItem(`${storageKey()}:creation`)).toContain(request.clientUploadId);
+		expect(getDirectUploadTask('9', storageKey()).hasUnresolved()).toBe(true);
+		cancel(); await screen.findByRole('alert');
+		expect(old.cancelled).not.toHaveBeenCalled(); expect(old.complete).not.toHaveBeenCalled();
+		expect(sessionStorage.getItem(`${storageKey()}:creation`)).toContain(request.clientUploadId);
+		old.unmount(); resetDirectUploadTasksForTests();
+		const replacement = new File(['B'], `small.${kind === 'GAME' ? 'zip' : kind === 'VIDEO' ? 'mp4' : 'png'}`);
+		const next = mount(kind, replacement, vi.fn(), vi.fn(), undefined, 'replacement');
+		await screen.findByRole('alert'); retry(); await act(async () => { await Promise.resolve(); });
+		expect(net.createRequests.every(value => value.clientUploadId === request.clientUploadId)).toBe(true);
+		expect(next.complete).not.toHaveBeenCalled(); expect(next.cancelled).not.toHaveBeenCalled();
+		expect(sessionStorage.getItem(`${storageKey()}:creation`)).toContain(request.clientUploadId);
+		if (code === 'IDEMPOTENCY_CONFLICT') expect(JSON.parse(sessionStorage.getItem(`${storageKey()}:creation`)!)).toMatchObject({ conflict: true });
 	});
 	it.each(['resume', 'cancel'] as const)('recovers a lost published-project create response and actually completes %s', async action => {
 		const net = network(kind); net.controls.loseCreate = true; net.controls.failLookup = true;
@@ -543,6 +634,31 @@ function QueueControls() {
 		<output data-testid="queue">{queue.entries.map(entry => `${entry.file.name}:${entry.status}`).join(',')}</output>
 		{visible && <AdminProjectUploadProgress />}</>;
 }
+it('keeps the real parent queue on B when a rejected A cancellation lookup arrives late', async () => {
+	const net = network('IMAGE'); net.controls.rejectName = 'first.png'; net.controls.holdRejection = true;
+	net.controls.holdLookup = true; net.controls.holdCreate = false; net.controls.holdComplete = true;
+	render(<QueryClientProvider client={client()}><AdminProjectUploadProvider project={project} projectId={7} limits={getClientUploadLimits('ADMIN')} canEditContent>
+		<AdminProjectAssetManager canEditContent /><QueueControls />
+	</AdminProjectUploadProvider></QueryClientProvider>);
+	fireEvent.drop(screen.getByRole('button', { name: '게임·미디어·자료 선택' }).parentElement!, { dataTransfer: { files: [new File(['first'], 'first.png', { type: 'image/png' }), new File(['B'], 'second.png', { type: 'image/png' })], types: ['Files'] } });
+	fireEvent.click(screen.getByRole('button', { name: '적용' })); await waitFor(() => expect(net.rejections).toHaveLength(1));
+	const list = await screen.findByRole('list', { name: '변경 파일 업로드 진행' });
+	fireEvent.click(within(list).getByRole('button', { name: '취소' }));
+	await waitFor(() => expect(net.lookups).toHaveLength(1));
+	fireEvent.click(screen.getByRole('button', { name: '화면 전환' }));
+	await act(async () => net.rejections[0]!.response.resolve(net.rejections[0]!.rejection));
+	fireEvent.click(screen.getByRole('button', { name: '화면 전환' }));
+	await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe('first.png:cancelled,second.png:pending'));
+	fireEvent.click(screen.getByRole('button', { name: '적용' })); await waitFor(() => expect(net.completes).toHaveLength(1));
+	await act(async () => net.lookups[0]!.resolve(json({}, 503)));
+	expect(screen.getByTestId('queue').textContent).toBe('first.png:cancelled,second.png:active');
+	expect(net.createRequests).toHaveLength(2); expect(net.createRequests[1]!.originalName).toBe('second.png');
+	expect(net.createRequests[1]!.clientUploadId).not.toBe(net.createRequests[0]!.clientUploadId);
+	await act(async () => net.completes[0]!.response.resolve(json({ status: 'READY', sessionId: net.completes[0]!.id, generation: 1, sizeBytes: 1 })));
+	await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe('first.png:cancelled,second.png:done'));
+	expect(net.createRequests).toHaveLength(2); expect(net.deletes).toHaveLength(0);
+});
+
 it.each(['READY', 'CANCELLED'] as const)('real parent queue reconciles %s once across a pending-create view handoff', async outcome => {
 	const net = network('IMAGE'); net.controls.failLookup = true;
 	render(<QueryClientProvider client={client()}><AdminProjectUploadProvider project={project} projectId={7} limits={getClientUploadLimits('ADMIN')} canEditContent>

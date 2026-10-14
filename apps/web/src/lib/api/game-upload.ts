@@ -37,6 +37,11 @@ export class DirectUploadCreateError extends Error {
 export class DirectUploadAllocationPendingError extends DirectUploadCreateError {
 	constructor() { super(true, undefined); this.message = '서버에서 업로드를 생성 중입니다. 잠시 후 재시도하거나 취소해 주세요.'; }
 }
+/** Only the create endpoint may attest that this attempt rejected before allocation. */
+export function isDirectUploadPreCreationRejection(cause: unknown): boolean {
+	return cause instanceof ApiError && 'rejectedBeforeCreation' in cause && cause.rejectedBeforeCreation === true;
+}
+
 export type DirectUploadCreateRequest = DirectGameUploadCreateSessionRequest & { clientUploadId: string };
 
 export async function getDirectAssetUploadCreation(clientUploadId: string): Promise<DirectAssetUploadCreationLookup> {
@@ -56,9 +61,17 @@ export async function createDirectAssetUploadSession(owner: DirectAssetUploadOwn
 	} catch (cause) {
 		if (cause instanceof ApiError) {
 			const code = (cause.body as { error?: { code?: string } } | null)?.error?.code;
-			// A request conflict is a definite rejection. Only an explicit in-progress
-			// outcome or a server/transport failure leaves the create unresolved.
-			if (cause.status >= 500 || code === 'OPERATION_IN_PROGRESS') Object.assign(cause, { uncertain: true });
+			// In the canonical create route these validation/auth errors precede
+			// createAllocating. Generic CONFLICT can follow allocation; neither it,
+			// IDEMPOTENCY_CONFLICT nor an unknown 4xx proves absence of a session.
+			// This attests only to this attempt, never to an earlier lost response.
+			const rejectedBeforeCreation = (cause.status === 400 && ['ERROR', 'VALIDATION_ERROR', 'INVALID_FILENAME'].includes(code ?? ''))
+				|| (cause.status === 401 && code === 'UNAUTHORIZED')
+				|| (cause.status === 403 && code === 'FORBIDDEN')
+				|| (cause.status === 404 && code === 'NOT_FOUND')
+				|| (cause.status === 413 && code === 'PAYLOAD_TOO_LARGE')
+				|| (cause.status === 415 && code === 'UNSUPPORTED_MEDIA_TYPE');
+			Object.assign(cause, { rejectedBeforeCreation, uncertain: !rejectedBeforeCreation });
 			throw cause;
 		}
 		throw new DirectUploadCreateError(true, cause);
@@ -128,10 +141,12 @@ async function apiRequest<T>(
 			return json as T;
 		}
 
-		throwIfAborted(effectiveRetrySignal);
+		// Create keeps its transport alive after a local pause/cancel. Preserve
+		// a late rejection as well as a late success, while still stopping retries.
+		throwIfAborted(init.signal ?? effectiveRetrySignal);
 		let body: unknown;
 		try { body = await res.json(); } catch { body = null; }
-		throwIfAborted(effectiveRetrySignal);
+		throwIfAborted(init.signal ?? effectiveRetrySignal);
 		if (res.status !== 429 || attempt >= CONTROL_RETRY_ATTEMPTS) {
 			throw new ApiError(res.status, res.statusText, body);
 		}
