@@ -1,3 +1,4 @@
+import { createWorkGate } from '../../../runtime/work-gate.js';
 export function createExportWorkerLoop(deps: {
 	runPass(signal: AbortSignal): Promise<number>;
 	pollIntervalMs: number;
@@ -6,6 +7,7 @@ export function createExportWorkerLoop(deps: {
 	if (!Number.isInteger(deps.pollIntervalMs) || deps.pollIntervalMs < 100) {
 		throw new RangeError('Export worker poll interval must be at least 100ms');
 	}
+	const gate = createWorkGate();
 	const controller = new AbortController();
 	let timer: NodeJS.Timeout | undefined;
 	let active: Promise<void> | undefined;
@@ -20,7 +22,7 @@ export function createExportWorkerLoop(deps: {
 				do {
 					pending = false;
 					if (controller.signal.aborted) break;
-					const processed = await deps.runPass(controller.signal);
+					const processed = await gate.run(() => deps.runPass(controller.signal), 0);
 					if (processed > 0) pending = true;
 				} while (pending && !closed);
 			} catch (error) {
@@ -32,6 +34,7 @@ export function createExportWorkerLoop(deps: {
 		return active;
 	};
 	return {
+		gate,
 		async start(): Promise<void> {
 			if (closed) throw new Error('Export worker loop is closed');
 			timer ??= setInterval(() => { void wake(); }, deps.pollIntervalMs);

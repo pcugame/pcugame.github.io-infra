@@ -61,9 +61,10 @@ export function createClaimHeartbeatGuard(input: {
 		signal,
 		assertOwned,
 		isLost: () => lost !== undefined,
-		stop() {
+		async stop() {
 			active = false;
 			clearInterval(heartbeat);
+			await renewalFlight?.catch(() => undefined);
 		},
 	};
 }

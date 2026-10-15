@@ -1,3 +1,4 @@
+import { createWorkGate } from '../../runtime/work-gate.js';
 import {
 	WebglGenerationFencedError,
 	WebglTerminalValidationError,
@@ -144,7 +145,7 @@ export function createWebglProcessingWorker(deps: {
 			});
 			return 'retried';
 		} finally {
-			claim.stop();
+			await claim.stop();
 		}
 	}
 
@@ -179,6 +180,7 @@ export function createWebglProcessingWorkerLoop(deps: {
 	if (!Number.isInteger(deps.pollIntervalMs) || deps.pollIntervalMs < 100) {
 		throw new RangeError('WebGL worker poll interval must be at least 100ms');
 	}
+	const gate = createWorkGate();
 	const abort = new AbortController();
 	let active: Promise<void> | undefined;
 	let pending = false;
@@ -193,7 +195,7 @@ export function createWebglProcessingWorkerLoop(deps: {
 			try {
 				do {
 					pending = false;
-					if (!abort.signal.aborted) await deps.runPass(abort.signal);
+					if (!abort.signal.aborted) await gate.run(() => deps.runPass(abort.signal), undefined);
 				} while (pending && !closed);
 			} catch (error) {
 				deps.logger.error({ error }, 'WebGL worker pass failed');
@@ -205,6 +207,7 @@ export function createWebglProcessingWorkerLoop(deps: {
 	}
 
 	return {
+		gate,
 		async start(): Promise<void> {
 			if (closed) throw new Error('WebGL worker loop is closed');
 			if (!timer) timer = setInterval(() => { void wake(); }, deps.pollIntervalMs);

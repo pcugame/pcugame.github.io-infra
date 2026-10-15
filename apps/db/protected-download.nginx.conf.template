@@ -117,6 +117,11 @@ server {
 
     set $pcu_file_method $request_method;
     auth_request /__pcu_file_auth;
+    auth_request_set $pcu_api_slot $upstream_http_x_pcu_api_slot;
+    add_header X-PCU-API-Slot $pcu_api_slot always;
+    # A location-level add_header replaces the server header set on Nginx 1.27.
+    add_header Cache-Control "private, no-store" always;
+    add_header X-Content-Type-Options "nosniff" always;
     auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
     auth_request_set $pcu_validated_upstream_host $upstream_http_x_pcu_upstream_host;
     resolver 127.0.0.11 valid=30s;
@@ -154,6 +159,8 @@ server {
 
     set $pcu_file_method $request_method;
     auth_request /__pcu_file_auth;
+    auth_request_set $pcu_api_slot $upstream_http_x_pcu_api_slot;
+    add_header X-PCU-API-Slot $pcu_api_slot always;
     auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
     auth_request_set $pcu_runtime_csp $upstream_http_x_pcu_runtime_csp;
     auth_request_set $pcu_validated_upstream_host $upstream_http_x_pcu_upstream_host;

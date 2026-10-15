@@ -131,7 +131,7 @@ export function createProjectPublicationWorker(deps: {
 				deps.logger.warn({ error, jobId: job.id }, 'Project publication will retry');
 				return { claimed: 1, completed: 0, retried: 1, failed: 0, cancelled: 0 };
 			} finally {
-				claim.stop();
+				await claim.stop();
 			}
 		},
 	};
