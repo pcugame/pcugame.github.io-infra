@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resumable, forward-only API slot and worker handoff. No failure cleanup."""
+"""Resumable, API slot admission, safe candidate cancellation and forward-only handoff."""
 import fcntl
 import json
 import os
@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 
 WORKERS = ['gp-worker-' + kind for kind in (
     'game-validation', 'webgl', 'video', 'image', 'export', 'project-publication')]
@@ -52,14 +53,16 @@ class Release:
         self.host, self.file, self.sha, self.image = host, Path(state_file), sha, image
         self.observe = observe
         self.state = json.loads(self.file.read_text()) if self.file.exists() else None
-        if self.state and self.state['phase'] != 'complete':
+        if self.state and self.state['phase'] == 'preflight':
+            host.recover_preflight(self.state, self.file)
+            self.state = json.loads(self.file.read_text())
+        if self.state and self.state['phase'] not in ('complete', 'aborted'):
             if (self.state['sha'], self.state['image']) != (sha, image):
                 raise ValueError('An unfinished release blocks another release')
-        elif not self.state or (self.state['sha'], self.state['image']) != (sha, image):
+        elif not self.state or self.state['phase'] == 'aborted' or (self.state['sha'], self.state['image']) != (sha, image):
             active = host.active_slot()
             self.state = dict(sha=sha, image=image, old=active, new='b' if active == 'a' else 'a',
-                              phase='preflight', workers=[], deferred=False)
-            self.persist()
+                              phase='preflight', workers=[], deferred=False, release_id=uuid.uuid4().hex)
 
     def persist(self, **values):
         self.state.update(values)
@@ -74,29 +77,83 @@ class Release:
             time.sleep(1)
         self.persist(deferred=False)
 
+    def abort(self):
+        h, s = self.host, self.state
+        if s['phase'] not in ('candidate', 'aborting'):
+            raise ValueError('Admission may have occurred; cancellation is forbidden')
+        self.persist(phase='aborting')
+        h.assert_unadmitted(s)
+        name = 'gp-api-' + s['new']
+        if h.running(name):
+            h.verify_image(name, s['image'], s['sha'])
+            h.prepare_admission(s)
+            h.control(name, 'quiesce')
+            self.wait(lambda: idle(h.control(name, 'status')))
+            h.stop(name)
+        h.verify_stopped(name)
+        h.cleanup_candidate(s)
+        h.assert_unadmitted(s)
+        if h.running(name):
+            raise ValueError('Candidate still running')
+        self.persist(phase='aborted', deferred=False)
+        return s
+
+    def approve(self):
+        h, s = self.host, self.state
+        identity = h.candidate_identity(s)
+        h.probe('candidate', s)
+        h.probe('cleanup', {**s, 'new': s['old']})
+        if h.candidate_identity(s) != identity:
+            raise ValueError('Candidate restarted during validation')
+        self.persist(approval=dict(release_id=s.get('release_id'), slot=s['new'],
+                                   sha=s['sha'], image=s['image'], instance=identity))
+        return identity
+
     def run(self):
         h, s = self.host, self.state
+        if s['phase'] not in ('preflight', 'candidate', 'aborting', 'switch', 'drain', 'handoff', 'workers', 'web-pending', 'complete'):
+            raise ValueError('Unknown release phase')
+        if s['phase'] != 'preflight' and not s.get('release_id'):
+            self.persist(release_id=uuid.uuid4().hex)
         old, new = 'gp-api-' + s['old'], 'gp-api-' + s['new']
-        # Verify actual process/artifact identities on every invocation.
+        if s['phase'] == 'aborting':
+            return self.abort()
         h.reconcile(s)
         if s['phase'] == 'preflight':
             h.preflight(s)
             h.snapshot(self.sha)
-            self.persist(phase='candidate')
+            h.capture_candidate(s)
+            # First durable intent precedes slot env, definition and service changes.
+            self.persist(phase='candidate', candidate_selected=True)
         if s['phase'] == 'candidate':
-            self.persist(candidate_selected=True)
-            h.start_candidate(s)
-            h.probe('candidate', s)
-            # Persist the entire old worker generation BEFORE changing disk or reload.
-            self.persist(phase='switch', nginx_workers=h.nginx_workers(), boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+            try:
+                h.assert_unadmitted(s)
+                h.start_candidate(s)
+                for mode in ('nas-public', 'nas-protected'):
+                    h.probe(mode, {**s, 'new': s['old']})
+                identity = self.approve()
+                workers = h.nginx_workers()
+                if h.candidate_identity(s) != identity:
+                    raise ValueError('Candidate changed before admission')
+                self.persist(phase='switch', nginx_workers=workers,
+                             boot_id=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+            except Exception:
+                if s['phase'] == 'candidate':
+                    self.abort()
+                raise
         if s['phase'] == 'switch':
-            # Re-probe on resume, including a restart that reset candidate state.
-            h.probe('candidate', s)
+            # Intent is irreversible even when helper response was lost. Revalidate
+            # the current instance; never use an approval from a previous process.
+            h.prepare_admission(s)
+            identity = self.approve()
             self.persist(nginx_workers=[list(worker) for worker in sorted({tuple(worker) for worker in [*s['nginx_workers'], *h.nginx_workers()]})])
+            if h.candidate_identity(s) != identity:
+                raise ValueError('Candidate changed before proxy command')
             h.switch(s)
             h.probe('public', s)
             h.probe('nas-public', s)
             h.probe('nas-protected', s)
+            h.probe('cleanup', s)
             h.set_active(s['new'])
             self.persist(phase='drain')
         if s['phase'] == 'drain':
@@ -194,9 +251,9 @@ class Host:
             old = 'gp-api-' + state['old']
             if self.running(old):
                 self.verify_image(old, state['old_image'])
-            if state['phase'] not in ('candidate',):
+            if state['phase'] not in ('candidate', 'aborting'):
                 self.verify_image('gp-api-' + state['new'], state['image'], state['sha'])
-            if state['phase'] not in ('candidate', 'switch'):
+            if state['phase'] not in ('candidate', 'aborting', 'switch'):
                 if self.active_slot() != state['new']:
                     raise ValueError('Active slot differs from persisted switch')
                 self.probe('public', state)
@@ -303,18 +360,80 @@ class Host:
             raise ValueError('Insufficient measured PostgreSQL connection headroom')
         # Verify every actual probe before changing service state.
         self.command(['node', str(self.root / 'rolling-smoke.mjs'), 'validate', str(self.root)])
-        for mode in ('public', 'nas-public', 'nas-protected'):
-            self.probe(mode, {**state, 'new': state['old']})
+        # Network probes with fixture writes run only after durable preparation.
+
+    def assert_unadmitted(self, state):
+        self.audit_installation()
+        if self.active_slot() != state['old'] or self.proxy('status')['slot'] != state['old']:
+            raise ValueError('Candidate admission is ambiguous; cancellation deferred')
+        self.verify_image('gp-api-' + state['old'], state['old_image'])
+
+    def capture_candidate(self, state):
+        name = 'gp-api-' + state['new']
+        state['previous_definition'] = (self.quadlet / (name + '.container')).read_text()
+        state['probe_file'] = str(self.root / ('cutover-state/rolling-probes-' + state['release_id'] + '.json'))
+        save(state['probe_file'], (self.root / 'rolling-probes.json').read_text())
+        state['previous_env'] = (self.root / ('runtime-env/slot-' + state['new'] + '.env')).read_text()
+
+    def cleanup_candidate(self, state):
+        # Only dedicated, replayable fixture writes are reset; no production rollback.
+        self.probe('cleanup', {**state, 'new': state['old']})
+        if 'previous_definition' in state:
+            save(self.quadlet / ('gp-api-' + state['new'] + '.container'), state['previous_definition'])
+            save(self.root / ('runtime-env/slot-' + state['new'] + '.env'), state['previous_env'])
+            self.command(['systemctl', '--user', 'daemon-reload'])
+
+    def verify_stopped(self, name):
+        status = self.command(['systemctl', '--user', 'show', name + '.service', '--property=ActiveState', '--value'])
+        if status not in ('inactive', 'failed') or self.running(name):
+            raise ValueError('Candidate service may restart; cancellation deferred')
+
+    def prepare_admission(self, state):
+        self.definition('gp-api-' + state['new'], state['image'], restart='no')
+
+    def candidate_identity(self, state):
+        name = 'gp-api-' + state['new']
+        self.verify_image(name, state['image'], state['sha'])
+        status = self.ready_control(name)
+        if status.get('maintenance', {}).get('paused') is not True:
+            raise ValueError('Unapproved candidate maintenance is active')
+        if self.command(['systemctl', '--user', 'show', name + '.service', '--property=Restart', '--value']) != 'no':
+            raise ValueError('Candidate automatic restart must be disabled before approval')
+        info = self.inspect(name)
+        return dict(id=info['Id'], started=info['State']['StartedAt'],
+                    pid=info['State']['Pid'], boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip())
+
+    def recover_preflight(self, state, file):
+        # Legacy preflight could perform authenticated writes. Phase alone is not
+        # evidence of no effects; inspect live services and reset only fixtures.
+        self.audit_installation()
+        if self.active_slot() != state['old'] or self.proxy('status')['slot'] != state['old']:
+            raise ValueError('Legacy preflight proxy state is ambiguous')
+        if self.running('gp-api-' + state['new']):
+            raise ValueError('Legacy preflight has an unrecorded candidate')
+        self.verify_stopped('gp-api-' + state['new'])
+        for name in ['gp-api-' + state['old'], *WORKERS]:
+            image = self.inspect(name)['ImageName']
+            definitions = re.findall(r'^Image=(' + IMAGE + r')$', (self.quadlet / (name + '.container')).read_text(), re.M)
+            if definitions != [image]:
+                raise ValueError('Legacy preflight runtime and definition differ')
+            self.verify_image(name, image)
+        self.probe('cleanup', {**state, 'new': state['old']})
+        save(file, {**state, 'phase': 'aborted'})
 
     def snapshot(self, sha):
         self.command(['bash', str(self.root / 'release-db-snapshot.sh'), sha])
 
-    def definition(self, name, image):
+    def definition(self, name, image, restart=None):
         file = self.quadlet / (name + '.container')
         text = file.read_text()
         text, count = re.subn(r'^Image=' + IMAGE + '$', 'Image=' + image, text, flags=re.M)
         if count != 1:
             raise ValueError('Installed definition has no immutable image: ' + name)
+        if restart is not None:
+            text, count = re.subn(r'^Restart=(?:always|no)$', 'Restart=' + restart, text, flags=re.M)
+            if count != 1:
+                raise ValueError('Unexpected API restart policy')
         save(file, text)
         self.command(['systemctl', '--user', 'daemon-reload'])
 
@@ -335,9 +454,10 @@ class Host:
         name = 'gp-api-' + state['new']
         if not self.running(name):
             save(self.root / ('runtime-env/slot-' + state['new'] + '.env'), 'API_MAINTENANCE_PAUSED=true\n')
-            self.definition(name, state['image'])
+            self.definition(name, state['image'], restart='no')
             self.command(['systemctl', '--user', 'start', name + '.service'])
         self.verify_image(name, state['image'], state['sha'])
+        self.definition(name, state['image'], restart='no')
         # Same DB, cookies, signing keys and storage endpoints must survive handoff.
         def env(container):
             return dict(value.split('=', 1) for value in self.inspect(container)['Config']['Env'])
@@ -367,7 +487,7 @@ class Host:
         self.proxy('switch', state['new'])
 
     def probe(self, mode, state):
-        self.command(['node', str(self.root / 'rolling-smoke.mjs'), mode, str(self.root), state['new']])
+        self.command(['node', str(self.root / 'rolling-smoke.mjs'), mode, str(self.root), state['new'], state.get('probe_file', str(self.root / 'rolling-probes.json'))])
 
     def stop(self, name):
         # Caller must prove idle before entering the existing forced-exit budget.
@@ -381,6 +501,7 @@ class Host:
     def enable_maintenance(self, state):
         name = 'gp-api-' + state['new']
         self.verify_image(name, state['image'], state['sha'])
+        self.definition(name, state['image'], restart='always')
         save(self.root / ('runtime-env/slot-' + state['new'] + '.env'), 'API_MAINTENANCE_PAUSED=false\n')
         self.control(name, 'resume')
         status = self.control(name, 'status')
@@ -418,20 +539,28 @@ class Host:
         self.probe('public', state)
         self.probe('nas-public', state)
         self.probe('nas-protected', state)
+        self.probe('cleanup', state)
+
+
+def recover_legacy(root, file):
+    state = json.loads(Path(file).read_text())
+    if state['phase'] == 'preflight':
+        Host(root).recover_preflight(state, file)
+    return json.loads(Path(file).read_text())
 
 
 def boot_plan(state, active, upstream, definitions):
     """Select identities only from durable evidence; boot never advances a release."""
     if active not in ('a', 'b') or upstream not in ('a', 'b'):
         raise ValueError('Invalid slot')
-    if not state or state['phase'] == 'complete':
+    if not state or state['phase'] in ('complete', 'aborted'):
         if active != upstream:
             raise ValueError('Proxy and recorded active slot differ')
         return {name: definitions[name] for name in ['gp-api-' + active, *WORKERS]}, active
     phase, old, new = state['phase'], state['old'], state['new']
-    if phase not in ('preflight', 'candidate', 'switch', 'drain', 'handoff', 'workers', 'web-pending'):
+    if phase not in ('preflight', 'candidate', 'aborting', 'switch', 'drain', 'handoff', 'workers', 'web-pending'):
         raise ValueError('Unknown release phase')
-    expected = old if phase in ('preflight', 'candidate') else new
+    expected = old if phase in ('preflight', 'candidate', 'aborting') else new
     if phase == 'switch':
         if active not in (old, new) or upstream not in (old, new):
             raise ValueError('Switch evidence mismatch')
@@ -440,16 +569,16 @@ def boot_plan(state, active, upstream, definitions):
     if phase == 'preflight':
         return {name: definitions[name] for name in ['gp-api-' + old, *WORKERS]}, old
     result = {}
-    if phase in ('candidate', 'switch', 'drain', 'handoff'):
+    if phase in ('candidate', 'aborting', 'switch', 'drain', 'handoff'):
         result['gp-api-' + old] = state['old_image']
     if state.get('candidate_selected'):
         result['gp-api-' + new] = state['image']
-    elif phase != 'candidate':
+    elif phase not in ('candidate', 'aborting'):
         raise ValueError('Missing candidate identity')
     for name in WORKERS:
         result[name] = state['image'] if name in state['workers'] else state['old_workers'][name]
-    # Before handoff both APIs restart paused. Explicit resume transfers maintenance.
-    maintenance = new if phase in ('workers', 'web-pending') else None
+    # Pre-admission keeps old maintenance; after intent explicit resume transfers it.
+    maintenance = new if phase in ('workers', 'web-pending') else old if phase in ('candidate', 'aborting') else None
     return result, maintenance
 
 
@@ -472,6 +601,8 @@ def boot(host):
     # API and workers. Do not select another serving slot when readiness fails.
     order = ['gp-api-' + upstream, *WORKERS, 'gp-api-' + ('b' if upstream == 'a' else 'a')]
     plan = {name: plan[name] for name in order if name in plan}
+    if state and state['phase'] == 'aborting' and not host.running('gp-api-' + state['new']):
+        plan.pop('gp-api-' + state['new'], None)
     for name, image in plan.items():
         if not re.fullmatch(IMAGE, image):
             raise ValueError('Missing immutable boot identity')
@@ -485,7 +616,8 @@ def boot(host):
         save(root / f'runtime-env/slot-{slot}.env', 'API_MAINTENANCE_PAUSED=' + ('false' if slot == maintenance else 'true') + '\n')
     for name, image in plan.items():
         if not host.running(name):
-            host.definition(name, image)
+            candidate = state and state['phase'] in ('candidate', 'switch', 'aborting') and name == 'gp-api-' + state['new']
+            host.definition(name, image, restart='no' if candidate else None)
             host.command(['systemctl', '--user', 'start', name + '.service'])
         host.verify_image(name, image)
         host.ready_control(name)
@@ -513,7 +645,7 @@ def main():
             return
         release = Release(Host(root), state_dir / 'rolling-release.json',
                           os.environ['RELEASE_SOURCE_SHA'], os.environ['FINAL_IMAGE'])
-        state = release.run()
+        state = release.abort() if sys.argv[1:] == ['abort'] else release.run()
         if sys.argv[1:] == ['complete']:
             if state['phase'] not in ('web-pending', 'complete'):
                 raise ValueError('Runtime handoff has not completed')

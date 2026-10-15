@@ -4,19 +4,29 @@ import assert from 'node:assert/strict';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-const [mode, root, slot] = process.argv.slice(2);
-assert.ok(['validate', 'candidate', 'public', 'nas-public', 'nas-protected'].includes(mode));
-const file = join(root, 'rolling-probes.json');
+const [mode, root, slot, recordedFile] = process.argv.slice(2);
+assert.ok(['validate', 'cleanup', 'candidate', 'public', 'nas-public', 'nas-protected'].includes(mode));
+const file = recordedFile ?? join(root, 'rolling-probes.json');
 assert.equal((await stat(file)).mode & 0o077, 0, 'Smoke credentials must be private');
 const config = JSON.parse(await readFile(file, 'utf8'));
-for (const group of ['candidate', 'public', 'nas-public', 'nas-protected']) {
+for (const group of ['candidate', 'public', 'nas-public', 'nas-protected', 'cleanup']) {
   assert.ok(Array.isArray(config[group]) && config[group].length > 0, `Missing ${group} probes`);
   for (const probe of config[group]) {
     assert.ok(probe.path?.startsWith('/') && !probe.path.startsWith('//'));
     assert.ok(['GET', 'POST', 'PATCH', 'PUT', 'HEAD'].includes(probe.method));
     assert.ok(Number.isInteger(probe.status) && [200, 201, 204, 206, 304, 416].includes(probe.status));
     assert.ok(Object.keys(probe.json ?? {}).length + Object.keys(probe.responseHeaders ?? {}).length > 0, 'A successful status alone is insufficient');
-    if (probe.category === 'authenticated-write') assert.ok(['POST', 'PATCH', 'PUT'].includes(probe.method));
+    if (probe.category === 'authenticated-write') assert.ok(['PATCH', 'PUT'].includes(probe.method));
+    if (!['GET', 'HEAD'].includes(probe.method)) {
+      assert.ok(['candidate', 'public', 'cleanup'].includes(group), 'NAS probes must be read-only');
+      assert.ok(['PATCH', 'PUT'].includes(probe.method), 'Writes must be replayable assignments');
+      assert.equal(probe.category, 'authenticated-write');
+      assert.notEqual(probe.body, undefined, 'Fixture writes require explicit assignment bodies');
+      const fixture = config.fixtures?.find(item => item.path === probe.path);
+      assert.ok(fixture?.dedicated === true && fixture.id, 'Write requires an exact dedicated fixture path');
+      assert.ok(config.cleanup?.some(item => item.path === probe.path && ['PATCH', 'PUT'].includes(item.method) && item.body !== undefined), 'Fixture reset is required');
+      assert.equal(probe.replaySafe, true, 'Provisioner must verify idempotent fixture writes');
+    }
     assert.ok(!Object.keys(probe.headers ?? {}).some(key => key.toLowerCase() === 'cookie'), 'Every probe must use the shared cookie');
   }
 }
@@ -35,8 +45,8 @@ assert.ok(config.candidate.some(probe => probe.path.startsWith('/api/internal/fi
 assert.ok(config.cookie && !/[\r\n]/.test(config.cookie), 'A shared smoke session cookie is required');
 if (mode !== 'validate') {
   assert.ok(['a', 'b'].includes(slot));
-  const origin = mode === 'candidate' ? `http://127.0.0.1:${slot === 'a' ? 4000 : 4001}` : config[`${mode}Origin`];
-  if (mode !== 'candidate') assert.equal(new URL(origin).protocol, 'https:');
+  const origin = ['candidate', 'cleanup'].includes(mode) ? `http://127.0.0.1:${slot === 'a' ? 4000 : 4001}` : config[`${mode}Origin`];
+  if (!['candidate', 'cleanup'].includes(mode)) assert.equal(new URL(origin).protocol, 'https:');
   for (const [index, probe] of config[mode].entries()) {
     const response = await fetch(new URL(probe.path, origin), {
       method: probe.method, headers: { Cookie: config.cookie, ...probe.headers },

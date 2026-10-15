@@ -36,7 +36,7 @@
 
 세 compatibility 값은 구 Web과 신 API의 요청·응답, 구·신 API의 데이터 의미, 구·신 worker의 대기 작업 형식 검토를 나타낸다. 같은 DB schema라는 사실만으로 설정해서는 안 된다. PR 또는 검증 기록에 실제 두 artifact와 검증 근거를 남긴다.
 
-`DEPLOY_DIR/rolling-probes.json`은 권한 `0600`으로 저장한다. 검증 전용 사용자·작품·업로드를 사용하며 실제 사용자 데이터에 대한 임의 쓰기를 구성하지 않는다. 같은 `cookie`를 후보 슬롯과 공개 경로에 사용한다. 각 request는 `path`, `method`, `status`, `category`, 선택적인 `headers`·`body`, 기대 JSON 경로인 `json` 또는 `responseHeaders`를 포함한다.
+`DEPLOY_DIR/rolling-probes.json`은 권한 `0600`으로 저장한다. 검증 전용 사용자·작품·업로드를 사용하며 실제 사용자 데이터에 대한 임의 쓰기를 구성하지 않는다. 같은 `cookie`를 후보 슬롯과 공개 경로에 사용한다. 모든 쓰기 요청은 재실행 가능한 `PATCH`·`PUT` 설정 요청이며 `category=authenticated-write`, `replaySafe=true`를 요구한다. `fixtures`에는 전용 자원의 `id`, 정확한 `path`, `dedicated=true`를 기록하고 같은 경로의 멱등 정리 요청을 `cleanup` 배열에 구성한다. 승인 전 정리는 기존 API, 편입 후 정리는 신 API의 loopback에서 실행하며 기대 응답을 검증한다. 일반 운영 데이터 rollback이나 반복 생성 `POST`는 허용하지 않는다. 배포 중 probe 설정은 권한 0600의 release별 사본으로 고정한다. 전용 사용자·자원과 멱등성은 fixture 구성 시 실제 API 계약으로 검증해야 한다. 각 request는 `path`, `method`, `status`, `category`, 선택적인 `headers`·`body`, 기대 JSON 경로인 `json` 또는 `responseHeaders`를 포함한다.
 
 - `candidate`: 직접 loopback 후보 API의 deep health, 인증된 `/api/me`, 인증된 쓰기, 빈·채워진 collection, `/api/internal/file-access` 승인 검사를 포함한다. 범주는 `authenticated-read`, `authenticated-write`, `empty-collection`, `populated-collection`을 사용한다.
 - `public`: `publicOrigin` HTTPS 주소에서 같은 인증·쓰기·collection 검사를 수행한다.
@@ -50,15 +50,21 @@
 
 1. 실제 설치 상태·artifact·capacity·호환성·probe 설정을 확인한다. 대상 이미지의 모든 migration 이름·checksum을 운영 적용 이력과 비교한다. 미적용·실패·rollback·중복·추가 이력은 전환 전에 거부한다. 승인된 과거 alternate contract 경로는 기존 receipt 검사와 같은 선택 규칙을 사용한다.
 2. 기존 온라인 DB snapshot과 격리 복원 검증을 수행한다. SQL migration은 실행하지 않는다.
-3. 비활성 슬롯을 maintenance 중지 상태로 시작한다. DB·storage·인증·직렬화·파일 승인 검사가 성공하면 구 Nginx worker의 PID와 시작 시각을 영속 기록한다.
-4. 공유 upstream을 변경하고 Nginx 설정 검사·reload를 수행한다. 공개·내부 probe가 신 슬롯에 도달해야 활성 슬롯 기록을 갱신한다.
+3. 최초 후보 서비스 변경 전에 대상 슬롯·SHA·digest, 기존 이미지 조합·슬롯 정의·환경과 전용 probe 사본을 journal에 기록하고 fsync한다. 후보는 loopback에서 검증하며 maintenance를 중지 상태로 유지한다. DB·Garage 연결은 허용한다. 배포 관리자는 readiness·호환성·인증·업무 probe와 fixture 정리를 확인하고 release ID·슬롯·SHA·digest·컨테이너 ID·시작 시각·PID·boot ID에 결부한 승인 근거를 기록한다. 수동 승인이나 API의 자기 승인은 사용하지 않는다.
+4. 후보 인스턴스를 다시 확인하고 전환 의도(`switch`)와 구 Nginx worker의 PID·시작 시각을 fsync한 뒤 기존 proxy helper로 공유 upstream을 변경하고 Nginx 설정 검사·reload를 수행한다. 공개·내부 probe가 신 슬롯에 도달해야 활성 슬롯 기록을 갱신한다.
 5. 구 API의 maintenance 수신을 중지한다. 구 Nginx worker가 모두 종료된 후 구 API의 HTTP 수신을 중지한다. 요청·hook/handler 실행·maintenance가 모두 0일 때만 systemd stop을 실행한다.
 6. 신 API의 maintenance를 활성화하고 worker를 순차 교체한다. worker는 claim 수신을 중지한 뒤 기존 작업과 heartbeat가 종료될 때까지 유지한다. 실행 중 작업의 AbortSignal은 배포 drain으로 취소하지 않는다.
 7. 전체 runtime 검사를 통과하면 같은 SHA의 Web을 게시한다. 공개·내부 smoke와 실제 Web SHA 확인 후 journal을 완료 처리한다.
 
-`cutover-state/host-release.lock`은 host 동시 실행을 차단한다. `rolling-release.json`은 source SHA, image digest, 이전 image, 양쪽 슬롯, 단계, Nginx worker 세대와 완료 worker 목록을 저장하며 파일·디렉터리를 fsync한다. SSH·workflow가 중단되어도 같은 release를 재실행하면 실제 runtime과 대조하여 재개한다. 부팅 복원은 journal과 실제 upstream 파일의 슬롯을 대조한다. 전환 중에는 양쪽 API를 maintenance 중지 상태로 복원하며, 완료되지 않은 worker 교체는 이전에 기록한 이미지로 복원한다. 완료 worker는 새 이미지를 유지한다. 부팅은 release 단계를 진행하지 않으며, 같은 SHA·digest로 재개할 때만 교체한다. journal과 upstream이 불일치하면 자동 복원을 거부한다. 점검 배포 중 표시가 있으면 명시적 복구를 요구한다. 다른 release와 기존 점검 배포·자동 복구는 완료되지 않은 rolling journal이 있으면 거부한다.
+`cutover-state/host-release.lock`은 host 동시 실행을 차단한다. `rolling-release.json`은 source SHA, image digest, 이전 image, 양쪽 슬롯, 단계, Nginx worker 세대와 완료 worker 목록을 저장하며 파일·디렉터리를 fsync한다. SSH·workflow가 중단되어도 같은 release를 재실행하면 실제 runtime과 대조하여 재개한다. 부팅 복원은 journal과 실제 upstream 파일의 슬롯을 대조한다. 승인 전에는 구 API maintenance를 유지하고 후보 maintenance를 중지한다. 전환 의도 이후에는 양쪽 API를 maintenance 중지 상태로 복원하며, 완료되지 않은 worker 교체는 이전에 기록한 이미지로 복원한다. 완료 worker는 새 이미지를 유지한다. 부팅은 release 단계를 진행하지 않으며, 같은 SHA·digest로 재개할 때만 교체한다. journal과 upstream이 불일치하면 자동 복원을 거부한다. 점검 배포 중 표시가 있으면 명시적 복구를 요구한다. 다른 release와 기존 점검 배포·자동 복구는 `complete` 또는 안전한 취소 완료인 `aborted`만 허용한다. 미완료·알 수 없는 상태는 거부한다.
 
 관찰 시간은 단계별 기본 10분이다. 초과 시 `deferred=true`와 종료 코드 `75`를 반환한다. 이 값은 **정리 보류**이며 강제 종료가 아니다. 신 API가 전환된 경우 계속 요청을 처리하고, 구 API·worker 및 journal은 유지된다. 다음 실행에서도 이전 상태 기록만으로 idle을 판단하지 않는다.
+
+사전 검사와 온라인 snapshot은 운영 서비스 변경·인증된 쓰기 probe 전에 수행하며 새 미완료 journal을 남기지 않는다. 후보 준비 이후의 인증된 쓰기는 전용 fixture에 한정한다. 후보 기동·검증 실패는 같은 host lock 아래에서 `candidate → aborting → aborted` 취소를 시도한다. 후보 quiesce 후 요청·handler·maintenance가 모두 종료되고, 서비스가 중지되어 재기동 대기 상태가 아니며, fixture 정리와 기존 슬롯 정의·환경 복원이 완료되어야 `aborted`를 기록한다. 불명확한 상태나 정리 실패는 `aborting`에 유지하며 강제 종료하지 않는다.
+
+승인 전 취소를 명시적으로 실행할 때는 기존 `DEPLOY_DIR`, `RELEASE_SOURCE_SHA`, `FINAL_IMAGE`를 유지하고 `python3 "$DEPLOY_DIR/rolling-release.py" abort`를 실행한다. 중단된 취소는 같은 release의 일반 재실행 또는 `abort`로 재개한다. `aborted` 이후에는 다른 이미지의 배포·점검 배포·복구가 각 경로의 기존 안전 조건에 따라 진행된다. 구형 `preflight` journal은 실제 proxy·active slot·서비스 이미지와 비활성 슬롯 중지 상태를 대조하고 전용 fixture 정리를 수행한 뒤 해제한다. 정리 설정이 없으면 `rolling-probes.json`에 기존 검증 fixture의 재실행 가능한 정리 요청을 구성한 뒤 재실행한다. 정상 복구에 journal 수동 삭제는 필요하지 않다.
+
+`switch`가 기록된 이후에는 helper 실패·응답 유실도 미편입의 증거로 취급하지 않는다. 취소를 금지하고 같은 SHA·digest로 재개한다. 승인 전 후보의 systemd 자동 재시작을 비활성화하여 마지막 인스턴스 확인과 proxy 변경 사이에 새 프로세스가 자동 기동하지 않도록 한다. handoff에서 기존 자동 재시작 정책을 복원한다. 후보가 명시적 재개·부팅으로 재시작되면 새 인스턴스의 readiness·업무 probe를 다시 실행하며 이전 승인 결과를 재사용하지 않는다. 공개 API와 NAS 공개·보호 경로 검증 이후에만 `drain`을 기록한다. 부팅 복원은 기록된 이미지 조합을 유지하고 proxy를 변경하지 않는다. 취소 중 이미 중지한 후보를 부팅 시 다시 시작하지 않는다.
 
 전환 전 실패는 구 API 서비스를 유지한다. 전환 후에는 이전 binary·Web로 자동 복귀하지 않는다. 같은 release 재개가 불가능하면 양쪽 artifact·실제 DB·journal을 보존하고 별도 forward-fix 절차를 검토한다. journal을 삭제하여 다른 release를 강제 실행해서는 안 된다. DB migration을 시도한 점검 배포는 기존 forward-only 복구 제한을 그대로 적용한다.
 

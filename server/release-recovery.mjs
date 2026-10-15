@@ -165,5 +165,7 @@ export async function runRecovery(mode, key, {
  console.log('previous_runtime_recovered=true');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
- runRecovery(process.argv[2], process.argv[3]).catch(error => { console.error(error.message); process.exitCode = 1; });
+ (process.env.RELEASE_HOST_LOCK_HELD === 'true'
+  ? runRecovery(process.argv[2], process.argv[3])
+  : Promise.reject(new Error('Use release-orchestrate.sh under the host release lock and rolling journal fence'))).catch(error => { console.error(error.message); process.exitCode = 1; });
 }

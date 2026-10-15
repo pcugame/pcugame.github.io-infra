@@ -218,3 +218,12 @@ for (const slot of ['a', 'b']) test(`pre-migration recovery uses active slot ${s
   assert.equal(f.calls.filter(c => c[2] === 'start').length, 0);
  } finally { f.cleanup(); }
 });
+
+
+test('direct recovery CLI requires the shared host lock and journal fence', () => {
+ const result = spawnSync(process.execPath, [resolve('server/release-recovery.mjs'), 'recover', runKey], {
+  env: { ...process.env, RELEASE_HOST_LOCK_HELD: 'false' }, encoding: 'utf8',
+ });
+ assert.notEqual(result.status, 0);
+ assert.match(result.stderr, /host release lock and rolling journal fence/);
+});

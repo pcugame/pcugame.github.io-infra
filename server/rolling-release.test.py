@@ -18,6 +18,8 @@ class Host:
         self.nginx_busy = False
         self.fail = None
         self.stopped = set()
+        self.instance = 1
+        self.upstream = 'a'
 
     def event(self, name):
         self.events.append(name)
@@ -28,11 +30,22 @@ class Host:
     def reconcile(self, state): self.event('reconcile')
     def preflight(self, state): self.event('preflight')
     def snapshot(self, sha): self.event('snapshot')
-    def start_candidate(self, state): self.event('candidate')
+    def capture_candidate(self, state): self.event('capture')
+    def assert_unadmitted(self, state):
+        if self.upstream != state['old']: raise ValueError('ambiguous')
+    def cleanup_candidate(self, state): self.event('cleanup')
+    def verify_stopped(self, name): self.event('verify-stopped')
+    def prepare_admission(self, state): self.event('prepare-admission')
+    def candidate_identity(self, state): return self.instance
+    def start_candidate(self, state):
+        self.stopped.discard('gp-api-' + state['new'])
+        self.event('candidate')
     def probe(self, kind, state): self.event('probe-' + kind)
     def nginx_workers(self): return [[42, 'starttime']]
     def nginx_workers_gone(self, workers): return not self.nginx_busy
-    def switch(self, state): self.event('switch')
+    def switch(self, state):
+        self.upstream = state['new']
+        self.event('switch')
     def set_active(self, slot): self.active = slot
     def running(self, name): return name not in self.stopped
     def stop(self, name):
@@ -96,7 +109,11 @@ class ReleaseTest(unittest.TestCase):
                 self.host = Host()
                 self.host.fail = failure
                 with self.assertRaises(RuntimeError): self.release().run()
-                self.assertFalse(self.host.stopped)
+                if failure in ('candidate', 'probe-candidate', 'probe-nas-protected'):
+                    self.assertEqual(self.release().state['phase'], 'preflight')
+                    self.assertEqual(self.host.stopped, {'gp-api-b'})
+                else:
+                    self.assertFalse(self.host.stopped)
                 self.host.fail = None
                 self.assertEqual(self.release().run()['phase'], 'web-pending')
 
@@ -111,14 +128,144 @@ class ReleaseTest(unittest.TestCase):
 
     def test_next_direction_selects_a_from_active_b(self):
         self.host.active = 'b'
+        self.host.upstream = 'b'
         state = self.release().run()
         self.assertEqual((state['old'], state['new'], self.host.active), ('b', 'a', 'a'))
         self.assertIn('stop-gp-api-b', self.host.events)
         self.assertNotIn('stop-gp-api-a', self.host.events)
 
+    def test_preflight_failure_leaves_no_journal_and_allows_other_image(self):
+        for failure in ('preflight', 'snapshot', 'capture'):
+            self.host.fail = failure
+            with self.assertRaises(RuntimeError): self.release().run()
+            self.assertFalse(self.file.exists())
+            self.assertEqual(self.release('c' * 40).state['phase'], 'preflight')
+
+    def test_abort_interruption_resumes_without_admission(self):
+        self.host.fail = 'probe-candidate'
+        self.host.busy = True
+        with self.assertRaises(rolling.Deferred): self.release().run()
+        self.assertEqual(self.release().state['phase'], 'aborting')
+        with self.assertRaises(ValueError): self.release('c' * 40)
+        self.host.fail = None
+        self.host.busy = False
+        self.assertEqual(self.release().run()['phase'], 'aborted')
+        self.assertNotIn('switch', self.host.events)
+        self.assertNotIn('gp-api-a', self.host.stopped)
+        self.assertEqual(self.release('c' * 40).run()['phase'], 'web-pending')
+
+    def test_process_interruption_during_candidate_keeps_durable_cleanup_target(self):
+        original = self.host.start_candidate
+        def interrupted(state):
+            original(state)
+            raise KeyboardInterrupt()
+        self.host.start_candidate = interrupted
+        with self.assertRaises(KeyboardInterrupt): self.release().run()
+        state = self.release().state
+        self.assertEqual((state['phase'], state['new'], state['image']), ('candidate', 'b', IMAGE))
+        self.assertNotIn('switch', self.host.events)
+        self.assertEqual(self.release().abort()['phase'], 'aborted')
+        self.assertNotIn('gp-api-a', self.host.stopped)
+
+    def test_cleanup_failure_never_records_aborted(self):
+        self.host.fail = 'cleanup'
+        release = self.release()
+        release.persist(phase='candidate')
+        with self.assertRaises(RuntimeError): release.abort()
+        self.assertEqual(self.release().state['phase'], 'aborting')
+        self.host.fail = None
+        self.assertEqual(self.release().run()['phase'], 'aborted')
+
+    def test_lost_switch_response_forbids_abort_and_revalidates_restart(self):
+        self.host.fail = 'switch'
+        with self.assertRaises(RuntimeError): self.release().run()
+        with self.assertRaises(ValueError): self.release().abort()
+        self.host.instance = 2
+        self.host.fail = None
+        state = self.release().run()
+        self.assertEqual(state['approval']['instance'], 2)
+        self.assertEqual(state['phase'], 'web-pending')
+
+    def test_restart_during_probe_cancels_without_switch(self):
+        original = self.host.probe
+        def probe(kind, state):
+            original(kind, state)
+            if kind == 'candidate': self.host.instance += 1
+        self.host.probe = probe
+        with self.assertRaisesRegex(ValueError, 'restarted'): self.release().run()
+        self.assertEqual(__import__('json').loads(self.file.read_text())['phase'], 'aborted')
+        self.assertNotIn('switch', self.host.events)
+
+    def test_interrupt_after_intent_before_proxy_never_cancels(self):
+        original = self.host.probe
+        def probe(kind, state):
+            if state['phase'] == 'switch': raise KeyboardInterrupt()
+            original(kind, state)
+        self.host.probe = probe
+        with self.assertRaises(KeyboardInterrupt): self.release().run()
+        self.assertEqual(self.release().state['phase'], 'switch')
+        with self.assertRaises(ValueError): self.release().abort()
+        self.host.probe = original
+        self.assertEqual(self.release().run()['phase'], 'web-pending')
+
     def test_missing_counters_fail_closed(self):
         self.assertFalse(rolling.idle(dict(kind='api', requests=0)))
         self.assertFalse(rolling.idle(dict(kind='worker', active=0)))
+
+
+class BoundaryTest(unittest.TestCase):
+    def test_shared_host_lock_rejects_boot_and_release_before_host_access(self):
+        import fcntl, os, subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'cutover-state').mkdir()
+            with (root / 'cutover-state/host-release.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                for args in ([], ['boot'], ['abort']):
+                    result = subprocess.run(['python3', str(Path(rolling.__file__)), *args],
+                                            env={**os.environ, 'DEPLOY_DIR': directory}, capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn('Resource temporarily unavailable', result.stderr)
+                    self.assertFalse((root / 'cutover-state/rolling-release.json').exists())
+
+    def test_candidate_restart_policy_is_durable_and_restorable(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            host = object.__new__(rolling.Host)
+            host.quadlet = Path(directory)
+            host.command = Mock(return_value='')
+            file = host.quadlet / 'gp-api-b.container'
+            file.write_text('[Container]\nImage=' + IMAGE + '\n[Service]\nRestart=always\n')
+            host.definition('gp-api-b', IMAGE, restart='no')
+            self.assertIn('Restart=no', file.read_text())
+            host.command.assert_called_with(['systemctl', '--user', 'daemon-reload'])
+            host.definition('gp-api-b', IMAGE, restart='always')
+            self.assertIn('Restart=always', file.read_text())
+
+    def test_legacy_preflight_requires_actual_state_and_fixture_cleanup(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / 'state.json'
+            state = dict(phase='preflight', old='a', new='b')
+            host = Mock()
+            host.quadlet = Path(directory)
+            for name in ['gp-api-a', *rolling.WORKERS]:
+                (host.quadlet / (name + '.container')).write_text('Image=' + IMAGE + '\n')
+            host.active_slot.return_value = 'a'
+            host.proxy.return_value = {'slot': 'a'}
+            host.running.return_value = False
+            host.inspect.return_value = {'ImageName': IMAGE}
+            rolling.save(file, state)
+            host.probe.side_effect = RuntimeError('fixture cleanup unavailable')
+            with self.assertRaises(RuntimeError): rolling.Host.recover_preflight(host, state, file)
+            self.assertEqual(__import__('json').loads(file.read_text())['phase'], 'preflight')
+            host.probe.side_effect = None
+            host.running.return_value = True
+            with self.assertRaises(ValueError): rolling.Host.recover_preflight(host, state, file)
+            host.running.return_value = False
+            rolling.Host.recover_preflight(host, state, file)
+            self.assertEqual(__import__('json').loads(file.read_text())['phase'], 'aborted')
+            host.verify_image.assert_called()
 
 
 class BootTest(unittest.TestCase):
@@ -148,6 +295,15 @@ class BootTest(unittest.TestCase):
         self.assertEqual(plan[rolling.WORKERS[0]], IMAGE)
         self.assertEqual(plan[rolling.WORKERS[1]], self.old)
         self.assertEqual(maintenance, 'b')
+
+    def test_unapproved_boot_keeps_old_maintenance_and_never_selects_candidate(self):
+        for phase in ('candidate', 'aborting'):
+            self.state['phase'] = phase
+            plan, maintenance = rolling.boot_plan(self.state, 'a', 'a', self.definitions)
+            self.assertEqual(maintenance, 'a')
+            self.assertEqual(plan['gp-api-a'], self.old)
+            self.assertEqual(plan['gp-api-b'], IMAGE)
+            with self.assertRaises(ValueError): rolling.boot_plan(self.state, 'a', 'b', self.definitions)
 
     def test_mismatch_and_missing_identities_fail_closed(self):
         with self.assertRaises(ValueError): rolling.boot_plan(None, 'a', 'b', self.definitions)

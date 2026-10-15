@@ -171,3 +171,14 @@ test('served Web mismatch prevents final evidence and automatic recovery', t => 
   assert.equal(f.evidence(), false); assert.notEqual(f.run('recover').status, 0);
   assert.doesNotMatch(f.events(), /smoke-data-plane/);
 });
+
+test('only completed cancellation permits maintenance and pre-migration recovery', t => {
+  for (const phase of ['aborted', 'candidate', 'aborting', 'switch', 'unknown']) {
+    const f = fixture(t);
+    writeFileSync(join(f.env.DEPLOY_DIR, 'cutover-state/rolling-release.json'), JSON.stringify({ phase }));
+    for (const command of ['preflight', 'recover', 'assert-pre-migration']) {
+      const result = f.run(command);
+      assert.equal(result.status === 0, phase === 'aborted', `${phase}/${command}: ${result.stderr}`);
+    }
+  }
+});

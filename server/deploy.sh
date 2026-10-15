@@ -17,7 +17,15 @@ if [[ "${1:-up}" =~ ^(up|down|drain|backup|release-migrate|release-assert|invent
   if [[ -f "${CUTOVER_STATE_DIR}/rolling-release.json" && "${RELEASE_ROLLING_ACTIVE:-false}" != true ]]; then
     python3 - "${CUTOVER_STATE_DIR}/rolling-release.json" <<'PYCODE'
 import json, sys
-if json.load(open(sys.argv[1]))['phase'] != 'complete':
+import importlib.util
+from pathlib import Path
+file = Path(sys.argv[1])
+if json.loads(file.read_text())['phase'] == 'preflight':
+    spec = importlib.util.spec_from_file_location('rolling', file.parent.parent / 'rolling-release.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.recover_legacy(file.parent.parent, file)
+if json.load(open(sys.argv[1]))['phase'] not in ('complete', 'aborted'):
     sys.exit('Unfinished rolling release blocks maintenance deployment')
 PYCODE
   fi

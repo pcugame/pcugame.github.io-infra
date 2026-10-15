@@ -20,10 +20,18 @@ export RELEASE_HOST_LOCK_HELD=true
 if [[ -f "${CUTOVER_STATE_DIR}/rolling-release.json" ]]; then
   python3 - "${CUTOVER_STATE_DIR}/rolling-release.json" "$command" <<'PYCODE'
 import json, os, sys
+import importlib.util
+from pathlib import Path
+file = Path(sys.argv[1])
+if json.loads(file.read_text())['phase'] == 'preflight':
+    spec = importlib.util.spec_from_file_location('rolling', file.parent.parent / 'rolling-release.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.recover_legacy(file.parent.parent, file)
 state = json.load(open(sys.argv[1]))
 rolling_health = (sys.argv[2] == 'health' and state['phase'] == 'web-pending'
     and state['sha'] == os.environ.get('RELEASE_SOURCE_SHA') and state['image'] == os.environ.get('FINAL_IMAGE'))
-if state['phase'] != 'complete' and not rolling_health:
+if state['phase'] not in ('complete', 'aborted') and not rolling_health:
     sys.exit('Unfinished rolling release blocks maintenance deployment and recovery')
 PYCODE
 fi
