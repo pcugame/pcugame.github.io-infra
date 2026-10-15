@@ -165,6 +165,10 @@ jobs:
         if: needs.verify.outputs.integration == 'true'
         run: npm run test:integration
 
+      - name: Nginx API slot handoff with PostgreSQL and Garage
+        if: needs.verify.outputs.integration == 'true'
+        run: node scripts/test-rolling-release.mjs
+
       - name: File gateway TLS verification
         if: needs.verify.outputs.integration == 'true'
         run: npm run test:file-gateway

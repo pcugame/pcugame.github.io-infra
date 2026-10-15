@@ -3,7 +3,7 @@
 
 assert_quadlet_adopted() {
   QUADLET_DIR="${QUADLET_DIR:-${HOME}/.config/containers/systemd}"
-  export API_IMAGE DEPLOY_DIR API_BIND_HOST APP_RUNTIME_ENV_FILE API_RUNTIME_ENV_FILE POSTGRES_RUNTIME_ENV_FILE
+  export API_SLOTS API_IMAGE DEPLOY_DIR API_BIND_HOST APP_RUNTIME_ENV_FILE API_RUNTIME_ENV_FILE POSTGRES_RUNTIME_ENV_FILE
   local staging
   staging="$(mktemp -d)"
   if ! bash "$QUADLET_HELPERS/render.sh" "$staging/expected" || ! systemctl --user show-environment | python3 "$QUADLET_HELPERS/check-installed.py" "$staging/expected" "$QUADLET_DIR" --manager-env; then
@@ -44,6 +44,7 @@ assert_foundation_active() {
 }
 
 stop_application_units() {
+  if [[ "$API_SLOTS" == true ]]; then systemctl --user stop gp-api-a.service gp-api-b.service || return 1; fi
   systemctl --user stop "${APP_UNITS[@]}" || return 1
   assert_application_stopped
 }
@@ -65,7 +66,9 @@ assert_application_stopped() {
     state="$(systemctl --user show "$unit" --property=ActiveState --value)" || return 1
     [[ "$state" == inactive ]] || { echo "ERROR: application service is not inactive: $unit"; return 1; }
   done
-  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
+  local containers=("${RUNTIME_CONTAINERS[@]}")
+  [[ "$API_SLOTS" != true ]] || containers+=(gp-api-a gp-api-b)
+  for ctr in "${containers[@]}"; do
     state="$(runtime_container_state "$ctr")" || return 1
     [[ "$state" == missing || "$state" == exited || "$state" == dead ]] || {
       echo "ERROR: failed to drain mutation process $ctr (state: $state)"

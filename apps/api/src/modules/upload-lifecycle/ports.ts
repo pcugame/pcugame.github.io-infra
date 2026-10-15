@@ -21,6 +21,9 @@ export interface UploadLifecycleRuntime {
 	wakeDeletionWorker(): void;
 	wakeMaintenance(): void;
 	recover(signal?: AbortSignal): Promise<void>;
+	quiesce?(): void;
+	resume?(): Promise<void>;
+	activity?(): number;
 	start(): Promise<void>;
 	close(): Promise<void>;
 }
@@ -31,6 +34,7 @@ export interface UploadLifecycleRuntimeServices {
 	orphanDeletions: ObjectDeletionCoordinator;
 	multipartAborts: MultipartAbortService;
 	orphans: OrphanService;
+	background?: { active(): number; settled(): Promise<void> };
 	clock: Clock;
 	logger: AppLogger;
 	metrics: UploadLifecycleMetrics;

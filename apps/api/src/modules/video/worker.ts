@@ -43,9 +43,7 @@ export function createVideoProcessingWorker(deps: {
 				rejected: 0,
 				retried: 0,
 			};
-			for (const session of sessions) {
-				if (signal?.aborted) break;
-				const claim = createClaimHeartbeatGuard({
+			const claims = sessions.map(session => createClaimHeartbeatGuard({
 					heartbeatMs: 30_000,
 					lostMessage: 'VIDEO processing lease was lost',
 					outerSignal: signal,
@@ -58,52 +56,57 @@ export function createVideoProcessingWorker(deps: {
 						{ error, sessionId: session.id },
 						'VIDEO processing heartbeat failed',
 					),
-				});
-				try {
-					await deps.processor.process(session, token, claim.signal, claim.assertOwned);
-					result.ready++;
-				} catch (error) {
-					if (claim.isLost() || signal?.aborted) {
-						result.retried++;
-						continue;
-					}
-					if (error instanceof VideoRejectedError
-						|| isWorkerSourceObjectMissing(error)
-						|| (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
-						try {
-							await claim.assertOwned();
-							const reason = error instanceof VideoRejectedError
-								? `${error.code}: ${error.message}`
-								: isWorkerSourceObjectMissing(error)
-									? `SOURCE_OBJECT_MISSING: ${error.message}`
-									: retryBudgetReason('VIDEO', error);
-							const rejected = await deps.repository.rejectVideo({
-								session,
-								token,
-								reason,
-							});
-							if (rejected) {
-								result.rejected++;
-								deps.wakeDeletionWorker?.();
-							} else result.retried++;
-						} catch (rejectError) {
+			}));
+			try {
+				for (const session of sessions) {
+					if (signal?.aborted) break;
+					const claim = claims[sessions.indexOf(session)]!;
+					try {
+						await deps.processor.process(session, token, claim.signal, claim.assertOwned);
+						result.ready++;
+					} catch (error) {
+						if (claim.isLost() || signal?.aborted) {
+							result.retried++;
+							continue;
+						}
+						if (error instanceof VideoRejectedError
+							|| isWorkerSourceObjectMissing(error)
+							|| (session.validationAttemptCount ?? 0) >= MAX_WORKER_VALIDATION_ATTEMPTS) {
+							try {
+								await claim.assertOwned();
+								const reason = error instanceof VideoRejectedError
+									? `${error.code}: ${error.message}`
+									: isWorkerSourceObjectMissing(error)
+										? `SOURCE_OBJECT_MISSING: ${error.message}`
+										: retryBudgetReason('VIDEO', error);
+								const rejected = await deps.repository.rejectVideo({
+									session,
+									token,
+									reason,
+								});
+								if (rejected) {
+									result.rejected++;
+									deps.wakeDeletionWorker?.();
+								} else result.retried++;
+							} catch (rejectError) {
+								deps.logger.error(
+									{ error: rejectError, sessionId: session.id, validationError: errorMessage(error) },
+									'VIDEO rejection commit failed; lease recovery will retry',
+								);
+								result.retried++;
+							}
+						} else {
 							deps.logger.error(
-								{ error: rejectError, sessionId: session.id, validationError: errorMessage(error) },
-								'VIDEO rejection commit failed; lease recovery will retry',
+								{ error, sessionId: session.id },
+								'Direct VIDEO processing will retry after lease expiry',
 							);
 							result.retried++;
 						}
-					} else {
-						deps.logger.error(
-							{ error, sessionId: session.id },
-							'Direct VIDEO processing will retry after lease expiry',
-						);
-						result.retried++;
+					} finally {
+						await claim.stop();
 					}
-				} finally {
-					claim.stop();
 				}
-			}
+			} finally { await Promise.all(claims.map(claim => claim.stop())); }
 			return result;
 		},
 	};
