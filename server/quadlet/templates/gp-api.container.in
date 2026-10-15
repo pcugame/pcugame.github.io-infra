@@ -15,7 +15,10 @@ EnvironmentFile=@API_ENV@
 Environment=PORT=4000
 Entrypoint=node
 Exec=dist/server.js
-StopTimeout=10
+# Application total budget is capped at 60s; allow 5s for process exit.
+StopTimeout=65
 
 [Service]
+# Allow Podman its full stop grace plus 10s of service teardown.
+TimeoutStopSec=75
 Restart=always

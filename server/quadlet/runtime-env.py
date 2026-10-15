@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Parse Podman literal env files; deployment defaults are not adoption evidence."""
 import re
+import math
 import shlex
 import sys
 from pathlib import Path
@@ -21,6 +22,8 @@ API_OPTIONAL_KEYS = {'VOTE_INVESTIGATION_SECRET', 'VOTE_PRIVACY_NOTICE'}
 API_KEYS = set(API_DEFAULTS) | API_OPTIONAL_KEYS
 PG_KEYS = set('POSTGRES_USER POSTGRES_DB POSTGRES_PASSWORD'.split())
 SCOPES = (COMMON_KEYS, API_KEYS, PG_KEYS)
+# Must match the application schema; parity tests verify the timeout hierarchy.
+SHUTDOWN_MAX_MS = 60_000
 
 
 def read_runtime_files(filenames, *, explicit=False):
@@ -49,6 +52,10 @@ def read_runtime_files(filenames, *, explicit=False):
         if explicit and not required <= values.keys():
             raise ValueError()
         scopes.append(values)
+    # Validate before exporting any settings or certifying adoption.
+    budget = float(scopes[1].get("SHUTDOWN_DRAIN_MS", API_DEFAULTS["SHUTDOWN_DRAIN_MS"]))
+    if not math.isfinite(budget) or not budget.is_integer() or not 0 < budget <= SHUTDOWN_MAX_MS:
+        raise ValueError()
     return scopes
 
 

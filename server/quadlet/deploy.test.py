@@ -37,7 +37,7 @@ podman() {
         [[ "${FAIL:-}" == emptybackup ]] || echo fixture-dump
         return 0
       fi
-      if [[ "$2" == gp-api ]]; then [[ "${FAIL:-}" != health ]] && echo '{"ok":true}'; fi ;;
+      if [[ "$2" == gp-api* ]]; then [[ "${FAIL:-}" != health ]] && echo '{"ok":true}'; fi ;;
     run)
       [[ "${FAIL:-}" != schema ]] || return 32
       if [[ "${@: -1}" == apply-contract ]]; then
@@ -96,9 +96,13 @@ esac
 '''
 
 class Deploy(unittest.TestCase):
-    def run_fixture(self, action='up', failure='', overrides=None, drift=False, missing=False):
+    def run_fixture(self, action='up', failure='', overrides=None, drift=False, missing=False, slot=None):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            apps = [f'gp-api-{slot}' if slot else 'gp-api', *APPS[1:]]
+            if slot:
+                (root / 'cutover-state').mkdir()
+                (root / 'cutover-state/active-slot').write_text(slot + '\n')
             runtime = root / 'runtime-env'
             runtime.mkdir()
             common = dict(DATABASE_URL='postgresql://fixture:fixture@postgres:5432/fixture',
@@ -128,8 +132,16 @@ class Deploy(unittest.TestCase):
             environment = dict(PATH=os.environ['PATH'], HOME=str(root), DEPLOY_DIR=str(root), API_IMAGE=OLD,
                 MIGRATION_IMAGE=IMAGE, RELEASE_SOURCE_SHA='c'*40, FIXTURE=str(root), ACTION=action,
                 FAIL=failure, QUADLET_DIR=str(units), PYTHONDONTWRITEBYTECODE='1')
+            if slot: environment['API_SLOTS'] = 'true'
             result = subprocess.run(['bash', str(HERE / 'render.sh'), str(units)], env=environment, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0)
+            if slot:
+                user = root / '.config/systemd/user'
+                user.mkdir(parents=True)
+                shutil.move(units / 'pcu-slot-boot.service', user / 'pcu-slot-boot.service')
+                for name in ('a', 'b'):
+                    (runtime / f'slot-{name}.env').write_text('API_MAINTENANCE_PAUSED=true\n')
+                    (root / f'gp-api-{name}').write_text('exited\n')
             if failure == 'quadletdropin': (units / 'container.d').mkdir()
             if failure in ('externaldropin', 'managerdropin'):
                 alternate = root / 'alternate'
@@ -138,7 +150,7 @@ class Deploy(unittest.TestCase):
                 environment['QUADLET_UNIT_DIRS'] = str(alternate)
             if drift: (units / 'gp-api.container').write_text((units / 'gp-api.container').read_text() + 'Environment=WRONG=true\n')
             if missing: (units / 'gp-worker-image.container').unlink()
-            for name in APPS: (root / name).write_text('running\n')
+            for name in apps: (root / name).write_text('running\n')
             (root / 'log').touch()
             prefix = (HERE.parent / 'deploy.sh').read_text().split('# ── Main ')[0]
             # Source modules from the repository, never operator deployment files.
@@ -160,8 +172,23 @@ class Deploy(unittest.TestCase):
             result = subprocess.run(command, env=environment, capture_output=True, text=True)
             log = (root / 'log').read_text().splitlines()
             marker = (root / 'cutover-state/mutation-drained').exists()
-            images = [(units / f'{name}.container').read_text().split('Image=')[1].splitlines()[0] for name in APPS if (units / f'{name}.container').exists()]
+            images = [(units / f'{name}.container').read_text().split('Image=')[1].splitlines()[0] for name in apps if (units / f'{name}.container').exists()]
             return result, log, marker, images
+
+    def test_slot_maintenance_activation_and_drain(self):
+        for slot in ('a', 'b'):
+            for action in ('release', 'up', 'drain'):
+                with self.subTest(slot=slot, action=action):
+                    result, log, marker, images = self.run_fixture(action, slot=slot)
+                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+                    self.assertIn('systemctl --user stop gp-api-a.service gp-api-b.service', log)
+                    if action != 'drain':
+                        self.assertIn(f'systemctl --user start gp-api-{slot}.service', log)
+                        self.assertFalse(marker)
+                        self.assertEqual(images, [IMAGE] * 7)
+                    else:
+                        self.assertTrue(marker)
+                    self.assertNotIn('systemctl --user start gp-api.service', log)
 
     def test_release_success_orders_dump_contract_and_activation(self):
         result, log, marker, images = self.run_fixture('release')

@@ -42,7 +42,7 @@ try:
     if any(any(root.rglob('*.d')) for root in roots):
         raise ValueError()
     for candidate in expected.iterdir():
-        current = installed / candidate.name
+        current = (Path(os.environ.get('XDG_CONFIG_HOME') or str(Path.home() / '.config')) / 'systemd/user' / candidate.name) if candidate.suffix == '.service' else installed / candidate.name
         if current.is_symlink() or not current.is_file():
             raise ValueError()
         actual, wanted = current.read_text(), candidate.read_text()

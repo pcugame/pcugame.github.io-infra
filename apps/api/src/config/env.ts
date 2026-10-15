@@ -31,9 +31,10 @@ const envSchema = z
     SESSION_IDLE_MS: z.coerce.number().int().positive().default(2 * 60 * 60 * 1000),
     SESSION_ABSOLUTE_MS: z.coerce.number().int().positive().default(14 * 24 * 60 * 60 * 1000),
     SESSION_TOUCH_MIN_INTERVAL_MS: z.coerce.number().int().nonnegative().default(5 * 60 * 1000),
-    // Max time the process waits for in-flight requests to finish after SIGTERM
-    // before it force-closes. Long enough to let a game-upload complete finalize (15s default).
-    SHUTDOWN_DRAIN_MS: z.coerce.number().int().positive().default(15_000),
+    // Total SIGTERM budget: request drain AND Fastify/backend cleanup.
+    // Quadlet reserves 65s for Podman and 75s for systemd; keep the 60s cap
+    // aligned with runtime-env.py (cross-checked by parity.test.py).
+    SHUTDOWN_DRAIN_MS: z.coerce.number().int().positive().max(60_000).default(15_000),
     COOKIE_SECURE: z
       .enum(['true', 'false'])
       .default('true')
