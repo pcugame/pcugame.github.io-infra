@@ -91,12 +91,14 @@ for (const boundary of ['handler', 'preHandler', 'plugin-hook'] as const) {
 			});
 		}
 		const origin = await app.listen({ host: '127.0.0.1', port: 0 });
+		const closed = deferred();
+		app.server.once('request', (_req, response) => { response.once('close', closed.resolve); });
 		const request = get(origin + '/long');
 		request.on('error', () => undefined);
 		await entered.promise;
 		request.destroy();
 		try {
-			await new Promise(resolve => setTimeout(resolve, 20));
+			await closed.promise;
 			expect(httpActivity(app).handlers).toBeGreaterThan(0);
 			httpActivity(app).accepting = false;
 			expect((await app.inject('/long')).statusCode).toBe(503);

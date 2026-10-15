@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { request as httpsRequest, Agent } from 'node:https';
+import { get } from 'node:http';
 import { connect, type ClientHttp2Session } from 'node:http2';
 import { S3Client, PutObjectCommand, UploadPartCommand } from '@aws-sdk/client-s3';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -99,8 +100,14 @@ describe.runIf(enabled)('actual nginx TLS HTTP/1.1 and HTTP/2 API slot handoff w
 				FILE_GATEWAY_SECRET: secret, RATE_LIMIT_GLOBAL_MAX: 10000,
 			}, { maintenancePaused: slot === 'b', resources: { prisma: { value: db, ownership: 'borrowed' } } });
 			contexts.push(context);
-			const app = await buildApp({ context }); apps.push(app);
-			app.addHook('onRequest', async (_req, reply) => { reply.header('x-pcu-api-slot', slot); });
+			const previousSlot = process.env.API_SLOT;
+			let app: FastifyInstance;
+			try { process.env.API_SLOT = slot; app = await buildApp({ context }); }
+			finally {
+				if (previousSlot === undefined) delete process.env.API_SLOT;
+				else process.env.API_SLOT = previousSlot;
+			}
+			apps.push(app);
 			await context.start(); await app.listen({ host: '127.0.0.1', port }); context.lifecycle.setState('ready');
 		}
 		directory = await mkdtemp(join(tmpdir(), 'pcu-rolling-nginx-'));
@@ -179,8 +186,35 @@ location / { proxy_pass http://pcu_api_active; proxy_http_version 1.1; proxy_set
 		if (directory) await rm(directory, { recursive: true, force: true });
 	});
 
+	async function verifyDisconnectedRequest() {
+		const entered = deferred(), finish = deferred(), closed = deferred();
+		const old = contexts[0]!;
+		const check = vi.spyOn(old.databaseHealth, 'check').mockImplementationOnce(async () => {
+			entered.resolve(); await finish.promise; return true;
+		});
+		apps[0]!.server.once('request', (_req, response) => { response.once('close', closed.resolve); });
+		const client = get(`http://127.0.0.1:${slots.get('a')}/api/health`);
+		client.on('error', () => undefined);
+		try {
+			await entered.promise; client.destroy(); await closed.promise;
+			expect(old.lifecycle.inFlight()).toBe(0);
+			// The onRequestAbort hook also settles after the close event. The
+			// health handler remains blocked on our explicit completion signal.
+			await vi.waitFor(() => expect(httpActivity(apps[0]!).handlers).toBe(1));
+			finish.resolve();
+			await vi.waitFor(() => expect(httpActivity(apps[0]!).handlers).toBe(0));
+		} finally { finish.resolve(); client.destroy(); check.mockRestore(); }
+	}
+
 	it('finishes old HTTP/1.1 + HTTP/2 work while cookie, upload and file authorization continue on the new API', async () => {
+		await verifyDisconnectedRequest();
 		const old = contexts[0]!, next = contexts[1]!;
+		const preflight = await request('/api/me', 'OPTIONS', undefined, apiOrigin, { 'access-control-request-method': 'GET' });
+		expect(preflight.status).toBe(204);
+		expect(preflight.headers['access-control-allow-origin']).toBe(origin);
+		expect(preflight.headers['x-pcu-api-slot']).toBe('a');
+		expect(old.lifecycle.inFlight()).toBe(0);
+		expect(httpActivity(apps[0]!).handlers).toBe(0);
 		expect(next.deployment?.status()).toEqual({ paused: true, active: 0, error: false, starting: false });
 		const me = await request('/api/me'); expect(JSON.parse(me.body).data.authenticated).toBe(true);
 		const grantResponse = await request('/api/file-access', 'POST', { url: fileOrigin + '/' + key });
