@@ -21,9 +21,10 @@ if [[ -f "${CUTOVER_STATE_DIR}/rolling-release.json" ]]; then
   python3 - "${CUTOVER_STATE_DIR}/rolling-release.json" "$command" <<'PYCODE'
 import json, os, sys
 state = json.load(open(sys.argv[1]))
+# Legacy preflight journals precede all deployed service changes.
 rolling_health = (sys.argv[2] == 'health' and state['phase'] == 'web-pending'
     and state['sha'] == os.environ.get('RELEASE_SOURCE_SHA') and state['image'] == os.environ.get('FINAL_IMAGE'))
-if state['phase'] != 'complete' and not rolling_health:
+if state['phase'] not in ('preflight', 'complete') and not rolling_health:
     sys.exit('Unfinished rolling release blocks maintenance deployment and recovery')
 PYCODE
 fi

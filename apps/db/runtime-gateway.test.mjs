@@ -20,6 +20,8 @@ const policy = "default-src 'none'; script-src 'self' blob:; worker-src 'self' b
 assert.ok(Buffer.byteLength(policy) > 4096);
 const fallback = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 const token = 'a'.repeat(64);
+const deniedToken = 'b'.repeat(64);
+const slot = 'a';
 const bytes = Buffer.from('0123456789abcdef');
 try {
  chmodSync(work, 0o755);
@@ -55,9 +57,11 @@ try {
    if ($http_x_pcu_gateway_secret != "${values.FILE_GATEWAY_SECRET}") { return 403; }
    if ($http_cookie != "") { return 403; }
    if ($http_authorization != "") { return 403; }
+   if ($http_x_pcu_file_uri ~ "${deniedToken}") { return 403; }
    if ($http_x_pcu_file_uri ~ denied\\.bin$) { return 403; }
    if ($fixture_dest_ok = 0) { return 403; }
    if ($fixture_method_ok = 0) { return 403; }
+   add_header X-PCU-API-Slot "${slot}" always;
    add_header X-PCU-Object-Path $fixture_path always;
    add_header X-PCU-Upstream-Host fixture.test always;
    add_header X-PCU-Runtime-CSP $fixture_csp always;
@@ -96,6 +100,39 @@ try {
  }
  for (const port of [8080, 8081]) {
   const origin = 'http://' + docker('port', name, `${port}/tcp`);
+  // Every location that adds the slot header must retain its own header contract.
+  const paths = port === 8081
+   ? [`/file/${token}`, `/pcu-protected/${token}/fixture.bin`, `/play/${token}/fixture.bin`, `/runtime/${token}/fixture.bin`]
+   : ['/fixture.bin', `/play/${token}/fixture.bin`, `/runtime/${token}/fixture.bin`];
+  for (const path of paths) {
+   const runtime = path.startsWith('/runtime/');
+   for (const denied of [false, true]) {
+    const target = denied ? (path === '/fixture.bin' ? '/denied.bin' : path.replace(token, deniedToken)) : path;
+    for (const [method, headers, status] of [['GET', {}, 200], ['HEAD', {}, 200], ['GET', { Range: 'bytes=0-3' }, 206]]) {
+     const response = await fetch(origin + target, { method, headers, signal: AbortSignal.timeout(5000) });
+     const label = `${port} ${target} ${method} ${JSON.stringify(headers)}`;
+     assert.equal(response.status, denied ? 403 : status, label);
+     assert.equal(response.headers.get('x-pcu-api-slot'), slot, label);
+     assert.equal(response.headers.get('cache-control'), 'private, no-store', label);
+     assert.equal(response.headers.get('x-content-type-options'), 'nosniff', label);
+     if (runtime) {
+      assert.equal(response.headers.get('content-security-policy'), policy, label);
+      assert.equal(response.headers.get('cross-origin-resource-policy'), 'cross-origin', label);
+      assert.equal(response.headers.get('cross-origin-embedder-policy'), 'require-corp', label);
+      assert.equal(response.headers.get('cross-origin-opener-policy'), 'same-origin', label);
+      assert.equal(response.headers.get('referrer-policy'), 'no-referrer', label);
+     } else if (port === 8081) {
+      assert.equal(response.headers.get('content-security-policy'), denied ? null : 'default-src *', label);
+     } else {
+      assert.ok(response.headers.get('content-security-policy')?.includes("frame-ancestors https://web.fixture.invalid"), label);
+     }
+     if (!denied) {
+      if (status === 206) assert.equal(response.headers.get('content-range'), 'bytes 0-3/16', label);
+      assert.equal(await response.text(), method === 'HEAD' ? '' : status === 206 ? '0123' : bytes.toString(), label);
+     } else await response.arrayBuffer();
+    }
+   }
+  }
   const reportUrl = `${origin}/api/webgl-play/reports/${token}`;
   const report = await fetch(reportUrl, { method: 'POST', headers: { 'Content-Type': 'application/csp-report', Cookie: 'sid=private', Authorization: 'Bearer private' }, body: '{"csp-report":{}}' });
   assert.equal(report.status, 204, 'report reaches the dedicated API path without cookies');

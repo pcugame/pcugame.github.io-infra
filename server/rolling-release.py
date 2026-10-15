@@ -53,14 +53,13 @@ class Release:
         self.host, self.file, self.sha, self.image = host, Path(state_file), sha, image
         self.observe = observe
         self.state = json.loads(self.file.read_text()) if self.file.exists() else None
-        if self.state and self.state['phase'] != 'complete':
+        if self.state and self.state['phase'] not in ('preflight', 'complete'):
             if (self.state['sha'], self.state['image']) != (sha, image):
                 raise ValueError('An unfinished release blocks another release')
-        elif not self.state or (self.state['sha'], self.state['image']) != (sha, image):
+        elif not self.state or self.state['phase'] == 'preflight' or (self.state['sha'], self.state['image']) != (sha, image):
             active = host.active_slot()
             self.state = dict(sha=sha, image=image, old=active, new='b' if active == 'a' else 'a',
                               phase='preflight', workers=[], deferred=False)
-            self.persist()
 
     def persist(self, **values):
         self.state.update(values)
@@ -83,6 +82,8 @@ class Release:
         if s['phase'] == 'preflight':
             h.preflight(s)
             h.snapshot(self.sha)
+            # No deployed service changes before this durable boundary. Failed
+            # read-only checks leave any previous journal untouched.
             self.persist(phase='candidate')
         if s['phase'] == 'candidate':
             h.start_candidate(s)

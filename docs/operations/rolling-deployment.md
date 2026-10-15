@@ -50,13 +50,15 @@
 
 1. 실제 설치 상태·artifact·capacity·호환성·probe 설정을 확인한다. 대상 이미지의 모든 migration 이름·checksum을 운영 적용 이력과 비교한다. 미적용·실패·rollback·중복·추가 이력은 전환 전에 거부한다. 승인된 과거 alternate contract 경로는 기존 receipt 검사와 같은 선택 규칙을 사용한다.
 2. 기존 온라인 DB snapshot과 격리 복원 검증을 수행한다. SQL migration은 실행하지 않는다.
-3. 비활성 슬롯을 maintenance 중지 상태로 시작한다. DB·storage·인증·직렬화·파일 승인 검사가 성공하면 구 Nginx worker의 PID와 시작 시각을 영속 기록한다.
+3. `candidate` journal을 원자적으로 저장하고 파일·디렉터리 fsync를 완료한 뒤, 비활성 슬롯을 maintenance 중지 상태로 시작한다. DB·storage·인증·직렬화·파일 승인 검사가 성공하면 구 Nginx worker의 PID와 시작 시각을 영속 기록한다.
 4. 공유 upstream을 변경하고 Nginx 설정 검사·reload를 수행한다. 공개·내부 probe가 신 슬롯에 도달해야 활성 슬롯 기록을 갱신한다.
 5. 구 API의 maintenance 수신을 중지한다. 구 Nginx worker가 모두 종료된 후 구 API의 HTTP 수신을 중지한다. 요청·hook/handler 실행·maintenance가 모두 0일 때만 systemd stop을 실행한다.
 6. 신 API의 maintenance를 활성화하고 worker를 순차 교체한다. worker는 claim 수신을 중지한 뒤 기존 작업과 heartbeat가 종료될 때까지 유지한다. 실행 중 작업의 AbortSignal은 배포 drain으로 취소하지 않는다.
 7. 전체 runtime 검사를 통과하면 같은 SHA의 Web을 게시한다. 공개·내부 smoke와 실제 Web SHA 확인 후 journal을 완료 처리한다.
 
-`cutover-state/host-release.lock`은 host 동시 실행을 차단한다. `rolling-release.json`은 source SHA, image digest, 이전 image, 양쪽 슬롯, 단계, Nginx worker 세대와 완료 worker 목록을 저장하며 파일·디렉터리를 fsync한다. SSH·workflow가 중단되어도 같은 release를 재실행하면 실제 runtime과 대조하여 재개한다. 다른 release와 기존 점검 배포·자동 복구는 완료되지 않은 rolling journal이 있으면 거부한다.
+`cutover-state/host-release.lock`은 사전 검사 시작부터 journal 저장·서비스 상태 변경·해당 실행 종료까지 유지하여 host 동시 실행을 차단한다. `rolling-release.json`은 source SHA, image digest, 이전 image, 양쪽 슬롯, 단계, Nginx worker 세대와 완료 worker 목록을 저장하며 파일·디렉터리를 fsync한다. SSH·workflow가 중단되어도 같은 release를 재실행하면 실제 runtime과 대조하여 재개한다. `candidate` 이후 미완료 journal이 있으면 다른 release와 기존 점검 배포·자동 복구를 거부한다. 후보 시작 직전에 프로세스가 중단된 경우도 동일 release로 재개하여 실제 상태를 확인한다.
+
+읽기 전용 사전 검사 또는 온라인 snapshot 검증 실패는 신규 rolling journal을 생성하지 않으며, 기존 journal을 성공한 `complete`로 변경하거나 삭제하지 않는다. migration이 있는 release의 rolling 거절 이후에는 다른 release의 사전 검사 또는 기존 점검 배포·복구 절차에 진입할 수 있다. 각 절차의 schema·artifact·호환성 검사와 migration 시도 후 복구 제한은 그대로 적용한다. 이전 구현이 기록한 `preflight` journal도 서비스 변경 전 단계이므로 세 진입점(`rolling-release.py`, `deploy.sh`, `release-orchestrate.sh`)에서 차단 대상으로 취급하지 않는다. 이 기록으로 재시도할 때는 현재 활성 슬롯을 다시 읽고 사전 검사를 모두 수행한다. 수동 journal 삭제는 필요하지 않다.
 
 관찰 시간은 단계별 기본 10분이다. 초과 시 `deferred=true`와 종료 코드 `75`를 반환한다. 이 값은 **정리 보류**이며 강제 종료가 아니다. 신 API가 전환된 경우 계속 요청을 처리하고, 구 API·worker 및 journal은 유지된다. 다음 실행에서도 이전 상태 기록만으로 idle을 판단하지 않는다.
 
@@ -77,4 +79,4 @@ API scope는 `all`·`http`·`maintenance`이다. worker는 새 pass와 claim 수
 
 `node scripts/test-rolling-release.mjs`는 별도 PostgreSQL·Garage 컨테이너와 임의 loopback 포트를 생성한다. 실제 API 두 개, Nginx TLS·keep-alive·HTTP/2, 인증된 조회·쓰기와 collection, 업로드 전환, 파일 권한 갱신·다운로드 및 worker lease 유지·작업 재개를 검사한다. 테스트 종료 시 자신이 생성한 Compose project만 정리한다. PR Checks의 integration job에 연결되어 있다.
 
-`server/rolling-release.test.py`는 준비·snapshot·reload·공개 probe 실패, 긴 drain, worker 교체 실패 및 같은 release 재개를 검사한다. API runtime 테스트는 연결 종료 이후 실행 중인 hook·handler와 heartbeat 완료 대기를 검사한다. 이 검증은 실제 운영 설치나 서로 다른 운영 release의 업무 호환성 검증을 대신하지 않는다.
+`server/rolling-release.test.py`는 준비·snapshot·reload·공개 probe 실패, 긴 drain, worker 교체 실패 및 같은 release 재개를 검사한다. 실제 shell 진입점의 journal 차단, 프로세스 중단·재실행과 host lock 경합도 격리 fixture로 검증한다. API runtime 테스트는 실제 CORS OPTIONS 완료, 응답·연결 종료 이후 실행 중인 hook·handler와 heartbeat 완료 대기를 검사한다. Nginx 슬롯 전환 검사는 유효한 preflight 이후 구 슬롯 drain과 긴 HTTP/1.1·HTTP/2 요청 보존을 포함한다. 이 검증은 실제 운영 설치나 서로 다른 운영 release의 업무 호환성 검증을 대신하지 않는다.

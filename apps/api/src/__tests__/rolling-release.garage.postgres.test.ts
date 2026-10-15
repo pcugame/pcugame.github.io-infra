@@ -54,7 +54,7 @@ describe.runIf(enabled)('actual nginx TLS HTTP/1.1 and HTTP/2 API slot handoff w
 	function request(path: string, method = 'GET', body?: unknown, base = apiOrigin) {
 		return new Promise<{ status: number; headers: import('node:http').IncomingHttpHeaders; body: string }>((resolve, reject) => {
 			const req = httpsRequest(new URL(path, base), { method, agent, rejectUnauthorized: false,
-				headers: { cookie, origin, ...(body === undefined ? {} : { 'content-type': 'application/json' }) } }, response => {
+				headers: { cookie, origin, ...(method === 'OPTIONS' ? { 'access-control-request-method': 'POST', 'access-control-request-headers': 'Content-Type' } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) } }, response => {
 				let text = '';
 				response.setEncoding('utf8'); response.on('data', chunk => { text += chunk; });
 				response.on('end', () => resolve({ status: response.statusCode!, headers: response.headers, body: text }));
@@ -153,6 +153,10 @@ location / { proxy_pass http://pcu_api_active; proxy_http_version 1.1; proxy_set
 	it('finishes old HTTP/1.1 + HTTP/2 work while cookie, upload and file authorization continue on the new API', async () => {
 		const old = contexts[0]!, next = contexts[1]!;
 		expect(next.deployment?.status()).toEqual({ paused: true, active: 0, error: false, starting: false });
+		const preflight = await request('/api/file-access', 'OPTIONS');
+		expect(preflight.status).toBe(204);
+		expect(preflight.headers['access-control-allow-origin']).toBe(origin);
+		expect(preflight.headers['access-control-allow-methods']).toContain('POST');
 		const me = await request('/api/me'); expect(JSON.parse(me.body).data.authenticated).toBe(true);
 		const grantResponse = await request('/api/file-access', 'POST', { url: fileOrigin + '/' + key });
 		expect(grantResponse.status).toBe(200);
@@ -222,7 +226,12 @@ location / { proxy_pass http://pcu_api_active; proxy_http_version 1.1; proxy_set
 		}, { timeout: 10000 });
 		httpActivity(apps[0]!).accepting = false;
 		expect(old.lifecycle.inFlight()).toBe(0); expect(httpActivity(apps[0]!).handlers).toBe(0);
+		await vi.waitFor(() => expect(old.deployment?.status().active).toBe(0));
 		await apps[0]!.close(); next.deployment?.resume();
+		const nextPreflight = await request('/api/file-access', 'OPTIONS');
+		expect(nextPreflight.status).toBe(204);
+		expect(nextPreflight.headers['access-control-allow-origin']).toBe(origin);
+		await vi.waitFor(() => expect(httpActivity(apps[1]!).handlers).toBe(0));
 		h2.destroy(); h2 = connect(apiOrigin, { rejectUnauthorized: false });
 		expect((await http2('/api/me')).slot).toBe('b');
 	}, 60_000);

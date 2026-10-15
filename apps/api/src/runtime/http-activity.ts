@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 
 type Callable = (this: unknown, ...args: unknown[]) => unknown;
 const trackedHooks = new Set(['onRequest', 'preParsing', 'preValidation', 'preHandler', 'preSerialization', 'onSend', 'onError', 'onResponse', 'onTimeout', 'onRequestAbort']);
@@ -16,18 +16,38 @@ export function trackHttpActivity(app: FastifyInstance) {
 		if (wrapped.has(original)) return original;
 		const tracked: Callable = function (...args) {
 			state.handlers++;
-			let completed = false;
-			const finish = () => { if (!completed) { completed = true; state.handlers--; } };
+			let completed = false, returned = false, pendingPromise = false, calledDone = false;
+			const response = callback ? (args[1] as FastifyReply | undefined)?.raw : undefined;
+			// onResponse callbacks start after finish and must still call done.
+			const responseWasFinished = response?.writableFinished;
+			const finish = () => {
+				if (completed) return;
+				completed = true;
+				response?.removeListener('finish', finish);
+				state.handlers--;
+			};
 			if (callback) {
 				const done = args.at(-1);
 				if (typeof done === 'function') args[args.length - 1] = (...values: unknown[]) => {
-					try { return done(...values); } finally { finish(); }
+					calledDone = true;
+					try { return done(...values); } finally {
+						if (returned && !pendingPromise) finish();
+					}
 				};
 			}
 			try {
 				const result = original.apply(this, args);
-				if (promiseLike(result)) return Promise.resolve(result).finally(finish);
-				if (!callback) finish();
+				pendingPromise = promiseLike(result);
+				returned = true;
+				// Even a synchronous done/send cannot finish a returned Promise's work.
+				if (pendingPromise) return Promise.resolve(result).finally(finish);
+				if (!callback || calledDone) finish();
+				else if (response && !responseWasFinished) {
+					// Callback hooks may send an early response without calling done.
+					// A socket close/abort alone is not execution completion.
+					if (response.writableFinished) finish();
+					else response.once('finish', finish);
+				}
 				return result;
 			} catch (error) { finish(); throw error; }
 		};

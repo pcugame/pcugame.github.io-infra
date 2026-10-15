@@ -17,7 +17,8 @@ if [[ "${1:-up}" =~ ^(up|down|drain|backup|release-migrate|release-assert|invent
   if [[ -f "${CUTOVER_STATE_DIR}/rolling-release.json" && "${RELEASE_ROLLING_ACTIVE:-false}" != true ]]; then
     python3 - "${CUTOVER_STATE_DIR}/rolling-release.json" <<'PYCODE'
 import json, sys
-if json.load(open(sys.argv[1]))['phase'] != 'complete':
+# Legacy preflight journals precede all deployed service changes.
+if json.load(open(sys.argv[1]))['phase'] not in ('preflight', 'complete'):
     sys.exit('Unfinished rolling release blocks maintenance deployment')
 PYCODE
   fi
