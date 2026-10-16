@@ -47,9 +47,7 @@ export function ProjectCard({ project, onSelect, localPoster }: Props) {
         <div className="archive-card__title-wrap">
           <h3 className="archive-card__title">{project.title}</h3>
         </div>
-        {project.summary && (
-          <p className="archive-card__summary">{project.summary}</p>
-        )}
+        <p className="archive-card__summary">{project.summary}</p>
         <div className="archive-card__footer">
           <div className="archive-card__members">
             {project.members.slice(0, 2).map((m) => (
