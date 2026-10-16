@@ -1,0 +1,5 @@
+{
+  "version": 2,
+  "quadlet_dir": "/home/gh-deploy/.config/containers/systemd",
+  "nginx_config_sha256": "REPLACE_WITH_REVIEWED_EFFECTIVE_CONFIG_FINGERPRINT"
+}

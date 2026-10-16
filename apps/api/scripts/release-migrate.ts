@@ -52,7 +52,7 @@ export const CONTRACT_MIGRATION = '20260822000000_canonical_asset_contract';
 export const PROJECT_CHANGE_MIGRATION = '20260909100000_project_change_requests';
 
 type RuntimePhase = 'phase1' | 'phase2';
-type Command = 'status' | 'apply-expand' | 'apply-contract' | 'assert-runtime';
+type Command = 'status' | 'apply-expand' | 'apply-contract' | 'assert-runtime' | 'assert-unchanged';
 
 export type MigrationRow = {
 	migration_name: string;
@@ -108,7 +108,7 @@ export function validateObservationException(value: ObservationException): void 
 
 export function parseArgs(args: readonly string[]): { command: Command; phase?: RuntimePhase; exception?: ObservationException } {
 	const [command, ...rest] = args;
-	if (!['status', 'apply-expand', 'apply-contract', 'assert-runtime'].includes(command ?? '')) {
+	if (!['status', 'apply-expand', 'apply-contract', 'assert-runtime', 'assert-unchanged'].includes(command ?? '')) {
 		throw new Error('usage: release-migrate <status|apply-expand|apply-contract|assert-runtime phase1|phase2>');
 	}
 	if (command === 'assert-runtime') {
@@ -437,6 +437,32 @@ async function stagedMigrate(target: string, databaseUrl: string, alternate: boo
 	}
 }
 
+export function assertExactMigrationHistory(rows: readonly MigrationRow[], expected: ReadonlyMap<string, string>): void {
+	if (rows.length !== expected.size) throw new Error('Migration list differs from the release image');
+	const seen = new Set<string>();
+	for (const row of rows) {
+		if (!row.finished_at || row.rolled_back_at || seen.has(row.migration_name)
+			|| expected.get(row.migration_name) !== row.checksum) {
+			throw new Error(`Unapplied, failed, duplicate or mismatched migration: ${row.migration_name}`);
+		}
+		seen.add(row.migration_name);
+	}
+}
+
+async function assertUnchanged(rows: readonly MigrationRow[], receipt: ExceptionReceipt | null): Promise<void> {
+	assertRuntime(rows, 'phase2', receipt);
+	const names = (await readdir(join(apiRoot(), 'prisma', 'migrations'), { withFileTypes: true }))
+		.filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
+	const path = releaseStatus(rows, receipt).contractPath;
+	const selected = stageMigrationNames(names, names.at(-1)!, path && isAlternateContract(path) ? path : false);
+	const expected = new Map<string, string>();
+	for (const name of selected) {
+		const sql = await readFile(join(apiRoot(), 'prisma', isAlternateContract(name) ? 'contract-migration-paths' : 'migrations', name, 'migration.sql'));
+		expected.set(name, createHash('sha256').update(sql).digest('hex'));
+	}
+	assertExactMigrationHistory(rows, expected);
+}
+
 async function main(): Promise<void> {
 	const { command, phase, exception } = parseArgs(process.argv.slice(2));
 	const databaseUrl = process.env['DATABASE_URL'];
@@ -446,6 +472,12 @@ async function main(): Promise<void> {
 	let receipt = await exceptionReceipt(databaseUrl);
 	let status = releaseStatus(rows, receipt);
 
+	if (command === 'assert-unchanged') {
+		await assertUnchanged(rows, receipt);
+		await verifyStorageBucketRegistry(databaseUrl);
+		console.log(JSON.stringify({ event: 'release_migrations_unchanged' }));
+		return;
+	}
 	if (command === 'status') {
 		console.log(JSON.stringify({ event: 'release_migration_status', ...status }, null, 2));
 		return;

@@ -7,6 +7,30 @@ for module in common lifecycle preflight backup migrate activate smoke; do
   source "${DEPLOY_SCRIPT_DIR}/deploy/${module}.sh"
 done
 
+# A direct invocation shares the workflow's host lock and pending-release fence.
+if [[ "${1:-up}" =~ ^(up|down|drain|backup|release-migrate|release-assert|inventory|capacity-preflight|boundary-preflight|release-artifact-preflight|verify-final-web|restart|rolling-schema-check)$ ]]; then
+  mkdir -p "$CUTOVER_STATE_DIR"
+  if [[ "${RELEASE_HOST_LOCK_HELD:-false}" != true ]]; then
+    exec 9>"${CUTOVER_STATE_DIR}/host-release.lock"
+    flock -n 9 || { echo 'Another host release operation is running' >&2; exit 1; }
+  fi
+  if [[ -f "${CUTOVER_STATE_DIR}/rolling-release.json" && "${RELEASE_ROLLING_ACTIVE:-false}" != true ]]; then
+    python3 - "${CUTOVER_STATE_DIR}/rolling-release.json" <<'PYCODE'
+import json, sys
+import importlib.util
+from pathlib import Path
+file = Path(sys.argv[1])
+if json.loads(file.read_text())['phase'] == 'preflight':
+    spec = importlib.util.spec_from_file_location('rolling', file.parent.parent / 'rolling-release.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.recover_legacy(file.parent.parent, file)
+if json.load(open(sys.argv[1]))['phase'] not in ('complete', 'aborted'):
+    sys.exit('Unfinished rolling release blocks maintenance deployment')
+PYCODE
+  fi
+fi
+
 # Activation is forward-only, including after a contract migration. API smoke
 # runs inside activation before workers may start. No old-image rollback exists.
 do_up() {
@@ -20,6 +44,7 @@ case "${1:-up}" in
   down)    do_down ;;
   drain)   do_drain ;;
   backup)  do_backup "${2:-manual}" ;;
+  rolling-schema-check) run_release_entry dist-release/scripts/release-migrate.js assert-unchanged ;;
   release-migrate) shift; do_release_migration "$@" ;;
   release-assert) do_release_assert "${2:-}" ;;
   inventory) do_inventory_snapshot "${2:-}" ;;

@@ -13,11 +13,11 @@ export function recoveryDecision(state, attempted, webVerified) {
  if (attempted) throw new Error('Migration was attempted: automatic previous-runtime recovery is forbidden; inspect DB history and forward-fix.');
  if (!state) return 'nothing';
  if (!webVerified) throw new Error('Previous Pages content has not been verified; refusing mixed web/API recovery.');
- if (!state.containers?.some(c => c.name === 'gp-api')) throw new Error('Missing captured API');
+ if (state.containers?.filter(c => ['gp-api', 'gp-api-a', 'gp-api-b'].includes(c.name)).length !== 1) throw new Error('Exactly one captured API is required');
  if (state.version !== 2 || !state.definitionHash || !state.quadletDir) throw new Error('Invalid captured runtime definitions');
  const seen = new Set();
  for (const c of state.containers) {
-  if (!names.includes(c.name) || seen.has(c.name) || !immutable.test(c.imageName) || !/^(sha256:)?[a-f0-9]{64}$/.test(c.image)) throw new Error('Invalid captured container');
+  if (![...names, 'gp-api-a', 'gp-api-b'].includes(c.name) || seen.has(c.name) || !immutable.test(c.imageName) || !/^(sha256:)?[a-f0-9]{64}$/.test(c.image)) throw new Error('Invalid captured container');
   seen.add(c.name);
  }
  return 'restart';
@@ -35,7 +35,7 @@ function save(file, content) {
  const fd = openSync(file, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 // Hash definitions and environment contents; recovery state must never contain secrets.
-function definitions(quadletDir, systemctl) {
+function definitions(quadletDir, systemctl, apiName = 'gp-api') {
  const entries = [], environmentFiles = new Set();
  function collectEnvironment(content, source) {
   for (const match of content.matchAll(/^EnvironmentFile=(.+)$/gm)) {
@@ -48,12 +48,12 @@ function definitions(quadletDir, systemctl) {
    environmentFiles.add(path.replace(/%%/g, '%').replace(/\$\$/g, '$'));
   }
  }
- for (const name of sourceFiles) {
+ for (const name of sourceFiles.map(name => name === 'gp-api.container' ? `${apiName}.container` : name)) {
   const file = join(quadletDir, name), content = readFileSync(file);
   entries.push([file, hash(content)]);
   collectEnvironment(content.toString(), file);
  }
- for (const unit of units) {
+ for (const unit of units.map(unit => unit === 'gp-api.service' ? `${apiName}.service` : unit)) {
   const content = systemctl(['--user', 'cat', unit]);
   entries.push([unit, hash(content)]);
   // Command definitions come from cat; do not fingerprint volatile Exec runtime metadata.
@@ -75,6 +75,12 @@ export async function runRecovery(mode, key, {
  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
 } = {}) {
  if (!/^\d+-\d+$/.test(key ?? '')) throw new Error('Invalid release run key');
+ const activeSlotFile = join(deployDir, 'cutover-state', 'active-slot');
+ const slot = existsSync(activeSlotFile) ? readFileSync(activeSlotFile, 'utf8').trim() : null;
+ if (slot !== null && !['a', 'b'].includes(slot)) throw new Error('Invalid active slot');
+ const apiName = slot ? `gp-api-${slot}` : 'gp-api';
+ const apiPort = slot === 'b' ? 4001 : 4000;
+ const runtimeNames = names.map(name => name === 'gp-api' ? apiName : name);
  const dir = join(deployDir, 'cutover-state', `recovery-${key}`);
  const stateFile = join(dir, 'runtime.json');
  const attemptFile = join(dir, 'migration-attempted');
@@ -82,9 +88,9 @@ export async function runRecovery(mode, key, {
   if (quadletDir) return quadletDir;
   // The workflow runs this tool separately from deploy.sh's shell .env loader.
   // Discover the adopted source, including a host-specific QUADLET_DIR.
-  const source = systemctl(['--user', 'show', 'gp-api.service', '--property=SourcePath', '--value']).trim();
-  const fragment = systemctl(['--user', 'show', 'gp-api.service', '--property=FragmentPath', '--value']).trim();
-  if (!isAbsolute(source) || basename(source) !== 'gp-api.container' || !/\/generator[^/]*\/gp-api\.service$/.test(fragment)) throw new Error('Recovery requires an adopted Quadlet API service');
+  const source = systemctl(['--user', 'show', `${apiName}.service`, '--property=SourcePath', '--value']).trim();
+  const fragment = systemctl(['--user', 'show', `${apiName}.service`, '--property=FragmentPath', '--value']).trim();
+  if (!isAbsolute(source) || basename(source) !== `${apiName}.container` || !fragment.includes('/generator') || !fragment.endsWith(`/${apiName}.service`)) throw new Error('Recovery requires an adopted Quadlet API service');
   return dirname(source);
  };
  const inspect = name => {
@@ -100,7 +106,7 @@ export async function runRecovery(mode, key, {
   quadletDir = resolveQuadletDir();
   mkdirSync(dir, { mode: 0o700 });
   const containers = [];
-  for (const name of names) {
+  for (const name of runtimeNames) {
    const current = inspect(name);
    if (current?.State.Status === 'running') {
     const imageName = current.ImageName;
@@ -111,7 +117,7 @@ export async function runRecovery(mode, key, {
     containers.push(c);
    }
   }
-  const state = { version: 2, quadletDir, containers, definitionHash: definitions(quadletDir, systemctl) };
+  const state = { version: 2, quadletDir, containers, definitionHash: definitions(quadletDir, systemctl, apiName) };
   recoveryDecision(state, false, true);
   save(stateFile, JSON.stringify(state));
   console.log(`recovery_capture=${containers.length}`);
@@ -133,28 +139,33 @@ export async function runRecovery(mode, key, {
  if (mode !== 'recover') throw new Error('Expected capture, mark-migration, assert-pre-migration or recover');
  const state = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : null;
  if (recoveryDecision(state, migrationAttempted(attemptFile), webVerified) === 'nothing') { console.log('recovery_not_needed=true'); return; }
+ if (!state.containers.some(c => c.name === apiName)) throw new Error('Active API slot changed since capture; refusing recovery');
  quadletDir = resolveQuadletDir();
- if (state.quadletDir !== quadletDir || state.definitionHash !== definitions(quadletDir, systemctl)) throw new Error('Runtime definitions changed since capture; refusing recovery');
+ if (state.quadletDir !== quadletDir || state.definitionHash !== definitions(quadletDir, systemctl, apiName)) throw new Error('Runtime definitions changed since capture; refusing recovery');
  for (const c of state.containers) {
   const current = inspect(c.name);
   if (current && (current.Name?.replace(/^\//, '') !== c.name || current.Image !== c.image || current.ImageName !== c.imageName)) throw new Error(`Container image changed since capture: ${c.name}`);
  }
- systemctl(['--user', 'start', 'gp-api.service']);
- verify(state.containers.find(c => c.name === 'gp-api'));
+ systemctl(['--user', 'start', `${apiName}.service`]);
+ verify(state.containers.find(c => c.name === apiName));
  let healthy = false;
  for (let i = 0; i < 30; i++) {
-  try { healthy = JSON.parse(podman(['exec', 'gp-api', 'wget', '-qO-', 'http://localhost:4000/api/health'])).ok === true; } catch { /* bounded startup wait */ }
+  try { healthy = JSON.parse(podman(['exec', apiName, 'wget', '-qO-', `http://localhost:${apiPort}/api/health`])).ok === true; } catch { /* bounded startup wait */ }
   if (healthy) break;
   await sleep(1000);
  }
  if (!healthy) throw new Error('Previous runtime recovery health failed');
- for (const c of state.containers) if (c.name !== 'gp-api') systemctl(['--user', 'start', `${c.name}.service`]);
+ for (const c of state.containers) if (c.name !== apiName) systemctl(['--user', 'start', `${c.name}.service`]);
  for (const c of state.containers) verify(c);
  const drained = join(deployDir, 'cutover-state', 'mutation-drained');
  if (existsSync(drained)) unlinkSync(drained);
+ const maintenance = join(deployDir, 'cutover-state', 'maintenance-in-progress');
+ if (existsSync(maintenance)) unlinkSync(maintenance);
  save(join(dir, 'recovered'), `${new Date().toISOString()}\n`);
  console.log('previous_runtime_recovered=true');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
- runRecovery(process.argv[2], process.argv[3]).catch(error => { console.error(error.message); process.exitCode = 1; });
+ (process.env.RELEASE_HOST_LOCK_HELD === 'true'
+  ? runRecovery(process.argv[2], process.argv[3])
+  : Promise.reject(new Error('Use release-orchestrate.sh under the host release lock and rolling journal fence'))).catch(error => { console.error(error.message); process.exitCode = 1; });
 }

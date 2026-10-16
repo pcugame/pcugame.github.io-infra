@@ -82,11 +82,18 @@ export interface BackendContext {
 	maintenance: BackgroundMaintenance;
 	routes: BackendRoutes;
 	resourceOwnership: readonly BackendResourceOwnership[];
+	deployment?: {
+		quiesce(): void;
+		resume(): void;
+		status(): { paused: boolean; active: number; error: boolean; starting: boolean };
+	};
 	start(): Promise<void>;
 	close(): Promise<void>;
 }
 
 export interface CreateProductionBackendContextOptions {
+	/** Candidate slots serve HTTP while durable maintenance remains paused. */
+	maintenancePaused?: boolean;
 	/** Construction hooks are test seams; their output is owned by the context. */
 	factories?: Partial<ProductionResourceFactories>;
 	/** Supplied live resources must state whether the context owns them. */
@@ -176,8 +183,9 @@ export async function createProductionBackendContext(
 				});
 			},
 			(runtime) => runtime.close(),
-			(runtime) => runtime.start(),
+			(runtime) => options.maintenancePaused ? undefined : runtime.start(),
 		);
+		if (options.maintenancePaused) uploadLifecycle.quiesce?.();
 		const settings = await resource(
 			'settings',
 			() => {
@@ -303,8 +311,29 @@ export async function createProductionBackendContext(
 		owner.register('maintenanceSchedule', owned(
 			maintenanceSchedule,
 			() => maintenanceSchedule.close(),
-			() => maintenanceSchedule.start(),
+			() => options.maintenancePaused ? undefined : maintenanceSchedule.start(),
 		));
+		let maintenancePaused = options.maintenancePaused ?? false;
+		let maintenanceStarting: Promise<void> | undefined;
+		let maintenanceError = false;
+		const deployment = {
+			quiesce() {
+				maintenancePaused = true;
+				maintenanceSchedule.quiesce();
+				uploadLifecycle.quiesce?.();
+			},
+			resume() {
+				if (maintenanceStarting || !maintenancePaused) return;
+				maintenancePaused = false;
+				maintenanceError = false;
+				maintenanceStarting = (uploadLifecycle.resume?.() ?? uploadLifecycle.start())
+					.then(() => { if (!maintenancePaused) maintenanceSchedule.start(); })
+					.catch(error => { maintenanceError = true; maintenancePaused = true; logger.error(error, 'Maintenance activation failed'); })
+					.finally(() => { maintenanceStarting = undefined; });
+			},
+			status: () => ({ paused: maintenancePaused, active: maintenanceSchedule.active()
+				+ (uploadLifecycle.activity?.() ?? 0) + Number(!!maintenanceStarting), error: maintenanceError, starting: !!maintenanceStarting }),
+		};
 		const baseRoutes = options.routes ?? await factories.routes(
 			config,
 			assetsBanned!,
@@ -347,6 +376,7 @@ export async function createProductionBackendContext(
 			databaseHealth,
 			authSessions,
 			maintenance,
+			deployment,
 			routes,
 			resourceOwnership: owner.ownership(),
 			start: () => owner.start(),

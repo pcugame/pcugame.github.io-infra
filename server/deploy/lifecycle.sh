@@ -3,7 +3,7 @@
 
 assert_quadlet_adopted() {
   QUADLET_DIR="${QUADLET_DIR:-${HOME}/.config/containers/systemd}"
-  export API_IMAGE DEPLOY_DIR API_BIND_HOST APP_RUNTIME_ENV_FILE API_RUNTIME_ENV_FILE POSTGRES_RUNTIME_ENV_FILE
+  export API_SLOTS API_IMAGE DEPLOY_DIR API_BIND_HOST APP_RUNTIME_ENV_FILE API_RUNTIME_ENV_FILE POSTGRES_RUNTIME_ENV_FILE
   local staging
   staging="$(mktemp -d)"
   if ! bash "$QUADLET_HELPERS/render.sh" "$staging/expected" || ! systemctl --user show-environment | python3 "$QUADLET_HELPERS/check-installed.py" "$staging/expected" "$QUADLET_DIR" --manager-env; then
@@ -43,7 +43,26 @@ assert_foundation_active() {
   done
 }
 
+mark_maintenance_in_progress() {
+  # Durable before stopping any writer: boot must not restore old binaries if
+  # a later migration or activation is interrupted by a host power loss.
+  python3 - "${CUTOVER_STATE_DIR}/maintenance-in-progress" <<'PYMARK'
+import os, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+with path.open('w') as output:
+    os.chmod(path, 0o600)
+    output.write('explicit recovery required\n')
+    output.flush()
+    os.fsync(output.fileno())
+fd = os.open(path.parent, os.O_RDONLY)
+try: os.fsync(fd)
+finally: os.close(fd)
+PYMARK
+}
+
 stop_application_units() {
+  if [[ "$API_SLOTS" == true ]]; then systemctl --user stop gp-api-a.service gp-api-b.service || return 1; fi
   systemctl --user stop "${APP_UNITS[@]}" || return 1
   assert_application_stopped
 }
@@ -65,7 +84,9 @@ assert_application_stopped() {
     state="$(systemctl --user show "$unit" --property=ActiveState --value)" || return 1
     [[ "$state" == inactive ]] || { echo "ERROR: application service is not inactive: $unit"; return 1; }
   done
-  for ctr in "${RUNTIME_CONTAINERS[@]}"; do
+  local containers=("${RUNTIME_CONTAINERS[@]}")
+  [[ "$API_SLOTS" != true ]] || containers+=(gp-api-a gp-api-b)
+  for ctr in "${containers[@]}"; do
     state="$(runtime_container_state "$ctr")" || return 1
     [[ "$state" == missing || "$state" == exited || "$state" == dead ]] || {
       echo "ERROR: failed to drain mutation process $ctr (state: $state)"
@@ -89,6 +110,7 @@ do_drain() {
   assert_quadlet_adopted
   mkdir -p "$CUTOVER_STATE_DIR"
   rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
+  mark_maintenance_in_progress
   stop_application_units
   assert_postgres_running
   {
@@ -105,6 +127,7 @@ do_down() {
   load_runtime_env
   assert_quadlet_adopted
   rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
+  mark_maintenance_in_progress
   stop_application_units
   systemctl --user stop "$PG_UNIT"
   systemctl --user stop "$POD_UNIT"

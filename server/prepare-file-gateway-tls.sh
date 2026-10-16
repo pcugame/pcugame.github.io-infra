@@ -36,13 +36,36 @@ server {
         allow ::1;
         deny all;
         limit_except GET { deny all; }
-        proxy_pass http://127.0.0.1:4000;
+        proxy_pass http://pcu_api_active;
         proxy_set_header Host pcu-file-auth.internal;
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_pass_request_body off;
         proxy_set_header Content-Length "";
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 5s;
+        proxy_next_upstream off;
+    }
+    # Report-only capabilities are verified by the API, never by cookie auth.
+    location ~ "^/api/webgl-play/reports/[a-f0-9]{64}$" {
+        allow 203.250.133.232;
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        if (\$request_method != POST) { return 405; }
+        client_max_body_size 16k;
+        client_body_buffer_size 16k;
+        access_log off;
+        error_log /dev/null crit;
+        proxy_pass http://pcu_api_active;
+        proxy_set_header Host pcu-file-auth.internal;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header Cookie "";
+        proxy_set_header Authorization "";
+        proxy_hide_header Set-Cookie;
         proxy_connect_timeout 3s;
         proxy_read_timeout 5s;
         proxy_next_upstream off;

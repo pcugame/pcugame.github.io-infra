@@ -7,7 +7,7 @@ import sys
 
 # This is the complete environment interface. Runtime configuration is never read.
 DEFAULTS = {
-    'API_IMAGE': '', 'DEPLOY_DIR': '/srv/graduationproject_v2',
+    'API_SLOTS': 'false', 'API_IMAGE': '', 'DEPLOY_DIR': '/srv/graduationproject_v2',
     'API_BIND_HOST': '127.0.0.1', 'API_PORT': '4000',
     'NAS_EXPORT_HOST_PATH': '/mnt/nas/pcu_storage/GraduationGame', 'NAS_EXPORT_PATH': '/nas',
     'S3_TLS_CA_HOST_PATH': '', 'APP_RUNTIME_ENV_FILE': '',
@@ -59,6 +59,29 @@ def render(output):
         template.name.removesuffix('.in'): re.sub(r'@([A-Z_]+)@', lambda match: tokens[match[1]], template.read_text())
         for template in templates.glob('*.in')
     }
+    if settings['API_SLOTS'] not in ('true', 'false'):
+        raise ValueError('API_SLOTS must be true or false')
+    if settings['API_SLOTS'] == 'true':
+        if host != '127.0.0.1' or port != '4000':
+            raise ValueError('API slots require fixed loopback ports 4000 and 4001')
+        rendered['graduationproject.pod'] = rendered['graduationproject.pod'].replace(
+            'PublishPort=127.0.0.1:4000:4000', 'PublishPort=127.0.0.1:4000:4000\nPublishPort=127.0.0.1:4001:4001')
+        api_template = rendered.pop('gp-api.container')
+        for slot, slot_port in [('a', 4000), ('b', 4001)]:
+            rendered[f'gp-api-{slot}.container'] = api_template.replace('gp-api', f'gp-api-{slot}').replace(
+                'StartWithPod=true', 'StartWithPod=false').replace('Environment=PORT=4000',
+                f'Environment=PORT={slot_port}\nEnvironment=API_SLOT={slot}\nEnvironmentFile=' + quote(deploy + f'/runtime-env/slot-{slot}.env'))
+        # This regular user service is installed separately from Quadlet sources.
+        rendered['pcu-slot-boot.service'] = (
+            '[Unit]\nDescription=Restore recorded PCU slot identities\n'
+            'After=gp-postgres.service\nRequires=gp-postgres.service\nStartLimitIntervalSec=0\n'
+            '[Service]\nType=oneshot\nTimeoutStartSec=0\nRestart=on-failure\nRestartSec=15\n'
+            'Environment=' + quote('DEPLOY_DIR=' + deploy) + '\n'
+            'ExecStart=/usr/bin/python3 ' + quote(deploy + '/rolling-release.py') + ' boot\n'
+            '[Install]\nWantedBy=default.target\n')
+        for name in rendered:
+            if name.startswith('gp-worker-'):
+                rendered[name] = rendered[name].replace('After=gp-api.service', 'After=gp-postgres.service').replace('StartWithPod=true', 'StartWithPod=false')
     output.mkdir(mode=0o700, parents=False, exist_ok=False)
     for filename, content in rendered.items():
         path = output / filename

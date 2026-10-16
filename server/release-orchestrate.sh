@@ -5,9 +5,48 @@ export PATH="$PATH:/usr/local/bin:/usr/bin"
 export DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
 export CUTOVER_STATE_DIR="${DEPLOY_DIR}/cutover-state"
 command="${1:-}"
+if [[ "$command" == rolling || "$command" == rolling-complete ]]; then
+  [[ "$command" != rolling ]] || { printf '%s' "${GHCR_TOKEN:?}" | podman login ghcr.io -u "${GHCR_USERNAME:?}" --password-stdin; }
+  export API_IMAGE="${FINAL_IMAGE:?}" MIGRATION_IMAGE="${FINAL_IMAGE:?}" RELEASE_SCHEMA_PHASE=phase2
+  if [[ "$command" == rolling-complete ]]; then
+    exec python3 "${DEPLOY_DIR}/rolling-release.py" complete
+  fi
+  exec python3 "${DEPLOY_DIR}/rolling-release.py"
+fi
+mkdir -p "$CUTOVER_STATE_DIR"
+exec 9>"${CUTOVER_STATE_DIR}/host-release.lock"
+flock -n 9 || { echo 'Another host release operation is running' >&2; exit 1; }
+export RELEASE_HOST_LOCK_HELD=true
+if [[ -f "${CUTOVER_STATE_DIR}/rolling-release.json" ]]; then
+  python3 - "${CUTOVER_STATE_DIR}/rolling-release.json" "$command" <<'PYCODE'
+import json, os, sys
+import importlib.util
+from pathlib import Path
+file = Path(sys.argv[1])
+if json.loads(file.read_text())['phase'] == 'preflight':
+    spec = importlib.util.spec_from_file_location('rolling', file.parent.parent / 'rolling-release.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.recover_legacy(file.parent.parent, file)
+state = json.load(open(sys.argv[1]))
+rolling_health = (sys.argv[2] == 'health' and state['phase'] == 'web-pending'
+    and state['sha'] == os.environ.get('RELEASE_SOURCE_SHA') and state['image'] == os.environ.get('FINAL_IMAGE'))
+if state['phase'] not in ('complete', 'aborted') and not rolling_health:
+    sys.exit('Unfinished rolling release blocks maintenance deployment and recovery')
+PYCODE
+fi
+api_container=gp-api
+api_port=4000
+if [[ -f "${CUTOVER_STATE_DIR}/active-slot" ]]; then
+  slot="$(cat "${CUTOVER_STATE_DIR}/active-slot")"
+  [[ "$slot" == a || "$slot" == b ]] || exit 1
+  api_container="gp-api-$slot"
+  [[ "$slot" == a ]] || api_port=4001
+fi
 if [[ "$command" == recover || "$command" == assert-pre-migration ]]; then
   exec node "${DEPLOY_DIR}/release-recovery.mjs" "$command" "${RELEASE_RUN_KEY:?}"
 fi
+export API_CONTAINER="$api_container"
 [[ "${RELEASE_SOURCE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid release source SHA' >&2; exit 1; }
 [[ "${FINAL_IMAGE:-}" =~ ^ghcr\.io/pcugame/pcu-graduationproject-v2-api@sha256:[0-9a-f]{64}$ ]] || { echo 'Invalid immutable release image' >&2; exit 1; }
 export API_IMAGE="$FINAL_IMAGE" MIGRATION_IMAGE="$FINAL_IMAGE"
@@ -17,7 +56,7 @@ deploy() { bash "${DEPLOY_DIR}/deploy.sh" "$@"; }
 login() { printf '%s' "${GHCR_TOKEN:?}" | podman login ghcr.io -u "${GHCR_USERNAME:?}" --password-stdin; }
 health() {
   # API smoke inside deploy.sh precedes workers. This gate checks the complete runtime.
-  for name in gp-api gp-worker-game-validation gp-worker-webgl gp-worker-video gp-worker-image gp-worker-export gp-worker-project-publication; do
+  for name in "$api_container" gp-worker-game-validation gp-worker-webgl gp-worker-video gp-worker-image gp-worker-export gp-worker-project-publication; do
     [[ "$(podman inspect --format '{{.State.Status}}' "$name")" == running ]]
     [[ "$(systemctl --user is-active "${name}.service")" == active ]]
     deployed_id="$(podman inspect "$name" --format '{{.Image}}')"
@@ -26,7 +65,7 @@ health() {
     [ "$actual_source" = "$RELEASE_SOURCE_SHA" ]
     [ "$actual_digest" = "${FINAL_IMAGE##*@}" ]
   done
-  podman exec gp-api wget -qO- http://localhost:4000/api/health | grep -q '"ok":true'
+  podman exec "$api_container" wget -qO- "http://localhost:${api_port}/api/health" | grep -q '"ok":true'
 }
 final_smoke() {
   health

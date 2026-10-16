@@ -15,6 +15,10 @@ function run(extra = {}, args = [sourceRevision]) {
   const bin = join(dir, 'bin');
   const trace = join(dir, 'trace');
   mkdirSync(bin);
+  if (extra.TEST_SLOT) {
+    mkdirSync(join(dir, 'cutover-state'));
+    writeFileSync(join(dir, 'cutover-state/active-slot'), extra.TEST_SLOT);
+  }
   writeFileSync(trace, '');
   const executable = (name, body) => writeFileSync(join(bin, name), `#!/usr/bin/env bash\nset -euo pipefail\n${body}`, { mode: 0o755 });
   executable('podman', `
@@ -145,4 +149,13 @@ test('rejects malformed source or container identifiers before dumping', () => {
       assert(!result.trace.some((line) => line.includes('pg_dump')));
     } finally { remove(result); }
   }
+});
+
+for (const slot of ['a', 'b']) test(`online snapshot records active slot ${slot} without stopping services`, () => {
+  const result = run({ TEST_SLOT: slot });
+  try {
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.ok(result.trace.some(line => line.includes(`gp-api-${slot}`)));
+    assert.ok(!result.trace.some(line => /\b(stop|start|restart|kill)\b/.test(line)));
+  } finally { remove(result); }
 });

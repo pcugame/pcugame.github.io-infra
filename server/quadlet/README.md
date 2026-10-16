@@ -3,8 +3,9 @@
 Quadlet owns the runtime topology and systemd owns process lifecycle and
 restart. `../deploy.sh` updates the immutable application digest and requests
 systemd operations on an already adopted host. It does not install Quadlet for
-the first time or migrate legacy units. Production adoption and operation have
-not been verified; repository edits do not activate these definitions.
+the first time or migrate legacy units. The 2026-10-15 read-only production inspection confirmed rootless Podman 5.4.2
+and Quadlet under gh-deploy, with one API and six workers. A/B slot adoption
+has not been performed; repository edits do not activate these definitions.
 
 For first installation, use the separately gated [first-adoption runbook](ADOPTION.md)
 and [Podman compatibility policy](COMPATIBILITY.md). Normal releases cannot adopt
@@ -22,7 +23,7 @@ It executes neither `deploy.sh`, Podman, nor systemctl.
 
 Operators own the three distinct runtime env files, their values, permissions,
 and updates. Protect them as credentials, outside the repository. The renderer
-produces exactly ten unit definitions, with no env files: one pod, one existing
+produces ten unit definitions in single-slot mode, with no env files: one pod, one existing
 named volume, and eight containers. It accepts absent or unreadable external
 files because rendering does not inspect them; those files must be available to
 Podman when units eventually start. Editing a runtime env file takes effect on
@@ -115,6 +116,25 @@ defaults. An empty value is written as `KEY=`.
 | `COOKIE_SECURE` | `true` |
 | `COOKIE_SAME_SITE` | `none` |
 | `ALLOWED_GOOGLE_HD` | Empty |
+
+`SHUTDOWN_DRAIN_MS` is the **total** API shutdown budget, including request
+draining, Fastify close, and backend cleanup; it is not an extra drain phase.
+Supported values are positive integer milliseconds up to **60000** (default
+15000). API startup and runtime-file validation reject larger/non-finite values.
+Cleanup reserves `min(5000, max(1000, floor(budget / 3)))` milliseconds within
+that total; requests receive the remaining budget. Very small budgets may leave
+no request-drain time. Exceeding the total forces exit with status 1.
+
+API `StopTimeout=65` covers the maximum supported app budget plus 5 seconds;
+`TimeoutStopSec=75` gives Podman another 10 seconds for service teardown.
+Parity tests enforce both inequalities and schema/parser agreement, including
+native generated service settings when the generator is available. Changing
+only `api.env` within the supported range cannot exceed the container grace.
+Raising the supported maximum requires updating both validators and reviewing
+the two outer timeouts together. The renderer still never reads runtime values.
+Existing installed units require the established topology update/adoption
+procedure before this policy applies; an image-only release does not update
+their timeouts. These definitions have not been activated on production.
 
 `postgres.env` is PostgreSQL-only: `POSTGRES_DB`, `POSTGRES_USER`, and
 `POSTGRES_PASSWORD` are all required, with no defaults. Do not place application
@@ -338,3 +358,16 @@ Voting investigation collection is disabled when both `VOTE_INVESTIGATION_SECRET
 `VOTE_PRIVACY_NOTICE` are omitted. These optional keys belong only in `api.env`;
 no empty defaults are inserted. To enable collection after approving its basis and
 notice, set both keys together. The application rejects a secret without a notice.
+
+
+## A/B boot restoration
+
+With `API_SLOTS=true`, install the two API containers and six workers with
+`StartWithPod=false`. Install the rendered `pcu-slot-boot.service` in
+`~/.config/systemd/user/` (not the Quadlet source directory), enable it, and verify
+user lingering. It starts after PostgreSQL and retries if the system nginx is not
+yet ready. The service calls `rolling-release.py boot` under the host release lock.
+It never upgrades an unfinished release: the journal determines each API and
+worker digest, and the proxy slot must agree with the recorded phase. Maintenance
+stays paused on both APIs until an interrupted handoff is explicitly resumed.
+See [slot adoption and acceptance](../../docs/operations/rolling-deployment.md).

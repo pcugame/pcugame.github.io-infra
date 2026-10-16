@@ -1,3 +1,4 @@
+import { createWorkerControl } from './runtime/worker-control.js';
 import { pathToFileURL } from 'node:url';
 import { loadEnv } from './config/env.js';
 import { createCryptoIdGenerator } from './infrastructure/production-ports.js';
@@ -16,6 +17,7 @@ export async function runVideoWorker(): Promise<void> {
 	});
 	const s3 = createS3Client(config);
 	const storage = createObjectStorage(s3, { defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC });
+	const control = await createWorkerControl();
 	const abort = new AbortController();
 	const stop = () => abort.abort(new Error('VIDEO worker shutdown requested'));
 	process.once('SIGTERM', stop);
@@ -30,17 +32,19 @@ export async function runVideoWorker(): Promise<void> {
 			tempRoot: config.VIDEO_WORKER_TEMP_ROOT,
 			tempDiskBudgetBytes: config.VIDEO_WORKER_TEMP_DISK_MB * 1024 * 1024,
 		});
-		const removed = await graph.cleanupStaleWorkspaces(
+		const removed = await control.gate.run(() => graph.cleanupStaleWorkspaces(
 			new Date(Date.now() - 24 * 60 * 60_000),
-		);
+		), 0);
 		if (removed > 0) logger.warn({ removed }, 'Removed stale VIDEO worker temp directories');
 		await runVideoWorkerLoop({
 			worker: graph.worker,
+			gate: control.gate,
 			signal: abort.signal,
 			idleDelayMs: config.VIDEO_WORKER_POLL_MS,
 			onError: (error) => logger.error({ error }, 'VIDEO worker pass failed; retrying'),
 		});
 	} finally {
+		await control.close();
 		process.off('SIGTERM', stop);
 		process.off('SIGINT', stop);
 		await prisma.$disconnect().catch(() => undefined);

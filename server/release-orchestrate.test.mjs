@@ -126,14 +126,14 @@ test('workflow DAG resolves immutable image before production gate and publishes
   assert.match(job('cutover'), /environment: production/);
   for (const operation of ['preflight', 'backup', 'migrate', 'activate', 'health', 'smoke']) {
     const step = job('cutover').split(/\n      - /).find(s => s.includes(`release-orchestrate.sh" ${operation}`));
-    assert.match(step, /if: \$\{\{ inputs.operation == 'release' \}\}/);
+    assert.match(step, operation === 'health' ? /inputs.operation == 'release' \|\| inputs.operation == 'rolling'/ : /if: \$\{\{ inputs.operation == 'release' \}\}/);
     assert.doesNotMatch(step, /continue-on-error|always\(\)|failure\(\)/);
     assert.match(step, /script_stop: true/);
   }
   const publish = job('cutover').split(/\n      - /).find(s => s.includes('peaceiris/actions-gh-pages'));
   assert.doesNotMatch(publish, /continue-on-error|always\(\)|failure\(\)/);
   assert.match(publish, /full_commit_message: Deploy \$\{\{ github.sha \}\} \(run \$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}\)/);
-  assert.match(publish, /if: \$\{\{ inputs.operation == 'release' \}\}/);
+  assert.match(publish, /inputs.operation == 'release' \|\| inputs.operation == 'rolling'/);
   const boundary = job('cutover').split(/\n      - /).find(s => s.includes('id: recovery-boundary'));
   assert.match(boundary, /failure\(\) && steps.capture-pages.outcome == 'success'/);
   assert.doesNotMatch(boundary, /steps\.migrate\.outcome/);
@@ -170,4 +170,15 @@ test('served Web mismatch prevents final evidence and automatic recovery', t => 
   assert.notEqual(f.release().status, 0); assert.match(f.events(), /publish/);
   assert.equal(f.evidence(), false); assert.notEqual(f.run('recover').status, 0);
   assert.doesNotMatch(f.events(), /smoke-data-plane/);
+});
+
+test('only completed cancellation permits maintenance and pre-migration recovery', t => {
+  for (const phase of ['aborted', 'candidate', 'aborting', 'switch', 'unknown']) {
+    const f = fixture(t);
+    writeFileSync(join(f.env.DEPLOY_DIR, 'cutover-state/rolling-release.json'), JSON.stringify({ phase }));
+    for (const command of ['preflight', 'recover', 'assert-pre-migration']) {
+      const result = f.run(command);
+      assert.equal(result.status === 0, phase === 'aborted', `${phase}/${command}: ${result.stderr}`);
+    }
+  }
 });
