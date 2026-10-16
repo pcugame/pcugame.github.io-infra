@@ -1,0 +1,15 @@
+[Unit]
+Description=PCU PostgreSQL
+[Container]
+Image=docker.io/library/postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+ContainerName=gp-postgres
+Pod=graduationproject.pod
+StartWithPod=false
+EnvironmentFile=/srv/pcu/config/postgres.env
+Volume=gp-pg-data.volume:/var/lib/postgresql/data:Z
+StopTimeout=60
+[Service]
+Restart=always
+TimeoutStopSec=75
+[Install]
+WantedBy=default.target

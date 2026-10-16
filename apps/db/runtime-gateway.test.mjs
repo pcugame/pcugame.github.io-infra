@@ -26,6 +26,7 @@ try {
  writeFileSync(join(work, 'fixture.bin'), bytes);
  writeFileSync(join(work, 'fixture.gz'), gzipSync(bytes));
  const values = {
+  NGINX_RESOLVER: '127.0.0.11',
   FILE_GATEWAY_TLS_SERVER_NAME: '', FILE_GATEWAY_API_UPSTREAM: 'http://127.0.0.1:8443',
   FILE_GATEWAY_SECRET: 'fixture-secret-at-least-32-characters',
   PUBLIC_CORS_ORIGIN_PRIMARY: 'https://web.fixture.invalid', PUBLIC_CORS_ORIGIN_SECONDARY: 'https://other.fixture.invalid',
@@ -55,6 +56,9 @@ try {
    if ($http_x_pcu_gateway_secret != "${values.FILE_GATEWAY_SECRET}") { return 403; }
    if ($http_cookie != "") { return 403; }
    if ($http_authorization != "") { return 403; }
+   if ($http_x_forwarded_for = "203.0.113.99") { return 403; }
+   if ($http_x_real_ip != "") { return 403; }
+   if ($http_forwarded != "") { return 403; }
    if ($http_x_pcu_file_uri ~ denied\\.bin$) { return 403; }
    if ($fixture_dest_ok = 0) { return 403; }
    if ($fixture_method_ok = 0) { return 403; }
@@ -116,6 +120,7 @@ try {
   assert.equal(response.headers.get('content-type'), 'application/wasm');
   assert.ok(response.headers.get('etag'));
   assert.ok(response.headers.get('last-modified'));
+  assert.equal((await request('fixture.bin', { headers: { 'X-Forwarded-For': '203.0.113.99', 'X-Real-IP': '203.0.113.99', Forwarded: 'for=203.0.113.99' } })).status, 200, 'client forwarding claims must be replaced');
   const conditional = await request('fixture.bin', { headers: { 'If-None-Match': response.headers.get('etag') } });
   assert.equal(conditional.status, 304);
   assert.equal(conditional.headers.get('content-security-policy'), policy);

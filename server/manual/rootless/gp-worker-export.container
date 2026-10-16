@@ -1,0 +1,25 @@
+[Unit]
+Description=Graduation project gp-worker-export
+After=gp-api.service
+
+[Container]
+Image=REPLACE_WITH_API_IMAGE_AT_SHA256_DIGEST
+ContainerName=gp-worker-export
+Pod=graduationproject.pod
+StartWithPod=false
+EnvironmentFile=/srv/pcu/config/app.env
+Environment=NODE_ENV=production
+
+Volume=/srv/pcu/config/ca.crt:/etc/pcu/ca.crt:ro,z
+
+Volume=/srv/pcu/exports:/exports:Z
+Entrypoint=node
+Exec=dist/export-worker.js
+StopTimeout=120
+
+[Service]
+TimeoutStopSec=135
+Restart=always
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,393 @@
+# 저장소 개요·검증 기록 — 2026-10-16 이전
+
+이 문서는 README 분리 이전의 기록이다. 현재 설치는 [운영 가이드](../guide/README.md), 현재 release는 [배포 런북](../operations/deployment.md)을 기준으로 한다. 아래 완료·미완료 표현은 각 기록 시점의 상태이다.
+
+# 배재대학교 게임공학과 졸업작품 전시 시스템
+
+배재대학교 게임공학과의 연도별 졸업작품을 공개하고, 재학생과 운영자가 작품 자료를 등록·관리하는 웹 시스템이다. 공개 전시 화면, 작품 제출 및 운영 화면, API, 관계형 데이터베이스, 객체 저장소와 배포 자동화를 하나의 npm workspace에서 관리한다.
+
+## 주요 기능
+
+### 공개 전시
+
+- 연도와 전시회별 작품 목록 조회
+- 작품 설명, 참여 학생, 지원 플랫폼, 이미지·영상 조회
+- 게임 배포 파일 다운로드
+- 업로드된 Unity WebGL 빌드의 브라우저 실행
+- 전시회 포스터와 공개 자산 제공
+
+### 작품 제출 및 운영
+
+- Google 계정 기반 로그인과 `USER`·`OPERATOR`·`ADMIN` 권한 구분
+- 재학생의 작품 제출 및 본인 참여 작품 조회
+- 작품 기본 정보, 참여 학생, 공개 상태와 정렬 순서 관리
+- 이미지·PDF·영상·게임 ZIP·Unity WebGL ZIP 업로드
+- 대용량 게임 파일의 S3 multipart 분할 업로드와 재개
+- 전시회 개설, 업로드 허용 여부와 포스터 관리
+- 작품 일괄 상태 변경·삭제, 차단 IP와 사이트 설정 관리
+- 기존 JSON 자료의 검증·가져오기와 NAS 내보내기
+
+### 전시회 투표·추첨
+
+`/admin/votes`에서 전시회별 투표와 공유 추첨 행사를 관리한다. 참가자는 고정 URL·QR로 접속하여 포스터를 선택하고, 연결된 행사에서 추첨·경품 수령을 진행한다. 공개 기록은 마감 이후에 제공한다. 브라우저 식별·보존·조사 정보 설정과 검증 범위는 [투표·추첨 운영](../../docs/operations/exhibition-voting.md)에 명시한다.
+
+## Safari 로그인 안내
+
+Mac Safari에서 Google 계정 선택 후에도 로그인 화면에 남는 현상이 제보되었다. 현재 웹과 API가 서로 다른 사이트에 있어, Safari의 제3자 쿠키 제한으로 로그인 상태가 유지되지 않을 가능성이 있다. 실제 Safari의 원인 확정과 설정 변경 효과는 미검증이며, [추적 이슈 #101](https://github.com/pcugame/pcugame.github.io-infra/issues/101)에서 확인 사항과 후속 과제를 관리한다.
+
+로그인 화면은 인증 요청 이후 세션을 확인하고, 세션이 유지되지 않으면 재시도 안내를 표시한다. Mac Safari에서는 **Safari → 설정 → 개인정보 보호 → 크로스 사이트 추적 방지**를 잠시 해제한 뒤 새로고침·재로그인을 시도할 수 있다. 이 설정은 다른 사이트에도 적용되며, 다시 활성화하면 이 사이트의 로그인이 유지되지 않을 수 있다. 설정 변경을 원하지 않으면 Mac의 다른 브라우저에서 로그인을 시도할 수 있다. 어느 방법도 해결을 보장하지 않는다. 자세한 설정은 [Apple 도움말](https://support.apple.com/ko-kr/guide/safari/sfri40732/mac)을 참조한다.
+
+기본 개인정보 보호 설정에서의 호환성 개선은 웹과 API를 같은 사이트에서 제공하는 구성을 후속 검토한다. 학교나 기존 도메인의 서브도메인, 동일 출처의 웹·API 호스팅을 활용할 수 있으므로 도메인 구매가 필수 조건은 아니다. 안내 추가는 구조적 제약의 해결이나 운영 배포 완료를 의미하지 않는다.
+
+## 시스템 구성
+
+```mermaid
+flowchart LR
+    B[브라우저] --> W[React Web\nGitHub Pages]
+    W -->|JSON API·session cookie| A[Fastify API]
+    B -->|WebGL·다운로드 요청| A
+    A --> P[(PostgreSQL)]
+    A --> S[(S3 호환 객체 저장소\nGarage)]
+    A --> N[NAS 내보내기 경로\n선택 사항]
+```
+
+| 구성 요소 | 구현 | 역할 |
+|---|---|---|
+| `apps/web` | React 19, Vite 8, React Router, TanStack Query | 공개 전시, 작품 제출, 운영 화면 |
+| `apps/api` | Node.js 22, Fastify 5, Prisma 7 | 인증, 작품·전시 관리, 파일 처리, 공개 자산 제공 |
+| `packages/contracts` | TypeScript, Zod | Web과 API가 공유하는 요청·응답 schema와 enum |
+| PostgreSQL | PostgreSQL 16 | 사용자, 전시회, 작품, 자산 metadata, session, 업로드 상태 저장 |
+| Garage | S3 호환 객체 저장소 | 공개·보호 자산과 multipart 업로드 객체 저장 |
+
+Web은 정적 SPA로 빌드된다. API는 공개·인증·운영 route를 제공하고, PostgreSQL과 객체 저장소 사이의 자산 상태를 관리한다. 게임과 WebGL 대용량 파일은 브라우저에서 S3 multipart 단위로 전송하며, API는 업로드 session, 완료 claim, 정리 작업과 orphan object를 데이터베이스에 기록한다.
+
+## 저장소 구조
+
+```text
+.
+├── apps/
+│   ├── api/                 # Fastify API, Prisma schema·migration, 단위·통합 테스트
+│   ├── db/                  # 로컬 PostgreSQL·Garage 구성과 초기화 script
+│   └── web/                 # React SPA와 화면 테스트
+├── packages/contracts/      # Web/API 공용 Zod 계약
+├── prisma/migrations/       # 이전 최상위 migration 기록
+├── scripts/                 # 통합 환경 기동과 smoke test
+├── server/                  # 운영 API용 Podman 배포 script와 이전 자료 예시
+├── docs/                    # 운영 runbook과 backend 검토 기록
+└── .github/workflows/       # PR 검증, API 배포, Web 배포
+```
+
+현재 Prisma schema와 신규 migration의 기준 위치는 `apps/api/prisma`이다. 최상위 `prisma/migrations`는 이전 migration 기록이며, 개발 명령은 `apps/api` workspace의 Prisma 설정을 사용한다.
+
+## 요구 환경
+
+- Node.js 22
+- npm과 저장소의 `package-lock.json`
+- Docker Engine 및 Docker Compose v2
+- 로컬 개발 포트 `4000`, `5173`, `5432`, `3900`, `3902`
+
+운영 배포에는 별도로 Podman, systemd user service, reverse proxy, PostgreSQL 백업 공간과 S3 호환 저장소 접속 정보가 필요하다.
+
+## 통합 환경 실행
+
+저장소의 전체 경로를 가장 짧게 확인하는 방법이다. PostgreSQL, Garage, API와 Web을 컨테이너로 기동하고 integration seed와 smoke test를 실행한다.
+
+```bash
+npm ci
+npm run testenv:up
+```
+
+기동 이후 접속 위치는 다음과 같다.
+
+| 대상 | 주소 |
+|---|---|
+| Web | <http://localhost:5173> |
+| API | <http://localhost:4000> |
+| API 상태 | <http://localhost:4000/api/health> |
+| Garage S3 API | <http://localhost:3900> |
+
+통합 환경은 `DEV_AUTH_ENABLED=true`로 실행된다. 로그인 화면의 개발용 인증 기능에서 `USER`, `OPERATOR`, `ADMIN` 동작을 확인할 수 있다. 이 route는 `NODE_ENV=production`에서 등록되지 않는다.
+
+```bash
+# 컨테이너 종료 — volume 유지
+npm run testenv:down
+
+# 컨테이너와 통합 테스트 volume 제거
+npm run testenv:clean
+
+# volume 제거 후 재구성
+npm run testenv:reset
+```
+
+`testenv:clean`과 `testenv:reset`은 `pcu-integration` Compose project의 PostgreSQL·Garage volume을 제거한다.
+
+## 개발 환경 구성
+
+API와 Web의 hot reload가 필요한 경우 PostgreSQL과 Garage만 Docker로 실행한다.
+
+### 1. 의존성 설치
+
+```bash
+npm ci
+```
+
+### 2. PostgreSQL·Garage 기동
+
+```bash
+docker compose -f apps/db/docker-compose.yml up -d --build
+docker compose -f apps/db/docker-compose.yml logs garage-init
+```
+
+`garage-init`는 `pcu-public`, `pcu-protected` bucket과 `pcu-dev-key`를 구성한다. 출력된 access key ID와 secret key를 API 환경 변수에 반영한다. 저장소의 기본 PostgreSQL 접속 정보는 개발용이며 운영 환경에 사용하지 않는다.
+
+### 3. 환경 변수 구성
+
+```bash
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env.local
+```
+
+`apps/api/.env`에서 최소한 다음 항목을 로컬 환경에 정합한다.
+
+- `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: `garage-init`에서 생성한 값
+- `GOOGLE_CLIENT_IDS`, `VITE_GOOGLE_CLIENT_ID`: 실제 Google OAuth를 확인할 때 사용하는 같은 Web client ID
+- `DEV_AUTH_ENABLED=true`, `VITE_DEV_AUTH_ENABLED=true`: 로컬 역할별 동작을 OAuth 없이 확인할 때만 설정
+
+API는 시작 시 환경 변수를 검증한다. `SESSION_SECRET`은 32자 이상이어야 하며, `DATABASE_URL`, `CORS_ALLOWED_ORIGINS`, `API_PUBLIC_URL`, `WEB_PUBLIC_URL`, S3 접속 정보는 필수이다. `.env`와 `.env.local`은 commit하지 않는다.
+
+### 4. database 초기화
+
+```bash
+npm run db:generate --workspace=apps/api
+npm run db:migrate --workspace=apps/api
+npm run db:seed --workspace=apps/api
+```
+
+`db:seed`는 개발용 관리자, session, 전시회와 예시 작품을 생성한다. `NODE_ENV=production`에서는 실행을 거부한다. 기존 자료를 가져오려면 `apps/db/legacy-import.json`을 검토한 뒤 다음 명령을 사용한다.
+
+```bash
+npm run db:seed:import --workspace=apps/api
+```
+
+### 5. 개발 server 실행
+
+두 terminal에서 각각 실행한다.
+
+```bash
+npm run dev --workspace=apps/api
+```
+
+```bash
+npm run dev --workspace=apps/web
+```
+
+Web은 <http://localhost:5173>, API는 <http://localhost:4000>에서 실행된다. API의 `/api/health`는 process lifecycle과 database를 확인하고, `/api/health/deep`은 객체 저장소까지 추가로 확인한다.
+
+### 6. Mock 개발 환경
+
+API·DB 없이 현재 Web의 조회·수정·제출·검토 흐름을 확인하려면 다음 명령을 실행한다.
+
+```bash
+npm run dev:mock --workspace=apps/web
+```
+
+화면 하단의 **Mock 개발 패널**에서 익명, 소유 학생, 공동 참여자, 다른 학생, `OPERATOR`, `ADMIN`을 선택한다. 최초 실행은 기존 `mock-role`을 반영하며, 설정이 없으면 `ADMIN`을 사용한다. 사용자 전환은 작품과 작업을 보존하고 조회 캐시를 갱신한다. 로그아웃·세션 만료 이후에는 보호된 요청의 인증 결과도 변경된다.
+
+| 제어 | 재현 범위 |
+|---|---|
+| 기본 전시 | 같은 연도 복수 전시, 20개 초과 목록, 상태·공개 범위·수정 허용 조합 |
+| 빈 데이터 | 전시·작품 목록의 빈 상태 |
+| 권한·수정 종료 | 소유·참여 관계별 capability, 직접 수정 제한 |
+| 미디어 처리 | 영상 처리 상태와 작업 일시 정지 |
+| 변경 요청 검토 | 수정 종료 작품의 `PENDING` 요청과 관리자 검토 |
+| 실패·재시도 | 일회성 요청 실패, 작업 실패와 재시도 |
+| 지연·다음 요청 429 | 지정 경로의 지연, `Retry-After`를 통한 직접 업로드 재시도 |
+| 전체 초기화 | 저장 데이터·작업의 삭제와 기본 fixture 복원 |
+
+브라우저 기능 검증은 **기본 전시**를 선택한 뒤 다음 경로에서 시작한다. 개발 패널에는 예시 작품 링크를 제공한다. 로그인 화면은 Mock 모드에서 역할 로그인과 로그인 실패 버튼을 표시하므로 Google 계정 연결 없이 확인할 수 있다.
+
+| 화면 기능 | 시작 경로·조작 |
+|---|---|
+| 게임 ZIP·영상·문서 다운로드 | `/projects/1`의 다운로드와 재생 버튼 |
+| 고정 크기·반응형 WebGL | `/projects/2`, `/projects/1` → 게임 실행. 편집 화면에서 표시 크기 저장 후 다시 실행 |
+| 첨부자료·긴 설명·다수 참여자·포스터 누락 | `/projects/3`, `/projects/4` |
+| 로그인·실패 안내·로그아웃 | 익명 선택 → `/login`의 역할·실패 버튼. 로그인 후 사용자 메뉴의 로그아웃 |
+| 소유자·참여자·다른 학생의 권한 | 사용자 전환 → `/me/projects`와 작품 편집 화면 |
+| 제출·초안·업로드 재개·취소 | `/me/projects/new` 또는 관리자 작품 등록. 파일 선택·ZIP 용도 선택 → 제출. 처리 중 새로고침 후 원본 파일 재선택 |
+| 영상 대기·성공·실패 | **미디어 처리** → `/projects/1` → 작업 결과 변경. 새로고침 후에도 처리 상태 유지 |
+| 변경 요청 작성·반려·승인·실패 재시도 | **권한·수정 종료** → 학생 내 작품의 변경 요청. 관리자 변경 요청에서 검토. **변경 요청 검토**는 대기 요청을 바로 제공 |
+| 외부 연결 신청·승인·철회 | 학생 `/me/projects/1/network` → 관리자 `/admin/webgl-network` |
+| 전시·포스터 수정, 작품 검색·일괄 처리 | `/admin/years`, `/admin/projects` |
+| 설정·IP 차단·JSON import·export | 관리자 메뉴의 각 화면. Export는 전시 목록의 **NAS 내보내기** |
+
+영상 순서 변경과 기존 이미지의 포스터 지정은 변경 요청 화면의 **현재 파일 관리**에서 승인 요청으로 조작할 수 있다. 관리자 직접 편집 화면에는 해당 버튼이 없으며, 직접 변경 API는 client 테스트로 확인한다. 정적 fixture는 실제 파일 서버의 토큰 강제 검증이나 외부 서버의 CSP·CORS 적용을 재현하지 않으며, 신청·검토·파일 접근 및 갱신 API의 화면 상태와 오류를 확인하는 용도로 사용한다.
+
+데이터와 예정된 작업 상태는 IndexedDB `pcu-development-mock-v1`에 저장한다. 성공 응답은 저장 완료 후 반환한다. 새로고침·사용자 전환·처리 중 재접속 이후에도 상태가 유지된다. 탭 간 변경은 revision 검사와 변경 알림으로 반영하며, 충돌 시 요청을 다시 실행한다. 시나리오 변경과 전체 초기화에는 데이터 삭제 확인이 표시되며, 폐기된 제출·업로드의 브라우저 복원 정보를 제거하고 화면을 다시 연다. 저장을 사용할 수 없거나 저장에 실패하면 오류를 표시하며 성공으로 처리하지 않는다. 이전 저장 형식은 migration을 적용하고, 지원하지 않는 버전은 전체 초기화로 복구한다.
+
+직접 업로드 재개 시 원본 파일을 다시 선택한다. 파일의 source identity, part 크기·checksum·ETag와 generation을 검증한다. `UPLOADING` 이후 검증·처리·`READY` 상태를 거치며, 작업 일시 정지·실패·취소도 재현한다. 초기 제출과 변경 요청은 프로젝트별로 구분하고, 제출의 `Idempotency-Key`를 보존한다. 발행 실패의 **Mock 발행 다시 시도**는 개발용 상태 재현 버튼이며 Mock 모드에서만 표시한다. 운영 API는 이미 `FINALIZING`인 발행을 finalize 재호출로 재시작하지 않는다. 일시적인 상태 조회 오류에는 **제출 상태 다시 확인**으로 조회를 재개한다. 변경 요청의 파일은 임시 프로젝트에 저장하며 승인 완료 시 원본에 반영한다.
+
+미디어는 `apps/web/public/mock`의 합성 이미지, 짧은 영상, 첨부파일, 고정 크기·반응형 WebGL 미리보기를 사용한다. Mock 기본 동작에는 운영 API·스토리지와 외부 이미지 서비스가 필요하지 않다. 대용량 파일은 메타데이터와 처리 상태를 재현한다. 실제 압축 해제·영상 변환·Unity 실행은 통합 환경에서 검증한다. Export는 서버 작업 상태와 결과 경로를 재현하며 브라우저 다운로드 기능은 추가하지 않는다.
+
+API 대응표는 [Mock API inventory](../../apps/web/src/lib/api/mock/inventory.json)에 기록한다. 일반 요청과 직접 업로드는 운영 모드와 동일한 응답 해석·`ApiError`·재시도 경로를 사용한다. 미등록 method/path는 오류와 개발 진단을 반환한다. production build에는 Mock transport·handler 코드가 포함되지 않는다.
+
+```bash
+npm test --workspace=apps/web -- mock
+npm run lint --workspace=apps/web
+npm run build --workspace=apps/web
+```
+
+응답 계약·실제 client·IndexedDB 저장/충돌/실패와 인증된 격리 API의 controller·service·serializer 비교는 자동 테스트로 확인한다. 격리 API 비교에는 테스트용 저장소를 사용하며, 운영의 인증된 응답을 검증한 것으로 간주하지 않는다. 서버·DB·공용 계약·release workflow는 이번 Mock 구현의 변경 범위에 포함하지 않는다.
+
+## 주요 명령
+
+| 명령 | 검증 범위 |
+|---|---|
+| `npm test` | 모든 workspace의 Vitest test |
+| `npm run lint` | API·Web lint와 TypeScript 검사 |
+| `npm run architecture` | API 계층 경계, 자체 test, dependency-cruiser 규칙 |
+| `npm run build` | 공용 계약, API, Web 순차 build |
+| `npm run test:integration` | PostgreSQL·Garage 기반 concurrency·transaction·upload·복구 test와 E2E smoke test |
+| `npm run test:integration:suite -- <name>` | 지정한 통합 test suite 실행 |
+| `npm run test:integration:list` | 통합 test suite 목록 조회 |
+
+[PR Checks](../../.github/workflows/pr-checks.yml)의 기본 npm 검증 순서는 다음과 같다. 전체 CI는 아래 명령 외에 migration 정책·배포 경계 검사와 별도 integration job을 포함한다.
+
+```bash
+npm ci --include-workspace-root
+npm run db:generate --workspace=apps/api
+npm test
+npm run lint
+npm run architecture
+npm audit --audit-level=high
+npm run build
+```
+
+전체 통합 test는 Docker image build와 서비스 기동을 포함한다. 고정 포트 `15432`, `3900`, `3902`, `3903`, `4000`, `5173`을 사용하므로 기존 process와의 충돌 여부를 먼저 확인한다.
+
+단일 suite 실행 전에는 `npm run testenv:up`으로 통합 test 환경을 준비한다. 단일 suite는 서비스를 기동하거나 종료하지 않으므로 반복 실행할 수 있다.
+
+```bash
+npm run testenv:up
+npm run test:integration:suite -- visibility
+npm run test:integration:suite -- lease-clock
+npm run testenv:down
+```
+
+기존 `test:integration:<name>` 명령은 `test:integration:suite -- <name>`으로 대체한다. Suite별 파일 목록, PostgreSQL·Garage 환경 설정, 실행 순서는 `scripts/run-integration.mjs`에서 관리한다. `lease-clock`, `phase2-transition`, `year-change-approval`은 기존 `--no-file-parallelism` 설정을 유지하며, 다른 suite는 기존 Vitest 병렬 실행 설정을 사용한다.
+
+## 데이터와 자산 경계
+
+- PostgreSQL은 자산의 `storageKey`, 공개 여부, 크기, MIME type, 처리 상태를 저장한다.
+- Garage의 `pcu-public` bucket은 공개 자산, `pcu-protected` bucket은 보호 자산을 저장한다.
+- API는 현재 공개 참조로 확인된 이미지를 불변 cache header와 함께 직접 stream한다. GAME·VIDEO 등 보호 자산은 권한을 검사한 뒤 기존처럼 짧은 유효 기간의 presigned URL로 redirect한다.
+- 영상 업로드는 재생용 자산 처리 상태를 별도로 기록한다.
+- Unity WebGL ZIP은 archive 경로와 content encoding을 검증한 뒤 공개 실행 경로로 제공한다.
+- multipart 업로드의 중단·만료·완료 실패는 background maintenance와 durable task table로 복구한다.
+
+schema 변경과 운영 배포는 [database migration policy](../../docs/database-migration-policy.md)와 [production 배포 절차](../../docs/operations/deployment.md)를 따른다.
+
+## 배포 구조
+
+운영 배포는 `master` 기준의 수동 release이다. master의 API 관련 대상 경로 변경 시 이미지를 자동 빌드하지만, push나 이미지 빌드 성공만으로 운영 서비스를 갱신하지 않는다.
+
+| Workflow | 역할 |
+| --- | --- |
+| [PR Checks](../../.github/workflows/pr-checks.yml) | PR의 기본 검사와 PostgreSQL·Garage 통합 검증 |
+| [Build API Release Image](../../.github/workflows/deploy-api.yml) | API 이미지 빌드·GHCR 게시, source SHA·artifact 검증, 불변 digest 기록 |
+| [Deploy Release](../../.github/workflows/release-api-cutover.yml) | 수동 실행으로 같은 master SHA의 Web·API와 필요한 DB migration 적용 |
+
+일반 배포는 `Deploy Release`에서 `master`와 `operation=release`를 선택한다. 해당 SHA의 검증된 이미지를 재사용하며, 보관된 결과가 없으면 build workflow를 호출한다. 일반 release에서는 `final_api_image`와 `forward_fix_acknowledgement`를 비워 두며, 선택된 이미지는 `@sha256` 불변 digest로 전달한다. GHCR의 `latest` tag는 운영 이미지 선택에 사용하지 않는다.
+
+일반 release 순서는 preflight → backup/drain → migration → API·worker activation → complete runtime health → Web publication → final smoke이다. Backup 단계에는 온라인 DB snapshot·격리 복원 검증, API·worker 중지와 추가 DB 백업이 포함된다. 컨테이너 시작 자체는 migration을 실행하지 않는다. Web 게시 전 API·모든 worker의 상태와 image source SHA·digest를 확인하고, 최종 smoke에서 Web SHA·runtime health·공개 파일 응답을 검증한다.
+
+자동 복구의 기준은 서버에 영속 기록한 `migration-attempted` marker의 부재이다. Workflow migration step의 outcome만으로 SQL 미실행을 판단하지 않는다. Marker가 없고 복구 capture가 확인된 경우에만 Pages 복구를 진행하며, 이전 Pages 제공 상태 검증 후 runtime 복구를 시도한다. Marker가 있거나 상태를 확인할 수 없으면 자동 복구를 중단한다.
+
+Web은 `apps/web/dist`를 `pcugame/pcugame.github.io`의 `master`에 게시하며, build에서 생성한 `404.html`로 SPA deep link를 처리한다. API·PostgreSQL·worker는 운영 호스트의 Podman pod에서 실행한다. API port는 기본 `127.0.0.1:4000`에 bind하고 외부 요청은 reverse proxy를 통과한다.
+
+사전 조건, 실행 순서, snapshot·forward-fix와 실패 복구는 [production 배포 절차](../../docs/operations/deployment.md)를 따른다.
+
+## 변경 기준
+
+- API 요청·응답을 변경할 때 `packages/contracts`의 schema와 관련 계약 test를 함께 개정한다.
+- database 구조를 변경할 때 `apps/api/prisma/schema.prisma`와 migration을 함께 commit하고 [database migration policy](../../docs/database-migration-policy.md)를 따른다.
+- 새 API module은 application·infrastructure 경계를 유지하고 `npm run architecture`를 통과해야 한다.
+- 업로드 변경은 파일 signature, 권한, 용량 제한, idempotency, orphan 정리와 동시성 test를 함께 검토한다.
+- 배포 관련 변경은 불변 이미지 검증, Web/API 호환성, DB 백업과 migration 시도 전후의 복구 경계를 유지한다.
+
+## 외부 연결 정책 — PR #114, 2026-10-12
+
+이 절의 앞 단계 기록은 PR #114의 `80ef535`와 당시 로컬 회귀 검증 변경을 기준으로 한다. 현재 계약과 최종 검증 범위는 [승인 연결 정책](../../docs/unity-webgl/003-approved-connections.md)을 참조한다. 운영 적용 상태를 의미하지 않는다. 과거 WebGL 검증 이력은 그대로 보존하며, 현재 배포는 [배포 런북](../../docs/operations/deployment.md)을 따른다.
+
+### 승인 범위와 세션
+
+| 규칙 예시 | 허용 범위 |
+|---|---|
+| `https://assets.example.com` | 해당 호스트의 HTTPS 443 |
+| `wss://game.example.com:8443` | 해당 호스트의 WSS 8443 |
+| `https://assets.example.com:*` | 해당 호스트의 HTTPS 전체 포트 |
+| `wss://*.example.com:*` | `example.com` 아래 하위 도메인의 WSS 전체 포트. 루트 제외 |
+
+전체 포트는 명시적인 `:*` 규칙으로 신청·승인한다. 포트 생략은 계속 443이며 기존 신청·승인·세션을 전체 포트로 자동 변환하지 않는다. HTTPS와 WSS는 별도 규칙이다. 하위 도메인 허용과 포트 허용은 독립적이며, 같은 방식에서 범위가 중첩되는 승인은 거부한다. 프로젝트당 승인 한도는 16개이다.
+
+규칙은 `connect-src`에만 적용한다. 외부 script·Worker 실행 권한, 다른 runtime 디렉터리 접근 권한, 사이트 인증 권한을 추가하지 않는다. API·Web·허용 Web origin·게임 자산·스토리지·업로드·보호 다운로드 호스트는 포트와 방식이 달라도 승인할 수 없다. 보호 호스트를 포함하는 하위 도메인 규칙도 거부하며 신청·승인·runtime 접근 시 재검사한다. 공개·사설 suffix 전체 wildcard와 사설 IP 등 기존 입력 제한을 유지한다. 서버의 CORS, WebSocket Origin 검사 및 서비스 인증은 별도로 충족해야 한다.
+
+세션은 발급 시 승인 문자열과 정책 버전을 보존한다. 이후 추가 승인은 새 세션에만 적용한다. 철회 이력은 해당 규칙이 포함된 구세션의 runtime 접근·갱신·진단을 거부하며, 같은 규칙을 다시 승인해도 구세션은 유효해지지 않는다. 이미 로드된 문서나 이미 열린 외부 소켓을 원격으로 즉시 종료한다는 의미는 아니다. 정책 전환 시 기존 게임 탭을 종료하고 새 세션으로 실행한다.
+
+### 특정 포트에서 전체 포트로의 수동 전환
+
+1. 작품의 현재 승인 목록, 방식, 호스트 범위와 정책 버전을 확인한다. 실제 서비스가 요구하는 포트 범위와 CORS·Origin·인증 설정을 확인한다.
+2. 소유자 또는 연결된 참여자가 `/me/projects/{projectId}/network`에서 정확한 `:*` 규칙을 새로 신청한다. 기존 기록을 수정하거나 DB 값을 직접 치환하지 않는다. 루트 호스트와 하위 도메인, HTTPS와 WSS가 각각 필요한지 확인한다.
+3. `OPERATOR` 또는 `ADMIN`이 `/admin/webgl-network`에서 신청을 검토한다. 기존 443·숫자 포트 승인과 중첩하면 새 승인은 `409`로 거부된다. 검토 사유를 기록하고 중첩하는 기존 승인을 모두 철회한 뒤 새 규칙을 승인한다. 이 사이에는 해당 연결의 승인 공백이 발생한다.
+4. 기존 게임 탭을 종료하고 새로 실행한다. 새 세션의 승인 목록에 `:*`가 포함되는지, 같은 호스트의 필요한 포트에서 연결되는지 확인한다. 구세션은 문서·Worker 접근과 갱신이 계속 거부되어야 한다.
+5. 진단 실행이 필요한 경우 전용 shell에서 진단을 활성화하여 새 세션을 발급한다. 차단 origin과 `connect-src` 기록을 확인한다. 진단 기록 부재는 연결 성공의 증거가 아니며, 진단은 규칙을 자동 승인하지 않는다.
+6. 특정 포트로 복귀할 때도 전체 포트 승인을 철회하고 필요한 규칙을 새로 신청·승인한 뒤 새 세션을 발급한다. 과거 승인·철회 이력을 보존한다.
+
+진단 report는 세션별 HMAC capability를 사용하며 DB에는 hash만 저장한다. 정확한 report POST만 CSRF 예외이며 사이트 session cookie를 해석하지 않는다. 조회는 신뢰된 shell 출처와 play-control 권한을 요구한다. 저장 항목은 차단 origin·directive·횟수·시각으로 제한하고 경로·쿼리·사용자정보·코드 표본을 폐기한다. 세션당 20개 항목, 분당 30개 요청, 요청당 16 KiB 한도를 유지한다. 게이트웨이는 report 경로의 access/error logging을 비활성화하고 전달 자격증명을 제거한다. 외부 proxy에도 capability가 기록되지 않도록 구성해야 한다.
+
+### 앞 단계 회귀 검증 기록
+
+이번 변경은 브라우저 fixture와 통합 테스트 보강 및 이 절의 문서 추가이다. 제품 코드 수정이 필요한 회귀 결함은 검출되지 않았다. 작업 시작 전의 별도 미커밋 Web 변경은 보존하였으며 workspace 검증에는 포함하였다.
+
+- 브라우저 fixture: `scripts/webgl-network-browser.mjs`. 같은 승인 호스트에 서로 다른 두 임시 TLS 포트를 열어 HTTPS 응답과 WSS echo를 확인한다. `fixed-port`, `exact-all-ports`, `subdomain-all-ports` 각각에 대해 문서와 dedicated Worker를 실행한다. 특정 포트의 다른 포트 차단은 브라우저 실패 결과와 서버의 HTTP/upgrade 수신 0건을 함께 확인한다. 미승인 호스트·루트 제외·다른 runtime·외부 script/Worker·redirect 차단 및 CORS·Origin·인증 실패를 함께 확인한다.
+- 브라우저 실행 결과: Chromium `153.0.8010.12`, Firefox `141.0`, WebKit `26.0`에서 세 정책 × 문서·Worker 모두 통과하였다. WebKit은 Playwright `1.58.2` Docker 환경에서 실행하였다. Worker violation event가 누락되는 경우에도 실제 연결 차단과 문서 report-uri 수신을 별도로 확인하였다. 초기 Firefox 실행의 driver/browser 버전 불일치와 WebKit 컨테이너의 module 경로·network-none DNS 실패는 환경 구성 후 해소하였으며, 이 실패를 제품 결함으로 분류하지 않았다.
+- 인증된 실제 PostgreSQL 경계: `npm run test:integration:suite -- visibility`, 5개 파일 43개 테스트 통과. HTTPS·WSS의 고정 포트 → 전체 포트 전환, 기존 승인·세션 불변, 철회·재승인 뒤 구문서·Worker·갱신 거부, 새 세션 성공을 확인하였다. 보호 호스트 변경 재검사, 다른 프로젝트 격리, 승인 동시성, 빈/유효 응답 직렬화, 진단 토큰 위조·만료·수집 한도·비밀정보 제거·정리도 포함한다. 격리 schema를 사용하며 운영 데이터는 변경하지 않았다.
+- `npm run test:file-gateway` 통과. 양쪽 nginx template의 실제 CSP 전달·fallback 차단·service worker 거부·report 제한과 신뢰 TLS 성공·잘못된 인증서 차단을 확인하였다.
+- 최종 `npm test` 통과: API 1,208개, API script 75개, Web 816개, contracts 130개로 총 2,229개이다. 환경 조건부 247개는 건너뛰었으며 통과 수에 포함하지 않았다. 위 PostgreSQL suite 43개는 별도 실행 결과이다. 최종 `npm run lint`, `npm run build`, `git diff --check` 통과. Web build의 기존 500 kB 초과 chunk 경고는 유지된다.
+- `npm run architecture`, CI 분류·workflow·integration runner 회귀 테스트, migration-policy guard 통과. 기존 진단 migration의 unique index에 대한 검토 경고 1건은 유지된다. 이번 작업에는 migration 변경이 없다.
+
+현재 브라우저 실행에는 build된 API/contracts와 Docker가 필요하다. 아래 runner는 격리 컨테이너에 테스트 CA와 서명된 서버 인증서를 구성하며 인증서 검증을 유지한다. fixture의 6개 호스트만 로컬 loopback으로 해석한다.
+
+```bash
+npm run build
+sh scripts/run-webgl-network-browser.sh chromium firefox webkit
+npm run test:integration:suite -- visibility
+npm run test:file-gateway
+npm test
+npm run lint
+npm run build
+```
+
+실제 Photon 인증·매치메이킹·두 사용자 멀티플레이, Relay allocation, Unity Addressables 빌드는 이번 작업에서 실행하지 않았다. 브라우저 fixture는 자체 서명 TLS를 신뢰하고 테스트 DNS를 loopback에 매핑한 합성 통신 시험이다. 실제 게임 서비스·운영 DNS·인증서·멀티플레이 검증으로 간주하지 않는다. 전체 Docker/Garage 통합 suite는 이번 작업에서 실행하지 않았으며, 관련 PostgreSQL suite와 nginx/TLS fixture를 실행하였다. 변경은 로컬 미커밋 상태이며 push·CI 실행·merge·배포·운영 승인 변경은 수행하지 않았다.
+
+### 최종 로컬 검증 — 전체 포트 신청 후속 작업
+
+일반 폼·서비스 예시·Mock이 공통 계약을 사용하며 새 신청은 모든 포트가 기본이다. 숫자 포트 충돌, 안전한 443 정규화, 루트 제외, 미리보기·승인 충돌 대상 표시를 확인하였다. Chromium의 호스트 와일드카드 URL 인코딩 차이는 공통 파서에서 CSP 구문을 분리하여 수정하였다. 기존 기록과 세션은 자동 확대하지 않는다.
+
+실제 React 신청 → 인증 HTTP API → PostgreSQL 저장 → 관리자 화면 승인 → 새 세션 → 문서·Worker 응답 CSP를 포함한 PostgreSQL suite 44개가 통과하였다. 격리 테스트 계정을 사용하였으며 OAuth 로그인과 실제 서비스 멀티플레이는 검증하지 않았다. Chromium 145.0.7632.6·Firefox 146.0.1·WebKit 26.0의 합성 통신은 인증서 검증을 유지한 상태에서 세 정책 × 문서·Worker를 통과하였다. 두 포트의 HTTPS/WSS 성공·차단은 실제 서버 수신·echo와 대조하였다.
+
+최종 `npm test`는 API 1,208개, API script 75개, release-artifact 31개, Web 820개, contracts 153개 통과이며, 환경 조건부 248개는 별도 skip이다. 게이트웨이·lint·architecture·build·release controls·CI 실행 스크립트·migration guard도 통과하였다. 기존 chunk 경고, 진단 migration unique-index 검토 신호, audit의 moderate 7건은 유지된다. 전체 Docker/Garage 통합 및 최종 원격 판정은 PR 필수 CI 결과로 확인한다. 앞 단계의 로컬 미커밋 상태 문장은 당시 기록이며 이후 커밋·push·CI 결과는 PR #114에 기록한다.
+
+접수 자료에는 SDK/버전·게임 모드, 목적지와 용도, 인증 방식, 외부 서비스 운영 담당자, 실제 2인 플레이 절차를 포함한다. 마감 후 신청 제한과 갱신 실패 시 게임 종료는 유지하며 권한 정책·일시적 오류 재시도는 후속 과제이다. [현재 계약·수동 전환·공개 전 수용 검사](../../docs/unity-webgl/003-approved-connections.md)를 참조한다.
+
+## 관련 문서
+
+- [production 배포 절차](../../docs/operations/deployment.md)
+- [production release 구조 조사와 정리 기준](../../docs/history/2026-backend-audit/production-release-audit.md)
+- [database migration policy](../../docs/database-migration-policy.md)
+- [업로드 lifecycle 전환 기록과 runbook](../../docs/upload-lifecycle-runbook.md)
+- [backend architecture](../../docs/architecture/README.md)
+- [architecture decision records](../../docs/adr/README.md)
+- [backend 감사·수정 이력](../../docs/history/2026-backend-audit/README.md)
+- [route 계약 소유권 후속 제안](../../docs/architecture/route-contract-ownership.md)
+- [추가 test 기록](../../docs/new_tests/README.md)
+- [교원 계정·관리자 지정 운영 절차](../../docs/operations/faculty-accounts.md)

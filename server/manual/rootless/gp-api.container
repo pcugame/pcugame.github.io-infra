@@ -1,0 +1,26 @@
+[Unit]
+Description=Graduation project gp-api
+After=gp-postgres.service
+
+[Container]
+Image=REPLACE_WITH_API_IMAGE_AT_SHA256_DIGEST
+ContainerName=gp-api
+Pod=graduationproject.pod
+StartWithPod=false
+EnvironmentFile=/srv/pcu/config/app.env
+Environment=NODE_ENV=production
+
+Volume=/srv/pcu/config/ca.crt:/etc/pcu/ca.crt:ro,z
+Environment=PORT=4000
+Entrypoint=node
+Exec=dist/server.js
+# Application total budget is capped at 60s; allow 5s for process exit.
+StopTimeout=65
+
+[Service]
+# Allow Podman its full stop grace plus 10s of service teardown.
+TimeoutStopSec=75
+Restart=always
+
+[Install]
+WantedBy=default.target
