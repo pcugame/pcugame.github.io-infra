@@ -387,6 +387,7 @@
 
 .archive-card__summary {
   font-size: 0.82rem;
+  min-height: 1.5em;
   color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
