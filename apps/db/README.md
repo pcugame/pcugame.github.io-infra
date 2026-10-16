@@ -1,4 +1,12 @@
-# NAS Garage data-plane runbook
+# NAS Garage data-plane technical reference
+
+New manual installations use the [operator guide](../../docs/guide/README.md),
+[configuration reference](../../docs/guide/configuration.md), and
+[NAS differences](../../docs/guide/nas.md). The Compose/init examples below are
+the existing development/NAS reference, not the single-PC production bootstrap.
+The development `garage-init` and seed must not initialize production.
+Set `NGINX_RESOLVER` explicitly for the container network (Docker default
+`127.0.0.11`, Podman uses its own DNS address).
 
 `docker compose -f apps/db/docker-compose.yml up -d` continues to start the
 existing local PostgreSQL and loopback-only Garage setup. The externally
@@ -9,7 +17,9 @@ docker compose -f apps/db/docker-compose.yml --profile nas-data-plane up -d --bu
 docker compose -f apps/db/docker-compose.yml --profile nas-data-plane ps
 ```
 
-Run this profile on the NAS. The only externally published services are:
+The profile describes the legacy NAS data plane. Do not run its development
+initializer against production. New installations follow the operator guide.
+The byte-serving services are:
 
 | Surface | Default port | Purpose |
 | --- | ---: | --- |
@@ -25,34 +35,17 @@ service mounts the Garage data/meta volumes or an export path.
 
 ## Required deployment values
 
-Set explicit externally reachable bind addresses/ports and origins before
-starting the profile. `UPLOAD_PART_MAX_BYTES` must equal (or exceed only by a
-small documented transport allowance) the maximum part size issued by the API.
+The common values, credentials, origins and resolver contract are maintained
+in the [configuration reference](../../docs/guide/configuration.md).
+For this legacy Compose profile only, the publication settings are:
 
-```bash
-export NAS_UPLOAD_BIND_ADDRESS=203.0.113.10
-export NAS_UPLOAD_PORT=443
-export NAS_PUBLIC_BIND_ADDRESS=203.0.113.11
-export NAS_PUBLIC_PORT=443
-export NAS_PROTECTED_DOWNLOAD_BIND_ADDRESS=203.0.113.12
-export NAS_PROTECTED_DOWNLOAD_PORT=443
-export UPLOAD_PART_MAX_BYTES=16m
-export UPLOAD_PART_GLOBAL_CONNECTIONS=512
-export UPLOAD_PART_PER_IP_CONNECTIONS=128
-export PROTECTED_DOWNLOAD_GLOBAL_CONNECTIONS=512
-export PROTECTED_DOWNLOAD_PER_IP_CONNECTIONS=128
-export S3_BUCKET_PROTECTED=pcu-protected
-export S3_BUCKET_PUBLIC=pcu-public
-export GARAGE_PUBLIC_BUCKET_HOST=pcu-public.web.garage.localhost
-export S3_CORS_ALLOWED_ORIGINS=https://www.example.edu,https://admin.example.edu
-export PUBLIC_CORS_ORIGIN_PRIMARY=https://www.example.edu
-export PUBLIC_CORS_ORIGIN_SECONDARY=https://admin.example.edu
-export WEB_PUBLIC_ORIGIN=https://www.example.edu
-# Reachable from both NAS gateway containers; use private authenticated TLS
-# across hosts. Configure the same independent random secret on the API.
-export FILE_GATEWAY_API_UPSTREAM=https://api.private.example.edu
-export FILE_GATEWAY_SECRET=replace-with-independent-32-plus-character-gateway-secret
-```
+| Setting | Purpose |
+| --- | --- |
+| `NAS_UPLOAD_BIND_ADDRESS`, `NAS_UPLOAD_PORT` | Upload listener; default loopback 3901 |
+| `NAS_PUBLIC_BIND_ADDRESS`, `NAS_PUBLIC_PORT` | Public listener; default loopback 3904 |
+| `NAS_PROTECTED_DOWNLOAD_BIND_ADDRESS`, `NAS_PROTECTED_DOWNLOAD_PORT` | Protected listener; default loopback 3906 |
+| `NGINX_RESOLVER` | Docker DNS default `127.0.0.11`; explicitly change for other runtimes |
+| `S3_CORS_ALLOWED_ORIGINS` | Development init input only; production uses the guide's explicit CORS operation |
 
 In production front these ports with the NAS TLS terminator or make it the
 published listener; this compose file deliberately does not manage

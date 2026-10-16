@@ -1,0 +1,5 @@
+[Network]
+NetworkName=pcu-storage
+Subnet=10.89.41.0/24
+Gateway=10.89.41.1
+Internal=true

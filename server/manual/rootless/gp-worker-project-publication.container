@@ -1,0 +1,23 @@
+[Unit]
+Description=Graduation project gp-worker-project-publication
+After=gp-api.service
+
+[Container]
+Image=REPLACE_WITH_API_IMAGE_AT_SHA256_DIGEST
+ContainerName=gp-worker-project-publication
+Pod=graduationproject.pod
+StartWithPod=false
+EnvironmentFile=/srv/pcu/config/app.env
+Environment=NODE_ENV=production
+
+Volume=/srv/pcu/config/ca.crt:/etc/pcu/ca.crt:ro,z
+Entrypoint=node
+Exec=dist/project-publication-worker.js
+StopTimeout=120
+
+[Service]
+TimeoutStopSec=135
+Restart=always
+
+[Install]
+WantedBy=default.target
