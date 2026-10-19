@@ -1,23 +1,21 @@
 import { WebglBuildGuideLink } from '../../../components/project/WebglBuildGuideLink';
 import { StudioFileHeading } from '../../../components/project/editor/StudioFileHeading';
 import { studioFileHint } from '../../../components/project/editor/studioFileHint';
-import { UploadFileRows } from '../../../components/common/UploadFileRows';
+import { FileUploadRows } from '../../../components/common/FileUploadRows';
 import { ProjectFileLimits } from '../../../components/project/editor/ProjectFileLimits';
 import { FormSection } from '../../../components/ui';
-import { createContext, useCallback, useContext, useId, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useId, useState, type ReactNode } from 'react';
 import type { AdminProjectDetail } from '@pcu/contracts';
-import DirectImageUploadWidget from '../../../components/DirectImageUploadWidget';
-import DirectVideoUploadWidget from '../../../components/DirectVideoUploadWidget';
-import GameUploadWidget from '../../../components/GameUploadWidget';
+import { useMe } from '../../auth';
 import type { ClientUploadLimits } from '../../../lib/upload-limits';
 import { ProjectPosterPreview, ProjectUploadDropZone } from '../../../components/project/editor';
 import { useProjectUploadQueue, type ProjectUploadQueue } from './useProjectUploadQueue';
-import { classifyProjectFile, uploadKindLabels, type ProjectUploadKind, type UploadEntry, type UploadZone } from '../../../lib/upload/project-files';
+import { classifyProjectFile, uploadKindLabels, type ProjectUploadKind, type UploadZone } from '../../../lib/upload/project-files';
 import { studioFileGroups } from '../../project-submission/studio/fileGroups';
 import { formatFileSizeMb } from '../../../lib/upload/fileValidation';
 
 const QueueContext = createContext<ProjectUploadQueue | null>(null);
-export function AdminProjectUploadProvider({
+function ProjectUploadProviderState({
 	project,
 	projectId,
 	limits,
@@ -33,46 +31,16 @@ export function AdminProjectUploadProvider({
 	const queue = useProjectUploadQueue(project, projectId, limits, canEditContent);
 	return <QueueContext.Provider value={queue}>{children}</QueueContext.Provider>;
 }
+export function AdminProjectUploadProvider(props: Parameters<typeof ProjectUploadProviderState>[0]) {
+ const { user } = useMe();
+ return <ProjectUploadProviderState key={`${props.projectId}:${user?.id ?? 'current-user'}`} {...props} />;
+}
 // The provider and its consumer hook share one context.
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAdminProjectUploadQueue() {
 	const queue = useContext(QueueContext);
 	if (!queue) throw new Error('Project upload provider is required');
 	return queue;
-}
-function ActiveUpload({ entry, queue }: { entry: UploadEntry; queue: ProjectUploadQueue }) {
-	const files = useMemo(() => [entry.file], [entry.file]);
-	const { complete, cancel } = queue;
-	const onComplete = useCallback(() => {
-		void complete(entry.id);
-	}, [complete, entry.id]);
-	const onCancelled = useCallback(() => cancel(entry.id), [cancel, entry.id]);
-	const common = { operationKey: `${queue.queueId}:${entry.id}`, autoStart: true, compact: true, onComplete, onCancelled, onError: queue.fail, retryAttempt: queue.retryAttempt, cancelAttempt: queue.cancelAttempt };
-	if (entry.kind === 'POSTER' || entry.kind === 'IMAGE')
-		return <DirectImageUploadWidget {...common} owner={queue.owner} kind={entry.kind} initialFiles={files} submissionItems={queue.submissionItem ? [queue.submissionItem] : undefined} />;
-	if (entry.kind === 'GAME' || entry.kind === 'WEBGL')
-		return (
-			<GameUploadWidget
-				{...common}
-				projectId={queue.owner.id}
-				uploadKind={entry.kind}
-				initialFile={entry.file}
-				submissionItem={queue.submissionItem}
-			/>
-		);
-	if (entry.kind === 'ZIP') return null;
-	return (
-		<DirectVideoUploadWidget
-			{...common}
-			projectId={queue.owner.id}
-			kind={entry.kind}
-			label={uploadKindLabels[entry.kind]}
-			initialFiles={files}
-			submissionItems={queue.submissionItem ? [queue.submissionItem] : undefined}
-			maxFiles={1}
-			maxFileBytes={entry.kind === 'VIDEO' ? undefined : queue.materialLimits?.maxBytes}
-		/>
-	);
 }
 function UploadDropZone({
 	zone,
@@ -85,7 +53,7 @@ function UploadDropZone({
 }) {
 	const queue = useAdminProjectUploadQueue();
 	const poster = zone === 'poster';
-	const entries = queue.entries.filter((entry) => entry.zone === zone && entry.status !== 'cancelled');
+	const entries = queue.entries.filter((entry) => entry.zone === zone && entry.status !== 'removed');
 	return (
 		<ProjectUploadDropZone
 			zone={zone}
@@ -208,7 +176,7 @@ export function AdminProjectPosterUpload({
 		<FormSection legend="포스터">
 			<StoredFiles poster canEditContent={canEditContent} />
 			<UploadDropZone zone="poster" canEditContent={canEditContent}>
-				<ProjectPosterPreview image={project.poster} title={project.title} localFile={selected} />
+				<ProjectPosterPreview image={project.poster} title={project.title} localFile={selected instanceof File ? selected : undefined} />
 			</UploadDropZone>
 		</FormSection>
 	);
@@ -230,7 +198,7 @@ function StudioEditFileArea({ label, kinds, canEditContent }: { label: string; k
  const id = useId();
  const [error, setError] = useState<string | null>(null);
  const poster = kinds.includes('POSTER'), build = kinds.includes('GAME') || kinds.includes('WEBGL'), video = kinds.includes('VIDEO');
- const entries = queue.entries.filter(entry => entry.kind !== 'ZIP' && kinds.includes(entry.kind) && entry.status !== 'cancelled');
+ const entries = queue.entries.filter(entry => entry.kind !== 'ZIP' && kinds.includes(entry.kind) && entry.status !== 'removed');
  const stored = queue.storedAssets.filter(asset => poster ? asset.id === queue.project.posterAssetId : asset.id !== queue.project.posterAssetId && kinds.includes(asset.kind as ProjectUploadKind));
  const hint = studioFileHint(poster ? 'POSTER' : kinds.includes('WEBGL') ? 'WEBGL' : build ? 'GAME' : video ? 'VIDEO' : 'IMAGE', queue.limits, queue.materialLimits);
  const select = (files: File[]) => {
@@ -264,8 +232,6 @@ function StudioEditFileArea({ label, kinds, canEditContent }: { label: string; k
 export function AdminProjectUploadProgress() {
  const queue = useAdminProjectUploadQueue();
  return <ul className="project-upload-queue" aria-label="변경 파일 업로드 진행">
-  {queue.entries.filter(entry => entry.status !== 'cancelled').map(entry => <li key={entry.id}>
-   {entry.status === 'active' ? <ActiveUpload entry={entry} queue={queue} /> : <UploadFileRows names={[entry.file.name]} phase={entry.status === 'done' ? 'ready' : 'idle'} />}
-  </li>)}
+  <FileUploadRows list queue={queue.uploads} disabled={!queue.enabled} />
  </ul>;
 }

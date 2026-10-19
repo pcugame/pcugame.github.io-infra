@@ -85,7 +85,7 @@ describe('persisted project direct upload mock through the actual client', () =>
   it('preserves verification and processing after reload, then publishes canonical metadata', async () => {
     const created = await submit(); const progress: number[] = [];
     const completion = await uploadDirectAssetFile(created.id, file(), 'GAME', event => progress.push(event.percent), binding(created));
-    expect(completion.status).toBe('VERIFYING'); expect(progress).toEqual([100]);
+    expect(completion.status).toBe('VERIFYING'); expect(progress[0]).toBe(0); expect(progress).toContain(99); expect(progress.at(-1)).toBe(100);
     await expect(finalize(created.id)).rejects.toMatchObject({ status: 409, code: 'CONFLICT' });
     await vi.advanceTimersByTimeAsync(400); await forgetMockCacheForTests();
     expect(await getDirectAssetUploadStatus(completion.sessionId)).toMatchObject({ state: 'VERIFYING' });

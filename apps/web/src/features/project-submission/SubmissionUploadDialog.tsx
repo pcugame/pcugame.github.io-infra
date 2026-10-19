@@ -40,7 +40,7 @@ export function SubmissionUploadDialog({ submission, files, title }: {
   title={createdProjectId === null ? '업로드 준비 중' : '파일 업로드'}
   description={`${title || '작품'} · 입력 정보와 완료된 파일은 저장됩니다. 공개 선택 시 필수 조건 검증 후 공개됩니다.`}
   completed={completed} total={createdProjectId === null ? selectedNames.length : submissionItems.length}
-  actions={showGameProgress && <Button variant="danger" size="small" onClick={() => void submission.cancelSubmission()}>업로드 중단</Button>}>
+  actions={showGameProgress && <Button variant="danger" size="small" onClick={() => void submission.cancelSubmission()}>전체 업로드 중단</Button>}>
   {showGameProgress && selectedNames.length === 0 && submissionItems.some(item => item.state !== 'READY' && item.state !== 'VERIFYING') && <p className="project-upload-dialog__recovery">업로드가 중단되었습니다. ‘파일 선택’을 누르고 동일한 파일을 다시 선택해 주세요.</p>}
   {error != null && <div className="error-box" role="alert">{getApiErrorMessage(error)}</div>}
   {submission.canRetryStatus && <Button disabled={submission.isFinalizing} onClick={() => void submission.retryStatus()}>제출 상태 다시 확인</Button>}

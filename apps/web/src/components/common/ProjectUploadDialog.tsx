@@ -1,4 +1,4 @@
-import { LinearUploadContext, UploadProgressReporter } from '../../lib/upload/linearPresentation';
+import { LinearUploadContext, UploadProgressReporter, type UploadByteProgress } from '../../lib/upload/linearPresentation';
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { claimUploadPresentation } from '../../lib/upload/presentation';
@@ -9,14 +9,18 @@ export function ProjectUploadDialog({ open, title, description, completed, total
  open: boolean; title: string; description: string; completed: number; total: number;
  busy: boolean; children: ReactNode; actions?: ReactNode;
 }) {
- const [progress, setProgress] = useState<Record<string, number>>({});
- const report = useCallback((id: string, value: number | null) => setProgress(previous => {
-  if (value === null && !(id in previous) || value === previous[id]) return previous;
+ const [progress, setProgress] = useState<Record<string, UploadByteProgress>>({});
+ const report = useCallback((id: string, value: UploadByteProgress | null) => setProgress(previous => {
+  if (value === null && !(id in previous) || JSON.stringify(value) === JSON.stringify(previous[id])) return previous;
   const next = { ...previous };
   if (value === null) delete next[id]; else next[id] = value;
   return next;
  }), []);
- const percent = total > 0 ? Math.min(100, Math.floor(Object.values(progress).reduce((sum, value) => sum + value, 0) / total)) : 0;
+ const values = Object.values(progress);
+ const known = values.reduce((sum, value) => sum + value.count, 0) === total && values.every(value => value.total !== undefined);
+ const totalBytes = values.reduce((sum, value) => sum + (value.total ?? 0), 0);
+ const percent = known && totalBytes > 0 ? Math.min(100, Math.floor(values.reduce((sum, value) => sum + Math.min(value.loaded, value.total ?? 0), 0) / totalBytes * 100)) : undefined;
+ const displayPercent = percent === 100 && values.some(value => value.percent < value.count * 100) ? 99 : percent;
  const ref = useRef<HTMLDialogElement>(null);
  const id = useId();
  usePreventWindowClose(open && busy);
@@ -38,8 +42,8 @@ export function ProjectUploadDialog({ open, title, description, completed, total
  return createPortal(<dialog ref={ref} className="project-upload-dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} onCancel={event => event.preventDefault()}>
   <header className="project-upload-dialog__header">
    <h2 id={`${id}-title`} tabIndex={-1} autoFocus>{title}</h2>
-   <span className="project-upload-dialog__count" aria-label="파일 검증 완료">{percent}% · {completed} / {total}</span>
-   <progress className="project-upload-dialog__progress" aria-label="전체 파일 업로드 진행률" max={100} value={percent} />
+   <span className="project-upload-dialog__count" aria-label="파일 검증 완료">{displayPercent === undefined ? '크기 확인 중' : `${displayPercent}%`} · 검증 완료 {completed} / {total}</span>
+   <progress className="project-upload-dialog__progress" aria-label="전체 파일 업로드 진행률" max={100} value={displayPercent} />
    <p id={`${id}-description`} className="sr-only">{description}</p>
   </header>
   <LinearUploadContext.Provider value={true}><UploadProgressReporter.Provider value={report}><div className="project-upload-dialog__body">{children}</div></UploadProgressReporter.Provider></LinearUploadContext.Provider>

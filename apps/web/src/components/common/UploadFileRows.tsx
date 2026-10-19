@@ -9,7 +9,7 @@ export function UploadFileRows({ names, completed = 0, percent = 0, phase = 'idl
  const ready = phase === 'ready' || phase === 'completed';
  const safePercent = phase === 'verifying' ? 100 : Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
  const sum = ready ? names.length * 100 : Math.min(completed, names.length) * 100 + (completed < names.length ? safePercent : 0);
- useEffect(() => { report?.(id, sum); }, [report, id, sum]);
+ useEffect(() => { report?.(id, { loaded: 0, count: names.length, percent: sum }); }, [report, id, sum, names.length]);
  useEffect(() => () => { report?.(id, null); }, [report, id]);
  return <div className="upload-file-rows">{names.map((name, index) => {
   const done = index < completed || ready;

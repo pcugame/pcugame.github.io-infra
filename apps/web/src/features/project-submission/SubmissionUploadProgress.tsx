@@ -1,115 +1,48 @@
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { StudioFileGroup } from './studio/fileGroups';
-import { UploadFileRows } from '../../components/common/UploadFileRows';
-import { useMemo } from 'react';
 import type { ProjectSubmissionItemStatus } from '../../contracts';
-import GameUploadWidget from '../../components/GameUploadWidget';
-import DirectVideoUploadWidget from '../../components/DirectVideoUploadWidget';
-import DirectImageUploadWidget from '../../components/DirectImageUploadWidget';
-import { uploadKindLabels } from '../../lib/upload/project-files';
+import { FileUploadRows } from '../../components/common/FileUploadRows';
+import { FileUploadQueue, type FileUploadSpec } from '../../lib/upload/fileUploadQueue';
+import { uploadKindLabels, type ProjectUploadKind } from '../../lib/upload/project-files';
 import type { SubmissionFilesState } from './useSubmissionFiles';
 
-export function SubmissionUploadProgress({
-	zone,
-	group,
-	fileNames = {},
-	projectId,
-	files,
-	items,
-	onComplete,
-}: {
-	zone: 'poster' | 'files';
-	group?: StudioFileGroup;
-	fileNames?: Record<string, string>;
-	projectId: number;
-	files: SubmissionFilesState;
-	items: ProjectSubmissionItemStatus[];
-	onComplete: () => void;
+function KindUploads({ projectId, kind, items, selected, fileNames, onComplete }: {
+ projectId: number; kind: ProjectUploadKind; items: ProjectSubmissionItemStatus[]; selected: readonly File[];
+ fileNames: Record<string, string>; onComplete: () => void;
 }) {
-	const owner = useMemo(() => ({ type: 'PROJECT' as const, id: projectId }), [projectId]);
-	const posterFiles = useMemo(() => (files.posterFile ? [files.posterFile] : []), [files.posterFile]);
-	const ordered = [...items].sort((left, right) =>
-		left.slot.localeCompare(right.slot, undefined, { numeric: true }),
-	);
-	const kinds = group?.kinds ?? (
-		zone === 'poster'
-			? (['POSTER'] as const)
-			: (['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'DOCUMENT', 'ATTACHMENT'] as const));
-	if (!ordered.some(item => (kinds as readonly string[]).includes(item.kind))) return null;
-	return (
-				<ul
-					className="project-upload-queue"
-					aria-label={group ? `${group.label} 업로드 진행` : zone === 'poster' ? '포스터 업로드 진행' : '파일 업로드 진행'}
-				>
-					{kinds.map((kind) => {
-						const kindItems = ordered.filter((item) => item.kind === kind);
-						if (kindItems.length === 0) return null;
-						const initialFiles =
-							kind === 'POSTER'
-								? posterFiles
-								: kind === 'IMAGE'
-									? files.imageFiles
-									: kind === 'VIDEO'
-										? files.videoFiles
-										: kind === 'DOCUMENT'
-											? files.documentFiles
-											: files.attachmentFiles;
-						const initialFile = kind === 'GAME' ? files.gameFile : files.webglFile;
-						const selected =
-							kind === 'GAME' || kind === 'WEBGL' ? (initialFile ? [initialFile] : []) : initialFiles;
-						// Bound batches retain absolute file indexes. Reloaded batches advance to remaining slots.
-						const pendingItems = selected.length
-							? kindItems
-							: kindItems.filter((item) => item.state !== 'READY');
-						const binding = pendingItems;
-						return (
-							<li key={`${kind}:${pendingItems.map((item) => item.id).join(':')}`}>
-                                {selected.length === 0 && !kindItems.every(item => item.state === 'READY') && <UploadFileRows names={kindItems.filter(item => item.state === 'READY').map((item, index) => fileNames[item.slot] ?? `${uploadKindLabels[kind]} ${index + 1}`)} phase="ready" />}
-								{/* Keep one batch owner and its absolute manifest indexes throughout status refreshes. */}
-								{kindItems.every((item) => item.state === 'READY') ? (
-									<UploadFileRows names={selected.length ? selected.map(file => file.name) : kindItems.map((item, index) => fileNames[item.slot] ?? `${uploadKindLabels[kind]} ${index + 1}`)} phase="ready" />
-								) : kind === 'GAME' || kind === 'WEBGL' ? (
-									<GameUploadWidget
-                                        displayNames={pendingItems.map(item => fileNames[item.slot] ?? uploadKindLabels[kind])}
-										projectId={projectId}
-										uploadKind={kind}
-										initialFile={initialFile}
-										autoStart={Boolean(initialFile)}
-										compact={Boolean(initialFile)}
-										submissionItem={binding[0]}
-										onComplete={onComplete}
-									/>
-								) : kind === 'POSTER' || kind === 'IMAGE' ? (
-									<DirectImageUploadWidget
-                                        displayNames={pendingItems.map(item => fileNames[item.slot] ?? uploadKindLabels[kind])}
-										owner={owner}
-										kind={kind}
-										initialFiles={initialFiles}
-										autoStart={initialFiles.length > 0}
-										compact={initialFiles.length > 0}
-										submissionItems={binding}
-										onComplete={onComplete}
-									/>
-								) : (
-									<DirectVideoUploadWidget
-                                        displayNames={pendingItems.map(item => fileNames[item.slot] ?? uploadKindLabels[kind])}
-										projectId={projectId}
-										kind={kind}
-										label={uploadKindLabels[kind]}
-										initialFiles={initialFiles}
-										accept={
-											kind === 'DOCUMENT'
-												? 'text/plain,text/markdown,application/pdf,.txt,.md,.markdown,.pdf,.doc,.docx,.odt,.ods,.odp,.rtf,.xls,.xlsx,.ppt,.pptx'
-												: undefined
-										}
-										autoStart={initialFiles.length > 0}
-										compact={initialFiles.length > 0}
-										submissionItems={binding}
-										onComplete={onComplete}
-									/>
-								)}
-							</li>
-						);
-					})}
-				</ul>
-	);
+ const client = useQueryClient();
+ const user = client.getQueryData<{ user?: { id: number; role: string } }>(['me'])?.user;
+ const queue = useMemo(() => new FileUploadQueue(String(user?.id ?? 'current-user'), user?.role === 'USER' ? 'user' : 'admin', `${projectId}:${kind}`), [projectId, kind, user?.id, user?.role]);
+ const rows = useSyncExternalStore(queue.subscribe, queue.getSnapshot);
+ useEffect(() => queue.attach(), [queue]);
+ useEffect(() => { queue.setOnReady(onComplete); return () => { queue.setOnReady(undefined); }; }, [queue, onComplete]);
+ useEffect(() => {
+  const legacyKey = kind === 'GAME' || kind === 'WEBGL' ? `pcu.direct-asset-upload:${projectId}:${kind}`
+   : kind === 'IMAGE' || kind === 'POSTER' ? `pcu.direct-${kind.toLowerCase()}-upload:PROJECT:${projectId}` : `pcu.direct-${kind.toLowerCase()}-upload:${projectId}`;
+  const specs: FileUploadSpec[] = items.map((item, index) => ({
+   id: item.id, owner: { type: 'PROJECT', id: projectId }, kind, binding: item, legacyKey,
+   file: selected[index], name: selected[index]?.name ?? fileNames[item.slot] ?? `${uploadKindLabels[kind]} ${index + 1}`, size: selected[index]?.size,
+  }));
+  queue.sync(specs);
+  void queue.start();
+ }, [queue, projectId, kind, items, selected, fileNames]);
+ // The parent status refresh changes bindings, never a row's queue position or identity.
+ return <li data-completed={rows.filter(row => row.phase === 'ready').length}><FileUploadRows queue={queue} /></li>;
+}
+export function SubmissionUploadProgress({ zone, group, fileNames = {}, projectId, files, items, onComplete }: {
+ zone: 'poster' | 'files'; group?: StudioFileGroup; fileNames?: Record<string, string>; projectId: number;
+ files: SubmissionFilesState; items: ProjectSubmissionItemStatus[]; onComplete: () => void;
+}) {
+ const kinds = group?.kinds ?? (zone === 'poster' ? ['POSTER'] as const : ['GAME', 'WEBGL', 'VIDEO', 'IMAGE', 'DOCUMENT', 'ATTACHMENT'] as const);
+ const ordered = [...items].sort((a, b) => a.slot.localeCompare(b.slot, undefined, { numeric: true }));
+ return <ul className="project-upload-queue" aria-label={group ? `${group.label} 업로드 진행` : zone === 'poster' ? '포스터 업로드 진행' : '파일 업로드 진행'}>
+  {kinds.map(kind => {
+   const kindItems = ordered.filter(item => item.kind === kind);
+   if (!kindItems.length) return null;
+   const selected = kind === 'POSTER' ? files.posterFile ? [files.posterFile] : [] : kind === 'GAME' ? files.gameFile ? [files.gameFile] : []
+    : kind === 'WEBGL' ? files.webglFile ? [files.webglFile] : [] : kind === 'VIDEO' ? files.videoFiles : kind === 'IMAGE' ? files.imageFiles : kind === 'DOCUMENT' ? files.documentFiles : files.attachmentFiles;
+   return <KindUploads key={kind} projectId={projectId} kind={kind} items={kindItems} selected={selected} fileNames={fileNames} onComplete={onComplete} />;
+  })}
+ </ul>;
 }

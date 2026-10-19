@@ -182,7 +182,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 		setNotice('표시된 입력 내용을 확인해주세요. 작성한 내용과 선택한 파일은 유지됩니다.');
 	});
 	const pendingEntries = (queue.entries ?? []).filter(entry => entry.status === 'pending' || entry.status === 'active');
-	const selected = (kind: string) => pendingEntries.filter(entry => entry.kind === kind).map(entry => entry.file);
+	const selected = (kind: string) => pendingEntries.filter(entry => entry.kind === kind).flatMap(entry => entry.file instanceof File ? [entry.file] : []);
 	const storedAssets = queue.storedAssets ?? project.assets;
 	const savedPoster = (queue.removals ?? []).includes(project.posterAssetId ?? -1) || (project.posterAssetId !== undefined && !storedAssets.some(asset => asset.id === project.posterAssetId)) ? undefined : project.poster;
 	const savedGame = storedAssets.find(asset => asset.kind === 'GAME' && !(queue.removals ?? []).includes(asset.id));
@@ -241,12 +241,12 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
                 title={applyError ? '변경사항을 모두 적용하지 못했어요.' : '변경사항을 적용하고 있어요.'}
                 description={`${values.title || project.title} · 파일 검증 후 작품 정보와 참여 학생을 저장합니다.`}
                 completed={(queue.entries ?? []).filter(entry => entry.status === 'done').length}
-                total={(queue.entries ?? []).filter(entry => entry.status !== 'cancelled').length}
+                total={(queue.entries ?? []).filter(entry => entry.status !== 'removed').length}
                 actions={<>{!pending && applyError != null && <>
                     <button type="button" className="btn btn--secondary" onClick={() => setShowUploadDialog(false)}>편집으로 돌아가기</button>
                     <button type="button" className="btn btn--primary" onClick={() => void onApply()}>다시 적용</button>
                 </>}
-                    <button type="button" className="btn btn--danger btn--small" disabled={!queue.active || cancelAllRequested.current} onClick={() => { cancelAllRequested.current = true; queue.cancelAll(); }}>업로드 중단</button>
+                    <button type="button" className="btn btn--danger btn--small" disabled={!queue.active || cancelAllRequested.current} onClick={() => { cancelAllRequested.current = true; queue.cancelAll(); }}>전체 업로드 중단</button>
                 </>}>
                 {applyError != null && <p className="field-error" role="alert">{getApiErrorMessage(applyError)} 일부 변경이 반영되었을 수 있습니다. 완료된 작업은 유지하고 남은 변경사항을 다시 적용하세요.</p>}
                 <AdminProjectUploadProgress />

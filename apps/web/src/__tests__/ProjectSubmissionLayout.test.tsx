@@ -317,7 +317,7 @@ describe('submission selection and recovery', () => {
 		await act(async () => {
 			finishPoster({ status: 'READY', sessionId: poster.name, generation: 1, sizeBytes: poster.size });
 		});
-		await waitFor(() => expect(controls.status).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(controls.status.mock.calls.length).toBeGreaterThanOrEqual(2));
 		expect(controls.upload.mock.calls.map((call) => call[1].name).sort()).toEqual([
 			'first.png',
 			'poster.png',

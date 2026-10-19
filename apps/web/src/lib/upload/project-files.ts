@@ -83,10 +83,13 @@ export function classifyProjectFile(
 }
 export interface UploadEntry {
 	id: number;
-	file: File;
+	uploadId: string;
+	sizeKnown?: boolean;
+	binding?: import('./directUploadTask').SubmissionBinding;
+	file: File | Pick<File, 'name' | 'size' | 'type'>;
 	zone: UploadZone;
 	kind: ProjectUploadKind | 'ZIP';
-	status: 'pending' | 'active' | 'done' | 'cancelled';
+	status: 'pending' | 'active' | 'done' | 'cancelled' | 'failed' | 'removed';
 }
 export const isMaterial = (kind: string) => kind === 'DOCUMENT' || kind === 'ATTACHMENT';
 export function uploadQueueIssues(
