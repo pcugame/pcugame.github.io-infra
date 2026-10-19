@@ -1,3 +1,5 @@
+import { publicationSnapshotInclude } from '../admin/project/publication.repository.js';
+import { assertPublicationNotWorsened } from '../../shared/publication-policy.js';
 import { normalizeIpTarget } from '@pcu/contracts';
 import { normalizeProjectVideoOrder } from './video-order.js';
 import {
@@ -77,6 +79,7 @@ export function createAssetsRepository(
 							visibility: true,
 							exhibition: {select:{visibility:true}},
 							title: true,
+							publicationStatus: true,
 							status: true,
 							members: {
 								select: { id: true, userId: true, name: true, studentId: true, sortOrder: true },
@@ -138,6 +141,11 @@ export function createAssetsRepository(
 					if (projects.length === 0) return null;
 				}
 
+    const publication = await tx.project.findUniqueOrThrow({ where: { id: candidate.projectId }, include: publicationSnapshotInclude });
+    if (publication.publicationStatus === 'PUBLIC') assertPublicationNotWorsened(publication, {
+     ...publication, poster: publication.posterAssetId === id ? null : publication.poster,
+     assets: publication.assets.filter(asset => asset.id !== id),
+    });
 				const rows = await tx.$queryRaw<LockedAssetDeletionRow[]>(Prisma.sql`
 					SELECT
 						"id",

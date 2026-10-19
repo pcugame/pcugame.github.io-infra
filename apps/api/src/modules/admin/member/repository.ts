@@ -1,3 +1,5 @@
+import { publicationSnapshotInclude } from '../project/publication.repository.js';
+import { assertPublicationNotWorsened } from '../../../shared/publication-policy.js';
 import type { PrismaClient } from '../../../generated/prisma/client.js';
 import type { Actor } from '../../../application/http-input.js';
 import { assertProjectWriteAccessInTransaction } from '../project-access.service.js';
@@ -25,8 +27,10 @@ export function createMemberRepository(client: PrismaClient) {
 		updateMember(id: number, projectId: number, data: { name?: string; studentId?: string; sortOrder?: number }, actor: Actor) {
 			return client.$transaction(async (tx) => {
 				await assertProjectWriteAccessInTransaction(tx, actor, projectId);
+				const before = await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: publicationSnapshotInclude });
 				const member = await tx.projectMember.updateMany({ where: { id, projectId }, data });
 				if (member.count !== 1) throw new Error('Member not found in project');
+    if (before.publicationStatus === 'PUBLIC') assertPublicationNotWorsened(before, await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: publicationSnapshotInclude }));
 				await tx.project.update({ where: { id: projectId }, data: { version: { increment: 1 } } });
 				return member;
 			});
@@ -35,8 +39,10 @@ export function createMemberRepository(client: PrismaClient) {
 		deleteMember(id: number, projectId: number, actor: Actor) {
 			return client.$transaction(async (tx) => {
 				await assertProjectWriteAccessInTransaction(tx, actor, projectId);
+				const before = await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: publicationSnapshotInclude });
 				const member = await tx.projectMember.deleteMany({ where: { id, projectId } });
 				if (member.count !== 1) throw new Error('Member not found in project');
+    if (before.publicationStatus === 'PUBLIC') assertPublicationNotWorsened(before, await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: publicationSnapshotInclude }));
 				await tx.project.update({ where: { id: projectId }, data: { version: { increment: 1 } } });
 				return member;
 			});

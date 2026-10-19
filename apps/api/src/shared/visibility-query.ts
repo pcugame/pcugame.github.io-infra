@@ -5,6 +5,5 @@ export function exhibitionVisibilityWhere(actor: VisibilityActor): Prisma.Exhibi
 	return { visibility: { in: readableVisibilities(actor) } };
 }
 export function projectVisibilityWhere(actor: VisibilityActor): Prisma.ProjectWhereInput {
-	const audience = { visibility: { in: readableVisibilities(actor) }, exhibition: exhibitionVisibilityWhere(actor) };
-	return actor ? { OR: [audience, { creatorId: actor.id }, { members: { some: { userId: actor.id } } }] } : audience;
+ return { publicationStatus: 'PUBLIC', exhibition: exhibitionVisibilityWhere(actor), hiddenCancelled: false };
 }

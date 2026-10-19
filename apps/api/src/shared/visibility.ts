@@ -4,6 +4,7 @@ export type VisibilityActor = { id: number; role: UserRole } | null;
 export interface VisibilityProject {
 	visibility: Visibility;
 	status: string;
+ publicationStatus?: 'PRIVATE' | 'PUBLIC';
 	creatorId: number;
 	members: ReadonlyArray<{ userId: number | null }>;
 	exhibition: { visibility: Visibility; isModificationEnabled?: boolean };
@@ -19,6 +20,8 @@ export function isProjectRelated(actor: VisibilityActor, project: Pick<Visibilit
 	return actor !== null && (project.creatorId === actor.id || project.members.some((member) => member.userId === actor.id));
 }
 export function canReadProject(actor: VisibilityActor, project: VisibilityProject, options: { allowDraft?: boolean } = {}): boolean {
+ if (project.publicationStatus === 'PRIVATE') return isVisibilityStaff(actor) || isProjectRelated(actor, project);
+ if (project.publicationStatus === 'PUBLIC') return isVisibilityStaff(actor) || isProjectRelated(actor, project) || canReadVisibility(actor, project.exhibition.visibility);
 	if (project.status !== 'PUBLISHED' && project.status !== 'ARCHIVED') {
 		return options.allowDraft === true && (isVisibilityStaff(actor) || isProjectRelated(actor, project));
 	}

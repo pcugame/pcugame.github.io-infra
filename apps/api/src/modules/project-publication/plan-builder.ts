@@ -9,7 +9,7 @@ export async function rebuildProjectPublicationPlan(
 		tx.storageBucket.findUnique({ where: { visibility: 'PROTECTED' } }),
 		tx.storageBucket.findUnique({ where: { visibility: 'PUBLIC' } }),
 		tx.projectSubmissionItem.findMany({
-			where: { submissionId: input.submissionId },
+			where: { submissionId: input.submissionId, required: true },
 			orderBy: { id: 'asc' },
 			include: {
 				uploadSession: true,

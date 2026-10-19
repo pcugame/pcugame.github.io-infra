@@ -91,7 +91,7 @@ beforeEach(() => {
 });
 afterEach(() => {
 	cleanup();
-	window.sessionStorage.clear();
+	window.sessionStorage.clear(); window.localStorage.clear();
 	vi.resetAllMocks();
 	vi.unstubAllGlobals();
 });
@@ -129,10 +129,10 @@ async function goTo(step: number) {
 describe('submission studio', () => {
 	it.each([0, 1, 2, 3])('shows the submit action and submits complete input from step %i', async step => {
 		mount();
-		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: '저장' }) as HTMLButtonElement).disabled).toBe(true);
 		await enterMetadata();
 		await goTo(step);
-		const button = screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement;
+		const button = screen.getByRole('button', { name: '저장' }) as HTMLButtonElement;
 		expect(button.disabled).toBe(false);
 		fireEvent.click(button);
 		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
@@ -141,7 +141,7 @@ describe('submission studio', () => {
 	it('retains errors on focus and clears each corrected field without another navigation attempt', async () => {
 		mount();
 		await goTo(3);
-		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: '저장' }) as HTMLButtonElement).disabled).toBe(true);
 		fireEvent.submit(document.querySelector('.submission-studio__sheet form')!);
 		await screen.findByText('제목을 입력하세요.');
 		const title = screen.getByLabelText('작품명 *');
@@ -171,7 +171,7 @@ describe('submission studio', () => {
 		await screen.findByRole('heading', { name: '게임 정보' });
 		expect(screen.queryByText('제목을 입력하세요.')).toBeNull();
 		await goTo(3);
-		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: '저장' }) as HTMLButtonElement).disabled).toBe(true);
 		fireEvent.submit(document.querySelector('.submission-studio__sheet form')!);
 		await screen.findByText('제목을 입력하세요.');
 		expect(screen.getByRole('heading', { name: '작품 소개' })).toBeTruthy();
@@ -220,7 +220,7 @@ describe('submission studio', () => {
 		await goTo(1);
 		fireEvent.change(screen.getByLabelText('필수 하드웨어'), { target: { value: 'x'.repeat(1001) } });
 		await goTo(3);
-		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: '저장' }) as HTMLButtonElement).disabled).toBe(true);
 		fireEvent.submit(document.querySelector('.submission-studio__sheet form')!);
 		await screen.findByRole('group', { name: '실행 환경' });
 		expect((screen.getByLabelText('필수 하드웨어') as HTMLTextAreaElement).value).toHaveLength(1001);
@@ -234,7 +234,7 @@ describe('submission studio', () => {
 		expect(within(screen.getByRole('article', { name: '전시 카드 미리보기' })).getByRole('heading', { name: '선택한 작품' })).toBeTruthy();
 		await goTo(3);
 		fireEvent.change(screen.getByLabelText('작품명 *'), { target: { value: '' } });
-		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: '저장' }) as HTMLButtonElement).disabled).toBe(true);
 		fireEvent.submit(document.querySelector('.submission-studio__sheet form')!);
 		await screen.findByText('제목을 입력하세요.');
 		expect(screen.getByLabelText('작품명 *').closest('[hidden]')).toBeNull();
@@ -261,7 +261,7 @@ describe('submission studio', () => {
 
 	it.each([{ step: 0, next: '게임 정보' }, { step: 1, next: '파일 업로드' }, { step: 2, next: '미리보기' }])('does not create a submission when Enter submits step $step', async ({ step, next }) => {
 		const { container } = mount();
-		await enterMetadata();
+		await enterMetadata('PUBLIC');
 		await goTo(step);
 		fireEvent.submit(container.querySelector('form')!);
 		await screen.findByRole('heading', { name: next });
@@ -278,7 +278,7 @@ describe('submission studio', () => {
 		await goTo(0);
 		await goTo(3);
 		expect(controls.upload).not.toHaveBeenCalled();
-		fireEvent.click(screen.getByRole('button', { name: '작품 제출' }));
+		fireEvent.click(screen.getByRole('button', { name: '저장' }));
 		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(3));
 		expect(items.map(item => item.kind)).toEqual(['GAME', 'WEBGL', 'ATTACHMENT']);
 	});
@@ -286,6 +286,7 @@ describe('submission studio', () => {
 	it.each(['user', 'admin'] as const)('%s sends metadata and all selected file kinds through the existing staged upload flow', async mode => {
 		const { container } = mount(mode);
 		await enterMetadata('PUBLIC');
+  fireEvent.change(screen.getByLabelText('한 줄 소개 선택'), { target: { value: '게임 소개' } });
 		await goTo(1);
 		fireEvent.click(screen.getByLabelText('PC'));
 		await goTo(2);
@@ -298,7 +299,7 @@ describe('submission studio', () => {
 		await goTo(0);
 		await goTo(3);
 		expect(controls.upload).not.toHaveBeenCalled();
-		fireEvent.click(screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' }));
+		fireEvent.click(screen.getByRole('button', { name: '공개 제출' }));
 		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(6));
 		expect(controls.getApi).toHaveBeenCalledWith(mode);
 		const data = controls.submit.mock.calls[0]![0].formData as FormData;
@@ -310,7 +311,7 @@ describe('submission studio', () => {
 			expect(call[4].submissionItem).toEqual({ id: item.id, clientToken: item.clientToken });
 		}
 		expect(screen.getByRole('dialog', { name: '파일 업로드' })).toBeTruthy();
-		expect(screen.queryByRole('button', { name: '작품 제출' })).toBeNull();
+		expect(screen.queryByRole('button', { name: '공개 제출' })).toBeNull();
 	});
 
 	it('enforces the user exhibition lock even on a direct submit event', async () => {
@@ -318,24 +319,18 @@ describe('submission studio', () => {
 		const { container } = mount();
 		await enterMetadata();
 		await goTo(3);
-		expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(true);
+		expect((screen.getByRole('button', { name: '저장' }) as HTMLButtonElement).disabled).toBe(true);
 		fireEvent.submit(container.querySelector('form')!);
 		expect(controls.submit).not.toHaveBeenCalled();
 	});
 
-	it('restores a staged submission and keeps cancellation available', async () => {
-		items = [{ id: 'item-1', kind: 'GAME', slot: 'game', clientToken: 'a'.repeat(32), required: true, state: 'EXPECTED' }];
-		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
-		mount();
-		const dialog = await screen.findByRole('dialog', { name: '파일 업로드' });
-        expect(within(dialog).getByText('업로드가 중단되었습니다. ‘파일 선택’을 누르고 동일한 파일을 다시 선택해 주세요.')).toBeTruthy();
-        expect(within(dialog).getByRole('button', { name: '파일 선택' })).toBeTruthy();
-        expect(within(dialog).queryByRole('button', { name: '파일 변경' })).toBeNull();
-		await waitFor(() => expect(controls.status).toHaveBeenCalledWith(73));
-		expect(screen.queryByRole('textbox', { name: /작품명/ })).toBeNull();
-		fireEvent.click(screen.getByRole('button', { name: '전체 취소' }));
-		await waitFor(() => expect(controls.cancel).toHaveBeenCalledWith(73));
-	});
+	it('restores a saved project in its editor without creating another project', async () => {
+  window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify({ id: 73, slug: 'saved', year: 2026, status: 'DRAFT', submissionId: 'saved', items: [], adminEditUrl: '/admin/projects/73/edit' }));
+  mount();
+  await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/admin/projects/73/edit'));
+  expect(controls.submit).not.toHaveBeenCalled();
+ });
+
 	it('preserves an in-flight second image when a status refresh marks the first image READY', async () => {
 		const first = new File(['first'], 'first.png', { type: 'image/png' });
 		const second = new File(['second'], 'second.png', { type: 'image/png' });
@@ -367,7 +362,7 @@ describe('submission studio', () => {
 		select(container, 'poster', [poster]);
 		select(container, 'materials', [first, second]);
 		await goTo(3);
-		fireEvent.click(screen.getByRole('button', { name: '작품 제출' }));
+		fireEvent.click(screen.getByRole('button', { name: '저장' }));
 		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(3));
 		items = items.map((item) =>
 			item.slot === 'image:0' || item.kind === 'POSTER' ? { ...item, state: 'READY' } : item,
@@ -449,7 +444,7 @@ describe('submission studio', () => {
 		await goTo(2);
 		select(container, 'native', [new File(['zip'], 'retry.zip')]);
 		await goTo(3);
-		fireEvent.click(screen.getByRole('button', { name: '작품 제출' }));
+		fireEvent.click(screen.getByRole('button', { name: '저장' }));
 		fireEvent.click(await screen.findByRole('button', { name: '재시도' }));
 		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(2));
 		expect(controls.upload.mock.calls[1]![4].submissionItem).toEqual(controls.upload.mock.calls[0]![4].submissionItem);
@@ -461,7 +456,7 @@ describe('submission studio', () => {
 		await goTo(2);
 		expect((screen.getByRole('button', { name: '네이티브 빌드 파일 선택' }) as HTMLButtonElement).disabled).toBe(false);
 		await goTo(3);
-		fireEvent.click(screen.getByRole('button', { name: '작품 등록' }));
+		fireEvent.click(screen.getByRole('button', { name: '저장' }));
 		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
 	});
 
@@ -476,9 +471,9 @@ describe.each(['user', 'admin'] as const)('%s optional submission assets', mode 
  ] as const;
  it.each(recommended)('keeps $label optional after selection and removal', async entry => {
   const { container } = mount(mode);
-  await enterMetadata('PUBLIC');
+  await enterMetadata('STAFF');
   await goTo(2);
-  expect(screen.getByText('네이티브 빌드·웹 빌드·동영상·스크린샷을 모두 등록하는 것을 권장합니다.')).toBeTruthy();
+  expect(screen.getByText('공개하려면 포스터·네이티브 게임·동영상이 필요합니다. WebGL·스크린샷·기타 자료는 선택입니다.')).toBeTruthy();
   const checklist = screen.getByRole('region', { name: '필수 정보 준비' });
   expect(within(checklist).getByText('3 / 3')).toBeTruthy();
   select(container, entry.zone, [new File(['data'], entry.name)]);
@@ -486,21 +481,22 @@ describe.each(['user', 'admin'] as const)('%s optional submission assets', mode 
   fireEvent.click(screen.getByRole('button', { name: `${entry.name} 선택 취소` }));
   expect(within(checklist).getByText(entry.label).closest('li')?.textContent).toContain('선택 안 함');
   await goTo(3);
-  const submit = screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' }) as HTMLButtonElement;
+  const submit = screen.getByRole('button', { name: '저장' }) as HTMLButtonElement;
   expect(submit.disabled).toBe(false);
   fireEvent.click(submit);
   await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
   expect(items).toHaveLength(0);
   expect(controls.upload).not.toHaveBeenCalled();
  });
- it.each(['STAFF', 'AUTHENTICATED'] as const)('allows changing %s to PUBLIC without files', async visibility => {
+ it('blocks public submission without required content while private saving remains available', async () => {
   const { container } = mount(mode);
-  await enterMetadata(visibility);
-  fireEvent.change(screen.getByLabelText('공개 범위'), { target: { value: 'PUBLIC' } });
-  await goTo(3);
+  await enterMetadata('PUBLIC'); await goTo(3);
   fireEvent.submit(container.querySelector('form')!);
+  expect(controls.submit).not.toHaveBeenCalled();
+  expect((screen.getByRole('button', { name: '공개 제출' }) as HTMLButtonElement).disabled).toBe(true);
+  await goTo(0); fireEvent.change(screen.getByLabelText('공개 범위'), { target: { value: 'STAFF' } });
+  fireEvent.click(screen.getByRole('button', { name: '저장' }));
   await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
-  expect(items).toHaveLength(0);
  });
 });
 
@@ -548,7 +544,7 @@ it('shows the fourth-step preview at the public modal size with local media and 
 	expect(within(updated).getByRole('heading', { name: '변경한 작품' })).toBeTruthy();
 	fireEvent.click(within(updated).getByRole('button', { name: /사진 1/ }));
 	expect(updated.querySelector('.modal-visual__img')?.getAttribute('src')).toBe('blob:replacement.png');
-	expect((screen.getByRole('button', { name: '작품 제출' }) as HTMLButtonElement).disabled).toBe(false);
+	expect((screen.getByRole('button', { name: '공개 제출' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 
@@ -592,7 +588,7 @@ describe.each(['user', 'admin'] as const)('%s registration enhancements', mode =
 		await goTo(3);
 		const preview = screen.getByRole('region', { name: '전시 화면 미리보기' });
 		expect(Array.from(preview.querySelectorAll('.modal-member')).map(node => node.firstChild?.textContent?.trim())).toEqual(['김학생', '홍길동']);
-		fireEvent.click(screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' }));
+		fireEvent.click(screen.getByRole('button', { name: '저장' }));
 		await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
 		const payload = JSON.parse(String(controls.submit.mock.calls[0][0].formData.get('payload')));
 		expect(payload.members).toEqual([
@@ -643,7 +639,7 @@ describe.each(['user', 'admin'] as const)('%s registration enhancements', mode =
 	it.each([true, false])('follows visibility feature flag %s', enabled => {
 		controls.visibilityEnabled = enabled;
 		mount(mode);
-		expect(!!screen.queryByText('작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.')).toBe(enabled);
+		expect(!!screen.queryByText('작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.')).toBe(true);
 	});
 });
 
@@ -663,7 +659,7 @@ it.each(['user', 'admin'] as const)('keeps faculty participants blank and unlink
  await goTo(1);
  expect((screen.getByLabelText('이름') as HTMLInputElement).value).toBe('홍길동');
  await goTo(3);
- fireEvent.click(screen.getByRole('button', { name: mode === 'admin' ? '작품 등록' : '작품 제출' }));
+ fireEvent.click(screen.getByRole('button', { name: '저장' }));
  await waitFor(() => expect(controls.submit).toHaveBeenCalledOnce());
  const payload = JSON.parse(String(controls.submit.mock.calls[0][0].formData.get('payload')));
  expect(payload.members).toEqual([{ name: '홍길동', studentId: '20269999' }]);

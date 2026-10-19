@@ -1,3 +1,5 @@
+import { publicationSnapshotInclude } from '../admin/project/publication.repository.js';
+import { assertPublication } from '../../shared/publication-policy.js';
 import { assertProjectWriteAccessInTransaction } from '../admin/project-access.service.js';
 import { forbidden } from '../../shared/errors.js';
 import { applyProjectChange, deleteProjectInTransaction, lockProject, validateSource } from '../project-change/transaction.js';
@@ -296,7 +298,18 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 				if (changeRequest) {
 					await applyProjectChange(tx, changeRequest);
 				} else {
-					const project = await tx.project.updateMany({ where: { id: job.projectId, status: 'DRAFT' }, data: { status: 'PUBLISHED', version: { increment: 1 } } });
+					const latest = await tx.project.findUniqueOrThrow({ where: { id: job.projectId }, include: publicationSnapshotInclude });
+     const publish = latest.publicationRequested && latest.publicationRequestedVersion === latest.version;
+     if (publish) {
+      const actor = latest.publicationActorId ? await tx.user.findUnique({ where: { id: latest.publicationActorId } }) : null;
+      if (!actor) throw forbidden('Publication actor is no longer available');
+      await assertProjectWriteAccessInTransaction(tx, actor, job.projectId);
+      assertPublication(latest, actor.role, latest.publicationExceptionReason ?? undefined);
+     }
+     const project = await tx.project.updateMany({ where: { id: job.projectId, status: 'DRAFT' }, data: {
+      status: 'PUBLISHED', publicationStatus: publish ? 'PUBLIC' : 'PRIVATE',
+      publicationRequested: false, version: { increment: 1 },
+     } });
 					if (project.count !== 1) throw new Error('Project publication CAS failed');
 				}
 

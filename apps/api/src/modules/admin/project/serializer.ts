@@ -1,3 +1,4 @@
+import { publicationReadiness } from '@pcu/contracts';
 import { projectRequiredAssets, type RequiredAssetsSource } from '../../../shared/project-required-assets.js';
 import { effectiveProjectExternalLinks } from '../../../shared/project-external-links.js';
 import type { Visibility } from '@pcu/contracts';
@@ -64,6 +65,8 @@ function imageSourceFor(asset: {
 
 /** Serialize a project detail record to the API response shape */
 export type SerializableProject = {
+ publicationStatus?: 'PRIVATE' | 'PUBLIC';
+ version?: number;
 	assetUploads?: RequiredAssetsSource['assetUploads'];
 	publicationJob?: RequiredAssetsSource['publicationJob'];
 	visibility: Visibility;
@@ -111,6 +114,9 @@ export function createProjectSerializer(
 	const base = baseUrl.replace(/\/$/, '');
 	function serializeImage(asset: Parameters<typeof imageSourceFor>[0]) {
 		const original = asset.representations?.find((candidate) => candidate.role === 'ORIGINAL');
+  if (original?.state === 'READY' && asset.id !== undefined && (!publicDelivery || original.bucket !== publicDelivery.publicBucket)) {
+   return { original: { url: canonicalProtectedAssetUrl(base, asset.id, 'original'), ...(original.width != null ? { width: original.width } : {}), ...(original.height != null ? { height: original.height } : {}) }, renditions: [] };
+  }
 		if (!publicDelivery || !original || original.state !== 'READY' || original.bucket !== publicDelivery.publicBucket) {
 			throw new Error(`Asset ${asset.id ?? 'unknown'} has no READY public ORIGINAL representation`);
 		}
@@ -210,6 +216,9 @@ export function createProjectSerializer(
 			video,
 			videos,
 			status: project.status,
+ publicationStatus: project.publicationStatus,
+ version: project.version,
+ publicationReadiness: publicationReadiness(project),
 			sortOrder: project.sortOrder,
 			posterAssetId: project.posterAssetId ?? undefined,
 			poster: project.poster && project.poster.status === 'READY'

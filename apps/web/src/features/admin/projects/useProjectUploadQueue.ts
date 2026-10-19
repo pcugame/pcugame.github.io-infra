@@ -146,10 +146,33 @@ export function useProjectUploadQueue(
 		};
 		try {
 			if (refreshNeeded.current) await refresh();
+			for (const entry of pending) {
+				checkInterrupted();
+				// A widget retry can finish while deletion or canonical refresh is awaited.
+				if (completedUploads.current.has(entry.id)) continue;
+				if (project.status === 'DRAFT') {
+					const submission = await submissionApi.getSubmission(projectId);
+					if (submission.state !== 'PENDING') throw new Error('제출 처리 중이거나 종료된 작품입니다. 페이지를 새로고침해 주세요.');
+					const item = [...submission.items]
+						.sort((a, b) => a.slot.localeCompare(b.slot, undefined, { numeric: true }))
+						.find((item) => item.kind === entry.kind && item.state !== 'READY');
+					setSubmissionItem(item);
+				} else {
+					setSubmissionItem(undefined);
+				}
+				await new Promise<void>((resolve, reject) => {
+					waiter.current = { resolve, reject };
+     activeEntry.current = entry.id;
+					if (entry.status === 'active') setRetryAttempt((attempt) => attempt + 1);
+					else dispatch({ type: 'status', id: entry.id, status: 'active' });
+				});
+				await refresh();
+			}
 			for (const id of removals) {
 				checkInterrupted();
 				if (deleted.current.has(id)) continue;
-				await adminAssetApi.remove(id);
+				const latest = await adminProjectApi.getDetail(projectId);
+    if (latest.assets.some(asset => asset.id === id)) await adminAssetApi.remove(id);
 				deleted.current.add(id);
 				setRemovals((ids) => ids.filter((value) => value !== id));
 				refreshNeeded.current = true;
@@ -162,29 +185,7 @@ export function useProjectUploadQueue(
 				refreshNeeded.current = true;
 			}
 			if (refreshNeeded.current) await refresh();
-			for (const entry of pending) {
-				checkInterrupted();
-				// A widget retry can finish while deletion or canonical refresh is awaited.
-				if (completedUploads.current.has(entry.id)) continue;
-				if (project.status === 'DRAFT') {
-					const submission = await submissionApi.getSubmission(projectId);
-					if (submission.state !== 'PENDING') throw new Error('제출 처리 중이거나 종료된 작품입니다. 페이지를 새로고침해 주세요.');
-					const item = [...submission.items]
-						.sort((a, b) => a.slot.localeCompare(b.slot, undefined, { numeric: true }))
-						.find((item) => item.kind === entry.kind && item.state !== 'READY');
-					if (!item) throw new Error('이 종류의 제출 파일은 이미 업로드되었거나 제출 목록에 없습니다. 제출 완료 후 파일을 추가·교체해 주세요.');
-					setSubmissionItem(item);
-				} else {
-					setSubmissionItem(undefined);
-				}
-				await new Promise<void>((resolve, reject) => {
-					waiter.current = { resolve, reject };
-					activeEntry.current = entry.id;
-					if (entry.status === 'active') setRetryAttempt((attempt) => attempt + 1);
-					else dispatch({ type: 'status', id: entry.id, status: 'active' });
-				});
-				await refresh();
-			}
+
 			checkInterrupted();
 		} finally {
 			applying.current = false;

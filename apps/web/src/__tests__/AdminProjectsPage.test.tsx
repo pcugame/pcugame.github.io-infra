@@ -241,7 +241,7 @@ describe('AdminProjectsPage pagination query contract', () => {
 		});
 		await expectProjectVisible('Alpha Project');
 
-		fireEvent.click(screen.getByRole('button', { name: '보관' }));
+		fireEvent.click(screen.getByRole('button', { name: '비공개' }));
 		await waitFor(() => {
 			expect(mocks.getProjects).toHaveBeenLastCalledWith(expect.objectContaining({
 				search: '2024',
@@ -291,7 +291,7 @@ describe('AdminProjectsPage pagination query contract', () => {
 		expect(screen.queryByText('2개 선택')).toBeNull();
 
 		fireEvent.click(screen.getAllByRole('checkbox')[0]);
-		const archiveButtons = screen.getAllByRole('button', { name: '보관' });
+		const archiveButtons = screen.getAllByRole('button', { name: '비공개' });
 		fireEvent.click(archiveButtons[archiveButtons.length - 1]);
 
 		await waitFor(() => {

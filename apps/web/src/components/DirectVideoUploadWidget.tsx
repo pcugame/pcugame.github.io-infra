@@ -1,3 +1,4 @@
+import { videoErrorMessage } from '../lib/upload/video-error';
 import { usePreventWindowClose } from './common/usePreventWindowClose';
 import { LinearUploadContext } from '../lib/upload/linearPresentation';
 import { UploadFileRows } from './common/UploadFileRows';
@@ -500,8 +501,8 @@ function VideoUploadSession({
 					</p>
 				</div>
 			)}
-			{(error || taskMessage) && <p className="game-upload__error" role="alert">{error || taskMessage}</p>}
-			{error && taskMessage && error !== taskMessage && <p role="status">{taskMessage}</p>}
+			{(error || taskMessage) && <p className="game-upload__error" role="alert">{videoErrorMessage(error || taskMessage || '')}</p>}
+			{error && taskMessage && error !== taskMessage && <p role="status">{videoErrorMessage(taskMessage)}</p>}
 			{!linear && uploadActions}
 		</div>
 	);

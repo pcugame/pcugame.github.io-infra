@@ -1,3 +1,4 @@
+import type { PublicationCommand } from '@pcu/contracts';
 import type { RequiredAssetsSource } from '../../../shared/project-required-assets.js';
 import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
 import type {
@@ -17,6 +18,7 @@ export interface ExhibitionUploadRecord {
 }
 
 export interface SubmitProjectWriteData {
+ allowDuplicateTitle?: boolean;
 	actor?: Actor;
 	visibility?: Visibility;
 	exhibitionId: number;
@@ -75,6 +77,8 @@ export interface ProjectSubmissionRecord {
 }
 
 export interface ProjectListRecord extends RequiredAssetsSource {
+ publicationStatus?: 'PRIVATE' | 'PUBLIC';
+ version?: number;
 	visibility: Visibility;
 	id: number;
 	title: string;
@@ -136,6 +140,7 @@ export interface ProjectRepository {
 	findProjectById(id: number): Promise<ProjectDetailRecord | null>;
 	isMemberOfProject(projectId: number, userId: number): Promise<unknown | null>;
 	updateProject(id: number, patch: {
+ publication?: PublicationCommand;
 		visibility?: Visibility;
 		title?: string;
 		summary?: string;

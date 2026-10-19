@@ -22,7 +22,8 @@ import { ProjectPreviewPanel, type PreviewMediaItem } from '../../components/pro
 import { AdminProjectBasicInfoForm } from '../../features/admin/projects/AdminProjectBasicInfoForm';
 import { WebglDisplaySettingsForm } from '../../features/admin/projects/WebglDisplaySettingsForm';
 import { AdminProjectMemberEditor } from '../../features/admin/projects/AdminProjectMemberEditor';
-import { DraftSubmissionStatus } from '../../features/admin/projects/DraftSubmissionStatus';
+import { PublicationFeedback } from '../../components/project/PublicationFeedback';
+import { getProjectSubmitApi } from '../../lib/api/project-submit';
 import { useAdminProjectMutations } from '../../features/admin/projects/useAdminProjectMutations';
 import { useProjectMemberDraft } from '../../features/admin/projects/useProjectMemberDraft';
 import { useMe } from '../../features/auth';
@@ -32,7 +33,7 @@ import { getClientUploadLimits } from '../../lib/upload-limits';
 
 const metadata = (project: AdminProjectDetail): UpdateProjectFormInput => ({
 	externalLinks: effectiveExternalLinks(project.externalLinks, project.githubUrl),
-	visibility: project.visibility,
+	visibility: project.publicationStatus === 'PUBLIC' ? 'PUBLIC' : 'STAFF',
 	title: project.title,
 	summary: project.summary ?? '',
 	description: project.description ?? '',
@@ -65,6 +66,8 @@ export default function AdminProjectEditPage() {
 
 function ProjectEditor({ project, isPrivileged, canEditContent }: { project: AdminProjectDetail; isPrivileged: boolean; canEditContent: boolean }) {
 	const id = project.id;
+ const { user } = useMe();
+ const [exceptionReason, setExceptionReason] = useState('');
 	const qc = useQueryClient();
 	const queue = useAdminProjectUploadQueue();
 	const members = useProjectMemberDraft(id, project.members);
@@ -83,7 +86,9 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	const [step, setStep] = useState(0);
 	const [notice, setNotice] = useState('');
 	const mutations = useAdminProjectMutations({ projectId: id, project });
-	const hasChanges = form.formState.isDirty || members.hasChanges || queue.hasChanges;
+	const wantsPublic = values.visibility === 'PUBLIC';
+ const needsPublication = wantsPublic && project.publicationStatus !== 'PUBLIC';
+ const hasChanges = form.formState.isDirty || members.hasChanges || queue.hasChanges || needsPublication;
 	const validChanges = UpdateProjectFormSchema.safeParse(values).success && members.validationErrors.length === 0 && !queue.validationError;
 	const pending = isApplying || queue.isApplying || isSavingDisplay;
 	usePreventWindowClose(pending);
@@ -114,29 +119,41 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 		setIsApplying(true);
 		queue.setLocked(true);
 		try {
-			// Existing endpoints are separate. Keep metadata/publication last and checkpoint each completed domain.
-			await queue.applyChanges();
-			await members.applyChanges();
+			// Apply PRIVATE first so explicitly requested removals cannot degrade a public project.
+   if (!wantsPublic && project.publicationStatus === 'PUBLIC') {
+    const latest = await adminProjectApi.getDetail(id);
+    await mutations.updateMutation.mutateAsync({ publication: { status: 'PRIVATE', expectedVersion: latest.version! } });
+   }
+   await members.applyChanges();
 			if (form.formState.isDirty) {
 				const defaults = form.formState.defaultValues;
-				const nextStatus = data.status;
 				const patch = {
 					...(JSON.stringify(data.externalLinks) !== JSON.stringify(defaults?.externalLinks) ? { externalLinks: data.externalLinks ?? [] } : {}),
 					...(JSON.stringify(data.platforms) !== JSON.stringify(defaults?.platforms) ? { platforms: data.platforms ?? [] } : {}),
 					...(data.hardwareRequirements !== defaults?.hardwareRequirements ? { hardwareRequirements: data.hardwareRequirements ?? '' } : {}),
 					// Background reads must not turn untouched fields into stale writes.
-					...(project.canChangeVisibility && data.visibility !== defaults?.visibility ? { visibility: data.visibility } : {}),
 					...(data.title !== defaults?.title ? { title: data.title } : {}),
 					...(data.summary !== defaults?.summary ? { summary: data.summary } : {}),
 					...(data.description !== defaults?.description ? { description: data.description } : {}),
 					...(data.sortOrder !== defaults?.sortOrder ? { sortOrder: data.sortOrder } : {}),
-					...(isPrivileged && baselineStatus !== 'DRAFT' && nextStatus !== baselineStatus ? { status: nextStatus } : {}),
 				};
 				const response = Object.keys(patch).length > 0 ? await mutations.updateMutation.mutateAsync(patch) : project;
-				form.reset(metadata(response));
+				form.reset({ ...metadata(response), visibility: data.visibility });
 				setBaselineStatus(response.status);
 				qc.setQueryData(queryKeys.adminProject(id), response);
 			}
+   await queue.applyChanges();
+   if (wantsPublic) {
+    const latest = await adminProjectApi.getDetail(id);
+    if (latest.publicationStatus !== 'PUBLIC') {
+     await mutations.updateMutation.mutateAsync({ publication: { status: 'PUBLIC', expectedVersion: latest.version!, ...(exceptionReason.trim() ? { exceptionReason: exceptionReason.trim() } : {}) } });
+     if (latest.status === 'DRAFT') {
+      const api = getProjectSubmitApi(user?.role === 'USER' ? 'user' : 'admin');
+      await api.finalizeSubmission(id);
+      setNotice('공개 처리 중입니다. 완료 후 상태가 반영됩니다.');
+     }
+    }
+   }
 			await qc.invalidateQueries({ queryKey: queryKeys.adminProject(id) });
 			await qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 			await invalidateVisibilityQueries(qc, { preserveProjectDrafts: true });
@@ -179,18 +196,19 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 		<div className="admin-project-edit-page" inert={showUploadDialog} aria-hidden={showUploadDialog}>
 
 			{form.formState.errors.status && <p className="field-error" role="alert">{form.formState.errors.status.message}</p>}
-			{project.status === 'DRAFT' && canEditContent && <DraftSubmissionStatus projectId={id} disabled={pending || hasChanges} />}
 			{!canEditContent && project.canRequestChange && <div className="admin-card" style={{ marginBottom: '1rem' }}><p>이 작품이 속한 연도는 닫혀 있습니다. 변경 내용은 운영자 승인 후 반영됩니다.</p><Link className="btn btn--primary" to={`/me/projects/${id}/change-request`}>수정 요청 작성</Link></div>}
 			<form id={formId} onSubmit={onApply} />
 			<ProjectEditStudio title={<>작품 수정{isPrivileged && project.isIncomplete && <span className="incomplete-badge">불완전</span>}</>} secondaryAction={<Link className="btn btn--secondary project-edit-header__back" to={isPrivileged ? '/admin/projects' : '/me/projects'} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 돌아가시겠어요?'))) event.preventDefault(); }} aria-disabled={pending}>{isPrivileged ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>} step={step} onStepChange={next => { setNotice(''); setStep(next); }} disabled={pending} notice={notice}
-				introduction={<AdminProjectBasicInfoForm {...info} section="introduction" />}
+				introduction={<><AdminProjectBasicInfoForm {...info} section="introduction" />
+     {wantsPublic && user?.role === 'ADMIN' && <div className="form-field"><label htmlFor="publication-exception">예외 공개 사유 (필수 조건 면제 시)</label><textarea id="publication-exception" value={exceptionReason} maxLength={2000} onChange={event => setExceptionReason(event.target.value)} /><p className="field-hint">파일 검증과 접근 권한은 면제되지 않습니다. 사유와 면제 항목이 기록됩니다.</p></div>}
+     <PublicationFeedback readiness={project.publicationReadiness} onStep={setStep} /></>}
 				game={<AdminProjectBasicInfoForm {...info} section="game" members={<AdminProjectMemberEditor
 								members={members.members} canEditContent={canEditContent} isBusy={pending}
 								errors={showMemberErrors ? members.validationErrors : []}
 								onAdd={members.add} onSwap={members.swap} onUpdate={members.update} onRemove={members.remove}
 							/>} />}
 				files={<>
-					<p className="submission-studio__upload-recommendation">네이티브 빌드·웹 빌드·동영상·스크린샷을 모두 등록하는 것을 권장합니다.</p>
+					<p className="submission-studio__upload-recommendation">공개하려면 포스터·네이티브 게임·동영상이 필요합니다. WebGL·스크린샷·기타 자료는 선택입니다.</p>
 					<AdminProjectPosterUpload project={project} canEditContent={canEditContent} studio />
 					<AdminProjectAssetManager canEditContent={canEditContent} studio />
 				</>}
@@ -209,7 +227,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 					{!pending && !applyError && (!canEditContent ? <p>현재 작품을 직접 수정할 권한이 없습니다.</p> : !hasChanges && !isSuccess ? <p>변경사항이 없습니다.</p> : hasChanges ? <p>{queue.validationError ?? '작품 정보·학생·파일은 적용 후 반영됩니다.'}</p> : null)}
 					{pending && <p role="status">변경사항을 적용하고 있습니다…</p>}
 				</>}
-				actions={<button type="submit" form={formId} className="btn btn--primary" disabled={!canEditContent || !hasChanges || pending || !validChanges}>{pending ? '적용 중…' : '적용'}</button>} />
+				actions={<button type="submit" form={formId} className="btn btn--primary" disabled={!canEditContent || !hasChanges || pending || !validChanges}>{pending ? '적용 중…' : !wantsPublic ? '저장' : project.publicationStatus === 'PUBLIC' ? '변경사항 적용' : '공개 제출'}</button>} />
             <ProjectUploadDialog open={showUploadDialog} busy={pending}
                 title={applyError ? '변경사항을 모두 적용하지 못했어요.' : '변경사항을 적용하고 있어요.'}
                 description={`${values.title || project.title} · 파일 검증 후 작품 정보와 참여 학생을 저장합니다.`}
@@ -219,7 +237,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
                     <button type="button" className="btn btn--secondary" onClick={() => setShowUploadDialog(false)}>편집으로 돌아가기</button>
                     <button type="button" className="btn btn--primary" onClick={() => void onApply()}>다시 적용</button>
                 </>}
-                    <button type="button" className="btn btn--danger btn--small" disabled={!queue.active || cancelAllRequested.current} onClick={() => { cancelAllRequested.current = true; queue.cancelAll(); }}>전체 취소</button>
+                    <button type="button" className="btn btn--danger btn--small" disabled={!queue.active || cancelAllRequested.current} onClick={() => { cancelAllRequested.current = true; queue.cancelAll(); }}>업로드 중단</button>
                 </>}>
                 {applyError != null && <p className="field-error" role="alert">{getApiErrorMessage(applyError)} 일부 변경이 반영되었을 수 있습니다. 완료된 작업은 유지하고 남은 변경사항을 다시 적용하세요.</p>}
                 <AdminProjectUploadProgress />

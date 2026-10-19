@@ -20,7 +20,7 @@ vi.mock('../features/admin/projects/AdminProjectAssetManager', () => ({
 	useAdminProjectUploadQueue: () => ({ entries: control.entries, removals: control.removals, hasChanges: control.queueDirty, isApplying: false, validationError: control.queueError, applyChanges: control.queueApply, setLocked: control.lock }),
 }));
 vi.mock('../lib/env', () => ({ env: { get VISIBILITY_CONTROLS_ENABLED() { return control.visibilityEnabled; } } }));
-const initial = (): AdminProjectDetail => ({ visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: true, id: 7, title: '기존 제목', summary: '소개', description: '설명', slug: 'project', year: 2026, platforms: [], isIncomplete: false, video: null, videos: [], status: 'PUBLISHED', sortOrder: 0, canEdit: true, members: [{ id: 10, name: '학생', studentId: '20260001', sortOrder: 0, userId: null }], assets: [] });
+const initial = (): AdminProjectDetail => ({ publicationStatus: 'PUBLIC', version: 1, visibility: 'PUBLIC', exhibitionVisibility: 'PUBLIC', canChangeVisibility: true, id: 7, title: '기존 제목', summary: '소개', description: '설명', slug: 'project', year: 2026, platforms: [], isIncomplete: false, video: null, videos: [], status: 'PUBLISHED', sortOrder: 0, canEdit: true, members: [{ id: 10, name: '학생', studentId: '20260001', sortOrder: 0, userId: null }], assets: [] });
 let stored: AdminProjectDetail;
 let client: QueryClient;
 function mount() {
@@ -32,14 +32,14 @@ function change(label: string, value: string) { fireEvent.change(screen.getByLab
 function goTo(step: number) { fireEvent.click(screen.getByRole('navigation', { name: '작품 작성 단계' }).querySelectorAll('button')[step]!); }
 function chooseVisibility(label: string) {
  goTo(0);
- fireEvent.change(screen.getByRole('combobox', { name: '공개 범위' }), { target: { value: (screen.getByRole('option', { name: label }) as HTMLOptionElement).value } });
+ fireEvent.change(screen.getByRole('combobox', { name: '공개 여부' }), { target: { value: (screen.getByRole('option', { name: label }) as HTMLOptionElement).value } });
 }
-const apply = () => { const retry = screen.queryByRole('button', { name: '다시 적용' }); if (retry) return retry as HTMLButtonElement; goTo(3); return screen.getByRole('button', { name: '적용' }) as HTMLButtonElement; };
+const apply = () => { const retry = screen.queryByRole('button', { name: '다시 적용' }); if (retry) return retry as HTMLButtonElement; goTo(3); return screen.getByRole('button', { name: /^(변경사항 적용|저장|공개 제출)$/ }) as HTMLButtonElement; };
 beforeEach(() => {
 	stored = initial(); control.entries = []; control.removals = []; control.visibilityEnabled = true; control.role = 'ADMIN'; control.queueDirty = false; control.queueError = null;
 	control.queueApply.mockResolvedValue(undefined);
 	vi.spyOn(adminProjectApi, 'getDetail').mockImplementation(async () => stored);
-	vi.spyOn(adminProjectApi, 'update').mockImplementation(async (_id, body) => { stored = { ...stored, ...body }; return stored; });
+	vi.spyOn(adminProjectApi, 'update').mockImplementation(async (_id, body) => { stored = { ...stored, ...body, publicationStatus: body.publication?.status ?? stored.publicationStatus, version: (stored.version ?? 1) + 1 }; return stored; });
 	vi.spyOn(adminMemberApi, 'add').mockResolvedValue({ id: 20 });
 	vi.spyOn(adminMemberApi, 'update').mockResolvedValue(undefined);
 	vi.spyOn(adminMemberApi, 'remove').mockResolvedValue(undefined);
@@ -49,7 +49,7 @@ afterEach(() => { cleanup(); client?.clear(); vi.restoreAllMocks(); vi.clearAllM
 describe('global project Apply', () => {
 	it('keeps Apply visible across all steps and disables invalid input', async () => {
 		mount(); await ready();
-		const button = () => screen.getByRole('button', { name: '적용' }) as HTMLButtonElement;
+		const button = () => screen.getByRole('button', { name: /^(변경사항 적용|저장|공개 제출)$/ }) as HTMLButtonElement;
 		expect(button().disabled).toBe(true);
 		change('작품명 *', '새 제목');
 		for (const step of [0, 1, 2, 3]) { goTo(step); expect(button().disabled).toBe(false); }
@@ -100,51 +100,21 @@ describe('global project Apply', () => {
   vi.unstubAllGlobals();
  });
 
- it.each([true, false])('uses visibility rather than archive controls when enabled: %s', async enabled => {
-  control.visibilityEnabled = enabled;
+ it('offers exactly private/public and applies private before file changes', async () => {
   mount(); await ready();
-  expect(screen.queryByRole('switch', { name: '작품 보관' })).toBeNull();
-  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 전체 공개');
-  if (enabled) {
-   chooseVisibility('운영자·관리자');
-   fireEvent.click(apply());
-   await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { visibility: 'STAFF' }));
-   expect(stored.status).toBe('PUBLISHED');
-  } else {
-   expect(screen.queryByRole('combobox', { name: '공개 범위' })).toBeNull();
-   expect(screen.getByText(/공개 범위 변경 기능이 비활성화/)).toBeTruthy();
-   expect(apply().disabled).toBe(true);
-  }
+  expect(screen.queryByRole('switch')).toBeNull();
+  chooseVisibility('비공개'); fireEvent.click(apply());
+  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { publication: { status: 'PRIVATE', expectedVersion: 1 } }));
+  expect(vi.mocked(adminProjectApi.update).mock.invocationCallOrder[0]).toBeLessThan(control.queueApply.mock.invocationCallOrder[0]!);
+  expect(stored.publicationStatus).toBe('PRIVATE');
  });
- it('does not claim an untouched audience will be saved after a background restriction', async () => {
-  mount(); await ready();
-  stored = { ...stored, visibility: 'STAFF' };
-  await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
-  await waitFor(() => expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 운영자·관리자'));
-  expect(screen.queryByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeNull();
-  expect(apply().disabled).toBe(true);
-  change('작품명 *', '제목만 변경'); fireEvent.click(apply());
-  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
-  await screen.findByText('적용되었습니다.');
-  expect(stored.visibility).toBe('STAFF');
- });
- it('keeps saved access visible after a failed visibility save and refreshes it after retry and remount', async () => {
-  stored.exhibitionVisibility = 'AUTHENTICATED';
-  vi.mocked(adminProjectApi.update).mockRejectedValueOnce(new Error('저장 실패'));
-  const view = mount(); await ready();
-  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 로그인 사용자');
-  chooseVisibility('운영자·관리자'); fireEvent.click(apply());
-  await screen.findByRole('alert');
-  expect(screen.getByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeTruthy();
-  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 로그인 사용자');
+ it('allows retrying publication without metadata changes', async () => {
+  stored.publicationStatus = 'PRIVATE';
+  mount(); await ready(); chooseVisibility('공개');
+  vi.mocked(adminProjectApi.update).mockRejectedValueOnce(new Error('공개 처리 실패'));
+  fireEvent.click(apply()); await screen.findByRole('alert');
   fireEvent.click(apply());
-  await screen.findByText('적용되었습니다.');
-  expect(adminProjectApi.update).toHaveBeenLastCalledWith(7, { visibility: 'STAFF' });
-  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 운영자·관리자');
-  expect(screen.queryByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeNull();
-  expect(stored.status).toBe('PUBLISHED');
-  view.unmount(); client.clear(); mount(); await ready();
-  expect(screen.getByLabelText('저장된 공개 범위').textContent).toContain('현재 조회 대상: 운영자·관리자');
+  await waitFor(() => expect(stored.publicationStatus).toBe('PUBLIC'));
  });
  it('edits existing links and explicitly clears all links without reviving legacy GitHub', async () => {
   stored = { ...stored, githubUrl: 'https://github.com/legacy', externalLinks: [{ label: '게임', url: 'https://example.com/old' }] };
@@ -194,57 +164,14 @@ describe('global project Apply', () => {
   await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
   expect(stored.platforms).toEqual(['WEB']); expect(stored.hardwareRequirements).toBe('새 하드웨어');
  });
- it('stages visibility until Apply, resets its baseline, and treats a reverted selection as clean', async () => {
+ it('disables publication selection and saving when modification is closed', async () => {
+  control.role = 'USER'; stored.canEdit = false; stored.canChangeVisibility = false;
   mount(); await ready();
-  chooseVisibility('운영자·관리자');
-  expect(adminProjectApi.update).not.toHaveBeenCalled();
-  expect(apply().disabled).toBe(false);
-  chooseVisibility('전체 공개');
-  await waitFor(() => expect(apply().disabled).toBe(true));
-  chooseVisibility('로그인 사용자');
-  fireEvent.click(apply());
-  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { visibility: 'AUTHENTICATED' }));
-  await waitFor(() => expect(apply().disabled).toBe(true));
-  expect((screen.getByLabelText('공개 범위') as HTMLSelectElement).selectedOptions[0].textContent).toContain('로그인 사용자');
-  expect(screen.getByText('적용되었습니다.')).toBeTruthy();
- });
- it('preserves visibility draft across background reads and drops it if capability is revoked before Apply', async () => {
-  mount(); await ready();
-  chooseVisibility('운영자·관리자');
-  stored = { ...stored, description: '외부 설명' };
-  await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
-  expect((screen.getByLabelText('공개 범위') as HTMLSelectElement).selectedOptions[0].textContent).toContain('운영자·관리자');
-  stored = { ...stored, canChangeVisibility: false };
-  await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
-  expect((screen.getByLabelText('공개 범위') as HTMLSelectElement).disabled).toBe(true);
-  expect(screen.queryByText(/선택한 공개 범위는 아직 저장되지 않았습니다/)).toBeNull();
-  change('작품명 *', '제목만 변경'); fireEvent.click(apply());
-  await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '제목만 변경' }));
-  expect(stored.visibility).toBe('PUBLIC');
-  expect(stored.description).toBe('외부 설명');
- });
- it('shows a disabled visibility field and blocks Apply in a locked contributor exhibition', async () => {
-  control.role = 'USER'; stored = { ...stored, canChangeVisibility: false, canEdit: false };
-  mount(); await ready();
-  expect((screen.getByLabelText('공개 범위') as HTMLSelectElement).disabled).toBe(true);
+  expect((screen.getByRole('combobox', { name: '공개 여부' }) as HTMLSelectElement).disabled).toBe(true);
   expect(apply().disabled).toBe(true);
-  expect(screen.getByLabelText('필수 하드웨어').closest('fieldset')?.disabled).toBe(true);
-  expect(screen.getByLabelText('PC').closest('fieldset')?.disabled).toBe(true);
-  fireEvent.click(apply()); expect(adminProjectApi.update).not.toHaveBeenCalled();
  });
-	it('stages visibility and text, applies one PATCH, and resets clean baseline from the response', async () => {
-		const { container } = mount(); await ready(); expect(apply().disabled).toBe(true);
-		chooseVisibility('운영자·관리자'); change('작품명 *', '새 제목');
-		expect(adminProjectApi.update).not.toHaveBeenCalled(); expect(apply().disabled).toBe(false);
-		const button = apply(); expect(button.form?.id).toBe('project-edit-7'); expect(button.closest('form')).toBeNull();
-		expect(container.querySelector('.submission-studio__actions')).toContain(button);
-		fireEvent.click(button);
-		await waitFor(() => expect(adminProjectApi.update).toHaveBeenCalledOnce());
-		expect(adminProjectApi.update).toHaveBeenCalledWith(7, { title: '새 제목', visibility: 'STAFF' });
-		await waitFor(() => expect(apply().disabled).toBe(true)); expect(screen.getByText('적용되었습니다.')).toBeTruthy();
-	});
 	it('disables after toggles and text edits are reverted, preserving draft across background refetch', async () => {
-		mount(); await ready(); chooseVisibility('운영자·관리자'); chooseVisibility('전체 공개');
+		mount(); await ready(); chooseVisibility('비공개'); chooseVisibility('공개');
 		expect(apply().disabled).toBe(true); change('작품명 *', '초안');
 		stored = { ...stored, title: '서버 갱신', description: '외부 설명' };
 		await act(async () => { await client.invalidateQueries({ queryKey: queryKeys.adminProject(7) }); });
@@ -285,14 +212,14 @@ describe('global project Apply', () => {
 	});
 	it('locks metadata, members, and apply while pending and runs publication after domains', async () => {
 		let finish!: () => void; control.queueApply.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve; }));
-		mount(); await ready(); chooseVisibility('운영자·관리자'); fireEvent.click(apply());
+		mount(); await ready(); chooseVisibility('비공개'); fireEvent.click(apply());
 		await screen.findByRole('dialog', { name: '변경사항을 적용하고 있어요.' });
         expect(screen.queryByRole('button', { name: '적용 중…' })).toBeNull();
 		expect(screen.queryByRole('switch', { name: '작품 보관' })).toBeNull();
 		expect(screen.getByLabelText('작품명 *').closest('fieldset')?.disabled).toBe(true);
 		expect(screen.getByLabelText('필수 하드웨어').closest('fieldset')?.disabled).toBe(true);
 		expect(screen.getByLabelText('참여 학생 1 이름').closest('fieldset')?.disabled).toBe(true);
-		expect(control.lock).toHaveBeenCalledWith(true); expect(adminProjectApi.update).not.toHaveBeenCalled();
+		expect(control.lock).toHaveBeenCalledWith(true); expect(stored.publicationStatus).toBe('PRIVATE');
 		await act(async () => finish()); await waitFor(() => expect(apply().disabled).toBe(true)); expect(control.lock).toHaveBeenLastCalledWith(false);
 	});
 	it('blocks queued file validation before member or metadata writes', async () => {

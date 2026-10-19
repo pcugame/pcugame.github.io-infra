@@ -1,3 +1,4 @@
+import { mockPublicationStatus } from './publication';
 import type { WebglDisplayAnalysis } from '@pcu/contracts';
 import type { MockContext, MockProject } from './context';
 import { MockHttpError } from './context';
@@ -42,7 +43,7 @@ export function canReadVisibility(ctx: MockContext, visibility: string) {
  return visibility === 'PUBLIC' || (visibility === 'AUTHENTICATED' && !!ctx.user) || (visibility === 'STAFF' && isStaff(ctx));
 }
 export function canReadPublicProject(ctx: MockContext, project: MockProject) {
- return !project.isChangeRequestDraft && project.status !== 'DRAFT' && (isRelated(ctx,project) || (canReadVisibility(ctx, project.visibility) && canReadVisibility(ctx, projectExhibition(ctx,project).visibility)));
+ return !project.isChangeRequestDraft && mockPublicationStatus(project) === 'PUBLIC' && canReadVisibility(ctx, projectExhibition(ctx,project).visibility);
 }
 export function bumpProjectVersion(ctx: MockContext, project: MockProject) { project.version = (project.version ?? 0) + 1; project.updatedAt = ctx.now(); }
 export const projectVersion = bumpProjectVersion;

@@ -50,7 +50,7 @@ export function createSubmission(ctx: MockContext, payload: SubmitProjectPayload
     const slugBase = payload.title.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}-]/gu, '') || 'project';
     let slug = slugBase; let suffix = 1;
     while (Object.values(ctx.state.projects).some(item => item.exhibitionId === exhibition.id && item.slug === slug)) slug = `${slugBase}-${++suffix}`;
-    project = { id, exhibitionId: exhibition.id, title: payload.title, slug, year: exhibition.year, status: 'DRAFT', visibility: payload.visibility ?? 'PUBLIC', exhibitionVisibility: exhibition.visibility,
+    project = { id, exhibitionId: exhibition.id, title: payload.title, slug, year: exhibition.year, status: 'DRAFT', publicationStatus: 'PRIVATE', visibility: payload.visibility ?? 'PUBLIC', exhibitionVisibility: exhibition.visibility,
       canChangeVisibility: true, platforms: payload.platforms ?? [], hardwareRequirements: payload.hardwareRequirements ?? '', isIncomplete: false, sortOrder: 0, summary: payload.summary ?? '', description: payload.description ?? '', externalLinks: payload.externalLinks ?? [],
       video: null, videos: [], assets: [], members: payload.members.map((member, index) => ({ ...member, id: assetId(ctx), sortOrder: member.sortOrder ?? index, userId: member.userId ?? Object.values(MOCK_USERS).find(user => user.studentId === member.studentId)?.id ?? null })),
       version: 1, webglNetworkPolicyVersion: 1, createdByUserId: actorId, createdAt: ctx.now(), updatedAt: ctx.now() };
