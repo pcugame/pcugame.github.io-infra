@@ -126,8 +126,8 @@ function widget(kind: 'IMAGE' | 'VIDEO' | 'GAME' | 'WEBGL', file: File | undefin
 	if (kind === 'VIDEO') return <DirectVideoUploadWidget {...props} projectId={7} initialFiles={file ? [file] : []} submissionItems={item ? [item] : []} />;
 	return <DirectImageUploadWidget {...props} owner={{ type: 'PROJECT', id: 7 }} kind="IMAGE" initialFiles={file ? [file] : []} submissionItems={item ? [item] : []} />;
 }
-function mount(kind: 'IMAGE' | 'VIDEO' | 'GAME' | 'WEBGL', file?: File, complete = vi.fn(), cancelled = vi.fn(), item?: SubmissionBinding, operationKey?: string, role = 'ADMIN') {
-	return { complete, cancelled, ...render(<StrictMode><QueryClientProvider client={client(role)}>{widget(kind, file, complete, cancelled, item, operationKey)}</QueryClientProvider></StrictMode>) };
+function mount(kind: 'IMAGE' | 'VIDEO' | 'GAME' | 'WEBGL', file?: File, complete = vi.fn(), cancelled = vi.fn(), item?: SubmissionBinding, operationKey?: string, role = 'ADMIN', autoStart = Boolean(file)) {
+	return { complete, cancelled, ...render(<StrictMode><QueryClientProvider client={client(role)}>{widget(kind, file, complete, cancelled, item, operationKey, autoStart)}</QueryClientProvider></StrictMode>) };
 }
 const cancel = () => fireEvent.click(screen.getByRole('button', { name: /^취소/ }));
 const retry = () => fireEvent.click(screen.getByRole('button', { name: /시작|재시도|이어올리기/ }));
@@ -368,8 +368,17 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s job handoff through React
 	it.each(['resume', 'cancel'] as const)('recovers a lost published-project create response and actually completes %s', async action => {
 		const net = network(kind); net.controls.loseCreate = true; net.controls.failLookup = true;
 		const chosen = file(); const old = mount(kind, chosen);
-		await screen.findByRole('alert'); old.unmount(); const view = mount(kind, chosen);
-		await screen.findByRole('alert'); net.controls.failLookup = false;
+		// An alert alone does not mean the automatic transfer has settled.
+		await screen.findByRole('button', { name: '재시도' }); old.unmount();
+		// Reentry must wait for the explicit resume/cancel action under test.
+		net.controls.holdLookup = true;
+		const view = mount(kind, chosen, vi.fn(), vi.fn(), undefined, undefined, 'ADMIN', false);
+		await waitFor(() => expect(net.lookups).toHaveLength(1));
+		await act(async () => net.lookups[0]!.resolve(json({}, 503)));
+		await screen.findByRole('alert');
+		expect(view.complete).not.toHaveBeenCalled(); expect(view.cancelled).not.toHaveBeenCalled();
+		expect(net.completes).toHaveLength(0); expect(net.deletes).toHaveLength(0);
+		net.controls.holdLookup = false; net.controls.failLookup = false;
 		if (action === 'cancel') { cancel(); await waitFor(() => expect(view.cancelled).toHaveBeenCalledOnce()); expect(net.deletes).toHaveLength(1); expect(view.complete).not.toHaveBeenCalled(); }
 		else { retry(); await waitFor(() => expect(view.complete).toHaveBeenCalledOnce()); expect(net.completes).toHaveLength(1); expect(view.cancelled).not.toHaveBeenCalled(); }
 		expect(net.creates).toHaveLength(1);
