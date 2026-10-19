@@ -204,7 +204,7 @@ export async function cancelDirectAssetUploadSession(sessionId: string): Promise
 /** Poll JSON control state only; Garage never passes archive bytes through the API. */
 export async function waitForDirectAssetReady(
 	sessionId: string,
-	options: { intervalMs?: number; maxIntervalMs?: number; timeoutMs?: number; signal?: AbortSignal } = {},
+	options: { intervalMs?: number; maxIntervalMs?: number; timeoutMs?: number; signal?: AbortSignal; onStatus?: (status: DirectAssetUploadStatus) => void } = {},
 ): Promise<DirectAssetUploadStatus> {
 	const intervalMs = options.intervalMs ?? 1_500;
 	const maxIntervalMs = options.maxIntervalMs ?? 15_000;
@@ -225,6 +225,7 @@ export async function waitForDirectAssetReady(
 			await wait(Math.min(maxIntervalMs, intervalMs * (2 ** Math.min(transientFailures, 4))), options.signal);
 			continue;
 		}
+		options.onStatus?.(status);
 		if (status.state === 'READY') return status;
 		if (['REJECTED', 'CANCELLED', 'EXPIRED'].includes(status.state)) {
 			throw new Error(`Direct upload ${status.state.toLowerCase()}`);
