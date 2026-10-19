@@ -294,6 +294,7 @@ if (!publicationId || submitted.data.status !== 'DRAFT') throw new Error('submis
 try {
   const hidden = await fetch(`${apiBase}/api/public/projects/${submitted.data.slug}`);
   if (hidden.status !== 404) throw new Error(`DRAFT was publicly visible (${hidden.status})`);
+  await fetchJson(`${apiBase}/api/admin/projects/${publicationId}`, {method:'PATCH',headers:{Cookie:cookie,Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({publication:{status:'PUBLIC',expectedVersion:1,exceptionReason:'Integration worker smoke without media'}})});
   await fetchJson(`${apiBase}/api/admin/projects/${publicationId}/submission/finalize`, {
     method: 'POST', headers: { Cookie: cookie, Origin: origin },
   });

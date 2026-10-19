@@ -127,7 +127,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 
 	it.each([false, true])('serializes authenticated detail and PATCH with populated materials=%s', async (populated) => {
 		const project = await db.project.create({ data: {
-			exhibitionId, creatorId: adminId, title: 'Before', slug: randomUUID(), status: 'PUBLISHED',
+			exhibitionId, creatorId: adminId, title: 'Before', slug: randomUUID(), status: 'PUBLISHED', publicationStatus: 'PUBLIC',
 		} });
 		const attachments = [];
 		if (populated) {
@@ -173,7 +173,7 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 
 	it.each([[], [{ label: 'GitHub', url: 'https://github.com/pcu/game' }, { label: '홈페이지', url: 'https://game.example.test/' }]].map((links) => [links]))('roundtrips external links through authenticated PATCH and both detail serializers: %j', async (externalLinks) => {
 		const enrichedLinks = externalLinks.map(({ label, url }) => { const service = detectExternalLinkService(url); return { label, url, ...(service ? { service } : {}) }; });
-		const project = await db.project.create({ data: { exhibitionId, creatorId: adminId, title: 'External links', slug: randomUUID(), status: 'PUBLISHED', githubUrl: 'https://github.com/legacy/game' } });
+		const project = await db.project.create({ data: { exhibitionId, creatorId: adminId, title: 'External links', slug: randomUUID(), status: 'PUBLISHED', publicationStatus: 'PUBLIC', githubUrl: 'https://github.com/legacy/game' } });
 		const url = `/api/admin/projects/${project.id}`;
 		const headers = { cookie: sessionCookie, origin: 'http://localhost:5173' };
 		const legacy = await app.inject({ method: 'GET', url, headers });
@@ -223,6 +223,9 @@ describe.runIf(enabled)('Phase 2 project HTTP response compatibility', () => {
 		const projectId = created.json().data.id as number;
 		expect(created.json().data).toMatchObject({ status: 'DRAFT', items: [] });
 		expect((await app.inject({ method: 'GET', url: `/api/public/projects/${projectId}` })).statusCode).toBe(404);
+        const version = (await db.project.findUniqueOrThrow({where:{id:projectId}})).version;
+        const approved = await app.inject({method:'PATCH',url:`/api/admin/projects/${projectId}`,headers:{cookie:sessionCookie,origin:'http://localhost:5173'},payload:{publication:{status:'PUBLIC',expectedVersion:version,exceptionReason:'Metadata-only legacy fixture'}}});
+        expect(approved.statusCode,approved.body).toBe(200);
 		const finalized = await app.inject({
 			method: 'POST', url: `/api/admin/projects/${projectId}/submission/finalize`,
 			headers: { cookie: sessionCookie, origin: 'http://localhost:5173' },

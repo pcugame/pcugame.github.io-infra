@@ -1,4 +1,15 @@
 BEGIN;
+ALTER TABLE project_submission_items DROP CONSTRAINT project_submission_items_required_check;
+ALTER TABLE project_submission_items DROP CONSTRAINT project_submission_items_slot_check;
+ALTER TABLE project_submission_items DROP CONSTRAINT project_submission_items_kind_slot_check;
+ALTER TABLE project_submission_items ADD CONSTRAINT project_submission_items_kind_slot_check CHECK (
+ (NOT required AND slot = 'history:' || id)
+ OR (kind = 'GAME' AND slot = 'game') OR (kind = 'WEBGL' AND slot = 'webgl')
+ OR (kind = 'POSTER' AND slot = 'poster') OR (kind = 'VIDEO' AND slot ~ '^video:[0-9]+$')
+ OR (kind = 'IMAGE' AND slot ~ '^image:[0-9]+$')
+ OR (kind = 'DOCUMENT' AND slot ~ '^document:[0-9]+$')
+ OR (kind = 'ATTACHMENT' AND slot ~ '^attachment:[0-9]+$')
+);
 CREATE TYPE "PublicationStatus" AS ENUM ('PRIVATE', 'PUBLIC');
 ALTER TABLE projects
  ADD COLUMN publication_status "PublicationStatus" NOT NULL DEFAULT 'PRIVATE',
@@ -14,6 +25,7 @@ CREATE TABLE publication_exceptions (
  waived_items text[] NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX publication_exceptions_project_id_idx ON publication_exceptions(project_id);
+CREATE INDEX projects_publication_status_idx ON projects(publication_status);
 UPDATE projects SET publication_status = 'PUBLIC', legacy_publication = true
  WHERE status IN ('PUBLISHED', 'ARCHIVED') AND visibility <> 'STAFF';
 INSERT INTO publication_exceptions(id, project_id, reason, kind, project_version, waived_items)
@@ -22,5 +34,4 @@ INSERT INTO publication_exceptions(id, project_id, reason, kind, project_version
 UPDATE projects SET hidden_cancelled = true WHERE status = 'DRAFT' AND EXISTS (
  SELECT 1 FROM project_submissions s WHERE s.project_id = projects.id AND s.state = 'CANCELLED'
 );
-CREATE INDEX projects_publication_status_idx ON projects(publication_status);
 COMMIT;

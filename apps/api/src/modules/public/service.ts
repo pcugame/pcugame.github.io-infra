@@ -314,9 +314,6 @@ export async function getProjectDetail(
 	}
 
 	const display = resolveWebglDisplay({ ...project, webglDisplayMode: project.webglDisplayMode as WebglDisplayMode | undefined, analysis: webglEntryUrl ? project.currentWebglDeployment?.displayAnalysis : null });
-	if (project.status === 'DRAFT') {
-		throw new Error('DRAFT project escaped the public repository boundary');
-	}
 	return {
 		id: project.id,
 		visibility: project.visibility,

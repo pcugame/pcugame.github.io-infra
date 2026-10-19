@@ -235,7 +235,7 @@ model PublicationException {
   kind String
   projectVersion Int @map("project_version")
   waivedItems String[] @map("waived_items")
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   @@index([projectId])
   @@map("publication_exceptions")
 }
@@ -289,6 +289,7 @@ model Project {
   webglNetworkRequests WebglNetworkRequest[]
 
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
+  @@index([publicationStatus])
   @@index([exhibitionId, status, sortOrder])
   @@index([status])
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "projects_title_trgm_idx")

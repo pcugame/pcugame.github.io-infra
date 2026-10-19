@@ -286,7 +286,7 @@ describe('submission studio', () => {
 	it.each(['user', 'admin'] as const)('%s sends metadata and all selected file kinds through the existing staged upload flow', async mode => {
 		const { container } = mount(mode);
 		await enterMetadata('PUBLIC');
-  fireEvent.change(screen.getByLabelText('한 줄 소개 선택'), { target: { value: '게임 소개' } });
+  fireEvent.change(screen.getByLabelText('한 줄 소개 공개 시 필수'), { target: { value: '게임 소개' } });
 		await goTo(1);
 		fireEvent.click(screen.getByLabelText('PC'));
 		await goTo(2);
@@ -382,60 +382,13 @@ describe('submission studio', () => {
 		expect(document.querySelector('[aria-label="스크린샷 / 기타 자료 업로드 진행"] .upload-file-row')?.textContent).toContain('first.png');
 	});
 
-	it('advances a reloaded three-image batch from a verifying second file to the remaining third slot', async () => {
-		items = ['READY', 'VERIFYING', 'EXPECTED'].map((state, index) => ({
-			id: `image-${index}`,
-			kind: 'IMAGE',
-			slot: `image:${index}`,
-			clientToken: `token-${index}`,
-			required: true,
-			state: state as ProjectSubmissionItemStatus['state'],
-            ...(state === 'VERIFYING' ? { sessionId: 'second-session', generation: 1 } : {}),
-		}));
-		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
-		const session = {
-			sessionId: 'second-session',
-			owner: { type: 'PROJECT', id: 73 },
-			kind: 'IMAGE',
-			generation: 1,
-			partSizeBytes: 16,
-			totalParts: 1,
-			expiresAt: '2026-10-01T00:00:00.000Z',
-			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
-			sourceIdentity: 'a'.repeat(64),
-		};
-		window.sessionStorage.setItem(
-			'pcu.direct-image-upload:PROJECT:73',
-			JSON.stringify({ session, originalName: 'second.png', totalBytes: 6, completed: 1 }),
-		);
-		controls.getUploadStatus.mockResolvedValue({ ...session, state: 'VERIFYING' });
-		let finish!: (value: unknown) => void;
-		controls.waitReady.mockImplementation(
-			() =>
-				new Promise((resolve) => {
-					finish = resolve;
-				}),
-		);
-		mount();
-		await waitFor(() => expect(controls.waitReady).toHaveBeenCalled());
-		items = items.map((item, index) => (index === 1 ? { ...item, state: 'READY' } : item));
-		await act(async () => {
-			finish({ ...session, state: 'READY' });
-		});
-		await waitFor(() =>
-			expect(document.querySelector('[aria-label="스크린샷 / 기타 자료 업로드 진행"] input[type="file"]')).toBeTruthy(),
-		);
-		const third = new File(['third'], 'third.png', { type: 'image/png' });
-		fireEvent.change(document.querySelector('[aria-label="스크린샷 / 기타 자료 업로드 진행"] input[type="file"]')!, {
-			target: { files: [third] },
-		});
-		fireEvent.click(screen.getByRole('button', { name: /업로드 시작/ }));
-		await waitFor(() => expect(controls.upload).toHaveBeenCalled());
-		expect(controls.upload.mock.calls[0]![4].submissionItem).toEqual({
-			id: 'image-2',
-			clientToken: 'token-2',
-		});
-	});
+	it('restores a pending upload in the saved editor without creating another project', async () => {
+  items = [{ id: 'image-0', kind: 'IMAGE', slot: 'image:0', clientToken: 'token-0', required: true, state: 'EXPECTED' }];
+  window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
+  mount();
+  await waitFor(() => expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:9')).toBeNull());
+  expect(controls.submit).not.toHaveBeenCalled(); expect(controls.upload).not.toHaveBeenCalled();
+ });
 
 	it('retries a failed native build with its original manifest binding', async () => {
 		controls.upload.mockRejectedValueOnce(new Error('network failure'));

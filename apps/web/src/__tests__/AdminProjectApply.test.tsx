@@ -194,13 +194,13 @@ describe('global project Apply', () => {
 		await waitFor(() => expect(apply().disabled).toBe(true)); expect(adminMemberApi.add).toHaveBeenCalledOnce();
 	});
 	it('validates every metadata field and members before any operation', async () => {
-		mount(); await ready(); change('작품명 *', ''); change('한 줄 소개 선택', 'x'.repeat(301)); change('상세 설명 선택', 'x'.repeat(5001)); change('오프셋(작을수록 상단에 표시)', '-1');
+		mount(); await ready(); change('작품명 *', ''); change('한 줄 소개 공개 시 필수', 'x'.repeat(301)); change('상세 설명 선택', 'x'.repeat(5001)); change('오프셋(작을수록 상단에 표시)', '-1');
 		expect(apply().disabled).toBe(true); fireEvent.submit(document.getElementById('project-edit-7')!); await screen.findByText('제목을 입력하세요');
-		expect(screen.getByLabelText('한 줄 소개 선택').parentElement?.querySelector('.field-error')).toBeTruthy();
+		expect(screen.getByLabelText('한 줄 소개 공개 시 필수').parentElement?.querySelector('.field-error')).toBeTruthy();
 		expect(screen.getByLabelText('상세 설명 선택').parentElement?.querySelector('.field-error')).toBeTruthy();
 		expect(screen.getByLabelText('오프셋(작을수록 상단에 표시)').parentElement?.querySelector('.field-error')).toBeTruthy();
 		expect(control.queueApply).not.toHaveBeenCalled(); expect(adminProjectApi.update).not.toHaveBeenCalled();
-		change('작품명 *', '제목'); change('한 줄 소개 선택', ''); change('상세 설명 선택', ''); change('오프셋(작을수록 상단에 표시)', '0'); change('참여 학생 1 이름', '');
+		change('작품명 *', '제목'); change('한 줄 소개 공개 시 필수', ''); change('상세 설명 선택', ''); change('오프셋(작을수록 상단에 표시)', '0'); change('참여 학생 1 이름', '');
 		expect(apply().disabled).toBe(true); fireEvent.submit(document.getElementById('project-edit-7')!); await screen.findByText(/참여 학생 1: 이름/);
 		expect(adminMemberApi.update).not.toHaveBeenCalled(); expect(control.queueApply).not.toHaveBeenCalled();
 	});

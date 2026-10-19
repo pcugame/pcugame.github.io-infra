@@ -43,12 +43,13 @@ describe('mock project canonical CRUD through API client',()=>{
   const search=await adminProjectApi.list({search:'2088100',sort:'title',order:'asc'});expect(search.items.length).toBeGreaterThan(0);expect(search.items.every(p=>p.memberStudentIds.includes('2088100'))).toBe(true);
  });
  it('projects metadata writes into authenticated public detail, honors slug/year and visibility',async()=>{
-  const updated=AdminProjectDetailSchema.parse(await adminProjectApi.update(1,{title:'수정된 작품',summary:'저장됨',visibility:'AUTHENTICATED'}));
+  const updated=AdminProjectDetailSchema.parse(await adminProjectApi.update(1,{title:'수정된 작품',summary:'저장됨'}));
   expect(updated.title).toBe('수정된 작품');
+  await updateMockState(s=>{s.exhibitions.find(e=>e.id===s.projects[1].exhibitionId)!.visibility='AUTHENTICATED';});
   const publicDetail=PublicProjectDetailResponseSchema.parse(await publicApi.getProjectDetail('dragon-slayer',2025));expect(publicDetail.title).toBe(updated.title);
   await expect(publicApi.getProjectDetail('dragon-slayer',2024)).rejects.toMatchObject({status:404});
   await selectMockUser('anonymous');await expect(publicApi.getProjectDetail(1)).rejects.toMatchObject({status:404});
-  const year=PublicYearProjectsResponseSchema.parse(await publicApi.getYearProjects(2025));expect(year.items.some(p=>p.id===1)).toBe(false);
+  await expect(publicApi.getYearProjects(2025)).rejects.toMatchObject({status:404});
   await selectMockUser('other');expect((await publicApi.getProjectDetail(1)).title).toBe(updated.title);
  });
  it('derives owner and participant access and closed capabilities dynamically',async()=>{

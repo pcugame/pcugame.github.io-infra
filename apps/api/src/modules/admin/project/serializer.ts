@@ -65,6 +65,7 @@ function imageSourceFor(asset: {
 
 /** Serialize a project detail record to the API response shape */
 export type SerializableProject = {
+ publicationRequested?: boolean;
  publicationStatus?: 'PRIVATE' | 'PUBLIC';
  version?: number;
 	assetUploads?: RequiredAssetsSource['assetUploads'];
@@ -216,6 +217,8 @@ export function createProjectSerializer(
 			video,
 			videos,
 			status: project.status,
+ publicationError: project.publicationJob?.state === 'FAILED' ? '파일 배치 작업을 완료하지 못했습니다. 필수 자료를 확인한 뒤 공개 제출 버튼으로 다시 시도하세요.' : undefined,
+ publicationRequested: project.publicationRequested,
  publicationStatus: project.publicationStatus,
  version: project.version,
  publicationReadiness: publicationReadiness(project),

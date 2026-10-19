@@ -1,3 +1,4 @@
+import { publicationReadiness } from '@pcu/contracts';
 import { StudioPreview } from '../../features/project-submission/studio/StudioPreview';
 import { ProjectUploadDialog } from '../../components/common/ProjectUploadDialog';
 import { usePreventWindowClose } from '../../components/common/usePreventWindowClose';
@@ -33,7 +34,7 @@ import { getClientUploadLimits } from '../../lib/upload-limits';
 
 const metadata = (project: AdminProjectDetail): UpdateProjectFormInput => ({
 	externalLinks: effectiveExternalLinks(project.externalLinks, project.githubUrl),
-	visibility: project.publicationStatus === 'PUBLIC' ? 'PUBLIC' : 'STAFF',
+	visibility: project.publicationStatus === 'PUBLIC' || project.publicationRequested ? 'PUBLIC' : 'STAFF',
 	title: project.title,
 	summary: project.summary ?? '',
 	description: project.description ?? '',
@@ -51,6 +52,7 @@ export default function AdminProjectEditPage() {
 		queryKey: queryKeys.adminProject(id),
 		queryFn: () => adminProjectApi.getDetail(id),
 		enabled: !isNaN(id),
+  refetchInterval: query => query.state.data?.publicationRequested && !query.state.data.publicationError ? 2000 : false,
 	});
 	if (isLoading) return <LoadingSpinner />;
 	if (error && !project) return <ErrorMessage error={error} onReset={() => refetch()} />;
@@ -87,6 +89,12 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 	const [notice, setNotice] = useState('');
 	const mutations = useAdminProjectMutations({ projectId: id, project });
 	const wantsPublic = values.visibility === 'PUBLIC';
+ const currentReadiness = project.publicationReadiness ? (() => {
+  const inputs = publicationReadiness({title:values.title ?? '',summary:values.summary,platforms:values.platforms ?? [],members:members.members.map(member=>({name:member.name,studentId:member.studentId ?? ''})),poster:null,assets:[]},user?.role);
+  const requirements = project.publicationReadiness.requirements.map(item => ['title','summary','members','platforms'].includes(item.key) ? inputs.requirements.find(input=>input.key===item.key)! : item);
+  const blockers = requirements.filter(item=>item.state!=='READY').map(item=>item.key);
+  return {...project.publicationReadiness,requirements,blockers,ready:blockers.length===0};
+ })() : undefined;
  const needsPublication = wantsPublic && project.publicationStatus !== 'PUBLIC';
  const hasChanges = form.formState.isDirty || members.hasChanges || queue.hasChanges || needsPublication;
 	const validChanges = UpdateProjectFormSchema.safeParse(values).success && members.validationErrors.length === 0 && !queue.validationError;
@@ -201,7 +209,8 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 			<ProjectEditStudio title={<>작품 수정{isPrivileged && project.isIncomplete && <span className="incomplete-badge">불완전</span>}</>} secondaryAction={<Link className="btn btn--secondary project-edit-header__back" to={isPrivileged ? '/admin/projects' : '/me/projects'} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 돌아가시겠어요?'))) event.preventDefault(); }} aria-disabled={pending}>{isPrivileged ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기'}</Link>} step={step} onStepChange={next => { setNotice(''); setStep(next); }} disabled={pending} notice={notice}
 				introduction={<><AdminProjectBasicInfoForm {...info} section="introduction" />
      {wantsPublic && user?.role === 'ADMIN' && <div className="form-field"><label htmlFor="publication-exception">예외 공개 사유 (필수 조건 면제 시)</label><textarea id="publication-exception" value={exceptionReason} maxLength={2000} onChange={event => setExceptionReason(event.target.value)} /><p className="field-hint">파일 검증과 접근 권한은 면제되지 않습니다. 사유와 면제 항목이 기록됩니다.</p></div>}
-     <PublicationFeedback readiness={project.publicationReadiness} onStep={setStep} /></>}
+     <PublicationFeedback readiness={currentReadiness} onStep={setStep} />
+     {project.publicationError && <p className="field-error" role="alert">{project.publicationError}</p>}</>}
 				game={<AdminProjectBasicInfoForm {...info} section="game" members={<AdminProjectMemberEditor
 								members={members.members} canEditContent={canEditContent} isBusy={pending}
 								errors={showMemberErrors ? members.validationErrors : []}

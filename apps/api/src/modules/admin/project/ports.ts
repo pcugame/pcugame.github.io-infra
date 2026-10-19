@@ -77,6 +77,7 @@ export interface ProjectSubmissionRecord {
 }
 
 export interface ProjectListRecord extends RequiredAssetsSource {
+ publicationRequested?: boolean;
  publicationStatus?: 'PRIVATE' | 'PUBLIC';
  version?: number;
 	visibility: Visibility;

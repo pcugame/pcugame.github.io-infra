@@ -14,7 +14,9 @@ export function createMemberRepository(client: PrismaClient) {
 		}, actor: Actor) {
 			return client.$transaction(async (tx) => {
 				await assertProjectWriteAccessInTransaction(tx, actor, data.projectId);
+				const before = await tx.project.findUniqueOrThrow({where:{id:data.projectId},include:publicationSnapshotInclude});
 				const member = await tx.projectMember.create({ data });
+    if (before.publicationStatus === 'PUBLIC') assertPublicationNotWorsened(before, await tx.project.findUniqueOrThrow({where:{id:data.projectId},include:publicationSnapshotInclude}));
 				await tx.project.update({ where: { id: data.projectId }, data: { version: { increment: 1 } } });
 				return member;
 			});

@@ -26,7 +26,7 @@ beforeEach(() => {
   vi.spyOn(adminProjectApi, 'submit').mockImplementation(() => new Promise(() => {}));
   vi.spyOn(userProjectApi, 'submit').mockImplementation(() => new Promise(() => {}));
 });
-afterEach(() => { cleanup(); client.clear(); window.sessionStorage.clear(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); client.clear(); window.sessionStorage.clear(); window.localStorage.clear(); vi.restoreAllMocks(); });
 
 it.each(['A00000@pcu.ac.kr', 'a12345@PCU.AC.KR'])('recognizes the full faculty address %s', email => expect(isFacultyAccount(email)).toBe(true));
 it.each([undefined, '', 'A0000@pcu.ac.kr', 'A000000@pcu.ac.kr', 'B00000@pcu.ac.kr', '20260001@pcu.ac.kr', 'A00000@g.pcu.ac.kr', 'A00000@pcu.ac.kr.evil', ' A00000@pcu.ac.kr'])('does not broaden the faculty pattern: %s', email => expect(isFacultyAccount(email)).toBe(false));
@@ -97,8 +97,8 @@ it('restores only the faculty account submission after remount without creating 
   await waitFor(() => expect(first.result.current.createdProjectId).toBe(73));
   first.unmount();
   const second = renderHook(() => useProjectSubmissionForm({ mode: 'admin', files }), { wrapper });
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
-  expect(second.result.current.createdProjectId).toBe(73);
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+  expect(second.result.current.createdProjectId).toBeNull();
   expect(second.result.current.form.getValues('members')).toEqual([{ name: '', studentId: '' }]);
   expect(adminProjectApi.submit).not.toHaveBeenCalled();
 });

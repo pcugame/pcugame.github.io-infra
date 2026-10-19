@@ -33,6 +33,8 @@ export type ProjectRequiredAssets = {
 };
 
 export type AdminProjectItem = {
+ publicationRequested?: boolean;
+ publicationError?: string;
  publicationStatus?: PublicationStatus;
  version?: number;
  publicationReadiness?: PublicationReadiness;
@@ -98,6 +100,8 @@ export type AdminProjectListResponse = {
 };
 
 export type AdminProjectDetail = {
+ publicationRequested?: boolean;
+ publicationError?: string;
  publicationStatus?: PublicationStatus;
  version?: number;
  publicationReadiness?: PublicationReadiness;

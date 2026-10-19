@@ -81,7 +81,7 @@ function resultShape(value: unknown): value is SubmitProjectResult {
 }
 
 function serializeSubmissionItems(submission: ProjectSubmissionRecord): ProjectSubmissionItemStatus[] {
-	return submission.items.map((item) => ({
+	return submission.items.filter(item => item.required).map((item) => ({
 		id: item.id,
 		kind: item.kind,
 		slot: item.slot,

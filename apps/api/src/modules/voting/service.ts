@@ -241,7 +241,7 @@ export function createVotingService(
 					// Explicitly deny automatic publication of private/staged project bytes.
 					if (
 						p
-							? p.visibility !== 'PUBLIC' || p.exhibition.visibility !== 'PUBLIC' || p.status !== 'PUBLISHED'
+							? p.publicationStatus !== 'PUBLIC' || p.exhibition.visibility !== 'PUBLIC'
 							: a.exhibition?.visibility !== 'PUBLIC'
 					)
 						throw forbidden('공개 승인이 완료된 이미지만 사용할 수 있습니다.');

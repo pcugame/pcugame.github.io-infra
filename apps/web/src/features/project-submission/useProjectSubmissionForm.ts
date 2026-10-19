@@ -359,8 +359,9 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 
 	const goToEdit = useCallback(() => {
 		if (!createdProjectId) return;
+  if (pendingStorageKey) window.sessionStorage.removeItem(pendingStorageKey);
 		navigate(`/admin/projects/${createdProjectId}/edit`);
-	}, [createdProjectId, navigate]);
+	}, [createdProjectId, navigate, pendingStorageKey]);
 
 	return {
 		copy,

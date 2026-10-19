@@ -158,14 +158,12 @@ export function createAssetsRepository(
 				`);
 				const asset = rows[0];
 					if (!asset || asset.projectId === null) return null;
-				if (asset.kind === 'VIDEO') {
-					const submission = await tx.projectSubmission.findUnique({
-						where: { projectId: asset.projectId }, select: { state: true },
-					});
-					if (submission && ['PENDING', 'FINALIZING'].includes(submission.state)) {
-						throw conflict('Submission videos must be removed through submission cancellation');
-					}
-				}
+                const submission = await tx.projectSubmission.findUnique({where:{projectId:asset.projectId},select:{state:true}});
+                if (submission?.state === 'FINALIZING') throw conflict('파일 배치 작업이 진행 중입니다. 완료 후 다시 시도하세요.');
+                if (submission?.state === 'PENDING') {
+                    const items = await tx.projectSubmissionItem.findMany({where:{resultAssetId:id},select:{id:true}});
+                    for (const item of items) await tx.projectSubmissionItem.update({where:{id:item.id},data:{required:false,slot:`history:${item.id}`}});
+                }
 				const representations = await tx.$queryRaw<LockedRepresentationDeletionRow[]>(Prisma.sql`
 					SELECT
 						"id",

@@ -1,5 +1,6 @@
 import { publicationReadiness } from '@pcu/contracts';
-import { PublicationFeedback, publicationRequirementLabels } from '../../../components/project/PublicationFeedback';
+import { PublicationFeedback } from '../../../components/project/PublicationFeedback';
+import { publicationRequirementLabels } from '../../../components/project/publication-labels';
 import { Link } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { Controller, useWatch, type FieldErrors } from 'react-hook-form';

@@ -44,7 +44,7 @@ export function SubmissionUploadDialog({ submission, files, title }: {
   {showGameProgress && selectedNames.length === 0 && submissionItems.some(item => item.state !== 'READY' && item.state !== 'VERIFYING') && <p className="project-upload-dialog__recovery">업로드가 중단되었습니다. ‘파일 선택’을 누르고 동일한 파일을 다시 선택해 주세요.</p>}
   {error != null && <div className="error-box" role="alert">{getApiErrorMessage(error)}</div>}
   {submission.canRetryStatus && <Button disabled={submission.isFinalizing} onClick={() => void submission.retryStatus()}>제출 상태 다시 확인</Button>}
-  {import.meta.env.VITE_MOCK === 'true' && submission.canRetryPublication && <Button disabled={submission.isFinalizing} onClick={() => void submission.retryPublication()}>Mock 발행 다시 시도</Button>}
+  {error != null && createdProjectId !== null && <Button variant="secondary" onClick={submission.goToEdit}>작품에서 수정·재시도</Button>}
   {createdProjectId === null ? <><UploadFileRows names={selectedNames} /><p role="status">작품 정보를 저장하고 있습니다.</p></> : <>
    <SubmissionUploadProgress zone="poster" projectId={createdProjectId} fileNames={fileNames} files={files} items={submissionItems} onComplete={onComplete} />
    {studioFileGroups.map(group => <SubmissionUploadProgress key={group.id} zone="files" group={group} projectId={createdProjectId} fileNames={fileNames} files={files} items={submissionItems} onComplete={onComplete} />)}

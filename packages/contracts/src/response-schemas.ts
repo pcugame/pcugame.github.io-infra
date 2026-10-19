@@ -294,6 +294,8 @@ export const ProjectRequiredAssetsSchema = z.object({
 }).strict();
 
 export const AdminProjectItemSchema = z.object({
+ publicationRequested: z.boolean().optional(),
+ publicationError: z.string().optional(),
  publicationStatus: PublicationStatusSchema.optional(),
  version: z.number().int().optional(),
  publicationReadiness: PublicationReadinessSchema.optional(),
@@ -332,6 +334,8 @@ export const AdminProjectListResponseSchema = z.object({
 }).strict();
 
 export const AdminProjectDetailSchema = z.object({
+ publicationRequested: z.boolean().optional(),
+ publicationError: z.string().optional(),
  publicationStatus: PublicationStatusSchema.optional(),
  version: z.number().int().optional(),
  publicationReadiness: PublicationReadinessSchema.optional(),

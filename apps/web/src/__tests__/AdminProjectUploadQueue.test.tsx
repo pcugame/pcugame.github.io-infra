@@ -78,6 +78,7 @@ function drop(files: File[], poster = false) {
 const file = (name: string, type = '') => new File(['x'], name, { type });
 beforeEach(() => {
 	viewer.role = 'ADMIN';
+ vi.spyOn(adminProjectApi, 'getDetail').mockResolvedValue(project);
 	vi.spyOn(publicApi, 'getUploadConfig').mockResolvedValue({
 		materialMaxCount: 3,
 		materialMaxBytes: 1024,
@@ -267,7 +268,7 @@ it('cancellation and deletion undo return to clean without API writes', () => {
 	fireEvent.click(screen.getByRole('button', { name: '삭제 취소' }));
 	expect(screen.getByTestId('dirty').textContent).toBe('false');
 });
-it('applies staged deletes before uploads and does not repeat a successful delete on retry', async () => {
+it('preserves stored files until replacement uploads succeed and does not repeat completed uploads', async () => {
 	const remove = vi.spyOn(adminAssetApi, 'remove').mockResolvedValue();
 	api.uploadDirectAssetFile.mockRejectedValueOnce(new Error('실패')).mockResolvedValueOnce({ status: 'READY', sessionId: 'one' });
 	setup();
@@ -279,7 +280,7 @@ it('applies staged deletes before uploads and does not repeat a successful delet
 	// The widget error renders before the parent Apply promise finishes.
 	// Production disables Apply until that promise settles; wait for the same boundary.
 	await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
-	expect(remove).toHaveBeenCalledExactlyOnceWith(11);
+	expect(remove).not.toHaveBeenCalled();
 	apply();
 	await waitFor(() => expect(screen.getByTestId('dirty').textContent).toBe('false'));
 	expect(remove).toHaveBeenCalledOnce();
@@ -360,7 +361,7 @@ it('counts staged video removals before validating capacity', async () => {
 	fireEvent.click(screen.getAllByRole('button', { name: '삭제' })[0]!);
 	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
-	expect(remove).toHaveBeenCalledExactlyOnceWith(11);
+	expect(remove).not.toHaveBeenCalled();
 });
 it('stages stored poster and WebGL deletion until Apply', async () => {
 	const remove = vi.spyOn(adminAssetApi, 'remove').mockResolvedValue();
@@ -389,38 +390,24 @@ it('keeps Apply dirty for refresh when a failed widget completes through its own
 	expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
 });
 
-it.each(['complete', 'cancel', 'fail'] as const)('handles widget %s while Apply awaits a staged deletion', async (outcome) => {
-	let finishUpload!: (value: unknown) => void;
-	let failUpload!: (error: Error) => void;
-	let finishDelete!: () => void;
-	api.uploadDirectAssetFile.mockRejectedValueOnce(new Error('first failure'))
-		.mockImplementationOnce((_owner, _file, _kind, _progress, options) => new Promise((resolve, reject) => {
-			finishUpload = resolve; failUpload = reject;
-			options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
-		}));
-	vi.spyOn(adminAssetApi, 'remove').mockImplementation(() => new Promise<void>((resolve) => { finishDelete = resolve; }));
-	setup();
-	drop([file('a.jpg'), file('remaining.mp4')]);
-	apply();
-	fireEvent.click(await screen.findByRole('button', { name: '재시도' }));
-	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
-	fireEvent.click(screen.getByRole('button', { name: '삭제' }));
-	apply();
-	await waitFor(() => expect(adminAssetApi.remove).toHaveBeenCalledOnce());
-	if (outcome === 'complete') await act(async () => finishUpload({ status: 'READY', sessionId: 'manual' }));
-	else if (outcome === 'fail') await act(async () => failUpload(new Error('second failure')));
-	else {
-			fireEvent.click(within(screen.getByRole('list', { name: '변경 파일 업로드 진행' })).getByRole('button', { name: '취소' }));
-			await waitFor(() => expect(screen.queryByText('a.jpg')).toBeNull());
-		}
-	await act(async () => finishDelete());
-	if (outcome === 'complete') {
-		await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(3));
-		expect(api.uploadDirectAssetFile.mock.calls[2]![1].name).toBe('remaining.mp4');
-	} else {
-		await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
-		expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
-	}
+it.each(['complete', 'cancel', 'fail'] as const)('preserves stored files until replacement outcome %s is known', async outcome => {
+ let finish!: (value: unknown) => void;
+ let fail!: (error: Error) => void;
+ api.uploadDirectAssetFile.mockImplementationOnce((_owner, _file, _kind, _progress, options) => new Promise((resolve, reject) => {
+  finish = resolve; fail = reject; options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+ }));
+ const remove = vi.spyOn(adminAssetApi, 'remove').mockResolvedValue();
+ setup(); fireEvent.click(screen.getByRole('button', { name: '삭제' })); drop([file('replacement.jpg')]); apply();
+ await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce()); expect(remove).not.toHaveBeenCalled();
+ if (outcome === 'complete') {
+  await act(async () => finish({ status: 'READY', sessionId: 'ready' }));
+  await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith(11));
+ } else {
+  if (outcome === 'fail') await act(async () => fail(new Error('failed')));
+  else fireEvent.click(within(screen.getByRole('list', { name: '변경 파일 업로드 진행' })).getByRole('button', { name: '취소' }));
+  await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
+  expect(remove).not.toHaveBeenCalled();
+ }
 });
 
 it('binds student draft retries through the user submission endpoint', async () => {

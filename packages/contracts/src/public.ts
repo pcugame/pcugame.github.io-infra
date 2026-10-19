@@ -123,5 +123,5 @@ export type PublicProjectDetailResponse = {
 	webglUrl?: string;
 	/** Stable trusted API player URL; never exchanged for a file capability. */
 	webglPlayUrl?: string;
-	status: 'PUBLISHED' | 'ARCHIVED';
+	status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
 };

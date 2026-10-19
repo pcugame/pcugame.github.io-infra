@@ -107,7 +107,7 @@ export function advanceUploadJobs(ctx: MockContext): void {
     if (submission.state !== 'FINALIZING' || submission.publicationState === 'FAILED' || !submission.finalizedAt || ctx.state.controls.worker === 'paused' || ms(ctx) - Date.parse(submission.finalizedAt) < 600) continue;
     if (ctx.state.controls.worker === 'fail') { submission.publicationState = 'FAILED'; submission.publicationError = 'Mock publication failed'; continue; }
     submission.state = 'PUBLISHED'; submission.publicationState = 'COMPLETED'; delete submission.publicationError;
-    const project = ctx.state.projects[submission.projectId]; if (project && !project.isChangeRequestDraft) { project.status = 'PUBLISHED'; project.updatedAt = ctx.now(); submission.projectStatus = 'PUBLISHED'; }
+    const project = ctx.state.projects[submission.projectId]; if (project && !project.isChangeRequestDraft) { project.status = 'PUBLISHED'; project.publicationStatus = 'PUBLIC'; project.updatedAt = ctx.now(); submission.projectStatus = 'PUBLISHED'; }
   }
 }
 function assertProjectUpload(ctx: MockContext, project: MockProject): void {

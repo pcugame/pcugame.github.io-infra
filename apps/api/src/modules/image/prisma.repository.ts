@@ -138,9 +138,9 @@ export function createPrismaImageWorkerRepository(
 				if (!current || current.state !== 'VERIFYING') throw new Error('Image session is no longer verifying');
 				const owner = ownerData(session);
 				const project = current.projectId === null ? null : await tx.project.findUniqueOrThrow({
-					where: { id: current.projectId }, select: { status: true },
+					where: { id: current.projectId }, select: { submission: { select: { state: true } } },
 				});
-				const staged = project?.status === 'DRAFT';
+				const staged = project?.submission?.state === 'PENDING';
 				if (staged && !current.submissionItemId) throw new Error('DRAFT image upload lacks its submission item identity');
 				let assetId = current.resultAssetId;
 				if (!assetId) {

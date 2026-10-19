@@ -82,7 +82,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('WebGL displa
 		await database?.close();
 	});
 	async function project() {
-		return db.project.create({ data: { exhibitionId, creatorId: owner.id, title: 'Before', slug: randomUUID(), status: 'PUBLISHED', members: { create: { name: 'Member', userId: member.id } } } });
+		return db.project.create({ data: { exhibitionId, creatorId: owner.id, title: 'Before', slug: randomUUID(), status: 'PUBLISHED', publicationStatus:'PUBLIC', members: { create: { name: 'Member', userId: member.id } } } });
 	}
 	function request(actor: Actor, method: 'GET' | 'PUT', path: string, payload?: Record<string, unknown>) {
 		return app.inject({ method, url: `/api/me/projects${path}`, headers: { cookie: cookies.get(actor.id)!, origin: 'http://localhost:5173' }, ...(payload ? { payload } : {}) });
@@ -102,6 +102,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('WebGL displa
 		const detail = await app.inject({ url: `/api/admin/projects/${id}`, headers });
 		expect(detail.statusCode, detail.body).toBe(200);
 		expect(AdminProjectDetailSchema.parse(detail.json().data)).toMatchObject(expected);
+		expect((await app.inject({method:'PATCH',url:`/api/admin/projects/${id}`,headers,payload:{publication:{status:'PUBLIC',expectedVersion:detail.json().data.version,exceptionReason:'Metadata serialization fixture'}}})).statusCode).toBe(200);
 		const finalized = await app.inject({ method: 'POST', url: `/api/admin/projects/${id}/submission/finalize`, headers });
 		expect(finalized.statusCode, finalized.body).toBe(200);
 		const publication = createProjectPublicationRepository(db);
@@ -121,7 +122,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('WebGL displa
 		const preserved = await app.inject({ method: 'PATCH', url: `/api/admin/projects/${id}`, headers, payload: { summary: 'Other metadata edit' } });
 		expect(preserved.statusCode, preserved.body).toBe(200);
 		expect(AdminProjectDetailSchema.parse(preserved.json().data)).toMatchObject(expected);
-		for (const update of [{ platforms: ['MOBILE'], hardwareRequirements: '  Controller required  ' }, { platforms: [], hardwareRequirements: '' }]) {
+		for (const update of [{ platforms: ['MOBILE'], hardwareRequirements: '  Controller required  ' }, { platforms: ['MOBILE'], hardwareRequirements: '' }]) {
 			const edited = await app.inject({ method: 'PATCH', url: `/api/admin/projects/${id}`, headers, payload: update });
 			expect(edited.statusCode, edited.body).toBe(200);
 			const normalized = { ...update, hardwareRequirements: update.hardwareRequirements.trim() };

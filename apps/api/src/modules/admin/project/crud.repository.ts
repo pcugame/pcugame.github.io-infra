@@ -671,14 +671,14 @@ export function createProjectCrudRepository(
 				});
 				if (!submission) throw notFound('Project submission not found');
 				await assertSubmissionActor(submission, actor, tx);
-				if (submission.state === 'PUBLISHED' && submission.project.status === 'PUBLISHED') return submission;
-				if (submission.state === 'FINALIZING' && submission.project.status === 'DRAFT') {
+				if (submission.state === 'PUBLISHED') return submission;
+				if (submission.state === 'FINALIZING') {
      if (submission.publicationJob?.state !== 'FAILED') return submission;
      await tx.projectSubmission.update({ where: { id: submission.id }, data: { state: 'PENDING' } });
      submission.state = 'PENDING';
     }
     if (submission.publicationJob && ['FAILED', 'CANCELLED'].includes(submission.publicationJob.state)) await tx.projectPublicationJob.delete({ where: { submissionId: submission.id } });
-				if (submission.state !== 'PENDING' || submission.project.status !== 'DRAFT') {
+				if (submission.state !== 'PENDING') {
 					throw conflict('Project submission cannot be finalized');
 				}
     await guardMutation(tx, actor as Actor, projectId);
@@ -688,7 +688,7 @@ export function createProjectCrudRepository(
     const abandoned = await tx.projectSubmissionItem.findMany({ where: { submissionId: submission.id, state: { in: ['EXPECTED', 'FAILED', 'CANCELLED'] }, OR: [{ uploadSession: null }, { uploadSession: { state: { in: ['REJECTED', 'CANCELLED', 'EXPIRED'] } } }] }, select: { id: true } });
     const abandonedIds = abandoned.map(item => item.id);
     if (abandonedIds.length) {
-     await tx.projectSubmissionItem.updateMany({ where: { id: { in: abandonedIds } }, data: { required: false } });
+     for (const id of abandonedIds) await tx.projectSubmissionItem.update({ where: { id }, data: { required: false, slot: `history:${id}` } });
      submission.items = submission.items.filter(item => !abandonedIds.includes(item.id));
     }
 
@@ -813,7 +813,7 @@ export function createProjectCrudRepository(
 				if (!submission) throw notFound('Project submission not found');
 				await assertSubmissionActor(submission, actor, tx);
 				if (submission.state === 'CANCELLED') return submission;
-				if (!['PENDING', 'FINALIZING'].includes(submission.state) || submission.project.status !== 'DRAFT') {
+				if (!['PENDING', 'FINALIZING'].includes(submission.state)) {
 					throw conflict('Published project submission cannot be cancelled');
 				}
     await guardMutation(tx, actor as Actor, projectId);

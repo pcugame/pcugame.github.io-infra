@@ -4,7 +4,7 @@ import type { PrismaClient } from '../../generated/prisma/client.js';
 import { createPrismaClientForDatabase } from '../../lib/prisma-client.js';
 
 /** Production repositories use real migrations but cannot see shared CI workers or fixtures. */
-export async function createIsolatedMigratedDatabase(baseUrl: string) {
+export async function createIsolatedMigratedDatabase(baseUrl: string, stopBefore?: string) {
 	const schema = `integration_${randomUUID().replaceAll('-', '')}`;
 	const bootstrap = createPrismaClientForDatabase(baseUrl);
 	const clients: PrismaClient[] = [];
@@ -22,6 +22,7 @@ export async function createIsolatedMigratedDatabase(baseUrl: string) {
 		const directories = (await readdir(migrations, { withFileTypes: true }))
 			.filter((entry) => entry.isDirectory()).map(({ name }) => name).sort();
 		for (const directory of directories) {
+            if (directory === stopBefore) break;
 			const connection = createPrismaClientForDatabase(baseUrl);
 			try {
 				const sql = await readFile(new URL(`${directory}/migration.sql`, migrations), 'utf8');

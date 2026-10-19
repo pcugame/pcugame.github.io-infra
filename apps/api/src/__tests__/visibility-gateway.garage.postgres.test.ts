@@ -65,7 +65,7 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 		for (const bucket of [publicBucket, protectedBucket]) expect(await db.storageBucket.findUnique({ where: { bucket } })).not.toBeNull();
 		owner = await user('USER'); member = await user('USER'); staff = await user('OPERATOR'); outsider = await user('USER');
 		exhibitionId = (await db.exhibition.create({ data: { year: 2093, title: marker } })).id;
-		projectId = (await db.project.create({ data: { exhibitionId, creatorId: owner.id, title: marker, slug: marker, status: 'PUBLISHED', members: { create: { name: 'Member', userId: member.id } } } })).id;
+		projectId = (await db.project.create({ data: { exhibitionId, creatorId: owner.id, title: marker, slug: marker, status: 'PUBLISHED', publicationStatus:'PUBLIC', members: { create: { name: 'Member', userId: member.id } } } })).id;
 		await db.asset.create({ data: { projectId, kind: 'IMAGE', representations: { create: [{ role: 'ORIGINAL', bucket: publicBucket, objectKey: imageKey, state: 'READY', mimeType: 'image/webp', sizeBytes: 16 }, { role: 'CARD_480', bucket: publicBucket, objectKey: renditionKey, state: 'READY', mimeType: 'image/webp', sizeBytes: 16 }, { role: 'DISPLAY_960', bucket: publicBucket, objectKey: imageKey + '-display', state: 'READY', mimeType: 'image/webp', sizeBytes: 16 }] } } });
 		const poster = await db.asset.create({ data: { exhibitionId, kind: 'POSTER', representations: { create: [{ role: 'ORIGINAL', bucket: publicBucket, objectKey: posterKey, state: 'READY', mimeType: 'image/webp', sizeBytes: 16 }, { role: 'CARD_480', bucket: publicBucket, objectKey: posterKey + '-card', state: 'READY', mimeType: 'image/webp', sizeBytes: 16 }, { role: 'DISPLAY_960', bucket: publicBucket, objectKey: posterKey + '-display', state: 'READY', mimeType: 'image/webp', sizeBytes: 16 }] } } });
 		await db.exhibition.update({ where: { id: exhibitionId }, data: { posterAssetId: poster.id } });
@@ -105,7 +105,7 @@ describe.runIf(enabled)('visibility gateway live Nginx/Garage fixtures', () => {
 		const anonymousAccess = await grant(`${api}/api/assets/${gameId}/download?variant=original`, null);
 		await db.project.update({ where: { id: projectId }, data: { status: 'ARCHIVED' } });
 		for (const url of [`${publicOrigin}/${imageKey}`, signed, anonymousAccess.url]) expect((await get(url)).status).toBe(200);
-		await db.project.update({ where: { id: projectId }, data: { visibility: 'STAFF' } });
+		await db.project.update({ where: { id: projectId }, data: { publicationStatus:'PRIVATE' } });
 		await denied(`${publicOrigin}/${imageKey}`); await denied(`${publicOrigin}/${renditionKey}`); await denied(signed); await denied(anonymousAccess.url);
 		expect((await request('/api/file-access', outsider, { url: `${publicOrigin}/${imageKey}` })).status).toBe(403);
 		for (const session of [owner, member, staff]) { const access = await grant(`${publicOrigin}/${imageKey}`, session); expect((await get(access.url)).status).toBe(200); }

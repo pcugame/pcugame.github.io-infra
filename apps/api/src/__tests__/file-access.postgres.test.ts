@@ -72,6 +72,18 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION']==='true')('live file capa
   await db.authSession.delete({where:{id:sid}});expect((await gate(grant.url,'protected')).statusCode).toBe(403);
   sid=(await db.authSession.create({data:{userId:owner,expiresAt:new Date(time.getTime()+3600000)}})).id;
  });
+ it('revokes previously public raw paths and anonymous playback grants immediately on unpublish',async()=>{
+  const project=await db.project.update({where:{id:projectId},data:{publicationStatus:'PUBLIC'}});
+  await db.exhibition.update({where:{id:project.exhibitionId},data:{visibility:'PUBLIC'}});
+  const asset=await db.asset.findFirstOrThrow({where:{projectId,kind:'VIDEO'}});
+  const grant=(await app.inject({method:'POST',url:'/api/file-access',headers:{origin},payload:{url:`http://api.test/api/assets/${asset.id}/download?variant=playback`}})).json().data;
+  expect((await gate(image)).statusCode).toBe(204);
+  expect((await gate(grant.url,'protected')).statusCode).toBe(204);
+  await db.project.update({where:{id:projectId},data:{publicationStatus:'PRIVATE'}});
+  expect((await gate(image)).statusCode).toBe(403);
+  expect((await gate(grant.url,'protected')).statusCode).toBe(403);
+  expect((await issue(image,otherSid)).statusCode).toBe(403);
+ });
  it('allows manifest-only relative WebGL paths and rejects other deployments, traversal and removed deployment',async()=>{
   const dep=await db.webglDeployment.findUniqueOrThrow({where:{id:deploymentId}});
   const grant=(await issue('http://files.test/'+dep.entryObjectKey)).json().data;

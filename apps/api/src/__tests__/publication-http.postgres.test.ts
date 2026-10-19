@@ -86,7 +86,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('publication 
 
  it('defaults private, serializes empty media and readiness, blocks users/operators and audits admin override', async () => {
   const exhibition = await db.exhibition.create({ data: { year: 2099, title: randomUUID() } });
-  const p = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Private', slug: randomUUID(), status: 'PUBLISHED', members: { create: { name: 'Student', studentId: '1', userId: member.id } } } });
+  const p = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Private', slug: randomUUID(), status: 'DRAFT', members: { create: { name: 'Student', studentId: '1', userId: member.id } } } });
   expect(p.publicationStatus).toBe('PRIVATE');
   const url = `/api/admin/projects/${p.id}`;
   for (const actor of [owner, member, operator, admin]) {

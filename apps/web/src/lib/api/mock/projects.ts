@@ -131,7 +131,7 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
  const p=getProject(ctx,Number(match[1])),route=match[2],memberId=match[3];
  if(!route&&method==='GET')return adminProjectDetail(ctx,assertProjectRead(ctx,p));
  assertProjectWrite(ctx,p);
- if(!route){methodAllowed(method,['PATCH','DELETE']);if(method==='DELETE'){removeProject(ctx,p.id);return;}const body=parse(UpdateProjectBaseSchema,options.body);if(body.status!==undefined&&!isStaff(ctx))throw new MockHttpError(403,'FORBIDDEN','Users cannot change project status');const { publication, ...metadata } = body; Object.assign(p,metadata);
+ if(!route){methodAllowed(method,['PATCH','DELETE']);if(method==='DELETE'){removeProject(ctx,p.id);return;}const body=parse(UpdateProjectBaseSchema,options.body);if(body.status!==undefined&&!isStaff(ctx))throw new MockHttpError(403,'FORBIDDEN','Users cannot change project status');const { publication, ...metadata } = body; Object.assign(p,metadata); if (body.visibility !== undefined) p.publicationStatus = body.visibility === 'STAFF' ? 'PRIVATE' : 'PUBLIC';
  if (publication) {
   if (publication.expectedVersion !== p.version) throw new MockHttpError(409,'CONFLICT','작품이 변경되었습니다.');
   if (publication.exceptionReason && ctx.user?.role !== 'ADMIN') throw new MockHttpError(403,'FORBIDDEN','관리자만 예외 공개할 수 있습니다.');

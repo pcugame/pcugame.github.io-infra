@@ -329,92 +329,19 @@ describe('submission selection and recovery', () => {
 		expect(screen.getByRole('dialog').querySelector('.upload-file-row')).toBeTruthy();
 	});
 
-	it('advances a reloaded three-image batch from a verifying second file to the remaining third slot', async () => {
-		items = ['READY', 'VERIFYING', 'EXPECTED'].map((state, index) => ({
-			id: `image-${index}`,
-			kind: 'IMAGE',
-			slot: `image:${index}`,
-			clientToken: `token-${index}`,
-			required: true,
-			state: state as ProjectSubmissionItemStatus['state'],
-            ...(state === 'VERIFYING' ? { sessionId: 'second-session', generation: 1 } : {}),
-		}));
-		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
-		const session = {
-			sessionId: 'second-session',
-			owner: { type: 'PROJECT', id: 73 },
-			kind: 'IMAGE',
-			generation: 1,
-			partSizeBytes: 16,
-			totalParts: 1,
-			expiresAt: '2026-10-01T00:00:00.000Z',
-			sourceIdentityAlgorithm: 'SHA256_BLOCK_MANIFEST_V1',
-			sourceIdentity: 'a'.repeat(64),
-		};
-		window.sessionStorage.setItem(
-			'pcu.direct-image-upload:PROJECT:73',
-			JSON.stringify({ session, originalName: 'second.png', totalBytes: 6, completed: 1 }),
-		);
-		controls.getUploadStatus.mockResolvedValue({ ...session, state: 'VERIFYING' });
-		let finish!: (value: unknown) => void;
-		controls.waitReady.mockImplementation(
-			() =>
-				new Promise((resolve) => {
-					finish = resolve;
-				}),
-		);
-		mount();
-		await waitFor(() => expect(controls.waitReady).toHaveBeenCalled());
-		items = items.map((item, index) => (index === 1 ? { ...item, state: 'READY' } : item));
-		await act(async () => {
-			finish({ ...session, state: 'READY' });
-		});
-		await waitFor(() =>
-			expect(screen.getByRole('dialog').querySelector('[aria-label="스크린샷 / 기타 자료 업로드 진행"] input[type="file"]')).toBeTruthy(),
-		);
-		const third = new File(['third'], 'third.png', { type: 'image/png' });
-		fireEvent.change(screen.getByRole('dialog').querySelector('[aria-label="스크린샷 / 기타 자료 업로드 진행"] input[type="file"]')!, {
-			target: { files: [third] },
-		});
-		fireEvent.click(screen.getByRole('button', { name: /업로드 시작/ }));
-		await waitFor(() => expect(controls.upload).toHaveBeenCalled());
-		expect(controls.upload.mock.calls[0]![4].submissionItem).toEqual({
-			id: 'image-2',
-			clientToken: 'token-2',
-		});
-	});
+	it('restores a pending upload in the saved editor without creating another project', async () => {
+  items = [{ id: 'image-0', kind: 'IMAGE', slot: 'image:0', clientToken: 'token-0', required: true, state: 'EXPECTED' }];
+  window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
+  mount();
+  await waitFor(() => expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:9')).toBeNull());
+  expect(controls.submit).not.toHaveBeenCalled(); expect(controls.upload).not.toHaveBeenCalled();
+ });
 
-	it('retains existing file recovery inputs after reloading a pending DRAFT without browser files', async () => {
-		items = [
-			{
-				id: 'poster-item',
-				kind: 'POSTER',
-				slot: 'poster',
-				clientToken: 'poster-token',
-				required: true,
-				state: 'EXPECTED',
-			},
-			{
-				id: 'game-item',
-				kind: 'GAME',
-				slot: 'game',
-				clientToken: 'game-token',
-				required: true,
-				state: 'EXPECTED',
-			},
-		];
-		window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
-		mount();
-		await screen.findByText('전체 취소');
-		expect(screen.getByRole('dialog').querySelector('[aria-label="포스터 업로드 진행"] input[type="file"]')).toBeTruthy();
-		expect(screen.getByRole('dialog').querySelector('[aria-label="네이티브 빌드 업로드 진행"] input[type="file"]')).toBeTruthy();
-		expect(controls.submit).not.toHaveBeenCalled();
-		expect(controls.upload).not.toHaveBeenCalled();
-		controls.cancel.mockResolvedValue(undefined);
-		fireEvent.click(screen.getByRole('button', { name: '전체 취소' }));
-		await waitFor(() => expect(controls.cancel).toHaveBeenCalledWith(73));
-		await waitFor(() =>
-			expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:9')).toBeNull(),
-		);
-	});
+	it('retains saved metadata when returning to the editor without browser-selected files', async () => {
+  items = [{ id: 'game', kind: 'GAME', slot: 'game', clientToken: 'token', required: true, state: 'FAILED' }];
+  window.sessionStorage.setItem('pcu.pending-project-submission:user:9', JSON.stringify(draft()));
+  mount();
+  await waitFor(() => expect(window.sessionStorage.getItem('pcu.pending-project-submission:user:9')).toBeNull());
+  expect(controls.cancel).not.toHaveBeenCalled(); expect(controls.submit).not.toHaveBeenCalled();
+ });
 });

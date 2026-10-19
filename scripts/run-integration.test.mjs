@@ -71,7 +71,9 @@ const expectedSuites = {
 		'src/__tests__/project-year-http.postgres.test.ts'
 	],
 	'visibility': [
-		'src/__tests__/visibility-http.postgres.test.ts',
+		'src/__tests__/publication-http.postgres.test.ts',
+   'src/__tests__/publication-migration.postgres.test.ts',
+   'src/__tests__/visibility-http.postgres.test.ts',
 		'src/__tests__/visibility-rollback.postgres.test.ts',
 		'src/__tests__/file-access.postgres.test.ts',
 		'src/__tests__/webgl-play.postgres.test.ts',

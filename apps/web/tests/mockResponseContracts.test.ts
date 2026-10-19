@@ -104,7 +104,7 @@ describe('all-surface mock HTTP response contracts', () => {
     await checked('POST',`/api/admin/webgl-network-requests/${request.id}/approve`,{reason:'Gate approval'});
     await checked('POST',`/api/admin/webgl-network-requests/${request.id}/revoke`,{reason:'Gate revocation'});
     await selectMockUser('owner');
-    const state=await updateMockState(state=>{state.projects[1].visibility='AUTHENTICATED';});
+    const state=await updateMockState(state=>{state.projects[1].publicationStatus='PRIVATE';});
     const document=state.projects[1].assets.find(asset=>asset.kind==='DOCUMENT');
     expect(document&&'downloadUrl' in document).toBe(true);
     const access=await checked('POST','/api/file-access',{url:document&&'downloadUrl' in document?document.downloadUrl:''});
