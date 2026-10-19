@@ -1,19 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
+import { createIsolatedMigratedDatabase } from './helpers/isolated-migrated-database.js';
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { createAssetsRepository } from '../modules/assets/repository.js';
 
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 describe.runIf(enabled)('project video ordering transactions', () => {
 	let db: PrismaClient;
+	let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let creatorId: number;
 	let exhibitionId: number;
 	const projects: number[] = [];
 	let protectedBucket = 'protected';
 	beforeAll(async () => {
-		db = createPrismaClientForDatabase(process.env['DATABASE_URL']!);
+		database = await createIsolatedMigratedDatabase(process.env['DATABASE_URL']!);
+		db = database.createClient();
 		protectedBucket = (await db.storageBucket.findUnique({ where: { visibility: 'PROTECTED' } }))?.bucket ?? protectedBucket;
 		await db.storageBucket.upsert({ where: { bucket: protectedBucket }, create: { bucket: protectedBucket, visibility: 'PROTECTED' }, update: {} });
 		const token = randomUUID();
@@ -25,7 +27,7 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 		await db.project.deleteMany({ where: { id: { in: projects } } });
 		if (exhibitionId) await db.exhibition.delete({ where: { id: exhibitionId } });
 		if (creatorId) await db.user.delete({ where: { id: creatorId } });
-		await db.$disconnect();
+		await database.close();
 	});
 	async function fixture(orders: Array<number | null> = [0, 1, 2], status: 'DRAFT' | 'PUBLISHED' = 'PUBLISHED') {
 		const project = await db.project.create({ data: { exhibitionId, creatorId, slug: randomUUID(), title: 'Video test', status } });
@@ -79,12 +81,18 @@ describe.runIf(enabled)('project video ordering transactions', () => {
 		expect((await db.asset.findUniqueOrThrow({ where: { id: ids[index]! } })).status).toBe('DELETING');
 		await expect(createProjectCrudRepository(db).setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
 	});
-	it.each(['PENDING', 'FINALIZING'] as const)('blocks ordinary reorder and delete during %s submission', async (state) => {
+	it.each(['PENDING', 'FINALIZING'] as const)('blocks reorder during %s submission and permits deletion only while pending', async (state) => {
 		const { projectId, ids } = await fixture([0, 1, 2], 'DRAFT');
 		await db.projectSubmission.create({ data: { projectId, actorId: creatorId, state } });
 		await expect(createProjectCrudRepository(db).setProjectVideoOrder(projectId, ids, ids)).rejects.toMatchObject({ statusCode: 409 });
-		await expect(createAssetsRepository(db).claimAssetForDeletion(ids[0]!)).rejects.toMatchObject({ statusCode: 409 });
-		expect(await current(projectId)).toHaveLength(3);
+		if (state === 'FINALIZING') {
+			await expect(createAssetsRepository(db).claimAssetForDeletion(ids[0]!)).rejects.toMatchObject({ statusCode: 409 });
+			expect(await current(projectId)).toHaveLength(3);
+		} else {
+			await createAssetsRepository(db).claimAssetForDeletion(ids[0]!);
+			expect(await current(projectId)).toEqual(ids.slice(1).map((id, videoSortOrder) => ({ id, videoSortOrder })));
+			expect((await db.asset.findUniqueOrThrow({ where: { id: ids[0]! } })).status).toBe('DELETING');
+		}
 	});
 	it('refuses reorder for an over-limit legacy project without removing videos', async () => {
 		const { projectId, ids } = await fixture([0, 1, 2, 3, 4, null]);
