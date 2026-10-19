@@ -8,6 +8,9 @@ import {
 	SOURCE_IDENTITY_BLOCK_SIZE_BYTES,
 } from '../lib/file-identity';
 
+// Existing control-plane cases route the storage adapter through their fetch fixture.
+vi.mock('../lib/api/upload-part-transport', () => ({ putUploadPart: (capability: { url: string; requiredHeaders: Record<string, string> }, body: Blob, signal?: AbortSignal) => fetch(capability.url, { method: 'PUT', headers: capability.requiredHeaders, body, signal }) }));
+
 function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
 	return new Response(JSON.stringify({ ok: true, data }), {
 		status: init.status ?? 200,
