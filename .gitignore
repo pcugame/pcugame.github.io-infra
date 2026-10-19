@@ -49,3 +49,7 @@ apps/web/src/pages/admin/AdminPreview.tsx
 # Reviewed Quadlet adoption policy
 !server/quadlet/ADOPTION.md
 !server/quadlet/COMPATIBILITY.md
+
+# Reviewed slot deployment runbook and Python caches
+!docs/operations/rolling-deployment.md
+__pycache__/

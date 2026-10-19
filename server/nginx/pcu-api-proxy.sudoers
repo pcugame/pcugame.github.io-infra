@@ -1,0 +1,2 @@
+# Install with visudo -cf, root:root mode 0440. Helper and parent must be root-owned.
+gh-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pcu-api-proxy status, /usr/local/sbin/pcu-api-proxy check, /usr/local/sbin/pcu-api-proxy switch a, /usr/local/sbin/pcu-api-proxy switch b

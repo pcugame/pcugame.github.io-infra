@@ -2,6 +2,8 @@
 """Offline deploy.sh structural parity with innocuous fixtures and process doubles."""
 import json
 import os
+import re
+import runpy
 from pathlib import Path
 import shlex
 import shutil
@@ -147,7 +149,18 @@ class Parity(unittest.TestCase):
                     self.assertEqual(unit['After'], ['gp-postgres.service' if name == 'gp-api' else 'gp-api.service'])
                 for dependency in ('Wants', 'Requires', 'BindsTo', 'PartOf', 'WantedBy'):
                     self.assertNotIn(dependency, unit)
-                self.assertEqual(unit['StopTimeout'], ['10'])
+                if name == 'gp-api':
+                    runtime = runpy.run_path(str(HERE / 'runtime-env.py'))
+                    schema = (HERE.parents[1] / 'apps/api/src/config/env.ts').read_text()
+                    maximum = re.search(r'SHUTDOWN_DRAIN_MS:.*?\.max\(([\d_]+)\)', schema)
+                    self.assertIsNotNone(maximum)
+                    self.assertEqual(int(maximum[1].replace('_', '')), runtime['SHUTDOWN_MAX_MS'])
+                    stop = int(unit['StopTimeout'][0])
+                    service_stop = int(unit['TimeoutStopSec'][0])
+                    self.assertGreaterEqual(stop * 1000, runtime['SHUTDOWN_MAX_MS'] + 5000)
+                    self.assertGreaterEqual(service_stop, stop + 10)
+                else:
+                    self.assertEqual(unit['StopTimeout'], ['10'])
                 self.assertEqual(unit['Restart'], ['always'])
             self.assertEqual(len(list(output.iterdir())), 10)
             self.assertEqual(output.stat().st_mode & 0o777, 0o700)
@@ -159,6 +172,11 @@ class Parity(unittest.TestCase):
                 result = generate(generator, output, generated, clean_env() | {'HOME': str(root)})
                 self.assertEqual(result.returncode, 0, 'offline Quadlet generation failed')
                 assert_graph(self, generated)
+                api_service = directives(generated / 'gp-api.service')
+                api_definition = directives(output / 'gp-api.container')
+                self.assertEqual(api_service['TimeoutStopSec'], api_definition['TimeoutStopSec'])
+                start = shlex.split(api_service['ExecStart'][0])
+                self.assertEqual(start[start.index('--stop-timeout') + 1], api_definition['StopTimeout'][0])
 
     def test_defaults(self): self.scenario({})
 

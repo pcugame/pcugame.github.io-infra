@@ -2,7 +2,9 @@
 
 일반 운영 배포는 `Deploy Release`를 `master`에서 수동 실행한다. 정확한 source SHA의 검증된 불변 이미지를 사용하고, Web·API·DB migration을 같은 release에서 처리한다. master push에 따른 이미지 빌드는 운영 적용과 별개이다.
 
-이 브랜치의 release 코드는 Quadlet 전환이 완료된 host와 일반 release의 schema 사전 조건이 충족된 DB를 대상으로 한다. 현재 production의 Quadlet 설치·기동·전환은 미수행 상태이며, 이 코드 정리를 운영 적용 완료로 간주하지 않는다. 신규 서버·빈 DB의 초기 설치 절차는 포함하지 않는다. 특정 migration의 최초 전환과 예외 이력은 [기존 전환 기록](manual-release.md)에 분리한다.
+이 브랜치의 release 코드는 Quadlet 전환이 완료된 host와 일반 release의 schema 사전 조건이 충족된 DB를 대상으로 한다. 2026-10-15 읽기 전용 운영 점검에서 `gh-deploy`의 rootless Podman 5.4.2·Quadlet, 단일 API와 worker 6종의 기동을 확인하였다. A/B 슬롯 설치는 미수행 상태이다. 신규 서버·빈 DB의 초기 설치 절차는 포함하지 않는다. 특정 migration의 최초 전환과 예외 이력은 [기존 전환 기록](manual-release.md)에 분리한다.
+
+DB 변경 없는 호환 release의 슬롯 병행 경로는 [API 슬롯 병행 배포](rolling-deployment.md)를 따른다. `operation=rolling`은 최초 설치 검증과 release별 호환성 자료를 요구하며, 조건 불충족 시 기존 점검 배포로 자동 전환하지 않는다.
 
 ## Workflow와 실행 경계
 

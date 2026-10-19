@@ -1,3 +1,4 @@
+import { trackHttpActivity } from './runtime/http-activity.js';
 import Fastify from 'fastify';
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
@@ -176,6 +177,7 @@ async function buildAppWithContext(
 	onCreated: (app: FastifyInstance) => void,
 ) {
 	const cfg = context.config;
+	const apiSlot = process.env.API_SLOT;
 	const app = Fastify({
 		logger: false,
 		bodyLimit: 2 * 1024 * 1024, // 2 MB for JSON bodies
@@ -196,6 +198,7 @@ async function buildAppWithContext(
 	app.setValidatorCompiler(validatorCompiler);
 	app.setSerializerCompiler(serializerCompiler);
 	registerRouteSchemas(app);
+	trackHttpActivity(app);
 
 	// In-flight counter so shutdown can wait for active requests to finish.
 	// Runs before routing so counter stays accurate even if a plugin hook rejects.
@@ -235,6 +238,7 @@ async function buildAppWithContext(
 		const log = context.logger.child({ reqId: request.id });
 		requestContext.enterWith({ reqId: request.id, log });
 		reply.header('x-request-id', request.id);
+		if (apiSlot === 'a' || apiSlot === 'b') reply.header('x-pcu-api-slot', apiSlot);
 	});
 
 	// Plugins

@@ -23,6 +23,7 @@ do_activate() {
   local staging ctr
   staging="$(mktemp -d)"
   if ! bash "$QUADLET_HELPERS/render.sh" "$staging/next"; then rm -rf "$staging"; return 1; fi
+  mark_maintenance_in_progress
   rm -f "${CUTOVER_STATE_DIR}/mutation-drained"
   if ! stop_application_units; then rm -rf "$staging"; return 1; fi
   for ctr in "${RUNTIME_CONTAINERS[@]}"; do
@@ -37,6 +38,9 @@ do_activate() {
   podman run "${RELEASE_CONTAINER_ARGS[@]}" --entrypoint node "$MIGRATION_IMAGE" \
     dist-release/scripts/release-migrate.js assert-runtime "$release_schema_phase"
   assert_foundation_active
+  if [[ "$API_SLOTS" == true ]]; then
+    printf 'API_MAINTENANCE_PAUSED=false\n' > "${DEPLOY_DIR}/runtime-env/slot-${active_slot}.env"
+  fi
   systemctl --user start "${API_CONTAINER}.service"
   verify_running "$API_CONTAINER" "API"
   do_api_smoke
@@ -45,6 +49,7 @@ do_activate() {
     systemctl --user start "${ctr}.service"
     verify_running "$ctr" "$ctr"
   done
+  rm -f "${CUTOVER_STATE_DIR}/maintenance-in-progress"
   echo "Forward-only Quadlet deploy complete; PostgreSQL and pod were retained."
 }
 

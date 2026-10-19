@@ -1,3 +1,4 @@
+import { listenControl } from './infrastructure/runtime-control.js';
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
@@ -18,6 +19,7 @@ export async function runWebglWorker(): Promise<void> {
 	const prisma = createPrismaClientForDatabase(config.DATABASE_URL);
 	const s3 = createS3Client(config);
 	const storage = createObjectStorage(s3, { defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC });
+	let closeControl: (() => Promise<void>) | undefined;
 	const abort = new AbortController();
 	const stop = () => abort.abort(new Error('WebGL worker is stopping'));
 	process.once('SIGTERM', stop);
@@ -41,12 +43,18 @@ export async function runWebglWorker(): Promise<void> {
 				pollIntervalMs: config.DIRECT_UPLOAD_WORKER_POLL_MS,
 			},
 		});
-		const removed = await graph.cleanupStaleWorkspaces(new Date(Date.now() - 24 * 60 * 60_000));
+		closeControl = await listenControl(command => {
+			if (command === 'quiesce') graph.loop.gate.quiesce();
+			if (command === 'resume') graph.loop.gate.resume();
+			return { kind: 'worker', ...graph.loop.gate.status() };
+		});
+		const removed = await graph.loop.gate.run(() => graph.cleanupStaleWorkspaces(new Date(Date.now() - 24 * 60 * 60_000)), 0);
 		if (removed > 0) logger.warn({ removed }, 'Removed stale WebGL worker temp directories');
 		await graph.loop.start();
 		await new Promise<void>((resolve) => abort.signal.addEventListener('abort', () => resolve(), { once: true }));
 		await graph.loop.close();
 	} finally {
+		await closeControl?.();
 		process.off('SIGTERM', stop);
 		process.off('SIGINT', stop);
 		s3.destroy();

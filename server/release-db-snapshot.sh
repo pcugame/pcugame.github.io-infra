@@ -7,6 +7,11 @@ set -euo pipefail
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/graduationproject_v2}"
 PG_CONTAINER="${PG_CONTAINER:-gp-postgres}"
 API_CONTAINER="gp-api"
+if [[ -f "${DEPLOY_DIR}/cutover-state/active-slot" ]]; then
+  slot="$(cat "${DEPLOY_DIR}/cutover-state/active-slot")"
+  [[ "$slot" == a || "$slot" == b ]] || exit 1
+  API_CONTAINER="gp-api-$slot"
+fi
 REHEARSAL_IMAGE="docker.io/library/postgres:16-alpine"
 SOURCE_REVISION="${1:-}"
 

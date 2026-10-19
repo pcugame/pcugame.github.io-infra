@@ -100,6 +100,9 @@ server {
     # through Garage's public website origin unchanged.
     set $pcu_file_method $request_method;
     auth_request /__pcu_file_auth;
+    auth_request_set $pcu_api_slot $upstream_http_x_pcu_api_slot;
+    proxy_hide_header X-PCU-API-Slot;
+    add_header X-PCU-API-Slot $pcu_api_slot always;
     auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
     resolver 127.0.0.11 valid=30s;
     proxy_pass ${GARAGE_PUBLIC_WEB_UPSTREAM}$pcu_validated_object_path;
@@ -157,6 +160,9 @@ server {
     # through Garage's public website origin unchanged.
     set $pcu_file_method $request_method;
     auth_request /__pcu_file_auth;
+    auth_request_set $pcu_api_slot $upstream_http_x_pcu_api_slot;
+    proxy_hide_header X-PCU-API-Slot;
+    add_header X-PCU-API-Slot $pcu_api_slot always;
     auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
     auth_request_set $pcu_runtime_csp $upstream_http_x_pcu_runtime_csp;
     resolver 127.0.0.11 valid=30s;

@@ -1,3 +1,5 @@
+import { listenControl } from './infrastructure/runtime-control.js';
+import { httpActivity } from './runtime/http-activity.js';
 import { pathToFileURL } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import type { Env } from './config/env.js';
@@ -182,7 +184,7 @@ export async function runProductionServer(config: Env): Promise<ServerRuntime> {
 		import('./backend-context.js'),
 		import('./app.js'),
 	]);
-	const context = await createProductionBackendContext(config);
+	const context = await createProductionBackendContext(config, { maintenancePaused: process.env.API_MAINTENANCE_PAUSED === 'true' });
 	let app: FastifyInstance;
 	try {
 		app = await buildApp({ context });
@@ -192,6 +194,27 @@ export async function runProductionServer(config: Env): Promise<ServerRuntime> {
 	}
 	const runtime = createServerRuntime({ config, context, app });
 	await runtime.start();
+	const activity = httpActivity(app);
+	let closeControl: () => Promise<void>;
+	try {
+		closeControl = await listenControl((command, scope) => {
+			if (command !== 'status') {
+				if (scope !== 'maintenance') activity.accepting = command === 'resume';
+				if (scope !== 'http') context.deployment?.[command === 'resume' ? 'resume' : 'quiesce']();
+			}
+			return {
+				kind: 'api', port: config.PORT, state: context.lifecycle.state(),
+				accepting: activity.accepting, requests: context.lifecycle.inFlight(), handlers: activity.handlers,
+				maintenance: context.deployment?.status(),
+			};
+		});
+	} catch (error) {
+		await runtime.shutdown('control startup failure');
+		throw error;
+	}
+	app.server.once('close', () => {
+		void closeControl().catch(error => context.logger.error(error, 'Failed to close runtime control'));
+	});
 	return runtime;
 }
 

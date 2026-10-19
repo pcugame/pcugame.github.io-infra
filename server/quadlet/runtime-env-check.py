@@ -36,8 +36,8 @@ UPLOAD_USER_MAX_FILES UPLOAD_USER_REQUEST_MAX_MB VIDEO_WORKER_POLL_MS VIDEO_WORK
 VOTE_INVESTIGATION_SECRET VOTE_PRIVACY_NOTICE
 WEBGL_EXTERNAL_CONNECTIONS_ENABLED WEBGL_PLAY_ENABLED WEB_PUBLIC_URL
 """.split())
-# No additional direct process.env key reads currently exist in application source.
-APP_PROCESS_ENV_KEYS = set()
+# Deployment-owned slot controls are deliberately excluded from operator env files.
+APP_PROCESS_ENV_KEYS = {'API_SLOT', 'API_MAINTENANCE_PAUSED'}
 KNOWN = set().union(*RUNTIME['SCOPES'], RESERVED, APP_SCHEMA_KEYS, APP_PROCESS_ENV_KEYS)
 ERROR = 'ERROR: invalid runtime files, topology options, or running-container inspect input'
 
