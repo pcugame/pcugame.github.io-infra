@@ -78,11 +78,11 @@ test('integration runs its gate even when verify fails; all expensive steps rema
   assert.ok(gate);
   assert.doesNotMatch(gateStep, /^        if:/m);
   const rest = steps(integration).slice(1);
-  assert.equal(rest.length, 7);
+  assert.equal(rest.length, 8);
   for (const step of rest.slice(0, -1)) conditional(step, "needs.verify.outputs.integration == 'true'");
   conditional(rest.at(-1), "always() && needs.verify.result == 'success' && needs.verify.outputs.integration == 'true'");
   for (const command of ['npm ci --include-workspace-root', 'npm run db:generate --workspace=apps/api',
-    'npm run test:integration', 'npm run test:file-gateway',
+    'npm run test:integration', 'node scripts/test-rolling-release.mjs', 'npm run test:file-gateway',
     'docker compose -f docker-compose.integration.yml down -v --remove-orphans']) {
     stepWith(integration, command);
   }

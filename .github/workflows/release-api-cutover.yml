@@ -8,7 +8,7 @@ on:
         required: true
         type: choice
         default: release
-        options: [release, snapshot, forward-fix]
+        options: [release, rolling, snapshot, forward-fix]
       final_api_image:
         description: 'Immutable @sha256 API/worker image (required for forward fix)'
         required: false
@@ -100,7 +100,7 @@ jobs:
             bash "${DEPLOY_DIR}/release-db-snapshot.sh" "${RELEASE_SOURCE_SHA}"
 
   resolve_image:
-    if: ${{ inputs.operation == 'release' }}
+    if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
     needs: authorize
     runs-on: ubuntu-latest
     outputs:
@@ -113,13 +113,13 @@ jobs:
         run: node server/resolve-release-image.mjs
 
   build_image:
-    if: ${{ inputs.operation == 'release' && needs.resolve_image.outputs.image == '' }}
+    if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') && needs.resolve_image.outputs.image == '' }}
     needs: [authorize, resolve_image]
     uses: ./.github/workflows/deploy-api.yml
     secrets: inherit
 
   cutover:
-    if: ${{ always() && needs.authorize.result == 'success' && inputs.operation != 'snapshot' && (inputs.operation != 'release' || (needs.resolve_image.result == 'success' && (needs.resolve_image.outputs.image != '' || needs.build_image.result == 'success'))) }}
+    if: ${{ always() && needs.authorize.result == 'success' && inputs.operation != 'snapshot' && ((inputs.operation != 'release' && inputs.operation != 'rolling') || (needs.resolve_image.result == 'success' && (needs.resolve_image.outputs.image != '' || needs.build_image.result == 'success'))) }}
     needs: [authorize, resolve_image, build_image]
     runs-on: ubuntu-latest
     environment: production
@@ -140,7 +140,7 @@ jobs:
         run: node server/verify-release-source.mjs
 
       - name: Preflight external Pages target and write access before maintenance
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         run: node server/verify-github-release-boundaries.mjs pages
@@ -153,13 +153,13 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          source: server/deploy.sh,server/deploy,server/quadlet,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs,server/ip-ban-audit.sh,server/release-orchestrate.sh
+          source: server/deploy.sh,server/deploy,server/quadlet,server/smoke-data-plane.mjs,server/release-db-snapshot.sh,server/release-recovery.mjs,server/release-smoke-target.mjs,server/ip-ban-audit.sh,server/release-orchestrate.sh,server/rolling-release.py,server/rolling-smoke.mjs
           target: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
           strip_components: 1
           overwrite: true
 
       - name: Set up Node for final web
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -167,22 +167,22 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install final web dependencies
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         # The HTTP parity suite imports real API controllers and their dependencies.
         run: npm ci --workspace=apps/web --workspace=apps/api --include-workspace-root
 
       - name: Test final web
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         working-directory: apps/web
         run: npm test
 
       - name: Lint final web
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         working-directory: apps/web
         run: npm run lint
 
       - name: Build final web
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         working-directory: apps/web
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
@@ -192,7 +192,7 @@ jobs:
         run: npm run build
 
       - name: Stamp exact release commit
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         working-directory: apps/web
         run: printf '%s\n' "${GITHUB_SHA}" > dist/release-sha.txt
 
@@ -204,6 +204,29 @@ jobs:
           RECOVERY_DIR: ${{ runner.temp }}/pages-release-recovery
           RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
         run: node server/pages-release-recovery.mjs capture "$RECOVERY_DIR" "$GITHUB_SHA" "$RELEASE_RUN_KEY"
+
+      - name: Switch API slots and drain workers without migration
+        if: ${{ inputs.operation == 'rolling' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+        with:
+          timeout: 120s
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          command_timeout: 60m
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" rolling
+
 
       - name: Preflight verified release
         if: ${{ inputs.operation == 'release' }}
@@ -295,7 +318,7 @@ jobs:
           script: bash "${DEPLOY_DIR}/release-orchestrate.sh" activate
 
       - name: Verify complete runtime health
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         uses: appleboy/ssh-action@v1.0.3
         env:
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
@@ -317,13 +340,13 @@ jobs:
           script: bash "${DEPLOY_DIR}/release-orchestrate.sh" health
 
       - name: Verify external Pages repository write access
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         env:
           PAGES_DEPLOY_TOKEN: ${{ secrets.PAGES_DEPLOY_TOKEN }}
         run: node server/verify-github-release-boundaries.mjs pages
 
       - name: Publish exact release web after runtime health
-        if: ${{ inputs.operation == 'release' }}
+        if: ${{ (inputs.operation == 'release' || inputs.operation == 'rolling') }}
         uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.PAGES_DEPLOY_TOKEN }}
@@ -333,6 +356,29 @@ jobs:
           full_commit_message: Deploy ${{ github.sha }} (run ${{ github.run_id }}-${{ github.run_attempt }})
           user_name: bipolarrr
           user_email: challengedbipolar@gmail.com
+
+      - name: Verify rolling release Web and complete journal
+        if: ${{ inputs.operation == 'rolling' }}
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_COMPOSE_PATH || '/srv/graduationproject_v2' }}
+          RELEASE_RUN_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          FINAL_IMAGE: ${{ needs.resolve_image.outputs.image || needs.build_image.outputs.image || needs.authorize.outputs.final_image }}
+          RELEASE_SOURCE_SHA: ${{ github.sha }}
+          SMOKE_PUBLIC_OBJECT_URL: ${{ secrets.SMOKE_PUBLIC_OBJECT_URL }}
+        with:
+          timeout: 120s
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script_stop: true
+          envs: GHCR_USERNAME,GHCR_TOKEN,DEPLOY_DIR,FINAL_IMAGE,RELEASE_SOURCE_SHA,RELEASE_RUN_KEY,SMOKE_PUBLIC_OBJECT_URL
+          command_timeout: 60m
+          script: bash "${DEPLOY_DIR}/release-orchestrate.sh" rolling-complete
+
 
       - name: Run final release smoke and record evidence
         if: ${{ inputs.operation == 'release' }}

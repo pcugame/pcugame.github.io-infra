@@ -1,3 +1,4 @@
+import { listenControl } from './infrastructure/runtime-control.js';
 import { pathToFileURL } from 'node:url';
 import { createPrismaClientForDatabase } from './lib/prisma-client.js';
 import { createS3Client } from './lib/s3.js';
@@ -17,6 +18,7 @@ export async function runGameValidationWorker(): Promise<void> {
 	const prisma = createPrismaClientForDatabase(config.DATABASE_URL);
 	const s3 = createS3Client(config);
 	const storage = createObjectStorage(s3, { defaultPresignTtlSec: config.S3_PRESIGN_TTL_SEC });
+	let closeControl: (() => Promise<void>) | undefined;
 	const abort = new AbortController();
 	const stop = () => abort.abort(new Error('GAME validation worker is stopping'));
 	process.once('SIGTERM', stop);
@@ -28,12 +30,17 @@ export async function runGameValidationWorker(): Promise<void> {
 			tempDiskBudgetBytes: capacity.tempBudgetBytes,
 			logger, wakeDeletionWorker: () => undefined,
 		});
+		closeControl = await listenControl(command => {
+			if (command === 'quiesce') graph.loop.gate.quiesce();
+			if (command === 'resume') graph.loop.gate.resume();
+			return { kind: 'worker', ...graph.loop.gate.status() };
+		});
 		const sweep = async () => {
 			const removed = await graph.cleanupStaleWorkspaces(new Date(Date.now() - 24 * 60 * 60_000));
 			if (removed > 0) logger.warn({ removed }, 'Removed stale GAME worker temp directories');
 		};
-		await sweep();
-		const scavenger = setInterval(() => void sweep().catch((error) => {
+		await graph.loop.gate.run(sweep, undefined);
+		const scavenger = setInterval(() => void graph.loop.gate.run(sweep, undefined).catch((error) => {
 			logger.error({ error }, 'GAME worker temp scavenger failed');
 		}), 60 * 60_000);
 		scavenger.unref();
@@ -43,6 +50,7 @@ export async function runGameValidationWorker(): Promise<void> {
 			clearInterval(scavenger);
 		}
 	} finally {
+		await closeControl?.();
 		process.off('SIGTERM', stop);
 		process.off('SIGINT', stop);
 		s3.destroy();

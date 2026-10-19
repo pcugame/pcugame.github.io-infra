@@ -82,7 +82,7 @@ WORKDIR /app/apps/api
 EXPOSE 4000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:4000/api/health || exit 1
+  CMD wget -qO- http://localhost:${PORT:-4000}/api/health || exit 1
 
 # Schema transition is an explicit, fenced release operation. Runtime
 # startup never applies pending migrations as a side effect.

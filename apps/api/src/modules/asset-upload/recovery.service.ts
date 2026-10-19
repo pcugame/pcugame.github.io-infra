@@ -244,7 +244,7 @@ export function createAssetUploadRecoveryService(deps: {
 			}
 			return 'retried';
 		} finally {
-			claim.stop();
+			await claim.stop();
 		}
 	}
 

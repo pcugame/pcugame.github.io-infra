@@ -358,7 +358,7 @@ export function createAssetUploadService(deps: {
 				);
 				throw error;
 			} finally {
-				completionLease.stop();
+				await completionLease.stop();
 			}
 		},
 	};
