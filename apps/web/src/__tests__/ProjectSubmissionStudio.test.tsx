@@ -520,6 +520,8 @@ it('keeps preview media URLs live through StrictMode and releases them on unmoun
 describe.each(['user', 'admin'] as const)('%s registration enhancements', mode => {
 	const backLabel = mode === 'admin' ? '작품 관리로 돌아가기' : '내 작품으로 돌아가기';
 	it('swaps complete rows, preserves identity after add/remove, and submits preview order', async () => {
+		let finishSave!: (value: ReturnType<typeof draft>) => void;
+		controls.submit.mockImplementationOnce(() => new Promise(resolve => { finishSave = resolve; }));
 		const { container } = mount(mode);
 		await enterMetadata();
 		await goTo(1);
@@ -551,6 +553,8 @@ describe.each(['user', 'admin'] as const)('%s registration enhancements', mode =
 		expect((screen.getByRole('button', { name: backLabel, hidden: true }) as HTMLButtonElement).disabled).toBe(true);
 		fireEvent.click(screen.getByRole('button', { name: backLabel, hidden: true }));
 		expect(screen.getByTestId('location').textContent).toBe('/');
+		await act(async () => { finishSave(draft()); });
+		await waitFor(() => expect(screen.getByTestId('location').textContent).toBe(draft().adminEditUrl));
 	});
 	it('does not autofill a replacement after the original row is deleted', async () => {
 		const { container } = mount(mode);
