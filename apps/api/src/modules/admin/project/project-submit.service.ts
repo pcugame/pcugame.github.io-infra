@@ -81,7 +81,7 @@ function resultShape(value: unknown): value is SubmitProjectResult {
 }
 
 function serializeSubmissionItems(submission: ProjectSubmissionRecord): ProjectSubmissionItemStatus[] {
-	return submission.items.map((item) => ({
+	return submission.items.filter(item => item.required).map((item) => ({
 		id: item.id,
 		kind: item.kind,
 		slot: item.slot,
@@ -143,7 +143,7 @@ export async function submitProject(
 		throw forbidden('Admin project submission requires operator or admin role');
 	}
 	if (options.audience === 'user') assertUserSubmitPayloadPolicy(input.payload);
-	const { exhibitionId, title, summary, description, externalLinks, platforms, hardwareRequirements, members, manifest, visibility } = parseBody(SubmitProjectPayload, input.payload);
+	const { exhibitionId, title, summary, description, externalLinks, platforms, hardwareRequirements, members, manifest, visibility, allowDuplicateTitle } = parseBody(SubmitProjectPayload, input.payload);
 	assertManifestIsUnambiguous(manifest);
 	const exhibition = await deps.repository.findExhibitionById(exhibitionId);
 	assertUploadAllowed(exhibition, exhibitionId, options.audience === 'user' ? 'USER' : input.actor.role as never);
@@ -173,7 +173,7 @@ export async function submitProject(
 		while (true) {
 			try {
 				project = await deps.repository.createProjectWithAssets({
-					exhibitionId: exhibition.id, slug, title, summary, description, externalLinks: resolvedExternalLinks, platforms, hardwareRequirements, status, visibility: visibility ?? 'PUBLIC',
+					allowDuplicateTitle, exhibitionId: exhibition.id, slug, title, summary, description, externalLinks: resolvedExternalLinks, platforms, hardwareRequirements, status, visibility: visibility ?? 'PUBLIC',
 					creatorId: input.actor.id,
 					actor: { id: input.actor.id, role: input.actor.role as 'USER' | 'OPERATOR' | 'ADMIN' },
 					manifest,

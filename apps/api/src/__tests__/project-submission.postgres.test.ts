@@ -1,3 +1,4 @@
+import { createAssetsRepository } from '../modules/assets/repository.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -65,12 +66,13 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 		const created = await repository.createProjectWithAssets({
 			exhibitionId,
 			slug: `${testId}-${projectIds.length}`,
-			title: 'Draft publication aggregate',
+			title: `Draft publication aggregate ${projectIds.length}`,
 			status: 'DRAFT',
 			creatorId: actorId,
 			members: [{ name: 'Submission actor', studentId: '20980001', userId: actorId }],
 			manifest,
 		});
+        await repository.updateProject(created.id, {publication:{status:'PUBLIC',expectedVersion:(await prisma.project.findUniqueOrThrow({where:{id:created.id}})).version,exceptionReason:'File lifecycle fixture; content requirements separately tested'}}, {id:actorId,role:'ADMIN'});
 		projectIds.push(created.id);
 		return { repository, created };
 	}
@@ -158,6 +160,7 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 			manifestItem('GAME', 'game', gameToken),
 			manifestItem('IMAGE', 'image:0', imageToken),
 		]);
+        await prisma.project.update({where:{id:created.id},data:{publicationRequested:false,publicationExceptionReason:null}});
 		const game = created.submission.items.find(({ kind }) => kind === 'GAME')!;
 		await bindReadyAsset({ projectId: created.id, itemId: game.id, clientToken: gameToken, kind: 'GAME' });
 		const image = created.submission.items.find(({ kind }) => kind === 'IMAGE')!;
@@ -323,15 +326,15 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 		await expect(prisma.orphanObject.count({ where: { OR: canonicalTargets } })).resolves.toBe(3);
 
 		await expect(repository.cancelSubmission(created.id, { id: actorId, role: 'ADMIN' }))
-			.resolves.toMatchObject({ state: 'CANCELLED', project: { status: 'DRAFT' } });
+			.resolves.toMatchObject({ state: 'PENDING', project: { status: 'DRAFT' } });
 		await expect(repository.cancelSubmission(created.id, { id: actorId, role: 'ADMIN' }))
-			.resolves.toMatchObject({ state: 'CANCELLED', project: { status: 'DRAFT' } });
+			.resolves.toMatchObject({ state: 'PENDING', project: { status: 'DRAFT' } });
 		await expect(prisma.projectPublicationJob.findUniqueOrThrow({ where: { id: storedJob.id } }))
 			.resolves.toMatchObject({ state: 'CANCELLED' });
 		await expect(prisma.orphanObject.count({ where: { OR: canonicalTargets } })).resolves.toBe(3);
 	});
 
-	it('accepts a valid VIDEO original with terminal FAILED playback for publication', async () => {
+	it('allows ADMIN to waive failed playback with an audited content exception', async () => {
 		const token = 'v'.repeat(32);
 		const { repository, created } = await createDraft([manifestItem('VIDEO', 'video:0', token)]);
 		const item = created.submission.items[0]!;
@@ -745,19 +748,36 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 		const session = await uploads.createAllocating({ ...input, id: randomUUID(), submissionClientToken: token });
 		await uploads.setAllocated(session.id, 1, `garage-${session.id}`);
 		await expect(repository.cancelSubmission(created.id, { id: actorId, role: 'ADMIN' }))
-			.resolves.toMatchObject({ state: 'CANCELLED', project: { status: 'DRAFT' } });
+			.resolves.toMatchObject({ state: 'PENDING', project: { status: 'DRAFT' } });
 		await expect(prisma.orphanObject.count({ where: { bucket: protectedBucket, storageKey: session.objectKey } })).resolves.toBe(1);
 		await expect(prisma.multipartAbortTask.count({ where: { bucket: protectedBucket, uploadSessionId: session.id } })).resolves.toBe(1);
 	});
 
-	it('rejects required=false at the database boundary', async () => {
+    it('preserves completed bytes on stop and adds/replaces files on the same private project', async () => {
+        const {repository,created}=await createDraft([manifestItem('GAME','game','q'.repeat(32))]);
+        const ready=await bindReadyAsset({projectId:created.id,itemId:created.submission.items[0]!.id,clientToken:'q'.repeat(32),kind:'GAME'});
+        await repository.cancelSubmission(created.id,{id:actorId,role:'ADMIN'});
+        const completed=await prisma.assetUploadSession.findUniqueOrThrow({where:{id:ready.id}});
+        expect(completed.state).toBe('READY');
+        expect(await prisma.asset.findUniqueOrThrow({where:{id:completed.resultAssetId!}})).toMatchObject({status:'READY'});
+        await createAssetsRepository(prisma).claimAssetForDeletion(completed.resultAssetId!,{id:actorId,role:'ADMIN'});
+        expect(await prisma.projectSubmissionItem.findUniqueOrThrow({where:{id:created.submission.items[0]!.id}})).toMatchObject({required:false});
+        const session=await createAssetUploadRepository(prisma).createAllocating({
+            id:randomUUID(),projectId:created.id,exhibitionId:null,userId:actorId,actorRole:'ADMIN',kind:'GAME',originalName:'replacement.zip',declaredMimeType:'application/zip',totalBytes:10n,partSizeBytes:10,totalParts:1,bucket:protectedBucket,objectKey:`protected/uploads/${randomUUID()}/source`,generation:1,sourceIdentityAlgorithm:'SHA256_BLOCK_MANIFEST_V1',sourceIdentity:'f'.repeat(64),sourceIdentityBlockSizeBytes:1048576,sourceIdentityBlockManifest:'e30=',expiresAt:new Date(Date.now()+60000),submissionItemId:null,
+        });
+        expect(session.projectId).toBe(created.id);
+        expect(session.submissionItemId).not.toBe(created.submission.items[0]!.id);
+        expect(await prisma.project.findUniqueOrThrow({where:{id:created.id}})).toMatchObject({publicationStatus:'PRIVATE'});
+        await repository.cancelSubmission(created.id,{id:actorId,role:'ADMIN'});
+    });
+	it('retains abandoned manifest entries with required=false', async () => {
 		const { created } = await createDraft([]);
 		await expect(prisma.projectSubmissionItem.create({
 			data: {
 				projectSubmission: { connect: { id: created.submission.id } },
 				kind: 'GAME', slot: 'game', clientToken: 'r'.repeat(32), required: false,
 			},
-		})).rejects.toThrow();
+		})).resolves.toMatchObject({required:false});
 	});
 
 	it('serializes repeated finalize-versus-cancel races without publishing partial state', async () => {
@@ -772,7 +792,7 @@ describe.runIf(runPostgresIntegration)('project submission publication aggregate
 			]);
 			expect(outcomes.some(({ status }) => status === 'fulfilled')).toBe(true);
 			await expect(prisma.projectSubmission.findUniqueOrThrow({ where: { projectId: created.id } }))
-				.resolves.toMatchObject({ state: 'CANCELLED', projectId: created.id });
+				.resolves.toMatchObject({ state: 'PENDING', projectId: created.id });
 			await expect(prisma.project.findUniqueOrThrow({ where: { id: created.id } }))
 				.resolves.toMatchObject({ status: 'DRAFT', currentWebglDeploymentId: null });
 			const job = await prisma.projectPublicationJob.findUnique({ where: { projectId: created.id } });

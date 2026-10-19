@@ -505,7 +505,7 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
       });
       await db.project.update({
         where: { id: projectId },
-        data: { visibility: "PUBLIC" },
+        data: { visibility: "PUBLIC", publicationStatus:"PUBLIC" },
       });
       const response = await app.inject({
         method: "POST",
@@ -537,7 +537,7 @@ describe.runIf(process.env["RUN_POSTGRES_INTEGRATION"] === "true")(
         where: { id: projectId },
         data: {
           currentWebglDeploymentId: deploymentId,
-          visibility: original.visibility,
+          visibility: original.visibility, publicationStatus:original.publicationStatus,
         },
       });
       await db.exhibition.update({

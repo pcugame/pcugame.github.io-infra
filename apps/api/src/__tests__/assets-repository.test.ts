@@ -13,8 +13,10 @@ describe('assets repository', () => {
 		const incrementProjectVersion = vi.fn().mockResolvedValue({ id: 7 });
 		const updateProject = vi.fn().mockResolvedValue({ count: 1 });
 		const tx = {
+   projectSubmission: {findUnique:vi.fn().mockResolvedValue(null)},
 			asset: { findUnique: vi.fn().mockResolvedValue({ projectId: 7 }), update: updateAsset },
-			project: { update: incrementProjectVersion, updateMany: updateProject },
+			project: {
+ findUniqueOrThrow: vi.fn(async () => ({ publicationStatus: 'PRIVATE' })), update: incrementProjectVersion, updateMany: updateProject },
 			$queryRaw: vi.fn()
 				.mockResolvedValueOnce([{ id: 7 }])
 				.mockResolvedValueOnce([{ id: 42, projectId: 7, kind: 'POSTER', status: 'READY' }])

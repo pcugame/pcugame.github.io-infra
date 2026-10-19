@@ -42,9 +42,9 @@ describe('admin project list repository', () => {
 			limit: 10,
 		});
 
-		expect(mocks.projectCount).toHaveBeenCalledWith({ where: { AND: [{ changeRequestDraft: null }] } });
+		expect(mocks.projectCount).toHaveBeenCalledWith({ where: { AND: [{ changeRequestDraft: null, hiddenCancelled: false }] } });
 		expect(mocks.projectFindMany).toHaveBeenCalledWith(expect.objectContaining({
-			where: { AND: [{ changeRequestDraft: null }] },
+			where: { AND: [{ changeRequestDraft: null, hiddenCancelled: false }] },
 			orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
 			skip: 10,
 			take: 10,
@@ -62,7 +62,7 @@ describe('admin project list repository', () => {
 		expect(mocks.projectCount).toHaveBeenCalledWith({
 			where: {
 				AND: [
-					{ changeRequestDraft: null },
+					{ changeRequestDraft: null, hiddenCancelled: false },
 					{
 						OR: [
 							{ creatorId: 101 },
@@ -83,7 +83,7 @@ describe('admin project list repository', () => {
 		expect(mocks.projectFindMany).toHaveBeenCalledWith(expect.objectContaining({
 			where: {
 				AND: [
-					{ changeRequestDraft: null },
+					{ changeRequestDraft: null, hiddenCancelled: false },
 					{
 						OR: [
 							{ title: { contains: 'alpha', mode: 'insensitive' } },
@@ -107,7 +107,7 @@ describe('admin project list repository', () => {
 		expect(mocks.projectFindMany).toHaveBeenCalledWith(expect.objectContaining({
 			where: {
 				AND: [
-					{ changeRequestDraft: null },
+					{ changeRequestDraft: null, hiddenCancelled: false },
 					{
 						OR: [
 							{ title: { contains: '2026', mode: 'insensitive' } },
@@ -174,9 +174,9 @@ describe('admin project list repository', () => {
 		expect(mocks.projectFindMany).toHaveBeenCalledWith(expect.objectContaining({
 			where: {
 				AND: [
-					{ changeRequestDraft: null },
+					{ changeRequestDraft: null, hiddenCancelled: false },
 					{ exhibition: { year: 2026 } },
-					{ status: 'ARCHIVED' },
+					{ publicationStatus: 'PRIVATE' },
 				],
 			},
 		}));

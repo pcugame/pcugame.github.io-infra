@@ -9,7 +9,6 @@ import { createGameUploadValidationWorker } from '../modules/asset-upload/valida
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '../generated/prisma/client.js';
-import { createPrismaClientForDatabase } from '../lib/prisma-client.js';
 import { createPrismaImageWorkerRepository } from '../modules/image/prisma.repository.js';
 import { createAssetUploadRepository } from '../modules/asset-upload/repository.js';
 
@@ -17,6 +16,7 @@ const runPostgresIntegration = process.env['RUN_POSTGRES_INTEGRATION'] === 'true
 
 describe.runIf(runPostgresIntegration)('canonical processing persistence fences', () => {
 	let client: PrismaClient;
+ let database: Awaited<ReturnType<typeof createIsolatedMigratedDatabase>>;
 	let actorId = 0;
 	let exhibitionId = 0;
 	let projectId = 0;
@@ -27,7 +27,8 @@ describe.runIf(runPostgresIntegration)('canonical processing persistence fences'
 	beforeAll(async () => {
 		const databaseUrl = process.env['DATABASE_URL'];
 		if (!databaseUrl) throw new Error('DATABASE_URL is required');
-		client = createPrismaClientForDatabase(databaseUrl);
+		database = await createIsolatedMigratedDatabase(databaseUrl);
+  client = database.createClient();
 		await client.$connect();
 		await client.storageBucket.upsert({
 			where: { bucket: publicBucket },
@@ -64,7 +65,7 @@ describe.runIf(runPostgresIntegration)('canonical processing persistence fences'
 		}
 		if (exhibitionId) await client.exhibition.deleteMany({ where: { id: exhibitionId } }).catch(() => undefined);
 		if (actorId) await client.user.deleteMany({ where: { id: actorId } }).catch(() => undefined);
-		await client.$disconnect();
+		await database.close();
 	});
 
 	async function readyImage(label: string) {

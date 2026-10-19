@@ -2,9 +2,9 @@ import type { ProjectStatus } from '../../../contracts';
 import type { AdminProjectStatusFilter } from './useAdminProjectList';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '초안',
+	DRAFT: '비공개',
 	PUBLISHED: '공개',
-	ARCHIVED: '보관',
+	ARCHIVED: '비공개',
 };
 
 interface AdminProjectsToolbarProps {
@@ -77,7 +77,7 @@ export function AdminProjectsToolbar({
 							disabled={isBusy}
 							onClick={() => onBulkStatus('ARCHIVED')}
 						>
-							보관
+							비공개
 						</button>
 						{isAdmin && (
 							<button

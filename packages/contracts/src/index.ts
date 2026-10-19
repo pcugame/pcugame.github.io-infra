@@ -145,3 +145,4 @@ export * from './connection-draft.js';
 
 export { DirectAssetUploadCreationSchema, DirectAssetUploadCreationLookupSchema } from './game-upload.js';
 export type { DirectAssetUploadCreation, DirectAssetUploadCreationLookup } from './game-upload.js';
+export * from './publication.js';

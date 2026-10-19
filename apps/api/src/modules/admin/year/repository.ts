@@ -109,7 +109,7 @@ export function createExhibitionRepository(
 		return prisma.exhibition.findMany({
 			where: exhibitionVisibilityWhere(actor),
 			orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
-			include: { ...exhibitionPosterInclude, _count: { select: { projects: { where: { changeRequestDraft: null, ...(isVisibilityStaff(actor) ? {} : { status: { in: ['PUBLISHED', 'ARCHIVED'] }, ...projectVisibilityWhere(actor) }) } } } } },
+			include: { ...exhibitionPosterInclude, _count: { select: { projects: { where: { changeRequestDraft: null, hiddenCancelled: false, ...(isVisibilityStaff(actor) ? {} : { status: { in: ['PUBLISHED', 'ARCHIVED'] }, ...projectVisibilityWhere(actor) }) } } } } },
 		});
 	}
 

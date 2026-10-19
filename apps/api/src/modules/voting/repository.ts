@@ -38,8 +38,7 @@ function unit(tx: Prisma.TransactionClient, now: Date) {
 			tx.project.findMany({
 				where: {
 					exhibitionId,
-					visibility: 'PUBLIC',
-					status: 'PUBLISHED',
+					publicationStatus: 'PUBLIC',
 					exhibition: { visibility: 'PUBLIC' },
 				},
 				include: { poster: { include: { representations: true } } },

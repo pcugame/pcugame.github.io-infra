@@ -1,22 +1,9 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ProjectStatus } from '../contracts';
 import { adminProjectApi, changeRequestApi } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import { LoadingSpinner, ErrorMessage, EmptyState } from '../components/common';
-
-const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '초안',
-	PUBLISHED: '공개',
-	ARCHIVED: '보관',
-};
-
-const STATUS_COLORS: Record<ProjectStatus, string> = {
-	DRAFT: 'badge--draft',
-	PUBLISHED: 'badge--published',
-	ARCHIVED: 'badge--archived',
-};
 
 export default function MyProjectsPage() {
 	const queryClient = useQueryClient();
@@ -80,8 +67,8 @@ export default function MyProjectsPage() {
 										<td className="admin-table__title-cell"><strong>{p.title}</strong></td>
 										<td><span className="admin-year-badge">{p.year}</span></td>
 										<td>
-											<span className={`badge ${STATUS_COLORS[p.status]}`}>
-												{STATUS_LABELS[p.status]}
+											<span className={`badge ${p.publicationStatus === 'PUBLIC' ? 'badge--published' : 'badge--draft'}`}>
+												{p.publicationStatus === 'PUBLIC' ? '공개' : '비공개'}
 											</span>
 										</td>
 										<td>{p.memberNames.length > 0 ? p.memberNames.join(', ') : '-'}</td>
@@ -109,8 +96,8 @@ export default function MyProjectsPage() {
 								<Link to={p.canEdit ? `/admin/projects/${p.id}/edit` : `/me/projects/${p.id}/change-request`} className="admin-pcard__link">
 									<div className="admin-pcard__top">
 										<h3 className="admin-pcard__title">{p.title}</h3>
-										<span className={`badge ${STATUS_COLORS[p.status]}`}>
-											{STATUS_LABELS[p.status]}
+										<span className={`badge ${p.publicationStatus === 'PUBLIC' ? 'badge--published' : 'badge--draft'}`}>
+											{p.publicationStatus === 'PUBLIC' ? '공개' : '비공개'}
 										</span>
 									</div>
 									<div className="admin-pcard__meta">

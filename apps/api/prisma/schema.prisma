@@ -222,7 +222,32 @@ model Exhibition {
   @@map("exhibitions")
 }
 
+enum PublicationStatus {
+  PRIVATE
+  PUBLIC
+}
+
+model PublicationException {
+  id String @id @default(cuid())
+  projectId Int @map("project_id")
+  actorId Int? @map("actor_id")
+  reason String
+  kind String
+  projectVersion Int @map("project_version")
+  waivedItems String[] @map("waived_items")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@index([projectId])
+  @@map("publication_exceptions")
+}
+
 model Project {
+  publicationStatus PublicationStatus @default(PRIVATE) @map("publication_status")
+  publicationRequestedVersion Int? @map("publication_requested_version")
+  publicationRequested Boolean @default(false) @map("publication_requested")
+  publicationExceptionReason String? @map("publication_exception_reason")
+  publicationActorId Int? @map("publication_actor_id")
+  legacyPublication Boolean @default(false) @map("legacy_publication")
+  hiddenCancelled Boolean @default(false) @map("hidden_cancelled")
   visibility Visibility @default(PUBLIC)
   version                  Int           @default(1)
   id                       Int           @id @default(autoincrement())
@@ -264,6 +289,7 @@ model Project {
   webglNetworkRequests WebglNetworkRequest[]
 
   @@unique([exhibitionId, slug], name: "project_exhibition_slug")
+  @@index([publicationStatus])
   @@index([exhibitionId, status, sortOrder])
   @@index([status])
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "projects_title_trgm_idx")

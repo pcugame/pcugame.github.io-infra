@@ -1,3 +1,5 @@
+import { publicationSnapshotInclude } from '../admin/project/publication.repository.js';
+import { assertPublicationNotWorsened } from '../../shared/publication-policy.js';
 import { normalizeIpTarget } from '@pcu/contracts';
 import { normalizeProjectVideoOrder } from './video-order.js';
 import {
@@ -77,6 +79,7 @@ export function createAssetsRepository(
 							visibility: true,
 							exhibition: {select:{visibility:true}},
 							title: true,
+							publicationStatus: true,
 							status: true,
 							members: {
 								select: { id: true, userId: true, name: true, studentId: true, sortOrder: true },
@@ -138,6 +141,11 @@ export function createAssetsRepository(
 					if (projects.length === 0) return null;
 				}
 
+    const publication = await tx.project.findUniqueOrThrow({ where: { id: candidate.projectId }, include: publicationSnapshotInclude });
+    if (publication.publicationStatus === 'PUBLIC') assertPublicationNotWorsened(publication, {
+     ...publication, poster: publication.posterAssetId === id ? null : publication.poster,
+     assets: publication.assets.filter(asset => asset.id !== id),
+    });
 				const rows = await tx.$queryRaw<LockedAssetDeletionRow[]>(Prisma.sql`
 					SELECT
 						"id",
@@ -150,14 +158,12 @@ export function createAssetsRepository(
 				`);
 				const asset = rows[0];
 					if (!asset || asset.projectId === null) return null;
-				if (asset.kind === 'VIDEO') {
-					const submission = await tx.projectSubmission.findUnique({
-						where: { projectId: asset.projectId }, select: { state: true },
-					});
-					if (submission && ['PENDING', 'FINALIZING'].includes(submission.state)) {
-						throw conflict('Submission videos must be removed through submission cancellation');
-					}
-				}
+                const submission = await tx.projectSubmission.findUnique({where:{projectId:asset.projectId},select:{state:true}});
+                if (submission?.state === 'FINALIZING') throw conflict('파일 배치 작업이 진행 중입니다. 완료 후 다시 시도하세요.');
+                if (submission?.state === 'PENDING') {
+                    const items = await tx.projectSubmissionItem.findMany({where:{resultAssetId:id},select:{id:true}});
+                    for (const item of items) await tx.projectSubmissionItem.update({where:{id:item.id},data:{required:false,slot:`history:${item.id}`}});
+                }
 				const representations = await tx.$queryRaw<LockedRepresentationDeletionRow[]>(Prisma.sql`
 					SELECT
 						"id",

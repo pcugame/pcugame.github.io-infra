@@ -4,9 +4,9 @@ import { Link } from 'react-router-dom';
 import type { AdminProjectItem, AdminProjectListSort, ProjectStatus } from '../../../contracts';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '초안',
+	DRAFT: '비공개',
 	PUBLISHED: '공개',
-	ARCHIVED: '보관',
+	ARCHIVED: '비공개',
 };
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
@@ -92,8 +92,8 @@ export function AdminProjectsTable({
 							<td className="admin-table__title-cell"><strong style={titleStyle(p.title)}>{p.title}</strong></td>
 							<td><span className="admin-year-badge">{p.year}</span></td>
 							<td>
-								<span className={`badge ${STATUS_COLORS[p.status]}`}>
-									{STATUS_LABELS[p.status]}
+								<span className={`badge ${STATUS_COLORS[p.publicationStatus === 'PUBLIC' ? 'PUBLISHED' : 'DRAFT']}`}>
+									{STATUS_LABELS[p.publicationStatus === 'PUBLIC' ? 'PUBLISHED' : 'DRAFT']}
 								</span>
 							</td>
 							<td className="admin-projects-table__asset"><RequiredAssetMark label="네이티브 빌드" status={p.requiredAssets?.nativeBuild} /></td>

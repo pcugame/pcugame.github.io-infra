@@ -10,6 +10,7 @@ function harness(initialOrders: Array<number | null> = []) {
 	const sessions: Session[] = [];
 	const items = new Map<string, number>();
 	const tx = {
+  projectSubmission: { findUnique: vi.fn(async () => null) },
 		$queryRaw: vi.fn(async () => [{ id: 7 }]),
 		project: {
 			findUniqueOrThrow: vi.fn(async () => ({ status: 'PUBLISHED' })),

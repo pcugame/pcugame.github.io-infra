@@ -24,7 +24,7 @@ function authorize(ctx: MockContext, owner: { projectId: number | null; exhibiti
       const source = request?.projectId === null ? undefined : ctx.state.projects[request?.projectId ?? 0];
       related = !!source && isRelated(ctx, source);
     }
-    if (project.status === 'DRAFT' ? !(related || isStaff(ctx)) : !canReadPublicProject(ctx, project)) forbidden();
+    if (!(related || isStaff(ctx) || canReadPublicProject(ctx, project))) forbidden();
   } else {
     const exhibition = ctx.state.exhibitions.find(e => e.id === owner.exhibitionId) ?? missing();
     if (!canReadVisibility(ctx, exhibition.visibility)) forbidden();

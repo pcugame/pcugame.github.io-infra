@@ -1,3 +1,4 @@
+import type { PublicationStatus, PublicationReadiness, PublicationCommand } from './publication.js';
 import type { ExternalLink } from './external-links.js';
 import type { Visibility } from './enums.js';
 import type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus } from './enums.js';
@@ -6,6 +7,7 @@ import type { ResponsiveImage } from './responsive-image.js';
 import type { ProjectAttachment } from './public.js';
 
 export type UpdateProjectRequest = {
+ publication?: PublicationCommand;
 	platforms?: Platform[];
 	visibility?: Visibility;
 	title?: string;
@@ -31,6 +33,11 @@ export type ProjectRequiredAssets = {
 };
 
 export type AdminProjectItem = {
+ publicationRequested?: boolean;
+ publicationError?: string;
+ publicationStatus?: PublicationStatus;
+ version?: number;
+ publicationReadiness?: PublicationReadiness;
 	/** Older API releases omit this summary. Video readiness requires playable output. */
 	requiredAssets?: ProjectRequiredAssets;
 	canChangeVisibility: boolean;
@@ -93,6 +100,11 @@ export type AdminProjectListResponse = {
 };
 
 export type AdminProjectDetail = {
+ publicationRequested?: boolean;
+ publicationError?: string;
+ publicationStatus?: PublicationStatus;
+ version?: number;
+ publicationReadiness?: PublicationReadiness;
 	/** Older API releases omit this summary. Video readiness requires playable output. */
 	requiredAssets?: ProjectRequiredAssets;
 	canChangeVisibility: boolean;
@@ -160,6 +172,7 @@ export type AdminProjectDetail = {
 };
 
 export type SubmitProjectPayload = {
+ allowDuplicateTitle?: boolean;
 	platforms?: Platform[];
 	visibility?: Visibility;
 	exhibitionId: number;

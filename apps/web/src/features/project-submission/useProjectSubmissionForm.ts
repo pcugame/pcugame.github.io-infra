@@ -8,7 +8,7 @@ import {
 	SubmitProjectPayloadSchema,
 	type SubmitProjectPayloadInput,
 } from '../../contracts/schemas';
-import { adminExhibitionApi, isApiError, getApiErrorCode, getApiErrorMessage } from '../../lib/api';
+import { adminExhibitionApi, adminProjectApi, isApiError, getApiErrorCode, getApiErrorMessage } from '../../lib/api';
 import { getProjectSubmitApi, type ProjectSubmissionMode } from '../../lib/api/project-submit';
 import { queryKeys, useViewerKey, invalidateVisibilityQueries } from '../../lib/query';
 import { buildSubmitFormData } from '../../lib/utils';
@@ -63,7 +63,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 		resolver: zodResolver(SubmitProjectPayloadSchema),
 		defaultValues: {
 			exhibitionId: 0,
-			visibility: 'PUBLIC',
+			visibility: 'STAFF',
 			title: '',
 			summary: '',
 			description: '',
@@ -112,6 +112,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 	const selectedExhibitionId = useWatch({ control, name: 'exhibitionId' });
 	const selectedYearItem = years.find((year) => year.id === Number(selectedExhibitionId));
 	const isUploadLocked = selectedYearItem != null && !(selectedYearItem.isModificationEnabled ?? selectedYearItem.isUploadEnabled) && !isPrivileged;
+	const [exceptionReason, setExceptionReason] = useState('');
 	const [createdProjectId, setCreatedProjectId] = useState<number | null>(null);
 	const [createdSubmission, setCreatedSubmission] = useState<(SubmitProjectResponse & { fileNames?: Record<string, string> }) | null>(null);
 	const [submissionItems, setSubmissionItems] = useState<ProjectSubmissionItemStatus[]>([]);
@@ -147,6 +148,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 				const status = await api.getSubmission(projectId);
 				if (!current()) return false;
 				setSubmissionItems(status.items);
+    if (form.getValues('visibility') !== 'PUBLIC') { if (status.items.every(item => item.state === 'READY')) { window.sessionStorage.removeItem(pendingStorageKey); navigate(`/admin/projects/${projectId}/edit`); } return true; }
 				if (status.publicationState !== 'FAILED') setCanRetryPublication(false);
 				if (status.state === 'CANCELLED') {
 					window.sessionStorage.removeItem(pendingStorageKey);
@@ -175,7 +177,11 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 					if (failed) { setSubmissionError(new Error(failed.failureReason ?? `${failed.slot} upload failed`)); return false; }
 					if (status.state === 'PENDING') {
 						if (!status.items.every(item => item.state === 'READY')) return false;
-						await api.finalizeSubmission(projectId);
+      if (exceptionReason.trim()) {
+       const latest = await adminProjectApi.getDetail(projectId);
+       await adminProjectApi.update(projectId, { publication: { status: 'PUBLIC', expectedVersion: latest.version!, exceptionReason: exceptionReason.trim() } });
+      }
+      await api.finalizeSubmission(projectId);
 						if (!current()) return false;
 					} else if (status.state !== 'FINALIZING') return false;
 				}
@@ -198,7 +204,7 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			if (publicationPoll.current === controller) publicationPoll.current = null;
 			if (current()) setIsFinalizing(false);
 		}
-	}, [mode, navigate, pendingStorageKey, qc, viewerIdentity]);
+	}, [exceptionReason, form, mode, navigate, pendingStorageKey, qc, viewerIdentity]);
 
 	const cancelSubmission = useCallback(async () => {
 		if (!mounted.current || currentViewer.current !== viewerIdentity || cancellationPending.current || createdProjectId === null) return;
@@ -211,29 +217,46 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			if (pendingStorageKey) { const saved = window.sessionStorage.getItem(pendingStorageKey); try { if (saved && JSON.parse(saved).id === createdProjectId) window.sessionStorage.removeItem(pendingStorageKey); } catch { /* Unrelated malformed pointer is handled by restoration. */ } }
 			if (!current()) return;
 			operationPoll?.abort(); if (publicationPoll.current === operationPoll) publicationPoll.current = null;
-			setCreatedProjectId(null);
-			setCreatedSubmission(null);
-			setSubmissionItems([]);
-			setSubmissionError(null);
+			navigate(`/admin/projects/${createdProjectId}/edit`);
 		} catch (error) {
 			if (current()) setSubmissionError(error);
 		} finally { if (current()) cancellationPending.current = false; }
-	}, [createdProjectId, mode, pendingStorageKey, viewerIdentity]);
+	}, [createdProjectId, mode, navigate, pendingStorageKey, viewerIdentity]);
 
 	useEffect(() => {
 		setCreatedProjectId(null); setCreatedSubmission(null); setSubmissionItems([]); setSubmissionError(null); setCanRetryPublication(false); setCanRetryStatus(false); setIsFinalizing(false);
 		if (!pendingStorageKey) return;
 		const raw = window.sessionStorage.getItem(pendingStorageKey);
+  const pendingCreate = window.localStorage.getItem(`${pendingStorageKey}:create`);
+  if (!raw && pendingCreate) {
+   try {
+    const operation = JSON.parse(pendingCreate) as { payload: SubmitProjectPayloadInput & { manifest: ProjectSubmissionManifestItem[] }; key: string };
+    void getProjectSubmitApi(mode).submit({ formData: buildSubmitFormData(operation.payload, {}), idempotencyKey: operation.key }).then(saved => {
+     if (!mounted.current || currentViewer.current !== viewerIdentity) return;
+     window.sessionStorage.setItem(pendingStorageKey, JSON.stringify(saved));
+     window.localStorage.removeItem(`${pendingStorageKey}:create`);
+     navigate(`/admin/projects/${saved.id}/edit`);
+    }).catch(error => { if (mounted.current && currentViewer.current === viewerIdentity) setSubmissionError(error); });
+   } catch { setSubmissionError(new Error('저장 요청 복원에 실패했습니다. 작품 목록에서 저장된 작품을 확인하세요.')); }
+  }
+
 		if (raw) {
 			try {
 				const restored = JSON.parse(raw) as SubmitProjectResponse;
 				if (!restored.id || !restored.submissionId || restored.status !== 'DRAFT') throw new Error('invalid');
 				setCreatedSubmission(restored); setCreatedProjectId(restored.id); setSubmissionItems(restored.items);
-				void finalizeIfReady(restored.id);
+				const restoreLifetime = lifetime.current;
+    void getProjectSubmitApi(mode).getSubmission(restored.id).then(() => {
+     if (mounted.current && lifetime.current === restoreLifetime && currentViewer.current === viewerIdentity) { window.sessionStorage.removeItem(pendingStorageKey); navigate(`/admin/projects/${restored.id}/edit`); }
+    }).catch(error => {
+     if (!mounted.current || lifetime.current !== restoreLifetime || currentViewer.current !== viewerIdentity) return;
+     if (isApiError(error) && error.status === 404) { window.sessionStorage.removeItem(pendingStorageKey); setCreatedProjectId(null); setCreatedSubmission(null); setSubmissionItems([]); }
+     else setSubmissionError(error);
+    });
 			} catch { window.sessionStorage.removeItem(pendingStorageKey); }
 		}
 		return () => { publicationPoll.current?.abort(); publicationPoll.current = null; };
-	}, [finalizeIfReady, pendingStorageKey, viewerIdentity]);
+	}, [finalizeIfReady, mode, navigate, pendingStorageKey, viewerIdentity]);
 
 	const submitMutation = useMutation({
 		mutationFn: ({ formData, idempotencyKey }: {
@@ -250,11 +273,18 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			&& error.status === 0
 			&& error.statusText === 'Network Error',
 		retryDelay: 0,
+  onError: (error, operation) => {
+   if (isApiError(error) && error.status === 409) {
+    const details = (error.body as { error?: { details?: { projectId?: number } } })?.error?.details;
+    if (details?.projectId) window.localStorage.removeItem(`${operation.storageKey}:create`);
+   }
+  },
 		onSuccess: (res, operation) => {
 			const active = mounted.current && lifetime.current === operation.lifetime && currentViewer.current === operation.viewerIdentity;
 			if (active || window.sessionStorage.getItem(operation.storageKey) === null) window.sessionStorage.setItem(operation.storageKey, JSON.stringify({ ...res, fileNames: operation.fileNames }));
 			if (!active) return;
 			idempotencyOperation.complete(operation.fingerprint);
+   window.localStorage.removeItem(`${operation.storageKey}:create`);
 			qc.invalidateQueries({ queryKey: queryKeys.adminProjects });
 			void invalidateVisibilityQueries(qc);
 			qc.invalidateQueries({ queryKey: queryKeys.yearProjects(res.year) });
@@ -303,7 +333,11 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			manifest = createdManifest;
 			manifestByFingerprint.current.set(fingerprint, manifest);
 		}
-		const fd = buildSubmitFormData({ ...data, manifest }, {});
+  const savedOperation = window.localStorage.getItem(`${pendingStorageKey}:create`);
+  const previous = savedOperation ? JSON.parse(savedOperation) as { payload: typeof data & { manifest: ProjectSubmissionManifestItem[] }; key: string } : null;
+  const operation = previous ?? { payload: { ...data, manifest }, key: idempotencyOperation.keyFor(fingerprint) };
+  window.localStorage.setItem(`${pendingStorageKey}:create`, JSON.stringify(operation));
+  const fd = buildSubmitFormData(operation.payload, {});
 		submitMutation.mutate({
 			fileNames: Object.fromEntries([
                 ...(files.posterFile ? [['poster', files.posterFile.name]] : []),
@@ -319,17 +353,19 @@ export function useProjectSubmissionForm({ mode, files }: UseProjectSubmissionFo
 			storageKey: pendingStorageKey,
 			lifetime: lifetime.current,
 			fingerprint,
-			idempotencyKey: idempotencyOperation.keyFor(fingerprint),
+			idempotencyKey: operation.key,
 		});
 	};
 
 	const goToEdit = useCallback(() => {
 		if (!createdProjectId) return;
+  if (pendingStorageKey) window.sessionStorage.removeItem(pendingStorageKey);
 		navigate(`/admin/projects/${createdProjectId}/edit`);
-	}, [createdProjectId, navigate]);
+	}, [createdProjectId, navigate, pendingStorageKey]);
 
 	return {
 		copy,
+  exceptionReason, setExceptionReason,
 		exhibitionsQuery,
 		canRetryPublication,
 		canRetryStatus,

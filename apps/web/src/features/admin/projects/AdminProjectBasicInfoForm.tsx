@@ -1,3 +1,4 @@
+import { SelectControl } from '../../../components/ui/SelectControl';
 import { ProjectIntroductionFields } from '../../../components/project/editor/ProjectIntroductionFields';
 import type { ReactNode } from 'react';
 import { FormSection } from '../../../components/ui';
@@ -5,9 +6,6 @@ import { ProjectRequirementsFieldset } from '../../../components/project/Project
 import { ExternalLinksFieldset } from '../../../components/project/ExternalLinksFieldset';
 import { Controller, useWatch } from 'react-hook-form';
 import type { AdminProjectDetail } from '@pcu/contracts';
-import { VisibilitySelect, VisibilityNotice } from '../../../components/VisibilitySelect';
-import { visibilityLabels, visibilityRank } from '../../../lib/visibility';
-import { env } from '../../../lib/env';
 import type { FormEventHandler } from 'react';
 import type { UseFormReturn } from 'react-hook-form';
 import type { UpdateProjectFormInput } from '../../../contracts/schemas';
@@ -26,7 +24,6 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
 	const { register, formState: { errors } } = form;
 	const summary = useWatch({ control: form.control, name: 'summary' }) ?? '';
 	const visibility = useWatch({ control: form.control, name: 'visibility' });
-	const effectiveVisibility = visibilityRank[project.visibility] >= visibilityRank[project.exhibitionVisibility] ? project.visibility : project.exhibitionVisibility;
 	const platforms = useWatch({ control: form.control, name: 'platforms' });
 	const hardwareRequirements = useWatch({ control: form.control, name: 'hardwareRequirements' });
 
@@ -36,21 +33,13 @@ export function AdminProjectBasicInfoForm({ project, form, formId, isPending, ca
 			<FormSection disabled={!canEditContent || isPending} legend="기본 정보" className="project-basic-fields">
 				<div className="form-field"><label htmlFor="edit-exhibition">전시회 <span className="required-mark">*</span></label><input id="edit-exhibition" readOnly value={`${project.year} 작품 전시`} /></div>
 				<ProjectIntroductionFields title={register('title')} summary={register('summary')} description={register('description')} summaryLength={summary.length} errors={{ title: errors.title?.message, summary: errors.summary?.message, description: errors.description?.message }} />
-                {env.VISIBILITY_CONTROLS_ENABLED && <div className="form-field">
-                 <label htmlFor="edit-visibility">공개 범위</label>
-                 <VisibilitySelect id="edit-visibility" disabled={!project.canChangeVisibility} value={visibility ?? ''} {...register('visibility')} />
-                 {!project.canChangeVisibility && <p className="field-hint">현재 공개 범위를 변경할 권한이 없습니다. 수정이 잠긴 전시회에서는 운영자·관리자만 변경할 수 있습니다.</p>}
-                 <VisibilityNotice visibility={visibility} exhibitionVisibility={project.exhibitionVisibility} />
-                 <p className="field-hint">작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.</p>
-                 {project.canChangeVisibility && visibility !== form.formState.defaultValues?.visibility && visibility !== project.visibility && <p className="field-hint">선택한 공개 범위는 아직 저장되지 않았습니다. 적용 후 반영됩니다.</p>}
-                </div>}
+    <div className="form-field"><label htmlFor="edit-visibility">공개 여부</label>
+     <SelectControl id="edit-visibility" disabled={!project.canChangeVisibility} value={visibility ?? 'STAFF'} {...register('visibility')}><option value="STAFF">비공개</option><option value="PUBLIC">공개</option></SelectControl>
+     <p className="field-hint">비공개 작품은 작성자·연결된 참여자·운영자·관리자만 조회할 수 있습니다.</p>
+    </div>
 			</FormSection>
 			<FormSection legend="관리 정보" disabled={!canEditContent || isPending}>
-			<div className="form-field" aria-label="저장된 공개 범위">
-				<p>저장된 공개 범위: {visibilityLabels[project.visibility]} · 전시회: {visibilityLabels[project.exhibitionVisibility]}</p>
-				<p>{project.status === 'DRAFT' ? '제출 중인 작품은 공개 조회되지 않습니다.' : `현재 조회 대상: ${visibilityLabels[effectiveVisibility]}. 작성자·참여자는 공개 범위와 관계없이 조회할 수 있습니다.`}</p>
-				{!env.VISIBILITY_CONTROLS_ENABLED && <p className="field-hint">현재 공개 범위 변경 기능이 비활성화되어 있습니다.</p>}
-			</div>
+
 				<div className="form-field">
 					<label htmlFor="sortOrder">오프셋(작을수록 상단에 표시)</label>
 					<input id="sortOrder" aria-invalid={!!errors.sortOrder} aria-describedby={errors.sortOrder ? "sortOrder-error" : undefined} type="number" {...register('sortOrder', { valueAsNumber: true })} />

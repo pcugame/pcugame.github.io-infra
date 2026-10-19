@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { assertMaterialCapacity, isMaterialKind, MATERIAL_MAX_BYTES } from './material-policy.js';
 import { Prisma, type PrismaClient } from '../../generated/prisma/client.js';
 import { createCanonicalAsset } from '../assets/representation-write.js';
@@ -66,7 +67,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 	return {
 		async createAllocating(input) {
 			return withAssetMutationTransaction(client, async (tx) => {
-				const { submissionClientToken, actorRole, ...sessionInput } = input;
+				let { submissionClientToken, actorRole, ...sessionInput } = input;
 				async function existingCreation() {
 					if (!input.clientUploadId) return null;
 					const existing = await tx.assetUploadSession.findUnique({
@@ -87,14 +88,29 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 					}, input.projectId);
 					const existing = await existingCreation();
 					if (existing) return existing;
-					const project = await tx.project.findUniqueOrThrow({
-						where: { id: input.projectId },
-						select: { status: true },
-					});
-					if (project.status === 'DRAFT') {
-						if (!input.submissionItemId || !submissionClientToken) {
-							throw new Error('PROJECT_SUBMISSION_ITEM_REQUIRED');
-						}
+     const submission = await tx.projectSubmission.findUnique({ where: { projectId: input.projectId } });
+     if (submission?.state === 'FINALIZING') throw conflict('파일 배치 작업이 진행 중입니다. 완료 후 다시 시도하세요.');
+     if (submission?.state === 'PENDING') {
+      if (!input.submissionItemId && !submissionClientToken) {
+       let slot = await tx.projectSubmissionItem.findFirst({ where: { submissionId: submission.id, kind: input.kind, required: true, state: { in: ['EXPECTED', 'FAILED', 'CANCELLED'] } }, include: { uploadSession: true } });
+       if (slot?.uploadSession && !['REJECTED', 'CANCELLED', 'EXPIRED'].includes(slot.uploadSession.state)) throw conflict('기존 파일 처리가 진행 중입니다.');
+       if (!slot) {
+        const count = await tx.projectSubmissionItem.count({ where: { submissionId: submission.id, kind: input.kind } });
+        const used = input.kind === 'VIDEO' ? await tx.projectSubmissionItem.findMany({where:{submissionId:submission.id,kind:'VIDEO',required:true},select:{slot:true}}) : [];
+        const index = input.kind === 'VIDEO' ? [0,1,2,3,4].find(i=>!used.some(item=>item.slot===`video:${i}`)) : count;
+        if (index === undefined) throw conflict('A project supports at most 5 videos');
+        const single = ['GAME', 'POSTER', 'WEBGL'].includes(input.kind);
+        if (single) {
+         const previous = await tx.projectSubmissionItem.findMany({where:{submissionId:submission.id,kind:input.kind},select:{id:true}});
+         for (const item of previous) await tx.projectSubmissionItem.update({where:{id:item.id},data:{required:false,slot:`history:${item.id}`}});
+        }
+        slot = await tx.projectSubmissionItem.create({ data: { submissionId: submission.id, kind: input.kind, slot: single ? input.kind.toLowerCase() : `${input.kind.toLowerCase()}:${index}`, clientToken: randomUUID().replaceAll('-', '') }, include: { uploadSession: true } });
+       }
+       input = { ...input, submissionItemId: slot.id };
+       sessionInput.submissionItemId = slot.id;
+       submissionClientToken = slot.clientToken;
+      }
+      if (!input.submissionItemId || !submissionClientToken) throw new Error('PROJECT_SUBMISSION_ITEM_REQUIRED');
 						const item = await tx.projectSubmissionItem.findUnique({
 							where: { id: input.submissionItemId },
 							include: {
@@ -102,8 +118,7 @@ export function createAssetUploadRepository(client: PrismaClient): AssetUploadRe
 								uploadSession: { select: { id: true, state: true } },
 							},
 						});
-						if (!item || item.projectSubmission.projectId !== input.projectId
-							|| item.projectSubmission.actorId !== input.userId
+						if (!item || item.required === false || item.projectSubmission.projectId !== input.projectId
 							|| item.projectSubmission.state !== 'PENDING'
 							|| item.kind !== input.kind || item.clientToken !== submissionClientToken) {
 							throw new Error('PROJECT_SUBMISSION_ITEM_MISMATCH');

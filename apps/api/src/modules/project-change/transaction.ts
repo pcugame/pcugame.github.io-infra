@@ -1,3 +1,5 @@
+import { publicationSnapshotInclude } from '../admin/project/publication.repository.js';
+import { assertPublicationNotWorsened } from '../../shared/publication-policy.js';
 import { Prisma, type ProjectChangeRequest } from '../../generated/prisma/client.js';
 import type { ProjectChangeValues } from '@pcu/contracts';
 import { conflict, forbidden } from '../../shared/errors.js';
@@ -78,6 +80,7 @@ export async function applyProjectChange(tx:Prisma.TransactionClient,request:Pro
  if(request.kind==='DELETE'){
   await deleteProjectInTransaction(tx,source.id);
  }else{
+  const before = await tx.project.findUniqueOrThrow({ where: { id: source.id }, include: publicationSnapshotInclude });
   const {changes,staged,remove}=await validateChanges(tx,request);
   const stage=request.stagingProjectId===null?null:await tx.project.findUnique({where:{id:request.stagingProjectId}});
   const newPoster=staged.find(asset=>asset.kind==='POSTER')?.id;
@@ -95,6 +98,7 @@ export async function applyProjectChange(tx:Prisma.TransactionClient,request:Pro
    ...(changes.title!==undefined?{title:changes.title}:{}),...(changes.summary!==undefined?{summary:changes.summary}:{}),...(changes.description!==undefined?{description:changes.description}:{}),...(changes.githubUrl!==undefined?{githubUrl:changes.githubUrl}:{}),...(changes.externalLinks!==undefined?{externalLinks:changes.externalLinks}:{}),...(changes.platforms!==undefined?{platforms:changes.platforms}:{}),...(changes.hardwareRequirements!==undefined?{hardwareRequirements:changes.hardwareRequirements}:{}),posterAssetId:poster,
    ...(stage?.currentWebglDeploymentId?{currentWebglDeploymentId:stage.currentWebglDeploymentId}:{}),version:{increment:1},
   }});
+  if (before.publicationStatus === 'PUBLIC') assertPublicationNotWorsened(before, await tx.project.findUniqueOrThrow({ where: { id: source.id }, include: publicationSnapshotInclude }));
   const videos=await tx.asset.findMany({where:{projectId:source.id,kind:'VIDEO',status:'READY'},orderBy:[{videoSortOrder:{sort:'asc',nulls:'last'}},{id:'asc'}],select:{id:true}});
   await rewriteProjectVideoOrder(tx,source.id,changes.videoAssetIds??videos.map(video=>video.id));
  }

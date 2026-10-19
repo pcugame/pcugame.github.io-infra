@@ -198,7 +198,7 @@ describe.runIf(enabled)('exhibition voting PostgreSQL and authenticated HTTP', (
 					creatorId: adminId,
 					title: 'Original',
 					slug: randomUUID(),
-					status: 'PUBLISHED',
+					status: 'PUBLISHED', publicationStatus: 'PUBLIC',
 				},
 			})
 		).id;
@@ -699,7 +699,7 @@ describe.runIf(enabled)('exhibition voting PostgreSQL and authenticated HTTP', (
 	it('rejects private source posters and preserves public bytes after source deletion', async () => {
 		const v = await setup();
 		await submit(v);
-		await db.project.update({ where: { id: projectId }, data: { visibility: 'STAFF' } });
+		await db.project.update({ where: { id: projectId }, data: { publicationStatus: 'PRIVATE' } });
 		expect(
 			(
 				await req(

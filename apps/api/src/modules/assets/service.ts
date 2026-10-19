@@ -29,6 +29,7 @@ type ProtectedAssetAccessRecord = {
 		visibility?: Visibility;
 		exhibition?: {visibility: Visibility};
 		status: string;
+ publicationStatus?: 'PRIVATE' | 'PUBLIC';
 		members: { userId: number | null }[];
 	};
 };

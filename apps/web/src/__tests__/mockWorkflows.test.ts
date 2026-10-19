@@ -114,7 +114,7 @@ describe('WebGL display/network and file access',()=>{
     expect(revoked).toMatchObject({origin:'https://*.example.com:*',state:'REVOKED'});
   });
   it('distinguishes protected media, expiration, role change and permission changes on renew',async()=>{
-    const p=Object.values((await getMockSnapshot()).projects).find(p=>p.poster)!;await api.patch(`/api/admin/projects/${p.id}`,{visibility:'AUTHENTICATED'});
+    const p=Object.values((await getMockSnapshot()).projects).find(p=>p.poster)!;await api.patch(`/api/admin/projects/${p.id}`,{visibility:'STAFF'});
     const media=p.poster!.original.url;
     await selectMockUser('anonymous');await expect(api.post('/api/file-access',{url:media})).rejects.toMatchObject({status:403});
     await selectMockUser('owner');const access=await api.post<{token:string;url:string}>('/api/file-access',{url:media});expect(access.token).toMatch(/^[a-f0-9]{64}$/);

@@ -289,9 +289,9 @@ export function createWebglProcessingRepository(client: PrismaClient): WebglProc
 					} satisfies ReservedWebglDeployment;
 				}
 				const project = await tx.project.findUniqueOrThrow({
-					where: { id: session.projectId }, select: { currentWebglDeploymentId: true, status: true },
+					where: { id: session.projectId }, select: { currentWebglDeploymentId: true, submission: { select: { state: true } } },
 				});
-				const staging = project.status === 'DRAFT'
+				const staging = project.submission?.state === 'PENDING'
 					? createCanonicalWebglStagingKeys(session.projectId, input.candidateDeploymentId)
 					: null;
 				const deployment = await tx.webglDeployment.create({

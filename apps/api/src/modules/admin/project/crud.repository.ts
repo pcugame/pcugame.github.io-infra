@@ -1,3 +1,5 @@
+import { changePublication, publicationSnapshotInclude } from './publication.repository.js';
+import { assertPublication, assertPublicationNotWorsened } from '../../../shared/publication-policy.js';
 import { canReadVisibility, isVisibilityStaff } from '../../../shared/visibility.js';
 import { getProjectVideos, rewriteProjectVideoOrder, MAX_PROJECT_VIDEOS } from '../../assets/video-order.js';
 import { withAssetMutationTransaction } from '../../assets/mutation-transaction.js';
@@ -16,7 +18,7 @@ import type {
 } from './ports.js';
 import { succeedIdempotencyOperation } from '../../idempotency/repository.js';
 import { queueMultipartAbortTask } from '../../multipart-abort/repository.js';
-import { conflict, forbidden, notFound } from '../../../shared/errors.js';
+import { AppError, conflict, forbidden, notFound } from '../../../shared/errors.js';
 import { assertValidPosterAsset } from '../../../shared/poster-validation.js';
 import {
 	projectActiveUploadDeletionTargets,
@@ -109,6 +111,7 @@ const projectSubmissionInclude = {
 	project: { select: { id: true, status: true } },
 	publicationJob: { select: { state: true, lastError: true } },
 	items: {
+  where: { required: true },
 		orderBy: { slot: 'asc' as const },
 		include: { uploadSession: { select: {
 			id: true, generation: true, sourceIdentityAlgorithm: true, sourceIdentity: true,
@@ -175,7 +178,7 @@ function buildProjectListWhere(
 	isPrivileged: boolean,
 	options: FindProjectsForUserOptions,
 ): Prisma.ProjectWhereInput {
-	const and: Prisma.ProjectWhereInput[] = [{ changeRequestDraft: null }];
+	const and: Prisma.ProjectWhereInput[] = [{ changeRequestDraft: null, hiddenCancelled: false }];
 	if (!isPrivileged) {
 		and.push({
 			OR: [
@@ -186,7 +189,7 @@ function buildProjectListWhere(
 	}
 	if (options.search) and.push(...searchTokens(options.search).map(searchTokenWhere));
 	if (options.year !== undefined) and.push({ exhibition: { year: options.year } });
-	if (options.status !== undefined) and.push({ status: options.status });
+	if (options.status !== undefined) and.push({ publicationStatus: options.status === 'PUBLISHED' ? 'PUBLIC' : 'PRIVATE' });
 	return and.length > 0 ? { AND: and } : {};
 }
 
@@ -262,11 +265,12 @@ export function createProjectCrudRepository(
 		};
 	}
 
-	function assertSubmissionActor(
-		submission: { actorId: number },
+	async function assertSubmissionActor(
+		submission: { actorId: number; projectId: number },
 		actor: { id: number; role: string },
-	): void {
-		if (actor.role !== 'ADMIN' && actor.role !== 'OPERATOR' && submission.actorId !== actor.id) {
+  connection: Pick<PrismaClient, 'projectMember'> = client,
+	): Promise<void> {
+		if (actor.role !== 'ADMIN' && actor.role !== 'OPERATOR' && submission.actorId !== actor.id && !await connection.projectMember.findFirst({ where: { projectId: submission.projectId, userId: actor.id } })) {
 			throw forbidden('Project submission is owned by another user');
 		}
 	}
@@ -294,17 +298,26 @@ export function createProjectCrudRepository(
 			return client.projectMember.findFirst({ where: { projectId, userId } });
 		},
 		async updateProject(id, data, actor) {
-			return client.$transaction(async (tx) => {
-				await guardMutation(tx, actor, id);
-				const current = await tx.project.findUniqueOrThrow({ where: { id }, select: { status: true } });
-				if (current.status === 'DRAFT' && data.status !== undefined && data.status !== 'DRAFT') {
-					throw conflict('Draft submissions may only be published by submission finalize');
-				}
-				await tx.project.update({ where: { id }, data });
-				await tx.project.update({ where: { id }, data: { version: { increment: 1 } } });
-				return tx.project.findUniqueOrThrow({ where: { id }, include: projectDetailInclude });
-			});
-		},
+   return client.$transaction(async (tx) => {
+    await guardMutation(tx, actor, id);
+    const before = await tx.project.findUniqueOrThrow({ where: { id }, include: publicationSnapshotInclude });
+    const { publication, status, visibility, ...metadata } = data;
+    await tx.project.update({ where: { id }, data: { ...metadata, ...(Object.keys(metadata).length ? { publicationRequested: false } : {}) } });
+    // Legacy clients still pass status/visibility; route them through the same policy.
+    const command = publication ?? (status !== undefined || visibility !== undefined ? {
+     status: visibility === 'STAFF' || status === 'DRAFT' || status === 'ARCHIVED' ? 'PRIVATE' as const : 'PUBLIC' as const,
+     expectedVersion: before.version,
+    } : undefined);
+    if (command) {
+     if (!actor) throw forbidden('Authenticated publication actor required');
+     await changePublication(tx, id, command, actor);
+    }
+    const after = await tx.project.findUniqueOrThrow({ where: { id }, include: publicationSnapshotInclude });
+    if (before.publicationStatus === 'PUBLIC' && after.publicationStatus === 'PUBLIC') assertPublicationNotWorsened(before, after);
+    await tx.project.update({ where: { id }, data: { version: { increment: 1 } } });
+    return tx.project.findUniqueOrThrow({ where: { id }, include: projectDetailInclude });
+   });
+  },
 		deleteProjectReturningAssets(id, outbox, actor) {
 			return client.$transaction(async (tx) => {
 				await guardMutation(tx, actor, id);
@@ -478,6 +491,7 @@ export function createProjectCrudRepository(
 		async setProjectPoster(projectId, assetId, actor) {
 			return client.$transaction(async (tx) => {
 				await guardMutation(tx, actor, projectId);
+				const before = await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: publicationSnapshotInclude });
 				const asset = await tx.asset.findUnique({
 					where: { id: assetId },
 					select: { id: true, projectId: true, kind: true, status: true },
@@ -488,6 +502,7 @@ export function createProjectCrudRepository(
 					data: { posterAssetId: assetId },
 				});
 				await tx.project.update({ where: { id: projectId }, data: { version: { increment: 1 } } });
+				if (before.publicationStatus === 'PUBLIC') assertPublicationNotWorsened(before, await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: publicationSnapshotInclude }));
 				return updated;
 			});
 		},
@@ -557,15 +572,21 @@ export function createProjectCrudRepository(
 				return { result, assets, projects, activeUploads };
 			});
 		},
-		bulkUpdateStatus(ids, status) {
-			return client.$transaction(async (tx) => {
-				const draftCount = await tx.project.count({ where: { id: { in: ids }, status: 'DRAFT' } });
-				if (draftCount > 0 && status !== 'DRAFT') {
-					throw conflict('Draft submissions may only be published by submission finalize');
-				}
-				return tx.project.updateMany({ where: { id: { in: ids } }, data: { status, version: { increment: 1 } } });
-			});
-		},
+  bulkUpdateStatus(ids, status) {
+   return client.$transaction(async (tx) => {
+    for (const id of [...new Set(ids)].sort((a, b) => a - b)) {
+     await guardMutation(tx, undefined, id);
+     const project = await tx.project.findUniqueOrThrow({ where: { id }, include: publicationSnapshotInclude });
+     if (status === 'PUBLISHED') {
+      assertPublication(project, 'OPERATOR');
+      const submission = await tx.projectSubmission.findUnique({ where: { projectId: id } });
+      if (submission && submission.state !== 'PUBLISHED') throw conflict('파일 처리 완료 후 개별 작품에서 공개하세요.');
+     }
+     await tx.project.update({ where: { id }, data: { publicationStatus: status === 'PUBLISHED' ? 'PUBLIC' : 'PRIVATE', legacyPublication: false, publicationRequested: false, version: { increment: 1 } } });
+    }
+    return { count: new Set(ids).size };
+   });
+  },
 		findExhibitionById(id) {
 			return client.exhibition.findUnique({ where: { id } });
 		},
@@ -581,6 +602,10 @@ export function createProjectCrudRepository(
 				if (!exhibition) throw notFound('Exhibition not found');
 				if (data.actor && (!canReadVisibility(data.actor, exhibition.visibility)
 					|| (!exhibition.isModificationEnabled && !isVisibilityStaff(data.actor)))) throw forbidden('Exhibition is not open for this submission');
+    if (!data.allowDuplicateTitle) {
+     const existing = await tx.project.findFirst({ where: { exhibitionId: data.exhibitionId, creatorId: data.creatorId, title: data.title, hiddenCancelled: false, changeRequestDraft: null }, orderBy: { id: 'asc' } });
+     if (existing) throw new AppError(409, '같은 제목의 작품이 있습니다. 기존 작품을 이어서 수정하세요.', 'CONFLICT', { projectId: existing.id, publicationStatus: existing.publicationStatus });
+    }
 				const project = await tx.project.create({
 					data: {
 						exhibitionId: data.exhibitionId,
@@ -629,7 +654,7 @@ export function createProjectCrudRepository(
 				include: projectSubmissionInclude,
 			});
 			if (!submission) return null;
-			assertSubmissionActor(submission, actor);
+			await assertSubmissionActor(submission, actor);
 			return submission;
 		},
 		finalizeSubmission(projectId, actor) {
@@ -645,12 +670,29 @@ export function createProjectCrudRepository(
 					include: projectSubmissionInclude,
 				});
 				if (!submission) throw notFound('Project submission not found');
-				assertSubmissionActor(submission, actor);
-				if (submission.state === 'PUBLISHED' && submission.project.status === 'PUBLISHED') return submission;
-				if (submission.state === 'FINALIZING' && submission.project.status === 'DRAFT') return submission;
-				if (submission.state !== 'PENDING' || submission.project.status !== 'DRAFT') {
+				await assertSubmissionActor(submission, actor, tx);
+				if (submission.state === 'PUBLISHED') return submission;
+				if (submission.state === 'FINALIZING') {
+     if (submission.publicationJob?.state !== 'FAILED') return submission;
+     await tx.projectSubmission.update({ where: { id: submission.id }, data: { state: 'PENDING' } });
+     submission.state = 'PENDING';
+    }
+    if (submission.publicationJob && ['FAILED', 'CANCELLED'].includes(submission.publicationJob.state)) await tx.projectPublicationJob.delete({ where: { submissionId: submission.id } });
+				if (submission.state !== 'PENDING') {
 					throw conflict('Project submission cannot be finalized');
 				}
+    await guardMutation(tx, actor as Actor, projectId);
+    const publicationSource = await tx.project.findUniqueOrThrow({ where: { id: projectId }, include: publicationSnapshotInclude });
+    const exception = publicationSource.publicationRequested ? publicationSource.publicationExceptionReason ?? undefined : undefined;
+    assertPublication(publicationSource, actor.role, exception);
+    const abandoned = await tx.projectSubmissionItem.findMany({ where: { submissionId: submission.id, state: { in: ['EXPECTED', 'FAILED', 'CANCELLED'] }, OR: [{ uploadSession: null }, { uploadSession: { state: { in: ['REJECTED', 'CANCELLED', 'EXPIRED'] } } }] }, select: { id: true } });
+    const abandonedIds = abandoned.map(item => item.id);
+    if (abandonedIds.length) {
+     for (const id of abandonedIds) await tx.projectSubmissionItem.update({ where: { id }, data: { required: false, slot: `history:${id}` } });
+     submission.items = submission.items.filter(item => !abandonedIds.includes(item.id));
+    }
+
+    await tx.project.update({ where: { id: projectId }, data: { publicationRequested: true, publicationRequestedVersion: publicationSource.version, publicationActorId: actor.id } });
 				const invalid = await tx.$queryRaw<Array<{ count: bigint }>>(PrismaRuntime.sql`
 					SELECT count(*)::bigint AS "count"
 					FROM "project_submission_items" item
@@ -659,7 +701,7 @@ export function createProjectCrudRepository(
 					LEFT JOIN "asset_representations" representation ON representation."id" = item."result_representation_id"
 					LEFT JOIN "webgl_deployments" deployment ON deployment."id" = item."result_webgl_deployment_id"
 					LEFT JOIN "projects" project ON project."id" = ${projectId}
-					WHERE item."submission_id" = ${submission.id}
+					WHERE item."submission_id" = ${submission.id} AND item."required" = true
 					  AND (
 						item."state" <> 'READY'::"ProjectSubmissionItemState"
 						OR session."state" <> 'READY'::"AssetUploadSessionState"
@@ -769,75 +811,23 @@ export function createProjectCrudRepository(
 					include: projectSubmissionInclude,
 				});
 				if (!submission) throw notFound('Project submission not found');
-				assertSubmissionActor(submission, actor);
+				await assertSubmissionActor(submission, actor, tx);
 				if (submission.state === 'CANCELLED') return submission;
-				if (!['PENDING', 'FINALIZING'].includes(submission.state) || submission.project.status !== 'DRAFT') {
+				if (!['PENDING', 'FINALIZING'].includes(submission.state)) {
 					throw conflict('Published project submission cannot be cancelled');
 				}
-				const [assets, deployments, sessions] = await Promise.all([
-					tx.asset.findMany({ where: { projectId }, include: { representations: true } }),
-					tx.webglDeployment.findMany({ where: { projectId }, select: webglDeletionSnapshotSelect }),
-					tx.assetUploadSession.findMany({
-						where: { submissionItem: { projectSubmission: { id: submission.id } } },
-						select: { id: true, kind: true, bucket: true, objectKey: true, uploadId: true },
-					}),
-				]);
-				await queueDurableDeletions(tx, [
-					...deployments.filter((deployment) => deployment.stagingBucket && deployment.stagingPrefix).map((deployment) => ({
-						bucket: deployment.stagingBucket!,
-						storageKey: deployment.stagingPrefix!,
-						targetKind: 'PREFIX' as const,
-						reason: 'project-submission-cancelled-webgl-staging',
-					})),
-					...projectAssetDeletionTargets(assets, { ...buckets, reason: 'project-submission-cancelled' }),
-					...projectWebglDeletionTargets(projectId, { ...buckets, reason: 'project-submission-cancelled' }, deployments),
-					...sessions.map((session) => ({
-						bucket: session.bucket,
-						storageKey: session.objectKey,
-						reason: 'project-submission-cancelled-source',
-					})),
-				]);
-				for (const session of sessions) {
-					if (!session.uploadId) continue;
-					await queueMultipartAbortTask(tx, {
-						bucket: session.bucket,
-						storageKey: session.objectKey,
-						uploadId: session.uploadId,
-						reason: 'project-submission-cancelled-multipart',
-						uploadSessionId: session.id,
-					});
-				}
-				await tx.assetUploadSession.updateMany({
-					where: { id: { in: sessions.map(({ id }) => id) } },
-					data: {
-						state: 'CANCELLED', uploadId: null,
-						completionLeaseToken: null, completionLeaseUntil: null,
-						validationLeaseToken: null, validationLeaseUntil: null,
-					},
-				});
-				await tx.project.update({
-					where: { id: projectId },
-					data: { posterAssetId: null, currentWebglDeploymentId: null },
-				});
-				await tx.webglDeployment.deleteMany({ where: { projectId } });
-				await tx.asset.deleteMany({ where: { projectId } });
-				await tx.projectSubmissionItem.updateMany({
-					where: { submissionId: submission.id },
-					data: {
-						state: 'CANCELLED', resultAssetId: null,
-						resultRepresentationId: null, resultWebglDeploymentId: null,
-						failureReason: 'submission cancelled',
-						playbackState: 'NONE', playbackError: null,
-					},
-				});
-				if (submission.publicationJob) await tx.projectPublicationJob.update({
-					where: { submissionId: submission.id },
-					data: { state: 'CANCELLED', claimToken: null, claimUntil: null },
-				});
-				await tx.projectSubmission.update({
-					where: { id: submission.id },
-					data: { state: 'CANCELLED', cancelledAt: new Date() },
-				});
+    await guardMutation(tx, actor as Actor, projectId);
+    const sessions = await tx.assetUploadSession.findMany({ where: { projectId, state: { in: [...canonicalActiveUploadStates] } } });
+    for (const session of sessions) {
+     if (session.uploadId) await queueMultipartAbortTask(tx, { bucket: session.bucket, storageKey: session.objectKey, uploadId: session.uploadId, reason: 'project-upload-stopped', uploadSessionId: session.id });
+     await queueDurableDeletions(tx, [{ bucket: session.bucket, storageKey: session.objectKey, reason: 'project-upload-stopped' }]);
+    }
+    await tx.assetUploadSession.updateMany({ where: { id: { in: sessions.map(s => s.id) } }, data: { state: 'CANCELLED', uploadId: null, completionLeaseToken: null, completionLeaseUntil: null, validationLeaseToken: null, validationLeaseUntil: null } });
+    await tx.projectSubmissionItem.updateMany({ where: { submissionId: submission.id, state: { not: 'READY' } }, data: { state: 'CANCELLED', failureReason: '업로드를 중단했습니다. 필요한 파일을 다시 선택하세요.' } });
+    await tx.project.update({ where: { id: projectId }, data: { publicationRequested: false, publicationStatus: 'PRIVATE', version: { increment: 1 } } });
+    if (submission.publicationJob) await tx.projectPublicationJob.update({ where: { submissionId: submission.id }, data: { state: 'CANCELLED', claimToken: null, claimUntil: null } });
+    await tx.projectSubmission.update({ where: { id: submission.id }, data: { state: 'PENDING' } });
+
 				return tx.projectSubmission.findUniqueOrThrow({
 					where: { id: submission.id },
 					include: projectSubmissionInclude,

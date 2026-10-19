@@ -1,3 +1,4 @@
+import { PublicationCommandSchema } from './publication.js';
 import { z } from 'zod';
 import { PlatformsSchema, HardwareRequirementsSchema } from './project-requirements.js';
 import { ExternalLinksSchema } from './external-links.js';
@@ -35,6 +36,7 @@ export const ProjectSubmissionTitleSchema = z.string()
 	});
 
 export const SubmitProjectPayloadBaseSchema = z.object({
+ allowDuplicateTitle: z.boolean().optional(),
 	visibility: VisibilitySchema.optional(),
 	exhibitionId: SafePositiveIntegerSchema,
 	title: ProjectSubmissionTitleSchema,
@@ -53,6 +55,7 @@ export const SubmitProjectPayloadBaseSchema = z.object({
 });
 
 export const UpdateProjectBaseSchema = z.object({
+ publication: PublicationCommandSchema.optional(),
 	visibility: VisibilitySchema.optional(),
 	title: z.string().min(1).max(120).optional(),
 	summary: z.string().max(300).optional(),

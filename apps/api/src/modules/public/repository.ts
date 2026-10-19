@@ -1,8 +1,8 @@
 import { exhibitionVisibilityWhere, projectVisibilityWhere } from '../../shared/visibility-query.js';
 import type { VisibilityActor } from '../../shared/visibility.js';
-import type { PrismaClient, ProjectStatus } from '../../generated/prisma/client.js';
+import type { PrismaClient } from '../../generated/prisma/client.js';
 
-const PUBLIC_PROJECT_STATUSES: ProjectStatus[] = ['PUBLISHED', 'ARCHIVED'];
+
 
 const projectDetailInclude = {
 	exhibition: true,
@@ -25,7 +25,7 @@ export function createPublicRepository(prisma: PrismaClient) {
 				where: exhibitionVisibilityWhere(actor),
 				orderBy: [{ sortOrder: 'asc' }, { year: 'desc' }],
 				include: {
-					_count: { select: { projects: { where: { status: { in: PUBLIC_PROJECT_STATUSES }, ...projectVisibilityWhere(actor) } } } },
+					_count: { select: { projects: { where: { ...projectVisibilityWhere(actor) } } } },
 					poster: { include: { representations: true } },
 				},
 			});
@@ -39,7 +39,7 @@ export function createPublicRepository(prisma: PrismaClient) {
 		/** Find published projects within given exhibitionIds, sorted by sortOrder */
 		findPublishedProjectsInExhibitions(exhibitionIds: number[], actor: VisibilityActor = null) {
 			return prisma.project.findMany({
-				where: { ...projectVisibilityWhere(actor), exhibitionId: { in: exhibitionIds }, status: { in: PUBLIC_PROJECT_STATUSES } },
+				where: { ...projectVisibilityWhere(actor), exhibitionId: { in: exhibitionIds } },
 				orderBy: { sortOrder: 'asc' },
 				include: {
 					exhibition: true,
@@ -57,7 +57,7 @@ export function createPublicRepository(prisma: PrismaClient) {
 		/** Find a published project by numeric ID */
 		findPublishedProjectById(id: number, actor: VisibilityActor = null) {
 			return prisma.project.findFirst({
-				where: { id, ...projectVisibilityWhere(actor), status: { in: PUBLIC_PROJECT_STATUSES } },
+				where: { id, ...projectVisibilityWhere(actor) },
 				include: projectDetailInclude,
 			});
 		},
@@ -68,7 +68,6 @@ export function createPublicRepository(prisma: PrismaClient) {
 				where: {
 					...projectVisibilityWhere(actor),
 					slug,
-					status: { in: PUBLIC_PROJECT_STATUSES },
 					...(exhibitionIds ? { exhibitionId: { in: exhibitionIds } } : {}),
 				},
 				include: projectDetailInclude,

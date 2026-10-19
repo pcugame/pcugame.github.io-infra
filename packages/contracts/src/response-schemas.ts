@@ -1,3 +1,4 @@
+import { PublicationStatusSchema, PublicationReadinessSchema } from './publication.js';
 import { WebglDisplayDimensionSchema, WebglDisplayKindSchema, WebglDisplayModeSchema } from './webgl-display.js';
 import { VisibilitySchema } from './schemas.js';
 import { z } from 'zod';
@@ -293,6 +294,11 @@ export const ProjectRequiredAssetsSchema = z.object({
 }).strict();
 
 export const AdminProjectItemSchema = z.object({
+ publicationRequested: z.boolean().optional(),
+ publicationError: z.string().optional(),
+ publicationStatus: PublicationStatusSchema.optional(),
+ version: z.number().int().optional(),
+ publicationReadiness: PublicationReadinessSchema.optional(),
 	requiredAssets: ProjectRequiredAssetsSchema.optional(),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,
@@ -328,6 +334,11 @@ export const AdminProjectListResponseSchema = z.object({
 }).strict();
 
 export const AdminProjectDetailSchema = z.object({
+ publicationRequested: z.boolean().optional(),
+ publicationError: z.string().optional(),
+ publicationStatus: PublicationStatusSchema.optional(),
+ version: z.number().int().optional(),
+ publicationReadiness: PublicationReadinessSchema.optional(),
 	requiredAssets: ProjectRequiredAssetsSchema.optional(),
 	canChangeVisibility: z.boolean(),
 	exhibitionVisibility: VisibilitySchema,

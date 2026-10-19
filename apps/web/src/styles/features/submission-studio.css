@@ -328,3 +328,10 @@ html:has(.submission-studio) { scroll-padding-block: 5rem 6rem; }
 @media (max-width: 50em) {
   .submission-studio__header > .btn { font-size: .75rem; padding-inline: .75rem; }
 }
+
+.publication-feedback ul { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0; margin: 1rem 0 0; list-style: none; }
+.publication-feedback li { min-width: 0; max-width: 100%; }
+.publication-feedback button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+.publication-feedback [data-state='READY'] button { color: var(--color-success); }
+.publication-feedback [data-state='FAILED'] button { color: var(--color-danger); }
+.publication-feedback [data-state='PROCESSING'] button { color: var(--color-primary); }

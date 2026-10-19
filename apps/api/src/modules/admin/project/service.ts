@@ -1,3 +1,4 @@
+import type { PublicationCommand } from '@pcu/contracts';
 import { projectRequiredAssets } from '../../../shared/project-required-assets.js';
 import type { ExternalLink, Platform, Visibility } from '@pcu/contracts';
 import type { ProjectStatus } from '@pcu/contracts';
@@ -86,6 +87,8 @@ export async function listProjects(
 			} : null,
 		),
 		status: p.status,
+ publicationStatus: p.publicationStatus,
+ version: p.version,
 		createdByUserName: p.creator.name || undefined,
 		memberNames: p.members.map((m) => m.name),
 		memberStudentIds: p.members.map((m) => m.studentId),
@@ -121,7 +124,8 @@ export async function getProjectDetail(
 		const isMember = !!(await deps.repository.isMemberOfProject(project.id, userId));
 		if (!isMember) throw forbidden('Not your project');
 	}
-	return { ...deps.serializeProjectDetail(project), ...capabilities(project, userId, userRole), canEditWebglDisplay: (userRole === 'ADMIN' || userRole === 'OPERATOR') || (project.creatorId === userId && project.exhibition.isModificationEnabled !== false) };
+	const detail = deps.serializeProjectDetail(project);
+ return { ...detail, publicationReadiness: detail.publicationReadiness ? { ...detail.publicationReadiness, canOverride: userRole === 'ADMIN' } : undefined, ...capabilities(project, userId, userRole), canEditWebglDisplay: (userRole === 'ADMIN' || userRole === 'OPERATOR') || (project.creatorId === userId && project.exhibition.isModificationEnabled !== false) };
 }
 
 /** Partial-update a project */
@@ -129,6 +133,7 @@ export async function updateProject(
 	deps: ProjectServiceDependencies,
 	projectId: number,
 	patch: {
+ publication?: PublicationCommand;
 		visibility?: Visibility;
 		title?: string; summary?: string; description?: string; externalLinks?: ExternalLink[];
 		platforms?: Platform[]; hardwareRequirements?: string;
@@ -137,6 +142,7 @@ export async function updateProject(
 	actor: Actor,
 ) {
 	const updated = await deps.repository.updateProject(projectId, {
+ ...(patch.publication ? { publication: patch.publication } : {}),
 		...(patch.visibility !== undefined ? { visibility: patch.visibility } : {}),
 		...(patch.title !== undefined ? { title: patch.title } : {}),
 		...(patch.summary !== undefined ? { summary: patch.summary } : {}),
@@ -148,7 +154,8 @@ export async function updateProject(
 		...(patch.status !== undefined ? { status: patch.status } : {}),
 		...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
 	}, actor);
-	return { ...deps.serializeProjectDetail(updated), ...capabilities(updated, actor.id, actor.role), canEditWebglDisplay: (actor.role === 'ADMIN' || actor.role === 'OPERATOR') || (updated.creatorId === actor.id && updated.exhibition.isModificationEnabled !== false) };
+	const detail = deps.serializeProjectDetail(updated);
+ return { ...detail, publicationReadiness: detail.publicationReadiness ? { ...detail.publicationReadiness, canOverride: actor.role === 'ADMIN' } : undefined, ...capabilities(updated, actor.id, actor.role), canEditWebglDisplay: (actor.role === 'ADMIN' || actor.role === 'OPERATOR') || (updated.creatorId === actor.id && updated.exhibition.isModificationEnabled !== false) };
 }
 
 /** Delete a project and its associated asset files from S3 */

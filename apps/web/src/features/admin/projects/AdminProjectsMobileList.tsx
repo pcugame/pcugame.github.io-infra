@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom';
 import type { AdminProjectItem, ProjectStatus } from '../../../contracts';
 
 const STATUS_LABELS: Record<ProjectStatus, string> = {
-	DRAFT: '초안',
+	DRAFT: '비공개',
 	PUBLISHED: '공개',
-	ARCHIVED: '보관',
+	ARCHIVED: '비공개',
 };
 
 const STATUS_COLORS: Record<ProjectStatus, string> = {
@@ -80,8 +80,8 @@ export function AdminProjectsMobileList({
 					>
 						<div className="admin-pcard__top">
 							<h3 className="admin-pcard__title">{p.title}</h3>
-							<span className={`badge ${STATUS_COLORS[p.status]}`}>
-								{STATUS_LABELS[p.status]}
+							<span className={`badge ${STATUS_COLORS[p.publicationStatus === 'PUBLIC' ? 'PUBLISHED' : 'DRAFT']}`}>
+								{STATUS_LABELS[p.publicationStatus === 'PUBLIC' ? 'PUBLISHED' : 'DRAFT']}
 							</span>
 						</div>
 						<ProjectRequiredAssets summary={p.requiredAssets} />

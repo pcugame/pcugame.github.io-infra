@@ -1,3 +1,5 @@
+import { publicationSnapshotInclude } from '../admin/project/publication.repository.js';
+import { assertPublication } from '../../shared/publication-policy.js';
 import { assertProjectWriteAccessInTransaction } from '../admin/project-access.service.js';
 import { forbidden } from '../../shared/errors.js';
 import { applyProjectChange, deleteProjectInTransaction, lockProject, validateSource } from '../project-change/transaction.js';
@@ -48,7 +50,6 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 					WHERE job."state" IN ('PENDING', 'PROCESSING')
 						AND (job."claim_until" IS NULL OR job."claim_until" <= clock_timestamp())
 						AND submission."state" = 'FINALIZING'::"ProjectSubmissionState"
-						AND project."status" = 'DRAFT'::"ProjectStatus"
 					ORDER BY job."created_at"
 					LIMIT 1 FOR UPDATE OF job SKIP LOCKED
 				)
@@ -91,7 +92,7 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 					|| !current.claimUntil || current.claimUntil <= new Date()
 					|| current.projectId !== job.projectId || current.submissionId !== job.submissionId
 					|| current.submission.projectId !== current.projectId
-					|| current.project.status !== 'DRAFT' || current.submission.state !== 'FINALIZING') {
+					|| current.submission.state !== 'FINALIZING') {
 					throw new Error('Project publication lease or aggregate fence was lost before plan validation');
 				}
 				let canonicalPlan: ProjectPublicationPlan | null = null;
@@ -180,7 +181,7 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 				}
 				if (current.state !== 'PROCESSING' || current.claimToken !== token
 					|| !current.claimUntil || current.claimUntil <= new Date()
-					|| current.project.status !== 'DRAFT' || current.submission.state !== 'FINALIZING') {
+					|| current.submission.state !== 'FINALIZING') {
 					throw new Error('Project publication lease or aggregate fence was lost');
 				}
 				if (changeRequest && (changeRequest.state !== 'APPLYING' || !await validateSource(tx, changeRequest))) {
@@ -282,7 +283,7 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 					});
 					if (updated.count !== 1) throw new Error('Publication WebGL deployment fence changed');
 					const pointer = await tx.project.updateMany({
-						where: { id: job.projectId, status: 'DRAFT', currentWebglDeploymentId: null },
+						where: { id: job.projectId, currentWebglDeploymentId: null },
 						data: { currentWebglDeploymentId: deployment.id },
 					});
 					if (pointer.count !== 1) throw new Error('Publication WebGL pointer fence changed');
@@ -296,7 +297,18 @@ export function createProjectPublicationRepository(client: PrismaClient): Projec
 				if (changeRequest) {
 					await applyProjectChange(tx, changeRequest);
 				} else {
-					const project = await tx.project.updateMany({ where: { id: job.projectId, status: 'DRAFT' }, data: { status: 'PUBLISHED', version: { increment: 1 } } });
+					const latest = await tx.project.findUniqueOrThrow({ where: { id: job.projectId }, include: publicationSnapshotInclude });
+     const publish = latest.publicationRequested && latest.publicationRequestedVersion === latest.version;
+     if (publish) {
+      const actor = latest.publicationActorId ? await tx.user.findUnique({ where: { id: latest.publicationActorId } }) : null;
+      if (!actor) throw forbidden('Publication actor is no longer available');
+      await assertProjectWriteAccessInTransaction(tx, actor, job.projectId);
+      assertPublication(latest, actor.role, latest.publicationExceptionReason ?? undefined);
+     }
+     const project = await tx.project.updateMany({ where: { id: job.projectId }, data: {
+      status: 'PUBLISHED', publicationStatus: publish ? 'PUBLIC' : 'PRIVATE',
+      publicationRequested: false, version: { increment: 1 },
+     } });
 					if (project.count !== 1) throw new Error('Project publication CAS failed');
 				}
 

@@ -428,7 +428,7 @@ async function seedIntegrationData() {
       title: 'Integration Public Asset Project',
       summary: 'Public project with poster, image, video, and game fixtures.',
       description: 'Seeded for full-stack integration verification.',
-      status: 'PUBLISHED',
+      status: 'PUBLISHED', publicationStatus: 'PUBLIC',
       creatorId: student.id,
       members: {
         create: [{ name: student.name, studentId: student.studentId ?? '', userId: student.id, sortOrder: 0 }],
@@ -503,7 +503,7 @@ async function seedIntegrationData() {
         slug: 'integration-student-owned',
         title: 'Integration Student Owned Project',
         summary: 'Owned by the fixed USER account.',
-        status: 'PUBLISHED',
+        status: 'PUBLISHED', publicationStatus: 'PUBLIC',
         creatorId: student.id,
       },
       {
@@ -511,7 +511,7 @@ async function seedIntegrationData() {
         slug: 'integration-other-owned',
         title: 'Integration Other Owned Project',
         summary: 'Owned by another student for permission checks.',
-        status: 'PUBLISHED',
+        status: 'PUBLISHED', publicationStatus: 'PUBLIC',
         creatorId: other.id,
       },
 			{
@@ -520,7 +520,7 @@ async function seedIntegrationData() {
         title: 'Integration Incomplete Project',
         summary: 'Incomplete project in upload-disabled exhibition.',
         isIncomplete: true,
-        status: 'PUBLISHED',
+        status: 'PUBLISHED', publicationStatus: 'PUBLIC',
         creatorId: student.id,
 			},
 			{
@@ -540,7 +540,7 @@ async function seedIntegrationData() {
 			slug: 'integration-webgl-deployment',
 			title: 'Integration Immutable WebGL Deployment',
 			summary: 'Published canonical WebGL deployment fixture.',
-			status: 'PUBLISHED',
+			status: 'PUBLISHED', publicationStatus: 'PUBLIC',
 			creatorId: student.id,
 		},
 	});
@@ -595,7 +595,7 @@ async function seedIntegrationData() {
       slug: 'integration-member-project',
       title: 'Integration Member Project',
       summary: 'Student is a member but not the creator.',
-      status: 'PUBLISHED',
+      status: 'PUBLISHED', publicationStatus: 'PUBLIC',
       creatorId: other.id,
       members: {
         create: [

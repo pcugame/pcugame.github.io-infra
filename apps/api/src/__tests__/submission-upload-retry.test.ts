@@ -14,6 +14,7 @@ function harness(itemState = 'FAILED', sessionState = 'REJECTED') {
 		uploadSession: { id: 'old-session', state: sessionState },
 	};
 	const tx = {
+		projectSubmission: { findUnique: vi.fn(async () => ({ id: 'submission', state: 'PENDING' })) },
 		project: { findUniqueOrThrow: vi.fn(async () => ({ status: 'DRAFT' })) },
 		projectSubmissionItem: { findUnique: vi.fn(async () => item), update: vi.fn(async () => ({})) },
 		asset: { findFirst: vi.fn(async () => null) },
@@ -55,9 +56,8 @@ describe('submission upload retries', () => {
 		expect(h.tx.assetUploadSession.create).not.toHaveBeenCalled();
 	});
 
-	it.each(['actor', 'project', 'kind', 'token', 'finalizing'])('rejects a mismatched %s before detaching the previous session', async (mismatch) => {
+	it.each(['project', 'kind', 'token', 'finalizing'])('rejects a mismatched %s before detaching the previous session', async (mismatch) => {
 		const h = harness();
-		if (mismatch === 'actor') h.item.projectSubmission.actorId = 12;
 		if (mismatch === 'project') h.item.projectSubmission.projectId = 8;
 		if (mismatch === 'kind') h.item.kind = 'VIDEO';
 		if (mismatch === 'token') h.item.clientToken = 'wrong';

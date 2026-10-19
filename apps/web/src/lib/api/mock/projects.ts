@@ -1,3 +1,4 @@
+import { mockPublicationStatus, mockPublicationReadiness } from './publication';
 import {
  resolveWebglDisplay, AddMemberSchema, UpdateMemberBaseSchema, SwapProjectMembersSchema, UpdateProjectBaseSchema,
  CreateExhibitionBaseSchema, UpdateExhibitionBaseSchema, BulkUpdateProjectStatusSchema,
@@ -49,7 +50,7 @@ export function adminProjectDetail(ctx:MockContext,p:MockProject): AdminProjectD
  const exhibition=projectExhibition(ctx,p);
  const {createdByUserId: _owner, participantUserIds: _participants, exhibitionId: _exhibition, createdAt: _created, updatedAt: _updated, version: _version,webglNetworkPolicyVersion:_network,isChangeRequestDraft:_stage,...detail}=p;
  void [_owner,_participants,_exhibition,_created,_updated,_version,_network,_stage];
- return {...detail,requiredAssets:requiredAssets(ctx,p),hardwareRequirements: detail.hardwareRequirements ?? '',year:exhibition.year,exhibitionVisibility:exhibition.visibility,...projectCapabilities(ctx,p),members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder||a.id-b.id)};
+ return {...detail, publicationStatus: mockPublicationStatus(p), version: p.version, publicationReadiness: mockPublicationReadiness(p, ctx.user?.role), requiredAssets:requiredAssets(ctx,p),hardwareRequirements: detail.hardwareRequirements ?? '',year:exhibition.year,exhibitionVisibility:exhibition.visibility,...projectCapabilities(ctx,p),members:[...p.members].sort((a,b)=>a.sortOrder-b.sortOrder||a.id-b.id)};
 }
 function listCapabilities(ctx:MockContext,p:MockProject) { const {canEditWebglDisplay:_display,...capabilities}=projectCapabilities(ctx,p);void _display;return capabilities; }
 function publicCard(ctx:MockContext,p:MockProject) {
@@ -113,7 +114,7 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
   const sort=validated.sort??'createdAt',direction=validated.order==='asc'?1:-1;
   items.sort((a,b)=> direction*(sort==='year'?a.year-b.year:sort==='title'?a.title.localeCompare(b.title,'ko'):sort==='status'?a.status.localeCompare(b.status):a.createdAt.localeCompare(b.createdAt))||a.id-b.id);
   const totalItems=items.length,totalPages=Math.ceil(totalItems/limit);
-  return {items:items.slice((page-1)*limit,page*limit).map(p=>({requiredAssets:requiredAssets(ctx,p),id:p.id,title:p.title,slug:p.slug,year:p.year,status:p.status,visibility:p.visibility,exhibitionVisibility:projectExhibition(ctx,p).visibility,isIncomplete:p.isIncomplete,memberNames:p.members.map(m=>m.name),memberStudentIds:p.members.map(m=>m.studentId),updatedAt:p.updatedAt,createdByUserName:Object.values(MOCK_USERS).find(user=>user.id===p.createdByUserId)?.name,...listCapabilities(ctx,p)})),pagination:{page,limit,totalItems,totalPages,hasNextPage:page<totalPages,hasPreviousPage:page>1&&totalItems>0}};
+  return {items:items.slice((page-1)*limit,page*limit).map(p=>({publicationStatus: mockPublicationStatus(p), version: p.version, requiredAssets:requiredAssets(ctx,p),id:p.id,title:p.title,slug:p.slug,year:p.year,status:p.status,visibility:p.visibility,exhibitionVisibility:projectExhibition(ctx,p).visibility,isIncomplete:p.isIncomplete,memberNames:p.members.map(m=>m.name),memberStudentIds:p.members.map(m=>m.studentId),updatedAt:p.updatedAt,createdByUserName:Object.values(MOCK_USERS).find(user=>user.id===p.createdByUserId)?.name,...listCapabilities(ctx,p)})),pagination:{page,limit,totalItems,totalPages,hasNextPage:page<totalPages,hasPreviousPage:page>1&&totalItems>0}};
  }
  if(pathname==='/api/admin/projects/bulk/status') {
   ctx.requireAdmin();methodAllowed(method,['PATCH']);const body=parse(BulkUpdateProjectStatusSchema,options.body);let updated=0;
@@ -130,7 +131,14 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
  const p=getProject(ctx,Number(match[1])),route=match[2],memberId=match[3];
  if(!route&&method==='GET')return adminProjectDetail(ctx,assertProjectRead(ctx,p));
  assertProjectWrite(ctx,p);
- if(!route){methodAllowed(method,['PATCH','DELETE']);if(method==='DELETE'){removeProject(ctx,p.id);return;}const body=parse(UpdateProjectBaseSchema,options.body);if(body.status!==undefined&&!isStaff(ctx))throw new MockHttpError(403,'FORBIDDEN','Users cannot change project status');Object.assign(p,body);bumpProjectVersion(ctx,p);return adminProjectDetail(ctx,p);}
+ if(!route){methodAllowed(method,['PATCH','DELETE']);if(method==='DELETE'){removeProject(ctx,p.id);return;}const body=parse(UpdateProjectBaseSchema,options.body);if(body.status!==undefined&&!isStaff(ctx))throw new MockHttpError(403,'FORBIDDEN','Users cannot change project status');const { publication, ...metadata } = body; Object.assign(p,metadata); if (body.visibility !== undefined) p.publicationStatus = body.visibility === 'STAFF' ? 'PRIVATE' : 'PUBLIC';
+ if (publication) {
+  if (publication.expectedVersion !== p.version) throw new MockHttpError(409,'CONFLICT','작품이 변경되었습니다.');
+  if (publication.exceptionReason && ctx.user?.role !== 'ADMIN') throw new MockHttpError(403,'FORBIDDEN','관리자만 예외 공개할 수 있습니다.');
+  if (publication.status === 'PUBLIC' && !publication.exceptionReason && !mockPublicationReadiness(p).ready) throw new MockHttpError(409,'CONFLICT','공개 조건을 확인하세요.');
+  p.publicationStatus = publication.status;
+ }
+ bumpProjectVersion(ctx,p);return adminProjectDetail(ctx,p);}
  if(route==='poster'){methodAllowed(method,['PATCH']);const {assetId}=parse(SetProjectPosterSchema,options.body);const asset=p.assets.find(a=>a.id===assetId);if(!asset)throw new MockHttpError(404,'NOT_FOUND','Asset not found in this project');if(!('image' in asset))throw new MockHttpError(400,'VALIDATION_ERROR','Only image assets can be used as poster');p.posterAssetId=assetId;p.poster=asset.image;bumpProjectVersion(ctx,p);return {posterAssetId:assetId};}
  if(route==='webgl'){methodAllowed(method,['DELETE']);delete p.webglUrl;delete p.webglDeployment;bumpProjectVersion(ctx,p);return;}
  if(route==='videos/order'){methodAllowed(method,['PUT']);const body=parse(SetProjectVideoOrderSchema,options.body);const current=p.videos.map(v=>v.assetId);if(JSON.stringify(current)!==JSON.stringify(body.expectedOrder))throw new MockHttpError(409,'CONFLICT','Video order has changed');if(body.order.length!==current.length||new Set(body.order).size!==current.length||body.order.some(id=>!current.includes(id)))throw new MockHttpError(400,'VALIDATION_ERROR','Order must contain every video exactly once');p.videos=body.order.map((id,i)=>({...p.videos.find(v=>v.assetId===id)!,sortOrder:i,role:i===0?'MAIN':'ADDITIONAL'}));p.video=p.videos[0]??null;for(const a of p.assets)if(a.kind==='VIDEO')a.videoSortOrder=body.order.indexOf(a.id);bumpProjectVersion(ctx,p);return {order:body.order};}

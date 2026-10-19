@@ -74,12 +74,12 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 		for (const exhibitionVisibility of visibilities) {
 			const exhibition = await db.exhibition.create({ data: { year: 2097, title: randomUUID(), visibility: exhibitionVisibility } });
 			for (const visibility of visibilities) {
-				const p = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: visibility, slug: randomUUID(), status: 'PUBLISHED', visibility, members: { create: { name: 'Member', userId: member.id } } } });
+				const p = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: visibility, slug: randomUUID(), status: 'PUBLISHED', publicationStatus: visibility === 'STAFF' ? 'PRIVATE' : 'PUBLIC', visibility, members: { create: { name: 'Member', userId: member.id } } } });
 				for (const actor of [null, stranger, owner, member, operator, admin]) {
 					const staff = actor?.role === 'ADMIN' || actor?.role === 'OPERATOR';
 					const accepts = (v: Visibility) => v === 'PUBLIC' || (v === 'AUTHENTICATED' && actor !== null) || staff;
 					const related = actor?.id === owner.id || actor?.id === member.id;
-					const allowed = related || (accepts(exhibitionVisibility) && accepts(visibility));
+					const allowed = visibility !== 'STAFF' && accepts(exhibitionVisibility);
 					const detail = await request(actor, `/api/public/projects/${p.id}`);
 					expect(detail.statusCode, `${exhibitionVisibility}/${visibility}/${actor?.role ?? 'anonymous'}/${related}`).toBe(allowed ? 200 : 404);
 					expect(detail.headers['cache-control']).toBe('private, no-store');
@@ -94,51 +94,20 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 			}
 		}
 	});
-	it('keeps archival independent from audience through authenticated PATCH and anonymous GET', async () => {
-		const exhibition = await db.exhibition.create({ data: { year: 2091, title: randomUUID(), visibility: 'PUBLIC' } });
-		const project = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Archive audience', slug: randomUUID(), status: 'PUBLISHED', visibility: 'PUBLIC', members: { create: { name: 'Member', userId: member.id } } } });
-		const adminUrl = `/api/admin/projects/${project.id}`;
-		const publicUrl = `/api/public/projects/${project.id}`;
-		async function anonymousRead(visible: boolean, status: 'PUBLISHED' | 'ARCHIVED') {
-			const detail = await request(null, publicUrl);
-			expect(detail.statusCode, detail.body).toBe(visible ? 200 : 404);
-			if (visible) expect(PublicProjectDetailResponseSchema.parse(detail.json().data)).toMatchObject({ status, visibility: 'PUBLIC' });
-			for (const url of [`/api/public/exhibitions/${exhibition.id}/projects`, '/api/public/years/2091/projects']) {
-				const list = await request(null, url);
-				expect(list.statusCode, list.body).toBe(200);
-				expect(list.json().data.items.map((p: { id: number }) => p.id)).toEqual(visible ? [project.id] : []);
-			}
-			const years = await request(null, '/api/public/years');
-			expect(PublicYearListResponseSchema.parse(years.json().data).items.find((e) => e.id === exhibition.id)?.projectCount).toBe(visible ? 1 : 0);
-		}
-		await anonymousRead(true, 'PUBLISHED');
-		const archived = await request(operator, adminUrl, 'PATCH', { status: 'ARCHIVED' });
-		expect(archived.statusCode, archived.body).toBe(200);
-		expect(archived.json().data).toMatchObject({ status: 'ARCHIVED', visibility: 'PUBLIC' });
-		await anonymousRead(true, 'ARCHIVED');
-		for (const status of ['ARCHIVED', 'PUBLISHED'] as const) {
-			const statusWrite = await request(operator, adminUrl, 'PATCH', { status });
-			expect(statusWrite.statusCode, statusWrite.body).toBe(200);
-			for (const visibility of ['STAFF', 'AUTHENTICATED', 'PUBLIC'] as const) {
-				const saved = await request(operator, adminUrl, 'PATCH', { visibility });
-				expect(saved.statusCode, saved.body).toBe(200);
-				expect(saved.json().data).toMatchObject({ status, visibility });
-				expect((await request(operator, adminUrl)).json().data).toMatchObject({ status, visibility });
-				await anonymousRead(visibility === 'PUBLIC', status);
-				for (const actor of [owner, member, operator, admin, stranger]) {
-					expect((await request(actor, publicUrl)).statusCode).toBe(actor === stranger && visibility === 'STAFF' ? 404 : 200);
-				}
-			}
-		}
-		const denied = await request(stranger, adminUrl, 'PATCH', { visibility: 'STAFF' });
-		expect(denied.statusCode).toBe(403);
-		await anonymousRead(true, 'PUBLISHED');
-		const restricted = await request(admin, `/api/admin/exhibitions/${exhibition.id}`, 'PATCH', { visibility: 'STAFF' });
-		expect(restricted.statusCode, restricted.body).toBe(200);
-		expect((await request(operator, adminUrl, 'PATCH', { visibility: 'PUBLIC' })).statusCode).toBe(200);
-		expect((await request(null, publicUrl)).statusCode).toBe(404);
-		expect((await request(null, `/api/public/exhibitions/${exhibition.id}/projects`)).statusCode).toBe(404);
-	});
+	it('maps legacy archive to private and refuses legacy publication bypasses', async () => {
+        const exhibition = await db.exhibition.create({ data: { year: 2091, title: randomUUID() } });
+        const project = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Legacy', slug: randomUUID(), publicationStatus: 'PUBLIC', legacyPublication: true, status: 'PUBLISHED' } });
+        const url = `/api/admin/projects/${project.id}`;
+        expect((await request(null, `/api/public/projects/${project.id}`)).statusCode).toBe(200);
+        expect((await request(operator, url, 'PATCH', { status: 'ARCHIVED' })).json().data.publicationStatus).toBe('PRIVATE');
+        expect((await request(null, `/api/public/projects/${project.id}`)).statusCode).toBe(404);
+        for (const payload of [{status:'PUBLISHED'}, {visibility:'PUBLIC'}, {visibility:'AUTHENTICATED'}]) {
+            expect((await request(operator, url, 'PATCH', payload)).statusCode).toBe(409);
+        }
+        const current = await db.project.findUniqueOrThrow({where:{id:project.id}});
+        expect((await request(admin, url, 'PATCH', {publication:{status:'PUBLIC',expectedVersion:current.version,exceptionReason:'Historic exhibition approval'}})).statusCode).toBe(200);
+        expect((await request(null, `/api/public/projects/${project.id}`)).statusCode).toBe(200);
+    });
 	it('keeps inaccessible exhibitions out of admin selectors; year slug cannot fall through', async () => {
 		const exhibition = await db.exhibition.create({ data: { year: 2096, title: 'Hidden', visibility: 'STAFF' } });
 		const p = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Own hidden', slug: randomUUID(), status: 'ARCHIVED' } });
@@ -166,7 +135,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 	it.each(['project', 'exhibition'] as const)('retains %s restriction when upload READY commit waits for a concurrent visibility change', async (scope) => {
 		await db.storageBucket.upsert({ where: { bucket: 'pcu-protected' }, create: { bucket: 'pcu-protected', visibility: 'PROTECTED' }, update: {} });
 		const exhibition = await db.exhibition.create({ data: { year: 2092, title: randomUUID() } });
-		const project = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Upload race', slug: randomUUID(), status: 'PUBLISHED' } });
+		const project = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Upload race', slug: randomUUID(), status: 'PUBLISHED', publicationStatus: 'PUBLIC' } });
 		const uploads = createAssetUploadRepository(db);
 		const id = randomUUID();
 		// Production allocation occurs before policy changes. Exercise the actual
@@ -188,7 +157,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 			const [backend] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
 			locked(backend!.pid);
 			await releaseBlocker;
-			if (scope === 'project') await tx.project.update({ where: { id: project.id }, data: { visibility: 'STAFF', version: { increment: 1 } } });
+			if (scope === 'project') await tx.project.update({ where: { id: project.id }, data: { visibility: 'STAFF', publicationStatus: 'PRIVATE', version: { increment: 1 } } });
 			else await tx.exhibition.update({ where: { id: exhibition.id }, data: { visibility: 'STAFF' } });
 		}, { timeout: 10_000 });
 		const blockerPid = await blockerReady;
@@ -211,7 +180,7 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 		await tightening;
 		const committed = await completion;
 		const stored = await db.project.findUniqueOrThrow({ where: { id: project.id }, include: { exhibition: true } });
-		expect(scope === 'project' ? stored.visibility : stored.exhibition.visibility).toBe('STAFF');
+		expect(scope === 'project' ? stored.publicationStatus : stored.exhibition.visibility).toBe(scope === 'project' ? 'PRIVATE' : 'STAFF');
 		expect((await db.assetUploadSession.findUniqueOrThrow({ where: { id } })).state).toBe('READY');
 		expect(await db.assetRepresentation.findUniqueOrThrow({ where: { id: committed.representationId } })).toMatchObject({ state: 'READY', bucket: 'pcu-protected', objectKey: session.objectKey });
 		for (const actor of [null, stranger]) {
@@ -228,20 +197,20 @@ describe.runIf(process.env['RUN_POSTGRES_INTEGRATION'] === 'true')('visibility a
 	it('rechecks relations and lock for visibility writes; locked requests reject visibility', async () => {
 		const exhibition = await db.exhibition.create({ data: { year: 2095, title: randomUUID() } });
 		const p = await db.project.create({ data: { exhibitionId: exhibition.id, creatorId: owner.id, title: 'Editable', slug: randomUUID(), status: 'PUBLISHED', members: { create: { name: 'Member', userId: member.id } } } });
-		for (const actor of [owner, member]) expect((await request(actor, `/api/admin/projects/${p.id}`, 'PATCH', { visibility: 'STAFF' })).json().data).toMatchObject({ visibility: 'STAFF', canChangeVisibility: true });
+		for (const actor of [owner, member]) expect((await request(actor, `/api/admin/projects/${p.id}`, 'PATCH', { visibility: 'STAFF' })).json().data).toMatchObject({ publicationStatus: 'PRIVATE', canChangeVisibility: true });
 		await db.projectMember.deleteMany({ where: { projectId: p.id } });
 		expect((await request(member, `/api/admin/projects/${p.id}`, 'PATCH', { visibility: 'PUBLIC' })).statusCode).toBe(403);
 		await db.exhibition.update({ where: { id: exhibition.id }, data: { isModificationEnabled: false } });
 		expect((await request(owner, `/api/admin/projects/${p.id}`, 'PATCH', { visibility: 'PUBLIC' })).statusCode).toBe(403);
 		expect((await request(owner, `/api/admin/projects/${p.id}`)).json().data.canChangeVisibility).toBe(false);
-		for (const actor of [operator, admin]) expect((await request(actor, `/api/admin/projects/${p.id}`, 'PATCH', { visibility: 'AUTHENTICATED' })).statusCode).toBe(200);
+		for (const actor of [operator, admin]) expect((await request(actor, `/api/admin/projects/${p.id}`, 'PATCH', { visibility: 'STAFF' })).statusCode).toBe(200);
 		expect(ProjectChangeValuesSchema.safeParse({ visibility: 'PUBLIC' }).success).toBe(false);
 		const change = await request(owner, `/api/me/projects/${p.id}/change-requests`, 'POST', { kind: 'EDIT', reason: 'Update metadata' });
 		expect(change.statusCode, change.body).toBe(201);
 		const bypass = await request(owner, `/api/me/change-requests/${change.json().data.id}`, 'PATCH', { changes: { visibility: 'PUBLIC' } });
 		expect(bypass.statusCode).toBe(400);
-		expect((await db.project.findUniqueOrThrow({ where: { id: p.id } })).visibility).toBe('AUTHENTICATED');
-		expect((await request(admin, `/api/admin/projects/${p.id}`, 'PATCH', { title: 'Preserve' })).json().data.visibility).toBe('AUTHENTICATED');
+		expect((await db.project.findUniqueOrThrow({ where: { id: p.id } })).publicationStatus).toBe('PRIVATE');
+		expect((await request(admin, `/api/admin/projects/${p.id}`, 'PATCH', { title: 'Preserve' })).json().data.publicationStatus).toBe('PRIVATE');
 		expect((await request(admin, `/api/admin/projects/${p.id}`, 'PATCH', { visibility: 'INVALID' })).statusCode).toBe(400);
 	});
 });
