@@ -238,7 +238,7 @@ function ImageUploadSession({
 				const completion = await transfer(activeRun, [owner, file, kind, (next) => {
 					if (!isCurrentRun(token)) return;
 					setProgress(next);
-					if (next.percent >= 100) setPhase('verifying');
+					if (next.phase === 'verifying') setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
 					recoveryIndex: index,

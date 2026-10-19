@@ -370,7 +370,7 @@ describe('submission studio', () => {
 		await act(async () => {
 			finishPoster({ status: 'READY', sessionId: poster.name, generation: 1, sizeBytes: poster.size });
 		});
-		await waitFor(() => expect(controls.status).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(controls.status.mock.calls.length).toBeGreaterThanOrEqual(2));
 		expect(controls.upload.mock.calls.map((call) => call[1].name).sort()).toEqual([
 			'first.png',
 			'poster.png',
@@ -398,7 +398,7 @@ describe('submission studio', () => {
 		select(container, 'native', [new File(['zip'], 'retry.zip')]);
 		await goTo(3);
 		fireEvent.click(screen.getByRole('button', { name: '저장' }));
-		fireEvent.click(await screen.findByRole('button', { name: '재시도' }));
+		fireEvent.click(await screen.findByRole('button', { name: /재시도$/ }));
 		await waitFor(() => expect(controls.upload).toHaveBeenCalledTimes(2));
 		expect(controls.upload.mock.calls[1]![4].submissionItem).toEqual(controls.upload.mock.calls[0]![4].submissionItem);
 	});

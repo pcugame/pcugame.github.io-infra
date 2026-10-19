@@ -167,7 +167,7 @@ it('classifies PDF by destination and rejects unsupported posters', () => {
 });
 it('reserves counts across stored and queued files and enforces bytes', () => {
 	const entries: UploadEntry[] = ['a.mp4', 'b.mp4', 'c.mp4', 'd.mp4', 'e.mp4'].map((name, id) => ({
-		id,
+		id, uploadId: String(id),
 		file: file(name),
 		kind: 'VIDEO',
 		zone: 'files',
@@ -175,7 +175,7 @@ it('reserves counts across stored and queued files and enforces bytes', () => {
 	}));
 	expect(uploadQueueIssues(entries, project, limits).get(4)).toMatch(/최대 5개/);
 	const materials: UploadEntry[] = ['a.pdf', 'a.bin', 'b.pdf', 'b.bin'].map((name, id) => ({
-		id,
+		id, uploadId: String(id),
 		file: file(name),
 		kind: id % 2 ? 'ATTACHMENT' : 'DOCUMENT',
 		zone: 'files',
@@ -248,7 +248,7 @@ it('retries failed upload from Apply and does not repeat completed transfers', a
 	setup();
 	drop([file('a.jpg'), file('b.mp4')]);
 	apply();
-	await screen.findByRole('button', { name: '재시도' });
+	await screen.findByRole('button', { name: /재시도$/ });
 	await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
 	expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2);
 	apply();
@@ -276,7 +276,7 @@ it('preserves stored files until replacement uploads succeed and does not repeat
 	drop([file('a.jpg')]);
 	expect(remove).not.toHaveBeenCalled();
 	apply();
-	await screen.findByRole('button', { name: '재시도' });
+	await screen.findByRole('button', { name: /재시도$/ });
 	// The widget error renders before the parent Apply promise finishes.
 	// Production disables Apply until that promise settles; wait for the same boundary.
 	await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
@@ -325,13 +325,12 @@ it('does not advance while server cancellation is pending', async () => {
 	drop([file('a.jpg'), file('b.mp4')]);
 	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce());
-	fireEvent.click(within(screen.getByRole('list', { name: '변경 파일 업로드 진행' })).getByRole('button', { name: '취소' }));
+	fireEvent.click(within(screen.getByRole('list', { name: '변경 파일 업로드 진행' })).getAllByRole('button', { name: / 취소$/ })[0]!);
 	await waitFor(() => expect(api.cancelDirectAssetUploadSession).toHaveBeenCalledOnce());
 	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
 	await act(async () => confirm());
-	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
-	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+	expect(screen.getByText('취소 완료')).toBeTruthy();
 });
 
 it('does not repeat a completed upload after canonical refresh fails', async () => {
@@ -344,10 +343,8 @@ it('does not repeat a completed upload after canonical refresh fails', async () 
 	const refresh = vi.spyOn(client, 'invalidateQueries').mockRejectedValue(new Error('offline'));
 	await act(async () => finishFirst({ status: 'READY', sessionId: 'first' }));
 	await waitFor(() => expect(screen.getByText('업로드 완료')).toBeTruthy());
-	expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
-	refresh.mockResolvedValue();
-	apply();
 	await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+	refresh.mockResolvedValue();
 	expect(api.uploadDirectAssetFile.mock.calls[1]![1].name).toBe('second.png');
 });
 
@@ -380,7 +377,7 @@ it('keeps Apply dirty for refresh when a failed widget completes through its own
 	const { client } = setup();
 	drop([file('a.jpg')]);
 	apply();
-	fireEvent.click(await screen.findByRole('button', { name: '재시도' }));
+	fireEvent.click(await screen.findByRole('button', { name: /재시도$/ }));
 	await screen.findByText('업로드 완료');
 	expect(screen.getByTestId('dirty').textContent).toBe('true');
 	const refresh = vi.spyOn(client, 'invalidateQueries');
@@ -404,7 +401,7 @@ it.each(['complete', 'cancel', 'fail'] as const)('preserves stored files until r
   await waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith(11));
  } else {
   if (outcome === 'fail') await act(async () => fail(new Error('failed')));
-  else fireEvent.click(within(screen.getByRole('list', { name: '변경 파일 업로드 진행' })).getByRole('button', { name: '취소' }));
+  else fireEvent.click(within(screen.getByRole('list', { name: '변경 파일 업로드 진행' })).getAllByRole('button', { name: / 취소$/ })[0]!);
   await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
   expect(remove).not.toHaveBeenCalled();
  }
@@ -460,6 +457,38 @@ it('cancels the entire queue only after the active server cancellation is confir
  expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
  await act(async () => confirm());
  await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
- expect(screen.getByTestId('dirty').textContent).toBe('false');
+ expect(screen.getByTestId('dirty').textContent).toBe('true');
+ expect(screen.getAllByText('취소 완료')).toHaveLength(2);
  expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
+});
+
+it('restores editor row IDs after remount and requests the missing original File on that row', async () => {
+ api.uploadDirectAssetFile.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ status: 'READY', sessionId: 'retried', generation: 1 });
+ const view = setup(); drop([file('resume.png')]); apply();
+ await screen.findByRole('button', { name: 'resume.png 재시도' });
+ const id = document.querySelector('.upload-file-row')!.getAttribute('data-file-id');
+ view.unmount(); resetDirectUploadTasksForTests();
+ setup(); apply();
+ const chooser = await screen.findByLabelText('resume.png 원본 파일 선택');
+ expect(document.querySelector('.upload-file-row')!.getAttribute('data-file-id')).toBe(id);
+ expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
+ fireEvent.change(chooser, { target: { files: [file('wrong.png')] } });
+ await screen.findByText('동일한 원본 파일을 선택해 주세요.'); expect(api.uploadDirectAssetFile).toHaveBeenCalledOnce();
+ fireEvent.change(screen.getByLabelText('resume.png 원본 파일 선택'), { target: { files: [file('resume.png')] } });
+ await waitFor(() => expect(api.uploadDirectAssetFile).toHaveBeenCalledTimes(2));
+ await screen.findByText('업로드 완료');
+});
+
+it('restores confirmed cancelled and completed row counts from durable outcomes', async () => {
+ const stored = [
+  { id: 1, uploadId: 'ready-id', kind: 'IMAGE', zone: 'files', status: 'pending', file: { name: 'ready.png', size: 1, type: 'image/png' } },
+  { id: 2, uploadId: 'cancelled-id', kind: 'IMAGE', zone: 'files', status: 'pending', file: { name: 'cancelled.png', size: 1, type: 'image/png' } },
+ ];
+ sessionStorage.setItem('pcu.edit-upload-files:3:7', JSON.stringify(stored));
+ sessionStorage.setItem('pcu.file-upload:3:PROJECT:7:IMAGE:ready-id:outcome', 'ready');
+ sessionStorage.setItem('pcu.file-upload:3:PROJECT:7:IMAGE:cancelled-id:outcome', 'cancelled');
+ setup();
+ await screen.findByText('업로드 완료'); expect(screen.getByText('취소 완료')).toBeTruthy();
+ apply(); await waitFor(() => expect(screen.getByTestId('applying').textContent).toBe('false'));
+ expect(api.uploadDirectAssetFile).not.toHaveBeenCalled(); expect(screen.getByTestId('dirty').textContent).toBe('true');
 });

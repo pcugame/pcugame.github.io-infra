@@ -1,5 +1,6 @@
 /** Direct Garage multipart client for GAME, WEBGL, VIDEO, IMAGE, and POSTER. */
 
+import { putUploadPart } from './upload-part-transport';
 import { env } from '../env';
 import { ApiError } from './client';
 import type {
@@ -18,6 +19,9 @@ import { DirectAssetUploadCreationSchema, DirectAssetUploadCreationLookupSchema,
 import { createFileSourceIdentity } from '../file-identity';
 
 export interface DirectAssetUploadProgress {
+	phase?: 'checking' | 'preparing' | 'uploading' | 'transferred' | 'completing' | 'verifying' | 'ready';
+	confirmedBytes?: number;
+	inFlightBytes?: number;
 	uploadedChunks: number;
 	totalChunks: number;
 	uploadedBytes: number;
@@ -200,7 +204,7 @@ export async function cancelDirectAssetUploadSession(sessionId: string): Promise
 /** Poll JSON control state only; Garage never passes archive bytes through the API. */
 export async function waitForDirectAssetReady(
 	sessionId: string,
-	options: { intervalMs?: number; maxIntervalMs?: number; timeoutMs?: number; signal?: AbortSignal } = {},
+	options: { intervalMs?: number; maxIntervalMs?: number; timeoutMs?: number; signal?: AbortSignal; onStatus?: (status: DirectAssetUploadStatus) => void } = {},
 ): Promise<DirectAssetUploadStatus> {
 	const intervalMs = options.intervalMs ?? 1_500;
 	const maxIntervalMs = options.maxIntervalMs ?? 15_000;
@@ -221,6 +225,7 @@ export async function waitForDirectAssetReady(
 			await wait(Math.min(maxIntervalMs, intervalMs * (2 ** Math.min(transientFailures, 4))), options.signal);
 			continue;
 		}
+		options.onStatus?.(status);
 		if (status.state === 'READY') return status;
 		if (['REJECTED', 'CANCELLED', 'EXPIRED'].includes(status.state)) {
 			throw new Error(`Direct upload ${status.state.toLowerCase()}`);
@@ -257,16 +262,13 @@ async function putDirectUploadPart(
 	capability: { url: string; requiredHeaders: Record<string, string> },
 	body: Blob,
 	signal?: AbortSignal,
+	onProgress?: (bytes: number) => void,
 ): Promise<string> {
 	throwIfAborted(signal);
 
-	let response: Response;
+	let response: { ok: boolean; status: number; headers: Pick<Headers, 'get'> };
 	try {
-		const transport = import.meta.env.VITE_MOCK === 'true'
-			? (await import('./mock/transport')).mockFetch : fetch;
-		response = await transport(capability.url, {
-			method: 'PUT', headers: capability.requiredHeaders, body, signal,
-		});
+		response = await putUploadPart(capability, body, signal, onProgress);
 	} catch (error) {
 		throwIfAborted(signal);
 		if (isAbortError(error)) throw error;
@@ -326,13 +328,16 @@ async function putPartWithBoundedRetry(
 	part: PreparedPart,
 	initialCapability: PartCapability,
 	signal?: AbortSignal,
+	onProgress?: (bytes: number) => void,
 ): Promise<string> {
 	let capability = initialCapability;
 	for (let attempt = 0; ; attempt += 1) {
 		throwIfAborted(signal);
 		try {
-			return await putDirectUploadPart(capability, part.body, signal);
+			onProgress?.(0);
+			return await putDirectUploadPart(capability, part.body, signal, onProgress);
 		} catch (error) {
+			onProgress?.(0);
 			throwIfAborted(signal);
 			if (isAbortError(error)) throw error;
 			if (!(error instanceof DirectUploadPartError) || attempt >= UPLOAD_PART_RETRY_ATTEMPTS) throw error;
@@ -377,7 +382,10 @@ export async function uploadDirectAssetFile(
 		throw new Error('Only poster uploads may be owned by an exhibition');
 	}
 	throwIfAborted(options.signal);
+	const initialProgress = (phase: DirectAssetUploadProgress['phase']) => onProgress?.({ phase, uploadedChunks: 0, totalChunks: 0, uploadedBytes: 0, confirmedBytes: 0, inFlightBytes: 0, totalBytes: file.size, percent: 0 });
+	initialProgress('checking');
 	const source = await createFileSourceIdentity(file, { signal: options.signal });
+	initialProgress('preparing');
 	throwIfAborted(options.signal);
 	let session: DirectAssetUploadSession;
 	let uploaded = new Map<number, { etag: string; sizeBytes: number }>();
@@ -425,6 +433,12 @@ export async function uploadDirectAssetFile(
 		.map(([partNumber, part]) => ({ partNumber, ...part }))
 		.sort((a, b) => a.partNumber - b.partNumber);
 	let uploadedBytes = parts.reduce((total, part) => total + part.sizeBytes, 0);
+	const report = (phase: DirectAssetUploadProgress['phase'], inFlightBytes = 0) => onProgress?.({
+		phase, uploadedChunks: parts.length, totalChunks: session.totalParts,
+		confirmedBytes: uploadedBytes, inFlightBytes, uploadedBytes: uploadedBytes + inFlightBytes,
+		totalBytes: file.size, percent: Math.min(parts.length === session.totalParts ? 100 : 99, Math.floor((uploadedBytes + inFlightBytes) / file.size * 100)),
+	});
+	report('uploading');
 	const pendingPartNumbers = Array.from({ length: session.totalParts }, (_, index) => index + 1)
 		.filter((partNumber) => !uploaded.has(partNumber));
 	for (let offset = 0; offset < pendingPartNumbers.length; offset += DIRECT_UPLOAD_BROWSER_PART_BATCH_SIZE) {
@@ -450,25 +464,21 @@ export async function uploadDirectAssetFile(
 			throwIfAborted(options.signal);
 			const capability = capabilities.get(part.partNumber);
 			if (!capability) throw new Error('Direct upload capability was not issued');
-			const etag = await putPartWithBoundedRetry(session, part, capability, options.signal);
+			const etag = await putPartWithBoundedRetry(session, part, capability, options.signal, bytes => report('uploading', bytes));
 			parts.push({ partNumber: part.partNumber, etag, sizeBytes: part.body.size });
 			uploadedBytes += part.body.size;
-			onProgress?.({
-				uploadedChunks: parts.length,
-				totalChunks: session.totalParts,
-				uploadedBytes,
-				totalBytes: file.size,
-				percent: Math.round((parts.length / session.totalParts) * 100),
-			});
+			report(parts.length === session.totalParts ? 'transferred' : 'uploading');
 			throwIfAborted(options.signal);
 		}
 	}
 	parts.sort((a, b) => a.partNumber - b.partNumber);
 	throwIfAborted(options.signal);
+	report('completing');
 	const completion = await apiRequest<DirectGameUploadCompletionResponse>(`/api/admin/direct-asset-upload-sessions/${session.sessionId}/complete`, {
 		method: 'POST', headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ generation: session.generation, parts } satisfies DirectGameUploadCompleteRequest),
 	}, options.signal);
 	throwIfAborted(options.signal);
+	report(completion.status === 'READY' ? 'ready' : 'verifying');
 	return completion;
 }

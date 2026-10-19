@@ -126,6 +126,14 @@ export class DirectUploadTask {
 			}
 		}
 	}
+	/** A durable locator may move only after its old view and control requests release ownership. */
+	canMigrate = () => !this.observers.size && !this.pending && !this.deleting && !this.recoveryRequest && !this.cancelObservation;
+	retireAfterMigration = () => {
+		if (!this.canMigrate()) throw new Error('이전 업로드 결과를 먼저 확인해 주세요.');
+		this.epoch++;
+		this.pause();
+		if (tasks.get(this.key) === this) tasks.delete(this.key);
+	};
 	disposeForTests = () => { this.epoch++; this.pause(); this.cancelObservation?.abort(); };
 	getSnapshot = () => this.snapshot;
 	subscribe = (listener: () => void) => {
@@ -166,7 +174,7 @@ export class DirectUploadTask {
 		if (!this.identityAssigned) { this.operationKey = operationKey; this.identityAssigned = true; }
 	};
 	matchesOperation = (operationKey?: string) => this.operationKey === operationKey;
-	matchesFile = async (file: File) => {
+	matchesFile = async (file: File, signal?: AbortSignal) => {
 		const epoch = this.epoch;
 		const saved = this.snapshot.saved;
 		const metadata = this.creation?.request ?? (saved && 'session' in saved ? saved : null);
@@ -180,7 +188,7 @@ export class DirectUploadTask {
 		// identify a newly selected file. Never infer a match from a missing File.
 		if (!expected?.sourceIdentity || expected.sourceIdentityAlgorithm !== 'SHA256_BLOCK_MANIFEST_V1') return false;
 		try {
-			const source = await createFileSourceIdentity(file);
+			const source = signal ? await createFileSourceIdentity(file, { signal }) : await createFileSourceIdentity(file);
 			return epoch === this.epoch && this.snapshot.saved === saved
 				&& source.sourceIdentityAlgorithm === expected.sourceIdentityAlgorithm && source.sourceIdentity === expected.sourceIdentity;
 		} catch { return false; }
@@ -340,6 +348,14 @@ export class DirectUploadTask {
 			try { await this.restore(recovery); }
 			catch (cause) {
 				if (this.creation?.request.clientUploadId !== clientUploadId) return;
+				this.publish({ control: 'cancel-unconfirmed', message: cancelUnconfirmedMessage });
+				this.observer()?.onCancelError(cause);
+			}
+		} else if (recovery?.items.some(item => item.sessionId)) {
+			try {
+				await this.restore(recovery);
+				this.finishCancellation();
+			} catch (cause) {
 				this.publish({ control: 'cancel-unconfirmed', message: cancelUnconfirmedMessage });
 				this.observer()?.onCancelError(cause);
 			}

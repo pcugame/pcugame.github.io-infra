@@ -1,4 +1,5 @@
 import { createContext } from 'react';
 export const LinearUploadContext = createContext(false);
 
-export const UploadProgressReporter = createContext<((id: string, value: number | null) => void) | null>(null);
+export type UploadByteProgress = { loaded: number; total?: number; count: number; percent: number };
+export const UploadProgressReporter = createContext<((id: string, value: UploadByteProgress | null) => void) | null>(null);

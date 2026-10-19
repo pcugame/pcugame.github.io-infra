@@ -287,7 +287,7 @@ function GameUploadSession({
 			const completion = await transfer(activeRun, [projectId, uploadFile, uploadKind, (next) => {
 				if (!isCurrentRun(token)) return;
 				setProgress(next);
-				if (next.percent >= 100) setState('verifying');
+				if (next.phase === 'verifying') setState('verifying');
 			}, {
 				...(resume ? { resume } : {}),
 				...(submissionItem ? { submissionItem: { id: submissionItem.id, clientToken: submissionItem.clientToken } } : {}),

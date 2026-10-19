@@ -248,7 +248,7 @@ function VideoUploadSession({
 				const completion = await transfer(activeRun, [projectId, file, kind, (next) => {
 					if (!isCurrentRun(token)) return;
 					setProgress(next);
-					if (next.percent >= 100) setPhase('verifying');
+					if (next.phase === 'verifying') setPhase('verifying');
 				}, {
 					...(matchingResume ? { resume: matchingResume } : {}),
 					recoveryIndex: index,

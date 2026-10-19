@@ -84,7 +84,7 @@ describe('global project Apply', () => {
 
  it('keeps selected replacement media and member edits through navigation and uses document order', async () => {
   vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:replacement'), revokeObjectURL: vi.fn() });
-  control.entries = [{ id: 1, kind: 'POSTER', zone: 'poster', status: 'pending', file: new File(['image'], 'replacement.png', { type: 'image/png' }) }];
+  control.entries = [{ id: 1, uploadId: 'poster', kind: 'POSTER', zone: 'poster', status: 'pending', file: new File(['image'], 'replacement.png', { type: 'image/png' }) }];
   mount(); await ready();
   goTo(1); change('참여 학생 1 이름', '변경 학생');
   const platform = screen.getByLabelText('PC');

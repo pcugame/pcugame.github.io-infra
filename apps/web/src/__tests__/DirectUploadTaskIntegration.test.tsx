@@ -18,6 +18,9 @@ import { getClientUploadLimits } from '../lib/upload-limits';
 import * as uploadApi from '../lib/api/game-upload';
 import { AdminProjectUploadProvider, AdminProjectAssetManager, AdminProjectUploadProgress, useAdminProjectUploadQueue } from '../features/admin/projects/AdminProjectAssetManager';
 
+// The suite supplies JSON/storage fixtures through fetch; real XHR is exercised by uploadPartProgress and the browser harness.
+vi.mock('../lib/api/upload-part-transport', () => ({ putUploadPart: (capability: { url: string; requiredHeaders: Record<string, string> }, body: Blob, signal?: AbortSignal) => fetch(capability.url, { method: 'PUT', headers: capability.requiredHeaders, body, signal }) }));
+
 function deferred<T>() {
 	let resolve!: (value: T) => void;
 	let reject!: (cause: unknown) => void;
@@ -123,8 +126,8 @@ function widget(kind: 'IMAGE' | 'VIDEO' | 'GAME' | 'WEBGL', file: File | undefin
 	if (kind === 'VIDEO') return <DirectVideoUploadWidget {...props} projectId={7} initialFiles={file ? [file] : []} submissionItems={item ? [item] : []} />;
 	return <DirectImageUploadWidget {...props} owner={{ type: 'PROJECT', id: 7 }} kind="IMAGE" initialFiles={file ? [file] : []} submissionItems={item ? [item] : []} />;
 }
-function mount(kind: 'IMAGE' | 'VIDEO' | 'GAME' | 'WEBGL', file?: File, complete = vi.fn(), cancelled = vi.fn(), item?: SubmissionBinding, operationKey?: string, role = 'ADMIN') {
-	return { complete, cancelled, ...render(<StrictMode><QueryClientProvider client={client(role)}>{widget(kind, file, complete, cancelled, item, operationKey)}</QueryClientProvider></StrictMode>) };
+function mount(kind: 'IMAGE' | 'VIDEO' | 'GAME' | 'WEBGL', file?: File, complete = vi.fn(), cancelled = vi.fn(), item?: SubmissionBinding, operationKey?: string, role = 'ADMIN', autoStart = Boolean(file)) {
+	return { complete, cancelled, ...render(<StrictMode><QueryClientProvider client={client(role)}>{widget(kind, file, complete, cancelled, item, operationKey, autoStart)}</QueryClientProvider></StrictMode>) };
 }
 const cancel = () => fireEvent.click(screen.getByRole('button', { name: /^취소/ }));
 const retry = () => fireEvent.click(screen.getByRole('button', { name: /시작|재시도|이어올리기/ }));
@@ -365,8 +368,17 @@ describe.each(['IMAGE', 'VIDEO', 'GAME'] as const)('%s job handoff through React
 	it.each(['resume', 'cancel'] as const)('recovers a lost published-project create response and actually completes %s', async action => {
 		const net = network(kind); net.controls.loseCreate = true; net.controls.failLookup = true;
 		const chosen = file(); const old = mount(kind, chosen);
-		await screen.findByRole('alert'); old.unmount(); const view = mount(kind, chosen);
-		await screen.findByRole('alert'); net.controls.failLookup = false;
+		// An alert alone does not mean the automatic transfer has settled.
+		await screen.findByRole('button', { name: '재시도' }); old.unmount();
+		// Reentry must wait for the explicit resume/cancel action under test.
+		net.controls.holdLookup = true;
+		const view = mount(kind, chosen, vi.fn(), vi.fn(), undefined, undefined, 'ADMIN', false);
+		await waitFor(() => expect(net.lookups).toHaveLength(1));
+		await act(async () => net.lookups[0]!.resolve(json({}, 503)));
+		await screen.findByRole('alert');
+		expect(view.complete).not.toHaveBeenCalled(); expect(view.cancelled).not.toHaveBeenCalled();
+		expect(net.completes).toHaveLength(0); expect(net.deletes).toHaveLength(0);
+		net.controls.holdLookup = false; net.controls.failLookup = false;
 		if (action === 'cancel') { cancel(); await waitFor(() => expect(view.cancelled).toHaveBeenCalledOnce()); expect(net.deletes).toHaveLength(1); expect(view.complete).not.toHaveBeenCalled(); }
 		else { retry(); await waitFor(() => expect(view.complete).toHaveBeenCalledOnce()); expect(net.completes).toHaveLength(1); expect(view.cancelled).not.toHaveBeenCalled(); }
 		expect(net.creates).toHaveLength(1);
@@ -639,13 +651,12 @@ it('keeps the real parent queue on B when a rejected A cancellation lookup arriv
 	fireEvent.drop(screen.getByRole('button', { name: '게임·미디어·자료 선택' }).parentElement!, { dataTransfer: { files: [new File(['first'], 'first.png', { type: 'image/png' }), new File(['B'], 'second.png', { type: 'image/png' })], types: ['Files'] } });
 	fireEvent.click(screen.getByRole('button', { name: '적용' })); await waitFor(() => expect(net.rejections).toHaveLength(1));
 	const list = await screen.findByRole('list', { name: '변경 파일 업로드 진행' });
-	fireEvent.click(within(list).getByRole('button', { name: '취소' }));
+	fireEvent.click(within(list).getByRole('button', { name: 'first.png 취소' }));
 	await waitFor(() => expect(net.lookups).toHaveLength(1));
 	fireEvent.click(screen.getByRole('button', { name: '화면 전환' }));
 	await act(async () => net.rejections[0]!.response.resolve(net.rejections[0]!.rejection));
 	fireEvent.click(screen.getByRole('button', { name: '화면 전환' }));
-	await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe('first.png:cancelled,second.png:pending'));
-	fireEvent.click(screen.getByRole('button', { name: '적용' })); await waitFor(() => expect(net.completes).toHaveLength(1));
+	await waitFor(() => expect(net.completes).toHaveLength(1));
 	await act(async () => net.lookups[0]!.resolve(json({}, 503)));
 	expect(screen.getByTestId('queue').textContent).toBe('first.png:cancelled,second.png:active');
 	expect(net.createRequests).toHaveLength(2); expect(net.createRequests[1]!.originalName).toBe('second.png');
@@ -664,15 +675,15 @@ it.each(['READY', 'CANCELLED'] as const)('real parent queue reconciles %s once a
 	fireEvent.click(screen.getByRole('button', { name: '적용' })); await waitFor(() => expect(net.creates).toHaveLength(1));
 	fireEvent.click(screen.getByRole('button', { name: '화면 전환' })); fireEvent.click(screen.getByRole('button', { name: '화면 전환' }));
 	const list = await screen.findByRole('list', { name: '변경 파일 업로드 진행' });
-	fireEvent.click(within(list).getByRole('button', { name: '취소' }));
+	fireEvent.click(within(list).getByRole('button', { name: 'first.png 취소' }));
 	expect(net.creates).toHaveLength(1); net.controls.cancelConflict = outcome === 'READY'; net.creates[0]!.session.state = outcome;
 	await act(async () => net.creates[0]!.response.resolve(json(net.creates[0]!.session)));
 	if (outcome === 'READY') {
-		await waitFor(() => expect(net.creates).toHaveLength(2)); expect(screen.getByTestId('queue').textContent).toBe('first.png:done,second.png:active');
+		await waitFor(() => expect(net.creates).toHaveLength(2)); await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe('first.png:done,second.png:active'));
 		expect(net.creates[1]!.session.originalName).toBe('second.png');
 	} else {
-		await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe('first.png:cancelled,second.png:pending'));
-		expect(net.creates).toHaveLength(1);
+		await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe('first.png:cancelled,second.png:active'));
+		await waitFor(() => expect(net.creates).toHaveLength(2));
 	}
 	expect(net.deletes).toHaveLength(1);
 });
@@ -939,7 +950,7 @@ describe.each(['IMAGE', 'VIDEO', 'GAME', 'WEBGL'] as const)('%s selection during
 
 });
 
-it.each(['IMAGE', 'VIDEO'] as const)('keeps the real %s parent queue pending after selection invalidates restored READY', async kind => {
+it.each(['IMAGE', 'VIDEO'] as const)('keeps restored READY bound to its original %s file across delayed status and continues the next file', async kind => {
 	const net = network(kind); const type = kind === 'IMAGE' ? 'image/png' : 'video/mp4';
 	const original = new File(['same-file'], kind === 'IMAGE' ? 'cover.png' : 'video.mp4', { type });
 	const next = new File(['next-file'], kind === 'IMAGE' ? 'next.png' : 'next.mp4', { type });
@@ -953,13 +964,9 @@ it.each(['IMAGE', 'VIDEO'] as const)('keeps the real %s parent queue pending aft
 	fireEvent.drop(screen.getByRole('button', { name: '게임·미디어·자료 선택' }).parentElement!, { dataTransfer: { files: [original, next], types: ['Files'] } });
 	fireEvent.click(screen.getByRole('button', { name: '적용' })); await waitFor(() => expect(net.statuses.length).toBeGreaterThan(0));
 	const list = screen.getByRole('list', { name: '변경 파일 업로드 진행' });
-	fireEvent.change(within(list).getByLabelText(/파일 선택/), { target: { files: [new File(['diff-file'], original.name, { type })] } });
+	expect(within(list).queryByLabelText(/원본 파일 선택/)).toBeNull();
 	net.controls.holdStatus = false;
 	await act(async () => { for (const request of net.statuses) request.response.resolve(json(session)); });
-	expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:active,${next.name}:pending`);
-	expect(net.creates).toHaveLength(0); expect(sessionStorage.getItem(key)).toContain('recovered');
-	fireEvent.change(within(list).getByLabelText(/파일 선택/), { target: { files: [original] } });
-	fireEvent.click(within(list).getByRole('button', { name: /재시도|이어올리기/ }));
 	await waitFor(() => expect(net.completes).toHaveLength(1));
 	expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:active`);
 	expect(net.createRequests.map(request => request.originalName)).toEqual([next.name]);
@@ -988,7 +995,7 @@ it('voting poster does not credit a new input selection with a delayed original 
 });
 
 
-it.each(['IMAGE', 'VIDEO'] as const)('ignores the real %s client late complete response while the parent queue uploads its next file', async kind => {
+it.each(['IMAGE', 'VIDEO'] as const)('prevents individual cancellation during %s completion and keeps the next file independent across a view remount', async kind => {
 	const net = network(kind); net.controls.holdCreate = false; net.controls.holdComplete = true;
 	const type = kind === 'IMAGE' ? 'image/png' : 'video/mp4';
 	const original = new File(['same-file'], kind === 'IMAGE' ? 'cover.png' : 'video.mp4', { type });
@@ -1001,13 +1008,15 @@ it.each(['IMAGE', 'VIDEO'] as const)('ignores the real %s client late complete r
 	// The server committed A, but its complete response is still in transit.
 	net.creates[0]!.session.state = 'READY'; net.controls.cancelConflict = true;
 	const list = screen.getByRole('list', { name: '변경 파일 업로드 진행' });
-	fireEvent.click(within(list).getByRole('button', { name: /^취소/ }));
-	await waitFor(() => expect(net.completes).toHaveLength(2));
-	expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:active`);
+	expect(within(list).queryByRole('button', { name: `${original.name} 취소` })).toBeNull();
+	fireEvent.click(screen.getByRole('button', { name: '화면 전환' }));
+	fireEvent.click(screen.getByRole('button', { name: '화면 전환' }));
+	expect(net.completes).toHaveLength(1);
 	await act(async () => net.completes[0]!.response.resolve(json({ status: 'READY', sessionId: net.completes[0]!.id, generation: 1, sizeBytes: original.size })));
+	await waitFor(() => expect(net.completes).toHaveLength(2));
 	expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:active`);
 	expect(net.createRequests.map(request => request.originalName)).toEqual([original.name, next.name]);
 	await act(async () => net.completes[1]!.response.resolve(json({ status: 'READY', sessionId: net.completes[1]!.id, generation: 1, sizeBytes: next.size })));
 	await waitFor(() => expect(screen.getByTestId('queue').textContent).toBe(`${original.name}:done,${next.name}:done`));
-	expect(net.creates).toHaveLength(2); expect(net.deletes).toHaveLength(1);
+	expect(net.creates).toHaveLength(2); expect(net.deletes).toHaveLength(0);
 });
