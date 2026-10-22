@@ -1,0 +1,10 @@
+[Container]
+Image=REPLACE_WITH_WEB_IMAGE_AT_SHA256_DIGEST
+ContainerName=pcu-web
+Network=pcu-app.network
+PublishPort=127.0.0.1:8080:8080
+Volume=/srv/pcu/config/web.json:/usr/share/nginx/html/runtime-config.json:ro,z
+[Service]
+Restart=always
+[Install]
+WantedBy=default.target

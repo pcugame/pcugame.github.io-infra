@@ -3,8 +3,14 @@
 Quadlet owns the runtime topology and systemd owns process lifecycle and
 restart. `../deploy.sh` updates the immutable application digest and requests
 systemd operations on an already adopted host. It does not install Quadlet for
-the first time or migrate legacy units. Production adoption and operation have
-not been verified; repository edits do not activate these definitions.
+the first time or migrate legacy units. The prior operational investigation
+confirmed rootless Quadlet adoption for the API and workers. That evidence does not validate newly edited definitions
+or the single-PC topology. Repository edits do not activate services.
+
+For a new manually configured single-PC installation, use the
+[operator guide](../../docs/guide/README.md) and its
+[configuration reference](../../docs/guide/configuration.md). Keep this renderer
+and the adoption procedure for existing managed hosts; do not mix their outputs.
 
 For first installation, use the separately gated [first-adoption runbook](ADOPTION.md)
 and [Podman compatibility policy](COMPATIBILITY.md). Normal releases cannot adopt

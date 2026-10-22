@@ -41,7 +41,7 @@ server {
     client_body_buffer_size 16k;
     access_log off;
     error_log /dev/null crit;
-    resolver 127.0.0.11 valid=30s;
+    resolver ${NGINX_RESOLVER} valid=30s;
     set $pcu_report_upstream "${FILE_GATEWAY_API_UPSTREAM}";
     proxy_pass $pcu_report_upstream$request_uri;
     proxy_ssl_server_name on;
@@ -62,7 +62,7 @@ server {
     # Bounded per-project runtime connection policies may exceed 4 KiB.
     proxy_buffer_size 16k;
     proxy_buffers 4 16k;
-    resolver 127.0.0.11 valid=30s;
+    resolver ${NGINX_RESOLVER} valid=30s;
     set $pcu_gate_upstream "${FILE_GATEWAY_API_UPSTREAM}";
     proxy_pass $pcu_gate_upstream/api/internal/file-access;
     proxy_ssl_server_name on;
@@ -79,6 +79,11 @@ server {
     proxy_set_header X-PCU-File-Kind "public";
     proxy_set_header X-PCU-File-Uri $request_uri;
     proxy_set_header X-PCU-File-Method $pcu_file_method;
+    # A trusted front proxy may restore remote_addr via a narrow real_ip rule.
+    # Never forward arbitrary browser-supplied client-IP claims to the API.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Real-IP "";
+    proxy_set_header Forwarded "";
     proxy_set_header X-PCU-Service-Worker $http_service_worker;
     proxy_set_header X-PCU-Fetch-Dest $http_sec_fetch_dest;
     proxy_connect_timeout 3s;
@@ -101,7 +106,7 @@ server {
     set $pcu_file_method $request_method;
     auth_request /__pcu_file_auth;
     auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
-    resolver 127.0.0.11 valid=30s;
+    resolver ${NGINX_RESOLVER} valid=30s;
     proxy_pass ${GARAGE_PUBLIC_WEB_UPSTREAM}$pcu_validated_object_path;
     proxy_set_header Cookie "";
     proxy_set_header Authorization "";
@@ -159,7 +164,7 @@ server {
     auth_request /__pcu_file_auth;
     auth_request_set $pcu_validated_object_path $upstream_http_x_pcu_object_path;
     auth_request_set $pcu_runtime_csp $upstream_http_x_pcu_runtime_csp;
-    resolver 127.0.0.11 valid=30s;
+    resolver ${NGINX_RESOLVER} valid=30s;
     proxy_pass ${GARAGE_PUBLIC_WEB_UPSTREAM}$pcu_validated_object_path;
     proxy_set_header Cookie "";
     proxy_set_header Authorization "";

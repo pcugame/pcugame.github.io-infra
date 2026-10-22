@@ -23,7 +23,8 @@ for(const file of ['public-origin','protected-download']) {
  const template=readFileSync(`${root}/apps/db/${file}.nginx.conf.template`,'utf8');
  for(const [upstream,tlsName] of [['8443','pcu-file-auth.internal'],['8443','wrong.internal'],['8445','pcu-file-auth.internal']]) {
   const id=port++;
-  const replace=s=>s.replaceAll('${FILE_GATEWAY_TLS_SERVER_NAME}',tlsName)
+  const replace=s=>s.replaceAll('${NGINX_RESOLVER}','127.0.0.11')
+   .replaceAll('${FILE_GATEWAY_TLS_SERVER_NAME}',tlsName)
    .replaceAll('$pcu_gate_tls_name',`$tls_${id}`)
    .replaceAll('${FILE_GATEWAY_API_UPSTREAM}',`https://127.0.0.1:${upstream}`)
    .replaceAll('${FILE_GATEWAY_SECRET}','fixture-secret-at-least-32-characters')

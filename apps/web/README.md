@@ -124,3 +124,7 @@ server-confirmed READY can still recover the original operation's completion,
 including legacy records; this recovery makes no claim about a new local file.
 The original immutable `File` reference can establish identity within the same
 in-memory task. No file content is persisted by this policy.
+
+## 수동 배치용 정적 이미지
+
+저장소 루트의 `docker build -f apps/web/Dockerfile .`로 runtime JSON 설정을 요구하는 Nginx 이미지를 빌드한다. 실행 PC에는 Node·npm·Vite가 필요하지 않다. 공개 설정 형식·mount·오류·cache 규칙은 [운영 설정](../../docs/guide/configuration.md), 기존 개발·Pages는 [개발 가이드](../../docs/guide/development.md)를 참조한다.

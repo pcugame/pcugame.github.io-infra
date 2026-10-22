@@ -46,6 +46,10 @@ apps/web/src/pages/admin/AdminPreview.tsx
 !docs/adr/**/*.md
 !docs/history/2026-backend-audit/**/*.md
 
+# Manual operator guide and preserved README history
+!docs/guide/**/*.md
+!docs/history/repository-overview-20261016.md
+
 # Reviewed Quadlet adoption policy
 !server/quadlet/ADOPTION.md
 !server/quadlet/COMPATIBILITY.md
