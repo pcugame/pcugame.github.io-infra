@@ -1,4 +1,5 @@
 import { publicationReadiness } from '@pcu/contracts';
+import { videoPlaybackFields, type PlaybackJobView } from '../../../shared/video-playbacks.js';
 import { projectRequiredAssets, type RequiredAssetsSource } from '../../../shared/project-required-assets.js';
 import { effectiveProjectExternalLinks } from '../../../shared/project-external-links.js';
 import type { Visibility } from '@pcu/contracts';
@@ -25,6 +26,7 @@ type SerializableRepresentation = {
 };
 
 export type SerializableAsset = {
+	playbackJobs?: PlaybackJobView[];
 	id: number;
 	kind: AssetKind;
 	originalName: string;
@@ -171,6 +173,7 @@ export function createProjectSerializer(
 			.map((videoAsset, index) => {
 				const playbackStatus = playbackStatusFor(videoAsset);
 				return {
+					...videoPlaybackFields(videoAsset, canonicalProtectedAssetUrl(base, videoAsset.id, 'playback')),
 					assetId: videoAsset.id,
 					sortOrder: videoAsset.videoSortOrder ?? null,
 					role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,

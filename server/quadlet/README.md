@@ -101,6 +101,10 @@ defaults. An empty value is written as `KEY=`.
 | `S3_FORCE_PATH_STYLE` | `true` |
 | `WEBGL_EXTERNAL_CONNECTIONS_ENABLED`, `WEBGL_PLAY_ENABLED` | `false` |
 
+`VIDEO_PLAYBACK_RENDITIONS_ENABLED` is optional in `common.env` and defaults to
+`false` in the application. Enable it only after the playback migrations and
+API/video-worker replacement described in [video playback rollout](../../docs/operations/video-playbacks.md).
+
 `api.env` is API-only and loaded after `common.env`:
 
 | Key | Legacy `deploy.sh` default |

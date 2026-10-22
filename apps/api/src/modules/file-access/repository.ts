@@ -6,8 +6,13 @@ export function createFileAccessRepository(client: PrismaClient) {
   purgeExpired: async (at: Date) => client.fileAccessToken.deleteMany({where:{expiresAt:{lte:at}}}),
   reusable: async (sessionId:string|null,bucket:string,objectKey:string,deploymentId:string|null,at:Date)=>client.fileAccessToken.findFirst({where:{sessionId,bucket,objectKey,deploymentId,expiresAt:{gt:at}}}),
   activeCount: async (sessionId:string|null, at:Date)=>client.fileAccessToken.count({where:{sessionId,expiresAt:{gt:at}}}),
-  asset: async (id:number)=>client.asset.findUnique({where:{id},include:{representations:true}}),
-  findRepresentation: async (bucket: string, objectKey: string) => client.assetRepresentation.findFirst({ where: { state: 'READY', OR: [{bucket, objectKey}, {publicationBucket: bucket, publicationObjectKey: objectKey}] }, include: { asset: { include: { project, exhibition: true } } } }),
+  asset: async (id:number)=>client.asset.findUnique({where:{id},include:{representations:true, playbackJobs: { where: { active: true }, include: { renditions: true } }}}),
+  findRepresentation: async (bucket: string, objectKey: string) => {
+   const representation = await client.assetRepresentation.findFirst({ where: { state: 'READY', OR: [{bucket, objectKey}, {publicationBucket: bucket, publicationObjectKey: objectKey}] }, include: { asset: { include: { project, exhibition: true } } } });
+   if (representation) return representation;
+   const rendition = await client.videoPlaybackRendition.findFirst({ where: { bucket, objectKey, state: 'READY', OR: [{ expiresAt: null, job: { active: true } }, { expiresAt: { gt: new Date() } }] }, include: { job: { include: { asset: { include: { project, exhibition: true } } } } } });
+   return rendition?.job.asset ? { ...rendition, role: 'PLAYBACK' as const, asset: rendition.job.asset } : null;
+  },
   findDeployment: async (bucket: string, objectKey: string) => client.webglDeployment.findFirst({ where: { state: 'READY', OR: [{publicBucket:bucket,entryObjectKey: objectKey}, {publicBucket:bucket,publicPrefix: objectKey.split('/').slice(0, 4).join('/')+'/'}, {stagingBucket:bucket,stagingEntryObjectKey:objectKey}] }, include: { project, sourceRepresentation:true } }),
   deployment: async (id: string) => client.webglDeployment.findUnique({ where: {id}, include: {project,sourceRepresentation:true} }),
   token: async (id: string) => client.fileAccessToken.findUnique({where: {id}}),

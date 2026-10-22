@@ -1,3 +1,4 @@
+import { videoPlaybackFields, type PlaybackJobView } from '../../shared/video-playbacks.js';
 import { effectiveProjectExternalLinks } from '../../shared/project-external-links.js';
 import { resolveWebglDisplay, type WebglDisplayMode } from '@pcu/contracts';
 import { canChangeProjectVisibility, type VisibilityActor } from '../../shared/visibility.js';
@@ -61,6 +62,7 @@ interface PublicProjectDetailRecord extends PublicProjectListRecord {
 	members: { id: number; name: string; studentId: string; userId: number | null }[];
 	assets: {
 		id: number;
+		playbackJobs?: PlaybackJobView[];
 		videoSortOrder?: number | null;
 		createdAt?: Date;
 		originalName?: string;
@@ -282,6 +284,7 @@ export async function getProjectDetail(
 			? 'READY' as const
 			: playback?.state === 'FAILED' ? 'FAILED' as const : 'PENDING' as const;
 		return [{
+			...videoPlaybackFields(videoAsset, protectedAssetUrl(deps, videoAsset.id, 'playback')),
 			assetId: videoAsset.id,
 			sortOrder: videoAsset.videoSortOrder ?? null,
 			role: index === 0 ? 'MAIN' as const : 'ADDITIONAL' as const,

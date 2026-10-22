@@ -97,6 +97,24 @@ class RuntimeCheck(unittest.TestCase):
         self.write_files()
         self.assertEqual(self.run_check().returncode, 2)
 
+    def test_playback_renditions_flag_is_optional_and_shared_by_apps(self):
+        key = 'VIDEO_PLAYBACK_RENDITIONS_ENABLED'
+        self.scopes[0].pop(key)
+        for index in range(len(CHECK['APP_NAMES'])):
+            self.change(index, key)
+        self.write_files()
+        self.assertEqual(self.run_check().returncode, 0)
+        self.assertNotIn(key, RUNTIME['deployment_values'](self.paths))
+        self.scopes[0][key] = 'true'
+        for index in range(len(CHECK['APP_NAMES'])):
+            self.change(index, key, 'true')
+        self.write_files()
+        self.assertEqual(self.run_check().returncode, 0)
+        self.assertEqual(RUNTIME['deployment_values'](self.paths)[key], 'true')
+        self.scopes[1][key] = 'true'
+        self.write_files()
+        self.assertEqual(self.run_check().returncode, 2)
+
     def test_application_key_inventory_tracks_schema_and_direct_reads(self):
         source = HERE.parents[1] / 'apps' / 'api' / 'src'
         schema = (source / 'config' / 'env.ts').read_text()

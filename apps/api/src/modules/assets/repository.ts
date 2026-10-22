@@ -73,6 +73,7 @@ export function createAssetsRepository(
 			return client.asset.findUnique({
 				where: { id },
 				include: {
+                    playbackJobs: { where: { active: true }, include: { renditions: true } },
 					project: {
 						select: {
 							creatorId: true,

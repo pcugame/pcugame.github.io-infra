@@ -1,10 +1,11 @@
 /* @vitest-environment jsdom */
 
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { ResponsiveImage } from '@pcu/contracts';
 
 import { ProjectVideo } from '../components/project/ProjectVideo';
+afterEach(cleanup);
 
 const poster: ResponsiveImage = {
 	original: {
@@ -29,6 +30,12 @@ const poster: ResponsiveImage = {
 };
 
 describe('ProjectVideo', () => {
+	it('distinguishes failed conversion from waiting and retains original download', () => {
+		const { container } = render(<ProjectVideo title="QuickService" video={{ assetId: 769, sortOrder: 0, role: 'MAIN', mimeType: 'video/mp4', playbackStatus: 'FAILED', originalDownloadUrl: 'https://videos.test/original.mp4' }} />);
+		expect(container.textContent).toContain('변환에 실패했습니다');
+		expect(container.querySelector('a')?.getAttribute('href')).toBe('https://videos.test/original.mp4');
+		expect(container.querySelector('video')).toBeNull();
+	});
 	it('uses the closest DISPLAY_960 candidate for the video poster attribute', () => {
 		const { container } = render(
 			<ProjectVideo

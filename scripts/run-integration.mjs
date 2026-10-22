@@ -172,6 +172,10 @@ const suites = {
 		],
 		env: garageEnv,
 	},
+	'video-playbacks': {
+		files: ['src/__tests__/video-playback.postgres.test.ts', 'src/__tests__/video-framerate.test.ts'],
+		env: { RUN_FFMPEG_TESTS: 'true' },
+	},
 	'project-assets': {
 		files: [
 			'src/__tests__/project-materials.postgres.test.ts',
@@ -239,6 +243,7 @@ const fullSuiteOrder = [
 	'lifecycle-schema',
 	'responsive-image-migration',
 	'canonical-migration-chain',
+	'video-playbacks',
 	'project-assets',
 	'admin-project-search',
 	'banned-ips',

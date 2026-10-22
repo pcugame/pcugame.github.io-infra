@@ -1,3 +1,6 @@
+import { createVideoRetryRepository } from '../modules/video/retry.repository.js';
+import { createVideoRetryService } from '../modules/video/retry.service.js';
+import { createVideoRetryController } from '../modules/video/retry.controller.js';
 import { createDiagnosticRepository, createUnavailableDiagnosticRepository } from '../modules/webgl-play/diagnostic-repository.js';
 import { createDiagnosticService } from '../modules/webgl-play/diagnostic-service.js';
 import { createVotingController } from '../modules/voting/controller.js';
@@ -248,6 +251,11 @@ export function composeBackendRoutes({
 		};
 		routes.admin = async (app) => {
 			await app.register(baseRoutes.admin);
+			await app.register(createVideoRetryController(createVideoRetryService(
+				prisma && !hasSuppliedPersistence ? createVideoRetryRepository(prisma) : {
+					retry: async () => { throw new Error('Video retry persistence unavailable'); },
+				},
+			)));
 			await app.register(createProjectChangeController(changes, 'admin'));
 			await app.register(createWebglNetworkController(network, 'admin'));
 		};

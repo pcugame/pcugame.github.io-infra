@@ -1,3 +1,4 @@
+import type { VideoPlaybackQuality } from '@pcu/contracts';
 import type { createBanMutationQueue } from '../../shared/ban-mutation-queue.js';
 import { attachmentContentDisposition, buildGameDownloadFilename, normalizeIpTarget } from '@pcu/contracts';
 import type { AssetKind, UserRole, Visibility } from '@pcu/contracts';
@@ -177,6 +178,8 @@ async function grantProtectedAssetDownload(
 	variant: AssetDownloadVariant,
 	clientIp: string,
 	user: ProtectedAssetAccessUser | undefined,
+	profile?: 'native' | 'cap60' | 'cap30',
+	quality?: VideoPlaybackQuality,
 ): Promise<HttpResponseDescriptor> {
 	if (!asset.project || asset.projectId === null) {
 		throw new AppError(500, 'Protected asset has no project identity', 'INTERNAL_ERROR');
@@ -186,7 +189,7 @@ async function grantProtectedAssetDownload(
 		if (!user) throw unauthorized();
 		throw forbidden('Not allowed to access this asset');
 	}
-	const representation = resolveDownloadRepresentation(asset, variant);
+	const representation = resolveDownloadRepresentation(asset, variant, profile, quality);
 
 	clientIp = normalizeIpTarget(clientIp);
 	const principalScope = user
@@ -235,10 +238,12 @@ export async function downloadAssetById(
 	variant: AssetDownloadVariant,
 	clientIp: string,
 	user: ProtectedAssetAccessUser | undefined,
+	profile?: 'native' | 'cap60' | 'cap30',
+	quality?: VideoPlaybackQuality,
 ): Promise<HttpResponseDescriptor> {
 	const asset = await deps.repository.findAssetByIdForDownload(assetId);
 	if (!asset) throw notFound('Asset not found');
-	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user);
+	return grantProtectedAssetDownload(deps, asset, variant, clientIp, user, profile, quality);
 }
 
 /** Delete an asset using a locked DB identity claim around storage I/O. */
@@ -271,7 +276,9 @@ export function createAssetsService(deps: AssetsServiceDependencies) {
 			variant: AssetDownloadVariant,
 			clientIp: string,
 			user: ProtectedAssetAccessUser | undefined,
-		) => downloadAssetById(deps, assetId, variant, clientIp, user),
+			profile?: 'native' | 'cap60' | 'cap30',
+			quality?: VideoPlaybackQuality,
+		) => downloadAssetById(deps, assetId, variant, clientIp, user, profile, quality),
 		deleteAsset: (assetId: number, actor: Actor) => deleteAsset(deps, assetId, actor),
 	};
 }

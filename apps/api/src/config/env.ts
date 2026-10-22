@@ -127,6 +127,7 @@ const envSchema = z
     DIRECT_UPLOAD_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-direct-upload'),
     DIRECT_UPLOAD_WORKER_TEMP_MAX_MB: z.coerce.number().int().positive().default(6144),
     DIRECT_UPLOAD_WORKER_POLL_MS: z.coerce.number().int().min(100).default(5_000),
+    VIDEO_PLAYBACK_RENDITIONS_ENABLED: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
     VIDEO_WORKER_TEMP_ROOT: z.string().default('/tmp/pcu-video-worker'),
     VIDEO_WORKER_TEMP_DISK_MB: z.coerce.number().int().positive().default(2048),
     VIDEO_WORKER_POLL_MS: z.coerce.number().int().min(100).default(2_000),

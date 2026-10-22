@@ -32,7 +32,7 @@ describe('canonical direct GAME architecture boundary', () => {
 		]);
 		expect(routeComposition).toContain('createAssetUploadControlGraph');
 		for (const source of [backend, routeComposition]) {
-			expect(source).not.toMatch(/validation-worker\.composition|webgl\/processing|modules\/video/);
+			expect(source).not.toMatch(/validation-worker\.composition|webgl\/processing|modules\/video\/(composition|processor|worker|playback\.worker|ffmpeg-operations|command-runner)/);
 		}
 		expect(webglWorker).toContain('createWebglProcessingGraph');
 		expect(webglWorker).not.toMatch(/fastify|Fastify/i);

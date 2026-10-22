@@ -101,7 +101,7 @@ export const projectDetailInclude = {
 	assets: {
 		where: { status: 'READY' as const },
 		orderBy: { createdAt: 'asc' as const },
-		include: { representations: true },
+		include: { representations: true, playbackJobs: { orderBy: { createdAt: 'desc' as const }, include: { renditions: true } } },
 	},
 	poster: { include: { representations: { where: { state: 'READY' as const } } } },
 	currentWebglDeployment: true,

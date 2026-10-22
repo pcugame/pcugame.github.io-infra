@@ -9,6 +9,18 @@
   "verification": "mockInventory.test.ts checks registration and source coverage; testFiles identify behavioral suites, not proof that every row has an authenticated success test. Query strings are excluded from path patterns.",
   "routes": [
     {
+      "method": "POST",
+      "path": "/api/admin/projects/:id/videos/:assetId/retry",
+      "priority": "P1",
+      "domain": "projects.ts",
+      "testFiles": [
+        "mockVideoRetry.test.ts"
+      ],
+      "uiSources": [
+        "lib/api/admin.ts"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/me",
       "priority": "P0",

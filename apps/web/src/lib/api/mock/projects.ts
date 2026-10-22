@@ -10,6 +10,25 @@ import { MOCK_USERS, MockHttpError, UNHANDLED } from './context';
 import type { MockContext, MockProject, MockRequestOptions } from './context';
 import { assertProjectRead, assertProjectWrite, bumpProjectVersion, canReadPublicProject, canReadVisibility, getProject, isRelated, isStaff, projectCapabilities, projectExhibition, removeAsset, removeProject, mockWebglAnalysis } from './policy';
 import type { z } from 'zod';
+import { mockFixtureUrl } from './data';
+
+export function advanceVideoRepairs(ctx: MockContext): void {
+ if (ctx.state.controls.worker === 'paused') return;
+ for (const [id, repair] of Object.entries(ctx.state.videoRepairs ?? {})) {
+  if (Date.parse(ctx.now()) < repair.dueAt) continue;
+  const project = ctx.state.projects[repair.projectId];
+  const video = project?.videos.find(video => video.assetId === Number(id));
+  if (video) {
+   video.playbackStatus = ctx.state.controls.worker === 'fail' ? 'FAILED' : 'READY';
+   if (video.playbackStatus === 'FAILED') video.playbackError = 'Mock video processing failed';
+   else { delete video.playbackError; video.url = mockFixtureUrl('/mock/files/demo.webm'); video.mimeType = 'video/webm'; }
+   const asset = project.assets.find(asset => asset.id === video.assetId);
+   if (asset?.kind === 'VIDEO') { asset.playbackStatus = video.playbackStatus; asset.playbackError = video.playbackError; asset.playbackUrl = video.url; }
+   project.video = project.videos[0] ?? null;
+  }
+  delete ctx.state.videoRepairs![Number(id)];
+ }
+}
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
  let value=body;
@@ -126,6 +145,17 @@ export function handleProjects(ctx:MockContext,pathname:string,method:string,opt
  }
  match=pathname.match(/^\/api\/admin\/assets\/(\d+)$/);
  if(match){methodAllowed(method,['DELETE']);ctx.requireUser();const id=Number(match[1]);const p=Object.values(ctx.state.projects).find(p=>p.assets.some(a=>a.id===id));if(!p)throw new MockHttpError(404,'NOT_FOUND','Asset not found');assertProjectWrite(ctx,p);removeAsset(p,id);bumpProjectVersion(ctx,p);return;}
+ match=pathname.match(/^\/api\/admin\/projects\/(\d+)\/videos\/(\d+)\/retry$/);
+ if(match){
+  methodAllowed(method,['POST']);ctx.requireAdmin();const p=getProject(ctx,Number(match[1]));assertProjectWrite(ctx,p);
+  const video=p.videos.find(video=>video.assetId===Number(match![2]));
+  if(!video)throw new MockHttpError(404,'NOT_FOUND','Video not found');
+  if(video.playbackStatus!=='FAILED')throw new MockHttpError(409,'CONFLICT','Video is not failed');
+  video.playbackStatus='PENDING';delete video.playbackError;delete video.url;p.video=p.videos[0]??null;
+  const asset=p.assets.find(asset=>asset.id===video.assetId);if(asset?.kind==='VIDEO'){asset.playbackStatus='PENDING';delete asset.playbackError;delete asset.playbackUrl;}
+  (ctx.state.videoRepairs??={})[video.assetId]={projectId:p.id,dueAt:Date.parse(ctx.now())+900};
+  return {assetId:video.assetId,playbackStatus:'PENDING'};
+ }
  match=pathname.match(/^\/api\/admin\/projects\/(\d+)(?:\/(poster|webgl|videos\/order|members)(?:\/(swap|\d+))?)?$/);
  if(!match)return UNHANDLED;
  const p=getProject(ctx,Number(match[1])),route=match[2],memberId=match[3];

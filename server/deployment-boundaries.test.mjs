@@ -112,6 +112,16 @@ assert.match(deploy, /15 \* gib \+ GARAGE_DEPLOYMENT_HEADROOM_BYTES/);
 // limits cannot silently drift from the worker tmpfs/object/job boundaries.
 const fixtureDir = await mkdtemp(join(tmpdir(), 'pcu-deploy-capacity-'));
 const deployPath = new URL('./deploy.sh', import.meta.url).pathname;
+// Capacity is a deployment input; fixture results must not depend on CI disk size.
+const capacityBin = join(fixtureDir, 'capacity-bin');
+await mkdir(capacityBin);
+await writeFile(join(capacityBin, 'df'), `#!/bin/sh
+printf '%s\\n' 'Filesystem 1024-blocks Used Available Capacity Mounted on'
+printf 'fixture 134217728 0 %s 0%% /fixture\\n' "\${FAKE_NAS_AVAILABLE_KIB:-67108864}"
+`);
+await chmod(join(capacityBin, 'df'), 0o755);
+const fixturePath = `${capacityBin}:${process.env.PATH ?? ''}`;
+
 const exactFixture = env
 	.replace(/^NAS_EXPORT_HOST_PATH=.*$/m, `NAS_EXPORT_HOST_PATH=${fixtureDir}`)
 	.replace(/^GARAGE_CAPACITY_ATTESTED_AVAILABLE_BYTES=.*$/m, 'GARAGE_CAPACITY_ATTESTED_AVAILABLE_BYTES=17179869184');
@@ -141,7 +151,7 @@ const runBoundary = async (fixture, command = 'boundary-preflight', extraEnv = {
 	await writeRuntimeFixture(fixture);
 	return spawnSync('bash', [deployPath, command, ...commandArgs], {
 		encoding: 'utf8',
-		env: { ...process.env, ...fixtureReleaseEnv, DEPLOY_DIR: fixtureDir, ...extraEnv },
+		env: { ...process.env, PATH: fixturePath, ...fixtureReleaseEnv, DEPLOY_DIR: fixtureDir, ...extraEnv },
 	});
 };
 const acceptedBoundary = await runBoundary(boundaryFixture);
@@ -267,7 +277,7 @@ const destructiveGuard = await runBoundary(
 	),
 	'up',
 	{
-		PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+		PATH: `${fakeBin}:${fixturePath}`,
 		PODMAN_MARKER: podmanMarker,
 	},
 );
@@ -309,7 +319,7 @@ for (const [label, fixture] of [
 ]) {
 	await rm(podmanMarker, { force: true });
 	const rejectedRestart = await runBoundary(fixture, 'restart', {
-		PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+		PATH: `${fakeBin}:${fixturePath}`,
 		PODMAN_MARKER: podmanMarker,
 	});
 	assert.notEqual(rejectedRestart.status, 0, `${label} restart unexpectedly passed`);
@@ -356,7 +366,7 @@ const releaseDigest = `sha256:${'1'.repeat(64)}`;
 const releaseImage = `ghcr.io/pcugame/pcu-graduationproject-v2-api@${releaseDigest}`;
 const releaseSourceSha = '2'.repeat(40);
 const releaseEnv = {
-	PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+	PATH: `${fakeBin}:${fixturePath}`,
 	API_IMAGE: releaseImage,
 	MIGRATION_IMAGE: releaseImage,
 	RELEASE_SOURCE_SHA: releaseSourceSha,
@@ -461,12 +471,12 @@ for (const [command, overrides, args, error] of [
 	assert.equal(spawnSync('test', ['!', '-e', podmanMarker]).status, 0, `${command} invoked Podman before rejecting a retired path`);
 }
 
-const runCapacity = async (fixture) => {
+const runCapacity = async (fixture, extraEnv = {}) => {
 	await writeFile(join(fixtureDir, '.env'), fixture);
 	await writeRuntimeFixture(fixture);
 	return spawnSync('bash', [deployPath, 'capacity-preflight'], {
 		encoding: 'utf8',
-		env: { ...process.env, DEPLOY_DIR: fixtureDir },
+		env: { ...process.env, PATH: fixturePath, DEPLOY_DIR: fixtureDir, ...extraEnv },
 	});
 };
 try {
@@ -484,6 +494,11 @@ try {
 		const name = line.slice(0, line.indexOf('='));
 		const rejected = await runCapacity(exactFixture.replace(new RegExp(`^${name}=.*$`, 'm'), line));
 		assert.notEqual(rejected.status, 0, `${line} unexpectedly passed`);
+		assert.match(`${rejected.stdout}\n${rejected.stderr}`, expectedError);
+	}
+	for (const [available, expectedError] of [['1', /NAS staging requires/], ['unknown', /could not determine NAS staging free space/]]) {
+		const rejected = await runCapacity(exactFixture, { FAKE_NAS_AVAILABLE_KIB: available });
+		assert.notEqual(rejected.status, 0, `invalid NAS capacity ${available} unexpectedly passed`);
 		assert.match(`${rejected.stdout}\n${rejected.stderr}`, expectedError);
 	}
 	const obsolete = await runCapacity(`${exactFixture}\nDIRECT_UPLOAD_PART_URL_WINDOW_MS=60000\n`);

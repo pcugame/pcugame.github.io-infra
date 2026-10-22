@@ -40,6 +40,10 @@ const expectedSuites = {
 		'src/__tests__/canonical-migration-chain.garage.postgres.test.ts',
 		'src/__tests__/webgl-deletion-lifecycle.garage.postgres.test.ts'
 	],
+	'video-playbacks': [
+		'src/__tests__/video-playback.postgres.test.ts',
+		'src/__tests__/video-framerate.test.ts'
+	],
 	'project-assets': [
 		'src/__tests__/project-materials.postgres.test.ts',
 		'src/modules/migration/canonical-correction.postgres.test.ts',
@@ -114,7 +118,8 @@ const docker = process.platform === 'win32' ? 'docker.exe' : 'docker';
 const fullOrder = [
 	'voting', 'orphan-renewal-timeout', 'canonical-processing-fences', 'import-transaction',
 	'idempotency', 'lease-clock-core', 'lifecycle-schema', 'responsive-image-migration',
-	'canonical-migration-chain', 'project-assets', 'admin-project-search', 'banned-ips',
+	'canonical-migration-chain',
+	'video-playbacks', 'project-assets', 'admin-project-search', 'banned-ips',
 	'phase2-transition', 'year-change-approval', 'webgl-display', 'visibility', 'visibility-gateway',
 ];
 const e2eArgs = ['compose', '-f', 'docker-compose.integration.yml', '--profile', 'e2e', 'run', '--rm', 'e2e'];
@@ -131,6 +136,7 @@ for (const [name] of Object.entries(expectedSuites)) {
 		assert.equal(status, 0);
 		assert.equal(calls.length, 1);
 		const expectedEnv = { ...inheritedEnv, ...postgresEnv };
+		if (name === 'video-playbacks') Object.assign(expectedEnv, { RUN_FFMPEG_TESTS: 'true' });
 		if (name === 'canonical-migration-chain') Object.assign(expectedEnv, garageEnv);
 		if (name === 'visibility-gateway') Object.assign(expectedEnv, { RUN_GARAGE_INTEGRATION: 'true', RUN_GATEWAY_INTEGRATION: 'true' });
 		assert.deepEqual(calls[0], [npm, suiteArgs(name), { stdio: 'inherit', env: expectedEnv }]);
@@ -165,7 +171,7 @@ test('list and help are read-only and expose all suites and entry points', async
 	}
 });
 
-test('full run preserves startup, all 17 ordered suites, E2E, smokes, and cleanup', async () => {
+test('full run preserves startup, all 18 ordered suites, E2E, smokes, and cleanup', async () => {
 	const calls = [];
 	const spawn = (...args) => { calls.push(args); return { status: 0 }; };
 	const status = await runIntegration([], {

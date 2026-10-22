@@ -1,3 +1,4 @@
+import { VideoRetryResponseSchema } from '@pcu/contracts';
 import { DirectAssetUploadCreationSchema, DirectAssetUploadCreationLookupSchema } from '@pcu/contracts';
 import { AllowWebglNetworkBatchSchema, CreateWebglNetworkBatchSchema, WebglNetworkBatchResponseSchema } from '@pcu/contracts';
 import { WebglDiagnosticDataSchema } from '@pcu/contracts';
@@ -267,6 +268,11 @@ changeRouteContracts.push(
 );
 
 export const ROUTE_RUNTIME_CONTRACTS: readonly RouteRuntimeContract[] = [
+	contract({ method: 'POST', url: '/api/admin/projects/:id/videos/:assetId/retry', family: 'admin-projects',
+		bodyBoundary: 'none', responseBoundary: 'json',
+		params: z.object({ id: IdParamsSchema.shape.id, assetId: IdParamsSchema.shape.id }),
+		querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(VideoRetryResponseSchema, 202),
+	}),
  contract({ method: 'GET', url: '/api/admin/votes/:id/posters', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({ id: Voting.VoteIdSchema }), querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(z.array(Voting.VotePosterSchema)) }),
  contract({ method: 'GET', url: '/api/votes/:id', family: 'voting', bodyBoundary: 'none', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: NoBodySchema, response: jsonResponse(Voting.VotePublicSchema) }),
  contract({ method: 'POST', url: '/api/votes/:id/ballots', family: 'voting', bodyBoundary: 'json', responseBoundary: 'json', params: z.object({id: Voting.VoteIdSchema}), querystring: EmptyObjectSchema, body: Voting.VoteSubmitSchema, response: jsonResponse(Voting.VoteBallotSchema) }),

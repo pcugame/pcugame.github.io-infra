@@ -1,3 +1,4 @@
+import { AdminVideoRetryPanel } from '../../features/admin/projects/AdminVideoRetryPanel';
 import { publicationReadiness } from '@pcu/contracts';
 import { StudioPreview } from '../../features/project-submission/studio/StudioPreview';
 import { ProjectUploadDialog } from '../../components/common/ProjectUploadDialog';
@@ -52,7 +53,11 @@ export default function AdminProjectEditPage() {
 		queryKey: queryKeys.adminProject(id),
 		queryFn: () => adminProjectApi.getDetail(id),
 		enabled: !isNaN(id),
-  refetchInterval: query => query.state.data?.publicationRequested && !query.state.data.publicationError ? 2000 : false,
+		refetchInterval: query => {
+			const project = query.state.data;
+			if (project?.publicationRequested && !project.publicationError) return 2000;
+			return project?.videos.some(video => video.playbackStatus === 'PENDING' || ['PENDING', 'RUNNING'].includes(video.playbackJob?.status ?? '')) ? 5000 : false;
+		},
 	});
 	if (isLoading) return <LoadingSpinner />;
 	if (error && !project) return <ErrorMessage error={error} onReset={() => refetch()} />;
@@ -220,6 +225,7 @@ function ProjectEditor({ project, isPrivileged, canEditContent }: { project: Adm
 					<p className="submission-studio__upload-recommendation">공개하려면 포스터·네이티브 게임·동영상이 필요합니다. WebGL·스크린샷·기타 자료는 선택입니다.</p>
 					<AdminProjectPosterUpload project={project} canEditContent={canEditContent} studio />
 					<AdminProjectAssetManager canEditContent={canEditContent} studio />
+					{isPrivileged && <AdminVideoRetryPanel project={project} disabled={pending || hasChanges} />}
 				</>}
 				settings={<><WebglDisplaySettingsForm project={project} isPending={pending} onPendingChange={setIsSavingDisplay} horizontal />{isPrivileged && <Link className="btn btn--secondary" to={`/admin/projects/${id}/network`} onClick={event => { if (pending || (hasChanges && !window.confirm('적용하지 않은 변경사항이 있습니다. 외부 연결 관리로 이동할까요?'))) event.preventDefault(); }}>게임 외부 연결 관리</Link>}</>}
 				preview={<StudioPreview exhibitionSelected values={{ title: values.title ?? '', summary: values.summary, members: members.members }} poster={selected('POSTER').at(-1) ?? null} savedPoster={savedPoster} assetChecks={[

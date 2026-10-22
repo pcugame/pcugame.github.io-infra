@@ -1,3 +1,4 @@
+import { createPlaybackRepository } from '../modules/video/playback.repository.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -7,6 +8,24 @@ import { createAssetUploadRepository } from '../modules/asset-upload/repository.
 import { createProjectCrudRepository } from '../modules/admin/project/crud.repository.js';
 import { createVideoWorkerRepository } from '../modules/video/repository.js';
 import type { VerifyingVideoSession } from '../modules/video/ports.js';
+import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
+import { serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod';
+import { AdminProjectDetailSchema, VideoRetryResponseSchema } from '@pcu/contracts';
+import { registerAuth } from '../plugins/auth.js';
+import { validateCsrfOrigin } from '../plugins/csrf.js';
+import { createAuthRepository } from '../modules/auth/repository.js';
+import { createVideoRetryController } from '../modules/video/retry.controller.js';
+import { createVideoRetryService } from '../modules/video/retry.service.js';
+import { createVideoRetryRepository } from '../modules/video/retry.repository.js';
+import { videoPlaybackObjectKey } from '../modules/video/playback-identity.js';
+import { registerRouteSchemas } from '../shared/http-route-schemas.js';
+import { AppError } from '../shared/errors.js';
+import { createProjectController } from '../modules/admin/project/controller.js';
+import { createProjectService } from '../modules/admin/project/service.js';
+import { createProjectSerializer } from '../modules/admin/project/serializer.js';
+import { createProjectAccessService } from '../modules/admin/project-access.service.js';
+import { createProjectAccessRepository } from '../modules/admin/project-access.repository.js';
 
 const enabled = process.env['RUN_POSTGRES_INTEGRATION'] === 'true';
 describe.runIf(enabled)('project video upload PostgreSQL transactions', () => {
@@ -111,5 +130,94 @@ describe.runIf(enabled)('project video upload PostgreSQL transactions', () => {
 			expect(await commit(sessionId)).toEqual(result);
 		}
 		expect(await prisma.asset.count({ where: { projectId: created.id } })).toBe(5);
+	});
+
+	it('retries through authenticated HTTP, preserves original bytes, fences racing requests, and exposes processing results', async () => {
+		const p = await project();
+		const app = Fastify();
+		app.setValidatorCompiler(validatorCompiler); app.setSerializerCompiler(serializerCompiler);
+		await app.register(cookie);
+		const origin = 'http://localhost:5173';
+		const config = { SESSION_COOKIE_NAME: 'sid', SESSION_IDLE_MS: 3600000, SESSION_TOUCH_MIN_INTERVAL_MS: 3600000, COOKIE_SECURE: false, COOKIE_SAME_SITE: 'lax' as const, CORS_ALLOWED_ORIGINS: [origin] };
+		await registerAuth(app, { config, clock: { now: () => new Date() }, logger: app.log, sessions: createAuthRepository(prisma) });
+		app.addHook('onRequest', async request => validateCsrfOrigin(request.method, request.headers.origin, new Set([origin])));
+		app.setErrorHandler((error, _request, reply) => {
+			reply.status(error instanceof AppError ? error.statusCode : (error as { statusCode?: number }).statusCode ?? 500)
+				.send({ ok: false, error: { code: error instanceof AppError ? error.code : 'ERROR', message: error instanceof Error ? error.message : 'Error' } });
+		});
+		registerRouteSchemas(app);
+		const access = createProjectAccessService(createProjectAccessRepository(prisma));
+		const repository = createProjectCrudRepository(prisma);
+		const service = createProjectService({ repository,
+			resolveExternalLinks: async () => [], serializeProjectDetail: createProjectSerializer('http://localhost:4000').serializeProjectDetail,
+			deletionBuckets: { publicBucket: 'public', protectedBucket: 'protected' }, abortMultipart: async () => {}, wakeDeletionWorker() {}, wakeMaintenance() {}, logger: app.log });
+		await app.register(createProjectController({ service, access, status: { assertTransition() {}, bulkUpdate: async () => ({ updated: 0 }) } }), { prefix: '/api/admin' });
+		await app.register(createVideoRetryController(createVideoRetryService(createVideoRetryRepository(prisma))), { prefix: '/api/admin' });
+		async function headers(role: 'USER' | 'ADMIN' | 'OPERATOR') {
+			const user = await prisma.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@example.test`, name: role, role } });
+			const id = randomUUID();
+			await prisma.authSession.create({ data: { id, userId: user.id, expiresAt: new Date(Date.now() + 3600000), lastSeenAt: new Date() } });
+			return { cookie: `sid=${id}`, origin };
+		}
+		const admin = await headers('ADMIN'), operator = await headers('OPERATOR'), student = await headers('USER');
+		try {
+			const detail = () => app.inject({ method: 'GET', url: `/api/admin/projects/${p.id}`, headers: admin });
+			const empty = await detail();
+			expect(empty.statusCode, empty.body).toBe(200);
+			expect(AdminProjectDetailSchema.parse(empty.json().data).videos).toEqual([]);
+			const allocated = await allocate(p.id);
+			const session = await prisma.assetUploadSession.update({ where: { id: allocated.id }, data: { state: 'VERIFYING', validationLeaseToken: 'lease', validationLeaseUntil: new Date(Date.now() + 60000) } });
+			const worker = createVideoWorkerRepository(prisma);
+			const original = await worker.commitVideoOriginalReady({ session: session as VerifyingVideoSession, token: 'lease', originalMimeType: 'video/mp4', originalSizeBytes: 10n,
+				playback: { bucket: 'protected', objectKey: videoPlaybackObjectKey({ ...session, projectId: p.id }), mimeType: 'video/mp4' } });
+			await worker.commitVideoPlaybackFailed({ session: session as VerifyingVideoSession, token: 'lease', ...original, reason: 'PLAYBACK_FAILED: Generated playback is not browser-safe' });
+			const sourceBefore = await prisma.assetRepresentation.findUniqueOrThrow({ where: { id: original.originalRepresentationId } });
+			// Repair must not depend on the original uploader retaining upload access.
+			const formerUploader = await prisma.user.create({ data: { googleSub: randomUUID(), email: `${randomUUID()}@example.test`, name: 'Former uploader', role: 'USER' } });
+			await prisma.assetUploadSession.update({ where: { id: session.id }, data: { userId: formerUploader.id } });
+			const url = `/api/admin/projects/${p.id}/videos/${original.assetId}/retry`;
+			expect(AdminProjectDetailSchema.parse((await detail()).json().data).videos[0]?.playbackStatus).toBe('FAILED');
+			expect((await app.inject({ method: 'POST', url, headers: { origin } })).statusCode).toBe(401);
+			expect((await app.inject({ method: 'POST', url, headers: student })).statusCode).toBe(403);
+			expect((await app.inject({ method: 'POST', url, headers: { ...admin, origin: 'https://other.test' } })).statusCode).toBe(403);
+			expect((await app.inject({ method: 'POST', url: `/api/admin/projects/${p.id + 999999}/videos/${original.assetId}/retry`, headers: admin })).statusCode).toBe(404);
+			const raced = await Promise.all([admin, operator].map(headers => app.inject({ method: 'POST', url, headers })));
+			expect(raced.map(response => response.statusCode).sort()).toEqual([202, 409]);
+			const accepted = raced.find(response => response.statusCode === 202)!;
+			expect(VideoRetryResponseSchema.parse(accepted.json().data)).toEqual({ assetId: original.assetId, playbackStatus: 'PENDING' });
+			const pending = await detail();
+			expect(pending.statusCode, pending.body).toBe(200);
+			expect(AdminProjectDetailSchema.parse(pending.json().data).videos[0]).toMatchObject({ playbackStatus: 'FAILED', playbackJob: { status: 'PENDING' } });
+			expect(await prisma.assetRepresentation.findUnique({ where: { id: sourceBefore.id } })).toEqual(sourceBefore);
+            const jobs = createPlaybackRepository(prisma);
+            const claimed = (await jobs.claim())!;
+            expect(claimed.assetId).toBe(original.assetId);
+            await jobs.fail(claimed.id, claimed.leaseToken!, 'PLAYBACK_FAILED: retry test');
+            expect(AdminProjectDetailSchema.parse((await detail()).json().data).videos[0]?.playbackJob).toMatchObject({ status: 'FAILED' });
+            expect((await app.inject({ method: 'POST', url, headers: operator })).statusCode).toBe(202);
+            expect((await app.inject({ method: 'POST', url, headers: admin })).statusCode).toBe(409);
+            const replacement = (await jobs.claim())!;
+            await jobs.bindSource(replacement.id, replacement.leaseToken!, 'test-source-sha');
+            const outputs = [];
+            for (const [profile, frameRate] of [['native', 120], ['cap60', 60], ['cap30', 30]] as const) {
+                const rendition = await jobs.prepare(replacement.id, replacement.leaseToken!, profile, 'protected', `playback-test/${replacement.id}/${profile}.mp4`);
+                outputs.push({ id: rendition.id, checksum: 'test-sha', sizeBytes: 10n, frameRate, width: 1920, height: 1080 });
+            }
+            await jobs.complete(replacement.id, replacement.leaseToken!, outputs);
+            const playable = AdminProjectDetailSchema.parse((await detail()).json().data).videos[0]!;
+            expect(playable.playbacks?.map(r => r.frameRate)).toEqual([120, 60, 30]);
+            expect(playable.playbackStatus).toBe('READY');
+            expect((await app.inject({ method: 'POST', url, headers: admin })).statusCode).toBe(202);
+            expect(AdminProjectDetailSchema.parse((await detail()).json().data).videos[0]).toMatchObject({ playbackStatus: 'READY', url: playable.url, playbackJob: { status: 'PENDING' } });
+            const legacy = await prisma.asset.create({ data: { projectId: p.id, kind: 'VIDEO', representations: { create: {
+                role: 'ORIGINAL', state: 'READY', bucket: 'protected', objectKey: `legacy/${randomUUID()}`, sizeBytes: 10n, mimeType: 'video/mp4',
+            } } } });
+            const legacyRetry = `/api/admin/projects/${p.id}/videos/${legacy.id}/retry`;
+            expect(await prisma.assetUploadSession.count({ where: { resultAssetId: legacy.id } })).toBe(0);
+            expect((await app.inject({ method: 'POST', url: legacyRetry, headers: student })).statusCode).toBe(403);
+            expect((await app.inject({ method: 'POST', url: legacyRetry, headers: admin })).statusCode).toBe(202);
+            expect((await app.inject({ method: 'POST', url: legacyRetry, headers: admin })).statusCode).toBe(409);
+			expect(await prisma.assetRepresentation.findUnique({ where: { id: sourceBefore.id } })).toEqual(sourceBefore);
+		} finally { await app.close(); }
 	});
 });

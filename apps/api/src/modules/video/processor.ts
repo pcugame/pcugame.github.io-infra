@@ -11,6 +11,7 @@ import {
 	assertSourceVideoPolicy,
 	canRemuxVideo,
 	isBrowserSafeVideo,
+	isVideoPlaybackRepair,
 } from './policy.js';
 import { materializeVideoWorkspace, sha256VideoFile } from './materialize.js';
 import { errorMessage, VideoRejectedError } from './errors.js';
@@ -77,7 +78,8 @@ export function createVideoProcessor(deps: VideoProcessorDependencies) {
 				await deps.operations.verifyDecode(workspace.inputPath, signal);
 				await assertOwned();
 
-				let strategy: VideoProcessingStrategy = isBrowserSafeVideo(probe, deps.limits)
+				// A repair retains the existing generated representation's object identity.
+				let strategy: VideoProcessingStrategy = !isVideoPlaybackRepair(session) && isBrowserSafeVideo(probe, deps.limits)
 					? 'passthrough'
 					: canRemuxVideo(probe, deps.limits) ? 'remux' : 'reencode';
 				const playbackObjectKey = strategy === 'passthrough'
@@ -141,6 +143,7 @@ export function createVideoProcessor(deps: VideoProcessorDependencies) {
 						}
 						const outputProbe = await deps.operations.probe(workspace.outputPath, signal);
 						assertBrowserSafeOutput(outputProbe, deps.limits);
+						await deps.operations.verifyPlayback?.(workspace.inputPath, workspace.outputPath, 1, signal);
 						playbackSize = output.size;
 						playbackChecksumSha256 = await sha256VideoFile(workspace.outputPath, signal);
 					} catch (error) {
