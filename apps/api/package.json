@@ -36,7 +36,9 @@
     "test:scripts": "vitest run --config scripts/vitest.config.ts && node --test scripts/verify-release-artifact.test.mjs",
     "correction:canonical-assets": "tsx scripts/correct-canonical-assets.ts",
     "release:correction": "node dist-release/scripts/correct-canonical-assets.js",
-    "worker:project-publication": "tsx src/project-publication-worker.ts"
+    "worker:project-publication": "tsx src/project-publication-worker.ts",
+    "video:playbacks": "tsx scripts/video-playbacks.ts",
+    "release:video-playbacks": "node dist-release/scripts/video-playbacks.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1024.0",

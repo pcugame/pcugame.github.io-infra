@@ -1,3 +1,5 @@
+import { VIDEO_PLAYBACK_QUALITIES, type VideoPlaybackQuality } from '@pcu/contracts';
+import { resolveDownloadRepresentation } from '../assets/download-resolver.js';
 import { attachmentContentDisposition, buildGameDownloadFilename } from '@pcu/contracts';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { VisibilityActor as Actor } from '../../shared/visibility.js';
@@ -69,7 +71,11 @@ export function createFileAccessService(repository: FileAccessRepository, config
    if(!match || !presign) throw notFound();
    const asset=await repository.asset(Number(match[1]));
    const role=asset?.kind==='WEBGL'?'WEBGL_SOURCE':parsed.searchParams.get('variant')==='playback'?'PLAYBACK':'ORIGINAL';
-   const representation=asset?.representations.find(r=>r.role===role && r.state==='READY');
+   const profile = parsed.searchParams.get('profile');
+   const quality = parsed.searchParams.get('quality');
+   if (quality && !VIDEO_PLAYBACK_QUALITIES.includes(quality as VideoPlaybackQuality)) throw notFound();
+   if (profile && !['native', 'cap60', 'cap30'].includes(profile)) throw notFound();
+   const representation=asset ? resolveDownloadRepresentation(asset, role === 'PLAYBACK' ? 'playback' : 'original', profile as 'native' | 'cap60' | 'cap30' | undefined, (quality || undefined) as VideoPlaybackQuality | undefined) : undefined;
    if(!representation || asset?.status!=='READY') throw notFound();
    input=representation.bucket===config.S3_BUCKET_PUBLIC ? publicOrigin+'/'+representation.objectKey.split('/').map(encodeURIComponent).join('/') : await presign(representation.bucket,representation.objectKey);
   }

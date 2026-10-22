@@ -1,3 +1,4 @@
+import { VIDEO_PLAYBACK_QUALITIES } from './video-playback.js';
 import { PublicationStatusSchema, PublicationReadinessSchema } from './publication.js';
 import { WebglDisplayDimensionSchema, WebglDisplayKindSchema, WebglDisplayModeSchema } from './webgl-display.js';
 import { VisibilitySchema } from './schemas.js';
@@ -183,7 +184,14 @@ export const PublicExhibitionProjectsResponseSchema = z.object({
 	empty: z.boolean(),
 }).strict();
 
+export const VideoPlaybackSchema = z.object({
+ profile: z.enum(['native', 'cap60', 'cap30']), quality: z.enum(VIDEO_PLAYBACK_QUALITIES).optional(), url: UrlSchema, mimeType: z.string().min(1),
+ frameRate: z.number().finite().nonnegative(), width: PositiveIntegerSchema, height: PositiveIntegerSchema,
+ status: z.literal('READY'),
+}).strict();
 export const ProjectVideoSchema = z.object({
+ playbacks: z.array(VideoPlaybackSchema).optional(),
+ playbackJob: z.object({ id: z.string(), status: z.enum(['PENDING', 'RUNNING', 'READY', 'FAILED']), error: z.string().optional() }).strict().optional(),
 	assetId: PositiveIntegerSchema,
 	sortOrder: z.number().int().min(0).max(4).nullable(),
 	role: z.enum(['MAIN', 'ADDITIONAL']),

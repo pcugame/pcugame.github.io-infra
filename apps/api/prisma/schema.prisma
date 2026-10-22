@@ -332,6 +332,7 @@ model Asset {
   exhibition         Exhibition?             @relation("ExhibitionAssets", fields: [exhibitionId], references: [id], onDelete: Cascade)
   posterOf           Project?                @relation("ProjectPoster")
   posterOfExhibition Exhibition?             @relation("ExhibitionPoster")
+  playbackJobs       VideoPlaybackJob[]
   representations    AssetRepresentation[]   @relation("AssetRepresentations")
   expectedByUploads  AssetUploadSession[]    @relation("AssetUploadExpectedTarget")
   resultOfUploads    AssetUploadSession[]    @relation("AssetUploadResult")
@@ -355,6 +356,7 @@ model StorageBucket {
   createdAt  DateTime          @default(now()) @map("created_at")
   updatedAt  DateTime          @updatedAt @map("updated_at")
 
+  videoPlaybackRenditions    VideoPlaybackRendition[]
   representations            AssetRepresentation[] @relation("AssetRepresentationBucket")
   publicationRepresentations AssetRepresentation[] @relation("AssetRepresentationPublicationBucket")
   publicWebglDeployments     WebglDeployment[]     @relation("WebglDeploymentPublicBucket")
@@ -1116,4 +1118,51 @@ model WebglConnectionDiagnostic {
   session WebglPlaySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   @@id([sessionId, origin, directive])
   @@map("webgl_connection_diagnostics")
+}
+
+/// Independent of upload sessions so preserved legacy originals can be rebuilt.
+model VideoPlaybackJob {
+  id String @id @default(uuid())
+  assetId Int? @map("asset_id")
+  asset Asset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  sourceRepresentationId String @map("source_representation_id")
+  sourceBucket String @map("source_bucket")
+  sourceObjectKey String @map("source_object_key")
+  sourceVersion String @map("source_version")
+  sourceSha256 String? @map("source_sha256")
+  state String @default("PENDING")
+  active Boolean @default(false)
+  leaseToken String? @map("lease_token")
+  leaseUntil DateTime? @map("lease_until")
+  attempts Int @default(0)
+  error String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  renditions VideoPlaybackRendition[]
+  @@index([state, leaseUntil])
+  @@index([assetId, active])
+  @@map("video_playback_jobs")
+}
+model VideoPlaybackRendition {
+  id String @id @default(uuid())
+  jobId String @map("job_id")
+  job VideoPlaybackJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  /// FPS profile, optionally suffixed with @720p; unsuffixed is maximum quality.
+  profile String
+  attempt String
+  bucket String
+  storageBucket StorageBucket @relation(fields: [bucket], references: [bucket], onDelete: Restrict, onUpdate: Cascade)
+  objectKey String @map("object_key")
+  state String @default("PENDING")
+  checksum String?
+  sizeBytes BigInt @default(0) @map("size_bytes")
+  frameRate Float? @map("frame_rate")
+  width Int?
+  height Int?
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([jobId, profile, attempt])
+  @@index([bucket, objectKey])
+  @@index([expiresAt])
+  @@map("video_playback_renditions")
 }

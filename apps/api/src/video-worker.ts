@@ -27,6 +27,7 @@ export async function runVideoWorker(): Promise<void> {
 			logger,
 			ids: createCryptoIdGenerator(),
 			protectedBucket: config.S3_BUCKET_PROTECTED,
+			renditionsEnabled: config.VIDEO_PLAYBACK_RENDITIONS_ENABLED,
 			tempRoot: config.VIDEO_WORKER_TEMP_ROOT,
 			tempDiskBudgetBytes: config.VIDEO_WORKER_TEMP_DISK_MB * 1024 * 1024,
 		});

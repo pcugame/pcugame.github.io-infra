@@ -34,6 +34,7 @@ export type MockFault = { status: number; code: string; message: string; path?: 
 export type MockControls = { delayMs: number; fault: MockFault | null; worker: 'auto' | 'paused' | 'fail' };
 export type MockBannedIp = { id:number; ip:string; reason:string; createdAt:string; source:'AUTO'|'MANUAL'|'LEGACY'; active:boolean; disabledAt:string|null };
 export type MockState = {
+	videoRepairs?: Record<number, { projectId: number; dueAt: number }>;
   voting?: MockVotingState;
   version: 2; revision: number; counters: Record<string, number>; authUser: MockUserSelection; authExpiresAt?: string;
   projects: Record<number, MockProject>; exhibitions: AdminExhibitionItem[];

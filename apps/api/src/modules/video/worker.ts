@@ -1,3 +1,4 @@
+import { isVideoPlaybackRepair } from './policy.js';
 import { createClaimHeartbeatGuard } from '../upload-lifecycle/claim-heartbeat.js';
 import { errorMessage, VideoRejectedError } from './errors.js';
 import type { VideoWorkerRepository } from './ports.js';
@@ -77,6 +78,18 @@ export function createVideoProcessingWorker(deps: {
 								: isWorkerSourceObjectMissing(error)
 									? `SOURCE_OBJECT_MISSING: ${error.message}`
 									: retryBudgetReason('VIDEO', error);
+							if (isVideoPlaybackRepair(session)) {
+								const repair = session.completionResult as { playbackRepresentationId?: unknown };
+								if (typeof repair.playbackRepresentationId !== 'string') throw new Error('VIDEO repair result is incomplete');
+								const failed = await deps.repository.commitVideoPlaybackFailed({
+									session, token, assetId: session.resultAssetId!,
+									originalRepresentationId: session.resultRepresentationId!,
+									playbackRepresentationId: repair.playbackRepresentationId,
+									reason: `PLAYBACK_FAILED: ${reason}`,
+								});
+								if (failed) result.rejected++; else result.retried++;
+								continue;
+							}
 							const rejected = await deps.repository.rejectVideo({
 								session,
 								token,

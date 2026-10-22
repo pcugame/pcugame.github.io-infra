@@ -1,3 +1,4 @@
+import { VIDEO_PLAYBACK_QUALITIES } from '@pcu/contracts';
 import { z } from 'zod';
 import {
 	AddMemberSchema,
@@ -126,6 +127,8 @@ export const DevAuthLoginErrorBody = DevAuthLoginErrorRequestSchema;
 
 export const AssetDownloadQuery = z.object({
 	variant: z.enum(['original', 'playback']).optional(),
+	profile: z.enum(['native', 'cap60', 'cap30']).optional(),
+	quality: z.enum(VIDEO_PLAYBACK_QUALITIES).optional(),
 }).strict();
 
 // ── Helper ───────────────────────────────────────────────────

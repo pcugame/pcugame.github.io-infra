@@ -1,3 +1,4 @@
+import type { VideoPlaybackQuality } from '@pcu/contracts';
 import type { Readable } from 'node:stream';
 
 /** Structurally compatible with asset-upload/AssetUploadSessionRecord. */
@@ -135,12 +136,14 @@ export interface BoundedCommandRunner {
 
 export interface VideoProbe {
 	formatNames: string[];
+	containerMajorBrand?: string;
 	videoCodec: string;
 	audioCodec: string;
 	pixelFormat: string;
 	width: number;
 	height: number;
 	frameRate: number;
+	nominalFrameRate?: number;
 	bitRate: number;
 	durationSeconds: number;
 	streamCount: number;
@@ -153,5 +156,6 @@ export interface VideoOperations {
 	probe(filePath: string, signal?: AbortSignal): Promise<VideoProbe>;
 	verifyDecode(filePath: string, signal?: AbortSignal): Promise<void>;
 	remux(inputPath: string, outputPath: string, maxOutputBytes: number, signal?: AbortSignal): Promise<void>;
-	reencode(inputPath: string, outputPath: string, maxOutputBytes: number, signal?: AbortSignal): Promise<void>;
+	reencode(inputPath: string, outputPath: string, maxOutputBytes: number, signal?: AbortSignal, divisor?: number, quality?: VideoPlaybackQuality): Promise<void>;
+	verifyPlayback?(inputPath: string, outputPath: string, divisor: number, signal?: AbortSignal): Promise<void>;
 }
