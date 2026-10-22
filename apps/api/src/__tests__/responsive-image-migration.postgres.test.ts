@@ -77,6 +77,7 @@ describe.runIf(runPostgresIntegration)('responsive image migrations with Postgre
 			SELECT column_name
 			FROM information_schema.columns
 			WHERE table_schema = '${schema}'
+				AND table_name IN ('assets', 'exhibitions', 'asset_representations')
 				AND column_name IN (
 					'width',
 					'height',
