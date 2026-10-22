@@ -16,7 +16,8 @@ API_PUBLIC_URL WEB_PUBLIC_URL S3_ENDPOINT S3_PUBLIC_SIGNING_ENDPOINT
 S3_PROTECTED_DOWNLOAD_SIGNING_ENDPOINT PUBLIC_ASSET_ORIGIN S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
 DIRECT_UPLOAD_PART_URL_REFRESH_MAX UPLOAD_USER_GAME_MAX_MB UPLOAD_PRIVILEGED_GAME_MAX_MB
 DIRECT_UPLOAD_WORKER_TEMP_MAX_MB EXPORT_WORKER_MAX_OBJECT_BYTES EXPORT_WORKER_MAX_JOB_BYTES'''.split())
-COMMON_KEYS = COMMON_REQUIRED | COMMON_DEFAULTS.keys()
+COMMON_OPTIONAL_KEYS = {'VIDEO_PLAYBACK_RENDITIONS_ENABLED'}
+COMMON_KEYS = COMMON_REQUIRED | COMMON_DEFAULTS.keys() | COMMON_OPTIONAL_KEYS
 API_OPTIONAL_KEYS = {'VOTE_INVESTIGATION_SECRET', 'VOTE_PRIVACY_NOTICE'}
 API_KEYS = set(API_DEFAULTS) | API_OPTIONAL_KEYS
 PG_KEYS = set('POSTGRES_USER POSTGRES_DB POSTGRES_PASSWORD'.split())
@@ -45,7 +46,7 @@ def read_runtime_files(filenames, *, explicit=False):
             if key not in allowed or key in values:
                 raise ValueError()
             values[key] = value
-        required = allowed - (API_OPTIONAL_KEYS if index == 1 else set())
+        required = allowed - (COMMON_OPTIONAL_KEYS if index == 0 else API_OPTIONAL_KEYS if index == 1 else set())
         if explicit and not required <= values.keys():
             raise ValueError()
         scopes.append(values)

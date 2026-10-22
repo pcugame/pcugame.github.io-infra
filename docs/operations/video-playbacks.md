@@ -24,7 +24,8 @@ No device detection, HLS, or automatic profile selection is introduced.
    `VIDEO_PLAYBACK_RENDITIONS_ENABLED=false` until both are replaced. New API
    queries require the migration even while generation is disabled. Retire all
    old video workers before enabling the queue.
-3. Set `VIDEO_PLAYBACK_RENDITIONS_ENABLED=true` in the video worker environment.
+3. Set `VIDEO_PLAYBACK_RENDITIONS_ENABLED=true` in the video worker environment
+   (the optional shared `runtime-env/common.env` key for Quadlet deployments).
    Completed new uploads enqueue a playback job. Administrator retries enqueue
    the same queue, including videos without upload sessions. Maintain one video
    worker replica for batch concurrency of one. Each pass processes one upload
