@@ -8,7 +8,7 @@ import {
 	parseBody,
 	parseIntParam,
 } from '../../../shared/validation.js';
-import { requireLogin } from '../../../plugins/auth.js';
+import { requireLogin } from '../../../shared/auth-guards.js';
 import type { createMemberService } from './service.js';
 
 export interface MemberControllerDependencies {

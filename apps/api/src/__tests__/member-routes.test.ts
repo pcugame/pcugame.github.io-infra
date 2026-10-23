@@ -16,33 +16,6 @@ const mocks = vi.hoisted(() => ({
 	transaction: vi.fn(),
 }));
 
-vi.mock('../plugins/auth.js', () => {
-	function httpError(statusCode: number, message: string, code: string) {
-		const err = new Error(message) as Error & { statusCode: number; code: string };
-		err.statusCode = statusCode;
-		err.code = code;
-		return err;
-	}
-
-	return {
-		requireLogin: async (request: any) => {
-			const id = Number(request.headers['x-test-user-id']);
-			const role = request.headers['x-test-role'] ?? 'USER';
-			if (!Number.isInteger(id) || id <= 0) {
-				throw httpError(401, 'Unauthorized', 'UNAUTHORIZED');
-			}
-			request.currentUser = {
-				id,
-				googleSub: `test-${id}`,
-				email: `user-${id}@g.pcu.ac.kr`,
-				name: `User ${id}`,
-				role,
-				studentId: String(id),
-			};
-		},
-	};
-});
-
 type TestRole = 'USER' | 'OPERATOR' | 'ADMIN';
 
 type TestProject = {
@@ -100,6 +73,13 @@ function installPrismaMocks() {
 
 async function buildTestApp() {
 	const testApp = Fastify({ logger: false });
+	testApp.addHook('onRequest', async (request) => {
+		const id = Number(request.headers['x-test-user-id']);
+		const role = request.headers['x-test-role'] ?? 'USER';
+		if (Number.isInteger(id) && id > 0 && (role === 'USER' || role === 'OPERATOR' || role === 'ADMIN')) {
+			request.currentUser = { id, googleSub: `test-${id}`, email: `user-${id}@g.pcu.ac.kr`, name: `User ${id}`, role, studentId: String(id) };
+		}
+	});
 	const prisma = {
 		project: { findUnique: mocks.projectFindUnique },
 		projectMember: {

@@ -10,7 +10,8 @@ import {
 	ProjectStatusSchema,
 	UserRoleSchema,
 } from './schemas.js';
-import type { ResponsiveImage } from './responsive-image.js';
+import { RESPONSIVE_IMAGE_PROFILES } from './responsive-image.js';
+import { AssetPlaybackStatusSchema } from './enums.js';
 
 export type JsonValue =
 	| string
@@ -54,6 +55,7 @@ export const ApiErrorCodeSchema = z.enum([
 	'IDEMPOTENCY_CONFLICT',
 	'OPERATION_IN_PROGRESS',
 ]);
+export type ApiErrorCode = z.output<typeof ApiErrorCodeSchema>;
 
 /**
  * Every JSON error emitted by the API uses this envelope. `statusCode` is
@@ -90,21 +92,21 @@ const UrlSchema = z.string().url();
 // Imports historically accept an opaque GitHub/link string. Narrowing this to
 // URL syntax would turn already-valid stored records into HTTP 500 responses.
 const StoredProjectLinkSchema = z.string().min(1).max(500);
-const AssetPlaybackStatusSchema = z.enum(['PENDING', 'READY', 'FAILED']);
 
-export const ResponsiveImageSchema: z.ZodType<ResponsiveImage> = z.object({
+export const ResponsiveImageSchema = z.object({
 	original: z.object({
 		url: UrlSchema,
 		width: PositiveIntegerSchema.optional(),
 		height: PositiveIntegerSchema.optional(),
 	}).strict(),
 	renditions: z.array(z.object({
-		profile: z.enum(['CARD_480', 'DISPLAY_960']),
+		profile: z.enum(RESPONSIVE_IMAGE_PROFILES.map(({ profile }) => profile)),
 		url: UrlSchema,
 		width: PositiveIntegerSchema,
 		height: PositiveIntegerSchema,
 	}).strict()),
 }).strict();
+export type ResponsiveImage = z.output<typeof ResponsiveImageSchema>;
 
 export const AuthUserSchema = z.object({
 	id: PositiveIntegerSchema,
@@ -113,14 +115,17 @@ export const AuthUserSchema = z.object({
 	role: UserRoleSchema,
 	studentId: z.string().optional(),
 }).strict();
+export type AuthUser = z.output<typeof AuthUserSchema>;
 
 export const GoogleAuthResponseSchema = z.object({
 	user: AuthUserSchema,
 }).strict();
+export type GoogleAuthResponse = z.output<typeof GoogleAuthResponseSchema>;
 
 export const LogoutResponseSchema = z.object({
 	message: z.string(),
 }).strict();
+export type LogoutResponse = z.output<typeof LogoutResponseSchema>;
 
 export const MeResponseSchema = z.discriminatedUnion('authenticated', [
 	z.object({ authenticated: z.literal(false) }).strict(),
@@ -129,6 +134,7 @@ export const MeResponseSchema = z.discriminatedUnion('authenticated', [
 		user: AuthUserSchema,
 	}).strict(),
 ]);
+export type MeResponse = z.output<typeof MeResponseSchema>;
 
 export const PublicYearItemSchema = z.object({
 	visibility: VisibilitySchema,
@@ -138,10 +144,12 @@ export const PublicYearItemSchema = z.object({
 	projectCount: NonNegativeIntegerSchema,
 	poster: ResponsiveImageSchema.optional(),
 }).strict();
+export type PublicYearItem = z.output<typeof PublicYearItemSchema>;
 
 export const PublicYearListResponseSchema = z.object({
 	items: z.array(PublicYearItemSchema),
 }).strict();
+export type PublicYearListResponse = z.output<typeof PublicYearListResponseSchema>;
 
 export const PublicProjectCardSchema = z.object({
 	canChangeVisibility: z.boolean(),
@@ -159,12 +167,14 @@ export const PublicProjectCardSchema = z.object({
 	exhibitionId: PositiveIntegerSchema.optional(),
 	exhibitionTitle: z.string().optional(),
 }).strict();
+export type PublicProjectCard = z.output<typeof PublicProjectCardSchema>;
 
 export const PublicExhibitionSchema = z.object({
 	visibility: VisibilitySchema,
 	id: PositiveIntegerSchema,
 	title: z.string(),
 }).strict();
+export type PublicExhibition = z.output<typeof PublicExhibitionSchema>;
 
 export const PublicYearProjectsResponseSchema = z.object({
 	year: YearSchema,
@@ -172,6 +182,7 @@ export const PublicYearProjectsResponseSchema = z.object({
 	items: z.array(PublicProjectCardSchema),
 	empty: z.boolean(),
 }).strict();
+export type PublicYearProjectsResponse = z.output<typeof PublicYearProjectsResponseSchema>;
 
 export const PublicExhibitionProjectsResponseSchema = z.object({
 	exhibition: z.object({
@@ -183,6 +194,7 @@ export const PublicExhibitionProjectsResponseSchema = z.object({
 	items: z.array(PublicProjectCardSchema),
 	empty: z.boolean(),
 }).strict();
+export type PublicExhibitionProjectsResponse = z.output<typeof PublicExhibitionProjectsResponseSchema>;
 
 export const VideoPlaybackSchema = z.object({
  profile: z.enum(['native', 'cap60', 'cap30']), quality: z.enum(VIDEO_PLAYBACK_QUALITIES).optional(), url: UrlSchema, mimeType: z.string().min(1),
@@ -208,18 +220,21 @@ export const ProjectVideoSchema = z.object({
 		message: 'READY playback requires a playback URL',
 		path: ['url'],
 	});
+export type ProjectVideo = z.output<typeof ProjectVideoSchema>;
 
 export const PublicProjectImageSchema = z.object({
 	id: PositiveIntegerSchema,
 	kind: z.enum(['IMAGE', 'POSTER']),
 	image: ResponsiveImageSchema,
 }).strict();
+export type PublicProjectImage = z.output<typeof PublicProjectImageSchema>;
 
 export const PublicProjectMemberSchema = z.object({
 	id: PositiveIntegerSchema,
 	name: z.string(),
 	studentId: z.string(),
 }).strict();
+export type PublicProjectMember = z.output<typeof PublicProjectMemberSchema>;
 
 export const ProjectAttachmentSchema = z.object({
 	assetId: PositiveIntegerSchema,
@@ -229,12 +244,14 @@ export const ProjectAttachmentSchema = z.object({
 	sizeBytes: NonNegativeIntegerSchema,
 	downloadUrl: UrlSchema,
 }).strict();
+export type ProjectAttachment = z.output<typeof ProjectAttachmentSchema>;
 
 /** Optional capability fields preserve web-first deployment compatibility. */
 export const PublicUploadConfigSchema = z.object({
 	materialMaxCount: PositiveIntegerSchema.optional(),
 	materialMaxBytes: PositiveIntegerSchema.optional(),
 }).strict();
+export type PublicUploadConfig = z.output<typeof PublicUploadConfigSchema>;
 
 export const PublicProjectDetailResponseSchema = z.object({
 	canChangeVisibility: z.boolean(),
@@ -265,6 +282,9 @@ export const PublicProjectDetailResponseSchema = z.object({
 	webglPlayUrl: UrlSchema.optional(),
 	status: ProjectStatusSchema,
 }).strict();
+/** Wire response also accepts older releases that omit defaulted fields. */
+export type PublicProjectDetailResponse = z.input<typeof PublicProjectDetailResponseSchema>;
+export type PublicProjectDetailResponseOutput = z.output<typeof PublicProjectDetailResponseSchema>;
 
 export const AdminExhibitionItemSchema = z.object({
 	visibility: VisibilitySchema,
@@ -279,6 +299,7 @@ export const AdminExhibitionItemSchema = z.object({
 	posterOriginalName: z.string().optional(),
 	posterSize: NonNegativeIntegerSchema.optional(),
 }).strict();
+export type AdminExhibitionItem = z.output<typeof AdminExhibitionItemSchema>;
 
 export const AdminExhibitionListResponseSchema = z.object({
 	items: z.array(AdminExhibitionItemSchema),
@@ -291,6 +312,7 @@ export const CreateExhibitionResponseSchema = z.object({
 }).strict();
 
 const RequiredAssetStatusSchema = z.object({ ready: z.boolean(), processing: z.boolean(), failed: z.boolean().optional() }).strict();
+export type RequiredAssetStatus = z.output<typeof RequiredAssetStatusSchema>;
 export const ProjectRequiredAssetsSchema = z.object({
 	nativeBuild: RequiredAssetStatusSchema,
 	webBuild: RequiredAssetStatusSchema,
@@ -300,6 +322,7 @@ export const ProjectRequiredAssetsSchema = z.object({
 	totalCount: z.literal(4),
 	complete: z.boolean(),
 }).strict();
+export type ProjectRequiredAssets = z.output<typeof ProjectRequiredAssetsSchema>;
 
 export const AdminProjectItemSchema = z.object({
  publicationRequested: z.boolean().optional(),
@@ -326,6 +349,7 @@ export const AdminProjectItemSchema = z.object({
 	memberStudentIds: z.array(z.string()),
 	updatedAt: IsoDateTimeSchema,
 }).strict();
+export type AdminProjectItem = z.output<typeof AdminProjectItemSchema>;
 
 export const PaginationInfoSchema = z.object({
 	page: PositiveIntegerSchema,
@@ -335,11 +359,13 @@ export const PaginationInfoSchema = z.object({
 	hasNextPage: z.boolean(),
 	hasPreviousPage: z.boolean(),
 }).strict();
+export type PaginationInfo = z.output<typeof PaginationInfoSchema>;
 
 export const AdminProjectListResponseSchema = z.object({
 	items: z.array(AdminProjectItemSchema),
 	pagination: PaginationInfoSchema,
 }).strict();
+export type AdminProjectListResponse = z.output<typeof AdminProjectListResponseSchema>;
 
 export const AdminProjectDetailSchema = z.object({
  publicationRequested: z.boolean().optional(),
@@ -420,6 +446,9 @@ export const AdminProjectDetailSchema = z.object({
 	])),
 	attachments: z.array(ProjectAttachmentSchema).default([]),
 }).strict();
+/** Wire response also accepts older releases that omit defaulted fields. */
+export type AdminProjectDetail = z.input<typeof AdminProjectDetailSchema>;
+export type AdminProjectDetailOutput = z.output<typeof AdminProjectDetailSchema>;
 
 export const SubmitProjectResponseSchema = z.object({
 	id: PositiveIntegerSchema,
@@ -443,6 +472,7 @@ export const SubmitProjectResponseSchema = z.object({
 	adminEditUrl: UrlSchema,
 	publicUrl: UrlSchema.optional(),
 }).strict();
+export type SubmitProjectResponse = z.output<typeof SubmitProjectResponseSchema>;
 
 export const ProjectSubmissionStatusResponseSchema = z.object({
 	submissionId: z.string().uuid(),
@@ -453,6 +483,7 @@ export const ProjectSubmissionStatusResponseSchema = z.object({
 	publicationError: z.string().optional(),
 	items: SubmitProjectResponseSchema.shape.items,
 }).strict();
+export type ProjectSubmissionStatusResponse = z.output<typeof ProjectSubmissionStatusResponseSchema>;
 
 export const ProjectSubmissionAuditResponseSchema = z.object({
 	draftProjects: NonNegativeIntegerSchema,
@@ -460,6 +491,7 @@ export const ProjectSubmissionAuditResponseSchema = z.object({
 	finalizingSubmissions: NonNegativeIntegerSchema,
 	activePublicationJobs: NonNegativeIntegerSchema,
 }).strict();
+export type ProjectSubmissionAuditResponse = z.output<typeof ProjectSubmissionAuditResponseSchema>;
 
 export const ProjectAssetUploadResponseSchema = z.object({
 	assetId: PositiveIntegerSchema,
@@ -487,6 +519,7 @@ export const SiteSettingsDataSchema = z.object({
 	maxGameFileMb: PositiveIntegerSchema,
 	maxChunkSizeMb: z.number().int().min(5),
 }).strict();
+export type SiteSettingsData = z.output<typeof SiteSettingsDataSchema>;
 
 export const BannedIpItemSchema = z.object({
 	source: z.enum(['AUTO', 'MANUAL', 'LEGACY']),
@@ -497,10 +530,12 @@ export const BannedIpItemSchema = z.object({
 	reason: z.string(),
 	createdAt: IsoDateTimeSchema,
 }).strict();
+export type BannedIpItem = z.output<typeof BannedIpItemSchema>;
 
 export const BannedIpListResponseSchema = z.object({
 	items: z.array(BannedIpItemSchema),
 }).strict();
+export type BannedIpListResponse = z.output<typeof BannedIpListResponseSchema>;
 
 export const ImportPreviewExhibitionSchema = z.object({
 	year: YearSchema,
@@ -508,6 +543,7 @@ export const ImportPreviewExhibitionSchema = z.object({
 	isNew: z.boolean(),
 	existingProjectCount: NonNegativeIntegerSchema,
 }).strict();
+export type ImportPreviewExhibition = z.output<typeof ImportPreviewExhibitionSchema>;
 
 export const ImportPreviewResultSchema = z.object({
 	valid: z.boolean(),
@@ -515,6 +551,7 @@ export const ImportPreviewResultSchema = z.object({
 	projectCount: NonNegativeIntegerSchema,
 	errors: z.array(z.string()),
 }).strict();
+export type ImportPreviewResult = z.output<typeof ImportPreviewResultSchema>;
 
 export const ImportExecuteResultSchema = z.object({
 	exhibitions: z.object({
@@ -525,6 +562,7 @@ export const ImportExecuteResultSchema = z.object({
 		created: NonNegativeIntegerSchema,
 	}).strict(),
 }).strict();
+export type ImportExecuteResult = z.output<typeof ImportExecuteResultSchema>;
 
 export const ExportProgressFileSchema = z.object({
 	// WebGL exports use `-project.id` as their stable synthetic progress key.
@@ -534,6 +572,7 @@ export const ExportProgressFileSchema = z.object({
 	fileName: z.string(),
 	status: z.enum(['pending', 'saving', 'saved', 'skipped', 'failed']),
 }).strict();
+export type ExportProgressFile = z.output<typeof ExportProgressFileSchema>;
 
 export const ExportProgressSchema = z.object({
 	year: YearSchema.nullable(),
@@ -548,6 +587,7 @@ export const ExportProgressSchema = z.object({
 	skipped: NonNegativeIntegerSchema,
 	failed: NonNegativeIntegerSchema,
 }).strict();
+export type ExportProgress = z.output<typeof ExportProgressSchema>;
 
 export const ExportStatusResponseSchema = z.object({
 	running: z.boolean(),
@@ -557,6 +597,7 @@ export const ExportStatusResponseSchema = z.object({
 	result: z.lazy(() => ExportResultSchema).nullable().optional(),
 	error: z.string().min(1).nullable().optional(),
 }).strict();
+export type ExportStatusResponse = z.output<typeof ExportStatusResponseSchema>;
 
 export const ExportResultSchema = z.object({
 	projects: NonNegativeIntegerSchema,
@@ -567,8 +608,17 @@ export const ExportResultSchema = z.object({
 	aborted: z.boolean(),
 	paths: z.array(z.string()),
 }).strict();
+export type ExportResult = z.output<typeof ExportResultSchema>;
 
 export const ExportStartResponseSchema = z.object({
 	jobId: z.string().min(1),
 	state: z.literal('QUEUED'),
 }).strict();
+export type ExportStartResponse = z.output<typeof ExportStartResponseSchema>;
+
+export type ProjectSubmissionItemStatus = SubmitProjectResponse['items'][number];
+export type ExportAssetKind = ExportProgressFile['kind'];
+export type ExportPhase = ExportProgress['phase'];
+export type ExportFileStatus = ExportProgressFile['status'];
+export type ExportJobState = NonNullable<ExportStatusResponse['state']>;
+export type BannedIpSource = BannedIpItem['source'];

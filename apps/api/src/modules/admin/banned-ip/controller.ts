@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { BannedIpListResponse, CreateBannedIpRequest } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { parseIntParam } from '../../../shared/validation.js';
-import { requireRole } from '../../../plugins/auth.js';
+import { requireRole } from '../../../shared/auth-guards.js';
 import type { createBannedIpService } from './service.js';
 
 export interface BannedIpControllerDependencies {

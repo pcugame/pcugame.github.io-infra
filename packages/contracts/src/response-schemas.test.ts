@@ -1,23 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
-import type {
-	AdminProjectDetail,
-	AdminProjectListResponse,
-	BannedIpListResponse,
-	ExportResult,
-	ExportStatusResponse,
-	GoogleAuthResponse,
-	ImportExecuteResult,
-	ImportPreviewResult,
-	LogoutResponse,
-	MeResponse,
-	PublicExhibitionProjectsResponse,
-	PublicProjectDetailResponse,
-	PublicYearListResponse,
-	PublicYearProjectsResponse,
-	SiteSettingsData,
-	SubmitProjectResponse,
-} from './index.js';
 import {
 	AdminProjectDetailSchema,
 	AdminProjectListResponseSchema,
@@ -66,38 +47,7 @@ const responsiveImage = {
 	],
 };
 
-type IsAssignable<A, B> = A extends B ? true : false;
-
-const runtimeSchemasMatchTransportTypes: [
-	IsAssignable<z.output<typeof GoogleAuthResponseSchema>, GoogleAuthResponse>,
-	IsAssignable<z.output<typeof LogoutResponseSchema>, LogoutResponse>,
-	IsAssignable<z.output<typeof MeResponseSchema>, MeResponse>,
-	IsAssignable<z.output<typeof PublicYearListResponseSchema>, PublicYearListResponse>,
-	IsAssignable<z.output<typeof PublicYearProjectsResponseSchema>, PublicYearProjectsResponse>,
-	IsAssignable<
-		z.output<typeof PublicExhibitionProjectsResponseSchema>,
-		PublicExhibitionProjectsResponse
-	>,
-	IsAssignable<z.output<typeof PublicProjectDetailResponseSchema>, PublicProjectDetailResponse>,
-	IsAssignable<z.output<typeof AdminProjectListResponseSchema>, AdminProjectListResponse>,
-	IsAssignable<z.output<typeof AdminProjectDetailSchema>, AdminProjectDetail>,
-	IsAssignable<z.output<typeof SubmitProjectResponseSchema>, SubmitProjectResponse>,
-	IsAssignable<z.output<typeof SiteSettingsDataSchema>, SiteSettingsData>,
-	IsAssignable<z.output<typeof BannedIpListResponseSchema>, BannedIpListResponse>,
-	IsAssignable<z.output<typeof ImportPreviewResultSchema>, ImportPreviewResult>,
-	IsAssignable<z.output<typeof ImportExecuteResultSchema>, ImportExecuteResult>,
-	IsAssignable<z.output<typeof ExportStatusResponseSchema>, ExportStatusResponse>,
-	IsAssignable<z.output<typeof ExportResultSchema>, ExportResult>,
-] = [
-	true, true, true, true, true, true, true, true, true, true, true,
-	true, true, true, true, true, true,
-];
-
 describe('response runtime schemas', () => {
-	it('stays assignable to every shared transport response type', () => {
-		expect(runtimeSchemasMatchTransportTypes.every(Boolean)).toBe(true);
-	});
-
 	it('accepts representative auth, public, admin, and upload responses', () => {
 		expect(GoogleAuthResponseSchema.parse({
 			user: {

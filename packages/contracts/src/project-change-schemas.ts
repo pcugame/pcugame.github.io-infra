@@ -6,6 +6,7 @@ import { SubmitProjectResponseSchema } from './response-schemas.js';
 const Id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const Time = z.string().datetime();
 export const ProjectChangeStateSchema = z.enum(['DRAFT', 'PENDING', 'APPLYING', 'COMPLETED', 'REJECTED', 'CANCELLED', 'CONFLICT', 'FAILED']);
+export type ProjectChangeState = z.output<typeof ProjectChangeStateSchema>;
 export const ProjectChangeValuesSchema = z.object({
 	title: z.string().trim().min(1).max(120).optional(),
 	summary: z.string().max(300).optional(),
@@ -20,9 +21,11 @@ export const ProjectChangeValuesSchema = z.object({
 	videoAssetIds: z.array(Id).max(5).optional(),
 	removeWebgl: z.boolean().optional(),
 }).strict();
+export type ProjectChangeValues = z.output<typeof ProjectChangeValuesSchema>;
 export const CreateProjectChangeSchema = z.object({
 	kind: z.enum(['EDIT', 'DELETE']), reason: z.string().trim().min(1).max(2000),
 }).strict();
+export type CreateProjectChangeRequest = z.input<typeof CreateProjectChangeSchema>;
 export const UpdateProjectChangeSchema = z.object({
 	reason: z.string().trim().min(1).max(2000).optional(),
 	changes: ProjectChangeValuesSchema.optional(),
@@ -33,6 +36,7 @@ export const UpdateProjectChangeSchema = z.object({
 		? item.slot === item.kind.toLowerCase()
 		: new RegExp(`^${item.kind.toLowerCase()}:(0|[1-9][0-9]*)$`).test(item.slot), { message: 'Upload slot does not match its kind', path: ['slot'] })).max(100).optional(),
 }).strict();
+export type UpdateProjectChangeRequest = z.input<typeof UpdateProjectChangeSchema>;
 export const RejectProjectChangeSchema = z.object({ reason: z.string().trim().min(1).max(2000) }).strict();
 export const ProjectChangeSummarySchema = z.object({
 	id: z.string().uuid(), projectId: Id.nullable(), originalProjectId: Id, projectTitle: z.string(),
@@ -40,6 +44,7 @@ export const ProjectChangeSummarySchema = z.object({
 	reason: z.string(), reviewReason: z.string().nullable(), reviewerId: Id.nullable(), error: z.string().nullable(),
 	baseVersion: Id, createdAt: Time, updatedAt: Time, submittedAt: Time.nullable(), reviewedAt: Time.nullable(), completedAt: Time.nullable(),
 }).strict();
+export type ProjectChangeSummary = z.output<typeof ProjectChangeSummarySchema>;
 export const ProjectChangeDetailSchema = ProjectChangeSummarySchema.extend({
 	before: ProjectChangeValuesSchema.extend({
 		title: z.string().optional(), summary: z.string().optional(), description: z.string().optional(), githubUrl: z.string().optional(),
@@ -51,4 +56,8 @@ export const ProjectChangeDetailSchema = ProjectChangeSummarySchema.extend({
 	stagingProjectId: Id.nullable(), submissionId: z.string().uuid().nullable(), items: SubmitProjectResponseSchema.shape.items,
 	stagedAssets: z.array(z.object({ id: Id, kind: z.string(), originalName: z.string(), previewUrl: z.string() }).strict()),
 }).strict();
+export type ProjectChangeDetail = z.output<typeof ProjectChangeDetailSchema>;
 export const ProjectChangeListResponseSchema = z.object({ items: z.array(ProjectChangeSummarySchema), total: z.number().int().nonnegative() }).strict();
+export type ProjectChangeListResponse = z.output<typeof ProjectChangeListResponseSchema>;
+export type ProjectChangeKind = CreateProjectChangeRequest['kind'];
+export type ProjectChangeManifestItem = NonNullable<UpdateProjectChangeRequest['manifest']>[number];

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { AssetDownloadQuery, parseBody, parseIntParam } from '../../shared/validation.js';
-import { requireLogin } from '../../plugins/auth.js';
+import { requireLogin } from '../../shared/auth-guards.js';
 import { applyResponseDescriptor } from '../../shared/response-descriptor.js';
 import type { createAssetsService } from './service.js';
 

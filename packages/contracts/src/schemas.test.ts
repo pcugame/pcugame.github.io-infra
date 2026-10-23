@@ -1,3 +1,4 @@
+import type { SubmitProjectPayload, SubmitProjectPayloadOutput } from './schemas.js';
 import { describe, expect, it } from 'vitest';
 import {
 	AddMemberSchema,
@@ -55,6 +56,16 @@ describe('project payload schemas', () => {
 			members: [member],
 			manifest: [],
 		});
+	});
+
+	it('applies manifest defaults at validation while accepting omitted wire fields', () => {
+		const input: SubmitProjectPayload = {
+			exhibitionId: 1, title: 'Project', members: [member],
+			manifest: [{ kind: 'POSTER', slot: 'poster', clientToken: 'a'.repeat(32) }],
+		};
+		const output: SubmitProjectPayloadOutput = SubmitProjectPayloadBaseSchema.parse(input);
+		expect(output.manifest[0].required).toBe(true);
+		expect(input.manifest?.[0].required).toBeUndefined();
 	});
 
 	it('limits new project titles to 125 UTF-8 bytes', () => {

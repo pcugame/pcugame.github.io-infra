@@ -1,6 +1,6 @@
 import { isPlayReportPath, isPlayControlPath, isTrustedPlaySource } from '../modules/webgl-play/source.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { AppError, unauthorized, forbidden } from '../shared/errors.js';
+import { AppError } from '../shared/errors.js';
 import { cookieExpiresAt, isIdleExpired } from '../shared/session.js';
 import { extractStudentIdFromEmail } from '../modules/auth/student-id.js';
 import type { UserRole } from '@pcu/contracts';
@@ -135,17 +135,4 @@ export async function registerAuth(app: FastifyInstance, options: AuthPluginOpti
 			allowedOrigins,
 		);
 	});
-}
-
-export async function requireLogin(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
-  if (!request.currentUser) throw unauthorized();
-}
-
-export function requireRole(...roles: UserRole[]) {
-  return async (request: FastifyRequest, _reply: FastifyReply): Promise<void> => {
-    if (!request.currentUser) throw unauthorized();
-    if (!roles.includes(request.currentUser.role)) {
-      throw forbidden('Insufficient permissions');
-    }
-  };
 }

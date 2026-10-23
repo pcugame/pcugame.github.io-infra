@@ -19,38 +19,6 @@ vi.mock('../config/env.js', () => ({
 	loadEnv: () => ({ ...defaultTestEnv }),
 }));
 
-vi.mock('../plugins/auth.js', () => {
-	const users = {
-		USER: { id: 101, email: 'student@g.pcu.ac.kr', name: 'Student', role: 'USER', studentId: '20240001' },
-		OPERATOR: { id: 202, email: 'operator@g.pcu.ac.kr', name: 'Operator', role: 'OPERATOR', studentId: null },
-		ADMIN: { id: 303, email: 'admin@g.pcu.ac.kr', name: 'Admin', role: 'ADMIN', studentId: null },
-	} as const;
-
-	function httpError(statusCode: number, message: string, code: string) {
-		const err = new Error(message) as Error & { statusCode: number; code: string };
-		err.statusCode = statusCode;
-		err.code = code;
-		return err;
-	}
-
-	function attachUser(request: any) {
-		const role = request.headers['x-test-role'] as keyof typeof users | undefined;
-		if (!role || !users[role]) throw httpError(401, 'Unauthorized', 'UNAUTHORIZED');
-		request.currentUser = users[role];
-		return users[role];
-	}
-
-	return {
-		requireLogin: async (request: any) => {
-			attachUser(request);
-		},
-		requireRole: (...roles: string[]) => async (request: any) => {
-			const user = attachUser(request);
-			if (!roles.includes(user.role)) throw httpError(403, 'Forbidden', 'FORBIDDEN');
-		},
-	};
-});
-
 import { createProjectController } from '../modules/admin/project/index.js';
 import type { createProjectService } from '../modules/admin/project/service.js';
 
@@ -74,6 +42,16 @@ const projectController = createProjectController({
 
 async function buildTestApp() {
 	const app = Fastify({ logger: false });
+	app.addHook('onRequest', async (request) => {
+		const role = request.headers['x-test-role'];
+		if (role === 'USER' || role === 'OPERATOR' || role === 'ADMIN') {
+			request.currentUser = {
+				id: role === 'USER' ? 101 : role === 'OPERATOR' ? 202 : 303,
+				googleSub: `test-${role}`, email: `${role}@g.pcu.ac.kr`, name: role, role,
+				...(role === 'USER' ? { studentId: '20240001' } : {}),
+			};
+		}
+	});
 	app.setErrorHandler((error: any, _request, reply) => {
 		reply.status(error.statusCode ?? 500).send({
 			ok: false,

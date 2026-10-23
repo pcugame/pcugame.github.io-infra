@@ -93,3 +93,75 @@ describe('api error helpers', () => {
 		expect(getApiErrorMessage('bad')).toBe('알 수 없는 오류가 발생했습니다.');
 	});
 });
+
+class ResponseXHR {
+	static response = { status: 200, statusText: 'OK', text: '' };
+	upload = {};
+	onload?: () => void;
+	withCredentials = false;
+	get status() { return ResponseXHR.response.status; }
+	get statusText() { return ResponseXHR.response.statusText; }
+	get responseText() { return ResponseXHR.response.text; }
+	open() {}
+	setRequestHeader() {}
+	send() { queueMicrotask(() => this.onload?.()); }
+}
+
+describe.each(['fetch', 'xhr'] as const)('%s API response protocol', (transport) => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.unstubAllEnvs();
+	});
+
+	async function send(status: number, text: string, statusText = 'OK', path = '/api/upload') {
+		vi.stubEnv('VITE_MOCK', 'false');
+		if (transport === 'fetch') {
+			vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(status === 204 ? null : text, { status, statusText })));
+			return api.post(path, {});
+		}
+		ResponseXHR.response = { status, text, statusText };
+		vi.stubGlobal('XMLHttpRequest', ResponseXHR);
+		const { uploadFormData } = await import('../lib/api/client');
+		return uploadFormData(path, new FormData(), { title: 'Upload' });
+	}
+
+	it.each([
+		['{"ok":true,"data":{"id":1}}', { id: 1 }],
+		['{"ok":true,"data":null}', null],
+		['{"id":1}', { id: 1 }],
+		['[]', []],
+		['false', false],
+	])('reads successful JSON %s', async (text, expected) => {
+		await expect(send(201, text)).resolves.toEqual(expected);
+	});
+
+	it('returns no content for 204', async () => {
+		await expect(send(204, '')).resolves.toBeUndefined();
+	});
+
+	it.each(['', '<html>proxy response</html>', '{"ok":true,'])('rejects malformed success JSON %s', async (text) => {
+		await expect(send(200, text)).rejects.toMatchObject({ name: 'ApiError', status: 200, statusText: 'Invalid JSON response', body: text });
+	});
+
+	it.each([
+		['{"ok":false,"error":{"code":"FORBIDDEN","message":"Denied"}}', { ok: false, error: { code: 'FORBIDDEN', message: 'Denied' } }],
+		['proxy unavailable', 'proxy unavailable'],
+		['', ''],
+	])('preserves failed response bodies %s', async (text, expected) => {
+		await expect(send(403, text, 'Forbidden')).rejects.toMatchObject({ name: 'ApiError', status: 403, statusText: 'Forbidden', body: expected });
+	});
+
+	it('hydrates media envelopes before returning them', async () => {
+		const payload = { ok: true, data: { poster: { original: { url: 'https://assets.test/poster.webp' }, renditions: [] } } };
+		const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, data: { url: 'https://assets.test/authorized.webp' } }));
+		vi.stubEnv('VITE_MOCK', 'false');
+		if (transport === 'fetch') fetchMock.mockResolvedValueOnce(jsonResponse(payload));
+		vi.stubGlobal('fetch', fetchMock);
+		ResponseXHR.response = { status: 200, text: JSON.stringify(payload), statusText: 'OK' };
+		vi.stubGlobal('XMLHttpRequest', ResponseXHR);
+		const { uploadFormData } = await import('../lib/api/client');
+		const response = transport === 'fetch' ? api.get('/api/admin/projects/1')
+			: uploadFormData('/api/admin/projects/1', new FormData(), { title: 'Upload' });
+		await expect(response).resolves.toMatchObject({ poster: { original: { url: 'https://assets.test/authorized.webp' } } });
+	});
+});

@@ -53,37 +53,30 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     credentials: 'include', // HttpOnly cookie session
   });
 
-  if (!response.ok) {
-    let errorBody: unknown;
-    try {
-      errorBody = await response.json();
-    } catch {
-      errorBody = await response.text().catch(() => null);
-    }
-    throw new ApiError(response.status, response.statusText, errorBody);
+  const text = response.status === 204 ? '' : await response.text();
+  return decodeApiResponse<T>(path, response.status, response.statusText, text);
+}
+
+/** API protocol handling shared by fetch and FormData XHR. Storage parts use their own protocol. */
+async function decodeApiResponse<T>(path: string, status: number, statusText: string, text: string): Promise<T> {
+  const success = status >= 200 && status < 300;
+  if (success && status === 204) return undefined as T;
+
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    if (success) throw new ApiError(status, 'Invalid JSON response', text);
+    body = text;
   }
+  if (!success) throw new ApiError(status, statusText, body);
 
-  // 204 No Content 등
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  const json = (await response.json()) as unknown;
-
-  // 백엔드가 { ok: true, data: T } envelope로 감싸므로 data 필드를 꺼낸다.
-  if (
-    typeof json === 'object' &&
-    json !== null &&
-    'ok' in json &&
-    'data' in json &&
-    (json as Record<string, unknown>).ok === true
-  ) {
-    const data = (json as { data: T }).data;
+  if (typeof body === 'object' && body !== null && 'ok' in body && body.ok === true && 'data' in body) {
+    const data = body.data as T;
     const isMediaRead = /^\/api\/(public\/(years|exhibitions|projects)|admin\/(exhibitions|projects|change-requests)|me\/(projects|change-requests))(\/|\?|$)/.test(path);
     return isMediaRead ? hydrateFileUrls(data) : data;
   }
-
-  return json as T;
+  return body as T;
 }
 
 // ── HTTP 메서드 헬퍼 ─────────────────────────────────────────
@@ -167,44 +160,15 @@ export function uploadFormData<T>(
 			});
 		};
 
-		xhr.onload = () => {
-			if (xhr.status < 200 || xhr.status >= 300) {
-				let errorBody: unknown = xhr.responseText;
-				try { errorBody = JSON.parse(xhr.responseText); } catch { /* keep text */ }
-				if (taskId) failUpload(taskId, getApiErrorMessage(new ApiError(xhr.status, xhr.statusText, errorBody)));
-				reject(new ApiError(xhr.status, xhr.statusText, errorBody));
-				return;
-			}
-
-			if (xhr.status === 204) {
-				if (taskId) finishUpload(taskId);
-				resolve(undefined as T);
-				return;
-			}
-
-			let json: unknown;
+		xhr.onload = async () => {
 			try {
-				json = JSON.parse(xhr.responseText);
-			} catch {
+				const data = await decodeApiResponse<T>(path, xhr.status, xhr.statusText, xhr.responseText);
 				if (taskId) finishUpload(taskId);
-				resolve(xhr.responseText as T);
-				return;
+				resolve(data);
+			} catch (err) {
+				if (taskId) failUpload(taskId, getApiErrorMessage(err));
+				reject(err);
 			}
-
-			if (
-				typeof json === 'object' &&
-				json !== null &&
-				'ok' in json &&
-				'data' in json &&
-				(json as Record<string, unknown>).ok === true
-			) {
-				if (taskId) finishUpload(taskId);
-				resolve((json as { data: T }).data);
-				return;
-			}
-
-			if (taskId) finishUpload(taskId);
-			resolve(json as T);
 		};
 
 		xhr.onerror = () => {

@@ -2,7 +2,7 @@
 
 export type { AssetKind, AssetPlaybackStatus, Platform, ProjectStatus, UserRole, Visibility } from './enums.js';
 export { RESPONSIVE_IMAGE_PROFILES } from './responsive-image.js';
-export type { ResponsiveImage, ResponsiveImageProfile } from './responsive-image.js';
+export type { ResponsiveImageProfile } from './responsive-image.js';
 
 export {
 	attachmentContentDisposition,
@@ -19,87 +19,6 @@ export type {
 	FilenameValidationReasonCode,
 	GameDownloadMember,
 } from './filename-policy.js';
-
-export type {
-	ApiErrorCode,
-	AuthUser,
-	DevAuthErrorScenario,
-	DevAuthLoginErrorRequest,
-	DevAuthLoginRequest,
-	GoogleAuthRequest,
-	GoogleAuthResponse,
-	LogoutResponse,
-	MeResponse,
-} from './auth.js';
-
-export type {
-	ProjectVideo,
-	PublicExhibition,
-	PublicExhibitionProjectsResponse,
-	PublicProjectCard,
-	PublicProjectDetailResponse,
-	PublicProjectImage,
-	ProjectAttachment,
-	PublicUploadConfig,
-	PublicProjectMember,
-	PublicYearItem,
-	PublicYearListResponse,
-	PublicYearProjectsResponse,
-} from './public.js';
-
-export type {
-	AdminExhibitionItem,
-	CreateExhibitionRequest,
-	UpdateExhibitionRequest,
-} from './admin-exhibitions.js';
-
-export type {
-	AddMemberRequest,
-	AdminProjectDetail,
-	AdminProjectItem,
-	ProjectRequiredAssets,
-	RequiredAssetStatus,
-	AdminProjectListQuery,
-	AdminProjectListResponse,
-	AdminProjectListSort,
-	BulkDeleteProjectsRequest,
-	BulkUpdateProjectStatusRequest,
-	PaginationInfo,
-	SetProjectPosterRequest,
-	SetProjectVideoOrderRequest,
-	SortOrder,
-	SubmitProjectPayload,
-	SubmitProjectResponse,
-	ProjectSubmissionManifestItem,
-	ProjectSubmissionItemStatus,
-	ProjectSubmissionStatusResponse,
-	ProjectSubmissionAuditResponse,
-	SwapProjectMembersRequest,
-	UpdateMemberRequest,
-	UpdateProjectRequest,
-} from './admin-projects.js';
-
-export type {
-	BannedIpItem,
-	BannedIpListResponse,
-	SiteSettingsData,
-	UpdateSiteSettingsRequest,
-} from './admin-settings.js';
-
-export type {
-	ExportFileStatus,
-	ExportAssetKind,
-	ExportPhase,
-	ExportProgress,
-	ExportProgressFile,
-	ExportJobState,
-	ExportResult,
-	ExportStartResponse,
-	ExportStatusResponse,
-	ImportExecuteResult,
-	ImportPreviewExhibition,
-	ImportPreviewResult,
-} from './admin-import-export.js';
 
 export type {
 	DirectGameUploadCompletionResponse,
@@ -123,11 +42,9 @@ export * from './external-links.js';
 export * from './schemas.js';
 export * from './response-schemas.js';
 
-export * from './project-changes.js';
 export * from './project-change-schemas.js';
 
 export { normalizeIpTarget, compileIpTarget } from './ip-target.js';
-export type { CreateBannedIpRequest, BannedIpSource } from './admin-settings.js';
 
 export { VisibilitySchema } from './schemas.js';
 export * from './webgl-play.js';
@@ -149,3 +66,5 @@ export * from './publication.js';
 
 export * from './video-retry.js';
 export * from './video-playback.js';
+
+export type { CreateBannedIpRequest, UpdateSiteSettingsRequest } from './admin-settings.js';

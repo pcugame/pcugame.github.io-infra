@@ -87,6 +87,19 @@ describe('global upload manager', () => {
 		expect(getUploadSnapshot()).toHaveLength(0);
 	});
 
+	it('marks a binary upload failed when successful HTTP returns invalid JSON', async () => {
+		vi.stubEnv('VITE_MOCK', 'false');
+		vi.stubGlobal('XMLHttpRequest', MockXMLHttpRequest);
+		const fd = new FormData();
+		fd.append('file', new File(['hello'], 'hello.txt'));
+		const request = uploadFormData('/upload', fd, { title: 'Upload' });
+		const xhr = MockXMLHttpRequest.instances[0];
+		xhr.responseText = '<html>invalid</html>';
+		xhr.onload?.();
+		await expect(request).rejects.toMatchObject({ name: 'ApiError', status: 200, statusText: 'Invalid JSON response' });
+		expect(getVisibleUploadTask()?.phase).toBe('error');
+	});
+
 	it('does not show an upload task for FormData without files', async () => {
 		vi.stubEnv('VITE_MOCK', 'false');
 		vi.stubGlobal('XMLHttpRequest', MockXMLHttpRequest);

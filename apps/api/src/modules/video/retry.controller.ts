@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { requireRole } from '../../plugins/auth.js';
+import { requireRole } from '../../shared/auth-guards.js';
 import { sendOk } from '../../shared/http.js';
 import { parseIntParam } from '../../shared/validation.js';
 import type { createVideoRetryService } from './retry.service.js';
