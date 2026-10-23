@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '26.12.1'
 
       - name: Test CI classification and required check wiring
         run: node --test scripts/classify-ci-changes.test.mjs scripts/pr-checks-workflow.test.mjs
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.changes.outputs.install == 'true'
         with:
-          node-version: 22
+          node-version: '26.12.1'
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -151,7 +151,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: needs.verify.outputs.integration == 'true'
         with:
-          node-version: 22
+          node-version: '26.12.1'
 
       - name: Install dependencies
         if: needs.verify.outputs.integration == 'true'

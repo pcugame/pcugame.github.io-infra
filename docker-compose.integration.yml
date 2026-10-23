@@ -274,7 +274,7 @@ services:
     command: ["node", "dist/project-publication-worker.js"]
 
   web:
-    image: node:22-bookworm-slim
+    image: node:26.12.1-bookworm-slim
     restart: unless-stopped
     working_dir: /app
     depends_on:
@@ -297,7 +297,7 @@ services:
              npm run dev --workspace=apps/web -- --host 0.0.0.0"
 
   e2e:
-    image: node:22-bookworm-slim
+    image: node:26.12.1-bookworm-slim
     profiles: ["e2e"]
     working_dir: /app
     depends_on:

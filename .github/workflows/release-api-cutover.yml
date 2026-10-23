@@ -162,7 +162,7 @@ jobs:
         if: ${{ inputs.operation == 'release' }}
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '26.12.1'
           cache: npm
           cache-dependency-path: package-lock.json
 
