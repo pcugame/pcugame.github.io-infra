@@ -2,7 +2,7 @@
 # Built via .github/workflows/deploy-api.yml with context=. file=apps/api/Dockerfile
 
 # ── Stage 1: Install dependencies ──
-FROM node:22-bookworm-slim AS deps
+FROM node:26.12.1-bookworm-slim AS deps
 WORKDIR /app
 # openssl CLI is required at install time so @prisma/engines' postinstall
 # detects OpenSSL 3.0.x and downloads the matching engines. Without it,
@@ -27,11 +27,11 @@ RUN npm ci
 # directly so they land in /app/node_modules/@img/, where the hoisted sharp
 # module will find the matching binary and libvips at runtime.
 RUN npm install --no-save \
-      @img/sharp-linux-x64@0.35.4 \
-      @img/sharp-libvips-linux-x64@1.3.3
+      @img/sharp-linux-x64@0.35.5 \
+      @img/sharp-libvips-linux-x64@1.3.4
 
 # ── Stage 2: Build TypeScript ──
-FROM node:22-bookworm-slim AS builder
+FROM node:26.12.1-bookworm-slim AS builder
 WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends openssl && \
@@ -50,7 +50,7 @@ RUN npm run build --workspace=@pcu/contracts && \
 # command may apply it; starting the runtime never migrates the database.
 
 # ── Stage 3: Production image ──
-FROM node:22-bookworm-slim AS runner
+FROM node:26.12.1-bookworm-slim AS runner
 ARG RELEASE_SOURCE_SHA
 LABEL org.opencontainers.image.revision="${RELEASE_SOURCE_SHA}"
 WORKDIR /app

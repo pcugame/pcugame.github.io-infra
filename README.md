@@ -50,7 +50,7 @@ flowchart LR
 | 구성 요소 | 구현 | 역할 |
 |---|---|---|
 | `apps/web` | React 19, Vite 8, React Router, TanStack Query | 공개 전시, 작품 제출, 운영 화면 |
-| `apps/api` | Node.js 22, Fastify 5, Prisma 7 | 인증, 작품·전시 관리, 파일 처리, 공개 자산 제공 |
+| `apps/api` | Node.js 26.12.1, Fastify 5, Prisma 7 | 인증, 작품·전시 관리, 파일 처리, 공개 자산 제공 |
 | `packages/contracts` | TypeScript, Zod | Web과 API가 공유하는 요청·응답 schema와 enum |
 | PostgreSQL | PostgreSQL 16 | 사용자, 전시회, 작품, 자산 metadata, session, 업로드 상태 저장 |
 | Garage | S3 호환 객체 저장소 | 공개·보호 자산과 multipart 업로드 객체 저장 |
@@ -77,7 +77,7 @@ Web은 정적 SPA로 빌드된다. API는 공개·인증·운영 route를 제공
 
 ## 요구 환경
 
-- Node.js 22
+- Node.js 26.12.1
 - npm과 저장소의 `package-lock.json`
 - Docker Engine 및 Docker Compose v2
 - 로컬 개발 포트 `4000`, `5173`, `5432`, `3900`, `3902`
