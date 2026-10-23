@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { SiteSettingsData } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
-import { requireRole } from '../../../plugins/auth.js';
+import { requireRole } from '../../../shared/auth-guards.js';
 import type { createSettingsService } from './service.js';
 
 export function createSettingsController(deps: {

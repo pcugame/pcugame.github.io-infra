@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { sendCreated, sendOk } from '../../shared/http.js';
 import { AppError } from '../../shared/errors.js';
 import { parseBody, parseIntParam } from '../../shared/validation.js';
-import { requireLogin } from '../../plugins/auth.js';
+import { requireLogin } from '../../shared/auth-guards.js';
 import type { createAssetUploadService } from './service.js';
 
 const SourceIdentityBody = z.object({

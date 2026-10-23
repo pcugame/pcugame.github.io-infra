@@ -3,7 +3,7 @@ import type { ImportExecuteResult, ImportPreviewResult } from '@pcu/contracts';
 import { sendOk } from '../../../shared/http.js';
 import { badRequest, payloadTooLarge } from '../../../shared/errors.js';
 import { assertValidUploadFilename } from '../../../shared/filename-validation.js';
-import { requireRole } from '../../../plugins/auth.js';
+import { requireRole } from '../../../shared/auth-guards.js';
 import type { createImportService } from './service.js';
 
 const MAX_JSON_SIZE = 10 * 1024 * 1024; // 10 MB

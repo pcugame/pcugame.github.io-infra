@@ -10,7 +10,7 @@ import {
 	parseBody,
 	parseIntParam,
 } from '../../../shared/validation.js';
-import { requireLogin, requireRole } from '../../../plugins/auth.js';
+import { requireLogin, requireRole } from '../../../shared/auth-guards.js';
 import type { Actor } from '../../../application/http-input.js';
 import type { createProjectService } from './service.js';
 import type { bulkUpdateStatus } from './project-status.service.js';

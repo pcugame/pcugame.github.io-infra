@@ -8,17 +8,3 @@ export const RESPONSIVE_IMAGE_PROFILES = [
 ] as const;
 
 export type ResponsiveImageProfile = (typeof RESPONSIVE_IMAGE_PROFILES)[number]['profile'];
-
-export type ResponsiveImage = {
-	original: {
-		url: string;
-		width?: number;
-		height?: number;
-	};
-	renditions: Array<{
-		profile: ResponsiveImageProfile;
-		url: string;
-		width: number;
-		height: number;
-	}>;
-};

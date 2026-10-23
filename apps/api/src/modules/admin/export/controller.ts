@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { requireRole } from '../../../plugins/auth.js';
+import { requireRole } from '../../../shared/auth-guards.js';
 import { badRequest } from '../../../shared/errors.js';
 import { sendOk } from '../../../shared/http.js';
 import type { createExportService } from './service.js';

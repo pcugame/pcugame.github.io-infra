@@ -95,7 +95,7 @@ export function createProjectChangeRepository(client:PrismaClient):ProjectChange
      row=await tx.projectChangeRequest.update({where:{id},data:{stagingProjectId:stage.id}});
     }
    }
-   await tx.projectChangeRequest.update({where:{id},data:{...(input.manifest?{fileSnapshot:[]}:{}),...(input.reason!==undefined?{reason:input.reason}:{}),...(input.changes?{changes:input.changes as Prisma.InputJsonValue}:{})}});
+   await tx.projectChangeRequest.update({where:{id},data:{...(input.manifest?{fileSnapshot:[]}:{}),...(input.reason!==undefined?{reason:input.reason}:{}),...(input.changes?{changes:input.changes}:{})}});
    return readDetail(tx,actor,id);
   });},
   async transition(actor,id,action,reviewReason){

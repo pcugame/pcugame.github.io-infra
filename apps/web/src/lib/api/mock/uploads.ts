@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { SubmitProjectPayloadBaseSchema } from '@pcu/contracts';
-import type { DirectAssetUploadKind, DirectAssetUploadStatus, ProjectSubmissionStatusResponse, SubmitProjectPayload, SubmitProjectResponse } from '../../../contracts';
+import { SubmitProjectPayloadBaseSchema, type SubmitProjectPayloadOutput } from '@pcu/contracts';
+import type { DirectAssetUploadKind, DirectAssetUploadStatus, ProjectSubmissionStatusResponse, SubmitProjectResponse } from '../../../contracts';
 import { MOCK_USERS, MockHttpError, UNHANDLED, type MockContext, type MockProject, type MockRequestOptions } from './context';
 import { assertProjectWrite } from './policy';
 import { mockFixtureUrl, mockResponsiveImage } from './data';
@@ -31,7 +31,7 @@ async function identityRoot(total: number, digests: string[]): Promise<string> {
   digests.forEach((value, index) => bytes.set(value.match(/../g)!.map(byte => parseInt(byte, 16)), prefix.length + 16 + index * 32));
   return digest(bytes.buffer);
 }
-function assertManifest(payload: SubmitProjectPayload): void {
+function assertManifest(payload: SubmitProjectPayloadOutput): void {
   const slots = new Set<string>(); const tokens = new Set<string>();
   for (const item of payload.manifest) {
     const slot = item.kind === 'GAME' || item.kind === 'WEBGL' || item.kind === 'POSTER' ? item.kind.toLowerCase() : `${item.kind.toLowerCase()}:`;
@@ -41,7 +41,7 @@ function assertManifest(payload: SubmitProjectPayload): void {
   const videos = payload.manifest.filter(item => item.kind === 'VIDEO');
   if (videos.length > 5 || videos.some((_, index) => !slots.has(`video:${index}`)) || payload.manifest.filter(item => ['DOCUMENT', 'ATTACHMENT'].includes(item.kind)).length > 5) fail(400, 'VALIDATION_ERROR', 'Too many or nonconsecutive manifest items');
 }
-export function createSubmission(ctx: MockContext, payload: SubmitProjectPayload, actorId: number, options: { project?: MockProject } = {}): SubmitProjectResponse {
+export function createSubmission(ctx: MockContext, payload: SubmitProjectPayloadOutput, actorId: number, options: { project?: MockProject } = {}): SubmitProjectResponse {
   assertManifest(payload);
   const exhibition = ctx.state.exhibitions.find(item => item.id === payload.exhibitionId) ?? fail(404, 'NOT_FOUND', 'Exhibition not found');
   let project = options.project;
@@ -157,7 +157,7 @@ export async function handleUploads(ctx: MockContext, pathname: string, method: 
       if (forbidden.some(key => key in raw) || (Array.isArray(raw.members) && raw.members.some(member => member && typeof member === 'object' && ('userId' in member || 'sortOrder' in member)))) fail(400, 'USER_SUBMIT_FORBIDDEN_FIELD', 'Submission contains a restricted field');
     }
     const parsed = SubmitProjectPayloadBaseSchema.safeParse(raw); if (!parsed.success) return fail(400, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid submission');
-    const payload = parsed.data as SubmitProjectPayload;
+    const payload = parsed.data;
     const exhibition = ctx.state.exhibitions.find(item => item.id === payload.exhibitionId) ?? fail(404, 'NOT_FOUND', 'Exhibition not found');
     if (exhibition.visibility === 'STAFF' && actor.role === 'USER') fail(403, 'FORBIDDEN', 'Exhibition is private');
     if (match[1] === 'me' && !(exhibition.isModificationEnabled ?? exhibition.isUploadEnabled)) fail(403, 'FORBIDDEN', 'Submissions are closed');

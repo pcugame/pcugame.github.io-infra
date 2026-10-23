@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { sendOk, sendCreated } from '../../../shared/http.js';
 import { parseBody, parseIntParam, CreateExhibitionBody, UpdateExhibitionBody } from '../../../shared/validation.js';
-import { requireLogin, requireRole } from '../../../plugins/auth.js';
+import { requireLogin, requireRole } from '../../../shared/auth-guards.js';
 import type { createExhibitionService } from './service.js';
 
 export interface YearControllerDependencies {
