@@ -120,11 +120,11 @@ function ProjectVideoPlayer({ video, poster, title }: Props) {
 				</VideoPlayer>
 			</I18nProvider>
 		</div>
-		{hasError && <p className="project-video__note" role="alert">
-			영상을 불러올 수 없습니다. {(frameRates.length > 1 || qualities.length > 1) && '낮은 화질 또는 프레임률을 선택하거나 '}{video.originalDownloadUrl && '원본을 다운로드해 주세요.'}
-		</p>}
-		{video.originalDownloadUrl && <div className="project-video__actions">
-			<a href={video.originalDownloadUrl} className="btn btn--secondary" download>동영상 원본 다운로드</a>
+		{hasError && <div className="project-video__actions">
+			<p className="project-video__note" role="alert">
+				영상을 불러올 수 없습니다. {(frameRates.length > 1 || qualities.length > 1) && '낮은 화질 또는 프레임률을 선택해 주세요.'}
+			</p>
+			{video.originalDownloadUrl && <a href={video.originalDownloadUrl} className="btn btn--secondary" download>동영상 원본 다운로드</a>}
 		</div>}
 	</div>;
 }

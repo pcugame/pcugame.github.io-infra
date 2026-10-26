@@ -143,18 +143,20 @@ try {
      await mobile.waitForFunction(() => { const v = document.querySelector('video'); return v && !v.paused && v.currentTime > 0; });
      await mobile.locator('video').evaluate(v => { v.loop = true; });
      assert.equal(await mobile.locator('video').evaluate(v => v.muted), false);
-     const closeBounds = await mobile.locator('.modal-toolbar .modal-close').boundingBox();
+     const closeBounds = await mobile.locator('.modal-panel--project > .modal-close').boundingBox();
      const videoBounds = await surface.boundingBox();
      const contentBounds = await mobile.locator('.modal-content').boundingBox();
-     assert(closeBounds.y + closeBounds.height <= Math.max(videoBounds.y, contentBounds.y), 'close button must be above the visible video');
+     assert.equal(await mobile.locator('.modal-toolbar').count(), 0, 'no separate header above the media');
+     assert(Math.abs(videoBounds.y - contentBounds.y) < 2, 'media starts at the top of the content');
+     assert(closeBounds.y >= videoBounds.y && closeBounds.y < videoBounds.y + videoBounds.height, 'close overlays the existing media');
+     assert.equal(await mobile.getByRole('link', { name: '동영상 원본 다운로드' }).count(), 0, 'no download action during normal playback');
      assert(Math.abs(videoBounds.height - Math.min(videoBounds.width * 9 / 16, viewport.height * 0.7)) < 2, 'downloads must not shrink the video');
      assert(closeBounds.width >= 44 && closeBounds.height >= 44, 'close touch target');
      async function showControls() {
       if (await mobile.locator('.project-video__skin').getAttribute('data-controls-visible') === null) await mobile.locator('video').tap();
      }
      async function dismissMenu() {
-      // Touch empty toolbar space, outside the popup and the project close button.
-      await mobile.locator('.modal-toolbar').tap({ position: { x: 10, y: 25 } });
+      await mobile.locator('.modal-video-label').tap();
      }
      await showControls();
      await mobile.getByRole('button', { name: '설정', exact: true }).tap();
@@ -166,6 +168,10 @@ try {
      });
      const qualityBounds = await quality.boundingBox();
      assert(qualityBounds.x >= 0 && qualityBounds.x + qualityBounds.width <= viewport.width, 'quality menu fits viewport');
+     const triggerBounds = await mobile.getByRole('button', { name: '설정', exact: true }).boundingBox();
+     const popupBounds = await mobile.locator('.media-menu-popup[data-open]').boundingBox();
+     assert(Math.abs(popupBounds.x + popupBounds.width - triggerBounds.x - triggerBounds.width) < 2, 'quality popup aligns with settings trigger end');
+     assert(popupBounds.y + popupBounds.height <= triggerBounds.y + 1, 'quality popup is above settings trigger');
      await quality.tap();
      await mobile.waitForFunction(() => document.querySelector('video').currentSrc.includes('native-720p'));
      await dismissMenu();
@@ -185,6 +191,12 @@ try {
      await mobile.waitForFunction(() => !document.querySelector('video').paused);
      await showControls();
      const fullscreen = mobile.locator('.media-fullscreen-button');
+     for (const button of await mobile.locator('.video-controls-secondary .media-button').all()) {
+      if (!await button.isVisible()) continue;
+      const bounds = await button.boundingBox();
+      assert(bounds.width >= 44 && bounds.height >= 44, 'player touch target');
+      assert(bounds.x + bounds.width <= closeBounds.x || bounds.y >= closeBounds.y + closeBounds.height || bounds.y + bounds.height <= closeBounds.y, 'player controls must not overlap close');
+     }
      if (await fullscreen.count() > 0 && await fullscreen.getAttribute('data-availability') === 'available') {
       await fullscreen.tap();
       await mobile.waitForFunction(() => document.querySelector('.media-fullscreen-button')?.hasAttribute('data-fullscreen'));
@@ -204,7 +216,8 @@ try {
      }
      await showControls();
      await mobile.getByRole('button', { name: '설정', exact: true }).tap();
-     await mobile.locator('.modal-toolbar .modal-close').tap();
+     await dismissMenu();
+     await mobile.locator('.modal-panel--project > .modal-close').tap();
      await mobile.getByText('작품 닫힘').waitFor();
      assert.equal(await mobile.locator('video').count(), 0);
      assert.deepEqual(mobileErrors, []);
