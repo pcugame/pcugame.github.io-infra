@@ -12,8 +12,13 @@ bar to the settings menu. `ProjectVideo` supplies frame rate and resolution subm
 independent MP4 renditions. Selection still belongs to the application; it does
 not enable adaptive streaming or change playback speed.
 
+The local skin also adds a centered play button while paused so touch playback
+starts directly from a button activation. Settings menus use the viewport as
+their positioning boundary so narrow inline videos do not clip quality or frame
+rate options. The project modal reserves a separate toolbar for dismissal.
+
 The stylesheet is the matching, pinned `@videojs/react/video/skin.css`. The
 project video styles use scoped `revert-layer` for spacing so the site reset
 does not override the layered skin. When
 upgrading Video.js, update this skin source alongside that package and rerun
-`scripts/video-player-browser.mjs`, including narrow screens and error recovery.
+`scripts/video-player-browser.mjs`, including touch input in the project modal, narrow/landscape screens, and error recovery.

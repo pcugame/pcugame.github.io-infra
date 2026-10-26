@@ -11,6 +11,7 @@ import { Container } from '../shared/components/layout/container';
 import { VideoGestures } from '../shared/skins/shared/video/behaviors/gestures';
 import { VideoHotkeys } from '../shared/skins/shared/video/behaviors/hotkeys';
 import { BufferingIndicator } from './components/display/buffering-indicator';
+import { PlayButton } from './components/buttons/play-button';
 import { DefaultVideoControls } from './layout/controls';
 import { VideoStatusIndicators } from './skins/shared/video/display/status-indicators';
 
@@ -29,6 +30,7 @@ export function VideoSkin({ children, className, renderPoster, renderThumbnail, 
       <BufferingIndicator />
       <ErrorDialog />
       <Title />
+      <PlayButton className="project-video__center-play" />
 
       <DefaultVideoControls renderThumbnail={renderThumbnail} settingsMenuItems={settingsMenuItems} />
 

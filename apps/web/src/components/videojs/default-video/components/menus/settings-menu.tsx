@@ -20,7 +20,7 @@ export interface SettingsMenuProps extends Omit<Menu.RootProps, 'children'> {
 
 export function SettingsMenu({ children, className, ...props }: SettingsMenuProps) {
   return (
-    <Menu.Root side="top" align="center" {...props}>
+    <Menu.Root side="top" align="center" boundary="viewport" {...props}>
       <ButtonTooltip label={<TextPrimitive token={settingsText.key}>{settingsText.text}</TextPrimitive>} side="top">
         <Menu.Trigger
           render={<Button />}

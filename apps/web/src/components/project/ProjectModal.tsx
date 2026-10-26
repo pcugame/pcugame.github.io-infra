@@ -1,7 +1,7 @@
 import { useViewerKey } from '../../lib/query';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { ResponsiveImage as ResponsiveImageData } from '@pcu/contracts';
+import type { ProjectVideo as VideoInfo, ResponsiveImage as ResponsiveImageData } from '@pcu/contracts';
 import { publicApi } from '../../lib/api';
 import { queryKeys } from '../../lib/query';
 import { LoadingSpinner, ResponsiveImage } from '../common';
@@ -18,7 +18,7 @@ interface Props {
 }
 
 type MediaItem =
-	| { type: 'video'; assetId: number; sortOrder: number | null; role: 'MAIN' | 'ADDITIONAL'; url?: string; mimeType: string; originalDownloadUrl?: string; playbackStatus?: 'PENDING' | 'READY' | 'FAILED'; playbackError?: string; label: string }
+	| (VideoInfo & { type: 'video'; label: string })
 	| { type: 'poster'; image: ResponsiveImageData; label: string }
 	| { type: 'image'; id: number; image: ResponsiveImageData; label: string };
 
@@ -36,7 +36,13 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 
 	// ESC 닫기
 	useEffect(() => {
-		const onKey = () => {
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key !== 'Escape' || event.defaultPrevented) return;
+			// Menus and fullscreen handle Escape before the surrounding project dialog.
+			if (document.fullscreenElement || overlayRef.current?.querySelector('[data-fullscreen]')) return;
+			// Video.js also listens on document; its preventDefault may run after ours.
+			if (event.composedPath().some(node => node instanceof Element && node.matches('.media-menu-popup, .media-dialog-popup'))
+				|| overlayRef.current?.querySelector('.media-menu-popup[data-open], .media-dialog-popup[data-open]')) return;
 			if (lightboxImage) {
 				setLightboxImage(null);
 			} else {
@@ -77,15 +83,8 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 		}
 		projectVideos.forEach((video, index) => {
 			mediaItems.push({
+				...video,
 				type: 'video',
-				assetId: video.assetId,
-				sortOrder: video.sortOrder,
-				role: video.role,
-				url: video.url,
-				mimeType: video.mimeType,
-				originalDownloadUrl: video.originalDownloadUrl,
-				playbackStatus: video.playbackStatus,
-				playbackError: video.playbackError,
 				label: getVideoLabel(video, index),
 			});
 		});
@@ -130,12 +129,13 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 	return (
 		<div className="modal-overlay" ref={overlayRef} onClick={handleOverlayClick}>
 			<div className="modal-panel modal-panel--project" role="dialog" aria-modal="true">
-				{/* 닫기 버튼 */}
-				<button className="modal-close" onClick={onClose} aria-label="닫기">
-					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-						<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-					</svg>
-				</button>
+				<div className="modal-toolbar">
+					<button className="modal-close" onClick={onClose} aria-label="닫기">
+						<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+						</svg>
+					</button>
+				</div>
 
 				{isLoading && (
 					<div className="modal-loading">
@@ -149,20 +149,11 @@ export function ProjectModal({ slug, year, onClose }: Props) {
 						{/* 메인 미디어 표시 — 16:9 고정 비율 */}
 						{current && (
 							<div className="modal-visual">
-								<div className="modal-visual__frame">
+								<div className={`modal-visual__frame${current.type === 'video' ? ' modal-visual__frame--video' : ''}`}>
 									{current.type === 'video' ? (
 										<ProjectVideo
 											key={current.assetId ?? current.url ?? activeIndex}
-											video={{
-												assetId: current.assetId,
-												sortOrder: current.sortOrder,
-												role: current.role,
-												url: current.url,
-												mimeType: current.mimeType,
-												originalDownloadUrl: current.originalDownloadUrl,
-												playbackStatus: current.playbackStatus,
-												playbackError: current.playbackError,
-											}}
+											video={current}
 											poster={project.poster}
 											title={project.title}
 										/>
