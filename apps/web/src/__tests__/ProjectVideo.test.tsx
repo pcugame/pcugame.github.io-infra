@@ -48,6 +48,16 @@ describe('ProjectVideo', () => {
 		expect(screen.getByRole('alert').textContent).toContain('영상을 불러올 수 없습니다.');
 	});
 
+	it('offers original download only after a playback error', () => {
+		const { container } = render(<ProjectVideo title="Game" video={{ assetId: 1, sortOrder: 0, role: 'MAIN', mimeType: 'video/mp4', url: 'https://videos.test/playback.mp4', originalDownloadUrl: 'https://videos.test/original.mov' }} />);
+		expect(screen.queryByRole('link', { name: '동영상 원본 다운로드' })).toBeNull();
+		fireEvent.error(container.querySelector('video')!);
+		expect(screen.getByRole('link', { name: '동영상 원본 다운로드' }).getAttribute('href')).toBe('https://videos.test/original.mov');
+		fireEvent.loadedMetadata(container.querySelector('video')!);
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.queryByRole('link', { name: '동영상 원본 다운로드' })).toBeNull();
+	});
+
 	it('distinguishes failed conversion from waiting and retains original download', () => {
 		const { container } = render(<ProjectVideo title="QuickService" video={{ assetId: 769, sortOrder: 0, role: 'MAIN', mimeType: 'video/mp4', playbackStatus: 'FAILED', originalDownloadUrl: 'https://videos.test/original.mp4' }} />);
 		expect(container.textContent).toContain('변환에 실패했습니다');

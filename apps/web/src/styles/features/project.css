@@ -627,6 +627,23 @@ img.external-link-icon { padding: 0.08rem; border-radius: 0.2rem; background: #f
   display: none;
 }
 
+/* The compact skin puts fullscreen/PiP at the top. Leave the modal X its
+   original top-right corner and keep the player controls together at the left. */
+@container media-root (width < 32rem) {
+  .modal-panel--project .project-video__skin:not([data-fullscreen]) .video-controls-secondary {
+    left: calc(var(--media-spacing) * 2);
+    right: auto;
+    max-width: calc(100% - 5rem);
+  }
+}
+
+@media (pointer: coarse) {
+  .project-video__skin .media-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
 .project-video__actions {
   padding: 0.5rem;
   background: var(--color-surface);

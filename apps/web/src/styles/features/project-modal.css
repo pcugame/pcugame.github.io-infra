@@ -65,24 +65,12 @@
   background: #fff;
 }
 
-/* Keep project dismissal outside the player's fullscreen and settings controls. */
-.modal-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  flex: none;
-  padding: 0.25rem 0.5rem;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-}
-
-.modal-toolbar .modal-close {
-  position: static;
-  width: 2.75rem;
-  height: 2.75rem;
-}
-
-.modal-panel--project .modal-visual {
-  border-radius: 0;
+/* Overlay dismissal stays reachable while the project content scrolls. */
+.modal-panel--project > .modal-close {
+  width: max(2.25rem, 44px);
+  height: max(2.25rem, 44px);
+  padding: 0;
+  z-index: 40;
 }
 
 .modal-loading {
@@ -389,6 +377,8 @@
 .modal-panel--project {
   display: flex;
   flex-direction: column;
+  border: 0;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.2);
   max-height: calc(100dvh - 4rem);
   overflow: hidden;
 }
